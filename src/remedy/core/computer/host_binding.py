@@ -4,8 +4,8 @@ This is the one place Python describes the C ABI declared in
 ``native/zig/include/remedy_core.h``. Every function here is a thin call into
 the library: it marshals arguments, checks the status, frees buffers the
 library allocated and returns plain Python values. Production process and
-ConPTY spawns use the authorized ABI (policy + capability tokens); the
-unsigned spawn exports remain for low-level tests only.
+ConPTY spawns use the authorized ABI (policy + capability tokens + write-jail
+/ workdir roots); the unsigned spawn exports remain for low-level tests only.
 
 Windows: host + UIA + ConPTY. Linux: host (X11/XTest) + AT-SPI a11y snapshot.
 ``host_op_prepare`` (structured ops + command-string prepare) and
@@ -335,6 +335,16 @@ _PROTOTYPES: dict[str, tuple[list[Any], Any]] = {
             POINTER(c_uint32),
             POINTER(c_uint64),
         ],
+        c_int32,
+    ),
+    "remedy_core_write_jail_set_roots": ([c_char_p, c_size_t], c_int32),
+    "remedy_core_write_jail_clear": ([], c_int32),
+    "remedy_core_write_jail_check_path": (
+        [c_char_p, c_size_t, c_char_p, c_size_t],
+        c_int32,
+    ),
+    "remedy_core_write_jail_check_spawn": (
+        [c_char_p, c_size_t, c_char_p, c_size_t],
         c_int32,
     ),
 }
@@ -1233,6 +1243,50 @@ def issue_process_spawn_token(
     return token, now
 
 
+def write_jail_set_roots(roots: Sequence[str] | None) -> None:
+    """Install write roots for authorized spawn (empty / None = Full, no workdir jail)."""
+    library = _lib()
+    payload = _utf8(json.dumps([str(r) for r in (roots or [])]))
+    _check(
+        library,
+        "write_jail_set_roots",
+        library.remedy_core_write_jail_set_roots(payload, len(payload)),
+    )
+
+
+def write_jail_clear() -> None:
+    library = _lib()
+    _check(library, "write_jail_clear", library.remedy_core_write_jail_clear())
+
+
+def write_jail_check_path(path: str, cwd: str | None = None) -> None:
+    """Raise :class:`HostError` with ACCESS_DENIED when *path* escapes the jail."""
+    library = _lib()
+    path_raw = _utf8(str(path))
+    cwd_raw = _utf8(str(cwd)) if cwd else b""
+    _check(
+        library,
+        "write_jail_check_path",
+        library.remedy_core_write_jail_check_path(
+            path_raw, len(path_raw), cwd_raw, len(cwd_raw)
+        ),
+    )
+
+
+def write_jail_check_spawn(argv: Sequence[str], cwd: str | None = None) -> None:
+    """Raise :class:`HostError` when argv/cwd would be denied by the write jail."""
+    library = _lib()
+    argv_raw = _utf8(json.dumps([str(a) for a in argv]))
+    cwd_raw = _utf8(str(cwd)) if cwd else b""
+    _check(
+        library,
+        "write_jail_check_spawn",
+        library.remedy_core_write_jail_check_spawn(
+            argv_raw, len(argv_raw), cwd_raw, len(cwd_raw)
+        ),
+    )
+
+
 def process_spawn_authorized(
     argv: Sequence[str],
     cwd: str | None = None,
@@ -1243,8 +1297,16 @@ def process_spawn_authorized(
     scope: str = DEFAULT_SPAWN_SCOPE,
     owner_confirmed: bool = False,
     now_ms: int | None = None,
+    write_roots: Sequence[str] | None = None,
 ) -> tuple[int, int]:
-    """Authorized hidden spawn. *argv[0]* must be absolute. No unsigned fallback."""
+    """Authorized hidden spawn. *argv[0]* must be absolute. No unsigned fallback.
+
+    When *write_roots* is not ``None``, installs those roots for the jail check
+    on this spawn (empty sequence = Full / unbound). ``None`` leaves the
+    previously installed roots unchanged.
+    """
+    if write_roots is not None:
+        write_jail_set_roots(write_roots)
     library = _lib()
     argv_raw = _utf8(json.dumps([str(a) for a in argv]))
     cwd_raw = _utf8(str(cwd)) if cwd else b""
@@ -1291,8 +1353,14 @@ def conpty_spawn_authorized(
     scope: str = DEFAULT_SPAWN_SCOPE,
     owner_confirmed: bool = False,
     now_ms: int | None = None,
+    write_roots: Sequence[str] | None = None,
 ) -> tuple[int, int]:
-    """Authorized ConPTY spawn. *argv[0]* must be absolute. No unsigned fallback."""
+    """Authorized ConPTY spawn. *argv[0]* must be absolute. No unsigned fallback.
+
+    *write_roots* semantics match :func:`process_spawn_authorized`.
+    """
+    if write_roots is not None:
+        write_jail_set_roots(write_roots)
     library = _lib()
     argv_raw = _utf8(json.dumps([str(a) for a in argv]))
     cwd_raw = _utf8(str(cwd)) if cwd else b""

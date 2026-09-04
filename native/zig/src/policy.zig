@@ -121,6 +121,21 @@ pub fn evaluateProcess(
     };
 }
 
+/// Shell wrappers whose argv[0] is not the real privilege binary.
+const shell_wrappers = [_][]const u8{
+    "bash", "sh", "zsh", "dash", "cmd", "powershell", "pwsh", "env", "nice", "nohup", "sudo", "doas", "xargs",
+};
+
+/// Nested privilege / wipe tokens inside `cmd /c` / `pwsh -Command` payloads
+/// (basename denylist alone is not enough when argv[0] is the shell).
+const nested_privilege_needles = [_][]const u8{
+    "reg add",     "reg delete",  "reg import", "takeown",   "icacls",
+    "net user",    "net localgroup", "wmic ",    "sc create", "sc delete",
+    "schtasks /create", "vssadmin", "bcdedit",   "diskpart",  "format ",
+    "shutdown /",  "shutdown -",  "mkfs.",      "mkfs ",     "useradd ",
+    "usermod ",    "passwd ",
+};
+
 pub fn isDangerousProcess(argv: []const []const u8) bool {
     if (argv.len == 0) return false;
     const base = executableBasename(argv[0]);
@@ -129,6 +144,40 @@ pub fn isDangerousProcess(argv: []const []const u8) bool {
             if (eqlIgnoreCase(base, "chmod") and isChmodPlusX(argv)) return false;
             return true;
         }
+    }
+    // Nested privilege inside shell wrappers (Python check_dangerous_command).
+    var is_wrapper = false;
+    for (shell_wrappers) |name| {
+        if (eqlIgnoreCase(base, name)) {
+            is_wrapper = true;
+            break;
+        }
+    }
+    if (!is_wrapper and argv.len < 2) return false;
+    var stack: [4096]u8 = undefined;
+    var len: usize = 0;
+    for (argv[1..]) |arg| {
+        if (len >= stack.len) break;
+        if (len > 0 and len < stack.len) {
+            stack[len] = ' ';
+            len += 1;
+        }
+        const take = @min(arg.len, stack.len - len);
+        @memcpy(stack[len..][0..take], arg[0..take]);
+        len += take;
+    }
+    const text = stack[0..len];
+    for (nested_privilege_needles) |needle| {
+        if (containsIgnoreCase(text, needle)) return true;
+    }
+    return false;
+}
+
+fn containsIgnoreCase(hay: []const u8, needle: []const u8) bool {
+    if (needle.len == 0 or hay.len < needle.len) return false;
+    var i: usize = 0;
+    while (i + needle.len <= hay.len) : (i += 1) {
+        if (eqlIgnoreCase(hay[i .. i + needle.len], needle)) return true;
     }
     return false;
 }
@@ -225,4 +274,11 @@ test "basename rules match without requiring the absolute path string" {
     const tool = if (builtin.os.tag == .windows) "C:\\Tools\\rg.exe" else "/usr/bin/rg";
     const rules = [_]ProcessRule{.{ .executable = "rg", .allow_any_arguments = true }};
     try std.testing.expectEqual(Decision.allow, evaluateProcess(&rules, &.{ tool, "-n", "foo" }, false, 1).decision);
+}
+
+test "nested privilege inside cmd /c is dangerous" {
+    const cmd = if (builtin.os.tag == .windows) "C:\\Windows\\System32\\cmd.exe" else "/bin/bash";
+    const flag = if (builtin.os.tag == .windows) "/c" else "-c";
+    try std.testing.expect(isDangerousProcess(&.{ cmd, flag, "reg add HKLM\\Software\\Pwn" }));
+    try std.testing.expect(!isDangerousProcess(&.{ cmd, flag, "echo hello" }));
 }

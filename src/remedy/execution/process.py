@@ -240,25 +240,34 @@ def spawn_hidden(
     *,
     cwd: str | Path | None = None,
     env: Mapping[str, str] | None = None,
+    write_roots: Sequence[str | Path] | None = None,
 ) -> HiddenProcess:
     """Start *argv* hidden, inside a job that dies with its handle.
 
     No pipes are attached; use :func:`popen_hidden` when output is needed.
-    Goes through ``remedy_core`` authorized spawn (policy + capability token).
-    There is no soft fallback to the unsigned spawn export.
-    Raises :class:`remedy.core.computer.host_binding.HostError` (unsupported)
-    on platforms where ``remedy_core`` has no process host yet.
+    Goes through ``remedy_core`` authorized spawn (policy + capability token +
+    write-jail / workdir roots). There is no soft fallback to the unsigned
+    spawn export. *write_roots* ``None`` leaves the core's installed roots
+    unchanged; an empty sequence clears the jail (Full). Raises
+    :class:`remedy.core.computer.host_binding.HostError` (unsupported) on
+    platforms where ``remedy_core`` has no process host yet.
     """
     from remedy.core.computer import host_binding
 
     resolved = _resolve_argv0(argv)
     token, now_ms = host_binding.issue_process_spawn_token(resolved)
+    roots = (
+        None
+        if write_roots is None
+        else [str(r) for r in write_roots]
+    )
     pid, handle = host_binding.process_spawn_authorized(
         resolved,
         str(cwd) if cwd else None,
         env,
         token=token,
         now_ms=now_ms,
+        write_roots=roots,
     )
     return HiddenProcess(pid, handle)
 

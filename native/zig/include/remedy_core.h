@@ -14,9 +14,10 @@ extern "C" {
  * Automation / Linux AT-SPI, and the ABI 2 host surface (DPI, monitors,
  * capture, PNG, input, windows, clipboard and hidden process control).
  * Additive on the same ABI 5: authorized spawn (policy + HMAC capability
- * tokens), signing-key set/clear, argv hash, and token issue. Production
- * Python spawn paths use the authorized exports; the unsigned
- * process_spawn_hidden / conpty_spawn symbols remain for low-level tests.
+ * tokens), signing-key set/clear, argv hash, token issue, and write-jail /
+ * workdir roots (set/clear/check). Production Python spawn paths use the
+ * authorized exports; the unsigned process_spawn_hidden / conpty_spawn
+ * symbols remain for low-level tests.
  * Every host/UIA/ConPTY/policy function returns a remedy_core_status. On a
  * non-Windows build each host/UIA/ConPTY spawn function returns
  * REMEDY_CORE_UNSUPPORTED and writes nothing; host_op_prepare,
@@ -441,6 +442,32 @@ int32_t remedy_core_conpty_spawn_authorized(
     uint8_t owner_confirmed,
     uint64_t now_ms,
     uint32_t *out_pid, uint64_t *out_handle
+);
+
+/* ---- ABI 5 additive: write jail / workdir roots --------------------------- */
+
+/* Install write roots from a JSON string array of absolute paths. Empty array,
+ * empty input, or null clears the jail (Full / unbound — no workdir gate).
+ * Authorized spawn checks cwd under these roots and refuses auth-secret paths
+ * always. Mutation-class absolute destinations outside roots are denied. */
+int32_t remedy_core_write_jail_set_roots(
+    const uint8_t *roots_json, size_t roots_len
+);
+
+/* Clear write roots (same as set_roots with []). */
+int32_t remedy_core_write_jail_clear(void);
+
+/* Check one path (optional cwd for relatives) against installed roots + auth.
+ * OK / ACCESS_DENIED / INVALID_ARGUMENT. */
+int32_t remedy_core_write_jail_check_path(
+    const uint8_t *path, size_t path_len,
+    const uint8_t *cwd, size_t cwd_len
+);
+
+/* Check argv_json + cwd with the same gate authorized spawn uses. */
+int32_t remedy_core_write_jail_check_spawn(
+    const uint8_t *argv_json, size_t argv_len,
+    const uint8_t *cwd, size_t cwd_len
 );
 
 #ifdef __cplusplus
