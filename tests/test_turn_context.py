@@ -302,7 +302,7 @@ async def test_abort_kills_registered_process():
 @pytest.mark.asyncio
 async def test_sandbox_aborts_long_shell():
     """SubprocessSandbox should return aborted when turn is aborted mid-run."""
-    from remedy.execution.sandbox import SubprocessSandbox
+    from remedy.execution.result import SubprocessSandbox
 
     tok = begin_turn("sand-abort", project_raw=None, active_path=".")
     try:

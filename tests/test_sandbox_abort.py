@@ -1,4 +1,4 @@
-"""Sandbox communicate/abort must not leak pending _wait_abort tasks."""
+"""Zig shell-chain abort flag must cancel without a Python communicate twin."""
 
 from __future__ import annotations
 
@@ -6,88 +6,63 @@ import asyncio
 
 import pytest
 
-from remedy.execution.sandbox import _communicate_or_abort
-
-
-class _HangProc:
-    def __init__(self) -> None:
-        self.returncode = None
-        self._gate = asyncio.Event()
-
-    async def communicate(self):
-        await self._gate.wait()
-        return b"out", b""
-
-
-class _FastProc:
-    returncode = 0
-
-    async def communicate(self):
-        return b"ok", b""
+from remedy.execution.result import SubprocessSandbox
 
 
 @pytest.mark.asyncio
-async def test_timeout_awaits_abort_waiter(monkeypatch):
-    monkeypatch.setattr("remedy.execution.process.kill_process_tree", lambda proc: None)
-    abort = asyncio.Event()
-    before = set(asyncio.all_tasks())
-    out = await _communicate_or_abort(
-        _HangProc(),  # type: ignore[arg-type]
-        timeout_seconds=0.08,
-        abort_event=abort,
+async def test_abort_before_start_returns_aborted(monkeypatch):
+    monkeypatch.setattr(
+        "remedy.core.turn_context.is_turn_aborted",
+        lambda: True,
     )
-    assert out == (None, None)
-    await asyncio.sleep(0)
-    leftover = [
-        t
-        for t in asyncio.all_tasks() - before
-        if not t.done() and "_wait_abort" in repr(t.get_coro())
-    ]
-    assert leftover == []
+    monkeypatch.setattr(
+        "remedy.execution.result._install_write_roots",
+        lambda roots: None,
+    )
+    res = await SubprocessSandbox().execute(["python", "-c", "print(1)"])
+    assert res.exit_code == -1
+    assert "Aborted before start" in res.stderr
 
 
 @pytest.mark.asyncio
-async def test_abort_kills_and_does_not_leak(monkeypatch):
-    monkeypatch.setattr("remedy.execution.process.kill_process_tree", lambda proc: None)
+async def test_shell_chain_abort_flag_is_set(monkeypatch):
+    """Abort event flips the ctypes flag passed into Zig shell_chain_execute."""
+    seen: dict[str, object] = {}
+
+    def fake_execute(payload, *, abort_flag=None):
+        seen["payload"] = payload
+        seen["flag"] = abort_flag
+        if abort_flag is not None:
+            abort_flag.value = 1
+        return {
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": "Aborted (session stop)",
+            "duration_ms": 1.0,
+        }
+
     abort = asyncio.Event()
-
-    async def fire() -> None:
-        await asyncio.sleep(0.02)
-        abort.set()
-
-    fire_task = asyncio.create_task(fire())
-    before = set(asyncio.all_tasks())
-    out = await _communicate_or_abort(
-        _HangProc(),  # type: ignore[arg-type]
-        timeout_seconds=2.0,
-        abort_event=abort,
+    abort.set()
+    monkeypatch.setattr(
+        "remedy.core.turn_context.is_turn_aborted",
+        lambda: False,
     )
-    assert out == (None, None)
-    await fire_task
-    await asyncio.sleep(0)
-    leftover = [
-        t
-        for t in asyncio.all_tasks() - before
-        if not t.done() and "_wait_abort" in repr(t.get_coro())
-    ]
-    assert leftover == []
-
-
-@pytest.mark.asyncio
-async def test_success_reaps_abort_waiter(monkeypatch):
-    monkeypatch.setattr("remedy.execution.process.kill_process_tree", lambda proc: None)
-    abort = asyncio.Event()
-    before = set(asyncio.all_tasks())
-    out = await _communicate_or_abort(
-        _FastProc(),  # type: ignore[arg-type]
-        timeout_seconds=2.0,
-        abort_event=abort,
+    monkeypatch.setattr(
+        "remedy.core.turn_context.current_abort_event",
+        lambda: abort,
     )
-    assert out == (b"ok", b"")
-    await asyncio.sleep(0)
-    leftover = [
-        t
-        for t in asyncio.all_tasks() - before
-        if not t.done() and "_wait_abort" in repr(t.get_coro())
-    ]
-    assert leftover == []
+    monkeypatch.setattr(
+        "remedy.execution.result._install_write_roots",
+        lambda roots: None,
+    )
+    monkeypatch.setattr(
+        "remedy.core.computer.host_binding.shell_chain_execute",
+        fake_execute,
+    )
+
+    argv = ["cmd.exe", "/c", "echo a && echo b"]
+    res = await SubprocessSandbox().execute(argv, timeout_seconds=5.0)
+    assert seen.get("flag") is not None
+    assert int(getattr(seen["flag"], "value", 0)) == 1
+    assert res.exit_code == -1
+    assert "Aborted" in res.stderr

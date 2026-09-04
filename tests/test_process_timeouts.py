@@ -88,9 +88,6 @@ def test_no_process_wait_in_the_tree_is_unbounded():
             attr = getattr(n.func, "attr", "")
             kwargs = {k.arg for k in n.keywords}
             if attr == "communicate" and "timeout" not in kwargs and n.lineno not in guarded:
-                # sandbox.py races communicate() against its own timeout task
-                if rel == "../remedy/execution/sandbox.py" or "sandbox.py" in rel:
-                    continue
                 offenders.append(f"{rel}:{n.lineno} communicate()")
             if attr in ("run", "check_output", "check_call"):
                 mod = getattr(getattr(n.func, "value", None), "id", "")

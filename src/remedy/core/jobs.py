@@ -176,7 +176,7 @@ async def run_verify_job(
     """Run a verify/test command via sandbox (optional workdir path)."""
     from remedy.core.project_fingerprint import fingerprint_path, path_env_with_local_bins
     from remedy.core.security import check_dangerous_command
-    from remedy.execution.sandbox import SubprocessSandbox
+    from remedy.execution.result import SubprocessSandbox
 
     root = runtime.effective_project_path()
     workdir = root
@@ -352,7 +352,7 @@ async def run_diff_job(runtime: Any, *, path: str = ".") -> JobResult:
     Spawns ``git`` directly (hidden console) — not via ``cmd``/PowerShell — so
     spread/diff workers do not flash a window on Windows.
     """
-    from remedy.execution.sandbox import SubprocessSandbox
+    from remedy.execution.result import SubprocessSandbox
 
     try:
         workdir = _resolve_job_path(runtime, path)

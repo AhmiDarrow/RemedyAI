@@ -176,7 +176,7 @@ def test_expand_shell_chain_cd_and_mkdir() -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_mkdir_chain_creates_dir(tmp_path) -> None:
-    from remedy.execution.sandbox import SubprocessSandbox
+    from remedy.execution.result import SubprocessSandbox
 
     py = sys.executable
 
@@ -196,7 +196,7 @@ async def test_sandbox_mkdir_chain_creates_dir(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_cd_chain_runs_in_subdir(tmp_path) -> None:
-    from remedy.execution.sandbox import SubprocessSandbox
+    from remedy.execution.result import SubprocessSandbox
 
     py = sys.executable
 
@@ -217,7 +217,7 @@ async def test_sandbox_cd_chain_runs_in_subdir(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_cd_chain_stays_in_jail(tmp_path) -> None:
-    from remedy.execution.sandbox import SubprocessSandbox
+    from remedy.execution.result import SubprocessSandbox
 
     py = sys.executable
 
@@ -237,7 +237,7 @@ async def test_sandbox_cd_chain_stays_in_jail(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_and_chain_runs_both_hops() -> None:
-    from remedy.execution.sandbox import SubprocessSandbox
+    from remedy.execution.result import SubprocessSandbox
 
     py = sys.executable
 
@@ -256,7 +256,7 @@ async def test_sandbox_and_chain_runs_both_hops() -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_and_chain_stops_on_failure() -> None:
-    from remedy.execution.sandbox import SubprocessSandbox
+    from remedy.execution.result import SubprocessSandbox
 
     py = sys.executable
 
