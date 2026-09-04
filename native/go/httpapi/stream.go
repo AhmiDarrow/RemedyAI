@@ -245,6 +245,12 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 		PlanMode:    req.PlanMode,
 		ChatMode:    req.ChatMode,
 		Attachments: attDicts,
+		DrainNudges: func() []string {
+			if s.claims == nil {
+				return nil
+			}
+			return s.claims.DrainNudges(sid)
+		},
 	}
 	go s.runDetachedStream(sid, claimEpoch, claimCtx, requestID, turnReq, frames)
 	handedOff = true
