@@ -15,10 +15,11 @@ extern "C" {
  * capture, PNG, input, windows, clipboard and hidden process control).
  * Additive on the same ABI 5: authorized spawn (policy + HMAC capability
  * tokens), signing-key set/clear, argv hash, token issue, write-jail /
- * workdir roots (set/clear/check), and HostSession orchestration (open/run/
- * cwd/close + wrap/split protocol). Production Python spawn/session paths
- * use the authorized exports; the unsigned process_spawn_hidden /
- * conpty_spawn / host_session_open symbols remain for low-level tests.
+ * workdir roots (set/clear/check), HostSession orchestration (open/run/
+ * cwd/close + wrap/split protocol), and host diagnose/dialect/stretch.
+ * Production Python spawn/session paths use the authorized exports; the
+ * unsigned process_spawn_hidden / conpty_spawn / host_session_open symbols
+ * remain for low-level tests.
  * Every host/UIA/ConPTY/policy function returns a remedy_core_status. On a
  * non-Windows build each host/UIA/ConPTY spawn function returns
  * REMEDY_CORE_UNSUPPORTED and writes nothing; host_op_prepare,
@@ -521,6 +522,79 @@ int32_t remedy_core_host_session_wrap(
 int32_t remedy_core_host_session_split(
     const uint8_t *json_in, size_t json_in_len,
     uint8_t **out_json, size_t *out_len
+);
+
+/* ---- ABI 5 additive: host diagnose / dialect / stretch -------------------- */
+
+/* Classify a failed host command. Input JSON:
+ * {command, stdout?, stderr?, exit_code?, translated?, timed_out?, host?}.
+ * Output JSON: {code, message, rewritten, hint, notes}. Caller frees. */
+int32_t remedy_core_diagnose_host_failure(
+    const uint8_t *json_in, size_t json_in_len,
+    uint8_t **out_json, size_t *out_len
+);
+
+/* Probe PATH tools into dialect JSON. persist!=0 writes ~/.remedy/host/dialect.json
+ * (or <home>/host/dialect.json). Caller frees. */
+int32_t remedy_core_dialect_probe(
+    const uint8_t *home, size_t home_len,
+    uint8_t persist,
+    uint8_t **out_json, size_t *out_len
+);
+
+/* Load dialect.json, healing empty/sidecar fields via probe. Caller frees. */
+int32_t remedy_core_dialect_load(
+    const uint8_t *home, size_t home_len,
+    uint8_t **out_json, size_t *out_len
+);
+
+/* Record a successful host command; returns updated dialect JSON. Caller frees. */
+int32_t remedy_core_dialect_record_success(
+    const uint8_t *home, size_t home_len,
+    const uint8_t *command, size_t command_len,
+    const uint8_t *note, size_t note_len,
+    uint8_t **out_json, size_t *out_len
+);
+
+/* One-line host inject. Optional dialect_json skips disk when non-empty. */
+int32_t remedy_core_dialect_format_line(
+    const uint8_t *home, size_t home_len,
+    const uint8_t *dialect_json, size_t dialect_json_len,
+    uint8_t **out_utf8, size_t *out_len
+);
+
+/* Probe + persist home census (~/.remedy/host/home.json). force!=0 refreshes. */
+int32_t remedy_core_stretch_home(
+    const uint8_t *home, size_t home_len,
+    uint8_t force,
+    uint8_t **out_json, size_t *out_len
+);
+
+/* Load home.json or the JSON null literal when missing. Caller frees. */
+int32_t remedy_core_stretch_load(
+    const uint8_t *home, size_t home_len,
+    uint8_t **out_json, size_t *out_len
+);
+
+/* Returns JSON true/false whether stretch is missing or older than stale_days. */
+int32_t remedy_core_stretch_needs(
+    const uint8_t *home, size_t home_len,
+    int32_t stale_days,
+    uint8_t **out_json, size_t *out_len
+);
+
+/* Compact "This home" inject line. Optional census_json skips disk. */
+int32_t remedy_core_stretch_format_line(
+    const uint8_t *home, size_t home_len,
+    const uint8_t *census_json, size_t census_json_len,
+    uint8_t **out_utf8, size_t *out_len
+);
+
+/* Longer /whoami and /stretch block. Optional census_json skips disk. */
+int32_t remedy_core_stretch_format_whoami(
+    const uint8_t *home, size_t home_len,
+    const uint8_t *census_json, size_t census_json_len,
+    uint8_t **out_utf8, size_t *out_len
 );
 
 /* ---- ABI 5 additive: Connect Tailscale management ------------------------- */

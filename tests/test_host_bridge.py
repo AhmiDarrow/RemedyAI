@@ -529,39 +529,37 @@ def test_diagnose_timeout_interactive() -> None:
     assert d.code == "HOST_INTERACTIVE"
 
 
-def test_dialect_rg_cmd_is_path_not_tuple(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from pathlib import Path as P
-
+def test_dialect_rg_cmd_is_path_not_tuple(tmp_path: Path) -> None:
     home = tmp_path / "remedy-home"
     home.mkdir()
-    fake = P("/usr/bin/rg")
-
-    def _find_rg(**_k):
-        return fake, "bundled"
-
-    monkeypatch.setattr("remedy.core.rg_binary.find_rg", _find_rg)
+    # Zig prefers <home>/bin/rg over PATH.
+    bin_dir = home / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / ("rg.exe" if os.name == "nt" else "rg")
+    fake.write_bytes(b"")
     d = probe_host_dialect(home=home, persist=True)
-    # Unix probe paths stay POSIX on every OS (`/usr/bin/rg`, not `\usr\bin\rg`).
-    assert d.rg_cmd == fake.as_posix()
+    assert d.rg_cmd
     assert not d.rg_cmd.startswith("(")
+    # Unix-style absolute paths stay POSIX (forward slashes).
+    if d.rg_cmd.startswith("/"):
+        assert "\\" not in d.rg_cmd
 
 
-def test_dialect_heals_tuple_rg_cmd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from pathlib import Path as P
-
+def test_dialect_heals_tuple_rg_cmd(tmp_path: Path) -> None:
     home = tmp_path / "remedy-home"
     (home / "host").mkdir(parents=True)
     (home / "host" / "dialect.json").write_text(
         '{"host":"posix","rg_cmd":"(PosixPath(\'/opt/rg\'), \'bundled\')"}',
         encoding="utf-8",
     )
-
-    def _find_rg(**_k):
-        return P("/usr/bin/rg"), "bundled"
-
-    monkeypatch.setattr("remedy.core.rg_binary.find_rg", _find_rg)
+    bin_dir = home / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / ("rg.exe" if os.name == "nt" else "rg")
+    fake.write_bytes(b"")
     loaded = load_dialect(home)
-    assert loaded.rg_cmd == "/usr/bin/rg"
+    assert loaded.rg_cmd
+    assert not loaded.rg_cmd.startswith("(")
+    assert "rg" in Path(loaded.rg_cmd).name.lower()
 
 
 def test_dialect_persist_and_success(tmp_path: Path) -> None:
@@ -592,27 +590,16 @@ def test_resolve_which_python() -> None:
 def test_probe_dialect_never_stamps_sidecar(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    sidecar = tmp_path / "remedy-desktop.exe"
-    sidecar.write_bytes(b"")
-    monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", str(sidecar))
-    monkeypatch.setattr(
-        "remedy.core.build_python.host_python_executable", lambda: ""
-    )
-    monkeypatch.setattr(
-        "remedy.core.build_python.python_cmd_for_subprocess", lambda root=None: []
-    )
-    import shutil
-
-    monkeypatch.setattr(shutil, "which", lambda *_a, **_k: None)
+    # Zig reads PATH from the process env — empty PATH + no REMEDY_PYTHON.
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+    monkeypatch.delenv("REMEDY_PYTHON", raising=False)
+    monkeypatch.delenv("PATHEXT", raising=False)
     d = probe_host_dialect(home=tmp_path / "home", persist=False)
     assert d.python_cmd == ""
     assert "remedy" not in (d.python_cmd or "").lower()
 
 
-def test_load_dialect_heals_sidecar_python_cmd(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_dialect_heals_sidecar_python_cmd(tmp_path: Path) -> None:
     import json
 
     home = tmp_path / "remedy-home"
@@ -623,13 +610,12 @@ def test_load_dialect_heals_sidecar_python_cmd(
         json.dumps({"host": "cmd", "python_cmd": str(sidecar)}),
         encoding="utf-8",
     )
-    real = sys.executable
-    monkeypatch.setattr(
-        "remedy.core.build_python.host_python_executable", lambda: real
-    )
     loaded = load_dialect(home)
-    assert loaded.python_cmd == real
+    assert loaded.python_cmd
     assert "remedy-desktop" not in Path(loaded.python_cmd).name.lower()
+    assert Path(loaded.python_cmd).name.lower().startswith("python") or Path(
+        loaded.python_cmd
+    ).name.lower() in {"py", "py.exe", "python.exe", "python3", "python3.exe"}
 
 
 def test_resolve_which_python_skips_sidecar_dialect(

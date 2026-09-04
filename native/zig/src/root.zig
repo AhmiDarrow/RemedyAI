@@ -18,6 +18,9 @@ pub const spawn_auth = @import("spawn_auth.zig");
 pub const write_jail = @import("write_jail.zig");
 pub const host_session = @import("host_session.zig");
 pub const tailscale = @import("tailscale.zig");
+pub const host_diagnose = @import("host_diagnose.zig");
+pub const host_dialect = @import("host_dialect.zig");
+pub const host_stretch = @import("host_stretch.zig");
 
 /// C ABI version of the exported surface (`remedy_core_abi_version`).
 pub const abi_version: u32 = 5;
@@ -35,8 +38,8 @@ pub const Status = enum(i32) {
 };
 
 // Host, UIA, shell_ir, shell_translate, conpty, spawn_auth, write_jail,
-// host_session, and tailscale exports live in their modules; referencing them
-// here makes the linker emit them from the library.
+// host_session, tailscale, and host diagnose/dialect/stretch exports live in
+// their modules; referencing them here makes the linker emit them.
 comptime {
     _ = host;
     _ = uia;
@@ -47,6 +50,9 @@ comptime {
     _ = write_jail;
     _ = host_session;
     _ = tailscale;
+    _ = host_diagnose;
+    _ = host_dialect;
+    _ = host_stretch;
 }
 
 export fn remedy_core_abi_version() callconv(.c) u32 {
@@ -157,4 +163,7 @@ test {
     _ = write_jail;
     _ = host_session;
     _ = tailscale;
+    _ = host_diagnose;
+    _ = host_dialect;
+    _ = host_stretch;
 }
