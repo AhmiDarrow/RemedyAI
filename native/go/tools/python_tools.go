@@ -317,5 +317,196 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 		return err
 	}
 
+	return registerVoiceVisionWorkerTools(registry, exec)
+}
+
+func registerVoiceVisionWorkerTools(registry *Registry, exec Executor) error {
+	type row struct {
+		id, desc string
+		risk     Risk
+		in, out  string
+	}
+	rows := []row{
+		{
+			id: "voice.speak", desc: "Synthesize speech via Python voice lane (internal)",
+			risk: RiskReadOnly,
+			in: `{
+			"type":"object",
+			"required":["text"],
+			"properties":{
+				"home_dir":{"type":"string"},
+				"text":{"type":"string"},
+				"gender":{"type":"string"},
+				"voice":{"type":"string"},
+				"speed":{"type":"number"}
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"required":["wav_b64","sample_rate","unavailable"],
+			"properties":{
+				"wav_b64":{"type":"string"},
+				"sample_rate":{"type":"integer"},
+				"unavailable":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`,
+		},
+		{
+			id: "voice.transcribe", desc: "Transcribe audio via Python STT lane (internal)",
+			risk: RiskReadOnly,
+			in: `{
+			"type":"object",
+			"required":["audio_b64"],
+			"properties":{
+				"home_dir":{"type":"string"},
+				"audio_b64":{"type":"string"},
+				"suffix":{"type":"string"},
+				"language":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"required":["text","unavailable"],
+			"properties":{
+				"text":{"type":"string"},
+				"language":{"type":"string"},
+				"unavailable":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`,
+		},
+		{
+			id: "voice.install", desc: "Start voice pack/engine install (internal)",
+			risk: RiskMutation,
+			in: `{
+			"type":"object",
+			"properties":{
+				"home_dir":{"type":"string"},
+				"component":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"required":["ok","started"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"started":{"type":"boolean"},
+				"error":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`,
+		},
+		{
+			id: "vision.activate", desc: "Activate local vision bundle (internal)",
+			risk: RiskMutation,
+			in: `{
+			"type":"object",
+			"properties":{
+				"home_dir":{"type":"string"},
+				"enabled":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`,
+			out: `{"type":"object","additionalProperties":true}`,
+		},
+		{
+			id: "vision.install", desc: "Install or activate vision model (internal)",
+			risk: RiskMutation,
+			in: `{
+			"type":"object",
+			"properties":{
+				"home_dir":{"type":"string"},
+				"model_id":{"type":"string"},
+				"runtime_id":{"type":"string"},
+				"prefer_cuda":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`,
+			out: `{"type":"object","additionalProperties":true}`,
+		},
+		{
+			id: "vision.cancel_install", desc: "Cancel in-flight vision install (internal)",
+			risk: RiskMutation,
+			in: `{
+			"type":"object",
+			"properties":{"home_dir":{"type":"string"}},
+			"additionalProperties":false
+		}`,
+			out: `{"type":"object","additionalProperties":true}`,
+		},
+		{
+			id: "vision.reinstall_runtime", desc: "Reinstall vision llama-server runtime (internal)",
+			risk: RiskMutation,
+			in: `{
+			"type":"object",
+			"properties":{
+				"home_dir":{"type":"string"},
+				"prefer_cuda":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`,
+			out: `{"type":"object","additionalProperties":true}`,
+		},
+		{
+			id: "vision.uninstall", desc: "Uninstall vision runtime/models (internal)",
+			risk: RiskMutation,
+			in: `{
+			"type":"object",
+			"properties":{
+				"home_dir":{"type":"string"},
+				"keep_models":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`,
+			out: `{"type":"object","additionalProperties":true}`,
+		},
+		{
+			id: "vision.start", desc: "Start local vision server (internal)",
+			risk: RiskMutation,
+			in: `{
+			"type":"object",
+			"properties":{"home_dir":{"type":"string"}},
+			"additionalProperties":false
+		}`,
+			out: `{"type":"object","additionalProperties":true}`,
+		},
+		{
+			id: "vision.stop", desc: "Stop local vision server (internal)",
+			risk: RiskMutation,
+			in: `{
+			"type":"object",
+			"properties":{"home_dir":{"type":"string"}},
+			"additionalProperties":false
+		}`,
+			out: `{"type":"object","additionalProperties":true}`,
+		},
+		{
+			id: "vision.progress", desc: "Vision install progress snapshot (internal)",
+			risk: RiskReadOnly,
+			in: `{
+			"type":"object",
+			"properties":{"home_dir":{"type":"string"}},
+			"additionalProperties":false
+		}`,
+			out: `{"type":"object","additionalProperties":true}`,
+		},
+	}
+	for _, r := range rows {
+		if err := registry.Register(Descriptor{
+			ID:           r.id,
+			Version:      1,
+			Description:  r.desc,
+			Runtime:      RuntimePython,
+			Risk:         r.risk,
+			InputSchema:  json.RawMessage(r.in),
+			OutputSchema: json.RawMessage(r.out),
+		}, exec); err != nil {
+			return err
+		}
+	}
 	return nil
 }
