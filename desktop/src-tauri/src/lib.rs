@@ -472,6 +472,241 @@ fn is_plausible_sidecar(p: &Path) -> bool {
     }
 }
 
+/// Packaged Desktop launches Go `remedy-runtime`. Dev keeps live Python unless
+/// `REMEDY_RUNTIME_SIDECAR=1` opts into the native binary.
+fn runtime_sidecar_requested() -> bool {
+    matches!(
+        env::var("REMEDY_RUNTIME_SIDECAR")
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn is_runtime_binary(cmd: &str) -> bool {
+    Path::new(cmd)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.to_ascii_lowercase().starts_with("remedy-runtime"))
+        .unwrap_or(false)
+}
+
+fn find_runtime_sidecar(
+    searched: &dyn Fn(&str, &Path) -> Option<String>,
+) -> Option<String> {
+    if let Some(dir) = current_exe_dir() {
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(path) = searched(
+                "runtime-triple",
+                &dir.join("remedy-runtime-x86_64-pc-windows-msvc.exe"),
+            ) {
+                return Some(path);
+            }
+            if let Some(path) = searched("runtime-plain", &dir.join("remedy-runtime.exe")) {
+                return Some(path);
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Some(path) = searched(
+                "runtime-triple",
+                &dir.join("remedy-runtime-x86_64-unknown-linux-gnu"),
+            ) {
+                return Some(path);
+            }
+            if let Some(path) = searched("runtime-plain", &dir.join("remedy-runtime")) {
+                return Some(path);
+            }
+        }
+    }
+
+    if let Ok(cwd) = env::current_dir() {
+        #[cfg(target_os = "windows")]
+        let cwd_cands: [(&str, PathBuf); 4] = [
+            (
+                "runtime-dev-bin-triple",
+                cwd.join("bin")
+                    .join("remedy-runtime-x86_64-pc-windows-msvc.exe"),
+            ),
+            ("runtime-dev-bin", cwd.join("bin").join("remedy-runtime.exe")),
+            (
+                "runtime-dev-desktop-triple",
+                cwd.join("desktop")
+                    .join("bin")
+                    .join("remedy-runtime-x86_64-pc-windows-msvc.exe"),
+            ),
+            (
+                "runtime-dev-desktop",
+                cwd.join("desktop").join("bin").join("remedy-runtime.exe"),
+            ),
+        ];
+        #[cfg(not(target_os = "windows"))]
+        let cwd_cands: [(&str, PathBuf); 4] = [
+            (
+                "runtime-dev-bin-triple",
+                cwd.join("bin")
+                    .join("remedy-runtime-x86_64-unknown-linux-gnu"),
+            ),
+            ("runtime-dev-bin", cwd.join("bin").join("remedy-runtime")),
+            (
+                "runtime-dev-desktop-triple",
+                cwd.join("desktop")
+                    .join("bin")
+                    .join("remedy-runtime-x86_64-unknown-linux-gnu"),
+            ),
+            (
+                "runtime-dev-desktop",
+                cwd.join("desktop").join("bin").join("remedy-runtime"),
+            ),
+        ];
+        for (label, p) in cwd_cands {
+            if let Some(path) = searched(label, &p) {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+fn find_python_sidecar(
+    searched: &dyn Fn(&str, &Path) -> Option<String>,
+) -> Option<String> {
+    if let Some(dir) = current_exe_dir() {
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(path) = searched(
+                "python-triple",
+                &dir.join("remedy-desktop-x86_64-pc-windows-msvc.exe"),
+            ) {
+                return Some(path);
+            }
+            if let Some(path) = searched(
+                "python-triple-amd64",
+                &dir.join("remedy-desktop-amd64-pc-windows-msvc.exe"),
+            ) {
+                return Some(path);
+            }
+            if let Some(path) = searched("python-plain", &dir.join("remedy-desktop.exe")) {
+                return Some(path);
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Some(path) = searched(
+                "python-triple",
+                &dir.join("remedy-desktop-x86_64-unknown-linux-gnu"),
+            ) {
+                return Some(path);
+            }
+            if let Some(path) = searched("python-plain", &dir.join("remedy-desktop")) {
+                return Some(path);
+            }
+        }
+    }
+
+    if let Ok(cwd) = env::current_dir() {
+        #[cfg(target_os = "windows")]
+        let cwd_cands: [(&str, PathBuf); 4] = [
+            (
+                "python-dev-bin-triple",
+                cwd.join("bin")
+                    .join("remedy-desktop-x86_64-pc-windows-msvc.exe"),
+            ),
+            ("python-dev-bin", cwd.join("bin").join("remedy-desktop.exe")),
+            (
+                "python-dev-desktop-triple",
+                cwd.join("desktop")
+                    .join("bin")
+                    .join("remedy-desktop-x86_64-pc-windows-msvc.exe"),
+            ),
+            (
+                "python-dev-desktop",
+                cwd.join("desktop").join("bin").join("remedy-desktop.exe"),
+            ),
+        ];
+        #[cfg(not(target_os = "windows"))]
+        let cwd_cands: [(&str, PathBuf); 4] = [
+            (
+                "python-dev-bin-triple",
+                cwd.join("bin")
+                    .join("remedy-desktop-x86_64-unknown-linux-gnu"),
+            ),
+            ("python-dev-bin", cwd.join("bin").join("remedy-desktop")),
+            (
+                "python-dev-desktop-triple",
+                cwd.join("desktop")
+                    .join("bin")
+                    .join("remedy-desktop-x86_64-unknown-linux-gnu"),
+            ),
+            (
+                "python-dev-desktop",
+                cwd.join("desktop").join("bin").join("remedy-desktop"),
+            ),
+        ];
+        for (label, p) in cwd_cands {
+            if let Some(path) = searched(label, &p) {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+fn find_live_python_dev() -> Option<String> {
+    // WSL/Linux: honor the isolated venv first. The repo `.venv` on /mnt/c
+    // is often a Windows environment (or a half-synced mix) and must not
+    // win over UV_PROJECT_ENVIRONMENT.
+    #[cfg(not(target_os = "windows"))]
+    if let Ok(uv_env) = env::var("UV_PROJECT_ENVIRONMENT") {
+        let cand = PathBuf::from(uv_env).join("bin").join("remedy");
+        if cand.is_file() && sidecar_is_native(&cand) {
+            log::info!(
+                "Dev build: using UV_PROJECT_ENVIRONMENT remedy: {}",
+                cand.display()
+            );
+            return Some(cand.to_string_lossy().to_string());
+        }
+    }
+    if let Ok(cwd) = env::current_dir() {
+        #[cfg(target_os = "windows")]
+        let venv_rels: &[&str] = &[
+            ".venv/Scripts/remedy.exe",
+            "../.venv/Scripts/remedy.exe",
+            "../../.venv/Scripts/remedy.exe",
+        ];
+        #[cfg(not(target_os = "windows"))]
+        let venv_rels: &[&str] = &[
+            ".venv/bin/remedy",
+            "../.venv/bin/remedy",
+            "../../.venv/bin/remedy",
+        ];
+        for venv_rel in venv_rels {
+            let cand = cwd.join(venv_rel);
+            if cand.is_file() && sidecar_is_native(&cand) {
+                log::info!(
+                    "Dev build: using repo venv remedy (live source): {}",
+                    cand.display()
+                );
+                return Some(cand.to_string_lossy().to_string());
+            }
+        }
+    }
+    // Fall back to a plausible (>1 MB) PATH `remedy` before packaged binaries.
+    if let Ok(path) = which_remedy_on_path() {
+        if is_plausible_sidecar(Path::new(&path)) {
+            log::info!("Dev build: using plausible PATH remedy for sidecar: {}", path);
+            return Some(path);
+        }
+        log::info!(
+            "Dev build: PATH remedy is a stub/wrapper ({}), checking bin paths",
+            path
+        );
+    }
+    None
+}
+
 fn find_remedy() -> (String, String) {
     let searched = |label: &str, p: &std::path::Path| -> Option<String> {
         if is_plausible_sidecar(p) {
@@ -494,142 +729,32 @@ fn find_remedy() -> (String, String) {
         }
     };
 
-    // Dev builds: run the *live source* sidecar, not a stale packaged binary.
-    // The repo's own venv launcher (`.venv/Scripts/remedy.exe`) runs current
-    // `src/remedy`, while `remedy-desktop.exe` next to target/debug may be a
-    // stale frozen build that predates provider/LLM fixes.  Prefer the venv
-    // when it exists (checked relative to cwd, then the repo root).
-    if cfg!(debug_assertions) {
-        // WSL/Linux: honor the isolated venv first. The repo `.venv` on /mnt/c
-        // is often a Windows environment (or a half-synced mix) and must not
-        // win over UV_PROJECT_ENVIRONMENT.
-        #[cfg(not(target_os = "windows"))]
-        if let Ok(uv_env) = env::var("UV_PROJECT_ENVIRONMENT") {
-            let cand = PathBuf::from(uv_env).join("bin").join("remedy");
-            if cand.is_file() && sidecar_is_native(&cand) {
-                log::info!(
-                    "Dev build: using UV_PROJECT_ENVIRONMENT remedy: {}",
-                    cand.display()
-                );
-                return (cand.to_string_lossy().to_string(), String::new());
-            }
+    // Packaged / release: Go runtime owns :7400. Dev keeps live Python unless
+    // REMEDY_RUNTIME_SIDECAR=1. Python `remedy-desktop` remains a resource
+    // fallback while Phase 6 route parity finishes.
+    let prefer_runtime = !cfg!(debug_assertions) || runtime_sidecar_requested();
+
+    if prefer_runtime {
+        if let Some(path) = find_runtime_sidecar(&searched) {
+            return (path, String::new());
         }
-        if let Ok(cwd) = env::current_dir() {
-            #[cfg(target_os = "windows")]
-            let venv_rels: &[&str] = &[
-                ".venv/Scripts/remedy.exe",
-                "../.venv/Scripts/remedy.exe",
-                "../../.venv/Scripts/remedy.exe",
-            ];
-            #[cfg(not(target_os = "windows"))]
-            let venv_rels: &[&str] = &[
-                ".venv/bin/remedy",
-                "../.venv/bin/remedy",
-                "../../.venv/bin/remedy",
-            ];
-            for venv_rel in venv_rels {
-                let cand = cwd.join(venv_rel);
-                if cand.is_file() && sidecar_is_native(&cand) {
-                    log::info!(
-                        "Dev build: using repo venv remedy (live source): {}",
-                        cand.display()
-                    );
-                    return (cand.to_string_lossy().to_string(), String::new());
-                }
-            }
-        }
-        // Fall back to a plausible (>1 MB) PATH `remedy` before the stale
-        // packaged sidecar.  Skip tiny Python wrapper scripts (108 KB
-        // `Scripts\remedy.exe`) — they need `uv run` and fail when spawned
-        // directly by the Rust sidecar.
-        if let Ok(path) = which_remedy_on_path() {
-            if is_plausible_sidecar(Path::new(&path)) {
-                log::info!("Dev build: using plausible PATH remedy for sidecar: {}", path);
-                return (path, String::new());
-            }
-            log::info!(
-                "Dev build: PATH remedy is a stub/wrapper ({}), checking dev bin paths",
-                path
-            );
+    } else if let Some(path) = find_live_python_dev() {
+        return (path, String::new());
+    }
+
+    if !prefer_runtime {
+        if let Some(path) = find_runtime_sidecar(&searched) {
+            return (path, String::new());
         }
     }
 
-    if let Some(dir) = current_exe_dir() {
-        #[cfg(target_os = "windows")]
-        {
-            if let Some(path) = searched(
-                "triple",
-                &dir.join("remedy-desktop-x86_64-pc-windows-msvc.exe"),
-            ) {
-                return (path, String::new());
-            }
-            if let Some(path) = searched(
-                "triple-amd64",
-                &dir.join("remedy-desktop-amd64-pc-windows-msvc.exe"),
-            ) {
-                return (path, String::new());
-            }
-            if let Some(path) = searched("plain", &dir.join("remedy-desktop.exe")) {
-                return (path, String::new());
-            }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            if let Some(path) = searched(
-                "triple",
-                &dir.join("remedy-desktop-x86_64-unknown-linux-gnu"),
-            ) {
-                return (path, String::new());
-            }
-            if let Some(path) = searched("plain", &dir.join("remedy-desktop")) {
-                return (path, String::new());
-            }
-        }
+    if let Some(path) = find_python_sidecar(&searched) {
+        return (path, String::new());
     }
 
-    if let Ok(cwd) = env::current_dir() {
-        #[cfg(target_os = "windows")]
-        let cwd_cands: [(&str, PathBuf); 4] = [
-            (
-                "dev-bin-triple",
-                cwd.join("bin")
-                    .join("remedy-desktop-x86_64-pc-windows-msvc.exe"),
-            ),
-            ("dev-bin", cwd.join("bin").join("remedy-desktop.exe")),
-            (
-                "dev-desktop-triple",
-                cwd.join("desktop")
-                    .join("bin")
-                    .join("remedy-desktop-x86_64-pc-windows-msvc.exe"),
-            ),
-            (
-                "dev-desktop",
-                cwd.join("desktop").join("bin").join("remedy-desktop.exe"),
-            ),
-        ];
-        #[cfg(not(target_os = "windows"))]
-        let cwd_cands: [(&str, PathBuf); 4] = [
-            (
-                "dev-bin-triple",
-                cwd.join("bin")
-                    .join("remedy-desktop-x86_64-unknown-linux-gnu"),
-            ),
-            ("dev-bin", cwd.join("bin").join("remedy-desktop")),
-            (
-                "dev-desktop-triple",
-                cwd.join("desktop")
-                    .join("bin")
-                    .join("remedy-desktop-x86_64-unknown-linux-gnu"),
-            ),
-            (
-                "dev-desktop",
-                cwd.join("desktop").join("bin").join("remedy-desktop"),
-            ),
-        ];
-        for (label, p) in cwd_cands {
-            if let Some(path) = searched(label, &p) {
-                return (path, String::new());
-            }
+    if prefer_runtime {
+        if let Some(path) = find_live_python_dev() {
+            return (path, String::new());
         }
     }
 
@@ -640,18 +765,19 @@ fn find_remedy() -> (String, String) {
     }
 
     let msg = format!(
-        "Sidecar not found - checked exe dir {:?}, cwd/bin/, and PATH (remedy). \
-         Tiny stub EXEs (<1MB) are ignored on Windows; PE/.exe is ignored on Linux.",
+        "Sidecar not found - checked exe dir {:?}, cwd/bin/ for remedy-runtime \
+         (and remedy-desktop fallback), and PATH (remedy). Tiny stub EXEs (<1MB) \
+         are ignored on Windows; PE/.exe is ignored on Linux.",
         current_exe_dir()
     );
     log::error!("{}", msg);
     #[cfg(target_os = "windows")]
     {
-        ("remedy-desktop.exe".to_string(), msg)
+        ("remedy-runtime.exe".to_string(), msg)
     }
     #[cfg(not(target_os = "windows"))]
     {
-        ("remedy-desktop".to_string(), msg)
+        ("remedy-runtime".to_string(), msg)
     }
 }
 
@@ -794,6 +920,7 @@ fn find_webui_dir() -> Option<PathBuf> {
 
     // Sidecar binary directory (externalBin lives next to main exe)
     if let Some(dir) = current_exe_dir() {
+        candidates.push(dir.join("remedy-runtime").join("webui"));
         candidates.push(dir.join("remedy-desktop").join("webui"));
     }
 
@@ -811,9 +938,12 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
     let home_dir = remedy_home();
     let home_str = home_dir.to_string_lossy();
     let port_str = api_port().to_string();
-    // --skip-setup: never block the sidecar on interactive CLI wizard.
-    // Desktop SetupWizard is the first-run UX (needs a running API).
-    let args = [
+    let use_runtime = is_runtime_binary(cmd);
+    // Go: --serve --listen 127.0.0.1:PORT (REMEDY_HOME via env).
+    // Python: --home … serve --host/--port --skip-setup (Desktop SetupWizard owns UX).
+    let listen = format!("127.0.0.1:{port_str}");
+    let runtime_args = ["--serve", "--listen", listen.as_str()];
+    let python_args = [
         "--home",
         home_str.as_ref(),
         "serve",
@@ -846,8 +976,13 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
         // Windows ignores CREATE_NO_WINDOW when DETACHED is set, which opens a
         // visible console for console-subsystem sidecar builds (what the user saw).
         let mut c = Command::new(cmd);
-        c.args(args)
-            .env("REMEDY_DESKTOP_SIDECAR", "1")
+        if use_runtime {
+            c.args(runtime_args);
+        } else {
+            c.args(python_args);
+        }
+        c.env("REMEDY_DESKTOP_SIDECAR", "1")
+            .env("REMEDY_HOME", home_str.as_ref())
             .env("PYTHONUNBUFFERED", "1")
             .creation_flags(CREATE_NO_WINDOW)
             .stdin(Stdio::null())
@@ -864,8 +999,13 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
     #[cfg(not(target_os = "windows"))]
     {
         let mut c = Command::new(cmd);
-        c.args(args)
-            .env("REMEDY_DESKTOP_SIDECAR", "1")
+        if use_runtime {
+            c.args(runtime_args);
+        } else {
+            c.args(python_args);
+        }
+        c.env("REMEDY_DESKTOP_SIDECAR", "1")
+            .env("REMEDY_HOME", home_str.as_ref())
             .env("PYTHONUNBUFFERED", "1")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -1216,7 +1356,7 @@ fn try_stop_vision_http() {
     thread::sleep(Duration::from_millis(250));
 }
 
-/// Stop the managed sidecar and any leftover remedy-desktop processes / :7400 listeners.
+/// Stop the managed sidecar and any leftover remedy-runtime / remedy-desktop processes / :7400 listeners.
 /// Must never hang — tray "Quit and stop server" depends on this returning quickly.
 fn shutdown_sidecar(state: &ServerState) {
     state.app_exiting.store(true, Ordering::SeqCst);
@@ -1268,6 +1408,8 @@ fn force_stop_vision_processes() {
 #[cfg(target_os = "windows")]
 fn force_stop_remedy_processes() {
     let images = [
+        "remedy-runtime.exe",
+        "remedy-runtime-x86_64-pc-windows-msvc.exe",
         "remedy-desktop.exe",
         "remedy-desktop-x86_64-pc-windows-msvc.exe",
         "remedy-desktop-amd64-pc-windows-msvc.exe",
@@ -1343,11 +1485,16 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='remedy.exe' OR
 
 #[cfg(not(target_os = "windows"))]
 fn force_stop_remedy_processes() {
-    // Sidecar argv is `remedy --home <dir> serve --host 127.0.0.1 --port N`.
-    // A literal `remedy serve` never matches.
+    // Python argv: `remedy --home <dir> serve --host 127.0.0.1 --port N`.
+    // Go argv: `remedy-runtime --serve --listen 127.0.0.1:N`.
     let port = api_port();
     let _ = Command::new("pkill")
         .args(["-f", &format!("serve --host 127.0.0.1 --port {port}")])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = Command::new("pkill")
+        .args(["-f", &format!("remedy-runtime.*--listen 127\\.0\\.0\\.1:{port}")])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();

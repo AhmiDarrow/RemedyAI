@@ -1,5 +1,6 @@
-// Package httpapi serves the Phase-4 opt-in local HTTP API for remedy-runtime.
-// Python remains the production authority on :7400; this package is additive.
+// Package httpapi serves the local HTTP API for remedy-runtime.
+// Packaged Desktop points :7400 at this server (Phase 6 prep). Python remains
+// the compatibility/worker path and the default for tauri:dev.
 package httpapi
 
 import (

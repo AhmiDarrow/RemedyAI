@@ -60,7 +60,7 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "../bin/remedy-desktop"
+      "../bin/remedy-runtime"
     ],
     "resources": {
       "../dist": "webui",

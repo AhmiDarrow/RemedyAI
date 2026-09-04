@@ -112,11 +112,13 @@ def test_release_builds_both_desktop_operating_systems_and_native_cores() -> Non
 
     windows = _run_commands(jobs["build-sidecar"]) + _run_commands(jobs["build-tauri"])
     assert "remedy-runtime.exe" in windows
+    assert "remedy-runtime-x86_64-pc-windows-msvc.exe" in windows
     assert "remedy_core.dll" in windows
     assert "tauri build --bundles nsis" in windows
 
     linux = _run_commands(jobs["build-sidecar-linux"]) + _run_commands(jobs["build-tauri-linux"])
     assert "remedy-runtime" in linux
+    assert "remedy-runtime-x86_64-unknown-linux-gnu" in linux
     assert "libremedy_core.so" in linux
     assert "tauri build --bundles deb,appimage" in linux
 

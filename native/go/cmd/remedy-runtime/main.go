@@ -1,6 +1,7 @@
-// Command remedy-runtime is the native runtime probe and opt-in local API.
-// Python remains the production HTTP authority on :7400. Pass --listen or
-// --serve to enable the Phase-4 Go API on a loopback address (never implied).
+// Command remedy-runtime is the native runtime probe and local API.
+// Packaged Desktop launches this binary as the :7400 sidecar (Phase 6 prep).
+// Pass --listen/--serve for the loopback HTTP API (never implied by --probe).
+// `tauri:dev` still prefers the live Python sidecar unless REMEDY_RUNTIME_SIDECAR=1.
 package main
 
 import (
