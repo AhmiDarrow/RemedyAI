@@ -168,7 +168,7 @@ def test_unknown_cli_action_ok_false(tmp_path: Path, monkeypatch):
 
     host = LocalComputerHost(home_dir=tmp_path)
     monkeypatch.setattr(
-        "remedy.core.computer.desktop_os.native",
+        "remedy.core.computer.host_binding.native",
         lambda: SimpleNamespace(),
     )
     out = host._run_action("fill", {}, SimpleNamespace())
@@ -608,7 +608,7 @@ async def test_self_inject_empty_delta_untracked_vs_head_gone_on_restore(tmp_pat
 
 
 def test_vault_desktop_refuses_button_no_click_type(tmp_path, monkeypatch):
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -711,7 +711,7 @@ def test_nested_extra_pending_load_is_not_life_drive_done():
 
 
 def test_executor_screenshot_without_bounds_ok_false(tmp_path, monkeypatch):
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -939,7 +939,7 @@ def test_computer_fill_success_is_unverified(tmp_path, monkeypatch):
 
 def test_hwnd_uia_button_vault_refuses_no_set_value(tmp_path, monkeypatch):
     from remedy.core.computer import desktop_uia as uia
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -975,7 +975,7 @@ def test_hwnd_uia_button_vault_refuses_no_set_value(tmp_path, monkeypatch):
 
 
 def test_ocr_role_text_vault_refuses(tmp_path, monkeypatch):
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -1005,7 +1005,7 @@ def test_ocr_role_text_vault_refuses(tmp_path, monkeypatch):
 
 
 def test_atspi_entry_vault_clicks_center_then_types(tmp_path, monkeypatch):
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 

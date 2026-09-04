@@ -474,9 +474,9 @@ def test_desktop_navigate_refuses_system_browser_without_explicit_ask(
         opened.append(url)
         return {"ok": True, "url": url}
 
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
 
-    # Executor / cli host call desktop_os.native() — patch the live OS module.
+    # Executor / cli host call host_binding.native() — patch the live OS module.
     monkeypatch.setattr(native(), "open_url", fake_open)
 
     ex = ComputerExecutor(home_dir=tmp_path)
@@ -1915,7 +1915,7 @@ def test_offline_navigate_refuses_os_browser_snapshot_falls_back(
         opened.append(url)
         return {"ok": True, "url": url}
 
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
 
     win = native()
 
@@ -1969,7 +1969,7 @@ def test_executor_click_text_stays_desktop_after_app(tmp_path: Path, monkeypatch
     import json
 
     from remedy.core.computer import host_bridge as hb
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -2074,7 +2074,7 @@ def test_executor_type_surfaces_abort(tmp_path: Path, monkeypatch):
             chars_typed[:] = [8]
         raise RuntimeError("Aborted by user during type")
 
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
 
     win = native()
     # TYPE path prefers type_text_fast (non-vault); both must abort the same way.
@@ -2648,7 +2648,7 @@ def test_select_and_fill_are_first_class_actions():
 
 
 def test_focus_window_false_is_not_ok(tmp_path, monkeypatch):
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -2855,7 +2855,7 @@ def test_executor_hover_text_moves_pointer_without_click(tmp_path: Path, monkeyp
     import json
 
     from remedy.core.computer import host_bridge as hb
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -2900,7 +2900,7 @@ def test_executor_press_hold_text_locates_native_control(tmp_path: Path, monkeyp
     import json
 
     from remedy.core.computer import host_bridge as hb
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -2980,7 +2980,7 @@ def test_executor_type_query_locates_native_field(tmp_path: Path, monkeypatch):
     import json
 
     from remedy.core.computer import host_bridge as hb
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -3048,7 +3048,7 @@ def test_executor_type_query_miss_names_the_label(tmp_path: Path, monkeypatch):
     import json
 
     from remedy.core.computer import host_bridge as hb
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -3096,7 +3096,7 @@ def test_executor_type_stale_ref_plus_query_relocates(tmp_path: Path, monkeypatc
     import json
 
     from remedy.core.computer import host_bridge as hb
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -3153,7 +3153,7 @@ def test_executor_type_without_query_still_types_into_focus(tmp_path: Path, monk
     import json
 
     from remedy.core.computer import host_bridge as hb
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -3182,7 +3182,7 @@ def test_executor_press_hold_text_miss_names_the_label(tmp_path: Path, monkeypat
     import json
 
     from remedy.core.computer import host_bridge as hb
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -3227,7 +3227,7 @@ def test_executor_drag_from_text_to_text_locates_native(tmp_path: Path, monkeypa
     import json
 
     from remedy.core.computer import host_bridge as hb
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -3296,7 +3296,7 @@ def test_executor_drag_text_miss_names_the_label(tmp_path: Path, monkeypatch):
     import json
 
     from remedy.core.computer import host_bridge as hb
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -3338,7 +3338,7 @@ def test_executor_drag_coords_still_work(tmp_path: Path, monkeypatch):
     import json
 
     from remedy.core.computer import host_bridge as hb
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -3385,7 +3385,7 @@ def test_executor_scroll_text_locates_native(tmp_path: Path, monkeypatch):
     import json
 
     from remedy.core.computer import host_bridge as hb
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -3453,7 +3453,7 @@ def test_executor_scroll_text_miss_names_the_label(tmp_path: Path, monkeypatch):
     import json
 
     from remedy.core.computer import host_bridge as hb
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
@@ -3514,7 +3514,7 @@ def test_executor_scroll_coords_and_dy_still_work(tmp_path: Path, monkeypatch):
     import json
 
     from remedy.core.computer import host_bridge as hb
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 

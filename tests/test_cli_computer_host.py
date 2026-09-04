@@ -194,8 +194,8 @@ def test_the_last_action_is_recorded_for_status(host, monkeypatch):
 
 
 def _patch_native_open_url(monkeypatch, fn):
-    """cli_host uses desktop_os.native() — patch whichever OS module is live."""
-    from remedy.core.computer.desktop_os import native
+    """cli_host uses host_binding.native() — patch whichever OS module is live."""
+    from remedy.core.computer.host_binding import native
 
     monkeypatch.setattr(native(), "open_url", fn)
 

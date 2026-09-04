@@ -10,6 +10,7 @@ ConPTY spawns use the authorized ABI (policy + capability tokens + write-jail
 Windows: host + UIA + ConPTY. Linux: host (X11/XTest) + AT-SPI a11y snapshot.
 ``host_op_prepare`` (structured ops + command-string prepare),
 ``translate_posix_to_host``, and diagnose/dialect/stretch are portable.
+``native()`` selects ``desktop_win`` / ``desktop_linux`` (no ``desktop_os`` twin).
 Other platforms: host/UIA/a11y/ConPTY calls report
 :data:`STATUS_UNSUPPORTED` (:class:`HostError`).
 """
@@ -34,6 +35,7 @@ from ctypes import (
     c_void_p,
 )
 from pathlib import Path
+from types import ModuleType
 from typing import Any, NamedTuple
 
 from remedy.runtime.native_runtime import NativeRuntimeUnavailableError, core_library
@@ -2153,3 +2155,14 @@ def stretch_format_whoami(
         ),
     )
     return _take(library, ptr, length).decode("utf-8", errors="replace")
+
+
+def native() -> ModuleType:
+    """Return the desktop module for this OS (``desktop_win`` / ``desktop_linux``)."""
+    if sys.platform == "win32":
+        from remedy.core.computer import desktop_win as win
+
+        return win
+    from remedy.core.computer import desktop_linux as linux
+
+    return linux

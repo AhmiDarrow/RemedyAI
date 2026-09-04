@@ -141,7 +141,7 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
     @app.post("/api/computer/capture")
     async def computer_capture(req: CaptureRequest):
         """Server-side screenshot on this PC (full or region). Used by host + tools."""
-        from remedy.core.computer.desktop_os import native
+        from remedy.core.computer.host_binding import native
 
         win = native()
 

@@ -602,7 +602,7 @@ class ComputerExecutor:
             already_fallback=bool(result.get("fallback")),
         ):
             try:
-                from remedy.core.computer.desktop_os import native
+                from remedy.core.computer.host_binding import native
 
                 win = native()
 
@@ -666,7 +666,7 @@ class ComputerExecutor:
                 bounds = self.bridge.get_browser_bounds()
                 scale = float((bounds or {}).get("scale") or 1.0)
                 if bounds and int(bounds.get("width") or 0) > 40:
-                    from remedy.core.computer.desktop_os import native
+                    from remedy.core.computer.host_binding import native
 
                     info = native().screenshot_region_png(
                         int(bounds["x"]),
@@ -784,7 +784,7 @@ class ComputerExecutor:
             with contextlib.suppress(Exception):
                 bounds = self.bridge.get_browser_bounds()
                 if bounds and int(bounds.get("width") or 0) > 40:
-                    from remedy.core.computer.desktop_os import native
+                    from remedy.core.computer.host_binding import native
 
                     sc = float(bounds.get("scale") or 1.0)
                     info = native().screenshot_region_png(
@@ -869,7 +869,7 @@ class ComputerExecutor:
             )
             return out
         try:
-            from remedy.core.computer.desktop_os import native
+            from remedy.core.computer.host_binding import native
 
             native().click(x, y)
         except Exception:
@@ -1017,7 +1017,7 @@ class ComputerExecutor:
             return None
         x, y = int(el.get("x") or 0), int(el.get("y") or 0)
         try:
-            from remedy.core.computer.desktop_os import native
+            from remedy.core.computer.host_binding import native
 
             info = native().press_hold(
                 x, y, hold_ms=hold_ms, abort_check=self._abort_check
@@ -1169,7 +1169,7 @@ class ComputerExecutor:
         """
         ev: dict[str, Any] = {}
         with contextlib.suppress(Exception):
-            from remedy.core.computer.desktop_os import native
+            from remedy.core.computer.host_binding import native
 
             win = native()
 
@@ -1243,7 +1243,7 @@ class ComputerExecutor:
         return out
 
     def _run_desktop(self, act: ComputerAction, **kwargs: Any) -> dict[str, Any]:
-        from remedy.core.computer.desktop_os import native
+        from remedy.core.computer.host_binding import native
 
         win = native()
 
@@ -2851,7 +2851,7 @@ class ComputerExecutor:
             scale = float((bounds or {}).get("scale") or 1.0)
             if bounds and bounds.get("width", 0) > 40 and bounds.get("height", 0) > 40:
                 try:
-                    from remedy.core.computer.desktop_os import native
+                    from remedy.core.computer.host_binding import native
 
                     win = native()
 
@@ -2880,7 +2880,7 @@ class ComputerExecutor:
             # Fallback: PrintWindow the rail webview. No reliable scale here, so
             # tell the model the coords may need the page's devicePixelRatio.
             try:
-                from remedy.core.computer.desktop_os import native
+                from remedy.core.computer.host_binding import native
 
                 win = native()
 

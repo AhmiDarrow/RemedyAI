@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from remedy.core.computer import desktop_win as W
-from remedy.core.computer.desktop_os import native
+from remedy.core.computer.host_binding import native
 from remedy.core.computer.executor import ComputerExecutor
 from remedy.core.computer.types import (
     COMPUTER_TOOL_NAMES,
