@@ -84,10 +84,15 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 }
 
 // NewDefaultToolRegistry builds the turn-time Tool ABI registry.
-// pythonCaller, when non-nil, registers RuntimePython tools over RMDY frames.
+// Always registers Go builtins and RuntimeZig host tools (execute fails closed
+// when remedy_core is unavailable). pythonCaller, when non-nil, registers
+// RuntimePython tools over RMDY frames.
 func NewDefaultToolRegistry(pythonCaller tools.FrameCaller) (*tools.Registry, error) {
 	registry := tools.NewRegistry(tools.AuthorizerFunc(runtimeLocalAuthorizer))
 	if err := tools.RegisterGoBuiltins(registry); err != nil {
+		return nil, err
+	}
+	if err := tools.RegisterZigHostTools(registry); err != nil {
 		return nil, err
 	}
 	if pythonCaller != nil {

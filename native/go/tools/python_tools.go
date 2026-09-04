@@ -163,6 +163,51 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:          "workspace.search",
+		Version:     1,
+		Description: "Search workspace text via ripgrep or Python sniff (Python worker)",
+		Runtime:     RuntimePython,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["pattern"],
+			"properties":{
+				"pattern":{"type":"string","minLength":1},
+				"path":{"type":"string"},
+				"glob":{"type":"string"},
+				"max_matches":{"type":"integer","minimum":1,"maximum":500},
+				"case_insensitive":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["pattern","engine","matches","total"],
+			"properties":{
+				"pattern":{"type":"string"},
+				"engine":{"type":"string"},
+				"matches":{
+					"type":"array",
+					"items":{
+						"type":"object",
+						"required":["path","line","text"],
+						"properties":{
+							"path":{"type":"string"},
+							"line":{"type":"integer","minimum":1},
+							"text":{"type":"string"}
+						},
+						"additionalProperties":false
+					}
+				},
+				"total":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:          "web.search",
 		Version:     1,
 		Description: "Search the public web via the Python agent web_search backend (OpenSERP/DDG)",

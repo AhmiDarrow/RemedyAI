@@ -23,8 +23,10 @@ type CognitionTurnRunner struct {
 }
 
 // NewCognitionTurnRunner builds a runner on the real Tool ABI registry (Go
-// builtins in-process). Pass AttachPythonWorker to add RuntimePython tools over
-// RMDY frames. Missing Tools/Policy is an error — no Echo/DenyAll fallback.
+// builtins + RuntimeZig host tools in-process). Pass AttachPythonWorker to add
+// RuntimePython tools over RMDY frames. Missing Tools/Policy is an error —
+// no Echo/DenyAll fallback. Zig-owned tools fail closed when remedy_core is
+// unavailable (no Python soft fallback).
 func NewCognitionTurnRunner(model cognition.Model) *CognitionTurnRunner {
 	registry, err := NewDefaultToolRegistry(nil)
 	if err != nil {

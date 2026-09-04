@@ -26,6 +26,19 @@ func TestCognitionTurnRunnerEmitsTextAndCompletes(t *testing.T) {
 	}
 }
 
+func TestCognitionTurnRunnerRegistersZigHostTools(t *testing.T) {
+	r := NewCognitionTurnRunner(&cognition.ScriptedModel{})
+	for _, id := range []string{"computer.screenshot", "computer.windows", "computer.monitors"} {
+		desc, err := r.Registry.Latest(id)
+		if err != nil {
+			t.Fatalf("%s missing: %v", id, err)
+		}
+		if desc.Runtime != tools.RuntimeZig {
+			t.Fatalf("%s runtime=%s", id, desc.Runtime)
+		}
+	}
+}
+
 func TestCognitionTurnRunnerExecutesRealGoBuiltinTools(t *testing.T) {
 	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
 		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "runtime.probe", Input: []byte(`{}`)}},

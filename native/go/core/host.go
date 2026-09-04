@@ -41,6 +41,47 @@ func VirtualScreenRect() (left, top, width, height int32, err error) {
 	return left, top, width, height, nil
 }
 
+// ListMonitorsJSON returns UTF-8 JSON array of monitor descriptors from Zig.
+// Fail-closed when remedy_core is missing or the host export is unsupported.
+func ListMonitorsJSON() ([]byte, error) {
+	lib, err := Open()
+	if err != nil {
+		return nil, err
+	}
+	var ptr, length uintptr
+	status, err := lib.call("remedy_core_list_monitors", unsafePtrPtr(&ptr), sizePtr(&length))
+	if err != nil {
+		return nil, err
+	}
+	if err := lib.check("list_monitors", int32(status)); err != nil {
+		return nil, err
+	}
+	return takeBytes(lib, ptr, length), nil
+}
+
+// ListWindowsJSON returns UTF-8 JSON array of visible titled windows (Zig).
+// limit 0 defaults to 50 inside the Tool ABI wrapper; Zig accepts any limit.
+func ListWindowsJSON(limit uint32) ([]byte, error) {
+	lib, err := Open()
+	if err != nil {
+		return nil, err
+	}
+	var ptr, length uintptr
+	status, err := lib.call(
+		"remedy_core_list_windows",
+		uintptr(limit),
+		unsafePtrPtr(&ptr),
+		sizePtr(&length),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := lib.check("list_windows", int32(status)); err != nil {
+		return nil, err
+	}
+	return takeBytes(lib, ptr, length), nil
+}
+
 // CaptureVirtualScreen captures the virtual screen (bytesPerPixel 3=BGR or 4=BGRA).
 func CaptureVirtualScreen(bytesPerPixel uint32) (*Capture, error) {
 	lib, err := Open()

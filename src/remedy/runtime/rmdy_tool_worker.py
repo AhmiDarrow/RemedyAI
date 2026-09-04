@@ -249,6 +249,59 @@ def _workspace_write(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     }
 
 
+def _workspace_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Bridge Tool ABI workspace.search to repo_search (rg or Python sniff)."""
+    pattern = str(inp.get("pattern") or "").strip()
+    if not pattern:
+        raise ValueError("pattern is required")
+    path = str(inp.get("path") or ".").strip() or "."
+    glob = str(inp.get("glob") or "").strip() or None
+    raw_max = inp.get("max_matches", 50)
+    try:
+        max_matches = int(raw_max) if raw_max is not None else 50
+    except (TypeError, ValueError):
+        max_matches = 50
+    max_matches = max(1, min(500, max_matches))
+    case_insensitive = bool(inp.get("case_insensitive") or False)
+
+    root = _workspace_root()
+    # Keep absolute paths inside the workspace jail (fail closed).
+    if path not in (".", "./", ""):
+        _resolve_workspace_path(path)
+
+    from remedy.core.repo_search import search_repo
+
+    home = (os.environ.get("REMEDY_HOME") or "").strip() or None
+    hits, engine = search_repo(
+        root,
+        pattern,
+        path=path,
+        glob=glob,
+        max_matches=max_matches,
+        case_insensitive=case_insensitive,
+        home_dir=home,
+        allowed_roots=[root],
+        access_scope="project",
+    )
+    if str(engine).startswith("error:"):
+        raise PermissionError(str(engine)[len("error:") :].strip() or engine)
+    matches: list[dict[str, Any]] = []
+    for hit in hits:
+        matches.append(
+            {
+                "path": str(hit.path),
+                "line": int(hit.line),
+                "text": str(hit.text),
+            }
+        )
+    return {
+        "pattern": pattern,
+        "engine": str(engine),
+        "matches": matches,
+        "total": len(matches),
+    }
+
+
 def _web_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     """Bridge Tool ABI web.search to the existing agent web_search backend."""
     from remedy.core.agent_web_tools import run_search, web_tools_enabled
@@ -342,6 +395,7 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("workspace.read", 1): _workspace_read,
     ("workspace.list", 1): _workspace_list,
     ("workspace.write", 1): _workspace_write,
+    ("workspace.search", 1): _workspace_search,
     ("web.search", 1): _web_search,
     ("web.fetch", 1): _web_fetch,
 }
