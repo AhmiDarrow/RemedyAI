@@ -487,6 +487,37 @@ def test_guidance_has_desktop_playbook() -> None:
         assert route in COMPUTER_USE_SYSTEM_ADDENDUM
 
 
+def test_desktop_win_is_thin_binding() -> None:
+    """Phase 1 leftover: desktop_win stays a ≤~250-line host binding, no windll."""
+    from pathlib import Path
+
+    path = Path(W.__file__)
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    assert len(lines) <= 280, f"desktop_win.py grew to {len(lines)} lines (target ≤~250)"
+    assert "import ctypes" not in text
+    assert "windll" not in text
+    for name in (
+        "type_text",
+        "press_key",
+        "click",
+        "drag",
+        "scroll",
+        "screenshot_png",
+        "print_window_png",
+        "get_clipboard_text",
+        "set_clipboard_text",
+        "list_windows",
+        "list_monitors",
+        "focus_window",
+        "manage_window",
+        "detect_ui_candidates",
+        "open_app",
+        "_write_png_bgr",
+    ):
+        assert callable(getattr(W, name)), name
+
+
 def test_a_wedged_computer_host_can_still_be_abandoned():
     """``stop`` keeps the handle when the worker outlives its join, so a second
     worker cannot land on the same job queue. ``force`` is the escape hatch for
