@@ -308,11 +308,12 @@ int32_t remedy_core_a11y_snapshot(
 
 /* ---- ABI 4: Host Command IR prepare ------------------------------------- */
 
-/* Prepare a HostOp into a PreparedCommand. json_in is UTF-8 JSON: either a
- * bare HostOp object ({kind,...}) or {op:<HostOp>, scratch_dir?, project_path?}.
+/* Prepare a HostOp or command string into a PreparedCommand. json_in is UTF-8
+ * JSON: a bare HostOp ({kind,...}), {op:<HostOp>, scratch_dir?, project_path?},
+ * or {command:"...", host?, scratch_dir?, project_path?} for prepare_host_command.
  * On success *out_json / *out_len hold UTF-8 PreparedCommand JSON
  * {argv,display,kind,ir,host,script_path?,notes?,translated?} — caller frees
- * with remedy_core_free. Supports run|script|mkdir|which|env|chain. */
+ * with remedy_core_free. Supports run|script|mkdir|which|env|chain|raw. */
 int32_t remedy_core_host_op_prepare(
     const uint8_t *json_in,
     size_t json_in_len,

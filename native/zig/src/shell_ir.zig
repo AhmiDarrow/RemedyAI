@@ -1,12 +1,13 @@
 //! Host Command IR — Zig mirror of `remedy.execution.host.ir` + prepare.
-//! ABI 4: `remedy_core_host_op_prepare` (run|script|mkdir|which|env|chain).
-//! Python `prepare_host_op` routes those kinds here. Translate is in
-//! `shell_translate.zig`. prepare_host_command / ConPTY remain Python.
+//! ABI 4: `remedy_core_host_op_prepare` (run|script|mkdir|which|env|chain|raw
+//! / command-string). Translate is in `shell_translate.zig`. ConPTY is ABI 5;
+//! policy remains Python.
 
 const std = @import("std");
 const builtin = @import("builtin");
 const root = @import("root.zig");
 const host = @import("host.zig");
+const shell_translate = @import("shell_translate.zig");
 
 const Status = root.Status;
 const Error = host.Error;
@@ -20,6 +21,21 @@ const max_script_chars: usize = 1_000_000;
 const uv_run_modules = [_][]const u8{
     "pytest", "ruff", "mypy", "pip", "httpx", "uvicorn", "http.server",
 };
+
+const cmd_builtins = [_][]const u8{
+    "echo",   "cd",      "dir",     "type",     "copy",    "move",    "del",
+    "erase",  "md",      "mkdir",   "rd",       "rmdir",   "set",     "setlocal",
+    "endlocal", "if",    "for",     "call",     "exit",    "rem",     "ver",
+    "cls",    "color",   "title",   "pushd",    "popd",    "shift",   "pause",
+    "assoc",  "ftype",   "start",   "vol",      "date",    "time",    "path",
+    "prompt", "where",   "mklink",  "xcopy",
+};
+
+const shell_meta_chars = "|<>&^%()";
+const ps_script_note = "powershell → temp .ps1 + pwsh -File";
+const encoded_ps_note = "encoded powershell left raw for jail";
+const plain_argv_note = "plain argv — no shell";
+const chmod_noop_note = "chmod ignored on Windows host";
 
 pub const OpKind = enum {
     run,
@@ -610,14 +626,458 @@ fn launchScript(
     return .{ .argv = argv, .path = path, .lang = "python", .body = body };
 }
 
-/// Prepare argv from a structured HostOp (Python `prepare_host_op` for
-/// run|script|mkdir|which|env|chain). `raw` is not handled here yet.
+fn trimSpace(s: []const u8) []const u8 {
+    return std.mem.trim(u8, s, " \t\r\n");
+}
+
+fn containsWordIgnoreCase(hay: []const u8, word: []const u8) bool {
+    if (word.len == 0 or hay.len < word.len) return false;
+    var i: usize = 0;
+    while (i + word.len <= hay.len) : (i += 1) {
+        if (!std.ascii.eqlIgnoreCase(hay[i .. i + word.len], word)) continue;
+        const before_ok = i == 0 or !(std.ascii.isAlphanumeric(hay[i - 1]) or hay[i - 1] == '_');
+        const after_ok = i + word.len >= hay.len or !(std.ascii.isAlphanumeric(hay[i + word.len]) or hay[i + word.len] == '_');
+        if (before_ok and after_ok) return true;
+    }
+    return false;
+}
+
+fn hasFlagIgnoreCase(hay: []const u8, flag: []const u8) bool {
+    if (flag.len == 0 or hay.len < flag.len) return false;
+    var i: usize = 0;
+    while (i + flag.len <= hay.len) : (i += 1) {
+        if (!std.ascii.eqlIgnoreCase(hay[i .. i + flag.len], flag)) continue;
+        const before_ok = i == 0 or hay[i - 1] == ' ' or hay[i - 1] == '\t';
+        const after_ok = i + flag.len >= hay.len or !(std.ascii.isAlphanumeric(hay[i + flag.len]) or hay[i + flag.len] == '_');
+        if (before_ok and after_ok) return true;
+    }
+    return false;
+}
+
+fn stripFlagIgnoreCase(arena: std.mem.Allocator, text: []const u8, flag: []const u8) error{OutOfMemory}![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(arena);
+    var i: usize = 0;
+    while (i < text.len) {
+        const at_boundary = i == 0 or text[i - 1] == ' ' or text[i - 1] == '\t';
+        if (at_boundary and i + flag.len <= text.len and std.ascii.eqlIgnoreCase(text[i .. i + flag.len], flag)) {
+            const after = i + flag.len;
+            const after_ok = after >= text.len or !(std.ascii.isAlphanumeric(text[after]) or text[after] == '_');
+            if (after_ok) {
+                try out.append(arena, ' ');
+                i = after;
+                continue;
+            }
+        }
+        try out.append(arena, text[i]);
+        i += 1;
+    }
+    return try out.toOwnedSlice(arena);
+}
+
+fn collapseWhitespace(arena: std.mem.Allocator, text: []const u8) error{OutOfMemory}![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(arena);
+    var prev_space = true;
+    for (text) |c| {
+        if (c == ' ' or c == '\t' or c == '\r' or c == '\n') {
+            if (!prev_space) try out.append(arena, ' ');
+            prev_space = true;
+            continue;
+        }
+        try out.append(arena, c);
+        prev_space = false;
+    }
+    while (out.items.len > 0 and out.items[out.items.len - 1] == ' ') _ = out.pop();
+    return try out.toOwnedSlice(arena);
+}
+
+fn stripPytestLastFailed(arena: std.mem.Allocator, command: []const u8) error{OutOfMemory}![]const u8 {
+    const raw = trimSpace(command);
+    if (!containsWordIgnoreCase(raw, "pytest")) return raw;
+    if (!hasFlagIgnoreCase(raw, "--lf") and !hasFlagIgnoreCase(raw, "--last-failed")) return raw;
+    var s = try stripFlagIgnoreCase(arena, raw, "--lf");
+    s = try stripFlagIgnoreCase(arena, s, "--last-failed");
+    return try collapseWhitespace(arena, s);
+}
+
+fn isEncodedPowershell(command: []const u8) bool {
+    const cmd = trimSpace(command);
+    if (cmd.len == 0) return false;
+    // \b(?:powershell|pwsh)(?:\.exe)?\b ... -(?:e|ec|encodedcommand|encoded)\b
+    var i: usize = 0;
+    var found_exe = false;
+    while (i < cmd.len) : (i += 1) {
+        const names = [_][]const u8{ "powershell.exe", "powershell", "pwsh.exe", "pwsh" };
+        for (names) |name| {
+            if (i + name.len > cmd.len) continue;
+            if (!std.ascii.eqlIgnoreCase(cmd[i .. i + name.len], name)) continue;
+            const before_ok = i == 0 or !(std.ascii.isAlphanumeric(cmd[i - 1]) or cmd[i - 1] == '_');
+            const after_ok = i + name.len >= cmd.len or !(std.ascii.isAlphanumeric(cmd[i + name.len]) or cmd[i + name.len] == '_');
+            if (before_ok and after_ok) {
+                found_exe = true;
+                i = i + name.len;
+                break;
+            }
+        }
+        if (found_exe) break;
+    }
+    if (!found_exe) return false;
+    while (i < cmd.len) : (i += 1) {
+        if (cmd[i] != '-') continue;
+        const flags = [_][]const u8{ "encodedcommand", "encoded", "ec", "e" };
+        for (flags) |flag| {
+            if (i + 1 + flag.len > cmd.len) continue;
+            if (!std.ascii.eqlIgnoreCase(cmd[i + 1 .. i + 1 + flag.len], flag)) continue;
+            const end = i + 1 + flag.len;
+            if (end < cmd.len and (std.ascii.isAlphanumeric(cmd[end]) or cmd[end] == '_')) continue;
+            return true;
+        }
+    }
+    return false;
+}
+
+fn isPsWrapper(command: []const u8) bool {
+    return shell_translate.looksLikePowershell(command) or blk: {
+        // Broader head match: optional path\ before powershell/pwsh.
+        const cmd = trimSpace(command);
+        var i: usize = 0;
+        while (i < cmd.len and (cmd[i] == ' ' or cmd[i] == '\t')) : (i += 1) {}
+        // Skip up through last \ or /
+        var j = i;
+        var last_sep: ?usize = null;
+        while (j < cmd.len and cmd[j] != ' ' and cmd[j] != '\t') : (j += 1) {
+            if (cmd[j] == '\\' or cmd[j] == '/') last_sep = j;
+        }
+        const start = if (last_sep) |s| s + 1 else i;
+        const rest = cmd[start..];
+        const names = [_][]const u8{ "powershell.exe", "powershell", "pwsh.exe", "pwsh" };
+        for (names) |name| {
+            if (rest.len >= name.len and std.ascii.eqlIgnoreCase(rest[0..name.len], name)) {
+                const end = name.len;
+                if (end >= rest.len or !(std.ascii.isAlphanumeric(rest[end]) or rest[end] == '_')) break :blk true;
+            }
+        }
+        break :blk false;
+    };
+}
+
+fn stripPsQuotes(body: []const u8) []const u8 {
+    const b = trimSpace(body);
+    if (b.len >= 2 and b[0] == b[b.len - 1] and (b[0] == '"' or b[0] == '\'')) {
+        return b[1 .. b.len - 1];
+    }
+    return b;
+}
+
+fn extractPowershellPayload(command: []const u8) ?[]const u8 {
+    const cmd = trimSpace(command);
+    if (cmd.len == 0 or isEncodedPowershell(cmd)) return null;
+
+    // Match optional path + powershell/pwsh + flags + -Command/-c + body.
+    var i: usize = 0;
+    while (i < cmd.len and (cmd[i] == ' ' or cmd[i] == '\t')) : (i += 1) {}
+    if (i + 2 < cmd.len and std.ascii.isAlphabetic(cmd[i]) and cmd[i + 1] == ':' and cmd[i + 2] == '\\') {
+        i += 3;
+    }
+    var j = i;
+    while (j < cmd.len) : (j += 1) {
+        const c = cmd[j];
+        if (c == ' ' or c == '\t' or c == '"' or c == '\'') break;
+        if (c == '\\' or c == '/') i = j + 1;
+    }
+    const rest = cmd[i..];
+    const names = [_][]const u8{ "powershell.exe", "powershell", "pwsh.exe", "pwsh" };
+    var name_len: usize = 0;
+    for (names) |name| {
+        if (rest.len >= name.len and std.ascii.eqlIgnoreCase(rest[0..name.len], name)) {
+            const end = name.len;
+            if (end >= rest.len or !(std.ascii.isAlphanumeric(rest[end]) or rest[end] == '_')) {
+                name_len = name.len;
+                break;
+            }
+        }
+    }
+    if (name_len == 0) {
+        // Bare PowerShell body (caller already detected).
+        if (std.ascii.eqlIgnoreCase(trimSpace(cmd), "powershell") or
+            std.ascii.eqlIgnoreCase(trimSpace(cmd), "powershell.exe") or
+            std.ascii.eqlIgnoreCase(trimSpace(cmd), "pwsh") or
+            std.ascii.eqlIgnoreCase(trimSpace(cmd), "pwsh.exe"))
+            return null;
+        return cmd;
+    }
+
+    var k = i + name_len;
+    // Skip -Flag tokens until -Command / -c.
+    while (k < cmd.len) {
+        while (k < cmd.len and (cmd[k] == ' ' or cmd[k] == '\t')) : (k += 1) {}
+        if (k >= cmd.len) return cmd;
+        if (cmd[k] != '-') return cmd;
+        // -Command / -c
+        if (k + 8 <= cmd.len and std.ascii.eqlIgnoreCase(cmd[k .. k + 8], "-Command")) {
+            var body_start = k + 8;
+            while (body_start < cmd.len and (cmd[body_start] == ' ' or cmd[body_start] == '\t')) : (body_start += 1) {}
+            if (body_start >= cmd.len) return cmd;
+            return stripPsQuotes(cmd[body_start..]);
+        }
+        if (k + 2 <= cmd.len and std.ascii.eqlIgnoreCase(cmd[k .. k + 2], "-c") and
+            (k + 2 >= cmd.len or !(std.ascii.isAlphanumeric(cmd[k + 2]) or cmd[k + 2] == '_')))
+        {
+            var body_start = k + 2;
+            while (body_start < cmd.len and (cmd[body_start] == ' ' or cmd[body_start] == '\t')) : (body_start += 1) {}
+            if (body_start >= cmd.len) return cmd;
+            return stripPsQuotes(cmd[body_start..]);
+        }
+        // Other -Flag — consume token -[A-Za-z][\w:]*
+        k += 1;
+        while (k < cmd.len and (std.ascii.isAlphanumeric(cmd[k]) or cmd[k] == '_' or cmd[k] == ':')) : (k += 1) {}
+    }
+    return cmd;
+}
+
+fn unquotedHasShellMeta(cmd: []const u8) bool {
+    var quote: u8 = 0;
+    var i: usize = 0;
+    while (i < cmd.len) : (i += 1) {
+        const ch = cmd[i];
+        if (quote != 0) {
+            if (ch == quote) quote = 0;
+            continue;
+        }
+        if (ch == '"' or ch == '\'') {
+            quote = ch;
+            continue;
+        }
+        if (std.mem.indexOfScalar(u8, shell_meta_chars, ch) != null) return true;
+        if (std.mem.startsWith(u8, cmd[i..], "&&") or std.mem.startsWith(u8, cmd[i..], "||")) return true;
+    }
+    return quote != 0;
+}
+
+fn isCmdBuiltin(stem: []const u8) bool {
+    for (cmd_builtins) |b| {
+        if (std.ascii.eqlIgnoreCase(stem, b)) return true;
+    }
+    return false;
+}
+
+/// Windows-ish argv split: whitespace, strip matching quotes (shlex posix=False).
+fn splitArgv(arena: std.mem.Allocator, text: []const u8) error{OutOfMemory}![]const []const u8 {
+    const s = trimSpace(text);
+    var out: std.ArrayList([]const u8) = .empty;
+    errdefer out.deinit(arena);
+    var i: usize = 0;
+    while (i < s.len) {
+        while (i < s.len and (s[i] == ' ' or s[i] == '\t')) : (i += 1) {}
+        if (i >= s.len) break;
+        if (s[i] == '"' or s[i] == '\'') {
+            const q = s[i];
+            i += 1;
+            const start = i;
+            while (i < s.len and s[i] != q) : (i += 1) {}
+            try out.append(arena, try arena.dupe(u8, s[start..i]));
+            if (i < s.len) i += 1;
+            continue;
+        }
+        const start = i;
+        while (i < s.len and s[i] != ' ' and s[i] != '\t') : (i += 1) {}
+        try out.append(arena, try arena.dupe(u8, s[start..i]));
+    }
+    return try out.toOwnedSlice(arena);
+}
+
+fn coerceArgv(arena: std.mem.Allocator, text: []const u8) error{OutOfMemory}![]const []const u8 {
+    const s = trimSpace(text);
+    if (s.len == 0) return &.{};
+    if (s[0] == '[' and s[s.len - 1] == ']') {
+        if (std.json.parseFromSliceLeaky(std.json.Value, arena, s, .{})) |parsed| {
+            switch (parsed) {
+                .array => |arr| {
+                    var out = try arena.alloc([]const u8, arr.items.len);
+                    var n: usize = 0;
+                    for (arr.items) |item| {
+                        const tok = try asString(arena, item);
+                        if (tok.len == 0) continue;
+                        out[n] = tok;
+                        n += 1;
+                    }
+                    return out[0..n];
+                },
+                else => {},
+            }
+        } else |_| {}
+    }
+    return splitArgv(arena, s);
+}
+
+fn looksLikePlainArgv(arena: std.mem.Allocator, command: []const u8) error{OutOfMemory}!bool {
+    const cmd = trimSpace(command);
+    if (cmd.len == 0 or unquotedHasShellMeta(cmd)) return false;
+    if (shell_translate.looksLikePowershell(cmd)) return false;
+    const toks = try splitArgv(arena, cmd);
+    if (toks.len == 0) return false;
+    return !isCmdBuiltin(exeStem(toks[0]));
+}
+
+fn winShellPrefix(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    resolved_host: []const u8,
+) error{OutOfMemory}![]const []const u8 {
+    // Equal-or-better vs Python: honor explicit host=cmd even on POSIX so
+    // prepare_command fixtures and cmd-targeted rewrites stay coherent.
+    if (std.mem.eql(u8, resolved_host, "cmd")) {
+        const exe = (try resolveWhich(arena, io, "cmd")) orelse try arena.dupe(u8, "cmd.exe");
+        const out = try arena.alloc([]const u8, 2);
+        out[0] = exe;
+        out[1] = "/c";
+        return out;
+    }
+    const sh = (try resolveWhich(arena, io, "bash")) orelse
+        (try resolveWhich(arena, io, "sh")) orelse
+        try arena.dupe(u8, "/bin/sh");
+    const out = try arena.alloc([]const u8, 2);
+    out[0] = sh;
+    out[1] = "-c";
+    return out;
+}
+
+fn noteSlice(arena: std.mem.Allocator, note: []const u8) error{OutOfMemory}![]const []const u8 {
+    const out = try arena.alloc([]const u8, 1);
+    out[0] = try arena.dupe(u8, note);
+    return out;
+}
+
+fn appendNotes(
+    arena: std.mem.Allocator,
+    existing: []const []const u8,
+    extra: []const u8,
+) error{OutOfMemory}![]const []const u8 {
+    var out = try arena.alloc([]const u8, existing.len + 1);
+    @memcpy(out[0..existing.len], existing);
+    out[existing.len] = try arena.dupe(u8, extra);
+    return out;
+}
+
+/// Turn a model-emitted command string into argv (Python `prepare_host_command`).
+pub fn prepareHostCommand(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    command: []const u8,
+    host_name: []const u8,
+    opts: PrepareOptions,
+) error{ OutOfMemory, OperationFailed, InvalidArgument }!PreparedCommand {
+    const raw = try stripPytestLastFailed(arena, command);
+    const resolved_host = if (host_name.len != 0) host_name else defaultHostName();
+
+    if (raw.len == 0) {
+        const prefix = try winShellPrefix(arena, io, resolved_host);
+        var argv = try arena.alloc([]const u8, prefix.len + 1);
+        @memcpy(argv[0..prefix.len], prefix);
+        argv[prefix.len] = "";
+        return .{
+            .argv = argv,
+            .display = "",
+            .kind = "raw",
+            .ir = .{ .kind = .raw, .text = "" },
+            .host_name = resolved_host,
+        };
+    }
+
+    if (isEncodedPowershell(raw)) {
+        const prefix = try winShellPrefix(arena, io, resolved_host);
+        var argv = try arena.alloc([]const u8, prefix.len + 1);
+        @memcpy(argv[0..prefix.len], prefix);
+        argv[prefix.len] = raw;
+        return .{
+            .argv = argv,
+            .display = raw,
+            .kind = "raw",
+            .ir = .{ .kind = .raw, .text = raw, .host = resolved_host },
+            .notes = try noteSlice(arena, encoded_ps_note),
+            .host_name = resolved_host,
+        };
+    }
+
+    if (shell_translate.looksLikePowershell(raw) or isPsWrapper(raw)) {
+        const body = extractPowershellPayload(raw) orelse raw;
+        const launch = try launchScript(arena, io, "pwsh", body, opts);
+        const display = try std.fmt.allocPrint(arena, "pwsh -File {s}", .{launch.path});
+        return .{
+            .argv = launch.argv,
+            .display = display,
+            .kind = "script",
+            .ir = .{ .kind = .script, .lang = "pwsh", .body = body },
+            .script_path = launch.path,
+            .notes = try noteSlice(arena, ps_script_note),
+            .host_name = "pwsh",
+        };
+    }
+
+    const translate_host = if (std.mem.eql(u8, resolved_host, "posix")) "posix" else "cmd";
+    const tr = try shell_translate.translatePosixToHost(arena, raw, .{ .host = translate_host });
+    const text = tr.text;
+    var notes = tr.notes;
+    if (tr.untranslatable) return error.InvalidArgument;
+    if (tr.noop) {
+        const use_notes = if (notes.len != 0) notes else try noteSlice(arena, chmod_noop_note);
+        return .{
+            .argv = &.{},
+            .display = raw,
+            .kind = "noop",
+            .ir = .{ .kind = .raw, .text = raw, .host = resolved_host },
+            .notes = use_notes,
+            .host_name = resolved_host,
+        };
+    }
+
+    if (!std.mem.eql(u8, resolved_host, "posix") and try looksLikePlainArgv(arena, text)) {
+        var argv = try coerceArgv(arena, text);
+        if (argv.len != 0) {
+            if (try resolveWhich(arena, io, argv[0])) |resolved| {
+                var copy = try arena.alloc([]const u8, argv.len);
+                copy[0] = resolved;
+                @memcpy(copy[1..], argv[1..]);
+                argv = copy;
+            }
+            argv = try deflateUvRun(arena, io, argv);
+            notes = try appendNotes(arena, notes, plain_argv_note);
+            return .{
+                .argv = argv,
+                .display = try joinDisplay(arena, argv),
+                .kind = "argv",
+                .ir = .{ .kind = .run, .argv = argv },
+                .notes = notes,
+                .translated = if (!std.mem.eql(u8, text, raw)) text else "",
+                .host_name = resolved_host,
+            };
+        }
+    }
+
+    const prefix = try winShellPrefix(arena, io, resolved_host);
+    var argv = try arena.alloc([]const u8, prefix.len + 1);
+    @memcpy(argv[0..prefix.len], prefix);
+    argv[prefix.len] = text;
+    const kind: []const u8 = if (tr.changed) "translated" else "raw";
+    return .{
+        .argv = argv,
+        .display = text,
+        .kind = kind,
+        .ir = .{ .kind = .raw, .text = text, .host = resolved_host },
+        .notes = notes,
+        .translated = if (!std.mem.eql(u8, text, raw)) text else "",
+        .host_name = resolved_host,
+    };
+}
+
+/// Prepare argv from a structured HostOp (Python `prepare_host_op`).
 pub fn prepareHostOp(
     arena: std.mem.Allocator,
     io: std.Io,
     op: HostOp,
     opts: PrepareOptions,
-) error{ OutOfMemory, OperationFailed, Unsupported }!PreparedCommand {
+) error{ OutOfMemory, OperationFailed, InvalidArgument }!PreparedCommand {
     const host_fallback = if (op.host.len != 0) op.host else defaultHostName();
 
     switch (op.kind) {
@@ -652,7 +1112,7 @@ pub fn prepareHostOp(
                 .host_name = launch.lang,
             };
         },
-        .raw => return error.Unsupported,
+        .raw => return prepareHostCommand(arena, io, op.text, op.host, opts),
         .mkdir, .which, .env, .chain => {
             return .{
                 .argv = &.{},
@@ -684,6 +1144,15 @@ fn parsePrepareRequest(arena: std.mem.Allocator, json: []const u8) error{ OutOfM
     if (object.get("op")) |op_v| {
         return .{ .op = try fromJsonValue(arena, op_v), .opts = opts };
     }
+    // prepare_host_command shape: {command, host?, ...}
+    if (object.get("command")) |cmd_v| {
+        const text = try asString(arena, cmd_v);
+        const host_s = if (object.get("host")) |h| try asString(arena, h) else "";
+        return .{
+            .op = .{ .kind = .raw, .text = text, .host = host_s },
+            .opts = opts,
+        };
+    }
     // Bare HostOp object.
     if (object.get("kind") != null) {
         return .{ .op = try fromJsonValue(arena, parsed), .opts = opts };
@@ -703,7 +1172,7 @@ fn prepareToOwnedJson(json_in: []const u8) Error![]u8 {
     const prep = prepareHostOp(arena, io, req.op, req.opts) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.OperationFailed => return error.OperationFailed,
-        error.Unsupported => return error.Unsupported,
+        error.InvalidArgument => return error.InvalidArgument,
     };
     const encoded = preparedToJson(host.allocator, prep) catch return error.OutOfMemory;
     // Arena can drop; encoded owns its bytes on host.allocator.
@@ -751,8 +1220,8 @@ fn deliverBytes(result: Error![]u8, out_ptr: ?*?[*]u8, out_len: ?*usize) i32 {
     return ok_status;
 }
 
-/// Prepare a HostOp JSON into a PreparedCommand JSON (ABI 4).
-/// Input may be a bare HostOp or `{op, scratch_dir?, project_path?}`.
+/// Prepare a HostOp or `{command,...}` into PreparedCommand JSON (ABI 4).
+/// Input may be a bare HostOp, `{op,...}`, or `{command, host?, ...}`.
 export fn remedy_core_host_op_prepare(
     json_in: ?[*]const u8,
     json_in_len: usize,
@@ -862,7 +1331,110 @@ test "shell_ir coerces unknown kind to raw" {
     try std.testing.expectEqualStrings("1", op.argv[0]);
 }
 
-test "shell_ir prepare_op cases match prepare_argv_scriptfile fixtures" {
+fn assertPreparedMatchesExpected(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    prep: PreparedCommand,
+    expected: std.json.ObjectMap,
+) !void {
+    const exp_kind = jsonStringField(expected, "kind").?;
+    try std.testing.expectEqualStrings(exp_kind, prep.kind);
+
+    if (jsonStringField(expected, "host")) |exp_host| {
+        const want = if (std.mem.eql(u8, exp_host, "<DEFAULT>"))
+            defaultHostName()
+        else
+            exp_host;
+        try std.testing.expectEqualStrings(want, prep.host_name);
+    }
+    if (jsonStringField(expected, "display")) |exp_display| {
+        try std.testing.expectEqualStrings(exp_display, prep.display);
+    }
+    if (jsonStringField(expected, "translated")) |exp_tr| {
+        try std.testing.expectEqualStrings(exp_tr, prep.translated);
+    }
+
+    if (jsonStringArray(expected, "argv")) |exp_argv| {
+        try std.testing.expectEqual(exp_argv.len, prep.argv.len);
+        for (exp_argv, prep.argv) |ev, av| {
+            try std.testing.expectEqualStrings(ev.string, av);
+        }
+    }
+
+    if (jsonStringArray(expected, "argv_template")) |tmpl| {
+        try std.testing.expectEqual(tmpl.len, prep.argv.len);
+        for (tmpl, prep.argv) |tv, av| {
+            const got = normExeToken(av, prep.script_path);
+            try std.testing.expectEqualStrings(tv.string, got);
+        }
+    }
+
+    if (jsonStringArray(expected, "notes")) |exp_notes| {
+        try std.testing.expectEqual(exp_notes.len, prep.notes.len);
+        for (exp_notes, prep.notes) |ev, av| {
+            try std.testing.expectEqualStrings(ev.string, av);
+        }
+    }
+
+    if (jsonStringField(expected, "script_suffix")) |suffix| {
+        try std.testing.expect(std.mem.endsWith(u8, prep.script_path, suffix));
+        const body_bytes = try readFileAlloc(std.testing.allocator, io, prep.script_path);
+        defer std.testing.allocator.free(body_bytes);
+
+        if (jsonBoolField(expected, "script_has_bom")) |has_bom| {
+            const starts_bom = body_bytes.len >= 3 and std.mem.eql(u8, body_bytes[0..3], &utf8_bom);
+            try std.testing.expectEqual(has_bom, starts_bom);
+        }
+        if (jsonStringField(expected, "script_body_utf8_sig")) |exp_body| {
+            const decoded = if (body_bytes.len >= 3 and std.mem.eql(u8, body_bytes[0..3], &utf8_bom))
+                body_bytes[3..]
+            else
+                body_bytes;
+            try std.testing.expectEqualStrings(exp_body, decoded);
+        }
+    }
+
+    if (expected.get("ir")) |ir_v| {
+        const ir_obj = ir_v.object;
+        if (jsonStringField(ir_obj, "kind")) |k| {
+            try std.testing.expectEqualStrings(k, prep.ir.kind.asText());
+        }
+        if (jsonStringField(ir_obj, "lang")) |lang| {
+            try std.testing.expectEqualStrings(lang, prep.ir.lang);
+        }
+        if (jsonStringField(ir_obj, "body")) |body| {
+            try std.testing.expectEqualStrings(body, prep.ir.body);
+        }
+        if (jsonStringField(ir_obj, "text")) |text| {
+            try std.testing.expectEqualStrings(text, prep.ir.text);
+        }
+        if (jsonStringField(ir_obj, "host")) |h| {
+            try std.testing.expectEqualStrings(h, prep.ir.host);
+        }
+        if (jsonStringArray(ir_obj, "argv")) |argv| {
+            try std.testing.expectEqual(argv.len, prep.ir.argv.len);
+            for (argv, prep.ir.argv) |ev, av| {
+                try std.testing.expectEqualStrings(ev.string, av);
+            }
+        }
+        if (jsonStringArray(ir_obj, "argv_template")) |tmpl| {
+            try std.testing.expectEqual(tmpl.len, prep.ir.argv.len);
+            for (tmpl, prep.ir.argv) |tv, av| {
+                const got = normExeToken(av, "");
+                try std.testing.expectEqualStrings(tv.string, got);
+            }
+        }
+        if (jsonStringArray(ir_obj, "paths")) |paths| {
+            try std.testing.expectEqual(paths.len, prep.ir.paths.len);
+            for (paths, prep.ir.paths) |ev, av| {
+                try std.testing.expectEqualStrings(ev.string, av);
+            }
+        }
+    }
+    _ = arena;
+}
+
+test "shell_ir prepare_op and prepare_command fixtures match" {
     const io = testingIo();
     const fixture_json = try loadPrepareFixture(std.testing.allocator, io);
     defer std.testing.allocator.free(fixture_json);
@@ -878,97 +1450,71 @@ test "shell_ir prepare_op cases match prepare_argv_scriptfile fixtures" {
     const scratch_len = try tmp.dir.realPath(io, &scratch_buf);
     const scratch_path = scratch_buf[0..scratch_len];
 
-    var passed: usize = 0;
+    var passed_op: usize = 0;
+    var passed_cmd: usize = 0;
     for (cases) |case_v| {
         const case = case_v.object;
         const kind = jsonStringField(case, "kind") orelse continue;
-        if (!std.mem.eql(u8, kind, "prepare_op")) continue;
         const input = case.get("input").?.object;
-        const op_json = input.get("op").?;
         const expected = case.get("expected").?.object;
 
         var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena_state.deinit();
         const arena = arena_state.allocator();
 
-        const op = try fromJsonValue(arena, op_json);
-        const prep = try prepareHostOp(arena, io, op, .{ .scratch_dir = scratch_path });
+        const prep = blk: {
+            if (std.mem.eql(u8, kind, "prepare_op")) {
+                const op = try fromJsonValue(arena, input.get("op").?);
+                break :blk try prepareHostOp(arena, io, op, .{ .scratch_dir = scratch_path });
+            }
+            if (std.mem.eql(u8, kind, "prepare_command")) {
+                const command = jsonStringField(input, "command") orelse continue;
+                const host_s = jsonStringField(input, "host") orelse "";
+                break :blk try prepareHostCommand(arena, io, command, host_s, .{ .scratch_dir = scratch_path });
+            }
+            continue;
+        };
 
-        const exp_kind = jsonStringField(expected, "kind").?;
-        try std.testing.expectEqualStrings(exp_kind, prep.kind);
-
-        if (jsonStringField(expected, "host")) |exp_host| {
-            const want = if (std.mem.eql(u8, exp_host, "<DEFAULT>"))
-                defaultHostName()
-            else
-                exp_host;
-            try std.testing.expectEqualStrings(want, prep.host_name);
-        }
-        if (jsonStringField(expected, "display")) |exp_display| {
-            try std.testing.expectEqualStrings(exp_display, prep.display);
-        }
-
-        if (jsonStringArray(expected, "argv")) |exp_argv| {
-            try std.testing.expectEqual(exp_argv.len, prep.argv.len);
-            for (exp_argv, prep.argv) |ev, av| {
-                try std.testing.expectEqualStrings(ev.string, av);
-            }
-        }
-
-        if (jsonStringArray(expected, "argv_template")) |tmpl| {
-            try std.testing.expectEqual(tmpl.len, prep.argv.len);
-            for (tmpl, prep.argv) |tv, av| {
-                const got = normExeToken(av, prep.script_path);
-                try std.testing.expectEqualStrings(tv.string, got);
-            }
-        }
-
-        if (jsonStringField(expected, "script_suffix")) |suffix| {
-            try std.testing.expect(std.mem.endsWith(u8, prep.script_path, suffix));
-            const body_bytes = try readFileAlloc(std.testing.allocator, io, prep.script_path);
-            defer std.testing.allocator.free(body_bytes);
-
-            if (jsonBoolField(expected, "script_has_bom")) |has_bom| {
-                const starts_bom = body_bytes.len >= 3 and std.mem.eql(u8, body_bytes[0..3], &utf8_bom);
-                try std.testing.expectEqual(has_bom, starts_bom);
-            }
-            if (jsonStringField(expected, "script_body_utf8_sig")) |exp_body| {
-                const decoded = if (body_bytes.len >= 3 and std.mem.eql(u8, body_bytes[0..3], &utf8_bom))
-                    body_bytes[3..]
-                else
-                    body_bytes;
-                try std.testing.expectEqualStrings(exp_body, decoded);
-            }
-        }
-
-        if (expected.get("ir")) |ir_v| {
-            const ir_obj = ir_v.object;
-            if (jsonStringField(ir_obj, "kind")) |k| {
-                try std.testing.expectEqualStrings(k, prep.ir.kind.asText());
-            }
-            if (jsonStringField(ir_obj, "lang")) |lang| {
-                try std.testing.expectEqualStrings(lang, prep.ir.lang);
-            }
-            if (jsonStringField(ir_obj, "body")) |body| {
-                try std.testing.expectEqualStrings(body, prep.ir.body);
-            }
-            if (jsonStringArray(ir_obj, "argv")) |argv| {
-                try std.testing.expectEqual(argv.len, prep.ir.argv.len);
-                for (argv, prep.ir.argv) |ev, av| {
-                    try std.testing.expectEqualStrings(ev.string, av);
-                }
-            }
-            if (jsonStringArray(ir_obj, "paths")) |paths| {
-                try std.testing.expectEqual(paths.len, prep.ir.paths.len);
-                for (paths, prep.ir.paths) |ev, av| {
-                    try std.testing.expectEqualStrings(ev.string, av);
-                }
-            }
-        }
-
-        passed += 1;
+        try assertPreparedMatchesExpected(arena, io, prep, expected);
+        if (std.mem.eql(u8, kind, "prepare_op")) passed_op += 1 else passed_cmd += 1;
     }
-    try std.testing.expectEqual(@as(usize, 4), passed);
+    try std.testing.expectEqual(@as(usize, 4), passed_op);
+    try std.testing.expectEqual(@as(usize, 5), passed_cmd);
+}
+
+test "shell_ir prepare_host_command rejects untranslatable" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const result = prepareHostCommand(arena, testingIo(), "echo $(pwd)", "cmd", .{});
+    try std.testing.expectError(error.InvalidArgument, result);
+}
+
+test "shell_ir prepare_command C ABI accepts command field" {
+    const io = testingIo();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var scratch_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const scratch_len = try tmp.dir.realPath(io, &scratch_buf);
+    const scratch_path = scratch_buf[0..scratch_len];
+
+    const scratch_json = try std.json.Stringify.valueAlloc(std.testing.allocator, scratch_path, .{});
+    defer std.testing.allocator.free(scratch_json);
+    const input = try std.fmt.allocPrint(
+        std.testing.allocator,
+        "{{\"command\":\"chmod +x run.sh\",\"host\":\"cmd\",\"scratch_dir\":{s}}}",
+        .{scratch_json},
+    );
+    defer std.testing.allocator.free(input);
+
+    var out_ptr: ?[*]u8 = null;
+    var out_len: usize = 0;
+    const status = remedy_core_host_op_prepare(input.ptr, input.len, &out_ptr, &out_len);
+    try std.testing.expectEqual(ok_status, status);
+    try std.testing.expect(out_ptr != null);
+    defer host.allocator.free(out_ptr.?[0..out_len]);
+    const out = out_ptr.?[0..out_len];
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"kind\":\"noop\"") != null);
 }
 
 test "shell_ir prepare which yields empty argv" {

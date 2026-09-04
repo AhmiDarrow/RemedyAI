@@ -12,13 +12,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from remedy.execution.host.ir import HostOp
-from remedy.execution.host.scriptfile import (
-    extract_powershell_payload,
-    is_encoded_powershell,
-    launch_script,
-)
-from remedy.execution.host.translate import looks_like_powershell, translate_posix_to_host
-from remedy.execution.process import win_shell_prefix
+from remedy.execution.host.translate import looks_like_powershell
 
 # Cmd builtins that still need a shell after translation.
 _CMD_BUILTINS = frozenset(
@@ -409,96 +403,32 @@ def prepare_host_command(
     project_path: str | Path | None = None,
     host: str | None = None,
 ) -> PreparedCommand:
-    """Turn a model-emitted command string into an argv the sandbox can exec."""
-    raw = (command or "").strip()
-    if re.search(r"(?i)\bpytest\b", raw) and re.search(
-        r"(?i)(?:^|\s)(?:--lf|--last-failed)\b", raw
-    ):
-        raw = re.sub(r"(?i)(?:^|\s)--lf\b", " ", raw)
-        raw = re.sub(r"(?i)(?:^|\s)--last-failed\b", " ", raw)
-        raw = re.sub(r"\s+", " ", raw).strip()
-    resolved_host = host or ("cmd" if os.name == "nt" else "posix")
-    if not raw:
-        return PreparedCommand(
-            argv=[*win_shell_prefix(), ""],
-            display="",
-            kind="raw",
-            ir=HostOp(kind="raw", text=""),
-            host=resolved_host,
-        )
+    """Turn a model-emitted command string into an argv the sandbox can exec.
 
-    # Encoded PowerShell stays raw so the write jail sees the original bytes.
-    if is_encoded_powershell(raw):
-        return PreparedCommand(
-            argv=[*win_shell_prefix(), raw],
-            display=raw,
-            kind="raw",
-            ir=HostOp(kind="raw", text=raw, host=resolved_host),
-            notes=["encoded powershell left raw for jail"],
-            host=resolved_host,
-        )
-
-    if looks_like_powershell(raw) or _is_ps_wrapper(raw):
-        body = extract_powershell_payload(raw) or raw
-        launch = launch_script(
-            "pwsh", body, scratch_dir=scratch_dir, project_path=project_path
-        )
-        return PreparedCommand(
-            argv=launch.argv,
-            display=f"pwsh -File {launch.path}",
-            kind="script",
-            ir=HostOp(kind="script", lang="pwsh", body=body),
-            script_path=launch.path,
-            notes=["powershell → temp .ps1 + pwsh -File"],
-            host="pwsh",
-        )
-
-    tr = translate_posix_to_host(raw, host="cmd" if resolved_host != "posix" else "posix")
-    text = tr.text
-    notes = list(tr.notes)
-    if tr.untranslatable:
-        raise ValueError(
-            "untranslatable substitution $(…) / backticks / ${} — use host_script"
-        )
-    if tr.noop:
-        return PreparedCommand(
-            argv=[],
-            display=raw,
-            kind="noop",
-            ir=HostOp(kind="raw", text=raw, host=resolved_host),
-            notes=notes or ["chmod ignored on Windows host"],
-            host=resolved_host,
-        )
-
-    if resolved_host != "posix" and looks_like_plain_argv(text):
-        argv = coerce_argv(text)
-        if argv:
-            resolved = resolve_which(argv[0], cwd=project_path)
-            if resolved:
-                argv[0] = resolved
-            argv = deflate_uv_run(argv, project_path=project_path)
-            notes.append("plain argv — no shell")
-            return PreparedCommand(
-                argv=argv,
-                display=" ".join(argv),
-                kind="argv",
-                ir=HostOp(kind="run", argv=argv),
-                notes=notes,
-                translated=text if text != raw else "",
-                host=resolved_host,
-            )
-
-    argv = [*win_shell_prefix(), text]
-    kind = "translated" if tr.changed else "raw"
-    return PreparedCommand(
-        argv=argv,
-        display=text,
-        kind=kind,
-        ir=HostOp(kind="raw", text=text, host=resolved_host),
-        notes=notes,
-        translated=text if text != raw else "",
-        host=resolved_host,
+    Implemented in Zig (``remedy_core_host_op_prepare`` with ``command``).
+    No Python rewrite twin — untranslatable substitutions raise ``ValueError``.
+    """
+    from remedy.core.computer.host_binding import (
+        STATUS_INVALID_ARGUMENT,
+        HostError,
+        host_op_prepare,
     )
+
+    payload: dict[str, Any] = {"command": command or ""}
+    if host is not None:
+        payload["host"] = host
+    if scratch_dir is not None:
+        payload["scratch_dir"] = str(scratch_dir)
+    if project_path is not None:
+        payload["project_path"] = str(project_path)
+    try:
+        return _prepared_from_native(host_op_prepare(raw=payload))
+    except HostError as exc:
+        if exc.status == STATUS_INVALID_ARGUMENT:
+            raise ValueError(
+                "untranslatable substitution $(…) / backticks / ${} — use host_script"
+            ) from exc
+        raise
 
 
 def _prepared_from_native(data: dict[str, Any]) -> PreparedCommand:
@@ -526,27 +456,29 @@ def prepare_host_op(
 ) -> PreparedCommand:
     """Prepare argv from a structured HostOp (no command-string parsing).
 
-    ``run`` / ``script`` / ``mkdir`` / ``which`` / ``env`` / ``chain`` go through
-    ``remedy_core_host_op_prepare`` (Zig ABI 4). ``raw`` still uses
-    :func:`prepare_host_command` (translate itself is Zig; orchestration,
-    ConPTY, and policy remain Python).
+    All kinds including ``raw`` go through ``remedy_core_host_op_prepare``
+    (Zig ABI 4). ConPTY and policy remain Python.
     """
-    if op.kind == "raw":
-        return prepare_host_command(
-            op.text,
-            scratch_dir=scratch_dir,
-            project_path=project_path,
-            host=op.host or None,
-        )
-    from remedy.core.computer.host_binding import host_op_prepare
-
-    return _prepared_from_native(
-        host_op_prepare(
-            op=op.to_dict(),
-            scratch_dir=str(scratch_dir) if scratch_dir else None,
-            project_path=str(project_path) if project_path else None,
-        )
+    from remedy.core.computer.host_binding import (
+        STATUS_INVALID_ARGUMENT,
+        HostError,
+        host_op_prepare,
     )
+
+    try:
+        return _prepared_from_native(
+            host_op_prepare(
+                op=op.to_dict(),
+                scratch_dir=str(scratch_dir) if scratch_dir else None,
+                project_path=str(project_path) if project_path else None,
+            )
+        )
+    except HostError as exc:
+        if op.kind == "raw" and exc.status == STATUS_INVALID_ARGUMENT:
+            raise ValueError(
+                "untranslatable substitution $(…) / backticks / ${} — use host_script"
+            ) from exc
+        raise
 
 
 def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
@@ -650,12 +582,3 @@ def default_script_lang(home: str | Path | None = None) -> str:
     if shutil.which("pwsh") or shutil.which("powershell"):
         return "pwsh"
     return "cmd"
-
-
-def _is_ps_wrapper(command: str) -> bool:
-    return bool(
-        re.match(
-            r"(?is)^\s*(?:.*\\)?(?:powershell|pwsh)(?:\.exe)?\b",
-            command or "",
-        )
-    )

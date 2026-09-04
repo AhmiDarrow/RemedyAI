@@ -11,7 +11,7 @@ import pytest
 
 from remedy.core.computer import host_binding as hb
 from remedy.execution.host.ir import HostOp
-from remedy.execution.host.runner import prepare_host_op
+from remedy.execution.host.runner import prepare_host_command, prepare_host_op
 from remedy.runtime import native_runtime
 
 FIXTURE = (
@@ -50,28 +50,12 @@ def _norm_argv_token(token: str, script_path: str | None) -> str:
     return token
 
 
-def _load_prepare_op_cases() -> list[dict]:
+def _load_cases(kind: str) -> list[dict]:
     raw = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    return [c for c in raw["cases"] if c.get("kind") == "prepare_op"]
+    return [c for c in raw["cases"] if c.get("kind") == kind]
 
 
-@pytest.fixture(scope="module")
-def _require_abi4_core():
-    if native_runtime._core_library_path() is None:
-        pytest.skip("remedy_core is not built in this checkout")
-    library = native_runtime.core_library()
-    assert int(library.remedy_core_abi_version()) == 4
-
-
-@pytest.mark.usefixtures("_require_abi4_core")
-@pytest.mark.parametrize("case", _load_prepare_op_cases(), ids=lambda c: c["id"])
-def test_host_op_prepare_matches_fixture(case: dict, tmp_path: Path) -> None:
-    op = case["input"]["op"]
-    expected = case["expected"]
-    scratch = tmp_path / "scratch"
-    scratch.mkdir()
-
-    got = hb.host_op_prepare(op=op, scratch_dir=str(scratch))
+def _assert_prepare_result(got: dict, expected: dict) -> None:
     assert got["kind"] == expected["kind"]
 
     if "argv" in expected:
@@ -83,6 +67,10 @@ def test_host_op_prepare_matches_fixture(case: dict, tmp_path: Path) -> None:
         assert normalized == expected["argv_template"]
     if "display" in expected:
         assert got.get("display") == expected["display"]
+    if "translated" in expected:
+        assert got.get("translated") == expected["translated"]
+    if "notes" in expected:
+        assert got.get("notes") == expected["notes"]
     if "host" in expected:
         assert got.get("host") == _expected_host(str(expected["host"]))
     if "script_suffix" in expected:
@@ -101,8 +89,42 @@ def test_host_op_prepare_matches_fixture(case: dict, tmp_path: Path) -> None:
         ir = got.get("ir") or {}
         for key, value in expected["ir"].items():
             if key == "argv_template":
+                script_path = None
+                normalized = [_norm_argv_token(a, script_path) for a in ir.get("argv") or []]
+                assert normalized == value
                 continue
             assert ir.get(key) == value
+
+
+@pytest.fixture(scope="module")
+def _require_abi4_core():
+    if native_runtime._core_library_path() is None:
+        pytest.skip("remedy_core is not built in this checkout")
+    library = native_runtime.core_library()
+    assert int(library.remedy_core_abi_version()) == 4
+
+
+@pytest.mark.usefixtures("_require_abi4_core")
+@pytest.mark.parametrize("case", _load_cases("prepare_op"), ids=lambda c: c["id"])
+def test_host_op_prepare_matches_fixture(case: dict, tmp_path: Path) -> None:
+    op = case["input"]["op"]
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    got = hb.host_op_prepare(op=op, scratch_dir=str(scratch))
+    _assert_prepare_result(got, case["expected"])
+
+
+@pytest.mark.usefixtures("_require_abi4_core")
+@pytest.mark.parametrize("case", _load_cases("prepare_command"), ids=lambda c: c["id"])
+def test_host_prepare_command_matches_fixture(case: dict, tmp_path: Path) -> None:
+    inp = case["input"]
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    payload: dict = {"command": inp["command"], "scratch_dir": str(scratch)}
+    if "host" in inp:
+        payload["host"] = inp["host"]
+    got = hb.host_op_prepare(raw=payload)
+    _assert_prepare_result(got, case["expected"])
 
 
 @pytest.mark.usefixtures("_require_abi4_core")
@@ -135,8 +157,27 @@ def test_prepare_host_op_routes_structured_ops_through_zig(tmp_path: Path) -> No
 
 
 @pytest.mark.usefixtures("_require_abi4_core")
-def test_prepare_host_op_raw_still_uses_command_path() -> None:
-    """Translate / prepare_command remain Python until that Zig slice lands."""
+def test_prepare_host_command_routes_through_zig(tmp_path: Path) -> None:
+    """Production prepare_host_command is Zig-only (no Python rewrite twin)."""
+    if sys.platform != "win32":
+        pytest.skip("cmd host translation fixtures are Windows-oriented")
+    prepared = prepare_host_command("chmod +x run.sh", host="cmd")
+    assert prepared.kind == "noop"
+    assert prepared.argv == []
+
+    mkdir = prepare_host_command("mkdir -p src/x", host="cmd", scratch_dir=tmp_path)
+    assert mkdir.kind == "translated"
+    assert "if not exist" in mkdir.display
+
+    ps = prepare_host_command("Get-ChildItem -Name", scratch_dir=tmp_path)
+    assert ps.kind == "script"
+    assert ps.script_path is not None
+    assert "-File" in ps.argv
+    assert "-Command" not in ps.argv
+
+
+@pytest.mark.usefixtures("_require_abi4_core")
+def test_prepare_host_op_raw_uses_zig_command_path() -> None:
     if sys.platform != "win32":
         pytest.skip("cmd host translation fixtures are Windows-oriented")
     prepared = prepare_host_op(HostOp(kind="raw", text="chmod +x run.sh", host="cmd"))
