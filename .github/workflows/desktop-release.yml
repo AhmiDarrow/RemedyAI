@@ -144,8 +144,8 @@ jobs:
         shell: bash
         run: python scripts/sync_version.py "${REMEDY_RELEASE_VERSION}"
 
-      # The sidecar bundles remedy_core.dll (build_desktop.py --add-binary),
-      # so the native runtime is built first.
+      # Packaged Desktop launches Go remedy-runtime (externalBin) and ships
+      # remedy_core.dll as a Tauri resource — no Python remedy-desktop.
       - name: Build native runtime
         shell: pwsh
         run: |
@@ -162,15 +162,11 @@ jobs:
           Pop-Location
           Copy-Item native/zig/zig-out/bin/remedy_core.dll desktop/bin/remedy_core.dll
 
-      - name: Build sidecar
-        run: python scripts/build_desktop.py --clean --ci
-
       - name: Upload sidecar artifact
         uses: actions/upload-artifact@v4
         with:
           name: remedy-sidecar
           path: |
-            desktop/bin/remedy-desktop*.exe
             desktop/bin/remedy-runtime.exe
             desktop/bin/remedy-runtime-x86_64-pc-windows-msvc.exe
             desktop/bin/remedy_core.dll
@@ -305,8 +301,8 @@ jobs:
         shell: bash
         run: python scripts/sync_version.py "${REMEDY_RELEASE_VERSION}"
 
-      # The sidecar bundles libremedy_core.so (build_desktop.py --add-binary),
-      # so the native runtime is built first.
+      # Packaged Desktop launches Go remedy-runtime (externalBin) and ships
+      # libremedy_core.so as a Tauri resource — no Python remedy-desktop.
       - name: Build Linux native runtime
         run: |
           mkdir -p desktop/bin
@@ -319,18 +315,11 @@ jobs:
           cp zig-out/lib/libremedy_core.so ../../desktop/bin/libremedy_core.so
           chmod +x ../../desktop/bin/remedy-runtime ../../desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
 
-      - name: Build Linux sidecar
-        run: python scripts/build_desktop.py --clean --ci
-        env:
-          TAURI_ENV_TARGET_TRIPLE: x86_64-unknown-linux-gnu
-
       - name: Upload Linux sidecar artifact
         uses: actions/upload-artifact@v4
         with:
           name: remedy-sidecar-linux
           path: |
-            desktop/bin/remedy-desktop
-            desktop/bin/remedy-desktop-x86_64-unknown-linux-gnu
             desktop/bin/remedy-runtime
             desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
             desktop/bin/libremedy_core.so
@@ -373,8 +362,8 @@ jobs:
           name: remedy-sidecar-linux
           path: desktop/bin/
 
-      - name: Mark sidecars executable
-        run: chmod +x desktop/bin/remedy-desktop desktop/bin/remedy-desktop-x86_64-unknown-linux-gnu desktop/bin/remedy-runtime desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
+      - name: Mark runtime executable
+        run: chmod +x desktop/bin/remedy-runtime desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
 
       - name: Setup Python
         uses: astral-sh/setup-uv@v5
