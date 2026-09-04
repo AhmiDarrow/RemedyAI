@@ -30,6 +30,7 @@ REQUIRED = (
     "noise_ik_snow.json",
     "noise_ik_pair_secret.json",
     "noise_ik_post_split.json",
+    "record_framing.json",
 )
 
 
@@ -58,6 +59,7 @@ def test_index_records_android_match() -> None:
     assert "snow_ik_chacha_blake2s" in idx["vectors"]
     assert "remedy_pair_secret" in idx["vectors"]
     assert "remedy_post_split_aead" in idx["vectors"]
+    assert "remedy_record_framing" in idx["vectors"]
 
 
 def test_android_debug_hash_matches_live_python() -> None:
