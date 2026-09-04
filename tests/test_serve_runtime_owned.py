@@ -201,8 +201,61 @@ def test_fastapi_module_is_not_production_serve_entry() -> None:
     src = Path(CR.__file__).read_text(encoding="utf-8")
     assert "create_app" not in src
     assert "run_uvicorn" not in src
+    assert "import uvicorn" not in src
+    assert "uvicorn.run" not in src
     assert "from remedy.interfaces.api" not in src
     assert not hasattr(SF, "run_uvicorn_logged")
+
+
+def test_cmd_serve_argv_never_starts_uvicorn(monkeypatch, tmp_path) -> None:
+    """Production ``remedy serve`` must exec remedy-runtime only — never uvicorn."""
+    import remedy.interfaces.cli.cmd_runtime as CR
+
+    seen: dict[str, object] = {}
+
+    def fake_call(cmd, *args, **kwargs):
+        seen["cmd"] = [str(x) for x in cmd]
+        joined = " ".join(seen["cmd"]).lower()
+        assert "uvicorn" not in joined
+        assert "remedy.interfaces.api" not in joined
+        assert any("remedy-runtime" in p for p in seen["cmd"])
+        return 0
+
+    monkeypatch.setenv("REMEDY_RUNTIME", str(tmp_path / "remedy-runtime"))
+    monkeypatch.setattr(CR.subprocess, "call", fake_call)
+    with pytest.raises(SystemExit) as ei:
+        CR._cmd_serve(
+            SimpleNamespace(
+                home=str(tmp_path / "home"),
+                host="127.0.0.1",
+                port=7400,
+                skip_setup=True,
+                force_setup=False,
+                config_file=None,
+                computer_host=False,
+                no_computer_host=False,
+            )
+        )
+    assert ei.value.code == 0
+    assert seen["cmd"] == [str(tmp_path / "remedy-runtime"), "--serve"]
+
+
+def test_python_routes_omit_go_owned_connect_and_webhooks() -> None:
+    """TestClient surface must not re-register Go-owned Connect/webhook paths."""
+    import importlib.util
+    import re
+
+    routes_init = Path("src/remedy/interfaces/routes/__init__.py").read_text(
+        encoding="utf-8"
+    )
+    assert not re.search(
+        r"^\s*(from|import).*\b(webhooks|connect)\b", routes_init, flags=re.M
+    )
+    assert not re.search(r"\bregister_webhook_routes\s*\(", routes_init)
+    assert not re.search(r"\bregister_connect_\w+\s*\(", routes_init)
+    assert importlib.util.find_spec("remedy.interfaces.routes.webhooks") is None
+    assert importlib.util.find_spec("remedy.interfaces.routes.connect") is None
+    assert importlib.util.find_spec("remedy.connect") is None
 
 
 def test_rmdy_tool_worker_entry_still_present() -> None:
