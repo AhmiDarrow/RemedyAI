@@ -614,6 +614,261 @@ func TestNetPipeHandshakeBothDirections(t *testing.T) {
 	}
 }
 
+func TestIdleLoopPingPong(t *testing.T) {
+	home := pipeHome(t)
+	hostKP := mustHostKP(t, home)
+	_, secret := mustStartPair(t, home, 7401)
+	deviceKP, err := connect.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv, cli := net.Pipe()
+	defer srv.Close()
+	defer cli.Close()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := connect.RunSession(context.Background(), srv, connect.SessionConfig{
+			Home:        home,
+			HostKP:      hostKP,
+			IdleTimeout: 3 * time.Second,
+		})
+		done <- err
+	}()
+
+	client, err := connect.HandshakeInitiator(cli, deviceKP, hostKP.Public, connect.PairPayload(secret, "phone"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ping, err := connect.EncodeInner(connect.TypePing, 42, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := client.Encrypt(ping)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := connect.WriteRecord(cli, blob); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = cli.SetDeadline(time.Now().Add(3 * time.Second))
+	nonce, ct, err := connect.ReadRecord(cli)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packed, err := connect.PackRecord(nonce, ct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := client.Decrypt(packed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := connect.DecodeInner(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame.Type != connect.TypePong || frame.ID != 42 || len(frame.Payload) != 0 || !frame.Fin() {
+		t.Fatalf("pong=%+v", frame)
+	}
+
+	_ = cli.Close()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("idle loop did not exit")
+	}
+}
+
+func TestHandleInnerRekeyKeepsTransport(t *testing.T) {
+	home := pipeHome(t)
+	hostKP := mustHostKP(t, home)
+	_, secret := mustStartPair(t, home, 7401)
+	deviceKP, err := connect.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv, cli := net.Pipe()
+	defer srv.Close()
+	defer cli.Close()
+
+	type result struct {
+		sess *connect.Session
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		sess, err := connect.AcceptSession(context.Background(), srv, connect.SessionConfig{
+			Home:   home,
+			HostKP: hostKP,
+		})
+		ch <- result{sess, err}
+	}()
+
+	client, err := connect.HandshakeInitiator(cli, deviceKP, hostKP.Public, connect.PairPayload(secret, "phone"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := <-ch
+	if res.err != nil || res.sess == nil {
+		t.Fatalf("accept: %+v", res.err)
+	}
+
+	// net.Pipe Write blocks until the peer reads — drive host recv concurrently.
+	errHost := make(chan error, 1)
+	go func() {
+		plain, err := res.sess.RecvPlain()
+		if err != nil {
+			errHost <- err
+			return
+		}
+		errHost <- connect.HandleInnerControl(res.sess, plain)
+	}()
+	rekey, err := connect.EncodeInner(connect.TypeRekey, 0, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := client.Encrypt(rekey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := connect.WriteRecord(cli, blob); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-errHost; err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Send.Rekey(); err != nil {
+		t.Fatal(err)
+	}
+
+	// After both sides rekey, a PING/PONG still round-trips.
+	go func() {
+		plain, err := res.sess.RecvPlain()
+		if err != nil {
+			errHost <- err
+			return
+		}
+		errHost <- connect.HandleInnerControl(res.sess, plain)
+	}()
+	ping, err := connect.EncodeInner(connect.TypePing, 7, []byte("x"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err = client.Encrypt(ping)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := connect.WriteRecord(cli, blob); err != nil {
+		t.Fatal(err)
+	}
+	_ = cli.SetDeadline(time.Now().Add(3 * time.Second))
+	nonce, ct, err := connect.ReadRecord(cli)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-errHost; err != nil {
+		t.Fatal(err)
+	}
+	packed, _ := connect.PackRecord(nonce, ct)
+	out, err := client.Decrypt(packed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := connect.DecodeInner(out)
+	if err != nil || frame.Type != connect.TypePong || frame.ID != 7 {
+		t.Fatalf("pong=%+v err=%v", frame, err)
+	}
+}
+
+func TestSendPlainInnerEmitsRekeyWhenDue(t *testing.T) {
+	home := pipeHome(t)
+	hostKP := mustHostKP(t, home)
+	_, secret := mustStartPair(t, home, 7401)
+	deviceKP, err := connect.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv, cli := net.Pipe()
+	defer srv.Close()
+	defer cli.Close()
+
+	type result struct {
+		sess *connect.Session
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		sess, err := connect.AcceptSession(context.Background(), srv, connect.SessionConfig{
+			Home:   home,
+			HostKP: hostKP,
+		})
+		ch <- result{sess, err}
+	}()
+	client, err := connect.HandshakeInitiator(cli, deviceKP, hostKP.Public, connect.PairPayload(secret, "phone"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := <-ch
+	if res.err != nil || res.sess == nil {
+		t.Fatalf("accept: %+v", res.err)
+	}
+
+	// Force the next NoteSend to request a rekey.
+	for i := 0; i < connect.RekeyRecords-1; i++ {
+		if res.sess.Crypto.NoteSend() {
+			t.Fatalf("unexpected early rekey at %d", i)
+		}
+	}
+
+	pong, err := connect.EncodeInner(connect.TypePong, 1, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errHost := make(chan error, 1)
+	go func() { errHost <- res.sess.SendPlainInner(pong) }()
+
+	_ = cli.SetDeadline(time.Now().Add(3 * time.Second))
+	nonce, ct, err := connect.ReadRecord(cli)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packed, _ := connect.PackRecord(nonce, ct)
+	first, err := client.Decrypt(packed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := connect.DecodeInner(first)
+	if err != nil || frame.Type != connect.TypePong {
+		t.Fatalf("first=%+v err=%v", frame, err)
+	}
+
+	nonce, ct, err = connect.ReadRecord(cli)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-errHost; err != nil {
+		t.Fatal(err)
+	}
+	packed, _ = connect.PackRecord(nonce, ct)
+	second, err := client.Decrypt(packed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err = connect.DecodeInner(second)
+	if err != nil || frame.Type != connect.TypeRekey {
+		t.Fatalf("rekey=%+v err=%v", frame, err)
+	}
+	if err := client.Recv.Rekey(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func bytesFilledPub(b byte) []byte {
 	out := make([]byte, 32)
 	for i := range out {
