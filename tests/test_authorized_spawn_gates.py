@@ -210,9 +210,10 @@ async def test_create_hidden_fail_closed_family(
 
 
 @pytest.mark.asyncio
-async def test_host_session_posix_pipes_fail_closed_on_linux() -> None:
-    if sys.platform != "linux":
-        pytest.skip("POSIX pipe refuse is linux-specific")
+async def test_host_session_live_open_fail_closed_off_windows() -> None:
+    """Non-Windows must not soft-pipe a HostSession (Zig live open is Win-only)."""
+    if sys.platform == "win32":
+        pytest.skip("Windows uses Zig HostSession open")
     from remedy.core.computer.host_binding import STATUS_UNSUPPORTED
     from remedy.execution.host import session as sess_mod
 

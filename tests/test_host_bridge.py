@@ -26,7 +26,7 @@ from remedy.execution.host.runner import (
     prepare_host_op,
     resolve_which,
 )
-from remedy.execution.host.session import _cwd_command, conpty_available
+from remedy.execution.host.session import conpty_available
 from remedy.execution.host.translate import looks_like_powershell, translate_posix_to_host
 from remedy.execution.process import win_shell_prefix
 from remedy.execution.runtime import ToolRuntime
@@ -768,81 +768,24 @@ def test_conpty_available_does_not_raise() -> None:
 
 @pytest.mark.asyncio
 async def test_host_session_echo() -> None:
+    from remedy.core.computer.host_binding import STATUS_UNSUPPORTED, HostError
     from remedy.execution.host.session import HostSession
 
-    host = "cmd" if os.name == "nt" else "posix"
-    sess = HostSession(host=host)
+    if os.name != "nt":
+        sess = HostSession(host="posix")
+        with pytest.raises(HostError) as raised:
+            await sess.start()
+        assert raised.value.status == STATUS_UNSUPPORTED
+        return
+
+    sess = HostSession(host="cmd")
     try:
         await sess.start()
-        cmd = "echo host-session-ok" if host == "cmd" else "echo host-session-ok"
-        result = await sess.run(cmd, timeout=20)
+        result = await sess.run("echo host-session-ok", timeout=20)
         assert not result.timed_out
         assert "host-session-ok" in (result.stdout or "")
     finally:
         await sess.close()
-
-
-@pytest.mark.asyncio
-async def test_read_until_poll_timeout_does_not_end_command() -> None:
-    """0.4s wait_for slices must not mark a still-running command timed out."""
-    from remedy.execution.host.session import HostSession
-
-    class _Stdout:
-        def __init__(self) -> None:
-            self.t0 = asyncio.get_running_loop().time()
-
-        async def read(self, _n: int) -> bytes:
-            while asyncio.get_running_loop().time() - self.t0 < 0.7:
-                await asyncio.sleep(0.05)
-            return b"MARK:0\n"
-
-    class _Proc:
-        stdout = None
-        returncode = None
-
-        def __init__(self) -> None:
-            self.stdout = _Stdout()
-
-    sess = HostSession(host="posix")
-    sess._proc = _Proc()
-    raw, timed_out, _, shell_exit = await sess._read_until(b"MARK", timeout=3.0)
-    assert timed_out is False
-    assert shell_exit is None
-    assert b"MARK" in raw
-
-
-@pytest.mark.asyncio
-async def test_read_until_real_deadline_still_times_out() -> None:
-    from remedy.execution.host.session import HostSession
-
-    cancelled = {"n": 0}
-
-    class _Stdout:
-        async def read(self, _n: int) -> bytes:
-            try:
-                await asyncio.sleep(10)
-                return b"MARK:0\n"
-            except asyncio.CancelledError:
-                cancelled["n"] += 1
-                raise
-
-    class _Proc:
-        returncode = None
-
-        def __init__(self) -> None:
-            self.stdout = _Stdout()
-
-    sess = HostSession(host="posix")
-    sess._proc = _Proc()
-    _raw, timed_out, _, shell_exit = await sess._read_until(b"MARK", timeout=0.7)
-    assert timed_out is True
-    assert shell_exit is None
-    # ConPTY ReadFile cannot be cancelled; one outstanding read must survive
-    # the poll timeout (wait_for-cancel used to leak the overlapped I/O).
-    assert cancelled["n"] == 0
-    assert sess._stdout_pending is not None
-    assert not sess._stdout_pending.done()
-    sess._stdout_pending.cancel()
 
 
 @pytest.mark.asyncio
@@ -904,6 +847,8 @@ def test_runtime_host_run_mapping() -> None:
 
 @pytest.mark.asyncio
 async def test_shared_session_scoped_by_id_and_start_cwd(tmp_path: Path) -> None:
+    if os.name != "nt":
+        pytest.skip("Zig HostSession live open is Windows-only")
     from remedy.execution.host.session import (
         close_all_shared_sessions,
         close_shared_session,
@@ -934,6 +879,8 @@ async def test_shared_session_scoped_by_id_and_start_cwd(tmp_path: Path) -> None
 
 @pytest.mark.asyncio
 async def test_abort_session_closes_shared_host_shell() -> None:
+    if os.name != "nt":
+        pytest.skip("Zig HostSession live open is Windows-only")
     from remedy.core.turn_context import abort_session, begin_turn, end_turn
     from remedy.execution.host.session import (
         close_all_shared_sessions,
@@ -952,19 +899,13 @@ async def test_abort_session_closes_shared_host_shell() -> None:
         await close_all_shared_sessions()
 
 
-def test_cwd_command_matches_host_dialect() -> None:
-    assert _cwd_command("cmd") == "cd"
-    assert _cwd_command("pwsh") == "(Get-Location).Path"
-    assert _cwd_command("posix") == "pwd"
-    assert _cwd_command("bash") == "pwd"
-
-
 @pytest.mark.asyncio
 async def test_current_cwd_empty_when_closed() -> None:
+    if os.name != "nt":
+        pytest.skip("Zig HostSession live open is Windows-only")
     from remedy.execution.host.session import HostSession
 
-    host = "cmd" if os.name == "nt" else "posix"
-    sess = HostSession(host=host, cwd=".")
+    sess = HostSession(host="cmd", cwd=".")
     assert await sess.current_cwd() == ""
     try:
         await sess.start()

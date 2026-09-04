@@ -100,7 +100,7 @@ async def test_python_host_session_is_thin_zig_binding() -> None:
     try:
         await sess.start()
         assert sess._zig_handle
-        assert sess._proc is None
+        assert not hasattr(sess, "_proc")
         res = await sess.run("echo thin-binding-ok", timeout=20.0)
         assert res.timed_out is False
         assert "thin-binding-ok" in res.stdout
