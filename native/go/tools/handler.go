@@ -115,6 +115,106 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	})); err != nil {
 		return err
 	}
+
+	if err := registry.Register(Descriptor{
+		ID:          "workspace.read",
+		Version:     1,
+		Description: "Read a UTF-8 text file (local mirror of Python worker)",
+		Runtime:     RuntimeGo,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["path"],
+			"properties":{
+				"path":{"type":"string","minLength":1},
+				"offset":{"type":"integer","minimum":0},
+				"limit":{"type":"integer","minimum":1}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["path","content"],
+			"properties":{
+				"path":{"type":"string"},
+				"content":{"type":"string"},
+				"truncated":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(func(_ context.Context, request Request) (Result, error) {
+		var body struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(request.Input, &body); err != nil || strings.TrimSpace(body.Path) == "" {
+			return Result{}, ErrInvalidInput
+		}
+		out, err := json.Marshal(map[string]any{
+			"path":    body.Path,
+			"content": "mirror:" + body.Path,
+		})
+		return Result{Output: out}, err
+	})); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:          "workspace.list",
+		Version:     1,
+		Description: "List workspace entries (local mirror of Python worker)",
+		Runtime:     RuntimeGo,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"path":{"type":"string"},
+				"limit":{"type":"integer","minimum":1,"maximum":2000},
+				"offset":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["path","entries","total"],
+			"properties":{
+				"path":{"type":"string"},
+				"entries":{
+					"type":"array",
+					"items":{
+						"type":"object",
+						"required":["name","kind"],
+						"properties":{
+							"name":{"type":"string"},
+							"kind":{"type":"string","enum":["file","dir"]}
+						},
+						"additionalProperties":false
+					}
+				},
+				"total":{"type":"integer","minimum":0},
+				"truncated":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(func(_ context.Context, request Request) (Result, error) {
+		var body struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(request.Input, &body)
+		path := body.Path
+		if path == "" {
+			path = "."
+		}
+		out, err := json.Marshal(map[string]any{
+			"path": path,
+			"entries": []map[string]string{
+				{"name": "mirror.txt", "kind": "file"},
+			},
+			"total": 1,
+		})
+		return Result{Output: out}, err
+	})); err != nil {
+		return err
+	}
 	return nil
 }
 

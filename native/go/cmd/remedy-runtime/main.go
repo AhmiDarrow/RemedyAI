@@ -17,6 +17,7 @@ import (
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/httpapi"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
+	"github.com/AhmiDarrow/RemedyAI/native/go/workers"
 )
 
 const (
@@ -84,8 +85,7 @@ func main() {
 	// / computer routes install the same on-disk key into remedy_core when they
 	// spawn ConPTY; Connect Tailscale management loads remedy_core lazily via
 	// native/go/core for CLI/msiexec (no os/exec). Python host_binding shares
-	// the file. Turn tools use the Go Tool ABI registry; AttachPythonWorker
-	// adds RuntimePython tools over RMDY frames when a worker is connected.
+	// the file.
 	if _, err := secret.EnsureHostSigningKey(""); err != nil {
 		fmt.Fprintf(os.Stderr, "remedy-runtime host signing key: %v\n", err)
 		os.Exit(1)
@@ -96,7 +96,26 @@ func main() {
 		runner = httpapi.NewFixtureTurnRunner()
 	} else {
 		// Live OpenAI-compatible SSE when settings+secret are ready; else Scripted.
-		runner = httpapi.NewCognitionTurnRunner(httpapi.ResolveListenModel(""))
+		cognition := httpapi.NewCognitionTurnRunner(httpapi.ResolveListenModel(""))
+		// Equal-or-better vs pre-cutover Python ReAct: supervise the RMDY tool
+		// worker, dial FrameCaller, AttachPythonWorker. Fail closed — never
+		// serve forever with only Go demo builtins pretending product tools.
+		cwd, _ := os.Getwd()
+		session, err := workers.StartRMDYToolWorker(ctx, workers.RMDYToolOptions{
+			Cwd: cwd,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "remedy-runtime: RMDY tool worker required: %v\n", err)
+			os.Exit(1)
+		}
+		defer func() { _ = session.Close() }()
+		if err := cognition.AttachPythonWorker(session.Client); err != nil {
+			_ = session.Close()
+			fmt.Fprintf(os.Stderr, "remedy-runtime: AttachPythonWorker failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "remedy-runtime: RMDY tool worker attached (pid=%d endpoint=%s)\n", session.PID, session.Endpoint)
+		runner = cognition
 	}
 
 	err := httpapi.ListenAndServe(ctx, addr, httpapi.Config{
