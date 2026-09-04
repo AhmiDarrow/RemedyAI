@@ -1,8 +1,6 @@
-"""HTTP surface for the phone line — status, terms, and the owner's choice.
+"""TestClient-only: phone line status, terms, and owner choice.
 
-Phase 0 is a simulated line. These routes let Grove/Settings see what this
-machine can actually do and record terms agreement. They do not place a
-real PSTN call until a backend other than ``fake`` is ready.
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
 """
 
 from __future__ import annotations

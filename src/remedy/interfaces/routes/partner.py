@@ -1,4 +1,7 @@
-"""Partner-loop routes: goals, approvals, knowledge pack import."""
+"""TestClient-only: partner-loop routes (goals, approvals, knowledge pack).
+
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,7 @@
-"""REST API for Remedy Nano Swarm status and control."""
+"""TestClient-only: Nano Swarm status and control.
+
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+"""
 
 from __future__ import annotations
 

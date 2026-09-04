@@ -1,4 +1,7 @@
-"""Personal assistant routes — Google OAuth + status (Phase 1 Calendar)."""
+"""TestClient-only: personal assistant routes (Google OAuth + status).
+
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+"""
 
 from __future__ import annotations
 

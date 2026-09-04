@@ -1,4 +1,7 @@
-"""Chat session HTTP routes — split by concern."""
+"""TestClient-only: chat session HTTP routes (split by concern).
+
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+"""
 
 from __future__ import annotations
 

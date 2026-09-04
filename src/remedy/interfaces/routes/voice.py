@@ -1,8 +1,6 @@
-"""REST API for local voice: speak-back, hearing, and smart-turn install.
+"""TestClient-only: local voice speak/hear/install routes.
 
-All processing is on-device; audio never leaves this machine. When engines
-are missing the endpoints answer 503 with ``fallback`` hints so the desktop
-degrades to OS voices (speechSynthesis) instead of erroring at the owner.
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
 """
 
 from __future__ import annotations

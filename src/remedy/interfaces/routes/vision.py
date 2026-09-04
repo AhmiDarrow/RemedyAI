@@ -1,4 +1,7 @@
-"""REST API for the local visual decoder (llama.cpp + SmolVLM2 2.2B)."""
+"""TestClient-only: local visual decoder REST routes.
+
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+"""
 
 from __future__ import annotations
 

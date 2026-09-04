@@ -1,4 +1,7 @@
-"""HTTP bridge for desktop host ↔ computer-use job queue."""
+"""TestClient-only: desktop host / computer-use job queue bridge.
+
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+"""
 
 from __future__ import annotations
 

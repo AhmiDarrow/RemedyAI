@@ -1,4 +1,7 @@
-"""REST API for RMB — Remedy Muscle Bridge (local llama.cpp chat host)."""
+"""TestClient-only: RMB (local llama.cpp chat host) REST routes.
+
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+"""
 
 from __future__ import annotations
 

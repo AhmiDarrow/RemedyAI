@@ -1,4 +1,7 @@
-"""Language catalogs for the desktop / WebUI chrome."""
+"""TestClient-only: language catalogs for desktop / WebUI chrome.
+
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+"""
 
 from __future__ import annotations
 

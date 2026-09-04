@@ -1,18 +1,6 @@
-"""SSE terminal for Grove Connect phone (and web rails).
+"""TestClient-only: SSE terminal for Grove Connect phone (and web rails).
 
-The desktop app shells out to Tauri ``pty_open`` / ``pty_write`` / ``pty_close``;
-the phone has no Tauri bridge, so Grove Connect needs the same capability as
-plain HTTP. This module exposes a minimal ConPTY/subprocess-backed terminal:
-
-    POST   /api/terminal              → open a shell, returns {terminal_id}
-    GET    /api/terminal/{id}/stream  → SSE: event: output / exit (+ keepalive)
-    POST   /api/terminal/{id}/input   → {"data": "..."} writes to stdin
-    POST   /api/terminal/{id}/resize  → {"cols": n, "rows": n}
-    DELETE /api/terminal/{id}         → close the shell
-
-Trust model: only reachable through the Connect pipe (Noise-authenticated
-pairing + the loopback shim token). The desktop terminal has the same blast
-radius — this is the phone getting the identical capability over HTTP.
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
 """
 
 from __future__ import annotations

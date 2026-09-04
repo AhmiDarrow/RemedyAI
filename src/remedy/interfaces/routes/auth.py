@@ -1,4 +1,7 @@
-"""Provider auth routes (xAI OAuth device-code + API key)."""
+"""TestClient-only: provider auth routes (xAI OAuth device-code + API key).
+
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+"""
 from __future__ import annotations
 
 import asyncio

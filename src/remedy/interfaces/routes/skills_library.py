@@ -1,4 +1,7 @@
-"""Skills Library HTTP routes: catalog, search, install, updates, submit."""
+"""TestClient-only: Skills Library HTTP routes.
+
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+"""
 
 from __future__ import annotations
 

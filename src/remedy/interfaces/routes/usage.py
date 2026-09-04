@@ -1,4 +1,7 @@
-"""Usage ledger + NanoToken status API routes."""
+"""TestClient-only: usage ledger + NanoToken status routes.
+
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+"""
 
 from __future__ import annotations
 
