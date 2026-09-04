@@ -45,6 +45,12 @@ type Config struct {
 	// TurnRunner powers POST /api/sessions/{id}/messages and .../messages/stream.
 	// Nil → 503 (matches Python when runtime is unavailable).
 	TurnRunner TurnRunner
+	// VoiceWorker powers speak/transcribe/install (Python speech lane).
+	// Nil → status/settings still work; speak/transcribe return 503 + fallback.
+	VoiceWorker VoiceWorker
+	// RmbController starts/stops llama-server (Python/Zig process supervisor).
+	// Nil → status/catalog/settings/HF still work; start returns 503.
+	RmbController RmbController
 }
 
 // Server is the production local HTTP API served by remedy-runtime.
@@ -59,6 +65,9 @@ type Server struct {
 	events   *sessionEventHub
 	claims   *streamClaims
 	runner   TurnRunner
+	voice    VoiceWorker
+	rmb      RmbController
+	hf       *hfProgress
 
 	connectGW     *connect.Gateway
 	messengerGW   *gateway.Gateway
@@ -92,7 +101,7 @@ type Server struct {
 // scheduler jobs, hive roster/spawn/assign/retire, Connect management,
 // Connect me/stop, providers/models catalog, skills/library routes,
 // workspace/files/media routes, partner/approvals/plans/life-tasks/goals,
-// WebUI, computer-use host bridge, and ConPTY terminal routes.
+// WebUI, computer-use host bridge, ConPTY terminal, voice, and RMB routes.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
@@ -126,6 +135,9 @@ func New(cfg Config) (*Server, error) {
 		events:    newSessionEventHub(),
 		claims:    newStreamClaims(),
 		runner:    cfg.TurnRunner,
+		voice:     cfg.VoiceWorker,
+		rmb:       cfg.RmbController,
+		hf:        newHFProgress(),
 		approvals: newApprovalQueue(),
 		lifeHub:   newLifeTaskHub(),
 		hiveMgr:   hive.New(context.Background(), 64),
@@ -231,6 +243,23 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/terminal/{terminal_id}/input", s.handleTerminalInput)
 	s.mux.HandleFunc("POST /api/terminal/{terminal_id}/resize", s.handleTerminalResize)
 	s.mux.HandleFunc("DELETE /api/terminal/{terminal_id}", s.handleTerminalClose)
+	s.mux.HandleFunc("GET /api/voice/status", s.handleVoiceStatus)
+	s.mux.HandleFunc("POST /api/voice/settings", s.handleVoiceSettings)
+	s.mux.HandleFunc("POST /api/voice/install", s.handleVoiceInstall)
+	s.mux.HandleFunc("POST /api/voice/client-log", s.handleVoiceClientLog)
+	s.mux.HandleFunc("POST /api/voice/speak", s.handleVoiceSpeak)
+	s.mux.HandleFunc("POST /api/voice/transcribe", s.handleVoiceTranscribe)
+	s.mux.HandleFunc("GET /api/rmb/status", s.handleRmbStatus)
+	s.mux.HandleFunc("GET /api/rmb/catalog", s.handleRmbCatalog)
+	s.mux.HandleFunc("POST /api/rmb/start", s.handleRmbStart)
+	s.mux.HandleFunc("POST /api/rmb/stop", s.handleRmbStop)
+	s.mux.HandleFunc("POST /api/rmb/settings", s.handleRmbSettings)
+	s.mux.HandleFunc("POST /api/rmb/use", s.handleRmbUse)
+	s.mux.HandleFunc("POST /api/rmb/hf/search", s.handleRmbHfSearch)
+	s.mux.HandleFunc("POST /api/rmb/hf/files", s.handleRmbHfFiles)
+	s.mux.HandleFunc("POST /api/rmb/hf/pull", s.handleRmbHfPull)
+	s.mux.HandleFunc("GET /api/rmb/hf/progress", s.handleRmbHfProgress)
+	s.mux.HandleFunc("POST /api/rmb/hf/cancel", s.handleRmbHfCancel)
 	s.mountWebUI()
 	return s, nil
 }
