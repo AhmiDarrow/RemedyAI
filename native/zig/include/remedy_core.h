@@ -498,6 +498,13 @@ int32_t remedy_core_write_jail_check_spawn(
 
 /* ---- ABI 5 additive: HostSession orchestration --------------------------- */
 
+/* Argv JSON array Zig will authorize for HostSession open of *host*
+ * (same PATH / SystemRoot resolution as open_authorized). Caller frees. */
+int32_t remedy_core_host_session_argv(
+    const uint8_t *host, size_t host_len,
+    uint8_t **out_json, size_t *out_len
+);
+
 /* Open a persistent shell session. json_in:
  * {"host":"cmd"|"pwsh"|"posix", "cwd"?: "...", "env"?: {...}, "use_conpty"?: bool}.
  * Windows only (UNSUPPORTED elsewhere). Unsigned — tests / low-level use. */
