@@ -20,9 +20,20 @@ from typing import Any
 from remedy.connect.noise import (
     PROLOGUE,
     PROTOCOL_NAME,
+    TAGLEN,
     HandshakeState,
     KeyPair,
     _hash,
+    encode_nonce,
+)
+from remedy.connect.record import (
+    MAX_PLAINTEXT,
+    MAX_RECORD,
+    NONCE_LEN,
+    decrypt_record,
+    encrypt_record,
+    pack_record,
+    unpack_record,
 )
 
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "connect"
@@ -360,12 +371,108 @@ def capture_post_split_aead() -> dict[str, Any]:
     }
 
 
+def capture_record_framing() -> dict[str, Any]:
+    """u32be|nonce12|ciphertext framing + encrypt_record with product Noise keys."""
+    import struct
+
+    pack_vectors: list[dict[str, Any]] = []
+    for nonce, ct in (
+        (b"\x00" * 12, b""),
+        (b"\x00" * 4 + b"\x01" + b"\x00" * 7, b"x"),
+        (b"\xff" * 12, b"\x00" * 16),
+        (bytes(range(12)), b"cipher" + b"\xab" * 20),
+    ):
+        blob = pack_record(nonce, ct)
+        pack_vectors.append(
+            {
+                "nonce_hex": _hx(nonce),
+                "ciphertext_hex": _hx(ct),
+                "record_hex": _hx(blob),
+                "length": len(nonce) + len(ct),
+            }
+        )
+
+    hs = _handshake(
+        init_static=REMEDY_PHONE_STATIC,
+        init_eph=REMEDY_PHONE_EPH,
+        resp_static=REMEDY_HOST_STATIC,
+        resp_eph=REMEDY_HOST_EPH,
+        prologue=PROLOGUE,
+        payload0=REMEDY_PAIR_SECRET,
+        payload1=b"",
+    )
+    send_i = hs.pop("_send_i")
+    recv_i = hs.pop("_recv_i")
+    send_r = hs.pop("_send_r")
+    recv_r = hs.pop("_recv_r")
+
+    encrypt_i_to_r: list[dict[str, Any]] = []
+    for plain in (b"", b"hello-record", REMEDY_MSG2_PLAIN, b"token-never-log"):
+        n_before = send_i.nonce()
+        blob = encrypt_record(send_i, plain)
+        nonce, ct = unpack_record(blob)
+        if nonce != encode_nonce(n_before):
+            raise RuntimeError("encrypt_record nonce mismatch")
+        if decrypt_record(recv_r, blob) != plain:
+            raise RuntimeError("encrypt_record roundtrip failed")
+        encrypt_i_to_r.append(
+            {
+                "plaintext_hex": _hx(plain),
+                "nonce_hex": _hx(nonce),
+                "ciphertext_hex": _hx(ct),
+                "record_hex": _hx(blob),
+                "nonce_counter": n_before,
+            }
+        )
+
+    n_before = send_r.nonce()
+    blob_r = encrypt_record(send_r, REMEDY_MSG3_PLAIN)
+    nonce_r, ct_r = unpack_record(blob_r)
+    if decrypt_record(recv_i, blob_r) != REMEDY_MSG3_PLAIN:
+        raise RuntimeError("encrypt_record r→i roundtrip failed")
+
+    return {
+        "name": "remedy_record_framing",
+        "notes": (
+            "Exact u32be|nonce12|ciphertext framing and encrypt_record blobs from "
+            "live Python remedy.connect.record (product Noise keys = post_split)."
+        ),
+        "source": "remedy.connect.record",
+        "max_record": MAX_RECORD,
+        "nonce_len": NONCE_LEN,
+        "tag_len": TAGLEN,
+        "max_plaintext": MAX_PLAINTEXT,
+        "init_static_priv_hex": _hx(REMEDY_PHONE_STATIC),
+        "init_eph_priv_hex": _hx(REMEDY_PHONE_EPH),
+        "resp_static_priv_hex": _hx(REMEDY_HOST_STATIC),
+        "resp_eph_priv_hex": _hx(REMEDY_HOST_EPH),
+        "handshake_msg0_payload_hex": _hx(REMEDY_PAIR_SECRET),
+        "pack_vectors": pack_vectors,
+        "encrypt_i_to_r": encrypt_i_to_r,
+        "encrypt_r_to_i": [
+            {
+                "plaintext_hex": _hx(REMEDY_MSG3_PLAIN),
+                "nonce_hex": _hx(nonce_r),
+                "ciphertext_hex": _hx(ct_r),
+                "record_hex": _hx(blob_r),
+                "nonce_counter": n_before,
+            }
+        ],
+        "reject": {
+            "oversize_length_field_hex": _hx(struct.pack("!I", MAX_RECORD + 1)),
+            "too_short_length_hex": _hx(struct.pack("!I", 11)),
+            "truncated_claim12_hex": _hx(struct.pack("!I", 12)),
+        },
+    }
+
+
 def capture_all() -> dict[str, Path]:
-    """Write all Connect Noise_IK fixtures. Returns path map."""
+    """Write all Connect Noise_IK + record framing fixtures. Returns path map."""
     debug = capture_debug_hash()
     snow = capture_snow_ik()
     pair = capture_pair_secret()
     post = capture_post_split_aead()
+    record = capture_record_framing()
 
     android_matched = bool(
         debug.get("android_hex_matched_python")
@@ -389,7 +496,13 @@ def capture_all() -> dict[str, Path]:
             "Snow vectors must stay byte-identical to Android NoiseIkTest. "
             "Regenerate: uv run python -m tests.harness.connect_fixture_capture"
         ),
-        "vectors": [debug["name"], snow["name"], pair["name"], post["name"]],
+        "vectors": [
+            debug["name"],
+            snow["name"],
+            pair["name"],
+            post["name"],
+            record["name"],
+        ],
     }
 
     written = {
@@ -398,6 +511,7 @@ def capture_all() -> dict[str, Path]:
         "snow_ik_chacha_blake2s": _write("noise_ik_snow.json", snow),
         "remedy_pair_secret": _write("noise_ik_pair_secret.json", pair),
         "remedy_post_split_aead": _write("noise_ik_post_split.json", post),
+        "remedy_record_framing": _write("record_framing.json", record),
         "readme": _write_readme(android_matched=android_matched),
     }
     return written
@@ -407,8 +521,8 @@ def _write_readme(*, android_matched: bool) -> Path:
     text = f"""# Connect Noise_IK fixtures (Phase 5)
 
 Exact hex vectors captured from **live Python** ``remedy.connect.noise``
-before any Go port. Snow crate vectors mirror Android
-``NoiseIkTest.snowVectorIkChaChaBlake2s``.
+and ``remedy.connect.record`` before any Go port. Snow crate vectors mirror
+Android ``NoiseIkTest.snowVectorIkChaChaBlake2s``.
 
 ## Android hex match
 
@@ -422,6 +536,7 @@ Last capture: **{'MATCHED' if android_matched else 'MISMATCH'}**
 | `noise_ik_snow.json` | `snow_ik_chacha_blake2s` | Full IK handshake + post-split AEAD (snow keys) |
 | `noise_ik_pair_secret.json` | `remedy_pair_secret` | Product prologue; first payload = 32-byte PS; wrong-ps fail |
 | `noise_ik_post_split.json` | `remedy_post_split_aead` | Both-direction transport AEAD after split |
+| `record_framing.json` | `remedy_record_framing` | u32be\\|nonce12\\|ct pack + encrypt_record blobs |
 | `noise_ik_index.json` | (meta) | Capture stamp + vector list |
 
 ## Regenerating
