@@ -261,7 +261,11 @@ pub fn isAuthSecretPath(path: []const u8) bool {
     if (std.mem.indexOf(u8, low, "\\auth\\provider_keys") != null) return true;
     if (std.mem.indexOf(u8, low, "\\auth\\oauth") != null) return true;
 
-    // REMEDY_HOME/auth when the env is set (custom portable home).
+    // Custom portable home: only worth a REMEDY_HOME lookup when the path
+    // already looks auth-related. Mapping the full Windows environ block just
+    // to read one variable has OOMed under Zig unit-test load.
+    if (std.mem.indexOf(u8, low, "auth") == null) return false;
+
     if (builtin.os.tag == .windows) {
         const environ: std.process.Environ = .{ .block = .global };
         if (std.process.Environ.getAlloc(environ, std.heap.smp_allocator, "REMEDY_HOME") catch null) |home| {
