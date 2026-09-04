@@ -6,10 +6,12 @@ import "context"
 // Round i is consumed on the i-th Stream call (1-based iteration).
 // If fewer rounds than iterations remain, the last round is reused.
 type ScriptedModel struct {
-	Rounds [][]ModelEvent
+	Rounds   [][]ModelEvent
+	LastTurn Turn // most recent Stream argument (tests)
 }
 
 func (m *ScriptedModel) Stream(_ context.Context, turn Turn) (<-chan ModelEvent, error) {
+	m.LastTurn = turn
 	if len(m.Rounds) == 0 {
 		ch := make(chan ModelEvent)
 		close(ch)
