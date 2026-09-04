@@ -988,7 +988,7 @@ class BasicRuntime(AgentRuntime):
         mid-stream), then runs the loop with ONE retry-with-backoff on
         transient failures before a clean turn-end.
         """
-        from remedy.core.agent_react_loop import call_llm_stream
+        from remedy.core.react_loop import call_llm_stream
 
         self._right_size_max_tokens()
         attempt = 0
