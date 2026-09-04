@@ -53,6 +53,9 @@ type Config struct {
 	// RmbController starts/stops llama-server (Python/Zig process supervisor).
 	// Nil → status/catalog/settings/HF still work; start returns 503.
 	RmbController RmbController
+	// VisionWorker powers activate/install/start/stop (Python vision lane).
+	// Nil → status/catalog still work; mutate routes return 503.
+	VisionWorker VisionWorker
 }
 
 // Server is the production local HTTP API served by remedy-runtime.
@@ -69,6 +72,7 @@ type Server struct {
 	runner   TurnRunner
 	voice    VoiceWorker
 	rmb      RmbController
+	vision   VisionWorker
 	hf       *hfProgress
 
 	connectGW     *connect.Gateway
@@ -108,7 +112,8 @@ type Server struct {
 // status/install/login), Connect me/stop, providers/models catalog (including
 // custom endpoints + probe), usage ledger, updates check, skills/library
 // routes, workspace/files/media routes, partner/approvals/plans/life-tasks/goals,
-// WebUI, computer-use host bridge, ConPTY terminal, voice, and RMB routes.
+// WebUI, computer-use host bridge, ConPTY terminal, voice, RMB, vision, and
+// telephony routes.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
@@ -144,6 +149,7 @@ func New(cfg Config) (*Server, error) {
 		runner:    cfg.TurnRunner,
 		voice:     cfg.VoiceWorker,
 		rmb:       cfg.RmbController,
+		vision:    cfg.VisionWorker,
 		hf:        newHFProgress(),
 		approvals: newApprovalQueue(),
 		lifeHub:   newLifeTaskHub(),
@@ -286,6 +292,18 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/webhooks/teams", s.handleTeamsActivity)
 	s.mux.HandleFunc("POST /api/webhooks/google_chat", s.handleGoogleChatEvent)
 	s.mux.HandleFunc("POST /api/webhook/{source}", s.handleGenericWebhook)
+	s.mux.HandleFunc("GET /api/vision/status", s.handleVisionStatus)
+	s.mux.HandleFunc("GET /api/vision/catalog", s.handleVisionCatalog)
+	s.mux.HandleFunc("POST /api/vision/activate", s.handleVisionActivate)
+	s.mux.HandleFunc("POST /api/vision/install", s.handleVisionInstall)
+	s.mux.HandleFunc("POST /api/vision/install/cancel", s.handleVisionInstallCancel)
+	s.mux.HandleFunc("POST /api/vision/reinstall-runtime", s.handleVisionReinstallRuntime)
+	s.mux.HandleFunc("POST /api/vision/uninstall", s.handleVisionUninstall)
+	s.mux.HandleFunc("POST /api/vision/start", s.handleVisionStart)
+	s.mux.HandleFunc("POST /api/vision/stop", s.handleVisionStop)
+	s.mux.HandleFunc("GET /api/telephony/status", s.handleTelephonyStatus)
+	s.mux.HandleFunc("POST /api/telephony/terms", s.handleTelephonyTerms)
+	s.mux.HandleFunc("POST /api/telephony/choose", s.handleTelephonyChoose)
 	s.mountWebUI()
 	return s, nil
 }
