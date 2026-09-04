@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -204,5 +206,137 @@ func TestTelegram409Backoff(t *testing.T) {
 	wait, insist = telegram409Backoff(now, now.Add(-2*time.Minute))
 	if insist || wait != 25*time.Second {
 		t.Fatalf("steady backoff = %v insist=%v", wait, insist)
+	}
+}
+
+func TestStringCursorRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	if LoadStringCursor(home, "matrix_since") != "" {
+		t.Fatal("want empty")
+	}
+	SaveStringCursor(home, "matrix_since", "s123_abc")
+	if got := LoadStringCursor(home, "matrix_since"); got != "s123_abc" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestRegisterFromConfigSlackMatrixMattermost(t *testing.T) {
+	home := t.TempDir()
+	g := New(Config{HomeDir: home})
+	cfg := map[string]any{
+		"enabled_channels": []string{"slack", "matrix", "mattermost"},
+		"slack":            map[string]any{"channel_id": "C1", "allow_all": true},
+		"matrix":           map[string]any{"homeserver": "https://matrix.example", "room_id": "!r:ex", "allow_all": true},
+		"mattermost":       map[string]any{"base_url": "https://mm.example", "channel_id": "ch1", "allow_all": true},
+	}
+	got := RegisterFromConfig(g, cfg, home, func(channel, field string) string {
+		switch channel + ":" + field {
+		case "slack:bot_token":
+			return "xoxb-test"
+		case "slack:app_token":
+			return "xapp-test"
+		case "matrix:access_token":
+			return "mat-token"
+		case "mattermost:bot_token":
+			return "mm-token"
+		default:
+			return ""
+		}
+	})
+	if len(got) != 3 {
+		t.Fatalf("registered = %v", got)
+	}
+	if _, ok := g.GetChannel(ChannelSlack).(*SlackChannel); !ok {
+		t.Fatalf("slack type = %T", g.GetChannel(ChannelSlack))
+	}
+	if _, ok := g.GetChannel(ChannelMatrix).(*MatrixChannel); !ok {
+		t.Fatalf("matrix type = %T", g.GetChannel(ChannelMatrix))
+	}
+	if _, ok := g.GetChannel(ChannelMattermost).(*MattermostChannel); !ok {
+		t.Fatalf("mattermost type = %T", g.GetChannel(ChannelMattermost))
+	}
+}
+
+func TestSlackHandleEventFilters(t *testing.T) {
+	g := New(Config{RateLimitPerMin: 100, HeartbeatInterval: time.Hour})
+	var n atomic.Int32
+	g.RegisterHandler(func(ctx context.Context, ev Event) error {
+		if ev.Kind == EventMessage {
+			n.Add(1)
+		}
+		return nil
+	})
+	ch := NewSlack(g, SlackConfig{BotToken: "xoxb", AllowAll: true})
+	ctx := context.Background()
+	ch.handleEvent(ctx, map[string]any{"type": "message", "subtype": "bot_message", "text": "x", "channel": "C1", "user": "U1"})
+	ch.handleEvent(ctx, map[string]any{"type": "message", "bot_id": "B1", "text": "x", "channel": "C1", "user": "U1"})
+	ch.handleEvent(ctx, map[string]any{"type": "message", "text": "hello", "channel": "C1", "user": "U1", "ts": "1.0"})
+	ch.handleEvent(ctx, map[string]any{"type": "message", "text": "hello", "channel": "C1", "user": "U1", "ts": "1.0"}) // dedupe
+	if n.Load() != 1 {
+		t.Fatalf("handler calls = %d, want 1", n.Load())
+	}
+}
+
+func TestMatrixHandleTimelineFilters(t *testing.T) {
+	g := New(Config{RateLimitPerMin: 100, HeartbeatInterval: time.Hour})
+	var n atomic.Int32
+	g.RegisterHandler(func(ctx context.Context, ev Event) error {
+		if ev.Kind == EventMessage {
+			n.Add(1)
+		}
+		return nil
+	})
+	ch := NewMatrix(g, MatrixConfig{
+		AccessToken: "t",
+		Homeserver:  "https://matrix.example",
+		UserID:      "@bot:ex",
+		AllowAll:    true,
+	})
+	ch.client = &http.Client{Timeout: time.Millisecond}
+	ctx := context.Background()
+	ch.handleTimelineEvent(ctx, "!r:ex", map[string]any{
+		"type": "m.room.message", "sender": "@bot:ex",
+		"content": map[string]any{"msgtype": "m.text", "body": "self"},
+	})
+	ch.handleTimelineEvent(ctx, "!r:ex", map[string]any{
+		"type": "m.room.message", "sender": "@alice:ex",
+		"content": map[string]any{"msgtype": "m.image", "body": "pic"},
+	})
+	ch.handleTimelineEvent(ctx, "!r:ex", map[string]any{
+		"type": "m.room.message", "sender": "@alice:ex",
+		"content": map[string]any{"msgtype": "m.text", "body": "hi"},
+	})
+	if n.Load() != 1 {
+		t.Fatalf("handler calls = %d, want 1", n.Load())
+	}
+}
+
+func TestMattermostOnEventFilters(t *testing.T) {
+	g := New(Config{RateLimitPerMin: 100, HeartbeatInterval: time.Hour})
+	var n atomic.Int32
+	g.RegisterHandler(func(ctx context.Context, ev Event) error {
+		if ev.Kind == EventMessage {
+			n.Add(1)
+		}
+		return nil
+	})
+	ch := NewMattermost(g, MattermostConfig{
+		BotToken: "t",
+		BaseURL:  "https://mm.example",
+		AllowAll: true,
+	})
+	ctx := context.Background()
+	ch.onEvent(ctx, map[string]any{"event": "typing"})
+	botPost, _ := json.Marshal(map[string]any{
+		"message": "bot", "channel_id": "c1", "user_id": "u1",
+		"props": map[string]any{"from_bot": true},
+	})
+	ch.onEvent(ctx, map[string]any{"event": "posted", "data": map[string]any{"post": string(botPost)}})
+	okPost, _ := json.Marshal(map[string]any{
+		"message": "hello", "channel_id": "c1", "user_id": "u1",
+	})
+	ch.onEvent(ctx, map[string]any{"event": "posted", "data": map[string]any{"post": string(okPost)}})
+	if n.Load() != 1 {
+		t.Fatalf("handler calls = %d, want 1", n.Load())
 	}
 }

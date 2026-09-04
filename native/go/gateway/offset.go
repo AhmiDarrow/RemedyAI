@@ -31,12 +31,42 @@ func SaveUpdateOffset(home, channel string, offset int) {
 	_ = os.WriteFile(path, []byte(strconv.Itoa(offset)+"\n"), 0o600)
 }
 
+// LoadStringCursor reads a persisted string cursor (e.g. Matrix next_batch).
+// name is the file stem under locks/ (e.g. "matrix_since").
+func LoadStringCursor(home, name string) string {
+	path := stringCursorPath(home, name)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+// SaveStringCursor persists a non-empty string cursor under locks/.
+func SaveStringCursor(home, name, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	path := stringCursorPath(home, name)
+	_ = os.MkdirAll(filepath.Dir(path), 0o700)
+	_ = os.WriteFile(path, []byte(value+"\n"), 0o600)
+}
+
 func offsetPath(home, channel string) string {
 	ch := normalizeID(channel)
 	if ch == "" {
 		ch = "telegram"
 	}
 	return filepath.Join(resolveHome(home), "locks", ch+"_offset.txt")
+}
+
+func stringCursorPath(home, name string) string {
+	stem := normalizeID(name)
+	if stem == "" {
+		stem = "cursor"
+	}
+	return filepath.Join(resolveHome(home), "locks", stem+".txt")
 }
 
 func resolveHome(home string) string {

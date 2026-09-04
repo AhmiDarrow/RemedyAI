@@ -37,7 +37,8 @@ def python_may_poll_messengers() -> bool:
     """True only when Python is explicitly allowed to own inbound pollers.
 
     Default is False: Go ``remedy-runtime`` holds ``*_getupdates.lock`` and runs
-    Telegram/Discord (and outbound stubs). Opt in with REMEDY_PYTHON_MESSENGER_POLL=1.
+    Telegram/Discord/Slack/Matrix/Mattermost inbound. Opt in with
+    REMEDY_PYTHON_MESSENGER_POLL=1.
     """
     raw = (os.environ.get("REMEDY_PYTHON_MESSENGER_POLL") or "").strip().lower()
     return raw in ("1", "true", "yes", "on")
