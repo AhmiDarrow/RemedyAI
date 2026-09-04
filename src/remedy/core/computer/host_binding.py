@@ -8,7 +8,8 @@ callers (``desktop_win``, ``desktop_uia``, ``desktop_linux``,
 ``execution.process``).
 
 Windows: host + UIA. Linux: host (X11/XTest) + AT-SPI a11y snapshot.
-``host_op_prepare`` and ``translate_posix_to_host`` are portable. Other
+``host_op_prepare`` (structured ops + command-string prepare) and
+``translate_posix_to_host`` are portable. Other
 platforms: host/UIA/a11y calls report :data:`STATUS_UNSUPPORTED`
 (:class:`HostError`).
 """
@@ -809,9 +810,9 @@ def host_op_prepare(
     """Call ``remedy_core_host_op_prepare``; return a PreparedCommand dict.
 
     Pass either a HostOp mapping as *op*, or a full request object as *raw*
-    (``{op, scratch_dir?, project_path?}`` or a bare HostOp).
-    :func:`remedy.execution.host.runner.prepare_host_op` routes structured ops
-    through this binding (``raw`` still uses Python ``prepare_host_command``).
+    (``{op, scratch_dir?, project_path?}``, ``{command, host?, ...}``, or a
+    bare HostOp). :func:`remedy.execution.host.runner.prepare_host_op` and
+    :func:`remedy.execution.host.runner.prepare_host_command` both route here.
     """
     if raw is not None:
         payload: dict[str, Any] = dict(raw)
