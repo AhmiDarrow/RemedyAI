@@ -523,6 +523,25 @@ int32_t remedy_core_host_session_split(
     uint8_t **out_json, size_t *out_len
 );
 
+/* ---- ABI 5 additive: Connect Tailscale management ------------------------- */
+
+/* UTF-8 JSON status object {installed,running,logged_in,tailnet_ipv4,version,
+ * error}. Spawns only the discovered Tailscale CLI with fixed argv. Caller
+ * frees with remedy_core_free. Never raises through the ABI — error text is
+ * inside the JSON when Tailscale is missing or not ready. */
+int32_t remedy_core_tailscale_status(uint8_t **out_json, size_t *out_len);
+
+/* UTF-8 JSON {status,message,login_url,msi_path,installer_url} from
+ * `tailscale up` (soft timeout keeps a printed login URL). Caller frees. */
+int32_t remedy_core_tailscale_login(uint8_t **out_json, size_t *out_len);
+
+/* Launch msiexec /i <absolute .msi path> detached (no kill-on-close job).
+ * Windows only; other platforms return UNSUPPORTED. */
+int32_t remedy_core_tailscale_launch_msi(
+    const uint8_t *msi_path, size_t msi_len,
+    uint32_t *out_pid
+);
+
 #ifdef __cplusplus
 }
 #endif

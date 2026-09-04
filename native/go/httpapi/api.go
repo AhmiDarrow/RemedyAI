@@ -98,10 +98,11 @@ type Server struct {
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
 // sessions CRUD, session LLM bind, attachments upload/get, messages
 // list/create/stream, abort, session-events SSE, durable events bus,
-// scheduler jobs, hive roster/spawn/assign/retire, Connect management,
-// Connect me/stop, providers/models catalog, skills/library routes,
-// workspace/files/media routes, partner/approvals/plans/life-tasks/goals,
-// WebUI, computer-use host bridge, ConPTY terminal, voice, and RMB routes.
+// scheduler jobs, hive roster/spawn/assign/retire, Connect management
+// (including Tailscale status/install/login), Connect me/stop, providers/models
+// catalog, skills/library routes, workspace/files/media routes,
+// partner/approvals/plans/life-tasks/goals, WebUI, computer-use host bridge,
+// ConPTY terminal, voice, and RMB routes.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
@@ -187,6 +188,9 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/connect/pause", s.handleConnectPause)
 	s.mux.HandleFunc("POST /api/connect/resume", s.handleConnectResume)
 	s.mux.HandleFunc("POST /api/connect/devices/{id}/revoke", s.handleConnectRevoke)
+	s.mux.HandleFunc("GET /api/connect/tailscale/status", s.handleConnectTailscaleStatus)
+	s.mux.HandleFunc("POST /api/connect/tailscale/install", s.handleConnectTailscaleInstall)
+	s.mux.HandleFunc("POST /api/connect/tailscale/login", s.handleConnectTailscaleLogin)
 	s.mux.HandleFunc("GET /connect/me", s.handleConnectMe)
 	s.mux.HandleFunc("GET /api/connect/me", s.handleConnectMe)
 	s.mux.HandleFunc("POST /api/stop", s.handleConnectStop)

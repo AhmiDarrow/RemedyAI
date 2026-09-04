@@ -81,9 +81,10 @@ func main() {
 
 	// Durable Zig HMAC key in the secret store (never logged). httpapi terminal
 	// / computer routes install the same on-disk key into remedy_core when they
-	// spawn ConPTY; Python host_binding shares the file. Turn tools use the Go
-	// Tool ABI registry; AttachPythonWorker adds RuntimePython tools over RMDY
-	// frames when a worker is connected.
+	// spawn ConPTY; Connect Tailscale management loads remedy_core lazily via
+	// native/go/core for CLI/msiexec (no os/exec). Python host_binding shares
+	// the file. Turn tools use the Go Tool ABI registry; AttachPythonWorker
+	// adds RuntimePython tools over RMDY frames when a worker is connected.
 	if _, err := secret.EnsureHostSigningKey(""); err != nil {
 		fmt.Fprintf(os.Stderr, "remedy-runtime host signing key: %v\n", err)
 		os.Exit(1)
