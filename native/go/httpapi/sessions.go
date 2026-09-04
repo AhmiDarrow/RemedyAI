@@ -467,6 +467,19 @@ func (s *sessionStore) Count() (int, error) {
 	return n, err
 }
 
+// StatusCounts returns memory_entries, session_summaries, chat_sessions.
+// Optional Python tables are zero when absent (Go-only schema).
+func (s *sessionStore) StatusCounts() (mem, summaries, chats int, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err = s.db.QueryRow(`SELECT COUNT(*) FROM chat_sessions`).Scan(&chats); err != nil {
+		return 0, 0, 0, err
+	}
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM memory_entries`).Scan(&mem)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM session_summaries`).Scan(&summaries)
+	return mem, summaries, chats, nil
+}
+
 type scannable interface {
 	Scan(dest ...any) error
 }
