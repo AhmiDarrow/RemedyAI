@@ -245,7 +245,8 @@ func (s *Scheduler) Run(ctx context.Context, ticks <-chan time.Time) error {
 		}
 	}
 }
-func (s *Scheduler) Snapshot() ([]byte, error) {
+// Jobs returns a stable-sorted copy of every registered job.
+func (s *Scheduler) Jobs() []Job {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	jobs := make([]Job, 0, len(s.jobs))
@@ -253,7 +254,11 @@ func (s *Scheduler) Snapshot() ([]byte, error) {
 		jobs = append(jobs, clone(*job))
 	}
 	sort.Slice(jobs, func(i, j int) bool { return jobs[i].ID < jobs[j].ID })
-	return json.Marshal(Snapshot{Version: 1, Jobs: jobs})
+	return jobs
+}
+
+func (s *Scheduler) Snapshot() ([]byte, error) {
+	return json.Marshal(Snapshot{Version: 1, Jobs: s.Jobs()})
 }
 func Restore(raw []byte, executor Executor, now func() time.Time) (*Scheduler, error) {
 	var snapshot Snapshot
