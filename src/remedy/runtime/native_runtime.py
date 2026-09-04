@@ -26,8 +26,6 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from remedy.execution.process import run_hidden
-
 #: Zig C ABI (``remedy_core_abi_version``); see ``native/zig/include/remedy_core.h``.
 _ABI_VERSION = 5
 #: Go runtime probe contract (``--probe`` JSON ``protocol`` / ``tool_abi``).
@@ -119,11 +117,17 @@ def _probe_go() -> _ComponentProbe:
     if executable is None:
         return _ComponentProbe(False, "not-installed")
     try:
-        completed = run_hidden(
+        # Probe must not go through run_hidden: that prefers Zig authorized
+        # spawn and fails closed without remedy_core. Go readiness is
+        # independent of the Zig host DLL.
+        from remedy.execution.process import hidden_subprocess_kwargs
+
+        completed = subprocess.run(
             [str(executable), "--probe"],
             capture_output=True,
             text=True,
             timeout=2.0,
+            **hidden_subprocess_kwargs(),
         )
     except subprocess.TimeoutExpired:
         return _ComponentProbe(False, "timeout")

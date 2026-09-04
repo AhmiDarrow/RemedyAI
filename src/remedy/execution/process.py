@@ -4,14 +4,15 @@ Desktop users must never see a brief cmd/powershell window when the agent
 runs tools, and nothing Remedy starts may be left running after she stops
 it. Every Remedy-spawned child goes through this module:
 
-* :func:`run_hidden` / :func:`popen_hidden` /
-  :func:`create_hidden_subprocess_exec` wrap :mod:`subprocess` and
-  :mod:`asyncio` for callers that need pipes, and add the hidden creation
-  flags on Windows.
-* :func:`spawn_hidden` starts a process through ``remedy_core`` authorized
-  spawn (policy + capability token) inside a Windows job object, so the
-  whole tree (``uv.exe`` and the python it launches, ``cmd`` and its
-  children) dies when the handle closes.
+* :func:`spawn_hidden` is the production path: ``remedy_core`` authorized
+  spawn (policy + capability token + write-jail) inside a job / process
+  group so the whole tree dies when the handle closes. No unsigned soft
+  fallback.
+* :func:`run_hidden` prefers :func:`spawn_hidden` when no pipes or stdin are
+  needed. Piped callers still use :mod:`subprocess` / :mod:`asyncio` with
+  hidden creation flags, but only after the process host is available
+  (fail closed when ``remedy_core`` is missing — except explicit test
+  doubles that patch these helpers).
 * :func:`kill_tree` / :func:`kill_process_tree` terminate a process and every
   descendant through ``remedy_core`` (toolhelp walk, deepest first) instead
   of a shell helper.
@@ -32,7 +33,8 @@ def hidden_creationflags() -> int:
     """Windows creation flags that suppress a console window (0 elsewhere).
 
     Uses ``getattr`` so a win32-platform mock on a POSIX interpreter (CI under
-    WSL, unit tests) cannot AttributeError on ``CREATE_NO_WINDOW``.
+    WSL, unit tests) cannot AttributeError on ``CREATE_NO_WINDOW``. Transitional
+    pipe helpers only — prefer :func:`spawn_hidden` when pipes are not needed.
     """
     if sys.platform != "win32":
         return 0
@@ -56,13 +58,8 @@ def hidden_subprocess_kwargs() -> dict[str, Any]:
     """Kwargs mergeable into subprocess.run / Popen / create_subprocess_exec.
 
     On Windows: CREATE_NO_WINDOW + SW_HIDE so *this* process has no console.
-    The packaged desktop sidecar is a GUI process (no console). A console
-    child (git, python, uv, cmd) without this flag opens a visible CMD.
-
-    CREATE_NO_WINDOW is not inherited: ``cmd /c uv run pytest`` hides cmd but
-    uv's python child still pops a window. Prefer exec'ing python/git
-    directly (see ``deflate_uv_run``), or :func:`spawn_hidden` when no pipes
-    are needed.
+    Transitional for piped callers; production no-pipe spawns use
+    :func:`spawn_hidden`.
     """
     if sys.platform != "win32":
         return {}
@@ -81,6 +78,45 @@ def _merge_hidden(extra: dict[str, Any]) -> dict[str, Any]:
         kwargs["creationflags"] = int(kwargs.get("creationflags", 0)) | int(flags)
     kwargs.update(extra)
     return kwargs
+
+
+def _process_host_required() -> bool:
+    """Platforms where product spawn must go through ``remedy_core``."""
+    return sys.platform in ("win32", "linux")
+
+
+def require_process_host() -> None:
+    """Fail closed when the Zig process host cannot be loaded.
+
+    Explicit test doubles patch :func:`run_hidden` / :func:`popen_hidden` /
+    :func:`create_hidden_subprocess_exec` / :func:`spawn_hidden` and never
+    reach this gate.
+    """
+    if not _process_host_required():
+        return
+    from remedy.core.computer import host_binding
+
+    host_binding._lib()
+
+
+def _stdio_is_pipe_request(
+    *,
+    capture_output: bool = False,
+    input: Any = None,
+    stdout: Any = None,
+    stderr: Any = None,
+    stdin: Any = None,
+    extra: Mapping[str, Any] | None = None,
+) -> bool:
+    """True when the caller needs OS pipes (authorized spawn has none)."""
+    if capture_output or input is not None:
+        return True
+    pipe_markers = (subprocess.PIPE, asyncio.subprocess.PIPE)
+    for value in (stdout, stderr, stdin):
+        if value in pipe_markers:
+            return True
+    extra = extra or {}
+    return any(extra.get(key) in pipe_markers for key in ("stdout", "stderr", "stdin"))
 
 
 #: Default wall for a hidden child process. Every caller today passes its own,
@@ -102,9 +138,32 @@ def run_hidden(
     input: str | bytes | None = None,
     **extra: Any,
 ) -> subprocess.CompletedProcess[Any]:
-    """subprocess.run with CREATE_NO_WINDOW on Windows."""
+    """Run *args* hidden; prefer Zig authorized spawn when pipes are unused."""
+    require_process_host()
+    if not _stdio_is_pipe_request(
+        capture_output=capture_output, input=input, extra=extra
+    ):
+        child = spawn_hidden(args, cwd=cwd, env=env)
+        try:
+            code = wait(child, timeout)
+            if code is None:
+                child.kill_tree()
+                child.close()
+                raise subprocess.TimeoutExpired(cmd=list(args), timeout=timeout)
+            empty = "" if text else b""
+            result = subprocess.CompletedProcess(
+                list(args), int(code), empty, empty
+            )
+            if check and result.returncode:
+                raise subprocess.CalledProcessError(
+                    result.returncode, list(args), result.stdout, result.stderr
+                )
+            return result
+        finally:
+            with suppress(Exception):
+                child.close()
     kwargs: dict[str, Any] = {
-        **_merge_hidden(extra),
+        **_merge_hidden(dict(extra)),
         "capture_output": capture_output,
         "text": text,
         "timeout": timeout,
@@ -127,11 +186,12 @@ def popen_hidden(
     stdin: Any = None,
     **extra: Any,
 ) -> subprocess.Popen[Any]:
-    """subprocess.Popen with CREATE_NO_WINDOW on Windows.
+    """Popen with CREATE_NO_WINDOW; requires the Zig process host (fail closed).
 
-    ``creationflags`` in *extra* are added to the hidden flags, so a caller
-    can still ask for CREATE_NEW_PROCESS_GROUP.
+    Prefer :func:`spawn_hidden` when the caller does not need pipes.
+    ``creationflags`` in *extra* are OR-ed into the hidden flags.
     """
+    require_process_host()
     return subprocess.Popen(
         list(args),
         cwd=cwd,
@@ -153,7 +213,8 @@ async def create_hidden_subprocess_exec(
     env: Mapping[str, str] | None = None,
     **extra: Any,
 ) -> asyncio.subprocess.Process:
-    """asyncio.create_subprocess_exec that never shows a Windows console."""
+    """Async exec with CREATE_NO_WINDOW; requires Zig process host (fail closed)."""
+    require_process_host()
     return await asyncio.create_subprocess_exec(
         program,
         *args,
