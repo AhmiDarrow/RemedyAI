@@ -586,6 +586,10 @@ def test_spawn_conpty_is_reported_unsupported_when_the_binding_says_so():
 @windows_only
 def test_conpty_spawn_builds_the_console_and_the_command_line_it_was_asked_for():
     """The binding fake proves pipes, pseudoconsole and CreateProcessW args."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
     from remedy.execution.host import conpty
     from tests.harness.fake_host_binding import install_fake_conpty
 
@@ -605,7 +609,11 @@ def test_conpty_spawn_builds_the_console_and_the_command_line_it_was_asked_for()
             "flags": 0,
         }
     ]
-    assert host.spawns[0]["cmdline"] == 'cmd.exe /c "echo hi"'
+    # Authorized spawn resolves argv[0] via PATH before quoting.
+    found = shutil.which("cmd.exe")
+    assert found is not None
+    expect = subprocess.list2cmdline([str(Path(found).resolve()), "/c", "echo hi"])
+    assert host.spawns[0]["cmdline"] == expect
     assert host.spawns[0]["cwd"] == "C:\\work"
     assert host.spawns[0]["flags"] == 0x00080000 | 0x00000400
     assert host.pipes[0].write_handle not in host.closed
