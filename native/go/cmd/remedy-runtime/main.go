@@ -14,6 +14,7 @@ import (
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
 	"github.com/AhmiDarrow/RemedyAI/native/go/httpapi"
+	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
 const (
@@ -65,6 +66,14 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+
+	// Durable Zig HMAC key in the secret store (never logged). Go does not
+	// yet load remedy_core in-process; Python host_binding installs the same
+	// on-disk key into the DLL when it spawns.
+	if _, err := secret.EnsureHostSigningKey(""); err != nil {
+		fmt.Fprintf(os.Stderr, "remedy-runtime host signing key: %v\n", err)
+		os.Exit(1)
+	}
 
 	var runner httpapi.TurnRunner
 	if *smokeFixture {
