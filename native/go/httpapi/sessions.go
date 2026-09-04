@@ -574,6 +574,11 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
+	// Stop in-flight turn + drop claim before removing the row (Python crud parity).
+	if s.claims != nil {
+		s.claims.Abort(id, nil, nil)
+		s.claims.Release(id, nil)
+	}
 	ok, err := s.sessions.Delete(id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})

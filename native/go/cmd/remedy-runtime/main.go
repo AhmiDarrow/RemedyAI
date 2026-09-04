@@ -64,7 +64,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	err := httpapi.ListenAndServe(ctx, addr, httpapi.Config{}, func(bound string) {
+	// Fixture runner keeps stream/sync chat callable until cognition is wired.
+	err := httpapi.ListenAndServe(ctx, addr, httpapi.Config{
+		TurnRunner: httpapi.NewFixtureTurnRunner(),
+	}, func(bound string) {
 		fmt.Fprintf(os.Stderr, "remedy-runtime listening on http://%s\n", bound)
 	})
 	if err != nil {
