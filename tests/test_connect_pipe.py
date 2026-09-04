@@ -54,6 +54,13 @@ def _wait_addr(timeout: float = 3.0) -> tuple[str, int]:
     raise AssertionError("connect gateway did not bind")
 
 
+# First transport record after a live Noise handshake. Idle boxes answer in
+# well under 3s; under full-suite Windows load the gateway loop can lag past
+# that while still healthy (handshake already succeeded). Match the mobile
+# relay live-socket budget — still fails a wedged session.
+_LIVE_RECORD_TIMEOUT_S = 8.0
+
+
 def test_pause_drops_live_socket_without_touching_7400_concept(home):
     from fastapi.testclient import TestClient
 
@@ -481,7 +488,9 @@ async def test_noise_handshake_and_connect_me(home):
         req = b"GET /connect/me HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
         writer.write(encrypt_record(send, req))
         await writer.drain()
-        nonce12, ct = await asyncio.wait_for(read_record(reader), timeout=3)
+        nonce12, ct = await asyncio.wait_for(
+            read_record(reader), timeout=_LIVE_RECORD_TIMEOUT_S
+        )
         plain = decrypt_record(recv, pack_record(nonce12, ct))
         assert b"200" in plain
         assert b"panes" in plain
@@ -539,7 +548,9 @@ async def test_android_raw_secret_and_inner_connect_me(home):
         inner = encode_inner(TYPE_HTTP_REQ, 7, encode_http_req("GET", "/connect/me", "", b""))
         writer.write(encrypt_record(send, inner))
         await writer.drain()
-        nonce12, ct = await asyncio.wait_for(read_record(reader), timeout=3)
+        nonce12, ct = await asyncio.wait_for(
+            read_record(reader), timeout=_LIVE_RECORD_TIMEOUT_S
+        )
         plain = decrypt_record(recv, pack_record(nonce12, ct))
         typ, msg_id, flags, payload = decode_inner(plain)
         assert typ == 0x02
@@ -602,7 +613,9 @@ async def test_allowlisted_device_reconnects_after_secret_consumed(home):
         req = b"GET /connect/me HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n"
         writer.write(encrypt_record(send, req))
         await writer.drain()
-        nonce12, ct = await asyncio.wait_for(read_record(reader), timeout=3)
+        nonce12, ct = await asyncio.wait_for(
+            read_record(reader), timeout=_LIVE_RECORD_TIMEOUT_S
+        )
         plain = decrypt_record(recv, pack_record(nonce12, ct))
         assert b"200" in plain
         assert b"panes" in plain
