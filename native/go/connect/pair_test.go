@@ -40,6 +40,46 @@ func TestStartPairRefusesNonLoopback(t *testing.T) {
 	}
 }
 
+func TestPendingPairRendezvousAndSIDs(t *testing.T) {
+	home := pairHome(t)
+	sid, err := PendingPairRendezvous(home)
+	if err != nil || sid != nil {
+		t.Fatalf("empty pending: sid=%v err=%v", sid, err)
+	}
+	_ = mustQR(t, home)
+	sid, err = PendingPairRendezvous(home)
+	if err != nil || len(sid) != SessionIDLen {
+		t.Fatalf("pending sid len=%d err=%v", len(sid), err)
+	}
+	all, err := RendezvousSIDs(home)
+	if err != nil || len(all) != 1 || string(all[0]) != string(sid) {
+		t.Fatalf("sids=%v err=%v", all, err)
+	}
+
+	// Paired device adds a second sid.
+	secret := PendingSecretForTest()
+	devPub := bytesFilled(0x22)
+	if _, err := CompletePair(secret, devPub, "phone", home); err != nil {
+		t.Fatal(err)
+	}
+	all, err = RendezvousSIDs(home)
+	if err != nil || len(all) != 1 {
+		// Pair window consumed by CompletePair — only the device sid remains.
+		t.Fatalf("after pair: len=%d err=%v", len(all), err)
+	}
+	kp, err := LoadOrCreateHostKeyPair(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := SessionIDDevice(kp.Public, devPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(all[0]) != string(want) {
+		t.Fatalf("device sid mismatch")
+	}
+}
+
 func TestQRHasNoLocalAPITokenOrBearer(t *testing.T) {
 	home := pairHome(t)
 	t.Setenv("REMEDY_API_KEY", "not-a-portal-secret-dummy-key")

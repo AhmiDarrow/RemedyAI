@@ -3,6 +3,7 @@ package connect
 import (
 	"encoding"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"net/url"
@@ -49,6 +50,42 @@ func SessionIDDevice(hostPub, devicePub []byte) ([]byte, error) {
 	msg = append(msg, '|')
 	msg = append(msg, devicePub...)
 	return blake2s16(msg)
+}
+
+// RendezvousSIDs returns the active 16-byte session ids the PC should hold on
+// relay and public rendezvous: the live pair-window id (if any) plus one per
+// non-revoked paired device. Fail-soft on a bad device record.
+func RendezvousSIDs(home string) ([][]byte, error) {
+	out := make([][]byte, 0, MaxDevices+1)
+	if sid, err := PendingPairRendezvous(home); err != nil {
+		return nil, err
+	} else if len(sid) == SessionIDLen {
+		out = append(out, sid)
+	}
+	kp, err := LoadOrCreateHostKeyPair(home)
+	if err != nil {
+		return out, nil
+	}
+	list, err := ListDevices(home, false)
+	if err != nil {
+		return out, nil
+	}
+	for _, rec := range list {
+		hx := strings.TrimSpace(rec.PublicHex)
+		if hx == "" {
+			continue
+		}
+		pub, err := hex.DecodeString(hx)
+		if err != nil || len(pub) != DHLen {
+			continue
+		}
+		sid, err := SessionIDDevice(kp.Public, pub)
+		if err != nil {
+			continue
+		}
+		out = append(out, sid)
+	}
+	return out, nil
 }
 
 // blake2s16 is unkeyed BLAKE2s with digest_size=16 (matches Python hashlib).
