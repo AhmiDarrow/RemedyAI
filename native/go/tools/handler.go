@@ -215,6 +215,67 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	})); err != nil {
 		return err
 	}
+
+	if err := registry.Register(Descriptor{
+		ID:          "web.search",
+		Version:     1,
+		Description: "Search the public web (local mirror of Python worker)",
+		Runtime:     RuntimeGo,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["query"],
+			"properties":{
+				"query":{"type":"string","minLength":1},
+				"max_results":{"type":"integer","minimum":1,"maximum":10}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["query","backend","results"],
+			"properties":{
+				"query":{"type":"string"},
+				"backend":{"type":"string"},
+				"results":{
+					"type":"array",
+					"items":{
+						"type":"object",
+						"required":["title","url"],
+						"properties":{
+							"title":{"type":"string"},
+							"url":{"type":"string"},
+							"snippet":{"type":"string"}
+						},
+						"additionalProperties":false
+					}
+				}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(func(_ context.Context, request Request) (Result, error) {
+		var body struct {
+			Query      string `json:"query"`
+			MaxResults int    `json:"max_results"`
+		}
+		if err := json.Unmarshal(request.Input, &body); err != nil || strings.TrimSpace(body.Query) == "" {
+			return Result{}, ErrInvalidInput
+		}
+		out, err := json.Marshal(map[string]any{
+			"query":   body.Query,
+			"backend": "mirror",
+			"results": []map[string]string{
+				{
+					"title":   "mirror:" + body.Query,
+					"url":     "https://example.invalid/mirror",
+					"snippet": "local mirror result",
+				},
+			},
+		})
+		return Result{Output: out}, err
+	})); err != nil {
+		return err
+	}
 	return nil
 }
 

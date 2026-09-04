@@ -82,3 +82,87 @@ def test_stdio_tool_round_trip_workspace_list(tmp_path: Path, monkeypatch: pytes
     assert body["ok"] is True
     assert body["output"]["total"] >= 1
     assert any(e["name"] == "a.py" for e in body["output"]["entries"])
+
+
+def test_web_search_bridges_agent_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    import remedy.core.agent_web_tools as web
+
+    monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
+
+    def _fake_run_search(q, *, max_results, timeout, runtime=None):
+        assert q == "asyncio gather"
+        assert max_results == 2
+        return (
+            [
+                {
+                    "title": "asyncio docs",
+                    "url": "https://docs.python.org/3/library/asyncio.html",
+                    "snippet": "gather coroutines",
+                }
+            ],
+            "test-backend",
+        )
+
+    monkeypatch.setattr(web, "run_search", _fake_run_search)
+    out = worker._web_search({"query": "asyncio gather", "max_results": 2})
+    assert out["query"] == "asyncio gather"
+    assert out["backend"] == "test-backend"
+    assert out["results"][0]["url"].startswith("https://docs.python.org/")
+
+
+def test_web_search_requires_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    import remedy.core.agent_web_tools as web
+
+    monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
+    with pytest.raises(ValueError, match="query"):
+        worker._web_search({"query": "  "})
+
+
+def test_stdio_tool_round_trip_web_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    import remedy.core.agent_web_tools as web
+
+    monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
+    monkeypatch.setattr(
+        web,
+        "run_search",
+        lambda q, *, max_results, timeout, runtime=None: (
+            [{"title": "t", "url": "https://example.com/", "snippet": "s"}],
+            "stub",
+        ),
+    )
+
+    req = json.dumps(
+        {"tool_id": "web.search", "version": 1, "input": {"query": "example", "max_results": 1}}
+    ).encode("utf-8")
+    corr = b"\x03" + b"\x00" * 15
+    inbound = _frame(worker._KIND_TOOL_REQUEST, req, corr)
+
+    class _Buf:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+            self._pos = 0
+            self.out = bytearray()
+
+        def read(self, n: int) -> bytes:
+            if self._pos >= len(self._data):
+                return b""
+            chunk = self._data[self._pos : self._pos + n]
+            self._pos += len(chunk)
+            return chunk
+
+        def write(self, data: bytes) -> int:
+            self.out.extend(data)
+            return len(data)
+
+        def flush(self) -> None:
+            return None
+
+    buf = _Buf(inbound)
+    worker.serve(buf, buf)  # type: ignore[arg-type]
+
+    raw = bytes(buf.out)
+    payload_len = struct.unpack_from("<I", raw, 12)[0]
+    body = json.loads(raw[32 : 32 + payload_len].decode("utf-8"))
+    assert body["ok"] is True
+    assert body["output"]["backend"] == "stub"
+    assert body["output"]["results"][0]["title"] == "t"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/ipc"
@@ -81,6 +82,31 @@ func TestRMDYPythonToolsRoundTrip(t *testing.T) {
 	}
 	if listOut.Total < 1 {
 		t.Fatalf("workspace.list total=%d", listOut.Total)
+	}
+
+	searched, err := clientReg.Execute(context.Background(), Request{
+		ToolID: "web.search", Version: 1,
+		Input: json.RawMessage(`{"query":"remedy tool abi","max_results":3}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var searchOut struct {
+		Query   string `json:"query"`
+		Backend string `json:"backend"`
+		Results []struct {
+			Title string `json:"title"`
+			URL   string `json:"url"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(searched.Output, &searchOut); err != nil {
+		t.Fatal(err)
+	}
+	if searchOut.Query != "remedy tool abi" || searchOut.Backend != "mirror" || len(searchOut.Results) < 1 {
+		t.Fatalf("web.search=%+v", searchOut)
+	}
+	if !strings.Contains(searchOut.Results[0].Title, "remedy tool abi") {
+		t.Fatalf("web.search title=%q", searchOut.Results[0].Title)
 	}
 }
 

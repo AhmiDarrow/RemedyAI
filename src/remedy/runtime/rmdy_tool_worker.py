@@ -198,11 +198,42 @@ def _workspace_list(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return out
 
 
+def _web_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Bridge Tool ABI web.search to the existing agent web_search backend."""
+    from remedy.core.agent_web_tools import run_search, web_tools_enabled
+
+    if not web_tools_enabled(None):
+        raise PermissionError("web tools are disabled")
+    query = str(inp.get("query") or "").strip()
+    if not query:
+        raise ValueError("query is required")
+    if len(query) > 400:
+        query = query[:400]
+    try:
+        max_results = int(inp.get("max_results") if inp.get("max_results") is not None else 5)
+    except (TypeError, ValueError):
+        max_results = 5
+    max_results = max(1, min(10, max_results))
+    rows, backend = run_search(query, max_results=max_results, timeout=20.0, runtime=None)
+    results: list[dict[str, str]] = []
+    for row in rows:
+        item: dict[str, str] = {
+            "title": str(row.get("title") or ""),
+            "url": str(row.get("url") or ""),
+        }
+        snippet = str(row.get("snippet") or "").strip()
+        if snippet:
+            item["snippet"] = snippet
+        results.append(item)
+    return {"query": query, "backend": str(backend), "results": results}
+
+
 _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("text.slugify", 1): lambda inp: {"slug": _slugify(str(inp.get("text", "")))},
     ("text.word_count", 1): lambda inp: {"words": _word_count(str(inp.get("text", "")))},
     ("workspace.read", 1): _workspace_read,
     ("workspace.list", 1): _workspace_list,
+    ("web.search", 1): _web_search,
 }
 
 
