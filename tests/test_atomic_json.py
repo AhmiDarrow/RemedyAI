@@ -142,12 +142,13 @@ class TestConcurrency:
     def test_a_permanent_permission_error_is_raised_and_cleaned_up(
         self, tmp_path, monkeypatch
     ):
-        import time
-
         from remedy.core import atomic_json
 
         sleeps: list[float] = []
-        monkeypatch.setattr(time, "sleep", sleeps.append)
+        # Patch the module binding replace_with_retry actually calls — a global
+        # time.sleep patch can pick up unrelated sleeps under WSL/full-suite load
+        # and falsely inflate the count (seen as 18 vs 9 on linux lane).
+        monkeypatch.setattr(atomic_json.time, "sleep", sleeps.append)
 
         def _denied(src, dst):
             raise PermissionError("in use")
@@ -156,7 +157,11 @@ class TestConcurrency:
         p = tmp_path / "state.json"
         with pytest.raises(PermissionError):
             write_json_atomic(p, {"v": 1})
-        assert len(sleeps) == atomic_json._REPLACE_ATTEMPTS - 1
+        expected = atomic_json._REPLACE_ATTEMPTS - 1
+        assert len(sleeps) == expected, (
+            f"replace_with_retry should sleep once per failed attempt except the last; "
+            f"got {len(sleeps)} sleeps {sleeps!r}"
+        )
         assert sum(sleeps) <= 1.0, "the retry budget must stay short"
         assert list(tmp_path.iterdir()) == [], "a scratch file was left behind"
 
