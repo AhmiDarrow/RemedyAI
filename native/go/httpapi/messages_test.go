@@ -568,15 +568,15 @@ func TestAbortSessionEpoch(t *testing.T) {
 
 func TestStreamClaimUnit(t *testing.T) {
 	c := newStreamClaims()
-	if !c.TryClaim("s1") {
+	ep, ctx, ok := c.TryClaim("s1")
+	if !ok || ctx == nil {
 		t.Fatal("first claim")
 	}
-	if c.TryClaim("s1") {
-		t.Fatal("second claim should fail")
-	}
-	ep := c.Epoch("s1")
 	if ep != 1 {
 		t.Fatalf("epoch = %d", ep)
+	}
+	if _, _, ok := c.TryClaim("s1"); ok {
+		t.Fatal("second claim should fail")
 	}
 	n := c.Abort("s1", &ep, strPtr("supersede"))
 	if n != 1 || c.PeekAbortReason("s1") != abortReasonSupersede {
@@ -585,15 +585,21 @@ func TestStreamClaimUnit(t *testing.T) {
 	if !c.IsClaimed("s1") {
 		t.Fatal("claim must remain until release")
 	}
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("abort should cancel claim ctx")
+	}
 	c.Release("s1", &ep)
 	if c.IsClaimed("s1") {
 		t.Fatal("released")
 	}
-	if !c.TryClaim("s1") {
+	ep2, ctx2, ok := c.TryClaim("s1")
+	if !ok || ctx2 == nil {
 		t.Fatal("reclaim after release")
 	}
-	if c.Epoch("s1") != 2 {
-		t.Fatalf("epoch bump = %d", c.Epoch("s1"))
+	if ep2 != 2 {
+		t.Fatalf("epoch bump = %d", ep2)
 	}
 }
 

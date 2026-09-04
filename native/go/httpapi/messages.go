@@ -391,11 +391,11 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.claims.TryClaim(sid) {
+	epoch, claimCtx, claimed := s.claims.TryClaim(sid)
+	if !claimed {
 		writeJSON(w, http.StatusConflict, map[string]string{"detail": sessionBusyDetail})
 		return
 	}
-	epoch := s.claims.Epoch(sid)
 	defer s.claims.Release(sid, &epoch)
 
 	requestID := newSessionID()
@@ -451,7 +451,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx := s.claims.Context(sid)
+	ctx := claimCtx
 	if ctx == nil {
 		ctx = r.Context()
 	}

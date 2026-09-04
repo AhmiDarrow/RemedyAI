@@ -27,6 +27,7 @@ type streamClaims struct {
 	mu     sync.Mutex
 	bySID  map[string]*claimEntry
 	epochs map[string]int
+	turns  sync.WaitGroup
 }
 
 func newStreamClaims() *streamClaims {
@@ -46,22 +47,61 @@ func normalizeAbortReason(reason string) string {
 	}
 }
 
-// TryClaim atomically claims sessionID for a new turn. False → 409.
-func (c *streamClaims) TryClaim(sessionID string) bool {
+// TryClaim atomically claims sessionID for a new turn.
+// ok=false → 409. On success, epoch and ctx are the live claim (never Background).
+func (c *streamClaims) TryClaim(sessionID string) (epoch int, ctx context.Context, ok bool) {
 	sid := strings.TrimSpace(sessionID)
 	if sid == "" || c == nil {
-		return false
+		return 0, nil, false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, busy := c.bySID[sid]; busy {
-		return false
+		return 0, nil, false
 	}
 	n := c.epochs[sid] + 1
 	c.epochs[sid] = n
 	ctx, cancel := context.WithCancel(context.Background())
 	c.bySID[sid] = &claimEntry{epoch: n, cancel: cancel, ctx: ctx}
-	return true
+	return n, ctx, true
+}
+
+// BeginTurn marks a detached turn goroutine; EndTurn must be deferred.
+func (c *streamClaims) BeginTurn() {
+	if c == nil {
+		return
+	}
+	c.turns.Add(1)
+}
+
+// EndTurn pairs with BeginTurn.
+func (c *streamClaims) EndTurn() {
+	if c == nil {
+		return
+	}
+	c.turns.Done()
+}
+
+// AbortAll cancels every live claim (server shutdown / Close).
+func (c *streamClaims) AbortAll() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, ent := range c.bySID {
+		if ent.cancel != nil {
+			ent.cancel()
+		}
+	}
+}
+
+// WaitTurns blocks until every BeginTurn has EndTurn'd.
+func (c *streamClaims) WaitTurns() {
+	if c == nil {
+		return
+	}
+	c.turns.Wait()
 }
 
 // Epoch returns the current claim generation (0 if never claimed).

@@ -103,9 +103,16 @@ func New(cfg Config) (*Server, error) {
 	return s, nil
 }
 
-// Close releases the session store.
+// Close aborts in-flight turns, waits for them, then releases the session store.
 func (s *Server) Close() error {
-	if s == nil || s.sessions == nil {
+	if s == nil {
+		return nil
+	}
+	if s.claims != nil {
+		s.claims.AbortAll()
+		s.claims.WaitTurns()
+	}
+	if s.sessions == nil {
 		return nil
 	}
 	return s.sessions.Close()
@@ -127,6 +134,10 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	var serveErr error
 	select {
 	case <-ctx.Done():
+		// Cancel turns before HTTP Shutdown so SSE handlers can drain.
+		if s.claims != nil {
+			s.claims.AbortAll()
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = httpServer.Shutdown(shutdownCtx)
