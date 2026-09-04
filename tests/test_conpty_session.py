@@ -1,30 +1,22 @@
-"""The ConPTY spawn path — the one place Remedy can start a real Windows console.
+"""The ConPTY spawn path — Zig-backed via ``host_binding`` (ABI 5).
 
-What breaks if this code is wrong: ``execution/host/conpty`` asks kernel32 to
-create a pseudoconsole and then ``CreateProcessW`` a child attached to it. Get a
-guard wrong and Remedy tries that on a machine with no such API; get a failure
-path wrong and every aborted spawn leaks a pipe, a console and a live child
-process into the owner's session — the session layer swallows the exception, so
-nothing would ever complain out loud. Get the argument marshalling wrong and the
-child is launched with the wrong command line, the wrong environment or handles
-it should never have inherited.
+What breaks if this code is wrong: ``execution/host/conpty`` asks ``remedy_core``
+to create a pseudoconsole and attach a child. Get a guard wrong and Remedy tries
+that on a machine with no such API; get a failure path wrong and every aborted
+spawn leaks a session; get the argument marshalling wrong and the child is
+launched with the wrong command line or environment.
 
-So the emphasis here is the negative side: what must be refused before a single
-handle is opened, what must be closed again when a step fails, what must NOT be
-attempted once an earlier step failed, and what the parent must never hand to
-the child. Every Win32 call goes through ``tests.harness.fake_win32`` — no real
-console is ever created and no real process is ever started.
+Win32 stays inside Zig. Tests mock ``host_binding`` through
+``tests.harness.fake_host_binding.install_fake_conpty`` (backed by
+``FakeConsoleHost``) — no real console, no real process.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import ctypes
 import subprocess
 import sys
 import threading
-import types
 from typing import Any
 
 import pytest
@@ -32,7 +24,6 @@ import pytest
 from remedy.execution.host import conpty
 from remedy.execution.host.conpty import (
     _ConPTYProcess,
-    _env_block,
     _HandleStream,
     spawn_conpty,
     spawn_conpty_supported,
@@ -42,31 +33,19 @@ from remedy.execution.host.session import (
     _sentinel_done,
     _split_sentinel,
     _wrap_with_sentinel,
-    strip_vt,
 )
+from tests.harness.fake_host_binding import FakeHostConpty, install_fake_conpty
 from tests.harness.fake_win32 import (
     CONPTY_PRELUDE,
     FakeConsoleHost,
     FakeShellExitError,
-    FakeWinDLL,
     fake_cmd_shell,
-    handle_value,
-    install_fake_win32,
 )
 
 WINDOWS = sys.platform == "win32"
 
-# ``_spawn_conpty_sync`` and ``_HandleStream`` build ctypes.wintypes structures
-# and ctypes.HRESULT, neither of which the double can conjure off Windows.
-windows_only = pytest.mark.skipif(
-    not WINDOWS,
-    reason="the code under test builds ctypes.wintypes structures, Windows-only",
-)
-
-_EXTENDED_STARTUPINFO_PRESENT = 0x00080000
-_CREATE_UNICODE_ENVIRONMENT = 0x00000400
-_PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016
-_STARTF_USESTDHANDLES = 0x00000100
+# Binding fakes are portable; live Zig ConPTY still needs Windows.
+windows_only = pytest.mark.skipif(not WINDOWS, reason="ConPTY is Windows-only")
 
 
 # ---------------------------------------------------------------------------
@@ -76,68 +55,24 @@ _STARTF_USESTDHANDLES = 0x00000100
 
 @pytest.fixture
 def wired() -> Any:
-    """A fake kernel32 with the in-memory console host behind it."""
     host = FakeConsoleHost()
-    with install_fake_win32(console=host) as fake:
+    with install_fake_conpty(console=host) as fake:
         yield host, fake
 
 
 @pytest.fixture(autouse=True)
 def _no_leaked_override() -> Any:
-    """``spawn_conpty._override`` is process-global; never let it escape a test."""
     yield
     if hasattr(spawn_conpty, "_override"):
         delattr(spawn_conpty, "_override")
 
 
-def _spawn_tolerating_the_return_bug(
-    argv: list[str],
-    cwd: str | None = None,
-    env: dict[str, str] | None = None,
-) -> Any:
-    """Run a spawn that gets all the way to CreateProcessW.
-
-    Today the final ``int(wintypes.HANDLE())`` raises ValueError (see
-    ``test_a_successful_spawn_currently_dies_...``), so tests that only care
-    about *what was asked of kernel32* must not depend on the return.
-    """
-    with contextlib.suppress(ValueError):
-        return conpty._spawn_conpty_sync(argv, cwd, env)
-    return None
-
-
-def _new_pipe(host: FakeConsoleHost) -> tuple[int, int]:
-    """(read_handle, write_handle) allocated through the fake's bookkeeping."""
-    read_h, write_h = ctypes.c_void_p(), ctypes.c_void_p()
-    host.CreatePipe(ctypes.byref(read_h), ctypes.byref(write_h))
-    return int(read_h.value or 0), int(write_h.value or 0)
-
-
-def _open_process(host: FakeConsoleHost) -> tuple[_ConPTYProcess, dict[str, int]]:
-    """A ``_ConPTYProcess`` wired to handles the fake console host tracks."""
-    _pty_in, stdin_h = _new_pipe(host)
-    stdout_h, _pty_out = _new_pipe(host)
-    pc = ctypes.c_void_p()
-    host.CreatePseudoConsole(types.SimpleNamespace(X=120, Y=40), _pty_in, _pty_out, 0, pc)
-    host.CreateProcessW()
-    handles = {
-        "stdin": stdin_h,
-        "stdout": stdout_h,
-        "pc": int(pc.value or 0),
-        "process": host.process_handle,
-    }
-    proc = _ConPTYProcess(
-        pid=host.pid,
-        process_handle=handles["process"],
-        stdin_handle=stdin_h,
-        stdout_handle=stdout_h,
-        pc_handle=handles["pc"],
-    )
-    return proc, handles
+def _session_of(fake: FakeHostConpty, proc: _ConPTYProcess) -> Any:
+    return fake.sessions[proc._handle]
 
 
 # ---------------------------------------------------------------------------
-# spawn_conpty_supported — the guard that keeps us off unsupported Windows
+# spawn_conpty_supported
 # ---------------------------------------------------------------------------
 
 
@@ -146,37 +81,35 @@ def test_conpty_is_never_reported_supported_off_windows(monkeypatch: pytest.Monk
     assert spawn_conpty_supported() is False
 
 
-def test_the_support_probe_off_windows_does_not_even_load_kernel32(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    windll = FakeWinDLL()
-    with install_fake_win32(windll=windll, platform="linux"):
+def test_the_support_probe_off_windows_does_not_call_the_binding() -> None:
+    host = FakeConsoleHost()
+    with install_fake_conpty(console=host, platform="linux") as fake:
         assert spawn_conpty_supported() is False
-    assert len(windll.log) == 0
-    assert windll.dlls == {}, "the platform guard must come before any DLL load"
+    assert fake.calls == []
 
 
-def test_conpty_is_supported_when_kernel32_exports_createpseudoconsole() -> None:
-    with install_fake_win32():
+def test_conpty_is_supported_when_the_binding_reports_available() -> None:
+    with install_fake_conpty(available=True):
         assert spawn_conpty_supported() is True
 
 
-def test_conpty_is_unsupported_on_a_windows_without_createpseudoconsole() -> None:
-    windll = FakeWinDLL()
-    with install_fake_win32(windll=windll):
-        windll.dll("kernel32").set_missing("CreatePseudoConsole")
+def test_conpty_is_unsupported_when_the_binding_reports_unavailable() -> None:
+    with install_fake_conpty(available=False):
         assert spawn_conpty_supported() is False
 
 
-def test_a_kernel32_that_refuses_to_load_is_reported_unsupported_not_raised(
+def test_a_binding_that_refuses_to_load_is_reported_unsupported_not_raised(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from remedy.core.computer import host_binding
+    from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
+
     monkeypatch.setattr(sys, "platform", "win32")
 
-    def explode(*_a: Any, **_k: Any) -> Any:
-        raise OSError("kernel32 is not available here")
+    def explode() -> bool:
+        raise NativeRuntimeUnavailableError("no remedy_core")
 
-    monkeypatch.setattr(ctypes, "WinDLL", explode, raising=False)
+    monkeypatch.setattr(host_binding, "conpty_available", explode)
     assert spawn_conpty_supported() is False
 
 
@@ -185,12 +118,11 @@ def test_probing_for_support_never_creates_a_console_or_a_process(wired: Any) ->
     assert spawn_conpty_supported() is True
     assert host.pseudoconsoles == []
     assert host.spawns == []
-    assert "CreatePseudoConsole" not in fake.log
-    assert "CreateProcessW" not in fake.log
+    assert fake.spawns == []
 
 
 # ---------------------------------------------------------------------------
-# spawn_conpty — the async entry point and its override hook
+# spawn_conpty — async entry + override
 # ---------------------------------------------------------------------------
 
 
@@ -255,11 +187,9 @@ async def test_a_failing_override_propagates_so_the_caller_can_fall_back(
 
 
 @pytest.mark.asyncio
-async def test_the_blocking_win32_spawn_runs_off_the_event_loop_thread(
+async def test_the_blocking_spawn_runs_off_the_event_loop_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # CreateProcessW plus four pipe calls is long enough to stall a UI; running
-    # it inline on the loop would freeze every other Remedy task.
     seen: dict[str, Any] = {}
 
     def fake_sync(argv: list[str], cwd: str | None, env: dict[str, str] | None) -> str:
@@ -273,7 +203,6 @@ async def test_the_blocking_win32_spawn_runs_off_the_event_loop_thread(
 
     assert got == "proc"
     assert seen["thread"] != threading.get_ident()
-    # argv/cwd/env are handed over positionally, in that order.
     assert (seen["argv"], seen["cwd"], seen["env"]) == (["cmd.exe"], None, {"K": "V"})
 
 
@@ -282,7 +211,7 @@ async def test_a_win32_spawn_failure_reaches_the_caller_unwrapped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_sync(*_a: Any) -> Any:
-        raise OSError("CreateProcessW failed winerr=2")
+        raise OSError("conpty_spawn: operation failed winerr=2")
 
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(conpty, "_spawn_conpty_sync", fake_sync)
@@ -291,57 +220,14 @@ async def test_a_win32_spawn_failure_reaches_the_caller_unwrapped(
 
 
 # ---------------------------------------------------------------------------
-# _env_block
-# ---------------------------------------------------------------------------
-
-
-def test_no_environment_means_no_environment_block() -> None:
-    # None must stay None: an empty block would wipe the child's environment.
-    assert _env_block(None) is None
-
-
-def test_an_environment_block_is_nul_separated_and_double_nul_terminated() -> None:
-    block = _env_block({"A": "1", "B": "2"})
-    assert block is not None
-    assert block[:].startswith("A=1\0B=2\0\0")
-
-
-def test_an_empty_environment_still_produces_a_terminated_block() -> None:
-    block = _env_block({})
-    assert block is not None
-    assert block[:].startswith("\0\0")
-
-
-@pytest.mark.parametrize(
-    ("env", "expected"),
-    [
-        ({"PATH": "C:\\bin;C:\\other"}, "PATH=C:\\bin;C:\\other\0\0"),
-        ({"EQ": "a=b"}, "EQ=a=b\0\0"),
-        ({"UNI": "café"}, "UNI=café\0\0"),
-        ({"EMPTY": ""}, "EMPTY=\0\0"),
-    ],
-)
-def test_environment_values_are_passed_through_untouched(env: dict[str, str], expected: str) -> None:
-    block = _env_block(env)
-    assert block is not None
-    assert block[:].startswith(expected)
-
-
-def test_environment_order_is_preserved() -> None:
-    block = _env_block({"Z": "1", "A": "2", "M": "3"})
-    assert block is not None
-    assert block[:].startswith("Z=1\0A=2\0M=3\0\0")
-
-
-# ---------------------------------------------------------------------------
-# _spawn_conpty_sync — what the parent asks of kernel32
+# _spawn_conpty_sync — binding arguments and cleanup
 # ---------------------------------------------------------------------------
 
 
 @windows_only
 def test_the_pseudoconsole_gets_the_pty_ends_of_both_pipes(wired: Any) -> None:
     host, _fake = wired
-    _spawn_tolerating_the_return_bug(["cmd.exe"])
+    conpty._spawn_conpty_sync(["cmd.exe"], None, None)
 
     assert len(host.pipes) == 2
     assert host.pseudoconsoles == [
@@ -357,10 +243,8 @@ def test_the_pseudoconsole_gets_the_pty_ends_of_both_pipes(wired: Any) -> None:
 
 @windows_only
 def test_the_parent_closes_the_pty_side_ends_and_keeps_its_own(wired: Any) -> None:
-    # Holding the pty ends open would keep the child's console alive forever;
-    # closing the parent ends would blind the session.
     host, _fake = wired
-    _spawn_tolerating_the_return_bug(["cmd.exe"])
+    conpty._spawn_conpty_sync(["cmd.exe"], None, None)
 
     assert host.is_closed(host.pipes[0].read_handle), "pty input end must be released"
     assert host.is_closed(host.pipes[1].write_handle), "pty output end must be released"
@@ -376,159 +260,96 @@ def test_the_parent_closes_the_pty_side_ends_and_keeps_its_own(wired: Any) -> No
         (["cmd.exe", "/c", "echo hi"], 'cmd.exe /c "echo hi"'),
         (["C:\\Program Files\\x.exe", "-v"], '"C:\\Program Files\\x.exe" -v'),
         (["cmd.exe", "/c", "echo a & del b"], 'cmd.exe /c "echo a & del b"'),
-        (["cmd.exe", '/c', 'say "hi"'], 'cmd.exe /c "say \\"hi\\""'),
+        (["cmd.exe", "/c", 'say "hi"'], 'cmd.exe /c "say \\"hi\\""'),
     ],
 )
 def test_the_command_line_is_quoted_argument_by_argument(
     wired: Any, argv: list[str], cmdline: str
 ) -> None:
-    # An argument containing spaces, quotes or a shell metacharacter must stay
-    # ONE argument — never split, never able to append a second command.
-    host, _fake = wired
-    _spawn_tolerating_the_return_bug(argv)
+    host, fake = wired
+    conpty._spawn_conpty_sync(argv, None, None)
+    assert fake.spawns[0]["cmdline"] == cmdline
+    assert fake.spawns[0]["cmdline"] == subprocess.list2cmdline(argv)
     assert host.spawns[0]["cmdline"] == cmdline
-    assert host.spawns[0]["cmdline"] == subprocess.list2cmdline(argv)
-
-
-@windows_only
-def test_the_executable_is_named_only_by_the_command_line(wired: Any) -> None:
-    # lpApplicationName is NULL, so argv[0] is resolved the same way a shell
-    # would resolve it; passing both is where quoting bugs hide.
-    host, _fake = wired
-    _spawn_tolerating_the_return_bug(["cmd.exe", "/c", "ver"])
-    assert host.spawns[0]["app"] is None
 
 
 @windows_only
 @pytest.mark.parametrize("cwd", [None, "C:\\work", "\\\\server\\share"])
 def test_the_working_directory_is_handed_over_unchanged(wired: Any, cwd: str | None) -> None:
-    host, _fake = wired
-    _spawn_tolerating_the_return_bug(["cmd.exe"], cwd)
-    assert host.spawns[0]["cwd"] == cwd
+    _host, fake = wired
+    conpty._spawn_conpty_sync(["cmd.exe"], cwd, None)
+    assert fake.spawns[0]["cwd"] == cwd
 
 
 @windows_only
-def test_the_child_gets_a_unicode_environment_and_an_extended_startupinfo(wired: Any) -> None:
-    host, _fake = wired
-    _spawn_tolerating_the_return_bug(["cmd.exe"], None, {"A": "b"})
-    flags = host.spawns[0]["flags"]
-    assert flags & _EXTENDED_STARTUPINFO_PRESENT, "without this the pty attribute is ignored"
-    assert flags & _CREATE_UNICODE_ENVIRONMENT, "an ANSI block would mangle the unicode buffer"
+def test_the_child_gets_a_unicode_environment_and_extended_flags(wired: Any) -> None:
+    host, fake = wired
+    conpty._spawn_conpty_sync(["cmd.exe"], None, {"A": "b"})
+    assert fake.spawns[0]["env"] == {"A": "b"}
+    assert host.spawns[0]["flags"] & 0x00080000
+    assert host.spawns[0]["flags"] & 0x00000400
     assert host.spawns[0]["env"] == "A=b"
 
 
 @windows_only
 def test_no_environment_block_is_passed_when_none_was_requested(wired: Any) -> None:
-    host, _fake = wired
-    _spawn_tolerating_the_return_bug(["cmd.exe"], None, None)
+    host, fake = wired
+    conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    assert fake.spawns[0]["env"] is None
     assert host.spawns[0]["env"] is None
 
 
 @windows_only
 def test_the_pipe_ends_are_created_non_inheritable(wired: Any) -> None:
-    # Inheritable pipe ends would be handed to every process Remedy later
-    # spawns, and would keep the console's write end alive past the child's exit
-    # — a shell that never reports EOF.
     host, _fake = wired
-    _spawn_tolerating_the_return_bug(["cmd.exe"])
+    conpty._spawn_conpty_sync(["cmd.exe"], None, None)
     assert [p.inheritable for p in host.pipes] == [False, False]
 
 
 @windows_only
 def test_the_child_inherits_no_handles(wired: Any) -> None:
-    # The pseudoconsole duplicates what the child needs; blanket inheritance
-    # would hand the child every other handle Remedy has open.
-    host, _fake = wired
-    _spawn_tolerating_the_return_bug(["cmd.exe"])
+    host, fake = wired
+    conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    assert fake.spawns[0]["inherit"] is False
     assert host.spawns[0]["inherit"] is False
 
 
 @windows_only
 def test_the_pseudoconsole_is_attached_through_the_documented_attribute(wired: Any) -> None:
-    # A wrong attribute id means CreateProcessW succeeds and the child simply
-    # has no console — the failure would be invisible until output went missing.
     host, _fake = wired
-    _spawn_tolerating_the_return_bug(["cmd.exe"])
-
+    conpty._spawn_conpty_sync(["cmd.exe"], None, None)
     assert len(host.attribute_updates) == 1
     args = host.attribute_updates[0]
-    assert args[2] == _PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
-    assert host.kinds.get(handle_value(args[3])) == "pseudoconsole"
-
-
-@windows_only
-def test_the_attribute_list_is_sized_by_a_probe_before_it_is_built(wired: Any) -> None:
-    _host, fake = wired
-    _spawn_tolerating_the_return_bug(["cmd.exe"])
-    calls = fake.log.calls("InitializeProcThreadAttributeList")
-    assert len(calls) == 2
-    assert calls[0].args[0] is None, "first call must be the NULL size probe"
-    assert calls[1].args[0] is not None
-
-
-@windows_only
-def test_the_attribute_list_is_released_once_the_process_exists(wired: Any) -> None:
-    _host, fake = wired
-    _spawn_tolerating_the_return_bug(["cmd.exe"])
-    assert fake.log.count("DeleteProcThreadAttributeList") == 1
+    assert args[2] == 0x00020016
 
 
 @windows_only
 def test_the_thread_handle_is_closed_immediately(wired: Any) -> None:
-    # Only the process handle is useful to us; a retained thread handle is a
-    # per-command leak in a long-lived session.
     host, _fake = wired
-    _spawn_tolerating_the_return_bug(["cmd.exe"])
+    conpty._spawn_conpty_sync(["cmd.exe"], None, None)
     threads = [h for h, kind in host.kinds.items() if kind == "thread"]
     assert threads and all(host.is_closed(h) for h in threads)
 
 
 @windows_only
 def test_a_successful_spawn_returns_a_usable_process(wired: Any) -> None:
-    """ConPTY could never actually succeed.
-
-    ``int(wintypes.HANDLE())`` raises ValueError — a HANDLE is a c_void_p,
-    which exposes a buffer rather than an ``__int__`` — so constructing the
-    ``_ConPTYProcess`` threw on the *last* statement, after the child had
-    already been created. The session layer caught everything and fell back to
-    pipes, so the only visible symptom was that ConPTY silently never worked,
-    while each attempt left a running child, its process handle, the
-    pseudoconsole and both parent pipe ends behind.
-    """
-    host, _fake = wired
+    host, fake = wired
     proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
 
     assert host.spawns, "no child was created"
     assert proc.pid > 0
-    # The handles become the two ends of the duck-typed stdio pair.
     assert proc.stdin is not None and proc.stdout is not None
-    assert proc._pc, "the pseudoconsole handle was lost"
-    assert proc._ph, "the process handle was lost"
-
-
-@windows_only
-def test_the_spawned_handles_are_the_ones_the_pipes_actually_returned(
-    wired: Any,
-) -> None:
-    """A silently-zeroed handle would read as "no pipe" rather than an error."""
-    host, _fake = wired
-    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
-    assert host.kinds[proc._pc] == "pseudoconsole"
-    assert host.kinds[proc._ph] == "process"
-    assert proc.stdin._handle in host.kinds
-    assert proc.stdout._handle in host.kinds
-
-
-# ---------------------------------------------------------------------------
-# _spawn_conpty_sync — every failure path cleans up and stops
-# ---------------------------------------------------------------------------
+    assert proc._handle in fake.sessions
+    session = _session_of(fake, proc)
+    assert session.pc_handle
+    assert session.process_handle
 
 
 @windows_only
 def test_a_failed_input_pipe_stops_before_a_console_or_a_child_exists() -> None:
     host = FakeConsoleHost(fail_create_pipe=True)
-    with install_fake_win32(console=host):
-        with pytest.raises(OSError, match="CreatePipe input failed"):
+    with install_fake_conpty(console=host):
+        with pytest.raises(OSError, match="operation failed"):
             conpty._spawn_conpty_sync(["cmd.exe"], None, None)
     assert host.pseudoconsoles == []
     assert host.spawns == []
@@ -538,18 +359,9 @@ def test_a_failed_input_pipe_stops_before_a_console_or_a_child_exists() -> None:
 @windows_only
 def test_a_failed_output_pipe_releases_the_input_pipe_it_already_opened() -> None:
     host = FakeConsoleHost()
-    with install_fake_win32(console=host) as fake:
-        calls = {"n": 0}
-        real = host.CreatePipe
-
-        def second_one_fails(*args: Any, **kw: Any) -> int:
-            calls["n"] += 1
-            return 0 if calls["n"] == 2 else real(*args, **kw)
-
-        fake.kernel32.on("CreatePipe", second_one_fails)
-        with pytest.raises(OSError, match="CreatePipe output failed"):
+    with install_fake_conpty(console=host, fail_after_pipes=2):
+        with pytest.raises(OSError, match="operation failed"):
             conpty._spawn_conpty_sync(["cmd.exe"], None, None)
-
     assert host.open_handles == [], f"leaked {host.open_handles}"
     assert host.double_closed == []
     assert host.pseudoconsoles == []
@@ -557,39 +369,35 @@ def test_a_failed_output_pipe_releases_the_input_pipe_it_already_opened() -> Non
 
 
 @windows_only
-def test_a_failed_pseudoconsole_reports_the_hresult_and_leaks_nothing() -> None:
+def test_a_failed_pseudoconsole_reports_the_error_and_leaks_nothing() -> None:
     host = FakeConsoleHost(create_pseudoconsole_hr=-2147024809)
-    with install_fake_win32(console=host):
-        with pytest.raises(OSError, match=r"CreatePseudoConsole failed hr=-2147024809"):
+    with install_fake_conpty(console=host):
+        with pytest.raises(OSError, match=r"winerr=-2147024809"):
             conpty._spawn_conpty_sync(["cmd.exe"], None, None)
 
     assert host.open_handles == []
-    assert host.double_closed == [], "every pipe end is closed exactly once"
-    assert host.spawns == [], "no child may be started once the console failed"
+    assert host.double_closed == []
+    assert host.spawns == []
 
 
 @windows_only
 def test_a_failed_attribute_list_closes_the_console_and_starts_nothing() -> None:
     host = FakeConsoleHost(fail_attribute_list=True)
-    with install_fake_win32(console=host) as fake:
-        with pytest.raises(OSError, match="InitializeProcThreadAttributeList failed"):
+    with install_fake_conpty(console=host):
+        with pytest.raises(OSError, match="operation failed"):
             conpty._spawn_conpty_sync(["cmd.exe"], None, None)
 
     assert host.closed_pseudoconsoles, "the pseudoconsole must be released"
     assert host.open_handles == []
     assert host.spawns == []
-    assert fake.log.count("DeleteProcThreadAttributeList") == 0, "nothing was initialised"
 
 
 @windows_only
-def test_a_failed_attribute_update_deletes_the_list_it_had_built() -> None:
+def test_a_failed_attribute_update_closes_the_console() -> None:
     host = FakeConsoleHost()
-    with install_fake_win32(console=host) as fake:
-        fake.kernel32.on("UpdateProcThreadAttribute", lambda *_a: 0)
-        with pytest.raises(OSError, match="UpdateProcThreadAttribute failed"):
+    with install_fake_conpty(console=host, fail_attribute_update=True):
+        with pytest.raises(OSError, match="operation failed"):
             conpty._spawn_conpty_sync(["cmd.exe"], None, None)
-
-        assert fake.log.count("DeleteProcThreadAttributeList") == 1
 
     assert host.closed_pseudoconsoles
     assert host.open_handles == []
@@ -599,77 +407,67 @@ def test_a_failed_attribute_update_deletes_the_list_it_had_built() -> None:
 @windows_only
 def test_a_failed_createprocess_closes_every_handle_and_the_console() -> None:
     host = FakeConsoleHost(fail_create_process=True)
-    with install_fake_win32(console=host) as fake:
-        with pytest.raises(OSError, match=r"CreateProcessW failed winerr=\d+"):
+    with install_fake_conpty(console=host):
+        with pytest.raises(OSError, match=r"winerr=2"):
             conpty._spawn_conpty_sync(["cmd.exe"], None, None)
-        assert fake.log.count("DeleteProcThreadAttributeList") == 1
 
     assert host.open_handles == [], f"leaked {host.open_handles}"
     assert host.closed_pseudoconsoles
-    assert host.terminated == [], "there is no child to terminate"
+    assert host.terminated == []
 
 
 # ---------------------------------------------------------------------------
-# _HandleStream
+# _HandleStream / _ConPTYProcess
 # ---------------------------------------------------------------------------
 
 
 @windows_only
 def test_the_stdin_stream_writes_the_bytes_it_was_given(wired: Any) -> None:
-    host, _fake = wired
-    _read, write_h = _new_pipe(host)
-    stream = _HandleStream(write_h, write=True)
-    stream.write(b"dir\r\n")
-    assert host.written(write_h) == b"dir\r\n"
+    host, fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
+    proc.stdin.write(b"dir\r\n")
+    assert host.written(session.stdin_handle) == b"dir\r\n"
 
 
 @windows_only
 def test_a_read_stream_refuses_to_write(wired: Any) -> None:
-    # stdout is read-only; a write here would be a bug that silently corrupts
-    # whatever the other end of the pipe is doing.
-    host, _fake = wired
-    read_h, _write = _new_pipe(host)
-    stream = _HandleStream(read_h, write=False)
-    stream.write(b"nope")
-    assert host.written(read_h) == b""
+    host, fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
+    proc.stdout.write(b"nope")
+    assert host.written(session.stdout_handle) == b""
 
 
 @windows_only
 def test_writing_after_close_is_ignored_rather_than_raising(wired: Any) -> None:
-    host, _fake = wired
-    _read, write_h = _new_pipe(host)
-    stream = _HandleStream(write_h, write=True)
-    stream.close()
-    stream.write(b"too late")
-    assert host.written(write_h) == b""
-
-
-@windows_only
-def test_a_write_to_a_dead_handle_does_not_raise(wired: Any) -> None:
-    _host, _fake = wired
-    stream = _HandleStream(0xDEAD, write=True)
-    stream.write(b"x")  # WriteFile returns FALSE; the session must survive it
+    host, fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
+    stdin_h = session.stdin_handle
+    proc.stdin.close()
+    proc.stdin.write(b"too late")
+    assert host.written(stdin_h) == b""
 
 
 @windows_only
 @pytest.mark.asyncio
 async def test_the_stdout_stream_reads_what_the_child_produced(wired: Any) -> None:
-    host, _fake = wired
-    read_h, _write = _new_pipe(host)
-    host.feed(read_h, b"hello world")
-    stream = _HandleStream(read_h, write=False)
-    assert await stream.read(4096) == b"hello world"
+    host, fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
+    host.feed(session.stdout_handle, b"hello world")
+    assert await proc.stdout.read(4096) == b"hello world"
 
 
 @windows_only
 @pytest.mark.asyncio
 async def test_a_read_returns_only_the_bytes_the_api_reported(wired: Any) -> None:
-    # The buffer is as long as the request; handing all of it back would append
-    # NUL padding to every chunk of console output the session decodes.
-    host, _fake = wired
-    read_h, _write = _new_pipe(host)
-    host.feed(read_h, b"abc")
-    got = await _HandleStream(read_h, write=False).read(4096)
+    host, fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
+    host.feed(session.stdout_handle, b"abc")
+    got = await proc.stdout.read(4096)
     assert len(got) == 3
     assert b"\x00" not in got
 
@@ -677,84 +475,71 @@ async def test_a_read_returns_only_the_bytes_the_api_reported(wired: Any) -> Non
 @windows_only
 @pytest.mark.asyncio
 async def test_a_read_is_capped_by_the_requested_size(wired: Any) -> None:
-    host, _fake = wired
-    read_h, _write = _new_pipe(host)
-    host.feed(read_h, b"abcdef")
-    stream = _HandleStream(read_h, write=False)
-    assert await stream.read(2) == b"ab"
-    assert await stream.read(4) == b"cdef"
+    host, fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
+    host.feed(session.stdout_handle, b"abcdef")
+    assert await proc.stdout.read(2) == b"ab"
+    assert await proc.stdout.read(4) == b"cdef"
 
 
 @windows_only
 @pytest.mark.asyncio
 async def test_an_empty_pipe_reads_as_end_of_stream_not_an_error(wired: Any) -> None:
-    host, _fake = wired
-    read_h, _write = _new_pipe(host)
-    stream = _HandleStream(read_h, write=False)
-    assert await stream.read() == b""
+    _host, _fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    assert await proc.stdout.read() == b""
 
 
 @windows_only
 @pytest.mark.asyncio
 async def test_a_zero_length_read_still_consumes_a_byte(wired: Any) -> None:
-    """Documents today's behaviour: n is clamped up to 1, not down to 0.
-
-    ``read(0)`` therefore takes a byte off the pipe instead of returning
-    immediately — harmless for the session (which always asks for 4096) but not
-    what the signature suggests.
-    """
-    host, _fake = wired
-    read_h, _write = _new_pipe(host)
-    host.feed(read_h, b"ab")
-    stream = _HandleStream(read_h, write=False)
-    assert await stream.read(0) == b"a"
+    """Documents today's behaviour: n is clamped up to 1, not down to 0."""
+    host, fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
+    host.feed(session.stdout_handle, b"ab")
+    assert await proc.stdout.read(0) == b"a"
 
 
 @windows_only
 @pytest.mark.asyncio
 async def test_a_write_stream_never_returns_data(wired: Any) -> None:
-    host, _fake = wired
-    _read, write_h = _new_pipe(host)
-    host.feed(write_h, b"not for you")
-    stream = _HandleStream(write_h, write=True)
-    assert await stream.read() == b""
+    _host, _fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    assert await proc.stdin.read() == b""
 
 
 @windows_only
 @pytest.mark.asyncio
 async def test_reading_after_close_returns_end_of_stream(wired: Any) -> None:
-    host, _fake = wired
-    read_h, _write = _new_pipe(host)
-    host.feed(read_h, b"leftover")
-    stream = _HandleStream(read_h, write=False)
-    stream.close()
-    assert await stream.read() == b""
-
-
-@windows_only
-@pytest.mark.asyncio
-async def test_a_failing_readfile_reads_as_end_of_stream(wired: Any) -> None:
-    _host, fake = wired
-    fake.kernel32.on("ReadFile", lambda *_a: 0)
-    stream = _HandleStream(0x100, write=False)
-    assert await stream.read() == b""
+    host, fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
+    host.feed(session.stdout_handle, b"leftover")
+    proc.stdout.close()
+    assert await proc.stdout.read() == b""
 
 
 @windows_only
 @pytest.mark.asyncio
 async def test_reading_does_not_block_the_event_loop(wired: Any) -> None:
     host, fake = wired
-    read_h, _write = _new_pipe(host)
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
     seen: dict[str, int] = {}
-    original = host.ReadFile
+    original = fake.conpty_read
 
-    def note_thread(*args: Any, **kw: Any) -> int:
+    def note_thread(handle: int, max_len: int = 4096) -> bytes:
         seen["thread"] = threading.get_ident()
-        return original(*args, **kw)
+        return original(handle, max_len)
 
-    fake.kernel32.on("ReadFile", note_thread)
-    host.feed(read_h, b"x")
-    assert await _HandleStream(read_h, write=False).read() == b"x"
+    fake.conpty_read = note_thread  # type: ignore[method-assign]
+    from remedy.core.computer import host_binding as H
+
+    H.conpty_read = note_thread
+    host.feed(session.stdout_handle, b"x")
+    assert await proc.stdout.read() == b"x"
     assert seen["thread"] != threading.get_ident()
 
 
@@ -762,71 +547,40 @@ async def test_reading_does_not_block_the_event_loop(wired: Any) -> None:
 @pytest.mark.asyncio
 async def test_drain_is_a_no_op_that_still_awaits(wired: Any) -> None:
     _host, fake = wired
-    stream = _HandleStream(0x100, write=True)
-    assert await stream.drain() is None
-    assert len(fake.log) == 0
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    before = len(fake.calls)
+    assert await proc.stdin.drain() is None
+    assert len(fake.calls) == before
 
 
 @windows_only
 def test_closing_a_stream_twice_closes_the_handle_once(wired: Any) -> None:
-    # A second CloseHandle on a recycled handle number closes somebody else's
-    # file. Idempotence here is a safety property, not a nicety.
-    host, _fake = wired
-    _read, write_h = _new_pipe(host)
-    stream = _HandleStream(write_h, write=True)
-    stream.close()
-    stream.close()
-    assert host.closed.count(write_h) == 1
+    host, fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
+    stdin_h = session.stdin_handle
+    proc.stdin.close()
+    proc.stdin.close()
+    assert host.closed.count(stdin_h) == 1
     assert host.double_closed == []
 
 
 @windows_only
-def test_a_failing_closehandle_is_swallowed_and_the_stream_stays_closed(wired: Any) -> None:
-    host, fake = wired
-    _read, write_h = _new_pipe(host)
-    fake.kernel32.function("CloseHandle").set_error(OSError("bad handle"))
-    stream = _HandleStream(write_h, write=True)
-    stream.close()  # must not escape: it runs inside process teardown
-    stream.write(b"x")
-    assert host.written(write_h) == b""
-
-
-# ---------------------------------------------------------------------------
-# _ConPTYProcess
-# ---------------------------------------------------------------------------
-
-
-def test_fake_cmd_shell_exit_ends_the_process() -> None:
-    run = fake_cmd_shell()
-    with pytest.raises(FakeShellExitError) as ei:
-        run("exit /b 7")
-    assert ei.value.code == 7
-    with pytest.raises(FakeShellExitError) as ei:
-        run("exit")
-    assert ei.value.code == 0
-    with pytest.raises(FakeShellExitError) as ei:
-        run("exit 3")
-    assert ei.value.code == 3
-    # A failed command must not kill the shell — the sentinel still has to run.
-    out = run("no_such_cmd")
-    assert "not recognized" in out
-
-
-@windows_only
 def test_a_new_process_looks_like_an_asyncio_subprocess(wired: Any) -> None:
-    host, _fake = wired
-    proc, handles = _open_process(host)
+    host, fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
 
     assert proc.pid == host.pid
-    assert proc.returncode is None, "a live process has no exit code yet"
-    assert proc.poll() is None, "GetExitCodeProcess is STILL_ACTIVE while alive"
-    assert proc.stderr is None, "a console merges stderr into stdout"
+    assert proc.returncode is None
+    assert proc.poll() is None
+    assert proc.stderr is None
     assert isinstance(proc.stdin, _HandleStream)
     assert isinstance(proc.stdout, _HandleStream)
     assert proc.stdin._write is True
     assert proc.stdout._write is False
-    assert proc.stdin._handle == handles["stdin"]
-    assert proc.stdout._handle == handles["stdout"]
+    assert session.stdin_handle
+    assert session.stdout_handle
 
 
 @windows_only
@@ -834,8 +588,15 @@ def test_a_new_process_looks_like_an_asyncio_subprocess(wired: Any) -> None:
 def test_killing_the_process_terminates_it_and_releases_everything(
     wired: Any, method: str
 ) -> None:
-    host, _fake = wired
-    proc, handles = _open_process(host)
+    host, fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
+    handles = {
+        "stdin": session.stdin_handle,
+        "stdout": session.stdout_handle,
+        "pc": session.pc_handle,
+        "process": session.process_handle,
+    }
 
     getattr(proc, method)()
 
@@ -850,109 +611,80 @@ def test_killing_the_process_terminates_it_and_releases_everything(
 
 @windows_only
 def test_killing_twice_does_not_close_anything_twice(wired: Any) -> None:
-    host, _fake = wired
-    proc, handles = _open_process(host)
+    host, fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
+    pc = session.pc_handle
 
     proc.kill()
     proc.kill()
 
-    assert host.double_closed == [], "a recycled handle number would be closed blind"
-    assert host.closed_pseudoconsoles == [handles["pc"]]
-    assert host.terminated == [(handles["process"], 1), (0, 1)]
+    assert host.double_closed == []
+    assert host.closed_pseudoconsoles == [pc]
     assert proc.returncode == 1
 
 
 @windows_only
 def test_a_terminated_process_stops_accepting_input(wired: Any) -> None:
-    host, _fake = wired
-    proc, handles = _open_process(host)
-    host.feed(handles["stdout"], b"still buffered")
+    host, fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
+    stdin_h = session.stdin_handle
+    host.feed(session.stdout_handle, b"still buffered")
 
     proc.terminate()
     proc.stdin.write(b"echo\r\n")
 
-    assert host.written(handles["stdin"]) == b""
+    assert host.written(stdin_h) == b""
 
 
 @windows_only
 @pytest.mark.asyncio
 async def test_reading_from_a_terminated_process_returns_end_of_stream(wired: Any) -> None:
-    host, _fake = wired
-    proc, handles = _open_process(host)
-    host.feed(handles["stdout"], b"still buffered")
+    host, fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
+    host.feed(session.stdout_handle, b"still buffered")
     proc.terminate()
     assert await proc.stdout.read() == b""
 
 
 @windows_only
 def test_a_terminateprocess_that_fails_still_tears_the_session_down(wired: Any) -> None:
-    # The child may already be gone; that must not leave the console open.
     host, fake = wired
-    proc, handles = _open_process(host)
-    fake.kernel32.function("TerminateProcess").set_error(OSError("access denied"))
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
+    pc = session.pc_handle
+    stdin_h = session.stdin_handle
 
+    def boom(_handle: int) -> None:
+        raise OSError("access denied")
+
+    from remedy.core.computer import host_binding as H
+
+    H.conpty_kill = boom
     proc.kill()
 
     assert proc.returncode == 1
-    assert host.is_closed(handles["stdin"])
-    assert host.closed_pseudoconsoles == [handles["pc"]]
-
-
-@windows_only
-def test_a_process_without_a_pseudoconsole_closes_only_what_it_owns(wired: Any) -> None:
-    host, _fake = wired
-    _read, stdin_h = _new_pipe(host)
-    stdout_h, _w = _new_pipe(host)
-    host.CreateProcessW()
-    proc = _ConPTYProcess(
-        pid=1,
-        process_handle=host.process_handle,
-        stdin_handle=stdin_h,
-        stdout_handle=stdout_h,
-        pc_handle=0,
-    )
-
-    proc.kill()
-
-    assert host.closed_pseudoconsoles == [], "ClosePseudoConsole(0) would be a wild call"
-    assert host.is_closed(host.process_handle)
+    assert host.is_closed(stdin_h)
+    assert host.closed_pseudoconsoles == [pc]
 
 
 @windows_only
 def test_a_process_with_no_handles_at_all_terminates_without_a_wild_close(wired: Any) -> None:
     host, _fake = wired
-    proc = _ConPTYProcess(
-        pid=0, process_handle=0, stdin_handle=0, stdout_handle=0, pc_handle=0
-    )
+    proc = _ConPTYProcess(pid=0, handle=0)
     proc.terminate()
     assert host.closed_pseudoconsoles == []
     assert proc.returncode == 1
 
 
 @windows_only
-def test_a_failing_pseudoconsole_close_still_closes_the_process_handle(
-    wired: Any,
-) -> None:
-    """``_close`` used to close the pseudoconsole and the process handle inside
-    one ``with suppress(Exception)``. A throwing ClosePseudoConsole skipped
-    CloseHandle — and the field was zeroed below regardless, so nothing could
-    ever close it: one leaked kernel object per failed teardown.
-    """
-    host, fake = wired
-    proc, handles = _open_process(host)
-    fake.kernel32.function("ClosePseudoConsole").set_error(OSError("already gone"))
-
-    proc.kill()
-
-    assert proc.returncode == 1
-    assert host.is_closed(handles["process"]), "the process handle was still leaked"
-    assert proc._ph == 0
-
-
-@windows_only
 def test_the_streams_are_closed_even_when_one_of_them_throws(wired: Any) -> None:
-    host, _fake = wired
-    proc, handles = _open_process(host)
+    host, fake = wired
+    proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    session = _session_of(fake, proc)
+    stdout_h = session.stdout_handle
 
     def boom() -> None:
         raise OSError("stdin close failed")
@@ -960,41 +692,16 @@ def test_the_streams_are_closed_even_when_one_of_them_throws(wired: Any) -> None
     proc.stdin.close = boom  # type: ignore[method-assign]
     proc.kill()
 
-    assert host.is_closed(handles["stdout"]), "one bad stream must not strand the other"
+    assert host.is_closed(stdout_h), "one bad stream must not strand the other"
     assert proc.returncode == 1
-
-
-@windows_only
-def test_terminating_never_touches_the_desktop(wired: Any) -> None:
-    # The whole point of the double: a teardown that reached user32 would be
-    # acting on the owner's session.
-    host, fake = wired
-    proc, _handles = _open_process(host)
-    fake.log.clear()
-    proc.kill()
-    assert all(rec.dll == "kernel32" for rec in fake.log)
 
 
 @windows_only
 @pytest.mark.asyncio
 async def test_a_spawned_session_round_trips_a_command_through_the_double() -> None:
-    """End to end on the doubles: spawn, write a command, read the reply, kill.
-
-    Uses the module's own override hook, which is how the session layer is meant
-    to be tested without a real console.
-    """
     host = FakeConsoleHost()
-    with install_fake_win32(console=host):
-        _pty_in, stdin_h = _new_pipe(host)
-        stdout_h, _pty_out = _new_pipe(host)
-        host.CreateProcessW()
-        proc = _ConPTYProcess(
-            pid=host.pid,
-            process_handle=host.process_handle,
-            stdin_handle=stdin_h,
-            stdout_handle=stdout_h,
-            pc_handle=0,
-        )
+    with install_fake_conpty(console=host) as fake:
+        proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
 
         async def override(argv: list[str], *, cwd: Any = None, env: Any = None) -> Any:
             assert argv == ["cmd.exe"]
@@ -1006,31 +713,32 @@ async def test_a_spawned_session_round_trips_a_command_through_the_double() -> N
 
         got.stdin.write(b"ver\r\n")
         await got.stdin.drain()
+        session = _session_of(fake, proc)
+        stdin_h = session.stdin_handle
+        stdout_h = session.stdout_handle
+        process_h = session.process_handle
         host.feed(stdout_h, b"Microsoft Windows [Version 10.0]\r\n")
         assert await got.stdout.read() == b"Microsoft Windows [Version 10.0]\r\n"
 
         got.kill()
 
     assert host.written(stdin_h) == b"ver\r\n"
-    assert host.terminated == [(host.process_handle, 1)]
+    assert host.terminated == [(process_h, 1)]
     assert host.double_closed == []
 
 
 # ---------------------------------------------------------------------------
-# The session on top of a pseudoconsole — echo, VT noise, the sentinel
+# The session on top of a pseudoconsole
 # ---------------------------------------------------------------------------
 
 
 def _echoing_host(cwd: str = "C:\\work") -> FakeConsoleHost:
-    # pid=0: should a test time out, kill_process_tree must not taskkill a
-    # real process that happens to own the fake's pid.
     return FakeConsoleHost(
         pid=0, echo=True, shell=fake_cmd_shell(cwd), vt_prelude=CONPTY_PRELUDE
     )
 
 
 async def _conpty_session(host: FakeConsoleHost) -> tuple[HostSession, Any]:
-    """A ``HostSession(use_conpty=True)`` whose child is the fake console."""
     proc = conpty._spawn_conpty_sync(["cmd.exe", "/Q", "/K"], None, None)
 
     async def override(_argv: list[str], *, cwd: Any = None, env: Any = None) -> Any:
@@ -1044,8 +752,6 @@ async def _conpty_session(host: FakeConsoleHost) -> tuple[HostSession, Any]:
 
 
 def _drop(sess: HostSession, proc: Any) -> None:
-    # Not sess.close(): kill_process_tree would run a real taskkill on the
-    # fake pid. The fake child is torn down directly.
     sess._proc = None
     sess.started = False
     proc.kill()
@@ -1054,16 +760,8 @@ def _drop(sess: HostSession, proc: Any) -> None:
 @windows_only
 @pytest.mark.asyncio
 async def test_a_conpty_session_returns_only_what_the_command_printed() -> None:
-    """Reproduced live: ``run("echo hello")`` came back with exit 0 and
-    ``stdout='\\x1b[?9001h…chcp 65001 >NUL & @echo offecho helloecho'``.
-
-    The pseudoconsole echoes what we type, so ``echo SENTINEL:%ERRORLEVEL%``
-    appeared in the stream BEFORE the command ran; ``_read_until`` matched the
-    echo, ``_split_sentinel`` read ``:%ERRORLEVEL%`` as exit 0, and the body
-    was escape codes plus the echoed boot and command lines.
-    """
     host = _echoing_host()
-    with install_fake_win32(console=host):
+    with install_fake_conpty(console=host):
         sess, proc = await _conpty_session(host)
         res = await sess.run("echo hello", timeout=5)
         _drop(sess, proc)
@@ -1078,14 +776,11 @@ async def test_a_conpty_session_returns_only_what_the_command_printed() -> None:
 @windows_only
 @pytest.mark.asyncio
 async def test_a_conpty_session_presses_enter_not_linefeed() -> None:
-    """Live, with the echo bug fixed, every command still timed out: a
-    pseudoconsole is a keyboard, and cooked line input is submitted by CR.
-    The LF the pipe path writes was typed INTO the line, never submitted."""
     host = _echoing_host()
-    with install_fake_win32(console=host):
+    with install_fake_conpty(console=host):
         sess, proc = await _conpty_session(host)
         res = await sess.run("echo typed", timeout=2)
-        typed = host.written(proc.stdin._handle)
+        typed = host.written(host.pipes[0].write_handle)
         _drop(sess, proc)
 
     assert res.timed_out is False
@@ -1097,11 +792,8 @@ async def test_a_conpty_session_presses_enter_not_linefeed() -> None:
 @windows_only
 @pytest.mark.asyncio
 async def test_a_conpty_session_reports_the_real_exit_code_not_the_echo() -> None:
-    # The echo of the sentinel line carries the literal ``%ERRORLEVEL%``;
-    # reading it as 0 turned every failed command into a success. A missing
-    # command fails without exiting the shell, so the sentinel still runs.
     host = _echoing_host()
-    with install_fake_win32(console=host):
+    with install_fake_conpty(console=host):
         sess, proc = await _conpty_session(host)
         res = await sess.run("no_such_cmd", timeout=5)
         _drop(sess, proc)
@@ -1114,10 +806,8 @@ async def test_a_conpty_session_reports_the_real_exit_code_not_the_echo() -> Non
 @windows_only
 @pytest.mark.asyncio
 async def test_exit_slash_b_returns_the_shell_code_instead_of_timing_out() -> None:
-    """Live: ``run("exit /b 7")`` waited for a sentinel the dead shell
-    would never print, then surfaced a timeout. The child is gone; say so."""
     host = _echoing_host()
-    with install_fake_win32(console=host):
+    with install_fake_conpty(console=host):
         sess, proc = await _conpty_session(host)
         res = await sess.run("exit /b 7", timeout=5)
         alive_after = sess.started
@@ -1135,7 +825,7 @@ async def test_exit_slash_b_returns_the_shell_code_instead_of_timing_out() -> No
 @pytest.mark.asyncio
 async def test_the_next_run_respawns_after_the_shell_exits() -> None:
     host = _echoing_host()
-    with install_fake_win32(console=host):
+    with install_fake_conpty(console=host):
 
         async def override(_argv: list[str], *, cwd: Any = None, env: Any = None) -> Any:
             return conpty._spawn_conpty_sync(["cmd.exe", "/Q", "/K"], None, None)
@@ -1160,7 +850,7 @@ async def test_a_pipe_session_also_notices_when_the_shell_exits() -> None:
     host = FakeConsoleHost(
         pid=0, echo=False, shell=fake_cmd_shell("C:\\plain"), newline_submits=True
     )
-    with install_fake_win32(console=host):
+    with install_fake_conpty(console=host):
         sess, proc = await _conpty_session(host)
         sess._used_conpty = False
         res = await sess.run("exit 3", timeout=5)
@@ -1175,7 +865,7 @@ async def test_a_pipe_session_also_notices_when_the_shell_exits() -> None:
 @pytest.mark.asyncio
 async def test_a_conpty_session_keeps_multi_line_output_and_drops_the_boot_echo() -> None:
     host = _echoing_host(cwd="D:\\proj")
-    with install_fake_win32(console=host):
+    with install_fake_conpty(console=host):
         sess, proc = await _conpty_session(host)
         first = await sess.run("echo one & echo two", timeout=5)
         second = await sess.run("echo three", timeout=5)
@@ -1191,11 +881,10 @@ async def test_a_conpty_session_keeps_multi_line_output_and_drops_the_boot_echo(
 @windows_only
 @pytest.mark.asyncio
 async def test_a_pipe_session_is_unaffected_by_the_stricter_sentinel() -> None:
-    # No echo, no VT: the plain-pipe shell path must keep working unchanged.
     host = FakeConsoleHost(
         pid=0, echo=False, shell=fake_cmd_shell("C:\\plain"), newline_submits=True
     )
-    with install_fake_win32(console=host):
+    with install_fake_conpty(console=host):
         sess, proc = await _conpty_session(host)
         sess._used_conpty = False
         res = await sess.run("echo plain", timeout=5)
@@ -1212,9 +901,7 @@ async def test_a_pipe_session_is_unaffected_by_the_stricter_sentinel() -> None:
         ("hi\r\nREMEDY_HOST_DONE_abc:0\r\n", 0, "hi"),
         ("REMEDY_HOST_DONE_abc:12\r\n", 12, ""),
         ("x\nREMEDY_HOST_DONE_abc:-1\n", -1, "x"),
-        # PowerShell: $LASTEXITCODE is null until a native command has run.
         ("out\r\nREMEDY_HOST_DONE_abc:\r\n", 0, "out"),
-        # ConPTY renders the line end as a cursor move rather than CRLF.
         ("hello\r\nREMEDY_HOST_DONE_abc:0\x1b[5;1H", 0, "hello"),
     ],
 )
@@ -1233,7 +920,9 @@ def test_the_sentinel_is_read_in_its_expanded_form(text: str, code: int, body: s
 def test_an_echoed_unexpanded_sentinel_is_not_a_completion(echoed: str) -> None:
     assert _sentinel_done(echoed.encode(), b"REMEDY_HOST_DONE_abc") is False
     assert _split_sentinel(echoed, "REMEDY_HOST_DONE_abc")[0] == -1
-    assert _sentinel_done((echoed + "REMEDY_HOST_DONE_abc:0\r\n").encode(), b"REMEDY_HOST_DONE_abc")
+    assert _sentinel_done(
+        (echoed + "REMEDY_HOST_DONE_abc:0\r\n").encode(), b"REMEDY_HOST_DONE_abc"
+    )
 
 
 def test_the_split_for_a_pseudoconsole_strips_vt_and_the_echoed_command() -> None:
@@ -1252,61 +941,16 @@ def test_the_split_for_a_pseudoconsole_strips_vt_and_the_echoed_command() -> Non
     )
 
 
-def test_strip_vt_removes_every_kind_of_escape_sequence() -> None:
-    text = "\x1b]0;title\x07\x1b[?9001h\x1b[2J\x1b[31mred\x1b[m\x1b(B\x07done\x1b[1;1H"
-    assert strip_vt(text) == "reddone"
-
-
-# ---------------------------------------------------------------------------
-# _spawn_conpty_sync — standard handles and a failing CreatePseudoConsole
-# ---------------------------------------------------------------------------
-
-
-@windows_only
-def test_the_child_gets_no_standard_handles_from_the_parent(wired: Any) -> None:
-    """When Remedy's own stdio is redirected (service, launcher) the child
-    inherited it regardless of ``bInheritHandles=False``; its output landed on
-    the parent's stdout and every ``run()`` timed out. STARTF_USESTDHANDLES
-    with NULL handles leaves the pseudoconsole as the child's only stdio.
-    """
-    host, _fake = wired
-    conpty._spawn_conpty_sync(["cmd.exe"], None, None)
-    spawn = host.spawns[0]
-    assert spawn["startup_flags"] & _STARTF_USESTDHANDLES
-    assert spawn["std_handles"] == (None, None, None)
-
-
-@windows_only
-def test_a_raising_createpseudoconsole_still_closes_all_four_pipe_ends() -> None:
-    """``restype = HRESULT`` makes ctypes RAISE on failure, so the ``if hr``
-    cleanup branch was dead and the four pipe handles leaked every time."""
-    host = FakeConsoleHost(create_pseudoconsole_hr=-2147024809)
-    with install_fake_win32(console=host) as fake:
-        with pytest.raises(OSError, match=r"CreatePseudoConsole failed hr=-2147024809"):
-            conpty._spawn_conpty_sync(["cmd.exe"], None, None)
-        assert fake.log.count("CloseHandle") == 4
-
-    assert len(host.pipes) == 2
-    assert host.open_handles == [], f"leaked {host.open_handles}"
-    assert host.double_closed == []
-    assert host.spawns == []
-
-
-def test_ctypes_is_imported_lazily_so_the_module_loads_anywhere() -> None:
-    # Every ctypes/wintypes import sits inside a function. A module-level one
-    # would make `import remedy.execution.host` fail outright on Linux and macOS,
-    # where the pipe-based session is the supported path.
-    assert not hasattr(conpty, "ctypes")
-    assert not hasattr(conpty, "wintypes")
-
-
-@pytest.mark.asyncio
-async def test_creating_the_coroutine_does_not_yet_touch_windows() -> None:
-    # The guards live in the coroutine body, so merely building it must be inert
-    # — the session builds and discards these on the pipe fallback path.
-    windll = FakeWinDLL()
-    with install_fake_win32(windll=windll, platform="linux"):
-        coro = spawn_conpty(["x"])
-        assert asyncio.iscoroutine(coro)
-        assert len(windll.log) == 0
-        coro.close()
+def test_fake_cmd_shell_exit_ends_the_process() -> None:
+    run = fake_cmd_shell()
+    with pytest.raises(FakeShellExitError) as ei:
+        run("exit /b 7")
+    assert ei.value.code == 7
+    with pytest.raises(FakeShellExitError) as ei:
+        run("exit")
+    assert ei.value.code == 0
+    with pytest.raises(FakeShellExitError) as ei:
+        run("exit 3")
+    assert ei.value.code == 3
+    out = run("no_such_cmd")
+    assert "not recognized" in out

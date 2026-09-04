@@ -9,23 +9,24 @@ extern "C" {
 #endif
 
 /*
- * ABI 4 adds host_op_prepare (Host Command IR → PreparedCommand JSON) and
- * translate_posix_to_host on top of ABI 3 UI Automation / Linux AT-SPI and
- * the ABI 2 host surface (DPI, monitors, capture, PNG, input, windows,
- * clipboard and hidden process control). Every host/UIA function returns a
- * remedy_core_status. On a non-Windows build each host/UIA function returns
+ * ABI 5 adds ConPTY (CreatePseudoConsole spawn/read/write/poll/kill/close)
+ * on top of ABI 4 host_op_prepare / translate_posix_to_host, ABI 3 UI
+ * Automation / Linux AT-SPI, and the ABI 2 host surface (DPI, monitors,
+ * capture, PNG, input, windows, clipboard and hidden process control).
+ * Every host/UIA/ConPTY function returns a remedy_core_status. On a
+ * non-Windows build each host/UIA/ConPTY function returns
  * REMEDY_CORE_UNSUPPORTED and writes nothing; host_op_prepare and
  * translate_posix_to_host are portable and remain available.
  *
  * Memory: any buffer returned through an `out_*` pointer is owned by the
  * caller and must be released with remedy_core_free(ptr, len). Strings that
  * cross this boundary are UTF-8 (WTF-8 when a Win32 string carried a lone
- * surrogate). Handles (HWND) travel as uint64_t.
+ * surrogate). Handles (HWND, ConPTY session) travel as uint64_t.
  *
  * Errors: when a call fails with REMEDY_CORE_OPERATION_FAILED the Win32 error
  * code is available from remedy_core_last_os_error() on the same thread.
  */
-#define REMEDY_CORE_ABI_VERSION 4u
+#define REMEDY_CORE_ABI_VERSION 5u
 
 enum remedy_core_status {
     REMEDY_CORE_OK = 0,
@@ -332,6 +333,49 @@ int32_t remedy_core_translate_posix_to_host(
     uint8_t **out_json,
     size_t *out_len
 );
+
+/* ---- ABI 5: ConPTY -------------------------------------------------------- */
+
+/* 1 when CreatePseudoConsole is available on this process; 0 otherwise.
+ * Non-Windows returns UNSUPPORTED with *out_available = 0. */
+int32_t remedy_core_conpty_available(uint8_t *out_available);
+
+/* Spawn argv_json (JSON string array) attached to a ConPTY. cols/rows of 0
+ * default to 120x40. cwd may be empty (inherit). env_json is a JSON object of
+ * strings replacing the environment, or empty to inherit. On success
+ * *out_handle is an opaque session; close with remedy_core_conpty_close. */
+int32_t remedy_core_conpty_spawn(
+    const uint8_t *argv_json, size_t argv_len,
+    const uint8_t *cwd, size_t cwd_len,
+    const uint8_t *env_json, size_t env_len,
+    uint16_t cols, uint16_t rows,
+    uint32_t *out_pid, uint64_t *out_handle
+);
+
+/* Write bytes to the session's stdin pipe. */
+int32_t remedy_core_conpty_write(
+    uint64_t handle, const uint8_t *data, size_t len, size_t *out_written
+);
+
+/* Read up to max_len into caller-owned buf. *out_len is 0 at EOF / empty. */
+int32_t remedy_core_conpty_read(
+    uint64_t handle, uint8_t *buf, size_t max_len, size_t *out_len
+);
+
+/* *out_exited is 0 while STILL_ACTIVE; else 1 with *out_exit_code. */
+int32_t remedy_core_conpty_poll(
+    uint64_t handle, uint8_t *out_exited, uint32_t *out_exit_code
+);
+
+/* TerminateProcess(1). Does not free the session — call close. */
+int32_t remedy_core_conpty_kill(uint64_t handle);
+
+/* Close one pipe end. which: 0 = stdin write, 1 = stdout read. Idempotent. */
+int32_t remedy_core_conpty_close_pipe(uint64_t handle, uint32_t which);
+
+/* Close remaining pipes, ClosePseudoConsole, CloseHandle(process), free
+ * the session. The handle must not be reused. */
+int32_t remedy_core_conpty_close(uint64_t handle);
 
 #ifdef __cplusplus
 }

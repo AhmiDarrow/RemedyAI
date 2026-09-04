@@ -1,23 +1,27 @@
-"""Controllable doubles for ``remedy.core.computer.host_binding`` UIA calls.
+"""Controllable doubles for ``remedy.core.computer.host_binding`` calls.
 
-``desktop_uia`` no longer talks to comtypes; it forwards to ``host_binding``
-(Zig COM). Tests that used to patch comtypes must mock this boundary instead.
+``desktop_uia`` and ``execution.host.conpty`` no longer talk to comtypes /
+ctypes Win32; they forward to ``host_binding`` (Zig). Tests that used to patch
+comtypes or ``ctypes.WinDLL`` must mock this boundary instead.
 
-This harness walks a ``FakeUIAutomation`` tree with the same limits the Zig
-path documents (max_elements clamp, name/value clipping, preferred_only,
-depth/children caps, offscreen keep-and-flag). It never loads
-UIAutomationCore.dll, never SendInput, and never touches the real clipboard.
+UIA: walks a ``FakeUIAutomation`` tree with the same limits the Zig path
+documents. ConPTY: drives a ``FakeConsoleHost`` through the binding surface
+(spawn/read/write/poll/kill/close) without loading kernel32.
 """
 
 from __future__ import annotations
 
 import contextlib
+import subprocess
 import sys
-from collections.abc import Iterator
+import types
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
 from tests.harness.fake_win32 import (
     CONTROL_TYPE_IDS,
+    FakeConsoleHost,
+    FakePipe,
     FakeUIAElement,
     FakeUIAutomation,
     TreeScope_Children,
@@ -36,7 +40,9 @@ from tests.harness.fake_win32 import (
 )
 
 __all__ = [
+    "FakeHostConpty",
     "FakeHostUia",
+    "install_fake_conpty",
     "install_fake_host_uia",
     "uia_element",
 ]
@@ -492,6 +498,341 @@ def install_fake_host_uia(
             if hasattr(H, name):
                 saved[name] = getattr(H, name)
                 setattr(H, name, getattr(fake, name))
+
+    platform_saved = None
+    if platform is not None:
+        platform_saved = sys.platform
+        sys.platform = platform
+    try:
+        yield fake
+    finally:
+        if platform_saved is not None:
+            sys.platform = platform_saved
+        for name, value in saved.items():
+            setattr(H, name, value)
+
+
+# ---------------------------------------------------------------------------
+# ConPTY (ABI 5)
+# ---------------------------------------------------------------------------
+
+
+class _ConptySession:
+    __slots__ = (
+        "pid",
+        "process_handle",
+        "pc_handle",
+        "stdin_handle",
+        "stdout_handle",
+        "exit_code",
+        "closed",
+    )
+
+    def __init__(
+        self,
+        *,
+        pid: int,
+        process_handle: int,
+        pc_handle: int,
+        stdin_handle: int,
+        stdout_handle: int,
+    ) -> None:
+        self.pid = pid
+        self.process_handle = process_handle
+        self.pc_handle = pc_handle
+        self.stdin_handle = stdin_handle
+        self.stdout_handle = stdout_handle
+        self.exit_code: int | None = None
+        self.closed = False
+
+
+class FakeHostConpty:
+    """In-memory host_binding ConPTY surface over a ``FakeConsoleHost``."""
+
+    def __init__(
+        self,
+        console: FakeConsoleHost | None = None,
+        *,
+        available: bool = True,
+        fail_after_pipes: int | None = None,
+        fail_attribute_update: bool = False,
+    ) -> None:
+        self.console = console if console is not None else FakeConsoleHost()
+        self.available = available
+        # Fail when creating the Nth pipe (1-based); None = use console flag only.
+        self.fail_after_pipes = fail_after_pipes
+        self.fail_attribute_update = fail_attribute_update
+        self._pipes_created = 0
+        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self.sessions: dict[int, _ConptySession] = {}
+        self._next_handle = 0xC000
+        self.spawns: list[dict[str, Any]] = []
+
+    def _alloc_handle(self) -> int:
+        self._next_handle += 8
+        return self._next_handle
+
+    def _session(self, handle: int) -> _ConptySession:
+        from remedy.core.computer.host_binding import STATUS_INVALID_ARGUMENT, HostError
+
+        session = self.sessions.get(int(handle))
+        if session is None or session.closed:
+            raise HostError("conpty", STATUS_INVALID_ARGUMENT)
+        return session
+
+    def _pipe(self) -> FakePipe:
+        from remedy.core.computer.host_binding import STATUS_OPERATION_FAILED, HostError
+
+        host = self.console
+        self._pipes_created += 1
+        if host.fail_create_pipe or (
+            self.fail_after_pipes is not None and self._pipes_created >= self.fail_after_pipes
+        ):
+            raise HostError("conpty_spawn", STATUS_OPERATION_FAILED, os_error=1)
+        pipe = FakePipe(
+            read_handle=host._handle("pipe-read"),
+            write_handle=host._handle("pipe-write"),
+        )
+        pipe.inheritable = False
+        host.pipes.append(pipe)
+        host._by_handle[pipe.read_handle] = pipe
+        host._by_handle[pipe.write_handle] = pipe
+        return pipe
+
+    def conpty_available(self) -> bool:
+        self.calls.append(("conpty_available", (), {}))
+        return bool(self.available)
+
+    def conpty_spawn(
+        self,
+        argv: Sequence[str],
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        *,
+        cols: int = 120,
+        rows: int = 40,
+    ) -> tuple[int, int]:
+        from remedy.core.computer.host_binding import STATUS_OPERATION_FAILED, HostError
+
+        self.calls.append(("conpty_spawn", (list(argv), cwd, env, cols, rows), {}))
+        host = self.console
+        record = {
+            "argv": [str(a) for a in argv],
+            "cmdline": subprocess.list2cmdline([str(a) for a in argv]),
+            "cwd": cwd,
+            "env": None if env is None else dict(env),
+            "cols": int(cols) or 120,
+            "rows": int(rows) or 40,
+            "flags": 0x00080000 | 0x00000400,
+            "inherit": False,
+        }
+        self.spawns.append(record)
+
+        pipe_in: FakePipe | None = None
+        pipe_out: FakePipe | None = None
+        try:
+            pipe_in = self._pipe()
+            pipe_out = self._pipe()
+        except HostError:
+            if pipe_in is not None:
+                host.CloseHandle(pipe_in.read_handle)
+                host.CloseHandle(pipe_in.write_handle)
+            raise
+
+        size = types.SimpleNamespace(X=record["cols"], Y=record["rows"])
+        phpc = types.SimpleNamespace(value=0)
+        try:
+            hr = host.CreatePseudoConsole(
+                size, pipe_in.read_handle, pipe_out.write_handle, 0, phpc
+            )
+        except OSError as exc:
+            host.CloseHandle(pipe_in.read_handle)
+            host.CloseHandle(pipe_in.write_handle)
+            host.CloseHandle(pipe_out.read_handle)
+            host.CloseHandle(pipe_out.write_handle)
+            winerr = getattr(exc, "winerror", None) or host.create_pseudoconsole_hr or -1
+            raise HostError("conpty_spawn", STATUS_OPERATION_FAILED, os_error=int(winerr)) from exc
+        if hr != 0:
+            host.CloseHandle(pipe_in.read_handle)
+            host.CloseHandle(pipe_in.write_handle)
+            host.CloseHandle(pipe_out.read_handle)
+            host.CloseHandle(pipe_out.write_handle)
+            raise HostError("conpty_spawn", STATUS_OPERATION_FAILED, os_error=int(hr))
+
+        pc = int(phpc.value or 0) or host._handle("pseudoconsole")
+
+        # Parent closes the PTY-side ends (handed to the console).
+        host.CloseHandle(pipe_in.read_handle)
+        host.CloseHandle(pipe_out.write_handle)
+
+        # Attribute list probe + update (recorded for tests that care).
+        host.InitializeProcThreadAttributeList(None, 1, 0, types.SimpleNamespace(value=0))
+        attr = object()
+        if (
+            host.fail_attribute_list
+            or host.InitializeProcThreadAttributeList(attr, 1, 0, types.SimpleNamespace(value=48))
+            == 0
+        ):
+            host.ClosePseudoConsole(pc)
+            host.CloseHandle(pipe_in.write_handle)
+            host.CloseHandle(pipe_out.read_handle)
+            raise HostError("conpty_spawn", STATUS_OPERATION_FAILED, os_error=87)
+        if (
+            self.fail_attribute_update
+            or host.UpdateProcThreadAttribute(attr, 0, 0x00020016, pc, 8, None, None) == 0
+        ):
+            host.ClosePseudoConsole(pc)
+            host.CloseHandle(pipe_in.write_handle)
+            host.CloseHandle(pipe_out.read_handle)
+            raise HostError("conpty_spawn", STATUS_OPERATION_FAILED, os_error=87)
+
+        # Match ctypes create_unicode_buffer().value: content up to the first NUL.
+        env_recorded = None
+        if env is not None:
+            env_recorded = "\0".join(f"{k}={v}" for k, v in env.items())
+
+        created = host.CreateProcessW(
+            None,
+            record["cmdline"],
+            None,
+            None,
+            False,
+            record["flags"],
+            types.SimpleNamespace(value=env_recorded) if env_recorded is not None else None,
+            cwd,
+            types.SimpleNamespace(
+                StartupInfo=types.SimpleNamespace(
+                    dwFlags=0x00000100,
+                    hStdInput=None,
+                    hStdOutput=None,
+                    hStdError=None,
+                )
+            ),
+            None,
+        )
+        if not created or host.fail_create_process:
+            host.ClosePseudoConsole(pc)
+            host.CloseHandle(pipe_in.write_handle)
+            host.CloseHandle(pipe_out.read_handle)
+            raise HostError("conpty_spawn", STATUS_OPERATION_FAILED, os_error=2)
+
+        # Close the thread handle the fake allocated.
+        for h, kind in list(host.kinds.items()):
+            if kind == "thread" and h not in host.closed:
+                host.CloseHandle(h)
+
+        handle = self._alloc_handle()
+        self.sessions[handle] = _ConptySession(
+            pid=host.pid,
+            process_handle=host.process_handle,
+            pc_handle=pc,
+            stdin_handle=pipe_in.write_handle,
+            stdout_handle=pipe_out.read_handle,
+        )
+        return host.pid, handle
+
+    def conpty_write(self, handle: int, data: bytes | bytearray | memoryview) -> int:
+        self.calls.append(("conpty_write", (handle, bytes(data)), {}))
+        session = self._session(handle)
+        if not session.stdin_handle or session.stdin_handle in self.console.closed:
+            return 0
+        raw = bytes(data)
+        ok = self.console.WriteFile(session.stdin_handle, raw, len(raw), types.SimpleNamespace(value=0))
+        return len(raw) if ok else 0
+
+    def conpty_read(self, handle: int, max_len: int = 4096) -> bytes:
+        self.calls.append(("conpty_read", (handle, max_len), {}))
+        session = self._session(handle)
+        if not session.stdout_handle or session.stdout_handle in self.console.closed:
+            return b""
+        pipe = self.console.pipe_for(session.stdout_handle)
+        if pipe is None:
+            return b""
+        return pipe.take(max(0, int(max_len)))
+
+    def conpty_poll(self, handle: int) -> int | None:
+        self.calls.append(("conpty_poll", (handle,), {}))
+        session = self._session(handle)
+        if session.exit_code is not None:
+            return session.exit_code
+        code_holder = types.SimpleNamespace(value=0)
+        if self.console.GetExitCodeProcess(session.process_handle, code_holder) == 0:
+            return None
+        if int(code_holder.value) == 259:
+            return None
+        session.exit_code = int(code_holder.value)
+        return session.exit_code
+
+    def conpty_kill(self, handle: int) -> None:
+        self.calls.append(("conpty_kill", (handle,), {}))
+        session = self._session(handle)
+        self.console.TerminateProcess(session.process_handle, 1)
+        session.exit_code = 1
+
+    def conpty_close_pipe(self, handle: int, which: int) -> None:
+        self.calls.append(("conpty_close_pipe", (handle, which), {}))
+        session = self._session(handle)
+        if int(which) == 0:
+            if session.stdin_handle:
+                self.console.CloseHandle(session.stdin_handle)
+                session.stdin_handle = 0
+        else:
+            if session.stdout_handle:
+                self.console.CloseHandle(session.stdout_handle)
+                session.stdout_handle = 0
+
+    def conpty_close(self, handle: int) -> None:
+        self.calls.append(("conpty_close", (handle,), {}))
+        session = self.sessions.get(int(handle))
+        if session is None or session.closed:
+            return
+        if session.stdin_handle:
+            self.console.CloseHandle(session.stdin_handle)
+            session.stdin_handle = 0
+        if session.stdout_handle:
+            self.console.CloseHandle(session.stdout_handle)
+            session.stdout_handle = 0
+        if session.pc_handle:
+            self.console.ClosePseudoConsole(session.pc_handle)
+            session.pc_handle = 0
+        if session.process_handle:
+            self.console.CloseHandle(session.process_handle)
+            session.process_handle = 0
+        session.closed = True
+
+
+@contextlib.contextmanager
+def install_fake_conpty(
+    console: FakeConsoleHost | None = None,
+    *,
+    available: bool = True,
+    platform: str | None = "win32",
+    fail_after_pipes: int | None = None,
+    fail_attribute_update: bool = False,
+) -> Iterator[FakeHostConpty]:
+    """Patch ``host_binding`` ConPTY entry points to a controllable fake."""
+    from remedy.core.computer import host_binding as H
+
+    fake = FakeHostConpty(
+        console,
+        available=available,
+        fail_after_pipes=fail_after_pipes,
+        fail_attribute_update=fail_attribute_update,
+    )
+    saved: dict[str, Any] = {}
+    names = (
+        "conpty_available",
+        "conpty_spawn",
+        "conpty_write",
+        "conpty_read",
+        "conpty_poll",
+        "conpty_kill",
+        "conpty_close_pipe",
+        "conpty_close",
+    )
+    for name in names:
+        saved[name] = getattr(H, name)
+        setattr(H, name, getattr(fake, name))
 
     platform_saved = None
     if platform is not None:

@@ -29,7 +29,7 @@ from typing import Any
 from remedy.execution.process import run_hidden
 
 #: Zig C ABI (``remedy_core_abi_version``); see ``native/zig/include/remedy_core.h``.
-_ABI_VERSION = 4
+_ABI_VERSION = 5
 #: Go runtime probe contract (``--probe`` JSON ``protocol`` / ``tool_abi``).
 _PROTOCOL_VERSION = 1
 _TOOL_ABI_VERSION = 1

@@ -122,7 +122,7 @@ WSL_ZIG_PREFIX = "/tmp/remedy-prepush-zig"
 WSL_NATIVE_CORE_LIB = f"{WSL_ZIG_PREFIX}/lib/libremedy_core.so"
 # Lockstep with remedy.runtime.native_runtime._ABI_VERSION and
 # REMEDY_CORE_ABI_VERSION in native/zig/include/remedy_core.h.
-REQUIRED_NATIVE_ABI = 4
+REQUIRED_NATIVE_ABI = 5
 
 
 RUST_ENV = {
