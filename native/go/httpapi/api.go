@@ -95,6 +95,9 @@ type Server struct {
 	hostBridge *HostBridge
 	termOnce   sync.Once
 	termReg    *terminalRegistry
+
+	updatesMu    sync.Mutex
+	updatesCache map[string]updatesCacheEntry
 }
 
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
@@ -102,10 +105,10 @@ type Server struct {
 // session LLM bind, attachments upload/get, messages list/create/stream, abort,
 // session-events SSE, durable events bus, scheduler jobs, hive
 // roster/spawn/assign/retire, Connect management (including Tailscale
-// status/install/login), Connect me/stop, providers/models catalog,
-// skills/library routes, workspace/files/media routes,
-// partner/approvals/plans/life-tasks/goals, WebUI, computer-use host bridge,
-// ConPTY terminal, voice, and RMB routes.
+// status/install/login), Connect me/stop, providers/models catalog (including
+// custom endpoints + probe), usage ledger, updates check, skills/library
+// routes, workspace/files/media routes, partner/approvals/plans/life-tasks/goals,
+// WebUI, computer-use host bridge, ConPTY terminal, voice, and RMB routes.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
@@ -205,7 +208,14 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/providers/connected", s.handleListConnectedProviders)
 	s.mux.HandleFunc("GET /api/providers/free", s.handleListFreeProviders)
 	s.mux.HandleFunc("GET /api/providers/ollama/detect", s.handleOllamaDetect)
+	s.mux.HandleFunc("POST /api/providers/custom", s.handleSaveCustomProvider)
+	s.mux.HandleFunc("DELETE /api/providers/custom/{id}", s.handleDeleteCustomProvider)
+	s.mux.HandleFunc("POST /api/providers/probe", s.handleProbeProvider)
 	s.mux.HandleFunc("GET /api/models", s.handleListModels)
+	s.mux.HandleFunc("GET /api/usage/summary", s.handleUsageSummary)
+	s.mux.HandleFunc("GET /api/usage/series", s.handleUsageSeries)
+	s.mux.HandleFunc("GET /api/usage/export", s.handleUsageExport)
+	s.mux.HandleFunc("GET /api/updates/check", s.handleUpdatesCheck)
 	s.mux.HandleFunc("GET /api/skills", s.handleListSkills)
 	s.mux.HandleFunc("GET /api/skills/library/catalog", s.handleLibraryCatalog)
 	s.mux.HandleFunc("GET /api/skills/library/search", s.handleLibrarySearch)
