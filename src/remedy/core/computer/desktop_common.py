@@ -360,3 +360,505 @@ def windows_as_elements(wins: list[dict[str, Any]], cap: int) -> list[dict[str, 
         if len(out) >= cap:
             break
     return out
+
+
+def merge_ui_candidates(
+    primary: list[dict[str, Any]],
+    extra: list[dict[str, Any]],
+    cap: int,
+    *,
+    cell: int = 12,
+) -> list[dict[str, Any]]:
+    """Dedup UI targets by grid cell (default ~12px); primary wins order."""
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[int, int]] = set()
+    step = max(1, int(cell or 1))
+    for c in list(primary) + list(extra):
+        if not isinstance(c, dict):
+            continue
+        try:
+            x, y = int(c["x"]), int(c["y"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        key = (x // step, y // step)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(c)
+        if len(out) >= cap:
+            break
+    return out
+
+
+def ocr_words_from_bgr(
+    raw: bytes, stride: int, width: int, height: int
+) -> list[dict[str, Any]]:
+    """Temp PNG → OCR words; empty on tiny frames or backend failure."""
+    import contextlib
+
+    if width < 32 or height < 32 or not raw:
+        return []
+    path = default_shot_path("ocr-detect")
+    try:
+        write_png_bgr(path, width, height, raw, stride)
+        from remedy.core.computer.ocr import read_screenshot_ocr
+
+        result = read_screenshot_ocr(path)
+        words = result.get("words") if isinstance(result, dict) else None
+        return list(words or [])
+    except Exception:
+        return []
+    finally:
+        with contextlib.suppress(OSError):
+            path.unlink(missing_ok=True)
+
+
+def ocr_word_candidates(
+    raw: bytes,
+    stride: int,
+    width: int,
+    height: int,
+    *,
+    max_marks: int = 20,
+    words_from: Callable[..., list[dict[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
+    """OCR word boxes as clickable candidates (center + size)."""
+    cap = max(1, int(max_marks or 20))
+    fetch = words_from or ocr_words_from_bgr
+    out: list[dict[str, Any]] = []
+    for w in fetch(raw, stride, width, height):
+        if not isinstance(w, dict):
+            continue
+        text = str(w.get("text") or "").strip()
+        if not text:
+            continue
+        try:
+            ix, iy = float(w.get("x") or 0), float(w.get("y") or 0)
+            iw, ih = float(w.get("w") or 0), float(w.get("h") or 0)
+        except (TypeError, ValueError):
+            continue
+        if iw < 2 or ih < 2:
+            continue
+        bw, bh = int(round(iw)), int(round(ih))
+        out.append(
+            {
+                "x": int(round(ix + iw / 2.0)),
+                "y": int(round(iy + ih / 2.0)),
+                "w": bw,
+                "h": bh,
+                "area": bw * bh,
+                "name": text[:80],
+                "role": "text",
+                "source": "ocr",
+            }
+        )
+        if len(out) >= cap:
+            break
+    return out[:cap]
+
+
+def clip_region_to_virtual(
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    *,
+    scale: float,
+    origin_x: int,
+    origin_y: int,
+    full_w: int,
+    full_h: int,
+) -> tuple[int, int, int, int, float]:
+    """Map requested region into virtual-screen crop box (bx,by,rw,rh,sc)."""
+    sc = float(scale) if scale and scale > 0 else 1.0
+    rx, ry = int(round(int(x) * sc)), int(round(int(y) * sc))
+    rw, rh = max(1, int(round(int(width) * sc))), max(1, int(round(int(height) * sc)))
+    bx, by = rx - origin_x, ry - origin_y
+    if bx < 0:
+        rw += bx
+        bx = 0
+    if by < 0:
+        rh += by
+        by = 0
+    if bx >= full_w or by >= full_h or rw <= 0 or rh <= 0:
+        raise ValueError("region outside virtual screen")
+    rw, rh = min(rw, full_w - bx), min(rh, full_h - by)
+    return bx, by, rw, rh, sc
+
+
+def apply_marks_offset(
+    raw: bytes,
+    stride: int,
+    width: int,
+    height: int,
+    marks: list[Any] | None,
+    *,
+    origin_left: int,
+    origin_top: int,
+    require_dict: bool = False,
+) -> bytes:
+    """Draw SoM marks shifted from screen coords into buffer-local coords."""
+    if not marks:
+        return raw
+    buf = bytearray(raw)
+    drawn: list[dict[str, Any]] = []
+    for mk in marks:
+        if require_dict and not isinstance(mk, dict):
+            continue
+        if not isinstance(mk, dict):
+            continue
+        drawn.append(
+            {
+                "n": mk.get("n"),
+                "x": int(mk.get("x", 0)) - origin_left,
+                "y": int(mk.get("y", 0)) - origin_top,
+            }
+        )
+    if drawn:
+        draw_marks_on_bgr(buf, stride, width, height, drawn)
+    return bytes(buf)
+
+
+def finalize_shot(
+    raw: bytes,
+    stride: int,
+    width: int,
+    height: int,
+    *,
+    path: Path | None,
+    prefix: str,
+    origin_x: int,
+    origin_y: int,
+    marks: list[Any] | None = None,
+    require_dict_marks: bool = False,
+    extra: dict[str, Any] | None = None,
+    purge: bool = True,
+) -> dict[str, Any]:
+    """Write PNG (optional SoM), purge aged shots, return standard shot dict."""
+    import contextlib
+
+    pixels = apply_marks_offset(
+        raw,
+        stride,
+        width,
+        height,
+        marks,
+        origin_left=origin_x,
+        origin_top=origin_y,
+        require_dict=require_dict_marks,
+    )
+    out = Path(path) if path is not None else default_shot_path(prefix)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    write_png_bgr(out, width, height, pixels, stride)
+    if purge:
+        with contextlib.suppress(Exception):
+            purge_old_shots(max_age_s=900.0, home_dir=remedy_home())
+    info: dict[str, Any] = {
+        "path": str(out),
+        "width": width,
+        "height": height,
+        "origin": {"x": origin_x, "y": origin_y},
+    }
+    if extra:
+        info.update(extra)
+    return info
+
+
+def type_text_fast(
+    text: str,
+    *,
+    type_text: Callable[..., int],
+    get_clipboard: Callable[[], str],
+    set_clipboard: Callable[[str], bool],
+    press_key: Callable[[str], None],
+    host_error: type[BaseException] = H.HostError,
+    abort_check: Callable[[], bool] | None = None,
+    chars_typed: list[int] | None = None,
+    paste_sleep_s: float = 0.15,
+) -> dict[str, Any]:
+    """Paste long text via clipboard; short / multiline stays keystrokes."""
+    import contextlib
+
+    data = str(text or "")
+    if len(data) <= PASTE_THRESHOLD or "\r" in data or "\n" in data:
+        n = type_text(data, abort_check=abort_check, chars_typed=chars_typed)
+        return {"chars": n, "method": "keystrokes"}
+    try:
+        saved = get_clipboard()
+    except host_error:
+        n = type_text(data, abort_check=abort_check, chars_typed=chars_typed)
+        return {"chars": n, "method": "keystrokes"}
+    try:
+        try:
+            set_clipboard(data)
+        except host_error:
+            n = type_text(data, abort_check=abort_check, chars_typed=chars_typed)
+            return {"chars": n, "method": "keystrokes"}
+        press_key("ctrl+v")
+        time.sleep(paste_sleep_s)
+        if chars_typed is not None:
+            chars_typed[:] = [len(data)]
+        return {"chars": len(data), "method": "paste"}
+    finally:
+        with contextlib.suppress(Exception):
+            set_clipboard(saved)
+
+
+def press_hold(
+    x: int,
+    y: int,
+    *,
+    mouse_move: Callable[[int, int], None],
+    mouse_down: Callable[[], None],
+    mouse_up: Callable[[], None],
+    hold_ms: int = 2600,
+    abort_check: Callable[[], bool] | None = None,
+    pre_hold_sleep_s: float = 0.05,
+) -> dict[str, Any]:
+    """Move, press, hold with abort_check, release. Caller owns fail-closed."""
+    mouse_move(int(x), int(y))
+    time.sleep(pre_hold_sleep_s)
+    mouse_down()
+    held = 0.0
+    step = 0.1
+    total = max(0.1, float(hold_ms) / 1000.0)
+    try:
+        while held < total:
+            time.sleep(min(step, total - held))
+            held += step
+            if abort_check is not None and abort_check():
+                break
+    finally:
+        mouse_up()
+    return {"held_ms": int(min(held, total) * 1000), "x": x, "y": y}
+
+
+def find_title_hwnd(
+    windows: list[dict[str, Any]],
+    *,
+    exact: str | None = None,
+    prefix: str | None = None,
+    substr: str | None = None,
+) -> tuple[int, str] | None:
+    """First window matching exact / prefix / casefold substr."""
+    needle = (substr or "").strip().lower()
+    for w in windows:
+        title = str(w.get("title") or "")
+        stripped = title.strip()
+        if exact is not None and stripped == exact:
+            return int(w["hwnd"]), title
+        if prefix is not None and stripped.startswith(prefix):
+            return int(w["hwnd"]), title
+        if needle and needle in title.lower():
+            return int(w["hwnd"]), title
+    return None
+
+
+WINDOW_ACTIONS = {
+    "minimize": H.WINDOW_MINIMIZE,
+    "maximize": H.WINDOW_MAXIMIZE,
+    "restore": H.WINDOW_RESTORE,
+    "close": H.WINDOW_CLOSE,
+    "move": H.WINDOW_MOVE_RESIZE,
+    "resize": H.WINDOW_MOVE_RESIZE,
+}
+
+
+def window_action(verb: str) -> int | None:
+    return WINDOW_ACTIONS.get((verb or "").strip().lower())
+
+
+def manage_window_message(
+    verb: str,
+    hwnd: int,
+    *,
+    nx: int | None = None,
+    ny: int | None = None,
+    nw: int | None = None,
+    nh: int | None = None,
+) -> dict[str, Any]:
+    v = (verb or "").strip().lower()
+    if v == "close":
+        return {
+            "ok": True,
+            "message": (
+                f"Sent close to hwnd={hwnd} (the app may show a save prompt — "
+                "snapshot to see it)"
+            ),
+        }
+    if v in ("move", "resize") and None not in (nx, ny, nw, nh):
+        return {"ok": True, "message": f"{v} hwnd={hwnd} → ({nx},{ny}) {nw}x{nh}"}
+    return {"ok": True, "message": f"{v} hwnd={hwnd}"}
+
+
+def screenshot_monitor_from_list(
+    monitors: list[dict[str, Any]],
+    index: int,
+    *,
+    path: Path | None,
+    region_shot: Callable[..., dict[str, Any]],
+    full_shot: Callable[..., dict[str, Any]],
+) -> dict[str, Any]:
+    if not monitors:
+        return full_shot(path)
+    idx = int(index)
+    if idx < 0 or idx >= len(monitors):
+        raise ValueError(f"monitor index {idx} out of range 0..{len(monitors) - 1}")
+    m = monitors[idx]
+    left = int(m.get("left", 0))
+    top = int(m.get("top", 0))
+    width = int(m.get("width") or max(0, int(m.get("right", 0)) - left))
+    height = int(m.get("height") or max(0, int(m.get("bottom", 0)) - top))
+    return region_shot(left, top, width, height, path=path, scale=1.0)
+
+
+def a11y_as_elements(cands: list[dict[str, Any]], cap: int) -> list[dict[str, Any]]:
+    """AT-SPI / a11y clickables → snapshot element dicts."""
+    out: list[dict[str, Any]] = []
+    for i, c in enumerate(cands):
+        w, h = int(c.get("w") or 0), int(c.get("h") or 0)
+        x, y = int(c.get("x") or 0), int(c.get("y") or 0)
+        name = str(c.get("name") or c.get("role") or "widget")[:120]
+        role = str(c.get("role") or "widget")
+        out.append(
+            {
+                "ref": f"c{i + 1}",
+                "tag": role,
+                "role": role,
+                "name": name,
+                "x": x,
+                "y": y,
+                "w": w,
+                "h": h,
+                "source": str(c.get("source") or "atspi"),
+                "bounds": {
+                    "left": x - w // 2,
+                    "top": y - h // 2,
+                    "right": x - w // 2 + w,
+                    "bottom": y - h // 2 + h,
+                },
+            }
+        )
+        if len(out) >= cap:
+            break
+    return out
+
+
+def compose_desktop_snapshot(
+    *,
+    limit: int = 40,
+    mode: str = "auto",
+    hwnd: int | None = None,
+    list_windows_fn: Callable[..., list[dict[str, Any]]],
+    controls_fn: Callable[[int | None, int], list[dict[str, Any]]] | None = None,
+    foreground_hwnd_fn: Callable[[], int | None] | None = None,
+    controls_modes: frozenset[str] | set[str] | None = None,
+    prefer_controls_alone: bool = False,
+    merge_cell: int = 1,
+) -> list[dict[str, Any]]:
+    """Windows/controls/auto snapshot merge used by both OS modules."""
+    mode_s = (mode or "auto").strip().lower()
+    cap = max(1, min(int(limit or 40), 100))
+    deep = controls_modes or frozenset({"controls", "uia", "deep", "atspi"})
+    wins = list_windows_fn(limit=min(cap, 80))
+    win_els = windows_as_elements(wins, cap)
+    if mode_s == "windows":
+        return win_els[:cap]
+    ctrl_els: list[dict[str, Any]] = []
+    if controls_fn is not None:
+        root = hwnd
+        if root is None and wins:
+            fg = None
+            if foreground_hwnd_fn is not None:
+                with __import__("contextlib").suppress(Exception):
+                    fg = foreground_hwnd_fn()
+            root = fg or wins[0].get("hwnd")
+        try:
+            ctrl_els = list(controls_fn(root, cap) or [])
+        except Exception:
+            ctrl_els = []
+    if mode_s in deep:
+        if prefer_controls_alone:
+            return ctrl_els[:cap]
+        return (ctrl_els or win_els)[:cap]
+    if prefer_controls_alone:
+        return ctrl_els[:cap] if ctrl_els else []
+    return merge_ui_candidates(win_els, ctrl_els, cap, cell=merge_cell)
+
+
+def annotate_monitors(
+    monitors: list[dict[str, Any]],
+    *,
+    remedy_hwnd: int | None = None,
+    window_rect_fn: Callable[[int], tuple[int, int, int, int]] | None = None,
+) -> list[dict[str, Any]]:
+    """Mark primary fallback + which monitor hosts Remedy Desktop."""
+    for m in monitors:
+        m["remedy"] = False
+    if monitors and not any(m.get("primary") for m in monitors):
+        monitors[0]["primary"] = True
+    if remedy_hwnd and window_rect_fn is not None:
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            left, top, right, bottom = window_rect_fn(int(remedy_hwnd))
+            cx, cy = (left + right) // 2, (top + bottom) // 2
+            for m in monitors:
+                if m["left"] <= cx < m["right"] and m["top"] <= cy < m["bottom"]:
+                    m["remedy"] = True
+                    break
+    return monitors
+
+
+def manage_window_dispatch(
+    hwnd: int,
+    verb: str,
+    *,
+    x: int | None = None,
+    y: int | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    window_rect_fn: Callable[[int], tuple[int, int, int, int]],
+    manage_fn: Callable[..., None],
+    fail_soft: bool = False,
+    require_partial_args: bool = False,
+) -> dict[str, Any]:
+    """Shared window verb dispatch; fail_soft returns ok:False instead of raise."""
+    v = (verb or "").strip().lower()
+    if not hwnd:
+        return {"ok": False, "message": "hwnd required"}
+    action = window_action(v)
+    if action is None:
+        return {"ok": False, "message": f"Unknown window verb {verb!r}"}
+    nx = int(x) if x is not None else 0
+    ny = int(y) if y is not None else 0
+    nw = int(width) if width is not None else 0
+    nh = int(height) if height is not None else 0
+    try:
+        if v in ("move", "resize"):
+            if require_partial_args:
+                if v == "move" and (x is None or y is None):
+                    return {"ok": False, "message": "move requires x and y"}
+                if v == "resize" and (width is None or height is None):
+                    return {"ok": False, "message": "resize requires width and height"}
+            if v == "move" or width is None or height is None or x is None or y is None:
+                import contextlib
+
+                with contextlib.suppress(Exception):
+                    left, top, right, bottom = window_rect_fn(int(hwnd))
+                    if x is None:
+                        nx = left
+                    if y is None:
+                        ny = top
+                    if width is None:
+                        nw = max(0, right - left)
+                    if height is None:
+                        nh = max(0, bottom - top)
+            manage_fn(int(hwnd), action, nx, ny, nw, nh)
+            return manage_window_message(v, hwnd, nx=nx, ny=ny, nw=nw, nh=nh)
+        manage_fn(int(hwnd), action, nx, ny, nw, nh)
+    except Exception as exc:
+        if fail_soft:
+            return {"ok": False, "message": f"{v} hwnd={hwnd} failed: {exc}"}
+        raise
+    return manage_window_message(v, hwnd, nx=nx, ny=ny, nw=nw, nh=nh)
