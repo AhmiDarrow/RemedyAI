@@ -6,8 +6,8 @@ Remedy Desktop now runs on Linux (including WSLg) as well as Windows. Same partn
 
 - 64-bit Linux with a desktop session (GNOME, KDE, XFCE, or **WSL2 + WSLg**)
 - Network for cloud providers, or a local model (Ollama / RMB / first-run vision)
-- Packaged desktop **includes** the Python sidecar (same as Windows). You do **not**
-  need a system `python` / `uv` for the `.deb` or AppImage.
+- Packaged desktop **includes** the Go `remedy-runtime` local API (same as Windows).
+  You do **not** need a system `python` / `uv` for the `.deb` or AppImage.
 
 ## Ways to run
 

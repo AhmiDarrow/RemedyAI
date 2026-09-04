@@ -33,7 +33,7 @@ Silent/passive/update installs may relaunch automatically.
 |------|----------------|
 | App install | `%LOCALAPPDATA%\Remedy Desktop\` |
 | Main EXE | `%LOCALAPPDATA%\Remedy Desktop\Remedy Desktop.exe` |
-| Sidecar API | `remedy-desktop.exe` next to the main app (local server) |
+| Local API | `remedy-runtime.exe` next to the main app (`127.0.0.1:7400`) |
 | User data | `%USERPROFILE%\.remedy\` |
 | Config | `%USERPROFILE%\.remedy\config.toml` |
 | Memory DB | `%USERPROFILE%\.remedy\memory.db` |

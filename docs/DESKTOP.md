@@ -64,10 +64,10 @@ the worker path (`remedy.voice.*`, `remedy.core.atomic_json`,
 
 ### Native runtime cutover (0.48+)
 
-Installers include two small native components in addition to the Python
-sidecar: the Go `remedy-runtime` probe/runtime and the Zig `remedy_core` shared
-library (`.dll` on Windows, `.so` on Linux). Python is deliberately retained for
-compatibility and AI/ML workers while parity moves over in tested slices.
+Installers ship the Go `remedy-runtime` (Tauri `externalBin`, owns `:7400`) and
+the Zig `remedy_core` shared library (`.dll` on Windows, `.so` on Linux) as a
+resource. Python remains a supervised worker for text/model work; it is not the
+Desktop launch path.
 
 The default is `REMEDY_NATIVE_RUNTIME=compatibility`. Developers can select
 `auto` to use a native slice only when both versioned probes are healthy, or
@@ -81,10 +81,11 @@ and other potentially partial side effects are never silently repeated.
 
 Tauri `externalBin` (Windows + Linux) is **`remedy-runtime`**. Packaged Desktop
 launches it on `127.0.0.1:7400` with `--serve` (or `--serve --listen` for a
-non-default port). **`remedy serve` also execs `remedy-runtime`** — Python no
-longer starts uvicorn on `:7400` (fail closed if the binary is missing).
-Packaged Desktop does **not** soft-fallback to Python `remedy-desktop` when
-the Go binary is absent. `tauri:dev` still prefers the live Python venv; set
+non-default port) and ships the Zig `remedy_core` shared library as a resource.
+**`remedy serve` also execs `remedy-runtime`** — Python no longer starts
+uvicorn on `:7400` (fail closed if the binary is missing). **`remedy-desktop`
+is not built or shipped** — there is no Python fallback launch path in
+installers. `tauri:dev` still prefers the live Python venv; set
 `REMEDY_RUNTIME_SIDECAR=1` to exercise the Go binary from a checkout.
 Python worker entry: `python -m remedy.runtime.rmdy_tool_worker`.
 
@@ -418,7 +419,7 @@ User path (Ollama-style):
 2. UI opens full-screen progress and **starts download immediately** (`autoStart`)
 3. Rust downloads the NSIS installer from GitHub Releases (trusted hosts only)
 4. Validates PE `MZ` header + minimum size (rejects HTML error pages)
-5. Kills the Python sidecar so files can be replaced
+5. Kills `remedy-runtime` (and any legacy `remedy-desktop`) so files can be replaced
 6. Launches installer with **`/S`** (silent NSIS — not MSI `/PASSIVE`)
 7. Detaches installer, exits the app
 8. NSIS **`NSIS_HOOK_POSTINSTALL`** runs `Exec "…\Remedy Desktop.exe"` so the app
@@ -474,20 +475,27 @@ outside the app’s control. After approval, install + relaunch are automatic.
 # 1. Add Rust to PATH for this session
 $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
 
-# 2. Build Go runtime (externalBin) + Python fallback resource
+# 2. Build Go runtime (externalBin) + Zig core (resource)
 New-Item -ItemType Directory -Force desktop/bin | Out-Null
 Push-Location native/go
 go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime.exe ./cmd/remedy-runtime
 Pop-Location
 Copy-Item desktop/bin/remedy-runtime.exe desktop/bin/remedy-runtime-x86_64-pc-windows-msvc.exe
-python scripts/build_desktop.py --clean
+Push-Location native/zig
+zig build -Doptimize=ReleaseSafe
+Pop-Location
+Copy-Item native/zig/zig-out/bin/remedy_core.dll desktop/bin/remedy_core.dll
 
 # 3. Build Tauri app (output: desktop/src-tauri/target/release/bundle/nsis/)
 cd desktop
 npm run tauri build
 ```
 
-Version is sourced from `pyproject.toml` — `scripts/sync_version.py` / `build_desktop.py` keep `package.json`, `package-lock.json`, `tauri.conf.json`, `Cargo.toml`, `Cargo.lock`, and `scripts/latest.json` in sync (installer URL uses `Remedy.Desktop_*`). Help chapters: `python scripts/sync_help_manual.py`. `src/remedy/__init__.py` reads the package version at runtime.
+Version is sourced from `pyproject.toml` — `scripts/sync_version.py` keeps
+`package.json`, `package-lock.json`, `tauri.conf.json`, `Cargo.toml`,
+`Cargo.lock`, and `scripts/latest.json` in sync (installer URL uses
+`Remedy.Desktop_*`). Help chapters: `python scripts/sync_help_manual.py`.
+`src/remedy/__init__.py` reads the package version at runtime.
 
 ## Releases & auto-update
 

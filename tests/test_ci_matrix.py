@@ -150,14 +150,21 @@ def test_ci_python_jobs_build_the_zig_core_before_pytest() -> None:
         assert library in run
 
 
-def test_release_builds_native_before_the_sidecar_that_bundles_it() -> None:
+def test_release_builds_runtime_and_core_without_python_sidecar() -> None:
+    """Packaged Desktop is remedy-runtime + Zig core; no PyInstaller sidecar."""
     jobs = _workflow_jobs("desktop-release.yml")
-    for name in ("build-sidecar", "build-sidecar-linux"):
+    for name, runtime, core in (
+        ("build-sidecar", "remedy-runtime.exe", "remedy_core.dll"),
+        ("build-sidecar-linux", "remedy-runtime", "libremedy_core.so"),
+    ):
         job = jobs[name]
-        native = _step_index(job, ZIG_BUILD)
-        sidecar = _step_index(job, "build_desktop.py")
-        assert native < sidecar, f"{name}: the sidecar bundles the core, so Zig builds first"
-        assert "go build" in str(_steps(job)[native]["run"]), f"{name}: Go builds with Zig"
+        runs = _run_commands(job)
+        assert "go build" in runs, f"{name}: builds Go remedy-runtime"
+        assert ZIG_BUILD in runs, f"{name}: builds Zig core"
+        assert runtime in runs, f"{name}: produces {runtime}"
+        assert core in runs, f"{name}: ships {core}"
+        assert "build_desktop.py" not in runs, f"{name}: must not build remedy-desktop"
+        assert "remedy-desktop" not in runs, f"{name}: must not reference remedy-desktop"
 
 
 def _build_desktop_module():
