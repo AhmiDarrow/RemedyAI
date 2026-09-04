@@ -10,8 +10,9 @@ The native migration has three non-overlapping responsibilities:
   libraries, and experiments, always as a replaceable supervised worker.
 
 Cross-language calls use only the versioned C Tool ABI, the `RMDY` framed IPC protocol,
-or the Python worker protocol. The existing Python product remains the compatibility path
-until Phase 17 gates a native slice on and proves rollback.
+or the Python worker protocol. Go `remedy-runtime` owns production `:7400`; Python is
+not the HTTP authority. Python remains the supervised ML / compatibility worker path
+until Phase 17 gates remaining native slices on and proves rollback.
 
 `go run ./cmd/check-boundaries -root ..` enforces the mechanical portion of this contract.
 It rejects direct process execution from Go, unsafe/syscall use, misplaced third-party
