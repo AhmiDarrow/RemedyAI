@@ -24,16 +24,18 @@ type claimEntry struct {
 
 // streamClaims mirrors remedy.core.turn_context stream claim + abort epoch.
 type streamClaims struct {
-	mu     sync.Mutex
-	bySID  map[string]*claimEntry
-	epochs map[string]int
-	turns  sync.WaitGroup
+	mu       sync.Mutex
+	bySID    map[string]*claimEntry
+	epochs   map[string]int
+	turns    sync.WaitGroup
+	sidTurns map[string]*sync.WaitGroup
 }
 
 func newStreamClaims() *streamClaims {
 	return &streamClaims{
-		bySID:  make(map[string]*claimEntry),
-		epochs: make(map[string]int),
+		bySID:    make(map[string]*claimEntry),
+		epochs:   make(map[string]int),
+		sidTurns: make(map[string]*sync.WaitGroup),
 	}
 }
 
@@ -66,20 +68,58 @@ func (c *streamClaims) TryClaim(sessionID string) (epoch int, ctx context.Contex
 	return n, ctx, true
 }
 
-// BeginTurn marks a detached turn goroutine; EndTurn must be deferred.
-func (c *streamClaims) BeginTurn() {
+// BeginTurn marks a detached turn goroutine for sid; EndTurn must be deferred.
+func (c *streamClaims) BeginTurn(sessionID string) {
 	if c == nil {
 		return
 	}
+	sid := strings.TrimSpace(sessionID)
 	c.turns.Add(1)
+	if sid == "" {
+		return
+	}
+	c.mu.Lock()
+	wg := c.sidTurns[sid]
+	if wg == nil {
+		wg = &sync.WaitGroup{}
+		c.sidTurns[sid] = wg
+	}
+	wg.Add(1)
+	c.mu.Unlock()
 }
 
 // EndTurn pairs with BeginTurn.
-func (c *streamClaims) EndTurn() {
+func (c *streamClaims) EndTurn(sessionID string) {
 	if c == nil {
 		return
 	}
+	sid := strings.TrimSpace(sessionID)
+	if sid != "" {
+		c.mu.Lock()
+		wg := c.sidTurns[sid]
+		c.mu.Unlock()
+		if wg != nil {
+			wg.Done()
+		}
+	}
 	c.turns.Done()
+}
+
+// WaitSessionTurn blocks until detached turns for sid have finished.
+func (c *streamClaims) WaitSessionTurn(sessionID string) {
+	if c == nil {
+		return
+	}
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		return
+	}
+	c.mu.Lock()
+	wg := c.sidTurns[sid]
+	c.mu.Unlock()
+	if wg != nil {
+		wg.Wait()
+	}
 }
 
 // AbortAll cancels every live claim (server shutdown / Close).

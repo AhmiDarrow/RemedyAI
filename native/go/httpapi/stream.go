@@ -305,8 +305,8 @@ func (s *Server) runDetachedStream(
 	req TurnRequest,
 	frames chan string,
 ) {
-	s.claims.BeginTurn()
-	defer s.claims.EndTurn()
+	s.claims.BeginTurn(sid)
+	defer s.claims.EndTurn(sid)
 	defer close(frames)
 	defer s.claims.Release(sid, &claimEpoch)
 

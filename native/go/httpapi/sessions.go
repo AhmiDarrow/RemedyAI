@@ -578,6 +578,8 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	if s.claims != nil {
 		s.claims.Abort(id, nil, nil)
 		s.claims.Release(id, nil)
+		// Wait for the detached turn to finish DB writes before DELETE.
+		s.claims.WaitSessionTurn(id)
 	}
 	ok, err := s.sessions.Delete(id)
 	if err != nil {

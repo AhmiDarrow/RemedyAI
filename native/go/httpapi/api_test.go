@@ -34,11 +34,15 @@ func startTestServer(t *testing.T, cfg Config) (baseURL string, shutdown func())
 		close(done)
 	}()
 	return "http://" + ln.Addr().String(), func() {
+		// Abort turns before cancel so SSE handlers drain within Shutdown.
+		if s.claims != nil {
+			s.claims.AbortAll()
+		}
 		cancel()
 		_ = ln.Close()
 		select {
 		case <-done:
-		case <-time.After(2 * time.Second):
+		case <-time.After(10 * time.Second):
 			t.Error("server did not shut down")
 		}
 	}
