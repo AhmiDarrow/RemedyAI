@@ -838,21 +838,21 @@ def manage_window(
 
 
 def get_clipboard_text() -> str:
-    """Read CF_UNICODETEXT from the clipboard ('' when empty/non-text/busy)."""
+    """Read CF_UNICODETEXT from the clipboard ('' when empty/non-text).
+
+    Host failures raise :class:`host_binding.HostError` — never soft ``""``.
+    """
     _require_windows()
-    try:
-        return H.clipboard_get_text()
-    except H.HostError:
-        return ""
+    return H.clipboard_get_text()
 
 
 def set_clipboard_text(text: str) -> bool:
-    """Put *text* on the clipboard as CF_UNICODETEXT."""
+    """Put *text* on the clipboard as CF_UNICODETEXT.
+
+    Host failures raise :class:`host_binding.HostError` — never soft ``False``.
+    """
     _require_windows()
-    try:
-        H.clipboard_set_text(str(text or ""))
-    except H.HostError:
-        return False
+    H.clipboard_set_text(str(text or ""))
     return True
 
 
@@ -870,8 +870,9 @@ def type_text_fast(
     """Type text — atomically via clipboard-paste when long, per-char when short.
 
     Preserves the user's clipboard (saved and restored around the paste). Falls
-    back to per-char typing when the clipboard path fails, so behaviour is a
-    strict superset of type_text. Returns {"chars", "method"}.
+    back to per-char typing when the clipboard path raises HostError, so
+    behaviour stays a strict ability superset of type_text. Returns
+    {"chars", "method"}.
     """
     data = str(text or "")
     if len(data) <= PASTE_THRESHOLD or "\r" in data or "\n" in data:
@@ -879,9 +880,15 @@ def type_text_fast(
         # newlines differently, e.g. chat boxes that send on Enter).
         n = type_text(data, abort_check=abort_check, chars_typed=chars_typed)
         return {"chars": n, "method": "keystrokes"}
-    saved = get_clipboard_text()
     try:
-        if not set_clipboard_text(data):
+        saved = get_clipboard_text()
+    except H.HostError:
+        n = type_text(data, abort_check=abort_check, chars_typed=chars_typed)
+        return {"chars": n, "method": "keystrokes"}
+    try:
+        try:
+            set_clipboard_text(data)
+        except H.HostError:
             n = type_text(data, abort_check=abort_check, chars_typed=chars_typed)
             return {"chars": n, "method": "keystrokes"}
         press_key("ctrl+v")
