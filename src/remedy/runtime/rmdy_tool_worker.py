@@ -461,6 +461,13 @@ def _vision_progress(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return vision_progress(inp)
 
 
+def _memory_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Bridge Tool ABI memory.search to Partner Memory + FTS (forever-Python)."""
+    from remedy.runtime.prompt_assemble import search_memory
+
+    return search_memory(inp)
+
+
 _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("text.slugify", 1): lambda inp: {"slug": _slugify(str(inp.get("text", "")))},
     ("text.word_count", 1): lambda inp: {"words": _word_count(str(inp.get("text", "")))},
@@ -482,6 +489,7 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("vision.start", 1): _vision_start,
     ("vision.stop", 1): _vision_stop,
     ("vision.progress", 1): _vision_progress,
+    ("memory.search", 1): _memory_search,
 }
 
 
