@@ -328,3 +328,132 @@ func RelayConfigured(raw string) (string, error) {
 	}
 	return text, nil
 }
+
+// RelayConnHandler is invoked once a relay dial completes for a session id.
+// The handler owns the connection for the session lifetime; returning closes it.
+type RelayConnHandler func(ctx context.Context, conn net.Conn)
+
+// RelaySupervisorOpts configures the outbound relay dialer supervisor.
+type RelaySupervisorOpts struct {
+	URL      string
+	Home     string
+	Handler  RelayConnHandler
+	Interval time.Duration // how often to refresh wanted SIDs; default 1s
+	DialWait time.Duration // per-dial timeout; default 20s
+}
+
+// RunRelaySupervisor keeps one outbound relay waiter per active rendezvous sid
+// (pair window + paired devices). Matches Python _relay_supervisor: reconnect
+// with backoff, skip while paused, retire SIDs that leave the wanted set.
+func RunRelaySupervisor(ctx context.Context, opts RelaySupervisorOpts) error {
+	url, err := RelayConfigured(opts.URL)
+	if err != nil {
+		return err
+	}
+	if url == "" {
+		return nil
+	}
+	if opts.Handler == nil {
+		return fmt.Errorf("%w: relay supervisor needs a handler", ErrRelay)
+	}
+	interval := opts.Interval
+	if interval <= 0 {
+		interval = time.Second
+	}
+	dialWait := opts.DialWait
+	if dialWait <= 0 {
+		dialWait = 20 * time.Second
+	}
+
+	type liveDial struct {
+		cancel context.CancelFunc
+		done   <-chan struct{}
+	}
+	live := map[string]liveDial{}
+	defer func() {
+		for _, d := range live {
+			d.cancel()
+		}
+		for _, d := range live {
+			<-d.done
+		}
+	}()
+
+	tick := time.NewTicker(interval)
+	defer tick.Stop()
+	for {
+		wanted, err := RendezvousSIDs(opts.Home)
+		if err != nil {
+			return err
+		}
+		wantKeys := map[string][]byte{}
+		for _, sid := range wanted {
+			if len(sid) == SessionIDLen {
+				wantKeys[string(sid)] = sid
+			}
+		}
+		for key, d := range live {
+			if _, ok := wantKeys[key]; !ok {
+				d.cancel()
+				<-d.done
+				delete(live, key)
+			}
+		}
+		for key, sid := range wantKeys {
+			if _, ok := live[key]; ok {
+				continue
+			}
+			sidCopy := append([]byte(nil), sid...)
+			dctx, cancel := context.WithCancel(ctx)
+			done := make(chan struct{})
+			live[key] = liveDial{cancel: cancel, done: done}
+			go func() {
+				defer close(done)
+				runRelayDialLoop(dctx, url, opts.Home, sidCopy, dialWait, opts.Handler)
+			}()
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick.C:
+		}
+	}
+}
+
+func runRelayDialLoop(ctx context.Context, url, home string, sid []byte, dialWait time.Duration, handler RelayConnHandler) {
+	backoff := time.Second
+	for {
+		if IsPaused(home) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(500 * time.Millisecond):
+				continue
+			}
+		}
+		dctx, cancel := context.WithTimeout(ctx, dialWait)
+		conn, err := DialRelay(dctx, url, sid)
+		cancel()
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			backoff = backoff + backoff/2
+			if backoff > 15*time.Second {
+				backoff = 15 * time.Second
+			}
+			continue
+		}
+		backoff = time.Second
+		handler(ctx, conn)
+		_ = conn.Close()
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+	}
+}

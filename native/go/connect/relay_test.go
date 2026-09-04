@@ -199,6 +199,85 @@ func TestRelayConfigured(t *testing.T) {
 	}
 }
 
+func TestRunRelaySupervisorDialsActiveSID(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REMEDY_HOME", home)
+	connect.ResetPairStateForTest()
+	t.Cleanup(connect.ResetPairStateForTest)
+
+	relay, err := connect.StartRelay("127.0.0.1", 0, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relay.Stop()
+
+	qr, err := connect.StartPair(connect.PairStartOpts{
+		Loopback: true,
+		BindHost: "127.0.0.1",
+		BindPort: 7401,
+		Home:     home,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = qr
+	sid, err := connect.PendingPairRendezvous(home)
+	if err != nil || len(sid) != connect.SessionIDLen {
+		t.Fatalf("sid=%v err=%v", sid, err)
+	}
+
+	gotConn := make(chan net.Conn, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- connect.RunRelaySupervisor(ctx, connect.RelaySupervisorOpts{
+			URL:      relay.Addr(),
+			Home:     home,
+			Interval: 50 * time.Millisecond,
+			DialWait: 3 * time.Second,
+			Handler: func(hctx context.Context, conn net.Conn) {
+				select {
+				case gotConn <- conn:
+				default:
+				}
+				<-hctx.Done()
+			},
+		})
+	}()
+
+	// Peer side of the splice — same session id.
+	peer, err := connect.DialRelay(ctx, relay.Addr(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+
+	var host net.Conn
+	select {
+	case host = <-gotConn:
+	case <-ctx.Done():
+		t.Fatal("supervisor never handed a conn")
+	}
+	defer host.Close()
+
+	frame := frameBlob([]byte("sup"))
+	if _, err := peer.Write(frame); err != nil {
+		t.Fatal(err)
+	}
+	_ = host.SetDeadline(time.Now().Add(3 * time.Second))
+	got := mustReadFull(t, host, len(frame))
+	if string(got) != string(frame) {
+		t.Fatalf("got %q", got)
+	}
+	cancel()
+	select {
+	case <-errCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("supervisor did not exit")
+	}
+}
+
 func frameBlob(payload []byte) []byte {
 	hdr := make([]byte, 4)
 	binary.BigEndian.PutUint32(hdr, uint32(len(payload)))

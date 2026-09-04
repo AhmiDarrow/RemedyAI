@@ -82,6 +82,25 @@ func PendingSecretForTest() []byte {
 	return out
 }
 
+// PendingPairRendezvous returns the 16-byte relay/rdv session id for the live
+// QR window, or nil when no pair is pending / expired / used.
+func PendingPairRendezvous(home string) ([]byte, error) {
+	pairMu.Lock()
+	if pendingPair == nil || pendingPair.used || nowFunc().After(pendingPair.exp) {
+		pairMu.Unlock()
+		return nil, nil
+	}
+	secret := make([]byte, len(pendingPair.secret))
+	copy(secret, pendingPair.secret)
+	pairMu.Unlock()
+
+	kp, err := LoadOrCreateHostKeyPair(home)
+	if err != nil {
+		return nil, err
+	}
+	return SessionIDPair(kp.Public, secret)
+}
+
 // B64u encodes URL-safe base64 without padding.
 func B64u(data []byte) string {
 	return strings.TrimRight(base64.URLEncoding.EncodeToString(data), "=")
