@@ -1,8 +1,9 @@
 """No route may buffer an unbounded request body.
 
 ``request.body()`` reads everything before anyone looks at it — so a route that
-keeps only the first kilobyte still pays for the whole megabyte first. The
-webhook routes already stream-cap; the generic one under /api/memory did not.
+keeps only the first kilobyte still pays for the whole megabyte first.
+Production webhook caps live in Go ``httpapi``; TestClient routes use
+``api_support.read_body_capped``.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ ROUTES = Path("src/remedy/interfaces/routes")
 
 @pytest.mark.asyncio
 async def test_an_oversized_content_length_is_refused_before_reading():
-    from remedy.interfaces.routes.webhooks import read_body_capped
+    from remedy.interfaces.api_support import read_body_capped
 
     class _Req:
         headers = {"content-length": str(50 * 1024 * 1024)}
@@ -34,7 +35,7 @@ async def test_an_oversized_content_length_is_refused_before_reading():
 
 @pytest.mark.asyncio
 async def test_a_body_that_lies_about_its_length_is_still_capped():
-    from remedy.interfaces.routes.webhooks import read_body_capped
+    from remedy.interfaces.api_support import read_body_capped
 
     class _Req:
         headers = {"content-length": "10"}
@@ -50,7 +51,7 @@ async def test_a_body_that_lies_about_its_length_is_still_capped():
 
 @pytest.mark.asyncio
 async def test_an_ordinary_body_comes_through_whole():
-    from remedy.interfaces.routes.webhooks import read_body_capped
+    from remedy.interfaces.api_support import read_body_capped
 
     class _Req:
         headers: dict[str, str] = {}
@@ -64,9 +65,9 @@ async def test_an_ordinary_body_comes_through_whole():
 
 def test_the_old_private_name_still_works():
     """Anything already importing it must not break."""
-    from remedy.interfaces.routes import webhooks
+    from remedy.interfaces import api_support
 
-    assert webhooks._read_body_capped is webhooks.read_body_capped
+    assert api_support._read_body_capped is api_support.read_body_capped
 
 
 def test_no_route_reads_a_body_without_a_cap():
@@ -88,5 +89,5 @@ def test_no_route_reads_a_body_without_a_cap():
                 offenders.append(f"{path.relative_to(ROUTES)}:{n.lineno} request.body()")
     assert not offenders, (
         "unbounded request bodies:\n  " + "\n  ".join(offenders)
-        + "\n(use routes.webhooks.read_body_capped)"
+        + "\n(use api_support.read_body_capped)"
     )
