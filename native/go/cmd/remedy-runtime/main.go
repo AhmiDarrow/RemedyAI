@@ -1,6 +1,7 @@
-// Command remedy-runtime is the native runtime probe and local API.
-// Packaged Desktop launches this binary as the :7400 sidecar (Phase 6 prep).
-// Pass --listen/--serve for the loopback HTTP API (never implied by --probe).
+// Command remedy-runtime is the native runtime probe and production local API.
+// Packaged Desktop launches this binary as the :7400 sidecar authority.
+// --serve binds 127.0.0.1:7400 by default; --listen overrides (desktop-chosen
+// port or ephemeral). Never implied by --probe alone.
 // `tauri:dev` still prefers the live Python sidecar unless REMEDY_RUNTIME_SIDECAR=1.
 package main
 
@@ -20,6 +21,8 @@ import (
 const (
 	protocolVersion = 1
 	toolABIVersion  = 1
+	// defaultServeAddr is the production loopback listen for --serve.
+	defaultServeAddr = "127.0.0.1:7400"
 )
 
 type probeResult struct {
@@ -40,10 +43,22 @@ func currentProbe() probeResult {
 	}
 }
 
+// resolveServeAddr picks the loopback bind for --serve/--listen.
+// Explicit --listen wins; bare --serve is production :7400.
+func resolveServeAddr(listen string, serve bool) string {
+	if listen != "" {
+		return listen
+	}
+	if serve {
+		return defaultServeAddr
+	}
+	return ""
+}
+
 func main() {
 	probe := flag.Bool("probe", false, "emit one JSON readiness record and exit")
-	listen := flag.String("listen", "", "loopback HTTP listen address (e.g. 127.0.0.1:0); opt-in, not :7400")
-	serve := flag.Bool("serve", false, "serve the Phase-4 local HTTP API (defaults --listen to 127.0.0.1:0)")
+	listen := flag.String("listen", "", "loopback HTTP listen address (overrides --serve default; e.g. 127.0.0.1:7410 or 127.0.0.1:0)")
+	serve := flag.Bool("serve", false, "serve the production local HTTP API (defaults --listen to 127.0.0.1:7400)")
 	smokeFixture := flag.Bool("smoke-fixture", false, "use FixtureTurnRunner instead of cognition (explicit smoke only)")
 	flag.Parse()
 
@@ -55,10 +70,7 @@ func main() {
 		return
 	}
 
-	addr := *listen
-	if *serve && addr == "" {
-		addr = "127.0.0.1:0"
-	}
+	addr := resolveServeAddr(*listen, *serve)
 	if addr == "" {
 		fmt.Fprintln(os.Stderr, "remedy-runtime requires --probe or --listen/--serve")
 		os.Exit(2)

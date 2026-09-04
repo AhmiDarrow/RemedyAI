@@ -1,6 +1,7 @@
-// Package httpapi serves the local HTTP API for remedy-runtime.
-// Packaged Desktop points :7400 at this server (Phase 6 prep). Python remains
-// the compatibility/worker path and the default for tauri:dev.
+// Package httpapi serves the production local HTTP API for remedy-runtime.
+// Packaged Desktop binds this server on 127.0.0.1:7400 (or a desktop-chosen
+// loopback port). Python remains the compatibility/worker path and the default
+// for tauri:dev.
 package httpapi
 
 import (
@@ -41,7 +42,7 @@ type Config struct {
 	TurnRunner TurnRunner
 }
 
-// Server is the Phase-4 first-slice HTTP API.
+// Server is the production local HTTP API served by remedy-runtime.
 type Server struct {
 	started  time.Time
 	version  string
