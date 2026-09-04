@@ -68,21 +68,11 @@ def test_no_module_carries_its_own_copy():
     )
 
 
-def test_signature_verification_is_constant_time():
-    import inspect
+def test_python_jwt_rs256_module_removed():
+    """RS256 JWT verify for Teams webhooks lives in Go now."""
+    from pathlib import Path
 
-    from remedy.gateway.channels import jwt_rs256
+    import remedy.gateway.channels as channels_pkg
 
-    src = inspect.getsource(jwt_rs256.verify_rs256)
-    assert "compare_digest" in src
-    assert "return digest_info == expected" not in src
-
-
-def test_a_forged_signature_still_fails():
-    """The real property: the verifier rejects rubbish. Constant time must not
-    have made it constant *true*."""
-    from remedy.gateway.channels.jwt_rs256 import verify_rs256
-
-    assert verify_rs256("a.b.c", n=3233, e=17) is False
-    assert verify_rs256("", n=3233, e=17) is False
-    assert verify_rs256("only.two", n=3233, e=17) is False
+    root = Path(channels_pkg.__file__).resolve().parent
+    assert not (root / "jwt_rs256.py").exists()

@@ -1,13 +1,11 @@
-"""Google Chat: spaces.messages outbound + webhook inbound."""
+"""Google Chat spaces.messages outbound — webhook inbound owned by Go httpapi."""
 
 from __future__ import annotations
 
 import logging
-from typing import Any
 
-from remedy.gateway.channels.allowlist import is_allowed, parse_ids
+from remedy.gateway.channels.allowlist import parse_ids
 from remedy.gateway.channels.base_http import HttpSessionMixin
-from remedy.gateway.channels.emit_util import emit_message
 from remedy.gateway.router import ChannelAdapter
 from remedy.models import ChannelKind
 
@@ -38,7 +36,8 @@ class GoogleChatChannel(HttpSessionMixin, ChannelAdapter):
         await super().start()
         if self.access_token:
             logger.info(
-                "Google Chat channel active (space=%s, inbound=webhook)",
+                "Google Chat outbound-ready (space=%s; "
+                "Go remedy-runtime owns webhook inbound)",
                 self.space_id or "(any)",
             )
         else:
@@ -74,83 +73,3 @@ class GoogleChatChannel(HttpSessionMixin, ChannelAdapter):
 
     async def send_typing(self, target: str | None = None) -> None:
         return
-
-    def verify_inbound_auth(self, authorization: str | None) -> bool:
-        """Require Bearer token matching configured access_token when set.
-
-        Google Chat HTTP push can use app-level bearer verification. When no
-        access_token is configured, reject (channel is stub / outbound-only).
-        """
-
-        if not self.access_token:
-            return False
-        auth = (authorization or "").strip()
-        if not auth.lower().startswith("bearer "):
-            # Some Google Chat deployments only use allowlist + private URL.
-            # Still require a token when configured — use REMEDY_GCHAT_ALLOW_NO_AUTH=1
-            # only for local tunnel debugging.
-            import os
-
-            if str(os.environ.get("REMEDY_GCHAT_ALLOW_NO_AUTH", "")).strip().lower() in (
-                "1",
-                "true",
-                "yes",
-                "on",
-            ):
-                return True
-            logger.warning("Google Chat webhook missing Bearer Authorization")
-            return False
-        presented = auth[7:].strip()
-        # Constant-time; unequal lengths → False (never raise → never 500).
-        from remedy.core.security import secret_equals
-
-        return secret_equals(presented, self.access_token)
-
-    async def handle_event(self, data: dict[str, Any]) -> bool:
-        """Handle Chat app event (MESSAGE).
-
-        Fail closed when allowlist is empty and allow_all is off (same policy as
-        Telegram). Auth is enforced at the webhook route via verify_inbound_auth.
-        """
-        etype = data.get("type") or data.get("eventType") or ""
-        msg = data.get("message") or {}
-        if etype and etype not in ("MESSAGE", "message"):
-            # Some payloads only include message
-            if not msg:
-                return False
-        text = (msg.get("text") or msg.get("argumentText") or "").strip()
-        if not text:
-            return False
-        space = (data.get("space") or msg.get("space") or {}) or {}
-        space_name = str(space.get("name") or self.space_id or "")
-        # normalize spaces/xxx
-        space_id = space_name.replace("spaces/", "") if space_name else ""
-        sender = (msg.get("sender") or data.get("user") or {}) or {}
-        user_name = str(sender.get("name") or sender.get("displayName") or "")
-        if sender.get("type") == "BOT":
-            return False
-        # Empty allowlist + not allow_all → ignore (do not open the agent to the world)
-        if not self._allowed and not self.allow_all:
-            logger.info(
-                "Google Chat ignore (empty allowlist, allow_all=false) space=%s",
-                space_id or space_name,
-            )
-            return False
-        if not is_allowed(
-            allowlist=self._allowed,
-            allow_all=self.allow_all,
-            candidates=[space_name, space_id, user_name],
-            channel="google_chat",
-        ):
-            return False
-        chat_id = space_name or space_id or "default"
-        await emit_message(
-            self.gateway,
-            ChannelKind.GOOGLE_CHAT,
-            message=text,
-            chat_id=chat_id,
-            source_id=user_name or chat_id,
-            username=sender.get("displayName"),
-            extra={"user_id": user_name, "space_id": space_id},
-        )
-        return True

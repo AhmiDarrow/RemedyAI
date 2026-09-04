@@ -135,12 +135,8 @@ async def run_gateway(
     gw.register_channel(WebChannel(gw))
     await gw.start()
 
-    go_owns = not python_may_poll_messengers()
-    inbound_note = (
-        "Inbound poll owned by Go remedy-runtime (Python outbound-only).\n"
-        if go_owns
-        else "Python messenger poll enabled (pytest / REMEDY_TESTING only).\n"
-    )
+    _ = python_may_poll_messengers()  # boundary: always False (inbound removed)
+    inbound_note = "Inbound poll owned by Go remedy-runtime (Python outbound-only).\n"
     console.print(Panel(
         f"[bold green]Remedy Gateway Running[/bold green]\n"
         f"Channels: {', '.join(c.value for c in gw.channels)}\n"
