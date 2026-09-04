@@ -200,3 +200,95 @@ def assemble_prompt(inp: Mapping[str, Any]) -> Mapping[str, Any]:
             return loop.run_until_complete(_assemble_async(inp))
         finally:
             loop.close()
+
+
+async def get_cached_runtime(
+    *,
+    home_dir: str | None = None,
+    project_path: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+) -> Any:
+    """Cached BasicRuntime for other forever-Python RMDY tools (memory/skills)."""
+    config = _agent_config(
+        home_dir=home_dir,
+        project_path=project_path,
+        provider=provider,
+        model=model,
+        base_url=base_url,
+    )
+    return await _get_runtime(config)
+
+
+def _run_coro(coro: Any) -> Any:
+    try:
+        return asyncio.run(coro)
+    except RuntimeError as exc:
+        if "asyncio.run()" not in str(exc) and "running event loop" not in str(exc):
+            raise
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+
+async def _memory_search_async(inp: Mapping[str, Any]) -> dict[str, Any]:
+    from remedy.memory.authority import RETRIEVAL_NOT_AUTHORITY
+    from remedy.memory.partner_memory import search_partner_and_entries
+
+    query = str(inp.get("query") or "").strip()
+    if not query:
+        raise ValueError("query is required")
+    if len(query) > 400:
+        query = query[:400]
+    raw_limit = inp.get("limit", 8)
+    try:
+        limit = int(raw_limit) if raw_limit is not None else 8
+    except (TypeError, ValueError):
+        limit = 8
+    limit = max(1, min(20, limit))
+    home_dir = str(inp.get("home_dir") or "").strip() or None
+    project_path = str(inp.get("project_path") or "").strip() or None
+
+    runtime = await get_cached_runtime(home_dir=home_dir, project_path=project_path)
+    memory = getattr(runtime, "memory", None)
+    if memory is None:
+        raise RuntimeError("memory store not available")
+    merged = await search_partner_and_entries(
+        memory,
+        query,
+        limit=limit,
+        project_path=project_path
+        or str(getattr(runtime, "_project_path", None) or "")
+        or None,
+    )
+    hits: list[dict[str, Any]] = []
+    for hit in merged or []:
+        item: dict[str, Any] = {
+            "kind": str(hit.get("kind") or "entry"),
+            "title": str(hit.get("title") or ""),
+            "content": str(hit.get("content") or "")[:400],
+            "score": float(hit.get("score") or 0.0),
+        }
+        auth = str(hit.get("authority") or "").strip()
+        if auth:
+            item["authority"] = auth
+        if "inferred" in hit:
+            item["inferred"] = bool(hit.get("inferred"))
+        why = str(hit.get("why") or "").strip()
+        if why:
+            item["why"] = why[:240]
+        hits.append(item)
+    return {
+        "query": query,
+        "hits": hits,
+        "total": len(hits),
+        "notice": RETRIEVAL_NOT_AUTHORITY,
+    }
+
+
+def search_memory(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Sync RMDY handler — Partner Memory + FTS search (context, not a grant)."""
+    return _run_coro(_memory_search_async(inp))

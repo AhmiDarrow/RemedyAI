@@ -281,6 +281,54 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:          "memory.search",
+		Version:     1,
+		Description: "Search Partner Memory + FTS entries (Python worker; context, not a grant)",
+		Runtime:     RuntimePython,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["query"],
+			"properties":{
+				"query":{"type":"string","minLength":1},
+				"limit":{"type":"integer","minimum":1,"maximum":20},
+				"home_dir":{"type":"string"},
+				"project_path":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["query","hits","total","notice"],
+			"properties":{
+				"query":{"type":"string"},
+				"hits":{
+					"type":"array",
+					"items":{
+						"type":"object",
+						"required":["kind","title","content","score"],
+						"properties":{
+							"kind":{"type":"string"},
+							"title":{"type":"string"},
+							"content":{"type":"string"},
+							"score":{"type":"number"},
+							"authority":{"type":"string"},
+							"inferred":{"type":"boolean"},
+							"why":{"type":"string"}
+						},
+						"additionalProperties":false
+					}
+				},
+				"total":{"type":"integer","minimum":0},
+				"notice":{"type":"string","minLength":1}
+			},
+			"additionalProperties":false
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:          "prompt.assemble",
 		Version:     1,
 		Description: "Assemble system/soul/skills/memory context for a cognition turn (internal; not model-callable)",

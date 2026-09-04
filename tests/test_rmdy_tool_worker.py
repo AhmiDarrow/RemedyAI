@@ -537,3 +537,111 @@ def test_voice_speak_unavailable_without_engines(
     out = vv.voice_speak({"text": "hi", "home_dir": str(tmp_path)})
     assert out["unavailable"] is True
     assert out["wav_b64"] == ""
+
+
+def test_memory_search_handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(
+        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
+        encoding="utf-8",
+    )
+
+    async def _fake_search(memory, query, *, limit=12, project_path=None):
+        assert query == "favorite color"
+        assert limit == 5
+        return [
+            {
+                "kind": "fact",
+                "title": "prefs",
+                "content": "favorite color is teal",
+                "score": 1.5,
+                "authority": "owner",
+                "inferred": False,
+            }
+        ]
+
+    monkeypatch.setattr(
+        "remedy.memory.partner_memory.search_partner_and_entries",
+        _fake_search,
+    )
+    out = worker._memory_search({"query": "favorite color", "limit": 5})
+    assert out["query"] == "favorite color"
+    assert out["total"] == 1
+    assert out["hits"][0]["content"] == "favorite color is teal"
+    assert "context" in out["notice"].lower()
+
+
+def test_memory_search_requires_query(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    with pytest.raises(ValueError, match="query"):
+        worker._memory_search({"query": "  "})
+
+
+def test_stdio_tool_round_trip_memory_search(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(
+        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
+        encoding="utf-8",
+    )
+
+    async def _fake_search(memory, query, *, limit=12, project_path=None):
+        return [
+            {
+                "kind": "entry",
+                "title": "note",
+                "content": "wire memory hit",
+                "score": 0.9,
+            }
+        ]
+
+    monkeypatch.setattr(
+        "remedy.memory.partner_memory.search_partner_and_entries",
+        _fake_search,
+    )
+
+    req = json.dumps(
+        {
+            "tool_id": "memory.search",
+            "version": 1,
+            "input": {"query": "wire", "limit": 3},
+        }
+    ).encode("utf-8")
+    corr = b"\x08" + b"\x00" * 15
+    inbound = _frame(worker._KIND_TOOL_REQUEST, req, corr)
+
+    class _Buf:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+            self._pos = 0
+            self.out = bytearray()
+
+        def read(self, n: int) -> bytes:
+            if self._pos >= len(self._data):
+                return b""
+            chunk = self._data[self._pos : self._pos + n]
+            self._pos += len(chunk)
+            return chunk
+
+        def write(self, data: bytes) -> int:
+            self.out.extend(data)
+            return len(data)
+
+        def flush(self) -> None:
+            return None
+
+    buf = _Buf(inbound)
+    worker.serve(buf, buf)  # type: ignore[arg-type]
+
+    raw = bytes(buf.out)
+    payload_len = struct.unpack_from("<I", raw, 12)[0]
+    body = json.loads(raw[32 : 32 + payload_len].decode("utf-8"))
+    assert body["ok"] is True
+    assert body["output"]["total"] == 1
+    assert "wire memory hit" in body["output"]["hits"][0]["content"]
+
+
+def test_memory_search_registered() -> None:
+    assert ("memory.search", 1) in worker._HANDLERS
+
