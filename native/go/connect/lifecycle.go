@@ -46,8 +46,8 @@ type GatewaySettings struct {
 }
 
 // Gateway owns the Connect listener lifecycle: start/stop, pause, health, self-heal.
-// The ConnHandler is supplied by the runtime (Noise session path); supervisors
-// (relay/rdv) are started beside the listener when configured.
+// A nil ConnHandler uses NoiseConnHandler (Noise IK → allowlist → inner mux).
+// Supervisors (relay/rdv) are started beside the listener when configured.
 type Gateway struct {
 	mu sync.Mutex
 
@@ -66,7 +66,7 @@ type Gateway struct {
 	now        func() time.Time
 }
 
-// NewGateway builds an idle gateway. handler may be nil until wired.
+// NewGateway builds an idle gateway. A nil handler selects NoiseConnHandler at start.
 func NewGateway(handler ConnHandler) *Gateway {
 	return &Gateway{
 		listener:   NewListener(),
@@ -78,10 +78,43 @@ func NewGateway(handler ConnHandler) *Gateway {
 }
 
 // SetHandler replaces the per-connection handler (tests / late wire-up).
+// Pass nil to restore the default Noise session path on the next MaybeStart.
 func (g *Gateway) SetHandler(handler ConnHandler) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.handler = handler
+}
+
+// SessionConfig builds a SessionConfig from live Gateway settings.
+// Listener is bound so BindDevice tracks sockets for pause/revoke.
+func (g *Gateway) SessionConfig() SessionConfig {
+	live := g.LiveConfig()
+	home := live.Home
+	sidecar := live.Sidecar
+	if sidecar <= 0 {
+		sidecar = 7400
+	}
+	return SessionConfig{
+		Home:        home,
+		APIKey:      live.APIKey,
+		SidecarPort: sidecar,
+		Listener:    g.listener,
+		ShouldStop: func() bool {
+			if IsPaused(home) {
+				return true
+			}
+			h := g.Health()
+			return !h.Serving && !h.Listening
+		},
+	}
+}
+
+// NoiseConnHandler returns the production ConnHandler: RunSession with live settings.
+// Each accept re-reads Home / APIKey / Sidecar so ApplySettings applies without rebind.
+func (g *Gateway) NoiseConnHandler() ConnHandler {
+	return func(ctx context.Context, conn net.Conn) {
+		_, _ = RunSession(ctx, conn, g.SessionConfig())
+	}
 }
 
 // Health returns a snapshot for GET /api/connect.
@@ -144,7 +177,7 @@ func (g *Gateway) MaybeStart(cfg GatewaySettings) error {
 	handler := g.handler
 	g.mu.Unlock()
 	if handler == nil {
-		handler = func(context.Context, net.Conn) {}
+		handler = g.NoiseConnHandler()
 	}
 
 	if err := g.listener.Start(host, port, handler); err != nil {
@@ -253,6 +286,15 @@ func SettingsFromMap(raw map[string]any) GatewaySettings {
 	cfg.RelayURL = strings.TrimSpace(settingsString(raw["connect_relay_url"]))
 	if _, ok := raw["connect_rdv_enabled"]; ok {
 		cfg.RDV = asBool(raw["connect_rdv_enabled"])
+	}
+	if v := strings.TrimSpace(settingsString(raw["connect_home"])); v != "" {
+		cfg.Home = v
+	}
+	if v := strings.TrimSpace(settingsString(raw["api_key"])); v != "" {
+		cfg.APIKey = v
+	}
+	if _, ok := raw["sidecar_port"]; ok {
+		cfg.Sidecar = settingsInt(raw["sidecar_port"], 7400)
 	}
 	return cfg
 }
