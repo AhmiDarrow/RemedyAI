@@ -2,7 +2,10 @@
 
 Production ``:7400`` is owned by Go ``remedy-runtime``. These ``register_*``
 helpers exist so ``create_app`` can exercise the Python route tree in-process.
-Connect management (``/api/connect*``) is not registered here — Go owns it.
+
+Not registered here (Go owns production):
+- ``/api/connect*`` Connect management
+- ``/api/webhooks/*`` and ``/api/webhook/{source}`` messenger / CI inbound
 """
 from __future__ import annotations
 
@@ -29,7 +32,6 @@ from remedy.interfaces.routes.terminal import register_terminal_routes
 from remedy.interfaces.routes.usage import register_usage_routes
 from remedy.interfaces.routes.vision import register_vision_routes
 from remedy.interfaces.routes.voice import register_voice_routes
-from remedy.interfaces.routes.webhooks import register_webhook_routes
 from remedy.interfaces.routes.workspace import register_workspace_routes
 
 
@@ -56,7 +58,7 @@ def register_all_routes(
     register_assistant_routes(app, **kw)
     register_partner_routes(app, **kw)
     register_computer_routes(app, **kw)
-    # No register_connect_* — /api/connect* is owned by remedy-runtime (Go).
+    # No register_connect_* / register_webhook_* — Go remedy-runtime owns those.
     register_misc_routes(app, **kw)
     register_vision_routes(app, **kw)
     register_voice_routes(app, **kw)
@@ -65,5 +67,4 @@ def register_all_routes(
     register_nanoswarm_routes(app, **kw)
     register_hive_routes(app, **kw)
     register_usage_routes(app, **kw)
-    register_webhook_routes(app, **kw)
     register_terminal_routes(app)
