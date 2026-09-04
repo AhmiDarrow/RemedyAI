@@ -80,3 +80,33 @@ func TestPauseCacheFollowsSetPaused(t *testing.T) {
 		t.Fatal("expected unpaused")
 	}
 }
+
+func TestDevicePublicMetaOmitsPublicHex(t *testing.T) {
+	home := t.TempDir()
+	pub := bytesFilled(0x44)
+	rec := Device{
+		ID:        deviceIDFor(pub),
+		Name:      "pixel",
+		PublicHex: hex.EncodeToString(pub),
+		PairedAt:  1_725_000_000.5,
+	}
+	if _, err := SaveDevice(rec, home); err != nil {
+		t.Fatal(err)
+	}
+	rows := DevicePublicMetaList(home)
+	if len(rows) != 1 {
+		t.Fatalf("%+v", rows)
+	}
+	if rows[0].ID != rec.ID || rows[0].Name != "pixel" || rows[0].PairedAt != rec.PairedAt {
+		t.Fatalf("%+v", rows[0])
+	}
+	if rows[0].Revoked {
+		t.Fatal("revoked")
+	}
+	if _, err := RevokeDevice(rec.ID, home); err != nil {
+		t.Fatal(err)
+	}
+	if got := DevicePublicMetaList(home); len(got) != 0 {
+		t.Fatalf("revoked still visible: %+v", got)
+	}
+}

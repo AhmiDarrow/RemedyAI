@@ -216,6 +216,59 @@ func (g *Gateway) ListeningAddr() (host string, port int, ok bool) {
 	return g.listener.ListeningAddr()
 }
 
+// DropAllSessions closes every live Connect socket (pause). :7400 untouched.
+func (g *Gateway) DropAllSessions() {
+	if g == nil || g.listener == nil {
+		return
+	}
+	g.listener.DropAllSessions()
+}
+
+// DropSessionsForDevice closes sockets for one paired device. :7400 untouched.
+func (g *Gateway) DropSessionsForDevice(deviceID string) {
+	if g == nil || g.listener == nil {
+		return
+	}
+	g.listener.DropSessionsForDevice(deviceID)
+}
+
+// ListeningTuple returns [host, port] for JSON, or nil when not listening.
+func (g *Gateway) ListeningTuple() any {
+	if g == nil {
+		return nil
+	}
+	host, port, ok := g.ListeningAddr()
+	if !ok {
+		return nil
+	}
+	return []any{host, port}
+}
+
+// HealthMap is the nested gateway object for GET /api/connect.
+func (g *Gateway) HealthMap() map[string]any {
+	if g == nil {
+		return map[string]any{
+			"crashes":       0,
+			"last_crash":    "",
+			"last_crash_ts": 0.0,
+			"healing":       false,
+			"serving":       false,
+			"thread_alive":  false,
+			"listening":     nil,
+		}
+	}
+	h := g.Health()
+	return map[string]any{
+		"crashes":       h.Crashes,
+		"last_crash":    h.LastCrash,
+		"last_crash_ts": h.LastCrashTS,
+		"healing":       h.Healing,
+		"serving":       h.Serving,
+		"thread_alive":  h.ThreadAlive,
+		"listening":     g.ListeningTuple(),
+	}
+}
+
 // MaybeStart starts the listener when Settings enable a chosen IPv4.
 // Same bind is a no-op (live config still updates). Never touches :7400.
 func (g *Gateway) MaybeStart(cfg GatewaySettings) error {
