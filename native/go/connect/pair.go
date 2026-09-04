@@ -7,9 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"net"
-	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -293,103 +290,4 @@ func ParseHandshakePayload(payload []byte) (kind string, fields HandshakeFields,
 		return "hello", HandshakeFields{DeviceID: deviceID}, nil
 	}
 	return "", HandshakeFields{}, fmt.Errorf("unknown handshake payload")
-}
-
-// ParseRelayEndpoint parses host:port or tcp://host:port for the QR relay= line.
-func ParseRelayEndpoint(rawURL string) (host string, port int, err error) {
-	raw := strings.TrimSpace(rawURL)
-	if raw == "" {
-		return "", 0, fmt.Errorf("relay URL is empty")
-	}
-	low := strings.ToLower(raw)
-	if strings.Contains(low, "local_api_token") || strings.Contains(low, "bearer ") || strings.Contains(low, "authorization=") {
-		return "", 0, fmt.Errorf("relay URL must not carry secrets")
-	}
-	if strings.Contains(raw, "://") {
-		parsed, err := url.Parse(raw)
-		if err != nil {
-			return "", 0, fmt.Errorf("relay URL is invalid")
-		}
-		scheme := strings.ToLower(parsed.Scheme)
-		if scheme == "http" || scheme == "https" {
-			return "", 0, fmt.Errorf("relay is a TCP splice, not HTTP")
-		}
-		if scheme != "" && scheme != "tcp" && scheme != "relay" {
-			return "", 0, fmt.Errorf("unsupported relay scheme %q", parsed.Scheme)
-		}
-		if parsed.User != nil {
-			return "", 0, fmt.Errorf("relay URL must not contain credentials")
-		}
-		if parsed.RawQuery != "" || parsed.Fragment != "" {
-			return "", 0, fmt.Errorf("relay URL must not contain a query")
-		}
-		host = strings.TrimSpace(parsed.Hostname())
-		if parsed.Port() != "" {
-			port, err = strconv.Atoi(parsed.Port())
-			if err != nil {
-				return "", 0, fmt.Errorf("relay port out of range")
-			}
-		} else {
-			port = 7402
-		}
-	} else {
-		host, port, err = splitHostPort(raw)
-		if err != nil {
-			return "", 0, err
-		}
-	}
-	host = strings.Trim(host, "[]")
-	if host == "" {
-		return "", 0, fmt.Errorf("relay host is empty")
-	}
-	if IsWildcardBind(host) {
-		return "", 0, fmt.Errorf("relay must not be a wildcard bind")
-	}
-	if port <= 0 || port > 65535 {
-		return "", 0, fmt.Errorf("relay port out of range")
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		if ip.IsUnspecified() || ip.IsMulticast() {
-			return "", 0, fmt.Errorf("relay address is not a unicast host")
-		}
-	} else if strings.ContainsAny(host, "/ \\") || strings.Contains(host, "..") {
-		return "", 0, fmt.Errorf("relay host is not a hostname")
-	}
-	return host, port, nil
-}
-
-func splitHostPort(raw string) (string, int, error) {
-	text := strings.TrimSpace(raw)
-	if text == "" {
-		return "", 0, fmt.Errorf("relay host is empty")
-	}
-	if strings.HasPrefix(text, "[") {
-		end := strings.Index(text, "]")
-		if end < 0 {
-			return "", 0, fmt.Errorf("relay host is empty")
-		}
-		host := text[1:end]
-		rest := text[end+1:]
-		if !strings.HasPrefix(rest, ":") {
-			return host, 7402, nil
-		}
-		port, err := strconv.Atoi(rest[1:])
-		if err != nil {
-			return "", 0, fmt.Errorf("relay port out of range")
-		}
-		return host, port, nil
-	}
-	host, portStr, err := net.SplitHostPort(text)
-	if err != nil {
-		// bare host → default port
-		if !strings.Contains(text, ":") {
-			return text, 7402, nil
-		}
-		return "", 0, fmt.Errorf("relay host is empty")
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return "", 0, fmt.Errorf("relay port out of range")
-	}
-	return host, port, nil
 }
