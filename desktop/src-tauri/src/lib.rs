@@ -729,45 +729,52 @@ fn find_remedy() -> (String, String) {
         }
     };
 
-    // Packaged / release: Go runtime owns :7400. Dev keeps live Python unless
-    // REMEDY_RUNTIME_SIDECAR=1. Python `remedy-desktop` remains a resource
-    // fallback while Phase 6 route parity finishes.
+    // Packaged / release (and REMEDY_RUNTIME_SIDECAR=1): Go owns :7400.
+    // Fail closed — no soft dual-serve via Python remedy-desktop / PATH remedy.
+    // tauri:dev keeps live Python unless that env opts into the native binary.
     let prefer_runtime = !cfg!(debug_assertions) || runtime_sidecar_requested();
 
     if prefer_runtime {
         if let Some(path) = find_runtime_sidecar(&searched) {
             return (path, String::new());
         }
-    } else if let Some(path) = find_live_python_dev() {
-        return (path, String::new());
-    }
-
-    if !prefer_runtime {
-        if let Some(path) = find_runtime_sidecar(&searched) {
-            return (path, String::new());
+        let msg = format!(
+            "remedy-runtime not found (Go owns :7400; no Python dual-serve). \
+             Checked exe dir {:?}, cwd/bin/, desktop/bin/. Build \
+             native/go/cmd/remedy-runtime into desktop/bin (packaged path has \
+             no soft Python fallback). Tiny stub EXEs (<1MB) are ignored on \
+             Windows; PE/.exe is ignored on Linux.",
+            current_exe_dir()
+        );
+        log::error!("{}", msg);
+        #[cfg(target_os = "windows")]
+        {
+            return ("remedy-runtime.exe".to_string(), msg);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            return ("remedy-runtime".to_string(), msg);
         }
     }
 
+    if let Some(path) = find_live_python_dev() {
+        return (path, String::new());
+    }
+    if let Some(path) = find_runtime_sidecar(&searched) {
+        return (path, String::new());
+    }
     if let Some(path) = find_python_sidecar(&searched) {
         return (path, String::new());
     }
-
-    if prefer_runtime {
-        if let Some(path) = find_live_python_dev() {
-            return (path, String::new());
-        }
-    }
-
-    // Prefer PATH `remedy` (current install / source entry) over missing stubs.
     if let Ok(path) = which_remedy_on_path() {
         log::info!("Found remedy on PATH: {}", path);
         return (path, String::new());
     }
 
     let msg = format!(
-        "Sidecar not found - checked exe dir {:?}, cwd/bin/ for remedy-runtime \
-         (and remedy-desktop fallback), and PATH (remedy). Tiny stub EXEs (<1MB) \
-         are ignored on Windows; PE/.exe is ignored on Linux.",
+        "Sidecar not found - checked live Python venv, exe dir {:?}, cwd/bin/ \
+         for remedy-runtime / remedy-desktop, and PATH (remedy). Tiny stub \
+         EXEs (<1MB) are ignored on Windows; PE/.exe is ignored on Linux.",
         current_exe_dir()
     );
     log::error!("{}", msg);

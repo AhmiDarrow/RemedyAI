@@ -7,7 +7,8 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 
 | Layer | Path | Role |
 |-------|------|------|
-| Python sidecar | `src/remedy/` | FastAPI/uvicorn API, ReAct loop, jail, PolicyEngine, hive, build engine, Soul/Partner memory |
+| Local API | `native/go/cmd/remedy-runtime` + `native/go/httpapi` | Production HTTP on `127.0.0.1:7400` (Desktop + `remedy serve`) |
+| Python workers | `src/remedy/` | RMDY tool worker, ReAct/ML helpers, TestClient FastAPI surface — **not** production `:7400` |
 | Desktop SPA | `desktop/` | Tauri 2 + React 19 (Grove / Alongside / Studio) |
 | Python tests | `tests/` | Sidecar, API, jail, policy, memory, Build, Connect host, packaging contracts |
 | SPA tests | `desktop/src/**/*.test.*` | React/TypeScript API, state, rails, sessions, and owner-facing behavior |
@@ -18,8 +19,8 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | Native runtime | `native/` | Versioned Go nervous system + Zig capability core; layered cutover with Python compatibility/ML workers |
 | Claimidx host | `src/remedy/runtime/claimidx_host.py` | Pinned first-run install, private index, loopback lifecycle on `:17340` |
 
-Entry: `serve.py` / `uv run` · verification: `.github/workflows/ci.yml` is the
-authoritative multi-stack matrix; pytest alone is not a release gate.
+Entry: `remedy serve` → `remedy-runtime` · verification: `.github/workflows/ci.yml`
+is the authoritative multi-stack matrix; pytest alone is not a release gate.
 
 ## Next Evolution native boundary
 
@@ -29,23 +30,27 @@ state, the Tool ABI, durable state/events/memory, scheduling, scoped agents, and
 replaceable Python workers. `native/zig/` exports a small C ABI and independently
 checks capabilities before machine-facing execution.
 
-`src/remedy/runtime/native_runtime.py` is the production cutover seam. The
-selector accepts `compatibility` (the default), `auto`, or `native` through
-`REMEDY_NATIVE_RUNTIME` or `native_runtime` in config. Go protocol/tool ABI 1
-and Zig ABI 1 must both probe healthy before the native route becomes effective.
-Fallback after a native attempt is allowed only for operations declared
-idempotent. The first cutover is read-only system topology; Python/FastAPI stays
-available as the compatibility surface and as the long-term AI/ML worker runtime.
-Startup performs one bounded readiness probe only when native mode is requested;
-the liveness route remains probe-free. Native durability requires contiguous event
+`src/remedy/runtime/native_runtime.py` is the Zig/Go probe seam for capability
+routing. The selector accepts `compatibility` (the default), `auto`, or `native`
+through `REMEDY_NATIVE_RUNTIME` or `native_runtime` in config. Go protocol/tool
+ABI 1 and Zig ABI 1 must both probe healthy before the native route becomes
+effective. Fallback after a native attempt is allowed only for operations
+declared idempotent.
+
+**HTTP authority:** `remedy-runtime` owns production `:7400`. `remedy serve` and
+packaged Desktop launch that binary (fail closed if missing). Python does not
+start uvicorn on `:7400`; `create_app` remains for in-process tests only.
+`python -m remedy.runtime.rmdy_tool_worker` is the RMDY worker entry. Startup
+performs one bounded readiness probe only when native mode is requested; the
+liveness route remains probe-free. Native durability requires contiguous event
 replay and rollback-safe appends; native cancellation cannot be overwritten or
-rearm recurring work; filesystem mutations resolve no-follow parent handles beneath
-their granted root.
+rearm recurring work; filesystem mutations resolve no-follow parent handles
+beneath their granted root.
 
 Desktop installers bundle the Go executable and Zig shared library on Windows
-and Linux alongside the Python sidecar. `/api/ping` reports cached selector and
-fallback evidence but never launches a probe, preserving the liveness route's
-low-latency contract. Native CI and release builds cover both operating systems.
+and Linux. `/api/ping` reports cached selector and fallback evidence but never
+launches a probe, preserving the liveness route's low-latency contract. Native
+CI and release builds cover both operating systems.
 
 ## Surfaces (one SPA)
 

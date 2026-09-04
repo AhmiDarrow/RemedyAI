@@ -1,354 +1,173 @@
-"""CLI: serve / chat / desktop."""
+"""CLI: serve / chat / desktop.
+
+Production ``remedy serve`` launches Go ``remedy-runtime`` (API authority on
+``:7400``). Python does not bind the local HTTP server — keep
+``python -m remedy.runtime.rmdy_tool_worker`` for the RMDY tool worker.
+"""
 
 from __future__ import annotations
 
 import argparse
-import asyncio
 import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 from rich.panel import Panel
 
-from remedy import __version__
 from remedy.interfaces.cli.util import (
     UnsafeHomeError,
     console,
-    evaluate_serve_bind,
     resolve_cli_home,
 )
 from remedy.interfaces.config import (
     config_to_agent_config,
-    create_default_config,
     resolve_config,
 )
 from remedy.interfaces.wizard import ensure_setup_before_launch
 from remedy.memory.store import MemoryStore
 
 
-class _NullStream:
-    """Drop-in file-like for frozen windowed builds where sys.stdout/stderr are None.
+def _repo_root() -> Path | None:
+    here = Path(__file__).resolve()
+    for candidate in (here.parents[3], here.parents[4] if len(here.parents) > 4 else None):
+        if candidate is None:
+            continue
+        if (candidate / "native" / "go" / "go.mod").is_file():
+            return candidate
+    env = os.environ.get("REMEDY_DEV_ROOT", "").strip()
+    if env:
+        root = Path(env).expanduser().resolve()
+        if (root / "native" / "go" / "go.mod").is_file():
+            return root
+    return None
 
-    uvicorn's ColourizedFormatter calls ``sys.stdout.isatty()`` at config time;
-    a --noconsole sidecar has ``sys.stdout is None`` and crashes with
-    ``AttributeError: 'NoneType' object has no attribute 'isatty'``. Give the
-    logging stack a real object that answers isatty()=False and swallows writes.
+
+def _runtime_bin_names() -> tuple[str, ...]:
+    if sys.platform == "win32":
+        return ("remedy-runtime.exe", "remedy-runtime")
+    return ("remedy-runtime",)
+
+
+def resolve_remedy_runtime_command() -> list[str] | None:
+    """Return argv to launch ``remedy-runtime``, or None when missing.
+
+    Search order: ``REMEDY_NATIVE_RUNTIME_BIN`` / ``REMEDY_RUNTIME``, PATH,
+    ``sys.executable`` dir, repo ``desktop/bin``, then ``go run`` in a checkout.
     """
+    for env_name in ("REMEDY_NATIVE_RUNTIME_BIN", "REMEDY_RUNTIME"):
+        override = os.environ.get(env_name, "").strip()
+        if override:
+            return [override]
 
-    def write(self, data) -> None:
-        pass
+    for name in _runtime_bin_names():
+        found = shutil.which(name)
+        if found:
+            return [found]
 
-    def flush(self) -> None:
-        pass
+    roots: list[Path] = [Path(sys.executable).resolve().parent]
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        roots.append(Path(meipass))
+    root = _repo_root()
+    if root is not None:
+        roots.append(root / "desktop" / "bin")
+        roots.append(root / "bin")
+    for base in roots:
+        for name in _runtime_bin_names():
+            candidate = base / name
+            if candidate.is_file():
+                return [str(candidate)]
 
-    def isatty(self) -> bool:
-        return False
+    if root is not None:
+        go = shutil.which("go")
+        if go:
+            return [go, "run", "./cmd/remedy-runtime"]
 
-    def fileno(self) -> int:
-        raise OSError("no console attached")
+    return None
 
 
-def _ensure_stdio() -> None:
-    """Never let uvicorn / logging see a None stdout/stderr.
+def build_runtime_serve_argv(
+    runtime_cmd: list[str],
+    *,
+    host: str = "127.0.0.1",
+    port: int = 7400,
+) -> list[str]:
+    """Map CLI host/port onto ``remedy-runtime --serve`` / ``--listen``."""
+    host_n = (host or "127.0.0.1").strip() or "127.0.0.1"
+    try:
+        port_n = int(port)
+    except (TypeError, ValueError):
+        port_n = 7400
+    argv = [*runtime_cmd, "--serve"]
+    if host_n != "127.0.0.1" or port_n != 7400:
+        argv.extend(["--listen", f"{host_n}:{port_n}"])
+    return argv
 
-    PyInstaller windowed (--noconsole) builds start Python with both set to
-    None. Replace them with a null stream so formatter config (isatty) and
-    StreamHandler writes degrade gracefully instead of raising.
-    """
-    import sys as _sys
 
-    for name in ("stdout", "stderr"):
-        if getattr(_sys, name, None) is None:
-            setattr(_sys, name, _NullStream())
+def _is_loopback_host(host: str) -> bool:
+    h = (host or "").strip().lower()
+    return h in {"127.0.0.1", "localhost", "::1"}
 
 
 def _cmd_serve(args) -> None:
-    import sys
-    import threading
-    import time as _time
-
-
-    # Frozen windowed builds have sys.stdout/stderr == None; give logging a
-    # null stream BEFORE any formatter/handler touches them (uvicorn crashes
-    # on None.isatty()). Also covers setup_serve_logging and StructuredFormatter.
-    _ensure_stdio()
-
-    from remedy.core.agent import BasicRuntime
-    from remedy.gateway.router import Gateway
-    from remedy.interfaces.api import create_app
-    from remedy.interfaces.instance_lock import (
-        heartbeat_serve_lock,
-        try_acquire_serve_lock,
-    )
-
+    """Hand production :7400 to ``remedy-runtime``. No Python uvicorn dual-serve."""
     try:
         home = resolve_cli_home(args.home)
     except UnsafeHomeError as exc:
         console.print(f"[red]{exc}[/red]")
         raise SystemExit(2) from exc
 
-    # Only one API/serve stack at a time (Desktop sidecar or CLI).
-    ok_lock, lock_msg = try_acquire_serve_lock(home)
-    if not ok_lock:
-        console.print(f"[red]{lock_msg}[/red]")
-        sys.exit(2)
-    if lock_msg and lock_msg != "acquired":
-        console.print(f"[dim]Instance lock:[/dim] {lock_msg}")
-
-    def _lock_heartbeat() -> None:
-        while True:
-            _time.sleep(30.0)
-            heartbeat_serve_lock()
-
-    threading.Thread(target=_lock_heartbeat, name="serve-lock-hb", daemon=True).start()
-
-    # First-run setup: NEVER block the HTTP server for the desktop sidecar.
-    # Desktop UI (SetupWizard) is the first-run experience and needs the API up.
-    # Interactive CLI TTY can still run the wizard; --skip-setup / env skip it.
-    from remedy.core.runtime_identity import is_desktop_sidecar
-
-    skip = bool(getattr(args, "skip_setup", False)) or is_desktop_sidecar()
-    force = bool(getattr(args, "force_setup", False))
-    # Only interactive CLI (real TTY, not desktop) may gate on the wizard.
-    # isatty() alone lies on scripted/hidden launches (inherited console);
-    # guard stdin availability too so a --noconsole sidecar never prompts.
-    real_tty = bool(
-        sys.stdin is not None
-        and getattr(sys.stdin, "isatty", lambda: False)()
-        and not (sys.stdin.closed if hasattr(sys.stdin, "closed") else False)
-    )
-    if force or (real_tty and not skip):
-        ok = ensure_setup_before_launch(
-            home_dir=home,
-            skip_setup=False,
-            force=force,
-            non_interactive=False,
-        )
-        if not ok:
-            raise SystemExit(1)
-    elif skip and not force:
-        # Desktop / headless: ensure a minimal config exists so settings API works,
-        # but do NOT mark setup_completed — UI wizard still runs on first open.
-        create_default_config(home)
-
-    config = resolve_config(
-        config_path=Path(args.config_file) if args.config_file else None,
-        home_dir=str(home),
-    )
-
-    # Durable logs under ~/.remedy/logs (debug.log always DEBUG for perf diagnosis).
+    host = str(getattr(args, "host", "127.0.0.1") or "127.0.0.1").strip() or "127.0.0.1"
     try:
-        from remedy.core.logging import setup_serve_logging
+        port = int(getattr(args, "port", 7400) or 7400)
+    except (TypeError, ValueError):
+        port = 7400
 
-        log_dir = setup_serve_logging(home, config=config)
-        console.print(f"[dim]Logs:[/dim]      {log_dir}")
-    except Exception as exc:
-        console.print(f"[yellow]Logging setup failed:[/yellow] {exc}")
-
-    # A hard crash (access violation inside a C extension, a stack overflow, a
-    # deadlocked thread killed by the OS) leaves nothing in the Python logs.
-    # faulthandler writes the native traceback of every thread to crash.log
-    # at the moment the process dies, so the desktop server panel can show
-    # *why* the sidecar vanished instead of only that it did.
-    from remedy.interfaces.serve_forensics import enable_crash_forensics
-
-    enable_crash_forensics(home)
-
-    agent_config = config_to_agent_config(config)
-
-    async def _start():
-        memory = MemoryStore(
-            agent_config.memory_db_path
-            or f"{agent_config.home_dir}/memory.db"
+    # Go httpapi refuses non-loopback binds — fail closed here with a clear error.
+    if not _is_loopback_host(host):
+        console.print(
+            "[bold red]Refusing non-loopback serve bind.[/bold red]\n"
+            f"  host={host!r} — remedy-runtime only listens on 127.0.0.1 / ::1.\n"
+            "  Use --host 127.0.0.1 (default)."
         )
-        await memory.initialize()
+        raise SystemExit(2)
 
-        runtime = BasicRuntime(agent_config, memory=memory)
-        await runtime.start()
+    runtime_cmd = resolve_remedy_runtime_command()
+    if not runtime_cmd:
+        console.print(
+            "[red]remedy serve:[/red] Go ``remedy-runtime`` owns the local API "
+            "(:7400). Binary not found.\n"
+            "  Build ``native/go/cmd/remedy-runtime`` into ``desktop/bin``, put "
+            "it on PATH, or set REMEDY_NATIVE_RUNTIME_BIN.\n"
+            "  Python no longer starts uvicorn on :7400 (no dual-serve)."
+        )
+        raise SystemExit(2)
 
-        # Bundled defaults + ~/.remedy/skills (seeded on first run)
-        n_skills = runtime.skills.discover_defaults(home_dir=agent_config.home_dir)
-        # Extra paths from config
-        for extra in agent_config.skills_dir or []:
-            p = Path(str(extra)).expanduser()
-            if p.is_dir():
-                n_skills += runtime.skills.discover(str(p), recurse=True)
-
-        gateway = Gateway(runtime=runtime, memory_store=memory)
-        from remedy.gateway.serve_bootstrap import attach_messengers_to_gateway
-
-        # Register channels only — do NOT gateway.start() here.
-        # asyncio.run() closes this loop when _start returns; Telegram poll
-        # tasks would die. Real start happens in FastAPI lifespan (uvicorn loop).
-        attach_messengers_to_gateway(runtime, gateway)
-
-        return runtime, gateway, memory, n_skills
-
-    # Partner full-power defaults (unset only if operator forces tight mode)
+    os.environ["REMEDY_HOME"] = str(home)
+    # Partner defaults still apply for any Python worker the runtime may spawn.
     os.environ.setdefault("REMEDY_FULL_CONTEXT", "1")
     os.environ.setdefault("REMEDY_REACT_AUTO_CONTINUE", "1")
 
-    runtime, gateway, memory, n_skills = asyncio.run(_start())
+    argv = build_runtime_serve_argv(runtime_cmd, host=host, port=port)
+    listen = f"{host}:{port}"
+    console.print(
+        f"[green]Starting remedy-runtime on http://{listen}[/green] "
+        "[dim](Go owns the local API; Python is worker-only)[/dim]"
+    )
 
-    # First install / stale map: stretch out and census this PC in the background.
+    cwd = None
+    if len(runtime_cmd) >= 3 and runtime_cmd[1] == "run":
+        root = _repo_root()
+        if root is not None:
+            cwd = str(root / "native" / "go")
+
     try:
-        from remedy.execution.host.stretch import ensure_home_stretch
-
-        ensure_home_stretch(home, force=False, background=True)
-    except Exception:
-        pass
-
-    # Warm secret-store / ACL path once so the first Settings GET is not paying
-    # Windows icacls (~100ms) on the critical UI path.
-    try:
-        from remedy.interfaces.secret_store import load_provider_keys
-
-        load_provider_keys(home)
-    except Exception:
-        pass
-
-    from remedy.interfaces.local_auth import ensure_local_api_token
-
-    api_key = ensure_local_api_token(
-        home,
-        explicit=os.environ.get("REMEDY_API_KEY") or config.get("api_key") or None,
-    )
-    host = str(getattr(args, "host", "127.0.0.1") or "127.0.0.1")
-    # 0.0.0.0 / non-loopback: owner power preserved only with explicit danger flag.
-    bind_verdict = evaluate_serve_bind(host, has_auth=bool(api_key))
-    if bind_verdict == "refuse":
-        console.print(
-            "[bold red]Refusing to serve without auth on a non-loopback bind.[/bold red]\n"
-            f"  host={host!r} and API auth is disabled.\n"
-            "  Fix: leave auth on (default), or bind 127.0.0.1, or set\n"
-            "  REMEDY_ALLOW_INSECURE_BIND=1 if you really want an open LAN agent."
-        )
-        raise SystemExit(2)
-    if bind_verdict == "warn":
-        console.print(
-            f"[bold yellow]WARNING:[/yellow] Binding {host!r} exposes the agent on the network.\n"
-            "  Only processes with your API token can call tools — keep the token secret.\n"
-            "  Set REMEDY_ALLOW_INSECURE_BIND=1 to allow auth-off on that bind (not recommended)."
-        )
-    app = create_app(
-        runtime=runtime,
-        gateway=gateway,
-        memory=memory,
-        title=config.get("name", "Remedy AI"),
-        version=__version__,
-        api_key=api_key,
-    )
-    try:
-        app.state.sidecar_port = int(getattr(args, "port", 7400) or 7400)
-    except (TypeError, ValueError):
-        app.state.sidecar_port = 7400
-    if api_key:
-        console.print(
-            "[dim]API auth:[/dim]   enabled (Bearer token in ~/.remedy/auth/local_api_token)"
-        )
-    else:
-        console.print(
-            "[yellow]API auth:[/yellow]  disabled (REMEDY_API_AUTH=0) — loopback only recommended"
-        )
-
-    if not agent_config.llm_api_key:
-        console.print("[bold yellow]WARNING: No LLM API key configured.[/bold yellow]")
-        console.print("  Set REMEDY_LLM_API_KEY env var or run [bold]remedy setup[/bold] to configure.")
-        console.print("  The server will run in [bold]fallback (echo)[/bold] mode without a real LLM.\n")
-
-    console.print(f"[green]Starting Remedy API on http://{args.host}:{args.port}[/green]")
-    console.print(f"[dim]Skills:[/dim]    {n_skills} loaded (bundled + user)")
-    webui = getattr(app.state, "webui_dir", None)
-    if webui:
-        console.print(
-            f"[dim]Web UI:[/dim]    http://{args.host}:{args.port}/  "
-            f"(from {webui})"
-        )
-    else:
-        console.print(
-            "[dim]Web UI:[/dim]    not found — build desktop UI "
-            "(`cd desktop && npm run build`) or set REMEDY_WEBUI_DIR"
-        )
-    console.print("[dim]Dashboard:[/dim] /dashboard")
-    console.print("[dim]OpenAPI:[/dim]   /api/openapi.json  /api/openapi.yaml")
-    console.print("[dim]Docs:[/dim]       /docs  /redoc")
-
-    # Optional in-process computer host so API sessions can navigate without Desktop.
-    # Default OFF so Desktop Tauri poller is not racing claims; opt-in via flag/env.
-    want_host = bool(getattr(args, "computer_host", False)) or str(
-        os.environ.get("REMEDY_CLI_COMPUTER_HOST", "")
-    ).strip().lower() in ("1", "true", "yes", "on")
-    if bool(getattr(args, "no_computer_host", False)):
-        want_host = False
-    if want_host:
-        try:
-            from remedy.core.computer.cli_host import start_cli_computer_host
-
-            ch = start_cli_computer_host(home)
-            ok_h = ch.status().get("host_connected")
-            console.print(
-                f"[dim]Computer:[/dim]  CLI host "
-                f"{'[green]connected[/green]' if ok_h else '[yellow]starting[/yellow]'} "
-                f"(system browser + desktop; Desktop app still preferred for rail DOM)"
-            )
-        except Exception as exc:
-            console.print(f"[yellow]Computer host failed:[/yellow] {exc}")
-
-    # Connect Gateway is owned by remedy-runtime (Go). Python serve does not
-    # start or fall back to a Python Connect listener.
-
-    log_level = config.get("log_level", "INFO").upper()
-    # Access logs spam the desktop console (status polls every few seconds).
-    # Opt in with access_log=true in config or REMEDY_ACCESS_LOG=1.
-    access_log_enabled = bool(
-        config.get("access_log")
-        or str(os.environ.get("REMEDY_ACCESS_LOG", "")).lower() in ("1", "true", "yes")
-    )
-    uvicorn_log_config = {
-        "version": 1,
-        "disable_existing_loggers": False,
-        "formatters": {
-            "default": {
-                "()": "uvicorn.logging.DefaultFormatter",
-                "fmt": "%(asctime)s %(levelprefix)s %(message)s",
-                "use_colors": False,
-            },
-            "access": {
-                "()": "uvicorn.logging.AccessFormatter",
-                "fmt": '%(asctime)s %(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s',
-            },
-        },
-        "handlers": {
-            "default": {
-                "class": "logging.StreamHandler",
-                "formatter": "default",
-                "stream": "ext://sys.stdout",
-            },
-            "access": {
-                "class": "logging.StreamHandler",
-                "formatter": "access",
-                "stream": "ext://sys.stdout",
-            },
-        },
-        "loggers": {
-            "uvicorn": {"handlers": ["default"], "level": log_level},
-            "uvicorn.error": {"handlers": ["default"], "level": log_level, "propagate": False},
-            # Keep access logger quiet unless explicitly enabled.
-            "uvicorn.access": {
-                "handlers": ["access"] if access_log_enabled else [],
-                "level": "INFO" if access_log_enabled else "WARNING",
-                "propagate": False,
-            },
-        },
-    }
-    from remedy.interfaces.serve_forensics import run_uvicorn_logged
-
-    run_uvicorn_logged(
-        app,
-        host=args.host,
-        port=args.port,
-        log_config=uvicorn_log_config,
-        access_log=access_log_enabled,
-    )
+        raise SystemExit(subprocess.call(argv, cwd=cwd))
+    except OSError as exc:
+        console.print(f"[red]remedy-runtime launch failed:[/red] {exc}")
+        raise SystemExit(1) from exc
 
 
 def _cmd_chat(args) -> None:
@@ -581,7 +400,9 @@ def _cmd_desktop(parsed: argparse.Namespace) -> None:
 
     elif subcommand == "dev":
         console.print("[bold]Starting desktop dev server...[/bold]")
-        console.print("[dim]Make sure 'remedy serve' is running in another terminal.[/dim]")
+        console.print(
+            "[dim]Make sure 'remedy serve' (remedy-runtime) is up, or use tauri:dev.[/dim]"
+        )
         console.print("[dim]Open http://localhost:5173 in your browser.[/dim]")
         console.print()
         import subprocess
@@ -690,6 +511,8 @@ def _desktop_status() -> None:
     except Exception as e:
         console.print(f"  Server:    [red]Error[/red] — {e}")
 
-    console.print("[dim]Use 'remedy serve' to start the server manually.[/dim]")
+    console.print(
+        "[dim]Use 'remedy serve' to start remedy-runtime (local API authority).[/dim]"
+    )
 
 

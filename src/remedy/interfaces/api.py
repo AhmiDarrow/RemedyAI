@@ -1,7 +1,9 @@
-"""REST API server -- FastAPI-based interface for Remedy.
+"""FastAPI route surface for unit tests and legacy TestClient harnesses.
 
-Exposes chat sessions, streaming messages, memory, skills, commands,
-models, agents, and webhook endpoints for the desktop and web UI.
+Production ``:7400`` is owned by Go ``remedy-runtime`` (``remedy serve``
+execs that binary). This module is **not** the production HTTP server —
+``create_app`` remains for pytest / in-process clients only. Python workers
+use ``python -m remedy.runtime.rmdy_tool_worker``.
 
 Models: api_models.py  |  Helpers: api_support.py  |  Routes: create_app() below.
 """

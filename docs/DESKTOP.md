@@ -77,22 +77,24 @@ process or loads a library. A native failure is replayed through compatibility
 only for an operation that declares itself idempotent; sends, payments, deletes,
 and other potentially partial side effects are never silently repeated.
 
-### Phase 6 prep — packaged sidecar is `remedy-runtime`
+### Phase 6 — packaged + `remedy serve` use `remedy-runtime`
 
 Tauri `externalBin` (Windows + Linux) is **`remedy-runtime`**. Packaged Desktop
-launches it on `127.0.0.1:7400` with `--serve --listen`. Python
-`remedy-desktop` still builds and ships as a **resource fallback** while route
-parity finishes. `tauri:dev` still prefers the live Python venv; set
+launches it on `127.0.0.1:7400` with `--serve` (or `--serve --listen` for a
+non-default port). **`remedy serve` also execs `remedy-runtime`** — Python no
+longer starts uvicorn on `:7400` (fail closed if the binary is missing).
+Packaged Desktop does **not** soft-fallback to Python `remedy-desktop` when
+the Go binary is absent. `tauri:dev` still prefers the live Python venv; set
 `REMEDY_RUNTIME_SIDECAR=1` to exercise the Go binary from a checkout.
+Python worker entry: `python -m remedy.runtime.rmdy_tool_worker`.
 
-**Remaining blockers before retiring `remedy-desktop`:**
+**Remaining gaps (worker / parity — not dual-serve):**
 
-| Gap | Why it blocks |
-|-----|----------------|
-| Full `/api/*` route parity | Go first-slice covers ping/status/sessions/stream/settings/connect/providers/messengers; Python still owns skills, memory harness, vision, voice, computer-use, and most of ~200 routes. Messenger *inbound* poll locks are Go-owned (`native/go/gateway`); Python adapters stay outbound-only unless `REMEDY_PYTHON_MESSENGER_POLL=1` |
-| Python worker over RMDY | Prompt assembly, soul/skills text, voice/vision/telephony still need a supervised worker; not yet the Desktop launch path |
-| Zig in-process from Go | Host primitives still load via Python `host_binding` for many paths |
-| WebUI / SPA mount | Go server does not yet mirror Python `find_webui_dir` + static mount for Switch-to-Web-UI |
+| Gap | Why it still matters |
+|-----|----------------------|
+| Full `/api/*` route parity | Go covers the production Desktop surface; FastAPI `create_app` remains for pytest / TestClient only |
+| Python worker over RMDY | Prompt assembly, soul/skills text, voice/vision/telephony still need a supervised worker |
+| Zig in-process from Go | Some host primitives still load via Python `host_binding` |
 | Release smoke | NSIS/deb/AppImage must prove :7400 health + session stream on both OS with the new `externalBin` triple names |
 
 

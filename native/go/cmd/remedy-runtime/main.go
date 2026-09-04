@@ -1,8 +1,9 @@
 // Command remedy-runtime is the native runtime probe and production local API.
-// Packaged Desktop launches this binary as the :7400 sidecar authority.
+// Packaged Desktop and `remedy serve` launch this binary as the :7400 authority.
 // --serve binds 127.0.0.1:7400 by default; --listen overrides (desktop-chosen
 // port or ephemeral). Never implied by --probe alone.
-// `tauri:dev` still prefers the live Python sidecar unless REMEDY_RUNTIME_SIDECAR=1.
+// Python does not bind :7400. `tauri:dev` may still use a live Python sidecar
+// unless REMEDY_RUNTIME_SIDECAR=1; packaged builds fail closed without this binary.
 package main
 
 import (

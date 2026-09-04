@@ -508,20 +508,19 @@ remedy gateway channels
 
 ### `remedy serve`
 
-Start the full API server with configuration integration. This is the recommended way to run Remedy as a server.
+Starts Go **`remedy-runtime`** on the local API (default `127.0.0.1:7400`).
+Python no longer binds uvicorn on `:7400`. Loopback only.
 
 ```bash
 remedy serve                                    # Defaults: 127.0.0.1:7400
-remedy serve --host 0.0.0.0 --port 3000        # Custom host/port
+remedy serve --port 7410                        # Custom loopback port
 remedy serve --config ./custom.toml             # Custom config file
 ```
 
-After starting, access:
-- **Dashboard**: http://127.0.0.1:7400/dashboard
-- **API Docs**: http://127.0.0.1:7400/docs
-- **Redoc**: http://127.0.0.1:7400/redoc
-- **OpenAPI JSON**: http://127.0.0.1:7400/api/openapi.json
-- **OpenAPI YAML**: http://127.0.0.1:7400/api/openapi.yaml
+Requires a built `remedy-runtime` on PATH / `desktop/bin`, or
+`REMEDY_NATIVE_RUNTIME_BIN`. After starting, access:
+- **Web UI / Dashboard**: http://127.0.0.1:7400/
+- **API**: http://127.0.0.1:7400/api/ping  (and the rest of the local API)
 
 ---
 
