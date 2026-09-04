@@ -15,7 +15,7 @@ const (
 )
 
 // RegisterGoBuiltins installs in-process Go Tool ABI executors.
-// Host filesystem / process tools stay on Zig once Go can load remedy_core;
+// Host capture / window / monitor tools live in RegisterZigHostTools;
 // these builtins are Go-owned runtime and pure-data helpers only.
 func RegisterGoBuiltins(registry *Registry) error {
 	if registry == nil {

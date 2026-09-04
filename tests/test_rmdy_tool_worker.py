@@ -166,6 +166,81 @@ def test_stdio_tool_round_trip_workspace_write(
     assert (tmp_path / "w.txt").read_text(encoding="utf-8") == "wire"
 
 
+def test_workspace_search_handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "alpha.py").write_text("def partner_token():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "skip_me").mkdir()
+    (tmp_path / "skip_me" / "other.py").write_text("partner_token = 0\n", encoding="utf-8")
+
+    out = worker._workspace_search(
+        {"pattern": "partner_token", "path": ".", "max_matches": 10, "case_insensitive": False}
+    )
+    assert out["pattern"] == "partner_token"
+    assert out["total"] >= 1
+    assert any("partner_token" in m["text"] for m in out["matches"])
+    assert all(isinstance(m["line"], int) and m["line"] >= 1 for m in out["matches"])
+
+
+def test_workspace_search_refuses_escape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+    with pytest.raises(PermissionError):
+        worker._workspace_search({"pattern": "x", "path": "../outside"})
+
+
+def test_workspace_search_requires_pattern(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+    with pytest.raises(ValueError, match="pattern"):
+        worker._workspace_search({"pattern": "  "})
+
+
+def test_stdio_tool_round_trip_workspace_search(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+    (tmp_path / "hit.txt").write_text("find-me-abi\n", encoding="utf-8")
+
+    req = json.dumps(
+        {
+            "tool_id": "workspace.search",
+            "version": 1,
+            "input": {"pattern": "find-me-abi", "max_matches": 5},
+        }
+    ).encode("utf-8")
+    corr = b"\x06" + b"\x00" * 15
+    inbound = _frame(worker._KIND_TOOL_REQUEST, req, corr)
+
+    class _Buf:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+            self._pos = 0
+            self.out = bytearray()
+
+        def read(self, n: int) -> bytes:
+            if self._pos >= len(self._data):
+                return b""
+            chunk = self._data[self._pos : self._pos + n]
+            self._pos += len(chunk)
+            return chunk
+
+        def write(self, data: bytes) -> int:
+            self.out.extend(data)
+            return len(data)
+
+        def flush(self) -> None:
+            return None
+
+    buf = _Buf(inbound)
+    worker.serve(buf, buf)  # type: ignore[arg-type]
+
+    raw = bytes(buf.out)
+    payload_len = struct.unpack_from("<I", raw, 12)[0]
+    body = json.loads(raw[32 : 32 + payload_len].decode("utf-8"))
+    assert body["ok"] is True
+    assert body["output"]["total"] >= 1
+    assert any("find-me-abi" in m["text"] for m in body["output"]["matches"])
+
+
 def test_web_search_bridges_agent_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     import remedy.core.agent_web_tools as web
 
