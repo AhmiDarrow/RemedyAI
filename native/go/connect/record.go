@@ -79,6 +79,22 @@ func ReadRecord(r io.Reader) (nonce12, ciphertext []byte, err error) {
 	return nonce, ct, nil
 }
 
+// WriteRecord writes a packed record blob (u32be|nonce12|ct) to w.
+func WriteRecord(w io.Writer, packed []byte) error {
+	if len(packed) < 4+NonceLen {
+		return fmt.Errorf("%w: truncated record", ErrRecord)
+	}
+	length := binary.BigEndian.Uint32(packed[:4])
+	if length > MaxRecord {
+		return fmt.Errorf("%w: record exceeds 64 KiB", ErrRecord)
+	}
+	if int(length) != len(packed)-4 {
+		return fmt.Errorf("%w: record length mismatch", ErrRecord)
+	}
+	_, err := w.Write(packed)
+	return err
+}
+
 // EncryptRecord encrypts plaintext with AD=b"" and packs u32be|nonce12|ct.
 func EncryptRecord(cs *CipherState, plaintext []byte) ([]byte, error) {
 	if cs == nil {

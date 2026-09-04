@@ -205,6 +205,144 @@ func IsRevokedLive(deviceID string) bool {
 	return ok
 }
 
+const pausedCacheTTL = 500 * time.Millisecond
+
+var (
+	pausedCacheMu sync.Mutex
+	pausedCache   = map[string]pausedHit{}
+)
+
+type pausedHit struct {
+	val bool
+	at  time.Time
+}
+
+// StatePath is ~/.remedy/auth/connect/state.json.
+func StatePath(home string) (string, error) {
+	root, err := ConnectRoot(home)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "state.json"), nil
+}
+
+// IsPaused reports the Connect pause flag (short-cached; torn reads keep last good).
+func IsPaused(home string) bool {
+	path, err := StatePath(home)
+	if err != nil {
+		return false
+	}
+	key := path
+	now := time.Now()
+	pausedCacheMu.Lock()
+	hit, ok := pausedCache[key]
+	if ok && now.Sub(hit.at) < pausedCacheTTL {
+		pausedCacheMu.Unlock()
+		return hit.val
+	}
+	pausedCacheMu.Unlock()
+
+	val := false
+	raw, readErr := os.ReadFile(path)
+	if readErr == nil && len(raw) > 0 {
+		var outer map[string]any
+		if json.Unmarshal(raw, &outer) == nil {
+			val = pausedFromEnvelope(outer)
+		}
+	} else if readErr != nil && !os.IsNotExist(readErr) && ok {
+		val = hit.val
+	}
+
+	pausedCacheMu.Lock()
+	pausedCache[key] = pausedHit{val: val, at: now}
+	pausedCacheMu.Unlock()
+	return val
+}
+
+func pausedFromEnvelope(outer map[string]any) bool {
+	encoding, _ := outer["encoding"].(string)
+	encoding = strings.ToLower(strings.TrimSpace(encoding))
+	var inner map[string]any
+	switch {
+	case encoding == "dpapi":
+		blob, _ := outer["dpapi"].(string)
+		if blob == "" {
+			blob, _ = outer["payload"].(string)
+		}
+		cipher, err := base64.StdEncoding.DecodeString(blob)
+		if err != nil {
+			return false
+		}
+		plain, err := secret.Unprotect(cipher)
+		if err != nil {
+			return false
+		}
+		if json.Unmarshal(plain, &inner) != nil {
+			return false
+		}
+	default:
+		if payload, ok := outer["payload"].(map[string]any); ok {
+			inner = payload
+		} else if _, has := outer["paused"]; has {
+			inner = outer
+		} else {
+			return false
+		}
+	}
+	paused, _ := inner["paused"].(bool)
+	return paused
+}
+
+// SetPaused writes the Connect pause flag and audits transitions.
+func SetPaused(paused bool, home string) error {
+	was := IsPaused(home)
+	path, err := StatePath(home)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{"paused": paused}
+	plain, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	envelope := map[string]any{
+		"v":        2,
+		"encoding": "plain",
+		"payload":  payload,
+	}
+	if runtime.GOOS == "windows" {
+		if sealed, err := secret.Protect(plain); err == nil {
+			envelope = map[string]any{
+				"v":        2,
+				"encoding": "dpapi",
+				"dpapi":    base64.StdEncoding.EncodeToString(sealed),
+			}
+		}
+	}
+	raw, err := json.MarshalIndent(envelope, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	storeMu.Lock()
+	err = writeBytesAtomic(path, raw)
+	storeMu.Unlock()
+	if err != nil {
+		return err
+	}
+
+	pausedCacheMu.Lock()
+	pausedCache[path] = pausedHit{val: paused, at: time.Now()}
+	pausedCacheMu.Unlock()
+
+	if paused && !was {
+		_ = AppendAudit("pause", home, map[string]string{"on": "1"})
+	} else if !paused && was {
+		_ = AppendAudit("pause", home, map[string]string{"on": "0"})
+	}
+	return nil
+}
+
 func writeSealedJSON(path string, payload Device) error {
 	plain, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

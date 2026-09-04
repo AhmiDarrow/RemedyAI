@@ -61,3 +61,22 @@ func TestRevokeHidesFromActive(t *testing.T) {
 		t.Fatalf("revoked list=%+v err=%v", list, err)
 	}
 }
+
+func TestPauseCacheFollowsSetPaused(t *testing.T) {
+	home := t.TempDir()
+	if IsPaused(home) {
+		t.Fatal("default paused")
+	}
+	if err := SetPaused(true, home); err != nil {
+		t.Fatal(err)
+	}
+	if !IsPaused(home) {
+		t.Fatal("expected paused")
+	}
+	if err := SetPaused(false, home); err != nil {
+		t.Fatal(err)
+	}
+	if IsPaused(home) {
+		t.Fatal("expected unpaused")
+	}
+}
