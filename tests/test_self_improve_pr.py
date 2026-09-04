@@ -103,7 +103,7 @@ def test_collect_git_diff_fails_closed_when_git_errors(tmp_path, monkeypatch):
     def failed_git(*_args, **_kwargs):
         return 128, "", "invalid revision"
 
-    monkeypatch.setattr("remedy.execution.sandbox.run_unattended_git", failed_git)
+    monkeypatch.setattr("remedy.execution.env.run_unattended_git", failed_git)
     with pytest.raises(RuntimeError, match="git file-list failed"):
         collect_git_diff(tmp_path, base="missing-base")
 

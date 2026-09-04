@@ -312,7 +312,7 @@ async def run_verify_job(
             ),
             details={"write_jail": jail_hit},
         )
-    from remedy.execution.sandbox import allowed_paths_for_shell
+    from remedy.execution.env import allowed_paths_for_shell
 
     sandbox = SubprocessSandbox(allowed_paths=allowed_paths_for_shell(roots, workdir))
     from remedy.execution.host.runner import prepare_host_command
@@ -365,7 +365,7 @@ async def run_diff_job(runtime: Any, *, path: str = ".") -> JobResult:
         )
     if workdir.is_file():
         workdir = workdir.parent
-    from remedy.execution.sandbox import allowed_paths_for_shell
+    from remedy.execution.env import allowed_paths_for_shell
 
     roots = runtime.allowed_roots()
     sandbox = SubprocessSandbox(

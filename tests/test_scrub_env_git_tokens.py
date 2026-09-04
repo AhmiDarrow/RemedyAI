@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from remedy.execution.sandbox import scrub_subprocess_env, unattended_vcs_env
+from remedy.execution.env import scrub_subprocess_env, unattended_vcs_env
 
 
 def test_generic_shell_drops_vcs_and_llm_tokens(monkeypatch):
@@ -59,7 +59,7 @@ def test_path_env_must_use_scrubbed_base(monkeypatch, tmp_path):
     leaked. Callers must pass a scrubbed base into path_env_with_local_bins.
     """
     from remedy.core.project_fingerprint import path_env_with_local_bins
-    from remedy.execution.sandbox import scrub_subprocess_env
+    from remedy.execution.env import scrub_subprocess_env
 
     monkeypatch.setenv("GH_TOKEN", "ghp_leaked")
     raw = path_env_with_local_bins(tmp_path)
@@ -72,7 +72,7 @@ def test_path_env_must_use_scrubbed_base(monkeypatch, tmp_path):
 
 
 def test_run_unattended_git_uses_scrubbed_env(monkeypatch, tmp_path):
-    from remedy.execution.sandbox import run_unattended_git
+    from remedy.execution.env import run_unattended_git
 
     monkeypatch.setenv("XAI_API_KEY", "xai_must_drop")
     monkeypatch.setenv("GIT_ASKPASS", "gui-helper")

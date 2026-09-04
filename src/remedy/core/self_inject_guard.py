@@ -326,7 +326,7 @@ def collect_git_diff(
     base: str | None = None,
 ) -> tuple[list[str], str]:
     """Return (paths, unified diff) vs *base*...HEAD or vs HEAD (worktree)."""
-    from remedy.execution.sandbox import run_unattended_git
+    from remedy.execution.env import run_unattended_git
 
     root = Path(repo)
     if base:

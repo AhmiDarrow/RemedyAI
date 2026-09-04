@@ -7,8 +7,8 @@ Remedy's. Remedy's sidecar ships without pandas/numpy/scipy, so the numerics in
 this module are pure stdlib (``csv``, ``math``, ``statistics``) and anything
 heavier is shelled out to the project interpreter and parsed back as JSON.
 
-Every subprocess goes through the same ``SubprocessSandbox`` +
-``allowed_paths_for_shell`` + approval gate that ``bash_exec`` uses; there is no
+Every subprocess goes through the same ``SubprocessSandbox`` + Zig write-jail
+(``allowed_paths_for_shell``) + approval gate that ``bash_exec`` uses; there is no
 free-form command parameter anywhere in this module (that is ``bash_exec``'s
 job). Writes resolve through ``runtime.resolve_tool_path(..., for_write=True)``
 and are checked against the write roots, returning the same ``WRITE_JAIL``
@@ -303,7 +303,8 @@ async def _sandbox_run(
 ) -> Any:
     """Run argv through SubprocessSandbox exactly like bash_exec does."""
     from remedy.core.project_fingerprint import path_env_with_local_bins
-    from remedy.execution.sandbox import SubprocessSandbox, allowed_paths_for_shell
+    from remedy.execution.env import allowed_paths_for_shell
+    from remedy.execution.sandbox import SubprocessSandbox
 
     roots = _write_roots(runtime) or [cwd]
     sandbox = SubprocessSandbox(allowed_paths=allowed_paths_for_shell(roots, cwd))

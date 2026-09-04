@@ -117,7 +117,8 @@ def _write_roots(runtime: Any) -> list[Path]:
 async def _sandbox_run(runtime: Any, argv: list[str], *, cwd: Path, timeout: float) -> Any:
     """Run argv through SubprocessSandbox exactly like bash_exec does."""
     from remedy.core.project_fingerprint import path_env_with_local_bins
-    from remedy.execution.sandbox import SubprocessSandbox, allowed_paths_for_shell
+    from remedy.execution.env import allowed_paths_for_shell
+    from remedy.execution.sandbox import SubprocessSandbox
 
     roots = _write_roots(runtime) or [cwd]
     sandbox = SubprocessSandbox(allowed_paths=allowed_paths_for_shell(roots, cwd))

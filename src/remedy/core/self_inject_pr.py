@@ -137,7 +137,7 @@ def format_inbox_comment(
 
 
 def _git(repo: Path, *args: str, timeout: float = 60.0) -> tuple[int, str, str]:
-    from remedy.execution.sandbox import run_unattended_git
+    from remedy.execution.env import run_unattended_git
 
     return run_unattended_git(repo, *args, timeout=timeout)
 
@@ -145,7 +145,7 @@ def _git(repo: Path, *args: str, timeout: float = 60.0) -> tuple[int, str, str]:
 async def _run_exec(
     repo: Path, argv: list[str], *, timeout: float
 ) -> tuple[int, str, str]:
-    from remedy.execution.sandbox import unattended_vcs_env
+    from remedy.execution.env import unattended_vcs_env
 
     env = unattended_vcs_env(argv)
     try:

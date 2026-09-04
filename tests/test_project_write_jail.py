@@ -1443,7 +1443,7 @@ async def test_host_session_cd_outside_resets_and_jails_relative(
 
 def test_full_sandbox_has_no_workdir_jail(tmp_path: Path):
     from remedy.core.approvals import APPROVALS
-    from remedy.execution.sandbox import allowed_paths_for_shell
+    from remedy.execution.env import allowed_paths_for_shell
 
     prev = APPROVALS.mode
     try:
