@@ -17,6 +17,7 @@ Last capture: **MATCHED**
 | `noise_ik_pair_secret.json` | `remedy_pair_secret` | Product prologue; first payload = 32-byte PS; wrong-ps fail |
 | `noise_ik_post_split.json` | `remedy_post_split_aead` | Both-direction transport AEAD after split |
 | `record_framing.json` | `remedy_record_framing` | u32be\|nonce12\|ct pack + encrypt_record blobs |
+| `inner_framing.json` | (inner mux) | HttpFrame-compatible encode/fragment vectors (Python capture) |
 | `noise_ik_index.json` | (meta) | Capture stamp + vector list |
 
 ## Regenerating
