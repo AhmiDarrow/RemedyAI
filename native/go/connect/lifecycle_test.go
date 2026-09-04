@@ -272,3 +272,55 @@ func TestGatewayNilHandlerServesNoiseConnectMe(t *testing.T) {
 		t.Fatalf("api key leaked in /connect/me: %q", joined)
 	}
 }
+
+func TestGatewayRelaySupervisorDialsActiveSID(t *testing.T) {
+	// MaybeStart with a relay URL dials wanted SIDs beside the TCP listener.
+	// Peer DialRelay only returns once the gateway supervisor also dials (splice).
+	home := pipeHome(t)
+	relay, err := connect.StartRelay("127.0.0.1", 0, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relay.Stop()
+
+	g := connect.NewGateway(nil)
+	defer func() { _ = g.Stop() }()
+
+	if err := g.MaybeStart(connect.GatewaySettings{
+		Enabled:  true,
+		Host:     "127.0.0.1",
+		Port:     0,
+		Home:     home,
+		RelayURL: relay.Addr(),
+		RDV:      false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, port, ok := g.ListeningAddr()
+	if !ok {
+		t.Fatal("not listening")
+	}
+	if _, err := connect.StartPair(connect.PairStartOpts{
+		Loopback: true,
+		BindHost: "127.0.0.1",
+		BindPort: port,
+		Home:     home,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sid, err := connect.PendingPairRendezvous(home)
+	if err != nil || len(sid) != connect.SessionIDLen {
+		t.Fatalf("sid=%v err=%v", sid, err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	peer, err := connect.DialRelay(ctx, relay.Addr(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	if !g.Health().Serving {
+		t.Fatal("gateway not serving")
+	}
+}

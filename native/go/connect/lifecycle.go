@@ -47,7 +47,8 @@ type GatewaySettings struct {
 
 // Gateway owns the Connect listener lifecycle: start/stop, pause, health, self-heal.
 // A nil ConnHandler uses NoiseConnHandler (Noise IK → allowlist → inner mux).
-// Supervisors (relay/rdv) are started beside the listener when configured.
+// Relay and public-broker rdv supervisors run beside the listener when configured;
+// dialed pipes use the same Noise session path as accepted TCP.
 type Gateway struct {
 	mu sync.Mutex
 
@@ -64,6 +65,10 @@ type Gateway struct {
 
 	healDelays []time.Duration
 	now        func() time.Time
+
+	supMu     sync.Mutex // serializes refreshSupervisors / stopSupervisors
+	supCancel context.CancelFunc
+	supWG     sync.WaitGroup
 }
 
 // NewGateway builds an idle gateway. A nil handler selects NoiseConnHandler at start.
@@ -117,6 +122,72 @@ func (g *Gateway) NoiseConnHandler() ConnHandler {
 	}
 }
 
+// supervisorHandler is the shared Noise path for relay / rdv dialed pipes.
+func (g *Gateway) supervisorHandler() RelayConnHandler {
+	return func(ctx context.Context, conn net.Conn) {
+		_, _ = RunSession(ctx, conn, g.SessionConfig())
+	}
+}
+
+// stopSupervisors cancels relay/rdv dialers and waits for them to exit.
+func (g *Gateway) stopSupervisors() {
+	g.supMu.Lock()
+	defer g.supMu.Unlock()
+	g.stopSupervisorsLocked()
+}
+
+func (g *Gateway) stopSupervisorsLocked() {
+	cancel := g.supCancel
+	g.supCancel = nil
+	if cancel != nil {
+		cancel()
+	}
+	g.supWG.Wait()
+}
+
+// refreshSupervisors restarts relay/rdv dialers from live settings.
+// No-op when not serving. Safe to call on same-bind ApplySettings.
+func (g *Gateway) refreshSupervisors() {
+	g.supMu.Lock()
+	defer g.supMu.Unlock()
+
+	g.mu.Lock()
+	serving := g.serving
+	live := g.settings
+	g.mu.Unlock()
+	if !serving {
+		return
+	}
+	g.stopSupervisorsLocked()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	g.supCancel = cancel
+
+	handler := g.supervisorHandler()
+	if url, err := RelayConfigured(live.RelayURL); err == nil && url != "" {
+		g.supWG.Add(1)
+		go func() {
+			defer g.supWG.Done()
+			_ = RunRelaySupervisor(ctx, RelaySupervisorOpts{
+				URL:     live.RelayURL,
+				Home:    live.Home,
+				Handler: handler,
+			})
+		}()
+	}
+	if live.RDV {
+		g.supWG.Add(1)
+		go func() {
+			defer g.supWG.Done()
+			_ = RunRDVSupervisor(ctx, RDVSupervisorOpts{
+				Home:    live.Home,
+				Handler: handler,
+				Enabled: true,
+			})
+		}()
+	}
+}
+
 // Health returns a snapshot for GET /api/connect.
 func (g *Gateway) Health() GatewayHealth {
 	g.mu.Lock()
@@ -163,6 +234,8 @@ func (g *Gateway) MaybeStart(cfg GatewaySettings) error {
 
 	if curHost, curPort, listening := g.listener.ListeningAddr(); listening {
 		if curHost == host && (port == 0 || curPort == port) {
+			// Same bind: panes/relay/rdv come from live settings; refresh dialers.
+			g.refreshSupervisors()
 			return nil
 		}
 		_ = g.Stop()
@@ -186,11 +259,13 @@ func (g *Gateway) MaybeStart(cfg GatewaySettings) error {
 	g.mu.Lock()
 	g.serving = true
 	g.mu.Unlock()
+	g.refreshSupervisors()
 	return nil
 }
 
-// Stop closes the listener and drops sessions. Idempotent.
+// Stop closes supervisors, the listener, and drops sessions. Idempotent.
 func (g *Gateway) Stop() error {
+	g.stopSupervisors()
 	g.mu.Lock()
 	select {
 	case <-g.stopCh:
