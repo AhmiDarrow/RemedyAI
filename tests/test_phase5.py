@@ -13,8 +13,9 @@ from remedy.execution.policy import (
     PolicyRule,
     default_policy,
 )
+from remedy.execution.result import ExecutionResult
 from remedy.execution.runtime import ToolContext, ToolRuntime
-from remedy.execution.sandbox import ExecutionResult, SubprocessSandbox
+from remedy.execution.sandbox import SubprocessSandbox
 from remedy.models import ToolCall, ToolSource
 
 

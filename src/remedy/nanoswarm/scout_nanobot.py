@@ -204,7 +204,7 @@ class ScoutNanobot:
         if git_dir.exists() or "git" in markers:
             try:
                 from remedy.execution.process import run_hidden
-                from remedy.execution.sandbox import scrub_subprocess_env
+                from remedy.execution.env import scrub_subprocess_env
 
                 git_env = scrub_subprocess_env()
                 git_env["GIT_TERMINAL_PROMPT"] = "0"

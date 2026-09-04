@@ -865,10 +865,38 @@ class FakeHostConpty:
         return self.conpty_spawn(argv, cwd=cwd, env=env, cols=cols, rows=rows)
 
     def write_jail_set_roots(self, roots: Sequence[str] | None) -> None:
-        self.calls.append(('write_jail_set_roots', (list(roots or []),), {}))
+        self._write_roots = [str(r) for r in (roots or [])]
+        self.calls.append(('write_jail_set_roots', (list(self._write_roots),), {}))
 
     def write_jail_clear(self) -> None:
+        self._write_roots = []
         self.calls.append(('write_jail_clear', (), {}))
+
+    def write_jail_check_path(self, path: str, cwd: str | None = None) -> None:
+        from remedy.core.computer import host_binding as H
+
+        self.calls.append(('write_jail_check_path', (path, cwd), {}))
+        roots = getattr(self, '_write_roots', None)
+        if not roots:
+            return
+        # Lexical prefix only — tests that need real jail use remedy_core.
+        raw = str(path)
+        for root in roots:
+            if raw == root or raw.startswith(root.rstrip('\\/') + '\\') or raw.startswith(
+                root.rstrip('\\/') + '/'
+            ):
+                return
+        raise H.HostError('write_jail_check_path', H.STATUS_ACCESS_DENIED)
+
+    def write_jail_check_spawn(self, argv: Sequence[str], cwd: str | None = None) -> None:
+
+        self.calls.append(('write_jail_check_spawn', (list(argv), cwd), {}))
+        roots = getattr(self, '_write_roots', None)
+        if not roots:
+            return
+        if cwd:
+            self.write_jail_check_path(str(cwd), None)
+
 
 
 @contextlib.contextmanager

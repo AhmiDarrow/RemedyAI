@@ -147,7 +147,7 @@ async def _git_out(
     which the callers already know how to handle.
     """
     from remedy.execution.process import create_hidden_subprocess_exec
-    from remedy.execution.sandbox import unattended_vcs_env
+    from remedy.execution.env import unattended_vcs_env
 
     env = unattended_vcs_env(["git"])
     proc = await create_hidden_subprocess_exec(

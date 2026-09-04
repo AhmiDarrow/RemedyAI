@@ -98,7 +98,7 @@ class HostSession:
         if self.env is not None:
             env = dict(self.env)
         else:
-            from remedy.execution.sandbox import scrub_subprocess_env
+            from remedy.execution.env import scrub_subprocess_env
 
             env = scrub_subprocess_env()
         handle = await asyncio.to_thread(
@@ -118,7 +118,7 @@ class HostSession:
         if self.env is not None:
             env = dict(self.env)
         else:
-            from remedy.execution.sandbox import scrub_subprocess_env
+            from remedy.execution.env import scrub_subprocess_env
 
             env = scrub_subprocess_env()
         env.setdefault("PYTHONIOENCODING", "utf-8")

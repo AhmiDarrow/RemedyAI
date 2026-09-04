@@ -1,8 +1,9 @@
-"""Sandboxed subprocess execution for skills and tools.
+"""Thin hop/abort orchestrator — Zig write-jail owns spawn scrub.
 
-``SubprocessSandbox`` owns async hop orchestration, abort, and env scrub.
-Docker lives in ``remedy.execution.docker``. Process spawn/kill on Windows
-goes through ``remedy_core``; Zig HostSession owns the persistent shell host.
+``SubprocessSandbox`` expands shell chains and runs hidden children with
+abort/timeout. Workdir / write-root / auth-path gates go through
+``host_binding.write_jail_*`` (no Python path-jail twin, no soft fallback).
+Env scrub lives in ``remedy.execution.env``; Docker in ``remedy.execution.docker``.
 """
 
 from __future__ import annotations
@@ -10,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -18,6 +18,23 @@ if TYPE_CHECKING:
     from remedy.execution.host.runner import ChainHop
 
 from remedy.core.security import check_dangerous_command
+from remedy.execution.env import (
+    allowed_paths_for_shell,
+    run_unattended_git,
+    scrub_subprocess_env,
+    unattended_vcs_env,
+)
+from remedy.execution.result import ExecutionResult, Sandbox
+
+__all__ = [
+    "ExecutionResult",
+    "Sandbox",
+    "SubprocessSandbox",
+    "allowed_paths_for_shell",
+    "run_unattended_git",
+    "scrub_subprocess_env",
+    "unattended_vcs_env",
+]
 
 
 def _spawn_error_stderr(command: list[str], exc: OSError) -> str:
@@ -37,71 +54,6 @@ def _spawn_error_stderr(command: list[str], exc: OSError) -> str:
     return f"OS error: {exc}"
 
 
-def scrub_subprocess_env(
-    env: dict[str, str] | None = None,
-    *,
-    grants: list[Any] | None = None,
-    argv: list[str] | None = None,
-) -> dict[str, str]:
-    """Child env: safe OS/path only, plus explicit credential grants.
-
-    Generic shell (no grants, no git/gh argv) does **not** inherit GH_TOKEN,
-    SSH_AUTH_SOCK, or registry tokens. git/gh/npm argv infers a grant so
-    ``git push`` / ``gh`` still work when those tools are the executable.
-    """
-    from remedy.credentials.broker import child_environment, grant_for_argv
-
-    inferred = list(grants or [])
-    if not inferred and argv:
-        inferred = grant_for_argv(argv, source=env)
-    return child_environment(env, grants=inferred)
-
-
-def unattended_vcs_env(
-    argv: list[str],
-    env: dict[str, str] | None = None,
-) -> dict[str, str]:
-    """git/gh env: VCS tokens only, no prompt / GIT_ASKPASS / LLM keys."""
-    out = scrub_subprocess_env(env, argv=argv)
-    out["GIT_TERMINAL_PROMPT"] = "0"
-    out["GH_PROMPT_DISABLED"] = "1"
-    out["GCM_INTERACTIVE"] = "never"
-    for key in list(out):
-        if key.upper() == "GIT_ASKPASS":
-            out.pop(key, None)
-    return out
-
-
-def run_unattended_git(
-    repo: Path | str,
-    *args: str,
-    timeout: float = 30.0,
-) -> tuple[int, str, str]:
-    """Hidden git. Never prompts. Returns (code, stdout, stderr)."""
-    import subprocess
-
-    from remedy.execution.process import hidden_subprocess_kwargs
-
-    try:
-        proc = subprocess.run(
-            ["git", "-C", str(repo), *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-            check=False,
-            stdin=subprocess.DEVNULL,
-            env=unattended_vcs_env(["git"]),
-            **hidden_subprocess_kwargs(),
-        )
-    except FileNotFoundError:
-        return 127, "", "git not found"
-    except subprocess.TimeoutExpired:
-        return 124, "", "git timeout"
-    return int(proc.returncode or 0), proc.stdout or "", proc.stderr or ""
-
-
 def _clip_output(text: str, stream: str) -> str:
     """Soft ExecutionBudget cap so a child cannot flood the turn."""
     from remedy.execution.budgets import ExecutionBudget
@@ -109,60 +61,62 @@ def _clip_output(text: str, stream: str) -> str:
     return ExecutionBudget().clip(text, stream=stream)
 
 
-@dataclass
-class ExecutionResult:
-    exit_code: int
-    stdout: str = ""
-    stderr: str = ""
-    duration_ms: float = 0.0
+def _install_write_roots(roots: list[Path]) -> None:
+    """Push workdir roots into Zig write-jail. Empty = Full / unbound."""
+    from remedy.core.computer import host_binding
+
+    host_binding.write_jail_set_roots([str(p) for p in roots])
 
 
-def allowed_paths_for_shell(
-    roots: list[Path] | None,
-    cwd: Path | None = None,
-) -> list[Path]:
-    """Workdir jail for subprocesses. Empty list = no workdir jail (Full)."""
+def _jail_denied_result(
+    *,
+    detail: str,
+    start: float,
+    what: str = "spawn",
+) -> ExecutionResult:
+    return ExecutionResult(
+        exit_code=-1,
+        stderr=f"Blocked by write jail ({what}): {detail}",
+        duration_ms=(time.monotonic() - start) * 1000,
+    )
+
+
+def _check_spawn_jail(argv: list[str], cwd: Path | None, *, start: float) -> ExecutionResult | None:
+    """Zig write-jail spawn gate. ACCESS_DENIED → result; anything else raises."""
+    from remedy.core.computer import host_binding
+    from remedy.core.computer.host_binding import STATUS_ACCESS_DENIED, HostError
+
     try:
-        from remedy.core.approvals import is_full_approval
-
-        if is_full_approval():
-            return []
-    except Exception:
-        pass
-    out: list[Path] = list(roots or [])
-    if cwd is not None and cwd not in out:
-        out.append(cwd)
-    return out
+        host_binding.write_jail_check_spawn(argv, str(cwd) if cwd else None)
+    except HostError as exc:
+        if exc.status == STATUS_ACCESS_DENIED:
+            return _jail_denied_result(detail=str(exc), start=start, what="spawn")
+        raise
+    return None
 
 
-class Sandbox:
-    """Base class for execution backends."""
+def _check_path_jail(
+    path: Path | str,
+    cwd: Path | None,
+    *,
+    start: float,
+    what: str,
+) -> ExecutionResult | None:
+    """Zig write-jail path gate for cd/mkdir hops."""
+    from remedy.core.computer import host_binding
+    from remedy.core.computer.host_binding import STATUS_ACCESS_DENIED, HostError
 
-    _workdir: Path | None = None
-
-    async def execute(
-        self,
-        command: list[str],
-        workdir: Path | None = None,
-        timeout_seconds: float = 30.0,
-        env: dict[str, str] | None = None,
-    ) -> ExecutionResult:
-        raise NotImplementedError
-
-    async def check_available(self) -> bool:
-        """Check whether this sandbox backend is available."""
-        return True
+    try:
+        host_binding.write_jail_check_path(str(path), str(cwd) if cwd else None)
+    except HostError as exc:
+        if exc.status == STATUS_ACCESS_DENIED:
+            return _jail_denied_result(detail=str(exc), start=start, what=what)
+        raise
+    return None
 
 
 class SubprocessSandbox(Sandbox):
-    """Execute commands in a restricted subprocess.
-
-    Security controls:
-    - Working directory confinement
-    - Timeout enforcement
-    - Environment variable isolation
-    - Input size limits
-    """
+    """Execute argv under Zig write-jail with hop chain + abort."""
 
     def __init__(
         self,
@@ -183,7 +137,6 @@ class SubprocessSandbox(Sandbox):
     ) -> ExecutionResult:
         start = time.monotonic()
 
-        # Check for dangerous commands before executing
         danger = check_dangerous_command(command)
         if danger:
             return ExecutionResult(
@@ -192,12 +145,11 @@ class SubprocessSandbox(Sandbox):
                 duration_ms=0.0,
             )
 
-        if self.allowed_paths and workdir and not self._path_in_jail(Path(workdir)):
-            return ExecutionResult(
-                exit_code=-1,
-                stderr=f"Workdir {workdir} not in allowed paths: {self.allowed_paths}",
-                duration_ms=0.0,
-            )
+        _install_write_roots(self.allowed_paths)
+        if workdir is not None:
+            denied = _check_path_jail(workdir, None, start=start, what="workdir")
+            if denied is not None:
+                return denied
 
         from remedy.execution.host.runner import expand_shell_chain
 
@@ -225,11 +177,6 @@ class SubprocessSandbox(Sandbox):
         from remedy.core.workspace import resolve_existing_path
 
         return resolve_existing_path(raw, cwd=cwd)
-
-    def _path_in_jail(self, dest: Path) -> bool:
-        from remedy.core.workspace import path_in_roots
-
-        return path_in_roots(dest, self.allowed_paths)
 
     async def _execute_shell_chain(
         self,
@@ -278,12 +225,9 @@ class SubprocessSandbox(Sandbox):
             if hop.kind == "cd":
                 raw = hop.paths[0] if hop.paths else ""
                 target = self._resolve_path(cwd, raw)
-                if not self._path_in_jail(target):
-                    return ExecutionResult(
-                        exit_code=-1,
-                        stderr=f"cd {raw}: not in allowed paths",
-                        duration_ms=(time.monotonic() - start) * 1000,
-                    )
+                denied = _check_path_jail(target, cwd, start=start, what=f"cd {raw}")
+                if denied is not None:
+                    return denied
                 if not target.is_dir():
                     return ExecutionResult(
                         exit_code=1,
@@ -298,12 +242,11 @@ class SubprocessSandbox(Sandbox):
                 try:
                     for p in hop.paths:
                         dest = self._resolve_path(cwd, p)
-                        if not self._path_in_jail(dest):
-                            return ExecutionResult(
-                                exit_code=-1,
-                                stderr=f"mkdir {p}: not in allowed paths",
-                                duration_ms=(time.monotonic() - start) * 1000,
-                            )
+                        denied = _check_path_jail(
+                            dest, cwd, start=start, what=f"mkdir {p}"
+                        )
+                        if denied is not None:
+                            return denied
                         dest.mkdir(parents=True, exist_ok=True)
                 except OSError as exc:
                     return ExecutionResult(
@@ -352,8 +295,10 @@ class SubprocessSandbox(Sandbox):
         env: dict[str, str] | None,
         start: float,
     ) -> ExecutionResult:
-        # Always scrub secrets; infer VCS grants only when argv is git/gh/ssh.
-        # Unattended git/gh must not hang on a GUI credential prompt.
+        denied = _check_spawn_jail(command, workdir, start=start)
+        if denied is not None:
+            return denied
+
         head = Path(command[0]).name.lower() if command else ""
         if head.endswith(".exe"):
             head = head[:-4]
@@ -361,10 +306,6 @@ class SubprocessSandbox(Sandbox):
             safe_env = unattended_vcs_env(command, env)
         else:
             safe_env = scrub_subprocess_env(env, argv=command)
-        # Force UTF-8 in the child so non-ASCII stdout/stderr survives the
-        # decode("utf-8") below (mirrors the persistent-session path). Without
-        # this, a child Python on Windows emits cp1252 and unicode output is
-        # corrupted into replacement chars.
         safe_env.setdefault("PYTHONIOENCODING", "utf-8")
         safe_env.setdefault("PYTHONUTF8", "1")
 
@@ -411,7 +352,6 @@ class SubprocessSandbox(Sandbox):
                     abort_event=abort_ev,
                 )
                 if stdout is None and stderr is None:
-                    # Aborted or timed out — process already killed
                     elapsed = (time.monotonic() - start) * 1000
                     if is_turn_aborted():
                         return ExecutionResult(
@@ -490,19 +430,16 @@ async def _communicate_or_abort(
         return_when=asyncio.FIRST_COMPLETED,
     )
 
-    # Timeout — nothing finished
     if not done:
         kill_process_tree(proc)
         await _cancel_waiters(*pending)
         return None, None
 
-    # Abort won
     if abort_task is not None and abort_task in done and not comm.done():
         kill_process_tree(proc)
         await _cancel_waiters(comm)
         return None, None
 
-    # Communicate finished (or both). Reap the abort waiter.
     await _cancel_waiters(abort_task)
     try:
         return await comm

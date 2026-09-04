@@ -89,7 +89,7 @@ class SkillExecutor:
 
         try:
             from remedy.execution.process import create_hidden_subprocess_exec
-            from remedy.execution.sandbox import scrub_subprocess_env
+            from remedy.execution.env import scrub_subprocess_env
 
             # Never pass provider keys / REMEDY_* into skill scripts (same as bash sandbox).
             child_env = scrub_subprocess_env(env)
@@ -193,7 +193,7 @@ class SkillExecutor:
 
         try:
             from remedy.execution.process import create_hidden_subprocess_exec
-            from remedy.execution.sandbox import scrub_subprocess_env
+            from remedy.execution.env import scrub_subprocess_env
 
             # Never pass provider keys / REMEDY_* into skill shell (same as run_script).
             child_env = scrub_subprocess_env(env)

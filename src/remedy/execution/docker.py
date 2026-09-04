@@ -14,7 +14,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from remedy.execution.sandbox import ExecutionResult, Sandbox
+from remedy.execution.result import ExecutionResult, Sandbox
 
 logger = logging.getLogger(__name__)
 

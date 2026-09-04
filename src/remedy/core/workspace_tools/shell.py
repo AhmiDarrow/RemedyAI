@@ -57,12 +57,29 @@ def _spawn_background(
     env: dict[str, str] | None,
     command: str,
     auto: bool = False,
+    write_roots: list[Path] | None = None,
 ) -> str:
     """Start a command and return immediately (GUI / server / game)."""
     import os
     import subprocess
 
-    from remedy.execution.sandbox import scrub_subprocess_env
+    from remedy.core.computer import host_binding
+    from remedy.core.computer.host_binding import STATUS_ACCESS_DENIED, HostError
+    from remedy.execution.env import scrub_subprocess_env
+
+    roots = list(write_roots or [])
+    host_binding.write_jail_set_roots([str(p) for p in roots])
+    try:
+        host_binding.write_jail_check_spawn(argv, str(cwd) if cwd else None)
+    except HostError as exc:
+        if exc.status == STATUS_ACCESS_DENIED:
+            return format_tool_error(
+                f"blocked by write jail: {exc}",
+                code="WRITE_JAIL",
+                tool_name="bash_exec",
+                suggestion="Keep the working directory under the project folder.",
+            )
+        raise
 
     kwargs: dict[str, Any] = {
         "cwd": str(cwd) if cwd else None,
@@ -696,9 +713,10 @@ def register_shell_tools(runtime: Any) -> None:
                 "on a real POSIX host."
             )
         argv = prepared.argv
-        from remedy.execution.sandbox import allowed_paths_for_shell, scrub_subprocess_env
+        from remedy.execution.env import allowed_paths_for_shell, scrub_subprocess_env
 
-        sandbox = SubprocessSandbox(allowed_paths=allowed_paths_for_shell(roots, cwd))
+        jail_roots = allowed_paths_for_shell(roots, cwd)
+        sandbox = SubprocessSandbox(allowed_paths=jail_roots)
         # M1.4: never hand the raw owner env to session/background/sandbox.
         # git/gh argv still infers a VCS grant inside scrub_subprocess_env.
         env = path_env_with_local_bins(
@@ -719,6 +737,7 @@ def register_shell_tools(runtime: Any) -> None:
                     env=env,
                     command=prepared.display or command,
                     auto=auto_bg and not background,
+                    write_roots=jail_roots,
                 )
             )
 
@@ -1000,6 +1019,9 @@ def register_shell_tools(runtime: Any) -> None:
                 return text
             return "\n".join(py_warnings) + "\n" + text
 
+        from remedy.execution.env import allowed_paths_for_shell
+
+        jail_roots = allowed_paths_for_shell(roots, cwd)
         if gui_py:
             env_bg = path_env_with_local_bins(cwd)
             return _py_warn(
@@ -1009,11 +1031,11 @@ def register_shell_tools(runtime: Any) -> None:
                     env=env_bg,
                     command=" ".join(argv),
                     auto=True,
+                    write_roots=jail_roots,
                 )
             )
-        from remedy.execution.sandbox import allowed_paths_for_shell
 
-        sandbox = SubprocessSandbox(allowed_paths=allowed_paths_for_shell(roots, cwd))
+        sandbox = SubprocessSandbox(allowed_paths=jail_roots)
         env = path_env_with_local_bins(cwd)
         result = await sandbox.execute(
             argv, workdir=cwd, timeout_seconds=timeout, env=env

@@ -921,7 +921,7 @@ def origin_wins_if_dirty(repo: str | Path) -> dict[str, Any]:
             "reason": "packaged_or_pip",
             "merge": False,
         }
-    from remedy.execution.sandbox import run_unattended_git
+    from remedy.execution.env import run_unattended_git
 
     code, out, _err = run_unattended_git(repo_p, "status", "--porcelain", timeout=15)
     if code != 0:

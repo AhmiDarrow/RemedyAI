@@ -54,7 +54,7 @@ class MCPClient:
 
         try:
             from remedy.execution.process import create_hidden_subprocess_exec
-            from remedy.execution.sandbox import scrub_subprocess_env
+            from remedy.execution.env import scrub_subprocess_env
 
             # Never forward provider/API secrets into MCP server children.
             safe_env = scrub_subprocess_env(env, argv=[command, *(args or [])])
