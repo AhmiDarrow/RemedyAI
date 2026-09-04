@@ -340,3 +340,187 @@ func TestMattermostOnEventFilters(t *testing.T) {
 		t.Fatalf("handler calls = %d, want 1", n.Load())
 	}
 }
+
+func TestWhatsAppWebhookVerifyAndPayload(t *testing.T) {
+	g := New(Config{RateLimitPerMin: 100, HeartbeatInterval: time.Hour})
+	var n atomic.Int32
+	g.RegisterHandler(func(ctx context.Context, ev Event) error {
+		if ev.Kind == EventMessage {
+			n.Add(1)
+		}
+		return nil
+	})
+	ch := NewWhatsApp(g, WhatsAppConfig{
+		VerifyToken: "secret",
+		AppSecret:   "app-secret",
+		AllowFrom:   []string{"15551234567"},
+	})
+	if got, ok := ch.VerifyWebhookChallenge("subscribe", "secret", "42"); !ok || got != "42" {
+		t.Fatalf("verify ok got=%q ok=%v", got, ok)
+	}
+	if _, ok := ch.VerifyWebhookChallenge("subscribe", "wrong", "42"); ok {
+		t.Fatal("want verify fail")
+	}
+	if _, ok := ch.VerifyWebhookChallenge("subscribe", "secre", "42"); ok {
+		t.Fatal("length mismatch must fail closed")
+	}
+	body := []byte(`{"x":1}`)
+	if ch.VerifySignature(body, "sha256=nope") {
+		t.Fatal("want bad signature")
+	}
+	handled := ch.HandleWebhookPayload(context.Background(), map[string]any{
+		"entry": []any{
+			map[string]any{
+				"changes": []any{
+					map[string]any{
+						"value": map[string]any{
+							"messages": []any{
+								map[string]any{
+									"from": "15551234567",
+									"type": "text",
+									"text": map[string]any{"body": "hello"},
+								},
+								map[string]any{
+									"from": "999",
+									"type": "text",
+									"text": map[string]any{"body": "blocked"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	if handled != 1 || n.Load() != 1 {
+		t.Fatalf("handled=%d events=%d", handled, n.Load())
+	}
+}
+
+func TestTeamsActivityAndJWTClaims(t *testing.T) {
+	g := New(Config{RateLimitPerMin: 100, HeartbeatInterval: time.Hour})
+	var n atomic.Int32
+	g.RegisterHandler(func(ctx context.Context, ev Event) error {
+		if ev.Kind == EventMessage {
+			n.Add(1)
+		}
+		return nil
+	})
+	ch := NewTeams(g, TeamsConfig{AppID: "app-id", AppPassword: "pw", AllowAll: true})
+	ok := ch.HandleActivity(context.Background(), map[string]any{
+		"type":       "message",
+		"text":       "hi teams",
+		"serviceUrl": "https://smba.trafficmanager.net/amer/",
+		"conversation": map[string]any{
+			"id": "conv1",
+		},
+		"from": map[string]any{"id": "u1", "name": "User"},
+	})
+	if !ok || n.Load() != 1 {
+		t.Fatalf("ok=%v events=%d", ok, n.Load())
+	}
+	ch.mu.Lock()
+	conv := ch.lastConversationID
+	ch.mu.Unlock()
+	if conv != "conv1" {
+		t.Fatalf("lastConversationID=%q", conv)
+	}
+	if isAllowedBotFrameworkServiceURL("http://evil.example/") {
+		t.Fatal("http serviceUrl must be rejected")
+	}
+	now := time.Now()
+	if JWTClaimsStructurallyValid(map[string]any{
+		"aud": "app-id",
+		"exp": float64(now.Add(time.Hour).Unix()),
+		"iss": "https://api.botframework.com",
+	}, "app-id", now) != true {
+		t.Fatal("want valid claims")
+	}
+	if JWTClaimsStructurallyValid(map[string]any{
+		"exp": float64(now.Add(time.Hour).Unix()),
+	}, "app-id", now) {
+		t.Fatal("missing aud must fail")
+	}
+}
+
+func TestGoogleChatEventFilters(t *testing.T) {
+	g := New(Config{RateLimitPerMin: 100, HeartbeatInterval: time.Hour})
+	var n atomic.Int32
+	g.RegisterHandler(func(ctx context.Context, ev Event) error {
+		if ev.Kind == EventMessage {
+			n.Add(1)
+		}
+		return nil
+	})
+	ch := NewGoogleChat(g, GoogleChatConfig{AccessToken: "tok", AllowAll: true})
+	if !ch.VerifyInboundAuth("Bearer tok") {
+		t.Fatal("want auth ok")
+	}
+	if ch.VerifyInboundAuth("Bearer wrong") {
+		t.Fatal("want auth fail")
+	}
+	if ch.VerifyInboundAuth("Bearer to") { // length mismatch
+		t.Fatal("length mismatch must fail")
+	}
+	ok := ch.HandleEvent(context.Background(), map[string]any{
+		"type": "MESSAGE",
+		"message": map[string]any{
+			"text":   "hi",
+			"sender": map[string]any{"name": "users/1", "displayName": "A", "type": "HUMAN"},
+		},
+		"space": map[string]any{"name": "spaces/s1"},
+	})
+	if !ok || n.Load() != 1 {
+		t.Fatalf("ok=%v events=%d", ok, n.Load())
+	}
+	botOK := ch.HandleEvent(context.Background(), map[string]any{
+		"type": "MESSAGE",
+		"message": map[string]any{
+			"text":   "bot",
+			"sender": map[string]any{"name": "bots/1", "type": "BOT"},
+		},
+		"space": map[string]any{"name": "spaces/s1"},
+	})
+	if botOK || n.Load() != 1 {
+		t.Fatalf("bot should be ignored ok=%v events=%d", botOK, n.Load())
+	}
+}
+
+func TestRegisterFromConfigWebhookMessengers(t *testing.T) {
+	home := t.TempDir()
+	g := New(Config{HomeDir: home})
+	cfg := map[string]any{
+		"enabled_channels": []string{"whatsapp", "teams", "google_chat"},
+		"whatsapp":         map[string]any{"phone_number_id": "pn", "allow_all": true},
+		"teams":            map[string]any{"app_id": "aid", "allow_all": true},
+		"google_chat":      map[string]any{"space_id": "spaces/s1", "allow_all": true},
+	}
+	got := RegisterFromConfig(g, cfg, home, func(channel, field string) string {
+		switch channel + ":" + field {
+		case "whatsapp:access_token":
+			return "wa-tok"
+		case "whatsapp:verify_token":
+			return "vtok"
+		case "whatsapp:app_secret":
+			return "asec"
+		case "teams:app_password":
+			return "tpw"
+		case "google_chat:access_token":
+			return "gc-tok"
+		default:
+			return ""
+		}
+	})
+	if len(got) != 3 {
+		t.Fatalf("registered=%v", got)
+	}
+	if _, ok := g.GetChannel(ChannelWhatsApp).(*WhatsAppChannel); !ok {
+		t.Fatalf("whatsapp type=%T", g.GetChannel(ChannelWhatsApp))
+	}
+	if _, ok := g.GetChannel(ChannelTeams).(*TeamsChannel); !ok {
+		t.Fatalf("teams type=%T", g.GetChannel(ChannelTeams))
+	}
+	if _, ok := g.GetChannel(ChannelGoogleChat).(*GoogleChatChannel); !ok {
+		t.Fatalf("google_chat type=%T", g.GetChannel(ChannelGoogleChat))
+	}
+}

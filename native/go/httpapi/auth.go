@@ -84,7 +84,14 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 }
 
 func pathNeedsAPIAuth(path string) bool {
-	return strings.HasPrefix(path, "/api/")
+	if !strings.HasPrefix(path, "/api/") {
+		return false
+	}
+	// Platform messengers authenticate inside the route (HMAC / JWT / verify token).
+	if strings.HasPrefix(path, "/api/webhooks/") || strings.HasPrefix(path, "/api/webhook/") {
+		return false
+	}
+	return true
 }
 
 func requestAuthorized(r *http.Request, token string) bool {
