@@ -289,7 +289,7 @@ async def _spawn_terminal(
     rows: int,
     shell_argv: list[str] | None = None,
 ) -> _TerminalSession:
-    """Spawn a shell. Prefers ConPTY on Windows; falls back to pipe subprocess."""
+    """Spawn a shell. Zig ConPTY on Windows when available; pipes only if unsupported."""
     if len(_TERMINALS) >= _MAX_TERMINALS:
         # Evict the oldest idle terminal to keep the cap honest.
         oldest = min(_TERMINALS.values(), key=lambda t: t.created)
@@ -310,16 +310,15 @@ async def _spawn_terminal(
         shell, args = _pick_shell()
         argv = [shell, *args]
     if os.name == "nt":
-        try:
-            from remedy.execution.host.conpty import spawn_conpty
+        from remedy.execution.host.conpty import spawn_conpty, spawn_conpty_supported
 
+        # Fail closed when Zig reports ConPTY: spawn errors surface to the
+        # owner. Soft pipe fallback only when ConPTY is unsupported.
+        if spawn_conpty_supported():
             proc = await spawn_conpty(argv, cwd=cwd, env=os.environ.copy())
-            if proc is not None:
-                sess = _TerminalSession(proc, cwd=cwd)
-                await sess.start()
-                return sess
-        except Exception as exc:
-            logger.info("conpty spawn failed (%s); falling back to pipes", exc)
+            sess = _TerminalSession(proc, cwd=cwd)
+            await sess.start()
+            return sess
 
     from remedy.execution.process import create_hidden_subprocess_exec
 
