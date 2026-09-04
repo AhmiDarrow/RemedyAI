@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/connect"
@@ -52,12 +53,16 @@ type Server struct {
 
 	connectGW     *connect.Gateway
 	apiListenPort int
+
+	// focusedSessionID mirrors host_bridge focused desktop tab (Connect Stop).
+	focusedMu        sync.Mutex
+	focusedSessionID string
 }
 
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
 // sessions CRUD, session LLM bind, attachments upload/get, messages
-// list/create/stream, abort, session-events SSE, Connect management, and
-// providers/models catalog routes.
+// list/create/stream, abort, session-events SSE, Connect management,
+// Connect me/stop, and providers/models catalog routes.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
@@ -117,6 +122,9 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/connect/pause", s.handleConnectPause)
 	s.mux.HandleFunc("POST /api/connect/resume", s.handleConnectResume)
 	s.mux.HandleFunc("POST /api/connect/devices/{id}/revoke", s.handleConnectRevoke)
+	s.mux.HandleFunc("GET /connect/me", s.handleConnectMe)
+	s.mux.HandleFunc("GET /api/connect/me", s.handleConnectMe)
+	s.mux.HandleFunc("POST /api/stop", s.handleConnectStop)
 	s.mux.HandleFunc("GET /api/providers", s.handleListProviders)
 	s.mux.HandleFunc("GET /api/providers/connected", s.handleListConnectedProviders)
 	s.mux.HandleFunc("GET /api/providers/free", s.handleListFreeProviders)

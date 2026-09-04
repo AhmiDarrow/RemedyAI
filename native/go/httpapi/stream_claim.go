@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -244,6 +245,26 @@ func (c *streamClaims) AnyActive() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.bySID) > 0
+}
+
+// ActiveSessionIDs returns live claim session keys (excludes blank / _anon).
+// Sorted for stable /connect/me selection when no focused sid is streaming.
+func (c *streamClaims) ActiveSessionIDs() []string {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, 0, len(c.bySID))
+	for sid := range c.bySID {
+		sid = strings.TrimSpace(sid)
+		if sid == "" || sid == "_anon" {
+			continue
+		}
+		out = append(out, sid)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // IsClaimed reports whether sessionID holds a live claim.
