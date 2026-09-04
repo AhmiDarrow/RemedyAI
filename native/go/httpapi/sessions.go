@@ -392,6 +392,14 @@ func (s *sessionStore) Delete(id string) (bool, error) {
 	return n > 0, nil
 }
 
+func (s *sessionStore) Count() (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM chat_sessions`).Scan(&n)
+	return n, err
+}
+
 type scannable interface {
 	Scan(dest ...any) error
 }
@@ -489,6 +497,15 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
 		return
 	}
+	title := sess.Title
+	count := sess.MessageCount
+	s.publishSessionEvent(SessionEvent{
+		Type:          "session_created",
+		SessionID:     sess.ID,
+		OriginChannel: sess.OriginChannel,
+		Title:         &title,
+		MessageCount:  &count,
+	})
 	writeJSON(w, http.StatusOK, sess)
 }
 
@@ -530,6 +547,15 @@ func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Session not found"})
 		return
 	}
+	title := sess.Title
+	count := sess.MessageCount
+	s.publishSessionEvent(SessionEvent{
+		Type:          "session_updated",
+		SessionID:     sess.ID,
+		OriginChannel: sess.OriginChannel,
+		Title:         &title,
+		MessageCount:  &count,
+	})
 	// PATCH returns a subset (matches Python crud.update_chat_session).
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id":           sess.ID,
@@ -557,6 +583,10 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Session not found"})
 		return
 	}
+	s.publishSessionEvent(SessionEvent{
+		Type:      "session_deleted",
+		SessionID: id,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":     "deleted",
 		"session_id": id,

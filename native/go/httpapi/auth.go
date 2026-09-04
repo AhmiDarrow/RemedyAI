@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
 // PublicPaths need no Bearer token (health / readiness).
@@ -30,8 +32,8 @@ func AuthEnabled() bool {
 	}
 }
 
-// ResolveToken returns REMEDY_API_KEY or a plaintext on-disk token.
-// DPAPI envelopes are ignored here (Phase 4.2).
+// ResolveToken returns REMEDY_API_KEY or the on-disk local API token
+// (plaintext, DPAPI v2 / legacy envelopes, or local_api_token.posix fallback).
 func ResolveToken(homeDir string) string {
 	if !AuthEnabled() {
 		return ""
@@ -50,23 +52,7 @@ func ResolveToken(homeDir string) string {
 		}
 		home = filepath.Join(userHome, ".remedy")
 	}
-	return readPlainTokenFile(filepath.Join(home, "auth", "local_api_token"))
-}
-
-func readPlainTokenFile(path string) string {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	text := strings.TrimSpace(string(raw))
-	if text == "" {
-		return ""
-	}
-	// DPAPI / JSON envelopes need Phase 4.2; do not treat JSON as a bearer.
-	if strings.HasPrefix(text, "{") {
-		return ""
-	}
-	return text
+	return secret.ReadLocalAPIToken(home)
 }
 
 func (s *Server) withAuth(next http.Handler) http.Handler {

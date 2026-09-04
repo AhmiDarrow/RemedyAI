@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -244,6 +245,83 @@ func TestResolveTokenFromFileAndEnv(t *testing.T) {
 	t.Setenv("REMEDY_API_AUTH", "0")
 	if got := ResolveToken(""); got != "" {
 		t.Fatalf("auth disabled still returned %q", got)
+	}
+}
+
+func TestResolveTokenPosixFallback(t *testing.T) {
+	dir := t.TempDir()
+	authDir := filepath.Join(dir, "auth")
+	if err := os.MkdirAll(authDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Fake DPAPI primary the process cannot unwrap.
+	if err := os.WriteFile(filepath.Join(authDir, "local_api_token"), []byte(`{"v":2,"dpapi":"AAAA"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const posixTok = "posix-token-not-secret16"
+	if err := os.WriteFile(filepath.Join(authDir, "local_api_token.posix"), []byte(posixTok+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("REMEDY_API_AUTH", "1")
+	t.Setenv("REMEDY_API_KEY", "")
+	if got := ResolveToken(dir); got != posixTok {
+		t.Fatalf("posix fallback = %q, want %q", got, posixTok)
+	}
+}
+
+func TestStatusAuthenticatedChatSessionsCount(t *testing.T) {
+	const token = "test-token-not-a-secret-16"
+	dbPath := filepath.Join(t.TempDir(), "memory.db")
+	base, shutdown := startTestServer(t, Config{
+		Token:   token,
+		Version: "0.50.2",
+		DBPath:  dbPath,
+	})
+	defer shutdown()
+	client := &http.Client{Timeout: 3 * time.Second}
+
+	// Create one session.
+	req, err := http.NewRequest(http.MethodPost, base+"/api/sessions", strings.NewReader(`{"title":"Counted"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	// Unauth status stays at zero counts.
+	resp, err = client.Get(base + "/api/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var unauth map[string]any
+	_ = json.Unmarshal(raw, &unauth)
+	if n, _ := unauth["chat_sessions_count"].(float64); n != 0 {
+		t.Fatalf("unauth count = %v", unauth["chat_sessions_count"])
+	}
+
+	req, err = http.NewRequest(http.MethodGet, base+"/api/status", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var authed map[string]any
+	_ = json.Unmarshal(raw, &authed)
+	if n, _ := authed["chat_sessions_count"].(float64); n != 1 {
+		t.Fatalf("authed count = %v body=%s", authed["chat_sessions_count"], raw)
 	}
 }
 
