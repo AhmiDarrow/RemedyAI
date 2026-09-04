@@ -1,6 +1,6 @@
 {
   "source": "remedy.connect.noise",
-  "captured_at": "2026-09-03T21:42:07+00:00",
+  "captured_at": "2026-09-04T00:47:58+00:00",
   "protocol_name_utf8": "Noise_IK_25519_ChaChaPoly_BLAKE2s",
   "protocol_name_hex": "4e6f6973655f494b5f32353531395f436861436861506f6c795f424c414b453273",
   "product_prologue_utf8": "remedy-connect/1",
