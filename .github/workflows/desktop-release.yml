@@ -154,6 +154,8 @@ jobs:
           go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime.exe ./cmd/remedy-runtime
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
+          # Tauri externalBin requires the Rust target-triple suffix.
+          Copy-Item desktop/bin/remedy-runtime.exe desktop/bin/remedy-runtime-x86_64-pc-windows-msvc.exe
           Push-Location native/zig
           zig build -Doptimize=ReleaseSafe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -170,6 +172,7 @@ jobs:
           path: |
             desktop/bin/remedy-desktop*.exe
             desktop/bin/remedy-runtime.exe
+            desktop/bin/remedy-runtime-x86_64-pc-windows-msvc.exe
             desktop/bin/remedy_core.dll
           retention-days: 1
 
@@ -309,10 +312,12 @@ jobs:
           mkdir -p desktop/bin
           cd native/go
           go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime ./cmd/remedy-runtime
+          # Tauri externalBin requires the Rust target-triple suffix.
+          cp ../../desktop/bin/remedy-runtime ../../desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
           cd ../zig
           zig build -Doptimize=ReleaseSafe
           cp zig-out/lib/libremedy_core.so ../../desktop/bin/libremedy_core.so
-          chmod +x ../../desktop/bin/remedy-runtime
+          chmod +x ../../desktop/bin/remedy-runtime ../../desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
 
       - name: Build Linux sidecar
         run: python scripts/build_desktop.py --clean --ci
@@ -327,6 +332,7 @@ jobs:
             desktop/bin/remedy-desktop
             desktop/bin/remedy-desktop-x86_64-unknown-linux-gnu
             desktop/bin/remedy-runtime
+            desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
             desktop/bin/libremedy_core.so
           retention-days: 1
 
@@ -368,7 +374,7 @@ jobs:
           path: desktop/bin/
 
       - name: Mark sidecars executable
-        run: chmod +x desktop/bin/remedy-desktop desktop/bin/remedy-desktop-x86_64-unknown-linux-gnu desktop/bin/remedy-runtime
+        run: chmod +x desktop/bin/remedy-desktop desktop/bin/remedy-desktop-x86_64-unknown-linux-gnu desktop/bin/remedy-runtime desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
 
       - name: Setup Python
         uses: astral-sh/setup-uv@v5

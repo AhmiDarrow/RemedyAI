@@ -77,6 +77,24 @@ process or loads a library. A native failure is replayed through compatibility
 only for an operation that declares itself idempotent; sends, payments, deletes,
 and other potentially partial side effects are never silently repeated.
 
+### Phase 6 prep — packaged sidecar is `remedy-runtime`
+
+Tauri `externalBin` (Windows + Linux) is **`remedy-runtime`**. Packaged Desktop
+launches it on `127.0.0.1:7400` with `--serve --listen`. Python
+`remedy-desktop` still builds and ships as a **resource fallback** while route
+parity finishes. `tauri:dev` still prefers the live Python venv; set
+`REMEDY_RUNTIME_SIDECAR=1` to exercise the Go binary from a checkout.
+
+**Remaining blockers before retiring `remedy-desktop`:**
+
+| Gap | Why it blocks |
+|-----|----------------|
+| Full `/api/*` route parity | Go first-slice covers ping/status/sessions/stream/settings/connect/providers; Python still owns skills, memory harness, vision, voice, gateway, computer-use, and most of ~200 routes |
+| Python worker over RMDY | Prompt assembly, soul/skills text, voice/vision/telephony still need a supervised worker; not yet the Desktop launch path |
+| Zig in-process from Go | Host primitives still load via Python `host_binding` for many paths |
+| WebUI / SPA mount | Go server does not yet mirror Python `find_webui_dir` + static mount for Switch-to-Web-UI |
+| Release smoke | NSIS/deb/AppImage must prove :7400 health + session stream on both OS with the new `externalBin` triple names |
+
 
 ### Skills panel (0.10.30+; HITL + packs in 0.10.44)
 
@@ -454,7 +472,12 @@ outside the app’s control. After approval, install + relaunch are automatic.
 # 1. Add Rust to PATH for this session
 $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
 
-# 2. Build Python sidecar (output: desktop/bin/remedy-desktop.exe)
+# 2. Build Go runtime (externalBin) + Python fallback resource
+New-Item -ItemType Directory -Force desktop/bin | Out-Null
+Push-Location native/go
+go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime.exe ./cmd/remedy-runtime
+Pop-Location
+Copy-Item desktop/bin/remedy-runtime.exe desktop/bin/remedy-runtime-x86_64-pc-windows-msvc.exe
 python scripts/build_desktop.py --clean
 
 # 3. Build Tauri app (output: desktop/src-tauri/target/release/bundle/nsis/)
