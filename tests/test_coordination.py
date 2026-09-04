@@ -54,13 +54,24 @@ def test_path_normalization_conflict(home) -> None:
 
 
 def test_stale_beacon_releases_claim(home, monkeypatch) -> None:
-    # Margins stay well above lock-wait + atomic-write latency under a loaded
-    # matrix (WSL fsync / shared ``_thread_lock``). A 50 ms TTL was enough in
-    # isolation and flaked when the suite contended the process lock.
+    # Short TTLs exercise reclaim; wait on the wall clock past the published
+    # heartbeat rather than a fixed sleep — under WSL suite load ``time.sleep``
+    # can return early on signals and leave "dead" still live.
     monkeypatch.setattr(C, "BEACON_TTL", 0.25)
     monkeypatch.setattr(C, "CLAIM_TTL", 0.25)
     assert C.claim_path("dead", "/p/x.py", home=home) is None
-    time.sleep(0.5)  # beacon + claim go stale
+    live = C.active_beacons(home=home)
+    assert len(live) == 1 and live[0].session_id == "dead"
+    heartbeat = float(live[0].heartbeat_ts)
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        if time.time() - heartbeat > C.BEACON_TTL:
+            break
+        time.sleep(0.02)
+    else:
+        raise AssertionError("dead beacon never aged past BEACON_TTL")
+    # Small extra margin past the equality boundary.
+    time.sleep(0.05)
     # A crashed/idle session must not deadlock the file.
     assert C.claim_path("alive", "/p/x.py", home=home) is None
     assert [b.session_id for b in C.active_beacons(home=home)] == ["alive"]
