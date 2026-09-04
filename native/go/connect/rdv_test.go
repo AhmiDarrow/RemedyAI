@@ -525,3 +525,95 @@ func TestRDVBrokerDownIsGraceful(t *testing.T) {
 		t.Fatal("expected dial failure")
 	}
 }
+
+func TestRunRDVSupervisorDisabled(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := connect.RunRDVSupervisor(ctx, connect.RDVSupervisorOpts{
+		Enabled: false,
+		Handler: func(context.Context, net.Conn) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunRDVSupervisorDialsActiveSID(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REMEDY_HOME", home)
+	connect.ResetPairStateForTest()
+	t.Cleanup(connect.ResetPairStateForTest)
+
+	broker := startFakeBroker(t, 0)
+	qr, err := connect.StartPair(connect.PairStartOpts{
+		Loopback: true,
+		BindHost: "127.0.0.1",
+		BindPort: 7401,
+		Home:     home,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = qr
+	sid, err := connect.PendingPairRendezvous(home)
+	if err != nil || len(sid) != connect.SessionIDLen {
+		t.Fatalf("sid=%v err=%v", sid, err)
+	}
+
+	gotConn := make(chan net.Conn, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- connect.RunRDVSupervisor(ctx, connect.RDVSupervisorOpts{
+			Home:        home,
+			Enabled:     true,
+			Interval:    50 * time.Millisecond,
+			OpenTimeout: 3 * time.Second,
+			Endpoints:   []connect.RDVEndpoint{{Host: "127.0.0.1", Port: broker.port()}},
+			Handler: func(hctx context.Context, conn net.Conn) {
+				select {
+				case gotConn <- conn:
+				default:
+				}
+				<-hctx.Done()
+			},
+		})
+	}()
+
+	// Phone side meets the PC on the same fake broker.
+	time.Sleep(100 * time.Millisecond)
+	phone, phConn := makeRDVSession(t, broker.port(), sid, "phone")
+	defer phone.CloseWait()
+	defer phConn.Close()
+
+	var host net.Conn
+	select {
+	case host = <-gotConn:
+	case <-ctx.Done():
+		t.Fatal("supervisor never handed a conn")
+	}
+	defer host.Close()
+
+	payload := []byte("rdv-sup")
+	frame := make([]byte, 4+len(payload))
+	binary.BigEndian.PutUint32(frame[:4], uint32(len(payload)))
+	copy(frame[4:], payload)
+	if _, err := phConn.Write(frame); err != nil {
+		t.Fatal(err)
+	}
+	_ = host.SetDeadline(time.Now().Add(3 * time.Second))
+	got := make([]byte, len(frame))
+	if _, err := io.ReadFull(host, got); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, frame) {
+		t.Fatalf("got %q want %q", got, frame)
+	}
+	cancel()
+	select {
+	case <-errCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("supervisor did not exit")
+	}
+}

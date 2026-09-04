@@ -817,3 +817,169 @@ func (r *RendezvousSession) CloseWait() {
 	case <-time.After(2 * time.Second):
 	}
 }
+
+// RDVEndpoint is one public MQTT broker the PC/phone can meet on.
+type RDVEndpoint struct {
+	Host string
+	Port int
+}
+
+// RDVSupervisorOpts configures the public-broker rendezvous dialer.
+type RDVSupervisorOpts struct {
+	Home        string
+	Handler     RelayConnHandler
+	Endpoints   []RDVEndpoint // empty → PublicRDVEndpoints
+	Interval    time.Duration // refresh wanted SIDs; default 1s
+	OpenTimeout time.Duration // MQTT+subscribe budget per broker; default 8s
+	Enabled     bool          // false → immediate return (connect_rdv_enabled off)
+}
+
+// RunRDVSupervisor keeps one public-broker rendezvous waiter per active sid.
+// Matches Python _rdv_supervisor: try brokers in order, reconnect with backoff,
+// skip while paused, retire SIDs that leave the wanted set.
+func RunRDVSupervisor(ctx context.Context, opts RDVSupervisorOpts) error {
+	if !opts.Enabled {
+		return nil
+	}
+	if opts.Handler == nil {
+		return fmt.Errorf("%w: rdv supervisor needs a handler", ErrMQTT)
+	}
+	endpoints := opts.Endpoints
+	if len(endpoints) == 0 {
+		endpoints = make([]RDVEndpoint, len(PublicRDVEndpoints))
+		for i, e := range PublicRDVEndpoints {
+			endpoints[i] = RDVEndpoint{Host: e.Host, Port: e.Port}
+		}
+	}
+	interval := opts.Interval
+	if interval <= 0 {
+		interval = time.Second
+	}
+	openTimeout := opts.OpenTimeout
+	if openTimeout <= 0 {
+		openTimeout = 8 * time.Second
+	}
+
+	type liveDial struct {
+		cancel context.CancelFunc
+		done   <-chan struct{}
+	}
+	live := map[string]liveDial{}
+	defer func() {
+		for _, d := range live {
+			d.cancel()
+		}
+		for _, d := range live {
+			<-d.done
+		}
+	}()
+
+	tick := time.NewTicker(interval)
+	defer tick.Stop()
+	for {
+		wanted, err := RendezvousSIDs(opts.Home)
+		if err != nil {
+			return err
+		}
+		wantKeys := map[string][]byte{}
+		for _, sid := range wanted {
+			if len(sid) == SessionIDLen {
+				wantKeys[string(sid)] = sid
+			}
+		}
+		for key, d := range live {
+			if _, ok := wantKeys[key]; !ok {
+				d.cancel()
+				<-d.done
+				delete(live, key)
+			}
+		}
+		for key, sid := range wantKeys {
+			if _, ok := live[key]; ok {
+				continue
+			}
+			sidCopy := append([]byte(nil), sid...)
+			dctx, cancel := context.WithCancel(ctx)
+			done := make(chan struct{})
+			live[key] = liveDial{cancel: cancel, done: done}
+			eps := append([]RDVEndpoint(nil), endpoints...)
+			go func() {
+				defer close(done)
+				runRDVDialLoop(dctx, opts.Home, sidCopy, eps, openTimeout, opts.Handler)
+			}()
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick.C:
+		}
+	}
+}
+
+func runRDVDialLoop(ctx context.Context, home string, sid []byte, endpoints []RDVEndpoint, openTimeout time.Duration, handler RelayConnHandler) {
+	backoff := time.Second
+	for {
+		if IsPaused(home) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(500 * time.Millisecond):
+				continue
+			}
+		}
+		connected := false
+		for _, ep := range endpoints {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			mqtt, err := NewMqttSession(ep.Host, ep.Port, openTimeout)
+			if err != nil {
+				continue
+			}
+			octx, cancel := context.WithTimeout(ctx, openTimeout)
+			err = mqtt.Connect(octx)
+			cancel()
+			if err != nil {
+				mqtt.Close()
+				continue
+			}
+			session, err := NewRendezvousSession(mqtt, sid, "pc", openTimeout)
+			if err != nil {
+				mqtt.Close()
+				continue
+			}
+			// Open must use the long-lived dial ctx — a dial-timeout ctx would
+			// cancel the MQTT pumps the moment Connect returns.
+			conn, err := session.Open(ctx)
+			if err != nil {
+				session.Close()
+				continue
+			}
+			connected = true
+			backoff = time.Second
+			handler(ctx, conn)
+			session.CloseWait()
+			_ = conn.Close()
+			break
+		}
+		if !connected {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			backoff = backoff + backoff/2
+			if backoff > 15*time.Second {
+				backoff = 15 * time.Second
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+	}
+}
