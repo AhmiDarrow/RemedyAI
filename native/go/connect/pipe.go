@@ -303,36 +303,6 @@ func (s *Session) sendPlain(plaintext []byte, innerRekey bool) error {
 	return s.Crypto.RekeySend()
 }
 
-// HandleInnerControl demuxes PING / PONG / REKEY on one decrypted record.
-// HTTP request dispatch lands in a later slice; those frames are ignored here.
-func HandleInnerControl(sess *Session, plain []byte) error {
-	if sess == nil || sess.Crypto == nil {
-		return fmt.Errorf("%w: nil session", ErrSession)
-	}
-	if len(plain) == 0 || plain[0] != InnerVersion {
-		return nil
-	}
-	sess.Crypto.Inner = true
-	frame, err := DecodeInner(plain)
-	if err != nil {
-		return err
-	}
-	switch frame.Type {
-	case TypeRekey:
-		return sess.Crypto.RekeyRecv()
-	case TypePing:
-		pong, err := EncodeInner(TypePong, frame.ID, nil, true)
-		if err != nil {
-			return err
-		}
-		return sess.SendPlainInner(pong)
-	case TypePong:
-		return nil
-	default:
-		return nil
-	}
-}
-
 // ReadTransport reads one packed transport record from the socket.
 func (s *Session) ReadTransport() ([]byte, error) {
 	if s == nil || s.Conn == nil {
@@ -382,10 +352,18 @@ type SessionConfig struct {
 	LenientDecrypt   bool
 	ShouldStop       func() bool
 	OnDevice         func(Device)
-	// OnAuthed runs after auth. Nil → AcceptSession returns immediately.
+	// OnAuthed runs after auth. Nil → idle loop (inner mux) until idle/stop.
 	OnAuthed func(ctx context.Context, sess *Session) error
 	// Listener, when set, receives BindDevice after successful auth.
 	Listener *Listener
+	// SidecarPort is the loopback API port for inner HTTP proxy (default 7400).
+	SidecarPort int
+	// APIKey is injected as Bearer on the loopback hop only.
+	APIKey string
+	// Panes overrides phone pane flags (nil → defaults / Config).
+	Panes map[string]bool
+	// Config may carry connect_panes when Panes is nil.
+	Config map[string]any
 }
 
 // AcceptSession runs pause check → Noise handshake → allowlist auth.
@@ -469,6 +447,7 @@ func runIdleLoop(ctx context.Context, sess *Session, cfg SessionConfig) error {
 	if idle <= 0 {
 		idle = IdleTimeout
 	}
+	mux := newInnerMuxState(cfg)
 	for {
 		if cfg.ShouldStop != nil && cfg.ShouldStop() {
 			return nil
@@ -494,7 +473,7 @@ func runIdleLoop(ctx context.Context, sess *Session, cfg SessionConfig) error {
 			}
 			return err
 		}
-		if err := HandleInnerControl(sess, plain); err != nil {
+		if err := HandleInner(sess, plain, mux); err != nil {
 			return err
 		}
 	}
