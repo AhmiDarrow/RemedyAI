@@ -290,12 +290,8 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "connect_panes": _connect_panes_public(raw.get("connect_panes")),
         "connect_relay_url": str(raw.get("connect_relay_url") or "").strip(),
     }
-    try:
-        from remedy.connect.store import device_public_meta
-
-        out["connect_devices"] = device_public_meta()
-    except Exception:
-        out["connect_devices"] = []
+    # Live device list is owned by remedy-runtime (Go Connect store).
+    out["connect_devices"] = []
     # Live Sleev install/gateway so agent can configure + report status.
     try:
         from remedy.core.sleev import sleev_status
@@ -690,9 +686,7 @@ async def _apply_settings_update_inner(
     if "connect_relay_url" in patch and patch["connect_relay_url"] is not None:
         relay = str(patch["connect_relay_url"] or "").strip()
         if relay:
-            from remedy.connect.rendezvous import parse_relay_endpoint
-
-            host_r, port_r = parse_relay_endpoint(relay)
+            host_r, port_r = _parse_connect_relay_endpoint(relay)
             if ":" in host_r:
                 patch["connect_relay_url"] = f"[{host_r}]:{port_r}"
             else:
@@ -707,31 +701,10 @@ async def _apply_settings_update_inner(
             if "connect_bind_host" in patch
             else (cfg.get("connect_bind_host") or "")
         ).strip()
-        if not bind_host or bind_host in ("0.0.0.0", "::", "[::]", "*"):
+        if not bind_host or _is_connect_wildcard_bind(bind_host):
             raise ValueError("connect bind must be a chosen IPv4, not wildcard")
-        try:
-            from remedy.connect.bind import (
-                assert_chosen_bind,
-                is_chosen_ipv4,
-                is_wildcard_bind,
-                reachable_lan_host,
-            )
-
-            if is_wildcard_bind(bind_host) or not is_chosen_ipv4(bind_host):
-                raise ValueError("connect bind must be a chosen IPv4, not wildcard")
-            assert_chosen_bind(bind_host)
-            # Heal a stale/loopback/virtual-NAT bind (WSL/Docker/Hyper-V) to the
-            # address a phone on the LAN can actually reach. An explicit
-            # non-virtual pick is kept as-is.
-            healed = reachable_lan_host(bind_host)
-            if healed and healed != bind_host:
-                patch["connect_bind_host"] = healed
-        except ImportError:
-            pass
-        except ValueError:
-            raise
-        except Exception as exc:
-            raise ValueError(str(exc) or "invalid connect bind") from exc
+        # LAN heal / AssertChosenBind live in Go Connect; Python only refuses
+        # wildcards so a stale Python settings path cannot enable 0.0.0.0.
 
     if "setup_completed" in patch and patch["setup_completed"] is not None:
         patch["setup_completed"] = _as_bool(patch["setup_completed"])
@@ -961,13 +934,7 @@ async def _apply_settings_update_inner(
         changes.append("messengers")
 
     snap = public_settings_snapshot(cfg)
-    if any(k.startswith("connect_") for k in patch):
-        try:
-            from remedy.connect.lifecycle import on_connect_settings_changed
-
-            on_connect_settings_changed(cfg)
-        except Exception:
-            logger.debug("connect settings apply", exc_info=True)
+    # Connect Gateway hot-apply is owned by remedy-runtime (Go).
     out: dict[str, Any] = {
         "status": "saved",
         "changes": changes,
@@ -1036,21 +1003,90 @@ def _normalize_trust_profile_value(raw: object | None) -> str:
     return normalize_trust_profile(raw).value
 
 
-def _connect_panes_public(raw: object | None) -> dict[str, bool]:
-    try:
-        from remedy.connect.panes import normalize_panes
+_CONNECT_PANE_KEYS: tuple[str, ...] = (
+    "live_ui",
+    "chat",
+    "approvals",
+    "sessions",
+    "rails",
+    "computer_preview",
+    "settings_write",
+)
+_CONNECT_DEFAULT_PANES: dict[str, bool] = {
+    "live_ui": True,
+    "chat": True,
+    "approvals": True,
+    "sessions": True,
+    "rails": True,
+    "computer_preview": False,
+    "settings_write": False,
+}
 
-        return normalize_panes(raw)
-    except Exception:
-        return {
-            "live_ui": True,
-            "chat": True,
-            "approvals": True,
-            "sessions": True,
-            "rails": True,
-            "computer_preview": False,
-            "settings_write": False,
-        }
+
+def _connect_panes_public(raw: object | None) -> dict[str, bool]:
+    """Normalize connect_panes for the shared config file (Go owns enforcement)."""
+    out = dict(_CONNECT_DEFAULT_PANES)
+    if isinstance(raw, dict):
+        for key in _CONNECT_PANE_KEYS:
+            if key in raw and raw[key] is not None:
+                out[key] = _as_bool(raw[key])
+    out["approvals"] = True
+    return out
+
+
+def _is_connect_wildcard_bind(host: str) -> bool:
+    text = (host or "").strip()
+    if not text:
+        return False
+    wild = {"0.0.0.0", "::", "[::]", "*", "0:0:0:0:0:0:0:0"}
+    if text in wild:
+        return True
+    inner = text[1:-1] if text.startswith("[") and text.endswith("]") else text
+    return inner in wild
+
+
+def _parse_connect_relay_endpoint(url: str) -> tuple[str, int]:
+    """Minimal host:port / tcp://host:port parse for config writes. Fail closed."""
+    from urllib.parse import urlparse
+
+    raw = (url or "").strip()
+    if not raw:
+        raise ValueError("relay URL is empty")
+    low = raw.lower()
+    if "local_api_token" in low or "bearer " in low or "authorization=" in low:
+        raise ValueError("relay URL must not carry secrets")
+    if "://" in raw:
+        parsed = urlparse(raw)
+        if parsed.scheme in ("http", "https"):
+            raise ValueError("relay is a TCP splice, not HTTP")
+        if parsed.scheme and parsed.scheme not in ("tcp", "relay"):
+            raise ValueError(f"unsupported relay scheme {parsed.scheme!r}")
+        if parsed.username or parsed.password:
+            raise ValueError("relay URL must not contain credentials")
+        if parsed.query or parsed.fragment:
+            raise ValueError("relay URL must not contain a query")
+        host = (parsed.hostname or "").strip()
+        port = int(parsed.port or 7402)
+    else:
+        text = raw.strip()
+        if text.startswith("["):
+            end = text.find("]")
+            if end < 0:
+                raise ValueError("relay IPv6 address is missing ']'")
+            host = text[1:end]
+            rest = text[end + 1 :]
+            port = int(rest[1:]) if rest.startswith(":") else 7402
+        elif text.count(":") == 1:
+            host, _, port_s = text.partition(":")
+            port = int(port_s or 7402)
+        else:
+            host, port = text, 7402
+    host = host.strip("[]")
+    if not host or _is_connect_wildcard_bind(host):
+        raise ValueError("relay must not be a wildcard bind")
+    if port <= 0 or port > 65535:
+        raise ValueError("relay port out of range")
+    return host, port
 
 
 def _as_bool(v: object) -> bool:

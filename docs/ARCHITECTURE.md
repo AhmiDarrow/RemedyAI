@@ -87,12 +87,13 @@ and `src/remedy/tools/`.
 
 ## Grove Connect
 
-Phone remote for **this PC** (`src/remedy/connect/`). **Not** the messenger
-gateway (`src/remedy/gateway/`). Default **off**. When on, it is a **second
-listener** on a chosen IPv4 (never `0.0.0.0`); `:7400` stays loopback.
-Owner-run relay (`remedy connect-relay`) forwards framed blobs without
-decrypting. Same-LAN mDNS (`_remedy-connect._udp`) advertises a host-pub hash
-only. See `docs/manual/29-remedy-connect.md`.
+Phone remote for **this PC** (`native/go/connect/`, served by
+`remedy-runtime`). **Not** the messenger gateway (`src/remedy/gateway/` /
+`native/go/gateway/`). Default **off**. When on, it is a **second listener**
+on a chosen IPv4 (never `0.0.0.0`); `:7400` stays loopback. Owner-run relay
+(`remedy connect-relay` → Go `cmd/connect-relay`) forwards framed blobs
+without decrypting. Same-LAN mDNS (`_remedy-connect._udp`) advertises a
+host-pub hash only. See `docs/manual/29-remedy-connect.md`.
 
 ## Versioning
 
