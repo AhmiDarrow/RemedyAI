@@ -44,21 +44,21 @@ spawn `remedy-runtime` directly. Quit any installed release first (shared port
 
 ### Voice runtime (0.30+)
 
-The frozen sidecar has no `pip`, and Chatterbox pulls torch, so voice works
-the same way as vision: nothing heavy in the installer, a pinned runtime in
-the owner's home.
+Packaged Desktop has no bundled Python/`pip`, and Chatterbox pulls torch, so
+voice works the same way as vision: nothing heavy in the installer, a pinned
+runtime in the owner's home.
 
 | Item | Policy |
 |------|--------|
-| Installer | **Does not** include kokoro-onnx / faster-whisper / onnxruntime / chatterbox / torch (`scripts/build_desktop.py` excludes them explicitly) |
+| Installer | **Does not** include kokoro-onnx / faster-whisper / onnxruntime / chatterbox / torch (packaged Desktop is Go `remedy-runtime` + Zig `remedy_core` only) |
 | Runtime | `~/.remedy/voice/runtime/python/` — pinned python-build-standalone CPython 3.12 (`remedy/voice/runtime.py`, sha256-verified, ~70 MB) |
 | Packs | `pip install` into that runtime: **voice** (`kokoro-onnx`, `faster-whisper`) on first Download; **hq** (`chatterbox-tts`) when HQ is turned on |
 | Inference | `remedy/voice/worker.py` runs inside the runtime (JSON lines over stdin/stdout); `remedy/voice/bridge.py` is the sidecar client. Models (`tts/`, `stt/`, `models/smart-turn/`, `chatterbox/`) stay where they were. |
 | Dev | In-process as before. `REMEDY_VOICE_MANAGED=1` forces the Desktop path from a checkout; `REMEDY_VOICE_PYTHON=…` points it at any interpreter (tests use this). |
 | Marker | `runtime/runtime.json` — `{ok, python, packs: {voice, hq}}`; `voice_status` reads it instead of importing engines |
 
-The worker imports the bundled `remedy` *source* (`sys._MEIPASS`, from
-`--add-data src/remedy`), so the runtime never needs `remedy-ai` installed
+The managed voice worker imports `remedy` source from the install layout (or
+the checkout in dev), so the voice runtime never needs `remedy-ai` installed
 and versions cannot drift. Only stdlib-backed modules may be imported on
 the worker path (`remedy.voice.*`, `remedy.core.atomic_json`,
 `remedy.telephony.narrowband`).
@@ -162,15 +162,16 @@ the script so the new ICO is embedded in the EXE.
 ### Windows Defender — known signals and how Remedy addresses them
 
 Remedy is **not** malware. Defender’s **ML** signatures sometimes mislabel
-unsigned or newly published desktop apps (especially PyInstaller sidecars).
-We treat every known trigger as a product defect and mitigate it in code.
+unsigned or newly published desktop apps. We treat every known trigger as a
+product defect and mitigate it in code. Packaged Desktop no longer ships a
+PyInstaller `remedy-desktop` sidecar — launch is Go `remedy-runtime`.
 
 | Defender name | What triggered it | Mitigation in current builds |
 |---------------|-------------------|------------------------------|
 | `Behavior:Win32/Persistence.A!ml` | Writing **HKCU\…\Run** for “Start with Windows” (0.10.19–0.10.21) | **Never write Run.** Autostart = **Startup folder** `.lnk` only. Launch/install/uninstall **delete** legacy values. |
 | Hidden PowerShell + Run key (related) | Launch/Settings polled and scrubbed Run via `powershell -ExecutionPolicy Bypass` | Scrub uses **`winreg` in Rust** (no PowerShell). NSIS uses **`DeleteRegValue`**. PowerShell only for optional `.lnk` create when the user toggles Start with Windows. |
-| `Behavior:Win32/Execution.A!ml` | Fresh unsigned **`app.exe`** in `%LOCALAPPDATA%\Remedy Desktop` then spawning the Python sidecar / shell (classic dropper pattern to Defender ML) | **0.23.2+** ships the UI as **`Remedy Desktop.exe`** (`tauri.conf.json` `mainBinaryName`). Keep **Allow on this device** for 0.23.1 if it already fired. Authenticode still the long-term reputation fix. |
-| `Trojan:Win32/Wacatac.B!ml` / `Bearfoos.A!ml` | Unsigned **PyInstaller onefile** / freshly written installer EXEs with weak PE identity; also common on **first in-app update** when Defender scans a new `Remedy.Desktop_*_setup.exe` in `%TEMP%` | Sidecar build stamps **version resource** + **icon** (`scripts/build_desktop.py`). Bundle metadata: publisher, copyright, descriptions in `tauri.conf.json` / Cargo.toml. **No UPX.** In-app updates remain **minisign**-verified before install. Full fix for SmartScreen/Defender reputation is **Authenticode** (see [WINDOWS_SIGNING.md](./WINDOWS_SIGNING.md)). After each PE-changing release, maintainers should **submit false-positive** reports to Microsoft WDSI (installer + sidecar). |
+| `Behavior:Win32/Execution.A!ml` | Fresh unsigned **`app.exe`** in `%LOCALAPPDATA%\Remedy Desktop` then spawning the local API / shell (classic dropper pattern to Defender ML) | **0.23.2+** ships the UI as **`Remedy Desktop.exe`** (`tauri.conf.json` `mainBinaryName`). Keep **Allow on this device** for 0.23.1 if it already fired. Authenticode still the long-term reputation fix. |
+| `Trojan:Win32/Wacatac.B!ml` / `Bearfoos.A!ml` | Historically unsigned **PyInstaller onefile** sidecars / freshly written installer EXEs with weak PE identity; also common on **first in-app update** when Defender scans a new `Remedy.Desktop_*_setup.exe` in `%TEMP%` | **No PyInstaller sidecar.** Bundle metadata: publisher, copyright, descriptions in `tauri.conf.json` / Cargo.toml. In-app updates remain **minisign**-verified before install. Full fix for SmartScreen/Defender reputation is **Authenticode** (see [WINDOWS_SIGNING.md](./WINDOWS_SIGNING.md)). After each PE-changing release, maintainers should **submit false-positive** reports to Microsoft WDSI (installer + `remedy-runtime.exe`). |
 | SmartScreen “Unknown publisher” | No **Authenticode** on first browser download | Expected until OV/EV code signing. In-app updates still **minisign**-verified. See [WINDOWS_SIGNING.md](./WINDOWS_SIGNING.md). |
 
 **Autostart policy (Persistence):**
@@ -186,7 +187,7 @@ We treat every known trigger as a product defect and mitigate it in code.
 4. Confirm no leftover value under  
    `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` named `RemedyDesktop` / `Remedy Desktop` / `remedy-desktop`.
 
-**Reporting false positives (maintainers):** submit the installer + `remedy-desktop.exe` to Microsoft’s [//www.microsoft.com/wdsi/filesubmission](https://www.microsoft.com/en-us/wdsi/filesubmission) portal after each release that changes PE layout.
+**Reporting false positives (maintainers):** submit the installer + `remedy-runtime.exe` to Microsoft’s [//www.microsoft.com/wdsi/filesubmission](https://www.microsoft.com/en-us/wdsi/filesubmission) portal after each release that changes PE layout.
 
 ### Taskbar still shows an old (medical) icon?
 
@@ -480,16 +481,11 @@ outside the app’s control. After approval, install + relaunch are automatic.
 # 1. Add Rust to PATH for this session
 $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
 
-# 2. Build Go runtime (externalBin) + Zig core (resource)
-New-Item -ItemType Directory -Force desktop/bin | Out-Null
-Push-Location native/go
-go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime.exe ./cmd/remedy-runtime
-Pop-Location
-Copy-Item desktop/bin/remedy-runtime.exe desktop/bin/remedy-runtime-x86_64-pc-windows-msvc.exe
-Push-Location native/zig
-zig build -Doptimize=ReleaseSafe
-Pop-Location
-Copy-Item native/zig/zig-out/bin/remedy_core.dll desktop/bin/remedy_core.dll
+# 2. Stage Go runtime (externalBin) + Zig core (resource) into desktop/bin/
+python scripts/build_desktop.py --clean
+# Equivalent manual steps (what the script runs):
+#   go build … -o desktop/bin/remedy-runtime.exe ./cmd/remedy-runtime
+#   copy triple-suffixed externalBin name; zig build; copy remedy_core.dll
 
 # 3. Build Tauri app (output: desktop/src-tauri/target/release/bundle/nsis/)
 cd desktop

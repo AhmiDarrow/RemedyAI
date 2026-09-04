@@ -1,7 +1,8 @@
 # Remedy Desktop
 
-Native Windows desktop shell for Remedy AI: **Tauri 2 + React 19 + Vite**, with the Python
-`remedy serve` process bundled as a sidecar.
+Native Windows desktop shell for Remedy AI: **Tauri 2 + React 19 + Vite**, with
+Go `remedy-runtime` as the local API (`externalBin`) and Zig `remedy_core` as a
+bundled resource.
 
 **Product feel:** easy · sleek · beautiful · familiar · powerful.  
 Simple UI by default; Advanced on the status bar and Settings for full control. Prefer dialogs for multi-step flows over dense settings walls.
@@ -42,14 +43,14 @@ npm install
 npm run dev
 # http://localhost:5173
 
-# Or full Tauri shell (spawns sidecar when packaged):
-npm run tauri dev
+# Or full Tauri shell (packaged builds spawn remedy-runtime):
+npm run tauri:dev
 ```
 
 ### Production build (local)
 
 ```powershell
-# From repo root — build PyInstaller sidecar into desktop/bin/
+# From repo root — stage Go remedy-runtime + Zig remedy_core into desktop/bin/
 python scripts/build_desktop.py --clean
 
 cd desktop
@@ -82,6 +83,6 @@ See root [README.md](../README.md#desktop-release-maintainers) and [docs/DESKTOP
 desktop/
 ├── src/                 # React UI (Composer, sessions, UpdateScreen, …)
 ├── src-tauri/           # Tauri shell, DnD, updater commands
-├── bin/                 # Built sidecar binaries (gitignored)
+├── bin/                 # Staged remedy-runtime + remedy_core (gitignored)
 └── package.json
 ```
