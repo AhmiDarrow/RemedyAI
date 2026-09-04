@@ -172,7 +172,7 @@ def test_logical_cpu_count_uses_compatibility_by_default(monkeypatch: pytest.Mon
 # --- remedy_core loader (ABI 2) ------------------------------------------
 
 
-def test_the_python_side_requires_abi_four_from_the_zig_core():
+def test_the_python_side_requires_abi_five_from_the_zig_core():
     assert native_runtime._ABI_VERSION == 5
     # The Go probe contract is a separate version and did not move.
     assert native_runtime._TOOL_ABI_VERSION == 1
