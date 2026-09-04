@@ -26,3 +26,6 @@ uv run pytest tests/test_connect_noise_fixtures.py -q
 ```
 
 Do not hand-edit hex fields. Re-run capture from Python, then re-verify.
+
+| `record_framing.json` | `remedy_record_framing` | u32be|nonce12|ct pack + encrypt_record |
+

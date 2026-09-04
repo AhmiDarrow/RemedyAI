@@ -11,6 +11,7 @@
     "android_debug_hash",
     "snow_ik_chacha_blake2s",
     "remedy_pair_secret",
-    "remedy_post_split_aead"
+    "remedy_post_split_aead",
+    "remedy_record_framing"
   ]
 }

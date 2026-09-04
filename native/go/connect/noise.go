@@ -540,6 +540,10 @@ func encodeNonce(n uint64) []byte {
 	return out
 }
 
+// EncodeNonce returns the 12-byte IETF ChaCha20-Poly1305 nonce for counter n
+// (4 zero bytes || uint64le). Matches Python remedy.connect.noise.encode_nonce.
+func EncodeNonce(n uint64) []byte { return encodeNonce(n) }
+
 func dh(local KeyPair, remotePublic []byte) ([]byte, error) {
 	if len(remotePublic) != DHLen {
 		return nil, fmt.Errorf("%w: invalid public key", ErrNoise)
