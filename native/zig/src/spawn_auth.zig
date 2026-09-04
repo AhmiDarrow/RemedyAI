@@ -189,6 +189,21 @@ fn authorizeLocked(
     );
 }
 
+/// Authorize argv for a HostSession open (same gates as authorized spawn).
+pub fn authorize(
+    argv: []const []const u8,
+    cwd: []const u8,
+    token: []const u8,
+    subject: []const u8,
+    scope: []const u8,
+    owner_confirmed: bool,
+    now_ms: u64,
+) !void {
+    lock();
+    defer unlock();
+    try authorizeLocked(argv, cwd, token, subject, scope, owner_confirmed, now_ms);
+}
+
 fn subjectOrDefault(ptr: ?[*]const u8, len: usize) []const u8 {
     const value = slice(ptr, len);
     return if (value.len == 0) default_subject else value;

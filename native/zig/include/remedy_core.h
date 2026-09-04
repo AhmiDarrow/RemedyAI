@@ -14,10 +14,11 @@ extern "C" {
  * Automation / Linux AT-SPI, and the ABI 2 host surface (DPI, monitors,
  * capture, PNG, input, windows, clipboard and hidden process control).
  * Additive on the same ABI 5: authorized spawn (policy + HMAC capability
- * tokens), signing-key set/clear, argv hash, token issue, and write-jail /
- * workdir roots (set/clear/check). Production Python spawn paths use the
- * authorized exports; the unsigned process_spawn_hidden / conpty_spawn
- * symbols remain for low-level tests.
+ * tokens), signing-key set/clear, argv hash, token issue, write-jail /
+ * workdir roots (set/clear/check), and HostSession orchestration (open/run/
+ * cwd/close + wrap/split protocol). Production Python spawn/session paths
+ * use the authorized exports; the unsigned process_spawn_hidden /
+ * conpty_spawn / host_session_open symbols remain for low-level tests.
  * Every host/UIA/ConPTY/policy function returns a remedy_core_status. On a
  * non-Windows build each host/UIA/ConPTY spawn function returns
  * REMEDY_CORE_UNSUPPORTED and writes nothing; host_op_prepare,
@@ -468,6 +469,58 @@ int32_t remedy_core_write_jail_check_path(
 int32_t remedy_core_write_jail_check_spawn(
     const uint8_t *argv_json, size_t argv_len,
     const uint8_t *cwd, size_t cwd_len
+);
+
+/* ---- ABI 5 additive: HostSession orchestration --------------------------- */
+
+/* Open a persistent shell session. json_in:
+ * {"host":"cmd"|"pwsh"|"posix", "cwd"?: "...", "env"?: {...}, "use_conpty"?: bool}.
+ * Windows only (UNSUPPORTED elsewhere). Unsigned — tests / low-level use. */
+int32_t remedy_core_host_session_open(
+    const uint8_t *json_in, size_t json_in_len,
+    uint64_t *out_handle
+);
+
+/* Authorize (policy + HMAC token + write-jail) then open. Same auth contract
+ * as process/conpty spawn_authorized; token is consumed. */
+int32_t remedy_core_host_session_open_authorized(
+    const uint8_t *json_in, size_t json_in_len,
+    const uint8_t *token, size_t token_len,
+    const uint8_t *subject, size_t subject_len,
+    const uint8_t *scope, size_t scope_len,
+    uint8_t owner_confirmed,
+    uint64_t now_ms,
+    uint64_t *out_handle
+);
+
+/* Run one command in the session. On success *out_json is
+ * {exit_code,stdout,stderr,cwd,timed_out,interactive,host,used_conpty}. */
+int32_t remedy_core_host_session_run(
+    uint64_t handle,
+    const uint8_t *command, size_t command_len,
+    uint32_t timeout_ms,
+    uint8_t **out_json, size_t *out_len
+);
+
+/* Probe the session cwd (sentinel-wrapped). Empty string when unknown. */
+int32_t remedy_core_host_session_cwd(
+    uint64_t handle,
+    uint8_t **out_utf8, size_t *out_len
+);
+
+/* Close pipes / ConPTY / kill tree and free the session. */
+int32_t remedy_core_host_session_close(uint64_t handle);
+
+/* Pure protocol: {"host","command","sentinel"} → {"wrapped"}. Portable. */
+int32_t remedy_core_host_session_wrap(
+    const uint8_t *json_in, size_t json_in_len,
+    uint8_t **out_json, size_t *out_len
+);
+
+/* Pure protocol: {"text","sentinel","command"?,"conpty"?} → {"exit_code","body"}. */
+int32_t remedy_core_host_session_split(
+    const uint8_t *json_in, size_t json_in_len,
+    uint8_t **out_json, size_t *out_len
 );
 
 #ifdef __cplusplus
