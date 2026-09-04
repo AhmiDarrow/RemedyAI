@@ -297,3 +297,49 @@ func sanitizeLabel(s string) string {
 	}
 	return string(out)
 }
+
+// Mouse button constants matching remedy_core_mouse_button.
+const (
+	MouseLeft   uint32 = 0
+	MouseRight  uint32 = 1
+	MouseMiddle uint32 = 2
+)
+
+// MouseClick moves to (x, y) then presses/releases via Zig SendInput / X11.
+// Coordinates are virtual-screen physical pixels. Fail-closed without remedy_core.
+func MouseClick(x, y int32, button, clicks uint32) error {
+	lib, err := Open()
+	if err != nil {
+		return err
+	}
+	if clicks == 0 {
+		clicks = 1
+	}
+	status, err := lib.call(
+		"remedy_core_mouse_click",
+		uintptr(x), uintptr(y), uintptr(button), uintptr(clicks),
+	)
+	if err != nil {
+		return err
+	}
+	return lib.check("mouse_click", int32(status))
+}
+
+// TypeText types UTF-8 text via Zig KEYEVENTF_UNICODE / XTest.
+// Fail-closed without remedy_core.
+func TypeText(text string, perCharDelayMS uint32) error {
+	lib, err := Open()
+	if err != nil {
+		return err
+	}
+	raw := []byte(text)
+	status, err := lib.call(
+		"remedy_core_type_text",
+		bytesPtr(raw), uintptr(len(raw)), uintptr(perCharDelayMS),
+	)
+	if err != nil {
+		return err
+	}
+	return lib.check("type_text", int32(status))
+}
+
