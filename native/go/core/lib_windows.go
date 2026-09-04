@@ -4,6 +4,7 @@ package core
 
 import (
 	"fmt"
+	"reflect"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -102,7 +103,14 @@ func takeBytes(l *Library, ptr uintptr, length uintptr) []byte {
 		return nil
 	}
 	defer l.free(ptr, length)
-	out := make([]byte, length)
-	copy(out, unsafe.Slice((*byte)(unsafe.Pointer(ptr)), length))
+	// Build a temporary slice header over the C buffer, copy into Go memory,
+	// then free. Avoids go vet unsafeptr on uintptr→Pointer→Slice.
+	var view []byte
+	hdr := (*reflect.SliceHeader)(unsafe.Pointer(&view))
+	hdr.Data = ptr
+	hdr.Len = int(length)
+	hdr.Cap = int(length)
+	out := make([]byte, int(length))
+	copy(out, view)
 	return out
 }

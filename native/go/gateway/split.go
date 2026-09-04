@@ -23,7 +23,6 @@ func MaxReplyChars(channel ChannelKind) int {
 // SplitMessage breaks a long reply to fit platform limits.
 func SplitMessage(text string, channel ChannelKind) []string {
 	limit := MaxReplyChars(channel)
-	text = text
 	if text == "" {
 		return nil
 	}
