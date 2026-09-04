@@ -1121,6 +1121,8 @@ DEFAULT_SPAWN_SCOPE = "workspace:local"
 _TOKEN_LIFETIME_MS = 60_000
 
 _signing_key_ready = False
+_HOST_SIGNING_FILENAME = "host_signing_key"
+_HOST_SIGNING_POSIX = "host_signing_key.posix"
 
 
 def security_set_signing_key(key: bytes | bytearray | memoryview) -> None:
@@ -1146,17 +1148,125 @@ def security_clear_signing_key() -> None:
     _signing_key_ready = False
 
 
+def _remedy_auth_dir(home: str | os.PathLike[str] | None = None) -> "Path":
+    from pathlib import Path
+
+    if home is not None and str(home).strip():
+        root = Path(home)
+    else:
+        env = (os.environ.get("REMEDY_HOME") or "").strip()
+        root = Path(env) if env else Path.home() / ".remedy"
+    return root / "auth"
+
+
+def _encode_host_signing_key(raw: bytes) -> bytes:
+    import base64
+    import json
+
+    key = bytes(raw)[:32]
+    if sys.platform == "win32":
+        from remedy.interfaces.secret_store import _dpapi_available, _dpapi_protect
+
+        if not _dpapi_available():
+            raise RuntimeError("DPAPI required to persist host signing key on Windows")
+        sealed = _dpapi_protect(key)
+        envelope = {
+            "v": 2,
+            "kind": "host_signing_key",
+            "dpapi": base64.b64encode(sealed).decode("ascii"),
+        }
+        return (json.dumps(envelope, indent=2) + "\n").encode("utf-8")
+    return (base64.b64encode(key).decode("ascii") + "\n").encode("utf-8")
+
+
+def _decode_host_signing_key(data: bytes) -> bytes | None:
+    import base64
+    import json
+
+    text = data.decode("utf-8", errors="replace").strip()
+    if not text:
+        return None
+    if text.startswith("{"):
+        try:
+            outer = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(outer, dict):
+            return None
+        kind = outer.get("kind")
+        if kind not in (None, "host_signing_key"):
+            return None
+        b64 = outer.get("dpapi") or ""
+        try:
+            from remedy.interfaces.secret_store import _dpapi_unprotect
+
+            plain = _dpapi_unprotect(base64.b64decode(str(b64)))
+            return plain[:32] if len(plain) >= 32 else None
+        except Exception:
+            return None
+    try:
+        plain = base64.b64decode(text)
+    except Exception:
+        return None
+    return plain[:32] if len(plain) >= 32 else None
+
+
+def load_or_create_host_signing_key(
+    home: str | os.PathLike[str] | None = None,
+) -> bytes:
+    """Load the durable Zig HMAC key from the secret store, or mint + persist one.
+
+    Never logs key material. Env ``REMEDY_SPAWN_SIGNING_KEY`` (hex or raw) wins
+    for tests/operators and is not written back unless persistence is desired.
+    """
+    from remedy.core.atomic_json import write_bytes_atomic
+
+    auth = _remedy_auth_dir(home)
+    primary = auth / _HOST_SIGNING_FILENAME
+    posix = auth / _HOST_SIGNING_POSIX
+    for path in (primary, posix):
+        try:
+            if path.is_file():
+                key = _decode_host_signing_key(path.read_bytes())
+                if key is not None:
+                    return key
+        except OSError:
+            continue
+    import base64
+
+    key = os.urandom(32)
+    try:
+        auth.mkdir(parents=True, exist_ok=True)
+        write_bytes_atomic(primary, _encode_host_signing_key(key), mode=0o600)
+        from remedy.interfaces.secret_store import _harden_path
+
+        _harden_path(primary, is_dir=False)
+        # Posix sidecar (base64) so WSL can read a Windows-minted key.
+        write_bytes_atomic(
+            posix,
+            (base64.b64encode(key).decode("ascii") + "\n").encode("utf-8"),
+            mode=0o600,
+        )
+        _harden_path(posix, is_dir=False)
+    except OSError as exc:
+        raise RuntimeError(f"unable to persist host signing key under {auth}") from exc
+    return key
+
+
 def ensure_spawn_signing_key() -> None:
-    """Ensure a runtime signing key is installed (ephemeral if unset)."""
+    """Ensure the Zig HMAC signing key is installed from the secret store."""
     global _signing_key_ready
     if _signing_key_ready:
         return
-    # Prefer an explicit test/operator key; otherwise mint a process-local one.
     env_key = os.environ.get("REMEDY_SPAWN_SIGNING_KEY", "")
     if env_key:
-        raw = bytes.fromhex(env_key) if all(c in "0123456789abcdefABCDEF" for c in env_key) and len(env_key) >= 64 else env_key.encode("utf-8")
+        raw = (
+            bytes.fromhex(env_key)
+            if all(c in "0123456789abcdefABCDEF" for c in env_key) and len(env_key) >= 64
+            else env_key.encode("utf-8")
+        )
     else:
-        raw = os.urandom(32)
+        raw = load_or_create_host_signing_key()
     security_set_signing_key(raw)
 
 
