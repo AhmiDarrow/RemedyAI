@@ -100,6 +100,13 @@ class MatrixChannel(HttpSessionMixin, ChannelAdapter):
                 logger.exception("Matrix whoami failed")
         self._since = _load_matrix_since(self._home_dir)
         logger.info("Matrix channel active (room=%s)", self.room_id)
+        from remedy.gateway.poll_lock import python_may_poll_messengers
+
+        if not python_may_poll_messengers():
+            logger.info(
+                "Matrix: outbound-ready (Go remedy-runtime owns inbound sync)"
+            )
+            return
         started = await self._try_start_sync()
         if not started:
             logger.error(

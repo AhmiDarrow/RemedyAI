@@ -89,7 +89,7 @@ parity finishes. `tauri:dev` still prefers the live Python venv; set
 
 | Gap | Why it blocks |
 |-----|----------------|
-| Full `/api/*` route parity | Go first-slice covers ping/status/sessions/stream/settings/connect/providers; Python still owns skills, memory harness, vision, voice, gateway, computer-use, and most of ~200 routes |
+| Full `/api/*` route parity | Go first-slice covers ping/status/sessions/stream/settings/connect/providers/messengers; Python still owns skills, memory harness, vision, voice, computer-use, and most of ~200 routes. Messenger *inbound* poll locks are Go-owned (`native/go/gateway`); Python adapters stay outbound-only unless `REMEDY_PYTHON_MESSENGER_POLL=1` |
 | Python worker over RMDY | Prompt assembly, soul/skills text, voice/vision/telephony still need a supervised worker; not yet the Desktop launch path |
 | Zig in-process from Go | Host primitives still load via Python `host_binding` for many paths |
 | WebUI / SPA mount | Go server does not yet mirror Python `find_webui_dir` + static mount for Switch-to-Web-UI |

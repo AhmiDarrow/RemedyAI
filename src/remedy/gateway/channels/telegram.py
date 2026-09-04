@@ -99,6 +99,13 @@ class TelegramChannel(ChannelAdapter):
             len(self.chat_ids),
             self.allow_all,
         )
+        from remedy.gateway.poll_lock import python_may_poll_messengers
+
+        if not python_may_poll_messengers():
+            logger.info(
+                "Telegram: outbound-ready (Go remedy-runtime owns inbound poll)"
+            )
+            return
         started = await self._try_start_poller()
         if not started:
             # Owner may be a dead PID that Windows still "OpenProcess"s, or a

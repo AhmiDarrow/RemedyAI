@@ -10,14 +10,22 @@ logger = logging.getLogger(__name__)
 
 
 async def reload_messenger_channels(gateway: Any, cfg: dict | None = None) -> list[str]:
-    """Stop messenger adapters, re-register from config, start them again."""
+    """Stop messenger adapters, re-register from config, start them again.
+
+    When Go owns inbound (default), restarted adapters stay outbound-only.
+    """
     if gateway is None:
         return []
     from remedy.gateway.channel_registry import register_messenger_channels
     from remedy.gateway.messengers import INTERNAL_CHANNELS, is_messenger_channel
+    from remedy.gateway.poll_lock import python_may_poll_messengers
     from remedy.interfaces.api_support import load_config
 
     cfg = cfg if isinstance(cfg, dict) else (load_config() or {})
+    if not python_may_poll_messengers():
+        logger.info(
+            "Messenger hot-reload: Go owns inbound poll; Python adapters outbound-only"
+        )
 
     # Stop + drop only messenger channels
     for kind in list(getattr(gateway, "channels", []) or []):

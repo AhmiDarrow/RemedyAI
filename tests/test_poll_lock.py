@@ -12,8 +12,26 @@ from remedy.gateway.poll_lock import (
     _parse_lock_payload,
     _pid_alive,
     load_update_offset,
+    python_may_poll_messengers,
     save_update_offset,
 )
+
+
+def test_go_owns_messenger_poll_by_default(monkeypatch, tmp_path):
+    """Production: Python must not take poll locks (no dual getUpdates with Go)."""
+    monkeypatch.delenv("REMEDY_PYTHON_MESSENGER_POLL", raising=False)
+    assert python_may_poll_messengers() is False
+    lock = MessengerPollLock(tmp_path, "telegram")
+    assert lock.try_acquire() is False
+    assert lock.held is False
+
+
+def test_python_poll_opt_in_allows_lock(monkeypatch, tmp_path):
+    monkeypatch.setenv("REMEDY_PYTHON_MESSENGER_POLL", "1")
+    assert python_may_poll_messengers() is True
+    lock = MessengerPollLock(tmp_path, "telegram")
+    assert lock.try_acquire() is True
+    lock.release()
 
 
 def test_pid_alive_self():
@@ -147,6 +165,27 @@ def test_discord_second_instance_does_not_start_gateway(tmp_path):
             await a.stop()
 
     asyncio.run(_run())
+
+
+@pytest.mark.asyncio
+async def test_telegram_start_outbound_only_when_go_owns(monkeypatch, tmp_path):
+    """Default cutover: Python must not schedule getUpdates or lock-retry."""
+    monkeypatch.delenv("REMEDY_PYTHON_MESSENGER_POLL", raising=False)
+    from remedy.gateway.channels.telegram import TelegramChannel
+
+    class _GW:
+        async def emit(self, event):
+            return None
+
+    ch = TelegramChannel(_GW(), bot_token="123:ABC", home_dir=str(tmp_path))
+    await ch.start()
+    try:
+        assert ch.running is True
+        assert ch._poll_task is None
+        assert ch._lock_retry_task is None
+        assert ch._poll_lock is None
+    finally:
+        await ch.stop()
 
 
 def test_try_acquire_idempotent_when_held(tmp_path):

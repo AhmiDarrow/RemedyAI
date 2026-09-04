@@ -62,6 +62,13 @@ class DiscordChannel(HttpSessionMixin, ChannelAdapter):
             logger.info("Discord channel: stub mode (no token)")
             return
         logger.info("Discord channel active (default_channel=%s)", self.channel_id)
+        from remedy.gateway.poll_lock import python_may_poll_messengers
+
+        if not python_may_poll_messengers():
+            logger.info(
+                "Discord: outbound-ready (Go remedy-runtime owns inbound gateway)"
+            )
+            return
         started = await self._try_start_gateway()
         if not started:
             logger.error(

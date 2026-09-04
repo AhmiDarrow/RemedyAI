@@ -61,6 +61,13 @@ class MattermostChannel(HttpSessionMixin, ChannelAdapter):
             logger.info("Mattermost channel: stub mode (missing token or base_url)")
             return
         logger.info("Mattermost channel active (channel=%s)", self.channel_id)
+        from remedy.gateway.poll_lock import python_may_poll_messengers
+
+        if not python_may_poll_messengers():
+            logger.info(
+                "Mattermost: outbound-ready (Go remedy-runtime owns inbound)"
+            )
+            return
         started = await self._try_start_socket()
         if not started:
             logger.error(
