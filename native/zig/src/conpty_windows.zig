@@ -119,6 +119,14 @@ extern "kernel32" fn WriteFile(
     written: *DWORD,
     overlapped: ?*anyopaque,
 ) callconv(.winapi) BOOL;
+extern "kernel32" fn PeekNamedPipe(
+    pipe: HANDLE,
+    buffer: ?[*]u8,
+    buffer_size: DWORD,
+    bytes_read: ?*DWORD,
+    total_bytes_avail: ?*DWORD,
+    bytes_left_this_message: ?*DWORD,
+) callconv(.winapi) BOOL;
 
 const CreatePseudoConsoleFn = *const fn (
     size: COORD,
@@ -372,6 +380,25 @@ pub fn read(handle: u64, buf: []u8) Error!usize {
     return got;
 }
 
+/// Non-blocking drain: PeekNamedPipe then ReadFile only when bytes are waiting.
+/// Production streaming keeps blocking `read`; tests and poll loops use this so a
+/// quiet ConPTY cannot stall the caller forever.
+pub fn readAvailable(handle: u64, buf: []u8) Error!usize {
+    const session = try sessionFrom(handle);
+    const pipe = session.stdout_read orelse return 0;
+    if (buf.len == 0) return 0;
+    var avail: DWORD = 0;
+    if (PeekNamedPipe(pipe, null, 0, null, &avail, null) == 0) {
+        // Broken/closed pipe → treat as EOF for the drain path.
+        return 0;
+    }
+    if (avail == 0) return 0;
+    const want: DWORD = @intCast(@min(buf.len, @as(usize, @intCast(avail))));
+    var got: DWORD = 0;
+    if (ReadFile(pipe, buf.ptr, want, &got, null) == 0) return 0;
+    return got;
+}
+
 pub const PollOutcome = struct { exited: bool, exit_code: u32 };
 
 pub fn poll(handle: u64) Error!PollOutcome {
@@ -441,7 +468,12 @@ test "conpty available matches CreatePseudoConsole export" {
 test "conpty spawn echo round-trip then close" {
     const argv = "[\"C:\\\\Windows\\\\System32\\\\cmd.exe\", \"/d\", \"/c\", \"echo remedy-conpty\"]";
     const spawned = try spawn(argv, "", "", 80, 25);
-    defer close(spawned.handle) catch {};
+    defer {
+        // Always tear down: CloseHandle on the pipe unblocks any waiter and
+        // keeps `zig build test` from hanging the native prepush lane.
+        kill(spawned.handle) catch {};
+        close(spawned.handle) catch {};
+    }
 
     try std.testing.expect(spawned.pid > 0);
 
@@ -450,11 +482,27 @@ test "conpty spawn echo round-trip then close" {
     defer total.deinit(std.testing.allocator);
 
     var spins: usize = 0;
-    while (spins < 200) : (spins += 1) {
-        const n = try read(spawned.handle, buf[0..]);
+    while (spins < 400) : (spins += 1) {
+        const n = try readAvailable(spawned.handle, buf[0..]);
         if (n > 0) try total.appendSlice(std.testing.allocator, buf[0..n]);
+        if (std.mem.indexOf(u8, total.items, "remedy-conpty") != null) break;
         const outcome = try poll(spawned.handle);
-        if (outcome.exited) break;
+        if (outcome.exited) {
+            // Drain whatever ConPTY still holds after the child exits.
+            var drain_spins: usize = 0;
+            while (drain_spins < 50) : (drain_spins += 1) {
+                const m = try readAvailable(spawned.handle, buf[0..]);
+                if (m == 0) {
+                    Sleep(10);
+                    const m2 = try readAvailable(spawned.handle, buf[0..]);
+                    if (m2 == 0) break;
+                    try total.appendSlice(std.testing.allocator, buf[0..m2]);
+                    continue;
+                }
+                try total.appendSlice(std.testing.allocator, buf[0..m]);
+            }
+            break;
+        }
         Sleep(10);
     }
     try std.testing.expect(std.mem.indexOf(u8, total.items, "remedy-conpty") != null);
