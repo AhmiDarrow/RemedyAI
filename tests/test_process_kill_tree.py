@@ -31,7 +31,23 @@ def test_kill_process_tree_no_longer_shells_out():
     assert "CREATE_NO_WINDOW" not in [name for name in dir(P) if name.isupper()]
 
 
-def test_popen_hidden_merges_caller_creation_flags(monkeypatch: pytest.MonkeyPatch):
+def test_popen_hidden_fail_closed_on_host_platforms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from remedy.core.computer.host_binding import STATUS_UNSUPPORTED, HostError
+
+    if sys.platform not in ("win32", "linux"):
+        pytest.skip("soft pipe refuse is win32/linux")
+    monkeypatch.setattr(P, "require_process_host", lambda: None)
+    with pytest.raises(HostError) as raised:
+        P.popen_hidden(["x"], creationflags=0x200, close_fds=True)
+    assert raised.value.status == STATUS_UNSUPPORTED
+
+
+def test_popen_hidden_soft_merge_off_host_platforms(monkeypatch: pytest.MonkeyPatch):
+    """Darwin (and other non-host platforms) may still soft-merge creation flags."""
+    if sys.platform in ("win32", "linux"):
+        pytest.skip("host platforms fail closed instead of soft Popen")
     seen: dict = {}
 
     def fake_popen(args, **kwargs):
@@ -60,6 +76,14 @@ def test_hidden_flags_survive_a_win32_mock_without_windows_attrs(
 
 
 def test_kill_process_tree_kills_a_plain_child_everywhere():
+    if sys.platform == "win32":
+        from remedy.core.computer import host_binding as H
+        from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
+
+        try:
+            H._lib()
+        except (NativeRuntimeUnavailableError, OSError, AttributeError):
+            pytest.skip("remedy_core required for Windows kill-tree")
     proc = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(60)"],
         stdout=subprocess.DEVNULL,
@@ -146,21 +170,17 @@ windows_with_core = pytest.mark.skipif(
 
 
 @windows_with_core
-def test_kill_process_tree_reaches_grandchildren_of_a_popen():
-    proc = P.popen_hidden(
-        ["cmd", "/c", "cmd /c ping -n 40 127.0.0.1 > nul"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+def test_kill_process_tree_reaches_grandchildren_of_spawn_hidden():
+    child = P.spawn_hidden(["cmd", "/c", "cmd /c ping -n 40 127.0.0.1 > nul"])
     try:
-        assert _wait_until(lambda: len(_descendants(proc.pid)) >= 2)
-        tree = _descendants(proc.pid)
-        P.kill_process_tree(proc)
-        assert proc.wait(timeout=10) is not None
+        assert _wait_until(lambda: len(_descendants(child.pid)) >= 2)
+        tree = _descendants(child.pid)
+        P.kill_process_tree(child)
+        assert child.wait(10.0) is not None
         assert _wait_until(lambda: not any(_alive(pid) for pid in tree))
     finally:
-        if proc.poll() is None:
-            proc.kill()
+        with __import__("contextlib").suppress(Exception):
+            child.close()
 
 
 @windows_with_core

@@ -269,7 +269,7 @@ class TestSubprocessSandbox:
         async def _boom(*_a, **_k):
             raise PermissionError(13, "Permission denied", "nonexistent_binary_xyz")
 
-        monkeypatch.setattr(process_mod, "create_hidden_subprocess_exec", _boom)
+        monkeypatch.setattr(process_mod, "run_hidden_async", _boom)
         sandbox = SubprocessSandbox()
         result = await sandbox.execute(["nonexistent_binary_xyz"])
         assert result.exit_code == -1

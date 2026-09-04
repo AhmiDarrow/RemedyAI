@@ -12,40 +12,23 @@ intercepted.
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
 from remedy.execution.docker import DockerSandbox
-
-
-class FakeProc:
-    def __init__(self, rc=0, out=b"hello", err=b"") -> None:
-        self.returncode = rc
-        self._out, self._err = out, err
-        self.killed = False
-
-    async def communicate(self):
-        return self._out, self._err
-
-    async def wait(self):
-        return self.returncode
-
-    def kill(self):
-        self.killed = True
 
 
 @pytest.fixture()
 def spawn(monkeypatch):
     """Capture the argv docker would have been started with."""
     calls: list[list[str]] = []
-    proc = FakeProc()
 
-    async def fake_exec(*argv, **kw):
+    async def fake_run(argv, **kw):
         calls.append(list(argv))
-        return proc
+        return subprocess.CompletedProcess(list(argv), 0, b"hello", b"")
 
-    monkeypatch.setattr(
-        "remedy.execution.process.create_hidden_subprocess_exec", fake_exec
-    )
+    monkeypatch.setattr("remedy.execution.process.run_hidden_async", fake_run)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/docker")
     return calls
 
@@ -193,12 +176,10 @@ async def test_output_comes_back_decoded(spawn):
 async def test_undecodable_output_does_not_raise(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/docker")
 
-    async def fake_exec(*argv, **kw):
-        return FakeProc(out=b"\xff\xfe not utf8")
+    async def fake_run(argv, **kw):
+        return subprocess.CompletedProcess(list(argv), 0, b"\xff\xfe not utf8", b"")
 
-    monkeypatch.setattr(
-        "remedy.execution.process.create_hidden_subprocess_exec", fake_exec
-    )
+    monkeypatch.setattr("remedy.execution.process.run_hidden_async", fake_run)
     assert isinstance((await DockerSandbox().execute(["x"])).stdout, str)
 
 
@@ -206,25 +187,14 @@ async def test_undecodable_output_does_not_raise(monkeypatch):
 async def test_a_container_that_overruns_is_killed_and_reported(monkeypatch):
     """A hung container must not hold the turn open indefinitely."""
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/docker")
-    proc = FakeProc()
 
-    async def never(*a, **kw):
-        import asyncio
+    async def fake_run(argv, **kw):
+        raise subprocess.TimeoutExpired(cmd=list(argv), timeout=0.1)
 
-        await asyncio.sleep(10)
-
-    proc.communicate = never
-
-    async def fake_exec(*argv, **kw):
-        return proc
-
-    monkeypatch.setattr(
-        "remedy.execution.process.create_hidden_subprocess_exec", fake_exec
-    )
+    monkeypatch.setattr("remedy.execution.process.run_hidden_async", fake_run)
     result = await DockerSandbox().execute(["sleep", "60"], timeout_seconds=0.1)
     assert result.exit_code == -1
     assert "timed out" in result.stderr
-    assert proc.killed is True
 
 
 @pytest.mark.asyncio
@@ -234,7 +204,7 @@ async def test_a_missing_docker_binary_mid_run_is_reported(monkeypatch):
     async def gone(*a, **kw):
         raise FileNotFoundError("docker")
 
-    monkeypatch.setattr("remedy.execution.process.create_hidden_subprocess_exec", gone)
+    monkeypatch.setattr("remedy.execution.process.run_hidden_async", gone)
     result = await DockerSandbox().execute(["echo", "hi"])
     assert result.exit_code == -1
     assert "not found" in result.stderr
@@ -256,7 +226,7 @@ async def test_the_scratch_directory_is_cleaned_up_even_on_failure(monkeypatch, 
     async def gone(*a, **kw):
         raise FileNotFoundError("docker")
 
-    monkeypatch.setattr("remedy.execution.process.create_hidden_subprocess_exec", gone)
+    monkeypatch.setattr("remedy.execution.process.run_hidden_async", gone)
     await DockerSandbox().execute(["echo", "hi"])
 
     import os
@@ -270,42 +240,15 @@ async def test_the_scratch_directory_is_cleaned_up_even_on_failure(monkeypatch, 
 
 @pytest.mark.asyncio
 async def test_cleanup_kills_a_prune_that_hangs(monkeypatch):
-    """wait_for cancels the *await*, not the process. A hung ``docker
-    container prune`` was left running (and its pipes open) after cleanup
-    returned, the same leak the execute/availability paths already fixed."""
+    """Zig exec-capture timeout must not leave cleanup hanging forever."""
     import asyncio
 
-    class HangingProc:
-        def __init__(self) -> None:
-            self.killed = False
-            self.waits = 0
+    seen: list[list[str]] = []
 
-        async def wait(self):
-            self.waits += 1
-            if not self.killed:
-                await asyncio.sleep(3600)
-            return -9
+    async def fake_run(argv, **kw):
+        seen.append(list(argv))
+        raise subprocess.TimeoutExpired(cmd=list(argv), timeout=kw.get("timeout") or 30)
 
-        def kill(self):
-            self.killed = True
-
-    proc = HangingProc()
-
-    async def fake_exec(*argv, **kw):
-        return proc
-
-    monkeypatch.setattr(
-        "remedy.execution.process.create_hidden_subprocess_exec", fake_exec
-    )
-
-    real_wait_for = asyncio.wait_for
-
-    async def quick_wait_for(aw, timeout):
-        # Shorten only cleanup's 30s prune budget; leave every other wait alone.
-        return await real_wait_for(aw, timeout=0.01 if timeout == 30.0 else timeout)
-
-    monkeypatch.setattr(asyncio, "wait_for", quick_wait_for)
-
-    await real_wait_for(DockerSandbox().cleanup(), timeout=5.0)
-    assert proc.killed, "the hung prune was not killed"
-    assert proc.waits >= 2, "the killed prune was not reaped"
+    monkeypatch.setattr("remedy.execution.process.run_hidden_async", fake_run)
+    await asyncio.wait_for(DockerSandbox().cleanup(), timeout=5.0)
+    assert seen and "prune" in seen[0]
