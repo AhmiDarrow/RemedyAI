@@ -40,7 +40,9 @@ def test_workspace_read_refuses_escape(tmp_path: Path, monkeypatch: pytest.Monke
         worker._workspace_read({"path": "../outside.txt"})
 
 
-def test_stdio_tool_round_trip_workspace_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stdio_tool_round_trip_workspace_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
     (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
 
@@ -82,6 +84,86 @@ def test_stdio_tool_round_trip_workspace_list(tmp_path: Path, monkeypatch: pytes
     assert body["ok"] is True
     assert body["output"]["total"] >= 1
     assert any(e["name"] == "a.py" for e in body["output"]["entries"])
+
+
+def test_workspace_write_handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    out = worker._workspace_write({"path": "nested/hi.txt", "content": "hello abi\n"})
+    assert out["path"] == "nested/hi.txt"
+    assert out["created"] is True
+    assert out["bytes_written"] == len(b"hello abi\n")
+    assert (tmp_path / "nested" / "hi.txt").read_text(encoding="utf-8") == "hello abi\n"
+
+    again = worker._workspace_write({"path": "nested/hi.txt", "content": "updated\n"})
+    assert again["created"] is False
+    assert (tmp_path / "nested" / "hi.txt").read_text(encoding="utf-8") == "updated\n"
+
+
+def test_workspace_write_refuses_escape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+    with pytest.raises(PermissionError):
+        worker._workspace_write({"path": "../outside.txt", "content": "nope"})
+
+
+def test_workspace_write_refuses_history_stub(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+    with pytest.raises(ValueError, match="history"):
+        worker._workspace_write(
+            {
+                "path": "a.py",
+                "content": "[file_write content omitted from provider history]",
+            }
+        )
+
+
+def test_stdio_tool_round_trip_workspace_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+
+    req = json.dumps(
+        {
+            "tool_id": "workspace.write",
+            "version": 1,
+            "input": {"path": "w.txt", "content": "wire"},
+        }
+    ).encode("utf-8")
+    corr = b"\x04" + b"\x00" * 15
+    inbound = _frame(worker._KIND_TOOL_REQUEST, req, corr)
+
+    class _Buf:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+            self._pos = 0
+            self.out = bytearray()
+
+        def read(self, n: int) -> bytes:
+            if self._pos >= len(self._data):
+                return b""
+            chunk = self._data[self._pos : self._pos + n]
+            self._pos += len(chunk)
+            return chunk
+
+        def write(self, data: bytes) -> int:
+            self.out.extend(data)
+            return len(data)
+
+        def flush(self) -> None:
+            return None
+
+    buf = _Buf(inbound)
+    worker.serve(buf, buf)  # type: ignore[arg-type]
+
+    raw = bytes(buf.out)
+    payload_len = struct.unpack_from("<I", raw, 12)[0]
+    body = json.loads(raw[32 : 32 + payload_len].decode("utf-8"))
+    assert body["ok"] is True
+    assert body["output"]["path"] == "w.txt"
+    assert (tmp_path / "w.txt").read_text(encoding="utf-8") == "wire"
 
 
 def test_web_search_bridges_agent_backend(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -12,7 +12,8 @@ import (
 )
 
 func TestRMDYPythonToolsRoundTrip(t *testing.T) {
-	serverReg := NewRegistry()
+	allow := AuthorizerFunc(func(context.Context, Descriptor, Request) error { return nil })
+	serverReg := NewRegistry(allow)
 	if err := RegisterPythonWorkerLocalMirrors(serverReg); err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +29,7 @@ func TestRMDYPythonToolsRoundTrip(t *testing.T) {
 	client := ipc.NewClient(clientConn)
 	defer client.Close()
 
-	clientReg := NewRegistry()
+	clientReg := NewRegistry(allow)
 	if err := RegisterPythonWorkerTools(clientReg, client); err != nil {
 		t.Fatal(err)
 	}
@@ -107,6 +108,26 @@ func TestRMDYPythonToolsRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(searchOut.Results[0].Title, "remedy tool abi") {
 		t.Fatalf("web.search title=%q", searchOut.Results[0].Title)
+	}
+
+	written, err := clientReg.Execute(context.Background(), Request{
+		ToolID: "workspace.write", Version: 1,
+		Input:           json.RawMessage(`{"path":"out/note.txt","content":"hello abi"}`),
+		CapabilityToken: []byte("test"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var writeOut struct {
+		Path         string `json:"path"`
+		BytesWritten int    `json:"bytes_written"`
+		Created      bool   `json:"created"`
+	}
+	if err := json.Unmarshal(written.Output, &writeOut); err != nil {
+		t.Fatal(err)
+	}
+	if writeOut.Path != "out/note.txt" || writeOut.BytesWritten != len("hello abi") || !writeOut.Created {
+		t.Fatalf("workspace.write=%+v", writeOut)
 	}
 }
 

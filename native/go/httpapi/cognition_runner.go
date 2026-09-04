@@ -33,7 +33,7 @@ func NewCognitionTurnRunner(model cognition.Model) *CognitionTurnRunner {
 	r := &CognitionTurnRunner{
 		Model:    model,
 		Registry: registry,
-		Tools:    &RegistryToolExecutor{Registry: registry},
+		Tools:    &RegistryToolExecutor{Registry: registry, TokenFor: RuntimeCapabilityToken},
 		Policy:   &RegistryPolicy{Registry: registry},
 	}
 	r.syncModelToolSchemas()
@@ -48,7 +48,7 @@ func (r *CognitionTurnRunner) AttachPythonWorker(caller tools.FrameCaller) error
 	if err := tools.RegisterPythonWorkerTools(r.Registry, caller); err != nil {
 		return err
 	}
-	r.Tools = &RegistryToolExecutor{Registry: r.Registry}
+	r.Tools = &RegistryToolExecutor{Registry: r.Registry, TokenFor: RuntimeCapabilityToken}
 	r.Policy = &RegistryPolicy{Registry: r.Registry}
 	r.syncModelToolSchemas()
 	return nil

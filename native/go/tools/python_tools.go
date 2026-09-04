@@ -134,6 +134,35 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:          "workspace.write",
+		Version:     1,
+		Description: "Write a UTF-8 text file under the workspace (Python worker)",
+		Runtime:     RuntimePython,
+		Risk:        RiskMutation,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["path","content"],
+			"properties":{
+				"path":{"type":"string","minLength":1},
+				"content":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["path","bytes_written"],
+			"properties":{
+				"path":{"type":"string"},
+				"bytes_written":{"type":"integer","minimum":0},
+				"created":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:          "web.search",
 		Version:     1,
 		Description: "Search the public web via the Python agent web_search backend (OpenSERP/DDG)",
