@@ -105,7 +105,13 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/sessions/{id}/messages/stream", s.handleStreamMessage)
 	s.mux.HandleFunc("POST /api/sessions/{id}/abort", s.handleAbortSession)
 	s.mux.HandleFunc("GET /api/events/sessions", s.handleSessionEvents)
-	s.mux.HandleFunc("GET /api/connect", s.handleConnect)
+	s.mux.HandleFunc("GET /api/connect", s.handleGetConnect)
+	s.mux.HandleFunc("PUT /api/connect", s.handlePutConnect)
+	s.mux.HandleFunc("GET /api/connect/addresses", s.handleConnectAddresses)
+	s.mux.HandleFunc("POST /api/connect/pair/start", s.handleConnectPairStart)
+	s.mux.HandleFunc("POST /api/connect/pause", s.handleConnectPause)
+	s.mux.HandleFunc("POST /api/connect/resume", s.handleConnectResume)
+	s.mux.HandleFunc("POST /api/connect/devices/{id}/revoke", s.handleConnectRevoke)
 	return s, nil
 }
 

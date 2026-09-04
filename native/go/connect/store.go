@@ -196,6 +196,33 @@ func RevokeDevice(deviceID, home string) (*Device, error) {
 	return &saved, nil
 }
 
+// DevicePublicMeta is owner-visible device metadata (no public keys / secrets).
+type DevicePublicMeta struct {
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	PairedAt float64 `json:"paired_at"`
+	Revoked  bool    `json:"revoked"`
+}
+
+// DevicePublicMetaList returns active paired devices without public_hex.
+// Revoked devices are hidden so revoke removes them from Connect settings.
+func DevicePublicMetaList(home string) []DevicePublicMeta {
+	list, err := ListDevices(home, false)
+	if err != nil || len(list) == 0 {
+		return []DevicePublicMeta{}
+	}
+	out := make([]DevicePublicMeta, 0, len(list))
+	for _, rec := range list {
+		out = append(out, DevicePublicMeta{
+			ID:       rec.ID,
+			Name:     rec.Name,
+			PairedAt: rec.PairedAt,
+			Revoked:  rec.Revoked,
+		})
+	}
+	return out
+}
+
 // IsRevokedLive reports whether deviceID was revoked in this process.
 func IsRevokedLive(deviceID string) bool {
 	id := strings.ToLower(strings.TrimSpace(deviceID))
