@@ -586,10 +586,12 @@ func TestStreamDeleteReleasesClaim(t *testing.T) {
 	runner := &stubRunner{tokens: []string{"x"}, hold: hold}
 	base, shutdown, token := startMessagesServer(t, runner, t.TempDir())
 	defer shutdown()
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 8 * time.Second}
 	sid := createSessionID(t, client, base, token)
 
+	streamDone := make(chan struct{})
 	go func() {
+		defer close(streamDone)
 		req := authReq(t, http.MethodPost, base+"/api/sessions/"+sid+"/messages/stream", token,
 			bytes.NewBufferString(`{"message":"a"}`))
 		resp, err := client.Do(req)
@@ -599,7 +601,7 @@ func TestStreamDeleteReleasesClaim(t *testing.T) {
 		}
 	}()
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		req := authReq(t, http.MethodGet, base+"/api/turn-active", token, nil)
 		resp, _ := client.Do(req)
@@ -622,9 +624,10 @@ func TestStreamDeleteReleasesClaim(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("delete = %d", resp.StatusCode)
 	}
+	// Unblock any hold that raced ahead of abort; claim ctx cancel is the real signal.
 	close(hold)
 
-	deadline = time.Now().Add(2 * time.Second)
+	deadline = time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		req = authReq(t, http.MethodGet, base+"/api/turn-active", token, nil)
 		resp, _ = client.Do(req)
@@ -633,6 +636,11 @@ func TestStreamDeleteReleasesClaim(t *testing.T) {
 		var b map[string]any
 		_ = json.Unmarshal(raw, &b)
 		if b["active"] == false {
+			select {
+			case <-streamDone:
+			case <-time.After(3 * time.Second):
+				t.Fatal("stream handler did not finish after claim release")
+			}
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
