@@ -26,7 +26,7 @@ _PS_STRONG = re.compile(
     r"|@['\"]"
     r")"
 )
-# Same idea as scriptfile._PS_WRAPPER: optional path prefix, command head only.
+# Optional path prefix before powershell/pwsh (command head only).
 _PS_HEAD = re.compile(
     r"(?is)^\s*(?:(?:[A-Za-z]:\\)?(?:[^\s\"']*[\\/])?)?(?:powershell|pwsh)(?:\.exe)?\b"
 )

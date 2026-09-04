@@ -21,15 +21,11 @@ from remedy.execution.host.dialect import (
 from remedy.execution.host.ir import HostOp, mkdir_op, run_op, script_op
 from remedy.execution.host.runner import (
     coerce_argv,
+    launch_script,
     looks_like_plain_argv,
     prepare_host_command,
     prepare_host_op,
     resolve_which,
-)
-from remedy.execution.host.scriptfile import (
-    extract_powershell_payload,
-    is_encoded_powershell,
-    launch_script,
 )
 from remedy.execution.host.session import _cwd_command, conpty_available
 from remedy.execution.host.translate import looks_like_powershell, translate_posix_to_host
@@ -414,14 +410,26 @@ def test_translate_posix_host_noop() -> None:
     assert not r.changed
 
 
-def test_extract_powershell_command_wrapper() -> None:
-    body = extract_powershell_payload(
-        "pwsh -NoProfile -Command \"Get-ChildItem -Name\""
+def test_zig_extracts_powershell_wrapper(tmp_path: Path) -> None:
+    """Zig prepare owns extract/is_encoded; wrapper unwraps to -File."""
+    prep = prepare_host_command(
+        'pwsh -NoProfile -Command "Get-ChildItem -Name"',
+        scratch_dir=tmp_path,
     )
-    assert body is not None
-    assert "Get-ChildItem" in body
-    assert is_encoded_powershell("powershell -EncodedCommand QQ==")
-    assert extract_powershell_payload("powershell -EncodedCommand QQ==") is None
+    assert prep.kind == "script"
+    assert prep.script_path is not None
+    assert "Get-ChildItem" in prep.script_path.read_text(encoding="utf-8-sig")
+    enc_dir = tmp_path / "enc"
+    enc_dir.mkdir()
+    encoded = prepare_host_command(
+        "powershell -EncodedCommand QQ==",
+        scratch_dir=enc_dir,
+    )
+    # EncodedCommand stays raw for the write jail (Zig encoded_ps_note).
+    assert encoded.kind == "raw"
+    assert encoded.script_path is None
+    assert any("encoded" in n.lower() for n in encoded.notes)
+    assert "EncodedCommand" in encoded.display
 
 
 def test_prepare_powershell_uses_file_not_command(tmp_path: Path) -> None:
@@ -737,10 +745,8 @@ def test_win_shell_prefix_and_runtime_agree() -> None:
 
 
 def test_script_body_size_cap(tmp_path: Path) -> None:
-    from remedy.execution.host.scriptfile import write_script
-
     with pytest.raises(ValueError, match="exceeds"):
-        write_script("python", "x" * 1_000_001, tmp_path / "too_big.py")
+        launch_script("python", "x" * 1_000_001, scratch_dir=tmp_path)
 
 
 def test_launch_script_python(tmp_path: Path) -> None:
@@ -1010,10 +1016,10 @@ def test_diagnose_not_found_wc() -> None:
 
 
 def test_cleanup_host_script(tmp_path: Path) -> None:
-    from remedy.execution.host.scriptfile import cleanup_host_script, write_script
+    from remedy.execution.host.runner import cleanup_host_script
 
     p = tmp_path / "host_abc123.py"
-    write_script("python", "print(1)", p)
+    p.write_text("print(1)\n", encoding="utf-8")
     assert p.is_file()
     cleanup_host_script(p)
     assert not p.is_file()

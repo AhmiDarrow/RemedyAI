@@ -1,8 +1,8 @@
 """Remedy Host Bridge — dialect-aware adaptor between the model and the OS.
 
 Models emit POSIX/bash. Windows is cmd + two PowerShells. Zig ``remedy_core``
-owns prepare/translate/ConPTY/HostSession; this package keeps thin bindings
-plus dialect/stretch/diagnose/scriptfile that have not moved yet.
+owns prepare/translate/scriptfile/ConPTY/HostSession; this package keeps thin
+bindings plus dialect/stretch/diagnose that have not moved yet.
 """
 
 from __future__ import annotations
