@@ -373,7 +373,7 @@ def available() -> bool:
         return False
     try:
         _lib()
-    except NativeRuntimeUnavailableError:
+    except (NativeRuntimeUnavailableError, OSError, AttributeError):
         return False
     return True
 
@@ -1150,13 +1150,9 @@ def security_clear_signing_key() -> None:
 
 
 def _remedy_auth_dir(home: str | os.PathLike[str] | None = None) -> Path:
-    from pathlib import Path
+    from remedy.home import default_home
 
-    if home is not None and str(home).strip():
-        root = Path(home)
-    else:
-        env = (os.environ.get("REMEDY_HOME") or "").strip()
-        root = Path(env) if env else Path.home() / ".remedy"
+    root = Path(home) if home is not None and str(home).strip() else default_home()
     return root / "auth"
 
 
