@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"sync"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -164,6 +165,25 @@ func (r *Registry) Latest(id string) (Descriptor, error) {
 		return Descriptor{}, ErrToolNotFound
 	}
 	return cloneDescriptor(latest), nil
+}
+
+// List returns the latest version of every registered tool id (stable by id).
+func (r *Registry) List() []Descriptor {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	latest := map[string]Descriptor{}
+	for k, tool := range r.tools {
+		prev, ok := latest[k.id]
+		if !ok || k.version > prev.Version {
+			latest[k.id] = tool.descriptor
+		}
+	}
+	out := make([]Descriptor, 0, len(latest))
+	for _, d := range latest {
+		out = append(out, cloneDescriptor(d))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }
 
 func (r *Registry) Execute(ctx context.Context, request Request) (Result, error) {

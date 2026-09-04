@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
+	"github.com/AhmiDarrow/RemedyAI/native/go/providers"
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
 
@@ -29,12 +30,14 @@ func NewCognitionTurnRunner(model cognition.Model) *CognitionTurnRunner {
 	if err != nil {
 		panic("tool ABI builtins failed to register: " + err.Error())
 	}
-	return &CognitionTurnRunner{
+	r := &CognitionTurnRunner{
 		Model:    model,
 		Registry: registry,
 		Tools:    &RegistryToolExecutor{Registry: registry},
 		Policy:   &RegistryPolicy{Registry: registry},
 	}
+	r.syncModelToolSchemas()
+	return r
 }
 
 // AttachPythonWorker registers RuntimePython tools that execute over RMDY frames.
@@ -47,7 +50,29 @@ func (r *CognitionTurnRunner) AttachPythonWorker(caller tools.FrameCaller) error
 	}
 	r.Tools = &RegistryToolExecutor{Registry: r.Registry}
 	r.Policy = &RegistryPolicy{Registry: r.Registry}
+	r.syncModelToolSchemas()
 	return nil
+}
+
+// syncModelToolSchemas advertises the Tool ABI surface on OpenAI-compatible requests.
+func (r *CognitionTurnRunner) syncModelToolSchemas() {
+	if r == nil || r.Registry == nil {
+		return
+	}
+	oc, ok := r.Model.(*providers.OpenAICompat)
+	if !ok || oc == nil {
+		return
+	}
+	list := r.Registry.List()
+	meta := make([]providers.RegistryTool, 0, len(list))
+	for _, d := range list {
+		meta = append(meta, providers.RegistryTool{
+			ID:          d.ID,
+			Description: d.Description,
+			InputSchema: append(json.RawMessage(nil), d.InputSchema...),
+		})
+	}
+	oc.Tools = providers.ToolSchemasFromRegistry(meta)
 }
 
 func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit func(string) error) error {

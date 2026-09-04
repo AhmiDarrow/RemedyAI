@@ -20,6 +20,9 @@ type OpenAICompat struct {
 	APIKey     string
 	Model      string
 	HTTPClient *http.Client
+	// Tools is the OpenAI tools array advertised on each chat completion request.
+	// Empty omits the field (text-only). Populated from the Tool ABI registry.
+	Tools []map[string]any
 }
 
 func (c *OpenAICompat) client() *http.Client {
@@ -36,11 +39,15 @@ func (c *OpenAICompat) Stream(ctx context.Context, turn cognition.Turn) (<-chan 
 		return nil, fmt.Errorf("openai-compat model requires base URL and model id")
 	}
 	messages := buildMessages(turn)
-	body, err := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"model":    model,
 		"messages": messages,
 		"stream":   true,
-	})
+	}
+	if len(c.Tools) > 0 {
+		payload["tools"] = c.Tools
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -73,6 +80,38 @@ func (c *OpenAICompat) Stream(ctx context.Context, turn cognition.Turn) (<-chan 
 		parseSSE(ctx, resp.Body, out)
 	}()
 	return out, nil
+}
+
+// RegistryTool is the providers-local view of a Tool ABI descriptor.
+type RegistryTool struct {
+	ID          string
+	Description string
+	InputSchema json.RawMessage
+}
+
+// ToolSchemasFromRegistry converts registry tool metadata into an OpenAI tools array.
+func ToolSchemasFromRegistry(list []RegistryTool) []map[string]any {
+	out := make([]map[string]any, 0, len(list))
+	for _, d := range list {
+		params := map[string]any{"type": "object", "properties": map[string]any{}}
+		if len(d.InputSchema) > 0 {
+			var decoded any
+			if json.Unmarshal(d.InputSchema, &decoded) == nil {
+				if m, ok := decoded.(map[string]any); ok && m != nil {
+					params = m
+				}
+			}
+		}
+		out = append(out, map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        d.ID,
+				"description": d.Description,
+				"parameters":   params,
+			},
+		})
+	}
+	return out
 }
 
 func buildMessages(turn cognition.Turn) []map[string]string {

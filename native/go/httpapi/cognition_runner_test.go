@@ -95,6 +95,46 @@ func TestCognitionTurnRunnerExecutesPythonToolsOverRMDY(t *testing.T) {
 	}
 }
 
+func TestCognitionTurnRunnerExecutesWorkspaceListOverRMDY(t *testing.T) {
+	serverReg := tools.NewRegistry()
+	if err := tools.RegisterPythonWorkerLocalMirrors(serverReg); err != nil {
+		t.Fatal(err)
+	}
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go ipc.ServeConn(ctx, serverConn, tools.WorkerHandler{Registry: serverReg})
+	client := ipc.NewClient(clientConn)
+	defer client.Close()
+
+	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
+		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "workspace.list", Input: []byte(`{"path":"."}`)}}},
+		{{Text: "listed", Done: true}},
+	}}
+	r := NewCognitionTurnRunner(model)
+	if err := r.AttachPythonWorker(client); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Registry.Latest("workspace.read"); err != nil {
+		t.Fatalf("workspace.read missing after attach: %v", err)
+	}
+	out, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "workspace.list") || !strings.Contains(out, `"ok":true`) {
+		t.Fatalf("missing workspace.list result: %q", out)
+	}
+	if !strings.Contains(out, "mirror.txt") {
+		t.Fatalf("missing list preview: %q", out)
+	}
+	if !strings.Contains(out, "listed") {
+		t.Fatalf("missing final text: %q", out)
+	}
+}
+
 func TestCognitionTurnRunnerDeniesUnregisteredTools(t *testing.T) {
 	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
 		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "file_read", Input: []byte(`{"path":"a.py"}`)}}},
