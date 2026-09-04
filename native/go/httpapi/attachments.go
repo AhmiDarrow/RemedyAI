@@ -1,6 +1,10 @@
 package httpapi
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"mime"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -8,9 +12,15 @@ import (
 	"unicode/utf8"
 )
 
-var safeSIDRe = regexp.MustCompile(`[^A-Za-z0-9._-]`)
+var (
+	safeSIDRe  = regexp.MustCompile(`[^A-Za-z0-9._-]`)
+	safeNameRe = regexp.MustCompile(`[^A-Za-z0-9._\- ()\[\]]+`)
+)
 
-const maxTextInjectChars = 24_000
+const (
+	maxTextInjectChars  = 24_000
+	maxAttachmentBytes  = 15 * 1024 * 1024
+)
 
 func safeSessionID(sessionID string) string {
 	s := safeSIDRe.ReplaceAllString(strings.TrimSpace(sessionID), "_")
@@ -191,10 +201,12 @@ func injectTextFileSnippets(atts []map[string]any, homeDir, sessionID string) st
 	return chunks.String()
 }
 
-func isProbablyText(mime, path string) bool {
-	m := strings.ToLower(strings.TrimSpace(mime))
+func isProbablyText(mimeType, path string) bool {
+	m := strings.ToLower(strings.TrimSpace(mimeType))
 	if strings.HasPrefix(m, "text/") || m == "application/json" ||
-		m == "application/javascript" || m == "application/xml" {
+		m == "application/javascript" || m == "application/xml" ||
+		m == "application/x-yaml" || m == "application/yaml" ||
+		m == "application/typescript" {
 		return true
 	}
 	ext := strings.ToLower(filepath.Ext(path))
@@ -202,9 +214,128 @@ func isProbablyText(mime, path string) bool {
 	case ".txt", ".md", ".py", ".go", ".ts", ".tsx", ".js", ".jsx",
 		".json", ".yaml", ".yml", ".toml", ".csv", ".rs", ".zig",
 		".c", ".h", ".cpp", ".hpp", ".java", ".kt", ".sh", ".ps1",
-		".html", ".css", ".sql", ".xml":
+		".html", ".css", ".sql", ".xml", ".log", ".ini", ".cfg",
+		".env", ".vue", ".svelte", ".scss":
 		return true
 	default:
 		return false
 	}
+}
+
+func isImageMIME(mimeType string) bool {
+	m := strings.ToLower(strings.TrimSpace(mimeType))
+	if strings.HasPrefix(m, "image/") {
+		return true
+	}
+	switch m {
+	case "image/png", "image/jpeg", "image/jpg", "image/gif",
+		"image/webp", "image/bmp":
+		return true
+	default:
+		return false
+	}
+}
+
+func sanitizeFilename(name string) string {
+	base := filepath.Base(strings.TrimSpace(name))
+	if base == "" || base == "." || base == ".." {
+		base = "file"
+	}
+	base = safeNameRe.ReplaceAllString(base, "_")
+	base = strings.Trim(base, "._")
+	if base == "" {
+		base = "file"
+	}
+	if len(base) > 180 {
+		ext := filepath.Ext(base)
+		if len(ext) > 40 {
+			ext = ext[:40]
+		}
+		stem := strings.TrimSuffix(base, filepath.Ext(base))
+		if len(stem) > 140 {
+			stem = stem[:140]
+		}
+		base = stem + ext
+	}
+	return base
+}
+
+func guessMIME(filename, declared string) string {
+	d := strings.TrimSpace(declared)
+	if d != "" && !strings.EqualFold(d, "application/octet-stream") {
+		return d
+	}
+	if m := mime.TypeByExtension(filepath.Ext(filename)); m != "" {
+		return m
+	}
+	return "application/octet-stream"
+}
+
+func newAttachmentID() string {
+	var b [6]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+// saveUpload writes bytes under the session attachments jail and returns meta
+// matching Python interfaces.attachments.save_upload / desktop AttachmentMeta.
+func saveUpload(sessionID, filename string, data []byte, contentType, homeDir string) (map[string]any, error) {
+	if len(data) > maxAttachmentBytes {
+		return nil, fmt.Errorf(
+			"File too large (%d bytes). Max is %d MB.",
+			len(data), maxAttachmentBytes/(1024*1024),
+		)
+	}
+	directory := sessionAttachmentsDir(sessionID, homeDir)
+	if directory == "" {
+		return nil, fmt.Errorf("attachments directory unavailable")
+	}
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return nil, err
+	}
+	displayName := sanitizeFilename(filename)
+	path := filepath.Join(directory, displayName)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return nil, err
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	mimeType := guessMIME(displayName, contentType)
+	return map[string]any{
+		"id":       newAttachmentID(),
+		"name":     displayName,
+		"path":     abs,
+		"mime":     mimeType,
+		"size":     len(data),
+		"is_image": isImageMIME(mimeType),
+		"is_text":  isProbablyText(mimeType, displayName),
+	}, nil
+}
+
+// resolveAttachmentFile returns a jailed absolute path for a basename under the
+// session attachments dir. ok=false with notFound distinguishes 404 vs 400.
+func resolveAttachmentFile(sessionID, filename, homeDir string) (path string, notFound bool, err error) {
+	safe := filepath.Base(strings.TrimSpace(filename))
+	if safe == "" || safe == "." || safe == ".." || strings.ContainsAny(safe, `/\`) {
+		return "", false, fmt.Errorf("Invalid path")
+	}
+	directory := sessionAttachmentsDir(sessionID, homeDir)
+	if directory == "" {
+		return "", false, fmt.Errorf("Invalid path")
+	}
+	root, absErr := filepath.Abs(directory)
+	if absErr != nil {
+		return "", false, fmt.Errorf("Invalid path")
+	}
+	candidate, absErr := filepath.Abs(filepath.Join(directory, safe))
+	if absErr != nil || !pathUnder(candidate, root) {
+		return "", false, fmt.Errorf("Invalid path")
+	}
+	st, statErr := os.Stat(candidate)
+	if statErr != nil || st.IsDir() {
+		return "", true, fmt.Errorf("Attachment not found")
+	}
+	return candidate, false, nil
 }
