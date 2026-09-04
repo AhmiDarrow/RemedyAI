@@ -1,21 +1,25 @@
 """Desktop UI Automation via ``remedy_core`` (no comtypes).
 
-Walks, reads and pattern actions are implemented in Zig COM vtable calls
-exported through :mod:`remedy.core.computer.host_binding`. Pure helpers
+Walks, reads and pattern actions are Zig COM exports through
+:mod:`remedy.core.computer.host_binding`. Pure helpers
 (:func:`structured_observe_hint`, :func:`preferred_click_action`) stay here.
 OCR remains on the Python/WinRT path.
+
+Soft misses (off-platform, missing native core, empty trees) stay ``None`` /
+``{"ok": False}``. :class:`host_binding.HostError` propagates (fail closed).
 """
 
 from __future__ import annotations
 
-import contextlib
 import sys
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from remedy.core.computer import host_binding as H
 from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
 _TOGGLE_ROLES = frozenset({"checkbox", "togglebutton", "switch", "radiobutton"})
+_T = TypeVar("_T")
 
 
 def structured_observe_hint(*, n_windows: int, n_controls: int) -> str:
@@ -37,14 +41,6 @@ def structured_observe_hint(*, n_windows: int, n_controls: int) -> str:
     )
 
 
-def uia_available() -> bool:
-    if sys.platform != "win32":
-        return False
-    with contextlib.suppress(NativeRuntimeUnavailableError):
-        return H.uia_available()
-    return False
-
-
 def preferred_click_action(role: str = "") -> str:
     """Which UIA pattern to try before a pixel click-at-center."""
     r = (role or "").strip().lower()
@@ -53,18 +49,32 @@ def preferred_click_action(role: str = "") -> str:
     return "invoke"
 
 
+def _uia_call(fn: Callable[[], _T], *, default: _T) -> _T:
+    """Run a host_binding UIA call; soft-miss only when native core is absent."""
+    if sys.platform != "win32":
+        return default
+    try:
+        return fn()
+    except NativeRuntimeUnavailableError:
+        return default
+
+
+def uia_available() -> bool:
+    return _uia_call(H.uia_available, default=False)
+
+
 def read_window_text(hwnd: int, *, max_chars: int = 12000) -> dict[str, Any] | None:
-    """Read the visible TEXT CONTENT of a native window via UIA.
+    """Read visible TEXT CONTENT of a native window via UIA.
 
     Returns ``{"title", "text", "fields"}`` or ``None`` when UIA is unavailable
     / hwnd missing. :class:`host_binding.HostError` propagates (fail closed).
     """
-    if sys.platform != "win32" or not hwnd:
+    if not hwnd:
         return None
-    try:
-        return H.uia_read_window_text(int(hwnd), int(max_chars))
-    except NativeRuntimeUnavailableError:
-        return None
+    return _uia_call(
+        lambda: H.uia_read_window_text(int(hwnd), int(max_chars)),
+        default=None,
+    )
 
 
 def focused_element_info() -> dict[str, Any] | None:
@@ -72,12 +82,7 @@ def focused_element_info() -> dict[str, Any] | None:
 
     :class:`host_binding.HostError` propagates (fail closed).
     """
-    if sys.platform != "win32":
-        return None
-    try:
-        return H.uia_focused_element()
-    except NativeRuntimeUnavailableError:
-        return None
+    return _uia_call(H.uia_focused_element, default=None)
 
 
 def element_action(
@@ -94,11 +99,12 @@ def element_action(
     Returns ``{"ok": bool, "message": str, ...}`` on success or soft miss.
     :class:`host_binding.HostError` propagates (fail closed).
     """
+    soft = {
+        "ok": False,
+        "message": f"UIA element {name!r} not found in hwnd={hwnd} (re-snapshot?)",
+    }
     if sys.platform != "win32":
-        return {
-            "ok": False,
-            "message": f"UIA element {name!r} not found in hwnd={hwnd} (re-snapshot?)",
-        }
+        return soft
     try:
         return H.uia_element_action(
             int(hwnd),
@@ -121,13 +127,11 @@ def uia_control_snapshot(
 
     :class:`host_binding.HostError` propagates (fail closed).
     """
-    if sys.platform != "win32":
-        return None
-    try:
-        return H.uia_control_snapshot(
+    return _uia_call(
+        lambda: H.uia_control_snapshot(
             0 if hwnd is None else int(hwnd),
             int(max_elements) if max_elements is not None else 80,
             bool(preferred_only),
-        )
-    except NativeRuntimeUnavailableError:
-        return None
+        ),
+        default=None,
+    )
