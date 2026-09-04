@@ -147,7 +147,12 @@ func openSessionStore(path string) (*sessionStore, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &sessionStore{db: db}, nil
+	store := &sessionStore{db: db}
+	if err := store.ensurePartnerMemorySchema(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return store, nil
 }
 
 func resolveDBPath(cfg Config) string {

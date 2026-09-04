@@ -98,11 +98,12 @@ type Server struct {
 }
 
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
-// sessions CRUD, session LLM bind, attachments upload/get, messages
-// list/create/stream, abort, session-events SSE, durable events bus,
-// scheduler jobs, hive roster/spawn/assign/retire, Connect management
-// (including Tailscale status/install/login), Connect me/stop, providers/models
-// catalog, skills/library routes, workspace/files/media routes,
+// i18n chrome catalogs, partner memory search/facts/persona-wipe, sessions CRUD,
+// session LLM bind, attachments upload/get, messages list/create/stream, abort,
+// session-events SSE, durable events bus, scheduler jobs, hive
+// roster/spawn/assign/retire, Connect management (including Tailscale
+// status/install/login), Connect me/stop, providers/models catalog,
+// skills/library routes, workspace/files/media routes,
 // partner/approvals/plans/life-tasks/goals, WebUI, computer-use host bridge,
 // ConPTY terminal, voice, and RMB routes.
 func New(cfg Config) (*Server, error) {
@@ -159,6 +160,10 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/auth/local-bootstrap", s.handleLocalBootstrap)
 	s.mux.HandleFunc("GET /api/settings", s.handleGetSettings)
 	s.mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
+	s.mux.HandleFunc("GET /api/i18n", s.handleGetI18n)
+	s.mux.HandleFunc("GET /api/memory/search", s.handleMemorySearch)
+	s.mux.HandleFunc("GET /api/memory/facts", s.handleMemoryFacts)
+	s.mux.HandleFunc("POST /api/memory/persona-wipe", s.handleMemoryPersonaWipe)
 	s.mux.HandleFunc("GET /api/sessions", s.handleListSessions)
 	s.mux.HandleFunc("POST /api/sessions", s.handleCreateSession)
 	s.mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
