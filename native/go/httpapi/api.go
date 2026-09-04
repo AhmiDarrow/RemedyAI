@@ -37,9 +37,11 @@ type Server struct {
 	token    string
 	mux      *http.ServeMux
 	sessions *sessionStore
+	events   *sessionEventHub
 }
 
-// New builds a server with ping/status/turn-active and sessions CRUD registered.
+// New builds a server with ping/status/turn-active, sessions CRUD, and
+// session-events SSE registered.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
@@ -59,6 +61,7 @@ func New(cfg Config) (*Server, error) {
 		token:    token,
 		mux:      http.NewServeMux(),
 		sessions: store,
+		events:   newSessionEventHub(),
 	}
 	s.mux.HandleFunc("GET /api/ping", s.handlePing)
 	s.mux.HandleFunc("GET /api/status", s.handleStatus)
@@ -68,6 +71,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
 	s.mux.HandleFunc("PATCH /api/sessions/{id}", s.handleUpdateSession)
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
+	s.mux.HandleFunc("GET /api/events/sessions", s.handleSessionEvents)
 	return s, nil
 }
 
@@ -173,18 +177,25 @@ func (s *Server) handlePing(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
-	// Unauthenticated tier: no DB, gateway not running, counts zero.
-	writeJSON(w, http.StatusOK, map[string]any{
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	uptime := formatUptime(time.Since(s.started))
+	body := map[string]any{
 		"status":              "ok",
 		"version":             s.version,
-		"uptime":              formatUptime(time.Since(s.started)),
+		"uptime":              uptime,
 		"gateway":             map[string]any{"running": false},
 		"memory_entries":      0,
 		"skills_count":        0,
 		"sessions_count":      0,
 		"chat_sessions_count": 0,
-	})
+	}
+	// Authenticated tier may touch SQLite for chat session counts.
+	if s.token != "" && requestAuthorized(r, s.token) && s.sessions != nil {
+		if n, err := s.sessions.Count(); err == nil {
+			body["chat_sessions_count"] = n
+		}
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) handleTurnActive(w http.ResponseWriter, _ *http.Request) {
