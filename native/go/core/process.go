@@ -101,7 +101,7 @@ func ExecCaptureAuthorized(
 
 // ProcessSpawnAuthorized policy-checks then hidden-spawns argv (Zig).
 // argv[0] must be absolute. No stdio pipes are attached — use IPC for framing.
-// Windows-only today (Linux remedy_core process host returns unsupported).
+// Windows and Linux (process group + kill-tree); other GOOS fail closed.
 func ProcessSpawnAuthorized(
 	argv []string,
 	cwd string,

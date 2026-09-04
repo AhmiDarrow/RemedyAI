@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package core
 
@@ -8,8 +8,8 @@ import (
 	"unsafe"
 )
 
-// nativeLib is a placeholder: in-process Zig load is Windows-first for this slice.
-// Non-Windows callers fail closed via Open().
+// nativeLib is a placeholder: in-process Zig load is Windows/Linux for this slice.
+// Other GOOS callers fail closed via Open().
 type nativeLib struct{}
 
 func openNative(path string) (nativeLib, error) {

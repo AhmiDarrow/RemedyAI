@@ -22,10 +22,11 @@ var unsafeOwners = map[string]bool{"secret": true, "core": true}
 // ipc→go-winio). modernc.org/sqlite is CGO-free; its transitive libc uses
 // unsafe internally, so the driver surface stays httpapi-only.
 // secret owns golang.org/x/sys for CryptProtectData / CryptUnprotectData.
-// core owns golang.org/x/sys for LoadDLL / Dlopen of remedy_core.
+// core owns golang.org/x/sys for LoadDLL of remedy_core and purego for Linux Dlopen.
 var externalOwners = map[string]string{
 	"github.com/Microsoft/go-winio":           "ipc",
 	"golang.org/x/sys":                        "ipc,state,secret,gateway,core",
+	"github.com/ebitengine/purego":            "core",
 	"github.com/santhosh-tekuri/jsonschema/v6": "tools",
 	"golang.org/x/crypto":                      "connect",
 	"modernc.org/sqlite":                       "httpapi",
