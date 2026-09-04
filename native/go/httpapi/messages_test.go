@@ -15,13 +15,14 @@ import (
 )
 
 type stubRunner struct {
-	mu       sync.Mutex
-	tokens   []string
-	err      error
-	calls    []TurnRequest
-	onToken  func(i int, req TurnRequest)
-	hold     chan struct{} // if set, block until closed (for 409 tests)
-	holdOnce sync.Once
+	mu         sync.Mutex
+	tokens     []string
+	err        error
+	calls      []TurnRequest
+	onToken    func(i int, req TurnRequest)
+	hold       chan struct{} // if set, block until closed (for 409 tests)
+	holdAfter  int           // emit this many tokens before hold (-1 = hold first; default 0 with hold ⇒ hold first)
+	holdOnce   sync.Once
 }
 
 func (s *stubRunner) RunTurn(ctx context.Context, req TurnRequest, emit func(string) error) error {
@@ -31,13 +32,25 @@ func (s *stubRunner) RunTurn(ctx context.Context, req TurnRequest, emit func(str
 	err := s.err
 	onToken := s.onToken
 	hold := s.hold
+	holdAfter := s.holdAfter
 	s.mu.Unlock()
 
-	if hold != nil {
+	waitHold := func() error {
+		if hold == nil {
+			return nil
+		}
 		select {
 		case <-hold:
+			return nil
 		case <-ctx.Done():
 			return ctx.Err()
+		}
+	}
+
+	// Default: hold before any tokens (409 / abort-while-busy tests).
+	if hold != nil && holdAfter <= 0 {
+		if err := waitHold(); err != nil {
+			return err
 		}
 	}
 	for i, tok := range tokens {
@@ -46,6 +59,11 @@ func (s *stubRunner) RunTurn(ctx context.Context, req TurnRequest, emit func(str
 		}
 		if err := emit(tok); err != nil {
 			return err
+		}
+		if hold != nil && holdAfter > 0 && i+1 == holdAfter {
+			if err := waitHold(); err != nil {
+				return err
+			}
 		}
 		select {
 		case <-ctx.Done():

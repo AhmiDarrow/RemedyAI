@@ -28,8 +28,8 @@ type Config struct {
 	// DBPath is the SQLite memory.db path. Empty derives from HomeDir /
 	// REMEDY_HOME / ~/.remedy/memory.db (or :memory: when no home).
 	DBPath string
-	// TurnRunner powers POST /api/sessions/{id}/messages. Nil → 503
-	// (matches Python when runtime is unavailable).
+	// TurnRunner powers POST /api/sessions/{id}/messages and .../messages/stream.
+	// Nil → 503 (matches Python when runtime is unavailable).
 	TurnRunner TurnRunner
 }
 
@@ -47,7 +47,7 @@ type Server struct {
 }
 
 // New builds a server with ping/status/turn-active, sessions CRUD,
-// messages list/create, abort, and session-events SSE registered.
+// messages list/create/stream, abort, and session-events SSE registered.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
@@ -82,6 +82,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
 	s.mux.HandleFunc("GET /api/sessions/{id}/messages", s.handleListMessages)
 	s.mux.HandleFunc("POST /api/sessions/{id}/messages", s.handleSendMessage)
+	s.mux.HandleFunc("POST /api/sessions/{id}/messages/stream", s.handleStreamMessage)
 	s.mux.HandleFunc("POST /api/sessions/{id}/abort", s.handleAbortSession)
 	s.mux.HandleFunc("GET /api/events/sessions", s.handleSessionEvents)
 	return s, nil

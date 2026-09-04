@@ -195,16 +195,44 @@ func scanMessage(row scannable) (ChatMessage, error) {
 }
 
 func (s *sessionStore) AddMessage(sessionID, role, content string, model, agent *string) (ChatMessage, error) {
+	return s.AddMessageFull(sessionID, role, content, nil, nil, nil, model, agent, nil)
+}
+
+// AddMessageFull inserts a chat row including thinking / tool payloads (stream path).
+func (s *sessionStore) AddMessageFull(
+	sessionID, role, content string,
+	thinking *string,
+	toolCalls, toolResults any,
+	model, agent *string,
+	tokens *int64,
+) (ChatMessage, error) {
 	now := nowISO()
 	id := newSessionID()
+	tcJSON := "[]"
+	trJSON := "[]"
+	if toolCalls != nil {
+		if b, err := json.Marshal(toolCalls); err == nil {
+			tcJSON = string(b)
+		}
+	}
+	if toolResults != nil {
+		if b, err := json.Marshal(toolResults); err == nil {
+			trJSON = string(b)
+		}
+	}
+	var tok any
+	if tokens != nil {
+		tok = *tokens
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(
 		`INSERT INTO chat_messages (
 			id, session_id, role, content, thinking, tool_calls, tool_results,
 			model, agent, tokens, created_at, reverted
-		) VALUES (?, ?, ?, ?, NULL, '[]', '[]', ?, ?, NULL, ?, 0)`,
-		id, sessionID, role, content, nullStr(model), nullStr(agent), now,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+		id, sessionID, role, content, nullStr(thinking), tcJSON, trJSON,
+		nullStr(model), nullStr(agent), tok, now,
 	)
 	if err != nil {
 		return ChatMessage{}, err
@@ -216,19 +244,46 @@ func (s *sessionStore) AddMessage(sessionID, role, content string, model, agent 
 	if err != nil {
 		return ChatMessage{}, err
 	}
+	var thinkAny any
+	if thinking != nil {
+		thinkAny = *thinking
+	}
+	tcAny := any([]any{})
+	trAny := any([]any{})
+	_ = json.Unmarshal([]byte(tcJSON), &tcAny)
+	_ = json.Unmarshal([]byte(trJSON), &trAny)
+	var tokAny any
+	if tokens != nil {
+		tokAny = *tokens
+	}
 	return ChatMessage{
 		ID:          id,
 		Role:        role,
 		Content:     content,
-		Thinking:    nil,
-		ToolCalls:   []any{},
-		ToolResults: []any{},
+		Thinking:    thinkAny,
+		ToolCalls:   tcAny,
+		ToolResults: trAny,
 		Model:       nullToAny(model),
 		Agent:       nullToAny(agent),
-		Tokens:      nil,
+		Tokens:      tokAny,
 		CreatedAt:   now,
 		Reverted:    false,
 	}, nil
+}
+
+func (s *sessionStore) SetTitle(sessionID, title string) error {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "New Session"
+	}
+	now := nowISO()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(
+		`UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ?`,
+		title, now, sessionID,
+	)
+	return err
 }
 
 func (s *sessionStore) UpdateLLMBind(sessionID string, provider, model *string) error {
