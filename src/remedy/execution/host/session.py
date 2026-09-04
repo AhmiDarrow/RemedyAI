@@ -92,7 +92,7 @@ class HostSession:
         await self._start_posix_pipes()
 
     async def _start_zig(self) -> None:
-        """Windows: Zig HostSession owns spawn + sentinel I/O."""
+        """Windows: Zig HostSession owns spawn + sentinel I/O (authorized open)."""
         from remedy.core.computer import host_binding
 
         if self.env is not None:
@@ -101,12 +101,16 @@ class HostSession:
             from remedy.execution.env import scrub_subprocess_env
 
             env = scrub_subprocess_env()
+        # Token hashes Zig's own session argv (PATH / SystemRoot resolution).
+        token, now_ms = host_binding.issue_host_session_token(self.host)
         handle = await asyncio.to_thread(
-            host_binding.host_session_open,
+            host_binding.host_session_open_authorized,
             host=self.host,
             cwd=self.cwd,
             env=env,
             use_conpty=bool(self.use_conpty),
+            token=token,
+            now_ms=now_ms,
         )
         self._zig_handle = int(handle)
         self._proc = None

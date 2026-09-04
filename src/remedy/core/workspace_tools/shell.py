@@ -50,6 +50,11 @@ _NO_PYTHON_MSG = (
 )
 
 
+# Retain Zig job/process-group handles so KILL_ON_JOB_CLOSE does not reap
+# background children the moment the spawn call returns.
+_BACKGROUND_CHILDREN: list[Any] = []
+
+
 def _spawn_background(
     argv: list[str],
     *,
@@ -59,17 +64,22 @@ def _spawn_background(
     auto: bool = False,
     write_roots: list[Path] | None = None,
 ) -> str:
-    """Start a command and return immediately (GUI / server / game)."""
+    """Start a command via Zig authorized spawn and return immediately.
+
+    No raw Popen soft path: missing ``remedy_core`` or a denied capability
+    token fails closed.
+    """
     import os
-    import subprocess
 
     from remedy.core.computer import host_binding
     from remedy.core.computer.host_binding import STATUS_ACCESS_DENIED, HostError
     from remedy.execution.env import scrub_subprocess_env
+    from remedy.execution.process import spawn_hidden
+    from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
     roots = list(write_roots or [])
-    host_binding.write_jail_set_roots([str(p) for p in roots])
     try:
+        host_binding.write_jail_set_roots([str(p) for p in roots])
         host_binding.write_jail_check_spawn(argv, str(cwd) if cwd else None)
     except HostError as exc:
         if exc.status == STATUS_ACCESS_DENIED:
@@ -80,39 +90,44 @@ def _spawn_background(
                 suggestion="Keep the working directory under the project folder.",
             )
         raise
-
-    kwargs: dict[str, Any] = {
-        "cwd": str(cwd) if cwd else None,
-        "env": scrub_subprocess_env(env, argv=argv),
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "stdin": subprocess.DEVNULL,
-        "close_fds": True,
-    }
-    if os.name == "nt":
-        from remedy.execution.process import hidden_subprocess_kwargs
-
-        # Games/GUIs get a real window. Servers and "run in background" must
-        # not flash a CMD — the desktop sidecar has no console to inherit.
-        new_group = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-        if auto:
-            kwargs["creationflags"] = (
-                getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010) | new_group
-            )
-        else:
-            kwargs.update(hidden_subprocess_kwargs())
-            kwargs["creationflags"] = int(kwargs.get("creationflags", 0)) | new_group
-    else:
-        kwargs["start_new_session"] = True
-    try:
-        proc = subprocess.Popen(argv, **kwargs)
-    except OSError as e:
+    except NativeRuntimeUnavailableError as exc:
         return format_tool_error(
-            f"failed to start background command: {e}",
+            f"authorized spawn unavailable: {exc}",
+            code="SPAWN_FAILED",
+            tool_name="bash_exec",
+            suggestion="Build remedy_core (zig build in native/zig) or set REMEDY_NATIVE_CORE_LIB.",
+        )
+
+    try:
+        child = spawn_hidden(
+            argv,
+            cwd=cwd,
+            env=scrub_subprocess_env(env, argv=argv),
+            write_roots=roots,
+        )
+    except HostError as exc:
+        if exc.status == STATUS_ACCESS_DENIED:
+            return format_tool_error(
+                f"blocked by spawn policy: {exc}",
+                code="SPAWN_DENIED",
+                tool_name="bash_exec",
+                suggestion="Use an allowed program under the project folder.",
+            )
+        return format_tool_error(
+            f"failed to start background command: {exc}",
             code="SPAWN_FAILED",
             tool_name="bash_exec",
             suggestion="Check the path exists and is executable.",
         )
+    except (NativeRuntimeUnavailableError, FileNotFoundError, OSError, ValueError) as e:
+        return format_tool_error(
+            f"failed to start background command: {e}",
+            code="SPAWN_FAILED",
+            tool_name="bash_exec",
+            suggestion="Check the path exists and is executable; remedy_core must be available.",
+        )
+
+    _BACKGROUND_CHILDREN.append(child)
     note = (
         " (auto: looks like a GUI/game — not waiting for exit)"
         if auto
@@ -125,7 +140,7 @@ def _spawn_background(
         else ""
     )
     return (
-        f"started background pid={proc.pid} cwd={cwd}{note}\n"
+        f"started background pid={child.pid} cwd={cwd}{note}\n"
         f"command={command}\n"
         "The process is running. Use computer_app or computer_snapshot "
         "target=desktop to play/inspect the window. Do not treat this as "
