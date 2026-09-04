@@ -1228,23 +1228,257 @@ pub fn clipboardSetText(utf8: []const u8) Error!void {
 }
 
 // ---------------------------------------------------------------------------
-// Processes — not part of the Linux desktop host surface yet
+// Processes — hidden spawn in its own process group (job-object analogue)
 // ---------------------------------------------------------------------------
+
+const linux = std.os.linux;
+
+const Process = struct {
+    pid: linux.pid_t,
+    pgid: linux.pid_t,
+    exited: bool = false,
+    exit_code: u32 = 0,
+};
 
 pub const Spawned = struct { pid: u32, handle: u64 };
 pub const WaitOutcome = struct { exited: bool, exit_code: u32 };
 
-pub fn spawnHidden(_: []const u8, _: []const u8, _: []const u8) Error!Spawned {
-    return error.Unsupported;
+fn processFrom(handle: u64) Error!*Process {
+    if (handle == 0) return error.InvalidArgument;
+    return @ptrFromInt(@as(usize, @intCast(handle)));
 }
-pub fn processWait(_: u64, _: u32) Error!WaitOutcome {
-    return error.Unsupported;
+
+fn failErrnoCode(err: linux.E) Error {
+    host.setOsError(@intCast(@intFromEnum(err)));
+    return error.OperationFailed;
 }
-pub fn killTree(_: u32) Error!void {
-    return error.Unsupported;
+
+fn reapNonBlocking(process: *Process) Error!bool {
+    if (process.exited) return true;
+    var status: u32 = 0;
+    while (true) {
+        const rc = linux.waitpid(process.pid, &status, linux.W.NOHANG);
+        switch (linux.errno(rc)) {
+            .SUCCESS => {
+                if (rc == 0) return false;
+                process.exited = true;
+                process.exit_code = if (linux.W.IFEXITED(status))
+                    linux.W.EXITSTATUS(status)
+                else if (linux.W.IFSIGNALED(status))
+                    @as(u32, @intCast(@intFromEnum(linux.W.TERMSIG(status)))) | 0x80
+                else
+                    1;
+                return true;
+            },
+            .INTR => continue,
+            .CHILD => {
+                // Already reaped elsewhere — treat as exited unknown.
+                process.exited = true;
+                process.exit_code = 1;
+                return true;
+            },
+            else => |e| return failErrnoCode(e),
+        }
+    }
 }
-pub fn processClose(_: u64) Error!void {
-    return error.Unsupported;
+
+fn killProcessGroup(pgid: linux.pid_t) void {
+    if (pgid <= 1) return;
+    _ = linux.kill(-pgid, .KILL);
+}
+
+/// init_single_threaded uses Allocator.failing — process spawn /proc walks OOM.
+fn threadedIo() std.Io.Threaded {
+    const parent_env: std.process.Environ = .{ .block = .empty };
+    return std.Io.Threaded.init(allocator, .{ .environ = parent_env });
+}
+
+fn readProcStatPpid(io: std.Io, pid: u32) ?u32 {
+    var path_buf: [64]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "/proc/{d}/stat", .{pid}) catch return null;
+    var file = std.Io.Dir.openFileAbsolute(io, path, .{}) catch return null;
+    defer file.close(io);
+    var data_buf: [512]u8 = undefined;
+    const n = file.readPositionalAll(io, &data_buf, 0) catch return null;
+    const data = data_buf[0..n];
+    // /proc/pid/stat: pid (comm) state ppid ...
+    const rparen = std.mem.lastIndexOfScalar(u8, data, ')') orelse return null;
+    if (rparen + 1 >= data.len or data[rparen + 1] != ' ') return null;
+    var rest = data[rparen + 2 ..];
+    const sp = std.mem.indexOfScalar(u8, rest, ' ') orelse return null;
+    rest = rest[sp + 1 ..];
+    const end = std.mem.indexOfScalar(u8, rest, ' ') orelse rest.len;
+    return std.fmt.parseInt(u32, rest[0..end], 10) catch null;
+}
+
+fn collectDescendants(gpa: std.mem.Allocator, io: std.Io, root: u32) Error![]u32 {
+    var victims: std.ArrayList(u32) = .empty;
+    errdefer victims.deinit(gpa);
+    try victims.append(gpa, root);
+
+    var proc_dir = std.Io.Dir.openDirAbsolute(io, "/proc", .{ .iterate = true }) catch return error.OperationFailed;
+    defer proc_dir.close(io);
+
+    var index: usize = 0;
+    while (index < victims.items.len) : (index += 1) {
+        const parent = victims.items[index];
+        var it = proc_dir.iterate();
+        while (it.next(io) catch null) |entry| {
+            if (entry.kind != .directory) continue;
+            const child_pid = std.fmt.parseInt(u32, entry.name, 10) catch continue;
+            if (child_pid == parent) continue;
+            if (std.mem.indexOfScalar(u32, victims.items, child_pid) != null) continue;
+            const ppid = readProcStatPpid(io, child_pid) orelse continue;
+            if (ppid == parent) {
+                victims.append(gpa, child_pid) catch return error.OutOfMemory;
+            }
+        }
+    }
+    return victims.toOwnedSlice(gpa) catch return error.OutOfMemory;
+}
+
+/// Kill `pid` and descendants (process-group SIGKILL + /proc walk), deepest first.
+pub fn killTree(pid: u32) Error!void {
+    if (pid == 0 or pid == 1) return error.InvalidArgument;
+    var threaded = threadedIo();
+    defer threaded.deinit();
+    const io = threaded.io();
+    const victims = try collectDescendants(allocator, io, pid);
+    defer allocator.free(victims);
+    // Prefer group kill when pid is the group leader (spawnHidden uses pgid=0).
+    killProcessGroup(@intCast(pid));
+    var index = victims.len;
+    while (index > 0) {
+        index -= 1;
+        _ = linux.kill(@intCast(victims[index]), .KILL);
+    }
+}
+
+/// Hidden spawn: stdin/stdout/stderr → /dev/null, own process group (pgid=0).
+/// Handle close / kill-tree ends the whole group (Windows job-object parity).
+pub fn spawnHidden(argv_json: []const u8, cwd: []const u8, env_json: []const u8) Error!Spawned {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const argv = try host.parseArgv(gpa, argv_json);
+    if (!std.fs.path.isAbsolute(argv[0])) return error.InvalidArgument;
+
+    var env_map_storage: ?std.process.Environ.Map = null;
+    defer if (env_map_storage) |*m| m.deinit();
+    const env_map_ptr: ?*const std.process.Environ.Map = blk: {
+        const pairs = try host.parseEnv(gpa, env_json) orelse break :blk null;
+        var map = std.process.Environ.Map.init(allocator);
+        errdefer map.deinit();
+        for (pairs) |pair| {
+            map.put(pair.key, pair.value) catch return error.OutOfMemory;
+        }
+        env_map_storage = map;
+        break :blk &env_map_storage.?;
+    };
+
+    const cwd_opt: std.process.Child.Cwd = if (cwd.len == 0)
+        .inherit
+    else
+        .{ .path = cwd };
+
+    var threaded = threadedIo();
+    defer threaded.deinit();
+    const io = threaded.io();
+    var child = std.process.spawn(io, .{
+        .argv = argv,
+        .cwd = cwd_opt,
+        .environ_map = env_map_ptr,
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+        .pgid = 0, // own process group leader (setpgid(0, 0))
+    }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.InvalidWtf8, error.InvalidUserId, error.InvalidProcessGroupId, error.InvalidExe, error.InvalidName, error.InvalidBatchScriptArg => return error.InvalidArgument,
+        else => {
+            host.setOsError(1);
+            return error.OperationFailed;
+        },
+    };
+    const pid = child.id orelse {
+        host.setOsError(1);
+        return error.OperationFailed;
+    };
+    // Own waitpid/kill-tree ourselves (Child would block forever on wait).
+    child.id = null;
+
+    const process = allocator.create(Process) catch {
+        killProcessGroup(pid);
+        _ = linux.kill(pid, .KILL);
+        var status: u32 = 0;
+        _ = linux.waitpid(pid, &status, 0);
+        return error.OutOfMemory;
+    };
+    process.* = .{ .pid = pid, .pgid = pid };
+    return .{ .pid = @intCast(pid), .handle = @intFromPtr(process) };
+}
+
+pub fn processWait(handle: u64, timeout_ms: u32) Error!WaitOutcome {
+    const process = try processFrom(handle);
+    if (try reapNonBlocking(process)) {
+        return .{ .exited = true, .exit_code = process.exit_code };
+    }
+    if (timeout_ms == 0) {
+        return .{ .exited = false, .exit_code = 0 };
+    }
+    const forever = timeout_ms == std.math.maxInt(u32);
+    const deadline: i64 = if (forever)
+        std.math.maxInt(i64)
+    else
+        monoMillis() + @as(i64, @intCast(timeout_ms));
+    while (forever or monoMillis() < deadline) {
+        sleepMs(10);
+        if (try reapNonBlocking(process)) {
+            return .{ .exited = true, .exit_code = process.exit_code };
+        }
+    }
+    return .{ .exited = false, .exit_code = 0 };
+}
+
+pub fn processClose(handle: u64) Error!void {
+    const process = try processFrom(handle);
+    if (!process.exited) {
+        killProcessGroup(process.pgid);
+        _ = linux.kill(process.pid, .KILL);
+        // Block briefly to reap; ignore leftover races.
+        var status: u32 = 0;
+        var spins: u32 = 0;
+        while (spins < 200) : (spins += 1) {
+            const rc = linux.waitpid(process.pid, &status, linux.W.NOHANG);
+            switch (linux.errno(rc)) {
+                .SUCCESS => {
+                    if (rc != 0) break;
+                },
+                .CHILD => break,
+                .INTR => continue,
+                else => break,
+            }
+            sleepMs(10);
+        }
+    }
+    allocator.destroy(process);
+}
+
+test "hidden spawn and kill-tree reaps a sleeping child" {
+    const argv = "[\"/bin/sleep\",\"30\"]";
+    const spawned = try spawnHidden(argv, "", "");
+    defer processClose(spawned.handle) catch {};
+    try std.testing.expect(spawned.pid > 1);
+    const still = try processWait(spawned.handle, 50);
+    try std.testing.expect(!still.exited);
+    try killTree(spawned.pid);
+    const done = try processWait(spawned.handle, 2000);
+    try std.testing.expect(done.exited);
+}
+
+test "spawnHidden rejects empty argv" {
+    try std.testing.expectError(error.InvalidArgument, spawnHidden("[]", "", ""));
 }
 
 // ---------------------------------------------------------------------------

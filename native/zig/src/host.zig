@@ -804,20 +804,19 @@ export fn remedy_core_process_spawn_hidden(
     out_pid: ?*u32,
     out_handle: ?*u64,
 ) callconv(.c) i32 {
-    if (!is_windows) return unsupported_status;
     const pid_slot = out_pid orelse return invalid_status;
     const handle_slot = out_handle orelse return invalid_status;
-    const spawned = windows.spawnHidden(
-        slice(argv_json, argv_len),
-        slice(cwd, cwd_len),
-        slice(env_json, env_len),
-    ) catch |err| {
-        pid_slot.* = 0;
-        handle_slot.* = 0;
-        return statusOf(err);
-    };
-    pid_slot.* = spawned.pid;
-    handle_slot.* = spawned.handle;
+    pid_slot.* = 0;
+    handle_slot.* = 0;
+    const spawned = if (is_windows)
+        windows.spawnHidden(slice(argv_json, argv_len), slice(cwd, cwd_len), slice(env_json, env_len))
+    else if (is_linux)
+        linux.spawnHidden(slice(argv_json, argv_len), slice(cwd, cwd_len), slice(env_json, env_len))
+    else
+        error.Unsupported;
+    const result = spawned catch |err| return statusOf(err);
+    pid_slot.* = result.pid;
+    handle_slot.* = result.handle;
     return ok_status;
 }
 
@@ -827,23 +826,30 @@ export fn remedy_core_process_wait(
     out_exited: ?*u8,
     out_exit_code: ?*u32,
 ) callconv(.c) i32 {
-    if (!is_windows) return unsupported_status;
     const exited_slot = out_exited orelse return invalid_status;
     const code_slot = out_exit_code orelse return invalid_status;
-    const outcome = windows.processWait(handle, timeout_ms) catch |err| return statusOf(err);
-    exited_slot.* = @intFromBool(outcome.exited);
-    code_slot.* = outcome.exit_code;
+    const outcome = if (is_windows)
+        windows.processWait(handle, timeout_ms)
+    else if (is_linux)
+        linux.processWait(handle, timeout_ms)
+    else
+        error.Unsupported;
+    const result = outcome catch |err| return statusOf(err);
+    exited_slot.* = @intFromBool(result.exited);
+    code_slot.* = result.exit_code;
     return ok_status;
 }
 
 export fn remedy_core_process_kill_tree(pid: u32) callconv(.c) i32 {
-    if (!is_windows) return unsupported_status;
-    return statusOfVoid(windows.killTree(pid));
+    if (is_windows) return statusOfVoid(windows.killTree(pid));
+    if (is_linux) return statusOfVoid(linux.killTree(pid));
+    return unsupported_status;
 }
 
 export fn remedy_core_process_close(handle: u64) callconv(.c) i32 {
-    if (!is_windows) return unsupported_status;
-    return statusOfVoid(windows.processClose(handle));
+    if (is_windows) return statusOfVoid(windows.processClose(handle));
+    if (is_linux) return statusOfVoid(linux.processClose(handle));
+    return unsupported_status;
 }
 
 /// ABI 3 accessibility snapshot. Linux: AT-SPI clickables. Windows: UIA
@@ -1083,9 +1089,10 @@ test "encode png export validates its output slots" {
 test "host exports report unsupported off windows" {
     if (is_windows) return;
     if (is_linux) {
-        // Linux implements the desktop host; process control is still unsupported.
+        // Linux implements desktop host + process control; pid 0/1 stay invalid.
         try std.testing.expectEqual(ok_status, remedy_core_dpi_awareness_enable());
-        try std.testing.expectEqual(unsupported_status, remedy_core_process_kill_tree(1));
+        try std.testing.expectEqual(invalid_status, remedy_core_process_kill_tree(0));
+        try std.testing.expectEqual(invalid_status, remedy_core_process_kill_tree(1));
         return;
     }
     try std.testing.expectEqual(unsupported_status, remedy_core_dpi_awareness_enable());
@@ -1098,4 +1105,5 @@ test "host exports report unsupported off windows" {
 
 test {
     if (is_windows) _ = windows;
+    if (is_linux) _ = linux;
 }
