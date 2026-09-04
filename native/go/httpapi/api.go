@@ -13,8 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AhmiDarrow/RemedyAI/native/go/connect"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
+
 
 // Version matches pyproject.toml until a shared ldflag/sync lands.
 // TODO: wire via -ldflags or scripts/sync_version.py.
@@ -48,6 +50,9 @@ type Server struct {
 	events   *sessionEventHub
 	claims   *streamClaims
 	runner   TurnRunner
+
+	connectGW     *connect.Gateway
+	apiListenPort int
 }
 
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
@@ -100,14 +105,16 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/sessions/{id}/messages/stream", s.handleStreamMessage)
 	s.mux.HandleFunc("POST /api/sessions/{id}/abort", s.handleAbortSession)
 	s.mux.HandleFunc("GET /api/events/sessions", s.handleSessionEvents)
+	s.mux.HandleFunc("GET /api/connect", s.handleConnect)
 	return s, nil
 }
 
-// Close aborts in-flight turns, waits for them, then releases the session store.
+// Close stops Connect, aborts in-flight turns, then releases the session store.
 func (s *Server) Close() error {
 	if s == nil {
 		return nil
 	}
+	s.stopConnectGateway()
 	if s.claims != nil {
 		s.claims.AbortAll()
 		s.claims.WaitTurns()
@@ -126,6 +133,8 @@ func (s *Server) Handler() http.Handler {
 // Serve serves until the listener closes or ctx is canceled.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.started = time.Now()
+	s.apiListenPort = listenPort(ln)
+	s.startConnectGateway(s.apiListenPort)
 	httpServer := &http.Server{Handler: s.Handler()}
 	errCh := make(chan error, 1)
 	go func() {
@@ -227,6 +236,17 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"skills_count":        0,
 		"sessions_count":      0,
 		"chat_sessions_count": 0,
+	}
+	if s.connectGW != nil {
+		h := s.connectGW.Health()
+		body["connect"] = map[string]any{
+			"serving":   h.Serving,
+			"listening": h.Listening,
+			"bind_host": h.BindHost,
+			"bind_port": h.BindPort,
+			"healing":   h.Healing,
+			"crashes":   h.Crashes,
+		}
 	}
 	// Authenticated tier may touch SQLite for chat session counts.
 	if s.token != "" && requestAuthorized(r, s.token) && s.sessions != nil {
