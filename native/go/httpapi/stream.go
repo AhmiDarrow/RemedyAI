@@ -162,11 +162,11 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Claim *before* persisting the user message (Python stream.py).
-	if !s.claims.TryClaim(sid) {
+	claimEpoch, claimCtx, claimed := s.claims.TryClaim(sid)
+	if !claimed {
 		writeJSON(w, http.StatusConflict, map[string]string{"detail": sessionBusyDetail})
 		return
 	}
-	claimEpoch := s.claims.Epoch(sid)
 	handedOff := false
 	defer func() {
 		if !handedOff {
@@ -246,7 +246,7 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 		ChatMode:    req.ChatMode,
 		Attachments: attDicts,
 	}
-	go s.runDetachedStream(sid, claimEpoch, requestID, turnReq, frames)
+	go s.runDetachedStream(sid, claimEpoch, claimCtx, requestID, turnReq, frames)
 	handedOff = true
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -300,10 +300,13 @@ func (s *Server) enqueueFrame(ch chan string, frame string) {
 func (s *Server) runDetachedStream(
 	sid string,
 	claimEpoch int,
+	ctx context.Context,
 	requestID string,
 	req TurnRequest,
 	frames chan string,
 ) {
+	s.claims.BeginTurn()
+	defer s.claims.EndTurn()
 	defer close(frames)
 	defer s.claims.Release(sid, &claimEpoch)
 
@@ -314,9 +317,11 @@ func (s *Server) runDetachedStream(
 		"claim_epoch":  claimEpoch,
 	}))
 
-	ctx := s.claims.Context(sid)
 	if ctx == nil {
-		ctx = context.Background()
+		// Should never happen after TryClaim — fail closed instead of Background.
+		cancelled, cancel := context.WithCancel(context.Background())
+		cancel()
+		ctx = cancelled
 	}
 
 	var (
