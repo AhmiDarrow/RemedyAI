@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/connect"
+	"github.com/AhmiDarrow/RemedyAI/native/go/gateway"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
@@ -52,6 +53,7 @@ type Server struct {
 	runner   TurnRunner
 
 	connectGW     *connect.Gateway
+	messengerGW   *gateway.Gateway
 	apiListenPort int
 
 	// focusedSessionID mirrors host_bridge focused desktop tab (Connect Stop).
@@ -173,11 +175,12 @@ func New(cfg Config) (*Server, error) {
 	return s, nil
 }
 
-// Close stops Connect, aborts in-flight turns, then releases the session store.
+// Close stops messenger + Connect, aborts in-flight turns, then releases the session store.
 func (s *Server) Close() error {
 	if s == nil {
 		return nil
 	}
+	s.stopMessengerGateway()
 	s.stopConnectGateway()
 	if s.claims != nil {
 		s.claims.AbortAll()
@@ -198,6 +201,7 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.started = time.Now()
 	s.apiListenPort = listenPort(ln)
+	s.startMessengerGateway()
 	s.startConnectGateway(s.apiListenPort)
 	httpServer := &http.Server{Handler: s.Handler()}
 	errCh := make(chan error, 1)
@@ -291,11 +295,20 @@ func (s *Server) handlePing(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	uptime := formatUptime(time.Since(s.started))
+	gwStats := map[string]any{"running": false}
+	if s.messengerGW != nil {
+		gwStats = s.messengerGW.StatsMap()
+		// Prefer process uptime for the top-level status field; gateway
+		// stats still expose their own started_at / uptime.
+		if !s.messengerGW.Running() {
+			gwStats["running"] = false
+		}
+	}
 	body := map[string]any{
 		"status":              "ok",
 		"version":             s.version,
 		"uptime":              uptime,
-		"gateway":             map[string]any{"running": false},
+		"gateway":             gwStats,
 		"memory_entries":      0,
 		"skills_count":        s.skillsCount(),
 		"sessions_count":      0,

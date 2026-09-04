@@ -213,6 +213,73 @@ func nullableTrim(raw *string) *string {
 	return &trimmed
 }
 
+// FindByOrigin returns a session matching origin_channel + external_chat_id.
+func (s *sessionStore) FindByOrigin(channel, externalChatID string) (ChatSession, bool, error) {
+	ch := strings.ToLower(strings.TrimSpace(channel))
+	ext := strings.TrimSpace(externalChatID)
+	if ch == "" || ext == "" {
+		return ChatSession{}, false, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row := s.db.QueryRow(
+		`SELECT id, title, model, agent, project_path, llm_provider, message_count,
+			origin_channel, external_chat_id, external_user, created_at, updated_at
+		 FROM chat_sessions
+		 WHERE origin_channel = ? AND external_chat_id = ?
+		 ORDER BY updated_at DESC LIMIT 1`,
+		ch, ext,
+	)
+	sess, err := scanSession(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ChatSession{}, false, nil
+	}
+	if err != nil {
+		return ChatSession{}, false, err
+	}
+	return sess, true, nil
+}
+
+// CreateMessenger inserts a messenger-backed session with a stable id.
+func (s *sessionStore) CreateMessenger(id, title, originChannel, externalChatID string, externalUser *string) (ChatSession, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		id = newSessionID()
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "New Session"
+	}
+	now := nowISO()
+	oc := strings.ToLower(strings.TrimSpace(originChannel))
+	ext := strings.TrimSpace(externalChatID)
+	sess := ChatSession{
+		ID:             id,
+		Title:          title,
+		MessageCount:   0,
+		OriginChannel:  nullableTrim(&oc),
+		ExternalChatID: nullableTrim(&ext),
+		ExternalUser:   nullableTrim(externalUser),
+		CreatedAt:      &now,
+		UpdatedAt:      &now,
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(
+		`INSERT INTO chat_sessions (
+			id, title, model, agent, project_path, llm_provider, message_count,
+			origin_channel, external_chat_id, external_user, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sess.ID, sess.Title, nil, nil, nil, nil, sess.MessageCount,
+		nullStr(sess.OriginChannel), nullStr(sess.ExternalChatID), nullStr(sess.ExternalUser),
+		*sess.CreatedAt, *sess.UpdatedAt,
+	)
+	if err != nil {
+		return ChatSession{}, err
+	}
+	return sess, nil
+}
+
 func (s *sessionStore) Create(req createSessionRequest) (ChatSession, error) {
 	title := strings.TrimSpace(req.Title)
 	if title == "" {

@@ -568,6 +568,7 @@ func (s *Server) runDetachedStream(
 					MessageCount:  &count,
 					Role:          &role,
 				})
+				s.mirrorDesktopReply(sess, persistText)
 			}
 		} else {
 			persistDone = true
