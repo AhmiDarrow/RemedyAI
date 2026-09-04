@@ -2,8 +2,9 @@
 
 What breaks if this code is wrong: ``desktop_uia`` is how Remedy *sees* a native
 window. Every fact it returns is handed to the model, which then acts on the
-owner's real desktop. Soft misses must stay ``None`` / ``{"ok": False}`` — never
-an exception, and never a fabricated element.
+owner's real desktop. Soft misses (off-platform, missing native core, empty
+trees) stay ``None`` / ``{"ok": False}``. ``HostError`` fails closed — it must
+propagate, never collapse to a soft blank. Never fabricate an element.
 
 The production boundary is ``remedy.core.computer.host_binding`` (Zig COM). Tests
 below mock that boundary via ``tests.harness.fake_host_binding`` — a reference
@@ -144,7 +145,8 @@ def test_reads_return_none_when_native_core_is_missing(monkeypatch: pytest.Monke
     assert got["ok"] is False
 
 
-def test_host_errors_on_reads_collapse_to_none(monkeypatch: pytest.MonkeyPatch):
+def test_host_errors_on_reads_propagate(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(desktop_uia.sys, "platform", "win32")
     monkeypatch.setattr(
         H,
         "uia_read_window_text",
@@ -166,9 +168,16 @@ def test_host_errors_on_reads_collapse_to_none(monkeypatch: pytest.MonkeyPatch):
             H.HostError("uia_control_snapshot", H.STATUS_OPERATION_FAILED)
         ),
     )
-    assert desktop_uia.read_window_text(101) is None
-    assert desktop_uia.focused_element_info() is None
-    assert desktop_uia.uia_control_snapshot(hwnd=101) is None
+    with pytest.raises(H.HostError) as read_exc:
+        desktop_uia.read_window_text(101)
+    assert read_exc.value.function == "uia_read_window_text"
+    assert read_exc.value.status == H.STATUS_OPERATION_FAILED
+    with pytest.raises(H.HostError) as focus_exc:
+        desktop_uia.focused_element_info()
+    assert focus_exc.value.function == "uia_focused_element"
+    with pytest.raises(H.HostError) as snap_exc:
+        desktop_uia.uia_control_snapshot(hwnd=101)
+    assert snap_exc.value.function == "uia_control_snapshot"
 
 
 def test_read_window_text_rejects_hwnd_zero_without_calling_native(
@@ -185,9 +194,7 @@ def test_read_window_text_rejects_hwnd_zero_without_calling_native(
     assert called["n"] == 0
 
 
-def test_element_action_is_refused_rather_than_raised_when_host_fails(
-    monkeypatch: pytest.MonkeyPatch,
-):
+def test_element_action_propagates_host_error(monkeypatch: pytest.MonkeyPatch):
     # Binding tests force win32: desktop_uia short-circuits UIA off Windows.
     monkeypatch.setattr(desktop_uia.sys, "platform", "win32")
     monkeypatch.setattr(
@@ -197,9 +204,10 @@ def test_element_action_is_refused_rather_than_raised_when_host_fails(
             H.HostError("uia_element_action", H.STATUS_OPERATION_FAILED)
         ),
     )
-    got = desktop_uia.element_action(101, "Save", action="invoke")
-    assert got["ok"] is False
-    assert "failed" in got["message"]
+    with pytest.raises(H.HostError) as exc:
+        desktop_uia.element_action(101, "Save", action="invoke")
+    assert exc.value.function == "uia_element_action"
+    assert exc.value.status == H.STATUS_OPERATION_FAILED
 
 
 # ----------------------------------------------------- binding passthrough ---
@@ -648,7 +656,8 @@ def test_the_snapshot_is_none_for_a_window_handle_uia_does_not_know():
         assert desktop_uia.uia_control_snapshot(hwnd=999) is None
 
 
-def test_a_host_failure_yields_none_rather_than_an_exception(monkeypatch: pytest.MonkeyPatch):
+def test_a_host_failure_on_snapshot_propagates(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(desktop_uia.sys, "platform", "win32")
     monkeypatch.setattr(
         H,
         "uia_control_snapshot",
@@ -656,7 +665,10 @@ def test_a_host_failure_yields_none_rather_than_an_exception(monkeypatch: pytest
             H.HostError("uia_control_snapshot", H.STATUS_OPERATION_FAILED)
         ),
     )
-    assert desktop_uia.uia_control_snapshot(hwnd=101) is None
+    with pytest.raises(H.HostError) as exc:
+        desktop_uia.uia_control_snapshot(hwnd=101)
+    assert exc.value.function == "uia_control_snapshot"
+    assert exc.value.status == H.STATUS_OPERATION_FAILED
 
 
 def test_the_desktop_walk_covers_named_top_level_windows():

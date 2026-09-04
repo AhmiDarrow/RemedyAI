@@ -148,6 +148,21 @@ def test_linux_host_fail_closed(monkeypatch) -> None:
     assert res.get("ok") is False
 
 
+def test_linux_capture_host_error_fails_closed_not_blank(monkeypatch) -> None:
+    """Capture HostError must raise — never a soft 10x10 blank frame."""
+    monkeypatch.setattr(lin, "_require_linux", lambda: None)
+
+    def boom(*_a, **_k):
+        raise H.HostError("capture_virtual_screen", H.STATUS_OPERATION_FAILED)
+
+    monkeypatch.setattr(H, "capture_virtual_screen", boom)
+    with pytest.raises(RuntimeError, match="capture") as exc:
+        lin._capture_virtual_screen()
+    assert isinstance(exc.value.__cause__, H.HostError)
+    assert exc.value.__cause__.function == "capture_virtual_screen"
+    assert exc.value.__cause__.status == H.STATUS_OPERATION_FAILED
+
+
 def test_linux_module_has_no_pointer_tool_shellout() -> None:
     """Phase 2 cutover: no external pointer/capture tool argv remains."""
     src = Path(lin.__file__).read_text(encoding="utf-8")
