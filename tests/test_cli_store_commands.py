@@ -17,6 +17,7 @@ from remedy.interfaces.cli.cmd_store import (
     _cmd_handoff,
     _cmd_memory,
     _cmd_migrate,
+    _cmd_session,
     _cmd_user,
 )
 from remedy.memory.store import MemoryStore
@@ -239,6 +240,35 @@ async def test_showing_a_handoff_that_does_not_exist_exits_nonzero(db, capsys):
         await _cmd_handoff(args(handoff_cmd="show", id="no-such-id"), db)
     assert exc.value.code == 1
     assert "not found" in capsys.readouterr().out.lower()
+
+
+# --- session start / end (no BasicRuntime) -----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_session_start_persists_active_marker(db, capsys):
+    await _cmd_session(args(session_cmd="start"), db)
+    out = capsys.readouterr().out
+    assert "Session started" in out
+    marker = db.parent / "cli_active_session"
+    assert marker.is_file()
+    assert marker.read_text(encoding="utf-8").strip()
+
+
+@pytest.mark.asyncio
+async def test_session_end_without_start_is_quiet(db, capsys):
+    await _cmd_session(args(session_cmd="end"), db)
+    assert "No active session" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_session_end_after_start_creates_handoff(db, capsys):
+    await _cmd_session(args(session_cmd="start"), db)
+    capsys.readouterr()
+    await _cmd_session(args(session_cmd="end"), db)
+    out = capsys.readouterr().out
+    assert "Handoff created" in out
+    assert not (db.parent / "cli_active_session").exists()
 
 
 # --- migration ---------------------------------------------------------------

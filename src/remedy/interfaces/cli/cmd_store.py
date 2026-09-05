@@ -16,7 +16,7 @@ from remedy.memory.consolidator import MemoryConsolidator
 from remedy.memory.handoff import HandoffNote
 from remedy.memory.repair import MemoryRepair
 from remedy.memory.store import MemoryStore
-from remedy.models import AgentConfig, MemoryEntry, MemoryEntryType
+from remedy.models import MemoryEntry, MemoryEntryType
 from remedy.skills.registry import SkillRegistry
 
 
@@ -98,37 +98,69 @@ async def _cmd_user(args, db_path: Path) -> None:
                 console.print("[dim]No facts found.[/dim]")
 
 
+def _cli_active_session_path(db_path: Path) -> Path:
+    return db_path.parent / "cli_active_session"
+
+
 async def _cmd_session(args, db_path: Path) -> None:
-    from remedy.core.agent import BasicRuntime
-    config = AgentConfig(
-        memory_db_path=str(db_path),
-        home_dir=str(db_path.parent),
-    )
-    runtime = BasicRuntime(config)
-    await runtime.start()
+    """CLI session start/end via MemoryStore + AutoHandoff (no BasicRuntime)."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
 
-    if args.session_cmd == "start":
-        sid = await runtime.start_session()
-        console.print(f"[green]Session started:[/green] {sid}")
+    from remedy.memory.handoff import AutoHandoffManager
+    from remedy.models import MemoryEntry, MemoryEntryType
 
-        pending = await runtime.handoff.get_pending_handoffs()
-        if pending:
-            console.print(f"[yellow]{len(pending)} pending handoff(s) from previous sessions:[/yellow]")
-            for h in pending:
-                console.print(f"  {h.title}: {h.content[:80]}...")
+    marker = _cli_active_session_path(db_path)
 
-    elif args.session_cmd == "end":
-        handoff = await runtime.end_session()
-        if handoff:
+    async with MemoryStore(db_path) as store:
+        handoff_mgr = AutoHandoffManager(store)
+
+        if args.session_cmd == "start":
+            sid = str(uuid4())
+            await store.upsert(
+                MemoryEntry(
+                    title="Session started",
+                    content=f"Session {sid} started.",
+                    entry_type=MemoryEntryType.NOTE,
+                    importance=0.3,
+                )
+            )
+            marker.write_text(sid + "\n", encoding="utf-8")
+            console.print(f"[green]Session started:[/green] {sid}")
+
+            pending = await handoff_mgr.get_pending_handoffs()
+            if pending:
+                console.print(
+                    f"[yellow]{len(pending)} pending handoff(s) from previous sessions:[/yellow]"
+                )
+                for h in pending:
+                    console.print(f"  {h.title}: {h.content[:80]}...")
+
+        elif args.session_cmd == "end":
+            sid = ""
+            if marker.is_file():
+                sid = marker.read_text(encoding="utf-8").strip()
+            if not sid:
+                console.print("[dim]No active session to end.[/dim]")
+                return
+
+            handoff = await handoff_mgr.generate_handoff(session_id=sid, tasks=[], open_tasks=[])
+            await handoff_mgr.generate_session_summary(
+                session_id=sid,
+                started_at=datetime.now(UTC),
+                tasks_completed=0,
+                key_decisions=[],
+                open_items=[],
+            )
+            try:
+                marker.unlink(missing_ok=True)
+            except OSError:
+                pass
             console.print(f"[green]Session ended. Handoff created:[/green] {handoff.id}")
             console.print(Panel(
                 f"[bold]{handoff.title}[/bold]\n{handoff.content[:300]}",
                 title="Auto-Handoff",
             ))
-        else:
-            console.print("[dim]No active session to end.[/dim]")
-
-    await runtime.stop()
 
 
 
