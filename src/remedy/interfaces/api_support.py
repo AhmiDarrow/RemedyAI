@@ -1,4 +1,4 @@
-"""Shared API helpers: SSE framing, slash commands, config sync, body caps."""
+"""Shared helpers: slash commands, config sync. Production HTTP is Go :7400."""
 
 from __future__ import annotations
 
@@ -10,8 +10,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException, Request
-
 from remedy.interfaces.config import (
     CONFIG_PATHS,
 )
@@ -21,47 +19,9 @@ from remedy.interfaces.config import (
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_BODY_MAX_BYTES = 2 * 1024 * 1024
-
-
-async def read_body_capped(
-    request: Request,
-    *,
-    max_bytes: int = _DEFAULT_BODY_MAX_BYTES,
-) -> bytes:
-    """Reject oversized Content-Length and stream-cap before handlers parse."""
-    cl = request.headers.get("content-length")
-    if cl:
-        try:
-            if int(cl) > max_bytes:
-                raise HTTPException(413, "payload too large")
-        except ValueError:
-            pass
-    chunks: list[bytes] = []
-    total = 0
-    async for chunk in request.stream():
-        total += len(chunk)
-        if total > max_bytes:
-            raise HTTPException(413, "payload too large")
-        chunks.append(chunk)
-    return b"".join(chunks)
-
-
-#: Prior name from routes.webhooks — keep for callers that still import it.
-_read_body_capped = read_body_capped
-
-
-async def _sse_stream_text(text: str, *, event: str | None = None) -> str:
-    """Format a single SSE frame."""
-    prefix = f"event: {event}\n" if event else ""
-    payload_obj: dict = {"text": text}
-    if event:
-        payload_obj["type"] = event
-    payload = json.dumps(payload_obj)
-    return f"{prefix}data: {payload}\n\n"
-
 
 def sse_headers() -> dict[str, str]:
+    """SSE response headers (re-exported by test-only FastAPI create_app)."""
     return {
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
@@ -82,9 +42,7 @@ __all__ = [
     "_BUILTIN_AGENTS",
     "_BUILTIN_COMMANDS",
     "_BUILTIN_MODELS",
-    "_read_body_capped",
     "handle_slash_command",
-    "read_body_capped",
     "sse_headers",
 ]
 
