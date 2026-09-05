@@ -293,3 +293,105 @@ async def _memory_search_async(inp: Mapping[str, Any]) -> dict[str, Any]:
 def search_memory(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     """Sync RMDY handler — Partner Memory + FTS search (context, not a grant)."""
     return _run_coro(_memory_search_async(inp))
+
+
+async def _memory_save_async(inp: Mapping[str, Any]) -> dict[str, Any]:
+    """Persist an explicit memory note with the same guards as agent memory_save."""
+    from contextlib import suppress
+
+    from remedy.memory.authority import (
+        looks_like_instruction_launder,
+        may_write_parent_memory,
+        stamp_entry_metadata,
+    )
+    from remedy.memory.partner_memory import looks_like_secret, upsert_profile_fact
+    from remedy.models import MemoryEntry, MemoryEntryType
+
+    content = str(inp.get("content") or "").strip()
+    if not content:
+        raise ValueError("content is required")
+    if len(content) > 8_000:
+        content = content[:8_000]
+    title = str(inp.get("title") or "Remembered").strip() or "Remembered"
+    category = str(inp.get("category") or "general").strip() or "general"
+    home_dir = str(inp.get("home_dir") or "").strip() or None
+    project_path = str(inp.get("project_path") or "").strip() or None
+    session_id = str(inp.get("session_id") or "").strip() or None
+
+    if looks_like_secret(content):
+        raise PermissionError(
+            "content looks like a secret (API key/password); "
+            "do not store credentials in Partner Memory"
+        )
+    if looks_like_instruction_launder(content):
+        raise PermissionError(
+            "content looks like an instruction trying to become standing memory; "
+            "memory is context, not a grant"
+        )
+
+    runtime = await get_cached_runtime(home_dir=home_dir, project_path=project_path)
+    memory = getattr(runtime, "memory", None)
+    if memory is None:
+        raise RuntimeError("memory store not available")
+
+    parent_ok = may_write_parent_memory(session_id)
+    why = (
+        "hive session note (not parent Partner Memory)"
+        if not parent_ok
+        else "you asked to remember"
+    )
+    meta = stamp_entry_metadata(
+        {},
+        source="explicit" if parent_ok else "hive",
+        session_id=session_id,
+        inferred=False,
+        why=why,
+    )
+    await memory.upsert(
+        MemoryEntry(
+            title=title[:120],
+            content=content,
+            entry_type=MemoryEntryType.NOTE,
+            importance=0.75,
+            session_id=session_id,
+            metadata=meta,
+        )
+    )
+    if parent_ok:
+        with suppress(Exception):
+            from remedy.memory.middleman import get_session_middleman
+
+            get_session_middleman(str(session_id or "")).put(
+                content,
+                kind="fact",
+                session_id=str(session_id or ""),
+                body_cap=1_000,
+            )
+    if parent_ok and len(content) < 400:
+        with suppress(Exception):
+            profile = await memory.get_or_create_profile()
+            upsert_profile_fact(
+                profile,
+                content,
+                category=category,
+                confidence=0.9,
+                source="explicit",
+                force=True,
+                inferred=False,
+                authority="owner",
+                why=why,
+                session_id=session_id,
+            )
+            await memory.save_user_profile(profile)
+
+    return {
+        "saved": True,
+        "title": title[:120],
+        "parent_memory": bool(parent_ok),
+        "why": why,
+    }
+
+
+def save_memory(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Sync RMDY handler — explicit Partner Memory write with secret/launder guards."""
+    return _run_coro(_memory_save_async(inp))

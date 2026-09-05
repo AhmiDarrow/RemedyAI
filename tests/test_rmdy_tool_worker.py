@@ -721,3 +721,42 @@ def test_stdio_tool_round_trip_memory_search(
 def test_memory_search_registered() -> None:
     assert ("memory.search", 1) in worker._HANDLERS
 
+
+def test_memory_save_handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+    (tmp_path / "config.toml").write_text(
+        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
+        encoding="utf-8",
+    )
+    from remedy.runtime import prompt_assemble as pa
+
+    pa._runtime_cache.clear()
+    out = worker._memory_save(
+        {
+            "content": "Owner likes oat milk in coffee",
+            "title": "Preference",
+            "session_id": "sess-save",
+        }
+    )
+    assert out["saved"] is True
+    assert out["title"] == "Preference"
+    assert out["parent_memory"] is True
+
+
+def test_memory_save_refuses_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    from remedy.runtime import prompt_assemble as pa
+
+    pa._runtime_cache.clear()
+    with pytest.raises(PermissionError, match="secret"):
+        worker._memory_save(
+            {"content": "sk-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF"}
+        )
+
+
+def test_memory_save_registered() -> None:
+    assert ("memory.save", 1) in worker._HANDLERS
+

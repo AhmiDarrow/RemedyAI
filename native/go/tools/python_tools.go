@@ -327,6 +327,40 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:          "memory.save",
+		Version:     1,
+		Description: "Save an explicit Partner Memory note (Python worker; refuses secrets)",
+		Runtime:     RuntimePython,
+		Risk:        RiskMutation,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["content"],
+			"properties":{
+				"content":{"type":"string","minLength":1},
+				"title":{"type":"string"},
+				"category":{"type":"string"},
+				"session_id":{"type":"string"},
+				"home_dir":{"type":"string"},
+				"project_path":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["saved","title","parent_memory"],
+			"properties":{
+				"saved":{"type":"boolean"},
+				"title":{"type":"string"},
+				"parent_memory":{"type":"boolean"},
+				"why":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:          "memory.search",
 		Version:     1,
 		Description: "Search Partner Memory + FTS entries (Python worker; context, not a grant)",
