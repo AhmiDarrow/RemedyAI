@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -606,10 +605,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if sess.ProjectPath != nil {
-			projectPath = strings.TrimSpace(*sess.ProjectPath)
-			if projectPath != "" {
-				projectPath = filepath.Clean(projectPath)
-			}
+			projectPath = effectiveTurnProjectPath(*sess.ProjectPath)
 		}
 		sp, sm := resolveSessionLLMBind(sess.LLMProvider, sess.Model, req.Provider, req.Model)
 		if p, m, has := sessionLLMUpdateFields(sp, sm); has {
@@ -640,6 +636,8 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		ctx = r.Context()
 	}
 	var responseText strings.Builder
+	var collectedToolCalls []map[string]any
+	var collectedToolResults []map[string]any
 	turnErr := s.runner.RunTurn(ctx, TurnRequest{
 		SessionID:   sid,
 		Prompt:      prompt,
@@ -656,6 +654,23 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 			return s.claims.DrainNudges(sid)
 		},
 	}, func(token string) error {
+		if strings.HasPrefix(token, "@@tool_call:") {
+			collectedToolCalls = append(collectedToolCalls, parseToolCallToken(token))
+			return nil
+		}
+		if strings.HasPrefix(token, "@@tool_result:") {
+			name, preview, ok := parseToolResultToken(token)
+			item := map[string]any{"name": name, "output": preview, "error": nil}
+			if !ok {
+				errMsg := preview
+				if errMsg == "" {
+					errMsg = "tool failed"
+				}
+				item["error"] = errMsg
+			}
+			collectedToolResults = append(collectedToolResults, item)
+			return nil
+		}
 		if strings.HasPrefix(token, "@@") {
 			return nil
 		}
@@ -693,12 +708,24 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reply := responseText.String()
-	if s.sessions != nil && reply != "" {
+	hasTools := len(collectedToolCalls) > 0 || len(collectedToolResults) > 0
+	if reply == "" && hasTools {
+		reply = "*(Used tools — see process.)*"
+	}
+	if s.sessions != nil && (reply != "" || hasTools) {
 		if _, ok, _ := s.sessions.Get(sid); !ok {
 			writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Session not found"})
 			return
 		}
-		if _, err := s.sessions.AddMessage(sid, "assistant", reply, sessModel, nil); err != nil {
+		var calls any = []any{}
+		var results any = []any{}
+		if len(collectedToolCalls) > 0 {
+			calls = collectedToolCalls
+		}
+		if len(collectedToolResults) > 0 {
+			results = collectedToolResults
+		}
+		if _, err := s.sessions.AddMessageFull(sid, "assistant", reply, nil, calls, results, sessModel, nil, nil); err != nil {
 			if _, ok, _ := s.sessions.Get(sid); !ok {
 				writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Session not found"})
 				return

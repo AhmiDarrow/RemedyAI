@@ -315,7 +315,9 @@ func normalizeSettingsPatch(patch, cfg ConfigMap) {
 	}
 	if v, ok := patch["project_path"]; ok && v != nil {
 		raw := strings.TrimSpace(fmt.Sprint(v))
-		if raw == "." || raw == "./" {
+		// Home / volume roots / install dir / "." are not project folders —
+		// persist empty so agency tools use Documents/Remedy.
+		if isUnsetProjectPath(raw) || isPackagedInstallDir(raw) {
 			raw = ""
 		}
 		patch["project_path"] = raw
@@ -602,10 +604,9 @@ func (s *Server) settingsPayload() map[string]any {
 	}
 
 	projectPath := cfgString(cfg, "project_path", "")
-	if projectPath == "" {
-		if wd, err := os.Getwd(); err == nil {
-			projectPath = wd
-		}
+	if isUnsetProjectPath(projectPath) {
+		// Do not advertise install cwd or the user profile as the focus folder.
+		projectPath = ""
 	}
 
 	gender := strings.ToLower(strings.TrimSpace(cfgString(cfg, "agent_gender", "female")))
