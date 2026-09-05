@@ -47,15 +47,17 @@ func TestRegisterZigHostToolsDescriptors(t *testing.T) {
 			t.Fatalf("%s capabilities=%v", id, desc.Capabilities)
 		}
 	}
-	clipRead, err := registry.Latest("clipboard.read")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if clipRead.Runtime != RuntimeZig || clipRead.Risk != RiskReadOnly {
-		t.Fatalf("clipboard.read runtime/risk=%s/%v", clipRead.Runtime, clipRead.Risk)
-	}
-	if len(clipRead.Capabilities) == 0 || clipRead.Capabilities[0] != "computer.read" {
-		t.Fatalf("clipboard.read capabilities=%v", clipRead.Capabilities)
+	for _, id := range []string{"clipboard.read", "clipboard.read_files", "clipboard.read_image"} {
+		clipRead, err := registry.Latest(id)
+		if err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		if clipRead.Runtime != RuntimeZig || clipRead.Risk != RiskReadOnly {
+			t.Fatalf("%s runtime/risk=%s/%v", id, clipRead.Runtime, clipRead.Risk)
+		}
+		if len(clipRead.Capabilities) == 0 || clipRead.Capabilities[0] != "computer.read" {
+			t.Fatalf("%s capabilities=%v", id, clipRead.Capabilities)
+		}
 	}
 	shell, err := registry.Latest("shell.exec")
 	if err != nil {
@@ -136,12 +138,12 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 		t.Fatalf("computer.key err=%v", err)
 	}
 
-	for _, id := range []string{"computer.move", "computer.scroll", "clipboard.read", "clipboard.write", "computer.focus", "computer.window", "computer.print_window", "computer.uia.focused", "computer.uia.read_text", "computer.uia.action"} {
+	for _, id := range []string{"computer.move", "computer.scroll", "clipboard.read", "clipboard.read_files", "clipboard.read_image", "clipboard.write", "computer.focus", "computer.window", "computer.print_window", "computer.uia.focused", "computer.uia.read_text", "computer.uia.action"} {
 		input := json.RawMessage(`{"x":1,"y":2}`)
 		switch id {
 		case "computer.scroll":
 			input = json.RawMessage(`{"x":1,"y":2,"dy":-1}`)
-		case "clipboard.read", "computer.uia.focused":
+		case "clipboard.read", "clipboard.read_files", "clipboard.read_image", "computer.uia.focused":
 			input = json.RawMessage(`{}`)
 		case "clipboard.write":
 			input = json.RawMessage(`{"text":"hi"}`)
@@ -479,6 +481,42 @@ func TestClipboardWriteRejectsMissingText(t *testing.T) {
 	}
 }
 
+func TestClipboardReadFilesRejectsExtraFields(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "clipboard.read_files",
+		Version:         1,
+		Input:           json.RawMessage(`{"extra":true}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("extra fields: %v", err)
+	}
+}
+
+func TestClipboardReadImageRejectsExtraFields(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "clipboard.read_image",
+		Version:         1,
+		Input:           json.RawMessage(`{"label":"x","extra":1}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("extra fields: %v", err)
+	}
+}
+
 func TestShellExecRejectsRelativeArgv(t *testing.T) {
 	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
 		return nil
@@ -780,6 +818,56 @@ func TestZigHostToolsLiveWhenLibraryPresent(t *testing.T) {
 		if !strings.Contains(actionOut.Message, "not found") {
 			t.Fatalf("expected not-found message: %#v", actionOut)
 		}
+	}
+
+	clipFiles, err := registry.Execute(context.Background(), Request{
+		ToolID: "clipboard.read_files", Version: 1, Input: json.RawMessage(`{}`),
+		CapabilityToken: token,
+	})
+	if err != nil {
+		t.Fatalf("clipboard.read_files: %v", err)
+	}
+	var filesOut struct {
+		Files []string `json:"files"`
+		Count int      `json:"count"`
+	}
+	if err := json.Unmarshal(clipFiles.Output, &filesOut); err != nil {
+		t.Fatal(err)
+	}
+	if filesOut.Count != len(filesOut.Files) {
+		t.Fatalf("files count mismatch: %#v", filesOut)
+	}
+	if filesOut.Files == nil {
+		t.Fatal("expected non-nil files array")
+	}
+
+	clipImage, err := registry.Execute(context.Background(), Request{
+		ToolID: "clipboard.read_image", Version: 1, Input: json.RawMessage(`{"label":"tool-abi"}`),
+		CapabilityToken: token,
+	})
+	if err != nil {
+		t.Fatalf("clipboard.read_image: %v", err)
+	}
+	var imageOut struct {
+		Available bool   `json:"available"`
+		Path      string `json:"path"`
+		Bytes     int    `json:"bytes"`
+	}
+	if err := json.Unmarshal(clipImage.Output, &imageOut); err != nil {
+		t.Fatal(err)
+	}
+	if imageOut.Available {
+		if imageOut.Bytes < 1 || imageOut.Path == "" {
+			t.Fatalf("available image missing path/bytes: %#v", imageOut)
+		}
+		if _, err := os.Stat(imageOut.Path); err != nil {
+			t.Fatalf("clipboard png missing: %v", err)
+		}
+		if !strings.Contains(filepath.ToSlash(imageOut.Path), "/computer/clipboard/") {
+			t.Fatalf("unexpected clipboard path %q", imageOut.Path)
+		}
+	} else if imageOut.Path != "" || imageOut.Bytes != 0 {
+		t.Fatalf("unavailable image should be empty: %#v", imageOut)
 	}
 
 	cmd := filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")

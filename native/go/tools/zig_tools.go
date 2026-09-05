@@ -601,6 +601,58 @@ func RegisterZigHostTools(registry *Registry) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:           "clipboard.read_files",
+		Version:      1,
+		Description:  "Read CF_HDROP clipboard file paths via Zig (Windows; empty when absent)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskReadOnly,
+		Capabilities: []string{"computer.read"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["files","count"],
+			"properties":{
+				"files":{"type":"array","items":{"type":"string"}},
+				"count":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeClipboardReadFiles)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:           "clipboard.read_image",
+		Version:      1,
+		Description:  "Read CF_DIB clipboard image as PNG under REMEDY_HOME/computer/clipboard (Windows; path-based to avoid Tool ABI payload bloat)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskReadOnly,
+		Capabilities: []string{"computer.read"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"label":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["available","path","bytes"],
+			"properties":{
+				"available":{"type":"boolean"},
+				"path":{"type":"string"},
+				"bytes":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeClipboardReadImage)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:           "clipboard.write",
 		Version:      1,
 		Description:  "Replace OS text clipboard via Zig (UTF-8)",
@@ -1305,6 +1357,73 @@ func executeClipboardRead(_ context.Context, request Request) (Result, error) {
 	}
 	out, err := json.Marshal(map[string]any{
 		"text": text, "chars": len([]rune(text)),
+	})
+	return Result{Output: out}, err
+}
+
+func executeClipboardReadFiles(_ context.Context, request Request) (Result, error) {
+	if len(request.Input) > 0 {
+		var body map[string]any
+		if err := json.Unmarshal(request.Input, &body); err != nil {
+			return Result{}, ErrInvalidInput
+		}
+		if len(body) != 0 {
+			return Result{}, ErrInvalidInput
+		}
+	}
+	files, err := core.ClipboardGetFiles()
+	if err != nil {
+		return Result{}, err
+	}
+	if files == nil {
+		files = []string{}
+	}
+	out, err := json.Marshal(map[string]any{
+		"files": files, "count": len(files),
+	})
+	return Result{Output: out}, err
+}
+
+func executeClipboardReadImage(_ context.Context, request Request) (Result, error) {
+	label := "clipboard"
+	if len(request.Input) > 0 {
+		var body map[string]any
+		if err := json.Unmarshal(request.Input, &body); err != nil {
+			return Result{}, ErrInvalidInput
+		}
+		for key, value := range body {
+			if key != "label" {
+				return Result{}, ErrInvalidInput
+			}
+			s, ok := value.(string)
+			if !ok {
+				return Result{}, ErrInvalidInput
+			}
+			if trimmed := strings.TrimSpace(s); trimmed != "" {
+				label = trimmed
+			}
+		}
+	}
+	png, err := core.ClipboardGetImagePNG()
+	if err != nil {
+		return Result{}, err
+	}
+	if len(png) == 0 {
+		out, err := json.Marshal(map[string]any{
+			"available": false, "path": "", "bytes": 0,
+		})
+		return Result{Output: out}, err
+	}
+	home := resolveToolHome()
+	if home == "" {
+		return Result{}, fmt.Errorf("%w: REMEDY_HOME required for clipboard.read_image", core.ErrUnavailable)
+	}
+	path, err := core.WriteClipboardPNG(home, label, png)
+	if err != nil {
+		return Result{}, err
+	}
+	out, err := json.Marshal(map[string]any{
+		"available": true, "path": path, "bytes": len(png),
 	})
 	return Result{Output: out}, err
 }
