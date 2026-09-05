@@ -74,15 +74,8 @@ async def test_tool_run_invokes_tool_abi(monkeypatch, tmp_path: Path, capsys):
 async def test_tool_run_does_not_import_basic_runtime(monkeypatch, tmp_path: Path):
     home = tmp_path / ".remedy"
     home.mkdir()
+    import sys
 
-    def fake_req(method, path, *, home, body=None, timeout=30.0):
-        import sys
-
-        assert "remedy.core.agent" not in sys.modules or True
-        # Prove the handler path never constructs BasicRuntime.
-        raise AssertionError("should not reach HTTP for this import probe")
-
-    # Force a failure path that still shouldn't need BasicRuntime.
     monkeypatch.setattr(
         cmd_skills,
         "_tool_runtime_request",
@@ -99,6 +92,7 @@ async def test_tool_run_does_not_import_basic_runtime(monkeypatch, tmp_path: Pat
             )
         )
     assert exc.value.code == 1
+    assert "remedy.core.agent" not in sys.modules
 
 
 @pytest.mark.asyncio

@@ -134,8 +134,8 @@ def test_gate_commands_are_not_over_quoted() -> None:
     """Every gate failed on Windows because quotes reached the tool literally."""
     from pathlib import Path as _P
 
-    from remedy.core.self_inject_draft import _gate_cmds
     from remedy.core.computer.host_binding import prepare_host_command
+    from remedy.core.self_inject_draft import _gate_cmds
 
     class T:
         test_id = "tests/test_x.py::test_y"

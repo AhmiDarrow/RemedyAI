@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 from remedy.core.plan_store import (
     PLAN_MODE_SYSTEM_ADDENDUM,
     PLAN_MODE_TOOL_NAMES,

@@ -260,9 +260,9 @@ async def _run_host_session(
 ) -> str:
     """Run *command* in the shared persistent host session (opt-in)."""
     from remedy.core.computer import host_binding
+    from remedy.core.computer.host_binding import close_shared_session, get_shared_session
     from remedy.core.errors import format_tool_error
     from remedy.core.shell_write_jail import check_shell_write_jail
-    from remedy.core.computer.host_binding import close_shared_session, get_shared_session
 
     try:
         sess = await get_shared_session(
@@ -693,8 +693,7 @@ def register_shell_tools(runtime: Any) -> None:
             return format_open_folder_result(info)
 
         from remedy.core.computer import host_binding
-        from remedy.core.computer.host_binding import HostOp
-        from remedy.core.computer.host_binding import PreparedCommand, prepare_host_command
+        from remedy.core.computer.host_binding import HostOp, PreparedCommand, prepare_host_command
 
         try:
             if _argv:

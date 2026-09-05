@@ -7,6 +7,7 @@ from contextvars import ContextVar
 from typing import Any
 
 from remedy.core.errors import format_tool_error
+
 # Set when authorize_tool allows this task through so handlers do not
 # re-ask (mail one-shot would otherwise be consumed twice).
 _gate_passed: ContextVar[str | None] = ContextVar("remedy_gate_passed", default=None)

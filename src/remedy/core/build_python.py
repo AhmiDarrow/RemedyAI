@@ -161,7 +161,6 @@ def _single_exe(cmd: list[str] | None) -> str:
         return _LAUNCHER_RESOLVE_CACHE[key]
     exe = ""
     with suppress(Exception):
-        import subprocess
 
         from remedy.execution.process import run_hidden
 

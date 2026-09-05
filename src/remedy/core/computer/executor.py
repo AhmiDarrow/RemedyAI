@@ -918,8 +918,8 @@ class ComputerExecutor:
             if el is not None:
                 if surface == "desktop" and el.get("offscreen") and el.get("hwnd"):
                     with contextlib.suppress(Exception):
-                        from remedy.core.computer.guidance import element_action
                         from remedy.core.computer.elements import find_best_element
+                        from remedy.core.computer.guidance import element_action
 
                         res = element_action(
                             int(el["hwnd"]),
@@ -2410,8 +2410,8 @@ class ComputerExecutor:
                 if not (el.get("offscreen") and el.get("hwnd")):
                     return el
                 with contextlib.suppress(Exception):
-                    from remedy.core.computer.guidance import element_action
                     from remedy.core.computer.elements import find_best_element
+                    from remedy.core.computer.guidance import element_action
 
                     res = element_action(
                         int(el["hwnd"]),

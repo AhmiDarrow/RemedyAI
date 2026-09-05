@@ -10,14 +10,13 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any
 
 from remedy.core.build_oracle import coerce_text_arg
 from remedy.core.computer import host_binding as H
 from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
 _TOGGLE_ROLES = frozenset({"checkbox", "togglebutton", "switch", "radiobutton"})
-_T = TypeVar("_T")
 
 # When this matches, the full playbook is worth the tokens. Coding "implement X"
 # must not pay for grocery/CUA liturgy on every turn.
@@ -420,7 +419,7 @@ def preferred_click_action(role: str = "") -> str:
     return "invoke"
 
 
-def _uia_call(fn: Callable[[], _T], *, default: _T) -> _T:
+def _uia_call[T](fn: Callable[[], T], *, default: T) -> T:
     """Soft-miss only when native core is absent / off-platform."""
     if sys.platform != "win32":
         return default

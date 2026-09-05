@@ -1155,7 +1155,6 @@ async def maybe_bootstrap_local_create(
         compile_note = f" (py_compile warning: {exc})"
     if wants_hello and print_phrase:
         try:
-            import subprocess
 
             from remedy.core.build_python import python_cmd_for_subprocess
 

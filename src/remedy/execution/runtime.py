@@ -283,8 +283,7 @@ class ToolRuntime:
             return coerce_argv(tool_call.arguments.get("argv"))
 
         if name == "host_script":
-            from remedy.core.computer.host_binding import script_op
-            from remedy.core.computer.host_binding import prepare_host_op
+            from remedy.core.computer.host_binding import prepare_host_op, script_op
 
             lang = str(tool_call.arguments.get("lang") or "pwsh")
             body = str(tool_call.arguments.get("body") or "")

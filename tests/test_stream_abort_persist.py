@@ -9,8 +9,6 @@ unit coverage.
 from __future__ import annotations
 
 
-
-
 def test_abort_reason_normalize_and_peek() -> None:
     from remedy.core.turn_context import (
         abort_session,

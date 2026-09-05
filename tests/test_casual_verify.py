@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 from remedy.core.build_oracle import run_casual_verify
 from remedy.core.jobs import JobResult
+
+
 def test_casual_verify_runs_the_job(monkeypatch):
     called: dict = {}
 

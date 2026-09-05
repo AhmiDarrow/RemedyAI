@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import json
-
 from remedy.core.react_stream import ensure_tool_call_pairings, normalize_tool_calls
+
 
 def test_normalize_tool_calls_assigns_ids_and_skips_empty_names():
     raw = [

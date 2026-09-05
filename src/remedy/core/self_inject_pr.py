@@ -16,7 +16,6 @@ Security
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import re
@@ -145,9 +144,9 @@ def _git(repo: Path, *args: str, timeout: float = 60.0) -> tuple[int, str, str]:
 async def _run_exec(
     repo: Path, argv: list[str], *, timeout: float
 ) -> tuple[int, str, str]:
-    from remedy.execution.env import unattended_vcs_env
-
     import subprocess
+
+    from remedy.execution.env import unattended_vcs_env
 
     env = unattended_vcs_env(argv)
     try:

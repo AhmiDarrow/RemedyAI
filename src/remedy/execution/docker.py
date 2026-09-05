@@ -228,8 +228,8 @@ class DockerSandbox(Sandbox):
 
     async def cleanup(self) -> None:
         """Remove all stopped Remedy sandbox containers."""
-        try:
-            # Prune is best-effort housekeeping; never let it stall shutdown.
+        # Prune is best-effort housekeeping; never let it stall shutdown.
+        with contextlib.suppress(Exception):
             await _run_docker(
                 [
                     "docker",
@@ -242,5 +242,3 @@ class DockerSandbox(Sandbox):
                 timeout_s=30.0,
                 what="docker container prune",
             )
-        except Exception:
-            pass

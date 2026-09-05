@@ -317,8 +317,9 @@ def test_piped_soft_helpers_fail_closed_without_pipes(
 def test_popen_hidden_with_pipes_uses_spawn_piped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from remedy.execution.process import PipedProcess
     import subprocess
+
+    from remedy.execution.process import PipedProcess
 
     class _FakePipe:
         closed = False
@@ -372,8 +373,8 @@ async def test_host_session_live_open_fail_closed_off_windows() -> None:
     """Non-Windows must not soft-pipe a HostSession (Zig live open is Win-only)."""
     if sys.platform == "win32":
         pytest.skip("Windows uses Zig HostSession open")
-    from remedy.core.computer.host_binding import STATUS_UNSUPPORTED
     from remedy.core.computer import host_binding as sess_mod
+    from remedy.core.computer.host_binding import STATUS_UNSUPPORTED
 
     session = sess_mod.HostSession(host="posix")
     with pytest.raises(HostError) as raised:

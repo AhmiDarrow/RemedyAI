@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
 
@@ -152,10 +153,8 @@ async def _cmd_session(args, db_path: Path) -> None:
                 key_decisions=[],
                 open_items=[],
             )
-            try:
+            with contextlib.suppress(OSError):
                 marker.unlink(missing_ok=True)
-            except OSError:
-                pass
             console.print(f"[green]Session ended. Handoff created:[/green] {handoff.id}")
             console.print(Panel(
                 f"[bold]{handoff.title}[/bold]\n{handoff.content[:300]}",

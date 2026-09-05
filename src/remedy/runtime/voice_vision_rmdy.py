@@ -8,6 +8,7 @@ vision install/start/stop stay in-process on this worker so progress state match
 from __future__ import annotations
 
 import base64
+import contextlib
 import os
 import tempfile
 from collections.abc import Mapping
@@ -87,10 +88,8 @@ def voice_transcribe(inp: Mapping[str, Any]) -> Mapping[str, Any]:
             home_dir=_home(inp),
         )
     finally:
-        try:
+        with contextlib.suppress(OSError):
             path.unlink(missing_ok=True)
-        except OSError:
-            pass
     if not result:
         return {"unavailable": True, "text": "", "language": ""}
     return {

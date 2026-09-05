@@ -9,6 +9,7 @@ KNOWN_GO_GAPS widening).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -134,10 +135,8 @@ def _stop_proc(proc: subprocess.Popen[str]) -> None:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         proc.kill()
-        try:
+        with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            pass
 
 
 @pytest.fixture(scope="module")

@@ -11,8 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from remedy.core.life_task_drive import drive_life_task, step_is_checkpoint
 from remedy.core.browse_parse import browse_tool_ok
+from remedy.core.life_task_drive import drive_life_task, step_is_checkpoint
 
 
 def test_navigate_unsuccessful_is_not_done():
@@ -568,8 +568,8 @@ async def test_self_inject_empty_delta_untracked_vs_head_gone_on_restore(tmp_pat
 
 
 def test_vault_desktop_refuses_button_no_click_type(tmp_path, monkeypatch):
-    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.types import ComputerAction
 
     typed: list[str] = []
@@ -671,8 +671,8 @@ def test_nested_extra_pending_load_is_not_life_drive_done():
 
 
 def test_executor_screenshot_without_bounds_ok_false(tmp_path, monkeypatch):
-    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.types import ComputerAction
 
     mod = native()
@@ -791,8 +791,8 @@ def test_computer_fill_success_is_unverified(tmp_path, monkeypatch):
 
 def test_hwnd_uia_button_vault_refuses_no_set_value(tmp_path, monkeypatch):
     from remedy.core.computer import guidance as uia
-    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.types import ComputerAction
 
     typed: list[str] = []
@@ -827,8 +827,8 @@ def test_hwnd_uia_button_vault_refuses_no_set_value(tmp_path, monkeypatch):
 
 
 def test_ocr_role_text_vault_refuses(tmp_path, monkeypatch):
-    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.types import ComputerAction
 
     typed: list[str] = []
@@ -857,8 +857,8 @@ def test_ocr_role_text_vault_refuses(tmp_path, monkeypatch):
 
 
 def test_atspi_entry_vault_clicks_center_then_types(tmp_path, monkeypatch):
-    from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.host_binding import native
     from remedy.core.computer.types import ComputerAction
 
     typed: list[str] = []

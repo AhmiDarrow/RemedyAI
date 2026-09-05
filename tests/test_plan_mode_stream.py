@@ -9,6 +9,7 @@ from remedy.core.computer.types import COMPUTER_PLAN_MODE_TOOLS, COMPUTER_TOOL_N
 from remedy.core.plan_store import PLAN_MODE_SYSTEM_ADDENDUM, PLAN_MODE_TOOL_NAMES
 from remedy.models import AgentConfig, ToolCall
 
+
 def _is_plan_blocked(res) -> bool:
     err = res.error or ""
     return (not res.success) and ("PLAN_MODE" in err or "Plan mode" in err)
