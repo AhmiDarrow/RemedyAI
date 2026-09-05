@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from remedy.core.app_control import (
     VALID_ACTIONS,
     VALID_PANELS,
