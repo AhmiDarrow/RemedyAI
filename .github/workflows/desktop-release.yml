@@ -113,7 +113,7 @@ jobs:
           fi
           echo "CI green: ${URL}"
 
-  build-sidecar:
+  build-runtime:
     needs: verify
     runs-on: windows-latest
     env:
@@ -162,10 +162,10 @@ jobs:
           Pop-Location
           Copy-Item native/zig/zig-out/bin/remedy_core.dll desktop/bin/remedy_core.dll
 
-      - name: Upload sidecar artifact
+      - name: Upload runtime artifact
         uses: actions/upload-artifact@v4
         with:
-          name: remedy-sidecar
+          name: remedy-runtime-bins
           path: |
             desktop/bin/remedy-runtime.exe
             desktop/bin/remedy-runtime-x86_64-pc-windows-msvc.exe
@@ -173,7 +173,7 @@ jobs:
           retention-days: 1
 
   build-tauri:
-    needs: [verify, build-sidecar]
+    needs: [verify, build-runtime]
     runs-on: windows-latest
     outputs:
       installer_name: ${{ steps.extract.outputs.installer_name }}
@@ -188,10 +188,10 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Download sidecar
+      - name: Download runtime
         uses: actions/download-artifact@v4
         with:
-          name: remedy-sidecar
+          name: remedy-runtime-bins
           path: desktop/bin/
 
       - name: Install Tauri CLI
@@ -202,7 +202,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Stamp release version (match sidecar job)
+      - name: Stamp release version (match runtime job)
         shell: bash
         run: python scripts/sync_version.py "${{ needs.verify.outputs.version }}"
 
@@ -270,7 +270,7 @@ jobs:
           path: ${{ steps.extract.outputs.signature_path }}
           retention-days: 7
 
-  build-sidecar-linux:
+  build-runtime-linux:
     needs: verify
     runs-on: ubuntu-22.04
     env:
@@ -315,10 +315,10 @@ jobs:
           cp zig-out/lib/libremedy_core.so ../../desktop/bin/libremedy_core.so
           chmod +x ../../desktop/bin/remedy-runtime ../../desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
 
-      - name: Upload Linux sidecar artifact
+      - name: Upload Linux runtime artifact
         uses: actions/upload-artifact@v4
         with:
-          name: remedy-sidecar-linux
+          name: remedy-runtime-linux
           path: |
             desktop/bin/remedy-runtime
             desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
@@ -326,7 +326,7 @@ jobs:
           retention-days: 1
 
   build-tauri-linux:
-    needs: [verify, build-sidecar-linux]
+    needs: [verify, build-runtime-linux]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -356,10 +356,10 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Download Linux sidecar
+      - name: Download Linux runtime
         uses: actions/download-artifact@v4
         with:
-          name: remedy-sidecar-linux
+          name: remedy-runtime-linux
           path: desktop/bin/
 
       - name: Mark runtime executable
@@ -370,7 +370,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Stamp release version (match sidecar job)
+      - name: Stamp release version (match runtime job)
         shell: bash
         run: python scripts/sync_version.py "${{ needs.verify.outputs.version }}"
 

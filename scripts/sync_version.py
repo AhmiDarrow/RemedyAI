@@ -73,22 +73,20 @@ def _bump_cargo_lock(ver: str) -> None:
     if not path.exists():
         return
     text = path.read_text(encoding="utf-8")
-    # Prefer package name "app" (Tauri crate name in this repo).
-    for name in ("app", "remedy-desktop"):
-        marker = f'name = "{name}"\nversion = "'
+    # Tauri crate name is "app" (Cargo.toml); no legacy remedy-desktop package.
+    marker = 'name = "app"\nversion = "'
+    idx = text.find(marker)
+    if idx < 0:
+        marker = 'name = "app"\r\nversion = "'
         idx = text.find(marker)
-        if idx < 0:
-            marker = f'name = "{name}"\r\nversion = "'
-            idx = text.find(marker)
-        if idx < 0:
-            continue
-        start = idx + len(marker)
-        end = text.find('"', start)
-        if end < 0:
-            continue
-        text = text[:start] + ver + text[end:]
-        path.write_text(text, encoding="utf-8")
+    if idx < 0:
         return
+    start = idx + len(marker)
+    end = text.find('"', start)
+    if end < 0:
+        return
+    text = text[:start] + ver + text[end:]
+    path.write_text(text, encoding="utf-8")
 
 
 def _bump_tauri_conf(ver: str) -> None:

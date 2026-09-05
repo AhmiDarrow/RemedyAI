@@ -1246,9 +1246,9 @@ fn wait_for_health(max_wait: Duration) -> bool {
 
 fn kill_child(guard: &mut Option<Child>) {
     if let Some(mut child) = guard.take() {
-        // On Windows, Child::kill / Drop do NOT kill the process tree. PyInstaller
-        // sidecars (and anything still holding :7400) must be tree-killed or they
-        // linger in Task Manager after the UI closes.
+        // On Windows, Child::kill / Drop do NOT kill the process tree. The
+        // managed remedy-runtime (and anything still holding :7400) must be
+        // tree-killed or they linger in Task Manager after the UI closes.
         #[cfg(target_os = "windows")]
         {
             let pid = child.id();
@@ -5597,7 +5597,7 @@ pub fn run() {
                         .level(log::LevelFilter::Info)
                         .targets([
                             Target::new(TargetKind::LogDir {
-                                file_name: Some("remedy-desktop".into()),
+                                file_name: Some("desktop".into()),
                             }),
                             Target::new(TargetKind::Webview),
                         ])

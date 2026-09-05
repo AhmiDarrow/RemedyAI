@@ -1,8 +1,9 @@
-"""``resolve_python_interpreter`` — the frozen Desktop sidecar is not Python.
+"""``resolve_python_interpreter`` — packaged Desktop / CLI stems are not Python.
 
-``sys.executable`` is ``remedy-desktop.exe`` in the packaged build, so
-``run_python_file`` / ``host_script(lang=python)`` used to run
-``remedy-desktop.exe script.py`` → ``usage: remedy …`` exit 2.
+Legacy ``remedy-desktop.exe`` and the current ``remedy`` / ``remedy-runtime``
+stems must never be treated as a host interpreter. ``run_python_file`` /
+``host_script(lang=python)`` used to run ``remedy-desktop.exe script.py`` →
+``usage: remedy …`` exit 2.
 """
 
 from __future__ import annotations
