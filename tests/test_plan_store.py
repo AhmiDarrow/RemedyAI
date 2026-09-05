@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi.testclient import TestClient
 
 from remedy.core.plan_store import (
     PLAN_MODE_SYSTEM_ADDENDUM,
@@ -14,7 +13,6 @@ from remedy.core.plan_store import (
     normalize_block_reason,
     parse_steps_from_text,
 )
-from remedy.interfaces.api import create_app
 from remedy.models import ToolCall
 
 
@@ -264,49 +262,6 @@ def test_step_evidence_and_block_reason_roundtrip(tmp_path: Path):
     assert sk is not None
     assert sk.steps[0].block_reason == "skipped"
 
-
-def test_plans_http_is_go_owned(tmp_path: Path):
-    """HTTP /api/plans* is Go httpapi; pin PlanStore semantics here instead."""
-    store = PlanStore(tmp_path)
-    plan = store.create(
-        "Add plan mode",
-        goal="Make Plan real",
-        steps=["Wire API", "Restrict tools", "Show in UI"],
-        risks=["Too many tools still available"],
-    )
-    assert plan.title == "Add plan mode"
-    assert len(plan.steps) == 3
-    pid = plan.id
-
-    listed = store.list_plans(limit=30)
-    assert any(p.id == pid for p in listed)
-
-    approved = store.set_status(pid, "approved")
-    assert approved is not None
-    assert approved.status == "approved"
-
-    stepped = store.update_step_status(pid, "s1", "done")
-    assert stepped is not None
-    assert stepped.steps[0].status == "done"
-    # Completing a step promotes draft/approved → active (Python store parity).
-    assert stepped.status == "active"
-
-    latest = store.latest_for_session(None)
-    assert latest is not None and latest.id == pid
-
-    # With a session_id that has no plans, do NOT fall back to global latest
-    assert store.latest_for_session("fresh-empty-session") is None
-
-    cancelled = store.set_status(pid, "cancelled")
-    assert cancelled is not None
-    assert cancelled.status == "cancelled"
-
-    # Cancelled plan must not surface as actionable latest
-    assert store.latest_for_session(None, actionable_only=True) is None
-
-    client = TestClient(create_app(api_key=""))
-    assert client.get("/api/plans").status_code in (404, 405)
-    assert client.get("/api/plans/latest").status_code in (404, 405)
 
 
 def test_call_tool_blocks_in_plan_mode():

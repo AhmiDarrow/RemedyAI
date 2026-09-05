@@ -345,10 +345,6 @@ class TestSettingsIncludesXaiAuth:
             encoding="utf-8",
         )
         xai_auth.save_api_key("xai-visible", home=tmp_path)
-        from remedy.interfaces.api import create_app
-
-        paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-        assert "/api/settings" not in paths
         creds = xai_auth.load_credentials(home=tmp_path)
         pub = creds.to_public_dict(home=tmp_path)
         assert pub.get("connected") is True

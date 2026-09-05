@@ -209,15 +209,3 @@ class TestCliAuth:
         from remedy.interfaces import xai_auth
 
         assert xai_auth.load_credentials(home=tmp_path).connected is False
-
-
-class TestAuthRoutes:
-    def test_provider_and_xai_auth_routes_absent_from_testclient(self):
-        from remedy.interfaces.api import create_app
-
-        paths = {getattr(r, "path", None) for r in create_app(api_key="").routes}
-        # Provider + xAI auth HTTP is Go-owned — FastAPI twin is gone.
-        assert "/api/providers" not in paths
-        assert "/api/providers/ollama/detect" not in paths
-        assert "/api/auth/xai/login" not in paths
-        assert "/api/auth/xai" not in paths

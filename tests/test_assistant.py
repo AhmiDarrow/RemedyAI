@@ -12,7 +12,6 @@ from remedy.assistant.store import (
     get_assistant_store,
     reset_assistant_store,
 )
-from remedy.interfaces.api import create_app
 
 
 @pytest.fixture(autouse=True)
@@ -94,8 +93,6 @@ def test_settings_http_absent_and_assistant_store_public(tmp_path, monkeypatch):
     monkeypatch.setattr(api_support, "_default_config_path", lambda: home / "config.toml")
     monkeypatch.setattr(api_support, "_find_config_path", lambda: home / "config.toml")
     reset_assistant_store()
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/settings" not in paths
     pub = get_assistant_store(home).public_status()
     assert isinstance(pub, dict)
     assert "providers_planned" in pub

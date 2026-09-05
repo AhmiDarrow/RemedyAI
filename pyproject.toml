@@ -37,9 +37,9 @@ dependencies = [
 ]
 
 # Optional install groups.
-# `server` is a documented alias — fastapi / uvicorn / python-multipart are
-# already core (pytest TestClient / create_app harness only; production :7400
-# is Go remedy-runtime). Kept so older pins keep working.
+# `server` is a documented alias — fastapi / uvicorn / python-multipart remain
+# core for leftover Python helpers (api_support body caps); production :7400
+# is Go remedy-runtime. Kept so older pins keep working.
 [project.optional-dependencies]
 server = [
     "fastapi>=0.139.2,<1",
@@ -134,7 +134,6 @@ unsafe-fixes = false
     # Orchestrator re-exports names so tests can patch ``loop.<name>``.
     "src/remedy/core/react_loop/loop.py" = ["F401"]
 "src/remedy/interfaces/config.py" = ["N806"]
-"src/remedy/interfaces/routes/*" = ["SIM117", "N806"]
 "src/remedy/vision/config.py" = ["N806"]
 
 [tool.ruff.format]

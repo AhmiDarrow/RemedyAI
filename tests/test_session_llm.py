@@ -7,23 +7,6 @@ from types import SimpleNamespace
 from remedy.core.session_llm import resolve_session_llm_bind, session_llm_update_fields
 
 
-def test_rmb_and_session_llm_http_absent_from_testclient():
-    """HTTP /api/rmb/* and /api/sessions/{id}/llm are Go-owned; no FastAPI twin."""
-    from remedy.interfaces.api import create_app
-
-    app = create_app(runtime=None, memory=None, api_key="")
-    paths = {getattr(r, "path", "") for r in app.routes}
-    for path in (
-        "/api/rmb/start",
-        "/api/rmb/settings",
-        "/api/rmb/use",
-        "/api/rmb/status",
-        "/api/rmb/catalog",
-        "/api/rmb/stop",
-        "/api/sessions/{session_id}/llm",
-    ):
-        assert path not in paths
-
 
 def test_explicit_req_pair_wins():
     sess = SimpleNamespace(llm_provider="xai", model="grok-4.5")

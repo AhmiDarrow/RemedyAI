@@ -14,7 +14,6 @@ from remedy.core.approvals import ApprovalQueue
 from remedy.core.build_mutant import mutant_kill_score
 from remedy.core.hive.policy import DAUGHTER_CAPABILITIES, is_mother_only_tool
 from remedy.core.turn_pipeline import _approval_key
-from remedy.interfaces.api import create_app
 from remedy.tools.catalog import descriptor_for
 
 # --- hive: the owner's correspondence is not a daughter surface --------------
@@ -141,8 +140,6 @@ def test_settings_snapshot_emits_trust_profile() -> None:
         "as undefined and write balanced back over the owner's saved profile"
     )
     assert body["trust_profile"] in ("conservative", "balanced", "autonomous")
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/settings" not in paths
 
 
 # --- build_mutant: a mutant row names the file that was mutated --------------

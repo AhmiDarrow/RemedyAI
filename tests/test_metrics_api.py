@@ -99,14 +99,3 @@ def test_health_check_detail_redacts_secrets() -> None:
     assert out["checks"]["probe"]["status"] == "ok"
 
 
-def test_fastapi_metrics_route_absent() -> None:
-    from fastapi.testclient import TestClient
-
-    from remedy.interfaces.api import create_app
-
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/metrics" not in paths
-    assert TestClient(create_app(api_key="")).get("/api/metrics").status_code in (
-        404,
-        405,
-    )

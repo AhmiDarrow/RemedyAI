@@ -108,11 +108,8 @@ def test_request_sidecar_restart_dev_desktop_still_requests(tmp_path, monkeypatc
 def test_self_inject_rounds_http_absent_and_ledger_orders_newest(tmp_path, monkeypatch):
     """HTTP /api/self-inject/rounds is Go-owned; ledger still newest-first."""
     from remedy.core.self_inject import SelfInjectRound, append_ledger, read_ledger
-    from remedy.interfaces.api import create_app
 
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/self-inject/rounds" not in paths
 
     live = SelfInjectRound(status="applied", tree="python", summary="old edit")
     live.finished_utc = "2000-01-01T00:00:00+00:00"

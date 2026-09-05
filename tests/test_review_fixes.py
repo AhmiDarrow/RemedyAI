@@ -252,14 +252,3 @@ class TestSecurity:
     def test_safe_path_blocks_traversal(self, tmp_path):
         with pytest.raises(SecurityError):
             safe_path("..", base_dir=tmp_path)
-
-
-class TestApiFilesAbsent:
-    def test_files_http_twin_gone(self):
-        """HTTP /api/files* jail lives in Go httpapi; FastAPI twin deleted."""
-        from remedy.interfaces.api import create_app
-
-        paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-        assert "/api/files" not in paths
-        assert "/api/files/search" not in paths
-

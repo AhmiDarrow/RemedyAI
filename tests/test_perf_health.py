@@ -6,19 +6,10 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
 
-from remedy.interfaces.api import create_app
 from remedy.vision.runtime import invalidate_running_cache, is_running
 from remedy.vision.service import get_status
 
-
-def test_ping_and_turn_active_absent_from_testclient():
-    """Go owns /api/ping and /api/turn-active; no FastAPI twins."""
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/ping" not in paths
-    assert "/api/turn-active" not in paths
-    assert "/api/status" not in paths
 
 
 def test_stream_lock_reflects_active_turns(tmp_path: Path):
@@ -98,8 +89,6 @@ def test_settings_snapshot_includes_light_vision(tmp_path: Path, monkeypatch):
     assert body["vision_enabled"] is True
     assert body["vision_model_id"] == "smolvlm2-2.2b"
     assert ms < 2000, f"settings snapshot took {ms:.0f}ms"
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/settings" not in paths
 
 
 def test_secret_load_skips_repeated_harden(tmp_path: Path, monkeypatch):
@@ -168,8 +157,6 @@ def test_connected_providers_fast_without_ollama(tmp_path: Path, monkeypatch):
     assert demo["connected"] is True
     # Closed Ollama + cache/precheck should be tens of ms, not ~1500.
     assert ms < 800, f"connected providers classify took {ms:.0f}ms"
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/providers/connected" not in paths
 
 
 

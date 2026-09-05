@@ -1,4 +1,4 @@
-"""Coordination presence is Go-owned; keep registry helpers under TestClient boundary."""
+"""Coordination presence registry helpers; HTTP is Go-owned."""
 
 from __future__ import annotations
 
@@ -6,12 +6,6 @@ import os
 import time
 
 from remedy.core import coordination as C
-from remedy.interfaces.api import create_app
-
-
-def test_coordination_presence_http_absent_from_testclient() -> None:
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/coordination/presence" not in paths
 
 
 def _presence_payload(session_id: str | None = None) -> dict:

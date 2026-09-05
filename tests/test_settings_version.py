@@ -3,13 +3,7 @@
 from __future__ import annotations
 
 from remedy import __version__
-from remedy.interfaces.api import create_app
 from remedy.interfaces.settings_apply import public_settings_snapshot
-
-
-def test_settings_http_absent_from_testclient():
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/settings" not in paths
 
 
 def test_settings_snapshot_returns_package_version():
@@ -29,4 +23,4 @@ def test_settings_snapshot_returns_package_version():
     assert __version__ != "0.9.0"
 
 
-# GET /api/updates/check is owned by Go httpapi — see updates_test.go.
+# GET /api/updates/check and /api/settings are owned by Go httpapi.

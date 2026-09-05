@@ -89,14 +89,14 @@ uvicorn on `:7400` (fail closed if the binary is missing). **`remedy-desktop`
 is not built or shipped** — there is no Python fallback launch path in
 installers. `tauri:dev` prefers staged `remedy-runtime` the same way; the live
 Python venv is only a last-resort launcher for `remedy serve` →
-`remedy-runtime`. FastAPI `create_app` is **test-only** (pytest / TestClient).
+`remedy-runtime`. FastAPI `create_app` harness is retired; Go owns `:7400`.
 Python worker entry: `python -m remedy.runtime.rmdy_tool_worker`.
 
 **Remaining gaps (worker / parity — not dual-serve):**
 
 | Gap | Why it still matters |
 |-----|----------------------|
-| Full `/api/*` route parity | Go covers the production Desktop surface; Desktop-called paths still missing on Go are listed in `tests/test_desktop_api_contract.py` `KNOWN_GO_GAPS` (shrink only). FastAPI `create_app` remains for pytest / TestClient only |
+| Full `/api/*` route parity | Go covers the production Desktop surface; Desktop-called paths still missing on Go are listed in `tests/test_desktop_api_contract.py` `KNOWN_GO_GAPS` (shrink only). FastAPI `create_app` harness is retired |
 | Python worker over RMDY | Prompt assembly, soul/skills text, voice/vision/telephony still need a supervised worker |
 | Zig in-process from Go | Some host primitives still load via Python `host_binding` |
 | Release smoke | NSIS/deb/AppImage must prove :7400 health + session stream on both OS with the new `externalBin` triple names |
@@ -220,7 +220,7 @@ Releases are minisign-signed for in-app auto-update.
 A **Tauri desktop app** (Windows-first) with an interactive chat UX, backed by
 Go **`remedy-runtime`** on `127.0.0.1:7400`. The desktop is the primary
 installation target; CLI and web UI remain available as power-user features.
-FastAPI `create_app` is pytest / TestClient only.
+FastAPI `create_app` harness is retired.
 
 ## Architecture
 
@@ -409,7 +409,7 @@ event: error         → { message: "..." }
 ## Runtime agent notes
 
 The desktop chat path is `React UI → remedy-runtime (:7400) → Go cognition /
-supervised workers`. FastAPI `create_app` is not on this path (tests only).
+supervised workers`. FastAPI `create_app` is not on this path (harness retired).
 Tool batches are executed in parallel waves (`MAX_PARALLEL_TOOLS`) but **every**
 assistant tool-call id still receives a tool result message before the next LLM
 request. Incomplete pairing is also sanitized by `ensure_tool_call_pairings`

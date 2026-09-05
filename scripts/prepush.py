@@ -64,8 +64,8 @@ ZERO_SHA = "0" * 40
 RELEASE_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+([.-].*)?$")
 PROTECTED_BRANCHES = ("master", "main")
 IMPORT_SMOKE = (
-    'python -c "import remedy; from remedy.interfaces.api import create_app; '
-    "create_app(); print('import OK')\""
+    'python -c "import remedy; from remedy.interfaces.api import should_warn_slow; '
+    "assert callable(should_warn_slow); print('import OK')\""
 )
 
 

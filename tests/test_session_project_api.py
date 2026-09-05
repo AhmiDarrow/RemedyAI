@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 
 from remedy.core.agent import BasicRuntime
-from remedy.interfaces.api import create_app
 from remedy.memory.store import MemoryStore
 from remedy.models import AgentConfig, ChatSession
 
@@ -24,15 +23,6 @@ def store(tmp_path: Path):
     yield s
     asyncio.run(s.close())
 
-
-def test_session_project_http_routes_absent_from_testclient() -> None:
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    for path in (
-        "/api/sessions",
-        "/api/sessions/bulk-project",
-        "/api/sessions/{session_id}",
-    ):
-        assert path not in paths
 
 
 def test_set_project_path_refuses_forbidden(tmp_path):

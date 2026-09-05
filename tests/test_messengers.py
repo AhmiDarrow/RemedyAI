@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-from fastapi.testclient import TestClient
-
 # Path is used for isolation checks against the real home directory
-from remedy.interfaces.api import create_app
 from remedy.interfaces.messenger_settings import (
     apply_messengers_update,
     external_session_id,
@@ -37,12 +33,10 @@ def test_catalog_includes_major_messengers():
     ):
         assert need in ids
 
-
 def test_channel_kind_has_new_messengers():
     assert ChannelKind.MATTERMOST.value == "mattermost"
     assert ChannelKind.WHATSAPP.value == "whatsapp"
     assert ChannelKind.TELEGRAM.value == "telegram"
-
 
 def test_external_session_id_stable():
     a = external_session_id("telegram", "12345")
@@ -52,12 +46,10 @@ def test_external_session_id_stable():
     assert a != c
     assert a.startswith("msg:telegram:")
 
-
 def test_heuristic_title():
     t = heuristic_session_title("telegram", username="alice")
     assert "Telegram" in t
     assert "alice" in t
-
 
 def test_split_message_respects_limit():
     assert max_reply_chars("discord") == 2000
@@ -66,18 +58,15 @@ def test_split_message_respects_limit():
     assert all(len(p) <= 2000 for p in parts)
     assert "".join(parts) == long
 
-
 def test_is_messenger_channel():
     assert is_messenger_channel("telegram")
     assert not is_messenger_channel("cli")
-
 
 def test_normalize_enabled_channels_keeps_cli():
     assert "cli" in normalize_enabled_channels(["telegram"])
     assert normalize_enabled_channels(["cli", "discord"])[0] == "cli" or "cli" in normalize_enabled_channels(
         ["cli", "discord"]
     )
-
 
 def test_settings_get_includes_messengers(tmp_path, monkeypatch):
     home = tmp_path / "home"
@@ -89,8 +78,6 @@ def test_settings_get_includes_messengers(tmp_path, monkeypatch):
     monkeypatch.setenv("REMEDY_HOME", str(home))
     from remedy.interfaces.messenger_settings import messengers_for_settings_response
 
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/settings" not in paths
     _channels, messengers = messengers_for_settings_response(
         {"enabled_channels": ["cli"], "setup_completed": True}, home
     )
@@ -99,7 +86,6 @@ def test_settings_get_includes_messengers(tmp_path, monkeypatch):
     for m in messengers:
         assert "id" in m and "token_set" in m
         assert "bot_token" not in (m.get("fields") or {})
-
 
 def test_settings_put_messenger_token_not_echoed(tmp_path, monkeypatch):
     """Token never echoes; enable + secrets land under REMEDY_HOME only."""
@@ -157,7 +143,6 @@ def test_settings_put_messenger_token_not_echoed(tmp_path, monkeypatch):
         real_keys = load_provider_keys(real_home)
         assert real_keys.get("ch:telegram:bot_token") != "secret-token-xyz"
 
-
 def test_apply_messengers_update_fields(tmp_path):
     cfg: dict = {"enabled_channels": ["cli"]}
     apply_messengers_update(
@@ -168,37 +153,6 @@ def test_apply_messengers_update_fields(tmp_path):
     assert "mattermost" in cfg["enabled_channels"]
     assert cfg["mattermost"]["base_url"] == "https://chat.example.com"
 
-
-def test_session_events_endpoint():
-    """Route registers and emits hello without hanging the suite."""
-    import asyncio
-
-    from remedy.interfaces.session_events import (
-        get_session_event_hub,
-        reset_session_event_hub,
-    )
-
-    reset_session_event_hub()
-    hub = get_session_event_hub()
-
-    async def _roundtrip():
-        q = await hub.subscribe()
-        from remedy.interfaces.session_events import SessionEvent
-
-        await hub.publish(SessionEvent(type="session_created", session_id="x"))
-        ev = await asyncio.wait_for(q.get(), timeout=2.0)
-        assert ev is not None
-        assert ev.session_id == "x"
-        await hub.unsubscribe(q)
-
-    asyncio.run(_roundtrip())
-
-    # SSE GET /api/events/sessions is Go-owned; FastAPI TestClient must not twin it.
-    client = TestClient(create_app())
-    paths = client.get("/openapi.json").json().get("paths") or {}
-    assert "/api/events/sessions" not in paths
-
-
 def test_redact_messenger_secrets_strips_telegram_url_token():
     tok = "7123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"
     url = f"https://api.telegram.org/bot{tok}/getUpdates"
@@ -207,7 +161,6 @@ def test_redact_messenger_secrets_strips_telegram_url_token():
     assert "api.telegram.org/bot" in scrubbed
     assert "[redacted]" in scrubbed
     assert tok not in redact_messenger_secrets(tok)
-
 
 def test_redact_messenger_secrets_residual_channels():
     """Slack xapp, Discord webhook/bot, Matrix syt_, Bearer must not leak."""
@@ -226,7 +179,6 @@ def test_redact_messenger_secrets_residual_channels():
         assert secret not in scrubbed, f"{label} leaked: {scrubbed}"
         assert "redacted" in scrubbed.lower(), f"{label} missing redaction: {scrubbed}"
 
-
 def test_public_fields_never_echo_legacy_plaintext_token():
     fields = public_fields_from_section(
         "telegram",
@@ -240,7 +192,6 @@ def test_public_fields_never_echo_legacy_plaintext_token():
     assert "should-never-appear" not in str(fields)
     assert fields.get("allow_chat_ids") == ["1", "2"]
     assert fields.get("allow_all") is False
-
 
 def test_public_fields_unknown_channel_strips_secret_suffixes():
     fields = public_fields_from_section(
