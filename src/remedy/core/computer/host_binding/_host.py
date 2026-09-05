@@ -328,35 +328,40 @@ def clipboard_set_text(text: str) -> None:
 
 def clipboard_get_files() -> list[str]:
     """CF_HDROP paths; empty list when the format is absent."""
-    from remedy.core.computer.host_binding._core import require_optional_export
-
     library = _lib()
-    fn = require_optional_export(library, "remedy_core_clipboard_get_files")
     ptr, length = _BytePtr(), c_size_t()
-    _check(library, "clipboard_get_files", fn(ctypes.byref(ptr), ctypes.byref(length)))
+    _check(
+        library,
+        "clipboard_get_files",
+        library.remedy_core_clipboard_get_files(ctypes.byref(ptr), ctypes.byref(length)),
+    )
     result: list[Any] = json.loads(_take(library, ptr, length) or b"[]")
     return [str(item) for item in result]
 
 
 def clipboard_get_image_png() -> bytes:
     """CF_DIB as PNG bytes; empty when absent or unsupported."""
-    from remedy.core.computer.host_binding._core import require_optional_export
-
     library = _lib()
-    fn = require_optional_export(library, "remedy_core_clipboard_get_image_png")
     ptr, length = _BytePtr(), c_size_t()
-    _check(library, "clipboard_get_image_png", fn(ctypes.byref(ptr), ctypes.byref(length)))
+    _check(
+        library,
+        "clipboard_get_image_png",
+        library.remedy_core_clipboard_get_image_png(
+            ctypes.byref(ptr), ctypes.byref(length)
+        ),
+    )
     return _take(library, ptr, length) or b""
 
 
 def foreground_detail() -> dict[str, Any]:
     """``{hwnd, title, pid, exe}`` for the foreground window."""
-    from remedy.core.computer.host_binding._core import require_optional_export
-
     library = _lib()
-    fn = require_optional_export(library, "remedy_core_foreground_detail")
     ptr, length = _BytePtr(), c_size_t()
-    _check(library, "foreground_detail", fn(ctypes.byref(ptr), ctypes.byref(length)))
+    _check(
+        library,
+        "foreground_detail",
+        library.remedy_core_foreground_detail(ctypes.byref(ptr), ctypes.byref(length)),
+    )
     result: dict[str, Any] = json.loads(_take(library, ptr, length) or b"{}")
     return result
 

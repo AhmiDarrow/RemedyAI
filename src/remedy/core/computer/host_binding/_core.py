@@ -169,6 +169,9 @@ _PROTOTYPES: dict[str, tuple[list[Any], Any]] = {
     ),
     "remedy_core_clipboard_get_text": ([POINTER(_BytePtr), POINTER(c_size_t)], c_int32),
     "remedy_core_clipboard_set_text": ([c_char_p, c_size_t], c_int32),
+    "remedy_core_clipboard_get_files": ([POINTER(_BytePtr), POINTER(c_size_t)], c_int32),
+    "remedy_core_clipboard_get_image_png": ([POINTER(_BytePtr), POINTER(c_size_t)], c_int32),
+    "remedy_core_foreground_detail": ([POINTER(_BytePtr), POINTER(c_size_t)], c_int32),
     "remedy_core_process_spawn_hidden": (
         [
             c_char_p,
@@ -527,15 +530,6 @@ _PROTOTYPES: dict[str, tuple[list[Any], Any]] = {
     ),
 }
 
-# Newer host exports: bind when present so an older staged DLL does not brick
-# the whole host_binding import graph (clipboard HDROP/PNG + foreground detail).
-_OPTIONAL_PROTOTYPES: dict[str, tuple[list[Any], Any]] = {
-    "remedy_core_clipboard_get_files": ([POINTER(_BytePtr), POINTER(c_size_t)], c_int32),
-    "remedy_core_clipboard_get_image_png": ([POINTER(_BytePtr), POINTER(c_size_t)], c_int32),
-    "remedy_core_foreground_detail": ([POINTER(_BytePtr), POINTER(c_size_t)], c_int32),
-}
-
-
 _bound: Any = None
 
 
@@ -548,24 +542,8 @@ def _lib() -> Any:
             function = getattr(library, name)
             function.argtypes = argtypes
             function.restype = restype
-        for name, (argtypes, restype) in _OPTIONAL_PROTOTYPES.items():
-            function = getattr(library, name, None)
-            if function is None:
-                continue
-            function.argtypes = argtypes
-            function.restype = restype
         _bound = library
     return library
-
-
-def require_optional_export(library: Any, name: str) -> Any:
-    """Return a bound optional export or raise NativeRuntimeUnavailableError."""
-    function = getattr(library, name, None)
-    if function is None:
-        raise NativeRuntimeUnavailableError(
-            f"remedy_core export {name} missing — rebuild native/zig remedy_core"
-        )
-    return function
 
 
 def available() -> bool:
