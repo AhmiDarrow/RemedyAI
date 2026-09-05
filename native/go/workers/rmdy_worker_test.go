@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -119,6 +120,24 @@ func TestResolveDefaultWorkspaceNeverInstallDir(t *testing.T) {
 	got := resolveDefaultWorkspace(env, install)
 	if filepath.Clean(got) != filepath.Clean(proj) {
 		t.Fatalf("workspace = %q want project %q (must not be install %q)", got, proj, install)
+	}
+}
+
+func TestProjectPathFromConfigUnescapesTOMLBackslashes(t *testing.T) {
+	home := t.TempDir()
+	proj := filepath.Join(home, "EscapedProj")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate serializeTOMLValue / json.Marshal style escaping.
+	escaped := strings.ReplaceAll(proj, `\`, `\\`)
+	cfg := "project_path = \"" + escaped + "\"\n"
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := projectPathFromConfig(home)
+	if filepath.Clean(got) != filepath.Clean(proj) {
+		t.Fatalf("projectPathFromConfig = %q want %q", got, proj)
 	}
 }
 

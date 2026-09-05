@@ -131,6 +131,8 @@ def _workspace_root(inp: Mapping[str, Any] | None = None) -> Path:
             if "=" not in s:
                 continue
             val = s.split("=", 1)[1].strip().strip("\"'")
+            # Writers escape Windows paths as C:\\Users\\… in TOML strings.
+            val = val.replace("\\\\", "\\")
             if val and val not in {".", "./"}:
                 try:
                     return Path(val).expanduser().resolve()

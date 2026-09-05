@@ -435,8 +435,20 @@ func (t *workspaceBoundTools) Execute(ctx context.Context, call cognition.ToolCa
 	}
 	root := strings.TrimSpace(t.root)
 	name := strings.TrimSpace(call.Name)
-	if root != "" && (strings.HasPrefix(name, "workspace.") || strings.HasPrefix(name, "workspace_")) {
+	if root == "" {
+		return t.inner.Execute(ctx, call)
+	}
+	if strings.HasPrefix(name, "workspace.") || strings.HasPrefix(name, "workspace_") {
 		call.Input = injectWorkspaceRoot(call.Input, root)
+	}
+	// Packaged Desktop shell default cwd is often System32; bind build/shell
+	// tools to the session project when the model omits cwd.
+	if name == "shell.exec" || name == "shell_exec" {
+		call.Input = injectShellCwd(call.Input, root)
+	}
+	if strings.HasPrefix(name, "memory.") || strings.HasPrefix(name, "memory_") ||
+		strings.HasPrefix(name, "skill.") || strings.HasPrefix(name, "skill_") {
+		call.Input = injectProjectPathField(call.Input, root)
 	}
 	return t.inner.Execute(ctx, call)
 }
@@ -454,6 +466,43 @@ func injectWorkspaceRoot(raw []byte, root string) []byte {
 	if _, ok := args["project_path"]; !ok {
 		args["project_path"] = root
 	}
+	b, err := json.Marshal(args)
+	if err != nil {
+		return raw
+	}
+	return b
+}
+
+func injectShellCwd(raw []byte, root string) []byte {
+	args := map[string]any{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return raw
+		}
+	}
+	cwd, _ := args["cwd"].(string)
+	if strings.TrimSpace(cwd) != "" {
+		return raw
+	}
+	args["cwd"] = root
+	b, err := json.Marshal(args)
+	if err != nil {
+		return raw
+	}
+	return b
+}
+
+func injectProjectPathField(raw []byte, root string) []byte {
+	args := map[string]any{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return raw
+		}
+	}
+	if _, ok := args["project_path"]; ok {
+		return raw
+	}
+	args["project_path"] = root
 	b, err := json.Marshal(args)
 	if err != nil {
 		return raw

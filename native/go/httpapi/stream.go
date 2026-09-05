@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -192,6 +193,7 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var sessProvider, sessModel *string
+	projectPath := ""
 	if s.sessions != nil {
 		sess, ok, err := s.sessions.Get(sid)
 		if err != nil {
@@ -201,6 +203,12 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Session not found"})
 			return
+		}
+		if sess.ProjectPath != nil {
+			projectPath = strings.TrimSpace(*sess.ProjectPath)
+			if projectPath != "" {
+				projectPath = filepath.Clean(projectPath)
+			}
 		}
 		sp, sm := resolveSessionLLMBind(sess.LLMProvider, sess.Model, req.Provider, req.Model)
 		if p, m, has := sessionLLMUpdateFields(sp, sm); has {
@@ -243,6 +251,7 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 		Prompt:      prompt,
 		Model:       sessModel,
 		Provider:    sessProvider,
+		ProjectPath: projectPath,
 		PlanMode:    req.PlanMode,
 		ChatMode:    req.ChatMode,
 		Attachments: attDicts,

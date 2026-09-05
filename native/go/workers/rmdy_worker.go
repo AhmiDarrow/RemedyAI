@@ -444,10 +444,12 @@ func projectPathFromConfig(home string) string {
 		val := strings.TrimSpace(parts[1])
 		val = strings.Trim(val, `"'`)
 		val = strings.TrimSpace(val)
+		// Writers escape Windows paths as C:\\Users\\… in TOML strings.
+		val = strings.ReplaceAll(val, `\\`, `\`)
 		if val == "" || val == "." || val == "./" {
 			return ""
 		}
-		return val
+		return filepath.Clean(val)
 	}
 	return ""
 }

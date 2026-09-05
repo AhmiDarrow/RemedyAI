@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/hive"
@@ -317,10 +318,15 @@ func (s *Server) runHiveForagerPulse(ctx context.Context, d hiveDaughter) error 
 	if budget > hiveMaxBudgetSteps {
 		budget = hiveMaxBudgetSteps
 	}
+	projectPath := strings.TrimSpace(d.ProjectPath)
+	if projectPath != "" {
+		projectPath = filepath.Clean(projectPath)
+	}
 	var text strings.Builder
 	err := s.runner.RunTurn(ctx, TurnRequest{
 		Prompt:        hiveForagerCharter(d),
 		SessionID:     d.SessionID,
+		ProjectPath:   projectPath,
 		MaxIterations: budget,
 	}, func(tok string) error {
 		if strings.HasPrefix(tok, "@@") {
