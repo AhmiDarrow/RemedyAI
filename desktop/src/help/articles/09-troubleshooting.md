@@ -243,8 +243,8 @@ Trojan. Known historical / ML labels and status:
 | Name | Status |
 |------|--------|
 | `Behavior:Win32/Persistence.A!ml` | **Fixed** — old builds wrote `HKCU\…\Run`; current builds use **Startup folder** only and scrub legacy keys without PowerShell. |
-| `Trojan:Win32/Wacatac.B!ml` | **Mitigated** — sidecar PE now has product version/company/icon metadata; still improve further with Authenticode. |
-| `Trojan:Win32/Bearfoos.A!ml` | Same class of ML hit on unsigned PyInstaller-style binaries; same mitigations. |
+| `Trojan:Win32/Wacatac.B!ml` | **Mitigated** — no PyInstaller sidecar; local API is Go `remedy-runtime` (`externalBin`). Still improve further with Authenticode. |
+| `Trojan:Win32/Bearfoos.A!ml` | Same class of ML hit on unsigned / freshly written installer EXEs; same mitigations. |
 | `Behavior:Win32/Execution.A!ml` | **Mitigated in 0.23.2** — UI EXE is `Remedy Desktop.exe` instead of generic `app.exe`. If 0.23.1 already fired: **Allow on this device**. |
 
 **If Windows Security quarantines Remedy after install or first run:**
