@@ -9,13 +9,11 @@ import pytest
 from remedy.core.approvals import APPROVALS
 from remedy.core.turn_context import begin_turn, end_turn
 from remedy.core.turn_pipeline import (
-    _current_action,
     authorize_tool,
     bound_hive_capabilities,
     finish_tool,
     snapshot_live_turn,
 )
-from remedy.execution.action import ActionState
 from remedy.policy.capabilities import Capability
 
 
@@ -60,13 +58,8 @@ def test_finish_tool_completes_the_authorized_action(_isolated_ask):
     try:
         args = {"path": "README.md"}
         assert authorize_tool(None, "file_read", args) is None
-        rec = _current_action.get()
-        assert rec is not None
-        assert rec.state == ActionState.RUNNING
         out = finish_tool(None, "file_read", args, "hello", ok=True)
         assert out == "hello"
-        assert rec.state == ActionState.COMPLETED
-        assert _current_action.get() is None
         assert "_action_id" not in args
     finally:
         end_turn("pipe-fin", *tokens)

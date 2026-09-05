@@ -7,13 +7,6 @@ from contextvars import ContextVar
 from typing import Any
 
 from remedy.core.errors import format_tool_error
-from remedy.execution.action import ActionRecord
-
-# Per-asyncio-task record so finish_tool resumes the same action authorize opened.
-# Never written into tool arguments — models and tests must not see it.
-_current_action: ContextVar[ActionRecord | None] = ContextVar(
-    "remedy_current_action", default=None
-)
 # Set when authorize_tool allows this task through so handlers do not
 # re-ask (mail one-shot would otherwise be consumed twice).
 _gate_passed: ContextVar[str | None] = ContextVar("remedy_gate_passed", default=None)
@@ -148,7 +141,6 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
     from remedy.core.optimization_telemetry import inc
     from remedy.core.turn_context import turn_session_id
     from remedy.events import EventType, default_bus
-    from remedy.execution.action import ActionRecord, ActionState
     from remedy.policy.decisions import ToolRequest
     from remedy.policy.engine import PolicyEngine
     from remedy.tools.catalog import descriptor_for
@@ -290,11 +282,6 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
     _gate_passed.set(name)
     _gate_command.set(cmd)
     with suppress(Exception):
-        rec = ActionRecord(tool=name)
-        rec.advance(ActionState.AUTHORIZED)
-        rec.advance(ActionState.RUNNING)
-        _current_action.set(rec)
-    with suppress(Exception):
         if ctx is not None:
             default_bus().emit_simple(
                 EventType.TOOL_STARTED,
@@ -319,7 +306,6 @@ def finish_tool(
     from remedy.core.optimization_telemetry import inc
     from remedy.core.react_policy import TOOL_RESULT_CHAR_CAP
     from remedy.events import EventType, default_bus
-    from remedy.execution.action import ActionRecord, ActionState
     from remedy.tools.catalog import descriptor_for
     from remedy.verification.evidence import (
         ActionResult,
@@ -381,19 +367,6 @@ def finish_tool(
                 turn_id=str(current_turn_id() or ""),
             )
     with suppress(Exception):
-        rec = _current_action.get()
-        if rec is None or rec.tool != name:
-            rec = ActionRecord(tool=name)
-            rec.advance(ActionState.AUTHORIZED)
-            rec.advance(ActionState.RUNNING)
-        rec.advance(ActionState.RESULT)
-        rec.advance(ActionState.VERIFYING)
-        rec.verification = vr
-        if vr.status == VerificationStatus.FAIL:
-            rec.advance(ActionState.FAILED)
-        else:
-            rec.advance(ActionState.VERIFIED)
-            rec.advance(ActionState.COMPLETED)
         from remedy.core.context import TurnFactory
 
         ctx = TurnFactory.create(runtime=runtime, emit_start=False)
@@ -404,7 +377,6 @@ def finish_tool(
             tool=name,
             ok=ok,
         )
-        _current_action.set(None)
     clear_tool_gate()
     return text
 
