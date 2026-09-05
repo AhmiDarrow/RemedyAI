@@ -904,15 +904,18 @@ pub const ForegroundInfo = struct { hwnd: u64, title: []u8 };
 
 fn processImagePath(gpa: std.mem.Allocator, pid: u32) Error![]u8 {
     if (pid == 0) return gpa.dupe(u8, "") catch return error.OutOfMemory;
+    // Zig 0.16: use the Linux syscall, not std.posix.readlink (removed).
     var path_buf: [64]u8 = undefined;
-    const link_path = std.fmt.bufPrint(&path_buf, "/proc/{d}/exe", .{pid}) catch {
+    const link_path = std.fmt.bufPrintZ(&path_buf, "/proc/{d}/exe", .{pid}) catch {
         return gpa.dupe(u8, "") catch return error.OutOfMemory;
     };
     var out_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const n = std.posix.readlink(link_path, &out_buf) catch {
+    const rc = std.os.linux.readlink(link_path.ptr, &out_buf, out_buf.len);
+    const errno = std.os.linux.errno(rc);
+    if (errno != .SUCCESS) {
         return gpa.dupe(u8, "") catch return error.OutOfMemory;
-    };
-    return gpa.dupe(u8, out_buf[0..n]) catch return error.OutOfMemory;
+    }
+    return gpa.dupe(u8, out_buf[0..rc]) catch return error.OutOfMemory;
 }
 
 /// JSON `{hwnd,title,pid,exe}` for the foreground window (empty fields when none).
