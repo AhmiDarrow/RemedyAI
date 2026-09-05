@@ -38,7 +38,7 @@ class _Stop(BaseException):
 
 
 class FakeProc:
-    """Stand-in for ``subprocess.Popen`` with a scriptable lifecycle."""
+    """Stand-in for Zig ``HiddenProcess`` with a scriptable lifecycle."""
 
     def __init__(
         self,
@@ -46,40 +46,29 @@ class FakeProc:
         alive: bool = True,
         returncode: int = 0,
         pid: int = 4242424,
-        terminate_error: BaseException | None = None,
-        wait_timeouts: int = 0,
+        kill_tree_error: BaseException | None = None,
         kill_works: bool = True,
     ) -> None:
         self._alive = alive
         self.returncode = returncode
         self.pid = pid
-        self._terminate_error = terminate_error
-        self._wait_timeouts = wait_timeouts
+        self._kill_tree_error = kill_tree_error
         self._kill_works = kill_works
-        self.terminated = False
-        self.killed = False
-        self.waits: list[float | None] = []
+        self.kill_tree_calls = 0
+        self.closed = False
 
     def poll(self):
         return None if self._alive else self.returncode
 
-    def terminate(self):
-        self.terminated = True
-        if self._terminate_error is not None:
-            raise self._terminate_error
-
-    def wait(self, timeout=None):
-        self.waits.append(timeout)
-        if self._wait_timeouts > 0:
-            self._wait_timeouts -= 1
-            raise subprocess.TimeoutExpired(cmd="fake", timeout=timeout or 0)
-        self._alive = False
-        return self.returncode
-
-    def kill(self):
-        self.killed = True
+    def kill_tree(self):
+        self.kill_tree_calls += 1
+        if self._kill_tree_error is not None:
+            raise self._kill_tree_error
         if self._kill_works:
             self._alive = False
+
+    def close(self):
+        self.closed = True
 
 
 class FakeResp:
@@ -396,86 +385,66 @@ def test_stopping_a_tier_with_no_child_reports_nothing_stopped():
     assert mr.stop_tier("medium") == {"ok": True, "stopped": False, "tier": "medium"}
 
 
-def test_stopping_a_live_child_terminates_it_and_clears_the_slot(monkeypatch):
-    monkeypatch.setattr(mr.os, "name", "posix")
+def test_stopping_a_live_child_kills_the_tree_and_clears_the_slot():
     proc = FakeProc(alive=True)
     mr._tier_procs["medium"] = proc
     result = mr.stop_tier("medium")
-    assert proc.terminated and not proc.killed
-    assert proc.waits == [5]
+    assert proc.kill_tree_calls == 1
+    assert proc.closed is True
     assert mr._tier_procs["medium"] is None
     assert result == {"ok": True, "stopped": True, "tier": "medium"}
 
 
-def test_a_child_that_ignores_terminate_is_killed(monkeypatch):
-    monkeypatch.setattr(mr.os, "name", "posix")
-    proc = FakeProc(alive=True, wait_timeouts=1)
-    mr._tier_procs["full"] = proc
-    result = mr.stop_tier("full")
-    assert proc.killed is True
-    assert proc.waits == [5, 3]
-    assert result["stopped"] is True
-
-
-def test_a_child_that_survives_kill_is_reported_and_retained_for_retry(monkeypatch):
-    monkeypatch.setattr(mr.os, "name", "posix")
-    proc = FakeProc(alive=True, wait_timeouts=2, kill_works=False)
+def test_a_child_that_survives_kill_tree_is_reported_and_retained_for_retry():
+    proc = FakeProc(alive=True, kill_works=False)
     mr._tier_procs["light"] = proc
     result = mr.stop_tier("light")
     assert result["ok"] is False
     assert result["stopped"] is False
     assert "still running" in result["error"]
-    assert proc.poll() is None  # still alive
+    assert proc.poll() is None
     assert mr._tier_procs["light"] is proc
 
 
-def test_a_terminate_that_raises_keeps_the_live_slot_and_reports_failure(monkeypatch):
-    monkeypatch.setattr(mr.os, "name", "posix")
-    proc = FakeProc(alive=True, terminate_error=PermissionError("access denied"))
+def test_a_kill_tree_that_raises_is_swallowed_when_the_child_exits():
+    """kill_tree errors are suppressed; poll decides whether the slot clears."""
+    proc = FakeProc(alive=True, kill_tree_error=PermissionError("access denied"))
+    # Simulate the child exiting despite the raise (OS reaped it).
+    def _boom_then_dead():
+        proc._alive = False
+        raise PermissionError("access denied")
+
+    proc.kill_tree = _boom_then_dead  # type: ignore[method-assign]
     mr._tier_procs["medium"] = proc
     result = mr.stop_tier("medium")
-    assert mr._tier_procs["medium"] is proc
-    assert result["ok"] is False
-    assert result["stopped"] is False
+    assert mr._tier_procs["medium"] is None
+    assert result == {"ok": True, "stopped": True, "tier": "medium"}
 
 
-def test_an_already_exited_child_is_not_terminated_again(monkeypatch):
-    monkeypatch.setattr(mr.os, "name", "posix")
+def test_an_already_exited_child_is_not_killed_again():
     proc = FakeProc(alive=False, returncode=0)
     mr._tier_procs["medium"] = proc
     result = mr.stop_tier("medium")
-    assert proc.terminated is False
+    assert proc.kill_tree_calls == 0
     assert mr._tier_procs["medium"] is None
     assert result == {"ok": True, "stopped": False, "tier": "medium"}
 
 
-def test_on_windows_the_process_tree_is_taskkilled(monkeypatch):
-    """llama-server spawns children; terminate() alone leaves them holding VRAM."""
-    monkeypatch.setattr(mr.os, "name", "nt")
-    calls = []
-    monkeypatch.setattr(subprocess, "run", lambda args, **kw: calls.append((args, kw)))
+def test_kill_tree_is_used_instead_of_raw_taskkill(monkeypatch):
+    """llama-server trees are reaped via Zig kill_tree, not taskkill."""
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: pytest.fail("raw subprocess must not run")
+    )
     proc = FakeProc(alive=True, pid=1234)
     mr._tier_procs["full"] = proc
     assert mr.stop_tier("full")["stopped"] is True
-    args, kw = calls[0]
-    assert args == ["taskkill", "/F", "/PID", "1234", "/T"]
-    assert kw["check"] is False and kw["timeout"] == 10
+    assert proc.kill_tree_calls == 1
 
 
-def test_a_failing_taskkill_does_not_break_the_stop(monkeypatch):
-    monkeypatch.setattr(mr.os, "name", "nt")
-
-    def _boom(*a, **k):
-        raise OSError("taskkill missing")
-
-    monkeypatch.setattr(subprocess, "run", _boom)
-    mr._tier_procs["full"] = FakeProc(alive=True)
-    assert mr.stop_tier("full")["ok"] is True
-
-
-def test_no_child_means_no_taskkill(monkeypatch):
-    monkeypatch.setattr(mr.os, "name", "nt")
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("taskkilled nothing"))
+def test_no_child_means_no_kill_tree(monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: pytest.fail("raw subprocess must not run")
+    )
     assert mr.stop_tier("light")["stopped"] is False
 
 
@@ -484,16 +453,24 @@ def test_no_child_means_no_taskkill(monkeypatch):
 # --------------------------------------------------------------------------
 
 
-def _popen_recorder(monkeypatch, proc=None):
+def _spawn_recorder(monkeypatch, proc=None):
+    """Record Zig spawn_hidden calls (MDL no longer uses subprocess.Popen)."""
     recorded = {}
 
-    def _popen(cmd, **kwargs):
-        recorded["cmd"] = cmd
+    def _spawn(cmd, **kwargs):
+        recorded["cmd"] = list(cmd)
         recorded["kwargs"] = kwargs
         return proc if proc is not None else FakeProc(alive=True)
 
-    monkeypatch.setattr(subprocess, "Popen", _popen)
+    monkeypatch.setattr("remedy.execution.process.spawn_hidden", _spawn)
+    monkeypatch.setattr(
+        "remedy.execution.process.retain_detached", lambda child: child
+    )
     return recorded
+
+
+# Back-compat alias used by older test names in this module.
+_popen_recorder = _spawn_recorder
 
 
 def test_starting_an_unknown_tier_is_an_error(tmp_path):
@@ -587,8 +564,7 @@ def test_the_command_line_carries_the_tier_port_and_layer_budget(monkeypatch, tm
     assert cmd[cmd.index("-ngl") + 1] == "16"  # medium tier's n_layers
     assert cmd[cmd.index("-m") + 1] == str(model)
     assert "--mmproj" not in cmd
-    assert rec["kwargs"]["cwd"] == str(binary.parent)
-    assert rec["kwargs"]["stdout"] == subprocess.DEVNULL
+    assert rec["kwargs"].get("cwd") == str(binary.parent)
 
 
 @pytest.mark.parametrize("ngl", [0, 1, 24])
@@ -719,14 +695,15 @@ def test_a_slow_tier_is_left_loading_and_picked_up_by_the_next_call_without_a_se
         spawns.append(cmd)
         return proc
 
-    monkeypatch.setattr(subprocess, "Popen", _popen)
+    monkeypatch.setattr("remedy.execution.process.spawn_hidden", _popen)
+    monkeypatch.setattr("remedy.execution.process.retain_detached", lambda child: child)
     kw = {"model_path": str(_model(tmp_path)), "runtime_binary": str(_binary(tmp_path))}
 
     first = mr.start_tier("medium", wait_s=0.0, **kw)
     assert first["ok"] is False
     assert first["starting"] is True
     assert first["pid"] == 991
-    assert not (proc.terminated or proc.killed), "a loading child was killed"
+    assert proc.kill_tree_calls == 0, "a loading child was killed"
     assert mr._tier_procs["medium"] is proc, "the loading child must stay registered"
 
     second = mr.start_tier("medium", wait_s=5.0, **kw)
@@ -789,14 +766,15 @@ def test_there_is_never_more_than_one_popen_per_tier(monkeypatch, tmp_path):
         spawned.append(FakeProc(alive=True, pid=100 + len(spawned)))
         return spawned[-1]
 
-    monkeypatch.setattr(subprocess, "Popen", _popen)
+    monkeypatch.setattr("remedy.execution.process.spawn_hidden", _popen)
+    monkeypatch.setattr("remedy.execution.process.retain_detached", lambda child: child)
     kw = {"model_path": str(_model(tmp_path)), "runtime_binary": str(_binary(tmp_path))}
     for _ in range(5):
         out = mr.start_tier("medium", wait_s=0.0, **kw)
         assert out["ok"] is False and out["starting"] is True
     assert len(spawned) == 1
     assert mr._tier_procs["medium"] is spawned[0]
-    assert not spawned[0].terminated and not spawned[0].killed
+    assert spawned[0].kill_tree_calls == 0
 
 
 def test_a_slot_cleared_by_a_concurrent_stop_aborts_the_start(monkeypatch, tmp_path):
