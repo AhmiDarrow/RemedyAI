@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -12,9 +13,10 @@ import (
 func TestHiveRosterSpawnAssignRetire(t *testing.T) {
 	home := t.TempDir()
 	base, shutdown := startTestServer(t, Config{
-		Token:   "test-token-not-a-secret-16",
-		HomeDir: home,
-		DBPath:  filepath.Join(home, "memory.db"),
+		Token:      "test-token-not-a-secret-16",
+		HomeDir:    home,
+		DBPath:     filepath.Join(home, "memory.db"),
+		TurnRunner: NewFixtureTurnRunner(),
 	})
 	defer shutdown()
 
@@ -68,6 +70,46 @@ func TestHiveRosterSpawnAssignRetire(t *testing.T) {
 	}
 	hiveID, _ := spawned["hive_id"].(string)
 
+	// Forager runs one cognition pulse then reports (no longer idle-running).
+	deadline := time.Now().Add(2 * time.Second)
+	var foragerLine map[string]any
+	for time.Now().Before(deadline) {
+		req, _ = http.NewRequest(http.MethodGet, base+"/api/hive/roster", nil)
+		auth(req)
+		resp, err = client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&roster); err != nil {
+			resp.Body.Close()
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		foragerLine = nil
+		if rows, ok := roster["daughters"].([]any); ok {
+			for _, row := range rows {
+				m, ok := row.(map[string]any)
+				if !ok {
+					continue
+				}
+				if m["id"] == hiveID {
+					foragerLine = m
+					break
+				}
+			}
+		}
+		if foragerLine != nil && foragerLine["status"] == "reported" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if foragerLine == nil || foragerLine["status"] != "reported" {
+		t.Fatalf("forager did not report: line=%#v roster=%#v", foragerLine, roster)
+	}
+	if outcome, _ := foragerLine["outcome"].(string); !strings.Contains(outcome, "Hello") {
+		t.Fatalf("forager outcome missing fixture text: %#v", foragerLine)
+	}
+
 	postBody, _ := json.Marshal(map[string]any{
 		"goal":    "watch logs",
 		"cadence": "post",
@@ -115,7 +157,8 @@ func TestHiveRosterSpawnAssignRetire(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if roster["count"] != float64(2) || roster["live_foragers"] != float64(1) || roster["live_posts"] != float64(1) {
+	// Reported foragers are not "live"; standing post still counts.
+	if roster["count"] != float64(2) || roster["live_foragers"] != float64(0) || roster["live_posts"] != float64(1) {
 		t.Fatalf("roster after spawn = %#v", roster)
 	}
 
