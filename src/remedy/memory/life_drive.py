@@ -303,14 +303,10 @@ def reveal_artifact(path: str | Path) -> bool:
         if sys.platform == "win32":
             os.startfile(os.path.normpath(str(p)))  # noqa: S606
             return True
-        import subprocess
+        from remedy.execution.process import retain_detached, spawn_hidden
 
         cmd = ["open", str(p)] if sys.platform == "darwin" else ["xdg-open", str(p)]
-        subprocess.Popen(  # noqa: S603
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        retain_detached(spawn_hidden(cmd))
         return True
     except Exception:
         return False

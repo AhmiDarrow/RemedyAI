@@ -1419,6 +1419,103 @@ pub fn spawnHidden(argv_json: []const u8, cwd: []const u8, env_json: []const u8)
     return .{ .pid = @intCast(pid), .handle = @intFromPtr(process) };
 }
 
+pub const PipedSpawned = struct {
+    pid: u32,
+    handle: u64, // Process* — wait/close via processWait/processClose
+    stdin_write: u64,
+    stdout_read: u64,
+    stderr_read: u64,
+};
+
+/// Interactive spawn with separate stdin/stdout/stderr pipes. Parent fds are
+/// transferred to the caller (not closed by `processClose`). Own process group.
+pub fn spawnPiped3(argv_json: []const u8, cwd: []const u8, env_json: []const u8) Error!PipedSpawned {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const argv = try host.parseArgv(gpa, argv_json);
+    if (!std.fs.path.isAbsolute(argv[0])) return error.InvalidArgument;
+
+    var env_map_storage: ?std.process.Environ.Map = null;
+    defer if (env_map_storage) |*m| m.deinit();
+    const env_map_ptr: ?*const std.process.Environ.Map = blk: {
+        const pairs = try host.parseEnv(gpa, env_json) orelse break :blk null;
+        var map = std.process.Environ.Map.init(allocator);
+        errdefer map.deinit();
+        for (pairs) |pair| {
+            map.put(pair.key, pair.value) catch return error.OutOfMemory;
+        }
+        env_map_storage = map;
+        break :blk &env_map_storage.?;
+    };
+
+    const cwd_opt: std.process.Child.Cwd = if (cwd.len == 0)
+        .inherit
+    else
+        .{ .path = cwd };
+
+    var threaded = threadedIo();
+    defer threaded.deinit();
+    const io = threaded.io();
+    var child = std.process.spawn(io, .{
+        .argv = argv,
+        .cwd = cwd_opt,
+        .environ_map = env_map_ptr,
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = .pipe,
+        .pgid = 0,
+    }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.InvalidWtf8, error.InvalidUserId, error.InvalidProcessGroupId, error.InvalidExe, error.InvalidName, error.InvalidBatchScriptArg => return error.InvalidArgument,
+        else => {
+            host.setOsError(1);
+            return error.OperationFailed;
+        },
+    };
+    const pid = child.id orelse {
+        host.setOsError(1);
+        return error.OperationFailed;
+    };
+    const stdin_file = child.stdin orelse {
+        host.setOsError(1);
+        return error.OperationFailed;
+    };
+    const stdout_file = child.stdout orelse {
+        host.setOsError(1);
+        return error.OperationFailed;
+    };
+    const stderr_file = child.stderr orelse {
+        host.setOsError(1);
+        return error.OperationFailed;
+    };
+    // Transfer pipe ownership to the caller; we own waitpid/kill-tree.
+    child.stdin = null;
+    child.stdout = null;
+    child.stderr = null;
+    child.id = null;
+
+    const process = allocator.create(Process) catch {
+        _ = linux.close(stdin_file.handle);
+        _ = linux.close(stdout_file.handle);
+        _ = linux.close(stderr_file.handle);
+        killProcessGroup(pid);
+        _ = linux.kill(pid, .KILL);
+        var status: u32 = 0;
+        _ = linux.waitpid(pid, &status, 0);
+        return error.OutOfMemory;
+    };
+    process.* = .{ .pid = pid, .pgid = pid };
+    return .{
+        .pid = @intCast(pid),
+        .handle = @intFromPtr(process),
+        .stdin_write = @as(u64, @intCast(stdin_file.handle)),
+        .stdout_read = @as(u64, @intCast(stdout_file.handle)),
+        .stderr_read = @as(u64, @intCast(stderr_file.handle)),
+    };
+}
+
 pub fn processWait(handle: u64, timeout_ms: u32) Error!WaitOutcome {
     const process = try processFrom(handle);
     if (try reapNonBlocking(process)) {

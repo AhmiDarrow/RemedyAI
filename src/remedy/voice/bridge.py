@@ -12,7 +12,6 @@ import base64
 import contextlib
 import json
 import logging
-import subprocess
 import threading
 from pathlib import Path
 from typing import Any
@@ -42,7 +41,7 @@ class VoiceBridge:
     def __init__(self, home_dir: Path | str | None = None, lane: Lane = LANE_VOICE) -> None:
         self.home_dir = str(home_dir) if home_dir else None
         self.lane = lane
-        self._proc: subprocess.Popen[str] | None = None
+        self._proc: Any | None = None
         self._lock = threading.Lock()
         self._next_id = 0
         self._stderr_thread: threading.Thread | None = None
@@ -52,31 +51,36 @@ class VoiceBridge:
     def available(self) -> bool:
         return rt.runtime_ready(self.home_dir)
 
-    def _spawn(self) -> subprocess.Popen[str]:
-        """JSON-RPC voice worker needs interactive stdin/stdout/stderr pipes.
+    def _spawn(self) -> Any:
+        """JSON-RPC voice worker via Zig authorized 3-pipe spawn."""
+        from remedy.core.computer.host_binding import HostError
+        from remedy.execution.process import spawn_piped
+        from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
-        Zig owns process spawn (NATIVE_CUTOVER). Authorized ``spawn_hidden`` has
-        no stdio; Windows ``spawnPiped`` (HostSession) merges stderr→stdout and
-        exposes Zig read/write — not Python file objects or a separate stderr
-        pump. A general authorized 3-pipe ABI + handle wrapping is not small.
-        Fail closed — no soft ``hide_flags`` / ``subprocess.Popen`` path.
-        """
         py = rt.python_path(self.home_dir)
         if not py.is_file():
             raise WorkerError("Remedy's voice runtime is not set up yet.")
-        _ = (py, self.home_dir, self.lane)
-        from remedy.core.computer.host_binding import STATUS_UNSUPPORTED, HostError
-        from remedy.execution.process import require_process_host
-
-        require_process_host()
-        raise WorkerError(
-            "voice worker needs interactive stdin/stdout/stderr pipes; "
-            "Zig has no authorized 3-pipe spawn ABI yet "
-            "(HostSession spawnPiped merges stderr and is Windows-only)."
-        ) from HostError("voice_bridge_spawn", STATUS_UNSUPPORTED)
+        env = rt.child_env(self.home_dir, with_source=True)
+        env["REMEDY_VOICE_WORKER"] = "1"
+        env["REMEDY_VOICE_LANE"] = self.lane
+        try:
+            proc = spawn_piped(
+                [str(py), "-m", "remedy.voice.worker"],
+                env=env,
+                text=True,
+            )
+        except (HostError, NativeRuntimeUnavailableError, OSError, FileNotFoundError) as exc:
+            raise WorkerError(
+                f"voice worker could not start: {exc}"
+            ) from exc
+        t = threading.Thread(target=self._pump_stderr, args=(proc,), daemon=True)
+        t.start()
+        self._stderr_thread = t
+        logger.info("voice worker [%s] started (pid %s) with %s", self.lane, proc.pid, py)
+        return proc
 
     @staticmethod
-    def _pump_stderr(proc: subprocess.Popen[str]) -> None:
+    def _pump_stderr(proc: Any) -> None:
         try:
             assert proc.stderr is not None
             for line in proc.stderr:
@@ -102,12 +106,16 @@ class VoiceBridge:
         if p is None:
             return
         try:
-            if p.stdin:
+            if getattr(p, "stdin", None):
                 p.stdin.close()
             p.wait(timeout=5)
         except Exception:
             with contextlib.suppress(Exception):
                 p.kill()
+        closer = getattr(p, "close", None)
+        if callable(closer):
+            with contextlib.suppress(Exception):
+                closer()
 
     # -- calls ---------------------------------------------------------------
 
@@ -136,7 +144,7 @@ class VoiceBridge:
                 raise WorkerError(str(reply.get("error") or "voice worker failed"))
             return reply.get("result")
 
-    def _read_reply(self, proc: subprocess.Popen[str], timeout: float) -> dict[str, Any]:
+    def _read_reply(self, proc: Any, timeout: float) -> dict[str, Any]:
         assert proc.stdout is not None
         box: dict[str, Any] = {}
 

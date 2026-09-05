@@ -277,6 +277,81 @@ export fn remedy_core_process_spawn_authorized(
     return ok_status;
 }
 
+/// Authorize then interactive 3-pipe spawn. Parent owns stdin_write / stdout_read /
+/// stderr_read OS handles (Windows HANDLE or POSIX fd as uint64). Process handle
+/// is wait/kill/close via process_wait / process_kill_tree / process_close —
+/// closing the process handle does not close the pipe ends.
+export fn remedy_core_process_spawn_piped_authorized(
+    argv_json: ?[*]const u8,
+    argv_len: usize,
+    cwd: ?[*]const u8,
+    cwd_len: usize,
+    env_json: ?[*]const u8,
+    env_len: usize,
+    token: ?[*]const u8,
+    token_len: usize,
+    subject: ?[*]const u8,
+    subject_len: usize,
+    scope: ?[*]const u8,
+    scope_len: usize,
+    owner_confirmed: u8,
+    now_ms: u64,
+    out_pid: ?*u32,
+    out_handle: ?*u64,
+    out_stdin_write: ?*u64,
+    out_stdout_read: ?*u64,
+    out_stderr_read: ?*u64,
+) callconv(.c) i32 {
+    if (!is_windows and !is_linux) return unsupported_status;
+    const pid_slot = out_pid orelse return invalid_status;
+    const handle_slot = out_handle orelse return invalid_status;
+    const stdin_slot = out_stdin_write orelse return invalid_status;
+    const stdout_slot = out_stdout_read orelse return invalid_status;
+    const stderr_slot = out_stderr_read orelse return invalid_status;
+    pid_slot.* = 0;
+    handle_slot.* = 0;
+    stdin_slot.* = 0;
+    stdout_slot.* = 0;
+    stderr_slot.* = 0;
+
+    var arena = std.heap.ArenaAllocator.init(host.allocator);
+    defer arena.deinit();
+    const argv = host.parseArgv(arena.allocator(), slice(argv_json, argv_len)) catch return invalid_status;
+
+    lock();
+    const auth_result = authorizeLocked(
+        argv,
+        slice(cwd, cwd_len),
+        slice(token, token_len),
+        subjectOrDefault(subject, subject_len),
+        scopeOrDefault(scope, scope_len),
+        owner_confirmed != 0,
+        now_ms,
+    );
+    unlock();
+    auth_result catch |err| return authStatus(err);
+
+    const spawned = if (is_windows)
+        windows_host.spawnPiped3(
+            slice(argv_json, argv_len),
+            slice(cwd, cwd_len),
+            slice(env_json, env_len),
+        )
+    else
+        linux_host.spawnPiped3(
+            slice(argv_json, argv_len),
+            slice(cwd, cwd_len),
+            slice(env_json, env_len),
+        );
+    const result = spawned catch |err| return host.statusOf(err);
+    pid_slot.* = result.pid;
+    handle_slot.* = result.handle;
+    stdin_slot.* = result.stdin_write;
+    stdout_slot.* = result.stdout_read;
+    stderr_slot.* = result.stderr_read;
+    return ok_status;
+}
+
 fn deliverCaptureOwned(
     stdout: []u8,
     stderr: []u8,

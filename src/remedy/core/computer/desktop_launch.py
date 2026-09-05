@@ -10,7 +10,6 @@ import contextlib
 import os
 import re
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -272,12 +271,9 @@ def open_app_linux(name: str, search_dirs: list[str] | None = None) -> dict[str,
     else:
         return {"ok": False, "message": f"no launcher for {raw!r} (install xdg-utils)"}
     try:
-        subprocess.Popen(  # noqa: S603
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        from remedy.execution.process import retain_detached, spawn_hidden
+
+        retain_detached(spawn_hidden(cmd))
     except OSError as exc:
         return {"ok": False, "message": str(exc)}
     return {"ok": True, "message": f"Launched {target}", "cmd": cmd}
@@ -306,10 +302,7 @@ def open_url_linux(url: str) -> dict[str, Any]:
     xdg = which("xdg-open")
     if not xdg:
         raise RuntimeError("xdg-open not found")
-    subprocess.Popen(  # noqa: S603
-        [xdg, u],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    from remedy.execution.process import retain_detached, spawn_hidden
+
+    retain_detached(spawn_hidden([xdg, u]))
     return {"url": u, "method": "xdg-open"}
