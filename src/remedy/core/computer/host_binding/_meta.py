@@ -23,8 +23,14 @@ from ._core import (
     _take,
     _utf8,
 )
+from ._json import take_json
 
 # ---- ABI 5 additive: diagnose / dialect / stretch --------------------------
+
+
+def _take_dict(library: Any, ptr: Any, length: Any) -> dict[str, Any]:
+    data = take_json(library, ptr, length)
+    return dict(data) if isinstance(data, dict) else {}
 
 
 def diagnose_host_failure(
@@ -62,7 +68,7 @@ def diagnose_host_failure(
             payload, len(payload), ctypes.byref(ptr), ctypes.byref(length)
         ),
     )
-    return dict(json.loads(_take(library, ptr, length).decode("utf-8")))
+    return _take_dict(library, ptr, length)
 
 
 def dialect_probe(home: str = "", *, persist: bool = False) -> dict[str, Any]:
@@ -81,7 +87,7 @@ def dialect_probe(home: str = "", *, persist: bool = False) -> dict[str, Any]:
             ctypes.byref(length),
         ),
     )
-    return dict(json.loads(_take(library, ptr, length).decode("utf-8")))
+    return _take_dict(library, ptr, length)
 
 
 def dialect_load(home: str = "") -> dict[str, Any]:
@@ -96,7 +102,7 @@ def dialect_load(home: str = "") -> dict[str, Any]:
             home_raw, len(home_raw), ctypes.byref(ptr), ctypes.byref(length)
         ),
     )
-    return dict(json.loads(_take(library, ptr, length).decode("utf-8")))
+    return _take_dict(library, ptr, length)
 
 
 def dialect_record_success(
@@ -122,7 +128,7 @@ def dialect_record_success(
             ctypes.byref(length),
         ),
     )
-    return dict(json.loads(_take(library, ptr, length).decode("utf-8")))
+    return _take_dict(library, ptr, length)
 
 
 def dialect_format_line(home: str = "", dialect: Mapping[str, Any] | None = None) -> str:
@@ -166,7 +172,7 @@ def stretch_home(home: str = "", *, force: bool = False) -> dict[str, Any]:
             ctypes.byref(length),
         ),
     )
-    return dict(json.loads(_take(library, ptr, length).decode("utf-8")))
+    return _take_dict(library, ptr, length)
 
 
 def stretch_load(home: str = "") -> dict[str, Any] | None:
@@ -181,10 +187,7 @@ def stretch_load(home: str = "") -> dict[str, Any] | None:
             home_raw, len(home_raw), ctypes.byref(ptr), ctypes.byref(length)
         ),
     )
-    raw = _take(library, ptr, length).decode("utf-8")
-    if raw.strip() == "null":
-        return None
-    data = json.loads(raw)
+    data = take_json(library, ptr, length)
     return dict(data) if isinstance(data, dict) else None
 
 
