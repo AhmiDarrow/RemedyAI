@@ -1,4 +1,4 @@
-"""Windows pixel / SoM helpers — re-export tip shared ``desktop_common``.
+"""Windows pixel / SoM helpers — re-export tip shared ``desktop_policy``.
 
 Kept as a named Phase-1 sibling so ``desktop_capture_win`` / ``desktop_win``
 can import a pixels surface without twinning shot/SoM policy.
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from remedy.core.computer import desktop_common as C
+from remedy.core.computer import desktop_policy as C
 
 PASTE_THRESHOLD = C.PASTE_THRESHOLD
 remedy_home = C.remedy_home
