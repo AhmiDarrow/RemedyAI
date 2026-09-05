@@ -327,14 +327,14 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
     )
     argv = prep.get("argv") or []
     if argv:
-        cand = str(argv[0] or "")
-        path = Path(cand)
-        if cand and path.is_file() and path.is_absolute():
+        prepared = str(argv[0] or "")
+        prepared_path = Path(prepared)
+        if prepared and prepared_path.is_file() and prepared_path.is_absolute():
             if key in {"python", "python3", "py"}:
-                if _ok_python(cand):
-                    return cand
+                if _ok_python(prepared):
+                    return prepared
             else:
-                return cand
+                return prepared
 
     if key in {"python", "python3"}:
         try:
