@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -218,26 +219,24 @@ def test_real_adapters_are_not_refused(name: str) -> None:
 
 
 # --------------------------------------------------------------------------
-# subprocess plumbing
+# Zig-authorized run_hidden plumbing (no raw subprocess)
 # --------------------------------------------------------------------------
 
 
-def test_run_returns_stdout_and_hides_the_console_window(monkeypatch) -> None:
+def test_run_returns_stdout_via_run_hidden(monkeypatch) -> None:
     seen: dict[str, Any] = {}
 
     def fake(argv, **kwargs):
-        seen["argv"] = argv
+        seen['argv'] = argv
         seen.update(kwargs)
-        return SimpleNamespace(returncode=0, stdout="hello", stderr="")
+        return SimpleNamespace(returncode=0, stdout='hello', stderr='')
 
-    monkeypatch.setattr(gpu_probe.subprocess, "run", fake)
-    assert _run(["tool", "--x"], timeout=1.5) == "hello"
-    assert seen["argv"] == ["tool", "--x"]
-    assert seen["timeout"] == 1.5
-    assert seen["capture_output"] is True
-    assert seen["text"] is True
-    if sys.platform == "win32":
-        assert isinstance(seen["creationflags"], int)
+    monkeypatch.setattr('remedy.execution.process.run_hidden', fake)
+    assert _run(['tool', '--x'], timeout=1.5) == 'hello'
+    assert seen['argv'] == ['tool', '--x']
+    assert seen['timeout'] == 1.5
+    assert seen['capture_output'] is True
+    assert seen['text'] is True
 
 
 def test_run_uses_a_bounded_default_timeout(monkeypatch) -> None:
@@ -245,47 +244,45 @@ def test_run_uses_a_bounded_default_timeout(monkeypatch) -> None:
 
     def fake(argv, **kwargs):
         seen.update(kwargs)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+        return SimpleNamespace(returncode=0, stdout='', stderr='')
 
-    monkeypatch.setattr(gpu_probe.subprocess, "run", fake)
-    _run(["tool"])
-    assert seen["timeout"] == 4.0
+    monkeypatch.setattr('remedy.execution.process.run_hidden', fake)
+    _run(['tool'])
+    assert seen['timeout'] == 4.0
 
 
 def test_a_failing_exit_code_discards_whatever_was_printed(monkeypatch) -> None:
     monkeypatch.setattr(
-        gpu_probe.subprocess,
-        "run",
-        lambda argv, **kw: SimpleNamespace(returncode=9, stdout="garbage on stdout", stderr="boom"),
+        'remedy.execution.process.run_hidden',
+        lambda argv, **kw: SimpleNamespace(returncode=9, stdout='garbage on stdout', stderr='boom'),
     )
-    assert _run(["tool"]) == ""
+    assert _run(['tool']) == ''
 
 
 def test_run_never_returns_none_for_an_empty_stdout(monkeypatch) -> None:
     monkeypatch.setattr(
-        gpu_probe.subprocess,
-        "run",
+        'remedy.execution.process.run_hidden',
         lambda argv, **kw: SimpleNamespace(returncode=0, stdout=None, stderr=None),
     )
-    assert _run(["tool"]) == ""
+    assert _run(['tool']) == ''
 
 
 @pytest.mark.parametrize(
-    "exc",
+    'exc',
     [
-        gpu_probe.subprocess.TimeoutExpired(cmd="tool", timeout=4.0),
-        FileNotFoundError("no such tool"),
-        PermissionError("denied"),
-        OSError("winerror 87"),
-        RuntimeError("something unforeseen"),
+        subprocess.TimeoutExpired(cmd='tool', timeout=4.0),
+        FileNotFoundError('no such tool'),
+        PermissionError('denied'),
+        OSError('winerror 87'),
+        RuntimeError('something unforeseen'),
     ],
 )
 def test_a_sensor_that_explodes_is_reported_as_silence_not_raised(monkeypatch, exc: Exception) -> None:
     def fake(argv, **kw):
         raise exc
 
-    monkeypatch.setattr(gpu_probe.subprocess, "run", fake)
-    assert _run(["tool"]) == ""
+    monkeypatch.setattr('remedy.execution.process.run_hidden', fake)
+    assert _run(['tool']) == ''
 
 
 def test_which_any_takes_the_first_tool_that_exists(monkeypatch) -> None:
