@@ -5,10 +5,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from remedy.interfaces.api_support import _sync_runtime_llm_from_config
+from remedy.interfaces.api_support import _apply_llm_to_runtime, resolve_llm_slot
 
 
-def test_sync_uses_session_provider_override(monkeypatch) -> None:
+def test_slot_uses_session_provider_override(monkeypatch) -> None:
     """Status-bar Grok switch while config still DeepSeek must not hit DeepSeek."""
     cfg = {
         "llm_provider": "deepseek",
@@ -25,25 +25,30 @@ def test_sync_uses_session_provider_override(monkeypatch) -> None:
         lambda _c, prov: f"key-for-{prov}",
     )
 
+    provider, model, base_url, api_key = resolve_llm_slot(
+        provider_override="xai",
+        model_override="grok-4.5",
+    )
+    assert api_key == "key-for-xai"
+    assert provider == "xai"
+    assert "grok" in str(model).lower() or model == "grok-4.5"
+    assert "deepseek" not in str(base_url or "").lower()
+
     runtime = MagicMock()
     runtime.reconfigure_llm = MagicMock()
-    runtime._llm_api_key = ""
-
-    key = _sync_runtime_llm_from_config(
+    _apply_llm_to_runtime(
         runtime,
-        model_override="grok-4.5",
-        provider_override="xai",
+        provider=provider,
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
     )
-    assert key == "key-for-xai"
     kwargs = runtime.reconfigure_llm.call_args.kwargs
     assert kwargs["provider"] == "xai"
-    assert "grok" in str(kwargs["model"]).lower() or kwargs["model"] == "grok-4.5"
-    # Must not keep DeepSeek host when provider changed
-    base = str(kwargs.get("base_url") or "").lower()
-    assert "deepseek" not in base
+    assert "deepseek" not in str(kwargs.get("base_url") or "").lower()
 
 
-def test_sync_without_override_keeps_global(monkeypatch) -> None:
+def test_slot_without_override_keeps_global(monkeypatch) -> None:
     cfg = {
         "llm_provider": "deepseek",
         "llm_model": "deepseek-v4-flash",
@@ -58,9 +63,18 @@ def test_sync_without_override_keeps_global(monkeypatch) -> None:
         "remedy.interfaces.config.resolve_provider_api_key",
         lambda _c, prov: "ds-key",
     )
-    runtime = SimpleNamespace(_llm_api_key="")
-    runtime.reconfigure_llm = MagicMock()  # type: ignore[attr-defined]
+    provider, model, base_url, api_key = resolve_llm_slot()
+    assert provider == "deepseek"
+    assert api_key == "ds-key"
 
-    _sync_runtime_llm_from_config(runtime, model_override=None, provider_override=None)
+    runtime = SimpleNamespace()
+    runtime.reconfigure_llm = MagicMock()  # type: ignore[attr-defined]
+    _apply_llm_to_runtime(
+        runtime,
+        provider=provider,
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+    )
     kwargs = runtime.reconfigure_llm.call_args.kwargs
     assert kwargs["provider"] == "deepseek"
