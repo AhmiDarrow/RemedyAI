@@ -12,7 +12,7 @@ import pytest
 
 from remedy.core.session_quality import get_session_quality
 from remedy.core.session_reset import full_reset_session
-from remedy.interfaces.api_support import handle_slash_command
+from remedy.interfaces.slash_commands import handle_slash_command
 from remedy.memory.store import MemoryStore
 from remedy.models import ChatMessage, ChatMessageRole, ChatSession, MemoryEntry, MemoryEntryType
 

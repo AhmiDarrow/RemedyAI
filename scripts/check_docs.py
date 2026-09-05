@@ -50,7 +50,7 @@ MANUAL = ROOT / "docs" / "manual"
 ARTICLES = ROOT / "desktop" / "src" / "help" / "articles"
 CATALOG_TS = ROOT / "desktop" / "src" / "help" / "catalog.ts"
 HOTKEYS_TS = ROOT / "desktop" / "src" / "hotkeys.ts"
-# Canonical slash command list (re-exported from api_support for compat).
+# Canonical slash command list.
 API_SUPPORT = ROOT / "src" / "remedy" / "interfaces" / "slash_commands.py"
 README = ROOT / "README.md"
 COMMANDS_MD = MANUAL / "11-reference-commands.md"
@@ -135,7 +135,7 @@ def check_version() -> CheckResult:
 
 
 def _parse_builtin_commands() -> list[dict]:
-    """Parse _BUILTIN_COMMANDS from api_support.py without importing remedy."""
+    """Parse _BUILTIN_COMMANDS from slash_commands.py without importing remedy."""
     text = API_SUPPORT.read_text(encoding="utf-8")
     tree = ast.parse(text)
     for node in tree.body:
@@ -148,7 +148,7 @@ def _parse_builtin_commands() -> list[dict]:
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             if node.target.id == "_BUILTIN_COMMANDS" and node.value is not None:
                 return ast.literal_eval(node.value)
-    raise RuntimeError("_BUILTIN_COMMANDS not found in api_support.py")
+    raise RuntimeError("_BUILTIN_COMMANDS not found in slash_commands.py")
 
 
 def check_slash_commands() -> CheckResult:
