@@ -1,7 +1,3 @@
-import pytest
-
-pytest.skip("Phase 6 absolute: retired agent_* tool family; product tools are Tool ABI", allow_module_level=True)
-
 """Project write jail: reads may leave the folder; writes may not (project scope)."""
 
 from __future__ import annotations
@@ -1107,70 +1103,7 @@ async def test_job_run_verify_write_roots_fail_closed(tmp_path: Path, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_update_settings_refuses_project_switch_without_force(tmp_path: Path):
-    """Regression: agent must not silently retarget SecretSticky → SecretFolder."""
-    from remedy.core.agent_settings_tools import register_settings_tools
-    from remedy.skills.tool_registry import ToolRegistry
-
-    sticky = tmp_path / "SecretSticky"
-    folder = tmp_path / "SecretFolder"
-    sticky.mkdir()
-    folder.mkdir()
-
-    class RT:
-        def __init__(self) -> None:
-            self.tool_registry = ToolRegistry()
-            self._proj = sticky.resolve()
-
-        def project_path_is_unset(self) -> bool:
-            return False
-
-        def effective_project_path(self) -> Path:
-            return self._proj
-
-    rt = RT()
-    register_settings_tools(rt)
-    out = await rt.tool_registry.execute(
-        "update_settings",
-        project_path=str(folder),
-    )
-    assert "PROJECT_JAIL" in out or "refusing to switch" in out.lower()
-
-
 @pytest.mark.asyncio
-async def test_update_settings_refuses_unset_project_and_home_scope(tmp_path: Path):
-    """Model must not lift the write jail via empty project_path or access_scope=home."""
-    from remedy.core.agent_settings_tools import register_settings_tools
-    from remedy.skills.tool_registry import ToolRegistry
-
-    sticky = tmp_path / "SecretSticky"
-    sticky.mkdir()
-
-    class RT:
-        def __init__(self) -> None:
-            self.tool_registry = ToolRegistry()
-            self._proj = sticky.resolve()
-
-        def project_path_is_unset(self) -> bool:
-            return False
-
-        def effective_project_path(self) -> Path:
-            return self._proj
-
-    rt = RT()
-    register_settings_tools(rt)
-    out = await rt.tool_registry.execute("update_settings", project_path="")
-    assert "PROJECT_JAIL" in out or "refusing to clear" in out.lower()
-    out_os = await rt.tool_registry.execute(
-        "update_settings", project_path=r"C:\Windows"
-    )
-    assert "PROJECT_FORBIDDEN" in out_os or "not allowed" in out_os.lower()
-    out2 = await rt.tool_registry.execute("update_settings", access_scope="home")
-    assert "APPROVAL_REQUIRED" in out2
-    out3 = await rt.tool_registry.execute("update_settings", approval_mode="auto")
-    assert "APPROVAL_REQUIRED" in out3
-
-
 def test_shell_blocks_auth_secret_reads(tmp_path: Path):
     sticky = tmp_path / "SecretSticky"
     sticky.mkdir()

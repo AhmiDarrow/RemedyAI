@@ -1,12 +1,7 @@
-import pytest
-
-pytest.skip("Phase 6 absolute: retired agent_* tool family; product tools are Tool ABI", allow_module_level=True)
-
 """Frontiers A–H: behavioral hop, spec, repair queue, mutants, snapshots, gates, index, TDD."""
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -219,47 +214,6 @@ def test_tdd_bootstrap(tmp_path):
     assert (res.get("tdd") or {}).get("written")
 
 
-def test_build_tools_ah_registered(tmp_path, monkeypatch):
-    from remedy.core.agent_build_tools import register_build_tools
-
-    # A–H frontiers stay behind maturity gate — enable for registration test
-    monkeypatch.setattr(
-        "remedy.core.feature_maturity.build_os_advanced_enabled",
-        lambda cfg=None: True,
-    )
-
-    handlers: dict[str, object] = {}
-
-    class FakeReg:
-        def register_builtin_handler(self, name, desc, fn, schema):  # noqa: ARG002
-            handlers[name] = fn
-
-    root = tmp_path
-    (root / "w.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
-    rt = SimpleNamespace(
-        tool_registry=FakeReg(),
-        effective_project_path=lambda: root,
-        resolve_tool_path=lambda p, **k: root / p,
-        config=SimpleNamespace(home_dir=tmp_path),
-        _build_state=None,
-    )
-    register_build_tools(rt)
-    for name in (
-        "build_compile_spec",
-        "build_tdd",
-        "build_gate_tower",
-        "build_repair_queue",
-        "build_mutant_score",
-        "build_snapshot",
-        "build_symbol_index",
-        "build_unit_hop",
-    ):
-        assert name in handlers, name
-
-    out = asyncio.run(handlers["build_compile_spec"](goal="add def foo"))  # type: ignore[operator]
-    assert "units" in out or "ok" in out
-
-
 def test_a_failing_test_points_at_a_source_file_that_exists():
     """The queue's top target used to be a bare name — "telephony_line.py" —
     that is nowhere in the tree, while the file it meant sits at
@@ -370,3 +324,4 @@ def test_the_source_index_learns_about_scaffolded_files(tmp_path):
     (proj / "src" / "pkg" / "newthing.py").write_text("x = 1" + chr(10))
     invalidate_source_index(proj)
     assert _test_to_source_guess("tests/test_pkg_newthing.py", proj) == "src/pkg/newthing.py"
+
