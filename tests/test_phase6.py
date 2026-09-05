@@ -15,7 +15,6 @@ from remedy.interfaces.config import (
     load_env_overrides,
     resolve_config,
 )
-from remedy.interfaces.plugin import HookManager, PluginManager
 from remedy.models import (
     ChannelKind,
 )
@@ -183,214 +182,16 @@ class TestConfigToAgentConfig:
 
 
 # ============================================================================
-# Test Hook & Plugin System
+# Plugin system retired (Phase 6 — Go owns product hooks)
 # ============================================================================
 
-class TestHookManager:
-    def test_register_and_fire(self):
-        hm = HookManager()
-        results = []
 
-        def handler(x):
-            results.append(x)
-            return x
+def test_interfaces_plugin_module_is_gone() -> None:
+    import importlib.util
+    from pathlib import Path
 
-        hm.register("test", handler)
-        r = hm.fire("test", 42)
-        assert results == [42]
-        assert r == [42]
-
-    def test_fire_no_handlers_returns_empty(self):
-        hm = HookManager()
-        assert hm.fire("nonexistent", 1) == []
-
-    def test_fire_chain_continues_on_true(self):
-        hm = HookManager()
-        calls = []
-
-        def a():
-            calls.append("a")
-            return True
-        def b():
-            calls.append("b")
-            return True
-
-        hm.register("chain", a, priority=10)
-        hm.register("chain", b, priority=5)
-        result = hm.fire_chain("chain")
-        assert result is True
-        assert calls == ["a", "b"]
-
-    def test_fire_chain_short_circuits_on_false(self):
-        hm = HookManager()
-        calls = []
-
-        def a():
-            calls.append("a")
-            return False
-        def b():
-            calls.append("b")
-            return True
-
-        hm.register("chain", a, priority=10)
-        hm.register("chain", b, priority=5)
-        result = hm.fire_chain("chain")
-        assert result is False
-        assert calls == ["a"]
-
-    def test_priority_ordering(self):
-        hm = HookManager()
-        order = []
-
-        hm.register("test", lambda: order.append("low"), priority=0)
-        hm.register("test", lambda: order.append("high"), priority=10)
-        hm.register("test", lambda: order.append("mid"), priority=5)
-        hm.fire("test")
-        assert order == ["high", "mid", "low"]
-
-    def test_unregister_handler(self):
-        hm = HookManager()
-        calls = []
-
-        def handler():
-            calls.append(1)
-
-        hm.register("test", handler)
-        hm.unregister("test", handler)
-        hm.fire("test")
-        assert calls == []
-
-    def test_clear_specific_hook(self):
-        hm = HookManager()
-        hm.register("a", lambda: None)
-        hm.register("b", lambda: None)
-        hm.clear("a")
-        assert hm.list_hooks().get("a", 0) == 0
-        assert hm.list_hooks()["b"] == 1
-
-    def test_clear_all_hooks(self):
-        hm = HookManager()
-        hm.register("a", lambda: None)
-        hm.register("b", lambda: None)
-        hm.clear()
-        assert hm.list_hooks() == {}
-
-    def test_list_hooks(self):
-        hm = HookManager()
-        hm.register("a", lambda: None)
-        hm.register("a", lambda: None)
-        hm.register("b", lambda: None)
-        hooks = hm.list_hooks()
-        assert hooks == {"a": 2, "b": 1}
-
-    def test_list_handlers(self):
-        hm = HookManager()
-        hm.register("test", lambda: None, priority=5, source="plugin-x")
-        handlers = hm.list_handlers("test")
-        assert len(handlers) == 1
-        assert handlers[0]["priority"] == 5
-        assert handlers[0]["source"] == "plugin-x"
-
-    def test_fire_async(self):
-        import asyncio
-        hm = HookManager()
-        results = []
-
-        async def handler(x):
-            results.append(x)
-            return x
-
-        hm.register("test", handler)
-        r = asyncio.run(hm.fire_async("test", 99))
-        assert results == [99]
-        assert r == [99]
-
-    def test_handler_exception_does_not_crash(self):
-        hm = HookManager()
-        results = []
-
-        def bad(): raise ValueError("ouch")
-        def good():
-            results.append("ok")
-            return "ok"
-
-        hm.register("test", bad, priority=10)
-        hm.register("test", good, priority=5)
-        r = hm.fire("test")
-        assert results == ["ok"]
-        assert r == ["ok"]
-
-
-class TestPluginManager:
-    def test_discover_py_files(self, tmp_path):
-        hm = HookManager()
-        pm = PluginManager(hm)
-        (tmp_path / "plugin_a.py").write_text("def setup_plugin(h): pass\n")
-        (tmp_path / "plugin_b.py").write_text("def setup_plugin(h): pass\n")
-        (tmp_path / "_internal.py").write_text("pass\n")
-        found = pm.discover([str(tmp_path)])
-        assert len(found) == 2
-        assert "plugin_a" in found
-        assert "plugin_b" in found
-
-    def test_discover_packages(self, tmp_path):
-        hm = HookManager()
-        pm = PluginManager(hm)
-        pkg = tmp_path / "my_plugin"
-        pkg.mkdir()
-        (pkg / "__init__.py").write_text("def setup_plugin(h): pass\n")
-        found = pm.discover([str(tmp_path)])
-        assert "my_plugin" in found
-
-    def test_discover_single_file(self, tmp_path):
-        hm = HookManager()
-        pm = PluginManager(hm)
-        p = tmp_path / "single.py"
-        p.write_text("def setup_plugin(h): pass\n")
-        found = pm.discover([str(p)])
-        assert "single" in found
-
-    def test_discover_missing_dir_returns_empty(self):
-        hm = HookManager()
-        pm = PluginManager(hm)
-        assert pm.discover(["/nonexistent"]) == []
-
-    def test_load_with_setup(self, tmp_path):
-        hm = HookManager()
-        pm = PluginManager(hm)
-        p = tmp_path / "test_load.py"
-        p.write_text(
-            "def setup_plugin(h): h.register('on_start', lambda: 'loaded')\n"
-        )
-        # Load requires plugin_path (or prior discover origin) — bare import refused.
-        assert pm.load("test_load", plugin_path=str(tmp_path)) is True
-        assert "test_load" in pm.loaded_plugins
-        assert hm.fire("on_start") == ["loaded"]
-
-    def test_load_without_setup(self, tmp_path):
-        hm = HookManager()
-        pm = PluginManager(hm)
-        p = tmp_path / "plain.py"
-        p.write_text("x = 1\n")
-        assert pm.load("plain", plugin_path=str(tmp_path)) is True
-        assert "plain" in pm.loaded_plugins
-
-    def test_load_nonexistent_returns_false(self):
-        hm = HookManager()
-        pm = PluginManager(hm)
-        # Bare load (no path/discover origin) is refused.
-        assert pm.load("nonexistent_module_xyz") is False
-
-    def test_unload(self, tmp_path):
-        hm = HookManager()
-        pm = PluginManager(hm)
-        p = tmp_path / "to_unload.py"
-        p.write_text(
-            "teardowns = []\ndef setup_plugin(h): pass\ndef teardown_plugin(): teardowns.append(1)\n"
-        )
-        assert pm.load("to_unload", plugin_path=str(tmp_path)) is True
-        assert pm.unload("to_unload") is True
-        assert "to_unload" not in pm.loaded_plugins
+    assert importlib.util.find_spec("remedy.interfaces.plugin") is None
+    assert not Path("src/remedy/interfaces/plugin.py").exists()
 
 
 # ============================================================================
