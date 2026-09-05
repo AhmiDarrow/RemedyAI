@@ -334,68 +334,6 @@ def binding_for_session(
     return LlmBinding(provider=p, model=m, base_url=url, api_key=key)
 
 
-def _sync_runtime_llm_from_config(
-    runtime: Any,
-    *,
-    model_override: str | None = None,
-    provider_override: str | None = None,
-    llm_only: bool = False,
-) -> str:
-    """Reload provider/model/url/key from disk into the live runtime.
-
-    Settings / wizard / cold start. Chat turns must use ``binding_for_session``
-    instead — writing the singleton mid-stream cross-wires concurrent tabs.
-    """
-    if runtime is None:
-        return ""
-    provider, model, base_url, api_key = resolve_llm_slot(
-        provider_override=provider_override,
-        model_override=model_override,
-        runtime=runtime,
-    )
-
-    if llm_only:
-        # Chat/messenger turn: only LLM binding (safe under _llm_turn_lock).
-        _apply_llm_to_runtime(
-            runtime,
-            provider=provider,
-            model=model,
-            base_url=base_url,
-            api_key=api_key if api_key else None,
-        )
-        return str(getattr(runtime, "_llm_api_key", "") or api_key or "")
-
-    # Full sync (settings save / cold start): partner trust + project + harness.
-    cfg = _load_config_cached()
-    from remedy.core.approvals import normalize_approval_mode
-
-    am = normalize_approval_mode(str(cfg.get("approval_mode") or "auto"))
-    scope = cfg.get("access_scope")
-    _hm = cfg.get("harness_min_context_pct")
-    _hx = cfg.get("harness_max_context_pct")
-    _apply_llm_to_runtime(
-        runtime,
-        provider=provider,
-        model=model,
-        base_url=base_url,
-        api_key=api_key if api_key else None,
-        project_path=cfg.get("project_path"),
-        access_scope=str(scope) if scope is not None else None,
-        harness_mode=cfg.get("harness_mode"),
-        harness_min_context_pct=float(_hm) if _hm is not None else None,
-        harness_max_context_pct=float(_hx) if _hx is not None else None,
-        thinking_level=cfg.get("thinking_level"),
-        approval_mode=am,
-    )
-    try:
-        from remedy.core.approvals import APPROVALS
-
-        APPROVALS.sync_from_config(cfg)
-    except Exception:
-        logger.exception("failed to sync approval mode from config")
-    return str(getattr(runtime, "_llm_api_key", "") or api_key or "")
-
-
 def _write_config(path: Path, cfg: dict[str, Any]) -> None:
     """Persist non-secret settings only. API keys never land in config.toml.
 
