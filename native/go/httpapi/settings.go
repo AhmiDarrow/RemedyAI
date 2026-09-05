@@ -247,6 +247,9 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 	if err := WriteConfig(path, cfg); err != nil {
 		return nil, err
 	}
+	if s.approvals != nil {
+		_ = s.approvals.SyncFromConfig(cfg)
+	}
 	s.refreshConnectAfterSettings()
 	if messengersUpdate != nil {
 		s.refreshMessengerAfterSettings()

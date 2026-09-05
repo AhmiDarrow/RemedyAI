@@ -13,7 +13,7 @@
 
 1. Open [RemedyAI Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest).
 2. Download the **`Remedy.Desktop_*_x64-setup.exe`** installer (not source zips).
-3. Prefer the latest **v0.10.x** signed release when available.
+3. Prefer the latest signed **Remedy.Desktop_*** release (see What’s new for the current version).
 
 > **SmartScreen / Windows Security**  
 > Solo builds may not be Authenticode-signed yet. If Windows says **Unknown publisher**, use **More info → Run anyway**.  

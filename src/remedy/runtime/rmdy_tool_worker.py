@@ -197,11 +197,23 @@ def _default_owner_workspace() -> Path:
 
 def _resolve_workspace_path(path: str, inp: Mapping[str, Any] | None = None) -> Path:
     root = _workspace_root(inp)
+    try:
+        from remedy.core.security import refuse_protected_secret_path
+
+        refuse_protected_secret_path(root)
+    except ImportError:
+        pass
     raw = (path or ".").strip() or "."
     candidate = Path(raw).expanduser()
     if not candidate.is_absolute():
         candidate = root / candidate
     resolved = candidate.resolve()
+    try:
+        from remedy.core.security import refuse_protected_secret_path
+
+        refuse_protected_secret_path(resolved)
+    except ImportError:
+        pass
     try:
         resolved.relative_to(root)
     except ValueError as exc:

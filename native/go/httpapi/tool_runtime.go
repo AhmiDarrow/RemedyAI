@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
@@ -61,8 +62,14 @@ func (e *RegistryToolExecutor) Execute(ctx context.Context, call cognition.ToolC
 
 // RegistryPolicy allows registered read-only tools, asks for mutation/checkpoint,
 // and denies unknown names. No silent allow for unregistered tools.
+//
+// Approval mode (ask/auto/full) matches the Python partner trust loop:
+// coding mutations run under Auto/Full; Ask enqueues for the owner banner;
+// RiskCheckpoint (money/credentials/send) always asks — no mode waives it.
 type RegistryPolicy struct {
-	Registry *tools.Registry
+	Registry  *tools.Registry
+	Approvals *approvalQueue
+	SessionID string
 }
 
 func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cognition.Decision {
@@ -76,11 +83,38 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 	switch desc.Risk {
 	case tools.RiskReadOnly:
 		return cognition.Allow
-	case tools.RiskMutation, tools.RiskCheckpoint:
+	case tools.RiskCheckpoint:
+		// Non-waivable owner moments (pay / credentials / irreversible send).
+		if p.Approvals != nil && p.Approvals.IsApproved(call.Name, toolCommandPreview(call), p.SessionID) {
+			return cognition.Allow
+		}
+		return cognition.Ask
+	case tools.RiskMutation:
+		mode := "ask"
+		if p.Approvals != nil {
+			mode = p.Approvals.Mode()
+		}
+		if mode == "auto" || mode == "full" {
+			return cognition.Allow
+		}
+		if p.Approvals != nil && p.Approvals.IsApproved(call.Name, toolCommandPreview(call), p.SessionID) {
+			return cognition.Allow
+		}
 		return cognition.Ask
 	default:
 		return cognition.Deny
 	}
+}
+
+func toolCommandPreview(call cognition.ToolCall) string {
+	if len(call.Input) == 0 {
+		return call.Name
+	}
+	raw := strings.TrimSpace(string(call.Input))
+	if len(raw) > 240 {
+		raw = raw[:240]
+	}
+	return raw
 }
 
 // NewDefaultToolRegistry builds the turn-time Tool ABI registry.

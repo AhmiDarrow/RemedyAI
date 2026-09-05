@@ -233,6 +233,36 @@ func (q *approvalQueue) Get(id string) *pendingApproval {
 	return &cp
 }
 
+// IsApproved reports whether this tool+command fingerprint was already
+// approved for the session (or always). Used so Ask → Approve → retry works.
+func (q *approvalQueue) IsApproved(toolName, command, sessionID string) bool {
+	if q == nil {
+		return false
+	}
+	fp := approvalFingerprint(toolName, command)
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		sid = "default"
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if _, ok := q.approvedFPs[fp]; ok {
+		return true
+	}
+	if set, ok := q.sessionFPs[sid]; ok {
+		if _, ok := set[fp]; ok {
+			return true
+		}
+	}
+	if ones, ok := q.oneShot[sid]; ok {
+		if _, ok := ones[fp]; ok {
+			delete(ones, fp) // one-shot consume
+			return true
+		}
+	}
+	return false
+}
+
 func plainApprovalSummary(item *pendingApproval) string {
 	if s := strings.TrimSpace(item.SummaryOverride); s != "" {
 		return s

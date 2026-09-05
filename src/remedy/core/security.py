@@ -146,6 +146,12 @@ _CREDENTIAL_NAMES = frozenset(
         ".kube",
         "credentials.json",
         "service-account.json",
+        # Remedy auth / provider material (name-based listing + path parts).
+        "local_api_token",
+        "local_api_token.posix",
+        "provider_keys.json",
+        "xai.json",
+        "oauth_tokens.json",
     }
 )
 _CREDENTIAL_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".ppk")
