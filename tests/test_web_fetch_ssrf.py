@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from remedy.core.agent_web_tools import (
+from remedy.core.web_helpers import (
     _host_is_blocked,
     _ip_is_blocked,
     _prefer_connect_ip,
@@ -85,7 +85,7 @@ def test_blocks_cgnat_and_non_global_ips():
 
 def test_pinned_fetch_blocks_url_userinfo():
     """user:pass@host must never be fetched (credential leak / SSRF)."""
-    from remedy.core.agent_web_tools import _pinned_fetch
+    from remedy.core.web_helpers import _pinned_fetch
 
     with pytest.raises(ValueError, match="USERINFO"):
         _pinned_fetch("https://user:secret@example.com/path", max_chars=1000)
@@ -102,7 +102,7 @@ def test_pinned_fetch_revalidates_redirect_private_and_userinfo():
     """
     from unittest.mock import MagicMock
 
-    from remedy.core.agent_web_tools import _pinned_fetch
+    from remedy.core.web_helpers import _pinned_fetch
 
     def _fake_conn_factory(location: str):
         class _Conn:
@@ -130,21 +130,21 @@ def test_pinned_fetch_revalidates_redirect_private_and_userinfo():
 
     # First hop is a public literal so host/DNS checks pass; pin uses that IP.
     with patch(
-        "remedy.core.agent_web_tools.http.client.HTTPConnection",
+        "remedy.core.web_helpers.http.client.HTTPConnection",
         _fake_conn_factory("http://127.0.0.1/metadata"),
     ):
         with pytest.raises(ValueError, match="SSRF_BLOCKED_REDIRECT"):
             _pinned_fetch("http://1.1.1.1/start", max_chars=1000)
 
     with patch(
-        "remedy.core.agent_web_tools.http.client.HTTPConnection",
+        "remedy.core.web_helpers.http.client.HTTPConnection",
         _fake_conn_factory("http://user:pass@8.8.8.8/leak"),
     ):
         with pytest.raises(ValueError, match="USERINFO"):
             _pinned_fetch("http://1.1.1.1/start", max_chars=1000)
 
     with patch(
-        "remedy.core.agent_web_tools.http.client.HTTPConnection",
+        "remedy.core.web_helpers.http.client.HTTPConnection",
         _fake_conn_factory("http://169.254.169.254/latest/meta-data/"),
     ):
         with pytest.raises(ValueError, match="SSRF_BLOCKED_REDIRECT"):
@@ -155,7 +155,7 @@ def test_pinned_fetch_aborts_between_redirect_hops(monkeypatch):
     """Stop generation must win between hops — do not follow the next Location."""
     from unittest.mock import MagicMock
 
-    from remedy.core.agent_web_tools import _pinned_fetch
+    from remedy.core.web_helpers import _pinned_fetch
 
     hops = {"n": 0}
 
@@ -186,7 +186,7 @@ def test_pinned_fetch_aborts_between_redirect_hops(monkeypatch):
             pass
 
     with patch(
-        "remedy.core.agent_web_tools.http.client.HTTPConnection",
+        "remedy.core.web_helpers.http.client.HTTPConnection",
         _Conn,
     ):
         with pytest.raises(ValueError, match="ABORTED"):
@@ -232,7 +232,7 @@ def test_blocks_ipv6_ula_link_local_loopback_and_mapped():
 
 
 def test_parse_ddg_html_results():
-    from remedy.core.agent_web_tools import parse_ddg_html_results
+    from remedy.core.web_helpers import parse_ddg_html_results
 
     html = """
     <div class="result">
@@ -255,7 +255,7 @@ def test_parse_ddg_html_results():
 
 
 def test_search_public_web_disabled(monkeypatch):
-    from remedy.core import agent_web_tools as w
+    from remedy.core import web_helpers as w
 
     monkeypatch.setattr(w, "_web_enabled", lambda runtime=None: False)
     assert w.search_public_web("spanish beginner") == []
@@ -301,17 +301,17 @@ async def test_web_search_parses_pinned_html(monkeypatch):
         return url, html, "utf-8"
 
     monkeypatch.setattr(
-        "remedy.core.agent_web_tools._pinned_fetch", fake_pinned
+        "remedy.core.web_helpers._pinned_fetch", fake_pinned
     )
     monkeypatch.setattr(
         "remedy.core.agent_web_tools._web_enabled", lambda runtime: True
     )
     monkeypatch.setattr(
-        "remedy.core.agent_web_tools._openserp_rows",
+        "remedy.core.web_helpers._openserp_rows",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("test: use DDG")),
     )
     monkeypatch.setattr(
-        "remedy.core.agent_web_tools._searxng_base", lambda runtime=None: ""
+        "remedy.core.web_helpers._searxng_base", lambda runtime=None: ""
     )
 
     runtime = MagicMock()
@@ -332,9 +332,10 @@ def test_a_redirect_body_is_drained_but_bounded():
     the redirect was even looked at. Nothing here needs that body."""
     import inspect
 
-    from remedy.core import agent_web_tools
+    from remedy.core import web_helpers as agent_web_tools
 
     src = inspect.getsource(agent_web_tools)
     assert "resp.read()  # drain" not in src, "unbounded drain is back"
     assert "_REDIRECT_DRAIN_BYTES" in src
     assert 0 < agent_web_tools._REDIRECT_DRAIN_BYTES <= 1024 * 1024
+

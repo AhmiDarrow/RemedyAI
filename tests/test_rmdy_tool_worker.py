@@ -517,6 +517,15 @@ def test_prompt_assemble_registered() -> None:
     assert ("prompt.assemble", 1) in worker._HANDLERS
 
 
+def test_worker_web_handlers_import_web_helpers() -> None:
+    """Phase 6 absolute: worker must not pull agent_web_tools registration."""
+    import inspect
+
+    src = inspect.getsource(worker._web_search) + inspect.getsource(worker._web_fetch)
+    assert "web_helpers" in src
+    assert "agent_web_tools" not in src
+
+
 def test_voice_vision_handlers_registered() -> None:
     for key in (
         ("voice.speak", 1),
