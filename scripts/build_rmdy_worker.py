@@ -63,6 +63,63 @@ SKIP_NAME_PARTS = frozenset(
 
 SKIP_SUFFIXES = frozenset({".pyc", ".pyo", ".so", ".dll", ".dylib"})
 
+# Phase 6 absolute: only these top-level remedy entries may ship in the worker.
+WORKER_ALLOW_TOP_LEVEL = frozenset(
+    {
+        "__init__.py",
+        "__main__.py",
+        "home.py",
+        "models.py",
+        "assistant",
+        "bundled_skills",
+        "core",
+        "credentials",
+        "events",
+        "execution",
+        "i18n",
+        "interfaces",
+        "memory",
+        "migrate",
+        "nanoswarm",
+        "policy",
+        "runtime",
+        "skills",
+        "telephony",
+        "tools",
+        "verification",
+        "vision",
+        "voice",
+    }
+)
+
+# Never ship agent tool-registration forests or MCP bridge in the worker package.
+WORKER_DENY_REL_FILES = frozenset(
+    {
+        "core/agent_mcp_bridge.py",
+    }
+)
+
+# Required worker surface (fail closed if missing after stage).
+WORKER_REQUIRED_REL_FILES = frozenset(
+    {
+        "runtime/rmdy_tool_worker.py",
+        "runtime/prompt_assemble.py",
+        "runtime/voice_vision_rmdy.py",
+        "core/web_helpers.py",
+    }
+)
+
+
+def _is_denied_worker_path(rel: Path) -> bool:
+    """True when *rel* (under src/remedy) must not ship in the worker package."""
+    posix = rel.as_posix()
+    if posix in WORKER_DENY_REL_FILES:
+        return True
+    name = rel.name
+    if name.startswith("agent_") and name.endswith("_tools.py"):
+        return True
+    return False
+
 
 def _is_skipped(rel: Path) -> bool:
     if any(part in SKIP_NAME_PARTS for part in rel.parts):
@@ -70,11 +127,18 @@ def _is_skipped(rel: Path) -> bool:
     if rel.suffix.lower() in SKIP_SUFFIXES:
         return True
     # Never stage a top-level package named like a banned server module.
-    return bool(rel.parts) and rel.parts[0].lower() in BANNED_SERVER_MODULE_NAMES
+    if rel.parts and rel.parts[0].lower() in BANNED_SERVER_MODULE_NAMES:
+        return True
+    top = rel.parts[0] if rel.parts else ""
+    if top and top not in WORKER_ALLOW_TOP_LEVEL:
+        return True
+    if _is_denied_worker_path(rel):
+        return True
+    return False
 
 
 def stage_worker_tree(dest: Path, *, source: Path = SRC_REMEDY) -> Path:
-    """Copy ``src/remedy`` → ``dest/remedy``, filtering caches and server names."""
+    """Copy allowlisted ``src/remedy`` → ``dest/remedy`` for the RMDY worker."""
     if not source.is_dir():
         raise FileNotFoundError(f"remedy package missing: {source}")
     package_root = dest / "remedy"
@@ -126,6 +190,32 @@ def assert_no_http_server_bundle(tree: Path) -> None:
         preview = "\n  ".join(offenders[:20])
         raise RuntimeError(
             "worker package must not bundle an HTTP server; found:\n  " + preview
+        )
+
+
+def assert_worker_allowlist(tree: Path) -> None:
+    """Fail closed if required worker files are missing or denied agent_* ships."""
+    if not tree.is_dir():
+        raise FileNotFoundError(tree)
+    package = tree / "remedy" if (tree / "remedy").is_dir() else tree
+    missing = [
+        rel for rel in sorted(WORKER_REQUIRED_REL_FILES) if not (package / rel).is_file()
+    ]
+    if missing:
+        raise RuntimeError(
+            "worker package missing required files:\n  " + "\n  ".join(missing)
+        )
+    offenders: list[str] = []
+    for path in package.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(package)
+        if _is_denied_worker_path(rel):
+            offenders.append(rel.as_posix())
+    if offenders:
+        preview = "\n  ".join(offenders[:20])
+        raise RuntimeError(
+            "worker package must not include denied agent tool modules:\n  " + preview
         )
 
 
@@ -215,6 +305,7 @@ def build_zipapp(
     parent.mkdir(parents=True)
     package_root = stage_worker_tree(parent)
     assert_no_http_server_bundle(parent)
+    assert_worker_allowlist(parent)
     # Bytecode compile soft-check: catch syntax errors before shipping.
     compileall.compile_dir(str(package_root), quiet=1, legacy=True)
     if out.exists():
@@ -259,7 +350,16 @@ def check_only() -> None:
     for banned in BANNED_SERVER_MODULE_NAMES:
         if (SRC_REMEDY / banned).exists():
             raise SystemExit(f"banned server package present under src/remedy: {banned}")
-    print("check ok: entry importable; no banned HTTP server packages under src/remedy")
+    # Allowlist contract against a throwaway stage.
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="rmdy-check-") as tmp:
+        stage_worker_tree(Path(tmp))
+        assert_no_http_server_bundle(Path(tmp))
+        assert_worker_allowlist(Path(tmp))
+    print(
+        "check ok: entry importable; no HTTP server; worker allowlist/deny gate passed"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
