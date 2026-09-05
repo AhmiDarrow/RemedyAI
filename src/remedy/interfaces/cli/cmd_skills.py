@@ -12,9 +12,7 @@ from remedy.core.learning.reflection import ExecutionTrace, TraceStep
 from remedy.core.learning_loop import LearningLoop
 from remedy.execution.result import SubprocessSandbox
 from remedy.interfaces.cli.util import _print_exec_result, _print_skills, console
-from remedy.interfaces.config import config_to_agent_config, resolve_config
 from remedy.memory.store import MemoryStore
-from remedy.models import ToolCall, ToolSource
 from remedy.skills.executor import SkillExecutor
 from remedy.skills.exporter import SkillExporter
 from remedy.skills.registry import SkillRegistry
@@ -199,9 +197,66 @@ async def _cmd_skill(args) -> None:
 
 
 
+def _tool_runtime_base() -> str:
+    import os
+
+    return (os.environ.get("REMEDY_API") or "http://127.0.0.1:7400").rstrip("/")
+
+
+def _tool_runtime_request(
+    method: str,
+    path: str,
+    *,
+    home: Path,
+    body: dict | None = None,
+    timeout: float = 30.0,
+) -> tuple[int, object]:
+    """Call Go remedy-runtime Tool ABI routes (no Python BasicRuntime)."""
+    import urllib.error
+    import urllib.request
+
+    from remedy.interfaces.local_auth import ensure_local_api_token, load_local_api_token
+
+    token = load_local_api_token(home) or ensure_local_api_token(home)
+    url = f"{_tool_runtime_base()}{path}"
+    data = None
+    headers = {"Accept": "application/json"}
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+            payload: object = None
+            if raw:
+                payload = json.loads(raw.decode("utf-8"))
+            return int(resp.status), payload
+    except urllib.error.HTTPError as exc:
+        raw = exc.read()
+        payload: object = None
+        if raw:
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError:
+                payload = raw.decode("utf-8", errors="replace")
+        return int(exc.code), payload
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        console.print(
+            "[bold red]remedy tool needs Go remedy-runtime.[/bold red]\n"
+            "  Start [green]remedy serve[/green] (or Desktop), then retry.\n"
+            f"  [dim]({_tool_runtime_base()} unreachable: {exc})[/dim]\n"
+            "  Tool ABI ids look like [cyan]runtime.probe[/cyan], "
+            "[cyan]workspace.read[/cyan], [cyan]shell.exec[/cyan] — "
+            "not the retired Python BasicRuntime names."
+        )
+        raise SystemExit(2) from exc
+
+
 async def _cmd_tool(args) -> None:
-    """Tool CLI — uses BasicRuntime so file/shell tools stay workspace-jailed."""
-    from remedy.core.agent import BasicRuntime
+    """Tool CLI — Go Tool ABI via remedy-runtime HTTP (no BasicRuntime)."""
     from remedy.interfaces.cli.util import UnsafeHomeError, resolve_cli_home
 
     try:
@@ -209,47 +264,79 @@ async def _cmd_tool(args) -> None:
     except UnsafeHomeError as exc:
         console.print(f"[red]{exc}[/red]")
         raise SystemExit(2) from exc
-    cfg = config_to_agent_config(resolve_config(home_dir=str(home)))
-    if not getattr(cfg, "home_dir", None):
-        cfg.home_dir = str(home)
-    if not getattr(cfg, "memory_db_path", None):
-        cfg.memory_db_path = str(home / "memory.db")
 
-    rt = BasicRuntime(cfg)
-    registry = rt.tool_registry
+    timeout = float(getattr(args, "timeout", 30.0) or 30.0)
 
     if args.tool_cmd == "list":
-        table = Table(title="Registered Tools")
-        table.add_column("Source")
-        table.add_column("Name")
+        code, payload = _tool_runtime_request("GET", "/api/tools", home=home, timeout=timeout)
+        if code != 200 or not isinstance(payload, dict):
+            detail = payload if isinstance(payload, str) else (
+                payload.get("detail") if isinstance(payload, dict) else payload
+            )
+            console.print(f"[red]Tool list failed ({code}):[/red] {detail}")
+            raise SystemExit(1)
+        table = Table(title="Tool ABI (remedy-runtime)")
+        table.add_column("Runtime")
+        table.add_column("Id")
+        table.add_column("Risk")
         table.add_column("Description")
-        for t in registry.tools:
-            table.add_row(t.source.value, t.name, t.description[:60])
+        for t in payload.get("tools") or []:
+            if not isinstance(t, dict):
+                continue
+            table.add_row(
+                str(t.get("runtime") or ""),
+                str(t.get("id") or ""),
+                str(t.get("risk") or ""),
+                str(t.get("description") or "")[:60],
+            )
         console.print(table)
 
     elif args.tool_cmd == "search":
-        results = registry.search(args.query)
-        if results:
-            for t in results:
-                console.print(f"[{t.source.value}] [bold]{t.name}[/bold]: {t.description}")
+        from urllib.parse import quote
+
+        q = quote(str(args.query or ""), safe="")
+        code, payload = _tool_runtime_request(
+            "GET", f"/api/tools?q={q}", home=home, timeout=timeout
+        )
+        if code != 200 or not isinstance(payload, dict):
+            detail = payload if isinstance(payload, str) else (
+                payload.get("detail") if isinstance(payload, dict) else payload
+            )
+            console.print(f"[red]Tool search failed ({code}):[/red] {detail}")
+            raise SystemExit(1)
+        tools = payload.get("tools") or []
+        if tools:
+            for t in tools:
+                if not isinstance(t, dict):
+                    continue
+                console.print(
+                    f"[{t.get('runtime')}] [bold]{t.get('id')}[/bold]: "
+                    f"{t.get('description')}"
+                )
         else:
             console.print(f"[dim]No tools matching '{args.query}'[/dim]")
 
     elif args.tool_cmd == "stats":
-        stats = registry.get_stats()
-        if stats["total_calls"] > 0:
-            body = (
-                f"Registered: {stats['registered_tools']}\n"
-                f"Total calls: {stats['total_calls']}\n"
-                f"Success rate: {stats['success_rate']:.1%}\n"
-                f"By source: {json.dumps(stats['by_source'])}"
+        code, payload = _tool_runtime_request("GET", "/api/tools", home=home, timeout=timeout)
+        if code != 200 or not isinstance(payload, dict):
+            detail = payload if isinstance(payload, str) else (
+                payload.get("detail") if isinstance(payload, dict) else payload
             )
-        else:
-            body = (
-                f"Registered: {stats['registered_tools']}\n"
-                "No invocations yet."
-            )
-        console.print(Panel(body, title="Tool Stats"))
+            console.print(f"[red]Tool stats failed ({code}):[/red] {detail}")
+            raise SystemExit(1)
+        count = int(payload.get("count") or 0)
+        by_runtime: dict[str, int] = {}
+        for t in payload.get("tools") or []:
+            if not isinstance(t, dict):
+                continue
+            rt = str(t.get("runtime") or "unknown")
+            by_runtime[rt] = by_runtime.get(rt, 0) + 1
+        console.print(Panel(
+            f"Registered (Tool ABI): {count}\n"
+            f"By runtime: {json.dumps(by_runtime, sort_keys=True)}\n"
+            "Invocation counters live on Go turn metrics, not this CLI.",
+            title="Tool Stats",
+        ))
 
     elif args.tool_cmd == "run":
         try:
@@ -260,24 +347,28 @@ async def _cmd_tool(args) -> None:
         if not isinstance(tool_args, dict):
             console.print("[red]--args must be a JSON object[/red]")
             raise SystemExit(2)
-        tool_call = ToolCall(
-            tool_name=args.name,
-            arguments=tool_args,
-            source=ToolSource.BUILTIN,
+        console.print(f"[bold]Running Tool ABI:[/bold] {args.name}")
+        code, payload = _tool_runtime_request(
+            "POST",
+            "/api/tools/invoke",
+            home=home,
+            body={"id": args.name, "input": tool_args},
+            timeout=timeout,
         )
-        console.print(f"[bold]Running:[/bold] {args.name}")
-        # Goes through BasicRuntime.call_tool → jailed workspace handlers.
-        result = await rt.call_tool(tool_call)
-        if result.success:
+        if code == 200 and isinstance(payload, dict) and payload.get("ok"):
             console.print("[green]Success[/green]")
-            if result.data is not None:
-                if isinstance(result.data, str):
-                    console.print(result.data)
+            out = payload.get("output")
+            if out is not None:
+                if isinstance(out, str):
+                    console.print(out)
                 else:
-                    console.print(json.dumps(result.data, indent=2, default=str))
-        else:
-            console.print(f"[red]Failed:[/red] {result.error}")
-            raise SystemExit(1)
+                    console.print(json.dumps(out, indent=2, default=str))
+            return
+        err = None
+        if isinstance(payload, dict):
+            err = payload.get("error") or payload.get("detail")
+        console.print(f"[red]Failed ({code}):[/red] {err or payload}")
+        raise SystemExit(1)
 
 
 
