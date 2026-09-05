@@ -202,6 +202,20 @@ func TestPublicAndAuthRoutes(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:   "cors https tauri origin",
+			method: http.MethodGet,
+			path:   "/api/ping",
+			headers: map[string]string{
+				"Origin": "https://tauri.localhost",
+			},
+			wantStatus: http.StatusOK,
+			check: func(t *testing.T, _ map[string]any, hdr http.Header) {
+				if got := hdr.Get("Access-Control-Allow-Origin"); got != "https://tauri.localhost" {
+					t.Fatalf("ACA-Origin = %q", got)
+				}
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -230,6 +244,42 @@ func TestPublicAndAuthRoutes(t *testing.T) {
 				tc.check(t, body, resp.Header)
 			}
 		})
+	}
+}
+
+func TestCORSStarIgnored(t *testing.T) {
+	// REMEDY_CORS_ORIGINS=* must not open ACAO to arbitrary browser origins.
+	t.Setenv("REMEDY_CORS_ORIGINS", "*")
+	const token = "test-token-not-a-secret-16"
+	base, shutdown := startTestServer(t, Config{Token: token, Version: "0.50.2"})
+	defer shutdown()
+	client := &http.Client{Timeout: 3 * time.Second}
+
+	req, err := http.NewRequest(http.MethodGet, base+"/api/ping", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", "https://evil.example")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("star CORS must not reflect evil origin; ACA-Origin=%q", got)
+	}
+	req2, err := http.NewRequest(http.MethodGet, base+"/api/ping", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req2.Header.Set("Origin", "https://tauri.localhost")
+	resp2, err := client.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if got := resp2.Header.Get("Access-Control-Allow-Origin"); got != "https://tauri.localhost" {
+		t.Fatalf("defaults still allow tauri; ACA-Origin=%q", got)
 	}
 }
 
