@@ -17,7 +17,8 @@ paths that must not shell out, the pid the process must never kill (its own),
 and the bits on disk that must survive.
 
 Nothing here spawns a process or frees a real port — the autouse fixture below
-replaces both with doubles and fails the test if anything reaches subprocess.
+replaces both with doubles and fails the test if anything reaches Zig
+``spawn_hidden`` / ``run_hidden`` (or leftover ``subprocess.Popen``).
 Health probes go over a real loopback socket (tests.harness.fake_http) so the
 loopback guard, the headers and the timeout are exercised for real.
 """
@@ -88,6 +89,8 @@ def rmb_guard(monkeypatch: pytest.MonkeyPatch) -> Any:
         raise AssertionError(f"test tried to spawn a real process: {args!r}")
 
     monkeypatch.setattr(subprocess, "Popen", _no_spawn)
+    monkeypatch.setattr(svc, "spawn_hidden", _no_spawn)
+    monkeypatch.setattr(svc, "run_hidden", _no_spawn)
     monkeypatch.setattr(svc, "_kill_pid", guard.kill_pid)
     monkeypatch.setattr(svc, "_kill_listeners_on_port", guard.kill_listeners)
     # A real watchdog thread outlives the test and polls the owner's :8787.
@@ -339,7 +342,8 @@ def test_kill_pid_refuses_a_non_positive_pid(pid: int, monkeypatch: pytest.Monke
     def _explode(*a: object, **k: object) -> None:
         raise AssertionError("must not shell out for a bogus pid")
 
-    monkeypatch.setattr(subprocess, "run", _explode)
+    monkeypatch.setattr(svc, "kill_tree", _explode)
+    monkeypatch.setattr(svc, "run_hidden", _explode)
     assert _REAL_KILL_PID(pid) is False
 
 
@@ -350,7 +354,7 @@ def test_looks_like_llama_server_refuses_a_non_positive_pid(
     def _explode(*a: object, **k: object) -> None:
         raise AssertionError("must not inspect a bogus pid")
 
-    monkeypatch.setattr(subprocess, "run", _explode)
+    monkeypatch.setattr(svc, "run_hidden", _explode)
     assert _REAL_LOOKS_LIKE_LLAMA(pid) is False
 
 
@@ -367,7 +371,7 @@ def test_looks_like_llama_server_refuses_a_non_positive_pid(
 def test_looks_like_llama_server_judges_by_process_name(
     stdout: str, expected: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed(stdout))
+    monkeypatch.setattr(svc, "run_hidden", lambda *a, **k: _completed(stdout))
     assert _REAL_LOOKS_LIKE_LLAMA(1234) is expected
 
 
@@ -380,7 +384,7 @@ def test_when_the_process_cannot_be_inspected_the_caller_decides(
     def _explode(*a: object, **k: object) -> None:
         raise OSError("powershell missing")
 
-    monkeypatch.setattr(subprocess, "run", _explode)
+    monkeypatch.setattr(svc, "run_hidden", _explode)
     assert _REAL_LOOKS_LIKE_LLAMA(1234) is True
 
 
@@ -391,7 +395,7 @@ def test_find_pid_on_port_refuses_an_invalid_port(
     def _explode(*a: object, **k: object) -> None:
         raise AssertionError("must not shell out for an invalid port")
 
-    monkeypatch.setattr(subprocess, "run", _explode)
+    monkeypatch.setattr(svc, "run_hidden", _explode)
     assert _REAL_FIND_PID(port) is None
 
 
@@ -405,7 +409,7 @@ def test_find_pid_on_port_only_reads_listening_rows(monkeypatch: pytest.MonkeyPa
             "  TCP    127.0.0.1:8787   0.0.0.0:0          LISTENING      333",
         ]
     )
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed(netstat))
+    monkeypatch.setattr(svc, "run_hidden", lambda *a, **k: _completed(netstat))
     assert _REAL_FIND_PID(8787) == 333
 
 
@@ -416,7 +420,7 @@ def test_find_pid_on_port_reports_nothing_when_the_tool_fails(
     def _explode(*a: object, **k: object) -> None:
         raise OSError("netstat missing")
 
-    monkeypatch.setattr(subprocess, "run", _explode)
+    monkeypatch.setattr(svc, "run_hidden", _explode)
     assert _REAL_FIND_PID(8787) is None
 
 
@@ -431,7 +435,7 @@ def test_freeing_a_port_never_kills_the_remedy_process_itself(
             "  TCP    127.0.0.1:8787   0.0.0.0:0   LISTENING   424242",
         ]
     )
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed(netstat))
+    monkeypatch.setattr(svc, "run_hidden", lambda *a, **k: _completed(netstat))
     killed = _REAL_KILL_LISTENERS(8787)
     assert os.getpid() not in rmb_guard.killed_pids
     assert rmb_guard.killed_pids == [424242]
@@ -443,7 +447,7 @@ def test_freeing_an_invalid_port_is_a_noop(port: int, monkeypatch: pytest.Monkey
     def _explode(*a: object, **k: object) -> None:
         raise AssertionError("must not shell out for an invalid port")
 
-    monkeypatch.setattr(subprocess, "run", _explode)
+    monkeypatch.setattr(svc, "run_hidden", _explode)
     assert _REAL_KILL_LISTENERS(port) == 0
 
 
