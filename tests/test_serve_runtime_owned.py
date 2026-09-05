@@ -16,6 +16,29 @@ from remedy.interfaces.cli.cmd_runtime import (
 from remedy.interfaces.cli.parser import build_parser
 
 
+def test_serve_parser_hides_retired_python_flags() -> None:
+    """Uvicorn-era serve flags stay accepted for argv compat but are not advertised."""
+    from remedy.interfaces.cli.parser import build_parser
+
+    parser = build_parser()
+    serve = None
+    for action in parser._actions:  # noqa: SLF001
+        if getattr(action, "choices", None) and "serve" in action.choices:
+            serve = action.choices["serve"]
+            break
+    assert serve is not None
+    help_text = serve.format_help()
+    assert "remedy-runtime" in help_text
+    assert "--computer-host" not in help_text
+    assert "--force-setup" not in help_text
+    assert "--skip-setup" not in help_text
+    # Still parse so Desktop/scripts argv keep working.
+    ns = parser.parse_args(["serve", "--skip-setup", "--computer-host"])
+    assert ns.command == "serve"
+    assert ns.skip_setup is True
+    assert ns.computer_host is True
+
+
 def test_parser_still_exposes_serve() -> None:
     ns = build_parser().parse_args(["serve", "--host", "127.0.0.1", "--port", "7410"])
     assert ns.command == "serve"
