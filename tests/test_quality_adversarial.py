@@ -244,8 +244,8 @@ def test_materialize_jails_absolute_and_dotdot(tmp_path: Path):
 
 
 def test_linux_hands_fail_closed_when_binaries_missing(monkeypatch):
-    """Without a working remedy_core host, Linux input/capture fail closed."""
-    from remedy.core.computer import desktop_linux as lin
+    """Without a working remedy_core host, POSIX input/capture fail closed."""
+    from remedy.core.computer import desktop_common as lin
     from remedy.core.computer import host_binding as H
 
     monkeypatch.setattr(lin, "_require_linux", lambda: None)

@@ -11,9 +11,9 @@ Windows: host + UIA + ConPTY. Linux: host (X11/XTest) + AT-SPI a11y snapshot.
 ``host_op_prepare`` (structured ops + command-string prepare),
 ``translate_posix_to_host`` / ``looks_like_powershell`` /
 ``rewrite_posix_argv``, and diagnose/dialect/stretch are portable.
-``native()`` selects ``desktop_win`` / ``desktop_linux`` (no ``desktop_os`` twin).
-Other platforms: host/UIA/a11y/ConPTY calls report
-:data:`STATUS_UNSUPPORTED` (:class:`HostError`).
+``native()`` selects ``desktop_win`` / ``desktop_common`` (POSIX facade; no
+``desktop_linux`` / ``desktop_os`` twin). Other platforms: host/UIA/a11y/ConPTY
+calls report :data:`STATUS_UNSUPPORTED` (:class:`HostError`).
 """
 
 from __future__ import annotations
@@ -2316,11 +2316,11 @@ def stretch_format_whoami(
 
 
 def native() -> ModuleType:
-    """Return the desktop module for this OS (``desktop_win`` / ``desktop_linux``)."""
+    """Return the desktop module for this OS (``desktop_win`` / ``desktop_common``)."""
     if sys.platform == "win32":
         from remedy.core.computer import desktop_win as win
 
         return win
-    from remedy.core.computer import desktop_linux as linux
+    from remedy.core.computer import desktop_common as posix
 
-    return linux
+    return posix
