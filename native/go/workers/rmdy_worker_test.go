@@ -331,3 +331,53 @@ func TestManagedVoicePythonAndStoreStub(t *testing.T) {
 		t.Fatalf("real cand should not look like a Store stub")
 	}
 }
+
+func TestPathUnderManagedAndExtractSkip(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "python", "python.exe")
+	if !pathUnderManaged(inside, root) {
+		t.Fatal("inside should be under root")
+	}
+	outside := filepath.Join(root, "..", "escape")
+	if pathUnderManaged(outside, root) {
+		t.Fatal("escape must be rejected")
+	}
+}
+
+func TestEnsureManagedPythonUsesExisting(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REMEDY_HOME", home)
+	t.Setenv("REMEDY_VOICE_PYTHON", "")
+	t.Setenv("REMEDY_SKIP_MANAGED_PYTHON_DOWNLOAD", "1")
+	var cand string
+	if runtime.GOOS == "windows" {
+		cand = filepath.Join(home, "voice", "runtime", "python", "python.exe")
+	} else {
+		cand = filepath.Join(home, "voice", "runtime", "python", "bin", "python3")
+	}
+	if err := os.MkdirAll(filepath.Dir(cand), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cand, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ensureManagedPython()
+	if err != nil {
+		t.Fatal(err)
+	}
+	abs, _ := filepath.Abs(cand)
+	if got != abs {
+		t.Fatalf("got=%q want=%q", got, abs)
+	}
+}
+
+func TestEnsureManagedPythonSkipDownload(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REMEDY_HOME", home)
+	t.Setenv("REMEDY_VOICE_PYTHON", "")
+	t.Setenv("REMEDY_SKIP_MANAGED_PYTHON_DOWNLOAD", "1")
+	_, err := ensureManagedPython()
+	if err == nil {
+		t.Fatal("expected error when missing and download skipped")
+	}
+}

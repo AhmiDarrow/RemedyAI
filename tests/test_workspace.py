@@ -48,10 +48,20 @@ def test_unset_project_path_helpers(tmp_path, monkeypatch):
 
 
 def test_resolve_project_path_defaults(tmp_path, monkeypatch):
-    # Unset paths use fallback (home by default), not process cwd.
+    # Unset paths use fallback when provided, not process cwd.
     assert resolve_project_path(None, fallback=tmp_path) == tmp_path.resolve()
     assert resolve_project_path("", fallback=tmp_path) == tmp_path.resolve()
     assert resolve_project_path(".", fallback=tmp_path) == tmp_path.resolve()
+
+
+def test_resolve_project_path_defaults_to_documents_remedy(tmp_path, monkeypatch):
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    got = resolve_project_path(None)
+    assert got == (fake_home / "Documents" / "Remedy").resolve()
+    # Entire profile is treated as unset → same narrow default.
+    assert resolve_project_path(str(fake_home)) == got
 
 
 def test_resolve_project_path_absolute(tmp_path):

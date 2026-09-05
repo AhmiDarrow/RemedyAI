@@ -159,17 +159,19 @@ def is_unset_project_path(raw: str | Path | None) -> bool:
 def resolve_project_path(raw: str | None, *, fallback: Path | None = None) -> Path:
     """Resolve a project path to an absolute directory.
 
-    Empty / '.' / missing → ``fallback`` or the user home directory (not the
-    process cwd — Desktop sidecars often run from the install folder).
+    Empty / '.' / missing / user-home → ``fallback`` or the narrow owner
+    folder (``~/Documents/Remedy``, then ``~/.remedy/workspace``) — never the
+    process cwd (Desktop sidecars often run from the install folder) and never
+    the entire user profile as the default project root.
     Pair with :func:`effective_access_scope`: unset project → full access.
     """
     if fallback is not None:
-        fb = fallback.expanduser().resolve()
-    else:
         try:
-            fb = Path.home().expanduser().resolve()
+            fb = fallback.expanduser().resolve()
         except OSError:
-            fb = Path.cwd().resolve()
+            fb = fallback.expanduser().absolute()
+    else:
+        fb = default_owner_project_path()
     if is_unset_project_path(raw):
         return fb
     text = str(raw).strip()
@@ -178,7 +180,29 @@ def resolve_project_path(raw: str | None, *, fallback: Path | None = None) -> Pa
         path = path.resolve()
     except OSError:
         path = Path(text).expanduser().absolute()
+    if is_unset_project_path(path):
+        return fb
     return path
+
+
+def default_owner_project_path() -> Path:
+    """Narrow default project folder — Documents/Remedy, not the whole profile."""
+    try:
+        user_home = Path.home().expanduser().resolve()
+    except OSError:
+        user_home = Path.home().expanduser().absolute()
+    docs = user_home / "Documents" / "Remedy"
+    try:
+        docs.mkdir(parents=True, exist_ok=True)
+        return docs.resolve()
+    except OSError:
+        pass
+    fallback = user_home / ".remedy" / "workspace"
+    try:
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback.resolve()
+    except OSError:
+        return docs
 
 
 def effective_access_scope(
@@ -675,8 +699,8 @@ def workspace_context_block(
     ]
     if project_unset:
         lines.append(
-            "No focus folder is set — default cwd is the user home profile; "
-            "access is **full** for this account. "
+            "No focus folder is set — default cwd is Documents/Remedy "
+            "(or ~/.remedy/workspace); access is **full** for this account. "
             "Use absolute paths for any tree you work on; relative paths resolve "
             "from the default cwd. A focus folder is optional convenience, not required."
         )
@@ -757,15 +781,16 @@ def ensure_new_project_seed() -> Path:
 
 
 def default_project_from_config(cfg: dict | None) -> Path:
-    """Pick project path from config dict / env, else user home (not process cwd).
+    """Pick project path from config dict / env, else Documents/Remedy.
 
-    Unset project → home path for tools that need *a* root; access_scope becomes
-    **full** via :func:`effective_access_scope`. New Project is only for first-run
-    config seeding, not an implicit every-session workspace.
+    Unset / home-wide project → narrow owner folder (never install cwd, never
+    the whole profile). access_scope becomes **full** via
+    :func:`effective_access_scope` so partner tools can still reach absolute
+    paths when needed. New Project is only for first-run config seeding.
     """
     cfg = cfg or {}
     env = os.environ.get("REMEDY_PROJECT_PATH") or os.environ.get("REMEDY_FILES_ROOT") or ""
     raw = cfg.get("project_path") or env or None
     if is_unset_project_path(raw):
-        return resolve_project_path(None)  # home, never install cwd
+        return resolve_project_path(None)
     return resolve_project_path(str(raw))
