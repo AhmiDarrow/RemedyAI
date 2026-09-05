@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -257,72 +256,6 @@ async def test_full_reset_also_purges_undo(store: MemoryStore, tmp_path: Path):
     assert stats["ok"] is True
     assert stats.get("undo_purged") is True
     assert not SessionUndoLog(home)._path(sid).is_file()
-
-
-@pytest.mark.asyncio
-async def test_delete_session_api_cascades_disk(
-    store: MemoryStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """DELETE /api/sessions/{id} removes attachments + undo, not only DB rows."""
-    from fastapi.testclient import TestClient
-
-    from remedy.core.time_travel import SessionUndoLog
-    from remedy.interfaces.api import create_app
-    from remedy.interfaces.attachments import save_upload
-
-    sid = str(uuid4())
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setenv("REMEDY_API_AUTH", "0")
-    # Point config home at tmp so cascade uses our tree
-    fake_cfg = lambda: {"home_dir": str(home)}  # noqa: E731
-    monkeypatch.setattr(
-        "remedy.interfaces.routes.sessions.crud.load_config",
-        fake_cfg,
-    )
-    # Back-compat if package re-exports load_config
-    with contextlib.suppress(Exception):
-        monkeypatch.setattr(
-            "remedy.interfaces.routes.sessions.load_config",
-            fake_cfg,
-        )
-    await store.create_chat_session(
-        ChatSession(
-            id=sid,
-            title="Delete me",
-            message_count=0,
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        )
-    )
-    meta = save_upload(
-        session_id=sid,
-        filename="leaked.txt",
-        data=b"sensitive-upload",
-        content_type="text/plain",
-        home_dir=home,
-    )
-    assert Path(meta["path"]).is_file()
-    SessionUndoLog(home).record_file_write(
-        session_id=sid,
-        path=str(tmp_path / "y.py"),
-        previous_content="undo-body",
-        existed=True,
-        new_size=4,
-    )
-
-    app = create_app(runtime=None, memory=store, api_key="")
-    with TestClient(app) as client:
-        r = client.delete(f"/api/sessions/{sid}")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["status"] == "deleted"
-    cascade = body.get("cascade") or {}
-    assert cascade.get("attachments_purged") is True
-    assert cascade.get("undo_purged") is True
-    assert not Path(meta["path"]).is_file()
-    assert not SessionUndoLog(home)._path(sid).is_file()
-    assert await store.get_chat_session(sid) is None
 
 
 @pytest.mark.asyncio

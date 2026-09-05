@@ -115,7 +115,8 @@ def test_auth_middleware_401_without_token(auth_on, tmp_path):
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
     client = TestClient(app)
-    r = client.get("/api/sessions")
+    # /api/sessions* is Go-owned; exercise auth on a remaining TestClient path.
+    r = client.get("/api/self-improve")
     assert r.status_code == 401
 
 
@@ -123,7 +124,7 @@ def test_auth_middleware_ok_with_bearer(auth_on, tmp_path):
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
     client = TestClient(app)
-    r = client.get("/api/sessions", headers={"Authorization": f"Bearer {tok}"})
+    r = client.get("/api/self-improve", headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code == 200
 
 
@@ -171,7 +172,7 @@ def test_auth_disabled_empty_key(monkeypatch):
     monkeypatch.setenv("REMEDY_API_AUTH", "0")
     app = create_app(api_key="")
     client = TestClient(app)
-    r = client.get("/api/sessions")
+    r = client.get("/api/self-improve")
     assert r.status_code == 200
 
 
@@ -183,7 +184,7 @@ def test_cors_star_refused_when_auth_on(auth_on, tmp_path, monkeypatch):
     # Middleware still has a concrete origin list, not bare *
     # Smoke: authenticated call works
     client = TestClient(app)
-    r = client.get("/api/sessions", headers={"Authorization": f"Bearer {tok}"})
+    r = client.get("/api/self-improve", headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code == 200
 
 
@@ -202,9 +203,9 @@ def test_cors_preflight_options_not_blocked_by_auth(auth_on, tmp_path):
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
     client = TestClient(app)
-    # /api/providers* is Go-owned; exercise CORS on a remaining TestClient path.
+    # /api/sessions* is Go-owned; exercise CORS on a remaining TestClient path.
     r = client.options(
-        "/api/sessions",
+        "/api/self-improve",
         headers={
             "Origin": "http://tauri.localhost",
             "Access-Control-Request-Method": "GET",
@@ -266,7 +267,7 @@ def test_auth_length_mismatch_is_401_not_500(auth_on, tmp_path):
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
     client = TestClient(app)
-    r = client.get("/api/sessions", headers={"Authorization": "Bearer x"})
+    r = client.get("/api/self-improve", headers={"Authorization": "Bearer x"})
     assert r.status_code == 401
 
 

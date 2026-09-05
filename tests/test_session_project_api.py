@@ -1,4 +1,8 @@
-"""Session project_path create/update/list — sidebar tree contract."""
+"""Session project_path HTTP is Go-owned; keep runtime/store guards.
+
+Production create/update/list/bulk-project live in ``native/go/httpapi``.
+The FastAPI twin is gone. Keep BasicRuntime / MemoryStore project jail tests.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +10,6 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from remedy.core.agent import BasicRuntime
 from remedy.interfaces.api import create_app
@@ -22,68 +25,14 @@ def store(tmp_path: Path):
     asyncio.run(s.close())
 
 
-@pytest.fixture
-def client(store: MemoryStore, tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("REMEDY_API_AUTH", "0")
-    cfg = AgentConfig(
-        name="test",
-        project_path="",  # unset global project
-        llm_provider="openai",
-        llm_model="test",
-        llm_api_key="x",
-        llm_base_url="http://127.0.0.1:9/v1",
-    )
-    runtime = BasicRuntime(cfg, memory=store)
-    app = create_app(runtime=runtime, memory=store, api_key="")
-    with TestClient(app) as c:
-        yield c, tmp_path
-
-
-def test_create_explicit_no_project_does_not_inherit(client):
-    c, _ = client
-    r = c.post("/api/sessions", json={"title": "Loose", "project_path": ""})
-    assert r.status_code == 200
-    body = r.json()
-    assert body.get("project_path") in (None, "", ".")
-
-
-def test_create_volume_root_is_no_project(client):
-    c, _ = client
-    r = c.post("/api/sessions", json={"title": "Drive", "project_path": "C:\\"})
-    assert r.status_code == 200
-    assert r.json().get("project_path") in (None, "", ".")
-
-
-@pytest.mark.parametrize(
-    "bad",
-    [r"C:\Windows", r"C:\Windows\System32", r"C:\Program Files\Remedy", "/etc", "/usr/bin"],
-)
-def test_create_forbidden_os_path_is_400(client, bad):
-    c, _ = client
-    r = c.post("/api/sessions", json={"title": "OS", "project_path": bad})
-    assert r.status_code == 400, r.text
-    assert "not allowed" in (r.json().get("detail") or r.text).lower() or "not allowed" in r.text.lower()
-
-
-def test_patch_forbidden_os_path_is_400(client):
-    c, tmp = client
-    r = c.post("/api/sessions", json={"title": "ok", "project_path": ""})
-    sid = r.json()["id"]
-    r2 = c.patch(f"/api/sessions/{sid}", json={"project_path": r"C:\Windows"})
-    assert r2.status_code == 400, r2.text
-    still = c.get(f"/api/sessions/{sid}").json()
-    assert still.get("project_path") in (None, "", ".")
-
-
-def test_bulk_forbidden_os_path_is_400(client):
-    c, _ = client
-    r = c.post("/api/sessions", json={"title": "b", "project_path": ""})
-    sid = r.json()["id"]
-    r2 = c.post(
+def test_session_project_http_routes_absent_from_testclient() -> None:
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    for path in (
+        "/api/sessions",
         "/api/sessions/bulk-project",
-        json={"session_ids": [sid], "project_path": r"C:\Program Files"},
-    )
-    assert r2.status_code == 400, r2.text
+        "/api/sessions/{session_id}",
+    ):
+        assert path not in paths
 
 
 def test_set_project_path_refuses_forbidden(tmp_path):
@@ -102,115 +51,6 @@ def test_set_project_path_refuses_forbidden(tmp_path):
     with pytest.raises(SecurityError):
         rt.set_project_path(r"C:\Windows", as_default=False)
     assert "Windows" not in str(rt.effective_project_path())
-
-
-def test_create_publishes_session_created(client):
-    from remedy.interfaces.session_events import get_session_event_hub, reset_session_event_hub
-
-    reset_session_event_hub()
-    hub = get_session_event_hub()
-    q = asyncio.run(hub.subscribe())
-    c, _ = client
-    r = c.post("/api/sessions", json={"title": "Ping", "project_path": ""})
-    assert r.status_code == 200
-    ev = asyncio.run(asyncio.wait_for(q.get(), timeout=2))
-    assert ev is not None
-    assert ev.type == "session_created"
-    assert ev.session_id == r.json()["id"]
-    asyncio.run(hub.unsubscribe(q))
-
-
-def test_create_empty_project_stays_root_even_with_global_default(
-    store: MemoryStore, tmp_path: Path, monkeypatch
-):
-    """Desktop New Session sends project_path='' — must not inherit config default."""
-    monkeypatch.setenv("REMEDY_API_AUTH", "0")
-    proj = tmp_path / "GlobalDefault"
-    proj.mkdir()
-    raw_cfg = {
-        "project_path": str(proj),
-        "home_dir": str(tmp_path / ".remedy"),
-        "access_scope": "project",
-    }
-    (tmp_path / ".remedy").mkdir(exist_ok=True)
-    # Modularized: load_config is used from sessions.crud (not the package root).
-    monkeypatch.setattr(
-        "remedy.interfaces.routes.sessions.crud.load_config",
-        lambda: dict(raw_cfg),
-    )
-    # Legacy / shared import path used by other session helpers
-    monkeypatch.setattr(
-        "remedy.interfaces.api_support.load_config",
-        lambda: dict(raw_cfg),
-    )
-    cfg = AgentConfig(
-        name="test",
-        project_path=str(proj),
-        llm_provider="openai",
-        llm_model="test",
-        llm_api_key="x",
-        llm_base_url="http://127.0.0.1:9/v1",
-    )
-    runtime = BasicRuntime(cfg, memory=store)
-    app = create_app(runtime=runtime, memory=store, api_key="")
-    with TestClient(app) as c:
-        r = c.post("/api/sessions", json={"title": "Root", "project_path": ""})
-        assert r.status_code == 200
-        assert r.json().get("project_path") in (None, "", ".")
-
-        # Omitting field inherits global config project_path
-        r2 = c.post("/api/sessions", json={"title": "Inherit?"})
-        assert r2.status_code == 200
-        inherited = r2.json().get("project_path") or ""
-        assert "GlobalDefault" in str(inherited).replace("/", "\\")
-
-
-def test_create_with_project_path(client):
-    c, tmp = client
-    proj = tmp / "MyApp"
-    proj.mkdir()
-    r = c.post(
-        "/api/sessions",
-        json={"title": "In app", "project_path": str(proj)},
-    )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["project_path"]
-    assert "MyApp" in body["project_path"].replace("/", "\\") or "MyApp" in body[
-        "project_path"
-    ]
-
-
-def test_patch_move_and_clear_project(client):
-    c, tmp = client
-    proj = tmp / "Work"
-    proj.mkdir()
-    r = c.post("/api/sessions", json={"title": "Move me", "project_path": ""})
-    sid = r.json()["id"]
-
-    r2 = c.patch(f"/api/sessions/{sid}", json={"project_path": str(proj)})
-    assert r2.status_code == 200
-    assert r2.json()["project_path"]
-    assert "Work" in str(r2.json()["project_path"])
-
-    r3 = c.patch(f"/api/sessions/{sid}", json={"project_path": ""})
-    assert r3.status_code == 200
-    assert r3.json().get("project_path") in (None, "", ".")
-
-
-def test_list_sessions_includes_project_path(client):
-    c, tmp = client
-    proj = tmp / "Listed"
-    proj.mkdir()
-    c.post("/api/sessions", json={"title": "A", "project_path": str(proj)})
-    c.post("/api/sessions", json={"title": "B", "project_path": ""})
-    r = c.get("/api/sessions?limit=50")
-    assert r.status_code == 200
-    sessions = r.json()["sessions"]
-    assert len(sessions) >= 2
-    paths = {s.get("title"): s.get("project_path") for s in sessions}
-    assert paths.get("A")
-    assert paths.get("B") in (None, "", ".")
 
 
 @pytest.mark.asyncio
@@ -312,51 +152,3 @@ async def test_forbidden_leftover_session_is_not_full(store: MemoryStore, tmp_pa
     await rt._apply_session_workspace(sess.id)
     assert rt.access_scope() != "full"
     assert "Windows" not in str(rt.effective_project_path())
-
-
-def test_bulk_set_session_project(client):
-    c, tmp = client
-    proj = tmp / "Bulk"
-    proj.mkdir()
-    ids = []
-    for title in ("x", "y", "z"):
-        r = c.post("/api/sessions", json={"title": title, "project_path": ""})
-        ids.append(r.json()["id"])
-    r = c.post(
-        "/api/sessions/bulk-project",
-        json={"session_ids": ids, "project_path": str(proj)},
-    )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["count"] == 3
-    assert "Bulk" in str(body["project_path"])
-    listed = c.get("/api/sessions?limit=50").json()["sessions"]
-    by_id = {s["id"]: s for s in listed}
-    for sid in ids:
-        assert by_id[sid].get("project_path")
-        assert "Bulk" in str(by_id[sid]["project_path"])
-
-
-# test_session_todos_endpoint: session todos HTTP is Go-owned (session_extras).
-
-# test_session_todos_do_not_leak_from_runtime_cache: session todos HTTP is Go-owned (session_extras).
-
-def test_grove_session_tagged_origin_and_no_project(client):
-    """Grove home/goal chats: origin_channel='grove', no project folder —
-    they are the eternal dialogue, not Studio workbench sessions."""
-    c, _ = client
-    r = c.post(
-        "/api/sessions",
-        json={"title": "🏡 Home", "project_path": "", "origin_channel": "grove"},
-    )
-    assert r.status_code == 200
-    body = r.json()
-    assert body.get("origin_channel") == "grove"
-    assert body.get("project_path") in (None, "", ".")
-
-
-def test_studio_session_has_no_grove_origin(client):
-    c, _ = client
-    r = c.post("/api/sessions", json={"title": "Work"})
-    assert r.status_code == 200
-    assert r.json().get("origin_channel") in (None, "")

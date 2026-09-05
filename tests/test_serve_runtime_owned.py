@@ -298,20 +298,8 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
     # misc keeps /dashboard only; Go owns app/command + projects/scan.
     assert re.search(r"\bregister_misc_routes\s*\(", routes_init)
     assert importlib.util.find_spec("remedy.interfaces.routes.misc") is not None
-    sessions_init = Path("src/remedy/interfaces/routes/sessions/__init__.py").read_text(
-        encoding="utf-8"
-    )
-    assert "register_session_event_routes" not in sessions_init
-    assert "register_stream_routes" not in sessions_init
-    assert (
-        importlib.util.find_spec("remedy.interfaces.routes.sessions.legacy_chat")
-        is None
-    )
-    assert importlib.util.find_spec("remedy.interfaces.routes.sessions.stream") is None
-    assert (
-        importlib.util.find_spec("remedy.interfaces.routes.sessions.stream_tokens")
-        is None
-    )
+    assert not re.search(r"\bregister_sessions_routes\s*\(", routes_init)
+    assert importlib.util.find_spec("remedy.interfaces.routes.sessions") is None
     assert importlib.util.find_spec("remedy.core.computer.host_conpty") is None
 
     client = TestClient(create_app(api_key=""))
@@ -373,6 +361,12 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/plans",
         "/api/plans/latest",
         "/api/projects/scan",
+        "/api/sessions",
+        "/api/sessions/s1",
+        "/api/sessions/s1/messages",
+        "/api/sessions/s1/llm",
+        "/api/sessions/s1/attachments/x.txt",
+        "/api/sessions/s1/turns/t1/explain",
         "/api/sessions/s1/todos",
         "/api/sessions/s1/timeline",
         "/api/sessions/s1/export",
@@ -443,8 +437,14 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/voice/settings",
         "/api/voice/install",
         "/api/voice/client-log",
+        "/api/sessions",
+        "/api/sessions/bulk-project",
         "/api/sessions/import",
+        "/api/sessions/s1/messages",
         "/api/sessions/s1/messages/stream",
+        "/api/sessions/s1/abort",
+        "/api/sessions/s1/attachments",
+        "/api/sessions/s1/llm",
         "/api/skills/library/install",
         "/api/skills/library/suggest/dismiss",
         "/api/skills/library/submit",

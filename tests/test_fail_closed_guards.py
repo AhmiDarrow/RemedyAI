@@ -151,7 +151,6 @@ class TestJailedAttachmentCallSites:
     @pytest.mark.parametrize(
         "modname",
         [
-            "remedy.interfaces.routes.sessions.messages",
             "remedy.vision.service",
         ],
     )

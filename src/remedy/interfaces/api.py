@@ -42,9 +42,7 @@ from remedy.interfaces.api_support import (
 
 logger = logging.getLogger(__name__)
 
-# High-frequency host polls. A fat ReAct turn blocks the event loop; these
-# waiting ≥500ms is contention, not the poller being slow. Failures stay loud.
-# Pollers still registered on the TestClient surface (Go owns the rest).
+# Quiet TestClient health stubs — slow responses still warn; failures stay loud.
 _SLOW_EXEMPT_PATHS = frozenset(
     {
         "/api/status",
@@ -71,8 +69,6 @@ def should_warn_slow(
     return str(path or "") not in _SLOW_EXEMPT_PATHS
 
 
-# Hot polls already sit at DEBUG; writing every ~150ms jobs/next into debug.log
-# still burns disk during long Grok turns. Keep failures + slow quiet polls.
 _QUIET_SILENT_MS = 100.0
 
 
@@ -787,8 +783,6 @@ def create_app(
         from remedy.core.runtime_identity import is_desktop_sidecar
 
         desktop = is_desktop_sidecar()
-        # High-frequency polls at DEBUG so CLI `remedy serve` terminals stay readable
-        # (Desktop computer-host + status bars used to flood INFO every few ms).
         quiet = method == "OPTIONS" or path in (
             "/api/status",
             "/api/ping",
@@ -847,6 +841,7 @@ def yaml_schema(app: FastAPI) -> str:
     return out.getvalue()
 
 
+# Minimal TestClient stub page — production SPA is Go httpapi/webui.go.
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -869,14 +864,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .method { color: #7c3aed; font-weight: bold; margin-right: 0.5rem; }
         .path { color: #e0e0e0; }
         .ok { color: #22c55e; }
-        .err { color: #ef4444; }
-        .section-header { color: #6366f1; font-size: 0.9rem; margin: 1rem 0 0.5rem 0; text-transform: uppercase; letter-spacing: 0.05em; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Remedy AI</h1>
-        <p class="subtitle">Self-improving, multi-channel AI agent framework v{{version}}</p>
+        <p class="subtitle">TestClient stub dashboard v{{version}} — production API is Go remedy-runtime</p>
 
         <div class="card">
             <h2>Status</h2>
@@ -885,28 +878,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
 
         <div class="card">
-            <h2>API Endpoints (TestClient surface)</h2>
-            <p class="section-header">Chat & Sessions</p>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/sessions</span> — list chat sessions</div>
-            <div class="endpoint"><span class="method">POST</span><span class="path">/api/sessions</span> — create chat session</div>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/sessions/{id}</span> — get session</div>
-            <div class="endpoint"><span class="method">PATCH</span><span class="path">/api/sessions/{id}</span> — rename session</div>
-            <div class="endpoint"><span class="method">DELETE</span><span class="path">/api/sessions/{id}</span> — delete session</div>
-            <div class="endpoint"><span class="method">POST</span><span class="path">/api/sessions/{id}/abort</span> — stop generation</div>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/sessions/{id}/messages</span> — list messages</div>
-            <div class="endpoint"><span class="method">POST</span><span class="path">/api/sessions/{id}/messages</span> — sync send</div>
-            <div class="endpoint"><span class="method">POST</span><span class="path">/api/sessions/{id}/messages/stream</span> (SSE) — structured events</div>
-            <div class="endpoint"><span class="method">POST</span><span class="path">/api/sessions/{id}/command</span> — slash command</div>
-            <p class="section-header">Models & Agents</p>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/models</span> — list LLM models</div>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/agents</span> — list agent profiles</div>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/commands</span> — slash commands</div>
-            <p class="section-header">Other</p>
+            <h2>TestClient stubs</h2>
+            <div class="endpoint"><span class="method">GET</span><span class="path">/api/ping</span> — liveness</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/status</span> — system status</div>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/self-improve</span> — unattended self-improve clock + last tick</div>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/diagnostics</span> — health diagnostics</div>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/openapi.yaml</span> — OpenAPI YAML</div>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/openapi.json</span> — OpenAPI JSON</div>
+            <div class="endpoint"><span class="method">GET</span><span class="path">/api/turn-active</span> — stream lock</div>
+            <div class="endpoint"><span class="method">GET</span><span class="path">/api/self-improve</span> — self-improve clock</div>
+            <div class="endpoint"><span class="method">GET</span><span class="path">/api/metrics</span> — metrics</div>
+            <div class="endpoint"><span class="method">GET</span><span class="path">/api/notifications</span> — notifications</div>
         </div>
     </div>
 </body>
