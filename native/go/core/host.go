@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -352,6 +353,28 @@ func writeShot(homeDir, label string, png []byte) (string, error) {
 	return path, nil
 }
 
+// WriteClipboardPNG stores clipboard PNG bytes under home/computer/clipboard.
+// Used by Tool ABI clipboard.read_image to avoid embedding large base64 in
+// frame payloads (protocol.MaxPayloadSize).
+func WriteClipboardPNG(homeDir, label string, png []byte) (string, error) {
+	if homeDir == "" {
+		return "", fmt.Errorf("home required for clipboard image")
+	}
+	if label == "" {
+		label = "clipboard"
+	}
+	dir := filepath.Join(homeDir, "computer", "clipboard")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	name := fmt.Sprintf("%s_%d.png", sanitizeLabel(label), time.Now().UnixNano())
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, png, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 func sanitizeLabel(s string) string {
 	out := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
@@ -509,6 +532,75 @@ func ClipboardSetText(text string) error {
 		return err
 	}
 	return lib.check("clipboard_set_text", int32(status))
+}
+
+// ClipboardGetFiles returns CF_HDROP paths as a string slice (Windows).
+// Empty slice when the format is absent. Fail-closed without remedy_core;
+// ErrUnsupported on non-Windows hosts.
+func ClipboardGetFiles() ([]string, error) {
+	lib, err := Open()
+	if err != nil {
+		return nil, err
+	}
+	var ptr, length uintptr
+	status, err := lib.call(
+		"remedy_core_clipboard_get_files",
+		unsafePtrPtr(&ptr),
+		sizePtr(&length),
+	)
+	if err != nil {
+		return nil, err
+	}
+	st := int32(status)
+	if st == StatusUnsupported {
+		return nil, ErrUnsupported
+	}
+	if err := lib.check("clipboard_get_files", st); err != nil {
+		return nil, err
+	}
+	raw := takeBytes(lib, ptr, length)
+	if len(raw) == 0 {
+		return []string{}, nil
+	}
+	var paths []string
+	if err := json.Unmarshal(raw, &paths); err != nil {
+		return nil, fmt.Errorf("clipboard_get_files: invalid JSON: %w", err)
+	}
+	if paths == nil {
+		paths = []string{}
+	}
+	return paths, nil
+}
+
+// ClipboardGetImagePNG returns CF_DIB encoded as PNG bytes (Windows).
+// Empty slice when absent or the DIB is unsupported. Fail-closed without
+// remedy_core; ErrUnsupported on non-Windows hosts.
+func ClipboardGetImagePNG() ([]byte, error) {
+	lib, err := Open()
+	if err != nil {
+		return nil, err
+	}
+	var ptr, length uintptr
+	status, err := lib.call(
+		"remedy_core_clipboard_get_image_png",
+		unsafePtrPtr(&ptr),
+		sizePtr(&length),
+	)
+	if err != nil {
+		return nil, err
+	}
+	st := int32(status)
+	if st == StatusUnsupported {
+		return nil, ErrUnsupported
+	}
+	if err := lib.check("clipboard_get_image_png", st); err != nil {
+		return nil, err
+	}
+	raw := takeBytes(lib, ptr, length)
+	if raw == nil {
+		return []byte{}, nil
+	}
+	return raw, nil
 }
 
 // KeyCombo presses virtual keys in order, then releases them in reverse.

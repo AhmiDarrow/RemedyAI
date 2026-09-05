@@ -105,7 +105,7 @@ func TestCognitionTurnRunnerRegistersZigHostTools(t *testing.T) {
 		"computer.screenshot", "computer.windows", "computer.monitors", "computer.snapshot",
 		"computer.click", "computer.type", "computer.key", "computer.move", "computer.scroll", "computer.drag",
 		"computer.focus", "computer.window",
-		"clipboard.read", "clipboard.write", "shell.exec",
+		"clipboard.read", "clipboard.read_files", "clipboard.read_image", "clipboard.write", "shell.exec",
 	} {
 		desc, err := r.Registry.Latest(id)
 		if err != nil {
