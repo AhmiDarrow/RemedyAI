@@ -75,12 +75,12 @@ def _isolate_runtime_globals():
         vr._not_running_log_ts = saved[5]
 
 
-class _SubprocessShim:
-    """Stand-in for the ``subprocess`` module inside ``vision.runtime`` only.
+class _HostSpawnShim:
+    """Blocks Zig spawn/exec and leftover subprocess unless a test opts in.
 
-    Spawning is an assertion failure unless a test opts in by assigning
-    ``Popen``/``run``. This is what keeps a bug in the code under test from
-    launching a real llama-server or a real taskkill on the owner's machine.
+    Production start/stop goes through ``spawn_hidden`` / ``run_hidden`` /
+    ``kill_tree``. Assign ``spawn`` / ``run_hidden_impl`` to allow a call.
+    ``vr.subprocess`` stays patched so a regression to raw Popen/run still fails.
     """
 
     DEVNULL = subprocess.DEVNULL
@@ -88,25 +88,46 @@ class _SubprocessShim:
     TimeoutExpired = subprocess.TimeoutExpired
 
     def __init__(self) -> None:
-        self.popen_calls: list[dict[str, Any]] = []
+        self.spawn_calls: list[dict[str, Any]] = []
         self.run_calls: list[list[str]] = []
+        self.spawn: Any = None
+        self.run_hidden_impl: Any = None
 
-    def Popen(self, *args: Any, **kwargs: Any):  # noqa: N802 - mirrors subprocess
-        # Record first: a test asserting "nothing was spawned" then has real
-        # evidence rather than the absence of a crash.
-        self.popen_calls.append({"args": args, "kwargs": kwargs})
+    def spawn_hidden(
+        self,
+        argv: list[str] | tuple[str, ...],
+        *,
+        cwd: str | None = None,
+        env: Any = None,
+        write_roots: Any = None,
+    ) -> Any:
+        self.spawn_calls.append(
+            {"args": list(argv), "cwd": cwd, "env": env, "write_roots": write_roots}
+        )
+        if self.spawn is None:
+            raise AssertionError("spawn_hidden must not be reached in this test")
+        return self.spawn(list(argv), cwd=cwd, env=env, write_roots=write_roots)
+
+    def run_hidden(self, args: list[str] | tuple[str, ...], **kwargs: Any) -> Any:
+        self.run_calls.append(list(args))
+        if self.run_hidden_impl is None:
+            raise AssertionError("run_hidden must not be reached in this test")
+        return self.run_hidden_impl(args, **kwargs)
+
+    def Popen(self, *args: Any, **kwargs: Any) -> Any:  # noqa: N802
         raise AssertionError("subprocess.Popen must not be reached in this test")
 
-    def run(self, *args: Any, **kwargs: Any):
-        self.run_calls.append(list(args[0]) if args else [])
+    def run(self, *args: Any, **kwargs: Any) -> Any:
         raise AssertionError("subprocess.run must not be reached in this test")
 
 
 @pytest.fixture(autouse=True)
-def no_real_spawn(monkeypatch) -> _SubprocessShim:
+def no_real_spawn(monkeypatch) -> _HostSpawnShim:
     """No test in this module may spawn a real process by accident."""
-    shim = _SubprocessShim()
+    shim = _HostSpawnShim()
     monkeypatch.setattr(vr, "subprocess", shim)
+    monkeypatch.setattr("remedy.execution.process.spawn_hidden", shim.spawn_hidden)
+    monkeypatch.setattr("remedy.execution.process.run_hidden", shim.run_hidden)
     return shim
 
 
@@ -119,10 +140,11 @@ def no_real_idle_threads(monkeypatch):
 
 
 class _FakeProc:
-    """Just enough Popen for the supervisor: poll(), pid, terminate/kill/wait."""
+    """Duck-types HiddenProcess for the supervisor: poll/pid/kill_tree/close."""
 
     def __init__(self, pid: int = 4242, poll_results: list[int | None] | None = None) -> None:
         self.pid = pid
+        self.handle = 1
         self._poll = list(poll_results or [])
         self.returncode: int | None = None
         self.terminated = False
@@ -135,12 +157,19 @@ class _FakeProc:
             self.returncode = self._poll.pop(0)
         return self.returncode
 
-    def terminate(self) -> None:
+    def kill_tree(self) -> None:
         self.terminated = True
-
-    def kill(self) -> None:
         self.killed = True
         self.returncode = -9
+
+    def terminate(self) -> None:
+        self.kill_tree()
+
+    def kill(self) -> None:
+        self.kill_tree()
+
+    def close(self) -> None:
+        self.handle = 0
 
     def wait(self, timeout: float | None = None) -> int:
         self.waits.append(timeout)
@@ -857,7 +886,7 @@ def test_start_server_refuses_while_rmb_owns_the_local_host(
     assert out["ok"] is False
     assert out["skipped"] is True
     assert out["reason"] == "rmb_exclusive_host"
-    assert no_real_spawn.popen_calls == []
+    assert no_real_spawn.spawn_calls == []
 
 
 def test_ignore_rmb_lets_a_cpu_only_observe_wake_through(
@@ -874,7 +903,7 @@ def test_ignore_rmb_lets_a_cpu_only_observe_wake_through(
         spawned.append(list(cmd))
         return _FakeProc()
 
-    no_real_spawn.Popen = spawn
+    no_real_spawn.spawn = spawn
     out = vr.start_server(home_dir=startable.home, wait_s=0.01, ignore_rmb=True)
     # Past both RMB guards: it really did spawn, and only then timed out.
     assert len(spawned) == 1
@@ -896,7 +925,7 @@ def test_rmb_starting_mid_path_aborts_the_spawn(startable, monkeypatch, no_real_
     out = vr.start_server(home_dir=startable.home, wait_s=0.01)
     assert out["skipped"] is True
     assert out["reason"] == "rmb_exclusive_host"
-    assert no_real_spawn.popen_calls == []
+    assert no_real_spawn.spawn_calls == []
 
 
 def test_a_missing_model_file_is_reported_not_raised(startable, no_real_spawn) -> None:
@@ -910,7 +939,7 @@ def test_a_missing_model_file_is_reported_not_raised(startable, no_real_spawn) -
     out = _with_failed_bundle(bundle, lambda: vr.start_server(home_dir=startable.home))
     assert out["ok"] is False
     assert "missing" in out["error"].lower() or "not activated" in out["error"].lower()
-    assert no_real_spawn.popen_calls == []
+    assert no_real_spawn.spawn_calls == []
 
 
 def _with_failed_bundle(bundle_mod: Any, fn: Any) -> Any:
@@ -927,7 +956,7 @@ def test_a_missing_mmproj_file_is_reported_not_raised(startable, no_real_spawn) 
     out = vr.start_server(home_dir=startable.home)
     assert out["ok"] is False
     assert "mmproj" in out["error"]
-    assert no_real_spawn.popen_calls == []
+    assert no_real_spawn.spawn_calls == []
 
 
 def test_no_vision_json_and_no_bundle_is_an_error_not_a_spawn(
@@ -943,7 +972,7 @@ def test_no_vision_json_and_no_bundle_is_an_error_not_a_spawn(
     out = vr.start_server(home_dir=tmp_path / "empty")
     assert out["ok"] is False
     assert out["error"] == "no bundle"
-    assert no_real_spawn.popen_calls == []
+    assert no_real_spawn.spawn_calls == []
 
 
 def test_a_bundle_activation_crash_is_reported_not_raised(
@@ -986,7 +1015,7 @@ def test_a_retired_model_pin_is_migrated_instead_of_raising_key_error(
     assert "model_path" not in migrated
     assert "mmproj_path" not in migrated
     assert out["ok"] is False  # paths were cleared, so it cannot start
-    assert no_real_spawn.popen_calls == []
+    assert no_real_spawn.spawn_calls == []
 
 
 def test_a_missing_binary_is_reported_not_raised(startable, monkeypatch, no_real_spawn) -> None:
@@ -1002,7 +1031,7 @@ def test_a_missing_binary_is_reported_not_raised(startable, monkeypatch, no_real
 
     out = vr.start_server(home_dir=startable.home)
     assert out == {"ok": False, "error": "llama-server binary not found"}
-    assert no_real_spawn.popen_calls == []
+    assert no_real_spawn.spawn_calls == []
 
 
 def test_an_already_healthy_server_is_not_started_twice(tmp_path: Path, fake_http, monkeypatch):
@@ -1046,7 +1075,7 @@ def test_a_failed_spawn_is_reported_not_raised(startable, monkeypatch, no_real_s
     def boom(*_a: object, **_k: object) -> None:
         raise OSError("Access is denied")
 
-    no_real_spawn.Popen = boom
+    no_real_spawn.spawn = boom
     out = vr.start_server(home_dir=startable.home)
     assert out["ok"] is False
     assert "Failed to start llama-server" in out["error"]
@@ -1058,7 +1087,7 @@ def test_a_child_that_exits_early_is_reported_with_its_code(
 ) -> None:
     """Otherwise the caller waits the full 60s for a process already gone."""
     proc = _FakeProc(poll_results=[3])
-    no_real_spawn.Popen = lambda *a, **k: proc
+    no_real_spawn.spawn = lambda *a, **k: proc
     monkeypatch.setattr(vr, "is_running", lambda *a, **k: False)
     monkeypatch.setattr(vr, "_port_open", lambda *a, **k: False)
 
@@ -1071,7 +1100,7 @@ def test_a_child_that_exits_early_is_reported_with_its_code(
 def test_a_concurrent_stop_during_startup_is_reported_not_ignored(
     startable, monkeypatch, no_real_spawn
 ) -> None:
-    no_real_spawn.Popen = lambda *a, **k: _FakeProc()
+    no_real_spawn.spawn = lambda *a, **k: _FakeProc()
     monkeypatch.setattr(vr, "is_running", lambda *a, **k: False)
     monkeypatch.setattr(vr, "_port_open", lambda *a, **k: False)
 
@@ -1092,7 +1121,7 @@ def test_a_concurrent_stop_during_startup_is_reported_not_ignored(
 def test_a_server_that_never_listens_times_out_with_the_wait_window(
     startable, monkeypatch, no_real_spawn
 ) -> None:
-    no_real_spawn.Popen = lambda *a, **k: _FakeProc()
+    no_real_spawn.spawn = lambda *a, **k: _FakeProc()
     monkeypatch.setattr(vr, "is_running", lambda *a, **k: False)
     monkeypatch.setattr(vr, "_port_open", lambda *a, **k: False)
 
@@ -1103,7 +1132,7 @@ def test_a_server_that_never_listens_times_out_with_the_wait_window(
 
 
 def test_a_successful_start_records_the_pid_and_the_command(
-    tmp_path: Path, fake_http, monkeypatch
+    tmp_path: Path, fake_http, monkeypatch, no_real_spawn
 ) -> None:
     """End to end over a real socket: spawn, wait for /v1/models, persist pid."""
     import remedy.runtime.rmb.mode as rmb_mode
@@ -1141,9 +1170,7 @@ def test_a_successful_start_records_the_pid_and_the_command(
         spawned["kwargs"] = kwargs
         return _FakeProc(pid=31337)
 
-    import remedy.vision.runtime as _vr
-
-    _vr.subprocess.Popen = spawn  # type: ignore[attr-defined]
+    no_real_spawn.spawn = spawn
 
     out = vr.start_server(home_dir=home, n_gpu_layers=0, wait_s=5)
     assert out["ok"] is True
@@ -1158,16 +1185,14 @@ def test_a_successful_start_records_the_pid_and_the_command(
     assert cmd[cmd.index("--port") + 1] == str(fake_http.port)
     assert cmd[cmd.index("--ctx-size") + 1] == "4096"
     assert cmd[cmd.index("-ngl") + 1] == "0"
-    # stdout/stderr must be discarded, or a full pipe buffer deadlocks the child.
-    assert spawned["kwargs"]["stdout"] == subprocess.DEVNULL
-    assert spawned["kwargs"]["stderr"] == subprocess.DEVNULL
+    # Zig spawn_hidden has no pipe kwargs; cwd is the binary's parent.
     assert spawned["kwargs"]["cwd"] == str(binary.parent)
 
     assert load_vision_json(home)["pid"] == 31337
 
 
 def test_a_busy_unhealthy_port_makes_the_server_move_to_a_free_one(
-    tmp_path: Path, fake_http, monkeypatch
+    tmp_path: Path, fake_http, monkeypatch, no_real_spawn
 ) -> None:
     """Another program on 8740 must not make Remedy fight it for the port."""
     import remedy.runtime.rmb.mode as rmb_mode
@@ -1199,9 +1224,7 @@ def test_a_busy_unhealthy_port_makes_the_server_move_to_a_free_one(
         home,
     )
 
-    import remedy.vision.runtime as _vr
-
-    _vr.subprocess.Popen = lambda *a, **k: _FakeProc()  # type: ignore[attr-defined]
+    no_real_spawn.spawn = lambda *a, **k: _FakeProc()
 
     out = vr.start_server(home_dir=home, wait_s=0.01)
     assert out["ok"] is False  # nothing ever listens on the new port
@@ -1224,7 +1247,7 @@ def test_a_broken_rmb_check_does_not_block_the_decoder(
     monkeypatch.setattr(vr, "is_running", lambda *a, **k: False)
     monkeypatch.setattr(vr, "_port_open", lambda *a, **k: False)
     spawned: list[Any] = []
-    no_real_spawn.Popen = lambda *a, **k: spawned.append(a) or _FakeProc()
+    no_real_spawn.spawn = lambda *a, **k: spawned.append(a) or _FakeProc()
 
     out = vr.start_server(home_dir=startable.home, wait_s=0.01)
     assert len(spawned) == 1
@@ -1260,7 +1283,7 @@ def test_a_successful_bundle_activation_rebinds_the_paths(
     # Rebound far enough to reach the mmproj check rather than dying earlier.
     assert out["ok"] is False
     assert "mmproj file missing" in out["error"]
-    assert no_real_spawn.popen_calls == []
+    assert no_real_spawn.spawn_calls == []
 
 
 def test_a_bundle_that_reports_ok_but_writes_nothing_is_reported(
@@ -1273,7 +1296,7 @@ def test_a_bundle_that_reports_ok_but_writes_nothing_is_reported(
     monkeypatch.setattr(bundle, "activate_local_bundle", lambda *a, **k: {"ok": True})
     out = vr.start_server(home_dir=tmp_path / "empty")
     assert out == {"ok": False, "error": "Local model not ready (no vision.json)"}
-    assert no_real_spawn.popen_calls == []
+    assert no_real_spawn.spawn_calls == []
 
 
 def test_a_crashing_bundle_binary_lookup_is_reported_as_binary_not_found(
@@ -1294,7 +1317,7 @@ def test_a_crashing_bundle_binary_lookup_is_reported_as_binary_not_found(
 
     out = vr.start_server(home_dir=startable.home)
     assert out == {"ok": False, "error": "llama-server binary not found"}
-    assert no_real_spawn.popen_calls == []
+    assert no_real_spawn.spawn_calls == []
 
 
 def test_the_binary_beside_the_runtime_dir_is_used_when_vision_json_has_no_pin(
@@ -1307,7 +1330,7 @@ def test_the_binary_beside_the_runtime_dir_is_used_when_vision_json_has_no_pin(
     monkeypatch.setattr(vr, "is_running", lambda *a, **k: False)
     monkeypatch.setattr(vr, "_port_open", lambda *a, **k: False)
     spawned: list[list[str]] = []
-    no_real_spawn.Popen = lambda cmd, **k: spawned.append(list(cmd)) or _FakeProc()
+    no_real_spawn.spawn = lambda cmd, **k: spawned.append(list(cmd)) or _FakeProc()
 
     vr.start_server(home_dir=startable.home, wait_s=0.01)
     assert spawned and spawned[0][0] == str(startable.binary)
@@ -1419,7 +1442,7 @@ def test_a_posix_cmdline_naming_something_else_is_refused(monkeypatch) -> None:
 
 
 def test_a_windows_process_named_llama_server_is_recognised(monkeypatch, no_real_spawn) -> None:
-    no_real_spawn.run = lambda *a, **k: types.SimpleNamespace(
+    no_real_spawn.run_hidden_impl = lambda *a, **k: types.SimpleNamespace(
         stdout="llama-server\r\n", stderr="", returncode=0
     )
     monkeypatch.setattr(vr, "os", _FakeOS(name="nt"))
@@ -1428,7 +1451,7 @@ def test_a_windows_process_named_llama_server_is_recognised(monkeypatch, no_real
 
 def test_a_windows_process_named_anything_else_is_refused(monkeypatch, no_real_spawn) -> None:
     """This is the check that stops Remedy killing the owner's editor."""
-    no_real_spawn.run = lambda *a, **k: types.SimpleNamespace(
+    no_real_spawn.run_hidden_impl = lambda *a, **k: types.SimpleNamespace(
         stdout="Code\r\n", stderr="", returncode=0
     )
     monkeypatch.setattr(vr, "os", _FakeOS(name="nt"))
@@ -1438,7 +1461,7 @@ def test_a_windows_process_named_anything_else_is_refused(monkeypatch, no_real_s
 def test_a_dead_windows_pid_produces_empty_output_and_is_refused(
     monkeypatch, no_real_spawn
 ) -> None:
-    no_real_spawn.run = lambda *a, **k: types.SimpleNamespace(
+    no_real_spawn.run_hidden_impl = lambda *a, **k: types.SimpleNamespace(
         stdout="", stderr="", returncode=0
     )
     monkeypatch.setattr(vr, "os", _FakeOS(name="nt"))
@@ -1453,7 +1476,7 @@ def test_a_slow_process_lookup_fails_open_and_allows_the_kill(
     def timeout(*_a: object, **_k: object) -> None:
         raise subprocess.TimeoutExpired(cmd="powershell", timeout=5)
 
-    no_real_spawn.run = timeout
+    no_real_spawn.run_hidden_impl = timeout
     monkeypatch.setattr(vr, "os", _FakeOS(name="nt"))
     assert vr._looks_like_llama_server(4242) is True
 

@@ -10,4 +10,11 @@ import importlib.util
 
 
 def test_fastapi_session_titles_module_gone() -> None:
-    assert importlib.util.find_spec("remedy.interfaces.routes.sessions") is None
+    # Parent package ``remedy.interfaces.routes`` was removed with the FastAPI
+    # cutover; find_spec raises ModuleNotFoundError for a missing intermediate
+    # rather than returning None.
+    try:
+        spec = importlib.util.find_spec("remedy.interfaces.routes.sessions")
+    except ModuleNotFoundError:
+        return
+    assert spec is None

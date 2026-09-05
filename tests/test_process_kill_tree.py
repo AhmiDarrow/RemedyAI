@@ -233,10 +233,20 @@ def test_leaving_the_with_block_ends_a_running_tree():
     assert _wait_until(lambda: not _alive(pid) and not any(_alive(p) for p in tree))
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="the unsupported path is for other hosts")
-def test_spawn_hidden_reports_unsupported_off_windows():
+def test_spawn_hidden_host_abi_by_platform():
+    """win32/linux: Zig authorized spawn works. Other hosts: fail closed."""
     from remedy.core.computer import host_binding
     from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
+
+    if sys.platform in ("win32", "linux"):
+        try:
+            host_binding._lib()
+        except (NativeRuntimeUnavailableError, OSError, AttributeError):
+            pytest.skip("remedy_core required for host spawn")
+        with P.spawn_hidden([sys.executable, "-c", "pass"]) as child:
+            assert child.pid > 0
+            assert child.wait(10.0) == 0
+        return
 
     with pytest.raises((host_binding.HostError, NativeRuntimeUnavailableError)):
         P.spawn_hidden([sys.executable, "-c", "pass"])

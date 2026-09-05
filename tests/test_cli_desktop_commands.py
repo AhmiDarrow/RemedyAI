@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -149,7 +150,14 @@ def test_launch_starts_the_installed_binary(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
     started: list[list[str]] = []
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: started.append(cmd))
+
+    def fake_spawn(argv, *, cwd=None, env=None, write_roots=None):
+        _ = (cwd, env, write_roots)
+        started.append(list(argv))
+        return types.SimpleNamespace(pid=1, handle=1)
+
+    monkeypatch.setattr("remedy.execution.process.spawn_hidden", fake_spawn)
+    monkeypatch.setattr("remedy.execution.process.retain_detached", lambda child: child)
     CR._desktop_launch()
     assert started and started[0][0].endswith("Remedy Desktop.exe")
 
@@ -165,7 +173,10 @@ def test_launch_on_a_non_windows_host_points_at_the_installer(monkeypatch, capsy
 def test_launch_without_an_install_says_where_to_download(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
-    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: pytest.fail("no app"))
+    monkeypatch.setattr(
+        "remedy.execution.process.spawn_hidden",
+        lambda *a, **kw: pytest.fail("no app"),
+    )
     with pytest.raises(SystemExit):
         CR._desktop_launch()
     assert "releases" in capsys.readouterr().out

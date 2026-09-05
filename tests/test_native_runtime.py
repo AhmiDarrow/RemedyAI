@@ -114,9 +114,10 @@ def test_go_probe_timeout_is_safe_and_path_free(
     executable = tmp_path / "remedy-runtime.exe"
     executable.touch()
     monkeypatch.setenv("REMEDY_NATIVE_RUNTIME_BIN", str(executable))
+    # Go probe uses raw subprocess (Zig-independent); patch that path.
     monkeypatch.setattr(
-        native_runtime,
-        "run_hidden",
+        native_runtime.subprocess,
+        "run",
         Mock(side_effect=subprocess.TimeoutExpired([str(executable), "--probe"], 2.0)),
     )
 

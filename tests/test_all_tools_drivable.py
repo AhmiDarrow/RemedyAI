@@ -187,6 +187,9 @@ async def test_no_tool_raises_a_programming_error_on_a_bare_call(tools):
         if name == "self_inject_round":
             # Drafts a patch against the tree; 60s is not enough on Linux CI.
             continue
+        if name in {"git_push", "gh_release"}:
+            # Bare call can hit a real remote; git_push timeout is 180s.
+            continue
         try:
             result = handler()
             if inspect.isawaitable(result):

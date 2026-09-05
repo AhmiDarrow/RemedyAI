@@ -81,8 +81,7 @@ def test_run_unattended_git_uses_scrubbed_env(monkeypatch, tmp_path):
     def fake_run(argv, **kwargs):
         captured["env"] = dict(kwargs.get("env") or {})
         captured["argv"] = list(argv)
-        captured["encoding"] = kwargs.get("encoding")
-        captured["errors"] = kwargs.get("errors")
+        captured["text"] = kwargs.get("text")
 
         class R:
             returncode = 0
@@ -91,7 +90,8 @@ def test_run_unattended_git_uses_scrubbed_env(monkeypatch, tmp_path):
 
         return R()
 
-    monkeypatch.setattr("subprocess.run", fake_run)
+    # Production path is Zig run_hidden, not subprocess.run.
+    monkeypatch.setattr("remedy.execution.process.run_hidden", fake_run)
     code, out, _err = run_unattended_git(tmp_path, "status", timeout=5)
     assert code == 0
     assert out == "ok\n"
@@ -100,8 +100,7 @@ def test_run_unattended_git_uses_scrubbed_env(monkeypatch, tmp_path):
     assert "GIT_ASKPASS" not in env
     assert env.get("GIT_TERMINAL_PROMPT") == "0"
     assert captured["argv"][:3] == ["git", "-C", str(tmp_path)]
-    assert captured["encoding"] == "utf-8"
-    assert captured["errors"] == "replace"
+    assert captured["text"] is True
 
 
 def test_unattended_git_never_inherits_askpass_or_llm_keys(monkeypatch):
