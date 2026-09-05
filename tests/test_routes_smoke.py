@@ -25,8 +25,8 @@ from fastapi.testclient import TestClient
 
 import remedy.interfaces.routes as routes_pkg
 
-#: Streams hold the connection open by design — that is the feature.
-STREAMING = {"/api/events/sessions"}
+#: Streams that hold the connection open. Go owns /api/events/sessions now.
+STREAMING: set[str] = set()
 
 #: Reaching the network would make this a flaky test, not a better one.
 # /api/updates/check removed from TestClient surface (Go-owned).
@@ -135,8 +135,8 @@ def test_no_parameterless_get_returns_a_server_error(app_and_failures):
 
 
 def test_the_streaming_route_is_still_streaming(app_and_failures):
-    """Named so that if it ever stops holding open, the exclusion above gets
-    revisited rather than quietly hiding a hang."""
+    """Go owns /api/events/sessions; keep STREAMING empty until a TestClient SSE remains."""
     app, _ = app_and_failures
     paths = {r.path for r in app.routes if hasattr(r, "methods")}
-    assert paths >= STREAMING, "the streaming route was renamed or removed"
+    assert "/api/events/sessions" not in paths
+    assert paths >= STREAMING

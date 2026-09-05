@@ -282,29 +282,6 @@ def test_redact_secrets_hyphen_aware_and_skip_unchanged():
     assert "[redacted]" in red
 
 
-def test_capture_browser_label_without_bounds_is_not_rail_success():
-    from fastapi.testclient import TestClient
-
-    from remedy.interfaces.api import create_app
-
-    class Cfg:
-        home_dir = "."
-
-    class RT:
-        config = Cfg()
-
-        def list_tasks(self):
-            return []
-
-    app = create_app(runtime=RT(), api_key="")
-    client = TestClient(app)
-    r = client.post("/api/computer/capture", json={"label": "browser_rail"})
-    assert r.status_code == 200
-    body = r.json()
-    assert body.get("ok") is False
-    assert "bounds" in str(body.get("error") or "").lower()
-
-
 def test_challenge_wall_on_click_and_act():
     from remedy.core.approvals import SENSITIVE_PREFIX, challenge_wall_checkpoint
 
@@ -475,23 +452,6 @@ def test_is_valid_navigate_url_dns_miss_and_loopback(monkeypatch):
         lambda _h: [],
     )
     assert is_valid_navigate_url("https://evil.example") is False
-
-
-def test_capture_label_family_without_bounds():
-    from fastapi.testclient import TestClient
-
-    from remedy.interfaces.api import create_app
-
-    class RT:
-        config = SimpleNamespace(home_dir=".")
-
-        def list_tasks(self):
-            return []
-
-    client = TestClient(create_app(runtime=RT(), api_key=""))
-    for label in ("browser", "rail", "Browser rail"):
-        body = client.post("/api/computer/capture", json={"label": label}).json()
-        assert body.get("ok") is False
 
 
 def test_tdd_jail_any_exception_does_not_write(tmp_path: Path):

@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from remedy.core.computer.host_bridge import (
     ComputerHostBridge,
@@ -16,7 +15,6 @@ from remedy.core.computer.host_bridge import (
 from remedy.core.computer.router import ComputerTarget, resolve_target
 from remedy.core.computer.types import COMPUTER_PLAN_MODE_TOOLS, COMPUTER_TOOL_NAMES
 from remedy.core.plan_store import PLAN_MODE_TOOL_NAMES
-from remedy.interfaces.api import create_app
 from remedy.models import AgentConfig
 
 
@@ -921,44 +919,6 @@ def test_enqueue_sets_ui_command_for_rail(tmp_path: Path):
     assert b.take_ui_command() is None
 
 
-def test_computer_host_routes_require_bearer(tmp_path: Path):
-    """Host/jobs/ui need Bearer (S-AUTH-04). Rust poller loads DPAPI token; SPA sends auth.
-
-    a11y push remains loopback-exempt (job_id capability secret).
-    """
-
-    class Cfg:
-        home_dir = str(tmp_path)
-
-    class RT:
-        config = Cfg()
-
-        def list_tasks(self):
-            return []
-
-    app = create_app(runtime=RT(), api_key="secret-test-key")
-    client = TestClient(app)
-    # No Authorization header → 401 (no longer loopback-open)
-    r = client.post("/api/computer/host/hello", json={"client": "desktop"})
-    assert r.status_code == 401, r.text
-    r2 = client.get("/api/computer/jobs/next")
-    assert r2.status_code == 401, r2.text
-    # With Bearer — host works
-    headers = {"Authorization": "Bearer secret-test-key"}
-    r3 = client.post(
-        "/api/computer/host/hello",
-        json={"client": "desktop"},
-        headers=headers,
-    )
-    assert r3.status_code == 200, r3.text
-    assert r3.json().get("ok") is True
-    r4 = client.get("/api/computer/jobs/next", headers=headers)
-    assert r4.status_code == 200, r4.text
-    assert "job" in r4.json()
-    # a11y still loopback-open (invalid short id → 400, not 401)
-    r5 = client.post("/api/computer/a11y/push", json={"job_id": "short", "elements": []})
-    assert r5.status_code == 400, r5.text
-
 
 def test_wait_fails_fast_when_unclaimed(tmp_path: Path):
     b = ComputerHostBridge(home_dir=tmp_path)
@@ -1453,54 +1413,8 @@ def test_navigate_rail_fast_optimistic_when_host_alive(tmp_path: Path, monkeypat
         assert "SUCCESS" not in str(d2.get("message") or "")
 
 
-def test_computer_api_and_tools_registered(tmp_path: Path, monkeypatch):
-    from remedy.core.computer import host_bridge as hb
-
-    monkeypatch.setattr(hb, "_bridge", None)
-
-    class Cfg:
-        home_dir = str(tmp_path)
-
-    class RT:
-        config = Cfg()
-
-        def list_tasks(self):
-            return []
-
-    app = create_app(runtime=RT(), api_key="")
-    client = TestClient(app)
-
-    r = client.post("/api/computer/host/hello", json={"client": "desktop"})
-    assert r.status_code == 200
-    assert r.json()["ok"] is True
-    # Hello alone must not claim poller-connected
-    assert r.json().get("host_connected") is False, r.json()
-
-    r2 = client.get("/api/computer/jobs/next")
-    assert r2.status_code == 200
-    # jobs/next is a real poller heartbeat
-    st = client.get("/api/computer/host/status")
-    assert st.status_code == 200
-    assert st.json().get("host_connected") is True
-    assert r2.json()["job"] is None
-
-    # Enqueue via bridge used by tools
-    # Fresh bridge for tmp home — create_app may use different singleton; claim uses route bridge
-    # Route uses runtime home_dir; enqueue there
-    from remedy.core.computer.host_bridge import ComputerHostBridge, get_host_bridge
-
-    ComputerHostBridge(home_dir=tmp_path)
-    # The route's get_host_bridge may be a process singleton — force enqueue through API path
-    # by using the same get_host_bridge after setting home via complete flow:
-    b = get_host_bridge(tmp_path)
-    # If singleton already pointed elsewhere, still test complete path with claim on that bridge
-    b.enqueue("navigate", {"url": "https://example.com/x"})
-    r3 = client.get("/api/computer/jobs/next")
-    # May or may not see job depending on singleton home; assert API shape
-    assert r3.status_code == 200
-    assert "job" in r3.json()
-
-    # Tool registration on a real runtime
+def test_computer_tools_registered(tmp_path: Path):
+    """HTTP /api/computer/* is Go-owned; keep tool registration coverage here."""
     from remedy.core.agent import BasicRuntime
 
     rt = BasicRuntime(
@@ -1529,34 +1443,6 @@ def test_desktop_screenshot_roundtrip(tmp_path: Path):
     assert region.is_file()
     assert rinfo["width"] > 0 and rinfo["height"] > 0
 
-
-def test_computer_capture_api(tmp_path: Path):
-    import sys
-
-    if sys.platform != "win32":
-        pytest.skip("Windows only")
-
-    class Cfg:
-        home_dir = str(tmp_path)
-
-    class RT:
-        config = Cfg()
-
-        def list_tasks(self):
-            return []
-
-    app = create_app(runtime=RT(), api_key="")
-    client = TestClient(app)
-    r = client.post("/api/computer/capture", json={})
-    assert r.status_code == 200
-    assert r.json()["ok"] is True
-    assert r.json()["capture"]["path"]
-    r2 = client.post(
-        "/api/computer/capture",
-        json={"x": 0, "y": 0, "width": 64, "height": 64, "scale": 1.0},
-    )
-    assert r2.status_code == 200
-    assert r2.json()["capture"]["width"] <= 64 + 8  # clamp tolerance
 
 
 def test_computer_guidance_present():
@@ -1604,34 +1490,15 @@ def test_list_user_message_still_loads_computer_guidance() -> None:
     assert needs_computer_use_guidance(None) is False
 
 
-def test_ui_command_peek_is_not_the_poller(tmp_path, monkeypatch):
-    from fastapi.testclient import TestClient
+def test_ui_command_peek_is_not_the_poller(tmp_path: Path):
+    """Peek must not mark the host connected; take/claim does (Go covers HTTP)."""
+    from remedy.core.computer.host_bridge import ComputerHostBridge
 
-    from remedy.core.computer import host_bridge as hb
-    from remedy.interfaces.api import create_app
-
-    monkeypatch.setattr(hb, "_bridge", None)
-
-    class Cfg:
-        home_dir = str(tmp_path)
-
-    class RT:
-        config = Cfg()
-
-        def list_tasks(self):
-            return []
-
-    app = create_app(runtime=RT(), api_key="")
-    client = TestClient(app)
-    r = client.get("/api/computer/ui/command")
-    assert r.status_code == 200
-    st = client.get("/api/computer/host/status")
-    assert st.status_code == 200
-    assert st.json().get("host_connected") is False
-    r2 = client.get("/api/computer/ui/command?take=1")
-    assert r2.status_code == 200
-    st2 = client.get("/api/computer/host/status")
-    assert st2.json().get("host_connected") is True
+    b = ComputerHostBridge(home_dir=tmp_path)
+    assert b.peek_ui_command() is None
+    assert b.host_connected() is False
+    b.mark_host_alive(poller=True)
+    assert b.host_connected() is True
 
 
 def test_host_driver_rust_vs_cli(tmp_path: Path):
@@ -1671,13 +1538,11 @@ def test_job_result_text_capped_on_complete(tmp_path: Path):
 
 
 def test_a11y_push_completes_snapshot_job(tmp_path: Path):
-    from remedy.core.computer.host_bridge import ComputerHostBridge, get_host_bridge
+    from remedy.core.computer.host_bridge import ComputerHostBridge
 
-    # Isolate bridge home
     b = ComputerHostBridge(home_dir=tmp_path)
     job = b.enqueue("snapshot", {})
     assert job.status == "pending"
-    # Simulate claim
     claimed = b.claim_next()
     assert claimed is not None
     done = b.complete_a11y_push(
@@ -1687,31 +1552,6 @@ def test_a11y_push_completes_snapshot_job(tmp_path: Path):
     assert done is not None
     assert done.status == "done"
     assert done.result and done.result.get("elements")
-
-    # API path (public, job secret)
-    class Cfg:
-        home_dir = str(tmp_path)
-
-    class RT:
-        config = Cfg()
-
-        def list_tasks(self):
-            return []
-
-    # Process singleton may differ — test complete_a11y via direct bridge above is enough
-    app = create_app(runtime=RT(), api_key="")
-    client = TestClient(app)
-    b2 = get_host_bridge(tmp_path)
-    j2 = b2.enqueue("snapshot", {})
-    r = client.post(
-        "/api/computer/a11y/push",
-        json={
-            "job_id": j2.id,
-            "elements": [{"ref": "e1", "name": "Go", "tag": "a"}],
-        },
-    )
-    # 200 if same singleton home, else 404 is acceptable when singleton points elsewhere
-    assert r.status_code in (200, 404)
 
 
 def test_list_monitors_windows():

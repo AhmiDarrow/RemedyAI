@@ -192,9 +192,10 @@ def test_session_events_endpoint():
 
     asyncio.run(_roundtrip())
 
+    # SSE GET /api/events/sessions is Go-owned; FastAPI TestClient must not twin it.
     client = TestClient(create_app())
     paths = client.get("/openapi.json").json().get("paths") or {}
-    assert "/api/events/sessions" in paths
+    assert "/api/events/sessions" not in paths
 
 
 def test_redact_messenger_secrets_strips_telegram_url_token():
