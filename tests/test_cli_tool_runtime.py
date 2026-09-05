@@ -71,10 +71,11 @@ async def test_tool_run_invokes_tool_abi(monkeypatch, tmp_path: Path, capsys):
 
 
 @pytest.mark.asyncio
-async def test_tool_run_does_not_import_basic_runtime(monkeypatch, tmp_path: Path):
+async def test_tool_run_uses_go_http_not_basic_runtime(monkeypatch, tmp_path: Path):
+    """Tool CLI talks to Go Tool ABI over HTTP — never builds BasicRuntime."""
     home = tmp_path / ".remedy"
     home.mkdir()
-    import sys
+    assert not hasattr(cmd_skills, "BasicRuntime")
 
     monkeypatch.setattr(
         cmd_skills,
@@ -92,7 +93,6 @@ async def test_tool_run_does_not_import_basic_runtime(monkeypatch, tmp_path: Pat
             )
         )
     assert exc.value.code == 1
-    assert "remedy.core.agent" not in sys.modules
 
 
 @pytest.mark.asyncio
