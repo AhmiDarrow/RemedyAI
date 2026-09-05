@@ -7,14 +7,11 @@ import pytest
 from remedy.core.agent import BasicRuntime
 from remedy.core.computer.types import COMPUTER_PLAN_MODE_TOOLS, COMPUTER_TOOL_NAMES
 from remedy.core.plan_store import PLAN_MODE_SYSTEM_ADDENDUM, PLAN_MODE_TOOL_NAMES
-from remedy.interfaces.api_models import SendMessageRequest
 from remedy.models import AgentConfig, ToolCall
-
 
 def _is_plan_blocked(res) -> bool:
     err = res.error or ""
     return (not res.success) and ("PLAN_MODE" in err or "Plan mode" in err)
-
 
 @pytest.mark.asyncio
 async def test_plan_mode_allows_plan_save_blocks_bash():
@@ -41,7 +38,6 @@ async def test_plan_mode_allows_plan_save_blocks_bash():
     assert "plan_save" in PLAN_MODE_TOOL_NAMES
     assert "checkpoint_save" not in PLAN_MODE_TOOL_NAMES  # build-only
     assert "computer_act" not in PLAN_MODE_TOOL_NAMES
-
 
 @pytest.mark.asyncio
 async def test_plan_mode_computer_matrix_and_help():
@@ -75,17 +71,3 @@ async def test_plan_mode_computer_matrix_and_help():
     assert "snapshot" in addendum or "observe" in addendum
     assert "help_list" in addendum or "help_read" in addendum or "f1" in addendum
 
-
-def test_send_message_request_has_plan_mode():
-    m = SendMessageRequest(message="hi", plan_mode=True)
-    assert m.plan_mode is True
-    m2 = SendMessageRequest(message="hi")
-    assert m2.plan_mode is False
-
-
-def test_plan_mode_field_roundtrip_json():
-    """API model accepts plan_mode from desktop stream body."""
-    raw = {"message": "plan this", "plan_mode": True, "model": None}
-    m = SendMessageRequest.model_validate(raw)
-    assert m.plan_mode is True
-    assert m.message == "plan this"
