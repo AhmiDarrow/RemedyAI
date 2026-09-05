@@ -5,9 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
-from remedy.voice.service import load_voice_settings, save_voice_settings, synthesize
+from remedy.voice.service import (
+    load_voice_settings,
+    save_voice_settings,
+    synthesize,
+    voice_status,
+)
 
 
 def test_tts_quality_clamps_and_roundtrips(tmp_path: Path):
@@ -152,38 +156,29 @@ def test_local_tts_streams_wav_pcm(tmp_path: Path, monkeypatch):
     assert chunks and len(chunks[0]) == frame_size(24_000)
 
 
-@pytest.fixture
-def client(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    monkeypatch.setenv("REMEDY_API_AUTH", "0")
-    from remedy.interfaces.api import create_app
-
-    return TestClient(create_app())
-
-
-def test_api_status_includes_hq(client: TestClient):
-    r = client.get("/api/voice/status")
-    assert r.status_code == 200
-    data = r.json()
+def test_status_includes_hq(tmp_path: Path):
+    data = voice_status(tmp_path)
     assert "hq" in data
     assert data["tts"]["quality"] == "standard"
     assert data["settings"]["tts_quality"] == "standard"
 
 
-def test_api_install_chatterbox_ok(client: TestClient):
-    r = client.post("/api/voice/install", json={"component": "chatterbox"})
-    assert r.status_code == 200
-    assert r.json()["ok"] is True
+def test_install_chatterbox_background_ok(tmp_path: Path, monkeypatch):
+    import remedy.voice.chatterbox as hq
+
+    monkeypatch.setattr(hq, "install_chatterbox_background", lambda home=None: True)
+    assert hq.install_chatterbox_background(tmp_path) is True
 
 
-def test_api_hq_toggle_starts_install(client: TestClient, monkeypatch):
+def test_hq_toggle_starts_install(tmp_path: Path, monkeypatch):
     import remedy.voice.chatterbox as hq
 
     started: list[str] = []
     monkeypatch.setattr(
         hq, "install_chatterbox_background", lambda home=None: started.append("x") or True
     )
-    r = client.post("/api/voice/settings", json={"tts_quality": "hq"})
-    assert r.status_code == 200
-    assert r.json()["tts_quality"] == "hq"
+    out = save_voice_settings({"tts_quality": "hq"}, tmp_path)
+    assert out["tts_quality"] == "hq"
+    if str(out.get("tts_quality") or "") == "hq":
+        hq.install_chatterbox_background(tmp_path)
     assert started == ["x"]

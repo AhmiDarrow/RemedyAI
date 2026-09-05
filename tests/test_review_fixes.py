@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
 
 from remedy.core.errors import SecurityError
 from remedy.core.learning_loop import LearningLoop
 from remedy.core.security import check_dangerous_command, safe_path
 from remedy.execution.runtime import ToolRuntime
-from remedy.interfaces.api import create_app
 from remedy.memory.store import MemoryStore
 from remedy.models import (
     MemoryEntry,
@@ -256,85 +254,12 @@ class TestSecurity:
             safe_path("..", base_dir=tmp_path)
 
 
-class TestApiFilesJail:
-    def test_files_endpoint_rejects_escape(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("REMEDY_FILES_ROOT", str(tmp_path))
-        (tmp_path / "ok.txt").write_text("hi", encoding="utf-8")
-        app = create_app()
-        client = TestClient(app)
-        bad = client.get("/api/files", params={"path": ".."})
-        assert bad.status_code == 200
-        assert bad.json().get("error")
-        good = client.get("/api/files", params={"path": "."})
-        assert good.status_code == 200
-        assert "error" not in good.json() or not good.json().get("error")
+class TestApiFilesAbsent:
+    def test_files_http_twin_gone(self):
+        """HTTP /api/files* jail lives in Go httpapi; FastAPI twin deleted."""
+        from remedy.interfaces.api import create_app
 
-    def test_files_endpoint_rejects_windows_system_paths(self, tmp_path, monkeypatch):
-        """Volume-root / SAM / win.ini must not look like a successful listing."""
-        monkeypatch.setenv("REMEDY_FILES_ROOT", str(tmp_path))
-        app = create_app()
-        client = TestClient(app)
-        for p in (
-            r"C:\Windows\System32\config\SAM",
-            r"C:\Users\Administrator\Desktop\..\..\Windows\win.ini",
-            r"C:\Users\Administrator\NTUSER.DAT",
-            "../../../Windows/System32/drivers/etc/hosts",
-        ):
-            resp = client.get("/api/files", params={"path": p})
-            assert resp.status_code == 200
-            body = resp.json()
-            assert body.get("error"), p
-            assert body.get("files") == []
+        paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+        assert "/api/files" not in paths
+        assert "/api/files/search" not in paths
 
-
-class TestApiFilesAccessScope:
-    def test_full_scope_lists_absolute_dir_outside_project(self, tmp_path, monkeypatch):
-        """Files rail must see folders list_dir can see when access_scope=full."""
-        monkeypatch.delenv("REMEDY_FILES_ROOT", raising=False)
-        monkeypatch.delenv("REMEDY_PROJECT_PATH", raising=False)
-        project = tmp_path / "ExampleProject"
-        project.mkdir()
-        (project / "song.txt").write_text("x", encoding="utf-8")
-        outside = tmp_path / "example-folder"
-        outside.mkdir()
-        (outside / "config.toml").write_text("ok", encoding="utf-8")
-
-        monkeypatch.setattr(
-            "remedy.interfaces.routes.workspace.load_config",
-            lambda: {
-                "project_path": str(project),
-                "access_scope": "full",
-            },
-        )
-        app = create_app()
-        client = TestClient(app)
-        resp = client.get("/api/files", params={"path": str(outside)})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert not body.get("error"), body
-        names = {e["name"] for e in body.get("files") or []}
-        assert "config.toml" in names
-
-    def test_project_scope_still_refuses_outside_dir(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("REMEDY_FILES_ROOT", raising=False)
-        monkeypatch.delenv("REMEDY_PROJECT_PATH", raising=False)
-        project = tmp_path / "ExampleProject"
-        project.mkdir()
-        outside = tmp_path / "example-folder"
-        outside.mkdir()
-        (outside / "config.toml").write_text("ok", encoding="utf-8")
-
-        monkeypatch.setattr(
-            "remedy.interfaces.routes.workspace.load_config",
-            lambda: {
-                "project_path": str(project),
-                "access_scope": "project",
-            },
-        )
-        app = create_app()
-        client = TestClient(app)
-        resp = client.get("/api/files", params={"path": str(outside)})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body.get("error")
-        assert body.get("files") == []

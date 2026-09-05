@@ -206,19 +206,14 @@ async def test_voice_tools_adjust_and_revert(tmp_path: Path):
     assert "Released." in await registry["voice_hold"](keep=False)  # type: ignore[operator]
 
 
-def test_identity_routes(tmp_path: Path, monkeypatch):
-    from fastapi.testclient import TestClient
-
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    monkeypatch.setenv("REMEDY_API_AUTH", "0")
-    monkeypatch.setenv("REMEDY_NO_FIRST_RUN_DOWNLOAD", "1")
-    from remedy.interfaces.api import create_app
-
-    c = TestClient(create_app())
-    base = c.get("/api/voice/identity").json()
+def test_identity_service_roundtrip(tmp_path: Path):
+    """HTTP /api/voice/identity* removed with the FastAPI twin; exercise the worker API."""
+    base = vid.load(tmp_path).public()
     assert {"pace", "pitch_semitones", "warmth", "articulation"} <= set(base)
-    adj = c.post("/api/voice/identity/adjust", json={"warmth": 0.1}).json()
-    assert adj["effective"]["warmth"] == pytest.approx(min(1.0, base["effective"]["warmth"] + 0.1))
-    rev = c.post("/api/voice/identity/revert", json={"steps": 1}).json()
+    adj = vid.evolve(tmp_path, warmth=0.1).public()
+    assert adj["effective"]["warmth"] == pytest.approx(
+        min(1.0, base["effective"]["warmth"] + 0.1)
+    )
+    rev = vid.revert(tmp_path, steps=1).public()
     assert rev["effective"]["warmth"] == pytest.approx(base["effective"]["warmth"])
 

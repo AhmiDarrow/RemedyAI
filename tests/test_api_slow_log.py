@@ -25,14 +25,9 @@ def test_real_endpoints_still_slow():
     assert should_warn_slow("PUT", "/api/settings", 200, 500) is True
 
 
-def test_voice_status_is_a_poller_not_a_slow_warn():
-    """Desktop polls /api/voice/status; a fat turn must not SLOW-spam the log."""
-    assert should_warn_slow("GET", "/api/voice/status", 200, 2707) is False
-    assert should_warn_slow("GET", "/api/voice/status", 500, 800) is True
-
-
 def test_go_owned_pollers_are_not_exempt_on_testclient_helper():
-    """Computer/life-tasks/RMB HF live on Go — TestClient slow helper no longer lists them."""
+    """Voice/computer/life-tasks live on Go — TestClient slow helper no longer lists them."""
+    assert should_warn_slow("GET", "/api/voice/status", 200, 2707) is True
     assert should_warn_slow("GET", "/api/computer/jobs/next", 200, 6259) is True
     assert should_warn_slow("GET", "/api/life-tasks/current", 200, 6259) is True
 

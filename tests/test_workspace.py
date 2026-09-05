@@ -62,64 +62,14 @@ def test_forbidden_os_project_paths(tmp_path):
     assert not is_forbidden_project_path(r"C:\Users\Administrator\Old-Remedy")
 
 
-def test_files_search_jails_and_does_not_mkdir(tmp_path, monkeypatch):
-    from fastapi.testclient import TestClient
-
-    from remedy.interfaces import api_support
+def test_files_http_routes_absent_from_testclient():
+    """HTTP /api/files* is Go-owned (native/go/httpapi/workspace_test.go)."""
     from remedy.interfaces.api import create_app
 
-    proj = tmp_path / "proj"
-    (proj / "src").mkdir(parents=True)
-    (proj / "src" / "ok.py").write_text("x", encoding="utf-8")
-    outside = tmp_path / "secret"
-    outside.mkdir()
-    (outside / "leak.txt").write_text("nope", encoding="utf-8")
-    missing = tmp_path / "would_create"
-
-    home = tmp_path / ".remedy"
-    home.mkdir()
-    cfg = {
-        "project_path": str(proj),
-        "home_dir": str(home),
-        "access_scope": "project",
-    }
-    monkeypatch.setattr(api_support, "load_config", lambda: dict(cfg))
-    monkeypatch.setattr(
-        "remedy.interfaces.routes.workspace.load_config",
-        lambda: dict(cfg),
-    )
-    monkeypatch.setenv("REMEDY_FILES_ROOT", str(proj))
-
-    app = create_app()
-    client = TestClient(app)
-    # Escape via absolute path
-    res = client.get(
-        "/api/files/search",
-        params={"query": "leak", "path": str(outside)},
-    )
-    assert res.status_code == 400, res.text
-    # OS trees are never searchable even if the jail base is a drive root
-    res_win = client.get(
-        "/api/files/search",
-        params={"query": "x", "path": r"C:\Windows"},
-    )
-    assert res_win.status_code == 400, res_win.text
-    assert not list(outside.rglob("ok.py"))
-    # GET must not mkdir
-    res2 = client.get(
-        "/api/files/search",
-        params={"query": "x", "path": str(missing)},
-    )
-    assert res2.status_code == 400
-    assert not missing.exists()
-    # In-project relative search still works
-    res3 = client.get(
-        "/api/files/search",
-        params={"query": "ok", "path": "src"},
-    )
-    assert res3.status_code == 200, res3.text
-    names = [r.get("name") for r in (res3.json().get("results") or [])]
-    assert any(n == "ok.py" for n in names)
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    assert "/api/files" not in paths
+    assert "/api/files/search" not in paths
+    assert "/api/workspace" not in paths
 
 
 def test_ensure_project_dir_creates(tmp_path):

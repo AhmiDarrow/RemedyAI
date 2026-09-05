@@ -283,6 +283,8 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "chat",
         "terminal",
         "rmb",
+        "voice",
+        "workspace",
     ):
         assert not re.search(rf"\bregister_{mod}_routes\s*\(", routes_init)
         assert importlib.util.find_spec(f"remedy.interfaces.routes.{mod}") is None
@@ -344,6 +346,13 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/rmb/settings",
         "/api/rmb/use",
         "/api/terminal",
+        "/api/voice/status",
+        "/api/voice/identity",
+        "/api/workspace",
+        "/api/files",
+        "/api/files/search",
+        "/api/media",
+        "/api/scratch",
     ]
     def _absent(status: int) -> bool:
         # Starlette may answer POST to an unmatched path with 405 when no
@@ -382,6 +391,11 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/rmb/hf/pull",
         "/api/rmb/hf/cancel",
         "/api/terminal",
+        "/api/voice/speak",
+        "/api/voice/settings",
+        "/api/voice/install",
+        "/api/voice/client-log",
+        "/api/sessions/import",
     ):
         r = client.post(path, json={})
         assert _absent(r.status_code), f"{path} still registered ({r.status_code})"
