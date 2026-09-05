@@ -1,6 +1,7 @@
 """App/URL launch policy for desktop computer-use.
 
-Kept out of the thin OS host bindings so desktop_win/linux stay host_binding wrappers.
+Kept out of the thin OS host bindings so desktop_win / desktop_common stay
+host_binding wrappers.
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ def _require_windows() -> None:
 
 def _require_linux() -> None:
     if sys.platform == "win32":
-        raise RuntimeError("desktop_linux is for POSIX desktops")
+        raise RuntimeError("POSIX desktop computer use only")
 
 
 def is_text_document_path(raw: str | Path) -> bool:

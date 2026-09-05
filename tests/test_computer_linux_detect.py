@@ -1,4 +1,4 @@
-"""Linux detect_ui_candidates: AT-SPI / OCR / pixel boxes; backends faked."""
+"""POSIX detect_ui_candidates via desktop_common / host_binding (Zig AT-SPI)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from remedy.core.computer import desktop_linux as lin
+from remedy.core.computer import desktop_common as lin
 from remedy.core.computer import host_binding as H
 
 
@@ -164,7 +164,13 @@ def test_linux_capture_host_error_fails_closed_not_blank(monkeypatch) -> None:
 
 
 def test_linux_module_has_no_pointer_tool_shellout() -> None:
-    """Phase 2 cutover: no external pointer/capture tool argv remains."""
+    """Phase 2 cutover: desktop_linux.py gone; no pointer/capture tool argv."""
+    import sys
+
+    gone = Path(lin.__file__).resolve().parent / "desktop_linux.py"
+    assert not gone.is_file(), "desktop_linux.py must be deleted (Phase 2)"
+    if sys.platform != "win32":
+        assert H.native() is lin
     src = Path(lin.__file__).read_text(encoding="utf-8")
     # Strip the module docstring so the banlist is about call sites.
     if src.startswith('"""'):
@@ -173,7 +179,7 @@ def test_linux_module_has_no_pointer_tool_shellout() -> None:
     else:
         body = src
     for banned in ("xdotool", "ydotool", "wmctrl", "grim", "scrot", "gnome-screenshot", "xsel"):
-        assert banned not in body, f"banned tool name still in desktop_linux.py: {banned}"
+        assert banned not in body, f"banned tool name still in desktop_common.py: {banned}"
 
 
 def test_linux_detect_atspi_still_runs_on_tiny_capture(monkeypatch) -> None:
