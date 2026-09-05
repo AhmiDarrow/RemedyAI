@@ -65,7 +65,8 @@ def run_hidden(
     ):
         child = P.spawn_hidden(args, cwd=cwd, env=env)
         try:
-            code = wait(child, timeout)
+            # Route through process.wait so tests can monkeypatch the public API.
+            code = P.wait(child, timeout)
             if code is None:
                 child.kill_tree()
                 child.close()
