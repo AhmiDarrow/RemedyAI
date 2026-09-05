@@ -39,6 +39,81 @@ def test_spawn_background_source_has_no_raw_popen() -> None:
     assert "spawn_hidden" in source
 
 
+def test_phase1_long_lived_hosts_use_spawn_hidden_not_popen() -> None:
+    """claimidx / openserp / mdl / vision / rmb start via Zig authorized spawn."""
+    from remedy.runtime import claimidx_host, mdl_runtime, web_search_host
+    from remedy.runtime.rmb import service as rmb_service
+    from remedy.vision import runtime as vision_runtime
+
+    for mod, needle in (
+        (claimidx_host, "def start"),
+        (web_search_host, "def start"),
+        (mdl_runtime, "def start_tier"),
+        (vision_runtime, "def start_server"),
+        (rmb_service, "def _spawn"),
+    ):
+        source = inspect.getsource(mod)
+        assert "hidden_subprocess_kwargs" not in source, mod.__name__
+        assert "spawn_hidden" in source, mod.__name__
+        # Nested _spawn in rmb is defined inside start; still must not Popen.
+        if needle == "def _spawn":
+            assert "subprocess.Popen" not in source, mod.__name__
+
+
+def test_voice_bridge_pipe_spawn_fail_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Interactive voice worker pipes have no Zig ABI — fail closed HostError."""
+    from remedy.voice import bridge as bridge_mod
+    from remedy.voice.bridge import VoiceBridge, WorkerError
+
+    monkeypatch.setattr(P, "require_process_host", lambda: None)
+    monkeypatch.setattr(
+        bridge_mod.rt,
+        "python_path",
+        lambda *_a, **_k: tmp_path / "python.exe",
+    )
+    (tmp_path / "python.exe").write_text("", encoding="utf-8")
+    vb = VoiceBridge(home_dir=tmp_path)
+    with pytest.raises(WorkerError) as raised:
+        vb._spawn()
+    assert "3-pipe" in str(raised.value).lower() or "pipes" in str(raised.value).lower()
+
+
+def test_voice_stream_pip_uses_run_hidden(monkeypatch: pytest.MonkeyPatch) -> None:
+    from remedy.voice import service as voice_service
+
+    seen: list[list[str]] = []
+
+    class _Done:
+        returncode = 0
+        stdout = "Successfully installed x\n"
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        seen.append(list(cmd))
+        assert kwargs.get("capture_output") is True
+        return _Done()
+
+    monkeypatch.setattr(P, "run_hidden", fake_run)
+    states: list[tuple] = []
+
+    def set_state(pct=None, message=None):
+        states.append((pct, message))
+
+    rc, tail = voice_service._stream_pip(
+        [sys.executable, "-m", "pip", "install", "x"],
+        env={},
+        set_state=set_state,
+        lo=10.0,
+        cap=40.0,
+        label="voice pack",
+    )
+    assert rc == 0
+    assert seen and "pip" in seen[0]
+    assert any("Successfully" in line for line in tail)
+
+
 def test_spawn_background_uses_authorized_spawn(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

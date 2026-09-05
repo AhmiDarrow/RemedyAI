@@ -74,23 +74,8 @@ def test_harness_soft_popen_merges_creationflags(monkeypatch: pytest.MonkeyPatch
     assert seen["creationflags"] == expected
 
 
-def test_hide_flags_survive_a_win32_mock_without_windows_attrs(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """POSIX interpreters lack CREATE_NO_WINDOW / STARTUPINFO; mocked win32 must not crash."""
-    from remedy.execution import hide_flags as HF
-
-    monkeypatch.setattr(HF.sys, "platform", "win32")
-    for name in ("CREATE_NO_WINDOW", "STARTUPINFO", "STARTF_USESHOWWINDOW", "SW_HIDE"):
-        if hasattr(subprocess, name):
-            monkeypatch.delattr(HF.subprocess, name, raising=False)
-    assert HF.hidden_creationflags() == 0
-    assert HF.hidden_startupinfo() is None
-    assert HF.hidden_subprocess_kwargs() == {"creationflags": 0}
-
-
 def test_kill_process_tree_kills_a_plain_child_everywhere():
-    from remedy.execution.hide_flags import hidden_subprocess_kwargs
+    from tests.harness.process_soft import soft_hidden_subprocess_kwargs
 
     if sys.platform in ("win32", "linux"):
         from remedy.core.computer import host_binding as H
@@ -104,7 +89,7 @@ def test_kill_process_tree_kills_a_plain_child_everywhere():
         [sys.executable, "-c", "import time; time.sleep(60)"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        **hidden_subprocess_kwargs(),
+        **soft_hidden_subprocess_kwargs(),
     )
     try:
         assert proc.poll() is None
