@@ -8,20 +8,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 # Path is used for isolation checks against the real home directory
-from remedy.interfaces.messenger_catalog import (
+from remedy.interfaces.api import create_app
+from remedy.interfaces.messenger_settings import (
+    apply_messengers_update,
     external_session_id,
     heuristic_session_title,
     is_messenger_channel,
     list_messenger_definitions,
     max_reply_chars,
+    normalize_enabled_channels,
     public_fields_from_section,
     redact_messenger_secrets,
     split_message,
-)
-from remedy.interfaces.api import create_app
-from remedy.interfaces.messenger_settings import (
-    apply_messengers_update,
-    normalize_enabled_channels,
 )
 from remedy.models import ChannelKind
 

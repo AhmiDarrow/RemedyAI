@@ -570,7 +570,7 @@ def scrub_config_secrets(cfg: dict[str, Any]) -> dict[str, Any]:
         out["llm_api_key"] = ""
     # Scrub messenger tokens from channel tables (prefer secret store)
     try:
-        from remedy.interfaces.messenger_catalog import SECRET_FIELD_KEYS, messenger_ids
+        from remedy.interfaces.messenger_settings import SECRET_FIELD_KEYS, messenger_ids
 
         for mid in messenger_ids():
             sec = out.get(mid)

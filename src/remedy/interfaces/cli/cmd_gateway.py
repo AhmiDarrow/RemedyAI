@@ -9,7 +9,7 @@ from typing import Any
 from rich.console import Console
 from rich.table import Table
 
-from remedy.interfaces.messenger_catalog import list_messenger_definitions
+from remedy.interfaces.messenger_settings import list_messenger_definitions
 from remedy.models import ChannelKind
 
 console = Console()
