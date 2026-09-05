@@ -875,7 +875,7 @@ def _stream_pip(
     ``(returncode, last_output_lines)``; raises ``TimeoutError`` when pip
     is silent for :data:`_PIP_IDLE_TIMEOUT_S`.
     """
-    from remedy.execution.process import hidden_subprocess_kwargs
+    from remedy.execution.hide_flags import hidden_subprocess_kwargs
 
     proc = subprocess.Popen(
         cmd,

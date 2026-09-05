@@ -74,33 +74,37 @@ def test_harness_soft_popen_merges_creationflags(monkeypatch: pytest.MonkeyPatch
     assert seen["creationflags"] == expected
 
 
-def test_hidden_flags_survive_a_win32_mock_without_windows_attrs(
+def test_hide_flags_survive_a_win32_mock_without_windows_attrs(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """POSIX interpreters lack CREATE_NO_WINDOW / STARTUPINFO; mocked win32 must not crash."""
-    monkeypatch.setattr(P.sys, "platform", "win32")
+    from remedy.execution import hide_flags as HF
+
+    monkeypatch.setattr(HF.sys, "platform", "win32")
     for name in ("CREATE_NO_WINDOW", "STARTUPINFO", "STARTF_USESHOWWINDOW", "SW_HIDE"):
         if hasattr(subprocess, name):
-            monkeypatch.delattr(P.subprocess, name, raising=False)
-    assert P.hidden_creationflags() == 0
-    assert P.hidden_startupinfo() is None
-    assert P.hidden_subprocess_kwargs() == {"creationflags": 0}
+            monkeypatch.delattr(HF.subprocess, name, raising=False)
+    assert HF.hidden_creationflags() == 0
+    assert HF.hidden_startupinfo() is None
+    assert HF.hidden_subprocess_kwargs() == {"creationflags": 0}
 
 
 def test_kill_process_tree_kills_a_plain_child_everywhere():
-    if sys.platform == "win32":
+    from remedy.execution.hide_flags import hidden_subprocess_kwargs
+
+    if sys.platform in ("win32", "linux"):
         from remedy.core.computer import host_binding as H
         from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
         try:
             H._lib()
         except (NativeRuntimeUnavailableError, OSError, AttributeError):
-            pytest.skip("remedy_core required for Windows kill-tree")
+            pytest.skip("remedy_core required for host kill-tree")
     proc = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(60)"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        **P.hidden_subprocess_kwargs(),
+        **hidden_subprocess_kwargs(),
     )
     try:
         assert proc.poll() is None

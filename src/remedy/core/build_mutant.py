@@ -101,16 +101,14 @@ def _run_pytest(root: Path, test_args: list[str], *, timeout_s: float = 45.0) ->
     if not py:
         return False
     try:
-        from remedy.execution.process import hidden_subprocess_kwargs
+        from remedy.execution.process import run_hidden
 
-        proc = subprocess.run(
-            [*py, "-m", "pytest", "-q", "-p", "no:cacheprovider", *test_args],
+        proc = run_hidden([*py, "-m", "pytest", "-q", "-p", "no:cacheprovider", *test_args],
             cwd=str(root),
             capture_output=True,
             text=True,
             timeout=timeout_s,
-            **hidden_subprocess_kwargs(),
-        )
+            )
         return proc.returncode == 0
     except (subprocess.TimeoutExpired, OSError):
         return False

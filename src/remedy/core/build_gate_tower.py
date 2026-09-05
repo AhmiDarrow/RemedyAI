@@ -52,7 +52,7 @@ def _python_cmd(root: Path | None = None) -> list[str]:
 
 def _run(cmd: list[str], cwd: Path, timeout_s: float = 60.0) -> tuple[bool, str]:
     try:
-        from remedy.execution.process import hidden_subprocess_kwargs
+        from remedy.execution.process import run_hidden
 
         # Windows: npm-installed tools are ``tsc.cmd`` / ``pyright.cmd`` shims.
         # CreateProcess cannot find a bare "tsc" (WinError 2 → false red), but
@@ -61,14 +61,12 @@ def _run(cmd: list[str], cwd: Path, timeout_s: float = 60.0) -> tuple[bool, str]
             found = shutil.which(cmd[0])
             if found:
                 cmd = [found, *cmd[1:]]
-        proc = subprocess.run(
-            cmd,
+        proc = run_hidden(cmd,
             cwd=str(cwd),
             capture_output=True,
             text=True,
             timeout=timeout_s,
-            **hidden_subprocess_kwargs(),
-        )
+            )
         out = ((proc.stdout or "") + (proc.stderr or ""))[-1500:]
         return proc.returncode == 0, out
     except (subprocess.TimeoutExpired, OSError) as e:

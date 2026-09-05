@@ -53,21 +53,16 @@ def run_unattended_git(
     """Hidden git. Never prompts. Returns (code, stdout, stderr)."""
     import subprocess
 
-    from remedy.execution.process import hidden_subprocess_kwargs
+    from remedy.execution.process import run_hidden
 
     try:
-        proc = subprocess.run(
-            ["git", "-C", str(repo), *args],
+        proc = run_hidden(["git", "-C", str(repo), *args],
             capture_output=True,
             text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=timeout,
             check=False,
-            stdin=subprocess.DEVNULL,
             env=unattended_vcs_env(["git"]),
-            **hidden_subprocess_kwargs(),
-        )
+            )
     except FileNotFoundError:
         return 127, "", "git not found"
     except subprocess.TimeoutExpired:

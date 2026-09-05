@@ -337,18 +337,15 @@ def _search_rg(
     cmd.extend(["--", pattern, str(start)])
     try:
         # Never flash a console on Windows (spread_run / search workers hit this often).
-        from remedy.execution.process import hidden_subprocess_kwargs
+        from remedy.execution.process import run_hidden
 
-        proc = subprocess.run(
+        proc = run_hidden(
             cmd,
             capture_output=True,
             text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=30,
             cwd=str(root if root.is_dir() else root.parent),
             env={**os.environ, "RIPGREP_CONFIG_PATH": ""},
-            **hidden_subprocess_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return [], False

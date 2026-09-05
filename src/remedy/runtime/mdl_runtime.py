@@ -128,20 +128,14 @@ def stop_tier(tier_name: str) -> dict[str, Any]:
                     proc.kill()
                     proc.wait(timeout=3)
 
-    if os.name == "nt" and was_running and proc is not None and proc.pid:
+    if was_running and proc is not None and proc.pid:
         try:
-            args = ["taskkill", "/F", "/PID", str(proc.pid), "/T"]
-            from remedy.execution.process import hidden_subprocess_kwargs
+            from remedy.execution.process import kill_tree
 
-            subprocess.run(
-                args,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=10,
-                check=False,
-                **hidden_subprocess_kwargs(),
-            )
-        except (OSError, subprocess.TimeoutExpired):
+            kill_tree(int(proc.pid))
+        except (OSError, ProcessLookupError, ValueError):
+            pass
+        except Exception:
             pass
 
     still_running = proc is not None and proc.poll() is None
@@ -222,7 +216,7 @@ def start_tier(
     if mmproj_path:
         cmd.extend(["--mmproj", str(mmproj_path)])
 
-    from remedy.execution.process import hidden_subprocess_kwargs
+    from remedy.execution.hide_flags import hidden_subprocess_kwargs
 
     logger.info("Starting MDL tier %s: %s", tier_name, " ".join(cmd))
     try:

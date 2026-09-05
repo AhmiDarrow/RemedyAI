@@ -294,7 +294,7 @@ def _run_script(
     """Run one sheath script in a subprocess. Never shell; cwd = sheath dir."""
     try:
         from remedy.core.build_python import python_cmd_for_subprocess
-        from remedy.execution.process import hidden_subprocess_kwargs
+        from remedy.execution.process import run_hidden
 
         # Never the frozen sidecar — spawning remedy-desktop.exe as Python
         # relaunches serve on :7400 and drops the live chat.
@@ -304,15 +304,13 @@ def _run_script(
                 "no real Python interpreter for sheath scripts "
                 "(Desktop sidecar is not CPython); set REMEDY_PYTHON"
             )
-        r = subprocess.run(
-            [*py, str(script), *args],
+        r = run_hidden([*py, str(script), *args],
             cwd=str(script.parent),
             capture_output=True,
             text=True,
             timeout=timeout,
             shell=False,
-            **hidden_subprocess_kwargs(),
-        )
+            )
         out = (r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")
         return r.returncode == 0, out[:OUTPUT_CAP]
     except subprocess.TimeoutExpired:

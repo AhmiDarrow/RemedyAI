@@ -18,7 +18,8 @@ from pathlib import Path
 from typing import Any
 from urllib.request import Request
 
-from remedy.execution.process import hidden_subprocess_kwargs
+from remedy.execution.hide_flags import hidden_subprocess_kwargs
+from remedy.execution.process import kill_tree, run_hidden
 from remedy.home import default_home
 from remedy.runtime.rmb.autofit import (
     apply_plan_to_state,
@@ -348,7 +349,7 @@ def _looks_like_llama_server(pid: int) -> bool:
             return True
     try:
         # ProcessName + Path (CUDA builds report ProcessName=llama-server)
-        out = subprocess.run(
+        out = run_hidden(
             [
                 "powershell",
                 "-NoProfile",
@@ -362,7 +363,6 @@ def _looks_like_llama_server(pid: int) -> bool:
             capture_output=True,
             text=True,
             timeout=4,
-            **hidden_subprocess_kwargs(),
         )
         name = (out.stdout or "").strip().lower()
         if not name:
@@ -380,37 +380,14 @@ def _looks_like_llama_server(pid: int) -> bool:
 
 
 def _kill_pid(pid: int) -> bool:
-    """Force-kill *pid* (and children on Windows). Returns True if a kill was attempted."""
+    """Force-kill *pid* (and children) via ``remedy_core`` — no taskkill soft path."""
     if pid <= 0:
         return False
     try:
-        if os.name == "nt":
-            hide = hidden_subprocess_kwargs()
-            r = subprocess.run(
-                ["taskkill", "/PID", str(int(pid)), "/T", "/F"],
-                capture_output=True,
-                timeout=8,
-                **hide,
-            )
-            if r.returncode == 0:
-                return True
-            r2 = subprocess.run(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-Command",
-                    f"Stop-Process -Id {int(pid)} -Force -ErrorAction SilentlyContinue",
-                ],
-                capture_output=True,
-                timeout=8,
-                **hide,
-            )
-            return r2.returncode == 0
-        os.kill(pid, 15)
-        time.sleep(0.2)
-        with contextlib.suppress(Exception):
-            os.kill(pid, 9)
+        kill_tree(int(pid))
         return True
+    except (OSError, ProcessLookupError, ValueError):
+        return False
     except Exception:
         return False
 
@@ -421,12 +398,11 @@ def _find_pid_on_port(port: int) -> int | None:
         return None
     try:
         if os.name == "nt":
-            out = subprocess.run(
+            out = run_hidden(
                 ["netstat", "-ano"],
                 capture_output=True,
                 text=True,
                 timeout=8,
-                **hidden_subprocess_kwargs(),
             )
             needle = f":{int(port)}"
             for line in (out.stdout or "").splitlines():
@@ -443,7 +419,7 @@ def _find_pid_on_port(port: int) -> int | None:
                     if pid > 0:
                         return pid
         else:
-            out = subprocess.run(
+            out = run_hidden(
                 ["lsof", "-ti", f":{int(port)}"],
                 capture_output=True,
                 text=True,
@@ -625,12 +601,11 @@ def _kill_listeners_on_port(port: int) -> int:
     try:
         pids: set[int] = set()
         if os.name == "nt":
-            out = subprocess.run(
+            out = run_hidden(
                 ["netstat", "-ano"],
                 capture_output=True,
                 text=True,
                 timeout=8,
-                **hidden_subprocess_kwargs(),
             )
             needle = f":{int(port)}"
             for line in (out.stdout or "").splitlines():
@@ -1102,9 +1077,7 @@ def _live_process_has_mtp_flags(state: dict[str, Any] | None = None) -> bool:
         port = DEFAULT_CHAT_PORT
     try:
         if os.name == "nt":
-            import subprocess as _sp
-
-            r = _sp.run(
+            r = run_hidden(
                 [
                     "powershell",
                     "-NoProfile",
@@ -1119,7 +1092,6 @@ def _live_process_has_mtp_flags(state: dict[str, Any] | None = None) -> bool:
                 capture_output=True,
                 text=True,
                 timeout=4,
-                **hidden_subprocess_kwargs(),
             )
             cmd = (r.stdout or "").lower()
             if "draft-mtp" in cmd or "--spec-type" in cmd:
@@ -2785,7 +2757,7 @@ def stop_rmb_server(
                 if _kill_pid(ipid):
                     killed = True
                 else:
-                    logger.warning("RMB: taskkill failed for pid %s", ipid)
+                    logger.warning("RMB: kill_tree failed for pid %s", ipid)
         # Always free the RMB port — handles orphan llama-server after API restart
         try:
             port = int(state.get("port") or DEFAULT_CHAT_PORT)

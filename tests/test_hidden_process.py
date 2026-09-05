@@ -9,27 +9,28 @@ import pytest
 
 from remedy.core.computer.host_binding import STATUS_UNSUPPORTED, HostError
 from remedy.execution import process as P
-from remedy.execution.process import (
+from remedy.execution.hide_flags import (
     hidden_creationflags,
     hidden_subprocess_kwargs,
-    run_hidden,
-    win_shell_prefix,
 )
+from remedy.execution.process import run_hidden, win_shell_prefix
 from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
 
-def test_hidden_creationflags_windows_only() -> None:
+def test_hide_flags_windows_only() -> None:
+    """Pipe-leftover hide kwargs live outside the Zig process binding."""
     flags = hidden_creationflags()
     kw = hidden_subprocess_kwargs()
     if sys.platform == "win32":
         assert flags == subprocess.CREATE_NO_WINDOW
         assert flags == 0x08000000
         assert kw.get("creationflags") == subprocess.CREATE_NO_WINDOW
-        # STARTUPINFO SW_HIDE is set alongside the flag (extra anti-flash)
         assert kw["startupinfo"].wShowWindow == subprocess.SW_HIDE
     else:
         assert flags == 0
         assert kw == {}
+    assert not hasattr(P, "hidden_subprocess_kwargs")
+    assert not hasattr(P, "hidden_creationflags")
 
 
 def test_win_shell_prefix_has_hidden_style_on_windows() -> None:
@@ -60,13 +61,11 @@ def test_run_hidden_python_echo() -> None:
     assert "hidden-ok" in (result.stdout or "")
 
 
-def test_run_hidden_accepts_creationflags_merge() -> None:
-    """Ensure kwargs still work and CREATE_NO_WINDOW is applied when set."""
+def test_hide_flags_popen_accepts_creationflags() -> None:
+    """Leftover hide_flags module may soft-merge; process.py must not."""
     kw = hidden_subprocess_kwargs()
     if sys.platform == "win32":
-        # Mimic what create_subprocess receives
         assert kw.get("creationflags") == subprocess.CREATE_NO_WINDOW
-        # subprocess.Popen accepts the flag without error
         p = subprocess.Popen(
             [sys.executable, "-c", "pass"],
             stdout=subprocess.DEVNULL,

@@ -1162,16 +1162,14 @@ async def maybe_bootstrap_local_create(
             py = python_cmd_for_subprocess(resolved.parent)
             if not py:
                 raise RuntimeError("no real Python")
-            from remedy.execution.process import hidden_subprocess_kwargs
+            from remedy.execution.process import run_hidden
 
-            r = subprocess.run(
-                [*py, str(resolved)],
+            r = run_hidden([*py, str(resolved)],
                 capture_output=True,
                 text=True,
                 timeout=15,
                 cwd=str(resolved.parent),
-                **hidden_subprocess_kwargs(),
-            )
+                )
             out = (r.stdout or "").strip()
             if print_phrase in out:
                 run_note = f"\nVerified run output: `{out}`"

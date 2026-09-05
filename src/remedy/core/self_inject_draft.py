@@ -516,20 +516,18 @@ def _from_ruff(repo: Path) -> DraftTarget | None:
         return None
     try:
         from remedy.core.build_python import python_cmd_for_subprocess
-        from remedy.execution.process import hidden_subprocess_kwargs
+        from remedy.execution.process import run_hidden
 
         py = python_cmd_for_subprocess(repo)
         if not py:
             return None
-        proc = subprocess.run(
-            [*py, "-m", "ruff", "check", "--output-format=json", "src/remedy"],
+        proc = run_hidden([*py, "-m", "ruff", "check", "--output-format=json", "src/remedy"],
             cwd=str(repo),
             capture_output=True,
             text=True,
             timeout=60,
             check=False,
-            **hidden_subprocess_kwargs(),
-        )
+            )
     except (OSError, subprocess.TimeoutExpired):
         return None
     raw = (proc.stdout or "").strip()
