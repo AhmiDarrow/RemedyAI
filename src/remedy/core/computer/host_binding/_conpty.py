@@ -266,7 +266,7 @@ def spawn_conpty_process(
     env: Mapping[str, str] | None = None,
 ) -> _ConPTYProcess:
     """Authorized ConPTY spawn → duck-typed process. No unsigned fallback."""
-    from remedy.execution.process import resolve_argv0
+    from remedy.execution.process_argv import resolve_argv0
 
     api = _api()
     resolved = resolve_argv0(argv)
