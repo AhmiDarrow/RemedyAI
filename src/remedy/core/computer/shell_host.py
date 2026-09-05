@@ -607,14 +607,9 @@ class HostSession:
 
 def conpty_available() -> bool:
     """True when ``remedy_core`` reports ConPTY (ABI 5) on this host."""
-    if sys.platform != "win32":
-        return False
-    try:
-        from remedy.core.computer import host_binding
+    from remedy.core.computer.host_conpty import spawn_conpty_supported
 
-        return bool(host_binding.conpty_available())
-    except Exception:
-        return False
+    return spawn_conpty_supported()
 
 
 _SESSIONS: dict[str, HostSession] = {}

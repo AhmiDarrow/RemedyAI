@@ -59,7 +59,7 @@ class VoiceBridge:
         env = rt.child_env(self.home_dir, with_source=True)
         env["REMEDY_VOICE_WORKER"] = "1"
         env["REMEDY_VOICE_LANE"] = self.lane
-        from remedy.execution.process import hidden_subprocess_kwargs
+        from remedy.execution.hide_flags import hidden_subprocess_kwargs
 
         proc = subprocess.Popen(
             [str(py), "-m", "remedy.voice.worker"],

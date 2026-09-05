@@ -406,7 +406,7 @@ def start(
         "--port",
         str(CLAIMIDX_PORT),
     ]
-    from remedy.execution.process import hidden_subprocess_kwargs
+    from remedy.execution.hide_flags import hidden_subprocess_kwargs
 
     try:
         with _lock:

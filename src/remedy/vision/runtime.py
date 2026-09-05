@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.request import Request
 
-from remedy.execution.process import hidden_subprocess_kwargs
+from remedy.execution.hide_flags import hidden_subprocess_kwargs
 from remedy.vision.catalog import DEFAULT_HOST, DEFAULT_PORT
 from remedy.vision.config import load_vision_json, save_vision_json
 from remedy.vision.install import runtime_binary_path
@@ -524,35 +524,20 @@ def start_server(
 
 
 def _kill_pid_tree(pid: int, *, force: bool = True) -> bool:
-    """Terminate a process (and its children on Windows). Returns True if we tried."""
+    """Terminate a process tree via ``remedy_core`` (no taskkill soft path)."""
+    _ = force
     if pid <= 0:
         return False
     try:
-        if os.name == "nt":
-            # /T = process tree (llama-server children / helpers)
-            args = ["taskkill", "/PID", str(pid), "/T"]
-            if force:
-                args.insert(1, "/F")
-            subprocess.run(
-                args,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=15,
-                check=False,
-                **hidden_subprocess_kwargs(),
-            )
-            return True
-        # POSIX: terminate process group when possible
-        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-            os.kill(pid, 15)  # SIGTERM
-            time.sleep(0.3)
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(pid, 0)  # still alive?
-                if force:
-                    os.kill(pid, 9)  # SIGKILL
-            return True
-    except (OSError, subprocess.TimeoutExpired, ValueError):
+        from remedy.execution.process import kill_tree
+
+        kill_tree(int(pid))
+        return True
+    except (OSError, ProcessLookupError, ValueError):
         logger.debug("kill_pid_tree failed for %s", pid, exc_info=True)
+    except Exception:
+        # HostError / NativeRuntimeUnavailableError — do not soft-fallback to taskkill.
+        logger.debug("kill_pid_tree host failed for %s", pid, exc_info=True)
     return False
 
 
@@ -578,7 +563,9 @@ def _windows_process_name(pid: int) -> str:
     """Lowercased ProcessName, or empty if gone / denied / not Windows."""
     if os.name != "nt" or pid <= 0:
         return ""
-    out = subprocess.run(
+    from remedy.execution.process import run_hidden
+
+    out = run_hidden(
         [
             "powershell",
             "-NoProfile",
@@ -589,7 +576,6 @@ def _windows_process_name(pid: int) -> str:
         text=True,
         timeout=5,
         check=False,
-        **hidden_subprocess_kwargs(),
     )
     return (out.stdout or "").strip().lower()
 

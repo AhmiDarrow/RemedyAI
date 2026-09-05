@@ -163,15 +163,13 @@ def _single_exe(cmd: list[str] | None) -> str:
     with suppress(Exception):
         import subprocess
 
-        from remedy.execution.process import hidden_subprocess_kwargs
+        from remedy.execution.process import run_hidden
 
-        r = subprocess.run(
-            [*cmd, "-c", "import sys;print(sys.executable)"],
+        r = run_hidden([*cmd, "-c", "import sys;print(sys.executable)"],
             capture_output=True,
             text=True,
             timeout=15,
-            **hidden_subprocess_kwargs(),
-        )
+            )
         out = (r.stdout or "").strip()
         if r.returncode == 0 and out:
             cand = out.splitlines()[-1].strip()

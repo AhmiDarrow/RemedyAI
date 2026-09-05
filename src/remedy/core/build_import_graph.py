@@ -224,17 +224,15 @@ def dry_run_import(
         "print('OK')\n"
     )
     try:
-        from remedy.execution.process import hidden_subprocess_kwargs
+        from remedy.execution.process import run_hidden
 
-        proc = subprocess.run(
-            [*py, "-c", code],
+        proc = run_hidden([*py, "-c", code],
             cwd=str(root),
             capture_output=True,
             text=True,
             timeout=timeout_s,
             env={**dict(os.environ), "PYTHONPATH": env_pythonpath},
-            **hidden_subprocess_kwargs(),
-        )
+            )
     except (subprocess.TimeoutExpired, OSError) as e:
         return {"ok": False, "module": module, "error": str(e)[:400], "error_class": "spawn"}
     if proc.returncode == 0 and "OK" in (proc.stdout or ""):

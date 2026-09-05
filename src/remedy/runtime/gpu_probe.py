@@ -196,16 +196,14 @@ def _skip_name(name: str) -> bool:
 
 
 def _run(argv: list[str], *, timeout: float = 4.0) -> str:
-    from remedy.execution.process import hidden_subprocess_kwargs
+    from remedy.execution.process import run_hidden
 
     try:
-        r = subprocess.run(
-            argv,
+        r = run_hidden(argv,
             capture_output=True,
             text=True,
             timeout=timeout,
-            **hidden_subprocess_kwargs(),
-        )
+            )
     except Exception:
         return ""
     if r.returncode != 0:

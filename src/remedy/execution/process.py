@@ -6,11 +6,13 @@ Production paths:
   process group (KILL_ON_JOB_CLOSE).
 * :func:`run_hidden` — no-pipe → :func:`spawn_hidden`; capture → Zig
   exec-capture. Interactive pipes raise ``HostError`` (unsupported).
-* :func:`kill_tree` / :func:`kill_process_tree` — toolhelp walk, deepest first.
+* :func:`kill_tree` / :func:`kill_process_tree` — Zig toolhelp / process-group
+  walk, deepest first (win32 + linux).
 
 ``popen_hidden`` / :func:`create_hidden_subprocess_exec` exist so tests can
 patch them; on every platform they fail closed (no CREATE_NO_WINDOW happy
-path). Legacy console-hide kwargs below are for non-Zig spawn sites only.
+path). Legacy hide kwargs for pipe-only leftovers live in
+:mod:`remedy.execution.hide_flags`.
 """
 
 from __future__ import annotations
@@ -22,37 +24,6 @@ from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, NoReturn
-
-
-def hidden_creationflags() -> int:
-    """Windows CREATE_NO_WINDOW (0 elsewhere). Legacy / non-host callers only."""
-    if sys.platform != "win32":
-        return 0
-    return int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
-
-
-def hidden_startupinfo() -> Any | None:
-    """STARTUPINFO with SW_HIDE alongside CREATE_NO_WINDOW."""
-    if sys.platform != "win32":
-        return None
-    startupinfo_cls = getattr(subprocess, "STARTUPINFO", None)
-    if startupinfo_cls is None:
-        return None
-    startup = startupinfo_cls()
-    startup.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 1)
-    startup.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
-    return startup
-
-
-def hidden_subprocess_kwargs() -> dict[str, Any]:
-    """Kwargs for legacy subprocess sites that are not yet Zig-backed."""
-    if sys.platform != "win32":
-        return {}
-    out: dict[str, Any] = {"creationflags": hidden_creationflags()}
-    startup = hidden_startupinfo()
-    if startup is not None:
-        out["startupinfo"] = startup
-    return out
 
 
 def _process_host_required() -> bool:
@@ -172,7 +143,7 @@ def _run_hidden_exec_capture(
 ) -> subprocess.CompletedProcess[Any]:
     from remedy.core.computer import host_binding
 
-    resolved = _resolve_argv0(args)
+    resolved = resolve_argv0(args)
     token, now_ms = host_binding.issue_process_spawn_token(resolved)
     timeout_ms = 0 if timeout is None else int(max(0.0, float(timeout)) * 1000)
     captured = host_binding.process_exec_capture_authorized(
@@ -307,7 +278,8 @@ def retain_detached(child: HiddenProcess) -> HiddenProcess:
     return child
 
 
-def _resolve_argv0(argv: Sequence[str]) -> list[str]:
+def resolve_argv0(argv: Sequence[str]) -> list[str]:
+    """Resolve argv[0] to an absolute path (required by authorized spawn)."""
     import shutil
 
     args = [str(a) for a in argv]
@@ -334,7 +306,7 @@ def spawn_hidden(
     """Start *argv* hidden via authorized spawn (no unsigned soft fallback)."""
     from remedy.core.computer import host_binding
 
-    resolved = _resolve_argv0(argv)
+    resolved = resolve_argv0(argv)
     token, now_ms = host_binding.issue_process_spawn_token(resolved)
     roots = None if write_roots is None else [str(r) for r in write_roots]
     pid, handle = host_binding.process_spawn_authorized(
@@ -371,7 +343,7 @@ def kill_tree(pid: int) -> None:
 
 
 def kill_process_tree(proc: Any) -> None:
-    """Kill *proc* (and on Windows its child tree via ``remedy_core``)."""
+    """Kill *proc* (and its child tree) through ``remedy_core`` on host platforms."""
     if proc is None:
         return
     if isinstance(proc, HiddenProcess):
@@ -379,7 +351,7 @@ def kill_process_tree(proc: Any) -> None:
             proc.kill_tree()
         return
     pid = getattr(proc, "pid", None)
-    if sys.platform == "win32" and pid:
+    if _process_host_required() and pid:
         from remedy.core.computer.host_binding import HostError
         from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 

@@ -52,16 +52,14 @@ def _which(name: str) -> str | None:
 
 def _run(cmd: list[str], *, cwd: Path | None = None, timeout_s: float = 20.0) -> tuple[bool, str]:
     try:
-        from remedy.execution.process import hidden_subprocess_kwargs
+        from remedy.execution.process import run_hidden
 
-        proc = subprocess.run(
-            cmd,
+        proc = run_hidden(cmd,
             cwd=str(cwd) if cwd else None,
             capture_output=True,
             text=True,
             timeout=timeout_s,
-            **hidden_subprocess_kwargs(),
-        )
+            )
         out = ((proc.stdout or "") + (proc.stderr or ""))[-800:]
         return proc.returncode == 0, out
     except (subprocess.TimeoutExpired, OSError) as e:

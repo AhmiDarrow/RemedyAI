@@ -257,16 +257,14 @@ def run_project_tests(
     if not py_cmd:
         return False, "pytest failed to run: no real Python interpreter", []
     try:
-        from remedy.execution.process import hidden_subprocess_kwargs
+        from remedy.execution.process import run_hidden
 
-        proc = subprocess.run(
-            [*py_cmd, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
+        proc = run_hidden([*py_cmd, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
             cwd=str(root),
             capture_output=True,
             text=True,
             timeout=timeout_s,
-            **hidden_subprocess_kwargs(),
-        )
+            )
     except (subprocess.TimeoutExpired, OSError) as e:
         return False, f"pytest failed to run: {e}", []
     out = (proc.stdout or "") + (proc.stderr or "")
@@ -302,16 +300,14 @@ class PytestOracle:
         if not py_cmd:
             return [OracleError(unit.id, "pytest error: no real Python interpreter")]
         try:
-            from remedy.execution.process import hidden_subprocess_kwargs
+            from remedy.execution.process import run_hidden
 
-            proc = subprocess.run(
-                [*py_cmd, "-m", "pytest", test_rel, "-q", "-p", "no:cacheprovider"],
+            proc = run_hidden([*py_cmd, "-m", "pytest", test_rel, "-q", "-p", "no:cacheprovider"],
                 cwd=str(self.root),
                 capture_output=True,
                 text=True,
                 timeout=self.timeout_s,
-                **hidden_subprocess_kwargs(),
-            )
+                )
         except (subprocess.TimeoutExpired, OSError) as e:
             return [OracleError(unit.id, f"pytest error: {e}")]
         if proc.returncode == 0:

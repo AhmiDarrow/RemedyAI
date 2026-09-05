@@ -142,10 +142,9 @@ def _process_stats() -> dict[str, Any]:
 def _cpu_brand() -> str | None:
     try:
         if platform.system() == "Windows":
-            from remedy.execution.process import hidden_subprocess_kwargs
+            from remedy.execution.process import run_hidden
 
-            r = subprocess.run(
-                [
+            r = run_hidden([
                     "powershell",
                     "-NoProfile",
                     "-Command",
@@ -154,8 +153,7 @@ def _cpu_brand() -> str | None:
                 capture_output=True,
                 text=True,
                 timeout=3,
-                **hidden_subprocess_kwargs(),
-            )
+                )
             name = (r.stdout or "").strip().splitlines()
             if name:
                 return name[0].strip()[:120]
@@ -188,10 +186,9 @@ def _hardware_stats() -> dict[str, Any]:
     except Exception:
         if os.name == "nt":
             try:
-                from remedy.execution.process import hidden_subprocess_kwargs
+                from remedy.execution.process import run_hidden
 
-                r = subprocess.run(
-                    [
+                r = run_hidden([
                         "powershell",
                         "-NoProfile",
                         "-Command",
@@ -203,8 +200,7 @@ def _hardware_stats() -> dict[str, Any]:
                     capture_output=True,
                     text=True,
                     timeout=4,
-                    **hidden_subprocess_kwargs(),
-                )
+                    )
                 lines = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
                 if len(lines) >= 2:
                     # values in KB

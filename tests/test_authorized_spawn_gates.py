@@ -160,7 +160,7 @@ def test_run_hidden_capture_uses_exec_capture(
         return _Captured()
 
     monkeypatch.setattr(P, "require_process_host", fake_require)
-    monkeypatch.setattr(P, "_resolve_argv0", fake_resolve)
+    monkeypatch.setattr(P, "resolve_argv0", fake_resolve)
     monkeypatch.setattr(H, "issue_process_spawn_token", fake_issue)
     monkeypatch.setattr(H, "process_exec_capture_authorized", fake_capture)
 

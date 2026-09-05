@@ -40,31 +40,15 @@ async def spawn_conpty(
     return await asyncio.to_thread(_spawn_conpty_sync, argv, cwd, env)
 
 
-def _resolve_argv0(argv: list[str]) -> list[str]:
-    import shutil
-    from pathlib import Path
-
-    args = [str(a) for a in argv]
-    if not args:
-        raise ValueError("argv must not be empty")
-    exe = args[0]
-    path = Path(exe)
-    if path.is_absolute():
-        return args
-    found = shutil.which(exe)
-    if found is None:
-        raise FileNotFoundError(exe)
-    args[0] = str(Path(found).resolve())
-    return args
-
-
 def _spawn_conpty_sync(
     argv: list[str],
     cwd: str | None,
     env: dict[str, str] | None,
 ) -> _ConPTYProcess:
     try:
-        resolved = _resolve_argv0(argv)
+        from remedy.execution.process import resolve_argv0
+
+        resolved = resolve_argv0(argv)
         token, now_ms = host_binding.issue_process_spawn_token(resolved)
         pid, handle = host_binding.conpty_spawn_authorized(
             resolved,
