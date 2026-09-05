@@ -77,6 +77,47 @@ func RegisterZigHostTools(registry *Registry) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:           "computer.print_window",
+		Version:      1,
+		Description:  "Capture an HWND via Zig PrintWindow (occluded-window safe) to PNG under REMEDY_HOME/computer/shots",
+		Runtime:      RuntimeZig,
+		Risk:         RiskReadOnly,
+		Capabilities: []string{"computer.read"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["hwnd"],
+			"properties":{
+				"hwnd":{"type":"integer","minimum":1},
+				"label":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["path","width","height","origin","hwnd","method"],
+			"properties":{
+				"path":{"type":"string","minLength":1},
+				"width":{"type":"integer","minimum":1},
+				"height":{"type":"integer","minimum":1},
+				"origin":{
+					"type":"object",
+					"required":["x","y"],
+					"properties":{
+						"x":{"type":"integer"},
+						"y":{"type":"integer"}
+					},
+					"additionalProperties":false
+				},
+				"hwnd":{"type":"integer","minimum":1},
+				"method":{"type":"string","const":"PrintWindow"}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeComputerPrintWindow)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:           "computer.windows",
 		Version:      1,
 		Description:  "List visible titled top-level windows (Zig)",
@@ -666,6 +707,33 @@ func executeComputerScreenshot(_ context.Context, request Request) (Result, erro
 	} else {
 		info, err = core.ScreenshotPNG(home, label)
 	}
+	if err != nil {
+		return Result{}, err
+	}
+	out, err := json.Marshal(info)
+	return Result{Output: out}, err
+}
+
+func executeComputerPrintWindow(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		HWND  *uint64 `json:"hwnd"`
+		Label string  `json:"label"`
+	}
+	if err := json.Unmarshal(request.Input, &body); err != nil {
+		return Result{}, ErrInvalidInput
+	}
+	if body.HWND == nil || *body.HWND == 0 {
+		return Result{}, ErrInvalidInput
+	}
+	label := strings.TrimSpace(body.Label)
+	if label == "" {
+		label = "hwnd"
+	}
+	home := resolveToolHome()
+	if home == "" {
+		return Result{}, fmt.Errorf("%w: REMEDY_HOME required for computer.print_window", core.ErrUnavailable)
+	}
+	info, err := core.PrintWindowPNG(home, label, *body.HWND)
 	if err != nil {
 		return Result{}, err
 	}
