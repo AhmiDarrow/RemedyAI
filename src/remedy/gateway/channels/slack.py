@@ -1,18 +1,17 @@
-"""Slack chat.postMessage outbound — Socket Mode inbound owned by Go."""
+"""Slack TestClient stub — Go owns Socket Mode inbound + chat.postMessage."""
 
 from __future__ import annotations
 
 import logging
 
 from remedy.gateway.channels.allowlist import parse_ids
-from remedy.gateway.channels.base_http import HttpSessionMixin
 from remedy.gateway.router import ChannelAdapter
 from remedy.models import ChannelKind
 
 logger = logging.getLogger(__name__)
 
 
-class SlackChannel(HttpSessionMixin, ChannelAdapter):
+class SlackChannel(ChannelAdapter):
     def __init__(
         self,
         gateway,
@@ -40,44 +39,18 @@ class SlackChannel(HttpSessionMixin, ChannelAdapter):
             logger.info("Slack channel: stub mode (no bot token)")
             return
         logger.info(
-            "Slack outbound-ready (channel=%s; Go remedy-runtime owns Socket Mode)",
+            "Slack TestClient stub (channel=%s); Go owns network",
             self.channel_id,
         )
 
     async def stop(self) -> None:
-        await self.close_http()
         await super().stop()
 
     async def send(self, message: str, target: str | None = None) -> bool:
+        _ = message
         if not self.bot_token:
             return True
-        ch = target or self.channel_id
-        if not ch:
-            return False
-        try:
-            session = await self.ensure_http()
-            async with session.post(
-                "https://slack.com/api/chat.postMessage",
-                headers={"Authorization": f"Bearer {self.bot_token}"},
-                json={"channel": ch, "text": (message or "")[:3000]},
-            ) as resp:
-                data = await resp.json()
-                return bool(data.get("ok"))
-        except Exception as e:
-            logger.error("Slack send failed: %s", e)
-            return False
+        return bool(target or self.channel_id)
 
     async def send_typing(self, target: str | None = None) -> None:
-        ch = target or self.channel_id
-        if not self.bot_token or not ch:
-            return
-        try:
-            session = await self.ensure_http()
-            async with session.post(
-                "https://slack.com/api/conversations.mark",
-                headers={"Authorization": f"Bearer {self.bot_token}"},
-                json={"channel": ch},
-            ) as resp:
-                _ = resp.status
-        except Exception:
-            pass
+        _ = target

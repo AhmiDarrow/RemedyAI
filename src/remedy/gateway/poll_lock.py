@@ -1,9 +1,9 @@
-"""Python messenger inbound gate — always refuse (inbound removed).
+"""Python messenger inbound gate — always refuse (network twins removed).
 
 Go ``remedy-runtime`` (``native/go/gateway``) owns messenger poll locks and
-inbound. Python adapters are outbound-only. ``python_may_poll_messengers``
-always returns False so production cannot dual-poll even if
-``REMEDY_PYTHON_MESSENGER_POLL=1`` is set.
+all messenger network I/O. Python adapters are TestClient stubs.
+``python_may_poll_messengers`` always returns False so production cannot
+dual-poll even if ``REMEDY_PYTHON_MESSENGER_POLL=1`` is set.
 """
 
 from __future__ import annotations

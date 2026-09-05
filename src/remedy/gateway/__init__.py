@@ -1,9 +1,10 @@
-"""Gateway package — catalog, settings, and outbound helpers.
+"""Gateway package — catalog, settings, and TestClient adapter stubs.
 
-Messenger *inbound* (Telegram, Discord, Slack Socket Mode, Matrix /sync,
-Mattermost WS, WhatsApp/Teams/Google Chat webhooks, Signal receive, poll locks)
-is owned by Go ``native/go/gateway`` + ``native/go/httpapi`` via
-``remedy-runtime`` (Signal send/receive via Zig authorized exec-capture).
-Python adapters are outbound-only stubs for TestClient / catalog compatibility.
-Production cannot enable Python dual-poll; inbound implementations were removed.
+Messenger network I/O (Telegram/Discord/Slack/Matrix/Mattermost poll/WS,
+WhatsApp/Teams/Google Chat webhooks, Signal via Zig exec-capture, and all
+outbound REST/CLI sends) is owned by Go ``native/go/gateway`` +
+``native/go/httpapi`` via ``remedy-runtime``.
+
+Python keeps ``messengers.py`` catalog/settings schema and shape-compatible
+channel stubs for TestClient — no aiohttp, no signal-cli spawn, no dual-poll.
 """

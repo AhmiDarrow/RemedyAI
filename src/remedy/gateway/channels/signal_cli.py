@@ -1,4 +1,4 @@
-"""Signal outbound via signal-cli — receive inbound owned by Go + Zig."""
+"""Signal TestClient stub — Go + Zig exec-capture owns signal-cli send/receive."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class SignalChannel(ChannelAdapter):
-    """Uses local signal-cli binary when present (send only)."""
+    """Shape-compatible stub; never spawns signal-cli from Python."""
 
     def __init__(
         self,
@@ -56,48 +56,18 @@ class SignalChannel(ChannelAdapter):
             )
             return
         logger.info(
-            "Signal outbound-ready (cli=%s; Go remedy-runtime owns inbound receive)",
+            "Signal TestClient stub (cli=%s); Go+Zig owns exec-capture network",
             bin_path,
         )
 
     async def stop(self) -> None:
         await super().stop()
 
-    async def _run(self, *args: str, timeout: float = 60.0) -> tuple[int, str, str]:
-        bin_path = self._bin()
-        if not bin_path:
-            return 1, "", "signal-cli not found"
-        import subprocess
-
-        from remedy.execution.process import run_hidden_async
-
-        cmd = [bin_path, "-a", self.account, *args]
-        try:
-            completed = await run_hidden_async(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired:
-            return 1, "", "timeout"
-        return (
-            int(completed.returncode or 0),
-            str(completed.stdout or ""),
-            str(completed.stderr or ""),
-        )
-
     async def send(self, message: str, target: str | None = None) -> bool:
+        _ = message
         if not self._bin() or not self.account:
             return False
-        to = (target or "").strip()
-        if not to:
-            return False
-        code, _out, err = await self._run("send", "-m", message or "", to, timeout=90.0)
-        if code != 0:
-            logger.warning("signal-cli send failed: %s", err[:200])
-            return False
-        return True
+        return bool((target or "").strip())
 
     async def send_typing(self, target: str | None = None) -> None:
-        return
+        _ = target

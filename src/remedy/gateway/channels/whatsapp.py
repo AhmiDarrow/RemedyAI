@@ -1,20 +1,17 @@
-"""WhatsApp Cloud API Graph outbound — webhook inbound owned by Go httpapi."""
+"""WhatsApp TestClient stub — Go httpapi owns webhook inbound + Graph send."""
 
 from __future__ import annotations
 
 import logging
 
 from remedy.gateway.channels.allowlist import parse_ids
-from remedy.gateway.channels.base_http import HttpSessionMixin
 from remedy.gateway.router import ChannelAdapter
 from remedy.models import ChannelKind
 
 logger = logging.getLogger(__name__)
 
-GRAPH = "https://graph.facebook.com/v19.0"
 
-
-class WhatsAppChannel(HttpSessionMixin, ChannelAdapter):
+class WhatsAppChannel(ChannelAdapter):
     def __init__(
         self,
         gateway,
@@ -38,40 +35,21 @@ class WhatsAppChannel(HttpSessionMixin, ChannelAdapter):
         await super().start()
         if self.access_token and self.phone_number_id:
             logger.info(
-                "WhatsApp outbound-ready (phone_number_id=%s; "
-                "Go remedy-runtime owns webhook inbound)",
+                "WhatsApp TestClient stub (phone_number_id=%s); Go owns network",
                 self.phone_number_id,
             )
         else:
             logger.info("WhatsApp channel: stub mode (missing token or phone_number_id)")
 
     async def stop(self) -> None:
-        await self.close_http()
         await super().stop()
 
     async def send(self, message: str, target: str | None = None) -> bool:
+        _ = message
         if not self.access_token or not self.phone_number_id:
             return True
         to = (target or "").lstrip("+")
-        if not to:
-            return False
-        try:
-            session = await self.ensure_http()
-            url = f"{GRAPH}/{self.phone_number_id}/messages"
-            async with session.post(
-                url,
-                headers={"Authorization": f"Bearer {self.access_token}"},
-                json={
-                    "messaging_product": "whatsapp",
-                    "to": to,
-                    "type": "text",
-                    "text": {"body": (message or "")[:4096]},
-                },
-            ) as resp:
-                return resp.status in (200, 201)
-        except Exception as e:
-            logger.error("WhatsApp send failed: %s", e)
-            return False
+        return bool(to)
 
     async def send_typing(self, target: str | None = None) -> None:
-        return
+        _ = target
