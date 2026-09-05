@@ -1,18 +1,17 @@
-"""Mattermost REST outbound — WebSocket inbound owned by Go."""
+"""Mattermost TestClient stub — Go owns WebSocket inbound + REST posts."""
 
 from __future__ import annotations
 
 import logging
 
 from remedy.gateway.channels.allowlist import parse_ids
-from remedy.gateway.channels.base_http import HttpSessionMixin
 from remedy.gateway.router import ChannelAdapter
 from remedy.models import ChannelKind
 
 logger = logging.getLogger(__name__)
 
 
-class MattermostChannel(HttpSessionMixin, ChannelAdapter):
+class MattermostChannel(ChannelAdapter):
     def __init__(
         self,
         gateway,
@@ -42,31 +41,18 @@ class MattermostChannel(HttpSessionMixin, ChannelAdapter):
             logger.info("Mattermost channel: stub mode (missing token or base_url)")
             return
         logger.info(
-            "Mattermost outbound-ready (channel=%s; Go remedy-runtime owns inbound)",
+            "Mattermost TestClient stub (channel=%s); Go owns network",
             self.channel_id,
         )
 
     async def stop(self) -> None:
-        await self.close_http()
         await super().stop()
 
     async def send(self, message: str, target: str | None = None) -> bool:
+        _ = message
         if not self.bot_token or not self.base_url:
             return True
-        ch_id = target or self.channel_id
-        if not ch_id:
-            return False
-        try:
-            session = await self.ensure_http()
-            async with session.post(
-                f"{self.base_url}/api/v4/posts",
-                headers={"Authorization": f"Bearer {self.bot_token}"},
-                json={"channel_id": ch_id, "message": (message or "")[:4000]},
-            ) as resp:
-                return resp.status in (200, 201)
-        except Exception as e:
-            logger.error("Mattermost send failed: %s", e)
-            return False
+        return bool(target or self.channel_id)
 
     async def send_typing(self, target: str | None = None) -> None:
-        return
+        _ = target

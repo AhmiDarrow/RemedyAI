@@ -1,20 +1,17 @@
-"""Discord REST outbound — Gateway WS inbound owned by Go."""
+"""Discord TestClient stub — Go owns Gateway WS inbound + REST outbound."""
 
 from __future__ import annotations
 
 import logging
 
 from remedy.gateway.channels.allowlist import parse_ids
-from remedy.gateway.channels.base_http import HttpSessionMixin
 from remedy.gateway.router import ChannelAdapter
 from remedy.models import ChannelKind
 
 logger = logging.getLogger(__name__)
 
-API = "https://discord.com/api/v10"
 
-
-class DiscordChannel(HttpSessionMixin, ChannelAdapter):
+class DiscordChannel(ChannelAdapter):
     def __init__(
         self,
         gateway,
@@ -42,43 +39,18 @@ class DiscordChannel(HttpSessionMixin, ChannelAdapter):
             logger.info("Discord channel: stub mode (no token)")
             return
         logger.info(
-            "Discord outbound-ready (default_channel=%s; "
-            "Go remedy-runtime owns inbound gateway)",
+            "Discord TestClient stub (default_channel=%s); Go owns network",
             self.channel_id,
         )
 
     async def stop(self) -> None:
-        await self.close_http()
         await super().stop()
 
     async def send(self, message: str, target: str | None = None) -> bool:
+        _ = message
         if not self.bot_token:
             return True
-        ch_id = target or self.channel_id
-        if not ch_id:
-            return False
-        try:
-            session = await self.ensure_http()
-            async with session.post(
-                f"{API}/channels/{ch_id}/messages",
-                headers={"Authorization": f"Bot {self.bot_token}"},
-                json={"content": (message or "")[:2000]},
-            ) as resp:
-                return resp.status in (200, 201)
-        except Exception as e:
-            logger.error("Discord send failed: %s", e)
-            return False
+        return bool(target or self.channel_id)
 
     async def send_typing(self, target: str | None = None) -> None:
-        ch_id = target or self.channel_id
-        if not self.bot_token or not ch_id:
-            return
-        try:
-            session = await self.ensure_http()
-            async with session.post(
-                f"{API}/channels/{ch_id}/typing",
-                headers={"Authorization": f"Bot {self.bot_token}"},
-            ) as resp:
-                _ = resp.status
-        except Exception:
-            pass
+        _ = target

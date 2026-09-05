@@ -1,20 +1,17 @@
-"""Google Chat spaces.messages outbound — webhook inbound owned by Go httpapi."""
+"""Google Chat TestClient stub — Go httpapi owns webhook inbound + spaces send."""
 
 from __future__ import annotations
 
 import logging
 
 from remedy.gateway.channels.allowlist import parse_ids
-from remedy.gateway.channels.base_http import HttpSessionMixin
 from remedy.gateway.router import ChannelAdapter
 from remedy.models import ChannelKind
 
 logger = logging.getLogger(__name__)
 
-API = "https://chat.googleapis.com/v1"
 
-
-class GoogleChatChannel(HttpSessionMixin, ChannelAdapter):
+class GoogleChatChannel(ChannelAdapter):
     def __init__(
         self,
         gateway,
@@ -36,15 +33,13 @@ class GoogleChatChannel(HttpSessionMixin, ChannelAdapter):
         await super().start()
         if self.access_token:
             logger.info(
-                "Google Chat outbound-ready (space=%s; "
-                "Go remedy-runtime owns webhook inbound)",
+                "Google Chat TestClient stub (space=%s); Go owns network",
                 self.space_id or "(any)",
             )
         else:
             logger.info("Google Chat channel: stub mode (no access_token)")
 
     async def stop(self) -> None:
-        await self.close_http()
         await super().stop()
 
     def _space_name(self, space: str) -> str:
@@ -54,22 +49,10 @@ class GoogleChatChannel(HttpSessionMixin, ChannelAdapter):
         return s
 
     async def send(self, message: str, target: str | None = None) -> bool:
+        _ = message
         if not self.access_token:
             return True
-        space = self._space_name(target or self.space_id)
-        if not space:
-            return False
-        try:
-            session = await self.ensure_http()
-            async with session.post(
-                f"{API}/{space}/messages",
-                headers={"Authorization": f"Bearer {self.access_token}"},
-                json={"text": (message or "")[:4096]},
-            ) as resp:
-                return resp.status in (200, 201)
-        except Exception as e:
-            logger.error("Google Chat send failed: %s", e)
-            return False
+        return bool(self._space_name(target or self.space_id))
 
     async def send_typing(self, target: str | None = None) -> None:
-        return
+        _ = target

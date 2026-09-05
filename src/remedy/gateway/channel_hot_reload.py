@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 async def reload_messenger_channels(gateway: Any, cfg: dict | None = None) -> list[str]:
     """Stop messenger adapters, re-register from config, start them again.
 
-    Restarted adapters stay outbound-only (Go owns inbound; Python inbound removed).
+    Restarted adapters stay TestClient stubs (Go owns messenger network).
     """
     if gateway is None:
         return []
@@ -24,7 +24,7 @@ async def reload_messenger_channels(gateway: Any, cfg: dict | None = None) -> li
     cfg = cfg if isinstance(cfg, dict) else (load_config() or {})
     if not python_may_poll_messengers():
         logger.info(
-            "Messenger hot-reload: Go owns inbound poll; Python adapters outbound-only"
+            "Messenger hot-reload: Go owns network; Python adapters are TestClient stubs"
         )
 
     # Stop + drop only messenger channels

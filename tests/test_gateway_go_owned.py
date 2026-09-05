@@ -1,4 +1,4 @@
-"""Python messenger inbound is gone — Go owns poll/WS/webhooks."""
+"""Python messenger network twins are gone — Go owns poll/WS/webhooks/send."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ def test_inbound_only_modules_are_gone() -> None:
     root = Path(channels_pkg.__file__).resolve().parent
     assert not (root / "jwt_rs256.py").exists()
     assert not (root / "emit_util.py").exists()
+    assert not (root / "base_http.py").exists()
     assert importlib.util.find_spec("remedy.interfaces.routes.webhooks") is None
 
 
@@ -30,14 +31,16 @@ def test_production_cannot_enable_python_inbound(monkeypatch) -> None:
     assert python_may_poll_messengers() is False
 
 
-def test_channel_modules_have_no_inbound_loops() -> None:
-    """Source scan: outbound stubs must not contain poll/WS/webhook inbound."""
+def test_channel_modules_have_no_network_twins() -> None:
+    """Source scan: TestClient stubs must not contain poll/WS/webhook/HTTP/CLI I/O."""
     root = Path("src/remedy/gateway/channels")
     banned = re.compile(
         r"handle_webhook_payload|verify_webhook_challenge|"
         r"async def _sync_loop|async def _gateway_loop|async def _socket_loop|"
         r"async def _receive_loop|async def _ws_loop|async def _poll_loop|"
-        r"MessengerPollLock|python_may_poll_messengers|/getUpdates"
+        r"MessengerPollLock|python_may_poll_messengers|/getUpdates|"
+        r"aiohttp|ClientSession|ensure_http|HttpSessionMixin|"
+        r"run_hidden_async|import subprocess|login\.microsoftonline"
     )
     for name in (
         "telegram.py",
@@ -51,7 +54,7 @@ def test_channel_modules_have_no_inbound_loops() -> None:
         "google_chat.py",
     ):
         src = (root / name).read_text(encoding="utf-8")
-        assert banned.search(src) is None, f"{name} still has inbound code"
+        assert banned.search(src) is None, f"{name} still has network twin code"
 
 
 def test_outbound_adapters_still_importable() -> None:
@@ -92,4 +95,4 @@ def test_gateway_package_doc_names_go_owner() -> None:
 
     doc = gw.__doc__ or ""
     assert "Go" in doc or "remedy-runtime" in doc
-    assert "inbound" in doc.lower()
+    assert "network" in doc.lower() or "inbound" in doc.lower()

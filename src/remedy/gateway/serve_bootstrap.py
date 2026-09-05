@@ -2,9 +2,9 @@
 
 Keeps interfaces/cli.py thin: serve only calls ``attach_messengers_to_gateway``.
 
-Inbound long-poll / WS / webhooks are owned by Go ``remedy-runtime``
-(``native/go/gateway``). Python registers outbound-only adapters for TestClient
-catalog compatibility — inbound implementations were removed.
+Messenger network I/O (inbound + outbound) is owned by Go ``remedy-runtime``
+(``native/go/gateway``). Python registers shape-compatible stubs for TestClient
+catalog compatibility — no aiohttp / signal-cli network twins.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ def attach_messengers_to_gateway(runtime: Any, gateway: Any) -> list[str]:
 
     if not python_may_poll_messengers():
         logger.info(
-            "Messenger inbound owned by Go remedy-runtime; "
-            "Python adapters are outbound-only (no dual poll)"
+            "Messenger network owned by Go remedy-runtime; "
+            "Python adapters are TestClient stubs (no dual poll / no aiohttp)"
         )
 
     async def _gateway_handler(event):
