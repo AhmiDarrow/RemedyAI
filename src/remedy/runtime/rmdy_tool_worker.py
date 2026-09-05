@@ -76,15 +76,83 @@ def _word_count(text: str) -> int:
     return len(text.split())
 
 
-def _workspace_root() -> Path:
-    raw = (os.environ.get("REMEDY_WORKSPACE") or os.environ.get("REMEDY_PROJECT") or "").strip()
-    if raw:
-        return Path(raw).expanduser().resolve()
-    return Path.cwd().resolve()
+def _looks_like_install_dir(path: Path) -> bool:
+    """Packaged Desktop install folder — never a project workspace."""
+    try:
+        p = path.expanduser().resolve()
+    except OSError:
+        return False
+    markers = (
+        "Remedy Desktop.exe",
+        "remedy-runtime.exe",
+        "remedy-runtime",
+        "uninstall.exe",
+    )
+    if any((p / name).exists() for name in markers):
+        return True
+    return (p / "webui").is_dir() and (p / "windows").is_dir()
 
 
-def _resolve_workspace_path(path: str) -> Path:
-    root = _workspace_root()
+def _workspace_root(inp: Mapping[str, Any] | None = None) -> Path:
+    """Resolve the active project root.
+
+    Prefer per-call workspace_root/project_path, then env, then config.toml,
+    then the user home. Never fall back to process cwd when that cwd is the
+    packaged Desktop install directory (sidecar launch cwd).
+    """
+    if inp:
+        for key in ("workspace_root", "project_path"):
+            raw = str(inp.get(key) or "").strip()
+            if raw and raw not in {".", "./"}:
+                try:
+                    return Path(raw).expanduser().resolve()
+                except OSError:
+                    return Path(raw).expanduser().absolute()
+
+    for key in ("REMEDY_WORKSPACE", "REMEDY_PROJECT_PATH", "REMEDY_PROJECT", "REMEDY_FILES_ROOT"):
+        raw = (os.environ.get(key) or "").strip()
+        if raw and raw not in {".", "./"}:
+            try:
+                return Path(raw).expanduser().resolve()
+            except OSError:
+                return Path(raw).expanduser().absolute()
+
+    home = (os.environ.get("REMEDY_HOME") or "").strip()
+    if home:
+        cfg = Path(home).expanduser() / "config.toml"
+        try:
+            text = cfg.read_text(encoding="utf-8")
+        except OSError:
+            text = ""
+        for line in text.splitlines():
+            s = line.strip()
+            if not s or s.startswith("#") or not s.lower().startswith("project_path"):
+                continue
+            if "=" not in s:
+                continue
+            val = s.split("=", 1)[1].strip().strip("\"'")
+            if val and val not in {".", "./"}:
+                try:
+                    return Path(val).expanduser().resolve()
+                except OSError:
+                    return Path(val).expanduser().absolute()
+
+    try:
+        user_home = Path.home().expanduser().resolve()
+    except OSError:
+        user_home = Path.home().expanduser().absolute()
+
+    try:
+        cwd = Path.cwd().resolve()
+    except OSError:
+        cwd = Path.cwd().absolute()
+    if not _looks_like_install_dir(cwd):
+        return cwd
+    return user_home
+
+
+def _resolve_workspace_path(path: str, inp: Mapping[str, Any] | None = None) -> Path:
+    root = _workspace_root(inp)
     raw = (path or ".").strip() or "."
     candidate = Path(raw).expanduser()
     if not candidate.is_absolute():
@@ -113,7 +181,7 @@ def _workspace_read(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     path = str(inp.get("path") or "").strip()
     if not path:
         raise ValueError("path is required")
-    target = _resolve_workspace_path(path)
+    target = _resolve_workspace_path(path, inp)
     if _is_credential_name(target.name) or any(_is_credential_name(p) for p in target.parts):
         raise PermissionError("credential-looking files are not readable")
     if not target.exists():
@@ -149,7 +217,7 @@ def _workspace_read(inp: Mapping[str, Any]) -> Mapping[str, Any]:
         text = text[:_READ_CHAR_CAP]
         truncated = True
     try:
-        rel = str(target.relative_to(_workspace_root()).as_posix())
+        rel = str(target.relative_to(_workspace_root(inp)).as_posix())
     except ValueError:
         rel = str(target)
     out: dict[str, Any] = {"path": rel, "content": text}
@@ -160,7 +228,7 @@ def _workspace_read(inp: Mapping[str, Any]) -> Mapping[str, Any]:
 
 def _workspace_list(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     path = str(inp.get("path") or ".").strip() or "."
-    target = _resolve_workspace_path(path)
+    target = _resolve_workspace_path(path, inp)
     if not target.exists():
         raise FileNotFoundError(f"path not found: {path}")
     if not target.is_dir():
@@ -173,7 +241,7 @@ def _workspace_list(inp: Mapping[str, Any]) -> Mapping[str, Any]:
         offset = max(0, int(inp.get("offset") or 0))
     except (TypeError, ValueError):
         offset = 0
-    root = _workspace_root()
+    root = _workspace_root(inp)
     entries = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
     visible = [
         p for p in entries if p.name not in _SKIP_DIR_NAMES and not _is_credential_name(p.name)
@@ -228,7 +296,7 @@ def _workspace_write(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     if looks_like_history_stub_text(body):
         raise ValueError("refusing to write provider-history summary stub as file content")
 
-    target = _resolve_workspace_path(path)
+    target = _resolve_workspace_path(path, inp)
     if _is_credential_name(target.name) or any(_is_credential_name(p) for p in target.parts):
         raise PermissionError("credential-looking files are not writable")
     if target.exists() and target.is_dir():
@@ -239,7 +307,7 @@ def _workspace_write(inp: Mapping[str, Any]) -> Mapping[str, Any]:
 
     write_text_atomic(target, body)
     try:
-        rel = str(target.relative_to(_workspace_root()).as_posix())
+        rel = str(target.relative_to(_workspace_root(inp)).as_posix())
     except ValueError:
         rel = str(target)
     return {
@@ -261,7 +329,7 @@ def _workspace_edit(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     if bad:
         raise PermissionError(bad)
 
-    target = _resolve_workspace_path(path)
+    target = _resolve_workspace_path(path, inp)
     if _is_credential_name(target.name) or any(
         _is_credential_name(p) for p in target.parts
     ):
@@ -305,7 +373,7 @@ def _workspace_edit(inp: Mapping[str, Any]) -> Mapping[str, Any]:
         write_text_atomic(target, result.new_content)
 
     try:
-        rel = str(target.relative_to(_workspace_root()).as_posix())
+        rel = str(target.relative_to(_workspace_root(inp)).as_posix())
     except ValueError:
         rel = str(target)
     return {
@@ -332,10 +400,10 @@ def _workspace_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     max_matches = max(1, min(500, max_matches))
     case_insensitive = bool(inp.get("case_insensitive") or False)
 
-    root = _workspace_root()
+    root = _workspace_root(inp)
     # Keep absolute paths inside the workspace jail (fail closed).
     if path not in (".", "./", ""):
-        _resolve_workspace_path(path)
+        _resolve_workspace_path(path, inp)
 
     from remedy.core.repo_search import search_repo
 

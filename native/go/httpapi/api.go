@@ -26,9 +26,8 @@ import (
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
-// Version matches pyproject.toml until a shared ldflag/sync lands.
-// TODO: wire via -ldflags or scripts/sync_version.py.
-const Version = "0.50.2"
+// Version matches pyproject.toml; scripts/sync_version.py stamps this const.
+const Version = "0.60.0"
 
 // Config controls the minimal local API server.
 type Config struct {

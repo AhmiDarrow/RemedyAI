@@ -204,7 +204,13 @@ func normalizeProjectPath(raw *string) *string {
 	if trimmed == "" || trimmed == "." || trimmed == "./" {
 		return nil
 	}
-	return &trimmed
+	// filepath.Clean collapses accidental double-escaped separators
+	// (C:\\\\Users\\\\… → C:\Users\…) while preserving UNC prefixes.
+	cleaned := filepath.Clean(trimmed)
+	if cleaned == "" || cleaned == "." {
+		return nil
+	}
+	return &cleaned
 }
 
 func nullableTrim(raw *string) *string {

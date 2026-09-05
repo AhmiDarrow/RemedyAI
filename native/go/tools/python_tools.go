@@ -74,7 +74,9 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 			"properties":{
 				"path":{"type":"string","minLength":1},
 				"offset":{"type":"integer","minimum":0},
-				"limit":{"type":"integer","minimum":1}
+				"limit":{"type":"integer","minimum":1},
+				"workspace_root":{"type":"string"},
+				"project_path":{"type":"string"}
 			},
 			"additionalProperties":false
 		}`),
@@ -103,7 +105,9 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 			"properties":{
 				"path":{"type":"string"},
 				"limit":{"type":"integer","minimum":1,"maximum":2000},
-				"offset":{"type":"integer","minimum":0}
+				"offset":{"type":"integer","minimum":0},
+				"workspace_root":{"type":"string"},
+				"project_path":{"type":"string"}
 			},
 			"additionalProperties":false
 		}`),
@@ -144,7 +148,9 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 			"required":["path","content"],
 			"properties":{
 				"path":{"type":"string","minLength":1},
-				"content":{"type":"string"}
+				"content":{"type":"string"},
+				"workspace_root":{"type":"string"},
+				"project_path":{"type":"string"}
 			},
 			"additionalProperties":false
 		}`),
@@ -176,6 +182,8 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 				"old_string":{"type":"string"},
 				"new_string":{"type":"string"},
 				"replace_all":{"type":"boolean"},
+				"workspace_root":{"type":"string"},
+				"project_path":{"type":"string"},
 				"edits":{
 					"type":"array",
 					"items":{
@@ -222,7 +230,9 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 				"path":{"type":"string"},
 				"glob":{"type":"string"},
 				"max_matches":{"type":"integer","minimum":1,"maximum":500},
-				"case_insensitive":{"type":"boolean"}
+				"case_insensitive":{"type":"boolean"},
+				"workspace_root":{"type":"string"},
+				"project_path":{"type":"string"}
 			},
 			"additionalProperties":false
 		}`),

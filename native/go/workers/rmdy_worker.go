@@ -169,6 +169,9 @@ func StartRMDYToolWorker(ctx context.Context, opts RMDYToolOptions) (*RMDYToolSe
 
 	env := inheritEnv()
 	env[envRMDYEndpoint] = endpoint
+	if home := strings.TrimSpace(opts.HomeDir); home != "" {
+		env["REMEDY_HOME"] = home
+	}
 	enrichWorkerEnv(env, opts.Cwd)
 
 	proc, err := starter(sessionCtx, argv, env, opts.Cwd)
@@ -377,19 +380,103 @@ func enrichWorkerEnv(env map[string]string, cwd string) {
 			start = wd
 		}
 	}
-	repo := findRepoRoot(start)
-	workspace := repo
-	if workspace == "" {
-		workspace = start
-	}
-	if strings.TrimSpace(env["REMEDY_WORKSPACE"]) == "" && workspace != "" {
-		env["REMEDY_WORKSPACE"] = workspace
+	if strings.TrimSpace(env["REMEDY_WORKSPACE"]) == "" {
+		if ws := resolveDefaultWorkspace(env, start); ws != "" {
+			env["REMEDY_WORKSPACE"] = ws
+		}
 	}
 	if strings.TrimSpace(env["PYTHONPATH"]) == "" {
 		if src := findPythonSrc(start); src != "" {
 			env["PYTHONPATH"] = src
 		}
 	}
+}
+
+// resolveDefaultWorkspace picks a workspace root that is never the packaged
+// Desktop install folder (cwd when remedy-runtime is launched as a sidecar).
+// Order: REMEDY_PROJECT_PATH → config.toml project_path → repo root (dev) →
+// user home.
+func resolveDefaultWorkspace(env map[string]string, start string) string {
+	if p := strings.TrimSpace(env["REMEDY_PROJECT_PATH"]); p != "" {
+		return p
+	}
+	if p := strings.TrimSpace(env["REMEDY_PROJECT"]); p != "" {
+		return p
+	}
+	home := strings.TrimSpace(env["REMEDY_HOME"])
+	if home == "" {
+		home = strings.TrimSpace(os.Getenv("REMEDY_HOME"))
+	}
+	if home != "" {
+		if p := projectPathFromConfig(home); p != "" && !looksLikeInstallDir(p) {
+			return p
+		}
+	}
+	if repo := findRepoRoot(start); repo != "" && !looksLikeInstallDir(repo) {
+		return repo
+	}
+	if userHome, err := os.UserHomeDir(); err == nil && strings.TrimSpace(userHome) != "" {
+		return userHome
+	}
+	if start != "" && !looksLikeInstallDir(start) {
+		return start
+	}
+	return ""
+}
+
+func projectPathFromConfig(home string) string {
+	raw, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		s := strings.TrimSpace(line)
+		if s == "" || strings.HasPrefix(s, "#") {
+			continue
+		}
+		if !strings.HasPrefix(strings.ToLower(s), "project_path") {
+			continue
+		}
+		parts := strings.SplitN(s, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		val := strings.TrimSpace(parts[1])
+		val = strings.Trim(val, `"'`)
+		val = strings.TrimSpace(val)
+		if val == "" || val == "." || val == "./" {
+			return ""
+		}
+		return val
+	}
+	return ""
+}
+
+func looksLikeInstallDir(path string) bool {
+	p := filepath.Clean(strings.TrimSpace(path))
+	if p == "" {
+		return false
+	}
+	markers := []string{
+		"Remedy Desktop.exe",
+		"remedy-runtime.exe",
+		"remedy-runtime",
+		"uninstall.exe",
+	}
+	for _, name := range markers {
+		if _, err := os.Stat(filepath.Join(p, name)); err == nil {
+			return true
+		}
+	}
+	// Packaged layout always ships webui/ next to the exe.
+	webui := filepath.Join(p, "webui")
+	windows := filepath.Join(p, "windows")
+	if st, err := os.Stat(webui); err == nil && st.IsDir() {
+		if st2, err2 := os.Stat(windows); err2 == nil && st2.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func findRepoRoot(start string) string {

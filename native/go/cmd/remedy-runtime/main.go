@@ -107,7 +107,8 @@ func main() {
 		// Same session hosts voice/vision handlers (forever-Python ML lanes).
 		cwd, _ := os.Getwd()
 		session, err := workers.StartRMDYToolWorker(ctx, workers.RMDYToolOptions{
-			Cwd: cwd,
+			HomeDir: home,
+			Cwd:     cwd,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "remedy-runtime: RMDY tool worker required: %v\n", err)

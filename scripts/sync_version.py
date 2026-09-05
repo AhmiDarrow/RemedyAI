@@ -33,7 +33,12 @@ PATHS = {
     "cargo_lock": ROOT / "desktop" / "src-tauri" / "Cargo.lock",
     "latest_json": ROOT / "scripts" / "latest.json",
     "android": ROOT / "android" / "app" / "build.gradle.kts",
+    "go_api_version": ROOT / "native" / "go" / "httpapi" / "api.go",
 }
+
+_GO_API_VERSION_RE = re.compile(
+    r'(const Version = )"\d+\.\d+\.\d+"',
+)
 
 
 def _pyproject_version() -> str:
@@ -123,6 +128,20 @@ def _bump_android(ver: str, *, version_changed: bool) -> None:
             count=1,
         )
     path.write_text(text, encoding="utf-8")
+
+
+def _bump_go_api_version(ver: str) -> None:
+    """Stamp native/go/httpapi/api.go ``const Version`` to match pyproject."""
+    path = PATHS["go_api_version"]
+    if not path.exists():
+        return
+    text = path.read_text(encoding="utf-8")
+    updated, n = _GO_API_VERSION_RE.subn(rf'\1"{ver}"', text, count=1)
+    if n != 1:
+        raise SystemExit(
+            f"Could not find const Version in {path.relative_to(ROOT)}"
+        )
+    path.write_text(updated, encoding="utf-8")
 
 
 def _bump_latest_json(ver: str) -> None:
@@ -268,6 +287,11 @@ def _check_aligned(expected: str) -> int:
         av = re.search(r'versionName\s*=\s*"([^"]*)"', android)
         rows.append(("Android versionName", av.group(1) if av else "?"))
 
+    if PATHS["go_api_version"].exists():
+        go_api = PATHS["go_api_version"].read_text(encoding="utf-8")
+        gv = re.search(r'const Version = "([^"]*)"', go_api)
+        rows.append(("httpapi.Version", gv.group(1) if gv else "?"))
+
     rows.append(("remedy.__version__", _runtime_version()))
 
     print(f"Canonical version: {expected}")
@@ -315,6 +339,9 @@ def main():
 
     _bump_android(new_ver, version_changed=new_ver != current)
     print("  Updated Android versionName")
+
+    _bump_go_api_version(new_ver)
+    print("  Updated native/go/httpapi/api.go Version")
 
     _bump_latest_json(new_ver)
     print("  Updated scripts/latest.json")
