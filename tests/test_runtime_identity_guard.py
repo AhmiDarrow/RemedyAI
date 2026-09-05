@@ -13,7 +13,7 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "remedy"
 
-# Files still allowed a raw check. Mostly PyInstaller asset-path mechanics
+# Files still allowed a raw check. Mostly frozen asset-path mechanics
 # (sys._MEIPASS layout), plus the authority module itself. Shrink, never grow.
 ALLOWED = {
     "core/runtime_identity.py",

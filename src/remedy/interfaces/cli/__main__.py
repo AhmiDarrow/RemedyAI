@@ -1,4 +1,4 @@
-"""``python -m remedy.interfaces.cli`` entry (also PyInstaller script path)."""
+"""``python -m remedy.interfaces.cli`` entry point."""
 
 from remedy.interfaces.cli.main import main
 

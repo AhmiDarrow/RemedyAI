@@ -140,9 +140,9 @@ def ensure_setup_before_launch(
     try:
         choice = Prompt.ask("Choose", choices=["1", "2", "3"], default="1", console=console)
     except (EOFError, KeyboardInterrupt):
-        # No interactive terminal (scripted / hidden-window launch, e.g. a
-        # --noconsole sidecar without REMEDY_DESKTOP_SIDECAR). Never crash the
-        # process on a missing answer — fall back to skip (fallback mode).
+        # No interactive terminal (scripted / hidden-window / Desktop child
+        # without a console). Never crash the process on a missing answer —
+        # fall back to skip (fallback mode).
         console.print(
             "[yellow]No terminal input — skipping first-run setup "
             "(fallback mode; configure later).[/yellow]"

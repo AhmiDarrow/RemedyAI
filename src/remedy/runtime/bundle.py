@@ -51,7 +51,7 @@ def _exe_dir_local() -> list[Path]:
                     base.parent / "resources" / "local",
                 ]
             )
-        # PyInstaller _MEIPASS
+        # Frozen worker/onedir unpack dir (_MEIPASS), if present.
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
             out.append(Path(meipass) / "local")
