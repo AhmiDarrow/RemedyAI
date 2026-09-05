@@ -23,6 +23,9 @@ type OpenAICompat struct {
 	// Tools is the OpenAI tools array advertised on each chat completion request.
 	// Empty omits the field (text-only). Populated from the Tool ABI registry.
 	Tools []map[string]any
+	// ToolNameMap maps advertised function names → real Tool ABI ids.
+	// DeepSeek/OpenAI require ^[a-zA-Z0-9_-]+$ so dotted ABI ids are sanitized.
+	ToolNameMap map[string]string
 }
 
 func (c *OpenAICompat) client() *http.Client {
@@ -77,9 +80,25 @@ func (c *OpenAICompat) Stream(ctx context.Context, turn cognition.Turn) (<-chan 
 	go func() {
 		defer close(out)
 		defer resp.Body.Close()
-		parseSSE(ctx, resp.Body, out)
+		// Keep advertised (sanitized) tool names on ToolCall so follow-up
+		// assistant.tool_calls round-trips match provider expectations.
+		// Remap to Tool ABI ids at execute time (see ResolveToolName).
+		parseSSE(ctx, resp.Body, out, nil)
 	}()
 	return out, nil
+}
+
+// ResolveToolName maps an advertised OpenAI function name back to the Tool ABI id.
+func (c *OpenAICompat) ResolveToolName(advertised string) string {
+	if c == nil {
+		return advertised
+	}
+	if c.ToolNameMap != nil {
+		if real, ok := c.ToolNameMap[advertised]; ok && real != "" {
+			return real
+		}
+	}
+	return advertised
 }
 
 // RegistryTool is the providers-local view of a Tool ABI descriptor.
@@ -89,9 +108,20 @@ type RegistryTool struct {
 	InputSchema json.RawMessage
 }
 
-// ToolSchemasFromRegistry converts registry tool metadata into an OpenAI tools array.
+// ToolSchemasFromRegistry converts registry tool metadata into an OpenAI tools
+// array with provider-safe function names (no dots). Prefer
+// ToolSchemasFromRegistryMapped when you need the reverse map for tool calls.
 func ToolSchemasFromRegistry(list []RegistryTool) []map[string]any {
+	schemas, _ := ToolSchemasFromRegistryMapped(list)
+	return schemas
+}
+
+// ToolSchemasFromRegistryMapped returns OpenAI tool schemas plus advertised→real
+// name map. Names are sanitized to ^[a-zA-Z0-9_-]+$ (DeepSeek / OpenAI strict).
+func ToolSchemasFromRegistryMapped(list []RegistryTool) ([]map[string]any, map[string]string) {
 	out := make([]map[string]any, 0, len(list))
+	nameMap := make(map[string]string, len(list))
+	used := map[string]struct{}{}
 	for _, d := range list {
 		params := map[string]any{"type": "object", "properties": map[string]any{}}
 		if len(d.InputSchema) > 0 {
@@ -102,30 +132,143 @@ func ToolSchemasFromRegistry(list []RegistryTool) []map[string]any {
 				}
 			}
 		}
+		advertised := uniqueSanitizedToolName(d.ID, used)
+		used[advertised] = struct{}{}
+		nameMap[advertised] = d.ID
 		out = append(out, map[string]any{
 			"type": "function",
 			"function": map[string]any{
-				"name":        d.ID,
+				"name":        advertised,
 				"description": d.Description,
 				"parameters":   params,
 			},
 		})
 	}
+	return out, nameMap
+}
+
+// sanitizeToolName maps Tool ABI ids to OpenAI/DeepSeek-safe function names.
+func sanitizeToolName(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "tool"
+	}
+	var b strings.Builder
+	b.Grow(len(id))
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := b.String()
+	if out == "" {
+		return "tool"
+	}
+	if out[0] >= '0' && out[0] <= '9' {
+		return "t_" + out
+	}
 	return out
 }
 
-func buildMessages(turn cognition.Turn) []map[string]string {
-	msgs := make([]map[string]string, 0, 3+len(turn.Results))
+func uniqueSanitizedToolName(id string, used map[string]struct{}) string {
+	base := sanitizeToolName(id)
+	if _, ok := used[base]; !ok {
+		return base
+	}
+	for i := 2; i < 10000; i++ {
+		cand := fmt.Sprintf("%s_%d", base, i)
+		if _, ok := used[cand]; !ok {
+			return cand
+		}
+	}
+	return base + "_x"
+}
+
+func buildMessages(turn cognition.Turn) []map[string]any {
+	msgs := make([]map[string]any, 0, 4+len(turn.Results))
 	if sys := strings.TrimSpace(turn.System); sys != "" {
-		msgs = append(msgs, map[string]string{"role": "system", "content": sys})
+		msgs = append(msgs, map[string]any{"role": "system", "content": sys})
 	}
 	goal := strings.TrimSpace(turn.Goal)
 	if goal == "" {
 		goal = "continue"
 	}
-	msgs = append(msgs, map[string]string{"role": "user", "content": goal})
+	msgs = append(msgs, map[string]any{"role": "user", "content": goal})
+
+	// OpenAI / DeepSeek require assistant.tool_calls then tool messages with
+	// matching tool_call_id. Plain role=tool without ids is rejected (HTTP 400).
+	if len(turn.Calls) > 0 && len(turn.Results) > 0 {
+		toolCalls := make([]map[string]any, 0, len(turn.Calls))
+		for i, call := range turn.Calls {
+			id := strings.TrimSpace(call.ID)
+			if id == "" {
+				id = fmt.Sprintf("call_%d", i+1)
+			}
+			args := string(call.Input)
+			if strings.TrimSpace(args) == "" {
+				args = "{}"
+			}
+			toolCalls = append(toolCalls, map[string]any{
+				"id":   id,
+				"type": "function",
+				"function": map[string]any{
+					"name":      call.Name,
+					"arguments": args,
+				},
+			})
+		}
+		assistant := map[string]any{
+			"role":       "assistant",
+			"tool_calls": toolCalls,
+		}
+		if text := strings.TrimSpace(turn.Text); text != "" {
+			assistant["content"] = text
+		}
+		msgs = append(msgs, assistant)
+
+		byID := map[string]cognition.ToolResult{}
+		byName := map[string]cognition.ToolResult{}
+		for _, res := range turn.Results {
+			if id := strings.TrimSpace(res.ID); id != "" {
+				byID[id] = res
+			}
+			if name := strings.TrimSpace(res.Name); name != "" {
+				byName[name] = res
+			}
+		}
+		for i, call := range turn.Calls {
+			id := strings.TrimSpace(call.ID)
+			if id == "" {
+				id = fmt.Sprintf("call_%d", i+1)
+			}
+			res, ok := byID[strings.TrimSpace(call.ID)]
+			if !ok {
+				res, ok = byName[strings.TrimSpace(call.Name)]
+			}
+			if !ok && i < len(turn.Results) {
+				res = turn.Results[i]
+			}
+			content := string(res.Output)
+			if res.Err != "" {
+				content = res.Err
+			}
+			if content == "" {
+				content = "{}"
+			}
+			msgs = append(msgs, map[string]any{
+				"role":         "tool",
+				"tool_call_id": id,
+				"content":      content,
+			})
+		}
+		return msgs
+	}
+
 	if text := strings.TrimSpace(turn.Text); text != "" {
-		msgs = append(msgs, map[string]string{"role": "assistant", "content": text})
+		msgs = append(msgs, map[string]any{"role": "assistant", "content": text})
 	}
 	for _, res := range turn.Results {
 		content := string(res.Output)
@@ -135,10 +278,11 @@ func buildMessages(turn cognition.Turn) []map[string]string {
 		if content == "" {
 			continue
 		}
-		msgs = append(msgs, map[string]string{
-			"role":    "tool",
-			"content": content,
-		})
+		msg := map[string]any{"role": "tool", "content": content}
+		if id := strings.TrimSpace(res.ID); id != "" {
+			msg["tool_call_id"] = id
+		}
+		msgs = append(msgs, msg)
 	}
 	return msgs
 }
@@ -169,7 +313,7 @@ type toolAcc struct {
 	id, name, args string
 }
 
-func parseSSE(ctx context.Context, body io.Reader, out chan<- cognition.ModelEvent) {
+func parseSSE(ctx context.Context, body io.Reader, out chan<- cognition.ModelEvent, nameMap map[string]string) {
 	scanner := bufio.NewScanner(body)
 	// Provider frames can be large when tool args stream in.
 	buf := make([]byte, 0, 64*1024)
@@ -177,6 +321,15 @@ func parseSSE(ctx context.Context, body io.Reader, out chan<- cognition.ModelEve
 
 	tools := map[int]*toolAcc{}
 	sawDone := false
+
+	resolveName := func(advertised string) string {
+		if nameMap != nil {
+			if real, ok := nameMap[advertised]; ok && real != "" {
+				return real
+			}
+		}
+		return advertised
+	}
 
 	emit := func(ev cognition.ModelEvent) bool {
 		select {
@@ -251,7 +404,7 @@ func parseSSE(ctx context.Context, body io.Reader, out chan<- cognition.ModelEve
 					}
 					call := &cognition.ToolCall{
 						ID:    acc.id,
-						Name:  acc.name,
+						Name:  resolveName(acc.name),
 						Input: []byte(acc.args),
 					}
 					if len(call.Input) == 0 {

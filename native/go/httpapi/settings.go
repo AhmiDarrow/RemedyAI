@@ -594,8 +594,12 @@ func (s *Server) settingsPayload() map[string]any {
 	if keysSet == nil {
 		keysSet = map[string]bool{}
 	}
-	effectiveKey := secret.GetProviderSecret(home, provider)
+	effectiveKey := resolveProviderAPIKey(cfg, provider, home)
 	keySet := effectiveKey != "" && !isPlaceholderKey(effectiveKey)
+	if provider == "xai" && !keySet {
+		// OAuth / console key in auth/xai.json counts even before bearer refresh.
+		keySet = loadXaiCredentials(home).connected()
+	}
 
 	projectPath := cfgString(cfg, "project_path", "")
 	if projectPath == "" {

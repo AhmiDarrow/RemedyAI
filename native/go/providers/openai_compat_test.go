@@ -112,6 +112,58 @@ func TestOpenAICompatCancelMidStream(t *testing.T) {
 	}
 }
 
+func TestSanitizeToolName(t *testing.T) {
+	cases := map[string]string{
+		"files.list":     "files_list",
+		"computer_snap":  "computer_snap",
+		"web-fetch":      "web-fetch",
+		"a.b.c":          "a_b_c",
+		"":               "tool",
+		"9bad":           "t_9bad",
+		"files list":     "files_list",
+	}
+	for in, want := range cases {
+		if got := sanitizeToolName(in); got != want {
+			t.Fatalf("sanitizeToolName(%q)=%q want %q", in, got, want)
+		}
+	}
+}
+
+func TestOpenAICompatResolveToolName(t *testing.T) {
+	m := &OpenAICompat{ToolNameMap: map[string]string{"files_list": "files.list"}}
+	if got := m.ResolveToolName("files_list"); got != "files.list" {
+		t.Fatalf("ResolveToolName=%q", got)
+	}
+	if got := m.ResolveToolName("other"); got != "other" {
+		t.Fatalf("passthrough=%q", got)
+	}
+}
+
+func TestBuildMessagesIncludesToolCallIDs(t *testing.T) {
+	msgs := buildMessages(cognition.Turn{
+		Goal: "list files",
+		Calls: []cognition.ToolCall{{
+			ID: "call_1", Name: "files_list", Input: []byte(`{"path":"."}`),
+		}},
+		Results: []cognition.ToolResult{{
+			ID: "call_1", Name: "files_list", Output: []byte(`["a"]`),
+		}},
+	})
+	if len(msgs) < 3 {
+		t.Fatalf("msgs=%v", msgs)
+	}
+	toolCalls, ok := msgs[1]["tool_calls"].([]map[string]any)
+	if !ok || len(toolCalls) != 1 {
+		t.Fatalf("assistant tool_calls=%T %#v", msgs[1]["tool_calls"], msgs[1])
+	}
+	if toolCalls[0]["id"] != "call_1" {
+		t.Fatalf("tool call id=%v", toolCalls[0]["id"])
+	}
+	if msgs[2]["role"] != "tool" || msgs[2]["tool_call_id"] != "call_1" {
+		t.Fatalf("tool msg=%v", msgs[2])
+	}
+}
+
 func TestOpenAICompatToolCalls(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -155,8 +207,8 @@ func TestOpenAICompatAdvertisesToolsArray(t *testing.T) {
 		}
 		first, _ := tools[0].(map[string]any)
 		fn, _ := first["function"].(map[string]any)
-		if fn["name"] != "workspace.read" {
-			t.Fatalf("tool name=%v", fn["name"])
+		if fn["name"] != "workspace_read" {
+			t.Fatalf("tool name=%v (want sanitized workspace_read)", fn["name"])
 		}
 		sawTools = true
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -164,16 +216,21 @@ func TestOpenAICompatAdvertisesToolsArray(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	schemas, nameMap := ToolSchemasFromRegistryMapped([]RegistryTool{{
+		ID:          "workspace.read",
+		Description: "Read a file",
+		InputSchema: json.RawMessage(`{"type":"object","required":["path"],"properties":{"path":{"type":"string"}}}`),
+	}})
+	if nameMap["workspace_read"] != "workspace.read" {
+		t.Fatalf("nameMap=%v", nameMap)
+	}
 	m := &OpenAICompat{
-		BaseURL:    srv.URL + "/v1",
-		APIKey:     "unused",
-		Model:      "x",
-		HTTPClient: srv.Client(),
-		Tools: ToolSchemasFromRegistry([]RegistryTool{{
-			ID:          "workspace.read",
-			Description: "Read a file",
-			InputSchema: json.RawMessage(`{"type":"object","required":["path"],"properties":{"path":{"type":"string"}}}`),
-		}}),
+		BaseURL:     srv.URL + "/v1",
+		APIKey:      "unused",
+		Model:       "x",
+		HTTPClient:  srv.Client(),
+		Tools:       schemas,
+		ToolNameMap: nameMap,
 	}
 	ch, err := m.Stream(context.Background(), cognition.Turn{Goal: "read"})
 	if err != nil {

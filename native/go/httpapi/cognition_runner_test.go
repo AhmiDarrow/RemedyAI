@@ -2,7 +2,10 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -302,6 +305,40 @@ func TestCognitionTurnRunnerAbortEmitsControlToken(t *testing.T) {
 	}
 	if !strings.Contains(out, "@@aborted") {
 		t.Fatalf("expected @@aborted, got %q", out)
+	}
+}
+
+func TestCognitionTurnRunnerFallsBackOnProvider402(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REMEDY_HOME", home)
+	t.Setenv("XAI_API_KEY", "")
+	t.Setenv("REMEDY_XAI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("REMEDY_OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	InvalidateConfigCache()
+	_ = os.MkdirAll(filepath.Join(home, "auth"), 0o700)
+
+	failing := cognitionModelFunc(func(context.Context, cognition.Turn) (<-chan cognition.ModelEvent, error) {
+		return nil, errors.New(`openai-compat HTTP 402: {"error":{"message":"The model assistant requires an active Poe subscription for API access."}}`)
+	})
+	// No cloud credentials → resolveChatModel(exclude=poe) → Scripted Hello world.
+	prov := "poe"
+	r := NewCognitionTurnRunner(nil)
+	r.HomeDir = home
+	r.forcePrimary = failing
+	out, err := CollectTokens(context.Background(), r, TurnRequest{
+		Prompt:   "hi",
+		Provider: &prov,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "That provider isn't available") {
+		t.Fatalf("expected switch status, got %q", out)
+	}
+	if !strings.Contains(out, "Hello world") {
+		t.Fatalf("expected scripted fallback text, got %q", out)
 	}
 }
 
