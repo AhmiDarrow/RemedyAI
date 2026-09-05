@@ -1,9 +1,9 @@
 """Windows desktop — thin binding over ``host_binding`` / ``remedy_core``.
 
 Shared SoM / keys / shot policy: :mod:`desktop_policy` (via pixels/keys siblings).
-Launch: :mod:`desktop_launch` (via :mod:`desktop_launch_win`). Capture / monitors:
-:mod:`desktop_capture_win`. Snapshot / UAC / find: :mod:`desktop_win_policy`.
-UIA soft helpers: :mod:`guidance`. :class:`HostError` propagates (fail closed).
+Launch: :mod:`desktop_launch_win`. Capture / monitors: :mod:`desktop_capture_win`.
+Snapshot / UAC / find: :mod:`desktop_win_policy`. DPI is Zig-owned (every host
+capture/coordinate call enables it). :class:`HostError` propagates (fail closed).
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ import contextlib
 import sys
 import time  # noqa: F401 — tests patch desktop_win.time.sleep
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 from remedy.core.computer import desktop_policy as C
@@ -32,16 +31,9 @@ from remedy.core.computer.desktop_launch_win import (
     open_url,
     refuse_os_open_text_document,
 )
-from remedy.core.computer.desktop_pixels import (
-    detect_ui_candidates,
-    purge_old_shots,
-)
-from remedy.core.computer.desktop_pixels import (
-    draw_marks_on_bgr as _draw_marks_on_bgr,
-)
-from remedy.core.computer.desktop_pixels import (
-    write_png_bgr as _write_png_bgr,
-)
+from remedy.core.computer.desktop_pixels import detect_ui_candidates, purge_old_shots
+from remedy.core.computer.desktop_pixels import draw_marks_on_bgr as _draw_marks_on_bgr
+from remedy.core.computer.desktop_pixels import write_png_bgr as _write_png_bgr
 from remedy.core.computer.desktop_win_policy import (
     click_element,
     desktop_snapshot,
@@ -51,15 +43,17 @@ from remedy.core.computer.desktop_win_policy import (
     find_webview_host_hwnd,
     focus_window_by_title,
 )
+from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
 PASTE_THRESHOLD = C.PASTE_THRESHOLD
+_remedy_home = C.remedy_home
+_default_shot_path = C.default_shot_path
 
 __all__ = [
     "PASTE_THRESHOLD",
     "_capture_virtual_screen",
     "_default_shot_path",
     "_draw_marks_on_bgr",
-    "_ensure_dpi_awareness",
     "_open_app_is_protocol_or_url",
     "_remedy_home",
     "_require_windows",
@@ -105,23 +99,10 @@ def _require_windows() -> None:
         raise RuntimeError("Desktop computer use requires Windows")
 
 
-def _ensure_dpi_awareness() -> None:
-    if sys.platform == "win32":
-        H.dpi_awareness_enable()
-
-
 def _capture_virtual_screen() -> tuple[bytes, int, int, int, int, int]:
     _require_windows()
     shot = H.capture_virtual_screen(3)
     return shot.pixels, shot.stride, shot.width, shot.height, shot.left, shot.top
-
-
-def _remedy_home() -> Path:
-    return C.remedy_home()
-
-
-def _default_shot_path(prefix: str = "desk") -> Path:
-    return C.default_shot_path(prefix)
 
 
 def move_mouse(x: int, y: int) -> None:
@@ -182,7 +163,9 @@ def focus_window(hwnd: int) -> bool:
 
 def foreground_window_info() -> dict[str, Any]:
     out: dict[str, Any] = {"hwnd": 0, "title": ""}
-    with contextlib.suppress(H.HostError, OSError, ValueError, TypeError):
+    with contextlib.suppress(
+        H.HostError, NativeRuntimeUnavailableError, OSError, ValueError, TypeError
+    ):
         hwnd, title = H.foreground_window()
         if hwnd:
             out = {"hwnd": int(hwnd), "title": title}

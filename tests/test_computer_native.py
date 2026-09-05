@@ -494,9 +494,10 @@ def test_desktop_win_is_thin_binding() -> None:
     path = Path(W.__file__)
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
-    assert len(lines) <= 280, f"desktop_win.py grew to {len(lines)} lines (target ≤~250)"
+    assert len(lines) <= 250, f"desktop_win.py grew to {len(lines)} lines (target ≤~250)"
     assert "import ctypes" not in text
     assert "windll" not in text
+    assert "dpi_awareness" not in text, "DPI is Zig-owned; do not re-wrap in desktop_win"
     for name in (
         "type_text",
         "press_key",
