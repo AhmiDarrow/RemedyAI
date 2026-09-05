@@ -1,4 +1,4 @@
-//! POSIX → Windows-cmd rewrite. Zig mirror of `remedy.execution.host.translate`.
+//! POSIX → Windows-cmd rewrite. Zig mirror of `remedy.core.computer.host_binding.translate`.
 //! ABI 4: `remedy_core_translate_posix_to_host`. No soft Python fallback.
 
 const std = @import("std");

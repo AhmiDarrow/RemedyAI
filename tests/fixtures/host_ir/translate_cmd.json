@@ -1,5 +1,5 @@
 {
-  "source": "remedy.execution.host.translate.translate_posix_to_host",
+  "source": "remedy.core.computer.host_binding.translate_posix_to_host",
   "captured_at": "2026-09-03",
   "notes": "Byte-identical `expected.text` is the Phase 3 Zig translate proof. Notes may be advisory; text/changed/untranslatable/noop are normative. grep→rg path is machine-dependent when ripgrep is installed — those cases record the live rewrite; Zig should match the same decision table (prefer rg when found, else findstr).",
   "cases": [

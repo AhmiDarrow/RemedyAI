@@ -298,7 +298,7 @@ async def _spawn_terminal(
         shell, args = _pick_shell()
         argv = [shell, *args]
     if os.name == "nt":
-        from remedy.execution.host.conpty import spawn_conpty, spawn_conpty_supported
+        from remedy.core.computer.host_conpty import spawn_conpty, spawn_conpty_supported
 
         # Fail closed when Zig reports ConPTY: spawn errors surface to the
         # owner. Soft pipe fallback only when ConPTY is unsupported.

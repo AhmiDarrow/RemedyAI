@@ -1327,7 +1327,7 @@ async def test_host_script_write_host_allowed_when_project_bound(
     """Pathless Write-Host / Get-Date must not hit pwsh -Command oneshot jail."""
     import os
 
-    from remedy.execution.host.session import close_all_shared_sessions
+    from remedy.core.computer.shell_host import close_all_shared_sessions
 
     proj = tmp_path / "proj"
     proj.mkdir()
@@ -1349,7 +1349,7 @@ async def test_host_script_write_host_allowed_when_project_bound(
 async def test_host_script_refuses_outside_and_home_writes(
     tmp_path: Path, monkeypatch
 ):
-    from remedy.execution.host.session import close_all_shared_sessions
+    from remedy.core.computer.shell_host import close_all_shared_sessions
 
     proj = tmp_path / "proj"
     proj.mkdir()
@@ -1394,7 +1394,7 @@ async def test_host_session_cd_outside_resets_and_jails_relative(
     import os
 
     from remedy.core.approvals import APPROVALS
-    from remedy.execution.host.session import close_all_shared_sessions, get_shared_session
+    from remedy.core.computer.shell_host import close_all_shared_sessions, get_shared_session
 
     monkeypatch.setattr(
         "remedy.interfaces.api_support.load_config",

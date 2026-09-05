@@ -262,7 +262,7 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                 if isinstance(ss, set):
                     ss.discard(sid)
         with contextlib.suppress(Exception):
-            from remedy.execution.host.session import close_shared_session
+            from remedy.core.computer.shell_host import close_shared_session
 
             await close_shared_session(sid)
         deleted = await memory.delete_chat_session(sid)
@@ -308,7 +308,7 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         reason_n = normalize_abort_reason(reason)
         n = _abort_turn(session_id, epoch=epoch, reason=reason_n)
         with contextlib.suppress(Exception):
-            from remedy.execution.host.session import close_shared_session
+            from remedy.core.computer.shell_host import close_shared_session
 
             await close_shared_session(str(session_id))
         if runtime is not None:

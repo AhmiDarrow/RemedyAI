@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 from remedy.core.computer.host_binding import translate_posix_to_host
-from remedy.execution.host.ir import (
+from remedy.core.computer.shell_host import (
     HostOp,
     mkdir_op,
     raw_op,
@@ -19,7 +19,7 @@ from remedy.execution.host.ir import (
     script_op,
     which_op,
 )
-from remedy.execution.host.runner import prepare_host_command, prepare_host_op
+from remedy.core.computer.shell_host import prepare_host_command, prepare_host_op
 
 ROOT = Path(__file__).resolve().parent
 
@@ -80,7 +80,7 @@ def main() -> None:
     _write(
         "ir_roundtrip.json",
         {
-            "source": "remedy.execution.host.ir",
+            "source": "remedy.core.computer.shell_host",
             "captured_at": "2026-09-03",
             "notes": (
                 "HostOp.to_dict/from_dict contract. Zig parse/roundtrip must emit "
@@ -359,7 +359,7 @@ def main() -> None:
     _write(
         "prepare_argv_scriptfile.json",
         {
-            "source": "remedy.execution.host.runner + zig shell_ir",
+            "source": "remedy.core.computer.shell_host + zig shell_ir",
             "captured_at": "2026-09-03",
             "notes": (
                 "Normative for Zig prepare: argv_template (with <PWSH>/<CMD>/<SCRIPT_PATH>/"

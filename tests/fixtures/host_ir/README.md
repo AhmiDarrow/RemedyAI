@@ -1,7 +1,7 @@
 # Host Command IR fixtures (Phase 3 native cutover)
 
-Captured from the **Python** `execution/host/` path before the Zig shell-host
-port. Zig parity tests must match these shapes:
+Captured from the **Python** shell-host path before the Zig port.
+Zig parity tests must match these shapes:
 
 | File | Normative fields |
 |------|------------------|
@@ -30,7 +30,7 @@ uv run python tests/fixtures/host_ir/_capture_host_ir.py
 ```
 
 Sources: `tests/test_host_bridge.py` cases plus the IR helpers in
-`src/remedy/execution/host/{ir,translate,runner}.py` (scriptfile lives in Zig).
+`src/remedy/core/computer/shell_host.py` (scriptfile lives in Zig).
 
 ## Proof target (from NATIVE_CUTOVER_PLAN Phase 3)
 

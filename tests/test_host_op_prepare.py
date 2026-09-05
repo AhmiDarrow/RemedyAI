@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 
 from remedy.core.computer import host_binding as hb
-from remedy.execution.host.ir import HostOp
-from remedy.execution.host.runner import prepare_host_command, prepare_host_op
+from remedy.core.computer.shell_host import HostOp
+from remedy.core.computer.shell_host import prepare_host_command, prepare_host_op
 from remedy.runtime import native_runtime
 
 FIXTURE = (

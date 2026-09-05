@@ -199,7 +199,7 @@ async def test_host_script_python_readonly_body_not_jailed(
     tmp_path: Path, monkeypatch
 ) -> None:
     """A Python body that only reads (regex with ``y:\\s*``) must run."""
-    from remedy.execution.host.session import close_all_shared_sessions
+    from remedy.core.computer.shell_host import close_all_shared_sessions
 
     proj = tmp_path / "proj"
     proj.mkdir()
