@@ -111,12 +111,16 @@ def test_local_api_token_upgrades_legacy_plain(tmp_path, auth_on, monkeypatch):
         assert load_local_api_token(home) == legacy
 
 
+# Protected probe used after FastAPI route twins were deleted. Auth middleware
+# still runs; a missing route answers 404 once Bearer is accepted.
+_AUTH_PROBE = "/api/self-improve"
+
+
 def test_auth_middleware_401_without_token(auth_on, tmp_path):
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
     client = TestClient(app)
-    # /api/sessions* is Go-owned; exercise auth on a remaining TestClient path.
-    r = client.get("/api/self-improve")
+    r = client.get(_AUTH_PROBE)
     assert r.status_code == 401
 
 
@@ -124,8 +128,9 @@ def test_auth_middleware_ok_with_bearer(auth_on, tmp_path):
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
     client = TestClient(app)
-    r = client.get("/api/self-improve", headers={"Authorization": f"Bearer {tok}"})
-    assert r.status_code == 200
+    r = client.get(_AUTH_PROBE, headers={"Authorization": f"Bearer {tok}"})
+    # No FastAPI twin remains — 404 means auth passed and routing found nothing.
+    assert r.status_code == 404
 
 
 def test_status_public(auth_on, tmp_path):
@@ -135,21 +140,26 @@ def test_status_public(auth_on, tmp_path):
     assert "/api/status" not in paths
     assert "/api/ping" not in paths
     assert "/api/turn-active" not in paths
+    assert "/api/self-improve" not in paths
+    assert "/api/metrics" not in paths
+    assert "/api/notifications" not in paths
 
 
-def test_self_improve_requires_bearer(auth_on, tmp_path, monkeypatch):
+def test_self_improve_snapshot_shape(auth_on, tmp_path, monkeypatch):
+    """HTTP /api/self-improve twin is gone; activity_snapshot still answers tools."""
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    tok = ensure_local_api_token(tmp_path)
-    app = create_app(api_key=tok)
-    client = TestClient(app)
-    r = client.get("/api/self-improve")
-    assert r.status_code == 401
-    ok = client.get("/api/self-improve", headers={"Authorization": f"Bearer {tok}"})
-    assert ok.status_code == 200
-    body = ok.json()
+    from remedy.core.self_inject import activity_snapshot
+
+    body = activity_snapshot(tmp_path)
     assert "enabled" in body
     assert "idle_s" in body
     assert "last_tick" in body
+    tok = ensure_local_api_token(tmp_path)
+    client = TestClient(create_app(api_key=tok))
+    assert client.get(_AUTH_PROBE).status_code == 401
+    assert client.get(
+        _AUTH_PROBE, headers={"Authorization": f"Bearer {tok}"}
+    ).status_code == 404
 
 
 def test_bootstrap_loopback(auth_on, tmp_path, monkeypatch):
@@ -167,8 +177,9 @@ def test_auth_disabled_empty_key(monkeypatch):
     monkeypatch.setenv("REMEDY_API_AUTH", "0")
     app = create_app(api_key="")
     client = TestClient(app)
-    r = client.get("/api/self-improve")
-    assert r.status_code == 200
+    # No route twin — unauthenticated TestClient still reaches a 404, not 401.
+    r = client.get(_AUTH_PROBE)
+    assert r.status_code == 404
 
 
 def test_cors_star_refused_when_auth_on(auth_on, tmp_path, monkeypatch):
@@ -176,11 +187,9 @@ def test_cors_star_refused_when_auth_on(auth_on, tmp_path, monkeypatch):
     monkeypatch.setenv("REMEDY_CORS_ORIGINS", "*")
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
-    # Middleware still has a concrete origin list, not bare *
-    # Smoke: authenticated call works
     client = TestClient(app)
-    r = client.get("/api/self-improve", headers={"Authorization": f"Bearer {tok}"})
-    assert r.status_code == 200
+    r = client.get(_AUTH_PROBE, headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code == 404
 
 
 def test_bootstrap_can_be_disabled(auth_on, tmp_path, monkeypatch):
@@ -198,9 +207,8 @@ def test_cors_preflight_options_not_blocked_by_auth(auth_on, tmp_path):
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
     client = TestClient(app)
-    # /api/sessions* is Go-owned; exercise CORS on a remaining TestClient path.
     r = client.options(
-        "/api/self-improve",
+        _AUTH_PROBE,
         headers={
             "Origin": "http://tauri.localhost",
             "Access-Control-Request-Method": "GET",
@@ -222,13 +230,13 @@ def test_cors_allows_tauri_https_origin(auth_on, tmp_path):
     app = create_app(api_key=tok)
     client = TestClient(app)
     r = client.get(
-        "/api/self-improve",
+        _AUTH_PROBE,
         headers={
             "Origin": "https://tauri.localhost",
             "Authorization": f"Bearer {tok}",
         },
     )
-    assert r.status_code == 200
+    assert r.status_code == 404
     assert r.headers.get("access-control-allow-origin") == "https://tauri.localhost"
 
 
@@ -265,7 +273,7 @@ def test_auth_length_mismatch_is_401_not_500(auth_on, tmp_path):
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
     client = TestClient(app)
-    r = client.get("/api/self-improve", headers={"Authorization": "Bearer x"})
+    r = client.get(_AUTH_PROBE, headers={"Authorization": "Bearer x"})
     assert r.status_code == 401
 
 

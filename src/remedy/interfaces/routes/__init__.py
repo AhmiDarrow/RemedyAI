@@ -1,9 +1,9 @@
 """Route modules for the pytest / TestClient FastAPI surface.
 
-Production ``:7400`` is owned by Go ``remedy-runtime``. These ``register_*``
-helpers exist so ``create_app`` can exercise the Python route tree in-process.
+Production ``:7400`` is owned by Go ``remedy-runtime``. ``register_all_routes``
+is intentionally empty — every former FastAPI twin has been deleted.
 
-Not registered here (Go owns production):
+Not registered here (Go owns production, or dropped as TestClient-only):
 - ``/api/connect*`` Connect management
 - ``/api/webhooks/*`` and ``/api/webhook/{source}`` messenger / CI inbound
 - ``/api/i18n`` language catalogs
@@ -31,12 +31,12 @@ Not registered here (Go owns production):
 - ``/api/diagnostics``, ``/api/coordination/presence``, ``/api/self-inject/rounds``
 - ``/api/app/command``, ``/api/projects/scan``
 - ``/api/ping``, ``/api/status``, ``/api/turn-active``, SPA ``/`` (webui)
+- ``/api/notifications*``, ``/api/metrics``, ``/api/self-improve`` (no desktop
+  callers; Python notify/metrics/self_inject modules remain for workers)
 """
 from __future__ import annotations
 
 from fastapi import FastAPI
-
-from remedy.interfaces.routes.status import register_status_routes
 
 
 def register_all_routes(
@@ -46,11 +46,5 @@ def register_all_routes(
     gateway=None,
     memory=None,
 ) -> None:
-    """Attach TestClient HTTP routes to *app* (not production :7400)."""
-    kw = {"runtime": runtime, "gateway": gateway, "memory": memory}
-    register_status_routes(app, **kw)
-    # No register_sessions/auth/settings/catalog/memory/partner/i18n/usage/
-    # vision/telephony/webhook/connect/nanoswarm/assistant/computer/hive/
-    # session_events/chat/terminal/rmb/voice/workspace/skills_library, or
-    # misc (/dashboard) — Go owns those.
-    # status keeps notifications/metrics/self-improve only (not Go-owned).
+    """No-op: TestClient FastAPI route tree is empty (Go owns :7400)."""
+    _ = (app, runtime, gateway, memory)

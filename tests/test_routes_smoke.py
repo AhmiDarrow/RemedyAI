@@ -1,12 +1,7 @@
-"""Every route module registers, and no parameterless GET returns a 5xx.
+"""Route package stays importable; TestClient registrar tree is empty.
 
-Sessions/partner/memory/catalog/auth/settings/stream/misc twins dropped; Go
-owns those. Remaining TestClient surface is notifications/metrics/self-improve.
-
-A stub runtime is the point: the desktop hits these during boot, before a
-provider is connected and before memory is open. A route that assumes any of
-that is present answers 500 instead of degrading, and nothing catches it until
-someone opens the app.
+Former FastAPI twins (sessions/partner/memory/catalog/auth/settings/status/…)
+are deleted. Go owns production :7400. create_app remains an auth/CORS harness.
 """
 
 from __future__ import annotations
@@ -28,7 +23,6 @@ import remedy.interfaces.routes as routes_pkg
 STREAMING: set[str] = set()
 
 #: Reaching the network would make this a flaky test, not a better one.
-# /api/updates/check removed from TestClient surface (Go-owned).
 OUTBOUND: set[str] = set()
 
 
@@ -49,7 +43,7 @@ class _StubRuntime:
 
 
 def _build_app(home: str) -> tuple[FastAPI, list[str]]:
-    app = FastAPI()
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.disable_api_docs = True
     failures: list[str] = []
     for mod_info in pkgutil.walk_packages(
@@ -91,11 +85,15 @@ def test_every_route_module_registers(app_and_failures):
     assert not failures, "route registrars that raised:\n  " + "\n  ".join(failures)
 
 
-def test_enough_routes_exist_for_this_to_mean_something(app_and_failures):
+def test_no_fastapi_route_twins_remain(app_and_failures):
+    """Registrar package must not reintroduce HTTP twins Go (or nobody) owns."""
     app, _ = app_and_failures
-    paths = {r.path for r in app.routes if hasattr(r, "methods")}
-    # Floor tracks intentional FastAPI TestClient shrink (Go owns production).
-    assert len(paths) >= 4
+    paths = {
+        r.path
+        for r in app.routes
+        if hasattr(r, "methods") and str(getattr(r, "path", "")).startswith("/api")
+    }
+    assert paths == set()
 
 
 def test_no_parameterless_get_returns_a_server_error(app_and_failures):

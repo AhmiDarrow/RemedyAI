@@ -1,11 +1,15 @@
-"""Metrics registry + HTTP /api/metrics tests."""
+"""Metrics registry + agency rollup tests (no FastAPI /api/metrics twin)."""
 
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
+import asyncio
 
-from remedy.core.metrics import MetricsRegistry, default_registry
-from remedy.interfaces.api import create_app
+from remedy.core.metrics import (
+    HealthChecker,
+    MetricsRegistry,
+    agency_metrics_rollup,
+    default_registry,
+)
 
 
 def test_prometheus_text_format() -> None:
@@ -22,45 +26,23 @@ def test_prometheus_text_format() -> None:
     assert "latency_seconds_count" in text
 
 
-def test_api_metrics_json() -> None:
-    default_registry.counter("remedy_test_counter").inc()
-    client = TestClient(create_app())
-    r = client.get("/api/metrics")
-    assert r.status_code == 200
-    data = r.json()
-    assert "metrics" in data
-    assert "health" in data
-    assert "agency" in data
-    assert data["health"]["status"] in ("ok", "degraded")
-    agency = data["agency"]
-    assert "tool_recovery_nudges" in agency
-    assert "tool_batch_errors" in agency
-    assert "skill_run_ok" in agency
-
-
 def test_agency_rollup_sums_recovery_and_skill_counters() -> None:
-    default_registry.counter(
-        "remedy_tool_recovery_nudge_total", kind="tool_error"
-    ).inc(2)
-    default_registry.counter("remedy_tool_batch_errors_total").inc()
-    default_registry.counter("remedy_skill_run_total", status="ok").inc()
-    default_registry.counter("remedy_skill_run_total", status="error").inc()
-    client = TestClient(create_app())
-    data = client.get("/api/metrics").json()
-    agency = data["agency"]
+    reg = MetricsRegistry()
+    reg.counter("remedy_tool_recovery_nudge_total", kind="tool_error").inc(2)
+    reg.counter("remedy_tool_batch_errors_total").inc()
+    reg.counter("remedy_skill_run_total", status="ok").inc()
+    reg.counter("remedy_skill_run_total", status="error").inc()
+    agency = agency_metrics_rollup(reg.snapshot())
     assert agency["tool_recovery_nudges"] >= 2
     assert agency["tool_batch_errors"] >= 1
     assert agency["skill_run_ok"] >= 1
     assert agency["skill_run_error"] >= 1
 
 
-def test_api_metrics_prometheus() -> None:
+def test_default_registry_prometheus_includes_probe() -> None:
     default_registry.counter("remedy_prom_probe").inc()
-    client = TestClient(create_app())
-    r = client.get("/api/metrics", params={"format": "prometheus"})
-    assert r.status_code == 200
-    assert "text/plain" in r.headers.get("content-type", "")
-    assert "remedy_prom_probe" in r.text
+    text = default_registry.prometheus_text()
+    assert "remedy_prom_probe" in text
 
 
 def test_tool_histogram_recorded() -> None:
@@ -102,10 +84,6 @@ def test_metric_labels_redact_secret_shaped_values() -> None:
 
 
 def test_health_check_detail_redacts_secrets() -> None:
-    import asyncio
-
-    from remedy.core.metrics import HealthChecker
-
     hc = HealthChecker()
     hc.register(
         "probe",
@@ -119,3 +97,16 @@ def test_health_check_detail_redacts_secrets() -> None:
     blob = str(out)
     assert "sk-abcdefghijklmnopqrstuvwxyz0123" not in blob
     assert out["checks"]["probe"]["status"] == "ok"
+
+
+def test_fastapi_metrics_route_absent() -> None:
+    from fastapi.testclient import TestClient
+
+    from remedy.interfaces.api import create_app
+
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    assert "/api/metrics" not in paths
+    assert TestClient(create_app(api_key="")).get("/api/metrics").status_code in (
+        404,
+        405,
+    )
