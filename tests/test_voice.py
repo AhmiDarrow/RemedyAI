@@ -1,8 +1,8 @@
 """Voice: gender-mapped speak-back + hearing, graceful without engines.
 
 These tests run WITHOUT the [voice] extra installed — they exercise the
-mapping, text-cleaning, wav encoding, settings, and the API's fallback
-contract (503 + fallback hints), plus engine paths via mocks.
+mapping, text-cleaning, wav encoding, settings, and service helpers. HTTP
+``/api/voice/*`` is Go-owned (native/go/httpapi/voice_test.go).
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ import wave
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from remedy.voice.service import (
     encode_wav,
@@ -173,77 +172,54 @@ def test_synthesize_with_mock_engine(tmp_path: Path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# API contract (no engines installed → graceful fallback, never a 500)
+# Service contract (HTTP /api/voice/* is Go-owned)
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def client(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    monkeypatch.setenv("REMEDY_API_AUTH", "0")
+def test_voice_http_routes_absent_from_testclient():
     from remedy.interfaces.api import create_app
 
-    return TestClient(create_app())
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    for path in (
+        "/api/voice/status",
+        "/api/voice/speak",
+        "/api/voice/transcribe",
+        "/api/voice/install",
+        "/api/voice/settings",
+        "/api/voice/identity",
+    ):
+        assert path not in paths
 
 
-def test_api_voice_status_shape(client: TestClient):
-    r = client.get("/api/voice/status")
-    assert r.status_code == 200
-    data = r.json()
+def test_voice_status_shape(tmp_path: Path):
+    data = voice_status(tmp_path)
     assert "tts" in data and "stt" in data and "smart_turn" in data and "settings" in data
     assert isinstance(data["tts"]["voices"], list)
 
 
-def test_api_speak_falls_back_to_browser_when_unavailable(client: TestClient):
-    r = client.post("/api/voice/speak", json={"text": "hello there"})
-    if r.status_code == 200:  # [voice] extra + models present on this machine
-        assert r.headers["content-type"].startswith("audio/")
-    else:
-        assert r.status_code == 503
-        assert r.json().get("fallback") == "browser"
-
-
-def test_api_transcribe_rejects_empty_and_degrades(client: TestClient):
-    r = client.post(
-        "/api/voice/transcribe",
-        content=b"",
-        headers={"Content-Type": "audio/webm"},
-    )
-    assert r.status_code == 400
-    r2 = client.post(
-        "/api/voice/transcribe",
-        content=b"not-really-audio",
-        headers={"Content-Type": "audio/webm"},
-    )
-    assert r2.status_code in (200, 503)
-    if r2.status_code == 503:
-        assert "error" in r2.json()
-
-
-def test_api_voice_install_all_starts_pack(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+def test_voice_install_all_starts_pack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import remedy.voice.service as svc
 
     monkeypatch.setattr(svc, "install_voice_pack_background", lambda home=None: True)
-    r = client.post("/api/voice/install", json={"component": "all"})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["ok"] is True
-    blob = str(body).lower()
-    assert "pip" not in blob
+    assert svc.install_voice_pack_background(tmp_path) is True
 
 
-def test_api_voice_install_stt_without_deps_starts_pack(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+def test_voice_install_stt_without_deps_starts_pack(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     import remedy.voice.service as svc
 
     monkeypatch.setattr(svc, "stt_deps_available", lambda: False)
-    monkeypatch.setattr(svc, "install_voice_pack_background", lambda home=None: True)
-    r = client.post("/api/voice/install", json={"component": "stt"})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["ok"] is True
-    assert "pip" not in str(body).lower()
+    called: list[str] = []
+
+    def _pack(home=None):
+        called.append("pack")
+        return True
+
+    monkeypatch.setattr(svc, "install_voice_pack_background", _pack)
+    if not svc.stt_deps_available():
+        assert svc.install_voice_pack_background(tmp_path) is True
+    assert called == ["pack"]
 
 
 def test_install_voice_pack_runs_extras_then_models(
@@ -451,25 +427,14 @@ def test_owner_pack_error_never_leaks_a_pip_command():
     assert "pip" not in out.lower()
 
 
-def test_api_voice_install_unknown_is_plain(client: TestClient):
-    r = client.post("/api/voice/install", json={"component": "nope"})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["ok"] is False
-    assert "Unknown voice piece" in body["error"]
-    assert "nope" in body["error"]
+def test_voice_settings_patch(tmp_path: Path):
+    out = save_voice_settings({"speak_replies": True}, tmp_path)
+    assert out["speak_replies"] is True
+    assert load_voice_settings(tmp_path)["speak_replies"] is True
+    assert voice_status(tmp_path)["settings"]["speak_replies"] is True
 
 
-def test_api_voice_settings_patch(client: TestClient):
-    r = client.post("/api/voice/settings", json={"speak_replies": True})
-    assert r.status_code == 200
-    assert r.json()["speak_replies"] is True
-    r2 = client.get("/api/voice/status")
-    assert r2.json()["settings"]["speak_replies"] is True
-
-
-def test_api_speak_respects_disabled(client: TestClient):
-    client.post("/api/voice/settings", json={"tts_enabled": False})
-    r = client.post("/api/voice/speak", json={"text": "hi"})
-    assert r.status_code == 503
-    assert r.json().get("fallback") == "browser"
+def test_tts_disabled_setting_persists(tmp_path: Path):
+    save_voice_settings({"tts_enabled": False}, tmp_path)
+    assert load_voice_settings(tmp_path)["tts_enabled"] is False
+    assert voice_status(tmp_path)["settings"]["tts_enabled"] is False

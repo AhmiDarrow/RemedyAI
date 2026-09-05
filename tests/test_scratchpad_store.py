@@ -5,10 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from remedy.core.scratchpad_store import read_scratch, scratch_id, write_scratch
-from remedy.interfaces.api import create_app
 
 
 def test_scratch_roundtrip(tmp_path: Path):
@@ -20,18 +18,12 @@ def test_scratch_roundtrip(tmp_path: Path):
     assert scratch_id("") == "_global"
 
 
-def test_scratch_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    app = create_app()
-    client = TestClient(app)
-    empty = client.get("/api/scratch", params={"session_id": "s1"})
-    assert empty.status_code == 200
-    assert empty.json()["text"] == ""
-    put = client.put("/api/scratch", json={"session_id": "s1", "text": "rail notes"})
-    assert put.status_code == 200
-    assert put.json()["text"] == "rail notes"
-    got = client.get("/api/scratch", params={"session_id": "s1"})
-    assert got.json()["text"] == "rail notes"
+def test_scratch_http_route_absent_from_testclient():
+    """HTTP /api/scratch is Go-owned (native/go/httpapi/scratch.go)."""
+    from remedy.interfaces.api import create_app
+
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    assert "/api/scratch" not in paths
 
 
 @pytest.mark.asyncio

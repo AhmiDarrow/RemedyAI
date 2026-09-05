@@ -14,11 +14,9 @@ from __future__ import annotations
 import atexit
 import logging
 import os
-import sys
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from pathlib import Path
 from typing import Any
 
 import yaml
@@ -56,7 +54,6 @@ _SLOW_EXEMPT_PATHS = frozenset(
         "/api/partner/status",
         "/api/plans/latest",
         "/api/app/command",
-        "/api/voice/status",
         "/api/approvals",
     }
 )
@@ -804,7 +801,6 @@ def create_app(
             "/api/partner/status",
             "/api/plans/latest",
             "/api/app/command",
-            "/api/voice/status",
         )
         if desktop and method in ("GET", "HEAD") and response.status_code < 400:
             quiet = True
@@ -844,173 +840,8 @@ def create_app(
     from remedy.interfaces.routes import register_all_routes
 
     register_all_routes(app, runtime=runtime, gateway=gateway, memory=memory)
-
-    # Optional SPA mount for TestClient / harness parity with Go WebUI serving.
-    # Prefer REMEDY_WEBUI_DIR, then repo desktop/dist (dev), then staged ui/.
-    _mount_web_ui(app)
-
+    # WebUI SPA is Go-owned (httpapi/webui.go); TestClient keeps /dashboard only.
     return app
-
-
-def find_webui_dir() -> Path | None:
-    """Locate built desktop SPA assets for browser WebUI mode.
-
-    Prefer **live** ``desktop/dist`` (Vite build) over staged sidecar ``webui/``
-    so ``npm run build`` updates WebUI without hunting stale target/debug copies.
-    """
-    env = (os.environ.get("REMEDY_WEBUI_DIR") or "").strip()
-    candidates: list[Path] = []
-    if env:
-        candidates.append(Path(env).expanduser())
-    # Dev: monorepo checkout root (tauri:dev sets this)
-    dev_root = (os.environ.get("REMEDY_DEV_ROOT") or "").strip()
-    if dev_root:
-        candidates.append(Path(dev_root).expanduser().resolve() / "desktop" / "dist")
-    # Repo layout: src/remedy/interfaces/api.py → parents include repo root
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        candidates.append(parent / "desktop" / "dist")
-    # Tauri debug externalBin lives at desktop/src-tauri/target/debug/*.exe
-    # → desktop/dist is parents[3]/dist (prefer over staged webui/)
-    from remedy.core.runtime_identity import is_frozen_install
-
-    if is_frozen_install():
-        try:
-            exe = Path(sys.executable).resolve()
-            # .../desktop/src-tauri/target/debug/remedy-desktop.exe
-            desktop_pkg = exe.parents[3]
-            candidates.append(desktop_pkg / "dist")
-        except (IndexError, OSError):
-            pass
-    # Staged copies next to frozen sidecar (packaged installs; after live dist)
-    if is_frozen_install():
-        exe_dir = Path(sys.executable).resolve().parent
-        candidates.extend(
-            [
-                exe_dir / "ui",
-                exe_dir / "webui",
-                exe_dir / "desktop" / "dist",
-                exe_dir / "resources" / "webui",
-                exe_dir.parent / "webui",
-                exe_dir.parent / "resources" / "webui",
-            ]
-        )
-    # Non-dist fallbacks (legacy layouts)
-    for parent in here.parents:
-        candidates.append(parent / "ui")
-        candidates.append(parent / "webui")
-    # Meipass / _MEIPASS bundle (PyInstaller onefile extract) — last resort
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        mp = Path(meipass)
-        candidates.extend([mp / "webui", mp / "ui", mp / "desktop" / "dist"])
-    seen: set[str] = set()
-    for c in candidates:
-        try:
-            key = str(c.resolve())
-        except OSError:
-            key = str(c)
-        if key in seen:
-            continue
-        seen.add(key)
-        if c.is_dir() and (c / "index.html").is_file():
-            return c
-    return None
-
-
-_WEBUI_MISSING_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Remedy WebUI</title>
-  <style>
-    body { font-family: system-ui, sans-serif; background: #0a0a1a; color: #e0e0e0;
-           display: flex; min-height: 100vh; align-items: center; justify-content: center; margin: 0; }
-    .card { max-width: 420px; padding: 1.75rem; border: 1px solid #1e1e3e; border-radius: 12px;
-            background: #12122a; }
-    h1 { color: #7c3aed; font-size: 1.35rem; margin: 0 0 0.75rem; }
-    p { color: #aaa; font-size: 0.95rem; line-height: 1.45; margin: 0 0 0.75rem; }
-    a { color: #a78bfa; }
-    code { font-size: 0.85rem; color: #c4b5fd; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>WebUI assets not bundled</h1>
-    <p>The local API is running, but the chat WebUI files were not found next to the server.</p>
-    <p>Use the desktop app, or open the <a href="/dashboard">API dashboard</a>.</p>
-    <p>Dev: build with <code>cd desktop &amp;&amp; npm run build</code>, then restart serve.
-       Or set <code>REMEDY_WEBUI_DIR</code> to a folder that contains <code>index.html</code>.</p>
-  </div>
-</body>
-</html>
-"""
-
-
-def _mount_web_ui(app: FastAPI) -> None:
-    """Serve the chat SPA at / when a built UI directory exists."""
-    from fastapi.responses import FileResponse, HTMLResponse
-    from fastapi.staticfiles import StaticFiles
-
-    web_dir = find_webui_dir()
-    if web_dir is None:
-        logger.info("WebUI assets not found — browser mode serves a helper page + /dashboard")
-
-        @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
-        async def webui_missing():
-            return HTMLResponse(_WEBUI_MISSING_HTML)
-
-        app.state.webui_dir = None
-        return
-
-    assets = web_dir / "assets"
-    if assets.is_dir():
-        app.mount("/assets", StaticFiles(directory=str(assets)), name="webui-assets")
-
-    index = web_dir / "index.html"
-    # HTML entry must revalidate so browsers pick up new hashed asset names after rebuild.
-    _html_headers = {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Pragma": "no-cache",
-    }
-
-    def _spa_file(full_path: str = ""):
-        if full_path in ("", ".", "/"):
-            return FileResponse(index, headers=_html_headers)
-        if (
-            full_path.startswith("api")
-            or full_path.startswith("docs")
-            or full_path.startswith("redoc")
-            or full_path.startswith("dashboard")
-            or full_path.startswith("openapi")
-            or full_path.startswith("assets")
-        ):
-            from fastapi import HTTPException
-
-            raise HTTPException(status_code=404, detail="Not found")
-        # Prefer real static file (favicon, logo, etc.)
-        candidate = (web_dir / full_path).resolve()
-        try:
-            candidate.relative_to(web_dir.resolve())
-        except ValueError:
-            return FileResponse(index, headers=_html_headers)
-        if candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(index, headers=_html_headers)
-
-    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
-    async def webui_index():
-        return FileResponse(index, headers=_html_headers)
-
-    # SPA deep-link fallback (exclude /api, /docs, /dashboard)
-    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
-    async def webui_spa(full_path: str):
-        return _spa_file(full_path)
-
-    # Stash for harnesses that inspect mount state.
-    app.state.webui_dir = str(web_dir)
-    logger.info("WebUI mounted from %s (TestClient harness; production :7400 is Go)", web_dir)
 
 
 def yaml_schema(app: FastAPI) -> str:
