@@ -45,10 +45,12 @@ type sendMessageRequest struct {
 
 // TurnRequest is what a TurnRunner receives for POST .../messages.
 type TurnRequest struct {
-	SessionID   string
-	Prompt      string
-	Model       *string
-	Provider    *string
+	SessionID string
+	Prompt    string
+	Model     *string
+	Provider  *string
+	// ProjectPath is the session's focused project folder (workspace root).
+	ProjectPath string
 	PlanMode    bool
 	ChatMode    bool
 	Attachments []map[string]any
@@ -591,6 +593,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var sessProvider, sessModel *string
+	projectPath := ""
 	if s.sessions != nil {
 		sess, ok, err := s.sessions.Get(sid)
 		if err != nil {
@@ -600,6 +603,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Session not found"})
 			return
+		}
+		if sess.ProjectPath != nil {
+			projectPath = strings.TrimSpace(*sess.ProjectPath)
 		}
 		sp, sm := resolveSessionLLMBind(sess.LLMProvider, sess.Model, req.Provider, req.Model)
 		if p, m, has := sessionLLMUpdateFields(sp, sm); has {
@@ -635,6 +641,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		Prompt:      prompt,
 		Model:       sessModel,
 		Provider:    sessProvider,
+		ProjectPath: projectPath,
 		PlanMode:    req.PlanMode,
 		ChatMode:    req.ChatMode,
 		Attachments: attDicts,

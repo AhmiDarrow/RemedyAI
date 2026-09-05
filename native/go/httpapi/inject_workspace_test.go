@@ -1,0 +1,34 @@
+package httpapi
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
+)
+
+func TestInjectWorkspaceRootPassesSchema(t *testing.T) {
+	reg := tools.NewRegistry()
+	if err := tools.RegisterPythonWorkerLocalMirrors(reg); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{"path":"."}`)
+	injected := injectWorkspaceRoot(raw, `C:\Users\Administrator\Old-Remedy`)
+	var args map[string]any
+	if err := json.Unmarshal(injected, &args); err != nil {
+		t.Fatal(err)
+	}
+	if args["workspace_root"] == nil || args["project_path"] == nil {
+		t.Fatalf("missing inject fields: %#v", args)
+	}
+	// Schema validate through registry Latest for workspace.list
+	desc, err := reg.Latest("workspace.list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := tools.Request{ToolID: desc.ID, Version: desc.Version, Input: injected}
+	// Execute against local mirror — must not fail schema validation
+	if _, err := reg.Execute(t.Context(), req); err != nil {
+		t.Fatalf("schema/execute after inject: %v input=%s", err, string(injected))
+	}
+}

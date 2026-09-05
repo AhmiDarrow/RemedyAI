@@ -173,6 +173,9 @@ func (r *CognitionTurnRunner) assemblePrompt(ctx context.Context, req TurnReques
 	if req.Provider != nil && strings.TrimSpace(*req.Provider) != "" {
 		input["provider"] = strings.TrimSpace(*req.Provider)
 	}
+	if proj := strings.TrimSpace(req.ProjectPath); proj != "" {
+		input["project_path"] = proj
+	}
 	raw, err := json.Marshal(input)
 	if err != nil {
 		return assembledPrompt{}, err
@@ -309,6 +312,9 @@ func (r *CognitionTurnRunner) runEngine(
 	}
 	execTools = &abiNameTools{inner: execTools, resolve: resolveTool}
 	policy = &abiNamePolicy{inner: policy, resolve: resolveTool}
+	if root := strings.TrimSpace(req.ProjectPath); root != "" {
+		execTools = &workspaceBoundTools{inner: execTools, root: root}
+	}
 	cfg := r.Config
 	if req.MaxIterations > 0 {
 		cfg.MaxIterations = req.MaxIterations
@@ -414,6 +420,45 @@ func (t *abiNameTools) Execute(ctx context.Context, call cognition.ToolCall) cog
 		call.Name = t.resolve(call.Name)
 	}
 	return t.inner.Execute(ctx, call)
+}
+
+// workspaceBoundTools injects the session project folder into workspace.* tool
+// inputs so the RMDY worker does not jail to the Desktop install cwd.
+type workspaceBoundTools struct {
+	inner cognition.ToolExecutor
+	root  string
+}
+
+func (t *workspaceBoundTools) Execute(ctx context.Context, call cognition.ToolCall) cognition.ToolResult {
+	if t == nil || t.inner == nil {
+		return cognition.ToolResult{ID: call.ID, Name: call.Name, Err: "tool executor missing"}
+	}
+	root := strings.TrimSpace(t.root)
+	name := strings.TrimSpace(call.Name)
+	if root != "" && (strings.HasPrefix(name, "workspace.") || strings.HasPrefix(name, "workspace_")) {
+		call.Input = injectWorkspaceRoot(call.Input, root)
+	}
+	return t.inner.Execute(ctx, call)
+}
+
+func injectWorkspaceRoot(raw []byte, root string) []byte {
+	args := map[string]any{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &args); err != nil {
+			args = map[string]any{"_raw": string(raw)}
+		}
+	}
+	if _, ok := args["workspace_root"]; !ok {
+		args["workspace_root"] = root
+	}
+	if _, ok := args["project_path"]; !ok {
+		args["project_path"] = root
+	}
+	b, err := json.Marshal(args)
+	if err != nil {
+		return raw
+	}
+	return b
 }
 
 type abiNamePolicy struct {

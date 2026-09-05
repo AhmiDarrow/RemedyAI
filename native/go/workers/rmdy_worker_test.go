@@ -91,6 +91,37 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
+func TestResolveDefaultWorkspaceNeverInstallDir(t *testing.T) {
+	home := t.TempDir()
+	install := t.TempDir()
+	if err := os.WriteFile(filepath.Join(install, "remedy-runtime.exe"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(install, "webui"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(install, "windows"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !looksLikeInstallDir(install) {
+		t.Fatal("expected install markers to match")
+	}
+	proj := filepath.Join(home, "MyProject")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// TOML string with forward slashes — Windows Path accepts them.
+	cfgLine := "project_path = \"" + filepath.ToSlash(proj) + "\"\n"
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfgLine), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{"REMEDY_HOME": home}
+	got := resolveDefaultWorkspace(env, install)
+	if filepath.Clean(got) != filepath.Clean(proj) {
+		t.Fatalf("workspace = %q want project %q (must not be install %q)", got, proj, install)
+	}
+}
+
 func TestStartRMDYToolWorkerAttachAndRoundTrip(t *testing.T) {
 	root := repoRoot(t)
 	argv := testPythonArgv(t)
