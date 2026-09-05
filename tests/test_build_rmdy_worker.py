@@ -47,9 +47,22 @@ def test_stage_and_assert_no_http_server(bw, tmp_path) -> None:
     assert (package / "runtime" / "rmdy_tool_worker.py").is_file()
     assert (tmp_path / "__main__.py").is_file()
     bw.assert_no_http_server_bundle(tmp_path)
+    bw.assert_worker_allowlist(tmp_path)
     for name in bw.BANNED_SERVER_MODULE_NAMES:
         assert not (package / name).exists()
         assert not (tmp_path / name).exists()
+
+
+def test_stage_excludes_agent_tool_registration(bw, tmp_path) -> None:
+    package = bw.stage_worker_tree(tmp_path)
+    # Absolute worker allowlist: no agent_*_tools registration forest.
+    leftovers = sorted(
+        p.relative_to(package).as_posix()
+        for p in package.rglob("agent_*_tools.py")
+    )
+    assert leftovers == []
+    assert not (package / "core" / "agent_mcp_bridge.py").exists()
+    assert (package / "core" / "web_helpers.py").is_file()
 
 
 def test_write_pyinstaller_spec_excludes_server(bw, tmp_path) -> None:
