@@ -472,7 +472,22 @@ export fn remedy_core_process_exec_capture_authorized(
     } else {
         // Portable path: soft capture. init_single_threaded uses a failing
         // allocator and OOMs on spawn — use a real GPA like shell_chain.
-        _ = .{ env_json, env_len };
+        // cwd + env must reach runCaptureSoft (parity with Windows execCapture
+        // and shell_chain); dropping them made Linux nested pytest / host_run
+        // inherit the parent cwd.
+        var env_map_storage: ?std.process.Environ.Map = null;
+        defer if (env_map_storage) |*m| m.deinit();
+        const env_map_ptr: ?*const std.process.Environ.Map = blk: {
+            const pairs = (host.parseEnv(arena.allocator(), slice(env_json, env_len)) catch
+                return invalid_status) orelse break :blk null;
+            var map = std.process.Environ.Map.init(host.allocator);
+            errdefer map.deinit();
+            for (pairs) |pair| {
+                map.put(pair.key, pair.value) catch return failed_status;
+            }
+            env_map_storage = map;
+            break :blk &env_map_storage.?;
+        };
         const parent_env: std.process.Environ = if (is_windows)
             .{ .block = .global }
         else
@@ -487,6 +502,8 @@ export fn remedy_core_process_exec_capture_authorized(
             .{
                 .argv = argv,
                 .timeout = timeoutMs(budget),
+                .cwd = slice(cwd, cwd_len),
+                .environ_map = env_map_ptr,
             },
         ) catch |err| return switch (err) {
             error.InvalidArguments => invalid_status,
@@ -677,4 +694,79 @@ test "exec capture authorized echoes through job/soft path" {
     try std.testing.expectEqual(@as(u8, 0), timed_out);
     try std.testing.expect(out_stdout_len > 0);
     try std.testing.expect(std.mem.indexOf(u8, out_stdout.?[0..out_stdout_len], "remedy-capture") != null);
+}
+
+test "exec capture authorized honors cwd on linux soft path" {
+    // Regression: Linux used to authorize cwd then drop it before runCaptureSoft,
+    // so nested pytest / host_run inherited the parent cwd (repo root under WSL).
+    if (builtin.os.tag != .linux) return error.SkipZigTest;
+
+    const key = [_]u8{0xB7} ** Hmac.key_length;
+    try std.testing.expectEqual(ok_status, remedy_core_security_set_signing_key(&key, key.len));
+    defer _ = remedy_core_security_clear_signing_key();
+
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{ .sub_path = "marker.txt", .data = "cwd-ok" });
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const abs_len = try tmp.dir.realPath(io, &path_buf);
+    const abs = path_buf[0..abs_len];
+
+    const argv = "[\"/bin/sh\",\"-c\",\"pwd; ls\"]";
+    const op = policy.hashArguments(&.{ "/bin/sh", "-c", "pwd; ls" });
+    var token_buf: [security.token_size]u8 = undefined;
+    try std.testing.expectEqual(ok_status, remedy_core_capability_issue(
+        default_subject.ptr,
+        default_subject.len,
+        default_scope.ptr,
+        default_scope.len,
+        &op,
+        op.len,
+        capability.Set.one(.process_spawn).bits,
+        1000,
+        60_000,
+        &([_]u8{0x33} ** 16),
+        16,
+        &token_buf,
+        token_buf.len,
+    ));
+
+    var exit_code: u32 = 99;
+    var timed_out: u8 = 1;
+    var out_stdout: ?[*]u8 = null;
+    var out_stdout_len: usize = 0;
+    var out_stderr: ?[*]u8 = null;
+    var out_stderr_len: usize = 0;
+    const st = remedy_core_process_exec_capture_authorized(
+        argv.ptr,
+        argv.len,
+        abs.ptr,
+        abs.len,
+        null,
+        0,
+        &token_buf,
+        token_buf.len,
+        null,
+        0,
+        null,
+        0,
+        0,
+        1500,
+        15_000,
+        &exit_code,
+        &timed_out,
+        &out_stdout,
+        &out_stdout_len,
+        &out_stderr,
+        &out_stderr_len,
+    );
+    defer if (out_stdout) |p| host.allocator.free(p[0..out_stdout_len]);
+    defer if (out_stderr) |p| host.allocator.free(p[0..out_stderr_len]);
+    try std.testing.expectEqual(ok_status, st);
+    try std.testing.expectEqual(@as(u32, 0), exit_code);
+    try std.testing.expectEqual(@as(u8, 0), timed_out);
+    const out = out_stdout.?[0..out_stdout_len];
+    try std.testing.expect(std.mem.indexOf(u8, out, abs) != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "marker.txt") != null);
 }

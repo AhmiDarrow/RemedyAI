@@ -59,9 +59,12 @@ class HostError(RuntimeError):
         self.status = status
         self.os_error = os_error
         detail = _STATUS_NAMES.get(status, f"status {status}")
-        suffix = f" (Win32 error {os_error})" if os_error else ""
+        if os_error:
+            label = "Win32 error" if sys.platform == "win32" else "errno"
+            suffix = f" ({label} {os_error})"
+        else:
+            suffix = ""
         super().__init__(f"{function}: {detail}{suffix}")
-
 
 class Capture(NamedTuple):
     """Raw pixel rows from a capture call; ``pixels`` is BGR or BGRA."""

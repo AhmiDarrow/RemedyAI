@@ -596,6 +596,14 @@ def _looks_like_llama_server(pid: int) -> bool:
         return "llama" in name
     except (OSError, subprocess.TimeoutExpired):
         return True
+    except Exception as exc:
+        # Zig run_hidden raises HostError (RuntimeError), not OSError.
+        from remedy.core.computer.host_binding import HostError
+        from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
+
+        if isinstance(exc, (HostError, NativeRuntimeUnavailableError)):
+            return True
+        raise
 
 
 def stop_server(home_dir: str | Path | None = None) -> dict[str, Any]:
