@@ -134,3 +134,28 @@ def test_assert_safe_wipe_root_refuses_non_remedy_paths(tmp_path: Path):
     # User home itself
     with pytest.raises(RuntimeError):
         uninst._assert_safe_wipe_root(Path.home())  # noqa: SLF001
+
+
+def test_stop_llama_uses_kill_tree_not_raw_subprocess(monkeypatch):
+    """Uninstall stops llama-server via Zig kill_tree — no pkill/taskkill spawn."""
+    import inspect
+
+    import remedy.execution.process as process_mod
+
+    src = inspect.getsource(uninst._stop_llama_server_processes)  # noqa: SLF001
+    assert "subprocess.run" not in src
+    assert "subprocess.call" not in src
+    assert '["pkill"' not in src and "pkill -f" not in src
+    assert "taskkill" not in src
+    assert "kill_tree" in src
+    assert "matching_processes" in src
+
+    killed: list[int] = []
+    monkeypatch.setattr(
+        process_mod,
+        "matching_processes",
+        lambda _pat: [(4242, "/opt/llama-server -m x.gguf")],
+    )
+    monkeypatch.setattr(process_mod, "kill_tree", lambda pid: killed.append(int(pid)))
+    uninst._stop_llama_server_processes()  # noqa: SLF001
+    assert killed == [4242]

@@ -39,6 +39,24 @@ def test_spawn_background_source_has_no_raw_popen() -> None:
     assert "spawn_hidden" in source
 
 
+def test_phase6_soft_spawn_sites_drop_raw_subprocess() -> None:
+    """Process list/kill soft sites must not call subprocess.run/pkill/ps."""
+    from remedy.core import local_discover
+    from remedy.interfaces import uninstaller
+    from remedy.tools import comfyui
+
+    for mod in (local_discover, comfyui, uninstaller):
+        source = Path(mod.__file__).read_text(encoding="utf-8")
+        assert "subprocess.run" not in source, mod.__name__
+        assert "subprocess.call" not in source, mod.__name__
+        assert '["ps", "aux"]' not in source, mod.__name__
+        assert '["pkill"' not in source, mod.__name__
+    stop_src = inspect.getsource(uninstaller._stop_llama_server_processes)
+    assert "kill_tree" in stop_src
+    assert "matching_processes" in stop_src
+    assert "taskkill" not in stop_src
+
+
 def test_phase1_long_lived_hosts_use_spawn_hidden_not_popen() -> None:
     """claimidx / openserp / mdl / vision / rmb start via Zig authorized spawn."""
     from remedy.runtime import claimidx_host, mdl_runtime, web_search_host

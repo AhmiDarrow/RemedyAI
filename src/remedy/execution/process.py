@@ -5,6 +5,7 @@ Zig-only production paths:
 * :func:`spawn_hidden` / :func:`spawn_piped` — authorized spawn
 * :func:`kill_tree` / :func:`kill_process_tree` — toolhelp / process-group
 * exec-capture via :func:`run_hidden` (:mod:`process_run`)
+* :func:`matching_processes` — process list without raw ``subprocess`` spawn
 
 Handle types: :mod:`process_child`. Argv helpers: :mod:`process_argv`.
 ``popen_hidden`` pipes → :func:`spawn_piped`; else fail closed.
@@ -13,6 +14,7 @@ Handle types: :mod:`process_child`. Argv helpers: :mod:`process_argv`.
 
 from __future__ import annotations
 
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
@@ -43,6 +45,8 @@ __all__ = [
     "create_hidden_subprocess_exec",
     "kill_process_tree",
     "kill_tree",
+    "matching_process_command_lines",
+    "matching_processes",
     "popen_hidden",
     "require_process_host",
     "resolve_argv0",
@@ -180,3 +184,69 @@ def kill_process_tree(proc: Any) -> None:
     except Exception:
         with suppress(Exception):
             proc.terminate()
+
+
+def matching_processes(pattern: str) -> list[tuple[int, str]]:
+    """Return ``(pid, command_line)`` for processes matching *pattern*.
+
+    No raw ``subprocess`` spawn. Linux reads ``/proc/*/cmdline``. Windows uses
+    Zig-authorized :func:`run_hidden` PowerShell. Fail closed → ``[]``.
+    """
+    if not pattern:
+        return []
+    out: list[tuple[int, str]] = []
+    try:
+        if sys.platform == "win32":
+            ps = (
+                "Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | "
+                f"Where-Object {{ $_.CommandLine -and "
+                f"($_.CommandLine -match '{pattern}') }} | "
+                'ForEach-Object { "{0}`t{1}" -f $_.ProcessId, $_.CommandLine }'
+            )
+            proc = run_hidden(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-Command",
+                    ps,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            for line in (proc.stdout or "").splitlines():
+                if "\t" not in line:
+                    continue
+                pid_s, cmdline = line.split("\t", 1)
+                with suppress(ValueError):
+                    pid = int(pid_s.strip())
+                    text = cmdline.strip()
+                    if pid > 0 and text:
+                        out.append((pid, text))
+            return out
+
+        proc_root = Path("/proc")
+        if not proc_root.is_dir():
+            return []
+        cre = re.compile(pattern, re.I)
+        for entry in proc_root.iterdir():
+            name = entry.name
+            if not name.isdigit():
+                continue
+            try:
+                raw = (entry / "cmdline").read_bytes()
+            except OSError:
+                continue
+            text = raw.replace(b"\x00", b" ").decode("utf-8", errors="ignore").strip()
+            if text and cre.search(text):
+                out.append((int(name), text))
+    except Exception:
+        return []
+    return out
+
+
+def matching_process_command_lines(pattern: str) -> list[str]:
+    """Command lines of running processes matching *pattern* (fail closed)."""
+    return [cmdline for _pid, cmdline in matching_processes(pattern)]

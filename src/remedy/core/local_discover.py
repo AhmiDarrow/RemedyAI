@@ -22,7 +22,6 @@ import os
 import re
 import shutil
 import socket
-import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -422,28 +421,9 @@ def _process_paths(spec: HttpServiceSpec) -> list[Path]:
     pattern = "|".join(re.escape(n) for n in needles)
     paths: list[Path] = []
     try:
-        if sys.platform == "win32":
-            ps = (
-                "Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | "
-                f"Where-Object {{ $_.CommandLine -match '{pattern}' }} | "
-                "Select-Object -ExpandProperty CommandLine"
-            )
-            from remedy.execution.process import run_hidden
+        from remedy.execution.process import matching_process_command_lines
 
-            proc = run_hidden(
-                ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            lines = (proc.stdout or "").splitlines()
-        else:
-            proc = subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=5)
-            lines = [
-                ln
-                for ln in (proc.stdout or "").splitlines()
-                if re.search(pattern, ln, re.I)
-            ]
+        lines = matching_process_command_lines(pattern)
     except Exception:
         return paths
 

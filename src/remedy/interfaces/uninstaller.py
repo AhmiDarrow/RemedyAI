@@ -150,26 +150,16 @@ def _wipe_config() -> None:
 
 
 def _stop_llama_server_processes() -> None:
-    """Best-effort kill so vision tree is not file-locked on Windows."""
-    import subprocess
+    """Best-effort kill so vision tree is not file-locked on Windows.
 
-    if os.name == "nt":
-        from remedy.execution.process import run_hidden
+    Match llama-server PIDs then terminate via Zig ``kill_tree`` (fail closed).
+    """
+    from remedy.execution.process import kill_tree, matching_processes
 
+    for pid, _cmdline in matching_processes(r"llama-server"):
         with contextlib.suppress(Exception):
-            run_hidden(["taskkill", "/F", "/IM", "llama-server.exe", "/T"],
-                capture_output=True,
-                timeout=15,
-                check=False,
-                )
-    else:
-        with contextlib.suppress(Exception):
-            subprocess.run(
-                ["pkill", "-f", "llama-server"],
-                capture_output=True,
-                timeout=10,
-                check=False,
-            )
+            kill_tree(int(pid))
+
 
 
 def _wipe_vision() -> None:
