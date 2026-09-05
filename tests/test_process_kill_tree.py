@@ -31,6 +31,17 @@ def test_kill_process_tree_no_longer_shells_out():
     assert "CREATE_NO_WINDOW" not in [name for name in dir(P) if name.isupper()]
 
 
+def test_hide_flags_module_deleted() -> None:
+    """Soft CREATE_NO_WINDOW kwargs are gone; Zig owns spawn hide."""
+    import importlib
+
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("remedy.execution.hide_flags")
+    assert not hasattr(P, "hidden_subprocess_kwargs")
+    assert not hasattr(P, "hidden_creationflags")
+    assert not hasattr(P, "hidden_startupinfo")
+
+
 def test_popen_hidden_fail_closed_on_host_platforms(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
