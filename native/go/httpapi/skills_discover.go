@@ -35,13 +35,19 @@ func (s *Server) skillsHome() string {
 }
 
 func (s *Server) discoverSkills() []skillRecord {
+	home := s.skillsHome()
+	userRoot := filepath.Join(home, "skills")
+	seedRoots := skillSeedRoots(home)
+	// Packaged installs often have no cwd checkout — seed missing curated
+	// skills into ~/.remedy/skills (Python SkillRegistry.discover_defaults parity).
+	seedMissingUserSkills(seedRoots, userRoot)
+
 	byName := map[string]skillRecord{}
-	for _, root := range skillSeedRoots(s.skillsHome()) {
+	for _, root := range seedRoots {
 		for _, rec := range loadSkillsFromRoot(root) {
 			byName[rec.Name] = rec
 		}
 	}
-	userRoot := filepath.Join(s.skillsHome(), "skills")
 	for _, rec := range loadSkillsFromRoot(userRoot) {
 		byName[rec.Name] = rec
 	}
@@ -53,6 +59,57 @@ func (s *Server) discoverSkills() []skillRecord {
 		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
 	})
 	return out
+}
+
+func seedMissingUserSkills(seedRoots []string, userRoot string) {
+	if strings.TrimSpace(userRoot) == "" {
+		return
+	}
+	_ = os.MkdirAll(userRoot, 0o700)
+	for _, root := range seedRoots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, ent := range entries {
+			if !ent.IsDir() || strings.HasPrefix(ent.Name(), ".") {
+				continue
+			}
+			src := filepath.Join(root, ent.Name())
+			if !fileExists(filepath.Join(src, "SKILL.md")) {
+				continue
+			}
+			dst := filepath.Join(userRoot, ent.Name())
+			if dirExists(dst) {
+				continue
+			}
+			_ = copySkillDir(src, dst)
+		}
+	}
+}
+
+func copySkillDir(src, dst string) error {
+	if err := os.MkdirAll(dst, 0o700); err != nil {
+		return err
+	}
+	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o700)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, raw, 0o600)
+	})
 }
 
 func (s *Server) skillsCount() int {
@@ -115,6 +172,22 @@ func skillSeedRoots(home string) []string {
 	if dev := strings.TrimSpace(os.Getenv("REMEDY_DEV_ROOT")); dev != "" {
 		add(filepath.Join(dev, "src", "remedy", "bundled_skills"))
 		add(filepath.Join(dev, "skills"))
+	}
+
+	// Packaged desktop: skills may sit next to remedy-runtime.exe / resources.
+	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+		here := filepath.Dir(exe)
+		for i := 0; i < 4; i++ {
+			add(filepath.Join(here, "bundled_skills"))
+			add(filepath.Join(here, "skills"))
+			add(filepath.Join(here, "resources", "bundled_skills"))
+			add(filepath.Join(here, "resources", "skills"))
+			parent := filepath.Dir(here)
+			if parent == here {
+				break
+			}
+			here = parent
+		}
 	}
 
 	cwd, err := os.Getwd()

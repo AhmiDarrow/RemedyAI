@@ -97,8 +97,10 @@ func main() {
 	if *smokeFixture {
 		runner = httpapi.NewFixtureTurnRunner()
 	} else {
-		// Live OpenAI-compatible SSE when settings+secret are ready; else Scripted.
-		cognition := httpapi.NewCognitionTurnRunner(httpapi.ResolveListenModel(""))
+		// Per-turn ResolveChatModel: xAI OAuth bearer, then vision helper, else Scripted.
+		home := httpapi.ResolveHomeDir("")
+		cognition := httpapi.NewCognitionTurnRunner(httpapi.ResolveListenModel(home))
+		cognition.HomeDir = home
 		// Equal-or-better vs pre-cutover Python ReAct: supervise the RMDY tool
 		// worker, dial FrameCaller, AttachPythonWorker. Fail closed — never
 		// serve forever with only Go demo builtins pretending product tools.

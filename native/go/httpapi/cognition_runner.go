@@ -16,7 +16,13 @@ import (
 // CognitionTurnRunner drives cognition.Engine and emits the @@ control tokens
 // that stream.go already understands. No Python ReAct wrap — Go owns the loop.
 type CognitionTurnRunner struct {
-	Model          cognition.Model
+	Model cognition.Model
+	// HomeDir enables per-turn ResolveChatModel (xAI OAuth, vision helper).
+	// When empty, RunTurn uses Model as-is (unit tests / fixtures).
+	HomeDir string
+	// forcePrimary, when set, is the first model attempt (tests). Production
+	// leaves it nil so modelForTurn resolves from HomeDir / Model.
+	forcePrimary   cognition.Model
 	Tools          cognition.ToolExecutor
 	Policy         cognition.Policy
 	Config         cognition.Config
@@ -80,6 +86,19 @@ func (r *CognitionTurnRunner) syncModelToolSchemas() {
 	if !ok || oc == nil {
 		return
 	}
+	r.applyToolSchemas(oc)
+}
+
+func (r *CognitionTurnRunner) applyToolSchemas(oc *providers.OpenAICompat) {
+	if r == nil || r.Registry == nil || oc == nil {
+		return
+	}
+	// Local vision helper is for basic chat only — do not advertise the full
+	// tool surface to a 2B VLM.
+	if isVisionHelperCompat(oc) {
+		oc.Tools = nil
+		return
+	}
 	list := r.Registry.List()
 	meta := make([]providers.RegistryTool, 0, len(list))
 	for _, d := range list {
@@ -92,7 +111,45 @@ func (r *CognitionTurnRunner) syncModelToolSchemas() {
 			InputSchema: append(json.RawMessage(nil), d.InputSchema...),
 		})
 	}
-	oc.Tools = providers.ToolSchemasFromRegistry(meta)
+	schemas, nameMap := providers.ToolSchemasFromRegistryMapped(meta)
+	oc.Tools = schemas
+	oc.ToolNameMap = nameMap
+}
+
+func isVisionHelperCompat(oc *providers.OpenAICompat) bool {
+	if oc == nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(oc.Model), "vision-decoder") {
+		return true
+	}
+	base := strings.TrimSpace(oc.BaseURL)
+	return isLocalURL(base) && strings.Contains(base, fmt.Sprintf(":%d", visionDefaultPort))
+}
+
+func (r *CognitionTurnRunner) modelForTurn(req TurnRequest) cognition.Model {
+	if r == nil {
+		return nil
+	}
+	if r.forcePrimary != nil {
+		return r.forcePrimary
+	}
+	if strings.TrimSpace(r.HomeDir) != "" || r.Model == nil {
+		home := r.HomeDir
+		prov, model := "", ""
+		if req.Provider != nil {
+			prov = strings.TrimSpace(*req.Provider)
+		}
+		if req.Model != nil {
+			model = strings.TrimSpace(*req.Model)
+		}
+		live := ResolveChatModel(home, prov, model, "")
+		if oc, ok := live.(*providers.OpenAICompat); ok {
+			r.applyToolSchemas(oc)
+		}
+		return live
+	}
+	return r.Model
 }
 
 type assembledPrompt struct {
@@ -146,7 +203,11 @@ func (r *CognitionTurnRunner) assemblePrompt(ctx context.Context, req TurnReques
 }
 
 func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit func(string) error) error {
-	if r == nil || r.Model == nil {
+	if r == nil {
+		return errors.New("cognition turn runner is nil")
+	}
+	live := r.modelForTurn(req)
+	if live == nil {
 		return errors.New("cognition turn runner requires a model")
 	}
 	if r.Tools == nil {
@@ -155,8 +216,6 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 	if r.Policy == nil {
 		return errors.New("cognition turn runner requires a policy")
 	}
-	execTools := r.Tools
-	policy := r.Policy
 
 	seed := cognition.Turn{Goal: req.Prompt}
 	// Production serve always AttachPythonWorker. When attached, assemble is
@@ -186,21 +245,28 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 		}
 	}
 
-	model := cognition.Model(&emittingModel{inner: r.Model, emit: safeEmit})
-	if req.DrainNudges != nil {
-		model = &nudgeAwareModel{inner: model, drain: req.DrainNudges, emit: safeEmit}
+	out := r.runEngine(ctx, req, live, seed, safeEmit)
+
+	// Credentialed-but-unusable (401/402/403, subscription) — switch once to
+	// another provider so selecting Poe without a sub doesn't hard-fail chat.
+	if out.Err != nil && isProviderUnusableError(out.Err) && strings.TrimSpace(r.HomeDir) != "" {
+		exclude := ""
+		if req.Provider != nil {
+			exclude = strings.TrimSpace(*req.Provider)
+		}
+		if exclude == "" {
+			cfgMap := LoadConfig(r.HomeDir)
+			exclude = cfgString(cfgMap, "llm_provider", "")
+		}
+		alt := resolveChatModel(r.HomeDir, "", "", "", exclude)
+		if alt != nil && !sameChatEndpoint(live, alt) {
+			if oc, ok := alt.(*providers.OpenAICompat); ok {
+				r.applyToolSchemas(oc)
+			}
+			safeEmit("@@status:That provider isn't available right now — switching to your usual model…\n")
+			out = r.runEngine(ctx, req, alt, seed, safeEmit)
+		}
 	}
-	cfg := r.Config
-	if req.MaxIterations > 0 {
-		cfg.MaxIterations = req.MaxIterations
-	}
-	engine := cognition.Engine{
-		Model:  model,
-		Tools:  &emittingTools{inner: execTools, emit: safeEmit},
-		Policy: policy,
-		Config: cfg,
-	}
-	out := engine.RunTurn(ctx, seed)
 
 	if emitErr != nil {
 		return emitErr
@@ -220,6 +286,53 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 		return out.Err
 	}
 	return nil
+}
+
+func (r *CognitionTurnRunner) runEngine(
+	ctx context.Context,
+	req TurnRequest,
+	live cognition.Model,
+	seed cognition.Turn,
+	safeEmit func(string),
+) cognition.Outcome {
+	execTools := r.Tools
+	policy := r.Policy
+	model := cognition.Model(&emittingModel{inner: live, emit: safeEmit})
+	if req.DrainNudges != nil {
+		model = &nudgeAwareModel{inner: model, drain: req.DrainNudges, emit: safeEmit}
+	}
+	resolveTool := func(name string) string {
+		if oc, ok := live.(*providers.OpenAICompat); ok {
+			return oc.ResolveToolName(name)
+		}
+		return name
+	}
+	execTools = &abiNameTools{inner: execTools, resolve: resolveTool}
+	policy = &abiNamePolicy{inner: policy, resolve: resolveTool}
+	cfg := r.Config
+	if req.MaxIterations > 0 {
+		cfg.MaxIterations = req.MaxIterations
+	}
+	engine := cognition.Engine{
+		Model:  model,
+		Tools:  &emittingTools{inner: execTools, emit: safeEmit},
+		Policy: policy,
+		Config: cfg,
+	}
+	return engine.RunTurn(ctx, seed)
+}
+
+func sameChatEndpoint(a, b cognition.Model) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	oa, oka := a.(*providers.OpenAICompat)
+	ob, okb := b.(*providers.OpenAICompat)
+	if oka && okb {
+		return strings.EqualFold(strings.TrimSpace(oa.BaseURL), strings.TrimSpace(ob.BaseURL)) &&
+			strings.EqualFold(strings.TrimSpace(oa.Model), strings.TrimSpace(ob.Model))
+	}
+	return a == b
 }
 
 type nudgeAwareModel struct {
@@ -288,6 +401,31 @@ func (t *emittingTools) Execute(ctx context.Context, call cognition.ToolCall) co
 	res := t.inner.Execute(ctx, call)
 	t.emit(formatToolResultToken(res))
 	return res
+}
+
+// abiNameTools remaps sanitized OpenAI function names → Tool ABI ids at execute.
+type abiNameTools struct {
+	inner   cognition.ToolExecutor
+	resolve func(string) string
+}
+
+func (t *abiNameTools) Execute(ctx context.Context, call cognition.ToolCall) cognition.ToolResult {
+	if t != nil && t.resolve != nil {
+		call.Name = t.resolve(call.Name)
+	}
+	return t.inner.Execute(ctx, call)
+}
+
+type abiNamePolicy struct {
+	inner   cognition.Policy
+	resolve func(string) string
+}
+
+func (p *abiNamePolicy) Decide(ctx context.Context, call cognition.ToolCall) cognition.Decision {
+	if p != nil && p.resolve != nil {
+		call.Name = p.resolve(call.Name)
+	}
+	return p.inner.Decide(ctx, call)
 }
 
 func formatToolCallToken(call cognition.ToolCall) string {

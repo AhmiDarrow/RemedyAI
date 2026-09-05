@@ -673,7 +673,11 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, httpErr.Status, map[string]string{"detail": httpErr.Detail})
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": "Internal Server Error"})
+		// Surface a redacted provider/runtime error — opaque 500s hide DeepSeek
+		// tool-name rejects and similar recoverable chat failures.
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"detail": redactStreamError(turnErr),
+		})
 		return
 	}
 

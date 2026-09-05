@@ -108,6 +108,69 @@ func (c xaiCredentials) connected() bool {
 	}
 }
 
+func (c xaiCredentials) bearerToken() string {
+	switch c.AuthMethod {
+	case "api_key":
+		return strings.TrimSpace(c.APIKey)
+	case "oauth":
+		return strings.TrimSpace(c.AccessToken)
+	default:
+		return ""
+	}
+}
+
+var xaiRefreshMu sync.Mutex
+
+// refreshXaiIfNeeded refreshes an expired OAuth access token (parity with
+// remedy.interfaces.xai_auth.refresh_if_needed).
+func refreshXaiIfNeeded(homeDir string) xaiCredentials {
+	xaiRefreshMu.Lock()
+	defer xaiRefreshMu.Unlock()
+
+	creds := loadXaiCredentials(homeDir)
+	if creds.AuthMethod != "oauth" || strings.TrimSpace(creds.RefreshToken) == "" {
+		return creds
+	}
+	if creds.ExpiresAt != nil && time.Now().Unix() < int64(*creds.ExpiresAt)-120 {
+		return creds
+	}
+	data, err := xaiHTTPForm(xaiTokenURL, map[string]string{
+		"grant_type":    "refresh_token",
+		"refresh_token": creds.RefreshToken,
+		"client_id":     xaiClientID(),
+	})
+	if err != nil {
+		return creds
+	}
+	access := strings.TrimSpace(fmt.Sprint(nilToEmpty(data["access_token"])))
+	if access == "" {
+		return creds
+	}
+	expiresIn := anyInt(data["expires_in"], 3600)
+	exp := float64(time.Now().Unix()) + float64(expiresIn)
+	creds.AccessToken = access
+	if rt := strings.TrimSpace(fmt.Sprint(nilToEmpty(data["refresh_token"]))); rt != "" {
+		creds.RefreshToken = rt
+	}
+	creds.ExpiresAt = &exp
+	_ = saveXaiCredentials(homeDir, creds)
+	return creds
+}
+
+// resolveXaiBearer returns the best available bearer for xAI API calls
+// (OAuth access token / API key / env), refreshing OAuth when needed.
+func resolveXaiBearer(homeDir string) string {
+	creds := refreshXaiIfNeeded(homeDir)
+	if tok := creds.bearerToken(); tok != "" {
+		return tok
+	}
+	envKey := strings.TrimSpace(os.Getenv("XAI_API_KEY"))
+	if envKey == "" {
+		envKey = strings.TrimSpace(os.Getenv("REMEDY_XAI_API_KEY"))
+	}
+	return envKey
+}
+
 func (c xaiCredentials) toPublic(homeDir string) map[string]any {
 	out := map[string]any{
 		"provider":    "xai",

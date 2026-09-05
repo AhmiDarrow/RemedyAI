@@ -24,6 +24,7 @@ var providerDefaults = map[string]struct {
 	"groq":       {baseURL: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile"},
 	"mistral":    {baseURL: "https://api.mistral.ai/v1", model: "mistral-small-latest"},
 	"openrouter": {baseURL: "https://openrouter.ai/api/v1", model: "openrouter/auto"},
+	"poe":        {baseURL: "https://api.poe.com/v1", model: "assistant"},
 	"ollama":     {baseURL: "http://127.0.0.1:11434/v1", model: "", noAuth: true},
 	"custom":     {baseURL: "http://127.0.0.1:5001/v1", model: ""},
 	"rmb":        {baseURL: "http://127.0.0.1:8741/v1", model: "", noAuth: true},

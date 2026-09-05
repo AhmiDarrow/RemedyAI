@@ -228,6 +228,10 @@ func classifyProviderConnection(
 		}
 		return false, "ollama_down"
 	}
+	// xAI OAuth / console key live in auth/xai.json (not provider_keys.json).
+	if pid == "xai" && loadXaiCredentials(home).connected() {
+		return true, "oauth_or_key"
+	}
 	if keys[pid] != "" || keysSet[pid] {
 		return true, "api_key"
 	}
@@ -254,7 +258,18 @@ func resolveProviderAPIKey(cfg ConfigMap, provider, home string) string {
 		home = ResolveHomeDir("")
 	}
 	if k := strings.TrimSpace(secret.GetProviderSecret(home, prov)); k != "" {
-		return k
+		if prov == "xai" && !looksLikeXaiCredential(k) {
+			k = ""
+		} else {
+			return k
+		}
+	}
+	// xAI device-OAuth / console key store (auth/xai.json) — parity with
+	// remedy.interfaces.config.resolve_provider_api_key → resolve_bearer.
+	if prov == "xai" {
+		if tok := resolveXaiBearer(home); tok != "" {
+			return tok
+		}
 	}
 	meta, ok := mergedProviderCatalog(cfg)[prov]
 	if !ok {
@@ -262,15 +277,39 @@ func resolveProviderAPIKey(cfg ConfigMap, provider, home string) string {
 	}
 	for _, envName := range meta.EnvKeys {
 		if v := strings.TrimSpace(os.Getenv(envName)); v != "" {
+			if prov == "xai" && !looksLikeXaiCredential(v) {
+				continue
+			}
 			return v
 		}
 	}
 	if prov == strings.ToLower(strings.TrimSpace(cfgString(cfg, "llm_provider", ""))) {
 		if v := strings.TrimSpace(os.Getenv("REMEDY_LLM_API_KEY")); v != "" {
+			if prov == "xai" && !looksLikeXaiCredential(v) {
+				return ""
+			}
 			return v
 		}
 	}
 	return ""
+}
+
+// looksLikeXaiCredential accepts console keys (xai-…) and OAuth JWTs.
+func looksLikeXaiCredential(raw string) bool {
+	s := strings.TrimSpace(raw)
+	if s == "" || isPlaceholderKey(s) {
+		return false
+	}
+	low := strings.ToLower(s)
+	if strings.HasPrefix(low, "xai-") {
+		return true
+	}
+	// JWT access tokens from device OAuth.
+	if strings.HasPrefix(s, "eyJ") && strings.Count(s, ".") >= 2 {
+		return true
+	}
+	// Allow other opaque bearer shapes stored via the xAI auth path.
+	return len(s) >= 20
 }
 
 func effectiveProviderAllowlist(enabledRaw any, catalogIDs, connectedIDs map[string]struct{}) map[string]bool {

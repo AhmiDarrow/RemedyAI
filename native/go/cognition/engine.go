@@ -50,6 +50,9 @@ type Turn struct {
 	System    string // assembled system/soul/skills/memory; empty = prompt-only
 	Text      string
 	Results   []ToolResult
+	// Calls are the previous iteration's tool calls (OpenAI assistant.tool_calls).
+	// Required so follow-up messages can include tool_call_id for providers like DeepSeek.
+	Calls     []ToolCall
 	Iteration int
 }
 
@@ -141,9 +144,17 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 	toolCount := 0
 	goal := seed.Goal
 	system := seed.System
+	var prevCalls []ToolCall
 	for iteration := 1; iteration <= config.MaxIterations; iteration++ {
 		trace(StateObserve, iteration, "assemble turn")
-		turn := Turn{Goal: goal, System: system, Text: out.Text, Results: append([]ToolResult(nil), out.Results...), Iteration: iteration}
+		turn := Turn{
+			Goal:      goal,
+			System:    system,
+			Text:      out.Text,
+			Results:   append([]ToolResult(nil), out.Results...),
+			Calls:     append([]ToolCall(nil), prevCalls...),
+			Iteration: iteration,
+		}
 		trace(StateModel, iteration, "stream model")
 		events, err := e.streamWithRetry(ctx, turn, config)
 		if err != nil {
@@ -207,7 +218,10 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 			return out
 		}
 		trace(StateAct, iteration, fmt.Sprintf("execute %d tools", len(allowed)))
-		out.Results = append(out.Results, executeBatch(ctx, e.Tools, allowed, config.MaxParallelTools)...)
+		// Replace observations with this batch only — OpenAI follow-ups pair
+		// one assistant.tool_calls message with its matching tool results.
+		out.Results = executeBatch(ctx, e.Tools, allowed, config.MaxParallelTools)
+		prevCalls = append([]ToolCall(nil), allowed...)
 		trace(StateUpdate, iteration, "append observations")
 	}
 	out.Err = ErrIterationLimit
