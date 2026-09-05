@@ -10,7 +10,6 @@ the bug instead of finding it. So this file checks the harness against the
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
@@ -278,12 +277,13 @@ def test_the_fake_registry_produces_a_real_openai_tools_payload():
     assert payload[0]["function"]["parameters"]["properties"] == {"a": {"type": "number"}}
 
 
-# -- end to end through the real ReAct loop -------------------------------
+# -- Python ReAct loop retired (Go CognitionTurnRunner owns turns) ---------
 
 
 @pytest.mark.asyncio
-async def test_the_loop_runs_a_scripted_tool_turn_then_the_scripted_final_answer():
-    """The harness has to survive the real loop, not just the real parser."""
+async def test_basic_runtime_stream_fails_closed_to_go_owned_react():
+    from remedy.core.errors import RemedyError
+
     runtime = BasicRuntime(
         AgentConfig(
             llm_api_key="sk-test",
@@ -292,38 +292,7 @@ async def test_the_loop_runs_a_scripted_tool_turn_then_the_scripted_final_answer
             llm_provider="openai",
         )
     )
-    registry = FakeToolRegistry().install(runtime)
-    registry.add("add", description="add two numbers", results=[{"sum": 5}])
-
-    fake = FakeLLM([tool_turn("add", {"a": 2, "b": 3}), text_turn("The sum is 5.")])
-    with fake.patch(force_tools=True):
-        text = await runtime._call_llm("run the add tool with a=2 b=3")
-
-    assert "The sum is 5." in text
-    assert fake.request_count == 2
-    assert registry.calls_to("add") == [RecordedToolCall("add", {"a": 2, "b": 3})]
-    # The recorder is the point: assert on what was *asked*, not only answered.
-    assert fake.requests[0].model == "fake-model"
-    assert "add" in fake.requests[0].tool_names
-    assert any("sum" in t for t in fake.requests[1].tool_result_texts)
-
-
-@pytest.mark.asyncio
-async def test_a_scripted_provider_error_reaches_the_caller_rather_than_a_fake_answer():
-    runtime = BasicRuntime(
-        AgentConfig(
-            llm_api_key="sk-test",
-            llm_model="fake-model",
-            llm_base_url="http://llm.invalid/v1",
-            llm_provider="openai",
-        )
-    )
-    FakeToolRegistry().install(runtime)
-
-    fake = FakeLLM([], when_exhausted=error_turn(500, body="upstream exploded"))
-    with fake.patch(), patch("remedy.core.agent._message_wants_tools",
-                             return_value=False):
-        text = await runtime._call_llm("say hello")
-
-    assert fake.request_count >= 1
-    assert "upstream exploded" in text or "500" in text
+    with pytest.raises(RemedyError) as exc:
+        async for _ in runtime._call_llm_stream("hello"):
+            pass
+    assert exc.value.code == "REACT_GO_OWNED"
