@@ -161,6 +161,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
           Copy-Item native/zig/zig-out/bin/remedy_core.dll desktop/bin/remedy_core.dll
+          python scripts/build_rmdy_worker.py --out desktop/bin/rmdy_tool_worker.pyz
 
       - name: Upload runtime artifact
         uses: actions/upload-artifact@v4
@@ -170,6 +171,7 @@ jobs:
             desktop/bin/remedy-runtime.exe
             desktop/bin/remedy-runtime-x86_64-pc-windows-msvc.exe
             desktop/bin/remedy_core.dll
+            desktop/bin/rmdy_tool_worker.pyz
           retention-days: 1
 
   build-tauri:
@@ -314,6 +316,8 @@ jobs:
           zig build -Doptimize=ReleaseSafe
           cp zig-out/lib/libremedy_core.so ../../desktop/bin/libremedy_core.so
           chmod +x ../../desktop/bin/remedy-runtime ../../desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
+          cd ../..
+          python scripts/build_rmdy_worker.py --out desktop/bin/rmdy_tool_worker.pyz
 
       - name: Upload Linux runtime artifact
         uses: actions/upload-artifact@v4
@@ -323,6 +327,7 @@ jobs:
             desktop/bin/remedy-runtime
             desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
             desktop/bin/libremedy_core.so
+            desktop/bin/rmdy_tool_worker.pyz
           retention-days: 1
 
   build-tauri-linux:

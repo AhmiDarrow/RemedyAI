@@ -140,17 +140,29 @@ def _workspace_root(inp: Mapping[str, Any] | None = None) -> Path:
                     return Path(val).expanduser().absolute()
 
     try:
-        user_home = Path.home().expanduser().resolve()
-    except OSError:
-        user_home = Path.home().expanduser().absolute()
-
-    try:
         cwd = Path.cwd().resolve()
     except OSError:
         cwd = Path.cwd().absolute()
     if not _looks_like_install_dir(cwd):
         return cwd
-    return user_home
+
+    # Narrow default — never the entire user profile.
+    try:
+        user_home = Path.home().expanduser().resolve()
+    except OSError:
+        user_home = Path.home().expanduser().absolute()
+    docs = user_home / "Documents" / "Remedy"
+    try:
+        docs.mkdir(parents=True, exist_ok=True)
+        return docs.resolve()
+    except OSError:
+        pass
+    fallback = user_home / ".remedy" / "workspace"
+    try:
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback.resolve()
+    except OSError:
+        return user_home
 
 
 def _resolve_workspace_path(path: str, inp: Mapping[str, Any] | None = None) -> Path:
@@ -177,6 +189,17 @@ def _is_credential_name(name: str) -> bool:
         return lowered in {".env", ".npmrc", ".pypirc"} or lowered.endswith(
             (".pem", ".key", ".p12", ".pfx")
         )
+
+
+def _is_junk_listing_name(name: str) -> bool:
+    """Hide corrupt / private-use names (e.g. 'C' + U+F03A) from listings."""
+    if not name or name in {".", ".."}:
+        return True
+    for ch in name:
+        o = ord(ch)
+        if o < 32 or o == 127 or 0xE000 <= o <= 0xF8FF:
+            return True
+    return False
 
 
 def _workspace_read(inp: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -246,7 +269,11 @@ def _workspace_list(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     root = _workspace_root(inp)
     entries = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
     visible = [
-        p for p in entries if p.name not in _SKIP_DIR_NAMES and not _is_credential_name(p.name)
+        p
+        for p in entries
+        if p.name not in _SKIP_DIR_NAMES
+        and not _is_credential_name(p.name)
+        and not _is_junk_listing_name(p.name)
     ]
     page = visible[offset : offset + limit]
     items: list[dict[str, str]] = []

@@ -285,14 +285,23 @@ func resolveRMDYPyz() (string, bool, error) {
 	}
 	candidates := []string{}
 	if exe, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "rmdy_tool_worker.pyz"))
-		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "bin", "rmdy_tool_worker.pyz"))
+		dir := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(dir, "rmdy_tool_worker.pyz"),
+			filepath.Join(dir, "bin", "rmdy_tool_worker.pyz"),
+			filepath.Join(dir, "resources", "rmdy_tool_worker.pyz"),
+			filepath.Join(dir, "..", "resources", "rmdy_tool_worker.pyz"),
+		)
+	}
+	if res := strings.TrimSpace(os.Getenv("REMEDY_RESOURCES")); res != "" {
+		candidates = append(candidates, filepath.Join(res, "rmdy_tool_worker.pyz"))
 	}
 	if home := strings.TrimSpace(os.Getenv("REMEDY_HOME")); home != "" {
 		candidates = append(candidates, filepath.Join(home, "bin", "rmdy_tool_worker.pyz"))
 	}
 	if cwd, err := os.Getwd(); err == nil {
 		candidates = append(candidates, filepath.Join(cwd, "dist", "rmdy_tool_worker.pyz"))
+		candidates = append(candidates, filepath.Join(cwd, "desktop", "bin", "rmdy_tool_worker.pyz"))
 	}
 	for _, c := range candidates {
 		if st, err := os.Stat(c); err == nil && !st.IsDir() {
@@ -395,7 +404,7 @@ func enrichWorkerEnv(env map[string]string, cwd string) {
 // resolveDefaultWorkspace picks a workspace root that is never the packaged
 // Desktop install folder (cwd when remedy-runtime is launched as a sidecar).
 // Order: REMEDY_PROJECT_PATH → config.toml project_path → repo root (dev) →
-// user home.
+// ~/Documents/Remedy (or ~/.remedy/workspace) — not the entire user home.
 func resolveDefaultWorkspace(env map[string]string, start string) string {
 	if p := strings.TrimSpace(env["REMEDY_PROJECT_PATH"]); p != "" {
 		return p
@@ -415,11 +424,29 @@ func resolveDefaultWorkspace(env map[string]string, start string) string {
 	if repo := findRepoRoot(start); repo != "" && !looksLikeInstallDir(repo) {
 		return repo
 	}
-	if userHome, err := os.UserHomeDir(); err == nil && strings.TrimSpace(userHome) != "" {
-		return userHome
+	if owner := defaultOwnerWorkspaceDir(); owner != "" {
+		return owner
 	}
 	if start != "" && !looksLikeInstallDir(start) {
 		return start
+	}
+	return ""
+}
+
+// defaultOwnerWorkspaceDir is a narrow folder for agency tools when no
+// session/config project is set — never the whole user profile.
+func defaultOwnerWorkspaceDir() string {
+	userHome, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(userHome) == "" {
+		return ""
+	}
+	docs := filepath.Join(userHome, "Documents", "Remedy")
+	if err := os.MkdirAll(docs, 0o755); err == nil {
+		return docs
+	}
+	fallback := filepath.Join(userHome, ".remedy", "workspace")
+	if err := os.MkdirAll(fallback, 0o755); err == nil {
+		return fallback
 	}
 	return ""
 }

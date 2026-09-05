@@ -38,6 +38,12 @@ def test_tauri_external_bin_is_remedy_runtime_win_and_linux() -> None:
     res_blob = json.dumps(resources).lower()
     assert "remedy-desktop" not in res_blob
     assert "remedy_core.dll" in res_blob
+    assert "rmdy_tool_worker.pyz" in res_blob
+
+    linux = json.loads((TAURI / "tauri.linux.conf.json").read_text(encoding="utf-8"))
+    linux_res = json.dumps(linux.get("bundle", {}).get("resources") or {}).lower()
+    assert "rmdy_tool_worker.pyz" in linux_res
+    assert "libremedy_core.so" in linux_res
 
 
 def test_lib_rs_launch_path_never_joins_remedy_desktop() -> None:

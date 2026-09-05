@@ -61,6 +61,7 @@ def test_no_pyinstaller_or_remedy_desktop_sidecar(bd) -> None:
     assert not hasattr(bd, "core_library_add_binary")
     assert hasattr(bd, "runtime_bin_paths")
     assert hasattr(bd, "stage_core")
+    assert hasattr(bd, "stage_rmdy_worker")
     assert hasattr(bd, "build_runtime")
 
 
@@ -78,8 +79,9 @@ def test_stage_removes_legacy_remedy_desktop(bd, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(bd, "check_third_party_notices", lambda: None)
     monkeypatch.setattr(bd, "build_runtime", lambda: None)
     monkeypatch.setattr(bd, "stage_core", lambda *a, **k: None)
+    monkeypatch.setattr(bd, "stage_rmdy_worker", lambda *a, **k: None)
 
-    bd.build(skip_runtime=True, skip_core=True)
+    bd.build(skip_runtime=True, skip_core=True, skip_rmdy_worker=True)
     assert list(desktop_bin.glob("remedy-desktop*")) == []
 
 

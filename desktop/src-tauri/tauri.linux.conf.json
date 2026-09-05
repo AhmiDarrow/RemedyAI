@@ -14,6 +14,7 @@
     "externalBin": ["../bin/remedy-runtime"],
     "resources": {
       "../bin/libremedy_core.so": "libremedy_core.so",
+      "../bin/rmdy_tool_worker.pyz": "rmdy_tool_worker.pyz",
       "../dist": "webui",
       "windows/wslg_workarea.ps1": "windows/wslg_workarea.ps1"
     },

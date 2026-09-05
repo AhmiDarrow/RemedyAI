@@ -30,11 +30,15 @@ func (s *Server) handleProjectsScan(w http.ResponseWriter, r *http.Request) {
 	scope := effectiveAccessScope(s.configAccessScope(), s.configProjectRaw())
 	proj := s.configProjectRaw()
 	if isUnsetProjectPath(proj) {
-		if uh := s.userHomeForWorkspace(); uh != "" {
+		if owner := defaultOwnerFilesBase(); owner != "" {
+			proj = owner
+		} else if uh := s.userHomeForWorkspace(); uh != "" {
 			proj = uh
 		} else {
 			cwd, _ := os.Getwd()
-			proj = cwd
+			if !isPackagedInstallDir(cwd) {
+				proj = cwd
+			}
 		}
 	}
 	roots := allowedReadRoots(scope, proj, s.userHomeForWorkspace())

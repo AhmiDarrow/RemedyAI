@@ -123,6 +123,27 @@ func TestResolveDefaultWorkspaceNeverInstallDir(t *testing.T) {
 	}
 }
 
+func TestResolveDefaultWorkspaceUsesDocumentsRemedy(t *testing.T) {
+	install := t.TempDir()
+	if err := os.WriteFile(filepath.Join(install, "remedy-runtime.exe"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(install, "webui"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(install, "windows"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := resolveDefaultWorkspace(map[string]string{}, install)
+	if got == "" || looksLikeInstallDir(got) {
+		t.Fatalf("workspace = %q (must not be empty or install)", got)
+	}
+	if !strings.Contains(filepath.ToSlash(got), "/Documents/Remedy") &&
+		!strings.Contains(filepath.ToSlash(got), "/.remedy/workspace") {
+		t.Fatalf("workspace = %q want Documents/Remedy or .remedy/workspace", got)
+	}
+}
+
 func TestProjectPathFromConfigUnescapesTOMLBackslashes(t *testing.T) {
 	home := t.TempDir()
 	proj := filepath.Join(home, "EscapedProj")

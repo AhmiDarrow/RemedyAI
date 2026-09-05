@@ -312,11 +312,15 @@ func (s *Server) readImportPath(raw string) (string, error) {
 	scope := effectiveAccessScope(s.configAccessScope(), s.configProjectRaw())
 	proj := s.configProjectRaw()
 	if isUnsetProjectPath(proj) {
-		if uh := s.userHomeForWorkspace(); uh != "" {
+		if owner := defaultOwnerFilesBase(); owner != "" {
+			proj = owner
+		} else if uh := s.userHomeForWorkspace(); uh != "" {
 			proj = uh
 		} else {
 			cwd, _ := os.Getwd()
-			proj = cwd
+			if !isPackagedInstallDir(cwd) {
+				proj = cwd
+			}
 		}
 	}
 	roots := allowedReadRoots(scope, proj, s.userHomeForWorkspace())

@@ -102,11 +102,60 @@ func (s *Server) resolveFilesBase(sessionID string) (base string, source string)
 		}
 		return clampFilesBase(raw), "config"
 	}
-	if uh := s.userHomeForWorkspace(); uh != "" {
-		return clampFilesBase(uh), "home"
+	if owner := defaultOwnerFilesBase(); owner != "" {
+		return clampFilesBase(owner), "owner_workspace"
 	}
 	cwd, _ := os.Getwd()
+	if isPackagedInstallDir(cwd) {
+		if uh := s.userHomeForWorkspace(); uh != "" {
+			return clampFilesBase(uh), "home"
+		}
+		return clampFilesBase(""), "unset"
+	}
 	return clampFilesBase(cwd), "cwd"
+}
+
+// defaultOwnerFilesBase mirrors the RMDY worker default: Documents/Remedy
+// (or ~/.remedy/workspace), not the entire user profile.
+func defaultOwnerFilesBase() string {
+	uh, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(uh) == "" {
+		return ""
+	}
+	docs := filepath.Join(uh, "Documents", "Remedy")
+	if abs, err := ensureDir(docs); err == nil {
+		return abs
+	}
+	fallback := filepath.Join(uh, ".remedy", "workspace")
+	if abs, err := ensureDir(fallback); err == nil {
+		return abs
+	}
+	return ""
+}
+
+func isPackagedInstallDir(path string) bool {
+	p := filepath.Clean(strings.TrimSpace(path))
+	if p == "" {
+		return false
+	}
+	for _, name := range []string{
+		"Remedy Desktop.exe",
+		"remedy-runtime.exe",
+		"remedy-runtime",
+		"uninstall.exe",
+	} {
+		if st, err := os.Stat(filepath.Join(p, name)); err == nil && !st.IsDir() {
+			return true
+		}
+	}
+	webui := filepath.Join(p, "webui")
+	windows := filepath.Join(p, "windows")
+	if st, err := os.Stat(webui); err == nil && st.IsDir() {
+		if st2, err2 := os.Stat(windows); err2 == nil && st2.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func listFileEntries(listed, base string) []fileEntry {
