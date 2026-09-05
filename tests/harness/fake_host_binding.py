@@ -840,6 +840,32 @@ class FakeHostConpty:
 
         raise HostError('process_spawn_authorized', STATUS_OPERATION_FAILED, os_error=1)
 
+    def process_spawn_piped_authorized(
+        self,
+        argv: Sequence[str],
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        *,
+        token: bytes,
+        subject: str = 'agent:remedy',
+        scope: str = 'workspace:local',
+        owner_confirmed: bool = False,
+        now_ms: int | None = None,
+        write_roots: Sequence[str] | None = None,
+    ) -> Any:
+        """Record authorized piped spawn; tests that need live pipes patch this."""
+        _ = (cwd, env, subject, scope, owner_confirmed, now_ms, write_roots)
+        self.calls.append(
+            (
+                'process_spawn_piped_authorized',
+                (list(argv), cwd, env, bytes(token), subject, scope, owner_confirmed, now_ms, write_roots),
+                {},
+            )
+        )
+        from remedy.core.computer.host_binding import STATUS_OPERATION_FAILED, HostError
+
+        raise HostError('process_spawn_piped_authorized', STATUS_OPERATION_FAILED, os_error=1)
+
     def process_exec_capture_authorized(
         self,
         argv: Sequence[str],

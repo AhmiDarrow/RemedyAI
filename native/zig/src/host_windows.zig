@@ -1087,6 +1087,151 @@ pub fn processClose(handle: u64) Error!void {
 }
 
 // ---------------------------------------------------------------------------
+// Interactive 3-pipe spawn (stdin / stdout / stderr separate; Python owns pipes)
+// ---------------------------------------------------------------------------
+
+pub const PipedSpawned = struct {
+    pid: u32,
+    handle: u64, // Process* — wait/close via processWait/processClose
+    stdin_write: u64,
+    stdout_read: u64,
+    stderr_read: u64,
+};
+
+/// Hidden CreateProcess with separate stdin/stdout/stderr pipes inside a
+/// kill-on-close job. Parent ends are non-inheritable and transferred to the
+/// caller (not closed by `processClose`). Equal-or-better than Popen pipes.
+pub fn spawnPiped3(argv_json: []const u8, cwd: []const u8, env_json: []const u8) Error!PipedSpawned {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const argv = try host.parseArgv(gpa, argv_json);
+    const command_line = try host.commandLine(gpa, argv);
+    const directory: ?[*:0]const u16 = if (cwd.len == 0) null else (try host.utf8ToUtf16Z(gpa, cwd)).ptr;
+    const environment: ?*anyopaque = if (try host.parseEnv(gpa, env_json)) |pairs|
+        @ptrCast((try host.envBlock(gpa, pairs)).ptr)
+    else
+        null;
+
+    var sa = SECURITY_ATTRIBUTES{
+        .nLength = @sizeOf(SECURITY_ATTRIBUTES),
+        .lpSecurityDescriptor = null,
+        .bInheritHandle = 1,
+    };
+
+    var child_stdin: ?HANDLE = null;
+    var parent_stdin: ?HANDLE = null;
+    if (CreatePipe(&child_stdin, &parent_stdin, &sa, 0) == 0) return fail();
+    if (SetHandleInformation(parent_stdin.?, HANDLE_FLAG_INHERIT, 0) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        return fail();
+    }
+
+    var parent_stdout: ?HANDLE = null;
+    var child_stdout: ?HANDLE = null;
+    if (CreatePipe(&parent_stdout, &child_stdout, &sa, 0) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        return fail();
+    }
+    if (SetHandleInformation(parent_stdout.?, HANDLE_FLAG_INHERIT, 0) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        return fail();
+    }
+
+    var parent_stderr: ?HANDLE = null;
+    var child_stderr: ?HANDLE = null;
+    if (CreatePipe(&parent_stderr, &child_stderr, &sa, 0) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        return fail();
+    }
+    if (SetHandleInformation(parent_stderr.?, HANDLE_FLAG_INHERIT, 0) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        closeOptHandle(parent_stderr);
+        closeOptHandle(child_stderr);
+        return fail();
+    }
+
+    const job = CreateJobObjectW(null, null) orelse {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        closeOptHandle(parent_stderr);
+        closeOptHandle(child_stderr);
+        return fail();
+    };
+    var limits = std.mem.zeroes(JOBOBJECT_EXTENDED_LIMIT_INFORMATION);
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, @sizeOf(JOBOBJECT_EXTENDED_LIMIT_INFORMATION)) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        closeOptHandle(parent_stderr);
+        closeOptHandle(child_stderr);
+        _ = CloseHandle(job);
+        return fail();
+    }
+
+    var startup = std.mem.zeroes(STARTUPINFOW);
+    startup.cb = @sizeOf(STARTUPINFOW);
+    startup.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+    startup.wShowWindow = SW_HIDE;
+    startup.hStdInput = child_stdin;
+    startup.hStdOutput = child_stdout;
+    startup.hStdError = child_stderr;
+    var info: PROCESS_INFORMATION = undefined;
+    const flags = CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED;
+    if (CreateProcessW(null, command_line.ptr, null, null, 1, flags, environment, directory, &startup, &info) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        closeOptHandle(parent_stderr);
+        closeOptHandle(child_stderr);
+        _ = CloseHandle(job);
+        return fail();
+    }
+    closeOptHandle(child_stdin);
+    closeOptHandle(child_stdout);
+    closeOptHandle(child_stderr);
+    errdefer {
+        _ = TerminateProcess(info.hProcess, 1);
+        _ = CloseHandle(info.hThread);
+        _ = CloseHandle(info.hProcess);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(parent_stderr);
+        _ = CloseHandle(job);
+    }
+    if (AssignProcessToJobObject(job, info.hProcess) == 0) return fail();
+    if (ResumeThread(info.hThread) == std.math.maxInt(DWORD)) return fail();
+    _ = CloseHandle(info.hThread);
+
+    const process = allocator.create(Process) catch return error.OutOfMemory;
+    process.* = .{ .process = info.hProcess, .job = job, .pid = info.dwProcessId };
+    return .{
+        .pid = info.dwProcessId,
+        .handle = @intFromPtr(process),
+        .stdin_write = @intFromPtr(parent_stdin.?),
+        .stdout_read = @intFromPtr(parent_stdout.?),
+        .stderr_read = @intFromPtr(parent_stderr.?),
+    };
+}
+
+// ---------------------------------------------------------------------------
 // Interactive piped spawn (stdin/stdout for HostSession; stderr→stdout)
 // ---------------------------------------------------------------------------
 
@@ -1698,4 +1843,43 @@ test "spawn honours cwd and environment" {
     try std.testing.expect(outcome.exited);
     try std.testing.expectEqual(@as(u32, 7), outcome.exit_code);
     try std.testing.expectError(error.InvalidArgument, processWait(0, 0));
+}
+
+test "spawnPiped3 delivers stdout on a separate pipe" {
+    // Echo-only proves the parent stdout handle works; Python tests cover
+    // interactive stdin round-trip (JSON-RPC) through the authorized ABI.
+    const spawned = try spawnPiped3(
+        "[\"cmd\", \"/c\", \"echo piped-ok\"]",
+        "",
+        "",
+    );
+    const stdin_h: ?HANDLE = @ptrFromInt(spawned.stdin_write);
+    const stdout_h: ?HANDLE = @ptrFromInt(spawned.stdout_read);
+    const stderr_h: ?HANDLE = @ptrFromInt(spawned.stderr_read);
+    defer {
+        closeOptHandle(stdin_h);
+        closeOptHandle(stdout_h);
+        closeOptHandle(stderr_h);
+        processClose(spawned.handle) catch {};
+    }
+    try std.testing.expect(spawned.pid > 0);
+
+    var buf: [256]u8 = undefined;
+    var got: usize = 0;
+    var spins: u32 = 0;
+    while (spins < 200) : (spins += 1) {
+        var avail: DWORD = 0;
+        if (PeekNamedPipe(stdout_h.?, null, 0, null, &avail, null) != 0 and avail > 0) {
+            var n: DWORD = 0;
+            const want: DWORD = @intCast(@min(buf.len - got, @as(usize, avail)));
+            if (ReadFile(stdout_h.?, buf[got..].ptr, want, &n, null) != 0) {
+                got += n;
+            }
+        }
+        if (std.mem.indexOf(u8, buf[0..got], "piped-ok") != null) break;
+        const wait = try processWait(spawned.handle, 20);
+        if (wait.exited and avail == 0) break;
+        Sleep(20);
+    }
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..got], "piped-ok") != null);
 }

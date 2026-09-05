@@ -114,19 +114,13 @@ def open_folder_os(path: str | Path) -> dict[str, Any]:
         method = "startfile"
     else:
         import shutil
-        import subprocess
+
+        from remedy.execution.process import retain_detached, spawn_hidden
 
         opener = shutil.which("xdg-open") or shutil.which("open")
         if not opener:
             raise ValueError("no folder opener on this host (xdg-open)")
-        subprocess.Popen(  # noqa: S603
-            [opener, str(p)],
-            start_new_session=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-            close_fds=True,
-        )
+        retain_detached(spawn_hidden([opener, str(p)]))
         method = "xdg-open"
     return {"ok": True, "method": method, "target": str(p)}
 

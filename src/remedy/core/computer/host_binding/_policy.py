@@ -436,6 +436,85 @@ def process_spawn_authorized(
     return pid.value, handle.value
 
 
+class PipedSpawnResult(NamedTuple):
+    """Outcome of :func:`process_spawn_piped_authorized` (OS handles, not files)."""
+
+    pid: int
+    handle: int
+    stdin_write: int
+    stdout_read: int
+    stderr_read: int
+
+
+def process_spawn_piped_authorized(
+    argv: Sequence[str],
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+    *,
+    token: bytes,
+    subject: str = DEFAULT_SPAWN_SUBJECT,
+    scope: str = DEFAULT_SPAWN_SCOPE,
+    owner_confirmed: bool = False,
+    now_ms: int | None = None,
+    write_roots: Sequence[str] | None = None,
+) -> PipedSpawnResult:
+    """Authorized interactive 3-pipe spawn. *argv[0]* must be absolute.
+
+    Returns parent OS handles (Windows ``HANDLE`` or POSIX fd as ``int``).
+    Caller owns the three pipe ends; ``process_close(handle)`` does not close
+    them. No unsigned soft fallback. *write_roots* semantics match
+    :func:`process_spawn_authorized`.
+    """
+    if write_roots is not None:
+        write_jail_set_roots(write_roots)
+    library = _lib()
+    argv_raw = _utf8(json.dumps([str(a) for a in argv]))
+    cwd_raw = _utf8(str(cwd)) if cwd else b""
+    env_raw = (
+        _utf8(json.dumps({str(k): str(v) for k, v in env.items()}))
+        if env is not None
+        else b""
+    )
+    subject_raw = _utf8(subject)
+    scope_raw = _utf8(scope)
+    token_raw = bytes(token)
+    when = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    pid, handle = c_uint32(), c_uint64()
+    stdin_h, stdout_h, stderr_h = c_uint64(), c_uint64(), c_uint64()
+    _check(
+        library,
+        "process_spawn_piped_authorized",
+        library.remedy_core_process_spawn_piped_authorized(
+            argv_raw,
+            len(argv_raw),
+            cwd_raw,
+            len(cwd_raw),
+            env_raw,
+            len(env_raw),
+            (c_uint8 * len(token_raw)).from_buffer_copy(token_raw),
+            len(token_raw),
+            subject_raw,
+            len(subject_raw),
+            scope_raw,
+            len(scope_raw),
+            1 if owner_confirmed else 0,
+            when,
+            ctypes.byref(pid),
+            ctypes.byref(handle),
+            ctypes.byref(stdin_h),
+            ctypes.byref(stdout_h),
+            ctypes.byref(stderr_h),
+        ),
+    )
+    return PipedSpawnResult(
+        pid=int(pid.value),
+        handle=int(handle.value),
+        stdin_write=int(stdin_h.value),
+        stdout_read=int(stdout_h.value),
+        stderr_read=int(stderr_h.value),
+    )
+
+
 class ExecCaptureResult(NamedTuple):
     """Outcome of :func:`process_exec_capture_authorized`."""
 

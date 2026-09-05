@@ -60,24 +60,57 @@ def test_phase1_long_lived_hosts_use_spawn_hidden_not_popen() -> None:
             assert "subprocess.Popen" not in source, mod.__name__
 
 
-def test_voice_bridge_pipe_spawn_fail_closed(
+def test_voice_bridge_uses_spawn_piped(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Interactive voice worker pipes have no Zig ABI — fail closed HostError."""
+    """Voice worker starts through Zig authorized 3-pipe spawn."""
+    from remedy.execution.process import PipedProcess
     from remedy.voice import bridge as bridge_mod
-    from remedy.voice.bridge import VoiceBridge, WorkerError
+    from remedy.voice.bridge import VoiceBridge
 
-    monkeypatch.setattr(P, "require_process_host", lambda: None)
+    class _FakePipe:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+        def write(self, _data: str) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+        def readline(self) -> str:
+            return ""
+
+        def __iter__(self):
+            return iter(())
+
+    seen: list[list[str]] = []
+
+    def fake_spawn(argv, **kwargs):
+        seen.append(list(argv))
+        assert kwargs.get("text") is True
+        return PipedProcess(4242, 1, _FakePipe(), _FakePipe(), _FakePipe())
+
+    monkeypatch.setattr(P, "spawn_piped", fake_spawn)
     monkeypatch.setattr(
         bridge_mod.rt,
         "python_path",
         lambda *_a, **_k: tmp_path / "python.exe",
     )
+    monkeypatch.setattr(
+        bridge_mod.rt,
+        "child_env",
+        lambda *_a, **_k: {"PATH": "x"},
+    )
     (tmp_path / "python.exe").write_text("", encoding="utf-8")
     vb = VoiceBridge(home_dir=tmp_path)
-    with pytest.raises(WorkerError) as raised:
-        vb._spawn()
-    assert "3-pipe" in str(raised.value).lower() or "pipes" in str(raised.value).lower()
+    proc = vb._spawn()
+    assert isinstance(proc, PipedProcess)
+    assert proc.pid == 4242
+    assert seen and "remedy.voice.worker" in seen[0]
 
 
 def test_voice_stream_pip_uses_run_hidden(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -250,7 +283,7 @@ def test_run_hidden_capture_uses_exec_capture(
     assert seen and seen[0][0] == sys.executable
 
 
-def test_piped_soft_helpers_fail_closed_family(
+def test_piped_soft_helpers_fail_closed_without_pipes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     if sys.platform not in ("win32", "linux"):
@@ -261,6 +294,38 @@ def test_piped_soft_helpers_fail_closed_family(
     with pytest.raises(HostError) as raised:
         P.popen_hidden([sys.executable, "-c", "pass"])
     assert raised.value.status == STATUS_UNSUPPORTED
+
+
+def test_popen_hidden_with_pipes_uses_spawn_piped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from remedy.execution.process import PipedProcess
+    import subprocess
+
+    class _FakePipe:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    seen: list[list[str]] = []
+
+    def fake_spawn(argv, **kwargs):
+        seen.append(list(argv))
+        assert kwargs.get("text") is True
+        return PipedProcess(7, 1, _FakePipe(), _FakePipe(), _FakePipe())
+
+    monkeypatch.setattr(P, "require_process_host", lambda: None)
+    monkeypatch.setattr(P, "spawn_piped", fake_spawn)
+    proc = P.popen_hidden(
+        [sys.executable, "-c", "pass"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert isinstance(proc, PipedProcess)
+    assert seen and seen[0][0] == sys.executable
 
 
 @pytest.mark.asyncio

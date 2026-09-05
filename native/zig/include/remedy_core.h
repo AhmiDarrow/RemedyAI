@@ -15,13 +15,14 @@ extern "C" {
  * capture, PNG, input, windows, clipboard and hidden process control).
  * Additive on the same ABI 5: authorized spawn (policy + HMAC capability
  * tokens), signing-key set/clear, argv hash, token issue, authorized
- * one-shot exec capture (stdout/stderr + timeout/kill-tree), write-jail /
- * workdir roots (set/clear/check), HostSession orchestration (open/run/
- * cwd/close + wrap/split protocol), host diagnose/dialect/stretch, and
- * looks_like_powershell / rewrite_posix_argv (argv-head twin of translate).
- * Production Python spawn/session paths use the authorized exports; the
- * unsigned process_spawn_hidden / conpty_spawn / host_session_open symbols
- * remain for low-level tests.
+ * one-shot exec capture (stdout/stderr + timeout/kill-tree), authorized
+ * interactive 3-pipe spawn (separate stdin/stdout/stderr OS handles for
+ * Python workers), write-jail / workdir roots (set/clear/check), HostSession
+ * orchestration (open/run/cwd/close + wrap/split protocol), host
+ * diagnose/dialect/stretch, and looks_like_powershell / rewrite_posix_argv
+ * (argv-head twin of translate). Production Python spawn/session paths use
+ * the authorized exports; the unsigned process_spawn_hidden / conpty_spawn /
+ * host_session_open symbols remain for low-level tests.
  * Every host/UIA/ConPTY/policy function returns a remedy_core_status. On a
  * non-Windows build each host/UIA/ConPTY spawn function returns
  * REMEDY_CORE_UNSUPPORTED and writes nothing; host_op_prepare,
@@ -450,6 +451,24 @@ int32_t remedy_core_process_spawn_authorized(
     uint8_t owner_confirmed,
     uint64_t now_ms,
     uint32_t *out_pid, uint64_t *out_handle
+);
+
+/* Policy + token authorize, then interactive 3-pipe spawn (win32 + linux).
+ * Parent owns *out_stdin_write / *out_stdout_read / *out_stderr_read as OS
+ * handles (Windows HANDLE or POSIX fd cast to uint64). *out_handle is the
+ * same job/process-group handle as spawn_authorized — process_close does not
+ * close the pipe ends. No soft unsigned fallback. */
+int32_t remedy_core_process_spawn_piped_authorized(
+    const uint8_t *argv_json, size_t argv_len,
+    const uint8_t *cwd, size_t cwd_len,
+    const uint8_t *env_json, size_t env_len,
+    const uint8_t *token, size_t token_len,
+    const uint8_t *subject, size_t subject_len,
+    const uint8_t *scope, size_t scope_len,
+    uint8_t owner_confirmed,
+    uint64_t now_ms,
+    uint32_t *out_pid, uint64_t *out_handle,
+    uint64_t *out_stdin_write, uint64_t *out_stdout_read, uint64_t *out_stderr_read
 );
 
 /* Policy + token authorize, then ConPTY spawn (same auth contract). */
