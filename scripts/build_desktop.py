@@ -1,7 +1,6 @@
 """Stage Go remedy-runtime + Zig remedy_core for Desktop packaging.
 
-Packaged Desktop and local ``tauri build`` / ``tauri:dev`` (with
-``REMEDY_RUNTIME_SIDECAR=1``) need:
+Packaged Desktop and local ``tauri build`` / ``tauri:dev`` need:
 
 * ``desktop/bin/remedy-runtime`` (+ Tauri target-triple copy) — ``externalBin``
 * ``desktop/bin/remedy_core.dll`` / ``libremedy_core.so`` / ``libremedy_core.dylib``

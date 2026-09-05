@@ -12,11 +12,12 @@ medical or clinical product). Current package series: **0.50.x** (see root
 **One dev build** on the default ports (`127.0.0.1:7400`, `~/.remedy`, Vite
 `localhost:5173`). Run `cd desktop && npm run tauri:dev`.
 
-By default `tauri:dev` may launch the **live Python `remedy` CLI** (repo
-`.venv`) as a thin launcher that execs Go `remedy-runtime` on `:7400` — it does
-**not** bind FastAPI/uvicorn. Set `REMEDY_RUNTIME_SIDECAR=1` to skip Python and
-spawn `remedy-runtime` directly. Quit any installed release first (shared port
-`7400` and `~/.remedy`).
+`tauri:dev` launches staged Go `remedy-runtime` from `desktop/bin` whenever it
+is present (same binary packaged builds use). When the binary is missing, debug
+falls back to the live Python `remedy` CLI only as a thin launcher that execs
+`remedy-runtime` — it does **not** bind FastAPI/uvicorn. Set
+`REMEDY_RUNTIME_SIDECAR=1` to fail closed if the Go binary is missing. Quit any
+installed release first (shared port `7400` and `~/.remedy`).
 
 ### Always-ready window (close → tray) — **0.20.0+**
 
@@ -86,11 +87,10 @@ non-default port) and ships the Zig `remedy_core` shared library as a resource.
 **`remedy serve` also execs `remedy-runtime`** — Python no longer starts
 uvicorn on `:7400` (fail closed if the binary is missing). **`remedy-desktop`
 is not built or shipped** — there is no Python fallback launch path in
-installers. `tauri:dev` optionally uses the live Python venv **only as a
-launcher** for `remedy serve` → `remedy-runtime`; set
-`REMEDY_RUNTIME_SIDECAR=1` to spawn the Go binary directly. FastAPI
-`create_app` is **test-only** (pytest / TestClient). Python worker entry:
-`python -m remedy.runtime.rmdy_tool_worker`.
+installers. `tauri:dev` prefers staged `remedy-runtime` the same way; the live
+Python venv is only a last-resort launcher for `remedy serve` →
+`remedy-runtime`. FastAPI `create_app` is **test-only** (pytest / TestClient).
+Python worker entry: `python -m remedy.runtime.rmdy_tool_worker`.
 
 **Remaining gaps (worker / parity — not dual-serve):**
 

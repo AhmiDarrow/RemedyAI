@@ -316,7 +316,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Start CLI computer host (default: off so Desktop owns the rail)",
     )
 
-    # remedy serve
+    # remedy serve — hands off to Go remedy-runtime (no Python uvicorn).
     serve_cmd = sub.add_parser(
         "serve",
         help="Start remedy-runtime on the local API (default 127.0.0.1:7400)",
@@ -327,26 +327,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Loopback bind host only (remedy-runtime refuses non-loopback)",
     )
     serve_cmd.add_argument("--port", type=int, default=7400)
-    serve_cmd.add_argument("--config", dest="config_file", default=None)
+    # Accepted no-ops: older Desktop/scripts still pass these; Go owns :7400.
     serve_cmd.add_argument(
         "--skip-setup",
         action="store_true",
-        help="Skip first-run setup wizard and remember choice (won't ask again)",
+        help=argparse.SUPPRESS,
     )
     serve_cmd.add_argument(
         "--force-setup",
         action="store_true",
-        help="Force the setup wizard even if setup was completed",
+        help=argparse.SUPPRESS,
+    )
+    serve_cmd.add_argument(
+        "--config",
+        dest="config_file",
+        default=None,
+        help=argparse.SUPPRESS,
     )
     serve_cmd.add_argument(
         "--computer-host",
         action="store_true",
-        help="Start in-process CLI computer host so browser navigate works without Desktop",
+        help=argparse.SUPPRESS,
     )
     serve_cmd.add_argument(
         "--no-computer-host",
         action="store_true",
-        help="Never start CLI computer host (Desktop owns the rail)",
+        help=argparse.SUPPRESS,
     )
 
     # remedy mcp serve — expose skills to external MCP clients (stdio)

@@ -1,9 +1,11 @@
 """Dev launcher for tauri:dev — live checkout via uv/python (optional).
 
-Tauri may spawn: ``remedy --home <path> serve --host 127.0.0.1 --port 7400``.
-That CLI path hands off to Go ``remedy-runtime`` (no Python uvicorn on :7400).
-This script re-execs into the repo checkout so launcher / worker fixes apply
-without rebuilding. Prefer ``REMEDY_RUNTIME_SIDECAR=1`` to skip Python entirely.
+Dev fallback when staged ``remedy-runtime`` is missing: Tauri may spawn
+``remedy --home <path> serve --host 127.0.0.1 --port 7400``. That CLI path
+hands off to Go ``remedy-runtime`` (no Python uvicorn on :7400). This script
+re-execs into the repo checkout so launcher / worker fixes apply without
+rebuilding. Prefer staging ``desktop/bin/remedy-runtime`` (or set
+``REMEDY_RUNTIME_SIDECAR=1`` to fail closed when it is absent).
 """
 
 from __future__ import annotations

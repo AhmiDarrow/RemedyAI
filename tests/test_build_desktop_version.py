@@ -83,6 +83,34 @@ def test_stage_removes_legacy_remedy_desktop(bd, tmp_path, monkeypatch) -> None:
     assert list(desktop_bin.glob("remedy-desktop*")) == []
 
 
+def test_tauri_external_bin_is_runtime_only() -> None:
+    """Phase 6: packaged Desktop launches remedy-runtime, never remedy-desktop."""
+    import json
+
+    for rel in (
+        "desktop/src-tauri/tauri.conf.json",
+        "desktop/src-tauri/tauri.linux.conf.json",
+    ):
+        conf = json.loads((ROOT / rel).read_text(encoding="utf-8"))
+        bins = conf.get("bundle", {}).get("externalBin") or []
+        assert bins == ["../bin/remedy-runtime"], rel
+        resources = conf.get("bundle", {}).get("resources") or {}
+        resource_text = json.dumps(resources)
+        assert "remedy-desktop" not in resource_text, rel
+
+    windows = json.loads(
+        (ROOT / "desktop/src-tauri/tauri.windows.conf.json").read_text(encoding="utf-8")
+    )
+    assert "remedy-desktop" not in json.dumps(windows.get("bundle", {}).get("resources") or {})
+
+    lib_rs = (ROOT / "desktop/src-tauri/src/lib.rs").read_text(encoding="utf-8")
+    assert "fn find_python_sidecar" not in lib_rs
+    assert "find_runtime_sidecar" in lib_rs
+    # Launch path must not soft-pick legacy PyInstaller sidecars from desktop/bin.
+    assert 'join("remedy-desktop' not in lib_rs
+    assert "Go remedy-runtime owns :7400 whenever it is staged" in lib_rs
+
+
 def test_sync_versions_stamps_package_lock(bd, tmp_path, monkeypatch) -> None:
     """Build-time sync must not leave package-lock.json root version stale."""
     import json

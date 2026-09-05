@@ -472,8 +472,8 @@ fn is_plausible_sidecar(p: &Path) -> bool {
     }
 }
 
-/// Packaged Desktop launches Go `remedy-runtime`. Dev keeps live Python unless
-/// `REMEDY_RUNTIME_SIDECAR=1` opts into the native binary.
+/// When set, debug builds fail closed if `remedy-runtime` is missing (no
+/// Python launcher fallback). Packaged builds always require the Go binary.
 fn runtime_sidecar_requested() -> bool {
     matches!(
         env::var("REMEDY_RUNTIME_SIDECAR")
@@ -645,16 +645,16 @@ fn find_remedy() -> (String, String) {
         }
     };
 
-    // Packaged / release (and REMEDY_RUNTIME_SIDECAR=1): Go owns :7400.
-    // Fail closed — no soft dual-serve via Python remedy-desktop / PATH remedy.
-    // tauri:dev keeps live Python unless that env opts into the native binary.
-    // Packaged builds never ship remedy-desktop; there is no Python fallback.
-    let prefer_runtime = !cfg!(debug_assertions) || runtime_sidecar_requested();
+    // Go remedy-runtime owns :7400 whenever it is staged. Never launch
+    // remedy-desktop / PyInstaller sidecars — those are retired (Phase 6).
+    if let Some(path) = find_runtime_sidecar(&searched) {
+        return (path, String::new());
+    }
 
-    if prefer_runtime {
-        if let Some(path) = find_runtime_sidecar(&searched) {
-            return (path, String::new());
-        }
+    // Packaged builds, and debug with REMEDY_RUNTIME_SIDECAR=1: fail closed.
+    // No soft dual-serve via Python remedy-desktop or PATH remedy.
+    let require_runtime = !cfg!(debug_assertions) || runtime_sidecar_requested();
+    if require_runtime {
         let msg = format!(
             "remedy-runtime not found (Go owns :7400; no Python dual-serve). \
              Checked exe dir {:?}, cwd/bin/, desktop/bin/. Build \
@@ -674,14 +674,10 @@ fn find_remedy() -> (String, String) {
         }
     }
 
+    // Dev-only fallback: live `remedy` CLI launcher → execs remedy-runtime.
     if let Some(path) = find_live_python_dev() {
         return (path, String::new());
     }
-    if let Some(path) = find_runtime_sidecar(&searched) {
-        return (path, String::new());
-    }
-
-    // Dev only: PATH `remedy` (current install / source entry).
     if let Ok(path) = which_remedy_on_path() {
         log::info!("Found remedy on PATH: {}", path);
         return (path, String::new());
