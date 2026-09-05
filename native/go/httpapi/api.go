@@ -193,6 +193,8 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/memory/persona-wipe", s.handleMemoryPersonaWipe)
 	s.mux.HandleFunc("GET /api/agents", s.handleListAgents)
 	s.mux.HandleFunc("GET /api/commands", s.handleListCommands)
+	s.mux.HandleFunc("GET /api/tools", s.handleListTools)
+	s.mux.HandleFunc("POST /api/tools/invoke", s.handleInvokeTool)
 	s.mux.HandleFunc("GET /api/app/command", s.handleAppCommand)
 	s.mux.HandleFunc("GET /api/scratch", s.handleGetScratch)
 	s.mux.HandleFunc("PUT /api/scratch", s.handlePutScratch)
