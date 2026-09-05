@@ -1,7 +1,7 @@
 """The ConPTY spawn path — Zig-backed via ``host_binding`` (ABI 5).
 
-What breaks if this code is wrong: ``core/computer/host_conpty`` asks ``remedy_core``
-to create a pseudoconsole and attach a child. Get a guard wrong and Remedy tries
+What breaks if this code is wrong: ``host_binding`` asks ``remedy_core`` to
+create a pseudoconsole and attach a child. Get a guard wrong and Remedy tries
 that on a machine with no such API; get a failure path wrong and every aborted
 spawn leaks a session; get the argument marshalling wrong and the child is
 launched with the wrong command line or environment.
@@ -20,8 +20,8 @@ from typing import Any
 
 import pytest
 
-from remedy.core.computer import host_conpty as conpty
-from remedy.core.computer.host_conpty import (
+from remedy.core.computer import host_binding as conpty
+from remedy.core.computer.host_binding import (
     _ConPTYProcess,
     _HandleStream,
     spawn_conpty,

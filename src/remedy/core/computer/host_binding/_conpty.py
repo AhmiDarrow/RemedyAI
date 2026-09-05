@@ -1,7 +1,8 @@
 """conpty C ABI surface for ``remedy_core``.
 
 Internal. Public imports go through ``host_binding``. Owns the authorized
-spawn duck-type (:class:`_ConPTYProcess`) used by the terminal route.
+spawn duck-type (:class:`_ConPTYProcess`) and async ``spawn_conpty`` facade.
+Production ``/api/terminal`` lives in Go ``remedy-runtime``.
 """
 from __future__ import annotations
 
@@ -286,3 +287,37 @@ def spawn_conpty_process(
     except NativeRuntimeUnavailableError as exc:
         raise OSError(f"ConPTY unavailable: {exc}") from exc
     return _ConPTYProcess(pid=pid, handle=handle)
+
+
+# Compat alias — tests patch/call the sync spawn by this name.
+_spawn_conpty_sync = spawn_conpty_process
+
+
+def spawn_conpty_supported() -> bool:
+    """True when ``remedy_core`` reports ConPTY (ABI 5) on this host."""
+    if sys.platform != "win32":
+        return False
+    try:
+        # Via package so fakes / monkeypatches on ``host_binding`` apply.
+        return bool(_api().conpty_available())
+    except (HostError, NativeRuntimeUnavailableError, OSError):
+        return False
+
+
+async def spawn_conpty(
+    argv: list[str],
+    *,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+) -> Any:
+    """Return a duck-typed process with async stdin/stdout (ConPTY attached)."""
+    api = _api()
+    override = getattr(api.spawn_conpty, "_override", None)
+    if override is None:
+        override = getattr(spawn_conpty, "_override", None)
+    if override is not None:
+        return await override(argv, cwd=cwd, env=env)
+    if sys.platform != "win32":
+        raise RuntimeError("ConPTY is Windows-only")
+    sync = getattr(api, "_spawn_conpty_sync", None) or _spawn_conpty_sync
+    return await asyncio.to_thread(sync, argv, cwd, env)

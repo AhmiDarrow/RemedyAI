@@ -1,8 +1,8 @@
 """Thin Python bindings for Zig shell-host (prepare, HostSession, scripts).
 
-Zig ``remedy_core`` owns Host Command IR prepare/translate/scriptfile,
-HostSession open/run/cwd/close, ConPTY, dialect, and policy. This module is
-serialization + asyncio orchestration only — no Python twins of Zig logic.
+Zig owns IR prepare/translate/scriptfile, HostSession, ConPTY, dialect, and
+policy. Go owns production ``/api/terminal``. This module is serialization +
+asyncio HostSession orchestration only — ConPTY via ``host_binding``.
 ``resolve_which`` / ``default_script_lang`` live in ``host_binding``.
 """
 
@@ -493,7 +493,7 @@ class HostSession:
 
 def conpty_available() -> bool:
     """True when ``remedy_core`` reports ConPTY (ABI 5) on this host."""
-    from remedy.core.computer.host_conpty import spawn_conpty_supported
+    from remedy.core.computer.host_binding import spawn_conpty_supported
 
     return spawn_conpty_supported()
 

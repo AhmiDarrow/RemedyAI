@@ -1,7 +1,7 @@
 """Doubles for every Win32 surface Remedy's desktop code touches.
 
 What breaks if this code is wrong: the desktop layer (``desktop_win``,
-``desktop_uia``, ``core/computer/host_conpty``) is the one part of Remedy that can
+``desktop_uia``, ``host_binding`` ConPTY) is the one part of Remedy that can
 physically move the owner's mouse, type into whatever window happens to be in
 front, replace the clipboard or spawn a real console. Tests for it must never
 reach the real API. This module supplies stand-ins — a recording ``windll``, a
