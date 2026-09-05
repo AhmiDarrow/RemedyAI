@@ -7,7 +7,6 @@ as unfinished work (same class as a red verify).
 
 from __future__ import annotations
 
-import os
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -88,34 +87,18 @@ def _hwnd_identity(hwnd: int) -> dict[str, Any]:
                 "exe": str(fg.get("exe") or ""),
                 "exe_name": str(fg.get("exe_name") or ""),
             }
-    if os.name != "nt":
-        return out
+    # Non-foreground: Zig list_windows (title/pid). No Win32 ctypes fallback.
     with suppress(Exception):
-        import ctypes
-        from ctypes import wintypes
+        from remedy.core.computer import host_binding as H
 
-        windll = getattr(ctypes, "windll", None)
-        if windll is None:
-            return out
-        user32 = windll.user32
-        kernel32 = windll.kernel32
-        n = int(user32.GetWindowTextLengthW(hwnd) or 0)
-        if n:
-            buf = ctypes.create_unicode_buffer(n + 1)
-            user32.GetWindowTextW(hwnd, buf, n + 1)
-            out["title"] = buf.value
-        pid = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        hproc = kernel32.OpenProcess(0x1000, False, int(pid.value))
-        if hproc:
-            try:
-                size = wintypes.DWORD(512)
-                pbuf = ctypes.create_unicode_buffer(512)
-                if kernel32.QueryFullProcessImageNameW(hproc, 0, pbuf, ctypes.byref(size)):
-                    out["exe"] = pbuf.value
-                    out["exe_name"] = Path(pbuf.value).name
-            finally:
-                kernel32.CloseHandle(hproc)
+        for win in H.list_windows(limit=80):
+            if int(win.get("hwnd") or 0) != int(hwnd):
+                continue
+            out["title"] = str(win.get("title") or "")
+            pid = int(win.get("pid") or 0)
+            if pid:
+                out["pid"] = pid
+            break
     return out
 
 

@@ -78,6 +78,18 @@ def test_phase1_long_lived_hosts_use_spawn_hidden_not_popen() -> None:
             assert "subprocess.Popen" not in source, mod.__name__
 
 
+def test_mcp_client_uses_spawn_piped_not_async_soft_exec() -> None:
+    """MCP stdio servers must use Zig spawn_piped (create_hidden_* is fail-closed)."""
+    from remedy.tools import mcp_client as mcp_mod
+
+    source = Path(mcp_mod.__file__).read_text(encoding="utf-8")
+    assert "create_hidden_subprocess_exec" not in source
+    assert "spawn_piped" in source
+    connect_src = inspect.getsource(mcp_mod.MCPClient.connect)
+    assert "spawn_piped" in connect_src
+    assert "create_hidden_subprocess_exec" not in connect_src
+
+
 def test_voice_bridge_uses_spawn_piped(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

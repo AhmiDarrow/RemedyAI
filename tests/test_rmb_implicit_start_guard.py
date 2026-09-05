@@ -59,6 +59,8 @@ def cold_host(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
         raise AssertionError(f"test tried to spawn a real process: {args!r}")
 
     monkeypatch.setattr(subprocess, "Popen", _no_spawn)
+    monkeypatch.setattr(svc, "spawn_hidden", _no_spawn)
+    monkeypatch.setattr(svc, "run_hidden", _no_spawn)
     monkeypatch.setattr(svc, "ensure_rmb_watchdog", rec.watchdog)
     monkeypatch.setattr(svc, "start_rmb_server", rec.start)
     monkeypatch.setattr(svc, "stop_rmb_server", rec.stop)
