@@ -690,23 +690,6 @@ def create_app(
         "/api/webhooks/",
         "/api/webhook/",
     )
-    # Computer-use: host/jobs/ui require Bearer (same as the rest of the API).
-    # Rust Desktop poller DPAPI-loads ``local_api_token`` and sends Authorization;
-    # SPA ``hostFetch`` already attaches auth headers. Unauthenticated loopback
-    # claim/complete was a same-user job-theft surface (S-AUTH-04).
-    #
-    # a11y push stays loopback-only without Bearer: legacy in-page inject uses
-    # job_id (≥16 chars) as the capability secret, not the API token.
-    _COMPUTER_A11Y_LOOPBACK_PREFIXES = ("/api/computer/a11y/",)
-
-    def _client_is_loopback(request: Request) -> bool:
-        host = ""
-        if request.client is not None:
-            host = (request.client.host or "").strip().lower()
-        # Also trust X-Forwarded only when clearly local (dev proxies)
-        if host in ("127.0.0.1", "::1", "localhost", "testclient"):
-            return True
-        return host.startswith("127.") or host == "::ffff:127.0.0.1"
 
     if api_key:
         app.state.api_key = api_key
@@ -725,11 +708,6 @@ def create_app(
             if not _disable_api_docs and (path.startswith("/docs") or path.startswith("/redoc")):
                 return await call_next(request)
             if any(path.startswith(p) for p in _AUTH_PUBLIC_PREFIXES):
-                return await call_next(request)
-            # Legacy a11y inject: loopback + job_id secret only (no Bearer).
-            if _client_is_loopback(request) and any(
-                path.startswith(p) for p in _COMPUTER_A11Y_LOOPBACK_PREFIXES
-            ):
                 return await call_next(request)
             # SPA / static Web UI (GET only) — browser loads shell then bootstraps token
             if request.method in ("GET", "HEAD") and not path.startswith("/api"):

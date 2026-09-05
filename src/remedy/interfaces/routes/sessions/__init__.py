@@ -25,9 +25,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
     register_stream_routes(app, **kw)
     # legacy /api/chat/stream dropped — Go + /api/sessions/.../messages/stream own chat.
     register_explain_routes(app, **kw)
-    from remedy.interfaces.routes.session_events import register_session_event_routes
-
-    register_session_event_routes(app)
+    # SSE GET /api/events/sessions is Go-owned (no FastAPI twin registrar).
 
 
 __all__ = ["register_sessions_routes"]

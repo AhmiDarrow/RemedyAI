@@ -277,12 +277,18 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "telephony",
         "nanoswarm",
         "assistant",
+        "computer",
         "hive",
+        "session_events",
         "chat",
         "terminal",
     ):
         assert not re.search(rf"\bregister_{mod}_routes\s*\(", routes_init)
         assert importlib.util.find_spec(f"remedy.interfaces.routes.{mod}") is None
+    sessions_init = Path("src/remedy/interfaces/routes/sessions/__init__.py").read_text(
+        encoding="utf-8"
+    )
+    assert "register_session_event_routes" not in sessions_init
     assert (
         importlib.util.find_spec("remedy.interfaces.routes.sessions.legacy_chat")
         is None
@@ -325,6 +331,10 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/sessions/s1/timeline",
         "/api/sessions/s1/export",
         "/api/hive/roster",
+        "/api/computer/host/status",
+        "/api/computer/jobs/next",
+        "/api/computer/ui/command",
+        "/api/events/sessions",
         "/api/chat",
         "/api/rmb/status",
         "/api/rmb/catalog",
@@ -355,6 +365,9 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/hive/spawn",
         "/api/hive/retire",
         "/api/hive/assign",
+        "/api/computer/host/hello",
+        "/api/computer/capture",
+        "/api/computer/a11y/push",
         "/api/chat",
         "/api/chat/stream",
         "/api/rmb/stop",
