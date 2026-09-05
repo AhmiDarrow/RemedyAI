@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.execution.process_argv import resolve_argv0
-from remedy.execution.process_child import DEFAULT_RUN_TIMEOUT_S, PipedProcess, wait
+from remedy.execution.process_child import DEFAULT_RUN_TIMEOUT_S, PipedProcess
 
 
 def _stdio_is_pipe_request(

@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-
 from remedy.vision import runtime as vision_runtime
 from remedy.vision.config import save_vision_json
 

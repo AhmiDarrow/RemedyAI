@@ -15,7 +15,11 @@ from unittest.mock import patch
 import pytest
 
 from remedy.core.agent import BasicRuntime
-from remedy.core.react_stream import StreamRoundState
+from remedy.core.react_stream import (
+    StreamRoundState,
+    apply_openai_completion_message,
+    iter_openai_sse_content,
+)
 from remedy.models import AgentConfig, ToolCall
 from tests.harness.fake_llm import (
     FakeLLM,
@@ -26,8 +30,6 @@ from tests.harness.fake_llm import (
     empty_turn,
     error_turn,
     exception_turn,
-    fake_adapter,
-    fake_binding,
     text_turn,
     tool_turn,
     tools_turn,
@@ -35,6 +37,20 @@ from tests.harness.fake_llm import (
 )
 
 
+async def _consume(fake: FakeLLM, *, stream: bool = True) -> StreamRoundState:
+    """POST once through the fake and run the answer through the real parser."""
+    body: dict[str, Any] = {"stream": stream, "model": "fake-model", "messages": []}
+    resp = fake.session.post("http://llm.invalid/v1/chat/completions", json=body)
+    state = StreamRoundState()
+    if stream:
+        await iter_openai_sse_content(resp.content, state, stream_live=True)
+    else:
+        data = await resp.json()
+        apply_openai_completion_message(state, data, stream_live=False)
+    return state
+
+
+@pytest.mark.asyncio
 async def test_scripted_turns_are_served_in_the_order_they_were_written():
     fake = FakeLLM([text_turn("first"), text_turn("second"), text_turn("third")])
 

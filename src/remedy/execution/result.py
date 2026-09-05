@@ -6,10 +6,9 @@ import asyncio
 import contextlib
 import ctypes
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-from dataclasses import dataclass
 
 from remedy.core.security import check_dangerous_command
 from remedy.execution.env import scrub_subprocess_env, unattended_vcs_env
@@ -312,10 +311,11 @@ class SubprocessSandbox(Sandbox):
             )
         except (OSError, HostError, NativeRuntimeUnavailableError, ValueError) as e:
             elapsed = (time.monotonic() - start) * 1000
-            if isinstance(e, OSError):
-                err = _spawn_error_stderr(command, e)
-            else:
-                err = f"OS error: {e}"
+            err = (
+                _spawn_error_stderr(command, e)
+                if isinstance(e, OSError)
+                else f"OS error: {e}"
+            )
             return ExecutionResult(
                 exit_code=-1,
                 stderr=err,

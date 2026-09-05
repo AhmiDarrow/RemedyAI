@@ -10,17 +10,19 @@ from pathlib import Path
 import pytest
 
 from remedy.core.computer import host_binding
-from remedy.core.computer.host_binding import looks_like_powershell, translate_posix_to_host
 from remedy.core.computer.host_binding import (
+    HostOp,
+    coerce_argv,
     conpty_available,
     launch_script,
-    resolve_which,
-)
-from remedy.core.computer.host_binding import HostOp, mkdir_op, run_op, script_op
-from remedy.core.computer.host_binding import (
-    coerce_argv,
+    looks_like_powershell,
+    mkdir_op,
     prepare_host_command,
     prepare_host_op,
+    resolve_which,
+    run_op,
+    script_op,
+    translate_posix_to_host,
 )
 from remedy.execution.process import win_shell_prefix
 from remedy.execution.runtime import ToolRuntime
@@ -778,8 +780,7 @@ def test_conpty_available_does_not_raise() -> None:
 
 @pytest.mark.asyncio
 async def test_host_session_echo() -> None:
-    from remedy.core.computer.host_binding import STATUS_UNSUPPORTED, HostError
-    from remedy.core.computer.host_binding import HostSession
+    from remedy.core.computer.host_binding import STATUS_UNSUPPORTED, HostError, HostSession
 
     if os.name != "nt":
         sess = HostSession(host="posix")
@@ -885,11 +886,11 @@ async def test_shared_session_scoped_by_id_and_start_cwd(tmp_path: Path) -> None
 async def test_abort_session_closes_shared_host_shell() -> None:
     if os.name != "nt":
         pytest.skip("Zig HostSession live open is Windows-only")
-    from remedy.core.turn_context import abort_session, begin_turn, end_turn
     from remedy.core.computer.host_binding import (
         close_all_shared_sessions,
         get_shared_session,
     )
+    from remedy.core.turn_context import abort_session, begin_turn, end_turn
 
     toks = begin_turn("host-abort", project_raw=None, active_path=".")
     try:

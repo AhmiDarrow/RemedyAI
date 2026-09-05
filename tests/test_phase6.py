@@ -4,8 +4,6 @@ import os
 from pathlib import Path
 from unittest import mock
 
-import pytest
-
 from remedy.interfaces.config import (
     _coerce,
     config_to_agent_config,

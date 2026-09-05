@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from remedy.core.react_stream import (
     StreamRoundState,
     accumulate_tool_call_delta,

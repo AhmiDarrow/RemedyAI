@@ -6,10 +6,8 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-
 from remedy.vision.runtime import invalidate_running_cache, is_running
 from remedy.vision.service import get_status
-
 
 
 def test_stream_lock_reflects_active_turns(tmp_path: Path):

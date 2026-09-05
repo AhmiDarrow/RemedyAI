@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 from remedy.core.approvals import ApprovalQueue
 from remedy.core.build_mutant import mutant_kill_score
 from remedy.core.hive.policy import DAUGHTER_CAPABILITIES, is_mother_only_tool

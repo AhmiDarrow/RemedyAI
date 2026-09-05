@@ -11,6 +11,8 @@ from remedy.i18n.languages import (
     normalize_ui_language,
     resolve_ui_language,
 )
+
+
 def test_normalize_unknown_is_auto_not_english_lock():
     assert normalize_ui_language(None) == "auto"
     assert normalize_ui_language("AUTO") == "auto"

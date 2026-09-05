@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from remedy.core.llm_api_errors import (
     is_billing_llm_api_error,
-    is_fatal_llm_api_error as _is_fatal_llm_api_error,
     is_thinking_tool_choice_error,
+)
+from remedy.core.llm_api_errors import (
+    is_fatal_llm_api_error as _is_fatal_llm_api_error,
 )
 from remedy.core.llm_recovery_messages import fatal_billing_error_message
 

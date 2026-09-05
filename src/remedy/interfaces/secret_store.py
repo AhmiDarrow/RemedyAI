@@ -91,7 +91,6 @@ def _harden_path(path: Path, *, is_dir: bool = False) -> None:
     if not user or not path.exists():
         return
     try:
-        import subprocess
 
         from remedy.execution.process import run_hidden
         user_ace = f"{user}:(OI)(CI)F" if is_dir else f"{user}:F"

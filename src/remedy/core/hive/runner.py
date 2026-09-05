@@ -20,7 +20,6 @@ from remedy.core.hive.policy import (
 )
 from remedy.core.hive.store import HiveStore, get_hive_store
 from remedy.core.hive.types import (
-    CADENCE_POST,
     STATUS_CANCELLED,
     STATUS_PENDING,
     STATUS_REPORTED,

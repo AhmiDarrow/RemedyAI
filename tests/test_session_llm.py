@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from remedy.core.session_llm import resolve_session_llm_bind, session_llm_update_fields
 
 
-
 def test_explicit_req_pair_wins():
     sess = SimpleNamespace(llm_provider="xai", model="grok-4.5")
     p, m = resolve_session_llm_bind(
