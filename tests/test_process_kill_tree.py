@@ -44,19 +44,31 @@ def test_popen_hidden_fail_closed_on_host_platforms(
     assert raised.value.status == STATUS_UNSUPPORTED
 
 
-def test_popen_hidden_soft_merge_off_host_platforms(monkeypatch: pytest.MonkeyPatch):
-    """Darwin (and other non-host platforms) may still soft-merge creation flags."""
-    if sys.platform in ("win32", "linux"):
-        pytest.skip("host platforms fail closed instead of soft Popen")
+def test_popen_hidden_fail_closed_off_host_platforms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Soft CREATE_NO_WINDOW Popen is retired on every platform (Rule 5)."""
+    from remedy.core.computer.host_binding import STATUS_UNSUPPORTED, HostError
+
+    monkeypatch.setattr(P, "require_process_host", lambda: None)
+    with pytest.raises(HostError) as raised:
+        P.popen_hidden(["x"], creationflags=0x200, close_fds=True)
+    assert raised.value.status == STATUS_UNSUPPORTED
+    assert raised.value.function == "popen_hidden"
+
+
+def test_harness_soft_popen_merges_creationflags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test double may soft-merge flags; production process.py must not."""
+    from tests.harness import process_soft as soft
+
     seen: dict = {}
 
     def fake_popen(args, **kwargs):
         seen.update(kwargs)
         return object()
 
-    monkeypatch.setattr(P, "require_process_host", lambda: None)
-    monkeypatch.setattr(P.subprocess, "Popen", fake_popen)
-    P.popen_hidden(["x"], creationflags=0x200, close_fds=True)
+    monkeypatch.setattr(soft.subprocess, "Popen", fake_popen)
+    soft.soft_popen_hidden(["x"], creationflags=0x200, close_fds=True)
     assert seen["close_fds"] is True
     expected = 0x200 | (subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
     assert seen["creationflags"] == expected
