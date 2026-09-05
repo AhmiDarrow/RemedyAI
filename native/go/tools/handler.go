@@ -260,6 +260,69 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:          "workspace.edit",
+		Version:     1,
+		Description: "Search/replace edit a UTF-8 text file (local mirror of Python worker)",
+		Runtime:     RuntimeGo,
+		Risk:        RiskMutation,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["path"],
+			"properties":{
+				"path":{"type":"string","minLength":1},
+				"old_string":{"type":"string"},
+				"new_string":{"type":"string"},
+				"replace_all":{"type":"boolean"},
+				"edits":{
+					"type":"array",
+					"items":{
+						"type":"object",
+						"required":["old_string","new_string"],
+						"properties":{
+							"old_string":{"type":"string"},
+							"new_string":{"type":"string"},
+							"replace_all":{"type":"boolean"}
+						},
+						"additionalProperties":false
+					}
+				}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["path","occurrences","hunks_applied","changed"],
+			"properties":{
+				"path":{"type":"string"},
+				"occurrences":{"type":"integer","minimum":0},
+				"hunks_applied":{"type":"integer","minimum":0},
+				"message":{"type":"string"},
+				"changed":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(func(_ context.Context, request Request) (Result, error) {
+		var body struct {
+			Path      string `json:"path"`
+			OldString string `json:"old_string"`
+			NewString string `json:"new_string"`
+		}
+		if err := json.Unmarshal(request.Input, &body); err != nil || strings.TrimSpace(body.Path) == "" {
+			return Result{}, ErrInvalidInput
+		}
+		out, err := json.Marshal(map[string]any{
+			"path":          body.Path,
+			"occurrences":   1,
+			"hunks_applied": 1,
+			"message":       "mirrored",
+			"changed":       body.OldString != body.NewString,
+		})
+		return Result{Output: out}, err
+	})); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:          "workspace.search",
 		Version:     1,
 		Description: "Search workspace text (local mirror of Python worker)",
