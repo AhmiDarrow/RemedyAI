@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -218,6 +219,35 @@ func RegisterZigHostTools(registry *Registry) error {
 			"additionalProperties":false
 		}`),
 	}, ExecutorFunc(executeComputerType)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:           "computer.key",
+		Version:      1,
+		Description:  "Press a key or combo via Zig (enter, tab, ctrl+s, alt+f4, …; fail closed)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskMutation,
+		Capabilities: []string{"computer.input"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["key"],
+			"properties":{
+				"key":{"type":"string","minLength":1,"maxLength":64}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok","key","vks"],
+			"properties":{
+				"ok":{"type":"boolean","const":true},
+				"key":{"type":"string","minLength":1},
+				"vks":{"type":"array","items":{"type":"integer","minimum":0,"maximum":65535},"minItems":1}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeComputerKey)); err != nil {
 		return err
 	}
 
@@ -658,6 +688,41 @@ func executeComputerType(_ context.Context, request Request) (Result, error) {
 	return Result{Output: out}, err
 }
 
+func executeComputerKey(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		Key string `json:"key"`
+	}
+	if err := json.Unmarshal(request.Input, &body); err != nil {
+		return Result{}, ErrInvalidInput
+	}
+	key := strings.TrimSpace(body.Key)
+	if key == "" || len(key) > 64 {
+		return Result{}, ErrInvalidInput
+	}
+	vks, err := resolveKeyCombo(key)
+	if err != nil {
+		if errors.Is(err, core.ErrUnavailable) || errors.Is(err, core.ErrUnsupported) {
+			return Result{}, err
+		}
+		var hostErr *core.HostError
+		if errors.As(err, &hostErr) {
+			return Result{}, err
+		}
+		return Result{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+	if err := core.KeyCombo(vks); err != nil {
+		return Result{}, err
+	}
+	vkOut := make([]int, len(vks))
+	for i, vk := range vks {
+		vkOut[i] = int(vk)
+	}
+	out, err := json.Marshal(map[string]any{
+		"ok": true, "key": key, "vks": vkOut,
+	})
+	return Result{Output: out}, err
+}
+
 func executeComputerMove(_ context.Context, request Request) (Result, error) {
 	var body struct {
 		X *int `json:"x"`
@@ -861,4 +926,110 @@ func resolveToolHome() string {
 		return ""
 	}
 	return filepath.Join(userHome, ".remedy")
+}
+
+// Named VKs matching Python desktop_policy.VK (plus Arrow* aliases).
+var namedVirtualKeys = map[string]uint16{
+	"enter": 0x0D, "return": 0x0D,
+	"tab": 0x09,
+	"escape": 0x1B, "esc": 0x1B,
+	"backspace": 0x08,
+	"delete": 0x2E, "del": 0x2E,
+	"space": 0x20,
+	"up": 0x26, "arrowup": 0x26,
+	"down": 0x28, "arrowdown": 0x28,
+	"left": 0x25, "arrowleft": 0x25,
+	"right": 0x27, "arrowright": 0x27,
+	"home": 0x24, "end": 0x23,
+	"pageup": 0x21, "pagedown": 0x22,
+	"f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73,
+	"f5": 0x74, "f6": 0x75, "f7": 0x76, "f8": 0x77,
+	"f9": 0x78, "f10": 0x79, "f11": 0x7A, "f12": 0x7B,
+	"insert": 0x2D, "ins": 0x2D,
+	"printscreen": 0x2C, "prtsc": 0x2C, "prtscn": 0x2C,
+	"ctrl": 0x11, "control": 0x11,
+	"alt": 0x12,
+	"shift": 0x10,
+	"win": 0x5B, "meta": 0x5B, "cmd": 0x5B, "super": 0x5B,
+}
+
+var modifierVirtualKeys = map[uint16]struct{}{
+	0x10: {}, 0x11: {}, 0x12: {}, 0x5B: {},
+}
+
+// resolveKeyCombo maps "ctrl+s" / "enter" / "?" to ordered VKs (modifiers first).
+// Matches Python desktop_policy.resolve_key_combo.
+func resolveKeyCombo(key string) ([]uint16, error) {
+	normalized := strings.ReplaceAll(strings.TrimSpace(key), "-", "+")
+	rawParts := strings.Split(normalized, "+")
+	parts := make([]string, 0, len(rawParts))
+	for _, p := range rawParts {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("empty key")
+	}
+	mods := make([]uint16, 0, 4)
+	mains := make([]uint16, 0, 4)
+	hasMod := func(vk uint16) bool {
+		for _, m := range mods {
+			if m == vk {
+				return true
+			}
+		}
+		return false
+	}
+	for _, p := range parts {
+		if vk, ok := namedVirtualKeys[p]; ok {
+			if _, isMod := modifierVirtualKeys[vk]; isMod {
+				mods = append(mods, vk)
+			} else {
+				mains = append(mains, vk)
+			}
+			continue
+		}
+		runes := []rune(p)
+		if len(runes) != 1 {
+			return nil, fmt.Errorf("unknown key: %q", p)
+		}
+		ch := runes[0]
+		// ASCII letters/digits map to stable Win32 VKs without layout scan.
+		if ch >= 'a' && ch <= 'z' {
+			mains = append(mains, uint16(ch-'a'+0x41))
+			continue
+		}
+		if ch >= 'A' && ch <= 'Z' {
+			if !hasMod(0x10) {
+				mods = append(mods, 0x10)
+			}
+			mains = append(mains, uint16(ch-'A'+0x41))
+			continue
+		}
+		if ch >= '0' && ch <= '9' {
+			mains = append(mains, uint16(ch))
+			continue
+		}
+		scan, err := core.VkKeyScan(uint32(ch))
+		if err != nil {
+			return nil, err
+		}
+		if scan == -1 {
+			return nil, fmt.Errorf("key has no VK mapping on this layout: %q", p)
+		}
+		shiftState := (scan >> 8) & 0xFF
+		if shiftState&1 != 0 && !hasMod(0x10) {
+			mods = append(mods, 0x10)
+		}
+		if shiftState&2 != 0 && !hasMod(0x11) {
+			mods = append(mods, 0x11)
+		}
+		if shiftState&4 != 0 && !hasMod(0x12) {
+			mods = append(mods, 0x12)
+		}
+		mains = append(mains, uint16(scan&0xFF))
+	}
+	return append(mods, mains...), nil
 }
