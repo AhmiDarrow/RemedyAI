@@ -17,7 +17,6 @@ import os
 import re
 import shutil
 import struct
-import subprocess
 import sys
 import threading
 import time
@@ -568,9 +567,7 @@ def _pulse_install(
             st["percent"] = round(min(cap, p + step), 1)
 
 
-_PIP_IDLE_TIMEOUT_S = 900.0  # no output for 15 min = something is wrong
-_PIP_PROGRESS_RE = re.compile(r"^Progress\s+(\d+)\s+of\s+(\d+)", re.I)
-_PIP_COLLECT_RE = re.compile(r"^(?:Collecting|Downloading)\s+(\S+)", re.I)
+_PIP_IDLE_TIMEOUT_S = 900.0  # Zig exec-capture wall budget for one pip run
 _GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 
 
@@ -839,20 +836,12 @@ def run_pip_packages(
     raise RuntimeError(last_err or "Voice pack download failed.")
 
 
-def _human_bytes(n: float) -> str:
-    if n >= 2**30:
-        return f"{n / 2**30:.2f} GB"
-    return f"{n / 2**20:.0f} MB"
-
-
 def _human_secs(s: float) -> str:
     s = int(s)
     return f"{s // 60}m{s % 60:02d}s" if s >= 60 else f"{s}s"
 
 
-_PIP_SIZE_RE = re.compile(r"^Downloading\s+\S+\s+\(([\d.]+)\s*(kB|MB|GB|bytes)\)", re.I)
 _PIP_LOG_RE = re.compile(r"^(Collecting|Downloading|Installing|Successfully|Building|ERROR|WARNING)", re.I)
-_UNIT = {"bytes": 1, "kb": 1000, "mb": 1000**2, "gb": 1000**3}
 
 
 def _stream_pip(
@@ -864,126 +853,56 @@ def _stream_pip(
     *,
     label: str = "the voice pack",
 ) -> tuple[int, list[str]]:
-    """Run one pip command hidden, keeping the owner's bar honest and alive.
+    """Run one pip command via Zig exec-capture; pulse the owner's bar.
 
-    pip (``--progress-bar raw``) prints ``Progress X of Y`` while a wheel
-    downloads and very little while it resolves a hundred dependencies.
-    The owner must never wonder whether anything is happening, so a ticker
-    rewrites the message every second with what is known for certain: the
-    current package, bytes fetched so far, and time elapsed. The percent
-    climbs with cumulative bytes (never backwards). Returns
-    ``(returncode, last_output_lines)``; raises ``TimeoutError`` when pip
-    is silent for :data:`_PIP_IDLE_TIMEOUT_S`.
+    Live byte streaming needs interactive pipes; Zig has no general pipe-spawn
+    ABI for Python. Capture is equal-or-better for process ownership — progress
+    is a ticker over wall time, then post-parsed from captured output.
     """
-    from remedy.execution.hide_flags import hidden_subprocess_kwargs
+    from remedy.execution.process import run_hidden
 
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-        **hidden_subprocess_kwargs(),
-    )
-    tail: list[str] = []
     started = time.monotonic()
-    box: dict[str, Any] = {
-        "last": started,
-        "done": False,
-        "name": "",
-        "phase": "Fetching",
-        "file_done": 0,  # bytes of the current file so far
-        "file_total": 0,
-        "cum_done": 0,  # bytes of files already completed
-        "files": 0,
-    }
-    stdout = proc.stdout
-    assert stdout is not None
-    lock = threading.Lock()
+    box: dict[str, Any] = {"done": False, "result": None, "exc": None}
+    mid = lo + (cap - lo) * 0.45
 
-    def _publish() -> None:
-        with lock:
-            cum = box["cum_done"] + box["file_done"]
-            name = box["name"]
-            phase = box["phase"]
-            ft, fd = box["file_total"], box["file_done"]
-        elapsed = time.monotonic() - started
-        parts = [f"{phase} {name}" if name else f"Preparing {label}"]
-        if ft >= 50 * 1000**2 and fd:
-            parts.append(f"{_human_bytes(fd)} of {_human_bytes(ft)}")
-        if cum:
-            parts.append(f"{_human_bytes(cum)} so far")
-        parts.append(_human_secs(elapsed))
-        # Bytes climb, so the bar climbs: a gentle curve through the stage
-        # (no known total across a hundred wheels), never backwards.
-        span = cap - lo
-        pct = lo + span * (1.0 - 1.0 / (1.0 + cum / (600 * 1000**2)))
-        set_state(pct, " · ".join(parts))
+    def _worker() -> None:
+        try:
+            box["result"] = run_hidden(
+                cmd,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=_PIP_IDLE_TIMEOUT_S,
+            )
+        except Exception as exc:  # noqa: BLE001 — surfaced to caller
+            box["exc"] = exc
+        finally:
+            box["done"] = True
 
-    def _reader() -> None:
-        last_log = 0.0
-        for raw in stdout:
-            line = raw.strip()
-            box["last"] = time.monotonic()
-            if not line:
-                continue
-            tail.append(line)
-            del tail[:-30]
-            m = _PIP_PROGRESS_RE.match(line)
-            if m:
-                done_b, total_b = int(m.group(1)), int(m.group(2))
-                with lock:
-                    box["file_done"] = done_b
-                    box["file_total"] = max(box["file_total"], total_b)
-                    if total_b and done_b >= total_b:
-                        box["cum_done"] += total_b
-                        box["file_done"] = 0
-                        box["file_total"] = 0
-                        box["files"] += 1
-                continue
-            m = _PIP_SIZE_RE.match(line)
-            if m:
-                with lock:
-                    box["file_total"] = int(float(m.group(1)) * _UNIT[m.group(2).lower()])
-            m = _PIP_COLLECT_RE.match(line)
-            if m:
-                name = re.split(r"[-=<>\[ ]", m.group(1), maxsplit=1)[0]
-                # A source archive (URL / commit hash) is not a name to show.
-                if name.endswith((".zip", ".tar.gz")) or re.fullmatch(r"[0-9a-f]{12,}", name):
-                    name = label
-                with lock:
-                    box["name"] = name
-                    box["phase"] = "Fetching"
-            elif line.lower().startswith("installing collected"):
-                with lock:
-                    box["name"] = label
-                    box["phase"] = "Installing"
-            elif line.lower().startswith("building wheel"):
-                with lock:
-                    box["phase"] = "Building"
-            if _PIP_LOG_RE.match(line) and time.monotonic() - last_log > 2.0:
-                logger.info("voice pip: %s", line[:160])
-                last_log = time.monotonic()
-        box["done"] = True
-
-    t = threading.Thread(target=_reader, daemon=True)
+    t = threading.Thread(target=_worker, daemon=True)
     t.start()
     while not box["done"]:
         t.join(1.0)
-        _publish()
-        if not box["done"] and time.monotonic() - box["last"] > _PIP_IDLE_TIMEOUT_S:
-            proc.kill()
-            raise TimeoutError("pip produced no output for 15 minutes")
-    rc = proc.wait(timeout=60)
-    if rc == 0:
-        with lock:
-            box["cum_done"] += box["file_done"]
-            box["file_done"] = 0
+        elapsed = time.monotonic() - started
+        # Gentle climb while Zig holds the child; never past mid until done.
+        span = mid - lo
+        pct = lo + span * (1.0 - 1.0 / (1.0 + elapsed / 90.0))
+        set_state(pct, f"Fetching {label} · {_human_secs(elapsed)}")
+    if box["exc"] is not None:
+        raise box["exc"]
+    completed = box["result"]
+    assert completed is not None
+    out = (completed.stdout or "") + "\n" + (completed.stderr or "")
+    lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+    tail = lines[-30:]
+    last_log = 0.0
+    for line in tail:
+        if _PIP_LOG_RE.match(line) and time.monotonic() - last_log > 0.0:
+            logger.info("voice pip: %s", line[:160])
+            last_log = time.monotonic()
+    if completed.returncode == 0:
         set_state(cap, None)
-    return rc, tail
+    return int(completed.returncode), tail
 
 
 def _runtime_python(home_dir: Path | str | None, state_key: str) -> Path:

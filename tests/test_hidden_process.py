@@ -1,34 +1,34 @@
-"""Tests for Windows console-hide helpers and fail-closed soft pipe gates."""
+"""Tests for Zig process binding and fail-closed soft pipe / hide_flags gates."""
 
 from __future__ import annotations
 
-import subprocess
 import sys
 
 import pytest
 
 from remedy.core.computer.host_binding import STATUS_UNSUPPORTED, HostError
 from remedy.execution import process as P
-from remedy.execution.hide_flags import (
-    hidden_creationflags,
-    hidden_subprocess_kwargs,
-)
+from remedy.execution import hide_flags as HF
 from remedy.execution.process import run_hidden, win_shell_prefix
 from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
 
-def test_hide_flags_windows_only() -> None:
-    """Pipe-leftover hide kwargs live outside the Zig process binding."""
-    flags = hidden_creationflags()
-    kw = hidden_subprocess_kwargs()
-    if sys.platform == "win32":
-        assert flags == subprocess.CREATE_NO_WINDOW
-        assert flags == 0x08000000
-        assert kw.get("creationflags") == subprocess.CREATE_NO_WINDOW
-        assert kw["startupinfo"].wShowWindow == subprocess.SW_HIDE
-    else:
-        assert flags == 0
-        assert kw == {}
+def test_hide_flags_fail_closed_on_host_platforms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Production hide_flags must not soft-return CREATE_NO_WINDOW kwargs."""
+    if sys.platform not in ("win32", "linux"):
+        pytest.skip("process host gate is win32/linux")
+    monkeypatch.setattr(P, "require_process_host", lambda: None)
+    for name in (
+        "hidden_creationflags",
+        "hidden_startupinfo",
+        "hidden_subprocess_kwargs",
+    ):
+        with pytest.raises(HostError) as raised:
+            getattr(HF, name)()
+        assert raised.value.status == STATUS_UNSUPPORTED
+        assert raised.value.function == name
     assert not hasattr(P, "hidden_subprocess_kwargs")
     assert not hasattr(P, "hidden_creationflags")
 
@@ -59,20 +59,6 @@ def test_run_hidden_python_echo() -> None:
     )
     assert result.returncode == 0
     assert "hidden-ok" in (result.stdout or "")
-
-
-def test_hide_flags_popen_accepts_creationflags() -> None:
-    """Leftover hide_flags module may soft-merge; process.py must not."""
-    kw = hidden_subprocess_kwargs()
-    if sys.platform == "win32":
-        assert kw.get("creationflags") == subprocess.CREATE_NO_WINDOW
-        p = subprocess.Popen(
-            [sys.executable, "-c", "pass"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            **kw,
-        )
-        assert p.wait(timeout=15) == 0
 
 
 def test_soft_helpers_fail_closed_without_process_host(

@@ -53,30 +53,27 @@ class VoiceBridge:
         return rt.runtime_ready(self.home_dir)
 
     def _spawn(self) -> subprocess.Popen[str]:
+        """JSON-RPC voice worker needs interactive stdin/stdout/stderr pipes.
+
+        Zig owns process spawn (NATIVE_CUTOVER). Authorized ``spawn_hidden`` has
+        no stdio; Windows ``spawnPiped`` (HostSession) merges stderr→stdout and
+        exposes Zig read/write — not Python file objects or a separate stderr
+        pump. A general authorized 3-pipe ABI + handle wrapping is not small.
+        Fail closed — no soft ``hide_flags`` / ``subprocess.Popen`` path.
+        """
         py = rt.python_path(self.home_dir)
         if not py.is_file():
             raise WorkerError("Remedy's voice runtime is not set up yet.")
-        env = rt.child_env(self.home_dir, with_source=True)
-        env["REMEDY_VOICE_WORKER"] = "1"
-        env["REMEDY_VOICE_LANE"] = self.lane
-        from remedy.execution.hide_flags import hidden_subprocess_kwargs
+        _ = (py, self.home_dir, self.lane)
+        from remedy.core.computer.host_binding import STATUS_UNSUPPORTED, HostError
+        from remedy.execution.process import require_process_host
 
-        proc = subprocess.Popen(
-            [str(py), "-m", "remedy.voice.worker"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            **hidden_subprocess_kwargs(),
-        )
-        t = threading.Thread(target=self._pump_stderr, args=(proc,), daemon=True)
-        t.start()
-        self._stderr_thread = t
-        logger.info("voice worker [%s] started (pid %s) with %s", self.lane, proc.pid, py)
-        return proc
+        require_process_host()
+        raise WorkerError(
+            "voice worker needs interactive stdin/stdout/stderr pipes; "
+            "Zig has no authorized 3-pipe spawn ABI yet "
+            "(HostSession spawnPiped merges stderr and is Windows-only)."
+        ) from HostError("voice_bridge_spawn", STATUS_UNSUPPORTED)
 
     @staticmethod
     def _pump_stderr(proc: subprocess.Popen[str]) -> None:
