@@ -282,6 +282,7 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "session_events",
         "chat",
         "terminal",
+        "rmb",
     ):
         assert not re.search(rf"\bregister_{mod}_routes\s*\(", routes_init)
         assert importlib.util.find_spec(f"remedy.interfaces.routes.{mod}") is None
@@ -339,6 +340,9 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/rmb/status",
         "/api/rmb/catalog",
         "/api/rmb/hf/progress",
+        "/api/rmb/start",
+        "/api/rmb/settings",
+        "/api/rmb/use",
         "/api/terminal",
     ]
     def _absent(status: int) -> bool:
@@ -371,6 +375,9 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/chat",
         "/api/chat/stream",
         "/api/rmb/stop",
+        "/api/rmb/start",
+        "/api/rmb/settings",
+        "/api/rmb/use",
         "/api/rmb/hf/search",
         "/api/rmb/hf/pull",
         "/api/rmb/hf/cancel",

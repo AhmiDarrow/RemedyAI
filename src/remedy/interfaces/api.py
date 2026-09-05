@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 # High-frequency host polls. A fat ReAct turn blocks the event loop; these
 # waiting ≥500ms is contention, not the poller being slow. Failures stay loud.
+# Pollers still registered on the TestClient surface (Go owns the rest).
 _SLOW_EXEMPT_PATHS = frozenset(
     {
         "/api/status",
@@ -53,18 +54,9 @@ _SLOW_EXEMPT_PATHS = frozenset(
         "/api/turn-active",
         "/api/self-improve",
         "/api/partner/status",
-        "/api/checkpoints/latest",
         "/api/plans/latest",
-        "/api/events/sessions",
-        "/api/computer/jobs/next",
-        "/api/computer/ui/command",
-        "/api/computer/host/status",
-        "/api/computer/host/hello",
         "/api/app/command",
         "/api/voice/status",
-        "/api/rmb/hf/progress",
-        "/api/vision/status",
-        "/api/life-tasks/current",
         "/api/approvals",
     }
 )
@@ -78,17 +70,12 @@ def should_warn_slow(
     duration_ms: float,
 ) -> bool:
     """True when the request log should emit a SLOW warning."""
+    _ = method
     if float(duration_ms) < _SLOW_WARN_MS:
         return False
     if int(status_code) >= 400:
         return True
-    p = str(path or "")
-    if p in _SLOW_EXEMPT_PATHS:
-        return False
-    method_u = str(method or "").upper()
-    if p.startswith("/api/computer/") and method_u in ("GET", "HEAD"):
-        return False
-    return not (p.startswith("/api/computer/") and p.endswith("/hello"))
+    return str(path or "") not in _SLOW_EXEMPT_PATHS
 
 
 # Hot polls already sit at DEBUG; writing every ~150ms jobs/next into debug.log
@@ -815,24 +802,10 @@ def create_app(
             "/api/turn-active",
             "/api/self-improve",
             "/api/partner/status",
-            "/api/checkpoints/latest",
             "/api/plans/latest",
-            "/api/events/sessions",
-            "/api/computer/jobs/next",
-            "/api/computer/ui/command",
-            "/api/computer/host/status",
-            "/api/computer/host/hello",
             "/api/app/command",
             "/api/voice/status",
-            "/api/rmb/hf/progress",
-            "/api/vision/status",
         )
-        if path.startswith("/api/computer/") and method in ("GET", "HEAD", "POST"):
-            # hello / jobs complete are also high-frequency; keep failures loud.
-            if response.status_code < 400 and method in ("GET", "HEAD"):
-                quiet = True
-            if path.endswith("/hello") and response.status_code < 400:
-                quiet = True
         if desktop and method in ("GET", "HEAD") and response.status_code < 400:
             quiet = True
         slow = should_warn_slow(method, path, response.status_code, duration)
@@ -1088,10 +1061,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
 
         <div class="card">
-            <h2>API Endpoints</h2>
+            <h2>API Endpoints (TestClient surface)</h2>
             <p class="section-header">Chat & Sessions</p>
-            <div class="endpoint"><span class="method">POST</span><span class="path">/api/chat</span> — legacy sync chat</div>
-            <div class="endpoint"><span class="method">POST</span><span class="path">/api/chat/stream</span> (SSE) — legacy stream</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/sessions</span> — list chat sessions</div>
             <div class="endpoint"><span class="method">POST</span><span class="path">/api/sessions</span> — create chat session</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/sessions/{id}</span> — get session</div>
@@ -1106,15 +1077,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/models</span> — list LLM models</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/agents</span> — list agent profiles</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/commands</span> — slash commands</div>
-            <p class="section-header">Memory & Skills</p>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/memory/search?query=...</span> — search memory</div>
-            <div class="endpoint"><span class="method">POST</span><span class="path">/api/memory/add</span> — add memory entry</div>
+            <p class="section-header">Skills</p>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/skills</span> — list skills</div>
             <p class="section-header">Other</p>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/status</span> — system status</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/self-improve</span> — unattended self-improve clock + last tick</div>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/diagnostics</span> — health diagnostics (Remedy, RMB, hardware, providers)</div>
-            <div class="endpoint"><span class="method">POST</span><span class="path">/api/webhook/{source}</span> — receive webhook</div>
+            <div class="endpoint"><span class="method">GET</span><span class="path">/api/diagnostics</span> — health diagnostics</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/openapi.yaml</span> — OpenAPI YAML</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/openapi.json</span> — OpenAPI JSON</div>
         </div>
