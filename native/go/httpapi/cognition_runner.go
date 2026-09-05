@@ -190,11 +190,15 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 	if req.DrainNudges != nil {
 		model = &nudgeAwareModel{inner: model, drain: req.DrainNudges, emit: safeEmit}
 	}
+	cfg := r.Config
+	if req.MaxIterations > 0 {
+		cfg.MaxIterations = req.MaxIterations
+	}
 	engine := cognition.Engine{
 		Model:  model,
 		Tools:  &emittingTools{inner: execTools, emit: safeEmit},
 		Policy: policy,
-		Config: r.Config,
+		Config: cfg,
 	}
 	out := engine.RunTurn(ctx, seed)
 

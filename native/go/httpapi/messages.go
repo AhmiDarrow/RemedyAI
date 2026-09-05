@@ -52,6 +52,8 @@ type TurnRequest struct {
 	PlanMode    bool
 	ChatMode    bool
 	Attachments []map[string]any
+	// MaxIterations caps cognition.Engine loops when > 0 (hive forager budget).
+	MaxIterations int
 	// DrainNudges returns queued owner mid-turn guidance (steer). Optional.
 	DrainNudges func() []string
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -242,8 +243,9 @@ func (s *Server) handleHiveRetire(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// superviseHiveDaughter registers a scoped hive.Manager agent that waits until cancel.
-// Full forager/post ReAct pulses remain a Python/cognition gap.
+// superviseHiveDaughter registers a scoped hive.Manager agent.
+// Foragers run one cognition pulse via TurnRunner (Go owns ReAct). Standing
+// posts wait until cancel / retire (pulse schedule is assign-driven).
 func (s *Server) superviseHiveDaughter(d hiveDaughter) bool {
 	if s == nil || s.hiveMgr == nil || strings.TrimSpace(d.ID) == "" {
 		return false
@@ -254,9 +256,132 @@ func (s *Server) superviseHiveDaughter(d hiveDaughter) bool {
 		MemoryScope:  "hive:" + d.ID,
 		Capabilities: []string{"read", "search"},
 		Run: func(ctx context.Context, _ *hive.Agent) error {
-			<-ctx.Done()
-			return ctx.Err()
+			if d.Cadence == hiveCadencePost {
+				<-ctx.Done()
+				return ctx.Err()
+			}
+			return s.runHiveForagerPulse(ctx, d)
 		},
 	})
 	return err == nil
+}
+
+func hiveForagerCharter(d hiveDaughter) string {
+	extra := ""
+	if d.Journal != nil {
+		if notes, ok := d.Journal["notes"].([]any); ok && len(notes) > 0 {
+			var lines []string
+			start := 0
+			if len(notes) > 4 {
+				start = len(notes) - 4
+			}
+			for _, n := range notes[start:] {
+				m, ok := n.(map[string]any)
+				if !ok {
+					continue
+				}
+				outcome := strings.TrimSpace(fmt.Sprint(m["outcome"]))
+				if outcome == "" || outcome == "<nil>" {
+					continue
+				}
+				lines = append(lines, "- "+outcome)
+			}
+			if len(lines) > 0 {
+				extra = "\n\nJournal of prior pulses:\n" + strings.Join(lines, "\n")
+			}
+		}
+	}
+	return "You are a hive daughter of Remedy. You do not speak to the owner. " +
+		"Report a compact outcome. Prefer tools over essays.\n\n" +
+		"Job: " + d.Goal + extra
+}
+
+// runHiveForagerPulse drives one TurnRunner pass and persists the return packet.
+func (s *Server) runHiveForagerPulse(ctx context.Context, d hiveDaughter) error {
+	if s == nil {
+		return errors.New("hive server missing")
+	}
+	if s.runner == nil {
+		s.finishHiveForager(d, hivePacket{
+			Goal:     d.Goal,
+			Done:     false,
+			Outcome:  "pulse failed: turn runner unavailable",
+			Blockers: []string{"pulse_failed"},
+		}, hiveStatusBlocked)
+		return errors.New("hive forager requires turn runner")
+	}
+	budget := d.BudgetSteps
+	if budget < 1 {
+		budget = hiveDefaultBudgetSteps
+	}
+	if budget > hiveMaxBudgetSteps {
+		budget = hiveMaxBudgetSteps
+	}
+	var text strings.Builder
+	err := s.runner.RunTurn(ctx, TurnRequest{
+		Prompt:        hiveForagerCharter(d),
+		SessionID:     d.SessionID,
+		MaxIterations: budget,
+	}, func(tok string) error {
+		if strings.HasPrefix(tok, "@@") {
+			return nil
+		}
+		text.WriteString(tok)
+		return nil
+	})
+	aborted := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	if err != nil && !aborted {
+		s.finishHiveForager(d, hivePacket{
+			Goal:     d.Goal,
+			Done:     false,
+			Outcome:  trimRunes("pulse failed: "+err.Error(), 400),
+			Blockers: []string{"pulse_failed"},
+		}, hiveStatusBlocked)
+		return err
+	}
+	outcome := strings.TrimSpace(text.String())
+	pkt := hivePacket{Goal: d.Goal, Outcome: trimRunes(outcome, 800)}
+	status := hiveStatusReported
+	if aborted {
+		pkt.Done = false
+		pkt.Blockers = []string{"cancelled"}
+		if pkt.Outcome == "" {
+			pkt.Outcome = "cancelled"
+		}
+		status = hiveStatusCancelled
+	} else {
+		pkt.Done = outcome != ""
+		if pkt.Outcome == "" {
+			pkt.Outcome = "pulse completed with no text"
+		}
+	}
+	s.finishHiveForager(d, pkt, status)
+	return nil
+}
+
+func (s *Server) finishHiveForager(d hiveDaughter, pkt hivePacket, status string) {
+	if s == nil || s.hiveFS == nil || !s.hiveFS.ready() {
+		return
+	}
+	fresh, ok, err := s.hiveFS.get(d.ID)
+	if err != nil || !ok {
+		return
+	}
+	if fresh.Status == hiveStatusRetired || fresh.Status == hiveStatusCancelled {
+		return
+	}
+	fresh.Packet = &pkt
+	fresh.Status = status
+	if fresh.Journal == nil {
+		fresh.Journal = map[string]any{}
+	}
+	count := 0
+	switch v := fresh.Journal["pulse_count"].(type) {
+	case float64:
+		count = int(v)
+	case int:
+		count = v
+	}
+	fresh.Journal["pulse_count"] = count + 1
+	_ = s.hiveFS.save(fresh)
 }
