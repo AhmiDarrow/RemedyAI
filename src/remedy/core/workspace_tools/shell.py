@@ -693,8 +693,8 @@ def register_shell_tools(runtime: Any) -> None:
             return format_open_folder_result(info)
 
         from remedy.core.computer import host_binding
-        from remedy.core.computer.shell_host import HostOp
-        from remedy.core.computer.shell_host import PreparedCommand, prepare_host_command
+        from remedy.core.computer.host_binding import HostOp
+        from remedy.core.computer.host_binding import PreparedCommand, prepare_host_command
 
         try:
             if _argv:
@@ -1186,7 +1186,7 @@ def register_shell_tools(runtime: Any) -> None:
         conpty: bool = False,
     ) -> str:
         """Run a native argv (no shell). Accepts list or string."""
-        from remedy.core.computer.shell_host import coerce_argv
+        from remedy.core.computer.host_binding import coerce_argv
 
         args = coerce_argv(argv)
         if not args:
@@ -1208,7 +1208,7 @@ def register_shell_tools(runtime: Any) -> None:
 
     async def host_mkdir(paths: Any = None, workdir: str = "") -> str:
         """Create directories (parents=True) under write roots. No shell."""
-        from remedy.core.computer.shell_host import coerce_argv
+        from remedy.core.computer.host_binding import coerce_argv
 
         items = coerce_argv(paths)
         if not items:

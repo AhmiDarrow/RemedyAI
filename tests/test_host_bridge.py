@@ -16,8 +16,8 @@ from remedy.core.computer.host_binding import (
     launch_script,
     resolve_which,
 )
-from remedy.core.computer.shell_host import HostOp, mkdir_op, run_op, script_op
-from remedy.core.computer.shell_host import (
+from remedy.core.computer.host_binding import HostOp, mkdir_op, run_op, script_op
+from remedy.core.computer.host_binding import (
     coerce_argv,
     prepare_host_command,
     prepare_host_op,
@@ -286,7 +286,7 @@ def test_prepare_deflates_uv_run_pytest(tmp_path: Path, monkeypatch: pytest.Monk
 
 
 def test_prepare_strips_pytest_last_failed() -> None:
-    from remedy.core.computer.shell_host import prepare_host_command
+    from remedy.core.computer.host_binding import prepare_host_command
 
     prep = prepare_host_command("pytest -q --lf", host="cmd")
     blob = " ".join(prep.argv) + " " + prep.display
