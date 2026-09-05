@@ -3,6 +3,8 @@
 Production :7400 is Go httpapi. This contract is Go-only: an SPA path that
 Go does not register fails the suite unless it is explicitly listed in
 ``KNOWN_GO_GAPS`` (Wave 2 cutover allowlist — shrink only, never fake success).
+
+Live HTTP against a spawned remedy-runtime is ``tests/test_go_route_parity.py``.
 """
 
 from __future__ import annotations
