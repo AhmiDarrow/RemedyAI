@@ -128,17 +128,12 @@ def test_cli_skill_list_hides_learned_probation(tmp_path, capsys):
         SkillRegistry.discover_defaults = original  # type: ignore[method-assign]
 
 
-def test_partner_status_session_id_scopes_metabolism(tmp_path):
-    """GET /api/partner/status?session_id= scopes lean metabolism to that tab."""
-    import asyncio
-
-    from fastapi.testclient import TestClient
-
+def test_partner_status_session_id_scopes_metabolism():
+    """Partner status HTTP is Go-owned; pin per-session quality counters here."""
     from remedy.core.metabolism.decision import reset_decision_tracker
     from remedy.core.metabolism.evidence import reset_evidence_ledger
+    from remedy.core.metabolism.turn import metabolism_poll_snapshot
     from remedy.core.session_quality import get_session_quality, reset_session_quality
-    from remedy.interfaces.api import create_app
-    from remedy.memory.store import MemoryStore
 
     sid_a = "status_sess_a"
     sid_b = "status_sess_b"
@@ -154,42 +149,15 @@ def test_partner_status_session_id_scopes_metabolism(tmp_path):
         tier=1, evidence_units=1, decision_units=0
     )
 
-    async def _init():
-        store = MemoryStore(str(tmp_path / "mem_status.db"))
-        await store.initialize()
-        return store
+    # Focused tab A must not inherit B's counters
+    meta_a = metabolism_poll_snapshot(sid_a)
+    assert meta_a.get("lean") is True
+    qm_a = (get_session_quality(sid_a).snapshot().get("metabolism") or {})
+    assert int(qm_a.get("evidence_units") or 0) == 7
+    assert int(qm_a.get("last_tier") or 0) == 2
 
-    store = asyncio.run(_init())
-    rt = type(
-        "RT",
-        (),
-        {
-            "skills": type("S", (), {"count": 0, "skills": []})(),
-            "_session_id": sid_b,  # runtime last-touch is B
-            "_streaming_sessions": set(),
-            "list_tasks": lambda self=None: [],
-        },
-    )()
-    app = create_app(runtime=rt, memory=store, api_key="")
-    with TestClient(app) as client:
-        # Focused tab A must not inherit B's counters
-        r = client.get(f"/api/partner/status?session_id={sid_a}")
-        assert r.status_code == 200
-        data = r.json()
-        assert data.get("session_id") == sid_a
-        assert data.get("version")
-        meta = data.get("metabolism") or {}
-        assert meta.get("lean") is True
-        q = data.get("session_quality") or {}
-        qm = q.get("metabolism") or {}
-        assert int(qm.get("evidence_units") or 0) == 7
-        assert int(qm.get("last_tier") or 0) == 2
-
-        r2 = client.get(f"/api/partner/status?session_id={sid_b}")
-        data2 = r2.json()
-        assert data2.get("session_id") == sid_b
-        qm2 = (data2.get("session_quality") or {}).get("metabolism") or {}
-        assert int(qm2.get("evidence_units") or 0) == 1
+    qm_b = (get_session_quality(sid_b).snapshot().get("metabolism") or {})
+    assert int(qm_b.get("evidence_units") or 0) == 1
 
     for s in (sid_a, sid_b):
         reset_session_quality(s)

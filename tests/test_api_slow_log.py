@@ -8,10 +8,7 @@ def test_poller_paths_skip_slow_on_200():
         "/api/status",
         "/api/ping",
         "/api/turn-active",
-        "/api/partner/status",
-        "/api/plans/latest",
-        "/api/app/command",
-        "/api/approvals",
+        "/api/self-improve",
     ):
         assert should_warn_slow("GET", path, 200, 6259) is False
 
@@ -26,7 +23,11 @@ def test_real_endpoints_still_slow():
 
 
 def test_go_owned_pollers_are_not_exempt_on_testclient_helper():
-    """Voice/computer/life-tasks live on Go — TestClient slow helper no longer lists them."""
+    """Partner/plans/app/voice live on Go — TestClient slow helper no longer lists them."""
+    assert should_warn_slow("GET", "/api/partner/status", 200, 6259) is True
+    assert should_warn_slow("GET", "/api/plans/latest", 200, 6259) is True
+    assert should_warn_slow("GET", "/api/app/command", 200, 6259) is True
+    assert should_warn_slow("GET", "/api/approvals", 200, 6259) is True
     assert should_warn_slow("GET", "/api/voice/status", 200, 2707) is True
     assert should_warn_slow("GET", "/api/computer/jobs/next", 200, 6259) is True
     assert should_warn_slow("GET", "/api/life-tasks/current", 200, 6259) is True

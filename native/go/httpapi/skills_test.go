@@ -167,6 +167,34 @@ func TestStatusSkillsCount(t *testing.T) {
 	}
 }
 
+func TestDeleteUserSkill(t *testing.T) {
+	s, home := newSkillsTestServer(t)
+	skillDir := filepath.Join(home, "skills", "demo-skill")
+	if !dirExists(skillDir) {
+		t.Fatalf("missing fixture skill dir %s", skillDir)
+	}
+
+	code, raw := doSkillsReq(t, s, http.MethodDelete, "/api/skills/demo-skill", "")
+	if code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", code, raw)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["status"] != "deleted" || out["removed_files"] != true {
+		t.Fatalf("out=%v", out)
+	}
+	if dirExists(skillDir) {
+		t.Fatal("skill dir still present after delete")
+	}
+
+	code, _ = doSkillsReq(t, s, http.MethodDelete, "/api/skills/does-not-exist", "")
+	if code != http.StatusNotFound {
+		t.Fatalf("missing delete status=%d", code)
+	}
+}
+
 func TestParseSkillFrontmatterFolded(t *testing.T) {
 	raw := "---\nname: x\ndescription: >\n  hello\n  world\nversion: 2.0.0\ntags: [a, b]\n---\n\nBody here\n"
 	fm, body, ok := parseSkillFrontmatter(raw)

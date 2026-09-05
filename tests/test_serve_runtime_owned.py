@@ -286,6 +286,8 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "voice",
         "workspace",
         "skills_library",
+        "memory",
+        "partner",
     ):
         assert not re.search(rf"\bregister_{mod}_routes\s*\(", routes_init)
         assert importlib.util.find_spec(f"remedy.interfaces.routes.{mod}") is None
@@ -319,6 +321,7 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/memory/import",
         "/api/session-summaries",
         "/api/handoffs",
+        "/api/skills",
         "/api/skills/packs",
         "/api/skills/metrics/reuse",
         "/api/skills/learning/summary",
@@ -334,7 +337,14 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/goals",
         "/api/life-tasks/current",
         "/api/checkpoints/latest",
+        "/api/partner/status",
+        "/api/partner/metabolism",
         "/api/partner/identity/export",
+        "/api/approvals",
+        "/api/plans",
+        "/api/plans/latest",
+        "/api/app/command",
+        "/api/projects/scan",
         "/api/sessions/s1/todos",
         "/api/sessions/s1/timeline",
         "/api/sessions/s1/export",
@@ -377,6 +387,8 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/memory/import",
         "/api/partner/identity/export",
         "/api/partner/identity/import",
+        "/api/plans",
+        "/api/projects/scan",
         "/api/goals",
         "/api/life-tasks/act",
         "/api/nanoswarm/classify",
@@ -405,6 +417,7 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/skills/library/suggest/dismiss",
         "/api/skills/library/submit",
         "/api/skills/library/update/alpha",
+        "/api/skills/export",
     ):
         r = client.post(path, json={})
         assert _absent(r.status_code), f"{path} still registered ({r.status_code})"

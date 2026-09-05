@@ -115,7 +115,7 @@ def test_auth_middleware_401_without_token(auth_on, tmp_path):
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
     client = TestClient(app)
-    r = client.get("/api/skills")
+    r = client.get("/api/sessions")
     assert r.status_code == 401
 
 
@@ -123,7 +123,7 @@ def test_auth_middleware_ok_with_bearer(auth_on, tmp_path):
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
     client = TestClient(app)
-    r = client.get("/api/skills", headers={"Authorization": f"Bearer {tok}"})
+    r = client.get("/api/sessions", headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code == 200
 
 
@@ -171,7 +171,7 @@ def test_auth_disabled_empty_key(monkeypatch):
     monkeypatch.setenv("REMEDY_API_AUTH", "0")
     app = create_app(api_key="")
     client = TestClient(app)
-    r = client.get("/api/skills")
+    r = client.get("/api/sessions")
     assert r.status_code == 200
 
 
@@ -183,7 +183,7 @@ def test_cors_star_refused_when_auth_on(auth_on, tmp_path, monkeypatch):
     # Middleware still has a concrete origin list, not bare *
     # Smoke: authenticated call works
     client = TestClient(app)
-    r = client.get("/api/skills", headers={"Authorization": f"Bearer {tok}"})
+    r = client.get("/api/sessions", headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code == 200
 
 
@@ -265,7 +265,7 @@ def test_auth_length_mismatch_is_401_not_500(auth_on, tmp_path):
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
     client = TestClient(app)
-    r = client.get("/api/skills", headers={"Authorization": "Bearer x"})
+    r = client.get("/api/sessions", headers={"Authorization": "Bearer x"})
     assert r.status_code == 401
 
 
