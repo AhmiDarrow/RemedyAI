@@ -13,7 +13,6 @@ import sys
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 _SESSIONS_GUARD = asyncio.Lock()
 
@@ -160,9 +159,9 @@ def conpty_available() -> bool:
     if sys.platform != "win32":
         return False
     try:
-        from remedy.execution.host.conpty import spawn_conpty_supported
+        from remedy.core.computer import host_binding
 
-        return bool(spawn_conpty_supported())
+        return bool(host_binding.conpty_available())
     except Exception:
         return False
 

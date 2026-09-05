@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from remedy.core.computer import host_binding
+from remedy.core.computer.host_binding import looks_like_powershell, translate_posix_to_host
 from remedy.execution.host.ir import HostOp, mkdir_op, run_op, script_op
 from remedy.execution.host.runner import (
     coerce_argv,
@@ -19,62 +20,61 @@ from remedy.execution.host.runner import (
     resolve_which,
 )
 from remedy.execution.host.session import conpty_available
-from remedy.execution.host.translate import looks_like_powershell, translate_posix_to_host
 from remedy.execution.process import win_shell_prefix
 from remedy.execution.runtime import ToolRuntime
 
 
 def test_translate_mkdir_p() -> None:
     r = translate_posix_to_host("mkdir -p src/foo tests", host="cmd")
-    assert r.changed
-    assert "if not exist" in r.text
-    assert "src\\foo" in r.text or "src/foo" in r.text.replace("\\", "/")
+    assert r.get("changed")
+    assert "if not exist" in r.get("text")
+    assert "src\\foo" in r.get("text") or "src/foo" in r.get("text").replace("\\", "/")
     # Trailing `\"` escapes the closer in cmd — must use `\.` instead.
-    assert '\\"' not in r.text
-    assert "\\." in r.text
+    assert '\\"' not in r.get("text")
+    assert "\\." in r.get("text")
 
 
 def test_translate_rm_rf() -> None:
     r = translate_posix_to_host("rm -rf build", host="cmd")
-    assert r.changed
-    assert "rmdir" in r.text
-    assert "build" in r.text
-    assert '\\"' not in r.text
+    assert r.get("changed")
+    assert "rmdir" in r.get("text")
+    assert "build" in r.get("text")
+    assert '\\"' not in r.get("text")
 
 
 def test_translate_export_and_dev_null() -> None:
     r = translate_posix_to_host("export FOO=bar && echo hi >/dev/null", host="cmd")
-    assert 'set "FOO=bar"' in r.text or "set FOO=bar" in r.text
-    assert "NUL" in r.text
-    assert "/dev/null" not in r.text
+    assert 'set "FOO=bar"' in r.get("text") or "set FOO=bar" in r.get("text")
+    assert "NUL" in r.get("text")
+    assert "/dev/null" not in r.get("text")
 
 
 def test_translate_rm_chain_and_plain_del() -> None:
     """cmd IF must not swallow `&& next`; plain rm must use _q()."""
     rec = translate_posix_to_host("rm -rf build && echo next", host="cmd")
-    assert rec.changed
-    assert rec.text.strip().startswith("(")
-    assert rec.text.count("(") >= 2
+    assert rec.get("changed")
+    assert rec.get("text").strip().startswith("(")
+    assert rec.get("text").count("(") >= 2
     # After the IF group, the chain operator must still be there.
-    assert "&&" in rec.text or "& echo" in rec.text.lower()
+    assert "&&" in rec.get("text") or "& echo" in rec.get("text").lower()
     plain = translate_posix_to_host('rm foo"&calc', host="cmd")
-    assert "del" in plain.text
-    assert '"foo""&calc"' in plain.text
+    assert "del" in plain.get("text")
+    assert '"foo""&calc"' in plain.get("text")
 
 
 def test_translate_q_escapes_quote_amp() -> None:
     """Zig cmd quoting doubles embedded quotes (``"foo""&calc"``)."""
-    text = translate_posix_to_host('cat foo"&calc', host="cmd").text
+    text = translate_posix_to_host('cat foo"&calc', host="cmd").get("text")
     assert "type" in text
     assert '"foo""&calc"' in text
 
 
 def test_translate_ls_cat_pwd_which() -> None:
-    assert translate_posix_to_host("ls", host="cmd").text == "dir"
-    assert "type" in translate_posix_to_host("cat README.md", host="cmd").text
-    assert translate_posix_to_host("pwd", host="cmd").text == "cd"
-    assert translate_posix_to_host("which git", host="cmd").text.startswith("where")
-    assert translate_posix_to_host("which 'foo&calc'", host="cmd").text == 'where "foo&calc"'
+    assert translate_posix_to_host("ls", host="cmd").get("text") == "dir"
+    assert "type" in translate_posix_to_host("cat README.md", host="cmd").get("text")
+    assert translate_posix_to_host("pwd", host="cmd").get("text") == "cd"
+    assert translate_posix_to_host("which git", host="cmd").get("text").startswith("where")
+    assert translate_posix_to_host("which 'foo&calc'", host="cmd").get("text") == 'where "foo&calc"'
 
 
 def test_refuse_os_open_text_document() -> None:
@@ -92,18 +92,18 @@ def test_refuse_os_open_text_document() -> None:
 
 def test_translate_start_md_types_instead_of_os_open() -> None:
     r = translate_posix_to_host("start README.md", host="cmd")
-    assert "type" in r.text.lower()
-    assert "notepad" not in r.text.lower()
-    assert "README.md" in r.text
+    assert "type" in r.get("text").lower()
+    assert "notepad" not in r.get("text").lower()
+    assert "README.md" in r.get("text")
     r2 = translate_posix_to_host('start "" notes.md', host="cmd")
-    assert "type" in r2.text.lower()
-    assert "notepad" not in r2.text.lower()
+    assert "type" in r2.get("text").lower()
+    assert "notepad" not in r2.get("text").lower()
     r3 = translate_posix_to_host("explorer README.md", host="cmd")
-    assert "type" in r3.text.lower()
+    assert "type" in r3.get("text").lower()
     r4 = translate_posix_to_host("cmd /c start index.html", host="cmd")
-    assert "type" in r4.text.lower()
+    assert "type" in r4.get("text").lower()
     r5 = translate_posix_to_host("start package.json", host="cmd")
-    assert "type" in r5.text.lower()
+    assert "type" in r5.get("text").lower()
 
 
 def _exe_stem(name: str) -> str:
@@ -111,12 +111,24 @@ def _exe_stem(name: str) -> str:
     return head[:-4] if head.endswith(".exe") else head
 
 
-def test_expand_and_chain_splits_git_without_cmd() -> None:
-    from remedy.execution.host import runner as host_runner
+def _chain_hops(argv: list[str]) -> list[dict] | None:
+    """Zig ``shell_chain_expand`` hops; None when not a multi-hop chain."""
+    result = host_binding.shell_chain_expand({"argv": argv})
+    hops = result.get("hops")
+    if not hops or not isinstance(hops, list) or len(hops) < 2:
+        return None
+    return [h for h in hops if isinstance(h, dict)]
 
-    hops = host_runner.expand_and_chain_argv(
-        ["cmd.exe", "/c", 'git add . && git commit -m "wip"']
-    )
+
+def _all_run_argvs(argv: list[str]) -> list[list[str]] | None:
+    hops = _chain_hops(argv)
+    if not hops or any(str(h.get("kind") or "") != "run" for h in hops):
+        return None
+    return [[str(a) for a in (h.get("argv") or [])] for h in hops]
+
+
+def test_expand_and_chain_splits_git_without_cmd() -> None:
+    hops = _all_run_argvs(["cmd.exe", "/c", 'git add . && git commit -m "wip"'])
     assert hops is not None
     assert _exe_stem(hops[0][0]) == "git"
     assert hops[0][1:] == ["add", "."]
@@ -124,7 +136,7 @@ def test_expand_and_chain_splits_git_without_cmd() -> None:
     assert hops[1][1:3] == ["commit", "-m"]
     assert hops[1][3] == "wip"
     # Quote-aware && stays one hop (Zig shell_chain — no Python twin).
-    quoted = host_runner.expand_and_chain_argv(
+    quoted = _all_run_argvs(
         ["cmd.exe", "/c", 'git commit -m "fix: a && b" && git status']
     )
     assert quoted is not None
@@ -134,33 +146,27 @@ def test_expand_and_chain_splits_git_without_cmd() -> None:
     assert quoted[0][3] == "fix: a && b"
     assert _exe_stem(quoted[1][0]) == "git"
     assert quoted[1][1:] == ["status"]
-    assert host_runner.expand_and_chain_argv(["cmd", "/c", "git status"]) is None
-    # mkdir is not a plain run hop — Zig returns mkdir+run, expand_and_chain_argv
-    # only yields all-run chains.
-    assert (
-        host_runner.expand_and_chain_argv(["cmd.exe", "/c", "mkdir -p a && git add ."])
-        is None
-    )
+    assert _all_run_argvs(["cmd", "/c", "git status"]) is None
+    # mkdir is not a plain run hop — Zig returns mkdir+run.
+    assert _all_run_argvs(["cmd.exe", "/c", "mkdir -p a && git add ."]) is None
 
 
 def test_expand_shell_chain_cd_and_mkdir() -> None:
-    from remedy.execution.host import runner as host_runner
-
-    cd_hops = host_runner.expand_shell_chain(["cmd.exe", "/c", "cd src && pytest -q"])
+    cd_hops = _chain_hops(["cmd.exe", "/c", "cd src && pytest -q"])
     assert cd_hops is not None
-    assert [h.kind for h in cd_hops] == ["cd", "run"]
-    assert cd_hops[0].paths == ("src",)
-    assert _exe_stem(cd_hops[1].argv[0]) == "pytest"
-    mk_hops = host_runner.expand_shell_chain(
+    assert [str(h.get("kind")) for h in cd_hops] == ["cd", "run"]
+    assert list(cd_hops[0].get("paths") or []) == ["src"]
+    assert _exe_stem((cd_hops[1].get("argv") or ["?"])[0]) == "pytest"
+    mk_hops = _chain_hops(
         ["cmd.exe", "/c", '(if not exist "out\\." mkdir "out") && git add .']
     )
     assert mk_hops is not None
-    assert [h.kind for h in mk_hops] == ["mkdir", "run"]
-    assert mk_hops[0].paths == ("out",)
-    posix_mk = host_runner.expand_shell_chain(["sh", "-c", "mkdir -p build && git status"])
+    assert [str(h.get("kind")) for h in mk_hops] == ["mkdir", "run"]
+    assert list(mk_hops[0].get("paths") or []) == ["out"]
+    posix_mk = _chain_hops(["sh", "-c", "mkdir -p build && git status"])
     assert posix_mk is not None
-    assert posix_mk[0].kind == "mkdir"
-    assert "build" in posix_mk[0].paths
+    assert str(posix_mk[0].get("kind")) == "mkdir"
+    assert "build" in list(posix_mk[0].get("paths") or [])
 
 
 @pytest.mark.asyncio
@@ -288,24 +294,24 @@ def test_prepare_strips_pytest_last_failed() -> None:
 
 def test_translate_chain_mkdir_and_true() -> None:
     r = translate_posix_to_host("mkdir -p a && true", host="cmd")
-    assert "if not exist" in r.text
+    assert "if not exist" in r.get("text")
     # Parens so `&& true` still runs when `a` already exists (cmd IF line-eat).
-    assert r.text.strip().startswith("(")
-    assert "&&" in r.text
-    assert r.text.index(")") < r.text.index("&&")
-    assert "cd ." in r.text
+    assert r.get("text").strip().startswith("(")
+    assert "&&" in r.get("text")
+    assert r.get("text").index(")") < r.get("text").index("&&")
+    assert "cd ." in r.get("text")
 
 
 def test_translate_leaves_powershell_alone() -> None:
     src = "Get-ChildItem -Recurse | Where-Object { $_.Name -eq 'x' }"
     r = translate_posix_to_host(src, host="cmd")
-    assert r.text == src
+    assert r.get("text") == src
     assert looks_like_powershell(src)
 
 
 def test_translate_untranslatable_subshell() -> None:
     r = translate_posix_to_host("echo $(pwd)", host="cmd")
-    assert r.untranslatable
+    assert r.get("untranslatable")
 
 
 def test_start_server_and_posix_test_are_not_powershell() -> None:
@@ -325,7 +331,7 @@ def test_untranslatable_prepare_does_not_exec() -> None:
 
 def test_chmod_is_host_noop() -> None:
     r = translate_posix_to_host("chmod +x run.sh", host="cmd")
-    assert r.noop
+    assert r.get("noop")
     prep = prepare_host_command("chmod +x run.sh", host="cmd")
     assert prep.kind == "noop"
     assert prep.argv == []
@@ -333,23 +339,23 @@ def test_chmod_is_host_noop() -> None:
 
 def test_chmod_dropped_from_chain() -> None:
     r = translate_posix_to_host("chmod +x a && mkdir -p b", host="cmd")
-    assert not r.noop
-    assert "if not exist" in r.text
-    assert "chmod" not in r.text.lower()
+    assert not r.get("noop")
+    assert "if not exist" in r.get("text")
+    assert "chmod" not in r.get("text").lower()
 
 
 def test_grep_falls_back_to_findstr(monkeypatch) -> None:
-    import remedy.execution.host.translate as tr
+    import remedy.core.computer.host_binding as tr
 
     monkeypatch.setattr(tr, "_find_rg", lambda: "")
     r = translate_posix_to_host("grep foo bar.py", host="cmd")
-    assert r.changed
-    assert "findstr" in r.text
-    assert "foo" in r.text
+    assert r.get("changed")
+    assert "findstr" in r.get("text")
+    assert "foo" in r.get("text")
 
 
 def test_find_rg_returns_path_string_not_tuple() -> None:
-    import remedy.execution.host.translate as tr
+    import remedy.core.computer.host_binding as tr
 
     got = tr._find_rg()
     assert isinstance(got, str)
@@ -360,35 +366,35 @@ def test_find_rg_returns_path_string_not_tuple() -> None:
 
 
 def test_grep_no_files_is_stdin_not_star(monkeypatch) -> None:
-    import remedy.execution.host.translate as tr
+    import remedy.core.computer.host_binding as tr
 
     monkeypatch.setattr(tr, "_find_rg", lambda: "")
     r = translate_posix_to_host("grep foo", host="cmd")
-    assert "findstr" in r.text
-    assert "*" not in r.text
-    assert "/s" not in r.text
+    assert "findstr" in r.get("text")
+    assert "*" not in r.get("text")
+    assert "/s" not in r.get("text")
     monkeypatch.setattr(tr, "_find_rg", lambda: r"C:\tools\rg.exe")
     rg = translate_posix_to_host("grep foo", host="cmd")
-    assert "*" not in rg.text
-    assert "WindowsPath" not in rg.text
-    assert "bundled" not in rg.text
+    assert "*" not in rg.get("text")
+    assert "WindowsPath" not in rg.get("text")
+    assert "bundled" not in rg.get("text")
 
 
 def test_piped_grep_does_not_embed_tuple_repr(monkeypatch) -> None:
-    import remedy.execution.host.translate as tr
+    import remedy.core.computer.host_binding as tr
 
     monkeypatch.setattr(tr, "_find_rg", lambda: r"C:\tools\rg.exe")
     r = translate_posix_to_host("dir | grep foo", host="cmd")
-    assert "WindowsPath" not in r.text
-    assert "bundled" not in r.text
-    assert "foo" in r.text
+    assert "WindowsPath" not in r.get("text")
+    assert "bundled" not in r.get("text")
+    assert "foo" in r.get("text")
 
 
 def test_powershell_word_in_args_does_not_skip_posix() -> None:
     src = "mkdir -p docs && echo use powershell"
     assert looks_like_powershell(src) is False
     r = translate_posix_to_host(src, host="cmd")
-    assert "if not exist" in r.text
+    assert "if not exist" in r.get("text")
     assert looks_like_powershell("where powershell") is False
     assert looks_like_powershell("pwsh -File x.ps1") is True
     assert looks_like_powershell("powershell -File x.ps1") is True
@@ -405,8 +411,8 @@ def test_service_cmdlets_are_powershell_not_filenames() -> None:
 
 def test_translate_posix_host_noop() -> None:
     r = translate_posix_to_host("mkdir -p a", host="posix")
-    assert r.text == "mkdir -p a"
-    assert not r.changed
+    assert r.get("text") == "mkdir -p a"
+    assert not r.get("changed")
 
 
 def test_zig_extracts_powershell_wrapper(tmp_path: Path) -> None:
@@ -645,7 +651,7 @@ def test_resolve_which_python_skips_sidecar_dialect(
 def test_python_exe_rewrite_skips_sidecar_when_frozen(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from remedy.execution.host import translate
+    from remedy.core.computer import host_binding as translate
 
     sidecar = tmp_path / "remedy-desktop.exe"
     sidecar.write_bytes(b"")
@@ -657,14 +663,14 @@ def test_python_exe_rewrite_skips_sidecar_when_frozen(
     exe = translate._python_exe()
     assert "remedy" not in Path(exe).name.lower()
     h = translate_posix_to_host("head -n 2 README.md", host="cmd")
-    assert "remedy-desktop" not in h.text.lower()
+    assert "remedy-desktop" not in h.get("text").lower()
 
 
 def test_line_rewrites_fall_back_to_pwsh_without_python(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No CPython at all: head/tail/wc still work via PowerShell."""
-    from remedy.execution.host import translate
+    from remedy.core.computer import host_binding as translate
 
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(
@@ -680,11 +686,13 @@ def test_line_rewrites_fall_back_to_pwsh_without_python(
         ("wc -l file.txt", "Measure-Object -Line"),
     ):
         h = translate_posix_to_host(cmd, host="cmd")
-        assert marker in h.text, (cmd, h.text)
-        assert "Get-Content" in h.text
-        assert "python" not in h.text.lower()
+        assert marker in h.get("text"), (cmd, h.get("text"))
+        assert "Get-Content" in h.get("text")
+        assert "python" not in h.get("text").lower()
 
-    argv, notes = translate.rewrite_posix_argv(["wc", "-l", "file.txt"])
+    data = translate.rewrite_posix_argv(["wc", "-l", "file.txt"])
+    argv = list(data.get("argv") or [])
+    notes = list(data.get("notes") or [])
     assert argv[0] == str(pw)
     assert any("pwsh" in n for n in notes)
 
@@ -693,7 +701,7 @@ def test_line_rewrites_skip_with_hint_without_python_or_pwsh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Neither CPython nor pwsh: leave the command, surface REMEDY_PYTHON."""
-    from remedy.execution.host import translate
+    from remedy.core.computer import host_binding as translate
 
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(
@@ -701,11 +709,13 @@ def test_line_rewrites_skip_with_hint_without_python_or_pwsh(
     )
     monkeypatch.setattr(translate, "_pwsh_exe", lambda: "")
     h = translate_posix_to_host("head -n 2 file.txt", host="cmd")
-    assert "head" in h.text
-    assert "9009" not in h.text
-    assert any("REMEDY_PYTHON" in n for n in h.notes)
+    assert "head" in h.get("text")
+    assert "9009" not in h.get("text")
+    assert any("REMEDY_PYTHON" in n for n in h.get("notes"))
 
-    argv, notes = translate.rewrite_posix_argv(["wc", "-l", "file.txt"])
+    data = translate.rewrite_posix_argv(["wc", "-l", "file.txt"])
+    argv = list(data.get("argv") or [])
+    notes = list(data.get("notes") or [])
     assert argv == ["wc", "-l", "file.txt"]
     assert any("REMEDY_PYTHON" in n for n in notes)
 
@@ -910,26 +920,28 @@ async def test_current_cwd_empty_when_closed() -> None:
 
 def test_head_tail_find_test_f_rewrite() -> None:
     h = translate_posix_to_host("head -n 5 README.md", host="cmd")
-    assert h.changed
-    assert "python" in h.text.lower() or "-c" in h.text
+    assert h.get("changed")
+    assert "python" in h.get("text").lower() or "-c" in h.get("text")
     t = translate_posix_to_host("tail -n 3 log.txt", host="cmd")
-    assert t.changed
+    assert t.get("changed")
     f = translate_posix_to_host("find . -name *.py", host="cmd")
-    assert "dir /s /b" in f.text
+    assert "dir /s /b" in f.get("text")
     tf = translate_posix_to_host("test -f app.py", host="cmd")
-    assert "if exist" in tf.text
+    assert "if exist" in tf.get("text")
     br = translate_posix_to_host("[ -f app.py ]", host="cmd")
-    assert "if exist" in br.text
+    assert "if exist" in br.get("text")
     wc = translate_posix_to_host("wc -l src/data/curriculum.ts", host="cmd")
-    assert wc.changed
-    assert "python" in wc.text.lower() or "-c" in wc.text
-    assert "len(p)" in wc.text
+    assert wc.get("changed")
+    assert "python" in wc.get("text").lower() or "-c" in wc.get("text")
+    assert "len(p)" in wc.get("text")
 
 
 def test_host_run_argv_rewrites_wc_dash_l() -> None:
-    from remedy.execution.host.translate import rewrite_posix_argv
+    from remedy.core.computer import host_binding
 
-    out, notes = rewrite_posix_argv(["wc", "-l", "src/data/curriculum.ts"])
+    data = host_binding.rewrite_posix_argv(["wc", "-l", "src/data/curriculum.ts"])
+    out = list(data.get("argv") or [])
+    notes = list(data.get("notes") or [])
     assert notes
     assert out[0] != "wc"
     assert "-c" in out

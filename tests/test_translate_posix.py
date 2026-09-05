@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from remedy.core.computer import host_binding as hb
-from remedy.execution.host.translate import translate_posix_to_host
+from remedy.core.computer.host_binding import translate_posix_to_host
 from remedy.runtime import native_runtime
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "host_ir" / "translate_cmd.json"
@@ -53,6 +53,6 @@ def test_translate_posix_matches_fixture(case: dict) -> None:
 def test_translate_posix_to_host_routes_through_zig() -> None:
     """Production wrapper must call Zig (no Python rewrite twin)."""
     got = translate_posix_to_host("mkdir -p a", host="cmd")
-    assert got.changed
-    assert "if not exist" in got.text
-    assert 'mkdir "a"' in got.text
+    assert got.get("changed")
+    assert "if not exist" in str(got.get("text") or "")
+    assert 'mkdir "a"' in str(got.get("text") or "")

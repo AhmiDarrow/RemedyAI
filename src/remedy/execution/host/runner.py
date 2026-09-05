@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import os
 import shlex
-import shutil
 import sys
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-from remedy.execution.host.ir import HostOp, script_op
+from remedy.execution.host.ir import HostOp, run_op, script_op
 
 
 @dataclass
@@ -49,80 +48,6 @@ def coerce_argv(argv: Any) -> list[str]:
         return [t for t in shlex.split(text, posix=posix) if t]
     except ValueError:
         return text.split()
-
-
-@dataclass(frozen=True)
-class ChainHop:
-    """One hop of an ``A && B`` chain the sandbox can run without cmd.exe."""
-
-    kind: Literal["run", "cd", "mkdir"]
-    argv: tuple[str, ...] = ()
-    paths: tuple[str, ...] = ()
-
-    @staticmethod
-    def run(argv: list[str]) -> ChainHop:
-        return ChainHop(kind="run", argv=tuple(argv))
-
-    @staticmethod
-    def cd(path: str) -> ChainHop:
-        return ChainHop(kind="cd", paths=(path,))
-
-    @staticmethod
-    def mkdir(paths: list[str]) -> ChainHop:
-        return ChainHop(kind="mkdir", paths=tuple(paths))
-
-    @staticmethod
-    def from_dict(raw: dict[str, Any]) -> ChainHop:
-        kind = str(raw.get("kind") or "")
-        if kind == "run":
-            return ChainHop.run([str(a) for a in (raw.get("argv") or [])])
-        if kind == "cd":
-            paths = [str(p) for p in (raw.get("paths") or [])]
-            return ChainHop.cd(paths[0] if paths else "")
-        if kind == "mkdir":
-            return ChainHop.mkdir([str(p) for p in (raw.get("paths") or [])])
-        raise ValueError(f"unknown chain hop kind: {kind!r}")
-
-
-def expand_shell_chain(
-    argv: list[str],
-    *,
-    project_path: Path | str | None = None,
-) -> list[ChainHop] | None:
-    """Turn ``cmd /c A && B`` into hidden cd/mkdir/run hops (Zig only)."""
-    from remedy.core.computer.host_binding import HostError, shell_chain_expand
-
-    payload: dict[str, Any] = {"argv": [str(a) for a in argv]}
-    if project_path is not None:
-        payload["project_path"] = str(project_path)
-    try:
-        result = shell_chain_expand(payload)
-    except HostError:
-        raise
-    hops_raw = result.get("hops")
-    if not hops_raw:
-        return None
-    hops: list[ChainHop] = []
-    for item in hops_raw:
-        if not isinstance(item, dict):
-            return None
-        try:
-            hops.append(ChainHop.from_dict(item))
-        except (TypeError, ValueError):
-            return None
-    return hops if len(hops) >= 2 else None
-
-
-def expand_and_chain_argv(
-    argv: list[str],
-    *,
-    project_path: Path | str | None = None,
-) -> list[list[str]] | None:
-    """If *argv* is ``cmd /c A && B`` of plain processes, return those argvs."""
-    hops = expand_shell_chain(argv, project_path=project_path)
-    if not hops or any(h.kind != "run" for h in hops):
-        return None
-    return [list(h.argv) for h in hops]
 
 
 def prepare_host_command(
@@ -211,11 +136,20 @@ def prepare_host_op(
         raise
 
 
+def _ok_python(path: str | None) -> bool:
+    if not path:
+        return False
+    from remedy.core.build_python import is_usable_host_python
+
+    return is_usable_host_python(path)
+
+
 def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
     """Resolve an executable the way the host would.
 
-    Also looks in the project's ``.venv`` / ``node_modules/.bin`` so
-    ``pytest`` / ``uv`` / ``ruff`` work without a global install.
+    Project ``.venv`` / ``node_modules/.bin`` first, then Zig dialect +
+    ``resolveWhich`` via ``host_op_prepare``. No ``shutil.which`` soft twin —
+    native runtime errors fail closed.
     """
     n = (name or "").strip()
     if not n:
@@ -223,40 +157,16 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
     key = n.lower().rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
     if key.endswith(".exe"):
         key = key[:-4]
-    from remedy.core.computer import host_binding
-    from remedy.core.computer.host_binding import HostError
-    from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
-    try:
-        d = host_binding.dialect_load("")
-        mapped = {
-            "python": str(d.get("python_cmd") or ""),
-            "python3": str(d.get("python_cmd") or ""),
-            "py": str(d.get("python_cmd") or ""),
-            "git": str(d.get("git_cmd") or ""),
-            "rg": str(d.get("rg_cmd") or ""),
-            "pwsh": str(d.get("pwsh_cmd") or ""),
-        }
-        hit = (mapped.get(key) or "").strip()
-        if hit and Path(hit).is_file():
-            if key in {"python", "python3", "py"}:
-                from remedy.core.build_python import is_usable_host_python
-
-                if not is_usable_host_python(hit):
-                    hit = ""
-            if hit:
-                return hit
-    except HostError:
-        raise
-    except (NativeRuntimeUnavailableError, OSError):
-        pass
     if cwd is not None:
         try:
             from remedy.core.project_fingerprint import local_bin_dirs
 
             suffix = ".exe" if os.name == "nt" else ""
             for bin_dir in local_bin_dirs(cwd):
-                cand = bin_dir / (n + suffix if suffix and not n.lower().endswith(suffix) else n)
+                cand = bin_dir / (
+                    n + suffix if suffix and not n.lower().endswith(suffix) else n
+                )
                 if cand.is_file():
                     return str(cand)
                 if suffix:
@@ -265,33 +175,48 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
                         return str(alt)
         except OSError:
             pass
-    def _ok_python(path: str | None) -> bool:
-        if not path:
-            return False
-        from remedy.core.build_python import is_usable_host_python
 
-        return is_usable_host_python(path)
+    from remedy.core.computer import host_binding
 
-    found = shutil.which(n)
-    if found and (key not in {"python", "python3", "py"} or _ok_python(found)):
-        return found
-    if os.name == "nt" and not n.lower().endswith(".exe"):
-        found = shutil.which(n + ".exe")
-        if found and (key not in {"python", "python3", "py"} or _ok_python(found)):
-            return found
+    d = host_binding.dialect_load("")
+    mapped = {
+        "python": str(d.get("python_cmd") or ""),
+        "python3": str(d.get("python_cmd") or ""),
+        "py": str(d.get("python_cmd") or ""),
+        "git": str(d.get("git_cmd") or ""),
+        "rg": str(d.get("rg_cmd") or ""),
+        "pwsh": str(d.get("pwsh_cmd") or ""),
+    }
+    hit = (mapped.get(key) or "").strip()
+    if hit and Path(hit).is_file():
+        if key in {"python", "python3", "py"}:
+            if _ok_python(hit):
+                return hit
+        else:
+            return hit
+
+    prep = prepare_host_op(run_op([n]), project_path=cwd)
+    if prep.argv:
+        cand = str(prep.argv[0] or "")
+        path = Path(cand)
+        if cand and path.is_file() and path.is_absolute():
+            if key in {"python", "python3", "py"}:
+                if _ok_python(cand):
+                    return cand
+            else:
+                return cand
+
     if key in {"python", "python3"}:
-        # Frozen Desktop: ``sys.executable`` is the sidecar, which would print
-        # its own usage and exit 2. Ask for a real interpreter instead —
-        # host_python_executable resolves ['py', '-3'] to the concrete
-        # python.exe rather than truncating the launcher argv to bare ``py``.
+        # Frozen Desktop: ``sys.executable`` is the sidecar. Prefer a real
+        # interpreter via host_python_executable.
         try:
             from remedy.core.build_python import host_python_executable
 
-            hit = host_python_executable()
+            found = host_python_executable()
         except OSError:
-            hit = ""
-        if hit and _ok_python(hit):
-            return hit
+            found = ""
+        if found and _ok_python(found):
+            return found
         from remedy.core.runtime_identity import is_frozen_install
 
         if is_frozen_install():
@@ -302,23 +227,17 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
 
 
 def default_script_lang(home: str | Path | None = None) -> str:
-    """pwsh when this PC has it; otherwise python (POSIX) or cmd."""
+    """pwsh when Zig dialect finds it; otherwise python (POSIX) or cmd.
+
+    No ``shutil.which`` soft twin — dialect errors fail closed.
+    """
     if os.name != "nt":
         return "python"
     from remedy.core.computer import host_binding
-    from remedy.core.computer.host_binding import HostError
-    from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
-    try:
-        d = host_binding.dialect_load(str(home) if home else "")
-        pwsh = str(d.get("pwsh_cmd") or "").strip()
-        if pwsh and Path(pwsh).is_file():
-            return "pwsh"
-    except HostError:
-        raise
-    except (NativeRuntimeUnavailableError, OSError):
-        pass
-    if shutil.which("pwsh") or shutil.which("powershell"):
+    d = host_binding.dialect_load(str(home) if home else "")
+    pwsh = str(d.get("pwsh_cmd") or "").strip()
+    if pwsh and Path(pwsh).is_file():
         return "pwsh"
     return "cmd"
 

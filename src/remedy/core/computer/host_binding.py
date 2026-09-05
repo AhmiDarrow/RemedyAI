@@ -1122,6 +1122,46 @@ def host_op_prepare(
     return result
 
 
+def _find_rg() -> str:
+    """Supply ``rg_path`` to Zig; monkeypatchable in tests."""
+    try:
+        from remedy.core.rg_binary import find_rg
+
+        path, _src = find_rg()
+        return str(path) if path else ""
+    except Exception:
+        return ""
+
+
+def _python_exe() -> str:
+    """A real CPython for head/tail/wc rewrites passed into Zig."""
+    try:
+        from remedy.core.build_python import host_python_executable
+
+        found = host_python_executable()
+        if found:
+            return found
+    except Exception:
+        pass
+    from remedy.core.runtime_identity import is_frozen_install
+
+    if is_frozen_install():
+        return ""
+    from remedy.core.build_python import is_usable_host_python
+
+    exe = sys.executable or ""
+    if exe and is_usable_host_python(exe):
+        return exe
+    return ""
+
+
+def _pwsh_exe() -> str:
+    """PowerShell for line rewrites when no CPython exists."""
+    import shutil
+
+    return shutil.which("pwsh") or shutil.which("powershell") or ""
+
+
 def translate_posix_to_host(
     command: str,
     *,
@@ -1130,16 +1170,23 @@ def translate_posix_to_host(
     python_exe: str | None = None,
     pwsh_exe: str | None = None,
 ) -> dict[str, Any]:
-    """Call ``remedy_core_translate_posix_to_host``; return a TranslateResult dict."""
-    payload: dict[str, Any] = {"command": command or ""}
-    if host is not None:
-        payload["host"] = host
-    if rg_path:
-        payload["rg_path"] = rg_path
-    if python_exe:
-        payload["python_exe"] = python_exe
-    if pwsh_exe:
-        payload["pwsh_exe"] = pwsh_exe
+    """Call ``remedy_core_translate_posix_to_host``; return a TranslateResult dict.
+
+    When *rg_path* / *python_exe* / *pwsh_exe* are omitted (``None``), path
+    helpers fill them for Zig. Pass ``""`` to force empty.
+    """
+    if host is None:
+        host = "cmd" if os.name == "nt" else "posix"
+    rg = _find_rg() if rg_path is None else rg_path
+    py = _python_exe() if python_exe is None else python_exe
+    pw = _pwsh_exe() if pwsh_exe is None else pwsh_exe
+    payload: dict[str, Any] = {"command": command or "", "host": host}
+    if rg:
+        payload["rg_path"] = rg
+    if py:
+        payload["python_exe"] = py
+    if pw:
+        payload["pwsh_exe"] = pw
     encoded = _utf8(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     library = _lib()
     ptr, length = _BytePtr(), c_size_t()
@@ -1177,12 +1224,17 @@ def rewrite_posix_argv(
     python_exe: str | None = None,
     pwsh_exe: str | None = None,
 ) -> dict[str, Any]:
-    """Call ``remedy_core_rewrite_posix_argv``; return ``{argv, notes}``."""
+    """Call ``remedy_core_rewrite_posix_argv``; return ``{argv, notes}``.
+
+    Omitting *python_exe* / *pwsh_exe* fills them via path helpers.
+    """
+    py = _python_exe() if python_exe is None else python_exe
+    pw = _pwsh_exe() if pwsh_exe is None else pwsh_exe
     payload: dict[str, Any] = {"argv": [str(a) for a in argv]}
-    if python_exe:
-        payload["python_exe"] = python_exe
-    if pwsh_exe:
-        payload["pwsh_exe"] = pwsh_exe
+    if py:
+        payload["python_exe"] = py
+    if pw:
+        payload["pwsh_exe"] = pw
     encoded = _utf8(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     library = _lib()
     ptr, length = _BytePtr(), c_size_t()
