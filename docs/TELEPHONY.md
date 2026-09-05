@@ -179,7 +179,7 @@ a phone line.
 ### Gateway integration
 
 `ChannelKind.PHONE` and `ChannelKind.SMS` join the existing enum and register
-through `channel_registry.py` like any messenger. This is deliberate: the
+through Go `native/go/gateway` like any messenger. This is deliberate: the
 proactive-messenger loop, session bridge, allowlists, and rate limits already
 work, so mid-call escalation ("clinic wants Tuesday instead — ok?") is an
 existing code path, not a new one.

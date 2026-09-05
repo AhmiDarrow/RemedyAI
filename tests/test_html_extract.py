@@ -183,9 +183,9 @@ def test_python_teams_jwt_helpers_removed():
     """Teams JWT / JWKS inbound moved to Go native/go/gateway."""
     from pathlib import Path
 
-    import remedy.gateway.channels as channels_pkg
-    import remedy.gateway.channels.teams as teams_mod
+    import remedy.gateway as gw
 
-    root = Path(channels_pkg.__file__).resolve().parent
-    assert not (root / "jwt_rs256.py").exists()
-    assert not hasattr(teams_mod, "_jwt_claims_structurally_valid")
+    root = Path(gw.__file__).resolve().parent
+    assert not (root / "channels").exists()
+    assert not (root / "channels" / "jwt_rs256.py").exists()
+    assert not (root / "channels" / "teams.py").exists()

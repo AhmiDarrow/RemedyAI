@@ -770,12 +770,7 @@ async def _apply_settings_update_inner(
             apply_messengers_update(cfg, messengers_update, home_path=home_path)
         except Exception:
             logger.exception("messenger settings update failed")
-        try:
-            from remedy.gateway.channel_hot_reload import reload_messenger_channels
-
-            await reload_messenger_channels(gateway, cfg)
-        except Exception:
-            logger.debug("messenger hot-reload skipped", exc_info=True)
+        # Messenger channel hot-reload is Go-owned (refreshMessengerAfterSettings).
 
     if "user_name" in patch and patch["user_name"] is not None:
         uname = str(patch["user_name"]).strip()

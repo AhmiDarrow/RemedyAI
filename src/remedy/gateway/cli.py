@@ -1,4 +1,4 @@
-"""Gateway CLI entrypoint — start, status, channels list."""
+"""Gateway CLI entrypoint — status, channels list, serve handoff."""
 
 from __future__ import annotations
 
@@ -7,35 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
 
-from remedy.gateway.channel_registry import register_messenger_channels
-from remedy.gateway.channels import CLIChannel, WebChannel
-from remedy.gateway.messengers import is_messenger_channel, list_messenger_definitions
-from remedy.gateway.router import Gateway
-from remedy.gateway.session_bridge import handle_messenger_event, outbound_chunks
-from remedy.models import ChannelKind, EventKind, GatewayEvent
+from remedy.gateway.messengers import list_messenger_definitions
+from remedy.models import ChannelKind
 
 console = Console()
-
-
-def _default_model(provider: Any) -> str:
-    try:
-        from remedy.interfaces.config import default_model_for_provider
-
-        return default_model_for_provider(str(provider or ""))
-    except Exception:
-        return ""
-
-
-def _load_cfg() -> dict[str, Any]:
-    try:
-        from remedy.interfaces.api_support import load_config
-
-        return load_config() or {}
-    except Exception:
-        return {}
 
 
 async def run_gateway(
@@ -128,10 +105,7 @@ def main_gateway(args) -> None:
                 flags.append("in")
             if m.outbound:
                 flags.append("out")
-            # Escaped: rich reads a bare [in/out] as a style tag and prints
-            # nothing at all, so the direction column only ever appeared for a
-            # messenger that supports neither direction — the exact opposite of
-            # what it is for.
+            # Escaped: rich reads a bare [in/out] as a style tag.
             console.print(
                 f"  {m.id:14} {m.status:8} {m.name}  "
                 rf"\[{'/'.join(flags) or '—'}]"

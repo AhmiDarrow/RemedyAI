@@ -72,7 +72,8 @@ def test_python_jwt_rs256_module_removed():
     """RS256 JWT verify for Teams webhooks lives in Go now."""
     from pathlib import Path
 
-    import remedy.gateway.channels as channels_pkg
+    import remedy.gateway as gw
 
-    root = Path(channels_pkg.__file__).resolve().parent
-    assert not (root / "jwt_rs256.py").exists()
+    root = Path(gw.__file__).resolve().parent
+    assert not (root / "channels").exists()
+    assert not (root / "channels" / "jwt_rs256.py").exists()

@@ -273,22 +273,19 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 role=ChatMessageRole.ASSISTANT,
                 content=response_text,
             ))
-            # Desktop reply → Telegram/Discord/etc. when session is messenger-origin.
+            # Desktop→messenger mirror is Go-owned (mirrorDesktopReply).
             with contextlib.suppress(Exception):
-                from remedy.gateway.session_bridge import mirror_desktop_reply_to_messenger
                 from remedy.interfaces.session_events import publish_session_event
 
                 ex = await memory.get_chat_session(session_id)
-                if ex is not None:
-                    await mirror_desktop_reply_to_messenger(gateway, ex, response_text)
-                    if getattr(ex, "origin_channel", None):
-                        await publish_session_event(
-                            "message_added",
-                            session_id,
-                            origin_channel=getattr(ex, "origin_channel", None),
-                            title=getattr(ex, "title", None),
-                            role="assistant",
-                        )
+                if ex is not None and getattr(ex, "origin_channel", None):
+                    await publish_session_event(
+                        "message_added",
+                        session_id,
+                        origin_channel=getattr(ex, "origin_channel", None),
+                        title=getattr(ex, "title", None),
+                        role="assistant",
+                    )
 
         return {
             "request_id": request_id,

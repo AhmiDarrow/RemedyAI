@@ -220,10 +220,21 @@ func (s *Server) resolveMessengerSession(channel, chatID, username, firstMessage
 	if s.sessions == nil {
 		return ChatSession{}, fmt.Errorf("no session store")
 	}
+	// Endless desktop session: join the focused tab instead of spawning msg:… parallel.
+	if attached, ok, err := s.attachMessengerToFocused(channel, chatID, username); err != nil {
+		return ChatSession{}, err
+	} else if ok {
+		return attached, nil
+	}
 	sid := gateway.ExternalSessionID(channel, chatID, "")
 	if existing, ok, err := s.sessions.Get(sid); err != nil {
 		return ChatSession{}, err
 	} else if ok {
+		if strings.TrimSpace(username) != "" && (existing.ExternalUser == nil || strings.TrimSpace(*existing.ExternalUser) == "") {
+			if updated, err := s.sessions.SetMessengerOrigin(existing.ID, "", "", trimUser(username)); err == nil {
+				return updated, nil
+			}
+		}
 		return existing, nil
 	}
 	if byExt, ok, err := s.sessions.FindByOrigin(channel, chatID); err != nil {
@@ -234,14 +245,7 @@ func (s *Server) resolveMessengerSession(channel, chatID, username, firstMessage
 	title := gateway.HeuristicSessionTitle(gateway.ChannelKind(channel), username, "", firstMessage)
 	oc := channel
 	ext := chatID
-	var user *string
-	if strings.TrimSpace(username) != "" {
-		u := strings.TrimSpace(username)
-		if len(u) > 120 {
-			u = u[:120]
-		}
-		user = &u
-	}
+	user := trimUser(username)
 	sess, err := s.sessions.CreateMessenger(sid, title, oc, ext, user)
 	if err != nil {
 		return ChatSession{}, err
@@ -253,6 +257,64 @@ func (s *Server) resolveMessengerSession(channel, chatID, username, firstMessage
 		Title:         &title,
 	})
 	return sess, nil
+}
+
+func trimUser(username string) *string {
+	u := strings.TrimSpace(username)
+	if u == "" {
+		return nil
+	}
+	if len(u) > 120 {
+		u = u[:120]
+	}
+	return &u
+}
+
+// attachMessengerToFocused mirrors Python session_bridge._attach_to_focused_session.
+func (s *Server) attachMessengerToFocused(channel, chatID, username string) (ChatSession, bool, error) {
+	focused := strings.TrimSpace(s.FocusedSessionID())
+	if focused == "" || strings.HasPrefix(focused, "msg:") {
+		return ChatSession{}, false, nil
+	}
+	sess, ok, err := s.sessions.Get(focused)
+	if err != nil || !ok {
+		return ChatSession{}, false, err
+	}
+	oc := ""
+	if sess.OriginChannel != nil {
+		oc = strings.ToLower(strings.TrimSpace(*sess.OriginChannel))
+	}
+	ext := ""
+	if sess.ExternalChatID != nil {
+		ext = strings.TrimSpace(*sess.ExternalChatID)
+	}
+	ch := strings.ToLower(strings.TrimSpace(channel))
+	wantExt := strings.TrimSpace(chatID)
+	if oc != "" && oc != ch {
+		return ChatSession{}, false, nil
+	}
+	if ext != "" && ext != wantExt {
+		return ChatSession{}, false, nil
+	}
+	setCh, setExt := "", ""
+	if oc == "" {
+		setCh = ch
+	}
+	if ext == "" {
+		setExt = wantExt
+	}
+	var setUser *string
+	if sess.ExternalUser == nil || strings.TrimSpace(*sess.ExternalUser) == "" {
+		setUser = trimUser(username)
+	}
+	if setCh == "" && setExt == "" && setUser == nil {
+		return sess, true, nil
+	}
+	updated, err := s.sessions.SetMessengerOrigin(focused, setCh, setExt, setUser)
+	if err != nil {
+		return sess, true, nil
+	}
+	return updated, true, nil
 }
 
 // mirrorDesktopReply pushes an assistant reply to the session origin messenger.

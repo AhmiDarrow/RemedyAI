@@ -789,26 +789,19 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                                 tokens=tok,
                             ))
                             persist_done = True
-                        # Desktop→messenger: mirror so Telegram users see desktop replies.
+                        # Desktop→messenger mirror is Go-owned (mirrorDesktopReply).
                         with contextlib.suppress(Exception):
-                            from remedy.gateway.session_bridge import (
-                                mirror_desktop_reply_to_messenger,
-                            )
                             from remedy.interfaces.session_events import publish_session_event
 
                             ex = await memory.get_chat_session(session_id)
-                            if ex is not None:
-                                await mirror_desktop_reply_to_messenger(
-                                    gateway, ex, persist_text
+                            if ex is not None and getattr(ex, "origin_channel", None):
+                                await publish_session_event(
+                                    "message_added",
+                                    session_id,
+                                    origin_channel=getattr(ex, "origin_channel", None),
+                                    title=getattr(ex, "title", None),
+                                    role="assistant",
                                 )
-                                if getattr(ex, "origin_channel", None):
-                                    await publish_session_event(
-                                        "message_added",
-                                        session_id,
-                                        origin_channel=getattr(ex, "origin_channel", None),
-                                        title=getattr(ex, "title", None),
-                                        role="assistant",
-                                    )
 
                     # Flush the checklist event a last-batch verify queued
                     # after that batch's flush point — otherwise a build that
