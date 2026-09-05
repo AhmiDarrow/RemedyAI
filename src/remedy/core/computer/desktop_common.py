@@ -11,7 +11,6 @@ import contextlib
 import functools
 import sys
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any, TypeVar
 
 from remedy.core.computer import desktop_capture_posix as Cap
@@ -23,15 +22,17 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 _write_png_bgr = P.write_png_bgr
 _ocr_words_from_bgr = P.ocr_words_from_bgr
 _pixel_ui_candidates = P.pixel_ui_candidates
+_capture_virtual_screen = Cap.capture_virtual_screen
+screenshot_png = Cap.screenshot_png
+screenshot_region_png = Cap.screenshot_region_png
+screenshot_monitor_png = Cap.screenshot_monitor_png
+print_window_png = Cap.print_window_png
+list_monitors = Cap.list_monitors
 
 
 def _require_linux() -> None:
     if sys.platform == "win32":
         raise RuntimeError("POSIX desktop computer use only")
-
-
-def _host_fail(need: str, exc: BaseException) -> RuntimeError:
-    return Cap.host_fail(need, exc)
 
 
 def _hands(need: str) -> Callable[[_F], _F]:
@@ -42,40 +43,11 @@ def _hands(need: str) -> Callable[[_F], _F]:
             try:
                 return fn(*args, **kwargs)
             except (NativeRuntimeUnavailableError, H.HostError) as exc:
-                raise _host_fail(need, exc) from exc
+                raise Cap.host_fail(need, exc) from exc
 
         return wrap  # type: ignore[return-value]
 
     return deco
-
-
-def _capture_virtual_screen() -> tuple[bytes, int, int, int, int, int]:
-    _require_linux()
-    return Cap.capture_virtual_screen()
-
-
-def screenshot_png(path: Path | None = None, *, marks: list[Any] | None = None) -> dict[str, Any]:
-    _require_linux()
-    return Cap.screenshot_png(path, marks=marks)
-
-
-@_hands("region screenshot")
-def screenshot_region_png(
-    x: int, y: int, width: int, height: int, *, path: Path | None = None, scale: float = 1.0
-) -> dict[str, Any]:
-    return Cap.screenshot_region_png(x, y, width, height, path=path, scale=scale)
-
-
-def screenshot_monitor_png(index: int, path: Path | None = None) -> dict[str, Any]:
-    _require_linux()
-    return P.screenshot_monitor_from_list(
-        list_monitors(), index, path=path, region_shot=screenshot_region_png, full_shot=screenshot_png
-    )
-
-
-def print_window_png(hwnd: int | None = None, path: Path | None = None) -> dict[str, Any]:
-    _require_linux()
-    return Cap.print_window_png(hwnd, path)
 
 
 def find_webview_host_hwnd() -> int | None:
@@ -168,7 +140,7 @@ def type_text(
         try:
             H.type_text(ch, P.TYPE_DELAY_MS)
         except (NativeRuntimeUnavailableError, H.HostError) as exc:
-            raise _host_fail("type", exc) from exc
+            raise Cap.host_fail("type", exc) from exc
 
     return P.type_text_chars(text, abort_check=abort_check, chars_typed=chars_typed, send=_send)
 
@@ -240,10 +212,6 @@ def manage_window(
 
 def list_windows(limit: int = 40) -> list[dict[str, Any]]:
     return H.list_windows(max(1, int(limit)))
-
-
-def list_monitors() -> list[dict[str, Any]]:
-    return H.list_monitors()
 
 
 def get_clipboard_text() -> str:
