@@ -1,10 +1,13 @@
-"""FastAPI route body-cap leftovers are gone; Go owns production webhooks."""
+"""FastAPI route twins are gone; body caps live in Go httpapi only."""
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 
-def test_fastapi_routes_package_is_gone():
-    """No FastAPI route modules remain to buffer unbounded bodies."""
+def test_no_fastapi_route_or_api_harness_remains() -> None:
+    assert importlib.util.find_spec("remedy.interfaces.routes") is None
+    assert importlib.util.find_spec("remedy.interfaces.api") is None
     assert not Path("src/remedy/interfaces/routes").exists()
+    assert not Path("src/remedy/interfaces/api.py").exists()

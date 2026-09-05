@@ -63,10 +63,7 @@ IS_WINDOWS = platform.system() == "Windows"
 ZERO_SHA = "0" * 40
 RELEASE_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+([.-].*)?$")
 PROTECTED_BRANCHES = ("master", "main")
-IMPORT_SMOKE = (
-    'python -c "import remedy; from remedy.interfaces.api import should_warn_slow; '
-    "assert callable(should_warn_slow); print('import OK')\""
-)
+IMPORT_SMOKE = 'python -c "import remedy; print(\'import OK\')"'
 
 
 # --------------------------------------------------------------------------- #

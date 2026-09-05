@@ -309,3 +309,24 @@ def test_go_notifications_metrics_self_improve(go_runtime: tuple[str, str]) -> N
     assert code == 200, improve
     assert isinstance(improve, dict)
     assert "enabled" in improve and "idle_s" in improve and "last_tick" in improve
+
+
+def test_go_local_bootstrap_and_x_remedy_token(go_runtime: tuple[str, str]) -> None:
+    """Auth surface formerly covered by FastAPI TestClient create_app."""
+    base, token = go_runtime
+
+    code, body = _http_json("GET", f"{base}/api/auth/local-bootstrap")
+    assert code in (200, 403), body
+    if code == 200:
+        assert isinstance(body, dict)
+        assert body.get("token") == token
+
+    code, listed = _http_json("GET", f"{base}/api/sessions", token=None)
+    assert code == 401, listed
+
+    headers = {"Accept": "application/json", "X-Remedy-Token": token}
+    req = urllib.request.Request(
+        f"{base}/api/sessions", data=None, headers=headers, method="GET"
+    )
+    with urllib.request.urlopen(req, timeout=8.0) as resp:
+        assert int(resp.status) == 200
