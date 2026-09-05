@@ -368,7 +368,8 @@ remedy learn sync
 
 ## Tool Commands
 
-Tools are the atomic operations Remedy can perform — both built-in and MCP-exposed.
+Tools are the Go Tool ABI surface served by `remedy-runtime` (requires
+`remedy serve` or Desktop). Python BasicRuntime is not used.
 
 ### `remedy tool list`
 
@@ -376,17 +377,19 @@ Tools are the atomic operations Remedy can perform — both built-in and MCP-exp
 remedy tool list
 ```
 
-Built-in tools include: `memory_search`, `memory_add`, `skill_load`, `skill_list`, `file_read`, `file_write`, `bash_exec`.
+Lists Tool ABI ids such as `runtime.probe`, `workspace.read`, `workspace.list`,
+`shell.exec`. For memory / shell without the runtime, use `remedy memory` and
+`remedy exec`.
 
 ### `remedy tool search <query>`
 
 ```bash
-remedy tool search memory
+remedy tool search workspace
 ```
 
 ### `remedy tool stats`
 
-Show invocation statistics for all tools — counts, success rates.
+Show Tool ABI registration counts by runtime (Go / Zig / Python worker).
 
 ```bash
 remedy tool stats
@@ -394,16 +397,17 @@ remedy tool stats
 
 ### `remedy tool run <name>`
 
-Execute a tool through the full runtime pipeline (policy check -> validation -> execute -> provenance recording).
+Invoke a Tool ABI tool through Go `POST /api/tools/invoke` (workspace-jailed /
+capability-gated on the runtime).
 
 ```bash
-remedy tool run memory_search --args '{"query": "database"}'
-remedy tool run bash_exec --args '{"command": "python --version"}' --timeout 10.0
+remedy tool run runtime.probe --args '{}'
+remedy tool run workspace.read --args '{"path": "README.md"}' --timeout 10.0
 ```
 
-- `--args` — JSON string of arguments
+- `--args` — JSON object of Tool ABI input
 - `--timeout` — seconds (default 30)
-- `--retries` — retry count on failure (default 0)
+- `--retries` — accepted for compatibility; retries are not applied by the HTTP path
 
 ---
 

@@ -65,7 +65,7 @@ Grove unmounts off-surface. Studio must own its own voice instance (`useVoice` i
 ## Core control plane
 
 - **ReAct (production)** — Go `native/go/cognition/` driven by `remedy-runtime` / `native/go/httpapi` (`CognitionTurnRunner`). Desktop, `remedy serve`, messenger turns, and hive forager pulses use this path on `:7400`.
-- **ReAct (Python helpers)** — `react_turn.py`, `react_policy.py`, `react_stream.py`, `turn_context.py`, `llm_api_errors.py` remain for workers/tests. The Python `react_loop` package is **deleted**; BasicRuntime/`remedy chat` fail closed toward Go.
+- **ReAct (Python helpers)** — `react_turn.py`, `react_policy.py`, `react_stream.py`, `turn_context.py`, `llm_api_errors.py` remain for workers/tests. The Python `react_loop` package is **deleted**; BasicRuntime/`remedy chat` fail closed toward Go. CLI `remedy tool` uses Go `GET /api/tools` + `POST /api/tools/invoke` (no BasicRuntime).
 - **PolicyEngine** — `policy/engine.py`. Deterministic allow / ask / deny. Dangerous host commands denied; mail/pay checkpoints never waived. Trust profiles live in `APPROVALS.needs_ask`.
 - **Write jail** — `core/security` + computer executor. Runtime-bin skip requires a real executable extension; cross-session computer state is thread-local per session.
 - **Hive** — daughters are capped; no parent Partner Memory writes; no nested spawn. PROCESS_EXEC + FS_WRITE + NETWORK_READ by design for foragers (not a full sandbox).
