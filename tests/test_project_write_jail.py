@@ -1396,6 +1396,15 @@ async def test_host_session_cd_outside_resets_and_jails_relative(
     from remedy.core.approvals import APPROVALS
     from remedy.core.computer.host_binding import close_all_shared_sessions, get_shared_session
 
+    # HostSession is Windows-only (Zig ConPTY / piped session); Linux fails closed.
+    if os.name != "nt":
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        _rt, reg = _register_shell_runtime(tmp_path, proj, monkeypatch)
+        out = await reg.execute("bash_exec", command="cd /tmp", session=True)
+        assert "unsupported on this platform" in out.lower() or "HOST_SESSION" in out
+        return
+
     monkeypatch.setattr(
         "remedy.interfaces.api_support.load_config",
         lambda: {"approval_mode": "auto", "access_scope": "project"},
@@ -1406,12 +1415,8 @@ async def test_host_session_cd_outside_resets_and_jails_relative(
     proj.mkdir()
     _rt, reg = _register_shell_runtime(tmp_path, proj, monkeypatch)
     marker = f"remedy_jail_leak_{os.getpid()}.txt"
-    if os.name == "nt":
-        outside = Path(r"C:\Users\Public")
-        cd_cmd = r"cd /d C:\Users\Public"
-    else:
-        outside = Path("/tmp")
-        cd_cmd = "cd /tmp"
+    outside = Path(r"C:\Users\Public")
+    cd_cmd = r"cd /d C:\Users\Public"
     leak = outside / marker
     if leak.exists():
         leak.unlink()

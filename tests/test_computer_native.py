@@ -170,6 +170,7 @@ def test_key_result_carries_evidence(tmp_path, monkeypatch) -> None:
 
 def test_type_fast_short_uses_keystrokes(monkeypatch) -> None:
     seen: dict[str, Any] = {}
+    monkeypatch.setattr(W, "_require_windows", lambda: None)
     monkeypatch.setattr(
         W, "type_text", lambda t, **k: seen.setdefault("typed", t) or len(t)
     )
@@ -184,6 +185,7 @@ def test_type_fast_short_uses_keystrokes(monkeypatch) -> None:
 
 def test_type_fast_long_pastes_and_restores_clipboard(monkeypatch) -> None:
     seen: dict[str, Any] = {}
+    monkeypatch.setattr(W, "_require_windows", lambda: None)
     monkeypatch.setattr(W, "type_text", lambda t, **k: len(t))
     monkeypatch.setattr(W, "get_clipboard_text", lambda: "USER_CLIP")
     clips: list[str] = []
@@ -199,6 +201,7 @@ def test_type_fast_long_pastes_and_restores_clipboard(monkeypatch) -> None:
 
 
 def test_type_fast_newlines_stay_keystrokes(monkeypatch) -> None:
+    monkeypatch.setattr(W, "_require_windows", lambda: None)
     monkeypatch.setattr(W, "type_text", lambda t, **k: len(t))
     r = W.type_text_fast("line\n" * 100)
     assert r["method"] == "keystrokes"
@@ -236,6 +239,7 @@ def test_type_fast_falls_back_when_clipboard_host_errors(monkeypatch) -> None:
     from remedy.core.computer import host_binding as H
 
     seen: dict[str, Any] = {}
+    monkeypatch.setattr(W, "_require_windows", lambda: None)
     monkeypatch.setattr(
         W, "type_text", lambda t, **k: seen.setdefault("typed", t) or len(t)
     )

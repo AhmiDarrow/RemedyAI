@@ -255,9 +255,37 @@ async def test_a_release_tag_is_not_pushed_before_the_gate_is_asked(
 async def test_a_release_without_a_tag_and_without_history_refuses_clearly(
     tmp_path, monkeypatch, approvals
 ):
+    """No tag and no reusable history → refuse with tag= (before touching gh)."""
     approvals(ask="", approved=True)
     rt = RT(tmp_path)
     S.register_ship_tools(rt)
     monkeypatch.setattr("remedy.core.turn_context.turn_session_id", lambda _rt: "s1")
+
+    async def fake_run_hidden_async(argv, **kwargs):  # noqa: ARG001
+        head = [str(a) for a in argv]
+        if head and head[0] == "gh":
+            raise AssertionError(f"gh must not run when tag is missing: {head}")
+        if head[:1] == ["git"] and "describe" in head:
+
+            class R:
+                returncode = 128
+                stdout = ""
+                stderr = "fatal: No names found"
+
+            return R()
+        if head[:1] == ["git"]:
+
+            class R:
+                returncode = 128
+                stdout = ""
+                stderr = "fatal: not a git repository"
+
+            return R()
+        raise AssertionError(f"unexpected argv: {head}")
+
+    # Intercept at the process layer (module docstring: no real git/gh).
+    monkeypatch.setattr(
+        "remedy.execution.process.run_hidden_async", fake_run_hidden_async
+    )
     out = await rt.tool_registry.tools["gh_release"]()
     assert "tag=" in out
