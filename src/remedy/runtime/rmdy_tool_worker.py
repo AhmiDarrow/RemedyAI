@@ -249,6 +249,74 @@ def _workspace_write(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     }
 
 
+def _workspace_edit(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Bridge Tool ABI workspace.edit to jailed search/replace (file_edit parity)."""
+    path = str(inp.get("path") or "").strip()
+    if not path:
+        raise ValueError("path is required")
+
+    from remedy.core.workspace_tools.guards import reserved_guard
+
+    bad = reserved_guard(path)
+    if bad:
+        raise PermissionError(bad)
+
+    target = _resolve_workspace_path(path)
+    if _is_credential_name(target.name) or any(
+        _is_credential_name(p) for p in target.parts
+    ):
+        raise PermissionError("credential-looking files are not editable")
+    if not target.is_file():
+        raise FileNotFoundError(f"file not found: {path}")
+
+    try:
+        content = target.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"file is not UTF-8 text: {path}") from exc
+
+    from remedy.core.file_edit import apply_multi_hunk, apply_search_replace
+
+    hunks_raw = inp.get("edits")
+    if hunks_raw is not None:
+        if not isinstance(hunks_raw, list) or not hunks_raw:
+            raise ValueError("edits must be a non-empty list of {old_string,new_string}")
+        result = apply_multi_hunk(content, hunks_raw)
+    else:
+        old_string = inp.get("old_string")
+        if old_string is None:
+            raise ValueError("old_string is required (or pass edits=[...])")
+        new_string = inp.get("new_string")
+        if new_string is None:
+            raise ValueError("new_string is required")
+        replace_all = bool(inp.get("replace_all") or False)
+        result = apply_search_replace(
+            content,
+            str(old_string),
+            str(new_string),
+            replace_all=replace_all,
+        )
+
+    if not result.ok or result.new_content is None:
+        raise ValueError(result.message or "edit failed")
+
+    if result.new_content != content:
+        from remedy.core.atomic_json import write_text_atomic
+
+        write_text_atomic(target, result.new_content)
+
+    try:
+        rel = str(target.relative_to(_workspace_root()).as_posix())
+    except ValueError:
+        rel = str(target)
+    return {
+        "path": rel,
+        "occurrences": int(result.occurrences or 0),
+        "hunks_applied": int(result.hunks_applied or 0),
+        "message": str(result.message or ""),
+        "changed": result.new_content != content,
+    }
+
+
 def _workspace_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     """Bridge Tool ABI workspace.search to repo_search (rg or Python sniff)."""
     pattern = str(inp.get("pattern") or "").strip()
@@ -474,6 +542,7 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("workspace.read", 1): _workspace_read,
     ("workspace.list", 1): _workspace_list,
     ("workspace.write", 1): _workspace_write,
+    ("workspace.edit", 1): _workspace_edit,
     ("workspace.search", 1): _workspace_search,
     ("web.search", 1): _web_search,
     ("web.fetch", 1): _web_fetch,

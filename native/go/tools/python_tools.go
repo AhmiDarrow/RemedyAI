@@ -163,6 +163,52 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:          "workspace.edit",
+		Version:     1,
+		Description: "Search/replace edit a UTF-8 text file under the workspace (Python worker)",
+		Runtime:     RuntimePython,
+		Risk:        RiskMutation,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["path"],
+			"properties":{
+				"path":{"type":"string","minLength":1},
+				"old_string":{"type":"string"},
+				"new_string":{"type":"string"},
+				"replace_all":{"type":"boolean"},
+				"edits":{
+					"type":"array",
+					"items":{
+						"type":"object",
+						"required":["old_string","new_string"],
+						"properties":{
+							"old_string":{"type":"string"},
+							"new_string":{"type":"string"},
+							"replace_all":{"type":"boolean"}
+						},
+						"additionalProperties":false
+					}
+				}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["path","occurrences","hunks_applied","changed"],
+			"properties":{
+				"path":{"type":"string"},
+				"occurrences":{"type":"integer","minimum":0},
+				"hunks_applied":{"type":"integer","minimum":0},
+				"message":{"type":"string"},
+				"changed":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:          "workspace.search",
 		Version:     1,
 		Description: "Search workspace text via ripgrep or Python sniff (Python worker)",

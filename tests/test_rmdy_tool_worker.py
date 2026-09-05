@@ -120,6 +120,45 @@ def test_workspace_write_refuses_history_stub(
         )
 
 
+def test_workspace_edit_handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / "edit_me.py"
+    target.write_text("def hello():\n    return 1\n", encoding="utf-8")
+    out = worker._workspace_edit(
+        {
+            "path": "edit_me.py",
+            "old_string": "return 1",
+            "new_string": "return 2",
+        }
+    )
+    assert out["changed"] is True
+    assert out["occurrences"] == 1
+    assert out["hunks_applied"] == 1
+    assert target.read_text(encoding="utf-8") == "def hello():\n    return 2\n"
+
+
+def test_workspace_edit_refuses_escape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+    outside = tmp_path.parent / "outside_edit.txt"
+    outside.write_text("keep", encoding="utf-8")
+    with pytest.raises(PermissionError):
+        worker._workspace_edit(
+            {
+                "path": "../outside_edit.txt",
+                "old_string": "keep",
+                "new_string": "gone",
+            }
+        )
+    assert outside.read_text(encoding="utf-8") == "keep"
+
+
+def test_workspace_edit_registered() -> None:
+    assert ("workspace.edit", 1) in worker._HANDLERS
+
+
 def test_stdio_tool_round_trip_workspace_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
