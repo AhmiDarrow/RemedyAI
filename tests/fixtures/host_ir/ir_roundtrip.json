@@ -1,5 +1,5 @@
 {
-  "source": "remedy.core.computer.shell_host",
+  "source": "remedy.core.computer.host_binding",
   "captured_at": "2026-09-03",
   "notes": "HostOp.to_dict/from_dict contract. Zig parse/roundtrip must emit byte-identical JSON object shapes (key order may differ; values must match).",
   "schema": {

@@ -1,10 +1,9 @@
 """HostOp serialization + thin Zig prepare wrappers.
 
-Zig owns IR prepare/translate/scriptfile, HostSession, ConPTY, dialect, and
-policy. Go owns production ``/api/terminal``. Script launch helpers and
-``HostSession`` / shared-session live in ``host_binding``.
+Internal. Public imports go through ``host_binding``. Zig owns IR
+prepare/translate/scriptfile; this module holds the Python dataclasses and
+``host_op_prepare`` call wrappers.
 """
-
 from __future__ import annotations
 
 import os
@@ -12,6 +11,9 @@ import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
+
+from ._core import STATUS_INVALID_ARGUMENT, HostError
+from ._ir import host_op_prepare
 
 OpKind = Literal["run", "mkdir", "which", "env", "script", "raw", "chain"]
 
@@ -172,12 +174,6 @@ def prepare_host_command(
     Implemented in Zig (``remedy_core_host_op_prepare`` with ``command``).
     No Python rewrite twin — untranslatable substitutions raise ``ValueError``.
     """
-    from remedy.core.computer.host_binding import (
-        STATUS_INVALID_ARGUMENT,
-        HostError,
-        host_op_prepare,
-    )
-
     payload: dict[str, Any] = {"command": command or ""}
     if host is not None:
         payload["host"] = host
@@ -207,12 +203,6 @@ def prepare_host_op(
     (Zig). ConPTY is ABI 5 via ``host_binding``. Process policy is Zig;
     tool allow/ask/deny is ``PolicyEngine``.
     """
-    from remedy.core.computer.host_binding import (
-        STATUS_INVALID_ARGUMENT,
-        HostError,
-        host_op_prepare,
-    )
-
     try:
         return _prepared_from_native(
             host_op_prepare(

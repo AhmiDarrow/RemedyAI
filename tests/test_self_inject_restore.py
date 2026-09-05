@@ -135,7 +135,7 @@ def test_gate_commands_are_not_over_quoted() -> None:
     from pathlib import Path as _P
 
     from remedy.core.self_inject_draft import _gate_cmds
-    from remedy.core.computer.shell_host import prepare_host_command
+    from remedy.core.computer.host_binding import prepare_host_command
 
     class T:
         test_id = "tests/test_x.py::test_y"

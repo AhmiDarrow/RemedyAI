@@ -1,6 +1,6 @@
 //! Persistent HostSession orchestration (Phase 3).
 //!
-//! Owns the shell-host protocol that Python shell_host HostSession binding used:
+//! Owns the shell-host protocol that Python host_binding HostSession used:
 //! session argv + boot, sentinel wrap/split, VT/echo strip, interactive-prompt
 //! kill, cwd probe, and ConPTY or piped I/O. Spawns go through the same
 //! ConPTY / piped primitives as ABI 5; production callers use the authorized

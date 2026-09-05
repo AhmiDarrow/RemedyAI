@@ -1,5 +1,5 @@
 {
-  "source": "remedy.core.computer.shell_host + zig shell_ir",
+  "source": "remedy.core.computer.host_binding + zig shell_ir",
   "captured_at": "2026-09-03",
   "notes": "Normative for Zig prepare: argv_template (with <PWSH>/<CMD>/<SCRIPT_PATH>/<GIT>/<PYTHON> placeholders), script body text, BOM flag, kind, IR. Script path basename is UUID — only suffix and body are compared. pwsh launch argv MUST be -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <path> — never -Command.",
   "cases": [

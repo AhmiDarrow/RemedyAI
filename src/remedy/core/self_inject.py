@@ -373,7 +373,7 @@ async def _run_one(cmd: str, workdir: Path, timeout: float) -> tuple[int, str, s
     scrubs secrets from the child env, so this is safe to run unattended.
     """
     sandbox = SubprocessSandbox(allowed_paths=[workdir])
-    from remedy.core.computer.shell_host import prepare_host_command
+    from remedy.core.computer.host_binding import prepare_host_command
 
     prepared = prepare_host_command(cmd, project_path=workdir)
     argv = prepared.argv
