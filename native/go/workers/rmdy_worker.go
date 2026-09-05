@@ -21,6 +21,7 @@ import (
 const (
 	envRMDYEndpoint = "REMEDY_RMDY_ENDPOINT"
 	envPython       = "REMEDY_PYTHON"
+	envRMDYPyz      = "REMEDY_RMDY_PYZ"
 	defaultAttach   = 15 * time.Second
 )
 
@@ -230,22 +231,76 @@ func defaultToolEndpoint() (string, error) {
 }
 
 func defaultPythonWorkerArgv() ([]string, error) {
+	pyz, pyzOK, pyzErr := resolveRMDYPyz()
+	if pyzErr != nil {
+		return nil, pyzErr
+	}
+
 	if override := strings.TrimSpace(os.Getenv(envPython)); override != "" {
 		abs, err := filepath.Abs(override)
 		if err != nil {
 			return nil, err
 		}
+		if st, err := os.Stat(abs); err != nil || st.IsDir() {
+			return nil, fmt.Errorf("%w: REMEDY_PYTHON is not an absolute file: %s", ErrWorkerAttachRequired, abs)
+		}
+		if pyzOK {
+			return []string{abs, pyz}, nil
+		}
 		return []string{abs, "-m", "remedy.runtime.rmdy_tool_worker"}, nil
 	}
 	for _, name := range []string{"python", "python3"} {
 		if abs := lookPathAbs(name); abs != "" {
+			if pyzOK {
+				return []string{abs, pyz}, nil
+			}
 			return []string{abs, "-m", "remedy.runtime.rmdy_tool_worker"}, nil
 		}
+	}
+	if pyzOK {
+		return nil, fmt.Errorf("%w: REMEDY_RMDY_PYZ set but no python interpreter found (set REMEDY_PYTHON)", ErrWorkerAttachRequired)
 	}
 	if uv := lookPathAbs("uv"); uv != "" {
 		return []string{uv, "run", "python", "-m", "remedy.runtime.rmdy_tool_worker"}, nil
 	}
 	return nil, errors.New("no python interpreter found (set REMEDY_PYTHON to an absolute path)")
+}
+
+// resolveRMDYPyz returns an absolute zipapp path when configured or discovered.
+// REMEDY_RMDY_PYZ set but missing fails closed.
+func resolveRMDYPyz() (string, bool, error) {
+	if override := strings.TrimSpace(os.Getenv(envRMDYPyz)); override != "" {
+		abs, err := filepath.Abs(override)
+		if err != nil {
+			return "", false, err
+		}
+		st, err := os.Stat(abs)
+		if err != nil || st.IsDir() {
+			return "", false, fmt.Errorf("%w: REMEDY_RMDY_PYZ missing or not a file: %s", ErrWorkerAttachRequired, abs)
+		}
+		return abs, true, nil
+	}
+	candidates := []string{}
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "rmdy_tool_worker.pyz"))
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "bin", "rmdy_tool_worker.pyz"))
+	}
+	if home := strings.TrimSpace(os.Getenv("REMEDY_HOME")); home != "" {
+		candidates = append(candidates, filepath.Join(home, "bin", "rmdy_tool_worker.pyz"))
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(cwd, "dist", "rmdy_tool_worker.pyz"))
+	}
+	for _, c := range candidates {
+		if st, err := os.Stat(c); err == nil && !st.IsDir() {
+			abs, err := filepath.Abs(c)
+			if err != nil {
+				continue
+			}
+			return abs, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func lookPathAbs(name string) string {

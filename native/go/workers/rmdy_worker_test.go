@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -175,5 +176,55 @@ func TestStartRMDYToolWorkerAttachAndRoundTrip(t *testing.T) {
 	}
 	if frame.Kind != protocol.KindHealth {
 		t.Fatalf("health kind=%d", frame.Kind)
+	}
+}
+
+func TestResolveRMDYPyzFailClosed(t *testing.T) {
+	t.Setenv(envRMDYPyz, filepath.Join(t.TempDir(), "missing.pyz"))
+	_, _, err := resolveRMDYPyz()
+	if err == nil {
+		t.Fatal("expected missing REMEDY_RMDY_PYZ to fail closed")
+	}
+	if !errors.Is(err, ErrWorkerAttachRequired) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestResolveRMDYPyzConfigured(t *testing.T) {
+	dir := t.TempDir()
+	pyz := filepath.Join(dir, "rmdy_tool_worker.pyz")
+	if err := os.WriteFile(pyz, []byte("PK\x03\x04"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(envRMDYPyz, pyz)
+	got, ok, err := resolveRMDYPyz()
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	abs, _ := filepath.Abs(pyz)
+	if got != abs {
+		t.Fatalf("got=%q want=%q", got, abs)
+	}
+}
+
+func TestDefaultPythonWorkerArgvPrefersPyz(t *testing.T) {
+	py := testPythonArgv(t)[0]
+	dir := t.TempDir()
+	pyz := filepath.Join(dir, "rmdy_tool_worker.pyz")
+	if err := os.WriteFile(pyz, []byte("PK\x03\x04"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(envPython, py)
+	t.Setenv(envRMDYPyz, pyz)
+	argv, err := defaultPythonWorkerArgv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(argv) != 2 || argv[0] != py {
+		t.Fatalf("argv=%v", argv)
+	}
+	abs, _ := filepath.Abs(pyz)
+	if argv[1] != abs {
+		t.Fatalf("argv[1]=%q want=%q", argv[1], abs)
 	}
 }
