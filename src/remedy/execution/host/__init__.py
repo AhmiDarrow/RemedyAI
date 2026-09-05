@@ -3,11 +3,15 @@
 Models emit POSIX/bash. Windows is cmd + two PowerShells. Zig ``remedy_core``
 owns prepare/translate/scriptfile/ConPTY/HostSession/diagnose/dialect/stretch;
 this package keeps thin bindings only (no Python twins, no soft fallbacks).
-Diagnose/dialect/stretch callers use ``host_binding`` directly.
+Diagnose/dialect/stretch/translate callers use ``host_binding`` directly.
 """
 
 from __future__ import annotations
 
+from remedy.core.computer.host_binding import (
+    looks_like_powershell,
+    translate_posix_to_host,
+)
 from remedy.execution.host.ir import HostOp, mkdir_op, raw_op, run_op, script_op, which_op
 from remedy.execution.host.runner import (
     PreparedCommand,
@@ -24,7 +28,6 @@ from remedy.execution.host.session import (
     conpty_available,
     get_shared_session,
 )
-from remedy.execution.host.translate import looks_like_powershell, translate_posix_to_host
 
 __all__ = [
     "HostOp",

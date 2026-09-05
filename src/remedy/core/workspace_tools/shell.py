@@ -185,9 +185,9 @@ def _normalize_shell_command_for_host(command: str) -> str:
     Thin wrapper over Host Bridge translate — kept so older call sites and
     tests that import this symbol still work.
     """
-    from remedy.execution.host.translate import translate_posix_to_host
+    from remedy.core.computer import host_binding
 
-    return translate_posix_to_host(command).text
+    return str(host_binding.translate_posix_to_host(command).get("text") or "")
 
 
 def _cwd_in_write_roots(here: Path | str, roots: list[Path]) -> bool:
@@ -706,9 +706,9 @@ def register_shell_tools(runtime: Any) -> None:
                 )
                 if resolved_head:
                     argv_use[0] = resolved_head
-                from remedy.execution.host.translate import rewrite_posix_argv
-
-                argv_use, posix_notes = rewrite_posix_argv(argv_use)
+                rewritten = host_binding.rewrite_posix_argv(argv_use)
+                argv_use = [str(a) for a in (rewritten.get("argv") or argv_use)]
+                posix_notes = [str(n) for n in (rewritten.get("notes") or [])]
                 prepared = PreparedCommand(
                     argv=argv_use,
                     display=" ".join(argv_use),

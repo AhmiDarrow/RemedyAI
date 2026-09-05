@@ -10,6 +10,7 @@ import json
 import tempfile
 from pathlib import Path
 
+from remedy.core.computer.host_binding import translate_posix_to_host
 from remedy.execution.host.ir import (
     HostOp,
     mkdir_op,
@@ -19,7 +20,6 @@ from remedy.execution.host.ir import (
     which_op,
 )
 from remedy.execution.host.runner import prepare_host_command, prepare_host_op
-from remedy.execution.host.translate import translate_posix_to_host
 
 ROOT = Path(__file__).resolve().parent
 
@@ -156,13 +156,13 @@ def main() -> None:
     translate_cases = []
     for cmd in translate_cmds:
         r = translate_posix_to_host(cmd, host="cmd")
-        text, used_rg = _scrub_rg(r.text)
+        text, used_rg = _scrub_rg(str(r.get("text") or ""))
         expected: dict = {
             "text": text,
-            "changed": r.changed,
-            "notes": list(r.notes),
-            "untranslatable": r.untranslatable,
-            "noop": r.noop,
+            "changed": bool(r.get("changed")),
+            "notes": list(r.get("notes") or []),
+            "untranslatable": bool(r.get("untranslatable")),
+            "noop": bool(r.get("noop")),
         }
         if used_rg:
             expected["rg_placeholder"] = True
@@ -179,18 +179,18 @@ def main() -> None:
             "id": "posix:mkdir -p a",
             "input": {"command": "mkdir -p a", "host": "posix"},
             "expected": {
-                "text": r_posix.text,
-                "changed": r_posix.changed,
-                "notes": list(r_posix.notes),
-                "untranslatable": r_posix.untranslatable,
-                "noop": r_posix.noop,
+                "text": str(r_posix.get("text") or ""),
+                "changed": bool(r_posix.get("changed")),
+                "notes": list(r_posix.get("notes") or []),
+                "untranslatable": bool(r_posix.get("untranslatable")),
+                "noop": bool(r_posix.get("noop")),
             },
         }
     )
     _write(
         "translate_cmd.json",
         {
-            "source": "remedy.execution.host.translate.translate_posix_to_host",
+            "source": "remedy.core.computer.host_binding.translate_posix_to_host",
             "captured_at": "2026-09-03",
             "notes": (
                 "Byte-identical `expected.text` is the Phase 3 Zig translate proof. "
