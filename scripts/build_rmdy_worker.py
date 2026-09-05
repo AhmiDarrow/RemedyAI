@@ -70,9 +70,7 @@ def _is_skipped(rel: Path) -> bool:
     if rel.suffix.lower() in SKIP_SUFFIXES:
         return True
     # Never stage a top-level package named like a banned server module.
-    if rel.parts and rel.parts[0].lower() in BANNED_SERVER_MODULE_NAMES:
-        return True
-    return False
+    return bool(rel.parts) and rel.parts[0].lower() in BANNED_SERVER_MODULE_NAMES
 
 
 def stage_worker_tree(dest: Path, *, source: Path = SRC_REMEDY) -> Path:

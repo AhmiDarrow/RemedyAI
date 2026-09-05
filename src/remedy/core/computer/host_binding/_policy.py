@@ -81,7 +81,7 @@ def _set_signing_ready(ready: bool) -> None:
     _signing_key_ready = bool(ready)
     pkg = sys.modules.get("remedy.core.computer.host_binding")
     if pkg is not None:
-        setattr(pkg, "_signing_key_ready", _signing_key_ready)
+        pkg.__dict__["_signing_key_ready"] = _signing_key_ready
 
 
 def ensure_spawn_signing_key() -> None:
