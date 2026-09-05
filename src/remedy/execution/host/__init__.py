@@ -3,19 +3,11 @@
 Models emit POSIX/bash. Windows is cmd + two PowerShells. Zig ``remedy_core``
 owns prepare/translate/scriptfile/ConPTY/HostSession/diagnose/dialect/stretch;
 this package keeps thin bindings only (no Python twins, no soft fallbacks).
+Diagnose/dialect/stretch callers use ``host_binding`` directly.
 """
 
 from __future__ import annotations
 
-from remedy.execution.host.diagnose import HostDiagnosis, diagnose_host_failure
-from remedy.execution.host.dialect import (
-    HostDialect,
-    format_dialect_line,
-    load_dialect,
-    probe_host_dialect,
-    record_success,
-    save_dialect,
-)
 from remedy.execution.host.ir import HostOp, mkdir_op, raw_op, run_op, script_op, which_op
 from remedy.execution.host.runner import (
     PreparedCommand,
@@ -32,21 +24,9 @@ from remedy.execution.host.session import (
     conpty_available,
     get_shared_session,
 )
-from remedy.execution.host.stretch import (
-    HomeCensus,
-    ensure_home_stretch,
-    format_home_line,
-    format_home_whoami,
-    load_census,
-    needs_stretch,
-    stretch_home,
-)
 from remedy.execution.host.translate import looks_like_powershell, translate_posix_to_host
 
 __all__ = [
-    "HomeCensus",
-    "HostDiagnosis",
-    "HostDialect",
     "HostOp",
     "HostSession",
     "PreparedCommand",
@@ -55,27 +35,15 @@ __all__ = [
     "close_shared_session",
     "coerce_argv",
     "conpty_available",
-    "diagnose_host_failure",
-    "ensure_home_stretch",
-    "format_dialect_line",
-    "format_home_line",
-    "format_home_whoami",
     "get_shared_session",
-    "load_census",
-    "load_dialect",
     "looks_like_powershell",
     "mkdir_op",
-    "needs_stretch",
     "prepare_host_command",
     "prepare_host_op",
-    "probe_host_dialect",
     "raw_op",
-    "record_success",
     "resolve_which",
     "run_op",
-    "save_dialect",
     "script_op",
-    "stretch_home",
     "translate_posix_to_host",
     "which_op",
 ]

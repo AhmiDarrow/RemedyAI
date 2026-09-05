@@ -262,17 +262,20 @@ class MachineMap:
         if chans:
             self.note_organ("channels", {"names": chans[:8]}, ttl_s=90.0)
         with suppress(Exception):
-            from remedy.execution.host.stretch import load_census
+            from remedy.core.computer import host_binding
 
-            c = load_census(home)
-            if c is not None and c.stretched_at:
-                open_d = [k for k, v in (c.doors or {}).items() if v]
+            c = host_binding.stretch_load(str(home) if home else "")
+            if c is not None and c.get("stretched_at"):
+                doors = c.get("doors") or {}
+                open_d = [
+                    k for k, v in (doors.items() if isinstance(doors, dict) else []) if v
+                ]
                 self.note_organ(
                     "pc",
                     {
-                        "os": (c.os_name or "")[:24],
-                        "ram_mb": int(c.ram_total_mb or 0),
-                        "gpu": (c.gpu_name or "")[:40],
+                        "os": str(c.get("os_name") or "")[:24],
+                        "ram_mb": int(c.get("ram_total_mb") or 0),
+                        "gpu": str(c.get("gpu_name") or "")[:40],
                         "doors_open": open_d[:8],
                     },
                     ttl_s=180.0,

@@ -104,9 +104,7 @@ async def test_a_failing_probe_says_what_to_configure(discover, monkeypatch):
 # --- the home census --------------------------------------------------------
 
 
-class Census:
-    def to_dict(self):
-        return {"rooms": ["study"], "tools": ["git"]}
+_FAKE_CENSUS = {"rooms": ["study"], "tools": ["git"]}
 
 
 @pytest.mark.asyncio
@@ -114,11 +112,11 @@ class Census:
 async def test_the_census_is_read_not_rebuilt(discover, monkeypatch, action):
     calls: list[str] = []
     monkeypatch.setattr(
-        "remedy.execution.host.stretch.load_census",
-        lambda h: calls.append("load") or Census(),
+        "remedy.core.computer.host_binding.stretch_load",
+        lambda h: calls.append("load") or dict(_FAKE_CENSUS),
     )
     monkeypatch.setattr(
-        "remedy.execution.host.stretch.stretch_home",
+        "remedy.core.computer.host_binding.stretch_home",
         lambda h, force=False: pytest.fail("should not re-probe"),
     )
     out = json.loads(await discover.tools["local_discover"](action=action))
@@ -130,10 +128,11 @@ async def test_the_census_is_read_not_rebuilt(discover, monkeypatch, action):
 @pytest.mark.parametrize("action", ["stretch", "map"])
 async def test_stretching_re_probes_the_machine(discover, monkeypatch, action):
     monkeypatch.setattr(
-        "remedy.execution.host.stretch.stretch_home", lambda h, force=False: Census()
+        "remedy.core.computer.host_binding.stretch_home",
+        lambda h, force=False: dict(_FAKE_CENSUS),
     )
     monkeypatch.setattr(
-        "remedy.execution.host.stretch.load_census",
+        "remedy.core.computer.host_binding.stretch_load",
         lambda h: pytest.fail("should have re-probed"),
     )
     out = json.loads(await discover.tools["local_discover"](action=action))
@@ -144,7 +143,9 @@ async def test_stretching_re_probes_the_machine(discover, monkeypatch, action):
 async def test_a_home_that_was_never_stretched_says_how_to_stretch_it(
     discover, monkeypatch
 ):
-    monkeypatch.setattr("remedy.execution.host.stretch.load_census", lambda h: None)
+    monkeypatch.setattr(
+        "remedy.core.computer.host_binding.stretch_load", lambda h: None
+    )
     out = await discover.tools["local_discover"](action="home")
     assert "NO_CENSUS" in out
     assert "action=stretch" in out
@@ -155,7 +156,7 @@ async def test_a_failed_stretch_is_reported_as_a_stretch_failure(discover, monke
     def boom(h, force=False):
         raise OSError("WMI unavailable")
 
-    monkeypatch.setattr("remedy.execution.host.stretch.stretch_home", boom)
+    monkeypatch.setattr("remedy.core.computer.host_binding.stretch_home", boom)
     out = await discover.tools["local_discover"](action="stretch")
     assert "STRETCH_FAILED" in out
     assert "WMI unavailable" in out

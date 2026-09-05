@@ -9,15 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from remedy.execution.host.diagnose import diagnose_host_failure
-from remedy.execution.host.dialect import (
-    HostDialect,
-    format_dialect_line,
-    load_dialect,
-    probe_host_dialect,
-    record_success,
-    save_dialect,
-)
+from remedy.core.computer import host_binding
 from remedy.execution.host.ir import HostOp, mkdir_op, run_op, script_op
 from remedy.execution.host.runner import (
     coerce_argv,
@@ -510,31 +502,31 @@ def test_prepare_host_op_script(tmp_path: Path) -> None:
 
 
 def test_diagnose_mkdir_powershell() -> None:
-    d = diagnose_host_failure(
-        "mkdir -p a",
+    d = host_binding.diagnose_host_failure(
+        command="mkdir -p a",
         stderr="mkdir: A positional parameter cannot be found that accepts argument '-p'.",
         translated='if not exist "a\\." mkdir "a"',
     )
-    assert d.code == "HOST_DIALECT"
-    assert d.rewritten
+    assert d.get("code") == "HOST_DIALECT"
+    assert d.get("rewritten")
 
 
 def test_diagnose_not_found_grep() -> None:
-    d = diagnose_host_failure(
-        "grep -n foo bar.py",
+    d = host_binding.diagnose_host_failure(
+        command="grep -n foo bar.py",
         stderr="'grep' is not recognized as an internal or external command",
     )
-    assert d.code == "HOST_NOT_FOUND"
-    assert "POSIX" in d.hint or "grep" in d.message
+    assert d.get("code") == "HOST_NOT_FOUND"
+    assert "POSIX" in str(d.get("hint") or "") or "grep" in str(d.get("message") or "")
 
 
 def test_diagnose_timeout_interactive() -> None:
-    d = diagnose_host_failure(
-        "Read-Host pw",
+    d = host_binding.diagnose_host_failure(
+        command="Read-Host pw",
         stdout="Password:",
         timed_out=True,
     )
-    assert d.code == "HOST_INTERACTIVE"
+    assert d.get("code") == "HOST_INTERACTIVE"
 
 
 def test_dialect_rg_cmd_is_path_not_tuple(tmp_path: Path) -> None:
@@ -545,12 +537,13 @@ def test_dialect_rg_cmd_is_path_not_tuple(tmp_path: Path) -> None:
     bin_dir.mkdir()
     fake = bin_dir / ("rg.exe" if os.name == "nt" else "rg")
     fake.write_bytes(b"")
-    d = probe_host_dialect(home=home, persist=True)
-    assert d.rg_cmd
-    assert not d.rg_cmd.startswith("(")
+    d = host_binding.dialect_probe(str(home), persist=True)
+    rg = str(d.get("rg_cmd") or "")
+    assert rg
+    assert not rg.startswith("(")
     # Unix-style absolute paths stay POSIX (forward slashes).
-    if d.rg_cmd.startswith("/"):
-        assert "\\" not in d.rg_cmd
+    if rg.startswith("/"):
+        assert "\\" not in rg
 
 
 def test_dialect_heals_tuple_rg_cmd(tmp_path: Path) -> None:
@@ -564,25 +557,28 @@ def test_dialect_heals_tuple_rg_cmd(tmp_path: Path) -> None:
     bin_dir.mkdir()
     fake = bin_dir / ("rg.exe" if os.name == "nt" else "rg")
     fake.write_bytes(b"")
-    loaded = load_dialect(home)
-    assert loaded.rg_cmd
-    assert not loaded.rg_cmd.startswith("(")
-    assert "rg" in Path(loaded.rg_cmd).name.lower()
+    loaded = host_binding.dialect_load(str(home))
+    rg = str(loaded.get("rg_cmd") or "")
+    assert rg
+    assert not rg.startswith("(")
+    assert "rg" in Path(rg).name.lower()
 
 
 def test_dialect_persist_and_success(tmp_path: Path) -> None:
     home = tmp_path / "remedy-home"
     home.mkdir()
-    d = probe_host_dialect(home=home, persist=True)
-    assert d.python_cmd
-    path = save_dialect(d, home)
+    d = host_binding.dialect_probe(str(home), persist=True)
+    assert d.get("python_cmd")
+    path = home / "host" / "dialect.json"
     assert path.is_file()
-    loaded = load_dialect(home)
-    assert loaded.python_cmd == d.python_cmd
-    rec = record_success("python -m pytest -q", home=home, note="argv")
-    assert rec.successes >= 1
-    assert rec.last_good_verify.startswith("python")
-    line = format_dialect_line(rec, home=home)
+    loaded = host_binding.dialect_load(str(home))
+    assert loaded.get("python_cmd") == d.get("python_cmd")
+    rec = host_binding.dialect_record_success(
+        "python -m pytest -q", home=str(home), note="argv"
+    )
+    assert int(rec.get("successes") or 0) >= 1
+    assert str(rec.get("last_good_verify") or "").startswith("python")
+    line = host_binding.dialect_format_line(str(home), rec)
     assert "Host bridge" in line
     assert "host_run" in line
 
@@ -602,9 +598,9 @@ def test_probe_dialect_never_stamps_sidecar(
     monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
     monkeypatch.delenv("REMEDY_PYTHON", raising=False)
     monkeypatch.delenv("PATHEXT", raising=False)
-    d = probe_host_dialect(home=tmp_path / "home", persist=False)
-    assert d.python_cmd == ""
-    assert "remedy" not in (d.python_cmd or "").lower()
+    d = host_binding.dialect_probe(str(tmp_path / "home"), persist=False)
+    assert d.get("python_cmd") == ""
+    assert "remedy" not in str(d.get("python_cmd") or "").lower()
 
 
 def test_load_dialect_heals_sidecar_python_cmd(tmp_path: Path) -> None:
@@ -618,12 +614,17 @@ def test_load_dialect_heals_sidecar_python_cmd(tmp_path: Path) -> None:
         json.dumps({"host": "cmd", "python_cmd": str(sidecar)}),
         encoding="utf-8",
     )
-    loaded = load_dialect(home)
-    assert loaded.python_cmd
-    assert "remedy-desktop" not in Path(loaded.python_cmd).name.lower()
-    assert Path(loaded.python_cmd).name.lower().startswith("python") or Path(
-        loaded.python_cmd
-    ).name.lower() in {"py", "py.exe", "python.exe", "python3", "python3.exe"}
+    loaded = host_binding.dialect_load(str(home))
+    py = str(loaded.get("python_cmd") or "")
+    assert py
+    assert "remedy-desktop" not in Path(py).name.lower()
+    assert Path(py).name.lower().startswith("python") or Path(py).name.lower() in {
+        "py",
+        "py.exe",
+        "python.exe",
+        "python3",
+        "python3.exe",
+    }
 
 
 def test_resolve_which_python_skips_sidecar_dialect(
@@ -632,8 +633,8 @@ def test_resolve_which_python_skips_sidecar_dialect(
     sidecar = tmp_path / "remedy-desktop.exe"
     sidecar.write_bytes(b"")
     monkeypatch.setattr(
-        "remedy.execution.host.dialect.load_dialect",
-        lambda home=None: HostDialect(python_cmd=str(sidecar)),
+        "remedy.core.computer.host_binding.dialect_load",
+        lambda home="": {"python_cmd": str(sidecar)},
     )
     found = resolve_which("python")
     assert found
@@ -811,12 +812,6 @@ def test_host_op_from_bad_dict() -> None:
     assert empty.kind == "raw"
 
 
-def test_dialect_from_dict_tolerates_junk() -> None:
-    d = HostDialect.from_dict({"notes": "nope", "successes": "3"})
-    assert d.successes == 3
-    assert d.notes == []
-
-
 def test_join_and_normalize_wrappers() -> None:
     from remedy.core.workspace_tools.shell import (
         _join_argv_for_jail,
@@ -942,12 +937,13 @@ def test_host_run_argv_rewrites_wc_dash_l() -> None:
 
 
 def test_diagnose_not_found_wc() -> None:
-    d = diagnose_host_failure(
-        "wc -l curriculum.ts",
+    d = host_binding.diagnose_host_failure(
+        command="wc -l curriculum.ts",
         stderr="'wc' is not recognized as an internal or external command",
     )
-    assert d.code == "HOST_NOT_FOUND"
-    assert "POSIX" in d.hint or "wc" in d.hint.lower()
+    assert d.get("code") == "HOST_NOT_FOUND"
+    hint = str(d.get("hint") or "")
+    assert "POSIX" in hint or "wc" in hint.lower()
 
 
 def test_cleanup_host_script(tmp_path: Path) -> None:

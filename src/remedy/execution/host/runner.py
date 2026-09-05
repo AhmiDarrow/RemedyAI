@@ -223,20 +223,19 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
     key = n.lower().rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
     if key.endswith(".exe"):
         key = key[:-4]
+    from remedy.core.computer import host_binding
     from remedy.core.computer.host_binding import HostError
     from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
     try:
-        from remedy.execution.host.dialect import load_dialect
-
-        d = load_dialect()
+        d = host_binding.dialect_load("")
         mapped = {
-            "python": d.python_cmd,
-            "python3": d.python_cmd,
-            "py": d.python_cmd,
-            "git": d.git_cmd,
-            "rg": d.rg_cmd,
-            "pwsh": d.pwsh_cmd,
+            "python": str(d.get("python_cmd") or ""),
+            "python3": str(d.get("python_cmd") or ""),
+            "py": str(d.get("python_cmd") or ""),
+            "git": str(d.get("git_cmd") or ""),
+            "rg": str(d.get("rg_cmd") or ""),
+            "pwsh": str(d.get("pwsh_cmd") or ""),
         }
         hit = (mapped.get(key) or "").strip()
         if hit and Path(hit).is_file():
@@ -306,14 +305,14 @@ def default_script_lang(home: str | Path | None = None) -> str:
     """pwsh when this PC has it; otherwise python (POSIX) or cmd."""
     if os.name != "nt":
         return "python"
+    from remedy.core.computer import host_binding
     from remedy.core.computer.host_binding import HostError
     from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
     try:
-        from remedy.execution.host.dialect import load_dialect
-
-        d = load_dialect(home)
-        if (d.pwsh_cmd or "").strip() and Path(d.pwsh_cmd).is_file():
+        d = host_binding.dialect_load(str(home) if home else "")
+        pwsh = str(d.get("pwsh_cmd") or "").strip()
+        if pwsh and Path(pwsh).is_file():
             return "pwsh"
     except HostError:
         raise

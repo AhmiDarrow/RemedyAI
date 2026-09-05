@@ -829,13 +829,22 @@ async def _apply_settings_update_inner(
     _api_support._write_config(config_path, cfg)
     if bool(cfg.get("setup_completed")):
         try:
-            from remedy.execution.host.stretch import ensure_home_stretch
+            import threading
 
-            ensure_home_stretch(
-                home_path or config_path.parent,
-                force=False,
-                background=True,
-            )
+            from remedy.core.computer import host_binding
+
+            home_s = str(home_path or config_path.parent)
+            if host_binding.stretch_needs(home_s):
+
+                def _bg_stretch() -> None:
+                    try:
+                        host_binding.stretch_home(home_s, force=False)
+                    except Exception:
+                        logger.exception("home stretch failed")
+
+                threading.Thread(
+                    target=_bg_stretch, name="remedy-home-stretch", daemon=True
+                ).start()
         except Exception:
             pass
 

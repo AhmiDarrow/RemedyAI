@@ -1391,9 +1391,22 @@ def mark_setup_completed(
     api_write(path, cfg)
     # First arrival — stretch out and map this PC (hardware, tools, rooms).
     try:
-        from remedy.execution.host.stretch import ensure_home_stretch
+        import logging
+        import threading
 
-        ensure_home_stretch(path.parent, force=True, background=True)
+        from remedy.core.computer import host_binding
+
+        home_s = str(path.parent)
+
+        def _bg_stretch() -> None:
+            try:
+                host_binding.stretch_home(home_s, force=True)
+            except Exception:
+                logging.getLogger(__name__).exception("home stretch failed")
+
+        threading.Thread(
+            target=_bg_stretch, name="remedy-home-stretch", daemon=True
+        ).start()
     except Exception:
         pass
     return path

@@ -23,6 +23,23 @@ from remedy.core.workspace_tools.guards import (
 _PY_EXE_STEM_RE = re.compile(r"^python(?:w)?\d*(?:\.\d+)*$")
 
 
+def _format_host_diag(diag: dict[str, Any]) -> str:
+    """Render a ``host_binding.diagnose_host_failure`` dict as HOST_DIAG text."""
+    lines = [
+        f"HOST_DIAG {diag.get('code') or 'HOST_OK'}",
+        str(diag.get("message") or ""),
+    ]
+    if diag.get("rewritten"):
+        lines.append(f"rewritten: {diag['rewritten']}")
+    if diag.get("hint"):
+        lines.append(f"hint: {diag['hint']}")
+    notes = diag.get("notes") or []
+    if isinstance(notes, list):
+        for n in notes[:12]:
+            lines.append(f"note: {n}")
+    return "\n".join(lines)
+
+
 def _is_python_binary(path_str: str) -> bool:
     """True when *path_str* names a real CPython launcher (python / python3.12 / pythonw)."""
     import os
@@ -242,9 +259,9 @@ async def _run_host_session(
     access_scope: str = "project",
 ) -> str:
     """Run *command* in the shared persistent host session (opt-in)."""
+    from remedy.core.computer import host_binding
     from remedy.core.errors import format_tool_error
     from remedy.core.shell_write_jail import check_shell_write_jail
-    from remedy.execution.host.diagnose import diagnose_host_failure
     from remedy.execution.host.session import close_shared_session, get_shared_session
 
     try:
@@ -356,14 +373,14 @@ async def _run_host_session(
             out = out[:_HARD_SAFETY_CHARS] + f"\n…[stdout safety cap {_HARD_SAFETY_CHARS}]"
         parts.append(out)
     if result.exit_code != 0 or result.timed_out:
-        diag = diagnose_host_failure(
-            command,
+        diag = host_binding.diagnose_host_failure(
+            command=command,
             stdout=result.stdout or "",
             exit_code=result.exit_code,
             timed_out=result.timed_out or result.interactive,
             host=result.host,
         )
-        parts.append(diag.format_block())
+        parts.append(_format_host_diag(diag))
     return "\n".join(parts)
 
 
@@ -675,7 +692,7 @@ def register_shell_tools(runtime: Any) -> None:
                 )
             return format_open_folder_result(info)
 
-        from remedy.execution.host.diagnose import diagnose_host_failure
+        from remedy.core.computer import host_binding
         from remedy.execution.host.ir import HostOp
         from remedy.execution.host.runner import PreparedCommand, prepare_host_command
 
@@ -810,8 +827,8 @@ def register_shell_tools(runtime: Any) -> None:
             parts.append(f"stderr:\n{err}")
         timed_out = result.exit_code == -1 and "timed out" in (result.stderr or "").lower()
         if result.exit_code != 0:
-            diag = diagnose_host_failure(
-                command,
+            diag = host_binding.diagnose_host_failure(
+                command=command,
                 stdout=result.stdout or "",
                 stderr=result.stderr or "",
                 exit_code=result.exit_code,
@@ -819,16 +836,21 @@ def register_shell_tools(runtime: Any) -> None:
                 timed_out=timed_out,
                 host=prepared.host,
             )
-            if diag.code == "HOST_NOT_FOUND":
+            if diag.get("code") == "HOST_NOT_FOUND":
                 with suppress(Exception):
                     from remedy.execution.host.runner import resolve_which
 
-                    missing = (diag.message or "").rsplit(":", 1)[-1].strip().rstrip(".")
+                    missing = (
+                        str(diag.get("message") or "")
+                        .rsplit(":", 1)[-1]
+                        .strip()
+                        .rstrip(".")
+                    )
                     alt = resolve_which(missing) if missing else None
                     if alt:
-                        diag.rewritten = alt
-                        diag.hint = f"Retry host_run with {alt}"
-            parts.append(diag.format_block())
+                        diag["rewritten"] = alt
+                        diag["hint"] = f"Retry host_run with {alt}"
+            parts.append(_format_host_diag(diag))
             parts.append(
                 "Suggestion: Prefer host_run(argv=[...]) / host_mkdir / host_script. "
                 "Read stderr, fix flags/paths/cwd, or raise timeout_seconds."
@@ -854,9 +876,7 @@ def register_shell_tools(runtime: Any) -> None:
                     )
         else:
             with suppress(Exception):
-                from remedy.execution.host.dialect import record_success
-
-                record_success(command, note=prepared.kind)
+                host_binding.dialect_record_success(command, note=prepared.kind)
         return _with_jail_warn("\n".join(parts))
 
     async def run_python_file(
