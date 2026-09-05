@@ -1,7 +1,3 @@
-import pytest
-
-pytest.skip("Phase 6 absolute: retired agent_* tool family; product tools are Tool ABI", allow_module_level=True)
-
 """On-PC job + git_status speed — filesystem and git probes off the hot path."""
 
 from __future__ import annotations
@@ -12,9 +8,7 @@ from typing import Any
 
 import pytest
 
-from remedy.core import agent_ship_tools as S
 from remedy.core.jobs import run_explore_job
-from tests.test_ship_tools import RT
 
 
 class _RT:
@@ -52,9 +46,3 @@ async def test_explore_job_lists_the_tree_off_the_loop(tmp_path: Path):
     assert "app.py" in result.summary or "src" in result.summary
 
 
-@pytest.mark.asyncio
-async def test_git_status_still_answers_when_not_a_repo(tmp_path: Path):
-    rt = RT(tmp_path)
-    S.register_ship_tools(rt)
-    out = await rt.tool_registry.tools["git_status"]()
-    assert "git_status" in out.lower()

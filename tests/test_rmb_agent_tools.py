@@ -1,7 +1,3 @@
-import pytest
-
-pytest.skip("Phase 6 absolute: retired agent_* tool family; product tools are Tool ABI", allow_module_level=True)
-
 """RMB as an organ: world map + the rmb tool (not Settings-only)."""
 
 from __future__ import annotations
@@ -210,22 +206,6 @@ def test_setup_phrase_rmb_does_not_silently_flip_provider():
 
 
 @pytest.mark.asyncio
-async def test_update_settings_rmb_phrase_points_at_rmb_tool(tmp_path: Path):
-    from remedy.core.agent_settings_tools import register_settings_tools
-
-    class Reg:
-        def __init__(self) -> None:
-            self.tools = {}
-
-        def register_builtin_handler(self, name, description, handler, parameters=None):
-            self.tools[name] = handler
-
-    rt = type("RT", (), {"tool_registry": Reg(), "memory": None, "gateway": None})()
-    register_settings_tools(rt)
-    out = await rt.tool_registry.tools["update_settings"](setup="start rmb")
-    assert "rmb tool" in out.lower() or 'action="status"' in out
-
-
 def test_house_map_tracks_rmb_organ(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     reset_machine_map("house_rmb")
     monkeypatch.setattr(

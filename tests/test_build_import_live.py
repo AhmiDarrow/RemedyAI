@@ -1,7 +1,3 @@
-import pytest
-
-pytest.skip("Phase 6 absolute: retired agent_* tool family; product tools are Tool ABI", allow_module_level=True)
-
 """Import graph, mutation cone, live hop oracle (no live LLM required)."""
 
 from __future__ import annotations
@@ -282,47 +278,3 @@ def test_gate_l2_soft_pass_on_interpreter(tmp_path):
         big.dry_run_imports_for_paths = real  # type: ignore[assignment]
 
 
-def test_build_tools_handlers_callable(tmp_path):
-    """Registration must bind real async handlers (no NameError at call)."""
-    import asyncio
-
-    from remedy.core.agent_build_tools import register_build_tools
-
-    handlers: dict[str, object] = {}
-
-    class FakeReg:
-        def register_builtin_handler(self, name, desc, fn, schema):  # noqa: ARG002
-            handlers[name] = fn
-
-    root = tmp_path
-    (root / "widget.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
-    rt = SimpleNamespace(
-        tool_registry=FakeReg(),
-        effective_project_path=lambda: root,
-        resolve_tool_path=lambda p, **k: root / p,
-        config=SimpleNamespace(home_dir=tmp_path),
-    )
-    register_build_tools(rt)
-    for name in (
-        "build_status",
-        "build_resume",
-        "build_unit_hop",
-        "build_live_project",
-        "build_mutation_score",
-    ):
-        assert name in handlers, name
-        assert callable(handlers[name])
-
-    out = asyncio.run(
-        handlers["build_unit_hop"](  # type: ignore[operator]
-            path="widget.py",
-            symbol="helper",
-            source="def helper():\n    return 1\n",
-            use_llm=False,
-        )
-    )
-    assert "OK" in out or "build_unit_hop" in out
-
-    out2 = asyncio.run(handlers["build_mutation_score"]())  # type: ignore[operator]
-    assert isinstance(out2, str)
-    assert "Mutation" in out2 or "write_set" in out2 or "seed" in out2.lower()

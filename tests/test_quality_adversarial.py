@@ -1,7 +1,3 @@
-import pytest
-
-pytest.skip("Phase 6 absolute: retired agent_* tool family; product tools are Tool ABI", allow_module_level=True)
-
 """Adversarial honesty tests for the 2026-08-28 quality fixes.
 
 Symptom families, not one reproduction string. No live network, no real secrets.
@@ -532,45 +528,6 @@ async def test_git_restore_empty_delta_is_noop_keeps_owner_wip(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_self_inject_empty_delta_untracked_vs_head_gone_on_restore(tmp_path):
-    import subprocess
-
-    from remedy.core.agent_self_inject_tools import round_write_paths
-    from remedy.core.self_inject import git_capture, git_restore
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "t@example.com"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "t"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-    )
-    (repo / "keep.txt").write_text("base\n", encoding="utf-8")
-    subprocess.run(["git", "add", "keep.txt"], cwd=repo, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
-    (repo / "keep.txt").write_text("base\nowner-wip\n", encoding="utf-8")
-    (repo / "evil.py").write_text("bad\n", encoding="utf-8")
-    snapshot = await git_capture(repo)
-    after = await git_capture(repo)
-    paths = round_write_paths(snapshot, after)
-    assert "evil.py" in paths
-    assert "keep.txt" not in paths
-    snap_was_clean = not (snapshot.get("changed") or snapshot.get("untracked"))
-    await git_restore(
-        repo, snapshot, round_paths=paths, reapply_snapshot=bool(snap_was_clean)
-    )
-    assert "owner-wip" in (repo / "keep.txt").read_text(encoding="utf-8")
-    assert not (repo / "evil.py").exists()
-
-
 def test_vault_desktop_refuses_button_no_click_type(tmp_path, monkeypatch):
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.host_binding import native

@@ -1,7 +1,3 @@
-import pytest
-
-pytest.skip("Phase 6 absolute: retired agent_* tool family; product tools are Tool ABI", allow_module_level=True)
-
 """App control — Remedy driving her own interface (surface switch, panels…)."""
 
 from __future__ import annotations
@@ -98,32 +94,7 @@ def test_queue_is_capped():
     assert n <= 32
 
 
-def _settings_rt():
-    from remedy.core.agent_settings_tools import register_settings_tools
-    from remedy.skills.tool_registry import ToolRegistry
-
-    class RT:
-        def __init__(self) -> None:
-            self.tool_registry = ToolRegistry()
-
-    rt = RT()
-    register_settings_tools(rt)
-    return rt
-
-
 @pytest.mark.asyncio
-async def test_app_control_tool_accepts_alongside():
-    import json
-
-    rt = _settings_rt()
-    raw = await rt.tool_registry.execute(
-        "app_control", action="switch_surface", target="alongside"
-    )
-    data = json.loads(raw)
-    assert data["ok"] is True
-    assert data["command"]["params"]["target"] == "alongside"
-
-
 def test_normalize_panel_and_settings_section():
     assert normalize_panel("Help") == "help"
     assert normalize_panel("time-travel") == "time_travel"
@@ -137,95 +108,3 @@ def test_normalize_panel_and_settings_section():
     assert infer_settings_section({"llm_model": "grok-4"}) == "provider"
     assert infer_settings_section({"approval_mode": "ask"}) == "security-power"
     assert infer_settings_section({"trust_profile": "autonomous"}) == "security-power"
-
-
-@pytest.mark.asyncio
-async def test_app_control_opens_settings_section_and_help():
-    import json
-
-    rt = _settings_rt()
-    raw = await rt.tool_registry.execute(
-        "app_control", action="open_settings", section="messengers"
-    )
-    data = json.loads(raw)
-    assert data["ok"] is True
-    assert data["command"]["params"]["section"] == "channels"
-    app_control_bus().clear()
-    raw = await rt.tool_registry.execute(
-        "app_control", action="open_panel", panel="terminal"
-    )
-    data = json.loads(raw)
-    assert data["ok"] is True
-    assert data["command"]["params"]["panel"] == "terminal"
-    app_control_bus().clear()
-    raw = await rt.tool_registry.execute(
-        "app_control", action="open_panel", panel="help", article="09-troubleshooting"
-    )
-    data = json.loads(raw)
-    assert data["command"]["params"]["article"] == "09-troubleshooting"
-    app_control_bus().clear()
-    raw = await rt.tool_registry.execute(
-        "app_control",
-        action="open_panel",
-        panel="files",
-        path=r"C:\Users\Administrator\Desktop\example-folder",
-    )
-    data = json.loads(raw)
-    assert data["ok"] is True
-    assert data["command"]["params"]["panel"] == "files"
-    assert data["command"]["params"]["path"].endswith("example-folder")
-    app_control_bus().clear()
-    raw = await rt.tool_registry.execute(
-        "app_control",
-        action="open_panel",
-        path=r"C:\Users\Administrator\Desktop\example-folder",
-    )
-    data = json.loads(raw)
-    assert data["command"]["params"]["panel"] == "files"
-    app_control_bus().clear()
-    raw = await rt.tool_registry.execute(
-        "app_control",
-        action="open_panel",
-        panel="browser",
-        url="https://github.com/AhmiDarrow/RemedyAI",
-    )
-    data = json.loads(raw)
-    assert data["command"]["params"]["url"].startswith("https://github.com/")
-    app_control_bus().clear()
-    raw = await rt.tool_registry.execute(
-        "app_control",
-        action="open_panel",
-        panel="terminal",
-        path=r"C:\Users\Administrator\Desktop\example-folder",
-    )
-    data = json.loads(raw)
-    assert data["command"]["params"]["path"].endswith("example-folder")
-    app_control_bus().clear()
-    raw = await rt.tool_registry.execute(
-        "app_control", action="open_session", session_id="4d89d9fa-a2a0-49e7-90c0-7e48732bfd1f"
-    )
-    data = json.loads(raw)
-    assert data["ok"] is True
-    assert data["command"]["action"] == "open_session"
-    assert data["command"]["params"]["session_id"].startswith("4d89d9fa")
-    assert request_app_action("close_ui")["ok"] is True
-
-
-@pytest.mark.asyncio
-async def test_list_sessions_tool_without_memory():
-    rt = _settings_rt()
-    out = await rt.tool_registry.execute("list_sessions")
-    assert "not available" in out.lower() or "NO_MEMORY" in out
-
-
-@pytest.mark.asyncio
-async def test_app_control_tool_rejects_unknown_place():
-    import json
-
-    rt = _settings_rt()
-    raw = await rt.tool_registry.execute(
-        "app_control", action="switch_surface", target="minecraft"
-    )
-    data = json.loads(raw)
-    assert data["ok"] is False
-    assert "alongside" in data["error"]

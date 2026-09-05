@@ -132,8 +132,7 @@ def test_sync_from_config_makes_auto_stick(monkeypatch):
 
 def test_ship_gate_respects_auto(monkeypatch):
     """Live 2026-08-13: Auto on, git_push still created a banner via `or fallback`."""
-    from remedy.core.approvals import approval_required_for_ship
-    from remedy.core.approvals import APPROVALS
+    from remedy.core.approvals import APPROVALS, approval_required_for_ship
 
     APPROVALS.set_mode("auto")
     monkeypatch.setattr(
@@ -155,8 +154,7 @@ def test_ship_gate_respects_auto(monkeypatch):
 
 
 def test_ship_gate_still_asks_in_ask_mode(monkeypatch):
-    from remedy.core.approvals import approval_required_for_ship
-    from remedy.core.approvals import APPROVALS
+    from remedy.core.approvals import APPROVALS, approval_required_for_ship
 
     APPROVALS.set_mode("ask")
     monkeypatch.setattr(

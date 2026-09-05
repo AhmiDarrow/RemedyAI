@@ -43,7 +43,6 @@ from remedy.core.agent_computer_tools import (
     register_computer_tools,
 )
 from remedy.core.approvals import SENSITIVE_PREFIX, ApprovalQueue
-from remedy.core.companion import FakeCompanionBackend, set_companion_backend
 from remedy.core.computer.types import COMPUTER_TOOL_NAMES, ComputerAction
 
 CHECKOUT_URL = "https://shop.example.com/checkout"
