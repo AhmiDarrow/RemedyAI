@@ -495,3 +495,70 @@ func VkKeyScan(codepoint uint32) (int32, error) {
 	return scan, nil
 }
 
+// Window action constants matching remedy_core_window_action.
+const (
+	WindowMinimize   uint32 = 0
+	WindowMaximize   uint32 = 1
+	WindowRestore    uint32 = 2
+	WindowClose      uint32 = 3
+	WindowMoveResize uint32 = 4
+)
+
+// FocusWindow restores and SetForegroundWindow via Zig. focused is true when
+// the window (or a root-owner peer) is foreground afterwards.
+// Fail-closed without remedy_core.
+func FocusWindow(hwnd uint64) (focused bool, err error) {
+	lib, err := Open()
+	if err != nil {
+		return false, err
+	}
+	var out uint8
+	status, err := lib.call("remedy_core_focus_window", uintptr(hwnd), uint8Ptr(&out))
+	if err != nil {
+		return false, err
+	}
+	if err := lib.check("focus_window", int32(status)); err != nil {
+		return false, err
+	}
+	return out != 0, nil
+}
+
+// ManageWindow applies a remedy_core_window_action verb. x/y/width/height are
+// used only for WindowMoveResize. Fail-closed without remedy_core.
+func ManageWindow(hwnd uint64, action uint32, x, y, width, height int32) error {
+	lib, err := Open()
+	if err != nil {
+		return err
+	}
+	status, err := lib.call(
+		"remedy_core_manage_window",
+		uintptr(hwnd), uintptr(action),
+		uintptr(x), uintptr(y), uintptr(width), uintptr(height),
+	)
+	if err != nil {
+		return err
+	}
+	return lib.check("manage_window", int32(status))
+}
+
+// WindowRect returns GetWindowRect bounds for hwnd via Zig.
+// Fail-closed without remedy_core.
+func WindowRect(hwnd uint64) (left, top, right, bottom int32, err error) {
+	lib, err := Open()
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	status, err := lib.call(
+		"remedy_core_window_rect",
+		uintptr(hwnd),
+		int32Ptr(&left), int32Ptr(&top), int32Ptr(&right), int32Ptr(&bottom),
+	)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	if err := lib.check("window_rect", int32(status)); err != nil {
+		return 0, 0, 0, 0, err
+	}
+	return left, top, right, bottom, nil
+}
+

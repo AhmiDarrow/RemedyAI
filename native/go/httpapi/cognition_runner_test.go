@@ -104,6 +104,7 @@ func TestCognitionTurnRunnerRegistersZigHostTools(t *testing.T) {
 	for _, id := range []string{
 		"computer.screenshot", "computer.windows", "computer.monitors", "computer.snapshot",
 		"computer.click", "computer.type", "computer.key", "computer.move", "computer.scroll", "computer.drag",
+		"computer.focus", "computer.window",
 		"clipboard.read", "clipboard.write", "shell.exec",
 	} {
 		desc, err := r.Registry.Latest(id)

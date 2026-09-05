@@ -35,7 +35,7 @@ func TestRegisterZigHostToolsDescriptors(t *testing.T) {
 			t.Fatalf("%s capabilities=%v", id, desc.Capabilities)
 		}
 	}
-	for _, id := range []string{"computer.click", "computer.type", "computer.key", "computer.move", "computer.scroll", "computer.drag", "clipboard.write"} {
+	for _, id := range []string{"computer.click", "computer.type", "computer.key", "computer.move", "computer.scroll", "computer.drag", "computer.focus", "computer.window", "clipboard.write"} {
 		desc, err := registry.Latest(id)
 		if err != nil {
 			t.Fatalf("%s: %v", id, err)
@@ -136,7 +136,7 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 		t.Fatalf("computer.key err=%v", err)
 	}
 
-	for _, id := range []string{"computer.move", "computer.scroll", "clipboard.read", "clipboard.write"} {
+	for _, id := range []string{"computer.move", "computer.scroll", "clipboard.read", "clipboard.write", "computer.focus", "computer.window"} {
 		input := json.RawMessage(`{"x":1,"y":2}`)
 		switch id {
 		case "computer.scroll":
@@ -145,6 +145,10 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 			input = json.RawMessage(`{}`)
 		case "clipboard.write":
 			input = json.RawMessage(`{"text":"hi"}`)
+		case "computer.focus":
+			input = json.RawMessage(`{"hwnd":42}`)
+		case "computer.window":
+			input = json.RawMessage(`{"hwnd":42,"action":"minimize"}`)
 		}
 		_, err = registry.Execute(context.Background(), Request{
 			ToolID: id, Version: 1, Input: input, CapabilityToken: token,
@@ -288,6 +292,69 @@ func TestComputerMoveRejectsMissingCoords(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("missing y: %v", err)
+	}
+}
+
+func TestComputerFocusRejectsMissingHwnd(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.focus",
+		Version:         1,
+		Input:           json.RawMessage(`{}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("missing hwnd: %v", err)
+	}
+	_, err = registry.Execute(context.Background(), Request{
+		ToolID:          "computer.focus",
+		Version:         1,
+		Input:           json.RawMessage(`{"hwnd":0}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("zero hwnd: %v", err)
+	}
+}
+
+func TestComputerWindowRejectsBadAction(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.window",
+		Version:         1,
+		Input:           json.RawMessage(`{"hwnd":42,"action":"explode"}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("bad action: %v", err)
+	}
+}
+
+func TestComputerWindowMoveRequiresCoords(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.window",
+		Version:         1,
+		Input:           json.RawMessage(`{"hwnd":42,"action":"move"}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("move without x/y: %v", err)
 	}
 }
 
