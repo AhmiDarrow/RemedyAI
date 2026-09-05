@@ -11,8 +11,9 @@ Production paths:
 
 ``popen_hidden`` / :func:`create_hidden_subprocess_exec` exist so tests can
 patch them; on every platform they fail closed (no CREATE_NO_WINDOW happy
-path). Legacy hide kwargs for pipe-only leftovers live in
-:mod:`remedy.execution.hide_flags`.
+path). Interactive pipes raise ``HostError`` — Zig has no general 3-pipe
+authorized spawn for Python workers (HostSession ``spawnPiped`` is
+Windows-only and merges stderr).
 """
 
 from __future__ import annotations
@@ -259,6 +260,13 @@ class HiddenProcess:
 
     def kill_tree(self) -> None:
         kill_tree(self.pid)
+
+    def terminate(self) -> None:
+        """Job/group kill — Zig has no graceful SIGTERM on the spawn handle."""
+        self.kill_tree()
+
+    def kill(self) -> None:
+        self.kill_tree()
 
     def close(self) -> None:
         from remedy.core.computer import host_binding
