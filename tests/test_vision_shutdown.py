@@ -113,10 +113,9 @@ def test_create_app_lifespan_registers_shutdown():
     """Lifespan context runs shutdown path without raising."""
     app = create_app(runtime=None, api_key="")
     client = TestClient(app)
-    # Enter/exit lifespan
+    # Enter/exit lifespan (/api/status is Go-owned; hit a remaining TestClient route).
     with client:
-        r = client.get("/api/status")
-        # status may 200 even without full runtime
+        r = client.get("/api/metrics")
         assert r.status_code in (200, 503, 500) or r.status_code < 600
 
 

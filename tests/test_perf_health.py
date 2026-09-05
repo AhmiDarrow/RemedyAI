@@ -13,34 +13,29 @@ from remedy.vision.runtime import invalidate_running_cache, is_running
 from remedy.vision.service import get_status
 
 
-def test_ping_is_public_and_fast():
-    client = TestClient(create_app())
-    t0 = time.perf_counter()
-    r = client.get("/api/ping")
-    ms = (time.perf_counter() - t0) * 1000
-    assert r.status_code == 200
-    assert r.json().get("status") == "ok"
-    assert "version" in r.json()
-    assert r.json()["native_runtime"]["effective"] == "compatibility"
-    # Local TestClient should be well under 100ms; keep a loose bound for CI.
-    assert ms < 500, f"/api/ping took {ms:.0f}ms"
+def test_ping_and_turn_active_absent_from_testclient():
+    """Go owns /api/ping and /api/turn-active; no FastAPI twins."""
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    assert "/api/ping" not in paths
+    assert "/api/turn-active" not in paths
+    assert "/api/status" not in paths
 
 
-def test_turn_active_is_public_and_reflects_stream_locks(tmp_path: Path):
-    """Desktop parent gates self-inject restarts on this — no auth, no DB."""
-    from remedy.core.stream_lock import acquire_stream_lock, release_stream_lock
+def test_stream_lock_reflects_active_turns(tmp_path: Path):
+    """Desktop parent gates self-inject restarts on stream locks — no auth, no DB."""
+    from remedy.core.stream_lock import (
+        acquire_stream_lock,
+        any_stream_active,
+        release_stream_lock,
+    )
 
-    client = TestClient(create_app())
-    r = client.get("/api/turn-active")
-    assert r.status_code == 200
-    assert r.json() == {"status": "ok", "active": False}
-
+    assert any_stream_active() is False
     acquire_stream_lock(tmp_path, "sid-turn-active")
     try:
-        assert client.get("/api/turn-active").json()["active"] is True
+        assert any_stream_active() is True
     finally:
         release_stream_lock(tmp_path, "sid-turn-active")
-    assert client.get("/api/turn-active").json()["active"] is False
+    assert any_stream_active() is False
 
 
 def test_is_running_skips_http_when_port_closed(tmp_path: Path):

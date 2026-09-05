@@ -1,24 +1,17 @@
-"""TestClient-only: ping/status/turn-active stubs + notifications/metrics/self-improve.
+"""TestClient-only: notifications / metrics / self-improve.
 
 Go ``remedy-runtime`` owns production ``:7400`` ping/status/turn-active,
-diagnostics, coordination/presence, and self-inject/rounds. Minimal stubs
-remain so auth/CORS/perf TestClient suites can still exercise create_app.
+diagnostics, coordination/presence, and self-inject/rounds.
 """
 from __future__ import annotations
 
 import contextlib
-import hmac
-import logging
-import time
 from typing import Any
 
 from fastapi import FastAPI, Query, Request, Response
 
 from remedy import __version__ as _remedy_version
-from remedy.interfaces.api_models import StatusResponse
 from remedy.interfaces.config import load_config
-
-logger = logging.getLogger(__name__)
 
 
 def _agency_metrics_rollup(snap: dict[str, Any]) -> dict[str, Any]:
@@ -66,27 +59,8 @@ def _agency_metrics_rollup(snap: dict[str, Any]) -> dict[str, Any]:
 
 
 def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
-    """Register TestClient stubs (closes over runtime/gateway/memory)."""
-    _ = memory
-
-    @app.get("/api/ping")
-    async def ping():
-        """Ultra-light liveness stub for TestClient (Go owns production)."""
-        from remedy.runtime.native_runtime import native_runtime_status
-
-        return {
-            "status": "ok",
-            "version": _remedy_version,
-            "ts": time.time(),
-            "native_runtime": native_runtime_status(probe=False),
-        }
-
-    @app.get("/api/turn-active")
-    async def turn_active():
-        """Public stream-lock stub for TestClient (Go owns production)."""
-        from remedy.core.stream_lock import any_stream_active
-
-        return {"status": "ok", "active": any_stream_active()}
+    """Register Python-only TestClient routes (closes over runtime)."""
+    _ = (gateway, memory)
 
     @app.get("/api/notifications")
     async def list_notifications_route(
@@ -145,33 +119,6 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             "health": health,
             "lines": default_registry.describe(),
         }
-
-    def _status_authed(request: Request) -> bool:
-        expected = str(getattr(request.app.state, "api_key", "") or "")
-        if not expected:
-            return True
-        auth = request.headers.get("Authorization") or ""
-        want = f"Bearer {expected}"
-        if len(auth.encode("utf-8")) != len(want.encode("utf-8")):
-            hmac.compare_digest(want.encode("utf-8"), want.encode("utf-8"))
-            return False
-        return hmac.compare_digest(auth.encode("utf-8"), want.encode("utf-8"))
-
-    @app.get("/api/status", response_model=StatusResponse)
-    async def get_status(request: Request):
-        """Minimal status stub for TestClient auth/CORS suites (Go owns production)."""
-        gw_stats = gateway.stats() if gateway else {"running": False}
-        if not _status_authed(request):
-            return StatusResponse(
-                version=_remedy_version,
-                uptime=str(gw_stats.get("uptime", "N/A")),
-                gateway={"running": bool(gw_stats.get("running"))},
-            )
-        return StatusResponse(
-            version=_remedy_version,
-            uptime=str(gw_stats.get("uptime", "N/A")),
-            gateway=gw_stats,
-        )
 
     @app.get("/api/self-improve")
     async def get_self_improve():

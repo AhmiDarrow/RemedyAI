@@ -30,13 +30,12 @@ Not registered here (Go owns production):
 - ``/api/settings`` GET/PUT
 - ``/api/diagnostics``, ``/api/coordination/presence``, ``/api/self-inject/rounds``
 - ``/api/app/command``, ``/api/projects/scan``
-  (ping/status/turn-active keep TestClient stubs only; misc keeps /dashboard)
+- ``/api/ping``, ``/api/status``, ``/api/turn-active``, SPA ``/`` (webui)
 """
 from __future__ import annotations
 
 from fastapi import FastAPI
 
-from remedy.interfaces.routes.misc import register_misc_routes
 from remedy.interfaces.routes.status import register_status_routes
 
 
@@ -52,6 +51,6 @@ def register_all_routes(
     register_status_routes(app, **kw)
     # No register_sessions/auth/settings/catalog/memory/partner/i18n/usage/
     # vision/telephony/webhook/connect/nanoswarm/assistant/computer/hive/
-    # session_events/chat/terminal/rmb/voice/workspace/skills_library —
-    # Go owns those (status keeps TestClient stubs; misc keeps /dashboard).
-    register_misc_routes(app, **kw)
+    # session_events/chat/terminal/rmb/voice/workspace/skills_library, or
+    # misc (/dashboard) — Go owns those.
+    # status keeps notifications/metrics/self-improve only.

@@ -432,12 +432,12 @@ def test_client():
 
 
 class TestAPIStatus:
-    def test_status_returns_ok(self, test_client):
-        r = test_client.get("/api/status")
-        assert r.status_code == 200
-        data = r.json()
-        assert data["status"] == "ok"
-        assert "version" in data
+    def test_status_ping_dashboard_absent(self, test_client):
+        """Go owns ping/status/turn-active and the SPA; no TestClient twins."""
+        paths = {getattr(r, "path", "") for r in test_client.app.routes}
+        for path in ("/api/status", "/api/ping", "/api/turn-active", "/dashboard"):
+            assert path not in paths
+            assert test_client.get(path).status_code in (404, 405)
 
     def test_legacy_chat_routes_absent(self, test_client):
         """Legacy /api/chat* dropped from TestClient; Go owns session stream."""
@@ -453,12 +453,6 @@ class TestAPIStatus:
         """Leftover /api/openapi.* FastAPI exports dropped with misc registrar."""
         assert test_client.get("/api/openapi.json").status_code in (404, 405)
         assert test_client.get("/api/openapi.yaml").status_code in (404, 405)
-
-    def test_dashboard_html(self, test_client):
-        r = test_client.get("/dashboard")
-        assert r.status_code == 200
-        assert "Remedy AI" in r.text
-        assert "Dashboard" in r.text
 
     def test_swagger_docs(self, test_client):
         r = test_client.get("/docs")
