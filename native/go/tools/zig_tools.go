@@ -760,7 +760,12 @@ func RegisterZigHostTools(registry *Registry) error {
 					"additionalProperties":{"type":"string"}
 				},
 				"timeout_ms":{"type":"integer","minimum":1,"maximum":600000},
-				"owner_confirmed":{"type":"boolean"}
+				"owner_confirmed":{"type":"boolean"},
+				"write_roots":{
+					"type":"array",
+					"items":{"type":"string","minLength":1},
+					"maxItems":16
+				}
 			},
 			"additionalProperties":false
 		}`),
@@ -1585,6 +1590,7 @@ func executeShellExec(_ context.Context, request Request) (Result, error) {
 		Env            map[string]string `json:"env"`
 		TimeoutMS      uint32            `json:"timeout_ms"`
 		OwnerConfirmed bool              `json:"owner_confirmed"`
+		WriteRoots     []string          `json:"write_roots"`
 	}
 	if err := json.Unmarshal(request.Input, &body); err != nil {
 		return Result{}, ErrInvalidInput
@@ -1603,6 +1609,9 @@ func executeShellExec(_ context.Context, request Request) (Result, error) {
 	if body.Cwd != "" && !filepath.IsAbs(body.Cwd) {
 		return Result{}, fmt.Errorf("%w: cwd must be absolute when set", ErrInvalidInput)
 	}
+	// Model-supplied owner_confirmed is not proof — only the approval queue
+	// (or an explicit runtime capability) may set the Zig owner bit.
+	body.OwnerConfirmed = false
 
 	home := resolveToolHome()
 	key, err := secret.EnsureHostSigningKey(home)
@@ -1612,7 +1621,16 @@ func executeShellExec(_ context.Context, request Request) (Result, error) {
 	if err := core.EnsureSigningKey(key); err != nil {
 		return Result{}, err
 	}
-	_ = core.WriteJailSetRoots(nil)
+	// write_roots from the session binder (project/home). Empty = Full for
+	// partner life tasks; Zig still refuses auth paths.
+	roots := make([]string, 0, len(body.WriteRoots))
+	for _, r := range body.WriteRoots {
+		r = strings.TrimSpace(r)
+		if r != "" && filepath.IsAbs(r) {
+			roots = append(roots, r)
+		}
+	}
+	_ = core.WriteJailSetRoots(roots)
 
 	token, nowMS, err := core.IssueProcessSpawnToken(body.Argv, body.OwnerConfirmed)
 	if err != nil {

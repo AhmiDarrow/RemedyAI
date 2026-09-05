@@ -162,6 +162,17 @@ func New(cfg Config) (*Server, error) {
 		appCmd:    newAppControlBus(),
 	}
 	_ = s.approvals.SyncFromConfig(LoadConfig(homeDir))
+	// Partner trust loop: Auto/Full must unlock coding mutations; Ask must
+	// enqueue into the same queue the Desktop banner polls.
+	if cr, ok := s.runner.(*CognitionTurnRunner); ok && cr != nil {
+		cr.Approvals = s.approvals
+		if cr.HomeDir == "" {
+			cr.HomeDir = home
+		}
+		if cr.Registry != nil {
+			cr.Policy = &RegistryPolicy{Registry: cr.Registry, Approvals: s.approvals}
+		}
+	}
 	if err := s.openEventBus(home); err != nil {
 		_ = store.Close()
 		s.hiveMgr.Shutdown()

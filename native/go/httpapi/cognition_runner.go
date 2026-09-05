@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -20,6 +21,9 @@ type CognitionTurnRunner struct {
 	// HomeDir enables per-turn ResolveChatModel (xAI OAuth, vision helper).
 	// When empty, RunTurn uses Model as-is (unit tests / fixtures).
 	HomeDir string
+	// Approvals is the owner trust queue. When set, Ask decisions enqueue
+	// real pending items the Desktop banner can resolve; Auto/Full consult mode.
+	Approvals *approvalQueue
 	// forcePrimary, when set, is the first model attempt (tests). Production
 	// leaves it nil so modelForTurn resolves from HomeDir / Model.
 	forcePrimary   cognition.Model
@@ -64,7 +68,7 @@ func (r *CognitionTurnRunner) AttachPythonWorker(caller tools.FrameCaller) error
 	}
 	r.promptAssemble = tools.NewRMDYExecutor(caller)
 	r.Tools = &RegistryToolExecutor{Registry: r.Registry, TokenFor: RuntimeCapabilityToken}
-	r.Policy = &RegistryPolicy{Registry: r.Registry}
+	r.Policy = &RegistryPolicy{Registry: r.Registry, Approvals: r.Approvals}
 	r.syncModelToolSchemas()
 	return nil
 }
@@ -282,6 +286,7 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 		if errors.Is(out.Err, cognition.ErrOwnerConfirmationNeeded) {
 			for _, call := range out.Pending {
 				safeEmit(formatToolCallToken(call))
+				r.enqueuePendingApproval(req.SessionID, call)
 			}
 			safeEmit("@@status:Waiting for your approval…\n")
 			return nil
@@ -299,7 +304,6 @@ func (r *CognitionTurnRunner) runEngine(
 	safeEmit func(string),
 ) cognition.Outcome {
 	execTools := r.Tools
-	policy := r.Policy
 	model := cognition.Model(&emittingModel{inner: live, emit: safeEmit})
 	if req.DrainNudges != nil {
 		model = &nudgeAwareModel{inner: model, drain: req.DrainNudges, emit: safeEmit}
@@ -311,9 +315,42 @@ func (r *CognitionTurnRunner) runEngine(
 		return name
 	}
 	execTools = &abiNameTools{inner: execTools, resolve: resolveTool}
-	policy = &abiNamePolicy{inner: policy, resolve: resolveTool}
-	if root := strings.TrimSpace(req.ProjectPath); root != "" && !isUnsetProjectPath(root) {
-		execTools = &workspaceBoundTools{inner: execTools, root: root}
+	// Per-turn policy so Auto/Full unlock coding mutations and Ask can match
+	// session fingerprints after the owner approves. Fixture tests may supply
+	// AllowAll / custom Policy without a Registry — keep those intact.
+	var policy cognition.Policy
+	switch {
+	case r.Registry != nil:
+		policy = &abiNamePolicy{
+			inner: &RegistryPolicy{
+				Registry:  r.Registry,
+				Approvals: r.Approvals,
+				SessionID: req.SessionID,
+			},
+			resolve: resolveTool,
+		}
+	case r.Policy != nil:
+		policy = &abiNamePolicy{inner: r.Policy, resolve: resolveTool}
+	default:
+		policy = &abiNamePolicy{inner: cognition.DenyAll{}, resolve: resolveTool}
+	}
+	// Always bind workspace/shell tools to a concrete root: session project when
+	// set, else Documents/Remedy (or ~/.remedy/workspace). access_scope=full
+	// still allows absolute Files/shell paths via their own gates — this only
+	// stops unbound model workspace_root / System32 cwd.
+	root := effectiveTurnProjectPath(req.ProjectPath)
+	if root == "" {
+		root = defaultOwnerFilesBase()
+	}
+	scope := "project"
+	if r.HomeDir != "" {
+		cfg := LoadConfig(r.HomeDir)
+		scope = effectiveAccessScope(cfgString(cfg, "access_scope", "project"), req.ProjectPath)
+	} else {
+		scope = effectiveAccessScope("project", req.ProjectPath)
+	}
+	if root != "" {
+		execTools = &workspaceBoundTools{inner: execTools, root: root, scope: scope}
 	}
 	cfg := r.Config
 	if req.MaxIterations > 0 {
@@ -422,11 +459,14 @@ func (t *abiNameTools) Execute(ctx context.Context, call cognition.ToolCall) cog
 	return t.inner.Execute(ctx, call)
 }
 
-// workspaceBoundTools injects the session project folder into workspace.* tool
-// inputs so the RMDY worker does not jail to the Desktop install cwd.
+// workspaceBoundTools injects the session/owner folder into workspace.* and
+// shell tools so the RMDY worker does not jail to the Desktop install cwd.
+// scope follows access_scope: project clamps escapes; home/full keep outside
+// cwds so life-task shells still work.
 type workspaceBoundTools struct {
 	inner cognition.ToolExecutor
 	root  string
+	scope string
 }
 
 func (t *workspaceBoundTools) Execute(ctx context.Context, call cognition.ToolCall) cognition.ToolResult {
@@ -441,10 +481,9 @@ func (t *workspaceBoundTools) Execute(ctx context.Context, call cognition.ToolCa
 	if strings.HasPrefix(name, "workspace.") || strings.HasPrefix(name, "workspace_") {
 		call.Input = injectWorkspaceRoot(call.Input, root)
 	}
-	// Packaged Desktop shell default cwd is often System32; bind build/shell
-	// tools to the session project when the model omits cwd.
 	if name == "shell.exec" || name == "shell_exec" {
-		call.Input = injectShellCwd(call.Input, root)
+		call.Input = injectShellCwd(call.Input, root, t.scope)
+		call.Input = injectShellWriteRoots(call.Input, root, t.scope)
 	}
 	if strings.HasPrefix(name, "memory.") || strings.HasPrefix(name, "memory_") ||
 		strings.HasPrefix(name, "skill.") || strings.HasPrefix(name, "skill_") {
@@ -460,11 +499,48 @@ func injectWorkspaceRoot(raw []byte, root string) []byte {
 			args = map[string]any{"_raw": string(raw)}
 		}
 	}
-	if _, ok := args["workspace_root"]; !ok {
-		args["workspace_root"] = root
+	// Always force the session/owner root — never trust model-supplied roots
+	// (prompt injection could otherwise retarget the jail to ~/.remedy/auth).
+	args["workspace_root"] = root
+	args["project_path"] = root
+	b, err := json.Marshal(args)
+	if err != nil {
+		return raw
 	}
-	if _, ok := args["project_path"]; !ok {
-		args["project_path"] = root
+	return b
+}
+
+func injectShellCwd(raw []byte, root string, scope string) []byte {
+	args := map[string]any{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return raw
+		}
+	}
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return raw
+	}
+	scope = normalizeAccessScope(scope)
+	cwd, _ := args["cwd"].(string)
+	cwd = strings.TrimSpace(cwd)
+	switch {
+	case cwd == "" || isPackagedInstallDir(cwd):
+		// Packaged Desktop often starts in System32 / install dir.
+		args["cwd"] = root
+	case pathUnder(cwd, root):
+		// Keep project subdirs (src/, native/go/, …) — do not strip ability.
+	case scope == "full":
+		// Partner life tasks: Downloads/Desktop/other apps stay reachable.
+		// Auth trees are refused later by Zig / secret path gates.
+	case scope == "home":
+		if uh, err := os.UserHomeDir(); err == nil && uh != "" && pathUnder(cwd, uh) {
+			break
+		}
+		args["cwd"] = root
+	default:
+		// project / untrusted: clamp escapes back to the focus folder.
+		args["cwd"] = root
 	}
 	b, err := json.Marshal(args)
 	if err != nil {
@@ -473,18 +549,33 @@ func injectWorkspaceRoot(raw []byte, root string) []byte {
 	return b
 }
 
-func injectShellCwd(raw []byte, root string) []byte {
+func injectShellWriteRoots(raw []byte, root string, scope string) []byte {
 	args := map[string]any{}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &args); err != nil {
 			return raw
 		}
 	}
-	cwd, _ := args["cwd"].(string)
-	if strings.TrimSpace(cwd) != "" {
-		return raw
+	scope = normalizeAccessScope(scope)
+	root = strings.TrimSpace(root)
+	switch scope {
+	case "full":
+		// Partner life tasks: unbound write jail for this spawn (auth still closed).
+		delete(args, "write_roots")
+	case "home":
+		roots := make([]string, 0, 2)
+		if root != "" {
+			roots = append(roots, root)
+		}
+		if uh, err := os.UserHomeDir(); err == nil && strings.TrimSpace(uh) != "" {
+			roots = append(roots, uh)
+		}
+		args["write_roots"] = roots
+	default:
+		if root != "" {
+			args["write_roots"] = []string{root}
+		}
 	}
-	args["cwd"] = root
 	b, err := json.Marshal(args)
 	if err != nil {
 		return raw
@@ -499,15 +590,53 @@ func injectProjectPathField(raw []byte, root string) []byte {
 			return raw
 		}
 	}
-	if _, ok := args["project_path"]; ok {
-		return raw
-	}
 	args["project_path"] = root
 	b, err := json.Marshal(args)
 	if err != nil {
 		return raw
 	}
 	return b
+}
+
+func (r *CognitionTurnRunner) enqueuePendingApproval(sessionID string, call cognition.ToolCall) {
+	if r == nil || r.Approvals == nil {
+		return
+	}
+	preview := toolCommandPreview(call)
+	summary := plainToolApprovalSummary(call.Name, preview)
+	var sid *string
+	if s := strings.TrimSpace(sessionID); s != "" {
+		sid = &s
+	}
+	reason := "Tool requires your approval"
+	if desc, err := r.Registry.Latest(call.Name); err == nil && desc.Risk == tools.RiskCheckpoint {
+		reason = sensitivePrefix + " — " + summary
+	}
+	_ = r.Approvals.Enqueue(call.Name, preview, reason, sid, summary)
+}
+
+func plainToolApprovalSummary(toolName, preview string) string {
+	name := strings.TrimSpace(toolName)
+	cmd := strings.TrimSpace(preview)
+	if len(cmd) > 120 {
+		cmd = cmd[:120]
+	}
+	switch {
+	case strings.HasPrefix(name, "workspace.write"), strings.HasPrefix(name, "workspace.edit"):
+		return "Remedy wants to change a file in your project."
+	case name == "shell.exec" || name == "shell_exec":
+		if cmd != "" {
+			return "Remedy wants to run a command: " + cmd
+		}
+		return "Remedy wants to run a shell command."
+	case strings.HasPrefix(name, "computer."):
+		return "Remedy wants to use the computer (click, type, or navigate)."
+	default:
+		if cmd != "" {
+			return "Remedy wants to use " + name + "."
+		}
+		return "Remedy wants to use a tool: " + name
+	}
 }
 
 type abiNamePolicy struct {
