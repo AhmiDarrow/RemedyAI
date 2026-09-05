@@ -88,12 +88,15 @@ Even with OV:
 ## Defender ML false positives (not SmartScreen)
 
 Separate from SmartScreen, **Windows Defender** ML may label unsigned
-PyInstaller/Tauri builds as:
+Tauri / freshly written installer EXEs as:
 
 - `Trojan:Win32/Wacatac.B!ml`
 - `Trojan:Win32/Bearfoos.A!ml`
 - `Behavior:Win32/Execution.A!ml` when the UI binary is generic `app.exe`
 - (legacy) `Behavior:Win32/Persistence.A!ml` when apps write `HKCU\…\Run`
+
+Packaged Desktop no longer ships a PyInstaller `remedy-desktop` sidecar —
+launch is Go `remedy-runtime` (`externalBin`) plus Zig `remedy_core`.
 
 **Code mitigations already in-tree** (see also `docs/DESKTOP.md`):
 
@@ -102,13 +105,13 @@ PyInstaller/Tauri builds as:
 | Persistence | Startup folder `.lnk` only; never write Run; delete legacy Run names |
 | UI EXE name | `mainBinaryName` = `Remedy Desktop` (not generic `app.exe`) |
 | Scrub implementation | Rust `winreg` + NSIS `DeleteRegValue` (no hidden PowerShell Bypass on launch) |
-| Sidecar PE identity | PyInstaller `--version-file` + `--icon` (Company/Product/FileVersion filled) |
-| Packing | `--noupx` always |
+| Local API binary | Go `remedy-runtime` via Tauri `externalBin` (no PyInstaller onefile) |
 | Bundle metadata | `publisher`, `copyright`, descriptions in `tauri.conf.json`; Cargo authors/repo |
 
 **What still requires a certificate:** Authenticode on the NSIS installer and
 main EXE remains the strongest fix for SmartScreen and many ML FPs. Until then,
-submit each release binary to Microsoft WDSI if users report quarantines.
+submit each release binary to Microsoft WDSI if users report quarantines
+(installer + `remedy-runtime.exe`).
 
 ## Related files
 
