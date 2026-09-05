@@ -1,8 +1,9 @@
-"""Shared desktop policy + POSIX desktop facade over ``host_binding``.
+"""Shared desktop policy + thin POSIX facade over ``host_binding``.
 
-Pure SoM / keys / shot / pixel policy lives here so Windows siblings do not twin
-it. On non-Windows, :func:`host_binding.native` returns this module — AT-SPI
-detect, capture/input wrappers, and launch stay fail-closed over Zig.
+Pure SoM / keys / shot / pixel / OCR / snapshot policy lives here so Windows
+siblings do not twin it. On non-Windows, :func:`host_binding.native` returns
+this module: capture/input/AT-SPI/launch are fail-closed Zig wrappers only
+(no ``desktop_linux`` / xdotool / wmctrl).
 """
 
 from __future__ import annotations
@@ -789,30 +790,6 @@ def compose_desktop_snapshot(
     return merge_ui_candidates(win_els, ctrl_els, cap, cell=merge_cell)
 
 
-def annotate_monitors(
-    monitors: list[dict[str, Any]],
-    *,
-    remedy_hwnd: int | None = None,
-    window_rect_fn: Callable[[int], tuple[int, int, int, int]] | None = None,
-) -> list[dict[str, Any]]:
-    """Mark primary fallback + which monitor hosts Remedy Desktop."""
-    for m in monitors:
-        m["remedy"] = False
-    if monitors and not any(m.get("primary") for m in monitors):
-        monitors[0]["primary"] = True
-    if remedy_hwnd and window_rect_fn is not None:
-        import contextlib
-
-        with contextlib.suppress(Exception):
-            left, top, right, bottom = window_rect_fn(int(remedy_hwnd))
-            cx, cy = (left + right) // 2, (top + bottom) // 2
-            for m in monitors:
-                if m["left"] <= cx < m["right"] and m["top"] <= cy < m["bottom"]:
-                    m["remedy"] = True
-                    break
-    return monitors
-
-
 def manage_window_dispatch(
     hwnd: int,
     verb: str,
@@ -874,6 +851,9 @@ _LINUX_HANDS_HINT = (
     "Pure Wayland without XWayland is not supported yet"
 )
 _F = TypeVar("_F", bound=Callable[..., Any])
+_write_png_bgr = write_png_bgr
+_ocr_words_from_bgr = ocr_words_from_bgr
+_pixel_ui_candidates = pixel_ui_candidates
 
 
 def _require_linux() -> None:
@@ -898,20 +878,6 @@ def _hands(need: str) -> Callable[[_F], _F]:
         return wrap  # type: ignore[return-value]
 
     return deco
-
-
-def _remedy_home() -> Path:
-    return remedy_home()
-
-
-def _default_shot_path(prefix: str = "desk") -> Path:
-    return default_shot_path(prefix)
-
-
-def _write_png_bgr(
-    path: Path, width: int, height: int, raw: bytes | bytearray | memoryview, stride: int, *, bytes_per_pixel: int = 3
-) -> None:
-    write_png_bgr(path, width, height, raw, stride, bytes_per_pixel=bytes_per_pixel)
 
 
 def _capture_virtual_screen() -> tuple[bytes, int, int, int, int, int]:
@@ -940,14 +906,14 @@ def screenshot_png(path: Path | None = None, *, marks: list[Any] | None = None) 
 def screenshot_region_png(
     x: int, y: int, width: int, height: int, *, path: Path | None = None, scale: float = 1.0
 ) -> dict[str, Any]:
-    origin_x, origin_y, full_w, full_h = H.virtual_screen_rect()
+    ox, oy, fw, fh = H.virtual_screen_rect()
     bx, by, rw, rh, sc = clip_region_to_virtual(
-        x, y, width, height, scale=scale, origin_x=origin_x, origin_y=origin_y, full_w=full_w, full_h=full_h
+        x, y, width, height, scale=scale, origin_x=ox, origin_y=oy, full_w=fw, full_h=fh
     )
-    crop = H.capture_region(origin_x + bx, origin_y + by, rw, rh, 3)
+    crop = H.capture_region(ox + bx, oy + by, rw, rh, 3)
     return finalize_shot(
         crop.pixels, crop.stride, rw, rh, path=path, prefix="region",
-        origin_x=origin_x + bx, origin_y=origin_y + by, purge=False,
+        origin_x=ox + bx, origin_y=oy + by, purge=False,
         extra={"requested": {"x": x, "y": y, "width": width, "height": height, "scale": sc}, "method": "remedy_core"},
     )
 
@@ -988,30 +954,16 @@ def find_remedy_desktop_hwnd() -> int | None:
 
 
 def _atspi_clickable_candidates(*, max_marks: int = 40) -> list[dict[str, Any]]:
-    try:
-        return list(H.a11y_snapshot(max(1, int(max_marks or 40))))
-    except NativeRuntimeUnavailableError:
-        return []
-
-
-def _atspi_snapshot_elements(cap: int) -> list[dict[str, Any]]:
-    return a11y_as_elements(_atspi_clickable_candidates(max_marks=cap), cap)
-
-
-def _windows_as_elements(cap: int) -> list[dict[str, Any]]:
-    return windows_as_elements(list_windows(limit=min(cap, 80)), cap)
+    return list(H.a11y_snapshot(max(1, int(max_marks or 40))))
 
 
 def desktop_snapshot(limit: int = 40, mode: str = "auto", hwnd: int | None = None) -> list[dict[str, Any]]:
     return compose_desktop_snapshot(
         limit=limit, mode=mode, hwnd=hwnd, list_windows_fn=list_windows,
-        controls_fn=lambda _root, cap: _atspi_snapshot_elements(cap), prefer_controls_alone=True,
+        controls_fn=lambda _r, cap: a11y_as_elements(_atspi_clickable_candidates(max_marks=cap), cap),
+        prefer_controls_alone=True,
         controls_modes=frozenset({"controls", "uia", "deep", "atspi"}),
     )
-
-
-def _ocr_words_from_bgr(raw: bytes, stride: int, width: int, height: int) -> list[dict[str, Any]]:
-    return ocr_words_from_bgr(raw, stride, width, height)
 
 
 def _ocr_word_candidates(
@@ -1020,18 +972,6 @@ def _ocr_word_candidates(
     return ocr_word_candidates(
         raw, stride, width, height, max_marks=max_marks, words_from=_ocr_words_from_bgr
     )
-
-
-def _pixel_ui_candidates(
-    raw: bytes, stride: int, width: int, height: int, *, max_marks: int = 20
-) -> list[dict[str, Any]]:
-    return pixel_ui_candidates(raw, stride, width, height, max_marks=max_marks)
-
-
-def _merge_candidates(
-    primary: list[dict[str, Any]], extra: list[dict[str, Any]], cap: int
-) -> list[dict[str, Any]]:
-    return merge_ui_candidates(primary, extra, cap)
 
 
 def detect_ui_candidates(
@@ -1044,8 +984,9 @@ def detect_ui_candidates(
         if width >= 32 and height >= 32 and raw
         else []
     )
-    merged = _merge_candidates(atspi, ocr, cap)
-    return merged or _pixel_ui_candidates(raw, stride, width, height, max_marks=cap)
+    return merge_ui_candidates(atspi, ocr, cap) or _pixel_ui_candidates(
+        raw, stride, width, height, max_marks=cap
+    )
 
 
 @_hands("hover")
@@ -1060,12 +1001,7 @@ def click(x: int, y: int, *, button: str = "left", clicks: int = 1) -> None:
 
 
 def click_element(el: dict[str, Any], *, button: str = "left", clicks: int = 1) -> None:
-    click(
-        int(el.get("x") or el.get("cx") or 0),
-        int(el.get("y") or el.get("cy") or 0),
-        button=button,
-        clicks=clicks,
-    )
+    click(int(el.get("x") or el.get("cx") or 0), int(el.get("y") or el.get("cy") or 0), button=button, clicks=clicks)
 
 
 @_hands("drag")
@@ -1111,14 +1047,9 @@ def type_text_fast(
     chars_typed: list[int] | None = None,
 ) -> dict[str, Any]:
     return run_type_text_fast(
-        text,
-        type_text=type_text,
-        get_clipboard=get_clipboard_text,
-        set_clipboard=set_clipboard_text,
-        press_key=press_key,
-        host_error=H.HostError,
-        abort_check=abort_check,
-        chars_typed=chars_typed,
+        text, type_text=type_text, get_clipboard=get_clipboard_text,
+        set_clipboard=set_clipboard_text, press_key=press_key, host_error=H.HostError,
+        abort_check=abort_check, chars_typed=chars_typed,
     )
 
 
@@ -1131,12 +1062,9 @@ def press_hold(
             H.mouse_button(H.MOUSE_LEFT, False)
 
     return run_press_hold(
-        x, y,
-        mouse_move=lambda mx, my: H.mouse_move(int(mx), int(my)),
-        mouse_down=lambda: H.mouse_button(H.MOUSE_LEFT, True),
-        mouse_up=_up,
-        hold_ms=hold_ms,
-        abort_check=abort_check,
+        x, y, mouse_move=lambda mx, my: H.mouse_move(int(mx), int(my)),
+        mouse_down=lambda: H.mouse_button(H.MOUSE_LEFT, True), mouse_up=_up,
+        hold_ms=hold_ms, abort_check=abort_check,
     )
 
 
@@ -1185,11 +1113,6 @@ def get_clipboard_text() -> str:
 def set_clipboard_text(text: str) -> bool:
     H.clipboard_set_text(str(text or ""))
     return True
-
-
-def _which(*names: str) -> str | None:
-    from remedy.core.computer.desktop_launch import which as _w
-    return _w(*names)
 
 
 def open_app(name: str, search_dirs: list[str] | None = None) -> dict[str, Any]:
