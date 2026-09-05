@@ -760,3 +760,42 @@ def test_memory_save_refuses_secret(
 def test_memory_save_registered() -> None:
     assert ("memory.save", 1) in worker._HANDLERS
 
+
+def test_skill_search_and_activate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+    (tmp_path / "config.toml").write_text(
+        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
+        encoding="utf-8",
+    )
+    from remedy.runtime import prompt_assemble as pa
+
+    pa._runtime_cache.clear()
+    ranked = worker._skill_search({"query": "change safety", "limit": 5})
+    assert ranked["total"] >= 1
+    names = {s["name"] for s in ranked["skills"]}
+    assert "change-safety" in names or any("change" in n for n in names)
+    pick = "change-safety" if "change-safety" in names else next(iter(names))
+    activated = worker._skill_activate({"name": pick})
+    assert activated["name"] == pick
+    assert isinstance(activated["body"], str) and activated["body"].strip()
+    assert int(activated["chars"]) == len(activated["body"])
+
+
+def test_skill_activate_refuses_bulk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    from remedy.runtime import prompt_assemble as pa
+
+    pa._runtime_cache.clear()
+    with pytest.raises(PermissionError, match="bulk"):
+        worker._skill_activate({"name": "all"})
+
+
+def test_skill_handlers_registered() -> None:
+    assert ("skill.search", 1) in worker._HANDLERS
+    assert ("skill.activate", 1) in worker._HANDLERS
+

@@ -496,6 +496,94 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:          "skill.search",
+		Version:     1,
+		Description: "Rank skill packs (local mirror of Python worker)",
+		Runtime:     RuntimeGo,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"query":{"type":"string"},
+				"limit":{"type":"integer","minimum":1,"maximum":20},
+				"home_dir":{"type":"string"},
+				"project_path":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["query","skills","total"],
+			"properties":{
+				"query":{"type":"string"},
+				"skills":{"type":"array"},
+				"total":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(func(_ context.Context, request Request) (Result, error) {
+		var body struct {
+			Query string `json:"query"`
+		}
+		_ = json.Unmarshal(request.Input, &body)
+		out, err := json.Marshal(map[string]any{
+			"query":  strings.TrimSpace(body.Query),
+			"skills": []any{},
+			"total":  0,
+		})
+		return Result{Output: out}, err
+	})); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:          "skill.activate",
+		Version:     1,
+		Description: "Load one skill procedure body (local mirror of Python worker)",
+		Runtime:     RuntimeGo,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["name"],
+			"properties":{
+				"name":{"type":"string","minLength":1},
+				"skill":{"type":"string","minLength":1},
+				"include_references":{"type":"boolean"},
+				"home_dir":{"type":"string"},
+				"project_path":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["name","body","chars"],
+			"properties":{
+				"name":{"type":"string"},
+				"body":{"type":"string"},
+				"related":{"type":"array","items":{"type":"string"}},
+				"chars":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(func(_ context.Context, request Request) (Result, error) {
+		var body struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(request.Input, &body); err != nil || strings.TrimSpace(body.Name) == "" {
+			return Result{}, ErrInvalidInput
+		}
+		out, err := json.Marshal(map[string]any{
+			"name":    strings.TrimSpace(body.Name),
+			"body":    "mirrored skill body",
+			"related": []string{},
+			"chars":   19,
+		})
+		return Result{Output: out}, err
+	})); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:          "memory.save",
 		Version:     1,
 		Description: "Save Partner Memory note (local mirror of Python worker)",

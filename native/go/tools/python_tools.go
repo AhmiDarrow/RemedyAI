@@ -327,6 +327,82 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:          "skill.search",
+		Version:     1,
+		Description: "Rank skill packs for a task query (Python worker)",
+		Runtime:     RuntimePython,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"query":{"type":"string"},
+				"limit":{"type":"integer","minimum":1,"maximum":20},
+				"home_dir":{"type":"string"},
+				"project_path":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["query","skills","total"],
+			"properties":{
+				"query":{"type":"string"},
+				"skills":{
+					"type":"array",
+					"items":{
+						"type":"object",
+						"required":["name","score","status"],
+						"properties":{
+							"name":{"type":"string"},
+							"score":{"type":"number"},
+							"status":{"type":"string"},
+							"description":{"type":"string"}
+						},
+						"additionalProperties":false
+					}
+				},
+				"total":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:          "skill.activate",
+		Version:     1,
+		Description: "Load one skill procedure body (Python worker; progressive disclosure)",
+		Runtime:     RuntimePython,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["name"],
+			"properties":{
+				"name":{"type":"string","minLength":1},
+				"skill":{"type":"string","minLength":1},
+				"include_references":{"type":"boolean"},
+				"home_dir":{"type":"string"},
+				"project_path":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["name","body","chars"],
+			"properties":{
+				"name":{"type":"string"},
+				"body":{"type":"string"},
+				"related":{"type":"array","items":{"type":"string"}},
+				"chars":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:          "memory.save",
 		Version:     1,
 		Description: "Save an explicit Partner Memory note (Python worker; refuses secrets)",
