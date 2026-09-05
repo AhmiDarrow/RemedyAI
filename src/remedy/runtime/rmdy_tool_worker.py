@@ -536,6 +536,13 @@ def _memory_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return search_memory(inp)
 
 
+def _memory_save(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Bridge Tool ABI memory.save to Partner Memory write (forever-Python)."""
+    from remedy.runtime.prompt_assemble import save_memory
+
+    return save_memory(inp)
+
+
 _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("text.slugify", 1): lambda inp: {"slug": _slugify(str(inp.get("text", "")))},
     ("text.word_count", 1): lambda inp: {"words": _word_count(str(inp.get("text", "")))},
@@ -559,6 +566,7 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("vision.stop", 1): _vision_stop,
     ("vision.progress", 1): _vision_progress,
     ("memory.search", 1): _memory_search,
+    ("memory.save", 1): _memory_save,
 }
 
 

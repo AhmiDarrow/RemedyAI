@@ -496,6 +496,59 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:          "memory.save",
+		Version:     1,
+		Description: "Save Partner Memory note (local mirror of Python worker)",
+		Runtime:     RuntimeGo,
+		Risk:        RiskMutation,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["content"],
+			"properties":{
+				"content":{"type":"string","minLength":1},
+				"title":{"type":"string"},
+				"category":{"type":"string"},
+				"session_id":{"type":"string"},
+				"home_dir":{"type":"string"},
+				"project_path":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["saved","title","parent_memory"],
+			"properties":{
+				"saved":{"type":"boolean"},
+				"title":{"type":"string"},
+				"parent_memory":{"type":"boolean"},
+				"why":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(func(_ context.Context, request Request) (Result, error) {
+		var body struct {
+			Content string `json:"content"`
+			Title   string `json:"title"`
+		}
+		if err := json.Unmarshal(request.Input, &body); err != nil || strings.TrimSpace(body.Content) == "" {
+			return Result{}, ErrInvalidInput
+		}
+		title := strings.TrimSpace(body.Title)
+		if title == "" {
+			title = "Remembered"
+		}
+		out, err := json.Marshal(map[string]any{
+			"saved":         true,
+			"title":         title,
+			"parent_memory": true,
+			"why":           "mirrored",
+		})
+		return Result{Output: out}, err
+	})); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:          "memory.search",
 		Version:     1,
 		Description: "Search Partner Memory (local mirror of Python worker)",
