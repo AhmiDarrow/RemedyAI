@@ -928,24 +928,6 @@ class BasicRuntime(AgentRuntime):
 
         return await load_session_history(self.memory, session_id, current_user)
 
-    async def _execute_tool_calls(
-        self,
-        tool_calls_list: list[dict[str, Any]],
-        *,
-        seen_fps: set[str],
-        result_cache: dict[str, str],
-    ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
-        """Run tools in parallel (capped waves); always yield one tool msg per call id."""
-        from remedy.core.agent_tool_batch import execute_tool_calls
-
-        async for item in execute_tool_calls(
-            self,
-            tool_calls_list,
-            seen_fps=seen_fps,
-            result_cache=result_cache,
-        ):
-            yield item
-
     def _right_size_max_tokens(self) -> int:
         """Compute the completion budget for the bound provider/model.
 
