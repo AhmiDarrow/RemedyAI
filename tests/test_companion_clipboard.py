@@ -1,18 +1,8 @@
-"""The Win32 clipboard backend — the ctypes prototypes, above all.
+"""Companion clipboard: Zig text path + remaining HDROP/DIB ctypes prototypes.
 
-This code crashed the process. Not raised, not returned an error: a Windows
-access violation, which is not a Python exception and which the ``except
-Exception`` around it could never have caught. Remedy would simply vanish
-mid-turn whenever she read the clipboard.
-
-The cause was ctypes' default: with no ``restype``, a foreign function is
-assumed to return ``int`` — 32 bits. ``GetClipboardData`` returns a 64-bit
-HANDLE on a 64-bit Python, so the top half was silently discarded and the
-truncated value passed straight to ``GlobalLock``. Locking a bogus handle can
-still hand back a non-null pointer, and ``wstring_at`` on it walks unmapped
-memory until it happens to find a zero.
-
-So the tests that matter here are about declared signatures, not behaviour.
+Text get/set goes through ``host_binding``. HDROP file lists and DIB images
+still use ctypes; those calls must keep pointer-sized ``restype`` /
+``argtypes`` so truncated HANDLEs cannot AV the process.
 """
 
 from __future__ import annotations
@@ -40,17 +30,14 @@ def declared():
     }
 
 
-# --- the prototypes ---------------------------------------------------------
+# --- remaining HDROP / DIB prototypes ---------------------------------------
 
 
 @pytest.mark.parametrize(
     ("dll", "func"),
     [
         ("user32", "GetClipboardData"),
-        ("user32", "SetClipboardData"),
         ("kernel32", "GlobalLock"),
-        ("kernel32", "GlobalAlloc"),
-        ("kernel32", "GlobalFree"),
     ],
 )
 def test_every_handle_returning_call_is_pointer_sized(declared, dll, func):
@@ -67,7 +54,6 @@ def test_every_handle_returning_call_is_pointer_sized(declared, dll, func):
         ("kernel32", "GlobalLock"),
         ("kernel32", "GlobalUnlock"),
         ("kernel32", "GlobalSize"),
-        ("kernel32", "GlobalFree"),
         ("shell32", "DragQueryFileW"),
     ],
 )
@@ -96,6 +82,12 @@ def test_declaration_is_skipped_off_windows(monkeypatch):
     assert C._WIN32_PROTOTYPES_SET is False
 
 
+def test_text_clipboard_no_longer_declares_set_or_alloc_prototypes(declared):
+    """EmptyClipboard / SetClipboardData / GlobalAlloc were deleted with the ctypes text path."""
+    assert not hasattr(C, "_CF_UNICODETEXT")
+    assert not hasattr(C, "_GMEM_MOVEABLE")
+
+
 # --- the calls themselves ---------------------------------------------------
 # Read-only. Nothing here writes to the owner's clipboard.
 
@@ -107,7 +99,7 @@ def test_reading_the_clipboard_does_not_crash_the_process():
 
 
 def test_a_clipboard_read_is_not_truncated_at_an_embedded_terminator():
-    """The bounded read must stop at the terminator, not before or after it."""
+    """Host text path must not leave NULs in the returned string."""
     out = C.Win32CompanionBackend().clipboard_text()
     if out:
         assert "\x00" not in out
