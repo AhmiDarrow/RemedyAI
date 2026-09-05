@@ -1,4 +1,4 @@
-"""FastAPI routes package and create_app harness are retired."""
+"""FastAPI routes package and create_app / interfaces.api are deleted."""
 
 from __future__ import annotations
 

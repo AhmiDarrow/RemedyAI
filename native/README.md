@@ -9,7 +9,7 @@ supervised ML / compatibility workers.
 - `protocol/` is the versioned binary contract shared by every runtime.
 
 Go ``remedy-runtime`` is authoritative for production ``:7400``. Python FastAPI
-FastAPI ``create_app`` harness is retired; Python workers remain for model, vision,
+``create_app`` / ``interfaces.api`` are deleted; Python workers remain for model, vision,
 speech, and research under Go supervision. Native capability slices stay behind the
 selector / rollback switch and must not weaken owner checkpoints, write-jail rules,
 credential isolation, or Windows/Linux parity.
@@ -35,7 +35,7 @@ work cannot overwrite one another through process-global model state.
 Local IPC uses the shared bounded frame format over current-user Windows named pipes or
 mode-0600 Unix sockets. Calls retain correlation IDs across concurrent work, propagate
 cancellation, and unblock on disconnect. Go ``remedy-runtime`` owns production loopback
-HTTP on ``:7400`` (Go ``remedy-runtime``; FastAPI create_app harness retired) and blocks
+HTTP on ``:7400`` (Go ``remedy-runtime``; FastAPI create_app deleted) and blocks
 off-machine targets and redirects. Duplicate active correlation IDs are rejected and each
 connection has a fixed in-flight ceiling.
 

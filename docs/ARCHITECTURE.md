@@ -39,7 +39,7 @@ allowed only for operations declared idempotent.
 
 **HTTP authority:** `remedy-runtime` owns production `:7400`. `remedy serve` and
 packaged Desktop launch that binary (fail closed if missing). Python does not
-start uvicorn on `:7400`; FastAPI `create_app` harness is retired; Go httpapi owns `:7400`.
+start uvicorn on `:7400`; FastAPI `create_app` / `interfaces.api` are deleted; Go httpapi owns `:7400`.
 `python -m remedy.runtime.rmdy_tool_worker` is the RMDY worker entry. Startup
 performs one bounded readiness probe only when native mode is requested; the
 liveness route remains probe-free. Native durability requires contiguous event

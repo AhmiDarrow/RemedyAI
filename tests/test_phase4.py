@@ -1,4 +1,4 @@
-"""Phase 4 leftovers: ChannelKind + API models (FastAPI create_app retired)."""
+"""Phase 4 leftovers: ChannelKind + API models (FastAPI create_app deleted)."""
 
 from __future__ import annotations
 
