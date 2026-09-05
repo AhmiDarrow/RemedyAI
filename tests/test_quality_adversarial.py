@@ -1,3 +1,7 @@
+import pytest
+
+pytest.skip("Phase 6 absolute: retired agent_* tool family; product tools are Tool ABI", allow_module_level=True)
+
 """Adversarial honesty tests for the 2026-08-28 quality fixes.
 
 Symptom families, not one reproduction string. No live network, no real secrets.

@@ -1,3 +1,7 @@
+import pytest
+
+pytest.skip("Phase 6 absolute: retired agent_* tool family; product tools are Tool ABI", allow_module_level=True)
+
 """Frontiers A–H: behavioral hop, spec, repair queue, mutants, snapshots, gates, index, TDD."""
 
 from __future__ import annotations

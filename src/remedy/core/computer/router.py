@@ -173,7 +173,7 @@ def is_valid_navigate_url(url: Any = None) -> bool:
         if not looks_public:
             return False
         try:
-            from remedy.core.agent_web_tools import _resolve_public_ips
+            from remedy.core.web_helpers import _resolve_public_ips
 
             return bool(_resolve_public_ips(host))
         except OSError:

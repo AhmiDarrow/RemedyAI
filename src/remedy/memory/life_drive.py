@@ -340,7 +340,7 @@ def looks_like_return(message: str) -> bool:
 def _search_web(query: str, max_results: int = 3) -> list[dict[str, str]]:
     """Thin wrapper so tests can patch without importing web tools."""
     try:
-        from remedy.core.agent_web_tools import search_public_web
+        from remedy.core.web_helpers import search_public_web
 
         return list(search_public_web(query, max_results=max_results) or [])
     except Exception:

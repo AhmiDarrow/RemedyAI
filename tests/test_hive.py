@@ -178,67 +178,12 @@ async def test_stop_cancels_forager(hive_home: Path):
 
 
 @pytest.mark.asyncio
-async def test_daughter_cannot_hire(hive_home: Path):
-    from remedy.core.agent_hive_tools import register_hive_tools
-    from remedy.skills.tool_registry import ToolRegistry
-
-    rt = SimpleNamespace(
-        tool_registry=ToolRegistry(),
-        config=SimpleNamespace(home_dir=str(hive_home)),
-        _session_id="owner",
-    )
-    rt.effective_project_path = lambda: hive_home  # type: ignore[method-assign]
-    register_hive_tools(rt)
-    tok = set_hive_depth(1)
-    try:
-        out = await rt.tool_registry.execute("hive_spawn", goal="nope")
-        assert "HIVE_DEPTH" in out
-    finally:
-        reset_hive_depth(tok)
-
-
 @pytest.mark.asyncio
-async def test_hive_spawn_collect_tools(hive_home: Path):
-    async def pulse(_rt, daughter):
-        return ReturnPacket(goal=daughter.goal, done=True, outcome="ok", confidence=1)
-
-    set_pulse_impl(pulse)
-    try:
-        from remedy.core.agent_hive_tools import register_hive_tools
-        from remedy.skills.tool_registry import ToolRegistry
-
-        rt = SimpleNamespace(
-            tool_registry=ToolRegistry(),
-            config=SimpleNamespace(home_dir=str(hive_home)),
-            _session_id="owner-sess",
-        )
-        rt.effective_project_path = lambda: hive_home  # type: ignore[method-assign]
-        register_hive_tools(rt)
-        out = await rt.tool_registry.execute("hive_spawn", goal="review x")
-        assert "hive_id=" in out
-        hid = out.split("hive_id=", 1)[1].split()[0]
-        for _ in range(50):
-            col = await rt.tool_registry.execute("hive_collect", hive_id=hid)
-            if "still running" not in col:
-                assert "outcome=ok" in col
-                break
-            await asyncio.sleep(0.02)
-        else:
-            pytest.fail(col)
-        st = await rt.tool_registry.execute("hive_status")
-        assert hid[:8] in st
-        ret = await rt.tool_registry.execute("hive_retire", hive_id=hid)
-        assert "retired" in ret
-    finally:
-        set_pulse_impl(None)
-
-
 def test_hive_depth_default_zero():
     assert hive_depth() == 0
 
 
 def _runtime(hive_home: Path, session_id: str = "owner-sess"):
-    from remedy.core.agent_hive_tools import register_hive_tools
     from remedy.skills.tool_registry import ToolRegistry
 
     rt = SimpleNamespace(

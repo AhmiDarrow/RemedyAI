@@ -432,26 +432,7 @@ def register_memory_tools(runtime: Any) -> None:
         {"type": "object", "properties": {}},
     )
 
-    # --- Partner State Machine (subgoals / txns / graph / prospective) ---
-    from remedy.core.agent_partner_tools import register_partner_state_tools
 
-    register_partner_state_tools(runtime)
 
-    # --- Soul Field (personhood / unified recall / dream) ---
-    from remedy.core.agent_soul_tools import register_soul_tools
 
-    register_soul_tools(runtime)
-
-    # --- Build engine (machine construction / ledger / unit hops) ---
-    from remedy.core.agent_build_tools import register_build_tools
-
-    register_build_tools(runtime)
-
-    # --- Ship tools (git_status / git_push / gh_release after green) ---
-    try:
-        from remedy.core.agent_ship_tools import register_ship_tools
-
-        register_ship_tools(runtime)
-    except Exception:
-        pass
 

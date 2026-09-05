@@ -32,12 +32,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from remedy.core import agent_companion_tools as companion_tools
 from remedy.core import agent_computer_tools as act
 from remedy.core import companion as companion_mod
 from remedy.core import companion_inbox as inbox_mod
 from remedy.core import companion_observe as observe_mod
-from remedy.core.agent_companion_tools import register_companion_tools
 from remedy.core.agent_computer_tools import (
     _page_context,
     _page_origin,
@@ -186,22 +184,8 @@ def tools(monkeypatch, approvals, tmp_path):
 
 @pytest.fixture
 def companion(monkeypatch, tmp_path):
-    """Registered companion tools on a fake clipboard/foreground backend."""
-    backend = FakeCompanionBackend()
-    set_companion_backend(backend)
-    # recent_files() walks the real Desktop/Downloads; pin it.
-    monkeypatch.setattr(companion_mod, "recent_files", lambda *a, **k: [])
-    runtime = _Runtime(tmp_path)
-    register_companion_tools(runtime)
-    try:
-        yield SimpleNamespace(
-            backend=backend,
-            runtime=runtime,
-            reg=runtime.tool_registry,
-            t=runtime.tool_registry.tools,
-        )
-    finally:
-        set_companion_backend(None)
+    """Retired with Phase 6 absolute (companion agent_* tools deleted)."""
+    pytest.skip("Phase 6 absolute: companion tools retired; Tool ABI owns product tools")
 
 
 # --------------------------------------------------------------------------
@@ -1353,4 +1337,4 @@ def test_the_companion_module_registers_handlers_not_bare_functions(companion):
 
 
 def test_the_companion_registration_module_exposes_only_its_entry_point():
-    assert hasattr(companion_tools, "register_companion_tools")
+    pytest.skip("Phase 6 absolute: companion tools retired")
