@@ -173,7 +173,7 @@ func (r *CognitionTurnRunner) assemblePrompt(ctx context.Context, req TurnReques
 	if req.Provider != nil && strings.TrimSpace(*req.Provider) != "" {
 		input["provider"] = strings.TrimSpace(*req.Provider)
 	}
-	if proj := strings.TrimSpace(req.ProjectPath); proj != "" {
+	if proj := strings.TrimSpace(req.ProjectPath); proj != "" && !isUnsetProjectPath(proj) {
 		input["project_path"] = proj
 	}
 	raw, err := json.Marshal(input)
@@ -312,7 +312,7 @@ func (r *CognitionTurnRunner) runEngine(
 	}
 	execTools = &abiNameTools{inner: execTools, resolve: resolveTool}
 	policy = &abiNamePolicy{inner: policy, resolve: resolveTool}
-	if root := strings.TrimSpace(req.ProjectPath); root != "" {
+	if root := strings.TrimSpace(req.ProjectPath); root != "" && !isUnsetProjectPath(root) {
 		execTools = &workspaceBoundTools{inner: execTools, root: root}
 	}
 	cfg := r.Config

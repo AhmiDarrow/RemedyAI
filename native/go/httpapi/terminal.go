@@ -130,7 +130,7 @@ func pickShell() (string, []string) {
 func defaultTerminalCWD(homeDir string) string {
 	cfg := LoadConfig(homeDir)
 	raw := strings.TrimSpace(cfgString(cfg, "project_path", ""))
-	if raw != "" {
+	if !isUnsetProjectPath(raw) && !isPackagedInstallDir(raw) {
 		if st, err := os.Stat(raw); err == nil && st.IsDir() {
 			abs, err := filepath.Abs(raw)
 			if err == nil {
@@ -138,6 +138,9 @@ func defaultTerminalCWD(homeDir string) string {
 			}
 			return raw
 		}
+	}
+	if owner := defaultOwnerFilesBase(); owner != "" {
+		return owner
 	}
 	return ""
 }

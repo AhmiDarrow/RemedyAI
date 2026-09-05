@@ -46,9 +46,68 @@ func isDriveLetter(b byte) bool {
 	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
 }
 
+// isJunkListingName hides corrupt / private-use names (e.g. "C" + U+F03A).
+func isJunkListingName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return true
+	}
+	for _, r := range name {
+		if r < 32 || r == 127 || (r >= 0xE000 && r <= 0xF8FF) {
+			return true
+		}
+	}
+	return false
+}
+
 func isUnsetProjectPath(raw string) bool {
 	text := strings.TrimSpace(raw)
-	return text == "" || text == "." || text == "./" || isVolumeRootPath(text)
+	if text == "" || text == "." || text == "./" || isVolumeRootPath(text) {
+		return true
+	}
+	// Entire user profile is not a project folder — treat like unset so
+	// agency tools fall back to ~/Documents/Remedy instead of jail-writing
+	// across Desktop/Downloads/.ssh under a "project" root.
+	return isUserHomeProjectPath(text)
+}
+
+// effectiveTurnProjectPath returns a cleaned project folder for turns, or
+// "" when the value is unset / too broad (home, volume root).
+func effectiveTurnProjectPath(raw string) string {
+	text := strings.TrimSpace(raw)
+	if isUnsetProjectPath(text) {
+		return ""
+	}
+	cleaned := filepath.Clean(text)
+	if isUnsetProjectPath(cleaned) {
+		return ""
+	}
+	return cleaned
+}
+
+func isUserHomeProjectPath(raw string) bool {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return false
+	}
+	uh, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(uh) == "" {
+		return false
+	}
+	cleaned := filepath.Clean(text)
+	home := filepath.Clean(uh)
+	if strings.EqualFold(cleaned, home) {
+		return true
+	}
+	// Trailing separator variants / short path forms.
+	abs, err := filepath.Abs(cleaned)
+	if err != nil {
+		return false
+	}
+	homeAbs, err := filepath.Abs(home)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(filepath.Clean(abs), filepath.Clean(homeAbs))
 }
 
 func normalizeAccessScope(raw string) string {
@@ -97,19 +156,12 @@ func resolveAbsPath(raw string) (string, error) {
 
 func clampFilesBase(base string) string {
 	resolved, err := resolveAbsPath(base)
-	if err != nil || resolved == "" {
-		if h, e := os.UserHomeDir(); e == nil {
-			return h
+	if err != nil || resolved == "" || filepath.Dir(resolved) == resolved ||
+		isUnsetProjectPath(resolved) || isPackagedInstallDir(resolved) {
+		if owner := defaultOwnerFilesBase(); owner != "" {
+			return owner
 		}
-		return base
-	}
-	if filepath.Dir(resolved) == resolved {
-		if h, e := os.UserHomeDir(); e == nil {
-			if abs, e2 := filepath.Abs(h); e2 == nil {
-				return filepath.Clean(abs)
-			}
-			return h
-		}
+		return resolved
 	}
 	return resolved
 }
@@ -225,10 +277,17 @@ func jailPath(userPath, base string) (string, error) {
 }
 
 func filesEnvRoot() string {
-	if v := strings.TrimSpace(os.Getenv("REMEDY_FILES_ROOT")); v != "" {
+	for _, key := range []string{"REMEDY_FILES_ROOT", "REMEDY_PROJECT_PATH"} {
+		v := strings.TrimSpace(os.Getenv(key))
+		if v == "" {
+			continue
+		}
+		if isUnsetProjectPath(v) || isPackagedInstallDir(v) {
+			continue
+		}
 		return v
 	}
-	return strings.TrimSpace(os.Getenv("REMEDY_PROJECT_PATH"))
+	return ""
 }
 
 func userProfileWorkFolders(home string) []string {

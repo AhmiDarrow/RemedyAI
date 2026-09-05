@@ -97,25 +97,29 @@ def _workspace_root(inp: Mapping[str, Any] | None = None) -> Path:
     """Resolve the active project root.
 
     Prefer per-call workspace_root/project_path, then env, then config.toml,
-    then the user home. Never fall back to process cwd when that cwd is the
-    packaged Desktop install directory (sidecar launch cwd).
+    then a narrow owner folder (Documents/Remedy). Never fall back to the
+    packaged Desktop install cwd or the entire user profile.
     """
     if inp:
         for key in ("workspace_root", "project_path"):
             raw = str(inp.get(key) or "").strip()
             if raw and raw not in {".", "./"}:
                 try:
-                    return Path(raw).expanduser().resolve()
+                    cand = Path(raw).expanduser().resolve()
                 except OSError:
-                    return Path(raw).expanduser().absolute()
+                    cand = Path(raw).expanduser().absolute()
+                if not _is_user_home_path(cand) and not _looks_like_install_dir(cand):
+                    return cand
 
     for key in ("REMEDY_WORKSPACE", "REMEDY_PROJECT_PATH", "REMEDY_PROJECT", "REMEDY_FILES_ROOT"):
         raw = (os.environ.get(key) or "").strip()
         if raw and raw not in {".", "./"}:
             try:
-                return Path(raw).expanduser().resolve()
+                cand = Path(raw).expanduser().resolve()
             except OSError:
-                return Path(raw).expanduser().absolute()
+                cand = Path(raw).expanduser().absolute()
+            if not _is_user_home_path(cand) and not _looks_like_install_dir(cand):
+                return cand
 
     home = (os.environ.get("REMEDY_HOME") or "").strip()
     if home:
@@ -135,18 +139,35 @@ def _workspace_root(inp: Mapping[str, Any] | None = None) -> Path:
             val = val.replace("\\\\", "\\")
             if val and val not in {".", "./"}:
                 try:
-                    return Path(val).expanduser().resolve()
+                    cand = Path(val).expanduser().resolve()
                 except OSError:
-                    return Path(val).expanduser().absolute()
+                    cand = Path(val).expanduser().absolute()
+                if not _is_user_home_path(cand) and not _looks_like_install_dir(cand):
+                    return cand
 
     try:
         cwd = Path.cwd().resolve()
     except OSError:
         cwd = Path.cwd().absolute()
-    if not _looks_like_install_dir(cwd):
+    if not _looks_like_install_dir(cwd) and not _is_user_home_path(cwd):
         return cwd
 
-    # Narrow default — never the entire user profile.
+    return _default_owner_workspace()
+
+
+def _is_user_home_path(path: Path) -> bool:
+    try:
+        home = Path.home().expanduser().resolve()
+        return path.expanduser().resolve() == home
+    except OSError:
+        try:
+            return path.expanduser().absolute() == Path.home().expanduser().absolute()
+        except OSError:
+            return False
+
+
+def _default_owner_workspace() -> Path:
+    """Narrow default — never the entire user profile."""
     try:
         user_home = Path.home().expanduser().resolve()
     except OSError:
@@ -162,7 +183,16 @@ def _workspace_root(inp: Mapping[str, Any] | None = None) -> Path:
         fallback.mkdir(parents=True, exist_ok=True)
         return fallback.resolve()
     except OSError:
-        return user_home
+        # Never jail to the entire profile when both owner folders fail.
+        rem_home = (os.environ.get("REMEDY_HOME") or "").strip()
+        if rem_home:
+            try:
+                p = Path(rem_home).expanduser() / "workspace"
+                p.mkdir(parents=True, exist_ok=True)
+                return p.resolve()
+            except OSError:
+                pass
+        return docs
 
 
 def _resolve_workspace_path(path: str, inp: Mapping[str, Any] | None = None) -> Path:

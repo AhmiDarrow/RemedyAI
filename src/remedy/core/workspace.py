@@ -134,12 +134,26 @@ def is_forbidden_project_path(raw: str | Path | None) -> bool:
 def is_unset_project_path(raw: str | Path | None) -> bool:
     """True when the user has not chosen a real project folder.
 
-    Empty / missing / ``.`` / a volume root means “no project” — not cwd.
+    Empty / missing / ``.`` / a volume root / the entire user profile means
+    “no project” — not cwd. Profile-wide roots are too broad for agency tools.
     """
     if raw is None:
         return True
     text = str(raw).strip()
-    return not text or text in (".", "./") or is_volume_root_path(text)
+    if not text or text in (".", "./") or is_volume_root_path(text):
+        return True
+    try:
+        path = Path(text).expanduser().resolve()
+        home = Path.home().expanduser().resolve()
+        return path == home
+    except OSError:
+        try:
+            return (
+                Path(text).expanduser().absolute()
+                == Path.home().expanduser().absolute()
+            )
+        except OSError:
+            return False
 
 
 def resolve_project_path(raw: str | None, *, fallback: Path | None = None) -> Path:

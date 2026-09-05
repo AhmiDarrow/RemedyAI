@@ -201,13 +201,15 @@ func normalizeProjectPath(raw *string) *string {
 		return nil
 	}
 	trimmed := strings.TrimSpace(*raw)
-	if trimmed == "" || trimmed == "." || trimmed == "./" {
+	// Empty, ".", volume roots, and the entire user profile are not
+	// project folders — clear so turns fall back to Documents/Remedy.
+	if isUnsetProjectPath(trimmed) {
 		return nil
 	}
 	// filepath.Clean collapses accidental double-escaped separators
 	// (C:\\\\Users\\\\… → C:\Users\…) while preserving UNC prefixes.
 	cleaned := filepath.Clean(trimmed)
-	if cleaned == "" || cleaned == "." {
+	if isUnsetProjectPath(cleaned) {
 		return nil
 	}
 	return &cleaned
@@ -567,7 +569,7 @@ func scanSession(row scannable) (ChatSession, error) {
 	}
 	sess.Model = nullToPtr(model)
 	sess.Agent = nullToPtr(agent)
-	sess.ProjectPath = nullToPtr(projectPath)
+	sess.ProjectPath = normalizeProjectPath(nullToPtr(projectPath))
 	sess.LLMProvider = nullToPtr(llmProvider)
 	sess.OriginChannel = nullToPtr(origin)
 	sess.ExternalChatID = nullToPtr(extChat)

@@ -450,11 +450,14 @@ async def _apply_settings_update_inner(
         from remedy.core.workspace import (
             ensure_project_dir,
             is_forbidden_project_path,
+            is_unset_project_path,
             resolve_project_path,
         )
 
         raw_pp = str(patch["project_path"]).strip()
-        if raw_pp and raw_pp not in (".", "./"):
+        if is_unset_project_path(raw_pp):
+            patch["project_path"] = ""
+        elif raw_pp:
             resolved = resolve_project_path(raw_pp)
             # Check the raw string too — POSIX resolve of C:\Windows\… becomes
             # a junk relative path and would otherwise pass.

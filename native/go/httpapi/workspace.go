@@ -73,7 +73,7 @@ func (s *Server) sessionProjectPath(sessionID string) string {
 	if err != nil || !ok || sess.ProjectPath == nil {
 		return ""
 	}
-	return strings.TrimSpace(*sess.ProjectPath)
+	return effectiveTurnProjectPath(*sess.ProjectPath)
 }
 
 // resolveFilesBase picks the files-rail jail root (clamped off volume roots).
@@ -106,10 +106,7 @@ func (s *Server) resolveFilesBase(sessionID string) (base string, source string)
 		return clampFilesBase(owner), "owner_workspace"
 	}
 	cwd, _ := os.Getwd()
-	if isPackagedInstallDir(cwd) {
-		if uh := s.userHomeForWorkspace(); uh != "" {
-			return clampFilesBase(uh), "home"
-		}
+	if isPackagedInstallDir(cwd) || isUnsetProjectPath(cwd) {
 		return clampFilesBase(""), "unset"
 	}
 	return clampFilesBase(cwd), "cwd"
@@ -170,7 +167,7 @@ func listFileEntries(listed, base string) []fileEntry {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if strings.HasPrefix(name, ".") {
+		if strings.HasPrefix(name, ".") || isJunkListingName(name) {
 			continue
 		}
 		full := filepath.Join(listed, name)
@@ -466,7 +463,7 @@ func listWorkspaceEntries(root string, limit int) []workspaceEntry {
 	})
 	for _, d := range dirents {
 		name := d.Name()
-		if strings.HasPrefix(name, ".") {
+		if strings.HasPrefix(name, ".") || isJunkListingName(name) {
 			continue
 		}
 		if _, skip := workspaceSkipNames[name]; skip {

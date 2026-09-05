@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -169,12 +168,11 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 
 	projectPath := ""
 	if sess.ProjectPath != nil {
-		projectPath = strings.TrimSpace(*sess.ProjectPath)
-		if projectPath != "" {
-			projectPath = filepath.Clean(projectPath)
-		}
+		projectPath = effectiveTurnProjectPath(*sess.ProjectPath)
 	}
 	var reply strings.Builder
+	var collectedToolCalls []map[string]any
+	var collectedToolResults []map[string]any
 	lastTyping := time.Now()
 	turnErr := s.runner.RunTurn(runCtx, TurnRequest{
 		SessionID:   sess.ID,
@@ -183,6 +181,23 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 		Provider:    sess.LLMProvider,
 		ProjectPath: projectPath,
 	}, func(token string) error {
+		if strings.HasPrefix(token, "@@tool_call:") {
+			collectedToolCalls = append(collectedToolCalls, parseToolCallToken(token))
+			return nil
+		}
+		if strings.HasPrefix(token, "@@tool_result:") {
+			name, preview, ok := parseToolResultToken(token)
+			item := map[string]any{"name": name, "output": preview, "error": nil}
+			if !ok {
+				errMsg := preview
+				if errMsg == "" {
+					errMsg = "tool failed"
+				}
+				item["error"] = errMsg
+			}
+			collectedToolResults = append(collectedToolResults, item)
+			return nil
+		}
 		if strings.HasPrefix(token, "@@") {
 			return nil
 		}
@@ -198,11 +213,24 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 		log.Printf("messenger turn error: %v", turnErr)
 		return nil
 	}
+	hasTools := len(collectedToolCalls) > 0 || len(collectedToolResults) > 0
 	if text == "" {
-		text = "Processed."
+		if hasTools {
+			text = "*(Used tools — see process.)*"
+		} else {
+			text = "Processed."
+		}
 	}
 	if s.sessions != nil {
-		if _, err := s.sessions.AddMessage(sess.ID, "assistant", text, sess.Model, nil); err == nil {
+		var calls any = []any{}
+		var results any = []any{}
+		if len(collectedToolCalls) > 0 {
+			calls = collectedToolCalls
+		}
+		if len(collectedToolResults) > 0 {
+			results = collectedToolResults
+		}
+		if _, err := s.sessions.AddMessageFull(sess.ID, "assistant", text, nil, calls, results, sess.Model, nil, nil); err == nil {
 			if fresh, ok, _ := s.sessions.Get(sess.ID); ok {
 				title := fresh.Title
 				count := fresh.MessageCount

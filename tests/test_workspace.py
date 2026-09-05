@@ -20,7 +20,7 @@ from remedy.core.workspace import (
 )
 
 
-def test_unset_project_path_helpers():
+def test_unset_project_path_helpers(tmp_path, monkeypatch):
     assert is_unset_project_path(None)
     assert is_unset_project_path("")
     assert is_unset_project_path(".")
@@ -31,10 +31,18 @@ def test_unset_project_path_helpers():
     assert is_unset_project_path("/")
     assert not is_unset_project_path("C:/proj")
     assert not is_unset_project_path("/tmp/x")
+    # Entire user profile is too broad — treat like unset.
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    assert is_unset_project_path(fake_home)
+    assert is_unset_project_path(str(fake_home))
+    assert not is_unset_project_path(fake_home / "code")
     # Empty project → full access
     assert effective_access_scope("project", None) == "full"
     assert effective_access_scope("project", "") == "full"
     assert effective_access_scope("project", ".") == "full"
+    assert effective_access_scope("project", fake_home) == "full"
     assert effective_access_scope("home", "/real/proj") == "home"
     assert effective_access_scope("untrusted", "C:/code") == "untrusted"
 

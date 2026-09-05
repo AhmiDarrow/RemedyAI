@@ -406,10 +406,10 @@ func enrichWorkerEnv(env map[string]string, cwd string) {
 // Order: REMEDY_PROJECT_PATH → config.toml project_path → repo root (dev) →
 // ~/Documents/Remedy (or ~/.remedy/workspace) — not the entire user home.
 func resolveDefaultWorkspace(env map[string]string, start string) string {
-	if p := strings.TrimSpace(env["REMEDY_PROJECT_PATH"]); p != "" {
+	if p := strings.TrimSpace(env["REMEDY_PROJECT_PATH"]); p != "" && !isUserHomePath(p) && !looksLikeInstallDir(p) {
 		return p
 	}
-	if p := strings.TrimSpace(env["REMEDY_PROJECT"]); p != "" {
+	if p := strings.TrimSpace(env["REMEDY_PROJECT"]); p != "" && !isUserHomePath(p) && !looksLikeInstallDir(p) {
 		return p
 	}
 	home := strings.TrimSpace(env["REMEDY_HOME"])
@@ -417,7 +417,7 @@ func resolveDefaultWorkspace(env map[string]string, start string) string {
 		home = strings.TrimSpace(os.Getenv("REMEDY_HOME"))
 	}
 	if home != "" {
-		if p := projectPathFromConfig(home); p != "" && !looksLikeInstallDir(p) {
+		if p := projectPathFromConfig(home); p != "" && !looksLikeInstallDir(p) && !isUserHomePath(p) {
 			return p
 		}
 	}
@@ -431,6 +431,18 @@ func resolveDefaultWorkspace(env map[string]string, start string) string {
 		return start
 	}
 	return ""
+}
+
+func isUserHomePath(path string) bool {
+	p := filepath.Clean(strings.TrimSpace(path))
+	if p == "" {
+		return false
+	}
+	uh, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(uh) == "" {
+		return false
+	}
+	return strings.EqualFold(p, filepath.Clean(uh))
 }
 
 // defaultOwnerWorkspaceDir is a narrow folder for agency tools when no
