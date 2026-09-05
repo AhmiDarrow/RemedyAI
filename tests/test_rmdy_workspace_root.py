@@ -40,3 +40,31 @@ def test_workspace_root_prefers_config_over_install_cwd(
 
     assert w._workspace_root() == proj.resolve()
     assert w._workspace_root({"workspace_root": str(proj)}) == proj.resolve()
+
+
+def test_workspace_root_defaults_to_documents_remedy(
+    tmp_path: Path, monkeypatch
+) -> None:
+    install = tmp_path / "install"
+    install.mkdir()
+    (install / "remedy-runtime.exe").write_text("x", encoding="utf-8")
+    (install / "webui").mkdir()
+    (install / "windows").mkdir()
+
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.delenv("REMEDY_WORKSPACE", raising=False)
+    monkeypatch.delenv("REMEDY_PROJECT_PATH", raising=False)
+    monkeypatch.delenv("REMEDY_PROJECT", raising=False)
+    monkeypatch.delenv("REMEDY_FILES_ROOT", raising=False)
+    monkeypatch.delenv("REMEDY_HOME", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.chdir(install)
+
+    got = w._workspace_root()
+    assert got == (fake_home / "Documents" / "Remedy").resolve()
+
+
+def test_junk_listing_name_filters_private_use() -> None:
+    assert w._is_junk_listing_name("C\uf03a")
+    assert not w._is_junk_listing_name("src")

@@ -920,6 +920,9 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
         if let Some(ref lb) = local_bundle {
             c.env("REMEDY_LOCAL_BUNDLE", lb);
         }
+        if let Some(pyz) = resolve_rmdy_worker_pyz() {
+            c.env("REMEDY_RMDY_PYZ", pyz);
+        }
         c.spawn().ok()
     }
     #[cfg(not(target_os = "windows"))]
@@ -942,8 +945,44 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
         if let Some(ref lb) = local_bundle {
             c.env("REMEDY_LOCAL_BUNDLE", lb);
         }
+        if let Some(pyz) = resolve_rmdy_worker_pyz() {
+            c.env("REMEDY_RMDY_PYZ", pyz);
+        }
         c.spawn().ok()
     }
+}
+
+/// Locate the packaged RMDY zipapp for the Go sidecar (`REMEDY_RMDY_PYZ`).
+fn resolve_rmdy_worker_pyz() -> Option<PathBuf> {
+    if let Ok(existing) = env::var("REMEDY_RMDY_PYZ") {
+        let p = PathBuf::from(existing.trim());
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(res) = env::var("REMEDY_RESOURCES") {
+        candidates.push(PathBuf::from(res).join("rmdy_tool_worker.pyz"));
+    }
+    if let Ok(exe) = env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.extend([
+                dir.join("rmdy_tool_worker.pyz"),
+                dir.join("resources").join("rmdy_tool_worker.pyz"),
+                dir.join("bin").join("rmdy_tool_worker.pyz"),
+            ]);
+        }
+    }
+    // Dev: staged next to the checkout Desktop bin.
+    if let Ok(root) = env::var("REMEDY_DEV_ROOT") {
+        candidates.push(PathBuf::from(root).join("desktop").join("bin").join("rmdy_tool_worker.pyz"));
+    }
+    for c in candidates {
+        if c.is_file() {
+            return Some(c);
+        }
+    }
+    None
 }
 
 /// True if this sidecar line is routine traffic noise (not useful in the desktop log).

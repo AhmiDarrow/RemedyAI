@@ -1,10 +1,11 @@
-"""Stage Go remedy-runtime + Zig remedy_core for Desktop packaging.
+"""Stage Go remedy-runtime + Zig remedy_core + RMDY pyz for Desktop packaging.
 
 Packaged Desktop and local ``tauri build`` / ``tauri:dev`` need:
 
 * ``desktop/bin/remedy-runtime`` (+ Tauri target-triple copy) — ``externalBin``
 * ``desktop/bin/remedy_core.dll`` / ``libremedy_core.so`` / ``libremedy_core.dylib``
   — Tauri resource
+* ``desktop/bin/rmdy_tool_worker.pyz`` — Tauri resource (Python zipapp worker)
 
 Release CI (``desktop-release.yml``) builds the same artifacts inline. This
 script is the local equivalent so developers do not hand-copy binaries.
@@ -274,6 +275,21 @@ def build_zig_core() -> Path:
     return built
 
 
+def stage_rmdy_worker(*, build_if_missing: bool = True) -> Path:
+    """Build/copy ``rmdy_tool_worker.pyz`` into ``desktop/bin`` for Tauri resources."""
+    DESKTOP_BIN.mkdir(parents=True, exist_ok=True)
+    dest = DESKTOP_BIN / "rmdy_tool_worker.pyz"
+    builder = ROOT / "scripts" / "build_rmdy_worker.py"
+    if build_if_missing or not dest.is_file():
+        _run([sys.executable, str(builder), "--out", str(dest)], cwd=ROOT)
+    if not dest.is_file():
+        print(f"ERROR: RMDY worker zipapp missing at {dest}")
+        sys.exit(1)
+    size_mb = dest.stat().st_size / (1024 * 1024)
+    print(f"RMDY worker: {dest} ({size_mb:.1f} MB)")
+    return dest
+
+
 def stage_core(core_lib: str | Path | None = None, *, build_if_missing: bool = True) -> Path:
     """Copy the Zig core into ``desktop/bin`` for Tauri resources.
 
@@ -301,8 +317,9 @@ def build(
     core_lib: str | None = None,
     skip_runtime: bool = False,
     skip_core: bool = False,
+    skip_rmdy_worker: bool = False,
 ) -> None:
-    """Build and stage remedy-runtime + remedy_core into ``desktop/bin``."""
+    """Build and stage remedy-runtime + remedy_core + RMDY pyz into ``desktop/bin``."""
     print(f"Staging Desktop native artifacts… (root={ROOT})")
 
     v = sync_versions()
@@ -340,6 +357,11 @@ def build(
     else:
         print("Skipping Zig remedy_core (--skip-core)")
 
+    if not skip_rmdy_worker:
+        stage_rmdy_worker(build_if_missing=True)
+    else:
+        print("Skipping RMDY worker zipapp (--skip-rmdy-worker)")
+
     print(f"\nStaged under {DESKTOP_BIN}")
 
 
@@ -375,6 +397,11 @@ if __name__ == "__main__":
         help="Do not build Go remedy-runtime",
     )
     p.add_argument(
+        "--skip-rmdy-worker",
+        action="store_true",
+        help="Do not build/stage rmdy_tool_worker.pyz",
+    )
+    p.add_argument(
         "--skip-core",
         action="store_true",
         help="Do not build/stage Zig remedy_core",
@@ -387,6 +414,7 @@ if __name__ == "__main__":
         core_lib=args.core_lib,
         skip_runtime=args.skip_runtime,
         skip_core=args.skip_core,
+        skip_rmdy_worker=args.skip_rmdy_worker,
     )
 
     if args.stage:
