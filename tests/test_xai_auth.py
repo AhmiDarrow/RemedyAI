@@ -345,14 +345,10 @@ class TestSettingsIncludesXaiAuth:
             encoding="utf-8",
         )
         xai_auth.save_api_key("xai-visible", home=tmp_path)
-        from fastapi.testclient import TestClient
-
         from remedy.interfaces.api import create_app
 
-        client = TestClient(create_app())
-        r = client.get("/api/settings")
-        assert r.status_code == 200, r.text
-        data = r.json()
-        assert data.get("llm_provider") in ("demo", "xai") or "xai_auth" in data
-        assert "xai_auth" in data
-        assert data["xai_auth"].get("connected") is True
+        paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+        assert "/api/settings" not in paths
+        creds = xai_auth.load_credentials(home=tmp_path)
+        pub = creds.to_public_dict(home=tmp_path)
+        assert pub.get("connected") is True

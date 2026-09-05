@@ -152,7 +152,6 @@ class TestJailedAttachmentCallSites:
         "modname",
         [
             "remedy.interfaces.routes.sessions.messages",
-            "remedy.interfaces.routes.sessions.stream",
             "remedy.vision.service",
         ],
     )

@@ -202,11 +202,12 @@ def test_cors_preflight_options_not_blocked_by_auth(auth_on, tmp_path):
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
     client = TestClient(app)
+    # /api/providers* is Go-owned; exercise CORS on a remaining TestClient path.
     r = client.options(
-        "/api/providers/probe",
+        "/api/sessions",
         headers={
             "Origin": "http://tauri.localhost",
-            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Method": "GET",
             "Access-Control-Request-Headers": "authorization,content-type",
         },
     )

@@ -409,7 +409,6 @@ def test_checkpoint_yes_skips_and_does_not_press(tmp_path):
 
 def test_life_task_marker_roundtrip():
     from remedy.core.life_task_hub import build_card, life_task_marker, parse_life_task_token
-    from remedy.interfaces.routes.sessions.stream_tokens import parse_life_task_token as parse_sse
 
     card = build_card(
         goal="buy milk",
@@ -424,4 +423,3 @@ def test_life_task_marker_roundtrip():
     assert parsed["goal"] == "buy milk"
     assert parsed["spoken"].startswith("Step 2")
     assert "markdown" not in parsed
-    assert parse_sse(tok)["goal"] == "buy milk"

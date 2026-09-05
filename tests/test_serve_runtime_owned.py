@@ -288,15 +288,28 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "skills_library",
         "memory",
         "partner",
+        "catalog",
+        "claimidx_ops",
+        "auth",
+        "settings",
     ):
         assert not re.search(rf"\bregister_{mod}_routes\s*\(", routes_init)
         assert importlib.util.find_spec(f"remedy.interfaces.routes.{mod}") is None
+    # misc keeps /dashboard only; Go owns app/command + projects/scan.
+    assert re.search(r"\bregister_misc_routes\s*\(", routes_init)
+    assert importlib.util.find_spec("remedy.interfaces.routes.misc") is not None
     sessions_init = Path("src/remedy/interfaces/routes/sessions/__init__.py").read_text(
         encoding="utf-8"
     )
     assert "register_session_event_routes" not in sessions_init
+    assert "register_stream_routes" not in sessions_init
     assert (
         importlib.util.find_spec("remedy.interfaces.routes.sessions.legacy_chat")
+        is None
+    )
+    assert importlib.util.find_spec("remedy.interfaces.routes.sessions.stream") is None
+    assert (
+        importlib.util.find_spec("remedy.interfaces.routes.sessions.stream_tokens")
         is None
     )
     assert importlib.util.find_spec("remedy.core.computer.host_conpty") is None
@@ -313,6 +326,14 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/telephony/status",
         "/api/auth/xai",
         "/api/auth/xai/login",
+        "/api/providers",
+        "/api/providers/connected",
+        "/api/providers/free",
+        "/api/providers/ollama/detect",
+        "/api/settings",
+        "/api/diagnostics",
+        "/api/coordination/presence",
+        "/api/self-inject/rounds",
         "/api/assistant/status",
         "/api/assistant/google",
         "/api/memory/search",
@@ -330,6 +351,14 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/skills/library/search",
         "/api/skills/library/suggest",
         "/api/skills/library/updates",
+        "/api/models",
+        "/api/commands",
+        "/api/commands/custom",
+        "/api/agents",
+        "/api/agents/custom",
+        "/api/app/command",
+        "/api/openapi.json",
+        "/api/openapi.yaml",
         "/api/continuity/dashboard",
         "/api/nanoswarm/status",
         "/api/nanoswarm/token/status",
@@ -343,7 +372,6 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/approvals",
         "/api/plans",
         "/api/plans/latest",
-        "/api/app/command",
         "/api/projects/scan",
         "/api/sessions/s1/todos",
         "/api/sessions/s1/timeline",
@@ -387,7 +415,10 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/memory/import",
         "/api/partner/identity/export",
         "/api/partner/identity/import",
+        "/api/approvals/x/resolve",
         "/api/plans",
+        "/api/plans/p1/status",
+        "/api/plans/p1/steps/status",
         "/api/projects/scan",
         "/api/goals",
         "/api/life-tasks/act",
@@ -413,14 +444,22 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/voice/install",
         "/api/voice/client-log",
         "/api/sessions/import",
+        "/api/sessions/s1/messages/stream",
         "/api/skills/library/install",
         "/api/skills/library/suggest/dismiss",
         "/api/skills/library/submit",
         "/api/skills/library/update/alpha",
         "/api/skills/export",
+        "/api/providers/custom",
+        "/api/providers/probe",
+        "/api/settings",
+        "/api/sessions/s1/command",
     ):
         r = client.post(path, json={})
         assert _absent(r.status_code), f"{path} still registered ({r.status_code})"
+
+    assert _absent(client.put("/api/settings", json={}).status_code)
+    assert _absent(client.delete("/api/providers/custom/custom-x").status_code)
 
 def test_rmdy_tool_worker_entry_still_present() -> None:
     spec = importlib.util.find_spec("remedy.runtime.rmdy_tool_worker")

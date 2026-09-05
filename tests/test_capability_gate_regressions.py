@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi.testclient import TestClient
 
 from remedy.core.approvals import ApprovalQueue
 from remedy.core.build_mutant import mutant_kill_score
@@ -132,14 +131,18 @@ def test_autonomous_still_waives_high_impact_ask_in_a_trusted_project(
 # undefined and wrote "balanced" over a saved profile on the next save.
 
 
-def test_settings_get_emits_trust_profile() -> None:
-    client = TestClient(create_app())
-    body = client.get("/api/settings").json()
+def test_settings_snapshot_emits_trust_profile() -> None:
+    """Go owns GET /api/settings; Python snapshot must still round-trip the key."""
+    from remedy.interfaces.settings_apply import public_settings_snapshot
+
+    body = public_settings_snapshot({"setup_completed": True, "trust_profile": "autonomous"})
     assert "trust_profile" in body, (
-        "GET /api/settings omits trust_profile; the Settings panel will read it "
+        "settings snapshot omits trust_profile; the Settings panel will read it "
         "as undefined and write balanced back over the owner's saved profile"
     )
     assert body["trust_profile"] in ("conservative", "balanced", "autonomous")
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    assert "/api/settings" not in paths
 
 
 # --- build_mutant: a mutant row names the file that was mutated --------------

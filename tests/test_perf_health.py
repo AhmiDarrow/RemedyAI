@@ -79,46 +79,32 @@ def test_get_status_light_skips_catalog_and_health(tmp_path: Path):
     assert status.get("health") is None
 
 
-def test_settings_includes_light_vision(tmp_path: Path, monkeypatch):
-    """GET /settings must not hang on vision HTTP health."""
+def test_settings_snapshot_includes_light_vision(tmp_path: Path, monkeypatch):
+    """Settings snapshot must not hang on vision HTTP health (Go owns GET)."""
+    from remedy.interfaces.settings_apply import public_settings_snapshot
+
     home = tmp_path / "home"
     home.mkdir()
-    cfg = home / "config.toml"
-    cfg.write_text(
-        'name = "Remedy"\nsetup_completed = true\nllm_provider = "openai"\n'
-        f'home_dir = "{home.as_posix()}"\n',
-        encoding="utf-8",
-    )
     monkeypatch.setenv("REMEDY_HOME", str(home))
-    # Bypass auth for route exercise
-    app = create_app(api_key=None)
-    client = TestClient(app)
-    with patch("remedy.interfaces.routes.settings.load_config") as lc:
-        lc.return_value = {
-            "name": "Remedy",
-            "setup_completed": True,
-            "llm_provider": "openai",
-            "llm_model": "gpt-4o-mini",
-            "llm_base_url": "https://api.openai.com/v1",
-            "home_dir": str(home),
-            "vision": {"enabled": True, "model_id": "smolvlm2-2.2b"},
-        }
-        with patch(
-            "remedy.interfaces.routes.settings._find_config_path",
-            return_value=cfg,
-        ):
-            with patch(
-                "remedy.vision.service.is_running",
-                return_value=False,
-            ):
-                t0 = time.perf_counter()
-                r = client.get("/api/settings")
-                ms = (time.perf_counter() - t0) * 1000
-    assert r.status_code == 200
-    body = r.json()
-    assert "vision" in body
-    assert body["vision"]["enabled"] is True
-    assert ms < 2000, f"/api/settings took {ms:.0f}ms"
+    with patch("remedy.vision.service.is_running", return_value=False):
+        t0 = time.perf_counter()
+        body = public_settings_snapshot(
+            {
+                "name": "Remedy",
+                "setup_completed": True,
+                "llm_provider": "openai",
+                "llm_model": "gpt-4o-mini",
+                "llm_base_url": "https://api.openai.com/v1",
+                "home_dir": str(home),
+                "vision": {"enabled": True, "model_id": "smolvlm2-2.2b"},
+            }
+        )
+        ms = (time.perf_counter() - t0) * 1000
+    assert body["vision_enabled"] is True
+    assert body["vision_model_id"] == "smolvlm2-2.2b"
+    assert ms < 2000, f"settings snapshot took {ms:.0f}ms"
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    assert "/api/settings" not in paths
 
 
 def test_secret_load_skips_repeated_harden(tmp_path: Path, monkeypatch):
@@ -156,24 +142,39 @@ def test_provider_keys_cache_hit(tmp_path: Path, monkeypatch):
 
 
 def test_connected_providers_fast_without_ollama(tmp_path: Path, monkeypatch):
-    """GET /providers/connected must not burn a 1.5s Ollama timeout on the loop."""
+    """Connected classification must not burn a 1.5s Ollama timeout (Go owns HTTP)."""
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    from remedy.interfaces.config import (
+        classify_provider_connection,
+        detect_ollama,
+        public_provider_catalog,
+    )
     from remedy.interfaces.model_discovery import invalidate_ollama_detect_cache
 
     invalidate_ollama_detect_cache()
-    app = create_app(api_key=None)
-    client = TestClient(app)
     t0 = time.perf_counter()
-    r = client.get("/api/providers/connected")
+    ollama = detect_ollama()
+    catalog = public_provider_catalog({})
+    items = []
+    for p in catalog:
+        connected, reason = classify_provider_connection(
+            p["id"],
+            cfg={},
+            keys={},
+            keys_set={},
+            ollama_available=bool(ollama.get("available")),
+            xai_connected=False,
+        )
+        items.append({**p, "connected": connected, "connect_reason": reason})
     ms = (time.perf_counter() - t0) * 1000
-    assert r.status_code == 200
-    body = r.json()
-    ids = {p["id"] for p in body.get("providers") or []}
+    ids = {p["id"] for p in items}
     assert "demo" in ids
-    demo = next(p for p in body["providers"] if p["id"] == "demo")
+    demo = next(p for p in items if p["id"] == "demo")
     assert demo["connected"] is True
     # Closed Ollama + cache/precheck should be tens of ms, not ~1500.
-    assert ms < 800, f"/api/providers/connected took {ms:.0f}ms"
+    assert ms < 800, f"connected providers classify took {ms:.0f}ms"
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    assert "/api/providers/connected" not in paths
 
 
 

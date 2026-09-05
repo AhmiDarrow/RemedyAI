@@ -14,7 +14,9 @@ Not registered here (Go owns production):
 - ``/api/computer/*`` host bridge / jobs / capture / a11y
 - ``/api/hive/*`` hive roster / spawn / assign / retire
 - ``/api/events/sessions`` session SSE
-- ``/api/chat`` and ``/api/chat/stream`` (legacy; sessions stream owns chat)
+- ``/api/chat`` and ``/api/chat/stream`` (legacy)
+- ``/api/sessions/{id}/messages/stream`` and ``/api/sessions/{id}/steer``
+  (Go CognitionTurnRunner / httpapi)
 - ``/api/terminal*`` ConPTY SSE terminal (phone / web rails)
 - ``/api/rmb/*`` local model host (start/stop/settings/use/HF)
 - ``/api/voice/*`` speak / hear / install / settings
@@ -23,17 +25,19 @@ Not registered here (Go owns production):
 - ``/api/memory/*`` search / facts / persona-wipe
 - ``/api/skills*`` list / detail / status / packs / library / delete
 - ``/api/partner/*``, ``/api/approvals*``, ``/api/plans*``
-- ``/api/app/command``, ``/api/projects/scan``, ``/api/updates/check``
+- ``/api/models``, ``/api/commands``, ``/api/agents``, session ``/command``
+- ``/api/providers*`` catalog / connected / free / custom / probe / ollama
+- ``/api/settings`` GET/PUT
+- ``/api/diagnostics``, ``/api/coordination/presence``, ``/api/self-inject/rounds``
+- ``/api/app/command``, ``/api/projects/scan``
+  (ping/status/turn-active keep TestClient stubs only; misc keeps /dashboard)
 """
 from __future__ import annotations
 
 from fastapi import FastAPI
 
-from remedy.interfaces.routes.auth import register_auth_routes
-from remedy.interfaces.routes.catalog import register_catalog_routes
 from remedy.interfaces.routes.misc import register_misc_routes
 from remedy.interfaces.routes.sessions import register_sessions_routes
-from remedy.interfaces.routes.settings import register_settings_routes
 from remedy.interfaces.routes.status import register_status_routes
 
 
@@ -48,10 +52,9 @@ def register_all_routes(
     kw = {"runtime": runtime, "gateway": gateway, "memory": memory}
     register_status_routes(app, **kw)
     register_sessions_routes(app, **kw)
-    register_catalog_routes(app, **kw)
-    register_settings_routes(app, **kw)
-    register_auth_routes(app, **kw)
-    # No register_i18n/usage/vision/telephony/webhook/connect/nanoswarm/assistant/
-    # computer/hive/session_events/chat/terminal/rmb/voice/workspace/skills_library/
-    # memory/partner — Go owns those. misc keeps TestClient openapi + /dashboard only.
+    # No register_auth/settings/catalog/memory/partner/i18n/usage/vision/
+    # telephony/webhook/connect/nanoswarm/assistant/computer/hive/
+    # session_events/chat/terminal/rmb/voice/workspace/skills_library or
+    # sessions stream/steer — Go owns those (status keeps TestClient stubs;
+    # misc keeps /dashboard only).
     register_misc_routes(app, **kw)

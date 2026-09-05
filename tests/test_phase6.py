@@ -440,7 +440,7 @@ class TestAPIStatus:
         assert "version" in data
 
     def test_legacy_chat_routes_absent(self, test_client):
-        """Legacy /api/chat* dropped from TestClient; sessions stream owns chat."""
+        """Legacy /api/chat* dropped from TestClient; Go owns session stream."""
         assert test_client.post("/api/chat", json={"message": "hello"}).status_code in (
             404,
             405,
@@ -449,16 +449,10 @@ class TestAPIStatus:
             "/api/chat/stream", json={"message": "hello"}
         ).status_code in (404, 405)
 
-    def test_openapi_json(self, test_client):
-        r = test_client.get("/api/openapi.json")
-        assert r.status_code == 200
-        schema = r.json()
-        assert schema["info"]["title"] == "Test Remedy"
-
-    def test_openapi_yaml(self, test_client):
-        r = test_client.get("/api/openapi.yaml")
-        assert r.status_code == 200
-        assert "title: Test Remedy" in r.text
+    def test_openapi_export_routes_absent(self, test_client):
+        """Leftover /api/openapi.* FastAPI exports dropped with misc registrar."""
+        assert test_client.get("/api/openapi.json").status_code in (404, 405)
+        assert test_client.get("/api/openapi.yaml").status_code in (404, 405)
 
     def test_dashboard_html(self, test_client):
         r = test_client.get("/dashboard")

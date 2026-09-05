@@ -1,4 +1,9 @@
-"""Session message SSE contract (desktop path)."""
+"""Session stream HTTP is Go-owned; keep TestClient CRUD/message guards.
+
+Production ``POST /api/sessions/{id}/messages/stream`` lives in
+``native/go/httpapi`` (``stream.go`` / ``stream_test.go``) via
+CognitionTurnRunner. The FastAPI twin is gone.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +18,7 @@ from remedy.memory.store import MemoryStore
 
 
 class _StreamRuntime:
-    """Minimal runtime that yields controlled stream events."""
+    """Minimal runtime stub for non-stream session route guards."""
 
     def __init__(self):
         self.skills = type("R", (), {"count": 0, "skills": []})()
@@ -29,70 +34,6 @@ class _StreamRuntime:
     ) -> AsyncIterator[str]:
         yield "Hello "
         yield "world"
-
-
-class _L0Runtime:
-    """Simulates agent L0 short-circuit without a provider key."""
-
-    def __init__(self):
-        self.skills = type(
-            "R",
-            (),
-            {
-                "count": 2,
-                "list_skills": staticmethod(lambda: ["change-safety", "project-etiquette"]),
-                "skills": [],
-            },
-        )()
-        self._llm_provider = "xai"
-        self._llm_model = "grok-test"
-        self._streaming_sessions: set[str] = set()
-        self._session_id = None
-        self.config = type("C", (), {"home_dir": None, "llm_provider": "xai", "llm_model": "grok-test"})()
-
-    async def stream_response(
-        self,
-        message: str,
-        session_id: str | None = None,
-        model: str | None = None,
-        attachments: list | None = None,
-        **kwargs,
-    ) -> AsyncIterator[str]:
-        from remedy.core.metabolism.l0 import try_l0_system_reply
-        from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
-
-        if (
-            not attachments
-            and classify_turn_tier(message or "", tools_enabled=False)
-            == TurnTier.L0_INSTANT
-        ):
-            l0 = try_l0_system_reply(self, message or "", preclassified=True)
-            if l0:
-                yield l0
-                return
-        yield (
-            "[LLM not connected — no API key. "
-            "Open Settings, enter your provider key, Save, then resend.]\n"
-        )
-
-
-class _AbortRuntime:
-    """Yields a token then cooperative abort."""
-
-    def __init__(self):
-        self.skills = type("R", (), {"count": 0, "skills": []})()
-        self._streaming_sessions: set[str] = set()
-
-    async def stream_response(
-        self,
-        message: str,
-        session_id: str | None = None,
-        model: str | None = None,
-        attachments: list | None = None,
-        **kwargs,
-    ) -> AsyncIterator[str]:
-        yield "partial "
-        yield "@@aborted\n"
 
 
 def _make_store(tmp_path: Path) -> MemoryStore:
@@ -125,99 +66,13 @@ def _create_session(client: TestClient) -> str:
     return str(sid)
 
 
-def test_create_session_and_stream(tmp_path: Path):
-    store = _make_store(tmp_path)
-    rt = _StreamRuntime()
-    app = create_app(runtime=rt, memory=store, api_key="")
-    with TestClient(app) as client:
-        sid = _create_session(client)
-        with client.stream(
-            "POST",
-            f"/api/sessions/{sid}/messages/stream",
-            json={"message": "hi"},
-        ) as resp:
-            assert resp.status_code == 200
-            body = "".join(resp.iter_text())
-        assert "Hello" in body or "world" in body or "event:" in body or len(body) > 0
-
-
-def test_l0_list_skills_streams_without_api_key(tmp_path: Path, monkeypatch):
-    """L0 instant (list skills) must not  error when no provider key is set."""
-    monkeypatch.setattr(
-        "remedy.interfaces.api_support._sync_runtime_llm_from_config",
-        lambda *a, **k: "",
-    )
-    store = _make_store(tmp_path)
-    rt = _L0Runtime()
-    app = create_app(runtime=rt, memory=store, api_key="")
-    with TestClient(app) as client:
-        sid = _create_session(client)
-        with client.stream(
-            "POST",
-            f"/api/sessions/{sid}/messages/stream",
-            json={"message": "list my skills"},
-        ) as resp:
-            assert resp.status_code == 200
-            body = "".join(resp.iter_text())
-    assert "event: error" not in body or "no API key" not in body
-    assert "Installed skills" in body or "change-safety" in body
-    assert "event: done" in body
-
-
-def test_l0_model_streams_without_api_key(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(
-        "remedy.interfaces.api_support._sync_runtime_llm_from_config",
-        lambda *a, **k: "",
-    )
-    store = _make_store(tmp_path)
-    rt = _L0Runtime()
-    app = create_app(runtime=rt, memory=store, api_key="")
-    with TestClient(app) as client:
-        sid = _create_session(client)
-        with client.stream(
-            "POST",
-            f"/api/sessions/{sid}/messages/stream",
-            json={"message": "what model am I using?"},
-        ) as resp:
-            assert resp.status_code == 200
-            body = "".join(resp.iter_text())
-    assert "Provider" in body or "Model" in body or "grok-test" in body
-    assert "event: done" in body
-
-
-def test_stream_aborted_event_not_error(tmp_path: Path, monkeypatch):
-    """Cooperative @@aborted must emit event:aborted, not event:error."""
-    monkeypatch.setattr(
-        "remedy.interfaces.api_support._sync_runtime_llm_from_config",
-        lambda *a, **k: "fake-key",
-    )
-    store = _make_store(tmp_path)
-    rt = _AbortRuntime()
-    app = create_app(runtime=rt, memory=store, api_key="")
-    with TestClient(app) as client:
-        sid = _create_session(client)
-        with client.stream(
-            "POST",
-            f"/api/sessions/{sid}/messages/stream",
-            json={"message": "hi"},
-        ) as resp:
-            assert resp.status_code == 200
-            body = "".join(resp.iter_text())
-    assert "event: aborted" in body
-    assert "Generation stopped" in body
-    assert "claim_epoch" in body
-    # Must not paint Stop as a hard stream error
-    assert '"type": "error"' not in body or "Generation stopped" not in body.split(
-        "event: error"
-    )[0] if "event: error" in body else True
-    # Prefer no error event at all for pure abort
-    if "event: error" in body:
-        # Tolerate metrics-only; generation-stopped must not be under error
-        err_idx = body.find("event: error")
-        assert "Generation stopped" not in body[err_idx : err_idx + 200]
+def test_session_stream_http_absent_from_testclient():
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    assert "/api/sessions/{session_id}/messages/stream" not in paths
 
 
 def test_stream_missing_session_is_404(tmp_path: Path):
+    """Absent FastAPI twin → unmatched path (404/405), not a Python 404 body."""
     store = _make_store(tmp_path)
     rt = _StreamRuntime()
     app = create_app(runtime=rt, memory=store, api_key="")
@@ -226,7 +81,7 @@ def test_stream_missing_session_is_404(tmp_path: Path):
             "/api/sessions/does-not-exist/messages/stream",
             json={"message": "hi"},
         )
-        assert r.status_code == 404
+        assert r.status_code in (404, 405)
 
 
 def test_sync_send_missing_session_is_404(tmp_path: Path):
@@ -303,26 +158,3 @@ def test_delete_releases_stream_claim(tmp_path: Path):
         from remedy.core.turn_context import release_session_stream_claim
 
         release_session_stream_claim(sid)
-
-
-def test_sse_keepalive_pings_while_the_inner_generator_is_blocked() -> None:
-    from remedy.interfaces.routes.sessions.stream import (
-        SSE_KEEPALIVE_COMMENT,
-        iter_sse_with_keepalive,
-    )
-
-    async def _slow() -> AsyncIterator[str]:
-        yield "event: start\n\n"
-        await asyncio.sleep(0.16)
-        yield "event: done\n\n"
-
-    async def _drain() -> list[str]:
-        out: list[str] = []
-        async for chunk in iter_sse_with_keepalive(_slow(), interval_s=0.05):
-            out.append(chunk)
-        return out
-
-    chunks = asyncio.run(_drain())
-    assert chunks[0].startswith("event: start")
-    assert chunks[-1].startswith("event: done")
-    assert SSE_KEEPALIVE_COMMENT in chunks

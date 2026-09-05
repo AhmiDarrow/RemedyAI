@@ -193,68 +193,7 @@ def test_calendar_cancel_and_mail_disconnect_are_owner_checkpoints(monkeypatch) 
         APPROVALS.set_mode(prev)
 
 
-def test_models_get_refuses_stored_key_to_foreign_host(monkeypatch) -> None:
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-
-    import remedy.interfaces.routes.catalog as catalog_mod
-    from remedy.interfaces.routes.catalog import register_catalog_routes
-
-    monkeypatch.setattr(
-        catalog_mod,
-        "load_config",
-        lambda: {
-            "llm_provider": "openai",
-            "llm_base_url": "https://api.openai.com/v1",
-        },
-    )
-    monkeypatch.setattr(
-        "remedy.interfaces.config.resolve_provider_api_key",
-        lambda cfg, provider: "sk-not-a-real-key-for-tests",
-    )
-    app = FastAPI()
-    register_catalog_routes(app, runtime=None, gateway=None, memory=None)
-    r = TestClient(app).get(
-        "/api/models",
-        params={"provider": "openai", "base_url": "http://127.0.0.1:9/v1"},
-    )
-    assert r.status_code == 200
-    body = r.json()
-    assert body.get("models") == []
-    assert "Refused" in str(body.get("error") or "")
-
-
-def test_models_get_refuses_active_foreign_host_while_listing_other_provider(
-    monkeypatch,
-) -> None:
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-
-    import remedy.interfaces.routes.catalog as catalog_mod
-    from remedy.interfaces.routes.catalog import register_catalog_routes
-
-    monkeypatch.setattr(
-        catalog_mod,
-        "load_config",
-        lambda: {
-            "llm_provider": "custom",
-            "llm_base_url": "http://127.0.0.1:9/v1",
-        },
-    )
-    monkeypatch.setattr(
-        "remedy.interfaces.config.resolve_provider_api_key",
-        lambda cfg, provider: "sk-not-a-real-key-for-tests",
-    )
-    app = FastAPI()
-    register_catalog_routes(app, runtime=None, gateway=None, memory=None)
-    r = TestClient(app).get(
-        "/api/models",
-        params={"provider": "openai", "base_url": "http://127.0.0.1:9/v1"},
-    )
-    assert r.status_code == 200
-    body = r.json()
-    assert body.get("models") == []
-    assert "Refused" in str(body.get("error") or "")
+# test_models_get_refuses_*: /api/models HTTP is Go-owned (providers_test.go).
 
 
 def test_synthesize_standard_quality_skips_chatterbox_even_if_ready(

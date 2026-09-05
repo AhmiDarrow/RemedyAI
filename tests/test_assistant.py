@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from fastapi.testclient import TestClient
 
 from remedy.assistant.disclaimer import MONEY_DISCLAIMER_SHORT
 from remedy.assistant.store import (
@@ -82,7 +81,7 @@ def test_get_assistant_store_rebinds_home(tmp_path):
     assert s1b.get_prefs().timezone == "UTC"
 
 
-def test_settings_get_includes_assistant(tmp_path, monkeypatch):
+def test_settings_http_absent_and_assistant_store_public(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     (home / "config.toml").write_text(
@@ -95,17 +94,16 @@ def test_settings_get_includes_assistant(tmp_path, monkeypatch):
     monkeypatch.setattr(api_support, "_default_config_path", lambda: home / "config.toml")
     monkeypatch.setattr(api_support, "_find_config_path", lambda: home / "config.toml")
     reset_assistant_store()
-    client = TestClient(create_app())
-    r = client.get("/api/settings")
-    assert r.status_code == 200
-    data = r.json()
-    assert "assistant" in data
-    assert isinstance(data["assistant"], dict)
-    assert "providers_planned" in data["assistant"]
-    assert data["assistant"].get("enabled") is True
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    assert "/api/settings" not in paths
+    pub = get_assistant_store(home).public_status()
+    assert isinstance(pub, dict)
+    assert "providers_planned" in pub
+    assert pub.get("enabled") is True
 
 
-def test_settings_put_assistant_prefs(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_settings_apply_assistant_prefs(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     (home / "config.toml").write_text(
@@ -114,33 +112,28 @@ def test_settings_put_assistant_prefs(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("REMEDY_HOME", str(home))
     from remedy.interfaces import api_support
+    from remedy.interfaces.settings_apply import apply_settings_update
 
     monkeypatch.setattr(api_support, "_default_config_path", lambda: home / "config.toml")
     monkeypatch.setattr(api_support, "_find_config_path", lambda: home / "config.toml")
     reset_assistant_store()
-    client = TestClient(create_app())
-    r = client.put(
-        "/api/settings",
-        json={
+    await apply_settings_update(
+        {
             "assistant": {
                 "enabled": True,
                 "money_disclaimer_accepted": True,
                 "brief": {"enabled": True, "hour_local": 9, "include_budget": True},
             }
-        },
+        }
     )
-    assert r.status_code == 200, r.text
     reset_assistant_store()
     store = get_assistant_store(home)
     prefs = store.get_prefs()
     assert prefs.money_disclaimer_accepted is True
     assert prefs.brief.enabled is True
     assert prefs.brief.hour_local == 9
-    # File on disk
     raw = json.loads((home / "assistant.json").read_text(encoding="utf-8"))
     assert raw["prefs"]["money_disclaimer_accepted"] is True
-
-    r2 = client.get("/api/settings")
-    assert r2.status_code == 200
-    assert r2.json()["assistant"]["money_disclaimer_accepted"] is True
-    assert r2.json()["assistant"]["brief"]["hour_local"] == 9
+    pub = store.public_status()
+    assert pub["money_disclaimer_accepted"] is True
+    assert pub["brief"]["hour_local"] == 9
