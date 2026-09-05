@@ -11,6 +11,8 @@ Not registered here (Go owns production):
 - ``/api/vision/*`` local visual decoder REST
 - ``/api/telephony/*`` phone line status / terms / choose
 - ``/api/assistant/*`` (google OAuth + status)
+- ``/api/hive/*`` hive roster / spawn / assign / retire
+- ``/api/chat`` and ``/api/chat/stream`` (legacy; sessions stream owns chat)
 """
 from __future__ import annotations
 
@@ -18,9 +20,7 @@ from fastapi import FastAPI
 
 from remedy.interfaces.routes.auth import register_auth_routes
 from remedy.interfaces.routes.catalog import register_catalog_routes
-from remedy.interfaces.routes.chat import register_chat_routes
 from remedy.interfaces.routes.computer import register_computer_routes
-from remedy.interfaces.routes.hive import register_hive_routes
 from remedy.interfaces.routes.memory import register_memory_routes
 from remedy.interfaces.routes.misc import register_misc_routes
 from remedy.interfaces.routes.partner import register_partner_routes
@@ -44,7 +44,6 @@ def register_all_routes(
     """Attach TestClient HTTP routes to *app* (not production :7400)."""
     kw = {"runtime": runtime, "gateway": gateway, "memory": memory}
     register_status_routes(app, **kw)
-    register_chat_routes(app, **kw)
     register_sessions_routes(app, **kw)
     register_catalog_routes(app, **kw)
     register_memory_routes(app, **kw)
@@ -55,10 +54,9 @@ def register_all_routes(
     register_auth_routes(app, **kw)
     register_partner_routes(app, **kw)
     register_computer_routes(app, **kw)
-    # No register_i18n/usage/vision/telephony/webhook/connect/nanoswarm/assistant —
-    # Go remedy-runtime owns those.
+    # No register_i18n/usage/vision/telephony/webhook/connect/nanoswarm/assistant/hive/chat —
+    # Go remedy-runtime owns those (legacy /api/chat* dropped from TestClient).
     register_misc_routes(app, **kw)
     register_voice_routes(app, **kw)
     register_rmb_routes(app, **kw)
-    register_hive_routes(app, **kw)
     register_terminal_routes(app)

@@ -1,6 +1,7 @@
-"""TestClient-only: RMB (local llama.cpp chat host) REST routes.
+"""TestClient-only: RMB start/settings/use REST routes.
 
 Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+HF catalog/search/pull/progress and status/stop/catalog live on Go httpapi only.
 """
 
 from __future__ import annotations
@@ -90,42 +91,8 @@ class RmbSettingsPatch(BaseModel):
     model_draft: str | None = None
 
 
-class RmbHfQuery(BaseModel):
-    query: str = Field(..., min_length=1, max_length=500)
-
-
-class RmbHfFilesQuery(BaseModel):
-    repo: str = Field(..., min_length=3, max_length=200)
-    revision: str | None = None
-
-
-class RmbHfPull(BaseModel):
-    query: str | None = Field(default=None, max_length=500)
-    repo: str | None = Field(default=None, max_length=200)
-    filename: str | None = Field(default=None, max_length=300)
-    revision: str | None = None
-    url: str | None = Field(default=None, max_length=800)
-    expected_size: int | None = None
-    load: bool = True
-
-
 def register_rmb_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
-    """Register /api/rmb/* routes."""
-
-    @app.get("/api/rmb/status")
-    async def rmb_status() -> dict[str, Any]:
-        import asyncio
-
-        from remedy.runtime.rmb.service import get_rmb_status
-
-        cfg = load_config()
-        return await asyncio.to_thread(get_rmb_status, cfg)
-
-    @app.get("/api/rmb/catalog")
-    async def rmb_catalog() -> dict[str, Any]:
-        from remedy.runtime.rmb.catalog import catalog_public
-
-        return catalog_public()
+    """Register TestClient /api/rmb/{start,settings,use} (HF/status/catalog/stop on Go)."""
 
     def _refuse_if_streaming() -> None:
         from remedy.core.turn_context import any_stream_claimed
@@ -156,16 +123,6 @@ def register_rmb_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
             wait_s=120.0,
             clear_user_stopped=True,
         )
-
-    @app.post("/api/rmb/stop")
-    async def rmb_stop() -> dict[str, Any]:
-        import asyncio
-
-        from remedy.runtime.rmb.service import stop_rmb_server
-
-        cfg = load_config()
-        home = cfg.get("home_dir") if isinstance(cfg, dict) else None
-        return await asyncio.to_thread(stop_rmb_server, home_dir=home)
 
     @app.post("/api/rmb/settings")
     async def rmb_settings(body: RmbSettingsPatch) -> dict[str, Any]:
@@ -316,80 +273,3 @@ def register_rmb_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
         except Exception:
             logger.exception("RMB use-as-provider live reconfigure failed")
         return {"status": st, "start": start, "runtime_applied": runtime is not None}
-
-    @app.post("/api/rmb/hf/search")
-    async def rmb_hf_search(body: RmbHfQuery) -> dict[str, Any]:
-        """Resolve a name / repo / Hugging Face URL into the next choice list."""
-        import asyncio
-
-        from remedy.runtime.rmb.hf import HfError, resolve_query
-
-        try:
-            return await asyncio.to_thread(resolve_query, body.query)
-        except HfError as exc:
-            return {"ok": False, "error": str(exc), "repos": [], "files": []}
-
-    @app.post("/api/rmb/hf/files")
-    async def rmb_hf_files(body: RmbHfFilesQuery) -> dict[str, Any]:
-        """List .gguf files in a Hugging Face model repo."""
-        import asyncio
-
-        from remedy.runtime.rmb.hf import HfError, list_gguf_files, sanitize_repo
-
-        try:
-            repo = sanitize_repo(body.repo)
-            files = await asyncio.to_thread(
-                list_gguf_files, repo, revision=body.revision
-            )
-            return {"ok": True, "repo": repo, "files": files}
-        except HfError as exc:
-            return {"ok": False, "error": str(exc), "files": []}
-
-    @app.post("/api/rmb/hf/pull")
-    async def rmb_hf_pull(body: RmbHfPull) -> dict[str, Any]:
-        """Download a GGUF into ~/.remedy/rmb/models/ (background)."""
-        import asyncio
-
-        from remedy.runtime.rmb.hf import HfError, parse_hf_hint, start_pull
-
-        cfg = load_config()
-        home = cfg.get("home_dir") if isinstance(cfg, dict) else None
-        repo = body.repo
-        filename = body.filename
-        revision = body.revision
-        url = body.url
-        raw = (body.query or url or "").strip()
-        if raw and (not repo or not filename):
-            try:
-                hint = parse_hf_hint(raw)
-            except HfError as exc:
-                return {"ok": False, "error": str(exc)}
-            repo = repo or hint.repo
-            filename = filename or hint.filename
-            revision = revision or hint.revision
-            url = url or hint.url
-        try:
-            return await asyncio.to_thread(
-                start_pull,
-                repo=repo,
-                filename=filename,
-                revision=revision,
-                url=url,
-                home_dir=home,
-                expected_size=int(body.expected_size or 0),
-                load=bool(body.load),
-            )
-        except HfError as exc:
-            return {"ok": False, "error": str(exc)}
-
-    @app.get("/api/rmb/hf/progress")
-    async def rmb_hf_progress() -> dict[str, Any]:
-        from remedy.runtime.rmb.hf import progress_snapshot
-
-        return {"ok": True, "progress": progress_snapshot()}
-
-    @app.post("/api/rmb/hf/cancel")
-    async def rmb_hf_cancel() -> dict[str, Any]:
-        from remedy.runtime.rmb.hf import cancel_pull
-
-        return cancel_pull()

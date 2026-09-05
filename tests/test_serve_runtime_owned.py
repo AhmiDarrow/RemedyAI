@@ -277,9 +277,15 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "telephony",
         "nanoswarm",
         "assistant",
+        "hive",
+        "chat",
     ):
         assert not re.search(rf"\bregister_{mod}_routes\s*\(", routes_init)
         assert importlib.util.find_spec(f"remedy.interfaces.routes.{mod}") is None
+    assert (
+        importlib.util.find_spec("remedy.interfaces.routes.sessions.legacy_chat")
+        is None
+    )
 
     client = TestClient(create_app(api_key=""))
     absent = [
@@ -316,6 +322,11 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/sessions/s1/todos",
         "/api/sessions/s1/timeline",
         "/api/sessions/s1/export",
+        "/api/hive/roster",
+        "/api/chat",
+        "/api/rmb/status",
+        "/api/rmb/catalog",
+        "/api/rmb/hf/progress",
     ]
     def _absent(status: int) -> bool:
         # Starlette may answer POST to an unmatched path with 405 when no
@@ -338,6 +349,15 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/goals",
         "/api/life-tasks/act",
         "/api/nanoswarm/classify",
+        "/api/hive/spawn",
+        "/api/hive/retire",
+        "/api/hive/assign",
+        "/api/chat",
+        "/api/chat/stream",
+        "/api/rmb/stop",
+        "/api/rmb/hf/search",
+        "/api/rmb/hf/pull",
+        "/api/rmb/hf/cancel",
     ):
         r = client.post(path, json={})
         assert _absent(r.status_code), f"{path} still registered ({r.status_code})"
