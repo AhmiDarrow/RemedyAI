@@ -75,6 +75,13 @@ func bytesPtr(b []byte) uintptr {
 	return uintptr(unsafe.Pointer(&b[0]))
 }
 
+func uint16SlicePtr(v []uint16) uintptr {
+	if len(v) == 0 {
+		return 0
+	}
+	return uintptr(unsafe.Pointer(&v[0]))
+}
+
 func uint8Ptr(p *uint8) uintptr {
 	if p == nil {
 		return 0

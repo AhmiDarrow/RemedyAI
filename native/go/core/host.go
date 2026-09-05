@@ -438,3 +438,60 @@ func ClipboardSetText(text string) error {
 	return lib.check("clipboard_set_text", int32(status))
 }
 
+// KeyCombo presses virtual keys in order, then releases them in reverse.
+// Fail-closed without remedy_core. Empty vks is invalid.
+func KeyCombo(vks []uint16) error {
+	lib, err := Open()
+	if err != nil {
+		return err
+	}
+	if len(vks) == 0 {
+		return fmt.Errorf("key_combo: empty key combo")
+	}
+	status, err := lib.call(
+		"remedy_core_key_combo",
+		uint16SlicePtr(vks), uintptr(len(vks)),
+	)
+	if err != nil {
+		return err
+	}
+	return lib.check("key_combo", int32(status))
+}
+
+// KeyHold presses one virtual key, holds for holdMS, then releases.
+// Fail-closed without remedy_core.
+func KeyHold(vk uint16, holdMS uint32) error {
+	lib, err := Open()
+	if err != nil {
+		return err
+	}
+	status, err := lib.call("remedy_core_key_hold", uintptr(vk), uintptr(holdMS))
+	if err != nil {
+		return err
+	}
+	return lib.check("key_hold", int32(status))
+}
+
+// VkKeyScan maps a Unicode code point to a VK + shift state via Zig.
+// Low byte is VK, high byte is shift state; -1 means no mapping.
+// Fail-closed without remedy_core.
+func VkKeyScan(codepoint uint32) (int32, error) {
+	lib, err := Open()
+	if err != nil {
+		return -1, err
+	}
+	var scan int32
+	status, err := lib.call(
+		"remedy_core_vk_key_scan",
+		uintptr(codepoint),
+		int32Ptr(&scan),
+	)
+	if err != nil {
+		return -1, err
+	}
+	if err := lib.check("vk_key_scan", int32(status)); err != nil {
+		return -1, err
+	}
+	return scan, nil
+}
+
