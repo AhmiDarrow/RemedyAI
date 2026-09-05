@@ -253,12 +253,20 @@ func defaultPythonWorkerArgv() ([]string, error) {
 		return []string{abs, "-m", "remedy.runtime.rmdy_tool_worker"}, nil
 	}
 	for _, name := range []string{"python", "python3"} {
-		if abs := lookPathAbs(name); abs != "" {
+		if abs := lookPathAbs(name); abs != "" && !isWindowsStorePythonStub(abs) {
 			if pyzOK {
 				return []string{abs, pyz}, nil
 			}
 			return []string{abs, "-m", "remedy.runtime.rmdy_tool_worker"}, nil
 		}
+	}
+	// Packaged Desktop often has no PATH python; reuse the managed voice
+	// CPython under ~/.remedy/voice/runtime when it is already installed.
+	if abs := managedVoicePython(); abs != "" {
+		if pyzOK {
+			return []string{abs, pyz}, nil
+		}
+		return []string{abs, "-m", "remedy.runtime.rmdy_tool_worker"}, nil
 	}
 	if pyzOK {
 		return nil, fmt.Errorf("%w: REMEDY_RMDY_PYZ set but no python interpreter found (set REMEDY_PYTHON)", ErrWorkerAttachRequired)
@@ -267,6 +275,46 @@ func defaultPythonWorkerArgv() ([]string, error) {
 		return []string{uv, "run", "python", "-m", "remedy.runtime.rmdy_tool_worker"}, nil
 	}
 	return nil, errors.New("no python interpreter found (set REMEDY_PYTHON to an absolute path)")
+}
+
+// managedVoicePython returns the owner's managed voice CPython when present
+// (same tree voice.runtime.python_path uses). Empty when not installed.
+func managedVoicePython() string {
+	if override := strings.TrimSpace(os.Getenv("REMEDY_VOICE_PYTHON")); override != "" {
+		if abs, err := filepath.Abs(override); err == nil {
+			if st, err := os.Stat(abs); err == nil && !st.IsDir() {
+				return abs
+			}
+		}
+	}
+	homes := make([]string, 0, 2)
+	if h := strings.TrimSpace(os.Getenv("REMEDY_HOME")); h != "" {
+		homes = append(homes, h)
+	}
+	if uh, err := os.UserHomeDir(); err == nil && uh != "" {
+		homes = append(homes, filepath.Join(uh, ".remedy"))
+	}
+	for _, home := range homes {
+		var cand string
+		if runtime.GOOS == "windows" {
+			cand = filepath.Join(home, "voice", "runtime", "python", "python.exe")
+		} else {
+			cand = filepath.Join(home, "voice", "runtime", "python", "bin", "python3")
+		}
+		if st, err := os.Stat(cand); err == nil && !st.IsDir() {
+			if abs, err := filepath.Abs(cand); err == nil {
+				return abs
+			}
+		}
+	}
+	return ""
+}
+
+// isWindowsStorePythonStub rejects WindowsApps alias stubs that are not a
+// real interpreter (they open the Store / fail spawn).
+func isWindowsStorePythonStub(path string) bool {
+	p := strings.ToLower(filepath.ToSlash(path))
+	return strings.Contains(p, "/windowsapps/")
 }
 
 // resolveRMDYPyz returns an absolute zipapp path when configured or discovered.

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -297,5 +298,36 @@ func TestDefaultPythonWorkerArgvPrefersPyz(t *testing.T) {
 	abs, _ := filepath.Abs(pyz)
 	if argv[1] != abs {
 		t.Fatalf("argv[1]=%q want=%q", argv[1], abs)
+	}
+}
+
+func TestManagedVoicePythonAndStoreStub(t *testing.T) {
+	t.Setenv("REMEDY_VOICE_PYTHON", "")
+	t.Setenv("REMEDY_HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("REMEDY_HOME", home)
+	var cand string
+	if runtime.GOOS == "windows" {
+		cand = filepath.Join(home, "voice", "runtime", "python", "python.exe")
+	} else {
+		cand = filepath.Join(home, "voice", "runtime", "python", "bin", "python3")
+	}
+	if err := os.MkdirAll(filepath.Dir(cand), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cand, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := managedVoicePython()
+	abs, _ := filepath.Abs(cand)
+	if got != abs {
+		t.Fatalf("managed=%q want=%q", got, abs)
+	}
+	stub := `C:\Users\x\AppData\Local\Microsoft\WindowsApps\python.exe`
+	if !isWindowsStorePythonStub(stub) {
+		t.Fatalf("expected WindowsApps stub rejection for %q", stub)
+	}
+	if isWindowsStorePythonStub(cand) {
+		t.Fatalf("real cand should not look like a Store stub")
 	}
 }
