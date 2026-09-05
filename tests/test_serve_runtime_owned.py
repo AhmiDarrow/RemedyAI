@@ -193,6 +193,26 @@ def test_create_app_still_importable_for_tests() -> None:
     assert "remedy-runtime" in doc or ":7400" in doc
 
 
+def test_create_app_lifespan_is_testclient_teardown_only() -> None:
+    """Production host autostart must not live in TestClient create_app."""
+    src = Path("src/remedy/interfaces/api.py").read_text(encoding="utf-8")
+    for needle in (
+        "start_vigil_thread",
+        "start_delivery_thread",
+        "run_unattended_improve",
+        "ensure_rmb_server",
+        "maybe_ensure_local_model",
+        "warm_voice_engines",
+        "resume_posts",
+        "initialize_native_runtime",
+        "ensure_connected",
+        "gateway.start",
+    ):
+        assert needle not in src, f"create_app still starts production work: {needle}"
+    assert "aclose_shared_session" in src
+    assert "_shutdown_vision_decoder" in src
+
+
 def test_fastapi_module_is_not_production_serve_entry() -> None:
     """create_app must not be reachable from the production serve path."""
     import remedy.interfaces.cli.cmd_runtime as CR

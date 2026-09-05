@@ -17,7 +17,6 @@ import os
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from typing import Any
 
 import yaml
 from fastapi import (
@@ -90,7 +89,6 @@ def request_log_level(
     return "info"
 
 
-
 _CLIENT_GONE_NAMES = frozenset({"EndOfStream", "ClientDisconnect", "BrokenResourceError"})
 
 
@@ -160,6 +158,7 @@ def create_app(
     """Build the in-process FastAPI app for pytest / TestClient.
 
     Not a production HTTP server. Go ``remedy-runtime`` owns ``:7400``.
+    Lifespan is TestClient teardown only — no production host autostart.
     """
     # Let slash commands list skills without threading runtime everywhere.
     handle_slash_command._skills_registry = (  # type: ignore[attr-defined]
@@ -174,361 +173,9 @@ def create_app(
             atexit.register(_shutdown_vision_decoder)
             _vision_atexit_registered = True
 
-        # Prime the optional native route once at startup. Compatibility mode
-        # returns immediately; auto/native probe only signed, bundled paths and
-        # fall back to Python when unavailable (Go owns production /api/ping).
-        try:
-            import asyncio as _asyncio_native
-
-            from remedy.runtime.native_runtime import initialize_native_runtime
-
-            _cfg_native = load_config()
-            await _asyncio_native.wait_for(
-                _asyncio_native.to_thread(
-                    initialize_native_runtime,
-                    _cfg_native if isinstance(_cfg_native, dict) else None,
-                ),
-                timeout=3.0,
-            )
-        except TimeoutError:
-            logger.warning("Native runtime startup probe timed out; using compatibility")
-        except Exception:
-            logger.debug("Native runtime startup probe skipped", exc_info=True)
-
-        # Start gateway messengers on the app event loop (TestClient / ASGI).
-        if gateway is not None and not getattr(gateway, "running", False):
-            try:
-                await gateway.start()
-                logger.info(
-                    "Gateway messengers started on API lifespan (channels=%s)",
-                    [c.value for c in getattr(gateway, "channels", [])],
-                )
-            except Exception:
-                logger.exception("Gateway start on lifespan failed")
-
-        # Retention pass (attachments / shots / undo / logs / optional sessions).
-        # Off the loop: it scans the whole home on disk, so on a large home it
-        # would delay readiness and block the rest of lifespan startup.
-        try:
-            import asyncio as _asyncio_ret
-
-            from remedy.core.retention import run_retention_pass
-
-            _cfg_ret = load_config()
-            _mem = getattr(runtime, "memory", None) if runtime is not None else None
-            await _asyncio_ret.to_thread(
-                run_retention_pass,
-                _cfg_ret if isinstance(_cfg_ret, dict) else None,
-                store=_mem,
-            )
-        except Exception:
-            logger.debug("retention pass skipped", exc_info=True)
-
-        # Vigil heartbeat starts with Remedy — no user action, ever. Inert
-        # until the partner grants her time in conversation (soul_vigil tool);
-        # budgets make the tick harmless. Local-only; never calls a provider.
-        _vigil_thread = None
-        try:
-            from remedy.core.feature_maturity import soul_field_enabled
-
-            if soul_field_enabled():
-                from remedy.memory.soul.vigil import start_vigil_thread
-
-                _cfg_v = load_config()
-                _home_v = (
-                    _cfg_v.get("home_dir") if isinstance(_cfg_v, dict) else None
-                )
-                _vigil_thread = start_vigil_thread(_home_v)
-                logger.info("Vigil heartbeat started (inert until granted)")
-        except Exception:
-            logger.debug("vigil heartbeat start skipped", exc_info=True)
-
-        # Remedy's clock + reach: fires stored reminders/due dates into the
-        # durable outbox and (when the owner has channels) their messengers.
-        # Local-only and cheap (small JSON read), so it always runs.
-        _notify_thread = None
-        try:
-            import asyncio as _asyncio
-
-            from remedy.core.notify import start_delivery_thread
-
-            _cfg_r = load_config()
-            _home_r = _cfg_r.get("home_dir") if isinstance(_cfg_r, dict) else None
-            try:
-                _main_loop = _asyncio.get_running_loop()
-            except RuntimeError:
-                _main_loop = None
-
-            def _messenger_send(text: str) -> None:
-                """Bridge the sync clock thread onto the async gateway."""
-                if gateway is None or _main_loop is None:
-                    return
-                # ``suppress`` is what this module imports; the bare
-                # ``contextlib`` name was never bound, so this raised NameError
-                # on every push — and notify.deliver_due wraps the call in its
-                # own suppress, so every reminder was recorded as delivered
-                # while no messenger ever heard about it.
-                with suppress(Exception):
-                    _asyncio.run_coroutine_threadsafe(
-                        gateway.broadcast(text), _main_loop
-                    )
-
-            _notify_thread = start_delivery_thread(
-                _home_r, messenger_send=_messenger_send
-            )
-            logger.info("Reminder clock + delivery started")
-        except Exception:
-            logger.debug("reminder clock start skipped", exc_info=True)
-
-        # Local model starts with Remedy when installed + enabled (vision + nano).
-        try:
-            import asyncio
-
-            cfg0 = load_config()
-
-            def _bg_autostart() -> None:
-                # RMB first when enabled: exclusive GPU host unloads Smol before load.
-                rmb_ok = False
-                try:
-                    from remedy.runtime.rmb.config import load_rmb_json, merge_state
-                    from remedy.runtime.rmb.service import ensure_rmb_server
-
-                    home0 = cfg0.get("home_dir") if isinstance(cfg0, dict) else None
-                    st = merge_state(load_rmb_json(home0))
-                    from remedy.core.feature_maturity import rmb_enabled
-
-                    rmb_wanted = bool(
-                        rmb_enabled(cfg0 if isinstance(cfg0, dict) else None)
-                        and st.get("enabled")
-                        and st.get("auto_start", False)
-                    )
-                    if rmb_wanted:
-                        from remedy.runtime.rmb.service import (
-                            adopt_existing_host,
-                            ensure_rmb_watchdog,
-                        )
-
-                        ensure_rmb_watchdog(home0)
-                        with suppress(Exception):
-                            adopt_existing_host(home0)
-                        # Honor persisted user Stop after recycle — do not
-                        # start_rmb_server (that used to wipe stay-off).
-                        rr = ensure_rmb_server(home_dir=home0, wait_s=120.0)
-                        rmb_ok = bool(rr.get("ok"))
-                        if rmb_ok:
-                            logger.info(
-                                "RMB local agent host auto-started (SmolVLM suspended) watchdog=on"
-                            )
-                        else:
-                            logger.info("RMB auto-start: %s", rr.get("error") or rr)
-                except Exception:
-                    logger.exception("RMB auto-start background task failed")
-                # Voice models (Kokoro / whisper / smart-turn) always download
-                # on first run — not a Settings option.
-                try:
-                    from remedy.voice.service import ensure_voice_assets
-
-                    home0 = cfg0.get("home_dir") if isinstance(cfg0, dict) else None
-                    vr = ensure_voice_assets(home0)
-                    if vr.get("started"):
-                        logger.info("Voice assets first-run download: %s", vr.get("started"))
-                except Exception:
-                    logger.exception("Voice assets first-run ensure failed")
-                # Local OpenSERP (~10 MB) so web_search has a real backend.
-                # Download is non-blocking; DuckDuckGo HTML covers the gap.
-                try:
-                    from remedy.runtime.web_search_host import schedule_ensure
-
-                    home0 = cfg0.get("home_dir") if isinstance(cfg0, dict) else None
-                    web_on = True
-                    if isinstance(cfg0, dict) and "web_tools_enabled" in cfg0:
-                        web_on = bool(cfg0.get("web_tools_enabled"))
-                    schedule_ensure(home0, enabled=web_on)
-                except Exception:
-                    logger.exception("web search host first-run ensure failed")
-                # Claimidx is an isolated, private-by-default first-run
-                # dependency. Installation/start happen in their own daemon
-                # thread so an offline package index never delays Remedy.
-                try:
-                    from remedy.runtime.claimidx_host import (
-                        schedule_ensure as schedule_claimidx,
-                    )
-
-                    home0 = cfg0.get("home_dir") if isinstance(cfg0, dict) else None
-                    schedule_claimidx(home0)
-                except Exception:
-                    logger.exception("Claimidx first-run ensure failed")
-                # Her voice should be ready before she is asked to speak: load
-                # the engines now (Kokoro; Chatterbox too when HQ is on) so
-                # the first sentence is not a twenty-second wait.
-                try:
-                    from remedy.voice.service import start_voice_evolution, warm_voice_engines
-
-                    start_voice_evolution(home0, memory)
-                    warm_voice_engines(
-                        home0,
-                        gender=str(cfg0.get("agent_gender") or "female")
-                        if isinstance(cfg0, dict)
-                        else None,
-                    )
-                except Exception:
-                    logger.exception("Voice warm-up failed")
-
-                # Vision files always download on first run. llama-server start
-                # is skipped when RMB already owns the GPU host.
-                try:
-                    from remedy.runtime.rmb.mode import should_skip_vision_stack
-                    from remedy.vision.service import maybe_ensure_local_model
-
-                    skip_smol = bool(
-                        rmb_ok
-                        or should_skip_vision_stack(
-                            cfg0 if isinstance(cfg0, dict) else None
-                        )
-                    )
-                    r = maybe_ensure_local_model(cfg0)
-                    # skipped=True + ok=True is RMB owning the GPU host — not
-                    # a started SmolVLM. Live 2026-08-27 logged "Local model
-                    # auto-started" while 8787 was closed and vision was skipped.
-                    if r.get("skipped"):
-                        logger.info(
-                            "Local vision autostart skipped (%s)",
-                            r.get("reason") or "not started",
-                        )
-                    elif skip_smol and r.get("ok"):
-                        logger.info(
-                            "Local vision download underway; SmolVLM start skipped "
-                            "(RMB exclusive host)"
-                        )
-                    elif r.get("ok"):
-                        logger.info("Local model auto-started with Remedy")
-                    else:
-                        logger.info(
-                            "Local model auto-start: %s",
-                            r.get("error") or r.get("reason") or r,
-                        )
-                except Exception:
-                    logger.exception("Local model auto-start background task failed")
-
-            # Non-blocking: model load can take tens of seconds
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = asyncio.get_event_loop()
-            loop.run_in_executor(None, _bg_autostart)
-        except Exception:
-            logger.debug("Local model auto-start schedule skipped", exc_info=True)
-
-        # Unattended self-improve: start whenever the feature is enabled, not
-        # only if the process is already idle at boot. Organism ticks (skill
-        # lifecycle, dream, persist) run every cycle; code self-heal waits for
-        # the user-idle window inside run_unattended_improve.
-        _self_inject_task: Any = None
-        try:
-            from remedy.core.self_inject import is_enabled as _si_enabled
-
-            _force = os.environ.get("REMEDY_SELF_INJECT_FORCE") == "1"
-            _self_inject_enabled = bool(runtime is not None and (_si_enabled() or _force))
-
-            async def _self_inject_idle_loop() -> None:
-                first = True
-                while True:
-                    try:
-                        # First tick quickly after boot so learning starts without
-                        # a user prompt; then settle to a 60s cadence.
-                        await asyncio.sleep(5 if first else 60)
-                        first = False
-                        if runtime is None:
-                            continue
-                        if not _si_enabled() and os.environ.get("REMEDY_SELF_INJECT_FORCE") != "1":
-                            continue
-                        try:
-                            from remedy.core.self_inject import run_unattended_improve
-
-                            home = getattr(runtime, "home_dir", None) or getattr(
-                                getattr(runtime, "config", None), "home_dir", None
-                            )
-                            result = await run_unattended_improve(runtime, home=home)
-                            org = result.get("organism") or {}
-                            code = result.get("code")
-                            logger.info(
-                                "self-improve tick skills=%s dreamed=%s code=%s idle_s=%s",
-                                org.get("skills_refined", 0),
-                                org.get("dreamed", False),
-                                (code or {}).get("outcome")
-                                or (code or {}).get("skipped")
-                                or "none",
-                                result.get("idle_s"),
-                            )
-                        except Exception:
-                            logger.exception("self-improve tick failed")
-                    except Exception:
-                        logger.debug("self-inject idle loop error", exc_info=True)
-
-            if _self_inject_enabled:
-                try:
-                    _self_inject_task = asyncio.create_task(_self_inject_idle_loop())
-                    logger.info("self-improve idle scheduler started")
-                except Exception:
-                    logger.debug("self-inject idle scheduler start skipped", exc_info=True)
-        except Exception:
-            logger.debug("self-inject scheduler setup skipped", exc_info=True)
-
-        # User-listed MCP servers: spawn on the live loop, once, in the
-        # background so a slow npx install never delays the API coming up.
-        _mcp_task: Any = None
-        if runtime is not None and getattr(runtime, "_mcp_bridge", None) is not None:
-            try:
-                import asyncio as _asyncio_mcp
-
-                from remedy.core.agent_mcp_bridge import ensure_connected
-
-                _mcp_task = _asyncio_mcp.create_task(ensure_connected(runtime))
-            except Exception:
-                logger.debug("MCP bridge startup skipped", exc_info=True)
-
-        # Standing hive posts: wake their pulse loops so a serve restart does
-        # not drop the job. Foragers are one-shot and stay reported on disk.
-        if runtime is not None:
-            try:
-                from remedy.core.hive.pulse import resume_posts
-
-                n_posts = resume_posts(runtime)
-                if n_posts:
-                    logger.info("Hive standing posts resumed count=%s", n_posts)
-            except Exception:
-                logger.debug("hive post resume skipped", exc_info=True)
-
         try:
             yield
         finally:
-            try:
-                from remedy.core.hive.pulse import stop_all_posts
-
-                stop_all_posts()
-            except Exception:
-                logger.debug("hive post stop skipped", exc_info=True)
-            if _mcp_task is not None:
-                with suppress(Exception):
-                    _mcp_task.cancel()
-            if runtime is not None and getattr(runtime, "_mcp_bridge", None) is not None:
-                try:
-                    from remedy.core.agent_mcp_bridge import shutdown_mcp_bridge
-
-                    await shutdown_mcp_bridge(runtime)
-                except Exception:
-                    logger.debug("MCP bridge shutdown failed", exc_info=True)
-            if _vigil_thread is not None:
-                with suppress(Exception):
-                    _vigil_thread._vigil_stop.set()  # type: ignore[attr-defined]
-            if _self_inject_task is not None:
-                with suppress(Exception):
-                    _self_inject_task.cancel()
-            if gateway is not None and getattr(gateway, "running", False):
-                try:
-                    await gateway.stop()
-                except Exception:
-                    logger.debug("Gateway stop on shutdown failed", exc_info=True)
             logger.info("API shutdown: stopping vision decoder if running")
             _shutdown_vision_decoder()
             with suppress(Exception):
@@ -642,8 +289,6 @@ def create_app(
     # Go owns production /api/ping|/api/status|/api/turn-active and the SPA.
     _AUTH_PUBLIC = {
         "/api/auth/local-bootstrap",
-        # Google OAuth browser redirect (state is one-time secret; no bearer).
-        "/api/assistant/google/callback",
     }
     if not _disable_api_docs:
         _AUTH_PUBLIC.update(
@@ -655,15 +300,6 @@ def create_app(
                 "/api/openapi.yaml",
             }
         )
-    # Messenger platform webhooks cannot send our Bearer token; they authenticate
-    # via their own verify tokens / HMAC / JWT inside the route handlers.
-    # Generic CI-style ``/api/webhook/{source}`` is also public at the middleware
-    # layer so ``X-Remedy-Webhook-Secret`` can reach the route; the handler itself
-    # fails closed (Bearer **or** webhook secret required when auth is on).
-    _AUTH_PUBLIC_PREFIXES = (
-        "/api/webhooks/",
-        "/api/webhook/",
-    )
 
     if api_key:
         app.state.api_key = api_key
@@ -676,12 +312,10 @@ def create_app(
             # (looks like the server is down) and breaks xAI OAuth + all JSON API calls.
             if request.method == "OPTIONS":
                 return await call_next(request)
-            # Public docs / health / bootstrap
+            # Public docs / bootstrap
             if path in _AUTH_PUBLIC:
                 return await call_next(request)
             if not _disable_api_docs and (path.startswith("/docs") or path.startswith("/redoc")):
-                return await call_next(request)
-            if any(path.startswith(p) for p in _AUTH_PUBLIC_PREFIXES):
                 return await call_next(request)
             # SPA / static Web UI (GET only) — browser loads shell then bootstraps token
             if request.method in ("GET", "HEAD") and not path.startswith("/api"):
