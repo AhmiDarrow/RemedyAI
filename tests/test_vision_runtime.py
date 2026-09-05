@@ -1340,58 +1340,34 @@ def test_a_nonpositive_pid_is_never_killed(pid: int, no_real_spawn) -> None:
     assert no_real_spawn.run_calls == []
 
 
-def test_kill_pid_tree_on_windows_uses_a_force_tree_taskkill(monkeypatch, no_real_spawn) -> None:
-    seen: list[list[str]] = []
+def test_kill_pid_tree_uses_zig_kill_tree(monkeypatch, no_real_spawn) -> None:
+    seen: list[int] = []
 
-    def fake_run(args: list[str], **kwargs: Any) -> Any:
-        seen.append(list(args))
-        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+    def fake_kill_tree(pid: int) -> None:
+        seen.append(int(pid))
 
-    no_real_spawn.run = fake_run
-    monkeypatch.setattr(vr, "os", _FakeOS(name="nt"))
-
+    monkeypatch.setattr("remedy.execution.process.kill_tree", fake_kill_tree)
     assert vr._kill_pid_tree(12345, force=True) is True
-    assert seen == [["taskkill", "/F", "/PID", "12345", "/T"]]
+    assert seen == [12345]
+    assert no_real_spawn.run_calls == []
 
 
-def test_a_graceful_kill_omits_the_force_flag(monkeypatch, no_real_spawn) -> None:
-    seen: list[list[str]] = []
-    no_real_spawn.run = lambda args, **k: seen.append(list(args)) or types.SimpleNamespace()
-    monkeypatch.setattr(vr, "os", _FakeOS(name="nt"))
+def test_kill_pid_tree_force_flag_is_ignored(monkeypatch, no_real_spawn) -> None:
+    """Zig kill_tree always reaps the tree; force is accepted for API compat."""
+    seen: list[int] = []
+    monkeypatch.setattr(
+        "remedy.execution.process.kill_tree", lambda pid: seen.append(int(pid))
+    )
+    assert vr._kill_pid_tree(777, force=False) is True
+    assert seen == [777]
 
-    vr._kill_pid_tree(777, force=False)
-    assert seen == [["taskkill", "/PID", "777", "/T"]]
 
+def test_kill_pid_tree_host_error_is_reported_as_not_killed(monkeypatch, no_real_spawn) -> None:
+    def boom(_pid: int) -> None:
+        raise OSError("host kill failed")
 
-def test_a_taskkill_timeout_is_reported_as_not_killed(monkeypatch, no_real_spawn) -> None:
-    def timeout(*_a: object, **_k: object) -> None:
-        raise subprocess.TimeoutExpired(cmd="taskkill", timeout=15)
-
-    no_real_spawn.run = timeout
-    monkeypatch.setattr(vr, "os", _FakeOS(name="nt"))
+    monkeypatch.setattr("remedy.execution.process.kill_tree", boom)
     assert vr._kill_pid_tree(999) is False
-
-
-def test_kill_pid_tree_on_posix_escalates_to_sigkill(monkeypatch) -> None:
-    fake_os = _FakeOS(name="posix")
-    monkeypatch.setattr(vr, "os", fake_os)
-    monkeypatch.setattr(vr.time, "sleep", lambda _s: None)
-
-    assert vr._kill_pid_tree(4321, force=True) is True
-    assert (4321, 15) in fake_os.signals
-    assert (4321, 9) in fake_os.signals
-
-
-def test_kill_pid_tree_on_posix_does_not_sigkill_a_process_that_already_died(
-    monkeypatch,
-) -> None:
-    fake_os = _FakeOS(name="posix")
-    fake_os.alive = False
-    monkeypatch.setattr(vr, "os", fake_os)
-    monkeypatch.setattr(vr.time, "sleep", lambda _s: None)
-
-    vr._kill_pid_tree(4321, force=True)
-    assert (4321, 9) not in fake_os.signals
 
 
 @pytest.mark.parametrize("pid", [0, -3])
