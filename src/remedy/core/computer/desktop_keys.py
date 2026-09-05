@@ -1,10 +1,10 @@
-"""Key-combo resolution — re-export tip shared ``desktop_common``."""
+"""Key-combo resolution — re-export tip shared ``desktop_policy``."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from remedy.core.computer.desktop_common import resolve_key_combo as _resolve
+from remedy.core.computer.desktop_policy import resolve_key_combo as _resolve
 
 __all__ = ["resolve_key_combo"]
 

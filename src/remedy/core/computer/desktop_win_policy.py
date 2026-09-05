@@ -10,7 +10,7 @@ import contextlib
 import time
 from typing import Any
 
-from remedy.core.computer import desktop_common as C
+from remedy.core.computer import desktop_policy as C
 from remedy.core.computer import host_binding as H
 
 _SECURE_TITLES = ("user account control", "windows security")
