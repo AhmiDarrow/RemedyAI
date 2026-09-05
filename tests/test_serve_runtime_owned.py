@@ -209,7 +209,7 @@ def test_cmd_serve_does_not_import_create_app(monkeypatch, tmp_path) -> None:
 
 
 def test_fastapi_api_module_is_gone() -> None:
-    """Phase 4 exit: no FastAPI create_app module remains."""
+    """Phase 4 exit: FastAPI create_app / interfaces.api are deleted."""
     assert importlib.util.find_spec("remedy.interfaces.api") is None
     assert not Path("src/remedy/interfaces/api.py").exists()
 
