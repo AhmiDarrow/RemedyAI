@@ -1,7 +1,7 @@
 """Built-in slash commands for chat (/help, /reset, …).
 
-Extracted from ``api_support.py`` so config/SSE helpers stay lean and command
-tables can grow without bloating the shared API support module.
+Canonical home for ``_BUILTIN_COMMANDS`` / ``handle_slash_command``. Config and
+LLM binding helpers stay in ``api_support.py``.
 """
 
 from __future__ import annotations

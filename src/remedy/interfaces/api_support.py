@@ -1,4 +1,8 @@
-"""Shared helpers: slash commands, config sync. Production HTTP is Go :7400."""
+"""Config load/write and per-session LLM binding helpers for Python workers.
+
+Production HTTP on :7400 is Go ``remedy-runtime``. Slash commands live in
+``slash_commands.py``.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from remedy.home import default_home
 from remedy.interfaces.config import (
     CONFIG_PATHS,
 )
@@ -18,33 +23,6 @@ from remedy.interfaces.config import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def sse_headers() -> dict[str, str]:
-    """SSE response headers."""
-    return {
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",
-    }
-
-
-# Slash commands live in slash_commands.py (re-exported for compatibility).
-from remedy.home import default_home  # noqa: E402
-from remedy.interfaces.slash_commands import (  # noqa: E402
-    _BUILTIN_AGENTS,
-    _BUILTIN_COMMANDS,
-    _BUILTIN_MODELS,
-    handle_slash_command,
-)
-
-__all__ = [
-    "_BUILTIN_AGENTS",
-    "_BUILTIN_COMMANDS",
-    "_BUILTIN_MODELS",
-    "handle_slash_command",
-    "sse_headers",
-]
 
 
 def _default_config_path() -> Path:
@@ -75,7 +53,7 @@ def _find_config_path() -> Path | None:
 
 
 def load_config() -> dict[str, Any]:
-    """Load config.toml with mtime cache (routes hit this constantly).
+    """Load config.toml with mtime cache.
 
     Returns a shallow copy so callers can mutate without poisoning the cache.
     """
@@ -180,9 +158,9 @@ def _sync_user_providers(cfg: dict[str, Any]) -> None:
 
 
 def _load_config_cached() -> dict[str, Any]:
-    """load_config() with a cheap mtime/size cache to avoid re-reading every request.
+    """load_config() with a cheap mtime/size cache to avoid re-reading every call.
 
-    Always returns a shallow copy so route handlers can mutate safely.
+    Always returns a shallow copy so callers can mutate safely.
     """
     path = _find_config_path()
     if path is None:
@@ -209,7 +187,7 @@ def _load_config_cached() -> dict[str, Any]:
         data = {}
     _config_cache.update({"path": str(path), "mtime": mtime, "size": size, "data": data})
     # Fresh read (first load or the file changed): saved custom endpoints
-    # become catalog providers right here, so every route sees them.
+    # become catalog providers right here for subsequent callers.
     _sync_user_providers(data)
     return dict(data)
 
@@ -474,7 +452,7 @@ def _write_config(path: Path, cfg: dict[str, Any]) -> None:
     write_text_atomic(path, content, mode=0o600)
     with contextlib.suppress(OSError):
         path.chmod(0o600)
-    # Drop mtime cache so the next GET sees the write immediately.
+    # Drop mtime cache so the next load_config() sees the write immediately.
     invalidate_config_cache()
     # Seed cache with what we wrote (skip another parse).
     try:
