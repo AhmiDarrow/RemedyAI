@@ -603,6 +603,37 @@ func ClipboardGetImagePNG() ([]byte, error) {
 	return raw, nil
 }
 
+// ForegroundDetailJSON returns UTF-8 JSON {hwnd,title,pid,exe} for the
+// foreground window (empty fields when none). Windows only; fail-closed
+// without remedy_core; ErrUnsupported on non-Windows hosts.
+func ForegroundDetailJSON() ([]byte, error) {
+	lib, err := Open()
+	if err != nil {
+		return nil, err
+	}
+	var ptr, length uintptr
+	status, err := lib.call(
+		"remedy_core_foreground_detail",
+		unsafePtrPtr(&ptr),
+		sizePtr(&length),
+	)
+	if err != nil {
+		return nil, err
+	}
+	st := int32(status)
+	if st == StatusUnsupported {
+		return nil, ErrUnsupported
+	}
+	if err := lib.check("foreground_detail", st); err != nil {
+		return nil, err
+	}
+	raw := takeBytes(lib, ptr, length)
+	if raw == nil {
+		return []byte{}, nil
+	}
+	return raw, nil
+}
+
 // KeyCombo presses virtual keys in order, then releases them in reverse.
 // Fail-closed without remedy_core. Empty vks is invalid.
 func KeyCombo(vks []uint16) error {

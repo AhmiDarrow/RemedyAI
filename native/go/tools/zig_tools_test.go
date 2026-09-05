@@ -20,7 +20,7 @@ func TestRegisterZigHostToolsDescriptors(t *testing.T) {
 	if err := RegisterZigHostTools(registry); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"computer.screenshot", "computer.print_window", "computer.windows", "computer.monitors", "computer.snapshot", "computer.uia.focused", "computer.uia.read_text"} {
+	for _, id := range []string{"computer.screenshot", "computer.print_window", "computer.windows", "computer.foreground", "computer.monitors", "computer.snapshot", "computer.uia.focused", "computer.uia.read_text"} {
 		desc, err := registry.Latest(id)
 		if err != nil {
 			t.Fatalf("%s: %v", id, err)
@@ -138,12 +138,12 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 		t.Fatalf("computer.key err=%v", err)
 	}
 
-	for _, id := range []string{"computer.move", "computer.scroll", "clipboard.read", "clipboard.read_files", "clipboard.read_image", "clipboard.write", "computer.focus", "computer.window", "computer.print_window", "computer.uia.focused", "computer.uia.read_text", "computer.uia.action"} {
+	for _, id := range []string{"computer.move", "computer.scroll", "clipboard.read", "clipboard.read_files", "clipboard.read_image", "clipboard.write", "computer.focus", "computer.window", "computer.print_window", "computer.foreground", "computer.uia.focused", "computer.uia.read_text", "computer.uia.action"} {
 		input := json.RawMessage(`{"x":1,"y":2}`)
 		switch id {
 		case "computer.scroll":
 			input = json.RawMessage(`{"x":1,"y":2,"dy":-1}`)
-		case "clipboard.read", "clipboard.read_files", "clipboard.read_image", "computer.uia.focused":
+		case "clipboard.read", "clipboard.read_files", "clipboard.read_image", "computer.foreground", "computer.uia.focused":
 			input = json.RawMessage(`{}`)
 		case "clipboard.write":
 			input = json.RawMessage(`{"text":"hi"}`)
@@ -638,6 +638,26 @@ func TestZigHostToolsLiveWhenLibraryPresent(t *testing.T) {
 	}
 	if winOut.Total != len(winOut.Windows) {
 		t.Fatalf("total mismatch: %#v", winOut)
+	}
+
+	fg, err := registry.Execute(context.Background(), Request{
+		ToolID: "computer.foreground", Version: 1, Input: json.RawMessage(`{}`),
+		CapabilityToken: token,
+	})
+	if err != nil {
+		t.Fatalf("computer.foreground: %v", err)
+	}
+	var fgOut struct {
+		HWND  uint64 `json:"hwnd"`
+		Title string `json:"title"`
+		PID   uint32 `json:"pid"`
+		Exe   string `json:"exe"`
+	}
+	if err := json.Unmarshal(fg.Output, &fgOut); err != nil {
+		t.Fatal(err)
+	}
+	if fgOut.HWND != 0 && fgOut.PID == 0 {
+		t.Fatalf("foreground hwnd set but pid empty: %#v", fgOut)
 	}
 
 	if winOut.Total > 0 {

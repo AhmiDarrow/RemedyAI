@@ -145,6 +145,32 @@ func RegisterZigHostTools(registry *Registry) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:           "computer.foreground",
+		Version:      1,
+		Description:  "Foreground window detail {hwnd,title,pid,exe} via Zig (Windows)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskReadOnly,
+		Capabilities: []string{"computer.read"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["hwnd","title","pid","exe"],
+			"properties":{
+				"hwnd":{"type":"integer","minimum":0},
+				"title":{"type":"string"},
+				"pid":{"type":"integer","minimum":0},
+				"exe":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeComputerForeground)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:           "computer.monitors",
 		Version:      1,
 		Description:  "List display monitors with bounds and scale (Zig)",
@@ -822,6 +848,38 @@ func executeComputerWindows(_ context.Context, request Request) (Result, error) 
 	out, err := json.Marshal(map[string]any{
 		"windows": windows,
 		"total":   len(windows),
+	})
+	return Result{Output: out}, err
+}
+
+func executeComputerForeground(_ context.Context, request Request) (Result, error) {
+	if len(request.Input) > 0 {
+		var body map[string]any
+		if err := json.Unmarshal(request.Input, &body); err != nil {
+			return Result{}, ErrInvalidInput
+		}
+		if len(body) != 0 {
+			return Result{}, ErrInvalidInput
+		}
+	}
+	raw, err := core.ForegroundDetailJSON()
+	if err != nil {
+		return Result{}, err
+	}
+	var detail struct {
+		HWND  uint64 `json:"hwnd"`
+		Title string `json:"title"`
+		PID   uint32 `json:"pid"`
+		Exe   string `json:"exe"`
+	}
+	if len(raw) == 0 {
+		raw = []byte(`{}`)
+	}
+	if err := json.Unmarshal(raw, &detail); err != nil {
+		return Result{}, fmt.Errorf("foreground_detail: invalid JSON: %w", err)
+	}
+	out, err := json.Marshal(map[string]any{
+		"hwnd": detail.HWND, "title": detail.Title, "pid": detail.PID, "exe": detail.Exe,
 	})
 	return Result{Output: out}, err
 }
