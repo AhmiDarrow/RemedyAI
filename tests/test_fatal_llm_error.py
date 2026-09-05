@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from remedy.core.react_loop import _is_fatal_llm_api_error
-from remedy.core.react_loop.errors import (
+from remedy.core.llm_api_errors import (
     is_billing_llm_api_error,
+    is_fatal_llm_api_error as _is_fatal_llm_api_error,
     is_thinking_tool_choice_error,
 )
-from remedy.core.react_loop.recovery import fatal_billing_error_message
+from remedy.core.llm_recovery_messages import fatal_billing_error_message
 
 
 def test_404_model_not_found_is_fatal() -> None:
@@ -42,112 +42,6 @@ def test_wrong_model_for_host_is_fatal() -> None:
         'or deepseek-v4-flash, but you passed grok-4.5."}}'
     )
     assert _is_fatal_llm_api_error(400, body) is True
-
-
-def test_deepseek_force_tool_choice_stays_auto() -> None:
-    """DeepSeek thinking models 400 on tool_choice=required — never send it."""
-    from types import SimpleNamespace
-
-    from remedy.core.providers import DeepSeekProvider
-    from remedy.core.react_loop.build_request import build_step_request_body
-
-    bind = SimpleNamespace(
-        provider="deepseek",
-        model="deepseek-chat",
-        api_key="x",
-        base_url="https://api.deepseek.com",
-        adapter=lambda: DeepSeekProvider(),
-    )
-    runtime = SimpleNamespace(
-        _force_tool_choice=True,
-        _thinking_level="high",
-        _tool_choice_required_blocked=False,
-        _llm_max_output_tokens=256,
-        _local_step_index=0,
-    )
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "file_read",
-                "parameters": {"type": "object", "properties": {}},
-            },
-        }
-    ]
-    body, _headers, _ep, _sse = build_step_request_body(
-        runtime=runtime,
-        bind=bind,
-        adapter=DeepSeekProvider(),
-        messages=[{"role": "user", "content": "read the file"}],
-        step_tools=tools,
-        step=0,
-        user_message="read the file",
-    )
-    assert body.get("tools")
-    assert body.get("tool_choice") == "auto"
-
-
-def test_xai_tool_rounds_do_not_stream() -> None:
-    """Live 2026-08-27: grok-4.6 SSE tool rounds RST mid-chunk on long builds."""
-    from types import SimpleNamespace
-
-    from remedy.core.react_loop.build_request import build_step_request_body
-
-    class _Adapter:
-        uses_openai_sse = True
-
-        def auth_headers(self, _key: str) -> dict:
-            return {}
-
-        def chat_endpoint(self, _base: str) -> str:
-            return "https://api.x.ai/v1/chat/completions"
-
-        def build_body(self, **kwargs: object) -> dict:
-            return {
-                "stream": kwargs.get("stream"),
-                "tools": kwargs.get("tools"),
-                "model": kwargs.get("model"),
-            }
-
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "file_read",
-                "parameters": {"type": "object", "properties": {}},
-            },
-        }
-    ]
-    bind = SimpleNamespace(
-        provider="xai",
-        model="grok-4.6",
-        api_key="x",
-        base_url="https://api.x.ai/v1",
-        adapter=lambda: _Adapter(),
-    )
-    runtime = SimpleNamespace(_llm_max_output_tokens=256)
-    body, _h, _ep, sse = build_step_request_body(
-        runtime=runtime,
-        bind=bind,
-        adapter=_Adapter(),
-        messages=[{"role": "user", "content": "read it"}],
-        step_tools=tools,
-        step=1,
-        user_message="read it",
-    )
-    assert body.get("stream") is False
-    assert sse is False
-    final, _h2, _ep2, sse2 = build_step_request_body(
-        runtime=runtime,
-        bind=bind,
-        adapter=_Adapter(),
-        messages=[{"role": "user", "content": "read it"}],
-        step_tools=None,
-        step=2,
-        user_message="read it",
-    )
-    assert final.get("stream") is True
-    assert sse2 is True
 
 
 def test_thinking_tool_choice_mismatch_is_recoverable() -> None:

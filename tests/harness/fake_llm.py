@@ -6,7 +6,7 @@ green while the shipped loop breaks (or go red while it is fine). So nothing
 here is invented -- the wire shapes are copied from the code that *parses*
 them: ``remedy.core.react_stream.apply_openai_sse_chunk`` for SSE deltas,
 ``apply_openai_completion_message`` / ``OpenAIProvider.extract_response`` for
-non-stream JSON, and ``remedy.core.react_loop.loop`` for how the request is
+non-stream JSON, and ``remedy.core.agent (retired loop)`` for how the request is
 posted.
 
 Nothing here opens a socket, spawns a process, or touches ``~/.remedy``.
@@ -88,7 +88,7 @@ from remedy.skills.tool_registry import ToolRegistry
 
 #: Where the ReAct loop looks up its HTTP session. Patching here (rather than
 #: ``aiohttp.ClientSession`` globally) is what the rest of the suite does.
-LOOP_CLIENT_SESSION = "remedy.core.react_loop.loop.aiohttp.ClientSession"
+LOOP_CLIENT_SESSION = "remedy.core.agent.BasicRuntime._call_llm_stream"
 #: The tools-on/tools-off gate the loop consults before it arms any tool.
 #: ``resolve_tools`` uses the ``_message_wants_tools`` alias. Do **not** patch
 #: ``message_wants_tools`` itself — that also drives unfinished-work blocking

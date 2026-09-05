@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from remedy.core.react_loop.binding import resolve_and_apply_tools
 from remedy.core.react_policy import REACT_MAX_STALE_EPOCHS
 from remedy.core.react_turn import (
     LOCAL_MAX_TOOLS_PER_STEP,
@@ -432,100 +431,6 @@ def test_resolve_tools_full_bugsweep_not_l1():
     assert d.tools is not None
     assert d.run_until_done is True
     assert d.reason != "l1_pure_chat"
-
-
-def test_mid_turn_keep_armed_does_not_override_non_work():
-    """Pseudo-tool rearm must not pin tools on a verbal-only turn."""
-    all_t = [_tool("file_write"), _tool("file_read"), _tool("list_dir")]
-    turn = TurnState(all_tools=all_t)
-    turn.rearm(reason="rearm_agency")
-
-    class _Rt:
-        _turn_tier = 1
-
-    tools, run = resolve_and_apply_tools(
-        runtime=_Rt(),
-        turn=turn,
-        message="Reply only STILLALIVE",
-        plan_mode=False,
-        history=[],
-        pure_action_kick=False,
-        clear_goals_only=False,
-        browse_pre_url=None,
-        page_interaction=False,
-        open_only_browse=False,
-        build_state=None,
-        open_tasks_for_wall=None,
-        step_index=2,
-    )
-    assert tools is None
-    assert run is False
-    assert turn.arm_reason == "non_work"
-
-
-def test_mid_turn_resolve_cannot_downgrade_full_pack_to_peek():
-    """A driven work turn must not become ask_first peek on a later step."""
-    all_t = [_tool("file_write"), _tool("file_read"), _tool("list_dir")]
-    turn = TurnState(all_tools=all_t, run_until_done=True, arm_reason="task")
-    turn.rearm(reason="rearm_agency")
-    assert turn.run_until_done is True
-
-    class _Rt:
-        _turn_tier = 1
-
-    tools, run = resolve_and_apply_tools(
-        runtime=_Rt(),
-        turn=turn,
-        message="Good deal",
-        plan_mode=False,
-        history=[
-            {"role": "assistant", "tool_calls": [{"id": "1"}]},
-            {"role": "tool", "content": "ok"},
-        ],
-        pure_action_kick=False,
-        clear_goals_only=False,
-        browse_pre_url=None,
-        page_interaction=False,
-        open_only_browse=False,
-        build_state=None,
-        open_tasks_for_wall=["finish the review"],
-        step_index=4,
-    )
-    assert tools is not None
-    assert run is True
-    assert turn.arm_reason == "keep_armed"
-    names = {((t.get("function") or {}).get("name") or "") for t in (tools or [])}
-    assert "file_write" in names
-
-
-def test_mid_turn_resolve_cannot_disarm_armed_turn():
-    """Per-step re-resolve may narrow a pack; it must not strip tools."""
-    all_t = [_tool("file_write"), _tool("file_read"), _tool("list_dir")]
-    turn = TurnState(all_tools=all_t)
-    turn.rearm(reason="rearm_agency")
-    assert turn.tools
-
-    class _Rt:
-        _turn_tier = 1
-
-    tools, run = resolve_and_apply_tools(
-        runtime=_Rt(),
-        turn=turn,
-        message="thanks",
-        plan_mode=False,
-        history=[],
-        pure_action_kick=False,
-        clear_goals_only=False,
-        browse_pre_url=None,
-        page_interaction=False,
-        open_only_browse=False,
-        build_state=None,
-        open_tasks_for_wall=None,
-        step_index=2,
-    )
-    assert tools is not None
-    assert run is True
-    assert turn.arm_reason == "keep_armed"
 
 
 def test_resolve_tools_plan_mode():

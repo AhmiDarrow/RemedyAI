@@ -51,54 +51,25 @@ def _store_for(runtime: Any) -> HiveStore:
 
 
 async def _default_llm_pulse(runtime: Any, daughter: HiveDaughter) -> ReturnPacket:
-    from remedy.core.react_loop.loop import call_llm_stream
-    from remedy.core.turn_context import is_turn_aborted
+    """Python hive pulses retired — Go httpapi owns forager cognition.
 
-    # Scope the budget to this pulse's turn. Writing it onto ``runtime`` would
-    # clobber the mother, who keeps working while her daughter forages (and two
-    # concurrent pulses would restore each other's value out of order).
+    Tests inject ``set_pulse_impl``. Production :7400 uses
+    ``runHiveForagerPulse`` via CognitionTurnRunner.
+    """
+    _ = runtime
     set_turn_max_react_steps(
         max(1, min(MAX_BUDGET_STEPS, int(daughter.budget_steps or 8)))
     )
-    chunks: list[str] = []
-    aborted = False
-    try:
-        extra = ""
-        if daughter.cadence == CADENCE_POST:
-            notes = (daughter.journal or {}).get("notes") or []
-            recent = [
-                str(n.get("outcome") or "").strip()
-                for n in notes[-4:]
-                if isinstance(n, dict) and str(n.get("outcome") or "").strip()
-            ]
-            if recent:
-                extra = "\n\nJournal of prior pulses:\n" + "\n".join(
-                    f"- {line}" for line in recent
-                )
-        charter = (
-            "You are a hive daughter of Remedy. You do not speak to the owner. "
-            "Report a compact outcome. Prefer tools over essays.\n\n"
-            f"Job: {daughter.goal}{extra}"
-        )
-        async for chunk in call_llm_stream(
-            runtime, charter, session_id=daughter.session_id
-        ):
-            if is_turn_aborted():
-                aborted = True
-                break
-            if not str(chunk).startswith("@@"):
-                chunks.append(str(chunk))
-    except asyncio.CancelledError:
-        aborted = True
-    except Exception as exc:
-        logger.warning("hive pulse failed id=%s: %s", daughter.id, exc)
-        return ReturnPacket(
-            goal=daughter.goal,
-            done=False,
-            outcome=f"pulse failed: {exc}"[:400],
-            blockers=["pulse_failed"],
-        )
-    return packet_from_outcome(daughter.goal, "".join(chunks), aborted=aborted)
+    logger.warning(
+        "hive pulse refused id=%s — Go CognitionTurnRunner owns forager pulses",
+        daughter.id,
+    )
+    return ReturnPacket(
+        goal=daughter.goal,
+        done=False,
+        outcome="pulse failed: Python ReAct retired; use remedy-runtime hive",
+        blockers=["pulse_failed", "react_go_owned"],
+    )
 
 
 def _cancelled(packet: ReturnPacket) -> bool:

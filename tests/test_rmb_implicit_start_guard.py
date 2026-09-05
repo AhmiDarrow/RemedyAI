@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from remedy.core.react_loop.errors import is_local_host_loading_error
+from remedy.core.llm_api_errors import is_local_host_loading_error
 from remedy.runtime.rmb import service as svc
 from remedy.runtime.rmb.config import merge_state, save_rmb_json
 

@@ -302,7 +302,7 @@ def is_rate_limited(status: int, body: str | None = None) -> bool:
     if st != 429:
         return False
     try:
-        from remedy.core.react_loop.errors import is_billing_llm_api_error
+        from remedy.core.llm_api_errors import is_billing_llm_api_error
 
         if is_billing_llm_api_error(st, body or ""):
             return False

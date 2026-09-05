@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from remedy.core.react_loop.errors import is_fatal_llm_api_error
+from remedy.core.llm_api_errors import is_fatal_llm_api_error
 from remedy.interfaces.anthropic_auth import (
     classify_anthropic_secret,
     is_subscription_oauth_token,
