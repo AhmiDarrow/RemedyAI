@@ -88,7 +88,7 @@ def test_ensure_installed_marks_only_a_verified_runtime(monkeypatch, tmp_path):
             py = host._venv_python(tmp_path)
             py.parent.mkdir(parents=True, exist_ok=True)
             py.write_bytes(b"python")
-        if "import claimidx, fastapi, uvicorn" in args[-1]:
+        if "import claimidx; print(claimidx.__version__)" in args[-1]:
             return _completed(host.CLAIMIDX_VERSION + "\n")
         return _completed()
 

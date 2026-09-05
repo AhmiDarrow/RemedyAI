@@ -8,7 +8,6 @@ from __future__ import annotations
 import tomllib
 
 import pytest
-from fastapi import FastAPI
 
 from remedy.interfaces import api_support
 from remedy.interfaces.config import (
