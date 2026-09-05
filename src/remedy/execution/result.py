@@ -72,6 +72,18 @@ def _install_write_roots(roots: list[Path]) -> None:
     host_binding.write_jail_set_roots([str(p) for p in roots])
 
 
+def _clear_write_roots() -> None:
+    """Drop process-wide Zig write-jail roots so later Full spawns stay unbound."""
+    from remedy.core.computer import host_binding
+    from remedy.core.computer.host_binding import HostError
+    from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
+
+    with contextlib.suppress(
+        HostError, NativeRuntimeUnavailableError, OSError, AttributeError
+    ):
+        host_binding.write_jail_clear()
+
+
 def _jail_denied_result(
     *,
     detail: str,
@@ -150,27 +162,30 @@ class SubprocessSandbox(Sandbox):
             )
 
         _install_write_roots(self.allowed_paths)
-        if workdir is not None:
-            denied = _check_path_jail(workdir, None, start=start, what="workdir")
-            if denied is not None:
-                return denied
+        try:
+            if workdir is not None:
+                denied = _check_path_jail(workdir, None, start=start, what="workdir")
+                if denied is not None:
+                    return denied
 
-        chain = await self._execute_shell_chain(
-            list(command),
-            workdir=workdir,
-            timeout_seconds=timeout_seconds,
-            env=env,
-            start=start,
-        )
-        if chain is not None:
-            return chain
-        return await self._execute_one(
-            list(command),
-            workdir=workdir,
-            timeout_seconds=timeout_seconds,
-            env=env,
-            start=start,
-        )
+            chain = await self._execute_shell_chain(
+                list(command),
+                workdir=workdir,
+                timeout_seconds=timeout_seconds,
+                env=env,
+                start=start,
+            )
+            if chain is not None:
+                return chain
+            return await self._execute_one(
+                list(command),
+                workdir=workdir,
+                timeout_seconds=timeout_seconds,
+                env=env,
+                start=start,
+            )
+        finally:
+            _clear_write_roots()
 
     async def _execute_shell_chain(
         self,

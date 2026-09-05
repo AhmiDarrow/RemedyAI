@@ -31,7 +31,7 @@ class MCPClient:
     def __init__(self) -> None:
         self._servers: dict[str, dict[str, Any]] = {}
         self._tools: dict[str, ToolDefinition] = {}
-        self._processes: dict[str, asyncio.subprocess.Process] = {}
+        self._processes: dict[str, Any] = {}
         self._readers: dict[str, asyncio.Task] = {}
         self._pending: dict[int, asyncio.Future] = {}
         self._pending_times: dict[int, float] = {}
@@ -48,25 +48,23 @@ class MCPClient:
         env: dict[str, str] | None = None,
         cwd: str | None = None,
     ) -> bool:
-        """Spawn an MCP server subprocess and handshake."""
+        """Spawn an MCP server via Zig authorized 3-pipe spawn and handshake."""
         if server_name in self._servers:
             await self.disconnect(server_name)
 
         try:
             from remedy.execution.env import scrub_subprocess_env
-            from remedy.execution.process import create_hidden_subprocess_exec
+            from remedy.execution.process import spawn_piped
 
             # Never forward provider/API secrets into MCP server children.
             safe_env = scrub_subprocess_env(env, argv=[command, *(args or [])])
 
-            proc = await create_hidden_subprocess_exec(
-                command,
-                *(args or []),
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            proc = await asyncio.to_thread(
+                spawn_piped,
+                [command, *(args or [])],
                 cwd=cwd or None,
                 env=safe_env,
+                text=True,
             )
 
             self._servers[server_name] = {
@@ -161,12 +159,17 @@ class MCPClient:
         proc = self._processes.pop(server_name, None)
         if proc:
             try:
-                if proc.stdin is not None:
-                    proc.stdin.close()
+                if getattr(proc, "stdin", None) is not None:
+                    with contextlib.suppress(Exception):
+                        proc.stdin.close()
                 proc.kill()
-                await proc.wait()
+                await asyncio.to_thread(proc.wait, 5.0)
             except Exception:
                 pass
+            closer = getattr(proc, "close", None)
+            if callable(closer):
+                with contextlib.suppress(Exception):
+                    closer()
 
         self._servers.pop(server_name, None)
         # Residual tools after disconnect would still match by name/uri.
@@ -384,8 +387,12 @@ class MCPClient:
         self._pending_times[request_id] = _time.monotonic()
 
         try:
-            proc.stdin.write(message.encode("utf-8"))
-            await proc.stdin.drain()
+            def _write() -> None:
+                assert proc.stdin is not None
+                proc.stdin.write(message)
+                proc.stdin.flush()
+
+            await asyncio.to_thread(_write)
         except Exception as e:
             self._pending.pop(request_id, None)
             self._pending_times.pop(request_id, None)
@@ -422,17 +429,18 @@ class MCPClient:
         # Already-unwrapped or non-standard payload
         return message
 
-    async def _read_responses(self, server_name: str, proc: asyncio.subprocess.Process) -> None:
-        """Continuously read JSON-RPC responses from a server's stdout."""
+    async def _read_responses(self, server_name: str, proc: Any) -> None:
+        """Continuously read JSON-RPC responses from a PipedProcess stdout."""
         try:
-            while proc.stdout and not proc.stdout.at_eof():
-                line = await proc.stdout.readline()
+            while getattr(proc, "stdout", None) is not None:
+                line = await asyncio.to_thread(proc.stdout.readline)
                 if not line:
                     break
 
                 try:
-                    data = json.loads(line.decode("utf-8"))
-                except json.JSONDecodeError:
+                    raw = line if isinstance(line, str) else line.decode("utf-8")
+                    data = json.loads(raw)
+                except (json.JSONDecodeError, UnicodeDecodeError):
                     continue
 
                 msg_id = data.get("id")

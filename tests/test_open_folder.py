@@ -64,15 +64,21 @@ def test_open_folder_os_mocked(tmp_path: Path, monkeypatch):
     else:
         monkeypatch.setattr("shutil.which", lambda _n: "/usr/bin/xdg-open")
 
-        def _popen(args, **_k):
+        def _spawn(args, **_k):
             opened.append(str(args[-1]))
 
             class P:
                 pid = 1
 
+                def close(self) -> None:
+                    return None
+
             return P()
 
-        monkeypatch.setattr("subprocess.Popen", _popen)
+        monkeypatch.setattr("remedy.execution.process.spawn_hidden", _spawn)
+        monkeypatch.setattr(
+            "remedy.execution.process.retain_detached", lambda child: child
+        )
     info = open_folder_os(tmp_path)
     assert info["ok"] is True
     assert Path(info["target"]) == tmp_path.resolve()

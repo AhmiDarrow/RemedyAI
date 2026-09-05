@@ -96,73 +96,79 @@ def _spawn_background(
 
     roots = list(write_roots or [])
     try:
-        host_binding.write_jail_set_roots([str(p) for p in roots])
-        host_binding.write_jail_check_spawn(argv, str(cwd) if cwd else None)
-    except HostError as exc:
-        if exc.status == STATUS_ACCESS_DENIED:
+        try:
+            host_binding.write_jail_set_roots([str(p) for p in roots])
+            host_binding.write_jail_check_spawn(argv, str(cwd) if cwd else None)
+        except HostError as exc:
+            if exc.status == STATUS_ACCESS_DENIED:
+                return format_tool_error(
+                    f"blocked by write jail: {exc}",
+                    code="WRITE_JAIL",
+                    tool_name="bash_exec",
+                    suggestion="Keep the working directory under the project folder.",
+                )
+            raise
+        except NativeRuntimeUnavailableError as exc:
             return format_tool_error(
-                f"blocked by write jail: {exc}",
-                code="WRITE_JAIL",
+                f"authorized spawn unavailable: {exc}",
+                code="SPAWN_FAILED",
                 tool_name="bash_exec",
-                suggestion="Keep the working directory under the project folder.",
+                suggestion="Build remedy_core (zig build in native/zig) or set REMEDY_NATIVE_CORE_LIB.",
             )
-        raise
-    except NativeRuntimeUnavailableError as exc:
-        return format_tool_error(
-            f"authorized spawn unavailable: {exc}",
-            code="SPAWN_FAILED",
-            tool_name="bash_exec",
-            suggestion="Build remedy_core (zig build in native/zig) or set REMEDY_NATIVE_CORE_LIB.",
-        )
 
-    try:
-        child = spawn_hidden(
-            argv,
-            cwd=cwd,
-            env=scrub_subprocess_env(env, argv=argv),
-            write_roots=roots,
-        )
-    except HostError as exc:
-        if exc.status == STATUS_ACCESS_DENIED:
+        try:
+            child = spawn_hidden(
+                argv,
+                cwd=cwd,
+                env=scrub_subprocess_env(env, argv=argv),
+                write_roots=roots,
+            )
+        except HostError as exc:
+            if exc.status == STATUS_ACCESS_DENIED:
+                return format_tool_error(
+                    f"blocked by spawn policy: {exc}",
+                    code="SPAWN_DENIED",
+                    tool_name="bash_exec",
+                    suggestion="Use an allowed program under the project folder.",
+                )
             return format_tool_error(
-                f"blocked by spawn policy: {exc}",
-                code="SPAWN_DENIED",
+                f"failed to start background command: {exc}",
+                code="SPAWN_FAILED",
                 tool_name="bash_exec",
-                suggestion="Use an allowed program under the project folder.",
+                suggestion="Check the path exists and is executable.",
             )
-        return format_tool_error(
-            f"failed to start background command: {exc}",
-            code="SPAWN_FAILED",
-            tool_name="bash_exec",
-            suggestion="Check the path exists and is executable.",
-        )
-    except (NativeRuntimeUnavailableError, FileNotFoundError, OSError, ValueError) as e:
-        return format_tool_error(
-            f"failed to start background command: {e}",
-            code="SPAWN_FAILED",
-            tool_name="bash_exec",
-            suggestion="Check the path exists and is executable; remedy_core must be available.",
-        )
+        except (NativeRuntimeUnavailableError, FileNotFoundError, OSError, ValueError) as e:
+            return format_tool_error(
+                f"failed to start background command: {e}",
+                code="SPAWN_FAILED",
+                tool_name="bash_exec",
+                suggestion="Check the path exists and is executable; remedy_core must be available.",
+            )
 
-    _BACKGROUND_CHILDREN.append(child)
-    note = (
-        " (auto: looks like a GUI/game — not waiting for exit)"
-        if auto
-        else ""
-    )
-    win_note = (
-        "\nHeads up: a new console/app window will appear on screen for this "
-        "process — that's expected, not an error."
-        if os.name == "nt" and auto
-        else ""
-    )
-    return (
-        f"started background pid={child.pid} cwd={cwd}{note}\n"
-        f"command={command}\n"
-        "The process is running. Use computer_app or computer_snapshot "
-        "target=desktop to play/inspect the window. Do not treat this as "
-        f"exit_code=0 of a finished program — observe the UI next.{win_note}"
-    )
+        _BACKGROUND_CHILDREN.append(child)
+        note = (
+            " (auto: looks like a GUI/game — not waiting for exit)"
+            if auto
+            else ""
+        )
+        win_note = (
+            "\nHeads up: a new console/app window will appear on screen for this "
+            "process — that's expected, not an error."
+            if os.name == "nt" and auto
+            else ""
+        )
+        return (
+            f"started background pid={child.pid} cwd={cwd}{note}\n"
+            f"command={command}\n"
+            "The process is running. Use computer_app or computer_snapshot "
+            "target=desktop to play/inspect the window. Do not treat this as "
+            f"exit_code=0 of a finished program — observe the UI next.{win_note}"
+        )
+    finally:
+        with suppress(
+            HostError, NativeRuntimeUnavailableError, OSError, AttributeError
+        ):
+            host_binding.write_jail_clear()
 
 
 def _join_argv_for_jail(argv: list[str]) -> str:

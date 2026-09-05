@@ -13,9 +13,10 @@ modes are expensive rather than cosmetic:
   core silently disappears mid-conversation.
 
 These tests never spawn a real process, never kill a real PID and never open a
-real socket: ``socket.create_connection``, ``subprocess.Popen`` and
-``subprocess.run`` are all stubbed out by an autouse fixture so a wrong test
-cannot taskkill something on the machine running the suite.
+real socket: ``socket.create_connection``, Zig ``spawn_hidden`` /
+``run_hidden``, and leftover ``subprocess.Popen`` / ``subprocess.run`` are
+stubbed by an autouse fixture so a wrong test cannot start a real llama-server
+or taskkill something on the machine running the suite.
 """
 
 from __future__ import annotations
@@ -93,15 +94,17 @@ def isolate(monkeypatch):
     def _no_socket(*a, **k):
         raise OSError("socket blocked in tests")
 
-    def _no_popen(*a, **k):
+    def _no_spawn(*a, **k):
         raise AssertionError("test spawned a real process")
 
     def _no_run(*a, **k):
         raise AssertionError("test ran a real command")
 
     monkeypatch.setattr(socket, "create_connection", _no_socket)
-    monkeypatch.setattr(subprocess, "Popen", _no_popen)
+    monkeypatch.setattr(subprocess, "Popen", _no_spawn)
     monkeypatch.setattr(subprocess, "run", _no_run)
+    monkeypatch.setattr("remedy.execution.process.spawn_hidden", _no_spawn)
+    monkeypatch.setattr("remedy.execution.process.run_hidden", _no_run)
 
 
 def _binary(tmp_path, name="llama-server.exe"):
@@ -535,7 +538,7 @@ def test_a_spawn_failure_is_returned_and_leaves_no_handle(monkeypatch, tmp_path)
     def _boom(*a, **k):
         raise OSError("ENOEXEC")
 
-    monkeypatch.setattr(subprocess, "Popen", _boom)
+    monkeypatch.setattr("remedy.execution.process.spawn_hidden", _boom)
     out = mr.start_tier(
         "medium",
         model_path=str(_model(tmp_path)),
