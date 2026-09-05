@@ -712,15 +712,13 @@ def workspace_context_block(
     else:
         lines.append("Top-level: (empty or unreadable)")
     with suppress(Exception):
-        from remedy.execution.host.stretch import format_home_line
+        from remedy.core.computer import host_binding
 
-        line = format_home_line(home=home_dir)
+        home_s = str(home_dir) if home_dir else ""
+        line = host_binding.stretch_format_line(home_s)
         if line:
             lines.append(line)
-    with suppress(Exception):
-        from remedy.execution.host.dialect import format_dialect_line
-
-        dline = format_dialect_line()
+        dline = host_binding.dialect_format_line(home_s)
         if dline and dline not in "\n".join(lines):
             lines.append(dline)
     return "\n".join(lines)

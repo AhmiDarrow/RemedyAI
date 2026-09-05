@@ -518,9 +518,11 @@ async def handle_slash_command(
                     text += "\n\n**Dreams of the future** (how I will help):\n"
                     text += "\n".join(f"- {d}" for d in sf.future_dreams[:5])
             with suppress(Exception):
-                from remedy.execution.host.stretch import format_home_whoami
+                from remedy.core.computer import host_binding
 
-                home_blk = format_home_whoami(home=home)
+                home_blk = host_binding.stretch_format_whoami(
+                    str(home) if home else ""
+                )
                 if home_blk:
                     text += "\n\n" + home_blk
             return {"text": text}
@@ -532,10 +534,11 @@ async def handle_slash_command(
         if runtime is not None:
             home = getattr(getattr(runtime, "config", None), "home_dir", None)
         try:
-            from remedy.execution.host.stretch import format_home_whoami, stretch_home
+            from remedy.core.computer import host_binding
 
-            census = stretch_home(home, force=True)
-            return {"text": format_home_whoami(census, home=home)}
+            home_s = str(home) if home else ""
+            census = host_binding.stretch_home(home_s, force=True)
+            return {"text": host_binding.stretch_format_whoami(home_s, census)}
         except Exception as e:
             return {"text": f"Could not stretch this home: {e}"}
 

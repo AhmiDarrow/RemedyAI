@@ -105,9 +105,9 @@ def house_walkthrough(home: str | Path | None = None) -> dict[str, Any]:
 
     census_fresh = None
     with suppress(Exception):
-        from remedy.execution.host.stretch import needs_stretch
+        from remedy.core.computer import host_binding
 
-        census_fresh = not needs_stretch(home)
+        census_fresh = not host_binding.stretch_needs(str(home) if home else "")
     if census_fresh is False:
         concerns.append("house census is stale — a re-stretch would refresh the map")
 

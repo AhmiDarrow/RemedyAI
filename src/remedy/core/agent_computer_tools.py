@@ -1393,9 +1393,11 @@ def register_computer_tools(runtime: Any) -> None:
             mm.refresh_house_organs(home_dir)
             out["house_line"] = mm.organ_hint()
         with contextlib.suppress(Exception):
-            from remedy.execution.host.stretch import format_home_whoami
+            from remedy.core.computer import host_binding
 
-            out["census"] = format_home_whoami(home=home_dir)
+            out["census"] = host_binding.stretch_format_whoami(
+                str(home_dir) if home_dir else ""
+            )
         with contextlib.suppress(Exception):
             from remedy.core.computer.appliances import appliance_overview
 

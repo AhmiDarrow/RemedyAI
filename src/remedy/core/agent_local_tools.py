@@ -37,17 +37,15 @@ def register_local_discover_tools(runtime: Any) -> None:
 
         act = (action or "scan").strip().lower()
         if act in ("home", "census", "stretch", "map"):
-            from remedy.execution.host.stretch import (
-                load_census,
-                stretch_home,
-            )
+            from remedy.core.computer import host_binding
 
             home = getattr(getattr(runtime, "config", None), "home_dir", None)
+            home_s = str(home) if home else ""
             try:
                 census = (
-                    stretch_home(home, force=True)
+                    host_binding.stretch_home(home_s, force=True)
                     if act in ("stretch", "map")
-                    else load_census(home)
+                    else host_binding.stretch_load(home_s)
                 )
             except Exception as e:
                 return format_tool_error(
@@ -63,7 +61,7 @@ def register_local_discover_tools(runtime: Any) -> None:
                     tool_name="local_discover",
                     suggestion="Call local_discover action=stretch (or /stretch).",
                 )
-            return json.dumps(census.to_dict(), indent=2)
+            return json.dumps(census, indent=2)
         specs = []
         with suppress(Exception):
             reg = getattr(runtime, "skills", None)
