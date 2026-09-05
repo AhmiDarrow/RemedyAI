@@ -219,6 +219,67 @@ def test_core_library_search_order_ends_at_the_dev_checkout():
     assert root.name == ("bin" if native_runtime.sys.platform == "win32" else "lib")
 
 
+def test_core_library_prefers_newer_zig_out_over_staged_desktop_bin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path,
+):
+    """tauri:dev must not bind a stale same-ABI DLL from desktop/bin."""
+    import os
+    import time
+
+    name = native_runtime._core_library_names()[0]
+    staged_root = tmp_path / "desktop" / "bin"
+    zig_root = tmp_path / "native" / "zig" / "zig-out" / (
+        "bin" if native_runtime.sys.platform == "win32" else "lib"
+    )
+    staged_root.mkdir(parents=True)
+    zig_root.mkdir(parents=True)
+    staged = staged_root / name
+    fresh = zig_root / name
+    staged.write_bytes(b"old")
+    time.sleep(0.02)
+    fresh.write_bytes(b"new")
+    # Make mtime ordering unambiguous on coarse filesystems.
+    older = time.time() - 60
+    newer = time.time()
+    os.utime(staged, (older, older))
+    os.utime(fresh, (newer, newer))
+
+    monkeypatch.delenv("REMEDY_NATIVE_CORE_LIB", raising=False)
+    monkeypatch.setattr(native_runtime, "_candidate_roots", lambda: [staged_root])
+    monkeypatch.setattr(native_runtime, "_dev_checkout_root", lambda: zig_root)
+    monkeypatch.setattr(native_runtime, "_library_cache", None)
+
+    assert native_runtime._core_library_path() == fresh
+
+
+def test_core_library_keeps_staged_when_zig_out_is_older(
+    monkeypatch: pytest.MonkeyPatch, tmp_path,
+):
+    import os
+    import time
+
+    name = native_runtime._core_library_names()[0]
+    staged_root = tmp_path / "desktop" / "bin"
+    zig_root = tmp_path / "zig-out"
+    staged_root.mkdir(parents=True)
+    zig_root.mkdir(parents=True)
+    staged = staged_root / name
+    stale = zig_root / name
+    staged.write_bytes(b"staged")
+    stale.write_bytes(b"stale")
+    newer = time.time()
+    older = newer - 60
+    os.utime(staged, (newer, newer))
+    os.utime(stale, (older, older))
+
+    monkeypatch.delenv("REMEDY_NATIVE_CORE_LIB", raising=False)
+    monkeypatch.setattr(native_runtime, "_candidate_roots", lambda: [staged_root])
+    monkeypatch.setattr(native_runtime, "_dev_checkout_root", lambda: zig_root)
+    monkeypatch.setattr(native_runtime, "_library_cache", None)
+
+    assert native_runtime._core_library_path() == staged
+
+
 def test_core_library_loads_the_built_core_when_present(
     monkeypatch: pytest.MonkeyPatch,
 ):

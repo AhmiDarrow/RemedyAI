@@ -224,3 +224,30 @@ def test_write_jail_empty_roots_is_full(test_signing_key, tmp_path: Path, clear_
         assert H.process_wait(handle, 10_000) == 0
     finally:
         H.process_close(handle)
+
+
+@windows_with_core
+def test_authorized_spawn_write_roots_do_not_stick(
+    test_signing_key, tmp_path: Path, clear_write_jail
+):
+    """write_roots on spawn is for that jail check only — must clear afterwards."""
+    _ = (test_signing_key, clear_write_jail)
+    project = tmp_path / "proj"
+    project.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    argv = P.resolve_argv0(["cmd", "/c", "exit 0"])
+    token, now = H.issue_process_spawn_token(argv)
+    pid, handle = H.process_spawn_authorized(
+        argv,
+        cwd=str(project),
+        token=token,
+        now_ms=now,
+        write_roots=[str(project)],
+    )
+    try:
+        assert H.process_wait(handle, 10_000) == 0
+    finally:
+        H.process_close(handle)
+    # Sticky project roots would deny this path; Full/cleared must allow it.
+    H.write_jail_check_path(str(outside / "x.txt"), cwd=str(outside))

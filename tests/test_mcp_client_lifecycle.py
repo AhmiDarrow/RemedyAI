@@ -312,3 +312,129 @@ async def test_disconnecting_a_server_that_was_never_connected_is_not_an_error(c
 @pytest.mark.asyncio
 async def test_disconnect_all_on_a_fresh_client_is_not_an_error(client):
     await client.disconnect_all()
+
+
+@pytest.mark.asyncio
+async def test_disconnect_reaps_piped_process_via_kill_and_close(client):
+    """MCP disconnect must kill_tree + close so Zig job/pipe handles cannot leak."""
+    calls: list[str] = []
+
+    class _FakePipe:
+        closed = False
+
+        def close(self):
+            self.closed = True
+            calls.append("stdin_close")
+
+    class _FakeProc:
+        def __init__(self):
+            self.pid = 4242
+            self.stdin = _FakePipe()
+            self.stdout = _FakePipe()
+            self.stderr = _FakePipe()
+
+        def kill(self):
+            calls.append("kill")
+
+        def wait(self, timeout=None):
+            calls.append(f"wait:{timeout}")
+            return 0
+
+        def close(self):
+            calls.append("close")
+
+    client._servers["srv"] = {"connected": True}
+    client._processes["srv"] = _FakeProc()
+    await client.disconnect("srv")
+    assert "kill" in calls
+    assert "close" in calls
+    assert "srv" not in client._processes
+
+
+@pytest.mark.asyncio
+async def test_reader_exit_reaps_process_when_disconnect_did_not(client):
+    """EOF/crash path used to pop the process without kill/close (handle leak)."""
+    calls: list[str] = []
+
+    class _FakePipe:
+        closed = False
+
+        def readline(self):
+            return ""  # EOF immediately
+
+        def close(self):
+            self.closed = True
+
+    class _FakeProc:
+        def __init__(self):
+            self.pid = 7
+            self.stdin = _FakePipe()
+            self.stdout = _FakePipe()
+            self.stderr = _FakePipe()
+
+        def kill(self):
+            calls.append("kill")
+
+        def wait(self, timeout=None):
+            calls.append("wait")
+            return 0
+
+        def close(self):
+            calls.append("close")
+
+    proc = _FakeProc()
+    client._servers["srv"] = {"connected": True}
+    client._processes["srv"] = proc
+    await client._read_responses("srv", proc)
+    assert "kill" in calls
+    assert "close" in calls
+    assert "srv" not in client._processes
+
+
+@pytest.mark.asyncio
+async def test_failed_initialize_disconnects_and_reaps(client, monkeypatch):
+    """Init error must not leave a half-connected PipedProcess running."""
+    calls: list[str] = []
+
+    class _FakePipe:
+        closed = False
+
+        def readline(self):
+            return ""
+
+        def close(self):
+            self.closed = True
+
+    class _FakeProc:
+        def __init__(self):
+            self.pid = 9
+            self.stdin = _FakePipe()
+            self.stdout = _FakePipe()
+            self.stderr = _FakePipe()
+
+        def kill(self):
+            calls.append("kill")
+
+        def wait(self, timeout=None):
+            return 0
+
+        def close(self):
+            calls.append("close")
+
+    async def _fail_init(*_a, **_k):
+        return {"error": "no handshake"}
+
+    import remedy.execution.env as env_mod
+    import remedy.execution.process as process_mod
+
+    monkeypatch.setattr(process_mod, "spawn_piped", lambda *a, **k: _FakeProc())
+    monkeypatch.setattr(env_mod, "scrub_subprocess_env", lambda env, argv=None: env or {})
+    monkeypatch.setattr(client, "_send_request", _fail_init)
+
+    ok = await client.connect("srv", "fake-mcp")
+    assert ok is False
+    # Reader EOF and/or disconnect must reap; either path is enough.
+    assert "kill" in calls
+    assert "close" in calls
+    assert "srv" not in client._processes
+    assert "srv" not in client._servers
