@@ -37,11 +37,20 @@ def test_ensure_stdio_replaces_none_streams():
         sys.stdout, sys.stderr = saved_stdout, saved_stderr
 
 
-def test_uvicorn_formatter_survives_null_stdout():
-    """The exact crash: use_colors=None -> isatty() on the None stream."""
+def test_isatty_formatter_survives_null_stdout():
+    """The exact crash class: formatter __init__ calls sys.stdout.isatty()."""
+    import logging
     import logging.config
 
     from remedy.interfaces.cli.cmd_runtime import _ensure_stdio
+
+    class _IsattyFormatter(logging.Formatter):
+        def __init__(self, fmt=None, datefmt=None, style="%", use_colors=None):
+            if use_colors in (True, False):
+                self.use_colors = use_colors
+            else:
+                self.use_colors = sys.stdout.isatty()
+            super().__init__(fmt=fmt, datefmt=datefmt, style=style)
 
     saved_stdout, saved_stderr = sys.stdout, sys.stderr
     try:
@@ -54,8 +63,8 @@ def test_uvicorn_formatter_survives_null_stdout():
                 "disable_existing_loggers": False,
                 "formatters": {
                     "default": {
-                        "()": "uvicorn.logging.DefaultFormatter",
-                        "fmt": "%(levelprefix)s %(message)s",
+                        "()": _IsattyFormatter,
+                        "fmt": "%(levelname)s %(message)s",
                         "use_colors": None,
                     }
                 },
@@ -69,7 +78,7 @@ def test_uvicorn_formatter_survives_null_stdout():
                 "root": {"handlers": ["default"], "level": "INFO"},
             }
         )
-        logger = logging.getLogger("uvicorn.test")
+        logger = logging.getLogger("noconsole.test")
         logger.info("no console attached")  # must not raise
     finally:
         sys.stdout, sys.stderr = saved_stdout, saved_stderr

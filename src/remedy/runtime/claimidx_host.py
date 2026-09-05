@@ -261,7 +261,7 @@ def ensure_installed(
                 [
                     str(py),
                     "-c",
-                    "import claimidx, fastapi, uvicorn; print(claimidx.__version__)",
+                    "import claimidx; print(claimidx.__version__)",
                 ],
                 env,
                 timeout=30.0,

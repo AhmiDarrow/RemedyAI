@@ -3182,14 +3182,11 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "comtypes", marker = "sys_platform == 'win32'" },
-    { name = "fastapi" },
     { name = "packaging" },
     { name = "pydantic" },
     { name = "pynacl" },
-    { name = "python-multipart" },
     { name = "pyyaml" },
     { name = "rich" },
-    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
@@ -3225,7 +3222,6 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.14.2,<4" },
     { name = "chatterbox-tts", marker = "extra == 'voice-hq'" },
     { name = "comtypes", marker = "sys_platform == 'win32'", specifier = ">=1.4.0" },
-    { name = "fastapi", specifier = ">=0.139.2,<1" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.139.2,<1" },
     { name = "faster-whisper", marker = "extra == 'voice'", specifier = ">=1.0.0,<2" },
     { name = "kokoro-onnx", marker = "extra == 'voice'", specifier = ">=0.3.0,<1" },
@@ -3233,11 +3229,9 @@ requires-dist = [
     { name = "pillow", marker = "extra == 'game-assets'", specifier = ">=10.0.0,<13" },
     { name = "pydantic", specifier = ">=2.13.4,<3" },
     { name = "pynacl", specifier = ">=1.5.0,<2" },
-    { name = "python-multipart", specifier = ">=0.0.9,<1" },
     { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.9,<1" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "rich", specifier = ">=15.0.0,<16" },
-    { name = "uvicorn", specifier = ">=0.51.0,<1" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.51.0,<1" },
 ]
 provides-extras = ["server", "voice", "game-assets", "voice-hq"]

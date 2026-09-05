@@ -26,20 +26,17 @@ requires-python = ">=3.12"
 dependencies = [
     "aiohttp>=3.14.2,<4",
     "comtypes>=1.4.0; sys_platform == 'win32'",
-    "fastapi>=0.139.2,<1",
     "packaging>=24.0,<26",
     "pydantic>=2.13.4,<3",
-    "python-multipart>=0.0.9,<1",
     "pyyaml>=6.0.3,<7",
     "pynacl>=1.5.0,<2",
     "rich>=15.0.0,<16",
-    "uvicorn>=0.51.0,<1",
 ]
 
 # Optional install groups.
-# `server` is a documented alias — fastapi / uvicorn / python-multipart remain
-# available for optional claimidx tooling; production :7400 is Go
-# remedy-runtime only (FastAPI create_app deleted). Kept so older pins keep working.
+# `server` keeps fastapi / uvicorn / python-multipart for optional claimidx
+# tooling and older pins. Production :7400 is Go remedy-runtime only
+# (FastAPI create_app deleted); they are not base-install deps.
 [project.optional-dependencies]
 server = [
     "fastapi>=0.139.2,<1",
@@ -85,9 +82,7 @@ module-name = "remedy"
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = ["-v", "--tb=short", "--strict-markers"]
-filterwarnings = [
-    "ignore::UserWarning:fastapi",
-]
+filterwarnings = []
 testpaths = ["tests"]
 markers = [
     "live: requires live RMB/local host (skipped when host down)",
