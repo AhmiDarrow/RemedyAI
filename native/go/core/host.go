@@ -151,6 +151,48 @@ func CaptureRegion(left, top, width, height int32, bytesPerPixel uint32) (*Captu
 	}, nil
 }
 
+// PrintWindow captures an HWND via Zig PrintWindow (PW_RENDERFULLCONTENT,
+// falling back to PrintWindow(0)). Works for occluded windows. bytesPerPixel
+// is 3=BGR or 4=BGRA. Fail-closed without remedy_core.
+func PrintWindow(hwnd uint64, bytesPerPixel uint32) (*Capture, error) {
+	lib, err := Open()
+	if err != nil {
+		return nil, err
+	}
+	var ptr uintptr
+	var length, stride uintptr
+	var width, height, left, top int32
+	status, err := lib.call(
+		"remedy_core_print_window",
+		uintptr(hwnd),
+		uintptr(bytesPerPixel),
+		unsafePtrPtr(&ptr),
+		sizePtr(&length),
+		int32Ptr(&width), int32Ptr(&height),
+		sizePtr(&stride),
+		int32Ptr(&left), int32Ptr(&top),
+	)
+	if err != nil {
+		return nil, err
+	}
+	st := int32(status)
+	if st == StatusUnsupported {
+		return nil, ErrUnsupported
+	}
+	if err := lib.check("print_window", st); err != nil {
+		return nil, err
+	}
+	pixels := takeBytes(lib, ptr, length)
+	return &Capture{
+		Pixels: pixels,
+		Stride: int(stride),
+		Width:  int(width),
+		Height: int(height),
+		Left:   int(left),
+		Top:    int(top),
+	}, nil
+}
+
 // EncodePNG encodes BGR/BGRA rows to PNG bytes.
 func EncodePNG(pixels []byte, width, height int, stride int, bytesPerPixel uint32) ([]byte, error) {
 	lib, err := Open()
@@ -195,6 +237,37 @@ func ScreenshotPNG(homeDir, label string) (map[string]any, error) {
 		"width":  shot.Width,
 		"height": shot.Height,
 		"origin": map[string]any{"x": shot.Left, "y": shot.Top},
+	}, nil
+}
+
+// PrintWindowPNG captures hwnd via PrintWindow to a PNG under home/computer/shots.
+// Fail-closed without remedy_core. label defaults to "hwnd" when empty.
+func PrintWindowPNG(homeDir, label string, hwnd uint64) (map[string]any, error) {
+	if hwnd == 0 {
+		return nil, fmt.Errorf("hwnd required for print_window")
+	}
+	shot, err := PrintWindow(hwnd, 3)
+	if err != nil {
+		return nil, err
+	}
+	png, err := EncodePNG(shot.Pixels, shot.Width, shot.Height, shot.Stride, 3)
+	if err != nil {
+		return nil, err
+	}
+	if label == "" {
+		label = "hwnd"
+	}
+	path, err := writeShot(homeDir, label, png)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"path":   path,
+		"width":  shot.Width,
+		"height": shot.Height,
+		"origin": map[string]any{"x": shot.Left, "y": shot.Top},
+		"hwnd":   hwnd,
+		"method": "PrintWindow",
 	}, nil
 }
 

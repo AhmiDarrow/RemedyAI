@@ -20,7 +20,7 @@ func TestRegisterZigHostToolsDescriptors(t *testing.T) {
 	if err := RegisterZigHostTools(registry); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"computer.screenshot", "computer.windows", "computer.monitors", "computer.snapshot", "computer.uia.focused", "computer.uia.read_text"} {
+	for _, id := range []string{"computer.screenshot", "computer.print_window", "computer.windows", "computer.monitors", "computer.snapshot", "computer.uia.focused", "computer.uia.read_text"} {
 		desc, err := registry.Latest(id)
 		if err != nil {
 			t.Fatalf("%s: %v", id, err)
@@ -136,7 +136,7 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 		t.Fatalf("computer.key err=%v", err)
 	}
 
-	for _, id := range []string{"computer.move", "computer.scroll", "clipboard.read", "clipboard.write", "computer.focus", "computer.window", "computer.uia.focused", "computer.uia.read_text", "computer.uia.action"} {
+	for _, id := range []string{"computer.move", "computer.scroll", "clipboard.read", "clipboard.write", "computer.focus", "computer.window", "computer.print_window", "computer.uia.focused", "computer.uia.read_text", "computer.uia.action"} {
 		input := json.RawMessage(`{"x":1,"y":2}`)
 		switch id {
 		case "computer.scroll":
@@ -145,7 +145,7 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 			input = json.RawMessage(`{}`)
 		case "clipboard.write":
 			input = json.RawMessage(`{"text":"hi"}`)
-		case "computer.focus":
+		case "computer.focus", "computer.print_window":
 			input = json.RawMessage(`{"hwnd":42}`)
 		case "computer.window":
 			input = json.RawMessage(`{"hwnd":42,"action":"minimize"}`)
@@ -317,6 +317,33 @@ func TestComputerFocusRejectsMissingHwnd(t *testing.T) {
 	}
 	_, err = registry.Execute(context.Background(), Request{
 		ToolID:          "computer.focus",
+		Version:         1,
+		Input:           json.RawMessage(`{"hwnd":0}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("zero hwnd: %v", err)
+	}
+}
+
+func TestComputerPrintWindowRejectsMissingHwnd(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.print_window",
+		Version:         1,
+		Input:           json.RawMessage(`{}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("missing hwnd: %v", err)
+	}
+	_, err = registry.Execute(context.Background(), Request{
+		ToolID:          "computer.print_window",
 		Version:         1,
 		Input:           json.RawMessage(`{"hwnd":0}`),
 		CapabilityToken: []byte("tok"),
@@ -573,6 +600,53 @@ func TestZigHostToolsLiveWhenLibraryPresent(t *testing.T) {
 	}
 	if winOut.Total != len(winOut.Windows) {
 		t.Fatalf("total mismatch: %#v", winOut)
+	}
+
+	if winOut.Total > 0 {
+		var first map[string]any
+		rawWin, _ := json.Marshal(winOut.Windows[0])
+		if err := json.Unmarshal(rawWin, &first); err != nil {
+			t.Fatalf("decode window: %v", err)
+		}
+		var pwHwnd uint64
+		switch v := first["hwnd"].(type) {
+		case float64:
+			pwHwnd = uint64(v)
+		case json.Number:
+			n, _ := v.Int64()
+			pwHwnd = uint64(n)
+		}
+		if pwHwnd != 0 {
+			pwInput, err := json.Marshal(map[string]any{"hwnd": pwHwnd, "label": "print-window"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			pw, err := registry.Execute(context.Background(), Request{
+				ToolID: "computer.print_window", Version: 1,
+				Input: pwInput, CapabilityToken: token,
+			})
+			if err != nil {
+				// Some HWNDs refuse PrintWindow; still require a typed failure, not panic.
+				t.Logf("computer.print_window hwnd=%d: %v", pwHwnd, err)
+			} else {
+				var pwOut struct {
+					Path   string `json:"path"`
+					Width  int    `json:"width"`
+					Height int    `json:"height"`
+					HWND   uint64 `json:"hwnd"`
+					Method string `json:"method"`
+				}
+				if err := json.Unmarshal(pw.Output, &pwOut); err != nil {
+					t.Fatal(err)
+				}
+				if pwOut.Width < 1 || pwOut.Height < 1 || pwOut.HWND != pwHwnd || pwOut.Method != "PrintWindow" {
+					t.Fatalf("bad print_window: %#v", pwOut)
+				}
+				if _, err := os.Stat(pwOut.Path); err != nil {
+					t.Fatalf("print_window shot missing: %v", err)
+				}
+			}
+		}
 	}
 
 	shot, err := registry.Execute(context.Background(), Request{
