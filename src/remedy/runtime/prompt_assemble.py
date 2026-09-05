@@ -181,7 +181,7 @@ async def _assemble_async(inp: Mapping[str, Any]) -> dict[str, Any]:
             "system_chars": len(system),
         }
     finally:
-        end_turn(turn_tokens)
+        end_turn(session_id, *turn_tokens)
         reset_llm_binding(llm_tok)
         runtime._plan_mode = False
         runtime._chat_mode = False

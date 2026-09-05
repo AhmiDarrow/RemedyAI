@@ -75,7 +75,7 @@ def _open_app_is_protocol_or_url(raw: str) -> bool:
     if "://" in s or s.startswith("//"):
         return True
     m = re.match(r"(?i)^([a-z][a-z0-9+.-]*):", s)
-    return bool(m) and len(m.group(1)) != 1
+    return m is not None and len(m.group(1)) != 1
 
 
 def open_app(app: str, *, search_dirs: list[Path] | None = None) -> dict[str, Any]:

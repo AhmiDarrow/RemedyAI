@@ -150,7 +150,7 @@ class VoiceBridge:
 
         def reader() -> None:
             try:
-                box["line"] = proc.stdout.readline()  # type: ignore[union-attr]
+                box["line"] = proc.stdout.readline()
             except Exception as exc:  # noqa: BLE001
                 box["exc"] = exc
 

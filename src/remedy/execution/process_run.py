@@ -70,14 +70,19 @@ def run_hidden(
             if code is None:
                 child.kill_tree()
                 child.close()
-                raise subprocess.TimeoutExpired(cmd=list(args), timeout=timeout)
-            empty = "" if text else b""
-            result = subprocess.CompletedProcess(
-                list(args), int(code), empty, empty
-            )
+                raise subprocess.TimeoutExpired(
+                    cmd=list(args),
+                    timeout=0.0 if timeout is None else float(timeout),
+                )
+            empty: str | bytes = "" if text else b""
+            argv = [str(a) for a in args]
+            result = subprocess.CompletedProcess(argv, int(code), empty, empty)
             if check and result.returncode:
                 raise subprocess.CalledProcessError(
-                    result.returncode, list(args), result.stdout, result.stderr
+                    result.returncode,
+                    argv,
+                    result.stdout if isinstance(result.stdout, (str, bytes)) else None,
+                    result.stderr if isinstance(result.stderr, (str, bytes)) else None,
                 )
             return result
         finally:
@@ -119,10 +124,18 @@ def _run_hidden_exec_capture(
     )
     if captured.timed_out:
         raise subprocess.TimeoutExpired(
-            cmd=list(args),
-            timeout=timeout,
-            output=captured.stdout if not text else captured.stdout.decode("utf-8", "replace"),
-            stderr=captured.stderr if not text else captured.stderr.decode("utf-8", "replace"),
+            cmd=[str(a) for a in args],
+            timeout=0.0 if timeout is None else float(timeout),
+            output=(
+                captured.stdout.decode("utf-8", "replace")
+                if text
+                else captured.stdout
+            ),
+            stderr=(
+                captured.stderr.decode("utf-8", "replace")
+                if text
+                else captured.stderr
+            ),
         )
     stdout: Any = captured.stdout
     stderr: Any = captured.stderr

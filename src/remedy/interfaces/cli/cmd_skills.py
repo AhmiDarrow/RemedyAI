@@ -236,7 +236,7 @@ def _tool_runtime_request(
             return int(resp.status), payload
     except urllib.error.HTTPError as exc:
         raw = exc.read()
-        payload: object = None
+        payload = None
         if raw:
             try:
                 payload = json.loads(raw.decode("utf-8"))
