@@ -59,6 +59,7 @@ def test_ci_covers_every_shipped_runtime_and_artifact() -> None:
 
     linux_python = _run_commands(jobs["test"])
     for command in (
+        "check_sanitize.py",
         "ruff check",
         "mypy",
         "check_mypy_exclude.py",
@@ -256,6 +257,7 @@ def test_prepush_gate_runs_every_public_ci_command() -> None:
     jobs = _workflow_jobs("ci.yml")
     expected = {
         "test": (
+            "check_sanitize.py",
             "ruff check . --no-fix",
             "uv run mypy",
             "check_mypy_exclude.py",
