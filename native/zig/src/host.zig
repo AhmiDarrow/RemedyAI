@@ -794,6 +794,24 @@ export fn remedy_core_clipboard_set_text(utf8: ?[*]const u8, len: usize) callcon
     return unsupported_status;
 }
 
+/// CF_HDROP paths as a JSON string array. Empty `[]` when absent. Windows only.
+export fn remedy_core_clipboard_get_files(out_json: ?*?[*]u8, out_len: ?*usize) callconv(.c) i32 {
+    if (is_windows) return deliverBytes(windows.clipboardGetFilesJson(), out_json, out_len);
+    return unsupported_status;
+}
+
+/// CF_DIB encoded as PNG. Empty buffer when absent / unsupported DIB. Windows only.
+export fn remedy_core_clipboard_get_image_png(out_png: ?*?[*]u8, out_len: ?*usize) callconv(.c) i32 {
+    if (is_windows) return deliverBytes(windows.clipboardGetImagePng(), out_png, out_len);
+    return unsupported_status;
+}
+
+/// JSON `{hwnd,title,pid,exe}` for the foreground window. Windows only.
+export fn remedy_core_foreground_detail(out_json: ?*?[*]u8, out_len: ?*usize) callconv(.c) i32 {
+    if (is_windows) return deliverBytes(windows.foregroundDetailJson(), out_json, out_len);
+    return unsupported_status;
+}
+
 export fn remedy_core_process_spawn_hidden(
     argv_json: ?[*]const u8,
     argv_len: usize,

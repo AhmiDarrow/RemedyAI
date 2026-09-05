@@ -166,6 +166,9 @@ _PROTOTYPES: dict[str, tuple[list[Any], Any]] = {
     ),
     "remedy_core_clipboard_get_text": ([POINTER(_BytePtr), POINTER(c_size_t)], c_int32),
     "remedy_core_clipboard_set_text": ([c_char_p, c_size_t], c_int32),
+    "remedy_core_clipboard_get_files": ([POINTER(_BytePtr), POINTER(c_size_t)], c_int32),
+    "remedy_core_clipboard_get_image_png": ([POINTER(_BytePtr), POINTER(c_size_t)], c_int32),
+    "remedy_core_foreground_detail": ([POINTER(_BytePtr), POINTER(c_size_t)], c_int32),
     "remedy_core_process_spawn_hidden": (
         [
             c_char_p,

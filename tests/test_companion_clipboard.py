@@ -1,9 +1,4 @@
-"""Companion clipboard: Zig text path + remaining HDROP/DIB ctypes prototypes.
-
-Text get/set goes through ``host_binding``. HDROP file lists and DIB images
-still use ctypes; those calls must keep pointer-sized ``restype`` /
-``argtypes`` so truncated HANDLEs cannot AV the process.
-"""
+"""Companion clipboard/foreground via Zig ``host_binding`` (no Win32 ctypes)."""
 
 from __future__ import annotations
 
@@ -16,76 +11,15 @@ from remedy.core import companion as C
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="Win32 clipboard only")
 
 
-@pytest.fixture()
-def declared():
-    C._WIN32_PROTOTYPES_SET = False
-    C._declare_win32_clipboard_prototypes()
-    import ctypes
-
-    return {
-        "user32": ctypes.windll.user32,
-        "kernel32": ctypes.windll.kernel32,
-        "shell32": ctypes.windll.shell32,
-        "ctypes": ctypes,
-    }
-
-
-# --- remaining HDROP / DIB prototypes ---------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("dll", "func"),
-    [
-        ("user32", "GetClipboardData"),
-        ("kernel32", "GlobalLock"),
-    ],
-)
-def test_every_handle_returning_call_is_pointer_sized(declared, dll, func):
-    """The bug in one assertion: an int restype truncates a 64-bit handle."""
-    fn = getattr(declared[dll], func)
-    assert fn.restype is declared["ctypes"].c_void_p, (
-        f"{dll}.{func} returns a handle; an int restype loses the top 32 bits"
-    )
-
-
-@pytest.mark.parametrize(
-    ("dll", "func"),
-    [
-        ("kernel32", "GlobalLock"),
-        ("kernel32", "GlobalUnlock"),
-        ("kernel32", "GlobalSize"),
-        ("shell32", "DragQueryFileW"),
-    ],
-)
-def test_every_handle_taking_call_accepts_a_pointer(declared, dll, func):
-    """Passing a 64-bit handle into an int argument truncates it just as badly."""
-    fn = getattr(declared[dll], func)
-    assert fn.argtypes is not None, f"{dll}.{func} has no declared argtypes"
-    assert fn.argtypes[0] is declared["ctypes"].c_void_p
-
-
-def test_global_size_returns_a_size_not_an_int(declared):
-    """The read is bounded by this; a truncated size would bound it wrongly."""
-    assert declared["kernel32"].GlobalSize.restype is declared["ctypes"].c_size_t
-
-
-def test_declaring_twice_is_harmless(declared):
-    C._declare_win32_clipboard_prototypes()
-    C._declare_win32_clipboard_prototypes()
-    assert C._WIN32_PROTOTYPES_SET is True
-
-
-def test_declaration_is_skipped_off_windows(monkeypatch):
-    monkeypatch.setattr(C.os, "name", "posix")
-    C._WIN32_PROTOTYPES_SET = False
-    C._declare_win32_clipboard_prototypes()
-    assert C._WIN32_PROTOTYPES_SET is False
-
-
-def test_text_clipboard_no_longer_declares_set_or_alloc_prototypes(declared):
-    """EmptyClipboard / SetClipboardData / GlobalAlloc were deleted with the ctypes text path."""
+def test_ctypes_clipboard_helpers_are_gone():
+    """HDROP/DIB/foreground prototypes lived here; Zig owns those reads now."""
+    assert not hasattr(C, "_declare_win32_clipboard_prototypes")
+    assert not hasattr(C, "_WIN32_PROTOTYPES_SET")
+    assert not hasattr(C, "_CF_HDROP")
+    assert not hasattr(C, "_CF_DIB")
     assert not hasattr(C, "_CF_UNICODETEXT")
-    assert not hasattr(C, "_GMEM_MOVEABLE")
+    assert not hasattr(C, "_dib_to_png_bytes")
+    assert not hasattr(C, "_PROCESS_QUERY_LIMITED")
 
 
 # --- the calls themselves ---------------------------------------------------
@@ -112,6 +46,18 @@ def test_listing_clipboard_files_does_not_crash():
 def test_reading_a_clipboard_image_does_not_crash():
     out = C.Win32CompanionBackend().clipboard_image_png()
     assert out is None or isinstance(out, bytes)
+    if out:
+        assert out[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_foreground_detail_includes_pid_keys():
+    fg = C.Win32CompanionBackend().foreground()
+    assert isinstance(fg, dict)
+    if fg:
+        assert "hwnd" in fg and "title" in fg
+        assert "pid" in fg and "exe" in fg and "exe_name" in fg
+        assert isinstance(fg["pid"], int)
+        assert isinstance(fg["exe"], str)
 
 
 def test_the_full_snapshot_does_not_crash():
