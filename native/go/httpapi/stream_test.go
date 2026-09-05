@@ -22,6 +22,47 @@ func readSSE(t *testing.T, resp *http.Response) string {
 	return string(raw)
 }
 
+func TestStreamPassesSessionProjectPath(t *testing.T) {
+	runner := &stubRunner{tokens: []string{"ok"}}
+	base, shutdown, token := startMessagesServer(t, runner, t.TempDir())
+	defer shutdown()
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	proj := t.TempDir()
+	body, _ := json.Marshal(map[string]any{"title": "P", "project_path": proj})
+	req := authReq(t, http.MethodPost, base+"/api/sessions", token, bytes.NewReader(body))
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create: %d %s", resp.StatusCode, raw)
+	}
+	var sess ChatSession
+	if err := json.Unmarshal(raw, &sess); err != nil {
+		t.Fatal(err)
+	}
+
+	req = authReq(t, http.MethodPost, base+"/api/sessions/"+sess.ID+"/messages/stream", token,
+		bytes.NewBufferString(`{"message":"list"}`))
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = readSSE(t, resp)
+	resp.Body.Close()
+
+	call, ok := runner.lastCall()
+	if !ok {
+		t.Fatal("runner not called")
+	}
+	if call.ProjectPath != proj {
+		t.Fatalf("ProjectPath=%q want %q", call.ProjectPath, proj)
+	}
+}
+
 func TestStreamHappyPathFrames(t *testing.T) {
 	runner := &stubRunner{tokens: []string{"Hello ", "world"}}
 	base, shutdown, token := startMessagesServer(t, runner, t.TempDir())

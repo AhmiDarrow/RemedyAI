@@ -7,6 +7,24 @@ import (
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
 
+func TestInjectShellCwdOnlyWhenMissing(t *testing.T) {
+	with := injectShellCwd([]byte(`{"argv":["C:\\Windows\\System32\\cmd.exe","/c","cd"],"cwd":"D:\\keep"}`), `C:\proj`)
+	var args map[string]any
+	if err := json.Unmarshal(with, &args); err != nil {
+		t.Fatal(err)
+	}
+	if args["cwd"] != `D:\keep` {
+		t.Fatalf("cwd overwritten: %#v", args["cwd"])
+	}
+	filled := injectShellCwd([]byte(`{"argv":["C:\\Windows\\System32\\cmd.exe","/c","cd"]}`), `C:\proj`)
+	if err := json.Unmarshal(filled, &args); err != nil {
+		t.Fatal(err)
+	}
+	if args["cwd"] != `C:\proj` {
+		t.Fatalf("cwd not injected: %#v", args["cwd"])
+	}
+}
+
 func TestInjectWorkspaceRootPassesSchema(t *testing.T) {
 	reg := tools.NewRegistry()
 	if err := tools.RegisterPythonWorkerLocalMirrors(reg); err != nil {

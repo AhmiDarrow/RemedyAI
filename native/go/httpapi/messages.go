@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -606,6 +607,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		if sess.ProjectPath != nil {
 			projectPath = strings.TrimSpace(*sess.ProjectPath)
+			if projectPath != "" {
+				projectPath = filepath.Clean(projectPath)
+			}
 		}
 		sp, sm := resolveSessionLLMBind(sess.LLMProvider, sess.Model, req.Provider, req.Model)
 		if p, m, has := sessionLLMUpdateFields(sp, sm); has {

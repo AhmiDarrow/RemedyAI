@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -166,13 +167,21 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 	}
 	s.messengerGW.SendTyping(runCtx, ev.Channel, chatID)
 
+	projectPath := ""
+	if sess.ProjectPath != nil {
+		projectPath = strings.TrimSpace(*sess.ProjectPath)
+		if projectPath != "" {
+			projectPath = filepath.Clean(projectPath)
+		}
+	}
 	var reply strings.Builder
 	lastTyping := time.Now()
 	turnErr := s.runner.RunTurn(runCtx, TurnRequest{
-		SessionID: sess.ID,
-		Prompt:    msg,
-		Model:     sess.Model,
-		Provider:  sess.LLMProvider,
+		SessionID:   sess.ID,
+		Prompt:      msg,
+		Model:       sess.Model,
+		Provider:    sess.LLMProvider,
+		ProjectPath: projectPath,
 	}, func(token string) error {
 		if strings.HasPrefix(token, "@@") {
 			return nil
