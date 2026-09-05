@@ -87,14 +87,16 @@ def test_settings_get_includes_messengers(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setenv("REMEDY_HOME", str(home))
-    client = TestClient(create_app())
-    r = client.get("/api/settings")
-    assert r.status_code == 200
-    data = r.json()
-    assert "messengers" in data
-    assert isinstance(data["messengers"], list)
-    assert len(data["messengers"]) >= 5
-    for m in data["messengers"]:
+    from remedy.interfaces.messenger_settings import messengers_for_settings_response
+
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    assert "/api/settings" not in paths
+    _channels, messengers = messengers_for_settings_response(
+        {"enabled_channels": ["cli"], "setup_completed": True}, home
+    )
+    assert isinstance(messengers, list)
+    assert len(messengers) >= 5
+    for m in messengers:
         assert "id" in m and "token_set" in m
         assert "bot_token" not in (m.get("fields") or {})
 
@@ -137,12 +139,13 @@ def test_settings_put_messenger_token_not_echoed(tmp_path, monkeypatch):
     assert "telegram" in disk
     assert "secret-token-xyz" not in disk
 
-    # API path: GET must not echo token; token_set reflects secret store
-    client = TestClient(create_app())
-    g = client.get("/api/settings")
-    assert g.status_code == 200
-    assert "secret-token-xyz" not in g.text
-    tg = next(m for m in g.json()["messengers"] if m["id"] == "telegram")
+    # Public messenger payload must not echo token; token_set reflects secret store
+    from remedy.interfaces.messenger_settings import messengers_for_settings_response
+
+    _channels, messengers = messengers_for_settings_response(cfg, home)
+    blob = str(messengers)
+    assert "secret-token-xyz" not in blob
+    tg = next(m for m in messengers if m["id"] == "telegram")
     assert tg.get("token_set") is True
     assert tg.get("enabled") is True
 

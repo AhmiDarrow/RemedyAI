@@ -691,35 +691,7 @@ def test_executor_screenshot_without_bounds_ok_false(tmp_path, monkeypatch):
     assert "bounds" in str(out.get("message") or "").lower()
 
 
-def test_models_active_custom_url_is_not_refused(monkeypatch):
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-
-    import remedy.interfaces.routes.catalog as catalog_mod
-    from remedy.interfaces.routes.catalog import register_catalog_routes
-
-    owner_url = "https://llm.owner.example/v1"
-    monkeypatch.setattr(
-        catalog_mod,
-        "load_config",
-        lambda: {
-            "llm_provider": "custom",
-            "llm_base_url": owner_url,
-        },
-    )
-    monkeypatch.setattr(
-        "remedy.interfaces.config.resolve_provider_api_key",
-        lambda cfg, provider: "sk-not-a-real-key-for-tests",
-    )
-    app = FastAPI()
-    register_catalog_routes(app, runtime=None, gateway=None, memory=None)
-    r = TestClient(app).get(
-        "/api/models",
-        params={"provider": "custom", "base_url": owner_url},
-    )
-    assert r.status_code == 200
-    body = r.json()
-    assert "Refused" not in str(body.get("error") or "")
+# test_models_active_custom_url_is_not_refused: /api/models HTTP is Go-owned.
 
 
 def test_budget_hits_drops_hive_session_id():

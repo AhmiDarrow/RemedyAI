@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
-
 from remedy.core.react_policy import build_system_prompt
 from remedy.i18n.catalog import chrome_catalog
 from remedy.i18n.languages import (
@@ -134,18 +132,24 @@ def test_i18n_catalog_payload_and_settings_round_trip(tmp_path, monkeypatch):
     assert any(x["id"] == "auto" for x in body["languages"])
     assert any(x["id"] == "yo" for x in body["languages"])
 
-    client = TestClient(create_app())
-    s = client.get("/api/settings")
-    assert s.status_code == 200
-    data = s.json()
-    assert data.get("ui_language") == "auto"
-    assert isinstance(data.get("ui_languages"), list)
-    assert len(data["ui_languages"]) >= 60
+    from remedy.i18n.languages import public_language_list
+    from remedy.interfaces.settings_apply import (
+        apply_settings_update,
+        public_settings_snapshot,
+    )
 
-    put = client.put("/api/settings", json={"ui_language": "ja"})
-    assert put.status_code == 200, put.text
-    again = client.get("/api/settings")
-    assert again.json()["ui_language"] == "ja"
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    assert "/api/settings" not in paths
+    data = public_settings_snapshot({"setup_completed": True})
+    assert data.get("ui_language") == "auto"
+    langs = public_language_list()
+    assert isinstance(langs, list)
+    assert len(langs) >= 60
+
+    import asyncio
+
+    asyncio.run(apply_settings_update({"ui_language": "ja"}))
+    assert public_settings_snapshot()["ui_language"] == "ja"
     ja = catalog_payload("ja")
     assert ja["resolved"] == "ja"
     assert ja["catalog"]["settings.save"] == "保存"

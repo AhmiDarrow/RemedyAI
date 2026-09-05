@@ -105,14 +105,14 @@ def test_request_sidecar_restart_dev_desktop_still_requests(tmp_path, monkeypatc
     assert (tmp_path / "locks" / "self_inject_apply").exists()
 
 
-def test_self_inject_rounds_endpoint_reports_live_state(tmp_path, monkeypatch):
-    """Ledger surface: live vs awaiting-restart vs not-loaded, newest first."""
-    from fastapi.testclient import TestClient
-
-    from remedy.core.self_inject import SelfInjectRound, append_ledger
+def test_self_inject_rounds_http_absent_and_ledger_orders_newest(tmp_path, monkeypatch):
+    """HTTP /api/self-inject/rounds is Go-owned; ledger still newest-first."""
+    from remedy.core.self_inject import SelfInjectRound, append_ledger, read_ledger
     from remedy.interfaces.api import create_app
 
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    assert "/api/self-inject/rounds" not in paths
 
     live = SelfInjectRound(status="applied", tree="python", summary="old edit")
     live.finished_utc = "2000-01-01T00:00:00+00:00"
@@ -133,16 +133,13 @@ def test_self_inject_rounds_endpoint_reports_live_state(tmp_path, monkeypatch):
     red.finished_utc = "2999-01-01T00:00:00+00:00"
     append_ledger(red, tmp_path)
 
-    client = TestClient(create_app())
-    data = client.get("/api/self-inject/rounds").json()
-    by_id = {r["round_id"]: r for r in data["rounds"]}
-    assert by_id[live.round_id]["live_state"] == "live"
-    assert by_id[pending.round_id]["live_state"] == "awaiting_restart"
-    assert by_id[frozen_skip.round_id]["live_state"] == "not_loaded"
-    assert by_id[red.round_id]["live_state"] == ""
-    # Newest first, diff stripped from the payload.
-    assert data["rounds"][0]["round_id"] == red.round_id
-    assert all("diff" not in r for r in data["rounds"])
+    rounds = read_ledger(tmp_path)[::-1]  # newest first
+    assert rounds[0]["round_id"] == red.round_id
+    by_id = {r["round_id"]: r for r in rounds}
+    assert by_id[live.round_id]["status"] == "applied"
+    assert by_id[pending.round_id]["detail"]["sidecar_restart_requested"] is True
+    assert by_id[frozen_skip.round_id]["detail"]["sidecar_restart_requested"] is False
+    assert by_id[red.round_id]["status"] == "rolled_back"
 
 
 def test_request_sidecar_restart_no_snapshot(tmp_path):

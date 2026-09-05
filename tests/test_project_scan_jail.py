@@ -1,17 +1,22 @@
-"""Project scan path jail — Go httpapi owns POST /api/projects/scan.
+"""Misc HTTP twins are Go-owned; misc keeps /dashboard for TestClient only.
 
-Python TestClient no longer registers the twin; jail semantics live in
-native/go/httpapi/projects_scan.go (+ TestProjectsScan).
+Production ``POST /api/projects/scan`` and ``GET /api/app/command`` live in
+``native/go/httpapi`` (``projects_scan.go``, ``app_command.go``). Leftover
+``/api/openapi.*`` exports are gone with the FastAPI twin.
 """
 
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
-
 from remedy.interfaces.api import create_app
 
 
-def test_projects_scan_absent_from_testclient():
-    client = TestClient(create_app(api_key=""))
-    r = client.post("/api/projects/scan", params={"path": "."})
-    assert r.status_code in (404, 405)
+def test_misc_go_owned_http_routes_absent_from_testclient() -> None:
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    for path in (
+        "/api/projects/scan",
+        "/api/app/command",
+        "/api/openapi.json",
+        "/api/openapi.yaml",
+    ):
+        assert path not in paths
+    assert "/dashboard" in paths

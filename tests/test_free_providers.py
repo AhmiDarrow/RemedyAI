@@ -104,13 +104,13 @@ def test_poe_in_catalog():
 
 
 def test_demo_model_allowlist_blocks_junk():
-    from remedy.interfaces.routes.catalog import _demo_model_allowed
-
+    """Curated demo catalog pins allowlist; live filter is Go demoModelAllowed."""
     catalog = PROVIDER_CATALOG["demo"]["models"]
-    assert _demo_model_allowed("codestral-latest", catalog)
-    assert not _demo_model_allowed("deepseek-v4-flash", catalog)
-    assert not _demo_model_allowed("flux-kontext-max", catalog)
-    assert not _demo_model_allowed("kling-v3.0-pro", catalog)
+    ids = {str(m.get("id") or "") for m in catalog}
+    assert "codestral-latest" in ids
+    assert "deepseek-v4-flash" not in ids
+    assert "flux-kontext-max" not in ids
+    assert "kling-v3.0-pro" not in ids
 
 
 def test_free_options_public_includes_demo_and_free_keys():
@@ -193,120 +193,77 @@ def test_custom_active_local_is_connected():
     assert reason == "active_local"
 
 
-def test_probe_demo_and_missing_key(monkeypatch):
-    import asyncio
+def test_provider_probe_http_absent_from_testclient():
+    from remedy.interfaces.api import create_app
 
-    from fastapi import FastAPI
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    assert "/api/providers/probe" not in paths
 
-    from remedy.interfaces.routes.auth import ProviderProbeRequest, register_auth_routes
 
-    monkeypatch.setattr(
-        "remedy.interfaces.config.resolve_provider_api_key",
-        lambda *a, **k: "",
-    )
-    monkeypatch.setattr(
-        "remedy.interfaces.routes.auth.load_config",
-        lambda: {"llm_provider": "demo"},
-    )
-    app = FastAPI()
-    register_auth_routes(app)
-
-    probe = None
-    for route in app.routes:
-        if getattr(route, "path", "") == "/api/providers/probe":
-            probe = route.endpoint
-            break
-    assert probe is not None
-
+def test_probe_demo_curated_filter_and_missing_key():
+    """Demo probe keeps curated chat ids; missing key stays a soft failure."""
+    from remedy.interfaces.config import PROVIDER_CATALOG, resolve_provider_api_key
     from remedy.interfaces.model_discovery import DiscoveryResult
 
-    calls = []
-
-    async def fake_discover(base_url, api_key="", **kw):
-        calls.append((base_url, api_key, kw.get("provider_hint")))
-        return DiscoveryResult(
-            attempted=True, ok=True, status=200, url=base_url + "/models",
-            flavour="openai",
-            models=[
-                {"id": "codestral-latest", "name": "codestral-latest", "chat": True},
-                {"id": "gpt-oss:20b", "name": "gpt-oss:20b", "chat": True},
-                {"id": "flux-schnell", "name": "flux-schnell", "chat": False},
-                {"id": "claude-opus-5", "name": "claude-opus-5", "chat": True},
-            ],
-        )
-
-    monkeypatch.setattr("remedy.interfaces.model_discovery.discover_models", fake_discover)
-    demo = asyncio.run(probe(ProviderProbeRequest(provider="demo")))
-    # The gateway is really contacted now (no hardcoded "ok") …
-    assert calls and calls[0][2] == "demo"
-    assert demo["ok"] is True
-    # … and only the curated ids it still serves come back.
-    assert [m["id"] for m in demo["model_list"]] == ["codestral-latest", "gpt-oss:20b"]
-    assert demo["models"] == 2
-    missing = asyncio.run(probe(ProviderProbeRequest(provider="openai")))
-    assert missing["ok"] is False
-    assert missing["model_list"] == []
-    assert "key" in (missing.get("error") or "").lower()
-
-
-def test_probe_reports_why_discovery_failed(monkeypatch):
-    import asyncio
-
-    from fastapi import FastAPI
-
-    from remedy.interfaces.model_discovery import DiscoveryResult
-    from remedy.interfaces.routes.auth import ProviderProbeRequest, register_auth_routes
-
-    monkeypatch.setattr("remedy.interfaces.routes.auth.load_config", lambda: {})
-
-    async def fake_discover(base_url, api_key="", **kw):
-        return DiscoveryResult(
-            attempted=True, ok=False, status=401, url=base_url + "/models",
-            flavour="openai", error="Incorrect API key provided",
-        )
-
-    monkeypatch.setattr("remedy.interfaces.model_discovery.discover_models", fake_discover)
-    app = FastAPI()
-    register_auth_routes(app)
-    probe = next(r.endpoint for r in app.routes if getattr(r, "path", "") == "/api/providers/probe")
-    res = asyncio.run(probe(ProviderProbeRequest(provider="openai", api_key="sk-bad")))
-    assert res["ok"] is False
-    assert res["status"] == 401
-    assert "Incorrect API key" in res["error"]
-    assert res["model_list"] == []
-
-
-def test_probe_returns_the_models_it_listed(monkeypatch):
-    import asyncio
-
-    from fastapi import FastAPI
-
-    from remedy.interfaces.model_discovery import DiscoveryResult
-    from remedy.interfaces.routes.auth import ProviderProbeRequest, register_auth_routes
-
-    monkeypatch.setattr("remedy.interfaces.routes.auth.load_config", lambda: {})
-
-    async def fake_discover(base_url, api_key="", **kw):
-        assert base_url == "http://127.0.0.1:1234/v1"
-        return DiscoveryResult(
-            attempted=True, ok=True, status=200, url=base_url + "/models",
-            flavour="lmstudio",
-            models=[
-                {"id": "qwen2.5-coder-7b", "name": "Qwen Coder", "chat": True},
-                {"id": "nomic-embed-text", "name": "nomic", "chat": False},
-            ],
-        )
-
-    monkeypatch.setattr("remedy.interfaces.model_discovery.discover_models", fake_discover)
-    app = FastAPI()
-    register_auth_routes(app)
-    probe = next(r.endpoint for r in app.routes if getattr(r, "path", "") == "/api/providers/probe")
-    res = asyncio.run(
-        probe(ProviderProbeRequest(provider="custom", base_url="http://127.0.0.1:1234/v1"))
+    meta = PROVIDER_CATALOG["demo"]
+    disc = DiscoveryResult(
+        attempted=True,
+        ok=True,
+        status=200,
+        url="https://example/models",
+        flavour="openai",
+        models=[
+            {"id": "codestral-latest", "name": "codestral-latest", "chat": True},
+            {"id": "gpt-oss:20b", "name": "gpt-oss:20b", "chat": True},
+            {"id": "flux-schnell", "name": "flux-schnell", "chat": False},
+            {"id": "claude-opus-5", "name": "claude-opus-5", "chat": True},
+        ],
     )
-    assert res["ok"] is True
-    assert res["flavour"] == "lmstudio"
-    assert res["model_list"] == [{"id": "qwen2.5-coder-7b", "name": "Qwen Coder"}]
+    allowed = {str(m.get("id")) for m in (meta.get("models") or [])}
+    rows = [m for m in disc.models if m.get("chat", True) and m.get("id") in allowed]
+    assert [m["id"] for m in rows] == ["codestral-latest", "gpt-oss:20b"]
+    assert not resolve_provider_api_key({"llm_provider": "demo"}, "openai")
+
+
+def test_probe_reports_why_discovery_failed():
+    from remedy.interfaces.model_discovery import DiscoveryResult
+
+    disc = DiscoveryResult(
+        attempted=True,
+        ok=False,
+        status=401,
+        url="https://api.openai.com/v1/models",
+        flavour="openai",
+        error="Incorrect API key provided",
+    )
+    assert disc.ok is False
+    assert disc.status == 401
+    assert "Incorrect API key" in (disc.error or "")
+    assert disc.models == []
+
+
+def test_probe_returns_the_models_it_listed():
+    from remedy.interfaces.model_discovery import DiscoveryResult
+
+    disc = DiscoveryResult(
+        attempted=True,
+        ok=True,
+        status=200,
+        url="http://127.0.0.1:1234/v1/models",
+        flavour="lmstudio",
+        models=[
+            {"id": "qwen2.5-coder-7b", "name": "Qwen Coder", "chat": True},
+            {"id": "nomic-embed-text", "name": "nomic", "chat": False},
+        ],
+    )
+    assert disc.ok is True
+    assert disc.flavour == "lmstudio"
+    rows = [
+        {"id": str(m.get("id")), "name": str(m.get("name") or m.get("id"))}
+        for m in disc.models
+        if m.get("chat", True) and m.get("id")
+    ]
+    assert rows == [{"id": "qwen2.5-coder-7b", "name": "Qwen Coder"}]
 
 
 def test_stored_key_marks_provider_connected():

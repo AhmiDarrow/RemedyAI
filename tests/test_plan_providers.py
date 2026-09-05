@@ -43,61 +43,47 @@ class TestCatalogSprintC:
 
 
 class TestCustomEndpointRoundTrip:
-    """PUT /api/settings stores custom_llm_name; GET + providers reflect it."""
+    """apply_settings_update stores custom_llm_name; catalog reflects it (Go owns HTTP)."""
 
-    def test_custom_name_round_trip(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        from fastapi.testclient import TestClient
-
-        from remedy.interfaces.api import create_app
+    @pytest.mark.asyncio
+    async def test_custom_name_round_trip(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        from remedy.interfaces.settings_apply import (
+            apply_settings_update,
+            public_settings_snapshot,
+        )
 
         monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-        client = TestClient(create_app())
-
-        r = client.put(
-            "/api/settings",
-            json={
+        result = await apply_settings_update(
+            {
                 "llm_provider": "custom",
                 "llm_base_url": "http://127.0.0.1:5001/api/v1",
                 "custom_llm_name": "  LM Studio local  ",
                 "setup_completed": True,
-            },
+            }
         )
-        assert r.status_code == 200, r.text
-        assert r.json()["custom_llm_name"] == "LM Studio local"
-
-        r = client.get("/api/settings")
-        assert r.status_code == 200, r.text
-        assert r.json()["custom_llm_name"] == "LM Studio local"
-
-        r = client.get("/api/providers")
-        assert r.status_code == 200, r.text
-        custom = next(p for p in r.json()["providers"] if p["id"] == "custom")
+        assert result["custom_llm_name"] == "LM Studio local"
+        assert public_settings_snapshot()["custom_llm_name"] == "LM Studio local"
+        custom = next(p for p in public_provider_catalog() if p["id"] == "custom")
         assert custom["name"] == "LM Studio local"
         assert custom["advanced"] is False
 
-    def test_custom_name_cleared_to_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        from fastapi.testclient import TestClient
-
-        from remedy.interfaces.api import create_app
+    @pytest.mark.asyncio
+    async def test_custom_name_cleared_to_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        from remedy.interfaces.settings_apply import apply_settings_update
 
         monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-        client = TestClient(create_app())
-
-        r = client.put(
-            "/api/settings",
-            json={
+        await apply_settings_update(
+            {
                 "llm_provider": "custom",
                 "custom_llm_name": "Temp Name",
                 "setup_completed": True,
-            },
+            }
         )
-        assert r.status_code == 200, r.text
-        r = client.put("/api/settings", json={"custom_llm_name": ""})
-        assert r.status_code == 200, r.text
-        assert r.json()["custom_llm_name"] == ""
-
-        r = client.get("/api/providers")
-        custom = next(p for p in r.json()["providers"] if p["id"] == "custom")
+        result = await apply_settings_update({"custom_llm_name": ""})
+        assert result["custom_llm_name"] == ""
+        custom = next(p for p in public_provider_catalog() if p["id"] == "custom")
         assert custom["name"] == "Custom / OpenAI-compatible"
 
     def test_adapters_registered(self):
@@ -226,16 +212,12 @@ class TestCliAuth:
 
 
 class TestAuthRoutes:
-    def test_routes_register(self):
-        from fastapi import FastAPI
+    def test_provider_and_xai_auth_routes_absent_from_testclient(self):
+        from remedy.interfaces.api import create_app
 
-        from remedy.interfaces.routes.auth import register_auth_routes
-
-        app = FastAPI()
-        register_auth_routes(app)
-        paths = {getattr(r, "path", None) for r in app.routes}
-        assert "/api/providers" in paths
-        assert "/api/providers/ollama/detect" in paths
-        # /api/auth/xai* is Go-owned — not on the TestClient registrar.
+        paths = {getattr(r, "path", None) for r in create_app(api_key="").routes}
+        # Provider + xAI auth HTTP is Go-owned — FastAPI twin is gone.
+        assert "/api/providers" not in paths
+        assert "/api/providers/ollama/detect" not in paths
         assert "/api/auth/xai/login" not in paths
         assert "/api/auth/xai" not in paths

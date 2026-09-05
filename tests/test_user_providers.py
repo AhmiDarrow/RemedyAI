@@ -1,7 +1,7 @@
 """Saved custom endpoints become providers of their own.
 
 Everything runs against a temp REMEDY_HOME; no sockets are opened (discovery
-is replaced with a stub).
+is replaced with a stub). HTTP ``/api/providers*`` is Go-owned.
 """
 from __future__ import annotations
 
@@ -12,15 +12,16 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from remedy.interfaces import api_support
+from remedy.interfaces.api import create_app
 from remedy.interfaces.config import (
     PROVIDER_CATALOG,
     classify_provider_connection,
     normalize_llm_settings,
     provider_credentials_ready,
+    public_provider_catalog,
     validate_provider_model,
 )
 from remedy.interfaces.model_discovery import DiscoveryResult
-from remedy.interfaces.routes.auth import register_auth_routes
 from remedy.interfaces.user_providers import (
     provider_id_for,
     remove_spec,
@@ -39,13 +40,6 @@ def home(tmp_path, monkeypatch):
     yield tmp_path / ".remedy"
     sync_catalog({})
     api_support.invalidate_config_cache()
-
-
-@pytest.fixture()
-def client(monkeypatch):
-    app = FastAPI()
-    register_auth_routes(app)
-    return TestClient(app)
 
 
 @pytest.fixture()
@@ -166,121 +160,106 @@ def test_adapter_follows_the_saved_flavour():
     assert isinstance(get_provider(d), OpenAIProvider)
 
 
-# --- routes -------------------------------------------------------------------
+# --- helpers (HTTP /api/providers* is Go-owned) --------------------------------
 
 
-def test_post_creates_a_provider_and_stores_the_key_under_its_id(client, discovery, home):
+def test_provider_http_routes_absent_from_testclient():
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    for path in (
+        "/api/providers",
+        "/api/providers/connected",
+        "/api/providers/free",
+        "/api/providers/ollama/detect",
+        "/api/providers/custom",
+        "/api/providers/probe",
+    ):
+        assert path not in paths
+
+
+def test_upsert_stores_a_provider_and_secret_under_its_id(discovery, home):
+    from remedy.interfaces.secret_store import get_provider_secret, set_provider_secret
+
     discovery["result"] = DiscoveryResult(
         attempted=True, ok=True, status=200, url="u", flavour="lmstudio",
         models=[{"id": "qwen2.5", "name": "qwen2.5", "chat": True}, {"id": "emb", "chat": False}],
     )
-    r = client.post(
-        "/api/providers/custom",
-        json={"name": "LM Studio", "base_url": "http://127.0.0.1:1234/v1/", "api_key": "lm-secret"},
+    cfg, pid = upsert_spec(
+        {},
+        name="LM Studio",
+        base_url="http://127.0.0.1:1234/v1/",
+        flavour="openai",
     )
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["id"] == "custom-lm-studio"
-    assert body["provider"]["user_defined"] is True
-    assert body["provider"]["name"] == "LM Studio"
-    assert body["provider"]["flavour"] == "openai"  # lmstudio speaks OpenAI
-    assert body["models"] == [{"id": "qwen2.5", "name": "qwen2.5"}]
-    assert discovery["last"] == ("http://127.0.0.1:1234/v1", "lm-secret", "custom")
-
-    from remedy.interfaces.secret_store import get_provider_secret
-
-    assert get_provider_secret("custom-lm-studio", home=home) == "lm-secret"
-    # The key lives under the new id — nothing was parked on "custom".
+    assert pid == "custom-lm-studio"
+    set_provider_secret(pid, "lm-secret", home=home)
+    assert PROVIDER_CATALOG[pid]["user_defined"] is True
+    assert PROVIDER_CATALOG[pid]["label"] == "LM Studio"
+    assert get_provider_secret(pid, home=home) == "lm-secret"
     assert not get_provider_secret("custom", home=home)
-
-    listed = {p["id"]: p for p in client.get("/api/providers").json()["providers"]}
-    assert "custom-lm-studio" in listed
-    # The template row is untouched and still offered.
+    sync_catalog(cfg)
+    listed = {p["id"]: p for p in public_provider_catalog(cfg)}
+    assert pid in listed
     assert listed["custom"]["base_url"] == PROVIDER_CATALOG["custom"]["base_url"]
 
 
-def test_post_without_a_key_saves_a_keyless_endpoint_even_when_the_host_is_down(
-    client, discovery
-):
-    r = client.post(
-        "/api/providers/custom",
-        json={"name": "Home server", "base_url": "http://192.168.1.9:8080/v1"},
+def test_upsert_without_a_key_saves_a_keyless_endpoint(discovery):
+    cfg, pid = upsert_spec(
+        {},
+        name="Home server",
+        base_url="http://192.168.1.9:8080/v1",
+        auth="none",
     )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["provider"]["auth"] == ["none"]
-    assert body["discovery"]["ok"] is False
-    assert body["note"] == "down"
+    assert PROVIDER_CATALOG[pid]["auth"] == ["none"]
+    sync_catalog(cfg)
 
 
-def test_post_can_replace_an_existing_saved_endpoint(client, discovery):
-    first = client.post(
-        "/api/providers/custom", json={"name": "Box", "base_url": "http://a/v1"}
-    ).json()["id"]
-    again = client.post(
-        "/api/providers/custom",
-        json={"id": first, "name": "Box", "base_url": "http://b/v1", "flavour": "anthropic"},
-    ).json()
-    assert again["id"] == first
+def test_upsert_can_replace_an_existing_saved_endpoint(discovery):
+    cfg, first = upsert_spec({}, name="Box", base_url="http://a/v1")
+    cfg, again = upsert_spec(
+        cfg, name="Box", base_url="http://b/v1", flavour="anthropic", pid=first
+    )
+    assert again == first
     assert PROVIDER_CATALOG[first]["base_url"] == "http://b/v1"
     assert PROVIDER_CATALOG[first]["flavour"] == "anthropic"
-    # A keyed endpoint edited without retyping the key stays keyed.
-    keyed = client.post(
-        "/api/providers/custom", json={"name": "Keyed", "base_url": "http://k/v1", "api_key": "sk"}
-    ).json()["id"]
+    cfg, keyed = upsert_spec(cfg, name="Keyed", base_url="http://k/v1", auth="api_key")
     assert PROVIDER_CATALOG[keyed]["auth"] == ["api_key"]
-    client.post("/api/providers/custom", json={"id": keyed, "name": "Keyed", "base_url": "http://k2/v1"})
-    assert PROVIDER_CATALOG[keyed]["auth"] == ["api_key"]
-    client.post(
-        "/api/providers/custom",
-        json={"id": keyed, "name": "Keyed", "base_url": "http://k2/v1", "requires_key": False},
+    cfg, keyed2 = upsert_spec(
+        cfg, name="Keyed", base_url="http://k2/v1", pid=keyed, auth="api_key"
     )
+    assert keyed2 == keyed
+    assert PROVIDER_CATALOG[keyed]["auth"] == ["api_key"]
+    cfg, keyed3 = upsert_spec(
+        cfg, name="Keyed", base_url="http://k2/v1", pid=keyed, auth="none"
+    )
+    assert keyed3 == keyed
     assert PROVIDER_CATALOG[keyed]["auth"] == ["none"]
-    ids = [p["id"] for p in client.get("/api/providers").json()["providers"]]
+    sync_catalog(cfg)
+    ids = [p["id"] for p in public_provider_catalog(cfg)]
     assert ids.count(first) == 1
 
 
-def test_bad_requests_are_rejected(client, discovery):
-    assert client.post("/api/providers/custom", json={"name": "x", "base_url": "nope"}).status_code == 400
-    assert client.post(
-        "/api/providers/custom", json={"id": "openai", "name": "x", "base_url": "http://a/v1"}
-    ).status_code == 400
-    assert client.delete("/api/providers/custom/openai").status_code == 404
+def test_bad_upsert_urls_are_rejected(discovery):
+    with pytest.raises(ValueError):
+        upsert_spec({}, name="x", base_url="")
+    with pytest.raises(ValueError):
+        upsert_spec({}, name="", base_url="http://a/v1")
 
 
-def test_delete_removes_the_provider_and_its_key(client, discovery, home):
-    pid = client.post(
-        "/api/providers/custom",
-        json={"name": "Gone", "base_url": "http://g/v1", "api_key": "k"},
-    ).json()["id"]
-    r = client.delete(f"/api/providers/custom/{pid}")
-    assert r.status_code == 200
+def test_delete_removes_the_provider_and_its_key(discovery, home):
+    from remedy.interfaces.secret_store import (
+        clear_provider_secret,
+        get_provider_secret,
+        set_provider_secret,
+    )
+
+    cfg, pid = upsert_spec({}, name="Gone", base_url="http://g/v1", auth="api_key")
+    set_provider_secret(pid, "k", home=home)
+    cfg = remove_spec(cfg, pid)
+    clear_provider_secret(pid, home=home)
     assert pid not in PROVIDER_CATALOG
-    ids = [p["id"] for p in client.get("/api/providers").json()["providers"]]
+    sync_catalog(cfg)
+    ids = [p["id"] for p in public_provider_catalog(cfg)]
     assert pid not in ids
-
-    from remedy.interfaces.secret_store import get_provider_secret
-
     assert not get_provider_secret(pid, home=home)
 
-
-def test_models_route_discovers_against_the_saved_url(monkeypatch, discovery):
-    from remedy.interfaces.routes.catalog import register_catalog_routes
-
-    cfg, pid = upsert_spec({}, name="Box", base_url="http://box:8000/v1", auth="none")
-    # Config is the truth: an endpoint that is not saved does not survive a load.
-    api_support._write_config(api_support._default_config_path(), cfg)
-    discovery["result"] = DiscoveryResult(
-        attempted=True, ok=True, status=200, url="u", flavour="openai",
-        models=[{"id": "served-model", "name": "served-model", "chat": True}],
-    )
-    # catalog.py bound the name at import time — patch its reference.
-    monkeypatch.setattr("remedy.interfaces.routes.catalog.discover_models", discovery["fake"])
-    app = FastAPI()
-    register_catalog_routes(app, runtime=None, gateway=None, memory=None)
-    c = TestClient(app)
-    body = c.get("/api/models", params={"provider": pid}).json()
-    assert body["provider"] == pid
-    assert body["base_url"] == "http://box:8000/v1"
-    assert [m["id"] for m in body["models"]] == ["served-model"]
-    assert body["default"] == "served-model"
+# test_models_route_discovers_against_the_saved_url: /api/models is Go-owned
+# (providers.go / providers_test.go).
