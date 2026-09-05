@@ -1,21 +1,16 @@
-"""Child processes that never flash a console window and never outlive us.
+"""Child processes via ``remedy_core`` authorized spawn — no soft pipe fallback.
 
-Desktop users must never see a brief cmd/powershell window when the agent
-runs tools, and nothing Remedy starts may be left running after she stops
-it. Every Remedy-spawned child goes through this module:
+Production paths:
 
-* :func:`spawn_hidden` is the production path: ``remedy_core`` authorized
-  spawn (policy + capability token + write-jail) inside a job / process
-  group so the whole tree dies when the handle closes. No unsigned soft
-  fallback.
-* :func:`run_hidden` prefers :func:`spawn_hidden` when no pipes are needed,
-  and :func:`process_exec_capture_authorized` for one-shot stdout/stderr
-  capture. Soft ``CREATE_NO_WINDOW`` is not a production happy path on
-  win32/linux (Zig has no interactive pipe-spawn yet — those helpers fail
-  closed; tests may inject doubles).
-* :func:`kill_tree` / :func:`kill_process_tree` terminate a process and every
-  descendant through ``remedy_core`` (toolhelp walk, deepest first) instead
-  of a shell helper.
+* :func:`spawn_hidden` — policy + capability token + write-jail inside a job /
+  process group (KILL_ON_JOB_CLOSE).
+* :func:`run_hidden` — no-pipe → :func:`spawn_hidden`; capture → Zig
+  exec-capture. Interactive pipes raise ``HostError`` (unsupported).
+* :func:`kill_tree` / :func:`kill_process_tree` — toolhelp walk, deepest first.
+
+``popen_hidden`` / :func:`create_hidden_subprocess_exec` exist so tests can
+patch them; on every platform they fail closed (no CREATE_NO_WINDOW happy
+path). Legacy console-hide kwargs below are for non-Zig spawn sites only.
 """
 
 from __future__ import annotations
@@ -26,23 +21,18 @@ import sys
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 
 def hidden_creationflags() -> int:
-    """Windows creation flags that suppress a console window (0 elsewhere).
-
-    Uses ``getattr`` so a win32-platform mock on a POSIX interpreter (CI under
-    WSL, unit tests) cannot AttributeError on ``CREATE_NO_WINDOW``. Legacy /
-    non-host platforms only — production win32/linux use Zig authorized spawn.
-    """
+    """Windows CREATE_NO_WINDOW (0 elsewhere). Legacy / non-host callers only."""
     if sys.platform != "win32":
         return 0
     return int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
 def hidden_startupinfo() -> Any | None:
-    """STARTUPINFO with SW_HIDE, belt and braces alongside CREATE_NO_WINDOW."""
+    """STARTUPINFO with SW_HIDE alongside CREATE_NO_WINDOW."""
     if sys.platform != "win32":
         return None
     startupinfo_cls = getattr(subprocess, "STARTUPINFO", None)
@@ -55,11 +45,7 @@ def hidden_startupinfo() -> Any | None:
 
 
 def hidden_subprocess_kwargs() -> dict[str, Any]:
-    """Kwargs mergeable into subprocess.run / Popen / create_subprocess_exec.
-
-    On Windows: CREATE_NO_WINDOW + SW_HIDE. Used only off the win32/linux
-    production gate (darwin / explicit test soft paths).
-    """
+    """Kwargs for legacy subprocess sites that are not yet Zig-backed."""
     if sys.platform != "win32":
         return {}
     out: dict[str, Any] = {"creationflags": hidden_creationflags()}
@@ -69,28 +55,12 @@ def hidden_subprocess_kwargs() -> dict[str, Any]:
     return out
 
 
-def _merge_hidden(extra: dict[str, Any]) -> dict[str, Any]:
-    """Hidden kwargs plus *extra*; caller creation flags are OR-ed in."""
-    kwargs = hidden_subprocess_kwargs()
-    flags = extra.pop("creationflags", 0)
-    if flags:
-        kwargs["creationflags"] = int(kwargs.get("creationflags", 0)) | int(flags)
-    kwargs.update(extra)
-    return kwargs
-
-
 def _process_host_required() -> bool:
-    """Platforms where product spawn must go through ``remedy_core``."""
     return sys.platform in ("win32", "linux")
 
 
 def require_process_host() -> None:
-    """Fail closed when the Zig process host cannot be loaded.
-
-    Explicit test doubles patch :func:`run_hidden` / :func:`popen_hidden` /
-    :func:`create_hidden_subprocess_exec` / :func:`spawn_hidden` and never
-    reach this gate.
-    """
+    """Fail closed when the Zig process host cannot be loaded on win32/linux."""
     if not _process_host_required():
         return
     from remedy.core.computer import host_binding
@@ -98,10 +68,8 @@ def require_process_host() -> None:
     host_binding._lib()
 
 
-def _refuse_soft_pipe_spawn(helper: str) -> None:
-    """Zig has no interactive pipe-spawn; win32/linux must not soft-fallback."""
-    if not _process_host_required():
-        return
+def _refuse_soft_pipe_spawn(helper: str) -> NoReturn:
+    """Zig has no interactive pipe-spawn; never soft-fallback anywhere."""
     from remedy.core.computer.host_binding import STATUS_UNSUPPORTED, HostError
 
     raise HostError(helper, STATUS_UNSUPPORTED)
@@ -116,7 +84,6 @@ def _stdio_is_pipe_request(
     stdin: Any = None,
     extra: Mapping[str, Any] | None = None,
 ) -> bool:
-    """True when the caller needs OS pipes (authorized spawn has none)."""
     if capture_output or input is not None:
         return True
     pipe_markers = (subprocess.PIPE, asyncio.subprocess.PIPE)
@@ -133,21 +100,16 @@ def _can_exec_capture(
     input: Any,
     extra: Mapping[str, Any],
 ) -> bool:
-    """True when Zig one-shot exec-capture can satisfy this run_hidden call."""
     if not capture_output or input is not None:
         return False
     pipe_markers = (subprocess.PIPE, asyncio.subprocess.PIPE)
     return not any(extra.get(key) in pipe_markers for key in ("stdout", "stderr", "stdin"))
 
 
-#: Default wall for a hidden child process. Every caller today passes its own,
-#: so this changes nothing now; it is here so the next one that forgets does
-#: not get an unbounded wait. Pass ``timeout=None`` for a deliberately
-#: unbounded run (an interactive dev server, a long build).
 DEFAULT_RUN_TIMEOUT_S = 120.0
 
 # Retain Zig job/process-group handles so KILL_ON_JOB_CLOSE does not reap
-# fire-and-forget launches (open_app, desktop CLI) the moment spawn returns.
+# fire-and-forget launches the moment spawn returns.
 _DETACHED_CHILDREN: list[Any] = []
 
 
@@ -163,7 +125,7 @@ def run_hidden(
     input: str | bytes | None = None,
     **extra: Any,
 ) -> subprocess.CompletedProcess[Any]:
-    """Run *args* hidden via Zig authorized spawn or exec-capture."""
+    """Run *args* via Zig authorized spawn or exec-capture (no soft pipes)."""
     require_process_host()
     if not _stdio_is_pipe_request(
         capture_output=capture_output, input=input, extra=extra
@@ -197,18 +159,6 @@ def run_hidden(
             check=check,
         )
     _refuse_soft_pipe_spawn("run_hidden")
-    kwargs: dict[str, Any] = {
-        **_merge_hidden(dict(extra)),
-        "capture_output": capture_output,
-        "text": text,
-        "timeout": timeout,
-        "cwd": cwd,
-        "env": env,
-        "check": check,
-    }
-    if input is not None:
-        kwargs["input"] = input
-    return subprocess.run(list(args), **kwargs)
 
 
 def _run_hidden_exec_capture(
@@ -220,7 +170,6 @@ def _run_hidden_exec_capture(
     env: Mapping[str, str] | None,
     check: bool,
 ) -> subprocess.CompletedProcess[Any]:
-    """One-shot capture through ``remedy_core`` authorized exec-capture."""
     from remedy.core.computer import host_binding
 
     resolved = _resolve_argv0(args)
@@ -266,7 +215,7 @@ async def run_hidden_async(
     input: str | bytes | None = None,
     **extra: Any,
 ) -> subprocess.CompletedProcess[Any]:
-    """Async wrapper around :func:`run_hidden` (Zig spawn / exec-capture)."""
+    """Async wrapper around :func:`run_hidden`."""
     return await asyncio.to_thread(
         run_hidden,
         args,
@@ -291,22 +240,10 @@ def popen_hidden(
     stdin: Any = None,
     **extra: Any,
 ) -> subprocess.Popen[Any]:
-    """Soft Popen helper — fail closed on win32/linux (no Zig pipe-spawn).
-
-    Prefer :func:`spawn_hidden` (retain the handle for fire-and-forget) or
-    :func:`run_hidden` for one-shot capture. Tests may patch this symbol.
-    """
+    """Fail closed — no Zig pipe-spawn. Prefer :func:`spawn_hidden` / :func:`run_hidden`."""
+    _ = (args, cwd, env, stdout, stderr, stdin, extra)
     require_process_host()
     _refuse_soft_pipe_spawn("popen_hidden")
-    return subprocess.Popen(
-        list(args),
-        cwd=cwd,
-        env=env,
-        stdout=stdout,
-        stderr=stderr,
-        stdin=stdin,
-        **_merge_hidden(extra),
-    )
 
 
 async def create_hidden_subprocess_exec(
@@ -319,36 +256,14 @@ async def create_hidden_subprocess_exec(
     env: Mapping[str, str] | None = None,
     **extra: Any,
 ) -> asyncio.subprocess.Process:
-    """Soft async exec — fail closed on win32/linux (no Zig pipe-spawn).
-
-    Prefer :func:`run_hidden_async` for one-shot capture. Tests may patch this
-    symbol.
-    """
+    """Fail closed — no Zig pipe-spawn. Prefer :func:`run_hidden_async`."""
+    _ = (program, args, stdout, stderr, stdin, cwd, env, extra)
     require_process_host()
     _refuse_soft_pipe_spawn("create_hidden_subprocess_exec")
-    return await asyncio.create_subprocess_exec(
-        program,
-        *args,
-        stdout=stdout,
-        stderr=stderr,
-        stdin=stdin,
-        cwd=cwd,
-        env=env,
-        **_merge_hidden(extra),
-    )
-
-
-# --- remedy_core process control -------------------------------------------
 
 
 class HiddenProcess:
-    """A process started by :func:`spawn_hidden`.
-
-    The process runs inside a job object with ``KILL_ON_JOB_CLOSE``: calling
-    :meth:`close` (or leaving a ``with`` block) ends the process and every
-    descendant that is still running. Use :meth:`wait` first when the process
-    is meant to finish on its own.
-    """
+    """Process from :func:`spawn_hidden`; :meth:`close` ends the job tree."""
 
     def __init__(self, pid: int, handle: int) -> None:
         self.pid = pid
@@ -366,18 +281,15 @@ class HiddenProcess:
         self.close()
 
     def wait(self, timeout: float | None = DEFAULT_RUN_TIMEOUT_S) -> int | None:
-        """Exit code once the process ends, None if *timeout* seconds elapse."""
         return wait(self, timeout)
 
     def poll(self) -> int | None:
         return wait(self, 0)
 
     def kill_tree(self) -> None:
-        """Terminate the process and all descendants now."""
         kill_tree(self.pid)
 
     def close(self) -> None:
-        """Release the handles; a still-running tree is terminated."""
         from remedy.core.computer import host_binding
 
         handle, self._handle = self._handle, 0
@@ -396,7 +308,6 @@ def retain_detached(child: HiddenProcess) -> HiddenProcess:
 
 
 def _resolve_argv0(argv: Sequence[str]) -> list[str]:
-    """Resolve argv[0] to an absolute path (required by authorized spawn)."""
     import shutil
 
     args = [str(a) for a in argv]
@@ -420,25 +331,12 @@ def spawn_hidden(
     env: Mapping[str, str] | None = None,
     write_roots: Sequence[str | Path] | None = None,
 ) -> HiddenProcess:
-    """Start *argv* hidden, inside a job that dies with its handle.
-
-    No pipes are attached; use :func:`run_hidden` (capture) when output is
-    needed. Goes through ``remedy_core`` authorized spawn (policy + capability
-    token + write-jail / workdir roots). There is no soft fallback to the
-    unsigned spawn export. *write_roots* ``None`` leaves the core's installed
-    roots unchanged; an empty sequence clears the jail (Full). Raises
-    :class:`remedy.core.computer.host_binding.HostError` (unsupported) on
-    platforms where ``remedy_core`` has no process host yet.
-    """
+    """Start *argv* hidden via authorized spawn (no unsigned soft fallback)."""
     from remedy.core.computer import host_binding
 
     resolved = _resolve_argv0(argv)
     token, now_ms = host_binding.issue_process_spawn_token(resolved)
-    roots = (
-        None
-        if write_roots is None
-        else [str(r) for r in write_roots]
-    )
+    roots = None if write_roots is None else [str(r) for r in write_roots]
     pid, handle = host_binding.process_spawn_authorized(
         resolved,
         str(cwd) if cwd else None,
@@ -451,11 +349,7 @@ def spawn_hidden(
 
 
 def wait(process: HiddenProcess, timeout: float | None = DEFAULT_RUN_TIMEOUT_S) -> int | None:
-    """Wait for a :class:`HiddenProcess`; None when *timeout* elapses first.
-
-    A closed handle always raises ``ValueError`` — read ``returncode`` on the
-    object after a prior successful wait instead of waiting again.
-    """
+    """Wait for a :class:`HiddenProcess`; None when *timeout* elapses first."""
     from remedy.core.computer import host_binding
 
     if not process.handle:
@@ -470,34 +364,22 @@ def wait(process: HiddenProcess, timeout: float | None = DEFAULT_RUN_TIMEOUT_S) 
 
 
 def kill_tree(pid: int) -> None:
-    """Terminate *pid* and every descendant (deepest first) through ``remedy_core``."""
+    """Terminate *pid* and every descendant through ``remedy_core``."""
     from remedy.core.computer import host_binding
 
     host_binding.process_kill_tree(int(pid))
 
 
 def kill_process_tree(proc: Any) -> None:
-    """Kill *proc* and, on Windows, its whole child tree.
-
-    Accepts ``asyncio.subprocess.Process``, ``subprocess.Popen`` or
-    :class:`HiddenProcess`. Safe to call if the process already exited.
-
-    On Windows the kill-tree walks through ``remedy_core``. A missing or
-    mismatched core is a hard error — orphans must not be left behind by a
-    silent fallthrough to ``proc.kill()``.
-    """
+    """Kill *proc* (and on Windows its child tree via ``remedy_core``)."""
     if proc is None:
         return
     if isinstance(proc, HiddenProcess):
-        try:
+        with suppress(ProcessLookupError):
             proc.kill_tree()
-        except ProcessLookupError:
-            return
         return
     pid = getattr(proc, "pid", None)
     if sys.platform == "win32" and pid:
-        # The job/toolhelp walk reaches grandchildren (pwsh under cmd, python
-        # under uv) that a plain proc.kill() would orphan.
         from remedy.core.computer.host_binding import HostError
         from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
@@ -509,11 +391,10 @@ def kill_process_tree(proc: Any) -> None:
         except ProcessLookupError:
             return
         except OSError:
-            # Process already gone; fall through only to confirm.
             pass
     try:
         if getattr(proc, "returncode", None) is not None:
-            return  # already exited (asyncio Process)
+            return
     except Exception:
         pass
     try:
@@ -531,21 +412,11 @@ def kill_process_tree(proc: Any) -> None:
 
 
 def win_shell_prefix() -> list[str]:
-    """Argv prefix for running a shell command string on Windows without a window.
-
-    Prefer **cmd.exe** for agent bash_exec: local models emit bash/cmd-style
-    commands (``mkdir -p``, ``&&``, ``cd path && …``). PowerShell treats
-    ``mkdir -p a b`` as unknown parameters and fails partner builds
-    (RemedyPDF 2026-08-08: ``mkdir: A positional parameter cannot be found…``).
-
-    PowerShell payloads never go through this prefix — Host Bridge writes a
-    temp ``.ps1`` and runs ``pwsh -File``. See ``execution.host``.
-    """
+    """Argv prefix for a shell command string (cmd /c on Windows, sh -c elsewhere)."""
     import shutil
 
     if sys.platform != "win32":
         sh = shutil.which("bash") or shutil.which("sh") or "/bin/sh"
         return [sh, "-c"]
-
     cmd = shutil.which("cmd") or "cmd.exe"
     return [cmd, "/c"]
