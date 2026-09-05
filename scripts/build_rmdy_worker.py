@@ -116,9 +116,7 @@ def _is_denied_worker_path(rel: Path) -> bool:
     if posix in WORKER_DENY_REL_FILES:
         return True
     name = rel.name
-    if name.startswith("agent_") and name.endswith("_tools.py"):
-        return True
-    return False
+    return name.startswith("agent_") and name.endswith("_tools.py")
 
 
 def _is_skipped(rel: Path) -> bool:
@@ -132,9 +130,7 @@ def _is_skipped(rel: Path) -> bool:
     top = rel.parts[0] if rel.parts else ""
     if top and top not in WORKER_ALLOW_TOP_LEVEL:
         return True
-    if _is_denied_worker_path(rel):
-        return True
-    return False
+    return bool(_is_denied_worker_path(rel))
 
 
 def stage_worker_tree(dest: Path, *, source: Path = SRC_REMEDY) -> Path:
