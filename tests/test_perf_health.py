@@ -160,27 +160,6 @@ def test_connected_providers_fast_without_ollama(tmp_path: Path, monkeypatch):
 
 
 
-def test_request_log_level_silences_fast_quiet():
-    from remedy.interfaces.api import request_log_level, should_warn_slow
-
-    assert should_warn_slow("GET", "/api/computer/jobs/next", 200, 12.0) is False
-    assert (
-        request_log_level(quiet=True, status_code=200, duration_ms=12.0, slow=False)
-        is None
-    )
-    assert (
-        request_log_level(quiet=True, status_code=200, duration_ms=250.0, slow=False)
-        == "debug"
-    )
-    assert (
-        request_log_level(quiet=False, status_code=200, duration_ms=12.0, slow=False)
-        == "info"
-    )
-    assert (
-        request_log_level(quiet=True, status_code=500, duration_ms=12.0, slow=True)
-        == "warning"
-    )
-
 def test_is_running_neg_cache_skips_port_probe(tmp_path: Path):
     """Closed-port miss must be cached longer than the old 2.5s TTL.
 

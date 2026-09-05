@@ -1,22 +1,8 @@
-"""Phase 4 leftovers: ChannelKind + API model re-exports (gateway twins gone)."""
+"""Phase 4 leftovers: ChannelKind + API models (FastAPI create_app retired)."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
-import pytest
-
-from remedy.models import AgentConfig, ChannelKind
-
-
-@pytest.fixture
-def runtime():
-    rt = MagicMock()
-    rt.config = AgentConfig(home_dir="~/.remedy")
-    rt.memory = MagicMock()
-    rt.skills = MagicMock()
-    rt.handoff = MagicMock()
-    return rt
+from remedy.models import ChannelKind
 
 
 class TestChannelKinds:
@@ -31,11 +17,13 @@ class TestChannelKinds:
 
 class TestAPI:
     def test_status_model(self):
-        from remedy.interfaces.api import StatusResponse
+        from remedy.interfaces.api_models import StatusResponse
 
         assert StatusResponse is not None
 
-    def test_create_app_harness_gone(self):
-        import remedy.interfaces.api as api
+    def test_fastapi_api_module_gone(self):
+        import importlib.util
+        from pathlib import Path
 
-        assert not hasattr(api, "create_app")
+        assert importlib.util.find_spec("remedy.interfaces.api") is None
+        assert not Path("src/remedy/interfaces/api.py").exists()

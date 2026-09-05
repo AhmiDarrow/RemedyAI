@@ -1,4 +1,4 @@
-"""FastAPI route package is gone; Go owns production :7400."""
+"""FastAPI routes package and create_app harness are retired."""
 
 from __future__ import annotations
 
@@ -11,9 +11,6 @@ def test_fastapi_routes_package_is_gone() -> None:
     assert not Path("src/remedy/interfaces/routes").exists()
 
 
-def test_create_app_harness_is_gone() -> None:
-    import remedy.interfaces.api as api
-
-    assert not hasattr(api, "create_app")
-    assert callable(api.should_warn_slow)
-    assert callable(api.request_log_level)
+def test_fastapi_api_module_is_gone() -> None:
+    assert importlib.util.find_spec("remedy.interfaces.api") is None
+    assert not Path("src/remedy/interfaces/api.py").exists()

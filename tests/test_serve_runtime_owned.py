@@ -11,6 +11,7 @@ import pytest
 
 from remedy.interfaces.cli.cmd_runtime import (
     build_runtime_serve_argv,
+    resolve_remedy_runtime_command,
 )
 from remedy.interfaces.cli.parser import build_parser
 
@@ -207,23 +208,10 @@ def test_cmd_serve_does_not_import_create_app(monkeypatch, tmp_path) -> None:
     assert ei.value.code == 0
 
 
-def test_create_app_harness_is_gone() -> None:
-    """Phase 4 leftover: empty FastAPI create_app harness is retired."""
-    mod = importlib.import_module("remedy.interfaces.api")
-    assert not hasattr(mod, "create_app")
-    assert callable(mod.should_warn_slow)
-    assert callable(mod.request_log_level)
-    doc = mod.__doc__ or ""
-    assert "remedy-runtime" in doc or ":7400" in doc
-    src = Path("src/remedy/interfaces/api.py").read_text(encoding="utf-8")
-    for needle in (
-        "from fastapi",
-        "CORSMiddleware",
-        "def create_app",
-        "start_vigil_thread",
-        "run_uvicorn",
-    ):
-        assert needle not in src, f"api.py still carries FastAPI harness: {needle}"
+def test_fastapi_api_module_is_gone() -> None:
+    """Phase 4 exit: no FastAPI create_app module remains."""
+    assert importlib.util.find_spec("remedy.interfaces.api") is None
+    assert not Path("src/remedy/interfaces/api.py").exists()
 
 
 def test_fastapi_module_is_not_production_serve_entry() -> None:
@@ -275,9 +263,40 @@ def test_cmd_serve_argv_never_starts_uvicorn(monkeypatch, tmp_path) -> None:
 
 def test_python_fastapi_routes_package_is_gone() -> None:
     """Deleted FastAPI route twins must stay gone with the routes package."""
-    import importlib.util
-
     assert importlib.util.find_spec("remedy.interfaces.routes") is None
     assert not Path("src/remedy/interfaces/routes").exists()
     assert importlib.util.find_spec("remedy.connect") is None
     assert importlib.util.find_spec("remedy.core.computer.host_conpty") is None
+
+
+def test_rmdy_tool_worker_entry_still_present() -> None:
+    spec = importlib.util.find_spec("remedy.runtime.rmdy_tool_worker")
+    assert spec is not None
+
+
+def test_resolve_prefers_env_override(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "custom-runtime.exe"
+    path.write_bytes(b"")
+    monkeypatch.setenv("REMEDY_NATIVE_RUNTIME_BIN", str(path))
+    assert resolve_remedy_runtime_command() == [str(path)]
+
+
+def test_resolve_never_returns_remedy_desktop(monkeypatch, tmp_path) -> None:
+    """Even with a legacy sidecar on disk, serve must resolve remedy-runtime."""
+    import remedy.interfaces.cli.cmd_runtime as CR
+
+    desktop_bin = tmp_path / "desktop" / "bin"
+    desktop_bin.mkdir(parents=True)
+    (desktop_bin / "remedy-desktop.exe").write_bytes(b"MZ" + b"\0" * 64)
+    runtime = desktop_bin / "remedy-runtime.exe"
+    runtime.write_bytes(b"MZ" + b"\0" * 64)
+
+    monkeypatch.delenv("REMEDY_NATIVE_RUNTIME_BIN", raising=False)
+    monkeypatch.delenv("REMEDY_RUNTIME", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REMEDY_RUNTIME", str(runtime))
+    cmd = CR.resolve_remedy_runtime_command()
+    assert cmd is not None
+    joined = " ".join(str(x) for x in cmd).lower()
+    assert "remedy-runtime" in joined
+    assert "remedy-desktop" not in joined
