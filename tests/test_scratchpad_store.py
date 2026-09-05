@@ -18,14 +18,6 @@ def test_scratch_roundtrip(tmp_path: Path):
     assert scratch_id("") == "_global"
 
 
-def test_scratch_http_route_absent_from_testclient():
-    """HTTP /api/scratch is Go-owned (native/go/httpapi/scratch.go)."""
-    from remedy.interfaces.api import create_app
-
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/scratch" not in paths
-
-
 @pytest.mark.asyncio
 async def test_scratchpad_tool_reads_what_it_wrote(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))

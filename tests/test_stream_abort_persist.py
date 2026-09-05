@@ -8,13 +8,7 @@ unit coverage.
 
 from __future__ import annotations
 
-from remedy.interfaces.api import create_app
 
-
-def test_session_stream_and_abort_http_absent_from_testclient() -> None:
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/sessions/{session_id}/messages/stream" not in paths
-    assert "/api/sessions/{session_id}/abort" not in paths
 
 
 def test_abort_reason_normalize_and_peek() -> None:

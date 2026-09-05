@@ -9,10 +9,8 @@ import tomllib
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from remedy.interfaces import api_support
-from remedy.interfaces.api import create_app
 from remedy.interfaces.config import (
     PROVIDER_CATALOG,
     classify_provider_connection,
@@ -162,18 +160,6 @@ def test_adapter_follows_the_saved_flavour():
 
 # --- helpers (HTTP /api/providers* is Go-owned) --------------------------------
 
-
-def test_provider_http_routes_absent_from_testclient():
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    for path in (
-        "/api/providers",
-        "/api/providers/connected",
-        "/api/providers/free",
-        "/api/providers/ollama/detect",
-        "/api/providers/custom",
-        "/api/providers/probe",
-    ):
-        assert path not in paths
 
 
 def test_upsert_stores_a_provider_and_secret_under_its_id(discovery, home):

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def sse_headers() -> dict[str, str]:
-    """SSE response headers (re-exported by test-only FastAPI create_app)."""
+    """SSE response headers."""
     return {
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",

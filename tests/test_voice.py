@@ -176,20 +176,6 @@ def test_synthesize_with_mock_engine(tmp_path: Path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_voice_http_routes_absent_from_testclient():
-    from remedy.interfaces.api import create_app
-
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    for path in (
-        "/api/voice/status",
-        "/api/voice/speak",
-        "/api/voice/transcribe",
-        "/api/voice/install",
-        "/api/voice/settings",
-        "/api/voice/identity",
-    ):
-        assert path not in paths
-
 
 def test_voice_status_shape(tmp_path: Path):
     data = voice_status(tmp_path)

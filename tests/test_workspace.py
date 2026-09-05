@@ -62,15 +62,6 @@ def test_forbidden_os_project_paths(tmp_path):
     assert not is_forbidden_project_path(r"C:\Users\Administrator\Old-Remedy")
 
 
-def test_files_http_routes_absent_from_testclient():
-    """HTTP /api/files* is Go-owned (native/go/httpapi/workspace_test.go)."""
-    from remedy.interfaces.api import create_app
-
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/files" not in paths
-    assert "/api/files/search" not in paths
-    assert "/api/workspace" not in paths
-
 
 def test_ensure_project_dir_creates(tmp_path):
     target = tmp_path / "new_proj"

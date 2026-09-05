@@ -1,11 +1,14 @@
-"""Local API authentication (Phase A)."""
+"""Local API authentication helpers (token files).
+
+HTTP auth / CORS / local-bootstrap live in Go ``native/go/httpapi``
+(``api_test.go``, ``settings_test.go``). The FastAPI ``create_app`` harness
+is gone.
+"""
 
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
 
-from remedy.interfaces.api import create_app
 from remedy.interfaces.local_auth import ensure_local_api_token, token_path
 
 
@@ -15,20 +18,6 @@ def auth_on(monkeypatch):
     monkeypatch.delenv("REMEDY_API_KEY", raising=False)
     yield
     monkeypatch.setenv("REMEDY_API_AUTH", "0")
-
-
-def test_client_gone_is_not_a_server_fault():
-    from anyio import EndOfStream
-
-    from remedy.interfaces.api import _is_client_gone
-
-    assert _is_client_gone(EndOfStream()) is True
-    wrapped = RuntimeError("No response returned.")
-    wrapped.__cause__ = EndOfStream()
-    assert _is_client_gone(wrapped) is True
-    assert _is_client_gone(RuntimeError("boom")) is False
-    # A route that forgot to return is a server fault, not a hung-up client.
-    assert _is_client_gone(RuntimeError("No response returned.")) is False
 
 
 def test_ensure_token_generates_and_persists(tmp_path, auth_on):
@@ -111,40 +100,6 @@ def test_local_api_token_upgrades_legacy_plain(tmp_path, auth_on, monkeypatch):
         assert load_local_api_token(home) == legacy
 
 
-# Protected probe used after FastAPI route twins were deleted. Auth middleware
-# still runs; a missing route answers 404 once Bearer is accepted.
-_AUTH_PROBE = "/api/self-improve"
-
-
-def test_auth_middleware_401_without_token(auth_on, tmp_path):
-    tok = ensure_local_api_token(tmp_path)
-    app = create_app(api_key=tok)
-    client = TestClient(app)
-    r = client.get(_AUTH_PROBE)
-    assert r.status_code == 401
-
-
-def test_auth_middleware_ok_with_bearer(auth_on, tmp_path):
-    tok = ensure_local_api_token(tmp_path)
-    app = create_app(api_key=tok)
-    client = TestClient(app)
-    r = client.get(_AUTH_PROBE, headers={"Authorization": f"Bearer {tok}"})
-    # No FastAPI twin remains — 404 means auth passed and routing found nothing.
-    assert r.status_code == 404
-
-
-def test_status_public(auth_on, tmp_path):
-    """Go owns /api/status; TestClient surface must not twin it."""
-    _ = auth_on, tmp_path
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/status" not in paths
-    assert "/api/ping" not in paths
-    assert "/api/turn-active" not in paths
-    assert "/api/self-improve" not in paths
-    assert "/api/metrics" not in paths
-    assert "/api/notifications" not in paths
-
-
 def test_self_improve_snapshot_shape(auth_on, tmp_path, monkeypatch):
     """HTTP /api/self-improve twin is gone; activity_snapshot still answers tools."""
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
@@ -154,90 +109,6 @@ def test_self_improve_snapshot_shape(auth_on, tmp_path, monkeypatch):
     assert "enabled" in body
     assert "idle_s" in body
     assert "last_tick" in body
-    tok = ensure_local_api_token(tmp_path)
-    client = TestClient(create_app(api_key=tok))
-    assert client.get(_AUTH_PROBE).status_code == 401
-    assert client.get(
-        _AUTH_PROBE, headers={"Authorization": f"Bearer {tok}"}
-    ).status_code == 404
-
-
-def test_bootstrap_loopback(auth_on, tmp_path, monkeypatch):
-    # Bootstrap defaults off for desktop/sidecar; enable for this unit test.
-    monkeypatch.setenv("REMEDY_HTTP_BOOTSTRAP", "1")
-    tok = ensure_local_api_token(tmp_path)
-    app = create_app(api_key=tok)
-    client = TestClient(app)
-    r = client.get("/api/auth/local-bootstrap")
-    assert r.status_code == 200
-    assert r.json()["token"] == tok
-
-
-def test_auth_disabled_empty_key(monkeypatch):
-    monkeypatch.setenv("REMEDY_API_AUTH", "0")
-    app = create_app(api_key="")
-    client = TestClient(app)
-    # No route twin — unauthenticated TestClient still reaches a 404, not 401.
-    r = client.get(_AUTH_PROBE)
-    assert r.status_code == 404
-
-
-def test_cors_star_refused_when_auth_on(auth_on, tmp_path, monkeypatch):
-    """CORS * must not apply while a token exists (browser token theft)."""
-    monkeypatch.setenv("REMEDY_CORS_ORIGINS", "*")
-    tok = ensure_local_api_token(tmp_path)
-    app = create_app(api_key=tok)
-    client = TestClient(app)
-    r = client.get(_AUTH_PROBE, headers={"Authorization": f"Bearer {tok}"})
-    assert r.status_code == 404
-
-
-def test_bootstrap_can_be_disabled(auth_on, tmp_path, monkeypatch):
-    monkeypatch.setenv("REMEDY_HTTP_BOOTSTRAP", "0")
-    tok = ensure_local_api_token(tmp_path)
-    app = create_app(api_key=tok)
-    client = TestClient(app)
-    r = client.get("/api/auth/local-bootstrap")
-    assert r.status_code == 403
-    monkeypatch.setenv("REMEDY_HTTP_BOOTSTRAP", "1")
-
-
-def test_cors_preflight_options_not_blocked_by_auth(auth_on, tmp_path):
-    """OPTIONS must not 401 — browser preflight has no Bearer (desktop xAI OAuth)."""
-    tok = ensure_local_api_token(tmp_path)
-    app = create_app(api_key=tok)
-    client = TestClient(app)
-    r = client.options(
-        _AUTH_PROBE,
-        headers={
-            "Origin": "http://tauri.localhost",
-            "Access-Control-Request-Method": "GET",
-            "Access-Control-Request-Headers": "authorization,content-type",
-        },
-    )
-    # Must not look like auth failure (401 → opaque Failed to fetch in webview)
-    assert r.status_code != 401
-    assert r.status_code in (200, 204, 400)
-    # CORS headers present for Tauri origin
-    assert r.headers.get("access-control-allow-origin") in (
-        "http://tauri.localhost",
-        "*",
-    )
-
-
-def test_cors_allows_tauri_https_origin(auth_on, tmp_path):
-    tok = ensure_local_api_token(tmp_path)
-    app = create_app(api_key=tok)
-    client = TestClient(app)
-    r = client.get(
-        _AUTH_PROBE,
-        headers={
-            "Origin": "https://tauri.localhost",
-            "Authorization": f"Bearer {tok}",
-        },
-    )
-    assert r.status_code == 404
-    assert r.headers.get("access-control-allow-origin") == "https://tauri.localhost"
 
 
 def test_gateway_serve_api_enables_auth(auth_on, tmp_path, monkeypatch):
@@ -268,31 +139,5 @@ def test_gateway_serve_api_enables_auth(auth_on, tmp_path, monkeypatch):
     assert called.get("args") is not None
 
 
-def test_auth_length_mismatch_is_401_not_500(auth_on, tmp_path):
-    """Unequal Bearer length must not raise from compare_digest."""
-    tok = ensure_local_api_token(tmp_path)
-    app = create_app(api_key=tok)
-    client = TestClient(app)
-    r = client.get(_AUTH_PROBE, headers={"Authorization": "Bearer x"})
-    assert r.status_code == 401
-
-
-def test_api_docs_disabled_by_env(auth_on, tmp_path, monkeypatch):
-    """S-AUTH-05: REMEDY_DISABLE_API_DOCS hides Swagger + OpenAPI export routes."""
-    monkeypatch.setenv("REMEDY_DISABLE_API_DOCS", "1")
-    tok = ensure_local_api_token(tmp_path)
-    app = create_app(api_key=tok)
-    client = TestClient(app)
-    assert app.state.disable_api_docs is True
-    # Built-in docs absent (404); not public when auth on.
-    assert client.get("/docs").status_code == 404
-    assert client.get("/redoc").status_code == 404
-    assert client.get("/openapi.json").status_code == 404
-    # Custom export routes not registered (auth middleware may 401 first).
-    r_export = client.get("/api/openapi.json", headers={"Authorization": f"Bearer {tok}"})
-    assert r_export.status_code == 404
-    r_yaml = client.get("/api/openapi.yaml", headers={"Authorization": f"Bearer {tok}"})
-    assert r_yaml.status_code == 404
-
-
 # Generic CI webhook (/api/webhook/{source}) is covered by Go httpapi/webhooks_test.go.
+# Auth / CORS / bootstrap HTTP: native/go/httpapi/api_test.go + settings_test.go.

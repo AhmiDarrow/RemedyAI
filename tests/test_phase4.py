@@ -1,4 +1,4 @@
-"""Phase 4 leftovers: ChannelKind + TestClient create_app (gateway twins gone)."""
+"""Phase 4 leftovers: ChannelKind + API model re-exports (gateway twins gone)."""
 
 from __future__ import annotations
 
@@ -30,19 +30,12 @@ class TestChannelKinds:
 
 
 class TestAPI:
-    def test_create_app_no_deps(self):
-        from remedy.interfaces.api import create_app
-
-        app = create_app(title="Test", version="0.1.0")
-        assert app.title == "Test"
-
-    def test_create_app_with_runtime(self, runtime):
-        from remedy.interfaces.api import create_app
-
-        app = create_app(runtime=runtime, gateway=None, memory=None)
-        assert app.title == "Remedy AI"
-
     def test_status_model(self):
         from remedy.interfaces.api import StatusResponse
 
         assert StatusResponse is not None
+
+    def test_create_app_harness_gone(self):
+        import remedy.interfaces.api as api
+
+        assert not hasattr(api, "create_app")

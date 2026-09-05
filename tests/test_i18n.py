@@ -11,9 +11,6 @@ from remedy.i18n.languages import (
     normalize_ui_language,
     resolve_ui_language,
 )
-from remedy.interfaces.api import create_app
-
-
 def test_normalize_unknown_is_auto_not_english_lock():
     assert normalize_ui_language(None) == "auto"
     assert normalize_ui_language("AUTO") == "auto"
@@ -138,8 +135,6 @@ def test_i18n_catalog_payload_and_settings_round_trip(tmp_path, monkeypatch):
         public_settings_snapshot,
     )
 
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/settings" not in paths
     data = public_settings_snapshot({"setup_completed": True})
     assert data.get("ui_language") == "auto"
     langs = public_language_list()

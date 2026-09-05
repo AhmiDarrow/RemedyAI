@@ -232,7 +232,7 @@ async def handle_slash_command(
         # Prefer live runtime registry; fall back to empty guidance.
         # Note: handle_slash_command doesn't receive runtime — use memory path via app state.
         # Callers that pass runtime through a side channel aren't available here, so we
-        # re-read from a module-level hook set by create_app when possible.
+        # re-read from a module-level hook when a caller sets it.
         registry = getattr(handle_slash_command, "_skills_registry", None)
         count = int(getattr(registry, "count", 0) or 0) if registry is not None else 0
         if registry is not None and count > 0:

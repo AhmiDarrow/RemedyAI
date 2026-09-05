@@ -8,7 +8,7 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | Layer | Path | Role |
 |-------|------|------|
 | Local API | `native/go/cmd/remedy-runtime` + `native/go/httpapi` | Production HTTP on `127.0.0.1:7400` (Desktop + `remedy serve`) |
-| Python workers | `src/remedy/` | RMDY tool worker, ReAct/ML helpers, TestClient FastAPI surface — **not** production `:7400` |
+| Python workers | `src/remedy/` | RMDY tool worker, ReAct/ML helpers — **not** production `:7400` |
 | Desktop SPA | `desktop/` | Tauri 2 + React 19 (Grove / Alongside / Studio) |
 | Python tests | `tests/` | Packaging/runtime, API TestClient, jail, policy, memory, Build, Connect host |
 | SPA tests | `desktop/src/**/*.test.*` | React/TypeScript API, state, rails, sessions, and owner-facing behavior |
@@ -39,7 +39,7 @@ allowed only for operations declared idempotent.
 
 **HTTP authority:** `remedy-runtime` owns production `:7400`. `remedy serve` and
 packaged Desktop launch that binary (fail closed if missing). Python does not
-start uvicorn on `:7400`; `create_app` remains for in-process tests only.
+start uvicorn on `:7400`; FastAPI `create_app` harness is retired; Go httpapi owns `:7400`.
 `python -m remedy.runtime.rmdy_tool_worker` is the RMDY worker entry. Startup
 performs one bounded readiness probe only when native mode is requested; the
 liveness route remains probe-free. Native durability requires contiguous event

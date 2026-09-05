@@ -5,9 +5,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from fastapi.testclient import TestClient
 
-from remedy.interfaces.api import create_app
 from remedy.interfaces.config import (
     _coerce,
     config_to_agent_config,
@@ -19,7 +17,6 @@ from remedy.interfaces.config import (
 )
 from remedy.interfaces.plugin import HookManager, PluginManager
 from remedy.models import (
-    AgentConfig,
     ChannelKind,
 )
 
@@ -397,85 +394,3 @@ class TestPluginManager:
 
 
 # ============================================================================
-# Test API Endpoints
-# ============================================================================
-
-@pytest.fixture
-def test_client():
-    from unittest import mock
-
-    async def _stream(message, session_id=None, model=None):
-        yield f"echo: {message}"
-
-    runtime = mock.MagicMock()
-    runtime.config = AgentConfig(name="test", home_dir="~/.remedy")
-    runtime.memory = None
-    runtime.skills = None
-    runtime.stream_response = _stream
-    runtime._llm_api_key = "test-key"
-    runtime._llm_provider = "openai"
-    runtime._llm_model = "test"
-    runtime._llm_base_url = "http://localhost"
-    runtime.effective_project_path = mock.MagicMock(return_value=Path("."))
-
-    gateway = mock.MagicMock()
-    gateway.emit = mock.AsyncMock(return_value=["echo: hello from test"])
-    gateway.stats.return_value = {"running": True, "uptime": "0s"}
-
-    app = create_app(
-        runtime=runtime,
-        gateway=gateway,
-        title="Test Remedy",
-        version="0.1.0-test",
-    )
-    return TestClient(app)
-
-
-class TestAPIStatus:
-    def test_status_ping_dashboard_absent(self, test_client):
-        """Go owns ping/status/turn-active/notifications/metrics/self-improve and the SPA."""
-        paths = {getattr(r, "path", "") for r in test_client.app.routes}
-        for path in (
-            "/api/status",
-            "/api/ping",
-            "/api/turn-active",
-            "/api/notifications",
-            "/api/metrics",
-            "/api/self-improve",
-            "/dashboard",
-        ):
-            assert path not in paths
-            assert test_client.get(path).status_code in (404, 405)
-
-    def test_legacy_chat_routes_absent(self, test_client):
-        """Legacy /api/chat* dropped from TestClient; Go owns session stream."""
-        assert test_client.post("/api/chat", json={"message": "hello"}).status_code in (
-            404,
-            405,
-        )
-        assert test_client.post(
-            "/api/chat/stream", json={"message": "hello"}
-        ).status_code in (404, 405)
-
-    def test_openapi_export_routes_absent(self, test_client):
-        """Leftover /api/openapi.* FastAPI exports dropped with misc registrar."""
-        assert test_client.get("/api/openapi.json").status_code in (404, 405)
-        assert test_client.get("/api/openapi.yaml").status_code in (404, 405)
-
-    def test_swagger_docs(self, test_client):
-        r = test_client.get("/docs")
-        assert r.status_code == 200
-
-    def test_redoc(self, test_client):
-        r = test_client.get("/redoc")
-        assert r.status_code == 200
-
-
-# ============================================================================
-# Test SSE Streaming
-# ============================================================================
-
-class TestSSEStreaming:
-    def test_legacy_chat_stream_absent(self, test_client):
-        r = test_client.post("/api/chat/stream", json={"message": "test stream"})
-        assert r.status_code in (404, 405)

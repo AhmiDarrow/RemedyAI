@@ -193,12 +193,6 @@ def test_custom_active_local_is_connected():
     assert reason == "active_local"
 
 
-def test_provider_probe_http_absent_from_testclient():
-    from remedy.interfaces.api import create_app
-
-    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
-    assert "/api/providers/probe" not in paths
-
 
 def test_probe_demo_curated_filter_and_missing_key():
     """Demo probe keeps curated chat ids; missing key stays a soft failure."""

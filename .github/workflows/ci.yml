@@ -40,7 +40,7 @@ jobs:
         run: uv run python scripts/check_mypy_exclude.py
 
       - name: Import smoke
-        run: uv run python -c "import remedy; from remedy.interfaces.api import create_app; create_app(); print('import OK')"
+        run: uv run python -c "import remedy; from remedy.interfaces.api import should_warn_slow; assert callable(should_warn_slow); print('import OK')"
 
       - name: Docs sync (versions, help, slash cmds, hotkeys, test count)
         run: uv run python scripts/check_docs.py
@@ -80,7 +80,7 @@ jobs:
         run: uv sync --dev
 
       - name: Import smoke
-        run: uv run python -c "import remedy; from remedy.interfaces.api import create_app; create_app(); print('import OK')"
+        run: uv run python -c "import remedy; from remedy.interfaces.api import should_warn_slow; assert callable(should_warn_slow); print('import OK')"
 
       # DLL-backed tests must execute, not skip: build the Zig core and point
       # the loader at it before the suite runs.
