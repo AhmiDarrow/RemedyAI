@@ -38,7 +38,7 @@ class _NullStream:
 
 
 def _ensure_stdio() -> None:
-    """Never let logging see a None stdout/stderr (PyInstaller --noconsole)."""
+    """Never let logging see a None stdout/stderr (windowed / no-console hosts)."""
     for name in ("stdout", "stderr"):
         if getattr(sys, name, None) is None:
             setattr(sys, name, _NullStream())

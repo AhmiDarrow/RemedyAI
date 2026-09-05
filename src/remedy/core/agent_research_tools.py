@@ -23,11 +23,12 @@ Rules this module holds itself to:
   to a public IP, every redirect hop re-validated. No fresh urllib/httpx path
   exists here on purpose: that would be an SSRF bypass. Networked tools are
   gated on the existing ``web_tools_enabled`` opt-in; there is no new switch.
-* **No heavy dependencies.** This module ships inside the PyInstaller sidecar,
-  which excludes pandas/numpy/scipy/sklearn/matplotlib/torch/transformers. Only
-  the standard library is imported, at module scope or anywhere else. PDF text
-  extraction tries a lazily-imported pure-python reader and otherwise degrades
-  to a clearly-flagged lossy stdlib parse — it never installs anything.
+* **No heavy dependencies.** This module runs in the Python worker surface,
+  which must stay lean (no pandas/numpy/scipy/sklearn/matplotlib/torch/
+  transformers). Only the standard library is imported, at module scope or
+  anywhere else. PDF text extraction tries a lazily-imported pure-python
+  reader and otherwise degrades to a clearly-flagged lossy stdlib parse — it
+  never installs anything.
 
 Test seam: monkeypatch :func:`_fetch_json` and :func:`_fetch_bytes`. Nothing else
 in this module opens a socket.

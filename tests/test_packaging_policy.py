@@ -49,6 +49,16 @@ def test_lib_rs_launch_path_never_joins_remedy_desktop() -> None:
     assert "no Python dual-serve" in text or "no soft Python fallback" in text
 
 
+def test_agents_md_names_runtime_release_jobs_not_sidecar() -> None:
+    """AGENTS.md must not steer agents at retired build-sidecar CI job names."""
+    text = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    assert "build-runtime" in text
+    assert "build-runtime-linux" in text
+    assert "build-sidecar" not in text
+    assert "FastAPI + Tauri" not in text
+    assert "remedy-runtime" in text
+
+
 def test_local_resources_readme_documents_first_run_download():
     readme = ROOT / "desktop" / "resources" / "local" / "README.md"
     text = readme.read_text(encoding="utf-8").lower()

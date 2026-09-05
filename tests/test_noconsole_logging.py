@@ -1,12 +1,11 @@
-"""Regression: frozen windowed sidecar must not crash on None stdout/stderr.
+"""Regression: windowed / no-console hosts must not crash on None stdout/stderr.
 
-The PyInstaller --noconsole sidecar starts Python with ``sys.stdout`` and
-``sys.stderr`` both None. uvicorn's ColourizedFormatter calls
-``sys.stdout.isatty()`` at config time, which raised
-``AttributeError: 'NoneType' object has no attribute 'isatty'`` and aborted
-the server before it bound a port. ``_ensure_stdio()`` replaces the None
-streams with a null stream so formatter config and StreamHandler writes
-degrade gracefully.
+Some hosts start Python with ``sys.stdout`` / ``sys.stderr`` as None.
+Formatters that call ``sys.stdout.isatty()`` at config time used to raise
+``AttributeError`` and abort before useful work. ``_ensure_stdio()`` replaces
+the None streams with a null stream so formatter config and StreamHandler
+writes degrade gracefully. Production ``:7400`` is Go ``remedy-runtime``;
+this guard remains for CLI / worker logging paths.
 """
 
 from __future__ import annotations

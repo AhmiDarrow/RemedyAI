@@ -10,7 +10,7 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | Local API | `native/go/cmd/remedy-runtime` + `native/go/httpapi` | Production HTTP on `127.0.0.1:7400` (Desktop + `remedy serve`) |
 | Python workers | `src/remedy/` | RMDY tool worker, ReAct/ML helpers, TestClient FastAPI surface — **not** production `:7400` |
 | Desktop SPA | `desktop/` | Tauri 2 + React 19 (Grove / Alongside / Studio) |
-| Python tests | `tests/` | Sidecar, API, jail, policy, memory, Build, Connect host, packaging contracts |
+| Python tests | `tests/` | Packaging/runtime, API TestClient, jail, policy, memory, Build, Connect host |
 | SPA tests | `desktop/src/**/*.test.*` | React/TypeScript API, state, rails, sessions, and owner-facing behavior |
 | Shell tests | `desktop/src-tauri/src/` | Rust/Tauri browser host, privacy shield, lifecycle, Windows + Linux compile |
 | Connect tests | `android/**/src/test/` | Kotlin protocol, storage, networking, and mobile behavior; lint + both APK variants |

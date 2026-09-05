@@ -324,10 +324,10 @@ _PYI_ENV = ("_MEIPASS2", "_PYI_APPLICATION_HOME_DIR", "_PYI_ARCHIVE_FILE", "_PYI
 def source_root_for_worker(home_dir: Path | str | None = None) -> Path:
     """Directory holding the ``remedy`` *source* the worker should import.
 
-    Dev: the checkout's ``src``. Frozen: PyInstaller's ``_MEIPASS`` also
-    holds the sidecar's own (3.13) extension modules, so it must never be on
-    the 3.12 worker's path — the pure ``.py`` tree is staged into
-    ``runtime/app/`` instead, refreshed whenever the sidecar version changes.
+    Dev: the checkout's ``src``. Frozen worker/onedir: ``_MEIPASS`` may also
+    hold the parent's extension modules, so it must never be on the managed
+    worker's path — the pure ``.py`` tree is staged into ``runtime/app/``
+    instead, refreshed whenever the parent binary version changes.
     """
     meipass = getattr(sys, "_MEIPASS", None)
     if not (getattr(sys, "frozen", False) and meipass):
@@ -339,7 +339,7 @@ def source_root_for_worker(home_dir: Path | str | None = None) -> Path:
     src = Path(meipass) / "remedy"
     app = runtime_dir(home_dir) / "app"
     stamp = app / "version.txt"
-    # Version alone is not enough: a patched sidecar of the same version
+    # Version alone is not enough: a patched parent of the same version
     # must not keep running yesterday's worker code. Key on the binary too.
     try:
         exe = Path(sys.executable).stat()
@@ -368,7 +368,7 @@ def source_root_for_worker(home_dir: Path | str | None = None) -> Path:
 
 
 def child_env(home_dir: Path | str | None = None, *, with_source: bool) -> dict[str, str]:
-    """Environment for the managed interpreter: nothing of the sidecar's leaks in."""
+    """Environment for the managed interpreter: nothing of the parent leaks in."""
     env = os.environ.copy()
     for k in _PYI_ENV:
         env.pop(k, None)
@@ -377,8 +377,8 @@ def child_env(home_dir: Path | str | None = None, *, with_source: bool) -> dict[
     env.pop("REMEDY_VOICE_MANAGED", None)
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
-        # PyInstaller prepends its unpack dir to PATH for DLL lookup; the
-        # worker must not see python313.dll before its own python312.dll.
+        # Frozen parents may prepend their unpack dir to PATH for DLL lookup;
+        # the worker must not see the parent's python DLL before its own.
         sep = os.pathsep
         env["PATH"] = sep.join(
             p for p in env.get("PATH", "").split(sep) if p and Path(p) != Path(meipass)
@@ -386,7 +386,7 @@ def child_env(home_dir: Path | str | None = None, *, with_source: bool) -> dict[
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONNOUSERSITE"] = "1"
-    # No progress bars on stderr: they would flood the sidecar log and
+    # No progress bars on stderr: they would flood the parent log and
     # nobody is watching a terminal.
     env["TQDM_DISABLE"] = "1"
     env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"

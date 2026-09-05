@@ -1,9 +1,9 @@
 """Single-process ownership so only one Remedy Desktop / serve stack runs.
 
-Desktop holds a Windows named mutex (see Tauri). The Python API (``remedy serve``)
-holds ``~/.remedy/locks/remedy_serve.lock`` so a second CLI serve cannot bind
-7400 under the first. Sidecar children set ``REMEDY_DESKTOP_SIDECAR=1`` and still
-take the serve lock (only one API).
+Desktop holds a Windows named mutex (see Tauri). Go ``remedy-runtime`` (and the
+Python ``remedy serve`` launcher path) holds ``~/.remedy/locks/remedy_serve.lock``
+so a second serve cannot bind 7400 under the first. Desktop-spawned children set
+``REMEDY_DESKTOP_SIDECAR=1`` (historical env name) and still take the serve lock.
 """
 
 from __future__ import annotations

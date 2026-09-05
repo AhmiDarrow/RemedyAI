@@ -38,16 +38,15 @@ def _get_version() -> str:
     """Resolve package version for CLI, API, About panel, and frozen builds.
 
     Order:
-      0. Frozen build: the ``pyproject.toml`` PyInstaller bundled next to the
-         code. It is the version the sidecar was built as; a stale
-         ``remedy-ai`` dist-info swept in from the build machine's
-         site-packages must never win over it.
+      0. Frozen worker/onedir: bundled ``pyproject.toml`` next to the code
+         (stale site-packages dist-info must never win). Packaged Desktop
+         itself is Go ``remedy-runtime``, not a frozen Python API.
       1. Repo ``pyproject.toml`` when running from the source tree / editable install
          (avoids stale site-packages dist-info like 0.9.2 while source is 0.10.x)
       2. importlib.metadata for installed wheels
       3. Adjacent pyproject copies
     """
-    # 0) Frozen: the bundled pyproject is authoritative.
+    # 0) Frozen worker: the bundled pyproject is authoritative.
     try:
         if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
             ver = _read_version_from_pyproject(Path(sys._MEIPASS) / "pyproject.toml")

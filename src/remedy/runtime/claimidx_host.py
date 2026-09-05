@@ -124,7 +124,7 @@ def _service_token(home_dir: str | Path | None = None) -> str:
 
 
 def _clean_env(home_dir: str | Path | None = None) -> dict[str, str]:
-    """Child environment isolated from global Claimidx and PyInstaller state."""
+    """Child environment isolated from global Claimidx and frozen-parent state."""
     from remedy.voice.runtime import child_env
 
     env = child_env(home_dir, with_source=False)
