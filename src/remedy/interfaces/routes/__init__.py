@@ -19,6 +19,8 @@ Not registered here (Go owns production):
 - ``/api/rmb/*`` local model host (start/stop/settings/use/HF)
 - ``/api/voice/*`` speak / hear / install / settings
 - ``/api/workspace``, ``/api/files*``, ``/api/media``, ``/api/scratch``
+- ``/api/skills/library/*`` catalog / search / suggest / install / updates
+  (and leftover Python-only ``update/{id}`` / ``submit``)
 """
 from __future__ import annotations
 
@@ -31,7 +33,6 @@ from remedy.interfaces.routes.misc import register_misc_routes
 from remedy.interfaces.routes.partner import register_partner_routes
 from remedy.interfaces.routes.sessions import register_sessions_routes
 from remedy.interfaces.routes.settings import register_settings_routes
-from remedy.interfaces.routes.skills_library import register_skills_library_routes
 from remedy.interfaces.routes.status import register_status_routes
 
 
@@ -48,11 +49,10 @@ def register_all_routes(
     register_sessions_routes(app, **kw)
     register_catalog_routes(app, **kw)
     register_memory_routes(app, **kw)
-    # Library routes must register before any conflicting catch-alls; namespaced under /library
-    register_skills_library_routes(app, **kw)
     register_settings_routes(app, **kw)
     register_auth_routes(app, **kw)
     register_partner_routes(app, **kw)
     # No register_i18n/usage/vision/telephony/webhook/connect/nanoswarm/assistant/
-    # computer/hive/session_events/chat/terminal/rmb/voice/workspace — Go owns those.
+    # computer/hive/session_events/chat/terminal/rmb/voice/workspace/skills_library
+    # — Go owns those.
     register_misc_routes(app, **kw)

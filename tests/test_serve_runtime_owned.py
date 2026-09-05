@@ -285,6 +285,7 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "rmb",
         "voice",
         "workspace",
+        "skills_library",
     ):
         assert not re.search(rf"\bregister_{mod}_routes\s*\(", routes_init)
         assert importlib.util.find_spec(f"remedy.interfaces.routes.{mod}") is None
@@ -322,6 +323,10 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/skills/metrics/reuse",
         "/api/skills/learning/summary",
         "/api/skills/export",
+        "/api/skills/library/catalog",
+        "/api/skills/library/search",
+        "/api/skills/library/suggest",
+        "/api/skills/library/updates",
         "/api/continuity/dashboard",
         "/api/nanoswarm/status",
         "/api/nanoswarm/token/status",
@@ -396,6 +401,10 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/voice/install",
         "/api/voice/client-log",
         "/api/sessions/import",
+        "/api/skills/library/install",
+        "/api/skills/library/suggest/dismiss",
+        "/api/skills/library/submit",
+        "/api/skills/library/update/alpha",
     ):
         r = client.post(path, json={})
         assert _absent(r.status_code), f"{path} still registered ({r.status_code})"
