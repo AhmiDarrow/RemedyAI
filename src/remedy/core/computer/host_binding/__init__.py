@@ -135,6 +135,11 @@ from ._policy import (
     write_jail_set_roots,
 )
 from ._session import (
+    HostSession,
+    SessionResult,
+    close_all_shared_sessions,
+    close_shared_session,
+    get_shared_session,
     host_session_argv,
     host_session_close,
     host_session_cwd,
@@ -270,6 +275,11 @@ __all__ = [
     "host_session_run",
     "host_session_cwd",
     "host_session_close",
+    "HostSession",
+    "SessionResult",
+    "get_shared_session",
+    "close_shared_session",
+    "close_all_shared_sessions",
     "diagnose_host_failure",
     "dialect_probe",
     "dialect_load",
