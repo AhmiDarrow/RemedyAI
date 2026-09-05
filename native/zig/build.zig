@@ -8,6 +8,7 @@ fn linkHostLibraries(module: *std.Build.Module, target: std.Build.ResolvedTarget
             module.linkSystemLibrary("user32", .{});
             module.linkSystemLibrary("gdi32", .{});
             module.linkSystemLibrary("shcore", .{});
+            module.linkSystemLibrary("shell32", .{});
             module.linkSystemLibrary("kernel32", .{});
             module.linkSystemLibrary("ole32", .{});
             module.linkSystemLibrary("oleaut32", .{});

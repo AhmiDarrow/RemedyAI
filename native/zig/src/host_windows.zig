@@ -199,8 +199,11 @@ extern "user32" fn VkKeyScanW(ch: u16) callconv(.winapi) i16;
 extern "user32" fn OpenClipboard(owner: ?HWND) callconv(.winapi) BOOL;
 extern "user32" fn CloseClipboard() callconv(.winapi) BOOL;
 extern "user32" fn EmptyClipboard() callconv(.winapi) BOOL;
+extern "user32" fn IsClipboardFormatAvailable(format: UINT) callconv(.winapi) BOOL;
 extern "user32" fn GetClipboardData(format: UINT) callconv(.winapi) ?HANDLE;
 extern "user32" fn SetClipboardData(format: UINT, data: HANDLE) callconv(.winapi) ?HANDLE;
+
+extern "shell32" fn DragQueryFileW(drop: HANDLE, index: UINT, file: ?[*]u16, cch: UINT) callconv(.winapi) UINT;
 
 extern "shcore" fn SetProcessDpiAwareness(value: c_int) callconv(.winapi) HRESULT;
 extern "shcore" fn GetDpiForMonitor(monitor: HMONITOR, kind: c_int, dpi_x: *UINT, dpi_y: *UINT) callconv(.winapi) HRESULT;
@@ -222,7 +225,14 @@ extern "kernel32" fn GetProcAddress(module: HMODULE, name: [*:0]const u8) callco
 extern "kernel32" fn GlobalAlloc(flags: UINT, bytes: usize) callconv(.winapi) ?HGLOBAL;
 extern "kernel32" fn GlobalLock(mem: HGLOBAL) callconv(.winapi) ?*anyopaque;
 extern "kernel32" fn GlobalUnlock(mem: HGLOBAL) callconv(.winapi) BOOL;
+extern "kernel32" fn GlobalSize(mem: HGLOBAL) callconv(.winapi) usize;
 extern "kernel32" fn GlobalFree(mem: HGLOBAL) callconv(.winapi) ?HGLOBAL;
+extern "kernel32" fn QueryFullProcessImageNameW(
+    process: HANDLE,
+    flags: DWORD,
+    name: [*]u16,
+    size: *DWORD,
+) callconv(.winapi) BOOL;
 extern "kernel32" fn CreateProcessW(
     application: ?[*:0]const u16,
     command_line: ?[*:0]u16,
@@ -320,7 +330,9 @@ const WM_CLOSE: UINT = 0x0010;
 const SWP_NOZORDER: UINT = 0x0004;
 const SWP_NOACTIVATE: UINT = 0x0010;
 
+const CF_DIB: UINT = 8;
 const CF_UNICODETEXT: UINT = 13;
+const CF_HDROP: UINT = 15;
 const GMEM_MOVEABLE: UINT = 0x0002;
 
 const CREATE_SUSPENDED: DWORD = 0x00000004;
@@ -835,6 +847,50 @@ pub fn foregroundWindow() Error!ForegroundInfo {
     return .{ .hwnd = hwndValue(hwnd), .title = try windowText(allocator, hwnd) };
 }
 
+fn processImagePath(gpa: std.mem.Allocator, pid: DWORD) Error![]u8 {
+    if (pid == 0) return gpa.dupe(u8, "") catch return error.OutOfMemory;
+    const handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) orelse {
+        return gpa.dupe(u8, "") catch return error.OutOfMemory;
+    };
+    defer _ = CloseHandle(handle);
+    var size: DWORD = 512;
+    var small: [512]u16 = undefined;
+    if (QueryFullProcessImageNameW(handle, 0, &small, &size) != 0) {
+        return host.utf16ToUtf8(gpa, small[0..size]);
+    }
+    size = 32768;
+    const big = gpa.alloc(u16, size) catch return error.OutOfMemory;
+    defer gpa.free(big);
+    if (QueryFullProcessImageNameW(handle, 0, big.ptr, &size) == 0) {
+        return gpa.dupe(u8, "") catch return error.OutOfMemory;
+    }
+    return host.utf16ToUtf8(gpa, big[0..size]);
+}
+
+/// JSON `{hwnd,title,pid,exe}` for the foreground window (empty fields when none).
+pub fn foregroundDetailJson() Error![]u8 {
+    const hwnd = GetForegroundWindow() orelse {
+        return host.jsonAlloc(.{
+            .hwnd = @as(u64, 0),
+            .title = "",
+            .pid = @as(u32, 0),
+            .exe = "",
+        });
+    };
+    var pid: DWORD = 0;
+    _ = GetWindowThreadProcessId(hwnd, &pid);
+    const title = try windowText(allocator, hwnd);
+    defer allocator.free(title);
+    const exe = try processImagePath(allocator, pid);
+    defer allocator.free(exe);
+    return host.jsonAlloc(.{
+        .hwnd = hwndValue(hwnd),
+        .title = host.truncateCodepoints(title, 200),
+        .pid = pid,
+        .exe = exe,
+    });
+}
+
 fn foregroundIs(hwnd: HWND) bool {
     const fg = GetForegroundWindow() orelse return false;
     if (fg == hwnd) return true;
@@ -970,6 +1026,97 @@ pub fn clipboardSetText(utf8: []const u8) Error!void {
         _ = GlobalFree(handle);
         return err;
     }
+}
+
+/// JSON array of UTF-8 paths from CF_HDROP; `[]` when the format is absent.
+pub fn clipboardGetFilesJson() Error![]u8 {
+    try openClipboardRetry();
+    defer _ = CloseClipboard();
+    if (IsClipboardFormatAvailable(CF_HDROP) == 0) {
+        return allocator.dupe(u8, "[]") catch return error.OutOfMemory;
+    }
+    const handle = GetClipboardData(CF_HDROP) orelse {
+        return allocator.dupe(u8, "[]") catch return error.OutOfMemory;
+    };
+    const count = DragQueryFileW(handle, 0xFFFFFFFF, null, 0);
+    var paths: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (paths.items) |path| allocator.free(path);
+        paths.deinit(allocator);
+    }
+    const limit = @min(count, @as(UINT, 20));
+    var i: UINT = 0;
+    while (i < limit) : (i += 1) {
+        const needed = DragQueryFileW(handle, i, null, 0);
+        if (needed == 0) continue;
+        const wide = allocator.alloc(u16, needed + 1) catch return error.OutOfMemory;
+        defer allocator.free(wide);
+        const copied = DragQueryFileW(handle, i, wide.ptr, needed + 1);
+        if (copied == 0) continue;
+        const utf8 = try host.utf16ToUtf8(allocator, wide[0..copied]);
+        paths.append(allocator, utf8) catch {
+            allocator.free(utf8);
+            return error.OutOfMemory;
+        };
+    }
+    return host.jsonAlloc(paths.items);
+}
+
+/// CF_DIB → PNG via `host.encodePng`. Empty buffer when the format is absent
+/// or the DIB is not BI_RGB 24/32-bit.
+pub fn clipboardGetImagePng() Error![]u8 {
+    try openClipboardRetry();
+    defer _ = CloseClipboard();
+    if (IsClipboardFormatAvailable(CF_DIB) == 0) {
+        return allocator.dupe(u8, "") catch return error.OutOfMemory;
+    }
+    const handle = GetClipboardData(CF_DIB) orelse {
+        return allocator.dupe(u8, "") catch return error.OutOfMemory;
+    };
+    const size = GlobalSize(handle);
+    if (size < @sizeOf(BITMAPINFOHEADER)) {
+        return allocator.dupe(u8, "") catch return error.OutOfMemory;
+    }
+    const locked = GlobalLock(handle) orelse {
+        return allocator.dupe(u8, "") catch return error.OutOfMemory;
+    };
+    defer _ = GlobalUnlock(handle);
+    const dib: [*]const u8 = @ptrCast(locked);
+    return dibToPng(allocator, dib[0..size]) catch |err| switch (err) {
+        error.InvalidArgument => allocator.dupe(u8, "") catch return error.OutOfMemory,
+        else => err,
+    };
+}
+
+fn dibToPng(gpa: std.mem.Allocator, dib: []const u8) Error![]u8 {
+    if (dib.len < @sizeOf(BITMAPINFOHEADER)) return error.InvalidArgument;
+    const hdr: *const BITMAPINFOHEADER = @ptrCast(@alignCast(dib.ptr));
+    if (hdr.biSize < @sizeOf(BITMAPINFOHEADER)) return error.InvalidArgument;
+    if (hdr.biCompression != BI_RGB) return error.InvalidArgument;
+    if (hdr.biBitCount != 24 and hdr.biBitCount != 32) return error.InvalidArgument;
+    if (hdr.biWidth <= 0 or hdr.biHeight == 0) return error.InvalidArgument;
+    const width: u32 = @intCast(hdr.biWidth);
+    const abs_h_i: i32 = if (hdr.biHeight < 0) -hdr.biHeight else hdr.biHeight;
+    const abs_h: u32 = @intCast(abs_h_i);
+    const bpp: u32 = if (hdr.biBitCount == 24) 3 else 4;
+    const stride_src: usize = ((@as(usize, width) * hdr.biBitCount + 31) / 32) * 4;
+    const header_len: usize = hdr.biSize;
+    const needed = std.math.add(usize, header_len, std.math.mul(usize, stride_src, abs_h) catch return error.InvalidArgument) catch return error.InvalidArgument;
+    if (dib.len < needed) return error.InvalidArgument;
+    const pixels = dib[header_len..];
+    const top_down = hdr.biHeight < 0;
+    if (top_down) {
+        return host.encodePng(gpa, pixels, width, abs_h, stride_src, bpp);
+    }
+    // Bottom-up DIB: reverse rows into a contiguous top-down buffer.
+    const flat = gpa.alloc(u8, stride_src * abs_h) catch return error.OutOfMemory;
+    defer gpa.free(flat);
+    var y: u32 = 0;
+    while (y < abs_h) : (y += 1) {
+        const src_y = abs_h - 1 - y;
+        @memcpy(flat[y * stride_src ..][0..stride_src], pixels[src_y * stride_src ..][0..stride_src]);
+    }
+    return host.encodePng(gpa, flat, width, abs_h, stride_src, bpp);
 }
 
 // ---------------------------------------------------------------------------
@@ -1773,6 +1920,42 @@ test "window enumeration yields well-formed entries and a class per window" {
     try std.testing.expectError(error.InvalidArgument, manageWindow(0, .minimize, 0, 0, 0, 0));
     const fg = try foregroundWindow();
     defer allocator.free(fg.title);
+    const detail = try foregroundDetailJson();
+    defer allocator.free(detail);
+    try std.testing.expect(detail.len >= 2);
+}
+
+test "dibToPng encodes a tiny BI_RGB 24-bit bottom-up DIB" {
+    // 2x2 BGR, bottom-up, DWORD-aligned stride of 8.
+    var dib: [40 + 16]u8 = undefined;
+    @memset(&dib, 0);
+    const hdr: *BITMAPINFOHEADER = @ptrCast(@alignCast(&dib));
+    hdr.biSize = 40;
+    hdr.biWidth = 2;
+    hdr.biHeight = 2;
+    hdr.biPlanes = 1;
+    hdr.biBitCount = 24;
+    hdr.biCompression = BI_RGB;
+    // Bottom row (stored first): red, green
+    dib[40] = 0;
+    dib[41] = 0;
+    dib[42] = 255;
+    dib[43] = 0;
+    dib[44] = 255;
+    dib[45] = 0;
+    // Top row: blue, white
+    dib[48] = 255;
+    dib[49] = 0;
+    dib[50] = 0;
+    dib[51] = 255;
+    dib[52] = 255;
+    dib[53] = 255;
+    const png = try dibToPng(allocator, &dib);
+    defer allocator.free(png);
+    try std.testing.expect(png.len > 40);
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n' }, png[0..8]);
+    try std.testing.expectEqual(@as(u32, 2), std.mem.readInt(u32, png[16..20], .big));
+    try std.testing.expectEqual(@as(u32, 2), std.mem.readInt(u32, png[20..24], .big));
 }
 
 // `timeout.exe` refuses to run without console stdin, which a hidden process

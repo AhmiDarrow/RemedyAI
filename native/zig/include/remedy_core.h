@@ -19,10 +19,12 @@ extern "C" {
  * interactive 3-pipe spawn (separate stdin/stdout/stderr OS handles for
  * Python workers), write-jail / workdir roots (set/clear/check), HostSession
  * orchestration (open/run/cwd/close + wrap/split protocol), host
- * diagnose/dialect/stretch, and looks_like_powershell / rewrite_posix_argv
- * (argv-head twin of translate). Production Python spawn/session paths use
- * the authorized exports; the unsigned process_spawn_hidden / conpty_spawn /
- * host_session_open symbols remain for low-level tests.
+ * diagnose/dialect/stretch, looks_like_powershell / rewrite_posix_argv
+ * (argv-head twin of translate), CF_HDROP file-list clipboard read,
+ * CF_DIB→PNG clipboard read, and foreground detail (hwnd/title/pid/exe).
+ * Production Python spawn/session paths use the authorized exports; the
+ * unsigned process_spawn_hidden / conpty_spawn / host_session_open symbols
+ * remain for low-level tests.
  * Every host/UIA/ConPTY/policy function returns a remedy_core_status. On a
  * non-Windows build each host/UIA/ConPTY spawn function returns
  * REMEDY_CORE_UNSUPPORTED and writes nothing; host_op_prepare,
@@ -233,6 +235,18 @@ int32_t remedy_core_clipboard_get_text(uint8_t **out_utf8, size_t *out_len);
 
 /* Replace the clipboard contents with UTF-8 text (same retry policy). */
 int32_t remedy_core_clipboard_set_text(const uint8_t *utf8, size_t len);
+
+/* CF_HDROP paths as a JSON string array. Empty `[]` when the format is
+ * absent. Windows only; unsupported elsewhere. */
+int32_t remedy_core_clipboard_get_files(uint8_t **out_json, size_t *out_len);
+
+/* CF_DIB encoded as PNG. Empty buffer when absent or the DIB is not
+ * BI_RGB 24/32-bit. Windows only; unsupported elsewhere. */
+int32_t remedy_core_clipboard_get_image_png(uint8_t **out_png, size_t *out_len);
+
+/* JSON object `{hwnd,title,pid,exe}` for the foreground window (empty
+ * fields when none). Windows only; unsupported elsewhere. */
+int32_t remedy_core_foreground_detail(uint8_t **out_json, size_t *out_len);
 
 /* ---- ABI 2: processes -------------------------------------------------- */
 
