@@ -179,6 +179,30 @@ def test_locate_shape() -> None:
     assert "COMFYUI_HOME" in loc["config_keys"]["env"]
 
 
+def test_process_install_paths_uses_matching_helper(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """ComfyUI process discovery uses Zig-backed matching — no ``ps aux``."""
+    import inspect
+
+    from remedy.execution import process as process_mod
+
+    src = inspect.getsource(comfy._process_install_paths)  # noqa: SLF001
+    assert "subprocess" not in src
+    assert "matching_process_command_lines" in src
+
+    install = tmp_path / "ComfyUI"
+    install.mkdir()
+    (install / "main.py").write_text("# fake\n", encoding="utf-8")
+    monkeypatch.setattr(
+        process_mod,
+        "matching_process_command_lines",
+        lambda _pat: [f"python {install / 'main.py'}"],
+    )
+    found = comfy._process_install_paths()  # noqa: SLF001
+    assert install in found
+
+
 def test_safe_image_filename_blocks_traversal() -> None:
     """Residual path jail: absolute / .. / separators must not become write names."""
     assert comfy._safe_image_filename("ComfyUI_00001_.png") == "ComfyUI_00001_.png"  # noqa: SLF001

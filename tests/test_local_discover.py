@@ -315,6 +315,68 @@ def test_discover_binaries_glob_dirs(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert discover_binaries(spec)["ok"] is False
 
 
+def test_process_paths_uses_matching_helper_not_ps_aux(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Linux process discovery must not spawn ``ps aux``."""
+    import inspect
+
+    from remedy.core import local_discover
+    from remedy.execution import process as process_mod
+
+    src = inspect.getsource(local_discover._process_paths)  # noqa: SLF001
+    assert "subprocess" not in src
+    assert "ps" not in src or "matching_process" in src
+
+    install = tmp_path / "ComfyUI"
+    install.mkdir()
+    (install / "main.py").write_text("# fake\n", encoding="utf-8")
+    cmdline = f"python {install / 'main.py'}"
+    monkeypatch.setattr(
+        process_mod,
+        "matching_process_command_lines",
+        lambda _pat: [cmdline],
+    )
+    spec = HttpServiceSpec(
+        id="comfyui",
+        ports=[8188],
+        path="/system_stats",
+        dir_names=["ComfyUI"],
+        entry_files=["main.py"],
+    )
+    found = local_discover._process_paths(spec)  # noqa: SLF001
+    assert install in found
+
+
+def test_matching_processes_reads_proc_without_spawn(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """POSIX listing reads /proc/*/cmdline — no subprocess.run."""
+    from remedy.execution import process as process_mod
+
+    monkeypatch.setattr(process_mod.sys, "platform", "linux")
+    pid_dir = tmp_path / "4242"
+    pid_dir.mkdir()
+    (pid_dir / "cmdline").write_bytes(b"python\x00/opt/ComfyUI/main.py\x00")
+    other = tmp_path / "7"
+    other.mkdir()
+    (other / "cmdline").write_bytes(b"bash\x00")
+
+    real_path = Path
+
+    def path_factory(*args, **kwargs):
+        if args and str(args[0]) == "/proc":
+            return tmp_path
+        return real_path(*args, **kwargs)
+
+    monkeypatch.setattr(process_mod, "Path", path_factory)
+    hits = process_mod.matching_processes(r"ComfyUI|main\.py")
+    assert hits == [(4242, "python /opt/ComfyUI/main.py")]
+    assert process_mod.matching_process_command_lines(r"ComfyUI") == [
+        "python /opt/ComfyUI/main.py"
+    ]
+
+
 def test_work_root_markers_for_games(tmp_path: Path) -> None:
     from remedy.core.work_roots import discover_work_root
 

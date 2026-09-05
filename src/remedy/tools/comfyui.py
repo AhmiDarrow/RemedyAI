@@ -19,7 +19,6 @@ import random
 import re
 import shutil
 import socket
-import subprocess
 import sys
 import time
 import urllib.error
@@ -367,41 +366,9 @@ def _process_install_paths() -> list[Path]:
     """Infer install dir from a running ComfyUI/python process (portable-ish)."""
     paths: list[Path] = []
     try:
-        if sys.platform == "win32":
-            # PowerShell: processes whose command line mentions ComfyUI main.py
-            ps = (
-                "Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | "
-                "Where-Object { $_.CommandLine -match 'ComfyUI|main\\.py' } | "
-                "Select-Object -ExpandProperty CommandLine"
-            )
-            from remedy.execution.process import run_hidden
+        from remedy.execution.process import matching_process_command_lines
 
-            proc = run_hidden(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-WindowStyle",
-                    "Hidden",
-                    "-Command",
-                    ps,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            lines = (proc.stdout or "").splitlines()
-        else:
-            proc = subprocess.run(
-                ["ps", "aux"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            lines = [
-                ln
-                for ln in (proc.stdout or "").splitlines()
-                if re.search(r"ComfyUI|main\.py", ln, re.I)
-            ]
+        lines = matching_process_command_lines(r"ComfyUI|main\.py")
     except Exception:
         return paths
 
