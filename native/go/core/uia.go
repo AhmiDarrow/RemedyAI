@@ -52,6 +52,98 @@ func UIAControlSnapshotJSON(hwnd uint64, maxElements uint32, preferredOnly bool)
 	return takeBytes(lib, ptr, length), nil
 }
 
+// UIAFocusedElementJSON returns UTF-8 JSON {name,role,value} or the JSON
+// literal null when nothing is focused / UIA is unavailable. Windows only;
+// other platforms return ErrUnsupported.
+func UIAFocusedElementJSON() ([]byte, error) {
+	lib, err := Open()
+	if err != nil {
+		return nil, err
+	}
+	var ptr, length uintptr
+	status, err := lib.call(
+		"remedy_core_uia_focused_element",
+		unsafePtrPtr(&ptr),
+		sizePtr(&length),
+	)
+	if err != nil {
+		return nil, err
+	}
+	st := int32(status)
+	if st == StatusUnsupported {
+		return nil, ErrUnsupported
+	}
+	if err := lib.check("uia_focused_element", st); err != nil {
+		return nil, err
+	}
+	return takeBytes(lib, ptr, length), nil
+}
+
+// UIAReadWindowTextJSON returns UTF-8 JSON {title,text,fields:[...]} or null.
+// hwnd 0 is invalid for a useful read (Zig still accepts it). maxChars 0
+// defaults inside Zig. Windows only; other platforms return ErrUnsupported.
+func UIAReadWindowTextJSON(hwnd uint64, maxChars uint32) ([]byte, error) {
+	lib, err := Open()
+	if err != nil {
+		return nil, err
+	}
+	var ptr, length uintptr
+	status, err := lib.call(
+		"remedy_core_uia_read_window_text",
+		uintptr(hwnd),
+		uintptr(maxChars),
+		unsafePtrPtr(&ptr),
+		sizePtr(&length),
+	)
+	if err != nil {
+		return nil, err
+	}
+	st := int32(status)
+	if st == StatusUnsupported {
+		return nil, ErrUnsupported
+	}
+	if err := lib.check("uia_read_window_text", st); err != nil {
+		return nil, err
+	}
+	return takeBytes(lib, ptr, length), nil
+}
+
+// UIAElementActionJSON runs invoke|set_value|toggle|scroll_into_view on a
+// live element matched by hwnd+name+role. Always returns a JSON object
+// {ok,message,verified?}. Windows only; other platforms return ErrUnsupported.
+func UIAElementActionJSON(hwnd uint64, name, role, action, text string) ([]byte, error) {
+	lib, err := Open()
+	if err != nil {
+		return nil, err
+	}
+	nameRaw := []byte(name)
+	roleRaw := []byte(role)
+	actionRaw := []byte(action)
+	textRaw := []byte(text)
+	var ptr, length uintptr
+	status, err := lib.call(
+		"remedy_core_uia_element_action",
+		uintptr(hwnd),
+		bytesPtr(nameRaw), uintptr(len(nameRaw)),
+		bytesPtr(roleRaw), uintptr(len(roleRaw)),
+		bytesPtr(actionRaw), uintptr(len(actionRaw)),
+		bytesPtr(textRaw), uintptr(len(textRaw)),
+		unsafePtrPtr(&ptr),
+		sizePtr(&length),
+	)
+	if err != nil {
+		return nil, err
+	}
+	st := int32(status)
+	if st == StatusUnsupported {
+		return nil, ErrUnsupported
+	}
+	if err := lib.check("uia_element_action", st); err != nil {
+		return nil, err
+	}
+	return takeBytes(lib, ptr, length), nil
+}
+
 // A11ySnapshotJSON returns UTF-8 JSON array of AT-SPI clickables (Linux).
 // Other platforms return ErrUnsupported (or a HostError with StatusUnsupported).
 func A11ySnapshotJSON(limit uint32) ([]byte, error) {

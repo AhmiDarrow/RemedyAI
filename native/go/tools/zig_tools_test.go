@@ -20,7 +20,7 @@ func TestRegisterZigHostToolsDescriptors(t *testing.T) {
 	if err := RegisterZigHostTools(registry); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"computer.screenshot", "computer.windows", "computer.monitors", "computer.snapshot"} {
+	for _, id := range []string{"computer.screenshot", "computer.windows", "computer.monitors", "computer.snapshot", "computer.uia.focused", "computer.uia.read_text"} {
 		desc, err := registry.Latest(id)
 		if err != nil {
 			t.Fatalf("%s: %v", id, err)
@@ -35,7 +35,7 @@ func TestRegisterZigHostToolsDescriptors(t *testing.T) {
 			t.Fatalf("%s capabilities=%v", id, desc.Capabilities)
 		}
 	}
-	for _, id := range []string{"computer.click", "computer.type", "computer.key", "computer.move", "computer.scroll", "computer.drag", "computer.focus", "computer.window", "clipboard.write"} {
+	for _, id := range []string{"computer.click", "computer.type", "computer.key", "computer.move", "computer.scroll", "computer.drag", "computer.focus", "computer.window", "computer.uia.action", "clipboard.write"} {
 		desc, err := registry.Latest(id)
 		if err != nil {
 			t.Fatalf("%s: %v", id, err)
@@ -136,12 +136,12 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 		t.Fatalf("computer.key err=%v", err)
 	}
 
-	for _, id := range []string{"computer.move", "computer.scroll", "clipboard.read", "clipboard.write", "computer.focus", "computer.window"} {
+	for _, id := range []string{"computer.move", "computer.scroll", "clipboard.read", "clipboard.write", "computer.focus", "computer.window", "computer.uia.focused", "computer.uia.read_text", "computer.uia.action"} {
 		input := json.RawMessage(`{"x":1,"y":2}`)
 		switch id {
 		case "computer.scroll":
 			input = json.RawMessage(`{"x":1,"y":2,"dy":-1}`)
-		case "clipboard.read":
+		case "clipboard.read", "computer.uia.focused":
 			input = json.RawMessage(`{}`)
 		case "clipboard.write":
 			input = json.RawMessage(`{"text":"hi"}`)
@@ -149,6 +149,10 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 			input = json.RawMessage(`{"hwnd":42}`)
 		case "computer.window":
 			input = json.RawMessage(`{"hwnd":42,"action":"minimize"}`)
+		case "computer.uia.read_text":
+			input = json.RawMessage(`{"hwnd":42}`)
+		case "computer.uia.action":
+			input = json.RawMessage(`{"hwnd":42,"name":"OK","action":"invoke"}`)
 		}
 		_, err = registry.Execute(context.Background(), Request{
 			ToolID: id, Version: 1, Input: input, CapabilityToken: token,
@@ -337,6 +341,60 @@ func TestComputerWindowRejectsBadAction(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("bad action: %v", err)
+	}
+}
+
+func TestComputerUIAReadTextRejectsMissingHwnd(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.uia.read_text",
+		Version:         1,
+		Input:           json.RawMessage(`{}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("missing hwnd: %v", err)
+	}
+	_, err = registry.Execute(context.Background(), Request{
+		ToolID:          "computer.uia.read_text",
+		Version:         1,
+		Input:           json.RawMessage(`{"hwnd":0}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("zero hwnd: %v", err)
+	}
+}
+
+func TestComputerUIAActionRejectsBadAction(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.uia.action",
+		Version:         1,
+		Input:           json.RawMessage(`{"hwnd":42,"name":"OK","action":"click"}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("bad action: %v", err)
+	}
+	_, err = registry.Execute(context.Background(), Request{
+		ToolID:          "computer.uia.action",
+		Version:         1,
+		Input:           json.RawMessage(`{"hwnd":42,"name":"","action":"invoke"}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("empty name: %v", err)
 	}
 }
 
@@ -565,6 +623,89 @@ func TestZigHostToolsLiveWhenLibraryPresent(t *testing.T) {
 	}
 	if snapOut.Total != len(snapOut.Controls) {
 		t.Fatalf("total mismatch: %#v", snapOut)
+	}
+
+	focused, err := registry.Execute(context.Background(), Request{
+		ToolID: "computer.uia.focused", Version: 1, Input: json.RawMessage(`{}`),
+		CapabilityToken: token,
+	})
+	if err != nil {
+		t.Fatalf("computer.uia.focused: %v", err)
+	}
+	var focusedOut struct {
+		Available bool `json:"available"`
+		Element   any  `json:"element"`
+	}
+	if err := json.Unmarshal(focused.Output, &focusedOut); err != nil {
+		t.Fatal(err)
+	}
+	if !focusedOut.Available {
+		t.Fatalf("expected UIA available for focused: %#v", focusedOut)
+	}
+
+	var fgHwnd uint64
+	if winOut.Total > 0 {
+		var first map[string]any
+		rawWin, _ := json.Marshal(winOut.Windows[0])
+		if err := json.Unmarshal(rawWin, &first); err == nil {
+			switch v := first["hwnd"].(type) {
+			case float64:
+				fgHwnd = uint64(v)
+			}
+		}
+	}
+	if fgHwnd != 0 {
+		readInput, err := json.Marshal(map[string]any{"hwnd": fgHwnd, "max_chars": 2000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		readText, err := registry.Execute(context.Background(), Request{
+			ToolID: "computer.uia.read_text", Version: 1, Input: readInput,
+			CapabilityToken: token,
+		})
+		if err != nil {
+			t.Fatalf("computer.uia.read_text: %v", err)
+		}
+		var readOut struct {
+			Available bool `json:"available"`
+			HWND      uint64 `json:"hwnd"`
+			Payload   any  `json:"payload"`
+		}
+		if err := json.Unmarshal(readText.Output, &readOut); err != nil {
+			t.Fatal(err)
+		}
+		if !readOut.Available || readOut.HWND != fgHwnd {
+			t.Fatalf("read_text out=%#v", readOut)
+		}
+
+		actionInput, err := json.Marshal(map[string]any{
+			"hwnd": fgHwnd, "name": "__remedy_no_such_control__", "role": "button", "action": "invoke",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		action, err := registry.Execute(context.Background(), Request{
+			ToolID: "computer.uia.action", Version: 1, Input: actionInput,
+			CapabilityToken: token,
+		})
+		if err != nil {
+			t.Fatalf("computer.uia.action: %v", err)
+		}
+		var actionOut struct {
+			OK      bool   `json:"ok"`
+			Message string `json:"message"`
+			HWND    uint64 `json:"hwnd"`
+			Action  string `json:"action"`
+		}
+		if err := json.Unmarshal(action.Output, &actionOut); err != nil {
+			t.Fatal(err)
+		}
+		if actionOut.OK || actionOut.HWND != fgHwnd || actionOut.Action != "invoke" {
+			t.Fatalf("expected not-found action result: %#v", actionOut)
+		}
+		if !strings.Contains(actionOut.Message, "not found") {
+			t.Fatalf("expected not-found message: %#v", actionOut)
+		}
 	}
 
 	cmd := filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
