@@ -182,7 +182,13 @@ def _bump_latest_json(ver: str) -> None:
     PATHS["latest_json"].write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
+_SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
+
+
 def _bump_version(current: str, target: str) -> str:
+    if target in ("-h", "--help", "help"):
+        print(__doc__.strip(), file=sys.stderr)
+        raise SystemExit(0)
     if target in ("patch", "minor", "major"):
         parts = [int(x) for x in current.split(".")]
         if target == "major":
@@ -192,6 +198,10 @@ def _bump_version(current: str, target: str) -> str:
         else:
             parts = [parts[0], parts[1], parts[2] + 1]
         return ".".join(str(p) for p in parts)
+    if not _SEMVER.match(target):
+        raise SystemExit(
+            f"Invalid version {target!r}. Use X.Y.Z, or patch|minor|major."
+        )
     return target
 
 
