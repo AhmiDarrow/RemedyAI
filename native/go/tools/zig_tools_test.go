@@ -35,7 +35,7 @@ func TestRegisterZigHostToolsDescriptors(t *testing.T) {
 			t.Fatalf("%s capabilities=%v", id, desc.Capabilities)
 		}
 	}
-	for _, id := range []string{"computer.click", "computer.type"} {
+	for _, id := range []string{"computer.click", "computer.type", "computer.move", "computer.scroll", "computer.drag", "clipboard.write"} {
 		desc, err := registry.Latest(id)
 		if err != nil {
 			t.Fatalf("%s: %v", id, err)
@@ -46,6 +46,16 @@ func TestRegisterZigHostToolsDescriptors(t *testing.T) {
 		if len(desc.Capabilities) == 0 || desc.Capabilities[0] != "computer.input" {
 			t.Fatalf("%s capabilities=%v", id, desc.Capabilities)
 		}
+	}
+	clipRead, err := registry.Latest("clipboard.read")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clipRead.Runtime != RuntimeZig || clipRead.Risk != RiskReadOnly {
+		t.Fatalf("clipboard.read runtime/risk=%s/%v", clipRead.Runtime, clipRead.Risk)
+	}
+	if len(clipRead.Capabilities) == 0 || clipRead.Capabilities[0] != "computer.read" {
+		t.Fatalf("clipboard.read capabilities=%v", clipRead.Capabilities)
 	}
 	shell, err := registry.Latest("shell.exec")
 	if err != nil {
@@ -114,6 +124,39 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
 		t.Fatalf("computer.type err=%v", err)
 	}
+
+	for _, id := range []string{"computer.move", "computer.scroll", "clipboard.read", "clipboard.write"} {
+		input := json.RawMessage(`{"x":1,"y":2}`)
+		switch id {
+		case "computer.scroll":
+			input = json.RawMessage(`{"x":1,"y":2,"dy":-1}`)
+		case "clipboard.read":
+			input = json.RawMessage(`{}`)
+		case "clipboard.write":
+			input = json.RawMessage(`{"text":"hi"}`)
+		}
+		_, err = registry.Execute(context.Background(), Request{
+			ToolID: id, Version: 1, Input: input, CapabilityToken: token,
+		})
+		if err == nil {
+			t.Fatalf("%s expected fail-closed error", id)
+		}
+		if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+			t.Fatalf("%s err=%v", id, err)
+		}
+	}
+
+	_, err = registry.Execute(context.Background(), Request{
+		ToolID: "computer.drag", Version: 1,
+		Input:           json.RawMessage(`{"x1":1,"y1":2,"x2":3,"y2":4}`),
+		CapabilityToken: token,
+	})
+	if err == nil {
+		t.Fatal("computer.drag expected fail-closed error")
+	}
+	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("computer.drag err=%v", err)
+	}
 }
 
 func TestComputerClickRejectsBadButton(t *testing.T) {
@@ -149,6 +192,60 @@ func TestComputerTypeRejectsEmptyText(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("empty text: %v", err)
+	}
+}
+
+func TestComputerMoveRejectsMissingCoords(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.move",
+		Version:         1,
+		Input:           json.RawMessage(`{"x":1}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("missing y: %v", err)
+	}
+}
+
+func TestComputerDragRejectsExcessiveSteps(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.drag",
+		Version:         1,
+		Input:           json.RawMessage(`{"x1":0,"y1":0,"x2":1,"y2":1,"steps":999}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("excessive steps: %v", err)
+	}
+}
+
+func TestClipboardWriteRejectsMissingText(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "clipboard.write",
+		Version:         1,
+		Input:           json.RawMessage(`{}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("missing text: %v", err)
 	}
 }
 
