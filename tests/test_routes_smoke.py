@@ -1,7 +1,7 @@
 """Every route module registers, and no parameterless GET returns a 5xx.
 
-Largest registrars still exercised here include routes/sessions/messages
-(partner/memory/catalog/auth/settings/stream/misc twins dropped; Go owns those).
+Sessions/partner/memory/catalog/auth/settings/stream twins dropped; Go owns
+those. Remaining TestClient surface is status stubs + /dashboard.
 
 A stub runtime is the point: the desktop hits these during boot, before a
 provider is connected and before memory is open. A route that assumes any of
@@ -95,7 +95,7 @@ def test_enough_routes_exist_for_this_to_mean_something(app_and_failures):
     app, _ = app_and_failures
     paths = {r.path for r in app.routes if hasattr(r, "methods")}
     # Floor tracks intentional FastAPI TestClient shrink (Go owns production).
-    assert len(paths) >= 15
+    assert len(paths) >= 8
 
 
 def test_no_parameterless_get_returns_a_server_error(app_and_failures):

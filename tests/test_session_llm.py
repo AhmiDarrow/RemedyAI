@@ -7,59 +7,8 @@ from types import SimpleNamespace
 from remedy.core.session_llm import resolve_session_llm_bind, session_llm_update_fields
 
 
-def test_rmb_live_reload_refused_while_any_stream_claimed(tmp_path, monkeypatch):
-    import asyncio
-
-    from fastapi.testclient import TestClient
-
-    from remedy.core.agent import BasicRuntime
-    from remedy.core.turn_context import (
-        release_session_stream_claim,
-        try_claim_session_stream,
-    )
-    from remedy.interfaces.api import create_app
-    from remedy.memory.store import MemoryStore
-    from remedy.models import AgentConfig, ChatSession
-
-    async def _prep():
-        store = MemoryStore(str(tmp_path / "llm.db"))
-        await store.initialize()
-        sess = await store.create_chat_session(ChatSession(title="rmb"))
-        return store, sess.id
-
-    store, sid = asyncio.run(_prep())
-    cfg = AgentConfig(
-        name="t",
-        project_path="",
-        llm_provider="rmb",
-        llm_model="local",
-        llm_api_key="x",
-        llm_base_url="http://127.0.0.1:8787/v1",
-        home_dir=str(tmp_path),
-    )
-    rt = BasicRuntime(cfg, memory=store)
-    called: list[int] = []
-    monkeypatch.setattr(
-        "remedy.runtime.rmb.service.apply_rmb_chat_model",
-        lambda *a, **k: called.append(1) or {"ok": True, "model_path": "x.gguf"},
-    )
-    app = create_app(runtime=rt, memory=store, api_key="")
-    other = "other-streaming-tab"
-    assert try_claim_session_stream(other) is True
-    try:
-        with TestClient(app) as client:
-            r = client.put(
-                f"/api/sessions/{sid}/llm",
-                json={"provider": "rmb", "model": "other-gguf"},
-            )
-            assert r.status_code == 409, r.text
-            assert called == []
-    finally:
-        release_session_stream_claim(other)
-
-
-def test_rmb_http_routes_absent_from_testclient():
-    """HTTP /api/rmb/* is Go-owned (incl. stream-claim 409); no FastAPI twin."""
+def test_rmb_and_session_llm_http_absent_from_testclient():
+    """HTTP /api/rmb/* and /api/sessions/{id}/llm are Go-owned; no FastAPI twin."""
     from remedy.interfaces.api import create_app
 
     app = create_app(runtime=None, memory=None, api_key="")
@@ -71,17 +20,9 @@ def test_rmb_http_routes_absent_from_testclient():
         "/api/rmb/status",
         "/api/rmb/catalog",
         "/api/rmb/stop",
+        "/api/sessions/{session_id}/llm",
     ):
         assert path not in paths
-
-
-def test_put_session_llm_route_is_registered():
-    """Desktop PUT /sessions/{id}/llm must not 404 (handler was previously unregistered)."""
-    from remedy.interfaces.api import create_app
-
-    app = create_app(runtime=None, memory=None, api_key="")
-    paths = {getattr(r, "path", "") for r in app.routes}
-    assert "/api/sessions/{session_id}/llm" in paths
 
 
 def test_explicit_req_pair_wins():
