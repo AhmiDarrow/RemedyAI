@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,6 +18,9 @@ func TestClipboardRichWrappersFailClosedWithoutLibrary(t *testing.T) {
 	}
 	if _, err := ClipboardGetImagePNG(); err == nil {
 		t.Fatal("ClipboardGetImagePNG expected fail-closed")
+	}
+	if _, err := ForegroundDetailJSON(); err == nil {
+		t.Fatal("ForegroundDetailJSON expected fail-closed")
 	}
 }
 
@@ -44,6 +48,23 @@ func TestClipboardRichWrappersLiveWhenLibraryPresent(t *testing.T) {
 	}
 	if png == nil {
 		t.Fatal("expected non-nil png slice")
+	}
+
+	raw, err := ForegroundDetailJSON()
+	if err != nil {
+		t.Fatalf("ForegroundDetailJSON: %v", err)
+	}
+	if len(raw) == 0 {
+		t.Fatal("expected non-empty foreground JSON")
+	}
+	var detail map[string]any
+	if err := json.Unmarshal(raw, &detail); err != nil {
+		t.Fatalf("decode foreground: %v", err)
+	}
+	for _, key := range []string{"hwnd", "title", "pid", "exe"} {
+		if _, ok := detail[key]; !ok {
+			t.Fatalf("missing %s in %#v", key, detail)
+		}
 	}
 }
 
