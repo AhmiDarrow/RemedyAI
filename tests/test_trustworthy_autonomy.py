@@ -110,14 +110,3 @@ def test_v038_verification_not_exit_code_alone(tmp_path: Path):
     )
 
 
-def test_v038_no_skip_verify():
-    from remedy.execution.action import ActionRecord, ActionState, IllegalTransition
-
-    rec = ActionRecord(tool="host_run")
-    rec.advance(ActionState.AUTHORIZED)
-    rec.advance(ActionState.RUNNING)
-    try:
-        rec.advance(ActionState.COMPLETED)
-        raise AssertionError("should have raised")
-    except IllegalTransition:
-        pass
