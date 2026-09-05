@@ -501,23 +501,15 @@ def test_apply_settings_use_jinja_string_words(tmp_path, monkeypatch):
     assert st.get("use_jinja") is False  # unchanged by the rejected word
 
 
-def test_rmb_settings_route_declares_all_owner_knobs():
-    """Pydantic silently strips undeclared fields — the desktop knobs must
-    survive the POST /api/rmb/settings model."""
-    from remedy.interfaces.routes.rmb import RmbSettingsPatch
+def test_go_rmb_settings_keys_include_owner_knobs():
+    """HTTP /api/rmb/settings is Go-owned; owner knobs must stay in rmbSettingsKeys."""
+    from pathlib import Path
 
-    body = RmbSettingsPatch(
-        thinking="off",
-        reasoning_budget=512,
-        enable_mtp=False,
-        n_cpu_moe=-1,
-        spec_draft_n_max=4,
-        n_gpu_layers_draft=8,
-        model_draft="draft.gguf",
-        use_jinja="auto",
-        cache_reuse=256,
-    )
-    patch = body.model_dump(exclude_none=True)
+    src = Path("native/go/httpapi/rmb.go").read_text(encoding="utf-8")
+    # Slice the rmbSettingsKeys var so we do not match engine-public maps.
+    start = src.index("var rmbSettingsKeys")
+    end = src.index("}", start)
+    block = src[start:end]
     for key in (
         "thinking",
         "reasoning_budget",
@@ -529,9 +521,7 @@ def test_rmb_settings_route_declares_all_owner_knobs():
         "use_jinja",
         "cache_reuse",
     ):
-        assert key in patch, key
-    assert patch["use_jinja"] == "auto"
-    assert patch["n_cpu_moe"] == -1
+        assert f'"{key}"' in block, key
 
 
 def test_merged_state_cached_tracks_saves(tmp_path):

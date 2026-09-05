@@ -16,6 +16,7 @@ Not registered here (Go owns production):
 - ``/api/events/sessions`` session SSE
 - ``/api/chat`` and ``/api/chat/stream`` (legacy; sessions stream owns chat)
 - ``/api/terminal*`` ConPTY SSE terminal (phone / web rails)
+- ``/api/rmb/*`` local model host (start/stop/settings/use/HF)
 """
 from __future__ import annotations
 
@@ -26,7 +27,6 @@ from remedy.interfaces.routes.catalog import register_catalog_routes
 from remedy.interfaces.routes.memory import register_memory_routes
 from remedy.interfaces.routes.misc import register_misc_routes
 from remedy.interfaces.routes.partner import register_partner_routes
-from remedy.interfaces.routes.rmb import register_rmb_routes
 from remedy.interfaces.routes.sessions import register_sessions_routes
 from remedy.interfaces.routes.settings import register_settings_routes
 from remedy.interfaces.routes.skills_library import register_skills_library_routes
@@ -55,7 +55,6 @@ def register_all_routes(
     register_auth_routes(app, **kw)
     register_partner_routes(app, **kw)
     # No register_i18n/usage/vision/telephony/webhook/connect/nanoswarm/assistant/
-    # computer/hive/session_events/chat/terminal — Go remedy-runtime owns those.
+    # computer/hive/session_events/chat/terminal/rmb — Go remedy-runtime owns those.
     register_misc_routes(app, **kw)
     register_voice_routes(app, **kw)
-    register_rmb_routes(app, **kw)

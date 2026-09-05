@@ -5,21 +5,19 @@ from remedy.interfaces.api import should_warn_slow
 
 def test_poller_paths_skip_slow_on_200():
     for path in (
-        "/api/computer/jobs/next",
-        "/api/computer/ui/command",
-        "/api/computer/host/hello",
-        "/api/computer/host/status",
         "/api/status",
         "/api/ping",
-        "/api/life-tasks/current",
+        "/api/turn-active",
+        "/api/partner/status",
+        "/api/plans/latest",
+        "/api/app/command",
         "/api/approvals",
     ):
         assert should_warn_slow("GET", path, 200, 6259) is False
-    assert should_warn_slow("POST", "/api/computer/host/hello", 200, 1711) is False
 
 
 def test_poller_failures_still_slow():
-    assert should_warn_slow("GET", "/api/computer/jobs/next", 500, 800) is True
+    assert should_warn_slow("GET", "/api/status", 500, 800) is True
 
 
 def test_real_endpoints_still_slow():
@@ -33,6 +31,12 @@ def test_voice_status_is_a_poller_not_a_slow_warn():
     assert should_warn_slow("GET", "/api/voice/status", 500, 800) is True
 
 
+def test_go_owned_pollers_are_not_exempt_on_testclient_helper():
+    """Computer/life-tasks/RMB HF live on Go — TestClient slow helper no longer lists them."""
+    assert should_warn_slow("GET", "/api/computer/jobs/next", 200, 6259) is True
+    assert should_warn_slow("GET", "/api/life-tasks/current", 200, 6259) is True
+
+
 def test_fast_never_slow():
-    assert should_warn_slow("GET", "/api/computer/jobs/next", 200, 20) is False
+    assert should_warn_slow("GET", "/api/status", 200, 20) is False
     assert should_warn_slow("POST", "/api/sessions/abc/messages/stream", 200, 20) is False

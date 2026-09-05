@@ -58,49 +58,21 @@ def test_rmb_live_reload_refused_while_any_stream_claimed(tmp_path, monkeypatch)
         release_session_stream_claim(other)
 
 
-def test_rmb_settings_and_start_409_while_stream_claimed(tmp_path, monkeypatch):
-    """Settings/start must not restart llama-server under a live stream."""
-    from fastapi.testclient import TestClient
-
-    from remedy.core.agent import BasicRuntime
-    from remedy.core.turn_context import (
-        release_session_stream_claim,
-        try_claim_session_stream,
-    )
+def test_rmb_http_routes_absent_from_testclient():
+    """HTTP /api/rmb/* is Go-owned (incl. stream-claim 409); no FastAPI twin."""
     from remedy.interfaces.api import create_app
-    from remedy.models import AgentConfig
 
-    cfg = AgentConfig(
-        name="t",
-        project_path="",
-        llm_provider="rmb",
-        llm_model="local",
-        llm_api_key="x",
-        llm_base_url="http://127.0.0.1:8787/v1",
-        home_dir=str(tmp_path),
-    )
-    rt = BasicRuntime(cfg, memory=None)
-    live_calls: list[bool] = []
-
-    def _apply(patch, **kwargs):
-        live_calls.append(bool(kwargs.get("live", True)))
-        return {"ok": True, "saved": True}
-
-    monkeypatch.setattr("remedy.runtime.rmb.service.apply_rmb_settings", _apply)
-    app = create_app(runtime=rt, memory=None, api_key="")
-    other = "streaming-tab"
-    assert try_claim_session_stream(other) is True
-    try:
-        with TestClient(app) as client:
-            r = client.post("/api/rmb/settings", json={"ctx_size": 16384})
-            assert r.status_code == 409, r.text
-            assert live_calls == [False]
-            r2 = client.post("/api/rmb/start")
-            assert r2.status_code == 409, r2.text
-            r3 = client.post("/api/rmb/use")
-            assert r3.status_code == 409, r3.text
-    finally:
-        release_session_stream_claim(other)
+    app = create_app(runtime=None, memory=None, api_key="")
+    paths = {getattr(r, "path", "") for r in app.routes}
+    for path in (
+        "/api/rmb/start",
+        "/api/rmb/settings",
+        "/api/rmb/use",
+        "/api/rmb/status",
+        "/api/rmb/catalog",
+        "/api/rmb/stop",
+    ):
+        assert path not in paths
 
 
 def test_put_session_llm_route_is_registered():

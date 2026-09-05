@@ -1,8 +1,7 @@
 """Every route module registers, and no parameterless GET returns a 5xx.
 
-Four of the largest untested modules live here — routes/partner (839 lines),
-routes/sessions/stream (688), routes/rmb (380), routes/sessions/messages (304).
-None of them had a test that so much as imported them.
+Largest registrars still exercised here include routes/partner,
+routes/sessions/stream, and routes/sessions/messages.
 
 A stub runtime is the point: the desktop hits these during boot, before a
 provider is connected and before memory is open. A route that assumes any of
@@ -96,7 +95,7 @@ def test_enough_routes_exist_for_this_to_mean_something(app_and_failures):
     app, _ = app_and_failures
     paths = {r.path for r in app.routes if hasattr(r, "methods")}
     # Floor tracks intentional FastAPI TestClient shrink (Go owns production).
-    assert len(paths) >= 80
+    assert len(paths) >= 77
 
 
 def test_no_parameterless_get_returns_a_server_error(app_and_failures):
