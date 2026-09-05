@@ -574,7 +574,7 @@ def test_the_attribute_list_size_probe_reports_failure_like_the_real_api():
 
 @windows_only
 def test_spawn_conpty_is_reported_unsupported_when_the_binding_says_so():
-    from remedy.core.computer import host_conpty as conpty
+    from remedy.core.computer import host_binding as conpty
     from tests.harness.fake_host_binding import install_fake_conpty
 
     with install_fake_conpty(available=True):
@@ -590,7 +590,7 @@ def test_conpty_spawn_builds_the_console_and_the_command_line_it_was_asked_for()
     import subprocess
     from pathlib import Path
 
-    from remedy.core.computer import host_conpty as conpty
+    from remedy.core.computer import host_binding as conpty
     from tests.harness.fake_host_binding import install_fake_conpty
 
     host = FakeConsoleHost()
@@ -621,7 +621,7 @@ def test_conpty_spawn_builds_the_console_and_the_command_line_it_was_asked_for()
 
 @windows_only
 def test_a_failed_createprocess_closes_every_handle_it_opened():
-    from remedy.core.computer import host_conpty as conpty
+    from remedy.core.computer import host_binding as conpty
     from tests.harness.fake_host_binding import install_fake_conpty
 
     host = FakeConsoleHost(fail_create_process=True)
@@ -634,7 +634,7 @@ def test_a_failed_createprocess_closes_every_handle_it_opened():
 
 @windows_only
 def test_a_failed_pseudoconsole_is_raised_and_leaves_no_handle_behind():
-    from remedy.core.computer import host_conpty as conpty
+    from remedy.core.computer import host_binding as conpty
     from tests.harness.fake_host_binding import install_fake_conpty
 
     host = FakeConsoleHost(create_pseudoconsole_hr=-2147024809)
@@ -647,7 +647,7 @@ def test_a_failed_pseudoconsole_is_raised_and_leaves_no_handle_behind():
 
 @windows_only
 def test_a_failed_pipe_is_raised_before_anything_else_happens():
-    from remedy.core.computer import host_conpty as conpty
+    from remedy.core.computer import host_binding as conpty
     from tests.harness.fake_host_binding import install_fake_conpty
 
     host = FakeConsoleHost(fail_create_pipe=True)
@@ -661,7 +661,7 @@ def test_a_failed_pipe_is_raised_before_anything_else_happens():
 @windows_only
 @pytest.mark.asyncio
 async def test_the_conpty_handle_stream_reads_and_writes_through_the_fake():
-    from remedy.core.computer import host_conpty as conpty
+    from remedy.core.computer import host_binding as conpty
     from tests.harness.fake_host_binding import install_fake_conpty
 
     host = FakeConsoleHost()
@@ -684,7 +684,7 @@ async def test_the_conpty_handle_stream_reads_and_writes_through_the_fake():
 @windows_only
 @pytest.mark.asyncio
 async def test_spawn_conpty_surfaces_the_failure_rather_than_returning_a_dead_process():
-    from remedy.core.computer import host_conpty as conpty
+    from remedy.core.computer import host_binding as conpty
     from tests.harness.fake_host_binding import install_fake_conpty
 
     host = FakeConsoleHost(fail_create_process=True)
@@ -695,7 +695,7 @@ async def test_spawn_conpty_surfaces_the_failure_rather_than_returning_a_dead_pr
 
 @windows_only
 def test_terminating_the_fake_process_closes_its_console_and_handles():
-    from remedy.core.computer import host_conpty as conpty
+    from remedy.core.computer import host_binding as conpty
     from tests.harness.fake_host_binding import install_fake_conpty
 
     host = FakeConsoleHost()

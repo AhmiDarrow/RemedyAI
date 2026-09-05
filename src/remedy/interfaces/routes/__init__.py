@@ -13,6 +13,7 @@ Not registered here (Go owns production):
 - ``/api/assistant/*`` (google OAuth + status)
 - ``/api/hive/*`` hive roster / spawn / assign / retire
 - ``/api/chat`` and ``/api/chat/stream`` (legacy; sessions stream owns chat)
+- ``/api/terminal*`` ConPTY SSE terminal (phone / web rails)
 """
 from __future__ import annotations
 
@@ -29,7 +30,6 @@ from remedy.interfaces.routes.sessions import register_sessions_routes
 from remedy.interfaces.routes.settings import register_settings_routes
 from remedy.interfaces.routes.skills_library import register_skills_library_routes
 from remedy.interfaces.routes.status import register_status_routes
-from remedy.interfaces.routes.terminal import register_terminal_routes
 from remedy.interfaces.routes.voice import register_voice_routes
 from remedy.interfaces.routes.workspace import register_workspace_routes
 
@@ -54,9 +54,8 @@ def register_all_routes(
     register_auth_routes(app, **kw)
     register_partner_routes(app, **kw)
     register_computer_routes(app, **kw)
-    # No register_i18n/usage/vision/telephony/webhook/connect/nanoswarm/assistant/hive/chat —
+    # No register_i18n/usage/vision/telephony/webhook/connect/nanoswarm/assistant/hive/chat/terminal —
     # Go remedy-runtime owns those (legacy /api/chat* dropped from TestClient).
     register_misc_routes(app, **kw)
     register_voice_routes(app, **kw)
     register_rmb_routes(app, **kw)
-    register_terminal_routes(app)

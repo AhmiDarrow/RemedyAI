@@ -19,6 +19,7 @@ from ._conpty import (
     CONPTY_PIPE_STDOUT,
     _ConPTYProcess,
     _HandleStream,
+    _spawn_conpty_sync,
     conpty_available,
     conpty_close,
     conpty_close_pipe,
@@ -27,7 +28,9 @@ from ._conpty import (
     conpty_read,
     conpty_spawn,
     conpty_write,
+    spawn_conpty,
     spawn_conpty_process,
+    spawn_conpty_supported,
 )
 from ._core import (
     MOUSE_LEFT,
@@ -237,7 +240,10 @@ __all__ = [
     "conpty_close",
     "_HandleStream",
     "_ConPTYProcess",
+    "_spawn_conpty_sync",
+    "spawn_conpty",
     "spawn_conpty_process",
+    "spawn_conpty_supported",
     "security_set_signing_key",
     "security_clear_signing_key",
     "load_or_create_host_signing_key",
