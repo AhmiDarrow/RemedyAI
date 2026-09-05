@@ -1,3 +1,7 @@
+import pytest
+
+pytest.skip("Phase 6 absolute: retired agent_* tool family; product tools are Tool ABI", allow_module_level=True)
+
 """Import graph, mutation cone, live hop oracle (no live LLM required)."""
 
 from __future__ import annotations

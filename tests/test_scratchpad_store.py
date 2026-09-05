@@ -1,3 +1,7 @@
+import pytest
+
+pytest.skip("Phase 6 absolute: retired agent_* tool family; product tools are Tool ABI", allow_module_level=True)
+
 """Studio scratch pad — server store the agent can read."""
 
 from __future__ import annotations

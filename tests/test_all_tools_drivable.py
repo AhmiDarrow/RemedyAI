@@ -45,7 +45,6 @@ PROGRAMMING_ERRORS = (
 #: has no notion of a test home at all. So they are excluded by construction.
 NEVER_DRIVE_MODULES = {
     "remedy.core.agent_computer_tools",
-    "remedy.core.agent_companion_tools",
 }
 NEVER_DRIVE_PREFIXES = (
     "computer_",
@@ -176,7 +175,9 @@ def tools(tmp_path_factory):
 
 
 def test_enough_tools_were_collected(tools):
-    assert len(tools) > 100, f"only {len(tools)} tools found — the factories moved"
+    # Phase 6 absolute retired most agent_* families; remaining Python
+    # registrars are workspace/skills/local/web/voice/goals/memory.
+    assert len(tools) > 30, f"only {len(tools)} tools found — the factories moved"
 
 
 @pytest.mark.asyncio
@@ -211,9 +212,11 @@ async def test_no_tool_raises_a_programming_error_on_a_bare_call(tools):
 
 @pytest.mark.parametrize(
     "expected",
-    ["assistant_brief", "goal_list", "remind_me", "mail_status", "budget_get"],
+    ["goal_list"],
 )
 def test_the_tools_the_manual_promises_are_registered(tools, expected):
+    # Phase 6 absolute: assistant/remind/mail/budget agent_* tools retired;
+    # those surfaces are Go HTTP / Tool ABI. Keep a remaining Python registrar check.
     assert expected in tools, f"{expected} is documented but no longer registered"
 
 

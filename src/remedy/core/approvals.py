@@ -892,3 +892,29 @@ class ApprovalQueue:
 
 # Singleton used by agent + API
 APPROVALS = ApprovalQueue()
+
+
+def approval_required_for_ship(
+    command: str,
+    session_id: str | None,
+    *,
+    reason: str,
+) -> str | None:
+    """Return an APPROVAL_REQUIRED blob, or None when Auto / already approved."""
+    ask = APPROVALS.needs_ask(command, tool_name="bash_exec")
+    if not ask:
+        return None
+    if APPROVALS.is_approved("bash_exec", command, session_id=session_id):
+        return None
+    item = APPROVALS.create(
+        tool_name="bash_exec",
+        command=command,
+        reason=ask or reason,
+        session_id=session_id,
+    )
+    return (
+        f"APPROVAL_REQUIRED id={item.id}\n"
+        f"reason={ask or reason}\n"
+        f"command={command}\n"
+        "Approve in UI then retry."
+    )

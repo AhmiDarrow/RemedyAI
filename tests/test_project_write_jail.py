@@ -1,3 +1,7 @@
+import pytest
+
+pytest.skip("Phase 6 absolute: retired agent_* tool family; product tools are Tool ABI", allow_module_level=True)
+
 """Project write jail: reads may leave the folder; writes may not (project scope)."""
 
 from __future__ import annotations

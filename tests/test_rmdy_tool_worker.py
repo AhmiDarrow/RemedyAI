@@ -281,7 +281,7 @@ def test_stdio_tool_round_trip_workspace_search(
 
 
 def test_web_search_bridges_agent_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    import remedy.core.agent_web_tools as web
+    import remedy.core.web_helpers as web
 
     monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
 
@@ -307,7 +307,7 @@ def test_web_search_bridges_agent_backend(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_web_search_requires_query(monkeypatch: pytest.MonkeyPatch) -> None:
-    import remedy.core.agent_web_tools as web
+    import remedy.core.web_helpers as web
 
     monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
     with pytest.raises(ValueError, match="query"):
@@ -315,7 +315,7 @@ def test_web_search_requires_query(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_stdio_tool_round_trip_web_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    import remedy.core.agent_web_tools as web
+    import remedy.core.web_helpers as web
 
     monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
     monkeypatch.setattr(
@@ -365,7 +365,7 @@ def test_stdio_tool_round_trip_web_search(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_web_fetch_bridges_polite_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
-    import remedy.core.agent_web_tools as web
+    import remedy.core.web_helpers as web
 
     monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
     html = (
@@ -387,7 +387,7 @@ def test_web_fetch_bridges_polite_fetch(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_web_fetch_requires_http_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    import remedy.core.agent_web_tools as web
+    import remedy.core.web_helpers as web
 
     monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
     with pytest.raises(ValueError, match="http"):
@@ -395,7 +395,7 @@ def test_web_fetch_requires_http_url(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_web_fetch_refuses_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    import remedy.core.agent_web_tools as web
+    import remedy.core.web_helpers as web
 
     monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: False)
     with pytest.raises(PermissionError, match="disabled"):
@@ -403,7 +403,7 @@ def test_web_fetch_refuses_when_disabled(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_stdio_tool_round_trip_web_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
-    import remedy.core.agent_web_tools as web
+    import remedy.core.web_helpers as web
 
     monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
     monkeypatch.setattr(
@@ -798,4 +798,5 @@ def test_skill_activate_refuses_bulk(
 def test_skill_handlers_registered() -> None:
     assert ("skill.search", 1) in worker._HANDLERS
     assert ("skill.activate", 1) in worker._HANDLERS
+
 

@@ -262,14 +262,3 @@ def test_document_vision_prompt_registered() -> None:
     assert "Hierarchy" in focus_question_for_kind("design")
 
 
-def test_document_tools_registered() -> None:
-    from types import SimpleNamespace
-
-    from remedy.core.agent_document_tools import register_document_tools
-    from remedy.skills.tool_registry import ToolRegistry
-
-    reg = ToolRegistry()
-    rt = SimpleNamespace(tool_registry=reg, config=SimpleNamespace(home_dir=None))
-    register_document_tools(rt)
-    names = {t.name for t in reg.tools}
-    assert {"document_read", "document_intake"} <= names

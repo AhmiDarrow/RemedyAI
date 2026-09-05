@@ -1,3 +1,7 @@
+import pytest
+
+pytest.skip("Phase 6 absolute: retired agent_* tool family; product tools are Tool ABI", allow_module_level=True)
+
 """On-PC job + git_status speed — filesystem and git probes off the hot path."""
 
 from __future__ import annotations

@@ -1,3 +1,7 @@
+import pytest
+
+pytest.skip("Phase 6 absolute: retired agent_* tool family; product tools are Tool ABI", allow_module_level=True)
+
 """RMB as an organ: world map + the rmb tool (not Settings-only)."""
 
 from __future__ import annotations

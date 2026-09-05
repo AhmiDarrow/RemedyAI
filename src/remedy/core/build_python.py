@@ -207,8 +207,6 @@ def python_cmd_for_subprocess(root: Path | str | None = None) -> list[str]:
 
     if root_p is not None:
         with suppress(Exception):
-            from remedy.core.agent_analysis_tools import project_python
-
             py, _src, _notes = project_python(root_p)
             if py:
                 # uv run python is fine; a bare path must not be the sidecar
@@ -269,3 +267,65 @@ def is_sidecar_spawn_error(text: str) -> bool:
     return "usage: remedy" in t or (
         t.strip().startswith("remedy: error") and "choice" in t
     )
+
+
+def project_python(root: Path) -> tuple[list[str], str, list[str]]:
+    """(argv prefix, source, notes) for the PROJECT's python — never Remedy's own.
+
+    Order: project ``.venv`` → ``uv run python`` when uv.lock/pyproject + uv →
+    system interpreter fallback (noted).
+    """
+    import os
+    import shutil as _shutil
+
+    notes: list[str] = []
+
+    def _venv_python(r: Path) -> Path | None:
+        for rel in (
+            Path(".venv") / "Scripts" / "python.exe",
+            Path(".venv") / "bin" / "python",
+            Path("venv") / "Scripts" / "python.exe",
+            Path("venv") / "bin" / "python",
+            Path("env") / "Scripts" / "python.exe",
+            Path("env") / "bin" / "python",
+        ):
+            cand = r / rel
+            with suppress(OSError):
+                if cand.is_file():
+                    return cand
+        return None
+
+    def _which(name: str, r: Path) -> str:
+        with suppress(Exception):
+            from remedy.core.project_fingerprint import path_env_with_local_bins
+
+            env = path_env_with_local_bins(r)
+            found = _shutil.which(
+                name, path=env.get("PATH") or env.get("Path") or os.environ.get("PATH")
+            )
+            return str(found) if found else ""
+        return ""
+
+    venv = _venv_python(root)
+    if venv is not None:
+        return [str(venv)], "project .venv", notes
+    has_uv_marker = (root / "uv.lock").is_file() or (root / "pyproject.toml").is_file()
+    uv = _which("uv", root)
+    if has_uv_marker and uv:
+        return [uv, "run", "python"], "uv run", notes
+    if (root / "environment.yml").is_file() or (root / "environment.yaml").is_file():
+        notes.append(
+            "conda environment.yml present but no .venv — activate the conda env "
+            "yourself, or point REMEDY_PYTHON at its interpreter; Remedy will not "
+            "activate a conda env for you."
+        )
+    with suppress(Exception):
+        found = resolve_python_interpreter()
+        if found:
+            notes.append(
+                "no project .venv or uv found — using a system interpreter, which "
+                "may not have the project's packages installed."
+            )
+            return list(found), "system interpreter (not the project env)", notes
+    return [], "", ["no usable Python interpreter found on PATH"]
+

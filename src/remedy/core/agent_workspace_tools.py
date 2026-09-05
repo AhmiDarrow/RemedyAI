@@ -1,4 +1,9 @@
-"""Workspace file/shell tool registration (extracted from BasicRuntime)."""
+"""Workspace file/shell tool registration (extracted from BasicRuntime).
+
+Phase 6 absolute: optional agent_* product families are retired from this
+registrar. Production tools live on the Go Tool ABI; tests that need a
+workspace jail still get files/help/search/shell (+ skill/local hooks).
+"""
 
 from __future__ import annotations
 
@@ -19,31 +24,20 @@ def register_workspace_tools(runtime: Any) -> None:
     register_files_tools(runtime)
     register_search_tools(runtime)
     register_shell_tools(runtime)
-    runtime._register_comfyui_tools()
-    runtime._register_vision_tools()
-    runtime._register_local_discover_tools()
-    _rmb = getattr(runtime, "_register_rmb_tools", None)
-    if callable(_rmb):
-        _rmb()
-    runtime._register_skill_tools()
-    try:
-        from remedy.core.agent_mission_tools import register_mission_tools
-
-        register_mission_tools(runtime)
-    except Exception:
-        _log.exception("optional tool family failed to register")
-    try:
-        from remedy.core.agent_spread_tools import register_spread_tools
-
-        register_spread_tools(runtime)
-    except Exception:
-        _log.exception("optional tool family failed to register")
-    try:
-        from remedy.core.agent_hive_tools import register_hive_tools
-
-        register_hive_tools(runtime)
-    except Exception:
-        _log.exception("optional tool family failed to register")
+    # Still useful for BasicRuntime tests / local dogfood harnesses.
+    for meth in (
+        "_register_comfyui_tools",
+        "_register_vision_tools",
+        "_register_local_discover_tools",
+        "_register_rmb_tools",
+        "_register_skill_tools",
+    ):
+        fn = getattr(runtime, meth, None)
+        if callable(fn):
+            try:
+                fn()
+            except Exception:
+                _log.exception("optional tool family failed to register: %s", meth)
     try:
         from remedy.core.agent_web_tools import register_web_tools
 
@@ -57,86 +51,11 @@ def register_workspace_tools(runtime: Any) -> None:
     except Exception:
         _log.exception("optional tool family failed to register")
     try:
-        from remedy.core.agent_companion_tools import register_companion_tools
-
-        register_companion_tools(runtime)
-    except Exception:
-        _log.exception("optional tool family failed to register")
-    try:
-        from remedy.core.agent_self_inject_tools import register_self_inject_tools
-
-        register_self_inject_tools(runtime)
-    except Exception:
-        _log.exception("optional tool family failed to register")
-    try:
-        from remedy.core.agent_assistant_tools import register_assistant_tools
-
-        register_assistant_tools(runtime)
-    except Exception:
-        _log.exception("optional tool family failed to register")
-    try:
-        from remedy.core.agent_reminder_tools import register_reminder_tools
-
-        register_reminder_tools(runtime)
-    except Exception:
-        _log.exception("optional tool family failed to register")
-    try:
-        from remedy.core.agent_document_tools import register_document_tools
-
-        register_document_tools(runtime)
-    except Exception:
-        _log.exception("optional tool family failed to register")
-    try:
-        from remedy.core.agent_settings_tools import register_settings_tools
-
-        register_settings_tools(runtime)
-    except Exception:
-        _log.exception("optional tool family failed to register")
-    try:
-        from remedy.core.agent_telephony_tools import register_telephony_tools
-
-        register_telephony_tools(runtime)
-    except Exception:
-        _log.exception("optional tool family failed to register")
-    try:
         from remedy.core.agent_voice_tools import register_voice_tools
 
         register_voice_tools(runtime)
     except Exception:
         _log.exception("optional tool family failed to register")
-    try:
-        from remedy.core.agent_game_tools import register_game_tools
-
-        register_game_tools(runtime)
-    except Exception:
-        _log.exception("optional tool family failed to register")
-    try:
-        from remedy.core.agent_analysis_tools import register_analysis_tools
-
-        register_analysis_tools(runtime)
-    except Exception:
-        _log.exception("optional tool family failed to register")
-    try:
-        from remedy.core.agent_research_tools import register_research_tools
-
-        register_research_tools(runtime)
-    except Exception:
-        _log.exception("optional tool family failed to register")
-    try:
-        from remedy.core.agent_science_tools import register_science_tools
-
-        register_science_tools(runtime)
-    except Exception:
-        _log.exception("optional tool family failed to register")
-    # Optional MCP client bridge: user-listed servers (config mcp_servers)
-    # surface as mcp_<server>_<tool>; nothing spawns until first use.
-    try:
-        from remedy.core.agent_mcp_bridge import register_mcp_bridge
-
-        register_mcp_bridge(runtime)
-    except Exception:
-        _log.exception("optional tool family failed to register")
     # Per-turn tool trace for auto-learn (reset each stream_response)
     runtime._turn_tool_steps = []
     runtime._learning_loop = None
-
