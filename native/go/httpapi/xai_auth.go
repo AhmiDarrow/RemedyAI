@@ -243,8 +243,8 @@ func xaiHTTPForm(endpoint string, form map[string]string) (map[string]any, error
 			"oauth_build": xaiOAuthBuildID,
 			"location":    resp.Header.Get("Location"),
 			"hint": "xAI OAuth API redirected to a web sign-in page. " +
-				"This usually means a stale Remedy Desktop sidecar is still calling " +
-				"accounts.x.ai. Install 0.10.23+ or copy a rebuilt remedy-desktop.exe. " +
+				"This usually means a stale local API binary is still calling " +
+				"accounts.x.ai. Install a current build or replace remedy-runtime. " +
 				"Expected host: auth.x.ai (build " + xaiOAuthBuildID + ").",
 		}
 		b, _ := json.Marshal(parsed)

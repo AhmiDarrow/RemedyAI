@@ -1,9 +1,9 @@
-"""Real CPython for build oracles — never the frozen/sidecar Remedy exe.
+"""Real CPython for build oracles — never a Remedy CLI / runtime binary.
 
 Build gates (import dry-run, gate tower pytest/mypy, mutant score, reducer
-oracles) must spawn a real interpreter. In Desktop, ``sys.executable`` is
-``remedy-desktop.exe`` / the ``remedy`` CLI; feeding it ``-c`` or ``-m pytest``
-prints usage (``invalid choice``) and the machine then screams
+oracles) must spawn a real interpreter. ``sys.executable`` may be the
+``remedy`` CLI or a legacy ``remedy-desktop.exe``; feeding either ``-c`` or
+``-m pytest`` prints usage (``invalid choice``) and the machine then screams
 ``[IMPORT DRY-RUN · RED]`` at healthy modules. Models thrash fixing imports
 that are not broken.
 
@@ -43,8 +43,8 @@ def is_usable_host_python(path: str) -> bool:
     """True for a real CPython or the ``py`` launcher; false for sidecar / Store stub.
 
     Host ``python`` mapping (dialect, ``resolve_which``, POSIX rewrites) must
-    never point at ``remedy-desktop.exe`` — spawning it as Python relaunches
-    serve on :7400 and drops the live chat.
+    never point at ``remedy`` / legacy ``remedy-desktop.exe`` — spawning either
+    as Python relaunches serve on :7400 and drops the live chat.
     """
     p = (path or "").strip().strip("\"'")
     if not p:
@@ -66,11 +66,11 @@ def is_usable_host_python(path: str) -> bool:
 def resolve_python_interpreter() -> list[str] | None:
     """Return the argv prefix for a real Python 3 interpreter, or ``None``.
 
-    In the frozen Desktop build ``sys.executable`` is ``remedy-desktop.exe``;
-    running ``remedy-desktop.exe script.py`` prints the sidecar's usage and
-    exits 2. Resolution order: ``REMEDY_PYTHON`` (file path or bare name),
-    ``sys.executable`` when it really is Python, then PATH (``python``,
-    ``py -3``, ``python3``), then the usual Windows install dirs.
+    When ``sys.executable`` is a Remedy CLI / legacy sidecar binary, running
+    ``… script.py`` prints usage and exits 2. Resolution order:
+    ``REMEDY_PYTHON`` (file path or bare name), ``sys.executable`` when it
+    really is Python, then PATH (``python``, ``py -3``, ``python3``), then
+    the usual Windows install dirs.
     """
     import glob
 

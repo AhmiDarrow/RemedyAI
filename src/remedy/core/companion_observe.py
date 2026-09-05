@@ -53,6 +53,7 @@ _REMEDY_EXES = frozenset(
     {
         "remedy desktop.exe",
         "remedy-desktop.exe",
+        "remedy-runtime.exe",
         "remedy.exe",
     }
 )
@@ -65,7 +66,7 @@ def is_remedy_chrome(ident: dict[str, Any] | None) -> bool:
     exe = str(ident.get("exe_name") or "").lower()
     title = str(ident.get("title") or "").lower()
     path = str(ident.get("exe") or "").replace("\\", "/").lower()
-    if exe in _REMEDY_EXES or exe.startswith("remedy-desktop"):
+    if exe in _REMEDY_EXES or exe.startswith(("remedy-desktop", "remedy-runtime")):
         return True
     if exe == "app.exe" and "remedy" in path:
         return True

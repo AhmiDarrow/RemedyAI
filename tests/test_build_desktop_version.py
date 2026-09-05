@@ -55,12 +55,32 @@ def test_no_pyinstaller_or_remedy_desktop_sidecar(bd) -> None:
     ):
         assert banned not in source, banned
     assert "cmd/remedy-runtime" in source
+    assert 'glob("remedy-desktop*")' in source
     assert not hasattr(bd, "write_sidecar_version_file")
     assert not hasattr(bd, "ensure_pyinstaller")
     assert not hasattr(bd, "core_library_add_binary")
     assert hasattr(bd, "runtime_bin_paths")
     assert hasattr(bd, "stage_core")
     assert hasattr(bd, "build_runtime")
+
+
+def test_stage_removes_legacy_remedy_desktop(bd, tmp_path, monkeypatch) -> None:
+    """Staging must delete leftover remedy-desktop* so they cannot be preferred."""
+    desktop_bin = tmp_path / "desktop" / "bin"
+    desktop_bin.mkdir(parents=True)
+    legacy = desktop_bin / "remedy-desktop.exe"
+    legacy.write_bytes(b"stale")
+    (desktop_bin / "remedy-desktop-x86_64-pc-windows-msvc.exe").write_bytes(b"stale")
+
+    monkeypatch.setattr(bd, "ROOT", tmp_path)
+    monkeypatch.setattr(bd, "DESKTOP_BIN", desktop_bin)
+    monkeypatch.setattr(bd, "sync_versions", lambda: "0.0.0")
+    monkeypatch.setattr(bd, "check_third_party_notices", lambda: None)
+    monkeypatch.setattr(bd, "build_runtime", lambda: None)
+    monkeypatch.setattr(bd, "stage_core", lambda *a, **k: None)
+
+    bd.build(skip_runtime=True, skip_core=True)
+    assert list(desktop_bin.glob("remedy-desktop*")) == []
 
 
 def test_sync_versions_stamps_package_lock(bd, tmp_path, monkeypatch) -> None:

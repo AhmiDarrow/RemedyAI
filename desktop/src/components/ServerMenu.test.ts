@@ -42,7 +42,7 @@ describe('server menu helpers', () => {
         healthy: true,
         pid: 1234,
         started_at_ms: Date.now() - 10_000,
-        launch_cmd: 'C:\\remedy-desktop.exe',
+        launch_cmd: 'C:\\remedy-runtime.exe',
         api_origin: 'http://127.0.0.1:7400',
         port: 7400,
         unexpected_exits: 1,
