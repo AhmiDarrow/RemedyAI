@@ -433,9 +433,17 @@ def test_client():
 
 class TestAPIStatus:
     def test_status_ping_dashboard_absent(self, test_client):
-        """Go owns ping/status/turn-active and the SPA; no TestClient twins."""
+        """Go owns ping/status/turn-active/notifications/metrics/self-improve and the SPA."""
         paths = {getattr(r, "path", "") for r in test_client.app.routes}
-        for path in ("/api/status", "/api/ping", "/api/turn-active", "/dashboard"):
+        for path in (
+            "/api/status",
+            "/api/ping",
+            "/api/turn-active",
+            "/api/notifications",
+            "/api/metrics",
+            "/api/self-improve",
+            "/dashboard",
+        ):
             assert path not in paths
             assert test_client.get(path).status_code in (404, 405)
 
