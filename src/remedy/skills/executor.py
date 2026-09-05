@@ -35,7 +35,7 @@ class ExecutionResult:
 
 def _default_shell() -> list[str]:
     """Return argv prefix for running a shell command string safely (no shell=True)."""
-    from remedy.execution.process import win_shell_prefix
+    from remedy.execution.process_argv import win_shell_prefix
 
     return win_shell_prefix()
 
