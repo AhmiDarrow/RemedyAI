@@ -339,37 +339,42 @@ def test_sanitize_message_still_stubs_file_write_for_provider():
 
 
 @pytest.mark.asyncio
-async def test_execute_tool_calls_blocks_history_stub_args(tmp_path):
-    """Execute path must refuse stub/summarized args before touching disk."""
+async def test_file_write_blocks_history_stub_args(tmp_path, monkeypatch):
+    """file_write must refuse stub/summarized args before touching disk."""
     from pathlib import Path
 
-    from remedy.core.agent_tool_batch import execute_tool_calls
-    from remedy.models import ToolCall, ToolResult
+    from remedy.core.agent import BasicRuntime
+    from remedy.core.approvals import APPROVALS
+    from remedy.models import AgentConfig, ToolCall
 
-    class RT:
-        async def call_tool(self, tc: ToolCall) -> ToolResult:
-            raise AssertionError("call_tool must not run for history stubs")
-
-    stub = (
-        "<<NOT_SOURCE_CODE history_stub kind=file_write content chars=99 "
-        "DO_NOT_file_write_this_string file_read_the_path_instead>>"
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"access_scope": "project", "approval_mode": "auto"},
     )
-    args = json.dumps({"path": str(tmp_path / "x.py"), "content": stub})
-    tcs = [
-        {
-            "id": "c_stub",
-            "type": "function",
-            "function": {"name": "file_write", "arguments": args},
-        }
-    ]
-    outs = []
-    async for _ev, msg in execute_tool_calls(RT(), tcs, seen_fps=set(), result_cache={}):
-        if isinstance(msg, dict) and msg.get("role") == "tool":
-            outs.append(msg)
-    assert outs
-    body = outs[0].get("content") or ""
-    assert "HISTORY_STUB" in body or "history" in body.lower()
-    assert not Path(tmp_path / "x.py").exists()
+    prev = APPROVALS.mode
+    APPROVALS.set_mode("auto")
+    try:
+        stub = (
+            "<<NOT_SOURCE_CODE history_stub kind=file_write content chars=99 "
+            "DO_NOT_file_write_this_string file_read_the_path_instead>>"
+        )
+        rt = BasicRuntime(
+            AgentConfig(
+                name="stub-guard",
+                llm_api_key="",
+                home_dir=str(tmp_path / "home"),
+                project_path=str(tmp_path),
+                approval_mode="auto",
+            )
+        )
+        res = await rt.call_tool(
+            ToolCall(tool_name="file_write", arguments={"path": "x.py", "content": stub})
+        )
+        body = str(res.error or res.data or "")
+        assert "HISTORY_STUB" in body or "history" in body.lower()
+        assert not Path(tmp_path / "x.py").exists()
+    finally:
+        APPROVALS.set_mode(prev)
 
 
 def test_repair_and_strip_tool_args_in_history():
