@@ -343,3 +343,98 @@ func TypeText(text string, perCharDelayMS uint32) error {
 	return lib.check("type_text", int32(status))
 }
 
+// MouseMove moves the pointer to virtual-screen physical pixels via Zig.
+// Fail-closed without remedy_core.
+func MouseMove(x, y int32) error {
+	lib, err := Open()
+	if err != nil {
+		return err
+	}
+	status, err := lib.call("remedy_core_mouse_move", uintptr(x), uintptr(y))
+	if err != nil {
+		return err
+	}
+	return lib.check("mouse_move", int32(status))
+}
+
+// MouseDrag presses at (x1,y1), interpolates through steps, releases at (x2,y2).
+// Fail-closed without remedy_core.
+func MouseDrag(x1, y1, x2, y2 int32, steps uint32) error {
+	lib, err := Open()
+	if err != nil {
+		return err
+	}
+	if steps == 0 {
+		steps = 12
+	}
+	status, err := lib.call(
+		"remedy_core_mouse_drag",
+		uintptr(x1), uintptr(y1), uintptr(x2), uintptr(y2), uintptr(steps),
+	)
+	if err != nil {
+		return err
+	}
+	return lib.check("mouse_drag", int32(status))
+}
+
+// MouseScroll moves to (x,y) then scrolls; dy>0 up, dx>0 right (notch units).
+// Fail-closed without remedy_core.
+func MouseScroll(x, y, dx, dy int32) error {
+	lib, err := Open()
+	if err != nil {
+		return err
+	}
+	status, err := lib.call(
+		"remedy_core_mouse_scroll",
+		uintptr(x), uintptr(y), uintptr(dx), uintptr(dy),
+	)
+	if err != nil {
+		return err
+	}
+	return lib.check("mouse_scroll", int32(status))
+}
+
+// ClipboardGetText returns CF_UNICODETEXT / X11 CLIPBOARD as UTF-8.
+// Empty clipboard yields "". Fail-closed without remedy_core.
+func ClipboardGetText() (string, error) {
+	lib, err := Open()
+	if err != nil {
+		return "", err
+	}
+	var ptr, length uintptr
+	status, err := lib.call(
+		"remedy_core_clipboard_get_text",
+		unsafePtrPtr(&ptr),
+		sizePtr(&length),
+	)
+	if err != nil {
+		return "", err
+	}
+	if err := lib.check("clipboard_get_text", int32(status)); err != nil {
+		return "", err
+	}
+	raw := takeBytes(lib, ptr, length)
+	if len(raw) == 0 {
+		return "", nil
+	}
+	return string(raw), nil
+}
+
+// ClipboardSetText replaces the OS text clipboard with UTF-8 contents.
+// Fail-closed without remedy_core.
+func ClipboardSetText(text string) error {
+	lib, err := Open()
+	if err != nil {
+		return err
+	}
+	raw := []byte(text)
+	status, err := lib.call(
+		"remedy_core_clipboard_set_text",
+		bytesPtr(raw), uintptr(len(raw)),
+	)
+	if err != nil {
+		return err
+	}
+	return lib.check("clipboard_set_text", int32(status))
+}
+
