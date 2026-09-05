@@ -160,6 +160,123 @@ func RegisterZigHostTools(registry *Registry) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:           "computer.uia.focused",
+		Version:      1,
+		Description:  "Focused UIA element {name,role,value} via Zig (Windows; fail closed)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskReadOnly,
+		Capabilities: []string{"computer.read"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["available","element"],
+			"properties":{
+				"available":{"type":"boolean"},
+				"element":{
+					"oneOf":[
+						{"type":"null"},
+						{
+							"type":"object",
+							"properties":{
+								"name":{"type":"string"},
+								"role":{"type":"string"},
+								"value":{"type":"string"}
+							},
+							"additionalProperties":true
+						}
+					]
+				}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeComputerUIAFocused)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:           "computer.uia.read_text",
+		Version:      1,
+		Description:  "Read window title/text/fields via Zig UIA (Windows; fail closed)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskReadOnly,
+		Capabilities: []string{"computer.read"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["hwnd"],
+			"properties":{
+				"hwnd":{"type":"integer","minimum":1},
+				"max_chars":{"type":"integer","minimum":1,"maximum":100000}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["available","hwnd","payload"],
+			"properties":{
+				"available":{"type":"boolean"},
+				"hwnd":{"type":"integer","minimum":1},
+				"payload":{
+					"oneOf":[
+						{"type":"null"},
+						{
+							"type":"object",
+							"properties":{
+								"title":{"type":"string"},
+								"text":{"type":"string"},
+								"fields":{"type":"array"}
+							},
+							"additionalProperties":true
+						}
+					]
+				}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeComputerUIAReadText)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:           "computer.uia.action",
+		Version:      1,
+		Description:  "Invoke/set_value/toggle/scroll_into_view on a UIA element by hwnd+name+role (Zig; fail closed)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskMutation,
+		Capabilities: []string{"computer.input"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["hwnd","name","action"],
+			"properties":{
+				"hwnd":{"type":"integer","minimum":1},
+				"name":{"type":"string","minLength":1,"maxLength":512},
+				"role":{"type":"string","maxLength":128},
+				"action":{"type":"string","enum":["invoke","set_value","toggle","scroll_into_view"]},
+				"text":{"type":"string","maxLength":8000}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok","message","hwnd","name","action"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"message":{"type":"string"},
+				"verified":{"type":"boolean"},
+				"hwnd":{"type":"integer","minimum":1},
+				"name":{"type":"string"},
+				"role":{"type":"string"},
+				"action":{"type":"string","enum":["invoke","set_value","toggle","scroll_into_view"]}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeComputerUIAAction)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:           "computer.click",
 		Version:      1,
 		Description:  "Click at virtual-screen physical pixels via Zig SendInput/X11 (fail closed)",
@@ -681,6 +798,134 @@ func executeComputerSnapshot(_ context.Context, request Request) (Result, error)
 	}
 }
 
+func executeComputerUIAFocused(_ context.Context, request Request) (Result, error) {
+	if len(request.Input) > 0 {
+		var body map[string]any
+		if err := json.Unmarshal(request.Input, &body); err != nil {
+			return Result{}, ErrInvalidInput
+		}
+		if len(body) != 0 {
+			return Result{}, ErrInvalidInput
+		}
+	}
+	available, err := core.UIAAvailable()
+	if err != nil {
+		return Result{}, err
+	}
+	if !available {
+		out, err := json.Marshal(map[string]any{"available": false, "element": nil})
+		return Result{Output: out}, err
+	}
+	raw, err := core.UIAFocusedElementJSON()
+	if err != nil {
+		return Result{}, err
+	}
+	element, err := decodeJSONObjectOrNull(raw)
+	if err != nil {
+		return Result{}, fmt.Errorf("uia_focused_element: invalid JSON: %w", err)
+	}
+	out, err := json.Marshal(map[string]any{"available": true, "element": element})
+	return Result{Output: out}, err
+}
+
+func executeComputerUIAReadText(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		HWND     *uint64 `json:"hwnd"`
+		MaxChars int     `json:"max_chars"`
+	}
+	if err := json.Unmarshal(request.Input, &body); err != nil {
+		return Result{}, ErrInvalidInput
+	}
+	if body.HWND == nil || *body.HWND == 0 {
+		return Result{}, ErrInvalidInput
+	}
+	if body.MaxChars < 0 || body.MaxChars > 100000 {
+		return Result{}, ErrInvalidInput
+	}
+	hwnd := *body.HWND
+	available, err := core.UIAAvailable()
+	if err != nil {
+		return Result{}, err
+	}
+	if !available {
+		out, err := json.Marshal(map[string]any{
+			"available": false, "hwnd": hwnd, "payload": nil,
+		})
+		return Result{Output: out}, err
+	}
+	maxChars := uint32(0)
+	if body.MaxChars > 0 {
+		maxChars = uint32(body.MaxChars)
+	}
+	raw, err := core.UIAReadWindowTextJSON(hwnd, maxChars)
+	if err != nil {
+		return Result{}, err
+	}
+	payload, err := decodeJSONObjectOrNull(raw)
+	if err != nil {
+		return Result{}, fmt.Errorf("uia_read_window_text: invalid JSON: %w", err)
+	}
+	out, err := json.Marshal(map[string]any{
+		"available": true, "hwnd": hwnd, "payload": payload,
+	})
+	return Result{Output: out}, err
+}
+
+func executeComputerUIAAction(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		HWND   *uint64 `json:"hwnd"`
+		Name   string  `json:"name"`
+		Role   string  `json:"role"`
+		Action string  `json:"action"`
+		Text   string  `json:"text"`
+	}
+	if err := json.Unmarshal(request.Input, &body); err != nil {
+		return Result{}, ErrInvalidInput
+	}
+	if body.HWND == nil || *body.HWND == 0 {
+		return Result{}, ErrInvalidInput
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" || len(name) > 512 {
+		return Result{}, ErrInvalidInput
+	}
+	role := strings.TrimSpace(body.Role)
+	if len(role) > 128 {
+		return Result{}, ErrInvalidInput
+	}
+	action := strings.ToLower(strings.TrimSpace(body.Action))
+	switch action {
+	case "invoke", "set_value", "toggle", "scroll_into_view":
+	default:
+		return Result{}, ErrInvalidInput
+	}
+	if len(body.Text) > 8000 {
+		return Result{}, ErrInvalidInput
+	}
+	hwnd := *body.HWND
+	raw, err := core.UIAElementActionJSON(hwnd, name, role, action, body.Text)
+	if err != nil {
+		return Result{}, err
+	}
+	var zigOut struct {
+		OK       bool   `json:"ok"`
+		Message  string `json:"message"`
+		Verified *bool  `json:"verified"`
+	}
+	if err := json.Unmarshal(raw, &zigOut); err != nil {
+		return Result{}, fmt.Errorf("uia_element_action: invalid JSON: %w", err)
+	}
+	payload := map[string]any{
+		"ok": zigOut.OK, "message": zigOut.Message,
+		"hwnd": hwnd, "name": name, "role": role, "action": action,
+	}
+	if zigOut.Verified != nil {
+		payload["verified"] = *zigOut.Verified
+	}
+	out, err := json.Marshal(payload)
+	return Result{Output: out}, err
+}
+
 func executeComputerClick(_ context.Context, request Request) (Result, error) {
 	var body struct {
 		X      *int   `json:"x"`
@@ -1094,6 +1339,18 @@ func decodeJSONArrayOrNull(raw []byte) ([]any, error) {
 		controls = []any{}
 	}
 	return controls, nil
+}
+
+func decodeJSONObjectOrNull(raw []byte) (any, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return nil, nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 func resolveToolHome() string {
