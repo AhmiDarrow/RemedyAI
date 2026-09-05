@@ -2,6 +2,7 @@
 
 Production ``:7400`` is owned by Go ``remedy-runtime``. ``register_all_routes``
 is intentionally empty — every former FastAPI twin has been deleted.
+Auth / CORS / bootstrap are Go-owned (not re-registered here).
 
 Not registered here (Go owns production, or dropped as TestClient-only):
 - ``/api/connect*`` Connect management

@@ -93,7 +93,7 @@ def test_stop_server_terminates_popen_handle(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(vision_runtime, "_kill_pid_tree", lambda *a, **k: False)
 
     result = vision_runtime.stop_server(home_dir=home)
-    proc.terminate.assert_called()
+    proc.kill_tree.assert_called()
     assert result["stopped"] is True
     assert vision_runtime._proc is None  # noqa: SLF001
 
@@ -109,27 +109,10 @@ def test_shutdown_vision_for_exit_swallows_errors(monkeypatch):
     assert "boom" in out.get("error", "")
 
 
-def test_create_app_lifespan_registers_shutdown():
-    """Lifespan context runs shutdown path without raising."""
+def test_create_app_lifespan_is_empty_harness():
+    """TestClient create_app lifespan is a no-op (Go owns production teardown)."""
     app = create_app(runtime=None, api_key="")
     client = TestClient(app)
-    # Enter/exit lifespan (no FastAPI route twins; docs still answer).
     with client:
         r = client.get("/openapi.json")
         assert r.status_code in (200, 404)
-
-
-def test_lifespan_shutdown_closes_shared_llm_session(monkeypatch):
-    """API shutdown must close agent_llm's shared aiohttp session."""
-    from remedy.core import agent_llm
-
-    calls: list[str] = []
-
-    async def _fake_close():
-        calls.append("closed")
-
-    monkeypatch.setattr(agent_llm, "aclose_shared_session", _fake_close)
-    app = create_app(runtime=None, api_key="")
-    with TestClient(app):
-        pass
-    assert calls == ["closed"]

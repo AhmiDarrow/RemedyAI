@@ -1,9 +1,8 @@
 """Route package stays importable; TestClient registrar tree is empty.
 
 Former FastAPI twins (sessions/partner/memory/catalog/auth/settings/status/…)
-are deleted. Go owns production :7400. create_app remains an auth/CORS harness.
+are deleted. Go owns production :7400. create_app is an empty-route harness.
 """
-
 from __future__ import annotations
 
 import importlib

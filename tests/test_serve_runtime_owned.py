@@ -230,10 +230,14 @@ def test_create_app_lifespan_is_testclient_teardown_only() -> None:
         "initialize_native_runtime",
         "ensure_connected",
         "gateway.start",
+        "aclose_shared_session",
+        "_shutdown_vision_decoder",
+        "CORSMiddleware",
+        "require_auth",
+        "Bearer {api_key}",
+        "handleLocalBootstrap",
     ):
-        assert needle not in src, f"create_app still starts production work: {needle}"
-    assert "aclose_shared_session" in src
-    assert "_shutdown_vision_decoder" in src
+        assert needle not in src, f"create_app still twins production work: {needle}"
 
 
 def test_fastapi_module_is_not_production_serve_entry() -> None:
