@@ -563,6 +563,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "Message is empty"})
 		return
 	}
+	s.NoteUserActivity()
 
 	epoch, claimCtx, claimed := s.claims.TryClaim(sid)
 	if !claimed {

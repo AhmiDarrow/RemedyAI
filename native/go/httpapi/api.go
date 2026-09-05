@@ -104,6 +104,9 @@ type Server struct {
 	updatesCache map[string]updatesCacheEntry
 
 	appCmd *appControlBus
+
+	// lastUserActivityUnixNano powers /api/self-improve idle_s (0 = none yet).
+	lastUserActivityUnixNano int64
 }
 
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
@@ -195,6 +198,10 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("PUT /api/scratch", s.handlePutScratch)
 	s.mux.HandleFunc("GET /api/diagnostics", s.handleDiagnostics)
 	s.mux.HandleFunc("GET /api/self-inject/rounds", s.handleSelfInjectRounds)
+	s.mux.HandleFunc("GET /api/self-improve", s.handleSelfImprove)
+	s.mux.HandleFunc("GET /api/notifications", s.handleListNotifications)
+	s.mux.HandleFunc("POST /api/notifications/read", s.handleMarkNotificationsRead)
+	s.mux.HandleFunc("GET /api/metrics", s.handleMetrics)
 	s.mux.HandleFunc("GET /api/coordination/presence", s.handleCoordinationPresence)
 	s.mux.HandleFunc("GET /api/continuity/dashboard", s.handleContinuityDashboard)
 	s.mux.HandleFunc("GET /api/nanoswarm/status", s.handleNanoswarmStatus)

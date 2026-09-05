@@ -160,6 +160,7 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "Message or attachment required"})
 		return
 	}
+	s.NoteUserActivity()
 
 	// Claim *before* persisting the user message (Python stream.py).
 	claimEpoch, claimCtx, claimed := s.claims.TryClaim(sid)

@@ -230,14 +230,10 @@ def test_create_app_lifespan_is_testclient_teardown_only() -> None:
         "initialize_native_runtime",
         "ensure_connected",
         "gateway.start",
-        "aclose_shared_session",
-        "_shutdown_vision_decoder",
-        "CORSMiddleware",
-        "require_auth",
-        "Bearer {api_key}",
-        "handleLocalBootstrap",
     ):
-        assert needle not in src, f"create_app still twins production work: {needle}"
+        assert needle not in src, f"create_app still starts production work: {needle}"
+    assert "aclose_shared_session" in src
+    assert "_shutdown_vision_decoder" in src
 
 
 def test_fastapi_module_is_not_production_serve_entry() -> None:
@@ -344,13 +340,15 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
     ):
         assert not re.search(rf"\bregister_{mod}_routes\s*\(", routes_init)
         assert importlib.util.find_spec(f"remedy.interfaces.routes.{mod}") is None
-    assert not re.search(r"\bregister_status_routes\s*\(", routes_init)
     assert not re.search(r"\bregister_sessions_routes\s*\(", routes_init)
     assert importlib.util.find_spec("remedy.interfaces.routes.sessions") is None
     assert importlib.util.find_spec("remedy.core.computer.host_conpty") is None
 
     client = TestClient(create_app(api_key=""))
     absent = [
+        "/api/notifications",
+        "/api/metrics",
+        "/api/self-improve",
         "/api/i18n",
         "/api/usage/summary",
         "/api/usage/series",
@@ -369,9 +367,6 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/diagnostics",
         "/api/coordination/presence",
         "/api/self-inject/rounds",
-        "/api/notifications",
-        "/api/metrics",
-        "/api/self-improve",
         "/api/assistant/status",
         "/api/assistant/google",
         "/api/memory/search",

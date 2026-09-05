@@ -2,7 +2,6 @@
 
 Production ``:7400`` is owned by Go ``remedy-runtime``. ``register_all_routes``
 is intentionally empty — every former FastAPI twin has been deleted.
-Auth / CORS / bootstrap are Go-owned (not re-registered here).
 
 Not registered here (Go owns production, or dropped as TestClient-only):
 - ``/api/connect*`` Connect management
@@ -47,5 +46,5 @@ def register_all_routes(
     gateway=None,
     memory=None,
 ) -> None:
-    """No-op: TestClient FastAPI route tree is empty (Go owns :7400)."""
+    """No-op: Go owns production HTTP; TestClient has no FastAPI route twins."""
     _ = (app, runtime, gateway, memory)

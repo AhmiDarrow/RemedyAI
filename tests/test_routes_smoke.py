@@ -1,8 +1,9 @@
 """Route package stays importable; TestClient registrar tree is empty.
 
 Former FastAPI twins (sessions/partner/memory/catalog/auth/settings/status/…)
-are deleted. Go owns production :7400. create_app is an empty-route harness.
+are deleted. Go owns production :7400. create_app remains an auth/CORS harness.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -17,6 +18,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import remedy.interfaces.routes as routes_pkg
+from remedy.interfaces.api import create_app
 
 #: Streams that hold the connection open. Go owns /api/events/sessions now.
 STREAMING: set[str] = set()
@@ -93,6 +95,20 @@ def test_no_fastapi_route_twins_remain(app_and_failures):
         if hasattr(r, "methods") and str(getattr(r, "path", "")).startswith("/api")
     }
     assert paths == set()
+
+
+def test_create_app_has_no_status_twins():
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    for path in (
+        "/api/notifications",
+        "/api/notifications/read",
+        "/api/metrics",
+        "/api/self-improve",
+        "/api/ping",
+        "/api/status",
+        "/api/turn-active",
+    ):
+        assert path not in paths
 
 
 def test_no_parameterless_get_returns_a_server_error(app_and_failures):

@@ -279,3 +279,33 @@ def test_go_turn_active_public(go_runtime: tuple[str, str]) -> None:
     assert isinstance(body, dict)
     assert body.get("status") == "ok"
     assert body.get("active") is False
+
+
+def test_go_notifications_metrics_self_improve(go_runtime: tuple[str, str]) -> None:
+    base, token = go_runtime
+
+    code, body = _http_json("GET", f"{base}/api/notifications", token=token)
+    assert code == 200, body
+    assert isinstance(body, dict)
+    assert isinstance(body.get("notifications"), list)
+    assert "unread" in body and "count" in body
+
+    code, marked = _http_json(
+        "POST",
+        f"{base}/api/notifications/read",
+        token=token,
+        body={"all": True},
+    )
+    assert code == 200, marked
+    assert isinstance(marked, dict)
+    assert marked.get("ok") is True
+
+    code, metrics = _http_json("GET", f"{base}/api/metrics", token=token)
+    assert code == 200, metrics
+    assert isinstance(metrics, dict)
+    assert "metrics" in metrics and "agency" in metrics and "health" in metrics
+
+    code, improve = _http_json("GET", f"{base}/api/self-improve", token=token)
+    assert code == 200, improve
+    assert isinstance(improve, dict)
+    assert "enabled" in improve and "idle_s" in improve and "last_tick" in improve
