@@ -17,7 +17,6 @@ import logging
 import os
 import platform
 import shutil
-import subprocess
 import sys
 import tarfile
 import tempfile
@@ -58,7 +57,7 @@ _ASSETS: dict[str, str] = {
     ),
 }
 
-_proc: subprocess.Popen[Any] | None = None
+_proc: Any | None = None
 _lock = threading.Lock()
 _ensure_started = False
 _atexit_registered = False
@@ -237,21 +236,19 @@ def start(
         "-p",
         str(OPENSERP_PORT),
     ]
-    from remedy.execution.hide_flags import hidden_subprocess_kwargs
+    from remedy.core.computer.host_binding import HostError
+    from remedy.execution.process import retain_detached, spawn_hidden
+    from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
     try:
         with _lock:
             if is_healthy():
                 return {"ok": True, "already": True, "url": base_url()}
-            _proc = subprocess.Popen(
-                cmd,
-                cwd=str(binary.parent),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                **hidden_subprocess_kwargs(),
+            _proc = retain_detached(
+                spawn_hidden(cmd, cwd=str(binary.parent))
             )
         _register_atexit()
-    except OSError as exc:
+    except (OSError, HostError, NativeRuntimeUnavailableError, FileNotFoundError, ValueError) as exc:
         return {"ok": False, "error": f"failed to start OpenSERP: {exc}"}
     deadline = time.time() + max(2.0, wait_s)
     while time.time() < deadline:
@@ -275,14 +272,11 @@ def stop() -> None:
         _proc = None
     if proc is None:
         return
-    if proc.poll() is not None:
-        return
     with suppress(Exception):
-        proc.terminate()
-        proc.wait(timeout=3)
-        return
+        if proc.poll() is None:
+            proc.kill_tree()
     with suppress(Exception):
-        proc.kill()
+        proc.close()
 
 
 def ensure_web_search_host(

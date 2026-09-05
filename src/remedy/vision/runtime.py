@@ -13,14 +13,13 @@ from pathlib import Path
 from typing import Any
 from urllib.request import Request
 
-from remedy.execution.hide_flags import hidden_subprocess_kwargs
 from remedy.vision.catalog import DEFAULT_HOST, DEFAULT_PORT
 from remedy.vision.config import load_vision_json, save_vision_json
 from remedy.vision.install import runtime_binary_path
 
 logger = logging.getLogger(__name__)
 
-_proc: subprocess.Popen[Any] | None = None
+_proc: Any | None = None
 _last_used: float = 0.0
 
 # Short-lived probe cache — Settings + status poll this often; never block the
@@ -41,8 +40,8 @@ _HEALTH_TIMEOUT_S = 0.35
 _vision_json_cache: dict[str, Any] = {"path": "", "mtime": -1.0, "data": {}}
 
 
-def _proc_ref() -> subprocess.Popen[Any] | None:
-    """Snapshot the global Popen handle (stop_server may clear it concurrently)."""
+def _proc_ref() -> Any | None:
+    """Snapshot the managed child (stop_server may clear it concurrently)."""
     return _proc
 
 
@@ -472,16 +471,14 @@ def start_server(
     except Exception:
         logger.warning("RMB exclusive-host re-check failed", exc_info=True)
 
+    from remedy.core.computer.host_binding import HostError
+    from remedy.execution.process import retain_detached, spawn_hidden
+    from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
+
     logger.info("Starting vision llama-server: %s", " ".join(cmd))
     try:
-        _proc = subprocess.Popen(
-            cmd,
-            cwd=str(binary.parent),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            **hidden_subprocess_kwargs(),
-        )
-    except OSError as e:
+        _proc = retain_detached(spawn_hidden(cmd, cwd=str(binary.parent)))
+    except (OSError, HostError, NativeRuntimeUnavailableError, FileNotFoundError, ValueError) as e:
         return {"ok": False, "error": f"Failed to start llama-server: {e}"}
 
     invalidate_running_cache()
@@ -617,18 +614,12 @@ def stop_server(home_dir: str | Path | None = None) -> dict[str, Any]:
         with contextlib.suppress(Exception):
             if proc.poll() is None and proc.pid:
                 pids.append(int(proc.pid))
-        # Prefer graceful terminate via Popen handle first
         if proc.poll() is None:
             with contextlib.suppress(Exception):
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                    killed = True
-                except subprocess.TimeoutExpired:
-                    with contextlib.suppress(Exception):
-                        proc.kill()
-                        proc.wait(timeout=3)
-                    killed = True
+                proc.kill_tree()
+                killed = True
+        with contextlib.suppress(Exception):
+            proc.close()
         _proc = None
 
     state = load_vision_json(home_dir)

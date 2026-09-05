@@ -11,15 +11,13 @@ import logging
 import os
 import re
 import socket
-import subprocess
 import threading
 import time
 from pathlib import Path
 from typing import Any
 from urllib.request import Request
 
-from remedy.execution.hide_flags import hidden_subprocess_kwargs
-from remedy.execution.process import kill_tree, run_hidden
+from remedy.execution.process import kill_tree, retain_detached, run_hidden, spawn_hidden
 from remedy.home import default_home
 from remedy.runtime.rmb.autofit import (
     apply_plan_to_state,
@@ -69,7 +67,7 @@ from remedy.runtime.rmb.host_profile import (
 
 logger = logging.getLogger(__name__)
 
-_proc: subprocess.Popen[Any] | None = None
+_proc: Any | None = None
 _last_used: float = 0.0
 _lock = threading.Lock()
 _atexit_registered = False
@@ -2233,7 +2231,9 @@ def _start_rmb_server_impl(
             _kill_listeners_on_port(port_k)
             if _proc is not None:
                 with contextlib.suppress(Exception):
-                    _proc.kill()
+                    _proc.kill_tree()
+                with contextlib.suppress(Exception):
+                    _proc.close()
                 _proc = None
             invalidate_cache()
         if managed_process_alive():
@@ -2408,29 +2408,18 @@ def _start_rmb_server_impl(
         if cuda and Path(cuda, "bin").is_dir():
             env["PATH"] = str(Path(cuda) / "bin") + os.pathsep + env.get("PATH", "")
 
+        # Zig authorized spawn has no stdio file redirect; keep path for
+        # classify_start_failure callers (tail may be empty).
         log_path = models_dir(home_dir).parent / "llama-server.log"
-        log_f: Any = subprocess.DEVNULL
-        try:
-            log_f = open(log_path, "ab", buffering=0)  # noqa: SIM115
-        except Exception:
-            log_f = subprocess.DEVNULL
 
-        def _spawn(argv: list[str]) -> subprocess.Popen[Any]:
-            return subprocess.Popen(
-                argv,
-                stdout=log_f,
-                stderr=subprocess.STDOUT,
-                env=env,
-                cwd=str(binary.parent),
-                **hidden_subprocess_kwargs(),
+        def _spawn(argv: list[str]) -> Any:
+            return retain_detached(
+                spawn_hidden(argv, cwd=str(binary.parent), env=env)
             )
 
         try:
             _proc = _spawn(cmd)
         except Exception as e:
-            if log_f is not subprocess.DEVNULL:
-                with contextlib.suppress(Exception):
-                    log_f.close()
             return _fail({"ok": False, "error": f"failed to spawn llama-server: {e}"})
 
         # Soft-retry: if speculative flags (MTP or owner draft) make an older
@@ -2444,6 +2433,8 @@ def _start_rmb_server_impl(
                     "without speculative flags so the model still loads",
                     _proc.returncode,
                 )
+                with contextlib.suppress(Exception):
+                    _proc.close()
                 cmd = _build_cmd(
                     binary,
                     model,
@@ -2467,9 +2458,6 @@ def _start_rmb_server_impl(
                 try:
                     _proc = _spawn(cmd)
                 except Exception as e:
-                    if log_f is not subprocess.DEVNULL:
-                        with contextlib.suppress(Exception):
-                            log_f.close()
                     return _fail(
                         {"ok": False, "error": f"failed to spawn llama-server: {e}"}
                     )
@@ -2596,12 +2584,9 @@ def _start_rmb_server_impl(
             with _lock:
                 if _proc is wait_proc and wait_proc.poll() is None:
                     with contextlib.suppress(Exception):
-                        wait_proc.terminate()
-                    try:
-                        wait_proc.wait(timeout=3)
-                    except Exception:
-                        with contextlib.suppress(Exception):
-                            wait_proc.kill()
+                        wait_proc.kill_tree()
+                    with contextlib.suppress(Exception):
+                        wait_proc.close()
                     _proc = None
 
         tail = _tail_log(wait_log)
@@ -2618,9 +2603,6 @@ def _start_rmb_server_impl(
         if not can_retry:
             _clear_starting()
             _set_vision_suspended(home_dir, False)
-            if log_f is not subprocess.DEVNULL:
-                with contextlib.suppress(Exception):
-                    log_f.close()
             if timed_out:
                 _last_start_error = f"llama-server did not become healthy within {wait_s}s"
                 return {
@@ -2696,9 +2678,6 @@ def _start_rmb_server_impl(
             except Exception as e:
                 _clear_starting()
                 _set_vision_suspended(home_dir, False)
-                if log_f is not subprocess.DEVNULL:
-                    with contextlib.suppress(Exception):
-                        log_f.close()
                 return {
                     "ok": False,
                     "error": f"failed to respawn llama-server: {e}",
@@ -2736,12 +2715,9 @@ def stop_rmb_server(
         killed = False
         if _proc is not None:
             with contextlib.suppress(Exception):
-                _proc.terminate()
-            try:
-                _proc.wait(timeout=5)
-            except Exception:
-                with contextlib.suppress(Exception):
-                    _proc.kill()
+                _proc.kill_tree()
+            with contextlib.suppress(Exception):
+                _proc.close()
             _proc = None
             killed = True
         state = merge_state(load_rmb_json(home_dir))

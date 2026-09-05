@@ -11,7 +11,6 @@ import contextlib
 import logging
 import os
 import socket
-import subprocess
 import threading
 import time
 from pathlib import Path
@@ -21,8 +20,8 @@ from remedy.runtime.mdl import MDL_TIERS, get_tier_base_url
 
 logger = logging.getLogger(__name__)
 
-# Per-tier state
-_tier_procs: dict[str, subprocess.Popen[Any] | None] = {
+# Per-tier state (Zig HiddenProcess; retain job handle until stop)
+_tier_procs: dict[str, Any | None] = {
     "light": None,
     "medium": None,
     "full": None,
@@ -120,23 +119,9 @@ def stop_tier(tier_name: str) -> dict[str, Any]:
 
     if was_running and proc is not None:
         with contextlib.suppress(Exception):
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                with contextlib.suppress(Exception):
-                    proc.kill()
-                    proc.wait(timeout=3)
-
-    if was_running and proc is not None and proc.pid:
-        try:
-            from remedy.execution.process import kill_tree
-
-            kill_tree(int(proc.pid))
-        except (OSError, ProcessLookupError, ValueError):
-            pass
-        except Exception:
-            pass
+            proc.kill_tree()
+        with contextlib.suppress(Exception):
+            proc.close()
 
     still_running = proc is not None and proc.poll() is None
     if not still_running:
@@ -216,19 +201,15 @@ def start_tier(
     if mmproj_path:
         cmd.extend(["--mmproj", str(mmproj_path)])
 
-    from remedy.execution.hide_flags import hidden_subprocess_kwargs
+    from remedy.core.computer.host_binding import HostError
+    from remedy.execution.process import retain_detached, spawn_hidden
+    from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
     logger.info("Starting MDL tier %s: %s", tier_name, " ".join(cmd))
     try:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=str(binary.parent),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            **hidden_subprocess_kwargs(),
-        )
+        proc = retain_detached(spawn_hidden(cmd, cwd=str(binary.parent)))
         _tier_procs[tier_name] = proc
-    except OSError as e:
+    except (OSError, HostError, NativeRuntimeUnavailableError, FileNotFoundError, ValueError) as e:
         return {"ok": False, "error": f"Failed to start tier {tier_name}: {e}"}
 
     return _await_ready(tier_name, proc, host, port, wait_s, already_running=False)
@@ -236,7 +217,7 @@ def start_tier(
 
 def _await_ready(
     tier_name: str,
-    proc: subprocess.Popen[Any],
+    proc: Any,
     host: str,
     port: int,
     wait_s: float,

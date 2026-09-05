@@ -51,7 +51,7 @@ CLAIMIDX_HOST = "127.0.0.1"
 # on its standard 7340 listener.
 CLAIMIDX_PORT = 17340
 
-_proc: subprocess.Popen[Any] | None = None
+_proc: Any | None = None
 _lock = threading.Lock()
 _ensure_started = False
 _atexit_registered = False
@@ -406,23 +406,19 @@ def start(
         "--port",
         str(CLAIMIDX_PORT),
     ]
-    from remedy.execution.hide_flags import hidden_subprocess_kwargs
+    from remedy.core.computer.host_binding import HostError
+    from remedy.execution.process import retain_detached, spawn_hidden
+    from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
     try:
         with _lock:
             if is_healthy():
                 return {"ok": True, "already": True, "url": base_url()}
-            _proc = subprocess.Popen(
-                cmd,
-                cwd=str(root),
-                env=_clean_env(home_dir),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                **hidden_subprocess_kwargs(),
+            _proc = retain_detached(
+                spawn_hidden(cmd, cwd=str(root), env=_clean_env(home_dir))
             )
         _register_atexit()
-    except OSError as exc:
+    except (OSError, HostError, NativeRuntimeUnavailableError, FileNotFoundError, ValueError) as exc:
         return {"ok": False, "error": f"failed to start Claimidx: {exc}"}
 
     deadline = time.monotonic() + max(2.0, wait_s)
@@ -451,14 +447,13 @@ def stop() -> None:
     with _lock:
         proc = _proc
         _proc = None
-    if proc is None or proc.poll() is not None:
+    if proc is None:
         return
     with suppress(Exception):
-        proc.terminate()
-        proc.wait(timeout=3)
-        return
+        if proc.poll() is None:
+            proc.kill_tree()
     with suppress(Exception):
-        proc.kill()
+        proc.close()
 
 
 def schedule_ensure(home_dir: str | Path | None = None) -> None:
