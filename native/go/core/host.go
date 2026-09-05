@@ -604,8 +604,8 @@ func ClipboardGetImagePNG() ([]byte, error) {
 }
 
 // ForegroundDetailJSON returns UTF-8 JSON {hwnd,title,pid,exe} for the
-// foreground window (empty fields when none). Windows only; fail-closed
-// without remedy_core; ErrUnsupported on non-Windows hosts.
+// foreground window (empty fields when none). Windows + Linux/X11; fail-closed
+// without remedy_core; ErrUnsupported when the host export is unavailable.
 func ForegroundDetailJSON() ([]byte, error) {
 	lib, err := Open()
 	if err != nil {

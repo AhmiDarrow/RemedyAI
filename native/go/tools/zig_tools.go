@@ -147,7 +147,7 @@ func RegisterZigHostTools(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:           "computer.foreground",
 		Version:      1,
-		Description:  "Foreground window detail {hwnd,title,pid,exe} via Zig (Windows)",
+		Description:  "Foreground window detail {hwnd,title,pid,exe} via Zig (Windows + Linux/X11)",
 		Runtime:      RuntimeZig,
 		Risk:         RiskReadOnly,
 		Capabilities: []string{"computer.read"},

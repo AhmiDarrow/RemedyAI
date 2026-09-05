@@ -902,6 +902,44 @@ pub fn listWindowsJson(limit: u32) Error![]u8 {
 
 pub const ForegroundInfo = struct { hwnd: u64, title: []u8 };
 
+fn processImagePath(gpa: std.mem.Allocator, pid: u32) Error![]u8 {
+    if (pid == 0) return gpa.dupe(u8, "") catch return error.OutOfMemory;
+    var path_buf: [64]u8 = undefined;
+    const link_path = std.fmt.bufPrint(&path_buf, "/proc/{d}/exe", .{pid}) catch {
+        return gpa.dupe(u8, "") catch return error.OutOfMemory;
+    };
+    var out_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = std.posix.readlink(link_path, &out_buf) catch {
+        return gpa.dupe(u8, "") catch return error.OutOfMemory;
+    };
+    return gpa.dupe(u8, out_buf[0..n]) catch return error.OutOfMemory;
+}
+
+/// JSON `{hwnd,title,pid,exe}` for the foreground window (empty fields when none).
+pub fn foregroundDetailJson() Error![]u8 {
+    const info = try foregroundWindow();
+    defer allocator.free(info.title);
+    if (info.hwnd == 0) {
+        return host.jsonAlloc(.{
+            .hwnd = @as(u64, 0),
+            .title = "",
+            .pid = @as(u32, 0),
+            .exe = "",
+        });
+    }
+    const guard = try DisplayGuard.open();
+    defer guard.close();
+    const pid = windowPid(guard.display, @intCast(info.hwnd));
+    const exe = try processImagePath(allocator, pid);
+    defer allocator.free(exe);
+    return host.jsonAlloc(.{
+        .hwnd = info.hwnd,
+        .title = host.truncateCodepoints(info.title, 200),
+        .pid = pid,
+        .exe = exe,
+    });
+}
+
 pub fn foregroundWindow() Error!ForegroundInfo {
     const guard = try DisplayGuard.open();
     defer guard.close();
