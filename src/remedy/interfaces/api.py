@@ -51,10 +51,6 @@ _SLOW_EXEMPT_PATHS = frozenset(
         "/api/ping",
         "/api/turn-active",
         "/api/self-improve",
-        "/api/partner/status",
-        "/api/plans/latest",
-        "/api/app/command",
-        "/api/approvals",
     }
 )
 _SLOW_WARN_MS = 500.0
@@ -798,9 +794,6 @@ def create_app(
             "/api/ping",
             "/api/turn-active",
             "/api/self-improve",
-            "/api/partner/status",
-            "/api/plans/latest",
-            "/api/app/command",
         )
         if desktop and method in ("GET", "HEAD") and response.status_code < 400:
             quiet = True
@@ -908,8 +901,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/models</span> — list LLM models</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/agents</span> — list agent profiles</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/commands</span> — slash commands</div>
-            <p class="section-header">Skills</p>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/skills</span> — list skills</div>
             <p class="section-header">Other</p>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/status</span> — system status</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/self-improve</span> — unattended self-improve clock + last tick</div>

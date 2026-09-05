@@ -20,7 +20,10 @@ Not registered here (Go owns production):
 - ``/api/voice/*`` speak / hear / install / settings
 - ``/api/workspace``, ``/api/files*``, ``/api/media``, ``/api/scratch``
 - ``/api/skills/library/*`` catalog / search / suggest / install / updates
-  (and leftover Python-only ``update/{id}`` / ``submit``)
+- ``/api/memory/*`` search / facts / persona-wipe
+- ``/api/skills*`` list / detail / status / packs / library / delete
+- ``/api/partner/*``, ``/api/approvals*``, ``/api/plans*``
+- ``/api/app/command``, ``/api/projects/scan``, ``/api/updates/check``
 """
 from __future__ import annotations
 
@@ -28,9 +31,7 @@ from fastapi import FastAPI
 
 from remedy.interfaces.routes.auth import register_auth_routes
 from remedy.interfaces.routes.catalog import register_catalog_routes
-from remedy.interfaces.routes.memory import register_memory_routes
 from remedy.interfaces.routes.misc import register_misc_routes
-from remedy.interfaces.routes.partner import register_partner_routes
 from remedy.interfaces.routes.sessions import register_sessions_routes
 from remedy.interfaces.routes.settings import register_settings_routes
 from remedy.interfaces.routes.status import register_status_routes
@@ -48,11 +49,9 @@ def register_all_routes(
     register_status_routes(app, **kw)
     register_sessions_routes(app, **kw)
     register_catalog_routes(app, **kw)
-    register_memory_routes(app, **kw)
     register_settings_routes(app, **kw)
     register_auth_routes(app, **kw)
-    register_partner_routes(app, **kw)
     # No register_i18n/usage/vision/telephony/webhook/connect/nanoswarm/assistant/
-    # computer/hive/session_events/chat/terminal/rmb/voice/workspace/skills_library
-    # — Go owns those.
+    # computer/hive/session_events/chat/terminal/rmb/voice/workspace/skills_library/
+    # memory/partner — Go owns those. misc keeps TestClient openapi + /dashboard only.
     register_misc_routes(app, **kw)

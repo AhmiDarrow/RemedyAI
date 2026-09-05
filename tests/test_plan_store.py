@@ -265,69 +265,48 @@ def test_step_evidence_and_block_reason_roundtrip(tmp_path: Path):
     assert sk.steps[0].block_reason == "skipped"
 
 
-def test_plans_api(tmp_path: Path, monkeypatch):
-    # Point config home at tmp via fake runtime.config
-    class Cfg:
-        home_dir = str(tmp_path)
-
-    class RT:
-        config = Cfg()
-        def list_tasks(self):
-            return []
-        def create_task(self, *a, **k):
-            raise NotImplementedError
-
-    app = create_app(runtime=RT(), api_key="")
-    client = TestClient(app)
-    r = client.post(
-        "/api/plans",
-        json={
-            "title": "Add plan mode",
-            "goal": "Make Plan real",
-            "steps": ["Wire API", "Restrict tools", "Show in UI"],
-            "risks": ["Too many tools still available"],
-        },
+def test_plans_http_is_go_owned(tmp_path: Path):
+    """HTTP /api/plans* is Go httpapi; pin PlanStore semantics here instead."""
+    store = PlanStore(tmp_path)
+    plan = store.create(
+        "Add plan mode",
+        goal="Make Plan real",
+        steps=["Wire API", "Restrict tools", "Show in UI"],
+        risks=["Too many tools still available"],
     )
-    assert r.status_code == 200
-    data = r.json()
-    assert data["plan"]["title"] == "Add plan mode"
-    assert len(data["plan"]["steps"]) == 3
-    pid = data["plan"]["id"]
+    assert plan.title == "Add plan mode"
+    assert len(plan.steps) == 3
+    pid = plan.id
 
-    r2 = client.get("/api/plans")
-    assert r2.status_code == 200
-    assert any(p["id"] == pid for p in r2.json()["plans"])
+    listed = store.list_plans(limit=30)
+    assert any(p.id == pid for p in listed)
 
-    r3 = client.post(f"/api/plans/{pid}/status", json={"status": "approved"})
-    assert r3.status_code == 200
-    assert r3.json()["plan"]["status"] == "approved"
+    approved = store.set_status(pid, "approved")
+    assert approved is not None
+    assert approved.status == "approved"
 
-    r4 = client.post(
-        f"/api/plans/{pid}/steps/status",
-        json={"step_id": "s1", "status": "done"},
-    )
-    assert r4.status_code == 200
-    body = r4.json()["plan"]
-    assert body["steps"][0]["status"] == "done"
-    assert body["status"] == "active"
+    stepped = store.update_step_status(pid, "s1", "done")
+    assert stepped is not None
+    assert stepped.steps[0].status == "done"
+    # Completing a step promotes draft/approved → active (Python store parity).
+    assert stepped.status == "active"
 
-    r4 = client.get("/api/plans/latest")
-    assert r4.status_code == 200
-    assert r4.json()["plan"]["id"] == pid
+    latest = store.latest_for_session(None)
+    assert latest is not None and latest.id == pid
 
     # With a session_id that has no plans, do NOT fall back to global latest
-    r5 = client.get("/api/plans/latest", params={"session_id": "fresh-empty-session"})
-    assert r5.status_code == 200
-    assert r5.json()["plan"] is None
+    assert store.latest_for_session("fresh-empty-session") is None
 
-    r6 = client.post(f"/api/plans/{pid}/status", json={"status": "cancelled"})
-    assert r6.status_code == 200
-    assert r6.json()["plan"]["status"] == "cancelled"
+    cancelled = store.set_status(pid, "cancelled")
+    assert cancelled is not None
+    assert cancelled.status == "cancelled"
 
-    r7 = client.get("/api/plans/latest", params={"actionable": "true"})
-    assert r7.status_code == 200
     # Cancelled plan must not surface as actionable latest
-    assert r7.json()["plan"] is None
+    assert store.latest_for_session(None, actionable_only=True) is None
+
+    client = TestClient(create_app(api_key=""))
+    assert client.get("/api/plans").status_code in (404, 405)
+    assert client.get("/api/plans/latest").status_code in (404, 405)
 
 
 def test_call_tool_blocks_in_plan_mode():

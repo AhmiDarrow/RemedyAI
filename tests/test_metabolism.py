@@ -1024,15 +1024,10 @@ def test_metabolism_public_snapshot_lean_skips_list_thrash():
     assert "recent" in (full.get("decisions") or {})
 
 
-def test_partner_metabolism_snapshot_api_top_level_fields(tmp_path: Path):
-    """GET /api/partner/metabolism exposes tier + EU/DU at the top level."""
-    import asyncio
-
-    from fastapi.testclient import TestClient
-
+def test_partner_metabolism_snapshot_top_level_fields():
+    """Partner metabolism HTTP is Go-owned; pin public snapshot shape here."""
+    from remedy.core.metabolism.turn import metabolism_public_snapshot
     from remedy.core.session_quality import get_session_quality, reset_session_quality
-    from remedy.interfaces.api import create_app
-    from remedy.memory.store import MemoryStore
 
     sid = "meta_api_sess"
     reset_session_quality(sid)
@@ -1048,32 +1043,16 @@ def test_partner_metabolism_snapshot_api_top_level_fields(tmp_path: Path):
     )
     get_decision_tracker(sid).record_tier_if_changed("L2_agency")
 
-    async def _init():
-        store = MemoryStore(str(tmp_path / "mem.db"))
-        await store.initialize()
-        return store
-
-    store = asyncio.run(_init())
-    rt = type(
-        "RT",
-        (),
-        {
-            "skills": type("S", (), {"count": 0, "skills": []})(),
-            "_session_id": sid,
-            "_streaming_sessions": set(),
-        },
-    )()
-    app = create_app(runtime=rt, memory=store, api_key="")
-    with TestClient(app) as client:
-        r = client.get(f"/api/partner/metabolism?session_id={sid}")
-        assert r.status_code == 200
-        data = r.json()
-    assert data.get("session_id") == sid
-    assert data.get("tier") == 2
-    assert int(data.get("evidence_units") or 0) >= 3
-    assert int(data.get("decision_units") or 0) >= 1
-    assert isinstance(data.get("metabolism"), dict)
-    assert "governor" in data["metabolism"] or "machine_map" in data["metabolism"]
+    qsnap = get_session_quality(sid).snapshot()
+    meta = metabolism_public_snapshot(sid)
+    qmeta = qsnap.get("metabolism") if isinstance(qsnap, dict) else {}
+    if not isinstance(qmeta, dict):
+        qmeta = {}
+    assert int(qmeta.get("last_tier") or 0) == 2
+    assert int(qmeta.get("evidence_units") or 0) >= 3
+    assert int(qmeta.get("decision_units") or 0) >= 1
+    assert isinstance(meta, dict)
+    assert "governor" in meta or "machine_map" in meta
     reset_session_quality(sid)
 
 

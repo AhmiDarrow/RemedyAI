@@ -53,6 +53,72 @@ func (s *Server) handleGetSkill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, body)
 }
 
+// handleDeleteSkill removes a user-installed skill under ~/.remedy/skills/.
+// Bundled / seed skills cannot be deleted this way (Python parity).
+func (s *Server) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" || !isSafeSkillName(name) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "Invalid skill name"})
+		return
+	}
+	switch strings.ToLower(name) {
+	case "packs", "library", "export", "import", "archive-unused", "metrics", "learning":
+		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "not found"})
+		return
+	}
+	rec, ok := s.findSkill(name)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Skill not found: " + name})
+		return
+	}
+
+	userRoot, err := filepath.Abs(filepath.Join(s.skillsHome(), "skills"))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
+		return
+	}
+	canonical := filepath.Join(userRoot, name)
+	target := rec.Dir
+	if target == "" {
+		target = canonical
+	}
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		absTarget = canonical
+	}
+	if !pathUnder(absTarget, userRoot) || filepath.Base(absTarget) != name || absTarget == userRoot {
+		// Metadata path outside user tree — only allow canonical user dir.
+		if !dirExists(canonical) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"detail": "Cannot delete bundled or non-user skills. " +
+					"Archive or quarantine them instead. " +
+					"Only skills under ~/.remedy/skills/ can be removed.",
+			})
+			return
+		}
+		absTarget = canonical
+	}
+
+	purge := true
+	if raw := strings.TrimSpace(r.URL.Query().Get("purge")); raw != "" {
+		purge = truthyYAML(raw)
+	}
+	removedFiles := false
+	if purge && dirExists(absTarget) {
+		if err := os.RemoveAll(absTarget); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
+			return
+		}
+		removedFiles = !dirExists(absTarget)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"name":          name,
+		"status":        "deleted",
+		"removed_files": removedFiles,
+		"path":          absTarget,
+	})
+}
+
 func listSkillSubfiles(skillDir, sub string) []string {
 	if skillDir == "" {
 		return []string{}

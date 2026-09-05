@@ -273,6 +273,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/skills/library/install", s.handleLibraryInstall)
 	s.mux.HandleFunc("GET /api/skills/library/updates", s.handleLibraryUpdates)
 	s.mux.HandleFunc("GET /api/skills/{name}", s.handleGetSkill)
+	s.mux.HandleFunc("DELETE /api/skills/{name}", s.handleDeleteSkill)
 	s.mux.HandleFunc("POST /api/skills/{name}/status", s.handleSetSkillStatus)
 	s.mux.HandleFunc("POST /api/skills/{name}/quarantine", s.handleSetSkillQuarantine)
 	s.mux.HandleFunc("PUT /api/skills/{name}/body", s.handlePutSkillBody)
