@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from remedy.core import agent_web_tools as w
+from remedy.core import web_helpers as w
 
 
 @pytest.fixture(autouse=True)

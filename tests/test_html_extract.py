@@ -59,7 +59,7 @@ async def test_web_fetch_returns_markdown(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "remedy.core.agent_web_tools._pinned_fetch",
+        "remedy.core.web_helpers._pinned_fetch",
         lambda url, **k: (url, html, "utf-8"),
     )
     monkeypatch.setattr(
@@ -98,7 +98,7 @@ async def test_a_thin_extract_beats_a_thinner_browser_read(monkeypatch):
         b"<body><article><h1>Guide</h1><p>Hello world.</p></article></body></html>"
     )
     monkeypatch.setattr(
-        "remedy.core.agent_web_tools._pinned_fetch",
+        "remedy.core.web_helpers._pinned_fetch",
         lambda url, **k: (url, html, "utf-8"),
     )
     monkeypatch.setattr("remedy.core.agent_web_tools._web_enabled", lambda runtime: True)
@@ -148,7 +148,7 @@ async def test_web_fetch_drops_rail_from_the_wrong_tab(monkeypatch):
 
     html = b"<!doctype html><html><body><script>app()</script></body></html>"
     monkeypatch.setattr(
-        "remedy.core.agent_web_tools._pinned_fetch",
+        "remedy.core.web_helpers._pinned_fetch",
         lambda url, **k: (url, html, "utf-8"),
     )
     monkeypatch.setattr(
@@ -184,3 +184,4 @@ def test_python_teams_jwt_helpers_removed():
     import importlib.util
 
     assert importlib.util.find_spec("remedy.gateway") is None
+

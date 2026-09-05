@@ -304,7 +304,7 @@ def _workspace_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
 
 def _web_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     """Bridge Tool ABI web.search to the existing agent web_search backend."""
-    from remedy.core.agent_web_tools import run_search, web_tools_enabled
+    from remedy.core.web_helpers import run_search, web_tools_enabled
 
     if not web_tools_enabled(None):
         raise PermissionError("web tools are disabled")
@@ -335,7 +335,7 @@ def _web_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
 
 def _web_fetch(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     """Bridge Tool ABI web.fetch to polite_fetch + HTML extract (SSRF-guarded)."""
-    from remedy.core.agent_web_tools import polite_fetch, web_tools_enabled
+    from remedy.core.web_helpers import polite_fetch, web_tools_enabled
 
     if not web_tools_enabled(None):
         raise PermissionError("web tools are disabled")
