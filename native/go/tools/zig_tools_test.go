@@ -35,7 +35,7 @@ func TestRegisterZigHostToolsDescriptors(t *testing.T) {
 			t.Fatalf("%s capabilities=%v", id, desc.Capabilities)
 		}
 	}
-	for _, id := range []string{"computer.click", "computer.type", "computer.move", "computer.scroll", "computer.drag", "clipboard.write"} {
+	for _, id := range []string{"computer.click", "computer.type", "computer.key", "computer.move", "computer.scroll", "computer.drag", "clipboard.write"} {
 		desc, err := registry.Latest(id)
 		if err != nil {
 			t.Fatalf("%s: %v", id, err)
@@ -125,6 +125,17 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 		t.Fatalf("computer.type err=%v", err)
 	}
 
+	_, err = registry.Execute(context.Background(), Request{
+		ToolID: "computer.key", Version: 1, Input: json.RawMessage(`{"key":"enter"}`),
+		CapabilityToken: token,
+	})
+	if err == nil {
+		t.Fatal("computer.key expected fail-closed error")
+	}
+	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("computer.key err=%v", err)
+	}
+
 	for _, id := range []string{"computer.move", "computer.scroll", "clipboard.read", "clipboard.write"} {
 		input := json.RawMessage(`{"x":1,"y":2}`)
 		switch id {
@@ -192,6 +203,73 @@ func TestComputerTypeRejectsEmptyText(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("empty text: %v", err)
+	}
+}
+
+func TestComputerKeyRejectsUnknownKey(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.key",
+		Version:         1,
+		Input:           json.RawMessage(`{"key":"not-a-real-key"}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("unknown key: %v", err)
+	}
+}
+
+func TestComputerKeyRejectsEmptyKey(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.key",
+		Version:         1,
+		Input:           json.RawMessage(`{"key":""}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("empty key: %v", err)
+	}
+}
+
+func TestResolveKeyComboNamed(t *testing.T) {
+	vks, err := resolveKeyCombo("ctrl+enter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vks) != 2 || vks[0] != 0x11 || vks[1] != 0x0D {
+		t.Fatalf("ctrl+enter => %v", vks)
+	}
+	vks, err = resolveKeyCombo("alt+f4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vks) != 2 || vks[0] != 0x12 || vks[1] != 0x73 {
+		t.Fatalf("alt+f4 => %v", vks)
+	}
+	vks, err = resolveKeyCombo("ArrowLeft")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vks) != 1 || vks[0] != 0x25 {
+		t.Fatalf("ArrowLeft => %v", vks)
+	}
+	vks, err = resolveKeyCombo("ctrl+shift+s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vks) != 3 || vks[0] != 0x11 || vks[1] != 0x10 || vks[2] != 0x53 {
+		t.Fatalf("ctrl+shift+s => %v", vks)
 	}
 }
 
