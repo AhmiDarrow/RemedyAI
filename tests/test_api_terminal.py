@@ -358,7 +358,7 @@ def test_write_does_not_await_a_synchronous_stdin() -> None:
 @pytest.mark.skipif(os.name != "nt", reason="ConPTY fail-closed path is Windows-only")
 def test_terminal_open_fails_closed_when_conpty_spawn_raises(monkeypatch) -> None:
     """When Zig reports ConPTY available, spawn failure must not soft-fall to pipes."""
-    import remedy.execution.host.conpty as conpty_mod
+    import remedy.core.computer.host_conpty as conpty_mod
 
     monkeypatch.setattr(terminal_mod, "_SPAWN_OVERRIDE", None)
     monkeypatch.setattr(conpty_mod, "spawn_conpty_supported", lambda: True)
@@ -390,7 +390,7 @@ def test_terminal_open_fails_closed_when_conpty_spawn_raises(monkeypatch) -> Non
 @pytest.mark.skipif(os.name != "nt", reason="ConPTY unsupported path is Windows-gated")
 def test_terminal_open_uses_pipes_when_conpty_unsupported(monkeypatch) -> None:
     """Pipes remain the legitimate path when Zig reports ConPTY unsupported."""
-    import remedy.execution.host.conpty as conpty_mod
+    import remedy.core.computer.host_conpty as conpty_mod
 
     monkeypatch.setattr(terminal_mod, "_SPAWN_OVERRIDE", None)
     monkeypatch.setattr(conpty_mod, "spawn_conpty_supported", lambda: False)

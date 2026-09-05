@@ -1,10 +1,7 @@
-"""Windows ConPTY spawn — child sees a real console; parent still uses pipes.
+"""Windows ConPTY spawn — thin async duck-type over Zig ``remedy_core`` (ABI 5).
 
-Used by the persistent host session when ``use_conpty=True``. Implementation
-lives in ``remedy_core`` (ABI 5); this module is a thin async duck-type over
-``host_binding`` authorized ConPTY spawn. Spawn/IO failures raise (no soft
-Python ConPTY twin and no unsigned-spawn fallback).
-When ConPTY is unsupported, ``HostSession`` keeps the ordinary pipe path.
+Used by the terminal route when ConPTY is available. Spawn/IO failures raise
+(no soft Python ConPTY twin and no unsigned-spawn fallback).
 """
 
 from __future__ import annotations
@@ -104,7 +101,6 @@ class _HandleStream:
     async def read(self, n: int = 4096) -> bytes:
         if self._closed or self._write or not self._session:
             return b""
-        # Match prior behaviour: n is clamped up to 1, not down to 0.
         return await asyncio.to_thread(self._read_sync, max(1, int(n)))
 
     def _read_sync(self, n: int) -> bytes:
@@ -129,7 +125,7 @@ class _HandleStream:
 
 
 class _ConPTYProcess:
-    """Duck-type asyncio.subprocess.Process for HostSession."""
+    """Duck-type asyncio.subprocess.Process for terminal / HostSession callers."""
 
     def __init__(self, *, pid: int, handle: int) -> None:
         self.pid = pid

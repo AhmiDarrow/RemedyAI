@@ -1093,8 +1093,8 @@ def host_op_prepare(
 
     Pass either a HostOp mapping as *op*, or a full request object as *raw*
     (``{op, scratch_dir?, project_path?}``, ``{command, host?, ...}``, or a
-    bare HostOp). :func:`remedy.execution.host.runner.prepare_host_op` and
-    :func:`remedy.execution.host.runner.prepare_host_command` both route here.
+    bare HostOp). :func:`remedy.core.computer.shell_host.prepare_host_op` and
+    :func:`remedy.core.computer.shell_host.prepare_host_command` both route here.
     """
     if raw is not None:
         payload: dict[str, Any] = dict(raw)

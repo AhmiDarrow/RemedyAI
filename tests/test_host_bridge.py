@@ -11,15 +11,15 @@ import pytest
 
 from remedy.core.computer import host_binding
 from remedy.core.computer.host_binding import looks_like_powershell, translate_posix_to_host
-from remedy.execution.host.ir import HostOp, mkdir_op, run_op, script_op
-from remedy.execution.host.runner import (
+from remedy.core.computer.shell_host import HostOp, mkdir_op, run_op, script_op
+from remedy.core.computer.shell_host import (
     coerce_argv,
     launch_script,
     prepare_host_command,
     prepare_host_op,
     resolve_which,
 )
-from remedy.execution.host.session import conpty_available
+from remedy.core.computer.shell_host import conpty_available
 from remedy.execution.process import win_shell_prefix
 from remedy.execution.runtime import ToolRuntime
 
@@ -284,7 +284,7 @@ def test_prepare_deflates_uv_run_pytest(tmp_path: Path, monkeypatch: pytest.Monk
 
 
 def test_prepare_strips_pytest_last_failed() -> None:
-    from remedy.execution.host.runner import prepare_host_command
+    from remedy.core.computer.shell_host import prepare_host_command
 
     prep = prepare_host_command("pytest -q --lf", host="cmd")
     blob = " ".join(prep.argv) + " " + prep.display
@@ -777,7 +777,7 @@ def test_conpty_available_does_not_raise() -> None:
 @pytest.mark.asyncio
 async def test_host_session_echo() -> None:
     from remedy.core.computer.host_binding import STATUS_UNSUPPORTED, HostError
-    from remedy.execution.host.session import HostSession
+    from remedy.core.computer.shell_host import HostSession
 
     if os.name != "nt":
         sess = HostSession(host="posix")
@@ -798,7 +798,7 @@ async def test_host_session_echo() -> None:
 
 @pytest.mark.asyncio
 async def test_host_session_cd_persists(tmp_path: Path) -> None:
-    from remedy.execution.host.session import HostSession
+    from remedy.core.computer.shell_host import HostSession
 
     if os.name != "nt":
         pytest.skip("cmd session cwd check is Windows-oriented")
@@ -851,7 +851,7 @@ def test_runtime_host_run_mapping() -> None:
 async def test_shared_session_scoped_by_id_and_start_cwd(tmp_path: Path) -> None:
     if os.name != "nt":
         pytest.skip("Zig HostSession live open is Windows-only")
-    from remedy.execution.host.session import (
+    from remedy.core.computer.shell_host import (
         close_all_shared_sessions,
         close_shared_session,
         get_shared_session,
@@ -884,7 +884,7 @@ async def test_abort_session_closes_shared_host_shell() -> None:
     if os.name != "nt":
         pytest.skip("Zig HostSession live open is Windows-only")
     from remedy.core.turn_context import abort_session, begin_turn, end_turn
-    from remedy.execution.host.session import (
+    from remedy.core.computer.shell_host import (
         close_all_shared_sessions,
         get_shared_session,
     )
@@ -905,7 +905,7 @@ async def test_abort_session_closes_shared_host_shell() -> None:
 async def test_current_cwd_empty_when_closed() -> None:
     if os.name != "nt":
         pytest.skip("Zig HostSession live open is Windows-only")
-    from remedy.execution.host.session import HostSession
+    from remedy.core.computer.shell_host import HostSession
 
     sess = HostSession(host="cmd", cwd=".")
     assert await sess.current_cwd() == ""
@@ -959,7 +959,7 @@ def test_diagnose_not_found_wc() -> None:
 
 
 def test_cleanup_host_script(tmp_path: Path) -> None:
-    from remedy.execution.host.runner import cleanup_host_script
+    from remedy.core.computer.shell_host import cleanup_host_script
 
     p = tmp_path / "host_abc123.py"
     p.write_text("print(1)\n", encoding="utf-8")
@@ -973,7 +973,7 @@ def test_cleanup_host_script(tmp_path: Path) -> None:
 
 
 def test_default_script_lang_posix() -> None:
-    from remedy.execution.host.runner import default_script_lang
+    from remedy.core.computer.shell_host import default_script_lang
 
     if os.name != "nt":
         assert default_script_lang() == "python"

@@ -1,4 +1,4 @@
-//! Host Command IR — Zig mirror of `remedy.execution.host.ir` + prepare.
+//! Host Command IR — Zig mirror of `remedy.core.computer.shell_host` + prepare.
 //! ABI 4: `remedy_core_host_op_prepare` (run|script|mkdir|which|env|chain|raw
 //! / command-string). Translate is in `shell_translate.zig`. ConPTY, policy,
 //! write-jail, and HostSession orchestration are ABI 5.

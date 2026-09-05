@@ -315,7 +315,7 @@ async def run_verify_job(
     from remedy.execution.env import allowed_paths_for_shell
 
     sandbox = SubprocessSandbox(allowed_paths=allowed_paths_for_shell(roots, workdir))
-    from remedy.execution.host.runner import prepare_host_command
+    from remedy.core.computer.shell_host import prepare_host_command
 
     prepared = prepare_host_command(cmd, project_path=root)
     argv = prepared.argv

@@ -1,6 +1,6 @@
 """Controllable doubles for ``remedy.core.computer.host_binding`` calls.
 
-``desktop_uia`` and ``execution.host.conpty`` no longer talk to comtypes /
+``desktop_uia`` and ``core.computer.host_conpty`` no longer talk to comtypes /
 ctypes Win32; they forward to ``host_binding`` (Zig). Tests that used to patch
 comtypes or ``ctypes.WinDLL`` must mock this boundary instead.
 

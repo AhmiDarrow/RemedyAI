@@ -609,7 +609,7 @@ def abort_session(
     with contextlib.suppress(Exception):
         import asyncio
 
-        from remedy.execution.host.session import close_shared_session
+        from remedy.core.computer.shell_host import close_shared_session
 
         try:
             loop = asyncio.get_running_loop()

@@ -278,13 +278,13 @@ class ToolRuntime:
             return self._shell_command(command)
 
         if name == "host_run":
-            from remedy.execution.host.runner import coerce_argv
+            from remedy.core.computer.shell_host import coerce_argv
 
             return coerce_argv(tool_call.arguments.get("argv"))
 
         if name == "host_script":
-            from remedy.execution.host.ir import script_op
-            from remedy.execution.host.runner import prepare_host_op
+            from remedy.core.computer.shell_host import script_op
+            from remedy.core.computer.shell_host import prepare_host_op
 
             lang = str(tool_call.arguments.get("lang") or "pwsh")
             body = str(tool_call.arguments.get("body") or "")
@@ -307,7 +307,7 @@ class ToolRuntime:
     @staticmethod
     def _shell_command(command: str) -> list[str]:
         """Resolve a portable shell argv — same host as bash_exec (cmd, not pwsh -Command)."""
-        from remedy.execution.host.runner import prepare_host_command
+        from remedy.core.computer.shell_host import prepare_host_command
 
         return prepare_host_command(command).argv
 
