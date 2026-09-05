@@ -35,7 +35,7 @@ func TestRegisterZigHostToolsDescriptors(t *testing.T) {
 			t.Fatalf("%s capabilities=%v", id, desc.Capabilities)
 		}
 	}
-	for _, id := range []string{"computer.click", "computer.type", "computer.key", "computer.move", "computer.scroll", "computer.drag", "computer.focus", "computer.window", "computer.uia.action", "clipboard.write"} {
+	for _, id := range []string{"computer.click", "computer.type", "computer.key", "computer.key_hold", "computer.move", "computer.scroll", "computer.drag", "computer.focus", "computer.window", "computer.uia.action", "clipboard.write"} {
 		desc, err := registry.Latest(id)
 		if err != nil {
 			t.Fatalf("%s: %v", id, err)
@@ -136,6 +136,17 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 	}
 	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
 		t.Fatalf("computer.key err=%v", err)
+	}
+
+	_, err = registry.Execute(context.Background(), Request{
+		ToolID: "computer.key_hold", Version: 1, Input: json.RawMessage(`{"key":"a","hold_ms":50}`),
+		CapabilityToken: token,
+	})
+	if err == nil {
+		t.Fatal("computer.key_hold expected fail-closed error")
+	}
+	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("computer.key_hold err=%v", err)
 	}
 
 	for _, id := range []string{"computer.move", "computer.scroll", "clipboard.read", "clipboard.read_files", "clipboard.read_image", "clipboard.write", "computer.focus", "computer.window", "computer.print_window", "computer.foreground", "computer.uia.focused", "computer.uia.read_text", "computer.uia.action"} {
@@ -249,6 +260,78 @@ func TestComputerKeyRejectsEmptyKey(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("empty key: %v", err)
+	}
+}
+
+func TestComputerKeyHoldRejectsCombo(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.key_hold",
+		Version:         1,
+		Input:           json.RawMessage(`{"key":"ctrl+s","hold_ms":100}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("combo key: %v", err)
+	}
+}
+
+func TestComputerKeyHoldRejectsMissingHoldMS(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.key_hold",
+		Version:         1,
+		Input:           json.RawMessage(`{"key":"a"}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("missing hold_ms: %v", err)
+	}
+}
+
+func TestComputerKeyHoldRejectsExcessiveHoldMS(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.key_hold",
+		Version:         1,
+		Input:           json.RawMessage(`{"key":"a","hold_ms":60001}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("excessive hold_ms: %v", err)
+	}
+}
+
+func TestComputerKeyHoldRejectsUnknownKey(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.key_hold",
+		Version:         1,
+		Input:           json.RawMessage(`{"key":"not-a-real-key","hold_ms":10}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("unknown key: %v", err)
 	}
 }
 

@@ -103,7 +103,7 @@ func TestCognitionTurnRunnerRegistersZigHostTools(t *testing.T) {
 	r := NewCognitionTurnRunner(&cognition.ScriptedModel{})
 	for _, id := range []string{
 		"computer.screenshot", "computer.windows", "computer.monitors", "computer.snapshot",
-		"computer.click", "computer.type", "computer.key", "computer.move", "computer.scroll", "computer.drag",
+		"computer.click", "computer.type", "computer.key", "computer.key_hold", "computer.move", "computer.scroll", "computer.drag",
 		"computer.focus", "computer.window",
 		"clipboard.read", "clipboard.read_files", "clipboard.read_image", "clipboard.write", "shell.exec",
 	} {
