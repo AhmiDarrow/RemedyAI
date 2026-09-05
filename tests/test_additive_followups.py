@@ -354,15 +354,6 @@ def test_chat_computer_host_defaults_off() -> None:
     assert bool(getattr(ns, "computer_host", False)) is False
 
 
-def test_messenger_inbound_python_session_bridge_gone() -> None:
-    """Guard: Python session_bridge twin deleted; Go owns messenger event handling."""
-    from pathlib import Path
-
-    import remedy.gateway as gw
-
-    assert not (Path(gw.__file__).resolve().parent / "session_bridge.py").exists()
-
-
 def test_browser_vault_type_requires_ref(tmp_path: Path) -> None:
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction

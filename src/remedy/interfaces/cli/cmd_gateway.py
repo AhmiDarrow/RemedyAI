@@ -1,4 +1,4 @@
-"""Gateway CLI entrypoint — status, channels list, serve handoff."""
+"""Gateway CLI — status / channels / serve. Start retired to Go remedy-runtime."""
 
 from __future__ import annotations
 
@@ -9,21 +9,14 @@ from typing import Any
 from rich.console import Console
 from rich.table import Table
 
-from remedy.gateway.messengers import list_messenger_definitions
+from remedy.interfaces.messenger_catalog import list_messenger_definitions
 from remedy.models import ChannelKind
 
 console = Console()
 
 
-async def run_gateway(
-    db_path: Path,
-    token_telegram: str = "",
-    token_discord: str = "",
-    token_slack: str = "",
-    heartbeat: float = 60.0,
-) -> None:
+def run_gateway_start() -> None:
     """Python dual-poll gateway retired — Go remedy-runtime owns messengers."""
-    _ = (db_path, token_telegram, token_discord, token_slack, heartbeat)
     raise SystemExit(
         "remedy gateway start retired Python BasicRuntime/ReAct. "
         "Messengers inbound run inside Go remedy-runtime (remedy serve)."
@@ -77,18 +70,13 @@ def main_gateway(args) -> None:
                 "in process lists. Prefer TELEGRAM_BOT_TOKEN / DISCORD_BOT_TOKEN / "
                 "SLACK_BOT_TOKEN.[/yellow]"
             )
-        token_telegram = cli_tg or os.environ.get("TELEGRAM_BOT_TOKEN", "") or ""
-        token_discord = cli_dc or os.environ.get("DISCORD_BOT_TOKEN", "") or ""
-        token_slack = cli_sl or os.environ.get("SLACK_BOT_TOKEN", "") or ""
-        asyncio.run(
-            run_gateway(
-                db_file,
-                token_telegram=token_telegram,
-                token_discord=token_discord,
-                token_slack=token_slack,
-                heartbeat=getattr(args, "heartbeat", 60.0),
-            )
+        _ = (
+            cli_tg or os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+            cli_dc or os.environ.get("DISCORD_BOT_TOKEN", ""),
+            cli_sl or os.environ.get("SLACK_BOT_TOKEN", ""),
+            getattr(args, "heartbeat", 60.0),
         )
+        run_gateway_start()
     elif args.gateway_cmd == "status":
         asyncio.run(gateway_status(db_file))
     elif args.gateway_cmd == "serve":
@@ -105,7 +93,10 @@ def main_gateway(args) -> None:
                 flags.append("in")
             if m.outbound:
                 flags.append("out")
-            # Escaped: rich reads a bare [in/out] as a style tag.
+            # Escaped: rich reads a bare [in/out] as a style tag and prints
+            # nothing at all, so the direction column only ever appeared for a
+            # messenger that supports neither direction — the exact opposite of
+            # what it is for.
             console.print(
                 f"  {m.id:14} {m.status:8} {m.name}  "
                 rf"\[{'/'.join(flags) or '—'}]"

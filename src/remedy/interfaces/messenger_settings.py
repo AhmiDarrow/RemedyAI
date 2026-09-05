@@ -17,7 +17,7 @@ def messengers_for_settings_response(
     home_path: Path | None,
 ) -> tuple[list[str], list[dict[str, Any]]]:
     """Return (enabled_channels, messengers public list)."""
-    from remedy.gateway.messengers import (
+    from remedy.interfaces.messenger_catalog import (
         build_messenger_public_status,
         channel_secret_store_key,
         list_messenger_definitions,
@@ -60,7 +60,7 @@ def apply_messengers_update(
     home_path: Path | None,
 ) -> dict[str, Any]:
     """Merge messenger field/secret updates into cfg (mutates and returns cfg)."""
-    from remedy.gateway.messengers import (
+    from remedy.interfaces.messenger_catalog import (
         apply_messenger_field_updates,
         channel_secret_store_key,
         messenger_ids,

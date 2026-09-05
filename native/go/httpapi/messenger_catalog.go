@@ -28,7 +28,8 @@ type messengerCatalogEntry struct {
 	Fields        []messengerFieldSchema
 }
 
-// messengerCatalog mirrors Python remedy.gateway.messengers.MESSENGERS field schema.
+// messengerCatalog owns production Settings messenger field_schema (Python
+// TestClient twin: remedy.interfaces.messenger_catalog).
 var messengerCatalog = []messengerCatalogEntry{
 	{
 		ID: "telegram", Name: "Telegram",

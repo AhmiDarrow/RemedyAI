@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from remedy.gateway.cli import main_gateway
+from remedy.interfaces.cli.cmd_gateway import main_gateway
 from remedy.interfaces.cli.cmd_runtime import _cmd_chat, _cmd_desktop, _cmd_serve
 from remedy.interfaces.cli.cmd_settings import (
     _cmd_auth,
