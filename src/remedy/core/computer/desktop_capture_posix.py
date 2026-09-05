@@ -19,7 +19,14 @@ def host_fail(need: str, exc: BaseException) -> RuntimeError:
     return RuntimeError(f"Linux {need} failed via remedy_core — {_LINUX_HANDS_HINT}: {exc}")
 
 
+def _require_linux() -> None:
+    from remedy.core.computer import desktop_common as D
+
+    D._require_linux()
+
+
 def capture_virtual_screen() -> tuple[bytes, int, int, int, int, int]:
+    _require_linux()
     try:
         shot = H.capture_virtual_screen(3)
     except (NativeRuntimeUnavailableError, H.HostError) as exc:
@@ -58,29 +65,34 @@ def screenshot_region_png(
     path: Path | None = None,
     scale: float = 1.0,
 ) -> dict[str, Any]:
-    ox, oy, fw, fh = H.virtual_screen_rect()
-    bx, by, rw, rh, sc = P.clip_region_to_virtual(
-        x, y, width, height, scale=scale, origin_x=ox, origin_y=oy, full_w=fw, full_h=fh
-    )
-    crop = H.capture_region(ox + bx, oy + by, rw, rh, 3)
-    return P.finalize_shot(
-        crop.pixels,
-        crop.stride,
-        rw,
-        rh,
-        path=path,
-        prefix="region",
-        origin_x=ox + bx,
-        origin_y=oy + by,
-        purge=False,
-        extra={
-            "requested": {"x": x, "y": y, "width": width, "height": height, "scale": sc},
-            "method": "remedy_core",
-        },
-    )
+    _require_linux()
+    try:
+        ox, oy, fw, fh = H.virtual_screen_rect()
+        bx, by, rw, rh, sc = P.clip_region_to_virtual(
+            x, y, width, height, scale=scale, origin_x=ox, origin_y=oy, full_w=fw, full_h=fh
+        )
+        crop = H.capture_region(ox + bx, oy + by, rw, rh, 3)
+        return P.finalize_shot(
+            crop.pixels,
+            crop.stride,
+            rw,
+            rh,
+            path=path,
+            prefix="region",
+            origin_x=ox + bx,
+            origin_y=oy + by,
+            purge=False,
+            extra={
+                "requested": {"x": x, "y": y, "width": width, "height": height, "scale": sc},
+                "method": "remedy_core",
+            },
+        )
+    except (NativeRuntimeUnavailableError, H.HostError) as exc:
+        raise host_fail("region screenshot", exc) from exc
 
 
 def print_window_png(hwnd: int | None = None, path: Path | None = None) -> dict[str, Any]:
+    _require_linux()
     if not hwnd:
         return screenshot_png(path)
     try:
@@ -98,4 +110,21 @@ def print_window_png(hwnd: int | None = None, path: Path | None = None) -> dict[
         origin_y=shot.top,
         purge=False,
         extra={"method": "remedy_core"},
+    )
+
+
+def list_monitors() -> list[dict[str, Any]]:
+    return H.list_monitors()
+
+
+def screenshot_monitor_png(index: int, path: Path | None = None) -> dict[str, Any]:
+    _require_linux()
+    from remedy.core.computer import desktop_common as D
+
+    return P.screenshot_monitor_from_list(
+        list_monitors(),
+        index,
+        path=path,
+        region_shot=D.screenshot_region_png,
+        full_shot=D.screenshot_png,
     )
