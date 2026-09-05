@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from remedy.core.life_task_drive import drive_life_task, step_is_checkpoint
-from remedy.core.react_loop.loop_util import browse_tool_ok
+from remedy.core.browse_parse import browse_tool_ok
 
 
 def test_navigate_unsuccessful_is_not_done():

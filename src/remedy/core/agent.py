@@ -982,50 +982,23 @@ class BasicRuntime(AgentRuntime):
         *,
         plan_mode: bool = False,
     ) -> AsyncIterator[str]:
-        """Call the LLM with a smooth ReAct loop.
+        """Production ReAct is Go ``CognitionTurnRunner`` on ``:7400``.
 
-        Right-sizes max_tokens up front (reasoning is never truncated
-        mid-stream), then runs the loop with ONE retry-with-backoff on
-        transient failures before a clean turn-end.
+        Python BasicRuntime no longer owns the loop (Phase 4). Callers must
+        use ``remedy serve`` / Desktop against remedy-runtime.
         """
-        from remedy.core.react_loop import call_llm_stream
+        _ = (message, session_id, attachments, plan_mode)
+        from remedy.core.errors import RemedyError
 
-        self._right_size_max_tokens()
-        attempt = 0
-        while True:
-            attempt += 1
-            try:
-                async for chunk in call_llm_stream(
-                    self,
-                    message,
-                    session_id=session_id,
-                    attachments=attachments,
-                    plan_mode=plan_mode,
-                ):
-                    yield chunk
-                return
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                if attempt >= 2:
-                    # Clean turn-end: no traceback, no dangling stream.
-                    logger.warning(
-                        "LLM stream failed after 2 attempts — clean turn-end: %s",
-                        exc,
-                    )
-                    yield (
-                        "\n*(The model request failed after one retry — "
-                        "history is intact. Resend or say **continue**.)*\n"
-                    )
-                    return
-                logger.warning(
-                    "LLM stream transient failure (attempt %d) — retrying "
-                    "with backoff: %s",
-                    attempt,
-                    exc,
-                )
-                yield "@@status:Connection blip — retrying once…\n"
-                await asyncio.sleep(1.5 * attempt)
+        raise RemedyError(
+            "Python ReAct loop retired — production turns use Go "
+            "CognitionTurnRunner via remedy-runtime on :7400 "
+            "(remedy serve / Desktop).",
+            code="REACT_GO_OWNED",
+        )
+        # Unreachable: keeps AsyncIterator typing for static checkers.
+        if False:  # pragma: no cover
+            yield ""
 
     async def _post_chat(
         self, body: dict[str, Any]

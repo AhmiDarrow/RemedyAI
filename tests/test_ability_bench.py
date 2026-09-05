@@ -171,59 +171,6 @@ def test_sse_tool_round_still_emits_thinking_when_content_is_buffered():
 
 
 @pytest.mark.asyncio
-async def test_json_tool_round_says_working_before_the_body_arrives():
-    from remedy.core.react_loop.stream_consume import consume_llm_http_response
-
-    class _Resp:
-        headers = {"Content-Type": "application/json"}
-        content = None
-
-        async def json(self):
-            await asyncio.sleep(0)
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "content": "",
-                            "reasoning_content": "click next",
-                            "tool_calls": [
-                                {
-                                    "id": "c1",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "computer_click",
-                                        "arguments": '{"text":"Next"}',
-                                    },
-                                }
-                            ],
-                        }
-                    }
-                ]
-            }
-
-    adapter = SimpleNamespace(extract_response=lambda data: {})
-    bind = SimpleNamespace(model="grok-4.6", provider="xai")
-    state = StreamRoundState()
-    collected: dict = {}
-    tokens: list[str] = []
-    async for tok, _user in consume_llm_http_response(
-        _Resp(),
-        round_state=state,
-        collected=collected,
-        adapter=adapter,
-        bind=bind,
-        body={"stream": False},
-        use_openai_sse=False,
-        stream_live=False,
-    ):
-        tokens.append(tok)
-    joined = " ".join(tokens)
-    assert "@@thinking_round" in joined
-    assert "@@status:Working" in joined
-    assert "@@thinking:" in joined
-    assert "click next" in joined
-
-
 def test_hover_enqueue_opens_the_browser_rail(tmp_path):
     from remedy.core.computer.host_bridge import ComputerHostBridge
 

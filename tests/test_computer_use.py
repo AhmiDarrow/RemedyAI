@@ -2628,7 +2628,7 @@ def test_resolve_key_combo_unknown_raises():
 
 
 def test_browse_tool_ok_parses_json_not_success_substring():
-    from remedy.core.react_loop.loop import _browse_tool_ok
+    from remedy.core.browse_parse import browse_tool_ok as _browse_tool_ok
 
     assert _browse_tool_ok('{"ok": true, "user_visible": true}') == (True, False)
     assert _browse_tool_ok('{"ok":false}') == (False, True)

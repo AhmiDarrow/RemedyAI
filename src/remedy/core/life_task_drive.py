@@ -215,7 +215,7 @@ def _parse_run_blob(raw: str) -> dict[str, Any]:
             return data
     except json.JSONDecodeError:
         pass
-    from remedy.core.react_loop.loop_util import browse_tool_ok
+    from remedy.core.browse_parse import browse_tool_ok
 
     ok_true, ok_false = browse_tool_ok(text)
     low = text.lower()

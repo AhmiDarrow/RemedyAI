@@ -1,4 +1,4 @@
-"""Fatal vs recoverable LLM API error classification for the ReAct loop."""
+"""Fatal vs recoverable LLM API error classification."""
 
 from __future__ import annotations
 

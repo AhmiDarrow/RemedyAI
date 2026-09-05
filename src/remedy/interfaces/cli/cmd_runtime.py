@@ -14,19 +14,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from rich.panel import Panel
-
 from remedy.interfaces.cli.util import (
     UnsafeHomeError,
     console,
     resolve_cli_home,
 )
-from remedy.interfaces.config import (
-    config_to_agent_config,
-    resolve_config,
-)
-from remedy.interfaces.wizard import ensure_setup_before_launch
-from remedy.memory.store import MemoryStore
 
 
 class _NullStream:
@@ -195,179 +187,15 @@ def _cmd_serve(args) -> None:
 
 
 def _cmd_chat(args) -> None:
-    import asyncio as _asyncio
-
-    from remedy.core.agent import BasicRuntime
-    from remedy.gateway.router import Gateway
-    from remedy.models import ChannelKind, EventKind, GatewayEvent
-
-    try:
-        home = resolve_cli_home(args.home)
-    except UnsafeHomeError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise SystemExit(2) from exc
-
-    # Always gate interactive chat on first-run setup (or --skip-setup).
-    ok = ensure_setup_before_launch(
-        home_dir=home,
-        skip_setup=bool(getattr(args, "skip_setup", False)),
-        force=bool(getattr(args, "force_setup", False)),
+    """Interactive CLI chat used the Python ReAct loop — retired in Phase 4."""
+    _ = args
+    console.print(
+        "[bold red]remedy chat retired the Python ReAct loop.[/bold red]\n"
+        "Production turns use Go CognitionTurnRunner on :7400.\n"
+        "  Use [green]remedy serve[/green] + Desktop / WebUI, or POST "
+        "/api/sessions/{id}/messages/stream against remedy-runtime."
     )
-    if not ok:
-        raise SystemExit(1)
-
-    config = resolve_config(
-        config_path=Path(args.config_file) if args.config_file else None,
-        home_dir=str(home),
-    )
-    agent_config = config_to_agent_config(config)
-
-    async def _chat_loop():
-        memory = MemoryStore(
-            agent_config.memory_db_path or f"{agent_config.home_dir}/memory.db"
-        )
-        await memory.initialize()
-
-        runtime = BasicRuntime(agent_config, memory=memory)
-        await runtime.start()
-        n_skills = runtime.skills.discover_defaults(home_dir=home)
-
-        # Computer-use: in-process CLI host so navigate/open works without Desktop.
-        # Default OFF so Desktop's poller is not racing claims (same as serve).
-        computer_host_on = False
-        want_host = bool(getattr(args, "computer_host", False))
-        skip_host = bool(getattr(args, "no_computer_host", False)) or not want_host
-        if not skip_host:
-            try:
-                from remedy.core.computer.cli_host import start_cli_computer_host
-
-                host = start_cli_computer_host(home)
-                computer_host_on = bool(host.running and host.status().get("host_connected"))
-            except Exception as exc:
-                console.print(f"[yellow]CLI computer host failed:[/yellow] {exc}")
-
-        gateway = Gateway(runtime=runtime, memory_store=memory)
-        gateway.register_handler(runtime.handle_event)
-        await gateway.start()
-
-        sid = args.session_id or await runtime.start_session()
-
-        llm_ready = bool(agent_config.llm_api_key)
-        model = agent_config.llm_model or "none"
-        computer_line = (
-            "[green]CLI host on[/green] (system browser + desktop)"
-            if computer_host_on
-            else (
-                "[dim]off[/dim] (desktop tools only; use --computer-host or Desktop app)"
-                if skip_host
-                else "[yellow]starting…[/yellow]"
-            )
-        )
-
-        console.print()
-        console.print(Panel(
-            f"[bold green]{agent_config.name}[/bold green] is ready.\n\n"
-            f"Session:  [dim]{sid}[/dim]\n"
-            f"LLM:      [{'green' if llm_ready else 'red'}]{model}[/{'green' if llm_ready else 'red'}]\n"
-            f"Skills:   {n_skills} loaded\n"
-            f"Memory:   {'enabled' if not args.no_memory else 'disabled'}\n"
-            f"Computer: {computer_line}\n\n"
-            f"[dim]Type /help for commands, /exit to quit[/dim]",
-            title="Remedy Chat",
-            border_style="green",
-        ))
-
-        try:
-            while True:
-                try:
-                    user_input = console.input("[bold cyan]You:[/bold cyan] ").strip()
-                except (KeyboardInterrupt, EOFError):
-                    console.print("\n[dim]Goodbye.[/dim]")
-                    break
-
-                if not user_input:
-                    continue
-
-                if user_input.startswith("/"):
-                    cmd = user_input[1:].strip().lower()
-                    if cmd in ("exit", "quit", "q"):
-                        console.print("[dim]Goodbye.[/dim]")
-                        break
-                    elif cmd == "help":
-                        console.print("""
-[bold]Commands:[/bold]
-  /exit, /quit, /q  — End this chat session
-  /help             — Show this help
-  /session          — Show current session ID
-  /skills           — List loaded skills
-  /computer         — Computer-use host status
-  /clear            — Clear the screen
-  Any other input   — Send a message to Remedy
-""")
-                        continue
-                    elif cmd == "session":
-                        console.print(f"[dim]Session: {sid}[/dim]")
-                        continue
-                    elif cmd == "computer":
-                        try:
-                            from remedy.core.computer.cli_host import get_local_computer_host
-                            from remedy.core.computer.host_bridge import get_host_bridge
-
-                            b = get_host_bridge(home)
-                            h = get_local_computer_host(home)
-                            console.print(
-                                f"  host_connected={b.host_connected()}  "
-                                f"cli_host={h.running}  pending={b.pending_count()}"
-                            )
-                        except Exception as exc:
-                            console.print(f"[red]{exc}[/red]")
-                        continue
-                    elif cmd == "skills":
-                        if runtime.skills.skills:
-                            for skill in sorted(
-                                runtime.skills.skills, key=lambda s: s.manifest.name
-                            ):
-                                desc = skill.manifest.description or ""
-                                console.print(
-                                    f"  [cyan]{skill.manifest.name}[/cyan] {desc[:60]}"
-                                )
-                        else:
-                            console.print("[dim]No skills loaded.[/dim]")
-                        continue
-                    elif cmd == "clear":
-                        console.clear()
-                        continue
-                    else:
-                        console.print(f"[dim]Unknown command: /{cmd}. Type /help[/dim]")
-                        continue
-
-                event = GatewayEvent(
-                    kind=EventKind.MESSAGE,
-                    channel=ChannelKind.CLI,
-                    source_id="user",
-                    payload={"message": user_input},
-                    session_id=sid,
-                )
-
-                with console.status("[dim]Thinking...[/dim]", spinner="dots"):
-                    responses = await gateway.emit(event)
-
-                for r in responses:
-                    if isinstance(r, str):
-                        console.print(f"[bold green]Remedy:[/bold green] {r}")
-                        break
-
-        finally:
-            try:
-                from remedy.core.computer.cli_host import stop_cli_computer_host
-
-                stop_cli_computer_host()
-            except Exception:
-                pass
-            await runtime.stop()
-            await gateway.stop()
-
-    _asyncio.run(_chat_loop())
+    raise SystemExit(2)
 
 
 def _cmd_desktop(parsed: argparse.Namespace) -> None:

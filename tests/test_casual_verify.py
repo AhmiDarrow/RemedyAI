@@ -7,21 +7,6 @@ from types import SimpleNamespace
 
 from remedy.core.build_oracle import run_casual_verify
 from remedy.core.jobs import JobResult
-from remedy.core.react_loop.tool_batch import _batch_ran_verify
-
-
-def test_batch_ran_verify_detects_job_run_kind():
-    assert _batch_ran_verify(
-        [{"function": {"name": "job_run", "arguments": {"kind": "verify"}}}]
-    )
-    assert not _batch_ran_verify(
-        [{"function": {"name": "job_run", "arguments": {"kind": "explore"}}}]
-    )
-    assert not _batch_ran_verify(
-        [{"function": {"name": "file_write", "arguments": {}}}]
-    )
-
-
 def test_casual_verify_runs_the_job(monkeypatch):
     called: dict = {}
 

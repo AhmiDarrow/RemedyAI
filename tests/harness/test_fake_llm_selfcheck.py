@@ -4,7 +4,6 @@ Every other test that uses ``tests.harness.fake_llm`` inherits whatever this
 file fails to catch: if the fake serves turns out of order, hides a provider
 error, or forgets to record the request, the tests built on it will agree with
 the bug instead of finding it. So this file checks the harness against the
-*real* parser (``consume_llm_http_response``) and the *real* runtime
 (``BasicRuntime.call_tool`` / the ReAct loop), never against itself.
 """
 
@@ -16,7 +15,6 @@ from unittest.mock import patch
 import pytest
 
 from remedy.core.agent import BasicRuntime
-from remedy.core.react_loop.stream_consume import consume_llm_http_response
 from remedy.core.react_stream import StreamRoundState
 from remedy.models import AgentConfig, ToolCall
 from tests.harness.fake_llm import (
@@ -37,30 +35,6 @@ from tests.harness.fake_llm import (
 )
 
 
-async def _consume(fake: FakeLLM, *, stream: bool = True) -> StreamRoundState:
-    """POST once through the fake and run the answer through the real parser."""
-    body: dict[str, Any] = {"stream": stream, "model": "fake-model", "messages": []}
-    resp = fake.session.post("http://llm.invalid/v1/chat/completions", json=body)
-    state = StreamRoundState()
-    collected: dict[str, Any] = {}
-    async for _token, _is_user_text in consume_llm_http_response(
-        resp,
-        round_state=state,
-        collected=collected,
-        adapter=fake_adapter(),
-        bind=fake_binding(),
-        body=body,
-        use_openai_sse=stream,
-        stream_live=True,
-    ):
-        pass
-    return state
-
-
-# -- scripted turns --------------------------------------------------------
-
-
-@pytest.mark.asyncio
 async def test_scripted_turns_are_served_in_the_order_they_were_written():
     fake = FakeLLM([text_turn("first"), text_turn("second"), text_turn("third")])
 

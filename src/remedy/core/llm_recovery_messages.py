@@ -1,4 +1,4 @@
-"""Recovery / soft-fail user-facing messages for the ReAct loop."""
+"""Recovery / soft-fail user-facing messages for LLM API failures."""
 
 from __future__ import annotations
 
