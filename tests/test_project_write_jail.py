@@ -1103,7 +1103,6 @@ async def test_job_run_verify_write_roots_fail_closed(tmp_path: Path, monkeypatc
 
 
 @pytest.mark.asyncio
-@pytest.mark.asyncio
 def test_shell_blocks_auth_secret_reads(tmp_path: Path):
     sticky = tmp_path / "SecretSticky"
     sticky.mkdir()
