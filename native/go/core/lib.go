@@ -99,6 +99,14 @@ func FindLibraryPath() string {
 		pst, perr := os.Stat(packaged)
 		dst, derr := os.Stat(dev)
 		if perr == nil && derr == nil && dst.ModTime().After(pst.ModTime()) {
+			// Match Python native_runtime: warn so tauri:dev does not silently
+			// look like it is still on the staged desktop/bin copy.
+			fmt.Fprintf(
+				os.Stderr,
+				"remedy_core: preferring newer zig-out %s over staged %s\n",
+				dev,
+				packaged,
+			)
 			return dev
 		}
 		return packaged

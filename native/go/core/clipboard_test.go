@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -53,6 +54,38 @@ func TestClipboardRichWrappersLiveWhenLibraryPresent(t *testing.T) {
 	raw, err := ForegroundDetailJSON()
 	if err != nil {
 		t.Fatalf("ForegroundDetailJSON: %v", err)
+	}
+	if len(raw) == 0 {
+		t.Fatal("expected non-empty foreground JSON")
+	}
+	var detail map[string]any
+	if err := json.Unmarshal(raw, &detail); err != nil {
+		t.Fatalf("decode foreground: %v", err)
+	}
+	for _, key := range []string{"hwnd", "title", "pid", "exe"} {
+		if _, ok := detail[key]; !ok {
+			t.Fatalf("missing %s in %#v", key, detail)
+		}
+	}
+}
+
+func TestForegroundDetailLiveOnLinuxWhenLibraryPresent(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux/X11 foreground_detail")
+	}
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+	if FindLibraryPath() == "" {
+		t.Skip("libremedy_core.so not built")
+	}
+
+	raw, err := ForegroundDetailJSON()
+	if err != nil {
+		// No DISPLAY / pure Wayland without XWayland → OperationFailed is OK.
+		if errors.Is(err, ErrUnsupported) {
+			t.Fatalf("foreground_detail must not report unsupported on Linux: %v", err)
+		}
+		t.Skipf("foreground_detail unavailable on this host: %v", err)
 	}
 	if len(raw) == 0 {
 		t.Fatal("expected non-empty foreground JSON")

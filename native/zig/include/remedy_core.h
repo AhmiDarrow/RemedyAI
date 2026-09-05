@@ -245,7 +245,7 @@ int32_t remedy_core_clipboard_get_files(uint8_t **out_json, size_t *out_len);
 int32_t remedy_core_clipboard_get_image_png(uint8_t **out_png, size_t *out_len);
 
 /* JSON object `{hwnd,title,pid,exe}` for the foreground window (empty
- * fields when none). Windows only; unsupported elsewhere. */
+ * fields when none). Windows + Linux/X11; unsupported elsewhere. */
 int32_t remedy_core_foreground_detail(uint8_t **out_json, size_t *out_len);
 
 /* ---- ABI 2: processes -------------------------------------------------- */

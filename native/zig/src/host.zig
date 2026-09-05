@@ -806,9 +806,10 @@ export fn remedy_core_clipboard_get_image_png(out_png: ?*?[*]u8, out_len: ?*usiz
     return unsupported_status;
 }
 
-/// JSON `{hwnd,title,pid,exe}` for the foreground window. Windows only.
+/// JSON `{hwnd,title,pid,exe}` for the foreground window (Windows + Linux/X11).
 export fn remedy_core_foreground_detail(out_json: ?*?[*]u8, out_len: ?*usize) callconv(.c) i32 {
     if (is_windows) return deliverBytes(windows.foregroundDetailJson(), out_json, out_len);
+    if (is_linux) return deliverBytes(linux.foregroundDetailJson(), out_json, out_len);
     return unsupported_status;
 }
 
