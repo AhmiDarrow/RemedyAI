@@ -183,36 +183,36 @@ def test_format_reminder_voice() -> None:
 # --- API surface ------------------------------------------------------------
 
 
-def test_notifications_endpoints(tmp_path, monkeypatch) -> None:
+def test_notifications_module_covers_list_and_mark_read(tmp_path, monkeypatch) -> None:
+    """HTTP /api/notifications twin is gone; notify module remains the SSOT."""
     from fastapi.testclient import TestClient
 
     from remedy.interfaces.api import create_app
 
     hm = tmp_path / "apihome"
     monkeypatch.setenv("REMEDY_HOME", str(hm))
-    monkeypatch.setattr(
-        "remedy.interfaces.routes.status.load_config",
-        lambda: {"home_dir": str(hm)},
-    )
     N.push_notification("Rent due tomorrow", home=hm, now=time.time())
     N.push_notification("Bins tonight", home=hm, now=time.time() + 400)
 
-    client = TestClient(create_app())
-    r = client.get("/api/notifications")
-    assert r.status_code == 200
-    body = r.json()
-    assert body["count"] == 2 and body["unread"] == 2
-    texts = {n["text"] for n in body["notifications"]}
+    items = N.list_notifications(home=hm)
+    assert len(items) == 2
+    assert N.unread_count(hm) == 2
+    texts = {n.text for n in items}
     assert "Rent due tomorrow" in texts
 
-    nid = body["notifications"][0]["id"]
-    r2 = client.post("/api/notifications/read", json={"ids": [nid]})
-    assert r2.status_code == 200 and r2.json()["marked"] == 1
-    assert client.get("/api/notifications").json()["unread"] == 1
+    nid = items[0].id
+    assert N.mark_read([nid], home=hm) == 1
+    assert N.unread_count(hm) == 1
+    assert N.mark_read([], all_=True, home=hm) >= 1
+    assert N.unread_count(hm) == 0
+    assert N.list_notifications(unread_only=True, home=hm) == []
 
-    r3 = client.post("/api/notifications/read", json={"all": True})
-    assert r3.json()["unread"] == 0
-    assert client.get("/api/notifications", params={"unread_only": True}).json()["count"] == 0
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    assert "/api/notifications" not in paths
+    assert TestClient(create_app(api_key="")).get("/api/notifications").status_code in (
+        404,
+        405,
+    )
 
 
 def test_delivery_thread_lifecycle(home) -> None:

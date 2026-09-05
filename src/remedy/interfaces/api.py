@@ -459,8 +459,8 @@ def create_app(
 
     from remedy.interfaces.routes import register_all_routes
 
+    # Empty registrar — auth/CORS/lifespan harness only (no FastAPI route twins).
     register_all_routes(app, runtime=runtime, gateway=gateway, memory=memory)
-    # WebUI SPA is Go-owned (httpapi/webui.go); no TestClient /dashboard twin.
     return app
 
 
