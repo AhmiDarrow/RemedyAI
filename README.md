@@ -64,7 +64,7 @@ Go race detection also runs on Linux CI. CI exercises Python
 3.12/3.13, Windows-sensitive behavior, the React SPA, both Tauri targets,
 RemedyConnect Android, the Go/Zig native runtime, and Python packaging.
 
-Version / help / docs gates: `scripts/sync_version.py` · `scripts/sync_help_manual.py` · `scripts/check_docs.py`.  
+Version / help / docs / sanitize gates: `scripts/sync_version.py` · `scripts/sync_help_manual.py` · `scripts/check_docs.py` · `scripts/check_sanitize.py`.  
 Contributing: [CONTRIBUTING.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/CONTRIBUTING.md) · signing: [WINDOWS_SIGNING.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/WINDOWS_SIGNING.md)
 
 ---

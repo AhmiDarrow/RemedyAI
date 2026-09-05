@@ -130,8 +130,9 @@ RUST_ENV = {
 
 CHECKS = Lane(
     "checks",
-    "Lint, types, docs, import smoke",
+    "Sanitize, lint, types, docs, import smoke",
     (
+        Step("sanitize", "uv run python scripts/check_sanitize.py"),
         Step("ruff", "uv run ruff check . --no-fix"),
         Step("mypy", "uv run mypy"),
         Step("mypy exclude may only shrink", "uv run python scripts/check_mypy_exclude.py"),
