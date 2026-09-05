@@ -352,6 +352,73 @@ func RegisterZigHostTools(registry *Registry) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:           "computer.focus",
+		Version:      1,
+		Description:  "Focus/restore a top-level window by hwnd via Zig (fail closed)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskMutation,
+		Capabilities: []string{"computer.input"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["hwnd"],
+			"properties":{
+				"hwnd":{"type":"integer","minimum":1}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok","hwnd","focused"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"hwnd":{"type":"integer","minimum":1},
+				"focused":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeComputerFocus)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:           "computer.window",
+		Version:      1,
+		Description:  "Minimize/maximize/restore/close/move/resize a window by hwnd via Zig (fail closed)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskMutation,
+		Capabilities: []string{"computer.input"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["hwnd","action"],
+			"properties":{
+				"hwnd":{"type":"integer","minimum":1},
+				"action":{"type":"string","enum":["minimize","maximize","restore","close","move","resize"]},
+				"x":{"type":"integer"},
+				"y":{"type":"integer"},
+				"width":{"type":"integer","minimum":0},
+				"height":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok","hwnd","action"],
+			"properties":{
+				"ok":{"type":"boolean","const":true},
+				"hwnd":{"type":"integer","minimum":1},
+				"action":{"type":"string","enum":["minimize","maximize","restore","close","move","resize"]},
+				"x":{"type":"integer"},
+				"y":{"type":"integer"},
+				"width":{"type":"integer","minimum":0},
+				"height":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeComputerWindow)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:           "clipboard.read",
 		Version:      1,
 		Description:  "Read OS text clipboard via Zig (CF_UNICODETEXT / X11 CLIPBOARD)",
@@ -794,6 +861,118 @@ func executeComputerDrag(_ context.Context, request Request) (Result, error) {
 		"x1": *body.X1, "y1": *body.Y1, "x2": *body.X2, "y2": *body.Y2,
 		"steps": steps,
 	})
+	return Result{Output: out}, err
+}
+
+func executeComputerFocus(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		HWND *uint64 `json:"hwnd"`
+	}
+	if err := json.Unmarshal(request.Input, &body); err != nil {
+		return Result{}, ErrInvalidInput
+	}
+	if body.HWND == nil || *body.HWND == 0 {
+		return Result{}, ErrInvalidInput
+	}
+	hwnd := *body.HWND
+	focused, err := core.FocusWindow(hwnd)
+	if err != nil {
+		return Result{}, err
+	}
+	out, err := json.Marshal(map[string]any{
+		"ok": focused, "hwnd": hwnd, "focused": focused,
+	})
+	return Result{Output: out}, err
+}
+
+func executeComputerWindow(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		HWND   *uint64 `json:"hwnd"`
+		Action string  `json:"action"`
+		X      *int    `json:"x"`
+		Y      *int    `json:"y"`
+		Width  *int    `json:"width"`
+		Height *int    `json:"height"`
+	}
+	if err := json.Unmarshal(request.Input, &body); err != nil {
+		return Result{}, ErrInvalidInput
+	}
+	if body.HWND == nil || *body.HWND == 0 {
+		return Result{}, ErrInvalidInput
+	}
+	action := strings.ToLower(strings.TrimSpace(body.Action))
+	hwnd := *body.HWND
+	var verb uint32
+	switch action {
+	case "minimize":
+		verb = core.WindowMinimize
+	case "maximize":
+		verb = core.WindowMaximize
+	case "restore":
+		verb = core.WindowRestore
+	case "close":
+		verb = core.WindowClose
+	case "move", "resize":
+		verb = core.WindowMoveResize
+	default:
+		return Result{}, ErrInvalidInput
+	}
+
+	var x, y, width, height int32
+	if action == "move" || action == "resize" {
+		if action == "move" && (body.X == nil || body.Y == nil) {
+			return Result{}, fmt.Errorf("%w: move requires x and y", ErrInvalidInput)
+		}
+		if action == "resize" && (body.Width == nil || body.Height == nil) {
+			return Result{}, fmt.Errorf("%w: resize requires width and height", ErrInvalidInput)
+		}
+		needRect := body.X == nil || body.Y == nil || body.Width == nil || body.Height == nil
+		if needRect {
+			left, top, right, bottom, err := core.WindowRect(hwnd)
+			if err != nil {
+				return Result{}, err
+			}
+			x, y = left, top
+			width = right - left
+			if width < 0 {
+				width = 0
+			}
+			height = bottom - top
+			if height < 0 {
+				height = 0
+			}
+		}
+		if body.X != nil {
+			x = int32(*body.X)
+		}
+		if body.Y != nil {
+			y = int32(*body.Y)
+		}
+		if body.Width != nil {
+			if *body.Width < 0 {
+				return Result{}, ErrInvalidInput
+			}
+			width = int32(*body.Width)
+		}
+		if body.Height != nil {
+			if *body.Height < 0 {
+				return Result{}, ErrInvalidInput
+			}
+			height = int32(*body.Height)
+		}
+	}
+
+	if err := core.ManageWindow(hwnd, verb, x, y, width, height); err != nil {
+		return Result{}, err
+	}
+	payload := map[string]any{"ok": true, "hwnd": hwnd, "action": action}
+	if action == "move" || action == "resize" {
+		payload["x"] = int(x)
+		payload["y"] = int(y)
+		payload["width"] = int(width)
+		payload["height"] = int(height)
+	}
+	out, err := json.Marshal(payload)
 	return Result{Output: out}, err
 }
 
