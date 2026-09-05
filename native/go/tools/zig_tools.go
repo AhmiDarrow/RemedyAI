@@ -436,6 +436,37 @@ func RegisterZigHostTools(registry *Registry) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:           "computer.key_hold",
+		Version:      1,
+		Description:  "Press and hold a single key via Zig for hold_ms (enter, a, f4, …; no combos; fail closed)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskMutation,
+		Capabilities: []string{"computer.input"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["key","hold_ms"],
+			"properties":{
+				"key":{"type":"string","minLength":1,"maxLength":64},
+				"hold_ms":{"type":"integer","minimum":0,"maximum":60000}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok","key","vk","hold_ms"],
+			"properties":{
+				"ok":{"type":"boolean","const":true},
+				"key":{"type":"string","minLength":1},
+				"vk":{"type":"integer","minimum":0,"maximum":65535},
+				"hold_ms":{"type":"integer","minimum":0,"maximum":60000}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeComputerKeyHold)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:           "computer.move",
 		Version:      1,
 		Description:  "Move the pointer to virtual-screen physical pixels via Zig (hover without click)",
@@ -1209,6 +1240,45 @@ func executeComputerKey(_ context.Context, request Request) (Result, error) {
 	}
 	out, err := json.Marshal(map[string]any{
 		"ok": true, "key": key, "vks": vkOut,
+	})
+	return Result{Output: out}, err
+}
+
+func executeComputerKeyHold(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		Key    string `json:"key"`
+		HoldMS *int   `json:"hold_ms"`
+	}
+	if err := json.Unmarshal(request.Input, &body); err != nil {
+		return Result{}, ErrInvalidInput
+	}
+	key := strings.TrimSpace(body.Key)
+	if key == "" || len(key) > 64 {
+		return Result{}, ErrInvalidInput
+	}
+	if body.HoldMS == nil || *body.HoldMS < 0 || *body.HoldMS > 60000 {
+		return Result{}, ErrInvalidInput
+	}
+	vks, err := resolveKeyCombo(key)
+	if err != nil {
+		if errors.Is(err, core.ErrUnavailable) || errors.Is(err, core.ErrUnsupported) {
+			return Result{}, err
+		}
+		var hostErr *core.HostError
+		if errors.As(err, &hostErr) {
+			return Result{}, err
+		}
+		return Result{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+	if len(vks) != 1 {
+		return Result{}, fmt.Errorf("%w: key_hold requires a single key, not a combo", ErrInvalidInput)
+	}
+	holdMS := uint32(*body.HoldMS)
+	if err := core.KeyHold(vks[0], holdMS); err != nil {
+		return Result{}, err
+	}
+	out, err := json.Marshal(map[string]any{
+		"ok": true, "key": key, "vk": int(vks[0]), "hold_ms": *body.HoldMS,
 	})
 	return Result{Output: out}, err
 }
