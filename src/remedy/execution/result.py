@@ -269,8 +269,8 @@ class SubprocessSandbox(Sandbox):
             import subprocess
 
             from remedy.core.computer.host_binding import HostError
-            from remedy.core.turn_context import is_turn_aborted
-            from remedy.execution.process import run_hidden_async
+            from remedy.core.turn_context import current_abort_event, is_turn_aborted
+            from remedy.execution.process import run_hidden_async, spawn_piped, wait_piped
             from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
             if is_turn_aborted():
@@ -280,17 +280,97 @@ class SubprocessSandbox(Sandbox):
                     duration_ms=(time.monotonic() - start) * 1000,
                 )
 
+            cwd_s = str(workdir) if workdir else None
+            abort_ev = current_abort_event()
+            # exec_capture cannot be killed mid-wait; during a turn use piped
+            # spawn so abort_session can kill the child promptly (shell_chain
+            # already polls abort_flag for multi-hop commands).
+            if abort_ev is not None:
+                child = await asyncio.to_thread(
+                    spawn_piped,
+                    command,
+                    cwd=cwd_s,
+                    env=safe_env,
+                    text=True,
+                )
+                try:
+                    with contextlib.suppress(Exception):
+                        if child.stdin is not None:
+                            child.stdin.close()
+                    deadline = time.monotonic() + float(timeout_seconds)
+                    while True:
+                        if abort_ev.is_set():
+                            with contextlib.suppress(Exception):
+                                child.kill()
+                            return ExecutionResult(
+                                exit_code=-1,
+                                stderr="Aborted (session stop) — shell killed",
+                                duration_ms=(time.monotonic() - start) * 1000,
+                            )
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            with contextlib.suppress(Exception):
+                                child.kill()
+                            return ExecutionResult(
+                                exit_code=-1,
+                                stderr=(
+                                    f"Command timed out after {timeout_seconds}s"
+                                ),
+                                duration_ms=(time.monotonic() - start) * 1000,
+                            )
+                        code = await asyncio.to_thread(
+                            wait_piped, child, min(0.05, remaining)
+                        )
+                        if code is None:
+                            continue
+
+                        def _read(stream: Any) -> str:
+                            if stream is None:
+                                return ""
+                            try:
+                                data = stream.read()
+                            except Exception:
+                                return ""
+                            return data if isinstance(data, str) else (
+                                data.decode("utf-8", "replace") if data else ""
+                            )
+
+                        stdout = await asyncio.to_thread(_read, child.stdout)
+                        stderr = await asyncio.to_thread(_read, child.stderr)
+                        elapsed = (time.monotonic() - start) * 1000
+                        if is_turn_aborted():
+                            return ExecutionResult(
+                                exit_code=-1,
+                                stderr="Aborted (session stop) — shell killed",
+                                duration_ms=elapsed,
+                            )
+                        return ExecutionResult(
+                            exit_code=int(code),
+                            stdout=_clip_output(stdout, "stdout"),
+                            stderr=_clip_output(stderr, "stderr"),
+                            duration_ms=elapsed,
+                        )
+                finally:
+                    with contextlib.suppress(Exception):
+                        child.close()
+
             try:
                 completed = await run_hidden_async(
                     command,
                     capture_output=True,
                     text=True,
                     timeout=timeout_seconds,
-                    cwd=str(workdir) if workdir else None,
+                    cwd=cwd_s,
                     env=safe_env,
                 )
             except subprocess.TimeoutExpired:
                 elapsed = (time.monotonic() - start) * 1000
+                if is_turn_aborted():
+                    return ExecutionResult(
+                        exit_code=-1,
+                        stderr="Aborted (session stop) — shell killed",
+                        duration_ms=elapsed,
+                    )
                 return ExecutionResult(
                     exit_code=-1,
                     stderr=f"Command timed out after {timeout_seconds}s",

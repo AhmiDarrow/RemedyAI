@@ -120,13 +120,13 @@ def _probe_go() -> _ComponentProbe:
         # Probe must not go through run_hidden: that prefers Zig authorized
         # spawn and fails closed without remedy_core. Go readiness is
         # independent of the Zig host DLL.
-        from remedy.execution.process import run_hidden
-
-        completed = run_hidden([str(executable), "--probe"],
+        completed = subprocess.run(
+            [str(executable), "--probe"],
             capture_output=True,
             text=True,
             timeout=2.0,
-            )
+            check=False,
+        )
     except subprocess.TimeoutExpired:
         return _ComponentProbe(False, "timeout")
     except (OSError, ValueError):
