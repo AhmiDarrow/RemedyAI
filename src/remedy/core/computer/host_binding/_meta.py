@@ -1,15 +1,19 @@
 """meta C ABI surface for ``remedy_core``.
 
-Internal. Public imports go through ``host_binding``.
+Internal. Public imports go through ``host_binding``. Also owns dialect-backed
+``resolve_which`` / ``default_script_lang`` (Zig dialect + host_op_prepare).
 """
 from __future__ import annotations
 
 import ctypes
 import json
+import os
+import sys
 from collections.abc import Mapping
 from ctypes import (
     c_size_t,
 )
+from pathlib import Path
 from typing import Any
 
 from ._core import (
@@ -255,3 +259,104 @@ def stretch_format_whoami(
         ),
     )
     return _take(library, ptr, length).decode("utf-8", errors="replace")
+
+
+def _ok_python(path: str | None) -> bool:
+    if not path:
+        return False
+    from remedy.core.build_python import is_usable_host_python
+
+    return is_usable_host_python(path)
+
+
+def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
+    """Resolve an executable via project bins, Zig dialect, then host_op_prepare.
+
+    No ``shutil.which`` soft twin — native runtime errors fail closed.
+    """
+    from ._ir import host_op_prepare
+
+    n = (name or "").strip()
+    if not n:
+        return None
+    key = n.lower().rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
+    if key.endswith(".exe"):
+        key = key[:-4]
+
+    if cwd is not None:
+        try:
+            from remedy.core.project_fingerprint import local_bin_dirs
+
+            suffix = ".exe" if os.name == "nt" else ""
+            for bin_dir in local_bin_dirs(cwd):
+                cand = bin_dir / (
+                    n + suffix if suffix and not n.lower().endswith(suffix) else n
+                )
+                if cand.is_file():
+                    return str(cand)
+                if suffix:
+                    alt = bin_dir / f"{key}{suffix}"
+                    if alt.is_file():
+                        return str(alt)
+        except OSError:
+            pass
+
+    d = dialect_load("")
+    mapped = {
+        "python": str(d.get("python_cmd") or ""),
+        "python3": str(d.get("python_cmd") or ""),
+        "py": str(d.get("python_cmd") or ""),
+        "git": str(d.get("git_cmd") or ""),
+        "rg": str(d.get("rg_cmd") or ""),
+        "pwsh": str(d.get("pwsh_cmd") or ""),
+    }
+    hit = (mapped.get(key) or "").strip()
+    if hit and Path(hit).is_file():
+        if key in {"python", "python3", "py"}:
+            if _ok_python(hit):
+                return hit
+        else:
+            return hit
+
+    prep = host_op_prepare(
+        op={"kind": "run", "argv": [n]},
+        project_path=str(cwd) if cwd is not None else None,
+    )
+    argv = prep.get("argv") or []
+    if argv:
+        cand = str(argv[0] or "")
+        path = Path(cand)
+        if cand and path.is_file() and path.is_absolute():
+            if key in {"python", "python3", "py"}:
+                if _ok_python(cand):
+                    return cand
+            else:
+                return cand
+
+    if key in {"python", "python3"}:
+        try:
+            from remedy.core.build_python import host_python_executable
+
+            found = host_python_executable()
+        except OSError:
+            found = ""
+        if found and _ok_python(found):
+            return found
+        from remedy.core.runtime_identity import is_frozen_install
+
+        if is_frozen_install():
+            return None
+        exe = sys.executable or ""
+        return exe if _ok_python(exe) else None
+    return None
+
+
+def default_script_lang(home: str | Path | None = None) -> str:
+    """pwsh when Zig dialect finds it; otherwise python (POSIX) or cmd."""
+    if os.name != "nt":
+        return "python"
+    d = dialect_load(str(home) if home else "")
+    pwsh = str(d.get("pwsh_cmd") or "").strip()
+    if pwsh and Path(pwsh).is_file():
+        return "pwsh"
+    return "cmd"

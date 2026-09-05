@@ -17,6 +17,8 @@ from types import ModuleType
 from ._conpty import (
     CONPTY_PIPE_STDIN,
     CONPTY_PIPE_STDOUT,
+    _ConPTYProcess,
+    _HandleStream,
     conpty_available,
     conpty_close,
     conpty_close_pipe,
@@ -25,6 +27,7 @@ from ._conpty import (
     conpty_read,
     conpty_spawn,
     conpty_write,
+    spawn_conpty_process,
 )
 from ._core import (
     MOUSE_LEFT,
@@ -87,11 +90,13 @@ from ._ir import (
     translate_posix_to_host,
 )
 from ._meta import (
+    default_script_lang,
     diagnose_host_failure,
     dialect_format_line,
     dialect_load,
     dialect_probe,
     dialect_record_success,
+    resolve_which,
     stretch_format_line,
     stretch_format_whoami,
     stretch_home,
@@ -230,6 +235,9 @@ __all__ = [
     "conpty_kill",
     "conpty_close_pipe",
     "conpty_close",
+    "_HandleStream",
+    "_ConPTYProcess",
+    "spawn_conpty_process",
     "security_set_signing_key",
     "security_clear_signing_key",
     "load_or_create_host_signing_key",
@@ -261,6 +269,8 @@ __all__ = [
     "dialect_load",
     "dialect_record_success",
     "dialect_format_line",
+    "resolve_which",
+    "default_script_lang",
     "stretch_home",
     "stretch_load",
     "stretch_needs",

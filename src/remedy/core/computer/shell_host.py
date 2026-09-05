@@ -3,6 +3,7 @@
 Zig ``remedy_core`` owns Host Command IR prepare/translate/scriptfile,
 HostSession open/run/cwd/close, ConPTY, dialect, and policy. This module is
 serialization + asyncio orchestration only — no Python twins of Zig logic.
+``resolve_which`` / ``default_script_lang`` live in ``host_binding``.
 """
 
 from __future__ import annotations
@@ -10,15 +11,14 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
-import sys
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
 from remedy.core.computer.host_binding import (
-    looks_like_powershell,
-    translate_posix_to_host,
+    default_script_lang,
+    resolve_which,
 )
 
 HostKind = Literal["cmd", "pwsh", "posix"]
@@ -74,11 +74,7 @@ class HostOp:
         if kind not in ("run", "mkdir", "which", "env", "script", "raw", "chain"):
             kind = "raw"
         children = data.get("ops") or []
-        ops = [
-            cls.from_dict(c)
-            for c in children
-            if isinstance(c, dict)
-        ]
+        ops = [cls.from_dict(c) for c in children if isinstance(c, dict)]
         env_raw = data.get("env") or {}
         env = (
             {str(k): str(v) for k, v in env_raw.items()}
@@ -157,6 +153,23 @@ def coerce_argv(argv: Any) -> list[str]:
         return text.split()
 
 
+def _prepared_from_native(data: dict[str, Any]) -> PreparedCommand:
+    """Build a :class:`PreparedCommand` from ``remedy_core_host_op_prepare`` JSON."""
+    ir_raw = data.get("ir")
+    script = data.get("script_path") or None
+    notes_raw = data.get("notes") or []
+    return PreparedCommand(
+        argv=[str(a) for a in (data.get("argv") or []) if str(a)],
+        display=str(data.get("display") or ""),
+        kind=str(data.get("kind") or "raw"),
+        ir=HostOp.from_dict(ir_raw if isinstance(ir_raw, dict) else {}),
+        script_path=Path(str(script)) if script else None,
+        notes=[str(n) for n in notes_raw] if isinstance(notes_raw, list) else [],
+        translated=str(data.get("translated") or ""),
+        host=str(data.get("host") or ("cmd" if os.name == "nt" else "posix")),
+    )
+
+
 def prepare_host_command(
     command: str,
     *,
@@ -192,23 +205,6 @@ def prepare_host_command(
         raise
 
 
-def _prepared_from_native(data: dict[str, Any]) -> PreparedCommand:
-    """Build a :class:`PreparedCommand` from ``remedy_core_host_op_prepare`` JSON."""
-    ir_raw = data.get("ir")
-    script = data.get("script_path") or None
-    notes_raw = data.get("notes") or []
-    return PreparedCommand(
-        argv=[str(a) for a in (data.get("argv") or []) if str(a)],
-        display=str(data.get("display") or ""),
-        kind=str(data.get("kind") or "raw"),
-        ir=HostOp.from_dict(ir_raw if isinstance(ir_raw, dict) else {}),
-        script_path=Path(str(script)) if script else None,
-        notes=[str(n) for n in notes_raw] if isinstance(notes_raw, list) else [],
-        translated=str(data.get("translated") or ""),
-        host=str(data.get("host") or ("cmd" if os.name == "nt" else "posix")),
-    )
-
-
 def prepare_host_op(
     op: HostOp,
     *,
@@ -241,110 +237,6 @@ def prepare_host_op(
                 "untranslatable substitution $(…) / backticks / ${} — use host_script"
             ) from exc
         raise
-
-
-def _ok_python(path: str | None) -> bool:
-    if not path:
-        return False
-    from remedy.core.build_python import is_usable_host_python
-
-    return is_usable_host_python(path)
-
-
-def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
-    """Resolve an executable the way the host would.
-
-    Project ``.venv`` / ``node_modules/.bin`` first, then Zig dialect +
-    ``resolveWhich`` via ``host_op_prepare``. No ``shutil.which`` soft twin —
-    native runtime errors fail closed.
-    """
-    n = (name or "").strip()
-    if not n:
-        return None
-    key = n.lower().rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
-    if key.endswith(".exe"):
-        key = key[:-4]
-
-    if cwd is not None:
-        try:
-            from remedy.core.project_fingerprint import local_bin_dirs
-
-            suffix = ".exe" if os.name == "nt" else ""
-            for bin_dir in local_bin_dirs(cwd):
-                cand = bin_dir / (
-                    n + suffix if suffix and not n.lower().endswith(suffix) else n
-                )
-                if cand.is_file():
-                    return str(cand)
-                if suffix:
-                    alt = bin_dir / f"{key}{suffix}"
-                    if alt.is_file():
-                        return str(alt)
-        except OSError:
-            pass
-
-    from remedy.core.computer import host_binding
-
-    d = host_binding.dialect_load("")
-    mapped = {
-        "python": str(d.get("python_cmd") or ""),
-        "python3": str(d.get("python_cmd") or ""),
-        "py": str(d.get("python_cmd") or ""),
-        "git": str(d.get("git_cmd") or ""),
-        "rg": str(d.get("rg_cmd") or ""),
-        "pwsh": str(d.get("pwsh_cmd") or ""),
-    }
-    hit = (mapped.get(key) or "").strip()
-    if hit and Path(hit).is_file():
-        if key in {"python", "python3", "py"}:
-            if _ok_python(hit):
-                return hit
-        else:
-            return hit
-
-    prep = prepare_host_op(run_op([n]), project_path=cwd)
-    if prep.argv:
-        cand = str(prep.argv[0] or "")
-        path = Path(cand)
-        if cand and path.is_file() and path.is_absolute():
-            if key in {"python", "python3", "py"}:
-                if _ok_python(cand):
-                    return cand
-            else:
-                return cand
-
-    if key in {"python", "python3"}:
-        try:
-            from remedy.core.build_python import host_python_executable
-
-            found = host_python_executable()
-        except OSError:
-            found = ""
-        if found and _ok_python(found):
-            return found
-        from remedy.core.runtime_identity import is_frozen_install
-
-        if is_frozen_install():
-            return None
-        exe = sys.executable or ""
-        return exe if _ok_python(exe) else None
-    return None
-
-
-def default_script_lang(home: str | Path | None = None) -> str:
-    """pwsh when Zig dialect finds it; otherwise python (POSIX) or cmd.
-
-    No ``shutil.which`` soft twin — dialect errors fail closed.
-    """
-    if os.name != "nt":
-        return "python"
-    from remedy.core.computer import host_binding
-
-    d = host_binding.dialect_load(str(home) if home else "")
-    pwsh = str(d.get("pwsh_cmd") or "").strip()
-    if pwsh and Path(pwsh).is_file():
-        return "pwsh"
-    return "cmd"
 
 
 _MAX_SCRIPT_CHARS = 1_000_000
@@ -505,10 +397,6 @@ class HostSession:
             from remedy.core.computer.host_binding import STATUS_UNSUPPORTED, HostError
 
             raise HostError("host_session_open", STATUS_UNSUPPORTED)
-        await self._start_zig()
-
-    async def _start_zig(self) -> None:
-        """Windows: Zig HostSession owns spawn + sentinel I/O (authorized open)."""
         from remedy.core.computer import host_binding
 
         if self.env is not None:
@@ -533,24 +421,22 @@ class HostSession:
 
     async def run(self, command: str, *, timeout: float = 60.0) -> SessionResult:
         if not command or not str(command).strip():
-            return SessionResult(exit_code=-1, stdout="", stderr="empty command", host=self.host)
+            return SessionResult(
+                exit_code=-1, stdout="", stderr="empty command", host=self.host
+            )
         await self.start()
         assert self._lock is not None
         if not self._zig_handle:
             from remedy.core.computer.host_binding import STATUS_UNSUPPORTED, HostError
 
             raise HostError("host_session_run", STATUS_UNSUPPORTED)
-        return await self._run_zig(command.strip(), timeout=timeout)
-
-    async def _run_zig(self, command: str, *, timeout: float) -> SessionResult:
         from remedy.core.computer import host_binding
 
-        assert self._lock is not None
         async with self._lock:
             data = await asyncio.to_thread(
                 host_binding.host_session_run,
                 self._zig_handle,
-                command,
+                command.strip(),
                 timeout_ms=int(max(1.0, float(timeout)) * 1000),
             )
         timed_out = bool(data.get("timed_out"))
@@ -703,7 +589,6 @@ __all__ = [
     "default_script_lang",
     "get_shared_session",
     "launch_script",
-    "looks_like_powershell",
     "mkdir_op",
     "prepare_host_command",
     "prepare_host_op",
@@ -711,6 +596,5 @@ __all__ = [
     "resolve_which",
     "run_op",
     "script_op",
-    "translate_posix_to_host",
     "which_op",
 ]
