@@ -10,9 +10,8 @@ import pytest
 # Explicit auth tests set REMEDY_API_AUTH=1 themselves.
 os.environ.setdefault("REMEDY_API_AUTH", "0")
 
-# Production: Go remedy-runtime owns messenger inbound. Python inbound code was
-# removed; REMEDY_TESTING marks the suite. REMEDY_PYTHON_MESSENGER_POLL alone is
-# refused outside pytest (boundary tests cover the refuse path).
+# Production: Go remedy-runtime owns messenger inbound + outbound. Python
+# network twins were removed; REMEDY_TESTING marks the suite.
 os.environ.setdefault("REMEDY_TESTING", "1")
 
 # The suite must never write to — or drive — the owner's real installation.

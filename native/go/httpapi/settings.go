@@ -818,44 +818,49 @@ func normalizeStringList(raw any) []string {
 }
 
 func publicMessengers(cfg ConfigMap, keysSet map[string]bool) []map[string]any {
-	out := make([]map[string]any, 0, len(knownMessengers))
+	out := make([]map[string]any, 0, len(messengerCatalog))
 	enabled := map[string]struct{}{}
 	for _, ch := range normalizeEnabledChannels(cfg["enabled_channels"]) {
 		enabled[ch] = struct{}{}
 	}
-	names := []string{
-		"telegram", "discord", "slack", "mattermost",
-		"whatsapp", "teams", "matrix", "google_chat", "signal",
-	}
-	for _, id := range names {
+	for _, entry := range messengerCatalog {
+		id := entry.ID
 		_, on := enabled[id]
+		section, _ := asStringMap(cfg[id])
 		tokenSet := false
-		for sk := range messengerSecretFields {
-			if keysSet["ch:"+id+":"+sk] {
+		for _, f := range entry.Fields {
+			if f.Kind != "secret" {
+				continue
+			}
+			if keysSet["ch:"+id+":"+f.Key] {
 				tokenSet = true
 				break
 			}
-		}
-		section, _ := asStringMap(cfg[id])
-		if section != nil {
-			for sk := range messengerSecretFields {
-				if strings.TrimSpace(fmt.Sprint(section[sk])) != "" {
+			if section != nil {
+				if strings.TrimSpace(fmt.Sprint(section[f.Key])) != "" && fmt.Sprint(section[f.Key]) != "<nil>" {
 					tokenSet = true
+					break
 				}
 			}
 		}
-		status := "ready"
-		if id == "whatsapp" || id == "teams" || id == "google_chat" || id == "signal" {
-			status = "planned"
+		badge := entry.Badge
+		if badge == "" {
+			badge = entry.Name
 		}
 		out = append(out, map[string]any{
-			"id":        id,
-			"name":      strings.ToUpper(id[:1]) + id[1:],
-			"status":    status,
-			"enabled":   on,
-			"token_set": tokenSet,
-			"inbound":   true,
-			"outbound":  true,
+			"id":              id,
+			"name":            entry.Name,
+			"description":     entry.Description,
+			"status":          entry.Status,
+			"enabled":         on,
+			"token_set":       tokenSet,
+			"inbound":         entry.Inbound,
+			"outbound":        entry.Outbound,
+			"docs_url":        entry.DocsURL,
+			"badge":           badge,
+			"max_reply_chars": entry.MaxReplyChars,
+			"fields":          publicFieldsFromSection(entry, section),
+			"field_schema":    fieldSchemaMaps(entry.Fields),
 		})
 	}
 	return out

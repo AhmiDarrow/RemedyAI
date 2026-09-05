@@ -381,6 +381,62 @@ func (s *sessionStore) List(limit, offset int) ([]ChatSession, error) {
 	return out, rows.Err()
 }
 
+// SetMessengerOrigin patches origin_channel / external_chat_id / external_user.
+// Empty channel/chatID leave that column unchanged; nil externalUser leaves user unchanged.
+func (s *sessionStore) SetMessengerOrigin(id, channel, externalChatID string, externalUser *string) (ChatSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	row := s.db.QueryRow(
+		`SELECT id, title, model, agent, project_path, llm_provider, message_count,
+			origin_channel, external_chat_id, external_user, created_at, updated_at
+		 FROM chat_sessions WHERE id = ?`, id,
+	)
+	sess, err := scanSession(row)
+	if err != nil {
+		return ChatSession{}, err
+	}
+	sets := make([]string, 0, 4)
+	args := make([]any, 0, 4)
+	if ch := strings.TrimSpace(channel); ch != "" {
+		sets = append(sets, "origin_channel = ?")
+		args = append(args, ch)
+		sess.OriginChannel = &ch
+	}
+	if ext := strings.TrimSpace(externalChatID); ext != "" {
+		sets = append(sets, "external_chat_id = ?")
+		args = append(args, ext)
+		sess.ExternalChatID = &ext
+	}
+	if externalUser != nil {
+		u := strings.TrimSpace(*externalUser)
+		if len(u) > 120 {
+			u = u[:120]
+		}
+		if u != "" {
+			sets = append(sets, "external_user = ?")
+			args = append(args, u)
+			sess.ExternalUser = &u
+		}
+	}
+	if len(sets) == 0 {
+		return sess, nil
+	}
+	now := nowISO()
+	sets = append(sets, "updated_at = ?")
+	args = append(args, now)
+	args = append(args, id)
+	_, err = s.db.Exec(
+		`UPDATE chat_sessions SET `+strings.Join(sets, ", ")+` WHERE id = ?`,
+		args...,
+	)
+	if err != nil {
+		return ChatSession{}, err
+	}
+	sess.UpdatedAt = &now
+	return sess, nil
+}
+
 func (s *sessionStore) Update(id string, req updateSessionRequest) (ChatSession, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

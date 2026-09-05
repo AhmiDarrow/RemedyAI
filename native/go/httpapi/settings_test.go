@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -300,5 +301,74 @@ func TestConfigStoreRoundTrip(t *testing.T) {
 	vision, ok := asStringMap(got["vision"])
 	if !ok || coerceBool(vision["enabled"], false) != true {
 		t.Fatalf("vision=%#v", got["vision"])
+	}
+}
+
+func TestPublicMessengersIncludesFieldSchema(t *testing.T) {
+	cfg := ConfigMap{
+		"enabled_channels": []string{"cli", "telegram"},
+		"telegram": map[string]any{
+			"allow_chat_ids": []any{"1", "2"},
+			"allow_all":      false,
+		},
+	}
+	keys := map[string]bool{"ch:telegram:bot_token": true}
+	got := publicMessengers(cfg, keys)
+	if len(got) < 9 {
+		t.Fatalf("expected full catalog, got %d", len(got))
+	}
+	var tg map[string]any
+	for _, row := range got {
+		if row["id"] == "telegram" {
+			tg = row
+			break
+		}
+	}
+	if tg == nil {
+		t.Fatal("telegram missing")
+	}
+	if tg["enabled"] != true {
+		t.Fatalf("enabled=%v", tg["enabled"])
+	}
+	if tg["token_set"] != true {
+		t.Fatalf("token_set=%v", tg["token_set"])
+	}
+	if tg["status"] != "ready" {
+		t.Fatalf("status=%v", tg["status"])
+	}
+	schema, ok := tg["field_schema"].([]map[string]any)
+	if !ok || len(schema) < 3 {
+		t.Fatalf("field_schema=%T %#v", tg["field_schema"], tg["field_schema"])
+	}
+	keysSeen := map[string]bool{}
+	for _, f := range schema {
+		keysSeen[fmt.Sprint(f["key"])] = true
+	}
+	for _, need := range []string{"bot_token", "allow_chat_ids", "allow_all"} {
+		if !keysSeen[need] {
+			t.Fatalf("missing field %s in %#v", need, schema)
+		}
+	}
+	fields, _ := tg["fields"].(map[string]any)
+	if fields["bot_token"] != nil {
+		t.Fatalf("secret leaked in fields: %#v", fields)
+	}
+	list, _ := fields["allow_chat_ids"].([]string)
+	if len(list) != 2 || list[0] != "1" {
+		t.Fatalf("allow_chat_ids=%#v", fields["allow_chat_ids"])
+	}
+	var signal map[string]any
+	for _, row := range got {
+		if row["id"] == "signal" {
+			signal = row
+			break
+		}
+	}
+	if signal == nil || signal["status"] != "partial" {
+		t.Fatalf("signal status=%v", signal)
+	}
+	sigSchema, _ := signal["field_schema"].([]map[string]any)
+	if len(sigSchema) == 0 {
+		t.Fatal("signal field_schema empty — SPA would show No fields yet")
 	}
 }

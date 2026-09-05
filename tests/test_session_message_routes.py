@@ -636,17 +636,18 @@ def test_a_session_that_vanishes_before_the_error_handler_is_reported_as_a_404()
     assert r.status_code == 404
 
 
-# --- POST /messages: messenger mirroring --------------------------------------
+# --- POST /messages: Python TestClient does not mirror (Go owns mirrorDesktopReply)
 
 
-def test_a_desktop_reply_is_mirrored_to_the_originating_chat():
+def test_python_testclient_does_not_mirror_to_messenger():
     gw = Gateway()
     mem = Memory([session(origin_channel="telegram", external_chat_id="4242")])
-    make_client(runtime=Runtime(["pong"]), gateway=gw, memory=mem).post(
+    r = make_client(runtime=Runtime(["pong"]), gateway=gw, memory=mem).post(
         "/api/sessions/s1/messages", json={"message": "ping"}
     )
-    assert gw.sent and gw.sent[0][2] == "4242"
-    assert "pong" in gw.sent[0][1]
+    assert r.status_code == 200
+    assert r.json()["response"] == "pong"
+    assert gw.sent == []
 
 
 def test_a_plain_desktop_session_is_not_mirrored_anywhere():
@@ -657,22 +658,9 @@ def test_a_plain_desktop_session_is_not_mirrored_anywhere():
     assert gw.sent == []
 
 
-def test_a_messenger_session_with_no_chat_id_is_not_mirrored():
-    gw = Gateway()
-    mem = Memory([session(origin_channel="telegram", external_chat_id=None)])
-    make_client(runtime=Runtime(["pong"]), gateway=gw, memory=mem).post(
-        "/api/sessions/s1/messages", json={"message": "ping"}
-    )
-    assert gw.sent == []
-
-
-def test_a_mirroring_failure_never_breaks_the_reply():
-    class Angry:
-        async def send_to(self, *a, **k):
-            raise OSError("telegram down")
-
+def test_messenger_origin_reply_still_succeeds_without_python_mirror():
     mem = Memory([session(origin_channel="telegram", external_chat_id="1")])
-    r = make_client(runtime=Runtime(["pong"]), gateway=Angry(), memory=mem).post(
+    r = make_client(runtime=Runtime(["pong"]), gateway=Gateway(), memory=mem).post(
         "/api/sessions/s1/messages", json={"message": "ping"}
     )
     assert r.status_code == 200

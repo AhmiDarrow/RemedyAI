@@ -23,7 +23,7 @@ from remedy.interfaces.messenger_settings import (
     apply_messengers_update,
     normalize_enabled_channels,
 )
-from remedy.models import ChannelKind, EventKind
+from remedy.models import ChannelKind
 
 
 def test_catalog_includes_major_messengers():
@@ -168,81 +168,6 @@ def test_apply_messengers_update_fields(tmp_path):
     assert cfg["mattermost"]["base_url"] == "https://chat.example.com"
 
 
-@pytest.mark.asyncio
-async def test_messenger_session_bridge(tmp_path):
-    from remedy.gateway.session_bridge import resolve_or_create_messenger_session
-    from remedy.memory.store import MemoryStore
-
-    db = tmp_path / "memory.db"
-    store = MemoryStore(db)
-    await store.initialize()
-    try:
-        s1 = await resolve_or_create_messenger_session(
-            store,
-            channel="telegram",
-            external_chat_id="42",
-            username="bob",
-            first_message="hello",
-        )
-        s2 = await resolve_or_create_messenger_session(
-            store,
-            channel="telegram",
-            external_chat_id="42",
-            username="bob",
-        )
-        assert s1.id == s2.id
-        assert s1.origin_channel == "telegram"
-        listed = await store.list_chat_sessions(limit=10)
-        assert any(x.id == s1.id for x in listed)
-    finally:
-        await store.close()
-
-
-@pytest.mark.asyncio
-async def test_telegram_joins_focused_endless_session(tmp_path, monkeypatch):
-    from remedy.core.computer import host_bridge as hb
-    from remedy.gateway.session_bridge import resolve_or_create_messenger_session
-    from remedy.memory.store import MemoryStore
-    from remedy.models import ChatSession
-
-    class _Bridge:
-        def focused_session_id(self):
-            return "live-endless"
-
-    monkeypatch.setattr(hb, "get_host_bridge", lambda home_dir=None: _Bridge())
-    db = tmp_path / "memory.db"
-    store = MemoryStore(db)
-    await store.initialize()
-    try:
-        home = await store.create_chat_session(
-            ChatSession(id="live-endless", title="Write up a fancy x post")
-        )
-        joined = await resolve_or_create_messenger_session(
-            store,
-            channel="telegram",
-            external_chat_id="8720969343",
-            first_message="Hi reme",
-        )
-        assert joined.id == home.id
-        assert joined.origin_channel == "telegram"
-        assert joined.external_chat_id == "8720969343"
-        ghost = await store.get_chat_session("msg:telegram:8720969343")
-        assert ghost is None
-    finally:
-        await store.close()
-
-
-def test_adapters_importable():
-    from remedy.gateway.channels import (
-        DiscordChannel,
-        MattermostChannel,
-        TelegramChannel,
-    )
-    from remedy.gateway.channels.adapters import SlackChannel
-
-    assert TelegramChannel and DiscordChannel and MattermostChannel and SlackChannel
-
-
 def test_session_events_endpoint():
     """Route registers and emits hello without hanging the suite."""
     import asyncio
@@ -268,7 +193,6 @@ def test_session_events_endpoint():
     asyncio.run(_roundtrip())
 
     client = TestClient(create_app())
-    # OpenAPI must list the events path
     paths = client.get("/openapi.json").json().get("paths") or {}
     assert "/api/events/sessions" in paths
 
@@ -297,7 +221,6 @@ def test_redact_messenger_secrets_residual_channels():
     }
     for label, secret in samples.items():
         scrubbed = redact_messenger_secrets(f"poll error: {secret}")
-        # Token body must not appear verbatim after scrub
         assert secret not in scrubbed, f"{label} leaked: {scrubbed}"
         assert "redacted" in scrubbed.lower(), f"{label} missing redaction: {scrubbed}"
 
@@ -328,131 +251,3 @@ def test_public_fields_unknown_channel_strips_secret_suffixes():
         },
     )
     assert fields == {"channel_id": "ok"}
-
-
-@pytest.mark.asyncio
-async def test_messenger_cancelled_error_persists_streamed_text(monkeypatch):
-    """Cancel after tokens: persist assistant streamed text and abort the claim epoch."""
-    import asyncio
-
-    from remedy.gateway.session_bridge import handle_messenger_event
-    from remedy.models import ChatMessageRole, ChatSession, GatewayEvent
-
-    persisted: list[tuple[str, str]] = []
-    aborts: list[tuple[str, int | None]] = []
-
-    class _Mem:
-        async def add_chat_message(self, msg):
-            persisted.append((str(msg.role), msg.content))
-            return msg
-
-    class _Rt:
-        memory = _Mem()
-        config = type("C", (), {"llm_model": "t", "name": "t"})()
-
-        async def stream_response(self, *a, **k):
-            yield "hello"
-            raise asyncio.CancelledError()
-
-        async def handle_event(self, event):
-            if False:
-                yield ""
-
-    def _abort(sid, epoch=None):
-        aborts.append((str(sid), epoch))
-        return 0
-
-    monkeypatch.setattr("remedy.core.turn_context.abort_session", _abort)
-    event = GatewayEvent(
-        kind=EventKind.MESSAGE,
-        channel=ChannelKind.TELEGRAM,
-        payload={"message": "hi"},
-        session_id="msg-cancel-1",
-    )
-    session = ChatSession(id="msg-cancel-1", title="t", origin_channel="telegram")
-
-    async def _ensure(*a, **k):
-        return session
-
-    import remedy.gateway.session_bridge as sb
-
-    orig = sb.ensure_session_for_event
-    sb.ensure_session_for_event = _ensure  # type: ignore[assignment]
-    try:
-        with pytest.raises(asyncio.CancelledError):
-            async for _ in handle_messenger_event(_Rt(), event):
-                pass
-    finally:
-        sb.ensure_session_for_event = orig
-    roles = [r for r, _ in persisted]
-    assert ChatMessageRole.USER in roles or "user" in roles
-    asst = [c for r, c in persisted if r in (ChatMessageRole.ASSISTANT, "assistant")]
-    assert asst == ["hello"]
-    assert aborts
-    assert aborts[0][0] == "msg-cancel-1"
-    assert aborts[0][1] is not None
-
-
-@pytest.mark.asyncio
-async def test_messenger_cancelled_error_persists_stopped_note(monkeypatch):
-    """Cancel with no tokens: persist continue/stopped note and abort the epoch."""
-    import asyncio
-
-    from remedy.gateway.session_bridge import handle_messenger_event
-    from remedy.models import ChatMessageRole, ChatSession, GatewayEvent
-
-    persisted: list[tuple[str, str]] = []
-    aborts: list[tuple[str, int | None]] = []
-
-    class _Mem:
-        async def add_chat_message(self, msg):
-            persisted.append((str(msg.role), msg.content))
-            return msg
-
-    class _Rt:
-        memory = _Mem()
-        config = type("C", (), {"llm_model": "t", "name": "t"})()
-
-        async def stream_response(self, *a, **k):
-            if False:
-                yield ""
-            raise asyncio.CancelledError()
-
-        async def handle_event(self, event):
-            if False:
-                yield ""
-
-    def _abort(sid, epoch=None):
-        aborts.append((str(sid), epoch))
-        return 0
-
-    monkeypatch.setattr("remedy.core.turn_context.abort_session", _abort)
-    event = GatewayEvent(
-        kind=EventKind.MESSAGE,
-        channel=ChannelKind.TELEGRAM,
-        payload={"message": "hi"},
-        session_id="msg-cancel-empty",
-    )
-    session = ChatSession(id="msg-cancel-empty", title="t", origin_channel="telegram")
-
-    async def _ensure(*a, **k):
-        return session
-
-    import remedy.gateway.session_bridge as sb
-
-    orig = sb.ensure_session_for_event
-    sb.ensure_session_for_event = _ensure  # type: ignore[assignment]
-    try:
-        with pytest.raises(asyncio.CancelledError):
-            async for _ in handle_messenger_event(_Rt(), event):
-                pass
-    finally:
-        sb.ensure_session_for_event = orig
-    asst = [c for r, c in persisted if r in (ChatMessageRole.ASSISTANT, "assistant")]
-    assert asst
-    note = asst[-1].lower()
-    assert "stopped" in note or "continue" in note
-    assert aborts
-    assert aborts[0][0] == "msg-cancel-empty"
-    assert aborts[0][1] is not None
-

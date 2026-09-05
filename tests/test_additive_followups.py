@@ -354,14 +354,13 @@ def test_chat_computer_host_defaults_off() -> None:
     assert bool(getattr(ns, "computer_host", False)) is False
 
 
-def test_messenger_inbound_does_not_call_last_desktop_muscle(monkeypatch) -> None:
-    """Guard: handle path no longer rewrites llm_provider from last_llm_provider."""
-    import inspect
+def test_messenger_inbound_python_session_bridge_gone() -> None:
+    """Guard: Python session_bridge twin deleted; Go owns messenger event handling."""
+    from pathlib import Path
 
-    from remedy.gateway import session_bridge as sb
+    import remedy.gateway as gw
 
-    src = inspect.getsource(sb.handle_messenger_event)
-    assert "update_chat_session" not in src or "llm_provider=last_p" not in src
+    assert not (Path(gw.__file__).resolve().parent / "session_bridge.py").exists()
 
 
 def test_browser_vault_type_requires_ref(tmp_path: Path) -> None:
