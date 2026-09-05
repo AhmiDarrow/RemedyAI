@@ -281,14 +281,15 @@ async def build_turn_context(runtime: Any) -> str:
                         "Approvals: Full (warn). The host is in Remedy's hands. "
                         "Write and run anywhere this account can. Auth secrets "
                         "(~/.remedy/auth) stay closed. Do not stop to ask. "
-                        "Do not call help_list. file_write / host_run / bash_exec now."
+                        "workspace.write / workspace.edit / shell.exec now "
+                        "(use only Tool ABI ids in your schema)."
                     )
                 elif am == "auto":
                     parts.append(
-                        "Approvals: Auto (in-project). file_write / file_edit / pytest "
-                        "/ uv / ruff inside the focus folder run without prompts. "
-                        "OS, home, and sibling trees stay jailed unless the user "
-                        "clicks Full."
+                        "Approvals: Auto (in-project). workspace.write / workspace.edit "
+                        "/ shell.exec for pytest / uv / ruff inside the focus folder "
+                        "run without prompts. OS, home, and sibling trees stay jailed "
+                        "unless the user clicks Full."
                     )
 
     # Partner State dual streams (Phase D) — separate partner vs project budgets
@@ -426,29 +427,22 @@ async def build_turn_context(runtime: Any) -> str:
             "Self-configuration: when the user asks you to set up, enable, disable, "
             "change, or configure Remedy (web tools, approval mode, model/provider, "
             "vision, persona, their name, project folder, access scope, messengers, "
-            "assistant prefs, etc.), call update_settings (or get_settings first). "
-            "RMB (local llama.cpp muscle) is hers — call **rmb** "
-            "(status/start/stop/use/search/pull), not only Settings. "
-            "The PC is her house — **house_status** for the combined map, "
-            "**computer_apps** / **computer_app**, **house_walkthrough**, "
-            "**vision_decode**, **voice_identity**, **vault_list**. "
-            "Apply the change yourself — do not only point them at Settings UI. "
-            "Examples: update_settings(setup=\"web tools\"), "
-            "update_settings(approval_mode=\"auto\"), "
-            "rmb(action=\"status\"), rmb(action=\"use\")."
+            "assistant prefs, RMB, house map, etc.), use Desktop Settings / product "
+            "HTTP surfaces when those actions are not in your Tool ABI schemas. "
+            "Do not invent snake_case settings tools. Prefer computer.* / clipboard.* "
+            "from your schema for screen and clipboard work."
         )
         parts.append(
             "Durable memory: when the user says remember / note that / don't forget / "
-            "store in memory, ALWAYS call memory_save(content=…) with the fact "
+            "store in memory, ALWAYS call memory.save(content=…) with the fact "
             "(in addition to any automatic silent save). Confirm briefly what was stored. "
-            "Never store secrets or API keys."
+            "Never store secrets or API keys. Use memory.search to look up prior facts."
         )
         parts.append(
-            "Owner's manual / F1 Help: you CAN and SHOULD read it. Call help_list to "
-            "see article ids (same chapters as in-app F1), then help_read(id=…) for the "
-            "full markdown (e.g. computer-use-soak, 19-metabolism, 00-overview). "
-            "Never claim F1/help is outside access scope — help_read bypasses project "
-            "jail for these read-only manuals. file_read on absolute help paths also works."
+            "Owner's manual / F1 Help: you CAN and SHOULD read it. Prefer "
+            "workspace.read on docs/manual paths under the product tree when those "
+            "paths are in access scope. Never claim F1/help is outside access scope "
+            "for read-only manuals shipped with the product."
         )
 
     # Skills catalog (progressive disclosure stage 1) — ranked, not full bodies.
@@ -530,7 +524,7 @@ async def build_turn_context(runtime: Any) -> str:
                                 desc = desc[:137] + "…"
                             lines.append(f"- **{m.name}** [{st}]: {desc}")
                         lines.append(
-                            "_Activate with skill_activate(name=…); rank with skill_search._"
+                            "_Activate with skill.activate(name=…); rank with skill.search._"
                         )
                         ranked_lines = lines
                 if not ranked_lines and hasattr(reg, "summary_lines"):
@@ -542,13 +536,13 @@ async def build_turn_context(runtime: Any) -> str:
 
                         get_swarm().skill._rank_cache = list(ranked_lines)
             parts.append(
-                "Skills catalog (name+status only — call skill_activate to load "
-                "ONE full procedure for the current task; skill_search to rank; "
-                "skill_reload to rescan disk — never skill_activate every pack):\n"
+                "Skills catalog (name+status only — call skill.activate to load "
+                "ONE full procedure for the current task; skill.search to rank — "
+                "never skill.activate every pack):\n"
                 + "\n".join(ranked_lines)
             )
             # Auto-suggest: review/coding tasks → inject preferred procedure body
-            # (stage-2 progressive disclosure without waiting for a skill_activate hop).
+            # (stage-2 progressive disclosure without waiting for a skill.activate hop).
             # "review project" must surface change-safety even when token overlap is modest.
             with suppress(Exception):
                 tq = (task_q or "").lower()
@@ -709,13 +703,13 @@ async def build_turn_context(runtime: Any) -> str:
                                 body = (
                                     body[:_PROC_CAP]
                                     + f"\n\n…[auto-suggest truncated at {_PROC_CAP} chars"
-                                    " — skill_activate for full procedure]"
+                                    " — skill.activate for full procedure]"
                                 )
                             parts.append(
                                 f"[Skill auto-suggest] Top match for this task: "
                                 f"**{m.name}** (score={float(pick_score):.2f}). "
                                 "Procedure loaded into context — follow it; "
-                                f"skill_activate(name={m.name}) only if you need "
+                                f"skill.activate(name={m.name}) only if you need "
                                 "references or a refresh.\n\n"
                                 f"{body}"
                             )
