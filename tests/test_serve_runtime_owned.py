@@ -496,3 +496,25 @@ def test_resolve_prefers_env_override(monkeypatch, tmp_path) -> None:
     path.write_bytes(b"")
     monkeypatch.setenv("REMEDY_NATIVE_RUNTIME_BIN", str(path))
     assert resolve_remedy_runtime_command() == [str(path)]
+
+
+def test_resolve_never_returns_remedy_desktop(monkeypatch, tmp_path) -> None:
+    """Even with a legacy sidecar on disk, serve must resolve remedy-runtime."""
+    import remedy.interfaces.cli.cmd_runtime as CR
+
+    desktop_bin = tmp_path / "desktop" / "bin"
+    desktop_bin.mkdir(parents=True)
+    (desktop_bin / "remedy-desktop.exe").write_bytes(b"MZ" + b"\0" * 64)
+    runtime = desktop_bin / "remedy-runtime.exe"
+    runtime.write_bytes(b"MZ" + b"\0" * 64)
+
+    monkeypatch.delenv("REMEDY_NATIVE_RUNTIME_BIN", raising=False)
+    monkeypatch.delenv("REMEDY_RUNTIME", raising=False)
+    monkeypatch.chdir(tmp_path)
+    # Prefer explicit env so resolve stays deterministic across PATH noise.
+    monkeypatch.setenv("REMEDY_RUNTIME", str(runtime))
+    cmd = CR.resolve_remedy_runtime_command()
+    assert cmd is not None
+    joined = " ".join(str(x) for x in cmd).lower()
+    assert "remedy-runtime" in joined
+    assert "remedy-desktop" not in joined

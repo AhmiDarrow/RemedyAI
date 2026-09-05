@@ -328,8 +328,8 @@ def _http_form(url: str, data: dict[str, str], timeout: float = 30.0) -> dict[st
             parsed["location"] = loc
             parsed["hint"] = (
                 "xAI OAuth API redirected to a web sign-in page. "
-                "This usually means a stale Remedy Desktop sidecar is still calling "
-                "accounts.x.ai. Install 0.10.23+ or copy a rebuilt remedy-desktop.exe. "
+                "This usually means a stale local API binary is still calling "
+                "accounts.x.ai. Install a current build or replace remedy-runtime. "
                 f"Expected host: auth.x.ai (build {OAUTH_BUILD_ID})."
             )
         raise RuntimeError(json.dumps(parsed)) from e

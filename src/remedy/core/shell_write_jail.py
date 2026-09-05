@@ -469,7 +469,7 @@ def is_runtime_executable_path(path_str: str) -> bool:
     return bool(re.fullmatch(r"python\d*", stem) or re.fullmatch(r"python\d*", compact))
 
 
-_SIDECAR_EXE_STEMS = frozenset({"remedy-desktop", "remedy"})
+_SIDECAR_EXE_STEMS = frozenset({"remedy-desktop", "remedy-runtime", "remedy"})
 
 
 def _is_sidecar_argv_leftover(token: str, command: str = "") -> bool:
@@ -488,7 +488,11 @@ def _is_sidecar_argv_leftover(token: str, command: str = "") -> bool:
     if stem not in _SIDECAR_EXE_STEMS:
         return False
     blob = (command or "").strip().lower()
-    if "remedy desktop" not in blob and "remedy-desktop" not in blob:
+    if (
+        "remedy desktop" not in blob
+        and "remedy-desktop" not in blob
+        and "remedy-runtime" not in blob
+    ):
         return False
     head = blob.split(None, 1)[0] if blob else ""
     head = head.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
