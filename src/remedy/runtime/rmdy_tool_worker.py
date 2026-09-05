@@ -543,6 +543,20 @@ def _memory_save(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return save_memory(inp)
 
 
+def _skill_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Bridge Tool ABI skill.search to SkillRegistry ranking."""
+    from remedy.runtime.prompt_assemble import search_skills
+
+    return search_skills(inp)
+
+
+def _skill_activate(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Bridge Tool ABI skill.activate to one skill body load."""
+    from remedy.runtime.prompt_assemble import activate_skill
+
+    return activate_skill(inp)
+
+
 _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("text.slugify", 1): lambda inp: {"slug": _slugify(str(inp.get("text", "")))},
     ("text.word_count", 1): lambda inp: {"words": _word_count(str(inp.get("text", "")))},
@@ -567,6 +581,8 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("vision.progress", 1): _vision_progress,
     ("memory.search", 1): _memory_search,
     ("memory.save", 1): _memory_save,
+    ("skill.search", 1): _skill_search,
+    ("skill.activate", 1): _skill_activate,
 }
 
 

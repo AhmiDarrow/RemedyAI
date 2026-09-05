@@ -395,3 +395,114 @@ async def _memory_save_async(inp: Mapping[str, Any]) -> dict[str, Any]:
 def save_memory(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     """Sync RMDY handler — explicit Partner Memory write with secret/launder guards."""
     return _run_coro(_memory_save_async(inp))
+
+
+async def _ensure_skills(runtime: Any) -> Any:
+    reg = getattr(runtime, "skills", None)
+    if reg is None:
+        raise RuntimeError("skill registry not available")
+    if int(getattr(reg, "count", 0) or 0) <= 0:
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        with suppress(Exception):
+            reg.discover_defaults(home_dir=home)
+    return reg
+
+
+async def _skill_search_async(inp: Mapping[str, Any]) -> dict[str, Any]:
+    query = str(inp.get("query") or "").strip()
+    raw_limit = inp.get("limit", 8)
+    try:
+        limit = int(raw_limit) if raw_limit is not None else 8
+    except (TypeError, ValueError):
+        limit = 8
+    limit = max(1, min(20, limit))
+    home_dir = str(inp.get("home_dir") or "").strip() or None
+    project_path = str(inp.get("project_path") or "").strip() or None
+
+    runtime = await get_cached_runtime(home_dir=home_dir, project_path=project_path)
+    reg = await _ensure_skills(runtime)
+    hint = ""
+    with suppress(Exception):
+        hint = str(runtime.effective_project_path() or "")
+    ranked = reg.match_skills(query, limit=limit, workspace_hint=hint or None)
+    skills: list[dict[str, Any]] = []
+    for skill, score in ranked or []:
+        m = skill.manifest
+        status = m.status.value if hasattr(m.status, "value") else str(m.status)
+        skills.append(
+            {
+                "name": str(m.name),
+                "score": float(score),
+                "status": str(status),
+                "description": str(m.description or "")[:200],
+            }
+        )
+    return {"query": query, "skills": skills, "total": len(skills)}
+
+
+def search_skills(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Sync RMDY handler — rank skill packs for the current task."""
+    return _run_coro(_skill_search_async(inp))
+
+
+async def _skill_activate_async(inp: Mapping[str, Any]) -> dict[str, Any]:
+    name = str(inp.get("name") or inp.get("skill") or "").strip()
+    include_references = bool(inp.get("include_references") or False)
+    home_dir = str(inp.get("home_dir") or "").strip() or None
+    project_path = str(inp.get("project_path") or "").strip() or None
+
+    bulk = name.lower().replace("_", " ").replace("-", " ")
+    if bulk in (
+        "all",
+        "*",
+        "every",
+        "everything",
+        "reload",
+        "reload all",
+        "rescan",
+        "refresh",
+        "all skills",
+        "every skill",
+    ) or bulk.startswith("all "):
+        raise PermissionError(
+            "refusing bulk skill.activate; load one pack per task "
+            "(use skill.search then skill.activate with an exact name)"
+        )
+    if not name:
+        raise ValueError("name is required")
+
+    runtime = await get_cached_runtime(home_dir=home_dir, project_path=project_path)
+    reg = await _ensure_skills(runtime)
+    sk_obj = reg.get(name)
+    if sk_obj is not None:
+        meta_q = sk_obj.manifest.metadata or {}
+        if meta_q.get("quarantine"):
+            raise PermissionError(
+                f"skill '{name}' is quarantined; Trust it in the Skills panel first"
+            )
+        st = getattr(sk_obj.manifest.status, "value", str(sk_obj.manifest.status))
+        if str(st).lower() in ("disabled", "archived", "deprecated"):
+            raise PermissionError(f"skill '{name}' is {st} (not active)")
+
+    body = reg.skill_body(name, include_references=bool(include_references))
+    if body is None:
+        hits = reg.match_skills(name, limit=5)
+        hint = ", ".join(s.manifest.name for s, _ in hits) or "none"
+        raise FileNotFoundError(f"skill not found: {name}; closest: {hint}")
+
+    with suppress(Exception):
+        reg.mark_activated(name)
+    related: list[str] = []
+    with suppress(Exception):
+        related = list(reg.related_skills(name) or [])
+    return {
+        "name": name,
+        "body": str(body),
+        "related": related,
+        "chars": len(str(body)),
+    }
+
+
+def activate_skill(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Sync RMDY handler — load one skill procedure body into the turn."""
+    return _run_coro(_skill_activate_async(inp))
