@@ -205,7 +205,6 @@ def test_setup_phrase_rmb_does_not_silently_flip_provider():
     assert resolve_setup_phrase("enable rmb") is None
 
 
-@pytest.mark.asyncio
 def test_house_map_tracks_rmb_organ(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     reset_machine_map("house_rmb")
     monkeypatch.setattr(

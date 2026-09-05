@@ -527,7 +527,6 @@ async def test_git_restore_empty_delta_is_noop_keeps_owner_wip(tmp_path):
     assert "owner-wip" in (repo / "keep.txt").read_text(encoding="utf-8")
 
 
-@pytest.mark.asyncio
 def test_vault_desktop_refuses_button_no_click_type(tmp_path, monkeypatch):
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.host_binding import native

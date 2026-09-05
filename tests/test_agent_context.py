@@ -186,4 +186,4 @@ async def test_review_project_auto_suggests_procedure():
     assert "[Skill auto-suggest]" in ctx
     # Procedure body (blast-radius checklist), not catalog-only
     assert "blast radius" in ctx.lower() or "Blast-radius" in ctx
-    assert "skill_activate" in ctx
+    assert "skill.activate" in ctx

@@ -83,7 +83,9 @@ def _collect():
 
 
 def test_enough_tools_are_reachable_for_this_check_to_mean_something():
-    assert len(_collect()) > 150
+    # Phase 6 absolute retired most agent_* families; remaining registrars
+    # still need enough surface for schema/handler parity to mean something.
+    assert len(_collect()) > 100
 
 
 def test_every_schema_matches_the_handler_behind_it():

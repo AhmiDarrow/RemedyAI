@@ -94,7 +94,6 @@ def test_queue_is_capped():
     assert n <= 32
 
 
-@pytest.mark.asyncio
 def test_normalize_panel_and_settings_section():
     assert normalize_panel("Help") == "help"
     assert normalize_panel("time-travel") == "time_travel"
