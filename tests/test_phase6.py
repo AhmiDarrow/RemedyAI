@@ -1,6 +1,5 @@
 """Phase 6 tests: Interfaces & Integration."""
 
-import json
 import os
 from pathlib import Path
 from unittest import mock
@@ -440,16 +439,15 @@ class TestAPIStatus:
         assert data["status"] == "ok"
         assert "version" in data
 
-    def test_chat_requires_message(self, test_client):
-        r = test_client.post("/api/chat", json={})
-        assert r.status_code == 422
-
-    def test_chat_echoes(self, test_client):
-        r = test_client.post("/api/chat", json={"message": "hello"})
-        assert r.status_code == 200
-        data = r.json()
-        assert "response" in data
-        assert "hello" in data["response"].lower()
+    def test_legacy_chat_routes_absent(self, test_client):
+        """Legacy /api/chat* dropped from TestClient; sessions stream owns chat."""
+        assert test_client.post("/api/chat", json={"message": "hello"}).status_code in (
+            404,
+            405,
+        )
+        assert test_client.post(
+            "/api/chat/stream", json={"message": "hello"}
+        ).status_code in (404, 405)
 
     def test_openapi_json(self, test_client):
         r = test_client.get("/api/openapi.json")
@@ -482,20 +480,6 @@ class TestAPIStatus:
 # ============================================================================
 
 class TestSSEStreaming:
-    def test_chat_stream_returns_sse(self, test_client):
-        with test_client.stream("POST", "/api/chat/stream", json={"message": "test stream"}) as response:
-            assert response.status_code == 200
-            assert response.headers["content-type"].startswith("text/event-stream")
-            data_lines = [line for line in response.iter_lines() if line]
-            assert len(data_lines) > 0
-            found_start = False
-            found_done = False
-            for line in data_lines:
-                if line.startswith("data: "):
-                    payload = json.loads(line[6:])
-                    if payload.get("type") == "start":
-                        found_start = True
-                    elif payload.get("type") == "done":
-                        found_done = True
-            assert found_start
-            assert found_done
+    def test_legacy_chat_stream_absent(self, test_client):
+        r = test_client.post("/api/chat/stream", json={"message": "test stream"})
+        assert r.status_code in (404, 405)
