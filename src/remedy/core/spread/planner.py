@@ -268,7 +268,7 @@ def _tasks_from_signals(
             "db": "src",
             "api": "src/remedy/interfaces",
             "memory": "src/remedy/memory",
-            "gateway": "src/remedy/gateway",
+            "gateway": "native/go/gateway",
             "skill": "src/remedy/skills",
             "skills": "src/remedy/skills",
             "test": "tests",

@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 # Path is used for isolation checks against the real home directory
-from remedy.gateway.messengers import (
+from remedy.interfaces.messenger_catalog import (
     external_session_id,
     heuristic_session_title,
     is_messenger_channel,

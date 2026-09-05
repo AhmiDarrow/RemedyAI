@@ -1,7 +1,9 @@
-"""Messenger connector catalog — single source of truth for desktop + gateway.
+"""Messenger connector catalog for TestClient settings / secret scrub.
 
-Defines which messaging platforms Remedy offers, their config fields, capability
-status, and helpers for stable session identity + public (secret-scrubbed) views.
+Production Settings schema + messenger I/O live in Go
+`native/go/httpapi` + `native/go/gateway` via remedy-runtime.
+This module keeps the same field schema for in-process FastAPI TestClient
+and CLI secret scrub - not a network twin.
 """
 
 from __future__ import annotations

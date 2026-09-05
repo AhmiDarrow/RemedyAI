@@ -181,11 +181,6 @@ async def test_web_fetch_drops_rail_from_the_wrong_tab(monkeypatch):
 
 def test_python_teams_jwt_helpers_removed():
     """Teams JWT / JWKS inbound moved to Go native/go/gateway."""
-    from pathlib import Path
+    import importlib.util
 
-    import remedy.gateway as gw
-
-    root = Path(gw.__file__).resolve().parent
-    assert not (root / "channels").exists()
-    assert not (root / "channels" / "jwt_rs256.py").exists()
-    assert not (root / "channels" / "teams.py").exists()
+    assert importlib.util.find_spec("remedy.gateway") is None

@@ -236,7 +236,7 @@ def test_gateway_serve_api_enables_auth(auth_on, tmp_path, monkeypatch):
     """``remedy gateway serve`` delegates to ``remedy serve`` (lock + auth)."""
     from types import SimpleNamespace
 
-    from remedy.gateway import cli as gateway_cli
+    from remedy.interfaces.cli import cmd_gateway as gateway_cli
 
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
     db = tmp_path / "memory.db"

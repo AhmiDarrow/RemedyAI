@@ -614,7 +614,7 @@ def _write_config(config: dict) -> Path:
 
         safe = migrate_secrets_from_config(safe, home)
         with suppress(Exception):
-            from remedy.gateway.messengers import SECRET_FIELD_KEYS, messenger_ids
+            from remedy.interfaces.messenger_catalog import SECRET_FIELD_KEYS, messenger_ids
 
             for mid in messenger_ids():
                 sec = safe.get(mid)

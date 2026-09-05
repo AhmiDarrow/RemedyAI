@@ -15,7 +15,7 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | Shell tests | `desktop/src-tauri/src/` | Rust/Tauri browser host, privacy shield, lifecycle, Windows + Linux compile |
 | Connect tests | `android/**/src/test/` | Kotlin protocol, storage, networking, and mobile behavior; lint + both APK variants |
 | Native tests | `native/go/**/*_test.go`, `native/zig/src/` | Go race/unit/benchmark/boundary gates and Zig debug/ReleaseSafe capability tests |
-| Gateway | `native/go/gateway/` + `native/go/httpapi` (+ catalog-only `src/remedy/gateway/`) | Go owns messenger inbound *and* outbound (Telegram/Discord/Slack/Matrix/Mattermost + WhatsApp/Teams/Google Chat webhooks + Signal via Zig exec-capture) + poll locks + desktop mirror + Settings field_schema; Python keeps messengers catalog helpers for TestClient/settings scrub only (no adapter/router/session_bridge twins; no `/api/webhooks*` registrar) |
+| Gateway | `native/go/gateway/` + `native/go/httpapi` (+ TestClient catalog `src/remedy/interfaces/messenger_catalog.py`) | Go owns messenger inbound *and* outbound (Telegram/Discord/Slack/Matrix/Mattermost + WhatsApp/Teams/Google Chat webhooks + Signal via Zig exec-capture) + poll locks + desktop mirror + Settings field_schema; Python keeps messengers catalog helpers for TestClient/settings scrub only (no adapter/router/session_bridge twins; no `/api/webhooks*` registrar) |
 | Native runtime | `native/` | Versioned Go nervous system + Zig capability core; layered cutover with Python compatibility/ML workers |
 | Claimidx host | `src/remedy/runtime/claimidx_host.py` | Pinned first-run install, private index, loopback lifecycle on `:17340` |
 
@@ -94,8 +94,7 @@ and `src/remedy/tools/`.
 ## Grove Connect
 
 Phone remote for **this PC** (`native/go/connect/`, served by
-`remedy-runtime`). **Not** the messenger gateway (`src/remedy/gateway/` /
-`native/go/gateway/`). Default **off**. When on, it is a **second listener**
+`remedy-runtime`). **Not** the messenger gateway (`native/go/gateway/`). Default **off**. When on, it is a **second listener**
 on a chosen IPv4 (never `0.0.0.0`); `:7400` stays loopback. Owner-run relay
 (`remedy connect-relay` → Go `cmd/connect-relay`) forwards framed blobs
 without decrypting. Same-LAN mDNS (`_remedy-connect._udp`) advertises a

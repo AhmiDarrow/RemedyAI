@@ -1,35 +1,39 @@
-"""Python messenger network twins are gone — Go owns poll/WS/webhooks/outbound."""
+"""Python gateway package is gone — Go owns messengers + catalog."""
 
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
+import sys
 
-import remedy.gateway as gw
-from remedy.gateway.messengers import list_messenger_definitions
-
-
-def _gateway_root() -> Path:
-    return Path(gw.__file__).resolve().parent
+from remedy.interfaces.cli.parser import build_parser
+from remedy.interfaces.messenger_catalog import list_messenger_definitions
 
 
-def test_inbound_and_adapter_modules_are_gone() -> None:
-    root = _gateway_root()
-    assert root.is_dir()
-    assert not (root / "channels").exists()
-    assert not (root / "router.py").exists()
-    assert not (root / "session_bridge.py").exists()
-    assert not (root / "serve_bootstrap.py").exists()
-    assert not (root / "channel_registry.py").exists()
-    assert not (root / "channel_hot_reload.py").exists()
-    assert not (root / "poll_lock.py").exists()
-    assert importlib.util.find_spec("remedy.interfaces.routes.webhooks") is None
-    # Submodules of this package path must not resolve when twins are deleted.
-    assert (root / "messengers.py").is_file()
-    assert (root / "cli.py").is_file()
+def test_gateway_package_is_gone() -> None:
+    assert importlib.util.find_spec("remedy.gateway") is None
+    assert "remedy.gateway" not in sys.modules
 
 
-def test_messengers_catalog_still_has_field_schema() -> None:
+def test_cli_parser_still_exposes_gateway() -> None:
+    ns = build_parser().parse_args(["gateway", "channels"])
+    assert ns.command == "gateway"
+    assert ns.gateway_cmd == "channels"
+
+
+def test_gateway_start_fails_closed_to_go() -> None:
+    from remedy.interfaces.cli.cmd_gateway import run_gateway_start
+
+    try:
+        run_gateway_start()
+    except SystemExit as ei:
+        msg = str(ei)
+        assert "remedy-runtime" in msg or "Go" in msg
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_settings_catalog_still_has_field_schema() -> None:
+    """TestClient settings schema stays in messenger_catalog; Go owns production."""
     defs = list_messenger_definitions()
     assert {m.id for m in defs} >= {
         "telegram",
@@ -45,9 +49,3 @@ def test_messengers_catalog_still_has_field_schema() -> None:
     for m in defs:
         assert m.fields, f"{m.id} missing fields"
         assert any(f.key for f in m.fields)
-
-
-def test_gateway_package_doc_names_go_owner() -> None:
-    doc = gw.__doc__ or ""
-    assert "Go" in doc or "remedy-runtime" in doc
-    assert "outbound" in doc.lower() or "inbound" in doc.lower()

@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from remedy.gateway import cli as G
+from remedy.interfaces.cli import cmd_gateway as G
 
 
 def args(**kw):
@@ -88,43 +88,49 @@ def test_an_unsafe_home_is_refused_before_anything_is_opened(monkeypatch, capsys
 # --- starting ----------------------------------------------------------------
 
 
-def test_start_runs_the_gateway(home, no_run):
-    G.main_gateway(args(gateway_cmd="start"))
-    assert len(no_run) == 1
+def test_start_fails_closed_to_go(home):
+    with pytest.raises(SystemExit) as ei:
+        G.main_gateway(args(gateway_cmd="start"))
+    assert "remedy-runtime" in str(ei.value) or "Go" in str(ei.value)
 
 
-def test_a_token_on_the_command_line_is_flagged(home, no_run, capsys):
+def test_a_token_on_the_command_line_is_flagged(home, capsys):
     """It is visible in the process list to anyone else on the machine."""
-    G.main_gateway(args(gateway_cmd="start", telegram_token="secret-token"))
+    with pytest.raises(SystemExit):
+        G.main_gateway(args(gateway_cmd="start", telegram_token="secret-token"))
     out = capsys.readouterr().out
     assert "process lists" in out
     assert "TELEGRAM_BOT_TOKEN" in out
 
 
-def test_the_warning_does_not_echo_the_token(home, no_run, capsys):
-    G.main_gateway(args(gateway_cmd="start", telegram_token="secret-token"))
+def test_the_warning_does_not_echo_the_token(home, capsys):
+    with pytest.raises(SystemExit):
+        G.main_gateway(args(gateway_cmd="start", telegram_token="secret-token"))
     assert "secret-token" not in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
     "field", ["telegram_token", "discord_token", "slack_token"]
 )
-def test_every_token_argument_is_flagged(home, no_run, capsys, field):
-    G.main_gateway(args(gateway_cmd="start", **{field: "abc"}))
+def test_every_token_argument_is_flagged(home, capsys, field):
+    with pytest.raises(SystemExit):
+        G.main_gateway(args(gateway_cmd="start", **{field: "abc"}))
     assert "process lists" in capsys.readouterr().out
 
 
-def test_tokens_from_the_environment_are_not_flagged(home, no_run, capsys, monkeypatch):
+def test_tokens_from_the_environment_are_not_flagged(home, capsys, monkeypatch):
     """The recommended way must not nag."""
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "from-env")
-    G.main_gateway(args(gateway_cmd="start"))
+    with pytest.raises(SystemExit):
+        G.main_gateway(args(gateway_cmd="start"))
     assert "process lists" not in capsys.readouterr().out
 
 
-def test_starting_with_no_tokens_at_all_is_quiet(home, no_run, capsys, monkeypatch):
+def test_starting_with_no_tokens_at_all_is_quiet(home, capsys, monkeypatch):
     for var in ("TELEGRAM_BOT_TOKEN", "DISCORD_BOT_TOKEN", "SLACK_BOT_TOKEN"):
         monkeypatch.delenv(var, raising=False)
-    G.main_gateway(args(gateway_cmd="start"))
+    with pytest.raises(SystemExit):
+        G.main_gateway(args(gateway_cmd="start"))
     assert "process lists" not in capsys.readouterr().out
 
 
