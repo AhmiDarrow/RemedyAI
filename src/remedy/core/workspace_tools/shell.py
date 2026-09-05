@@ -262,7 +262,7 @@ async def _run_host_session(
     from remedy.core.computer import host_binding
     from remedy.core.errors import format_tool_error
     from remedy.core.shell_write_jail import check_shell_write_jail
-    from remedy.core.computer.shell_host import close_shared_session, get_shared_session
+    from remedy.core.computer.host_binding import close_shared_session, get_shared_session
 
     try:
         sess = await get_shared_session(
@@ -698,7 +698,7 @@ def register_shell_tools(runtime: Any) -> None:
 
         try:
             if _argv:
-                from remedy.core.computer.shell_host import resolve_which
+                from remedy.core.computer.host_binding import resolve_which
 
                 argv_use = [str(a) for a in _argv]
                 resolved_head = (
@@ -801,7 +801,7 @@ def register_shell_tools(runtime: Any) -> None:
             )
         finally:
             with suppress(Exception):
-                from remedy.core.computer.shell_host import cleanup_host_script
+                from remedy.core.computer.host_binding import cleanup_host_script
 
                 cleanup_host_script(getattr(prepared, "script_path", None))
         parts = [
@@ -838,7 +838,7 @@ def register_shell_tools(runtime: Any) -> None:
             )
             if diag.get("code") == "HOST_NOT_FOUND":
                 with suppress(Exception):
-                    from remedy.core.computer.shell_host import resolve_which
+                    from remedy.core.computer.host_binding import resolve_which
 
                     missing = (
                         str(diag.get("message") or "")
@@ -1248,7 +1248,7 @@ def register_shell_tools(runtime: Any) -> None:
 
     async def host_which(name: str = "") -> str:
         """Resolve an executable on PATH (and common Windows names)."""
-        from remedy.core.computer.shell_host import resolve_which
+        from remedy.core.computer.host_binding import resolve_which
 
         n = (name or "").strip()
         if not n:
@@ -1275,7 +1275,7 @@ def register_shell_tools(runtime: Any) -> None:
         workdir: str = "",
     ) -> str:
         """Write a scratch script and run it with -File (never -Command)."""
-        from remedy.core.computer.shell_host import default_script_lang, launch_script
+        from remedy.core.computer.host_binding import default_script_lang, launch_script
 
         text = (body or "").strip()
         if not text:

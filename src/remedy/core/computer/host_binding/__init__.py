@@ -134,6 +134,12 @@ from ._policy import (
     write_jail_clear,
     write_jail_set_roots,
 )
+from ._script import (
+    ScriptLaunch,
+    age_out_host_scripts,
+    cleanup_host_script,
+    launch_script,
+)
 from ._session import (
     HostSession,
     SessionResult,
@@ -277,6 +283,10 @@ __all__ = [
     "host_session_close",
     "HostSession",
     "SessionResult",
+    "ScriptLaunch",
+    "age_out_host_scripts",
+    "cleanup_host_script",
+    "launch_script",
     "get_shared_session",
     "close_shared_session",
     "close_all_shared_sessions",

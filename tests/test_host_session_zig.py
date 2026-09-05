@@ -94,7 +94,7 @@ def test_zig_host_session_echo_round_trip() -> None:
 @pytest.mark.asyncio
 async def test_python_host_session_is_thin_zig_binding() -> None:
     """HostSession on Windows must open/run/close only through Zig authorized open."""
-    from remedy.core.computer.shell_host import HostSession
+    from remedy.core.computer.host_binding import HostSession
 
     sess = HostSession(host="cmd", use_conpty=False)
     try:
