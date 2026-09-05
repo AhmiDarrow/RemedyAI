@@ -53,4 +53,4 @@ def register_all_routes(
     # vision/telephony/webhook/connect/nanoswarm/assistant/computer/hive/
     # session_events/chat/terminal/rmb/voice/workspace/skills_library, or
     # misc (/dashboard) — Go owns those.
-    # status keeps notifications/metrics/self-improve only.
+    # status keeps notifications/metrics/self-improve only (not Go-owned).
