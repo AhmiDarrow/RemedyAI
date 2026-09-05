@@ -69,8 +69,9 @@ def host_session_wrap(*, host: str, command: str, sentinel: str) -> str:
             payload, len(payload), ctypes.byref(ptr), ctypes.byref(length)
         ),
     )
-    raw = _take(library, ptr, length)
-    data = json.loads(raw.decode("utf-8"))
+    data = take_json(library, ptr, length)
+    if not isinstance(data, dict):
+        return ""
     return str(data.get("wrapped") or "")
 
 
@@ -103,8 +104,9 @@ def host_session_split(
             payload, len(payload), ctypes.byref(ptr), ctypes.byref(length)
         ),
     )
-    raw = _take(library, ptr, length)
-    data = json.loads(raw.decode("utf-8"))
+    data = take_json(library, ptr, length)
+    if not isinstance(data, dict):
+        return -1, ""
     return int(data.get("exit_code", -1)), str(data.get("body") or "")
 
 
@@ -237,8 +239,8 @@ def host_session_run(
             ctypes.byref(length),
         ),
     )
-    raw = _take(library, ptr, length)
-    return dict(json.loads(raw.decode("utf-8")))
+    data = take_json(library, ptr, length)
+    return dict(data) if isinstance(data, dict) else {}
 
 
 def host_session_cwd(handle: int) -> str:
