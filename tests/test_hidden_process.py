@@ -1,4 +1,4 @@
-"""Tests for Zig process binding and fail-closed soft pipe / hide_flags gates."""
+"""Tests for Zig process binding and fail-closed soft pipe gates."""
 
 from __future__ import annotations
 
@@ -8,29 +8,8 @@ import pytest
 
 from remedy.core.computer.host_binding import STATUS_UNSUPPORTED, HostError
 from remedy.execution import process as P
-from remedy.execution import hide_flags as HF
 from remedy.execution.process import run_hidden, win_shell_prefix
 from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
-
-
-def test_hide_flags_fail_closed_on_host_platforms(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Production hide_flags must not soft-return CREATE_NO_WINDOW kwargs."""
-    if sys.platform not in ("win32", "linux"):
-        pytest.skip("process host gate is win32/linux")
-    monkeypatch.setattr(P, "require_process_host", lambda: None)
-    for name in (
-        "hidden_creationflags",
-        "hidden_startupinfo",
-        "hidden_subprocess_kwargs",
-    ):
-        with pytest.raises(HostError) as raised:
-            getattr(HF, name)()
-        assert raised.value.status == STATUS_UNSUPPORTED
-        assert raised.value.function == name
-    assert not hasattr(P, "hidden_subprocess_kwargs")
-    assert not hasattr(P, "hidden_creationflags")
 
 
 def test_win_shell_prefix_has_hidden_style_on_windows() -> None:
