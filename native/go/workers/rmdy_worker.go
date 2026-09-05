@@ -139,6 +139,12 @@ func StartRMDYToolWorker(ctx context.Context, opts RMDYToolOptions) (*RMDYToolSe
 			return nil, fmt.Errorf("%w: %v", ErrWorkerAttachRequired, err)
 		}
 	}
+	// Ensure managed-python download lands under the same home the worker uses.
+	if home := strings.TrimSpace(opts.HomeDir); home != "" {
+		if strings.TrimSpace(os.Getenv("REMEDY_HOME")) == "" {
+			_ = os.Setenv("REMEDY_HOME", home)
+		}
+	}
 	argv := opts.PythonArgv
 	if len(argv) == 0 {
 		var err error
@@ -260,16 +266,15 @@ func defaultPythonWorkerArgv() ([]string, error) {
 			return []string{abs, "-m", "remedy.runtime.rmdy_tool_worker"}, nil
 		}
 	}
-	// Packaged Desktop often has no PATH python; reuse the managed voice
-	// CPython under ~/.remedy/voice/runtime when it is already installed.
-	if abs := managedVoicePython(); abs != "" {
+	// Packaged Desktop often has no PATH python; reuse or download the
+	// managed CPython under ~/.remedy/voice/runtime (shared with voice).
+	if abs, err := ensureManagedPython(); err == nil && abs != "" {
 		if pyzOK {
 			return []string{abs, pyz}, nil
 		}
 		return []string{abs, "-m", "remedy.runtime.rmdy_tool_worker"}, nil
-	}
-	if pyzOK {
-		return nil, fmt.Errorf("%w: REMEDY_RMDY_PYZ set but no python interpreter found (set REMEDY_PYTHON)", ErrWorkerAttachRequired)
+	} else if err != nil && pyzOK {
+		return nil, fmt.Errorf("%w: no python interpreter found (%v); set REMEDY_PYTHON or allow managed download", ErrWorkerAttachRequired, err)
 	}
 	if uv := lookPathAbs("uv"); uv != "" {
 		return []string{uv, "run", "python", "-m", "remedy.runtime.rmdy_tool_worker"}, nil
