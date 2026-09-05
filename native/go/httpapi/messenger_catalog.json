@@ -1,0 +1,163 @@
+[
+  {
+    "id": "telegram",
+    "name": "Telegram",
+    "description": "Bot API long-poll inbound and sendMessage outbound.",
+    "status": "ready",
+    "inbound": true,
+    "outbound": true,
+    "docs_url": "https://core.telegram.org/bots#how-do-i-create-a-bot",
+    "badge": "Telegram",
+    "max_reply_chars": 4096,
+    "fields": [
+      {"key": "bot_token", "label": "Bot token", "kind": "secret", "placeholder": "123456:ABC…", "help": "From @BotFather", "required": true},
+      {"key": "allow_chat_ids", "label": "Allowed chat IDs", "kind": "list", "placeholder": "123456789, -100…", "help": "Comma-separated. Empty + allow_all off = ignore all chats."},
+      {"key": "allow_all", "label": "Allow all chats", "kind": "bool", "help": "Dangerous for public bots. Prefer an allowlist."}
+    ]
+  },
+  {
+    "id": "discord",
+    "name": "Discord",
+    "description": "Gateway WS inbound + REST outbound. Allowlist channels/users.",
+    "status": "ready",
+    "inbound": true,
+    "outbound": true,
+    "docs_url": "https://discord.com/developers/docs/getting-started",
+    "badge": "Discord",
+    "max_reply_chars": 2000,
+    "fields": [
+      {"key": "bot_token", "label": "Bot token", "kind": "secret", "required": true},
+      {"key": "channel_id", "label": "Default channel ID", "kind": "text"},
+      {"key": "guild_id", "label": "Guild ID", "kind": "text"},
+      {"key": "allow_ids", "label": "Allowed IDs", "kind": "list", "help": "Channel, user, or guild ids. Empty + allow_all off = ignore all."},
+      {"key": "allow_all", "label": "Allow all", "kind": "bool"}
+    ]
+  },
+  {
+    "id": "slack",
+    "name": "Slack",
+    "description": "Socket Mode inbound + chat.postMessage. Needs bot + app token.",
+    "status": "ready",
+    "inbound": true,
+    "outbound": true,
+    "docs_url": "https://api.slack.com/apis/connections/socket",
+    "badge": "Slack",
+    "max_reply_chars": 3000,
+    "fields": [
+      {"key": "bot_token", "label": "Bot token", "kind": "secret", "placeholder": "xoxb-…", "required": true},
+      {"key": "app_token", "label": "App-level token", "kind": "secret", "placeholder": "xapp-…", "help": "Socket Mode (connections:write)."},
+      {"key": "channel_id", "label": "Default channel ID", "kind": "text"},
+      {"key": "allow_ids", "label": "Allowed channel/user IDs", "kind": "list"},
+      {"key": "allow_all", "label": "Allow all", "kind": "bool"}
+    ]
+  },
+  {
+    "id": "mattermost",
+    "name": "Mattermost",
+    "description": "WebSocket inbound + REST posts (self-hosted).",
+    "status": "ready",
+    "inbound": true,
+    "outbound": true,
+    "docs_url": "https://developers.mattermost.com/integrate/reference/bot-accounts/",
+    "badge": "Mattermost",
+    "max_reply_chars": 4000,
+    "fields": [
+      {"key": "base_url", "label": "Server URL", "kind": "url", "placeholder": "https://chat.example.com", "required": true},
+      {"key": "bot_token", "label": "Bot token", "kind": "secret", "required": true},
+      {"key": "team_id", "label": "Team ID", "kind": "text"},
+      {"key": "channel_id", "label": "Default channel ID", "kind": "text"},
+      {"key": "allow_ids", "label": "Allowed channel/user IDs", "kind": "list"},
+      {"key": "allow_all", "label": "Allow all", "kind": "bool"}
+    ]
+  },
+  {
+    "id": "whatsapp",
+    "name": "WhatsApp",
+    "description": "Cloud API outbound; inbound via /api/webhooks/whatsapp (public HTTPS).",
+    "status": "partial",
+    "inbound": true,
+    "outbound": true,
+    "docs_url": "https://developers.facebook.com/docs/whatsapp/cloud-api",
+    "badge": "WhatsApp",
+    "max_reply_chars": 4096,
+    "fields": [
+      {"key": "access_token", "label": "Access token", "kind": "secret", "required": true},
+      {"key": "phone_number_id", "label": "Phone number ID", "kind": "text", "required": true},
+      {"key": "verify_token", "label": "Webhook verify token", "kind": "secret"},
+      {"key": "app_secret", "label": "App secret (HMAC)", "kind": "secret"},
+      {"key": "allow_from", "label": "Allowed phone numbers", "kind": "list", "help": "E.164 numbers, comma-separated."},
+      {"key": "allow_all", "label": "Allow all senders", "kind": "bool"}
+    ]
+  },
+  {
+    "id": "teams",
+    "name": "Microsoft Teams",
+    "description": "Bot Framework connector; inbound via /api/webhooks/teams.",
+    "status": "partial",
+    "inbound": true,
+    "outbound": true,
+    "docs_url": "https://learn.microsoft.com/en-us/microsoftteams/platform/bots/what-are-bots",
+    "badge": "Teams",
+    "max_reply_chars": 28000,
+    "fields": [
+      {"key": "app_id", "label": "App (client) ID", "kind": "text", "required": true},
+      {"key": "app_password", "label": "App password / secret", "kind": "secret", "required": true},
+      {"key": "tenant_id", "label": "Tenant ID", "kind": "text", "help": "Default botframework.com"},
+      {"key": "allow_ids", "label": "Allowed conversation/user IDs", "kind": "list"},
+      {"key": "allow_all", "label": "Allow all", "kind": "bool"}
+    ]
+  },
+  {
+    "id": "matrix",
+    "name": "Matrix",
+    "description": "Client-Server /sync inbound + room send.",
+    "status": "ready",
+    "inbound": true,
+    "outbound": true,
+    "docs_url": "https://spec.matrix.org/latest/client-server-api/",
+    "badge": "Matrix",
+    "max_reply_chars": 4000,
+    "fields": [
+      {"key": "homeserver", "label": "Homeserver URL", "kind": "url", "placeholder": "https://matrix.org", "required": true},
+      {"key": "access_token", "label": "Access token", "kind": "secret", "required": true},
+      {"key": "user_id", "label": "Bot user ID", "kind": "text", "placeholder": "@bot:example.com"},
+      {"key": "room_id", "label": "Default room ID", "kind": "text"},
+      {"key": "allow_ids", "label": "Allowed room/user IDs", "kind": "list"},
+      {"key": "allow_all", "label": "Allow all rooms", "kind": "bool"}
+    ]
+  },
+  {
+    "id": "google_chat",
+    "name": "Google Chat",
+    "description": "Chat API outbound; inbound via /api/webhooks/google_chat.",
+    "status": "partial",
+    "inbound": true,
+    "outbound": true,
+    "docs_url": "https://developers.google.com/chat",
+    "badge": "GChat",
+    "max_reply_chars": 4096,
+    "fields": [
+      {"key": "access_token", "label": "Access token", "kind": "secret", "required": true},
+      {"key": "space_id", "label": "Default space ID", "kind": "text"},
+      {"key": "allow_ids", "label": "Allowed space/user IDs", "kind": "list"},
+      {"key": "allow_all", "label": "Allow all", "kind": "bool"}
+    ]
+  },
+  {
+    "id": "signal",
+    "name": "Signal",
+    "description": "Optional signal-cli receive/send (local binary required).",
+    "status": "partial",
+    "inbound": true,
+    "outbound": true,
+    "docs_url": "https://github.com/AsamK/signal-cli",
+    "badge": "Signal",
+    "max_reply_chars": 2000,
+    "fields": [
+      {"key": "cli_path", "label": "signal-cli path", "kind": "text", "placeholder": "signal-cli"},
+      {"key": "account", "label": "Account number", "kind": "text", "placeholder": "+1…", "required": true},
+      {"key": "allow_from", "label": "Allowed numbers", "kind": "list"},
+      {"key": "allow_all", "label": "Allow all", "kind": "bool"}
+    ]
+  }
+]
