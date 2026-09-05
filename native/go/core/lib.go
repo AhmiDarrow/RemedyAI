@@ -34,6 +34,8 @@ func libraryNames() []string {
 }
 
 // FindLibraryPath mirrors Python native_runtime._core_library_path.
+// When both a staged (exe-adjacent) copy and a fresher zig-out build exist,
+// prefer zig-out so tauri:dev cannot bind a stale same-ABI DLL after zig build.
 func FindLibraryPath() string {
 	if explicit := os.Getenv("REMEDY_NATIVE_CORE_LIB"); explicit != "" {
 		if st, err := os.Stat(explicit); err == nil && !st.IsDir() {
@@ -56,12 +58,12 @@ func FindLibraryPath() string {
 		}
 		return ""
 	}
+	var packaged string
 	if exe, err := os.Executable(); err == nil {
 		if p := add(filepath.Dir(exe)); p != "" {
-			return p
-		}
-		if p := add(filepath.Join(filepath.Dir(exe), "bin")); p != "" {
-			return p
+			packaged = p
+		} else if p := add(filepath.Join(filepath.Dir(exe), "bin")); p != "" {
+			packaged = p
 		}
 	}
 	wd, err := os.Getwd()
@@ -74,21 +76,37 @@ func FindLibraryPath() string {
 			start = filepath.Dir(exe)
 		}
 	}
+	var dev string
 	for d := start; d != "" && d != filepath.Dir(d); d = filepath.Dir(d) {
 		if p := add(filepath.Join(d, "native", "zig", "zig-out", "bin")); p != "" {
-			return p
+			dev = p
+			break
 		}
 		if p := add(filepath.Join(d, "native", "zig", "zig-out", "lib")); p != "" {
-			return p
+			dev = p
+			break
 		}
 		if p := add(filepath.Join(d, "zig", "zig-out", "bin")); p != "" {
-			return p
+			dev = p
+			break
 		}
 		if p := add(filepath.Join(d, "zig", "zig-out", "lib")); p != "" {
-			return p
+			dev = p
+			break
 		}
 	}
-	return ""
+	if packaged != "" && dev != "" && packaged != dev {
+		pst, perr := os.Stat(packaged)
+		dst, derr := os.Stat(dev)
+		if perr == nil && derr == nil && dst.ModTime().After(pst.ModTime()) {
+			return dev
+		}
+		return packaged
+	}
+	if packaged != "" {
+		return packaged
+	}
+	return dev
 }
 
 // Open loads remedy_core (cached). Fail-closed on missing / ABI mismatch.

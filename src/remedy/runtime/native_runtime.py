@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -25,6 +26,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 #: Zig C ABI (``remedy_core_abi_version``); see ``native/zig/include/remedy_core.h``.
 _ABI_VERSION = 5
@@ -167,19 +170,43 @@ def _dev_checkout_root() -> Path:
     return zig_out / ("bin" if sys.platform == "win32" else "lib")
 
 
-def _core_library_path() -> Path | None:
-    """REMEDY_NATIVE_CORE_LIB, then the packaged roots, then a dev checkout."""
-    explicit = os.environ.get("REMEDY_NATIVE_CORE_LIB")
-    if explicit:
-        candidate = Path(explicit).expanduser()
-        return candidate if candidate.is_file() else None
-    names = _core_library_names()
-    for root in [*_candidate_roots(), _dev_checkout_root()]:
+def _first_library_in(roots: list[Path], names: tuple[str, ...]) -> Path | None:
+    for root in roots:
         for name in names:
             candidate = root / name
             if candidate.is_file():
                 return candidate
     return None
+
+
+def _core_library_path() -> Path | None:
+    """REMEDY_NATIVE_CORE_LIB, then packaged roots, then a dev checkout.
+
+    When both a staged ``desktop/bin`` (or exe-adjacent) copy and a fresher
+    ``native/zig/zig-out`` build exist, prefer the newer zig-out so tauri:dev
+    cannot silently bind a stale same-ABI DLL after a local ``zig build``.
+    ABI mismatches still fail loud in :func:`_open_core_library`.
+    """
+    explicit = os.environ.get("REMEDY_NATIVE_CORE_LIB")
+    if explicit:
+        candidate = Path(explicit).expanduser()
+        return candidate if candidate.is_file() else None
+    names = _core_library_names()
+    packaged = _first_library_in(_candidate_roots(), names)
+    dev = _first_library_in([_dev_checkout_root()], names)
+    if packaged is not None and dev is not None and packaged != dev:
+        try:
+            if dev.stat().st_mtime_ns > packaged.stat().st_mtime_ns:
+                _log.warning(
+                    "remedy_core: preferring newer zig-out %s over staged %s",
+                    dev,
+                    packaged,
+                )
+                return dev
+        except OSError:
+            pass
+        return packaged
+    return packaged or dev
 
 
 class _AbiMismatchError(NativeRuntimeUnavailableError):
@@ -217,10 +244,11 @@ def _open_core_library(library_path: Path) -> Any:
 def core_library() -> Any:
     """The loaded ``remedy_core`` ctypes library at ABI :data:`_ABI_VERSION`.
 
-    Search order: ``REMEDY_NATIVE_CORE_LIB``, the packaged roots next to the
-    interpreter / bundle / ``desktop/bin``, then ``native/zig/zig-out`` of a
-    source checkout. Raises :class:`NativeRuntimeUnavailableError` when no library
-    is found or the ABI differs; there is no Python fallback behind it.
+    Search order: ``REMEDY_NATIVE_CORE_LIB``, packaged roots next to the
+    interpreter / bundle / ``desktop/bin``, then ``native/zig/zig-out``. A
+    newer zig-out wins over a staged copy (dev warning logged). Raises
+    :class:`NativeRuntimeUnavailableError` when no library is found or the
+    ABI differs; there is no Python fallback behind it.
     """
     library_path = _core_library_path()
     if library_path is None:

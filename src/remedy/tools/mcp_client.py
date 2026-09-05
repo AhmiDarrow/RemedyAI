@@ -40,6 +40,30 @@ class MCPClient:
 
     # -- server management ---------------------------------------------------
 
+    @staticmethod
+    def _reap_process(proc: Any) -> None:
+        """kill_tree + close a PipedProcess so job/pipe handles cannot leak."""
+        if proc is None:
+            return
+        with contextlib.suppress(Exception):
+            stdin = getattr(proc, "stdin", None)
+            if stdin is not None and not getattr(stdin, "closed", False):
+                stdin.close()
+        killer = getattr(proc, "kill", None)
+        if not callable(killer):
+            killer = getattr(proc, "kill_tree", None)
+        if callable(killer):
+            with contextlib.suppress(Exception):
+                killer()
+        waiter = getattr(proc, "wait", None)
+        if callable(waiter):
+            with contextlib.suppress(Exception):
+                waiter(2.0)
+        closer = getattr(proc, "close", None)
+        if callable(closer):
+            with contextlib.suppress(Exception):
+                closer()
+
     async def connect(
         self,
         server_name: str,
@@ -88,11 +112,15 @@ class MCPClient:
 
             if result.get("error"):
                 logger.error("MCP init failed for %s: %s", server_name, result["error"])
+                await self.disconnect(server_name)
                 return False
 
             return True
         except Exception as e:
             logger.error("MCP connect failed: %s", e)
+            if server_name in self._processes or server_name in self._servers:
+                with contextlib.suppress(Exception):
+                    await self.disconnect(server_name)
             return False
 
     def _purge_server_tools(self, server_name: str) -> int:
@@ -157,19 +185,8 @@ class MCPClient:
             del self._readers[server_name]
 
         proc = self._processes.pop(server_name, None)
-        if proc:
-            try:
-                if getattr(proc, "stdin", None) is not None:
-                    with contextlib.suppress(Exception):
-                        proc.stdin.close()
-                proc.kill()
-                await asyncio.to_thread(proc.wait, 5.0)
-            except Exception:
-                pass
-            closer = getattr(proc, "close", None)
-            if callable(closer):
-                with contextlib.suppress(Exception):
-                    closer()
+        if proc is not None:
+            await asyncio.to_thread(self._reap_process, proc)
 
         self._servers.pop(server_name, None)
         # Residual tools after disconnect would still match by name/uri.
@@ -455,7 +472,10 @@ class MCPClient:
             logger.exception("MCP reader error for %s", server_name)
         finally:
             self._servers.pop(server_name, None)
-            self._processes.pop(server_name, None)
+            # Winner of pop vs disconnect reaps; loser sees None (no double-kill).
+            owned = self._processes.pop(server_name, None)
+            if owned is not None:
+                await asyncio.to_thread(self._reap_process, owned)
             # Reader exit (crash / EOF) must not leave residual tools callable.
             self._purge_server_tools(server_name)
             if not self._processes:
