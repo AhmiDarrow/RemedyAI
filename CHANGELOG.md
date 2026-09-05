@@ -4,6 +4,53 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-09-05
+
+> **Native runtime cutover.** Local API and Desktop packaging are Go
+> `remedy-runtime` + Zig `remedy_core`. The 0.50 experimental line is superseded.
+
+### Go owns `:7400` (Phase 6 absolute)
+
+- Packaged Desktop and `remedy serve` launch **Go `remedy-runtime` only** — no
+  Python FastAPI/uvicorn on the local API, no PyInstaller `remedy-desktop`
+  sidecar in release.
+- FastAPI `create_app` / `interfaces.api` deleted; Desktop-called routes live in
+  Go `httpapi` (remaining gaps are shrink-only in the desktop API contract).
+- Cognition / ReAct runs in Go with an attached RMDY tool worker (fail-closed).
+  Production prompts advertise Tool ABI ids only (`workspace.*`, `shell.exec`,
+  `computer.*`, `memory.*`, `skill.*`).
+- Unused `agent_*` tool families removed; CLI `remedy tool` / session commands
+  call Go Tool ABI HTTP.
+
+### Provider chat that adjusts instead of hard-failing
+
+- Session binds to an uncredentialed or down local provider fall back to the
+  owner's active cloud provider (including xAI OAuth), then the vision helper,
+  then Scripted Hello/world — chat does not 500.
+- Credentialed-but-unusable providers (HTTP 401/402/403, subscription required
+  such as Poe without a paid API plan) switch once mid-turn with a plain-language
+  status instead of failing the turn.
+- Poe uses `https://api.poe.com/v1` (no localhost `:5001` fall-through). Ollama /
+  llama.cpp / RMB are used only when the endpoint is actually listening.
+- OpenAI-compatible tool round-trips sanitize function names for strict providers
+  (DeepSeek) and keep `assistant.tool_calls` / `tool_call_id` on follow-ups.
+- Packaged installs seed missing user skills on discover.
+
+### Zig host and Tool ABI
+
+- Windows/Linux host ops, ConPTY, and computer/shell Tool ABI surface via
+  `remedy_core` (ABI 5). Process list/kill and uninstaller stops use authorized
+  paths (no raw `ps`/`pkill` soft spawns).
+- RMDY worker exposes `workspace.read` / `list` / `write` / `edit` / `search`,
+  `web.fetch`, `memory.*`, and `skill.*`.
+
+### Ship gates and memory scoping
+
+- `scripts/prepush.py` is the local pre-push gate matching public CI lane for
+  lane; release tags require master + aligned versions + green CI.
+- Build goals and project paths stay session/project memory — they no longer
+  pollute owner-global soul threads or dreams.
+
 ## [0.50.2] - 2026-09-03
 
 > **Experimental.** 0.50.0 through 0.50.2 are an experimental line: the native

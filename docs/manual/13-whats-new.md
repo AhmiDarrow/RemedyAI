@@ -2,14 +2,22 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.50.2 — experimental**. The 0.50 line (native Go/Zig
-runtime, first-run Claimidx service, RemedyConnect hardening) is still being
-proven in daily use; expect rough edges and report what you hit. Installed apps
-update to it automatically. Partner line still starts at 0.31.0.
+Current release: **v0.60.0**. Local API and Desktop packaging are the native
+Go/Zig runtime. Installed apps update automatically. Partner line still starts
+at 0.31.0.
 
 ## Contents
 
-- [0.50.2](#0502---experimental-native-runtime-claimidx-and-connect-hardening) · [0.48.0](#0480---next-evolution-native-runtime) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+- [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-native-runtime-claimidx-and-connect-hardening) · [0.48.0](#0480---next-evolution-native-runtime) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+
+## 0.60.0 - Native runtime cutover
+
+Desktop and `remedy serve` run **Go `remedy-runtime`** on `:7400` with Zig
+`remedy_core` — not Python FastAPI. Chat keeps working when you pick a provider
+that has no key, a down local host, or a blocked subscription: Remedy switches
+to your usual model and says so in plain language. Tools use the Tool ABI
+(`workspace.*`, `shell.exec`, `computer.*`, and friends). Packaged installs seed
+skills automatically.
 
 ## 0.50.2 - Experimental: native runtime, Claimidx, and Connect hardening
 
