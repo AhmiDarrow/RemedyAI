@@ -436,6 +436,34 @@ def test_prompt_assemble_handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert "Remedy" in out["system"] or "partner" in out["system"].lower()
 
 
+def test_prompt_assemble_does_not_register_agent_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Phase 6 absolute: prompt path must not boot the agent_* tool forest."""
+    from remedy.runtime import prompt_assemble as pa
+
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+    (tmp_path / "config.toml").write_text(
+        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
+        encoding="utf-8",
+    )
+    pa._runtime_cache.clear()
+    out = worker._prompt_assemble(
+        {"message": "tool-free harness", "session_id": "sess-tools", "chat_mode": True}
+    )
+    assert isinstance(out["system"], str) and out["system"].strip()
+    cached = next(iter(pa._runtime_cache.values()), None)
+    assert cached is not None
+    assert getattr(cached, "_register_tools", True) is False
+    names = {t.name for t in cached.tool_registry.tools}
+    handlers = set(getattr(cached.tool_registry, "_handlers", {}) or {})
+    assert not names
+    assert "file_read" not in handlers
+    assert "bash_exec" not in handlers
+    assert "memory_search" not in handlers
+
+
 def test_stdio_tool_round_trip_prompt_assemble(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

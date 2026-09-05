@@ -88,9 +88,16 @@ class BasicRuntime(AgentRuntime):
     - Falls back to echo-style responses when no LLM is configured
     """
 
-    def __init__(self, config: AgentConfig, memory: MemoryStore | None = None) -> None:
+    def __init__(
+        self,
+        config: AgentConfig,
+        memory: MemoryStore | None = None,
+        *,
+        register_tools: bool = True,
+    ) -> None:
         super().__init__(config, memory=memory)
         self.tool_registry = ToolRegistry()
+        self._register_tools = bool(register_tools)
         self._system_prompt = _build_system_prompt(
             getattr(config, "persona", None),
             name=getattr(config, "name", None),
@@ -192,8 +199,11 @@ class BasicRuntime(AgentRuntime):
         self.__dict__["_work_roots_live"] = []
         self._session_briefs: dict[str, Any] = {}
         self._learning_loop: Any | None = None
-        self._register_workspace_tools()
-        self._register_memory_tools()
+        # Production prompt.assemble / memory.search use register_tools=False:
+        # Go owns Tool ABI execution; Python only builds soul/skills/memory text.
+        if self._register_tools:
+            self._register_workspace_tools()
+            self._register_memory_tools()
 
     # -- turn-local continuity (properties) ---------------------------------
 

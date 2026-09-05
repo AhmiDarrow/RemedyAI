@@ -71,7 +71,8 @@ async def _get_runtime(config: Any) -> Any:
             cached._llm_api_key = getattr(config, "llm_api_key", cached._llm_api_key)
         return cached
 
-    runtime = BasicRuntime(config)
+    # Tool ABI lives on Go; this harness only needs memory/soul/skills text.
+    runtime = BasicRuntime(config, register_tools=False)
     with suppress(Exception):
         await runtime.memory.initialize()
     _runtime_cache[key] = runtime
