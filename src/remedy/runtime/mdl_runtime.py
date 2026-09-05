@@ -8,6 +8,7 @@ MEDIUM and FULL tiers start on demand and idle-stop after use.
 from __future__ import annotations
 
 import contextlib
+import os
 import logging
 import socket
 import threading

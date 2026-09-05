@@ -52,6 +52,43 @@ def _reset_provider_breaker():
 
 
 @pytest.fixture(autouse=True)
+def _reset_zig_host_spawn_gates():
+    """Write-jail roots and spawn signing state are process-wide in Zig.
+
+    A hop/sandbox test that installs jail roots (or clears the HMAC key) must
+    not make later ``run_hidden`` / ``process_exec_capture_authorized`` calls
+    fail with ACCESS_DENIED across the rest of the suite.
+    """
+    import contextlib
+
+    try:
+        from remedy.core.computer import host_binding as H
+        from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
+    except Exception:  # pragma: no cover - import graph mid-collection
+        yield
+        return
+
+    key = bytes(range(32))
+    os.environ.setdefault("REMEDY_SPAWN_SIGNING_KEY", key.hex())
+
+    def _reset() -> None:
+        with contextlib.suppress(H.HostError, NativeRuntimeUnavailableError, OSError, AttributeError):
+            H.write_jail_clear()
+        with contextlib.suppress(H.HostError, NativeRuntimeUnavailableError, OSError, AttributeError):
+            H.security_clear_signing_key()
+        with contextlib.suppress(H.HostError, NativeRuntimeUnavailableError, OSError, AttributeError, ValueError):
+            H.security_set_signing_key(key)
+            if hasattr(H, "_set_signing_ready"):
+                H._set_signing_ready(True)
+            else:
+                H._signing_key_ready = True
+
+    _reset()
+    yield
+    _reset()
+
+
+@pytest.fixture(autouse=True)
 def _reset_live_model_registry():
     """Ids a provider's endpoint listed are remembered process-wide so the
     validator can accept them; one test's mocked listing must not make another
