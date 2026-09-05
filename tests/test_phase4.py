@@ -1,4 +1,4 @@
-"""Phase 4 leftovers: ChannelKind + API models (FastAPI create_app deleted)."""
+"""Phase 4 leftovers: ChannelKind + FastAPI create_app deleted."""
 
 from __future__ import annotations
 
@@ -16,14 +16,25 @@ class TestChannelKinds:
 
 
 class TestAPI:
-    def test_status_model(self):
-        from remedy.interfaces.api_models import StatusResponse
-
-        assert StatusResponse is not None
-
     def test_fastapi_api_module_gone(self):
         import importlib.util
         from pathlib import Path
 
         assert importlib.util.find_spec("remedy.interfaces.api") is None
         assert not Path("src/remedy/interfaces/api.py").exists()
+
+    def test_fastapi_api_models_gone(self):
+        import importlib.util
+        from pathlib import Path
+
+        assert importlib.util.find_spec("remedy.interfaces.api_models") is None
+        assert not Path("src/remedy/interfaces/api_models.py").exists()
+
+    def test_session_event_hub_twin_gone(self):
+        import importlib.util
+        from pathlib import Path
+
+        assert importlib.util.find_spec("remedy.interfaces.session_events") is None
+        assert not Path("src/remedy/interfaces/session_events.py").exists()
+        assert importlib.util.find_spec("remedy.interfaces.session_public") is None
+        assert not Path("src/remedy/interfaces/session_public.py").exists()
