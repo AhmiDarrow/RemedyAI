@@ -95,7 +95,8 @@ def test_every_route_module_registers(app_and_failures):
 def test_enough_routes_exist_for_this_to_mean_something(app_and_failures):
     app, _ = app_and_failures
     paths = {r.path for r in app.routes if hasattr(r, "methods")}
-    assert len(paths) > 90
+    # Floor tracks intentional FastAPI TestClient shrink (Go owns production).
+    assert len(paths) >= 80
 
 
 def test_no_parameterless_get_returns_a_server_error(app_and_failures):
