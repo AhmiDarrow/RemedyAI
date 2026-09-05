@@ -355,7 +355,7 @@ async def test_host_session_live_open_fail_closed_off_windows() -> None:
     if sys.platform == "win32":
         pytest.skip("Windows uses Zig HostSession open")
     from remedy.core.computer.host_binding import STATUS_UNSUPPORTED
-    from remedy.core.computer import shell_host as sess_mod
+    from remedy.core.computer import host_binding as sess_mod
 
     session = sess_mod.HostSession(host="posix")
     with pytest.raises(HostError) as raised:
@@ -369,7 +369,7 @@ async def test_host_session_live_open_fail_closed_off_windows() -> None:
 async def test_host_session_production_open_is_authorized(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from remedy.core.computer import shell_host as sess_mod
+    from remedy.core.computer import host_binding as sess_mod
 
     opens: list[str] = []
 
