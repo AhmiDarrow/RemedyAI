@@ -108,15 +108,15 @@ def test_ci_covers_every_shipped_runtime_and_artifact() -> None:
 
 def test_release_builds_both_desktop_operating_systems_and_native_cores() -> None:
     jobs = _workflow_jobs("desktop-release.yml")
-    assert {"build-sidecar", "build-tauri", "build-sidecar-linux", "build-tauri-linux"} <= jobs.keys()
+    assert {"build-runtime", "build-tauri", "build-runtime-linux", "build-tauri-linux"} <= jobs.keys()
 
-    windows = _run_commands(jobs["build-sidecar"]) + _run_commands(jobs["build-tauri"])
+    windows = _run_commands(jobs["build-runtime"]) + _run_commands(jobs["build-tauri"])
     assert "remedy-runtime.exe" in windows
     assert "remedy-runtime-x86_64-pc-windows-msvc.exe" in windows
     assert "remedy_core.dll" in windows
     assert "tauri build --bundles nsis" in windows
 
-    linux = _run_commands(jobs["build-sidecar-linux"]) + _run_commands(jobs["build-tauri-linux"])
+    linux = _run_commands(jobs["build-runtime-linux"]) + _run_commands(jobs["build-tauri-linux"])
     assert "remedy-runtime" in linux
     assert "remedy-runtime-x86_64-unknown-linux-gnu" in linux
     assert "libremedy_core.so" in linux
@@ -154,8 +154,8 @@ def test_release_builds_runtime_and_core_without_python_sidecar() -> None:
     """Packaged Desktop is remedy-runtime + Zig core; no PyInstaller sidecar."""
     jobs = _workflow_jobs("desktop-release.yml")
     for name, runtime, core in (
-        ("build-sidecar", "remedy-runtime.exe", "remedy_core.dll"),
-        ("build-sidecar-linux", "remedy-runtime", "libremedy_core.so"),
+        ("build-runtime", "remedy-runtime.exe", "remedy_core.dll"),
+        ("build-runtime-linux", "remedy-runtime", "libremedy_core.so"),
     ):
         job = jobs[name]
         runs = _run_commands(job)
@@ -365,7 +365,7 @@ def test_release_builds_nothing_before_the_commit_is_verified() -> None:
     assert "actions/workflows/ci.yml/runs?head_sha=" in gate, "release must check CI is green"
     assert "sync_version.py check" in gate, "release must check version surfaces"
     assert "merge-base --is-ancestor" in gate, "release must come from master"
-    for name in ("build-sidecar", "build-tauri", "build-sidecar-linux", "build-tauri-linux", "release"):
+    for name in ("build-runtime", "build-tauri", "build-runtime-linux", "build-tauri-linux", "release"):
         job = jobs[name]
         assert isinstance(job, dict)
         needs = job.get("needs")
