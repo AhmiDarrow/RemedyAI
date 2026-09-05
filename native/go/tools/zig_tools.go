@@ -222,6 +222,158 @@ func RegisterZigHostTools(registry *Registry) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:           "computer.move",
+		Version:      1,
+		Description:  "Move the pointer to virtual-screen physical pixels via Zig (hover without click)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskMutation,
+		Capabilities: []string{"computer.input"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["x","y"],
+			"properties":{
+				"x":{"type":"integer"},
+				"y":{"type":"integer"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok","x","y"],
+			"properties":{
+				"ok":{"type":"boolean","const":true},
+				"x":{"type":"integer"},
+				"y":{"type":"integer"}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeComputerMove)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:           "computer.scroll",
+		Version:      1,
+		Description:  "Scroll at virtual-screen pixels via Zig (dy>0 up, dx>0 right)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskMutation,
+		Capabilities: []string{"computer.input"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["x","y"],
+			"properties":{
+				"x":{"type":"integer"},
+				"y":{"type":"integer"},
+				"dx":{"type":"integer"},
+				"dy":{"type":"integer"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok","x","y","dx","dy"],
+			"properties":{
+				"ok":{"type":"boolean","const":true},
+				"x":{"type":"integer"},
+				"y":{"type":"integer"},
+				"dx":{"type":"integer"},
+				"dy":{"type":"integer"}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeComputerScroll)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:           "computer.drag",
+		Version:      1,
+		Description:  "Drag from (x1,y1) to (x2,y2) via Zig interpolated mouse path",
+		Runtime:      RuntimeZig,
+		Risk:         RiskMutation,
+		Capabilities: []string{"computer.input"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["x1","y1","x2","y2"],
+			"properties":{
+				"x1":{"type":"integer"},
+				"y1":{"type":"integer"},
+				"x2":{"type":"integer"},
+				"y2":{"type":"integer"},
+				"steps":{"type":"integer","minimum":1,"maximum":200}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok","x1","y1","x2","y2","steps"],
+			"properties":{
+				"ok":{"type":"boolean","const":true},
+				"x1":{"type":"integer"},
+				"y1":{"type":"integer"},
+				"x2":{"type":"integer"},
+				"y2":{"type":"integer"},
+				"steps":{"type":"integer","minimum":1}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeComputerDrag)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:           "clipboard.read",
+		Version:      1,
+		Description:  "Read OS text clipboard via Zig (CF_UNICODETEXT / X11 CLIPBOARD)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskReadOnly,
+		Capabilities: []string{"computer.read"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["text","chars"],
+			"properties":{
+				"text":{"type":"string"},
+				"chars":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeClipboardRead)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:           "clipboard.write",
+		Version:      1,
+		Description:  "Replace OS text clipboard via Zig (UTF-8)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskMutation,
+		Capabilities: []string{"computer.input"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["text"],
+			"properties":{
+				"text":{"type":"string","maxLength":1000000}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok","chars"],
+			"properties":{
+				"ok":{"type":"boolean","const":true},
+				"chars":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeClipboardWrite)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:           "shell.exec",
 		Version:      1,
 		Description:  "Authorized one-shot argv capture via Zig (absolute argv[0]; no os/exec)",
@@ -478,8 +630,8 @@ func executeComputerClick(_ context.Context, request Request) (Result, error) {
 
 func executeComputerType(_ context.Context, request Request) (Result, error) {
 	var body struct {
-		Text            string `json:"text"`
-		PerCharDelayMS  *int   `json:"per_char_delay_ms"`
+		Text           string `json:"text"`
+		PerCharDelayMS *int   `json:"per_char_delay_ms"`
 	}
 	if err := json.Unmarshal(request.Input, &body); err != nil {
 		return Result{}, ErrInvalidInput
@@ -502,6 +654,122 @@ func executeComputerType(_ context.Context, request Request) (Result, error) {
 	}
 	out, err := json.Marshal(map[string]any{
 		"ok": true, "chars": len([]rune(body.Text)),
+	})
+	return Result{Output: out}, err
+}
+
+func executeComputerMove(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		X *int `json:"x"`
+		Y *int `json:"y"`
+	}
+	if err := json.Unmarshal(request.Input, &body); err != nil {
+		return Result{}, ErrInvalidInput
+	}
+	if body.X == nil || body.Y == nil {
+		return Result{}, ErrInvalidInput
+	}
+	if err := core.MouseMove(int32(*body.X), int32(*body.Y)); err != nil {
+		return Result{}, err
+	}
+	out, err := json.Marshal(map[string]any{"ok": true, "x": *body.X, "y": *body.Y})
+	return Result{Output: out}, err
+}
+
+func executeComputerScroll(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		X  *int `json:"x"`
+		Y  *int `json:"y"`
+		Dx int  `json:"dx"`
+		Dy int  `json:"dy"`
+	}
+	if err := json.Unmarshal(request.Input, &body); err != nil {
+		return Result{}, ErrInvalidInput
+	}
+	if body.X == nil || body.Y == nil {
+		return Result{}, ErrInvalidInput
+	}
+	if err := core.MouseScroll(int32(*body.X), int32(*body.Y), int32(body.Dx), int32(body.Dy)); err != nil {
+		return Result{}, err
+	}
+	out, err := json.Marshal(map[string]any{
+		"ok": true, "x": *body.X, "y": *body.Y, "dx": body.Dx, "dy": body.Dy,
+	})
+	return Result{Output: out}, err
+}
+
+func executeComputerDrag(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		X1    *int `json:"x1"`
+		Y1    *int `json:"y1"`
+		X2    *int `json:"x2"`
+		Y2    *int `json:"y2"`
+		Steps int  `json:"steps"`
+	}
+	if err := json.Unmarshal(request.Input, &body); err != nil {
+		return Result{}, ErrInvalidInput
+	}
+	if body.X1 == nil || body.Y1 == nil || body.X2 == nil || body.Y2 == nil {
+		return Result{}, ErrInvalidInput
+	}
+	steps := body.Steps
+	if steps <= 0 {
+		steps = 12
+	}
+	if steps > 200 {
+		return Result{}, ErrInvalidInput
+	}
+	if err := core.MouseDrag(
+		int32(*body.X1), int32(*body.Y1), int32(*body.X2), int32(*body.Y2), uint32(steps),
+	); err != nil {
+		return Result{}, err
+	}
+	out, err := json.Marshal(map[string]any{
+		"ok": true,
+		"x1": *body.X1, "y1": *body.Y1, "x2": *body.X2, "y2": *body.Y2,
+		"steps": steps,
+	})
+	return Result{Output: out}, err
+}
+
+func executeClipboardRead(_ context.Context, request Request) (Result, error) {
+	if len(request.Input) > 0 {
+		var body map[string]any
+		if err := json.Unmarshal(request.Input, &body); err != nil {
+			return Result{}, ErrInvalidInput
+		}
+		if len(body) != 0 {
+			return Result{}, ErrInvalidInput
+		}
+	}
+	text, err := core.ClipboardGetText()
+	if err != nil {
+		return Result{}, err
+	}
+	out, err := json.Marshal(map[string]any{
+		"text": text, "chars": len([]rune(text)),
+	})
+	return Result{Output: out}, err
+}
+
+func executeClipboardWrite(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		Text *string `json:"text"`
+	}
+	if err := json.Unmarshal(request.Input, &body); err != nil {
+		return Result{}, ErrInvalidInput
+	}
+	if body.Text == nil {
+		return Result{}, ErrInvalidInput
+	}
+	if len(*body.Text) > 1_000_000 {
+		return Result{}, ErrInvalidInput
+	}
+	if err := core.ClipboardSetText(*body.Text); err != nil {
+		return Result{}, err
+	}
+	out, err := json.Marshal(map[string]any{
+		"ok": true, "chars": len([]rune(*body.Text)),
 	})
 	return Result{Output: out}, err
 }
