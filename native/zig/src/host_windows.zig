@@ -2050,7 +2050,7 @@ test "spawnPiped3 delivers stdout on a separate pipe" {
     var buf: [256]u8 = undefined;
     var got: usize = 0;
     var spins: u32 = 0;
-    while (spins < 200) : (spins += 1) {
+    while (spins < 400) : (spins += 1) {
         var avail: DWORD = 0;
         if (PeekNamedPipe(stdout_h.?, null, 0, null, &avail, null) != 0 and avail > 0) {
             var n: DWORD = 0;
@@ -2061,7 +2061,19 @@ test "spawnPiped3 delivers stdout on a separate pipe" {
         }
         if (std.mem.indexOf(u8, buf[0..got], "piped-ok") != null) break;
         const wait = try processWait(spawned.handle, 20);
-        if (wait.exited and avail == 0) break;
+        if (wait.exited) {
+            // Child may exit before PeekNamedPipe observes the last bytes;
+            // drain once more after exit before giving up.
+            avail = 0;
+            if (PeekNamedPipe(stdout_h.?, null, 0, null, &avail, null) != 0 and avail > 0) {
+                var n: DWORD = 0;
+                const want: DWORD = @intCast(@min(buf.len - got, @as(usize, avail)));
+                if (ReadFile(stdout_h.?, buf[got..].ptr, want, &n, null) != 0) {
+                    got += n;
+                }
+            }
+            break;
+        }
         Sleep(20);
     }
     try std.testing.expect(std.mem.indexOf(u8, buf[0..got], "piped-ok") != null);
