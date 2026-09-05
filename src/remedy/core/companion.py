@@ -35,10 +35,9 @@ _COMPANION_RE = re.compile(
 _CLIP_TEXT_CAP = 4_000
 _RECENT_N = 8
 _RECENT_MAX_AGE_S = 3 * 24 * 3600
-_CF_UNICODETEXT = 13
+# HDROP / DIB still go through ctypes — Zig host has text clipboard only.
 _CF_HDROP = 15
 _CF_DIB = 8
-_GMEM_MOVEABLE = 0x0002
 _PROCESS_QUERY_LIMITED = 0x1000
 
 
@@ -82,16 +81,11 @@ _WIN32_PROTOTYPES_SET = False
 
 
 def _declare_win32_clipboard_prototypes() -> None:
-    """Give ctypes the real signatures for the clipboard calls.
+    """ctypes signatures for HDROP / DIB clipboard reads still owned here.
 
-    Without an explicit ``restype`` ctypes assumes ``int`` — 32 bits. Every
-    HANDLE/HGLOBAL these functions return is 64 bits on a 64-bit Python, so the
-    top half was being discarded and the truncated value handed straight back
-    to ``GlobalLock``. Locking a bogus handle can still hand back a non-null
-    pointer, and ``wstring_at`` on that pointer walks unmapped memory: a
-    Windows access violation, which is not a Python exception, cannot be caught
-    by the ``except Exception`` below, and takes the whole process down
-    mid-turn. Declaring the prototypes once is the whole fix.
+    Text get/set lives in Zig ``host_binding``. Without an explicit ``restype``
+    ctypes assumes ``int`` (32 bits); HANDLE values are 64-bit on 64-bit Python,
+    so truncated handles fed to ``GlobalLock`` can AV the process.
     """
     global _WIN32_PROTOTYPES_SET
     if _WIN32_PROTOTYPES_SET or os.name != "nt":
@@ -107,14 +101,10 @@ def _declare_win32_clipboard_prototypes() -> None:
     user32.OpenClipboard.restype = wintypes.BOOL
     user32.CloseClipboard.argtypes = []
     user32.CloseClipboard.restype = wintypes.BOOL
-    user32.EmptyClipboard.argtypes = []
-    user32.EmptyClipboard.restype = wintypes.BOOL
     user32.IsClipboardFormatAvailable.argtypes = [wintypes.UINT]
     user32.IsClipboardFormatAvailable.restype = wintypes.BOOL
     user32.GetClipboardData.argtypes = [wintypes.UINT]
     user32.GetClipboardData.restype = ctypes.c_void_p
-    user32.SetClipboardData.argtypes = [wintypes.UINT, ctypes.c_void_p]
-    user32.SetClipboardData.restype = ctypes.c_void_p
 
     kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
     kernel32.GlobalLock.restype = ctypes.c_void_p
@@ -122,10 +112,6 @@ def _declare_win32_clipboard_prototypes() -> None:
     kernel32.GlobalUnlock.restype = wintypes.BOOL
     kernel32.GlobalSize.argtypes = [ctypes.c_void_p]
     kernel32.GlobalSize.restype = ctypes.c_size_t
-    kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
-    kernel32.GlobalAlloc.restype = ctypes.c_void_p
-    kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
-    kernel32.GlobalFree.restype = ctypes.c_void_p
 
     shell32.DragQueryFileW.argtypes = [
         ctypes.c_void_p,
@@ -139,43 +125,20 @@ def _declare_win32_clipboard_prototypes() -> None:
 
 
 class Win32CompanionBackend:
-    """ctypes Win32 clipboard + foreground (no extra deps)."""
+    """PC companion host: Zig text clipboard; ctypes for HDROP/DIB + foreground."""
 
     def clipboard_text(self) -> str | None:
         if os.name != "nt":
             return None
-        import ctypes
-
-        _declare_win32_clipboard_prototypes()
-
-        user32 = ctypes.windll.user32
-        kernel32 = ctypes.windll.kernel32
-        if not user32.OpenClipboard(None):
-            return None
         try:
-            if not user32.IsClipboardFormatAvailable(_CF_UNICODETEXT):
-                return None
-            handle = user32.GetClipboardData(_CF_UNICODETEXT)
-            if not handle:
-                return None
-            size = int(kernel32.GlobalSize(handle) or 0)
-            ptr = kernel32.GlobalLock(handle)
-            if not ptr:
-                return None
-            try:
-                if size >= 2:
-                    # Read exactly what was allocated, then stop at the
-                    # terminator. An unbounded wstring_at keeps walking until
-                    # it finds a NUL, which is the run-away read if the buffer
-                    # is ever short or unterminated.
-                    return ctypes.wstring_at(ptr, size // 2).split("\x00", 1)[0]
-                return ctypes.wstring_at(ptr)
-            finally:
-                kernel32.GlobalUnlock(handle)
-        except Exception:
+            from remedy.core.computer import host_binding as H
+            from remedy.core.computer.host_binding import HostError
+            from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
+
+            text = H.clipboard_get_text()
+        except (HostError, NativeRuntimeUnavailableError, OSError, AttributeError):
             return None
-        finally:
-            user32.CloseClipboard()
+        return text if text else None
 
     def clipboard_files(self) -> list[str]:
         if os.name != "nt":
@@ -244,37 +207,18 @@ class Win32CompanionBackend:
     def set_clipboard_text(self, text: str) -> bool:
         if os.name != "nt":
             return False
-        import ctypes
-
-        _declare_win32_clipboard_prototypes()
-
-        user32 = ctypes.windll.user32
-        kernel32 = ctypes.windll.kernel32
-        data = (text or "") + "\x00"
-        buf = data.encode("utf-16-le")
-        if not user32.OpenClipboard(None):
-            return False
         try:
-            user32.EmptyClipboard()
-            hglob = kernel32.GlobalAlloc(_GMEM_MOVEABLE, len(buf))
-            if not hglob:
-                return False
-            dest = kernel32.GlobalLock(hglob)
-            if not dest:
-                kernel32.GlobalFree(hglob)
-                return False
-            ctypes.memmove(dest, buf, len(buf))
-            kernel32.GlobalUnlock(hglob)
-            if not user32.SetClipboardData(_CF_UNICODETEXT, hglob):
-                kernel32.GlobalFree(hglob)
-                return False
+            from remedy.core.computer import host_binding as H
+            from remedy.core.computer.host_binding import HostError
+            from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
+
+            H.clipboard_set_text(str(text or ""))
             return True
-        except Exception:
+        except (HostError, NativeRuntimeUnavailableError, OSError, AttributeError):
             return False
-        finally:
-            user32.CloseClipboard()
 
     def foreground(self) -> dict[str, Any]:
+        # Zig foreground_window is hwnd+title only; companion needs pid/exe too.
         if os.name != "nt":
             return {}
         import ctypes
