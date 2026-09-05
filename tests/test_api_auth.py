@@ -129,17 +129,12 @@ def test_auth_middleware_ok_with_bearer(auth_on, tmp_path):
 
 
 def test_status_public(auth_on, tmp_path):
-    tok = ensure_local_api_token(tmp_path)
-    app = create_app(api_key=tok)
-    client = TestClient(app)
-    r = client.get("/api/status")
-    assert r.status_code == 200
-    body = r.json()
-    assert body.get("version")
-    # Unauthenticated liveness must not leak session / memory counts.
-    assert int(body.get("memory_entries") or 0) == 0
-    assert int(body.get("sessions_count") or 0) == 0
-    assert int(body.get("chat_sessions_count") or 0) == 0
+    """Go owns /api/status; TestClient surface must not twin it."""
+    _ = auth_on, tmp_path
+    paths = {getattr(r, "path", "") for r in create_app(api_key="").routes}
+    assert "/api/status" not in paths
+    assert "/api/ping" not in paths
+    assert "/api/turn-active" not in paths
 
 
 def test_self_improve_requires_bearer(auth_on, tmp_path, monkeypatch):
@@ -227,8 +222,11 @@ def test_cors_allows_tauri_https_origin(auth_on, tmp_path):
     app = create_app(api_key=tok)
     client = TestClient(app)
     r = client.get(
-        "/api/status",
-        headers={"Origin": "https://tauri.localhost"},
+        "/api/self-improve",
+        headers={
+            "Origin": "https://tauri.localhost",
+            "Authorization": f"Bearer {tok}",
+        },
     )
     assert r.status_code == 200
     assert r.headers.get("access-control-allow-origin") == "https://tauri.localhost"

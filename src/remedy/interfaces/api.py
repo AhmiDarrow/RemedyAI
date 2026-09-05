@@ -42,7 +42,8 @@ from remedy.interfaces.api_support import (
 
 logger = logging.getLogger(__name__)
 
-# Quiet TestClient health stubs — slow responses still warn; failures stay loud.
+# High-frequency host polls (Go owns production). Failures stay loud; names
+# remain so TestClient request-log helpers match historical quiet paths.
 _SLOW_EXEMPT_PATHS = frozenset(
     {
         "/api/status",
@@ -175,7 +176,7 @@ def create_app(
 
         # Prime the optional native route once at startup. Compatibility mode
         # returns immediately; auto/native probe only signed, bundled paths and
-        # fall back to Python when unavailable. Keep /api/ping probe-free.
+        # fall back to Python when unavailable (Go owns production /api/ping).
         try:
             import asyncio as _asyncio_native
 
@@ -637,12 +638,9 @@ def create_app(
     )
 
     # Local agent API: auth is ON by default when a key is available.
-    # Public allowlist is intentionally small (health + docs + token bootstrap).
+    # Public allowlist is intentionally small (docs + token bootstrap).
+    # Go owns production /api/ping|/api/status|/api/turn-active and the SPA.
     _AUTH_PUBLIC = {
-        "/dashboard",
-        "/api/status",
-        "/api/ping",
-        "/api/turn-active",
         "/api/auth/local-bootstrap",
         # Google OAuth browser redirect (state is one-time secret; no bearer).
         "/api/assistant/google/callback",
@@ -783,6 +781,7 @@ def create_app(
         from remedy.core.runtime_identity import is_desktop_sidecar
 
         desktop = is_desktop_sidecar()
+        # High-frequency polls at DEBUG (Go owns most of these in production).
         quiet = method == "OPTIONS" or path in (
             "/api/status",
             "/api/ping",
@@ -827,7 +826,7 @@ def create_app(
     from remedy.interfaces.routes import register_all_routes
 
     register_all_routes(app, runtime=runtime, gateway=gateway, memory=memory)
-    # WebUI SPA is Go-owned (httpapi/webui.go); TestClient keeps /dashboard only.
+    # WebUI SPA is Go-owned (httpapi/webui.go); no TestClient /dashboard twin.
     return app
 
 
@@ -839,53 +838,3 @@ def yaml_schema(app: FastAPI) -> str:
     out = io.StringIO()
     yaml.dump(data, out, default_flow_style=False, allow_unicode=True, sort_keys=False)
     return out.getvalue()
-
-
-# Minimal TestClient stub page — production SPA is Go httpapi/webui.go.
-DASHBOARD_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Remedy AI - Dashboard</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: system-ui, sans-serif; background: #0a0a1a; color: #e0e0e0; padding: 2rem; }
-        .container { max-width: 900px; margin: 0 auto; }
-        h1 { color: #7c3aed; font-size: 2rem; margin-bottom: 0.5rem; }
-        .subtitle { color: #888; margin-bottom: 2rem; }
-        .card { background: #12122a; border: 1px solid #1e1e3e; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; }
-        .card h2 { color: #a78bfa; margin-bottom: 1rem; font-size: 1.1rem; }
-        .stat { display: flex; justify-content: space-between; padding: 0.3rem 0; border-bottom: 1px solid #1e1e3e; }
-        .stat:last-child { border-bottom: none; }
-        .stat-label { color: #888; }
-        .stat-value { color: #e0e0e0; font-weight: 600; }
-        .endpoint { font-family: monospace; background: #0a0a1a; padding: 0.5rem 1rem; border-radius: 4px; margin: 0.3rem 0; }
-        .method { color: #7c3aed; font-weight: bold; margin-right: 0.5rem; }
-        .path { color: #e0e0e0; }
-        .ok { color: #22c55e; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Remedy AI</h1>
-        <p class="subtitle">TestClient stub dashboard v{{version}} — production API is Go remedy-runtime</p>
-
-        <div class="card">
-            <h2>Status</h2>
-            <div class="stat"><span class="stat-label">Version</span><span class="stat-value">{{version}}</span></div>
-            <div class="stat"><span class="stat-label">API</span><span class="stat-value ok">Online</span></div>
-        </div>
-
-        <div class="card">
-            <h2>TestClient stubs</h2>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/ping</span> — liveness</div>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/status</span> — system status</div>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/turn-active</span> — stream lock</div>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/self-improve</span> — self-improve clock</div>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/metrics</span> — metrics</div>
-            <div class="endpoint"><span class="method">GET</span><span class="path">/api/notifications</span> — notifications</div>
-        </div>
-    </div>
-</body>
-</html>"""

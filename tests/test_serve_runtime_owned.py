@@ -292,12 +292,13 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "claimidx_ops",
         "auth",
         "settings",
+        "misc",
     ):
         assert not re.search(rf"\bregister_{mod}_routes\s*\(", routes_init)
         assert importlib.util.find_spec(f"remedy.interfaces.routes.{mod}") is None
-    # misc keeps /dashboard only; Go owns app/command + projects/scan.
-    assert re.search(r"\bregister_misc_routes\s*\(", routes_init)
-    assert importlib.util.find_spec("remedy.interfaces.routes.misc") is not None
+    # status keeps notifications/metrics/self-improve; Go owns ping/status/turn-active.
+    assert re.search(r"\bregister_status_routes\s*\(", routes_init)
+    assert importlib.util.find_spec("remedy.interfaces.routes.status") is not None
     assert not re.search(r"\bregister_sessions_routes\s*\(", routes_init)
     assert importlib.util.find_spec("remedy.interfaces.routes.sessions") is None
     assert importlib.util.find_spec("remedy.core.computer.host_conpty") is None
@@ -347,6 +348,10 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/app/command",
         "/api/openapi.json",
         "/api/openapi.yaml",
+        "/dashboard",
+        "/api/ping",
+        "/api/status",
+        "/api/turn-active",
         "/api/continuity/dashboard",
         "/api/nanoswarm/status",
         "/api/nanoswarm/token/status",
