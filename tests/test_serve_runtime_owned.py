@@ -270,7 +270,14 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
     routes_init = Path("src/remedy/interfaces/routes/__init__.py").read_text(
         encoding="utf-8"
     )
-    for mod in ("i18n", "usage", "vision", "telephony"):
+    for mod in (
+        "i18n",
+        "usage",
+        "vision",
+        "telephony",
+        "nanoswarm",
+        "assistant",
+    ):
         assert not re.search(rf"\bregister_{mod}_routes\s*\(", routes_init)
         assert importlib.util.find_spec(f"remedy.interfaces.routes.{mod}") is None
 
@@ -286,16 +293,26 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/telephony/status",
         "/api/auth/xai",
         "/api/auth/xai/login",
+        "/api/assistant/status",
         "/api/assistant/google",
         "/api/memory/search",
         "/api/memory/facts",
         "/api/memory/persona-wipe",
+        "/api/memory/import",
+        "/api/session-summaries",
+        "/api/handoffs",
         "/api/skills/packs",
         "/api/skills/metrics/reuse",
         "/api/skills/learning/summary",
         "/api/skills/export",
         "/api/continuity/dashboard",
+        "/api/nanoswarm/status",
         "/api/nanoswarm/token/status",
+        "/api/nanoswarm/classify",
+        "/api/goals",
+        "/api/life-tasks/current",
+        "/api/checkpoints/latest",
+        "/api/partner/identity/export",
         "/api/sessions/s1/todos",
         "/api/sessions/s1/timeline",
         "/api/sessions/s1/export",
@@ -315,10 +332,15 @@ def test_python_routes_omit_phase4_go_owned_modules() -> None:
         "/api/sessions/s1/steer",
         "/api/sessions/s1/time-travel",
         "/api/memory/persona-wipe",
+        "/api/memory/import",
+        "/api/partner/identity/export",
+        "/api/partner/identity/import",
+        "/api/goals",
+        "/api/life-tasks/act",
+        "/api/nanoswarm/classify",
     ):
         r = client.post(path, json={})
         assert _absent(r.status_code), f"{path} still registered ({r.status_code})"
-
 
 def test_rmdy_tool_worker_entry_still_present() -> None:
     spec = importlib.util.find_spec("remedy.runtime.rmdy_tool_worker")

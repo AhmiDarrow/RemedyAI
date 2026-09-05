@@ -1,4 +1,4 @@
-"""TestClient-only: core skills HTTP routes (+ legacy summaries/handoffs).
+"""TestClient-only: core skills HTTP routes.
 
 Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
 Memory search/facts/wipe and skills extras (packs/metrics/export/…) are Go-owned.
@@ -392,45 +392,4 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         }
 
     # skills export/import/archive-unused live on Go httpapi only.
-
-    # Generic CI webhook POST /api/webhook/{source} lives on Go httpapi only.
-
-    # -- legacy session summaries  -------------------------------------------
-    @app.get("/api/session-summaries")
-    async def list_session_summaries(limit: int = Query(default=10, le=50)):
-        if memory is None:
-            return {"sessions": []}
-        summaries = await memory.list_sessions(limit=limit)
-        return {
-            "sessions": [
-                {
-                    "session_id": s.session_id,
-                    "started_at": s.started_at.isoformat() if s.started_at else None,
-                    "ended_at": s.ended_at.isoformat() if s.ended_at else None,
-                    "tasks_completed": s.tasks_completed,
-                    "skills_created": s.skills_created,
-                    "summary": s.summary,
-                }
-                for s in summaries
-            ]
-        }
-
-    # -- handoffs  -----------------------------------------------------------
-    @app.get("/api/handoffs")
-    async def list_handoffs(limit: int = Query(default=10, le=50)):
-        if memory is None:
-            return {"handoffs": []}
-        handoffs = await memory.list_handoffs(limit=limit)
-        return {
-            "handoffs": [
-                {
-                    "id": str(h.id),
-                    "title": h.title,
-                    "content": h.content[:200],
-                    "acknowledged": h.acknowledged,
-                    "created_at": h.created_at.isoformat() if h.created_at else None,
-                }
-                for h in handoffs
-            ]
-        }
-
+    # session-summaries / handoffs are not on the TestClient surface.
