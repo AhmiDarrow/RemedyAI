@@ -203,6 +203,243 @@ def assemble_prompt(inp: Mapping[str, Any]) -> Mapping[str, Any]:
             loop.close()
 
 
+def slim_epoch(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Soft-epoch Memory Harness: prune/offload/brief for Go cognition.
+
+    Fail-soft: on any error returns the input system/text unchanged with
+    ``ok=false`` so the Go engine keeps its local compact.
+    """
+    try:
+        return _run_coro(_slim_epoch_async(inp))
+    except Exception as exc:  # noqa: BLE001 — RMDY must never crash the turn
+        logger.warning("prompt.slim_epoch failed: %s", exc)
+        return {
+            "ok": False,
+            "system": str(inp.get("system") or ""),
+            "text": str(inp.get("text") or ""),
+            "brief": "",
+            "error": str(exc)[:240],
+        }
+
+
+def should_continue(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Decide whether a text-only model completion should re-arm tools."""
+    try:
+        return _run_coro(_should_continue_async(inp))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("prompt.should_continue failed: %s", exc)
+        # Fail open toward continuing work when tools already ran.
+        tools = int(inp.get("tool_count") or 0)
+        return {
+            "ok": False,
+            "continue": tools > 0,
+            "nudge": (
+                "Work is unfinished — call tools now via the function-calling API. "
+                "Do not narrate; execute."
+                if tools > 0
+                else ""
+            ),
+            "error": str(exc)[:240],
+        }
+
+
+async def _slim_epoch_async(inp: Mapping[str, Any]) -> dict[str, Any]:
+    from remedy.memory.harness.brief import brief_to_context_block
+    from remedy.memory.harness.send_policy import (
+        _ensure_session_brief,
+        apply_auto_harness_send_policy,
+        slim_messages_mid_turn,
+    )
+
+    system = str(inp.get("system") or "")
+    goal = str(inp.get("goal") or inp.get("message") or "")
+    text = str(inp.get("text") or "")
+    checkpoint = str(inp.get("checkpoint") or "")
+    session_id = str(inp.get("session_id") or "").strip()
+    epoch = int(inp.get("epoch") or 0)
+    total_steps = int(inp.get("total_steps") or 0)
+    home_dir = str(inp.get("home_dir") or "").strip() or None
+    project_path = str(inp.get("project_path") or "").strip() or None
+    provider = str(inp.get("provider") or "").strip() or None
+    model = str(inp.get("model") or "").strip() or None
+    base_url = str(inp.get("base_url") or "").strip() or None
+
+    runtime = await get_cached_runtime(
+        home_dir=home_dir,
+        project_path=project_path,
+        provider=provider,
+        model=model,
+        base_url=base_url,
+    )
+    if session_id:
+        with suppress(Exception):
+            runtime._session_id = session_id
+
+    working = text.strip()
+    if checkpoint.strip():
+        working = (working + "\n\n" + checkpoint.strip()).strip()
+
+    messages: list[dict[str, Any]] = []
+    if system.strip():
+        messages.append({"role": "system", "content": system})
+    if goal.strip():
+        messages.append({"role": "user", "content": goal})
+    if working:
+        messages.append({"role": "assistant", "content": working})
+
+    # Update Session Brief with epoch checkpoint (history thread).
+    brief = _ensure_session_brief(runtime, session_id)
+    summary = checkpoint.strip() or working[-600:]
+    if summary:
+        with suppress(Exception):
+            brief.append_history_thread(
+                f"Epoch {epoch} @ step {total_steps}: {summary[:500]}"
+            )
+            if goal.strip() and not (brief.intent or "").strip():
+                brief.intent = goal.strip()[:400]
+            brief.compress_count = int(getattr(brief, "compress_count", 0) or 0) + 1
+            brief.touch()
+
+    from remedy.core.react_policy import TOOL_RESULT_CHAR_CAP as _trc
+
+    tool_cap = int(_trc or 128_000)
+    # Mid-turn slim first (cheap prune/offload), then full auto policy for brief.
+    messages = slim_messages_mid_turn(
+        runtime,
+        messages,
+        session_id=session_id,
+        tool_result_char_cap=tool_cap,
+    )
+    messages, meta = apply_auto_harness_send_policy(
+        runtime,
+        messages,
+        user_text=goal,
+        session_id=session_id,
+        tool_result_char_cap=128_000,
+    )
+
+    out_system = system
+    out_text = working
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        role = str(m.get("role") or "")
+        content = m.get("content")
+        if not isinstance(content, str):
+            continue
+        if role == "system" and content.strip():
+            # Prefer the first (primary) system; later injects are brief pointers.
+            if out_system == system or "[Working memory]" in content or "[Memory Harness]" in content:
+                if content.startswith("[Working memory]") or content.startswith("[Memory Harness]"):
+                    # Keep primary system; brief returned separately.
+                    pass
+                else:
+                    out_system = content
+        elif role == "assistant" and content.strip():
+            out_text = content
+
+    brief_block = ""
+    with suppress(Exception):
+        brief_block = brief_to_context_block(brief, max_chars=1200) or ""
+    # Also pick up any harness inject that landed as a late system message.
+    for m in reversed(messages):
+        if not isinstance(m, dict) or m.get("role") != "system":
+            continue
+        c = str(m.get("content") or "")
+        if "[Working memory]" in c or "[Memory Harness]" in c or "Session Brief" in c:
+            brief_block = c.strip()
+            break
+
+    # Lean system: primary system + brief block (avoid duplicating full sludge).
+    if brief_block and brief_block not in out_system:
+        # Cap primary system share so brief always fits.
+        sys_cap = 12_000
+        lean = out_system if len(out_system) <= sys_cap else out_system[:sys_cap] + "\n…"
+        out_system = lean.rstrip() + "\n\n" + brief_block
+
+    return {
+        "ok": True,
+        "system": out_system,
+        "text": out_text,
+        "brief": brief_block,
+        "meta": {
+            "epoch": epoch,
+            "total_steps": total_steps,
+            "level": (meta or {}).get("level"),
+            "est": (meta or {}).get("est"),
+            "compress_count": int(getattr(brief, "compress_count", 0) or 0),
+        },
+    }
+
+
+async def _should_continue_async(inp: Mapping[str, Any]) -> dict[str, Any]:
+    from remedy.core.react_policy import (
+        UNFINISHED_WORK_NUDGE,
+        agency_rearm_nudge_message,
+        agency_tool_promise_claim,
+        message_wants_tools,
+        turn_has_unfinished_work,
+    )
+
+    goal = str(inp.get("goal") or inp.get("message") or "")
+    text = str(inp.get("text") or "")
+    session_id = str(inp.get("session_id") or "").strip() or None
+    tool_count = int(inp.get("tool_count") or 0)
+    chat_mode = bool(inp.get("chat_mode") or False)
+    plan_mode = bool(inp.get("plan_mode") or False)
+    home_dir = str(inp.get("home_dir") or "").strip() or None
+    project_path = str(inp.get("project_path") or "").strip() or None
+
+    if chat_mode:
+        return {"ok": True, "continue": False, "nudge": "", "reason": "chat_mode"}
+
+    runtime = await get_cached_runtime(home_dir=home_dir, project_path=project_path)
+    if session_id:
+        with suppress(Exception):
+            runtime._session_id = session_id
+
+    tools_enabled = not plan_mode  # plan may still have read tools; treat as enabled
+    unfinished = bool(
+        turn_has_unfinished_work(
+            runtime,
+            session_id=session_id,
+            tools_enabled=tools_enabled,
+            tool_steps_this_turn=tool_count,
+        )
+    )
+    promise = bool(agency_tool_promise_claim(text))
+    wants = bool(message_wants_tools(goal)) and tool_count == 0
+
+    cont = unfinished or promise or (wants and not plan_mode) or tool_count > 0
+    # If tools already ran and model stops with prose, always re-arm until budget.
+    if tool_count > 0:
+        cont = True
+
+    nudge = ""
+    reason = "done"
+    if cont:
+        if promise and not unfinished:
+            msg = agency_rearm_nudge_message()
+            nudge = str(msg.get("content") or msg.get("text") or "")
+            if not nudge:
+                nudge = (
+                    "Do not only say you will use tools. Call tools now via "
+                    "the function-calling API."
+                )
+            reason = "agency_promise"
+        else:
+            nudge = UNFINISHED_WORK_NUDGE
+            reason = "unfinished" if unfinished or tool_count > 0 else "wants_tools"
+
+    return {
+        "ok": True,
+        "continue": bool(cont),
+        "nudge": nudge,
+        "reason": reason,
+        "tool_count": tool_count,
+    }
+
+
 async def get_cached_runtime(
     *,
     home_dir: str | None = None,

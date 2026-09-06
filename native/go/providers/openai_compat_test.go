@@ -165,6 +165,31 @@ func TestBuildMessagesIncludesToolCallIDs(t *testing.T) {
 	}
 }
 
+func TestFitLocalRequestShrinksOverBudget(t *testing.T) {
+	sys := strings.Repeat("SYSTEM ", 4000)
+	msgs := []map[string]any{
+		{"role": "system", "content": sys},
+		{"role": "user", "content": "build"},
+		{"role": "tool", "content": strings.Repeat("BODY ", 2000)},
+	}
+	tools := []map[string]any{
+		{"type": "function", "function": map[string]any{"name": "workspace_read", "description": "r", "parameters": map[string]any{}}},
+		{"type": "function", "function": map[string]any{"name": "calendar_list", "description": "c", "parameters": map[string]any{}}},
+	}
+	outM, outT, meta := FitLocalRequest(msgs, tools, 4096)
+	if meta["est_after"].(int) >= meta["est_before"].(int) && meta["est_before"].(int) > meta["prompt_budget"].(int) {
+		// Must have attempted shrink levels when over budget.
+		levels, _ := meta["levels"].([]string)
+		if len(levels) == 0 || levels[0] == "ok" {
+			t.Fatalf("meta=%v", meta)
+		}
+	}
+	if len(outT) == 0 {
+		t.Fatal("must keep some tools")
+	}
+	_ = outM
+}
+
 func TestBuildMessagesNeverEmitsOrphanToolRole(t *testing.T) {
 	msgs := buildMessages(cognition.Turn{
 		Goal: "continue",

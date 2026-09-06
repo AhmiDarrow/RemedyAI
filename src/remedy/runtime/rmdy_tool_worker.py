@@ -602,6 +602,18 @@ def _prompt_assemble(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return assemble_prompt(inp)
 
 
+def _prompt_slim_epoch(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.prompt_assemble import slim_epoch
+
+    return slim_epoch(inp)
+
+
+def _prompt_should_continue(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.prompt_assemble import should_continue
+
+    return should_continue(inp)
+
+
 def _voice_speak(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     from remedy.runtime.voice_vision_rmdy import voice_speak
 
@@ -731,6 +743,8 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("web.search", 1): _web_search,
     ("web.fetch", 1): _web_fetch,
     ("prompt.assemble", 1): _prompt_assemble,
+    ("prompt.slim_epoch", 1): _prompt_slim_epoch,
+    ("prompt.should_continue", 1): _prompt_should_continue,
     ("voice.speak", 1): _voice_speak,
     ("voice.transcribe", 1): _voice_transcribe,
     ("voice.install", 1): _voice_install,
