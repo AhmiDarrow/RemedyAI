@@ -146,6 +146,10 @@ func (b *HostBridge) hostConnectedLocked() bool {
 func (b *HostBridge) hostDriver() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	return b.hostDriverLocked()
+}
+
+func (b *HostBridge) hostDriverLocked() string {
 	if !b.hostConnectedLocked() {
 		return ""
 	}
