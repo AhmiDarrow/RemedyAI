@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
@@ -9,9 +11,13 @@ import (
 )
 
 func TestInjectShellCwdScopeMatrix(t *testing.T) {
-	proj := `C:\proj`
-	subdir := `C:\proj\src`
-	outside := `D:\other`
+	// Use host-native paths — hardcoded Windows paths fail pathUnder on Linux CI.
+	proj := t.TempDir()
+	subdir := filepath.Join(proj, "src")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
 
 	must := func(cwd, root, scope, want string) {
 		t.Helper()

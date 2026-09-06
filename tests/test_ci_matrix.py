@@ -295,6 +295,9 @@ def test_prepush_gate_runs_every_public_ci_command() -> None:
 
     # The Linux suite is reproduced from this checkout when the host is Windows.
     assert any(step.command == "__wsl_pytest__" for step in prepush.LINUX.steps)
+    assert any(step.command == "__wsl_go_test__" for step in prepush.LINUX.steps), (
+        "Windows go test alone misses Linux filepath traps; WSL go test is required"
+    )
     assert prepush.PYTHON.serial_after_others, "pytest must not share the box with cargo/gradle"
 
 
@@ -315,9 +318,10 @@ def test_prepush_python_lane_consumes_the_native_lane_core() -> None:
     assert names.index("native core present") < names.index("pytest")
 
     # The WSL lane builds its own .so (into /tmp, never the checkout's zig-out)
-    # and hands it to the loader, when WSL has zig.
+    # and hands it to the loader, when WSL has zig. It also runs Linux go test.
     linux = [s.command for s in prepush.LINUX.steps]
-    assert linux.index(prepush.WSL_ZIG_BUILD) < linux.index(prepush.WSL_PYTEST)
+    assert linux.index(prepush.WSL_ZIG_BUILD) < linux.index(prepush.WSL_GO_TEST)
+    assert linux.index(prepush.WSL_GO_TEST) < linux.index(prepush.WSL_PYTEST)
     assert prepush.WSL_NATIVE_CORE_LIB.startswith("/tmp/")
     assert prepush.REQUIRED_NATIVE_ABI == 5
     if prepush.IS_WINDOWS and prepush.shutil.which("wsl"):
@@ -332,6 +336,9 @@ def test_prepush_python_lane_consumes_the_native_lane_core() -> None:
         assert pytest_cmd
         assert "rm -f" in pytest_cmd and "libremedy_core.so" in pytest_cmd
         assert (f"REMEDY_NATIVE_CORE_LIB={prepush.WSL_NATIVE_CORE_LIB}" in pytest_cmd) == prepush._wsl_has_zig()
+        go_cmd = prepush._wsl_go_test_command()
+        assert go_cmd and "go test ./..." in go_cmd
+        assert "native/go" in go_cmd.replace("\\", "/")
 
 
 def test_prepush_hook_is_wired_and_executable() -> None:

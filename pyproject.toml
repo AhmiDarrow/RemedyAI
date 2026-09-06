@@ -136,6 +136,9 @@ quote-style = "double"
 
 [tool.mypy]
 python_version = "3.12"
+# Force Linux stubs on every host so Windows local mypy matches Linux CI
+# (os.startfile / ctypes.windll are absent there).
+platform = "linux"
 ignore_missing_imports = true
 warn_unused_ignores = true
 check_untyped_defs = true

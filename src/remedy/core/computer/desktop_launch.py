@@ -48,6 +48,14 @@ def _require_windows() -> None:
         raise RuntimeError("Desktop computer use requires Windows")
 
 
+def _windows_startfile(target: str) -> None:
+    """Call ``os.startfile`` without assuming the attribute exists (Linux mypy)."""
+    startfile = getattr(os, "startfile", None)
+    if startfile is None:
+        raise RuntimeError("os.startfile is only available on Windows")
+    startfile(target)
+
+
 def _require_linux() -> None:
     if sys.platform == "win32":
         raise RuntimeError("POSIX desktop computer use only")
@@ -116,7 +124,7 @@ def open_app(app: str, *, search_dirs: list[Path] | None = None) -> dict[str, An
     key = raw.lower()
     target = aliases.get(key, raw)
     if key == "settings" and target == "ms-settings:":
-        os.startfile(target)
+        _windows_startfile(target)
         return {"app": raw, "method": "startfile", "target": target}
     path_candidate = Path(target)
     if search_dirs and not path_candidate.is_absolute():
@@ -174,7 +182,7 @@ def open_app(app: str, *, search_dirs: list[Path] | None = None) -> dict[str, An
         if hit is not None:
             lnk = Path(hit.path)
             if lnk.is_file() and lnk.suffix.lower() == ".lnk":
-                os.startfile(str(lnk))  # noqa: S606 — trusted scan root
+                _windows_startfile(str(lnk))  # noqa: S606 — trusted scan root
                 return {
                     "app": raw,
                     "method": "appliance",

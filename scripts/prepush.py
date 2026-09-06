@@ -113,6 +113,7 @@ def native_core_library_path() -> Path:
 # Sentinel commands resolved at run time (see _run_lane).
 WSL_PYTEST = "__wsl_pytest__"
 WSL_ZIG_BUILD = "__wsl_zig_build__"
+WSL_GO_TEST = "__wsl_go_test__"
 REQUIRE_NATIVE_CORE = "__require_native_core__"
 NATIVE_CORE_ENV = {"REMEDY_NATIVE_CORE_LIB": str(native_core_library_path())}
 WSL_ZIG_PREFIX = "/tmp/remedy-prepush-zig"
@@ -162,9 +163,11 @@ PYTHON = Lane(
 
 LINUX = Lane(
     "linux",
-    "Full pytest suite on Linux (WSL)",
+    "Linux CI surface under WSL (Go native + pytest)",
     (
         Step("zig build (linux)", WSL_ZIG_BUILD),
+        # native-core (ubuntu) — Windows go test alone misses filepath.ToSlash traps.
+        Step("go test (linux)", WSL_GO_TEST),
         Step("pytest (linux)", WSL_PYTEST),
     ),
 )
@@ -323,6 +326,21 @@ def _wsl_has_zig() -> bool:
     return proc.returncode == 0 and bool(proc.stdout.strip())
 
 
+@functools.cache
+def _wsl_has_go() -> bool:
+    """Whether a login shell inside WSL can find ``go``."""
+    if not IS_WINDOWS or shutil.which("wsl") is None:
+        return False
+    proc = subprocess.run(
+        ["wsl", "-e", "bash", "-lc", "command -v go"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return proc.returncode == 0 and bool(proc.stdout.strip())
+
+
 def _wsl_zig_abi_assert() -> str:
     """Shell snippet: load the WSL-installed .so and refuse a stale ABI.
 
@@ -399,6 +417,21 @@ def _wsl_pytest_command() -> str | None:
     return f'wsl -e bash -lc "{inner}"'
 
 
+def _wsl_go_test_command() -> str | None:
+    """``native-core`` Linux ``go test ./...``, from this checkout under WSL.
+
+    Windows ``go test`` alone misses filepath separator traps that fail on
+    ubuntu-latest in ~30s. Returns None on a non-Windows host; "" without WSL.
+    """
+    if not IS_WINDOWS:
+        return None
+    if shutil.which("wsl") is None:
+        return ""
+    go_dir = _wsl_path(ROOT / "native" / "go")
+    inner = f"cd {go_dir} && go test ./..."
+    return f'wsl -e bash -lc "{inner}"'
+
+
 # --------------------------------------------------------------------------- #
 # Running the matrix
 # --------------------------------------------------------------------------- #
@@ -435,15 +468,18 @@ def _run_lane(lane: Lane, scratch_home: Path, log_dir: Path) -> LaneResult:
                     return LaneResult(lane, False, time.monotonic() - started, step.name, log)
                 fh.write(f"native core: {library}\n")
                 continue
-            if command in (WSL_PYTEST, WSL_ZIG_BUILD):
-                resolved = (
-                    _wsl_pytest_command() if command == WSL_PYTEST else _wsl_zig_build_command()
-                )
+            if command in (WSL_PYTEST, WSL_ZIG_BUILD, WSL_GO_TEST):
+                if command == WSL_PYTEST:
+                    resolved = _wsl_pytest_command()
+                elif command == WSL_ZIG_BUILD:
+                    resolved = _wsl_zig_build_command()
+                else:
+                    resolved = _wsl_go_test_command()
                 if resolved is None:
                     fh.write("skipped: host is already Linux\n")
                     continue
                 if resolved == "":
-                    fh.write("WSL is not installed; Linux pytest cannot run here\n")
+                    fh.write("WSL is not installed; Linux CI surface cannot run here\n")
                     return LaneResult(
                         lane, False, time.monotonic() - started, step.name, log
                     )
@@ -454,6 +490,14 @@ def _run_lane(lane: Lane, scratch_home: Path, log_dir: Path) -> LaneResult:
                         "WSL to exercise library loading there.\n"
                     )
                     continue
+                if command == WSL_GO_TEST and not _wsl_has_go():
+                    fh.write(
+                        "go is not installed inside WSL; refusing to skip Linux go test "
+                        "(native-core ubuntu CI would catch filepath traps Windows misses).\n"
+                    )
+                    return LaneResult(
+                        lane, False, time.monotonic() - started, step.name, log
+                    )
                 command = resolved
             fh.write(f"\n=== {step.name}: {command}  (cwd={step.cwd})\n")
             fh.flush()
