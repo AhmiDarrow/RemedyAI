@@ -296,6 +296,15 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 			safeEmit("@@status:Waiting for your approval…\n")
 			return nil
 		}
+		if errors.Is(out.Err, cognition.ErrNoProgress) {
+			safeEmit("@@status:Stuck repeating the same steps — change approach or nudge Remedy, then continue.\n")
+			return fmt.Errorf("%w: repeated the same tools without progress", out.Err)
+		}
+		if errors.Is(out.Err, cognition.ErrToolCallLimit) || errors.Is(out.Err, cognition.ErrIterationLimit) {
+			// Absolute safety net only — not a normal task budget.
+			safeEmit("@@status:Safety ceiling hit after a pathological loop. Start a new message to continue the same work — soft epochs normally keep builds going.\n")
+			return fmt.Errorf("%w (safety ceiling, not a task budget)", out.Err)
+		}
 		return out.Err
 	}
 	return nil
@@ -359,7 +368,11 @@ func (r *CognitionTurnRunner) runEngine(
 	}
 	cfg := r.Config
 	if req.MaxIterations > 0 {
+		// Explicit budgets (e.g. hive foragers) are absolute ceilings only.
 		cfg.MaxIterations = req.MaxIterations
+		if cfg.SoftEpochSteps <= 0 || cfg.SoftEpochSteps > req.MaxIterations {
+			cfg.SoftEpochSteps = -1 // disable soft epochs inside a capped budget
+		}
 	}
 	var gate cognition.ApprovalGate
 	if r.Approvals != nil {
@@ -388,6 +401,12 @@ func (r *CognitionTurnRunner) runEngine(
 		Policy:       policy,
 		Config:       cfg,
 		ApprovalGate: gate,
+		EpochHook: func(epoch, totalSteps, toolCalls int, _ *cognition.Turn) {
+			safeEmit(fmt.Sprintf(
+				"@@status:Checkpoint %d — compacted context after %d steps / %d tools; continuing until the work is done…\n",
+				epoch, totalSteps, toolCalls,
+			))
+		},
 	}
 	return engine.RunTurn(ctx, seed)
 }

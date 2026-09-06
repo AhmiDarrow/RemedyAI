@@ -252,8 +252,9 @@ def _env_bool(name: str, default: bool = True) -> bool:
 # Same operating model as Grok Build: run until the task is finished.
 REACT_EPOCH_STEPS = _env_int("REMEDY_REACT_EPOCH_STEPS", 256, lo=16, hi=2_000)
 # Absolute safety ceiling across all epochs in one turn (pathological loops only).
+# Soft epochs + auto-continue are the real pacing; this is a last-resort net.
 REACT_MAX_TOTAL_STEPS = _env_int(
-    "REMEDY_REACT_MAX_TOTAL_STEPS", 10_000, lo=64, hi=100_000
+    "REMEDY_REACT_MAX_TOTAL_STEPS", 1_000_000, lo=64, hi=10_000_000
 )
 # When True (default), epoch walls never strip tools while work is unfinished.
 REACT_AUTO_CONTINUE = _env_bool("REMEDY_REACT_AUTO_CONTINUE", True)
