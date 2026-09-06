@@ -861,6 +861,16 @@ def serve(reader: BinaryIO, writer: BinaryIO) -> None:
         write_frame(writer, _KIND_TOOL_RESULT, correlation, err, flags=1)
 
 
+def _win32_kernel32() -> Any:
+    """Resolve ``ctypes.windll.kernel32`` without assuming Linux stubs have windll."""
+    import ctypes
+
+    windll = getattr(ctypes, "windll", None)
+    if windll is None:
+        raise OSError("ctypes.windll is only available on Windows")
+    return windll.kernel32
+
+
 class _PipeFile:
     """Binary file-like over a Windows named-pipe HANDLE (CreateFileW)."""
 
@@ -874,7 +884,7 @@ class _PipeFile:
         import ctypes
         from ctypes import wintypes
 
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = _win32_kernel32()
         remaining = 65536 if size < 0 else size
         chunks: list[bytes] = []
         while remaining > 0:
@@ -898,7 +908,7 @@ class _PipeFile:
         import ctypes
         from ctypes import wintypes
 
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = _win32_kernel32()
         written_total = 0
         while written_total < len(data):
             chunk = data[written_total:]
@@ -921,23 +931,19 @@ class _PipeFile:
     def flush(self) -> None:
         if self._closed:
             return
-        import ctypes
-
-        ctypes.windll.kernel32.FlushFileBuffers(self._handle)
+        _win32_kernel32().FlushFileBuffers(self._handle)
 
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        import ctypes
-
-        ctypes.windll.kernel32.CloseHandle(self._handle)
+        _win32_kernel32().CloseHandle(self._handle)
 
 
 def _dial_windows_pipe(endpoint: str) -> tuple[BinaryIO, BinaryIO, Callable[[], None]]:
     import ctypes
 
-    kernel32 = ctypes.windll.kernel32
+    kernel32 = _win32_kernel32()
     generic_read = 0x80000000
     generic_write = 0x40000000
     open_existing = 3
@@ -952,7 +958,8 @@ def _dial_windows_pipe(endpoint: str) -> tuple[BinaryIO, BinaryIO, Callable[[], 
         None,
     )
     if handle in (None, 0, invalid_handle, -1):
-        err = ctypes.GetLastError()
+        get_last_error = getattr(ctypes, "GetLastError", None)
+        err = get_last_error() if get_last_error is not None else "unknown"
         raise OSError(f"CreateFileW({endpoint!r}) failed: Win32 {err}")
     pipe = _PipeFile(int(handle))
     stream = cast(BinaryIO, pipe)

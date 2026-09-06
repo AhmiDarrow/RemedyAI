@@ -317,8 +317,12 @@ func managedVoicePython() string {
 
 // isWindowsStorePythonStub rejects WindowsApps alias stubs that are not a
 // real interpreter (they open the Store / fail spawn).
+//
+// Normalize both separators so a Windows path string still matches when
+// inspected on Linux (shared homes / CI).
 func isWindowsStorePythonStub(path string) bool {
 	p := strings.ToLower(filepath.ToSlash(path))
+	p = strings.ReplaceAll(p, `\`, "/")
 	return strings.Contains(p, "/windowsapps/")
 }
 
