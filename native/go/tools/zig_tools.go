@@ -1609,6 +1609,11 @@ func executeShellExec(_ context.Context, request Request) (Result, error) {
 	if body.Cwd != "" && !filepath.IsAbs(body.Cwd) {
 		return Result{}, fmt.Errorf("%w: cwd must be absolute when set", ErrInvalidInput)
 	}
+	// Omitted/0 used to become Zig's 60s default — too short for cargo/pytest/npm.
+	// Build-scale default: 10 minutes (schema max is 600000).
+	if body.TimeoutMS == 0 {
+		body.TimeoutMS = 600_000
+	}
 	// Model-supplied owner_confirmed is not proof — only the approval queue
 	// (or an explicit runtime capability) may set the Zig owner bit.
 	body.OwnerConfirmed = false

@@ -14,9 +14,10 @@ import (
 )
 
 var (
-	ErrIterationLimit          = errors.New("ReAct safety iteration ceiling reached")
-	ErrToolCallLimit           = errors.New("ReAct safety tool-call ceiling reached")
-	ErrNoProgress              = errors.New("ReAct made no progress")
+	ErrIterationLimit          = errors.New("safety stop: step ceiling")
+	ErrToolCallLimit           = errors.New("safety stop: tool ceiling")
+	ErrBudgetExhausted         = errors.New("step budget exhausted")
+	ErrNoProgress              = errors.New("stuck repeating without progress")
 	ErrOwnerConfirmationNeeded = errors.New("owner confirmation required")
 	ErrOwnerDenied             = errors.New("owner denied confirmation")
 	ErrIncompleteModelStream   = errors.New("model stream closed before completion")
@@ -49,6 +50,8 @@ type ModelEvent struct {
 	Text     string
 	ToolCall *ToolCall
 	Done     bool
+	// Truncated means finish_reason=length / max_tokens — continue, do not stop.
+	Truncated bool
 }
 type Turn struct {
 	Goal      string
@@ -94,20 +97,26 @@ type EpochHook func(epoch, totalSteps, toolCalls int, turn *Turn)
 // ceilings exist only as pathological-loop safety nets — not task budgets.
 // Same operating model as a Build agent: run until the request is finished.
 type Config struct {
-	// MaxIterations is the absolute safety ceiling on model rounds (default 10000).
+	// MaxIterations absolute safety ceiling on model rounds (default 1_000_000).
 	MaxIterations int
-	// MaxToolCalls is the absolute safety ceiling on tool invocations (default 100000).
+	// MaxToolCalls absolute safety ceiling on tool invocations (default 10_000_000).
 	MaxToolCalls int
-	// SoftEpochSteps triggers compact+continue every N model rounds (default 256).
-	// Zero disables soft epochs (absolute ceiling only).
+	// SoftEpochSteps compact+continue every N model rounds (default 64).
+	// Zero-value Config uses the default; set -1 to disable soft epochs.
 	SoftEpochSteps int
-	// MaxStaleEpochs stops only after this many consecutive soft epochs with
+	// MaxStaleEpochs stops after this many consecutive soft epochs with
 	// zero tool activity (default 8). Failed tools still count as activity.
 	MaxStaleEpochs int
-	// KeepLastResults is how many tool results to retain across a soft epoch (default 32).
+	// KeepLastResults how many tool outcomes to fold into the epoch checkpoint (default 16).
 	KeepLastResults int
-	MaxParallelTools int
-	MaxRepeatedBatch int
+	// MaxResultChars caps each tool output retained for the model (default 24_000).
+	MaxResultChars int
+	// MaxAssistantChars caps accumulated assistant text between rounds (default 2_000).
+	MaxAssistantChars int
+	// MaxLengthContinues caps finish_reason=length auto-continues (default 64).
+	MaxLengthContinues int
+	MaxParallelTools   int
+	MaxRepeatedBatch   int
 	// RepeatNudgeBudget allows identical tool batches this many times with a
 	// nudge before ErrNoProgress (default 2).
 	RepeatNudgeBudget int
@@ -147,13 +156,23 @@ func (c Config) normalized() Config {
 		c.SoftEpochSteps = 0
 	} else if c.SoftEpochSteps == 0 {
 		// 0 in zero-value Config means "use default"; explicit disable via -1 above.
-		c.SoftEpochSteps = envInt("REMEDY_REACT_EPOCH_STEPS", 256, 16, 2_000)
+		// 64 keeps context lean for long builds (was 256 — too rare for efficiency).
+		c.SoftEpochSteps = envInt("REMEDY_REACT_EPOCH_STEPS", 64, 16, 2_000)
 	}
 	if c.MaxStaleEpochs <= 0 {
 		c.MaxStaleEpochs = envInt("REMEDY_REACT_MAX_STALE_EPOCHS", 8, 1, 50)
 	}
 	if c.KeepLastResults <= 0 {
-		c.KeepLastResults = 64
+		c.KeepLastResults = 16
+	}
+	if c.MaxResultChars <= 0 {
+		c.MaxResultChars = envInt("REMEDY_REACT_MAX_RESULT_CHARS", 24_000, 2_000, 256_000)
+	}
+	if c.MaxAssistantChars <= 0 {
+		c.MaxAssistantChars = envInt("REMEDY_REACT_MAX_ASSISTANT_CHARS", 2_000, 512, 32_000)
+	}
+	if c.MaxLengthContinues <= 0 {
+		c.MaxLengthContinues = envInt("REMEDY_REACT_MAX_LENGTH_CONTINUES", 64, 1, 512)
 	}
 	if c.MaxParallelTools <= 0 {
 		c.MaxParallelTools = envInt("REMEDY_MAX_PARALLEL_TOOLS", 32, 4, 64)
@@ -214,6 +233,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 	var lastBatch string
 	repeated := 0
 	repeatNudges := 0
+	lengthContinues := 0
 	toolCount := 0
 	toolsThisEpoch := 0
 	epoch := 0
@@ -221,6 +241,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 	goal := seed.Goal
 	system := seed.System
 	var prevCalls []ToolCall
+	var outcomeLedger []string
 	for iteration := 1; iteration <= config.MaxIterations; iteration++ {
 		trace(StateObserve, iteration, "assemble turn")
 		turn := Turn{
@@ -240,9 +261,11 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 		}
 		var calls []ToolCall
 		completed := false
+		truncated := false
 		for event := range events {
 			out.Text += event.Text
 			completed = completed || event.Done
+			truncated = truncated || event.Truncated
 			if event.ToolCall != nil {
 				calls = append(calls, *event.ToolCall)
 			}
@@ -256,9 +279,19 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 				trace(StateFailed, iteration, out.Err.Error())
 				return out
 			}
+			if truncated && lengthContinues < config.MaxLengthContinues {
+				lengthContinues++
+				out.Text = trimTail(out.Text, config.MaxAssistantChars)
+				out.Text += "\n\n[Continue] Output hit the length limit — pick up exactly where you left off with tools. Do not restart or renumber."
+				out.Results = nil
+				prevCalls = nil
+				trace(StateUpdate, iteration, "length auto-continue")
+				continue
+			}
 			trace(StateComplete, iteration, "model completed without tools")
 			return out
 		}
+		lengthContinues = 0
 		toolCount += len(calls)
 		toolsThisEpoch += len(calls)
 		if toolCount > config.MaxToolCalls {
@@ -283,18 +316,14 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 			if repeatNudges < config.RepeatNudgeBudget {
 				repeatNudges++
 				repeated = 0
-				nudge := ToolResult{
-					ID:   "epoch-nudge",
-					Name: "remedy.nudge",
-					Output: []byte(
-						"Same tools repeated without progress. Change approach: " +
-							"read a different path, edit the failing file, run a verify command, " +
-							"or try a smaller next step. Do not restart the whole task.",
-					),
-				}
-				out.Results = append(out.Results, nudge)
-				trace(StateUpdate, iteration, "repeat-batch nudge")
+				// Fold nudge into assistant text — never orphan role=tool without Calls.
+				out.Text = trimTail(out.Text, config.MaxAssistantChars)
+				out.Text += "\n\n[Nudge] Same tools repeated without progress. Change approach: " +
+					"read a different path, edit the failing file, run a verify command, " +
+					"or try a smaller next step. Do not restart the whole task."
+				out.Results = nil
 				prevCalls = nil
+				trace(StateUpdate, iteration, "repeat-batch nudge")
 				continue
 			}
 			out.Err = ErrNoProgress
@@ -335,11 +364,14 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 		trace(StateAct, iteration, fmt.Sprintf("execute %d tools", len(allowed)))
 		// Replace observations with this batch only — OpenAI follow-ups pair
 		// one assistant.tool_calls message with its matching tool results.
-		out.Results = executeBatch(ctx, e.Tools, allowed, config.MaxParallelTools)
+		out.Results = capResults(executeBatch(ctx, e.Tools, allowed, config.MaxParallelTools), config.MaxResultChars)
 		if len(denied) > 0 {
 			out.Results = append(out.Results, denied...)
 		}
 		prevCalls = append([]ToolCall(nil), allowed...)
+		appendOutcomes(&outcomeLedger, out.Results, 24)
+		// Bound assistant prose so every follow-up does not re-pay the monologue.
+		out.Text = trimTail(out.Text, config.MaxAssistantChars)
 		trace(StateUpdate, iteration, "append observations")
 
 		// Soft epoch: compact context and continue — never a stop while tools work.
@@ -367,7 +399,8 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 				}
 			}
 			toolsThisEpoch = 0
-			compactTurn(&out, &prevCalls, config.KeepLastResults, epoch, iteration)
+			compactTurn(&out, &prevCalls, config.KeepLastResults, config.MaxResultChars, epoch, iteration, outcomeLedger)
+			outcomeLedger = outcomeLedger[:0]
 			trace(StateEpoch, iteration, fmt.Sprintf("soft epoch %d continue", epoch))
 			if e.EpochHook != nil {
 				hookTurn := Turn{
@@ -397,26 +430,107 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 	return out
 }
 
-func compactTurn(out *Outcome, prevCalls *[]ToolCall, keep int, epoch, totalSteps int) {
-	if keep > 0 && len(out.Results) > keep {
-		out.Results = append([]ToolResult(nil), out.Results[len(out.Results)-keep:]...)
+func trimTail(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
 	}
-	// Drop prior assistant text accumulation so the next round starts lean;
-	// tool results carry the working state.
-	if len(out.Text) > 4000 {
-		out.Text = out.Text[len(out.Text)-4000:]
+	return s[len(s)-max:]
+}
+
+func capResults(results []ToolResult, maxChars int) []ToolResult {
+	if maxChars <= 0 || len(results) == 0 {
+		return results
 	}
-	nudge := fmt.Sprintf(
-		"[Epoch %d complete at step %d] Context was compacted — this is not a stop. "+
-			"Run until the task is finished: continue from the checkpoint / tool results above. "+
-			"Do not restart, renumber, or summarize-only. Keep using tools until the work is done.",
+	out := make([]ToolResult, len(results))
+	for i, r := range results {
+		out[i] = r
+		out[i].Output = clipBytes(r.Output, maxChars)
+	}
+	return out
+}
+
+func clipBytes(b []byte, max int) []byte {
+	if max <= 0 || len(b) <= max {
+		return b
+	}
+	head := max * 2 / 3
+	tail := max - head - 80
+	if tail < 40 {
+		tail = 40
+		head = max - tail - 80
+	}
+	if head < 40 {
+		return append([]byte(nil), b[:max]...)
+	}
+	msg := fmt.Sprintf("\n…[truncated %d chars — re-read the path or ask for an offset if you need more]…\n", len(b)-max)
+	clipped := make([]byte, 0, max)
+	clipped = append(clipped, b[:head]...)
+	clipped = append(clipped, msg...)
+	clipped = append(clipped, b[len(b)-tail:]...)
+	return clipped
+}
+
+func appendOutcomes(ledger *[]string, results []ToolResult, max int) {
+	for _, r := range results {
+		line := outcomeLine(r)
+		if line == "" {
+			continue
+		}
+		*ledger = append(*ledger, line)
+	}
+	if max > 0 && len(*ledger) > max {
+		*ledger = append([]string(nil), (*ledger)[len(*ledger)-max:]...)
+	}
+}
+
+func outcomeLine(r ToolResult) string {
+	name := strings.TrimSpace(r.Name)
+	if name == "" {
+		return ""
+	}
+	status := "ok"
+	body := string(r.Output)
+	if r.Err != "" {
+		status = "err"
+		body = r.Err
+	}
+	body = strings.ReplaceAll(body, "\n", " ")
+	body = strings.TrimSpace(body)
+	if len(body) > 160 {
+		body = body[:160] + "…"
+	}
+	return fmt.Sprintf("- %s [%s] %s", name, status, body)
+}
+
+// compactTurn folds recent outcomes into assistant text and clears Calls/Results
+// so the next provider round never sees orphan role=tool messages.
+func compactTurn(out *Outcome, prevCalls *[]ToolCall, keep, maxResultChars, epoch, totalSteps int, ledger []string) {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(
+		"[Epoch %d @ step %d] Context compacted — not a stop. Continue with tools until the work is done. Do not restart.\n",
 		epoch, totalSteps,
-	)
-	out.Results = append(out.Results, ToolResult{
-		ID:     fmt.Sprintf("epoch-%d", epoch),
-		Name:   "remedy.epoch",
-		Output: []byte(nudge),
-	})
+	))
+	if len(ledger) > 0 {
+		b.WriteString("Recent outcomes:\n")
+		start := 0
+		if keep > 0 && len(ledger) > keep {
+			start = len(ledger) - keep
+		}
+		for _, line := range ledger[start:] {
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	} else if len(out.Results) > 0 {
+		b.WriteString("Last batch:\n")
+		for _, r := range capResults(out.Results, maxResultChars) {
+			if line := outcomeLine(r); line != "" {
+				b.WriteString(line)
+				b.WriteByte('\n')
+			}
+		}
+	}
+	out.Text = trimTail(out.Text, 1200) + "\n\n" + b.String()
+	out.Results = nil
 	*prevCalls = nil
 }
 
