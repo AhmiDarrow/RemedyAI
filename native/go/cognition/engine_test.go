@@ -82,6 +82,53 @@ func TestEngineRetriesModelAndPausesForOwner(t *testing.T) {
 	}
 }
 
+func TestEngineApprovalGateResumesAndExecutes(t *testing.T) {
+	var decides atomic.Int32
+	var executed atomic.Int32
+	var modelCalls atomic.Int32
+	engine := Engine{
+		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+			if modelCalls.Add(1) == 1 {
+				return events(ModelEvent{ToolCall: &ToolCall{ID: "1", Name: "shell.exec", Input: []byte(`{"argv":["echo"]}`)}}), nil
+			}
+			return events(ModelEvent{Text: "done", Done: true}), nil
+		}),
+		Tools: toolFunc(func(_ context.Context, call ToolCall) ToolResult {
+			executed.Add(1)
+			return ToolResult{ID: call.ID, Name: call.Name, Output: []byte("ok")}
+		}),
+		Policy: policyFunc(func(context.Context, ToolCall) Decision {
+			if decides.Add(1) == 1 {
+				return Ask
+			}
+			return Allow
+		}),
+		ApprovalGate: func(context.Context, []ToolCall) error { return nil },
+	}
+	out := engine.Run(context.Background(), "run")
+	if out.Err != nil || executed.Load() != 1 || out.Text != "done" {
+		t.Fatalf("outcome=%#v executed=%d", out, executed.Load())
+	}
+}
+
+func TestEngineApprovalGateDenyDoesNotExecute(t *testing.T) {
+	engine := Engine{
+		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+			return events(ModelEvent{ToolCall: &ToolCall{ID: "1", Name: "shell.exec"}}), nil
+		}),
+		Tools: toolFunc(func(context.Context, ToolCall) ToolResult {
+			t.Fatal("tool must not run after deny")
+			return ToolResult{}
+		}),
+		Policy:       policyFunc(func(context.Context, ToolCall) Decision { return Ask }),
+		ApprovalGate: func(context.Context, []ToolCall) error { return ErrOwnerDenied },
+	}
+	out := engine.Run(context.Background(), "run")
+	if !errors.Is(out.Err, ErrOwnerDenied) || len(out.Pending) != 1 {
+		t.Fatalf("outcome=%#v", out)
+	}
+}
+
 func TestEngineStopsRepeatedNoProgressAndToolCeilings(t *testing.T) {
 	repeating := modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
 		return events(ModelEvent{ToolCall: &ToolCall{Name: "same", Input: []byte("x")}}), nil

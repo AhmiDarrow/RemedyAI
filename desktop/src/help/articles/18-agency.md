@@ -17,43 +17,36 @@ Access scope (`project` / `home` / `full`) is a **security** control, separate f
 
 ## Tools for coding
 
+Tool ABI ids (what the model calls on `:7400`):
+
 | Tool | Use |
 |------|-----|
-| **`file_edit`** | Precise search/replace; multi-hunk via `edits=` JSON; CRLF + indent-tolerant unique hunks; failed hunks are not retried blindly |
-| **`file_edit_batch`** | Multi-file search/replace in one call |
-| **`file_write`** | Create or fully overwrite a file |
-| **`file_read`** | Read text (optional line offset/limit) |
-| **`repo_search`** | Any text language; `symbol=` for definitions; `context_before`/`after`; absolute `path` for multi-tree |
-| **`file_glob`** | Find files by pattern (`*.py`, `src/**/*.ts`) — prefer over serial `list_dir` |
+| **`workspace.edit`** | Precise search/replace; multi-hunk via `edits=` JSON; CRLF + indent-tolerant unique hunks; failed hunks are not retried blindly |
+| **`workspace.write`** | Create or fully overwrite a file |
+| **`workspace.read`** | Read text (optional line offset/limit) |
+| **`workspace.list`** | Browse a directory (relative or absolute) |
+| **`workspace.search`** | Any text language; `symbol=` for definitions; context lines; absolute `path` for multi-tree |
+| **`shell.exec`** | Host command (Windows = **cmd.exe**, not bash). POSIX strings are rewritten; PowerShell goes through a temp `.ps1` + `pwsh -File` |
+| **`computer.*`** | Screenshot, click, type, navigate, and other GUI / Browser-rail actions |
 | **`todo_write` / `todo_read`** | Short build checklist (pending → in_progress → completed). Shown in chat and crossed off as items finish. Do not claim done while open |
 | **`build_drive`** | Machine-owned loop: lock spec → write failing TDD tests → isolated hops → gate tower → review-fix |
 | **`build_parallel`** | Isolated overlays per unit; merge only if that unit’s oracle is green |
 | **`apply_patch`** | Unified diff / Begin-Patch block through the write jail |
 | **`build_review_fix`** | Second pass: TODO / bare except / syntax / missing tests → isolated hops |
-| **`companion_context`** | Focused window + clipboard + recent Desktop/Downloads — the rest of the PC |
-| **`clipboard_read` / `clipboard_write`** | Hold or hand back text, images, files. Do not ask what they copied |
-| **`companion_design`** | Design pass: gather visual evidence, seed critique → make → re-observe |
-| **`companion_observe`** | Screenshot focused window / desktop after a UI write |
-| **`companion_taste`** | Durable design taste (spacing, type, density) — honored every visual pass |
-| **`companion_inbox`** | New Desktop/Downloads drops (mocks, logs) since last look |
-| **`list_dir`** | Browse a directory (relative or absolute) |
-| **`bash_exec`** | Host command (Windows = **cmd.exe**, not bash). POSIX strings are rewritten; PowerShell goes through a temp `.ps1` + `pwsh -File` |
-| **`host_run`** | Native argv — no shell, no quoting. Prefer this for git/pytest/python |
-| **`host_mkdir`** | Create directories under write roots (no shell) |
-| **`host_which`** | Resolve an executable on this PC’s PATH |
-| **`host_script`** | Write a scratch script under `.remedy-build/tmp/` and run it (`pwsh` / `cmd` / `python`) |
 | **`job_run`** | Silent **explore** or **verify** job — returns a summary, not a second chat persona |
 | **`spread_run`** | Silent **fan-out** of several jobs in parallel (cover more ground) — one merged digest |
 | **`mission_*`** | Durable checklist + verify for work-alone builds |
 | **`web_fetch` / `web_search`** | Public HTTP fetch and search — on by default; `web_tools_enabled: false` to disable |
-| **`skill_activate` / `skill_run`** | Load procedure packs; scripts stay blocked until Trust |
+| **`skill.activate` / `skill.search`** | Load / discover procedure packs; scripts stay blocked until Trust |
+| **`settings.get` / `settings.patch`** | Read or change jailed safe prefs (approval mode, UI, messenger enable flags) — never secrets |
 
 ### Review / implement (must use tools) — **0.20.0+**
 
 Phrases like **“review project”**, **“implement the fix”**, **“run the tests”** stay in
 **agency mode** (tools on). If the model only *narrates* “activating skill” without a
-function call, Remedy **re-arms tools** and requires real `skill_activate` / `list_dir` /
-`file_read` / etc. — you should see process trail activity, not a one-line promise.
+function call, Remedy **re-arms tools** and requires real `skill.activate` /
+`workspace.list` / `workspace.read` / etc. — you should see process trail activity,
+not a one-line promise.
 
 Shell mutations stay inside **write roots** (project / home scope); opaque payloads
 (`EncodedCommand`, WebClient download, certutil urlcache, …) fail closed when bound.
@@ -67,15 +60,15 @@ Shell mutations stay inside **write roots** (project / home scope); opaque paylo
 
 ### Shell and edits
 
-- **`bash_exec`:** optional `timeout_seconds` (up to 600) and `workdir` for long Godot/cargo builds; local `.venv` / `node_modules/.bin` / repo-root tools are on `PATH`. On Windows the host is **cmd.exe**. `session=true` keeps cwd/env in a persistent session; `conpty=true` attaches a real console when the program needs a TTY.
-- **Host Bridge:** prefer `host_run(argv=[…])`, `host_mkdir`, `host_script` over quoted bash/PowerShell. Failed commands return a `HOST_DIAG` code (dialect / quoting / not-found / interactive) plus a rewrite when one exists. This PC’s last-good dialect is remembered under `~/.remedy/host/dialect.json`.
-- **`file_edit`:** multi-hunk with `edits='[{"old_string":"…","new_string":"…"}]'` to cut round-trips. Unique hunks survive CRLF / trailing-space / leading-indent drift. The same failed hunk is refused a second time this turn — `file_read` and copy a real snippet.
+- **`shell.exec`:** optional `timeout_seconds` (up to 600) and `workdir` for long Godot/cargo builds; local `.venv` / `node_modules/.bin` / repo-root tools are on `PATH`. On Windows the host is **cmd.exe**. `session=true` keeps cwd/env in a persistent session; `conpty=true` attaches a real console when the program needs a TTY.
+- Prefer argv-style shell calls over quoted bash/PowerShell when the host dialect is unclear. Failed commands return a clear diagnostic (dialect / quoting / not-found / interactive) when one exists.
+- **`workspace.edit`:** multi-hunk with `edits='[{"old_string":"…","new_string":"…"}]'` to cut round-trips. Unique hunks survive CRLF / trailing-space / leading-indent drift. The same failed hunk is refused a second time this turn — `workspace.read` and copy a real snippet.
 - **Windows:** paths named `nul` / other reserved device names are rejected with a clear error (do not open them).
 
 ### Explore / verify jobs
 
 - **`job_run kind=explore`:** tree sample + stack fingerprint + orientation pointers + optional search under `path=` (absolute OK).
-- **`job_run kind=verify`:** runs a command (or fingerprint default) with local PATH and longer timeout. Same Ask-mode approval gate as `bash_exec`.
+- **`job_run kind=verify`:** runs a command (or fingerprint default) with local PATH and longer timeout. Same Ask-mode approval gate as `shell.exec`.
 - **`job_run kind=diff`:** `git status` / `diff --stat` summary.
 
 ### Spread (parallel silent workers)
@@ -133,7 +126,7 @@ REMEDY_REACT_MAX_STALE_EPOCHS=8
 When you say **work alone** / **handle this on your own**, continuity steers Remedy to:
 
 1. `mission_start` with a goal, steps, and `verify_command` (e.g. `pytest -q`) — if verify is omitted, stack fingerprint may suggest one  
-2. Implement with `file_edit` / `repo_search`  
+2. Implement with `workspace.edit` / `workspace.search`  
 3. `mission_update` as steps complete  
 4. `mission_verify` before claiming done (nudged when steps are done but verify has not passed)  
 5. Fix and re-verify on failure  

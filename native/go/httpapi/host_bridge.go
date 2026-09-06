@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -67,19 +69,23 @@ type HostBridge struct {
 	root    string
 	uiPath  string
 
-	mu              sync.Mutex
-	hostSeenAt      float64
-	lastPollAt      float64
-	lastPollDriver  string
-	lastClaimAt     float64
-	pollIdleEmpty   bool
-	wake            chan struct{}
-	browserBounds   map[string]float64
-	browserScale    float64
-	uiCommand       map[string]any
-	focusedSession  string
-	lastElements    []map[string]any
-	sessionStreaming func(string) bool
+	mu                       sync.Mutex
+	hostSeenAt               float64
+	lastPollAt               float64
+	lastPollDriver           string
+	lastClaimAt              float64
+	pollIdleEmpty            bool
+	wake                     chan struct{}
+	browserBounds            map[string]float64
+	browserScale             float64
+	uiCommand                map[string]any
+	focusedSession           string
+	lastElements             []map[string]any
+	sessionStreaming         func(string) bool
+	lastObservedURL          string
+	lastObservedURLBySession map[string]string
+	lastNavigateURL          string
+	lastNavigateURLBySession map[string]string
 }
 
 func newHostBridge(homeDir string) *HostBridge {
@@ -89,11 +95,13 @@ func newHostBridge(homeDir string) *HostBridge {
 	ui := filepath.Join(home, "computer", "ui_command.json")
 	_ = os.MkdirAll(filepath.Dir(ui), 0o700)
 	return &HostBridge{
-		homeDir: home,
-		root:    root,
-		uiPath:  ui,
-		wake:    make(chan struct{}, 1),
-		browserScale: 1,
+		homeDir:                  home,
+		root:                     root,
+		uiPath:                   ui,
+		wake:                     make(chan struct{}, 1),
+		browserScale:             1,
+		lastObservedURLBySession: map[string]string{},
+		lastNavigateURLBySession: map[string]string{},
 	}
 }
 
@@ -208,6 +216,15 @@ func (b *HostBridge) peekUICommandLocked() map[string]any {
 	return cloneMap(m)
 }
 
+func (b *HostBridge) setUICommand(command map[string]any) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	cmd := cloneMap(command)
+	b.uiCommand = cmd
+	raw, _ := json.Marshal(cmd)
+	_ = os.WriteFile(b.uiPath, raw, 0o600)
+}
+
 func (b *HostBridge) clearUICommand(jobID *string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -218,6 +235,317 @@ func (b *HostBridge) clearUICommand(jobID *string) {
 	}
 	b.uiCommand = nil
 	_ = os.Remove(b.uiPath)
+}
+
+func (b *HostBridge) markObservedURL(url, sessionID string) {
+	u := strings.TrimSpace(url)
+	if u == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.lastObservedURL = u
+	if sid := strings.TrimSpace(sessionID); sid != "" {
+		if b.lastObservedURLBySession == nil {
+			b.lastObservedURLBySession = map[string]string{}
+		}
+		b.lastObservedURLBySession[sid] = u
+	}
+}
+
+func (b *HostBridge) lastObservedURLFor(sessionID string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if sid := strings.TrimSpace(sessionID); sid != "" {
+		if u := strings.TrimSpace(b.lastObservedURLBySession[sid]); u != "" {
+			return u
+		}
+	}
+	return b.lastObservedURL
+}
+
+func (b *HostBridge) markNavigated(url string, optimistic bool, sessionID string) {
+	_ = optimistic
+	u := strings.TrimSpace(url)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if u != "" {
+		b.lastNavigateURL = u
+	}
+	if sid := strings.TrimSpace(sessionID); sid != "" {
+		if b.lastNavigateURLBySession == nil {
+			b.lastNavigateURLBySession = map[string]string{}
+		}
+		if u != "" {
+			b.lastNavigateURLBySession[sid] = u
+		}
+	}
+}
+
+func (b *HostBridge) lastNavigateURLFor(sessionID string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if sid := strings.TrimSpace(sessionID); sid != "" {
+		if u := strings.TrimSpace(b.lastNavigateURLBySession[sid]); u != "" {
+			return u
+		}
+	}
+	return b.lastNavigateURL
+}
+
+// Enqueue writes a pending computer job and optionally publishes open_browser.
+func (b *HostBridge) Enqueue(action string, payload map[string]any, sessionID string) *ComputerJob {
+	pl := cloneMap(payload)
+	if pl == nil {
+		pl = map[string]any{}
+	}
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		sid = strings.TrimSpace(strOr(pl["session_id"], ""))
+	}
+	if sid != "" {
+		if _, ok := pl["session_id"]; !ok {
+			pl["session_id"] = sid
+		}
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	job := &ComputerJob{
+		ID:        newComputerJobID(),
+		Action:    strings.TrimSpace(action),
+		Payload:   pl,
+		Status:    "pending",
+		CreatedAt: now,
+		UpdatedAt: now,
+		SessionID: sid,
+	}
+	b.mu.Lock()
+	_ = b.writeJob(job)
+	b.pollIdleEmpty = false
+	select {
+	case b.wake <- struct{}{}:
+	default:
+	}
+	b.mu.Unlock()
+
+	rawUI, _ := pl["ui"].(map[string]any)
+	openBrowser := false
+	if rawUI != nil {
+		if v, ok := rawUI["open_browser"].(bool); ok && v {
+			openBrowser = true
+		}
+	}
+	act := strings.ToLower(job.Action)
+	switch act {
+	case "navigate", "snapshot", "a11y", "page_text", "ready",
+		"click", "type", "key", "scroll", "drag", "press_hold",
+		"select", "hover", "screenshot":
+		openBrowser = true
+	}
+	if openBrowser {
+		cmd := map[string]any{
+			"action":     "open_browser",
+			"url":        strOr(pl["url"], ""),
+			"job_id":     job.ID,
+			"job_action": job.Action,
+		}
+		if sid != "" {
+			cmd["session_id"] = sid
+		}
+		b.setUICommand(cmd)
+	}
+	return job
+}
+
+func (b *HostBridge) renudgeUIForJob(job *ComputerJob) {
+	if job == nil || strings.ToLower(job.Action) != "navigate" {
+		return
+	}
+	if job.Status != "pending" && job.Status != "running" {
+		return
+	}
+	url := strOr(job.Payload["url"], "")
+	if strings.TrimSpace(url) == "" {
+		return
+	}
+	cmd := map[string]any{
+		"action":     "open_browser",
+		"url":        url,
+		"job_id":     job.ID,
+		"job_action": job.Action,
+		"renudge":    true,
+	}
+	sid := strings.TrimSpace(job.SessionID)
+	if sid == "" {
+		sid = strOr(job.Payload["session_id"], "")
+	}
+	if sid != "" {
+		cmd["session_id"] = sid
+	}
+	b.setUICommand(cmd)
+}
+
+// WaitOptions controls HostBridge.Wait.
+type WaitOptions struct {
+	TimeoutS          float64
+	PollS             float64
+	UnclaimedTimeoutS *float64 // nil = disabled (navigate default)
+	GraceS            *float64
+	AbortCheck        func() bool
+}
+
+// Wait blocks until the job completes, fails, or times out.
+func (b *HostBridge) Wait(jobID string, opts WaitOptions) *ComputerJob {
+	timeout := opts.TimeoutS
+	if timeout <= 0 {
+		timeout = 30
+	}
+	poll := opts.PollS
+	if poll <= 0 {
+		poll = 0.05
+	}
+	started := time.Now()
+	deadline := started.Add(time.Duration(timeout * float64(time.Second)))
+	nudgesDone := 0
+	for time.Now().Before(deadline) {
+		if opts.AbortCheck != nil && opts.AbortCheck() {
+			job := b.readJob(jobID)
+			if job != nil && (job.Status == "done" || job.Status == "error" || job.Status == "cancelled") {
+				return job
+			}
+			return b.cancel(jobID)
+		}
+		job := b.readJob(jobID)
+		if job == nil {
+			time.Sleep(time.Duration(poll * float64(time.Second)))
+			continue
+		}
+		if job.Status == "done" || job.Status == "error" || job.Status == "cancelled" {
+			return job
+		}
+		elapsed := time.Since(started).Seconds()
+		if strings.ToLower(job.Action) == "navigate" && (job.Status == "pending" || job.Status == "running") {
+			if nudgesDone == 0 && elapsed >= 0.6 {
+				cmd := b.peekUICommand()
+				if strOr(cmd["job_id"], "") != jobID {
+					b.renudgeUIForJob(job)
+				}
+				nudgesDone = 1
+			} else if nudgesDone == 1 && elapsed >= 2.5 {
+				cmd := b.peekUICommand()
+				if strOr(cmd["job_id"], "") != jobID {
+					b.renudgeUIForJob(job)
+				}
+				nudgesDone = 2
+			}
+		}
+		if job.Status == "pending" && opts.UnclaimedTimeoutS != nil {
+			limit := *opts.UnclaimedTimeoutS
+			if limit < 0.5 {
+				limit = 0.5
+			}
+			if elapsed >= limit {
+				cmd := b.peekUICommand()
+				if strOr(cmd["job_id"], "") != jobID {
+					job2 := b.readJob(jobID)
+					if job2 != nil && (job2.Status == "done" || job2.Status == "error" || job2.Status == "cancelled") {
+						return job2
+					}
+					msg := "host did not claim job within " + itoa(int(limit)) + "s (Desktop poller offline or not authenticated)"
+					b.mu.Lock()
+					cur := b.readJob(jobID)
+					if cur != nil && (cur.Status == "pending" || cur.Status == "running") {
+						cur.Status = "error"
+						cur.Error = &msg
+						cur.Payload = scrubRetainedPayload(cur.Payload)
+						_ = b.writeJob(cur)
+						b.mu.Unlock()
+						return cur
+					}
+					b.mu.Unlock()
+					if cur != nil {
+						return cur
+					}
+				}
+			}
+		}
+		time.Sleep(time.Duration(poll * float64(time.Second)))
+	}
+
+	job := b.readJob(jobID)
+	if job == nil {
+		msg := "job missing"
+		return &ComputerJob{ID: jobID, Action: "?", Status: "error", Error: &msg}
+	}
+	if job.Status == "done" || job.Status == "error" || job.Status == "cancelled" {
+		return job
+	}
+	grace := 0.5
+	if opts.GraceS != nil {
+		grace = *opts.GraceS
+	} else if strings.ToLower(job.Action) == "navigate" {
+		grace = timeout * 0.25
+		if grace < 0.05 {
+			grace = 0.05
+		}
+		if grace > 2.5 {
+			grace = 2.5
+		}
+	} else {
+		grace = timeout * 0.1
+		if grace < 0.05 {
+			grace = 0.05
+		}
+		if grace > 0.5 {
+			grace = 0.5
+		}
+	}
+	graceDeadline := time.Now().Add(time.Duration(grace * float64(time.Second)))
+	for time.Now().Before(graceDeadline) {
+		time.Sleep(20 * time.Millisecond)
+		job = b.readJob(jobID)
+		if job != nil && (job.Status == "done" || job.Status == "error" || job.Status == "cancelled") {
+			return job
+		}
+	}
+	job = b.readJob(jobID)
+	if job == nil {
+		msg := "job missing"
+		return &ComputerJob{ID: jobID, Action: "?", Status: "error", Error: &msg}
+	}
+	if job.Status == "done" || job.Status == "error" || job.Status == "cancelled" {
+		return job
+	}
+	msg := "timeout waiting for desktop host (" + formatFloat1(timeout) + "s)"
+	b.mu.Lock()
+	cur := b.readJob(jobID)
+	if cur != nil && (cur.Status == "done" || cur.Status == "error" || cur.Status == "cancelled") {
+		b.mu.Unlock()
+		return cur
+	}
+	if cur != nil && (cur.Status == "pending" || cur.Status == "running") {
+		cur.Status = "error"
+		cur.Error = &msg
+		cur.Payload = scrubRetainedPayload(cur.Payload)
+		_ = b.writeJob(cur)
+		b.mu.Unlock()
+		return cur
+	}
+	b.mu.Unlock()
+	return job
+}
+
+func newComputerJobID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func formatFloat1(v float64) string {
+	// Avoid fmt import churn in hot path; one decimal is enough for timeout msgs.
+	i := int(v*10 + 0.5)
+	whole := i / 10
+	frac := i % 10
+	return itoa(whole) + "." + itoa(frac)
 }
 
 func (b *HostBridge) takeUICommand(sessionID string) map[string]any {
@@ -469,7 +797,32 @@ func (b *HostBridge) complete(jobID string, ok bool, result map[string]any, errM
 		job.Payload = scrubRetainedPayload(job.Payload)
 	}
 	_ = b.writeJob(job)
+	if observed := observedURLFromResult(safeResult, job); observed != "" {
+		b.lastObservedURL = observed
+		if sid := strings.TrimSpace(job.SessionID); sid != "" {
+			if b.lastObservedURLBySession == nil {
+				b.lastObservedURLBySession = map[string]string{}
+			}
+			b.lastObservedURLBySession[sid] = observed
+		}
+	}
 	return job
+}
+
+func observedURLFromResult(result map[string]any, job *ComputerJob) string {
+	if result != nil {
+		for _, k := range []string{"url", "final_url", "current_url", "href"} {
+			if u := strings.TrimSpace(strOr(result[k], "")); u != "" {
+				return u
+			}
+		}
+	}
+	if job != nil {
+		if u := strings.TrimSpace(strOr(job.Payload["url"], "")); u != "" {
+			return u
+		}
+	}
+	return ""
 }
 
 func (b *HostBridge) cancel(jobID string) *ComputerJob {

@@ -1356,6 +1356,9 @@ export function SettingsPanel({
                 messengersDirtyRef.current = true
                 setMessengerDrafts(v)
               }}
+              onMessengersRefresh={() => {
+                void load()
+              }}
               assistant={settings?.assistant}
               assistantDraft={assistantDraft}
               setAssistantDraft={setAssistantDraft}

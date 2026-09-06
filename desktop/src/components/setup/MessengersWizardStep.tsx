@@ -25,10 +25,16 @@ export function MessengersWizardStep({
       ? messengers
       : ([
           { id: 'telegram', name: 'Telegram', status: 'ready', enabled: false, token_set: false },
-          { id: 'discord', name: 'Discord', status: 'partial', enabled: false, token_set: false },
-          { id: 'slack', name: 'Slack', status: 'partial', enabled: false, token_set: false },
-          { id: 'mattermost', name: 'Mattermost', status: 'partial', enabled: false, token_set: false },
+          { id: 'discord', name: 'Discord', status: 'ready', enabled: false, token_set: false },
+          { id: 'slack', name: 'Slack', status: 'ready', enabled: false, token_set: false },
+          { id: 'mattermost', name: 'Mattermost', status: 'ready', enabled: false, token_set: false },
         ] as MessengerInfo[])
+
+  const statusText = (m: MessengerInfo) => {
+    if (m.status === 'needs_setup') return m.status_reason || 'needs setup'
+    if (m.status === 'planned') return 'planned'
+    return 'ready'
+  }
 
   return (
     <div className="space-y-3">
@@ -61,7 +67,7 @@ export function MessengersWizardStep({
                   {m.name}
                 </span>
                 <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                  {m.status}
+                  {statusText(m)}
                 </span>
               </label>
               {on && (

@@ -17,13 +17,15 @@ from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
-MessengerStatus = Literal["ready", "partial", "planned"]
+MessengerStatus = Literal["ready", "needs_setup", "planned", "partial"]
 FieldKind = Literal["secret", "text", "bool", "list", "url"]
 
 SECRET_FIELD_KEYS = frozenset(
     {
         "bot_token",
         "access_token",
+        "refresh_token",
+        "oauth_client_secret",
         "app_token",
         "app_password",
         "app_secret",
@@ -101,7 +103,10 @@ def _entry_from_raw(raw: dict[str, Any]) -> MessengerDef:
         if isinstance(f, dict) and str(f.get("key") or "").strip()
     )
     status = str(raw.get("status") or "planned")
-    if status not in ("ready", "partial", "planned"):
+    if status == "partial":
+        # Catalog no longer ships partial; map legacy fixtures to needs_setup.
+        status = "needs_setup"
+    if status not in ("ready", "needs_setup", "planned"):
         status = "planned"
     return MessengerDef(
         id=str(raw.get("id") or "").strip().lower(),

@@ -78,6 +78,10 @@ type Server struct {
 	messengerGW   *gateway.Gateway
 	apiListenPort int
 
+	tunnelOnce    sync.Once
+	tunnel        *messengerTunnelState
+	tunnelStarter tunnelProcessStarter
+
 	// focusedSessionID mirrors host_bridge focused desktop tab (Connect Stop).
 	focusedMu        sync.Mutex
 	focusedSessionID string
@@ -172,6 +176,10 @@ func New(cfg Config) (*Server, error) {
 		if cr.Registry != nil {
 			cr.Policy = &RegistryPolicy{Registry: cr.Registry, Approvals: s.approvals}
 		}
+		// Browser-rail tools (computer.navigate) need the live HostBridge.
+		_ = cr.AttachRailTools(s.bridge)
+		// Settings Tool ABI (settings.get / settings.patch) uses the apply path.
+		_ = cr.AttachSettingsTools(func() *Server { return s })
 	}
 	if err := s.openEventBus(home); err != nil {
 		_ = store.Close()
@@ -262,6 +270,11 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/connect/tailscale/status", s.handleConnectTailscaleStatus)
 	s.mux.HandleFunc("POST /api/connect/tailscale/install", s.handleConnectTailscaleInstall)
 	s.mux.HandleFunc("POST /api/connect/tailscale/login", s.handleConnectTailscaleLogin)
+
+	s.mux.HandleFunc("GET /api/messengers/tunnel", s.handleMessengerTunnelStatus)
+	s.mux.HandleFunc("POST /api/messengers/tunnel/start", s.handleMessengerTunnelStart)
+	s.mux.HandleFunc("POST /api/messengers/tunnel/stop", s.handleMessengerTunnelStop)
+	s.mux.HandleFunc("POST /api/messengers/signal/ensure", s.handleMessengerSignalEnsure)
 	s.mux.HandleFunc("GET /connect/me", s.handleConnectMe)
 	s.mux.HandleFunc("GET /api/connect/me", s.handleConnectMe)
 	s.mux.HandleFunc("POST /api/stop", s.handleConnectStop)

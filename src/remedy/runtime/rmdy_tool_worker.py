@@ -696,6 +696,30 @@ def _skill_activate(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return activate_skill(inp)
 
 
+def _mail_list(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.mail_calendar_tools import mail_list
+
+    return mail_list(inp)
+
+
+def _mail_send(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.mail_calendar_tools import mail_send
+
+    return mail_send(inp)
+
+
+def _calendar_list_events(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.mail_calendar_tools import calendar_list_events
+
+    return calendar_list_events(inp)
+
+
+def _calendar_create_event(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.mail_calendar_tools import calendar_create_event
+
+    return calendar_create_event(inp)
+
+
 _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("text.slugify", 1): lambda inp: {"slug": _slugify(str(inp.get("text", "")))},
     ("text.word_count", 1): lambda inp: {"words": _word_count(str(inp.get("text", "")))},
@@ -722,6 +746,10 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("memory.save", 1): _memory_save,
     ("skill.search", 1): _skill_search,
     ("skill.activate", 1): _skill_activate,
+    ("mail.list", 1): _mail_list,
+    ("mail.send", 1): _mail_send,
+    ("calendar.list_events", 1): _calendar_list_events,
+    ("calendar.create_event", 1): _calendar_create_event,
 }
 
 

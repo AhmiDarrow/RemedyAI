@@ -435,6 +435,66 @@ func (s *Server) handleActLifeTask(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+var (
+	lifeCaptchaRE  = regexp.MustCompile(`(?is)(captcha|hcaptcha|recaptcha|turnstile|not a robot|verify you are human|press.?and.?hold|human.?check)`)
+	lifePasswordRE = regexp.MustCompile(`(?is)(\benter (your )?password\b|\bpassword\b.*\bsign in\b|\bcurrent password\b)`)
+	life2FARE      = regexp.MustCompile(`(?is)(two[-\s]?factor|2fa|one[-\s]?time (code|password)|authenticator|verification code|otp\b)`)
+	lifeLoginURLRE = regexp.MustCompile(`(?is)(/log-?in|/sign-?in|/signin|/challenge|/captcha|/verify|accounts\.google|/checkpoint|recaptcha)`)
+)
+
+func lifeAutoResumeKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "captcha", "password", "2fa", "challenge":
+		return true
+	default:
+		return false
+	}
+}
+
+func lifeWallPresent(pageText, url string) map[string]struct{} {
+	blob := pageText + " " + url
+	found := map[string]struct{}{}
+	if lifeCaptchaRE.MatchString(blob) {
+		found["captcha"] = struct{}{}
+	}
+	if lifeLoginURLRE.MatchString(url) {
+		found["password"] = struct{}{}
+	}
+	if lifePasswordRE.MatchString(pageText) {
+		found["password"] = struct{}{}
+	}
+	if life2FARE.MatchString(blob) {
+		found["2fa"] = struct{}{}
+	}
+	return found
+}
+
+func lifeWallCleared(kind, pageText, url, pausedURL string, railReady bool) bool {
+	if !lifeAutoResumeKind(kind) || !railReady {
+		return false
+	}
+	present := lifeWallPresent(pageText, url)
+	if _, hit := present[kind]; hit {
+		return false
+	}
+	// challenge maps to captcha-like walls
+	if kind == "challenge" {
+		if _, hit := present["captcha"]; hit {
+			return false
+		}
+	}
+	if strings.TrimSpace(pageText) != "" {
+		_, hit := present[kind]
+		return !hit
+	}
+	u := strings.TrimSpace(url)
+	paused := strings.TrimSpace(pausedURL)
+	if paused != "" && u != "" && strings.TrimRight(u, "/") != strings.TrimRight(paused, "/") {
+		return !lifeLoginURLRE.MatchString(u)
+	}
+	return u != "" && !lifeLoginURLRE.MatchString(u)
+}
+
 func (s *Server) handleProbeLifeTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SessionID *string `json:"session_id"`
@@ -457,17 +517,49 @@ func (s *Server) handleProbeLifeTask(w http.ResponseWriter, r *http.Request) {
 	}
 	hand, _ := card["handoff"].(map[string]any)
 	kind := asString(hand["kind"])
-	// Auto-resume kinds (captcha/password) need host bridge — not wired in Go yet.
-	auto := kind == "captcha" || kind == "password" || kind == "challenge" || kind == "2fa"
-	if !auto {
+	if !lifeAutoResumeKind(kind) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok": true, "cleared": false, "reason": "needs_yes", "task": sseLifeCard(card),
 		})
 		return
 	}
+	b := s.bridge()
 	ready := false
 	if req.RailReady != nil {
 		ready = *req.RailReady
+	} else {
+		ready = b.hostConnected()
+	}
+	liveURL := strings.TrimSpace(req.URL)
+	if liveURL == "" {
+		liveURL = b.lastObservedURLFor(sid)
+	}
+	paused := asString(hand["paused_url"])
+	if lifeWallCleared(kind, req.PageText, liveURL, paused, ready) {
+		spoken := "Sign-in wall cleared. Ask Remedy to continue the remaining steps."
+		card = copyMap(card)
+		card["spoken"] = spoken
+		card["status"] = "approved"
+		delete(card, "handoff")
+		s.lifeHub.Publish(card, sid)
+		tid := ""
+		if req.TaskID != nil {
+			tid = strings.TrimSpace(*req.TaskID)
+		}
+		if tid == "" {
+			tid = asString(card["task_id"])
+		}
+		if tid != "" {
+			if rec := s.loadLifeTask(tid); rec != nil {
+				rec["status"] = "approved"
+				rec["handoff_cleared"] = true
+				_ = s.saveLifeTaskRec(rec)
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true, "cleared": true, "resumed": true, "spoken": spoken, "task": sseLifeCard(card),
+		})
+		return
 	}
 	spoken := "Open the Browser rail, then finish the sign-in or CAPTCHA. Remedy will continue after."
 	if ready {

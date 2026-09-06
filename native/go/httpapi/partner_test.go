@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const partnerTestToken = "tok-partner-test-not-a-secret"
@@ -82,7 +84,7 @@ func TestPartnerStatusLean(t *testing.T) {
 func TestApprovalsListAndResolve(t *testing.T) {
 	s, _ := newPartnerTestServer(t)
 	sid := "sess-a"
-	item := s.approvals.Enqueue("bash_exec", "echo hi", "shell", &sid, "")
+	item := s.approvals.Enqueue("shell.exec", "echo hi", "shell", &sid, "")
 	code, body := doPartnerReq(t, s, http.MethodGet, "/api/approvals?session_id="+sid, "")
 	if code != http.StatusOK {
 		t.Fatalf("list status=%d", code)
@@ -100,6 +102,13 @@ func TestApprovalsListAndResolve(t *testing.T) {
 	if body["status"] != "approved" {
 		t.Fatalf("status=%v", body["status"])
 	}
+	hint, _ := body["hint"].(string)
+	if !strings.Contains(hint, "can run now without asking again") {
+		t.Fatalf("hint=%q want fingerprint-ready wording", hint)
+	}
+	if body["resumed"] == true {
+		t.Fatalf("resumed=%v want false when no turn waiter", body["resumed"])
+	}
 	code, body = doPartnerReq(t, s, http.MethodGet, "/api/approvals", "")
 	if code != http.StatusOK {
 		t.Fatalf("list2 status=%d", code)
@@ -107,6 +116,51 @@ func TestApprovalsListAndResolve(t *testing.T) {
 	arr, _ = body["approvals"].([]any)
 	if len(arr) != 0 {
 		t.Fatalf("still pending: %v", body)
+	}
+}
+
+func TestResolveApprovalResumedHintWhenTurnWaiting(t *testing.T) {
+	s, _ := newPartnerTestServer(t)
+	sid := "sess-wait"
+	item := s.approvals.Enqueue("shell.exec", `{"argv":["echo"]}`, "test", &sid, "run echo")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	waitDone := make(chan bool, 1)
+	go func() {
+		ok, err := s.approvals.WaitAll(ctx, []string{item.ID})
+		if err != nil {
+			waitDone <- false
+			return
+		}
+		waitDone <- ok
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for !s.approvals.HasWaiter(item.ID) && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !s.approvals.HasWaiter(item.ID) {
+		t.Fatal("waiter not registered")
+	}
+	code, body := doPartnerReq(t, s, http.MethodPost,
+		"/api/approvals/"+item.ID+"/resolve",
+		`{"approve":true,"scope":"session"}`)
+	if code != http.StatusOK {
+		t.Fatalf("resolve status=%d body=%v", code, body)
+	}
+	if body["resumed"] != true {
+		t.Fatalf("resumed=%v want true", body["resumed"])
+	}
+	hint, _ := body["hint"].(string)
+	if !strings.Contains(hint, "continuing") {
+		t.Fatalf("hint=%q want continuing wording", hint)
+	}
+	select {
+	case ok := <-waitDone:
+		if !ok {
+			t.Fatal("WaitAll should succeed after approve")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitAll did not unblock")
 	}
 }
 

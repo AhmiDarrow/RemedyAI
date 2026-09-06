@@ -261,8 +261,12 @@ func TestSignalStartWithoutAccountNoPoll(t *testing.T) {
 	if err := ch.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !ch.Running() {
-		t.Fatal("should be running stub")
+	if ch.Running() {
+		t.Fatal("must not mark Running without account")
+	}
+	h := ch.Health()
+	if h["cli_ok"] != true || h["account_ok"] != false {
+		t.Fatalf("health=%v", h)
 	}
 	time.Sleep(50 * time.Millisecond)
 	if calls != 0 {
@@ -271,13 +275,40 @@ func TestSignalStartWithoutAccountNoPoll(t *testing.T) {
 	_ = ch.Stop(context.Background())
 }
 
+func TestSignalStartWithoutBinaryNotRunning(t *testing.T) {
+	dir := t.TempDir()
+	ch := NewSignal(nil, SignalConfig{
+		CLIPath: filepath.Join(dir, "missing-signal-cli"),
+		Account: "+15550100",
+		HomeDir: dir,
+		Runner:  nopRunner,
+	})
+	if err := ch.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if ch.Running() {
+		t.Fatal("must not mark Running without binary")
+	}
+	h := ch.Health()
+	if h["cli_ok"] != false || h["account_ok"] != true {
+		t.Fatalf("health=%v", h)
+	}
+	if _, ok := h["download_url"].(string); !ok {
+		t.Fatalf("expected download_url in health=%v", h)
+	}
+}
+
 func TestRegisterFromConfigSignalCLIPath(t *testing.T) {
 	home := t.TempDir()
+	bin := filepath.Join(home, "signal-cli")
+	if err := os.WriteFile(bin, []byte(""), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	g := New(Config{HomeDir: home})
 	cfg := map[string]any{
 		"enabled_channels": []string{"signal"},
 		"signal": map[string]any{
-			"cli_path":   "/opt/signal-cli",
+			"cli_path":   bin,
 			"account":    "+15550100",
 			"allow_from": []string{"+1"},
 			"allow_all":  true,
@@ -291,8 +322,27 @@ func TestRegisterFromConfigSignalCLIPath(t *testing.T) {
 	if !ok || ch == nil {
 		t.Fatal("expected *SignalChannel")
 	}
-	if ch.cliPath != "/opt/signal-cli" || ch.account != "+15550100" || !ch.allowAll {
+	if ch.cliPath != bin || ch.account != "+15550100" || !ch.allowAll {
 		t.Fatalf("cfg=%+v", ch)
+	}
+}
+
+func TestRegisterFromConfigSignalSkipsMissingBinary(t *testing.T) {
+	home := t.TempDir()
+	g := New(Config{HomeDir: home})
+	cfg := map[string]any{
+		"enabled_channels": []string{"signal"},
+		"signal": map[string]any{
+			"cli_path": filepath.Join(home, "no-such-cli"),
+			"account":  "+15550100",
+		},
+	}
+	got := RegisterFromConfig(g, cfg, home, nil)
+	if len(got) != 0 {
+		t.Fatalf("expected skip, got %v", got)
+	}
+	if g.GetChannel(ChannelSignal) != nil {
+		t.Fatal("signal must not register without binary")
 	}
 }
 

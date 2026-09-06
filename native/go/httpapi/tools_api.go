@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
 
@@ -95,10 +96,11 @@ func (s *Server) handleListTools(w http.ResponseWriter, r *http.Request) {
 }
 
 type toolInvokeBody struct {
-	ID      string          `json:"id"`
-	Version uint32          `json:"version"`
-	Input   json.RawMessage `json:"input"`
-	Args    json.RawMessage `json:"args"` // alias for input (CLI familiarity)
+	ID        string          `json:"id"`
+	Version   uint32          `json:"version"`
+	Input     json.RawMessage `json:"input"`
+	Args      json.RawMessage `json:"args"` // alias for input (CLI familiarity)
+	SessionID string          `json:"session_id"`
 }
 
 func (s *Server) handleInvokeTool(w http.ResponseWriter, r *http.Request) {
@@ -131,6 +133,7 @@ func (s *Server) handleInvokeTool(w http.ResponseWriter, r *http.Request) {
 	if len(input) == 0 {
 		input = json.RawMessage(`{}`)
 	}
+	sessionID := strings.TrimSpace(body.SessionID)
 
 	desc, err := reg.Latest(id)
 	if err != nil {
@@ -149,6 +152,46 @@ func (s *Server) handleInvokeTool(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		desc = resolved
+	}
+
+	// Same Ask/Auto/Full + fingerprint gate as CognitionTurnRunner.
+	call := cognition.ToolCall{
+		Name:  desc.ID,
+		Input: append([]byte(nil), input...),
+	}
+	policy := &RegistryPolicy{
+		Registry:  reg,
+		Approvals: s.approvals,
+		SessionID: sessionID,
+	}
+	switch policy.Decide(r.Context(), call) {
+	case cognition.Allow:
+		// proceed to execute
+	case cognition.Ask:
+		item := enqueueToolApproval(s.approvals, reg, sessionID, call)
+		resp := map[string]any{
+			"ok":                false,
+			"id":                id,
+			"version":           desc.Version,
+			"risk":              riskName(desc.Risk),
+			"error":             "approval required",
+			"approval_required": true,
+			"approval_mode":     s.approvals.Mode(),
+		}
+		if item != nil {
+			resp["approval"] = s.approvals.ToPublic(item)
+		}
+		writeJSON(w, http.StatusForbidden, resp)
+		return
+	default:
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"ok":      false,
+			"id":      id,
+			"version": desc.Version,
+			"risk":    riskName(desc.Risk),
+			"error":   "tool denied by policy",
+		})
+		return
 	}
 
 	req := tools.Request{

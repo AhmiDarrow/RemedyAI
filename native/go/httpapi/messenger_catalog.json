@@ -73,8 +73,8 @@
   {
     "id": "whatsapp",
     "name": "WhatsApp",
-    "description": "Cloud API outbound; inbound via /api/webhooks/whatsapp (public HTTPS).",
-    "status": "partial",
+    "description": "Cloud API outbound; inbound via /api/webhooks/whatsapp (needs public HTTPS tunnel).",
+    "status": "ready",
     "inbound": true,
     "outbound": true,
     "docs_url": "https://developers.facebook.com/docs/whatsapp/cloud-api",
@@ -92,8 +92,8 @@
   {
     "id": "teams",
     "name": "Microsoft Teams",
-    "description": "Bot Framework connector; inbound via /api/webhooks/teams.",
-    "status": "partial",
+    "description": "Bot Framework connector; inbound via /api/webhooks/teams (needs public HTTPS tunnel).",
+    "status": "ready",
     "inbound": true,
     "outbound": true,
     "docs_url": "https://learn.microsoft.com/en-us/microsoftteams/platform/bots/what-are-bots",
@@ -129,15 +129,18 @@
   {
     "id": "google_chat",
     "name": "Google Chat",
-    "description": "Chat API outbound; inbound via /api/webhooks/google_chat.",
-    "status": "partial",
+    "description": "Chat API outbound; inbound via /api/webhooks/google_chat (needs public HTTPS tunnel).",
+    "status": "ready",
     "inbound": true,
     "outbound": true,
     "docs_url": "https://developers.google.com/chat",
     "badge": "GChat",
     "max_reply_chars": 4096,
     "fields": [
-      {"key": "access_token", "label": "Access token", "kind": "secret", "required": true},
+      {"key": "access_token", "label": "Access token", "kind": "secret", "help": "Short-lived OAuth bearer. Optional if refresh token + OAuth client are set."},
+      {"key": "refresh_token", "label": "Refresh token", "kind": "secret", "help": "Recommended — Remedy refreshes the access token when it expires."},
+      {"key": "oauth_client_id", "label": "OAuth client ID", "kind": "text", "help": "Google Cloud OAuth client ID (needed to refresh)."},
+      {"key": "oauth_client_secret", "label": "OAuth client secret", "kind": "secret", "help": "Google Cloud OAuth client secret (needed to refresh)."},
       {"key": "space_id", "label": "Default space ID", "kind": "text"},
       {"key": "allow_ids", "label": "Allowed space/user IDs", "kind": "list"},
       {"key": "allow_all", "label": "Allow all", "kind": "bool"}
@@ -146,15 +149,15 @@
   {
     "id": "signal",
     "name": "Signal",
-    "description": "Optional signal-cli receive/send (local binary required).",
-    "status": "partial",
+    "description": "signal-cli receive/send (local binary + registered account required).",
+    "status": "ready",
     "inbound": true,
     "outbound": true,
     "docs_url": "https://github.com/AsamK/signal-cli",
     "badge": "Signal",
     "max_reply_chars": 2000,
     "fields": [
-      {"key": "cli_path", "label": "signal-cli path", "kind": "text", "placeholder": "signal-cli"},
+      {"key": "cli_path", "label": "signal-cli path", "kind": "text", "placeholder": "signal-cli", "help": "Leave blank to use PATH or ~/.remedy/signal managed install."},
       {"key": "account", "label": "Account number", "kind": "text", "placeholder": "+1…", "required": true},
       {"key": "allow_from", "label": "Allowed numbers", "kind": "list"},
       {"key": "allow_all", "label": "Allow all", "kind": "bool"}

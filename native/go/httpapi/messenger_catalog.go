@@ -25,7 +25,7 @@ type messengerCatalogEntry struct {
 	ID            string                 `json:"id"`
 	Name          string                 `json:"name"`
 	Description   string                 `json:"description"`
-	Status        string                 `json:"status"` // ready | partial | planned
+	Status        string                 `json:"status"` // ready | planned (live API may emit needs_setup)
 	Inbound       bool                   `json:"inbound"`
 	Outbound      bool                   `json:"outbound"`
 	DocsURL       string                 `json:"docs_url"`

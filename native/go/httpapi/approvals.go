@@ -1,9 +1,12 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -27,6 +30,10 @@ type pendingApproval struct {
 	SummaryOverride string  `json:"-"`
 }
 
+type approvalResolveResult struct {
+	approved bool
+}
+
 type approvalQueue struct {
 	mu           sync.Mutex
 	items        map[string]*pendingApproval
@@ -34,6 +41,7 @@ type approvalQueue struct {
 	sessionFPs   map[string]map[string]struct{}
 	sessionOrder []string
 	oneShot      map[string]map[string]string // sid -> fp -> origin
+	waiters      map[string]chan approvalResolveResult
 	mode         string
 }
 
@@ -43,6 +51,7 @@ func newApprovalQueue() *approvalQueue {
 		approvedFPs: map[string]struct{}{},
 		sessionFPs:  map[string]map[string]struct{}{},
 		oneShot:     map[string]map[string]string{},
+		waiters:     map[string]chan approvalResolveResult{},
 		mode:        "ask",
 	}
 }
@@ -180,6 +189,12 @@ func (q *approvalQueue) ListPending(sessionID string) []*pendingApproval {
 }
 
 func (q *approvalQueue) Resolve(id string, approve bool, scope string) *pendingApproval {
+	item, _ := q.resolve(id, approve, scope)
+	return item
+}
+
+// resolve applies approve/deny and reports whether a blocked turn was waiting.
+func (q *approvalQueue) resolve(id string, approve bool, scope string) (*pendingApproval, bool) {
 	if scope != "session" && scope != "always" {
 		scope = "session"
 	}
@@ -187,11 +202,15 @@ func (q *approvalQueue) Resolve(id string, approve bool, scope string) *pendingA
 	defer q.mu.Unlock()
 	item := q.items[id]
 	if item == nil {
-		return nil
+		return nil, false
 	}
 	if item.Status != "pending" {
 		cp := *item
-		return &cp
+		return &cp, false
+	}
+	resumed := false
+	if _, ok := q.waiters[id]; ok {
+		resumed = approve
 	}
 	if approve {
 		item.Status = "approved"
@@ -218,8 +237,116 @@ func (q *approvalQueue) Resolve(id string, approve bool, scope string) *pendingA
 	} else {
 		item.Status = "denied"
 	}
+	q.signalWaiterLocked(id, approve)
 	cp := *item
-	return &cp
+	return &cp, resumed
+}
+
+func (q *approvalQueue) signalWaiterLocked(id string, approve bool) {
+	ch := q.waiters[id]
+	if ch == nil {
+		return
+	}
+	delete(q.waiters, id)
+	select {
+	case ch <- approvalResolveResult{approved: approve}:
+	default:
+	}
+}
+
+// HasWaiter reports whether a live turn is blocked on this approval id.
+func (q *approvalQueue) HasWaiter(id string) bool {
+	if q == nil {
+		return false
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	_, ok := q.waiters[id]
+	return ok
+}
+
+// WaitAll blocks until every id is approved, or returns false if any is denied.
+// Already-resolved ids are checked without waiting. Context cancel unregisters
+// waiters and returns ctx.Err().
+func (q *approvalQueue) WaitAll(ctx context.Context, ids []string) (bool, error) {
+	if q == nil {
+		return false, errors.New("approval queue is nil")
+	}
+	if len(ids) == 0 {
+		return true, nil
+	}
+	type waitSlot struct {
+		id string
+		ch <-chan approvalResolveResult
+	}
+	var waiting []waitSlot
+	q.mu.Lock()
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		item := q.items[id]
+		if item == nil {
+			q.mu.Unlock()
+			q.clearWaiters(ids)
+			return false, fmt.Errorf("approval %s not found", id)
+		}
+		switch item.Status {
+		case "approved":
+			continue
+		case "denied":
+			q.mu.Unlock()
+			q.clearWaiters(ids)
+			return false, nil
+		default:
+			ch := make(chan approvalResolveResult, 1)
+			q.waiters[id] = ch
+			waiting = append(waiting, waitSlot{id: id, ch: ch})
+		}
+	}
+	q.mu.Unlock()
+
+	for _, slot := range waiting {
+		select {
+		case <-ctx.Done():
+			q.clearWaiters(ids)
+			return false, ctx.Err()
+		case res := <-slot.ch:
+			if !res.approved {
+				q.denyRemaining(ids, slot.id)
+				q.clearWaiters(ids)
+				return false, nil
+			}
+		}
+	}
+	return true, nil
+}
+
+func (q *approvalQueue) clearWaiters(ids []string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, id := range ids {
+		delete(q.waiters, id)
+	}
+}
+
+// denyRemaining marks other still-pending ids in the batch as denied so the
+// banner clears when the owner rejects one tool in a multi-tool Ask batch.
+func (q *approvalQueue) denyRemaining(ids []string, except string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, id := range ids {
+		if id == except {
+			continue
+		}
+		item := q.items[id]
+		if item == nil || item.Status != "pending" {
+			continue
+		}
+		item.Status = "denied"
+		q.signalWaiterLocked(id, false)
+	}
 }
 
 func (q *approvalQueue) Get(id string) *pendingApproval {
@@ -279,20 +406,26 @@ func plainApprovalSummary(item *pendingApproval) string {
 		}
 		return "Remedy wants to drive this computer through a plan. Yes, No, or Explain?"
 	}
-	if tool == "bash_exec" {
+	if tool == "bash_exec" || tool == "shell.exec" {
 		if len(cmd) > 120 {
 			cmd = cmd[:120]
 		}
 		return "Remedy wants to run a command: " + cmd
 	}
-	if tool == "file_write" || tool == "file_edit" {
+	if tool == "file_write" || tool == "file_edit" || tool == "workspace.write" || tool == "workspace.edit" {
 		if len(cmd) > 120 {
 			cmd = cmd[:120]
 		}
 		return "Remedy wants to change a file: " + cmd
 	}
-	if tool == "mail_send" {
+	if tool == "mail_send" || tool == "mail.send" {
 		return "Remedy wants to send an email."
+	}
+	if tool == "computer.navigate" {
+		if len(cmd) > 120 {
+			cmd = cmd[:120]
+		}
+		return "Remedy wants to open a page in the Browser rail: " + cmd
 	}
 	if len(cmd) > 120 {
 		cmd = cmd[:120]
@@ -360,18 +493,23 @@ func (s *Server) handleResolveApproval(w http.ResponseWriter, r *http.Request) {
 	req.Scope = "session"
 	dec := json.NewDecoder(r.Body)
 	_ = dec.Decode(&req)
-	item := s.approvals.Resolve(id, req.Approve, req.Scope)
+	item, resumed := s.approvals.resolve(id, req.Approve, req.Scope)
 	if item == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Approval not found"})
 		return
 	}
-	hint := "Denied — do not run the command."
+	hint := "Denied — stopped."
 	if item.Status == "approved" {
-		hint = "Approved — ask Remedy to retry the same command."
+		if resumed {
+			hint = "Approved — Remedy is continuing with the approved action."
+		} else {
+			hint = "Approved — the same action can run now without asking again this session."
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":   item.Status,
 		"approval": s.approvals.ToPublic(item),
 		"hint":     hint,
+		"resumed":  resumed,
 	})
 }
