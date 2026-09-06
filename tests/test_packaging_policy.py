@@ -56,8 +56,17 @@ def test_lib_rs_launch_path_never_joins_remedy_desktop() -> None:
 
 
 def test_agents_md_names_runtime_release_jobs_not_sidecar() -> None:
-    """AGENTS.md must not steer agents at retired build-sidecar CI job names."""
-    text = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    """AGENTS.md must not steer agents at retired build-sidecar CI job names.
+
+    Clone-only (gitignored at repo root). Public CI checkouts have no copy —
+    skip rather than FileNotFoundError.
+    """
+    import pytest
+
+    agents = ROOT / "AGENTS.md"
+    if not agents.is_file():
+        pytest.skip("AGENTS.md is clone-only (gitignored); not on public CI")
+    text = agents.read_text(encoding="utf-8")
     assert "build-runtime" in text
     assert "build-runtime-linux" in text
     assert "build-sidecar" not in text

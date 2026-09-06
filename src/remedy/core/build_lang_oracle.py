@@ -129,14 +129,41 @@ def _is_tsc_project_noise(err: str) -> bool:
     )
 
 
+def _is_toolchain_unavailable(err: str) -> bool:
+    """Parser exited because the runtime is missing — not because the file is bad.
+
+    GitHub Linux pytest images can have a ``tsc`` shim on PATH without ``node``.
+    Treating that as a syntax failure false-reds every .ts/.tsx/.jsx file.
+    """
+    e = (err or "").lower()
+    return (
+        "'node': no such file" in e
+        or '"node": no such file' in e
+        or "node: not found" in e
+        or "cannot find node" in e
+        or "unable to locate node" in e
+        or "enoent" in e and "node" in e
+    )
+
+
+def _tsc_usable() -> str | None:
+    """``tsc`` is a Node script; without node it is not a parser."""
+    tsc = _which("tsc")
+    if tsc is None:
+        return None
+    if _which("node") is None:
+        return None
+    return tsc
+
+
 def _jsx_checker() -> str | None:
     """A parser that actually understands JSX, or None.
 
     esbuild parses .jsx/.tsx natively and is the cheapest; tsc with
-    ``--jsx preserve`` is the fallback. Node is deliberately not here.
+    ``--jsx preserve`` is the fallback. Node is deliberately not a JSX
+    checker itself — but tsc still needs node on PATH to run.
     """
-    return _which("esbuild") or _which("tsc")
-
+    return _which("esbuild") or _tsc_usable()
 
 def _jsx_command(checker: str, p: Path) -> list[str]:
     if Path(checker).stem.lower() == "esbuild":
@@ -297,6 +324,9 @@ def check_lang_syntax(path: str | Path) -> dict[str, Any]:
             out["engine"] = "skip (no jsx parser)"
             return out
         ok, err = _run(_jsx_command(checker, p))
+        if not ok and _is_toolchain_unavailable(err):
+            out["engine"] = "skip (jsx toolchain unavailable)"
+            return out
         if not ok and _is_tsc_project_noise(err):
             out["engine"] = "skip (tsc import-noise)"
             return out
@@ -309,6 +339,12 @@ def check_lang_syntax(path: str | Path) -> dict[str, Any]:
         node = _which("node")
         if node:
             ok, err = _run([node, "--check", str(p)])
+            if not ok and _is_toolchain_unavailable(err):
+                ok, err = brace_balance(text)
+                out["ok"] = ok
+                out["error"] = err
+                out["engine"] = "brace (node unavailable)"
+                return out
             out["ok"] = ok
             out["error"] = "" if ok else err
             out["engine"] = "node --check"
@@ -320,12 +356,16 @@ def check_lang_syntax(path: str | Path) -> dict[str, Any]:
         return out
 
     if suffix == ".ts":
-        tsc = _which("tsc")
+        tsc = _tsc_usable()
         if tsc:
             ok, err = _run([tsc, "--noEmit", "--pretty", "false", "--allowJs", "false", str(p)])
             # tsc on a single file without tsconfig often errors on imports —
-            # fall back to brace if the only issue is project config.
-            if not ok and _is_tsc_project_noise(err):
+            # fall back to brace if the only issue is project config. A tsc
+            # shim without a working node is the same class of miss.
+            if not ok and _is_toolchain_unavailable(err):
+                ok, err = brace_balance(text)
+                out["engine"] = "brace (tsc toolchain unavailable)"
+            elif not ok and _is_tsc_project_noise(err):
                 ok, err = brace_balance(text)
                 out["engine"] = "brace (tsc import-noise)"
             else:
