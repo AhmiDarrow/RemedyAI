@@ -151,6 +151,38 @@ def test_ci_python_jobs_build_the_zig_core_before_pytest() -> None:
         assert library in run
 
 
+def test_linux_ci_installs_zig_host_libs_before_building_remedy_core() -> None:
+    """ubuntu-latest has no X11/AT-SPI; Zig links them (native/zig/build.zig).
+
+    WSL developer boxes often already have the libs, so local green does not
+    prove GitHub runners can link remedy_core. Every Linux job that builds Zig
+    must run scripts/ci_install_linux_zig_host_deps.sh first.
+    """
+    script = (ROOT / "scripts" / "ci_install_linux_zig_host_deps.sh").read_text("utf-8")
+    for pkg in (
+        "libx11-dev",
+        "libxtst-dev",
+        "libatspi2.0-dev",
+        "libdbus-1-dev",
+        "libglib2.0-dev",
+    ):
+        assert pkg in script, f"host-deps script missing {pkg}"
+
+    install = "ci_install_linux_zig_host_deps.sh"
+    jobs = _workflow_jobs("ci.yml")
+    for name in ("test", "native-core"):
+        runs = _run_commands(jobs[name])
+        assert install in runs, f"ci.yml {name} must install Linux Zig host libs"
+        assert runs.index(install) < runs.index(ZIG_BUILD), (
+            f"ci.yml {name} must install host libs before zig build"
+        )
+
+    release = _workflow_jobs("desktop-release.yml")
+    linux_runtime = _run_commands(release["build-runtime-linux"])
+    assert install in linux_runtime
+    assert linux_runtime.index(install) < linux_runtime.index(ZIG_BUILD)
+
+
 def test_release_builds_runtime_and_core_without_python_sidecar() -> None:
     """Packaged Desktop is remedy-runtime + Zig core; no PyInstaller sidecar."""
     jobs = _workflow_jobs("desktop-release.yml")

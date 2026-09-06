@@ -48,9 +48,13 @@ jobs:
       - name: Docs sync (versions, help, slash cmds, hotkeys, test count)
         run: uv run python scripts/check_docs.py
 
+      # Zig remedy_core links X11/XTest/AT-SPI on Linux (see native/zig/build.zig).
+      - name: Install Linux Zig host libs
+        run: bash scripts/ci_install_linux_zig_host_deps.sh
+
       # Library-backed tests must execute, not skip: build the Zig core and
-      # point the loader at it. Linux host functions return unsupported, but
-      # loading and the ABI check run for real.
+      # point the loader at it. Linux host functions need DISPLAY for live
+      # ops, but loading and the ABI check run for real.
       - name: Build native core (Zig)
         working-directory: native/zig
         run: |
@@ -207,6 +211,10 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
+
+      - name: Install Linux Zig host libs
+        if: runner.os == 'Linux'
+        run: bash scripts/ci_install_linux_zig_host_deps.sh
 
       - name: Go tests
         run: go test ./...
