@@ -4,6 +4,39 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-09-05
+
+### Agency and Tool ABI
+
+- Go HostBridge can enqueue and wait on Desktop computer jobs; `computer.navigate`
+  opens the in-app Browser rail (Tool ABI).
+- Life-task CAPTCHA/password probes can clear when the rail URL/page shows the
+  wall is gone.
+- Exclusive serve lock at `~/.remedy/locks/remedy_serve.lock` (PID + heartbeat).
+- `POST /api/tools/invoke` respects Ask/Auto/Full and approval fingerprints.
+- Approving a pending tool continues the cognition turn; deny stops without
+  running the tool.
+- RMDY tools: `mail.list` / `mail.send` (checkpoint), `calendar.list_events` /
+  `calendar.create_event`, plus `settings.get` / `settings.patch` (jailed fields).
+
+### Messengers
+
+- Catalog no longer shows vague `partial` — live health is `ready` or
+  `needs_setup` with a plain-language reason.
+- Teams keeps a per-conversation `serviceUrl` map.
+- Managed Cloudflare tunnel helper and Settings Quick/Named “Expose messenger
+  webhooks” (API stays on loopback).
+- Managed signal-cli install (native on Linux; JVM tarball on Windows) with
+  `java_ok` / Temurin guidance; no silent stub when the binary is missing.
+- Google Chat refreshes OAuth access tokens when refresh token + client id/secret
+  are set (retry on 401).
+
+### Docs and tests
+
+- Owner manuals retargeted to Tool ABI ids and v0.61 packaging.
+- Removed obsolete FastAPI route-smoke tombstone; HostBridge / navigate /
+  messenger health coverage expanded.
+
 ## [0.60.0] - 2026-09-05
 
 > **Native runtime cutover.** Local API and Desktop packaging are Go
