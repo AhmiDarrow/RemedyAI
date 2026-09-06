@@ -62,6 +62,7 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
     messengers = [],
     messengerDrafts = {},
     setMessengerDrafts,
+    onMessengersRefresh,
     assistant = null,
     assistantDraft = {},
     setAssistantDraft,
@@ -172,6 +173,7 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
           messengers={messengers}
           messengerDrafts={messengerDrafts}
           setMessengerDrafts={setMessengerDrafts}
+          onMessengersRefresh={onMessengersRefresh}
         />
       ) : (
         <SettingsSection {...sectionProps('channels')}>

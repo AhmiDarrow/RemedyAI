@@ -17,6 +17,7 @@ import (
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/httpapi"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
+	"github.com/AhmiDarrow/RemedyAI/native/go/servelock"
 	"github.com/AhmiDarrow/RemedyAI/native/go/workers"
 )
 
@@ -81,6 +82,15 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	home := httpapi.ResolveHomeDir("")
+	serveLock := servelock.New(home)
+	if ok, msg := serveLock.TryAcquire(); !ok {
+		fmt.Fprintln(os.Stderr, msg)
+		os.Exit(1)
+	}
+	defer serveLock.Release()
+	go serveLock.RunHeartbeat(ctx)
+
 	// Durable Zig HMAC key in the secret store (never logged). httpapi terminal
 	// / computer routes install the same on-disk key into remedy_core when they
 	// spawn ConPTY; Connect Tailscale management loads remedy_core lazily via
@@ -98,7 +108,6 @@ func main() {
 		runner = httpapi.NewFixtureTurnRunner()
 	} else {
 		// Per-turn ResolveChatModel: xAI OAuth bearer, then vision helper, else Scripted.
-		home := httpapi.ResolveHomeDir("")
 		cognition := httpapi.NewCognitionTurnRunner(httpapi.ResolveListenModel(home))
 		cognition.HomeDir = home
 		// Equal-or-better vs pre-cutover Python ReAct: supervise the RMDY tool
@@ -134,6 +143,7 @@ func main() {
 		TurnRunner:   runner,
 		VoiceWorker:  voiceWorker,
 		VisionWorker: visionWorker,
+		HomeDir:      home,
 	}, func(bound string) {
 		fmt.Fprintf(os.Stderr, "remedy-runtime listening on http://%s\n", bound)
 	})

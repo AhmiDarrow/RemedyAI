@@ -85,6 +85,13 @@ func (c *SignalChannel) Running() bool {
 }
 
 func (c *SignalChannel) Start(ctx context.Context) error {
+	bin := c.resolveBin()
+	if bin == "" || c.account == "" {
+		// Do not mark Running — silent stub "running" lied to health/UI.
+		log.Printf("signal: not starting (signal-cli=%v account=%v)", bin != "", c.account != "")
+		return nil
+	}
+
 	c.mu.Lock()
 	if c.running {
 		c.mu.Unlock()
@@ -95,11 +102,6 @@ func (c *SignalChannel) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	bin := c.resolveBin()
-	if bin == "" || c.account == "" {
-		log.Printf("signal: stub (signal-cli=%v account=%v)", bin != "", c.account != "")
-		return nil
-	}
 	log.Printf("signal: active (cli=%s)", bin)
 	if !c.tryStartReceive(runCtx) {
 		log.Printf("signal: receive deferred — another process holds the bot lock; retrying")
@@ -107,6 +109,29 @@ func (c *SignalChannel) Start(ctx context.Context) error {
 		go c.lockRetryLoop(runCtx)
 	}
 	return nil
+}
+
+// Health reports setup gates for Settings live status (cli_ok / account_ok / java_ok).
+func (c *SignalChannel) Health() map[string]any {
+	cliOK := c.resolveBin() != ""
+	accountOK := strings.TrimSpace(c.account) != ""
+	needsJava := SignalCLINeedsJava()
+	javaOK := SignalCLIJavaOK()
+	out := map[string]any{
+		"cli_ok":     cliOK,
+		"account_ok": accountOK,
+		"needs_java": needsJava,
+		"java_ok":    javaOK,
+	}
+	if url := SignalCLIDownloadURL(); url != "" {
+		out["download_url"] = url
+	}
+	if !cliOK {
+		out["install_hint"] = signalCLIInstallHint()
+	} else if needsJava && !javaOK {
+		out["install_hint"] = "Install Java 21+ (Temurin) and restart Remedy so signal-cli can run."
+	}
+	return out
 }
 
 func (c *SignalChannel) Stop(ctx context.Context) error {
@@ -167,6 +192,9 @@ func (c *SignalChannel) resolveBin() string {
 		return c.resolved
 	}
 	found := resolveSignalCLI(c.cliPath)
+	if found == "" {
+		found = LookupManagedSignalCLI(c.home)
+	}
 	c.resolved = found
 	return found
 }
@@ -342,6 +370,11 @@ func stringField(m map[string]any, key string) string {
 	}
 	s, _ := v.(string)
 	return strings.TrimSpace(s)
+}
+
+// ResolveSignalCLIForHealth resolves a signal-cli path for Settings health checks.
+func ResolveSignalCLIForHealth(cliPath string) string {
+	return resolveSignalCLI(cliPath)
 }
 
 // resolveSignalCLI mirrors Python SignalChannel._bin without os/exec.

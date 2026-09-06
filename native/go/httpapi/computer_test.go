@@ -193,11 +193,4 @@ func TestComputerUICommandPeekAndAck(t *testing.T) {
 	}
 }
 
-func (b *HostBridge) setUICommand(command map[string]any) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	cmd := cloneMap(command)
-	b.uiCommand = cmd
-	raw, _ := json.Marshal(cmd)
-	_ = os.WriteFile(b.uiPath, raw, 0o600)
-}
+

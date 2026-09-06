@@ -132,3 +132,91 @@ func TestToolsUnavailableWithoutRegistry(t *testing.T) {
 		t.Fatalf("status=%d want 503", code)
 	}
 }
+
+func TestInvokeReadOnlyStillAllowedInAskMode(t *testing.T) {
+	s := newToolsAPIServer(t)
+	_ = s.approvals.SetMode("ask")
+	code, raw := doTools(t, s, http.MethodPost, "/api/tools/invoke", `{"id":"runtime.probe","input":{}}`)
+	if code != http.StatusOK {
+		t.Fatalf("read-only status=%d body=%s", code, raw)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["ok"] != true {
+		t.Fatalf("expected ok: %v", out)
+	}
+}
+
+func TestInvokeMutationAskBlocks(t *testing.T) {
+	s := newToolsAPIServer(t)
+	_ = s.approvals.SetMode("ask")
+	body := `{"id":"shell.exec","session_id":"sess-ask","input":{"argv":["C:\\Windows\\System32\\cmd.exe","/c","echo"]}}`
+	code, raw := doTools(t, s, http.MethodPost, "/api/tools/invoke", body)
+	if code != http.StatusForbidden {
+		t.Fatalf("mutation Ask status=%d body=%s want 403", code, raw)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["ok"] != false || out["approval_required"] != true {
+		t.Fatalf("expected approval_required block: %v", out)
+	}
+	if out["error"] != "approval required" {
+		t.Fatalf("error=%v", out["error"])
+	}
+	pending := s.approvals.ListPending("sess-ask")
+	if len(pending) != 1 || pending[0].ToolName != "shell.exec" {
+		t.Fatalf("pending=%v", pending)
+	}
+
+	// computer.click must also Ask-block (no silent run).
+	code2, raw2 := doTools(t, s, http.MethodPost, "/api/tools/invoke",
+		`{"id":"computer.click","session_id":"sess-ask","input":{"x":10,"y":20}}`)
+	if code2 != http.StatusForbidden {
+		t.Fatalf("computer.click Ask status=%d body=%s want 403", code2, raw2)
+	}
+}
+
+func TestInvokeMutationApprovedFingerprintAllows(t *testing.T) {
+	s := newToolsAPIServer(t)
+	_ = s.approvals.SetMode("ask")
+	sid := "sess-fp"
+	input := `{"argv":["C:\\Windows\\System32\\cmd.exe","/c","echo"]}`
+	item := s.approvals.Enqueue("shell.exec", input, "test", &sid, "run echo")
+	_ = s.approvals.Resolve(item.ID, true, "session")
+
+	body := `{"id":"shell.exec","session_id":"sess-fp","input":{"argv":["C:\\Windows\\System32\\cmd.exe","/c","echo"]}}`
+	code, raw := doTools(t, s, http.MethodPost, "/api/tools/invoke", body)
+	if code == http.StatusForbidden {
+		var out map[string]any
+		_ = json.Unmarshal(raw, &out)
+		if out["approval_required"] == true {
+			t.Fatalf("approved fingerprint still Ask-blocked: %s", raw)
+		}
+	}
+	// Past policy: execute may fail closed without Zig core (not an Ask 403).
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["approval_required"] == true {
+		t.Fatalf("should not require approval after fingerprint: %v", out)
+	}
+}
+
+func TestInvokeMutationAutoAllowsPastPolicy(t *testing.T) {
+	s := newToolsAPIServer(t)
+	_ = s.approvals.SetMode("auto")
+	body := `{"id":"computer.click","input":{"x":1,"y":2}}`
+	code, raw := doTools(t, s, http.MethodPost, "/api/tools/invoke", body)
+	if code == http.StatusForbidden {
+		var out map[string]any
+		_ = json.Unmarshal(raw, &out)
+		if out["approval_required"] == true {
+			t.Fatalf("auto mode must not Ask-block mutations: %s", raw)
+		}
+	}
+}

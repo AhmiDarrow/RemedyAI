@@ -147,7 +147,7 @@ func (s *Server) executeSlashCommand(sessionID, command string) map[string]any {
 			return map[string]any{
 				"text": "No skills loaded yet. Default skills ship with Remedy — restart the server " +
 					"to discover bundled skills, or drop SKILL.md packages into `~/.remedy/skills/`.\n\n" +
-					"**Built-in tools:** `file_read`, `file_write`, `list_dir`, `bash_exec`.",
+					"**Built-in tools:** `workspace.read`, `workspace.write`, `workspace.list`, `shell.exec`.",
 			}
 		}
 		limit := 40
@@ -164,7 +164,7 @@ func (s *Server) executeSlashCommand(sessionID, command string) map[string]any {
 			lines = append(lines, fmt.Sprintf("  · **%s** — %s", rec.Name, desc))
 		}
 		toolsHint := "\n\n**Built-in tools** (always available): " +
-			"`file_read`, `file_write`, `list_dir`, `bash_exec`.\n" +
+			"`workspace.read`, `workspace.write`, `workspace.list`, `shell.exec`.\n" +
 			"Skills are procedure packs the agent follows; tools are executable actions."
 		return map[string]any{
 			"text": fmt.Sprintf("**%d skills loaded:**\n", len(skills)) + strings.Join(lines, "\n") + toolsHint,

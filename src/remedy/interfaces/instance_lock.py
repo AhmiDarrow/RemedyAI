@@ -1,9 +1,11 @@
 """Single-process ownership so only one Remedy Desktop / serve stack runs.
 
-Desktop holds a Windows named mutex (see Tauri). Go ``remedy-runtime`` (and the
-Python ``remedy serve`` launcher path) holds ``~/.remedy/locks/remedy_serve.lock``
-so a second serve cannot bind 7400 under the first. Desktop-spawned children set
-``REMEDY_DESKTOP_SIDECAR=1`` (historical env name) and still take the serve lock.
+Desktop holds a Windows named mutex (see Tauri). Go ``remedy-runtime`` holds
+``~/.remedy/locks/remedy_serve.lock`` (see ``native/go/servelock``) so a second
+serve cannot bind 7400 under the first. ``remedy serve`` launches that binary;
+this Python module remains for tests and any helper that must check the same
+file. Desktop-spawned children set ``REMEDY_DESKTOP_SIDECAR=1`` (historical env
+name); the runtime still takes the serve lock.
 """
 
 from __future__ import annotations

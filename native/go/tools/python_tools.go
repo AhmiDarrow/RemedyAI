@@ -531,6 +531,140 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 		return err
 	}
 
+	if err := registry.Register(Descriptor{
+		ID:          "mail.list",
+		Version:     1,
+		Description: "List recent email messages from the connected account (Python worker)",
+		Runtime:     RuntimePython,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"query":{"type":"string"},
+				"limit":{"type":"integer","minimum":1,"maximum":50},
+				"home_dir":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok","messages","count"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"messages":{"type":"array"},
+				"count":{"type":"integer","minimum":0},
+				"query":{"type":"string"},
+				"error":{"type":"string"}
+			},
+			"additionalProperties":true
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:          "mail.send",
+		Version:     1,
+		Description: "Send an email from the connected account (always requires owner approval)",
+		Runtime:     RuntimePython,
+		Risk:        RiskCheckpoint,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["to"],
+			"properties":{
+				"to":{"type":"string","minLength":3},
+				"subject":{"type":"string"},
+				"body":{"type":"string"},
+				"text":{"type":"string"},
+				"home_dir":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"message_id":{"type":"string"},
+				"to":{"type":"string"},
+				"subject":{"type":"string"},
+				"message":{"type":"string"},
+				"error":{"type":"string"}
+			},
+			"additionalProperties":true
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:          "calendar.list_events",
+		Version:     1,
+		Description: "List upcoming calendar events from the connected account (Python worker)",
+		Runtime:     RuntimePython,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"days":{"type":"integer","minimum":1,"maximum":60},
+				"time_min":{"type":"string"},
+				"time_max":{"type":"string"},
+				"home_dir":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok","events","count"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"events":{"type":"array"},
+				"count":{"type":"integer","minimum":0},
+				"days":{"type":"integer"},
+				"error":{"type":"string"}
+			},
+			"additionalProperties":true
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:          "calendar.create_event",
+		Version:     1,
+		Description: "Create a calendar event on the connected account (requires approval)",
+		Runtime:     RuntimePython,
+		Risk:        RiskMutation,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["title","start","end"],
+			"properties":{
+				"title":{"type":"string","minLength":1},
+				"start":{"type":"string","minLength":1},
+				"end":{"type":"string","minLength":1},
+				"description":{"type":"string"},
+				"home_dir":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"id":{"type":"string"},
+				"title":{"type":"string"},
+				"start":{"type":"string"},
+				"end":{"type":"string"},
+				"message":{"type":"string"},
+				"error":{"type":"string"}
+			},
+			"additionalProperties":true
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
 	return registerVoiceVisionWorkerTools(registry, exec)
 }
 

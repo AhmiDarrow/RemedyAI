@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -363,6 +364,182 @@ func TestCognitionTurnRunnerOwnerCheckpointStatus(t *testing.T) {
 	if !strings.Contains(out, "@@status:Waiting for your approval") {
 		t.Fatalf("missing approval status: %q", out)
 	}
+}
+
+func TestApproveResumesPendingToolBatch(t *testing.T) {
+	reg, err := NewDefaultToolRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := newApprovalQueue()
+	_ = q.SetMode("ask")
+	input := `{"argv":["C:\\Windows\\System32\\cmd.exe","/c","echo"]}`
+	var executed atomic.Int32
+	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
+		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "shell.exec", Input: []byte(input)}}},
+		{{Text: "finished", Done: true}},
+	}}
+	r := &CognitionTurnRunner{
+		Model:     model,
+		Registry:  reg,
+		Approvals: q,
+		Policy:    &RegistryPolicy{Registry: reg, Approvals: q, SessionID: "sess-resume-approve"},
+		Tools: cognitionToolFunc(func(_ context.Context, call cognition.ToolCall) cognition.ToolResult {
+			executed.Add(1)
+			return cognition.ToolResult{ID: call.ID, Name: call.Name, Output: []byte("ok")}
+		}),
+	}
+	sid := "sess-resume-approve"
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	var out string
+	var turnErr error
+	go func() {
+		defer close(done)
+		out, turnErr = CollectTokens(ctx, r, TurnRequest{SessionID: sid, Prompt: "run echo"})
+	}()
+
+	var item *pendingApproval
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		pending := q.ListPending(sid)
+		if len(pending) > 0 {
+			item = pending[0]
+			break
+		}
+		select {
+		case <-done:
+			t.Fatalf("turn finished before approval appeared: err=%v out=%q", turnErr, out)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	if item == nil {
+		t.Fatal("timed out waiting for pending approval")
+	}
+	if item.ToolName != "shell.exec" {
+		t.Fatalf("tool=%q", item.ToolName)
+	}
+	waiterDeadline := time.Now().Add(2 * time.Second)
+	for !q.HasWaiter(item.ID) && time.Now().Before(waiterDeadline) {
+		select {
+		case <-done:
+			t.Fatalf("turn finished before waiter registered: err=%v out=%q", turnErr, out)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	if !q.HasWaiter(item.ID) {
+		t.Fatal("timed out waiting for approval waiter")
+	}
+
+	resolved, resumed := q.resolve(item.ID, true, "session")
+	if resolved == nil || resolved.Status != "approved" || !resumed {
+		t.Fatalf("resolve=%#v resumed=%v", resolved, resumed)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("turn did not resume after approve")
+	}
+	if turnErr != nil {
+		t.Fatalf("turn err: %v", turnErr)
+	}
+	if executed.Load() != 1 {
+		t.Fatalf("executed=%d want 1", executed.Load())
+	}
+	if len(q.ListPending(sid)) != 0 {
+		t.Fatalf("second approval banner: %v", q.ListPending(sid))
+	}
+	if !strings.Contains(out, "Waiting for your approval") {
+		t.Fatalf("missing wait status: %q", out)
+	}
+	if !strings.Contains(out, "finished") {
+		t.Fatalf("missing continued model text: %q", out)
+	}
+	if !strings.Contains(out, "@@tool_result:") {
+		t.Fatalf("missing tool result after resume: %q", out)
+	}
+}
+
+func TestDenyDoesNotRunPendingToolBatch(t *testing.T) {
+	reg, err := NewDefaultToolRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := newApprovalQueue()
+	_ = q.SetMode("ask")
+	input := `{"argv":["C:\\Windows\\System32\\cmd.exe","/c","echo"]}`
+	var executed atomic.Int32
+	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
+		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "shell.exec", Input: []byte(input)}}},
+		{{Text: "should-not-run", Done: true}},
+	}}
+	r := &CognitionTurnRunner{
+		Model:     model,
+		Registry:  reg,
+		Approvals: q,
+		Policy:    &RegistryPolicy{Registry: reg, Approvals: q, SessionID: "sess-resume-deny"},
+		Tools: cognitionToolFunc(func(_ context.Context, call cognition.ToolCall) cognition.ToolResult {
+			executed.Add(1)
+			return cognition.ToolResult{ID: call.ID, Name: call.Name, Output: []byte("ok")}
+		}),
+	}
+	sid := "sess-resume-deny"
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	var out string
+	var turnErr error
+	go func() {
+		defer close(done)
+		out, turnErr = CollectTokens(ctx, r, TurnRequest{SessionID: sid, Prompt: "run echo"})
+	}()
+
+	var item *pendingApproval
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		pending := q.ListPending(sid)
+		if len(pending) > 0 {
+			item = pending[0]
+			break
+		}
+		select {
+		case <-done:
+			t.Fatalf("turn finished before approval appeared: err=%v out=%q", turnErr, out)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	if item == nil {
+		t.Fatal("timed out waiting for pending approval")
+	}
+	_ = q.Resolve(item.ID, false, "session")
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("turn did not stop after deny")
+	}
+	if turnErr != nil {
+		t.Fatalf("turn err: %v", turnErr)
+	}
+	if executed.Load() != 0 {
+		t.Fatalf("tool ran after deny: executed=%d", executed.Load())
+	}
+	if !strings.Contains(out, "Denied — stopped") {
+		t.Fatalf("missing deny status: %q", out)
+	}
+	if strings.Contains(out, "should-not-run") {
+		t.Fatalf("model continued after deny: %q", out)
+	}
+}
+
+type cognitionToolFunc func(context.Context, cognition.ToolCall) cognition.ToolResult
+
+func (f cognitionToolFunc) Execute(ctx context.Context, call cognition.ToolCall) cognition.ToolResult {
+	return f(ctx, call)
 }
 
 type cognitionModelFunc func(context.Context, cognition.Turn) (<-chan cognition.ModelEvent, error)

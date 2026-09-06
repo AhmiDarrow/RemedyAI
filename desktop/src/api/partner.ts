@@ -172,7 +172,7 @@ export async function resolveApproval(
   id: string,
   approve: boolean,
   scope: 'session' | 'always' = 'session',
-): Promise<{ status: string; hint?: string }> {
+): Promise<{ status: string; hint?: string; resumed?: boolean }> {
   return apiFetch(`/approvals/${encodeURIComponent(id)}/resolve`, {
     method: 'POST',
     body: JSON.stringify({ approve, scope }),

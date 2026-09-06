@@ -160,16 +160,25 @@ func RegisterFromConfig(gw *Gateway, cfg map[string]any, home string, secrets Se
 	if _, on := enabled["google_chat"]; on {
 		sec := section(cfg, "google_chat")
 		tok := secrets("google_chat", "access_token")
-		if tok != "" {
+		refresh := secrets("google_chat", "refresh_token")
+		clientID := secrets("google_chat", "oauth_client_id")
+		if clientID == "" {
+			clientID = cfgString(sec, "oauth_client_id")
+		}
+		clientSecret := secrets("google_chat", "oauth_client_secret")
+		if tok != "" || (refresh != "" && clientID != "" && clientSecret != "") {
 			gw.RegisterChannel(NewGoogleChat(gw, GoogleChatConfig{
-				AccessToken: tok,
-				SpaceID:     cfgString(sec, "space_id"),
-				AllowIDs:    firstAny(sec["allow_ids"], sec["allow_chat_ids"]),
-				AllowAll:    asBool(sec["allow_all"]),
+				AccessToken:  tok,
+				RefreshToken: refresh,
+				ClientID:     clientID,
+				ClientSecret: clientSecret,
+				SpaceID:      cfgString(sec, "space_id"),
+				AllowIDs:     firstAny(sec["allow_ids"], sec["allow_chat_ids"]),
+				AllowAll:     asBool(sec["allow_all"]),
 			}))
 			registered = append(registered, "google_chat")
 		} else {
-			log.Printf("google_chat enabled but no access_token")
+			log.Printf("google_chat enabled but missing access_token (or refresh_token + oauth client)")
 		}
 	}
 
@@ -180,14 +189,25 @@ func RegisterFromConfig(gw *Gateway, cfg map[string]any, home string, secrets Se
 			cli = "signal-cli"
 		}
 		acct := cfgString(sec, "account")
-		gw.RegisterChannel(NewSignal(gw, SignalConfig{
-			CLIPath:   cli,
-			Account:   acct,
-			AllowFrom: firstAny(sec["allow_from"], sec["allow_ids"]),
-			AllowAll:  asBool(sec["allow_all"]),
-			HomeDir:   home,
-		}))
-		registered = append(registered, "signal")
+		resolved := resolveSignalCLI(cli)
+		if resolved == "" {
+			if managed := LookupManagedSignalCLI(home); managed != "" {
+				resolved = managed
+				cli = managed
+			}
+		}
+		if resolved == "" || acct == "" {
+			log.Printf("signal enabled but missing signal-cli binary or account (cli_ok=%v account_ok=%v)", resolved != "", acct != "")
+		} else {
+			gw.RegisterChannel(NewSignal(gw, SignalConfig{
+				CLIPath:   cli,
+				Account:   acct,
+				AllowFrom: firstAny(sec["allow_from"], sec["allow_ids"]),
+				AllowAll:  asBool(sec["allow_all"]),
+				HomeDir:   home,
+			}))
+			registered = append(registered, "signal")
+		}
 	}
 
 	return registered

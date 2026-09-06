@@ -163,7 +163,7 @@ func injectTextFileSnippets(atts []map[string]any, homeDir, sessionID string) st
 		if total >= maxTextInjectChars {
 			chunks.WriteString(
 				"\n…[additional text attachments omitted for context size; " +
-					"use file_read on paths above]\n",
+					"use workspace.read on paths above]\n",
 			)
 			break
 		}

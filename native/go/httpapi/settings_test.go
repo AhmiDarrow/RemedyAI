@@ -313,7 +313,7 @@ func TestPublicMessengersIncludesFieldSchema(t *testing.T) {
 		},
 	}
 	keys := map[string]bool{"ch:telegram:bot_token": true}
-	got := publicMessengers(cfg, keys)
+	got := publicMessengers(cfg, keys, t.TempDir())
 	if len(got) < 9 {
 		t.Fatalf("expected full catalog, got %d", len(got))
 	}
@@ -364,11 +364,78 @@ func TestPublicMessengersIncludesFieldSchema(t *testing.T) {
 			break
 		}
 	}
-	if signal == nil || signal["status"] != "partial" {
+	if signal == nil || signal["status"] != "needs_setup" {
 		t.Fatalf("signal status=%v", signal)
+	}
+	if reason, _ := signal["status_reason"].(string); reason == "" {
+		t.Fatal("signal needs status_reason")
+	}
+	health, _ := signal["health"].(map[string]any)
+	if health == nil || health["cli_ok"] != false {
+		t.Fatalf("signal health=%v", health)
+	}
+	if _, ok := health["java_ok"]; !ok {
+		t.Fatalf("signal health missing java_ok: %v", health)
+	}
+	if _, ok := health["needs_java"]; !ok {
+		t.Fatalf("signal health missing needs_java: %v", health)
 	}
 	sigSchema, _ := signal["field_schema"].([]map[string]any)
 	if len(sigSchema) == 0 {
 		t.Fatal("signal field_schema empty — SPA would show No fields yet")
+	}
+	for _, row := range got {
+		if row["status"] == "partial" {
+			t.Fatalf("%s still reports vague partial", row["id"])
+		}
+	}
+}
+
+func TestPublicMessengersWebhookNeedsTunnel(t *testing.T) {
+	t.Setenv("REMEDY_PUBLIC_BASE_URL", "")
+	t.Setenv("REMEDY_WEBHOOK_PUBLIC_URL", "")
+	cfg := ConfigMap{
+		"enabled_channels": []string{"cli", "whatsapp", "teams", "google_chat"},
+		"whatsapp": map[string]any{
+			"phone_number_id": "pn1",
+		},
+		"teams": map[string]any{
+			"app_id": "aid",
+		},
+		"google_chat": map[string]any{},
+	}
+	keys := map[string]bool{
+		"ch:whatsapp:access_token":           true,
+		"ch:teams:app_password":              true,
+		"ch:google_chat:access_token":        true,
+		"ch:google_chat:refresh_token":       true,
+		"ch:google_chat:oauth_client_id":     true,
+		"ch:google_chat:oauth_client_secret": true,
+	}
+	got := publicMessengers(cfg, keys, t.TempDir())
+	byID := map[string]map[string]any{}
+	for _, row := range got {
+		byID[fmt.Sprint(row["id"])] = row
+	}
+	for _, id := range []string{"whatsapp", "teams", "google_chat"} {
+		row := byID[id]
+		if row["status"] != "needs_setup" {
+			t.Fatalf("%s status=%v want needs_setup", id, row["status"])
+		}
+		reason := strings.ToLower(fmt.Sprint(row["status_reason"]))
+		if !strings.Contains(reason, "tunnel") && !strings.Contains(reason, "https") {
+			t.Fatalf("%s reason=%q want tunnel hint", id, row["status_reason"])
+		}
+	}
+	t.Setenv("REMEDY_PUBLIC_BASE_URL", "https://hooks.example.com")
+	got2 := publicMessengers(cfg, keys, t.TempDir())
+	byID2 := map[string]map[string]any{}
+	for _, row := range got2 {
+		byID2[fmt.Sprint(row["id"])] = row
+	}
+	for _, id := range []string{"whatsapp", "teams", "google_chat"} {
+		if byID2[id]["status"] != "ready" {
+			t.Fatalf("%s with tunnel status=%v reason=%v", id, byID2[id]["status"], byID2[id]["status_reason"])
+		}
 	}
 }

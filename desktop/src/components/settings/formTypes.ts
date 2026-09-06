@@ -216,6 +216,8 @@ export interface SettingsFormProps {
   messengers?: MessengerInfo[]
   messengerDrafts?: MessengerDraftMap
   setMessengerDrafts?: Dispatch<SetStateAction<MessengerDraftMap>>
+  /** Reload settings after tunnel / signal-cli install changes live health. */
+  onMessengersRefresh?: () => void | Promise<void>
   assistant?: AssistantStatus | null
   assistantDraft?: AssistantDraft
   setAssistantDraft?: Dispatch<SetStateAction<AssistantDraft>>

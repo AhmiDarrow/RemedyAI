@@ -283,7 +283,12 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 			_ = emit("@@aborted\n")
 			return nil
 		}
+		if errors.Is(out.Err, cognition.ErrOwnerDenied) {
+			safeEmit("@@status:Denied — stopped.\n")
+			return nil
+		}
 		if errors.Is(out.Err, cognition.ErrOwnerConfirmationNeeded) {
+			// No ApprovalGate (or fingerprint still Ask after approve).
 			for _, call := range out.Pending {
 				safeEmit(formatToolCallToken(call))
 				r.enqueuePendingApproval(req.SessionID, call)
@@ -356,11 +361,33 @@ func (r *CognitionTurnRunner) runEngine(
 	if req.MaxIterations > 0 {
 		cfg.MaxIterations = req.MaxIterations
 	}
+	var gate cognition.ApprovalGate
+	if r.Approvals != nil {
+		gate = func(gateCtx context.Context, pending []cognition.ToolCall) error {
+			ids := make([]string, 0, len(pending))
+			for _, call := range pending {
+				item := enqueueToolApproval(r.Approvals, r.Registry, req.SessionID, call)
+				if item != nil {
+					ids = append(ids, item.ID)
+				}
+			}
+			safeEmit("@@status:Waiting for your approval…\n")
+			ok, err := r.Approvals.WaitAll(gateCtx, ids)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return cognition.ErrOwnerDenied
+			}
+			return nil
+		}
+	}
 	engine := cognition.Engine{
-		Model:  model,
-		Tools:  &emittingTools{inner: execTools, emit: safeEmit},
-		Policy: policy,
-		Config: cfg,
+		Model:        model,
+		Tools:        &emittingTools{inner: execTools, emit: safeEmit},
+		Policy:       policy,
+		Config:       cfg,
+		ApprovalGate: gate,
 	}
 	return engine.RunTurn(ctx, seed)
 }
@@ -599,8 +626,17 @@ func injectProjectPathField(raw []byte, root string) []byte {
 }
 
 func (r *CognitionTurnRunner) enqueuePendingApproval(sessionID string, call cognition.ToolCall) {
-	if r == nil || r.Approvals == nil {
+	if r == nil {
 		return
+	}
+	_ = enqueueToolApproval(r.Approvals, r.Registry, sessionID, call)
+}
+
+// enqueueToolApproval records a pending owner approval for Ask/Deny gates
+// (turn runner and POST /api/tools/invoke share this path).
+func enqueueToolApproval(approvals *approvalQueue, registry *tools.Registry, sessionID string, call cognition.ToolCall) *pendingApproval {
+	if approvals == nil {
+		return nil
 	}
 	preview := toolCommandPreview(call)
 	summary := plainToolApprovalSummary(call.Name, preview)
@@ -609,10 +645,12 @@ func (r *CognitionTurnRunner) enqueuePendingApproval(sessionID string, call cogn
 		sid = &s
 	}
 	reason := "Tool requires your approval"
-	if desc, err := r.Registry.Latest(call.Name); err == nil && desc.Risk == tools.RiskCheckpoint {
-		reason = sensitivePrefix + " — " + summary
+	if registry != nil {
+		if desc, err := registry.Latest(call.Name); err == nil && desc.Risk == tools.RiskCheckpoint {
+			reason = sensitivePrefix + " — " + summary
+		}
 	}
-	_ = r.Approvals.Enqueue(call.Name, preview, reason, sid, summary)
+	return approvals.Enqueue(call.Name, preview, reason, sid, summary)
 }
 
 func plainToolApprovalSummary(toolName, preview string) string {
@@ -629,6 +667,10 @@ func plainToolApprovalSummary(toolName, preview string) string {
 			return "Remedy wants to run a command: " + cmd
 		}
 		return "Remedy wants to run a shell command."
+	case name == "mail.send" || name == "mail_send":
+		return "Remedy wants to send an email."
+	case name == "calendar.create_event":
+		return "Remedy wants to create a calendar event."
 	case strings.HasPrefix(name, "computer."):
 		return "Remedy wants to use the computer (click, type, or navigate)."
 	default:

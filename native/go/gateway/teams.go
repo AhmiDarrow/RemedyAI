@@ -39,7 +39,9 @@ type TeamsChannel struct {
 	running            bool
 	token              string
 	tokenExp           time.Time
-	lastServiceURL     string
+	// serviceURLs maps conversation id → last trusted Bot Framework serviceUrl.
+	// Replies must use the conversation's own host (regions / tenants differ).
+	serviceURLs        map[string]string
 	lastConversationID string
 }
 
@@ -66,6 +68,7 @@ func NewTeams(g *Gateway, cfg TeamsConfig) *TeamsChannel {
 		allowed:     ParseIDs(cfg.AllowIDs),
 		allowAll:    cfg.AllowAll,
 		client:      &http.Client{Timeout: 30 * time.Second},
+		serviceURLs: make(map[string]string),
 	}
 }
 
@@ -305,17 +308,24 @@ func (c *TeamsChannel) bearer(ctx context.Context) string {
 	return tok
 }
 
+func (c *TeamsChannel) conversationRef(target string) (conv, service string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	conv = strings.TrimSpace(target)
+	if conv == "" {
+		conv = c.lastConversationID
+	}
+	if conv != "" && c.serviceURLs != nil {
+		service = strings.TrimRight(c.serviceURLs[conv], "/")
+	}
+	return conv, service
+}
+
 func (c *TeamsChannel) Send(ctx context.Context, message, target string) (bool, error) {
 	if c.appID == "" || c.appPassword == "" {
 		return true, nil
 	}
-	c.mu.Lock()
-	conv := strings.TrimSpace(target)
-	if conv == "" {
-		conv = c.lastConversationID
-	}
-	service := strings.TrimRight(c.lastServiceURL, "/")
-	c.mu.Unlock()
+	conv, service := c.conversationRef(target)
 	if conv == "" || service == "" {
 		log.Printf("teams: send: no conversation reference yet")
 		return false, nil
@@ -338,13 +348,7 @@ func (c *TeamsChannel) Send(ctx context.Context, message, target string) (bool, 
 
 // SendTyping posts a typing activity when a conversation reference exists.
 func (c *TeamsChannel) SendTyping(ctx context.Context, target string) error {
-	c.mu.Lock()
-	conv := strings.TrimSpace(target)
-	if conv == "" {
-		conv = c.lastConversationID
-	}
-	service := strings.TrimRight(c.lastServiceURL, "/")
-	c.mu.Unlock()
+	conv, service := c.conversationRef(target)
 	if conv == "" || service == "" || c.appID == "" || c.appPassword == "" {
 		return nil
 	}
@@ -381,13 +385,19 @@ func (c *TeamsChannel) HandleActivity(ctx context.Context, activity map[string]a
 	fromID := anyString(from["id"])
 	serviceURL := strings.TrimRight(anyString(activity["serviceUrl"]), "/")
 	if serviceURL != "" && isAllowedBotFrameworkServiceURL(serviceURL) {
-		c.mu.Lock()
-		c.lastServiceURL = serviceURL
-		c.mu.Unlock()
+		if convID != "" {
+			c.mu.Lock()
+			if c.serviceURLs == nil {
+				c.serviceURLs = make(map[string]string)
+			}
+			c.serviceURLs[convID] = serviceURL
+			c.lastConversationID = convID
+			c.mu.Unlock()
+		}
 	} else if serviceURL != "" {
 		log.Printf("teams: ignored untrusted serviceUrl host: %s", trimRunes(serviceURL, 120))
 		c.mu.Lock()
-		have := c.lastServiceURL != ""
+		have := convID != "" && c.serviceURLs != nil && c.serviceURLs[convID] != ""
 		c.mu.Unlock()
 		if !have {
 			return false

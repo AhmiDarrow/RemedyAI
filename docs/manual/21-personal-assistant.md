@@ -37,16 +37,16 @@ Two routes. Prefer the first.
 | Where the password lives | Remedy's encrypted local secret store | OAuth tokens, same store |
 
 ```
-mail_connect      address + app_password   — verifies IMAP *and* SMTP before saving
-mail_status       which mailbox, and by which route
-mail_disconnect   forget the password and unlink the account
-mail_list         query like in:inbox, from:someone
-mail_get          read one message
-mail_reply        reply in thread — prefer this over a fresh send
-mail_create_draft compose without sending
-mail_send         send now; only when you explicitly ask
-mail_archive      out of the inbox, still searchable
-mail_mark_read    read / unread
+mail.connect       address + app_password   — verifies IMAP *and* SMTP before saving
+mail.status        which mailbox, and by which route
+mail.disconnect    forget the password and unlink the account
+mail.list          query like in:inbox, from:someone
+mail.get           read one message
+mail.reply         reply in thread — prefer this over a fresh send
+mail.create_draft  compose without sending
+mail.send          send now; only when you explicitly ask
+mail.archive       out of the inbox, still searchable
+mail.mark_read     read / unread
 ```
 
 Remedy asks for the **app password**, never your account password, and tells you
@@ -61,10 +61,10 @@ mailbox connects the calendar too, with no second login. Outlook and Yahoo
 supply mail only; use Google OAuth if you need their calendar.
 
 ```
-calendar_list_events    days, or an explicit time_min / time_max
-calendar_create_event   title, start, end, description
-calendar_update_event   only the fields you pass change — moves a time, does not duplicate
-calendar_cancel_event   not reversible from here, so it asks first
+calendar.list_events    days, or an explicit time_min / time_max
+calendar.create_event   title, start, end, description
+calendar.update_event   only the fields you pass change — moves a time, does not duplicate
+calendar.cancel_event   not reversible from here, so it asks first
 ```
 
 ## Money — organization, never advice

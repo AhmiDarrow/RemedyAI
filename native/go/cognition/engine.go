@@ -15,6 +15,7 @@ var (
 	ErrToolCallLimit           = errors.New("ReAct tool-call limit reached")
 	ErrNoProgress              = errors.New("ReAct made no progress")
 	ErrOwnerConfirmationNeeded = errors.New("owner confirmation required")
+	ErrOwnerDenied             = errors.New("owner denied confirmation")
 	ErrIncompleteModelStream   = errors.New("model stream closed before completion")
 )
 
@@ -74,6 +75,12 @@ type Policy interface {
 	Decide(context.Context, ToolCall) Decision
 }
 
+// ApprovalGate is invoked when policy returns Ask for one or more tools.
+// Return nil after the owner has approved (policy must then Allow on re-decide).
+// Return ErrOwnerDenied to stop cleanly; any other error fails the turn.
+// When nil, the engine pauses with ErrOwnerConfirmationNeeded (legacy).
+type ApprovalGate func(ctx context.Context, pending []ToolCall) error
+
 type Config struct {
 	MaxIterations    int
 	MaxToolCalls     int
@@ -117,11 +124,12 @@ type Outcome struct {
 }
 
 type Engine struct {
-	Model  Model
-	Tools  ToolExecutor
-	Policy Policy
-	Config Config
-	Now    func() time.Time
+	Model        Model
+	Tools        ToolExecutor
+	Policy       Policy
+	Config       Config
+	ApprovalGate ApprovalGate
+	Now          func() time.Time
 }
 
 func (e *Engine) Run(ctx context.Context, goal string) Outcome {
@@ -201,21 +209,35 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 			return out
 		}
 		trace(StatePolicy, iteration, fmt.Sprintf("evaluate %d tools", len(calls)))
-		var allowed []ToolCall
-		for _, call := range calls {
-			switch e.Policy.Decide(ctx, call) {
-			case Allow:
-				allowed = append(allowed, call)
-			case Ask:
-				out.Pending = append(out.Pending, call)
+		allowed, pending, denied := e.partitionCalls(ctx, calls)
+		if len(pending) > 0 {
+			if e.ApprovalGate == nil {
+				out.Pending = pending
 				out.Err = ErrOwnerConfirmationNeeded
-			case Deny:
-				out.Results = append(out.Results, ToolResult{ID: call.ID, Name: call.Name, Err: "policy denied"})
+				out.Results = append(out.Results, denied...)
+				trace(StatePaused, iteration, "owner checkpoint")
+				return out
 			}
-		}
-		if len(out.Pending) > 0 {
 			trace(StatePaused, iteration, "owner checkpoint")
-			return out
+			if err := e.ApprovalGate(ctx, pending); err != nil {
+				out.Pending = pending
+				out.Err = err
+				if errors.Is(err, ErrOwnerDenied) {
+					trace(StatePaused, iteration, "owner denied")
+				} else {
+					trace(StateFailed, iteration, err.Error())
+				}
+				return out
+			}
+			// Owner approved — fingerprints should now Allow. Re-decide once.
+			allowed, pending, denied = e.partitionCalls(ctx, calls)
+			if len(pending) > 0 {
+				out.Pending = pending
+				out.Err = ErrOwnerConfirmationNeeded
+				out.Results = append(out.Results, denied...)
+				trace(StatePaused, iteration, "still needs approval")
+				return out
+			}
 		}
 		trace(StateAct, iteration, fmt.Sprintf("execute %d tools", len(allowed)))
 		// Replace observations with this batch only — OpenAI follow-ups pair
@@ -227,6 +249,20 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 	out.Err = ErrIterationLimit
 	trace(StateFailed, config.MaxIterations, out.Err.Error())
 	return out
+}
+
+func (e *Engine) partitionCalls(ctx context.Context, calls []ToolCall) (allowed, pending []ToolCall, denied []ToolResult) {
+	for _, call := range calls {
+		switch e.Policy.Decide(ctx, call) {
+		case Allow:
+			allowed = append(allowed, call)
+		case Ask:
+			pending = append(pending, call)
+		case Deny:
+			denied = append(denied, ToolResult{ID: call.ID, Name: call.Name, Err: "policy denied"})
+		}
+	}
+	return allowed, pending, denied
 }
 
 func (e *Engine) streamWithRetry(ctx context.Context, turn Turn, config Config) (<-chan ModelEvent, error) {

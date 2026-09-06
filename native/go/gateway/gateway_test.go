@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -124,12 +125,20 @@ func TestOffsetRoundTrip(t *testing.T) {
 
 func TestRegisterFromConfigTelegram(t *testing.T) {
 	home := t.TempDir()
+	bin := filepath.Join(home, "signal-cli")
+	if err := os.WriteFile(bin, []byte(""), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	g := New(Config{HomeDir: home})
 	cfg := map[string]any{
 		"enabled_channels": []string{"telegram", "signal"},
 		"telegram": map[string]any{
 			"allow_chat_ids": []string{"1"},
 			"allow_all":      false,
+		},
+		"signal": map[string]any{
+			"cli_path": bin,
+			"account":  "+15550100",
 		},
 	}
 	got := RegisterFromConfig(g, cfg, home, func(channel, field string) string {
@@ -421,9 +430,13 @@ func TestTeamsActivityAndJWTClaims(t *testing.T) {
 	}
 	ch.mu.Lock()
 	conv := ch.lastConversationID
+	svc := ch.serviceURLs["conv1"]
 	ch.mu.Unlock()
 	if conv != "conv1" {
 		t.Fatalf("lastConversationID=%q", conv)
+	}
+	if svc != "https://smba.trafficmanager.net/amer" {
+		t.Fatalf("serviceURL for conv1=%q", svc)
 	}
 	if isAllowedBotFrameworkServiceURL("http://evil.example/") {
 		t.Fatal("http serviceUrl must be rejected")
@@ -440,6 +453,40 @@ func TestTeamsActivityAndJWTClaims(t *testing.T) {
 		"exp": float64(now.Add(time.Hour).Unix()),
 	}, "app-id", now) {
 		t.Fatal("missing aud must fail")
+	}
+}
+
+func TestTeamsPerConversationServiceURL(t *testing.T) {
+	g := New(Config{RateLimitPerMin: 100, HeartbeatInterval: time.Hour})
+	ch := NewTeams(g, TeamsConfig{AppID: "app-id", AppPassword: "pw", AllowAll: true})
+	amer := "https://smba.trafficmanager.net/amer/"
+	emea := "https://smba.trafficmanager.net/emea/"
+	if !ch.HandleActivity(context.Background(), map[string]any{
+		"type": "message", "text": "a", "serviceUrl": amer,
+		"conversation": map[string]any{"id": "conv-amer"},
+		"from":         map[string]any{"id": "u1"},
+	}) {
+		t.Fatal("amer activity rejected")
+	}
+	if !ch.HandleActivity(context.Background(), map[string]any{
+		"type": "message", "text": "b", "serviceUrl": emea,
+		"conversation": map[string]any{"id": "conv-emea"},
+		"from":         map[string]any{"id": "u2"},
+	}) {
+		t.Fatal("emea activity rejected")
+	}
+	convAmer, svcAmer := ch.conversationRef("conv-amer")
+	convEmea, svcEmea := ch.conversationRef("conv-emea")
+	if convAmer != "conv-amer" || svcAmer != "https://smba.trafficmanager.net/amer" {
+		t.Fatalf("amer ref=%q %q", convAmer, svcAmer)
+	}
+	if convEmea != "conv-emea" || svcEmea != "https://smba.trafficmanager.net/emea" {
+		t.Fatalf("emea ref=%q %q", convEmea, svcEmea)
+	}
+	// Empty target falls back to last conversation (emea), not amer's host.
+	_, lastSvc := ch.conversationRef("")
+	if lastSvc != "https://smba.trafficmanager.net/emea" {
+		t.Fatalf("last fallback service=%q", lastSvc)
 	}
 }
 

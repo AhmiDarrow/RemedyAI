@@ -204,7 +204,10 @@ export interface MessengerInfo {
   id: string
   name: string
   description?: string
-  status: 'ready' | 'partial' | 'planned' | string
+  /** Live health: ready | needs_setup | planned (never vague partial). */
+  status: 'ready' | 'needs_setup' | 'planned' | string
+  /** One plain-language sentence when status is needs_setup. */
+  status_reason?: string
   enabled: boolean
   token_set: boolean
   inbound?: boolean
@@ -214,6 +217,7 @@ export interface MessengerInfo {
   max_reply_chars?: number
   fields?: Record<string, unknown>
   field_schema?: MessengerFieldSchema[]
+  health?: Record<string, unknown>
 }
 
 export interface SettingsUpdate {
@@ -288,5 +292,63 @@ export async function updateSettings(
   return apiFetch('/settings', {
     method: 'PUT',
     body: JSON.stringify(updates),
+  })
+}
+
+/** Cloudflare tunnel that exposes loopback messenger webhooks over HTTPS. */
+export interface MessengerTunnelStatus {
+  running: boolean
+  mode?: string
+  public_url?: string
+  binary?: string
+  binary_ready: boolean
+  download_url?: string
+  env_configured: boolean
+  pid?: number
+  error?: string
+  hint?: string
+}
+
+export async function getMessengerTunnelStatus(): Promise<MessengerTunnelStatus> {
+  return apiFetch<MessengerTunnelStatus>('/messengers/tunnel')
+}
+
+export async function startMessengerTunnel(body?: {
+  mode?: 'quick' | 'named'
+  token?: string
+  public_base_url?: string
+}): Promise<MessengerTunnelStatus> {
+  return apiFetch<MessengerTunnelStatus>('/messengers/tunnel/start', {
+    method: 'POST',
+    body: JSON.stringify(body || { mode: 'quick' }),
+  })
+}
+
+export async function stopMessengerTunnel(): Promise<MessengerTunnelStatus> {
+  return apiFetch<MessengerTunnelStatus>('/messengers/tunnel/stop', {
+    method: 'POST',
+    body: '{}',
+  })
+}
+
+export interface SignalEnsureResult {
+  status?: string
+  cli_path?: string
+  download_url?: string
+  needs_java?: boolean
+  /** False when this OS needs a JRE and java is not on PATH. */
+  java_ok?: boolean
+  hint?: string
+  detail?: string
+}
+
+/** Adoptium Temurin JDK 21 — owner-facing install for JVM signal-cli. */
+export const SIGNAL_JAVA_DOWNLOAD_URL =
+  'https://adoptium.net/temurin/releases/?version=21'
+
+export async function ensureManagedSignalCLI(): Promise<SignalEnsureResult> {
+  return apiFetch<SignalEnsureResult>('/messengers/signal/ensure', {
+    method: 'POST',
+    body: '{}',
   })
 }

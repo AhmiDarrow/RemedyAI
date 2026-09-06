@@ -623,7 +623,7 @@ func (s *Server) settingsPayload() map[string]any {
 	visionForce := coerceBool(visionTbl["force_decode"], false)
 
 	enabledChannels := normalizeEnabledChannels(cfg["enabled_channels"])
-	messengers := publicMessengers(cfg, keysSet)
+	messengers := publicMessengers(cfg, keysSet, s.homeDir)
 
 	out := map[string]any{
 		"llm_provider":              provider,
@@ -825,7 +825,7 @@ func normalizeStringList(raw any) []string {
 	}
 }
 
-func publicMessengers(cfg ConfigMap, keysSet map[string]bool) []map[string]any {
+func publicMessengers(cfg ConfigMap, keysSet map[string]bool, home string) []map[string]any {
 	out := make([]map[string]any, 0, len(messengerCatalog))
 	enabled := map[string]struct{}{}
 	for _, ch := range normalizeEnabledChannels(cfg["enabled_channels"]) {
@@ -855,11 +855,12 @@ func publicMessengers(cfg ConfigMap, keysSet map[string]bool) []map[string]any {
 		if badge == "" {
 			badge = entry.Name
 		}
-		out = append(out, map[string]any{
+		status, reason, health := liveMessengerHealth(entry, on, tokenSet, section, keysSet, home)
+		row := map[string]any{
 			"id":              id,
 			"name":            entry.Name,
 			"description":     entry.Description,
-			"status":          entry.Status,
+			"status":          status,
 			"enabled":         on,
 			"token_set":       tokenSet,
 			"inbound":         entry.Inbound,
@@ -869,7 +870,14 @@ func publicMessengers(cfg ConfigMap, keysSet map[string]bool) []map[string]any {
 			"max_reply_chars": entry.MaxReplyChars,
 			"fields":          publicFieldsFromSection(entry, section),
 			"field_schema":    fieldSchemaMaps(entry.Fields),
-		})
+		}
+		if reason != "" {
+			row["status_reason"] = reason
+		}
+		if health != nil {
+			row["health"] = health
+		}
+		out = append(out, row)
 	}
 	return out
 }
