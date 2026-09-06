@@ -26,7 +26,7 @@ func (s *Server) bridge() *HostBridge {
 func (s *Server) handleComputerHostHello(w http.ResponseWriter, r *http.Request) {
 	b := s.bridge()
 	b.mu.Lock()
-	b.markHostAlive(false, "")
+	b.markHostAliveLocked(false, "")
 	b.mu.Unlock()
 	var req struct {
 		Client    string         `json:"client"`
@@ -50,7 +50,7 @@ func (s *Server) handleComputerHostHello(w http.ResponseWriter, r *http.Request)
 	if req.Bounds != nil {
 		b.setBrowserBounds(req.Bounds, req.Scale)
 	}
-	connected := b.hostConnected()
+	connected := b.hostConnectedLocked()
 	b.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":             true,
@@ -63,17 +63,18 @@ func (s *Server) handleComputerHostHello(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleComputerHostStatus(w http.ResponseWriter, _ *http.Request) {
 	b := s.bridge()
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"host_connected":      b.hostConnected(),
-		"focused_session_id":  b.focusedSessionID(),
-		"browser_bounds":      b.getBrowserBounds(),
-		"pending_jobs":        b.pendingCount(),
-		"ui_command":          b.peekUICommandLocked(),
-		"jobs_root":           b.root,
-		"pending_hint":        "Rust computer-host claims GET /api/computer/jobs/next",
-		"host_driver":         b.hostDriver(),
-	})
+	payload := map[string]any{
+		"host_connected":     b.hostConnectedLocked(),
+		"focused_session_id": b.focusedSessionID(),
+		"browser_bounds":     b.getBrowserBounds(),
+		"pending_jobs":       b.pendingCount(),
+		"ui_command":         b.peekUICommandLocked(),
+		"jobs_root":          b.root,
+		"pending_hint":       "Rust computer-host claims GET /api/computer/jobs/next",
+		"host_driver":        b.hostDriverLocked(),
+	}
+	b.mu.Unlock()
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (s *Server) handleComputerUICommand(w http.ResponseWriter, r *http.Request) {
@@ -88,9 +89,9 @@ func (s *Server) handleComputerUICommand(w http.ResponseWriter, r *http.Request)
 		if d == "" {
 			d = "rust"
 		}
-		b.markHostAlive(true, d)
+		b.markHostAliveLocked(true, d)
 	} else {
-		b.markHostAlive(false, "")
+		b.markHostAliveLocked(false, "")
 	}
 	if strings.TrimSpace(sessionID) != "" {
 		b.setFocusedSession(sessionID)
@@ -179,7 +180,7 @@ func (s *Server) handleComputerJobsNext(w http.ResponseWriter, r *http.Request) 
 		driver = "rust"
 	}
 	b.mu.Lock()
-	b.markHostAlive(true, driver)
+	b.markHostAliveLocked(true, driver)
 	if sid := strings.TrimSpace(q.Get("session_id")); sid != "" {
 		b.setFocusedSession(sid)
 		s.SetFocusedSession(sid)
@@ -238,7 +239,7 @@ func (s *Server) handleComputerJobComplete(w http.ResponseWriter, r *http.Reques
 	}
 	b := s.bridge()
 	b.mu.Lock()
-	b.markHostAlive(false, "")
+	b.markHostAliveLocked(false, "")
 	b.mu.Unlock()
 	job := b.complete(jobID, req.OK, req.Result, req.Error)
 	if job == nil {

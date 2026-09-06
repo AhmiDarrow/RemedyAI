@@ -107,7 +107,7 @@ func (s *Server) collectDiagnostics(probeProviders bool) map[string]any {
 
 	b := s.bridge()
 	b.mu.Lock()
-	hostConnected := b.hostConnected()
+	hostConnected := b.hostConnectedLocked()
 	pendingJobs := b.pendingCount()
 	jobsRoot := b.root
 	b.mu.Unlock()
