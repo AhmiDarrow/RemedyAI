@@ -32,6 +32,8 @@ type CognitionTurnRunner struct {
 	Config         cognition.Config
 	Registry       *tools.Registry
 	promptAssemble *tools.RMDYExecutor
+	// codingPackOnly advertises the mid-build coding tool pack (lower schema tax).
+	codingPackOnly bool
 }
 
 // NewCognitionTurnRunner builds a runner on the real Tool ABI registry (Go
@@ -73,6 +75,29 @@ func (r *CognitionTurnRunner) AttachPythonWorker(caller tools.FrameCaller) error
 	return nil
 }
 
+func (r *CognitionTurnRunner) rmdyCall(ctx context.Context, toolID string, input map[string]any) (map[string]any, error) {
+	if r == nil || r.promptAssemble == nil {
+		return nil, errors.New("rmdy prompt worker unavailable")
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	res, err := r.promptAssemble.Execute(ctx, tools.Request{
+		ToolID:  toolID,
+		Version: 1,
+		Input:   raw,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(res.Output, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // modelVisibleTool reports whether a Tool ABI id should be advertised to the LLM.
 // Internal services (prompt.*/voice.*/vision.*) stay off the model surface.
 func modelVisibleTool(id string) bool {
@@ -103,10 +128,20 @@ func (r *CognitionTurnRunner) applyToolSchemas(oc *providers.OpenAICompat) {
 		oc.Tools = nil
 		return
 	}
+	useCoding := r.codingPackOnly || providers.IsLocalBaseURL(oc.BaseURL)
+	if useCoding {
+		oc.LocalFit = true
+		if oc.ContextWindow <= 0 {
+			oc.ContextWindow = 16384
+		}
+	}
 	list := r.Registry.List()
 	meta := make([]providers.RegistryTool, 0, len(list))
 	for _, d := range list {
 		if !modelVisibleTool(d.ID) {
+			continue
+		}
+		if useCoding && !isCodingPackTool(d.ID) {
 			continue
 		}
 		meta = append(meta, providers.RegistryTool{
@@ -115,9 +150,38 @@ func (r *CognitionTurnRunner) applyToolSchemas(oc *providers.OpenAICompat) {
 			InputSchema: append(json.RawMessage(nil), d.InputSchema...),
 		})
 	}
+	// Never advertise zero tools on a coding turn — fall back to full surface.
+	if useCoding && len(meta) == 0 {
+		for _, d := range list {
+			if !modelVisibleTool(d.ID) {
+				continue
+			}
+			meta = append(meta, providers.RegistryTool{
+				ID:          d.ID,
+				Description: d.Description,
+				InputSchema: append(json.RawMessage(nil), d.InputSchema...),
+			})
+		}
+	}
 	schemas, nameMap := providers.ToolSchemasFromRegistryMapped(meta)
 	oc.Tools = schemas
 	oc.ToolNameMap = nameMap
+}
+
+func isCodingPackTool(id string) bool {
+	id = strings.TrimSpace(id)
+	for _, want := range providers.CodingPackABI {
+		if id == want {
+			return true
+		}
+	}
+	if strings.HasPrefix(id, "workspace.") || strings.HasPrefix(id, "mission.") {
+		return true
+	}
+	if strings.HasPrefix(id, "memory.") || strings.HasPrefix(id, "skill.") {
+		return true
+	}
+	return id == "shell.exec" || id == "web.fetch" || id == "web.search"
 }
 
 func isVisionHelperCompat(oc *providers.OpenAICompat) bool {
@@ -224,6 +288,9 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 		return errors.New("cognition turn runner requires a policy")
 	}
 
+	// Fresh turn: full schemas until first soft epoch (then coding pack).
+	// Local models start on coding pack via applyToolSchemas.
+	r.codingPackOnly = false
 	seed := cognition.Turn{Goal: req.Prompt}
 	// Production serve always AttachPythonWorker. When attached, assemble is
 	// mandatory — never fall back to raw prompt-only.
@@ -413,11 +480,85 @@ func (r *CognitionTurnRunner) runEngine(
 		Policy:       policy,
 		Config:       cfg,
 		ApprovalGate: gate,
-		EpochHook: func(epoch, totalSteps, toolCalls int, _ *cognition.Turn) {
+		EpochHook: func(epoch, totalSteps, toolCalls int, turn *cognition.Turn) {
 			safeEmit(fmt.Sprintf(
 				"@@status:Checkpoint %d — compacted context after %d steps / %d tools; continuing until the work is done…\n",
 				epoch, totalSteps, toolCalls,
 			))
+			// Mid-build: switch to coding-pack schemas (lower per-step tax).
+			if epoch >= 1 && !r.codingPackOnly {
+				r.codingPackOnly = true
+				if oc, ok := live.(*providers.OpenAICompat); ok {
+					r.applyToolSchemas(oc)
+				}
+				safeEmit("@@status:Switched to coding tool pack for a leaner mid-build context…\n")
+			}
+			// Memory Harness prune/offload/brief via RMDY (fail-open).
+			if r.promptAssemble == nil || turn == nil {
+				return
+			}
+			input := map[string]any{
+				"system":      turn.System,
+				"goal":        turn.Goal,
+				"text":        turn.Text,
+				"checkpoint":  turn.Text,
+				"session_id":  req.SessionID,
+				"epoch":       epoch,
+				"total_steps": totalSteps,
+				"home_dir":    r.HomeDir,
+			}
+			if req.ProjectPath != "" {
+				input["project_path"] = req.ProjectPath
+			}
+			if req.Provider != nil {
+				input["provider"] = *req.Provider
+			}
+			if req.Model != nil {
+				input["model"] = *req.Model
+			}
+			out, err := r.rmdyCall(ctx, "prompt.slim_epoch", input)
+			if err != nil || out == nil {
+				return
+			}
+			if ok, _ := out["ok"].(bool); !ok {
+				return
+			}
+			if sys, _ := out["system"].(string); strings.TrimSpace(sys) != "" {
+				turn.System = sys
+			}
+			if text, _ := out["text"].(string); strings.TrimSpace(text) != "" {
+				turn.Text = text
+			}
+			// Ensure no orphan tool results after harness rewrite.
+			turn.Results = nil
+			turn.Calls = nil
+			safeEmit("@@status:Memory harness slimmed context (brief + prune)…\n")
+		},
+		ContinueGate: func(gateCtx context.Context, turn cognition.Turn, toolCount int) (bool, string) {
+			if req.ChatMode {
+				return false, ""
+			}
+			// Local heuristic when RMDY unavailable.
+			if r.promptAssemble == nil {
+				return toolCount > 0, ""
+			}
+			input := map[string]any{
+				"goal":         turn.Goal,
+				"text":         turn.Text,
+				"session_id":   req.SessionID,
+				"tool_count":   toolCount,
+				"chat_mode":    req.ChatMode,
+				"plan_mode":    req.PlanMode,
+				"home_dir":     r.HomeDir,
+				"project_path": req.ProjectPath,
+			}
+			out, err := r.rmdyCall(gateCtx, "prompt.should_continue", input)
+			if err != nil || out == nil {
+				return toolCount > 0, ""
+			}
+			cont, _ := out["continue"].(bool)
+			nudge, _ := out["nudge"].(string)
+			return cont, nudge
 		},
 	}
 	return engine.RunTurn(ctx, seed)

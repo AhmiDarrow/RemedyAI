@@ -554,6 +554,62 @@ def test_stdio_tool_round_trip_prompt_assemble(
 
 def test_prompt_assemble_registered() -> None:
     assert ("prompt.assemble", 1) in worker._HANDLERS
+    assert ("prompt.slim_epoch", 1) in worker._HANDLERS
+    assert ("prompt.should_continue", 1) in worker._HANDLERS
+
+
+def test_prompt_slim_epoch_updates_brief(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+    (tmp_path / "config.toml").write_text(
+        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
+        encoding="utf-8",
+    )
+    out = worker._prompt_slim_epoch(
+        {
+            "system": "You are Remedy.\n" + ("skills catalog\n" * 20),
+            "goal": "implement the feature",
+            "text": "Edited src/app.py and ran tests.",
+            "checkpoint": "- workspace.edit [ok] src/app.py\n- shell.exec [ok] pytest",
+            "session_id": "sess-epoch-1",
+            "epoch": 2,
+            "total_steps": 128,
+        }
+    )
+    assert out.get("ok") is True
+    assert isinstance(out.get("system"), str) and out["system"].strip()
+    assert "Epoch 2" in str(out.get("text") or out.get("brief") or out["system"]) or int(
+        (out.get("meta") or {}).get("compress_count") or 0
+    ) >= 1
+
+
+def test_prompt_should_continue_rearms_after_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(
+        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
+        encoding="utf-8",
+    )
+    out = worker._prompt_should_continue(
+        {
+            "goal": "build the app",
+            "text": "All done.",
+            "session_id": "sess-rearm",
+            "tool_count": 3,
+            "chat_mode": False,
+        }
+    )
+    assert out.get("continue") is True
+    assert "tool" in str(out.get("nudge") or "").lower() or "function" in str(
+        out.get("nudge") or ""
+    ).lower()
+    chat = worker._prompt_should_continue(
+        {"goal": "hi", "text": "hello", "tool_count": 0, "chat_mode": True}
+    )
+    assert chat.get("continue") is False
 
 
 def test_worker_web_handlers_import_web_helpers() -> None:

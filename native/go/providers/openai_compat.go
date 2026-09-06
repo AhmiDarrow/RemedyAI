@@ -47,6 +47,10 @@ type OpenAICompat struct {
 	// ToolNameMap maps advertised function names → real Tool ABI ids.
 	// DeepSeek/OpenAI require ^[a-zA-Z0-9_-]+$ so dotted ABI ids are sanitized.
 	ToolNameMap map[string]string
+	// ContextWindow is the physical n_ctx for local models (0 = cloud / unknown).
+	ContextWindow int
+	// LocalFit forces FitLocalRequest even when BaseURL is not loopback.
+	LocalFit bool
 }
 
 func (c *OpenAICompat) client() *http.Client {
@@ -63,13 +67,24 @@ func (c *OpenAICompat) Stream(ctx context.Context, turn cognition.Turn) (<-chan 
 		return nil, fmt.Errorf("openai-compat model requires base URL and model id")
 	}
 	messages := buildMessages(turn)
+	toolSchemas := c.Tools
+	window := c.ContextWindow
+	if window <= 0 {
+		window = envContextWindow()
+	}
+	if c.LocalFit || IsLocalBaseURL(base) {
+		if window <= 0 {
+			window = 16384 // conservative RMB/Ollama default when unknown
+		}
+		messages, toolSchemas, _ = FitLocalRequest(messages, toolSchemas, window)
+	}
 	payload := map[string]any{
 		"model":    model,
 		"messages": messages,
 		"stream":   true,
 	}
-	if len(c.Tools) > 0 {
-		payload["tools"] = c.Tools
+	if len(toolSchemas) > 0 {
+		payload["tools"] = toolSchemas
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

@@ -91,7 +91,13 @@ type ApprovalGate func(ctx context.Context, pending []ToolCall) error
 // EpochHook runs at soft-epoch boundaries (context compact + continue).
 // Soft epochs never stop the turn — they only slim context so long builds
 // can run for as many tool rounds as the work needs.
+// Mutating turn.System / turn.Text is applied when the hook returns.
 type EpochHook func(epoch, totalSteps, toolCalls int, turn *Turn)
+
+// ContinueGate decides whether a text-only model completion should re-arm
+// tools (unfinished build/mission/agency promise). Return continue=true and
+// an optional nudge string. Nil gate uses a local heuristic (toolCount > 0).
+type ContinueGate func(ctx context.Context, turn Turn, toolCount int) (shouldContinue bool, nudge string)
 
 // Config controls ReAct pacing. Soft epochs compact and continue; absolute
 // ceilings exist only as pathological-loop safety nets — not task budgets.
@@ -115,8 +121,10 @@ type Config struct {
 	MaxAssistantChars int
 	// MaxLengthContinues caps finish_reason=length auto-continues (default 64).
 	MaxLengthContinues int
-	MaxParallelTools   int
-	MaxRepeatedBatch   int
+	// MaxRearms caps unfinished-work / agency re-arms after text-only stops (default 8).
+	MaxRearms        int
+	MaxParallelTools int
+	MaxRepeatedBatch int
 	// RepeatNudgeBudget allows identical tool batches this many times with a
 	// nudge before ErrNoProgress (default 2).
 	RepeatNudgeBudget int
@@ -174,6 +182,9 @@ func (c Config) normalized() Config {
 	if c.MaxLengthContinues <= 0 {
 		c.MaxLengthContinues = envInt("REMEDY_REACT_MAX_LENGTH_CONTINUES", 64, 1, 512)
 	}
+	if c.MaxRearms <= 0 {
+		c.MaxRearms = envInt("REMEDY_REACT_MAX_REARMS", 8, 1, 64)
+	}
 	if c.MaxParallelTools <= 0 {
 		c.MaxParallelTools = envInt("REMEDY_MAX_PARALLEL_TOOLS", 32, 4, 64)
 	}
@@ -212,6 +223,7 @@ type Engine struct {
 	Config       Config
 	ApprovalGate ApprovalGate
 	EpochHook    EpochHook
+	ContinueGate ContinueGate
 	Now          func() time.Time
 }
 
@@ -234,6 +246,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 	repeated := 0
 	repeatNudges := 0
 	lengthContinues := 0
+	rearmCount := 0
 	toolCount := 0
 	toolsThisEpoch := 0
 	epoch := 0
@@ -287,6 +300,26 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 				prevCalls = nil
 				trace(StateUpdate, iteration, "length auto-continue")
 				continue
+			}
+			// Unfinished-work / agency re-arm — production sets ContinueGate.
+			// Nil gate preserves plain text-only completion (tests / fixtures).
+			if e.ContinueGate != nil && rearmCount < config.MaxRearms {
+				gateTurn := Turn{
+					Goal: goal, System: system, Text: out.Text, Iteration: iteration,
+				}
+				should, nudge := e.ContinueGate(ctx, gateTurn, toolCount)
+				if should {
+					rearmCount++
+					if strings.TrimSpace(nudge) == "" {
+						nudge = "Work is unfinished — call tools now via the function-calling API. Do not narrate; execute."
+					}
+					out.Text = trimTail(out.Text, config.MaxAssistantChars)
+					out.Text += "\n\n[Re-arm] " + strings.TrimSpace(nudge)
+					out.Results = nil
+					prevCalls = nil
+					trace(StateUpdate, iteration, fmt.Sprintf("unfinished re-arm %d", rearmCount))
+					continue
+				}
 			}
 			trace(StateComplete, iteration, "model completed without tools")
 			return out
@@ -412,12 +445,18 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 					Iteration: iteration,
 				}
 				e.EpochHook(epoch, iteration, toolCount, &hookTurn)
+				if strings.TrimSpace(hookTurn.System) != "" {
+					system = hookTurn.System
+				}
 				if hookTurn.Text != "" {
 					out.Text = hookTurn.Text
 				}
 				if len(hookTurn.Results) > 0 {
 					out.Results = hookTurn.Results
+				} else {
+					out.Results = nil
 				}
+				prevCalls = append([]ToolCall(nil), hookTurn.Calls...)
 			}
 			continue
 		}

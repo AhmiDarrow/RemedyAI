@@ -125,11 +125,14 @@ REMEDY_REACT_MAX_STALE_EPOCHS=8
 ```
 
 Soft epochs compact context and **continue** (lean outcome ledger, not orphan
-tool dumps). Tool bodies and assistant prose are capped each round so long
-builds stay efficient. While tools are making progress, Remedy extends its own
-runway — a real build can run for as long as the project needs. Only a
-pathological safety stop, repeated no-progress loops, or Stop ends a coding
-turn — never a mid-mission “tool-call limit.”
+tool dumps). At each epoch the Memory Harness prune/offload/brief runs over RMDY
+so long builds stay efficient. Mid-build switches to a **coding tool pack**
+(fewer schemas per step). Local/RMB endpoints hard-fit into `n_ctx`. If the
+model tries to stop with prose while work is unfinished, Remedy **re-arms**
+tools instead of accepting an early “done.” While tools are making progress,
+Remedy extends its own runway — a real build can run for as long as the project
+needs. Only a pathological safety stop, repeated no-progress loops, or Stop
+ends a coding turn — never a mid-mission “tool-call limit.”
 
 ## Missions (work alone)
 

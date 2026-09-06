@@ -532,6 +532,82 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:          "prompt.slim_epoch",
+		Version:     1,
+		Description: "Memory Harness prune/offload/brief at soft epochs (internal; not model-callable)",
+		Runtime:     RuntimePython,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"system":{"type":"string"},
+				"goal":{"type":"string"},
+				"text":{"type":"string"},
+				"checkpoint":{"type":"string"},
+				"session_id":{"type":"string"},
+				"epoch":{"type":"integer"},
+				"total_steps":{"type":"integer"},
+				"home_dir":{"type":"string"},
+				"project_path":{"type":"string"},
+				"provider":{"type":"string"},
+				"model":{"type":"string"},
+				"base_url":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"ok":{"type":"boolean"},
+				"system":{"type":"string"},
+				"text":{"type":"string"},
+				"brief":{"type":"string"},
+				"meta":{"type":"object"},
+				"error":{"type":"string"}
+			},
+			"additionalProperties":true
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:          "prompt.should_continue",
+		Version:     1,
+		Description: "Unfinished-work / agency re-arm gate (internal; not model-callable)",
+		Runtime:     RuntimePython,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"goal":{"type":"string"},
+				"message":{"type":"string"},
+				"text":{"type":"string"},
+				"session_id":{"type":"string"},
+				"tool_count":{"type":"integer"},
+				"chat_mode":{"type":"boolean"},
+				"plan_mode":{"type":"boolean"},
+				"home_dir":{"type":"string"},
+				"project_path":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"ok":{"type":"boolean"},
+				"continue":{"type":"boolean"},
+				"nudge":{"type":"string"},
+				"reason":{"type":"string"},
+				"error":{"type":"string"}
+			},
+			"additionalProperties":true
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:          "mail.list",
 		Version:     1,
 		Description: "List recent email messages from the connected account (Python worker)",

@@ -330,6 +330,45 @@ func TestCapResultsHeadTail(t *testing.T) {
 	}
 }
 
+func TestEngineContinueGateRearmsThenStops(t *testing.T) {
+	var rounds atomic.Int32
+	var rearmAsks atomic.Int32
+	engine := Engine{
+		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+			n := rounds.Add(1)
+			if n == 1 {
+				return events(ModelEvent{ToolCall: &ToolCall{ID: "1", Name: "workspace.read", Input: []byte(`{}`)}}), nil
+			}
+			return events(ModelEvent{Text: "summary", Done: true}), nil
+		}),
+		Tools: toolFunc(func(_ context.Context, c ToolCall) ToolResult {
+			return ToolResult{ID: c.ID, Name: c.Name, Output: []byte("ok")}
+		}),
+		Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+		Config: Config{MaxIterations: 20, SoftEpochSteps: -1, MaxRearms: 2},
+		ContinueGate: func(_ context.Context, _ Turn, toolCount int) (bool, string) {
+			rearmAsks.Add(1)
+			if rearmAsks.Load() <= 2 {
+				return true, "keep going"
+			}
+			return false, ""
+		},
+	}
+	out := engine.Run(context.Background(), "build it")
+	if out.Err != nil {
+		t.Fatalf("err=%v", out.Err)
+	}
+	if rearmAsks.Load() < 2 {
+		t.Fatalf("expected re-arm asks, got %d", rearmAsks.Load())
+	}
+	if rounds.Load() < 3 {
+		t.Fatalf("rounds=%d", rounds.Load())
+	}
+	if !strings.Contains(out.Text, "keep going") {
+		t.Fatalf("text=%q", out.Text)
+	}
+}
+
 func TestEngineRejectsStreamClosedWithoutDone(t *testing.T) {
 	engine := Engine{
 		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
