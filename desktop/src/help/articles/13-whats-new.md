@@ -2,28 +2,47 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.61.0**. Local API and Desktop packaging are the native
-**Go + Zig** foundation (see the arc below). Installed apps update
-automatically. Partner line still starts at 0.31.0.
+Current release: **v0.61.0**. Local API and Desktop packaging run on the
+native **Go + Zig** foundation. Installed apps update automatically. Partner
+line still starts at 0.31.0.
 
-## Why Go and Zig (0.48 → 0.61)
+## Why a Go + Zig foundation (0.48 → 0.61)
 
-Remedy is a partner that **drives this computer**: see the UI, run tools, keep
-memory, talk on messengers, and finish the owner's goal — not a chat box glued
-to a Python web server.
+Remedy is a **partner that drives this computer** — see the UI, run tools, keep
+memory, talk on messengers, and finish the owner's goal. That is more than a
+chat box glued to a Python web server.
 
-That needs two durable layers:
+Python alone was the wrong shape for the product core:
 
-| Layer | Role | Why not stay on Python alone |
-|-------|------|------------------------------|
-| **Go `remedy-runtime`** | Local API on `:7400`, ReAct / cognition, Tool ABI, messengers, scheduling, approvals | One supervised process owns the product surface — no dual FastAPI/uvicorn ownership, no “tool returned ok” without a real turn engine |
-| **Zig `remedy_core`** | Capability-checked filesystem, process, shell, and computer host ops (ABI 5) | Host actions go through grants and checked paths — not soft `ps`/`pkill` or unchecked OS calls |
+- **Two processes meant two owners.** FastAPI/uvicorn plus a Desktop sidecar
+  could disagree about lifecycle, restarts, and who still held `:7400`.
+- **“Tool returned ok” is not the goal done.** A partner needs one turn engine
+  that plans, acts, verifies, asks for Yes on money/credentials, and keeps
+  evidence — not a loose HTTP toolkit.
+- **Host actions need hard gates.** Filesystem, process, shell, and computer
+  clicks must go through checked paths and one-use grants, not soft shell
+  spawns the model can invent.
 
-**Python** stays for ML/voice workers and tool bodies over the RMDY wire. It is
-no longer the product HTTP server or the Desktop sidecar.
+So 0.48–0.61 build two durable layers and then cut over to them:
 
-The versions below are one migration story: land the foundation → prove it →
-cut over → finish agency on top of it.
+| Layer | What it owns | Why this language |
+|-------|--------------|-------------------|
+| **Go `remedy-runtime`** | Local API on `:7400`, cognition / ReAct, Tool ABI, messengers, scheduling, approvals | One supervised process owns the product surface; concurrency and long-lived servers are first-class |
+| **Zig `remedy_core`** | Capability-checked filesystem, process, shell, and computer host ops (ABI 5) | Small, explicit host substrate; grants and path checks before OS work |
+
+**Python stays** for ML / voice workers and tool bodies over the RMDY wire. It
+is no longer the product HTTP server or the packaged Desktop sidecar.
+
+### The migration in four steps
+
+| Step | Release | What changed for you |
+|------|---------|----------------------|
+| **Land** | [0.48.0](#0480---land-the-gozig-foundation) | Go + Zig ship in Desktop beside Python; selector can try native safely |
+| **Prove** | [0.50.0–0.50.2](#0502---experimental-prove-the-foundation) | Harden native paths, full CI matrix, Claimidx first-run, Connect recovery — experimental line |
+| **Cut over** | [0.60.0](#0600---native-runtime-cutover) | Desktop and `remedy serve` launch **Go only**; FastAPI/uvicorn and the PyInstaller sidecar are gone |
+| **Agency** | [0.61.0](#0610---agency-on-the-native-foundation) | Browser, approvals, mail/calendar/settings, and messenger health finish on that stack |
+
+Read newest first below; older partner notes follow after 0.48.
 
 ## Contents
 
@@ -31,40 +50,52 @@ cut over → finish agency on top of it.
 
 ## 0.61.0 - Agency on the native foundation
 
-With Go/Zig owning the runtime, Remedy finishes computer and messenger surfaces
-that were half-wired on that stack. The Browser rail opens via
-`computer.navigate`, approvals continue the cognition turn when you say Yes, and
-mail / calendar / settings tools ride the Tool ABI. Messengers report **ready**
-or **needs_setup** (never a vague partial), with an optional HTTPS tunnel helper
-for WhatsApp / Teams / Google Chat and a managed signal-cli install path.
+**Finish the partner surfaces on the stack that now owns them.** With Go/Zig
+running the runtime, computer and messenger work that was half-wired can
+complete for real.
+
+- The Browser rail opens through `computer.navigate` (Desktop HostBridge).
+- Saying **Yes** on an approval continues the cognition turn; deny stops
+  without running the tool.
+- Mail, calendar, and settings tools ride the same Tool ABI as workspace /
+  shell / computer.
+- Messengers report **ready** or **needs_setup** with a plain reason — never a
+  vague partial. Optional HTTPS tunnel helper for WhatsApp / Teams / Google
+  Chat; managed signal-cli install (native on Linux, JVM path on Windows).
 
 ## 0.60.0 - Native runtime cutover
 
-**This is the switch.** Desktop and `remedy serve` launch **Go `remedy-runtime`
-only** on `:7400` with Zig `remedy_core` — not Python FastAPI/uvicorn, and not a
-PyInstaller Desktop sidecar. Cognition / ReAct runs in Go; production prompts
-advertise Tool ABI ids only (`workspace.*`, `shell.exec`, `computer.*`,
-`memory.*`, `skill.*`). Chat keeps working when you pick a provider that has no
-key, a down local host, or a blocked subscription: Remedy switches to your usual
-model and says so in plain language. Packaged installs seed skills
-automatically. The 0.50 experimental line is superseded.
+**This is the switch.** Packaged Desktop and `remedy serve` launch **Go
+`remedy-runtime` only** on `:7400` with Zig `remedy_core`. Python FastAPI /
+uvicorn no longer own the local API; the PyInstaller Desktop sidecar is out of
+release.
+
+- Cognition / ReAct runs in Go. Production prompts advertise Tool ABI ids only
+  (`workspace.*`, `shell.exec`, `computer.*`, `memory.*`, `skill.*`).
+- Chat keeps working when the chosen provider has no key, a down local host, or
+  a blocked subscription: Remedy switches to your usual model and says so in
+  plain language.
+- Packaged installs seed missing skills on discover.
+- Process list/kill and uninstaller stops use authorized Zig paths — no raw
+  `ps` / `pkill` soft spawns.
+- The 0.50 experimental line is superseded.
 
 ## 0.50.2 - Experimental: prove the foundation
 
-**Experimental line (0.50.0–0.50.2).** Native Go/Zig paths, Claimidx first-run,
-and RemedyConnect hardening were proven in daily use before the cutover —
-expect rough edges on that line; last stable public before the arc was
+**Experimental line (0.50.0–0.50.2).** After landing Go/Zig, this line proved
+them in daily use before anyone cut the Python server away. Expect rough edges
+on that line; last stable public before the arc was
 [v0.41.5](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.41.5).
 
-- Native runtime closed link/junction escapes, made event and memory writes
-  rollback-safe, bounded IPC, and recovered an exited desktop server on its
-  own. Closing or losing the phone can no longer leave the API offline.
-- Public CI grew to the full matrix: Python on Windows and Linux, React, Rust
-  (warnings fail), Android, Go, Zig, docs, and packaging — so the foundation
-  could not ship without its gates.
-- First run can install a pinned Claimidx prior-art service under
-  `~/.remedy/claimidx` without blocking offline launch.
-- RemedyConnect: reconnect, host-controlled navigation, per-session Stop,
+- **Native hardness:** closed link/junction escapes; rollback-safe event and
+  memory writes; bounded IPC; automatic recovery when the desktop server exits.
+  Closing or losing the phone can no longer leave the API offline.
+- **Gates that match the product:** public CI grew to the full matrix — Python
+  on Windows and Linux, React, Rust (warnings fail), Android, Go, Zig, docs,
+  and packaging — so the foundation could not ship without its gates.
+- **Claimidx on first run:** pinned wheel under `~/.remedy/claimidx`, offline
+  launch never blocked.
+- **RemedyConnect:** reconnect, host-controlled navigation, per-session Stop,
   bounded network inputs, durable pairing, secrets kept out of Android backup.
 - A cloud provider outage no longer wakes RMB on a machine that was never set
   up for local models.
@@ -73,10 +104,11 @@ expect rough edges on that line; last stable public before the arc was
 
 **Start of the migration.** Remedy adds a versioned **Go nervous system** and
 **Zig capability core** under `native/`, built into Windows and Linux Desktop
-releases beside the then-default Python compatibility path.
+releases beside the then-default Python compatibility path. Nothing forced
+native yet — both ABIs had to probe healthy first.
 
 - **Go:** supervised lifecycle, local IPC, ReAct state, Tool ABI, durable
-  memory/events/state, scheduling, scoped Hive workers, and Python worker
+  memory / events / state, scheduling, scoped Hive workers, and Python worker
   supervision.
 - **Zig:** capability-checked filesystem / process / system substrate, compact
   records, signed one-use grants, and the public C ABI.
@@ -92,7 +124,8 @@ releases beside the then-default Python compatibility path.
 The phone can stop only its own session, cannot shut down the desktop server,
 and reconnects after network loss. Native Grove, selectable sessions, terminal
 input, Tailscale setup, and a desktop server-restart control make Connect useful
-without giving it authority over Remedy's lifecycle.
+without giving it authority over Remedy's lifecycle. That lifecycle lesson is
+part of why Go later owns a single supervised runtime.
 
 ## 0.46.0 - RemedyConnect follows the PC
 
