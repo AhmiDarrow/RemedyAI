@@ -244,7 +244,20 @@ def test_desktop_snapshot_auto_empty_when_no_atspi(monkeypatch) -> None:
 
 
 def test_atspi_binding_returns_list_on_non_linux() -> None:
-    """host_binding.a11y_snapshot is empty / unsupported off Linux, never raises."""
+    """host_binding.a11y_snapshot is empty / unsupported off Linux, never raises.
+
+    On Linux without a graphical session it must also return [] — never abort
+    (CI runners have no DISPLAY; AT-SPI/dbus must not kill pytest).
+    """
+    import os
+    import sys
+
+    if sys.platform.startswith("linux") and not (
+        os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    ):
+        got = H.a11y_snapshot(10)
+        assert got == []
+        return
     got = H.a11y_snapshot(10)
     assert isinstance(got, list)
 
