@@ -112,6 +112,12 @@ func (b *HostBridge) setSessionStreaming(fn func(string) bool) {
 }
 
 func (b *HostBridge) markHostAlive(poller bool, driver string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.markHostAliveLocked(poller, driver)
+}
+
+func (b *HostBridge) markHostAliveLocked(poller bool, driver string) {
 	now := float64(time.Now().UnixNano()) / 1e9
 	b.hostSeenAt = now
 	if poller {
@@ -124,6 +130,12 @@ func (b *HostBridge) markHostAlive(poller bool, driver string) {
 }
 
 func (b *HostBridge) hostConnected() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.hostConnectedLocked()
+}
+
+func (b *HostBridge) hostConnectedLocked() bool {
 	now := float64(time.Now().UnixNano()) / 1e9
 	if b.lastPollAt > 0 && (now-b.lastPollAt) <= hostAliveMaxAgeS {
 		return true
@@ -132,7 +144,9 @@ func (b *HostBridge) hostConnected() bool {
 }
 
 func (b *HostBridge) hostDriver() string {
-	if !b.hostConnected() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.hostConnectedLocked() {
 		return ""
 	}
 	return b.lastPollDriver
@@ -688,7 +702,7 @@ func (b *HostBridge) claimNext(exclude, only map[string]struct{}, sessionID stri
 func (b *HostBridge) claimNextOnce(exclude, only map[string]struct{}, sessionID string) *ComputerJob {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.markHostAlive(true, b.lastPollDriver)
+	b.markHostAliveLocked(true, b.lastPollDriver)
 	if b.pollIdleEmpty {
 		return nil
 	}
