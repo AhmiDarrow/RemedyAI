@@ -272,6 +272,12 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "auto_approve_threshold": float(raw.get("auto_approve_threshold", 0.8)),
         "log_level": str(raw.get("log_level") or "INFO").upper(),
         "sarcasm_mode": bool(raw.get("sarcasm_mode", False)),
+        # Claimidx 0.7+ submits by default — missing key must read as on.
+        "claimidx_public_ledger": bool(
+            raw.get("claimidx_public_ledger")
+            if "claimidx_public_ledger" in raw
+            else True
+        ),
         "skills_active_budget": int(raw.get("skills_active_budget") or 80),
         "browser_home_url": normalize_browser_home_url(raw.get("browser_home_url")),
         "enabled_providers": raw.get("enabled_providers"),

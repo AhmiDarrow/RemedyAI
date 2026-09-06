@@ -8,7 +8,8 @@ or offline install never blocks Remedy.
 
 The managed service does not inherit an owner's global Claimidx configuration
 or credentials (separate config/db/token).  Submit/share follows Claimidx's own
-defaults — Remedy must not force ``CLAIMIDX_SHARE=0`` or ``share: false``.
+defaults — Remedy must not force ``CLAIMIDX_SHARE=0`` or ``share: false``
+unless the owner explicitly turns off Settings ``claimidx_public_ledger``.
 """
 
 from __future__ import annotations
@@ -124,6 +125,26 @@ def _service_token(home_dir: str | Path | None = None) -> str:
     return token
 
 
+def _public_ledger_enabled(home_dir: str | Path | None = None) -> bool:
+    """Submit/share follows Claimidx defaults unless the owner opts out.
+
+    Missing ``claimidx_public_ledger`` → True. Only an explicit false in the
+    Remedy home config disables public submit (``CLAIMIDX_SHARE=0``).
+    """
+    try:
+        from remedy.interfaces.config import load_config
+
+        if home_dir is not None:
+            cfg = load_config(Path(home_dir).expanduser() / "config.toml")
+        else:
+            cfg = load_config()
+    except Exception:
+        return True
+    if not isinstance(cfg, dict) or "claimidx_public_ledger" not in cfg:
+        return True
+    return bool(cfg.get("claimidx_public_ledger"))
+
+
 def _clean_env(home_dir: str | Path | None = None) -> dict[str, str]:
     """Child environment isolated from global Claimidx and frozen-parent state."""
     from remedy.voice.runtime import child_env
@@ -139,8 +160,6 @@ def _clean_env(home_dir: str | Path | None = None) -> dict[str, str]:
             "CLAIMIDX_DB": str(root / "index.sqlite"),
             "CLAIMIDX_OWNER": "did:claimidx:remedy",
             "CLAIMIDX_AGENT": "remedy",
-            # Do not set CLAIMIDX_SHARE — Claimidx 0.7+ submits by default;
-            # forcing "0" here would counter that product default.
             # Protect mutating endpoints even though the server only binds
             # loopback. Read-only prior art remains locally available.
             "CLAIMIDX_HOME_TOKEN": _service_token(home_dir),
@@ -148,6 +167,9 @@ def _clean_env(home_dir: str | Path | None = None) -> dict[str, str]:
             "PIP_NO_INPUT": "1",
         }
     )
+    # Claimidx 0.7+ submits by default — only force SHARE off on owner opt-out.
+    if not _public_ledger_enabled(home_dir):
+        env["CLAIMIDX_SHARE"] = "0"
     return env
 
 
@@ -303,14 +325,14 @@ def _setup(home_dir: str | Path | None = None) -> dict[str, Any]:
     root.mkdir(parents=True, exist_ok=True)
     from remedy.core.atomic_json import write_json_atomic
 
-    write_json_atomic(
-        root / "config.json",
-        {
-            "owner": "did:claimidx:remedy",
-            "agent": "remedy",
-            # Omit share — Claimidx defaults to submit/share on; do not force off.
-        },
-    )
+    claimidx_cfg: dict[str, Any] = {
+        "owner": "did:claimidx:remedy",
+        "agent": "remedy",
+    }
+    # Omit share when ledger is on — Claimidx defaults to submit. Opt-out only.
+    if not _public_ledger_enabled(home_dir):
+        claimidx_cfg["share"] = False
+    write_json_atomic(root / "config.json", claimidx_cfg)
     seed_marker = root / "seed.json"
     try:
         seed_state = json.loads(seed_marker.read_text(encoding="utf-8"))

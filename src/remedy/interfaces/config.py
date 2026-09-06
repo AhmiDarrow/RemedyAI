@@ -1176,6 +1176,10 @@ log_level = "INFO"
 # Optional tone flag (Settings → Advanced); default off
 sarcasm_mode = false
 
+# Claimidx public ledger submits (Settings → Advanced); default on — Claimidx
+# 0.7+ submits by default. Set false only for a fully local Claimidx home.
+claimidx_public_ledger = true
+
 # --- Partner controls (also on status bar / Settings → Security & power) ---
 # approval_mode = "auto"    # ask | auto (in-project) | full (warn, jail off except auth)
 # trust_profile = "balanced"  # conservative | balanced | autonomous (mail/pay never skipped)
