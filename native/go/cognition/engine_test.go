@@ -3,6 +3,7 @@ package cognition
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -133,14 +134,115 @@ func TestEngineStopsRepeatedNoProgressAndToolCeilings(t *testing.T) {
 	repeating := modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
 		return events(ModelEvent{ToolCall: &ToolCall{Name: "same", Input: []byte("x")}}), nil
 	})
-	base := Engine{Model: repeating, Tools: toolFunc(func(_ context.Context, c ToolCall) ToolResult { return ToolResult{Name: c.Name} }), Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }), Config: Config{MaxIterations: 10, MaxRepeatedBatch: 1, MaxToolCalls: 10}}
+	base := Engine{Model: repeating, Tools: toolFunc(func(_ context.Context, c ToolCall) ToolResult { return ToolResult{Name: c.Name} }), Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }), Config: Config{MaxIterations: 10, MaxRepeatedBatch: 1, MaxToolCalls: 10, RepeatNudgeBudget: -1, SoftEpochSteps: -1}}
 	if out := base.Run(context.Background(), "goal"); !errors.Is(out.Err, ErrNoProgress) {
 		t.Fatalf("repeat = %v", out.Err)
 	}
 	base.Config.MaxRepeatedBatch = 10
 	base.Config.MaxToolCalls = 1
+	base.Config.RepeatNudgeBudget = -1
 	if out := base.Run(context.Background(), "goal"); !errors.Is(out.Err, ErrToolCallLimit) {
 		t.Fatalf("ceiling = %v", out.Err)
+	}
+}
+
+func TestEngineSoftEpochContinuesPastOldToolCap(t *testing.T) {
+	// Old default MaxToolCalls=128 would stop mid-build. Soft epochs + high
+	// absolute ceiling must keep going well past that.
+	var rounds atomic.Int32
+	engine := Engine{
+		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+			n := rounds.Add(1)
+			if n > 140 {
+				return events(ModelEvent{Text: "finished", Done: true}), nil
+			}
+			return events(ModelEvent{ToolCall: &ToolCall{
+				ID: fmt.Sprintf("%d", n), Name: "workspace.read",
+				Input: []byte(fmt.Sprintf(`{"path":"f%d"}`, n)),
+			}}), nil
+		}),
+		Tools: toolFunc(func(_ context.Context, c ToolCall) ToolResult {
+			return ToolResult{ID: c.ID, Name: c.Name, Output: []byte("ok")}
+		}),
+		Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+		Config: Config{
+			MaxIterations:     10_000,
+			MaxToolCalls:      100_000,
+			SoftEpochSteps:    50,
+			MaxRepeatedBatch:  100,
+			RepeatNudgeBudget: -1,
+		},
+	}
+	var epochs atomic.Int32
+	engine.EpochHook = func(epoch, total, tools int, _ *Turn) {
+		epochs.Add(1)
+	}
+	out := engine.Run(context.Background(), "build forever")
+	if out.Err != nil {
+		t.Fatalf("must not hit tool limit: %v after %d rounds", out.Err, rounds.Load())
+	}
+	if rounds.Load() <= 128 {
+		t.Fatalf("expected >128 model rounds, got %d", rounds.Load())
+	}
+	if epochs.Load() < 2 {
+		t.Fatalf("expected soft epochs, got %d", epochs.Load())
+	}
+	if out.Text != "finished" {
+		t.Fatalf("text=%q", out.Text)
+	}
+}
+
+func TestEngineDefaultCeilingsAreBuildScale(t *testing.T) {
+	cfg := Config{}.normalized()
+	if cfg.MaxIterations < 100_000 {
+		t.Fatalf("MaxIterations=%d want build-scale absolute ceiling", cfg.MaxIterations)
+	}
+	if cfg.MaxToolCalls < 1_000_000 {
+		t.Fatalf("MaxToolCalls=%d want build-scale absolute ceiling", cfg.MaxToolCalls)
+	}
+	if cfg.SoftEpochSteps < 16 {
+		t.Fatalf("SoftEpochSteps=%d", cfg.SoftEpochSteps)
+	}
+	if cfg.MaxParallelTools < 16 {
+		t.Fatalf("MaxParallelTools=%d", cfg.MaxParallelTools)
+	}
+	if cfg.KeepLastResults < 32 {
+		t.Fatalf("KeepLastResults=%d", cfg.KeepLastResults)
+	}
+}
+
+func TestEngineProgressExtendsStepCeiling(t *testing.T) {
+	// Low absolute ceiling would stop mid-build without progress extension.
+	var rounds atomic.Int32
+	engine := Engine{
+		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+			n := rounds.Add(1)
+			if n > 80 {
+				return events(ModelEvent{Text: "done", Done: true}), nil
+			}
+			return events(ModelEvent{ToolCall: &ToolCall{
+				ID: fmt.Sprintf("%d", n), Name: "workspace.edit",
+				Input: []byte(fmt.Sprintf(`{"path":"f%d"}`, n)),
+			}}), nil
+		}),
+		Tools: toolFunc(func(_ context.Context, c ToolCall) ToolResult {
+			return ToolResult{ID: c.ID, Name: c.Name, Output: []byte("ok")}
+		}),
+		Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+		Config: Config{
+			MaxIterations:     40, // would die without extension
+			MaxToolCalls:      40,
+			SoftEpochSteps:    20,
+			MaxRepeatedBatch:  200,
+			RepeatNudgeBudget: -1,
+		},
+	}
+	out := engine.Run(context.Background(), "long build")
+	if out.Err != nil {
+		t.Fatalf("progress must extend ceilings: %v after %d rounds", out.Err, rounds.Load())
+	}
+	if rounds.Load() <= 40 {
+		t.Fatalf("expected >40 rounds via extension, got %d", rounds.Load())
 	}
 }
 

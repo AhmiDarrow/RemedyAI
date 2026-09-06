@@ -116,10 +116,16 @@ Optional env overrides (advanced):
 
 ```text
 REMEDY_REACT_EPOCH_STEPS=256
-REMEDY_REACT_MAX_TOTAL_STEPS=10000
-REMEDY_REACT_AUTO_CONTINUE=1
+REMEDY_REACT_MAX_TOTAL_STEPS=1000000
+REMEDY_REACT_MAX_TOOL_CALLS=10000000
+REMEDY_MAX_PARALLEL_TOOLS=32
 REMEDY_REACT_MAX_STALE_EPOCHS=8
 ```
+
+Soft epochs compact context and **continue**. While tools are making progress,
+Remedy extends its own runway — a real build can run for as long as the project
+needs. Only a pathological safety ceiling, repeated no-progress loops, or Stop
+ends a coding turn — never a mid-mission “tool-call limit.”
 
 ## Missions (work alone)
 
