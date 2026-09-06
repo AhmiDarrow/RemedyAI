@@ -132,7 +132,17 @@ def uia_element_action(
 
 
 def a11y_snapshot(limit: int = 40) -> list[dict[str, Any]]:
-    """Linux AT-SPI clickables as dicts; empty list when unavailable / non-Linux."""
+    """Linux AT-SPI clickables as dicts; empty list when unavailable / non-Linux.
+
+    Headless CI (no DISPLAY/WAYLAND_DISPLAY) must not enter AT-SPI — dbus can
+    abort the process. Match Zig ``atspi_linux.hasGraphicalSession``.
+    """
+    import os
+    import sys
+
+    if sys.platform.startswith("linux"):
+        if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            return []
     try:
         library = _lib()
     except NativeRuntimeUnavailableError:

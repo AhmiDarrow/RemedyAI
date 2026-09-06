@@ -175,8 +175,24 @@ fn walk(gpa: std.mem.Allocator, root: *AtspiAccessible, limit: usize) Error![]Ca
     return out.toOwnedSlice(gpa);
 }
 
+fn hasGraphicalSession() bool {
+    // GitHub Actions / headless CI has no session bus. Calling atspi_init there
+    // can abort the whole process (pytest exit 133). Fail closed to "[]".
+    // Zig 0.16: getenv lives on std.c (not std.posix).
+    if (std.c.getenv("DISPLAY") != null) return true;
+    if (std.c.getenv("WAYLAND_DISPLAY") != null) return true;
+    return false;
+}
+
 pub fn snapshotJson(gpa: std.mem.Allocator, limit: u32) Error![]u8 {
-    _ = atspi_init();
+    if (!hasGraphicalSession()) {
+        return gpa.dupe(u8, "[]") catch return error.OutOfMemory;
+    }
+    const init_rc = atspi_init();
+    // 0 = first init ok, 1 = already init; anything else → empty snapshot.
+    if (init_rc != 0 and init_rc != 1) {
+        return gpa.dupe(u8, "[]") catch return error.OutOfMemory;
+    }
     const desktop = atspi_get_desktop(0) orelse {
         return gpa.dupe(u8, "[]") catch return error.OutOfMemory;
     };
