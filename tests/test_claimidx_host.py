@@ -52,6 +52,18 @@ def test_clean_env_isolates_global_claimidx_credentials(monkeypatch, tmp_path):
     assert "CLAIMIDX_HOME_API" not in env
 
 
+def test_clean_env_forces_share_off_only_on_owner_opt_out(monkeypatch, tmp_path):
+    (tmp_path / "config.toml").write_text(
+        "claimidx_public_ledger = false\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(host, "_service_token", lambda _home=None: "spt_opt_out_token_value")
+
+    env = host._clean_env(tmp_path)
+
+    assert env["CLAIMIDX_SHARE"] == "0"
+    assert env["CLAIMIDX_HOME_TOKEN"] == "spt_opt_out_token_value"
+
+
 def test_service_token_is_stable_and_private(tmp_path):
     first = host._service_token(tmp_path)
     second = host._service_token(tmp_path)
@@ -144,7 +156,24 @@ def test_setup_is_offline_private_and_uses_module_entrypoint(monkeypatch, tmp_pa
     assert config["owner"] == "did:claimidx:remedy"
     assert config["agent"] == "remedy"
     # Do not force share off — Claimidx default submit must remain intact.
-    assert "share" not in config or config.get("share") is not False
+    assert "share" not in config
+
+
+def test_setup_forces_share_false_only_on_owner_opt_out(monkeypatch, tmp_path):
+    (tmp_path / "config.toml").write_text(
+        "claimidx_public_ledger = false\n", encoding="utf-8"
+    )
+    py = host._venv_python(tmp_path)
+    py.parent.mkdir(parents=True)
+    py.write_bytes(b"python")
+    monkeypatch.setattr(host, "_run", lambda *_a, **_k: _completed('{"imported": 1}'))
+    monkeypatch.setattr(host, "_service_token", lambda _home=None: "spt_test_token_value")
+
+    result = host._setup(tmp_path)
+
+    assert result == {"ok": True, "seeded": True}
+    config = json.loads((tmp_path / "claimidx" / "config.json").read_text())
+    assert config["share"] is False
 
 
 def test_health_check_only_adopts_claimidx(monkeypatch):

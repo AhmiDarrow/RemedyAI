@@ -464,7 +464,8 @@ export function SettingsPanel({
       }
       setLogLevel(String(s.log_level || 'INFO').toUpperCase())
       setSarcasmMode(Boolean(s.sarcasm_mode))
-      setClaimidxPublicLedger(Boolean(s.claimidx_public_ledger))
+      // Default on (Claimidx submit-by-default); only explicit false opts out.
+      setClaimidxPublicLedger(s.claimidx_public_ledger !== false)
       setWebToolsEnabled(Boolean(s.web_tools_enabled))
       setHttpBootstrap(s.http_bootstrap === true)
       setPrivacyMode(Boolean(s.privacy_mode))
