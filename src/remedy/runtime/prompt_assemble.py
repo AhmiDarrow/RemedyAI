@@ -300,9 +300,9 @@ async def _slim_epoch_async(inp: Mapping[str, Any]) -> dict[str, Any]:
             brief.compress_count = int(getattr(brief, "compress_count", 0) or 0) + 1
             brief.touch()
 
-    from remedy.core.react_policy import TOOL_RESULT_CHAR_CAP as _trc
+    from remedy.core.react_policy import TOOL_RESULT_CHAR_CAP
 
-    tool_cap = int(_trc or 128_000)
+    tool_cap = int(TOOL_RESULT_CHAR_CAP or 128_000)
     # Mid-turn slim first (cheap prune/offload), then full auto policy for brief.
     messages = slim_messages_mid_turn(
         runtime,
