@@ -194,7 +194,7 @@ export function SettingsPanel({
   const [autoApproveThreshold, setAutoApproveThreshold] = useState(0.8)
   const [logLevel, setLogLevel] = useState('INFO')
   const [sarcasmMode, setSarcasmMode] = useState(false)
-  const [claimidxPublicLedger, setClaimidxPublicLedger] = useState(false)
+  const [claimidxPublicLedger, setClaimidxPublicLedger] = useState(true)
   const [toolProcess, setToolProcess] = useState<ToolProcessMode>(
     () => toolProcessMode || 'off',
   )

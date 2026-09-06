@@ -156,11 +156,12 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
         <FormToggle
           checked={claimidxPublicLedger}
           onChange={setClaimidxPublicLedger}
-          label="Claimidx public ledger (opt-in claim submission)"
+          label="Claimidx public ledger (submit claims)"
         />
         <FormHint>
-          When enabled, Remedy can submit sanitized claims to the public GitHub ledger at
-          github.com/claimidx/claimidx. Disabled by default — no data leaves your machine without this on.
+          On by default (Claimidx 0.7+ submits by default). When enabled, Remedy can
+          submit sanitized claims to the public ledger at github.com/claimidx/claimidx.
+          Turn off only if you want Claimidx fully local with no public submits.
         </FormHint>
         <FormHint>
           Advanced knobs only — defaults keep full owner power. Skill creation stays on so Remedy can improve.

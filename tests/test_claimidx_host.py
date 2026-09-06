@@ -29,6 +29,13 @@ def _completed(stdout: str = "", stderr: str = "", code: int = 0):
     return subprocess.CompletedProcess([], code, stdout, stderr)
 
 
+def test_claimidx_pin_is_repo_release():
+    assert host.CLAIMIDX_VERSION == "0.7.2"
+    assert host.CLAIMIDX_WHEEL == "claimidx-0.7.2-py3-none-any.whl"
+    assert "claimidx-0.7.2-py3-none-any.whl" in host.CLAIMIDX_WHEEL_URL
+    assert len(host.CLAIMIDX_WHEEL_SHA256) == 64
+
+
 def test_clean_env_isolates_global_claimidx_credentials(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAIMIDX_HOME_TOKEN", "owner-secret")
     monkeypatch.setenv("CLAIMIDX_HOME_API", "https://private.example")
@@ -40,7 +47,8 @@ def test_clean_env_isolates_global_claimidx_credentials(monkeypatch, tmp_path):
     assert env["CLAIMIDX_CONFIG"] == str(tmp_path / "claimidx" / "config.json")
     assert env["CLAIMIDX_DB"] == str(tmp_path / "claimidx" / "index.sqlite")
     assert env["CLAIMIDX_HOME_TOKEN"] == "spt_managed_token_value"
-    assert env["CLAIMIDX_SHARE"] == "0"
+    # Must not force SHARE off — Claimidx 0.7+ submits by default.
+    assert "CLAIMIDX_SHARE" not in env
     assert "CLAIMIDX_HOME_API" not in env
 
 
@@ -133,11 +141,10 @@ def test_setup_is_offline_private_and_uses_module_entrypoint(monkeypatch, tmp_pa
     assert calls[0][1:3] == ["-m", "claimidx.cli"]
     assert calls[0][-1] == "seed"
     config = json.loads((tmp_path / "claimidx" / "config.json").read_text())
-    assert config == {
-        "owner": "did:claimidx:remedy",
-        "agent": "remedy",
-        "share": False,
-    }
+    assert config["owner"] == "did:claimidx:remedy"
+    assert config["agent"] == "remedy"
+    # Do not force share off — Claimidx default submit must remain intact.
+    assert "share" not in config or config.get("share") is not False
 
 
 def test_health_check_only_adopts_claimidx(monkeypatch):
