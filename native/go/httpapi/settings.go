@@ -671,7 +671,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"auto_approve_threshold":    cfgFloat(cfg, "auto_approve_threshold", 0.8),
 		"log_level":                 strings.ToUpper(cfgString(cfg, "log_level", "INFO")),
 		"sarcasm_mode":              cfgBool(cfg, "sarcasm_mode", false),
-		"claimidx_public_ledger":    cfgBool(cfg, "claimidx_public_ledger", false),
+		"claimidx_public_ledger":    cfgBool(cfg, "claimidx_public_ledger", true),
 		"enabled_providers":         cfg["enabled_providers"],
 		"enabled_models":            cfgMapOrEmpty(cfg, "enabled_models"),
 		"last_model_by_provider":    cfgMapOrEmpty(cfg, "last_model_by_provider"),

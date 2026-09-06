@@ -2,13 +2,13 @@
 
 Claimidx is intentionally not part of the Remedy installer.  Remedy creates an
 isolated virtual environment below ``~/.remedy/claimidx``, downloads the pinned
-wheel from PyPI, verifies its sha256, seeds a private local index, and starts a
-loopback-only service.  A failed or offline install never blocks Remedy.
+wheel from the Claimidx release (PyPI mirrors ``claimidx/claimidx``), verifies
+its sha256, seeds a local index, and starts a loopback-only service.  A failed
+or offline install never blocks Remedy.
 
 The managed service does not inherit an owner's global Claimidx configuration
-or credentials and public sharing stays disabled.  This prevents a local
-Remedy install from accidentally publishing claims or serving another profile's
-database.
+or credentials (separate config/db/token).  Submit/share follows Claimidx's own
+defaults — Remedy must not force ``CLAIMIDX_SHARE=0`` or ``share: false``.
 """
 
 from __future__ import annotations
@@ -35,15 +35,16 @@ from remedy.home import default_home
 
 logger = logging.getLogger(__name__)
 
-CLAIMIDX_VERSION = "0.6.1"
+# Pinned to claimidx/claimidx releases (PyPI artifact for that tag).
+CLAIMIDX_VERSION = "0.7.2"
 CLAIMIDX_WHEEL = f"claimidx-{CLAIMIDX_VERSION}-py3-none-any.whl"
 CLAIMIDX_WHEEL_URL = (
-    "https://files.pythonhosted.org/packages/14/3e/"
-    "e63c537c294fe06ec79677af08f726a039362c99190095560bc85c4733d3/"
+    "https://files.pythonhosted.org/packages/cb/9e/"
+    "353b072039192ebe1c92d64da57f6df304f4596b0cd1f28c6c8cf6ca8409/"
     + CLAIMIDX_WHEEL
 )
 CLAIMIDX_WHEEL_SHA256 = (
-    "50ffe85d2e350bb4b9b39ebbc0ed8b32a33ee2f4da9572d2673ee244ac3af7b3"
+    "c0c35f75b8ff537f4f9e16f7aa97c0503d2497ddd41f5a82c192c6d353d19444"
 )
 CLAIMIDX_WHEEL_MAX_BYTES = 2_000_000
 CLAIMIDX_HOST = "127.0.0.1"
@@ -138,9 +139,10 @@ def _clean_env(home_dir: str | Path | None = None) -> dict[str, str]:
             "CLAIMIDX_DB": str(root / "index.sqlite"),
             "CLAIMIDX_OWNER": "did:claimidx:remedy",
             "CLAIMIDX_AGENT": "remedy",
-            "CLAIMIDX_SHARE": "0",
-            # Protect every mutating endpoint even though the server only
-            # binds loopback. Read-only prior art remains locally available.
+            # Do not set CLAIMIDX_SHARE — Claimidx 0.7+ submits by default;
+            # forcing "0" here would counter that product default.
+            # Protect mutating endpoints even though the server only binds
+            # loopback. Read-only prior art remains locally available.
             "CLAIMIDX_HOME_TOKEN": _service_token(home_dir),
             "PIP_DISABLE_PIP_VERSION_CHECK": "1",
             "PIP_NO_INPUT": "1",
@@ -306,7 +308,7 @@ def _setup(home_dir: str | Path | None = None) -> dict[str, Any]:
         {
             "owner": "did:claimidx:remedy",
             "agent": "remedy",
-            "share": False,
+            # Omit share — Claimidx defaults to submit/share on; do not force off.
         },
     )
     seed_marker = root / "seed.json"
