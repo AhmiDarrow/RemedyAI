@@ -2,13 +2,21 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.60.0**. Local API and Desktop packaging are the native
+Current release: **v0.61.0**. Local API and Desktop packaging are the native
 Go/Zig runtime. Installed apps update automatically. Partner line still starts
 at 0.31.0.
 
 ## Contents
 
-- [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-native-runtime-claimidx-and-connect-hardening) · [0.48.0](#0480---next-evolution-native-runtime) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+- [0.61.0](#0610---agency-complete-and-messenger-health) · [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-native-runtime-claimidx-and-connect-hardening) · [0.48.0](#0480---next-evolution-native-runtime) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+
+## 0.61.0 - Agency complete and messenger health
+
+Remedy finishes computer and messenger surfaces that were half-wired. The Browser
+rail opens via `computer.navigate`, approvals continue the turn when you say Yes,
+and mail/calendar/settings tools are on the Tool ABI. Messengers show **ready** or
+**needs_setup** (never a vague partial), with an optional HTTPS tunnel helper for
+WhatsApp/Teams/Google Chat and a managed signal-cli install path.
 
 ## 0.60.0 - Native runtime cutover
 
