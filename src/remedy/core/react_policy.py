@@ -250,7 +250,7 @@ def _env_bool(name: str, default: bool = True) -> bool:
 
 # Soft epoch: checkpoint + mid-turn slim, then keep tools (do not force-answer).
 # Same operating model as Grok Build: run until the task is finished.
-REACT_EPOCH_STEPS = _env_int("REMEDY_REACT_EPOCH_STEPS", 256, lo=16, hi=2_000)
+REACT_EPOCH_STEPS = _env_int("REMEDY_REACT_EPOCH_STEPS", 64, lo=16, hi=2_000)
 # Absolute safety ceiling across all epochs in one turn (pathological loops only).
 # Soft epochs + auto-continue are the real pacing; this is a last-resort net.
 REACT_MAX_TOTAL_STEPS = _env_int(
@@ -280,16 +280,17 @@ HISTORY_MSG_SOFT_TRIM = 500_000
 _FULL_ENV = str(os.environ.get("REMEDY_FULL_CONTEXT", "1")).strip().lower()
 _FULL = _FULL_ENV not in ("0", "false", "no", "off")
 if _FULL:
-    # 0 = no soft cap; callers use HARD_SAFETY_CHARS only
-    TOOL_RESULT_CHAR_CAP = 0
-    FILE_READ_CHAR_CAP = 0
+    # Generous but finite — uncapped 50MB reads blow every Go model round.
+    # Go send-view also head/tail clips at ~24k; this is the ingress ceiling.
+    TOOL_RESULT_CHAR_CAP = 128_000
+    FILE_READ_CHAR_CAP = 256_000
     HARD_SAFETY_CHARS = 50_000_000
     HISTORY_CHAR_BUDGET = 12_000_000
     HISTORY_MSG_LIMIT = 4_000
     HISTORY_MSG_SOFT_TRIM = 0
 else:
-    TOOL_RESULT_CHAR_CAP = 256_000
-    FILE_READ_CHAR_CAP = 512_000
+    TOOL_RESULT_CHAR_CAP = 64_000
+    FILE_READ_CHAR_CAP = 128_000
     # Absolute emergency only (OOM guard).
     HARD_SAFETY_CHARS = 5_000_000
 

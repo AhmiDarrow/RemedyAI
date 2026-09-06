@@ -300,10 +300,22 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 			safeEmit("@@status:Stuck repeating the same steps — change approach or nudge Remedy, then continue.\n")
 			return fmt.Errorf("%w: repeated the same tools without progress", out.Err)
 		}
+		if errors.Is(out.Err, cognition.ErrBudgetExhausted) {
+			safeEmit("@@status:This pulse used its step budget — spawn another pulse or continue from the mother.\n")
+			return cognition.ErrBudgetExhausted
+		}
 		if errors.Is(out.Err, cognition.ErrToolCallLimit) || errors.Is(out.Err, cognition.ErrIterationLimit) {
-			// Absolute safety net only — not a normal task budget.
-			safeEmit("@@status:Safety ceiling hit after a pathological loop. Start a new message to continue the same work — soft epochs normally keep builds going.\n")
-			return fmt.Errorf("%w (safety ceiling, not a task budget)", out.Err)
+			if req.MaxIterations > 0 {
+				// Explicit budget (hive foragers) — not a pathological safety stop.
+				safeEmit("@@status:Step budget used up for this pulse — continue with another pulse if more work remains.\n")
+				return cognition.ErrBudgetExhausted
+			}
+			safeEmit("@@status:Safety stop after a stuck loop. History is intact — send continue to keep going.\n")
+			return fmt.Errorf("%w (safety stop, not a task budget)", out.Err)
+		}
+		if errors.Is(out.Err, cognition.ErrIncompleteModelStream) {
+			safeEmit("@@status:The model stopped mid-reply — send continue to resume.\n")
+			return fmt.Errorf("model stopped mid-reply")
 		}
 		return out.Err
 	}

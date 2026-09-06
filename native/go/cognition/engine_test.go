@@ -1,9 +1,11 @@
 package cognition
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -187,7 +189,7 @@ func TestEngineSoftEpochContinuesPastOldToolCap(t *testing.T) {
 	if epochs.Load() < 2 {
 		t.Fatalf("expected soft epochs, got %d", epochs.Load())
 	}
-	if out.Text != "finished" {
+	if !strings.Contains(out.Text, "finished") {
 		t.Fatalf("text=%q", out.Text)
 	}
 }
@@ -200,14 +202,20 @@ func TestEngineDefaultCeilingsAreBuildScale(t *testing.T) {
 	if cfg.MaxToolCalls < 1_000_000 {
 		t.Fatalf("MaxToolCalls=%d want build-scale absolute ceiling", cfg.MaxToolCalls)
 	}
-	if cfg.SoftEpochSteps < 16 {
-		t.Fatalf("SoftEpochSteps=%d", cfg.SoftEpochSteps)
+	if cfg.SoftEpochSteps < 16 || cfg.SoftEpochSteps > 128 {
+		t.Fatalf("SoftEpochSteps=%d want lean default around 64", cfg.SoftEpochSteps)
 	}
 	if cfg.MaxParallelTools < 16 {
 		t.Fatalf("MaxParallelTools=%d", cfg.MaxParallelTools)
 	}
-	if cfg.KeepLastResults < 32 {
+	if cfg.KeepLastResults < 8 {
 		t.Fatalf("KeepLastResults=%d", cfg.KeepLastResults)
+	}
+	if cfg.MaxResultChars < 8_000 {
+		t.Fatalf("MaxResultChars=%d", cfg.MaxResultChars)
+	}
+	if cfg.MaxAssistantChars < 512 {
+		t.Fatalf("MaxAssistantChars=%d", cfg.MaxAssistantChars)
 	}
 }
 
@@ -243,6 +251,82 @@ func TestEngineProgressExtendsStepCeiling(t *testing.T) {
 	}
 	if rounds.Load() <= 40 {
 		t.Fatalf("expected >40 rounds via extension, got %d", rounds.Load())
+	}
+}
+
+func TestEngineLengthContinueDoesNotStop(t *testing.T) {
+	var rounds atomic.Int32
+	engine := Engine{
+		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+			n := rounds.Add(1)
+			if n == 1 {
+				return events(ModelEvent{Text: "partial…", Done: true, Truncated: true}), nil
+			}
+			return events(ModelEvent{Text: "finished", Done: true}), nil
+		}),
+		Tools:  toolFunc(func(context.Context, ToolCall) ToolResult { return ToolResult{} }),
+		Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+		Config: Config{MaxIterations: 10, SoftEpochSteps: -1, MaxLengthContinues: 4},
+	}
+	out := engine.Run(context.Background(), "goal")
+	if out.Err != nil {
+		t.Fatalf("err=%v", out.Err)
+	}
+	if rounds.Load() < 2 {
+		t.Fatalf("expected length continue, rounds=%d", rounds.Load())
+	}
+	if !strings.Contains(out.Text, "finished") {
+		t.Fatalf("text=%q", out.Text)
+	}
+}
+
+func TestEngineSoftEpochLeavesNoOrphanToolResults(t *testing.T) {
+	var rounds atomic.Int32
+	var afterEpochResults int
+	engine := Engine{
+		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+			n := rounds.Add(1)
+			if n > 4 {
+				return events(ModelEvent{Text: "done", Done: true}), nil
+			}
+			return events(ModelEvent{ToolCall: &ToolCall{
+				ID: fmt.Sprintf("%d", n), Name: "workspace.read", Input: []byte(`{"path":"a"}`),
+			}}), nil
+		}),
+		Tools: toolFunc(func(_ context.Context, c ToolCall) ToolResult {
+			return ToolResult{ID: c.ID, Name: c.Name, Output: []byte("body")}
+		}),
+		Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+		Config: Config{
+			MaxIterations: 20, SoftEpochSteps: 2, MaxRepeatedBatch: 50, RepeatNudgeBudget: -1,
+		},
+	}
+	engine.EpochHook = func(epoch, total, tools int, turn *Turn) {
+		afterEpochResults = len(turn.Results)
+		if len(turn.Calls) != 0 {
+			t.Fatalf("epoch must clear Calls, got %d", len(turn.Calls))
+		}
+	}
+	out := engine.Run(context.Background(), "build")
+	if out.Err != nil {
+		t.Fatalf("err=%v", out.Err)
+	}
+	if afterEpochResults != 0 {
+		t.Fatalf("epoch must clear Results (no orphan tools), got %d", afterEpochResults)
+	}
+	if !strings.Contains(out.Text, "Epoch") && !strings.Contains(out.Text, "done") {
+		t.Fatalf("expected checkpoint or done in text=%q", out.Text)
+	}
+}
+
+func TestCapResultsHeadTail(t *testing.T) {
+	big := bytes.Repeat([]byte("x"), 10_000)
+	out := capResults([]ToolResult{{Name: "r", Output: big}}, 1_000)
+	if len(out[0].Output) > 1_200 {
+		t.Fatalf("len=%d", len(out[0].Output))
+	}
+	if !bytes.Contains(out[0].Output, []byte("truncated")) {
+		t.Fatalf("missing truncate marker: %s", out[0].Output[:80])
 	}
 }
 

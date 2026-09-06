@@ -7,12 +7,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
 )
+
+// Default stream client: no overall Timeout (long thinking/tool streams must not
+// die at 120s). Dial/TLS/header bounds only; body read follows ctx cancel / Stop.
+func defaultStreamHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 0,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   30 * time.Second,
+			ResponseHeaderTimeout: 120 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			ForceAttemptHTTP2:     true,
+		},
+	}
+}
 
 // OpenAICompat streams OpenAI-compatible chat completions SSE into cognition.ModelEvent.
 type OpenAICompat struct {
@@ -32,7 +53,7 @@ func (c *OpenAICompat) client() *http.Client {
 	if c.HTTPClient != nil {
 		return c.HTTPClient
 	}
-	return &http.Client{Timeout: 120 * time.Second}
+	return defaultStreamHTTPClient()
 }
 
 func (c *OpenAICompat) Stream(ctx context.Context, turn cognition.Turn) (<-chan cognition.ModelEvent, error) {
@@ -187,6 +208,24 @@ func uniqueSanitizedToolName(id string, used map[string]struct{}) string {
 	return base + "_x"
 }
 
+const (
+	maxToolArgChars    = 12_000
+	maxToolResultChars = 24_000
+	maxAssistantChars  = 4_000
+)
+
+func clipString(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	head := max * 2 / 3
+	tail := max - head - 64
+	if tail < 32 {
+		return s[:max] + "…"
+	}
+	return s[:head] + fmt.Sprintf("\n…[truncated %d chars]…\n", len(s)-max) + s[len(s)-tail:]
+}
+
 func buildMessages(turn cognition.Turn) []map[string]any {
 	msgs := make([]map[string]any, 0, 4+len(turn.Results))
 	if sys := strings.TrimSpace(turn.System); sys != "" {
@@ -210,6 +249,8 @@ func buildMessages(turn cognition.Turn) []map[string]any {
 			args := string(call.Input)
 			if strings.TrimSpace(args) == "" {
 				args = "{}"
+			} else {
+				args = clipString(args, maxToolArgChars)
 			}
 			toolCalls = append(toolCalls, map[string]any{
 				"id":   id,
@@ -225,7 +266,7 @@ func buildMessages(turn cognition.Turn) []map[string]any {
 			"tool_calls": toolCalls,
 		}
 		if text := strings.TrimSpace(turn.Text); text != "" {
-			assistant["content"] = text
+			assistant["content"] = clipString(text, maxAssistantChars)
 		}
 		msgs = append(msgs, assistant)
 
@@ -257,6 +298,8 @@ func buildMessages(turn cognition.Turn) []map[string]any {
 			}
 			if content == "" {
 				content = "{}"
+			} else {
+				content = clipString(content, maxToolResultChars)
 			}
 			msgs = append(msgs, map[string]any{
 				"role":         "tool",
@@ -267,22 +310,38 @@ func buildMessages(turn cognition.Turn) []map[string]any {
 		return msgs
 	}
 
-	if text := strings.TrimSpace(turn.Text); text != "" {
-		msgs = append(msgs, map[string]any{"role": "assistant", "content": text})
+	// No paired Calls — never emit orphan role=tool (provider 400). Fold any
+	// leftover results into assistant text as working memory.
+	text := strings.TrimSpace(turn.Text)
+	if len(turn.Results) > 0 {
+		var b strings.Builder
+		if text != "" {
+			b.WriteString(text)
+			b.WriteString("\n\n")
+		}
+		b.WriteString("Working memory:\n")
+		for _, res := range turn.Results {
+			content := string(res.Output)
+			if res.Err != "" {
+				content = res.Err
+			}
+			content = strings.ReplaceAll(strings.TrimSpace(content), "\n", " ")
+			if len(content) > 200 {
+				content = content[:200] + "…"
+			}
+			if content == "" {
+				continue
+			}
+			b.WriteString("- ")
+			b.WriteString(strings.TrimSpace(res.Name))
+			b.WriteString(": ")
+			b.WriteString(content)
+			b.WriteByte('\n')
+		}
+		text = b.String()
 	}
-	for _, res := range turn.Results {
-		content := string(res.Output)
-		if res.Err != "" {
-			content = res.Err
-		}
-		if content == "" {
-			continue
-		}
-		msg := map[string]any{"role": "tool", "content": content}
-		if id := strings.TrimSpace(res.ID); id != "" {
-			msg["tool_call_id"] = id
-		}
-		msgs = append(msgs, msg)
+	if text != "" {
+		msgs = append(msgs, map[string]any{"role": "assistant", "content": clipString(text, maxAssistantChars)})
 	}
 	return msgs
 }
@@ -415,8 +474,12 @@ func parseSSE(ctx context.Context, body io.Reader, out chan<- cognition.ModelEve
 					}
 				}
 				return
-			case "stop", "length":
+			case "stop":
 				_ = emit(cognition.ModelEvent{Done: true})
+				return
+			case "length":
+				// Hit max_tokens — engine auto-continues instead of ending the turn.
+				_ = emit(cognition.ModelEvent{Done: true, Truncated: true})
 				return
 			}
 		}

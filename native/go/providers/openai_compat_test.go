@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -161,6 +162,28 @@ func TestBuildMessagesIncludesToolCallIDs(t *testing.T) {
 	}
 	if msgs[2]["role"] != "tool" || msgs[2]["tool_call_id"] != "call_1" {
 		t.Fatalf("tool msg=%v", msgs[2])
+	}
+}
+
+func TestBuildMessagesNeverEmitsOrphanToolRole(t *testing.T) {
+	msgs := buildMessages(cognition.Turn{
+		Goal: "continue",
+		Text: "checkpoint",
+		Results: []cognition.ToolResult{{
+			ID: "orphan", Name: "workspace.read", Output: []byte("huge body"),
+		}},
+	})
+	for _, m := range msgs {
+		if m["role"] == "tool" {
+			t.Fatalf("orphan role=tool without Calls is forbidden: %#v", m)
+		}
+	}
+	last := msgs[len(msgs)-1]
+	if last["role"] != "assistant" {
+		t.Fatalf("want assistant fold, got %#v", last)
+	}
+	if !strings.Contains(fmt.Sprint(last["content"]), "Working memory") {
+		t.Fatalf("content=%v", last["content"])
 	}
 }
 

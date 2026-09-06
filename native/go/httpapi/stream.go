@@ -136,6 +136,24 @@ func redactStreamError(err error) string {
 	if msg == "" {
 		return "Stream error"
 	}
+	low := strings.ToLower(msg)
+	switch {
+	case strings.Contains(low, "budget exhausted") || strings.Contains(low, "step budget"):
+		return "Step budget used up — send continue or spawn another pulse. History is intact."
+	case strings.Contains(low, "safety stop") || strings.Contains(low, "safety ceiling") ||
+		strings.Contains(low, "tool ceiling") || strings.Contains(low, "step ceiling") ||
+		strings.Contains(low, "tool-call"):
+		return "Safety stop after a stuck loop. History is intact — send continue to keep going."
+	case strings.Contains(low, "no progress") || strings.Contains(low, "without progress") ||
+		strings.Contains(low, "stuck repeating"):
+		return "Stuck repeating the same steps — change approach, then send continue."
+	case strings.Contains(low, "mid-reply") || strings.Contains(low, "incomplete model"):
+		return "The model stopped mid-reply — send continue to resume."
+	case strings.Contains(low, "context canceled") || strings.Contains(low, "context cancelled"):
+		return "Stopped."
+	case strings.Contains(low, "deadline exceeded"):
+		return "That step took too long — send continue to retry from where you left off."
+	}
 	if len(msg) > 800 {
 		msg = msg[:800]
 	}
