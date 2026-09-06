@@ -217,7 +217,37 @@ def test_a_broken_jsx_file_is_caught_when_a_parser_exists(tmp_path):
 def no_jsx_parser(monkeypatch):
     from remedy.core import build_lang_oracle as O
 
-    monkeypatch.setattr(O, "_TOOLCHAIN", {"esbuild": None, "tsc": None})
+    monkeypatch.setattr(O, "_TOOLCHAIN", {"esbuild": None, "tsc": None, "node": None})
+
+
+def test_tsc_shim_without_node_is_not_a_parser(tmp_path, monkeypatch):
+    """CI Linux can expose a tsc shebang with no node — must not false-red JSX/TS."""
+    from remedy.core import build_lang_oracle as O
+
+    monkeypatch.setattr(
+        O, "_TOOLCHAIN", {"esbuild": None, "tsc": "/usr/bin/tsc", "node": None}
+    )
+    assert O._jsx_checker() is None
+    assert O._tsc_usable() is None
+
+    jsx = tmp_path / "Hint.jsx"
+    jsx.write_text("const Hint = ({x}) => <p>Don't click {x}</p>;\n", encoding="utf-8")
+    out = check_lang_syntax(jsx)
+    assert out["ok"] is True
+    assert out["engine"].startswith("skip")
+
+    ts = tmp_path / "ok.ts"
+    ts.write_text("function add(a, b) { return a + b; }\n", encoding="utf-8")
+    out_ts = check_lang_syntax(ts)
+    assert out_ts["ok"] is True
+    assert out_ts["engine"] == "brace"
+
+
+def test_toolchain_unavailable_error_is_classified() -> None:
+    from remedy.core.build_lang_oracle import _is_toolchain_unavailable
+
+    assert _is_toolchain_unavailable("/usr/bin/env: 'node': No such file or directory\n")
+    assert not _is_toolchain_unavailable("error TS1005: '}' expected.")
 
 
 @pytest.mark.parametrize("suffix", ["jsx", "tsx"])
