@@ -68,6 +68,9 @@ jobs:
           test -f zig-out/lib/libremedy_core.so
           echo "REMEDY_NATIVE_CORE_LIB=${PWD}/zig-out/lib/libremedy_core.so" >> "$GITHUB_ENV"
 
+      - name: Refuse host-ISA bake in remedy_core (SHA-NI)
+        run: uv run python scripts/check_remedy_core_isa.py
+
       - name: Test
         env:
           # Match a headless GitHub runner even if a future image sets a display.
@@ -113,6 +116,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $lib = (Resolve-Path zig-out/bin/remedy_core.dll).Path
           "REMEDY_NATIVE_CORE_LIB=$lib" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Refuse host-ISA bake in remedy_core (SHA-NI)
+        run: uv run python scripts/check_remedy_core_isa.py
 
       - name: Full Windows test suite
         run: uv run pytest -q --tb=short
@@ -273,3 +279,6 @@ jobs:
       - name: Zig release-safe build
         run: zig build -Doptimize=ReleaseSafe
         working-directory: native/zig
+
+      - name: Refuse host-ISA bake in remedy_core (SHA-NI)
+        run: uv run python scripts/check_remedy_core_isa.py

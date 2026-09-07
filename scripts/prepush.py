@@ -213,6 +213,11 @@ NATIVE = Lane(
         Step("zig test", "zig build test", cwd="native/zig"),
         Step("zig test release-safe", "zig build test -Doptimize=ReleaseSafe", cwd="native/zig"),
         Step("zig build release-safe", "zig build -Doptimize=ReleaseSafe", cwd="native/zig"),
+        # SHA-NI / host-ISA bake must not ship (0.62.1 connecting hang on Comet Lake).
+        Step(
+            "remedy_core ISA baseline",
+            "uv run python scripts/check_remedy_core_isa.py",
+        ),
     ),
 )
 
