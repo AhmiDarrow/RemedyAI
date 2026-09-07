@@ -2,7 +2,7 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.61.0**. Local API and Desktop packaging run on the
+Current release: **v0.62.0**. Local API and Desktop packaging run on the
 native **Go + Zig** foundation. Installed apps update automatically. Partner
 line still starts at 0.31.0.
 
@@ -41,12 +41,28 @@ is no longer the product HTTP server or the packaged Desktop sidecar.
 | **Prove** | [0.50.0–0.50.2](#0502---experimental-prove-the-foundation) | Harden native paths, full CI matrix, Claimidx first-run, Connect recovery — experimental line |
 | **Cut over** | [0.60.0](#0600---native-runtime-cutover) | Desktop and `remedy serve` launch **Go only**; FastAPI/uvicorn and the PyInstaller sidecar are gone |
 | **Agency** | [0.61.0](#0610---agency-on-the-native-foundation) | Browser, approvals, mail/calendar/settings, and messenger health finish on that stack |
+| **Stay on mission** | [0.62.0](#0620---build-engine-and-claimidx-defaults) | Long builds keep going; Claimidx submits by default; local CI matches GitHub |
 
 Read newest first below; older partner notes follow after 0.48.
 
 ## Contents
 
-- [0.61.0](#0610---agency-on-the-native-foundation) · [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-prove-the-foundation) · [0.48.0](#0480---land-the-gozig-foundation) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+- [0.62.0](#0620---build-engine-and-claimidx-defaults) · [0.61.0](#0610---agency-on-the-native-foundation) · [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-prove-the-foundation) · [0.48.0](#0480---land-the-gozig-foundation) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+
+## 0.62.0 - Build engine and Claimidx defaults
+
+**Long builds stay on mission, and Claimidx is on by default.** Soft epochs,
+memory harness reconnect, and unfinished-work re-arm keep coding and life-task
+turns from dying mid-flight. Managed Claimidx is pinned to 0.7.2 and submits
+unless you turn the public ledger off. Local prepush now matches the headless
+Go/Zig GitHub gate so a push is not how we discover Linux failures.
+
+- Soft epochs + progress-extends (absolute caps 1M steps / 10M tools).
+- Memory Harness and unfinished-work re-arm at soft epochs; lean outcome ledger.
+- Coding tool pack mid-build; local/RMB fit before chat completions.
+- Claimidx 0.7.2; ledger default **on**.
+- Prepush/CI: headless WSL, Node 20, WSL `go test`, no Windows `node_modules/.bin`
+  masquerading as ubuntu tools.
 
 ## 0.61.0 - Agency on the native foundation
 
