@@ -2,7 +2,7 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.62.1**. Local API and Desktop packaging run on the
+Current release: **v0.62.2**. Local API and Desktop packaging run on the
 native **Go + Zig** foundation. Installed apps update automatically. Partner
 line still starts at 0.31.0.
 
@@ -43,12 +43,22 @@ is no longer the product HTTP server or the packaged Desktop sidecar.
 | **Agency** | [0.61.0](#0610---agency-on-the-native-foundation) | Browser, approvals, mail/calendar/settings, and messenger health finish on that stack |
 | **Stay on mission** | [0.62.0](#0620---build-engine-and-claimidx-defaults) | Long builds keep going; Claimidx submits by default; local CI matches GitHub |
 | **Updater** | [0.62.1](#0621---windows-in-app-update-install) | Windows in-app update finishes the install step after download |
+| **Boot** | [0.62.2](#0622---portable-native-core) | Native core builds for every x86_64 PC (no SHA-NI crash on connect) |
 
 Read newest first below; older partner notes follow after 0.48.
 
 ## Contents
 
-- [0.62.1](#0621---windows-in-app-update-install) · [0.62.0](#0620---build-engine-and-claimidx-defaults) · [0.61.0](#0610---agency-on-the-native-foundation) · [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-prove-the-foundation) · [0.48.0](#0480---land-the-gozig-foundation) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+- [0.62.2](#0622---portable-native-core) · [0.62.1](#0621---windows-in-app-update-install) · [0.62.0](#0620---build-engine-and-claimidx-defaults) · [0.61.0](#0610---agency-on-the-native-foundation) · [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-prove-the-foundation) · [0.48.0](#0480---land-the-gozig-foundation) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+
+## 0.62.2 - Portable native core
+
+**Desktop connects again on every common x86_64 PC.** 0.62.1's `remedy_core.dll`
+was compiled for the GitHub runner CPU, which includes Intel SHA-NI. On older
+desktops without those instructions (Comet Lake and similar), the local server
+crashed while hashing process-spawn policy and never opened `:7400`, so the app
+stayed on "connecting to local server." The core now builds for baseline x86_64,
+and CI refuses any DLL that still contains SHA-NI opcodes.
 
 ## 0.62.1 - Windows in-app update install
 

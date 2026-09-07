@@ -351,7 +351,8 @@ func TestStatusAuthenticatedChatSessionsCount(t *testing.T) {
 		HomeDir: home,
 	})
 	defer shutdown()
-	client := &http.Client{Timeout: 3 * time.Second}
+	// 3s flakes under parallel prepush (WSL + gradle + cargo); status walks skills.
+	client := &http.Client{Timeout: 15 * time.Second}
 
 	// Create one session.
 	req, err := http.NewRequest(http.MethodPost, base+"/api/sessions", strings.NewReader(`{"title":"Counted"}`))

@@ -4,6 +4,19 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.62.2] - 2026-09-07
+
+### Fixed - Desktop stuck on "connecting to local server"
+
+- **`remedy_core` builds for baseline x86_64, not the CI host CPU.** GitHub
+  windows runners enable Intel SHA-NI; Zig's HMAC-SHA256 then emitted
+  `sha256msg1` / `sha256rnds2`. On Comet Lake (e.g. i9-10900K, no SHA-NI)
+  `PolicyHashArgv` crashed with `STATUS_ILLEGAL_INSTRUCTION` while starting the
+  RMDY tool worker, so `--serve` never bound `:7400` and Desktop hung on
+  connecting. `native/zig/build.zig` defaults to `cpu_model = .baseline`.
+- **Release/CI gate** `scripts/check_remedy_core_isa.py` refuses a shipped
+  DLL/SO that still contains SHA-NI opcodes.
+
 ## [0.62.1] - 2026-09-07
 
 ### Fixed - Windows in-app update install step

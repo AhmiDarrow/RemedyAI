@@ -184,6 +184,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
           Copy-Item native/zig/zig-out/bin/remedy_core.dll desktop/bin/remedy_core.dll
+          python scripts/check_remedy_core_isa.py desktop/bin/remedy_core.dll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/build_rmdy_worker.py --out desktop/bin/rmdy_tool_worker.pyz
 
       - name: Upload runtime artifact
@@ -343,6 +345,7 @@ jobs:
           cp zig-out/lib/libremedy_core.so ../../desktop/bin/libremedy_core.so
           chmod +x ../../desktop/bin/remedy-runtime ../../desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
           cd ../..
+          python scripts/check_remedy_core_isa.py desktop/bin/libremedy_core.so
           python scripts/build_rmdy_worker.py --out desktop/bin/rmdy_tool_worker.pyz
 
       - name: Upload Linux runtime artifact

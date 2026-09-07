@@ -103,6 +103,7 @@ def test_ci_covers_every_shipped_runtime_and_artifact() -> None:
         "zig build test",
         "zig build test -Doptimize=ReleaseSafe",
         "zig build -Doptimize=ReleaseSafe",
+        "check_remedy_core_isa.py",
     ):
         assert command in native
 
@@ -115,13 +116,22 @@ def test_release_builds_both_desktop_operating_systems_and_native_cores() -> Non
     assert "remedy-runtime.exe" in windows
     assert "remedy-runtime-x86_64-pc-windows-msvc.exe" in windows
     assert "remedy_core.dll" in windows
+    assert "check_remedy_core_isa.py" in windows
     assert "tauri build --bundles nsis" in windows
 
     linux = _run_commands(jobs["build-runtime-linux"]) + _run_commands(jobs["build-tauri-linux"])
     assert "remedy-runtime" in linux
     assert "remedy-runtime-x86_64-unknown-linux-gnu" in linux
     assert "libremedy_core.so" in linux
+    assert "check_remedy_core_isa.py" in linux
     assert "tauri build --bundles deb,appimage" in linux
+
+
+def test_zig_build_defaults_to_baseline_cpu() -> None:
+    """Shipped remedy_core must not bake the CI host ISA (SHA-NI hang on Comet Lake)."""
+    text = (ROOT / "native" / "zig" / "build.zig").read_text(encoding="utf-8")
+    assert "cpu_model = .baseline" in text
+    assert "SHA-NI" in text or "sha256msg1" in text
 
 
 def test_ci_python_jobs_build_the_zig_core_before_pytest() -> None:
@@ -354,6 +364,7 @@ def test_prepush_gate_runs_every_public_ci_command() -> None:
             "zig build test",
             "zig build test -Doptimize=ReleaseSafe",
             "zig build -Doptimize=ReleaseSafe",
+            "check_remedy_core_isa.py",
         ),
     }
     for job, commands in expected.items():
