@@ -68,8 +68,10 @@ jobs:
           test -f zig-out/lib/libremedy_core.so
           echo "REMEDY_NATIVE_CORE_LIB=${PWD}/zig-out/lib/libremedy_core.so" >> "$GITHUB_ENV"
 
+      # native-core has no uv; system Python is enough for this stdlib script.
       - name: Refuse host-ISA bake in remedy_core (SHA-NI)
-        run: uv run python scripts/check_remedy_core_isa.py
+        shell: bash
+        run: python3 scripts/check_remedy_core_isa.py || python scripts/check_remedy_core_isa.py
 
       - name: Test
         env:
@@ -117,8 +119,10 @@ jobs:
           $lib = (Resolve-Path zig-out/bin/remedy_core.dll).Path
           "REMEDY_NATIVE_CORE_LIB=$lib" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      # native-core has no uv; system Python is enough for this stdlib script.
       - name: Refuse host-ISA bake in remedy_core (SHA-NI)
-        run: uv run python scripts/check_remedy_core_isa.py
+        shell: bash
+        run: python3 scripts/check_remedy_core_isa.py || python scripts/check_remedy_core_isa.py
 
       - name: Full Windows test suite
         run: uv run pytest -q --tb=short
@@ -280,5 +284,7 @@ jobs:
         run: zig build -Doptimize=ReleaseSafe
         working-directory: native/zig
 
+      # native-core has no uv; system Python is enough for this stdlib script.
       - name: Refuse host-ISA bake in remedy_core (SHA-NI)
-        run: uv run python scripts/check_remedy_core_isa.py
+        shell: bash
+        run: python3 scripts/check_remedy_core_isa.py || python scripts/check_remedy_core_isa.py
