@@ -23,6 +23,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # Lang oracle (.ts/.tsx/.jsx) needs a working node for `tsc` shebangs.
+      # Runner images can expose a broken tsc shim; pin node explicitly.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
@@ -53,8 +59,8 @@ jobs:
         run: bash scripts/ci_install_linux_zig_host_deps.sh
 
       # Library-backed tests must execute, not skip: build the Zig core and
-      # point the loader at it. Linux host functions need DISPLAY for live
-      # ops, but loading and the ABI check run for real.
+      # point the loader at it. Pytest itself is headless (no DISPLAY) — Zig/Python
+      # a11y paths must fail closed rather than abort the process.
       - name: Build native core (Zig)
         working-directory: native/zig
         run: |
@@ -63,6 +69,10 @@ jobs:
           echo "REMEDY_NATIVE_CORE_LIB=${PWD}/zig-out/lib/libremedy_core.so" >> "$GITHUB_ENV"
 
       - name: Test
+        env:
+          # Match a headless GitHub runner even if a future image sets a display.
+          DISPLAY: ""
+          WAYLAND_DISPLAY: ""
         run: uv run pytest -q --tb=short
 
       - name: Build Python distribution
@@ -78,6 +88,10 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:

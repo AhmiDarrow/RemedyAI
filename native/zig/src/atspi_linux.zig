@@ -175,13 +175,17 @@ fn walk(gpa: std.mem.Allocator, root: *AtspiAccessible, limit: usize) Error![]Ca
     return out.toOwnedSlice(gpa);
 }
 
+fn envNonEmpty(name: [*:0]const u8) bool {
+    // Empty string counts as absent — CI may set DISPLAY="" to force headless.
+    const value = std.c.getenv(name) orelse return false;
+    return value[0] != 0;
+}
+
 fn hasGraphicalSession() bool {
     // GitHub Actions / headless CI has no session bus. Calling atspi_init there
     // can abort the whole process (pytest exit 133). Fail closed to "[]".
     // Zig 0.16: getenv lives on std.c (not std.posix).
-    if (std.c.getenv("DISPLAY") != null) return true;
-    if (std.c.getenv("WAYLAND_DISPLAY") != null) return true;
-    return false;
+    return envNonEmpty("DISPLAY") or envNonEmpty("WAYLAND_DISPLAY");
 }
 
 pub fn snapshotJson(gpa: std.mem.Allocator, limit: u32) Error![]u8 {

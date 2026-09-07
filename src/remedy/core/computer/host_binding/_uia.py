@@ -141,7 +141,10 @@ def a11y_snapshot(limit: int = 40) -> list[dict[str, Any]]:
     import sys
 
     if sys.platform.startswith("linux"):
-        if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        # Empty string (CI forces DISPLAY="") counts as absent — match Zig.
+        display = (os.environ.get("DISPLAY") or "").strip()
+        wayland = (os.environ.get("WAYLAND_DISPLAY") or "").strip()
+        if not (display or wayland):
             return []
     try:
         library = _lib()
