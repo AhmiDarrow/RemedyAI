@@ -246,7 +246,13 @@ def test_tsc_shim_without_node_is_not_a_parser(tmp_path, monkeypatch):
 def test_toolchain_unavailable_error_is_classified() -> None:
     from remedy.core.build_lang_oracle import _is_toolchain_unavailable
 
-    assert _is_toolchain_unavailable("/usr/bin/env: 'node': No such file or directory\n")
+    for err in (
+        "/usr/bin/env: 'node': No such file or directory\n",
+        "env: node: No such file or directory\n",
+        "bash: /usr/bin/tsc: /usr/bin/env: bad interpreter: No such file or directory\n",
+        "node: not found\n",
+    ):
+        assert _is_toolchain_unavailable(err), err
     assert not _is_toolchain_unavailable("error TS1005: '}' expected.")
 
 

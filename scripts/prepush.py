@@ -406,9 +406,12 @@ def _wsl_pytest_command() -> str | None:
     # Drop checkout-local .so again so a parallel Windows zig-out write cannot
     # win the soname race against the /tmp install during pytest.
     checkout_so = _wsl_path(ROOT / "native" / "zig" / "zig-out" / "lib" / "libremedy_core.so")
+    # GitHub ubuntu-latest has no session display. WSLg often sets DISPLAY, which
+    # hides headless AT-SPI / dbus aborts that kill CI (pytest exit 133). Match CI.
     inner = (
         f"rm -f {checkout_so} && "
         f"cd {_wsl_path(ROOT)} && mkdir -p /tmp/remedy-prepush-home && "
+        "unset DISPLAY WAYLAND_DISPLAY && "
         "REMEDY_HOME=/tmp/remedy-prepush-home "
         "UV_PROJECT_ENVIRONMENT=/tmp/remedy-prepush-venv "
         f"{core}"

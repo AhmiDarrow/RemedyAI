@@ -253,13 +253,25 @@ def test_atspi_binding_returns_list_on_non_linux() -> None:
     import sys
 
     if sys.platform.startswith("linux") and not (
-        os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+        (os.environ.get("DISPLAY") or "").strip()
+        or (os.environ.get("WAYLAND_DISPLAY") or "").strip()
     ):
         got = H.a11y_snapshot(10)
         assert got == []
         return
     got = H.a11y_snapshot(10)
     assert isinstance(got, list)
+
+
+def test_atspi_binding_treats_empty_display_as_headless(monkeypatch) -> None:
+    """CI may set DISPLAY=\"\" — must not call into AT-SPI."""
+    import sys
+
+    if not sys.platform.startswith("linux"):
+        return
+    monkeypatch.setenv("DISPLAY", "")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "")
+    assert H.a11y_snapshot(10) == []
 
 
 

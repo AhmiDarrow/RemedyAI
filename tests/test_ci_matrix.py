@@ -183,6 +183,41 @@ def test_linux_ci_installs_zig_host_libs_before_building_remedy_core() -> None:
     assert linux_runtime.index(install) < linux_runtime.index(ZIG_BUILD)
 
 
+def test_ci_python_jobs_pin_node_for_lang_oracle() -> None:
+    """tsc shebangs need node; runner images alone have been a false-red source."""
+    jobs = _workflow_jobs("ci.yml")
+    for name in ("test", "test-windows"):
+        setup = _uses_step(jobs[name], "actions/setup-node")
+        assert setup["with"]["node-version"] == "20", f"{name} must pin Node 20"
+
+
+def test_ci_linux_pytest_is_explicitly_headless() -> None:
+    """AT-SPI must not see a display on GitHub; empty DISPLAY/WAYLAND in Test."""
+    jobs = _workflow_jobs("ci.yml")
+    test_steps = _steps(jobs["test"])
+    pytest_steps = [
+        s for s in test_steps if "pytest" in str(s.get("run", "")) and s.get("name") == "Test"
+    ]
+    assert pytest_steps, "ci.yml test job must have a Test pytest step"
+    env = pytest_steps[0].get("env") or {}
+    assert env.get("DISPLAY") == "", "Linux pytest must clear DISPLAY"
+    assert env.get("WAYLAND_DISPLAY") == "", "Linux pytest must clear WAYLAND_DISPLAY"
+
+
+def test_prepush_linux_pytest_unsets_display() -> None:
+    """WSLg DISPLAY must not hide headless CI aborts from the local gate."""
+    import sys
+
+    import scripts.prepush as prepush
+
+    source = (ROOT / "scripts" / "prepush.py").read_text(encoding="utf-8")
+    assert "unset DISPLAY WAYLAND_DISPLAY" in source
+    if sys.platform.startswith("win"):
+        cmd = prepush._wsl_pytest_command()
+        assert cmd, "Windows checkout must produce a WSL pytest command"
+        assert "unset DISPLAY WAYLAND_DISPLAY" in cmd
+
+
 def test_release_builds_runtime_and_core_without_python_sidecar() -> None:
     """Packaged Desktop is remedy-runtime + Zig core; no PyInstaller sidecar."""
     jobs = _workflow_jobs("desktop-release.yml")

@@ -123,7 +123,9 @@ def _is_tsc_project_noise(err: str) -> bool:
         or "TS7006" in e  # implicit any (no tsconfig / noImplicitAny)
         or "TS7026" in e  # JSX.IntrinsicElements missing
         or "TS7031" in e
+        or "TS17004" in e  # Cannot use JSX unless the '--jsx' flag is provided
         or "JSX.IntrinsicElements" in e
+        or "Cannot use JSX unless" in e
         or "implicitly has type 'any'" in e
         or "implicitly has an 'any' type" in e
     )
@@ -139,10 +141,15 @@ def _is_toolchain_unavailable(err: str) -> bool:
     return (
         "'node': no such file" in e
         or '"node": no such file' in e
+        or "node: no such file" in e
+        or "env: node: no such file" in e
         or "node: not found" in e
         or "cannot find node" in e
         or "unable to locate node" in e
-        or "enoent" in e and "node" in e
+        or "bad interpreter" in e
+        or "exec format error" in e
+        or ("enoent" in e and "node" in e)
+        or ("not found" in e and "node" in e and "tsc" not in e)
     )
 
 
