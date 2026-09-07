@@ -4,6 +4,19 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.62.1] - 2026-09-07
+
+### Fixed - Windows in-app update install step
+
+- **Install script always gets a Job-safe host.** `schedule_update_install_script`
+  no longer returns on the first PowerShell spawn Ok. Under Tauri's Job Object
+  that child can die before writing BOOT, so the UI showed "Could not start the
+  install step after download" even though the signed installer was already in
+  `%TEMP%`. Powershell, WScript, and `schtasks` are armed together; if BOOT is
+  still missing the hosts are re-armed once before failing.
+- **Updater URLs normalize `Remedy Desktop_` → `Remedy.Desktop_`.** Matches the
+  GitHub asset naming softprops already publishes.
+
 ## [0.62.0] - 2026-09-07
 
 ### Build engine

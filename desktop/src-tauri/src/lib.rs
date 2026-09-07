@@ -3515,14 +3515,18 @@ fn updater_owns_relaunch_flag_path() -> PathBuf {
 
 /// Schedule the post-exit install script so it survives Tauri's Job Object.
 ///
-/// Failure mode (0.14.4→0.14.5): `powershell -File` was spawned with DETACHED
-/// flags but still died with the parent when BREAKAWAY was refused — download
-/// finished, status stuck at "closing", install never ran (no log lines).
+/// Failure mode (0.14.4→0.14.5 and again on 0.61→0.62): `powershell -File`
+/// spawn returned Ok but the child died with the parent Job before writing
+/// the BOOT log line — download finished, UI showed "Could not start the
+/// install step", install never ran.
 ///
-/// Strategy (first success wins; all are silent / no black CMD):
-/// 1. `powershell.exe` + CREATE_BREAKAWAY_FROM_JOB
+/// Strategy (arm **all** hosts; spawn Ok is not proof of life):
+/// 1. `powershell.exe` + CREATE_BREAKAWAY_FROM_JOB (then basic flags)
 /// 2. `wscript.exe` + tiny .vbs `WScript.Shell.Run` (often outside the job)
-/// 3. One-shot `schtasks` 15s in the future (always outlives the app)
+/// 3. One-shot `schtasks` /Run immediately (always outlives the app)
+///
+/// Callers must still wait for the BOOT line in `RemedyDesktop-Update.log`
+/// before exiting the UI process.
 #[cfg(target_os = "windows")]
 fn schedule_update_install_script(ps1_path: &str) -> Result<(), String> {
     const DETACHED_PROCESS: u32 = 0x00000008;
@@ -3533,6 +3537,7 @@ fn schedule_update_install_script(ps1_path: &str) -> Result<(), String> {
     let flags_basic = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW;
 
     let mut errors: Vec<String> = Vec::new();
+    let mut armed = 0u32;
 
     // --- 1) Direct PowerShell with job breakaway ---
     let try_ps = |flags: u32| -> Result<(), String> {
@@ -3554,17 +3559,15 @@ fn schedule_update_install_script(ps1_path: &str) -> Result<(), String> {
             .map(|_| ())
             .map_err(|e| e.to_string())
     };
-    if try_ps(flags_breakaway)
-        .or_else(|e1| {
-            log::warn!("update schedule: breakaway powershell failed: {e1}");
-            try_ps(flags_basic)
-        })
-        .is_ok()
-    {
-        log::info!("update schedule: powershell spawn ok");
-        return Ok(());
-    } else {
-        errors.push("powershell spawn failed".into());
+    match try_ps(flags_breakaway).or_else(|e1| {
+        log::warn!("update schedule: breakaway powershell failed: {e1}");
+        try_ps(flags_basic)
+    }) {
+        Ok(()) => {
+            log::info!("update schedule: powershell spawn ok (not yet proven alive)");
+            armed += 1;
+        }
+        Err(e) => errors.push(format!("powershell spawn failed: {e}")),
     }
 
     // --- 2) WScript.Shell.Run via temp .vbs (hidden, often outlives Job) ---
@@ -3599,8 +3602,8 @@ fn schedule_update_install_script(ps1_path: &str) -> Result<(), String> {
             })
             .is_ok()
         {
-            log::info!("update schedule: wscript launch ok");
-            return Ok(());
+            log::info!("update schedule: wscript launch ok (not yet proven alive)");
+            armed += 1;
         } else {
             errors.push("wscript spawn failed".into());
         }
@@ -3609,13 +3612,16 @@ fn schedule_update_install_script(ps1_path: &str) -> Result<(), String> {
     }
 
     // --- 3) One-shot scheduled task — always outside the app Job ---
+    // Always arm this path even when powershell/wscript spawn returned Ok:
+    // spawn success under a Job Object is not proof the script will live long
+    // enough to write BOOT.
     let task = format!("RemedyDesktopUpdate_{}", std::process::id());
     let st = {
         let out = Command::new("powershell.exe")
             .args([
                 "-NoProfile",
                 "-Command",
-                "(Get-Date).AddSeconds(25).ToString('HH:mm')",
+                "(Get-Date).AddSeconds(15).ToString('HH:mm')",
             ])
             .creation_flags(CREATE_NO_WINDOW)
             .output();
@@ -3673,6 +3679,7 @@ fn schedule_update_install_script(ps1_path: &str) -> Result<(), String> {
             .stderr(Stdio::null())
             .status();
         log::info!("update schedule: schtasks {task} created and run (ST={st})");
+        armed += 1;
         let cleanup = format!("Start-Sleep -Seconds 240; schtasks /Delete /TN \"{task}\" /F");
         let _ = Command::new("powershell.exe")
             .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &cleanup])
@@ -3681,13 +3688,17 @@ fn schedule_update_install_script(ps1_path: &str) -> Result<(), String> {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn();
-        return Ok(());
     } else {
         errors.push("schtasks create/run failed".into());
         log::warn!("update schedule: schtasks create failed");
     }
 
-    Err(errors.join(" | "))
+    if armed > 0 {
+        log::info!("update schedule: armed {armed} host(s); waiting for BOOT proof");
+        Ok(())
+    } else {
+        Err(errors.join(" | "))
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -3910,8 +3921,11 @@ fn fetch_signed_release_asset() -> Result<(String /*url*/, String /*sig*/), Stri
             "latest.json asset URL is not a trusted GitHub release host: {url}"
         ));
     }
-    // Normalize legacy underscore product segment if a bad publish ever lands.
-    let url = url.replace("Remedy_Desktop_", "Remedy.Desktop_");
+    // Canonical GitHub asset names use dots for the product-name spaces Tauri
+    // emits (`Remedy Desktop_` → `Remedy.Desktop_`). Also heal underscore typos.
+    let url = url
+        .replace("Remedy_Desktop_", "Remedy.Desktop_")
+        .replace("Remedy Desktop_", "Remedy.Desktop_");
     if sig.is_empty() {
         return Err(
             "Release is unsigned (empty signature in latest.json). \
@@ -4027,7 +4041,8 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
             let mut download_url = signed_url;
             let client_norm = client_url
                 .trim()
-                .replace("Remedy_Desktop_", "Remedy.Desktop_");
+                .replace("Remedy_Desktop_", "Remedy.Desktop_")
+                .replace("Remedy Desktop_", "Remedy.Desktop_");
             if !client_norm.is_empty() && client_norm != download_url {
                 log::warn!(
                     "Update URL from UI differed from signed latest.json; using signed asset.\n  ui: {client_norm}\n  signed: {download_url}"
@@ -4402,31 +4417,43 @@ try {
                 // Do not exit until the install script proves it started (BOOT line).
                 // Prevents "download done, app closes, nothing happens."
                 let log_full = env::temp_dir().join("RemedyDesktop-Update.log");
+                let installer_name = temp
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let boot_alive = |txt: &str| -> bool {
+                    (txt.contains("BOOT pid=") || txt.contains("Update script started"))
+                        && (installer_name.is_empty()
+                            || txt.contains(&installer_name)
+                            || txt.contains("BOOT pid="))
+                };
                 let mut booted = false;
                 for i in 0..40 {
                     thread::sleep(Duration::from_millis(150));
                     if let Ok(txt) = std::fs::read_to_string(&log_full) {
-                        // Accept either new BOOT marker or classic start line.
-                        if txt.contains("BOOT pid=") || txt.contains("Update script started") {
-                            // Prefer a line from this run (installer path unique per pid).
-                            if txt.contains(&temp.file_name().unwrap_or_default().to_string_lossy().to_string())
-                                || txt.contains("BOOT pid=")
-                            {
-                                booted = true;
-                                log::info!("Install script alive after {}ms", (i + 1) * 150);
-                                break;
-                            }
+                        if boot_alive(&txt) {
+                            booted = true;
+                            log::info!("Install script alive after {}ms", (i + 1) * 150);
+                            break;
                         }
                     }
                 }
                 if !booted {
-                    log::warn!("Install script not alive yet; waiting longer (not re-scheduling)");
-                    for i in 0..30 {
-                        thread::sleep(Duration::from_millis(200));
+                    // Spawn Ok under a Job is not life. Re-arm all hosts once more
+                    // (schtasks especially) before the final wait.
+                    log::warn!(
+                        "Install script not alive yet; re-arming schedule hosts and waiting longer"
+                    );
+                    let _ = schedule_update_install_script(&ps1_path);
+                    for i in 0..40 {
+                        thread::sleep(Duration::from_millis(250));
                         if let Ok(txt) = std::fs::read_to_string(&log_full) {
-                            if txt.contains("BOOT pid=") || txt.contains("Update script started") {
+                            if boot_alive(&txt) {
                                 booted = true;
-                                log::info!("Install script alive on retry after {}ms", (i + 1) * 200);
+                                log::info!(
+                                    "Install script alive on re-arm after {}ms",
+                                    (i + 1) * 250
+                                );
                                 break;
                             }
                         }
