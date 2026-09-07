@@ -4,6 +4,41 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-09-07
+
+### Build engine
+
+- Soft epochs with progress-extends; absolute defaults 1M steps / 10M tools so
+  mid-mission work is not cut by tool-call limits.
+- Soft epoch default 64; lean outcome ledger; no orphan `role=tool`.
+- Per-round caps (tool 24k / assistant 2k / args 12k) with length auto-continue.
+- No 120s LLM stream wall; `shell.exec` default timeout is 10 minutes.
+- Memory Harness at soft epochs via RMDY `prompt.slim_epoch` (prune/offload/brief).
+- Unfinished-work re-arm via RMDY `prompt.should_continue` (mission/build/agency).
+- Local/RMB fit in Go `FitLocalRequest` before chat completions.
+- Coding tool pack mid-build (and on local endpoints) to cut schema tax.
+
+### Claimidx
+
+- Pin managed Claimidx to **0.7.2** (PyPI wheel + sha256 from claimidx/claimidx).
+- Claimidx submits by default; Settings `claimidx_public_ledger` defaults **on**.
+- Missing ledger setting is treated as on; only an explicit owner opt-out writes
+  `CLAIMIDX_SHARE=0` / `share: false`.
+
+### CI and prepush
+
+- mypy `platform = "linux"` so Windows local matches Linux CI stubs.
+- Prepush linux lane runs WSL `go test ./...` (not only Windows go + WSL pytest).
+- Linux-only Go traps fixed: host-native inject cwd paths; WindowsApps stub slash
+  normalize.
+- Linux CI/release jobs install X11/XTest/AT-SPI libs before `zig build`.
+- Linux pytest clears DISPLAY/WAYLAND; WSL prepush unsets them too (CI-faithful
+  headless).
+- Pin Node 20 on CI Python jobs; tsc without node skips instead of false-red.
+- Lang oracle inherits PATH (no empty-env Zig spawn false-skip on broken JSX);
+  WSL PATH scrub strips `node_modules/.bin` without nested quotes under cmd.exe.
+- Zig/Python treat empty DISPLAY as headless (no AT-SPI abort).
+
 ## [0.61.0] - 2026-09-05
 
 ### Agency and Tool ABI
