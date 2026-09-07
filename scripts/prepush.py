@@ -408,10 +408,13 @@ def _wsl_pytest_command() -> str | None:
     checkout_so = _wsl_path(ROOT / "native" / "zig" / "zig-out" / "lib" / "libremedy_core.so")
     # GitHub ubuntu-latest has no session display. WSLg often sets DISPLAY, which
     # hides headless AT-SPI / dbus aborts that kill CI (pytest exit 133). Match CI.
+    # Strip */node_modules/.bin from PATH so a Windows-built esbuild on /mnt/c
+    # cannot masquerade as the ubuntu-latest toolchain.
     inner = (
         f"rm -f {checkout_so} && "
         f"cd {_wsl_path(ROOT)} && mkdir -p /tmp/remedy-prepush-home && "
         "unset DISPLAY WAYLAND_DISPLAY && "
+        'export PATH="$(printf \"%s\" \"$PATH\" | tr \":\" \"\\n\" | grep -v \"/node_modules/.bin\" | paste -sd: -)" && '
         "REMEDY_HOME=/tmp/remedy-prepush-home "
         "UV_PROJECT_ENVIRONMENT=/tmp/remedy-prepush-venv "
         f"{core}"

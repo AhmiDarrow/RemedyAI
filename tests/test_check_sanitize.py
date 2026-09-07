@@ -21,15 +21,20 @@ def _load():
 
 
 def test_sanitize_script_exits_clean_on_current_tree() -> None:
+    # Windows CI can emit non-UTF8 bytes (e.g. em dash 0x97) on stdout; decode
+    # lossily so a clean exit is not masked by a reader-thread UnicodeError.
     proc = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "check_sanitize.py")],
         cwd=ROOT,
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="replace",
     )
-    assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "sanitize: OK" in proc.stdout
+    out = proc.stdout or ""
+    err = proc.stderr or ""
+    assert proc.returncode == 0, out + err
+    assert "sanitize: OK" in out
 
 
 def test_public_docs_allowlist_matches_gitignore() -> None:
