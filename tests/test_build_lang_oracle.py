@@ -256,6 +256,21 @@ def test_toolchain_unavailable_error_is_classified() -> None:
     assert not _is_toolchain_unavailable("error TS1005: '}' expected.")
 
 
+def test_tsc_syntax_error_wins_over_project_noise() -> None:
+    """CI tsc often emits implicit-any AND '}' expected — must stay red."""
+    from remedy.core.build_lang_oracle import _is_tsc_project_noise, _is_tsc_syntax_error
+
+    mixed = (
+        "error TS7006: Parameter 'a' implicitly has an 'any' type.\n"
+        "error TS1005: '}' expected.\n"
+    )
+    assert _is_tsc_syntax_error(mixed)
+    assert not _is_tsc_project_noise(mixed)
+    assert _is_tsc_project_noise(
+        "error TS7006: Parameter 'a' implicitly has an 'any' type.\n"
+    )
+
+
 @pytest.mark.parametrize("suffix", ["jsx", "tsx"])
 def test_an_apostrophe_in_jsx_text_is_not_an_unterminated_string(tmp_path, suffix):
     """``<p>Don't click {x}</p>`` is prose, not a string literal. The brace

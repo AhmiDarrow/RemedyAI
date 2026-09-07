@@ -204,18 +204,20 @@ def test_ci_linux_pytest_is_explicitly_headless() -> None:
     assert env.get("WAYLAND_DISPLAY") == "", "Linux pytest must clear WAYLAND_DISPLAY"
 
 
-def test_prepush_linux_pytest_unsets_display() -> None:
-    """WSLg DISPLAY must not hide headless CI aborts from the local gate."""
+def test_prepush_linux_pytest_matches_headless_ci_env() -> None:
+    """WSLg DISPLAY and Windows node_modules bins must not hide CI paths."""
     import sys
 
     import scripts.prepush as prepush
 
     source = (ROOT / "scripts" / "prepush.py").read_text(encoding="utf-8")
     assert "unset DISPLAY WAYLAND_DISPLAY" in source
+    assert "node_modules/.bin" in source
     if sys.platform.startswith("win"):
         cmd = prepush._wsl_pytest_command()
         assert cmd, "Windows checkout must produce a WSL pytest command"
         assert "unset DISPLAY WAYLAND_DISPLAY" in cmd
+        assert "node_modules/.bin" in cmd
 
 
 def test_release_builds_runtime_and_core_without_python_sidecar() -> None:

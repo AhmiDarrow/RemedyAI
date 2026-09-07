@@ -51,15 +51,25 @@ def _which(name: str) -> str | None:
 
 
 def _run(cmd: list[str], *, cwd: Path | None = None, timeout_s: float = 20.0) -> tuple[bool, str]:
-    try:
-        from remedy.execution.process import run_hidden
+    """Run a toolchain binary with the real process environment.
 
-        proc = run_hidden(cmd,
+    Do not route through Zig ``run_hidden``: authorized spawn often gets an
+    empty env, so ``tsc``/``esbuild`` shebangs fail with ``node: not found``
+    even when node is on PATH for the pytest process — which then false-skips
+    every JSX file while ``_jsx_checker()`` still looks present.
+    """
+    try:
+        proc = subprocess.run(
+            cmd,
             cwd=str(cwd) if cwd else None,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout_s,
-            )
+            env=os.environ.copy(),
+            check=False,
+        )
         out = ((proc.stdout or "") + (proc.stderr or ""))[-800:]
         return proc.returncode == 0, out
     except (subprocess.TimeoutExpired, OSError) as e:
@@ -113,9 +123,34 @@ def brace_balance(text: str) -> tuple[bool, str]:
     return True, ""
 
 
-def _is_tsc_project_noise(err: str) -> bool:
-    """tsc on a lone file without a tsconfig errors on imports/types, not syntax."""
+def _is_tsc_syntax_error(err: str) -> bool:
+    """Real parse/syntax failures must never be treated as skippable project noise."""
     e = err or ""
+    return (
+        "TS1005" in e  # '}' expected / ')' expected
+        or "TS1003" in e
+        or "TS1009" in e
+        or "TS1109" in e
+        or "TS1128" in e  # Declaration or statement expected
+        or "TS1131" in e
+        or "TS1160" in e  # Unterminated template literal
+        or "TS17008" in e  # JSX element has no corresponding closing tag
+        or "'}' expected" in e
+        or "')' expected" in e
+        or "';minated" in e.lower()
+        or "Unexpected token" in e
+    )
+
+
+def _is_tsc_project_noise(err: str) -> bool:
+    """tsc on a lone file without a tsconfig errors on imports/types, not syntax.
+
+    If the stderr also contains a real syntax code, this is NOT noise — a broken
+    file that happens to mention implicit-any must still come back red.
+    """
+    e = err or ""
+    if _is_tsc_syntax_error(e):
+        return False
     return (
         "Cannot find module" in e
         or "TS2307" in e
@@ -136,6 +171,8 @@ def _is_toolchain_unavailable(err: str) -> bool:
 
     GitHub Linux pytest images can have a ``tsc`` shim on PATH without ``node``.
     Treating that as a syntax failure false-reds every .ts/.tsx/.jsx file.
+    npm esbuild wrappers can also fail with a platform/install error that is
+    not a verdict on the source file.
     """
     e = (err or "").lower()
     return (
@@ -148,6 +185,9 @@ def _is_toolchain_unavailable(err: str) -> bool:
         or "unable to locate node" in e
         or "bad interpreter" in e
         or "exec format error" in e
+        or "generatebinpath" in e
+        or "installed esbuild for another platform" in e
+        or "you installed esbuild" in e
         or ("enoent" in e and "node" in e)
         or ("not found" in e and "node" in e and "tsc" not in e)
     )
@@ -163,14 +203,27 @@ def _tsc_usable() -> str | None:
     return tsc
 
 
+def _esbuild_usable() -> str | None:
+    """esbuild npm wrappers still need node; a native binary does not."""
+    path = _which("esbuild")
+    if path is None:
+        return None
+    # npm's esbuild bin is a JS/shell wrapper that execs node.
+    lower = path.replace("\\", "/").lower()
+    if lower.endswith(".cmd") or "/node_modules/" in lower or "\\node_modules\\" in path:
+        if _which("node") is None:
+            return None
+    return path
+
+
 def _jsx_checker() -> str | None:
     """A parser that actually understands JSX, or None.
 
     esbuild parses .jsx/.tsx natively and is the cheapest; tsc with
     ``--jsx preserve`` is the fallback. Node is deliberately not a JSX
-    checker itself — but tsc still needs node on PATH to run.
+    checker itself — but both npm wrappers still need node on PATH.
     """
-    return _which("esbuild") or _tsc_usable()
+    return _esbuild_usable() or _tsc_usable()
 
 def _jsx_command(checker: str, p: Path) -> list[str]:
     if Path(checker).stem.lower() == "esbuild":
@@ -326,20 +379,29 @@ def check_lang_syntax(path: str | Path) -> dict[str, Any]:
         # error that sent the model rewriting them. Only a real JSX-aware
         # parser gets a verdict; without one the file is skipped, the same
         # way an extension without an oracle is skipped.
-        checker = _jsx_checker()
-        if checker is None:
+        #
+        # Try esbuild then tsc. A wrapper that cannot run (wrong platform,
+        # missing node) is not a verdict — fall through to the next tool.
+        candidates = [c for c in (_esbuild_usable(), _tsc_usable()) if c]
+        if not candidates:
             out["engine"] = "skip (no jsx parser)"
             return out
-        ok, err = _run(_jsx_command(checker, p))
-        if not ok and _is_toolchain_unavailable(err):
-            out["engine"] = "skip (jsx toolchain unavailable)"
+        last_unavail = ""
+        for checker in candidates:
+            ok, err = _run(_jsx_command(checker, p))
+            if not ok and _is_toolchain_unavailable(err):
+                last_unavail = err
+                continue
+            if not ok and _is_tsc_project_noise(err):
+                out["engine"] = "skip (tsc import-noise)"
+                return out
+            out["ok"] = ok
+            out["error"] = "" if ok else err
+            out["engine"] = f"{Path(checker).stem} (jsx)"
             return out
-        if not ok and _is_tsc_project_noise(err):
-            out["engine"] = "skip (tsc import-noise)"
-            return out
-        out["ok"] = ok
-        out["error"] = "" if ok else err
-        out["engine"] = f"{Path(checker).stem} (jsx)"
+        out["engine"] = "skip (jsx toolchain unavailable)"
+        if last_unavail:
+            out["error"] = ""
         return out
 
     if suffix in {".js", ".mjs", ".cjs"}:
