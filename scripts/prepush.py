@@ -410,11 +410,20 @@ def _wsl_pytest_command() -> str | None:
     # hides headless AT-SPI / dbus aborts that kill CI (pytest exit 133). Match CI.
     # Strip */node_modules/.bin from PATH so a Windows-built esbuild on /mnt/c
     # cannot masquerade as the ubuntu-latest toolchain.
+    #
+    # No double quotes inside ``inner``: the outer form is ``bash -lc "..."`` under
+    # Windows ``cmd.exe`` (``shell=True``). Nested ``"`` closes early and runs
+    # ``tr`` / ``grep`` as cmd builtins ("'tr' is not recognized").
+    path_scrub = (
+        "IFS=:; _rp=; for _d in $PATH; do "
+        "case $_d in */node_modules/.bin) ;; *) _rp=${_rp:+$_rp:}$_d;; esac; "
+        "done; export PATH=$_rp; unset IFS _rp _d"
+    )
     inner = (
         f"rm -f {checkout_so} && "
         f"cd {_wsl_path(ROOT)} && mkdir -p /tmp/remedy-prepush-home && "
         "unset DISPLAY WAYLAND_DISPLAY && "
-        'export PATH="$(printf \"%s\" \"$PATH\" | tr \":\" \"\\n\" | grep -v \"/node_modules/.bin\" | paste -sd: -)" && '
+        f"{path_scrub} && "
         "REMEDY_HOME=/tmp/remedy-prepush-home "
         "UV_PROJECT_ENVIRONMENT=/tmp/remedy-prepush-venv "
         f"{core}"
