@@ -2,7 +2,7 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.62.0**. Local API and Desktop packaging run on the
+Current release: **v0.62.1**. Local API and Desktop packaging run on the
 native **Go + Zig** foundation. Installed apps update automatically. Partner
 line still starts at 0.31.0.
 
@@ -42,12 +42,22 @@ is no longer the product HTTP server or the packaged Desktop sidecar.
 | **Cut over** | [0.60.0](#0600---native-runtime-cutover) | Desktop and `remedy serve` launch **Go only**; FastAPI/uvicorn and the PyInstaller sidecar are gone |
 | **Agency** | [0.61.0](#0610---agency-on-the-native-foundation) | Browser, approvals, mail/calendar/settings, and messenger health finish on that stack |
 | **Stay on mission** | [0.62.0](#0620---build-engine-and-claimidx-defaults) | Long builds keep going; Claimidx submits by default; local CI matches GitHub |
+| **Updater** | [0.62.1](#0621---windows-in-app-update-install) | Windows in-app update finishes the install step after download |
 
 Read newest first below; older partner notes follow after 0.48.
 
 ## Contents
 
-- [0.62.0](#0620---build-engine-and-claimidx-defaults) · [0.61.0](#0610---agency-on-the-native-foundation) · [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-prove-the-foundation) · [0.48.0](#0480---land-the-gozig-foundation) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+- [0.62.1](#0621---windows-in-app-update-install) · [0.62.0](#0620---build-engine-and-claimidx-defaults) · [0.61.0](#0610---agency-on-the-native-foundation) · [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-prove-the-foundation) · [0.48.0](#0480---land-the-gozig-foundation) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+
+## 0.62.1 - Windows in-app update install
+
+**In-app update finishes after download.** On 0.61→0.62 the signed installer
+landed in `%TEMP%` but the install script never wrote BOOT under Tauri's Job
+Object, so the UI stopped with "Could not start the install step after
+download." The updater now arms PowerShell, WScript, and a scheduled task
+together, re-arms if BOOT is still missing, and normalizes `Remedy Desktop_`
+asset names to the dotted GitHub form.
 
 ## 0.62.0 - Build engine and Claimidx defaults
 
