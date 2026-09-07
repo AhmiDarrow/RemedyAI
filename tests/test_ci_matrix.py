@@ -216,8 +216,15 @@ def test_prepush_linux_pytest_matches_headless_ci_env() -> None:
     if sys.platform.startswith("win"):
         cmd = prepush._wsl_pytest_command()
         assert cmd, "Windows checkout must produce a WSL pytest command"
-        assert "unset DISPLAY WAYLAND_DISPLAY" in cmd
-        assert "node_modules/.bin" in cmd
+        assert cmd.startswith('wsl -e bash -lc "') and cmd.endswith('"')
+        inner = cmd[len('wsl -e bash -lc "') : -1]
+        assert '"' not in inner, (
+            "nested quotes inside bash -lc break cmd.exe shell=True "
+            "(tr/grep get run as Windows commands)"
+        )
+        assert "unset DISPLAY WAYLAND_DISPLAY" in inner
+        assert "node_modules/.bin" in inner
+        assert "for _d in $PATH" in inner
 
 
 def test_release_builds_runtime_and_core_without_python_sidecar() -> None:
