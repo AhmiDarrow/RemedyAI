@@ -538,9 +538,10 @@ func (r *CognitionTurnRunner) runEngine(
 			if req.ChatMode {
 				return false, ""
 			}
-			// Local heuristic when RMDY unavailable.
+			// Local heuristic when RMDY unavailable: only re-arm on narrated
+			// tool promises, never on tool_count alone (explore thrash).
 			if r.promptAssemble == nil {
-				return toolCount > 0, ""
+				return false, ""
 			}
 			input := map[string]any{
 				"goal":         turn.Goal,
@@ -554,7 +555,7 @@ func (r *CognitionTurnRunner) runEngine(
 			}
 			out, err := r.rmdyCall(gateCtx, "prompt.should_continue", input)
 			if err != nil || out == nil {
-				return toolCount > 0, ""
+				return false, ""
 			}
 			cont, _ := out["continue"].(bool)
 			nudge, _ := out["nudge"].(string)

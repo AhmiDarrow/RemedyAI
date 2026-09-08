@@ -2452,21 +2452,29 @@ def turn_has_unfinished_work(
         from remedy.core.mission import MissionStore
 
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
-        mid = str(
-            session_id
-            or getattr(runtime, "_session_id", None)
-            or ""
-        ) or None
-        m = MissionStore(home).latest(mid)
-        if m is not None and m.status == "active":
-            if not m.steps:
-                return True
-            if any(s.status in ("pending", "active", "failed") for s in m.steps):
-                return True
-            if m.verify_command and m.verify_status != "passed":
-                return True
-    # Mid-turn tool work without a deliberate completion
-    return tool_steps_this_turn > 0
+        # Never fall through to the live owner home when the runtime has no
+        # home_dir — that made unit tests and headless fixtures inherit a
+        # real active mission and look "unfinished" forever.
+        if home:
+            mid = str(
+                session_id
+                or getattr(runtime, "_session_id", None)
+                or ""
+            ) or None
+            m = MissionStore(home).latest(mid)
+            if m is not None and m.status == "active":
+                if not m.steps:
+                    return True
+                if any(s.status in ("pending", "active", "failed") for s in m.steps):
+                    return True
+                if m.verify_command and m.verify_status != "passed":
+                    return True
+    # Do NOT treat "any tools ran this turn" as unfinished by itself.
+    # That re-armed forever on explore/review thrash (search → empty → widen)
+    # after the native Go cutover. Productive debt is covered by mission /
+    # build-engine checks above; agency narration is ContinueGate's job.
+    _ = tool_steps_this_turn
+    return False
 
 
 def is_productive_tool_batch(tool_messages: list[dict[str, Any]]) -> bool:

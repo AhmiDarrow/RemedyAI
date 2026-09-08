@@ -150,7 +150,8 @@ func TestEngineStopsRepeatedNoProgressAndToolCeilings(t *testing.T) {
 
 func TestEngineSoftEpochContinuesPastOldToolCap(t *testing.T) {
 	// Old default MaxToolCalls=128 would stop mid-build. Soft epochs + high
-	// absolute ceiling must keep going well past that.
+	// absolute ceiling must keep going well past that — but only on productive
+	// mutate/verify tools (explore thrash must not extend forever).
 	var rounds atomic.Int32
 	engine := Engine{
 		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
@@ -159,7 +160,7 @@ func TestEngineSoftEpochContinuesPastOldToolCap(t *testing.T) {
 				return events(ModelEvent{Text: "finished", Done: true}), nil
 			}
 			return events(ModelEvent{ToolCall: &ToolCall{
-				ID: fmt.Sprintf("%d", n), Name: "workspace.read",
+				ID: fmt.Sprintf("%d", n), Name: "workspace.edit",
 				Input: []byte(fmt.Sprintf(`{"path":"f%d"}`, n)),
 			}}), nil
 		}),
@@ -173,6 +174,7 @@ func TestEngineSoftEpochContinuesPastOldToolCap(t *testing.T) {
 			SoftEpochSteps:    50,
 			MaxRepeatedBatch:  100,
 			RepeatNudgeBudget: -1,
+			MaxExploreStreak:  100, // not under test here
 		},
 	}
 	var epochs atomic.Int32
@@ -243,6 +245,7 @@ func TestEngineProgressExtendsStepCeiling(t *testing.T) {
 			SoftEpochSteps:    20,
 			MaxRepeatedBatch:  200,
 			RepeatNudgeBudget: -1,
+			MaxExploreStreak:  100,
 		},
 	}
 	out := engine.Run(context.Background(), "long build")
@@ -251,6 +254,85 @@ func TestEngineProgressExtendsStepCeiling(t *testing.T) {
 	}
 	if rounds.Load() <= 40 {
 		t.Fatalf("expected >40 rounds via extension, got %d", rounds.Load())
+	}
+}
+
+func TestEngineExploreThrashNudgesThenStops(t *testing.T) {
+	var rounds atomic.Int32
+	engine := Engine{
+		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+			n := rounds.Add(1)
+			return events(ModelEvent{ToolCall: &ToolCall{
+				ID: fmt.Sprintf("%d", n), Name: "workspace.read",
+				Input: []byte(fmt.Sprintf(`{"path":"f%d"}`, n)),
+			}}), nil
+		}),
+		Tools: toolFunc(func(_ context.Context, c ToolCall) ToolResult {
+			return ToolResult{ID: c.ID, Name: c.Name, Output: []byte("empty")}
+		}),
+		Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+		Config: Config{
+			MaxIterations:     50,
+			MaxToolCalls:      50,
+			SoftEpochSteps:    -1,
+			MaxRepeatedBatch:  100,
+			RepeatNudgeBudget: -1,
+			MaxExploreStreak:  3,
+		},
+	}
+	out := engine.Run(context.Background(), "review the Tailscale connect stack")
+	if !errors.Is(out.Err, ErrNoProgress) {
+		t.Fatalf("explore thrash want ErrNoProgress, got %v after %d rounds text=%q", out.Err, rounds.Load(), out.Text)
+	}
+	if !strings.Contains(out.Text, "[DELIVER]") {
+		t.Fatalf("expected DELIVER nudge for review goal, text=%q", out.Text)
+	}
+}
+
+func TestEngineExploreDoesNotExtendToolCeiling(t *testing.T) {
+	var rounds atomic.Int32
+	engine := Engine{
+		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+			n := rounds.Add(1)
+			return events(ModelEvent{ToolCall: &ToolCall{
+				ID: fmt.Sprintf("%d", n), Name: "workspace.search",
+				Input: []byte(fmt.Sprintf(`{"q":"tailscale%d"}`, n)),
+			}}), nil
+		}),
+		Tools: toolFunc(func(_ context.Context, c ToolCall) ToolResult {
+			return ToolResult{ID: c.ID, Name: c.Name, Output: []byte("[]")}
+		}),
+		Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+		Config: Config{
+			MaxIterations:     20,
+			MaxToolCalls:      5,
+			SoftEpochSteps:    4,
+			MaxRepeatedBatch:  100,
+			RepeatNudgeBudget: -1,
+			MaxExploreStreak:  100, // disable thrash stop; test ceiling only
+		},
+	}
+	out := engine.Run(context.Background(), "build a feature")
+	if !errors.Is(out.Err, ErrToolCallLimit) {
+		t.Fatalf("explore-only must hit tool ceiling, got %v after %d", out.Err, rounds.Load())
+	}
+}
+
+func TestClassifyToolKinds(t *testing.T) {
+	if ClassifyTool("workspace.read") != ToolExplore {
+		t.Fatal("read")
+	}
+	if ClassifyTool("workspace.edit") != ToolMutate {
+		t.Fatal("edit")
+	}
+	if ClassifyTool("mission_verify") != ToolVerify {
+		t.Fatal("verify")
+	}
+	if !goalLooksLikeBuild("fix the connect crash") {
+		t.Fatal("build goal")
+	}
+	if goalLooksLikeBuild("what is Tailscale?") {
+		t.Fatal("question should not look like build")
 	}
 }
 
