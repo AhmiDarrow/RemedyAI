@@ -164,11 +164,12 @@ def test_unfinished_work_false_without_tools():
         )
         is True
     )
+    # Tools alone are not unfinished — that re-armed explore thrash forever.
     assert (
         turn_has_unfinished_work(
             _R(), tools_enabled=True, tool_steps_this_turn=2
         )
-        is True
+        is False
     )
 
 

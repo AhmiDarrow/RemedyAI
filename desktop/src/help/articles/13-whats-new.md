@@ -2,7 +2,7 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.62.2**. Local API and Desktop packaging run on the
+Current release: **v0.62.3**. Local API and Desktop packaging run on the
 native **Go + Zig** foundation. Installed apps update automatically. Partner
 line still starts at 0.31.0.
 
@@ -44,12 +44,21 @@ is no longer the product HTTP server or the packaged Desktop sidecar.
 | **Stay on mission** | [0.62.0](#0620---build-engine-and-claimidx-defaults) | Long builds keep going; Claimidx submits by default; local CI matches GitHub |
 | **Updater** | [0.62.1](#0621---windows-in-app-update-install) | Windows in-app update finishes the install step after download |
 | **Boot** | [0.62.2](#0622---portable-native-core) | Native core builds for every x86_64 PC (no SHA-NI crash on connect) |
+| **Build loop** | [0.62.3](#0623---coherent-builds) | Long builds stay endless when productive; explore thrash stops |
 
 Read newest first below; older partner notes follow after 0.48.
 
 ## Contents
 
-- [0.62.2](#0622---portable-native-core) · [0.62.1](#0621---windows-in-app-update-install) · [0.62.0](#0620---build-engine-and-claimidx-defaults) · [0.61.0](#0610---agency-on-the-native-foundation) · [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-prove-the-foundation) · [0.48.0](#0480---land-the-gozig-foundation) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+- [0.62.3](#0623---coherent-builds) · [0.62.2](#0622---portable-native-core) · [0.62.1](#0621---windows-in-app-update-install) · [0.62.0](#0620---build-engine-and-claimidx-defaults) · [0.61.0](#0610---agency-on-the-native-foundation) · [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-prove-the-foundation) · [0.48.0](#0480---land-the-gozig-foundation) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+
+## 0.62.3 - Coherent builds
+
+**Long builds keep going when they change the tree; incoherent search loops stop.**
+Soft-epoch runway now extends only on edit/verify work. Pure explore thrash
+gets one clear “implement or deliver” nudge, then stops — instead of widening
+the same empty sweep forever. Real builds can still run for as many tool rounds
+as the work needs.
 
 ## 0.62.2 - Portable native core
 

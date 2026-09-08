@@ -4,6 +4,18 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.62.3] - 2026-09-07
+
+### Fixed - coherent builds (not incoherent explore thrash)
+
+- **Explore thrash stops; productive builds still run endlessly.** Soft-epoch
+  runway extends only on mutate/verify tools. Consecutive explore-only batches
+  get a FORCE IMPLEMENT / DELIVER nudge, then stalemate (`ErrNoProgress`) —
+  so slight-variation searches cannot spin forever.
+- **`prompt.should_continue` / `turn_has_unfinished_work`** no longer re-arm
+  merely because tools already ran. That was the post-cutover review loop that
+  never converged. Mission/build debt and narrated tool promises still re-arm.
+
 ## [0.62.2] - 2026-09-07
 
 ### Fixed - Desktop stuck on "connecting to local server"

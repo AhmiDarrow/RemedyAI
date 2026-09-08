@@ -128,8 +128,13 @@ type Config struct {
 	// RepeatNudgeBudget allows identical tool batches this many times with a
 	// nudge before ErrNoProgress (default 2).
 	RepeatNudgeBudget int
-	ModelRetries      int
-	RetryBackoff      time.Duration
+	// MaxExploreStreak is consecutive explore-only batches before a phase nudge
+	// (default 4). A second explore-only streak after the nudge is ErrNoProgress.
+	// Productive mutate/verify batches reset the streak and may still extend
+	// ceilings forever (coherent endless builds).
+	MaxExploreStreak int
+	ModelRetries     int
+	RetryBackoff     time.Duration
 }
 
 func envInt(name string, def, lo, hi int) int {
@@ -196,10 +201,99 @@ func (c Config) normalized() Config {
 	} else if c.RepeatNudgeBudget == 0 {
 		c.RepeatNudgeBudget = 2
 	}
+	if c.MaxExploreStreak <= 0 {
+		c.MaxExploreStreak = envInt("REMEDY_REACT_MAX_EXPLORE_STREAK", 4, 2, 32)
+	}
 	if c.ModelRetries < 0 {
 		c.ModelRetries = 0
 	}
 	return c
+}
+
+// ToolKind classifies a tool for progress / thrash gating.
+type ToolKind uint8
+
+const (
+	ToolExplore ToolKind = iota
+	ToolMutate
+	ToolVerify
+)
+
+func ClassifyTool(name string) ToolKind {
+	n := strings.ToLower(strings.TrimSpace(name))
+	n = strings.ReplaceAll(n, "-", "_")
+	n = strings.ReplaceAll(n, ".", "_")
+	switch n {
+	case "workspace_edit", "workspace_write", "workspace_create", "workspace_delete",
+		"workspace_rename", "workspace_mkdir", "file_edit", "file_write", "file_delete",
+		"apply_patch", "str_replace", "search_replace", "write", "edit":
+		return ToolMutate
+	case "shell_exec", "bash_exec", "host_run", "job_run", "process_spawn",
+		"mission_verify", "build_drive", "pytest", "cargo_test":
+		return ToolVerify
+	case "workspace_read", "workspace_list", "workspace_search", "workspace_grep",
+		"file_read", "read", "grep", "glob", "list_dir", "search", "web_search",
+		"memory_search", "skill_search", "codebase_search":
+		return ToolExplore
+	default:
+		// Unknown tools are explore-safe: they must not silently extend endless builds.
+		if strings.Contains(n, "write") || strings.Contains(n, "edit") ||
+			strings.Contains(n, "delete") || strings.Contains(n, "patch") ||
+			strings.Contains(n, "create") {
+			return ToolMutate
+		}
+		if strings.Contains(n, "verify") || strings.Contains(n, "test") ||
+			strings.Contains(n, "shell") || strings.Contains(n, "exec") {
+			return ToolVerify
+		}
+		return ToolExplore
+	}
+}
+
+func batchHasProductive(calls []ToolCall) bool {
+	for _, c := range calls {
+		switch ClassifyTool(c.Name) {
+		case ToolMutate, ToolVerify:
+			return true
+		}
+	}
+	return false
+}
+
+func batchExploreOnly(calls []ToolCall) bool {
+	if len(calls) == 0 {
+		return false
+	}
+	for _, c := range calls {
+		if ClassifyTool(c.Name) != ToolExplore {
+			return false
+		}
+	}
+	return true
+}
+
+func goalLooksLikeBuild(goal string) bool {
+	g := strings.ToLower(goal)
+	for _, needle := range []string{
+		"build", "implement", "fix", "add ", "create ", "write ", "ship",
+		"refactor", "feature", "bug", "patch", "land ",
+	} {
+		if strings.Contains(g, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func explorePhaseNudge(goal string) string {
+	if goalLooksLikeBuild(goal) {
+		return "\n\n[FORCE IMPLEMENT] Serial explore without changing the tree. " +
+			"STOP scouting. Next step must mutate: workspace.edit / file_write / apply_patch " +
+			"(or a verify command after edits). Do not restart; do not re-search the same area."
+	}
+	return "\n\n[DELIVER] Serial explore without new substance. " +
+		"STOP searching. Answer with concrete findings now, or call one targeted mutate/verify tool. " +
+		"Do not widen the same sweep again."
 }
 
 type TraceEvent struct {
@@ -249,6 +343,9 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 	rearmCount := 0
 	toolCount := 0
 	toolsThisEpoch := 0
+	productiveThisEpoch := 0
+	exploreStreak := 0
+	exploreNudges := 0
 	epoch := 0
 	staleEpochs := 0
 	goal := seed.Goal
@@ -327,11 +424,21 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 		lengthContinues = 0
 		toolCount += len(calls)
 		toolsThisEpoch += len(calls)
+		productive := batchHasProductive(calls)
+		if productive {
+			productiveThisEpoch += len(calls)
+			exploreStreak = 0
+		} else if batchExploreOnly(calls) {
+			exploreStreak++
+		} else {
+			exploreStreak = 0
+		}
 		if toolCount > config.MaxToolCalls {
-			// Soft-epoch builds extend on progress — never kill a productive mission.
-			if config.SoftEpochSteps > 0 && toolsThisEpoch > 0 {
+			// Soft-epoch builds extend on productive progress only — explore thrash
+			// must not raise the ceiling (coherent endless builds, not endless scouting).
+			if config.SoftEpochSteps > 0 && productiveThisEpoch > 0 {
 				config.MaxToolCalls = toolCount + config.SoftEpochSteps*config.MaxParallelTools
-				trace(StateEpoch, iteration, fmt.Sprintf("extended tool ceiling to %d (progress)", config.MaxToolCalls))
+				trace(StateEpoch, iteration, fmt.Sprintf("extended tool ceiling to %d (productive progress)", config.MaxToolCalls))
 			} else {
 				out.Err = ErrToolCallLimit
 				trace(StateFailed, iteration, out.Err.Error())
@@ -361,6 +468,22 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 			}
 			out.Err = ErrNoProgress
 			trace(StateFailed, iteration, out.Err.Error())
+			return out
+		}
+		// Explore thrash (slightly varying searches) — force implement or deliver.
+		if config.MaxExploreStreak > 0 && exploreStreak >= config.MaxExploreStreak {
+			if exploreNudges < 1 {
+				exploreNudges++
+				exploreStreak = 0
+				out.Text = trimTail(out.Text, config.MaxAssistantChars)
+				out.Text += explorePhaseNudge(goal)
+				out.Results = nil
+				prevCalls = nil
+				trace(StateUpdate, iteration, "explore-streak phase nudge")
+				continue
+			}
+			out.Err = ErrNoProgress
+			trace(StateFailed, iteration, "explore thrash after phase nudge")
 			return out
 		}
 		trace(StatePolicy, iteration, fmt.Sprintf("evaluate %d tools", len(calls)))
@@ -417,21 +540,26 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 					trace(StateFailed, iteration, "stale epochs with no tool activity")
 					return out
 				}
-			} else {
+			} else if productiveThisEpoch > 0 {
 				staleEpochs = 0
-				// Productive work extends the absolute runway so a real build
-				// (days/weeks of tool rounds) never dies on a step counter.
+				// Productive mutate/verify extends the absolute runway so a real
+				// build never dies on a step counter. Explore-only does not.
 				runway := config.SoftEpochSteps * 4
 				if iteration+runway > config.MaxIterations {
 					config.MaxIterations = iteration + runway
-					trace(StateEpoch, iteration, fmt.Sprintf("extended step ceiling to %d (progress)", config.MaxIterations))
+					trace(StateEpoch, iteration, fmt.Sprintf("extended step ceiling to %d (productive progress)", config.MaxIterations))
 				}
 				toolRunway := config.SoftEpochSteps * config.MaxParallelTools
 				if toolCount+toolRunway > config.MaxToolCalls {
 					config.MaxToolCalls = toolCount + toolRunway
 				}
+			} else {
+				// Explore-only epoch: compact, but do not extend ceilings.
+				staleEpochs = 0
+				trace(StateEpoch, iteration, "explore-only epoch (no runway extend)")
 			}
 			toolsThisEpoch = 0
+			productiveThisEpoch = 0
 			compactTurn(&out, &prevCalls, config.KeepLastResults, config.MaxResultChars, epoch, iteration, outcomeLedger)
 			outcomeLedger = outcomeLedger[:0]
 			trace(StateEpoch, iteration, fmt.Sprintf("soft epoch %d continue", epoch))

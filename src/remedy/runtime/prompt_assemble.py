@@ -410,15 +410,50 @@ async def _should_continue_async(inp: Mapping[str, Any]) -> dict[str, Any]:
     promise = bool(agency_tool_promise_claim(text))
     wants = bool(message_wants_tools(goal)) and tool_count == 0
 
-    cont = unfinished or promise or (wants and not plan_mode) or tool_count > 0
-    # If tools already ran and model stops with prose, always re-arm until budget.
-    if tool_count > 0:
+    # Build-engine explore thrash: re-arm once with FORCE IMPLEMENT, then let
+    # Go cognition stalemate if the model keeps scouting. Do NOT always re-arm
+    # merely because tool_count > 0 — that made incoherent review loops endless.
+    force_implement_nudge = ""
+    build_debt = False
+    with suppress(Exception):
+        from remedy.core.build_engine import get_build_state
+
+        st = get_build_state(runtime)
+        if st is not None and bool(getattr(st, "active", False)):
+            writes = int(getattr(st, "write_steps", 0) or 0)
+            streak = int(getattr(st, "serial_explore_streak", 0) or 0)
+            cap = int(getattr(st, "max_serial_explore", 3) or 3)
+            emitted = getattr(st, "nudges_emitted", None) or []
+            if writes > 0 and not getattr(st, "verify_ok", False):
+                build_debt = True
+            if (
+                streak >= cap
+                and writes == 0
+                and "force_implement" not in emitted
+            ):
+                try:
+                    emitted.append("force_implement")
+                    st.nudges_emitted = emitted
+                    st.phase = "implement"
+                except Exception:
+                    pass
+                force_implement_nudge = (
+                    "[Build engine · FORCE IMPLEMENT] Serial explore streak exceeded. "
+                    "STOP scouting. Next step must CHANGE the tree "
+                    "(file_write / file_edit / apply_patch). Do not restart."
+                )
+
+    cont = unfinished or promise or (wants and not plan_mode) or build_debt
+    if force_implement_nudge:
         cont = True
 
     nudge = ""
     reason = "done"
     if cont:
-        if promise and not unfinished:
+        if force_implement_nudge:
+            nudge = force_implement_nudge
+            reason = "force_implement"
+        elif promise and not unfinished:
             msg = agency_rearm_nudge_message()
             nudge = str(msg.get("content") or msg.get("text") or "")
             if not nudge:
@@ -429,7 +464,7 @@ async def _should_continue_async(inp: Mapping[str, Any]) -> dict[str, Any]:
             reason = "agency_promise"
         else:
             nudge = UNFINISHED_WORK_NUDGE
-            reason = "unfinished" if unfinished or tool_count > 0 else "wants_tools"
+            reason = "unfinished" if unfinished or build_debt else "wants_tools"
 
     return {
         "ok": True,

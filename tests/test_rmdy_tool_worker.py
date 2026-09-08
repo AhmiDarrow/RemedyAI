@@ -593,19 +593,29 @@ def test_prompt_should_continue_rearms_after_tools(
         'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
         encoding="utf-8",
     )
+    # Narrated tool promise without tool_calls → re-arm (anti-hallucination).
     out = worker._prompt_should_continue(
         {
             "goal": "build the app",
-            "text": "All done.",
+            "text": "Activating the build skill now and calling tools.",
             "session_id": "sess-rearm",
-            "tool_count": 3,
+            "tool_count": 0,
             "chat_mode": False,
         }
     )
     assert out.get("continue") is True
-    assert "tool" in str(out.get("nudge") or "").lower() or "function" in str(
-        out.get("nudge") or ""
-    ).lower()
+    # Mere tool_count with a finished answer must NOT force endless re-arm
+    # (that made incoherent review thrash never stop).
+    done = worker._prompt_should_continue(
+        {
+            "goal": "what is connect?",
+            "text": "Connect pairs a phone over LAN or Tailscale.",
+            "session_id": "sess-done",
+            "tool_count": 3,
+            "chat_mode": False,
+        }
+    )
+    assert done.get("continue") is False
     chat = worker._prompt_should_continue(
         {"goal": "hi", "text": "hello", "tool_count": 0, "chat_mode": True}
     )
