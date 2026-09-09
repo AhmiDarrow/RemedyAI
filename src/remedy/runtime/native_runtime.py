@@ -30,7 +30,7 @@ from typing import Any
 _log = logging.getLogger(__name__)
 
 #: Zig C ABI (``remedy_core_abi_version``); see ``native/zig/include/remedy_core.h``.
-_ABI_VERSION = 5
+_ABI_VERSION = 7
 #: Go runtime probe contract (``--probe`` JSON ``protocol`` / ``tool_abi``).
 _PROTOCOL_VERSION = 1
 _TOOL_ABI_VERSION = 1

@@ -33,7 +33,7 @@ checks capabilities before machine-facing execution.
 `src/remedy/runtime/native_runtime.py` is the Zig/Go probe seam for capability
 routing. The selector accepts `compatibility` (the default), `auto`, or `native`
 through `REMEDY_NATIVE_RUNTIME` or `native_runtime` in config. Go protocol/tool
-ABI 1 and Zig C ABI **5** (`REMEDY_CORE_ABI_VERSION`) must both probe healthy
+ABI 1 and Zig C ABI **7** (`REMEDY_CORE_ABI_VERSION`) must both probe healthy
 before the native route becomes effective. Fallback after a native attempt is
 allowed only for operations declared idempotent.
 
@@ -64,12 +64,15 @@ Grove unmounts off-surface. Studio must own its own voice instance (`useVoice` i
 
 ## Core control plane
 
-- **ReAct (production)** — Go `native/go/cognition/` driven by `remedy-runtime` / `native/go/httpapi` (`CognitionTurnRunner`). Desktop, `remedy serve`, messenger turns, and hive forager pulses use this path on `:7400`.
+- **ReAct (production)** — Go `native/go/cognition/` driven by `remedy-runtime` / `native/go/httpapi` (`CognitionTurnRunner`). Desktop, `remedy serve`, messenger turns, and hive forager pulses use this path on `:7400`. The turn is an **append-only transcript** (`cognition.Message` / `Block`): round N still carries round 1's tool output, prior session turns, and attachments as image/text blocks. Over budget, `compact.go` replaces the middle with one deterministic working set (files touched, commands with exit codes, last failing check, TODO, decisions) and keeps the goal plus the recent tail.
+- **Model surface** — the model is advertised `read, edit, write, glob, grep, bash, jobs, todo, screenshot, delegate` plus `computer.*` / `clipboard.*` and, with the Python worker attached, `web.*` / `memory.*` / `skill.*` / `mail.*` / `calendar.*`. The internal ids (`workspace.*`, `shell.exec`, demo tools) stay registered for the CLI and tests but are hidden through `tools.IsModelHiddenTool`. Approvals are fingerprinted on the **Tool ABI id**, never the provider's wire name.
+- **Turn log / evidence** — every streamed turn writes `<home>/sessions/<sid>/turns/<request_id>.jsonl`: full tool output, images beside it, usage, approvals, one monotonic `seq` per frame. `GET …/stream/attach` replays it and then tails the live turn, so a reload rejoins work in progress; `GET …/turns/{request_id}/tools/{call_id}` serves the complete result behind the short SSE preview. Pruned per turn (40 newest per session, 30 days).
+- **Providers** — `providers.Anthropic` (official SDK: prompt caching with an explicit stable/volatile system split, adaptive thinking, effort, images, `stop_reason`, usage) and `providers.OpenAICompat` for everything else. Both implement `ToolAdvertiser`, which is the runner's single seam for pushing the tool surface.
 - **ReAct (Python helpers)** — `react_turn.py`, `react_policy.py`, `react_stream.py`, `turn_context.py`, `llm_api_errors.py` remain for workers/tests. The Python `react_loop` package is **deleted**; BasicRuntime/`remedy chat` fail closed toward Go. CLI `remedy tool` uses Go `GET /api/tools` + `POST /api/tools/invoke` (no BasicRuntime).
 - **PolicyEngine** — `policy/engine.py`. Deterministic allow / ask / deny. Dangerous host commands denied; mail/pay checkpoints never waived. Trust profiles live in `APPROVALS.needs_ask`.
 - **Write jail** — `core/security` + computer executor. Runtime-bin skip requires a real executable extension; cross-session computer state is thread-local per session.
 - **Hive** — daughters are capped; no parent Partner Memory writes; no nested spawn. PROCESS_EXEC + FS_WRITE + NETWORK_READ by design for foragers (not a full sandbox).
-- **Build engine** — TDD → unit hop → gate-tower verify. Plan steps may record intended / observed / evidence.
+- **Build engine** — TDD → unit hop → gate-tower verify. Plan steps may record intended / observed / evidence. Completion is decided on evidence, not prose: `prompt.should_continue` receives the last tool batch, so a claim of success after a non-zero exit re-arms with the failure named.
 - **Soul / Partner memory** — `memory/soul/`, Partner Memory with who/why stamps. Retrieval is labeled context, not a grant.
 
 ## Language

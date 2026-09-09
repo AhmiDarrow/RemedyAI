@@ -9,25 +9,25 @@ import (
 )
 
 // ABIVersion matches native/zig/include/remedy_core.h REMEDY_CORE_ABI_VERSION.
-const ABIVersion = 5
+const ABIVersion = 7
 
 const (
-	StatusOK               = 0
-	StatusInvalidArgument  = 1
-	StatusAccessDenied     = 2
-	StatusOperationFailed  = 3
-	StatusUnsupported      = 4
+	StatusOK              = 0
+	StatusInvalidArgument = 1
+	StatusAccessDenied    = 2
+	StatusOperationFailed = 3
+	StatusUnsupported     = 4
 )
 
 const (
-	CapabilityTokenSize   = 169
-	ProcessSpawnRight     = uint64(1) << 2
-	OwnerCheckpointRight  = uint64(1) << 5
-	DefaultSpawnSubject   = "agent:remedy"
-	DefaultSpawnScope     = "workspace:local"
-	TokenLifetimeMS         = 60_000
-	ConptyPipeStdin       = 0
-	ConptyPipeStdout      = 1
+	CapabilityTokenSize  = 169
+	ProcessSpawnRight    = uint64(1) << 2
+	OwnerCheckpointRight = uint64(1) << 5
+	DefaultSpawnSubject  = "agent:remedy"
+	DefaultSpawnScope    = "workspace:local"
+	TokenLifetimeMS      = 60_000
+	ConptyPipeStdin      = 0
+	ConptyPipeStdout     = 1
 )
 
 var (

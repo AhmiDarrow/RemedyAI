@@ -701,7 +701,7 @@ fn stripPytestLastFailed(arena: std.mem.Allocator, command: []const u8) error{Ou
     return try collapseWhitespace(arena, s);
 }
 
-fn isEncodedPowershell(command: []const u8) bool {
+pub fn isEncodedPowershell(command: []const u8) bool {
     const cmd = trimSpace(command);
     if (cmd.len == 0) return false;
     // \b(?:powershell|pwsh)(?:\.exe)?\b ... -(?:e|ec|encodedcommand|encoded)\b
@@ -724,17 +724,24 @@ fn isEncodedPowershell(command: []const u8) bool {
     }
     if (!found_exe) return false;
     while (i < cmd.len) : (i += 1) {
-        if (cmd[i] != '-') continue;
-        const flags = [_][]const u8{ "encodedcommand", "encoded", "ec", "e" };
-        for (flags) |flag| {
-            if (i + 1 + flag.len > cmd.len) continue;
-            if (!std.ascii.eqlIgnoreCase(cmd[i + 1 .. i + 1 + flag.len], flag)) continue;
-            const end = i + 1 + flag.len;
-            if (end < cmd.len and (std.ascii.isAlphanumeric(cmd[end]) or cmd[end] == '_')) continue;
-            return true;
-        }
+        if (cmd[i] != '-' and cmd[i] != '/') continue;
+        // PowerShell accepts any unambiguous prefix of -EncodedCommand
+        // (-e, -enc, -encoded, ...) plus the -ec alias. Read the flag body up
+        // to the next separator and test it with the same rule policy.zig uses.
+        var end = i + 1;
+        while (end < cmd.len and (std.ascii.isAlphanumeric(cmd[end]) or cmd[end] == '_')) : (end += 1) {}
+        if (isEncodedCommandFlagBody(cmd[i + 1 .. end])) return true;
+        i = end - 1;
     }
     return false;
+}
+
+/// True when `body` (a flag without its leading `-` / `/`) names
+/// -EncodedCommand: the -ec alias or any prefix of "encodedcommand".
+pub fn isEncodedCommandFlagBody(body: []const u8) bool {
+    if (body.len == 0 or body.len > "encodedcommand".len) return false;
+    if (std.ascii.eqlIgnoreCase(body, "ec")) return true;
+    return std.ascii.eqlIgnoreCase(body, "encodedcommand"[0..body.len]);
 }
 
 fn isPsWrapper(command: []const u8) bool {

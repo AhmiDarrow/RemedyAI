@@ -24,7 +24,10 @@ pub const host_stretch = @import("host_stretch.zig");
 pub const shell_chain = @import("shell_chain.zig");
 
 /// C ABI version of the exported surface (`remedy_core_abi_version`).
-pub const abi_version: u32 = 5;
+/// ABI 6 added the env_denied status for a refused environment override.
+/// ABI 7 adds policy_hash_spawn (argv + environment operation hash) and
+/// policy_env_strict (refuse argv-only tokens for spawns that carry one).
+pub const abi_version: u32 = 7;
 /// Wire version of the language-neutral RMDY frame; independent of the C ABI.
 pub const protocol_version: u16 = 1;
 pub const header_size: usize = 32;
@@ -36,6 +39,9 @@ pub const Status = enum(i32) {
     access_denied = 2,
     operation_failed = 3,
     unsupported = 4,
+    /// A supplied environment override is on the loader/hook denylist
+    /// (or pins a system variable to a non-parent value).
+    env_denied = 5,
 };
 
 // Host, UIA, shell_ir, shell_translate, conpty, spawn_auth, write_jail,

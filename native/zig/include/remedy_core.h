@@ -39,7 +39,7 @@ extern "C" {
  * code is available from remedy_core_last_os_error() on the same thread.
  * Policy / token failures return REMEDY_CORE_ACCESS_DENIED.
  */
-#define REMEDY_CORE_ABI_VERSION 5u
+#define REMEDY_CORE_ABI_VERSION 7u
 
 enum remedy_core_status {
     REMEDY_CORE_OK = 0,
@@ -433,11 +433,35 @@ int32_t remedy_core_security_set_signing_key(const uint8_t *key, size_t len);
 int32_t remedy_core_security_clear_signing_key(void);
 
 /* SHA-256 over a JSON argv string array (same framing as spawn). Writes 32
- * bytes into out_hash when out_hash_len >= 32. */
+ * bytes into out_hash when out_hash_len >= 32. Bound to argv alone: a token
+ * issued over this hash says nothing about the environment the spawn will
+ * receive — prefer remedy_core_policy_hash_spawn. */
 int32_t remedy_core_policy_hash_argv(
     const uint8_t *argv_json, size_t argv_len,
     uint8_t *out_hash, size_t out_hash_len
 );
+
+/* SHA-256 over argv plus the caller-supplied environment overrides and the
+ * replacement flag — the operation hash an authorized spawn recomputes from
+ * the env_json it actually receives, so a token cannot be minted for one
+ * environment and spent on another. env_json takes the same shapes as the
+ * spawn exports (an object of string values, or {"env": {...},
+ * "replace_env": bool}); replace_env requests replacement for the plain
+ * object shape. Empty env_json with replace_env 0 is byte-identical to
+ * remedy_core_policy_hash_argv. */
+int32_t remedy_core_policy_hash_spawn(
+    const uint8_t *argv_json, size_t argv_len,
+    const uint8_t *env_json, size_t env_len,
+    uint8_t replace_env,
+    uint8_t *out_hash, size_t out_hash_len
+);
+
+/* Strict environment binding, process-wide. Enabled (1): an authorized spawn
+ * carrying environment overrides requires a token whose operation hash covers
+ * them; an argv-only hash is refused with ACCESS_DENIED. Disabled (0,
+ * default): argv-only tokens are still accepted while callers migrate.
+ * Env-less spawns verify identically either way. */
+int32_t remedy_core_policy_env_strict(uint8_t enabled);
 
 /* Issue a v2 capability token (169 bytes). operation_hash is 32 bytes; nonce
  * is 16 bytes; out_token_len must be >= 169. Requires a signing key. */

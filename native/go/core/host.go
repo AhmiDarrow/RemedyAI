@@ -757,4 +757,3 @@ func WindowRect(hwnd uint64) (left, top, right, bottom int32, err error) {
 	}
 	return left, top, right, bottom, nil
 }
-

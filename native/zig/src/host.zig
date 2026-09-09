@@ -16,6 +16,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const root = @import("root.zig");
+const policy = @import("policy.zig");
+const process = @import("process.zig");
+const write_jail = @import("write_jail.zig");
 
 pub const is_windows = builtin.os.tag == .windows;
 pub const is_linux = builtin.os.tag == .linux;
@@ -29,6 +32,9 @@ pub const Error = error{
     InvalidArgument,
     OperationFailed,
     OutOfMemory,
+    /// A supplied environment override is denied by policy (loader hooks,
+    /// pinned system variables). Reported as `Status.env_denied`.
+    EnvDenied,
 };
 
 /// One allocator for everything that crosses the ABI, so `remedy_core_free`
@@ -48,11 +54,14 @@ pub fn statusOf(err: Error) i32 {
         error.InvalidArgument => Status.invalid_argument,
         error.OperationFailed => Status.operation_failed,
         error.OutOfMemory => Status.operation_failed,
+        error.EnvDenied => Status.env_denied,
     });
 }
 
 const ok_status: i32 = @intFromEnum(Status.ok);
 const invalid_status: i32 = @intFromEnum(Status.invalid_argument);
+const denied_status: i32 = @intFromEnum(Status.access_denied);
+const failed_status: i32 = @intFromEnum(Status.operation_failed);
 const unsupported_status: i32 = @intFromEnum(Status.unsupported);
 
 fn statusOfVoid(result: Error!void) i32 {
@@ -347,9 +356,24 @@ pub fn parseArgv(arena: std.mem.Allocator, json: []const u8) Error![]const []con
 
 pub const EnvPair = struct { key: []const u8, value: []const u8 };
 
-/// Parse a JSON object of string values into sorted `KEY=value` pairs.
-/// An empty input means "inherit the parent environment" and yields null.
-pub fn parseEnv(arena: std.mem.Allocator, json: []const u8) Error!?[]EnvPair {
+/// Caller-supplied environment overrides. `replace` requests the legacy
+/// whole-environment replacement; the default merges onto the parent block.
+pub const EnvSpec = struct {
+    pairs: []EnvPair,
+    replace: bool = false,
+};
+
+/// Parse the `env_json` a spawn export receives. Two shapes are accepted:
+///
+/// * a JSON object of string values — merged onto the parent environment;
+/// * `{"env": {...}, "replace_env": true|false}` — the wrapper form that
+///   makes replacement explicit (an env variable literally named `env`
+///   cannot collide because env values are strings, never objects).
+///
+/// Keys must be non-empty printable ASCII without `=`; values must not
+/// contain NUL. Pairs come back sorted by uppercase-folded key. An empty or
+/// `null` input means "inherit the parent environment" and yields null.
+pub fn parseEnvSpec(arena: std.mem.Allocator, json: []const u8) Error!?EnvSpec {
     if (trimWhitespace(json).len == 0) return null;
     const value = std.json.parseFromSliceLeaky(std.json.Value, arena, json, .{}) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
@@ -360,6 +384,38 @@ pub fn parseEnv(arena: std.mem.Allocator, json: []const u8) Error!?[]EnvPair {
         .null => return null,
         else => return error.InvalidArgument,
     };
+    if (object.get("env")) |inner| {
+        if (inner == .object) {
+            var replace = false;
+            var iterator = object.iterator();
+            while (iterator.next()) |entry| {
+                const key = entry.key_ptr.*;
+                if (std.mem.eql(u8, key, "env")) continue;
+                if (std.mem.eql(u8, key, "replace_env")) {
+                    replace = switch (entry.value_ptr.*) {
+                        .bool => |b| b,
+                        .integer => |i| i != 0,
+                        else => return error.InvalidArgument,
+                    };
+                    continue;
+                }
+                return error.InvalidArgument;
+            }
+            return .{ .pairs = try envPairsFromObject(arena, inner.object), .replace = replace };
+        }
+    }
+    return .{ .pairs = try envPairsFromObject(arena, object), .replace = false };
+}
+
+/// Parse a JSON object of string values into sorted `KEY=value` pairs.
+/// An empty input means "inherit the parent environment" and yields null.
+/// The `replace_env` wrapper flag is dropped; use `parseEnvSpec` to see it.
+pub fn parseEnv(arena: std.mem.Allocator, json: []const u8) Error!?[]EnvPair {
+    const spec = (try parseEnvSpec(arena, json)) orelse return null;
+    return spec.pairs;
+}
+
+fn envPairsFromObject(arena: std.mem.Allocator, object: std.json.ObjectMap) Error![]EnvPair {
     var pairs = arena.alloc(EnvPair, object.count()) catch return error.OutOfMemory;
     var index: usize = 0;
     var iterator = object.iterator();
@@ -369,14 +425,23 @@ pub fn parseEnv(arena: std.mem.Allocator, json: []const u8) Error!?[]EnvPair {
             else => return error.InvalidArgument,
         };
         const key = entry.key_ptr.*;
-        if (key.len == 0 or std.mem.indexOfScalar(u8, key, '=') != null) return error.InvalidArgument;
-        if (std.mem.indexOfScalar(u8, key, 0) != null or std.mem.indexOfScalar(u8, text, 0) != null) {
-            return error.InvalidArgument;
-        }
+        if (!isValidEnvKey(key)) return error.InvalidArgument;
+        if (std.mem.indexOfScalar(u8, text, 0) != null) return error.InvalidArgument;
         pairs[index] = .{ .key = key, .value = text };
     }
     std.mem.sort(EnvPair, pairs, {}, envLessThan);
     return pairs;
+}
+
+/// Supplied keys are printable ASCII without `=`: the Windows block is sorted
+/// by uppercase-folded key and a non-ASCII key would need locale-dependent
+/// folding that CreateProcess and the CRT do not agree on.
+pub fn isValidEnvKey(key: []const u8) bool {
+    if (key.len == 0) return false;
+    for (key) |c| {
+        if (c < 0x21 or c > 0x7e or c == '=') return false;
+    }
+    return true;
 }
 
 fn envLessThan(_: void, a: EnvPair, b: EnvPair) bool {
@@ -387,7 +452,135 @@ fn envLessThan(_: void, a: EnvPair, b: EnvPair) bool {
         const cb = std.ascii.toUpper(b.key[i]);
         if (ca != cb) return ca < cb;
     }
-    return a.key.len < b.key.len;
+    if (a.key.len != b.key.len) return a.key.len < b.key.len;
+    // Same key ignoring case (POSIX only): keep the order total.
+    return std.mem.lessThan(u8, a.key, b.key);
+}
+
+fn envKeysEqual(a: []const u8, b: []const u8) bool {
+    if (is_windows) return std.ascii.eqlIgnoreCase(a, b);
+    return std.mem.eql(u8, a, b);
+}
+
+/// Look up one variable in this process's environment. Caller frees.
+pub fn parentEnvGet(gpa: std.mem.Allocator, key: []const u8) ?[]u8 {
+    if (is_windows) {
+        const environ: std.process.Environ = .{ .block = .global };
+        return std.process.Environ.getAlloc(environ, gpa, key) catch null;
+    }
+    if (!builtin.link_libc) return null;
+    var key_buf: [256]u8 = undefined;
+    if (key.len >= key_buf.len) return null;
+    @memcpy(key_buf[0..key.len], key);
+    key_buf[key.len] = 0;
+    const value = std.c.getenv(key_buf[0..key.len :0]) orelse return null;
+    return gpa.dupe(u8, std.mem.span(value)) catch null;
+}
+
+/// Snapshot of this process's environment as pairs (unsorted, arena-owned).
+extern "kernel32" fn GetEnvironmentStringsW() callconv(.winapi) ?[*]const u16;
+extern "kernel32" fn FreeEnvironmentStringsW(block: [*]const u16) callconv(.winapi) i32;
+
+pub fn parentEnvPairs(arena: std.mem.Allocator) Error![]EnvPair {
+    var out: std.ArrayList(EnvPair) = .empty;
+    if (is_windows) {
+        // Ask Win32 for the live block rather than reading Zig's cached
+        // `.block = .global`. This code ships as a DLL loaded by a Go host, so
+        // Zig's start code never ran and that global is empty — which silently
+        // turned "merge the caller's env onto the parent" into "replace the
+        // parent", handing the child a process with no PATH or SystemRoot.
+        const block = GetEnvironmentStringsW() orelse return error.OperationFailed;
+        defer _ = FreeEnvironmentStringsW(block);
+        var index: usize = 0;
+        while (true) {
+            // The block is a run of NUL-terminated UTF-16 strings ended by an
+            // empty one.
+            var end = index;
+            while (block[end] != 0) : (end += 1) {}
+            if (end == index) break;
+            const entry = block[index..end];
+            index = end + 1;
+            const eq = std.mem.indexOfScalar(u16, entry, '=') orelse continue;
+            // A leading '=' marks Windows' per-drive working directories
+            // (=C:), which are not inheritable settings a caller may name.
+            if (eq == 0) continue;
+            const key = std.unicode.utf16LeToUtf8Alloc(arena, entry[0..eq]) catch
+                return error.OutOfMemory;
+            const value = std.unicode.utf16LeToUtf8Alloc(arena, entry[eq + 1 ..]) catch
+                return error.OutOfMemory;
+            out.append(arena, .{ .key = key, .value = value }) catch return error.OutOfMemory;
+        }
+        return out.toOwnedSlice(arena) catch return error.OutOfMemory;
+    }
+    if (!builtin.link_libc) return out.toOwnedSlice(arena) catch return error.OutOfMemory;
+    var i: usize = 0;
+    while (std.c.environ[i]) |entry| : (i += 1) {
+        const text = std.mem.span(entry);
+        const eq = std.mem.indexOfScalar(u8, text, '=') orelse continue;
+        if (eq == 0) continue;
+        out.append(arena, .{ .key = text[0..eq], .value = text[eq + 1 ..] }) catch return error.OutOfMemory;
+    }
+    return out.toOwnedSlice(arena) catch return error.OutOfMemory;
+}
+
+/// Parent environment first, supplied pairs override (case-insensitive key
+/// match on Windows), result sorted for the Windows block. With `replace`
+/// only the supplied pairs are returned.
+pub fn mergedEnvPairs(arena: std.mem.Allocator, spec: EnvSpec) Error![]EnvPair {
+    if (spec.replace) {
+        const copy = arena.dupe(EnvPair, spec.pairs) catch return error.OutOfMemory;
+        std.mem.sort(EnvPair, copy, {}, envLessThan);
+        return copy;
+    }
+    const parent = try parentEnvPairs(arena);
+    var out: std.ArrayList(EnvPair) = .empty;
+    out.ensureTotalCapacity(arena, parent.len + spec.pairs.len) catch return error.OutOfMemory;
+    for (parent) |pair| {
+        var overridden = false;
+        for (spec.pairs) |supplied| {
+            if (envKeysEqual(pair.key, supplied.key)) {
+                overridden = true;
+                break;
+            }
+        }
+        if (!overridden) out.appendAssumeCapacity(pair);
+    }
+    for (spec.pairs) |supplied| out.appendAssumeCapacity(supplied);
+    const merged = out.toOwnedSlice(arena) catch return error.OutOfMemory;
+    std.mem.sort(EnvPair, merged, {}, envLessThan);
+    return merged;
+}
+
+/// Windows spawn primitives: parse, police and merge `env_json` into a
+/// CreateProcess environment block. Null means inherit (empty input).
+pub fn resolveEnvBlock(arena: std.mem.Allocator, env_json: []const u8) Error!?[]u16 {
+    const spec = (try parseEnvSpec(arena, env_json)) orelse return null;
+    policy.checkEnvBase(spec.pairs) catch return error.EnvDenied;
+    const merged = try mergedEnvPairs(arena, spec);
+    return try envBlock(arena, merged);
+}
+
+/// POSIX / portable spawn primitives: parse, police and merge `env_json` into
+/// an `Environ.Map` (caller `deinit`s). On POSIX a map is returned even for an
+/// empty input so the child inherits this process's environment regardless
+/// of how the `Io.Threaded` instance was configured; on Windows an empty
+/// input yields null (the global block is inherited by CreateProcess).
+pub fn resolveEnvMap(gpa: std.mem.Allocator, env_json: []const u8) Error!?std.process.Environ.Map {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const spec_opt = try parseEnvSpec(a, env_json);
+    if (spec_opt == null and is_windows) return null;
+    const spec: EnvSpec = spec_opt orelse .{ .pairs = &.{} };
+    policy.checkEnvBase(spec.pairs) catch return error.EnvDenied;
+    const merged = try mergedEnvPairs(a, spec);
+    var map = std.process.Environ.Map.init(gpa);
+    errdefer map.deinit();
+    for (merged) |pair| {
+        if (pair.key.len == 0 or pair.key[0] == '=') continue;
+        map.put(pair.key, pair.value) catch return error.OutOfMemory;
+    }
+    return map;
 }
 
 /// Build a Windows environment block: `KEY=value\0...\0` in UTF-16LE.
@@ -464,6 +657,36 @@ pub fn commandLine(gpa: std.mem.Allocator, argv: []const []const u8) Error![:0]u
 fn slice(ptr: ?[*]const u8, len: usize) []const u8 {
     const raw = ptr orelse return "";
     return raw[0..len];
+}
+
+/// Policy gate shared by the unsigned spawn exports (`process_spawn_hidden`,
+/// `conpty_spawn`, `host_session_open`): absolute argv[0] and argument
+/// limits, the dangerous-command classifier, and the write jail / auth-secret
+/// refuse. Returns the status to hand back on failure.
+pub fn unsignedSpawnGate(argv_json: []const u8, cwd: []const u8) error{ InvalidArgument, AccessDenied, OperationFailed }!void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const argv = parseArgv(arena.allocator(), argv_json) catch return error.InvalidArgument;
+    return unsignedSpawnGateArgv(argv, cwd);
+}
+
+pub fn unsignedSpawnGateArgv(argv: []const []const u8, cwd: []const u8) error{ InvalidArgument, AccessDenied, OperationFailed }!void {
+    process.validateArguments(argv) catch return error.InvalidArgument;
+    if (policy.isDangerousProcess(argv)) return error.AccessDenied;
+    write_jail.checkSpawn(allocator, argv, cwd) catch |err| return switch (err) {
+        error.AccessDenied => error.AccessDenied,
+        error.InvalidPath => error.InvalidArgument,
+        error.OutOfMemory => error.OperationFailed,
+    };
+}
+
+/// Map a gate failure onto the C status codes.
+pub fn gateStatus(err: error{ InvalidArgument, AccessDenied, OperationFailed }) i32 {
+    return switch (err) {
+        error.InvalidArgument => invalid_status,
+        error.AccessDenied => denied_status,
+        error.OperationFailed => failed_status,
+    };
 }
 
 export fn remedy_core_free(ptr: ?[*]u8, len: usize) callconv(.c) void {
@@ -827,6 +1050,9 @@ export fn remedy_core_process_spawn_hidden(
     const handle_slot = out_handle orelse return invalid_status;
     pid_slot.* = 0;
     handle_slot.* = 0;
+    // Token-less low-level door: still no PATH lookup, no dangerous command,
+    // no auth-secret / write-jail escape.
+    unsignedSpawnGate(slice(argv_json, argv_len), slice(cwd, cwd_len)) catch |err| return gateStatus(err);
     const spawned = if (is_windows)
         windows.spawnHidden(slice(argv_json, argv_len), slice(cwd, cwd_len), slice(env_json, env_len))
     else if (is_linux)
@@ -1079,6 +1305,44 @@ test "command line quoting follows CommandLineToArgvW rules" {
     }
     try std.testing.expectError(error.InvalidArgument, commandLine(gpa, &.{}));
     try std.testing.expectError(error.InvalidArgument, commandLine(gpa, &.{"bad\"exe"}));
+}
+
+test "a supplied environment merges onto the real parent block" {
+    if (!is_windows) return;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // The parent snapshot must not be empty: this ships as a DLL, so reading
+    // Zig's cached global block returned nothing and the merge below silently
+    // replaced the child's environment instead of extending it.
+    const parent = try parentEnvPairs(a);
+    try std.testing.expect(parent.len > 0);
+    var saw_path = false;
+    for (parent) |pair| {
+        if (std.ascii.eqlIgnoreCase(pair.key, "PATH")) saw_path = true;
+        try std.testing.expect(pair.key.len > 0);
+    }
+    try std.testing.expect(saw_path);
+
+    // One supplied override keeps everything else and wins where it collides.
+    var supplied = [_]EnvPair{
+        .{ .key = "REMEDY_MERGE_PROBE", .value = "1" },
+        .{ .key = "PATH", .value = "C:\\only-this" },
+    };
+    const merged = try mergedEnvPairs(a, .{ .pairs = &supplied });
+    try std.testing.expect(merged.len >= parent.len);
+    var probe: ?[]const u8 = null;
+    var path_value: ?[]const u8 = null;
+    for (merged) |pair| {
+        if (std.mem.eql(u8, pair.key, "REMEDY_MERGE_PROBE")) probe = pair.value;
+        if (std.ascii.eqlIgnoreCase(pair.key, "PATH")) path_value = pair.value;
+    }
+    try std.testing.expectEqualStrings("1", probe orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqualStrings(
+        "C:\\only-this",
+        path_value orelse return error.TestUnexpectedResult,
+    );
 }
 
 test "status mapping and free are stable across the abi" {

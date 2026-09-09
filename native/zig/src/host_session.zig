@@ -922,6 +922,7 @@ export fn remedy_core_host_session_open_authorized(
     spawn_auth.authorize(
         argv,
         opts.cwd,
+        opts.env_json,
         slice(token, token_len),
         subj,
         scp,
