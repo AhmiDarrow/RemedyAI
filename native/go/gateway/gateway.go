@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// Handler processes a gateway event. Prefer returning quickly; long work
-// should be scheduled by the caller (httpapi turn runner).
+// Handler processes a gateway event. Handlers run on a per-session worker, so
+// a slow turn in one chat never blocks another chat or the hub loop.
 type Handler func(ctx context.Context, ev Event) error
 
 // Channel is a messenger (or internal) adapter owned by the gateway.
@@ -31,6 +31,10 @@ type Config struct {
 	HeartbeatInterval time.Duration
 	RateLimitPerMin   int
 	HomeDir           string
+	// QueueSize bounds the hub intake queue (default 256).
+	QueueSize int
+	// WorkerQueueSize bounds each per-session worker queue (default 8).
+	WorkerQueueSize int
 }
 
 // Stats is the public gateway snapshot (Python Gateway.stats /api/status).
@@ -44,6 +48,17 @@ type Stats struct {
 	RateLimitPerMin int      `json:"rate_limit_per_min"`
 }
 
+const (
+	defaultQueueSize       = 256
+	defaultWorkerQueueSize = 8
+	workerIdleReap         = 10 * time.Minute
+	rateLimitWindow        = time.Minute
+	busyReplyWindow        = 30 * time.Second
+
+	rateLimitReply = "You are sending messages too quickly. Wait a few seconds and try again."
+	queueBusyReply = "I am handling a lot of messages right now. Please try again in a moment."
+)
+
 // Gateway is the always-on multi-channel event hub.
 type Gateway struct {
 	mu sync.Mutex
@@ -55,13 +70,81 @@ type Gateway struct {
 	running   bool
 	startedAt time.Time
 	events    int
+	dropped   int
 	rateLimit int
 	heartbeat time.Duration
 
-	queue     chan Event
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	rateBuckets map[ChannelKind][]time.Time
+	queue  chan Event
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
+	workersMu sync.Mutex
+	workers   map[string]*sessionWorker
+
+	// rateBuckets / rateWarned / busyWarned are keyed by channel|sender.
+	rateBuckets map[string][]time.Time
+	rateWarned  map[string]time.Time
+	busyWarned  map[string]time.Time
+	now         func() time.Time
+
+	// deniedMu guards the refusal ring. A refused message is silent to its
+	// sender by design, so the owner needs somewhere to see that it happened.
+	deniedMu sync.Mutex
+	denied   []DeniedInbound
+}
+
+// DeniedInbound is one refused inbound message, kept so Settings can tell the
+// owner that somebody tried to reach Remedy and why it was ignored.
+type DeniedInbound struct {
+	Channel  string  `json:"channel"`
+	UserID   string  `json:"user_id"`
+	ScopeID  string  `json:"scope_id"`
+	Reason   string  `json:"reason"`
+	Count    int     `json:"count"`
+	LastSeen float64 `json:"last_seen"`
+}
+
+// deniedRingSize bounds the refusal ring; distinct (channel,user,scope,reason)
+// rows collapse into a count so a chatty stranger cannot evict the owner's row.
+const deniedRingSize = 32
+
+// recordDenied notes a refused inbound message for the owner-facing list.
+func (g *Gateway) recordDenied(channel ChannelKind, reason, userID, scopeID string) {
+	if g == nil {
+		return
+	}
+	now := float64(time.Now().UnixNano()) / 1e9
+	g.deniedMu.Lock()
+	defer g.deniedMu.Unlock()
+	for i := range g.denied {
+		d := &g.denied[i]
+		if d.Channel == string(channel) && d.UserID == userID && d.ScopeID == scopeID && d.Reason == reason {
+			d.Count++
+			d.LastSeen = now
+			return
+		}
+	}
+	if len(g.denied) >= deniedRingSize {
+		g.denied = g.denied[1:]
+	}
+	g.denied = append(g.denied, DeniedInbound{
+		Channel: string(channel), UserID: userID, ScopeID: scopeID,
+		Reason: reason, Count: 1, LastSeen: now,
+	})
+}
+
+// DeniedInbounds returns the refusal ring, oldest first.
+func (g *Gateway) DeniedInbounds() []DeniedInbound {
+	if g == nil {
+		return nil
+	}
+	g.deniedMu.Lock()
+	defer g.deniedMu.Unlock()
+	return append([]DeniedInbound(nil), g.denied...)
+}
+
+type sessionWorker struct {
+	ch chan Event
 }
 
 // New builds an idle gateway hub.
@@ -72,12 +155,22 @@ func New(cfg Config) *Gateway {
 	if cfg.RateLimitPerMin <= 0 {
 		cfg.RateLimitPerMin = 60
 	}
+	if cfg.QueueSize <= 0 {
+		cfg.QueueSize = defaultQueueSize
+	}
+	if cfg.WorkerQueueSize <= 0 {
+		cfg.WorkerQueueSize = defaultWorkerQueueSize
+	}
 	return &Gateway{
 		cfg:         cfg,
 		channels:    make(map[ChannelKind]Channel),
 		rateLimit:   cfg.RateLimitPerMin,
 		heartbeat:   cfg.HeartbeatInterval,
-		rateBuckets: make(map[ChannelKind][]time.Time),
+		workers:     make(map[string]*sessionWorker),
+		rateBuckets: make(map[string][]time.Time),
+		rateWarned:  make(map[string]time.Time),
+		busyWarned:  make(map[string]time.Time),
+		now:         time.Now,
 	}
 }
 
@@ -116,8 +209,7 @@ func (g *Gateway) Channels() []ChannelKind {
 	return out
 }
 
-// RegisterHandler appends an event handler (idempotent by pointer equality is
-// not available for funcs — callers should register once).
+// RegisterHandler appends an event handler (callers should register once).
 func (g *Gateway) RegisterHandler(h Handler) {
 	if g == nil || h == nil {
 		return
@@ -176,10 +268,13 @@ func (g *Gateway) StatsMap() map[string]any {
 		"started_at":         st.StartedAt,
 		"uptime":             st.Uptime,
 		"rate_limit_per_min": st.RateLimitPerMin,
+		// Refused inbound messages are silent to their sender, so the owner
+		// sees them here (Settings can offer "add to allowlist").
+		"denied_inbound": g.DeniedInbounds(),
 	}
 }
 
-// Start launches the queue worker, heartbeat, and all registered channels.
+// Start launches the hub loop, heartbeat, and all registered channels.
 func (g *Gateway) Start(ctx context.Context) error {
 	g.mu.Lock()
 	if g.running {
@@ -188,7 +283,7 @@ func (g *Gateway) Start(ctx context.Context) error {
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	g.cancel = cancel
-	g.queue = make(chan Event, 256)
+	g.queue = make(chan Event, g.cfg.QueueSize)
 	g.running = true
 	g.startedAt = time.Now().UTC()
 	channels := make([]Channel, 0, len(g.channels))
@@ -198,7 +293,7 @@ func (g *Gateway) Start(ctx context.Context) error {
 	g.mu.Unlock()
 
 	g.wg.Add(2)
-	go g.processQueue(runCtx)
+	go g.hubLoop(runCtx)
 	go g.heartbeatLoop(runCtx)
 
 	for _, ch := range channels {
@@ -235,14 +330,25 @@ func (g *Gateway) Stop(ctx context.Context) error {
 		_ = ch.Stop(ctx)
 	}
 	g.wg.Wait()
+	g.workersMu.Lock()
+	g.workers = make(map[string]*sessionWorker)
+	g.workersMu.Unlock()
 	log.Printf("gateway: stopped (events=%d)", events)
 	return nil
 }
 
-// Enqueue buffers an event for async handling (poll/WS must not block on turns).
+// Enqueue buffers an event for async handling. See TryEnqueue.
 func (g *Gateway) Enqueue(ev Event) {
+	_ = g.TryEnqueue(ev)
+}
+
+// TryEnqueue buffers an event and reports whether it was accepted. When the
+// hub is not running the event is handled synchronously. When the intake
+// queue is full the sender is told once per window and false is returned so
+// pollers can hold their cursor and retry instead of losing the message.
+func (g *Gateway) TryEnqueue(ev Event) bool {
 	if g == nil {
-		return
+		return false
 	}
 	g.mu.Lock()
 	running := g.running
@@ -250,13 +356,38 @@ func (g *Gateway) Enqueue(ev Event) {
 	g.mu.Unlock()
 	if !running || q == nil {
 		_ = g.Emit(context.Background(), ev)
-		return
+		return true
 	}
 	select {
 	case q <- ev:
+		return true
 	default:
-		log.Printf("gateway: queue full; dropping %s from %s", ev.Kind, ev.Channel)
+		g.noteQueueFull(ev, "hub")
+		return false
 	}
+}
+
+func (g *Gateway) noteQueueFull(ev Event, where string) {
+	g.mu.Lock()
+	g.dropped++
+	g.mu.Unlock()
+	log.Printf("gateway: %s queue full; refusing %s from %s (sender=%s)", where, ev.Kind, ev.Channel, ev.SourceID)
+	if ev.Kind != EventMessage || !IsMessenger(ev.Channel) {
+		return
+	}
+	key := string(ev.Channel) + "|" + ev.SourceID
+	now := g.now()
+	g.mu.Lock()
+	last, seen := g.busyWarned[key]
+	if seen && now.Sub(last) < busyReplyWindow {
+		g.mu.Unlock()
+		return
+	}
+	g.busyWarned[key] = now
+	g.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, _ = g.SendTo(ctx, ev.Channel, queueBusyReply, replyTarget(ev))
 }
 
 // Emit runs handlers synchronously and increments the event counter.
@@ -270,23 +401,14 @@ func (g *Gateway) Emit(ctx context.Context, ev Event) error {
 	if ev.At.IsZero() {
 		ev.At = time.Now().UTC()
 	}
-	if !g.checkRateLimit(ev.Channel) {
-		log.Printf("gateway: rate limit exceeded for %s", ev.Channel)
-		target := ""
-		if ev.Payload != nil {
-			if v, ok := ev.Payload["chat_id"].(string); ok {
-				target = v
-			} else if v, ok := ev.Payload["channel_id"].(string); ok {
-				target = v
+	if ev.Kind == EventMessage {
+		if ok, warn := g.checkRateLimit(ev); !ok {
+			if warn {
+				log.Printf("gateway: rate limit exceeded for %s sender=%s", ev.Channel, ev.SourceID)
+				_, _ = g.SendTo(ctx, ev.Channel, rateLimitReply, replyTarget(ev))
 			}
+			return nil
 		}
-		if target == "" {
-			target = ev.SessionID
-		}
-		_, _ = g.SendTo(ctx, ev.Channel,
-			"You're sending messages too quickly. Wait a few seconds and try again.",
-			target)
-		return nil
 	}
 
 	g.mu.Lock()
@@ -319,26 +441,61 @@ func (g *Gateway) SendTyping(ctx context.Context, kind ChannelKind, target strin
 	}
 }
 
-func (g *Gateway) checkRateLimit(channel ChannelKind) bool {
+func replyTarget(ev Event) string {
+	target := ""
+	if ev.Payload != nil {
+		if v, ok := ev.Payload["chat_id"].(string); ok {
+			target = v
+		} else if v, ok := ev.Payload["channel_id"].(string); ok {
+			target = v
+		}
+	}
+	if target == "" {
+		target = ev.SessionID
+	}
+	return target
+}
+
+// checkRateLimit applies a sliding one-minute window per (channel, sender).
+// The second result is true when the caller should send the single
+// "too fast" reply for this window.
+func (g *Gateway) checkRateLimit(ev Event) (allowed bool, warn bool) {
+	key := string(ev.Channel) + "|" + ev.SourceID
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	now := time.Now()
-	bucket := g.rateBuckets[channel]
+	now := g.now()
+	bucket := g.rateBuckets[key]
 	kept := bucket[:0]
 	for _, t := range bucket {
-		if now.Sub(t) < time.Minute {
+		if now.Sub(t) < rateLimitWindow {
 			kept = append(kept, t)
 		}
 	}
 	if len(kept) >= g.rateLimit {
-		g.rateBuckets[channel] = kept
-		return false
+		g.rateBuckets[key] = kept
+		last, seen := g.rateWarned[key]
+		if !seen || now.Sub(last) >= rateLimitWindow {
+			g.rateWarned[key] = now
+			return false, true
+		}
+		return false, false
 	}
-	g.rateBuckets[channel] = append(kept, now)
-	return true
+	g.rateBuckets[key] = append(kept, now)
+	return true, false
 }
 
-func (g *Gateway) processQueue(ctx context.Context) {
+func workerKey(ev Event) string {
+	sid := ev.SessionID
+	if sid == "" {
+		sid = ev.SourceID
+	}
+	return string(ev.Channel) + "|" + sid
+}
+
+// hubLoop drains the intake queue and hands each event to its session worker.
+// It never blocks on a handler: a full worker queue is reported to the sender
+// and the event is refused.
+func (g *Gateway) hubLoop(ctx context.Context) {
 	defer g.wg.Done()
 	for {
 		select {
@@ -348,7 +505,56 @@ func (g *Gateway) processQueue(ctx context.Context) {
 			if !ok {
 				return
 			}
+			g.dispatch(ctx, ev)
+		}
+	}
+}
+
+func (g *Gateway) dispatch(ctx context.Context, ev Event) {
+	key := workerKey(ev)
+	g.workersMu.Lock()
+	w := g.workers[key]
+	if w == nil {
+		w = &sessionWorker{ch: make(chan Event, g.cfg.WorkerQueueSize)}
+		g.workers[key] = w
+		g.wg.Add(1)
+		go g.runWorker(ctx, key, w)
+	}
+	select {
+	case w.ch <- ev:
+		g.workersMu.Unlock()
+	default:
+		g.workersMu.Unlock()
+		g.noteQueueFull(ev, "session")
+	}
+}
+
+func (g *Gateway) runWorker(ctx context.Context, key string, w *sessionWorker) {
+	defer g.wg.Done()
+	idle := time.NewTimer(workerIdleReap)
+	defer idle.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-w.ch:
 			_ = g.Emit(ctx, ev)
+			if !idle.Stop() {
+				select {
+				case <-idle.C:
+				default:
+				}
+			}
+			idle.Reset(workerIdleReap)
+		case <-idle.C:
+			g.workersMu.Lock()
+			if len(w.ch) == 0 && g.workers[key] == w {
+				delete(g.workers, key)
+				g.workersMu.Unlock()
+				return
+			}
+			g.workersMu.Unlock()
+			idle.Reset(workerIdleReap)
 		}
 	}
 }

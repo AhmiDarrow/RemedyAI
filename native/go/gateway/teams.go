@@ -18,7 +18,11 @@ var bfServiceHostSuffixes = []string{
 	".botframework.azure.cn",
 }
 
-var bfIssSuffixes = []string{
+// BotFrameworkIssuer is the only issuer accepted for production channel traffic.
+const BotFrameworkIssuer = "https://api.botframework.com"
+
+// bfDevIssuerHosts are additionally accepted only with teams_dev_emulator.
+var bfDevIssuerHosts = []string{
 	"sts.windows.net",
 	"login.microsoftonline.com",
 	"login.microsoft.com",
@@ -31,27 +35,31 @@ type TeamsChannel struct {
 	appID       string
 	appPassword string
 	tenantID    string
-	allowed     map[string]struct{}
-	allowAll    bool
+	access      Access
+	devEmulator bool
 	client      *http.Client
 
-	mu                 sync.Mutex
-	running            bool
-	token              string
-	tokenExp           time.Time
-	// serviceURLs maps conversation id → last trusted Bot Framework serviceUrl.
-	// Replies must use the conversation's own host (regions / tenants differ).
+	mu       sync.Mutex
+	running  bool
+	token    string
+	tokenExp time.Time
+	// serviceURLs maps conversation id to the last trusted Bot Framework
+	// serviceUrl. Replies must use the conversation host (regions differ).
 	serviceURLs        map[string]string
 	lastConversationID string
 }
 
-// TeamsConfig configures a Teams Bot Framework adapter.
+// TeamsConfig configures a Teams Bot Framework adapter. AllowIDs holds AAD
+// user ids (from.id / aadObjectId); conversation ids are scope only.
+// DevEmulator widens the accepted token issuers for the Bot Framework
+// Emulator and must stay off in production.
 type TeamsConfig struct {
 	AppID       string
 	AppPassword string
 	TenantID    string
 	AllowIDs    any
 	AllowAll    bool
+	DevEmulator bool
 }
 
 // NewTeams builds a Teams channel bound to a gateway hub.
@@ -65,8 +73,8 @@ func NewTeams(g *Gateway, cfg TeamsConfig) *TeamsChannel {
 		appID:       strings.TrimSpace(cfg.AppID),
 		appPassword: strings.TrimSpace(cfg.AppPassword),
 		tenantID:    tenant,
-		allowed:     ParseIDs(cfg.AllowIDs),
-		allowAll:    cfg.AllowAll,
+		access:      NewAccess(cfg.AllowIDs, cfg.AllowAll),
+		devEmulator: cfg.DevEmulator,
 		client:      &http.Client{Timeout: 30 * time.Second},
 		serviceURLs: make(map[string]string),
 	}
@@ -86,7 +94,7 @@ func (c *TeamsChannel) Start(ctx context.Context) error {
 	c.running = true
 	c.mu.Unlock()
 	if c.appID != "" && c.appPassword != "" {
-		log.Printf("teams: active (inbound=webhook, outbound=connector)")
+		log.Printf("teams: active (inbound=webhook, outbound=connector, dev_emulator=%v)", c.devEmulator)
 	} else {
 		log.Printf("teams: stub mode (missing app_id/password)")
 	}
@@ -125,8 +133,10 @@ func isAllowedBotFrameworkServiceURL(raw string) bool {
 	return false
 }
 
-// JWTClaimsStructurallyValid fail-closed aud/exp/nbf/iss checks (no crypto).
-func JWTClaimsStructurallyValid(claims map[string]any, appID string, now time.Time) bool {
+// JWTClaimsStructurallyValid applies fail-closed aud / exp / nbf / iss checks
+// (no crypto). iss is required. In production only BotFrameworkIssuer is
+// accepted; devEmulator additionally admits the Azure AD / emulator issuers.
+func JWTClaimsStructurallyValid(claims map[string]any, appID string, now time.Time, devEmulator bool) bool {
 	appID = strings.TrimSpace(appID)
 	if appID == "" || claims == nil {
 		return false
@@ -158,10 +168,10 @@ func JWTClaimsStructurallyValid(claims map[string]any, appID string, now time.Ti
 		return false
 	}
 
-	ts := now.Unix()
 	if now.IsZero() {
-		ts = time.Now().Unix()
+		now = time.Now()
 	}
+	ts := now.Unix()
 	exp, ok := anyFloat(claims["exp"])
 	if !ok {
 		return false
@@ -174,27 +184,29 @@ func JWTClaimsStructurallyValid(claims map[string]any, appID string, now time.Ti
 			return false
 		}
 	}
-	iss := strings.TrimSpace(anyString(claims["iss"]))
-	if iss != "" {
-		host := ""
-		if parsed, err := url.Parse(iss); err == nil {
-			host = strings.ToLower(parsed.Hostname())
-		}
-		if host == "" {
-			host = strings.ToLower(strings.Split(iss, "/")[0])
-		}
-		okIss := false
-		for _, s := range bfIssSuffixes {
-			if host == s || strings.HasSuffix(host, "."+s) {
-				okIss = true
-				break
-			}
-		}
-		if !okIss {
-			return false
+	iss := strings.TrimRight(strings.TrimSpace(anyString(claims["iss"])), "/")
+	if iss == "" {
+		return false
+	}
+	if iss == BotFrameworkIssuer {
+		return true
+	}
+	if !devEmulator {
+		return false
+	}
+	host := ""
+	if parsed, err := url.Parse(iss); err == nil {
+		host = strings.ToLower(parsed.Hostname())
+	}
+	if host == "" {
+		host = strings.ToLower(strings.Split(iss, "/")[0])
+	}
+	for _, s := range bfDevIssuerHosts {
+		if host == s || strings.HasSuffix(host, "."+s) {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func anyFloat(v any) (float64, bool) {
@@ -226,38 +238,39 @@ func anyFloat(v any) (float64, bool) {
 	}
 }
 
-// VerifyInboundAuth gates Bot Framework JWT (claims + RS256 JWKS).
-func (c *TeamsChannel) VerifyInboundAuth(authorization string) bool {
-	if envTruthy("REMEDY_TEAMS_SKIP_JWT") {
-		return true
+// VerifyInboundAuth gates the Bot Framework JWT (claims + RS256 JWKS) and
+// returns the verified claims for HandleActivity. Claims are nil only when a
+// remedydev build skips verification.
+func (c *TeamsChannel) VerifyInboundAuth(authorization string) (map[string]any, bool) {
+	if devSkipTeamsJWT() {
+		return nil, true
 	}
 	if c.appID == "" {
-		return false
+		return nil, false
 	}
 	auth := strings.TrimSpace(authorization)
 	if !strings.HasPrefix(strings.ToLower(auth), "bearer ") {
 		log.Printf("teams: webhook missing Bearer Authorization")
-		return false
+		return nil, false
 	}
 	token := strings.TrimSpace(auth[7:])
 	claims := DecodeJWTPayloadUnverified(token)
 	if claims == nil {
 		log.Printf("teams: webhook Authorization is not a JWT")
-		return false
+		return nil, false
 	}
-	if !JWTClaimsStructurallyValid(claims, c.appID, time.Now()) {
+	if !JWTClaimsStructurallyValid(claims, c.appID, time.Now(), c.devEmulator) {
 		log.Printf("teams: JWT claim check failed (aud/exp/nbf/iss fail-closed)")
-		return false
+		return nil, false
 	}
-	if envTruthy("REMEDY_TEAMS_SKIP_JWKS") {
-		log.Printf("teams: JWT JWKS signature skipped (REMEDY_TEAMS_SKIP_JWKS)")
-		return true
+	if devSkipTeamsJWKS() {
+		return claims, true
 	}
 	if !VerifyJWTRS256JWKS(token, true) {
 		log.Printf("teams: JWT RS256/JWKS verification failed")
-		return false
+		return nil, false
 	}
-	return true
+	return claims, true
 }
 
 func (c *TeamsChannel) bearer(ctx context.Context) string {
@@ -364,8 +377,19 @@ func (c *TeamsChannel) SendTyping(ctx context.Context, target string) error {
 	return nil
 }
 
+// serviceURLMatchesClaim enforces the Bot Framework rule that the token
+// serviceurl claim equals the activity serviceUrl.
+func serviceURLMatchesClaim(claims map[string]any, serviceURL string) bool {
+	want := strings.ToLower(strings.TrimRight(strings.TrimSpace(anyString(claims["serviceurl"])), "/"))
+	got := strings.ToLower(strings.TrimRight(strings.TrimSpace(serviceURL), "/"))
+	return want != "" && got != "" && want == got
+}
+
 // HandleActivity processes a Bot Framework activity JSON from the webhook.
-func (c *TeamsChannel) HandleActivity(ctx context.Context, activity map[string]any) bool {
+// claims are the verified JWT claims from VerifyInboundAuth; nil is accepted
+// only when a remedydev build skipped verification. Every check (service
+// URL, claim binding, allowlist) runs before any state is mutated.
+func (c *TeamsChannel) HandleActivity(ctx context.Context, activity map[string]any, claims map[string]any) bool {
 	if anyString(activity["type"]) != "message" {
 		return false
 	}
@@ -383,52 +407,52 @@ func (c *TeamsChannel) HandleActivity(ctx context.Context, activity map[string]a
 		from = map[string]any{}
 	}
 	fromID := anyString(from["id"])
+	aadID := anyString(from["aadObjectId"])
 	serviceURL := strings.TrimRight(anyString(activity["serviceUrl"]), "/")
-	if serviceURL != "" && isAllowedBotFrameworkServiceURL(serviceURL) {
-		if convID != "" {
-			c.mu.Lock()
-			if c.serviceURLs == nil {
-				c.serviceURLs = make(map[string]string)
-			}
-			c.serviceURLs[convID] = serviceURL
-			c.lastConversationID = convID
-			c.mu.Unlock()
-		}
-	} else if serviceURL != "" {
-		log.Printf("teams: ignored untrusted serviceUrl host: %s", trimRunes(serviceURL, 120))
-		c.mu.Lock()
-		have := convID != "" && c.serviceURLs != nil && c.serviceURLs[convID] != ""
-		c.mu.Unlock()
-		if !have {
+	if serviceURL == "" || !isAllowedBotFrameworkServiceURL(serviceURL) {
+		log.Printf("teams: ignored untrusted serviceUrl: %s", trimRunes(serviceURL, 120))
+		return false
+	}
+	if claims == nil {
+		if !devSkipTeamsJWT() {
+			log.Printf("teams: activity without verified claims rejected")
 			return false
 		}
+	} else if !serviceURLMatchesClaim(claims, serviceURL) {
+		log.Printf("teams: serviceurl claim does not match activity serviceUrl")
+		return false
 	}
+
+	identity := fromID
+	ok, reason := c.access.Permit(identity, convID)
+	if !ok && aadID != "" {
+		ok, reason = c.access.Permit(aadID, convID)
+	}
+	if !ok {
+		logDeny(ChannelTeams, reason, fromID, convID)
+		c.gateway.recordDenied(ChannelTeams, reason, fromID, convID)
+		return false
+	}
+
 	if convID != "" {
 		c.mu.Lock()
+		if c.serviceURLs == nil {
+			c.serviceURLs = make(map[string]string)
+		}
+		c.serviceURLs[convID] = serviceURL
 		c.lastConversationID = convID
 		c.mu.Unlock()
-	}
-	if len(c.allowed) == 0 && !c.allowAll {
-		log.Printf("teams: ignore (empty allowlist, allow_all=false) conv=%s", firstNonEmpty(convID, fromID))
-		return false
-	}
-	if !IsAllowed(c.allowed, c.allowAll, convID, fromID) {
-		return false
 	}
 	chatID := convID
 	if chatID == "" {
 		chatID = fromID
-	}
-	sourceID := fromID
-	if sourceID == "" {
-		sourceID = convID
 	}
 	username := anyString(from["name"])
 	ev := Event{
 		ID:        NewEventID(),
 		Kind:      EventMessage,
 		Channel:   ChannelTeams,
-		SourceID:  sourceID,
+		SourceID:  fromID,
 		SessionID: chatID,
 		Payload: map[string]any{
 			"message":     text,

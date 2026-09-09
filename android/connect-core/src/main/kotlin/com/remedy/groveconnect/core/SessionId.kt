@@ -7,6 +7,29 @@ import java.security.MessageDigest
 object SessionId {
     private val PAIR = "remedy-connect/1|pair|".toByteArray(Charsets.UTF_8)
     private val DEV = "remedy-connect/1|dev|".toByteArray(Charsets.UTF_8)
+    private val RDV = "remedy-connect/1|rdv|".toByteArray(Charsets.UTF_8)
+    private val PIPE = byteArrayOf('|'.code.toByte())
+
+    /**
+     * Public MQTT brokers accept wildcard subscribers, so a rendezvous id that
+     * never changes lets anyone watching a broker enumerate live machines and
+     * keep returning to the same topic. Public-broker ids therefore carry a
+     * coarse time bucket and go stale on their own. The relay id (see [device])
+     * is unchanged: a relay is a host the owner chose.
+     */
+    const val RDV_BUCKET_SECONDS = 3600L
+
+    /** Rotation bucket for a wall-clock time in seconds since the epoch. */
+    fun rdvBucket(epochSeconds: Long): Long = epochSeconds / RDV_BUCKET_SECONDS
+
+    /** Current rotation bucket. */
+    fun rdvBucketNow(): Long = rdvBucket(System.currentTimeMillis() / 1000L)
+
+    /** Rotating public-broker rendezvous id for a paired device. */
+    fun rendezvous(hostPub: ByteArray, devicePub: ByteArray, bucket: Long): ByteArray {
+        require(hostPub.size == Protocol.KEY_LEN && devicePub.size == Protocol.KEY_LEN)
+        return blake2s16(RDV, hostPub, PIPE, devicePub, PIPE, bucket.toString().toByteArray(Charsets.UTF_8))
+    }
 
     fun pair(hostPub: ByteArray, pairSecret: ByteArray): ByteArray {
         require(hostPub.size == Protocol.KEY_LEN && pairSecret.size == Protocol.KEY_LEN)

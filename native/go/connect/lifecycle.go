@@ -3,6 +3,7 @@ package connect
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"strings"
 	"sync"
@@ -42,7 +43,7 @@ type GatewaySettings struct {
 	APIKey   string
 	Sidecar  int
 	RelayURL string
-	RDV      bool // connect_rdv_enabled; default true when unset at the call site
+	RDV      bool // connect_rdv_enabled; opt-in (public MQTT brokers)
 }
 
 // Gateway owns the Connect listener lifecycle: start/stop, pause, health, self-heal.
@@ -70,6 +71,7 @@ type Gateway struct {
 	supMu     sync.Mutex // serializes refreshSupervisors / stopSupervisors
 	supCancel context.CancelFunc
 	supWG     sync.WaitGroup
+	rdvNotice sync.Once
 
 	mdnsStop func()
 }
@@ -132,6 +134,16 @@ func (g *Gateway) supervisorHandler() RelayConnHandler {
 	}
 }
 
+// supervisorSession is supervisorHandler with the auth outcome kept, so the
+// rendezvous dialer can budget refused handshakes instead of treating the
+// first one as a dead broker.
+func (g *Gateway) supervisorSession() func(context.Context, net.Conn) error {
+	return func(ctx context.Context, conn net.Conn) error {
+		_, err := RunSession(ctx, conn, g.SessionConfig())
+		return err
+	}
+}
+
 // stopSupervisors cancels relay/rdv dialers and waits for them to exit.
 func (g *Gateway) stopSupervisors() {
 	g.supMu.Lock()
@@ -179,16 +191,26 @@ func (g *Gateway) refreshSupervisors() {
 		}()
 	}
 	if live.RDV {
+		log.Printf("connect: rendezvous ON — this machine holds a topic on public MQTT brokers (%s) "+
+			"so the paired phone can reach it off-LAN. Ids rotate every %ds. "+
+			"Set connect_rdv_enabled = false to stop.", RDVQRValue(), RDVBucketSeconds)
+		session := g.supervisorSession()
 		g.supWG.Add(1)
 		go func() {
 			defer g.supWG.Done()
 			_ = RunRDVSupervisor(ctx, RDVSupervisorOpts{
 				Home:    live.Home,
-				Handler: handler,
+				Session: session,
 				Enabled: true,
 			})
 		}()
+		return
 	}
+	g.rdvNotice.Do(func() {
+		log.Printf("connect: rendezvous OFF (default) — the phone reaches this machine over LAN, " +
+			"Tailscale or a relay you choose. Public-broker rendezvous is opt-in: " +
+			"set connect_rdv_enabled = true if the phone must find it from anywhere.")
+	})
 }
 
 // Health returns a snapshot for GET /api/connect.
@@ -439,9 +461,14 @@ func (g *Gateway) LiveConfig() GatewaySettings {
 	return g.settings
 }
 
-// SettingsFromMap reads the Connect keys from a loose settings map (API shape).
+// SettingsFromMap reads the Connect keys from a loose settings map.
+//
+// Rendezvous defaults OFF: it publishes this machine on third-party public
+// MQTT brokers, which is a reasonable thing to opt into and a poor thing to
+// inherit. refreshSupervisors logs which way it resolved so the owner is not
+// left guessing why the phone cannot find the PC off-LAN.
 func SettingsFromMap(raw map[string]any) GatewaySettings {
-	cfg := GatewaySettings{RDV: true, Sidecar: 7400, Port: DefaultBindPort}
+	cfg := GatewaySettings{RDV: false, Sidecar: 7400, Port: DefaultBindPort}
 	if raw == nil {
 		return cfg
 	}

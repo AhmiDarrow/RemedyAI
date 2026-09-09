@@ -416,6 +416,7 @@ func TestTeamsActivityAndJWTClaims(t *testing.T) {
 		return nil
 	})
 	ch := NewTeams(g, TeamsConfig{AppID: "app-id", AppPassword: "pw", AllowAll: true})
+	amerClaims := map[string]any{"serviceurl": "https://smba.trafficmanager.net/amer/"}
 	ok := ch.HandleActivity(context.Background(), map[string]any{
 		"type":       "message",
 		"text":       "hi teams",
@@ -424,7 +425,7 @@ func TestTeamsActivityAndJWTClaims(t *testing.T) {
 			"id": "conv1",
 		},
 		"from": map[string]any{"id": "u1", "name": "User"},
-	})
+	}, amerClaims)
 	if !ok || n.Load() != 1 {
 		t.Fatalf("ok=%v events=%d", ok, n.Load())
 	}
@@ -446,12 +447,12 @@ func TestTeamsActivityAndJWTClaims(t *testing.T) {
 		"aud": "app-id",
 		"exp": float64(now.Add(time.Hour).Unix()),
 		"iss": "https://api.botframework.com",
-	}, "app-id", now) != true {
+	}, "app-id", now, false) != true {
 		t.Fatal("want valid claims")
 	}
 	if JWTClaimsStructurallyValid(map[string]any{
 		"exp": float64(now.Add(time.Hour).Unix()),
-	}, "app-id", now) {
+	}, "app-id", now, false) {
 		t.Fatal("missing aud must fail")
 	}
 }
@@ -465,14 +466,14 @@ func TestTeamsPerConversationServiceURL(t *testing.T) {
 		"type": "message", "text": "a", "serviceUrl": amer,
 		"conversation": map[string]any{"id": "conv-amer"},
 		"from":         map[string]any{"id": "u1"},
-	}) {
+	}, map[string]any{"serviceurl": amer}) {
 		t.Fatal("amer activity rejected")
 	}
 	if !ch.HandleActivity(context.Background(), map[string]any{
 		"type": "message", "text": "b", "serviceUrl": emea,
 		"conversation": map[string]any{"id": "conv-emea"},
 		"from":         map[string]any{"id": "u2"},
-	}) {
+	}, map[string]any{"serviceurl": emea}) {
 		t.Fatal("emea activity rejected")
 	}
 	convAmer, svcAmer := ch.conversationRef("conv-amer")
@@ -500,14 +501,13 @@ func TestGoogleChatEventFilters(t *testing.T) {
 		return nil
 	})
 	ch := NewGoogleChat(g, GoogleChatConfig{AccessToken: "tok", AllowAll: true})
-	if !ch.VerifyInboundAuth("Bearer tok") {
-		t.Fatal("want auth ok")
+	// The app's own outbound access token is never inbound proof, and without a
+	// project number there is no audience to verify against: reject both.
+	if ch.VerifyInboundAuth("Bearer tok") {
+		t.Fatal("outbound access token must not authenticate inbound webhooks")
 	}
 	if ch.VerifyInboundAuth("Bearer wrong") {
 		t.Fatal("want auth fail")
-	}
-	if ch.VerifyInboundAuth("Bearer to") { // length mismatch
-		t.Fatal("length mismatch must fail")
 	}
 	ok := ch.HandleEvent(context.Background(), map[string]any{
 		"type": "MESSAGE",

@@ -16,13 +16,12 @@ import (
 
 // TelegramChannel long-polls getUpdates and sends via sendMessage.
 type TelegramChannel struct {
-	gateway  *Gateway
-	token    string
-	home     string
-	allowed  map[string]struct{}
-	allowAll bool
-	apiBase  string
-	client   *http.Client
+	gateway *Gateway
+	token   string
+	home    string
+	access  Access
+	apiBase string
+	client  *http.Client
 
 	mu            sync.Mutex
 	running       bool
@@ -37,9 +36,15 @@ type TelegramChannel struct {
 }
 
 // TelegramConfig configures a Telegram adapter.
+//
+// AllowChatIDs is the user identity allowlist (legacy name: for private chats
+// the chat id equals the user id). ScopeChatIDs optionally restricts which
+// chats / groups the bot answers in; group ids are scope only and never
+// authorize a sender by themselves.
 type TelegramConfig struct {
 	BotToken     string
 	AllowChatIDs any
+	ScopeChatIDs any
 	AllowAll     bool
 	HomeDir      string
 }
@@ -47,13 +52,16 @@ type TelegramConfig struct {
 // NewTelegram builds a Telegram channel bound to a gateway hub.
 func NewTelegram(g *Gateway, cfg TelegramConfig) *TelegramChannel {
 	tok := strings.TrimSpace(cfg.BotToken)
+	access := NewAccess(cfg.AllowChatIDs, cfg.AllowAll)
+	for id := range ParseIDs(cfg.ScopeChatIDs) {
+		access.Scopes[id] = struct{}{}
+	}
 	return &TelegramChannel{
-		gateway:  g,
-		token:    tok,
-		home:     cfg.HomeDir,
-		allowed:  ParseIDs(cfg.AllowChatIDs),
-		allowAll: cfg.AllowAll,
-		apiBase:  "https://api.telegram.org/bot" + tok,
+		gateway: g,
+		token:   tok,
+		home:    cfg.HomeDir,
+		access:  access,
+		apiBase: "https://api.telegram.org/bot" + tok,
 		client: &http.Client{
 			Timeout: 60 * time.Second,
 		},
@@ -83,7 +91,7 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 		log.Printf("telegram: stub mode (no token)")
 		return nil
 	}
-	log.Printf("telegram: active (allowlist=%d allow_all=%v)", len(c.allowed), c.allowAll)
+	log.Printf("telegram: active (allowlist=%d scopes=%d allow_all=%v)", len(c.access.Users), len(c.access.Scopes), c.access.AllowAll)
 	if !c.tryStartPoller(runCtx) {
 		log.Printf("telegram: long-poll deferred — another process holds the bot lock; retrying")
 		c.wg.Add(1)
@@ -121,10 +129,7 @@ func (c *TelegramChannel) Send(ctx context.Context, message, target string) (boo
 	}
 	chatID := strings.TrimSpace(target)
 	if chatID == "" {
-		for id := range c.allowed {
-			chatID = id
-			break
-		}
+		chatID = c.access.FirstUser()
 	}
 	if chatID == "" {
 		return false, nil
@@ -166,7 +171,7 @@ func (c *TelegramChannel) tryStartPoller(ctx context.Context) bool {
 			c.lock = nil
 		}
 		c.mu.Unlock()
-		lock := NewPollLock(c.home, "telegram")
+		lock := NewPollLockForToken(c.home, "telegram", c.token)
 		if !lock.TryAcquire() {
 			return false
 		}
@@ -273,7 +278,17 @@ func (c *TelegramChannel) pollLoop(ctx context.Context) {
 			continue
 		}
 		for _, u := range updates {
-			c.handleUpdate(ctx, u)
+			if !c.handleUpdate(ctx, u) {
+				// Hub refused the event (queue full). The offset was not
+				// advanced, so Telegram redelivers this update; pause briefly
+				// instead of spinning on the same batch.
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(2 * time.Second):
+				}
+				break
+			}
 		}
 	}
 }
@@ -384,64 +399,78 @@ func telegram409Backoff(now, pollStartedAt time.Time) (time.Duration, bool) {
 	insist := !pollStartedAt.IsZero() && now.Sub(pollStartedAt) < 90*time.Second
 	if insist {
 		// 2s + jitter from fractional second
-		jitter := time.Duration((now.UnixNano()%1700))*time.Millisecond
+		jitter := time.Duration((now.UnixNano() % 1700)) * time.Millisecond
 		return 2*time.Second + jitter, true
 	}
 	return 25 * time.Second, false
 }
 
-func (c *TelegramChannel) handleUpdate(ctx context.Context, update map[string]any) {
-	if id, ok := asInt(update["update_id"]); ok {
-		c.mu.Lock()
-		if id > c.lastUpdateID {
-			c.lastUpdateID = id
-		}
-		offset := c.lastUpdateID
-		c.mu.Unlock()
-		SaveUpdateOffset(c.home, "telegram", offset)
-	}
+// handleUpdate normalizes one getUpdates item. It returns false only when the
+// hub refused the event; in that case the offset is left untouched so the
+// update is fetched again on the next poll.
+func (c *TelegramChannel) handleUpdate(ctx context.Context, update map[string]any) bool {
+	updateID, hasID := asInt(update["update_id"])
 	msg, _ := update["message"].(map[string]any)
 	if msg == nil {
 		msg, _ = update["edited_message"].(map[string]any)
 	}
+	ev, ok := c.eventFromMessage(msg, update)
+	if ok {
+		if c.gateway != nil && !c.gateway.TryEnqueue(ev) {
+			return false
+		}
+	}
+	if hasID {
+		c.commitOffset(updateID)
+	}
+	return true
+}
+
+// commitOffset advances and persists the long-poll cursor.
+func (c *TelegramChannel) commitOffset(updateID int) {
+	c.mu.Lock()
+	if updateID > c.lastUpdateID {
+		c.lastUpdateID = updateID
+	}
+	offset := c.lastUpdateID
+	c.mu.Unlock()
+	SaveUpdateOffset(c.home, "telegram", offset)
+}
+
+// eventFromMessage applies bot / allowlist filters and builds the hub event.
+func (c *TelegramChannel) eventFromMessage(msg, update map[string]any) (Event, bool) {
 	if msg == nil {
-		return
+		return Event{}, false
 	}
 	text, _ := msg["text"].(string)
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return
+		return Event{}, false
 	}
 	from, _ := msg["from"].(map[string]any)
 	if isBot, _ := from["is_bot"].(bool); isBot {
-		return
+		return Event{}, false
 	}
 	chat, _ := msg["chat"].(map[string]any)
-	chatID := fmt.Sprint(chat["id"])
-	if chatID == "<nil>" {
-		chatID = ""
+	chatID := anyString(chat["id"])
+	userID := anyString(from["id"])
+	access := c.access
+	if devAllowAll("REMEDY_TELEGRAM_ALLOW_ALL") {
+		access.AllowAll = true
 	}
-	userID := fmt.Sprint(from["id"])
-	if userID == "<nil>" {
-		userID = ""
-	}
-	allowAll := c.allowAll || EnvAllowAll("REMEDY_TELEGRAM_ALLOW_ALL")
-	if !IsAllowed(c.allowed, allowAll, chatID, userID) {
-		log.Printf("telegram: ignore chat_id=%s user_id=%s (allowlist)", chatID, userID)
-		return
+	if ok, reason := access.Permit(userID, chatID); !ok {
+		logDeny(ChannelTelegram, reason, userID, chatID)
+		c.gateway.recordDenied(ChannelTelegram, reason, userID, chatID)
+		return Event{}, false
 	}
 	go func() { _ = c.SendTyping(context.Background(), chatID) }()
 
 	username, _ := from["username"].(string)
-	sourceID := userID
-	if sourceID == "" {
-		sourceID = chatID
-	}
 	ev := Event{
 		ID:        NewEventID(),
 		Kind:      EventMessage,
 		Channel:   ChannelTelegram,
-		SourceID:  sourceID,
+		SourceID:  userID,
 		SessionID: chatID,
 		Payload: map[string]any{
 			"message":  text,
@@ -453,11 +482,7 @@ func (c *TelegramChannel) handleUpdate(ctx context.Context, update map[string]an
 		At:  time.Now().UTC(),
 	}
 	log.Printf("telegram: inbound chat_id=%s user=%s len=%d", chatID, firstNonEmpty(username, userID), len(text))
-	if c.gateway != nil && c.gateway.Running() {
-		c.gateway.Enqueue(ev)
-	} else if c.gateway != nil {
-		_ = c.gateway.Emit(ctx, ev)
-	}
+	return ev, true
 }
 
 func (c *TelegramChannel) apiPost(ctx context.Context, method string, body map[string]any) (int, []byte, error) {

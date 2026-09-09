@@ -3,6 +3,7 @@ package secret
 import (
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -100,6 +101,49 @@ func GetProviderSecret(home, provider string) string {
 	return LoadProviderKeys(home)[provider]
 }
 
+// StoreEncoding reports how the provider store on disk is protected:
+// "dpapi", "plain", "missing", or "unknown".
+func StoreEncoding(home string) string {
+	raw, err := os.ReadFile(ProviderKeysPath(home))
+	if err != nil || len(raw) == 0 {
+		return "missing"
+	}
+	var outer map[string]any
+	if json.Unmarshal(raw, &outer) != nil {
+		return "unknown"
+	}
+	if enc, _ := outer["encoding"].(string); enc != "" {
+		return enc
+	}
+	return "unknown"
+}
+
+// PlaintextAtRest reports whether secrets are readable by anyone who can read
+// the profile. Callers surface this; it is never a silent fallback.
+func PlaintextAtRest(home string) bool {
+	return strings.EqualFold(StoreEncoding(home), "plain")
+}
+
+// PlaintextWarning is the owner-facing sentence for a plaintext store.
+const PlaintextWarning = "Provider and messenger credentials are stored as plaintext on this " +
+	"machine: the OS credential seal (DPAPI) is unavailable here, and Remedy will not " +
+	"invent a weaker one. Anyone who can read your user profile can read them. " +
+	"Keep this home directory off shared storage and out of backups you do not control."
+
+// warnPlaintextOnce keeps the startup log to one line per process.
+var warnPlaintextOnce sync.Once
+
+// WarnPlaintextAtRest logs PlaintextWarning once when the store is plaintext
+// and actually holds something.
+func WarnPlaintextAtRest(home string) {
+	if !PlaintextAtRest(home) || len(LoadProviderKeys(home)) == 0 {
+		return
+	}
+	warnPlaintextOnce.Do(func() {
+		log.Printf("secret store: %s", PlaintextWarning)
+	})
+}
+
 // PublicSecretStatus is the safe blob for GET /api/settings (no raw secrets).
 func PublicSecretStatus(home string) map[string]any {
 	keys := LoadProviderKeys(home)
@@ -123,16 +167,16 @@ func PublicSecretStatus(home string) map[string]any {
 		set[k] = true
 		providers = append(providers, k)
 	}
+	plaintext := strings.EqualFold(encoding, "plain")
 	out := map[string]any{
 		"providers_with_keys": providers,
 		"provider_keys_set":   set,
 		"store_path":          path,
 		"encoding":            encoding,
+		"plaintext_at_rest":   plaintext,
 	}
-	if encoding == "plain" && len(keys) > 0 {
-		out["encoding_warning"] = "Provider API keys are stored as plaintext (DPAPI seal unavailable). " +
-			"Anyone with access to your user profile can read them. " +
-			"On Windows, fix DPAPI / re-save keys if this was unexpected."
+	if plaintext && len(keys) > 0 {
+		out["encoding_warning"] = PlaintextWarning
 	}
 	return out
 }
@@ -237,7 +281,13 @@ func encodeProviderStore(keys map[string]string) ([]byte, error) {
 		return nil, err
 	}
 	if runtime.GOOS == "windows" {
-		if sealed, err := Protect(plain); err == nil && len(sealed) > 0 {
+		sealed, perr := Protect(plain)
+		if perr != nil {
+			// On Windows DPAPI is expected to work; if it does not, the owner
+			// needs to know their credentials just landed in the clear.
+			log.Printf("secret store: DPAPI seal failed (%v) — writing plaintext instead", perr)
+		}
+		if perr == nil && len(sealed) > 0 {
 			outer := map[string]any{
 				"version":    providerStoreVersion,
 				"encoding":   "dpapi",
@@ -250,6 +300,15 @@ func encodeProviderStore(keys map[string]string) ([]byte, error) {
 			}
 			return append(b, '\n'), nil
 		}
+	}
+	// No OS credential seal on this platform. A keyring (Secret Service /
+	// macOS Keychain) would need a new third-party dependency, so the store
+	// stays plaintext and says so loudly rather than pretending otherwise:
+	// see PlaintextWarning, PublicSecretStatus and WarnPlaintextAtRest.
+	if len(keys) > 0 {
+		warnPlaintextOnce.Do(func() {
+			log.Printf("secret store: %s", PlaintextWarning)
+		})
 	}
 	outer := map[string]any{
 		"version":    providerStoreVersion,

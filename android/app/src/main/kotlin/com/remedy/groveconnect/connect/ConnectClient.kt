@@ -208,7 +208,7 @@ class ConnectClient(
             }
             if (rdvHosts.isNotEmpty()) {
                 try {
-                    val sid = SessionId.device(hostPub, devicePub)
+                    val sid = SessionId.rendezvous(hostPub, devicePub, SessionId.rdvBucketNow())
                     connectRendezvous(rdvHosts, sid, hostPub, pairSecret = null, hello = hello, timeoutMs = timeoutMs)
                     via = "rdv"
                     return
@@ -237,7 +237,7 @@ class ConnectClient(
         }
         if (rdvHosts.isNotEmpty()) {
             try {
-                val sid = SessionId.device(hostPub, devicePub)
+                val sid = SessionId.rendezvous(hostPub, devicePub, SessionId.rdvBucketNow())
                 connectRendezvous(rdvHosts, sid, hostPub, pairSecret = null, hello = hello, timeoutMs = timeoutMs)
                 via = "rdv"
                 return

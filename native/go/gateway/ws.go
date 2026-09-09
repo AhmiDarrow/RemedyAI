@@ -13,16 +13,22 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
 // wsConn is a minimal RFC6455 client (text/close/ping/pong) for Discord/Slack.
+// Writes are serialized so a heartbeat goroutine and the session loop never
+// interleave frame bytes.
 type wsConn struct {
 	conn   net.Conn
 	reader *bufio.Reader
+	wmu    sync.Mutex
 }
 
-func dialWS(rawURL string, headers http.Header, timeout time.Duration) (*wsConn, error) {
+// dialWS is a var so gateway tests can drive a real WS peer over net.Pipe
+// instead of reaching Discord / Slack.
+var dialWS = func(rawURL string, headers http.Header, timeout time.Duration) (*wsConn, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err
@@ -137,6 +143,8 @@ func (w *wsConn) writeFrame(opcode byte, payload []byte) error {
 	if w == nil || w.conn == nil {
 		return errors.New("ws closed")
 	}
+	w.wmu.Lock()
+	defer w.wmu.Unlock()
 	var hdr []byte
 	hdr = append(hdr, 0x80|opcode)
 	n := len(payload)

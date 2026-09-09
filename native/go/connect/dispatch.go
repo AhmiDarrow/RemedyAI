@@ -3,8 +3,10 @@ package connect
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -24,6 +26,41 @@ type InnerMuxState struct {
 	Panes       map[string]bool
 	SidecarPort int
 	APIKey      string
+
+	// idleTimeout / lastRequest gate the rails family. Keepalive PINGs do not
+	// count as activity, so a phone that has been quiet longer than the idle
+	// timeout must complete a fresh Noise handshake before it can open a
+	// terminal, a file browser or the browser rail again.
+	idleTimeout time.Duration
+	lastRequest time.Time
+}
+
+// noteRequest records inner HTTP activity (never a PING).
+func (s *InnerMuxState) noteRequest(now time.Time) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.lastRequest = now
+	s.mu.Unlock()
+}
+
+// railsStale reports whether the rails family needs a fresh handshake first.
+func (s *InnerMuxState) railsStale(now time.Time) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	last := s.lastRequest
+	idle := s.idleTimeout
+	s.mu.Unlock()
+	if last.IsZero() {
+		return false
+	}
+	if idle <= 0 {
+		idle = IdleTimeout
+	}
+	return now.Sub(last) > idle
 }
 
 type fragmentBuf struct {
@@ -41,11 +78,17 @@ func newInnerMuxState(cfg SessionConfig) *InnerMuxState {
 	if port <= 0 {
 		port = 7400
 	}
+	idle := cfg.IdleTimeout
+	if idle <= 0 {
+		idle = IdleTimeout
+	}
 	return &InnerMuxState{
 		fragments:   make(map[uint32]*fragmentBuf),
 		Panes:       panes,
 		SidecarPort: port,
 		APIKey:      cfg.APIKey,
+		idleTimeout: idle,
+		lastRequest: time.Now(),
 	}
 }
 
@@ -121,6 +164,10 @@ func IterRequestHTTP(req HTTPRequest, device Device, state *InnerMuxState, home 
 		method = "GET"
 	}
 
+	now := time.Now()
+	railsStale := state.railsStale(now)
+	state.noteRequest(now)
+
 	if (method == "PUT" || method == "PATCH") && strings.HasPrefix(path, "/api/settings") {
 		if locked := SettingsWriteLocked(req.Body); locked != "" {
 			return emit(jsonError(403, locked, "forbidden"))
@@ -164,7 +211,20 @@ func IterRequestHTTP(req HTTPRequest, device Device, state *InnerMuxState, home 
 	}
 
 	if reason := ConnectForbidden(method, path, query, panes); reason != "" {
+		if reason == "pane:rails" {
+			log.Printf("connect: refused %s %s for device %s (rails pane is off — "+
+				"turn Rails on in Settings to give this phone terminal / files / browser)",
+				method, path, device.ID)
+		}
 		return emit(jsonError(403, reason, "forbidden"))
+	}
+
+	// Rails stay behind a live handshake: an authenticated socket that has been
+	// silent past the idle timeout is a phone somebody may have picked up since.
+	if railsStale && starts(path, railsPrefixes) {
+		log.Printf("connect: rails need a fresh handshake for device %s (idle past %s)",
+			device.ID, state.idleTimeout)
+		return emit(jsonError(403, "rails:stale-session", "forbidden"))
 	}
 
 	return IterProxyResponse(ProxyRequest{
