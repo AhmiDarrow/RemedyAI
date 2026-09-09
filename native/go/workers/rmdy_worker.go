@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -11,10 +12,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/core"
 	"github.com/AhmiDarrow/RemedyAI/native/go/ipc"
+	"github.com/AhmiDarrow/RemedyAI/native/go/protocol"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
@@ -22,8 +25,23 @@ const (
 	envRMDYEndpoint = "REMEDY_RMDY_ENDPOINT"
 	envPython       = "REMEDY_PYTHON"
 	envRMDYPyz      = "REMEDY_RMDY_PYZ"
+	envRMDYDeps     = "REMEDY_RMDY_DEPS"
 	defaultAttach   = 15 * time.Second
 )
+
+// depsDirName is the dependency directory staged beside the zipapp by
+// scripts/build_rmdy_worker.py. The zipapp carries src/remedy only; pydantic
+// and PyYAML ship here because their compiled extensions cannot be imported
+// from inside an archive.
+const depsDirName = "rmdy-deps"
+
+// ExitMissingDependencies is the worker exit code for an unimportable
+// third-party closure (sysexits EX_CONFIG). Must match
+// remedy.runtime.rmdy_tool_worker.EXIT_MISSING_DEPENDENCIES.
+const ExitMissingDependencies = 78
+
+// ErrWorkerMissingDeps is the operator-facing diagnosis for that exit code.
+var ErrWorkerMissingDeps = errors.New("python worker is missing its dependencies — reinstall")
 
 // ErrWorkerAttachRequired is returned when the RMDY tool worker cannot be
 // supervised or attached. Serve must fail closed — never pretend tools exist.
@@ -34,7 +52,19 @@ type StartedProcess struct {
 	PID     uint32
 	Handle  uint64 // Zig process handle; 0 for non-Zig starters
 	Cleanup func() error
+	// Wait blocks until the child exits and returns its exit code. Optional;
+	// when nil the supervisor relies on the IPC connection closing.
+	Wait func() (uint32, error)
 }
+
+// ErrProcessClosed is returned by StartedProcess.Wait once Cleanup ran.
+var ErrProcessClosed = errors.New("process handle closed")
+
+// attachProbeDefault is the tool the attach probe executes. prompt.assemble
+// exercises the full import chain (config, models, memory) so a packaged
+// worker missing a dependency fails at startup with the traceback in the
+// worker log rather than on the first chat turn.
+const attachProbeDefault = "prompt.assemble"
 
 // ProcessStarter starts argv with the given environment. Production uses Zig
 // remedy_core authorized spawn (no os/exec). Tests may inject os/exec.
@@ -48,6 +78,10 @@ type RMDYToolOptions struct {
 	Endpoint      string   // default: platform IPC path with remedy- prefix
 	AttachTimeout time.Duration
 	StartProcess  ProcessStarter // default: ZigProcessStarter
+	// AttachProbeTool is executed once after the worker dials in; a failure
+	// aborts the attach. Empty selects attachProbeDefault (prompt.assemble);
+	// "none" skips the tool probe (the health frame is always checked).
+	AttachProbeTool string
 }
 
 // RMDYToolSession is a live FrameCaller backed by a supervised Python worker.
@@ -59,30 +93,35 @@ type RMDYToolSession struct {
 	listener net.Listener
 	proc     *StartedProcess
 	cancel   context.CancelFunc
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
-// Close tears down the IPC client, listener, and child process.
+// Close tears down the IPC client, listener, and child process. It runs once;
+// the fields stay set so the supervisor may read Client / proc concurrently
+// (closing the client is what wakes its Done channel).
 func (s *RMDYToolSession) Close() error {
 	if s == nil {
 		return nil
 	}
-	var joined error
-	if s.cancel != nil {
-		s.cancel()
-	}
-	if s.Client != nil {
-		joined = errors.Join(joined, s.Client.Close())
-		s.Client = nil
-	}
-	if s.listener != nil {
-		joined = errors.Join(joined, s.listener.Close())
-		s.listener = nil
-	}
-	if s.proc != nil && s.proc.Cleanup != nil {
-		joined = errors.Join(joined, s.proc.Cleanup())
-		s.proc = nil
-	}
-	return joined
+	s.closeOnce.Do(func() {
+		var joined error
+		if s.cancel != nil {
+			s.cancel()
+		}
+		if s.Client != nil {
+			joined = errors.Join(joined, s.Client.Close())
+		}
+		if s.listener != nil {
+			joined = errors.Join(joined, s.listener.Close())
+		}
+		if s.proc != nil && s.proc.Cleanup != nil {
+			joined = errors.Join(joined, s.proc.Cleanup())
+		}
+		s.closeErr = joined
+	})
+	return s.closeErr
 }
 
 // ZigProcessStarter spawns via remedy_core authorized hidden process.
@@ -98,24 +137,52 @@ func ZigProcessStarter(home string) ProcessStarter {
 			return nil, err
 		}
 		_ = core.WriteJailSetRoots(nil)
-		token, nowMS, err := core.IssueProcessSpawnToken(argv, false)
+		token, nowMS, err := core.IssueProcessSpawnToken(argv, env, false, false)
 		if err != nil {
 			return nil, err
 		}
-		pid, handle, err := core.ProcessSpawnAuthorized(argv, cwd, env, token, "", "", false, nowMS)
+		pid, handle, err := core.ProcessSpawnAuthorized(argv, cwd, env, false, token, "", "", false, nowMS)
 		if err != nil {
 			return nil, err
 		}
+		// handleMu serializes ProcessWait against ProcessClose: the Zig side
+		// frees the handle on close, so a poll after close would be a
+		// use-after-free.
+		var handleMu sync.Mutex
+		closed := false
 		return &StartedProcess{
 			PID:    pid,
 			Handle: handle,
 			Cleanup: func() error {
+				handleMu.Lock()
+				defer handleMu.Unlock()
+				if closed {
+					return nil
+				}
+				closed = true
 				var joined error
 				if pid != 0 {
 					joined = errors.Join(joined, core.ProcessKillTree(pid))
 				}
 				joined = errors.Join(joined, core.ProcessClose(handle))
 				return joined
+			},
+			Wait: func() (uint32, error) {
+				for {
+					handleMu.Lock()
+					if closed {
+						handleMu.Unlock()
+						return 0, ErrProcessClosed
+					}
+					code, err := core.ProcessWait(handle, 500)
+					handleMu.Unlock()
+					if err != nil {
+						return 0, err
+					}
+					if code != nil {
+						return *code, nil
+					}
+				}
 			},
 		}, nil
 	}
@@ -179,6 +246,10 @@ func StartRMDYToolWorker(ctx context.Context, opts RMDYToolOptions) (*RMDYToolSe
 		env["REMEDY_HOME"] = home
 	}
 	enrichWorkerEnv(env, opts.Cwd)
+	if err := applyWorkerDepsEnv(env); err != nil {
+		_ = session.Close()
+		return nil, err
+	}
 
 	proc, err := starter(sessionCtx, argv, env, opts.Cwd)
 	if err != nil {
@@ -189,6 +260,7 @@ func StartRMDYToolWorker(ctx context.Context, opts RMDYToolOptions) (*RMDYToolSe
 	if proc != nil {
 		session.PID = proc.PID
 	}
+	exited := watchProcessExit(proc)
 
 	acceptCtx, acceptCancel := context.WithTimeout(sessionCtx, timeout)
 	defer acceptCancel()
@@ -206,8 +278,16 @@ func StartRMDYToolWorker(ctx context.Context, opts RMDYToolOptions) (*RMDYToolSe
 	var conn net.Conn
 	select {
 	case <-acceptCtx.Done():
+		// The child usually died first; read its code before Close kills it.
+		if code, ok := awaitProcessExit(exited, time.Second); ok {
+			_ = session.Close()
+			return nil, workerExitError(code)
+		}
 		_ = session.Close()
 		return nil, fmt.Errorf("%w: worker did not dial %s within %s", ErrWorkerAttachRequired, endpoint, timeout)
+	case code := <-exited:
+		_ = session.Close()
+		return nil, workerExitError(code)
 	case res := <-ch:
 		if res.err != nil {
 			_ = session.Close()
@@ -217,7 +297,201 @@ func StartRMDYToolWorker(ctx context.Context, opts RMDYToolOptions) (*RMDYToolSe
 	}
 
 	session.Client = ipc.NewClient(conn)
+	if err := probeWorker(sessionCtx, session.Client, opts, timeout); err != nil {
+		_ = session.Close()
+		return nil, fmt.Errorf("%w: attach probe: %v", ErrWorkerAttachRequired, err)
+	}
 	return session, nil
+}
+
+// probeWorker checks the health frame and runs the attach probe tool. The
+// probe request is Go-bound so home_dir is honoured by the worker.
+func probeWorker(ctx context.Context, client *ipc.Client, opts RMDYToolOptions, timeout time.Duration) error {
+	probeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var corr [16]byte
+	if _, err := rand.Read(corr[:]); err != nil {
+		return err
+	}
+	health, err := client.Call(probeCtx, protocol.Frame{Kind: protocol.KindHealth, CorrelationID: corr})
+	if err != nil {
+		return fmt.Errorf("health: %w", err)
+	}
+	if health.Kind != protocol.KindHealth {
+		return fmt.Errorf("health: unexpected frame kind %d", health.Kind)
+	}
+	var status struct {
+		Protocol int  `json:"protocol"`
+		Ready    bool `json:"ready"`
+	}
+	if err := json.Unmarshal(health.Payload, &status); err != nil {
+		return fmt.Errorf("health: %w", err)
+	}
+	if status.Protocol != ProtocolVersion || !status.Ready {
+		return fmt.Errorf("health: protocol=%d ready=%v", status.Protocol, status.Ready)
+	}
+
+	tool := strings.TrimSpace(opts.AttachProbeTool)
+	if tool == "" {
+		tool = attachProbeDefault
+	}
+	if strings.EqualFold(tool, "none") {
+		return nil
+	}
+	input := map[string]any{"_go_bound": true}
+	switch tool {
+	case "prompt.assemble":
+		input["message"] = "attach probe"
+		input["session_id"] = "rmdy-attach-probe"
+		input["chat_mode"] = true
+		if home := strings.TrimSpace(opts.HomeDir); home != "" {
+			input["home_dir"] = home
+		}
+	case "text.slugify":
+		input["text"] = "attach probe"
+	}
+	raw, err := json.Marshal(map[string]any{"tool_id": tool, "version": 1, "input": input, "_go_bound": true})
+	if err != nil {
+		return err
+	}
+	if _, err := rand.Read(corr[:]); err != nil {
+		return err
+	}
+	res, err := client.Call(probeCtx, protocol.Frame{Kind: protocol.KindToolRequest, CorrelationID: corr, Payload: raw})
+	if err != nil {
+		return fmt.Errorf("%s: %w", tool, err)
+	}
+	if res.Flags&1 != 0 {
+		return fmt.Errorf("%s: transport error: %s", tool, string(res.Payload))
+	}
+	var result struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(res.Payload, &result); err != nil {
+		return fmt.Errorf("%s: %w", tool, err)
+	}
+	if !result.OK {
+		// The worker logged the traceback to stderr and rmdy_worker.log.
+		return fmt.Errorf("%s failed in worker: %s (see <REMEDY_HOME>/logs/rmdy_worker.log)", tool, result.Error)
+	}
+	return nil
+}
+
+// watchProcessExit reports the child's exit code once, when the starter can
+// wait on it. A worker that dies before dialing — a packaged install whose
+// dependency directory is missing exits ExitMissingDependencies immediately —
+// is then diagnosed at once instead of after the whole attach timeout. The
+// goroutine ends when the process exits or the handle is closed.
+func watchProcessExit(proc *StartedProcess) <-chan uint32 {
+	if proc == nil || proc.Wait == nil {
+		return nil
+	}
+	ch := make(chan uint32, 1)
+	go func() {
+		code, err := proc.Wait()
+		if err != nil {
+			return
+		}
+		ch <- code
+	}()
+	return ch
+}
+
+// awaitProcessExit waits up to d for a pending exit code.
+func awaitProcessExit(exited <-chan uint32, d time.Duration) (uint32, bool) {
+	if exited == nil {
+		return 0, false
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case code := <-exited:
+		return code, true
+	case <-timer.C:
+		return 0, false
+	}
+}
+
+// workerExitError explains a worker that exited before the attach finished.
+func workerExitError(code uint32) error {
+	if code == ExitMissingDependencies {
+		return fmt.Errorf("%w: %w (see <REMEDY_HOME>/logs/rmdy_worker.log)", ErrWorkerAttachRequired, ErrWorkerMissingDeps)
+	}
+	return fmt.Errorf("%w: worker exited with code %d before attaching (see <REMEDY_HOME>/logs/rmdy_worker.log)", ErrWorkerAttachRequired, code)
+}
+
+// applyWorkerDepsEnv points the worker at its staged dependency directory.
+// An inherited or caller-set value wins; otherwise the directory is discovered
+// beside the zipapp. Nothing is set in a dev checkout without a staged
+// directory — there the venv already provides the closure.
+func applyWorkerDepsEnv(env map[string]string) error {
+	if env == nil {
+		return nil
+	}
+	if strings.TrimSpace(env[envRMDYDeps]) != "" {
+		return nil
+	}
+	deps, ok, err := resolveRMDYDeps()
+	if err != nil {
+		return err
+	}
+	if ok {
+		env[envRMDYDeps] = deps
+	}
+	return nil
+}
+
+// resolveRMDYDeps returns the staged dependency directory when configured or
+// discovered. REMEDY_RMDY_DEPS set but missing fails closed.
+func resolveRMDYDeps() (string, bool, error) {
+	if override := strings.TrimSpace(os.Getenv(envRMDYDeps)); override != "" {
+		abs, err := filepath.Abs(override)
+		if err != nil {
+			return "", false, err
+		}
+		st, err := os.Stat(abs)
+		if err != nil || !st.IsDir() {
+			return "", false, fmt.Errorf("%w: REMEDY_RMDY_DEPS missing or not a directory: %s", ErrWorkerAttachRequired, abs)
+		}
+		return abs, true, nil
+	}
+	candidates := []string{}
+	// Packaging always stages the directory next to the zipapp.
+	if pyz, ok, err := resolveRMDYPyz(); err == nil && ok {
+		candidates = append(candidates, filepath.Join(filepath.Dir(pyz), depsDirName))
+	}
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(dir, depsDirName),
+			filepath.Join(dir, "bin", depsDirName),
+			filepath.Join(dir, "resources", depsDirName),
+			filepath.Join(dir, "..", "resources", depsDirName),
+		)
+	}
+	if res := strings.TrimSpace(os.Getenv("REMEDY_RESOURCES")); res != "" {
+		candidates = append(candidates, filepath.Join(res, depsDirName))
+	}
+	if home := strings.TrimSpace(os.Getenv("REMEDY_HOME")); home != "" {
+		candidates = append(candidates, filepath.Join(home, "bin", depsDirName))
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(cwd, "dist", depsDirName),
+			filepath.Join(cwd, "desktop", "bin", depsDirName),
+		)
+	}
+	for _, c := range candidates {
+		if st, err := os.Stat(c); err == nil && st.IsDir() {
+			abs, err := filepath.Abs(c)
+			if err != nil {
+				continue
+			}
+			return abs, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func defaultToolEndpoint() (string, error) {
@@ -244,6 +518,12 @@ func defaultPythonWorkerArgv() ([]string, error) {
 	if pyzErr != nil {
 		return nil, pyzErr
 	}
+	workerArgv := func(python string) []string {
+		if pyzOK {
+			return []string{python, pyz}
+		}
+		return []string{python, "-m", "remedy.runtime.rmdy_tool_worker"}
+	}
 
 	if override := strings.TrimSpace(os.Getenv(envPython)); override != "" {
 		abs, err := filepath.Abs(override)
@@ -253,26 +533,23 @@ func defaultPythonWorkerArgv() ([]string, error) {
 		if st, err := os.Stat(abs); err != nil || st.IsDir() {
 			return nil, fmt.Errorf("%w: REMEDY_PYTHON is not an absolute file: %s", ErrWorkerAttachRequired, abs)
 		}
-		if pyzOK {
-			return []string{abs, pyz}, nil
-		}
-		return []string{abs, "-m", "remedy.runtime.rmdy_tool_worker"}, nil
+		return workerArgv(abs), nil
+	}
+	// Dev tree: the project .venv has pydantic/yaml/etc. installed, unlike a
+	// stray PATH python — prefer it whenever we are running from a checkout,
+	// including when a zipapp was built into dist/ or desktop/bin.
+	if venv := repoVenvPython(); venv != "" {
+		return workerArgv(venv), nil
 	}
 	for _, name := range []string{"python", "python3"} {
 		if abs := lookPathAbs(name); abs != "" && !isWindowsStorePythonStub(abs) {
-			if pyzOK {
-				return []string{abs, pyz}, nil
-			}
-			return []string{abs, "-m", "remedy.runtime.rmdy_tool_worker"}, nil
+			return workerArgv(abs), nil
 		}
 	}
 	// Packaged Desktop often has no PATH python; reuse or download the
 	// managed CPython under ~/.remedy/voice/runtime (shared with voice).
 	if abs, err := ensureManagedPython(); err == nil && abs != "" {
-		if pyzOK {
-			return []string{abs, pyz}, nil
-		}
-		return []string{abs, "-m", "remedy.runtime.rmdy_tool_worker"}, nil
+		return workerArgv(abs), nil
 	} else if err != nil && pyzOK {
 		return nil, fmt.Errorf("%w: no python interpreter found (%v); set REMEDY_PYTHON or allow managed download", ErrWorkerAttachRequired, err)
 	}
@@ -280,6 +557,61 @@ func defaultPythonWorkerArgv() ([]string, error) {
 		return []string{uv, "run", "python", "-m", "remedy.runtime.rmdy_tool_worker"}, nil
 	}
 	return nil, errors.New("no python interpreter found (set REMEDY_PYTHON to an absolute path)")
+}
+
+// PythonWorkerNeedsDownload reports whether resolving the worker interpreter
+// would have to download the managed CPython (no REMEDY_PYTHON, no repo
+// .venv, no PATH python, no managed runtime yet). Callers use it to bind the
+// HTTP API first and attach the worker asynchronously.
+func PythonWorkerNeedsDownload() bool {
+	if strings.TrimSpace(os.Getenv(envPython)) != "" {
+		return false
+	}
+	if _, _, err := resolveRMDYPyz(); err != nil {
+		return false
+	}
+	if repoVenvPython() != "" {
+		return false
+	}
+	for _, name := range []string{"python", "python3"} {
+		if abs := lookPathAbs(name); abs != "" && !isWindowsStorePythonStub(abs) {
+			return false
+		}
+	}
+	if managedVoicePython() != "" {
+		return false
+	}
+	return !skipManagedPythonDownload()
+}
+
+// repoVenvPython returns <repo>/.venv python when remedy-runtime runs from a
+// source checkout (pyproject.toml above cwd or the executable).
+func repoVenvPython() string {
+	starts := []string{}
+	if wd, err := os.Getwd(); err == nil {
+		starts = append(starts, wd)
+	}
+	if exe, err := os.Executable(); err == nil {
+		starts = append(starts, filepath.Dir(exe))
+	}
+	for _, start := range starts {
+		repo := findRepoRoot(start)
+		if repo == "" {
+			continue
+		}
+		var cand string
+		if runtime.GOOS == "windows" {
+			cand = filepath.Join(repo, ".venv", "Scripts", "python.exe")
+		} else {
+			cand = filepath.Join(repo, ".venv", "bin", "python")
+		}
+		if st, err := os.Stat(cand); err == nil && !st.IsDir() {
+			if abs, err := filepath.Abs(cand); err == nil {
+				return abs
+			}
+		}
+	}
+	return ""
 }
 
 // managedVoicePython returns the owner's managed voice CPython when present

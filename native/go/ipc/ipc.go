@@ -18,7 +18,13 @@ var (
 	ErrTooManyCalls    = errors.New("too many concurrent Remedy IPC calls")
 )
 
-const maxConcurrentCalls = 256
+const (
+	maxConcurrentCalls = 256
+	// writeQueueDepth bounds frames waiting for the writer goroutine. Callers
+	// block on enqueue (respecting ctx) rather than growing memory when the
+	// peer stops draining the pipe.
+	writeQueueDepth = 64
+)
 
 type Handler interface {
 	Handle(context.Context, protocol.Frame) ([]protocol.Frame, error)
@@ -117,49 +123,152 @@ func writeError(conn net.Conn, mu *sync.Mutex, id [16]byte, err error) {
 	})
 }
 
+// outbound is one frame queued for the writer goroutine. done (when non-nil)
+// receives the write error so a Call can fail fast on a broken pipe.
+type outbound struct {
+	frame protocol.Frame
+	done  chan error
+}
+
+// Client multiplexes correlated request/response frames over one connection.
+//
+// A single writer goroutine owns the socket for writes: Call enqueues onto a
+// bounded queue and waits on ctx, so one slow write (a full pipe buffer while
+// the worker is busy) never parks other callers on a mutex. Cancels are
+// fire-and-forget through the same queue. Responses for unknown or already
+// finished correlation IDs are dropped.
 type Client struct {
 	conn    net.Conn
-	writeMu sync.Mutex
 	mu      sync.Mutex
 	pending map[[16]byte]chan protocol.Frame
+	queue   chan outbound
 	done    chan struct{}
 	once    sync.Once
 }
 
 func NewClient(conn net.Conn) *Client {
-	c := &Client{conn: conn, pending: make(map[[16]byte]chan protocol.Frame), done: make(chan struct{})}
+	c := &Client{
+		conn:    conn,
+		pending: make(map[[16]byte]chan protocol.Frame),
+		queue:   make(chan outbound, writeQueueDepth),
+		done:    make(chan struct{}),
+	}
 	go c.readLoop()
+	go c.writeLoop()
 	return c
 }
 
+// Close tears the connection down; pending and future calls fail with
+// ErrDisconnected.
 func (c *Client) Close() error { c.shutdown(); return c.conn.Close() }
 
+// Done is closed once the connection is no longer usable (peer EOF, write
+// failure, or Close). Supervisors wait on it to detect a dead worker.
+func (c *Client) Done() <-chan struct{} { return c.done }
+
+// Call sends request and waits for the correlated response. ctx cancellation
+// sends a best-effort KindCancel and returns ctx.Err(); the late response, if
+// any, is dropped.
 func (c *Client) Call(ctx context.Context, request protocol.Frame) (protocol.Frame, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-c.done:
+		return protocol.Frame{}, ErrDisconnected
+	default:
+	}
 	response := make(chan protocol.Frame, 1)
 	c.mu.Lock()
 	if _, exists := c.pending[request.CorrelationID]; exists {
 		c.mu.Unlock()
-		return protocol.Frame{}, errors.New("duplicate correlation ID")
+		return protocol.Frame{}, ErrDuplicateCall
 	}
 	c.pending[request.CorrelationID] = response
 	c.mu.Unlock()
 	defer func() { c.mu.Lock(); delete(c.pending, request.CorrelationID); c.mu.Unlock() }()
-	c.writeMu.Lock()
-	err := protocol.WriteFrame(c.conn, request)
-	c.writeMu.Unlock()
-	if err != nil {
-		return protocol.Frame{}, err
+
+	written := make(chan error, 1)
+	select {
+	case c.queue <- outbound{frame: request, done: written}:
+	case <-ctx.Done():
+		return protocol.Frame{}, ctx.Err()
+	case <-c.done:
+		return protocol.Frame{}, ErrDisconnected
+	}
+	select {
+	case frame := <-response:
+		return frame, nil
+	case err := <-written:
+		if err != nil {
+			return protocol.Frame{}, err
+		}
+	case <-ctx.Done():
+		c.Cancel(request.CorrelationID)
+		return protocol.Frame{}, ctx.Err()
+	case <-c.done:
+		return protocol.Frame{}, ErrDisconnected
 	}
 	select {
 	case frame := <-response:
 		return frame, nil
 	case <-ctx.Done():
-		c.writeMu.Lock()
-		_ = protocol.WriteFrame(c.conn, protocol.Frame{Kind: protocol.KindCancel, CorrelationID: request.CorrelationID})
-		c.writeMu.Unlock()
+		c.Cancel(request.CorrelationID)
 		return protocol.Frame{}, ctx.Err()
 	case <-c.done:
 		return protocol.Frame{}, ErrDisconnected
+	}
+}
+
+// Cancel queues a KindCancel for id without waiting. It never blocks a caller
+// on a full queue: a cancel the peer never sees only costs one late response,
+// which the read loop drops anyway.
+func (c *Client) Cancel(id [16]byte) {
+	frame := protocol.Frame{Kind: protocol.KindCancel, CorrelationID: id}
+	select {
+	case c.queue <- outbound{frame: frame}:
+	case <-c.done:
+	default:
+		go func() {
+			select {
+			case c.queue <- outbound{frame: frame}:
+			case <-c.done:
+			}
+		}()
+	}
+}
+
+func (c *Client) writeLoop() {
+	defer c.shutdown()
+	for {
+		select {
+		case <-c.done:
+			c.drainQueue()
+			return
+		case item := <-c.queue:
+			err := protocol.WriteFrame(c.conn, item.frame)
+			if item.done != nil {
+				item.done <- err
+			}
+			if err != nil {
+				c.drainQueue()
+				return
+			}
+		}
+	}
+}
+
+// drainQueue fails every queued sender once the writer has stopped.
+func (c *Client) drainQueue() {
+	for {
+		select {
+		case item := <-c.queue:
+			if item.done != nil {
+				item.done <- ErrDisconnected
+			}
+		default:
+			return
+		}
 	}
 }
 

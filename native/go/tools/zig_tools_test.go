@@ -1,16 +1,19 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/core"
+	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
 func TestRegisterZigHostToolsDescriptors(t *testing.T) {
@@ -600,7 +603,30 @@ func TestClipboardReadImageRejectsExtraFields(t *testing.T) {
 	}
 }
 
-func TestShellExecRejectsRelativeArgv(t *testing.T) {
+func TestShellExecResolvesArgvOnPath(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	// A bare command name is resolved on PATH before the token is issued, so
+	// the model does not have to know install locations.
+	probe := "hostname"
+	if _, err := exec.LookPath(probe); err != nil {
+		t.Skipf("%s not on PATH: %v", probe, err)
+	}
+	if _, err := registry.Execute(context.Background(), Request{
+		ToolID:          "shell.exec",
+		Version:         1,
+		Input:           json.RawMessage(`{"argv":["` + probe + `"]}`),
+		CapabilityToken: []byte("test-token"),
+	}); err != nil {
+		t.Fatalf("PATH argv[0] must resolve: %v", err)
+	}
+}
+
+func TestShellExecRejectsUnresolvableArgv(t *testing.T) {
 	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
 		return nil
 	}))
@@ -610,14 +636,14 @@ func TestShellExecRejectsRelativeArgv(t *testing.T) {
 	_, err := registry.Execute(context.Background(), Request{
 		ToolID:          "shell.exec",
 		Version:         1,
-		Input:           json.RawMessage(`{"argv":["echo","hi"]}`),
+		Input:           json.RawMessage(`{"argv":["remedy-no-such-binary-xyz","hi"]}`),
 		CapabilityToken: []byte("test-token"),
 	})
 	if !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("relative argv[0]: %v", err)
+		t.Fatalf("unresolvable argv[0]: %v", err)
 	}
-	if !strings.Contains(err.Error(), "absolute") {
-		t.Fatalf("expected absolute path message: %v", err)
+	if !strings.Contains(err.Error(), "could not be resolved") {
+		t.Fatalf("expected a resolution message: %v", err)
 	}
 }
 
@@ -882,9 +908,9 @@ func TestZigHostToolsLiveWhenLibraryPresent(t *testing.T) {
 			t.Fatalf("computer.uia.read_text: %v", err)
 		}
 		var readOut struct {
-			Available bool `json:"available"`
+			Available bool   `json:"available"`
 			HWND      uint64 `json:"hwnd"`
-			Payload   any  `json:"payload"`
+			Payload   any    `json:"payload"`
 		}
 		if err := json.Unmarshal(readText.Output, &readOut); err != nil {
 			t.Fatal(err)
@@ -1004,5 +1030,91 @@ func TestZigHostToolsLiveWhenLibraryPresent(t *testing.T) {
 	}
 	if !strings.Contains(shellOut.Stdout, "shell-exec-ok") {
 		t.Fatalf("stdout=%q stderr=%q", shellOut.Stdout, shellOut.Stderr)
+	}
+}
+
+// TestSpawnTokenBindsEnvironmentAtABI drives the real remedy_core library: a
+// capability token minted for argv plus one environment must not spawn with
+// another, and an environment-free token must keep working unchanged.
+func TestSpawnTokenBindsEnvironmentAtABI(t *testing.T) {
+	core.ResetForTest()
+	t.Cleanup(core.ResetForTest)
+	if core.FindLibraryPath() == "" {
+		t.Skip("remedy_core not built")
+	}
+	hostnameBin, err := exec.LookPath("hostname")
+	if err != nil {
+		t.Skip("hostname not on PATH")
+	}
+	hostnameBin, err = filepath.Abs(hostnameBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	t.Setenv("REMEDY_HOME", home)
+	key, err := secret.EnsureHostSigningKey(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := core.EnsureSigningKey(key); err != nil {
+		if errors.Is(err, core.ErrUnavailable) || errors.Is(err, core.ErrUnsupported) {
+			t.Skipf("remedy_core unavailable: %v", err)
+		}
+		t.Fatal(err)
+	}
+	if err := core.WriteJailSetRoots(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	argv := []string{hostnameBin}
+	envA := map[string]string{"REMEDY_SPAWN_BIND": "a"}
+	envB := map[string]string{"REMEDY_SPAWN_BIND": "b"}
+	run := func(env map[string]string, token []byte, nowMS uint64) error {
+		_, err := core.ExecCaptureAuthorized(argv, "", env, false, token, "", "", false, nowMS, 15000)
+		return err
+	}
+
+	token, nowMS, err := core.IssueProcessSpawnToken(argv, envA, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Replay of an envA token against envB: the Zig verifier recomputes the
+	// operation hash from the environment it received, so this is denied.
+	err = run(envB, token, nowMS)
+	if err == nil {
+		t.Fatal("token minted for envA spawned with envB")
+	}
+	var hostErr *core.HostError
+	if !errors.As(err, &hostErr) || hostErr.Status != core.StatusAccessDenied {
+		t.Fatalf("want ACCESS_DENIED, got %v", err)
+	}
+	// Dropping the environment is the same replay.
+	if err := run(nil, token, nowMS); err == nil {
+		t.Fatal("token minted for envA spawned with no environment")
+	}
+	// The nonce is only burned by a successful verification.
+	if err := run(envA, token, nowMS); err != nil {
+		t.Fatalf("envA spawn with its own token: %v", err)
+	}
+
+	// An environment-free token still spawns environment-free.
+	plain, plainNow, err := core.IssueProcessSpawnToken(argv, nil, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run(nil, plain, plainNow); err != nil {
+		t.Fatalf("env-less spawn: %v", err)
+	}
+	// ... and its hash is byte-identical to the argv-only hash it always was.
+	envless, err := core.PolicyHashSpawn(argv, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := core.PolicyHashSpawn(argv, envA, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(envless, bound) {
+		t.Fatal("supplying an environment must change the operation hash")
 	}
 }

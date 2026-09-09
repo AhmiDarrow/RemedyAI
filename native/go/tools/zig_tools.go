@@ -5,14 +5,30 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/core"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
+
+// jailMu serializes core.WriteJailSetRoots with the spawn that depends on
+// it. The write jail is one process-global table inside remedy_core, so two
+// concurrent shell.exec calls could otherwise interleave as
+// set(rootsA) -> set(rootsB) -> spawn(A) and run A under B's roots. The lock
+// is held only across set-roots + spawn, never across the child's lifetime.
+// A per-call jail ABI is a later Zig change; until then this is the gate.
+var jailMu sync.Mutex
+
+// shellCaptureLimit bounds each captured stream so a runaway child cannot
+// exhaust the host. Excess bytes are dropped and noted on the stream.
+const shellCaptureLimit = 32 << 20
 
 // RegisterZigHostTools installs RuntimeZig Tool ABI executors that call
 // remedy_core through native/go/core. Registration always succeeds; execute
@@ -321,7 +337,8 @@ func RegisterZigHostTools(registry *Registry) error {
 				"name":{"type":"string","minLength":1,"maxLength":512},
 				"role":{"type":"string","maxLength":128},
 				"action":{"type":"string","enum":["invoke","set_value","toggle","scroll_into_view"]},
-				"text":{"type":"string","maxLength":8000}
+				"text":{"type":"string","maxLength":8000},
+				"page_context":{"type":"string","maxLength":4000}
 			},
 			"additionalProperties":false
 		}`),
@@ -357,7 +374,9 @@ func RegisterZigHostTools(registry *Registry) error {
 				"x":{"type":"integer"},
 				"y":{"type":"integer"},
 				"button":{"type":"string","enum":["left","right","middle"]},
-				"clicks":{"type":"integer","minimum":1,"maximum":3}
+				"clicks":{"type":"integer","minimum":1,"maximum":3},
+				"label":{"type":"string","maxLength":512},
+				"page_context":{"type":"string","maxLength":4000}
 			},
 			"additionalProperties":false
 		}`),
@@ -389,7 +408,9 @@ func RegisterZigHostTools(registry *Registry) error {
 			"required":["text"],
 			"properties":{
 				"text":{"type":"string","minLength":1,"maxLength":8000},
-				"per_char_delay_ms":{"type":"integer","minimum":0,"maximum":200}
+				"per_char_delay_ms":{"type":"integer","minimum":0,"maximum":200},
+				"label":{"type":"string","maxLength":512},
+				"page_context":{"type":"string","maxLength":4000}
 			},
 			"additionalProperties":false
 		}`),
@@ -417,7 +438,9 @@ func RegisterZigHostTools(registry *Registry) error {
 			"type":"object",
 			"required":["key"],
 			"properties":{
-				"key":{"type":"string","minLength":1,"maxLength":64}
+				"key":{"type":"string","minLength":1,"maxLength":64},
+				"label":{"type":"string","maxLength":512},
+				"page_context":{"type":"string","maxLength":4000}
 			},
 			"additionalProperties":false
 		}`),
@@ -740,7 +763,7 @@ func RegisterZigHostTools(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:           "shell.exec",
 		Version:      1,
-		Description:  "Authorized one-shot argv capture via Zig (absolute argv[0]; no os/exec)",
+		Description:  "Authorized one-shot argv capture via Zig. argv[0] may be absolute, a bare name (resolved on PATH) or a path relative to cwd; it is resolved to an absolute file before authorization. Cancellation kills the process tree. No os/exec.",
 		Runtime:      RuntimeZig,
 		Risk:         RiskMutation,
 		Capabilities: []string{"process.spawn"},
@@ -1583,7 +1606,38 @@ func executeClipboardWrite(_ context.Context, request Request) (Result, error) {
 	return Result{Output: out}, err
 }
 
-func executeShellExec(_ context.Context, request Request) (Result, error) {
+// modelInterpreterPathEnv are module-search-path variables that turn a benign
+// command into arbitrary code execution: the interpreter imports from the
+// supplied directory before running anything the classifier inspected. The Zig
+// host cannot blanket-deny them because the runtime itself sets PYTHONPATH when
+// it spawns its own worker; a tool call has no such need, so they are refused
+// here, where "supplied by the model" is what the caller actually knows.
+var modelInterpreterPathEnv = []string{
+	"PYTHONPATH",
+	"PYTHONHOME",
+	"CLASSPATH",
+	"GEM_PATH",
+	"GEM_HOME",
+	"LUA_PATH",
+	"LUA_CPATH",
+	"PSMODULEPATH",
+	"NODE_PATH",
+}
+
+// modelDeniedEnvKey returns the first refused variable, or "".
+func modelDeniedEnvKey(env map[string]string) string {
+	for key := range env {
+		trimmed := strings.TrimSpace(key)
+		for _, denied := range modelInterpreterPathEnv {
+			if strings.EqualFold(trimmed, denied) {
+				return denied
+			}
+		}
+	}
+	return ""
+}
+
+func executeShellExec(ctx context.Context, request Request) (Result, error) {
 	var body struct {
 		Argv           []string          `json:"argv"`
 		Cwd            string            `json:"cwd"`
@@ -1603,65 +1657,259 @@ func executeShellExec(_ context.Context, request Request) (Result, error) {
 			return Result{}, ErrInvalidInput
 		}
 	}
-	if !filepath.IsAbs(body.Argv[0]) {
-		return Result{}, fmt.Errorf("%w: argv[0] must be absolute", ErrInvalidInput)
-	}
 	if body.Cwd != "" && !filepath.IsAbs(body.Cwd) {
 		return Result{}, fmt.Errorf("%w: cwd must be absolute when set", ErrInvalidInput)
 	}
+	if bad := modelDeniedEnvKey(body.Env); bad != "" {
+		return Result{}, fmt.Errorf(
+			"%w: %s cannot be set from a tool call — it makes an interpreter load code "+
+				"before the command runs. Put the path on the command line instead",
+			ErrInvalidInput, bad)
+	}
+	argv0, err := resolveShellArgv0(body.Argv[0], body.Cwd)
+	if err != nil {
+		return Result{}, err
+	}
+	argv := append([]string{argv0}, body.Argv[1:]...)
 	// Omitted/0 used to become Zig's 60s default — too short for cargo/pytest/npm.
 	// Build-scale default: 10 minutes (schema max is 600000).
 	if body.TimeoutMS == 0 {
 		body.TimeoutMS = 600_000
 	}
-	// Model-supplied owner_confirmed is not proof — only the approval queue
-	// (or an explicit runtime capability) may set the Zig owner bit.
-	body.OwnerConfirmed = false
+	proc, err := spawnAuthorized(ctx, shellSpawnSpec{
+		argv:       argv,
+		cwd:        body.Cwd,
+		env:        body.Env,
+		writeRoots: body.WriteRoots,
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	capture := waitShellCapture(ctx, proc, time.Duration(body.TimeoutMS)*time.Millisecond)
+	if capture.err != nil {
+		return Result{}, capture.err
+	}
+	out, err := json.Marshal(map[string]any{
+		"exit_code": capture.exitCode,
+		"timed_out": capture.timedOut,
+		"stdout":    string(capture.stdout),
+		"stderr":    string(capture.stderr),
+	})
+	return Result{Output: out}, err
+}
 
+// resolveShellArgv0 turns argv[0] into the absolute file the Zig spawn
+// authorizes. Absolute paths pass through; a path with separators resolves
+// against cwd (or the runtime's working directory when cwd is inherited); a
+// bare name resolves on PATH. A name found only via the current directory is
+// refused (exec.ErrDot) so a planted binary in the project cannot shadow a
+// system tool.
+func resolveShellArgv0(argv0, cwd string) (string, error) {
+	if filepath.IsAbs(argv0) {
+		return argv0, nil
+	}
+	candidate := argv0
+	if strings.ContainsAny(argv0, `/\`) {
+		base := cwd
+		if base == "" {
+			wd, err := os.Getwd()
+			if err != nil {
+				return "", fmt.Errorf("%w: argv[0] %q is relative and the working directory is unknown: %v", ErrInvalidInput, argv0, err)
+			}
+			base = wd
+		}
+		candidate = filepath.Join(base, argv0)
+	}
+	resolved, err := exec.LookPath(candidate)
+	if err != nil {
+		return "", fmt.Errorf("%w: argv[0] %q could not be resolved to an absolute executable: %v", ErrInvalidInput, argv0, err)
+	}
+	abs, err := filepath.Abs(resolved)
+	if err != nil {
+		return "", fmt.Errorf("%w: argv[0] %q could not be made absolute: %v", ErrInvalidInput, argv0, err)
+	}
+	return abs, nil
+}
+
+// shellSpawnSpec is one authorized child process: the argv the Zig deny
+// classifier will see, the working directory, the merged environment and the
+// write-jail roots for its lifetime.
+type shellSpawnSpec struct {
+	argv       []string
+	cwd        string
+	env        map[string]string
+	writeRoots []string
+}
+
+// spawnAuthorized mints the capability token for spec and starts the child
+// under the write jail. Every process Remedy runs for the model — shell.exec
+// and bash — comes through here, so the deny classifier, the token binding and
+// the jail always see the same argv the child is actually given. There is no
+// second, unpoliced spawn path.
+//
+// owner_confirmed is never set from a tool call: only the approval queue may
+// clear an owner checkpoint, so the Zig owner bit stays false here.
+func spawnAuthorized(ctx context.Context, spec shellSpawnSpec) (core.PipedProcess, error) {
+	if err := ctx.Err(); err != nil {
+		return core.PipedProcess{}, fmt.Errorf("shell spawn: %w", err)
+	}
 	home := resolveToolHome()
 	key, err := secret.EnsureHostSigningKey(home)
 	if err != nil {
-		return Result{}, fmt.Errorf("shell.exec signing key: %w", err)
+		return core.PipedProcess{}, fmt.Errorf("shell spawn signing key: %w", err)
 	}
 	if err := core.EnsureSigningKey(key); err != nil {
-		return Result{}, err
+		return core.PipedProcess{}, err
 	}
-	// write_roots from the session binder (project/home). Empty = Full for
-	// partner life tasks; Zig still refuses auth paths.
-	roots := make([]string, 0, len(body.WriteRoots))
-	for _, r := range body.WriteRoots {
+	// write_roots come from the session binder (project/home). Empty means the
+	// jail is unbound for this spawn (Full access scope); Zig still refuses
+	// auth paths.
+	roots := make([]string, 0, len(spec.writeRoots))
+	for _, r := range spec.writeRoots {
 		r = strings.TrimSpace(r)
 		if r != "" && filepath.IsAbs(r) {
 			roots = append(roots, r)
 		}
 	}
-	_ = core.WriteJailSetRoots(roots)
+	token, nowMS, err := core.IssueProcessSpawnToken(spec.argv, spec.env, false, false)
+	if err != nil {
+		return core.PipedProcess{}, err
+	}
+	return spawnShellUnderJail(roots, spec.argv, spec.cwd, spec.env, token, false, nowMS)
+}
 
-	token, nowMS, err := core.IssueProcessSpawnToken(body.Argv, body.OwnerConfirmed)
-	if err != nil {
-		return Result{}, err
+// spawnShellUnderJail installs the write roots and spawns under jailMu so no
+// other spawn can observe a foreign root set (see jailMu).
+func spawnShellUnderJail(
+	roots, argv []string,
+	cwd string,
+	env map[string]string,
+	token []byte,
+	ownerConfirmed bool,
+	nowMS uint64,
+) (core.PipedProcess, error) {
+	jailMu.Lock()
+	defer jailMu.Unlock()
+	if err := core.WriteJailSetRoots(roots); err != nil {
+		return core.PipedProcess{}, fmt.Errorf("shell.exec write jail: %w", err)
 	}
-	res, err := core.ExecCaptureAuthorized(
-		body.Argv,
-		body.Cwd,
-		body.Env,
-		token,
-		"",
-		"",
-		body.OwnerConfirmed,
-		nowMS,
-		body.TimeoutMS,
-	)
-	if err != nil {
-		return Result{}, err
+	return core.ProcessSpawnPipedAuthorized(argv, cwd, env, false, token, "", "", ownerConfirmed, nowMS)
+}
+
+type shellCapture struct {
+	exitCode uint32
+	timedOut bool
+	stdout   []byte
+	stderr   []byte
+	err      error
+}
+
+// waitShellCapture drains the child's pipes and waits for exit, the tool
+// timeout, or ctx. Timeout: kill tree, exit_code 1, timed_out true (Python
+// signal-cli parity). ctx done: kill tree and return ctx's error so the
+// executor reports the call as cancelled rather than as tool output.
+func waitShellCapture(ctx context.Context, proc core.PipedProcess, timeout time.Duration) shellCapture {
+	stdin, stdout, stderr := proc.Files()
+	_ = stdin.Close() // one-shot: the child never gets interactive input
+
+	var outBuf, errBuf boundedBuffer
+	readers := make(chan struct{})
+	go func() {
+		defer close(readers)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); _, _ = io.Copy(&outBuf, stdout) }()
+		go func() { defer wg.Done(); _, _ = io.Copy(&errBuf, stderr) }()
+		wg.Wait()
+	}()
+
+	type exitStatus struct {
+		code uint32
+		err  error
 	}
-	out, err := json.Marshal(map[string]any{
-		"exit_code": res.ExitCode,
-		"timed_out": res.TimedOut,
-		"stdout":    string(res.Stdout),
-		"stderr":    string(res.Stderr),
-	})
-	return Result{Output: out}, err
+	exited := make(chan exitStatus, 1)
+	go func() {
+		for {
+			code, err := core.ProcessWait(proc.Handle, 100)
+			if err != nil {
+				exited <- exitStatus{err: err}
+				return
+			}
+			if code != nil {
+				exited <- exitStatus{code: *code}
+				return
+			}
+		}
+	}()
+
+	finish := func(result shellCapture) shellCapture {
+		// Pipe EOF follows the last writer in the job; give stragglers a
+		// bounded grace period, then close our ends and move on.
+		select {
+		case <-readers:
+		case <-time.After(2 * time.Second):
+		}
+		_ = stdout.Close()
+		_ = stderr.Close()
+		_ = core.ProcessClose(proc.Handle)
+		result.stdout = outBuf.Bytes("stdout")
+		result.stderr = errBuf.Bytes("stderr")
+		return result
+	}
+	killAndReap := func() {
+		_ = core.ProcessKillTree(proc.PID)
+		select {
+		case <-exited:
+		case <-time.After(3 * time.Second):
+		}
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case st := <-exited:
+		if st.err != nil {
+			return finish(shellCapture{err: fmt.Errorf("shell.exec wait: %w", st.err)})
+		}
+		return finish(shellCapture{exitCode: st.code})
+	case <-timer.C:
+		killAndReap()
+		return finish(shellCapture{exitCode: 1, timedOut: true})
+	case <-ctx.Done():
+		killAndReap()
+		return finish(shellCapture{err: fmt.Errorf("shell.exec: %w", ctx.Err())})
+	}
+}
+
+// boundedBuffer keeps the first shellCaptureLimit bytes and counts the rest.
+type boundedBuffer struct {
+	mu      sync.Mutex
+	buf     []byte
+	dropped int64
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	room := shellCaptureLimit - len(b.buf)
+	if room > len(p) {
+		room = len(p)
+	}
+	if room > 0 {
+		b.buf = append(b.buf, p[:room]...)
+	}
+	b.dropped += int64(len(p) - room)
+	return len(p), nil
+}
+
+func (b *boundedBuffer) Bytes(stream string) []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.dropped == 0 {
+		return append([]byte(nil), b.buf...)
+	}
+	note := fmt.Sprintf("\n[remedy: %d bytes of %s dropped after %d-byte capture limit]\n", b.dropped, stream, shellCaptureLimit)
+	return append(append([]byte(nil), b.buf...), note...)
 }
 
 func decodeJSONArrayOrNull(raw []byte) ([]any, error) {
@@ -1705,12 +1953,12 @@ func resolveToolHome() string {
 // Named VKs matching Python desktop_policy.VK (plus Arrow* aliases).
 var namedVirtualKeys = map[string]uint16{
 	"enter": 0x0D, "return": 0x0D,
-	"tab": 0x09,
+	"tab":    0x09,
 	"escape": 0x1B, "esc": 0x1B,
 	"backspace": 0x08,
-	"delete": 0x2E, "del": 0x2E,
+	"delete":    0x2E, "del": 0x2E,
 	"space": 0x20,
-	"up": 0x26, "arrowup": 0x26,
+	"up":    0x26, "arrowup": 0x26,
 	"down": 0x28, "arrowdown": 0x28,
 	"left": 0x25, "arrowleft": 0x25,
 	"right": 0x27, "arrowright": 0x27,
@@ -1722,9 +1970,9 @@ var namedVirtualKeys = map[string]uint16{
 	"insert": 0x2D, "ins": 0x2D,
 	"printscreen": 0x2C, "prtsc": 0x2C, "prtscn": 0x2C,
 	"ctrl": 0x11, "control": 0x11,
-	"alt": 0x12,
+	"alt":   0x12,
 	"shift": 0x10,
-	"win": 0x5B, "meta": 0x5B, "cmd": 0x5B, "super": 0x5B,
+	"win":   0x5B, "meta": 0x5B, "cmd": 0x5B, "super": 0x5B,
 }
 
 var modifierVirtualKeys = map[uint16]struct{}{
