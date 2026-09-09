@@ -29,11 +29,11 @@ func TestLinuxProcessSpawnAuthorized(t *testing.T) {
 	}
 	_ = WriteJailSetRoots(nil)
 	argv := []string{"/bin/sleep", "30"}
-	token, nowMS, err := IssueProcessSpawnToken(argv, false)
+	token, nowMS, err := IssueProcessSpawnToken(argv, nil, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pid, handle, err := ProcessSpawnAuthorized(argv, "", nil, token, "", "", false, nowMS)
+	pid, handle, err := ProcessSpawnAuthorized(argv, "", nil, false, token, "", "", false, nowMS)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}

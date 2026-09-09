@@ -30,10 +30,35 @@ func SecuritySetSigningKey(key []byte) error {
 	if err := lib.check("security_set_signing_key", int32(status)); err != nil {
 		return err
 	}
+	// Every Go spawn token is minted over argv plus the environment the spawn
+	// will receive, so this process refuses argv-only tokens for spawns that
+	// carry an environment instead of accepting them as a migration case.
+	if err := PolicyEnvStrict(true); err != nil {
+		return err
+	}
 	signingMu.Lock()
 	signingReady = true
 	signingMu.Unlock()
 	return nil
+}
+
+// PolicyEnvStrict turns strict environment binding on or off for the loaded
+// library (process-wide). With it on, an authorized spawn that supplies
+// environment overrides requires a token whose operation hash covers them.
+func PolicyEnvStrict(enabled bool) error {
+	lib, err := Open()
+	if err != nil {
+		return err
+	}
+	flag := uintptr(0)
+	if enabled {
+		flag = 1
+	}
+	status, err := lib.call("remedy_core_policy_env_strict", flag)
+	if err != nil {
+		return err
+	}
+	return lib.check("policy_env_strict", int32(status))
 }
 
 // EnsureSigningKey installs key into Zig when not yet ready.
@@ -47,8 +72,12 @@ func EnsureSigningKey(key []byte) error {
 	return SecuritySetSigningKey(key)
 }
 
-// PolicyHashArgv returns the 32-byte Zig argv hash.
-func PolicyHashArgv(argv []string) ([]byte, error) {
+// PolicyHashSpawn returns the 32-byte Zig operation hash over argv plus the
+// environment the spawn will receive. It encodes env with spawnEnvJSON — the
+// same encoding the spawn calls use — so a token minted here can only be spent
+// on a spawn carrying that exact environment. A nil env without replacement
+// yields the argv-only hash, byte for byte.
+func PolicyHashSpawn(argv []string, env map[string]string, replaceEnv bool) ([]byte, error) {
 	lib, err := Open()
 	if err != nil {
 		return nil, err
@@ -57,16 +86,26 @@ func PolicyHashArgv(argv []string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	envRaw, err := spawnEnvJSON(env, replaceEnv)
+	if err != nil {
+		return nil, err
+	}
+	replace := uintptr(0)
+	if replaceEnv {
+		replace = 1
+	}
 	out := make([]byte, 32)
 	status, err := lib.call(
-		"remedy_core_policy_hash_argv",
+		"remedy_core_policy_hash_spawn",
 		bytesPtr(argvRaw), uintptr(len(argvRaw)),
+		bytesPtr(envRaw), uintptr(len(envRaw)),
+		replace,
 		bytesPtr(out), uintptr(len(out)),
 	)
 	if err != nil {
 		return nil, err
 	}
-	if err := lib.check("policy_hash_argv", int32(status)); err != nil {
+	if err := lib.check("policy_hash_spawn", int32(status)); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -121,9 +160,17 @@ func CapabilityIssue(
 	return out, nil
 }
 
-// IssueProcessSpawnToken returns (token, nowMS) for argv.
-func IssueProcessSpawnToken(argv []string, ownerCheckpoint bool) ([]byte, uint64, error) {
-	digest, err := PolicyHashArgv(argv)
+// IssueProcessSpawnToken returns (token, nowMS) for argv spawned with env.
+// Pass the same env and replaceEnv the spawn call will use: the token's
+// operation hash covers them, so a token minted for one environment is
+// refused for a spawn that supplies another.
+func IssueProcessSpawnToken(
+	argv []string,
+	env map[string]string,
+	replaceEnv bool,
+	ownerCheckpoint bool,
+) ([]byte, uint64, error) {
+	digest, err := PolicyHashSpawn(argv, env, replaceEnv)
 	if err != nil {
 		return nil, 0, err
 	}

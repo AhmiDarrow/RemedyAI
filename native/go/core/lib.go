@@ -9,11 +9,11 @@ import (
 )
 
 var (
-	libMu     sync.Mutex
-	libCache  *Library
-	libPath   string
-	libErr    error
-	libTried  bool
+	libMu    sync.Mutex
+	libCache *Library
+	libPath  string
+	libErr   error
+	libTried bool
 )
 
 // Library is a loaded remedy_core shared library at ABIVersion.
@@ -152,13 +152,12 @@ func Open() (*Library, error) {
 	return libCache, nil
 }
 
-// ResetForTest clears the library cache (tests only).
+// ResetForTest clears the library cache (tests only). The module itself is
+// deliberately left loaded: an in-flight call on another goroutine would
+// otherwise execute in unmapped memory once the handle is released.
 func ResetForTest() {
 	libMu.Lock()
 	defer libMu.Unlock()
-	if libCache != nil {
-		_ = libCache.raw.close()
-	}
 	libCache = nil
 	libPath = ""
 	libErr = nil

@@ -32,6 +32,7 @@ func ConptySpawnAuthorized(
 	argv []string,
 	cwd string,
 	env map[string]string,
+	replaceEnv bool,
 	cols, rows uint16,
 	token []byte,
 	subject, scope string,
@@ -53,12 +54,9 @@ func ConptySpawnAuthorized(
 	if cwd != "" {
 		cwdRaw = []byte(cwd)
 	}
-	var envRaw []byte
-	if env != nil {
-		envRaw, err = json.Marshal(env)
-		if err != nil {
-			return 0, 0, err
-		}
+	envRaw, err := spawnEnvJSON(env, replaceEnv)
+	if err != nil {
+		return 0, 0, err
 	}
 	if subject == "" {
 		subject = DefaultSpawnSubject

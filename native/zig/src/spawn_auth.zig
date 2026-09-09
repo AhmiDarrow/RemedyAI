@@ -105,6 +105,8 @@ export fn remedy_core_security_clear_signing_key() callconv(.c) i32 {
 }
 
 /// SHA-256 over argv_json parsed as a JSON string array (same framing as spawn).
+/// Bound to argv alone: a token issued over this hash says nothing about the
+/// environment the spawn will receive. Prefer `remedy_core_policy_hash_spawn`.
 export fn remedy_core_policy_hash_argv(
     argv_json: ?[*]const u8,
     argv_len: usize,
@@ -117,6 +119,57 @@ export fn remedy_core_policy_hash_argv(
     const argv = host.parseArgv(arena.allocator(), slice(argv_json, argv_len)) catch return invalid_status;
     const digest = policy.hashArguments(argv);
     @memcpy(out_hash.?[0..32], &digest);
+    return ok_status;
+}
+
+/// The environment overrides a spawn export will apply, in the exact form the
+/// operation hash binds. `replace_request` is the out-of-band replacement flag
+/// `remedy_core_policy_hash_spawn` accepts for the plain-object `env_json`
+/// shape; the `{"env": ..., "replace_env": ...}` wrapper carries its own.
+const SpawnEnv = struct {
+    pairs: []const host.EnvPair = &.{},
+    replace: bool = false,
+};
+
+fn spawnEnv(arena: std.mem.Allocator, env_json: []const u8, replace_request: bool) host.Error!SpawnEnv {
+    const spec = (try host.parseEnvSpec(arena, env_json)) orelse
+        return .{ .replace = replace_request };
+    return .{ .pairs = spec.pairs, .replace = spec.replace or replace_request };
+}
+
+/// SHA-256 over argv plus the caller-supplied environment overrides and the
+/// replacement flag — the operation hash an authorized spawn recomputes from
+/// the environment it actually receives, so a token cannot be minted for one
+/// environment and spent on another. `env_json` takes the same two shapes as
+/// the spawn exports. With no environment and `replace_env` 0 the digest is
+/// byte-identical to `remedy_core_policy_hash_argv`.
+export fn remedy_core_policy_hash_spawn(
+    argv_json: ?[*]const u8,
+    argv_len: usize,
+    env_json: ?[*]const u8,
+    env_len: usize,
+    replace_env: u8,
+    out_hash: ?[*]u8,
+    out_hash_len: usize,
+) callconv(.c) i32 {
+    if (out_hash == null or out_hash_len < 32) return invalid_status;
+    var arena = std.heap.ArenaAllocator.init(host.allocator);
+    defer arena.deinit();
+    const argv = host.parseArgv(arena.allocator(), slice(argv_json, argv_len)) catch return invalid_status;
+    const env = spawnEnv(arena.allocator(), slice(env_json, env_len), replace_env != 0) catch
+        return invalid_status;
+    const digest = policy.hashSpawn(argv, env.pairs, env.replace);
+    @memcpy(out_hash.?[0..32], &digest);
+    return ok_status;
+}
+
+/// Strict environment binding, process-wide. When enabled, an authorized spawn
+/// that supplies environment overrides requires a token whose operation hash
+/// covers them (`remedy_core_policy_hash_spawn`); an argv-only hash is refused.
+/// Off by default: callers still minting argv-only hashes keep working until
+/// they migrate. Env-less spawns verify identically either way.
+export fn remedy_core_policy_env_strict(enabled: u8) callconv(.c) i32 {
+    policy.setEnvStrict(enabled != 0);
     return ok_status;
 }
 
@@ -165,9 +218,14 @@ export fn remedy_core_capability_issue(
     return ok_status;
 }
 
+/// `env_json` is the same buffer the spawn will hand to `host.resolveEnvBlock`
+/// / `host.resolveEnvMap`, so the expected operation hash is recomputed from
+/// the environment the child actually gets; a mismatch is a denial.
 fn authorizeLocked(
+    arena: std.mem.Allocator,
     argv: []const []const u8,
     cwd: []const u8,
+    env_json: []const u8,
     token: []const u8,
     subject: []const u8,
     scope: []const u8,
@@ -179,6 +237,7 @@ fn authorizeLocked(
     // sandbox workdir gate). Runs before token consume so a denied spawn
     // does not burn the nonce.
     try write_jail.checkSpawn(host.allocator, argv, cwd);
+    const env = try spawnEnv(arena, env_json, false);
     const verifier = &(g_verifier orelse return error.AccessDenied);
     _ = try executor.authorizeProcess(
         verifier,
@@ -187,8 +246,11 @@ fn authorizeLocked(
         subject,
         scope,
         argv,
+        env.pairs,
+        env.replace,
         owner_confirmed,
         now_ms,
+        policy.envStrict(),
     );
 }
 
@@ -196,15 +258,18 @@ fn authorizeLocked(
 pub fn authorize(
     argv: []const []const u8,
     cwd: []const u8,
+    env_json: []const u8,
     token: []const u8,
     subject: []const u8,
     scope: []const u8,
     owner_confirmed: bool,
     now_ms: u64,
 ) !void {
+    var arena = std.heap.ArenaAllocator.init(host.allocator);
+    defer arena.deinit();
     lock();
     defer unlock();
-    try authorizeLocked(argv, cwd, token, subject, scope, owner_confirmed, now_ms);
+    try authorizeLocked(arena.allocator(), argv, cwd, env_json, token, subject, scope, owner_confirmed, now_ms);
 }
 
 fn subjectOrDefault(ptr: ?[*]const u8, len: usize) []const u8 {
@@ -248,8 +313,10 @@ export fn remedy_core_process_spawn_authorized(
 
     lock();
     const auth_result = authorizeLocked(
+        arena.allocator(),
         argv,
         slice(cwd, cwd_len),
+        slice(env_json, env_len),
         slice(token, token_len),
         subjectOrDefault(subject, subject_len),
         scopeOrDefault(scope, scope_len),
@@ -320,8 +387,10 @@ export fn remedy_core_process_spawn_piped_authorized(
 
     lock();
     const auth_result = authorizeLocked(
+        arena.allocator(),
         argv,
         slice(cwd, cwd_len),
+        slice(env_json, env_len),
         slice(token, token_len),
         subjectOrDefault(subject, subject_len),
         scopeOrDefault(scope, scope_len),
@@ -438,8 +507,10 @@ export fn remedy_core_process_exec_capture_authorized(
 
     lock();
     const auth_result = authorizeLocked(
+        arena.allocator(),
         argv,
         slice(cwd, cwd_len),
+        slice(env_json, env_len),
         slice(token, token_len),
         subjectOrDefault(subject, subject_len),
         scopeOrDefault(scope, scope_len),
@@ -561,8 +632,10 @@ export fn remedy_core_conpty_spawn_authorized(
 
     lock();
     const auth_result = authorizeLocked(
+        arena.allocator(),
         argv,
         slice(cwd, cwd_len),
+        slice(env_json, env_len),
         slice(token, token_len),
         subjectOrDefault(subject, subject_len),
         scopeOrDefault(scope, scope_len),
@@ -608,8 +681,11 @@ test "product rules allow git and deny sudo through authorizeProcess" {
         default_subject,
         default_scope,
         &.{ git, "status" },
+        &.{},
+        false,
         false,
         1500,
+        true,
     );
     try std.testing.expectError(
         error.PolicyDenied,
@@ -620,8 +696,11 @@ test "product rules allow git and deny sudo through authorizeProcess" {
             default_subject,
             default_scope,
             &.{sudo},
+            &.{},
+            false,
             false,
             1500,
+            true,
         ),
     );
 }
@@ -769,4 +848,137 @@ test "exec capture authorized honors cwd on linux soft path" {
     const out = out_stdout.?[0..out_stdout_len];
     try std.testing.expect(std.mem.indexOf(u8, out, abs) != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "marker.txt") != null);
+}
+
+fn hashSpawnAbi(argv_json: []const u8, env_json: []const u8, replace_env: u8) ![32]u8 {
+    var digest: [32]u8 = undefined;
+    try std.testing.expectEqual(ok_status, remedy_core_policy_hash_spawn(
+        argv_json.ptr,
+        argv_json.len,
+        if (env_json.len == 0) null else env_json.ptr,
+        env_json.len,
+        replace_env,
+        &digest,
+        digest.len,
+    ));
+    return digest;
+}
+
+fn issueSpawnToken(operation_hash: [32]u8, nonce_byte: u8) ![security.token_size]u8 {
+    var token: [security.token_size]u8 = undefined;
+    try std.testing.expectEqual(ok_status, remedy_core_capability_issue(
+        default_subject.ptr,
+        default_subject.len,
+        default_scope.ptr,
+        default_scope.len,
+        &operation_hash,
+        operation_hash.len,
+        capability.Set.one(.process_spawn).bits,
+        1000,
+        60_000,
+        &([_]u8{nonce_byte} ** 16),
+        16,
+        &token,
+        token.len,
+    ));
+    return token;
+}
+
+fn execCaptureAbi(argv_json: []const u8, env_json: []const u8, token: []const u8) i32 {
+    var exit_code: u32 = 99;
+    var timed_out: u8 = 1;
+    var out_stdout: ?[*]u8 = null;
+    var out_stdout_len: usize = 0;
+    var out_stderr: ?[*]u8 = null;
+    var out_stderr_len: usize = 0;
+    const status = remedy_core_process_exec_capture_authorized(
+        argv_json.ptr,
+        argv_json.len,
+        null,
+        0,
+        if (env_json.len == 0) null else env_json.ptr,
+        env_json.len,
+        token.ptr,
+        token.len,
+        null,
+        0,
+        null,
+        0,
+        0,
+        1500,
+        15_000,
+        &exit_code,
+        &timed_out,
+        &out_stdout,
+        &out_stdout_len,
+        &out_stderr,
+        &out_stderr_len,
+    );
+    if (out_stdout) |p| host.allocator.free(p[0..out_stdout_len]);
+    if (out_stderr) |p| host.allocator.free(p[0..out_stderr_len]);
+    return status;
+}
+
+test "spawn hash export matches the argv-only export when no env is supplied" {
+    const argv_json: []const u8 = "[\"/opt/remedy/tool\",\"--flag\"]";
+    var argv_only: [32]u8 = undefined;
+    try std.testing.expectEqual(ok_status, remedy_core_policy_hash_argv(
+        argv_json.ptr,
+        argv_json.len,
+        &argv_only,
+        argv_only.len,
+    ));
+    // Env-less tokens stay byte-identical, so existing issuers are unaffected.
+    try std.testing.expectEqualSlices(u8, &argv_only, &try hashSpawnAbi(argv_json, "", 0));
+    try std.testing.expectEqualSlices(u8, &argv_only, &try hashSpawnAbi(argv_json, "null", 0));
+    // Supplying an environment, or asking for replacement, changes the hash.
+    const with_env = try hashSpawnAbi(argv_json, "{\"REMEDY_ENV_BIND\":\"a\"}", 0);
+    try std.testing.expect(!std.mem.eql(u8, &argv_only, &with_env));
+    try std.testing.expect(!std.mem.eql(u8, &with_env, &try hashSpawnAbi(argv_json, "{\"REMEDY_ENV_BIND\":\"b\"}", 0)));
+    try std.testing.expect(!std.mem.eql(u8, &argv_only, &try hashSpawnAbi(argv_json, "", 1)));
+    // The wrapper shape and the out-of-band flag agree.
+    try std.testing.expectEqualSlices(
+        u8,
+        &try hashSpawnAbi(argv_json, "{\"REMEDY_ENV_BIND\":\"a\"}", 1),
+        &try hashSpawnAbi(argv_json, "{\"env\":{\"REMEDY_ENV_BIND\":\"a\"},\"replace_env\":true}", 0),
+    );
+}
+
+test "authorized spawn refuses a token minted for a different environment" {
+    if (builtin.os.tag != .windows and builtin.os.tag != .linux) return error.SkipZigTest;
+
+    const key = [_]u8{0xC3} ** Hmac.key_length;
+    try std.testing.expectEqual(ok_status, remedy_core_security_set_signing_key(&key, key.len));
+    defer _ = remedy_core_security_clear_signing_key();
+    defer _ = remedy_core_policy_env_strict(0);
+
+    const argv_json: []const u8 = if (builtin.os.tag == .windows)
+        "[\"C:\\\\Windows\\\\System32\\\\cmd.exe\",\"/d\",\"/c\",\"echo remedy-env-bind\"]"
+    else
+        "[\"/bin/sh\",\"-c\",\"printf remedy-env-bind\"]";
+    const env_a = "{\"REMEDY_ENV_BIND\":\"a\"}";
+    const env_b = "{\"REMEDY_ENV_BIND\":\"b\"}";
+
+    // Minted for argv + env A, spent with env B: the verifier recomputes the
+    // hash from the environment it received, so the replay is denied.
+    const bound_a = try issueSpawnToken(try hashSpawnAbi(argv_json, env_a, 0), 0x41);
+    try std.testing.expectEqual(denied_status, execCaptureAbi(argv_json, env_b, &bound_a));
+    // Dropping the environment entirely is the same replay and also denied.
+    try std.testing.expectEqual(denied_status, execCaptureAbi(argv_json, "", &bound_a));
+    // The nonce survives a denial, so the honest spawn still works.
+    try std.testing.expectEqual(ok_status, execCaptureAbi(argv_json, env_a, &bound_a));
+
+    // An env-less token spawns env-less exactly as before the env binding.
+    const plain = try issueSpawnToken(try hashSpawnAbi(argv_json, "", 0), 0x42);
+    try std.testing.expectEqual(ok_status, execCaptureAbi(argv_json, "", &plain));
+
+    // Argv-only token plus an environment: accepted while callers migrate,
+    // refused once strict binding is on.
+    const legacy = try issueSpawnToken(try hashSpawnAbi(argv_json, "", 0), 0x43);
+    try std.testing.expectEqual(ok_status, execCaptureAbi(argv_json, env_a, &legacy));
+    try std.testing.expectEqual(ok_status, remedy_core_policy_env_strict(1));
+    const legacy_strict = try issueSpawnToken(try hashSpawnAbi(argv_json, "", 0), 0x44);
+    try std.testing.expectEqual(denied_status, execCaptureAbi(argv_json, env_a, &legacy_strict));
+    const bound_strict = try issueSpawnToken(try hashSpawnAbi(argv_json, env_a, 0), 0x45);
+    try std.testing.expectEqual(ok_status, execCaptureAbi(argv_json, env_a, &bound_strict));
 }

@@ -999,10 +999,19 @@ pub fn clipboardGetText() Error![]u8 {
     try openClipboardRetry();
     defer _ = CloseClipboard();
     const handle = GetClipboardData(CF_UNICODETEXT) orelse return allocator.dupe(u8, "") catch return error.OutOfMemory;
+    // Never scan past the allocation: a clipboard owner that omits the NUL
+    // terminator must not turn the length scan into an out-of-bounds read.
+    const max_units = GlobalSize(handle) / @sizeOf(u16);
     const locked = GlobalLock(handle) orelse return allocator.dupe(u8, "") catch return error.OutOfMemory;
     defer _ = GlobalUnlock(handle);
-    const wide: [*:0]const u16 = @ptrCast(@alignCast(locked));
-    return host.utf16ToUtf8(allocator, wide[0..std.mem.len(wide)]);
+    const wide: [*]const u16 = @ptrCast(@alignCast(locked));
+    return host.utf16ToUtf8(allocator, wide[0..clampedUtf16Len(wide, max_units)]);
+}
+
+/// Length of a UTF-16 string up to the first NUL, never reading beyond
+/// `max_units` code units.
+fn clampedUtf16Len(units: [*]const u16, max_units: usize) usize {
+    return std.mem.indexOfScalar(u16, units[0..max_units], 0) orelse max_units;
 }
 
 pub fn clipboardSetText(utf8: []const u8) Error!void {
