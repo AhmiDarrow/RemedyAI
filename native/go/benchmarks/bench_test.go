@@ -99,6 +99,8 @@ func BenchmarkSchedulerTick(b *testing.B) {
 
 type completeModel struct{}
 
+func (completeModel) ContextWindow() int { return 0 }
+
 func (completeModel) Stream(context.Context, cognition.Turn) (<-chan cognition.ModelEvent, error) {
 	ch := make(chan cognition.ModelEvent, 1)
 	ch <- cognition.ModelEvent{Text: "done", Done: true}

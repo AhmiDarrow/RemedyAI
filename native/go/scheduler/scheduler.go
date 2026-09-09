@@ -58,6 +58,9 @@ type Job struct {
 	Status       Status        `json:"status"`
 	Ready        bool          `json:"ready"`
 	LastError    string        `json:"last_error,omitempty"`
+	// LastStarted is when the most recent execution began. Restore uses it to
+	// re-arm a job that was persisted mid-run without re-running it early.
+	LastStarted time.Time `json:"last_started,omitempty"`
 }
 type Executor interface {
 	Execute(context.Context, Job) error
@@ -165,8 +168,9 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) []Job {
 			s.mu.Unlock()
 			continue
 		}
-		s.mu.Unlock()
 		start := s.now()
+		job.LastStarted = start
+		s.mu.Unlock()
 		executionCtx, executionCancel, runtimeBound := boundedExecutionContext(scheduledJob.ctx, *job, start)
 		var err error
 		if executionCtx.Err() != nil {
@@ -245,6 +249,7 @@ func (s *Scheduler) Run(ctx context.Context, ticks <-chan time.Time) error {
 		}
 	}
 }
+
 // Jobs returns a stable-sorted copy of every registered job.
 func (s *Scheduler) Jobs() []Job {
 	s.mu.Lock()
@@ -271,13 +276,25 @@ func Restore(raw []byte, executor Executor, now func() time.Time) (*Scheduler, e
 	scheduler := New(executor, now)
 	for _, job := range snapshot.Jobs {
 		if job.Status == Running {
-			job.Status = Pending
+			job = rearmInterrupted(job)
 		}
 		if err := scheduler.Add(job); err != nil {
 			return nil, err
 		}
 	}
 	return scheduler, nil
+}
+
+// rearmInterrupted converts a job persisted mid-execution back to Pending.
+// A recurring job that recorded its start keeps its cadence: the next run is
+// last_started + Interval rather than immediately, so a restart inside the
+// interval does not double-fire. Everything else re-runs on schedule.
+func rearmInterrupted(job Job) Job {
+	job.Status = Pending
+	if job.Trigger == Recurring && job.Interval > 0 && !job.LastStarted.IsZero() {
+		job.NextRun = job.LastStarted.Add(job.Interval)
+	}
+	return job
 }
 func (s *Scheduler) runnable(job *Job, now time.Time) bool {
 	if job.Status != Pending {
