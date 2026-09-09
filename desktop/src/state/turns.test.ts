@@ -4,7 +4,12 @@ vi.mock('../api/sessions', () => ({
   abortSession: vi.fn(async () => ({ status: 'aborted' })),
 }))
 
-import { completeStreamJob, registerStreamJob } from '../sessions/streamJobs'
+import {
+  appendJobToken,
+  completeStreamJob,
+  markLiveTurn,
+  registerStreamJob,
+} from '../sessions/streamJobs'
 import {
   clearTurnsForSession,
   getTurn,
@@ -20,9 +25,41 @@ import {
 describe('TurnStore', () => {
   afterEach(() => {
     resetTurns()
-    for (const id of ['sess-wire', 'sess-goal']) {
+    for (const id of ['sess-wire', 'sess-goal', 'sess-storm']) {
       completeStreamJob(id, 'aborted')
     }
+  })
+
+  it('does not re-emit for every streamed token — only on status changes', () => {
+    const c = new AbortController()
+    registerStreamJob('sess-storm', c)
+    let emits = 0
+    const unsub = subscribeTurns(() => {
+      emits += 1
+    })
+    for (let i = 0; i < 1000; i++) appendJobToken('sess-storm', 'x')
+    expect(emits).toBe(0)
+    markLiveTurn('sess-storm', 'verifying')
+    expect(emits).toBe(1)
+    markLiveTurn('sess-storm', 'verifying')
+    expect(emits).toBe(1)
+    markLiveTurn('sess-storm', 'running')
+    expect(emits).toBe(2)
+    unsub()
+  })
+
+  it('upsertTurn with an identical patch is a no-op for subscribers', () => {
+    upsertTurn({ sessionId: 'a', turnId: 't-same', status: 'running', startedAt: '2026-08-24T00:00:00Z' })
+    let emits = 0
+    const unsub = subscribeTurns(() => {
+      emits += 1
+    })
+    upsertTurn({ sessionId: 'a', turnId: 't-same', status: 'running', startedAt: '2026-08-24T00:00:00Z' })
+    upsertTurn({ sessionId: 'a', turnId: 't-same', status: 'running' })
+    expect(emits).toBe(0)
+    upsertTurn({ sessionId: 'a', turnId: 't-same', status: 'waiting' })
+    expect(emits).toBe(1)
+    unsub()
   })
 
   it('keeps background and foreground turns from crossing sessions', () => {

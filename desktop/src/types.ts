@@ -13,6 +13,10 @@ export interface ChatSession {
   external_user?: string | null
   created_at: string
   updated_at: string
+  /** True while a turn holds this session's stream claim (server-side work in flight). */
+  claimed?: boolean
+  /** Turn id of that claim — what `stream/attach` and the evidence route are keyed on. */
+  active_request_id?: string | null
 }
 
 export interface ChatMessage {
@@ -32,12 +36,16 @@ export interface ChatMessage {
 export interface ToolCall {
   name: string
   args: Record<string, unknown>
+  /** Runtime call id — pairs results with calls when tools run in parallel. */
+  id?: string
 }
 
 export interface ToolResult {
   name: string
   output: string
   error?: string
+  /** Matches `ToolCall.id`; absent on rows persisted by older runtimes. */
+  id?: string
 }
 
 export interface ModelDefinition {

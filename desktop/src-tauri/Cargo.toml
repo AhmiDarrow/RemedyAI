@@ -51,7 +51,7 @@ libc = "0.2"
 # WebView2 COM for in-rail video fullscreen (ContainsFullScreenElementChanged).
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_JobObjects"] }
 # Direct registry access for legacy Run-key scrub (no PowerShell Bypass).
 winreg = "0.55"
 

@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
+  attachTurn,
   listMessages,
   listSessionTodos,
   streamMessage,
   executeCommand,
   editFromMessageApi,
   type StreamProgress,
+  type TurnStreamHandlers,
   type UsagePayload,
 } from '../api/messages'
 import {
@@ -21,11 +23,19 @@ import {
   detachStreamJob,
   getJobPaint,
   getStreamJob,
+  isJobInterrupted,
   isJobUiCommitted,
+  markJobInterrupted,
   markJobUiCommitted,
+  isFollowingTurn,
+  getJobRequestId,
   markLiveTurn,
   reattachStreamJob,
+  getJobLastSeq,
   registerStreamJob,
+  setJobClaimEpoch,
+  setJobLastSeq,
+  setJobRequestId,
   setJobActiveTools,
   setJobProcessSteps,
   setJobRunUsage,
@@ -34,6 +44,7 @@ import {
   shouldRestoreStoppedPartial,
   stopStreamJob,
   touchStreamJob,
+  withInterruptedMarker,
   withStoppedMarker,
 } from '../sessions/streamJobs'
 import {
@@ -41,9 +52,14 @@ import {
   resolveBusySend,
   retrySendOptions,
 } from '../sessions/retryPrompt'
-import { steerSession } from '../api/sessions'
+import { reattachPlan } from '../sessions/reattach'
+import { getSession, steerSession } from '../api/sessions'
 import type { ChatMessage } from '../types'
-import { toolLabel, type ProcessStep } from '../utils/toolLabels'
+import {
+  applyLiveToolCall,
+  applyLiveToolResult,
+  type ProcessStep,
+} from '../utils/toolLabels'
 import { emptyUsage, type UsageSnapshot } from '../utils/tokenCost'
 import type { LibrarySuggest } from '../api/skillsLibrary'
 
@@ -73,6 +89,19 @@ export type QueuedSend = {
   mode: 'after' | 'interrupt' | 'steer'
 }
 
+/** How a turn's stream is opened: this webview sends it, or joins one in flight. */
+type TurnRun =
+  | {
+      kind: 'send'
+      text: string
+      model?: string
+      provider?: string
+      attachments?: QueuedSend['attachments']
+      planMode?: boolean
+      chatMode?: boolean
+    }
+  | { kind: 'attach'; requestId: string; after: number; model?: string }
+
 export function useMessages(sessionId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(false)
@@ -92,6 +121,17 @@ export function useMessages(sessionId: string | null) {
   const [stallSeconds, setStallSeconds] = useState(0)
   /** User hid the quiet banner for this turn (does not stop the stream). */
   const [stallBannerDismissed, setStallBannerDismissed] = useState(false)
+  /**
+   * The server holds a claim on this session but never named the turn, so
+   * there is no log to attach to. Rare (older sidecar, claim before first
+   * record) — show the working state and let the session-events refresh
+   * deliver the reply.
+   */
+  const [remoteBusy, setRemoteBusy] = useState(false)
+  /** Set once `runTurnStream` exists — the load effect runs before it. */
+  const attachToTurnRef = useRef<
+    ((sid: string, requestId: string, model?: string) => void) | null
+  >(null)
   const streamingRef = useRef(false)
   const sendLockRef = useRef(false)
   /** Last token / tool / progress activity (ms) for stall detection. */
@@ -265,17 +305,18 @@ export function useMessages(sessionId: string | null) {
   const [hasOlder, setHasOlder] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
 
-  const load = useCallback(async (opts?: { force?: boolean }) => {
+  /** Load the newest window. Resolves with the list painted, or null when skipped/stale/failed. */
+  const load = useCallback(async (opts?: { force?: boolean }): Promise<ChatMessage[] | null> => {
     if (!sessionId) {
       setMessages([])
       setLoading(false)
       setLoadError(null)
       setHasOlder(false)
-      return
+      return null
     }
     // Always load when switching sessions (force). Only skip mid-stream refreshes
     // for the same session — previously a stuck stream blocked all session switches.
-    if (streamingRef.current && !opts?.force) return
+    if (streamingRef.current && !opts?.force) return null
     const loadId = sessionId
     const prevGen = loadGenBySessionRef.current.get(loadId) || 0
     const gen = prevGen + 1
@@ -285,27 +326,29 @@ export function useMessages(sessionId: string | null) {
     try {
       const msgs = await listMessages(loadId, MESSAGE_PAGE, 0)
       // Ignore stale responses after a session switch or a newer load/finishOk.
-      if ((loadGenBySessionRef.current.get(loadId) || 0) !== gen || sessionIdRef.current !== loadId) return
+      if ((loadGenBySessionRef.current.get(loadId) || 0) !== gen || sessionIdRef.current !== loadId) return null
       const list = Array.isArray(msgs) ? msgs : []
       serverCountRef.current = list.length
       setMessages(list)
       setHasOlder(list.length >= MESSAGE_PAGE)
       try {
         const td = await listSessionTodos(loadId)
-        if ((loadGenBySessionRef.current.get(loadId) || 0) !== gen || sessionIdRef.current !== loadId) return
+        if ((loadGenBySessionRef.current.get(loadId) || 0) !== gen || sessionIdRef.current !== loadId) return list
         const parsed = parseTodosPayload(td)
         setBuildTodos(todosHaveOpen(parsed) ? parsed : [])
       } catch {
         /* checklist is optional */
       }
+      return list
     } catch (e: unknown) {
-      if ((loadGenBySessionRef.current.get(loadId) || 0) !== gen || sessionIdRef.current !== loadId) return
+      if ((loadGenBySessionRef.current.get(loadId) || 0) !== gen || sessionIdRef.current !== loadId) return null
       const msg = e instanceof Error ? e.message : String(e)
       console.warn('[remedy] listMessages failed', loadId, msg)
       setLoadError(msg || 'Failed to load messages')
       // Clear so we never show another session's transcript under a load failure.
       setMessages([])
       setHasOlder(false)
+      return null
     } finally {
       if ((loadGenBySessionRef.current.get(loadId) || 0) === gen && sessionIdRef.current === loadId) {
         setLoading(false)
@@ -353,6 +396,7 @@ export function useMessages(sessionId: string | null) {
     }
     prevSessionForDetachRef.current = sessionId || null
     prevStreamingForDetachRef.current = false
+    setRemoteBusy(false)
     // Do not paint the previous transcript as the newly focused session.
     setMessages([])
     // Clear focused UI only — do not abort streamCtrl (job owns the controller).
@@ -383,6 +427,7 @@ export function useMessages(sessionId: string | null) {
       const job = getStreamJob(sessionId)
       const paint = getJobPaint(sessionId)
       if (job?.status === 'aborted' && paint?.partialText?.trim()) {
+        const mark = job.interrupted ? withInterruptedMarker : withStoppedMarker
         setMessages((prev) => {
           if (!shouldRestoreStoppedPartial(prev, paint.partialText)) return prev
           return [
@@ -390,7 +435,7 @@ export function useMessages(sessionId: string | null) {
             {
               id: crypto.randomUUID(),
               role: 'assistant',
-              content: withStoppedMarker(paint.partialText),
+              content: mark(paint.partialText),
               thinking: paint.partialThinking || null,
               tool_calls: [],
               tool_results: [],
@@ -404,6 +449,27 @@ export function useMessages(sessionId: string | null) {
         })
         markJobUiCommitted(sessionId)
       }
+      // Reload / SSE drop: the server may still be working this session's
+      // turn while no local job exists. `claimed` + `active_request_id` say so,
+      // and the turn log replays everything this webview missed.
+      void getSession(sessionId)
+        .then((sess) => {
+          if (sessionIdRef.current !== sessionId) return
+          const running = getStreamJob(sessionId)?.status === 'running'
+          const plan = reattachPlan({
+            liveness: sess,
+            localJobRunning: running,
+            localRequestId: running ? getJobRequestId(sessionId) : undefined,
+          })
+          if (plan.kind === 'attach') {
+            attachToTurnRef.current?.(sessionId, plan.requestId, sess.model || undefined)
+          } else {
+            setRemoteBusy(plan.kind === 'working')
+          }
+        })
+        .catch(() => {
+          /* liveness is best-effort — an unreachable server paints idle */
+        })
     })
     // Re-bind UI if this session still has a live background job.
     // Restore paint buffers so concurrent multi-tab turns do not flash blank.
@@ -520,6 +586,492 @@ export function useMessages(sessionId: string | null) {
     }
   }, [])
 
+  /**
+   * Drive one turn's SSE — a turn this webview starts (`send`) or one the
+   * server is already running (`attach`, which replays the turn log first).
+   * Both paths paint through the same job buffers, so a re-attach after a
+   * reload restores the trail exactly as the live stream built it.
+   */
+  const runTurnStream = useCallback(
+    (targetId: string, run: TurnRun) => {
+      const model = run.model
+      const isFocusedTurn = () => sessionIdRef.current === targetId
+      let doneReceived = false
+
+      const bumpActivity = () => {
+        lastStreamActivityRef.current = Date.now()
+        touchStreamJob(targetId)
+        if (!isFocusedTurn()) return
+        setStreamStalled(false)
+        setStallSeconds(0)
+      }
+
+      const finishOk = async (meta?: {
+        aborted?: boolean
+        steered?: boolean
+        interrupted?: boolean
+      }) => {
+        if (doneReceived) return
+        doneReceived = true
+        if (meta?.steered) {
+          // Words went to the still-running turn; that turn's own stream (or
+          // reattach) paints the reply. Nothing to commit here.
+          markJobUiCommitted(targetId)
+        }
+        // Closed without a terminal frame: keep the partial, mark it, re-fetch.
+        const wasInterrupted = Boolean(meta?.interrupted) || isJobInterrupted(targetId)
+        if (wasInterrupted) markJobInterrupted(targetId)
+        // Only flush RAF buffers for the focused turn — otherwise a detached
+        // job finish injects ghost partials into the visible session.
+        if (isFocusedTurn()) {
+          resetStreamBuffers()
+        } else {
+          clearStreamAccum()
+        }
+        // Prefer per-job paint (survives detach + concurrent tabs) over hook refs.
+        const paint = getJobPaint(targetId)
+        const job = getStreamJob(targetId)
+        const wasAborted = Boolean(
+          meta?.aborted || job?.status === 'aborted',
+        )
+        const alreadyCommitted = isJobUiCommitted(targetId)
+        const stepsSnapshot = paint?.processSteps?.length
+          ? [...paint.processSteps]
+          : [...processStepsRef.current]
+        const rawAssistantText =
+          (paint?.partialText && paint.partialText.length
+            ? paint.partialText
+            : streamAccumRef.current) || ''
+        let assistantText = rawAssistantText
+        if (wasInterrupted && assistantText.trim()) {
+          assistantText = withInterruptedMarker(assistantText)
+        } else if (wasAborted && assistantText.trim()) {
+          assistantText = withStoppedMarker(assistantText)
+        }
+        const thinkingText =
+          (paint?.partialThinking && paint.partialThinking.length
+            ? paint.partialThinking
+            : thinkingAccumRef.current) || null
+        // Optimistic: promote stream into a permanent bubble immediately (no blank gap).
+        // Skip when Stop/interrupt already committed this partial (double-bubble guard).
+        if (
+          !alreadyCommitted
+          && assistantText.trim()
+          && sessionIdRef.current === targetId
+        ) {
+          const optimistic: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: assistantText,
+            thinking: thinkingText,
+            tool_calls: stepsSnapshot.map((s) => ({
+              name: s.name,
+              args: s.argsText ? safeParseArgs(s.argsText) : {},
+              id: s.callId,
+            })),
+            tool_results: stepsSnapshot.map((s) => ({
+              name: s.name,
+              output: s.resultText || '',
+              error: s.error,
+              id: s.callId,
+            })),
+            model: model || null,
+            agent: null,
+            tokens: null,
+            created_at: new Date().toISOString(),
+            reverted: false,
+          }
+          setMessages((prev) => [...prev, optimistic])
+          if (wasAborted || wasInterrupted) markJobUiCommitted(targetId)
+        }
+        completeStreamJob(targetId, wasAborted || wasInterrupted ? 'aborted' : 'done')
+        // Always clear focused chrome locks when the focused job ends; if this
+        // was a background job, leave focused locks alone (other tab may stream).
+        if (isFocusedTurn()) {
+          setBuildTodos((prev) => (todosHaveOpen(prev) ? prev : []))
+          setStreaming(false)
+          setStreamStalled(false)
+          setStallSeconds(0)
+          setStreamCtrl(null)
+          streamCtrlRef.current = null
+          setPartialText('')
+          setPartialThinking('')
+          setActiveTools([])
+          setTaskProgress(null)
+          streamingRef.current = false
+          sendLockRef.current = false
+          streamAccumRef.current = ''
+          thinkingAccumRef.current = ''
+        }
+        // Drop results if the user already switched sessions.
+        if (sessionIdRef.current !== targetId) {
+          if (wasAborted && !alreadyCommitted && assistantText.trim()) {
+            markJobUiCommitted(targetId)
+          }
+          // Drain that session's queue in the background (does not steal focus).
+          window.setTimeout(() => {
+            void drainQueue(targetId)
+          }, 40)
+          return
+        }
+        // Aborted turns: keep the local Stopped bubble; server often has no final row yet.
+        if (wasAborted && !wasInterrupted) {
+          setProcessSteps([])
+          processStepsRef.current = []
+          window.setTimeout(() => {
+            void drainQueue(targetId)
+          }, 40)
+          return
+        }
+        if (wasInterrupted) {
+          // Re-fetch: the server may have committed the row (or still be
+          // working). Keep our interrupted partial only when the tail lacks it,
+          // then wait for the reply the way a reloaded webview does.
+          setProcessSteps([])
+          processStepsRef.current = []
+          try {
+            const prevGen = loadGenBySessionRef.current.get(targetId) || 0
+            const gen = prevGen + 1
+            loadGenBySessionRef.current.set(targetId, gen)
+            const msgs = await listMessages(targetId, MESSAGE_PAGE, 0)
+            if ((loadGenBySessionRef.current.get(targetId) || 0) !== gen || sessionIdRef.current !== targetId) return
+            const list = Array.isArray(msgs) ? msgs : []
+            const keepPartial =
+              rawAssistantText.trim() && shouldRestoreStoppedPartial(list, rawAssistantText)
+            serverCountRef.current = list.length
+            setMessages((prev) => {
+              if (!keepPartial) return list
+              const local = prev.find(
+                (m) => m.role === 'assistant' && m.content === assistantText,
+              )
+              return local ? [...list, local] : list
+            })
+            setHasOlder(list.length >= MESSAGE_PAGE)
+            // The turn may still be running: the socket dropped, the claim did
+            // not. Re-attach and replay instead of leaving the page idle.
+            if (getStreamJob(targetId)?.status !== 'running') {
+              void getSession(targetId)
+                .then((sess) => {
+                  if (sessionIdRef.current !== targetId) return
+                  const plan = reattachPlan({
+                    liveness: sess,
+                    localJobRunning: getStreamJob(targetId)?.status === 'running',
+                  })
+                  if (plan.kind === 'attach') {
+                    attachToTurnRef.current?.(targetId, plan.requestId, model)
+                  } else {
+                    setRemoteBusy(plan.kind === 'working')
+                  }
+                })
+                .catch(() => {
+                  /* best-effort */
+                })
+            }
+          } catch {
+            /* keep optimistic interrupted bubble */
+          }
+          window.setTimeout(() => {
+            void drainQueue(targetId)
+          }, 40)
+          return
+        }
+        try {
+          const prevGen = loadGenBySessionRef.current.get(targetId) || 0
+          const gen = prevGen + 1
+          loadGenBySessionRef.current.set(targetId, gen)
+          const msgs = await listMessages(targetId)
+          if ((loadGenBySessionRef.current.get(targetId) || 0) !== gen || sessionIdRef.current !== targetId) return
+          if (stepsSnapshot.length && msgs.length) {
+            const last = msgs[msgs.length - 1]
+            if (last && last.role === 'assistant') {
+              const hasTools = (last.tool_calls?.length || 0) > 0
+              if (!hasTools) {
+                last.tool_calls = stepsSnapshot.map((s) => ({
+                  name: s.name,
+                  args: s.argsText ? safeParseArgs(s.argsText) : {},
+                  id: s.callId,
+                }))
+                last.tool_results = stepsSnapshot.map((s) => ({
+                  name: s.name,
+                  output: s.resultText || '',
+                  error: s.error,
+                  id: s.callId,
+                }))
+              }
+            }
+          }
+          setMessages(msgs)
+        } catch {
+          /* keep optimistic assistant bubble */
+        }
+        setProcessSteps([])
+        processStepsRef.current = []
+        // Drain next queued prompt for this session after a tick.
+        window.setTimeout(() => {
+          void drainQueue(targetId)
+        }, 40)
+      }
+
+      /**
+       * `quiet` is for a re-attach that never joined: failing to reach a turn
+       * log is this client's problem, not something the owner did, so it must
+       * not land a red system bubble in her transcript.
+       */
+      const finishErr = async (errMsg: string, opts?: { quiet?: boolean }) => {
+        if (doneReceived) return
+        doneReceived = true
+        if (isFocusedTurn()) {
+          resetStreamBuffers()
+        } else {
+          clearStreamAccum()
+        }
+        completeStreamJob(targetId, 'error', errMsg)
+        if (isFocusedTurn()) {
+          setStreaming(false)
+          setStreamStalled(false)
+          setStallSeconds(0)
+          setStreamCtrl(null)
+          streamCtrlRef.current = null
+          setPartialText('')
+          setPartialThinking('')
+          setActiveTools([])
+          setProcessSteps([])
+          processStepsRef.current = []
+          setTaskProgress(null)
+          streamingRef.current = false
+          sendLockRef.current = false
+        }
+        // Only paint errors on the session that started this turn.
+        if (!opts?.quiet && sessionIdRef.current === targetId) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: 'system',
+              content: `Error: ${errMsg}`,
+              thinking: null,
+              tool_calls: [],
+              tool_results: [],
+              model: null,
+              agent: null,
+              tokens: null,
+              created_at: new Date().toISOString(),
+              reverted: false,
+            },
+          ])
+        }
+        window.setTimeout(() => {
+          void drainQueue(targetId)
+        }, 40)
+      }
+
+      const pushSteps = (next: ProcessStep[]) => {
+        // Always write job paint (background turns keep process trail).
+        setJobProcessSteps(targetId, next)
+        if (isFocusedTurn()) {
+          processStepsRef.current = next
+          setProcessSteps(next)
+        }
+      }
+
+      const handlers: TurnStreamHandlers = {
+        onToken: (token) => {
+          bumpActivity()
+          // Always accumulate on the job so reattach/finish see full text.
+          appendJobToken(targetId, token)
+          if (isFocusedTurn()) appendPartialToken(token)
+        },
+        onDone: (doneMeta) => {
+          void finishOk({
+            aborted: Boolean(doneMeta?.aborted),
+            steered: Boolean(doneMeta?.steered),
+            interrupted: Boolean(doneMeta?.interrupted),
+          })
+        },
+        onError: (errMsg) => {
+          // An attach that never applied a frame did not join the turn (no log
+          // for it, or the server moved on). Keep the working state instead of
+          // reporting a failure the owner cannot act on.
+          const joinFailed = run.kind === 'attach' && getJobLastSeq(targetId) === 0
+          if (joinFailed) {
+            console.warn('[remedy] could not attach to turn', run.requestId, errMsg)
+            setRemoteBusy(true)
+          }
+          void finishErr(errMsg, { quiet: joinFailed })
+        },
+        onStart: (info) => {
+          if (info.requestId) setJobRequestId(targetId, info.requestId)
+          // Stop must send the claim generation, on a re-attach as much as on
+          // a turn this webview started.
+          if (typeof info.claimEpoch === 'number') {
+            setJobClaimEpoch(targetId, info.claimEpoch)
+          }
+        },
+        onSeq: (seq) => {
+          setJobLastSeq(targetId, seq)
+        },
+        onThinking: (thought, meta) => {
+          bumpActivity()
+          if (meta?.replace) {
+            replaceJobThinking(targetId, thought)
+            if (isFocusedTurn()) replacePartialThinking(thought)
+            return
+          }
+          appendJobThinking(targetId, thought)
+          if (isFocusedTurn()) appendPartialThinking(thought)
+        },
+        onToolCall: (name, args, callId) => {
+          bumpActivity()
+          const paint = getJobPaint(targetId)
+          const prevSteps = paint?.processSteps?.length
+            ? paint.processSteps
+            : processStepsRef.current
+          const { steps, tools } = applyLiveToolCall(
+            prevSteps,
+            paint?.activeTools || [],
+            { name, args, callId, requestId: getJobRequestId(targetId) },
+          )
+          setJobActiveTools(targetId, tools)
+          markLiveTurn(targetId, 'running')
+          if (isFocusedTurn()) setActiveTools(tools)
+          pushSteps(steps)
+        },
+        onToolResult: (name, preview, ok = true, callId) => {
+          bumpActivity()
+          const paint = getJobPaint(targetId)
+          const prevSteps = paint?.processSteps?.length
+            ? paint.processSteps
+            : processStepsRef.current
+          // Results pair by call id (parallel tools finish out of order);
+          // name + order only when the frame carries no id.
+          const { steps, tools } = applyLiveToolResult(
+            prevSteps,
+            paint?.activeTools || [],
+            { name, preview, ok, callId, requestId: getJobRequestId(targetId) },
+          )
+          setJobActiveTools(targetId, tools)
+          if (isFocusedTurn()) setActiveTools(tools)
+          pushSteps(steps)
+          const stillRunning = tools.some((t) => t.status === 'running')
+          if (!stillRunning) markLiveTurn(targetId, 'verifying')
+        },
+        onProgress: (info) => {
+          bumpActivity()
+          setJobTaskProgress(targetId, info)
+          if (isFocusedTurn()) setTaskProgress(info)
+        },
+        onUsage: (usage: UsagePayload) => {
+          bumpActivity()
+          const snap = {
+            prompt_tokens: usage.prompt_tokens ?? 0,
+            completion_tokens: usage.completion_tokens ?? 0,
+            total_tokens:
+              usage.total_tokens
+              ?? (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0),
+            estimated_cost_usd: usage.estimated_cost_usd ?? 0,
+            cache_read_tokens: usage.cache_read_tokens,
+            cache_write_tokens: usage.cache_write_tokens,
+            source: usage.source,
+            model: usage.model ?? model ?? null,
+            provider: usage.provider ?? null,
+          }
+          setJobRunUsage(targetId, snap)
+          if (isFocusedTurn()) setRunUsage(snap)
+        },
+        onLibrarySuggest: (payload) => {
+          bumpActivity()
+          if (sessionIdRef.current !== targetId) return
+          const id = typeof payload.id === 'string' ? payload.id : ''
+          const name = typeof payload.name === 'string' ? payload.name : ''
+          if (!id || !name) return
+          setLibrarySuggest({
+            id,
+            name,
+            description:
+              typeof payload.description === 'string' ? payload.description : '',
+            score: typeof payload.score === 'number' ? payload.score : undefined,
+            version: typeof payload.version === 'string' ? payload.version : undefined,
+            reason: typeof payload.reason === 'string' ? payload.reason : undefined,
+          })
+        },
+        onTodos: (payload) => {
+          bumpActivity()
+          const parsed = parseTodosPayload(payload)
+          const live = todosHaveOpen(parsed) ? parsed : []
+          setJobBuildTodos(targetId, live)
+          if (isFocusedTurn()) setBuildTodos(live)
+        },
+      }
+
+      // Both entry points return their AbortController synchronously (before
+      // the first fetch), so the job is registered before any frame lands.
+      const ctrl =
+        run.kind === 'send'
+          ? streamMessage(targetId, run.text, handlers, {
+              model,
+              provider: run.provider,
+              attachments: run.attachments,
+              planMode: run.planMode,
+              chatMode: run.chatMode,
+            })
+          : attachTurn(targetId, run.requestId, handlers, { after: run.after })
+      registerStreamJob(
+        targetId,
+        ctrl,
+        model,
+        run.kind === 'attach'
+          ? { requestId: run.requestId, lastSeq: run.after, attached: true }
+          : undefined,
+      )
+      // Only bind focused chrome AbortController to this job.
+      if (isFocusedTurn()) {
+        streamCtrlRef.current = ctrl
+        setStreamCtrl(ctrl)
+      }
+      return ctrl
+    },
+    [
+      appendPartialToken,
+      appendPartialThinking,
+      replacePartialThinking,
+      resetStreamBuffers,
+      clearStreamAccum,
+      drainQueue,
+    ],
+  )
+
+  const attachToTurn = useCallback(
+    (sid: string, requestId: string, model?: string) => {
+      // Idempotent: a second attach for a turn this webview already paints
+      // would replay its frames into a fresh buffer and duplicate the trail.
+      if (isFollowingTurn(sid, requestId)) return
+      setRemoteBusy(false)
+      if (sessionIdRef.current === sid) {
+        streamingRef.current = true
+        sendLockRef.current = true
+        setStreaming(true)
+        setStreamStalled(false)
+        setStallSeconds(0)
+        // The replay is the whole turn — start from a clean paint so nothing
+        // from a previous turn is mistaken for this one's work.
+        clearStreamAccum()
+        setPartialText('')
+        setPartialThinking('')
+        setActiveTools([])
+        setProcessSteps([])
+        processStepsRef.current = []
+        setTaskProgress(null)
+        lastStreamActivityRef.current = Date.now()
+      }
+      runTurnStream(sid, { kind: 'attach', requestId, after: 0, model })
+    },
+    [runTurnStream, clearStreamAccum],
+  )
+
+  useEffect(() => {
+    attachToTurnRef.current = attachToTurn
+  }, [attachToTurn])
+
   const sendTurn = useCallback(
     async (
       text: string,
@@ -537,6 +1089,8 @@ export function useMessages(sessionId: string | null) {
       if (getStreamJob(targetId)?.status === 'running') return
       const isFocusedStart = sessionIdRef.current === targetId
       if (isFocusedStart) {
+        // This webview now owns the stream — nothing to re-attach to.
+        setRemoteBusy(false)
         sendLockRef.current = true
         streamingRef.current = true
       }
@@ -618,396 +1172,17 @@ export function useMessages(sessionId: string | null) {
         chatMode,
       })
 
-      let doneReceived = false
-
-      const bumpActivity = () => {
-        lastStreamActivityRef.current = Date.now()
-        touchStreamJob(targetId)
-        if (!isFocusedTurn()) return
-        setStreamStalled(false)
-        setStallSeconds(0)
-      }
-
-      const finishOk = async (meta?: { aborted?: boolean; steered?: boolean }) => {
-        if (doneReceived) return
-        doneReceived = true
-        if (meta?.steered) {
-          // Words went to the still-running turn; that turn's own stream (or
-          // reattach) paints the reply. Nothing to commit here.
-          markJobUiCommitted(targetId)
-        }
-        // Only flush RAF buffers for the focused turn — otherwise a detached
-        // job finish injects ghost partials into the visible session.
-        if (isFocusedTurn()) {
-          resetStreamBuffers()
-        } else {
-          clearStreamAccum()
-        }
-        // Prefer per-job paint (survives detach + concurrent tabs) over hook refs.
-        const paint = getJobPaint(targetId)
-        const job = getStreamJob(targetId)
-        const wasAborted = Boolean(
-          meta?.aborted || job?.status === 'aborted',
-        )
-        const alreadyCommitted = isJobUiCommitted(targetId)
-        const stepsSnapshot = paint?.processSteps?.length
-          ? [...paint.processSteps]
-          : [...processStepsRef.current]
-        let assistantText =
-          (paint?.partialText && paint.partialText.length
-            ? paint.partialText
-            : streamAccumRef.current) || ''
-        if (wasAborted && assistantText.trim()) {
-          assistantText = withStoppedMarker(assistantText)
-        }
-        const thinkingText =
-          (paint?.partialThinking && paint.partialThinking.length
-            ? paint.partialThinking
-            : thinkingAccumRef.current) || null
-        // Optimistic: promote stream into a permanent bubble immediately (no blank gap).
-        // Skip when Stop/interrupt already committed this partial (double-bubble guard).
-        if (
-          !alreadyCommitted
-          && assistantText.trim()
-          && sessionIdRef.current === targetId
-        ) {
-          const optimistic: ChatMessage = {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content: assistantText,
-            thinking: thinkingText,
-            tool_calls: stepsSnapshot.map((s) => ({
-              name: s.name,
-              args: s.argsText ? safeParseArgs(s.argsText) : {},
-            })),
-            tool_results: stepsSnapshot.map((s) => ({
-              name: s.name,
-              output: s.resultText || '',
-              error: s.error,
-            })),
-            model: model || null,
-            agent: null,
-            tokens: null,
-            created_at: new Date().toISOString(),
-            reverted: false,
-          }
-          setMessages((prev) => [...prev, optimistic])
-          if (wasAborted) markJobUiCommitted(targetId)
-        }
-        completeStreamJob(targetId, wasAborted ? 'aborted' : 'done')
-        // Always clear focused chrome locks when the focused job ends; if this
-        // was a background job, leave focused locks alone (other tab may stream).
-        if (isFocusedTurn()) {
-          setBuildTodos((prev) => (todosHaveOpen(prev) ? prev : []))
-          setStreaming(false)
-          setStreamStalled(false)
-          setStallSeconds(0)
-          setStreamCtrl(null)
-          streamCtrlRef.current = null
-          setPartialText('')
-          setPartialThinking('')
-          setActiveTools([])
-          setTaskProgress(null)
-          streamingRef.current = false
-          sendLockRef.current = false
-          streamAccumRef.current = ''
-          thinkingAccumRef.current = ''
-        }
-        // Drop results if the user already switched sessions.
-        if (sessionIdRef.current !== targetId) {
-          if (wasAborted && !alreadyCommitted && assistantText.trim()) {
-            markJobUiCommitted(targetId)
-          }
-          // Drain that session's queue in the background (does not steal focus).
-          window.setTimeout(() => {
-            void drainQueue(targetId)
-          }, 40)
-          return
-        }
-        // Aborted turns: keep the local Stopped bubble; server often has no final row yet.
-        if (wasAborted) {
-          setProcessSteps([])
-          processStepsRef.current = []
-          window.setTimeout(() => {
-            void drainQueue(targetId)
-          }, 40)
-          return
-        }
-        try {
-          const prevGen = loadGenBySessionRef.current.get(targetId) || 0
-          const gen = prevGen + 1
-          loadGenBySessionRef.current.set(targetId, gen)
-          const msgs = await listMessages(targetId)
-          if ((loadGenBySessionRef.current.get(targetId) || 0) !== gen || sessionIdRef.current !== targetId) return
-          if (stepsSnapshot.length && msgs.length) {
-            const last = msgs[msgs.length - 1]
-            if (last && last.role === 'assistant') {
-              const hasTools = (last.tool_calls?.length || 0) > 0
-              if (!hasTools) {
-                last.tool_calls = stepsSnapshot.map((s) => ({
-                  name: s.name,
-                  args: s.argsText ? safeParseArgs(s.argsText) : {},
-                }))
-                last.tool_results = stepsSnapshot.map((s) => ({
-                  name: s.name,
-                  output: s.resultText || '',
-                  error: s.error,
-                }))
-              }
-            }
-          }
-          setMessages(msgs)
-        } catch {
-          /* keep optimistic assistant bubble */
-        }
-        setProcessSteps([])
-        processStepsRef.current = []
-        // Drain next queued prompt for this session after a tick.
-        window.setTimeout(() => {
-          void drainQueue(targetId)
-        }, 40)
-      }
-
-      const finishErr = async (errMsg: string) => {
-        if (doneReceived) return
-        doneReceived = true
-        if (isFocusedTurn()) {
-          resetStreamBuffers()
-        } else {
-          clearStreamAccum()
-        }
-        completeStreamJob(targetId, 'error', errMsg)
-        if (isFocusedTurn()) {
-          setStreaming(false)
-          setStreamStalled(false)
-          setStallSeconds(0)
-          setStreamCtrl(null)
-          streamCtrlRef.current = null
-          setPartialText('')
-          setPartialThinking('')
-          setActiveTools([])
-          setProcessSteps([])
-          processStepsRef.current = []
-          setTaskProgress(null)
-          streamingRef.current = false
-          sendLockRef.current = false
-        }
-        // Only paint errors on the session that started this turn.
-        if (sessionIdRef.current === targetId) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              role: 'system',
-              content: `Error: ${errMsg}`,
-              thinking: null,
-              tool_calls: [],
-              tool_results: [],
-              model: null,
-              agent: null,
-              tokens: null,
-              created_at: new Date().toISOString(),
-              reverted: false,
-            },
-          ])
-        }
-        window.setTimeout(() => {
-          void drainQueue(targetId)
-        }, 40)
-      }
-
-      const pushSteps = (next: ProcessStep[]) => {
-        // Always write job paint (background turns keep process trail).
-        setJobProcessSteps(targetId, next)
-        if (isFocusedTurn()) {
-          processStepsRef.current = next
-          setProcessSteps(next)
-        }
-      }
-
-      // streamMessage returns its AbortController synchronously (before fetch).
-      // Register immediately so background tokens always hit job.paint.
-      const ctrl = streamMessage(
-        targetId,
-        text.trim() || '(see attached files)',
-        (token) => {
-          bumpActivity()
-          // Always accumulate on the job so reattach/finish see full text.
-          appendJobToken(targetId, token)
-          if (isFocusedTurn()) appendPartialToken(token)
-        },
-        (doneMeta) => {
-          void finishOk({
-            aborted: Boolean(doneMeta?.aborted),
-            steered: Boolean(doneMeta?.steered),
-          })
-        },
-        (errMsg) => {
-          void finishErr(errMsg)
-        },
+      runTurnStream(targetId, {
+        kind: 'send',
+        text: text.trim() || '(see attached files)',
         model,
-        (thought, meta) => {
-          bumpActivity()
-          if (meta?.replace) {
-            replaceJobThinking(targetId, thought)
-            if (isFocusedTurn()) replacePartialThinking(thought)
-            return
-          }
-          appendJobThinking(targetId, thought)
-          if (isFocusedTurn()) appendPartialThinking(thought)
-        },
-        (name, args, callId) => {
-          bumpActivity()
-          const paint = getJobPaint(targetId)
-          const tools = [
-            ...(paint?.activeTools || []),
-            { name, status: 'running' as const },
-          ]
-          setJobActiveTools(targetId, tools)
-          markLiveTurn(targetId, 'running')
-          if (isFocusedTurn()) {
-            setActiveTools(tools)
-          }
-          const step: ProcessStep = {
-            id: callId || `${name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            name,
-            label: toolLabel(name),
-            status: 'running',
-            startedAt: Date.now(),
-            callId: callId || undefined,
-            argsText:
-              args && Object.keys(args).length
-                ? JSON.stringify(args, null, 2)
-                : undefined,
-          }
-          const prevSteps =
-            paint?.processSteps?.length
-              ? paint.processSteps
-              : processStepsRef.current
-          pushSteps([...prevSteps, step])
-        },
-        (name, preview, ok = true, callId) => {
-          bumpActivity()
-          const paint = getJobPaint(targetId)
-          let tools = paint?.activeTools || []
-          let toolDone = false
-          tools = tools.map((t) => {
-            if (!toolDone && t.name === name && t.status === 'running') {
-              toolDone = true
-              return { ...t, status: ok ? ('done' as const) : ('error' as const) }
-            }
-            return t
-          })
-          setJobActiveTools(targetId, tools)
-          if (isFocusedTurn()) setActiveTools(tools)
-
-          const prev =
-            paint?.processSteps?.length
-              ? paint.processSteps
-              : processStepsRef.current
-          let hit = false
-          const next = prev.map((s) => {
-            if (hit || s.status !== 'running') return s
-            const idMatch =
-              callId && (s.callId === callId || s.id === callId)
-            const nameMatch = !callId && s.name === name
-            if (idMatch || nameMatch) {
-              hit = true
-              return {
-                ...s,
-                status: (ok ? 'done' : 'error') as ProcessStep['status'],
-                endedAt: Date.now(),
-                resultText: preview,
-                error: ok ? undefined : preview || 'tool failed',
-                callId: s.callId || callId,
-              }
-            }
-            return s
-          })
-          if (!hit) {
-            next.push({
-              id: callId || `${name}-done-${Date.now()}`,
-              name,
-              label: toolLabel(name),
-              status: ok ? 'done' : 'error',
-              startedAt: Date.now(),
-              endedAt: Date.now(),
-              callId: callId || undefined,
-              resultText: preview,
-              error: ok ? undefined : preview || 'tool failed',
-            })
-          }
-          pushSteps(next)
-          const stillRunning = tools.some((t) => t.status === 'running')
-          if (!stillRunning) markLiveTurn(targetId, 'verifying')
-        },
-        attachments,
-        (info) => {
-          bumpActivity()
-          setJobTaskProgress(targetId, info)
-          if (isFocusedTurn()) setTaskProgress(info)
-        },
-        planMode,
-        (usage: UsagePayload) => {
-          bumpActivity()
-          const snap = {
-            prompt_tokens: usage.prompt_tokens ?? 0,
-            completion_tokens: usage.completion_tokens ?? 0,
-            total_tokens:
-              usage.total_tokens
-              ?? (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0),
-            estimated_cost_usd: usage.estimated_cost_usd ?? 0,
-            source: usage.source,
-            model: usage.model ?? model ?? null,
-            provider: usage.provider ?? null,
-          }
-          setJobRunUsage(targetId, snap)
-          if (isFocusedTurn()) setRunUsage(snap)
-        },
-        (payload) => {
-          bumpActivity()
-          if (sessionIdRef.current !== targetId) return
-          const id = typeof payload.id === 'string' ? payload.id : ''
-          const name = typeof payload.name === 'string' ? payload.name : ''
-          if (!id || !name) return
-          setLibrarySuggest({
-            id,
-            name,
-            description:
-              typeof payload.description === 'string' ? payload.description : '',
-            score: typeof payload.score === 'number' ? payload.score : undefined,
-            version:
-              typeof payload.version === 'string' ? payload.version : undefined,
-            reason: typeof payload.reason === 'string' ? payload.reason : undefined,
-          })
-        },
         provider,
-        (payload) => {
-          bumpActivity()
-          const parsed = parseTodosPayload(payload)
-          const live = todosHaveOpen(parsed) ? parsed : []
-          setJobBuildTodos(targetId, live)
-          if (isFocusedTurn()) setBuildTodos(live)
-        },
+        attachments,
+        planMode,
         chatMode,
-      )
-
-      registerStreamJob(targetId, ctrl, model)
-      // Only bind focused chrome AbortController to this job.
-      if (isFocusedTurn()) {
-        streamCtrlRef.current = ctrl
-        setStreamCtrl(ctrl)
-      }
+      })
     },
-    [
-      sessionId,
-      appendPartialToken,
-      appendPartialThinking,
-      replacePartialThinking,
-      resetStreamBuffers,
-      clearStreamAccum,
-      drainQueue,
-    ],
+    [sessionId, clearStreamAccum, runTurnStream],
   )
 
   useEffect(() => {
@@ -1501,6 +1676,7 @@ export function useMessages(sessionId: string | null) {
     loadingOlder,
     loadOlder,
     streaming,
+    remoteBusy,
     streamStalled,
     stallSeconds,
     stallBannerDismissed,

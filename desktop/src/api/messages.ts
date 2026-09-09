@@ -1,12 +1,16 @@
 import {
   apiFetch,
   authHeaders,
+  clearApiToken,
   ensureApiToken,
   formatApiErrorBody,
   getApiBase,
 } from './client'
-import { setJobClaimEpoch } from '../sessions/streamJobs'
+import { pumpTurnStream, SeqGate } from './turnStream'
+import type { TurnStreamHandlers } from './turnStream'
 import type { ChatMessage, ModelDefinition, AgentDefinition, CommandDefinition } from '../types'
+
+export type { TurnStreamHandlers } from './turnStream'
 
 /**
  * User-facing message for a failed stream HTTP response.
@@ -85,6 +89,10 @@ export type UsagePayload = {
   completion_tokens?: number
   total_tokens?: number
   estimated_cost_usd?: number
+  /** Prompt input served from the provider's cache (Anthropic prompt caching). */
+  cache_read_tokens?: number
+  /** Prompt input written into the cache this round. */
+  cache_write_tokens?: number
   source?: string
   model?: string | null
   provider?: string | null
@@ -101,25 +109,13 @@ export type StreamDonePayload = {
    * as mid-turn steering instead of killing it; no new assistant row follows.
    */
   steered?: boolean
-}
-
-export type StreamHandlers = {
-  onToken: (text: string) => void
-  onDone: (data: StreamDonePayload) => void
-  onError: (message: string) => void
-  onThinking?: (text: string, meta?: { replace?: boolean }) => void
-  onToolCall?: (
-    name: string,
-    args?: Record<string, unknown>,
-    callId?: string,
-  ) => void
-  onToolResult?: (
-    name: string,
-    preview?: string,
-    ok?: boolean,
-    callId?: string,
-  ) => void
-  onUsage?: (usage: UsagePayload) => void
+  /**
+   * The connection closed without a terminal `done` / `aborted` / `error`
+   * frame (proxy cut, sidecar restart, webview reload). The turn may still be
+   * running server-side: callers keep the partial text, mark the bubble as
+   * interrupted and re-fetch the session instead of treating this as success.
+   */
+  interrupted?: boolean
 }
 
 export type AttachmentPayload = {
@@ -139,37 +135,125 @@ export type StreamProgress = {
   total?: number | null
 }
 
+export type SendTurnOptions = {
+  model?: string
+  /** Per-session provider — must pair with model for multi-tab multi-provider. */
+  provider?: string
+  attachments?: AttachmentPayload[]
+  planMode?: boolean
+  chatMode?: boolean
+}
+
+/** `GET /api/sessions/{id}/stream/attach` URL for a turn, resuming after `after`. */
+export function attachStreamUrl(
+  sessionId: string,
+  requestId: string,
+  after = 0,
+): string {
+  const q = new URLSearchParams({ request_id: requestId })
+  if (after > 0) q.set('after', String(Math.trunc(after)))
+  return `${getApiBase()}/sessions/${sessionId}/stream/attach?${q.toString()}`
+}
+
+/** One authenticated GET on the attach stream (401 → re-bootstrap once). */
+async function openAttachStream(url: string, signal: AbortSignal): Promise<Response> {
+  await ensureApiToken()
+  const doFetch = () =>
+    fetch(url, {
+      method: 'GET',
+      headers: { ...authHeaders(), Accept: 'text/event-stream' },
+      signal,
+    })
+  let res = await doFetch()
+  if (res.status === 401) {
+    clearApiToken()
+    await ensureApiToken()
+    res = await doFetch()
+  }
+  return res
+}
+
+/**
+ * Follow a turn that is already running: replay what this client missed from
+ * the turn log, then tail the live turn until it finishes.
+ *
+ * Resuming twice is safe — every frame is gated on its `seq` — and a `gap`
+ * notice re-opens the stream from the server's `resume_after` instead of
+ * continuing past the frames it lost.
+ */
+export function attachTurn(
+  sessionId: string,
+  requestId: string,
+  handlers: TurnStreamHandlers,
+  opts?: { after?: number },
+): AbortController {
+  const controller = new AbortController()
+  const gate = new SeqGate(opts?.after ?? 0)
+
+  ;(async () => {
+    let after = Math.max(0, Math.trunc(opts?.after ?? 0))
+    try {
+      while (!controller.signal.aborted) {
+        const res = await openAttachStream(
+          attachStreamUrl(sessionId, requestId, after),
+          controller.signal,
+        )
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          handlers.onError(streamHttpErrorMessage(body, res.status, res.statusText))
+          return
+        }
+        if (!res.body) {
+          handlers.onError('No response body from server')
+          return
+        }
+        const outcome = await pumpTurnStream(res.body, handlers, gate, { requestId })
+        if (outcome.kind === 'terminal') return
+        if (outcome.kind === 'gap') {
+          after = outcome.after
+          continue
+        }
+        // Closed with no terminal frame. The turn may still be running server
+        // side, but this socket is done: report it as interrupted rather than
+        // as a success.
+        handlers.onDone({ request_id: requestId, interrupted: true })
+        return
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return
+      handlers.onError(streamTransportErrorMessage(err))
+    }
+  })()
+
+  return controller
+}
+
+/**
+ * Send a message and stream the turn.
+ *
+ * A `gap` notice mid-stream means the server's frame queue overflowed: this
+ * client abandons the POST socket and finishes the turn on `stream/attach`
+ * from the lost range (dropping the POST connection never cancels the turn —
+ * only `POST /abort` does), so the caller still sees one continuous stream.
+ */
 export function streamMessage(
   sessionId: string,
   message: string,
-  onToken: (text: string) => void,
-  onDone: (data: StreamDonePayload) => void,
-  onError: (message: string) => void,
-  model?: string,
-  onThinking?: (text: string, meta?: { replace?: boolean }) => void,
-  onToolCall?: (
-    name: string,
-    args?: Record<string, unknown>,
-    callId?: string,
-  ) => void,
-  onToolResult?: (
-    name: string,
-    preview?: string,
-    ok?: boolean,
-    callId?: string,
-  ) => void,
-  attachments?: AttachmentPayload[],
-  onProgress?: (info: StreamProgress) => void,
-  planMode?: boolean,
-  onUsage?: (usage: UsagePayload) => void,
-  onLibrarySuggest?: (payload: Record<string, unknown>) => void,
-  /** Per-session provider — must pair with model for multi-tab multi-provider. */
-  provider?: string,
-  onTodos?: (payload: Record<string, unknown>) => void,
-  chatMode?: boolean,
-  onLifeTask?: (payload: Record<string, unknown>) => void,
+  handlers: TurnStreamHandlers,
+  opts: SendTurnOptions = {},
 ): AbortController {
   const controller = new AbortController()
+  const { model, provider, attachments, planMode, chatMode } = opts
+  const gate = new SeqGate()
+  let requestId = ''
+  const wrapped: TurnStreamHandlers = {
+    ...handlers,
+    // The turn id is what a re-sync needs; everything else is the caller's.
+    onStart: (info) => {
+      if (info.requestId) requestId = info.requestId
+      handlers.onStart?.(info)
+    },
+  }
 
   ;(async () => {
     try {
@@ -199,9 +283,8 @@ export function streamMessage(
       let res = await doFetch()
       // After update / server restart the cached token can be stale — re-bootstrap once.
       if (res.status === 401) {
-        const { clearApiToken, ensureApiToken: reAuth } = await import('./client')
         clearApiToken()
-        await reAuth()
+        await ensureApiToken()
         res = await doFetch()
       }
       // Same-session already streaming (Stop+send / double-submit). The dying
@@ -223,7 +306,11 @@ export function streamMessage(
             try {
               const sr = await fetch(`${getApiBase()}/sessions/${sessionId}/steer`, {
                 method: 'POST',
-                headers: { ...authHeaders(), Accept: 'application/json', 'Content-Type': 'application/json' },
+                headers: {
+                  ...authHeaders(),
+                  Accept: 'application/json',
+                  'Content-Type': 'application/json',
+                },
                 body: JSON.stringify({ message }),
               })
               const sj = (await sr.json().catch(() => ({}))) as {
@@ -236,7 +323,7 @@ export function streamMessage(
                 reason: sj?.reason,
               })
               if (last === 'steered') {
-                onDone({ request_id: '', steered: true })
+                handlers.onDone({ request_id: '', steered: true })
                 return
               }
               if (last === 'supersede') break
@@ -246,7 +333,7 @@ export function streamMessage(
           }
           if (last === 'retry-steer') {
             // Nudge full or a blip — keep the live turn. Words retry next Enter.
-            onDone({ request_id: '', steered: true })
+            handlers.onDone({ request_id: '', steered: true })
             return
           }
         }
@@ -265,179 +352,42 @@ export function streamMessage(
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
-        onError(streamHttpErrorMessage(body, res.status, res.statusText))
+        handlers.onError(streamHttpErrorMessage(body, res.status, res.statusText))
+        return
+      }
+      if (!res.body) {
+        handlers.onError('No response body from server')
         return
       }
 
-      const reader = res.body?.getReader()
-      if (!reader) {
-        onError('No response body from server')
-        return
-      }
-
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let currentEvent = ''
-      let finished = false
-
-      function handlePayload(payload: Record<string, unknown>) {
-        if (finished) return
-        switch (currentEvent) {
-          case 'token':
-            if (typeof payload.text === 'string' && payload.text) onToken(payload.text)
-            break
-          case 'thinking':
-            if (typeof payload.text === 'string' && payload.text) {
-              onThinking?.(payload.text, {
-                replace: payload.replace === true,
-              })
-            }
-            break
-          case 'tool_call':
-            if (typeof payload.name === 'string' && payload.name) {
-              const args =
-                payload.args && typeof payload.args === 'object' && !Array.isArray(payload.args)
-                  ? (payload.args as Record<string, unknown>)
-                  : undefined
-              const callId =
-                typeof payload.call_id === 'string'
-                  ? payload.call_id
-                  : typeof payload.id === 'string'
-                    ? payload.id
-                    : undefined
-              onToolCall?.(payload.name, args, callId)
-            }
-            break
-          case 'tool_result':
-            if (typeof payload.name === 'string' && payload.name) {
-              const callId =
-                typeof payload.call_id === 'string'
-                  ? payload.call_id
-                  : typeof payload.id === 'string'
-                    ? payload.id
-                    : undefined
-              onToolResult?.(
-                payload.name,
-                typeof payload.preview === 'string' ? payload.preview : undefined,
-                typeof payload.ok === 'boolean' ? payload.ok : true,
-                callId,
-              )
-            }
-            break
-          case 'progress':
-            onProgress?.({
-              percent: typeof payload.percent === 'number' ? payload.percent : null,
-              label: typeof payload.label === 'string' ? payload.label : undefined,
-              eta: typeof payload.eta === 'string' ? payload.eta : null,
-              step: typeof payload.step === 'number' ? payload.step : null,
-              total: typeof payload.total === 'number' ? payload.total : null,
-            })
-            break
-          case 'usage':
-            onUsage?.({
-              prompt_tokens: typeof payload.prompt_tokens === 'number' ? payload.prompt_tokens : 0,
-              completion_tokens:
-                typeof payload.completion_tokens === 'number' ? payload.completion_tokens : 0,
-              total_tokens: typeof payload.total_tokens === 'number' ? payload.total_tokens : 0,
-              estimated_cost_usd:
-                typeof payload.estimated_cost_usd === 'number' ? payload.estimated_cost_usd : 0,
-              source: typeof payload.source === 'string' ? payload.source : undefined,
-              model: typeof payload.model === 'string' ? payload.model : null,
-              provider: typeof payload.provider === 'string' ? payload.provider : null,
-            })
-            break
-          case 'library_suggest':
-            if (payload && typeof payload === 'object') {
-              onLibrarySuggest?.(payload)
-            }
-            break
-          case 'todos':
-            if (payload && typeof payload === 'object') {
-              onTodos?.(payload)
-            }
-            break
-          case 'life_task':
-            if (payload && typeof payload === 'object') {
-              onLifeTask?.(payload)
-            }
-            break
-          case 'start': {
-            const ep = payload.claim_epoch
-            if (typeof ep === 'number') setJobClaimEpoch(sessionId, ep)
-            break
-          }
-          case 'done':
-            finished = true
-            if (payload.usage && typeof payload.usage === 'object') {
-              onUsage?.(payload.usage as UsagePayload)
-            }
-            onDone(payload as StreamDonePayload)
-            break
-          case 'aborted':
-            // Cooperative Stop — not an error, but not success either.
-            // Callers complete the job as 'aborted' and mark partials [Stopped].
-            finished = true
-            onDone({
-              request_id:
-                typeof payload.request_id === 'string' ? payload.request_id : '',
-              aborted: true,
-            })
-            break
-          case 'error':
-            finished = true
-            onError(String(payload.message || 'Unknown error'))
-            break
+      let outcome = await pumpTurnStream(res.body, wrapped, gate)
+      // Frames were lost. Finish the turn on the turn log rather than carry on
+      // past the hole; the turn itself keeps running server-side.
+      while (outcome.kind === 'gap' && requestId && !controller.signal.aborted) {
+        const resumed = await openAttachStream(
+          attachStreamUrl(sessionId, requestId, outcome.after),
+          controller.signal,
+        )
+        if (!resumed.ok || !resumed.body) {
+          handlers.onDone({ request_id: requestId, interrupted: true })
+          return
         }
+        outcome = await pumpTurnStream(resumed.body, wrapped, gate, { requestId })
       }
-
-      function processEvents() {
-        // Keep incomplete trailing line in buffer (critical for correct SSE framing).
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-
-        for (const raw of lines) {
-          const line = raw.replace(/\r$/, '')
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7).trim()
-            continue
-          }
-          if (line.startsWith('data: ')) {
-            try {
-              const payload = JSON.parse(line.slice(6)) as Record<string, unknown>
-              handlePayload(payload)
-            } catch {
-              // skip unparseable lines
-            }
-            currentEvent = ''
-          }
-        }
-      }
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        processEvents()
-      }
-      buffer += decoder.decode()
-      if (buffer.trim()) {
-        buffer += '\n'
-        processEvents()
-      }
-      // If stream closed without a done/error/aborted event, still complete cleanly.
-      // Cooperative abort (event:aborted) leaves finished=true without onDone —
-      // callers (stop / interrupt) own job + UI cleanup.
-      if (!finished) {
-        finished = true
-        onDone({ request_id: '' })
-      }
+      if (outcome.kind === 'terminal') return
+      // The stream closed with no done/aborted/error frame. That is not a
+      // completed turn: the sidecar may have restarted, a proxy may have cut
+      // us, or the turn may still be running server-side. Report it as
+      // interrupted so the caller keeps the partial, marks the bubble and
+      // re-fetches the session — never as a success with an empty request id.
+      handlers.onDone({ request_id: requestId, interrupted: true })
     } catch (err: unknown) {
       // AbortError: user Stop or session switch — callers clear streaming state.
       // Do not call onDone (would race setMessages onto the wrong session).
       if (err instanceof Error && err.name === 'AbortError') {
         return
       }
-      onError(streamTransportErrorMessage(err))
+      handlers.onError(streamTransportErrorMessage(err))
     }
   })()
 

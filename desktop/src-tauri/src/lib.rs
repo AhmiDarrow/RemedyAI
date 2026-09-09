@@ -19,6 +19,219 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+/// Process images Desktop may stop when they hold our API port. Anything else
+/// listening there belongs to someone else: we name the owner and exit instead
+/// of killing it.
+#[cfg(target_os = "windows")]
+const KNOWN_REMEDY_IMAGES: [&str; 3] = ["remedy-runtime", "remedy-desktop", "remedy"];
+
+/// True when `image` (a bare name or full path, e.g.
+/// `remedy-runtime-x86_64-pc-windows-msvc.exe`) is one of our binaries.
+#[cfg(target_os = "windows")]
+fn is_known_remedy_image(image: &str) -> bool {
+    let name = Path::new(image.trim())
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let stem = name.strip_suffix(".exe").unwrap_or(&name);
+    if stem.is_empty() {
+        return false;
+    }
+    KNOWN_REMEDY_IMAGES.iter().any(|known| {
+        // `remedy` must match exactly; hyphenated names may carry a target triple.
+        stem == *known || (known.contains('-') && stem.starts_with(&format!("{known}-")))
+    })
+}
+
+/// PIDs of TCP sockets LISTENING on `port`, parsed from `netstat -ano` output.
+#[cfg(target_os = "windows")]
+fn parse_netstat_listener_pids(output: &str, port: u16) -> Vec<u32> {
+    let suffix = format!(":{port}");
+    let mut pids = Vec::new();
+    for line in output.lines() {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() < 5 || !cols[0].eq_ignore_ascii_case("TCP") {
+            continue;
+        }
+        if !cols[1].ends_with(&suffix) || !cols[3].eq_ignore_ascii_case("LISTENING") {
+            continue;
+        }
+        if let Ok(pid) = cols[4].parse::<u32>() {
+            if pid != 0 && !pids.contains(&pid) {
+                pids.push(pid);
+            }
+        }
+    }
+    pids
+}
+
+/// Image name from `tasklist /FI "PID eq N" /FO CSV /NH` (first CSV field).
+#[cfg(target_os = "windows")]
+fn parse_tasklist_image(output: &str) -> Option<String> {
+    for line in output.lines() {
+        let line = line.trim();
+        if !line.starts_with('"') {
+            // "INFO: No tasks are running which match the specified criteria."
+            continue;
+        }
+        let first = line.trim_start_matches('"');
+        let end = first.find('"').unwrap_or(first.len());
+        let image = &first[..end];
+        if !image.is_empty() {
+            return Some(image.to_string());
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn listener_pids(port: u16) -> Vec<u32> {
+    match Command::new("netstat")
+        .args(["-ano", "-p", "TCP"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(Stdio::null())
+        .output()
+    {
+        Ok(out) => parse_netstat_listener_pids(&String::from_utf8_lossy(&out.stdout), port),
+        Err(_) => Vec::new(),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn process_image_name(pid: u32) -> Option<String> {
+    let filter = format!("PID eq {pid}");
+    let out = Command::new("tasklist")
+        .args(["/FI", &filter, "/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    parse_tasklist_image(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// Stop whatever LISTENs on `port` — but only when it is a Remedy binary.
+/// Never kills by port alone. `Err` names the first foreign owner we refused
+/// to touch (`image (pid N)`), so callers can tell the user who has the port.
+#[cfg(target_os = "windows")]
+fn kill_port_listeners_if_remedy(port: u16) -> Result<(), String> {
+    let mut foreign: Option<String> = None;
+    for pid in listener_pids(port) {
+        if pid == std::process::id() {
+            continue;
+        }
+        let image = process_image_name(pid).unwrap_or_default();
+        if is_known_remedy_image(&image) {
+            log::info!("Stopping {image} (pid {pid}) listening on :{port}");
+            let _ = Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        } else {
+            let who = if image.is_empty() {
+                format!("pid {pid}")
+            } else {
+                format!("{image} (pid {pid})")
+            };
+            log::warn!("Port {port} is held by {who} — not a Remedy binary, leaving it alone");
+            foreign.get_or_insert(who);
+        }
+    }
+    match foreign {
+        Some(who) => Err(who),
+        None => Ok(()),
+    }
+}
+
+/// Job object whose closure kills every process assigned to it. The handle is
+/// intentionally never closed: closing it is what kills the job, so it lives
+/// exactly as long as this process — the sidecar tree dies with the shell.
+#[cfg(target_os = "windows")]
+fn sidecar_job_object() -> Option<windows::Win32::Foundation::HANDLE> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::JobObjects::{
+        CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    static JOB: OnceLock<isize> = OnceLock::new();
+    let raw = *JOB.get_or_init(|| unsafe {
+        let job = match CreateJobObjectW(None, PCWSTR::null()) {
+            Ok(h) => h,
+            Err(e) => {
+                log::warn!("CreateJobObject failed; sidecar will not be bound to the shell: {e}");
+                return 0;
+            }
+        };
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let set = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION as *const core::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if let Err(e) = set {
+            log::warn!("SetInformationJobObject(KILL_ON_JOB_CLOSE) failed: {e}");
+            let _ = CloseHandle(job);
+            return 0;
+        }
+        job.0 as isize
+    });
+    if raw == 0 {
+        None
+    } else {
+        Some(windows::Win32::Foundation::HANDLE(raw as *mut core::ffi::c_void))
+    }
+}
+
+/// Tie the managed sidecar's lifetime to this process (see `sidecar_job_object`).
+#[cfg(target_os = "windows")]
+fn bind_sidecar_lifetime(child: &Child) {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::JobObjects::AssignProcessToJobObject;
+    let Some(job) = sidecar_job_object() else {
+        return;
+    };
+    let process = HANDLE(child.as_raw_handle() as *mut core::ffi::c_void);
+    if let Err(e) = unsafe { AssignProcessToJobObject(job, process) } {
+        log::warn!(
+            "Could not bind sidecar pid {} to the kill-on-close job: {e}",
+            child.id()
+        );
+    }
+}
+
+/// Linux: spawn with `PR_SET_PDEATHSIG` so the sidecar gets SIGTERM when the
+/// shell dies. The death signal is tied to the spawning *thread*, so this runs
+/// on a thread that lives as long as the process (never a pooled worker).
+#[cfg(target_os = "linux")]
+fn spawn_bound_to_parent(mut c: Command) -> Option<Child> {
+    use std::os::unix::process::CommandExt;
+    let (tx, rx) = std::sync::mpsc::channel::<Option<Child>>();
+    let spawned = thread::Builder::new()
+        .name("sidecar-spawner".into())
+        .spawn(move || {
+            unsafe {
+                c.pre_exec(|| {
+                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM as libc::c_ulong);
+                    Ok(())
+                });
+            }
+            let _ = tx.send(c.spawn().ok());
+            loop {
+                thread::park();
+            }
+        });
+    if spawned.is_err() {
+        return None;
+    }
+    rx.recv().ok().flatten()
+}
+
 /// Sidecar / user-data home.
 /// Reap a fire-and-forget child on a detached thread so it does not linger as
 /// a zombie (defunct) until the app exits. Used for `xdg-open` launches, whose
@@ -923,7 +1136,10 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
         if let Some(pyz) = resolve_rmdy_worker_pyz() {
             c.env("REMEDY_RMDY_PYZ", pyz);
         }
-        c.spawn().ok()
+        let child = c.spawn().ok()?;
+        // Sidecar tree dies with the shell (job object, KILL_ON_JOB_CLOSE).
+        bind_sidecar_lifetime(&child);
+        Some(child)
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -948,7 +1164,14 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
         if let Some(pyz) = resolve_rmdy_worker_pyz() {
             c.env("REMEDY_RMDY_PYZ", pyz);
         }
-        c.spawn().ok()
+        #[cfg(target_os = "linux")]
+        {
+            spawn_bound_to_parent(c)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            c.spawn().ok()
+        }
     }
 }
 
@@ -1392,28 +1615,13 @@ fn force_stop_remedy_processes() {
     kill_cli_serve_windows();
 }
 
-/// Kill LISTENING owners of **this instance's** API port only.
+/// Stop Remedy binaries LISTENING on **this instance's** API port. A foreign
+/// process on the port is logged and left running — never killed by port.
 #[cfg(target_os = "windows")]
 fn kill_api_port_windows() {
-    let port = api_port();
-    let netstat_cmd = format!(
-        r#"for /f "tokens=5" %a in ('netstat -ano ^| findstr :{port} ^| findstr LISTENING') do taskkill /F /T /PID %a"#
-    );
-    let _ = Command::new("cmd")
-        .args(["/C", &netstat_cmd])
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    let ps = format!(
-        "Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}"
-    );
-    let _ = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &ps])
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    if let Err(owner) = kill_port_listeners_if_remedy(api_port()) {
+        log::warn!("Left {owner} on :{} alone (not a Remedy binary)", api_port());
+    }
 }
 
 /// Kill ``remedy.exe serve`` and ``python … remedy … serve`` process trees.
@@ -1590,17 +1798,29 @@ fn start_sidecar(
     force_stop_remedy_processes();
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
         let port = api_port();
-        let netstat_cmd = format!(
-            r#"for /f "tokens=5" %a in ('netstat -ano ^| findstr :{port} ^| findstr LISTENING') do taskkill /F /PID %a"#
-        );
-        let _ = Command::new("cmd")
-            .args(["/C", &netstat_cmd])
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        // Only Remedy binaries are ever stopped by port. Anything else keeps
+        // the port; we tell the user who owns it and step aside.
+        if let Err(owner) = kill_port_listeners_if_remedy(port) {
+            drop(guard);
+            let msg = format!(
+                "Port {port} is in use by {owner}, which is not a Remedy process. \
+                 Remedy Desktop will not stop it. Close that program or set \
+                 REMEDY_API_PORT to a free port, then start Remedy again."
+            );
+            log::error!("{msg}");
+            if mode == SidecarStartMode::InteractiveLaunch {
+                let _ = rfd::MessageDialog::new()
+                    .set_level(rfd::MessageLevel::Error)
+                    .set_title("Port already in use")
+                    .set_description(&msg)
+                    .set_buttons(rfd::MessageButtons::Ok)
+                    .show();
+                // Setup treats "cancelled" as a clean exit that leaves the owner running.
+                return Err("cancelled".into());
+            }
+            return Err(msg);
+        }
         // Brief pause so the port is free before re-bind.
         std::thread::sleep(Duration::from_millis(400));
     }
@@ -3873,12 +4093,22 @@ fn verify_installer_minisign(exe: &Path, sig: &str) -> Result<(), String> {
 }
 
 /// Only this repository's release assets (not arbitrary GitHub releases).
+/// What `latest.json` promises for this platform, after every trust check.
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SignedRelease {
+    url: String,
+    sig: String,
+    /// Release version with any leading `v` stripped (`0.62.4`).
+    version: String,
+}
+
 /// Fetch signed asset URL + minisign signature from published latest.json.
 /// Callers should **download the returned URL** (not a stale UI-held URL) so a
 /// check→install race cannot pair an old installer path with a new signature blob.
 /// Refuses install when the release is unsigned (owner can still install manually from GitHub).
 #[cfg(target_os = "windows")]
-fn fetch_signed_release_asset() -> Result<(String /*url*/, String /*sig*/), String> {
+fn fetch_signed_release_asset() -> Result<SignedRelease, String> {
     let meta_url =
         "https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json";
     let resp = ureq::get(meta_url)
@@ -3895,6 +4125,20 @@ fn fetch_signed_release_asset() -> Result<(String /*url*/, String /*sig*/), Stri
     let v: serde_json::Value = resp
         .into_json()
         .map_err(|e| format!("latest.json invalid: {e}"))?;
+    parse_signed_release(&v)
+}
+
+/// Pure half of `fetch_signed_release_asset`: validate the latest.json document.
+#[cfg(target_os = "windows")]
+fn parse_signed_release(v: &serde_json::Value) -> Result<SignedRelease, String> {
+    let version = v
+        .get("version")
+        .and_then(|x| x.as_str())
+        .map(|s| s.trim().trim_start_matches(['v', 'V']).to_string())
+        .unwrap_or_default();
+    if version.is_empty() {
+        return Err("latest.json missing version".into());
+    }
     let plat = v
         .pointer("/platforms/windows-x86_64")
         .or_else(|| v.pointer("/platforms/windows-x86-64"));
@@ -3933,7 +4177,19 @@ fn fetch_signed_release_asset() -> Result<(String /*url*/, String /*sig*/), Stri
                 .into(),
         );
     }
-    Ok((url, sig))
+    Ok(SignedRelease { url, sig, version })
+}
+
+/// Refuse to install anything that is not strictly newer than what is running
+/// (a stale CDN copy of latest.json or a rolled-back release must not downgrade).
+#[cfg(target_os = "windows")]
+fn ensure_release_is_newer(release_version: &str, current: &str) -> Result<(), String> {
+    if is_newer(release_version, current) {
+        return Ok(());
+    }
+    Err(format!(
+        "Latest release is {release_version}; this Desktop is {current}. Nothing newer to install."
+    ))
 }
 
 #[cfg(target_os = "windows")]
@@ -4037,8 +4293,11 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
             );
 
             // Canonical signed URL wins. Normalize legacy Remedy_Desktop_ if needed.
-            let (signed_url, sig) = fetch_signed_release_asset()?;
-            let mut download_url = signed_url;
+            let release = fetch_signed_release_asset()?;
+            // Version gate from the same document that carries the signature.
+            ensure_release_is_newer(&release.version, &ver_from)?;
+            let sig = release.sig;
+            let mut download_url = release.url;
             let client_norm = client_url
                 .trim()
                 .replace("Remedy_Desktop_", "Remedy.Desktop_")

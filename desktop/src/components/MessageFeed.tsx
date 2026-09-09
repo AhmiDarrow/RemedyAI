@@ -41,6 +41,7 @@ import {
   type ToolProcessMode,
 } from '../utils/toolLabels'
 import { useStickToBottom } from '../hooks/useStickToBottom'
+import { feedHiddenCount, feedNextChunk, feedWindowStart } from '../utils/feedWindow'
 import { DiffCode } from './DiffCode'
 import { useI18n } from '../i18n'
 
@@ -728,14 +729,18 @@ export function MessageFeed({
     ? Math.max(0, visible.length - detachedAtCountRef.current) + (streaming && partialText ? 1 : 0)
     : 0
 
-  // Window long chats: only mount recent messages (virtualization lite) unless expanded.
-  const WINDOW = 80
-  const [showAll, setShowAll] = useState(false)
+  // Window long chats: only mount recent messages (virtualization lite).
+  // "Load earlier" reveals one more chunk per click — never the whole transcript.
+  const [revealed, setRevealed] = useState(0)
+  useEffect(() => {
+    setRevealed(0)
+  }, [sessionId])
   const windowed = useMemo(() => {
-    if (showAll || visible.length <= WINDOW) return visible
-    return visible.slice(-WINDOW)
-  }, [visible, showAll])
-  const hiddenCount = Math.max(0, visible.length - windowed.length)
+    const start = feedWindowStart(visible.length, revealed)
+    return start > 0 ? visible.slice(start) : visible
+  }, [visible, revealed])
+  const hiddenCount = feedHiddenCount(visible.length, revealed)
+  const nextChunk = feedNextChunk(visible.length, revealed)
 
   const feedItems = useMemo(() => {
     const items: Array<
@@ -834,9 +839,9 @@ export function MessageFeed({
           <button
             type="button"
             className="chat-load-pill"
-            onClick={() => setShowAll(true)}
+            onClick={() => setRevealed((r) => r + nextChunk)}
           >
-            Show {hiddenCount} earlier messages
+            Load {nextChunk} earlier · {hiddenCount} hidden
           </button>
         </div>
       )}
@@ -925,7 +930,12 @@ export function MessageFeed({
               showToolDetails={processSteps.length === 0}
             />
             {processSteps.length > 0 && (
-              <ProcessTrace mode={toolProcessMode} steps={processSteps} live />
+              <ProcessTrace
+                mode={toolProcessMode}
+                steps={processSteps}
+                live
+                sessionId={sessionId}
+              />
             )}
           </div>
         </div>

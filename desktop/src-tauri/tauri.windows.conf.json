@@ -3,6 +3,7 @@
     "resources": {
       "../bin/remedy_core.dll": "remedy_core.dll",
       "../bin/rmdy_tool_worker.pyz": "rmdy_tool_worker.pyz",
+      "../bin/rmdy-deps": "rmdy-deps",
       "../dist": "webui",
       "windows/uninstall_options.ps1": "windows/uninstall_options.ps1",
       "windows/uninstall_wipe.ps1": "windows/uninstall_wipe.ps1",

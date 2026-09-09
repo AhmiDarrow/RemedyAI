@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { UsageSnapshot } from '../utils/tokenCost'
-import { formatCost, formatTokens } from '../utils/tokenCost'
+import { formatCacheUsage, formatCost, formatTokens } from '../utils/tokenCost'
 
 const HIDE_KEY = 'remedy.tokenTicker.hidden'
 const HIDE_COST_KEY = 'remedy.tokenTicker.hideCost'
@@ -70,6 +70,11 @@ export function TokenCostTicker({
   const sessTok = Math.max(0, Math.round(session?.total_tokens ?? 0))
   const sessCost = Number(session?.estimated_cost_usd ?? 0) || 0
   const src = run?.source === 'provider' ? 'API' : 'est.'
+  // Prompt-cache accounting, when the provider reports it. Quiet on the
+  // collapsed row (a count, no label) but always present — a warm cache is the
+  // difference between an expensive build and a cheap one.
+  const cacheRead = Math.max(0, Math.round(run?.cache_read_tokens ?? 0))
+  const cacheLine = formatCacheUsage(run)
   // Always show something meaningful while streaming (even before first token).
   const hasData = runTok > 0 || sessTok > 0 || streaming || (run?.completion_tokens ?? 0) > 0
   const isSidebar = placement === 'sidebar'
@@ -194,6 +199,19 @@ export function TokenCostTicker({
                     </button>
                   </>
                 )}
+                {cacheRead > 0 && (
+                  <span
+                    className="rounded px-1"
+                    style={{
+                      color: 'var(--success)',
+                      background: 'color-mix(in srgb, var(--success) 12%, transparent)',
+                      fontSize: 10,
+                    }}
+                    title={`Prompt cache: ${cacheLine}`}
+                  >
+                    ⚡{formatTokens(cacheRead)}
+                  </span>
+                )}
                 {streaming && (
                   <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>{src}</span>
                 )}
@@ -232,6 +250,14 @@ export function TokenCostTicker({
               )}
             </span>
           </div>
+          {cacheLine && (
+            <div className="flex justify-between gap-2">
+              <span style={{ color: 'var(--text-muted)' }}>Prompt cache</span>
+              <span className="text-right" style={{ color: 'var(--success)' }}>
+                {cacheLine}
+              </span>
+            </div>
+          )}
           <div className="flex justify-between gap-2">
             <span style={{ color: 'var(--text-muted)' }}>Session</span>
             <span>

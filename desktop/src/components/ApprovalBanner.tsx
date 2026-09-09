@@ -5,6 +5,7 @@ import {
   resolveApproval,
   type PendingApproval,
 } from '../api/partner'
+import { approvalHeadline } from '../utils/approvalText'
 
 interface ApprovalBannerProps {
   sessionId: string | null
@@ -73,8 +74,23 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
       role="region"
       aria-label={t('approval.region')}
     >
+      {/* One card per item, each answered on its own. There is deliberately no
+          approve-all control: sensitive checkpoints (payment / credentials /
+          vault) must never be resolved in bulk. */}
       {items.map((item) => (
-        <div key={item.id} className="ui-banner ui-banner-warn">
+        <div
+          key={item.id}
+          className="ui-banner ui-banner-warn"
+          data-sensitive={item.sensitive ? 'true' : undefined}
+          style={
+            item.sensitive
+              ? {
+                  borderColor: 'color-mix(in srgb, var(--warning) 70%, var(--border))',
+                  boxShadow: '0 0 0 1px color-mix(in srgb, var(--warning) 35%, transparent)',
+                }
+              : undefined
+          }
+        >
           <div
             className="font-semibold mb-1.5 flex items-center gap-1.5 text-[0.72rem] uppercase tracking-wide"
             style={{ color: 'var(--warning)' }}
@@ -82,10 +98,11 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
             <span aria-hidden>{item.sensitive ? '💳' : '⚠'}</span>
             {item.sensitive ? t('approval.payment') : t('approval.required')}
           </div>
-          {/* Plain-language headline first (Grove premise); raw reason/command
+          {/* Plain-language headline first (Grove premise) with the origin
+              channel when the request came from elsewhere; raw reason/command
               demoted to a details line. */}
           <div className="mb-1.5 text-sm" style={{ color: 'var(--text-primary)' }}>
-            {item.summary || item.reason}
+            {approvalHeadline(item)}
           </div>
           {item.sensitive && (
             <div className="mb-1.5 text-[0.72rem]" style={{ color: 'var(--warning)' }}>
