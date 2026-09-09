@@ -1,20 +1,20 @@
 {
   "source": "host_binding",
-  "captured_at": "2026-09-03T22:01:37+00:00",
+  "captured_at": "2026-09-09T23:37:47+00:00",
   "platform": "win32",
-  "notes": "Live capture via desktop_uia → host_binding → Zig COM. Do not inject input; do not write clipboard. Window acquisition: existing.",
+  "notes": "Live capture via desktop_uia → host_binding → Zig COM. Do not inject input; do not write clipboard. Window acquisition: launched_notepad.",
   "window": {
-    "hwnd": 4066618,
-    "how": "existing"
+    "hwnd": 1706022,
+    "how": "launched_notepad"
   },
   "api": "read_window_text",
   "args": {
-    "hwnd": 4066618,
+    "hwnd": 1706022,
     "max_chars": 12000
   },
   "result": {
     "title": "Untitled - Notepad",
-    "text": "P\nC\nS\nT\nK\nG\nI\nB\nR\nL\nH\nE\nU\nF\nV\nUntitled. Unmodified.\nUntitled\nClose Tab\nAdd New Tab\nFile\nEdit\nView\nHeadings\nLists\nBold (Ctrl+B)\nItalic (Ctrl+I)\nStrikethrough (Ctrl+Shift+X)\nLink (Ctrl+K)\nTable\nClear formatting (Ctrl+Space)\nWriting tools\nWhat's new\nUser avatar\nSettings\nLine 1,\nColumn 1\n0 characters\nPlain text\nZoom\nWindows (CRLF)\nUTF-8\nSystem\nMinimize\nMaximize\nClose",
+    "text": "Untitled. Unmodified.\nUntitled\nClose Tab\nAdd New Tab\nFile\nEdit\nView\nHeadings\nLists\nBold (Ctrl+B)\nItalic (Ctrl+I)\nStrikethrough (Ctrl+Shift+X)\nLink (Ctrl+K)\nTable\nClear formatting (Ctrl+Space)\nWriting tools\nWhat's new\nUser avatar\nSettings\nLine 1,\nColumn 1\n0 characters\nPlain text\nZoom\nWindows (CRLF)\nUTF-8\nSystem\nMinimize\nMaximize\nClose",
     "fields": [
       {
         "name": "Text editor",
