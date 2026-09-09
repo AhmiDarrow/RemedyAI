@@ -209,6 +209,15 @@ def search_repo(
 
     max_matches = max(1, min(500, int(max_matches or 50)))
 
+    # ``pattern`` is a regular expression (Python ``re`` syntax; ripgrep's
+    # Rust regex is a near-subset). An invalid pattern is an error the caller
+    # must see — silently searching for the literal text hid typos and
+    # returned confidently wrong "no matches".
+    try:
+        re.compile(pattern, re.IGNORECASE if case_insensitive else 0)
+    except re.error as exc:
+        return [], f"error: invalid regex: {exc}"
+
     # Warn when scanning a huge root without a narrow path (anti-thrash).
     huge_note = "huge-root" if is_huge_root(start) else ""
 
@@ -225,7 +234,7 @@ def search_repo(
                     # the 99 s server freeze. Refuse with a re-scope hint.
                     return [], "error: " + HUGE_ROOT_NO_RG_MESSAGE.format(root=start)
             if rg_path is not None:
-                hits, rg_ok = _search_rg(
+                hits, rg_ok, rg_capped = _search_rg(
                     str(rg_path),
                     display_root,
                     start,
@@ -241,6 +250,8 @@ def search_repo(
                     label = engine_label(source)
                     if huge_note:
                         label = f"{label}+{huge_note}"
+                    if rg_capped:
+                        label = f"{label}+{CAPPED_NOTE}"
                     return hits, label
         except Exception:
             pass
@@ -270,9 +281,7 @@ def search_repo(
     return hits, label
 
 
-async def search_repo_async(
-    root: Path, pattern: str, **kwargs: Any
-) -> tuple[list[SearchHit], str]:
+async def search_repo_async(root: Path, pattern: str, **kwargs: Any) -> tuple[list[SearchHit], str]:
     """``search_repo`` off the event loop.
 
     Both engines block (rg is a ``subprocess.run``; the fallback is an
@@ -282,19 +291,59 @@ async def search_repo_async(
     return await asyncio.to_thread(search_repo, root, pattern, **kwargs)
 
 
+CAPPED_NOTE = "capped"
+
+
+def is_capped_label(engine: str) -> bool:
+    """True when the engine label says the result hit ``max_matches``."""
+    return f"+{CAPPED_NOTE}" in str(engine)
+
+
+def _split_rg_line(line: str) -> tuple[str, int, bool, str] | None:
+    """Parse ``path:line:text`` / ``path-line-text`` (context) robustly.
+
+    Windows drive letters also use ``:``, so anchor on the trailing
+    ``:<n>:`` / ``:<n>-`` separator. Returns ``(path, lineno, is_match, text)``.
+    """
+    # rg separates a match as ``path:N:text`` and a context line as
+    # ``path-N-text`` — the same character on both sides. Anchoring only on
+    # ``:`` silently dropped every context line, so --context did nothing.
+    # Try the match form first: a context line is misread only when its own
+    # text contains ``:<digits>:``.
+    for sep, is_match in ((":", True), ("-", False)):
+        m = re.search(rf"{sep}(\d+){sep}(.*)$", line)
+        if not m:
+            continue
+        path = line[: m.start()]
+        if not path:
+            continue
+        try:
+            lineno = int(m.group(1))
+        except ValueError:
+            continue
+        return path, lineno, is_match, m.group(2)
+    return None
+
+
 def _parse_rg_line(line: str) -> tuple[str, int, str] | None:
     """Parse ``path:line:text`` robustly (Windows drive letters use ``:``)."""
-    m = re.search(r":(\d+)([:\-])(.*)$", line)
-    if not m:
+    parsed = _split_rg_line(line)
+    if parsed is None:
         return None
-    path = line[: m.start()]
-    if not path:
-        return None
+    path, lineno, _is_match, text = parsed
+    return path, lineno, text
+
+
+def _rg_relative_path(root: Path, raw_path: str) -> str:
+    p = Path(raw_path)
     try:
-        lineno = int(m.group(1))
-    except ValueError:
-        return None
-    return path, lineno, m.group(3)
+        p = (root / p).resolve() if not p.is_absolute() else p.resolve()
+        try:
+            return p.relative_to(root).as_posix()
+        except ValueError:
+            return str(p).replace("\\", "/")
+    except Exception:
+        return raw_path.replace("\\", "/")
 
 
 def _search_rg(
@@ -309,8 +358,17 @@ def _search_rg(
     context_before: int,
     context_after: int,
     huge_root: bool = False,
-) -> tuple[list[SearchHit], bool]:
-    """Returns (hits, ok). ok=False means fall back to pure Python."""
+) -> tuple[list[SearchHit], bool, bool]:
+    """Returns (hits, ok, capped). ok=False means fall back to pure Python.
+
+    ``--max-count`` is ripgrep's *per-file* limit, not a global one. It used to
+    be clamped to 100, which silently dropped matches from a busy file even
+    when the caller asked for up to 500. Now each file may contribute up to
+    ``max_matches + 1`` lines and the global cap is applied here, so
+    ``capped`` reliably says whether more matches existed.
+    """
+    ctx_b = max(0, min(5, int(context_before or 0)))
+    ctx_a = max(0, min(5, int(context_after or 0)))
     cmd = [
         rg,
         "--line-number",
@@ -318,14 +376,14 @@ def _search_rg(
         "--color",
         "never",
         "--max-count",
-        str(max(1, min(100, max_matches))),
+        str(max_matches + 1),
     ]
     if case_insensitive:
         cmd.append("-i")
-    if context_before > 0:
-        cmd.extend(["-B", str(min(5, context_before))])
-    if context_after > 0:
-        cmd.extend(["-A", str(min(5, context_after))])
+    if ctx_b > 0:
+        cmd.extend(["-B", str(ctx_b)])
+    if ctx_a > 0:
+        cmd.extend(["-A", str(ctx_a)])
     if glob:
         cmd.extend(["--glob", glob])
     for d in _SKIP_DIR_NAMES:
@@ -348,28 +406,49 @@ def _search_rg(
             env={**os.environ, "RIPGREP_CONFIG_PATH": ""},
         )
     except (OSError, subprocess.TimeoutExpired):
-        return [], False
+        return [], False, False
     if proc.returncode not in (0, 1):
-        return [], False
+        return [], False, False
     hits: list[SearchHit] = []
+    capped = False
+    with_context = ctx_b > 0 or ctx_a > 0
+    before: list[str] = []
+    current: SearchHit | None = None
+    current_path = ""
+    after_left = 0
     for line in (proc.stdout or "").splitlines():
-        parsed = _parse_rg_line(line)
+        if with_context and line == "--":
+            before = []
+            current = None
+            after_left = 0
+            continue
+        parsed = _split_rg_line(line)
         if not parsed:
             continue
-        raw_path, lineno, text = parsed
-        p = Path(raw_path)
-        try:
-            p = (root / p).resolve() if not p.is_absolute() else p.resolve()
-            try:
-                rel = p.relative_to(root).as_posix()
-            except ValueError:
-                rel = str(p).replace("\\", "/")
-        except Exception:
-            rel = raw_path.replace("\\", "/")
-        hits.append(SearchHit(path=rel, line=lineno, text=text.rstrip("\n")[:400]))
-        if len(hits) >= max_matches:
-            break
-    return hits, True
+        raw_path, lineno, is_match, text = parsed
+        text = text.rstrip("\n")
+        if is_match:
+            if len(hits) >= max_matches:
+                capped = True
+                break
+            rel = _rg_relative_path(root, raw_path)
+            body = "\n".join([*before, text])[:800] if with_context else text[:400]
+            hit = SearchHit(path=rel, line=lineno, text=body)
+            hits.append(hit)
+            before = []
+            current = hit
+            current_path = raw_path
+            after_left = ctx_a
+            continue
+        if not with_context:
+            continue
+        if current is not None and after_left > 0 and raw_path == current_path:
+            current.text = (current.text + "\n" + text)[:800]
+            after_left -= 1
+        else:
+            before.append(text)
+            before = before[-ctx_b:] if ctx_b else []
+    return hits, True, capped
 
 
 def _glob_match(name: str, pattern: str | None) -> bool:
@@ -440,10 +519,9 @@ def _search_python(
     """
     deadline = time.monotonic() + max(0.5, float(time_budget_s or PYTHON_WALK_BUDGET_S))
     flags = re.IGNORECASE if case_insensitive else 0
-    try:
-        cre = re.compile(pattern, flags)
-    except re.error:
-        cre = re.compile(re.escape(pattern), flags)
+    # search_repo validates the pattern up front; a direct caller with an
+    # invalid regex gets the same explicit failure rather than a literal scan.
+    cre = re.compile(pattern, flags)
 
     ignore_names = _load_gitignore_names(root if root.is_dir() else root.parent)
     # Cap walk when searching home-sized trees
@@ -511,9 +589,11 @@ def _search_python(
                     body = "\n".join(chunk)[:800]
                 else:
                     body = line[:400]
-                hits.append(SearchHit(path=rel, line=i, text=body))
                 if len(hits) >= max_matches:
-                    return hits, ""
+                    # One more match exists beyond the cap: report it as
+                    # capped instead of pretending the result is complete.
+                    return hits, CAPPED_NOTE
+                hits.append(SearchHit(path=rel, line=i, text=body))
     return hits, truncated
 
 
@@ -544,7 +624,7 @@ def _truncation_reason(engine: str) -> str:
 def format_hits(hits: list[SearchHit], *, engine: str, pattern: str) -> str:
     _record_search_metrics(engine, len(hits))
     if not hits and str(engine).startswith("error: "):
-        return "Error: " + str(engine)[len("error: "):]
+        return "Error: " + str(engine)[len("error: ") :]
     if not hits:
         extra = ""
         if "truncated:" in str(engine):
@@ -558,15 +638,15 @@ def format_hits(hits: list[SearchHit], *, engine: str, pattern: str) -> str:
                 "\nNote: search started at a very large root (e.g. home). "
                 "Pass path= to a specific project directory."
             )
-        return (
-            f"No matches for {pattern!r} (engine={engine}).\n"
-            f"{EMPTY_SEARCH_HINT}{extra}"
-        )
+        return f"No matches for {pattern!r} (engine={engine}).\n{EMPTY_SEARCH_HINT}{extra}"
     lines = [f"Found {len(hits)} match(es) for {pattern!r} (engine={engine}):"]
-    if "huge-root" in str(engine):
+    if is_capped_label(engine):
         lines.append(
-            "(warning: large root — prefer absolute path= to the repo next time)"
+            "(capped: more matches exist beyond max_matches — narrow path=/glob= "
+            "or raise max_matches)"
         )
+    if "huge-root" in str(engine):
+        lines.append("(warning: large root — prefer absolute path= to the repo next time)")
     if "truncated:" in str(engine):
         lines.append(
             "(partial: the walk stopped early — "

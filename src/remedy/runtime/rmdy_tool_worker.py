@@ -14,7 +14,28 @@ IPC mode (supervised by ``remedy-runtime --serve``)::
     REMEDY_RMDY_ENDPOINT=\\\\.\\pipe\\remedy-tools-… python -m remedy.runtime.rmdy_tool_worker
     REMEDY_RMDY_ENDPOINT=/tmp/remedy-tools-….sock python -m remedy.runtime.rmdy_tool_worker
 
-The worker never logs to stdout (that is the wire).
+The worker never logs to stdout (that is the wire). Tracebacks go to stderr
+and to ``<REMEDY_HOME>/logs/rmdy_worker.log`` (rotating, 2 MB).
+
+Concurrency
+-----------
+``KindToolRequest`` frames run on a thread pool (``_MAX_WORKERS``); responses
+are written under one lock. Tools whose id starts with a ``_SERIAL_PREFIXES``
+entry share the cached ``BasicRuntime`` (not thread-safe) and therefore run one
+at a time under ``_serial_lock``. ``KindCancel`` marks the correlation id so its
+late response is dropped instead of written.
+
+Go-bound fields
+---------------
+``home_dir``, ``workspace_root`` and ``project_path`` in a tool input are only
+honoured when the Go side vouches for them: either the request envelope carries
+``"_go_bound": true`` (top-level, next to ``tool_id``) or the input object
+itself carries ``"_go_bound": true``. Go's injection helper
+(``httpapi.injectWorkspaceRoot`` and friends) sets the input-level field after
+it has overwritten those paths with the session root; it must first delete any
+model-supplied ``_go_bound``. Without the flag the worker strips those keys and
+falls back to environment / config resolution, so a prompt-injected
+``workspace_root`` can never retarget the jail.
 """
 
 from __future__ import annotations
@@ -26,7 +47,10 @@ import os
 import socket
 import struct
 import sys
+import threading
+import time
 from collections.abc import Callable, Mapping
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, BinaryIO, cast
 
@@ -37,6 +61,34 @@ _HEADER_SIZE = 32
 _MAX_PAYLOAD = 16 << 20
 _MAGIC = b"RMDY"
 _READ_CHAR_CAP = 512_000
+_MAX_WORKERS = 8
+_LOG_MAX_BYTES = 2 * 1024 * 1024
+_LOG_BACKUPS = 3
+
+# Tools sharing the cached BasicRuntime run one at a time.
+_SERIAL_PREFIXES = ("prompt.", "memory.", "skill.", "voice.", "vision.")
+_serial_lock = threading.Lock()
+
+# Envelope / input field the Go side sets after binding paths (see module doc).
+GO_BOUND_FIELD = "_go_bound"
+# Input keys ignored unless the request is Go-bound.
+_GO_BOUND_ONLY_KEYS = ("home_dir", "workspace_root", "project_path")
+
+# Packaged installs ship the third-party closure (pydantic, PyYAML, …) in a
+# directory beside the zipapp because pydantic_core and _yaml are compiled
+# extensions that cannot be imported from inside an archive. The Go launcher
+# passes that directory here; scripts/build_rmdy_worker.py stages it.
+_ENV_DEPS_DIR = "REMEDY_RMDY_DEPS"
+# Third-party modules every RMDY handler chain needs (prompt.assemble pulls
+# remedy.interfaces.config and remedy.models). Kept in step with
+# DEPS_IMPORT_NAMES in scripts/build_rmdy_worker.py.
+_REQUIRED_THIRD_PARTY = ("yaml", "pydantic", "pydantic_core")
+# Distinct exit code the Go supervisor reports as a broken install
+# (sysexits.h EX_CONFIG). Must match workers.ExitMissingDependencies.
+EXIT_MISSING_DEPENDENCIES = 78
+
+# Hidden test-only tools (never advertised) — enabled by REMEDY_RMDY_TEST_TOOLS=1.
+_ENV_TEST_TOOLS = "REMEDY_RMDY_TEST_TOOLS"
 _SKIP_DIR_NAMES = {
     ".git",
     "__pycache__",
@@ -53,6 +105,7 @@ _SKIP_DIR_NAMES = {
 
 _KIND_TOOL_REQUEST = 1
 _KIND_TOOL_RESULT = 2
+_KIND_CANCEL = 6
 _KIND_HEALTH = 7
 
 ToolHandler = Callable[[Mapping[str, Any]], Mapping[str, Any]]
@@ -263,33 +316,56 @@ def _workspace_read(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     except ImportError:
         pass
     text = target.read_text(encoding="utf-8", errors="replace")
+    # ``offset`` is a 1-based line number (0 and 1 both mean "from the top").
     try:
-        offset = max(0, int(inp.get("offset") or 0))
+        offset = max(1, int(inp.get("offset") or 1))
     except (TypeError, ValueError):
-        offset = 0
+        offset = 1
     limit_raw = inp.get("limit")
     limit: int | None
     try:
         limit = None if limit_raw is None else max(1, int(limit_raw))
     except (TypeError, ValueError):
         limit = None
-    truncated = False
-    if offset or limit is not None:
-        lines = text.splitlines(keepends=True)
-        end = len(lines) if limit is None else min(len(lines), offset + limit)
-        start = min(offset, len(lines))
-        text = "".join(lines[start:end])
-        truncated = end < len(lines)
-    if len(text) > _READ_CHAR_CAP:
-        text = text[:_READ_CHAR_CAP]
+    number_lines = bool(inp.get("line_numbers") or False)
+
+    lines = text.splitlines(keepends=True)
+    total_lines = len(lines)
+    start = min(offset - 1, total_lines)
+    end = total_lines if limit is None else min(total_lines, start + limit)
+    window = lines[start:end]
+    more_lines = end < total_lines
+
+    if number_lines:
+        width = max(1, len(str(end)))
+        body = "".join(f"{start + i + 1:>{width}}\t{line}" for i, line in enumerate(window))
+    else:
+        body = "".join(window)
+    truncated = more_lines
+    if len(body) > _READ_CHAR_CAP:
+        body = body[:_READ_CHAR_CAP]
         truncated = True
+        # Chars, not lines, bounded the window: the caller should resume at
+        # the last fully-included line rather than trust ``end``.
+        included = body.count("\n")
+        end = start + included
+        more_lines = end < total_lines
+
     try:
         rel = str(target.relative_to(_workspace_root(inp)).as_posix())
     except ValueError:
         rel = str(target)
-    out: dict[str, Any] = {"path": rel, "content": text}
+    out: dict[str, Any] = {
+        "path": rel,
+        "content": body,
+        "total_lines": total_lines,
+        "line_start": min(start + 1, max(total_lines, 1)),
+        "line_end": end,
+    }
     if truncated:
         out["truncated"] = True
+    if more_lines:
+        out["next_offset"] = end + 1
     return out
 
 
@@ -401,15 +477,18 @@ def _workspace_edit(inp: Mapping[str, Any]) -> Mapping[str, Any]:
         raise PermissionError(bad)
 
     target = _resolve_workspace_path(path, inp)
-    if _is_credential_name(target.name) or any(
-        _is_credential_name(p) for p in target.parts
-    ):
+    if _is_credential_name(target.name) or any(_is_credential_name(p) for p in target.parts):
         raise PermissionError("credential-looking files are not editable")
     if not target.is_file():
         raise FileNotFoundError(f"file not found: {path}")
 
+    # Byte-exact round trip: keep the BOM and every CR/LF as found on disk.
+    # ``Path.read_text`` would fold CRLF to LF and the rewrite would silently
+    # re-line-end the whole file.
+    raw_bytes = target.read_bytes()
+    bom = b"\xef\xbb\xbf" if raw_bytes.startswith(b"\xef\xbb\xbf") else b""
     try:
-        content = target.read_text(encoding="utf-8")
+        content = raw_bytes[len(bom) :].decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ValueError(f"file is not UTF-8 text: {path}") from exc
 
@@ -439,9 +518,9 @@ def _workspace_edit(inp: Mapping[str, Any]) -> Mapping[str, Any]:
         raise ValueError(result.message or "edit failed")
 
     if result.new_content != content:
-        from remedy.core.atomic_json import write_text_atomic
+        from remedy.core.atomic_json import write_bytes_atomic
 
-        write_text_atomic(target, result.new_content)
+        write_bytes_atomic(target, bom + result.new_content.encode("utf-8"))
 
     try:
         rel = str(target.relative_to(_workspace_root(inp)).as_posix())
@@ -470,13 +549,18 @@ def _workspace_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
         max_matches = 50
     max_matches = max(1, min(500, max_matches))
     case_insensitive = bool(inp.get("case_insensitive") or False)
+    try:
+        context = int(inp.get("context") or 0)
+    except (TypeError, ValueError):
+        context = 0
+    context = max(0, min(5, context))
 
     root = _workspace_root(inp)
     # Keep absolute paths inside the workspace jail (fail closed).
     if path not in (".", "./", ""):
         _resolve_workspace_path(path, inp)
 
-    from remedy.core.repo_search import search_repo
+    from remedy.core.repo_search import is_capped_label, search_repo
 
     home = (os.environ.get("REMEDY_HOME") or "").strip() or None
     hits, engine = search_repo(
@@ -486,12 +570,18 @@ def _workspace_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
         glob=glob,
         max_matches=max_matches,
         case_insensitive=case_insensitive,
+        context_before=context,
+        context_after=context,
         home_dir=home,
         allowed_roots=[root],
         access_scope="project",
     )
-    if str(engine).startswith("error:"):
-        raise PermissionError(str(engine)[len("error:") :].strip() or engine)
+    label = str(engine)
+    if label.startswith("error:"):
+        detail = label[len("error:") :].strip() or label
+        if detail.startswith("invalid regex"):
+            raise ValueError(detail)
+        raise PermissionError(detail)
     matches: list[dict[str, Any]] = []
     for hit in hits:
         matches.append(
@@ -501,11 +591,14 @@ def _workspace_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
                 "text": str(hit.text),
             }
         )
+    capped = is_capped_label(label)
     return {
         "pattern": pattern,
-        "engine": str(engine),
+        "engine": label,
         "matches": matches,
         "total": len(matches),
+        "capped": capped,
+        "truncated": capped or ("truncated:" in label),
     }
 
 
@@ -809,129 +902,514 @@ def write_frame(
     stream.flush()
 
 
+def _debug_sleep(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Test-only: block the calling pool thread for ``seconds`` (max 30)."""
+    try:
+        seconds = float(inp.get("seconds") or 0.0)
+    except (TypeError, ValueError):
+        seconds = 0.0
+    seconds = max(0.0, min(30.0, seconds))
+    time.sleep(seconds)
+    return {"slept": seconds}
+
+
+def _debug_exit(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Test-only: raise SystemExit inside a tool (must never stop the worker)."""
+    raise SystemExit(int(inp.get("code") or 3))
+
+
+def _debug_big(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Test-only: return ``chars`` bytes of ASCII (exercise the frame limit)."""
+    try:
+        chars = int(inp.get("chars") or 0)
+    except (TypeError, ValueError):
+        chars = 0
+    return {"blob": "x" * max(0, chars)}
+
+
+_TEST_HANDLERS: dict[tuple[str, int], ToolHandler] = {
+    ("debug.sleep", 1): _debug_sleep,
+    ("debug.exit", 1): _debug_exit,
+    ("debug.big", 1): _debug_big,
+}
+
+
+def _test_tools_enabled() -> bool:
+    return (os.environ.get(_ENV_TEST_TOOLS) or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _lookup_handler(tool_id: str, version: int) -> ToolHandler | None:
+    handler = _HANDLERS.get((tool_id, version))
+    if handler is None and _test_tools_enabled():
+        handler = _TEST_HANDLERS.get((tool_id, version))
+    return handler
+
+
+def _is_serial_tool(tool_id: str) -> bool:
+    return tool_id.startswith(_SERIAL_PREFIXES)
+
+
+def _error_payload(message: str, **extra: Any) -> bytes:
+    body: dict[str, Any] = {"ok": False, "error": message}
+    body.update(extra)
+    return json.dumps(body, separators=(",", ":"), default=str).encode("utf-8")
+
+
+def _encode_result(output: Any) -> bytes:
+    """Serialize a tool result; oversize results become an error payload."""
+    encoded = json.dumps({"ok": True, "output": output}, separators=(",", ":"), default=str).encode(
+        "utf-8"
+    )
+    if len(encoded) > _MAX_PAYLOAD:
+        return _error_payload("result exceeds 16 MiB frame limit", size=len(encoded))
+    return encoded
+
+
+def _is_go_bound(request: Mapping[str, Any], raw_input: Mapping[str, Any]) -> bool:
+    return bool(request.get(GO_BOUND_FIELD)) or bool(raw_input.get(GO_BOUND_FIELD))
+
+
+def _sanitize_input(request: Mapping[str, Any], raw_input: Mapping[str, Any]) -> dict[str, Any]:
+    """Drop the marker field and, unless Go-bound, the path-binding keys."""
+    bound = _is_go_bound(request, raw_input)
+    cleaned: dict[str, Any] = {}
+    for key, value in raw_input.items():
+        if key == GO_BOUND_FIELD:
+            continue
+        if not bound and key in _GO_BOUND_ONLY_KEYS:
+            continue
+        cleaned[key] = value
+    return cleaned
+
+
 def _handle_tool(payload: bytes) -> bytes:
+    """Run one KindToolRequest. Never raises; the wire always gets a payload."""
     try:
         request = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return json.dumps({"ok": False, "error": f"invalid tool request: {exc}"}).encode("utf-8")
+        return _error_payload(f"invalid tool request: {exc}")
+    if not isinstance(request, Mapping):
+        return _error_payload("tool request must be a JSON object")
     tool_id = str(request.get("tool_id") or "")
-    version = int(request.get("version") or 0)
+    try:
+        version = int(request.get("version") or 0)
+    except (TypeError, ValueError):
+        return _error_payload(f"invalid tool version {request.get('version')!r}")
     raw_input = request.get("input", {})
     if isinstance(raw_input, str):
         try:
             raw_input = json.loads(raw_input)
         except json.JSONDecodeError as exc:
-            return json.dumps({"ok": False, "error": f"invalid input: {exc}"}).encode("utf-8")
+            return _error_payload(f"invalid input: {exc}")
+    if raw_input is None:
+        raw_input = {}
     if not isinstance(raw_input, Mapping):
-        return json.dumps({"ok": False, "error": "input must be a JSON object"}).encode("utf-8")
-    handler = _HANDLERS.get((tool_id, version))
+        return _error_payload("input must be a JSON object")
+    handler = _lookup_handler(tool_id, version)
     if handler is None:
-        return json.dumps({"ok": False, "error": f"unknown tool {tool_id}@{version}"}).encode(
-            "utf-8"
-        )
+        return _error_payload(f"unknown tool {tool_id}@{version}")
+    tool_input = _sanitize_input(request, raw_input)
     try:
-        output = handler(raw_input)
-    except Exception as exc:  # noqa: BLE001 — wire must carry the failure
+        if _is_serial_tool(tool_id):
+            with _serial_lock:
+                output = handler(tool_input)
+        else:
+            output = handler(tool_input)
+        return _encode_result(output)
+    except KeyboardInterrupt:
+        raise
+    except BaseException as exc:  # noqa: BLE001 — SystemExit et al. must not stop the worker
         logger.exception("tool %s@%s failed", tool_id, version)
-        return json.dumps({"ok": False, "error": str(exc)}).encode("utf-8")
-    return json.dumps({"ok": True, "output": output}, separators=(",", ":")).encode("utf-8")
+        message = str(exc) or exc.__class__.__name__
+        if isinstance(exc, SystemExit):
+            message = f"tool raised SystemExit({exc.code!r})"
+        return _error_payload(message)
+
+
+def _health_payload() -> bytes:
+    return json.dumps(
+        {
+            "protocol": _PROTOCOL_VERSION,
+            "ready": True,
+            "capabilities": ["tools", "speech", "vision"],
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+class _FrameWriter:
+    """Serializes frame writes from the pool onto one stream."""
+
+    def __init__(self, stream: BinaryIO) -> None:
+        self._stream = stream
+        self._lock = threading.Lock()
+        self.broken = False
+
+    def send(self, kind: int, correlation: bytes, payload: bytes, *, flags: int = 0) -> bool:
+        with self._lock:
+            if self.broken:
+                return False
+            try:
+                write_frame(self._stream, kind, correlation, payload, flags=flags)
+                return True
+            except (OSError, ValueError):
+                self.broken = True
+                logger.exception("rmdy frame write failed; peer gone")
+                return False
+
+
+class _Dispatcher:
+    """Thread-pool tool dispatch with KindCancel suppression."""
+
+    def __init__(self, writer: _FrameWriter, max_workers: int = _MAX_WORKERS) -> None:
+        self._writer = writer
+        self._pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="rmdy-tool")
+        self._lock = threading.Lock()
+        self._inflight: dict[bytes, Future[None]] = {}
+        self._cancelled: set[bytes] = set()
+
+    def submit(self, correlation: bytes, payload: bytes) -> None:
+        with self._lock:
+            if correlation in self._inflight:
+                self._writer.send(
+                    _KIND_TOOL_RESULT,
+                    correlation,
+                    _error_payload("duplicate active correlation ID"),
+                )
+                return
+            future = self._pool.submit(self._run, correlation, payload)
+            self._inflight[correlation] = future
+
+    def cancel(self, correlation: bytes) -> None:
+        with self._lock:
+            if correlation in self._inflight:
+                self._cancelled.add(correlation)
+
+    def _run(self, correlation: bytes, payload: bytes) -> None:
+        try:
+            response = _handle_tool(payload)
+        except BaseException:  # noqa: BLE001 — a pool thread must never die silently
+            logger.exception("rmdy dispatcher failure")
+            response = _error_payload("internal worker error")
+        with self._lock:
+            self._inflight.pop(correlation, None)
+            suppressed = correlation in self._cancelled
+            self._cancelled.discard(correlation)
+        if suppressed:
+            logger.info("dropping late response for cancelled request %s", correlation.hex())
+            return
+        self._writer.send(_KIND_TOOL_RESULT, correlation, response)
+
+    def shutdown(self) -> None:
+        self._pool.shutdown(wait=True, cancel_futures=True)
 
 
 def serve(reader: BinaryIO, writer: BinaryIO) -> None:
-    while True:
+    """Serve frames until EOF on *reader*.
+
+    Tool failures of any kind are answered on the wire and never end the
+    loop; only stream EOF (or an unrecoverable protocol desync, which is
+    logged) returns.
+    """
+    out = _FrameWriter(writer)
+    dispatcher = _Dispatcher(out)
+    try:
+        while True:
+            try:
+                kind, _flags, correlation, payload = read_frame(reader)
+            except EOFError:
+                return
+            except ValueError:
+                logger.exception("rmdy protocol desync; closing stream")
+                return
+            except OSError:
+                logger.exception("rmdy stream read failed")
+                return
+            if kind == _KIND_HEALTH:
+                out.send(_KIND_HEALTH, correlation, _health_payload())
+                continue
+            if kind == _KIND_TOOL_REQUEST:
+                dispatcher.submit(correlation, payload)
+                continue
+            if kind == _KIND_CANCEL:
+                dispatcher.cancel(correlation)
+                continue
+            err = f"unsupported RMDY frame kind {kind}".encode()
+            out.send(_KIND_TOOL_RESULT, correlation, err, flags=1)
+    finally:
+        dispatcher.shutdown()
+
+
+def _log_dir() -> Path | None:
+    try:
+        from remedy.home import default_home
+
+        home = default_home()
+    except Exception:  # noqa: BLE001 — logging must never block startup
+        raw = (os.environ.get("REMEDY_HOME") or "").strip()
+        if not raw:
+            return None
+        home = Path(raw).expanduser()
+    return home / "logs"
+
+
+def bootstrap_dependency_path(env: Mapping[str, str] | None = None) -> Path | None:
+    """Put the packaged dependency directory last on ``sys.path``.
+
+    Packaged installs run a managed CPython with only the standard library, so
+    the launcher points ``REMEDY_RMDY_DEPS`` at the staged closure. Appending
+    (never inserting) keeps a developer venv authoritative: the deps directory
+    is purely additive and only answers imports nothing else provides.
+
+    Runs before anything imports ``remedy.*``, so it must not log — the caller
+    reports a configured-but-missing directory once logging is up.
+    """
+    source = env if env is not None else os.environ
+    raw = (source.get(_ENV_DEPS_DIR) or "").strip()
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    if not path.is_dir():
+        return None
+    entry = str(path)
+    if entry not in sys.path:
+        sys.path.append(entry)
+    return path
+
+
+def verify_dependencies() -> None:
+    """Fail fast and legibly when the third-party closure is not importable.
+
+    Without this the first ``prompt.assemble`` call — the Go attach probe —
+    dies deep inside ``remedy.interfaces.config`` and the operator sees a tool
+    failure rather than a broken install.
+    """
+    import importlib
+
+    for name in _REQUIRED_THIRD_PARTY:
         try:
-            kind, _flags, correlation, payload = read_frame(reader)
-        except EOFError:
-            return
-        if kind == _KIND_HEALTH:
-            body = json.dumps(
-                {
-                    "protocol": _PROTOCOL_VERSION,
-                    "ready": True,
-                    "capabilities": ["tools", "speech", "vision"],
-                },
-                separators=(",", ":"),
-            ).encode("utf-8")
-            write_frame(writer, _KIND_HEALTH, correlation, body)
-            continue
-        if kind == _KIND_TOOL_REQUEST:
-            write_frame(writer, _KIND_TOOL_RESULT, correlation, _handle_tool(payload))
-            continue
-        err = f"unsupported RMDY frame kind {kind}".encode()
-        write_frame(writer, _KIND_TOOL_RESULT, correlation, err, flags=1)
+            importlib.import_module(name)
+        except Exception:
+            deps = (os.environ.get(_ENV_DEPS_DIR) or "").strip() or "<unset>"
+            logger.exception(
+                "rmdy worker cannot import required dependency %r "
+                "(%s=%s, executable=%s); the install is incomplete",
+                name,
+                _ENV_DEPS_DIR,
+                deps,
+                sys.executable,
+            )
+            logging.shutdown()
+            raise SystemExit(EXIT_MISSING_DEPENDENCIES) from None
+
+
+def configure_logging() -> Path | None:
+    """stderr + rotating ``<REMEDY_HOME>/logs/rmdy_worker.log``; returns the log path."""
+    from logging.handlers import RotatingFileHandler
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if not any(getattr(h, "_rmdy_stderr", False) for h in root.handlers):
+        stderr_handler = logging.StreamHandler(sys.stderr)
+        stderr_handler.setLevel(logging.WARNING)
+        stderr_handler.setFormatter(fmt)
+        stderr_handler._rmdy_stderr = True  # type: ignore[attr-defined]
+        root.addHandler(stderr_handler)
+    log_dir = _log_dir()
+    if log_dir is None:
+        return None
+    path = log_dir / "rmdy_worker.log"
+    if any(getattr(h, "_rmdy_file", None) == str(path) for h in root.handlers):
+        return path
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            path, maxBytes=_LOG_MAX_BYTES, backupCount=_LOG_BACKUPS, encoding="utf-8"
+        )
+    except OSError:
+        logger.warning("cannot open worker log at %s", path)
+        return None
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(fmt)
+    file_handler._rmdy_file = str(path)  # type: ignore[attr-defined]
+    root.addHandler(file_handler)
+    return path
+
+
+_ERROR_IO_PENDING = 997
+_ERROR_BROKEN_PIPE = 109
+_ERROR_PIPE_NOT_CONNECTED = 233
+_ERROR_OPERATION_ABORTED = 995
+_FILE_FLAG_OVERLAPPED = 0x40000000
+_win32_lock = threading.Lock()
+_win32_cache: dict[str, Any] = {}
+
+
+def _win32_last_error() -> int:
+    """Win32 GetLastError via ctypes.
+
+    Declared through ``getattr`` because ``ctypes.get_last_error`` is absent
+    from the non-Windows typeshed stubs the repo type-checks against.
+    """
+    import ctypes
+
+    getter = getattr(ctypes, "get_last_error", None)
+    if getter is None:
+        return 0
+    return int(getter())
 
 
 def _win32_kernel32() -> Any:
-    """Resolve ``ctypes.windll.kernel32`` without assuming Linux stubs have windll."""
-    import ctypes
+    """kernel32 with ``use_last_error`` — without assuming Linux stubs have WinDLL."""
+    with _win32_lock:
+        cached = _win32_cache.get("kernel32")
+        if cached is not None:
+            return cached
+        import ctypes
 
-    windll = getattr(ctypes, "windll", None)
-    if windll is None:
-        raise OSError("ctypes.windll is only available on Windows")
-    return windll.kernel32
+        win_dll = getattr(ctypes, "WinDLL", None)
+        if win_dll is None:
+            raise OSError("ctypes.WinDLL is only available on Windows")
+        kernel32 = win_dll("kernel32", use_last_error=True)
+        # Explicit HANDLE prototypes: a bare Python int would be narrowed to a
+        # C int and 64-bit handle values could be truncated.
+        from ctypes import wintypes
+
+        kernel32.CreateFileW.restype = wintypes.HANDLE
+        kernel32.CreateEventW.restype = wintypes.HANDLE
+        kernel32.CreateEventW.argtypes = [
+            ctypes.c_void_p,
+            wintypes.BOOL,
+            wintypes.BOOL,
+            wintypes.LPCWSTR,
+        ]
+        for fn in (kernel32.ReadFile, kernel32.WriteFile):
+            fn.restype = wintypes.BOOL
+            fn.argtypes = [
+                wintypes.HANDLE,
+                ctypes.c_void_p,
+                wintypes.DWORD,
+                ctypes.c_void_p,
+                ctypes.c_void_p,
+            ]
+        kernel32.GetOverlappedResult.restype = wintypes.BOOL
+        kernel32.GetOverlappedResult.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            wintypes.BOOL,
+        ]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        _win32_cache["kernel32"] = kernel32
+        return kernel32
+
+
+def _win32_overlapped_type() -> Any:
+    with _win32_lock:
+        cached = _win32_cache.get("OVERLAPPED")
+        if cached is not None:
+            return cached
+        import ctypes
+        from ctypes import wintypes
+
+        class _Overlapped(ctypes.Structure):
+            _fields_ = [
+                ("Internal", ctypes.c_void_p),
+                ("InternalHigh", ctypes.c_void_p),
+                ("Offset", wintypes.DWORD),
+                ("OffsetHigh", wintypes.DWORD),
+                ("hEvent", wintypes.HANDLE),
+            ]
+
+        _win32_cache["OVERLAPPED"] = _Overlapped
+        return _Overlapped
 
 
 class _PipeFile:
-    """Binary file-like over a Windows named-pipe HANDLE (CreateFileW)."""
+    """Binary file-like over a Windows named-pipe HANDLE (CreateFileW).
+
+    The handle is opened with ``FILE_FLAG_OVERLAPPED`` and every operation
+    carries its own OVERLAPPED + event. A synchronous pipe handle serializes
+    I/O per file object, so a pool thread's WriteFile would block behind the
+    reader thread's pending ReadFile and the worker would deadlock waiting
+    for a request that Go only sends after our response.
+    """
 
     def __init__(self, handle: int) -> None:
         self._handle = handle
         self._closed = False
 
-    def read(self, size: int = -1) -> bytes:
-        if self._closed or size == 0:
-            return b""
+    def _overlapped_io(self, op: str, buf: Any, size: int) -> int:
+        """Run ReadFile/WriteFile with a private OVERLAPPED; returns bytes moved."""
         import ctypes
         from ctypes import wintypes
 
         kernel32 = _win32_kernel32()
-        remaining = 65536 if size < 0 else size
-        chunks: list[bytes] = []
-        while remaining > 0:
-            to_read = min(65536, remaining)
-            buf = (ctypes.c_char * to_read)()
-            read = wintypes.DWORD(0)
-            ok = kernel32.ReadFile(self._handle, buf, to_read, ctypes.byref(read), None)
-            if not ok or read.value == 0:
-                break
-            chunks.append(buf.raw[: read.value])
-            if size < 0:
-                break
-            remaining -= read.value
-            if read.value < to_read:
-                break
-        return b"".join(chunks)
+        overlapped_type = _win32_overlapped_type()
+        event = kernel32.CreateEventW(None, True, False, None)
+        if not event:
+            raise OSError(f"CreateEventW failed: Win32 {_win32_last_error()}")
+        try:
+            ov = overlapped_type()
+            ov.hEvent = event
+            moved = wintypes.DWORD(0)
+            fn = kernel32.ReadFile if op == "read" else kernel32.WriteFile
+            ok = fn(self._handle, buf, size, ctypes.byref(moved), ctypes.byref(ov))
+            if not ok:
+                err = _win32_last_error()
+                if err in (_ERROR_BROKEN_PIPE, _ERROR_PIPE_NOT_CONNECTED):
+                    return 0
+                if err != _ERROR_IO_PENDING:
+                    raise OSError(f"{op} failed on named pipe: Win32 {err}")
+            done = wintypes.DWORD(0)
+            if not kernel32.GetOverlappedResult(
+                self._handle, ctypes.byref(ov), ctypes.byref(done), True
+            ):
+                err = _win32_last_error()
+                if err in (
+                    _ERROR_BROKEN_PIPE,
+                    _ERROR_PIPE_NOT_CONNECTED,
+                    _ERROR_OPERATION_ABORTED,
+                ):
+                    return 0
+                raise OSError(f"{op} failed on named pipe: Win32 {err}")
+            return int(done.value)
+        finally:
+            kernel32.CloseHandle(event)
+
+    def read(self, size: int = -1) -> bytes:
+        if self._closed or size == 0:
+            return b""
+        import ctypes
+
+        to_read = 65536 if size < 0 else min(65536, size)
+        buf = (ctypes.c_char * to_read)()
+        got = self._overlapped_io("read", buf, to_read)
+        if got <= 0:
+            return b""
+        return buf.raw[:got]
 
     def write(self, data: bytes) -> int:
         if self._closed:
             return 0
         import ctypes
-        from ctypes import wintypes
 
-        kernel32 = _win32_kernel32()
         written_total = 0
         while written_total < len(data):
             chunk = data[written_total:]
             buf = (ctypes.c_char * len(chunk)).from_buffer_copy(chunk)
-            written = wintypes.DWORD(0)
-            ok = kernel32.WriteFile(
-                self._handle,
-                buf,
-                len(chunk),
-                ctypes.byref(written),
-                None,
-            )
-            if not ok:
-                raise OSError("WriteFile failed on named pipe")
-            written_total += int(written.value)
-            if written.value == 0:
-                break
+            written = self._overlapped_io("write", buf, len(chunk))
+            if written <= 0:
+                raise OSError("WriteFile on named pipe wrote nothing (peer closed)")
+            written_total += written
         return written_total
 
     def flush(self) -> None:
-        if self._closed:
-            return
-        _win32_kernel32().FlushFileBuffers(self._handle)
+        # Byte-mode pipe writes are visible to the peer once WriteFile
+        # completes; FlushFileBuffers would block until Go drained the pipe.
+        return None
 
     def close(self) -> None:
         if self._closed:
@@ -954,13 +1432,11 @@ def _dial_windows_pipe(endpoint: str) -> tuple[BinaryIO, BinaryIO, Callable[[], 
         0,
         None,
         open_existing,
-        0,
+        _FILE_FLAG_OVERLAPPED,
         None,
     )
     if handle in (None, 0, invalid_handle, -1):
-        get_last_error = getattr(ctypes, "GetLastError", None)
-        err = get_last_error() if get_last_error is not None else "unknown"
-        raise OSError(f"CreateFileW({endpoint!r}) failed: Win32 {err}")
+        raise OSError(f"CreateFileW({endpoint!r}) failed: Win32 {_win32_last_error()}")
     pipe = _PipeFile(int(handle))
     stream = cast(BinaryIO, pipe)
     return stream, stream, pipe.close
@@ -999,20 +1475,21 @@ def dial_endpoint(endpoint: str) -> tuple[BinaryIO, BinaryIO, Callable[[], None]
 
 
 def serve_endpoint(endpoint: str) -> None:
-    import time
-
     last_err: Exception | None = None
     for _ in range(50):
         try:
             reader, writer, closer = dial_endpoint(endpoint)
-            try:
-                serve(reader, writer)
-            finally:
-                closer()
-            return
         except OSError as exc:
             last_err = exc
             time.sleep(0.1)
+            continue
+        logger.info("rmdy worker attached to %s (pid=%d)", endpoint, os.getpid())
+        try:
+            serve(reader, writer)
+        finally:
+            closer()
+        logger.info("rmdy worker stream closed; exiting")
+        return
     raise SystemExit(f"failed to dial RMDY endpoint {endpoint!r}: {last_err}")
 
 
@@ -1024,7 +1501,14 @@ def main(argv: list[str] | None = None) -> int:
         help="IPC endpoint (named pipe / unix socket); default REMEDY_RMDY_ENDPOINT or stdio",
     )
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
+    # sys.path first: nothing may import remedy.* before the packaged
+    # dependency directory is in place. Logging follows, then the preflight.
+    deps_dir = bootstrap_dependency_path()
+    configure_logging()
+    configured = (os.environ.get(_ENV_DEPS_DIR) or "").strip()
+    if configured and deps_dir is None:
+        logger.warning("%s points at a missing directory: %s", _ENV_DEPS_DIR, configured)
+    verify_dependencies()
     endpoint = (args.endpoint or os.environ.get("REMEDY_RMDY_ENDPOINT") or "").strip()
     if endpoint:
         serve_endpoint(endpoint)

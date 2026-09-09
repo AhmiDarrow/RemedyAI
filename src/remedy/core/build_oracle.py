@@ -278,9 +278,8 @@ def oracle_missing_nudge(state: Any) -> dict[str, str]:
             "No verify command discovered for this project (no pytest/npm/cargo/go "
             "fingerprint). You cannot claim DONE.\n"
             "Next step MUST be one of:\n"
-            "1) file_write a minimal test + bash_exec the runner, or\n"
-            "2) bash_exec/job_run with an explicit verify command, or\n"
-            "3) mission_start with verify_command=…\n"
+            "1) workspace.write a minimal test + shell.exec the runner, or\n"
+            "2) shell.exec an explicit verify command (tests, compiler, or the program).\n"
             "Do not monologue. Create falsification now."
         ),
     }
@@ -806,7 +805,7 @@ def format_auto_verify_message(
             f"[Build engine · AUTO VERIFY · RED]\n"
             f"Machine ran: `{cmd}`\n"
             f"{summary}\n"
-            "Verify FAILED. file_edit the failing units, then re-verify. "
+            "Verify FAILED. workspace.edit the failing units, then re-verify. "
             "Do not claim success."
         ),
     }

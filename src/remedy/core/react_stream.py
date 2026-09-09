@@ -315,6 +315,16 @@ async def iter_openai_sse_content(
             await on_live(live)
 
 
+# TURN_CONTEXT_MARKER separates the durable head of the system block (identity,
+# operational core, connected binding) from the per-turn context that follows
+# (session isolation, workspace, retrieved memory). A provider that caches a
+# prompt prefix cuts here: everything above is byte-stable across the turns of
+# a session, everything below is rebuilt every turn. Without an explicit
+# boundary the breakpoint lands after volatile text and every turn pays for a
+# cache write it can never read back.
+TURN_CONTEXT_MARKER = "\n\n[Turn context]\n"
+
+
 def build_runtime_system_block(
     *,
     system_prompt: str,
@@ -365,7 +375,7 @@ def build_runtime_system_block(
         "Do not stop mid-task to summarize or because of step pressure.\n"
         "When asked which provider/model you use, answer from this block — do not call tools."
     )
-    return f"{system_prompt}\n\n{runtime_info}\n\n{context}"
+    return f"{system_prompt}\n\n{runtime_info}{TURN_CONTEXT_MARKER}{context}"
 
 
 def should_enable_tools(

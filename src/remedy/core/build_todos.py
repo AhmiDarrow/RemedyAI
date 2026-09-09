@@ -74,7 +74,18 @@ def _root_for(runtime: Any) -> Path | None:
     return None
 
 
-def _path(root: Path) -> Path:
+_SID_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _path(root: Path, session_id: str | None = None) -> Path:
+    """Checklist file for *session_id* (two builds in one folder must not clobber).
+
+    Anonymous / no-session callers keep the legacy ``todos.json``.
+    """
+    sid = str(session_id or "").strip()
+    if sid and sid != "_anon":
+        safe = _SID_SAFE_RE.sub("_", sid)[:64]
+        return root / ".remedy-build" / "todos" / f"{safe}.json"
     return root / ".remedy-build" / "todos.json"
 
 
@@ -100,7 +111,7 @@ def load_todos(
         if explicit and not session_id:
             return []
         return _mem_todos(runtime, session_id)
-    fp = _path(base)
+    fp = _path(base, _todos_session_key(runtime, session_id))
     if not fp.is_file():
         if explicit and not session_id:
             return []
@@ -199,7 +210,7 @@ def save_todos(
     base = Path(root) if root else _root_for(runtime)
     if base is None:
         return None
-    fp = _path(base)
+    fp = _path(base, _todos_session_key(runtime))
     if not stored:
         with suppress(OSError):
             if fp.is_file():

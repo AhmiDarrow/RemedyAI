@@ -692,6 +692,15 @@ def token_overlap_score(query: str, text: str) -> float:
     return inter / max(1.0, len(q) ** 0.5 * len(t) ** 0.5)
 
 
+def fact_provenance_tag(fact: Any) -> str:
+    """``[owner]`` for facts the owner stated; ``[inferred]`` for everything else."""
+    authority = str(getattr(fact, "authority", "") or "").strip().lower()
+    inferred = getattr(fact, "inferred", None)
+    if authority == "owner" and inferred is False:
+        return "[owner]"
+    return "[inferred]"
+
+
 def build_partner_memory_block(
     profile: UserProfile | None,
     *,
@@ -730,13 +739,19 @@ def build_partner_memory_block(
         limit=MAX_HOT_FACTS,
         project_path=project_path,
     )
+    from remedy.memory.authority import looks_like_instruction_launder
+
     for f in facts:
+        # Render-time guard: a fact that slipped in before the write-time
+        # checks existed must still never reach the prompt.
+        if looks_like_secret(f.fact) or looks_like_instruction_launder(f.fact):
+            continue
         pin = "📌 " if f.pinned else ""
         scope = ""
         if f.project_path:
             folder = project_label(f.project_path)
             scope = f" @{folder}" if folder else ""
-        line = f"- {pin}({f.category}{scope}) {f.fact}"
+        line = f"- {pin}{fact_provenance_tag(f)} ({f.category}{scope}) {f.fact}"
         bucket = bucket_for(f.category, project_scoped=bool(f.project_path))
         buckets.setdefault(bucket, []).append(line)
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
@@ -75,6 +76,8 @@ _WRITE_TOOLS = frozenset(
         "file_edit",
         "file_edit_batch",
         "apply_patch",
+        "workspace.write",
+        "workspace.edit",
         "build_unit_hop",
         "build_drive",
         "build_parallel",
@@ -87,6 +90,10 @@ _EXPLORE_TOOLS = frozenset(
         "repo_search",
         "file_glob",
         "memory_search",
+        "workspace.read",
+        "workspace.list",
+        "workspace.search",
+        "memory.search",
         "soul_recall",
     }
 )
@@ -94,10 +101,9 @@ _VERIFY_TOOLS = frozenset(
     {
         "bash_exec",
         "shell_exec",
+        "shell.exec",
         "job_run",
         "host_run",
-        "mission_verify",
-        "mission_update",
     }
 )
 _SHIP_TOOLS = frozenset(
@@ -1100,17 +1106,17 @@ def build_protocol_block(state: BuildTurnState) -> str:
             return (
                 f"[Review] {state.goal or '(user request)'}\n"
                 "Scout once (batch reads), deliver findings, stop. "
-                "No file_write unless they asked to change something."
+                "No workspace.write unless they asked to change something."
                 f"{_coworkers_block()}"
             )
         return (
             "[Read-only review — RESEARCH → SYNTHESIZE → DELIVER]\n"
             f"Goal: {state.goal or '(user request)'}\n"
-            "1) RESEARCH (scout): batch file_read/list_dir/repo_search in ONE step "
+            "1) RESEARCH (scout): batch workspace.read/workspace.list/workspace.search in ONE step "
             "(4–12). One good sweep is enough — do not re-scout for marginal detail.\n"
             "2) SYNTHESIZE: strengths, risks, concrete file:line findings, ranked.\n"
             "3) DELIVER the written review. DONE = findings delivered. A read-only "
-            "review needs NO file_write and NO verify signal — do not loop for 'a few "
+            "review needs NO workspace.write and NO verify signal — do not loop for 'a few "
             "more details', and do not claim you must build. Only edit if the user "
             "explicitly asked you to fix or change something (that switches this into "
             "a full build with the green gate)."
@@ -1125,7 +1131,7 @@ def build_protocol_block(state: BuildTurnState) -> str:
             "[Task loop — IMPLEMENT the open Build list · hard rule]\n"
             f"Goal: {state.goal or '(user request)'}\n"
             "The numbered review findings are already on the Build checklist. "
-            "Implement them with file_write / file_edit. Read only the files those "
+            "Implement them with workspace.write / workspace.edit. Read only the files those "
             "items name. Do **not** start a whole-tree review as this hop. "
             "Do **not** claim Issues 1–10 fixed while checklist rows are still open. "
             "The full test suite waits until those product items exist."
@@ -1180,11 +1186,11 @@ def build_protocol_block(state: BuildTurnState) -> str:
         f"Goal: {state.goal or '(user request)'}\n"
         f"{oracle}\n"
         "Default schedule (do not skip to monologue):\n"
-        "1) RESEARCH (scout): batch file_read/list_dir/repo_search/memory_search "
+        "1) RESEARCH (scout): batch workspace.read/workspace.list/workspace.search/memory.search "
         "in ONE step (4–12). Gather facts before inventing.\n"
         "2) PLAN: short checklist via open tasks / mission_start — machine-side, "
         "not a long essay unless the user asked plan-only.\n"
-        "3) BUILD (implement): file_write for new files, file_edit multi-hunk for "
+        "3) BUILD (implement): workspace.write for new files, workspace.edit multi-hunk for "
         "changes. Do **not** run the project test suite (`npm test` / `pytest`) "
         "until the current product checklist items are actually built — a red "
         "suite mid-slice is noise, not the job. Static HTML: files on disk is "
@@ -1194,7 +1200,7 @@ def build_protocol_block(state: BuildTurnState) -> str:
         f"{ship}\n"
         "YOU DRIVE THIS PC this turn (Ask is skipped; jail/auth/Plan stay). "
         "Do not call help_list or goal_add. Do not ask permission. "
-        "Use file_read / file_write / host_run / bash_exec now. "
+        "Use workspace.read / workspace.write / shell.exec now. "
         "Machine loop: todo_write a short checklist covering the WHOLE goal, "
         "then implement item by item. Green tests are a checkpoint **after** "
         "the slice exists — do not stop to report or to chase the suite after "
@@ -1279,11 +1285,7 @@ def observe_tool_batch(
     for tc in tcs:
         n = _tool_name(tc)
         tid = str(tc.get("id") or tc.get("tool_call_id") or "")
-        if n in ("mission_verify",):
-            any_verify = True
-            if tid:
-                verify_ids.add(tid)
-        elif n in ("bash_exec", "shell_exec", "job_run", "host_run"):
+        if n in ("bash_exec", "shell_exec", "shell.exec", "job_run", "host_run"):
             blob = _tool_command_blob(tc)
             if _blob_is_verify_command(blob):
                 any_verify = True
@@ -1540,6 +1542,129 @@ def observe_tool_batch(
         state.clear_write_set_on_green()
 
 
+def observe_result_rows(state: BuildTurnState, evidence: Mapping[str, Any]) -> None:
+    """Update build counters from compact Go-loop outcome rows.
+
+    The Go cognition loop owns tool execution; Python only sees
+    ``{name, ok, tail}`` rows (see ``react_policy.summarize_tool_evidence``).
+    Red is always trusted. Green needs an engine-discovered verify command —
+    an ``ok`` shell call is not a passing suite.
+    """
+    if not state.active:
+        return
+    mutates = int(evidence.get("mutates") or 0)
+    explores = int(evidence.get("explores") or 0)
+    if mutates:
+        state.write_steps += mutates
+        state.serial_explore_streak = 0
+        if state.read_only:
+            state.read_only = False
+            state.require_green_to_finish = True
+        if state.phase == "scout":
+            state.phase = "implement"
+        if state.last_verify_ok is True:
+            # Writes after green invalidate it until the next run.
+            state.last_verify_ok = None
+            state.auto_verify_ran = False
+    elif bool(evidence.get("single_explore")):
+        state.explore_steps += 1
+        state.serial_explore_streak += 1
+    elif explores:
+        state.explore_steps += 1
+        state.serial_explore_streak = 0
+    if not bool(evidence.get("verify_seen")):
+        return
+    state.verify_steps += 1
+    state.serial_explore_streak = 0
+    tail = str(evidence.get("last_verify_tail") or "")[:2000]
+    verdict = evidence.get("last_verify_ok")
+    if verdict is False:
+        state.last_verify_ok = False
+        state.phase = "repair"
+        state.repair_steps += 1
+        state.last_verify_summary = tail
+        return
+    if verdict is True and state.verify_command:
+        state.last_verify_ok = True
+        state.last_verify_summary = tail
+        state.clear_write_set_on_green()
+        if state.phase in ("scout", "implement", "repair"):
+            state.phase = "verify"
+    elif verdict is True:
+        state.last_verify_summary = tail
+
+
+def ensure_build_state_for_goal(
+    runtime: Any,
+    goal: str,
+    *,
+    session_id: str | None = None,
+) -> BuildTurnState | None:
+    """Return this session's build state, creating a lean one for a build goal.
+
+    Used by the RMDY prompt services (Go loop owns tools). Unlike
+    :func:`begin_build_turn` this registers no mission or coordination — it
+    only gives the ledger something to observe. Runs inside ``begin_turn``.
+    """
+    st = get_build_state(runtime)
+    if st is not None and st.active:
+        return st
+    goal_txt = coerce_text_arg(goal)[:300]
+    if not looks_like_build_request(goal_txt):
+        return None
+    from remedy.core.muscle_profile import muscle_from_runtime
+
+    muscle = muscle_from_runtime(runtime)
+    st = BuildTurnState(
+        active=True,
+        phase="scout",
+        goal=goal_txt,
+        muscle_tier=muscle.label,
+        max_serial_explore=2 if muscle.is_frontier else 3,
+        session_id=str(session_id or _session_build_key(runtime) or "").strip(),
+        ship_required=looks_like_ship_goal(goal_txt),
+    )
+    with suppress(Exception):
+        st.project_path = str(runtime.effective_project_path() or "")
+    with suppress(Exception):
+        from remedy.core.build_oracle import discover_verify_command
+
+        st.verify_command = discover_verify_command(runtime)
+        st.oracle_ok = bool(st.verify_command)
+    with suppress(Exception):
+        from remedy.core.build_ledger import load_ledger
+
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        led = load_ledger(st.project_path or None, home=home, goal=goal_txt)
+        if led is not None and led.verify_command and not st.verify_command:
+            st.verify_command = led.verify_command
+            st.oracle_ok = True
+    key = _session_build_key(runtime)
+    m = _build_turns_map(runtime)
+    if m is None:
+        m = {}
+        with suppress(Exception):
+            runtime._build_turns = m
+    m[key] = st
+    return st
+
+
+def persist_build_state(runtime: Any, state: BuildTurnState | None) -> None:
+    """Merge the live state into the on-disk ledger (never drops a verdict)."""
+    if state is None or not state.active:
+        return
+    with suppress(Exception):
+        from remedy.core.build_ledger import merge_turn_into_ledger
+
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        merge_turn_into_ledger(
+            state,
+            project_path=state.project_path,
+            session_id=str(state.session_id or ""),
+            home=home,
+        )
+
+
 def _has_c_toolchain() -> bool:
     """True when a C/C++ compiler is on PATH (gcc / clang / cc / MSVC cl)."""
     import shutil
@@ -1598,7 +1723,7 @@ def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
             "content": (
                 "[Build engine · FORCE IMPLEMENT] The goal still needs these files "
                 f"on disk with real content: {listed}. "
-                "file_write each one with the complete source (never empty). "
+                "workspace.write each one with the complete source (never empty). "
                 "Do not claim done. Verify only after the files exist."
             ),
         }
@@ -1647,10 +1772,9 @@ def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
         return {
             "role": "user",
             "content": (
-                "[Build engine · FORCE IMPLEMENT] Serial explore streak exceeded. "
-                "STOP single-file scouting. In the NEXT step emit tool_calls that "
-                "CHANGE the tree: file_write and/or file_edit (multi-hunk). "
-                "Batch remaining reads only if needed for the edit. No plan monologue."
+                "[Build engine] Enough scouting for now. The next step changes the "
+                "tree: workspace.write for new files or workspace.edit (multi-hunk) "
+                "for existing ones. Batch remaining reads only if the edit needs them."
             ),
         }
 
@@ -1687,7 +1811,7 @@ def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
             "role": "user",
             "content": (
                 "[Build engine · FORCE VERIFY] Code was written but not verified. "
-                "Run tests now: bash_exec / job_run kind=verify / mission_verify."
+                "Run the verify command now with shell.exec."
                 f"{vhint} Do not claim done until exit_code=0."
             ),
         }
@@ -1723,7 +1847,7 @@ def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
             "role": "user",
             "content": (
                 "[Build engine · REPAIR] Verify failed. Read the error (path:line), "
-                "file_edit the failing units, re-run the SAME verify command. "
+                "workspace.edit the failing units, re-run the SAME verify command. "
                 "Do not expand scope. Do not summarize failure as success."
             ),
         }
@@ -1739,7 +1863,7 @@ def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
             "role": "user",
             "content": (
                 "[Build engine · IMPLEMENT NOW] Enough context. Write the code. "
-                "file_write / file_edit in this step. Verification follows."
+                "workspace.write / workspace.edit in this step. Verification follows."
             ),
         }
 
@@ -1760,9 +1884,9 @@ def monologue_block_nudge(state: BuildTurnState | None) -> dict[str, str] | None
     return {
         "role": "user",
         "content": (
-            "[Task loop · NO MONOLOGUE] Stop writing plans in chat. "
-            "Emit native tool_calls **now** (list_dir / file_read batch, then "
-            "file_write / file_edit). Do not answer with only a RESEARCH/PLAN/BUILD essay."
+            "[Task loop] A plan in chat is not progress. Emit native tool_calls "
+            "now (workspace.list / workspace.read batch, then workspace.write / "
+            "workspace.edit) instead of a RESEARCH/PLAN/BUILD essay."
         ),
     }
 
@@ -2011,7 +2135,7 @@ def unfinished_green_gate_message(state: BuildTurnState) -> dict[str, str]:
                     "[Build engine · TODO GATE · refuse scout-only DONE]\n"
                     f"{state.open_todo_count} checklist item(s) still pending. "
                     "Do not ask the owner to say go. Implement the first open "
-                    "item now (file_write / file_edit), todo_write it in_progress, "
+                    "item now (workspace.write / workspace.edit), mark it in_progress, "
                     "then the next. Tools stay on."
                 ),
             }
@@ -2028,8 +2152,8 @@ def unfinished_green_gate_message(state: BuildTurnState) -> dict[str, str]:
     if has_c:
         cmd = state.verify_command or "gcc -o hello.exe hello.c && hello.exe"
         extra = (
-            "This is a **C** task: bash_exec the gcc compile, then run the exe. "
-            "Do not stop after file_write alone. Do not use pytest."
+            "This is a **C** task: shell.exec the gcc compile, then run the exe. "
+            "Do not stop after workspace.write alone. Do not use pytest."
         )
     else:
         cmd = state.verify_command or "pytest -q / npm test"
@@ -2172,9 +2296,9 @@ def green_continue_message(state: BuildTurnState, *, command: str = "") -> dict[
                     "[Build engine · GREEN · play/iterate]\n"
                     f"Machine verify passed: `{cmd}`.\n"
                     "Do **not** rewrite working source just to re-verify.\n"
-                    "The program is built — **use it**: computer_app the exe "
-                    "(or run_python_file / bash_exec background), then "
-                    "computer_snapshot target=desktop, play it, file_edit only "
+                    "The program is built — **use it**: launch the exe with "
+                    "shell.exec in the background, then computer.screenshot the "
+                    "desktop, play it, workspace.edit only "
                     "what you observe is wrong, rebuild, repeat.\n"
                     "Tools stay on."
                 ),
