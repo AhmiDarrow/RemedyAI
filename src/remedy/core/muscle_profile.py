@@ -166,9 +166,10 @@ def builder_system_addendum(profile: MuscleProfile) -> str:
     """Extra system block when muscle is capable of multi-step construction."""
     if not profile.builder_contract:
         return ""
+    from remedy.core.react_policy import TOOL_NAME_TABLE as T
+
     spread = (
-        " Prefer **spread_run** when ≥2 independent modules/areas can be surveyed "
-        "in parallel."
+        " Survey independent modules in one parallel batch."
         if profile.prefer_spread
         else ""
     )
@@ -177,9 +178,9 @@ def builder_system_addendum(profile: MuscleProfile) -> str:
         f"[Builder · {profile.label} · {profile.provider or 'provider'}"
         f"{(' / ' + profile.model) if profile.model else ''} · "
         f"parallel≤{parallel}]\n"
-        "You can design and ship full systems with tools. Prefer action over "
-        "narration. After a runnable with a window: run it, computer_snapshot "
-        "the desktop, play it, file_edit what you see."
+        "You can design and ship full systems with tools. After a runnable "
+        f"with a window: run it, {T['computer']} screenshot the desktop, play it, "
+        f"{T['edit']} what you see."
         f"{spread} "
         "Run until the request is finished."
     )

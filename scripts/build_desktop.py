@@ -6,6 +6,9 @@ Packaged Desktop and local ``tauri build`` / ``tauri:dev`` need:
 * ``desktop/bin/remedy_core.dll`` / ``libremedy_core.so`` / ``libremedy_core.dylib``
   — Tauri resource
 * ``desktop/bin/rmdy_tool_worker.pyz`` — Tauri resource (Python zipapp worker)
+* ``desktop/bin/rmdy-deps/`` — Tauri resource (the worker's pinned third-party
+  closure; pydantic/PyYAML ship as real files because their compiled
+  extensions cannot be imported from inside a zipapp)
 
 Release CI (``desktop-release.yml``) builds the same artifacts inline. This
 script is the local equivalent so developers do not hand-copy binaries.
@@ -276,17 +279,32 @@ def build_zig_core() -> Path:
 
 
 def stage_rmdy_worker(*, build_if_missing: bool = True) -> Path:
-    """Build/copy ``rmdy_tool_worker.pyz`` into ``desktop/bin`` for Tauri resources."""
+    """Build/copy the RMDY worker zipapp + its deps into ``desktop/bin``.
+
+    Both are Tauri resources: the zipapp holds ``src/remedy``, and
+    ``rmdy-deps/`` holds the pinned third-party closure (pydantic, PyYAML)
+    that a zipapp cannot carry because of their compiled extension modules.
+    The Go launcher finds the directory beside the zipapp.
+    """
     DESKTOP_BIN.mkdir(parents=True, exist_ok=True)
     dest = DESKTOP_BIN / "rmdy_tool_worker.pyz"
+    deps = DESKTOP_BIN / "rmdy-deps"
     builder = ROOT / "scripts" / "build_rmdy_worker.py"
-    if build_if_missing or not dest.is_file():
-        _run([sys.executable, str(builder), "--out", str(dest)], cwd=ROOT)
+    if build_if_missing or not dest.is_file() or not deps.is_dir():
+        _run(
+            [sys.executable, str(builder), "--out", str(dest), "--deps-out", str(deps)],
+            cwd=ROOT,
+        )
     if not dest.is_file():
         print(f"ERROR: RMDY worker zipapp missing at {dest}")
         sys.exit(1)
+    if not deps.is_dir():
+        print(f"ERROR: RMDY worker dependencies missing at {deps}")
+        sys.exit(1)
     size_mb = dest.stat().st_size / (1024 * 1024)
     print(f"RMDY worker: {dest} ({size_mb:.1f} MB)")
+    deps_mb = sum(p.stat().st_size for p in deps.rglob("*") if p.is_file()) / (1024 * 1024)
+    print(f"RMDY worker deps: {deps} ({deps_mb:.1f} MB)")
     return dest
 
 

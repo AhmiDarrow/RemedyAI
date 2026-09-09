@@ -384,7 +384,10 @@ def _merge_turn_into_ledger_locked(
     if vcmd:
         entry.verify_command = vcmd
     entry.oracle_ok = getattr(state, "oracle_ok", entry.oracle_ok)
-    entry.last_verify_ok = getattr(state, "last_verify_ok", entry.last_verify_ok)
+    # A turn that has not verified yet (None) must not erase the last verdict.
+    _lv = getattr(state, "last_verify_ok", None)
+    if _lv is not None:
+        entry.last_verify_ok = bool(_lv)
     summ = str(getattr(state, "last_verify_summary", "") or "")
     if summ:
         entry.last_verify_summary = summ[:2000]
@@ -516,7 +519,7 @@ def body_next_lines(entry: BuildLedgerEntry) -> list[str]:
         if next_cmd:
             lines.append(f"NEXT VERIFY: `{next_cmd}`")
         lines.append(
-            "Next: file_read READ FIRST → file_edit the fail → re-run NEXT VERIFY. "
+            "Next: workspace.read READ FIRST → workspace.edit the fail → re-run NEXT VERIFY. "
             "Do not restart the build."
         )
         return lines
@@ -607,9 +610,9 @@ def resume_hint(project_path: str | Path | None = None, *, home: str | Path | No
     if needs_resume_drive(entry):
         lines.append(
             "This build is RED with writes on disk — do not leave it unfinished. "
-            "Continue driving it to green: call build_drive (it loops "
-            "verify→repair→re-verify until tests pass), or read the failure and "
-            "file_edit directly, then re-verify. Do not claim done until green."
+            "Continue driving it to green: read the failure, workspace.edit the "
+            "failing units, re-run the verify command with shell.exec, repeat. "
+            "Do not claim done until green."
         )
     if not body:
         lines.append(
@@ -628,7 +631,7 @@ def resume_hint(project_path: str | Path | None = None, *, home: str | Path | No
             "Next: batch-read key paths, then PLAN a short checklist, then BUILD."
         )
     elif phase in ("plan",):
-        lines.append("Next: BUILD with file_write/file_edit — no more explore-only turns.")
+        lines.append("Next: BUILD with workspace.write/workspace.edit — no more explore-only turns.")
     elif phase in ("build", "repair", "write"):
         lines.append(
             "Next: finish remaining writes, then VERIFY (oracle/tests). "

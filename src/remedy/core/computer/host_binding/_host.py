@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import ctypes
 import json
+import os
+import shutil
 from collections.abc import Mapping, Sequence
 from ctypes import (
     c_int32,
@@ -369,6 +371,31 @@ def foreground_detail() -> dict[str, Any]:
 # --- processes ---------------------------------------------------------------
 
 
+
+def _absolute_argv0(argv: Sequence[str], cwd: str | None) -> list[str]:
+    """Resolve ``argv[0]`` to an absolute executable.
+
+    The host refuses a relative ``argv[0]`` so that ``CreateProcess`` never
+    performs its own PATH/cwd search, which an attacker-controlled environment
+    could redirect. Callers still say ``cmd`` or ``xdg-open``, so the lookup
+    happens here, once, and the host receives the resolved path.
+    """
+    items = [str(a) for a in argv]
+    if not items:
+        return items
+    first = items[0]
+    if os.path.isabs(first):
+        return items
+    if os.sep in first or (os.altsep and os.altsep in first):
+        base = cwd or os.getcwd()
+        items[0] = os.path.abspath(os.path.join(base, first))
+        return items
+    found = shutil.which(first, path=os.environ.get("PATH"))
+    if found:
+        items[0] = os.path.abspath(found)
+    return items
+
+
 def process_spawn_hidden(
     argv: Sequence[str],
     cwd: str | None = None,
@@ -377,7 +404,7 @@ def process_spawn_hidden(
     """``(pid, handle)`` of a hidden, job-bound process. Close the handle with
     :func:`process_close`; closing it ends the whole tree."""
     library = _lib()
-    argv_raw = _utf8(json.dumps([str(a) for a in argv]))
+    argv_raw = _utf8(json.dumps(_absolute_argv0(argv, cwd)))
     cwd_raw = _utf8(str(cwd)) if cwd else b""
     env_raw = _utf8(json.dumps({str(k): str(v) for k, v in env.items()})) if env is not None else b""
     pid, handle = c_uint32(), c_uint64()

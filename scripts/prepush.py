@@ -118,9 +118,27 @@ REQUIRE_NATIVE_CORE = "__require_native_core__"
 NATIVE_CORE_ENV = {"REMEDY_NATIVE_CORE_LIB": str(native_core_library_path())}
 WSL_ZIG_PREFIX = "/tmp/remedy-prepush-zig"
 WSL_NATIVE_CORE_LIB = f"{WSL_ZIG_PREFIX}/lib/libremedy_core.so"
-# Lockstep with remedy.runtime.native_runtime._ABI_VERSION and
-# REMEDY_CORE_ABI_VERSION in native/zig/include/remedy_core.h.
-REQUIRED_NATIVE_ABI = 5
+NATIVE_CORE_HEADER = ROOT / "native" / "zig" / "include" / "remedy_core.h"
+
+
+def required_native_abi(*, header: Path = NATIVE_CORE_HEADER) -> int:
+    """``REMEDY_CORE_ABI_VERSION`` from the C header — the one source of truth.
+
+    The ABI number is mirrored in the Zig core, the Go loader, the Python
+    loader and this gate; parsing the header means a bump lands in one place
+    and every consumer follows instead of silently drifting.
+    """
+    match = re.search(
+        r"^#define\s+REMEDY_CORE_ABI_VERSION\s+(\d+)u?\s*$",
+        header.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    if not match:
+        raise SystemExit(f"cannot read REMEDY_CORE_ABI_VERSION from {header}")
+    return int(match.group(1))
+
+
+REQUIRED_NATIVE_ABI = required_native_abi()
 
 
 RUST_ENV = {

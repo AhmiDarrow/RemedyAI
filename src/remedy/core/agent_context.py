@@ -9,6 +9,9 @@ from __future__ import annotations
 from contextlib import suppress
 from typing import Any
 
+# Middleman "Working memory" projection cap (chars) — independent of window size.
+MIDDLEMAN_BLOCK_CHAR_CAP = 6_000
+
 
 async def build_turn_context(runtime: Any) -> str:
     """Assemble system-context parts for the current agent turn.
@@ -124,9 +127,9 @@ async def build_turn_context(runtime: Any) -> str:
                         if should_auto_resume_drive(um, proj or None, home=home):
                             parts.append(
                                 "[Auto-resume] You have an unfinished RED build and "
-                                "the user said to continue — immediately call "
-                                "build_drive to keep looping verify→repair until "
-                                "green. Act as they would: finish what you started."
+                                "the user said to continue — re-run the verify "
+                                "command with shell.exec, workspace.edit what fails, "
+                                "and repeat until green. Finish what you started."
                             )
 
     # Project workspace (default directory for this session)
@@ -800,9 +803,10 @@ def _middleman_context_block(
     runtime: Any, query: str, paths: list[str], budget: int
 ) -> str:
     """Project the relevant middleman slice for this turn, or '' when empty."""
+    from remedy.core.turn_context import turn_session_id
     from remedy.memory.middleman import get_session_middleman
 
-    sid = str(getattr(runtime, "_session_id", None) or "")
+    sid = str(turn_session_id(runtime) or "")
     if not sid:
         return ""
     # Do not filter by session_id: this store is already the session hot set
@@ -815,6 +819,10 @@ def _middleman_context_block(
     )
     if not proj:
         return ""
+    # Hard cap regardless of window: a 128k window is not a licence to spend
+    # 20k chars of the prefix on retrieved scraps.
+    if len(proj) > MIDDLEMAN_BLOCK_CHAR_CAP:
+        proj = proj[: MIDDLEMAN_BLOCK_CHAR_CAP - 1].rstrip() + "…"
     return "Working memory (retrieved, not a grant):\n" + proj
 
 

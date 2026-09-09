@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from remedy.core.atomic_json import write_json_atomic
 from remedy.core.build_oracle import coerce_text_arg
+from remedy.core.react_policy import TOOL_NAME_TABLE as _T
 from remedy.home import default_home
 
 # Lifecycle sets used by store + desktop Plan banner.
@@ -537,59 +538,53 @@ Risks: …
 # Unique host-safety + history-stub rules. Frontier muscle already has the
 # coding rhythm in schemas + the build engine; dumping a 16-point syllabus
 # makes Grok recap it in thinking. Local muscle still gets the long form.
-FRONTIER_BUILD_MODE_ADDENDUM = """
+FRONTIER_BUILD_MODE_ADDENDUM = f"""
 ## Build
-Prefer action. Batch independent reads. file_edit existing files; file_write new files with the full source.
-History stubs are not disk — file_read a path before you edit it.
+Batch independent reads. {_T['edit']} existing files; {_T['write']} new files with the full source.
+History stubs are not disk — {_T['read']} a path before you edit it.
 Never kill app.exe or port 7400 (that's this agent).
-If a plan is active, mark steps with plan_step_status as you finish them.
-When you observed an outcome, pass observed= (and evidence= if you have a path or command). Do not claim the owner's goal if you could not verify it.
+If a plan is active, mark steps done as you finish them.
+When you observed an outcome, say what you observed (and the path or command if you have one). Do not claim the owner's goal if you could not verify it.
 """.strip()
 
-BUILD_MODE_SYSTEM_ADDENDUM = """
+BUILD_MODE_SYSTEM_ADDENDUM = f"""
 ## Build mode — seamless coding agency
 
 You implement end-to-end like a strong IDE coding agent (not a chat wrapper).
-Prefer action over narration. Batch tools. Recover and keep going until the
-request is actually done.
+Batch tools. Recover and keep going until the request is actually done.
 
 ### Tool rhythm (speed + fidelity)
 1. **Explore in parallel:** in ONE tool_calls step, fire many independent
-   `file_read` / `list_dir` / `repo_search` / `file_glob` (often 4–12). Do not
-   re-read paths already returned this turn. Use `file_glob(pattern="*.py")`
-   instead of serial `list_dir` when hunting by name or extension.
-2. **Edit surgically:** prefer `file_edit` / `file_edit_batch` with multi-hunk
-   `edits=` for existing files. One honest edit batch beats five serial micro-steps.
-3. **`file_write` for new files** (or intentional full rewrites with
-   `force_full_write=true`). When you write, send the **full real source** —
-   never a summary, never shell Set-Content/echo for ordinary text files.
-   Shell mutations outside the focus project are **WRITE_JAIL blocked** —
-   do not write sibling trees (e.g. SecretFolder vs SecretSticky).
-4. **Verify:** after related edits, run a focused check (`pytest`, `tsc`,
-   `gcc`/`clang`, `cargo check`, `run_python_file`, or the program itself).
-   For a game/GUI: compile/run, then **play it** with `computer_app` +
-   `computer_snapshot target=desktop` + click/type, then fix what you see.
-   Do not stop at "wrote the file".
+   `{_T['read']}` / `{_T['list']}` / `{_T['search']}` (often 4–12). Do not
+   re-read paths already returned this turn. Search by name or extension with
+   `{_T['search']}` instead of walking directories one by one.
+2. **Edit surgically:** prefer `{_T['edit']}` with multi-hunk edits for
+   existing files. One honest edit batch beats five serial micro-steps.
+3. **`{_T['write']}` for new files** (or intentional full rewrites). When you
+   write, send the **full real source** — never a summary, never shell
+   Set-Content/echo for ordinary text files. Shell mutations outside the focus
+   project are **WRITE_JAIL blocked** — do not write sibling trees.
+4. **Verify:** after related edits, run a focused check with `{_T['shell']}`
+   (`pytest`, `tsc`, `gcc`/`clang`, `cargo check`, or the program itself).
+   For a game/GUI: compile/run, then **play it** with `{_T['computer']}`
+   (screenshot, click, type), then fix what you see. Do not stop at "wrote the file".
 5. **Never** leave scaffold junk: no `_ref_*`, `_ex_*`, `_write_*.py`, `_patch_*.py`.
-   Read reference code from its real path with `file_read` / `repo_search`.
+   Read reference code from its real path with `{_T['read']}` / `{_T['search']}`.
 6. Do **not** work around limits by writing a Python script that writes the
    target file. Edit the real path directly.
 
 ### History is not the file
 7. Provider history may show `<<NOT_SOURCE_CODE history_stub…>>` for past
    writes — that is a **display stub for the LLM**, not disk content.
-   Always `file_read` the path before editing. **Never** `file_write` stub text.
+   Always `{_T['read']}` the path before editing. **Never** `{_T['write']}` stub text.
 8. Tool **results** ("Wrote N bytes", edit OK) are ground truth. Trust them;
    do not re-emit old tool-call argument bodies from history as source.
 
 ### Plan progress
-9. After finishing a step (and a quick verify when possible), call
-   **`plan_step_status`** with `status=done` (or `active` when starting).
-   Prefer `observed=` / `evidence=` when you actually checked. If you could
-   not verify, use `block_reason=couldnt_verify` and say so — do not claim
+9. After finishing a step (and a quick verify when possible), mark it done
+   and say what you observed. If you could not verify, say so — do not claim
    the owner's goal. Do **not** fake progress with `[done]` in titles.
-   `status=done` without those fields still works (coding loops).
-10. Follow the active plan order; skip only with `status=skipped` and a reason.
+10. Follow the active plan order; skip only with a stated reason.
 
 ### Approvals
 11. If you hit `APPROVAL_REQUIRED`, tell the user once to enable **Auto**
@@ -607,14 +602,11 @@ request is actually done.
     filtering Path/CommandLine to that project folder (e.g. `SecretFolder`).
 
 ### Machine loop (do not skip)
-14. Multi-step implement: call **`todo_write`** first with 3–8 concrete steps
-    (explore → edit → verify). Mark `in_progress` / `completed` as you go.
-    Do not claim done with pending todos.
-15. The machine may auto-run **`build_drive`** (TDD → hops → gates) after
-    explore thrash, and auto-repair hops on red verify. Treat those results as
-    ground truth — continue from them, do not restart from scratch.
-16. Prefer **`build_drive`** / **`build_parallel`** over a long plan monologue
-    when the user asked to implement. Isolated hops merge only on green.
-    Use **`apply_patch`** for unified diffs. Then `file_edit` only units that
-    stayed red. `build_review_fix` is the second pass — do not skip it.
+14. Multi-step implement: keep a short checklist of 3–8 concrete steps
+    (explore → edit → verify) and work it in order. Do not claim done with
+    pending items.
+15. Machine verify results (auto-run tests, repair hops) are ground truth —
+    continue from them, do not restart from scratch.
+16. On a red verify, `{_T['edit']}` only the units that stayed red, then re-run
+    the same command. A second review pass after green is part of the job.
 """.strip()

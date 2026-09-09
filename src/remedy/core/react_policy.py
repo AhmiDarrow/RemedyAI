@@ -19,6 +19,26 @@ from remedy.interfaces.config import persona_system_addendum
 
 logger = logging.getLogger(__name__)
 
+# Canonical Tool ABI ids. Every nudge / addendum formats tool names from this
+# table so a renamed tool is a one-line change and legacy snake_case names
+# (file_read, bash_exec, ...) never reach the model again.
+TOOL_NAME_TABLE: dict[str, str] = {
+    "read": "workspace.read",
+    "list": "workspace.list",
+    "search": "workspace.search",
+    "write": "workspace.write",
+    "edit": "workspace.edit",
+    "shell": "shell.exec",
+    "web_fetch": "web.fetch",
+    "web_search": "web.search",
+    "memory_search": "memory.search",
+    "memory_save": "memory.save",
+    "skill_search": "skill.search",
+    "skill_activate": "skill.activate",
+    "computer": "computer.*",
+}
+T = TOOL_NAME_TABLE
+
 # Identity opening is filled by build_system_prompt (name + gender + creed);
 # canon lives in docs/REMEDY_PERSONA.md. This body is operational only.
 _DEFAULT_SYSTEM_BODY = (
@@ -127,6 +147,42 @@ _DEFAULT_SYSTEM_BODY = (
     "with different arguments or a different tool."
 )
 
+# Compact operational core for frontier muscle (anthropic/openai/google/xai/
+# deepseek/poe …). Capable models already know how to run a coding loop; the
+# long body above is for local models that need the rhythm spelled out.
+_FRONTIER_SYSTEM_CORE = (
+    "Personhood, operationally: Soul Field + Partner Memory + Session Brief carry "
+    "who you are; never reset identity when the provider changes. Talk like a "
+    "friend doing the work with them; match their length. Prefer action over "
+    "narration.\n"
+    "Scope: chat and knowledge (answer directly, use context), tasks and code "
+    "(tools until the goal is actually done), research and design (structured, "
+    "honest about uncertainty), PC work (within granted scope, reversible first). "
+    "Greetings and thanks get one or two sentences — no ledger, no resume plan. "
+    "Latest message wins; when unsure whether they want work or talk, ask one "
+    "short question.\n"
+    "Tool policy:\n"
+    f"- Tools are only the ids in your live schemas: {T['read']}, {T['list']}, "
+    f"{T['search']}, {T['write']}, {T['edit']}, {T['shell']}, {T['web_search']}, "
+    f"{T['web_fetch']}, {T['memory_search']}, {T['memory_save']}, "
+    f"{T['skill_search']}, {T['skill_activate']}, {T['computer']}. Never invent "
+    "alternate names or write calls as plain text or XML.\n"
+    f"- Read before you change: {T['read']} a path before {T['edit']}; "
+    f"{T['write']} only for new files or intentional full rewrites, always with "
+    "the complete source. History stubs are not the file.\n"
+    "- Batch independent reads and searches in one step; do not re-read a path "
+    "already returned this turn; stay in the subsystem they named.\n"
+    f"- Ordinary text files go through {T['write']}, not shell echo/Set-Content. "
+    f"Skills load with {T['skill_activate']} name=<catalog id>.\n"
+    "- Work turns end with tool evidence, not a plan. Pure chat gets no tools.\n"
+    "Checkpoints: soft epochs only compact context — they are not a stop or a "
+    "tool budget. Never claim you are blocked by a step limit.\n"
+    "Recovery: tool errors carry a CODE and often a Suggestion — follow it, try "
+    "an absolute path or the parent directory, switch tool when the type is "
+    "wrong, and only report you cannot finish after at least one different "
+    "attempt. APPROVAL_REQUIRED means ask once; never invent success."
+)
+
 # Injected once per turn when a tool batch returns errors (runtime recovery nudge).
 RECOVERY_NUDGE = (
     "One or more tools failed. Do not give a final answer yet. "
@@ -220,7 +276,7 @@ APPROVAL_NUDGE = (
 # When repo_search returns no hits (appended by format_hits); also available for loop.
 EMPTY_SEARCH_NUDGE = (
     "Search returned no matches. Do not invent paths. "
-    "list_dir the intended tree (absolute path if needed), then repo_search again "
+    f"{T['list']} the intended tree (absolute path if needed), then {T['search']} again "
     "with a clearer path or simpler pattern."
 )
 
@@ -1300,8 +1356,8 @@ _AGENCY_TOOL_PROMISE_HARD = (
     "i will use tools",
     "calling skill",
     "skill_activate",
-    "calling file_edit",
-    "calling file_write",
+    "calling workspace.edit",
+    "calling workspace.write",
     "i'll call tools",
     "i will call tools",
 )
@@ -1359,16 +1415,38 @@ _AGENCY_TOOL_PROMISE_SOFT = (
 AGENCY_REARM_NUDGE = (
     "Do not only *say* you will use tools or activate "
     "a skill. Call tools now via the function-calling API "
-    "(e.g. skill_activate, list_dir, repo_search, "
-    "file_read). Start the real review/work immediately."
+    f"(e.g. {T['skill_activate']}, {T['list']}, {T['search']}, "
+    f"{T['read']}). Start the real review/work immediately."
 )
 
 # Class-level unfinished-work drive (not a per-incident phrase).
 UNFINISHED_WORK_NUDGE = (
     "The user asked for real work. A reply with no function calls is not done. "
     "Call tools now via the function-calling API "
-    "(list_dir, file_read, file_edit, file_write, bash_exec, repo_search). "
-    "Do not narrate what you will do — execute."
+    f"({T['list']}, {T['read']}, {T['edit']}, {T['write']}, {T['shell']}, "
+    f"{T['search']}). The next real step is a tool call, not a description of one."
+)
+
+# Build engine: explore streak exceeded — one calm sentence, no shouting.
+FORCE_IMPLEMENT_NUDGE = (
+    "[Build engine] Enough scouting for now. The next step changes the tree: "
+    f"{T['write']} for new files or {T['edit']} for existing ones. Do not restart."
+)
+
+# Evidence-based re-arm: a verify-class tool failed and the text claims done.
+def failed_verify_nudge(name: str, exit_code: int | None) -> str:
+    code = f"exit_code={exit_code}" if exit_code is not None else "a failed result"
+    return (
+        f"[Verify] `{name}` returned {code}, so the work is not done yet. "
+        "Read the failure, fix it with "
+        f"{T['edit']}, then re-run the same command with {T['shell']}."
+    )
+
+
+VERIFY_ONCE_NUDGE = (
+    "[Verify] Files changed but nothing ran afterwards. Run the project's check "
+    f"once with {T['shell']} (tests, compiler, or the program itself) before "
+    "reporting the result."
 )
 
 UNFINISHED_WORK_HARD_STOP = (
@@ -2227,6 +2305,7 @@ def build_system_prompt(
     name: str | None = None,
     gender: str | None = None,
     ui_language: str | None = None,
+    compact: bool = False,
 ) -> str:
     """Base system prompt: identity kernel + operational body + style addendum.
 
@@ -2237,16 +2316,19 @@ def build_system_prompt(
     A chosen style leads over the emergent voice; it never overrides the creed
     or temperament.
     *ui_language* is reply-language only — it does not strip tools or checkpoints.
+    *compact* swaps the long operational body for ``_FRONTIER_SYSTEM_CORE``
+    (capable hosted models); local models keep the full body.
     """
     from remedy.core.agent_identity import identity_system_preamble
     from remedy.i18n.languages import language_system_line
 
+    body = _FRONTIER_SYSTEM_CORE if compact else _DEFAULT_SYSTEM_BODY
     base = (
         identity_system_preamble(name=name, gender=gender)
         + "\n"
         + language_system_line(ui_language)
         + "\n\n"
-        + _DEFAULT_SYSTEM_BODY
+        + body
     )
     addendum = persona_system_addendum(persona)
     if addendum:
@@ -2401,12 +2483,17 @@ def turn_has_unfinished_work(
     tools_enabled: bool,
     tool_steps_this_turn: int = 0,
     open_tasks: list[str] | None = None,
+    include_build: bool = True,
 ) -> bool:
     """True when a soft epoch wall must NOT force a final answer.
 
     Unfinished = active mission, open brief tasks, mid-turn tool work, or an
     active build-engine turn that has not verified yet. Simple chat (no tools)
     returns False so epochs never thrash.
+
+    *include_build=False* skips the build-engine phase checks — the Go
+    continue gate judges build debt from tool evidence instead, so an
+    active build never re-arms merely because its phase is not "done".
     """
     if not tools_enabled:
         return False
@@ -2435,7 +2522,7 @@ def turn_has_unfinished_work(
             get_build_state,
         )
 
-        bst = get_build_state(runtime)
+        bst = get_build_state(runtime) if include_build else None
         if bst is not None and bst.active:
             if build_blocks_final_answer(bst):
                 return True
@@ -2493,3 +2580,115 @@ def is_productive_tool_batch(tool_messages: list[dict[str, Any]]) -> bool:
         any_ok = True
         break
     return any_ok
+
+
+# --- Tool-result evidence (Go loop → prompt.should_continue) -----------------
+
+_VERIFY_TOOL_NAME_RE = re.compile(r"(?i)(test|verify|pytest|cargo)")
+_MUTATE_TOOL_NAMES = frozenset({"workspace.write", "workspace.edit"})
+_EXPLORE_TOOL_NAMES = frozenset(
+    {"workspace.read", "workspace.list", "workspace.search", "memory.search"}
+)
+_EXIT_CODE_RE = re.compile(r"(?i)\bexit[_ ]code\s*[=:]\s*(-?\d+)")
+_COMPLETION_CLAIM_RE = re.compile(
+    r"(?i)\b(?:"
+    r"(?:all|everything|the\s+\w+)\s+(?:is|are)\s+(?:now\s+)?(?:done|complete|finished|fixed|passing|green)|"
+    r"(?:done|complete|completed|finished|fixed|implemented|working|passing|green)\b[.!]|"
+    r"tests?\s+(?:pass|passed|are\s+green)|"
+    r"successfully\s+(?:implemented|fixed|built|added|created)|"
+    r"(?:is|are)\s+(?:now\s+)?(?:working|in\s+place|ready)"
+    r")"
+)
+
+
+def is_verify_tool_name(name: str | None) -> bool:
+    n = str(name or "").strip().lower()
+    if not n:
+        return False
+    return n == "shell.exec" or bool(_VERIFY_TOOL_NAME_RE.search(n))
+
+
+def is_mutate_tool_name(name: str | None) -> bool:
+    return str(name or "").strip().lower() in _MUTATE_TOOL_NAMES
+
+
+def is_explore_tool_name(name: str | None) -> bool:
+    return str(name or "").strip().lower() in _EXPLORE_TOOL_NAMES
+
+
+def parse_exit_code(tail: str | None) -> int | None:
+    m = _EXIT_CODE_RE.search(str(tail or "")[:4000])
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except ValueError:
+        return None
+
+
+def text_claims_completion(text: str | None) -> bool:
+    """True when a final answer reads as 'the work is done'."""
+    t = str(text or "").strip()
+    if not t:
+        return False
+    return bool(_COMPLETION_CLAIM_RE.search(t[-1500:]))
+
+
+def summarize_tool_evidence(last_results: Any) -> dict[str, Any]:
+    """Fold the last tool batch (``{name, ok, tail}`` rows) into build evidence.
+
+    Returns: ``mutates`` (count), ``explores`` (count), ``verify_seen``,
+    ``verify_failed``, ``failed_name``, ``failed_exit``, ``last_verify_ok``
+    (True/False/None), ``last_verify_exit``, ``mutate_after_verify`` (a write
+    landed after the last verify in this batch), ``single_explore`` (the batch
+    was one explore call), ``names``.
+    """
+    rows = [r for r in (last_results or []) if isinstance(r, dict)]
+    out: dict[str, Any] = {
+        "mutates": 0,
+        "explores": 0,
+        "verify_seen": False,
+        "verify_failed": False,
+        "failed_name": "",
+        "failed_exit": None,
+        "last_verify_ok": None,
+        "last_verify_exit": None,
+        "last_verify_tail": "",
+        "mutate_after_verify": False,
+        "single_explore": False,
+        "names": [],
+    }
+    last_kind = ""
+    for row in rows:
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        out["names"].append(name)
+        ok = row.get("ok")
+        ok_b = bool(ok) if ok is not None else True
+        tail = str(row.get("tail") or "")
+        if is_mutate_tool_name(name):
+            out["mutates"] += 1
+            last_kind = "mutate"
+            continue
+        if is_explore_tool_name(name):
+            out["explores"] += 1
+            last_kind = "explore"
+            continue
+        if is_verify_tool_name(name):
+            code = parse_exit_code(tail)
+            failed = (not ok_b) or (code is not None and code != 0)
+            out["verify_seen"] = True
+            out["last_verify_ok"] = not failed
+            out["last_verify_exit"] = code
+            out["last_verify_tail"] = tail[:2000]
+            if failed:
+                out["verify_failed"] = True
+                out["failed_name"] = name
+                out["failed_exit"] = code
+            last_kind = "verify"
+            continue
+        last_kind = "other"
+    out["mutate_after_verify"] = last_kind == "mutate"
+    out["single_explore"] = len(out["names"]) == 1 and out["explores"] == 1
+    return out
