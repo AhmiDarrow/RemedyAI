@@ -21,12 +21,18 @@ var AlwaysOn = map[string]struct{}{
 }
 
 // DefaultPanesMap is the shipping pane defaults (do not mutate).
+//
+// rails is off by default. It maps to /api/terminal, /api/files and
+// /api/browser (see deny.go), so leaving it on would mean a phone that
+// finished pairing thirty seconds ago can open a shell on the machine. The
+// capability is unchanged — the owner turns it on for a device deliberately,
+// and dispatch tells the phone which pane refused it.
 var DefaultPanesMap = map[string]bool{
 	"live_ui":          true,
 	"chat":             true,
 	"approvals":        true,
 	"sessions":         true,
-	"rails":            true,
+	"rails":            false,
 	"computer_preview": false,
 	"settings_write":   false,
 }

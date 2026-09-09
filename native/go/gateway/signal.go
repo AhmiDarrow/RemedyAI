@@ -439,7 +439,7 @@ func zigSignalRunner(home string) SignalRunner {
 			return 1, "", "", err
 		}
 		_ = core.WriteJailSetRoots(nil)
-		token, nowMS, err := core.IssueProcessSpawnToken(argv, false)
+		token, nowMS, err := core.IssueProcessSpawnToken(argv, nil, false, false)
 		if err != nil {
 			return 1, "", "", err
 		}
@@ -447,7 +447,7 @@ func zigSignalRunner(home string) SignalRunner {
 		if ms == 0 {
 			ms = 60_000
 		}
-		res, err := core.ExecCaptureAuthorized(argv, "", nil, token, "", "", false, nowMS, ms)
+		res, err := core.ExecCaptureAuthorized(argv, "", nil, false, token, "", "", false, nowMS, ms)
 		if err != nil {
 			return 1, "", "", err
 		}

@@ -11,6 +11,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -266,6 +267,13 @@ type fakeBroker struct {
 	mu          sync.Mutex
 	subs        map[string]map[net.Conn]struct{}
 	ln          net.Listener
+	conns       atomic.Int64
+}
+
+// connections counts accepted broker sessions, so a test can tell a re-armed
+// rendezvous from a reconnect.
+func (b *fakeBroker) connections() int {
+	return int(b.conns.Load())
 }
 
 func startFakeBroker(t *testing.T, connackCode int) *fakeBroker {
@@ -303,6 +311,7 @@ func (b *fakeBroker) serve() {
 }
 
 func (b *fakeBroker) handle(conn net.Conn) {
+	b.conns.Add(1)
 	defer func() {
 		b.mu.Lock()
 		for topic, writers := range b.subs {

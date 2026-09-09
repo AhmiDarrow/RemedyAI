@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -663,6 +664,7 @@ type RendezvousSession struct {
 	closeOnce sync.Once
 	local     net.Conn // handed to Connect handler
 	peer      net.Conn // MQTT pump side
+	loopCtx   context.Context
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
 }
@@ -709,19 +711,13 @@ func (r *RendezvousSession) Open(ctx context.Context) (net.Conn, error) {
 		return nil, err
 	}
 
-	a, b := net.Pipe()
-	r.mu.Lock()
-	r.local = a
-	r.peer = b
 	loopCtx, loopCancel := context.WithCancel(ctx)
+	r.mu.Lock()
+	r.loopCtx = loopCtx
 	r.cancel = loopCancel
 	r.mu.Unlock()
 
-	r.wg.Add(3)
-	go func() {
-		defer r.wg.Done()
-		r.pumpOut(loopCtx)
-	}()
+	r.wg.Add(2)
 	go func() {
 		defer r.wg.Done()
 		r.MQTT.ReaderLoop(loopCtx)
@@ -730,7 +726,51 @@ func (r *RendezvousSession) Open(ctx context.Context) (net.Conn, error) {
 		defer r.wg.Done()
 		r.MQTT.PingLoop(loopCtx)
 	}()
-	return a, nil
+	return r.armPipe(), nil
+}
+
+// Rearm drops the current record pipe and hands back a fresh one on the same
+// broker subscription.
+//
+// Anyone can publish to a public-broker topic, so a refused Noise handshake is
+// not evidence that the rendezvous is broken — it is evidence that somebody
+// spoke who could not prove they were the paired phone. Re-arming costs
+// nothing, where tearing the rendezvous down and redialling hands a spammer a
+// cheap way to keep the paired phone off the machine.
+func (r *RendezvousSession) Rearm() (net.Conn, error) {
+	r.mu.Lock()
+	ctx := r.loopCtx
+	r.mu.Unlock()
+	if ctx == nil {
+		return nil, fmt.Errorf("%w: rendezvous is not open", ErrMQTT)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return r.armPipe(), nil
+}
+
+// armPipe replaces the record pipe and starts the outbound pump for it.
+func (r *RendezvousSession) armPipe() net.Conn {
+	a, b := net.Pipe()
+	r.mu.Lock()
+	if r.local != nil {
+		_ = r.local.Close()
+	}
+	if r.peer != nil {
+		_ = r.peer.Close()
+	}
+	r.local = a
+	r.peer = b
+	ctx := r.loopCtx
+	r.mu.Unlock()
+
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		r.pumpOut(ctx, b)
+	}()
+	return a
 }
 
 func (r *RendezvousSession) onMessage(topic string, payload []byte) {
@@ -749,14 +789,13 @@ func (r *RendezvousSession) onMessage(topic string, payload []byte) {
 	_, _ = peer.Write(frame)
 }
 
-func (r *RendezvousSession) pumpOut(ctx context.Context) {
-	defer r.Close()
-	r.mu.Lock()
-	peer := r.peer
-	r.mu.Unlock()
-	if peer == nil {
+// pumpOut publishes records written to one pipe generation. It closes only
+// that pipe when it ends, so a re-armed rendezvous keeps its broker session.
+func (r *RendezvousSession) pumpOut(ctx context.Context, peer net.Conn) {
+	if peer == nil || ctx == nil {
 		return
 	}
+	defer func() { _ = peer.Close() }()
 	for {
 		select {
 		case <-ctx.Done():
@@ -818,20 +857,68 @@ func (r *RendezvousSession) CloseWait() {
 	}
 }
 
+// serveRendezvous runs handshakes on one open rendezvous until the budget of
+// refused handshakes is spent, the rendezvous dies, or the context ends.
+func serveRendezvous(ctx context.Context, session *RendezvousSession, conn net.Conn, run func(context.Context, net.Conn) error) {
+	bad := 0
+	for {
+		err := run(ctx, conn)
+		_ = conn.Close()
+		if ctx.Err() != nil {
+			return
+		}
+		if err == nil {
+			bad = 0
+		} else {
+			bad++
+			if bad >= MaxBadHandshakes {
+				log.Printf("connect: rendezvous %s gave up after %d refused handshakes "+
+					"(public broker topics are open to anyone; the paired phone will redial)",
+					shortSID(session.SID), bad)
+				return
+			}
+		}
+		next, rerr := session.Rearm()
+		if rerr != nil {
+			return
+		}
+		conn = next
+	}
+}
+
+// shortSID is a log-safe prefix of a rendezvous id.
+func shortSID(sid []byte) string {
+	full := hex.EncodeToString(sid)
+	if len(full) > 8 {
+		return full[:8]
+	}
+	return full
+}
+
 // RDVEndpoint is one public MQTT broker the PC/phone can meet on.
 type RDVEndpoint struct {
 	Host string
 	Port int
 }
 
+// MaxBadHandshakes is how many refused handshakes one public-broker
+// rendezvous absorbs before it gives that broker up and backs off.
+const MaxBadHandshakes = 5
+
 // RDVSupervisorOpts configures the public-broker rendezvous dialer.
 type RDVSupervisorOpts struct {
-	Home        string
-	Handler     RelayConnHandler
+	Home    string
+	Handler RelayConnHandler
+	// Session, when set, runs one rendezvous connection and reports whether
+	// it authenticated. Errors are budgeted (MaxBadHandshakes) instead of
+	// costing a broker reconnect. Takes precedence over Handler.
+	Session     func(ctx context.Context, conn net.Conn) error
 	Endpoints   []RDVEndpoint // empty → PublicRDVEndpoints
 	Interval    time.Duration // refresh wanted SIDs; default 1s
 	OpenTimeout time.Duration // MQTT+subscribe budget per broker; default 8s
 	Enabled     bool          // false → immediate return (connect_rdv_enabled off)
+	// Now overrides the clock used for session-id rotation (tests).
+	Now func() time.Time
 }
 
 // RunRDVSupervisor keeps one public-broker rendezvous waiter per active sid.
@@ -841,8 +928,20 @@ func RunRDVSupervisor(ctx context.Context, opts RDVSupervisorOpts) error {
 	if !opts.Enabled {
 		return nil
 	}
-	if opts.Handler == nil {
+	if opts.Handler == nil && opts.Session == nil {
 		return fmt.Errorf("%w: rdv supervisor needs a handler", ErrMQTT)
+	}
+	run := opts.Session
+	if run == nil {
+		handler := opts.Handler
+		run = func(ctx context.Context, conn net.Conn) error {
+			handler(ctx, conn)
+			return nil
+		}
+	}
+	now := opts.Now
+	if now == nil {
+		now = time.Now
 	}
 	endpoints := opts.Endpoints
 	if len(endpoints) == 0 {
@@ -877,7 +976,7 @@ func RunRDVSupervisor(ctx context.Context, opts RDVSupervisorOpts) error {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for {
-		wanted, err := RendezvousSIDs(opts.Home)
+		wanted, err := RendezvousSIDsRDV(opts.Home, now())
 		if err != nil {
 			return err
 		}
@@ -905,7 +1004,7 @@ func RunRDVSupervisor(ctx context.Context, opts RDVSupervisorOpts) error {
 			eps := append([]RDVEndpoint(nil), endpoints...)
 			go func() {
 				defer close(done)
-				runRDVDialLoop(dctx, opts.Home, sidCopy, eps, openTimeout, opts.Handler)
+				runRDVDialLoop(dctx, opts.Home, sidCopy, eps, openTimeout, run)
 			}()
 		}
 
@@ -917,7 +1016,7 @@ func RunRDVSupervisor(ctx context.Context, opts RDVSupervisorOpts) error {
 	}
 }
 
-func runRDVDialLoop(ctx context.Context, home string, sid []byte, endpoints []RDVEndpoint, openTimeout time.Duration, handler RelayConnHandler) {
+func runRDVDialLoop(ctx context.Context, home string, sid []byte, endpoints []RDVEndpoint, openTimeout time.Duration, run func(context.Context, net.Conn) error) {
 	backoff := time.Second
 	for {
 		if IsPaused(home) {
@@ -960,9 +1059,8 @@ func runRDVDialLoop(ctx context.Context, home string, sid []byte, endpoints []RD
 			}
 			connected = true
 			backoff = time.Second
-			handler(ctx, conn)
+			serveRendezvous(ctx, session, conn, run)
 			session.CloseWait()
-			_ = conn.Close()
 			break
 		}
 		if !connected {

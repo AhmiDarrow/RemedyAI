@@ -20,8 +20,7 @@ type MattermostChannel struct {
 	channelID string
 	teamID    string
 	home      string
-	allowed   map[string]struct{}
-	allowAll  bool
+	access    Access
 	client    *http.Client
 
 	mu      sync.Mutex
@@ -45,11 +44,7 @@ type MattermostConfig struct {
 
 // NewMattermost builds a Mattermost channel bound to a gateway hub.
 func NewMattermost(g *Gateway, cfg MattermostConfig) *MattermostChannel {
-	allowed := ParseIDs(cfg.AllowIDs)
 	chID := strings.TrimSpace(cfg.ChannelID)
-	if chID != "" {
-		allowed[chID] = struct{}{}
-	}
 	return &MattermostChannel{
 		gateway:   g,
 		token:     strings.TrimSpace(cfg.BotToken),
@@ -57,8 +52,7 @@ func NewMattermost(g *Gateway, cfg MattermostConfig) *MattermostChannel {
 		channelID: chID,
 		teamID:    strings.TrimSpace(cfg.TeamID),
 		home:      cfg.HomeDir,
-		allowed:   allowed,
-		allowAll:  cfg.AllowAll,
+		access:    NewAccess(cfg.AllowIDs, cfg.AllowAll, chID, strings.TrimSpace(cfg.TeamID)),
 		client:    &http.Client{Timeout: 30 * time.Second},
 		seq:       1,
 	}
@@ -87,7 +81,7 @@ func (c *MattermostChannel) Start(ctx context.Context) error {
 		log.Printf("mattermost: stub mode (missing token or base_url)")
 		return nil
 	}
-	log.Printf("mattermost: active (channel=%s)", c.channelID)
+	LogAccessSummary(ChannelMattermost, c.access, "channel="+c.channelID)
 	if !c.tryStartSocket(runCtx) {
 		log.Printf("mattermost: WebSocket deferred — another process holds the bot lock; retrying")
 		c.wg.Add(1)
@@ -340,7 +334,11 @@ func (c *MattermostChannel) onEvent(ctx context.Context, data map[string]any) {
 	}
 	ch := anyString(post["channel_id"])
 	user := anyString(post["user_id"])
-	if !IsAllowed(c.allowed, c.allowAll, ch, user, c.teamID) {
+	if ok, reason := c.access.Permit(user, ch, c.teamID); !ok {
+		logDeny(ChannelMattermost, reason, user, ch)
+		if c.gateway != nil {
+			c.gateway.recordDenied(ChannelMattermost, reason, user, ch)
+		}
 		return
 	}
 	sourceID := user

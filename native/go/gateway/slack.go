@@ -19,16 +19,15 @@ type SlackChannel struct {
 	appToken string
 	home     string
 	channel  string
-	allowed  map[string]struct{}
-	allowAll bool
+	access   Access
 	client   *http.Client
 
-	mu       sync.Mutex
-	running  bool
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	lock     *PollLock
-	seen     map[string]struct{}
+	mu        sync.Mutex
+	running   bool
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	lock      *PollLock
+	seen      map[string]struct{}
 	seenOrder []string
 }
 
@@ -44,19 +43,14 @@ type SlackConfig struct {
 
 // NewSlack builds a Slack channel bound to a gateway hub.
 func NewSlack(g *Gateway, cfg SlackConfig) *SlackChannel {
-	allowed := ParseIDs(cfg.AllowIDs)
 	chID := strings.TrimSpace(cfg.ChannelID)
-	if chID != "" {
-		allowed[chID] = struct{}{}
-	}
 	return &SlackChannel{
 		gateway:  g,
 		botToken: strings.TrimSpace(cfg.BotToken),
 		appToken: strings.TrimSpace(cfg.AppToken),
 		home:     cfg.HomeDir,
 		channel:  chID,
-		allowed:  allowed,
-		allowAll: cfg.AllowAll,
+		access:   NewAccess(cfg.AllowIDs, cfg.AllowAll, chID),
 		client:   &http.Client{Timeout: 30 * time.Second},
 		seen:     make(map[string]struct{}),
 	}
@@ -349,7 +343,11 @@ func (c *SlackChannel) handleEvent(ctx context.Context, event map[string]any) {
 	if eid != "" && c.rememberSeen(eid) {
 		return
 	}
-	if !IsAllowed(c.allowed, c.allowAll, ch, user) {
+	if ok, reason := c.access.Permit(user, ch); !ok {
+		logDeny(ChannelSlack, reason, user, ch)
+		if c.gateway != nil {
+			c.gateway.recordDenied(ChannelSlack, reason, user, ch)
+		}
 		return
 	}
 	sourceID := user

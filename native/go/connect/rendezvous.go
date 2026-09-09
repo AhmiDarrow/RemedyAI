@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/blake2s"
 )
@@ -19,11 +20,25 @@ const (
 
 	// DefaultRelayPort is used when a relay URL omits an explicit port.
 	DefaultRelayPort = 7402
+
+	// RDVBucketSeconds rotates public-broker rendezvous ids.
+	//
+	// Public MQTT brokers accept wildcard subscribers, so a stable id per
+	// device pair lets anyone watching the broker enumerate live machines and
+	// keep spamming the same topic. Mixing a coarse time bucket into the
+	// derivation means a harvested id stops naming anything after an hour.
+	RDVBucketSeconds = 3600
+
+	// RDVBucketGrace is how far either side of a bucket boundary the PC also
+	// holds the neighbouring id, so a phone with a slightly different clock
+	// still meets it.
+	RDVBucketGrace = 5 * time.Minute
 )
 
 var (
 	pairPrefix = []byte("remedy-connect/1|pair|")
 	devPrefix  = []byte("remedy-connect/1|dev|")
+	rdvPrefix  = []byte("remedy-connect/1|rdv|")
 )
 
 // SessionIDPair returns the 16-byte rendezvous id for the 60s pair window.
@@ -50,6 +65,82 @@ func SessionIDDevice(hostPub, devicePub []byte) ([]byte, error) {
 	msg = append(msg, '|')
 	msg = append(msg, devicePub...)
 	return blake2s16(msg)
+}
+
+// RDVBucket returns the rendezvous rotation bucket covering t.
+func RDVBucket(t time.Time) int64 {
+	return t.Unix() / RDVBucketSeconds
+}
+
+// RDVBucketsAt returns the buckets the PC should hold at t: the current one,
+// plus the neighbour it is within RDVBucketGrace of, so a clock a few minutes
+// off on either side still lands on an id the PC is listening to.
+func RDVBucketsAt(t time.Time) []int64 {
+	cur := RDVBucket(t)
+	out := []int64{cur}
+	offset := t.Unix() - cur*RDVBucketSeconds
+	grace := int64(RDVBucketGrace / time.Second)
+	if offset < grace {
+		out = append(out, cur-1)
+	}
+	if int64(RDVBucketSeconds)-offset <= grace {
+		out = append(out, cur+1)
+	}
+	return out
+}
+
+// SessionIDDeviceRDV returns the rotating 16-byte public-broker rendezvous id
+// for a paired device in the given time bucket. This is deliberately not the
+// relay id: the relay is a chosen host, the public brokers are not.
+func SessionIDDeviceRDV(hostPub, devicePub []byte, bucket int64) ([]byte, error) {
+	if len(hostPub) != DHLen || len(devicePub) != DHLen {
+		return nil, fmt.Errorf("host and device pubs must be 32 bytes")
+	}
+	stamp := strconv.FormatInt(bucket, 10)
+	msg := make([]byte, 0, len(rdvPrefix)+len(hostPub)+len(devicePub)+2+len(stamp))
+	msg = append(msg, rdvPrefix...)
+	msg = append(msg, hostPub...)
+	msg = append(msg, '|')
+	msg = append(msg, devicePub...)
+	msg = append(msg, '|')
+	msg = append(msg, stamp...)
+	return blake2s16(msg)
+}
+
+// RendezvousSIDsRDV returns the ids the public-broker supervisor should hold
+// at t: the live pair-window id (already short-lived) plus the rotating id of
+// every non-revoked paired device. The supervisor re-reads this list on its
+// tick, so a bucket rollover retires the old topic on its own.
+func RendezvousSIDsRDV(home string, t time.Time) ([][]byte, error) {
+	out := make([][]byte, 0, MaxDevices*2+1)
+	if sid, err := PendingPairRendezvous(home); err != nil {
+		return nil, err
+	} else if len(sid) == SessionIDLen {
+		out = append(out, sid)
+	}
+	kp, err := LoadOrCreateHostKeyPair(home)
+	if err != nil {
+		return out, nil
+	}
+	list, err := ListDevices(home, false)
+	if err != nil {
+		return out, nil
+	}
+	buckets := RDVBucketsAt(t)
+	for _, rec := range list {
+		pub, err := hex.DecodeString(strings.TrimSpace(rec.PublicHex))
+		if err != nil || len(pub) != DHLen {
+			continue
+		}
+		for _, bucket := range buckets {
+			sid, err := SessionIDDeviceRDV(kp.Public, pub, bucket)
+			if err != nil {
+				continue
+			}
+			out = append(out, sid)
+		}
+	}
+	return out, nil
 }
 
 // RendezvousSIDs returns the active 16-byte session ids the PC should hold on

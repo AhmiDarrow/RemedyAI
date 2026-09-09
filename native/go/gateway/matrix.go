@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,15 +16,14 @@ import (
 
 // MatrixChannel: Client-Server /sync inbound + room send outbound.
 type MatrixChannel struct {
-	gateway     *Gateway
-	token       string
-	homeserver  string
-	userID      string
-	roomID      string
-	home        string
-	allowed     map[string]struct{}
-	allowAll    bool
-	client      *http.Client
+	gateway    *Gateway
+	token      string
+	homeserver string
+	userID     string
+	roomID     string
+	home       string
+	access     Access
+	client     *http.Client
 
 	mu      sync.Mutex
 	running bool
@@ -46,11 +46,7 @@ type MatrixConfig struct {
 
 // NewMatrix builds a Matrix channel bound to a gateway hub.
 func NewMatrix(g *Gateway, cfg MatrixConfig) *MatrixChannel {
-	allowed := ParseIDs(cfg.AllowIDs)
 	room := strings.TrimSpace(cfg.RoomID)
-	if room != "" {
-		allowed[room] = struct{}{}
-	}
 	return &MatrixChannel{
 		gateway:    g,
 		token:      strings.TrimSpace(cfg.AccessToken),
@@ -58,8 +54,7 @@ func NewMatrix(g *Gateway, cfg MatrixConfig) *MatrixChannel {
 		userID:     strings.TrimSpace(cfg.UserID),
 		roomID:     room,
 		home:       cfg.HomeDir,
-		allowed:    allowed,
-		allowAll:   cfg.AllowAll,
+		access:     NewAccess(cfg.AllowIDs, cfg.AllowAll, room),
 		client:     &http.Client{Timeout: 90 * time.Second},
 	}
 }
@@ -95,7 +90,7 @@ func (c *MatrixChannel) Start(ctx context.Context) error {
 		}
 	}
 	c.since = LoadStringCursor(c.home, "matrix_since")
-	log.Printf("matrix: active (room=%s)", c.roomID)
+	LogAccessSummary(ChannelMatrix, c.access, "room="+c.roomID)
 	if !c.tryStartSync(runCtx) {
 		log.Printf("matrix: sync deferred — another process holds the bot lock; retrying")
 		c.wg.Add(1)
@@ -180,11 +175,59 @@ func (c *MatrixChannel) tryStartSync(ctx context.Context) bool {
 	}
 	c.mu.Lock()
 	c.lock = lock
+	since := c.since
 	c.mu.Unlock()
+	if since == "" {
+		c.drainBacklog(ctx)
+	}
 	c.wg.Add(1)
 	go c.syncLoop(ctx)
 	log.Printf("matrix: sync task scheduled")
 	return true
+}
+
+// matrixBacklogFilter asks the homeserver for a sync with no timeline events.
+// The response still carries next_batch, which is all a first sync needs.
+const matrixBacklogFilter = `{"room":{"timeline":{"limit":0}}}`
+
+// drainBacklog anchors an empty cursor at "now".
+//
+// A first /sync with no since returns the recent timeline of every joined
+// room, and each of those events would otherwise become an agent turn — so
+// enabling Matrix on a busy allowlisted room would fire a burst of work and
+// outbound replies at people who wrote hours ago. Ask for a zero-limit
+// timeline, keep only next_batch, and discard anything the server sends
+// anyway (Telegram does the same in its own drainBacklog).
+func (c *MatrixChannel) drainBacklog(ctx context.Context) {
+	data, err := c.syncRequest(ctx, 0, matrixBacklogFilter)
+	if err != nil {
+		log.Printf("matrix: backlog anchor failed: %s (starting from the next sync)", SafeErr(err))
+		return
+	}
+	skipped := countTimelineEvents(data)
+	c.mu.Lock()
+	since := c.since
+	c.mu.Unlock()
+	if since == "" {
+		log.Printf("matrix: no next_batch on the first sync; room history may replay")
+		return
+	}
+	log.Printf("matrix: starting from now (skipped %d backlog event(s) already in the room)", skipped)
+}
+
+// countTimelineEvents counts events a sync response carried, for the log line
+// that tells the owner what was skipped.
+func countTimelineEvents(data map[string]any) int {
+	rooms, _ := data["rooms"].(map[string]any)
+	join, _ := rooms["join"].(map[string]any)
+	n := 0
+	for _, bodyAny := range join {
+		body, _ := bodyAny.(map[string]any)
+		timeline, _ := body["timeline"].(map[string]any)
+		events, _ := timeline["events"].([]any)
+		n += len(events)
+	}
+	return n
 }
 
 func (c *MatrixChannel) lockRetryLoop(ctx context.Context) {
@@ -249,15 +292,25 @@ func (c *MatrixChannel) syncLoop(ctx context.Context) {
 }
 
 func (c *MatrixChannel) syncOnce(ctx context.Context) (map[string]any, error) {
+	return c.syncRequest(ctx, 30000, "")
+}
+
+// syncRequest performs one /sync. filter is the inline filter JSON (empty for
+// the normal streaming sync); timeoutMS is the long-poll budget.
+func (c *MatrixChannel) syncRequest(ctx context.Context, timeoutMS int, filter string) (map[string]any, error) {
 	q := url.Values{}
-	q.Set("timeout", "30000")
+	q.Set("timeout", strconv.Itoa(timeoutMS))
+	if filter != "" {
+		q.Set("filter", filter)
+	}
 	c.mu.Lock()
 	since := c.since
 	c.mu.Unlock()
 	if since != "" {
 		q.Set("since", since)
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	budget := time.Duration(timeoutMS)*time.Millisecond + 15*time.Second
+	reqCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet,
 		c.homeserver+"/_matrix/client/v3/sync?"+q.Encode(), nil)
@@ -321,7 +374,11 @@ func (c *MatrixChannel) handleTimelineEvent(ctx context.Context, roomID string, 
 	if text == "" {
 		return
 	}
-	if !IsAllowed(c.allowed, c.allowAll, roomID, sender) {
+	if ok, reason := c.access.Permit(sender, roomID); !ok {
+		logDeny(ChannelMatrix, reason, sender, roomID)
+		if c.gateway != nil {
+			c.gateway.recordDenied(ChannelMatrix, reason, sender, roomID)
+		}
 		return
 	}
 	go func() {

@@ -2,71 +2,80 @@ package gateway
 
 import (
 	"context"
-	"crypto/hmac"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	googleChatAPI      = "https://chat.googleapis.com/v1"
+	googleChatAPI       = "https://chat.googleapis.com/v1"
 	googleOAuthTokenURL = "https://oauth2.googleapis.com/token"
 )
 
 // GoogleChatChannel: spaces.messages outbound + webhook inbound.
+//
+// Inbound webhooks are authenticated with the Google-issued bearer JWT
+// (RS256, iss chat@system.gserviceaccount.com, aud = Cloud project number).
 type GoogleChatChannel struct {
-	gateway      *Gateway
-	accessToken  string
-	refreshToken string
-	clientID     string
-	clientSecret string
-	spaceID      string
-	allowed      map[string]struct{}
-	allowAll     bool
-	client       *http.Client
-	tokenURL     string // tests override
-	apiBase      string // tests override (default googleChatAPI)
+	gateway       *Gateway
+	accessToken   string
+	refreshToken  string
+	clientID      string
+	clientSecret  string
+	spaceID       string
+	projectNumber string
+	access        Access
+	client        *http.Client
+	tokenURL      string // tests override
+	apiBase       string // tests override (default googleChatAPI)
+	allowJWKSNet  bool   // tests disable network JWKS fetches
+	now           func() time.Time
 
 	mu      sync.Mutex
 	running bool
 }
 
-// GoogleChatConfig configures a Google Chat adapter.
+// GoogleChatConfig configures a Google Chat adapter. SpaceID is scope only;
+// AllowIDs holds sender resource names (users/123...). ProjectNumber is the
+// Cloud project number the inbound JWT audience must equal.
 type GoogleChatConfig struct {
-	AccessToken  string
-	RefreshToken string
-	ClientID     string
-	ClientSecret string
-	SpaceID      string
-	AllowIDs     any
-	AllowAll     bool
+	AccessToken   string
+	RefreshToken  string
+	ClientID      string
+	ClientSecret  string
+	SpaceID       string
+	ProjectNumber string
+	AllowIDs      any
+	AllowAll      bool
 }
 
 // NewGoogleChat builds a Google Chat channel bound to a gateway hub.
 func NewGoogleChat(g *Gateway, cfg GoogleChatConfig) *GoogleChatChannel {
-	allowed := ParseIDs(cfg.AllowIDs)
 	spaceID := strings.TrimSpace(cfg.SpaceID)
+	scopes := []string{}
 	if spaceID != "" {
-		allowed[spaceID] = struct{}{}
+		bare := strings.TrimPrefix(spaceID, "spaces/")
+		scopes = append(scopes, bare, "spaces/"+bare)
 	}
 	return &GoogleChatChannel{
-		gateway:      g,
-		accessToken:  strings.TrimSpace(cfg.AccessToken),
-		refreshToken: strings.TrimSpace(cfg.RefreshToken),
-		clientID:     strings.TrimSpace(cfg.ClientID),
-		clientSecret: strings.TrimSpace(cfg.ClientSecret),
-		spaceID:      spaceID,
-		allowed:      allowed,
-		allowAll:     cfg.AllowAll,
-		client:       &http.Client{Timeout: 30 * time.Second},
-		tokenURL:     googleOAuthTokenURL,
+		gateway:       g,
+		accessToken:   strings.TrimSpace(cfg.AccessToken),
+		refreshToken:  strings.TrimSpace(cfg.RefreshToken),
+		clientID:      strings.TrimSpace(cfg.ClientID),
+		clientSecret:  strings.TrimSpace(cfg.ClientSecret),
+		spaceID:       spaceID,
+		projectNumber: strings.TrimSpace(cfg.ProjectNumber),
+		access:        NewAccess(cfg.AllowIDs, cfg.AllowAll, scopes...),
+		client:        &http.Client{Timeout: 30 * time.Second},
+		tokenURL:      googleOAuthTokenURL,
+		allowJWKSNet:  true,
+		now:           time.Now,
 	}
 }
 
@@ -75,9 +84,10 @@ func (c *GoogleChatChannel) Health() map[string]any {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return map[string]any{
-		"token_set":    strings.TrimSpace(c.accessToken) != "",
-		"refresh_set":  strings.TrimSpace(c.refreshToken) != "",
-		"oauth_client": strings.TrimSpace(c.clientID) != "" && strings.TrimSpace(c.clientSecret) != "",
+		"token_set":      strings.TrimSpace(c.accessToken) != "",
+		"refresh_set":    strings.TrimSpace(c.refreshToken) != "",
+		"oauth_client":   strings.TrimSpace(c.clientID) != "" && strings.TrimSpace(c.clientSecret) != "",
+		"project_number": c.projectNumber != "",
 	}
 }
 
@@ -183,6 +193,9 @@ func (c *GoogleChatChannel) Start(ctx context.Context) error {
 	} else {
 		log.Printf("google_chat: stub mode (no access_token)")
 	}
+	if c.projectNumber == "" {
+		log.Printf("google_chat: project_number not set; inbound webhooks will be rejected")
+	}
 	return nil
 }
 
@@ -253,25 +266,20 @@ func (c *GoogleChatChannel) Send(ctx context.Context, message, target string) (b
 	return status == 200 || status == 201, nil
 }
 
-// VerifyInboundAuth requires Bearer matching access_token when configured.
+// VerifyInboundAuth requires a Google-issued RS256 JWT whose audience is the
+// configured project number. There is no bypass.
 func (c *GoogleChatChannel) VerifyInboundAuth(authorization string) bool {
-	expected := c.currentAccessToken()
-	if expected == "" {
-		return false
-	}
 	auth := strings.TrimSpace(authorization)
 	if !strings.HasPrefix(strings.ToLower(auth), "bearer ") {
-		if envTruthy("REMEDY_GCHAT_ALLOW_NO_AUTH") {
-			return true
-		}
 		log.Printf("google_chat: webhook missing Bearer Authorization")
 		return false
 	}
-	presented := strings.TrimSpace(auth[7:])
-	if len(presented) != len(expected) {
+	if c.projectNumber == "" {
+		log.Printf("google_chat: webhook rejected: set google_chat.project_number to verify the Google JWT audience")
 		return false
 	}
-	return hmac.Equal([]byte(presented), []byte(expected))
+	token := strings.TrimSpace(auth[7:])
+	return VerifyGoogleChatJWT(token, c.projectNumber, c.now(), c.allowJWKSNet)
 }
 
 // HandleEvent processes a Chat app MESSAGE event.
@@ -300,14 +308,12 @@ func (c *GoogleChatChannel) HandleEvent(ctx context.Context, data map[string]any
 	if space == nil {
 		space, _ = msg["space"].(map[string]any)
 	}
-	if space == nil {
-		space = map[string]any{}
-	}
 	spaceName := anyString(space["name"])
 	if spaceName == "" {
-		spaceName = c.spaceID
+		log.Printf("google_chat: event without space rejected")
+		return false
 	}
-	spaceID := strings.ReplaceAll(spaceName, "spaces/", "")
+	spaceID := strings.TrimPrefix(spaceName, "spaces/")
 	sender, _ := msg["sender"].(map[string]any)
 	if sender == nil {
 		sender, _ = data["user"].(map[string]any)
@@ -315,37 +321,23 @@ func (c *GoogleChatChannel) HandleEvent(ctx context.Context, data map[string]any
 	if sender == nil {
 		sender = map[string]any{}
 	}
-	userName := anyString(sender["name"])
-	if userName == "" {
-		userName = anyString(sender["displayName"])
-	}
 	if anyString(sender["type"]) == "BOT" {
 		return false
 	}
-	if len(c.allowed) == 0 && !c.allowAll {
-		log.Printf("google_chat: ignore (empty allowlist, allow_all=false) space=%s", firstNonEmpty(spaceID, spaceName))
-		return false
-	}
-	if !IsAllowed(c.allowed, c.allowAll, spaceName, spaceID, userName) {
+	// Only the resource name is an identity. displayName is free text.
+	userName := anyString(sender["name"])
+	if ok, reason := c.access.Permit(userName, spaceName, spaceID); !ok {
+		logDeny(ChannelGoogleChat, reason, userName, spaceName)
+		c.gateway.recordDenied(ChannelGoogleChat, reason, userName, spaceName)
 		return false
 	}
 	chatID := spaceName
-	if chatID == "" {
-		chatID = spaceID
-	}
-	if chatID == "" {
-		chatID = "default"
-	}
-	sourceID := userName
-	if sourceID == "" {
-		sourceID = chatID
-	}
 	username := anyString(sender["displayName"])
 	ev := Event{
 		ID:        NewEventID(),
 		Kind:      EventMessage,
 		Channel:   ChannelGoogleChat,
-		SourceID:  sourceID,
+		SourceID:  userName,
 		SessionID: chatID,
 		Payload: map[string]any{
 			"message":    text,
@@ -364,13 +356,4 @@ func (c *GoogleChatChannel) HandleEvent(ctx context.Context, data map[string]any
 		_ = c.gateway.Emit(ctx, ev)
 	}
 	return true
-}
-
-func envTruthy(key string) bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
 }

@@ -1,7 +1,10 @@
 package gateway
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,14 +13,21 @@ import (
 	"time"
 )
 
-// StaleLockSeconds matches Python: heartbeat older than this may be reclaimed
-// when the OS exclusive lock is free.
+// StaleLockSeconds: a lock whose heartbeat is older than this is reclaimable
+// even when the recorded pid is still alive (a hung poller must not hold the
+// bot forever).
 const StaleLockSeconds = 90.0
 
 // processHolders prevents dual in-process long-pollers (flock is re-entrant).
 var processHolders sync.Map // path -> *PollLock
 
+// pidAliveFn is indirect so tests can simulate a live-but-hung holder.
+var pidAliveFn = pidAlive
+
 // PollLock is a non-blocking exclusive lock for one messenger channel poller.
+// The lock file is never unlinked after release: exclusivity comes from the
+// OS file lock, and a stable inode keeps flock semantics sound across
+// processes.
 type PollLock struct {
 	Path      string
 	Channel   string
@@ -32,12 +42,32 @@ type PollLock struct {
 
 // NewPollLock prepares a lock under ~/.remedy/locks/{channel}_getupdates.lock.
 func NewPollLock(home, channel string) *PollLock {
+	return NewPollLockForToken(home, channel, "")
+}
+
+// NewPollLockForToken scopes the lock to one bot identity so two bots of the
+// same kind (different tokens) may poll from the same home concurrently. The
+// file name carries a short hash of the token, never the token itself.
+func NewPollLockForToken(home, channel, token string) *PollLock {
 	ch := normalizeID(channel)
 	if ch == "" {
 		ch = "telegram"
 	}
-	path := filepath.Join(resolveHome(home), "locks", ch+"_getupdates.lock")
+	stem := ch
+	if tag := tokenTag(token); tag != "" {
+		stem = ch + "_" + tag
+	}
+	path := filepath.Join(resolveHome(home), "locks", stem+"_getupdates.lock")
 	return &PollLock{Path: path, Channel: ch}
+}
+
+func tokenTag(token string) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:4])
 }
 
 func (l *PollLock) resolveKey() string {
@@ -74,15 +104,18 @@ func (l *PollLock) TryAcquire() bool {
 	}
 
 	foreignPID := 0
-	foreignAlive := false
 	if raw, err := os.ReadFile(l.Path); err == nil {
 		if pid, ts, ok := parseLockPayload(string(raw)); ok && pid != os.Getpid() {
 			foreignPID = pid
-			foreignAlive = pidAlive(pid)
+			alive := pidAliveFn(pid)
 			staleHB := ts > 0 && time.Since(time.Unix(int64(ts), 0)).Seconds() > StaleLockSeconds
-			if !foreignAlive {
-				_ = staleHB
+			if !alive || staleHB {
+				// Dead holder, or a live holder that stopped heartbeating:
+				// drop the stale file so a fresh inode can be locked. When
+				// the holder still pins the file the flock below fails and
+				// the caller retries later.
 				_ = os.Remove(l.Path)
+				log.Printf("%s: reclaiming poll lock (pid=%d alive=%v stale_heartbeat=%v)", l.Channel, pid, alive, staleHB)
 			}
 		}
 	}
@@ -93,11 +126,10 @@ func (l *PollLock) TryAcquire() bool {
 	}
 	if err := tryLockFile(fh); err != nil {
 		_ = fh.Close()
-		_ = foreignAlive
-		_ = foreignPID
 		return false
 	}
 	l.fh = fh
+	l.closed = false
 	if err := l.writePayloadLocked(); err != nil {
 		_ = unlockFile(fh)
 		_ = fh.Close()
@@ -105,7 +137,7 @@ func (l *PollLock) TryAcquire() bool {
 		return false
 	}
 	l.Held = true
-	l.Reclaimed = foreignPID > 0 && foreignPID != os.Getpid()
+	l.Reclaimed = foreignPID > 0
 	processHolders.Store(key, l)
 	return true
 }
@@ -126,7 +158,7 @@ func (l *PollLock) Heartbeat() {
 	_ = l.writePayloadLocked()
 }
 
-// Release drops the exclusive lock and removes our payload file when we own it.
+// Release drops the exclusive lock. The file stays on disk (see PollLock).
 func (l *PollLock) Release() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -138,11 +170,6 @@ func (l *PollLock) Release() {
 		_ = l.fh.Close()
 		l.fh = nil
 		l.closed = true
-	}
-	if raw, err := os.ReadFile(l.Path); err == nil {
-		if strings.HasPrefix(strings.TrimSpace(string(raw)), strconv.Itoa(os.Getpid())) {
-			_ = os.Remove(l.Path)
-		}
 	}
 	l.Held = false
 	l.Reclaimed = false

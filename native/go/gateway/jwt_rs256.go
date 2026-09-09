@@ -16,34 +16,76 @@ import (
 	"time"
 )
 
-// Bot Framework / Azure AD OpenID metadata (JWKS discovery).
-var defaultOpenIDURLs = []string{
-	"https://login.botframework.com/v1/.well-known/openidconfiguration",
-	"https://login.microsoftonline.com/botframework.com/v2.0/.well-known/openid-configuration",
-}
-
-var jwksHosts = map[string]struct{}{
-	"login.botframework.com":    {},
-	"login.microsoftonline.com": {},
-	"login.microsoft.com":       {},
-	"login.windows.net":         {},
+// jwksSource is one issuer family with its own key cache. Keys from one
+// source are never used to verify tokens attributed to another.
+type jwksSource struct {
+	name string
+	// openID metadata documents whose jwks_uri is followed (optional).
+	openID []string
+	// direct JWKS documents fetched after metadata discovery.
+	direct []string
+	// hosts allowed for any JWKS / metadata fetch of this source.
+	hosts       map[string]struct{}
+	hostSuffix  []string
+	mu          sync.Mutex
+	keys        map[string]*rsa.PublicKey
+	fetchedAt   time.Time
+	logPrefix   string
+	verifyLabel string
 }
 
 var (
-	jwksMu        sync.Mutex
-	jwksKeys      = map[string]*rsa.PublicKey{}
-	jwksFetchedAt time.Time
-	jwksTTL       = 6 * time.Hour
-	jwksTestKeys  = map[string]*rsa.PublicKey{}
-	jwksHTTP      = &http.Client{Timeout: 4 * time.Second}
+	// teamsJWKS covers Bot Framework / Azure AD issued tokens.
+	teamsJWKS = &jwksSource{
+		name: "teams",
+		openID: []string{
+			"https://login.botframework.com/v1/.well-known/openidconfiguration",
+			"https://login.microsoftonline.com/botframework.com/v2.0/.well-known/openid-configuration",
+		},
+		direct: []string{
+			"https://login.botframework.com/v1/.well-known/keys",
+			"https://login.microsoftonline.com/common/discovery/v2.0/keys",
+		},
+		hosts: map[string]struct{}{
+			"login.botframework.com":    {},
+			"login.microsoftonline.com": {},
+			"login.microsoft.com":       {},
+			"login.windows.net":         {},
+		},
+		hostSuffix: []string{".microsoftonline.com", ".windows.net"},
+		keys:       map[string]*rsa.PublicKey{},
+		logPrefix:  "teams",
+	}
+
+	// googleChatJWKS covers tokens minted by the Google Chat service account.
+	googleChatJWKS = &jwksSource{
+		name:      "google_chat",
+		direct:    []string{googleChatJWKSURL},
+		hosts:     map[string]struct{}{"www.googleapis.com": {}},
+		keys:      map[string]*rsa.PublicKey{},
+		logPrefix: "google_chat",
+	}
+
+	jwksTTL  = 6 * time.Hour
+	jwksHTTP = &http.Client{Timeout: 4 * time.Second}
+
+	jwksTestMu   sync.Mutex
+	jwksTestKeys = map[string]*rsa.PublicKey{}
 )
+
+// GoogleChatIssuer is the service account Google Chat signs webhook JWTs with.
+const GoogleChatIssuer = "chat@system.gserviceaccount.com"
+
+const googleChatJWKSURL = "https://www.googleapis.com/service_accounts/v1/jwk/" + GoogleChatIssuer
 
 // ClearJWKSCache drops cached network keys (keeps test injects).
 func ClearJWKSCache() {
-	jwksMu.Lock()
-	defer jwksMu.Unlock()
-	jwksKeys = map[string]*rsa.PublicKey{}
-	jwksFetchedAt = time.Time{}
+	for _, src := range []*jwksSource{teamsJWKS, googleChatJWKS} {
+		src.mu.Lock()
+		src.keys = map[string]*rsa.PublicKey{}
+		src.fetchedAt = time.Time{}
+		src.mu.Unlock()
+	}
 }
 
 // InjectTestRSAKey registers a public key for unit tests (no network).
@@ -63,15 +105,15 @@ func InjectTestRSAKey(kid, nB64, eB64 string) {
 		N: new(big.Int).SetBytes(nBytes),
 		E: int(new(big.Int).SetBytes(eBytes).Int64()),
 	}
-	jwksMu.Lock()
+	jwksTestMu.Lock()
 	jwksTestKeys[kid] = pub
-	jwksMu.Unlock()
+	jwksTestMu.Unlock()
 }
 
 // ClearTestRSAKeys removes injected test keys.
 func ClearTestRSAKeys() {
-	jwksMu.Lock()
-	defer jwksMu.Unlock()
+	jwksTestMu.Lock()
+	defer jwksTestMu.Unlock()
 	jwksTestKeys = map[string]*rsa.PublicKey{}
 }
 
@@ -119,7 +161,7 @@ func decodeJWTHeader(token string) map[string]any {
 	return data
 }
 
-func jwksURLAllowed(raw string) bool {
+func (src *jwksSource) urlAllowed(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || !strings.EqualFold(u.Scheme, "https") {
 		return false
@@ -128,15 +170,20 @@ func jwksURLAllowed(raw string) bool {
 	if host == "" {
 		return false
 	}
-	if _, ok := jwksHosts[host]; ok {
+	if _, ok := src.hosts[host]; ok {
 		return true
 	}
-	return strings.HasSuffix(host, ".microsoftonline.com") || strings.HasSuffix(host, ".windows.net")
+	for _, suf := range src.hostSuffix {
+		if strings.HasSuffix(host, suf) {
+			return true
+		}
+	}
+	return false
 }
 
-func httpGetJSON(rawURL string) map[string]any {
-	if !jwksURLAllowed(rawURL) {
-		log.Printf("teams: JWKS URL refused (host not allowlisted): %s", trimRunes(rawURL, 80))
+func (src *jwksSource) getJSON(rawURL string) map[string]any {
+	if !src.urlAllowed(rawURL) {
+		log.Printf("%s: JWKS URL refused (host not allowlisted): %s", src.logPrefix, trimRunes(rawURL, 80))
 		return nil
 	}
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
@@ -144,10 +191,10 @@ func httpGetJSON(rawURL string) map[string]any {
 		return nil
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "RemedyAI-TeamsJWT/1")
+	req.Header.Set("User-Agent", "RemedyAI-JWT/1")
 	resp, err := jwksHTTP.Do(req)
 	if err != nil {
-		log.Printf("teams: JWKS fetch failed %s: %v", trimRunes(rawURL, 80), err)
+		log.Printf("%s: JWKS fetch failed %s: %v", src.logPrefix, trimRunes(rawURL, 80), err)
 		return nil
 	}
 	defer resp.Body.Close()
@@ -162,7 +209,8 @@ func httpGetJSON(rawURL string) map[string]any {
 	return data
 }
 
-func ingestJWKSet(doc map[string]any) int {
+// ingestJWKSet parses RSA keys from a JWK set into dst.
+func ingestJWKSet(dst map[string]*rsa.PublicKey, doc map[string]any) int {
 	keys, _ := doc["keys"].([]any)
 	nAdded := 0
 	for _, raw := range keys {
@@ -190,7 +238,7 @@ func ingestJWKSet(doc map[string]any) int {
 		if err != nil {
 			continue
 		}
-		jwksKeys[kid] = &rsa.PublicKey{
+		dst[kid] = &rsa.PublicKey{
 			N: new(big.Int).SetBytes(nBytes),
 			E: int(new(big.Int).SetBytes(eBytes).Int64()),
 		}
@@ -199,63 +247,105 @@ func ingestJWKSet(doc map[string]any) int {
 	return nAdded
 }
 
-// RefreshJWKS fetches Bot Framework / Azure AD JWKS into the cache.
-func RefreshJWKS(force bool) bool {
+// refresh fetches the JWKS documents for this source into its cache.
+func (src *jwksSource) refresh(force bool) bool {
 	now := time.Now()
-	jwksMu.Lock()
-	if !force && len(jwksKeys) > 0 && now.Sub(jwksFetchedAt) < jwksTTL {
-		jwksMu.Unlock()
+	src.mu.Lock()
+	if !force && len(src.keys) > 0 && now.Sub(src.fetchedAt) < jwksTTL {
+		src.mu.Unlock()
 		return true
 	}
-	jwksMu.Unlock()
+	src.mu.Unlock()
 
-	jwksURIs := make([]string, 0, 8)
-	for _, metaURL := range defaultOpenIDURLs {
-		meta := httpGetJSON(metaURL)
+	uris := make([]string, 0, 8)
+	for _, metaURL := range src.openID {
+		meta := src.getJSON(metaURL)
 		if meta == nil {
 			continue
 		}
 		juri := strings.TrimSpace(anyString(meta["jwks_uri"]))
-		if jwksURLAllowed(juri) {
-			jwksURIs = append(jwksURIs, juri)
+		if src.urlAllowed(juri) {
+			uris = append(uris, juri)
 		}
 	}
-	jwksURIs = append(jwksURIs,
-		"https://login.botframework.com/v1/.well-known/keys",
-		"https://login.microsoftonline.com/common/discovery/v2.0/keys",
-	)
+	uris = append(uris, src.direct...)
 	seen := map[string]struct{}{}
-	docs := make([]map[string]any, 0, len(jwksURIs))
-	for _, uri := range jwksURIs {
+	docs := make([]map[string]any, 0, len(uris))
+	for _, uri := range uris {
 		if _, ok := seen[uri]; ok {
 			continue
 		}
 		seen[uri] = struct{}{}
-		if doc := httpGetJSON(uri); doc != nil {
+		if doc := src.getJSON(uri); doc != nil {
 			docs = append(docs, doc)
 		}
 	}
-	jwksMu.Lock()
-	defer jwksMu.Unlock()
+	src.mu.Lock()
+	defer src.mu.Unlock()
 	total := 0
 	for _, doc := range docs {
-		total += ingestJWKSet(doc)
+		total += ingestJWKSet(src.keys, doc)
 	}
 	if total > 0 {
-		jwksFetchedAt = time.Now()
-		log.Printf("teams: JWKS loaded: %d RSA keys", len(jwksKeys))
+		src.fetchedAt = time.Now()
+		log.Printf("%s: JWKS loaded: %d RSA keys", src.logPrefix, len(src.keys))
 		return true
 	}
-	return len(jwksKeys) > 0
+	return len(src.keys) > 0
 }
 
-func lookupJWKSKey(kid string) *rsa.PublicKey {
-	jwksMu.Lock()
-	defer jwksMu.Unlock()
+func (src *jwksSource) lookup(kid string) *rsa.PublicKey {
+	jwksTestMu.Lock()
 	if k, ok := jwksTestKeys[kid]; ok {
+		jwksTestMu.Unlock()
 		return k
 	}
-	return jwksKeys[kid]
+	jwksTestMu.Unlock()
+	src.mu.Lock()
+	defer src.mu.Unlock()
+	return src.keys[kid]
+}
+
+// verifyToken checks alg/kid, resolves the key (network when allowed) and
+// verifies the RS256 signature.
+func (src *jwksSource) verifyToken(token string, allowNetwork bool) bool {
+	header := decodeJWTHeader(token)
+	if header == nil {
+		return false
+	}
+	alg := strings.ToUpper(anyString(header["alg"]))
+	if alg != "RS256" {
+		log.Printf("%s: JWT alg not RS256: %s", src.logPrefix, alg)
+		return false
+	}
+	kid := strings.TrimSpace(anyString(header["kid"]))
+	if kid == "" {
+		log.Printf("%s: JWT missing kid", src.logPrefix)
+		return false
+	}
+	key := src.lookup(kid)
+	if key == nil && allowNetwork {
+		src.refresh(false)
+		key = src.lookup(kid)
+		if key == nil {
+			src.refresh(true)
+			key = src.lookup(kid)
+		}
+	}
+	if key == nil {
+		log.Printf("%s: JWT kid not in JWKS: %s", src.logPrefix, trimRunes(kid, 40))
+		return false
+	}
+	if !verifyRS256(token, key) {
+		log.Printf("%s: JWT RS256 signature invalid", src.logPrefix)
+		return false
+	}
+	return true
+}
+
+// RefreshJWKS fetches Bot Framework / Azure AD JWKS into the cache.
+func RefreshJWKS(force bool) bool {
+	return teamsJWKS.refresh(force)
 }
 
 func verifyRS256(token string, pub *rsa.PublicKey) bool {
@@ -272,38 +362,55 @@ func verifyRS256(token string, pub *rsa.PublicKey) bool {
 	return rsa.VerifyPKCS1v15(pub, crypto.SHA256, sum[:], sig) == nil
 }
 
-// VerifyJWTRS256JWKS verifies a JWT with RS256 against cached/fetched JWKS.
+// VerifyJWTRS256JWKS verifies a Bot Framework JWT with RS256 against the
+// Teams JWKS cache (network fetch when allowNetwork).
 func VerifyJWTRS256JWKS(token string, allowNetwork bool) bool {
-	header := decodeJWTHeader(token)
-	if header == nil {
+	return teamsJWKS.verifyToken(token, allowNetwork)
+}
+
+// VerifyGoogleChatJWT verifies a Google Chat webhook bearer token:
+// RS256 signature against the chat service account JWKS, iss equal to that
+// account, aud equal to the configured Cloud project number, and exp in the
+// future (60 s skew). Fail closed on any missing claim.
+func VerifyGoogleChatJWT(token, projectNumber string, now time.Time, allowNetwork bool) bool {
+	projectNumber = strings.TrimSpace(projectNumber)
+	if projectNumber == "" || strings.TrimSpace(token) == "" {
 		return false
 	}
-	alg := strings.ToUpper(anyString(header["alg"]))
-	if alg != "RS256" {
-		log.Printf("teams: JWT alg not RS256: %s", alg)
+	claims := DecodeJWTPayloadUnverified(token)
+	if claims == nil {
 		return false
 	}
-	kid := strings.TrimSpace(anyString(header["kid"]))
-	if kid == "" {
-		log.Printf("teams: JWT missing kid")
+	if iss := strings.TrimSpace(anyString(claims["iss"])); iss != GoogleChatIssuer {
+		log.Printf("google_chat: JWT iss rejected: %s", trimRunes(iss, 80))
 		return false
 	}
-	key := lookupJWKSKey(kid)
-	if key == nil && allowNetwork {
-		RefreshJWKS(false)
-		key = lookupJWKSKey(kid)
-		if key == nil {
-			RefreshJWKS(true)
-			key = lookupJWKSKey(kid)
+	audOK := false
+	switch v := claims["aud"].(type) {
+	case string:
+		audOK = strings.TrimSpace(v) == projectNumber
+	case []any:
+		for _, a := range v {
+			if anyString(a) == projectNumber {
+				audOK = true
+				break
+			}
 		}
 	}
-	if key == nil {
-		log.Printf("teams: JWT kid not in JWKS: %s", trimRunes(kid, 40))
+	if !audOK {
+		log.Printf("google_chat: JWT aud does not match project_number")
 		return false
 	}
-	if !verifyRS256(token, key) {
-		log.Printf("teams: JWT RS256 signature invalid")
+	if now.IsZero() {
+		now = time.Now()
+	}
+	exp, ok := anyFloat(claims["exp"])
+	if !ok || float64(now.Unix()) >= exp+60 {
+		log.Printf("google_chat: JWT expired or missing exp")
 		return false
 	}
-	return true
+	if nbf, ok := anyFloat(claims["nbf"]); ok && float64(now.Unix())+60 < nbf {
+		return false
+	}
+	return googleChatJWKS.verifyToken(token, allowNetwork)
 }
