@@ -266,7 +266,7 @@ func TestStartPairEmitsTailscaleLine(t *testing.T) {
 	home := pairHome(t)
 	qr, err := StartPair(PairStartOpts{
 		Loopback:  true,
-		BindHost:  "192.168.0.46",
+		BindHost:  "192.168.1.50",
 		BindPort:  7401,
 		Tailscale: "100.64.1.2",
 		Home:      home,
@@ -284,7 +284,7 @@ func TestStartPairOmitsBadTailscale(t *testing.T) {
 	for _, ts := range []string{"0.0.0.0", "not-an-ip"} {
 		qr, err := StartPair(PairStartOpts{
 			Loopback:  true,
-			BindHost:  "192.168.0.46",
+			BindHost:  "192.168.1.50",
 			BindPort:  7401,
 			Tailscale: ts,
 			Home:      home,
