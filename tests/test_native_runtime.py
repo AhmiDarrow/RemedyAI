@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -173,8 +175,20 @@ def test_logical_cpu_count_uses_compatibility_by_default(monkeypatch: pytest.Mon
 # --- remedy_core loader (ABI 2) ------------------------------------------
 
 
-def test_the_python_side_requires_abi_five_from_the_zig_core():
-    assert native_runtime._ABI_VERSION == 5
+def test_the_python_side_requires_the_shipped_zig_abi():
+    """The Python pin must equal the header the Zig core is built from.
+
+    Four places pin this number (Zig root.zig, remedy_core.h, Go core, this
+    module). Comparing against the header rather than a literal means a bump
+    fails loudly in one place instead of silently skipping every
+    library-backed test.
+    """
+    header = Path(__file__).resolve().parents[1] / "native" / "zig" / "include" / "remedy_core.h"
+    if header.exists():
+        text = header.read_text(encoding="utf-8")
+        match = re.search(r"#define\s+REMEDY_CORE_ABI_VERSION\s+(\d+)u?", text)
+        assert match, "REMEDY_CORE_ABI_VERSION not found in remedy_core.h"
+        assert int(match.group(1)) == native_runtime._ABI_VERSION
     # The Go probe contract is a separate version and did not move.
     assert native_runtime._TOOL_ABI_VERSION == 1
     assert native_runtime._PROTOCOL_VERSION == 1
@@ -289,5 +303,7 @@ def test_core_library_loads_the_built_core_when_present(
     if path is None:
         pytest.skip("remedy_core is not built in this checkout")
     library = native_runtime.core_library()
-    assert int(library.remedy_core_abi_version()) == 5, f"loaded from {path}"
+    assert int(library.remedy_core_abi_version()) == native_runtime._ABI_VERSION, (
+        f"loaded from {path}"
+    )
     assert native_runtime.core_library() is library

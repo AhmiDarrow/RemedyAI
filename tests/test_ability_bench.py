@@ -168,7 +168,6 @@ def test_sse_tool_round_still_emits_thinking_when_content_is_buffered():
     assert 0 in state.tool_call_acc
 
 
-@pytest.mark.asyncio
 def test_hover_enqueue_opens_the_browser_rail(tmp_path):
     from remedy.core.computer.host_bridge import ComputerHostBridge
 

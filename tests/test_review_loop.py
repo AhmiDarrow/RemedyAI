@@ -177,7 +177,11 @@ def test_normal_build_still_force_implements() -> None:
     st.explore_steps = 5
     n = next_machine_nudge(st)
     assert n is not None
-    assert "FORCE IMPLEMENT" in n.get("content", "")
+    # Behaviour, not the retired ALL-CAPS wording: the nudge must stop the
+    # scouting and name a tool that changes the tree.
+    nudge_text = n.get("content", "")
+    assert "scouting" in nudge_text.lower()
+    assert "workspace.write" in nudge_text or "workspace.edit" in nudge_text
 
 
 # --- loop layer (epoch wall) ----------------------------------------------

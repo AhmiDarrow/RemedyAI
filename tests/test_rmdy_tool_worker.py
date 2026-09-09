@@ -580,9 +580,14 @@ def test_prompt_slim_epoch_updates_brief(
     )
     assert out.get("ok") is True
     assert isinstance(out.get("system"), str) and out["system"].strip()
-    assert "Epoch 2" in str(out.get("text") or out.get("brief") or out["system"]) or int(
-        (out.get("meta") or {}).get("compress_count") or 0
-    ) >= 1
+    # The epoch checkpoint is appended to the system block (the Session Brief
+    # lives there now); the assistant tail is left alone.
+    combined = " ".join(
+        str(out.get(key) or "") for key in ("text", "brief", "system")
+    )
+    assert "Epoch 2" in combined
+    # A soft epoch counts as a compaction pass for the owner-facing counter.
+    assert int((out.get("meta") or {}).get("compress_count") or 0) >= 1
 
 
 def test_prompt_should_continue_rearms_after_tools(

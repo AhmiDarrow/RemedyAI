@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -125,6 +126,49 @@ def test_release_builds_both_desktop_operating_systems_and_native_cores() -> Non
     assert "libremedy_core.so" in linux
     assert "check_remedy_core_isa.py" in linux
     assert "tauri build --bundles deb,appimage" in linux
+
+
+def test_release_ships_the_worker_dependency_directory() -> None:
+    """A packaged worker runs a stdlib-only CPython.
+
+    The zipapp carries src/remedy; pydantic/PyYAML cannot live inside it
+    (compiled extensions) so they are staged beside it and bundled as a Tauri
+    resource, exactly like remedy_core.dll.
+    """
+    import json
+
+    jobs = _workflow_jobs("desktop-release.yml")
+    for runtime_job, tauri_job in (
+        ("build-runtime", "build-tauri"),
+        ("build-runtime-linux", "build-tauri-linux"),
+    ):
+        job = jobs[runtime_job]
+        runs = _run_commands(job)
+        assert "build_rmdy_worker.py" in runs, f"{runtime_job} must build the worker zipapp"
+        assert "--deps-out desktop/bin/rmdy-deps" in runs, (
+            f"{runtime_job} must stage the worker dependency directory"
+        )
+        upload = _uses_step(job, "actions/upload-artifact")
+        paths = str((upload.get("with") or {}).get("path", ""))
+        assert "desktop/bin/rmdy_tool_worker.pyz" in paths
+        assert "desktop/bin/rmdy-deps/**" in paths, (
+            f"{runtime_job} must upload the dependency directory for the bundle job"
+        )
+        needs = jobs[tauri_job].get("needs")  # type: ignore[union-attr]
+        needs = [needs] if isinstance(needs, str) else needs
+        assert needs and runtime_job in needs, (
+            f"{tauri_job} must consume {runtime_job}: deps are staged before bundling"
+        )
+
+    for conf in ("tauri.windows.conf.json", "tauri.linux.conf.json"):
+        payload = json.loads(
+            (ROOT / "desktop" / "src-tauri" / conf).read_text(encoding="utf-8")
+        )
+        resources = payload["bundle"]["resources"]
+        assert resources["../bin/rmdy_tool_worker.pyz"] == "rmdy_tool_worker.pyz"
+        assert resources["../bin/rmdy-deps"] == "rmdy-deps", (
+            f"{conf} must bundle the worker dependency directory beside the zipapp"
+        )
 
 
 def test_zig_build_defaults_to_baseline_cpu() -> None:
@@ -410,7 +454,19 @@ def test_prepush_python_lane_consumes_the_native_lane_core() -> None:
     assert linux.index(prepush.WSL_ZIG_BUILD) < linux.index(prepush.WSL_GO_TEST)
     assert linux.index(prepush.WSL_GO_TEST) < linux.index(prepush.WSL_PYTEST)
     assert prepush.WSL_NATIVE_CORE_LIB.startswith("/tmp/")
-    assert prepush.REQUIRED_NATIVE_ABI == 5
+    # One source of truth: the C header. A bump there must not leave the gate
+    # (or the Python/Go loaders) asserting a stale number.
+    header = (ROOT / "native" / "zig" / "include" / "remedy_core.h").read_text("utf-8")
+    header_abi = re.search(r"^#define\s+REMEDY_CORE_ABI_VERSION\s+(\d+)u?\s*$", header, re.M)
+    assert header_abi, "remedy_core.h must define REMEDY_CORE_ABI_VERSION"
+    assert int(header_abi.group(1)) == prepush.REQUIRED_NATIVE_ABI
+    assert prepush.required_native_abi() == prepush.REQUIRED_NATIVE_ABI
+
+    from remedy.runtime import native_runtime
+
+    assert native_runtime._ABI_VERSION == prepush.REQUIRED_NATIVE_ABI, (
+        "the Python loader and the pre-push gate must pin the same native ABI"
+    )
     if prepush.IS_WINDOWS and prepush.shutil.which("wsl"):
         build = prepush._wsl_zig_build_command()
         assert build and "zig build -Doptimize=ReleaseSafe" in build
