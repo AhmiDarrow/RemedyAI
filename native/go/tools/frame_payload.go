@@ -9,11 +9,21 @@ import (
 // Wire payloads for KindToolRequest / KindToolResult on RMDY frames.
 // Shared by the Go registry executor and the Python tool worker.
 
+// GoBoundField marks a request whose path-binding inputs (home_dir,
+// workspace_root, project_path) were set by the Go runtime rather than the
+// model. The Python worker ignores those keys unless the flag is present —
+// either here on the envelope or inside the input object (which is where
+// httpapi's injection helper sets it). Go must delete any model-supplied
+// copy before setting it.
+const GoBoundField = "_go_bound"
+
 type WireRequest struct {
 	ToolID          string          `json:"tool_id"`
 	Version         uint32          `json:"version"`
 	Input           json.RawMessage `json:"input"`
 	CapabilityToken []byte          `json:"capability_token,omitempty"`
+	// GoBound vouches for the path-binding keys in Input (see GoBoundField).
+	GoBound bool `json:"_go_bound,omitempty"`
 }
 
 type WireResult struct {

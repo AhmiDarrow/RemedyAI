@@ -114,28 +114,52 @@ func main() {
 		// worker, dial FrameCaller, AttachPythonWorker. Fail closed — never
 		// serve forever with only Go demo builtins pretending product tools.
 		// Same session hosts voice/vision handlers (forever-Python ML lanes).
+		//
+		// The supervisor respawns a crashed worker (backoff 1 s → 30 s, five
+		// restarts per ten minutes) and swaps the ipc.Client behind one
+		// LiveCaller, so registered tools follow the new process.
 		cwd, _ := os.Getwd()
-		session, err := workers.StartRMDYToolWorker(ctx, workers.RMDYToolOptions{
+		opts := workers.RMDYToolOptions{
 			HomeDir: home,
 			Cwd:     cwd,
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "remedy-runtime: RMDY tool worker required: %v\n", err)
-			os.Exit(1)
 		}
-		defer func() { _ = session.Close() }()
-		if err := cognition.AttachPythonWorker(session.Client); err != nil {
-			_ = session.Close()
+		var supervisor *workers.Supervisor
+		if workers.PythonWorkerNeedsDownload() {
+			// The only interpreter is the managed CPython download. Bind HTTP
+			// first so the Desktop connects; /api/status reports
+			// tools_python=downloading|ready|failed (workers.ToolsPythonStatus)
+			// and tool calls fail with a clear error until the worker attaches.
+			fmt.Fprintln(os.Stderr, "remedy-runtime: no local Python; downloading managed CPython in the background")
+			supervisor = workers.StartSupervisedRMDYToolWorkerAsync(ctx, opts, func(err error) {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "remedy-runtime: RMDY tool worker attach failed after download: %v\n", err)
+				}
+			})
+		} else {
+			var err error
+			supervisor, err = workers.StartSupervisedRMDYToolWorker(ctx, opts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "remedy-runtime: RMDY tool worker required: %v\n", err)
+				os.Exit(1)
+			}
+		}
+		defer func() { _ = supervisor.Close() }()
+		caller := supervisor.Caller()
+		if err := cognition.AttachPythonWorker(caller); err != nil {
+			_ = supervisor.Close()
 			fmt.Fprintf(os.Stderr, "remedy-runtime: AttachPythonWorker failed: %v\n", err)
 			os.Exit(1)
 		}
-		voiceWorker, visionWorker, err = httpapi.AttachMLWorkers(session.Client)
+		var err error
+		voiceWorker, visionWorker, err = httpapi.AttachMLWorkers(caller)
 		if err != nil {
-			_ = session.Close()
+			_ = supervisor.Close()
 			fmt.Fprintf(os.Stderr, "remedy-runtime: voice/vision workers required: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Fprintf(os.Stderr, "remedy-runtime: RMDY tool worker attached (pid=%d endpoint=%s; voice+vision)\n", session.PID, session.Endpoint)
+		if session := supervisor.Session(); session != nil {
+			fmt.Fprintf(os.Stderr, "remedy-runtime: RMDY tool worker attached (pid=%d endpoint=%s; voice+vision)\n", session.PID, session.Endpoint)
+		}
 		runner = cognition
 	}
 

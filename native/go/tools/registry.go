@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -51,6 +53,9 @@ type Descriptor struct {
 	Permissions  []string        `json:"permissions"`
 	InputSchema  json.RawMessage `json:"input_schema"`
 	OutputSchema json.RawMessage `json:"output_schema"`
+	// Deadline bounds one Execute of this tool. Zero means the executor owns
+	// its own timeout (shell.exec) or no bound was assigned.
+	Deadline time.Duration `json:"deadline_ns,omitempty"`
 }
 
 type Request struct {
@@ -59,9 +64,21 @@ type Request struct {
 	Input           json.RawMessage
 	CapabilityToken []byte
 }
+
+// ImageResult is a binary image a tool produced alongside its JSON output.
+// The runtime turns it into a transcript image block. It is deliberately not
+// base64 inside Output: the model would then pay for the same pixels twice,
+// once as an image and once as a wall of text it cannot read.
+type ImageResult struct {
+	MediaType string
+	Data      []byte
+}
+
 type Result struct {
 	Output   json.RawMessage
 	Evidence []byte
+	// Images carries non-text results (screenshot, read of an image file).
+	Images []ImageResult
 }
 type Executor interface {
 	Execute(context.Context, Request) (Result, error)
@@ -142,6 +159,44 @@ func (r *Registry) Register(descriptor Descriptor, executor Executor) error {
 	return nil
 }
 
+// SetDeadline assigns the per-Execute deadline of a registered tool version.
+// Callers that build a registry (NewDefaultToolRegistry) apply their defaults
+// here after registration so executors keep declaring only what they know.
+func (r *Registry) SetDeadline(id string, version uint32, deadline time.Duration) error {
+	if deadline < 0 {
+		return fmt.Errorf("%w: negative deadline", ErrInvalidDescriptor)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k := key{id, version}
+	tool, ok := r.tools[k]
+	if !ok {
+		return ErrToolNotFound
+	}
+	tool.descriptor.Deadline = deadline
+	r.tools[k] = tool
+	return nil
+}
+
+// SetDefaultDeadlines assigns rule(descriptor) to every registered version
+// that has no Deadline yet. Descriptors that declared their own keep it.
+func (r *Registry) SetDefaultDeadlines(rule func(Descriptor) time.Duration) {
+	if rule == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for k, tool := range r.tools {
+		if tool.descriptor.Deadline != 0 {
+			continue
+		}
+		if d := rule(cloneDescriptor(tool.descriptor)); d > 0 {
+			tool.descriptor.Deadline = d
+			r.tools[k] = tool
+		}
+	}
+}
+
 func (r *Registry) Resolve(id string, version uint32) (Descriptor, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -196,8 +251,11 @@ func (r *Registry) Execute(ctx context.Context, request Request) (Result, error)
 	descriptor := cloneDescriptor(tool.descriptor)
 	execRequest := cloneRequest(request)
 	input, err := decodeJSON(execRequest.Input)
-	if err != nil || tool.input.Validate(input) != nil {
-		return Result{}, ErrInvalidInput
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+	if verr := tool.input.Validate(input); verr != nil {
+		return Result{}, fmt.Errorf("%w: %v", ErrInvalidInput, verr)
 	}
 	protected := descriptor.Risk != RiskReadOnly || len(descriptor.Capabilities) != 0 || len(descriptor.Permissions) != 0
 	if protected {
@@ -214,8 +272,15 @@ func (r *Registry) Execute(ctx context.Context, request Request) (Result, error)
 		return result, err
 	}
 	output, err := decodeJSON(result.Output)
-	if err != nil || tool.output.Validate(output) != nil {
-		return Result{}, ErrInvalidOutput
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %v", ErrInvalidOutput, err)
+	}
+	if verr := tool.output.Validate(output); verr != nil {
+		// A successful execution already happened (side effects included);
+		// dropping its payload would hide real work from the model. Surface
+		// the contract drift in the log and hand the payload through.
+		slog.Warn("tool output failed schema validation",
+			"tool", descriptor.ID, "version", descriptor.Version, "error", verr.Error())
 	}
 	return result, nil
 }

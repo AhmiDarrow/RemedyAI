@@ -19,8 +19,8 @@ import (
 
 // Pinned python-build-standalone (same release as remedy.voice.runtime).
 const (
-	pbsTag = "20260814"
-	pbsPy  = "3.12.14"
+	pbsTag  = "20260814"
+	pbsPy   = "3.12.14"
 	pbsBase = "https://github.com/astral-sh/python-build-standalone/releases/download/"
 )
 
@@ -264,13 +264,13 @@ func pathUnderManaged(path, root string) bool {
 
 func writeManagedPythonMarker(runtimeDir, triple string) error {
 	marker := map[string]any{
-		"ok":      true,
-		"python":  pbsPy,
-		"tag":     pbsTag,
-		"triple":  triple,
-		"source":  "rmdy-ensure",
-		"at":      time.Now().UTC().Format(time.RFC3339),
-		"packs":   map[string]any{},
+		"ok":     true,
+		"python": pbsPy,
+		"tag":    pbsTag,
+		"triple": triple,
+		"source": "rmdy-ensure",
+		"at":     time.Now().UTC().Format(time.RFC3339),
+		"packs":  map[string]any{},
 	}
 	raw, err := json.MarshalIndent(marker, "", "  ")
 	if err != nil {

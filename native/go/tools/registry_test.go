@@ -39,12 +39,18 @@ func TestRegistryValidatesInputAndOutput(t *testing.T) {
 	if _, err := registry.Execute(context.Background(), Request{ToolID: "filesystem.read", Version: 1, Input: json.RawMessage(`{"path":"x"} {"path":"y"}`), CapabilityToken: []byte("valid-token")}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("trailing input = %v", err)
 	}
+	// An output-schema miss is logged, never fatal: a handler that adds a key
+	// must not discard work the tool actually did.
 	bad := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error { return nil }))
 	_ = bad.Register(descriptor(1, RuntimeGo), ExecutorFunc(func(context.Context, Request) (Result, error) {
 		return Result{Output: json.RawMessage(`{"wrong":true}`)}, nil
 	}))
-	if _, err := bad.Execute(context.Background(), Request{ToolID: "filesystem.read", Version: 1, Input: json.RawMessage(`{"path":"x"}`), CapabilityToken: []byte("valid-token")}); !errors.Is(err, ErrInvalidOutput) {
-		t.Fatalf("output=%v", err)
+	out, err := bad.Execute(context.Background(), Request{ToolID: "filesystem.read", Version: 1, Input: json.RawMessage(`{"path":"x"}`), CapabilityToken: []byte("valid-token")})
+	if err != nil {
+		t.Fatalf("output-schema miss must not fail the call: %v", err)
+	}
+	if string(out.Output) != `{"wrong":true}` {
+		t.Fatalf("payload must pass through: %s", out.Output)
 	}
 }
 
