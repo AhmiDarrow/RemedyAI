@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -92,8 +94,15 @@ func TestMessengerTunnelStartStopWithInjectedStarter(t *testing.T) {
 		t.Fatalf("argv=%v", startedArgv)
 	}
 	joined := strings.Join(startedArgv, " ")
-	if !strings.Contains(joined, "--url") || !strings.Contains(joined, "127.0.0.1:7400") {
+	// The tunnel points at the webhook-only origin, never at the API port.
+	if !strings.Contains(joined, "--url") || !strings.Contains(joined, "http://127.0.0.1:") {
 		t.Fatalf("expected quick tunnel url argv, got %v", startedArgv)
+	}
+	if strings.Contains(joined, "127.0.0.1:7400") {
+		t.Fatalf("tunnel must not be pointed at the API port: %v", startedArgv)
+	}
+	if origin, _ := body["origin_url"].(string); origin == "" || !strings.Contains(joined, origin) {
+		t.Fatalf("status origin_url=%q argv=%v", body["origin_url"], startedArgv)
 	}
 
 	// Health should treat webhook messengers as tunnel-ready.
@@ -167,12 +176,12 @@ func TestPublicMessengersHealthWhenPublicURLPresent(t *testing.T) {
 		"google_chat":      map[string]any{},
 	}
 	keys := map[string]bool{
-		"ch:whatsapp:access_token":            true,
-		"ch:teams:app_password":               true,
-		"ch:google_chat:access_token":         true,
-		"ch:google_chat:refresh_token":        true,
-		"ch:google_chat:oauth_client_id":      true,
-		"ch:google_chat:oauth_client_secret":  true,
+		"ch:whatsapp:access_token":           true,
+		"ch:teams:app_password":              true,
+		"ch:google_chat:access_token":        true,
+		"ch:google_chat:refresh_token":       true,
+		"ch:google_chat:oauth_client_id":     true,
+		"ch:google_chat:oauth_client_secret": true,
 	}
 	got := publicMessengers(cfg, keys, t.TempDir())
 	for _, row := range got {
@@ -184,4 +193,131 @@ func TestPublicMessengersHealthWhenPublicURLPresent(t *testing.T) {
 			}
 		}
 	}
+}
+
+// A loopback-only server has no reverse proxy in front of it, so a request
+// carrying Cf-Connecting-Ip / X-Forwarded-For came off the tunnel. Only the
+// webhook routes are published there; everything else must be refused before
+// the Host check is the last thing standing between the tunnel and the token.
+func TestForwardedHeadersAreRefusedOffTheWebhookPath(t *testing.T) {
+	s, _ := newConnectTestServer(t)
+	for _, header := range []string{"Cf-Connecting-Ip", "X-Forwarded-For"} {
+		hdr := connectAuthHeader()
+		hdr.Set(header, "203.0.113.7")
+		code, _, text := doConnectJSON(t, s, http.MethodGet, "/api/sessions", nil, hdr)
+		if code != http.StatusForbidden {
+			t.Fatalf("%s on /api/sessions: %d %s", header, code, text)
+		}
+		if !strings.Contains(text, "webhooks") {
+			t.Fatalf("%s refusal should tell the owner what is exposed: %s", header, text)
+		}
+		// The webhook lane still works: that is the whole point of the tunnel.
+		code, _, text = doConnectJSON(t, s, http.MethodPost, "/api/webhooks/whatsapp", map[string]any{}, hdr)
+		if code == http.StatusForbidden && strings.Contains(text, "webhooks are exposed") {
+			t.Fatalf("%s must not be refused on a webhook path: %d %s", header, code, text)
+		}
+	}
+}
+
+// Handing the API token to a browser while the machine is published over a
+// tunnel turns one rewritten Host header into full API access.
+func TestTokenBootstrapRefusedWhileTunnelRunning(t *testing.T) {
+	t.Setenv("REMEDY_HTTP_BOOTSTRAP", "1")
+	s, _ := newConnectTestServer(t)
+
+	code, _, text := doConnectJSON(t, s, http.MethodGet, "/api/auth/local-bootstrap", nil, connectAuthHeader())
+	if code != http.StatusOK {
+		t.Fatalf("bootstrap while idle: %d %s", code, text)
+	}
+
+	ts := s.tunnelState()
+	ts.mu.Lock()
+	ts.running = true
+	ts.mu.Unlock()
+	t.Cleanup(func() {
+		ts.mu.Lock()
+		ts.running = false
+		ts.mu.Unlock()
+	})
+
+	code, body, text := doConnectJSON(t, s, http.MethodGet, "/api/auth/local-bootstrap", nil, connectAuthHeader())
+	if code != http.StatusForbidden {
+		t.Fatalf("bootstrap while tunnelled: %d %s", code, text)
+	}
+	if body["error"] != "tunnel_running" {
+		t.Fatalf("owner needs to know why: %s", text)
+	}
+	if strings.Contains(text, connectTestToken) {
+		t.Fatalf("token leaked in refusal: %s", text)
+	}
+}
+
+// The quick tunnel used to be pointed at the whole local API. It must now
+// reach a dedicated loopback origin that serves webhooks and nothing else.
+func TestQuickTunnelOriginServesWebhooksOnly(t *testing.T) {
+	t.Setenv("REMEDY_PUBLIC_BASE_URL", "")
+	t.Setenv("REMEDY_SKIP_MANAGED_CLOUDFLARED_DOWNLOAD", "1")
+
+	s, home := newConnectTestServer(t)
+	s.apiListenPort = 7400
+
+	binDir := filepath.Join(gateway.ManagedTunnelDir(home), "bin")
+	if err := os.MkdirAll(binDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	binName := "cloudflared"
+	if runtimeGOOSWindows() {
+		binName = "cloudflared.exe"
+	}
+	if err := os.WriteFile(filepath.Join(binDir, binName), []byte("fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	prevPoll := pollQuickTunnelHostname
+	t.Cleanup(func() { pollQuickTunnelHostname = prevPoll })
+	pollQuickTunnelHostname = func(string, time.Duration) (string, error) {
+		return "https://demo.trycloudflare.com", nil
+	}
+	var argv []string
+	s.tunnelStarter = func(_ context.Context, a []string, _ map[string]string, _ string) (*tunnelStartedProcess, error) {
+		argv = append([]string{}, a...)
+		return &tunnelStartedProcess{PID: 4242, Cleanup: func() error { return nil }}, nil
+	}
+
+	st, err := s.startMessengerTunnel(tunnelStartBody{Mode: "quick"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.stopMessengerTunnel() })
+
+	if st.OriginURL == "" {
+		t.Fatalf("status must name the origin so a named tunnel can be pointed at it: %+v", st)
+	}
+	if strings.Contains(st.OriginURL, ":7400") {
+		t.Fatalf("origin must not be the API port: %s", st.OriginURL)
+	}
+	if !strings.Contains(strings.Join(argv, " "), st.OriginURL) {
+		t.Fatalf("cloudflared argv %v should point at %s", argv, st.OriginURL)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	get := func(path string) (int, string) {
+		t.Helper()
+		resp, err := client.Get(st.OriginURL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return resp.StatusCode, string(raw)
+	}
+	for _, path := range []string{"/", "/api/ping", "/api/sessions", "/api/auth/local-bootstrap", "/api/connect/me", "/connect/me"} {
+		if code, body := get(path); code != http.StatusNotFound {
+			t.Fatalf("origin exposed %s: %d %s", path, code, body)
+		}
+	}
+	if code, body := get("/api/webhooks/whatsapp"); code == http.StatusNotFound {
+		t.Fatalf("webhook route must be reachable on the origin: %d %s", code, body)
+	}
+	_ = fmt.Sprint(home)
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -55,9 +56,18 @@ func (s *Server) initScheduler(home string) {
 	s.schedPath = path
 	if path != "" {
 		if raw, err := os.ReadFile(path); err == nil && len(raw) > 0 {
-			if restored, err := scheduler.Restore(raw, exec, time.Now); err == nil {
+			restored, rerr := scheduler.Restore(raw, exec, time.Now)
+			if rerr == nil {
 				s.sched = restored
 				return
+			}
+			// Keep the unreadable snapshot for inspection instead of letting
+			// the next persist overwrite the only copy of the owner's jobs.
+			quarantine := path + ".corrupt-" + time.Now().UTC().Format("20060102T150405Z")
+			if mvErr := os.Rename(path, quarantine); mvErr != nil {
+				log.Printf("scheduler: snapshot %s unreadable (%v) and could not be quarantined: %v", path, rerr, mvErr)
+			} else {
+				log.Printf("scheduler: snapshot unreadable (%v); moved to %s", rerr, quarantine)
 			}
 		}
 	}
@@ -72,13 +82,38 @@ func (s *Server) persistScheduler() {
 	if err != nil {
 		return
 	}
-	tmp := s.schedPath + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return
+	if err := writeFileSynced(s.schedPath, raw, 0o600); err != nil {
+		log.Printf("scheduler: persist %s: %v", s.schedPath, err)
 	}
-	if err := os.Rename(tmp, s.schedPath); err != nil {
+}
+
+// writeFileSynced writes data to a sibling temp file, fsyncs it, and renames
+// it over path so a crash leaves either the old or the new snapshot.
+func writeFileSynced(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
 		_ = os.Remove(tmp)
+		return err
 	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 func (s *Server) startSchedulerLoop(ctx context.Context) {

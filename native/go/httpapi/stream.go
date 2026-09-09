@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,12 +13,17 @@ import (
 )
 
 const (
-	stopNote = "*(Generation stopped. History is intact — send **continue** to resume.)*"
+	stopNote      = "*(Generation stopped. History is intact — send **continue** to resume.)*"
 	supersedeNote = "*(Interrupted by your next message — partial work above is saved. " +
 		"Say **continue** to pick it up.)*"
 	sseKeepaliveInterval = 12 * time.Second
 	sseKeepaliveComment  = ": keepalive\n\n"
 	streamQueueSize      = 512
+
+	// A draft assistant row is upserted at least this often while a turn is
+	// producing text, so a crash mid-build leaves the partial answer in place.
+	draftInterval = 3 * time.Second
+	draftMinBytes = 2_048
 )
 
 func interruptedTurnNote(reason string) string {
@@ -52,6 +58,7 @@ func sseTextFrame(event, text string) string {
 	return sseFrame(event, map[string]any{"type": event, "text": text})
 }
 
+// parseToolCallToken decodes a @@tool_call token into {name, args[, id]}.
 func parseToolCallToken(token string) map[string]any {
 	raw := token[len("@@tool_call:"):]
 	name := raw
@@ -68,7 +75,16 @@ func parseToolCallToken(token string) map[string]any {
 			if a, ok := obj["args"].(map[string]any); ok {
 				args = a
 			}
-			return map[string]any{"name": name, "args": args}
+			out := map[string]any{"name": name, "args": args}
+			if id, _ := obj["id"].(string); id != "" {
+				out["id"] = id
+			}
+			// via names the sub-agent a delegated call came from, so the trail
+			// can show whose work it was rather than attributing it to Remedy.
+			if via, _ := obj["via"].(string); via != "" {
+				out["via"] = via
+			}
+			return out
 		}
 	}
 	if i := strings.Index(raw, "|"); i >= 0 {
@@ -82,36 +98,123 @@ func parseToolCallToken(token string) map[string]any {
 	return map[string]any{"name": name, "args": args}
 }
 
-func parseToolResultToken(token string) (name, preview string, ok bool) {
+// toolResultImage is an image block carried back by a tool result.
+type toolResultImage struct {
+	MediaType string
+	Data      []byte
+}
+
+// toolResultToken is a decoded @@tool_result token. Preview is what the SSE
+// frame carries; Output is the full body the turn log records.
+type toolResultToken struct {
+	ID      string
+	Name    string
+	Preview string
+	Output  string
+	Error   string
+	OK      bool
+	Images  []toolResultImage
+	// Via names the sub-agent this result came from (a delegated mission), so
+	// the trail can attribute the work rather than showing it as Remedy's own.
+	Via string
+}
+
+// record is the persisted tool_results row shape.
+func (t toolResultToken) record() map[string]any {
+	item := map[string]any{"name": t.Name, "output": t.Preview, "error": nil}
+	if t.Via != "" {
+		item["via"] = t.Via
+	}
+	if t.ID != "" {
+		item["id"] = t.ID
+	}
+	if !t.OK {
+		errMsg := t.Preview
+		if errMsg == "" {
+			errMsg = "tool failed"
+		}
+		item["error"] = errMsg
+	}
+	return item
+}
+
+func parseToolResultToken(token string) toolResultToken {
 	raw := token[len("@@tool_result:"):]
-	name = "tool"
-	preview = ""
-	ok = true
+	res := toolResultToken{Name: "tool", OK: true}
 	trimmed := strings.TrimSpace(raw)
 	if strings.HasPrefix(trimmed, "{") {
 		var obj map[string]any
 		if err := json.Unmarshal([]byte(raw), &obj); err == nil {
 			if n, _ := obj["name"].(string); n != "" {
-				name = n
+				res.Name = n
 			}
 			if p, _ := obj["preview"].(string); p != "" {
-				preview = p
+				res.Preview = p
 			}
 			if v, has := obj["ok"]; has {
-				ok = asBool(v)
+				res.OK = asBool(v)
 			}
-			return name, preview, ok
+			res.Output, _ = obj["output"].(string)
+			res.Error, _ = obj["error"].(string)
+			res.ID, _ = obj["id"].(string)
+			res.Images = parseToolResultImages(obj["blocks"])
+			res.Via, _ = obj["via"].(string)
+			return res
 		}
 	}
 	if i := strings.Index(raw, "|"); i >= 0 {
-		name = strings.TrimSpace(raw[:i])
+		res.Name = strings.TrimSpace(raw[:i])
 	} else {
-		name = strings.TrimSpace(raw)
+		res.Name = strings.TrimSpace(raw)
 	}
-	if name == "" {
-		name = "tool"
+	if res.Name == "" {
+		res.Name = "tool"
 	}
-	return name, preview, ok
+	return res
+}
+
+// parseToolResultImages decodes the base64 image blocks of a tool result.
+func parseToolResultImages(raw any) []toolResultImage {
+	list, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]toolResultImage, 0, len(list))
+	for _, entry := range list {
+		obj, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t, _ := obj["type"].(string); t != "" && t != "image" {
+			continue
+		}
+		mediaType, _ := obj["media_type"].(string)
+		encoded, _ := obj["data"].(string)
+		if encoded == "" {
+			continue
+		}
+		data, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		if strings.TrimSpace(mediaType) == "" {
+			mediaType = "image/png"
+		}
+		out = append(out, toolResultImage{MediaType: mediaType, Data: data})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// modelTextToken unwraps the @@text: escape the turn runner applies to model
+// output that begins with "@@". ok is false for every other token.
+func modelTextToken(token string) (string, bool) {
+	if strings.HasPrefix(token, "@@text:") {
+		return token[len("@@text:"):], true
+	}
+	return "", false
 }
 
 func asBool(v any) bool {
@@ -210,6 +313,7 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var sessProvider, sessModel *string
+	var history []map[string]any
 	projectPath := ""
 	if s.sessions != nil {
 		sess, ok, err := s.sessions.Get(sid)
@@ -240,6 +344,7 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 		} else {
 			sessProvider, sessModel = sp, sm
 		}
+		history = s.turnHistory(sid)
 		if _, err := s.sessions.AddMessage(sid, "user", displayContent, nil, nil); err != nil {
 			if _, ok, _ := s.sessions.Get(sid); !ok {
 				writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Session not found"})
@@ -259,7 +364,7 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	frames := make(chan string, streamQueueSize)
+	sink := newFrameSink(requestID, streamQueueSize)
 	turnReq := TurnRequest{
 		SessionID:   sid,
 		Prompt:      prompt,
@@ -269,6 +374,7 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 		PlanMode:    req.PlanMode,
 		ChatMode:    req.ChatMode,
 		Attachments: attDicts,
+		History:     history,
 		DrainNudges: func() []string {
 			if s.claims == nil {
 				return nil
@@ -276,7 +382,7 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 			return s.claims.DrainNudges(sid)
 		},
 	}
-	go s.runDetachedStream(sid, claimEpoch, claimCtx, requestID, turnReq, frames)
+	go s.runDetachedStream(sid, claimEpoch, claimCtx, requestID, turnReq, sink)
 	handedOff = true
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -289,7 +395,9 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 	keepalive := time.NewTicker(sseKeepaliveInterval)
 	defer keepalive.Stop()
 
-	// Client disconnect must NOT cancel the turn — only POST /abort does.
+	// Client disconnect must NOT cancel the turn — only POST /abort does. The
+	// turn keeps writing its log, and the client re-attaches with
+	// GET /stream/attach?request_id=…&after=<last seq>.
 	for {
 		select {
 		case <-r.Context().Done():
@@ -299,11 +407,11 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			flusher.Flush()
-		case frame, open := <-frames:
+		case frame, open := <-sink.ch:
 			if !open {
 				return
 			}
-			if _, err := io.WriteString(w, frame); err != nil {
+			if _, err := io.WriteString(w, frame.Data); err != nil {
 				return
 			}
 			flusher.Flush()
@@ -312,19 +420,19 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) enqueueFrame(ch chan string, frame string) {
-	select {
-	case ch <- frame:
-	default:
-		select {
-		case <-ch:
-		default:
-		}
-		select {
-		case ch <- frame:
-		default:
-		}
+// turnOrigin names where a turn came from for the start record.
+func turnOrigin(req TurnRequest) string {
+	if o := strings.TrimSpace(req.Origin); o != "" {
+		return o
 	}
+	return "desktop"
+}
+
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func (s *Server) runDetachedStream(
@@ -333,19 +441,43 @@ func (s *Server) runDetachedStream(
 	ctx context.Context,
 	requestID string,
 	req TurnRequest,
-	frames chan string,
+	sink *frameSink,
 ) {
 	s.claims.BeginTurn(sid)
 	defer s.claims.EndTurn(sid)
-	defer close(frames)
+	defer sink.close()
 	defer s.claims.Release(sid, &claimEpoch)
 
-	s.enqueueFrame(frames, sseFrame("start", map[string]any{
-		"type":         "start",
-		"request_id":   requestID,
-		"session_id":   sid,
-		"claim_epoch":  claimEpoch,
-	}))
+	s.claims.SetActiveRequest(sid, claimEpoch, requestID)
+
+	turnLog, logErr := openTurnLog(s.homeDir, sid, requestID)
+	defer turnLog.Close()
+	// Turn logs carry every tool result and image, so they are pruned once per
+	// turn rather than left to grow without limit under the owner's home.
+	defer pruneTurnLogs(s.homeDir, sid, turnLogKeepPerSession, turnLogMaxAge, time.Now())
+	live := s.turns.begin(sid, requestID)
+	defer s.turns.end(live)
+
+	ts := &turnStream{log: turnLog, live: live, sink: sink}
+	// Approvals are resolved from the UI, outside this goroutine; register the
+	// writer so those decisions land in this turn's evidence.
+	s.turns.attachStream(sid, ts)
+	defer s.turns.detachStream(sid, ts)
+
+	ts.record(turnRecord{
+		T:          "start",
+		RequestID:  requestID,
+		SessionID:  sid,
+		ClaimEpoch: claimEpoch,
+		Origin:     turnOrigin(req),
+		Model:      derefStr(req.Model),
+		Provider:   derefStr(req.Provider),
+	})
+	if logErr != nil {
+		ts.signal("error", map[string]any{
+			"message": "Turn evidence is not being recorded: " + logErr.Error(),
+		})
+	}
 
 	if ctx == nil {
 		// Should never happen after TryClaim — fail closed instead of Background.
@@ -355,82 +487,144 @@ func (s *Server) runDetachedStream(
 	}
 
 	var (
-		fullResponse          strings.Builder
-		fullThinking          strings.Builder
-		thinkingReplaceNext   bool
-		collectedToolCalls    []map[string]any
-		collectedToolResults  []map[string]any
-		aborted               bool
-		persistDone           bool
-		bodyFinished          bool
+		fullResponse         strings.Builder
+		fullThinking         strings.Builder
+		thinkingReplaceNext  bool
+		collectedToolCalls   []map[string]any
+		collectedToolResults []map[string]any
+		aborted              bool
+		persistDone          bool
+		draftAt              = time.Now()
+		draftLen             int
+		writeFailed          bool
 	)
 
-	persistInterrupted := func(kind string) {
-		_ = kind
+	// noteWriteFailure surfaces a lost persist as an SSE error frame rather
+	// than dropping the turn on the floor.
+	noteWriteFailure := func(what string, err error) {
+		if err == nil || writeFailed {
+			return
+		}
+		writeFailed = true
+		ts.signal("error", map[string]any{
+			"message": "Could not save this turn (" + what + "): " + redactStreamError(err),
+		})
+	}
+
+	thinkingPtr := func() *string {
+		if t := strings.TrimSpace(fullThinking.String()); t != "" {
+			return &t
+		}
+		return nil
+	}
+
+	toolLedger := func() (any, any) {
+		var calls any = []any{}
+		var results any = []any{}
+		if len(collectedToolCalls) > 0 {
+			calls = collectedToolCalls
+		}
+		if len(collectedToolResults) > 0 {
+			results = collectedToolResults
+		}
+		return calls, results
+	}
+
+	// upsertDraft writes the partial assistant row. force skips the rate gate
+	// (used when the tool ledger changed, which must never be lost).
+	upsertDraft := func(force bool) {
 		if persistDone || s.sessions == nil {
 			return
 		}
-		persistDone = true
-		reason := s.claims.PeekAbortReason(sid)
-		calls := append([]map[string]any(nil), collectedToolCalls...)
-		results := append([]map[string]any(nil), collectedToolResults...)
-		content := interruptedTurnContent(fullResponse.String(), reason, len(calls) > 0 || len(results) > 0)
-		var thinking *string
-		if t := strings.TrimSpace(fullThinking.String()); t != "" {
-			thinking = &t
+		n := fullResponse.Len()
+		if !force {
+			if n == draftLen {
+				return
+			}
+			if n-draftLen < draftMinBytes && time.Since(draftAt) < draftInterval {
+				return
+			}
 		}
-		if _, ok, _ := s.sessions.Get(sid); !ok {
+		draftLen = n
+		draftAt = time.Now()
+		calls, results := toolLedger()
+		body := fullResponse.String()
+		if strings.TrimSpace(body) == "" && len(collectedToolCalls) == 0 {
 			return
 		}
-		_, _ = s.sessions.AddMessageFull(
-			sid, "assistant", content, thinking, calls, results, req.Model, nil, nil,
-		)
+		if _, err := s.sessions.UpsertDraftMessage(
+			sid, requestID, "assistant", body, thinkingPtr(), calls, results, req.Model,
+		); err != nil {
+			noteWriteFailure("draft", err)
+		}
+	}
+
+	finalize := func(content string) {
+		if persistDone || s.sessions == nil {
+			return
+		}
+		if _, ok, _ := s.sessions.Get(sid); !ok {
+			persistDone = true
+			return
+		}
+		persistDone = true
+		calls, results := toolLedger()
+		if _, err := s.sessions.FinalizeMessage(
+			sid, requestID, "assistant", content, thinkingPtr(), calls, results, req.Model, nil, nil,
+		); err != nil {
+			noteWriteFailure("assistant message", err)
+			return
+		}
+		s.publishMessageAdded(sid, content)
+	}
+
+	persistInterrupted := func() {
+		if persistDone || s.sessions == nil {
+			return
+		}
+		reason := s.claims.PeekAbortReason(sid)
+		hasTools := len(collectedToolCalls) > 0 || len(collectedToolResults) > 0
+		finalize(interruptedTurnContent(fullResponse.String(), reason, hasTools))
+	}
+
+	emitAborted := func() {
+		ts.signal("aborted", map[string]any{
+			"message":    "Generation stopped",
+			"request_id": requestID,
+		})
 	}
 
 	emit := func(token string) error {
 		if token == "" {
 			return nil
 		}
+		if text, ok := modelTextToken(token); ok {
+			fullResponse.WriteString(text)
+			ts.assistantText(text)
+			upsertDraft(false)
+			return nil
+		}
 		if strings.HasPrefix(token, "@@aborted") {
 			aborted = true
-			persistInterrupted("aborted")
-			s.enqueueFrame(frames, sseFrame("aborted", map[string]any{
-				"type":       "aborted",
-				"message":    "Generation stopped",
-				"request_id": requestID,
-			}))
+			persistInterrupted()
+			emitAborted()
 			return errStreamAborted
 		}
 		switch {
 		case strings.HasPrefix(token, "@@tool_call:"):
 			parsed := parseToolCallToken(token)
 			collectedToolCalls = append(collectedToolCalls, parsed)
-			s.enqueueFrame(frames, sseFrame("tool_call", map[string]any{
-				"type": "tool_call",
-				"name": parsed["name"],
-				"args": parsed["args"],
-			}))
+			name, _ := parsed["name"].(string)
+			id, _ := parsed["id"].(string)
+			args, _ := parsed["args"].(map[string]any)
+			via, _ := parsed["via"].(string)
+			ts.toolUse(id, name, via, args)
+			upsertDraft(true)
 		case strings.HasPrefix(token, "@@tool_result:"):
-			name, preview, ok := parseToolResultToken(token)
-			item := map[string]any{
-				"name":   name,
-				"output": preview,
-				"error":  nil,
-			}
-			if !ok {
-				errMsg := preview
-				if errMsg == "" {
-					errMsg = "tool failed"
-				}
-				item["error"] = errMsg
-			}
-			collectedToolResults = append(collectedToolResults, item)
-			s.enqueueFrame(frames, sseFrame("tool_result", map[string]any{
-				"type":    "tool_result",
-				"name":    name,
-				"preview": preview,
-				"ok":      ok,
-			}))
+			res := parseToolResultToken(token)
+			collectedToolResults = append(collectedToolResults, res.record())
+			ts.toolResult(res)
+			upsertDraft(true)
 		case strings.HasPrefix(token, "@@progress:"):
 			raw := token[len("@@progress:"):]
 			payload := map[string]any{"label": raw}
@@ -438,23 +632,14 @@ func (s *Server) runDetachedStream(
 				var obj map[string]any
 				if err := json.Unmarshal([]byte(raw), &obj); err == nil {
 					payload = obj
+					delete(payload, "type")
 				}
 			}
-			payload["type"] = "progress"
-			s.enqueueFrame(frames, sseFrame("progress", payload))
+			ts.signal("progress", payload)
 		case strings.HasPrefix(token, "@@status:"):
-			label := strings.TrimSpace(token[len("@@status:"):])
-			if label != "" {
-				s.enqueueFrame(frames, sseFrame("progress", map[string]any{
-					"type":  "progress",
-					"label": label,
-				}))
-			}
+			ts.status(strings.TrimSpace(token[len("@@status:"):]))
 		case strings.HasPrefix(token, "@@steered"):
-			s.enqueueFrame(frames, sseFrame("progress", map[string]any{
-				"type":  "progress",
-				"label": "Taking that in…",
-			}))
+			ts.status("Taking that in…")
 		case strings.HasPrefix(token, "@@thinking_round"):
 			thinkingReplaceNext = true
 		case strings.HasPrefix(token, "@@thinking:"):
@@ -462,46 +647,40 @@ func (s *Server) runDetachedStream(
 			if thought == "" {
 				return nil
 			}
-			if thinkingReplaceNext {
-				thinkingReplaceNext = false
+			replace := thinkingReplaceNext
+			thinkingReplaceNext = false
+			if replace {
 				fullThinking.Reset()
-				fullThinking.WriteString(thought)
-				s.enqueueFrame(frames, sseFrame("thinking", map[string]any{
-					"type":    "thinking",
-					"text":    thought,
-					"replace": true,
-				}))
-			} else {
-				fullThinking.WriteString(thought)
-				s.enqueueFrame(frames, sseTextFrame("thinking", thought))
 			}
+			fullThinking.WriteString(thought)
+			ts.assistantThinking(thought, replace)
 		case strings.HasPrefix(token, "@@usage:"):
 			raw := token[len("@@usage:"):]
 			var part map[string]any
 			if err := json.Unmarshal([]byte(raw), &part); err == nil && part != nil {
-				part["type"] = "usage"
-				s.enqueueFrame(frames, sseFrame("usage", part))
+				delete(part, "type")
+				ts.usage(part)
 			}
 		case strings.HasPrefix(token, "@@library_suggest:"):
 			raw := strings.TrimSpace(token[len("@@library_suggest:"):])
 			var payload map[string]any
 			if err := json.Unmarshal([]byte(raw), &payload); err == nil && payload["id"] != nil {
-				payload["type"] = "library_suggest"
-				s.enqueueFrame(frames, sseFrame("library_suggest", payload))
+				delete(payload, "type")
+				ts.signal("library_suggest", payload)
 			}
 		case strings.HasPrefix(token, "@@life_task:"):
 			raw := token[len("@@life_task:"):]
 			var payload map[string]any
 			if err := json.Unmarshal([]byte(raw), &payload); err == nil && payload != nil {
-				payload["type"] = "life_task"
-				s.enqueueFrame(frames, sseFrame("life_task", payload))
+				delete(payload, "type")
+				ts.signal("life_task", payload)
 			}
 		case strings.HasPrefix(token, "@@todos:"):
 			raw := token[len("@@todos:"):]
 			var payload map[string]any
 			if err := json.Unmarshal([]byte(raw), &payload); err == nil && payload != nil {
-				payload["type"] = "todos"
-				s.enqueueFrame(frames, sseFrame("todos", payload))
+				delete(payload, "type")
+				ts.signal("todos", payload)
 			}
 		case token == "@@tool_calls":
 			// no-op marker
@@ -509,7 +688,8 @@ func (s *Server) runDetachedStream(
 			// Unknown control token — never leak into the bubble.
 		default:
 			fullResponse.WriteString(token)
-			s.enqueueFrame(frames, sseTextFrame("token", token))
+			ts.assistantText(token)
+			upsertDraft(false)
 		}
 		return nil
 	}
@@ -524,32 +704,26 @@ func (s *Server) runDetachedStream(
 		turnErr = nil
 	}
 	if aborted && !persistDone {
-		persistInterrupted("aborted-fallback")
-		s.enqueueFrame(frames, sseFrame("aborted", map[string]any{
-			"type":       "aborted",
-			"message":    "Generation stopped",
-			"request_id": requestID,
-		}))
+		persistInterrupted()
+		emitAborted()
 	}
 
 	if turnErr != nil {
-		bodyFinished = true
-		persistDone = true
 		safe := redactStreamError(turnErr)
-		s.enqueueFrame(frames, sseFrame("error", map[string]any{
-			"type":    "error",
-			"message": safe,
-		}))
-		if s.sessions != nil {
+		ts.signal("error", map[string]any{"message": safe})
+		if !persistDone && s.sessions != nil {
 			if _, ok, _ := s.sessions.Get(sid); ok {
 				note := ""
 				if body := strings.TrimSpace(fullResponse.String()); body != "" {
 					note = body + "\n\n"
 				}
 				note += "*(Turn ended with an error: " + safe + ". History is intact — send **continue** to resume.)*"
-				_, _ = s.sessions.AddMessage(sid, "assistant", note, req.Model, nil)
+				finalize(note)
+			} else {
+				persistDone = true
 			}
 		}
+		ts.done(requestID, "error", safe)
 		return
 	}
 
@@ -564,58 +738,42 @@ func (s *Server) runDetachedStream(
 	if persistText == "" && hasTools {
 		persistText = "*(Used tools — see process.)*"
 	}
-	if persistText != "" && s.sessions != nil && !persistDone {
-		if _, ok, _ := s.sessions.Get(sid); ok {
-			var thinking *string
-			if t := strings.TrimSpace(fullThinking.String()); t != "" {
-				thinking = &t
-			}
-			var calls any
-			var results any
-			if len(collectedToolCalls) > 0 {
-				calls = collectedToolCalls
-			} else {
-				calls = []any{}
-			}
-			if len(collectedToolResults) > 0 {
-				results = collectedToolResults
-			} else {
-				results = []any{}
-			}
-			_, _ = s.sessions.AddMessageFull(
-				sid, "assistant", persistText, thinking, calls, results, req.Model, nil, nil,
-			)
-			persistDone = true
-			if sess, ok, _ := s.sessions.Get(sid); ok && sess.OriginChannel != nil && *sess.OriginChannel != "" {
-				title := sess.Title
-				count := sess.MessageCount
-				role := "assistant"
-				s.publishSessionEvent(SessionEvent{
-					Type:          "message_added",
-					SessionID:     sid,
-					OriginChannel: sess.OriginChannel,
-					Title:         &title,
-					MessageCount:  &count,
-					Role:          &role,
-				})
-				s.mirrorDesktopReply(sess, persistText)
-			}
-		} else {
-			persistDone = true
-		}
+	if persistText != "" && !persistDone {
+		finalize(persistText)
 	}
 
 	status := "ok"
 	if aborted {
 		status = "aborted"
 	}
-	bodyFinished = true
-	_ = bodyFinished
-	s.enqueueFrame(frames, sseFrame("done", map[string]any{
-		"type":       "done",
-		"request_id": requestID,
-		"status":     status,
-	}))
+	ts.done(requestID, status, "")
+}
+
+// publishMessageAdded announces a persisted assistant reply for every session,
+// not only messenger-origin ones — the desktop sidebar and any attached client
+// need the same signal. Only the messenger mirror stays origin-gated.
+func (s *Server) publishMessageAdded(sid, reply string) {
+	if s == nil || s.sessions == nil {
+		return
+	}
+	sess, ok, _ := s.sessions.Get(sid)
+	if !ok {
+		return
+	}
+	title := sess.Title
+	count := sess.MessageCount
+	role := "assistant"
+	s.publishSessionEvent(SessionEvent{
+		Type:          "message_added",
+		SessionID:     sid,
+		OriginChannel: sess.OriginChannel,
+		Title:         &title,
+		MessageCount:  &count,
+		Role:          &role,
+	})
+	if sess.OriginChannel != nil && strings.TrimSpace(*sess.OriginChannel) != "" {
+		s.mirrorDesktopReply(sess, reply)
+	}
 }
 
 var errStreamAborted = errors.New("stream aborted")

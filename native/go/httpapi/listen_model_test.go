@@ -18,7 +18,7 @@ func TestResolveListenModelFallsBackToScripted(t *testing.T) {
 	t.Setenv("REMEDY_HOME", home)
 	InvalidateConfigCache()
 	model := ResolveListenModel(home)
-	ch, err := model.Stream(context.Background(), cognition.Turn{Goal: "hi", Iteration: 1})
+	ch, err := model.Stream(context.Background(), cognition.Turn{Messages: []cognition.Message{cognition.UserText("hi")}, Iteration: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,5 +239,74 @@ func TestResolveChatModelExcludesProvider(t *testing.T) {
 	}
 	if !strings.Contains(oc.BaseURL, "api.x.ai") {
 		t.Fatalf("exclude poe should yield xAI, got %q", oc.BaseURL)
+	}
+}
+
+func TestResolveChatModelBuildsNativeAnthropicAdapter(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REMEDY_HOME", home)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-unit-test-not-real")
+	InvalidateConfigCache()
+
+	model := ResolveChatModel(home, "anthropic", "", "")
+	claude, ok := model.(*providers.Anthropic)
+	if !ok || claude == nil {
+		t.Fatalf("provider anthropic with a key must build the native adapter, got %T", model)
+	}
+	if claude.APIKey != "sk-ant-unit-test-not-real" {
+		t.Fatalf("adapter key = %q", claude.APIKey)
+	}
+	if claude.Model != defaultModelForProvider("anthropic") {
+		t.Fatalf("adapter model = %q", claude.Model)
+	}
+	if !strings.Contains(claude.BaseURL, "api.anthropic.com") {
+		t.Fatalf("adapter base URL = %q", claude.BaseURL)
+	}
+	if claude.ContextWindow() <= cognition.DefaultContextWindow {
+		t.Fatalf("frontier window = %d", claude.ContextWindow())
+	}
+}
+
+func TestResolveChatModelAnthropicBaseURLOverrideIsHonoured(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REMEDY_HOME", home)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-unit-test-not-real")
+	InvalidateConfigCache()
+
+	model := ResolveChatModel(home, "anthropic", "claude-fable-5-1", "https://gateway.example.com/v1")
+	claude, ok := model.(*providers.Anthropic)
+	if !ok {
+		t.Fatalf("got %T", model)
+	}
+	if claude.BaseURL != "https://gateway.example.com/v1" || claude.Model != "claude-fable-5-1" {
+		t.Fatalf("override lost: %q / %q", claude.BaseURL, claude.Model)
+	}
+}
+
+func TestResolveChatModelAnthropicWithoutKeyFallsThrough(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REMEDY_HOME", home)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("REMEDY_LLM_API_KEY", "")
+	InvalidateConfigCache()
+
+	model := ResolveChatModel(home, "anthropic", "claude-opus-5", "")
+	if _, ok := model.(*providers.Anthropic); ok {
+		t.Fatalf("an uncredentialed anthropic bind must not become a live adapter")
+	}
+}
+
+func TestIsProviderUnusableErrorCoversAnthropic(t *testing.T) {
+	for _, msg := range []string{
+		"anthropic HTTP 401: invalid x-api-key",
+		"anthropic HTTP 402: credit balance too low",
+		"anthropic HTTP 403: forbidden",
+	} {
+		if !isProviderUnusableError(errors.New(msg)) {
+			t.Fatalf("%q should trigger the provider fallback", msg)
+		}
+	}
+	if isProviderUnusableError(errors.New("anthropic HTTP 500: overloaded")) {
+		t.Fatalf("a 500 is retryable, not a provider swap")
 	}
 }

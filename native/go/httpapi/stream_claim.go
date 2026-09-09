@@ -17,10 +17,13 @@ const (
 )
 
 type claimEntry struct {
-	epoch  int
-	reason string
-	cancel context.CancelFunc
-	ctx    context.Context
+	epoch int
+	// requestID is the turn currently writing under this claim. It is the
+	// request_id of the turn log, so a reloading client can attach to it.
+	requestID string
+	reason    string
+	cancel    context.CancelFunc
+	ctx       context.Context
 }
 
 const nudgeMax = 24
@@ -271,6 +274,39 @@ func (c *streamClaims) ActiveSessionIDs() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// SetActiveRequest records the turn writing under the claim held at epoch.
+// A stale epoch is ignored so a superseded turn cannot relabel the live one.
+func (c *streamClaims) SetActiveRequest(sessionID string, epoch int, requestID string) {
+	sid := strings.TrimSpace(sessionID)
+	rid := strings.TrimSpace(requestID)
+	if sid == "" || rid == "" || c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ent, ok := c.bySID[sid]
+	if !ok || ent.epoch != epoch {
+		return
+	}
+	ent.requestID = rid
+}
+
+// ActiveRequest returns the request_id of the turn running for sessionID
+// ("" when the session is idle).
+func (c *streamClaims) ActiveRequest(sessionID string) string {
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" || c == nil {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ent, ok := c.bySID[sid]
+	if !ok {
+		return ""
+	}
+	return ent.requestID
 }
 
 // IsClaimed reports whether sessionID holds a live claim.

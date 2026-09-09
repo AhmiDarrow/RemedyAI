@@ -111,7 +111,8 @@ func (s *Server) handleTeamsActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auth := r.Header.Get("Authorization")
-	if !ch.VerifyInboundAuth(auth) {
+	claims, ok := ch.VerifyInboundAuth(auth)
+	if !ok {
 		writeWebhookError(w, http.StatusUnauthorized, "teams auth failed")
 		return
 	}
@@ -129,7 +130,7 @@ func (s *Server) handleTeamsActivity(w http.ResponseWriter, r *http.Request) {
 		writeWebhookError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	handled := ch.HandleActivity(r.Context(), activity)
+	handled := ch.HandleActivity(r.Context(), activity, claims)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "handled": handled})
 }
 
@@ -303,9 +304,8 @@ func (s *Server) authorizeGenericWebhook(r *http.Request) (int, string) {
 	auth := r.Header.Get("Authorization")
 	secretHdr := r.Header.Get("X-Remedy-Webhook-Secret")
 	bearerOK := expected != "" && secretEquals(auth, "Bearer "+expected)
-	secretOK := secretHdr != "" && (
-		(expected != "" && secretEquals(secretHdr, expected)) ||
-			(webhookSecret != "" && secretEquals(secretHdr, webhookSecret)))
+	secretOK := secretHdr != "" && ((expected != "" && secretEquals(secretHdr, expected)) ||
+		(webhookSecret != "" && secretEquals(secretHdr, webhookSecret)))
 	if !(bearerOK || secretOK) {
 		return http.StatusUnauthorized, "Webhook auth required"
 	}

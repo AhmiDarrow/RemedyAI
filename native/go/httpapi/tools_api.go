@@ -35,6 +35,29 @@ func (s *Server) toolRegistry() *tools.Registry {
 	return nil
 }
 
+// toolBindingFor resolves the session binding for a tool call the way RunTurn
+// does: the session's project as the root when set, else the owner's
+// Documents/Remedy folder; scope from access_scope (full when no project);
+// home and session id for the job list and the checklist.
+func (s *Server) toolBindingFor(sessionID string) toolBinding {
+	projectPath := ""
+	if sessionID != "" && s.sessions != nil {
+		if sess, ok, err := s.sessions.Get(sessionID); err == nil && ok && sess.ProjectPath != nil {
+			projectPath = effectiveTurnProjectPath(*sess.ProjectPath)
+		}
+	}
+	root := projectPath
+	if root == "" {
+		root = defaultOwnerFilesBase()
+	}
+	return toolBinding{
+		Root:      root,
+		Scope:     effectiveAccessScope(cfgString(LoadConfig(s.remedyHomeDir()), "access_scope", "project"), projectPath),
+		HomeDir:   s.remedyHomeDir(),
+		SessionID: sessionID,
+	}
+}
+
 func riskName(r tools.Risk) string {
 	switch r {
 	case tools.RiskReadOnly:
@@ -154,11 +177,15 @@ func (s *Server) handleInvokeTool(w http.ResponseWriter, r *http.Request) {
 		desc = resolved
 	}
 
-	// Same Ask/Auto/Full + fingerprint gate as CognitionTurnRunner.
-	call := cognition.ToolCall{
+	// Same session binding as the engine path: the caller never chooses the
+	// jail root, the shell cwd / write roots, or home_dir.
+	call := bindToolInput(cognition.ToolCall{
 		Name:  desc.ID,
 		Input: append([]byte(nil), input...),
-	}
+	}, s.toolBindingFor(sessionID))
+	input = json.RawMessage(call.Input)
+
+	// Same Ask/Auto/Full + fingerprint gate as CognitionTurnRunner.
 	policy := &RegistryPolicy{
 		Registry:  reg,
 		Approvals: s.approvals,

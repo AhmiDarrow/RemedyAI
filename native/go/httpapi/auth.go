@@ -3,6 +3,7 @@ package httpapi
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,15 +14,18 @@ import (
 
 // PublicPaths need no Bearer token (health / readiness / loopback bootstrap).
 var PublicPaths = map[string]struct{}{
-	"/api/ping":                         {},
-	"/api/status":                       {},
-	"/api/turn-active":                  {},
-	"/api/auth/local-bootstrap":         {},
-	"/api/assistant/google/callback":    {}, // browser OAuth redirect; state is one-time
+	"/api/ping":                      {},
+	"/api/status":                    {},
+	"/api/turn-active":               {},
+	"/api/auth/local-bootstrap":      {},
+	"/api/assistant/google/callback": {}, // browser OAuth redirect; state is one-time
 }
 
 const unauthorizedDetail = "Missing or invalid Bearer token. " +
 	"Desktop loads it automatically; CLI: REMEDY_API_KEY."
+
+// bootstrapPath is the loopback token handout route.
+const bootstrapPath = "/api/auth/local-bootstrap"
 
 // AuthEnabled mirrors Python local_auth.auth_enabled().
 func AuthEnabled() bool {
@@ -63,6 +67,25 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		if hdr, forwarded := forwardedHopHeader(r); forwarded && !isWebhookPath(r.URL.Path) {
+			logForwardedRefusal(hdr, r)
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error": "Forbidden",
+				"detail": "This server is loopback-only. A request carrying " + hdr +
+					" reached a non-webhook path; only /api/webhooks/* is exposed through a tunnel.",
+			})
+			return
+		}
+		if r.URL.Path == bootstrapPath && s.tunnelRunning() {
+			log.Printf("auth: token bootstrap refused while the messenger tunnel is running")
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error": "tunnel_running",
+				"detail": "Browser token bootstrap is disabled while the messenger " +
+					"tunnel is running. Stop the tunnel (Settings → Messengers) " +
+					"before handing the API token to a browser.",
+			})
+			return
+		}
 		if _, ok := PublicPaths[r.URL.Path]; ok {
 			next.ServeHTTP(w, r)
 			return
@@ -89,10 +112,36 @@ func pathNeedsAPIAuth(path string) bool {
 		return false
 	}
 	// Platform messengers authenticate inside the route (HMAC / JWT / verify token).
-	if strings.HasPrefix(path, "/api/webhooks/") || strings.HasPrefix(path, "/api/webhook/") {
+	if isWebhookPath(path) {
 		return false
 	}
 	return true
+}
+
+// isWebhookPath reports whether a path is one of the platform webhook routes.
+// These are the only routes a quick tunnel is allowed to reach; each one
+// authenticates its own caller (HMAC / signed JWT / verify token).
+func isWebhookPath(path string) bool {
+	return strings.HasPrefix(path, "/api/webhooks/") || strings.HasPrefix(path, "/api/webhook/")
+}
+
+// forwardedHopHeader names the proxy header a request arrived with, if any.
+// A loopback-only server has no legitimate reverse proxy in front of it, so
+// these headers mean the request came through the quick tunnel.
+func forwardedHopHeader(r *http.Request) (string, bool) {
+	for _, name := range []string{"Cf-Connecting-Ip", "X-Forwarded-For"} {
+		if strings.TrimSpace(r.Header.Get(name)) != "" {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// logForwardedRefusal makes a tunnelled probe visible to the owner without
+// echoing attacker-controlled header values into the log.
+func logForwardedRefusal(header string, r *http.Request) {
+	log.Printf("auth: refused tunnelled request %s %s (%s present; only webhooks are exposed)",
+		r.Method, r.URL.Path, header)
 }
 
 func requestAuthorized(r *http.Request, token string) bool {

@@ -75,6 +75,7 @@ var providerCatalog = map[string]providerMeta{
 			{ID: "claude-haiku-4-5", Name: "Claude Haiku 4.5", Vision: boolPtr(true)},
 			{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", Vision: boolPtr(true)},
 			{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", Vision: boolPtr(true)},
+			{ID: "claude-fable-5-1", Name: "Claude Fable 5.1", Vision: boolPtr(true)},
 		},
 	},
 	"google": {

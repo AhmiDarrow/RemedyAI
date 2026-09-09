@@ -184,11 +184,22 @@ func TestInvokeMutationApprovedFingerprintAllows(t *testing.T) {
 	s := newToolsAPIServer(t)
 	_ = s.approvals.SetMode("ask")
 	sid := "sess-fp"
-	input := `{"argv":["C:\\Windows\\System32\\cmd.exe","/c","echo"]}`
-	item := s.approvals.Enqueue("shell.exec", input, "test", &sid, "run echo")
-	_ = s.approvals.Resolve(item.ID, true, "session")
-
 	body := `{"id":"shell.exec","session_id":"sess-fp","input":{"argv":["C:\\Windows\\System32\\cmd.exe","/c","echo"]}}`
+
+	// First call asks. The owner approves that pending item, which is
+	// fingerprinted on the bound call — the command that will actually run.
+	if first, firstRaw := doTools(t, s, http.MethodPost, "/api/tools/invoke", body); first != http.StatusForbidden {
+		t.Fatalf("first invoke status=%d body=%s want 403 (Ask)", first, firstRaw)
+	}
+	pending := s.approvals.ListPending(sid)
+	if len(pending) != 1 {
+		t.Fatalf("pending=%d want 1", len(pending))
+	}
+	if resolved := s.approvals.Resolve(pending[0].ID, true, "session"); resolved == nil {
+		t.Fatalf("approval %s could not be resolved", pending[0].ID)
+	}
+
+	// The same call must now pass the gate without asking again.
 	code, raw := doTools(t, s, http.MethodPost, "/api/tools/invoke", body)
 	if code == http.StatusForbidden {
 		var out map[string]any

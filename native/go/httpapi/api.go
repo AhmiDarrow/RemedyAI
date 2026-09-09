@@ -68,11 +68,14 @@ type Server struct {
 	sessions *sessionStore
 	events   *sessionEventHub
 	claims   *streamClaims
-	runner   TurnRunner
-	voice    VoiceWorker
-	rmb      RmbController
-	vision   VisionWorker
-	hf       *hfProgress
+	// turns tracks the turns currently writing a turn log so
+	// GET /api/sessions/{id}/stream/attach can tail a live one.
+	turns  *turnHub
+	runner TurnRunner
+	voice  VoiceWorker
+	rmb    RmbController
+	vision VisionWorker
+	hf     *hfProgress
 
 	connectGW     *connect.Gateway
 	messengerGW   *gateway.Gateway
@@ -154,6 +157,7 @@ func New(cfg Config) (*Server, error) {
 		sessions:  store,
 		events:    newSessionEventHub(),
 		claims:    newStreamClaims(),
+		turns:     newTurnHub(),
 		runner:    cfg.TurnRunner,
 		voice:     cfg.VoiceWorker,
 		rmb:       cfg.RmbController,
@@ -166,6 +170,9 @@ func New(cfg Config) (*Server, error) {
 		appCmd:    newAppControlBus(),
 	}
 	_ = s.approvals.SyncFromConfig(LoadConfig(homeDir))
+	// What the owner was asked, and what they decided, belongs in the turn's
+	// evidence alongside the tool calls it gated.
+	s.approvals.SetObserver(s.turns.RecordApproval)
 	// Partner trust loop: Auto/Full must unlock coding mutations; Ask must
 	// enqueue into the same queue the Desktop banner polls.
 	if cr, ok := s.runner.(*CognitionTurnRunner); ok && cr != nil {
@@ -241,6 +248,11 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/sessions/{id}/messages", s.handleListMessages)
 	s.mux.HandleFunc("POST /api/sessions/{id}/messages", s.handleSendMessage)
 	s.mux.HandleFunc("POST /api/sessions/{id}/messages/stream", s.handleStreamMessage)
+	s.mux.HandleFunc("GET /api/sessions/{id}/stream/attach", s.handleStreamAttach)
+	s.mux.HandleFunc(
+		"GET /api/sessions/{id}/turns/{request_id}/tools/{call_id}",
+		s.handleTurnToolEvidence,
+	)
 	s.mux.HandleFunc("POST /api/sessions/{id}/messages/{msg_id}/edit", s.handleEditFromMessage)
 	s.mux.HandleFunc("POST /api/sessions/{id}/abort", s.handleAbortSession)
 	s.mux.HandleFunc("GET /api/sessions/{id}/export", s.handleExportSession)

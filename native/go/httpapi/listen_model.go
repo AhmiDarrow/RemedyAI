@@ -40,7 +40,7 @@ func resolveChatModel(home, provider, model, baseURL, excludeProvider string) co
 	explicitURL := strings.TrimSpace(baseURL)
 
 	if !providerExcluded(explicitProv, exclude) {
-		if m := tryOpenAICompat(home, cfg, explicitProv, explicitModel, explicitURL); m != nil {
+		if m := tryLiveModel(home, cfg, explicitProv, explicitModel, explicitURL); m != nil {
 			return m
 		}
 	}
@@ -54,7 +54,7 @@ func resolveChatModel(home, provider, model, baseURL, excludeProvider string) co
 		(explicitModel == "" || strings.EqualFold(explicitModel, strings.TrimSpace(cfgModel))) &&
 		(explicitURL == "" || strings.EqualFold(explicitURL, strings.TrimSpace(cfgURL)))
 	if !sameAsExplicit && !providerExcluded(cfgProv, exclude) {
-		if m := tryOpenAICompat(home, cfg, cfgProv, cfgModel, cfgURL); m != nil {
+		if m := tryLiveModel(home, cfg, cfgProv, cfgModel, cfgURL); m != nil {
 			return m
 		}
 	}
@@ -83,10 +83,12 @@ func isProviderUnusableError(err error) bool {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "openai-compat http 401") ||
-		strings.Contains(msg, "openai-compat http 402") ||
-		strings.Contains(msg, "openai-compat http 403") {
-		return true
+	for _, prefix := range []string{"openai-compat http ", "anthropic http "} {
+		for _, status := range []string{"401", "402", "403"} {
+			if strings.Contains(msg, prefix+status) {
+				return true
+			}
+		}
 	}
 	// Some gateways wrap status differently but still surface subscription/billing.
 	if strings.Contains(msg, "requires an active") && strings.Contains(msg, "subscription") {
@@ -98,7 +100,10 @@ func isProviderUnusableError(err error) bool {
 	return false
 }
 
-func tryOpenAICompat(home string, cfg ConfigMap, provider, model, baseURL string) cognition.Model {
+// tryLiveModel builds the adapter for one credentialed provider: Anthropic
+// gets the native Claude adapter (prompt caching, adaptive thinking, strict
+// tools, usage); everything else stays on the OpenAI-compatible client.
+func tryLiveModel(home string, cfg ConfigMap, provider, model, baseURL string) cognition.Model {
 	rawProvider := strings.TrimSpace(provider)
 	if rawProvider == "" {
 		return nil
@@ -146,6 +151,14 @@ func tryOpenAICompat(home string, cfg ConfigMap, provider, model, baseURL string
 		} else {
 			return nil
 		}
+	}
+	if prov == "anthropic" {
+		if k := strings.TrimSpace(key); k != "" && !isPlaceholderKey(k) {
+			return &providers.Anthropic{BaseURL: urlOut, APIKey: k, Model: modelID}
+		}
+		// No usable key: fall through so the caller can try the owner's
+		// configured provider instead of binding a dead adapter.
+		return nil
 	}
 	return &providers.OpenAICompat{
 		BaseURL: urlOut,

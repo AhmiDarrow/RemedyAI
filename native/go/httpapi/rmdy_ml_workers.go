@@ -97,9 +97,10 @@ func (w *RMDYVisionWorker) call(ctx context.Context, toolID string, input any) (
 
 func (w *RMDYVoiceWorker) Speak(ctx context.Context, homeDir string, req VoiceSpeakRequest, gender string) (*VoiceSpeakResult, error) {
 	in := map[string]any{
-		"home_dir": homeDir,
-		"text":     req.Text,
-		"gender":   gender,
+		"home_dir":         homeDir,
+		tools.GoBoundField: true,
+		"text":             req.Text,
+		"gender":           gender,
 	}
 	if strings.TrimSpace(req.Voice) != "" {
 		in["voice"] = req.Voice
@@ -129,9 +130,10 @@ func (w *RMDYVoiceWorker) Speak(ctx context.Context, homeDir string, req VoiceSp
 func (w *RMDYVoiceWorker) Transcribe(ctx context.Context, homeDir string, audio []byte, contentType, language string) (*VoiceTranscribeResult, error) {
 	suffix := suffixFromContentType(contentType)
 	in := map[string]any{
-		"home_dir":  homeDir,
-		"audio_b64": base64.StdEncoding.EncodeToString(audio),
-		"suffix":    suffix,
+		"home_dir":         homeDir,
+		tools.GoBoundField: true,
+		"audio_b64":        base64.StdEncoding.EncodeToString(audio),
+		"suffix":           suffix,
 	}
 	if strings.TrimSpace(language) != "" {
 		in["language"] = language
@@ -152,8 +154,9 @@ func (w *RMDYVoiceWorker) Transcribe(ctx context.Context, homeDir string, audio 
 
 func (w *RMDYVoiceWorker) Install(ctx context.Context, homeDir, component string) (bool, error) {
 	out, err := w.call(ctx, "voice.install", map[string]any{
-		"home_dir":  homeDir,
-		"component": component,
+		"home_dir":         homeDir,
+		tools.GoBoundField: true,
+		"component":        component,
 	})
 	if err != nil {
 		return false, err
@@ -170,15 +173,17 @@ func (w *RMDYVoiceWorker) Install(ctx context.Context, homeDir, component string
 
 func (w *RMDYVisionWorker) Activate(ctx context.Context, homeDir string, enabled bool) (map[string]any, error) {
 	return w.call(ctx, "vision.activate", map[string]any{
-		"home_dir": homeDir,
-		"enabled":  enabled,
+		"home_dir":         homeDir,
+		tools.GoBoundField: true,
+		"enabled":          enabled,
 	})
 }
 
 func (w *RMDYVisionWorker) Install(ctx context.Context, homeDir, modelID, runtimeID string, preferCUDA bool) (map[string]any, error) {
 	in := map[string]any{
-		"home_dir":    homeDir,
-		"prefer_cuda": preferCUDA,
+		"home_dir":         homeDir,
+		tools.GoBoundField: true,
+		"prefer_cuda":      preferCUDA,
 	}
 	if strings.TrimSpace(modelID) != "" {
 		in["model_id"] = modelID
@@ -190,33 +195,35 @@ func (w *RMDYVisionWorker) Install(ctx context.Context, homeDir, modelID, runtim
 }
 
 func (w *RMDYVisionWorker) CancelInstall(ctx context.Context, homeDir string) (map[string]any, error) {
-	return w.call(ctx, "vision.cancel_install", map[string]any{"home_dir": homeDir})
+	return w.call(ctx, "vision.cancel_install", map[string]any{"home_dir": homeDir, tools.GoBoundField: true})
 }
 
 func (w *RMDYVisionWorker) ReinstallRuntime(ctx context.Context, homeDir string, preferCUDA bool) (map[string]any, error) {
 	return w.call(ctx, "vision.reinstall_runtime", map[string]any{
-		"home_dir":    homeDir,
-		"prefer_cuda": preferCUDA,
+		"home_dir":         homeDir,
+		tools.GoBoundField: true,
+		"prefer_cuda":      preferCUDA,
 	})
 }
 
 func (w *RMDYVisionWorker) Uninstall(ctx context.Context, homeDir string, keepModels bool) (map[string]any, error) {
 	return w.call(ctx, "vision.uninstall", map[string]any{
-		"home_dir":    homeDir,
-		"keep_models": keepModels,
+		"home_dir":         homeDir,
+		tools.GoBoundField: true,
+		"keep_models":      keepModels,
 	})
 }
 
 func (w *RMDYVisionWorker) Start(ctx context.Context, homeDir string) (map[string]any, error) {
-	return w.call(ctx, "vision.start", map[string]any{"home_dir": homeDir})
+	return w.call(ctx, "vision.start", map[string]any{"home_dir": homeDir, tools.GoBoundField: true})
 }
 
 func (w *RMDYVisionWorker) Stop(ctx context.Context, homeDir string) (map[string]any, error) {
-	return w.call(ctx, "vision.stop", map[string]any{"home_dir": homeDir})
+	return w.call(ctx, "vision.stop", map[string]any{"home_dir": homeDir, tools.GoBoundField: true})
 }
 
 func (w *RMDYVisionWorker) Progress(ctx context.Context, homeDir string) map[string]any {
-	out, err := w.call(ctx, "vision.progress", map[string]any{"home_dir": homeDir})
+	out, err := w.call(ctx, "vision.progress", map[string]any{"home_dir": homeDir, tools.GoBoundField: true})
 	if err != nil || out == nil {
 		return nil
 	}
