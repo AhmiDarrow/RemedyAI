@@ -425,7 +425,7 @@ def try_live_capture() -> dict[str, Any]:
                     **meta,
                     "api": "focused_element_info",
                     "args": {},
-                    "result": focus,
+                    "result": _redact_focus(focus),
                 },
             ),
         ]
@@ -509,6 +509,23 @@ def write_readme(*, live_ok: bool, live_error: str | None = None) -> Path:
     path = fixture_dir() / "README.md"
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
+
+
+def _redact_focus(focus: Any) -> Any:
+    """Strip owner activity from a focused-element capture.
+
+    ``focused_element_info`` returns whichever window the owner had in front of
+    them, which has already put an application path from their home directory
+    into a tracked fixture. The shape is what the fixture is for, so keep the
+    keys and drop the values.
+    """
+    if not isinstance(focus, dict):
+        return focus
+    out = dict(focus)
+    for key in ("name", "value", "title", "text"):
+        if key in out and isinstance(out[key], str) and out[key]:
+            out[key] = f"redacted-{key}"
+    return out
 
 
 def main() -> int:

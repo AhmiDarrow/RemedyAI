@@ -1,17 +1,17 @@
 {
   "source": "host_binding",
-  "captured_at": "2026-09-09T23:37:47+00:00",
+  "captured_at": "2026-09-09T23:57:10+00:00",
   "platform": "win32",
-  "notes": "Live capture via desktop_uia → host_binding → Zig COM. Do not inject input; do not write clipboard. Window acquisition: launched_notepad. Focused-element values are redacted before commit: this API returns whatever window the owner had in front of them, which is activity data and must not enter the public tree.",
+  "notes": "Live capture via desktop_uia → host_binding → Zig COM. Do not inject input; do not write clipboard. Window acquisition: launched_notepad.",
   "window": {
-    "hwnd": 1706022,
+    "hwnd": 1508602,
     "how": "launched_notepad"
   },
   "api": "focused_element_info",
   "args": {},
   "result": {
-    "name": "Notepad",
+    "name": "redacted-name",
     "role": "document",
-    "value": "redacted: focused-window capture records whatever the owner had open"
+    "value": "redacted-value"
   }
 }

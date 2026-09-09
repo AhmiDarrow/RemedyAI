@@ -1,6 +1,6 @@
 {
   "source": "fake_host_binding",
-  "captured_at": "2026-09-09T23:37:47+00:00",
+  "captured_at": "2026-09-09T23:57:09+00:00",
   "api": "misc",
   "platform": "harness",
   "notes": "Contract fixture from tests.harness.fake_host_binding (reference walker over FakeUIAutomation trees). Shapes must match live Zig UIA output field-for-field.",
