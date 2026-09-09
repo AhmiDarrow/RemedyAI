@@ -96,7 +96,11 @@ def test_no_auto_resume_when_green(tmp_path):
 def test_resume_hint_directs_drive_on_red(tmp_path):
     save_ledger(_red_entry(project_path=str(tmp_path)), home=tmp_path)
     hint = resume_hint(str(tmp_path), home=tmp_path)
-    assert "RED" in hint and "build_drive" in hint
+    # The hint must say the build is red and point at live tools; build_drive
+    # is not a registered tool, so naming it cost a wasted round.
+    assert "RED" in hint
+    assert "workspace.edit" in hint or "workspace.read" in hint
+    assert "build_drive" not in hint
     assert "do not" in hint.lower() and "green" in hint.lower()
 
 

@@ -114,8 +114,10 @@ def test_the_oracle_missing_nudge_forbids_claiming_done():
 
 def test_the_oracle_missing_nudge_names_every_way_out():
     content = oracle_missing_nudge(None)["content"]
-    for route in ("file_write", "bash_exec", "mission_start"):
-        assert route in content
+    # Every way out must name a tool that exists on the Tool ABI; the old
+    # file_write / bash_exec / mission_start aliases were retired.
+    assert "workspace.write" in content
+    assert "shell.exec" in content
 
 
 # --- the cheap "did the goal files land" check --------------------------------
