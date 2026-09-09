@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -31,6 +32,14 @@ type ChatMessage struct {
 	Tokens      any    `json:"tokens"`
 	CreatedAt   any    `json:"created_at"`
 	Reverted    bool   `json:"reverted"`
+	// Draft marks a partial assistant row written while the turn is still
+	// running. The final write replaces it in place.
+	Draft bool `json:"draft"`
+	// RequestID names the turn that produced this row. It is what addresses
+	// the recorded evidence (…/turns/{request_id}/tools/{call_id}), so without
+	// it the process trail can only show the full output of a turn this client
+	// happened to watch live. Empty for rows written before turn logs.
+	RequestID string `json:"request_id,omitempty"`
 }
 
 type sendMessageRequest struct {
@@ -58,6 +67,29 @@ type TurnRequest struct {
 	MaxIterations int
 	// DrainNudges returns queued owner mid-turn guidance (steer). Optional.
 	DrainNudges func() []string
+	// History is the last few session messages before Prompt, oldest first,
+	// as {"role","content"} — forwarded to prompt.assemble.
+	History []map[string]any
+	// Origin names where the prompt came from: "desktop" (default when empty),
+	// "webui", "cli", "hive:<parent-session>", "phone:<device>", or a
+	// messenger channel such as "telegram:<user-id>". Non-owner origins run
+	// untrusted: the prompt is wrapped in an untrusted envelope and every
+	// mutation asks regardless of approval_mode (see OriginIsOwner).
+	Origin string
+}
+
+// OriginIsOwner reports whether a TurnRequest.Origin is one of the owner's own
+// surfaces. Empty means desktop. Messenger and phone origins are untrusted.
+func OriginIsOwner(origin string) bool {
+	o := strings.ToLower(strings.TrimSpace(origin))
+	switch {
+	case o == "", o == "desktop", o == "webui", o == "cli", o == "fixture":
+		return true
+	case strings.HasPrefix(o, "hive:"):
+		return true
+	default:
+		return false
+	}
 }
 
 // TurnRunner generates assistant tokens for the sync send path.
@@ -66,11 +98,41 @@ type TurnRunner interface {
 	RunTurn(ctx context.Context, req TurnRequest, emit func(token string) error) error
 }
 
+// truncStr keeps the first n bytes of s, cutting on a rune boundary.
 func truncStr(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
 	return s[:n] + fmt.Sprintf("\n…[truncated %d chars]", len(s)-n)
+}
+
+const (
+	turnHistoryMessages     = 12
+	turnHistoryContentChars = 4_000
+)
+
+// turnHistory returns the most recent session messages, oldest first, as
+// prompt.assemble history rows. Call it before persisting the current prompt.
+func (s *Server) turnHistory(sid string) []map[string]any {
+	if s == nil || s.sessions == nil {
+		return nil
+	}
+	msgs, err := s.sessions.ListMessages(sid, turnHistoryMessages, 0)
+	if err != nil {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(msgs))
+	for _, m := range msgs {
+		content, _ := m.Content.(string)
+		out = append(out, map[string]any{
+			"role":    m.Role,
+			"content": truncStr(content, turnHistoryContentChars),
+		})
+	}
+	return out
 }
 
 func truncAny(v any, n int) any {
@@ -118,10 +180,10 @@ func (s *sessionStore) ListMessages(sessionID string, limit, offset int) ([]Chat
 	defer s.mu.Unlock()
 	rows, err := s.db.Query(
 		`SELECT id, role, content, thinking, tool_calls, tool_results,
-		        model, agent, tokens, created_at, reverted
+		        model, agent, tokens, created_at, reverted, draft, request_id
 		 FROM (
 		   SELECT id, role, content, thinking, tool_calls, tool_results,
-		          model, agent, tokens, created_at, reverted, rowid AS _rid
+		          model, agent, tokens, created_at, reverted, draft, request_id, rowid AS _rid
 		   FROM chat_messages
 		   WHERE session_id = ? AND reverted = 0
 		   ORDER BY created_at DESC, rowid DESC
@@ -158,10 +220,10 @@ func (s *sessionStore) ListMessagesExport(sessionID string, limit int) ([]ChatMe
 	defer s.mu.Unlock()
 	rows, err := s.db.Query(
 		`SELECT id, role, content, thinking, tool_calls, tool_results,
-		        model, agent, tokens, created_at, reverted
+		        model, agent, tokens, created_at, reverted, draft, request_id
 		 FROM (
 		   SELECT id, role, content, thinking, tool_calls, tool_results,
-		          model, agent, tokens, created_at, reverted, rowid AS _rid
+		          model, agent, tokens, created_at, reverted, draft, request_id, rowid AS _rid
 		   FROM chat_messages
 		   WHERE session_id = ? AND reverted = 0
 		   ORDER BY created_at DESC, rowid DESC
@@ -195,7 +257,7 @@ func (s *sessionStore) GetMessage(msgID string) (msg ChatMessage, sessionID stri
 	defer s.mu.Unlock()
 	row := s.db.QueryRow(
 		`SELECT id, session_id, role, content, thinking, tool_calls, tool_results,
-		        model, agent, tokens, created_at, reverted
+		        model, agent, tokens, created_at, reverted, draft
 		 FROM chat_messages WHERE id = ?`,
 		msgID,
 	)
@@ -204,11 +266,11 @@ func (s *sessionStore) GetMessage(msgID string) (msg ChatMessage, sessionID stri
 		thinking, model, agent          sql.NullString
 		toolCallsJSON, toolResultsJSON  string
 		tokens                          sql.NullInt64
-		reverted                        int
+		reverted, draft                 int
 	)
 	err = row.Scan(
 		&id, &sid, &role, &content, &thinking, &toolCallsJSON, &toolResultsJSON,
-		&model, &agent, &tokens, &created, &reverted,
+		&model, &agent, &tokens, &created, &reverted, &draft,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ChatMessage{}, "", false, nil
@@ -232,6 +294,7 @@ func (s *sessionStore) GetMessage(msgID string) (msg ChatMessage, sessionID stri
 		ToolResults: toolResults,
 		CreatedAt:   created,
 		Reverted:    reverted != 0,
+		Draft:       draft != 0,
 	}
 	if thinking.Valid {
 		msg.Thinking = thinking.String
@@ -320,11 +383,12 @@ func scanMessage(row scannable) (ChatMessage, error) {
 		thinking, model, agent         sql.NullString
 		toolCallsJSON, toolResultsJSON string
 		tokens                         sql.NullInt64
-		reverted                       int
+		reverted, draft                int
+		requestID                      sql.NullString
 	)
 	err := row.Scan(
 		&id, &role, &content, &thinking, &toolCallsJSON, &toolResultsJSON,
-		&model, &agent, &tokens, &created, &reverted,
+		&model, &agent, &tokens, &created, &reverted, &draft, &requestID,
 	)
 	if err != nil {
 		return ChatMessage{}, err
@@ -338,6 +402,7 @@ func scanMessage(row scannable) (ChatMessage, error) {
 		_ = json.Unmarshal([]byte(toolResultsJSON), &toolResults)
 	}
 	msg := ChatMessage{
+		RequestID:   requestID.String,
 		ID:          id,
 		Role:        role,
 		Content:     content,
@@ -345,6 +410,7 @@ func scanMessage(row scannable) (ChatMessage, error) {
 		ToolResults: toolResults,
 		CreatedAt:   created,
 		Reverted:    reverted != 0,
+		Draft:       draft != 0,
 	}
 	if thinking.Valid {
 		msg.Thinking = thinking.String
@@ -374,6 +440,9 @@ func (s *sessionStore) AddMessage(sessionID, role, content string, model, agent 
 }
 
 // AddMessageFull inserts a chat row including thinking / tool payloads (stream path).
+// The INSERT and the message_count UPDATE run in one transaction: a chat row
+// is never written without its counter, and a failure is returned, never
+// swallowed.
 func (s *sessionStore) AddMessageFull(
 	sessionID, role, content string,
 	thinking *string,
@@ -381,44 +450,79 @@ func (s *sessionStore) AddMessageFull(
 	model, agent *string,
 	tokens *int64,
 ) (ChatMessage, error) {
+	return s.insertMessage(sessionID, "", role, content, thinking, toolCalls, toolResults, model, agent, tokens, false)
+}
+
+// marshalToolPayload renders a tool_calls / tool_results column value.
+func marshalToolPayload(v any) string {
+	if v == nil {
+		return "[]"
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
+
+func (s *sessionStore) insertMessage(
+	sessionID, requestID, role, content string,
+	thinking *string,
+	toolCalls, toolResults any,
+	model, agent *string,
+	tokens *int64,
+	draft bool,
+) (ChatMessage, error) {
 	now := nowISO()
 	id := newSessionID()
-	tcJSON := "[]"
-	trJSON := "[]"
-	if toolCalls != nil {
-		if b, err := json.Marshal(toolCalls); err == nil {
-			tcJSON = string(b)
-		}
-	}
-	if toolResults != nil {
-		if b, err := json.Marshal(toolResults); err == nil {
-			trJSON = string(b)
-		}
-	}
+	tcJSON := marshalToolPayload(toolCalls)
+	trJSON := marshalToolPayload(toolResults)
 	var tok any
 	if tokens != nil {
 		tok = *tokens
 	}
+	draftFlag := 0
+	if draft {
+		draftFlag = 1
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return ChatMessage{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(
 		`INSERT INTO chat_messages (
 			id, session_id, role, content, thinking, tool_calls, tool_results,
-			model, agent, tokens, created_at, reverted
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+			model, agent, tokens, created_at, reverted, request_id, draft
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
 		id, sessionID, role, content, nullStr(thinking), tcJSON, trJSON,
-		nullStr(model), nullStr(agent), tok, now,
-	)
-	if err != nil {
+		nullStr(model), nullStr(agent), tok, now, nullStr(nullableTrim(&requestID)), draftFlag,
+	); err != nil {
 		return ChatMessage{}, err
 	}
-	_, err = s.db.Exec(
+	if _, err := tx.Exec(
 		`UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?`,
 		now, sessionID,
-	)
-	if err != nil {
+	); err != nil {
 		return ChatMessage{}, err
 	}
+	if err := tx.Commit(); err != nil {
+		return ChatMessage{}, err
+	}
+	return buildChatMessage(id, role, content, thinking, tcJSON, trJSON, model, agent, tokens, now, draft), nil
+}
+
+func buildChatMessage(
+	id, role, content string,
+	thinking *string,
+	tcJSON, trJSON string,
+	model, agent *string,
+	tokens *int64,
+	created string,
+	draft bool,
+) ChatMessage {
 	var thinkAny any
 	if thinking != nil {
 		thinkAny = *thinking
@@ -441,9 +545,138 @@ func (s *sessionStore) AddMessageFull(
 		Model:       nullToAny(model),
 		Agent:       nullToAny(agent),
 		Tokens:      tokAny,
-		CreatedAt:   now,
+		CreatedAt:   created,
 		Reverted:    false,
-	}, nil
+		Draft:       draft,
+	}
+}
+
+// findTurnRow returns the id of the row already written for (sessionID,
+// requestID), draft or final.
+func (s *sessionStore) findTurnRowLocked(sessionID, requestID, role string) (string, bool, error) {
+	var id string
+	err := s.db.QueryRow(
+		`SELECT id FROM chat_messages
+		 WHERE session_id = ? AND request_id = ? AND role = ? AND reverted = 0
+		 ORDER BY rowid DESC LIMIT 1`,
+		sessionID, requestID, role,
+	).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return id, true, nil
+}
+
+// UpsertDraftMessage writes the partial answer for a running turn. The first
+// call inserts the row (and counts it); later calls update it in place, so a
+// crash mid-build leaves the partial text and the tool ledger on disk instead
+// of an empty assistant turn.
+func (s *sessionStore) UpsertDraftMessage(
+	sessionID, requestID, role, content string,
+	thinking *string,
+	toolCalls, toolResults any,
+	model *string,
+) (ChatMessage, error) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return ChatMessage{}, errors.New("request_id required for a draft row")
+	}
+	s.mu.Lock()
+	id, found, err := s.findTurnRowLocked(sessionID, requestID, role)
+	s.mu.Unlock()
+	if err != nil {
+		return ChatMessage{}, err
+	}
+	if !found {
+		return s.insertMessage(
+			sessionID, requestID, role, content, thinking,
+			toolCalls, toolResults, model, nil, nil, true,
+		)
+	}
+	tcJSON := marshalToolPayload(toolCalls)
+	trJSON := marshalToolPayload(toolResults)
+	now := nowISO()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.db.Exec(
+		`UPDATE chat_messages
+		 SET content = ?, thinking = ?, tool_calls = ?, tool_results = ?, draft = 1
+		 WHERE id = ?`,
+		content, nullStr(thinking), tcJSON, trJSON, id,
+	); err != nil {
+		return ChatMessage{}, err
+	}
+	if _, err := s.db.Exec(
+		`UPDATE chat_sessions SET updated_at = ? WHERE id = ?`, now, sessionID,
+	); err != nil {
+		return ChatMessage{}, err
+	}
+	msg := buildChatMessage(id, role, content, thinking, tcJSON, trJSON, model, nil, nil, now, true)
+	return msg, nil
+}
+
+// FinalizeMessage replaces the draft row for a turn with its final content
+// (draft = 0), or inserts the row when no draft was ever written. It is the
+// single assistant-write path for a streamed turn, so an interrupted, errored
+// and completed turn all leave exactly one row.
+func (s *sessionStore) FinalizeMessage(
+	sessionID, requestID, role, content string,
+	thinking *string,
+	toolCalls, toolResults any,
+	model, agent *string,
+	tokens *int64,
+) (ChatMessage, error) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID != "" {
+		s.mu.Lock()
+		id, found, err := s.findTurnRowLocked(sessionID, requestID, role)
+		s.mu.Unlock()
+		if err != nil {
+			return ChatMessage{}, err
+		}
+		if found {
+			tcJSON := marshalToolPayload(toolCalls)
+			trJSON := marshalToolPayload(toolResults)
+			now := nowISO()
+			var tok any
+			if tokens != nil {
+				tok = *tokens
+			}
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			tx, err := s.db.Begin()
+			if err != nil {
+				return ChatMessage{}, err
+			}
+			defer func() { _ = tx.Rollback() }()
+			if _, err := tx.Exec(
+				`UPDATE chat_messages
+				 SET content = ?, thinking = ?, tool_calls = ?, tool_results = ?,
+				     model = ?, agent = ?, tokens = ?, draft = 0
+				 WHERE id = ?`,
+				content, nullStr(thinking), tcJSON, trJSON,
+				nullStr(model), nullStr(agent), tok, id,
+			); err != nil {
+				return ChatMessage{}, err
+			}
+			if _, err := tx.Exec(
+				`UPDATE chat_sessions SET updated_at = ? WHERE id = ?`, now, sessionID,
+			); err != nil {
+				return ChatMessage{}, err
+			}
+			if err := tx.Commit(); err != nil {
+				return ChatMessage{}, err
+			}
+			return buildChatMessage(id, role, content, thinking, tcJSON, trJSON, model, agent, tokens, now, false), nil
+		}
+	}
+	return s.insertMessage(
+		sessionID, requestID, role, content, thinking,
+		toolCalls, toolResults, model, agent, tokens, false,
+	)
 }
 
 func (s *sessionStore) SetTitle(sessionID, title string) error {
@@ -593,6 +826,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var sessProvider, sessModel *string
+	var history []map[string]any
 	projectPath := ""
 	if s.sessions != nil {
 		sess, ok, err := s.sessions.Get(sid)
@@ -620,7 +854,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		} else {
 			sessProvider, sessModel = sp, sm
 		}
-
+		history = s.turnHistory(sid)
 		if _, err := s.sessions.AddMessage(sid, "user", displayContent, nil, nil); err != nil {
 			if _, ok, _ := s.sessions.Get(sid); !ok {
 				writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Session not found"})
@@ -647,6 +881,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		PlanMode:    req.PlanMode,
 		ChatMode:    req.ChatMode,
 		Attachments: attDicts,
+		History:     history,
 		DrainNudges: func() []string {
 			if s.claims == nil {
 				return nil
@@ -654,24 +889,15 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 			return s.claims.DrainNudges(sid)
 		},
 	}, func(token string) error {
-		if strings.HasPrefix(token, "@@tool_call:") {
+		if text, ok := modelTextToken(token); ok {
+			token = text
+		} else if strings.HasPrefix(token, "@@tool_call:") {
 			collectedToolCalls = append(collectedToolCalls, parseToolCallToken(token))
 			return nil
-		}
-		if strings.HasPrefix(token, "@@tool_result:") {
-			name, preview, ok := parseToolResultToken(token)
-			item := map[string]any{"name": name, "output": preview, "error": nil}
-			if !ok {
-				errMsg := preview
-				if errMsg == "" {
-					errMsg = "tool failed"
-				}
-				item["error"] = errMsg
-			}
-			collectedToolResults = append(collectedToolResults, item)
+		} else if strings.HasPrefix(token, "@@tool_result:") {
+			collectedToolResults = append(collectedToolResults, parseToolResultToken(token).record())
 			return nil
-		}
-		if strings.HasPrefix(token, "@@") {
+		} else if strings.HasPrefix(token, "@@") {
 			return nil
 		}
 		responseText.WriteString(token)

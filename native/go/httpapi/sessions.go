@@ -32,6 +32,11 @@ type ChatSession struct {
 	ExternalUser   *string `json:"external_user"`
 	CreatedAt      *string `json:"created_at"`
 	UpdatedAt      *string `json:"updated_at"`
+	// Claimed is true while a turn holds this session's stream claim, and
+	// ActiveRequestID names that turn — the pair the UI needs to show
+	// "working" after a reload and to call GET .../stream/attach.
+	Claimed         bool    `json:"claimed"`
+	ActiveRequestID *string `json:"active_request_id"`
 }
 
 type createSessionRequest struct {
@@ -101,9 +106,13 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     tokens INTEGER,
     created_at TEXT NOT NULL,
     reverted INTEGER NOT NULL DEFAULT 0,
+    request_id TEXT,
+    draft INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_request
+    ON chat_messages(session_id, request_id);
 `
 
 type sessionStore struct {
@@ -148,11 +157,60 @@ func openSessionStore(path string) (*sessionStore, error) {
 		return nil, err
 	}
 	store := &sessionStore{db: db}
+	if err := store.ensureChatMessageColumns(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := store.ensurePartnerMemorySchema(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return store, nil
+}
+
+// ensureChatMessageColumns adds the partial-persistence columns to a database
+// created before drafts existed. New databases already have them.
+func (s *sessionStore) ensureChatMessageColumns() error {
+	rows, err := s.db.Query(`PRAGMA table_info(chat_messages)`)
+	if err != nil {
+		return err
+	}
+	have := map[string]bool{}
+	for rows.Next() {
+		var (
+			cid        int
+			name, typ  string
+			notNull    int
+			defaultVal sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultVal, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		have[name] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !have["request_id"] {
+		if _, err := s.db.Exec(`ALTER TABLE chat_messages ADD COLUMN request_id TEXT`); err != nil {
+			return err
+		}
+	}
+	if !have["draft"] {
+		if _, err := s.db.Exec(
+			`ALTER TABLE chat_messages ADD COLUMN draft INTEGER NOT NULL DEFAULT 0`,
+		); err != nil {
+			return err
+		}
+	}
+	_, err = s.db.Exec(
+		`CREATE INDEX IF NOT EXISTS idx_chat_messages_request
+		 ON chat_messages(session_id, request_id)`,
+	)
+	return err
 }
 
 func resolveDBPath(cfg Config) string {
@@ -622,6 +680,9 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
 		return
 	}
+	for i := range sessions {
+		s.decorateLiveness(&sessions[i])
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"sessions": sessions,
 		"offset":   offset,
@@ -673,7 +734,20 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Session not found"})
 		return
 	}
+	s.decorateLiveness(&sess)
 	writeJSON(w, http.StatusOK, sess)
+}
+
+// decorateLiveness stamps claimed / active_request_id onto a session row so a
+// client that reloads mid-build can show "working" and re-attach to the turn.
+func (s *Server) decorateLiveness(sess *ChatSession) {
+	if s == nil || sess == nil || s.claims == nil {
+		return
+	}
+	sess.Claimed = s.claims.IsClaimed(sess.ID)
+	if rid := s.claims.ActiveRequest(sess.ID); rid != "" {
+		sess.ActiveRequestID = &rid
+	}
 }
 
 func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {

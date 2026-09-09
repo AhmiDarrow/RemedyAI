@@ -150,7 +150,7 @@ func TestWhatsAppWebhookRejectsOversized(t *testing.T) {
 
 func TestTeamsWebhookAuthAndActivity(t *testing.T) {
 	s := newWebhookTestServer(t)
-	t.Setenv("REMEDY_TEAMS_SKIP_JWT", "1")
+	signer := newTestJWTSigner(t, "teams-test-key")
 	var n atomic.Int32
 	s.messengerGW.RegisterHandler(func(ctx context.Context, ev gateway.Event) error {
 		if ev.Kind == gateway.EventMessage {
@@ -173,8 +173,14 @@ func TestTeamsWebhookAuthAndActivity(t *testing.T) {
 		"from": map[string]any{"id": "u1", "name": "User"},
 	}
 	raw, _ := json.Marshal(activity)
+	token := signer.sign(t, map[string]any{
+		"iss":        gateway.BotFrameworkIssuer,
+		"aud":        "app-id",
+		"serviceurl": "https://smba.trafficmanager.net/amer/",
+		"exp":        float64(time.Now().Add(time.Hour).Unix()),
+	})
 	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/teams", bytes.NewReader(raw))
-	req.Header.Set("Authorization", "Bearer ignored-when-skip")
+	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -182,8 +188,7 @@ func TestTeamsWebhookAuthAndActivity(t *testing.T) {
 	}
 	waitAtomic(t, &n, 1)
 
-	// Missing auth when skip off
-	t.Setenv("REMEDY_TEAMS_SKIP_JWT", "0")
+	// No Authorization header at all is refused.
 	req = httptest.NewRequest(http.MethodPost, "/api/webhooks/teams", bytes.NewReader(raw))
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -194,8 +199,10 @@ func TestTeamsWebhookAuthAndActivity(t *testing.T) {
 
 func TestGoogleChatWebhookChallengeAndAuth(t *testing.T) {
 	s := newWebhookTestServer(t)
+	gcSigner := newTestJWTSigner(t, "gchat-test-key")
+	const gcProject = "1234567890"
 	s.messengerGW.RegisterChannel(gateway.NewGoogleChat(s.messengerGW, gateway.GoogleChatConfig{
-		AccessToken: "gchat-tok", AllowAll: true,
+		AccessToken: "gchat-tok", ProjectNumber: gcProject, AllowAll: true,
 	}))
 	h := s.Handler()
 
@@ -235,7 +242,11 @@ func TestGoogleChatWebhookChallengeAndAuth(t *testing.T) {
 		return nil
 	})
 	req = httptest.NewRequest(http.MethodPost, "/api/webhooks/google_chat", bytes.NewReader(raw))
-	req.Header.Set("Authorization", "Bearer gchat-tok")
+	req.Header.Set("Authorization", "Bearer "+gcSigner.sign(t, map[string]any{
+		"iss": gateway.GoogleChatIssuer,
+		"aud": gcProject,
+		"exp": float64(time.Now().Add(time.Hour).Unix()),
+	}))
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

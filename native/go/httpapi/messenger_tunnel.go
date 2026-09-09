@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -40,11 +41,11 @@ func zigTunnelStarter(home string) tunnelProcessStarter {
 			return nil, err
 		}
 		_ = core.WriteJailSetRoots(nil)
-		token, nowMS, err := core.IssueProcessSpawnToken(argv, false)
+		token, nowMS, err := core.IssueProcessSpawnToken(argv, env, false, false)
 		if err != nil {
 			return nil, err
 		}
-		pid, handle, err := core.ProcessSpawnAuthorized(argv, cwd, env, token, "", "", false, nowMS)
+		pid, handle, err := core.ProcessSpawnAuthorized(argv, cwd, env, false, token, "", "", false, nowMS)
 		if err != nil {
 			return nil, err
 		}
@@ -121,7 +122,75 @@ type messengerTunnelState struct {
 	prevEnv     string
 	prevEnvSet  bool
 	proc        *tunnelStartedProcess
+	origin      *webhookOrigin
 	err         string
+}
+
+// webhookOrigin is the loopback listener a tunnel is pointed at. It serves the
+// platform webhook routes and nothing else, so a rewritten Host header cannot
+// walk from the tunnel into the API, the SPA, or token bootstrap.
+type webhookOrigin struct {
+	ln   net.Listener
+	srv  *http.Server
+	port int
+}
+
+func (o *webhookOrigin) close() {
+	if o == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if o.srv != nil {
+		_ = o.srv.Shutdown(ctx)
+	}
+	if o.ln != nil {
+		_ = o.ln.Close()
+	}
+}
+
+// startWebhookOrigin binds a fresh loopback port that only answers
+// /api/webhooks/* and /api/webhook/{source}. Every other path is 404 — the
+// tunnel never learns the API exists.
+func (s *Server) startWebhookOrigin() (*webhookOrigin, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, fmt.Errorf("webhook origin listen: %w", err)
+	}
+	port := 0
+	if tcp, ok := ln.Addr().(*net.TCPAddr); ok {
+		port = tcp.Port
+	}
+	mux := s.mux
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isWebhookPath(r.URL.Path) {
+			writeJSON(w, http.StatusNotFound, map[string]string{
+				"detail": "not found (this origin serves messenger webhooks only)",
+			})
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+	srv := &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 15 * time.Second,
+	}
+	go func() { _ = srv.Serve(ln) }()
+	log.Printf("messenger tunnel: webhook-only origin on 127.0.0.1:%d (the API and Web UI stay off the tunnel)", port)
+	return &webhookOrigin{ln: ln, srv: srv, port: port}, nil
+}
+
+// tunnelRunning reports whether a managed cloudflared tunnel is up. Token
+// bootstrap is refused while it is (auth.go), so a tunnelled request can never
+// be answered with the local API token.
+func (s *Server) tunnelRunning() bool {
+	ts := s.tunnelState()
+	if ts == nil {
+		return false
+	}
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	return ts.running
 }
 
 func (s *Server) tunnelState() *messengerTunnelState {
@@ -139,6 +208,7 @@ type MessengerTunnelStatus struct {
 	Running       bool   `json:"running"`
 	Mode          string `json:"mode,omitempty"`
 	PublicURL     string `json:"public_url,omitempty"`
+	OriginURL     string `json:"origin_url,omitempty"`
 	Binary        string `json:"binary,omitempty"`
 	BinaryReady   bool   `json:"binary_ready"`
 	DownloadURL   string `json:"download_url,omitempty"`
@@ -156,7 +226,9 @@ func (s *Server) messengerTunnelStatus() MessengerTunnelStatus {
 		Binary:        bin,
 		DownloadURL:   gateway.CloudflaredDownloadURL(),
 		EnvConfigured: publicHTTPSTunnelConfigured(),
-		Hint:          "Exposes local messenger webhooks (WhatsApp / Teams / Google Chat) over HTTPS. The API stays on loopback.",
+		Hint: "Exposes local messenger webhooks (WhatsApp / Teams / Google Chat) over HTTPS. " +
+			"The tunnel is pointed at a webhook-only loopback origin; the API, the Web UI and " +
+			"token bootstrap are not reachable through it.",
 	}
 	ts := s.tunnelState()
 	if ts == nil {
@@ -167,6 +239,9 @@ func (s *Server) messengerTunnelStatus() MessengerTunnelStatus {
 	st.Running = ts.running
 	st.Mode = ts.mode
 	st.PublicURL = ts.publicURL
+	if ts.origin != nil {
+		st.OriginURL = fmt.Sprintf("http://127.0.0.1:%d", ts.origin.port)
+	}
 	st.PID = ts.pid
 	st.Error = ts.err
 	if st.Binary == "" && ts.binary != "" {
@@ -180,8 +255,8 @@ func (s *Server) messengerTunnelStatus() MessengerTunnelStatus {
 }
 
 type tunnelStartBody struct {
-	Mode          string `json:"mode"`                     // quick (default) | named
-	Token         string `json:"token,omitempty"`          // named tunnel token
+	Mode          string `json:"mode"`                      // quick (default) | named
+	Token         string `json:"token,omitempty"`           // named tunnel token
 	PublicBaseURL string `json:"public_base_url,omitempty"` // required for named; optional override for quick
 	OriginPort    int    `json:"origin_port,omitempty"`     // default apiListenPort or 7400
 }
@@ -309,17 +384,18 @@ func (s *Server) startMessengerTunnel(body tunnelStartBody) (MessengerTunnelStat
 	if err != nil {
 		return MessengerTunnelStatus{}, err
 	}
-	originPort := body.OriginPort
-	if originPort <= 0 {
-		originPort = s.apiListenPort
+	if body.OriginPort > 0 {
+		log.Printf("messenger tunnel: origin_port=%d ignored; the tunnel only ever serves the webhook origin", body.OriginPort)
 	}
-	if originPort <= 0 {
-		originPort = 7400
+	webhookOrig, err := s.startWebhookOrigin()
+	if err != nil {
+		return MessengerTunnelStatus{}, err
 	}
-	origin := fmt.Sprintf("http://127.0.0.1:%d", originPort)
+	origin := fmt.Sprintf("http://127.0.0.1:%d", webhookOrig.port)
 
 	metricsLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
+		webhookOrig.close()
 		return MessengerTunnelStatus{}, fmt.Errorf("metrics listen: %w", err)
 	}
 	metricsPort := metricsLn.Addr().(*net.TCPAddr).Port
@@ -339,6 +415,7 @@ func (s *Server) startMessengerTunnel(body tunnelStartBody) (MessengerTunnelStat
 	}
 	proc, err := starter(context.Background(), argv, nil, filepath.Dir(bin))
 	if err != nil {
+		webhookOrig.close()
 		return MessengerTunnelStatus{}, fmt.Errorf("start cloudflared: %w", err)
 	}
 
@@ -347,6 +424,7 @@ func (s *Server) startMessengerTunnel(body tunnelStartBody) (MessengerTunnelStat
 		host, perr := pollQuickTunnelHostname("http://"+metricsAddr+"/quicktunnel", 45*time.Second)
 		if perr != nil {
 			_ = proc.Cleanup()
+			webhookOrig.close()
 			return MessengerTunnelStatus{}, fmt.Errorf("quick tunnel URL: %w", perr)
 		}
 		publicURL = host
@@ -361,9 +439,13 @@ func (s *Server) startMessengerTunnel(body tunnelStartBody) (MessengerTunnelStat
 	ts.binary = bin
 	ts.pid = proc.PID
 	ts.proc = proc
+	ts.origin = webhookOrig
 	ts.setEnv = true
 	ts.err = ""
 	ts.mu.Unlock()
+	if mode == "named" {
+		log.Printf("messenger tunnel: named mode — point the Cloudflare ingress at %s so only webhooks are published", origin)
+	}
 
 	return s.messengerTunnelStatus(), nil
 }
@@ -372,6 +454,8 @@ func (s *Server) stopMessengerTunnel() MessengerTunnelStatus {
 	ts := s.tunnelState()
 	ts.mu.Lock()
 	proc := ts.proc
+	origin := ts.origin
+	ts.origin = nil
 	setEnv := ts.setEnv
 	ts.running = false
 	ts.mode = ""
@@ -393,6 +477,7 @@ func (s *Server) stopMessengerTunnel() MessengerTunnelStatus {
 		_ = core.ProcessKillTree(proc.PID)
 		_ = core.ProcessClose(proc.Handle)
 	}
+	origin.close()
 	if setEnv {
 		if prevSet {
 			_ = os.Setenv("REMEDY_PUBLIC_BASE_URL", prev)

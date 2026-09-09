@@ -227,15 +227,15 @@ func spawnConptyTerminal(homeDir string, argv []string, cwd string, cols, rows i
 		return nil, err
 	}
 	_ = core.WriteJailSetRoots(nil) // Full / unbound for interactive terminal
-	token, nowMS, err := core.IssueProcessSpawnToken(argv, false)
-	if err != nil {
-		return nil, err
-	}
 	env := map[string]string{}
 	for _, e := range os.Environ() {
 		if i := strings.IndexByte(e, '='); i > 0 {
 			env[e[:i]] = e[i+1:]
 		}
+	}
+	token, nowMS, err := core.IssueProcessSpawnToken(argv, env, false, false)
+	if err != nil {
+		return nil, err
 	}
 	c, r := uint16(cols), uint16(rows)
 	if c == 0 {
@@ -244,7 +244,7 @@ func spawnConptyTerminal(homeDir string, argv []string, cwd string, cols, rows i
 	if r == 0 {
 		r = 40
 	}
-	_, handle, err := core.ConptySpawnAuthorized(argv, cwd, env, c, r, token, "", "", false, nowMS)
+	_, handle, err := core.ConptySpawnAuthorized(argv, cwd, env, false, c, r, token, "", "", false, nowMS)
 	if err != nil {
 		return nil, err
 	}

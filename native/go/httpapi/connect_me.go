@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
@@ -72,8 +73,30 @@ func (s *Server) connectMePayload() map[string]any {
 	}
 }
 
+// connectMeAuthorized gates the unauthenticated /connect/me alias.
+//
+// /connect/me is registered outside /api/, so the Bearer middleware never sees
+// it, yet the payload names the focused session, whether a turn is running and
+// which panes are open — enough to watch the owner. Authenticated callers
+// (/api/connect/me with the API token) pass straight through; everyone else
+// must be on loopback AND have addressed a loopback Host, which is the same
+// pair of checks token bootstrap uses to survive DNS rebinding.
+func (s *Server) connectMeAuthorized(r *http.Request) bool {
+	if s != nil && s.token != "" && requestAuthorized(r, s.token) {
+		return true
+	}
+	return clientIsLoopback(r) && hostHeaderIsLoopback(r)
+}
+
 // handleConnectMe serves GET /connect/me and GET /api/connect/me.
-func (s *Server) handleConnectMe(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleConnectMe(w http.ResponseWriter, r *http.Request) {
+	if !s.connectMeAuthorized(r) {
+		log.Printf("connect/me: refused (not loopback, or Host is not loopback — rebinding blocked)")
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"detail": "loopback only (send the API token for /api/connect/me)",
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, s.connectMePayload())
 }
 

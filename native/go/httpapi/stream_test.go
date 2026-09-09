@@ -600,7 +600,9 @@ func TestStreamDisconnectDoesNotKillJob(t *testing.T) {
 		}
 		_ = json.Unmarshal(raw, &listed)
 		for i := range listed.Messages {
-			if listed.Messages[i].Role == "assistant" {
+			// Skip the draft row: the final write replaces it in place, and
+			// only the final row carries the interrupt note.
+			if listed.Messages[i].Role == "assistant" && !listed.Messages[i].Draft {
 				assistant = &listed.Messages[i]
 				break
 			}

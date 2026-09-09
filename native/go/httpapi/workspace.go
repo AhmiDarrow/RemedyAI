@@ -130,6 +130,36 @@ func defaultOwnerFilesBase() string {
 	return ""
 }
 
+// isSystemStartDir reports OS directories a packaged Desktop is merely launched
+// from (Windows System32 / SysWOW64 / the Windows root, POSIX filesystem root).
+// They are never a working folder the owner meant, so a shell started there is
+// rebound to the session root in every access scope.
+func isSystemStartDir(path string) bool {
+	p := strings.TrimSpace(path)
+	if p == "" {
+		return false
+	}
+	p = filepath.Clean(p)
+	if p == string(filepath.Separator) {
+		return true
+	}
+	winRoot := strings.TrimSpace(os.Getenv("SystemRoot"))
+	if winRoot == "" {
+		winRoot = `C:\Windows`
+	}
+	winRoot = filepath.Clean(winRoot)
+	for _, candidate := range []string{
+		winRoot,
+		filepath.Join(winRoot, "System32"),
+		filepath.Join(winRoot, "SysWOW64"),
+	} {
+		if strings.EqualFold(p, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
 func isPackagedInstallDir(path string) bool {
 	p := filepath.Clean(strings.TrimSpace(path))
 	if p == "" {

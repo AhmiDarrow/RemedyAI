@@ -56,6 +56,9 @@ func (s *Server) reloadMessengerChannels() {
 	if s == nil || s.messengerGW == nil {
 		return
 	}
+	// Before reading credentials, move any legacy plaintext ones out of
+	// config.toml into the secret store (secret_migrate.go). Runs once.
+	s.migrateSecretsOnce()
 	home := ResolveHomeDir(s.homeDir)
 	cfg := map[string]any(LoadConfig(s.homeDir))
 	wasRunning := s.messengerGW.Running()
@@ -126,6 +129,7 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 		chatID = ev.SessionID
 	}
 	username, _ := ev.Payload["username"].(string)
+	senderID, _ := ev.Payload["user_id"].(string)
 
 	sess, err := s.resolveMessengerSession(string(ev.Channel), chatID, username, msg)
 	if err != nil || sess.ID == "" {
@@ -180,25 +184,17 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 		Model:       sess.Model,
 		Provider:    sess.LLMProvider,
 		ProjectPath: projectPath,
+		Origin:      messengerOrigin(string(ev.Channel), senderID),
 	}, func(token string) error {
-		if strings.HasPrefix(token, "@@tool_call:") {
+		if text, ok := modelTextToken(token); ok {
+			token = text
+		} else if strings.HasPrefix(token, "@@tool_call:") {
 			collectedToolCalls = append(collectedToolCalls, parseToolCallToken(token))
 			return nil
-		}
-		if strings.HasPrefix(token, "@@tool_result:") {
-			name, preview, ok := parseToolResultToken(token)
-			item := map[string]any{"name": name, "output": preview, "error": nil}
-			if !ok {
-				errMsg := preview
-				if errMsg == "" {
-					errMsg = "tool failed"
-				}
-				item["error"] = errMsg
-			}
-			collectedToolResults = append(collectedToolResults, item)
+		} else if strings.HasPrefix(token, "@@tool_result:") {
+			collectedToolResults = append(collectedToolResults, parseToolResultToken(token).record())
 			return nil
-		}
-		if strings.HasPrefix(token, "@@") {
+		} else if strings.HasPrefix(token, "@@") {
 			return nil
 		}
 		reply.WriteString(token)
@@ -251,6 +247,17 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 		_, _ = s.messengerGW.SendTo(runCtx, ev.Channel, part, chatID)
 	}
 	return nil
+}
+
+// messengerOrigin is the untrusted TurnRequest.Origin for an inbound
+// messenger event: "<channel>:<sender-id>", or the channel alone when the
+// adapter did not carry a sender id.
+func messengerOrigin(channel, senderID string) string {
+	ch := strings.ToLower(strings.TrimSpace(channel))
+	if id := strings.TrimSpace(senderID); id != "" {
+		return ch + ":" + id
+	}
+	return ch
 }
 
 func (s *Server) resolveMessengerSession(channel, chatID, username, firstMessage string) (ChatSession, error) {

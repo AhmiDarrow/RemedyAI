@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -159,5 +160,54 @@ func TestConnectMePausedReachable(t *testing.T) {
 	}
 	if body["reachable"] != "paused" {
 		t.Fatalf("reachable=%v", body["reachable"])
+	}
+}
+
+// connectMeRequest issues one /connect/me call with an explicit peer and Host
+// so the rebinding guard can be exercised.
+func connectMeRequest(t *testing.T, s *Server, path, remoteAddr, host string, auth bool) int {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.RemoteAddr = remoteAddr
+	req.Host = host
+	if auth {
+		req.Header.Set("Authorization", "Bearer "+connectTestToken)
+	}
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	return rr.Code
+}
+
+// /connect/me is registered outside /api/, so the Bearer middleware never sees
+// it. Its payload names the focused session and the open panes, so it must be
+// no easier to reach than token bootstrap.
+func TestConnectMeUnauthenticatedAliasIsLoopbackAndHostGuarded(t *testing.T) {
+	s, _ := newConnectTestServer(t)
+
+	if code := connectMeRequest(t, s, "/connect/me", "127.0.0.1:5555", "127.0.0.1:7400", false); code != http.StatusOK {
+		t.Fatalf("loopback peer + loopback Host must pass: %d", code)
+	}
+	if code := connectMeRequest(t, s, "/connect/me", "10.9.8.7:5555", "127.0.0.1:7400", false); code != http.StatusForbidden {
+		t.Fatalf("off-box peer must be refused: %d", code)
+	}
+	// DNS rebinding: the socket is loopback but the browser addressed a name
+	// the attacker controls.
+	if code := connectMeRequest(t, s, "/connect/me", "127.0.0.1:5555", "rebind.example.com", false); code != http.StatusForbidden {
+		t.Fatalf("rebound Host must be refused: %d", code)
+	}
+	if code := connectMeRequest(t, s, "/api/connect/me", "127.0.0.1:5555", "rebind.example.com", false); code != http.StatusUnauthorized {
+		t.Fatalf("/api alias without a token must be 401: %d", code)
+	}
+}
+
+// The token holder is the owner; remote-but-authenticated callers (Connect
+// proxy, desktop over the inner hop) keep working.
+func TestConnectMeAuthenticatedCallerBypassesLoopbackGuard(t *testing.T) {
+	s, _ := newConnectTestServer(t)
+	if code := connectMeRequest(t, s, "/api/connect/me", "10.9.8.7:5555", "remedy.local", true); code != http.StatusOK {
+		t.Fatalf("authenticated /api/connect/me: %d", code)
+	}
+	if code := connectMeRequest(t, s, "/connect/me", "10.9.8.7:5555", "remedy.local", true); code != http.StatusOK {
+		t.Fatalf("authenticated /connect/me: %d", code)
 	}
 }

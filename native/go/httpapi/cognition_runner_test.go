@@ -64,8 +64,8 @@ func TestCognitionTurnRunnerAssemblesPromptOverRMDY(t *testing.T) {
 	if !strings.Contains(model.LastTurn.System, "mirror-system") {
 		t.Fatalf("expected assembled system on model turn, got %q", model.LastTurn.System)
 	}
-	if model.LastTurn.Goal != "hello partner" {
-		t.Fatalf("goal=%q", model.LastTurn.Goal)
+	if got := model.LastTurn.FirstUserText(); got != "hello partner" {
+		t.Fatalf("user message=%q", got)
 	}
 	if _, err := r.Registry.Latest("prompt.assemble"); err != nil {
 		t.Fatalf("prompt.assemble missing after attach: %v", err)
@@ -98,7 +98,7 @@ func TestCognitionTurnRunnerFailsClosedWhenAssembleUnavailable(t *testing.T) {
 	if !strings.Contains(err.Error(), "prompt.assemble") {
 		t.Fatalf("error should mention prompt.assemble, got %v", err)
 	}
-	if model.LastTurn.System != "" || model.LastTurn.Goal != "" {
+	if model.LastTurn.System != "" || len(model.LastTurn.Messages) != 0 {
 		t.Fatalf("model must not see the turn when assemble fails: %+v", model.LastTurn)
 	}
 }
@@ -548,6 +548,8 @@ func (f cognitionModelFunc) Stream(ctx context.Context, turn cognition.Turn) (<-
 	return f(ctx, turn)
 }
 
+func (cognitionModelFunc) ContextWindow() int { return 0 }
+
 type cognitionPolicyFunc func(context.Context, cognition.ToolCall) cognition.Decision
 
 func (f cognitionPolicyFunc) Decide(ctx context.Context, call cognition.ToolCall) cognition.Decision {
@@ -562,5 +564,143 @@ func TestFormatToolCallTokenFamily(t *testing.T) {
 	tok2 := formatToolCallToken(cognition.ToolCall{Name: "y", Input: []byte(`{"a":1}`)})
 	if !strings.Contains(tok2, `"a":1`) {
 		t.Fatalf("json args: %q", tok2)
+	}
+}
+
+func TestSeedTranscriptCarriesHistoryThenTheUserMessage(t *testing.T) {
+	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
+		{{Text: "sure", Done: true}},
+	}}
+	r := NewCognitionTurnRunner(model)
+	_, err := CollectTokens(context.Background(), r, TurnRequest{
+		Prompt: "and now the second one",
+		History: []map[string]any{
+			{"role": "user", "content": "first question"},
+			{"role": "assistant", "content": "first answer"},
+			{"role": "system", "content": "ignored"},
+			{"role": "user", "content": ""},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs := model.Turns[0].Messages
+	if len(msgs) != 3 {
+		t.Fatalf("round 1 transcript = %#v", msgs)
+	}
+	if msgs[0].Role != cognition.RoleUser || msgs[0].Text() != "first question" {
+		t.Fatalf("history[0]=%#v", msgs[0])
+	}
+	if msgs[1].Role != cognition.RoleAssistant || msgs[1].Text() != "first answer" {
+		t.Fatalf("history[1]=%#v", msgs[1])
+	}
+	if msgs[2].Role != cognition.RoleUser || msgs[2].Text() != "and now the second one" {
+		t.Fatalf("current message=%#v", msgs[2])
+	}
+}
+
+func TestSeedTranscriptReadsAttachments(t *testing.T) {
+	home := t.TempDir()
+	sid := "sess-att"
+	dir := sessionAttachmentsDir(sid, home)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	png := filepath.Join(dir, "shot.png")
+	// 1x1 PNG header bytes are enough: the runner never decodes the image.
+	if err := os.WriteFile(png, []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	notes := filepath.Join(dir, "notes.md")
+	if err := os.WriteFile(notes, []byte("remember the milk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("do not read me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{{{Text: "seen", Done: true}}}}
+	r := NewCognitionTurnRunner(model)
+	r.HomeDir = home
+	r.forcePrimary = model // HomeDir set: keep the scripted model, do not resolve a live one
+	_, err := CollectTokens(context.Background(), r, TurnRequest{
+		SessionID: sid,
+		Prompt:    "what is this?",
+		Attachments: []map[string]any{
+			{"name": "shot.png", "path": png, "mime": "image/png"},
+			{"name": "notes.md", "path": notes, "mime": "text/markdown"},
+			{"name": "secret.txt", "path": outside, "mime": "text/plain"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := model.LastTurn.Messages[0].Blocks
+	var images, texts int
+	var body strings.Builder
+	for _, b := range blocks {
+		switch b.Type {
+		case cognition.BlockImage:
+			images++
+			if b.MediaType != "image/png" || len(b.Data) == 0 {
+				t.Fatalf("image block=%#v", b)
+			}
+		case cognition.BlockText:
+			texts++
+			body.WriteString(b.Text)
+		}
+	}
+	if images != 1 {
+		t.Fatalf("want one image block, got %d: %#v", images, blocks)
+	}
+	if !strings.Contains(body.String(), "what is this?") {
+		t.Fatalf("user text lost: %q", body.String())
+	}
+	if !strings.Contains(body.String(), "remember the milk") {
+		t.Fatalf("text attachment not inlined: %q", body.String())
+	}
+	if strings.Contains(body.String(), "do not read me") || strings.Contains(body.String(), "secret.txt") {
+		t.Fatalf("attachment jail leaked: %q", body.String())
+	}
+}
+
+func TestModelToolSurfaceHidesDemoTools(t *testing.T) {
+	r := NewCognitionTurnRunner(&cognition.ScriptedModel{})
+	advertised := map[string]bool{}
+	for _, id := range r.ModelVisibleToolIDs() {
+		advertised[id] = true
+	}
+	// Diagnostics, and the internal ABI the frontier surface replaced.
+	for _, hidden := range []string{
+		"text.slugify", "text.word_count", "runtime.probe", "json.canonical", "text.sha256",
+		"workspace.read", "workspace.list", "workspace.write", "workspace.edit", "workspace.search",
+		"shell.exec",
+	} {
+		if advertised[hidden] {
+			t.Fatalf("%s must not be advertised to the model", hidden)
+		}
+	}
+	// The Go-native diagnostics and the replaced ABI stay registered for
+	// probes, the CLI and approval fingerprints (text.slugify /
+	// text.word_count arrive with the Python worker).
+	for _, hidden := range []string{"runtime.probe", "json.canonical", "text.sha256", "shell.exec"} {
+		if _, err := r.Registry.Latest(hidden); err != nil {
+			t.Fatalf("%s must stay registered: %v", hidden, err)
+		}
+	}
+	// The surface a frontier model arrives knowing.
+	for _, want := range []string{
+		"read", "edit", "write", "glob", "grep", "bash", "jobs", "todo",
+		"screenshot", "delegate", "computer.screenshot",
+	} {
+		if !advertised[want] {
+			t.Fatalf("%s must be on the model surface", want)
+		}
+	}
+	for id := range advertised {
+		if strings.HasPrefix(id, "prompt.") || strings.HasPrefix(id, "voice.") || strings.HasPrefix(id, "vision.") {
+			t.Fatalf("internal tool advertised: %s", id)
+		}
 	}
 }

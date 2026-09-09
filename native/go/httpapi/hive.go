@@ -324,8 +324,11 @@ func (s *Server) runHiveForagerPulse(ctx context.Context, d hiveDaughter) error 
 		SessionID:     d.SessionID,
 		ProjectPath:   projectPath,
 		MaxIterations: budget,
+		Origin:        "hive:" + d.ParentSessionID,
 	}, func(tok string) error {
-		if strings.HasPrefix(tok, "@@") {
+		if body, ok := modelTextToken(tok); ok {
+			tok = body
+		} else if strings.HasPrefix(tok, "@@") {
 			return nil
 		}
 		text.WriteString(tok)
