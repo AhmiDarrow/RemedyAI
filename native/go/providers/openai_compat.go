@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
 )
@@ -47,10 +49,29 @@ type OpenAICompat struct {
 	// ToolNameMap maps advertised function names → real Tool ABI ids.
 	// DeepSeek/OpenAI require ^[a-zA-Z0-9_-]+$ so dotted ABI ids are sanitized.
 	ToolNameMap map[string]string
-	// ContextWindow is the physical n_ctx for local models (0 = cloud / unknown).
-	ContextWindow int
+	// NCtx is the physical context window for local models (0 = cloud / unknown).
+	NCtx int
 	// LocalFit forces FitLocalRequest even when BaseURL is not loopback.
 	LocalFit bool
+}
+
+// ContextWindow reports the prompt window in tokens: the configured n_ctx, the
+// REMEDY_LOCAL_CTX / REMEDY_N_CTX override, a conservative default for loopback
+// runtimes, else the frontier cloud default.
+func (c *OpenAICompat) ContextWindow() int {
+	if c == nil {
+		return 0
+	}
+	if c.NCtx > 0 {
+		return c.NCtx
+	}
+	if n := envContextWindow(); n > 0 {
+		return n
+	}
+	if c.LocalFit || IsLocalBaseURL(c.BaseURL) {
+		return localDefaultContextWindow
+	}
+	return cognition.DefaultContextWindow
 }
 
 func (c *OpenAICompat) client() *http.Client {
@@ -66,22 +87,20 @@ func (c *OpenAICompat) Stream(ctx context.Context, turn cognition.Turn) (<-chan 
 	if base == "" || model == "" {
 		return nil, fmt.Errorf("openai-compat model requires base URL and model id")
 	}
-	messages := buildMessages(turn)
+	messages := renderMessages(turn, c.advertisedName())
 	toolSchemas := c.Tools
-	window := c.ContextWindow
-	if window <= 0 {
-		window = envContextWindow()
-	}
 	if c.LocalFit || IsLocalBaseURL(base) {
+		window := c.ContextWindow()
 		if window <= 0 {
-			window = 16384 // conservative RMB/Ollama default when unknown
+			window = localDefaultContextWindow
 		}
 		messages, toolSchemas, _ = FitLocalRequest(messages, toolSchemas, window)
 	}
 	payload := map[string]any{
-		"model":    model,
-		"messages": messages,
-		"stream":   true,
+		"model":          model,
+		"messages":       messages,
+		"stream":         true,
+		"stream_options": map[string]any{"include_usage": true},
 	}
 	if len(toolSchemas) > 0 {
 		payload["tools"] = toolSchemas
@@ -116,10 +135,12 @@ func (c *OpenAICompat) Stream(ctx context.Context, turn cognition.Turn) (<-chan 
 	go func() {
 		defer close(out)
 		defer resp.Body.Close()
-		// Keep advertised (sanitized) tool names on ToolCall so follow-up
-		// assistant.tool_calls round-trips match provider expectations.
-		// Remap to Tool ABI ids at execute time (see ResolveToolName).
-		parseSSE(ctx, resp.Body, out, nil)
+		// ToolCall.Name carries the advertised (sanitized) function name here;
+		// the turn runner resolves it to the Tool ABI id once (ResolveToolName)
+		// and records the wire name in ToolCall.Advertised. Everything after
+		// that point — policy, approvals, the executor and the transcript —
+		// sees only the ABI id; advertisedName maps it back on the way out.
+		parseSSE(ctx, resp.Body, out)
 	}()
 	return out, nil
 }
@@ -176,7 +197,7 @@ func ToolSchemasFromRegistryMapped(list []RegistryTool) ([]map[string]any, map[s
 			"function": map[string]any{
 				"name":        advertised,
 				"description": d.Description,
-				"parameters":   params,
+				"parameters":  params,
 			},
 		})
 	}
@@ -226,9 +247,11 @@ func uniqueSanitizedToolName(id string, used map[string]struct{}) string {
 const (
 	maxToolArgChars    = 12_000
 	maxToolResultChars = 24_000
-	maxAssistantChars  = 4_000
+	maxAssistantChars  = 12_000
 )
 
+// clipString keeps the head and tail of s within max bytes, cutting only on
+// rune boundaries.
 func clipString(s string, max int) string {
 	if max <= 0 || len(s) <= max {
 		return s
@@ -236,133 +259,253 @@ func clipString(s string, max int) string {
 	head := max * 2 / 3
 	tail := max - head - 64
 	if tail < 32 {
-		return s[:max] + "…"
+		return s[:runeFloor(s, max)] + "…"
 	}
-	return s[:head] + fmt.Sprintf("\n…[truncated %d chars]…\n", len(s)-max) + s[len(s)-tail:]
+	return s[:runeFloor(s, head)] + fmt.Sprintf("\n…[truncated %d chars]…\n", len(s)-max) + s[runeCeil(s, len(s)-tail):]
 }
 
-func buildMessages(turn cognition.Turn) []map[string]any {
-	msgs := make([]map[string]any, 0, 4+len(turn.Results))
+// runeFloor returns the largest index <= i that starts a rune in s.
+func runeFloor(s string, i int) int {
+	for i > 0 && i < len(s) && !utf8.RuneStart(s[i]) {
+		i--
+	}
+	return i
+}
+
+// runeCeil returns the smallest index >= i that starts a rune in s (or len(s)).
+func runeCeil(s string, i int) int {
+	for i < len(s) && !utf8.RuneStart(s[i]) {
+		i++
+	}
+	return i
+}
+
+// advertisedName reverses ToolNameMap so a tool_use block (always a Tool ABI
+// id) is echoed back under the function name the provider actually saw.
+func (c *OpenAICompat) advertisedName() func(string) string {
+	if c == nil || len(c.ToolNameMap) == 0 {
+		return nil
+	}
+	reverse := make(map[string]string, len(c.ToolNameMap))
+	for advertised, abi := range c.ToolNameMap {
+		if _, ok := reverse[abi]; !ok {
+			reverse[abi] = advertised
+		}
+	}
+	return func(abi string) string {
+		if advertised, ok := reverse[abi]; ok {
+			return advertised
+		}
+		// Advertised under an earlier schema set (the runner narrows the
+		// surface mid-build) — the sanitizer is deterministic, so it
+		// reproduces the name the provider saw.
+		return sanitizeToolName(abi)
+	}
+}
+
+// renderMessages converts the append-only transcript into chat-completions
+// messages. wireName maps a Tool ABI id to the advertised function name (nil
+// keeps the ABI id, which is what a provider with no name map saw).
+func renderMessages(turn cognition.Turn, wireName func(string) string) []map[string]any {
+	msgs := make([]map[string]any, 0, len(turn.Messages)+2)
 	if sys := strings.TrimSpace(turn.System); sys != "" {
 		msgs = append(msgs, map[string]any{"role": "system", "content": sys})
 	}
-	goal := strings.TrimSpace(turn.Goal)
-	if goal == "" {
-		goal = "continue"
+	state := &renderState{announced: map[string]bool{}, wireName: wireName}
+	body := 0
+	for _, m := range turn.Messages {
+		var rendered []map[string]any
+		if m.Role == cognition.RoleAssistant {
+			rendered = state.assistant(m)
+		} else {
+			rendered = state.user(m)
+		}
+		msgs = append(msgs, rendered...)
+		body += len(rendered)
 	}
-	msgs = append(msgs, map[string]any{"role": "user", "content": goal})
+	if body == 0 {
+		msgs = append(msgs, map[string]any{"role": "user", "content": "continue"})
+	}
+	return msgs
+}
 
-	// OpenAI / DeepSeek require assistant.tool_calls then tool messages with
-	// matching tool_call_id. Plain role=tool without ids is rejected (HTTP 400).
-	if len(turn.Calls) > 0 && len(turn.Results) > 0 {
-		toolCalls := make([]map[string]any, 0, len(turn.Calls))
-		for i, call := range turn.Calls {
-			id := strings.TrimSpace(call.ID)
+// renderState carries the tool_call ids the assistant has announced so far, so
+// a tool_result whose tool_use was compacted away never becomes an orphan
+// role=tool message (HTTP 400 on every OpenAI-compatible provider).
+type renderState struct {
+	announced map[string]bool
+	unnamed   []string
+	seq       int
+	wireName  func(string) string
+}
+
+func (s *renderState) assistant(m cognition.Message) []map[string]any {
+	var text strings.Builder
+	toolCalls := make([]map[string]any, 0, len(m.Blocks))
+	for _, b := range m.Blocks {
+		switch b.Type {
+		case cognition.BlockText:
+			text.WriteString(b.Text)
+		case cognition.BlockThinking:
+			// Reasoning is never sent back: no chat-completions field carries it.
+		case cognition.BlockToolUse:
+			id := strings.TrimSpace(b.ID)
 			if id == "" {
-				id = fmt.Sprintf("call_%d", i+1)
+				s.seq++
+				id = fmt.Sprintf("call_%d", s.seq)
+				s.unnamed = append(s.unnamed, id)
 			}
-			args := string(call.Input)
-			if strings.TrimSpace(args) == "" {
+			s.announced[id] = true
+			args := strings.TrimSpace(string(b.Input))
+			if args == "" {
 				args = "{}"
 			} else {
 				args = clipString(args, maxToolArgChars)
+			}
+			name := b.Name
+			if s.wireName != nil {
+				name = s.wireName(b.Name)
 			}
 			toolCalls = append(toolCalls, map[string]any{
 				"id":   id,
 				"type": "function",
 				"function": map[string]any{
-					"name":      call.Name,
+					"name":      name,
 					"arguments": args,
 				},
 			})
 		}
-		assistant := map[string]any{
-			"role":       "assistant",
-			"tool_calls": toolCalls,
-		}
-		if text := strings.TrimSpace(turn.Text); text != "" {
-			assistant["content"] = clipString(text, maxAssistantChars)
-		}
-		msgs = append(msgs, assistant)
+	}
+	content := clipString(strings.TrimSpace(text.String()), maxAssistantChars)
+	if content == "" && len(toolCalls) == 0 {
+		return nil
+	}
+	msg := map[string]any{"role": "assistant"}
+	if content != "" {
+		msg["content"] = content
+	}
+	if len(toolCalls) > 0 {
+		msg["tool_calls"] = toolCalls
+	}
+	return []map[string]any{msg}
+}
 
-		byID := map[string]cognition.ToolResult{}
-		byName := map[string]cognition.ToolResult{}
-		for _, res := range turn.Results {
-			if id := strings.TrimSpace(res.ID); id != "" {
-				byID[id] = res
-			}
-			if name := strings.TrimSpace(res.Name); name != "" {
-				byName[name] = res
-			}
+func (s *renderState) user(m cognition.Message) []map[string]any {
+	out := make([]map[string]any, 0, len(m.Blocks)+1)
+	var parts []map[string]any
+	addText := func(text string) {
+		if strings.TrimSpace(text) == "" {
+			return
 		}
-		for i, call := range turn.Calls {
-			id := strings.TrimSpace(call.ID)
-			if id == "" {
-				id = fmt.Sprintf("call_%d", i+1)
-			}
-			res, ok := byID[strings.TrimSpace(call.ID)]
-			if !ok {
-				res, ok = byName[strings.TrimSpace(call.Name)]
-			}
-			if !ok && i < len(turn.Results) {
-				res = turn.Results[i]
-			}
-			content := string(res.Output)
-			if res.Err != "" {
-				content = res.Err
-			}
-			if content == "" {
-				content = "{}"
+		parts = append(parts, map[string]any{"type": "text", "text": text})
+	}
+	for _, b := range m.Blocks {
+		switch b.Type {
+		case cognition.BlockText:
+			addText(b.Text)
+		case cognition.BlockImage:
+			parts = append(parts, imagePart(b))
+		case cognition.BlockToolResult:
+			id := s.resolveToolUseID(b.ToolUseID)
+			content := clipString(toolResultText(b), maxToolResultChars)
+			if id != "" {
+				out = append(out, map[string]any{
+					"role":         "tool",
+					"tool_call_id": id,
+					"content":      content,
+				})
 			} else {
-				content = clipString(content, maxToolResultChars)
+				addText("[tool result] " + content)
 			}
-			msgs = append(msgs, map[string]any{
-				"role":         "tool",
-				"tool_call_id": id,
-				"content":      content,
-			})
+			// A tool message cannot carry an image, so screenshots trail the
+			// batch as a user message in the OpenAI vision shape.
+			for _, inner := range b.Content {
+				if inner.Type != cognition.BlockImage {
+					continue
+				}
+				if id != "" {
+					addText("[image returned by tool call " + id + "]")
+				}
+				parts = append(parts, imagePart(inner))
+			}
 		}
-		return msgs
 	}
+	if len(parts) > 0 {
+		out = append(out, map[string]any{"role": "user", "content": userContent(parts)})
+	}
+	return out
+}
 
-	// No paired Calls — never emit orphan role=tool (provider 400). Fold any
-	// leftover results into assistant text as working memory.
-	text := strings.TrimSpace(turn.Text)
-	if len(turn.Results) > 0 {
-		var b strings.Builder
-		if text != "" {
-			b.WriteString(text)
-			b.WriteString("\n\n")
+// resolveToolUseID returns the wire tool_call_id for a result, or "" when no
+// assistant message announced it.
+func (s *renderState) resolveToolUseID(toolUseID string) string {
+	id := strings.TrimSpace(toolUseID)
+	if id != "" {
+		if s.announced[id] {
+			return id
 		}
-		b.WriteString("Working memory:\n")
-		for _, res := range turn.Results {
-			content := string(res.Output)
-			if res.Err != "" {
-				content = res.Err
-			}
-			content = strings.ReplaceAll(strings.TrimSpace(content), "\n", " ")
-			if len(content) > 200 {
-				content = content[:200] + "…"
-			}
-			if content == "" {
-				continue
-			}
-			b.WriteString("- ")
-			b.WriteString(strings.TrimSpace(res.Name))
-			b.WriteString(": ")
-			b.WriteString(content)
-			b.WriteByte('\n')
+		return ""
+	}
+	if len(s.unnamed) == 0 {
+		return ""
+	}
+	id, s.unnamed = s.unnamed[0], s.unnamed[1:]
+	return id
+}
+
+// toolResultText flattens a tool_result's text content; images are carried
+// separately by the trailing user message.
+func toolResultText(b cognition.Block) string {
+	var out strings.Builder
+	if b.IsError {
+		out.WriteString("[error] ")
+	}
+	for _, inner := range b.Content {
+		if inner.Type == cognition.BlockText {
+			out.WriteString(inner.Text)
 		}
-		text = b.String()
 	}
-	if text != "" {
-		msgs = append(msgs, map[string]any{"role": "assistant", "content": clipString(text, maxAssistantChars)})
+	text := strings.TrimSpace(out.String())
+	if text == "" || text == "[error]" {
+		return text + "(no output)"
 	}
-	return msgs
+	return text
+}
+
+func imagePart(b cognition.Block) map[string]any {
+	mediaType := strings.TrimSpace(b.MediaType)
+	if mediaType == "" {
+		mediaType = "image/png"
+	}
+	return map[string]any{
+		"type": "image_url",
+		"image_url": map[string]any{
+			"url": "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(b.Data),
+		},
+	}
+}
+
+// userContent keeps the plain-string shape when a message is text only (the
+// widest provider compatibility) and switches to content parts for images.
+func userContent(parts []map[string]any) any {
+	var text strings.Builder
+	for _, p := range parts {
+		if p["type"] != "text" {
+			return parts
+		}
+		if text.Len() > 0 {
+			text.WriteString("\n\n")
+		}
+		text.WriteString(fmt.Sprint(p["text"]))
+	}
+	return text.String()
 }
 
 type sseDelta struct {
-	Content   string `json:"content"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content"`
+	// Reasoning is the OpenRouter spelling of reasoning_content.
+	Reasoning string `json:"reasoning"`
 	ToolCalls []struct {
 		Index    int    `json:"index"`
 		ID       string `json:"id"`
@@ -379,41 +522,156 @@ type sseChoice struct {
 	FinishReason *string  `json:"finish_reason"`
 }
 
+type sseUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
 type sseChunk struct {
 	Choices []sseChoice `json:"choices"`
+	Usage   *sseUsage   `json:"usage"`
 }
 
 type toolAcc struct {
 	id, name, args string
 }
 
-func parseSSE(ctx context.Context, body io.Reader, out chan<- cognition.ModelEvent, nameMap map[string]string) {
+// sseParser accumulates one chat-completions stream into ModelEvents.
+type sseParser struct {
+	ctx      context.Context
+	out      chan<- cognition.ModelEvent
+	tools    map[int]*toolAcc
+	finished bool // a finish_reason was seen
+	sawUsage bool
+}
+
+func (p *sseParser) emit(ev cognition.ModelEvent) bool {
+	select {
+	case <-p.ctx.Done():
+		return false
+	case p.out <- ev:
+		return true
+	}
+}
+
+// flushTools emits accumulated tool calls in index order and clears them.
+func (p *sseParser) flushTools() bool {
+	maxIdx := -1
+	for i := range p.tools {
+		if i > maxIdx {
+			maxIdx = i
+		}
+	}
+	for i := 0; i <= maxIdx; i++ {
+		acc := p.tools[i]
+		if acc == nil || acc.name == "" {
+			continue
+		}
+		call := &cognition.ToolCall{ID: acc.id, Name: acc.name, Input: []byte(acc.args)}
+		if len(call.Input) == 0 {
+			call.Input = []byte("{}")
+		}
+		if !p.emit(cognition.ModelEvent{ToolCall: call}) {
+			return false
+		}
+	}
+	p.tools = map[int]*toolAcc{}
+	return true
+}
+
+func (p *sseParser) accumulate(delta sseDelta) {
+	for _, tc := range delta.ToolCalls {
+		acc := p.tools[tc.Index]
+		if acc == nil {
+			acc = &toolAcc{}
+			p.tools[tc.Index] = acc
+		}
+		if tc.ID != "" {
+			acc.id = tc.ID
+		}
+		if tc.Function.Name != "" {
+			acc.name = tc.Function.Name
+		}
+		if tc.Function.Arguments != "" {
+			acc.args += tc.Function.Arguments
+		}
+	}
+}
+
+// finish handles a finish_reason: tool calls are flushed for every reason;
+// stop/length also complete the round (length marks it truncated).
+func (p *sseParser) finish(reason string) bool {
+	p.finished = true
+	if !p.flushTools() {
+		return false
+	}
+	switch reason {
+	case "length":
+		return p.emit(cognition.ModelEvent{Done: true, Truncated: true})
+	case "tool_calls", "function_call":
+		return true
+	default:
+		return p.emit(cognition.ModelEvent{Done: true})
+	}
+}
+
+// chunk processes one data payload. It returns false once nothing more is
+// expected from the stream or the context is done.
+func (p *sseParser) chunk(c sseChunk) bool {
+	if c.Usage != nil {
+		p.sawUsage = true
+		if !p.emit(cognition.ModelEvent{Usage: &cognition.Usage{
+			PromptTokens:     c.Usage.PromptTokens,
+			CompletionTokens: c.Usage.CompletionTokens,
+			TotalTokens:      c.Usage.TotalTokens,
+		}}) {
+			return false
+		}
+	}
+	if len(c.Choices) == 0 {
+		// Usage-only trailer after finish_reason: the round is complete.
+		return !(p.finished && p.sawUsage)
+	}
+	ch := c.Choices[0]
+	thought := ch.Delta.ReasoningContent
+	if thought == "" {
+		thought = ch.Delta.Reasoning
+	}
+	if thought != "" {
+		if !p.emit(cognition.ModelEvent{Thinking: thought}) {
+			return false
+		}
+	}
+	if text := ch.Delta.Content; text != "" {
+		if !p.emit(cognition.ModelEvent{Text: text}) {
+			return false
+		}
+	}
+	p.accumulate(ch.Delta)
+	if ch.FinishReason != nil {
+		if reason := strings.TrimSpace(*ch.FinishReason); reason != "" {
+			if !p.finish(reason) {
+				return false
+			}
+			return !p.sawUsage
+		}
+	}
+	return true
+}
+
+// parseSSE streams chat-completions SSE frames into out. Tool calls are
+// flushed on any finish_reason and at [DONE] or end of body; a read error
+// (frame over the scanner limit, broken connection) ends the stream without
+// Done so the engine reports it as incomplete.
+func parseSSE(ctx context.Context, body io.Reader, out chan<- cognition.ModelEvent) {
 	scanner := bufio.NewScanner(body)
 	// Provider frames can be large when tool args stream in.
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
-	tools := map[int]*toolAcc{}
+	p := &sseParser{ctx: ctx, out: out, tools: map[int]*toolAcc{}}
 	sawDone := false
-
-	resolveName := func(advertised string) string {
-		if nameMap != nil {
-			if real, ok := nameMap[advertised]; ok && real != "" {
-				return real
-			}
-		}
-		return advertised
-	}
-
-	emit := func(ev cognition.ModelEvent) bool {
-		select {
-		case <-ctx.Done():
-			return false
-		case out <- ev:
-			return true
-		}
-	}
-
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -421,9 +679,6 @@ func parseSSE(ctx context.Context, body io.Reader, out chan<- cognition.ModelEve
 		default:
 		}
 		line := scanner.Text()
-		if line == "" || strings.HasPrefix(line, ":") {
-			continue
-		}
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
@@ -436,70 +691,17 @@ func parseSSE(ctx context.Context, body io.Reader, out chan<- cognition.ModelEve
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 			continue
 		}
-		if len(chunk.Choices) == 0 {
-			continue
-		}
-		ch := chunk.Choices[0]
-		if text := ch.Delta.Content; text != "" {
-			if !emit(cognition.ModelEvent{Text: text}) {
-				return
-			}
-		}
-		for _, tc := range ch.Delta.ToolCalls {
-			acc := tools[tc.Index]
-			if acc == nil {
-				acc = &toolAcc{}
-				tools[tc.Index] = acc
-			}
-			if tc.ID != "" {
-				acc.id = tc.ID
-			}
-			if tc.Function.Name != "" {
-				acc.name = tc.Function.Name
-			}
-			if tc.Function.Arguments != "" {
-				acc.args += tc.Function.Arguments
-			}
-		}
-		if ch.FinishReason != nil {
-			reason := strings.TrimSpace(*ch.FinishReason)
-			switch reason {
-			case "tool_calls":
-				maxIdx := -1
-				for i := range tools {
-					if i > maxIdx {
-						maxIdx = i
-					}
-				}
-				for i := 0; i <= maxIdx; i++ {
-					acc := tools[i]
-					if acc == nil || acc.name == "" {
-						continue
-					}
-					call := &cognition.ToolCall{
-						ID:    acc.id,
-						Name:  resolveName(acc.name),
-						Input: []byte(acc.args),
-					}
-					if len(call.Input) == 0 {
-						call.Input = []byte("{}")
-					}
-					if !emit(cognition.ModelEvent{ToolCall: call}) {
-						return
-					}
-				}
-				return
-			case "stop":
-				_ = emit(cognition.ModelEvent{Done: true})
-				return
-			case "length":
-				// Hit max_tokens — engine auto-continues instead of ending the turn.
-				_ = emit(cognition.ModelEvent{Done: true, Truncated: true})
-				return
-			}
+		if !p.chunk(chunk) {
+			return
 		}
 	}
+	if scanner.Err() != nil || p.finished {
+		return
+	}
+	if !p.flushTools() {
+		return
+	}
 	if sawDone {
-		_ = emit(cognition.ModelEvent{Done: true})
+		_ = p.emit(cognition.ModelEvent{Done: true})
 	}
 }

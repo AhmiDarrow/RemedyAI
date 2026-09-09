@@ -19,6 +19,17 @@ var CodingPackABI = []string{
 	"mission.start", "mission.status", "mission.update", "mission.verify", "mission.complete",
 }
 
+// localDefaultContextWindow is the conservative n_ctx assumed for a loopback
+// runtime (RMB / Ollama / llama.cpp) that does not report its window.
+const localDefaultContextWindow = LocalContextWindow
+
+// LocalContextWindow is the conservative n_ctx callers assume for a loopback
+// runtime that does not report its own window.
+const LocalContextWindow = 16384
+
+// imagePartTokens is the flat charge for one image content part.
+const imagePartTokens = 1500
+
 // IsLocalBaseURL reports loopback OpenAI-compatible endpoints (RMB/Ollama/llama.cpp).
 func IsLocalBaseURL(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
@@ -52,8 +63,18 @@ func estimateMessagesTokens(msgs []map[string]any) int {
 	total := 0
 	for _, m := range msgs {
 		total += 6
-		if c, ok := m["content"].(string); ok {
+		switch c := m["content"].(type) {
+		case string:
 			total += (len(c) + 3) / 4
+		case []map[string]any:
+			for _, part := range c {
+				if part["type"] == "image_url" {
+					total += imagePartTokens
+					continue
+				}
+				text, _ := part["text"].(string)
+				total += (len(text) + 3) / 4
+			}
 		}
 		if tcs, ok := m["tool_calls"].([]map[string]any); ok {
 			for _, tc := range tcs {
@@ -160,7 +181,7 @@ func filterToolsCodingPack(tools []map[string]any, nameOnly bool) []map[string]a
 				"function": map[string]any{
 					"name":        name,
 					"description": truncStr(strOr(fn["description"]), 80),
-					"parameters":   map[string]any{"type": "object", "properties": map[string]any{}},
+					"parameters":  map[string]any{"type": "object", "properties": map[string]any{}},
 				},
 			})
 			continue
@@ -242,5 +263,3 @@ func truncStr(s string, n int) string {
 	}
 	return s[:n]
 }
-
-

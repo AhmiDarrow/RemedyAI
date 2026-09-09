@@ -8,10 +8,20 @@ import "context"
 type ScriptedModel struct {
 	Rounds   [][]ModelEvent
 	LastTurn Turn // most recent Stream argument (tests)
+	// Window is the reported context window; 0 means "unknown" and the engine
+	// assumes DefaultContextWindow.
+	Window int
+	// Turns records every Stream argument in order (tests assert what the
+	// model actually saw at round N).
+	Turns []Turn
 }
+
+// ContextWindow reports the scripted window (0 = unknown).
+func (m *ScriptedModel) ContextWindow() int { return m.Window }
 
 func (m *ScriptedModel) Stream(_ context.Context, turn Turn) (<-chan ModelEvent, error) {
 	m.LastTurn = turn
+	m.Turns = append(m.Turns, turn)
 	if len(m.Rounds) == 0 {
 		ch := make(chan ModelEvent)
 		close(ch)
