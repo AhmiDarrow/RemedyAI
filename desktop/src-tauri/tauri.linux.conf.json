@@ -15,6 +15,7 @@
     "resources": {
       "../bin/libremedy_core.so": "libremedy_core.so",
       "../bin/rmdy_tool_worker.pyz": "rmdy_tool_worker.pyz",
+      "../bin/rmdy-deps": "rmdy-deps",
       "../dist": "webui",
       "windows/wslg_workarea.ps1": "windows/wslg_workarea.ps1"
     },

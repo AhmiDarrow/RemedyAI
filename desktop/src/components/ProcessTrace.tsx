@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   isFullProcessMode,
   type ProcessStep,
   type ToolProcessMode,
 } from '../utils/toolLabels'
+import {
+  fetchToolEvidence,
+  peekToolEvidence,
+  type ToolEvidence,
+} from '../api/turnEvidence'
+import { ChatImage } from './ChatImage'
 import { IconBtn, IconCheck, IconChevronDown, IconChevronUp, IconCopy } from './icons'
 import { useStickToBottom } from '../hooks/useStickToBottom'
 import { DiffCode } from './DiffCode'
@@ -21,6 +27,12 @@ interface ProcessTraceProps {
   live?: boolean
   /** Start with the Process panel collapsed */
   defaultCollapsed?: boolean
+  /**
+   * Session the steps belong to. With a step's `requestId` + `callId` it
+   * addresses the recorded tool result, which is what turns the trail's
+   * 500-character preview into evidence.
+   */
+  sessionId?: string | null
 }
 
 /** Viewport height — tighter on Min so chat stays primary. */
@@ -109,11 +121,164 @@ function statusColor(status: ProcessStep['status']): string {
  * - Med:  consecutive same-tool runs grouped; human label + path one-liner + short result
  * - Full: every step listed (not grouped) with complete args/results — no hidden dumps
  */
+/** Bytes as the owner reads them (the recorded body can be large). */
+function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0 B'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+interface StepEvidenceProps {
+  step: ProcessStep
+  sessionId: string | null
+  open: boolean
+  loading: boolean
+  error?: string
+  /** Bumped by the parent when a fetch lands, so the cache is re-read. */
+  nonce: number
+  onToggle: () => void
+}
+
+/**
+ * The recorded result behind a trail row.
+ *
+ * The stream only ever carried a 500-character preview; this fetches what
+ * Remedy actually saw — the full output and any images stored beside the turn
+ * log — and only when the owner opens the row.
+ */
+function StepEvidence({
+  step,
+  sessionId,
+  open,
+  loading,
+  error,
+  nonce,
+  onToggle,
+}: StepEvidenceProps) {
+  const [copied, setCopied] = useState(false)
+  const addressable = Boolean(sessionId && step.requestId && step.callId)
+  const evidence: ToolEvidence | null =
+    open && addressable
+      ? peekToolEvidence(sessionId as string, step.requestId as string, step.callId as string)
+      : null
+  // nonce only exists to invalidate the read above.
+  void nonce
+
+  if (!addressable) return null
+
+  const truncated =
+    Boolean(evidence)
+    && evidence!.bytes > evidence!.output.length
+    && evidence!.output.length > 0
+
+  return (
+    <div className="mt-1 ml-4">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="text-[10px] px-0"
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--accent)',
+            cursor: 'pointer',
+          }}
+          onClick={onToggle}
+          aria-expanded={open}
+        >
+          {open ? 'Hide recorded result' : 'Recorded result'}
+        </button>
+        {open && evidence && (
+          <>
+            <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>
+              {formatBytes(evidence.bytes)}
+              {evidence.images.length
+                ? ` · ${evidence.images.length} image${evidence.images.length === 1 ? '' : 's'}`
+                : ''}
+            </span>
+            {evidence.output && (
+              <button
+                type="button"
+                className="text-[10px] px-0"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                }}
+                onClick={() => {
+                  void navigator.clipboard
+                    ?.writeText(evidence.output)
+                    .then(() => {
+                      setCopied(true)
+                      window.setTimeout(() => setCopied(false), 1200)
+                    })
+                    .catch(() => {
+                      /* clipboard unavailable */
+                    })
+                }}
+              >
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+            )}
+          </>
+        )}
+      </div>
+      {open && loading && (
+        <div className="text-[10px] italic mt-0.5" style={{ color: 'var(--text-muted)' }}>
+          Loading the recorded result…
+        </div>
+      )}
+      {open && error && (
+        <div className="text-[10px] mt-0.5" style={{ color: 'var(--error)' }}>
+          {error}
+        </div>
+      )}
+      {open && evidence && (
+        <div className="mt-0.5 space-y-1">
+          {evidence.output ? (
+            <pre
+              className="text-[10px] p-1.5 m-0 whitespace-pre-wrap break-words font-mono rounded"
+              style={{
+                color: evidence.is_error ? 'var(--error)' : 'var(--text-secondary)',
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border)',
+                maxHeight: FULL_BLOCK_MAX_H,
+                overflow: 'auto',
+              }}
+            >
+              {clipFull(evidence.output)}
+            </pre>
+          ) : (
+            !evidence.images.length && (
+              <div className="text-[10px] italic" style={{ color: 'var(--text-muted)' }}>
+                The recorded result has no text body.
+              </div>
+            )
+          )}
+          {truncated && (
+            <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+              Showing the first {clipFull(evidence.output).length.toLocaleString()} characters.
+            </div>
+          )}
+          {evidence.images.map((img) => (
+            <div key={img.sha256 || img.url} className="max-w-full">
+              <ChatImage src={img.url} alt={`${step.name} result image`} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ProcessTrace({
   mode,
   steps,
   live = false,
   defaultCollapsed = false,
+  sessionId = null,
 }: ProcessTraceProps) {
   const full = isFullProcessMode(mode)
   const med = mode === 'medium'
@@ -123,6 +288,70 @@ export function ProcessTrace({
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
 
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  /**
+   * Which rows have their recorded result open. Only ids live here — the
+   * bodies stay in the bounded module cache, so a build with a thousand tool
+   * calls never pins a thousand outputs in the component.
+   */
+  const [openEvidence, setOpenEvidence] = useState<Set<string>>(() => new Set())
+  const [loadingEvidence, setLoadingEvidence] = useState<Set<string>>(() => new Set())
+  const [evidenceErrors, setEvidenceErrors] = useState<Record<string, string>>({})
+  /** Bumped when a fetch lands so the render re-reads the cache. */
+  const [evidenceNonce, setEvidenceNonce] = useState(0)
+
+  /** The recorded-result address of a step, when the turn is known. */
+  const evidenceRefOf = useCallback(
+    (step: ProcessStep) => {
+      if (!sessionId || !step.requestId || !step.callId) return null
+      return { sid: sessionId, rid: step.requestId, cid: step.callId }
+    },
+    [sessionId],
+  )
+
+  const toggleEvidence = useCallback(
+    (step: ProcessStep) => {
+      const ref = evidenceRefOf(step)
+      if (!ref) return
+      const key = step.id
+      let opening = false
+      setOpenEvidence((prev) => {
+        const next = new Set(prev)
+        if (next.has(key)) next.delete(key)
+        else {
+          next.add(key)
+          opening = true
+        }
+        return next
+      })
+      if (!opening) return
+      if (peekToolEvidence(ref.sid, ref.rid, ref.cid)) return
+      setLoadingEvidence((prev) => new Set(prev).add(key))
+      setEvidenceErrors((prev) => {
+        if (!(key in prev)) return prev
+        const next = { ...prev }
+        delete next[key]
+        return next
+      })
+      void fetchToolEvidence(ref.sid, ref.rid, ref.cid)
+        .then(() => {
+          setEvidenceNonce((n) => n + 1)
+        })
+        .catch((e: unknown) => {
+          setEvidenceErrors((prev) => ({
+            ...prev,
+            [key]: e instanceof Error ? e.message : String(e),
+          }))
+        })
+        .finally(() => {
+          setLoadingEvidence((prev) => {
+            const next = new Set(prev)
+            next.delete(key)
+            return next
+          })
+        })
+    },
+    [evidenceRefOf],
+  )
 
   useEffect(() => {
     if (live) {
@@ -136,6 +365,12 @@ export function ProcessTrace({
   useEffect(() => {
     if (steps.length < MIN_RECENT_CHIPS) setShowAllMin(false)
   }, [steps.length])
+
+  // A new turn re-uses nothing: close every opened result.
+  useEffect(() => {
+    setOpenEvidence(new Set())
+    setEvidenceErrors({})
+  }, [sessionId])
 
   /**
    * Full = one row per step (complete dumps).
@@ -607,6 +842,16 @@ export function ProcessTrace({
                             )}
                           </div>
                         )}
+
+                        <StepEvidence
+                          step={s}
+                          sessionId={sessionId}
+                          open={openEvidence.has(s.id)}
+                          loading={loadingEvidence.has(s.id)}
+                          error={evidenceErrors[s.id]}
+                          nonce={evidenceNonce}
+                          onToggle={() => toggleEvidence(s)}
+                        />
                       </li>
                     )
                   })}

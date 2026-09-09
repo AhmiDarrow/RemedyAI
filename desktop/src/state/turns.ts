@@ -40,6 +40,23 @@ function emit() {
   }
 }
 
+function sameTurn(a: Turn, b: Turn): boolean {
+  return (
+    a.sessionId === b.sessionId
+    && a.turnId === b.turnId
+    && a.jobId === b.jobId
+    && a.status === b.status
+    && a.goal === b.goal
+    && a.startedAt === b.startedAt
+    && a.completedAt === b.completedAt
+  )
+}
+
+/**
+ * Upsert a turn record. Emits only when something actually changed: the
+ * stream path calls this on every token to keep the turn "running", and
+ * re-emitting an identical record re-rendered every subscriber per token.
+ */
 export function upsertTurn(partial: TurnPatch): Turn {
   const k = keyOf(partial.sessionId, partial.turnId)
   const prev = byKey.get(k)
@@ -51,6 +68,7 @@ export function upsertTurn(partial: TurnPatch): Turn {
     ...(prev ?? { sessionId: partial.sessionId, turnId: partial.turnId }),
     ...partial,
   }
+  if (prev && sameTurn(prev, next)) return prev
   byKey.set(k, next)
   emit()
   return next

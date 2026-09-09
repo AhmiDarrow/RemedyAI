@@ -10,11 +10,11 @@ import { abortSession } from '../api/sessions'
 import { upsertTurn } from '../state/turns'
 import type { StreamProgress, UsagePayload } from '../api/messages'
 import type { BuildTodo } from '../components/BuildTodos'
-import type { ProcessStep } from '../utils/toolLabels'
+import type { LiveToolChip, ProcessStep } from '../utils/toolLabels'
 
 export type StreamJobStatus = 'running' | 'done' | 'error' | 'aborted'
 
-export type StreamJobActiveTool = { name: string; status: 'running' | 'done' | 'error' }
+export type StreamJobActiveTool = LiveToolChip
 
 /** Live stream paint owned by the job (survives session switch / reattach). */
 export type StreamJobPaint = {
@@ -49,6 +49,19 @@ export type StreamJob = {
   detached: boolean
   /** Stream-claim generation from `event: start`. Stop must send this. */
   claimEpoch?: number
+  /**
+   * Server turn id from `event: start` (or from the session's
+   * `active_request_id` when this job is a re-attach). Keys the attach stream
+   * and the tool-evidence route.
+   */
+  requestId?: string
+  /**
+   * Highest turn-log `seq` applied to this job's paint. A reconnect resumes
+   * from here so a replay never re-applies a frame this job already painted.
+   */
+  lastSeq?: number
+  /** True when this job follows a turn the server already owned (re-attach). */
+  attached?: boolean
   /** Accumulated stream paint (tokens/tools) — always updated, even when detached. */
   paint: StreamJobPaint
   /**
@@ -56,6 +69,8 @@ export type StreamJob = {
    * finishOk must not double-commit the same abort.
    */
   uiCommitted?: boolean
+  /** Stream closed without a terminal frame (not a user Stop). */
+  interrupted?: boolean
 }
 
 export function emptyStreamPaint(): StreamJobPaint {
@@ -122,6 +137,7 @@ export function registerStreamJob(
   sessionId: string,
   controller: AbortController,
   model?: string,
+  meta?: { requestId?: string; lastSeq?: number; attached?: boolean },
 ): StreamJob {
   // Replace any prior job for this session (single live turn per session).
   const prev = jobs.get(sessionId)
@@ -144,6 +160,9 @@ export function registerStreamJob(
     lastActivityAt: startedAt,
     detached: false,
     paint: emptyStreamPaint(),
+    requestId: meta?.requestId,
+    lastSeq: meta?.lastSeq,
+    attached: meta?.attached,
   }
   jobs.set(sessionId, job)
   upsertTurn({
@@ -280,6 +299,17 @@ export function isJobUiCommitted(sessionId: string): boolean {
   return Boolean(jobs.get(sessionId)?.uiCommitted)
 }
 
+/** Record that this job's stream closed without a terminal frame. */
+export function markJobInterrupted(sessionId: string): void {
+  const j = jobs.get(sessionId)
+  if (!j) return
+  j.interrupted = true
+}
+
+export function isJobInterrupted(sessionId: string): boolean {
+  return Boolean(jobs.get(sessionId)?.interrupted)
+}
+
 /** Suffix for aborted partials — visible in chat that generation was stopped. */
 export const STOPPED_MARKER = '_[Stopped]_'
 
@@ -290,7 +320,21 @@ export function withStoppedMarker(text: string): string {
   return `${t}\n\n${STOPPED_MARKER}`
 }
 
-/** True when an aborted partial is missing from the server transcript tail. */
+/**
+ * Suffix for a partial whose stream closed without a terminal frame. Same
+ * italic note styling as the Stopped marker; the wording tells the owner the
+ * connection dropped rather than that she chose to stop.
+ */
+export const INTERRUPTED_MARKER = '_[Interrupted — connection dropped]_'
+
+export function withInterruptedMarker(text: string): string {
+  const t = (text || '').trimEnd()
+  if (!t) return INTERRUPTED_MARKER
+  if (t.includes(INTERRUPTED_MARKER) || t.includes(STOPPED_MARKER)) return t
+  return `${t}\n\n${INTERRUPTED_MARKER}`
+}
+
+/** True when an aborted/interrupted partial is missing from the server transcript tail. */
 export function shouldRestoreStoppedPartial(
   serverMessages: { role?: string; content?: string }[],
   paintText: string | undefined | null,
@@ -301,7 +345,14 @@ export function shouldRestoreStoppedPartial(
     const m = serverMessages[i]
     if (m?.role !== 'assistant') continue
     const content = String(m.content || '')
-    if (content.includes(STOPPED_MARKER) || content.includes('Stopped')) return false
+    if (
+      content.includes(STOPPED_MARKER)
+      || content.includes(INTERRUPTED_MARKER)
+      || content.includes('Stopped')
+      || content.includes('interrupted')
+    ) {
+      return false
+    }
     const stem = raw.slice(0, Math.min(80, raw.length))
     if (stem && content.includes(stem)) return false
     break
@@ -363,6 +414,51 @@ export function completeStreamJob(
       emit({ type: 'removed', sessionId })
     }
   }, 4000)
+}
+
+/** Remember the server turn id (from `event: start` or a re-attach). */
+export function setJobRequestId(sessionId: string, requestId: string): void {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  const rid = (requestId || '').trim()
+  if (!rid || j.requestId === rid) return
+  j.requestId = rid
+  emit({ type: 'update', job: { ...j } })
+}
+
+export function getJobRequestId(sessionId: string): string | undefined {
+  return jobs.get(sessionId)?.requestId
+}
+
+/** Watermark of turn-log seqs already painted — the resume point for a re-attach. */
+export function setJobLastSeq(sessionId: string, seq: number): void {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  if (!Number.isFinite(seq) || seq <= 0) return
+  const next = Math.trunc(seq)
+  if ((j.lastSeq || 0) >= next) return
+  j.lastSeq = next
+}
+
+export function getJobLastSeq(sessionId: string): number {
+  return jobs.get(sessionId)?.lastSeq || 0
+}
+
+/**
+ * True when this webview already follows that exact turn.
+ *
+ * The reattach path calls this first: opening a second stream for a turn we
+ * are already painting would replay its frames into a fresh paint buffer and
+ * duplicate the trail.
+ */
+export function isFollowingTurn(sessionId: string, requestId: string): boolean {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return false
+  const rid = (requestId || '').trim()
+  // A job with no request id yet is a turn this webview just started; it is
+  // about to learn its id from `event: start`, so never double-attach it.
+  if (!j.requestId) return true
+  return Boolean(rid) && j.requestId === rid
 }
 
 /** Remember the server claim generation so Stop cannot kill a newer turn. */

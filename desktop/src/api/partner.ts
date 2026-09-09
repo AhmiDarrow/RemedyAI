@@ -9,6 +9,10 @@ export interface PendingApproval {
   summary?: string
   /** Payment / credential / vault owner checkpoint — asks in every mode. */
   sensitive?: boolean
+  /** Where the request came from (telegram, discord, phone, desktop…) when known. */
+  origin?: string | null
+  /** Legacy alias for origin on some runtimes. */
+  channel?: string | null
   soft_risk?: string | null
   approval_mode_hint?: string
   session_id?: string | null

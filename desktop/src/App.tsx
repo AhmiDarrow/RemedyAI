@@ -192,6 +192,7 @@ export default function App() {
     loadingOlder: messagesLoadingOlder,
     loadOlder: loadOlderMessages,
     streaming,
+    remoteBusy,
     streamStalled,
     stallSeconds,
     stallBannerDismissed,
@@ -2029,6 +2030,16 @@ export default function App() {
             className="chat-middle-composer flex flex-col"
             style={{ position: 'relative', zIndex: 5 }}
           >
+            {/* The session is claimed but the server named no turn to attach
+                to (older sidecar / claim ahead of the log): not idle, and the
+                reply lands over the session-events refresh. */}
+            {!streaming && remoteBusy && (
+              <div className="chat-status-banner chat-status-banner-accent" role="status">
+                <span className="flex-1 min-w-[12rem]">
+                  Remedy is working… the reply will appear here when it lands.
+                </span>
+              </div>
+            )}
             {!streaming
               && activeId
               && getStreamJob(activeId)?.status === 'running' && (

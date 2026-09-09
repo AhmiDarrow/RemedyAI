@@ -6,6 +6,11 @@ vi.mock('../api/sessions', () => ({
 
 import {
   appendJobToken,
+  getJobLastSeq,
+  getJobRequestId,
+  isFollowingTurn,
+  setJobLastSeq,
+  setJobRequestId,
   appendJobThinking,
   replaceJobThinking,
   completeStreamJob,
@@ -174,5 +179,55 @@ describe('streamJobs', () => {
     // Late finishOk as done must not revive
     completeStreamJob('abort-ux', 'done')
     expect(getStreamJob('abort-ux')?.status).toBe('aborted')
+  })
+})
+
+describe('turn identity on a stream job', () => {
+  afterEach(() => {
+    for (const id of getBusySessionIds()) completeStreamJob(id, 'aborted')
+    resetTurns()
+  })
+
+  it('records the turn id from `start` and the seq watermark from the stream', () => {
+    registerStreamJob('s-id', new AbortController())
+    expect(getJobRequestId('s-id')).toBeUndefined()
+    setJobRequestId('s-id', 'req-7')
+    expect(getJobRequestId('s-id')).toBe('req-7')
+    setJobLastSeq('s-id', 5)
+    setJobLastSeq('s-id', 9)
+    // A watermark never moves backwards — a late replay frame cannot lower it.
+    setJobLastSeq('s-id', 3)
+    expect(getJobLastSeq('s-id')).toBe(9)
+  })
+
+  it('seeds identity when the job is a re-attach', () => {
+    registerStreamJob('s-att', new AbortController(), 'grok', {
+      requestId: 'req-8',
+      lastSeq: 12,
+      attached: true,
+    })
+    expect(getJobRequestId('s-att')).toBe('req-8')
+    expect(getJobLastSeq('s-att')).toBe(12)
+    expect(getStreamJob('s-att')?.attached).toBe(true)
+  })
+
+  it('reports a turn it already follows so a second attach is a no-op', () => {
+    registerStreamJob('s-follow', new AbortController(), undefined, {
+      requestId: 'req-8',
+    })
+    expect(isFollowingTurn('s-follow', 'req-8')).toBe(true)
+    expect(isFollowingTurn('s-follow', 'req-9')).toBe(false)
+    expect(isFollowingTurn('s-other', 'req-8')).toBe(false)
+  })
+
+  it('treats a turn that has not named itself yet as already followed', () => {
+    registerStreamJob('s-fresh', new AbortController())
+    expect(isFollowingTurn('s-fresh', 'req-anything')).toBe(true)
+  })
+
+  it('stops following once the job is terminal', () => {
+    registerStreamJob('s-endz', new AbortController(), undefined, { requestId: 'req-8' })
+    completeStreamJob('s-endz', 'done')
+    expect(isFollowingTurn('s-endz', 'req-8')).toBe(false)
   })
 })

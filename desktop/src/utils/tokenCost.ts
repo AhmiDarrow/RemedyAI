@@ -5,9 +5,31 @@ export type UsageSnapshot = {
   completion_tokens: number
   total_tokens: number
   estimated_cost_usd: number
+  /**
+   * Prompt input the provider served from its cache. A build that keeps its
+   * prompt cache warm costs a fraction of one that does not, so this is worth
+   * showing next to the raw token counts rather than folding into them.
+   */
+  cache_read_tokens?: number
+  /** Prompt input written into the provider cache this run. */
+  cache_write_tokens?: number
   source?: 'provider' | 'estimate' | string
   model?: string | null
   provider?: string | null
+}
+
+/**
+ * Cache line for the status area — empty string when the provider reported no
+ * cache activity, so nothing is drawn for providers that do not cache.
+ */
+export function formatCacheUsage(usage: UsageSnapshot | null | undefined): string {
+  const read = Math.max(0, Math.round(usage?.cache_read_tokens || 0))
+  const write = Math.max(0, Math.round(usage?.cache_write_tokens || 0))
+  if (!read && !write) return ''
+  const parts: string[] = []
+  if (read) parts.push(`${formatTokens(read)} cached`)
+  if (write) parts.push(`${formatTokens(write)} written`)
+  return parts.join(' · ')
 }
 
 // Order matters: more specific model ids first (grok-4.5 before grok-4).
@@ -117,6 +139,9 @@ export function liveRunEstimate(
       model,
       provider,
     ),
+    // Cache counters are provider truth or nothing — never estimated.
+    cache_read_tokens: providerUsage?.cache_read_tokens,
+    cache_write_tokens: providerUsage?.cache_write_tokens,
     source: providerUsage?.source === 'provider' ? 'provider' : 'estimate',
     model,
     provider,
