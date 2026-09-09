@@ -25,7 +25,7 @@ Live mode may launch Notepad briefly and terminate it.
 ## Capture status (last write)
 
 - Contract fixtures: always written
-- Live capture: did not succeed (`uia_unavailable`)
+- Live capture: succeeded
 
 ## Key result shapes
 
