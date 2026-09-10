@@ -452,8 +452,8 @@ func (c *TelegramChannel) eventFromMessage(msg, update map[string]any) (Event, b
 		return Event{}, false
 	}
 	chat, _ := msg["chat"].(map[string]any)
-	chatID := anyString(chat["id"])
-	userID := anyString(from["id"])
+	chatID := anyID(chat["id"])
+	userID := anyID(from["id"])
 	access := c.access
 	if devAllowAll("REMEDY_TELEGRAM_ALLOW_ALL") {
 		access.AllowAll = true

@@ -64,3 +64,30 @@ func TestDeniedInboundIsVisibleToOwner(t *testing.T) {
 	}
 	_ = context.Background()
 }
+
+func TestTelegramNumericIDsMatchTheAllowlist(t *testing.T) {
+	g := New(Config{RateLimitPerMin: 100, HeartbeatInterval: time.Hour})
+	ch := NewTelegram(g, TelegramConfig{BotToken: "t", AllowChatIDs: "8720969343"})
+
+	owner := map[string]any{
+		"text": "hi",
+		"chat": map[string]any{"id": float64(8720969343)},
+		"from": map[string]any{"id": float64(8720969343)},
+	}
+	ev, ok := ch.eventFromMessage(owner, nil)
+	if !ok {
+		t.Fatal("a numeric Telegram user id must match a decimal allowlist entry")
+	}
+	if ev.SourceID != "8720969343" || ev.SessionID != "8720969343" {
+		t.Fatalf("ids=%q/%q", ev.SourceID, ev.SessionID)
+	}
+
+	stranger := map[string]any{
+		"text": "hi",
+		"chat": map[string]any{"id": float64(-1001234567890)},
+		"from": map[string]any{"id": float64(9999999999)},
+	}
+	if _, ok := ch.eventFromMessage(stranger, nil); ok {
+		t.Fatal("a different numeric id must still be refused")
+	}
+}

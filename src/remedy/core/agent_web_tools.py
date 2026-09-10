@@ -78,7 +78,7 @@ def register_web_tools(runtime: Any) -> None:
                     "Refused: private/localhost/metadata URLs are blocked (SSRF protection).",
                     code="SSRF_BLOCKED",
                     tool_name=tool_name,
-                    suggestion="Use a public https URL, or read local files with workspace.read.",
+                    suggestion="Use a public https URL, or read local files with read.",
                 )
             if msg.startswith("ROBOTS_BLOCKED"):
                 host = msg.split(" ", 1)[-1]

@@ -289,7 +289,14 @@ fn encodedPayloadDangerous(gpa: std.mem.Allocator, text: []const u8, depth: u8) 
         const token = stripQuotes(raw_token);
         if (!isEncodedCommandFlag(token)) continue;
         found_flag = true;
-        const operand = it.next() orelse return true;
+        // PowerShell accepts `-EncodedCommand:<payload>` as one token. Decode
+        // that suffix; only then take the next space-separated operand.
+        const operand = blk: {
+            if (std.mem.indexOfScalar(u8, token, ':')) |colon| {
+                if (colon + 1 < token.len) break :blk token[colon + 1 ..];
+            }
+            break :blk it.next() orelse return true;
+        };
         const decoded = decodeEncodedCommand(gpa, operand) catch return true;
         defer gpa.free(decoded);
         const normalized = normalizeText(gpa, decoded) catch return true;
@@ -640,6 +647,12 @@ test "encoded powershell payloads are decoded before needle matching" {
     const outer = try encodeUtf16Base64(gpa, inner);
     defer gpa.free(outer);
     try std.testing.expect(isDangerousProcess(&.{ pwsh, "-e", outer }));
+
+    // Colon form attaches the payload to the flag. A following benign blob
+    // must not be what the classifier inspects.
+    const colon_bad = try std.fmt.allocPrint(gpa, "-enc:{s}", .{bad});
+    defer gpa.free(colon_bad);
+    try std.testing.expect(isDangerousProcess(&.{ pwsh, colon_bad, good }));
 }
 
 test "spawn hash binds supplied environment and is argv-only without one" {

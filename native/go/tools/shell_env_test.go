@@ -19,7 +19,7 @@ func TestShellExecRefusesInterpreterPathEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, key := range []string{"PYTHONPATH", "pythonpath", "NODE_PATH", "CLASSPATH", "PSModulePath"} {
+	for _, key := range []string{"PYTHONPATH", "pythonpath", "NODE_PATH", "CLASSPATH", "PSModulePath", "NODE_OPTIONS", "BASH_ENV", "LD_PRELOAD"} {
 		input, err := json.Marshal(map[string]any{
 			"argv": []string{"hostname"},
 			"env":  map[string]string{key: "C:\attacker"},

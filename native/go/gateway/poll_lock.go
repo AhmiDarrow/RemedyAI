@@ -110,11 +110,10 @@ func (l *PollLock) TryAcquire() bool {
 			alive := pidAliveFn(pid)
 			staleHB := ts > 0 && time.Since(time.Unix(int64(ts), 0)).Seconds() > StaleLockSeconds
 			if !alive || staleHB {
-				// Dead holder, or a live holder that stopped heartbeating:
-				// drop the stale file so a fresh inode can be locked. When
-				// the holder still pins the file the flock below fails and
-				// the caller retries later.
-				_ = os.Remove(l.Path)
+				// Do not unlink: flock is on the inode. Removing the path
+				// while a holder still has the fd lets a second process
+				// create a new inode and take LOCK_EX. Open the existing
+				// file and try the lock; a live holder still wins.
 				log.Printf("%s: reclaiming poll lock (pid=%d alive=%v stale_heartbeat=%v)", l.Channel, pid, alive, staleHB)
 			}
 		}

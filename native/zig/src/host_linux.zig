@@ -1407,16 +1407,8 @@ pub fn spawnHidden(argv_json: []const u8, cwd: []const u8, env_json: []const u8)
 
     var env_map_storage: ?std.process.Environ.Map = null;
     defer if (env_map_storage) |*m| m.deinit();
-    const env_map_ptr: ?*const std.process.Environ.Map = blk: {
-        const pairs = try host.parseEnv(gpa, env_json) orelse break :blk null;
-        var map = std.process.Environ.Map.init(allocator);
-        errdefer map.deinit();
-        for (pairs) |pair| {
-            map.put(pair.key, pair.value) catch return error.OutOfMemory;
-        }
-        env_map_storage = map;
-        break :blk &env_map_storage.?;
-    };
+    env_map_storage = try host.resolveEnvMap(allocator, env_json);
+    const env_map_ptr: ?*const std.process.Environ.Map = if (env_map_storage) |*m| m else null;
 
     const cwd_opt: std.process.Child.Cwd = if (cwd.len == 0)
         .inherit
@@ -1480,16 +1472,8 @@ pub fn spawnPiped3(argv_json: []const u8, cwd: []const u8, env_json: []const u8)
 
     var env_map_storage: ?std.process.Environ.Map = null;
     defer if (env_map_storage) |*m| m.deinit();
-    const env_map_ptr: ?*const std.process.Environ.Map = blk: {
-        const pairs = try host.parseEnv(gpa, env_json) orelse break :blk null;
-        var map = std.process.Environ.Map.init(allocator);
-        errdefer map.deinit();
-        for (pairs) |pair| {
-            map.put(pair.key, pair.value) catch return error.OutOfMemory;
-        }
-        env_map_storage = map;
-        break :blk &env_map_storage.?;
-    };
+    env_map_storage = try host.resolveEnvMap(allocator, env_json);
+    const env_map_ptr: ?*const std.process.Environ.Map = if (env_map_storage) |*m| m else null;
 
     const cwd_opt: std.process.Child.Cwd = if (cwd.len == 0)
         .inherit

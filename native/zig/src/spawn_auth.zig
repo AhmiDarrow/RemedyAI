@@ -29,6 +29,7 @@ const invalid_status: i32 = @intFromEnum(Status.invalid_argument);
 const denied_status: i32 = @intFromEnum(Status.access_denied);
 const failed_status: i32 = @intFromEnum(Status.operation_failed);
 const unsupported_status: i32 = @intFromEnum(Status.unsupported);
+const env_denied_status: i32 = @intFromEnum(Status.env_denied);
 
 const default_subject = "agent:remedy";
 const default_scope = "workspace:local";
@@ -70,6 +71,7 @@ fn authStatus(err: anyerror) i32 {
         error.InvalidPath,
         => invalid_status,
         error.Unsupported => unsupported_status,
+        error.EnvDenied => env_denied_status,
         error.OutOfMemory => failed_status,
         else => failed_status,
     };
@@ -238,6 +240,7 @@ fn authorizeLocked(
     // does not burn the nonce.
     try write_jail.checkSpawn(host.allocator, argv, cwd);
     const env = try spawnEnv(arena, env_json, false);
+    policy.checkEnvBase(env.pairs) catch return error.EnvDenied;
     const verifier = &(g_verifier orelse return error.AccessDenied);
     _ = try executor.authorizeProcess(
         verifier,
@@ -549,15 +552,10 @@ export fn remedy_core_process_exec_capture_authorized(
         var env_map_storage: ?std.process.Environ.Map = null;
         defer if (env_map_storage) |*m| m.deinit();
         const env_map_ptr: ?*const std.process.Environ.Map = blk: {
-            const pairs = (host.parseEnv(arena.allocator(), slice(env_json, env_len)) catch
-                return invalid_status) orelse break :blk null;
-            var map = std.process.Environ.Map.init(host.allocator);
-            errdefer map.deinit();
-            for (pairs) |pair| {
-                map.put(pair.key, pair.value) catch return failed_status;
-            }
+            const map = host.resolveEnvMap(host.allocator, slice(env_json, env_len)) catch |err|
+                return host.statusOf(err);
             env_map_storage = map;
-            break :blk &env_map_storage.?;
+            break :blk if (env_map_storage) |*m| m else null;
         };
         const parent_env: std.process.Environ = if (is_windows)
             .{ .block = .global }

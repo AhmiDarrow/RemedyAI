@@ -519,7 +519,7 @@ def body_next_lines(entry: BuildLedgerEntry) -> list[str]:
         if next_cmd:
             lines.append(f"NEXT VERIFY: `{next_cmd}`")
         lines.append(
-            "Next: workspace.read READ FIRST → workspace.edit the fail → re-run NEXT VERIFY. "
+            "Next: read READ FIRST → edit the fail → re-run NEXT VERIFY. "
             "Do not restart the build."
         )
         return lines
@@ -610,8 +610,8 @@ def resume_hint(project_path: str | Path | None = None, *, home: str | Path | No
     if needs_resume_drive(entry):
         lines.append(
             "This build is RED with writes on disk — do not leave it unfinished. "
-            "Continue driving it to green: read the failure, workspace.edit the "
-            "failing units, re-run the verify command with shell.exec, repeat. "
+            "Continue driving it to green: read the failure, edit the "
+            "failing units, re-run the verify command with bash, repeat. "
             "Do not claim done until green."
         )
     if not body:
@@ -631,7 +631,7 @@ def resume_hint(project_path: str | Path | None = None, *, home: str | Path | No
             "Next: batch-read key paths, then PLAN a short checklist, then BUILD."
         )
     elif phase in ("plan",):
-        lines.append("Next: BUILD with workspace.write/workspace.edit — no more explore-only turns.")
+        lines.append("Next: BUILD with write/edit — no more explore-only turns.")
     elif phase in ("build", "repair", "write"):
         lines.append(
             "Next: finish remaining writes, then VERIFY (oracle/tests). "

@@ -34,8 +34,8 @@ Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
 
 **v0.60** is the native runtime cutover: Desktop and `remedy serve` run Go
 `remedy-runtime` on `:7400` with Zig `remedy_core` — not Python FastAPI. Tools
-use the Tool ABI (`workspace.*`, `shell.exec`, `computer.*`, `settings.*`, and
-friends). Chat keeps a plain-language provider fallback when a key is missing
+use the Tool ABI (`read` / `edit` / `write` / `glob` / `grep` / `bash`,
+`computer.*`, `settings.*`, and friends). Chat keeps a plain-language provider fallback when a key is missing
 or a local host is down. See [What’s new](13-whats-new.md).
 
 **v0.41** is **multilingual**: Language pins chrome *and* replies (default Auto

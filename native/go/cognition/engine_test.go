@@ -463,8 +463,17 @@ func TestClassifyToolKinds(t *testing.T) {
 	if ClassifyTool("workspace.read") != ToolExplore {
 		t.Fatal("read")
 	}
+	if ClassifyTool("read") != ToolExplore {
+		t.Fatal("advertised read")
+	}
 	if ClassifyTool("workspace.edit") != ToolMutate {
 		t.Fatal("edit")
+	}
+	if ClassifyTool("edit") != ToolMutate {
+		t.Fatal("advertised edit")
+	}
+	if ClassifyTool("write") != ToolMutate {
+		t.Fatal("advertised write")
 	}
 	if ClassifyTool("mission_verify") != ToolVerify {
 		t.Fatal("verify")
@@ -954,6 +963,32 @@ func TestCompactTranscriptKeepsGoalAndLastEight(t *testing.T) {
 	first := out[2]
 	if first.Role == RoleUser && first.HasToolResults() {
 		t.Fatal("compaction orphaned a tool result")
+	}
+}
+
+func TestCompactTranscriptKeepsCurrentGoalAfterHistory(t *testing.T) {
+	msgs := []Message{UserText("remember the milk")}
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, Message{Role: RoleAssistant, Blocks: []Block{TextBlock(fmt.Sprintf("old %d", i))}})
+		msgs = append(msgs, UserText(fmt.Sprintf("history %d", i)))
+	}
+	msgs = append(msgs, UserText("do X now"))
+	for i := 1; i <= 10; i++ {
+		msgs = append(msgs, Message{Role: RoleAssistant, Blocks: []Block{
+			TextBlock(fmt.Sprintf("Round %d.", i)),
+			{Type: BlockToolUse, ID: fmt.Sprintf("n%d", i), Name: "edit", Input: json.RawMessage(`{"path":"a.go"}`)},
+		}})
+		msgs = append(msgs, Message{Role: RoleUser, Blocks: []Block{
+			{Type: BlockToolResult, ToolUseID: fmt.Sprintf("n%d", i), Content: []Block{TextBlock("ok")}},
+		}})
+	}
+	out := compactTranscript(msgs)
+	joined := transcriptText(out)
+	if !strings.Contains(joined, "remember the milk") {
+		t.Fatalf("session opener dropped: %s", joined)
+	}
+	if !strings.Contains(joined, "do X now") {
+		t.Fatalf("current goal dropped: %s", joined)
 	}
 }
 

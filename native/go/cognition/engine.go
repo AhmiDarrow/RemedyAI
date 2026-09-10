@@ -408,6 +408,11 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 				calls = append(calls, *event.ToolCall)
 			}
 		}
+		if err := ctx.Err(); err != nil {
+			out.Err = err
+			trace(StateFailed, iteration, err.Error())
+			return out
+		}
 		roundText := text.String()
 		out.Text += roundText
 		// Every tool_use block must carry an id its result can be paired to;
@@ -512,8 +517,12 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 
 		trace(StatePolicy, iteration, fmt.Sprintf("evaluate %d tools", len(calls)))
 		decisions := e.decide(ctx, calls)
-		if pending := callsWith(calls, decisions, Ask); len(pending) > 0 {
-			if e.ApprovalGate == nil {
+		for gateAttempt := 0; ; gateAttempt++ {
+			pending := callsWith(calls, decisions, Ask)
+			if len(pending) == 0 {
+				break
+			}
+			if e.ApprovalGate == nil || gateAttempt >= 2 {
 				out.Pending = pending
 				out.Err = ErrOwnerConfirmationNeeded
 				out.Messages = cloneMessages(transcript)
@@ -532,15 +541,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 				}
 				return out
 			}
-			// Owner approved — fingerprints should now Allow. Re-decide once.
 			decisions = e.decide(ctx, calls)
-			if pending := callsWith(calls, decisions, Ask); len(pending) > 0 {
-				out.Pending = pending
-				out.Err = ErrOwnerConfirmationNeeded
-				out.Messages = cloneMessages(transcript)
-				trace(StatePaused, iteration, "still needs approval")
-				return out
-			}
 		}
 
 		allowed := callsWith(calls, decisions, Allow)

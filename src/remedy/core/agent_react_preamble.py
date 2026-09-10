@@ -610,8 +610,8 @@ async def prepare_turn_preamble(
                             "[Partner · PROJECT TREE — tools required]\n"
                             f"{listing}\n\n"
                             "Reply with native tool_calls only "
-                            "(workspace.read / workspace.write / workspace.edit / "
-                            "shell.exec). Do not restate the plan."
+                            "(read / write / edit / "
+                            "bash). Do not restate the plan."
                         ),
                     }
                 )

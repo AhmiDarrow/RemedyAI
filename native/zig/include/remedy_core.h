@@ -47,6 +47,7 @@ enum remedy_core_status {
     REMEDY_CORE_ACCESS_DENIED = 2,
     REMEDY_CORE_OPERATION_FAILED = 3,
     REMEDY_CORE_UNSUPPORTED = 4,
+    REMEDY_CORE_ENV_DENIED = 5,
 };
 
 enum remedy_core_capability {

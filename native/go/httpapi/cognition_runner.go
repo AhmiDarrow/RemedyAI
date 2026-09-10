@@ -749,13 +749,34 @@ func lastResultsInput(results []cognition.ToolResult) []map[string]any {
 		if res.Err != "" {
 			tail = res.Err
 		}
-		out = append(out, map[string]any{
+		ok := res.Err == ""
+		row := map[string]any{
 			"name": res.Name,
-			"ok":   res.Err == "",
+			"ok":   ok,
 			"tail": tailRunes(tail, 400),
-		})
+		}
+		if code, found := jsonExitCode(res.Output); found {
+			row["exit_code"] = code
+			if code != 0 {
+				row["ok"] = false
+			}
+			// parse_exit_code reads the tail; keep the code at the front so a
+			// large stdout cannot hide it past the 400-character window.
+			row["tail"] = fmt.Sprintf("exit_code=%d %s", code, tailRunes(tail, 350))
+		}
+		out = append(out, row)
 	}
 	return out
+}
+
+func jsonExitCode(output []byte) (int, bool) {
+	var parsed struct {
+		ExitCode *int `json:"exit_code"`
+	}
+	if json.Unmarshal(output, &parsed) != nil || parsed.ExitCode == nil {
+		return 0, false
+	}
+	return *parsed.ExitCode, true
 }
 
 // tailRunes keeps the last n runes of s.
@@ -868,11 +889,7 @@ func (m *emittingModel) emitEvent(ev cognition.ModelEvent) {
 		m.emit("@@status:" + ev.Status)
 	}
 	if ev.Text != "" {
-		if strings.HasPrefix(ev.Text, "@@") {
-			m.emit("@@text:" + ev.Text)
-		} else {
-			m.emit(ev.Text)
-		}
+		m.emit("@@text:" + ev.Text)
 	}
 	if ev.ToolCall != nil {
 		m.emit(formatToolCallToken(*ev.ToolCall))
@@ -1361,7 +1378,11 @@ func CollectTokens(ctx context.Context, r TurnRunner, req TurnRequest) (string, 
 	err := r.RunTurn(ctx, req, func(tok string) error {
 		mu.Lock()
 		defer mu.Unlock()
-		b.WriteString(tok)
+		if text, ok := modelTextToken(tok); ok {
+			b.WriteString(text)
+		} else {
+			b.WriteString(tok)
+		}
 		return nil
 	})
 	mu.Lock()

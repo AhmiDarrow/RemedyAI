@@ -168,13 +168,14 @@ func RegisterFromConfig(gw *Gateway, cfg map[string]any, home string, secrets Se
 		clientSecret := secrets("google_chat", "oauth_client_secret")
 		if tok != "" || (refresh != "" && clientID != "" && clientSecret != "") {
 			gw.RegisterChannel(NewGoogleChat(gw, GoogleChatConfig{
-				AccessToken:  tok,
-				RefreshToken: refresh,
-				ClientID:     clientID,
-				ClientSecret: clientSecret,
-				SpaceID:      cfgString(sec, "space_id"),
-				AllowIDs:     firstAny(sec["allow_ids"], sec["allow_chat_ids"]),
-				AllowAll:     asBool(sec["allow_all"]),
+				AccessToken:   tok,
+				RefreshToken:  refresh,
+				ClientID:      clientID,
+				ClientSecret:  clientSecret,
+				SpaceID:       cfgString(sec, "space_id"),
+				ProjectNumber: cfgString(sec, "project_number"),
+				AllowIDs:      firstAny(sec["allow_ids"], sec["allow_chat_ids"]),
+				AllowAll:      asBool(sec["allow_all"]),
 			}))
 			registered = append(registered, "google_chat")
 		} else {

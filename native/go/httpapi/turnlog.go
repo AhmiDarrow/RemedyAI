@@ -297,8 +297,12 @@ func (l *turnLog) append(rec *turnRecord) uint64 {
 	if l.f == nil {
 		return 0
 	}
-	l.seq++
-	rec.Seq = l.seq
+	if rec.T == "approval" {
+		rec.Seq = 0
+	} else {
+		l.seq++
+		rec.Seq = l.seq
+	}
 	if rec.TS == 0 {
 		rec.TS = float64(time.Now().UnixNano()) / 1e9
 	}
@@ -565,6 +569,14 @@ func (t *turnStream) record(rec turnRecord) uint64 {
 	if t == nil {
 		return 0
 	}
+	if rec.T == "approval" {
+		// Evidence only: do not occupy the SSE seq, or SeqGate parks on a hole.
+		_ = t.log.append(&rec)
+		if t.live != nil {
+			t.live.signal()
+		}
+		return 0
+	}
 	seq := t.log.append(&rec)
 	if seq == 0 {
 		// No log configured: the transport still needs a monotonic seq.
@@ -574,7 +586,9 @@ func (t *turnStream) record(rec turnRecord) uint64 {
 	if event, payload, ok := rec.frame(); ok {
 		t.sink.push(streamFrame{Seq: seq, Data: sseFrame(event, payload)})
 	}
-	t.live.signal()
+	if t.live != nil {
+		t.live.signal()
+	}
 	return seq
 }
 

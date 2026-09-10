@@ -44,7 +44,7 @@ _GATE_VERIFY_FAILED_MAX = 3
 _GATE_MISSION_MAX = 2
 
 _LEDGER_LINE_RE = re.compile(
-    r"^\W*(?P<name>[a-z][a-z0-9_]*\.[a-z0-9_*]+)\s*"
+    r"^\W*(?P<name>[a-z][a-z0-9_.]+)\s*"
     r"(?:\[(?P<status>ok|fail|failed|error|err|timeout)\])?\s*(?P<rest>.*)$",
     re.IGNORECASE,
 )

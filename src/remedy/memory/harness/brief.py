@@ -219,7 +219,7 @@ def brief_to_context_block(brief: SessionBrief | None, *, max_chars: int = 2200)
             lines.append(f"  · [C{ent.n}] {ent.summary}")
     if getattr(brief, "hot_writes", None):
         lines.append(
-            "- Hot writes (disk is source of truth — workspace.read these; "
+            "- Hot writes (disk is source of truth — read these; "
             "never restore an older version from chat):"
         )
         for a in list(brief.hot_writes)[-16:]:

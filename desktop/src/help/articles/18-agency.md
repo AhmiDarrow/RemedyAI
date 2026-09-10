@@ -21,12 +21,12 @@ Tool ABI ids (what the model calls on `:7400`):
 
 | Tool | Use |
 |------|-----|
-| **`workspace.edit`** | Precise search/replace; multi-hunk via `edits=` JSON; CRLF + indent-tolerant unique hunks; failed hunks are not retried blindly |
-| **`workspace.write`** | Create or fully overwrite a file |
-| **`workspace.read`** | Read text (optional line offset/limit) |
-| **`workspace.list`** | Browse a directory (relative or absolute) |
-| **`workspace.search`** | Any text language; `symbol=` for definitions; context lines; absolute `path` for multi-tree |
-| **`shell.exec`** | Host command (Windows = **cmd.exe**, not bash). POSIX strings are rewritten; PowerShell goes through a temp `.ps1` + `pwsh -File` |
+| **`edit`** | Precise search/replace; fails if the old text is not unique unless `replace_all`; keeps CRLF and BOM |
+| **`write`** | Create or fully overwrite a file |
+| **`read`** | Read text (optional line offset/limit) or an image file |
+| **`glob`** | Find files by name pattern under the project |
+| **`grep`** | Search file contents (regex or literal) with optional context lines |
+| **`bash`** | Host command string (Windows = **cmd.exe**). Timeout and cancel kill the process tree |
 | **`computer.*`** | Screenshot, click, type, navigate, and other GUI / Browser-rail actions |
 | **`todo_write` / `todo_read`** | Short build checklist (pending → in_progress → completed). Shown in chat and crossed off as items finish. Do not claim done while open |
 | **`build_drive`** | Machine-owned loop: lock spec → write failing TDD tests → isolated hops → gate tower → review-fix |
@@ -45,7 +45,7 @@ Tool ABI ids (what the model calls on `:7400`):
 Phrases like **“review project”**, **“implement the fix”**, **“run the tests”** stay in
 **agency mode** (tools on). If the model only *narrates* “activating skill” without a
 function call, Remedy **re-arms tools** and requires real `skill.activate` /
-`workspace.list` / `workspace.read` / etc. — you should see process trail activity,
+`glob` / `read` / etc. — you should see process trail activity,
 not a one-line promise.
 
 Shell mutations stay inside **write roots** (project / home scope); opaque payloads
@@ -60,15 +60,15 @@ Shell mutations stay inside **write roots** (project / home scope); opaque paylo
 
 ### Shell and edits
 
-- **`shell.exec`:** optional `timeout_seconds` (up to 600) and `workdir` for long Godot/cargo builds; local `.venv` / `node_modules/.bin` / repo-root tools are on `PATH`. On Windows the host is **cmd.exe**. `session=true` keeps cwd/env in a persistent session; `conpty=true` attaches a real console when the program needs a TTY.
+- **`bash`:** optional `timeout_ms` (up to 600000) and `cwd` for long Godot/cargo builds. On Windows the host is **cmd.exe**. Cancellation and timeout kill the process tree.
 - Prefer argv-style shell calls over quoted bash/PowerShell when the host dialect is unclear. Failed commands return a clear diagnostic (dialect / quoting / not-found / interactive) when one exists.
-- **`workspace.edit`:** multi-hunk with `edits='[{"old_string":"…","new_string":"…"}]'` to cut round-trips. Unique hunks survive CRLF / trailing-space / leading-indent drift. The same failed hunk is refused a second time this turn — `workspace.read` and copy a real snippet.
+- **`edit`:** exact `old_string` → `new_string`. Unique hunks keep CRLF and BOM. The same failed hunk is refused a second time this turn — `read` and copy a real snippet.
 - **Windows:** paths named `nul` / other reserved device names are rejected with a clear error (do not open them).
 
 ### Explore / verify jobs
 
 - **`job_run kind=explore`:** tree sample + stack fingerprint + orientation pointers + optional search under `path=` (absolute OK).
-- **`job_run kind=verify`:** runs a command (or fingerprint default) with local PATH and longer timeout. Same Ask-mode approval gate as `shell.exec`.
+- **`job_run kind=verify`:** runs a command (or fingerprint default) with local PATH and longer timeout. Same Ask-mode approval gate as `bash`.
 - **`job_run kind=diff`:** `git status` / `diff --stat` summary.
 
 ### Spread (parallel silent workers)
@@ -139,7 +139,7 @@ ends a coding turn — never a mid-mission “tool-call limit.”
 When you say **work alone** / **handle this on your own**, continuity steers Remedy to:
 
 1. `mission_start` with a goal, steps, and `verify_command` (e.g. `pytest -q`) — if verify is omitted, stack fingerprint may suggest one  
-2. Implement with `workspace.edit` / `workspace.search`  
+2. Implement with `edit` / `grep`  
 3. `mission_update` as steps complete  
 4. `mission_verify` before claiming done (nudged when steps are done but verify has not passed)  
 5. Fix and re-verify on failure  

@@ -34,8 +34,9 @@ def test_completion_claim_is_refused_after_a_failing_verify(home: Path) -> None:
             "verify_seen": False,
             "last_results": [
                 {
-                    "name": "shell.exec",
-                    "ok": False,
+                    "name": "bash",
+                    "ok": True,
+                    "exit_code": 1,
                     "tail": "exit_code=1 FAILED test_app.py::test_verbose_flag",
                 }
             ],
@@ -56,7 +57,7 @@ def test_completion_is_accepted_after_a_green_verify(home: Path) -> None:
             "tool_count": 3,
             "verify_seen": True,
             "last_results": [
-                {"name": "shell.exec", "ok": True, "tail": "exit_code=0 5 passed"}
+                {"name": "bash", "ok": True, "exit_code": 0, "tail": "exit_code=0 5 passed"}
             ],
         }
     )

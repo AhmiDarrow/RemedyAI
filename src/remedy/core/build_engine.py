@@ -76,8 +76,8 @@ _WRITE_TOOLS = frozenset(
         "file_edit",
         "file_edit_batch",
         "apply_patch",
-        "workspace.write",
-        "workspace.edit",
+        "write",
+        "edit",
         "build_unit_hop",
         "build_drive",
         "build_parallel",
@@ -90,9 +90,9 @@ _EXPLORE_TOOLS = frozenset(
         "repo_search",
         "file_glob",
         "memory_search",
-        "workspace.read",
-        "workspace.list",
-        "workspace.search",
+        "read",
+        "glob",
+        "grep",
         "memory.search",
         "soul_recall",
     }
@@ -101,7 +101,7 @@ _VERIFY_TOOLS = frozenset(
     {
         "bash_exec",
         "shell_exec",
-        "shell.exec",
+        "bash",
         "job_run",
         "host_run",
     }
@@ -1106,17 +1106,17 @@ def build_protocol_block(state: BuildTurnState) -> str:
             return (
                 f"[Review] {state.goal or '(user request)'}\n"
                 "Scout once (batch reads), deliver findings, stop. "
-                "No workspace.write unless they asked to change something."
+                "No write unless they asked to change something."
                 f"{_coworkers_block()}"
             )
         return (
             "[Read-only review — RESEARCH → SYNTHESIZE → DELIVER]\n"
             f"Goal: {state.goal or '(user request)'}\n"
-            "1) RESEARCH (scout): batch workspace.read/workspace.list/workspace.search in ONE step "
+            "1) RESEARCH (scout): batch read/glob/grep in ONE step "
             "(4–12). One good sweep is enough — do not re-scout for marginal detail.\n"
             "2) SYNTHESIZE: strengths, risks, concrete file:line findings, ranked.\n"
             "3) DELIVER the written review. DONE = findings delivered. A read-only "
-            "review needs NO workspace.write and NO verify signal — do not loop for 'a few "
+            "review needs NO write and NO verify signal — do not loop for 'a few "
             "more details', and do not claim you must build. Only edit if the user "
             "explicitly asked you to fix or change something (that switches this into "
             "a full build with the green gate)."
@@ -1131,7 +1131,7 @@ def build_protocol_block(state: BuildTurnState) -> str:
             "[Task loop — IMPLEMENT the open Build list · hard rule]\n"
             f"Goal: {state.goal or '(user request)'}\n"
             "The numbered review findings are already on the Build checklist. "
-            "Implement them with workspace.write / workspace.edit. Read only the files those "
+            "Implement them with write / edit. Read only the files those "
             "items name. Do **not** start a whole-tree review as this hop. "
             "Do **not** claim Issues 1–10 fixed while checklist rows are still open. "
             "The full test suite waits until those product items exist."
@@ -1186,11 +1186,11 @@ def build_protocol_block(state: BuildTurnState) -> str:
         f"Goal: {state.goal or '(user request)'}\n"
         f"{oracle}\n"
         "Default schedule (do not skip to monologue):\n"
-        "1) RESEARCH (scout): batch workspace.read/workspace.list/workspace.search/memory.search "
+        "1) RESEARCH (scout): batch read/glob/grep/memory.search "
         "in ONE step (4–12). Gather facts before inventing.\n"
         "2) PLAN: short checklist via open tasks / mission_start — machine-side, "
         "not a long essay unless the user asked plan-only.\n"
-        "3) BUILD (implement): workspace.write for new files, workspace.edit multi-hunk for "
+        "3) BUILD (implement): write for new files, edit multi-hunk for "
         "changes. Do **not** run the project test suite (`npm test` / `pytest`) "
         "until the current product checklist items are actually built — a red "
         "suite mid-slice is noise, not the job. Static HTML: files on disk is "
@@ -1200,7 +1200,7 @@ def build_protocol_block(state: BuildTurnState) -> str:
         f"{ship}\n"
         "YOU DRIVE THIS PC this turn (Ask is skipped; jail/auth/Plan stay). "
         "Do not call help_list or goal_add. Do not ask permission. "
-        "Use workspace.read / workspace.write / shell.exec now. "
+        "Use read / write / bash now. "
         "Machine loop: todo_write a short checklist covering the WHOLE goal, "
         "then implement item by item. Green tests are a checkpoint **after** "
         "the slice exists — do not stop to report or to chase the suite after "
@@ -1285,7 +1285,7 @@ def observe_tool_batch(
     for tc in tcs:
         n = _tool_name(tc)
         tid = str(tc.get("id") or tc.get("tool_call_id") or "")
-        if n in ("bash_exec", "shell_exec", "shell.exec", "job_run", "host_run"):
+        if n in ("bash_exec", "shell_exec", "bash", "job_run", "host_run"):
             blob = _tool_command_blob(tc)
             if _blob_is_verify_command(blob):
                 any_verify = True
@@ -1723,7 +1723,7 @@ def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
             "content": (
                 "[Build engine · FORCE IMPLEMENT] The goal still needs these files "
                 f"on disk with real content: {listed}. "
-                "workspace.write each one with the complete source (never empty). "
+                "write each one with the complete source (never empty). "
                 "Do not claim done. Verify only after the files exist."
             ),
         }
@@ -1773,7 +1773,7 @@ def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
             "role": "user",
             "content": (
                 "[Build engine] Enough scouting for now. The next step changes the "
-                "tree: workspace.write for new files or workspace.edit (multi-hunk) "
+                "tree: write for new files or edit (multi-hunk) "
                 "for existing ones. Batch remaining reads only if the edit needs them."
             ),
         }
@@ -1811,7 +1811,7 @@ def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
             "role": "user",
             "content": (
                 "[Build engine · FORCE VERIFY] Code was written but not verified. "
-                "Run the verify command now with shell.exec."
+                "Run the verify command now with bash."
                 f"{vhint} Do not claim done until exit_code=0."
             ),
         }
@@ -1847,7 +1847,7 @@ def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
             "role": "user",
             "content": (
                 "[Build engine · REPAIR] Verify failed. Read the error (path:line), "
-                "workspace.edit the failing units, re-run the SAME verify command. "
+                "edit the failing units, re-run the SAME verify command. "
                 "Do not expand scope. Do not summarize failure as success."
             ),
         }
@@ -1863,7 +1863,7 @@ def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
             "role": "user",
             "content": (
                 "[Build engine · IMPLEMENT NOW] Enough context. Write the code. "
-                "workspace.write / workspace.edit in this step. Verification follows."
+                "write / edit in this step. Verification follows."
             ),
         }
 
@@ -1885,8 +1885,8 @@ def monologue_block_nudge(state: BuildTurnState | None) -> dict[str, str] | None
         "role": "user",
         "content": (
             "[Task loop] A plan in chat is not progress. Emit native tool_calls "
-            "now (workspace.list / workspace.read batch, then workspace.write / "
-            "workspace.edit) instead of a RESEARCH/PLAN/BUILD essay."
+            "now (glob / read batch, then write / "
+            "edit) instead of a RESEARCH/PLAN/BUILD essay."
         ),
     }
 
@@ -2135,7 +2135,7 @@ def unfinished_green_gate_message(state: BuildTurnState) -> dict[str, str]:
                     "[Build engine · TODO GATE · refuse scout-only DONE]\n"
                     f"{state.open_todo_count} checklist item(s) still pending. "
                     "Do not ask the owner to say go. Implement the first open "
-                    "item now (workspace.write / workspace.edit), mark it in_progress, "
+                    "item now (write / edit), mark it in_progress, "
                     "then the next. Tools stay on."
                 ),
             }
@@ -2152,8 +2152,8 @@ def unfinished_green_gate_message(state: BuildTurnState) -> dict[str, str]:
     if has_c:
         cmd = state.verify_command or "gcc -o hello.exe hello.c && hello.exe"
         extra = (
-            "This is a **C** task: shell.exec the gcc compile, then run the exe. "
-            "Do not stop after workspace.write alone. Do not use pytest."
+            "This is a **C** task: bash the gcc compile, then run the exe. "
+            "Do not stop after write alone. Do not use pytest."
         )
     else:
         cmd = state.verify_command or "pytest -q / npm test"
@@ -2297,8 +2297,8 @@ def green_continue_message(state: BuildTurnState, *, command: str = "") -> dict[
                     f"Machine verify passed: `{cmd}`.\n"
                     "Do **not** rewrite working source just to re-verify.\n"
                     "The program is built — **use it**: launch the exe with "
-                    "shell.exec in the background, then computer.screenshot the "
-                    "desktop, play it, workspace.edit only "
+                    "bash in the background, then computer.screenshot the "
+                    "desktop, play it, edit only "
                     "what you observe is wrong, rebuild, repeat.\n"
                     "Tools stay on."
                 ),

@@ -16,30 +16,61 @@ const (
 )
 
 // compactTranscript replaces the middle of an over-budget transcript with one
-// deterministic working-set message. The first user message (the goal) and the
+// deterministic working-set message. The first user prose (session opener),
+// the latest user prose that is not tool results (this turn's goal), and the
 // last compactKeepTail messages survive verbatim. The cut never separates an
 // assistant tool_use message from the user message carrying its results.
 func compactTranscript(msgs []Message) []Message {
 	if len(msgs) <= compactKeepTail+2 {
 		return msgs
 	}
+	head := firstUserProseIndex(msgs)
+	goal := lastUserProseIndex(msgs)
 	cut := len(msgs) - compactKeepTail
 	// Never start the kept tail on tool results whose tool_use is being dropped.
 	for cut > 1 && msgs[cut].Role == RoleUser && msgs[cut].HasToolResults() {
 		cut--
 	}
-	if cut <= 1 {
+	if cut <= head+1 && (goal < 0 || goal == head || goal >= cut) {
 		return msgs
 	}
-	middle := msgs[1:cut]
+	keepGoal := goal > head && goal < cut
+	middle := make([]Message, 0, cut-head)
+	for i := head + 1; i < cut; i++ {
+		if keepGoal && i == goal {
+			continue
+		}
+		middle = append(middle, msgs[i])
+	}
 	if len(middle) == 0 {
 		return msgs
 	}
-	out := make([]Message, 0, len(msgs)-len(middle)+1)
-	out = append(out, msgs[0])
+	out := make([]Message, 0, 4+len(msgs)-cut)
+	out = append(out, msgs[head])
+	if keepGoal {
+		out = append(out, msgs[goal])
+	}
 	out = append(out, UserText(buildWorkingSet(middle).render(len(middle))))
 	out = append(out, msgs[cut:]...)
 	return out
+}
+
+func firstUserProseIndex(msgs []Message) int {
+	for i, m := range msgs {
+		if m.Role == RoleUser && !m.HasToolResults() && strings.TrimSpace(m.Text()) != "" {
+			return i
+		}
+	}
+	return 0
+}
+
+func lastUserProseIndex(msgs []Message) int {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == RoleUser && !msgs[i].HasToolResults() && strings.TrimSpace(msgs[i].Text()) != "" {
+			return i
+		}
+	}
+	return -1
 }
 
 type fileNote struct {

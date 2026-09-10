@@ -181,7 +181,7 @@ def test_normal_build_still_force_implements() -> None:
     # scouting and name a tool that changes the tree.
     nudge_text = n.get("content", "")
     assert "scouting" in nudge_text.lower()
-    assert "workspace.write" in nudge_text or "workspace.edit" in nudge_text
+    assert "write" in nudge_text or "edit" in nudge_text
 
 
 # --- loop layer (epoch wall) ----------------------------------------------

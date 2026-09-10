@@ -16,6 +16,26 @@ import (
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
 
+func TestLastResultsInputSurfacesExitCode(t *testing.T) {
+	rows := lastResultsInput([]cognition.ToolResult{{
+		Name:   "bash",
+		Output: []byte(`{"command":"pytest","exit_code":1,"stdout":"` + strings.Repeat("x", 800) + `"}`),
+	}})
+	if len(rows) != 1 {
+		t.Fatalf("rows=%d", len(rows))
+	}
+	if rows[0]["ok"] != false {
+		t.Fatalf("a non-zero exit must not look successful: %v", rows[0])
+	}
+	if rows[0]["exit_code"] != 1 {
+		t.Fatalf("exit_code=%v", rows[0]["exit_code"])
+	}
+	tail, _ := rows[0]["tail"].(string)
+	if !strings.HasPrefix(tail, "exit_code=1 ") {
+		t.Fatalf("tail must lead with the exit code, got %q", tail)
+	}
+}
+
 func TestCognitionTurnRunnerEmitsTextAndCompletes(t *testing.T) {
 	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
 		{{Text: "Hello ", Done: false}, {Text: "world", Done: true}},

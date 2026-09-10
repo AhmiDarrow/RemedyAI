@@ -1156,8 +1156,8 @@ pub fn spawnDetached(argv_json: []const u8, cwd: []const u8, env_json: []const u
     const argv = try host.parseArgv(gpa, argv_json);
     const command_line = try host.commandLine(gpa, argv);
     const directory: ?[*:0]const u16 = if (cwd.len == 0) null else (try host.utf8ToUtf16Z(gpa, cwd)).ptr;
-    const environment: ?*anyopaque = if (try host.parseEnv(gpa, env_json)) |pairs|
-        @ptrCast((try host.envBlock(gpa, pairs)).ptr)
+    const environment: ?*anyopaque = if (try host.resolveEnvBlock(gpa, env_json)) |block|
+        @ptrCast(block.ptr)
     else
         null;
 
@@ -1185,8 +1185,8 @@ pub fn spawnHidden(argv_json: []const u8, cwd: []const u8, env_json: []const u8)
     const argv = try host.parseArgv(gpa, argv_json);
     const command_line = try host.commandLine(gpa, argv);
     const directory: ?[*:0]const u16 = if (cwd.len == 0) null else (try host.utf8ToUtf16Z(gpa, cwd)).ptr;
-    const environment: ?*anyopaque = if (try host.parseEnv(gpa, env_json)) |pairs|
-        @ptrCast((try host.envBlock(gpa, pairs)).ptr)
+    const environment: ?*anyopaque = if (try host.resolveEnvBlock(gpa, env_json)) |block|
+        @ptrCast(block.ptr)
     else
         null;
 
@@ -1265,8 +1265,8 @@ pub fn spawnPiped3(argv_json: []const u8, cwd: []const u8, env_json: []const u8)
     const argv = try host.parseArgv(gpa, argv_json);
     const command_line = try host.commandLine(gpa, argv);
     const directory: ?[*:0]const u16 = if (cwd.len == 0) null else (try host.utf8ToUtf16Z(gpa, cwd)).ptr;
-    const environment: ?*anyopaque = if (try host.parseEnv(gpa, env_json)) |pairs|
-        @ptrCast((try host.envBlock(gpa, pairs)).ptr)
+    const environment: ?*anyopaque = if (try host.resolveEnvBlock(gpa, env_json)) |block|
+        @ptrCast(block.ptr)
     else
         null;
 
@@ -1420,8 +1420,8 @@ pub fn spawnPiped(argv_json: []const u8, cwd: []const u8, env_json: []const u8) 
     const argv = try host.parseArgv(gpa, argv_json);
     const command_line = try host.commandLine(gpa, argv);
     const directory: ?[*:0]const u16 = if (cwd.len == 0) null else (try host.utf8ToUtf16Z(gpa, cwd)).ptr;
-    const environment: ?*anyopaque = if (try host.parseEnv(gpa, env_json)) |pairs|
-        @ptrCast((try host.envBlock(gpa, pairs)).ptr)
+    const environment: ?*anyopaque = if (try host.resolveEnvBlock(gpa, env_json)) |block|
+        @ptrCast(block.ptr)
     else
         null;
 
@@ -1616,8 +1616,8 @@ pub fn execCapture(
     const argv = try host.parseArgv(gpa, argv_json);
     const command_line = try host.commandLine(gpa, argv);
     const directory: ?[*:0]const u16 = if (cwd.len == 0) null else (try host.utf8ToUtf16Z(gpa, cwd)).ptr;
-    const environment: ?*anyopaque = if (try host.parseEnv(gpa, env_json)) |pairs|
-        @ptrCast((try host.envBlock(gpa, pairs)).ptr)
+    const environment: ?*anyopaque = if (try host.resolveEnvBlock(gpa, env_json)) |block|
+        @ptrCast(block.ptr)
     else
         null;
 
