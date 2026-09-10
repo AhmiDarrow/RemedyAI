@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -344,7 +343,7 @@ func resolveDelegateAgent(raw string) (delegateAgent, error) {
 // resolveDelegateBinary finds the agent on PATH. A missing agent is an
 // ordinary tool failure that names what to install, not a crash.
 func resolveDelegateBinary(agent delegateAgent) (string, error) {
-	found, err := exec.LookPath(agent.binary)
+	found, err := lookPath(agent.binary)
 	if err != nil {
 		return "", fmt.Errorf("%w: %s is not installed on this machine (no %q on PATH) — %s",
 			ErrInvalidInput, agent.label, agent.binary, agent.install)
