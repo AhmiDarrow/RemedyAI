@@ -604,25 +604,20 @@ func TestClipboardReadImageRejectsExtraFields(t *testing.T) {
 }
 
 func TestShellExecResolvesArgvOnPath(t *testing.T) {
-	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
-		return nil
-	}))
-	if err := RegisterZigHostTools(registry); err != nil {
-		t.Fatal(err)
-	}
 	// A bare command name is resolved on PATH before the token is issued, so
-	// the model does not have to know install locations.
+	// the model does not have to know install locations. Spawn itself needs
+	// remedy_core; this test only covers the lookup.
 	probe := "hostname"
-	if _, err := exec.LookPath(probe); err != nil {
+	want, err := exec.LookPath(probe)
+	if err != nil {
 		t.Skipf("%s not on PATH: %v", probe, err)
 	}
-	if _, err := registry.Execute(context.Background(), Request{
-		ToolID:          "shell.exec",
-		Version:         1,
-		Input:           json.RawMessage(`{"argv":["` + probe + `"]}`),
-		CapabilityToken: []byte("test-token"),
-	}); err != nil {
+	got, err := resolveShellArgv0(probe, "")
+	if err != nil {
 		t.Fatalf("PATH argv[0] must resolve: %v", err)
+	}
+	if !strings.EqualFold(filepath.Clean(got), filepath.Clean(want)) {
+		t.Fatalf("resolveShellArgv0(%q)=%q want %q", probe, got, want)
 	}
 }
 
