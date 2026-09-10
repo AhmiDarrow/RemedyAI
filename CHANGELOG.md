@@ -4,6 +4,101 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.63.0] - 2026-09-10
+
+### Security
+
+- Messages arriving from a messenger are treated as untrusted: they ask before
+  any change, whatever the Approvals mode, and are labelled by where they came
+  from. Group membership alone no longer grants access; a sender must be on the
+  allowlist.
+- Google Chat webhooks verify a Google-signed token (issuer, audience, expiry
+  and signature). The previous check could not accept genuine traffic and had
+  an environment switch that disabled it entirely; both are gone.
+- Microsoft Teams webhooks require a token issuer and bind the reply address to
+  the verified token.
+- Commands can no longer smuggle instructions past the safety check through
+  encoded PowerShell or through environment variables that load code, and the
+  environment is now part of what a command is authorised to do. Extra
+  variables merge onto the existing environment instead of replacing it.
+- Telegram user ids from the Bot API are compared as decimal numbers, so a
+  real account is no longer ignored because the id was formatted in scientific
+  notation.
+- Google Chat inbound webhooks can be given a Cloud project number so the
+  Google-signed token can actually be checked.
+- The local tools endpoint applies the same folder limits as chat, and a caller
+  cannot redirect it at another home directory.
+- Payment, credential and submit actions driven by the computer are recognised
+  as checkpoints and always ask.
+- A completion claim over a failing command no longer ends the turn: the
+  evidence gate recognises `bash` / `write` / `edit`, and the prompt names the
+  same tools the model can call.
+
+### Changed
+
+- Anthropic is now reached directly rather than through a compatibility
+  endpoint, which brings prompt caching, adaptive thinking, image input and
+  token reporting. The unchanging prefix of the system prompt is cached; the
+  per-turn session block stays after the cache boundary so a long build can
+  reuse it.
+- Claude models in the picker are current, and Anthropic's default model when
+  none has been chosen is now Claude Opus 5. If you picked a model already,
+  nothing changes; if you never did, note that the default is a more capable
+  and more expensive one, and you can pick another in Settings.
+- The model now sees the whole turn: everything it read and ran earlier in the
+  same run, previous messages in the conversation, and any files you attached.
+  It used to see only the most recent tool results, which is why it re-read
+  files it had already opened.
+- You can see what Remedy actually did. Every turn records its full tool output
+  and screenshots, the process trail can show them, and reopening the app
+  mid-run rejoins the work in progress instead of showing an idle session.
+  Recorded turns are kept for 30 days.
+- Desktop closes the local server with the app instead of leaving it running,
+  only reclaims its port from a Remedy process, and refuses an update that is
+  not newer than the installed version.
+- Frontier models are advertised `read` / `edit` / `write` / `glob` / `grep` /
+  `bash` (and friends). Hidden ABI ids such as `workspace.read` still work for
+  CLI and the worker.
+
+### Fixed
+
+- A fresh install no longer starts with a dead tool plane. The packaged
+  Python worker ships the libraries it needs beside it, and when they are
+  missing the log says the install is incomplete instead of timing out.
+- Approvals now unlock. A tool approved in Ask mode is recognised on the next
+  call, so a build no longer loops on "waiting for your approval". Approvals
+  are matched on the real tool identity rather than the name a provider
+  happens to advertise.
+- Stop actually stops. Cancelling a turn kills the running command and its
+  child processes instead of leaving the session busy for up to ten minutes.
+- Model output can no longer be mistaken for a control signal, so a reply that
+  quotes a log or Remedy's own source is shown in full instead of ending the
+  turn or inventing a tool call.
+- The Python tool worker is supervised: it restarts after a crash, survives an
+  oversized or unserialisable result, and runs several tools at once instead of
+  queueing every session behind the slowest call.
+- A pending approval is never discarded while a turn is waiting on it, and
+  switching Approvals to Auto releases a turn that is already waiting.
+- Parallel tool results are matched to the calls that produced them, so the
+  process trail and saved history no longer pair a file with another file's
+  contents.
+- Editing a file keeps its existing line endings and byte-order mark, so a
+  one-line change on Windows no longer rewrites the whole file.
+- Reading a file reports its total length and where to continue from; search
+  says when results were capped.
+- Commands run from chat resolve programs on PATH, keep the existing
+  environment, and start in the session's project folder rather than a system
+  directory.
+- A provider that runs out of credit mid-answer no longer restarts the task and
+  repeats work that was already done.
+- Tool errors explain what was wrong with the input instead of a generic
+  validation failure, and a tool that returns an extra field no longer discards
+  a successful result.
+- Compact no longer drops this turn's goal when conversation history is long.
+- Approving a tool from the local HTTP API records the decision in the
+  evidence log.
+- Migrating secrets no longer overwrites provider keys you already stored.
+
 ## [0.62.3] - 2026-09-07
 
 ### Fixed - coherent builds (not incoherent explore thrash)

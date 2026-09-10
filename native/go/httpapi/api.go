@@ -27,7 +27,7 @@ import (
 )
 
 // Version matches pyproject.toml; scripts/sync_version.py stamps this const.
-const Version = "0.62.3"
+const Version = "0.63.0"
 
 // Config controls the minimal local API server.
 type Config struct {
