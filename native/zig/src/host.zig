@@ -582,6 +582,11 @@ pub fn resolveEnvBlock(arena: std.mem.Allocator, env_json: []const u8) Error!?[]
 /// empty input so the child inherits this process's environment regardless
 /// of how the `Io.Threaded` instance was configured; on Windows an empty
 /// input yields null (the global block is inherited by CreateProcess).
+///
+/// The map is backed by `page_allocator`, not `host.allocator` (smp). Filling
+/// it with the parent environment is many small dupes; smp's thread-local
+/// free list panics with "incorrect alignment" in the Linux test runner
+/// (and GitHub's native-core job). The map never crosses the C ABI.
 pub fn resolveEnvMap(gpa: std.mem.Allocator, env_json: []const u8) Error!?std.process.Environ.Map {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -591,7 +596,7 @@ pub fn resolveEnvMap(gpa: std.mem.Allocator, env_json: []const u8) Error!?std.pr
     const spec: EnvSpec = spec_opt orelse .{ .pairs = &.{} };
     policy.checkEnvBase(spec.pairs) catch return error.EnvDenied;
     const merged = try mergedEnvPairs(a, spec);
-    var map = std.process.Environ.Map.init(gpa);
+    var map = std.process.Environ.Map.init(std.heap.page_allocator);
     errdefer map.deinit();
     for (merged) |pair| {
         if (pair.key.len == 0 or pair.key[0] == '=') continue;
@@ -1361,6 +1366,20 @@ test "a supplied environment merges onto the real parent block" {
         "C:\\only-this",
         path_value orelse return error.TestUnexpectedResult,
     );
+}
+
+test "resolveEnvMap empty JSON inherits parent PATH on POSIX" {
+    if (is_windows) {
+        try std.testing.expectEqual(@as(?std.process.Environ.Map, null), try resolveEnvMap(std.testing.allocator, ""));
+        return;
+    }
+    var map = (try resolveEnvMap(std.testing.allocator, "")).?;
+    defer map.deinit();
+    try std.testing.expect(map.get("PATH") != null);
+    var extra = (try resolveEnvMap(std.testing.allocator, "{\"REMEDY_MERGE_PROBE\":\"1\"}")).?;
+    defer extra.deinit();
+    try std.testing.expectEqualStrings("1", extra.get("REMEDY_MERGE_PROBE") orelse return error.TestUnexpectedResult);
+    try std.testing.expect(extra.get("PATH") != null);
 }
 
 test "status mapping and free are stable across the abi" {
