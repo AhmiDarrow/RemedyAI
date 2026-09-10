@@ -111,8 +111,6 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_chat_messages_request
-    ON chat_messages(session_id, request_id);
 `
 
 type sessionStore struct {

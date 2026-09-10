@@ -4,6 +4,14 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.63.1] - 2026-09-10
+
+### Fixed
+
+- Desktop starts on an existing home again. 0.63.0 tried to index `request_id`
+  on chat history before adding that column, so serve exited and the app stayed
+  on "Connecting to local server".
+
 ## [0.63.0] - 2026-09-10
 
 ### Security

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -323,5 +324,68 @@ func TestSessionStorePersistsAcrossOpen(t *testing.T) {
 	}
 	if got.Title != "Persist" || got.Model == nil || *got.Model != "m1" {
 		t.Fatalf("persisted = %#v", got)
+	}
+}
+
+// Homes created before request_id existed must still open. CREATE INDEX on
+// that column used to run in the same Exec as CREATE TABLE IF NOT EXISTS, so
+// an old chat_messages table made serve exit before the ALTER ran — Desktop
+// stayed on "Connecting to local server".
+func TestSessionStoreOpensPreRequestIDDatabase(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "memory.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+CREATE TABLE chat_sessions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT 'New Session',
+    model TEXT,
+    agent TEXT,
+    project_path TEXT,
+    llm_provider TEXT,
+    message_count INTEGER NOT NULL DEFAULT 0,
+    origin_channel TEXT,
+    external_chat_id TEXT,
+    external_user TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE chat_messages (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user',
+    content TEXT NOT NULL DEFAULT '',
+    thinking TEXT,
+    tool_calls TEXT NOT NULL DEFAULT '[]',
+    tool_results TEXT NOT NULL DEFAULT '[]',
+    model TEXT,
+    agent TEXT,
+    tokens INTEGER,
+    created_at TEXT NOT NULL,
+    reverted INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_chat_messages_session ON chat_messages(session_id, created_at);
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := openSessionStore(dbPath)
+	if err != nil {
+		t.Fatalf("open pre-request_id database: %v", err)
+	}
+	defer store.Close()
+	sess, err := store.Create(createSessionRequest{Title: "after migrate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddMessage(sess.ID, "user", "hello", nil, nil); err != nil {
+		t.Fatal(err)
 	}
 }
