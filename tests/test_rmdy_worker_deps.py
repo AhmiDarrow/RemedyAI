@@ -136,6 +136,10 @@ def test_worker_imports_with_only_the_staged_deps_on_sys_path(bw, tmp_path) -> N
     series = f"{sys.version_info.major}.{sys.version_info.minor}"
     if series != bw.managed_python_series():
         pytest.skip("staged wheels target the managed CPython series, not this one")
+    suffix = ".pyd" if sys.platform == "win32" else ".so"
+    native = list((deps / "pydantic_core").glob("_pydantic_core*"))
+    if not any(path.name.endswith(suffix) for path in native):
+        pytest.skip("staged rmdy-deps wheels are for another OS (Windows checkout under WSL)")
     program = (
         "import sys\n"
         "sys.path.insert(0, sys.argv[1])\n"
