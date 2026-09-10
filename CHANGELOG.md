@@ -98,6 +98,8 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Approving a tool from the local HTTP API records the decision in the
   evidence log.
 - Migrating secrets no longer overwrites provider keys you already stored.
+- Linux spawn builds the inherited environment without the native-core test
+  crash (`incorrect alignment` in the smp allocator while copying PATH).
 
 ## [0.62.3] - 2026-09-07
 
