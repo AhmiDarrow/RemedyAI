@@ -56,6 +56,7 @@ NEVER_DRIVE_PREFIXES = (
 #: Individually dangerous tools from otherwise safe modules.
 NEVER_DRIVE_NAMES = {
     "soul_dream",  # spawns a thread that HTTP-calls the local model server
+    "local_discover",  # bare scan probes live local services (ollama, ComfyUI, …)
 }
 
 
@@ -187,6 +188,8 @@ async def test_no_tool_raises_a_programming_error_on_a_bare_call(tools):
     for name, (module, handler) in sorted(tools.items()):
         if name == "self_inject_round":
             # Drafts a patch against the tree; 60s is not enough on Linux CI.
+            continue
+        if name == "local_discover":
             continue
         if name in {"git_push", "gh_release"}:
             # Bare call can hit a real remote; git_push timeout is 180s.

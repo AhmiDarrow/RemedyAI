@@ -2,7 +2,7 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.63.0**. Local API and Desktop packaging run on the
+Current release: **v0.63.1**. Local API and Desktop packaging run on the
 native **Go + Zig** foundation. Installed apps update automatically. Partner
 line still starts at 0.31.0.
 
@@ -46,12 +46,19 @@ is no longer the product HTTP server or the packaged Desktop sidecar.
 | **Boot** | [0.62.2](#0622---portable-native-core) | Native core builds for every x86_64 PC (no SHA-NI crash on connect) |
 | **Build loop** | [0.62.3](#0623---coherent-builds) | Long builds stay endless when productive; explore thrash stops |
 | **Frontier** | [0.63.0](#0630---tools-the-model-knows) | Frontier tool names, native Anthropic, messenger identity, full-turn evidence |
+| **Boot** | [0.63.1](#0631---existing-homes-start) | Existing installs connect to the local server again |
 
 Read newest first below; older partner notes follow after 0.48.
 
 ## Contents
 
-- [0.63.0](#0630---tools-the-model-knows) · [0.62.3](#0623---coherent-builds) · [0.62.2](#0622---portable-native-core) · [0.62.1](#0621---windows-in-app-update-install) · [0.62.0](#0620---build-engine-and-claimidx-defaults) · [0.61.0](#0610---agency-on-the-native-foundation) · [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-prove-the-foundation) · [0.48.0](#0480---land-the-gozig-foundation) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+- [0.63.1](#0631---existing-homes-start) · [0.63.0](#0630---tools-the-model-knows) · [0.62.3](#0623---coherent-builds) · [0.62.2](#0622---portable-native-core) · [0.62.1](#0621---windows-in-app-update-install) · [0.62.0](#0620---build-engine-and-claimidx-defaults) · [0.61.0](#0610---agency-on-the-native-foundation) · [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-prove-the-foundation) · [0.48.0](#0480---land-the-gozig-foundation) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+
+## 0.63.1 - Existing homes start
+
+**Desktop connects to the local server on an existing install.** 0.63.0
+stopped at "Connecting to local server" because chat history from earlier
+versions had no `request_id` column yet, and serve exited while indexing it.
 
 ## 0.63.0 - Tools the model knows
 
