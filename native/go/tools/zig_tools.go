@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -1739,7 +1738,7 @@ func resolveShellArgv0(argv0, cwd string) (string, error) {
 		}
 		candidate = filepath.Join(base, argv0)
 	}
-	resolved, err := exec.LookPath(candidate)
+	resolved, err := lookPath(candidate)
 	if err != nil {
 		return "", fmt.Errorf("%w: argv[0] %q could not be resolved to an absolute executable: %v", ErrInvalidInput, argv0, err)
 	}

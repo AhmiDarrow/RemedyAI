@@ -32,26 +32,34 @@ func testPythonArgv(t *testing.T) []string {
 	candidates = append(candidates, "python", "python3")
 	var py string
 	for _, name := range candidates {
+		resolved := ""
 		if filepath.IsAbs(name) {
 			if st, err := os.Stat(name); err == nil && !st.IsDir() {
-				py = name
-				break
+				resolved = name
 			}
+		} else if p, err := exec.LookPath(name); err == nil {
+			resolved = p
+		}
+		if resolved == "" || !pythonHasWorkerDeps(resolved) {
 			continue
 		}
-		if p, err := exec.LookPath(name); err == nil {
-			py = p
-			break
-		}
+		py = resolved
+		break
 	}
 	if py == "" {
-		t.Skip("python interpreter not found")
+		t.Skip("python with pydantic/yaml not found (repo .venv or REMEDY_PYTHON)")
 	}
 	abs, err := filepath.Abs(py)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return []string{abs, "-m", "remedy.runtime.rmdy_tool_worker"}
+}
+
+func pythonHasWorkerDeps(py string) bool {
+	cmd := exec.Command(py, "-c", "import pydantic, yaml")
+	cmd.Env = os.Environ()
+	return cmd.Run() == nil
 }
 
 func execProcessStarter(t *testing.T) ProcessStarter {

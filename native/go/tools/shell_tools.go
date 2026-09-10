@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -216,7 +215,7 @@ func platformShellArgv(command string) ([]string, error) {
 	if runtime.GOOS == "windows" {
 		shell := filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
 		if _, err := os.Stat(shell); err != nil {
-			resolved, lookErr := exec.LookPath("cmd.exe")
+			resolved, lookErr := lookPath("cmd.exe")
 			if lookErr != nil {
 				return nil, fmt.Errorf("%w: no command shell on this host: %v", ErrInvalidInput, lookErr)
 			}
@@ -229,10 +228,10 @@ func platformShellArgv(command string) ([]string, error) {
 		// /d skips AutoRun, /s keeps the quoting of the command string intact.
 		return []string{abs, "/d", "/s", "/c", command}, nil
 	}
-	shell, err := exec.LookPath("bash")
+	shell, err := lookPath("bash")
 	flag := "-lc"
 	if err != nil {
-		shell, err = exec.LookPath("sh")
+		shell, err = lookPath("sh")
 		flag = "-c"
 		if err != nil {
 			return nil, fmt.Errorf("%w: neither bash nor sh is on PATH: %v", ErrInvalidInput, err)
