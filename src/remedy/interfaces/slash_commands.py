@@ -239,7 +239,7 @@ async def handle_slash_command(
             lines = registry.summary_lines()
             tools_hint = (
                 "\n\n**Built-in tools** (always available): "
-                "`file_read`, `file_write`, `list_dir`, `bash_exec`.\n"
+                "`read`, `write`, `glob`, `bash`.\n"
                 "Skills are procedure packs the agent follows; tools are executable actions."
             )
             return {
@@ -249,7 +249,7 @@ async def handle_slash_command(
             "text": (
                 "No skills loaded yet. Default skills ship with Remedy — restart the server "
                 "to discover bundled skills, or drop SKILL.md packages into `~/.remedy/skills/`.\n\n"
-                "**Built-in tools:** `file_read`, `file_write`, `list_dir`, `bash_exec`."
+                "**Built-in tools:** `read`, `write`, `glob`, `bash`."
             )
         }
 

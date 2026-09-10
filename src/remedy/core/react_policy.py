@@ -23,12 +23,12 @@ logger = logging.getLogger(__name__)
 # table so a renamed tool is a one-line change and legacy snake_case names
 # (file_read, bash_exec, ...) never reach the model again.
 TOOL_NAME_TABLE: dict[str, str] = {
-    "read": "workspace.read",
-    "list": "workspace.list",
-    "search": "workspace.search",
-    "write": "workspace.write",
-    "edit": "workspace.edit",
-    "shell": "shell.exec",
+    "read": "read",
+    "list": "glob",
+    "search": "grep",
+    "write": "write",
+    "edit": "edit",
+    "shell": "bash",
     "web_fetch": "web.fetch",
     "web_search": "web.search",
     "memory_search": "memory.search",
@@ -81,19 +81,19 @@ _DEFAULT_SYSTEM_BODY = (
     "— do NOT shell out or invent names. Load a pack only with **skill.search** / "
     "**skill.activate** when those ids appear in your tool schemas.\n"
     "- **Tools** are only the ids in your live Tool ABI schemas. Core surface: "
-    "workspace.read, workspace.list, workspace.write, workspace.edit, "
-    "workspace.search, shell.exec, web.search, web.fetch, memory.search, "
+    "read, glob, write, edit, "
+    "grep, bash, web.search, web.fetch, memory.search, "
     "memory.save, computer.* (screenshot/windows/click/type/key/…), "
     "clipboard.read / clipboard.write / clipboard.read_files / clipboard.read_image. "
     "Call only ids present in your tool schemas — never invent alternate names.\n\n"
     "Tool policy:\n"
     "- Simple chat (greetings, definitions, provider/model/skills questions): "
     "answer immediately with NO tools.\n"
-    "- **Create text files**: use **workspace.write** with path + content — never "
+    "- **Create text files**: use **write** with path + content — never "
     "powershell/cmd Set-Content, echo, or Out-File for ordinary .txt/.md/.json writes. "
     "Quoting hell is not a strategy. Desktop path on Windows: "
     "use an absolute path under the user's Desktop (e.g. C:\\\\Users\\\\…\\\\Desktop\\\\file.txt).\n"
-    "- **Edit existing files**: prefer **workspace.edit** (surgical hunks) over full rewrites.\n"
+    "- **Edit existing files**: prefer **edit** (surgical hunks) over full rewrites.\n"
     "- **skill.activate**: pass name=<catalog id only>. Do not invent skill names from "
     "the user prompt.\n"
     "- **[Library] tips**: if continuity mentions a not-installed library pack, do not "
@@ -102,18 +102,18 @@ _DEFAULT_SYSTEM_BODY = (
     "native tool_calls. Don't recap a process — do the next real step.\n"
     "- Local apps / RMB / ComfyUI / house map: use Desktop Settings and product "
     "surfaces when those actions are not in your tool schemas. NEVER thrash "
-    "workspace.list on C:\\\\ or / or run where/dir /s to find installs.\n"
+    "glob on C:\\\\ or / or run where/dir /s to find installs.\n"
     "- Screen / clipboard / input: use **computer.*** and **clipboard.*** tools from "
     "your schema when the owner says look at this, I copied, what's on my screen, "
     "or design this. Do not ask what they copied if clipboard.read already has it.\n"
-    "- NEVER write tool calls as plain text (e.g. workspace.read(\"x\") && "
-    "workspace.list(\"y\")). That hangs the UI — always use native tool_calls.\n"
+    "- NEVER write tool calls as plain text (e.g. read(\"x\") && "
+    "glob(\"y\")). That hangs the UI — always use native tool_calls.\n"
     "- NEVER emit DSML/XML tool markup (tool_calls, invoke, invoke_parameter) as chat text.\n"
     "- Prefer parallel tool calls for independent reads; avoid repeating the same call.\n"
     "- **Speed (coding):** each model step is expensive. In ONE tool_calls response, "
-    "emit many independent reads/searches together (typically 4–12 workspace.read / "
-    "workspace.list / workspace.search), not one file per step. Do not re-read a path "
-    "already returned this turn. After enough context, switch to workspace.edit "
+    "emit many independent reads/searches together (typically 4–12 read / "
+    "glob / grep), not one file per step. Do not re-read a path "
+    "already returned this turn. After enough context, switch to edit "
     "and verify — avoid explore loops.\n"
     "- After tool results, finish the request with tools. Soft epochs only compact; "
     "they are not a stop. Never claim blocked by a step/tool limit. "
@@ -121,28 +121,28 @@ _DEFAULT_SYSTEM_BODY = (
     "Coding path model:\n"
     "- A focus/project folder is optional convenience (default cwd for relative paths). "
     "You are not confined to it — absolute paths work anywhere in access scope.\n"
-    "- Multi-tree work: pass absolute paths to workspace.list / workspace.search / "
-    "workspace.read / workspace.write / workspace.edit.\n"
-    "- Prefer workspace.edit for surgical edits; workspace.search finds any text language "
+    "- Multi-tree work: pass absolute paths to glob / grep / "
+    "read / write / edit.\n"
+    "- Prefer edit for surgical edits; grep finds any text language "
     "(no extension allowlist). Parallel independent reads in the same step.\n"
     "- Scope discipline: if the user named a subsystem, stay there — do not "
     "re-review the whole tree unless asked.\n"
-    "- **Tool fidelity:** workspace.write / workspace.edit arguments you emit are "
+    "- **Tool fidelity:** write / edit arguments you emit are "
     "executed verbatim on disk. History may later show short stubs for large bodies — "
     "those stubs are NOT the file. Never rewrite a path from memory of a stub; "
-    "workspace.read first.\n\n"
+    "read first.\n\n"
     "Recovery (do not give up on the first failure):\n"
     "- Tool errors include Error [CODE:tool] and often a Suggestion line — follow it.\n"
-    "- HISTORY_STUB / PREFER_EDIT → workspace.read real path, then workspace.edit "
-    "(or workspace.write only for intentional full rewrites of real source).\n"
+    "- HISTORY_STUB / PREFER_EDIT → read real path, then edit "
+    "(or write only for intentional full rewrites of real source).\n"
     "- APPROVAL_REQUIRED → ask user once for Auto approvals; do not invent success.\n"
-    "- Path not found → workspace.list on the parent or default cwd; try absolute form.\n"
-    "- Path is a directory → use workspace.list, then workspace.read on specific files.\n"
-    "- Not a directory / wrong type → switch tool (workspace.read vs workspace.list).\n"
-    "- workspace.search 0 hits → re-scope path (absolute tree), workspace.list, "
+    "- Path not found → glob on the parent or default cwd; try absolute form.\n"
+    "- Path is a directory → use glob, then read on specific files.\n"
+    "- Not a directory / wrong type → switch tool (read vs glob).\n"
+    "- grep 0 hits → re-scope path (absolute tree), glob, "
     "simplify pattern; never invent symbols or paths.\n"
     "- Command failed (non-zero exit / stderr) → fix flags/cwd or try a safer equivalent.\n"
-    "- Prefer discovery (workspace.list) over guessing paths; never invent file contents.\n"
+    "- Prefer discovery (glob) over guessing paths; never invent file contents.\n"
     "- Only report that you cannot finish after at least one recovery attempt "
     "with different arguments or a different tool."
 )
@@ -186,7 +186,7 @@ _FRONTIER_SYSTEM_CORE = (
 # Injected once per turn when a tool batch returns errors (runtime recovery nudge).
 RECOVERY_NUDGE = (
     "One or more tools failed. Do not give a final answer yet. "
-    "Recover now: read the Error/Suggestion lines, then workspace.list on the parent or "
+    "Recover now: read the Error/Suggestion lines, then glob on the parent or "
     "use an absolute path, try an alternate path, or adjust the shell command. "
     "Finish the user's task with corrected tool calls."
 )
@@ -215,12 +215,12 @@ def ask_first_nudge_message() -> dict[str, str]:
 
 # Empty / spam file_write — model must resend full content (not monologue).
 EMPTY_WRITE_NUDGE = (
-    "[Partner · EMPTY/SPAM workspace.write blocked] You tried to write blank or "
+    "[Partner · EMPTY/SPAM write blocked] You tried to write blank or "
     "looped-import content. The real file on disk was **kept** (not wiped).\n"
     "Next tool_calls MUST be one of:\n"
-    "1) workspace.read the path you meant to change\n"
-    "2) workspace.edit with a small real hunk (old_string → new_string)\n"
-    "3) workspace.write with the **complete** source in content= "
+    "1) read the path you meant to change\n"
+    "2) edit with a small real hunk (old_string → new_string)\n"
+    "3) write with the **complete** source in content= "
     "(never \"\", never spam imports)\n"
     "Illegal: monologue, empty content=, or claiming the file was written when Error said no."
 )
@@ -229,9 +229,9 @@ EMPTY_WRITE_NUDGE = (
 # Does not strip tools or force-answer — only asks for denser parallel batches.
 SPEED_BATCH_NUDGE = (
     "[Speed] You are calling tools one-at-a-time. In your NEXT tool_calls response, "
-    "emit many independent reads/searches together (e.g. 4–12 workspace.read / "
-    "workspace.list / workspace.search in one step). Do not re-read paths already "
-    "returned this turn. When you have enough context, switch to workspace.edit "
+    "emit many independent reads/searches together (e.g. 4–12 read / "
+    "glob / grep in one step). Do not re-read paths already "
+    "returned this turn. When you have enough context, switch to edit "
     "and verify — stay scoped to the user's request. Agency stays full; finish faster."
 )
 
@@ -239,9 +239,9 @@ SPEED_BATCH_NUDGE = (
 # Include legacy snake_case aliases so recovery still detects old model habits.
 _SERIAL_EXPLORE_TOOLS = frozenset(
     {
-        "workspace.read",
-        "workspace.list",
-        "workspace.search",
+        "read",
+        "glob",
+        "grep",
         "memory.search",
         "file_read",
         "list_dir",
@@ -1356,8 +1356,8 @@ _AGENCY_TOOL_PROMISE_HARD = (
     "i will use tools",
     "calling skill",
     "skill_activate",
-    "calling workspace.edit",
-    "calling workspace.write",
+    "calling edit",
+    "calling write",
     "i'll call tools",
     "i will call tools",
 )
@@ -2585,9 +2585,19 @@ def is_productive_tool_batch(tool_messages: list[dict[str, Any]]) -> bool:
 # --- Tool-result evidence (Go loop → prompt.should_continue) -----------------
 
 _VERIFY_TOOL_NAME_RE = re.compile(r"(?i)(test|verify|pytest|cargo)")
-_MUTATE_TOOL_NAMES = frozenset({"workspace.write", "workspace.edit"})
+_MUTATE_TOOL_NAMES = frozenset(
+    {"write", "edit", "workspace.write", "workspace.edit"}
+)
 _EXPLORE_TOOL_NAMES = frozenset(
-    {"workspace.read", "workspace.list", "workspace.search", "memory.search"}
+    {
+        "read",
+        "glob",
+        "grep",
+        "workspace.read",
+        "workspace.list",
+        "workspace.search",
+        "memory.search",
+    }
 )
 _EXIT_CODE_RE = re.compile(r"(?i)\bexit[_ ]code\s*[=:]\s*(-?\d+)")
 _COMPLETION_CLAIM_RE = re.compile(
@@ -2605,7 +2615,10 @@ def is_verify_tool_name(name: str | None) -> bool:
     n = str(name or "").strip().lower()
     if not n:
         return False
-    return n == "shell.exec" or bool(_VERIFY_TOOL_NAME_RE.search(n))
+    n = n.replace("-", "_")
+    if n in {"bash", "shell.exec", "shell_exec", "bash_exec"}:
+        return True
+    return bool(_VERIFY_TOOL_NAME_RE.search(n))
 
 
 def is_mutate_tool_name(name: str | None) -> bool:
@@ -2676,7 +2689,14 @@ def summarize_tool_evidence(last_results: Any) -> dict[str, Any]:
             last_kind = "explore"
             continue
         if is_verify_tool_name(name):
-            code = parse_exit_code(tail)
+            code = row.get("exit_code")
+            if code is not None:
+                try:
+                    code = int(code)
+                except (TypeError, ValueError):
+                    code = parse_exit_code(tail)
+            else:
+                code = parse_exit_code(tail)
             failed = (not ok_b) or (code is not None and code != 0)
             out["verify_seen"] = True
             out["last_verify_ok"] = not failed

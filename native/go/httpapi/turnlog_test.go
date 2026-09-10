@@ -1004,6 +1004,9 @@ func TestTurnLogRecordsApprovalDecision(t *testing.T) {
 	if _, _, renders := (&approvals[0]).frame(); renders {
 		t.Fatal("approval records must not render an SSE frame")
 	}
+	if approvals[0].Seq != 0 || approvals[1].Seq != 0 {
+		t.Fatalf("approval seq must not occupy the SSE sequence: %d %d", approvals[0].Seq, approvals[1].Seq)
+	}
 }
 
 // A server without a home still streams; only the evidence routes go quiet.

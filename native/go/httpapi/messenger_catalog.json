@@ -11,7 +11,7 @@
     "max_reply_chars": 4096,
     "fields": [
       {"key": "bot_token", "label": "Bot token", "kind": "secret", "placeholder": "123456:ABC…", "help": "From @BotFather", "required": true},
-      {"key": "allow_chat_ids", "label": "Allowed chat IDs", "kind": "list", "placeholder": "123456789, -100…", "help": "Comma-separated. Empty + allow_all off = ignore all chats."},
+      {"key": "allow_chat_ids", "label": "Allowed user IDs", "kind": "list", "placeholder": "123456789", "help": "Telegram user ids who may talk to the bot (not group/chat ids). Empty + allow_all off = ignore everyone."},
       {"key": "allow_all", "label": "Allow all chats", "kind": "bool", "help": "Dangerous for public bots. Prefer an allowlist."}
     ]
   },
@@ -29,7 +29,7 @@
       {"key": "bot_token", "label": "Bot token", "kind": "secret", "required": true},
       {"key": "channel_id", "label": "Default channel ID", "kind": "text"},
       {"key": "guild_id", "label": "Guild ID", "kind": "text"},
-      {"key": "allow_ids", "label": "Allowed IDs", "kind": "list", "help": "Channel, user, or guild ids. Empty + allow_all off = ignore all."},
+      {"key": "allow_ids", "label": "Allowed user IDs", "kind": "list", "help": "Discord user ids. Channel and guild go in the fields above. Empty + allow_all off = ignore everyone."},
       {"key": "allow_all", "label": "Allow all", "kind": "bool"}
     ]
   },
@@ -142,7 +142,8 @@
       {"key": "oauth_client_id", "label": "OAuth client ID", "kind": "text", "help": "Google Cloud OAuth client ID (needed to refresh)."},
       {"key": "oauth_client_secret", "label": "OAuth client secret", "kind": "secret", "help": "Google Cloud OAuth client secret (needed to refresh)."},
       {"key": "space_id", "label": "Default space ID", "kind": "text"},
-      {"key": "allow_ids", "label": "Allowed space/user IDs", "kind": "list"},
+      {"key": "project_number", "label": "Cloud project number", "kind": "text", "help": "Google Cloud project number. Inbound webhooks are rejected until this is set — it is the JWT audience."},
+      {"key": "allow_ids", "label": "Allowed user IDs", "kind": "list", "help": "Sender resource names (users/123…). A space id is where the bot answers, not who may speak."},
       {"key": "allow_all", "label": "Allow all", "kind": "bool"}
     ]
   },

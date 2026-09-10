@@ -540,7 +540,7 @@ func TestRegisterFromConfigWebhookMessengers(t *testing.T) {
 		"enabled_channels": []string{"whatsapp", "teams", "google_chat"},
 		"whatsapp":         map[string]any{"phone_number_id": "pn", "allow_all": true},
 		"teams":            map[string]any{"app_id": "aid", "allow_all": true},
-		"google_chat":      map[string]any{"space_id": "spaces/s1", "allow_all": true},
+		"google_chat":      map[string]any{"space_id": "spaces/s1", "allow_all": true, "project_number": "123456789"},
 	}
 	got := RegisterFromConfig(g, cfg, home, func(channel, field string) string {
 		switch channel + ":" + field {
@@ -567,7 +567,11 @@ func TestRegisterFromConfigWebhookMessengers(t *testing.T) {
 	if _, ok := g.GetChannel(ChannelTeams).(*TeamsChannel); !ok {
 		t.Fatalf("teams type=%T", g.GetChannel(ChannelTeams))
 	}
-	if _, ok := g.GetChannel(ChannelGoogleChat).(*GoogleChatChannel); !ok {
+	gc, ok := g.GetChannel(ChannelGoogleChat).(*GoogleChatChannel)
+	if !ok {
 		t.Fatalf("google_chat type=%T", g.GetChannel(ChannelGoogleChat))
+	}
+	if health := gc.Health(); health["project_number"] != true {
+		t.Fatalf("project_number was not wired from config: %v", health)
 	}
 }

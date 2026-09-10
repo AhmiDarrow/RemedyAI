@@ -205,12 +205,12 @@ def test_update_step_status_by_id_and_index(tmp_path: Path):
     # Build prompts name live Tool ABI ids. `file_edit` and `plan_step_status`
     # were retired: instructing the model to call them cost a wasted round and
     # advanced the no-progress counters (see tests/test_prompt_tool_names.py).
-    assert "workspace.edit" in BUILD_MODE_SYSTEM_ADDENDUM
+    assert "edit" in BUILD_MODE_SYSTEM_ADDENDUM
     assert "file_edit" not in BUILD_MODE_SYSTEM_ADDENDUM
     assert "plan_step_status" not in BUILD_MODE_SYSTEM_ADDENDUM
     from remedy.core.plan_store import FRONTIER_BUILD_MODE_ADDENDUM
 
-    assert "workspace.edit" in FRONTIER_BUILD_MODE_ADDENDUM
+    assert "edit" in FRONTIER_BUILD_MODE_ADDENDUM
     assert "file_edit" not in FRONTIER_BUILD_MODE_ADDENDUM
     assert "plan_step_status" not in FRONTIER_BUILD_MODE_ADDENDUM
     assert "7400" in FRONTIER_BUILD_MODE_ADDENDUM

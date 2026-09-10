@@ -99,7 +99,7 @@ def test_resume_hint_directs_drive_on_red(tmp_path):
     # The hint must say the build is red and point at live tools; build_drive
     # is not a registered tool, so naming it cost a wasted round.
     assert "RED" in hint
-    assert "workspace.edit" in hint or "workspace.read" in hint
+    assert "edit" in hint or "read" in hint
     assert "build_drive" not in hint
     assert "do not" in hint.lower() and "green" in hint.lower()
 

@@ -145,7 +145,7 @@ def test_serial_explore_forces_implement():
     # The nudge stops scouting and points at a mutating tool. It asserts
     # behaviour, not the old ALL-CAPS wording, which was tuned for weaker
     # models and read as shouting to a frontier one.
-    assert "workspace.write" in nudge_text or "workspace.edit" in nudge_text
+    assert "write" in nudge_text or "edit" in nudge_text
     assert "scouting" in nudge_text.lower()
     # Second call does not re-emit
     assert next_machine_nudge(st) is None

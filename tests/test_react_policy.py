@@ -704,7 +704,7 @@ def test_tool_call_fingerprint_stable() -> None:
 
 def test_system_prompt_has_recovery_contract() -> None:
     assert "Recovery" in _DEFAULT_SYSTEM_BODY
-    assert "workspace.list" in _DEFAULT_SYSTEM_BODY
+    assert "glob" in _DEFAULT_SYSTEM_BODY
     assert "Suggestion" in _DEFAULT_SYSTEM_BODY
 
 
@@ -712,8 +712,8 @@ def test_system_prompt_is_tool_abi_honest() -> None:
     """Phase 6 absolute: production creed must not teach denied snake_case tools."""
     body = _DEFAULT_SYSTEM_BODY
     # Teach live Tool ABI ids.
-    assert "workspace.read" in body
-    assert "shell.exec" in body
+    assert "read" in body
+    assert "bash" in body
     assert "memory.search" in body
     # Do not advertise legacy aliases as executable tools.
     for banned in (

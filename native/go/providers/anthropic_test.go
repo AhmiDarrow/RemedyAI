@@ -690,7 +690,11 @@ func TestAnthropicBaseURLOverrideIsHonoured(t *testing.T) {
 
 func TestAnthropicSystemSplit(t *testing.T) {
 	a := &Anthropic{}
-	stable, volatile := a.splitSystem("STABLE\n\n[Session Brief · epoch working memory]\nbrief")
+	stable, volatile := a.splitSystem("STABLE\n\n[Turn context]\nsession=abc\n\n[Session Brief · epoch working memory]\nbrief")
+	if stable != "STABLE" || !strings.Contains(volatile, "[Turn context]") || strings.Contains(stable, "session=abc") {
+		t.Fatalf("turn-context split = %q / %q", stable, volatile)
+	}
+	stable, volatile = a.splitSystem("STABLE\n\n[Session Brief · epoch working memory]\nbrief")
 	if stable != "STABLE" || !strings.HasPrefix(volatile, "[Session Brief") {
 		t.Fatalf("brief split = %q / %q", stable, volatile)
 	}

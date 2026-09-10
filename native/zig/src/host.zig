@@ -401,10 +401,17 @@ pub fn parseEnvSpec(arena: std.mem.Allocator, json: []const u8) Error!?EnvSpec {
                 }
                 return error.InvalidArgument;
             }
-            return .{ .pairs = try envPairsFromObject(arena, inner.object), .replace = replace };
+            return finishEnvSpec(.{ .pairs = try envPairsFromObject(arena, inner.object), .replace = replace });
         }
     }
-    return .{ .pairs = try envPairsFromObject(arena, object), .replace = false };
+    return finishEnvSpec(.{ .pairs = try envPairsFromObject(arena, object), .replace = false });
+}
+
+/// An empty object with replace=false is inherit (same as null), so it cannot
+/// ride an argv-only token and wipe PATH.
+fn finishEnvSpec(spec: EnvSpec) ?EnvSpec {
+    if (spec.pairs.len == 0 and !spec.replace) return null;
+    return spec;
 }
 
 /// Parse a JSON object of string values into sorted `KEY=value` pairs.
@@ -465,8 +472,17 @@ fn envKeysEqual(a: []const u8, b: []const u8) bool {
 /// Look up one variable in this process's environment. Caller frees.
 pub fn parentEnvGet(gpa: std.mem.Allocator, key: []const u8) ?[]u8 {
     if (is_windows) {
-        const environ: std.process.Environ = .{ .block = .global };
-        return std.process.Environ.getAlloc(environ, gpa, key) catch null;
+        // Zig's `.block = .global` is empty in a Go-loaded DLL (start code
+        // never ran). Ask Win32 for the live value, matching parentEnvPairs.
+        const name = utf8ToUtf16Z(gpa, key) catch return null;
+        defer gpa.free(name);
+        const needed = GetEnvironmentVariableW(name.ptr, null, 0);
+        if (needed == 0) return null;
+        const buf = gpa.alloc(u16, needed) catch return null;
+        defer gpa.free(buf);
+        const n = GetEnvironmentVariableW(name.ptr, buf.ptr, needed);
+        if (n == 0 or n >= needed) return null;
+        return utf16ToUtf8(gpa, buf[0..n]) catch null;
     }
     if (!builtin.link_libc) return null;
     var key_buf: [256]u8 = undefined;
@@ -480,6 +496,7 @@ pub fn parentEnvGet(gpa: std.mem.Allocator, key: []const u8) ?[]u8 {
 /// Snapshot of this process's environment as pairs (unsorted, arena-owned).
 extern "kernel32" fn GetEnvironmentStringsW() callconv(.winapi) ?[*]const u16;
 extern "kernel32" fn FreeEnvironmentStringsW(block: [*]const u16) callconv(.winapi) i32;
+extern "kernel32" fn GetEnvironmentVariableW(lpName: [*:0]const u16, lpBuffer: ?[*]u16, nSize: u32) callconv(.winapi) u32;
 
 pub fn parentEnvPairs(arena: std.mem.Allocator) Error![]EnvPair {
     var out: std.ArrayList(EnvPair) = .empty;
@@ -1284,6 +1301,7 @@ test "env json parsing sorts case-insensitively and builds a block" {
     try std.testing.expectError(error.InvalidArgument, parseEnv(gpa, "{\"a=b\": \"1\"}"));
     try std.testing.expectError(error.InvalidArgument, parseEnv(gpa, "[\"a\"]"));
     try std.testing.expectError(error.InvalidArgument, parseEnv(gpa, "{"));
+    try std.testing.expectEqual(@as(?[]EnvPair, null), try parseEnv(gpa, "{}"));
 }
 
 test "command line quoting follows CommandLineToArgvW rules" {

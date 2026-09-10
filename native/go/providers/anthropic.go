@@ -51,6 +51,7 @@ const (
 // after the cache breakpoint; everything before it is byte-stable and is what
 // prompt caching pays for.
 var systemVolatileMarkers = []string{
+	"[Turn context]",
 	"Recent conversation (oldest first;",
 	"[Session Brief · epoch working memory]",
 }

@@ -17,6 +17,7 @@ const (
 	StatusAccessDenied    = 2
 	StatusOperationFailed = 3
 	StatusUnsupported     = 4
+	StatusEnvDenied       = 5
 )
 
 const (
@@ -62,6 +63,8 @@ func statusName(status int32) string {
 		return "operation failed"
 	case StatusUnsupported:
 		return "unsupported on this platform"
+	case StatusEnvDenied:
+		return "environment denied"
 	default:
 		return fmt.Sprintf("status %d", status)
 	}

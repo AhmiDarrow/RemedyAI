@@ -22,7 +22,7 @@ func configSecretField(key string) bool {
 	k := strings.ToLower(strings.TrimSpace(key))
 	switch k {
 	case "bot_token", "access_token", "app_token", "app_password",
-		"app_secret", "verify_token", "signing_secret":
+		"app_secret", "verify_token", "signing_secret", "api_key":
 		return true
 	}
 	return strings.HasSuffix(k, "_token") ||
@@ -92,7 +92,10 @@ func migrateConfigSecrets(homeDir string) ([]string, error) {
 	if keys, ok := asStringMap(cfg["provider_keys"]); ok {
 		for provider, v := range keys {
 			if value := configSecretValue(v); value != "" {
-				pending[strings.ToLower(strings.TrimSpace(provider))] = value
+				key := strings.ToLower(strings.TrimSpace(provider))
+				if _, exists := pending[key]; !exists {
+					pending[key] = value
+				}
 			}
 		}
 		delete(cfg, "provider_keys")
@@ -102,7 +105,9 @@ func migrateConfigSecrets(homeDir string) ([]string, error) {
 		if provider == "" {
 			provider = "default"
 		}
-		pending[provider] = value
+		if _, exists := pending[provider]; !exists {
+			pending[provider] = value
+		}
 		delete(cfg, "llm_api_key")
 	}
 
@@ -148,9 +153,6 @@ func (s *Server) migrateSecretsOnce() {
 	home := ResolveHomeDir(s.homeDir)
 	secretMigrateMu.Lock()
 	_, done := secretMigratedHome[home]
-	if !done {
-		secretMigratedHome[home] = struct{}{}
-	}
 	secretMigrateMu.Unlock()
 	if done {
 		return
@@ -161,6 +163,9 @@ func (s *Server) migrateSecretsOnce() {
 		log.Printf("secret store: could not move credentials out of config.toml: %v", err)
 		return
 	}
+	secretMigrateMu.Lock()
+	secretMigratedHome[home] = struct{}{}
+	secretMigrateMu.Unlock()
 	if len(moved) > 0 {
 		log.Printf("secret store: moved %d credential(s) out of config.toml into %s (%s). "+
 			"The config file no longer holds them.",

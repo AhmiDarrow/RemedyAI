@@ -1622,12 +1622,31 @@ var modelInterpreterPathEnv = []string{
 	"LUA_CPATH",
 	"PSMODULEPATH",
 	"NODE_PATH",
+	"LD_PRELOAD",
+	"LD_LIBRARY_PATH",
+	"LD_AUDIT",
+	"GIT_SSH_COMMAND",
+	"GIT_EXEC_PATH",
+	"BROWSER",
+	"PYTHONSTARTUP",
+	"PERL5OPT",
+	"NODE_OPTIONS",
+	"RUBYOPT",
+	"BASH_ENV",
+	"ENV",
+	"PROMPT_COMMAND",
+	"DOTNET_STARTUP_HOOKS",
+	"JAVA_TOOL_OPTIONS",
 }
 
 // modelDeniedEnvKey returns the first refused variable, or "".
 func modelDeniedEnvKey(env map[string]string) string {
 	for key := range env {
 		trimmed := strings.TrimSpace(key)
+		upper := strings.ToUpper(trimmed)
+		if strings.HasPrefix(upper, "DYLD_") {
+			return trimmed
+		}
 		for _, denied := range modelInterpreterPathEnv {
 			if strings.EqualFold(trimmed, denied) {
 				return denied

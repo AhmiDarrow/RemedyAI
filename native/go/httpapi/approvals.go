@@ -626,7 +626,7 @@ func plainApprovalSummary(item *pendingApproval) string {
 	if tool == "bash_exec" || tool == "shell.exec" {
 		return "Remedy wants to run a command: " + cmd
 	}
-	if tool == "file_write" || tool == "file_edit" || tool == "workspace.write" || tool == "workspace.edit" {
+	if tool == "file_write" || tool == "file_edit" || tool == "workspace.write" || tool == "workspace.edit" || tool == "write" || tool == "edit" {
 		return "Remedy wants to change a file: " + cmd
 	}
 	if tool == "mail_send" || tool == "mail.send" {
@@ -711,6 +711,11 @@ func (s *Server) handleResolveApproval(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Approval not found"})
 		return
 	}
+	decision := "denied"
+	if *req.Approve {
+		decision = "approved"
+	}
+	s.approvals.notify(item, decision)
 	hint := "Denied — stopped."
 	if item.Status == "approved" {
 		if resumed {

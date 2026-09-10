@@ -77,7 +77,7 @@ def test_frontier_work_gets_short_build_addendum():
         message="implement a calculator",
     )
     # The addendum names live Tool ABI ids, not the retired file_* aliases.
-    assert "workspace.edit" in out
+    assert "edit" in out
     assert "file_edit" not in out
     assert "7400" in out
     assert "1. **Explore" not in out

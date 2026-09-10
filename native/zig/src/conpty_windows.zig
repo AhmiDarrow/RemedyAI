@@ -226,8 +226,8 @@ pub fn spawn(
         null
     else
         (try host.utf8ToUtf16Z(gpa, cwd)).ptr;
-    const environment: ?*anyopaque = if (try host.parseEnv(gpa, env_json)) |pairs|
-        @ptrCast((try host.envBlock(gpa, pairs)).ptr)
+    const environment: ?*anyopaque = if (try host.resolveEnvBlock(gpa, env_json)) |block|
+        @ptrCast(block.ptr)
     else
         null;
 

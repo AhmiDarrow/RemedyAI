@@ -56,11 +56,25 @@ def test_tool_name_table_maps_to_live_abi_ids() -> None:
     from remedy.core.react_policy import TOOL_NAME_TABLE
 
     assert TOOL_NAME_TABLE, "TOOL_NAME_TABLE must not be empty"
+    live = {
+        "read",
+        "glob",
+        "grep",
+        "write",
+        "edit",
+        "bash",
+        "web.fetch",
+        "web.search",
+        "memory.search",
+        "memory.save",
+        "skill.search",
+        "skill.activate",
+        "computer.*",
+    }
     for key, abi_id in TOOL_NAME_TABLE.items():
         assert abi_id, f"{key} maps to an empty id"
-        # Every live id is dotted (workspace.read, shell.exec, computer.*).
-        assert "." in abi_id, f"{key} -> {abi_id} is not a Tool ABI id"
         assert abi_id not in RETIRED_TOOL_NAMES, f"{key} -> {abi_id} is retired"
+        assert abi_id in live, f"{key} -> {abi_id} is not on the advertised surface"
 
 
 def test_prompt_services_are_reachable(tmp_path, monkeypatch) -> None:

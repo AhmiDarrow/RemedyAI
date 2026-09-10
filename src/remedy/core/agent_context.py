@@ -128,7 +128,7 @@ async def build_turn_context(runtime: Any) -> str:
                             parts.append(
                                 "[Auto-resume] You have an unfinished RED build and "
                                 "the user said to continue — re-run the verify "
-                                "command with shell.exec, workspace.edit what fails, "
+                                "command with bash, edit what fails, "
                                 "and repeat until green. Finish what you started."
                             )
 
@@ -284,13 +284,13 @@ async def build_turn_context(runtime: Any) -> str:
                         "Approvals: Full (warn). The host is in Remedy's hands. "
                         "Write and run anywhere this account can. Auth secrets "
                         "(~/.remedy/auth) stay closed. Do not stop to ask. "
-                        "workspace.write / workspace.edit / shell.exec now "
+                        "write / edit / bash now "
                         "(use only Tool ABI ids in your schema)."
                     )
                 elif am == "auto":
                     parts.append(
-                        "Approvals: Auto (in-project). workspace.write / workspace.edit "
-                        "/ shell.exec for pytest / uv / ruff inside the focus folder "
+                        "Approvals: Auto (in-project). write / edit "
+                        "/ bash for pytest / uv / ruff inside the focus folder "
                         "run without prompts. OS, home, and sibling trees stay jailed "
                         "unless the user clicks Full."
                     )
@@ -443,7 +443,7 @@ async def build_turn_context(runtime: Any) -> str:
         )
         parts.append(
             "Owner's manual / F1 Help: you CAN and SHOULD read it. Prefer "
-            "workspace.read on docs/manual paths under the product tree when those "
+            "read on docs/manual paths under the product tree when those "
             "paths are in access scope. Never claim F1/help is outside access scope "
             "for read-only manuals shipped with the product."
         )

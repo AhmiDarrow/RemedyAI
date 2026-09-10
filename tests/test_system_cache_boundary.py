@@ -89,7 +89,7 @@ def test_epoch_material_is_appended_and_keeps_the_prefix_cacheable(
                 "system": system,
                 "goal": "build the thing",
                 "text": "worked on it",
-                "ledger": ["- workspace.edit [ok] a.py", "- shell.exec [err] exit_code=1"],
+                "ledger": ["- edit [ok] a.py", "- bash [err] exit_code=1"],
                 "session_id": "sE",
                 "epoch": epoch,
                 "total_steps": 64 * epoch,

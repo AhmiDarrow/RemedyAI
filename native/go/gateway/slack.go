@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -431,5 +432,30 @@ func anyString(v any) string {
 			return ""
 		}
 		return s
+	}
+}
+
+// anyID formats a messenger identity or scope id. JSON numbers must stay
+// decimal integers — fmt.Sprint of float64 turns 8720969343 into
+// 8.720969343e+09, which never matches an allowlist.
+func anyID(v any) string {
+	if v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t)
+	case json.Number:
+		return strings.TrimSpace(t.String())
+	case int:
+		return strconv.Itoa(t)
+	case int64:
+		return strconv.FormatInt(t, 10)
+	case float64:
+		return strconv.FormatInt(int64(t), 10)
+	case float32:
+		return strconv.FormatInt(int64(t), 10)
+	default:
+		return anyString(v)
 	}
 }
