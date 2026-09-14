@@ -185,8 +185,8 @@ func TestSignalEnvelopeAllowlistAndParse(t *testing.T) {
 	ch7.onEnvelope(context.Background(), map[string]any{
 		"envelope": map[string]any{"dataMessage": map[string]any{"message": "who am i"}},
 	})
-	if len(got) != 1 || got[0].Payload["chat_id"] != "signal" {
-		t.Fatalf("anonymous session: %+v", got)
+	if len(got) != 0 {
+		t.Fatalf("AllowAll still requires a sender id: %+v", got)
 	}
 }
 

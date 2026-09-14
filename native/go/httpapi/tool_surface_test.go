@@ -96,6 +96,15 @@ func TestBindToolInputBindsTheFrontierTools(t *testing.T) {
 		t.Fatalf("bash command must survive binding: %#v", args)
 	}
 
+	nav := bindToolInput(cognition.ToolCall{
+		Name:  "computer.navigate",
+		Input: []byte(`{"url":"https://example.com","session_id":"spoofed"}`),
+	}, b)
+	navArgs := decodeInput(t, nav.Input)
+	if navArgs["session_id"] != "s-42" {
+		t.Fatalf("computer.navigate session_id=%v want s-42", navArgs["session_id"])
+	}
+
 	// Session tools carry the session, and nothing else the model chose.
 	for _, name := range []string{"jobs", "todo"} {
 		call := bindToolInput(cognition.ToolCall{

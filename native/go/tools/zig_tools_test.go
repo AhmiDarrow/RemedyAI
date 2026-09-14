@@ -212,6 +212,56 @@ func TestComputerClickRejectsBadButton(t *testing.T) {
 	}
 }
 
+func TestComputerTypeRejectsVaultHandle(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"text":"{{vault:card-visa}}"}`,
+		`{"text":"prefix {{VAULT:pw}} suffix"}`,
+	} {
+		_, err := registry.Execute(context.Background(), Request{
+			ToolID:          "computer.type",
+			Version:         1,
+			Input:           json.RawMessage(body),
+			CapabilityToken: []byte("tok"),
+		})
+		if !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("vault type body=%s err=%v", body, err)
+		}
+	}
+}
+
+func TestRedactSecretElementStripsPasswordValues(t *testing.T) {
+	el := map[string]any{"name": "Password", "role": "edit", "type": "password", "value": "hunter2"}
+	redactSecretElement(el)
+	if el["value"] != "[redacted]" || el["value_redacted"] != true {
+		t.Fatalf("password value leaked: %#v", el)
+	}
+	plain := map[string]any{"name": "Search", "role": "edit", "type": "text", "value": "milk"}
+	redactSecretElement(plain)
+	if plain["value"] != "milk" {
+		t.Fatalf("ordinary field was redacted: %#v", plain)
+	}
+	payload := map[string]any{"fields": []any{
+		map[string]any{"name": "PIN", "value": "1234"},
+		map[string]any{"name": "Notes", "value": "ok"},
+	}}
+	redactSecretWindowPayload(payload)
+	fields := payload["fields"].([]any)
+	pin := fields[0].(map[string]any)
+	notes := fields[1].(map[string]any)
+	if pin["value"] != "[redacted]" {
+		t.Fatalf("PIN leaked: %#v", pin)
+	}
+	if notes["value"] != "ok" {
+		t.Fatalf("notes redacted: %#v", notes)
+	}
+}
+
 func TestComputerTypeRejectsEmptyText(t *testing.T) {
 	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
 		return nil

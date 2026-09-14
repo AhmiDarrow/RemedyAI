@@ -20,9 +20,13 @@ export interface Moment {
   sub?: string
 }
 
+function abiName(name: string): string {
+  return (name || '').toLowerCase().replace(/_/g, '.')
+}
+
 /** Tool name → plain-language verb phrase for "Remedy did" moments. */
 export function describeToolCall(call: ToolCall): string | null {
-  const name = (call?.name || '').toLowerCase()
+  const name = abiName(call?.name || '')
   const args = call?.args || {}
   const str = (k: string): string => {
     const v = args[k]
@@ -36,9 +40,9 @@ export function describeToolCall(call: ToolCall): string | null {
     }
   }
   switch (name) {
-    case 'computer_navigate':
+    case 'computer.navigate':
       return str('url') ? `Opened ${host(str('url'))}` : 'Opened a page'
-    case 'computer_act': {
+    case 'computer.act': {
       const bits: string[] = []
       if (str('url')) bits.push(`went to ${host(str('url'))}`)
       if (str('click')) bits.push(`pressed “${str('click')}”`)
@@ -48,38 +52,49 @@ export function describeToolCall(call: ToolCall): string | null {
       const s = bits.join(', ')
       return s.charAt(0).toUpperCase() + s.slice(1)
     }
-    case 'computer_click':
+    case 'computer.click':
       return str('text')
         ? `Pressed “${str('text')}”`
         : 'Clicked on the page'
-    case 'computer_type':
+    case 'computer.type':
       return 'Typed into a field'
-    case 'computer_select':
+    case 'computer.select':
       return str('value') || str('text')
         ? `Chose “${str('value') || str('text')}”`
         : 'Chose a dropdown option'
-    case 'computer_fill':
+    case 'computer.fill':
       return 'Filled in a form'
-    case 'computer_key':
+    case 'computer.key':
       return str('key') ? `Pressed ${str('key')}` : 'Pressed a key'
-    case 'computer_app':
-      return str('app') ? `Opened ${str('app')} on this PC` : 'Opened an app'
-    case 'computer_screenshot':
-    case 'computer_snapshot':
-    case 'computer_page_text':
-    case 'computer_find':
+    case 'computer.app':
+    case 'computer.window':
+      return str('app') || str('title')
+        ? `Opened ${str('app') || str('title')} on this PC`
+        : 'Opened an app'
+    case 'computer.screenshot':
+    case 'computer.snapshot':
+    case 'computer.page.text':
+    case 'computer.page_text':
+    case 'computer.find':
+    case 'computer.uia.focused':
+    case 'computer.uia.read.text':
+    case 'computer.uia.read_text':
       return 'Looked at the screen'
-    case 'vault_list':
+    case 'computer.uia.action':
+      return str('name') ? `Used “${str('name')}” on this PC` : 'Used a control on this PC'
+    case 'vault.list':
       return 'Checked which stored secrets exist (never their values)'
-    case 'file_write':
-    case 'file_edit':
+    case 'file.write':
+    case 'file.edit':
+    case 'edit':
       return str('path') ? `Worked on ${str('path')}` : 'Worked on a file'
-    case 'bash_exec':
-    case 'host_run':
+    case 'bash.exec':
+    case 'shell.exec':
+    case 'host.run':
       return 'Ran a command on this PC'
-    case 'mail_send':
+    case 'mail.send':
       return 'Sent an email (with your go-ahead)'
-    case 'web_search':
+    case 'web.search':
       return str('query') ? `Searched the web for “${str('query')}”` : 'Searched the web'
     default:
       return null
@@ -88,14 +103,20 @@ export function describeToolCall(call: ToolCall): string | null {
 
 /** Tools that are pure observation — folded away unless nothing else happened. */
 const QUIET_TOOLS = new Set([
-  'computer_screenshot',
-  'computer_snapshot',
-  'computer_page_text',
-  'computer_find',
-  'computer_wait',
-  'computer_monitors',
+  'computer.screenshot',
+  'computer.snapshot',
+  'computer.page.text',
+  'computer.page_text',
+  'computer.find',
+  'computer.wait',
+  'computer.monitors',
+  'computer.uia.focused',
+  'computer.uia.read.text',
+  'computer.uia.read_text',
+  'help.list',
   'help_list',
-  'file_read',
+  'file.read',
+  'read',
 ])
 
 export function messagesToMoments(messages: ChatMessage[]): Moment[] {
@@ -114,7 +135,7 @@ export function messagesToMoments(messages: ChatMessage[]): Moment[] {
     const seen = new Set<string>()
     for (let i = 0; i < (m.tool_calls || []).length; i++) {
       const call = m.tool_calls[i]
-      if (QUIET_TOOLS.has((call?.name || '').toLowerCase())) continue
+      if (QUIET_TOOLS.has(abiName(call?.name || ''))) continue
       const text = describeToolCall(call)
       if (!text || seen.has(text)) continue
       seen.add(text)

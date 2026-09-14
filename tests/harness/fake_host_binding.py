@@ -806,12 +806,14 @@ class FakeHostConpty:
         self,
         argv: Sequence[str],
         *,
+        env: Mapping[str, str] | None = None,
+        replace_env: bool = False,
         owner_checkpoint: bool = False,
         subject: str = 'agent:remedy',
         scope: str = 'workspace:local',
     ) -> tuple[bytes, int]:
-        _ = (argv, owner_checkpoint, subject, scope)
-        self.calls.append(('issue_process_spawn_token', (list(argv),), {}))
+        _ = (argv, env, replace_env, owner_checkpoint, subject, scope)
+        self.calls.append(('issue_process_spawn_token', (list(argv),), {'env': env}))
         return b'\x11' * 169, 1_700_000_000_000
 
     def process_spawn_authorized(

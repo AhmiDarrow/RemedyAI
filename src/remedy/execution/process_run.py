@@ -112,7 +112,7 @@ def _run_hidden_exec_capture(
     from remedy.core.computer import host_binding
 
     resolved = resolve_argv0(args)
-    token, now_ms = host_binding.issue_process_spawn_token(resolved)
+    token, now_ms = host_binding.issue_process_spawn_token(resolved, env=env)
     timeout_ms = 0 if timeout is None else int(max(0.0, float(timeout)) * 1000)
     captured = host_binding.process_exec_capture_authorized(
         resolved,

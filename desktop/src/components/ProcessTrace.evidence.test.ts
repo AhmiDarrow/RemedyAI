@@ -51,4 +51,11 @@ describe('process trail evidence', () => {
     expect(live).toBeGreaterThan(-1)
     expect(feed.slice(live, live + 200)).toContain('sessionId={sessionId}')
   })
+
+  it('historical trails are given the session and the message request id', () => {
+    const hist = feed.indexOf('steps={histSteps}')
+    expect(hist).toBeGreaterThan(-1)
+    expect(feed.slice(hist, hist + 280)).toContain('sessionId={sessionId}')
+    expect(feed).toContain('requestId: msg.request_id')
+  })
 })

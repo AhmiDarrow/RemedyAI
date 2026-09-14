@@ -40,6 +40,16 @@ func ParseIDs(raw any) map[string]struct{} {
 // numbers). Messenger adapters with separate user and room ids must use
 // Access.Permit so a room id can never stand in for a user identity.
 func IsAllowed(allowlist map[string]struct{}, allowAll bool, candidates ...string) bool {
+	hasID := false
+	for _, c := range candidates {
+		if strings.TrimSpace(c) != "" {
+			hasID = true
+			break
+		}
+	}
+	if !hasID {
+		return false
+	}
 	if allowAll {
 		return true
 	}
@@ -108,15 +118,15 @@ func (a Access) Permit(userID string, scopeIDs ...string) (bool, string) {
 			return false, "scope"
 		}
 	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false, "no-user-id"
+	}
 	if a.AllowAll {
 		return true, ""
 	}
 	if len(a.Users) == 0 {
 		return false, "empty-allowlist"
-	}
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return false, "no-user-id"
 	}
 	if _, ok := a.Users[userID]; ok {
 		return true, ""

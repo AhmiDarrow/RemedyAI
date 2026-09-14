@@ -197,12 +197,29 @@ type RegistryPolicy struct {
 	Approvals *approvalQueue
 	SessionID string
 	// ForceAsk makes every RiskMutation decision Ask regardless of approval
-	// mode. Set for untrusted origins (messenger, phone) — see OriginIsOwner.
+	// mode. Set for untrusted origins (messenger, phone, hive) — see OriginIsOwner.
 	ForceAsk bool
+	// HiveRestricted denies computer input, mail, calendar and hive-control
+	// tools. A daughter may read and search; it may not click, type, or send.
+	HiveRestricted bool
+	// LiveContext is the host-observed URL and labels for this session. The
+	// model-supplied page_context field is ignored — a checkout click without
+	// this probe is an owner moment.
+	LiveContext func(sessionID string) string
+}
+
+func (p *RegistryPolicy) livePageContext() string {
+	if p == nil || p.LiveContext == nil {
+		return ""
+	}
+	return strings.TrimSpace(p.LiveContext(p.SessionID))
 }
 
 func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cognition.Decision {
 	if p == nil || p.Registry == nil {
+		return cognition.Deny
+	}
+	if p.HiveRestricted && hiveDeniedTool(call.Name) {
 		return cognition.Deny
 	}
 	desc, err := p.Registry.Latest(call.Name)
@@ -218,7 +235,7 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 		if callIsReadOnlyAction(call) {
 			return cognition.Allow
 		}
-		if isSensitiveComputerAction(call) {
+		if classifySensitiveComputer(call, p.livePageContext()) {
 			return p.decideOwnerMoment(call)
 		}
 		mode := "ask"
@@ -283,16 +300,17 @@ func toolCommandPreview(call cognition.ToolCall) string {
 // serverOwnedInputFields are set by the runtime from the session, never by
 // the model or an API caller: they choose the jail root, the shell's write
 // roots and the owner home the Python worker reads.
-var serverOwnedInputFields = []string{"home_dir", "workspace_root", "project_path", "write_roots", "owner_confirmed"}
+var serverOwnedInputFields = []string{"home_dir", "workspace_root", "project_path", "write_roots", "owner_confirmed", "page_context"}
 
 // toolBinding is what the runtime, not the model, decides about a tool call:
 // which folder it is jailed to, how far outside it the shell may reach, and
 // which session's job list and checklist it writes.
 type toolBinding struct {
-	Root      string
-	Scope     string
-	HomeDir   string
-	SessionID string
+	Root        string
+	Scope       string
+	HomeDir     string
+	SessionID   string
+	PageContext string
 }
 
 // fileToolIDs and sessionToolIDs are the frontier surface's Go-native tools.
@@ -317,10 +335,19 @@ func bindToolInput(call cognition.ToolCall, b toolBinding) cognition.ToolCall {
 
 	isShell := name == "bash" || name == "shell.exec" || name == "shell_exec"
 	_, isSessionTool := sessionToolIDs[name]
+	isRail := name == "computer.navigate" || name == "computer_navigate"
+	isComputer := strings.HasPrefix(name, "computer.") || strings.HasPrefix(name, "computer_")
 	// shell.exec has no session in its schema; bash needs one for background
-	// jobs, and the session tools are named for it.
-	if isSessionTool || name == "bash" {
+	// jobs, and the session tools are named for it. Rail tools take the same
+	// session so a model-supplied session_id cannot drive another chat's browser.
+	if isSessionTool || name == "bash" || isRail {
 		call.Input = injectSessionBinding(call.Input, b.HomeDir, b.SessionID)
+	}
+	if isComputer {
+		live := strings.TrimSpace(b.PageContext)
+		if live != "" {
+			call.Input = injectSingleField(call.Input, "page_context", live)
+		}
 	}
 	if root == "" {
 		return call
@@ -451,8 +478,12 @@ var (
 		`i.?m not a robot|press.?and.?hold|press.?&.?hold|` +
 		`human.?check|verify you are human` +
 		`)`)
-	vaultHandleRe   = regexp.MustCompile(`\{\{\s*vault:`)
-	cardCandidateRe = regexp.MustCompile(`(?:^|[^\d])((?:\d[ -]?){13,19})(?:[^\d]|$)`)
+	vaultHandleRe    = regexp.MustCompile(`\{\{\s*vault:`)
+	cardCandidateRe  = regexp.MustCompile(`(?:^|[^\d])((?:\d[ -]?){13,19})(?:[^\d]|$)`)
+	passwordFieldRe  = regexp.MustCompile(`(?is)\b(` +
+		`password|passwd|passphrase|passcode|pin\b|otp|one[ -]?time|` +
+		`2fa|mfa|totp|cvv|cvc|security\s+code|ssn|social\s+security` +
+		`)\b`)
 
 	// shell.exec argv shapes that move money or touch credentials.
 	shellMoneyRe = regexp.MustCompile(`(?is)(` +
@@ -488,30 +519,59 @@ var submitKeys = map[string]struct{}{"enter": {}, "return": {}, "\n": {}, "space
 // (one-shot, mode-proof) approval. enqueueToolApproval consults it so the
 // banner item carries Sensitive and SetMode sweeps leave it pending.
 func approvalIsSensitive(call cognition.ToolCall) bool {
-	return isSensitiveComputerAction(call)
+	return classifySensitiveComputer(call, "")
 }
 
-// isSensitiveComputerAction is the Go port of the Python payment /
-// credential checkpoints: true for computer.click, computer.uia.action,
-// computer.key and computer.type when the call's target label, UIA name, or
-// page context reads as a purchase, payment submit, card entry or vault use
-// (or a challenge wall), and for shell.exec / bash when the command has a
-// money or credential shape. The input is the call as the model sent it; page
-// context arrives in the optional page_context field.
 func isSensitiveComputerAction(call cognition.ToolCall) bool {
-	name := strings.ToLower(strings.TrimSpace(call.Name))
-	name = strings.ReplaceAll(name, "_", ".")
+	return classifySensitiveComputer(call, "")
+}
+
+func toolNameDotted(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	return strings.ReplaceAll(n, "_", ".")
+}
+
+// hiveDeniedTool is the mother-only surface a forager must never hold:
+// computer input, mail, calendar, hive control. Read/search stay allowed.
+// Unknown computer.* names fail closed so a new input verb cannot slip through.
+func hiveDeniedTool(name string) bool {
+	n := toolNameDotted(name)
+	if strings.HasPrefix(n, "mail.") || strings.HasPrefix(n, "calendar.") ||
+		strings.HasPrefix(n, "hive.") || strings.HasPrefix(n, "mcp.") {
+		return true
+	}
+	if n == "clipboard.write" {
+		return true
+	}
+	if strings.HasPrefix(n, "computer.") {
+		switch n {
+		case "computer.screenshot", "computer.print.window", "computer.windows",
+			"computer.foreground", "computer.monitors", "computer.snapshot",
+			"computer.uia.focused", "computer.uia.read.text":
+			return false
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+// classifySensitiveComputer is the Go port of the Python payment /
+// credential checkpoints. live is host-observed URL + labels; the model's
+// page_context field is never read. An unlabeled click or submit key with
+// no live probe is an owner moment (fail closed).
+func classifySensitiveComputer(call cognition.ToolCall, live string) bool {
+	name := toolNameDotted(call.Name)
 	args := map[string]any{}
 	if len(call.Input) > 0 {
 		if err := json.Unmarshal(call.Input, &args); err != nil {
-			// Not an object: scan the raw text so a truncated or non-JSON
-			// preview still trips the checkpoint words.
 			raw := string(call.Input)
 			switch name {
 			case "shell.exec", "bash":
 				return shellMoneyRe.MatchString(raw) || shellCredentialRe.MatchString(raw)
-			case "computer.click", "computer.uia.action", "computer.key", "computer.type":
-				return sensitiveComputerRe.MatchString(raw)
+			case "computer.click", "computer.uia.action", "computer.key",
+				"computer.type", "computer.key.hold", "computer.drag":
+				return sensitiveComputerRe.MatchString(raw) || challengeWallRe.MatchString(raw)
 			}
 			return false
 		}
@@ -519,18 +579,25 @@ func isSensitiveComputerAction(call cognition.ToolCall) bool {
 	switch name {
 	case "shell.exec", "bash":
 		return shellArgvIsSensitive(args)
-	case "computer.click", "computer.uia.action", "computer.key", "computer.type":
+	case "computer.click", "computer.uia.action", "computer.key",
+		"computer.type", "computer.key.hold", "computer.drag":
 	default:
 		return false
 	}
 	label := strings.TrimSpace(asString(args["label"]))
 	uiaName := strings.TrimSpace(asString(args["name"]))
-	pageContext := asString(args["page_context"])
 	text := asString(args["text"])
 	target := strings.TrimSpace(label + " " + uiaName)
+	pageContext := strings.TrimSpace(live)
+	blob := pageContext + " " + target
 
 	if sensitiveComputerRe.MatchString(target) {
 		return true
+	}
+	if passwordFieldRe.MatchString(target) || passwordFieldRe.MatchString(pageContext) {
+		if name == "computer.type" || name == "computer.uia.action" || name == "computer.key" {
+			return true
+		}
 	}
 	if vaultHandleRe.MatchString(text) || strings.Contains(text, "vault=") {
 		return true
@@ -538,26 +605,41 @@ func isSensitiveComputerAction(call cognition.ToolCall) bool {
 	if (name == "computer.type" || name == "computer.uia.action") && looksLikeRawCard(text) {
 		return true
 	}
-	if name == "computer.click" && challengeWallRe.MatchString(pageContext+" "+label) {
-		return true
+	if challengeWallRe.MatchString(blob) {
+		switch name {
+		case "computer.click", "computer.key.hold", "computer.drag", "computer.key":
+			return true
+		}
 	}
-	if !paymentSurfaceRe.MatchString(pageContext) {
-		return false
-	}
+	payment := paymentSurfaceRe.MatchString(pageContext)
+	probeEmpty := pageContext == ""
 	switch name {
 	case "computer.click":
-		// Coordinate click with no readable target on a checkout page, or a
-		// short submit-shaped label ("Pay", "Continue").
-		return label == "" || submitLabelRe.MatchString(label)
+		if payment {
+			return label == "" || submitLabelRe.MatchString(label)
+		}
+		// Coordinate click with no readable target and no live page: we cannot
+		// tell this is not Place order.
+		return probeEmpty && label == ""
 	case "computer.uia.action":
-		return submitLabelRe.MatchString(uiaName)
+		if payment {
+			return submitLabelRe.MatchString(uiaName) || uiaName == ""
+		}
+		return probeEmpty && uiaName == ""
 	case "computer.key":
 		key := strings.ToLower(strings.TrimSpace(asString(args["key"])))
 		if i := strings.LastIndex(key, "+"); i >= 0 {
 			key = key[i+1:]
 		}
 		_, submits := submitKeys[key]
-		return submits
+		if !submits {
+			return false
+		}
+		return payment || probeEmpty
+	case "computer.type":
+		return payment
+	case "computer.key.hold", "computer.drag":
+		return payment || probeEmpty || challengeWallRe.MatchString(blob)
 	}
 	return false
 }

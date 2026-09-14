@@ -50,11 +50,16 @@ func (s *Server) toolBindingFor(sessionID string) toolBinding {
 	if root == "" {
 		root = defaultOwnerFilesBase()
 	}
+	live := ""
+	if b := s.bridge(); b != nil {
+		live = b.livePageContext(sessionID)
+	}
 	return toolBinding{
-		Root:      root,
-		Scope:     effectiveAccessScope(cfgString(LoadConfig(s.remedyHomeDir()), "access_scope", "project"), projectPath),
-		HomeDir:   s.remedyHomeDir(),
-		SessionID: sessionID,
+		Root:        root,
+		Scope:       effectiveAccessScope(cfgString(LoadConfig(s.remedyHomeDir()), "access_scope", "project"), projectPath),
+		HomeDir:     s.remedyHomeDir(),
+		SessionID:   sessionID,
+		PageContext: live,
 	}
 }
 
@@ -187,15 +192,16 @@ func (s *Server) handleInvokeTool(w http.ResponseWriter, r *http.Request) {
 
 	// Same Ask/Auto/Full + fingerprint gate as CognitionTurnRunner.
 	policy := &RegistryPolicy{
-		Registry:  reg,
-		Approvals: s.approvals,
-		SessionID: sessionID,
+		Registry:    reg,
+		Approvals:   s.approvals,
+		SessionID:   sessionID,
+		LiveContext: func(sid string) string { return s.toolBindingFor(sid).PageContext },
 	}
 	switch policy.Decide(r.Context(), call) {
 	case cognition.Allow:
 		// proceed to execute
 	case cognition.Ask:
-		item := enqueueToolApproval(s.approvals, reg, sessionID, call)
+		item := enqueueToolApprovalIn(s.approvals, reg, sessionID, call, "", s.toolBindingFor(sessionID).PageContext)
 		resp := map[string]any{
 			"ok":                false,
 			"id":                id,

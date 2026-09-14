@@ -36,6 +36,15 @@ MAIL_AND_CALENDAR = (
 def test_daughters_cannot_reach_mail_or_calendar() -> None:
     for name in MAIL_AND_CALENDAR:
         assert is_mother_only_tool(name), f"{name} is reachable by a daughter"
+    for name in (
+        "mail.send",
+        "hive.spawn",
+        "computer.uia.action",
+        "computer.click",
+        "computer.move",
+        "clipboard.write",
+    ):
+        assert is_mother_only_tool(name), f"{name} is reachable by a daughter"
 
 
 def test_mail_and_calendar_carry_a_capability_daughters_lack() -> None:
@@ -50,7 +59,16 @@ def test_mail_and_calendar_carry_a_capability_daughters_lack() -> None:
 
 def test_ordinary_tools_are_still_daughter_reachable() -> None:
     """Guard the prefix widening against over-reach."""
-    for name in ("file_read", "repo_search", "list_dir", "web_search"):
+    for name in (
+        "file_read",
+        "repo_search",
+        "list_dir",
+        "web_search",
+        "computer.screenshot",
+        "computer.snapshot",
+        "computer.windows",
+        "computer.uia.focused",
+    ):
         assert not is_mother_only_tool(name)
 
 

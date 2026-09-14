@@ -100,7 +100,7 @@ type TurnRun =
       planMode?: boolean
       chatMode?: boolean
     }
-  | { kind: 'attach'; requestId: string; after: number; model?: string }
+  | { kind: 'attach'; requestId: string; after: number; model?: string; attempt?: number }
 
 export function useMessages(sessionId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -130,7 +130,12 @@ export function useMessages(sessionId: string | null) {
   const [remoteBusy, setRemoteBusy] = useState(false)
   /** Set once `runTurnStream` exists — the load effect runs before it. */
   const attachToTurnRef = useRef<
-    ((sid: string, requestId: string, model?: string) => void) | null
+    ((
+      sid: string,
+      requestId: string,
+      model?: string,
+      opts?: { force?: boolean; attempt?: number },
+    ) => void) | null
   >(null)
   const streamingRef = useRef(false)
   const sendLockRef = useRef(false)
@@ -614,9 +619,28 @@ export function useMessages(sessionId: string | null) {
         if (doneReceived) return
         doneReceived = true
         if (meta?.steered) {
-          // Words went to the still-running turn; that turn's own stream (or
-          // reattach) paints the reply. Nothing to commit here.
-          markJobUiCommitted(targetId)
+          // This POST never joined; the live turn still holds the claim.
+          // Attach instead of painting the job done — Stop must still work.
+          void getSession(targetId)
+            .then((sess) => {
+              if (sessionIdRef.current !== targetId) return
+              const plan = reattachPlan({
+                liveness: sess,
+                localJobRunning: getStreamJob(targetId)?.status === 'running',
+                localRequestId: getJobRequestId(targetId),
+              })
+              if (plan.kind === 'attach') {
+                attachToTurnRef.current?.(targetId, plan.requestId, model, {
+                  force: true,
+                })
+              } else {
+                setRemoteBusy(plan.kind === 'working')
+              }
+            })
+            .catch(() => {
+              setRemoteBusy(true)
+            })
+          return
         }
         // Closed without a terminal frame: keep the partial, mark it, re-fetch.
         const wasInterrupted = Boolean(meta?.interrupted) || isJobInterrupted(targetId)
@@ -889,12 +913,40 @@ export function useMessages(sessionId: string | null) {
           })
         },
         onError: (errMsg) => {
+          if (doneReceived) return
           // An attach that never applied a frame did not join the turn (no log
           // for it, or the server moved on). Keep the working state instead of
           // reporting a failure the owner cannot act on.
           const joinFailed = run.kind === 'attach' && getJobLastSeq(targetId) === 0
           if (joinFailed) {
             console.warn('[remedy] could not attach to turn', run.requestId, errMsg)
+            const attempt = run.kind === 'attach' ? (run.attempt ?? 0) : 0
+            if (attempt < 5) {
+              void getSession(targetId)
+                .then((sess) => {
+                  if (doneReceived) return
+                  const rid = (sess.active_request_id || '').trim()
+                  if (sess.claimed && rid) {
+                    doneReceived = true
+                    setRemoteBusy(true)
+                    window.setTimeout(() => {
+                      attachToTurnRef.current?.(targetId, rid, model, {
+                        force: true,
+                        attempt: attempt + 1,
+                      })
+                    }, 400 * (attempt + 1))
+                    return
+                  }
+                  setRemoteBusy(true)
+                  void finishErr(errMsg, { quiet: true })
+                })
+                .catch(() => {
+                  if (doneReceived) return
+                  setRemoteBusy(true)
+                  void finishErr(errMsg, { quiet: true })
+                })
+              return
+            }
             setRemoteBusy(true)
           }
           void finishErr(errMsg, { quiet: joinFailed })
@@ -1041,10 +1093,15 @@ export function useMessages(sessionId: string | null) {
   )
 
   const attachToTurn = useCallback(
-    (sid: string, requestId: string, model?: string) => {
+    (
+      sid: string,
+      requestId: string,
+      model?: string,
+      opts?: { force?: boolean; attempt?: number },
+    ) => {
       // Idempotent: a second attach for a turn this webview already paints
       // would replay its frames into a fresh buffer and duplicate the trail.
-      if (isFollowingTurn(sid, requestId)) return
+      if (!opts?.force && isFollowingTurn(sid, requestId)) return
       setRemoteBusy(false)
       if (sessionIdRef.current === sid) {
         streamingRef.current = true
@@ -1063,7 +1120,13 @@ export function useMessages(sessionId: string | null) {
         setTaskProgress(null)
         lastStreamActivityRef.current = Date.now()
       }
-      runTurnStream(sid, { kind: 'attach', requestId, after: 0, model })
+      runTurnStream(sid, {
+        kind: 'attach',
+        requestId,
+        after: 0,
+        model,
+        attempt: opts?.attempt ?? 0,
+      })
     },
     [runTurnStream, clearStreamAccum],
   )

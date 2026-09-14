@@ -68,6 +68,8 @@ def security_set_signing_key(key: bytes | bytearray | memoryview) -> None:
         library.remedy_core_security_set_signing_key(buf, 32),
     )
     _set_signing_ready(True)
+    with contextlib.suppress(AttributeError, HostError, OSError):
+        library.remedy_core_policy_env_strict(1)
 
 
 def security_clear_signing_key() -> None:
@@ -111,6 +113,47 @@ def policy_hash_argv(argv: Sequence[str]) -> bytes:
         library,
         "policy_hash_argv",
         library.remedy_core_policy_hash_argv(argv_raw, len(argv_raw), out, 32),
+    )
+    return bytes(out)
+
+
+def _spawn_env_payload(
+    env: Mapping[str, str] | None,
+    replace_env: bool,
+) -> tuple[bytes, int]:
+    """Match Go ``spawnEnvJSON`` + ``PolicyHashSpawn`` (compact JSON, sorted keys).
+
+    Inherit (``env is None`` and not replacing) is a NULL pointer and length 0.
+    """
+    flag = 1 if replace_env else 0
+    if env is None and not replace_env:
+        return b"", 0
+    block = {str(k): str(v) for k, v in (env or {}).items()}
+    raw = json.dumps(
+        {"env": block, "replace_env": True} if replace_env else block,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return _utf8(raw), flag
+
+
+def policy_hash_spawn(
+    argv: Sequence[str],
+    env: Mapping[str, str] | None = None,
+    replace_env: bool = False,
+) -> bytes:
+    """Operation hash covering argv plus the environment the spawn will receive."""
+    library = _lib()
+    argv_raw = _utf8(json.dumps([str(a) for a in argv]))
+    env_raw, flag = _spawn_env_payload(env, replace_env)
+    out = (c_uint8 * 32)()
+    env_ptr = env_raw if env_raw else None
+    _check(
+        library,
+        "policy_hash_spawn",
+        library.remedy_core_policy_hash_spawn(
+            argv_raw, len(argv_raw), env_ptr, len(env_raw), flag, out, 32
+        ),
     )
     return bytes(out)
 
@@ -165,12 +208,14 @@ def capability_issue(
 def issue_process_spawn_token(
     argv: Sequence[str],
     *,
+    env: Mapping[str, str] | None = None,
+    replace_env: bool = False,
     owner_checkpoint: bool = False,
     subject: str = DEFAULT_SPAWN_SUBJECT,
     scope: str = DEFAULT_SPAWN_SCOPE,
 ) -> tuple[bytes, int]:
-    """Return ``(token, now_ms)`` for an authorized spawn of *argv*."""
-    digest = policy_hash_argv(argv)
+    """Return ``(token, now_ms)`` for an authorized spawn of *argv* plus *env*."""
+    digest = policy_hash_spawn(argv, env, replace_env)
     now = int(time.time() * 1000)
     rights = PROCESS_SPAWN_RIGHT
     if owner_checkpoint:
@@ -322,7 +367,7 @@ def process_spawn_authorized(
         library = _lib()
         argv_raw = _utf8(json.dumps([str(a) for a in argv]))
         cwd_raw = _utf8(str(cwd)) if cwd else b""
-        env_raw = _utf8(json.dumps({str(k): str(v) for k, v in env.items()})) if env is not None else b""
+        env_raw, _flag = _spawn_env_payload(env, False)
         subject_raw = _utf8(subject)
         scope_raw = _utf8(scope)
         token_raw = bytes(token)
@@ -392,11 +437,7 @@ def process_spawn_piped_authorized(
         library = _lib()
         argv_raw = _utf8(json.dumps([str(a) for a in argv]))
         cwd_raw = _utf8(str(cwd)) if cwd else b""
-        env_raw = (
-            _utf8(json.dumps({str(k): str(v) for k, v in env.items()}))
-            if env is not None
-            else b""
-        )
+        env_raw, _flag = _spawn_env_payload(env, False)
         subject_raw = _utf8(subject)
         scope_raw = _utf8(scope)
         token_raw = bytes(token)
@@ -475,11 +516,7 @@ def process_exec_capture_authorized(
         library = _lib()
         argv_raw = _utf8(json.dumps([str(a) for a in argv]))
         cwd_raw = _utf8(str(cwd)) if cwd else b""
-        env_raw = (
-            _utf8(json.dumps({str(k): str(v) for k, v in env.items()}))
-            if env is not None
-            else b""
-        )
+        env_raw, _flag = _spawn_env_payload(env, False)
         subject_raw = _utf8(subject)
         scope_raw = _utf8(scope)
         token_raw = bytes(token)
@@ -550,11 +587,7 @@ def conpty_spawn_authorized(
         library = _lib()
         argv_raw = _utf8(json.dumps([str(a) for a in argv]))
         cwd_raw = _utf8(str(cwd)) if cwd else b""
-        env_raw = (
-            _utf8(json.dumps({str(k): str(v) for k, v in env.items()}))
-            if env is not None
-            else b""
-        )
+        env_raw, _flag = _spawn_env_payload(env, False)
         subject_raw = _utf8(subject)
         scope_raw = _utf8(scope)
         token_raw = bytes(token)

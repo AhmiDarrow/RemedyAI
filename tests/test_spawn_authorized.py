@@ -42,14 +42,29 @@ def test_signing_key(monkeypatch):
 
 
 @windows_with_core
+def test_policy_hash_spawn_covers_env(test_signing_key):
+    _ = test_signing_key
+    argv = [r"C:\Windows\System32\cmd.exe", "/c", "echo"]
+    argv_only = H.policy_hash_spawn(argv, None, False)
+    with_env = H.policy_hash_spawn(argv, {"FOO": "bar"}, False)
+    again = H.policy_hash_spawn(argv, {"FOO": "bar"}, False)
+    replaced = H.policy_hash_spawn(argv, {"FOO": "bar"}, True)
+    assert argv_only != with_env
+    assert with_env == again
+    assert replaced != with_env
+    assert len(argv_only) == 32
+
+
+@windows_with_core
 def test_authorized_spawn_runs_cmd_with_token(test_signing_key, tmp_path: Path):
     _ = test_signing_key
     argv = P.resolve_argv0(["cmd", "/c", "exit %REMEDY_AUTH_CODE%"])
-    token, now = H.issue_process_spawn_token(argv)
+    env = {"REMEDY_AUTH_CODE": "5", "SystemRoot": r"C:\Windows"}
+    token, now = H.issue_process_spawn_token(argv, env=env)
     pid, handle = H.process_spawn_authorized(
         argv,
         cwd=str(tmp_path),
-        env={"REMEDY_AUTH_CODE": "5", "SystemRoot": r"C:\Windows"},
+        env=env,
         token=token,
         now_ms=now,
     )
@@ -59,6 +74,23 @@ def test_authorized_spawn_runs_cmd_with_token(test_signing_key, tmp_path: Path):
         assert code == 5
     finally:
         H.process_close(handle)
+
+
+@windows_with_core
+def test_argv_only_token_cannot_spend_on_env(test_signing_key, tmp_path: Path):
+    """PolicyEnvStrict: a token minted for inherit cannot authorize a spawn env."""
+    _ = test_signing_key
+    argv = P.resolve_argv0(["cmd", "/c", "echo"])
+    token, now = H.issue_process_spawn_token(argv)
+    with pytest.raises(H.HostError) as raised:
+        H.process_spawn_authorized(
+            argv,
+            cwd=str(tmp_path),
+            env={"FOO": "bar", "SystemRoot": r"C:\Windows"},
+            token=token,
+            now_ms=now,
+        )
+    assert raised.value.status == H.STATUS_ACCESS_DENIED
 
 
 @windows_with_core

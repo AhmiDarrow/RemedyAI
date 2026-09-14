@@ -226,7 +226,6 @@ func spawnConptyTerminal(homeDir string, argv []string, cwd string, cols, rows i
 	if err := core.EnsureSigningKey(key); err != nil {
 		return nil, err
 	}
-	_ = core.WriteJailSetRoots(nil) // Full / unbound for interactive terminal
 	env := map[string]string{}
 	for _, e := range os.Environ() {
 		if i := strings.IndexByte(e, '='); i > 0 {
@@ -244,8 +243,12 @@ func spawnConptyTerminal(homeDir string, argv []string, cwd string, cols, rows i
 	if r == 0 {
 		r = 40
 	}
-	_, handle, err := core.ConptySpawnAuthorized(argv, cwd, env, false, c, r, token, "", "", false, nowMS)
-	if err != nil {
+	var handle uint64
+	if err := core.WithWriteJail(nil, func() error {
+		var err error
+		_, handle, err = core.ConptySpawnAuthorized(argv, cwd, env, false, c, r, token, "", "", false, nowMS)
+		return err
+	}); err != nil {
 		return nil, err
 	}
 	return &conptyProc{handle: handle}, nil

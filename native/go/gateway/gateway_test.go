@@ -204,6 +204,12 @@ func TestAllowlist(t *testing.T) {
 	if IsAllowed(nil, false, "9") {
 		t.Fatal("empty deny")
 	}
+	if IsAllowed(nil, true, "") {
+		t.Fatal("allow_all must still require a sender identity")
+	}
+	if ok, reason := NewAccess(nil, true).Permit("", "room-1"); ok || reason != "no-user-id" {
+		t.Fatalf("Permit empty user under allow_all: ok=%v reason=%q", ok, reason)
+	}
 }
 
 func TestTelegram409Backoff(t *testing.T) {

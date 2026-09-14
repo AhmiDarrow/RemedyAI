@@ -31,6 +31,8 @@ export interface ChatMessage {
   tokens: number | null
   created_at: string
   reverted: boolean
+  /** Turn that produced this row — addresses recorded tool evidence. */
+  request_id?: string
 }
 
 export interface ToolCall {

@@ -6,8 +6,10 @@ import {
   SIGNAL_JAVA_DOWNLOAD_URL,
   ensureManagedSignalCLI,
   getMessengerTunnelStatus,
+  getRuntimeStatus,
   startMessengerTunnel,
   stopMessengerTunnel,
+  type DeniedInbound,
   type MessengerInfo,
   type MessengerTunnelStatus,
 } from '../../api/settings'
@@ -62,6 +64,7 @@ export function MessengersSection({
   const [namedPublicURL, setNamedPublicURL] = useState('')
   const [signalBusy, setSignalBusy] = useState(false)
   const [signalMsg, setSignalMsg] = useState('')
+  const [deniedInbound, setDeniedInbound] = useState<DeniedInbound[]>([])
 
   const refreshTunnel = useCallback(async () => {
     try {
@@ -76,10 +79,18 @@ export function MessengersSection({
     } catch {
       setTunnel(null)
     }
+    try {
+      const st = await getRuntimeStatus()
+      setDeniedInbound(st.gateway?.denied_inbound || [])
+    } catch {
+      setDeniedInbound([])
+    }
   }, [])
 
   useEffect(() => {
     void refreshTunnel()
+    const id = window.setInterval(() => void refreshTunnel(), 8000)
+    return () => window.clearInterval(id)
   }, [refreshTunnel])
 
   const enabledCount = useMemo(
@@ -194,6 +205,38 @@ export function MessengersSection({
         Expand a messenger to set tokens and options. Chats show up in the session list
         (realtime). Empty secret fields leave the current token unchanged.
       </div>
+
+      {deniedInbound.length > 0 && (
+        <div
+          className="rounded px-2 py-1.5 mb-2 space-y-1"
+          style={{
+            border: '1px solid color-mix(in srgb, var(--warning) 45%, var(--border))',
+            background: 'color-mix(in srgb, var(--warning) 8%, transparent)',
+          }}
+          data-testid="denied-inbound"
+        >
+          <div className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--warning)' }}>
+            Blocked inbound
+          </div>
+          <div className="text-[10px] leading-snug" style={{ color: 'var(--text-secondary)' }}>
+            These people tried to message Remedy and were ignored. Add their id to
+            that messenger’s allow list if they should get through.
+          </div>
+          {deniedInbound.map((d) => (
+            <div
+              key={`${d.channel}:${d.user_id}:${d.scope_id}:${d.reason}`}
+              className="text-[11px] leading-snug"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              <span className="font-medium">{d.channel || 'messenger'}</span>
+              {' · '}
+              {d.user_id || d.scope_id || 'unknown'}
+              {d.count > 1 ? ` ×${d.count}` : ''}
+              {d.reason ? ` — ${d.reason}` : ''}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div
         className="rounded px-2 py-1.5 mb-2 space-y-1"

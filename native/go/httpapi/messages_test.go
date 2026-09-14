@@ -415,7 +415,8 @@ func TestSendMessageProcessedFallback(t *testing.T) {
 	resp.Body.Close()
 	var body map[string]any
 	_ = json.Unmarshal(raw, &body)
-	if body["response"] != "Processed." {
+	got, _ := body["response"].(string)
+	if got == "" || strings.Contains(got, "Processed.") {
 		t.Fatalf("response = %#v", body["response"])
 	}
 	req = authReq(t, http.MethodGet, base+"/api/sessions/"+sid+"/messages", token, nil)

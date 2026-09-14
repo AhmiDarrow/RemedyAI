@@ -79,13 +79,11 @@ type TurnRequest struct {
 }
 
 // OriginIsOwner reports whether a TurnRequest.Origin is one of the owner's own
-// surfaces. Empty means desktop. Messenger and phone origins are untrusted.
+// surfaces. Empty means desktop. Messenger, phone, and hive origins are untrusted.
 func OriginIsOwner(origin string) bool {
 	o := strings.ToLower(strings.TrimSpace(origin))
 	switch {
 	case o == "", o == "desktop", o == "webui", o == "cli", o == "fixture":
-		return true
-	case strings.HasPrefix(o, "hive:"):
 		return true
 	default:
 		return false
@@ -977,7 +975,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 	out := reply
 	if out == "" {
-		out = "Processed."
+		out = "I finished that step without a reply I can show here. Send continue if you want me to keep going."
 	}
 	elapsedMs := float64(int(time.Since(start).Seconds()*10000+0.5)) / 10
 	writeJSON(w, http.StatusOK, map[string]any{

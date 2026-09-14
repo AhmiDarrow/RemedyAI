@@ -438,7 +438,6 @@ func zigSignalRunner(home string) SignalRunner {
 		if err := core.EnsureSigningKey(key); err != nil {
 			return 1, "", "", err
 		}
-		_ = core.WriteJailSetRoots(nil)
 		token, nowMS, err := core.IssueProcessSpawnToken(argv, nil, false, false)
 		if err != nil {
 			return 1, "", "", err
@@ -447,8 +446,12 @@ func zigSignalRunner(home string) SignalRunner {
 		if ms == 0 {
 			ms = 60_000
 		}
-		res, err := core.ExecCaptureAuthorized(argv, "", nil, false, token, "", "", false, nowMS, ms)
-		if err != nil {
+		var res core.ExecCaptureResult
+		if err := core.WithWriteJail(nil, func() error {
+			var err error
+			res, err = core.ExecCaptureAuthorized(argv, "", nil, false, token, "", "", false, nowMS, ms)
+			return err
+		}); err != nil {
 			return 1, "", "", err
 		}
 		stdout := string(res.Stdout)

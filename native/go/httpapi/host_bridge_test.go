@@ -42,6 +42,20 @@ func TestHostBridgeEnqueueClaimComplete(t *testing.T) {
 	}
 }
 
+func TestHostBridgeCompleteWithoutURLDoesNotClaimNavigation(t *testing.T) {
+	home := t.TempDir()
+	b := newHostBridge(home)
+	job := b.Enqueue("navigate", map[string]any{"url": "https://shop.example/checkout"}, "sess-1")
+	b.claimNext(nil, nil, "sess-1", 0)
+	done := b.complete(job.ID, true, map[string]any{"ok": true}, nil)
+	if done == nil || done.Status != "done" {
+		t.Fatalf("complete=%v", done)
+	}
+	if got := b.lastObservedURLFor("sess-1"); got != "" {
+		t.Fatalf("missing observed url must not fall back to the requested url, got %q", got)
+	}
+}
+
 func TestHostBridgeWaitTimeoutUnclaimed(t *testing.T) {
 	home := t.TempDir()
 	b := newHostBridge(home)
@@ -80,6 +94,27 @@ func TestHostBridgeCancel(t *testing.T) {
 	got := b.cancel(job.ID)
 	if got == nil || got.Status != "cancelled" {
 		t.Fatalf("cancel=%v", got)
+	}
+}
+
+func TestLivePageContextDoesNotBleedLabelsAcrossSessions(t *testing.T) {
+	home := t.TempDir()
+	b := newHostBridge(home)
+	a := b.Enqueue("snapshot", map[string]any{}, "sess-a")
+	if b.completeA11yPush(a.ID, []map[string]any{{"name": "Place order"}}) == nil {
+		t.Fatal("a11y a")
+	}
+	c := b.Enqueue("snapshot", map[string]any{}, "sess-b")
+	if b.completeA11yPush(c.ID, []map[string]any{{"name": "Search"}}) == nil {
+		t.Fatal("a11y b")
+	}
+	gotA := b.livePageContext("sess-a")
+	gotB := b.livePageContext("sess-b")
+	if !strings.Contains(gotA, "Place order") || strings.Contains(gotA, "Search") {
+		t.Fatalf("sess-a context=%q", gotA)
+	}
+	if !strings.Contains(gotB, "Search") || strings.Contains(gotB, "Place order") {
+		t.Fatalf("sess-b context=%q", gotB)
 	}
 }
 

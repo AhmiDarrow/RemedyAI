@@ -36,6 +36,24 @@ func TestLastResultsInputSurfacesExitCode(t *testing.T) {
 	}
 }
 
+func TestLastResultsInputTreatsIsErrorAsFailure(t *testing.T) {
+	rows := lastResultsInput([]cognition.ToolResult{{
+		Name:    "computer.click",
+		Output:  []byte(`{"ok":true}`),
+		IsError: true,
+	}})
+	if len(rows) != 1 || rows[0]["ok"] != false {
+		t.Fatalf("IsError must not look successful: %v", rows)
+	}
+	plain := lastResultsInput([]cognition.ToolResult{{
+		Name:   "computer.click",
+		Output: []byte(`{"ok":true}`),
+	}})
+	if len(plain) != 1 || plain[0]["ok"] != true {
+		t.Fatalf("a clean result must stay ok: %v", plain)
+	}
+}
+
 func TestCognitionTurnRunnerEmitsTextAndCompletes(t *testing.T) {
 	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
 		{{Text: "Hello ", Done: false}, {Text: "world", Done: true}},

@@ -221,7 +221,7 @@ func TestInvokeMutationApprovedFingerprintAllows(t *testing.T) {
 func TestInvokeMutationAutoAllowsPastPolicy(t *testing.T) {
 	s := newToolsAPIServer(t)
 	_ = s.approvals.SetMode("auto")
-	body := `{"id":"computer.click","input":{"x":1,"y":2}}`
+	body := `{"id":"computer.click","input":{"x":1,"y":2,"label":"Open settings"}}`
 	code, raw := doTools(t, s, http.MethodPost, "/api/tools/invoke", body)
 	if code == http.StatusForbidden {
 		var out map[string]any

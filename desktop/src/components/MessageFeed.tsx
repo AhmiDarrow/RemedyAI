@@ -361,6 +361,7 @@ const MessageBubble = memo(function MessageBubble({
   onRegenerate,
   userName,
   partnerName,
+  sessionId = null,
 }: {
   msg: ChatMessage
   partial?: string
@@ -374,6 +375,7 @@ const MessageBubble = memo(function MessageBubble({
   onRegenerate?: (id: string) => void
   userName?: string
   partnerName?: string
+  sessionId?: string | null
 }) {
   const isUser = msg.role === 'user'
   const isSystem = msg.role === 'system'
@@ -478,7 +480,9 @@ const MessageBubble = memo(function MessageBubble({
 
   const histSteps =
     !isUser && !isSystem && !isStreamingPartial && showsProcessTrace(toolProcessMode)
-      ? stepsFromMessageTools(msg.tool_calls || [], msg.tool_results || [])
+      ? stepsFromMessageTools(msg.tool_calls || [], msg.tool_results || [], {
+          requestId: msg.request_id,
+        })
       : []
 
   return (
@@ -628,6 +632,7 @@ const MessageBubble = memo(function MessageBubble({
             mode={toolProcessMode}
             steps={histSteps}
             defaultCollapsed={processDefaultCollapsed(toolProcessMode)}
+            sessionId={sessionId}
           />
         </div>
       )}
@@ -867,6 +872,7 @@ export function MessageFeed({
               onRegenerate={onRegenerate}
               userName={userName}
               partnerName={partnerName}
+              sessionId={sessionId}
             />
           </Fragment>
         )

@@ -17,14 +17,6 @@ import (
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
-// jailMu serializes core.WriteJailSetRoots with the spawn that depends on
-// it. The write jail is one process-global table inside remedy_core, so two
-// concurrent shell.exec calls could otherwise interleave as
-// set(rootsA) -> set(rootsB) -> spawn(A) and run A under B's roots. The lock
-// is held only across set-roots + spawn, never across the child's lifetime.
-// A per-call jail ABI is a later Zig change; until then this is the gate.
-var jailMu sync.Mutex
-
 // shellCaptureLimit bounds each captured stream so a runaway child cannot
 // exhaust the host. Excess bytes are dropped and noted on the stream.
 const shellCaptureLimit = 32 << 20
@@ -1060,6 +1052,7 @@ func executeComputerUIAFocused(_ context.Context, request Request) (Result, erro
 	if err != nil {
 		return Result{}, fmt.Errorf("uia_focused_element: invalid JSON: %w", err)
 	}
+	redactSecretElement(element)
 	out, err := json.Marshal(map[string]any{"available": true, "element": element})
 	return Result{Output: out}, err
 }
@@ -1101,6 +1094,7 @@ func executeComputerUIAReadText(_ context.Context, request Request) (Result, err
 	if err != nil {
 		return Result{}, fmt.Errorf("uia_read_window_text: invalid JSON: %w", err)
 	}
+	redactSecretWindowPayload(payload)
 	out, err := json.Marshal(map[string]any{
 		"available": true, "hwnd": hwnd, "payload": payload,
 	})
@@ -1137,6 +1131,9 @@ func executeComputerUIAAction(_ context.Context, request Request) (Result, error
 	}
 	if len(body.Text) > 8000 {
 		return Result{}, ErrInvalidInput
+	}
+	if action == "set_value" && vaultHandleIn(body.Text) {
+		return Result{}, fmt.Errorf("%w: vault handles cannot be set without a live site binding on this path", ErrInvalidInput)
 	}
 	hwnd := *body.HWND
 	raw, err := core.UIAElementActionJSON(hwnd, name, role, action, body.Text)
@@ -1219,6 +1216,9 @@ func executeComputerType(_ context.Context, request Request) (Result, error) {
 	}
 	if len(body.Text) > 8000 {
 		return Result{}, ErrInvalidInput
+	}
+	if vaultHandleIn(body.Text) {
+		return Result{}, fmt.Errorf("%w: vault handles cannot be typed into whatever is focused — name the field (computer.uia.action) so the site binding can run", ErrInvalidInput)
 	}
 	delay := uint32(5)
 	if body.PerCharDelayMS != nil {
@@ -1655,6 +1655,58 @@ func modelDeniedEnvKey(env map[string]string) string {
 	return ""
 }
 
+func vaultHandleIn(text string) bool {
+	low := strings.ToLower(text)
+	return strings.Contains(text, "{{") && strings.Contains(low, "vault:")
+}
+
+func secretFieldBlob(name, role, typ string) string {
+	return strings.ToLower(strings.TrimSpace(name + " " + role + " " + typ))
+}
+
+func looksSecretField(name, role, typ string) bool {
+	blob := secretFieldBlob(name, role, typ)
+	for _, k := range []string{"password", "passwd", "passcode", "secret", "otp", "cvv", "cvc", "pin", "ssn"} {
+		if strings.Contains(blob, k) {
+			return true
+		}
+	}
+	return typ == "password"
+}
+
+func redactSecretElement(el map[string]any) {
+	if el == nil {
+		return
+	}
+	name, _ := el["name"].(string)
+	role, _ := el["role"].(string)
+	typ, _ := el["type"].(string)
+	if !looksSecretField(name, role, typ) {
+		return
+	}
+	if s, ok := el["value"].(string); ok && s != "" {
+		el["value"] = "[redacted]"
+		el["value_redacted"] = true
+	}
+}
+
+func redactSecretWindowPayload(payload map[string]any) {
+	if payload == nil {
+		return
+	}
+	fields, ok := payload["fields"].([]any)
+	if !ok {
+		return
+	}
+	for _, raw := range fields {
+		el, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		redactSecretElement(el)
+	}
+}
+
 func executeShellExec(ctx context.Context, request Request) (Result, error) {
 	var body struct {
 		Argv           []string          `json:"argv"`
@@ -1796,8 +1848,8 @@ func spawnAuthorized(ctx context.Context, spec shellSpawnSpec) (core.PipedProces
 	return spawnShellUnderJail(roots, spec.argv, spec.cwd, spec.env, token, false, nowMS)
 }
 
-// spawnShellUnderJail installs the write roots and spawns under jailMu so no
-// other spawn can observe a foreign root set (see jailMu).
+// spawnShellUnderJail installs the write roots and spawns under the core
+// write-jail lock so no other spawn can observe a foreign root set.
 func spawnShellUnderJail(
 	roots, argv []string,
 	cwd string,
@@ -1806,12 +1858,16 @@ func spawnShellUnderJail(
 	ownerConfirmed bool,
 	nowMS uint64,
 ) (core.PipedProcess, error) {
-	jailMu.Lock()
-	defer jailMu.Unlock()
-	if err := core.WriteJailSetRoots(roots); err != nil {
-		return core.PipedProcess{}, fmt.Errorf("shell.exec write jail: %w", err)
+	var proc core.PipedProcess
+	err := core.WithWriteJail(roots, func() error {
+		var err error
+		proc, err = core.ProcessSpawnPipedAuthorized(argv, cwd, env, false, token, "", "", ownerConfirmed, nowMS)
+		return err
+	})
+	if err != nil {
+		return core.PipedProcess{}, err
 	}
-	return core.ProcessSpawnPipedAuthorized(argv, cwd, env, false, token, "", "", ownerConfirmed, nowMS)
+	return proc, nil
 }
 
 type shellCapture struct {
@@ -1945,7 +2001,7 @@ func decodeJSONArrayOrNull(raw []byte) ([]any, error) {
 	return controls, nil
 }
 
-func decodeJSONObjectOrNull(raw []byte) (any, error) {
+func decodeJSONObjectOrNull(raw []byte) (map[string]any, error) {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" || trimmed == "null" {
 		return nil, nil

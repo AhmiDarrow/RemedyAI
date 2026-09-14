@@ -332,7 +332,7 @@ func (q *approvalQueue) Resolve(id string, approve bool, scope string) *pendingA
 
 // resolve applies approve/deny and reports whether a blocked turn was waiting.
 func (q *approvalQueue) resolve(id string, approve bool, scope string) (*pendingApproval, bool) {
-	if scope != "session" && scope != "always" {
+	if scope != "session" && scope != "always" && scope != "once" {
 		scope = "session"
 	}
 	q.mu.Lock()
@@ -380,6 +380,9 @@ func (q *approvalQueue) resolve(id string, approve bool, scope string) (*pending
 					break
 				}
 			}
+		case scope == "once":
+			// Approve this waiter only. Do not stamp a session fingerprint —
+			// the next identical call asks again.
 		default:
 			q.addSessionFPLocked(sid, item.Fingerprint)
 		}

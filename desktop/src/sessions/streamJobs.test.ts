@@ -82,6 +82,16 @@ describe('streamJobs', () => {
     expect(vi.mocked(abortSession).mock.calls.at(-1)?.[2]).toBeUndefined()
   })
 
+  it('stopStreamJob does not complete a job the server ignored', async () => {
+    const { abortSession } = await import('../api/sessions')
+    vi.mocked(abortSession).mockImplementationOnce(async () => ({ status: 'ignored', notified: 0 }))
+    const c = new AbortController()
+    registerStreamJob('s-ignored', c)
+    await stopStreamJob('s-ignored')
+    expect(c.signal.aborted).toBe(false)
+    expect(getStreamJob('s-ignored')?.status).toBe('running')
+  })
+
   it('stopStreamJob sends the claim epoch from event start', async () => {
     const { abortSession } = await import('../api/sessions')
     vi.mocked(abortSession).mockClear()

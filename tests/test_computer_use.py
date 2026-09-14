@@ -1448,11 +1448,12 @@ def test_desktop_screenshot_roundtrip(tmp_path: Path):
 def test_computer_guidance_present():
     from remedy.core.computer.guidance import COMPUTER_USE_SYSTEM_ADDENDUM
 
-    assert "computer_screenshot" in COMPUTER_USE_SYSTEM_ADDENDUM
-    assert "computer_snapshot" in COMPUTER_USE_SYSTEM_ADDENDUM
-    assert "computer_act" in COMPUTER_USE_SYSTEM_ADDENDUM
-    assert "computer_select" in COMPUTER_USE_SYSTEM_ADDENDUM
-    assert "computer_fill" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "computer.screenshot" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "computer.snapshot" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "computer.click" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "computer.navigate" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "computer.uia.action" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "computer_act" not in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "target" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "play" in COMPUTER_USE_SYSTEM_ADDENDUM.lower()
     assert "target=desktop" in COMPUTER_USE_SYSTEM_ADDENDUM

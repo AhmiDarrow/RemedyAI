@@ -135,7 +135,9 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 	if err != nil || sess.ID == "" {
 		return err
 	}
+	var history []map[string]any
 	if s.sessions != nil {
+		history = s.turnHistory(sess.ID)
 		if _, err := s.sessions.AddMessage(sess.ID, "user", msg, nil, nil); err != nil {
 			return err
 		}
@@ -185,6 +187,7 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 		Provider:    sess.LLMProvider,
 		ProjectPath: projectPath,
 		Origin:      messengerOrigin(string(ev.Channel), senderID),
+		History:     history,
 	}, func(token string) error {
 		if text, ok := modelTextToken(token); ok {
 			token = text
@@ -206,15 +209,15 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 	})
 	text := strings.TrimSpace(reply.String())
 	if turnErr != nil && text == "" {
+		text = redactStreamError(turnErr)
 		log.Printf("messenger turn error: %v", turnErr)
-		return nil
 	}
 	hasTools := len(collectedToolCalls) > 0 || len(collectedToolResults) > 0
 	if text == "" {
 		if hasTools {
 			text = "*(Used tools — see process.)*"
 		} else {
-			text = "Processed."
+			text = "I finished that step without a reply I can show here. Send continue if you want me to keep going."
 		}
 	}
 	if s.sessions != nil {

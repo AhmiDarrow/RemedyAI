@@ -112,7 +112,8 @@ def test_computer_playbook_loads_only_when_needed():
         runtime=rt,
         message="goto walmart and buy milk",
     )
-    assert "computer_act" in shop
+    assert "computer.click" in shop or "computer.navigate" in shop
+    assert "computer_act" not in shop
     assert "Add to cart" in shop or "walmart" in shop.lower()
 
 
