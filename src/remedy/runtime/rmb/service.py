@@ -591,6 +591,22 @@ def ensure_rmb_watchdog(
     logger.info("RMB watchdog started (interval=%ss)", _WATCHDOG_INTERVAL_S)
 
 
+def stop_rmb_watchdog(*, join_s: float = 1.0) -> None:
+    """Park the healer thread so it cannot latch stay-off from a stale home.
+
+    Tests must call this: a leftover daemon re-reads ``user_stopped`` from the
+    home it was started with and sets the process-wide bit. Windows often keeps
+    that temp home alive while the thread still holds it.
+    """
+    global _watchdog_thread, _watchdog_home
+    _watchdog_stop.set()
+    thread = _watchdog_thread
+    if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+        thread.join(timeout=max(0.05, float(join_s)))
+    _watchdog_thread = None
+    _watchdog_home = None
+
+
 def _kill_listeners_on_port(port: int) -> int:
     """Kill any process listening on *port* (Windows netstat / lsof). Returns kill attempts."""
     if port <= 0:
@@ -2777,9 +2793,9 @@ def ensure_rmb_server(
     force: bool = False,
 ) -> dict[str, Any]:
     """Start if enabled. Does not start when disabled unless force=True."""
-    ensure_rmb_watchdog(home_dir, force=True)
     state = merge_state(load_rmb_json(home_dir))
     if is_running(home_dir, force=True, require_http=True):
+        ensure_rmb_watchdog(home_dir, force=True)
         mark_used()
         with contextlib.suppress(Exception):
             adopt_existing_host(home_dir)
@@ -2788,6 +2804,7 @@ def ensure_rmb_server(
     with contextlib.suppress(Exception):
         ad = adopt_existing_host(home_dir)
         if ad.get("ok") and is_running(home_dir, force=True, require_http=True):
+            ensure_rmb_watchdog(home_dir, force=True)
             return {
                 "ok": True,
                 "already_running": True,

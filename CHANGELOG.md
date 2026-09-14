@@ -42,6 +42,8 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - `page_context` is filled by the host and is not advertised to the model.
 - Approve-once does not stamp a standing grant. Vault placeholders are refused
   on type / UIA set-value; secret field values are not kept as live labels.
+- Stopping the local chat host to swap models does not leave it stuck off.
+  A refused start after you hit Stop no longer arms the background healer.
 
 ## [0.63.1] - 2026-09-10
 

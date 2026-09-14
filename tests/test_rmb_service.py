@@ -97,6 +97,9 @@ def rmb_guard(monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setattr(svc, "ensure_rmb_watchdog", lambda *a, **k: None)
     # Never register an atexit hook that would stop a host at interpreter exit.
     monkeypatch.setattr(svc, "_atexit_registered", True)
+    # A watchdog started by an earlier file (ensure after user-stop used to
+    # arm one) re-latches _user_stopped from that home. Park it first.
+    svc.stop_rmb_watchdog(join_s=0.2)
 
     svc._proc = None
     svc._user_stopped = False
@@ -1107,6 +1110,30 @@ def test_ensure_refuses_after_a_user_stop_unless_forced(
         svc, "start_rmb_server", lambda **k: pytest.fail("must not start after user stop")
     )
     assert svc.ensure_rmb_server(str(tmp_path)) == {"ok": False, "error": "RMB stopped by user"}
+
+
+@pytest.mark.parametrize(
+    "seed, err",
+    [
+        ({"enabled": True, "user_stopped": True}, "RMB stopped by user"),
+        ({"enabled": False, "user_stopped": False}, "RMB not enabled"),
+    ],
+)
+def test_ensure_does_not_arm_the_watchdog_when_it_refuses_to_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seed: dict[str, Any], err: str
+) -> None:
+    """A refused ensure used to start the healer, which then latched stay-off
+    from that temp home into later tests (Windows CI flake)."""
+    _seed(tmp_path, port=_closed_port(), **seed)
+    armed: list[object] = []
+    monkeypatch.setattr(svc, "is_running", lambda *a, **k: False)
+    monkeypatch.setattr(svc, "adopt_existing_host", lambda home=None: {"ok": False})
+    monkeypatch.setattr(svc, "ensure_rmb_watchdog", lambda *a, **k: armed.append(1))
+    monkeypatch.setattr(
+        svc, "start_rmb_server", lambda **k: pytest.fail("must not start when ensure refuses")
+    )
+    assert svc.ensure_rmb_server(str(tmp_path)) == {"ok": False, "error": err}
+    assert armed == []
 
 
 def test_waking_in_the_background_is_refused_after_a_user_stop(

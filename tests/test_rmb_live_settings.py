@@ -225,3 +225,6 @@ def test_start_rmb_honors_persisted_user_stopped(tmp_path, monkeypatch):
     assert ensured.get("ok") is False
     assert "stopped" in str(ensured.get("error") or "").lower()
     assert load_rmb_json(home).get("user_stopped") is True
+    thread = getattr(svc, "_watchdog_thread", None)
+    assert thread is None or not thread.is_alive()
+    svc.stop_rmb_watchdog(join_s=0.2)
