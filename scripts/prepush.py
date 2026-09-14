@@ -114,6 +114,7 @@ def native_core_library_path() -> Path:
 WSL_PYTEST = "__wsl_pytest__"
 WSL_ZIG_BUILD = "__wsl_zig_build__"
 WSL_GO_TEST = "__wsl_go_test__"
+WSL_CARGO = "__wsl_cargo__"
 REQUIRE_NATIVE_CORE = "__require_native_core__"
 NATIVE_CORE_ENV = {"REMEDY_NATIVE_CORE_LIB": str(native_core_library_path())}
 WSL_ZIG_PREFIX = "/tmp/remedy-prepush-zig"
@@ -145,6 +146,11 @@ RUST_ENV = {
     # Mirrors ci.yml rust-desktop: compile/test Rust alone, warnings are errors.
     "TAURI_CONFIG": '{"bundle":{"active":false,"externalBin":[],"resources":null}}',
     "RUSTFLAGS": "-D warnings",
+}
+RUST_WSL_ENV = {
+    **RUST_ENV,
+    # TAURI_CONFIG is JSON with double quotes; do not embed it in bash -lc.
+    "WSLENV": "RUSTFLAGS/u:TAURI_CONFIG/u",
 }
 
 CHECKS = Lane(
@@ -181,12 +187,14 @@ PYTHON = Lane(
 
 LINUX = Lane(
     "linux",
-    "Linux CI surface under WSL (Go native + pytest)",
+    "Linux CI surface under WSL (Go native + pytest + cargo)",
     (
         Step("zig build (linux)", WSL_ZIG_BUILD),
         # native-core (ubuntu) — Windows go test alone misses filepath.ToSlash traps.
         Step("go test (linux)", WSL_GO_TEST),
         Step("pytest (linux)", WSL_PYTEST),
+        # After pytest so WSL cargo does not share DrvFS with Windows go test.
+        Step("cargo test+check (linux)", WSL_CARGO, env=RUST_WSL_ENV),
     ),
 )
 
@@ -364,6 +372,21 @@ def _wsl_has_go() -> bool:
     return proc.returncode == 0 and bool(proc.stdout.strip())
 
 
+@functools.cache
+def _wsl_has_cargo() -> bool:
+    """Whether a login shell inside WSL can find ``cargo``."""
+    if not IS_WINDOWS or shutil.which("wsl") is None:
+        return False
+    proc = subprocess.run(
+        ["wsl", "-e", "bash", "-lc", "command -v cargo"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return proc.returncode == 0 and bool(proc.stdout.strip())
+
+
 def _wsl_zig_abi_assert() -> str:
     """Shell snippet: load the WSL-installed .so and refuse a stale ABI.
 
@@ -470,6 +493,27 @@ def _wsl_go_test_command() -> str | None:
     return f'wsl -e bash -lc "{inner}"'
 
 
+def _wsl_cargo_command() -> str | None:
+    """``rust-desktop`` Linux ``cargo test/check --locked``, under WSL.
+
+    Windows cargo does not type-check ``cfg(not(target_os = "windows"))``
+    unused bindings; ubuntu-22.04 CI does, with ``RUSTFLAGS=-D warnings``.
+    Target dir is ``/tmp`` so this does not share ``desktop/src-tauri/target``
+    with the Windows cargo steps. Returns None on a Linux host; "" without WSL.
+    """
+    if not IS_WINDOWS:
+        return None
+    if shutil.which("wsl") is None:
+        return ""
+    tauri = _wsl_path(ROOT / "desktop" / "src-tauri")
+    inner = (
+        f"cd {tauri} && "
+        "export CARGO_TARGET_DIR=/tmp/remedy-prepush-cargo && "
+        "cargo test --locked && cargo check --locked"
+    )
+    return f'wsl -e bash -lc "{inner}"'
+
+
 # --------------------------------------------------------------------------- #
 # Running the matrix
 # --------------------------------------------------------------------------- #
@@ -506,13 +550,15 @@ def _run_lane(lane: Lane, scratch_home: Path, log_dir: Path) -> LaneResult:
                     return LaneResult(lane, False, time.monotonic() - started, step.name, log)
                 fh.write(f"native core: {library}\n")
                 continue
-            if command in (WSL_PYTEST, WSL_ZIG_BUILD, WSL_GO_TEST):
+            if command in (WSL_PYTEST, WSL_ZIG_BUILD, WSL_GO_TEST, WSL_CARGO):
                 if command == WSL_PYTEST:
                     resolved = _wsl_pytest_command()
                 elif command == WSL_ZIG_BUILD:
                     resolved = _wsl_zig_build_command()
-                else:
+                elif command == WSL_GO_TEST:
                     resolved = _wsl_go_test_command()
+                else:
+                    resolved = _wsl_cargo_command()
                 if resolved is None:
                     fh.write("skipped: host is already Linux\n")
                     continue
@@ -532,6 +578,14 @@ def _run_lane(lane: Lane, scratch_home: Path, log_dir: Path) -> LaneResult:
                     fh.write(
                         "go is not installed inside WSL; refusing to skip Linux go test "
                         "(native-core ubuntu CI would catch filepath traps Windows misses).\n"
+                    )
+                    return LaneResult(
+                        lane, False, time.monotonic() - started, step.name, log
+                    )
+                if command == WSL_CARGO and not _wsl_has_cargo():
+                    fh.write(
+                        "cargo is not installed inside WSL; refusing to skip Linux cargo "
+                        "(ubuntu rust-desktop -D warnings catches cfg(not windows) unused).\n"
                     )
                     return LaneResult(
                         lane, False, time.monotonic() - started, step.name, log
@@ -871,6 +925,13 @@ def print_matrix() -> None:
                     cmd = "(zig not installed in WSL: loader reports not-installed)"
                 else:
                     cmd = _wsl_zig_build_command() or ""
+            elif cmd == WSL_CARGO:
+                if not IS_WINDOWS:
+                    cmd = "(host is Linux: covered by cargo test/check)"
+                elif not _wsl_has_cargo():
+                    cmd = "(cargo not installed in WSL: lane fails)"
+                else:
+                    cmd = _wsl_cargo_command() or ""
             elif cmd == REQUIRE_NATIVE_CORE:
                 cmd = f"require {native_core_library_path()}"
             env = " ".join(f"{k}={v}" for k, v in step.env.items() if k == "REMEDY_NATIVE_CORE_LIB")
