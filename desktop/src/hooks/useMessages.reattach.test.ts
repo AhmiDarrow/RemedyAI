@@ -27,6 +27,10 @@ describe('reattach on load', () => {
     expect(hook).toContain("kind: 'attach'")
     expect(hook).toContain('runTurnStream(sid, {')
     expect(hook).toContain('attempt: opts?.attempt ?? 0')
+    expect(hook).toContain('const after = Math.max(0, opts?.after ?? 0)')
+    expect(hook).toContain('if (after === 0)')
+    expect(hook).toContain('after: liveAttachAfter(targetId)')
+    expect(hook).toContain('after: liveAttachAfter(sessionId)')
     expect(hook).toContain('attachTurn(targetId, run.requestId, handlers, { after: run.after })')
   })
 

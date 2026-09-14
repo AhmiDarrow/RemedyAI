@@ -1454,15 +1454,19 @@ def test_computer_guidance_present():
     assert "computer.navigate" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "computer.uia.action" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "computer_act" not in COMPUTER_USE_SYSTEM_ADDENDUM
-    assert "target" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "play" in COMPUTER_USE_SYSTEM_ADDENDUM.lower()
-    assert "target=desktop" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "plan_step_status" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "couldnt_verify" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "Compose / social post" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "View in Reddit App" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "OCR" in COMPUTER_USE_SYSTEM_ADDENDUM
-    assert "ref=oN" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "required `x`,`y`" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "expect_url" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "computer.click text=" not in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "ref=eN" not in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "ref=oN" not in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "| `target` |" not in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "additionalProperties" in COMPUTER_USE_SYSTEM_ADDENDUM
     from remedy.core.computer.guidance import needs_computer_use_guidance
 
     assert needs_computer_use_guidance("goto gmail and sign in")

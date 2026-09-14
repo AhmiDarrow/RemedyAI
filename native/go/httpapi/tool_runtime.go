@@ -245,7 +245,7 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 		if !p.ForceAsk && (mode == "auto" || mode == "full") {
 			return cognition.Allow
 		}
-		if p.Approvals != nil && p.Approvals.IsApproved(call.Name, toolCommandPreview(call), p.SessionID) {
+		if p.Approvals != nil && p.Approvals.IsApproved(call.Name, toolCommandPreview(call), p.SessionID, !p.ForceAsk) {
 			return cognition.Allow
 		}
 		return cognition.Ask
@@ -335,7 +335,8 @@ func bindToolInput(call cognition.ToolCall, b toolBinding) cognition.ToolCall {
 
 	isShell := name == "bash" || name == "shell.exec" || name == "shell_exec"
 	_, isSessionTool := sessionToolIDs[name]
-	isRail := name == "computer.navigate" || name == "computer_navigate"
+	isRail := name == "computer.navigate" || name == "computer_navigate" ||
+		name == "computer.snapshot" || name == "computer_snapshot"
 	isComputer := strings.HasPrefix(name, "computer.") || strings.HasPrefix(name, "computer_")
 	// shell.exec has no session in its schema; bash needs one for background
 	// jobs, and the session tools are named for it. Rail tools take the same
@@ -478,9 +479,9 @@ var (
 		`i.?m not a robot|press.?and.?hold|press.?&.?hold|` +
 		`human.?check|verify you are human` +
 		`)`)
-	vaultHandleRe    = regexp.MustCompile(`\{\{\s*vault:`)
-	cardCandidateRe  = regexp.MustCompile(`(?:^|[^\d])((?:\d[ -]?){13,19})(?:[^\d]|$)`)
-	passwordFieldRe  = regexp.MustCompile(`(?is)\b(` +
+	vaultHandleRe   = regexp.MustCompile(`\{\{\s*vault:`)
+	cardCandidateRe = regexp.MustCompile(`(?:^|[^\d])((?:\d[ -]?){13,19})(?:[^\d]|$)`)
+	passwordFieldRe = regexp.MustCompile(`(?is)\b(` +
 		`password|passwd|passphrase|passcode|pin\b|otp|one[ -]?time|` +
 		`2fa|mfa|totp|cvv|cvc|security\s+code|ssn|social\s+security` +
 		`)\b`)

@@ -204,7 +204,7 @@ func RegisterZigHostTools(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:           "computer.snapshot",
 		Version:      1,
-		Description:  "Accessibility control snapshot via Zig UIA (Windows) or AT-SPI (Linux)",
+		Description:  "Accessibility control snapshot: Browser rail when Desktop is connected and hwnd is unset; otherwise Zig UIA (Windows) or AT-SPI (Linux)",
 		Runtime:      RuntimeZig,
 		Risk:         RiskReadOnly,
 		Capabilities: []string{"computer.read"},
@@ -214,7 +214,9 @@ func RegisterZigHostTools(registry *Registry) error {
 				"hwnd":{"type":"integer","minimum":0},
 				"max_elements":{"type":"integer","minimum":1,"maximum":120},
 				"preferred_only":{"type":"boolean"},
-				"limit":{"type":"integer","minimum":1,"maximum":200}
+				"limit":{"type":"integer","minimum":1,"maximum":200},
+				"session_id":{"type":"string"},
+				"timeout_s":{"type":"number","minimum":0.05,"maximum":120}
 			},
 			"additionalProperties":false
 		}`),
@@ -222,7 +224,7 @@ func RegisterZigHostTools(registry *Registry) error {
 			"type":"object",
 			"required":["source","available","controls","total"],
 			"properties":{
-				"source":{"type":"string","enum":["uia","atspi","none"]},
+				"source":{"type":"string","enum":["uia","atspi","browser","none"]},
 				"available":{"type":"boolean"},
 				"controls":{"type":"array"},
 				"total":{"type":"integer","minimum":0}

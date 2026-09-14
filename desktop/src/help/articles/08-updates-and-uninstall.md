@@ -31,8 +31,9 @@ Logo menu / status bar **WebUI** / Settings → **Switch to WebUI**:
 the tray (or app menu) stops the server — the WebUI will stop working.
 
 **Linux / WSLg ✕** minimizes to the taskbar (there is no tray). Quit from the
-app menu or the quit dialog. In-app Update is Windows-only; Linux installs
-come from the GitHub Release `.deb` or AppImage on the same tag.
+app menu or the quit dialog. In-app Update on Linux replaces an **AppImage**
+install (minisign-verified). A `.deb` install cannot replace itself without
+sudo — the update screen gives you the GitHub download URL instead.
 
 ## Install an update
 

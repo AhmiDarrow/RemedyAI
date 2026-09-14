@@ -828,9 +828,10 @@ class FakeHostConpty:
         owner_confirmed: bool = False,
         now_ms: int | None = None,
         write_roots: Sequence[str] | None = None,
+        replace_env: bool = False,
     ) -> tuple[int, int]:
         """Record an authorized process spawn; tests that need a live child patch this."""
-        _ = (cwd, env, subject, scope, owner_confirmed, now_ms, write_roots)
+        _ = (cwd, env, subject, scope, owner_confirmed, now_ms, write_roots, replace_env)
         self.calls.append(
             (
                 'process_spawn_authorized',
@@ -854,9 +855,10 @@ class FakeHostConpty:
         owner_confirmed: bool = False,
         now_ms: int | None = None,
         write_roots: Sequence[str] | None = None,
+        replace_env: bool = False,
     ) -> Any:
         """Record authorized piped spawn; tests that need live pipes patch this."""
-        _ = (cwd, env, subject, scope, owner_confirmed, now_ms, write_roots)
+        _ = (cwd, env, subject, scope, owner_confirmed, now_ms, write_roots, replace_env)
         self.calls.append(
             (
                 'process_spawn_piped_authorized',
@@ -881,6 +883,7 @@ class FakeHostConpty:
         now_ms: int | None = None,
         timeout_ms: int = 60_000,
         write_roots: Sequence[str] | None = None,
+        replace_env: bool = False,
     ) -> Any:
         """Record authorized exec-capture; tests that need output patch this."""
         from remedy.core.computer.host_binding import (
@@ -924,7 +927,9 @@ class FakeHostConpty:
         owner_confirmed: bool = False,
         now_ms: int | None = None,
         write_roots: Sequence[str] | None = None,
+        replace_env: bool = False,
     ) -> tuple[int, int]:
+        _ = replace_env
         self.calls.append(
             (
                 'conpty_spawn_authorized',

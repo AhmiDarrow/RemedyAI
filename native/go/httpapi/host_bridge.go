@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	jobTextMax = 4000
+	jobTextMax       = 4000
 	hostAliveMaxAgeS = 15.0
 )
 
@@ -85,8 +85,6 @@ type HostBridge struct {
 	sessionStreaming         func(string) bool
 	lastObservedURL          string
 	lastObservedURLBySession map[string]string
-	lastNavigateURL          string
-	lastNavigateURLBySession map[string]string
 }
 
 func newHostBridge(homeDir string) *HostBridge {
@@ -102,7 +100,6 @@ func newHostBridge(homeDir string) *HostBridge {
 		wake:                     make(chan struct{}, 1),
 		browserScale:             1,
 		lastObservedURLBySession: map[string]string{},
-		lastNavigateURLBySession: map[string]string{},
 		lastElementsBySession:    map[string][]map[string]any{},
 	}
 }
@@ -282,35 +279,6 @@ func (b *HostBridge) lastObservedURLFor(sessionID string) string {
 		}
 	}
 	return b.lastObservedURL
-}
-
-func (b *HostBridge) markNavigated(url string, optimistic bool, sessionID string) {
-	_ = optimistic
-	u := strings.TrimSpace(url)
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if u != "" {
-		b.lastNavigateURL = u
-	}
-	if sid := strings.TrimSpace(sessionID); sid != "" {
-		if b.lastNavigateURLBySession == nil {
-			b.lastNavigateURLBySession = map[string]string{}
-		}
-		if u != "" {
-			b.lastNavigateURLBySession[sid] = u
-		}
-	}
-}
-
-func (b *HostBridge) lastNavigateURLFor(sessionID string) string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if sid := strings.TrimSpace(sessionID); sid != "" {
-		if u := strings.TrimSpace(b.lastNavigateURLBySession[sid]); u != "" {
-			return u
-		}
-	}
-	return b.lastNavigateURL
 }
 
 // Enqueue writes a pending computer job and optionally publishes open_browser.
@@ -889,15 +857,9 @@ func (b *HostBridge) livePageContext(sessionID string) string {
 	url := ""
 	if sid != "" {
 		url = strings.TrimSpace(b.lastObservedURLBySession[sid])
-		if url == "" {
-			url = strings.TrimSpace(b.lastNavigateURLBySession[sid])
-		}
 	}
 	if url == "" && (sid == "" || sid == strings.TrimSpace(b.focusedSession)) {
 		url = strings.TrimSpace(b.lastObservedURL)
-		if url == "" {
-			url = strings.TrimSpace(b.lastNavigateURL)
-		}
 	}
 	bits := make([]string, 0, 8)
 	if url != "" {
@@ -915,7 +877,7 @@ func (b *HostBridge) livePageContext(sessionID string) string {
 		if i >= 40 {
 			break
 		}
-		for _, k := range []string{"name", "text", "label", "value"} {
+		for _, k := range []string{"name", "text", "label"} {
 			if v := strings.TrimSpace(strOr(el[k], "")); v != "" && v != "[filled]" && v != "[redacted]" {
 				bits = append(bits, v)
 			}
@@ -1212,4 +1174,3 @@ func strOr(v any, def string) string {
 	}
 	return def
 }
-

@@ -32,6 +32,7 @@ import {
   markLiveTurn,
   reattachStreamJob,
   getJobLastSeq,
+  liveAttachAfter,
   registerStreamJob,
   setJobClaimEpoch,
   setJobLastSeq,
@@ -134,7 +135,7 @@ export function useMessages(sessionId: string | null) {
       sid: string,
       requestId: string,
       model?: string,
-      opts?: { force?: boolean; attempt?: number },
+      opts?: { force?: boolean; attempt?: number; after?: number },
     ) => void) | null
   >(null)
   const streamingRef = useRef(false)
@@ -467,7 +468,9 @@ export function useMessages(sessionId: string | null) {
             localRequestId: running ? getJobRequestId(sessionId) : undefined,
           })
           if (plan.kind === 'attach') {
-            attachToTurnRef.current?.(sessionId, plan.requestId, sess.model || undefined)
+            attachToTurnRef.current?.(sessionId, plan.requestId, sess.model || undefined, {
+              after: liveAttachAfter(sessionId),
+            })
           } else {
             setRemoteBusy(plan.kind === 'working')
           }
@@ -632,6 +635,7 @@ export function useMessages(sessionId: string | null) {
               if (plan.kind === 'attach') {
                 attachToTurnRef.current?.(targetId, plan.requestId, model, {
                   force: true,
+                  after: liveAttachAfter(targetId),
                 })
               } else {
                 setRemoteBusy(plan.kind === 'working')
@@ -782,7 +786,9 @@ export function useMessages(sessionId: string | null) {
                     localJobRunning: getStreamJob(targetId)?.status === 'running',
                   })
                   if (plan.kind === 'attach') {
-                    attachToTurnRef.current?.(targetId, plan.requestId, model)
+                    attachToTurnRef.current?.(targetId, plan.requestId, model, {
+                      after: liveAttachAfter(targetId),
+                    })
                   } else {
                     setRemoteBusy(plan.kind === 'working')
                   }
@@ -933,6 +939,7 @@ export function useMessages(sessionId: string | null) {
                       attachToTurnRef.current?.(targetId, rid, model, {
                         force: true,
                         attempt: attempt + 1,
+                        after: liveAttachAfter(targetId),
                       })
                     }, 400 * (attempt + 1))
                     return
@@ -1097,11 +1104,12 @@ export function useMessages(sessionId: string | null) {
       sid: string,
       requestId: string,
       model?: string,
-      opts?: { force?: boolean; attempt?: number },
+      opts?: { force?: boolean; attempt?: number; after?: number },
     ) => {
       // Idempotent: a second attach for a turn this webview already paints
       // would replay its frames into a fresh buffer and duplicate the trail.
       if (!opts?.force && isFollowingTurn(sid, requestId)) return
+      const after = Math.max(0, opts?.after ?? 0)
       setRemoteBusy(false)
       if (sessionIdRef.current === sid) {
         streamingRef.current = true
@@ -1109,21 +1117,23 @@ export function useMessages(sessionId: string | null) {
         setStreaming(true)
         setStreamStalled(false)
         setStallSeconds(0)
-        // The replay is the whole turn — start from a clean paint so nothing
-        // from a previous turn is mistaken for this one's work.
-        clearStreamAccum()
-        setPartialText('')
-        setPartialThinking('')
-        setActiveTools([])
-        setProcessSteps([])
-        processStepsRef.current = []
-        setTaskProgress(null)
+        // Replay from seq 0 is the whole turn — start from a clean paint.
+        // A watermarked retry must keep the tokens already on screen.
+        if (after === 0) {
+          clearStreamAccum()
+          setPartialText('')
+          setPartialThinking('')
+          setActiveTools([])
+          setProcessSteps([])
+          processStepsRef.current = []
+          setTaskProgress(null)
+        }
         lastStreamActivityRef.current = Date.now()
       }
       runTurnStream(sid, {
         kind: 'attach',
         requestId,
-        after: 0,
+        after,
         model,
         attempt: opts?.attempt ?? 0,
       })

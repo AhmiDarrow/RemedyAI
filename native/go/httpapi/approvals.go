@@ -38,7 +38,7 @@ type pendingApproval struct {
 	Status          string  `json:"status"`
 	Fingerprint     string  `json:"-"`
 	Sensitive       bool    `json:"sensitive"`
-	Origin          string  `json:"-"`
+	Origin          string  `json:"origin,omitempty"`
 	SummaryOverride string  `json:"-"`
 	// Slots counts the tool calls this item covers. Identical calls in one
 	// batch share one banner item; a sensitive approval then grants exactly
@@ -234,13 +234,17 @@ func (q *approvalQueue) addSessionFPLocked(sessionID, fp string) {
 // tool aimed at "Place order" is an owner moment even when the caller only
 // knows it as a mutation.
 func (q *approvalQueue) Enqueue(toolName, command, reason string, sessionID *string, summary string) *pendingApproval {
-	item := q.enqueueItem(toolName, command, reason, sessionID, summary)
+	return q.EnqueueOrigin(toolName, command, reason, sessionID, summary, "")
+}
+
+func (q *approvalQueue) EnqueueOrigin(toolName, command, reason string, sessionID *string, summary, origin string) *pendingApproval {
+	item := q.enqueueItem(toolName, command, reason, sessionID, summary, origin)
 	// Outside the lock: the observer writes to the turn log.
 	q.notify(item, "asked")
 	return item
 }
 
-func (q *approvalQueue) enqueueItem(toolName, command, reason string, sessionID *string, summary string) *pendingApproval {
+func (q *approvalQueue) enqueueItem(toolName, command, reason string, sessionID *string, summary, origin string) *pendingApproval {
 	fp := approvalFingerprint(toolName, command)
 	sensitive := strings.HasPrefix(reason, sensitivePrefix) ||
 		approvalIsSensitive(cognition.ToolCall{Name: toolName, Input: []byte(command)})
@@ -266,6 +270,7 @@ func (q *approvalQueue) enqueueItem(toolName, command, reason string, sessionID 
 		Fingerprint:     fp,
 		Sensitive:       sensitive,
 		SummaryOverride: strings.TrimSpace(summary),
+		Origin:          strings.TrimSpace(origin),
 		Slots:           1,
 	}
 	q.items[item.ID] = item
@@ -354,10 +359,12 @@ func (q *approvalQueue) resolve(id string, approve bool, scope string) (*pending
 	if approve {
 		item.Status = "approved"
 		sid := sessionKey(item.SessionID)
+		untrusted := strings.TrimSpace(item.Origin) != "" && !OriginIsOwner(item.Origin)
 		switch {
-		case item.Sensitive:
-			// One go-ahead is not standing consent: grant exactly the covered
-			// calls, keyed by this approval, and let it lapse if unused.
+		case item.Sensitive || untrusted:
+			// One go-ahead is not standing consent. Hive / messenger Asks
+			// never inherit Always / This session fingerprints from the
+			// parent chat — a just-approved retry consumes this one-shot.
 			if q.oneShot[sid] == nil {
 				q.oneShot[sid] = map[string]*oneShotGrant{}
 			}
@@ -531,7 +538,9 @@ func (q *approvalQueue) Get(id string) *pendingApproval {
 // IsApproved reports whether this tool+command fingerprint was already
 // approved for the session (or always). Used so Ask → Approve → retry works.
 // A one-shot grant also satisfies it (consumed, unbound to a call id).
-func (q *approvalQueue) IsApproved(toolName, command, sessionID string) bool {
+// honorStanding is false for ForceAsk origins: parent Always / This session
+// grants must not authorize an untrusted forager.
+func (q *approvalQueue) IsApproved(toolName, command, sessionID string, honorStanding bool) bool {
 	if q == nil {
 		return false
 	}
@@ -542,12 +551,14 @@ func (q *approvalQueue) IsApproved(toolName, command, sessionID string) bool {
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if _, ok := q.approvedFPs[fp]; ok {
-		return true
-	}
-	if set, ok := q.sessionFPs[sid]; ok {
-		if _, ok := set[fp]; ok {
+	if honorStanding {
+		if _, ok := q.approvedFPs[fp]; ok {
 			return true
+		}
+		if set, ok := q.sessionFPs[sid]; ok {
+			if _, ok := set[fp]; ok {
+				return true
+			}
 		}
 	}
 	return q.consumeOneShotLocked(sid, fp, "")
@@ -671,6 +682,8 @@ func (q *approvalQueue) ToPublic(item *pendingApproval) map[string]any {
 		"sensitive":          item.Sensitive,
 		"soft_risk":          soft,
 		"session_id":         sid,
+		"origin":             item.Origin,
+		"blocking":           q.HasWaiter(item.ID),
 		"status":             item.Status,
 		"created_at":         item.CreatedAt,
 		"approval_mode_hint": hint,

@@ -352,6 +352,7 @@ def process_spawn_authorized(
     owner_confirmed: bool = False,
     now_ms: int | None = None,
     write_roots: Sequence[str] | None = None,
+    replace_env: bool = False,
 ) -> tuple[int, int]:
     """Authorized hidden spawn. *argv[0]* must be absolute. No unsigned fallback.
 
@@ -367,7 +368,7 @@ def process_spawn_authorized(
         library = _lib()
         argv_raw = _utf8(json.dumps([str(a) for a in argv]))
         cwd_raw = _utf8(str(cwd)) if cwd else b""
-        env_raw, _flag = _spawn_env_payload(env, False)
+        env_raw, _flag = _spawn_env_payload(env, replace_env)
         subject_raw = _utf8(subject)
         scope_raw = _utf8(scope)
         token_raw = bytes(token)
@@ -422,6 +423,7 @@ def process_spawn_piped_authorized(
     owner_confirmed: bool = False,
     now_ms: int | None = None,
     write_roots: Sequence[str] | None = None,
+    replace_env: bool = False,
 ) -> PipedSpawnResult:
     """Authorized interactive 3-pipe spawn. *argv[0]* must be absolute.
 
@@ -437,7 +439,7 @@ def process_spawn_piped_authorized(
         library = _lib()
         argv_raw = _utf8(json.dumps([str(a) for a in argv]))
         cwd_raw = _utf8(str(cwd)) if cwd else b""
-        env_raw, _flag = _spawn_env_payload(env, False)
+        env_raw, _flag = _spawn_env_payload(env, replace_env)
         subject_raw = _utf8(subject)
         scope_raw = _utf8(scope)
         token_raw = bytes(token)
@@ -502,6 +504,7 @@ def process_exec_capture_authorized(
     now_ms: int | None = None,
     timeout_ms: int = 60_000,
     write_roots: Sequence[str] | None = None,
+    replace_env: bool = False,
 ) -> ExecCaptureResult:
     """Authorized one-shot hidden spawn with stdout/stderr capture.
 
@@ -516,7 +519,7 @@ def process_exec_capture_authorized(
         library = _lib()
         argv_raw = _utf8(json.dumps([str(a) for a in argv]))
         cwd_raw = _utf8(str(cwd)) if cwd else b""
-        env_raw, _flag = _spawn_env_payload(env, False)
+        env_raw, _flag = _spawn_env_payload(env, replace_env)
         subject_raw = _utf8(subject)
         scope_raw = _utf8(scope)
         token_raw = bytes(token)
@@ -575,6 +578,7 @@ def conpty_spawn_authorized(
     owner_confirmed: bool = False,
     now_ms: int | None = None,
     write_roots: Sequence[str] | None = None,
+    replace_env: bool = False,
 ) -> tuple[int, int]:
     """Authorized ConPTY spawn. *argv[0]* must be absolute. No unsigned fallback.
 
@@ -587,7 +591,7 @@ def conpty_spawn_authorized(
         library = _lib()
         argv_raw = _utf8(json.dumps([str(a) for a in argv]))
         cwd_raw = _utf8(str(cwd)) if cwd else b""
-        env_raw, _flag = _spawn_env_payload(env, False)
+        env_raw, _flag = _spawn_env_payload(env, replace_env)
         subject_raw = _utf8(subject)
         scope_raw = _utf8(scope)
         token_raw = bytes(token)

@@ -31,9 +31,21 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
 
   const refresh = useCallback(async () => {
     try {
-      const items = await listApprovals(sessionId)
-      // life_drive has its own Yes/No/Explain card (LifeTaskBanner).
-      setItems(items.filter((i) => i.tool_name !== 'life_drive'))
+      // List every pending item, then keep this chat's plus blocking / hive
+      // Asks so an owner looking at another tab still sees a waiter.
+      const items = await listApprovals()
+      const focused = (sessionId || '').trim()
+      setItems(
+        items.filter((i) => {
+          if (i.tool_name === 'life_drive') return false
+          if (!focused) return true
+          const sid = (i.session_id || '').trim()
+          if (!sid || sid === focused) return true
+          if (i.blocking) return true
+          const origin = String(i.origin || i.channel || '').toLowerCase()
+          return origin.startsWith('hive:')
+        }),
+      )
     } catch {
       // server down
     }

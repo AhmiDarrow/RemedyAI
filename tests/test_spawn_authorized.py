@@ -76,6 +76,102 @@ def test_authorized_spawn_runs_cmd_with_token(test_signing_key, tmp_path: Path):
         H.process_close(handle)
 
 
+def test_run_hidden_exec_capture_threads_replace_env(monkeypatch):
+    """Mint and spend must share replace_env on the exec-capture path."""
+    seen: dict[str, bool] = {}
+
+    def issue(argv, env=None, replace_env=False, **kwargs):
+        _ = (argv, env, kwargs)
+        seen["issue"] = bool(replace_env)
+        return b"tok", 1
+
+    class _Cap:
+        timed_out = False
+        exit_code = 0
+        stdout = b""
+        stderr = b""
+
+    def capture(*args, replace_env=False, **kwargs):
+        _ = (args, kwargs)
+        seen["spend"] = bool(replace_env)
+        return _Cap()
+
+    monkeypatch.setattr(H, "issue_process_spawn_token", issue)
+    monkeypatch.setattr(H, "process_exec_capture_authorized", capture)
+    monkeypatch.setattr(P, "require_process_host", lambda: None)
+    P.run_hidden(
+        [sys.executable, "-c", "pass"],
+        capture_output=True,
+        replace_env=True,
+        timeout=1,
+    )
+    assert seen.get("issue") is True
+    assert seen.get("spend") is True
+
+
+@windows_with_core
+def test_replace_env_token_cannot_spend_as_merge(test_signing_key, tmp_path: Path):
+    """A token minted for replace_env=true must not spend on a merge payload."""
+    _ = test_signing_key
+    argv = P.resolve_argv0(["cmd", "/c", "echo"])
+    env = {"FOO": "bar", "SystemRoot": r"C:\Windows"}
+    token, now = H.issue_process_spawn_token(argv, env=env, replace_env=True)
+    with pytest.raises(H.HostError) as raised:
+        H.process_spawn_authorized(
+            argv,
+            cwd=str(tmp_path),
+            env=env,
+            token=token,
+            now_ms=now,
+            replace_env=False,
+        )
+    assert raised.value.status == H.STATUS_ACCESS_DENIED
+
+
+def test_host_session_start_mints_the_env_it_spends() -> None:
+    """HostSession.start always passes a scrubbed env; the token must cover it."""
+    import inspect
+
+    from remedy.core.computer.host_binding import _session
+
+    src = inspect.getsource(_session.HostSession.start)
+    assert "issue_host_session_token(self.host, env=env)" in src
+    src_issue = inspect.getsource(_session.issue_host_session_token)
+    assert "env=env" in src_issue
+    assert "replace_env=replace_env" in src_issue
+
+
+@windows_with_core
+def test_host_session_env_token_cannot_spend_as_argv_only(
+    test_signing_key, tmp_path: Path
+) -> None:
+    """A session open with env must not spend an argv-only token."""
+    _ = (test_signing_key, tmp_path)
+    env = {"REMEDY_AUTH_CODE": "1", "SystemRoot": r"C:\Windows"}
+    token, now = H.issue_host_session_token("cmd")
+    with pytest.raises(H.HostError) as raised:
+        H.host_session_open_authorized(
+            host="cmd",
+            env=env,
+            use_conpty=False,
+            token=token,
+            now_ms=now,
+        )
+    assert raised.value.status == H.STATUS_ACCESS_DENIED
+    token, now = H.issue_host_session_token("cmd", env=env)
+    handle = H.host_session_open_authorized(
+        host="cmd",
+        env=env,
+        use_conpty=False,
+        token=token,
+        now_ms=now,
+    )
+    try:
+        assert handle > 0
+    finally:
+        H.host_session_close(handle)
+
+
 @windows_with_core
 def test_argv_only_token_cannot_spend_on_env(test_signing_key, tmp_path: Path):
     """PolicyEnvStrict: a token minted for inherit cannot authorize a spawn env."""

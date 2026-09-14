@@ -104,6 +104,89 @@ func TestComputerNavigateEnqueueAndComplete(t *testing.T) {
 	}
 }
 
+func TestComputerSnapshotRailWhenHostConnected(t *testing.T) {
+	home := t.TempDir()
+	b := newHostBridge(home)
+	b.markHostAlive(true, "rust")
+	reg, err := NewDefaultToolRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RegisterRailTools(reg, func() *HostBridge { return b }); err != nil {
+		t.Fatal(err)
+	}
+	if err := RegisterRailTools(reg, func() *HostBridge { return b }); err != nil {
+		t.Fatal("wrap must be idempotent")
+	}
+	desc, err := reg.Latest("computer.snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			job := b.claimNext(nil, nil, "sess-1", 0.2)
+			if job == nil {
+				continue
+			}
+			if job.Action != "snapshot" {
+				t.Errorf("claimed %s", job.Action)
+				return
+			}
+			_ = b.completeA11yPush(job.ID, []map[string]any{
+				{"ref": "e1", "name": "Place order", "role": "button", "x": 40, "y": 80},
+			})
+			return
+		}
+	}()
+	out, err := reg.Execute(context.Background(), tools.Request{
+		ToolID:          "computer.snapshot",
+		Version:         desc.Version,
+		Input:           json.RawMessage(`{"session_id":"sess-1","timeout_s":3}`),
+		CapabilityToken: RuntimeCapabilityToken(desc),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if json.Unmarshal(out.Output, &body) != nil {
+		t.Fatalf("out=%s", out.Output)
+	}
+	if body["source"] != "browser" || body["available"] != true {
+		t.Fatalf("snapshot=%s", out.Output)
+	}
+	controls, _ := body["controls"].([]any)
+	if len(controls) != 1 {
+		t.Fatalf("controls=%v", body["controls"])
+	}
+	el, _ := controls[0].(map[string]any)
+	if el["name"] != "Place order" || el["id"] != "e1" {
+		t.Fatalf("control=%v", el)
+	}
+}
+
+func TestComputerNavigateRejectsTargetField(t *testing.T) {
+	home := t.TempDir()
+	b := newHostBridge(home)
+	reg := tools.NewRegistry(tools.AuthorizerFunc(runtimeLocalAuthorizer))
+	if err := RegisterRailTools(reg, func() *HostBridge { return b }); err != nil {
+		t.Fatal(err)
+	}
+	desc, err := reg.Latest("computer.navigate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = reg.Execute(context.Background(), tools.Request{
+		ToolID:          "computer.navigate",
+		Version:         1,
+		Input:           json.RawMessage(`{"url":"https://example.com","target":"browser"}`),
+		CapabilityToken: RuntimeCapabilityToken(desc),
+	})
+	if err == nil {
+		t.Fatal("target= must fail schema validation")
+	}
+}
+
 func TestAttachRailToolsOnRunner(t *testing.T) {
 	r := NewCognitionTurnRunner(&cognition.ScriptedModel{})
 	home := t.TempDir()

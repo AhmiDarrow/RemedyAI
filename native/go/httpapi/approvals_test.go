@@ -106,12 +106,12 @@ func TestApproveOnceDoesNotStampSessionFingerprint(t *testing.T) {
 	if got == nil || got.Status != "approved" {
 		t.Fatalf("once resolve=%+v", got)
 	}
-	if q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid) {
+	if q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, true) {
 		t.Fatal("approve-once must not persist a session fingerprint")
 	}
 	session := q.Enqueue("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, "Tool requires your approval", &sid, "")
 	_ = q.Resolve(session.ID, true, "session")
-	if !q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid) {
+	if !q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, true) {
 		t.Fatal("approve-session must persist a session fingerprint")
 	}
 }
@@ -193,7 +193,7 @@ func TestOneShotGrantCoversIdenticalBatchCalls(t *testing.T) {
 	if d := p.Decide(context.Background(), callC); d != cognition.Ask {
 		t.Fatalf("third identical call must ask again: Decide=%v", d)
 	}
-	if q.IsApproved("computer.click", toolCommandPreview(callC), sid) {
+	if q.IsApproved("computer.click", toolCommandPreview(callC), sid, true) {
 		t.Fatal("sensitive approval leaked into standing session/always consent")
 	}
 
@@ -227,6 +227,44 @@ func TestWaitAllDeniedDoesNotHangOnDuplicateIDs(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("WaitAll hung on duplicate ids")
+	}
+}
+
+func TestForceAskIgnoresStandingGrantsButHonorsOneShot(t *testing.T) {
+	reg, err := NewDefaultToolRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := newApprovalQueue()
+	_ = q.SetMode("ask")
+	sid := "sess-parent"
+	cmd := `{"argv":["echo","hi"]}`
+	item := q.Enqueue("shell.exec", cmd, "Tool requires your approval", &sid, "")
+	_ = q.Resolve(item.ID, true, "always")
+	if !q.IsApproved("shell.exec", cmd, sid, true) {
+		t.Fatal("owner standing Always must allow on the parent")
+	}
+	if q.IsApproved("shell.exec", cmd, sid, false) {
+		t.Fatal("ForceAsk must not inherit Always / session fingerprints")
+	}
+
+	p := &RegistryPolicy{Registry: reg, Approvals: q, SessionID: sid, ForceAsk: true}
+	call := cognition.ToolCall{ID: "1", Name: "shell.exec", Input: []byte(cmd)}
+	if d := p.Decide(context.Background(), call); d != cognition.Ask {
+		t.Fatalf("ForceAsk with parent Always Decide=%v want Ask", d)
+	}
+
+	cmd2 := `{"argv":["echo","hive"]}`
+	hive := q.EnqueueOrigin("shell.exec", cmd2, "Tool requires your approval", &sid, "", "hive:"+sid)
+	_ = q.Resolve(hive.ID, true, "session")
+	if !q.IsApproved("shell.exec", cmd2, sid, false) {
+		t.Fatal("just-approved hive Ask must Allow via one-shot on the engine retry")
+	}
+	if q.IsApproved("shell.exec", cmd2, sid, false) {
+		t.Fatal("hive one-shot must be consumed after the retry")
+	}
+	if q.IsApproved("shell.exec", cmd2, sid, true) {
+		t.Fatal("hive session-scope must not stamp a standing fingerprint")
 	}
 }
 

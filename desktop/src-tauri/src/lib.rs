@@ -3344,7 +3344,6 @@ struct DesktopUpdateInfo {
     error: Option<String>,
 }
 
-#[cfg(target_os = "windows")]
 #[derive(serde::Serialize, Clone)]
 struct UpdateProgress {
     phase: String,
@@ -3356,7 +3355,29 @@ fn app_version(app: &AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
-#[cfg(target_os = "windows")]
+fn updater_platform_keys() -> &'static [&'static str] {
+    if cfg!(target_os = "windows") {
+        &["windows-x86_64", "windows-x86-64"]
+    } else if cfg!(target_os = "linux") {
+        &["linux-x86_64", "linux-x86-64"]
+    } else {
+        &[]
+    }
+}
+
+fn asset_looks_like_this_platform(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    if cfg!(target_os = "windows") {
+        name.ends_with("-setup.exe")
+            || name.ends_with("_x64-setup.exe")
+            || (name.ends_with(".exe") && (lower.contains("setup") || lower.contains("remedy")))
+    } else if cfg!(target_os = "linux") {
+        lower.ends_with(".appimage") && lower.contains("remedy")
+    } else {
+        false
+    }
+}
+
 fn parse_semver(raw: &str) -> (u64, u64, u64) {
     let s = raw.trim().trim_start_matches('v').trim_start_matches('V');
     let mut parts = s.split(|c| c == '.' || c == '-' || c == '+');
@@ -3366,15 +3387,15 @@ fn parse_semver(raw: &str) -> (u64, u64, u64) {
     (major, minor, patch)
 }
 
-#[cfg(target_os = "windows")]
 fn is_newer(latest: &str, current: &str) -> bool {
     parse_semver(latest) > parse_semver(current)
 }
 
 /// Fetch latest desktop release metadata. Tries multiple sources; never fails
 /// the whole check because the first URL errored (common with redirects / rate limits).
-#[cfg(target_os = "windows")]
-fn fetch_latest_desktop() -> Result<(String, Option<String>, Option<String>), String> {
+/// The last bool is true only when latest.json carried a non-empty minisign
+/// signature for this platform — GitHub API asset URLs are never installable.
+fn fetch_latest_desktop() -> Result<(String, Option<String>, Option<String>, bool), String> {
     // Prefer Tauri latest.json (has platform installer URL + signature).
     let urls = [
         "https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json",
@@ -3413,19 +3434,33 @@ fn fetch_latest_desktop() -> Result<(String, Option<String>, Option<String>), St
 
         // latest.json shape
         if let Some(ver) = v.get("version").and_then(|x| x.as_str()) {
-            let download = v
-                .pointer("/platforms/windows-x86_64/url")
-                .and_then(|x| x.as_str())
-                .or_else(|| v.get("url").and_then(|x| x.as_str()))
-                .map(|s| s.to_string());
             let notes = v
                 .get("notes")
                 .and_then(|x| x.as_str())
                 .map(|s| s.to_string());
-            return Ok((ver.to_string(), download, notes));
+            match parse_signed_release(&v) {
+                Ok(signed) => {
+                    return Ok((signed.version, Some(signed.url), notes, true));
+                }
+                Err(_) => {
+                    let mut download = None;
+                    for key in updater_platform_keys() {
+                        if let Some(url) = v
+                            .pointer(&format!("/platforms/{key}/url"))
+                            .and_then(|x| x.as_str())
+                            .filter(|s| !s.is_empty())
+                        {
+                            download = Some(url.to_string());
+                            break;
+                        }
+                    }
+                    return Ok((ver.to_string(), download, notes, false));
+                }
+            }
         }
 
-        // GitHub API shape
+        // GitHub API shape — version/notes only. Asset URLs have no minisign,
+        // so they are never installable even when we recognize the filename.
         if let Some(tag) = v.get("tag_name").and_then(|x| x.as_str()) {
             let notes = v
                 .get("body")
@@ -3439,18 +3474,13 @@ fn fetch_latest_desktop() -> Result<(String, Option<String>, Option<String>), St
                         .get("browser_download_url")
                         .and_then(|u| u.as_str())
                         .unwrap_or("");
-                    let lower = name.to_lowercase();
-                    if name.ends_with("-setup.exe")
-                        || name.ends_with("_x64-setup.exe")
-                        || (name.ends_with(".exe")
-                            && (lower.contains("setup") || lower.contains("remedy")))
-                    {
+                    if asset_looks_like_this_platform(name) {
                         download = Some(asset_url.to_string());
                         break;
                     }
                 }
             }
-            return Ok((tag.to_string(), download, notes));
+            return Ok((tag.to_string(), download, notes, false));
         }
 
         errors.push(format!("{url}: unrecognized update metadata shape"));
@@ -3463,46 +3493,45 @@ fn fetch_latest_desktop() -> Result<(String, Option<String>, Option<String>), St
     })
 }
 
-#[cfg(not(target_os = "windows"))]
-fn desktop_update_result(current: String) -> DesktopUpdateInfo {
+fn desktop_info_from_meta(
+    current: String,
+    latest: String,
+    download_url: Option<String>,
+    notes: Option<String>,
+    signed: bool,
+) -> DesktopUpdateInfo {
+    let latest_norm = latest
+        .trim()
+        .trim_start_matches('v')
+        .trim_start_matches('V')
+        .to_string();
+    let newer = is_newer(&latest_norm, &current);
+    let has_url = download_url.as_ref().is_some_and(|u| !u.is_empty());
+    let available = newer && signed && has_url;
+    let error = if newer && !available {
+        Some(if !signed {
+            "A newer version exists but this release is unsigned. Install from GitHub Releases."
+                .into()
+        } else {
+            "A newer version exists but no installer URL was found on the release.".into()
+        })
+    } else {
+        None
+    };
     DesktopUpdateInfo {
-        current_version: current.clone(),
-        latest_version: current,
-        update_available: false,
-        download_url: None,
-        release_notes: None,
-        error: None,
+        current_version: current,
+        latest_version: latest_norm,
+        update_available: available,
+        download_url: if signed { download_url } else { None },
+        release_notes: notes,
+        error,
     }
 }
 
-#[cfg(target_os = "windows")]
 fn desktop_update_result(current: String) -> DesktopUpdateInfo {
     match fetch_latest_desktop() {
-        Ok((latest, download_url, notes)) => {
-            let latest_norm = latest
-                .trim()
-                .trim_start_matches('v')
-                .trim_start_matches('V')
-                .to_string();
-            let newer = is_newer(&latest_norm, &current);
-            // Never claim an update is available without an installer URL.
-            let available = newer && download_url.as_ref().is_some_and(|u| !u.is_empty());
-            let error = if newer && !available {
-                Some(
-                    "A newer version exists but no Windows installer URL was found on the release."
-                        .into(),
-                )
-            } else {
-                None
-            };
-            DesktopUpdateInfo {
-                current_version: current,
-                latest_version: latest_norm,
-                update_available: available,
-                download_url,
-                release_notes: notes,
-                error,
-            }
+        Ok((latest, download_url, notes, signed)) => {
+            desktop_info_from_meta(current, latest, download_url, notes, signed)
         }
         Err(e) => DesktopUpdateInfo {
             current_version: current.clone(),
@@ -3693,8 +3722,8 @@ fn write_update_status(phase: &str, percent: u8, message: &str, from: &str, to: 
     let _ = std::fs::write(&path, body);
 }
 
-#[cfg(target_os = "windows")]
 fn emit_progress(app: &AppHandle, phase: &str, percent: u8, message: &str) {
+    #[cfg(target_os = "windows")]
     write_update_status(phase, percent, message, "", "");
     let _ = app.emit(
         "update-progress",
@@ -3706,7 +3735,6 @@ fn emit_progress(app: &AppHandle, phase: &str, percent: u8, message: &str) {
     );
 }
 
-#[cfg(target_os = "windows")]
 fn emit_progress_ver(
     app: &AppHandle,
     phase: &str,
@@ -3715,6 +3743,7 @@ fn emit_progress_ver(
     from: &str,
     to: &str,
 ) {
+    #[cfg(target_os = "windows")]
     write_update_status(phase, percent, message, from, to);
     let _ = app.emit(
         "update-progress",
@@ -4047,11 +4076,9 @@ fn launch_install_progress_ui(from: &str, to: &str) {
 }
 
 /// Tauri updater pubkey (same blob as tauri.conf.json plugins.updater.pubkey).
-#[cfg(target_os = "windows")]
 const UPDATER_MINISIGN_PUBKEY_B64: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ2MDEwQzVERTNBQ0JDRTAKUldUZ3ZLempYUXdCMWdRNWl0UzlpSDVUamJQZXRvREFpNE9Mb2xJeGpQck5ubVJ5ZDNxSko0dTYK";
 
 /// Accept raw minisign **or** Tauri's base64-wrapped `.sig` (both appear in latest.json).
-#[cfg(target_os = "windows")]
 fn decode_updater_signature(sig: &str) -> Result<minisign_verify::Signature, String> {
     use base64::Engine;
     use minisign_verify::Signature;
@@ -4069,7 +4096,6 @@ fn decode_updater_signature(sig: &str) -> Result<minisign_verify::Signature, Str
         .map_err(|e| format!("updater signature parse: {e}"))
 }
 
-#[cfg(target_os = "windows")]
 fn verify_installer_minisign(exe: &Path, sig: &str) -> Result<(), String> {
     use base64::Engine;
     use minisign_verify::PublicKey;
@@ -4094,7 +4120,6 @@ fn verify_installer_minisign(exe: &Path, sig: &str) -> Result<(), String> {
 
 /// Only this repository's release assets (not arbitrary GitHub releases).
 /// What `latest.json` promises for this platform, after every trust check.
-#[cfg(target_os = "windows")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SignedRelease {
     url: String,
@@ -4107,7 +4132,6 @@ struct SignedRelease {
 /// Callers should **download the returned URL** (not a stale UI-held URL) so a
 /// check→install race cannot pair an old installer path with a new signature blob.
 /// Refuses install when the release is unsigned (owner can still install manually from GitHub).
-#[cfg(target_os = "windows")]
 fn fetch_signed_release_asset() -> Result<SignedRelease, String> {
     let meta_url =
         "https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json";
@@ -4129,7 +4153,6 @@ fn fetch_signed_release_asset() -> Result<SignedRelease, String> {
 }
 
 /// Pure half of `fetch_signed_release_asset`: validate the latest.json document.
-#[cfg(target_os = "windows")]
 fn parse_signed_release(v: &serde_json::Value) -> Result<SignedRelease, String> {
     let version = v
         .get("version")
@@ -4139,11 +4162,20 @@ fn parse_signed_release(v: &serde_json::Value) -> Result<SignedRelease, String> 
     if version.is_empty() {
         return Err("latest.json missing version".into());
     }
-    let plat = v
-        .pointer("/platforms/windows-x86_64")
-        .or_else(|| v.pointer("/platforms/windows-x86-64"));
+    let mut plat = None;
+    let mut plat_name = "";
+    for key in updater_platform_keys() {
+        if let Some(p) = v.pointer(&format!("/platforms/{key}")) {
+            plat = Some(p);
+            plat_name = key;
+            break;
+        }
+    }
     let Some(plat) = plat else {
-        return Err("latest.json missing windows-x86_64 platform".into());
+        return Err(format!(
+            "latest.json missing {} platform",
+            updater_platform_keys().first().copied().unwrap_or("this-os")
+        ));
     };
     let url = plat
         .get("url")
@@ -4158,7 +4190,7 @@ fn parse_signed_release(v: &serde_json::Value) -> Result<SignedRelease, String> 
         .trim()
         .to_string();
     if url.is_empty() {
-        return Err("latest.json missing windows-x86_64.url".into());
+        return Err(format!("latest.json missing {plat_name}.url"));
     }
     if !is_trusted_download_url(&url) {
         return Err(format!(
@@ -4182,7 +4214,6 @@ fn parse_signed_release(v: &serde_json::Value) -> Result<SignedRelease, String> 
 
 /// Refuse to install anything that is not strictly newer than what is running
 /// (a stale CDN copy of latest.json or a rolled-back release must not downgrade).
-#[cfg(target_os = "windows")]
 fn ensure_release_is_newer(release_version: &str, current: &str) -> Result<(), String> {
     if is_newer(release_version, current) {
         return Ok(());
@@ -4192,7 +4223,6 @@ fn ensure_release_is_newer(release_version: &str, current: &str) -> Result<(), S
     ))
 }
 
-#[cfg(target_os = "windows")]
 fn is_trusted_download_url(url: &str) -> bool {
     // Official release pages / assets for RemedyAI only.
     if url.starts_with("https://github.com/AhmiDarrow/RemedyAI/releases/") {
@@ -4236,8 +4266,243 @@ fn validate_installer_exe(path: &Path, min_bytes: u64) -> Result<(), String> {
 }
 
 // Guard against double-click / concurrent update starts.
-#[cfg(target_os = "windows")]
 static UPDATE_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(target_os = "linux")]
+fn linux_appimage_path() -> Option<PathBuf> {
+    std::env::var_os("APPIMAGE")
+        .map(PathBuf::from)
+        .filter(|p| p.is_file())
+}
+
+#[cfg(target_os = "linux")]
+fn validate_elf_payload(path: &Path, min_bytes: u64) -> Result<(), String> {
+    let meta = std::fs::metadata(path).map_err(|e| format!("Cannot stat download: {e}"))?;
+    if meta.len() < min_bytes {
+        return Err(format!(
+            "Downloaded file is too small ({} bytes) — likely not a real AppImage",
+            meta.len()
+        ));
+    }
+    let mut f = std::fs::File::open(path).map_err(|e| format!("Cannot open download: {e}"))?;
+    let mut magic = [0u8; 4];
+    f.read_exact(&mut magic)
+        .map_err(|e| format!("Cannot read download header: {e}"))?;
+    if &magic != b"\x7fELF" {
+        return Err(
+            "Downloaded file is not a Linux executable (missing ELF header). \
+             GitHub may have returned an HTML error page."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+/// Linux AppImage self-replace. `.deb` installs need sudo — refuse with the
+/// signed download URL rather than attempting dpkg.
+#[tauri::command]
+#[cfg(target_os = "linux")]
+fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), String> {
+    if !download_url.is_empty() && !is_trusted_download_url(&download_url) {
+        return Err("Download URL is not a trusted GitHub release host".into());
+    }
+    let Some(appimage) = linux_appimage_path() else {
+        let url = fetch_signed_release_asset()
+            .map(|r| r.url)
+            .ok()
+            .filter(|u| !u.is_empty())
+            .or_else(|| {
+                let t = download_url.trim().to_string();
+                if t.is_empty() {
+                    None
+                } else {
+                    Some(t)
+                }
+            })
+            .unwrap_or_else(|| {
+                "https://github.com/AhmiDarrow/RemedyAI/releases/latest".into()
+            });
+        return Err(format!(
+            "This Linux install is not an AppImage, so Remedy cannot replace itself. \
+             Download the new AppImage (or install the .deb with sudo) from:\n{url}"
+        ));
+    };
+    if UPDATE_IN_FLIGHT.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return Err("An update is already in progress".into());
+    }
+
+    let app_for_thread = app.clone();
+    let ver_from = app_version(&app);
+    let server_state = app.state::<ServerState>();
+    let process_slot = server_state.process.clone();
+    let app_exiting = server_state.app_exiting.clone();
+    let client_url = download_url;
+    let dest = appimage;
+
+    thread::spawn(move || {
+        let result = (|| -> Result<(), String> {
+            emit_progress_ver(
+                &app_for_thread,
+                "downloading",
+                0,
+                "Connecting to update server...",
+                &ver_from,
+                "",
+            );
+            let release = fetch_signed_release_asset()?;
+            ensure_release_is_newer(&release.version, &ver_from)?;
+            let mut download_url = release.url;
+            let client_norm = client_url
+                .trim()
+                .replace("Remedy_Desktop_", "Remedy.Desktop_")
+                .replace("Remedy Desktop_", "Remedy.Desktop_");
+            if !client_norm.is_empty() && client_norm != download_url {
+                log::warn!(
+                    "Update URL from UI differed from signed latest.json; using signed asset.\n  ui: {client_norm}\n  signed: {download_url}"
+                );
+            }
+            if download_url.is_empty() {
+                if client_norm.is_empty() {
+                    return Err("No download URL for this release".into());
+                }
+                download_url = client_norm;
+            }
+
+            let resp = ureq::get(&download_url)
+                .set("User-Agent", "RemedyDesktop-Updater/0.10")
+                .set("Accept", "application/octet-stream,*/*")
+                .timeout(Duration::from_secs(600))
+                .call()
+                .map_err(|e| format!("Download failed: {e}"))?;
+            if resp.status() != 200 {
+                return Err(format!("Download HTTP {}", resp.status()));
+            }
+            let content_type = resp
+                .header("Content-Type")
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if content_type.contains("text/html") {
+                return Err(
+                    "Download returned HTML instead of an AppImage (check the release URL)."
+                        .into(),
+                );
+            }
+            let len = resp
+                .header("Content-Length")
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
+
+            let file_name = dest
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "Remedy.Desktop.AppImage".into());
+            let temp = dest.with_file_name(format!(
+                "{file_name}.new-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_file(&temp);
+            let mut file = std::fs::File::create(&temp)
+                .map_err(|e| format!("Cannot create temp AppImage: {e}"))?;
+            let mut reader = resp.into_reader();
+            let mut buf = [0u8; 64 * 1024];
+            let mut done: u64 = 0;
+            loop {
+                let n = reader
+                    .read(&mut buf)
+                    .map_err(|e| format!("Download interrupted: {e}"))?;
+                if n == 0 {
+                    break;
+                }
+                file.write_all(&buf[..n])
+                    .map_err(|e| format!("Write failed: {e}"))?;
+                done += n as u64;
+                let pct = if len > 0 {
+                    ((done * 100) / len).min(99) as u8
+                } else {
+                    ((done / (512 * 1024)) % 90) as u8
+                };
+                let mb = done as f64 / (1024.0 * 1024.0);
+                emit_progress(
+                    &app_for_thread,
+                    "downloading",
+                    pct,
+                    &format!("Downloading update... {mb:.1} MB"),
+                );
+            }
+            drop(file);
+
+            validate_elf_payload(&temp, 512 * 1024)?;
+            emit_progress(
+                &app_for_thread,
+                "installing",
+                100,
+                "Verifying release signature...",
+            );
+            verify_installer_minisign(&temp, &release.sig)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o755))
+                    .map_err(|e| format!("Cannot mark AppImage executable: {e}"))?;
+            }
+            std::fs::rename(&temp, &dest)
+                .map_err(|e| format!("Cannot replace AppImage: {e}"))?;
+
+            emit_progress(
+                &app_for_thread,
+                "closing",
+                100,
+                "Download complete. Restarting…",
+            );
+            app_exiting.store(true, Ordering::SeqCst);
+            match process_slot.lock() {
+                Ok(mut guard) => kill_child(&mut guard),
+                Err(poisoned) => {
+                    let mut guard = poisoned.into_inner();
+                    kill_child(&mut guard);
+                }
+            }
+            force_stop_remedy_processes();
+            let mut cmd = Command::new(&dest);
+            cmd.stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                cmd.process_group(0);
+                unsafe {
+                    cmd.pre_exec(|| {
+                        if libc::setsid() == -1 {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                        Ok(())
+                    });
+                }
+            }
+            cmd.spawn()
+                .map_err(|e| format!("Failed to relaunch AppImage: {e}"))?;
+            thread::sleep(Duration::from_millis(700));
+            app_for_thread.exit(0);
+            Ok(())
+        })();
+        if let Err(e) = result {
+            log::error!("Update failed: {}", e);
+            UPDATE_IN_FLIGHT.store(false, std::sync::atomic::Ordering::SeqCst);
+            emit_progress(&app_for_thread, "error", 0, &e);
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn start_desktop_update(_app: AppHandle, _download_url: String) -> Result<(), String> {
+    Err(
+        "In-app updates are available on Windows and Linux AppImage. Install from GitHub Releases."
+            .into(),
+    )
+}
 
 /// Download the NSIS installer, run it silently (/S /UPDATE), exit so files can be replaced.
 ///
@@ -4246,14 +4511,7 @@ static UPDATE_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// 2. **New popup** (install host) - appears after Remedy exits for install/relaunch
 ///
 /// Sole relaunch owner: update script (+ NSIS marker /NOAUTOLAUNCH). No double window.
-#[tauri::command]
-#[cfg(not(target_os = "windows"))]
-fn start_desktop_update(_app: AppHandle, _download_url: String) -> Result<(), String> {
-    Err(
-        "In-app updates are Windows-only. Install the Linux .deb or AppImage from GitHub Releases."
-            .into(),
-    )
-}
+
 
 #[tauri::command]
 #[cfg(target_os = "windows")]
@@ -6069,4 +6327,93 @@ pub fn run() {
                 _ => {}
             }
         });
+}
+
+#[cfg(test)]
+mod updater_parse_tests {
+    use super::*;
+
+    fn sample_latest() -> serde_json::Value {
+        serde_json::json!({
+            "version": "v0.63.2",
+            "platforms": {
+                "windows-x86_64": {
+                    "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.63.2/Remedy.Desktop_0.63.2_x64-setup.exe",
+                    "signature": "untrusted comment: minisign\nRWfake"
+                },
+                "linux-x86_64": {
+                    "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.63.2/Remedy.Desktop_0.63.2_amd64.AppImage",
+                    "signature": "untrusted comment: minisign\nRWfake"
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn parse_signed_release_this_platform() {
+        let got = parse_signed_release(&sample_latest()).expect("parse");
+        assert_eq!(got.version, "0.63.2");
+        if cfg!(target_os = "windows") {
+            assert!(got.url.ends_with("_x64-setup.exe"), "{}", got.url);
+        } else if cfg!(target_os = "linux") {
+            assert!(got.url.ends_with(".AppImage"), "{}", got.url);
+        }
+        assert!(got.url.contains("AhmiDarrow/RemedyAI/releases/"));
+    }
+
+    #[test]
+    fn parse_signed_release_refuses_empty_signature() {
+        let mut v = sample_latest();
+        for key in ["windows-x86_64", "linux-x86_64"] {
+            v["platforms"][key]["signature"] = serde_json::json!("");
+        }
+        let err = parse_signed_release(&v).unwrap_err();
+        assert!(err.to_lowercase().contains("unsigned"), "{err}");
+    }
+
+    #[test]
+    fn is_newer_orders_semver() {
+        assert!(is_newer("0.63.2", "0.63.1"));
+        assert!(!is_newer("0.63.1", "0.63.1"));
+        assert!(!is_newer("0.62.9", "0.63.0"));
+    }
+
+    #[test]
+    fn unsigned_release_is_not_installable() {
+        let info = desktop_info_from_meta(
+            "0.63.1".into(),
+            "0.63.2".into(),
+            Some(
+                "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.63.2/Remedy.Desktop_0.63.2_amd64.AppImage"
+                    .into(),
+            ),
+            None,
+            false,
+        );
+        assert!(!info.update_available);
+        assert!(info.download_url.is_none());
+        assert!(info
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .to_lowercase()
+            .contains("unsigned"));
+    }
+
+    #[test]
+    fn signed_newer_release_is_installable() {
+        let info = desktop_info_from_meta(
+            "0.63.1".into(),
+            "0.63.2".into(),
+            Some(
+                "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.63.2/Remedy.Desktop_0.63.2_x64-setup.exe"
+                    .into(),
+            ),
+            None,
+            true,
+        );
+        assert!(info.update_available);
+        assert!(info.download_url.is_some());
+        assert!(info.error.is_none());
+    }
 }

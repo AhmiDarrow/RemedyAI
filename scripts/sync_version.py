@@ -152,34 +152,30 @@ def _bump_latest_json(ver: str) -> None:
     data = json.loads(PATHS["latest_json"].read_text(encoding="utf-8"))
     old_raw = str(data.get("version", "")).lstrip("v")
     data["version"] = f"v{ver}"
-    data["notes"] = f"Remedy Desktop v{ver} — Windows installer"
+    data["notes"] = f"Remedy Desktop v{ver} — Windows installer and Linux AppImage"
     data["pub_date"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Prefer rewriting known GitHub release URL shape so notes/URL/version stay aligned.
     # Real NSIS assets use dots for spaces: "Remedy Desktop" → "Remedy.Desktop_…".
-    installer_name = f"Remedy.Desktop_{ver}_x64-setup.exe"
-    default_url = (
-        f"https://github.com/AhmiDarrow/RemedyAI/releases/download/v{ver}/{installer_name}"
-    )
+    platforms = data.setdefault("platforms", {})
+    if "windows-x86_64" not in platforms:
+        platforms["windows-x86_64"] = {"signature": "", "url": ""}
+    if "linux-x86_64" not in platforms:
+        platforms["linux-x86_64"] = {"signature": "", "url": ""}
+
+    def _asset_url(name: str) -> str:
+        asset = (
+            f"Remedy.Desktop_{ver}_amd64.AppImage"
+            if str(name).startswith("linux")
+            else f"Remedy.Desktop_{ver}_x64-setup.exe"
+        )
+        return (
+            f"https://github.com/AhmiDarrow/RemedyAI/releases/download/v{ver}/{asset}"
+        )
 
     version_changed = bool(old_raw and old_raw != ver)
-    for plat in data.get("platforms", {}).values():
-        url = str(plat.get("url") or "")
-        if version_changed and url:
-            # Replace tag (vX.Y.Z) first, then bare version in filenames.
-            url = url.replace(f"v{old_raw}", f"v{ver}")
-            url = re.sub(
-                rf"(?<![0-9]){re.escape(old_raw)}(?![0-9])",
-                ver,
-                url,
-            )
-            # Normalize legacy underscore installer names.
-            url = url.replace("Remedy_Desktop_", "Remedy.Desktop_")
-            plat["url"] = url
-        else:
-            plat["url"] = default_url
-        # Always normalize URL to the canonical installer name for this version.
-        plat["url"] = default_url
+    for name, plat in platforms.items():
+        plat["url"] = _asset_url(name)
         # Signature is per-installer file. Clear when version changes OR when the
         # trusted comment / URL still mentions a different version (stale).
         sig = str(plat.get("signature") or "")
@@ -190,7 +186,7 @@ def _bump_latest_json(ver: str) -> None:
         )
         # Heuristic: if signature blob mentions another setup version, drop it.
         if sig:
-            m = re.search(r"(\d+\.\d+\.\d+)_x64-setup", sig)
+            m = re.search(r"(\d+\.\d+\.\d+)_(?:x64-setup|amd64)", sig)
             if m and m.group(1) != ver:
                 stale_sig = True
         if stale_sig or version_changed:

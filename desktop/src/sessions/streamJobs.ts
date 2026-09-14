@@ -444,6 +444,13 @@ export function getJobLastSeq(sessionId: string): number {
   return jobs.get(sessionId)?.lastSeq || 0
 }
 
+/** Attach watermark only while this webview still holds the live paint. */
+export function liveAttachAfter(sessionId: string): number {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return 0
+  return j.lastSeq || 0
+}
+
 /**
  * True when this webview already follows that exact turn.
  *

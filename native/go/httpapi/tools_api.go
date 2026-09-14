@@ -201,7 +201,7 @@ func (s *Server) handleInvokeTool(w http.ResponseWriter, r *http.Request) {
 	case cognition.Allow:
 		// proceed to execute
 	case cognition.Ask:
-		item := enqueueToolApprovalIn(s.approvals, reg, sessionID, call, "", s.toolBindingFor(sessionID).PageContext)
+		item := enqueueToolApprovalIn(s.approvals, reg, sessionID, call, "", s.toolBindingFor(sessionID).PageContext, "")
 		resp := map[string]any{
 			"ok":                false,
 			"id":                id,

@@ -440,6 +440,51 @@ func TestMessengerOriginForcesAskUnderAuto(t *testing.T) {
 	}
 }
 
+func TestHiveAskLandsOnParentSession(t *testing.T) {
+	if got := ownerApprovalSessionID(TurnRequest{SessionID: "daughter", Origin: "hive:parent"}); got != "parent" {
+		t.Fatalf("hive origin parent=%q", got)
+	}
+	if got := ownerApprovalSessionID(TurnRequest{SessionID: "daughter", Origin: "hive:"}); got != "daughter" {
+		t.Fatalf("empty hive parent must fall back to the turn session, got %q", got)
+	}
+	if got := ownerApprovalSessionID(TurnRequest{SessionID: "s1", Origin: "desktop"}); got != "s1" {
+		t.Fatalf("owner origin=%q", got)
+	}
+
+	reg, err := NewDefaultToolRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := newApprovalQueue()
+	_ = q.SetMode("auto")
+	r := &CognitionTurnRunner{Registry: reg, Approvals: q}
+	req := TurnRequest{SessionID: "sess-daughter", Origin: "hive:sess-parent"}
+	p, ok := r.turnPolicy(req).(*RegistryPolicy)
+	if !ok {
+		t.Fatalf("policy %T", r.turnPolicy(req))
+	}
+	if p.SessionID != "sess-parent" || !p.ForceAsk || !p.HiveRestricted {
+		t.Fatalf("policy session=%q forceAsk=%v hive=%v", p.SessionID, p.ForceAsk, p.HiveRestricted)
+	}
+	call := cognition.ToolCall{ID: "1", Name: "shell.exec", Input: []byte(`{"argv":["echo"]}`)}
+	if d := p.Decide(context.Background(), call); d != cognition.Ask {
+		t.Fatalf("hive mutation Decide=%v want Ask", d)
+	}
+	item := enqueueToolApprovalIn(q, reg, ownerApprovalSessionID(req), call, "", "", req.Origin)
+	if item == nil {
+		t.Fatal("expected a pending approval")
+	}
+	if len(q.ListPending("sess-parent")) != 1 {
+		t.Fatalf("parent pending=%d", len(q.ListPending("sess-parent")))
+	}
+	if len(q.ListPending("sess-daughter")) != 0 {
+		t.Fatal("hive Ask must not land on the daughter session")
+	}
+	if item.Origin != req.Origin {
+		t.Fatalf("origin=%q want %q", item.Origin, req.Origin)
+	}
+}
+
 func TestMessengerOriginShape(t *testing.T) {
 	if got := messengerOrigin("Telegram", "42"); got != "telegram:42" {
 		t.Fatalf("got %q", got)

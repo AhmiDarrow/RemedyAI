@@ -57,7 +57,7 @@ function mergeUpdateSources(
   const errors = [desk?.error, api?.error].filter(Boolean) as string[]
   if (newer && !installable) {
     errors.push(
-      'A newer version exists but no Windows installer URL was found on the release.',
+      'A newer version exists but no installer URL was found on the release.',
     )
   }
 

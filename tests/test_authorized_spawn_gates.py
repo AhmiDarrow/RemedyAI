@@ -187,7 +187,8 @@ def test_spawn_background_uses_authorized_spawn(
     class _Child:
         pid = 4242
 
-    def fake_spawn(argv, *, cwd=None, env=None, write_roots=None):
+    def fake_spawn(argv, *, cwd=None, env=None, write_roots=None, replace_env=False):
+        _ = replace_env
         calls.append((list(argv), cwd, env, write_roots))
         return _Child()
 
@@ -246,8 +247,8 @@ def test_run_hidden_no_pipes_uses_spawn_hidden(
     def fake_require() -> None:
         return None
 
-    def fake_spawn(argv, *, cwd=None, env=None, write_roots=None):
-        _ = (cwd, env, write_roots)
+    def fake_spawn(argv, *, cwd=None, env=None, write_roots=None, replace_env=False):
+        _ = (cwd, env, write_roots, replace_env)
         seen.append(list(argv))
         return _Child()
 

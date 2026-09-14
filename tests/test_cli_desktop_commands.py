@@ -151,8 +151,8 @@ def test_launch_starts_the_installed_binary(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
     started: list[list[str]] = []
 
-    def fake_spawn(argv, *, cwd=None, env=None, write_roots=None):
-        _ = (cwd, env, write_roots)
+    def fake_spawn(argv, *, cwd=None, env=None, write_roots=None, replace_env=False):
+        _ = (cwd, env, write_roots, replace_env)
         started.append(list(argv))
         return types.SimpleNamespace(pid=1, handle=1)
 

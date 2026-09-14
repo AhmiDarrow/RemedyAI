@@ -68,7 +68,8 @@ type TurnRequest struct {
 	// DrainNudges returns queued owner mid-turn guidance (steer). Optional.
 	DrainNudges func() []string
 	// History is the last few session messages before Prompt, oldest first,
-	// as {"role","content"} — forwarded to prompt.assemble.
+	// as {"role","content"}. They become transcript messages (not a system
+	// block) so prior turns are not rendered twice.
 	History []map[string]any
 	// Origin names where the prompt came from: "desktop" (default when empty),
 	// "webui", "cli", "hive:<parent-session>", "phone:<device>", or a

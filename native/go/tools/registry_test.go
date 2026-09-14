@@ -93,6 +93,41 @@ func TestRegistryDoesNotExecuteAfterAuthorizationFailure(t *testing.T) {
 	}
 }
 
+func TestRegistryWrapExecutorReplacesInner(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error { return nil }))
+	innerCalls := 0
+	if err := registry.Register(descriptor(1, RuntimeGo), ExecutorFunc(func(context.Context, Request) (Result, error) {
+		innerCalls++
+		return Result{Output: json.RawMessage(`{"content":"inner"}`)}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.WrapExecutor("filesystem.read", 0, func(inner Executor) Executor {
+		return ExecutorFunc(func(ctx context.Context, req Request) (Result, error) {
+			if string(req.Input) == `{"path":"wrap.txt"}` {
+				return Result{Output: json.RawMessage(`{"content":"wrapped"}`)}, nil
+			}
+			return inner.Execute(ctx, req)
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := registry.Execute(context.Background(), Request{
+		ToolID: "filesystem.read", Version: 1, Input: json.RawMessage(`{"path":"wrap.txt"}`),
+		CapabilityToken: []byte("token"),
+	})
+	if err != nil || string(out.Output) != `{"content":"wrapped"}` || innerCalls != 0 {
+		t.Fatalf("wrap=%s err=%v inner=%d", out.Output, err, innerCalls)
+	}
+	out, err = registry.Execute(context.Background(), Request{
+		ToolID: "filesystem.read", Version: 1, Input: json.RawMessage(`{"path":"safe.txt"}`),
+		CapabilityToken: []byte("token"),
+	})
+	if err != nil || string(out.Output) != `{"content":"inner"}` || innerCalls != 1 {
+		t.Fatalf("inner=%s err=%v calls=%d", out.Output, err, innerCalls)
+	}
+}
+
 func TestRegistryRejectsInvalidInputBeforeConsumingAuthorization(t *testing.T) {
 	authorized := 0
 	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {

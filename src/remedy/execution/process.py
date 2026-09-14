@@ -87,12 +87,15 @@ def spawn_hidden(
     cwd: str | Path | None = None,
     env: Mapping[str, str] | None = None,
     write_roots: Sequence[str | Path] | None = None,
+    replace_env: bool = False,
 ) -> HiddenProcess:
     """Start *argv* hidden via authorized spawn (no unsigned soft fallback)."""
     from remedy.core.computer import host_binding
 
     resolved = resolve_argv0(argv)
-    token, now_ms = host_binding.issue_process_spawn_token(resolved, env=env)
+    token, now_ms = host_binding.issue_process_spawn_token(
+        resolved, env=env, replace_env=replace_env
+    )
     roots = None if write_roots is None else [str(r) for r in write_roots]
     pid, handle = host_binding.process_spawn_authorized(
         resolved,
@@ -101,6 +104,7 @@ def spawn_hidden(
         token=token,
         now_ms=now_ms,
         write_roots=roots,
+        replace_env=replace_env,
     )
     return HiddenProcess(pid, handle)
 
@@ -112,13 +116,16 @@ def spawn_piped(
     env: Mapping[str, str] | None = None,
     write_roots: Sequence[str | Path] | None = None,
     text: bool = True,
+    replace_env: bool = False,
 ) -> PipedProcess:
     """Start *argv* with interactive stdin/stdout/stderr via authorized spawn."""
     from remedy.core.computer import host_binding
 
     require_process_host()
     resolved = resolve_argv0(argv)
-    token, now_ms = host_binding.issue_process_spawn_token(resolved, env=env)
+    token, now_ms = host_binding.issue_process_spawn_token(
+        resolved, env=env, replace_env=replace_env
+    )
     roots = None if write_roots is None else [str(r) for r in write_roots]
     spawned = host_binding.process_spawn_piped_authorized(
         resolved,
@@ -127,6 +134,7 @@ def spawn_piped(
         token=token,
         now_ms=now_ms,
         write_roots=roots,
+        replace_env=replace_env,
     )
     stdin = wrap_os_pipe_handle(spawned.stdin_write, writable=True, text=text)
     stdout = wrap_os_pipe_handle(spawned.stdout_read, writable=False, text=text)

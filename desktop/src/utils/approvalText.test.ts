@@ -19,6 +19,7 @@ describe('approval copy', () => {
 
   it('prettifies unknown origins', () => {
     expect(approvalOriginLabel({ origin: 'matrix_bridge' })).toBe('Matrix Bridge')
+    expect(approvalOriginLabel({ origin: 'hive:parent' })).toBe('a hive task')
     expect(approvalOriginLabel({})).toBeNull()
   })
 
@@ -40,5 +41,8 @@ describe('approval copy', () => {
     expect(src).toContain('approvalHeadline(item)')
     expect(src).toContain('data-sensitive')
     expect(src).toContain("act(item, true, 'once')")
+    expect(src).toContain('await listApprovals()')
+    expect(src).toContain("origin.startsWith('hive:')")
+    expect(src).toContain('i.blocking')
   })
 })

@@ -59,6 +59,7 @@ var modelInternalInputKeys = []string{
 	"session_id",
 	"workspace_root",
 	"project_path",
+	"page_context",
 	GoBoundField,
 }
 

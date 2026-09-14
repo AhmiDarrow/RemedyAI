@@ -30,7 +30,7 @@ var siteAliases = map[string]string{
 }
 
 var (
-	bareDomainRE = regexp.MustCompile(`(?i)^[a-z0-9.-]+\.[a-z]{2,}(/.*)?$`)
+	bareDomainRE  = regexp.MustCompile(`(?i)^[a-z0-9.-]+\.[a-z]{2,}(/.*)?$`)
 	metadataHosts = map[string]struct{}{
 		"metadata.google.internal": {}, "metadata.goog": {}, "metadata": {},
 		"instance-data": {}, "kubernetes.default.svc": {},
@@ -45,30 +45,26 @@ func RegisterRailTools(registry *tools.Registry, bridge HostBridgeProvider) erro
 	if bridge == nil {
 		return errors.New("host bridge provider is required")
 	}
-	if _, err := registry.Latest("computer.navigate"); err == nil {
-		// Already wired (tests may New() more than once with the same runner).
-		return nil
-	}
-	return registry.Register(tools.Descriptor{
-		ID:           "computer.navigate",
-		Version:      1,
-		Description:  "Open a URL in the in-app Browser rail (not the system browser)",
-		Runtime:      tools.RuntimeGo,
-		Risk:         tools.RiskMutation,
-		Capabilities: []string{"computer.browser"},
-		InputSchema: json.RawMessage(`{
+	if _, err := registry.Latest("computer.navigate"); err != nil {
+		if err := registry.Register(tools.Descriptor{
+			ID:           "computer.navigate",
+			Version:      1,
+			Description:  "Open a URL in the in-app Browser rail (not the system browser)",
+			Runtime:      tools.RuntimeGo,
+			Risk:         tools.RiskMutation,
+			Capabilities: []string{"computer.browser"},
+			InputSchema: json.RawMessage(`{
 			"type":"object",
 			"required":["url"],
 			"properties":{
 				"url":{"type":"string","minLength":1},
-				"target":{"type":"string","enum":["browser","desktop","auto"]},
 				"hint":{"type":"string"},
 				"session_id":{"type":"string"},
 				"timeout_s":{"type":"number","minimum":0.05,"maximum":120}
 			},
 			"additionalProperties":false
 		}`),
-		OutputSchema: json.RawMessage(`{
+			OutputSchema: json.RawMessage(`{
 			"type":"object",
 			"required":["ok","url"],
 			"properties":{
@@ -81,15 +77,193 @@ func RegisterRailTools(registry *tools.Registry, bridge HostBridgeProvider) erro
 			},
 			"additionalProperties":false
 		}`),
-	}, tools.ExecutorFunc(func(ctx context.Context, req tools.Request) (tools.Result, error) {
-		return executeComputerNavigate(ctx, bridge, req)
-	}))
+		}, tools.ExecutorFunc(func(ctx context.Context, req tools.Request) (tools.Result, error) {
+			return executeComputerNavigate(ctx, bridge, req)
+		})); err != nil {
+			return err
+		}
+	}
+	return wrapComputerSnapshot(registry, bridge)
+}
+
+// snapshotRouter sends hwnd-less snapshots to the Browser rail when Desktop
+// is connected, and otherwise keeps the Zig UIA/AT-SPI executor.
+type snapshotRouter struct {
+	inner  tools.Executor
+	bridge HostBridgeProvider
+}
+
+func wrapComputerSnapshot(registry *tools.Registry, bridge HostBridgeProvider) error {
+	if registry == nil || bridge == nil {
+		return nil
+	}
+	if _, err := registry.Latest("computer.snapshot"); err != nil {
+		return nil
+	}
+	if err := registry.WrapExecutor("computer.snapshot", 0, func(inner tools.Executor) tools.Executor {
+		if existing, ok := inner.(*snapshotRouter); ok {
+			existing.bridge = bridge
+			return existing
+		}
+		return &snapshotRouter{inner: inner, bridge: bridge}
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *snapshotRouter) Execute(ctx context.Context, req tools.Request) (tools.Result, error) {
+	if s == nil || s.inner == nil {
+		return tools.Result{}, tools.ErrToolNotFound
+	}
+	var body struct {
+		HWND      *uint64 `json:"hwnd"`
+		SessionID string  `json:"session_id"`
+		TimeoutS  float64 `json:"timeout_s"`
+	}
+	if len(req.Input) > 0 {
+		if err := json.Unmarshal(req.Input, &body); err != nil {
+			return tools.Result{}, tools.ErrInvalidInput
+		}
+	}
+	if body.HWND != nil && *body.HWND > 0 {
+		return s.inner.Execute(ctx, req)
+	}
+	b := s.bridge()
+	if b == nil || !b.hostConnected() {
+		return s.inner.Execute(ctx, req)
+	}
+	return executeComputerSnapshotRail(ctx, b, req, body.SessionID, body.TimeoutS)
+}
+
+func executeComputerSnapshotRail(ctx context.Context, b *HostBridge, req tools.Request, sessionID string, timeoutS float64) (tools.Result, error) {
+	_ = req
+	sid := strings.TrimSpace(sessionID)
+	job := b.Enqueue("snapshot", map[string]any{
+		"ui":         map[string]any{"open_browser": true},
+		"session_id": sid,
+	}, sid)
+	timeout := timeoutS
+	if timeout <= 0 {
+		timeout = 22
+	}
+	unclaimed := 8.0
+	done := b.Wait(job.ID, WaitOptions{
+		TimeoutS:          timeout,
+		UnclaimedTimeoutS: &unclaimed,
+		AbortCheck: func() bool {
+			select {
+			case <-ctx.Done():
+				return true
+			default:
+				return false
+			}
+		},
+	})
+	if done == nil {
+		return snapshotUnavailable("browser"), nil
+	}
+	if done.Status != "done" {
+		return snapshotUnavailable("browser"), nil
+	}
+	controls := railResultControls(done.Result)
+	out, err := json.Marshal(map[string]any{
+		"source":    "browser",
+		"available": true,
+		"controls":  controls,
+		"total":     len(controls),
+	})
+	return tools.Result{Output: out}, err
+}
+
+func snapshotUnavailable(source string) tools.Result {
+	out, _ := json.Marshal(map[string]any{
+		"source": source, "available": false, "controls": []any{}, "total": 0,
+	})
+	return tools.Result{Output: out}
+}
+
+func railResultControls(result map[string]any) []map[string]any {
+	if result == nil {
+		return []map[string]any{}
+	}
+	raw, ok := result["elements"]
+	if !ok {
+		raw = result["controls"]
+	}
+	list, ok := raw.([]any)
+	if !ok {
+		if typed, ok := raw.([]map[string]any); ok {
+			out := make([]map[string]any, 0, len(typed))
+			for _, el := range typed {
+				if c := railElementToControl(el); c != nil {
+					out = append(out, c)
+				}
+			}
+			return out
+		}
+		return []map[string]any{}
+	}
+	out := make([]map[string]any, 0, len(list))
+	for _, item := range list {
+		el, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if c := railElementToControl(el); c != nil {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func railElementToControl(el map[string]any) map[string]any {
+	if el == nil {
+		return nil
+	}
+	name := strOr(el["name"], "")
+	if name == "" {
+		name = strOr(el["text"], "")
+	}
+	if name == "" {
+		name = strOr(el["label"], "")
+	}
+	c := map[string]any{"name": name, "role": strOr(el["role"], "")}
+	if id := strOr(el["ref"], ""); id == "" {
+		if id = strOr(el["id"], ""); id != "" {
+			c["id"] = id
+		}
+	} else {
+		c["id"] = id
+	}
+	if x, ok := jsonNumber(el["x"]); ok {
+		c["x"] = x
+	}
+	if y, ok := jsonNumber(el["y"]); ok {
+		c["y"] = y
+	}
+	return c
+}
+
+func jsonNumber(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	default:
+		return 0, false
+	}
 }
 
 func executeComputerNavigate(ctx context.Context, bridge HostBridgeProvider, req tools.Request) (tools.Result, error) {
 	var body struct {
 		URL       string  `json:"url"`
-		Target    string  `json:"target"`
 		Hint      string  `json:"hint"`
 		SessionID string  `json:"session_id"`
 		TimeoutS  float64 `json:"timeout_s"`
@@ -98,16 +272,6 @@ func executeComputerNavigate(ctx context.Context, bridge HostBridgeProvider, req
 		return tools.Result{}, tools.ErrInvalidInput
 	}
 	_ = body.Hint
-	target := strings.ToLower(strings.TrimSpace(body.Target))
-	if target == "" {
-		target = "browser"
-	}
-	if target == "desktop" {
-		out, _ := json.Marshal(map[string]any{
-			"ok": false, "url": "", "error": "computer.navigate drives the Browser rail; use shell/open externally only when the owner asks for the system browser",
-		})
-		return tools.Result{Output: out}, nil
-	}
 	normalized := normalizeNavigateURL(body.URL)
 	if normalized == "" {
 		out, _ := json.Marshal(map[string]any{
@@ -134,12 +298,11 @@ func executeComputerNavigate(ctx context.Context, bridge HostBridgeProvider, req
 	}
 	sid := strings.TrimSpace(body.SessionID)
 	job := b.Enqueue("navigate", map[string]any{
-		"url":           normalized,
-		"target":        "browser",
-		"ui":            map[string]any{"open_browser": true},
-		"session_id":    sid,
+		"url":        normalized,
+		"target":     "browser",
+		"ui":         map[string]any{"open_browser": true},
+		"session_id": sid,
 	}, sid)
-	b.markNavigated(normalized, true, sid)
 
 	select {
 	case <-ctx.Done():

@@ -132,6 +132,8 @@ def host_session_argv(host: str | None = None) -> list[str]:
 def issue_host_session_token(
     host: str | None = None,
     *,
+    env: Mapping[str, str] | None = None,
+    replace_env: bool = False,
     owner_checkpoint: bool = False,
     subject: str = DEFAULT_SPAWN_SUBJECT,
     scope: str = DEFAULT_SPAWN_SCOPE,
@@ -139,6 +141,8 @@ def issue_host_session_token(
     """Return ``(token, now_ms)`` for an authorized HostSession open of *host*."""
     return issue_process_spawn_token(
         host_session_argv(host),
+        env=env,
+        replace_env=replace_env,
         owner_checkpoint=owner_checkpoint,
         subject=subject,
         scope=scope,
@@ -314,7 +318,7 @@ class HostSession:
             from remedy.execution.env import scrub_subprocess_env
 
             env = scrub_subprocess_env()
-        token, now_ms = api.issue_host_session_token(self.host)
+        token, now_ms = api.issue_host_session_token(self.host, env=env)
         handle = await asyncio.to_thread(
             api.host_session_open_authorized,
             host=self.host,
