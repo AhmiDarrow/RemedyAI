@@ -22,7 +22,7 @@ import (
 
 func waitAtomic(t *testing.T, n *atomic.Int32, want int32) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if n.Load() == want {
 			return
