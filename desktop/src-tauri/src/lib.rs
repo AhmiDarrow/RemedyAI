@@ -3745,6 +3745,8 @@ fn emit_progress_ver(
 ) {
     #[cfg(target_os = "windows")]
     write_update_status(phase, percent, message, from, to);
+    #[cfg(not(target_os = "windows"))]
+    let _ = (from, to);
     let _ = app.emit(
         "update-progress",
         UpdateProgress {
