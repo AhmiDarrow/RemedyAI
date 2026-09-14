@@ -423,6 +423,9 @@ def test_prepush_gate_runs_every_public_ci_command() -> None:
     for step in prepush.RUST.steps:
         assert step.env["RUSTFLAGS"] == ci_rust_env["RUSTFLAGS"]
         assert step.env["TAURI_CONFIG"] == ci_rust_env["TAURI_CONFIG"]
+    assert any(step.command == "__wsl_cargo__" for step in prepush.LINUX.steps), (
+        "Windows cargo alone misses Linux cfg(not windows) unused vars; WSL cargo is required"
+    )
 
     # The Linux suite is reproduced from this checkout when the host is Windows.
     assert any(step.command == "__wsl_pytest__" for step in prepush.LINUX.steps)
