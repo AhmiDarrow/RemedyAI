@@ -437,6 +437,11 @@ jobs:
           APP_SAFE=$(basename "${APP}" | tr ' ' '.')
           cp -f "${DEB}" "dist-linux/${DEB_SAFE}"
           cp -f "${APP}" "dist-linux/${APP_SAFE}"
+          SIG=$(ls "$APP_DIR"/*.AppImage.sig 2>/dev/null | head -1 || true)
+          if [[ -n "${SIG}" ]]; then
+            SIG_SAFE=$(basename "${SIG}" | tr ' ' '.')
+            cp -f "${SIG}" "dist-linux/${SIG_SAFE}"
+          fi
           echo "deb_name=${DEB_SAFE}" >> "$GITHUB_OUTPUT"
           echo "appimage_name=${APP_SAFE}" >> "$GITHUB_OUTPUT"
 
@@ -506,42 +511,60 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, os
+          import base64, json, os
           from datetime import datetime, timezone
+          from pathlib import Path
+
+          def unwrap_sig(raw: str) -> str:
+              sig = (raw or "").strip()
+              if not sig:
+                  return ""
+              try:
+                  decoded = base64.b64decode(sig, validate=True).decode("utf-8")
+              except Exception:
+                  decoded = ""
+              if decoded.lstrip().startswith("untrusted comment:"):
+                  sig = decoded if decoded.endswith("\n") else decoded + "\n"
+              return sig
 
           ver = os.environ["VER"]
           tag = os.environ["TAG"]
           asset_name = os.environ["ASSET_NAME"]
-          import base64
-          sig = open("dist/signature.txt", encoding="utf-8").read().strip()
+          sig = unwrap_sig(open("dist/signature.txt", encoding="utf-8").read())
           if not sig:
               raise SystemExit("empty signature")
-          # Installed Remedy clients call minisign Signature::decode on this
-          # field. Tauri's .sig is a base64 wrapper of that file — unwrap so
-          # auto-update can parse it. (Tauri plugin unwraps itself.)
-          try:
-              raw = base64.b64decode(sig, validate=True).decode("utf-8")
-          except Exception:
-              raw = ""
-          if raw.lstrip().startswith("untrusted comment:"):
-              sig = raw if raw.endswith("\n") else raw + "\n"
           owner = os.environ["REPO_OWNER"]
           repo = os.environ["REPO_NAME"]
+          linux_dir = Path("dist-linux")
+          appimage = ""
+          linux_sig = ""
+          if linux_dir.is_dir():
+              for p in sorted(linux_dir.iterdir()):
+                  if p.name.endswith(".AppImage") and not p.name.endswith(".sig"):
+                      appimage = p.name
+                  if p.name.endswith(".AppImage.sig"):
+                      linux_sig = unwrap_sig(p.read_text(encoding="utf-8"))
+          platforms = {
+              "windows-x86_64": {
+                  "signature": sig,
+                  "url": f"https://github.com/{owner}/{repo}/releases/download/{tag}/{asset_name}",
+              }
+          }
+          if appimage:
+              platforms["linux-x86_64"] = {
+                  "signature": linux_sig,
+                  "url": f"https://github.com/{owner}/{repo}/releases/download/{tag}/{appimage}",
+              }
           payload = {
               "version": f"v{ver}",
-              "notes": f"Remedy Desktop v{ver} — signed Windows installer",
+              "notes": f"Remedy Desktop v{ver} — Windows installer and Linux AppImage",
               "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-              "platforms": {
-                  "windows-x86_64": {
-                      "signature": sig,
-                      "url": f"https://github.com/{owner}/{repo}/releases/download/{tag}/{asset_name}",
-                  }
-              },
+              "platforms": platforms,
           }
           with open("dist/latest.json", "w", encoding="utf-8") as f:
               json.dump(payload, f, indent=2)
               f.write("\n")
-          print("Wrote dist/latest.json for", asset_name, "sig_chars=", len(sig))
+          print("Wrote dist/latest.json for", asset_name, "linux=", appimage or "none", "sig_chars=", len(sig))
           PY
         env:
           ASSET_NAME: ${{ steps.installer.outputs.asset_name }}
@@ -574,8 +597,8 @@ jobs:
 
             No Python, Node, or Rust required.
 
-            ### Auto-update (Windows)
-            This release is **minisign-signed**. Apps with the embedded updater pubkey (v0.10.2+) can check and install updates in-app.
+            ### Auto-update
+            This release is **minisign-signed**. Windows NSIS and Linux AppImage installs with the embedded updater pubkey (v0.10.2+) can check and install updates in-app. Linux `.deb` installs still update from this page (`sudo apt install` the new `.deb`).
           files: |
             dist/${{ steps.installer.outputs.name }}
             dist/latest.json

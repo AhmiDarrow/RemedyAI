@@ -34,7 +34,7 @@ func TestIsModelHiddenTool(t *testing.T) {
 }
 
 func TestModelInputSchemaStripsInternalKeys(t *testing.T) {
-	in := json.RawMessage(`{"type":"object","required":["query","home_dir"],"properties":{"query":{"type":"string"},"home_dir":{"type":"string"},"_go_bound":{"type":"boolean"}},"additionalProperties":false}`)
+	in := json.RawMessage(`{"type":"object","required":["query","home_dir"],"properties":{"query":{"type":"string"},"home_dir":{"type":"string"},"page_context":{"type":"string"},"_go_bound":{"type":"boolean"}},"additionalProperties":false}`)
 	out := ModelInputSchema(in)
 	var doc map[string]any
 	if err := json.Unmarshal(out, &doc); err != nil {
@@ -46,6 +46,9 @@ func TestModelInputSchemaStripsInternalKeys(t *testing.T) {
 	}
 	if _, ok := props[GoBoundField]; ok {
 		t.Fatal("_go_bound must be stripped from the model schema")
+	}
+	if _, ok := props["page_context"]; ok {
+		t.Fatal("page_context must be stripped from the model schema")
 	}
 	if _, ok := props["query"]; !ok {
 		t.Fatal("query must survive")

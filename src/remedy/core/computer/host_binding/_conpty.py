@@ -264,13 +264,17 @@ def spawn_conpty_process(
     argv: list[str],
     cwd: str | None = None,
     env: Mapping[str, str] | None = None,
+    *,
+    replace_env: bool = False,
 ) -> _ConPTYProcess:
     """Authorized ConPTY spawn → duck-typed process. No unsigned fallback."""
     from remedy.execution.process_argv import resolve_argv0
 
     api = _api()
     resolved = resolve_argv0(argv)
-    token, now_ms = api.issue_process_spawn_token(resolved, env=env)
+    token, now_ms = api.issue_process_spawn_token(
+        resolved, env=env, replace_env=replace_env
+    )
     try:
         pid, handle = api.conpty_spawn_authorized(
             resolved,
@@ -278,6 +282,7 @@ def spawn_conpty_process(
             env=env,
             token=token,
             now_ms=now_ms,
+            replace_env=replace_env,
         )
     except HostError as exc:
         detail = str(exc)

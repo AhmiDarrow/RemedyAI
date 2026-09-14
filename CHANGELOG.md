@@ -4,6 +4,45 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.63.2] - 2026-09-13
+
+### Security
+
+- Hive helpers can look (windows, screenshot, snapshot) but cannot click, type,
+  send mail, or drive hive control. A new computer verb is denied until it is
+  named as observe-only.
+- A hive helper does not inherit Always / This session grants from the parent
+  chat. Each mutation asks; a Yes you just gave still lets that one call
+  finish.
+- Payment, sign-in, and submit clicks use the URL and labels the computer
+  actually shows, not a page string the model invented. Unlabeled click or
+  Enter on a checkout page still asks.
+- Messenger messages with no user id are refused even when allow-all is on.
+  Denied senders show in Settings. Empty replies are never reported as
+  processed.
+- The environment a command will run with is part of its authorization token.
+  A token minted for a replace cannot be spent as a merge.
+
+### Changed
+
+- When Desktop is connected, seeing the page uses the in-app Browser (including
+  shadow DOM). A native window handle still reads that window.
+- Linux AppImage can install a signed in-app update and relaunch in its own
+  process group. A `.deb` install still needs a manual download (sudo). An
+  unsigned `latest.json` is not offered as an in-app update.
+- Hive approval cards appear on whatever chat you are looking at, not only the
+  parent tab.
+- Rejoining a live turn keeps what is already on screen. A dead stream does not
+  skip frames as if they had been painted.
+
+### Fixed
+
+- The computer-use playbook matches the live tools: click at x,y with a label;
+  navigate takes a URL only (no leftover `target=`).
+- `page_context` is filled by the host and is not advertised to the model.
+- Approve-once does not stamp a standing grant. Vault placeholders are refused
+  on type / UIA set-value; secret field values are not kept as live labels.
+
 ## [0.63.1] - 2026-09-10
 
 ### Fixed

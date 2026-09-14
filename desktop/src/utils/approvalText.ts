@@ -27,6 +27,7 @@ export function approvalOriginLabel(item: OriginFields): string | null {
   if (!raw) return null
   const key = raw.toLowerCase()
   if (ORIGIN_LABELS[key]) return ORIGIN_LABELS[key]
+  if (key.startsWith('hive:')) return 'a hive task'
   return raw.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 

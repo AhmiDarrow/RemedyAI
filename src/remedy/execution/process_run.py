@@ -54,6 +54,7 @@ def run_hidden(
     env: Mapping[str, str] | None = None,
     check: bool = False,
     input: str | bytes | None = None,
+    replace_env: bool = False,
     **extra: Any,
 ) -> subprocess.CompletedProcess[Any]:
     """Run *args* via Zig authorized spawn or exec-capture (no soft pipes)."""
@@ -63,7 +64,7 @@ def run_hidden(
     if not _stdio_is_pipe_request(
         capture_output=capture_output, input=input, extra=extra
     ):
-        child = P.spawn_hidden(args, cwd=cwd, env=env)
+        child = P.spawn_hidden(args, cwd=cwd, env=env, replace_env=replace_env)
         try:
             # Route through process.wait so tests can monkeypatch the public API.
             code = P.wait(child, timeout)
@@ -96,6 +97,7 @@ def run_hidden(
             cwd=cwd,
             env=env,
             check=check,
+            replace_env=replace_env,
         )
     P._refuse_soft_pipe_spawn("run_hidden")
 
@@ -108,11 +110,14 @@ def _run_hidden_exec_capture(
     cwd: str | Path | None,
     env: Mapping[str, str] | None,
     check: bool,
+    replace_env: bool = False,
 ) -> subprocess.CompletedProcess[Any]:
     from remedy.core.computer import host_binding
 
     resolved = resolve_argv0(args)
-    token, now_ms = host_binding.issue_process_spawn_token(resolved, env=env)
+    token, now_ms = host_binding.issue_process_spawn_token(
+        resolved, env=env, replace_env=replace_env
+    )
     timeout_ms = 0 if timeout is None else int(max(0.0, float(timeout)) * 1000)
     captured = host_binding.process_exec_capture_authorized(
         resolved,
@@ -121,6 +126,7 @@ def _run_hidden_exec_capture(
         token=token,
         now_ms=now_ms,
         timeout_ms=timeout_ms,
+        replace_env=replace_env,
     )
     if captured.timed_out:
         raise subprocess.TimeoutExpired(
@@ -160,6 +166,7 @@ async def run_hidden_async(
     env: Mapping[str, str] | None = None,
     check: bool = False,
     input: str | bytes | None = None,
+    replace_env: bool = False,
     **extra: Any,
 ) -> subprocess.CompletedProcess[Any]:
     """Async wrapper around :func:`run_hidden`."""
@@ -173,6 +180,7 @@ async def run_hidden_async(
         env=env,
         check=check,
         input=input,
+        replace_env=replace_env,
         **extra,
     )
 
@@ -188,6 +196,7 @@ def popen_hidden(
     text: bool = False,
     encoding: str | None = None,
     errors: str | None = None,
+    replace_env: bool = False,
     **extra: Any,
 ) -> PipedProcess:
     """Authorized piped spawn when stdio pipes are requested; else fail closed."""
@@ -196,7 +205,9 @@ def popen_hidden(
     P.require_process_host()
     want_text = bool(text or encoding or errors)
     if _stdio_is_pipe_request(stdout=stdout, stderr=stderr, stdin=stdin, extra=extra):
-        return P.spawn_piped(args, cwd=cwd, env=env, text=want_text)
+        return P.spawn_piped(
+            args, cwd=cwd, env=env, text=want_text, replace_env=replace_env
+        )
     _ = (encoding, errors)
     P._refuse_soft_pipe_spawn("popen_hidden")
 

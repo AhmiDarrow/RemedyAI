@@ -207,6 +207,12 @@ func TestAllowlist(t *testing.T) {
 	if IsAllowed(nil, true, "") {
 		t.Fatal("allow_all must still require a sender identity")
 	}
+	if IsAllowed(set, false, "", "2") {
+		t.Fatal("empty first candidate must not let a later id stand in")
+	}
+	if IsAllowed(nil, true, "", "room-1") {
+		t.Fatal("allow_all with an empty sender must not admit a room id")
+	}
 	if ok, reason := NewAccess(nil, true).Permit("", "room-1"); ok || reason != "no-user-id" {
 		t.Fatalf("Permit empty user under allow_all: ok=%v reason=%q", ok, reason)
 	}

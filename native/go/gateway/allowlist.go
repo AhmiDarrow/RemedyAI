@@ -40,14 +40,13 @@ func ParseIDs(raw any) map[string]struct{} {
 // numbers). Messenger adapters with separate user and room ids must use
 // Access.Permit so a room id can never stand in for a user identity.
 func IsAllowed(allowlist map[string]struct{}, allowAll bool, candidates ...string) bool {
-	hasID := false
-	for _, c := range candidates {
-		if strings.TrimSpace(c) != "" {
-			hasID = true
-			break
-		}
+	// Identity is the first candidate only. Later args (room / chat ids)
+	// must not stand in when the sender id is missing.
+	if len(candidates) == 0 {
+		return false
 	}
-	if !hasID {
+	id := strings.TrimSpace(candidates[0])
+	if id == "" {
 		return false
 	}
 	if allowAll {
@@ -56,16 +55,8 @@ func IsAllowed(allowlist map[string]struct{}, allowAll bool, candidates ...strin
 	if len(allowlist) == 0 {
 		return false
 	}
-	for _, c := range candidates {
-		c = strings.TrimSpace(c)
-		if c == "" {
-			continue
-		}
-		if _, ok := allowlist[c]; ok {
-			return true
-		}
-	}
-	return false
+	_, ok := allowlist[id]
+	return ok
 }
 
 // Access is the per-channel inbound policy.

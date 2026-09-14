@@ -421,13 +421,14 @@ User path (Ollama-style):
 
 1. Settings / status bar → **Update & Relaunch** (single click)
 2. UI opens full-screen progress and **starts download immediately** (`autoStart`)
-3. Rust downloads the NSIS installer from GitHub Releases (trusted hosts only)
-4. Validates PE `MZ` header + minimum size (rejects HTML error pages)
-5. Kills `remedy-runtime` (and any legacy `remedy-desktop`) so files can be replaced
-6. Launches installer with **`/S`** (silent NSIS — not MSI `/PASSIVE`)
-7. Detaches installer, exits the app
-8. NSIS **`NSIS_HOOK_POSTINSTALL`** runs `Exec "…\Remedy Desktop.exe"` so the app
-   relaunches on the new build
+3. Rust re-reads signed `latest.json` and downloads **this OS’s** asset from GitHub Releases (trusted hosts only)
+4. **Windows:** validates PE `MZ` header + minimum size (rejects HTML error pages)
+   **Linux AppImage:** validates ELF header + minimum size
+5. Verifies **minisign** against the embedded updater pubkey
+6. Kills `remedy-runtime` so files can be replaced
+7. **Windows:** launches NSIS with **`/S` `/UPDATE`**, detaches, exits; NSIS POSTINSTALL relaunches
+   **Linux AppImage:** replaces the `APPIMAGE` file, chmod +x, relaunches it
+   **Linux `.deb`:** refuses in-app replace (needs sudo) and shows the download URL
 
 Metadata: `https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json`
 
@@ -438,16 +439,17 @@ Metadata: `https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/lates
 | Product title (release name) | `Remedy Desktop v{X.Y.Z}` |
 | Tag | `v{X.Y.Z}` |
 | NSIS file on disk (Tauri default) | `Remedy Desktop_{X.Y.Z}_x64-setup.exe` (space) |
-| **GitHub asset name / latest.json URL** | **`Remedy.Desktop_{X.Y.Z}_x64-setup.exe`** (dots for spaces) |
+| **GitHub Windows asset / `windows-x86_64` URL** | **`Remedy.Desktop_{X.Y.Z}_x64-setup.exe`** (dots for spaces) |
+| **GitHub Linux AppImage / `linux-x86_64` URL** | **`Remedy.Desktop_{X.Y.Z}_amd64.AppImage`** |
 | Metadata asset | `latest.json` (same release) |
-| Full installer URL | `https://github.com/AhmiDarrow/RemedyAI/releases/download/v{X.Y.Z}/Remedy.Desktop_{X.Y.Z}_x64-setup.exe` |
+| Full Windows installer URL | `https://github.com/AhmiDarrow/RemedyAI/releases/download/v{X.Y.Z}/Remedy.Desktop_{X.Y.Z}_x64-setup.exe` |
 
 **Rules (do not break auto-update):**
 
 1. Never publish `Remedy_Desktop_*` (underscore between product words) — only `Remedy.Desktop_*`.
 2. CI renames spaces → dots before upload (`.github/workflows/desktop-release.yml`).
-3. `latest.json` → `platforms.windows-x86_64.url` must equal the asset’s
-   `browser_download_url` **exactly** (signature is bound to that file).
+3. `latest.json` → `platforms.windows-x86_64.url` / `platforms.linux-x86_64.url`
+   must equal those assets’ `browser_download_url` **exactly** (signature is bound to that file).
 4. If a release asset is misnamed, the **easy fix** is rename the GitHub Release
    asset to `Remedy.Desktop_{ver}_x64-setup.exe` (and ensure `latest.json` URL
    matches). Prefer fixing the asset over disabling the URL match check.

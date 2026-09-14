@@ -118,6 +118,42 @@ func TestLivePageContextDoesNotBleedLabelsAcrossSessions(t *testing.T) {
 	}
 }
 
+func TestLivePageContextIgnoresOptimisticNavigate(t *testing.T) {
+	home := t.TempDir()
+	b := newHostBridge(home)
+	if got := b.livePageContext("sess-1"); strings.Contains(got, "checkout") {
+		t.Fatalf("unobserved url leaked into live context: %q", got)
+	}
+	job := b.Enqueue("navigate", map[string]any{"url": "https://shop.example/checkout"}, "sess-1")
+	b.claimNext(nil, nil, "sess-1", 0)
+	b.complete(job.ID, true, map[string]any{"ok": true, "url": "https://shop.example/cart"}, nil)
+	got := b.livePageContext("sess-1")
+	if !strings.Contains(got, "/cart") {
+		t.Fatalf("observed url missing from live context: %q", got)
+	}
+	if strings.Contains(got, "checkout") {
+		t.Fatalf("requested url must not replace observed url: %q", got)
+	}
+}
+
+func TestLivePageContextDropsControlValues(t *testing.T) {
+	home := t.TempDir()
+	b := newHostBridge(home)
+	a := b.Enqueue("snapshot", map[string]any{}, "sess-a")
+	if b.completeA11yPush(a.ID, []map[string]any{
+		{"name": "Card number", "value": "4111111111111111", "text": "Visa", "label": "Payment"},
+	}) == nil {
+		t.Fatal("a11y")
+	}
+	got := b.livePageContext("sess-a")
+	if strings.Contains(got, "4111") {
+		t.Fatalf("control value leaked into live context: %q", got)
+	}
+	if !strings.Contains(got, "Card number") || !strings.Contains(got, "Visa") {
+		t.Fatalf("name/text missing from live context: %q", got)
+	}
+}
+
 func containsFold(s, sub string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(sub))
 }

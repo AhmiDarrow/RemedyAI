@@ -135,16 +135,14 @@ def parse_granted_caps(raw: object) -> frozenset[Capability]:
 
 
 def is_mother_only_tool(name: str | None) -> bool:
-    n = _abi_name(name)
+    n = _abi_name(name or "")
     if not n:
         return False
-    if n in MOTHER_ONLY_TOOLS:
-        return True
-    if n.startswith(MOTHER_ONLY_PREFIXES):
-        return True
-    if n.startswith("computer.") and n not in _COMPUTER_OBSERVE:
-        return True
-    return False
+    return (
+        n in MOTHER_ONLY_TOOLS
+        or n.startswith(MOTHER_ONLY_PREFIXES)
+        or (n.startswith("computer.") and n not in _COMPUTER_OBSERVE)
+    )
 
 
 def _tool_name(tool: dict[str, Any]) -> str:

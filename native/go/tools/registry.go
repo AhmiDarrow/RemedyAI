@@ -178,6 +178,76 @@ func (r *Registry) SetDeadline(id string, version uint32, deadline time.Duration
 	return nil
 }
 
+// WrapExecutor replaces the executor of a registered version. version 0 means
+// the latest. Used to route an already-registered tool (computer.snapshot)
+// through a second backend without re-registering the id.
+func (r *Registry) WrapExecutor(id string, version uint32, wrap func(Executor) Executor) error {
+	if wrap == nil {
+		return ErrInvalidDescriptor
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k, err := r.lookupLocked(id, version)
+	if err != nil {
+		return err
+	}
+	tool := r.tools[k]
+	next := wrap(tool.executor)
+	if next == nil {
+		return ErrInvalidDescriptor
+	}
+	tool.executor = next
+	r.tools[k] = tool
+	return nil
+}
+
+// ReplaceSchemas recompiles input and/or output schemas of a registered
+// version. A nil/empty blob leaves that side unchanged.
+func (r *Registry) ReplaceSchemas(id string, version uint32, input, output json.RawMessage) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	k, err := r.lookupLocked(id, version)
+	if err != nil {
+		return err
+	}
+	tool := r.tools[k]
+	if len(input) > 0 {
+		compiled, err := compileSchema(id+"-input", input)
+		if err != nil {
+			return fmt.Errorf("%w: input: %v", ErrInvalidDescriptor, err)
+		}
+		tool.input = compiled
+		tool.descriptor.InputSchema = append(json.RawMessage(nil), input...)
+	}
+	if len(output) > 0 {
+		compiled, err := compileSchema(id+"-output", output)
+		if err != nil {
+			return fmt.Errorf("%w: output: %v", ErrInvalidDescriptor, err)
+		}
+		tool.output = compiled
+		tool.descriptor.OutputSchema = append(json.RawMessage(nil), output...)
+	}
+	r.tools[k] = tool
+	return nil
+}
+
+func (r *Registry) lookupLocked(id string, version uint32) (key, error) {
+	if version == 0 {
+		var latest uint32
+		for k := range r.tools {
+			if k.id == id && k.version > latest {
+				latest = k.version
+			}
+		}
+		version = latest
+	}
+	k := key{id, version}
+	if _, ok := r.tools[k]; !ok {
+		return key{}, ErrToolNotFound
+	}
+	return k, nil
+}
+
 // SetDefaultDeadlines assigns rule(descriptor) to every registered version
 // that has no Deadline yet. Descriptors that declared their own keep it.
 func (r *Registry) SetDefaultDeadlines(rule func(Descriptor) time.Duration) {

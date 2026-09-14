@@ -16,6 +16,8 @@ export interface PendingApproval {
   soft_risk?: string | null
   approval_mode_hint?: string
   session_id?: string | null
+  /** True when a live turn is blocked on this item. */
+  blocking?: boolean
   status: string
   created_at?: number
   /** Yes / No / Explain for life-task plan cards. */

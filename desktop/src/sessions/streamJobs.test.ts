@@ -7,6 +7,7 @@ vi.mock('../api/sessions', () => ({
 import {
   appendJobToken,
   getJobLastSeq,
+  liveAttachAfter,
   getJobRequestId,
   isFollowingTurn,
   setJobLastSeq,
@@ -208,6 +209,15 @@ describe('turn identity on a stream job', () => {
     // A watermark never moves backwards — a late replay frame cannot lower it.
     setJobLastSeq('s-id', 3)
     expect(getJobLastSeq('s-id')).toBe(9)
+    expect(liveAttachAfter('s-id')).toBe(9)
+  })
+
+  it('does not pass a dead job lastSeq as an attach watermark', () => {
+    registerStreamJob('s-dead', new AbortController())
+    setJobLastSeq('s-dead', 12)
+    completeStreamJob('s-dead', 'error')
+    expect(getJobLastSeq('s-dead')).toBe(12)
+    expect(liveAttachAfter('s-dead')).toBe(0)
   })
 
   it('seeds identity when the job is a re-attach', () => {
