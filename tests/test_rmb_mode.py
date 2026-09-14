@@ -129,7 +129,7 @@ def test_vision_suspended_skips_stack(monkeypatch):
 
 def test_stop_accepts_resume_vision_false():
     home = tempfile.mkdtemp(prefix="rmb-stop-")
-    r = stop_rmb_server(home_dir=home, resume_vision=False)
+    r = stop_rmb_server(home_dir=home, resume_vision=False, user_intent=False)
     assert r.get("ok") is True
     assert r.get("vision_suspended") is False
 
