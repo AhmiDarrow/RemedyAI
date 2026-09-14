@@ -92,7 +92,7 @@ def spawn_hidden(
     from remedy.core.computer import host_binding
 
     resolved = resolve_argv0(argv)
-    token, now_ms = host_binding.issue_process_spawn_token(resolved)
+    token, now_ms = host_binding.issue_process_spawn_token(resolved, env=env)
     roots = None if write_roots is None else [str(r) for r in write_roots]
     pid, handle = host_binding.process_spawn_authorized(
         resolved,
@@ -118,7 +118,7 @@ def spawn_piped(
 
     require_process_host()
     resolved = resolve_argv0(argv)
-    token, now_ms = host_binding.issue_process_spawn_token(resolved)
+    token, now_ms = host_binding.issue_process_spawn_token(resolved, env=env)
     roots = None if write_roots is None else [str(r) for r in write_roots]
     spawned = host_binding.process_spawn_piped_authorized(
         resolved,

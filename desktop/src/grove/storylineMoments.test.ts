@@ -30,11 +30,17 @@ describe('describeToolCall', () => {
       describeToolCall({ name: 'computer_navigate', args: { url: 'https://www.kroger.com/cart' } }),
     ).toBe('Opened kroger.com')
     expect(
+      describeToolCall({ name: 'computer.navigate', args: { url: 'https://www.kroger.com/cart' } }),
+    ).toBe('Opened kroger.com')
+    expect(
       describeToolCall({
         name: 'computer_act',
         args: { url: 'https://www.kroger.com', click: 'Add to Cart' },
       }),
     ).toBe('Went to kroger.com, pressed “Add to Cart”')
+    expect(describeToolCall({ name: 'computer.click', args: { text: 'Sign in' } })).toBe(
+      'Pressed “Sign in”',
+    )
     expect(describeToolCall({ name: 'computer_click', args: { text: 'Sign in' } })).toBe(
       'Pressed “Sign in”',
     )

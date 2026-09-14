@@ -33,6 +33,7 @@ import { getSettings } from '../api/settings'
 import { useVoice } from '../voice/useVoice'
 import type { GenderRole } from '../voice/pickVoice'
 import type { ChatMessage, ChatSession } from '../types'
+import type { ProcessStep, ToolProcessMode } from '../utils/toolLabels'
 import './grove.css'
 
 const GOAL_SESSIONS_KEY = 'remedy.grove.goalSessions.v1'
@@ -109,6 +110,8 @@ export interface GroveAppProps {
   streaming: boolean
   messagesLoading: boolean
   buildTodos?: BuildTodo[]
+  processSteps?: ProcessStep[]
+  toolProcessMode?: ToolProcessMode
   handleSend: (
     text: string,
     attachments?: SendAttachment[],
@@ -147,6 +150,8 @@ export function GroveApp({
   streaming,
   messagesLoading,
   buildTodos = [],
+  processSteps = [],
+  toolProcessMode = 'off',
   handleSend,
   stickNonce,
   stop,
@@ -739,6 +744,8 @@ export function GroveApp({
             streaming={streaming}
             loading={messagesLoading}
             buildTodos={buildTodos}
+            processSteps={processSteps}
+            toolProcessMode={toolProcessMode}
             userName={userName}
             partnerName={partnerName}
             serverReady={serverReady}
@@ -786,6 +793,8 @@ export function GroveApp({
                 streaming={streaming}
                 loading={messagesLoading}
                 buildTodos={buildTodos}
+            processSteps={processSteps}
+            toolProcessMode={toolProcessMode}
                 userName={userName}
                 partnerName={partnerName}
                 serverReady={serverReady}
@@ -924,6 +933,8 @@ export function GroveApp({
               streaming={streaming}
               loading={messagesLoading}
               buildTodos={buildTodos}
+            processSteps={processSteps}
+            toolProcessMode={toolProcessMode}
               userName={userName}
               partnerName={partnerName}
               serverReady={serverReady}

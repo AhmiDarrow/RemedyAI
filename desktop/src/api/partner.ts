@@ -175,7 +175,7 @@ export async function listApprovals(sessionId?: string | null): Promise<PendingA
 export async function resolveApproval(
   id: string,
   approve: boolean,
-  scope: 'session' | 'always' = 'session',
+  scope: 'session' | 'always' | 'once' = 'session',
 ): Promise<{ status: string; hint?: string; resumed?: boolean }> {
   return apiFetch(`/approvals/${encodeURIComponent(id)}/resolve`, {
     method: 'POST',

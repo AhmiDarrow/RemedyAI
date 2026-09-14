@@ -11,6 +11,7 @@ import (
 var (
 	signingMu    sync.Mutex
 	signingReady bool
+	writeJailMu  sync.Mutex
 )
 
 // SecuritySetSigningKey installs the first 32 bytes as the HMAC key.
@@ -196,6 +197,27 @@ func IssueProcessSpawnToken(
 
 // WriteJailSetRoots installs write roots (empty = Full / unbound).
 func WriteJailSetRoots(roots []string) error {
+	writeJailMu.Lock()
+	defer writeJailMu.Unlock()
+	return writeJailSetRootsLocked(roots)
+}
+
+// WithWriteJail holds the process-global write-jail table across set-roots
+// and the spawn that depends on it, so a concurrent worker/terminal/shell
+// cannot observe a foreign root set.
+func WithWriteJail(roots []string, fn func() error) error {
+	if fn == nil {
+		return fmt.Errorf("with write jail: missing function")
+	}
+	writeJailMu.Lock()
+	defer writeJailMu.Unlock()
+	if err := writeJailSetRootsLocked(roots); err != nil {
+		return err
+	}
+	return fn()
+}
+
+func writeJailSetRootsLocked(roots []string) error {
 	lib, err := Open()
 	if err != nil {
 		return err

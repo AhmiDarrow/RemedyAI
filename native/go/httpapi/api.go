@@ -181,7 +181,13 @@ func New(cfg Config) (*Server, error) {
 			cr.HomeDir = home
 		}
 		if cr.Registry != nil {
-			cr.Policy = &RegistryPolicy{Registry: cr.Registry, Approvals: s.approvals}
+			cr.LiveContext = func(sid string) string {
+				if b := s.bridge(); b != nil {
+					return b.livePageContext(sid)
+				}
+				return ""
+			}
+			cr.Policy = &RegistryPolicy{Registry: cr.Registry, Approvals: s.approvals, LiveContext: cr.LiveContext}
 		}
 		// Browser-rail tools (computer.navigate) need the live HostBridge.
 		_ = cr.AttachRailTools(s.bridge)

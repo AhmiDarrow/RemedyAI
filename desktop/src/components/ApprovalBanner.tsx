@@ -48,11 +48,15 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
     }
   }, [refresh, sessionId])
 
-  const act = async (item: PendingApproval, approve: boolean) => {
+  const act = async (
+    item: PendingApproval,
+    approve: boolean,
+    scope: 'session' | 'always' | 'once' = 'once',
+  ) => {
     setBusyId(item.id)
     setMessage('')
     try {
-      const res = await resolveApproval(item.id, approve, 'session')
+      const res = await resolveApproval(item.id, approve, approve ? scope : 'once')
       const msg = res.hint || (approve ? t('approval.approved') : t('approval.denied'))
       flashMsg(msg, 2800)
       await refresh()
@@ -134,7 +138,7 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
             <button
               type="button"
               disabled={busyId === item.id}
-              onClick={() => void act(item, true)}
+              onClick={() => void act(item, true, 'once')}
               className="ui-btn ui-btn-primary"
             >
               {busyId === item.id

@@ -274,6 +274,11 @@ _PROTOTYPES: dict[str, tuple[list[Any], Any]] = {
         [c_char_p, c_size_t, c_void_p, c_size_t],
         c_int32,
     ),
+    "remedy_core_policy_hash_spawn": (
+        [c_char_p, c_size_t, c_char_p, c_size_t, c_uint8, c_void_p, c_size_t],
+        c_int32,
+    ),
+    "remedy_core_policy_env_strict": ([c_uint8], c_int32),
     "remedy_core_capability_issue": (
         [
             c_char_p,

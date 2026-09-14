@@ -318,7 +318,7 @@ func (r *CognitionTurnRunner) AttachRailTools(bridge HostBridgeProvider) error {
 		return err
 	}
 	r.Tools = &RegistryToolExecutor{Registry: r.Registry, TokenFor: RuntimeCapabilityToken}
-	r.Policy = &RegistryPolicy{Registry: r.Registry, Approvals: r.Approvals}
+	r.Policy = &RegistryPolicy{Registry: r.Registry, Approvals: r.Approvals, LiveContext: r.LiveContext}
 	r.syncModelToolSchemas()
 	return nil
 }

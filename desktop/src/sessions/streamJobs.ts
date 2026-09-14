@@ -474,7 +474,12 @@ export function setJobClaimEpoch(sessionId: string, epoch: number): void {
 export async function stopStreamJob(sessionId: string): Promise<void> {
   const live = jobs.get(sessionId)
   try {
-    await abortSession(sessionId, 'stop', live?.claimEpoch)
+    const res = await abortSession(sessionId, 'stop', live?.claimEpoch)
+    // A stale Stop (wrong claim epoch) must not paint this turn as aborted —
+    // the live turn is someone else's.
+    if (res?.status === 'ignored') {
+      return
+    }
   } catch {
     /* */
   }

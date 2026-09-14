@@ -208,30 +208,67 @@ func TestIsSensitiveComputerAction(t *testing.T) {
 	cases := []struct {
 		name  string
 		call  cognition.ToolCall
+		live  string
 		wants bool
 	}{
-		{"place order label", cognition.ToolCall{Name: "computer.click", Input: []byte(`{"x":1,"y":2,"label":"Place order"}`)}, true},
-		{"plain click", cognition.ToolCall{Name: "computer.click", Input: []byte(`{"x":1,"y":2,"label":"Open settings"}`)}, false},
-		{"coordinate click on checkout", cognition.ToolCall{Name: "computer.click", Input: []byte(`{"x":1,"y":2,"page_context":"https://shop.example/checkout"}`)}, true},
-		{"coordinate click elsewhere", cognition.ToolCall{Name: "computer.click", Input: []byte(`{"x":1,"y":2,"page_context":"https://docs.example/guide"}`)}, false},
-		{"uia continue on billing", cognition.ToolCall{Name: "computer.uia.action", Input: []byte(`{"hwnd":1,"name":"Continue","action":"invoke","page_context":"Billing address"}`)}, true},
-		{"uia toggle normal", cognition.ToolCall{Name: "computer.uia.action", Input: []byte(`{"hwnd":1,"name":"Dark mode","action":"toggle"}`)}, false},
-		{"enter on payment page", cognition.ToolCall{Name: "computer.key", Input: []byte(`{"key":"enter","page_context":"Payment details"}`)}, true},
-		{"tab on payment page", cognition.ToolCall{Name: "computer.key", Input: []byte(`{"key":"tab","page_context":"Payment details"}`)}, false},
-		{"raw card typed", cognition.ToolCall{Name: "computer.type", Input: []byte(`{"text":"4111 1111 1111 1111"}`)}, true},
-		{"vault handle typed", cognition.ToolCall{Name: "computer.type", Input: []byte(`{"text":"{{vault:visa}}"}`)}, true},
-		{"ordinary typing", cognition.ToolCall{Name: "computer.type", Input: []byte(`{"text":"please send the report tomorrow"}`)}, false},
-		{"captcha click", cognition.ToolCall{Name: "computer_click", Input: []byte(`{"x":1,"y":2,"page_context":"Verify you are human"}`)}, true},
-		{"shell password", cognition.ToolCall{Name: "shell.exec", Input: []byte(`{"argv":["C:\\x\\mysql.exe","--password=hunter2"]}`)}, true},
-		{"shell ssh key", cognition.ToolCall{Name: "shell.exec", Input: []byte(`{"argv":["C:\\x\\type.exe","C:\\Users\\me\\.ssh\\id_rsa"]}`)}, true},
-		{"shell stripe charge", cognition.ToolCall{Name: "shell.exec", Input: []byte(`{"argv":["stripe","charges","create","--amount","5000"]}`)}, true},
-		{"shell build", cognition.ToolCall{Name: "shell.exec", Input: []byte(`{"argv":["C:\\Go\\bin\\go.exe","test","./..."]}`)}, false},
-		{"other tool", cognition.ToolCall{Name: "workspace.write", Input: []byte(`{"path":"pay now.txt","label":"Place order"}`)}, false},
+		{"place order label", cognition.ToolCall{Name: "computer.click", Input: []byte(`{"x":1,"y":2,"label":"Place order"}`)}, "", true},
+		{"plain click", cognition.ToolCall{Name: "computer.click", Input: []byte(`{"x":1,"y":2,"label":"Open settings"}`)}, "", false},
+		{"coordinate click on checkout", cognition.ToolCall{Name: "computer.click", Input: []byte(`{"x":1,"y":2}`)}, "https://shop.example/checkout", true},
+		{"coordinate click elsewhere", cognition.ToolCall{Name: "computer.click", Input: []byte(`{"x":1,"y":2}`)}, "https://docs.example/guide", false},
+		{"model page_context is ignored", cognition.ToolCall{Name: "computer.click", Input: []byte(`{"x":1,"y":2,"page_context":"https://shop.example/checkout"}`)}, "https://docs.example/guide", false},
+		{"unlabeled click with no probe", cognition.ToolCall{Name: "computer.click", Input: []byte(`{"x":1,"y":2}`)}, "", true},
+		{"uia continue on billing", cognition.ToolCall{Name: "computer.uia.action", Input: []byte(`{"hwnd":1,"name":"Continue","action":"invoke"}`)}, "Billing address", true},
+		{"uia toggle normal", cognition.ToolCall{Name: "computer.uia.action", Input: []byte(`{"hwnd":1,"name":"Dark mode","action":"toggle"}`)}, "", false},
+		{"enter on payment page", cognition.ToolCall{Name: "computer.key", Input: []byte(`{"key":"enter"}`)}, "Payment details", true},
+		{"tab on payment page", cognition.ToolCall{Name: "computer.key", Input: []byte(`{"key":"tab"}`)}, "Payment details", false},
+		{"enter with no probe", cognition.ToolCall{Name: "computer.key", Input: []byte(`{"key":"enter"}`)}, "", true},
+		{"raw card typed", cognition.ToolCall{Name: "computer.type", Input: []byte(`{"text":"4111 1111 1111 1111"}`)}, "", true},
+		{"vault handle typed", cognition.ToolCall{Name: "computer.type", Input: []byte(`{"text":"{{vault:visa}}"}`)}, "", true},
+		{"ordinary typing", cognition.ToolCall{Name: "computer.type", Input: []byte(`{"text":"please send the report tomorrow"}`)}, "", false},
+		{"type on checkout", cognition.ToolCall{Name: "computer.type", Input: []byte(`{"text":"Jane Doe"}`)}, "https://shop.example/checkout", true},
+		{"type into password field", cognition.ToolCall{Name: "computer.uia.action", Input: []byte(`{"hwnd":1,"name":"Password","action":"set_value","text":"secret"}`)}, "", true},
+		{"captcha click", cognition.ToolCall{Name: "computer_click", Input: []byte(`{"x":1,"y":2}`)}, "Verify you are human", true},
+		{"key hold on captcha", cognition.ToolCall{Name: "computer.key_hold", Input: []byte(`{"key":"space","hold_ms":3000}`)}, "Press and hold", true},
+		{"key hold unlabeled no probe", cognition.ToolCall{Name: "computer.key_hold", Input: []byte(`{"key":"space","hold_ms":3000}`)}, "", true},
+		{"shell password", cognition.ToolCall{Name: "shell.exec", Input: []byte(`{"argv":["C:\\x\\mysql.exe","--password=hunter2"]}`)}, "", true},
+		{"shell ssh key", cognition.ToolCall{Name: "shell.exec", Input: []byte(`{"argv":["C:\\x\\type.exe","C:\\Users\\me\\.ssh\\id_rsa"]}`)}, "", true},
+		{"shell stripe charge", cognition.ToolCall{Name: "shell.exec", Input: []byte(`{"argv":["stripe","charges","create","--amount","5000"]}`)}, "", true},
+		{"shell build", cognition.ToolCall{Name: "shell.exec", Input: []byte(`{"argv":["C:\\Go\\bin\\go.exe","test","./..."]}`)}, "", false},
+		{"other tool", cognition.ToolCall{Name: "workspace.write", Input: []byte(`{"path":"pay now.txt","label":"Place order"}`)}, "", false},
 	}
 	for _, tc := range cases {
-		if got := isSensitiveComputerAction(tc.call); got != tc.wants {
+		if got := classifySensitiveComputer(tc.call, tc.live); got != tc.wants {
 			t.Errorf("%s: got %v want %v", tc.name, got, tc.wants)
 		}
+	}
+}
+
+func TestHiveDeniedTools(t *testing.T) {
+	if !hiveDeniedTool("computer.click") || !hiveDeniedTool("mail.send") || !hiveDeniedTool("computer_type") {
+		t.Fatal("hive must deny click/type/mail")
+	}
+	if !hiveDeniedTool("hive.spawn") || !hiveDeniedTool("clipboard.write") || !hiveDeniedTool("computer.uia.action") {
+		t.Fatal("hive must deny hive control, clipboard write, and UIA action")
+	}
+	if !hiveDeniedTool("computer.move") {
+		t.Fatal("hive must deny mouse move; it is computer input")
+	}
+	if !hiveDeniedTool("computer.future") || !hiveDeniedTool("mcp.github.create") {
+		t.Fatal("hive must fail closed on unknown computer input and mcp tools")
+	}
+	if hiveDeniedTool("read") || hiveDeniedTool("computer.screenshot") || hiveDeniedTool("web.search") {
+		t.Fatal("hive may still read and search")
+	}
+	if hiveDeniedTool("computer.snapshot") || hiveDeniedTool("computer.uia.focused") || hiveDeniedTool("computer.print_window") {
+		t.Fatal("hive may still observe the screen")
+	}
+	reg, err := NewDefaultToolRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &RegistryPolicy{Registry: reg, HiveRestricted: true}
+	if d := p.Decide(context.Background(), cognition.ToolCall{Name: "computer.click", Input: []byte(`{"x":1,"y":2,"label":"Open settings"}`)}); d != cognition.Deny {
+		t.Fatalf("hive click Decide=%v want Deny", d)
 	}
 }
 

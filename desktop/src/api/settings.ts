@@ -309,6 +309,21 @@ export interface MessengerTunnelStatus {
   hint?: string
 }
 
+export type DeniedInbound = {
+  channel: string
+  user_id: string
+  scope_id: string
+  reason: string
+  count: number
+  last_seen: number
+}
+
+export async function getRuntimeStatus(): Promise<{
+  gateway?: { denied_inbound?: DeniedInbound[] }
+}> {
+  return apiFetch('/status')
+}
+
 export async function getMessengerTunnelStatus(): Promise<MessengerTunnelStatus> {
   return apiFetch<MessengerTunnelStatus>('/messengers/tunnel')
 }

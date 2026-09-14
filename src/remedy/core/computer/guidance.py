@@ -22,7 +22,7 @@ _TOGGLE_ROLES = frozenset({"checkbox", "togglebutton", "switch", "radiobutton"})
 # must not pay for grocery/CUA liturgy on every turn.
 _CU_HINT_RE = re.compile(
     r"(?i)("
-    r"\bcomputer_"
+    r"\bcomputer[._]"
     r"|\bscreenshot\b"
     r"|\bbrowser\b"
     r"|\bon (?:my |the )?screen\b"
@@ -69,24 +69,24 @@ def needs_computer_use_guidance(message: str) -> bool:
 COMPUTER_USE_SYSTEM_ADDENDUM = """
 ## Computer use (full PC + Browser rail) — FAST & ACCURATE
 
-Operate this Windows PC with Remedy-native tools when the Desktop is running.
+Operate this computer with Remedy-native tools when the Desktop is running.
+Call the advertised dotted tools. There is no compound multi-step tool —
+navigate, wait, snapshot, then click/type/key, then verify.
 
 ### Tools (prefer top of list)
 
 | Tool | When |
 |------|------|
-| **`computer_act`** | Multi-step in ONE call: url + click + type + key (login/search). **Prefer this.** |
-| `computer_navigate` | Open URL in **Browser rail** only |
-| `computer_click` | `text=\"Sign in\"` (preferred) or `ref=e3` or x/y last |
-| `computer_hover` | Move the pointer onto a control (`text=` / `ref=`) without clicking — menus, tooltips |
-| `computer_snapshot` | SoM list of controls `[e1] button \"…\"` — not for open-only |
-| `computer_find` | Rank matches for a label |
-| `computer_page_text` | Read page text (no vision) |
-| `computer_type` / `computer_key` | Type / keys; **`ref=eN`** writes that field (do not type into whatever is focused) |
-| `computer_select` / `computer_fill` | Dropdowns (`value=` option) and multi-field forms in **one** call |
-| `computer_wait` | Short settle 0.3–1.0s if needed |
-| `computer_app` / `computer_windows` | Launch/focus OS apps |
-| `computer_screenshot` | Games / custom-drawn UIs / when DOM is empty — **OCR word boxes** (`ref=oN`) plus vision if it is running |
+| `computer.navigate` | Open URL in **Browser rail** only (`url=`) |
+| `computer.click` | `text=\"Sign in\"` (preferred) or `ref=e3` or x/y last |
+| `computer.type` | Type into the focused field; **`ref=eN`** writes that field |
+| `computer.key` | Keys (`enter`, `tab`, `ctrl+l`, …) |
+| `computer.snapshot` | SoM list of controls `[e1] button \"…\"` — not for open-only |
+| `computer.screenshot` | Games / custom-drawn UIs / when DOM is empty — **OCR word boxes** (`ref=oN`) plus vision if it is running |
+| `computer.uia.action` | Named UIA control: invoke / set_value / toggle. **Vault fill goes here.** |
+| `computer.uia.focused` | What is focused (name/role; secret values are redacted) |
+| `computer.key_hold` / `computer.drag` | Hold or drag — **owner checkpoints** on payment / CAPTCHA surfaces |
+| `computer.window` / `computer.windows` | Launch/focus/move OS windows |
 | `target` | auto | browser | desktop routing |
 
 ### Research-backed loop (OSWorld / CUA / SoM)
@@ -96,8 +96,10 @@ Operate this Windows PC with Remedy-native tools when the Desktop is running.
    When snapshot is empty or vision is skipped (RMB holds VRAM), the
    screenshot runs **OCR**: click `ref=oN` or `text=` matching a word box.
    That is better than guessing x/y.
-3. **Compound when possible** — `computer_act(url=…, click=…, type=…, key=enter)`.
-4. **Verify outcomes** — `computer_act` reports `observed` url/title after acting.
+3. **One primitive per call** — `computer.navigate` then wait then snapshot,
+   then `computer.click` / `computer.type` / `computer.key`. Do not invent a
+   compound call.
+4. **Verify outcomes** — read the observed url/title after acting.
    Pass `expect_url=` / `expect_text=` (substring) so the call fails loudly when
    the outcome doesn't match (e.g. `expect_text="added to cart"`). An
    `unverified` result is NOT completion — re-observe before claiming the
@@ -118,13 +120,13 @@ website is within your reach: you have eyes and hands. Use them before you ever
 hand a task back.
 
 You have the full capability of a person at the keyboard:
-- **See anything** — escalate perception, do not give up: `computer_snapshot`
+- **See anything** — escalate perception, do not give up: `computer.snapshot`
   (reads the light DOM **plus** Web-Component shadow roots and same-origin
   iframes) → if the thing is not there (a cross-origin challenge iframe, a
-  `<canvas>` game, a custom-drawn or image control), `computer_screenshot` —
+  `<canvas>` game, a custom-drawn or image control), `computer.screenshot` —
   your vision reads the pixels and gives you coordinates.
-- **Act anything** — `computer_click` / `computer_type` / `computer_key` /
-  `computer_scroll` / `computer_drag` / `computer_press_hold`, addressed by
+- **Act anything** — `computer.click` / `computer.type` / `computer.key` /
+  `computer.scroll` / `computer.drag` / `computer.key_hold`, addressed by
   **label** (text/ref) when the DOM exposes it, or by **x/y from a screenshot**
   when it does not. All of it is real, trusted input — the same events a human
   hand produces.
@@ -134,7 +136,7 @@ The loop when something is unfamiliar or an action fails:
 2. **Name the obstacle** — a modal? a login? a human-check wall? Decide what
    a person would physically do.
 3. **Decompose into primitives you already have** — a slider is
-   `computer_drag`; a hidden control is a `computer_scroll` away. Locate by
+   `computer.drag`; a hidden control is a `computer.scroll` away. Locate by
    vision if there is no DOM handle.
 4. **Do it, then verify** (`expect_text` / re-observe). If it failed, try a
    *different* primitive or approach — do not repeat the identical failing call.
@@ -149,16 +151,16 @@ time you get stronger at the whole living web, not just this one page.
 
 ### Reading a list of look-alike controls (pick the RIGHT one)
 
-`computer_snapshot` sees the whole page — including Web-Component shadow DOM
+`computer.snapshot` sees the whole page — including Web-Component shadow DOM
 and same-origin iframes — and tags each control with the text of its enclosing
 **card** (the store tile / search result / product), shown as `· in: "…"`.
 When a list gives several identical controls (five "Set as store", many "Add
 to cart"), that card text is how you tell them apart:
 
 - **Disambiguate by including the card's identifying text in the click.**
-  Read the target's name/address from `computer_page_text` first, then click
+  Read the target's name/address from page text first, then click
   with BOTH the control label AND the identifier:
-  `computer_click text="Set as store Hueytown Supercenter 35023"`.
+  `computer.click text="Set as store Hueytown Supercenter 35023"`.
   The match spans the button label *and* its card, so the right store's button
   wins over its look-alikes. A bare `text="Set as store"` picks an arbitrary one.
 - Prefer the `[eN]` **ref** from the snapshot when you can see which card it
@@ -166,20 +168,20 @@ to cart"), that card text is how you tell them apart:
 - `[selected]` / `[not-selected]` in the snapshot is the control's real state
   (aria-pressed/selected/checked). Do not re-click an already-`[selected]`
   store or tab — read state before toggling.
-- If a control truly is not in the snapshot, it may be off-screen: `computer_act`
-  click-by-text auto-scrolls to find it; otherwise scroll and snapshot again.
+- If a control truly is not in the snapshot, it may be off-screen: click-by-text
+  auto-scrolls to find it; otherwise scroll and snapshot again.
 
 ### Forms (browser rail)
 
 A form is one job, not a pile of unfocused keystrokes:
 
-- **Dropdown**: `computer_select ref=eN value="Oregon"` (visible option text
-  is fine). If you only have the field label, pass `hint="State"` plus the
-  option as `value=`.
-- **Many fields**: `computer_fill fields=[{"text":"First name","value":"Ada"},{"text":"State","select":"Oregon"}]`. Prefer this over a round-trip per box.
-- **One field**: `computer_type ref=eN text=…` — `ref=` is the snapshot
+- **Dropdown**: click the field, then click the visible option. If you only
+  have the field label, snapshot and use that `[eN]` ref.
+- **Many fields**: one `computer.type` per box (`ref=eN`), not a round-trip
+  of unfocused keystrokes. Snapshot between groups if the form re-renders.
+- **One field**: `computer.type ref=eN text=…` — `ref=` is the snapshot
   `[eN]`. Without a ref, click the label first.
-- After fill, `computer_page_text` or snapshot to **verify** values landed
+- After fill, snapshot or page text to **verify** values landed
   before any Submit. Unverified fill is not done.
 
 ### Shopping (grocery / retail) — go STRAIGHT to results
@@ -203,12 +205,12 @@ step; do not land on the homepage and hunt for the search box:
 
 These pages lie to click-by-text. Do this, in order:
 
-1. **Navigate, then wait, then snapshot.** Do not `computer_act(click=…, type=…)`
-   in the same call as the first load. SPAs paint late; a snapshot of
+1. **Navigate, then wait, then snapshot.** Do not click/type
+   in the same breath as the first load. SPAs paint late; a snapshot of
    "13 desktop windows" is NOT the page — wait 2s and snapshot the **rail**.
 2. **Type into a field by ref.** Snapshot, find the textarea/input
    (`[e4] textarea "Post text What's happening?"`), then
-   `computer_type ref=e4 text=…`. A visible placeholder ("What's happening?")
+   `computer.type ref=e4 text=…`. A visible placeholder ("What's happening?")
    is often NOT the aria-label ("Post text") — use the snapshot ref.
 3. **Submit is a BUTTON, not a link.** Several controls are named "Post" /
    "Continue". Pick the `button` whose card is the composer, not a nav `<a>`
@@ -228,17 +230,17 @@ Traps that lose the task:
 - The header ZIP/store-locator box is NOT product search — typing an address
   or item there lands on `/store-finder`. If you end up there, navigate to
   the direct search URL above.
-- Retail pages are HEAVY: after navigate, `computer_wait 0.8` then snapshot
+- Retail pages are HEAVY: after navigate, wait ~0.8s then snapshot
   once. If a snapshot times out, wait and retry the RAIL — do not switch to
   desktop screenshots for a web shop.
 - Verify with `expect_text=` ("added to cart", the product name). Add to cart
-  via `computer_click text="Add to cart"` near the matched product.
+  via `computer.click text="Add to cart"` near the matched product.
 - Store pickup/delivery choice and CHECKOUT are owner checkpoints: set the
   cart up, then hand over — never place the order without the owner's
   explicit go-ahead at that step.
 - **Pick the right store:** snapshot the store list — each store's controls
   carry the store's card text (name + address). Click the one whose card
-  matches the owner's ZIP/address: `computer_click text="store details 65616
+  matches the owner's ZIP/address: `computer.click text="store details 65616
   Branson"` or the `[eN]` ref for that card. Do not click a bare "set as
   store" — it grabs an arbitrary store.
 - **Human-check walls ("PRESS & HOLD", "I'm not a robot", CAPTCHA, Turnstile):
@@ -267,10 +269,11 @@ owner's explicit go-ahead at that step.
 ### Vault — stored payment info & credentials
 
 The owner's secrets live in the encrypted Vault. You NEVER see values:
-1. `vault_list` → handles + labels (e.g. `card-visa` "Visa …4242", bound to amazon.com)
-2. Fill with the token: `computer_type text="{{vault:card-visa}}"` (or in
-   `computer_act type=`) — the machine substitutes the real value at the
-   input field, enforces the site binding, and asks the owner first.
+1. `vault.list` / `vault_list` → handles + labels (e.g. `card-visa` "Visa …4242", bound to amazon.com)
+2. Fill with the token on a **named field**: `computer.uia.action action=set_value name=\"Card number\" text=\"{{vault:card-visa}}\"`.
+   The machine substitutes the real value at that input, enforces the site
+   binding, and asks the owner first. **Never** put `{{vault:…}}` in
+   `computer.type` — that path types into whatever is focused and is refused.
 3. Never ask the user to paste card numbers / passwords into chat; never try
    to read, print, or web-send a vault value. If a site is not in the item's
    binding, tell the owner — do not work around it.
@@ -284,50 +287,52 @@ The owner's secrets live in the encrypted Vault. You NEVER see values:
 
 User: goto gmail, sign in, type user@example.com
 
-Prefer ONE tool:
-`computer_act(url=\"https://mail.google.com\", click=\"Sign in\", type=\"user@example.com\")`
-or after page open: click \"Email\" / \"Email or phone\" then type.
+1. `computer.navigate url=\"https://mail.google.com\"`
+2. Wait, then `computer.snapshot`
+3. `computer.click text=\"Sign in\"` (or the Email field)
+4. `computer.type text=\"user@example.com\"` into that field (ref if you have one)
 
 ### Clipboard & focus (personal companion)
 
 Repo-only agents cannot see the rest of the PC. You can:
-- **`companion_context`** — focused window + clipboard + recent Desktop/Downloads
-- **`clipboard_read` / `clipboard_write`** — hold or hand back text/images/files
-- **`companion_design`** — gather visual evidence and a critique→make→re-observe list
+- **`companion.context` / `companion_context`** — focused window + clipboard + recent Desktop/Downloads
+- **`clipboard.read` / `clipboard.write`** — hold or hand back text/images/files
+- **`companion.design` / `companion_design`** — gather visual evidence and a critique→make→re-observe list
 
 If they say “look at this” / “I copied” / “design this”, call those first.
 Do not ask what is on the clipboard when a read already returned it.
 
 ### Full PC autonomy
 
-1. `computer_app` or `computer_windows mode=focus title=…`
-2. `computer_snapshot target=desktop` / `computer_find` / `computer_click text=…`
-3. `computer_type` / `computer_key` until the task completes
+1. `computer.window` / `computer.windows` `mode=focus title=…`
+2. `computer.snapshot target=desktop` then `computer.click text=…`
+3. `computer.type` / `computer.key` until the task completes
 4. Reversible first; confirm destructive actions
 
 Native-app power moves (prefer these over pixel guessing):
-- **READ an app's content**: `computer_page_text target=desktop` — returns the
+- **READ an app's content**: `computer.uia.read_text` / page text `target=desktop` — returns the
   window's edit/document values and labels via UI Automation. Use it to check
   what a field contains or to verify what you just typed. No screenshot needed.
-- **SET a field directly**: `computer_type ref=cN text=…` writes that control's
-  whole value atomically via UIA (verified read-back, no focus races). Best for
-  form fields, Save-As filename boxes, and search boxes.
+- **SET a field directly**: `computer.uia.action action=set_value name=… text=…`
+  writes that control's whole value atomically via UIA (verified read-back, no
+  focus races). Best for form fields, Save-As filename boxes, and search boxes.
+  `computer.type ref=cN` is the fallback when UIA set_value is not available.
 - **Offscreen items**: snapshot keeps below-the-fold items (marked offscreen);
   clicking one auto-scrolls it into view first — don't manually scroll-hunt.
-- **Windows**: `computer_windows mode=minimize|maximize|restore|close|move|resize`
+- **Windows**: `computer.window` `mode=minimize|maximize|restore|close|move|resize`
   manages windows (close is polite — a save prompt may appear; snapshot to
   drive it). Tile two windows with move/resize to work across apps.
 - Every desktop click/type/key result includes `foreground` + `focused` (name /
   role / value) — CHECK it: if the foreground window isn't the app you meant,
   refocus before continuing instead of typing into the wrong window.
-- **Save / Open dialogs** (common Win32 dialog): `computer_key alt+n` focuses the
-  File-name box → `computer_type text=C:/full/path.ext` → `computer_key alt+s`
+- **Save / Open dialogs** (common Win32 dialog): `computer.key alt+n` focuses the
+  File-name box → `computer.type text=C:/full/path.ext` → `computer.key alt+s`
   (Save) or `alt+o` (Open). These hotkeys are far more reliable than hunting the
   field in the file list.
 - **UAC / "Windows Security" prompts**: you CANNOT click these — Windows runs
   them on a secure desktop that blocks all automated input. A desktop
   click/type there returns blocked; tell the owner to approve it and continue.
-- **Pixel-only apps** (game / canvas / no a11y): `computer_screenshot mark=true`
+- **Pixel-only apps** (game / canvas / no a11y): `computer.screenshot mark=true`
   overlays numbered boxes and returns a mark legend. When the app HAS no
   accessibility tree, marks are detected from pixels (edge/contrast regions) and
   each legend row carries its own `x`/`y` — click those coordinates directly
@@ -343,14 +348,14 @@ faster and far more reliable than hunting controls.
 | **File Explorer** | `ctrl+l` = address bar → type a full path → `enter`. `ctrl+f` = search box. `f2` rename, `ctrl+shift+n` new folder, `alt+enter` properties. |
 | **Save / Open dialog** | `alt+n` filename box → type FULL path → `alt+s` (Save) / `alt+o` (Open). Never click through the file list. |
 | **Excel / Sheets-like** | Name Box (`ctrl+g` or click it) → type a cell like `B7` → `enter` jumps there. `ctrl+home` top-left, `ctrl+arrow` edge of data, `f2` edit cell, `ctrl+s` save. |
-| **Word / editors** | `ctrl+f` find, `ctrl+h` replace, `ctrl+end` document end, `ctrl+s` save. Read content with `computer_page_text target=desktop` rather than screenshotting pages. |
+| **Word / editors** | `ctrl+f` find, `ctrl+h` replace, `ctrl+end` document end, `ctrl+s` save. Read content with UIA / page text `target=desktop` rather than screenshotting pages. |
 | **Browsers (system)** | `ctrl+l` address bar, `ctrl+t` new tab, `ctrl+w` close tab, `f5` reload. Prefer the in-app rail unless the owner asked for their own browser. |
 | **Any app** | `alt` reveals menu-bar access keys; `alt+f4` closes; `ctrl+z` undo (your first move after a mistake). |
 
 Rules that keep native work reliable:
-- Prefer `computer_type ref=cN` (UIA set-value) for any field — atomic and
+- Prefer `computer.uia.action action=set_value` (UIA set-value) for any field — atomic and
   verified. Fall back to click-then-type only when the control has no value.
-- After a destructive or state-changing step, `computer_page_text target=desktop`
+- After a destructive or state-changing step, re-read the window
   to CONFIRM the result before reporting done — never assume a keystroke landed.
 - A dialog you did not expect (save prompt, error, "are you sure") is a normal
   window: snapshot it, read it, then answer it. Do not keep typing past it.
@@ -358,20 +363,20 @@ Rules that keep native work reliable:
 ### Build → run → play (games / GUI / compiled apps)
 
 After writing a runnable (`.c` / `.py` / `.exe` / pygame / etc.):
-1. **Compile/run it** with `bash_exec` or `run_python_file` (do not stop at write).
-2. **Drive the window** — `computer_app` or focus the title, then
-   `computer_snapshot target=desktop` (w1… windows, c1… controls).
-3. **Play it** — `computer_click text=` / `computer_key` / `computer_act`
+1. **Compile/run it** with `bash` / `shell.exec` or `run_python_file` (do not stop at write).
+2. **Drive the window** — focus the title, then
+   `computer.snapshot target=desktop` (w1… windows, c1… controls).
+3. **Play it** — `computer.click text=` / `computer.key`
    with `target=desktop` (never the Browser rail for a native window).
 4. **If snapshot has no c1/e1 controls** (pygame, SDL, custom paint): the
    machine **screenshots and runs built-in vision** (local SmolVLM + native
-   chat vision when the provider can see images). Then `computer_click x= y=`
+   chat vision when the provider can see images). Then `computer.click x= y=`
    from the decode (image pixels + origin offset). Do not give up.
-5. **Observe** what is wrong, `file_edit`, rebuild, play again. Loop until
+5. **Observe** what is wrong, `edit`, rebuild, play again. Loop until
    the thing actually works. Do not claim done from compile-success alone
    when the user asked you to play / try / iterate on it.
 
-Sticky target: after `computer_app` or a desktop snapshot, later auto
+Sticky target: after a desktop snapshot, later auto
 click/type/find stay on the desktop. Pass `target=desktop` if a previous
 web task left the rail sticky.
 
@@ -386,6 +391,7 @@ web task left the rail sticky.
 - Stopping after navigate when the user also asked to sign in / type / click
 - Clicking a desktop game/app with implicit browser routing
 - Replaying unrelated earlier tasks
+- Putting `{{vault:…}}` into `computer.type` (refused; use `computer.uia.action`)
 """.strip()
 
 
@@ -402,11 +408,11 @@ def structured_observe_hint(*, n_windows: int, n_controls: int) -> str:
     if int(n_windows or 0) > 0:
         return (
             "Window list only — UI Automation found no controls. "
-            "Focus the app and snapshot again, or computer_screenshot for OCR "
+            "Focus the app and snapshot again, or computer.screenshot for OCR "
             "(ref=oN). Do not click guessed x/y."
         )
     return (
-        "No structured controls. computer_screenshot then click OCR ref=oN "
+        "No structured controls. computer.screenshot then click OCR ref=oN "
         "or marked boxes — never guessed coordinates."
     )
 
@@ -568,3 +574,4 @@ def find_webview_host_hwnd(
                 return child
         return hwnd
     return None
+

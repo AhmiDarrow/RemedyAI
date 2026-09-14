@@ -83,9 +83,9 @@ def register_memory_tools(runtime: Any) -> None:
             )
             meta = stamp_entry_metadata(
                 {},
-                source="explicit" if parent_ok else "hive",
+                source="tool" if parent_ok else "hive",
                 session_id=sid,
-                inferred=False,
+                inferred=True,
                 why=why,
             )
             await runtime.memory.upsert(
@@ -119,10 +119,10 @@ def register_memory_tools(runtime: Any) -> None:
                         text,
                         category=category or "general",
                         confidence=0.9,
-                        source="explicit",
+                        source="tool",
                         force=True,
-                        inferred=False,
-                        authority="owner",
+                        inferred=True,
+                        authority="agent",
                         why=why,
                         session_id=sid,
                     )

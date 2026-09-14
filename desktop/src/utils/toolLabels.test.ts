@@ -144,6 +144,8 @@ describe('history tool pairing', () => {
     expect(steps.map((s) => s.resultText)).toEqual(['A', 'B', 'C'])
     expect(steps.map((s) => s.status)).toEqual(['done', 'error', 'done'])
     expect(steps.map((s) => s.callId)).toEqual(['c1', 'c2', 'c3'])
+    const addressed = stepsFromMessageTools(calls, results, { requestId: 'req-9' })
+    expect(addressed.every((s) => s.requestId === 'req-9')).toBe(true)
   })
 
   it('keeps name + order pairing for rows without ids', () => {

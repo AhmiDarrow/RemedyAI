@@ -270,7 +270,7 @@ def spawn_conpty_process(
 
     api = _api()
     resolved = resolve_argv0(argv)
-    token, now_ms = api.issue_process_spawn_token(resolved)
+    token, now_ms = api.issue_process_spawn_token(resolved, env=env)
     try:
         pid, handle = api.conpty_spawn_authorized(
             resolved,

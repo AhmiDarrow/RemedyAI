@@ -13,12 +13,15 @@ from tests.harness import uia_fixture_capture as cap
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "uia"
 
 
-def test_write_uia_contract_and_optional_live_fixtures():
+def test_write_uia_contract_and_optional_live_fixtures(tmp_path: Path, monkeypatch):
+    """Capture writes belong in tmp — pytest must not dirty tracked fixtures."""
+    monkeypatch.setattr(cap, "FIXTURE_DIR", tmp_path)
     contract = cap.write_harness_contract_fixtures()
     assert len(contract) >= 4
     for path in contract:
         assert path.is_file()
         assert path.stat().st_size > 20
+        assert path.parent == tmp_path
 
     live = cap.try_live_capture()
     readme = cap.write_readme(

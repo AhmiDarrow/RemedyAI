@@ -16,6 +16,7 @@ import { pickAttachFiles } from '../api/attachments'
 import { liveTurnForSession, plainTurnLabel, upsertTurn } from '../state/turns'
 import { useSessionTurns } from '../state/useTurns'
 import type { ChatMessage } from '../types'
+import type { ProcessStep, ToolProcessMode } from '../utils/toolLabels'
 
 /**
  * Grove's own starter chips — life tone, never Studio's workbench set
@@ -71,6 +72,9 @@ export interface GroveChatProps {
   waitingOnYou?: boolean
   /** Live build checklist — same source as Studio MessageFeed. */
   buildTodos?: BuildTodo[]
+  /** Live process trail — same source as Studio MessageFeed. */
+  processSteps?: ProcessStep[]
+  toolProcessMode?: ToolProcessMode
 }
 
 export function GroveChat({
@@ -94,6 +98,8 @@ export function GroveChat({
   onMic,
   waitingOnYou = false,
   buildTodos = [],
+  processSteps = [],
+  toolProcessMode = 'off',
 }: GroveChatProps) {
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -352,6 +358,8 @@ export function GroveChat({
           onQuickPrompt={quickPrompt}
           stickNonce={stickNonce}
           buildTodos={buildTodos}
+          processSteps={processSteps}
+          toolProcessMode={toolProcessMode}
           sessionId={sessionKey}
           starters={starters ?? GROVE_STARTERS}
           emptySub={

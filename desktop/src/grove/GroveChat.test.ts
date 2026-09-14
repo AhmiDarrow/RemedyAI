@@ -12,8 +12,18 @@ describe('Grove live todos', () => {
     expect(chat).toContain('buildTodos={buildTodos}')
   })
 
+  it('GroveChat paints the live process trail', () => {
+    expect(chat).toContain('processSteps={processSteps}')
+    expect(chat).toContain('toolProcessMode={toolProcessMode}')
+  })
+
   it('GroveApp threads buildTodos into every GroveChat', () => {
     const n = app.split('buildTodos={buildTodos}').length - 1
+    expect(n).toBeGreaterThanOrEqual(3)
+  })
+
+  it('GroveApp threads processSteps into every GroveChat', () => {
+    const n = app.split('processSteps={processSteps}').length - 1
     expect(n).toBeGreaterThanOrEqual(3)
   })
 })

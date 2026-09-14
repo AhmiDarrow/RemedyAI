@@ -447,7 +447,7 @@ func TestMessengerOriginShape(t *testing.T) {
 	if got := messengerOrigin("discord", ""); got != "discord" {
 		t.Fatalf("got %q", got)
 	}
-	if OriginIsOwner(messengerOrigin("telegram", "42")) || !OriginIsOwner("hive:parent") {
+	if OriginIsOwner(messengerOrigin("telegram", "42")) || OriginIsOwner("hive:parent") {
 		t.Fatal("origin trust")
 	}
 }

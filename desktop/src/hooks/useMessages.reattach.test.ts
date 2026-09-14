@@ -24,12 +24,14 @@ describe('reattach on load', () => {
   })
 
   it('opens the attach stream through the shared turn runner', () => {
-    expect(hook).toContain("runTurnStream(sid, { kind: 'attach', requestId, after: 0, model })")
+    expect(hook).toContain("kind: 'attach'")
+    expect(hook).toContain('runTurnStream(sid, {')
+    expect(hook).toContain('attempt: opts?.attempt ?? 0')
     expect(hook).toContain('attachTurn(targetId, run.requestId, handlers, { after: run.after })')
   })
 
   it('refuses to open a second stream for a turn it already paints', () => {
-    expect(hook).toContain('if (isFollowingTurn(sid, requestId)) return')
+    expect(hook).toContain('if (!opts?.force && isFollowingTurn(sid, requestId)) return')
   })
 
   it('records the turn id and the seq watermark from the stream', () => {

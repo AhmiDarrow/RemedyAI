@@ -40,13 +40,17 @@ func zigTunnelStarter(home string) tunnelProcessStarter {
 		if err := core.EnsureSigningKey(key); err != nil {
 			return nil, err
 		}
-		_ = core.WriteJailSetRoots(nil)
 		token, nowMS, err := core.IssueProcessSpawnToken(argv, env, false, false)
 		if err != nil {
 			return nil, err
 		}
-		pid, handle, err := core.ProcessSpawnAuthorized(argv, cwd, env, false, token, "", "", false, nowMS)
-		if err != nil {
+		var pid uint32
+		var handle uint64
+		if err := core.WithWriteJail(nil, func() error {
+			var err error
+			pid, handle, err = core.ProcessSpawnAuthorized(argv, cwd, env, false, token, "", "", false, nowMS)
+			return err
+		}); err != nil {
 			return nil, err
 		}
 		return &tunnelStartedProcess{

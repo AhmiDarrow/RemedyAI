@@ -81,6 +81,7 @@ type HostBridge struct {
 	uiCommand                map[string]any
 	focusedSession           string
 	lastElements             []map[string]any
+	lastElementsBySession    map[string][]map[string]any
 	sessionStreaming         func(string) bool
 	lastObservedURL          string
 	lastObservedURLBySession map[string]string
@@ -102,6 +103,7 @@ func newHostBridge(homeDir string) *HostBridge {
 		browserScale:             1,
 		lastObservedURLBySession: map[string]string{},
 		lastNavigateURLBySession: map[string]string{},
+		lastElementsBySession:    map[string][]map[string]any{},
 	}
 }
 
@@ -824,10 +826,47 @@ func (b *HostBridge) complete(jobID string, ok bool, result map[string]any, errM
 			b.lastObservedURLBySession[sid] = observed
 		}
 	}
+	if els := elementsFromResult(safeResult); len(els) > 0 {
+		b.rememberElements(job.SessionID, els)
+	}
 	return job
 }
 
+func elementsFromResult(result map[string]any) []map[string]any {
+	if result == nil {
+		return nil
+	}
+	switch raw := result["elements"].(type) {
+	case []map[string]any:
+		return raw
+	case []any:
+		out := make([]map[string]any, 0, len(raw))
+		for _, item := range raw {
+			if m, ok := item.(map[string]any); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func (b *HostBridge) rememberElements(sessionID string, els []map[string]any) {
+	clean := scrubElements(els)
+	b.lastElements = clean
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		return
+	}
+	if b.lastElementsBySession == nil {
+		b.lastElementsBySession = map[string][]map[string]any{}
+	}
+	b.lastElementsBySession[sid] = clean
+}
+
 func observedURLFromResult(result map[string]any, job *ComputerJob) string {
+	_ = job
 	if result != nil {
 		for _, k := range []string{"url", "final_url", "current_url", "href"} {
 			if u := strings.TrimSpace(strOr(result[k], "")); u != "" {
@@ -835,12 +874,58 @@ func observedURLFromResult(result map[string]any, job *ComputerJob) string {
 			}
 		}
 	}
-	if job != nil {
-		if u := strings.TrimSpace(strOr(job.Payload["url"], "")); u != "" {
-			return u
+	return ""
+}
+
+// livePageContext is URL + labels the host actually saw. Used for money
+// checkpoints; the model never supplies this.
+func (b *HostBridge) livePageContext(sessionID string) string {
+	if b == nil {
+		return ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	sid := strings.TrimSpace(sessionID)
+	url := ""
+	if sid != "" {
+		url = strings.TrimSpace(b.lastObservedURLBySession[sid])
+		if url == "" {
+			url = strings.TrimSpace(b.lastNavigateURLBySession[sid])
 		}
 	}
-	return ""
+	if url == "" && (sid == "" || sid == strings.TrimSpace(b.focusedSession)) {
+		url = strings.TrimSpace(b.lastObservedURL)
+		if url == "" {
+			url = strings.TrimSpace(b.lastNavigateURL)
+		}
+	}
+	bits := make([]string, 0, 8)
+	if url != "" {
+		bits = append(bits, url)
+	}
+	els := b.lastElements
+	if sid != "" {
+		if got, ok := b.lastElementsBySession[sid]; ok {
+			els = got
+		} else if sid != strings.TrimSpace(b.focusedSession) {
+			els = nil
+		}
+	}
+	for i, el := range els {
+		if i >= 40 {
+			break
+		}
+		for _, k := range []string{"name", "text", "label", "value"} {
+			if v := strings.TrimSpace(strOr(el[k], "")); v != "" && v != "[filled]" && v != "[redacted]" {
+				bits = append(bits, v)
+			}
+		}
+	}
+	out := strings.TrimSpace(strings.Join(bits, " "))
+	if len(out) > 2000 {
+		out = out[:2000]
+	}
+	return out
 }
 
 func (b *HostBridge) cancel(jobID string) *ComputerJob {
@@ -886,7 +971,7 @@ func (b *HostBridge) completeA11yPush(jobID string, elements []map[string]any) *
 	job.Status = "done"
 	job.Result = safe
 	job.Payload = scrubRetainedPayload(job.Payload)
-	b.lastElements = scrubElements(trimmed)
+	b.rememberElements(job.SessionID, trimmed)
 	_ = b.writeJob(job)
 	return job
 }

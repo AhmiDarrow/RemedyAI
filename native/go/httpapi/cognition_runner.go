@@ -36,6 +36,8 @@ type CognitionTurnRunner struct {
 	Config         cognition.Config
 	Registry       *tools.Registry
 	promptAssemble *tools.RMDYExecutor
+	// LiveContext is the host-observed page for money/credential checkpoints.
+	LiveContext func(sessionID string) string
 }
 
 // NewCognitionTurnRunner builds a runner on the real Tool ABI registry (Go
@@ -536,11 +538,14 @@ func (r *CognitionTurnRunner) turnPolicy(req TurnRequest) cognition.Policy {
 	// AllowAll / custom Policy without a Registry — keep those intact.
 	switch {
 	case r.Registry != nil:
+		origin := strings.ToLower(strings.TrimSpace(req.Origin))
 		return &RegistryPolicy{
-			Registry:  r.Registry,
-			Approvals: r.Approvals,
-			SessionID: req.SessionID,
-			ForceAsk:  !OriginIsOwner(req.Origin),
+			Registry:       r.Registry,
+			Approvals:      r.Approvals,
+			SessionID:      req.SessionID,
+			ForceAsk:       !OriginIsOwner(req.Origin),
+			HiveRestricted: strings.HasPrefix(origin, "hive:"),
+			LiveContext:    r.LiveContext,
 		}
 	case r.Policy != nil:
 		return r.Policy
@@ -569,8 +574,12 @@ func (r *CognitionTurnRunner) approvalGate(req TurnRequest, safeEmit func(string
 	root := r.turnRoot(req)
 	return func(gateCtx context.Context, pending []cognition.ToolCall) error {
 		ids := make([]string, 0, len(pending))
+		live := ""
+		if r.LiveContext != nil {
+			live = r.LiveContext(req.SessionID)
+		}
 		for _, call := range pending {
-			if item := enqueueToolApprovalIn(r.Approvals, r.Registry, req.SessionID, call, root); item != nil {
+			if item := enqueueToolApprovalIn(r.Approvals, r.Registry, req.SessionID, call, root, live); item != nil {
 				ids = append(ids, item.ID)
 			}
 		}
@@ -600,11 +609,16 @@ func (r *CognitionTurnRunner) boundTools(req TurnRequest) cognition.ToolExecutor
 		cfg := LoadConfig(r.HomeDir)
 		scope = effectiveAccessScope(cfgString(cfg, "access_scope", "project"), req.ProjectPath)
 	}
+	live := ""
+	if r.LiveContext != nil {
+		live = r.LiveContext(req.SessionID)
+	}
 	return &workspaceBoundTools{inner: r.Tools, binding: toolBinding{
-		Root:      root,
-		Scope:     scope,
-		HomeDir:   r.HomeDir,
-		SessionID: req.SessionID,
+		Root:        root,
+		Scope:       scope,
+		HomeDir:     r.HomeDir,
+		SessionID:   req.SessionID,
+		PageContext: live,
 	}}
 }
 
@@ -749,7 +763,7 @@ func lastResultsInput(results []cognition.ToolResult) []map[string]any {
 		if res.Err != "" {
 			tail = res.Err
 		}
-		ok := res.Err == ""
+		ok := res.Err == "" && !res.IsError
 		row := map[string]any{
 			"name": res.Name,
 			"ok":   ok,
@@ -1111,7 +1125,11 @@ func (r *CognitionTurnRunner) enqueuePendingApproval(req TurnRequest, call cogni
 	if r == nil {
 		return
 	}
-	_ = enqueueToolApprovalIn(r.Approvals, r.Registry, req.SessionID, call, r.turnRoot(req))
+	live := ""
+	if r.LiveContext != nil {
+		live = r.LiveContext(req.SessionID)
+	}
+	_ = enqueueToolApprovalIn(r.Approvals, r.Registry, req.SessionID, call, r.turnRoot(req), live)
 }
 
 // turnRoot is the folder this turn's tools are bound to. The banner names it
@@ -1129,7 +1147,7 @@ func (r *CognitionTurnRunner) turnRoot(req TurnRequest) string {
 // binds the call before it asks, so the summary reads the folder off the call
 // itself; the engine path asks before binding and passes the turn's root.
 func enqueueToolApproval(approvals *approvalQueue, registry *tools.Registry, sessionID string, call cognition.ToolCall) *pendingApproval {
-	return enqueueToolApprovalIn(approvals, registry, sessionID, call, "")
+	return enqueueToolApprovalIn(approvals, registry, sessionID, call, "", "")
 }
 
 func enqueueToolApprovalIn(
@@ -1138,6 +1156,7 @@ func enqueueToolApprovalIn(
 	sessionID string,
 	call cognition.ToolCall,
 	boundRoot string,
+	liveContext string,
 ) *pendingApproval {
 	if approvals == nil {
 		return nil
@@ -1149,10 +1168,14 @@ func enqueueToolApprovalIn(
 		sid = &s
 	}
 	reason := "Tool requires your approval"
+	checkpoint := false
 	if registry != nil {
 		if desc, err := registry.Latest(call.Name); err == nil && desc.Risk == tools.RiskCheckpoint {
-			reason = sensitivePrefix + " — " + summary
+			checkpoint = true
 		}
+	}
+	if checkpoint || classifySensitiveComputer(call, liveContext) {
+		reason = sensitivePrefix + " — " + summary
 	}
 	return approvals.Enqueue(call.Name, preview, reason, sid, summary)
 }

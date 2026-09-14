@@ -34,44 +34,65 @@ MIN_PULSE_S = 30
 DEFAULT_BUDGET_STEPS = 8
 MAX_BUDGET_STEPS = 16
 
+def _abi_name(name: str) -> str:
+    """Snake and dotted Tool ABI ids collapse to the same form."""
+    return str(name or "").strip().lower().replace("_", ".")
+
+
 # Tools a daughter must never see — mother/owner surfaces.
+# Names are stored dotted so ``mail_send`` and ``mail.send`` match.
 MOTHER_ONLY_TOOLS = frozenset(
     {
-        "hive_spawn",
-        "hive_assign",
-        "hive_collect",
-        "hive_status",
-        "hive_retire",
-        "spread_run",
-        "update_settings",
-        "mail_send",
-        "mail_reply",
-        "computer_click",
-        "computer_type",
-        "computer_fill",
-        "computer_act",
-        "computer_key",
-        "computer_press_hold",
-        "computer_hotkey",
-        "computer_drag",
-        "computer_select",
-        "computer_app",
-        "computer_windows",
-        "browser_click",
-        "browser_type",
-        "browser_fill",
-        "browser_act",
-        "session_export",
-        "session_import",
-        "soul_import",
-        "soul_dream",
-        "soul_vigil",
-        "soul_arm_missions",
-        "soul_export",
+        "spread.run",
+        "update.settings",
+        "computer.click",
+        "computer.type",
+        "computer.fill",
+        "computer.act",
+        "computer.key",
+        "computer.key.hold",
+        "computer.press.hold",
+        "computer.hotkey",
+        "computer.move",
+        "computer.drag",
+        "computer.select",
+        "computer.app",
+        "computer.window",
+        "computer.navigate",
+        "computer.scroll",
+        "computer.focus",
+        "computer.uia.action",
+        "clipboard.write",
+        "browser.click",
+        "browser.type",
+        "browser.fill",
+        "browser.act",
+        "session.export",
+        "session.import",
+        "soul.import",
+        "soul.dream",
+        "soul.vigil",
+        "soul.arm.missions",
+        "soul.export",
     }
 )
 
-MOTHER_ONLY_PREFIXES = ("hive_", "mail_", "calendar_", "mcp_")
+MOTHER_ONLY_PREFIXES = ("hive.", "mail.", "calendar.", "mcp.")
+
+# Observation-only computer tools a daughter may still hold. Every other
+# computer.* name is mother-only so a new input verb cannot slip through.
+_COMPUTER_OBSERVE = frozenset(
+    {
+        "computer.screenshot",
+        "computer.print.window",
+        "computer.windows",
+        "computer.foreground",
+        "computer.monitors",
+        "computer.snapshot",
+        "computer.uia.focused",
+        "computer.uia.read.text",
+    }
+)
 
 
 def hive_depth() -> int:
@@ -114,12 +135,16 @@ def parse_granted_caps(raw: object) -> frozenset[Capability]:
 
 
 def is_mother_only_tool(name: str | None) -> bool:
-    n = str(name or "").strip()
+    n = _abi_name(name)
     if not n:
         return False
     if n in MOTHER_ONLY_TOOLS:
         return True
-    return n.startswith(MOTHER_ONLY_PREFIXES)
+    if n.startswith(MOTHER_ONLY_PREFIXES):
+        return True
+    if n.startswith("computer.") and n not in _COMPUTER_OBSERVE:
+        return True
+    return False
 
 
 def _tool_name(tool: dict[str, Any]) -> str:

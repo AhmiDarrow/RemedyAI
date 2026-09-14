@@ -75,6 +75,10 @@ async def test_memory_save_joins_list_content(mem_tools):
     assert saved, out
     assert saved[0].content == "bar"
     assert "['bar']" not in out
+    meta = saved[0].metadata or {}
+    assert meta.get("source") == "tool"
+    assert meta.get("authority") in ("tool", "agent")
+    assert meta.get("inferred") is True
 
 
 @pytest.mark.asyncio

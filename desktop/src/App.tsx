@@ -1844,6 +1844,8 @@ export default function App() {
           streaming={streaming}
           messagesLoading={messagesLoading}
           buildTodos={buildTodos}
+          processSteps={processSteps}
+          toolProcessMode={toolProcessMode}
           handleSend={handleSend}
           stickNonce={stickNonce}
           stop={stop}

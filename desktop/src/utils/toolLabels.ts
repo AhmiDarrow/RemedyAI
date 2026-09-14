@@ -181,9 +181,11 @@ export function pairToolResults(
 export function stepsFromMessageTools(
   toolCalls: HistoryToolCall[],
   toolResults: HistoryToolResult[],
+  ids?: { requestId?: string | null },
 ): ProcessStep[] {
   const steps: ProcessStep[] = []
   const now = Date.now()
+  const requestId = (ids?.requestId || '').trim() || undefined
   const paired = pairToolResults(toolCalls, toolResults)
   toolCalls.forEach((tc, i) => {
     const res = paired[i]
@@ -202,6 +204,7 @@ export function stepsFromMessageTools(
       resultText: res?.output,
       error: res?.error,
       callId: tc.id,
+      requestId,
     })
   })
   if (!toolCalls.length && toolResults.length) {
@@ -215,6 +218,7 @@ export function stepsFromMessageTools(
         endedAt: now,
         resultText: r.output,
         error: r.error,
+        requestId,
       })
     })
   }

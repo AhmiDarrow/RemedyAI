@@ -39,5 +39,6 @@ describe('approval copy', () => {
     expect(src).not.toMatch(/approve\s*all/i)
     expect(src).toContain('approvalHeadline(item)')
     expect(src).toContain('data-sensitive')
+    expect(src).toContain("act(item, true, 'once')")
   })
 })

@@ -95,6 +95,27 @@ func TestApprovalSetModeWakesWaitersAndSkipsSensitive(t *testing.T) {
 	}
 }
 
+func TestApproveOnceDoesNotStampSessionFingerprint(t *testing.T) {
+	q := newApprovalQueue()
+	sid := "s-once"
+	item := q.Enqueue("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, "Tool requires your approval", &sid, "")
+	if item == nil {
+		t.Fatal("enqueue")
+	}
+	got := q.Resolve(item.ID, true, "once")
+	if got == nil || got.Status != "approved" {
+		t.Fatalf("once resolve=%+v", got)
+	}
+	if q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid) {
+		t.Fatal("approve-once must not persist a session fingerprint")
+	}
+	session := q.Enqueue("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, "Tool requires your approval", &sid, "")
+	_ = q.Resolve(session.ID, true, "session")
+	if !q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid) {
+		t.Fatal("approve-session must persist a session fingerprint")
+	}
+}
+
 func TestResolveApprovalRequiresExplicitBoolean(t *testing.T) {
 	s := newToolsAPIServer(t)
 	sid := "s-resolve"
