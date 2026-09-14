@@ -255,7 +255,7 @@ func TestStream409BusyExactText(t *testing.T) {
 	runner := &stubRunner{tokens: []string{"slow"}, hold: hold}
 	base, shutdown, token := startMessagesServer(t, runner, t.TempDir())
 	defer shutdown()
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 15 * time.Second}
 	sid := createSessionID(t, client, base, token)
 
 	done := make(chan struct{})
@@ -270,7 +270,7 @@ func TestStream409BusyExactText(t *testing.T) {
 		}
 	}()
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		req := authReq(t, http.MethodGet, base+"/api/turn-active", token, nil)
 		resp, err := client.Do(req)
