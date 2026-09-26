@@ -1,3 +1,5 @@
+import { useNarrowRails } from './hooks/useNarrowRails'
+import { useDialogFocus } from './hooks/useDialogFocus'
 import { useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { ApprovalBanner } from './components/ApprovalBanner'
@@ -248,6 +250,7 @@ export default function App() {
   } = useTheme()
   const { busyIds, runningCount } = useSessionStreamJobs()
   const {
+    modelSwitching,
     model,
     setModel,
     llmProvider,
@@ -363,6 +366,8 @@ export default function App() {
     openSlideInRail,
     swapSides,
   } = useWorkspaceChrome({ setPanel })
+  const narrowRails = useNarrowRails(wsLayout)
+  const openNarrowRail = narrowRails.open
   const connectCompact = isConnectCompact()
   useComputerHost(!connectCompact, openBrowserInRail, activeId)
 
@@ -372,6 +377,7 @@ export default function App() {
    * (that used to collapse the chat shell).
    */
   const openSettingsInRail = useCallback(() => {
+    openNarrowRail('right')
     setPanel(null)
     setWsLayout((prev) => {
       const next = {
@@ -395,7 +401,7 @@ export default function App() {
       saveWorkspaceLayout(next)
       return next
     })
-  }, [])
+  }, [openNarrowRail])
   const surfaceRef = useRef(surface)
   surfaceRef.current = surface
   /** Open Settings on the current surface — Grove overlay, Studio rail. Never switch surfaces. */
@@ -414,6 +420,7 @@ export default function App() {
     openSettingsInRail()
   }, [openSettingsInRail])
   const closeGroveSettings = useCallback(() => setGroveSettingsOpen(false), [])
+  const groveSettingsRef = useDialogFocus<HTMLDivElement>(surface === 'grove' && groveSettingsOpen, closeGroveSettings)
   /** Track recently opened sessions (for archive filter only — no chip strip UI). */
   const [openTabs, setOpenTabs] = useState<Set<string>>(new Set())
   const openTabIds = useMemo(() => [...openTabs], [openTabs])
@@ -1721,14 +1728,14 @@ export default function App() {
       onImport={() => void handleImport()}
       openTabIds={openTabIds}
       footer={
-        <TokenCostTicker
+        uiMode === 'advanced' ? <TokenCostTicker
           placement="sidebar"
           run={displayRunUsage}
           session={sessionUsage}
           streaming={streaming}
           model={barModel}
           provider={barProvider}
-        />
+        /> : null
       }
     />
   )
@@ -1871,15 +1878,13 @@ export default function App() {
           side="left"
           active={wsLayout.left}
           width={wsLayout.leftWidth}
-          railMode={wsLayout.leftRail}
+          railMode={narrowRails.leftRail}
           onSelect={(id) => patchWs({ left: id })}
           onWidth={(w) => patchWs({ leftWidth: w })}
-          onRailMode={(mode) =>
-            patchWs({
-              leftRail: mode,
-              leftOpen: mode === 'open',
-            })
-          }
+          onRailMode={(mode) => {
+            if (narrowRails.narrow) openNarrowRail(mode === 'open' ? 'left' : null)
+            else patchWs({ leftRail: mode, leftOpen: mode === 'open' })
+          }}
           onSwap={swapSides}
           onPopout={
             SLIDE_META[wsLayout.left]?.popout
@@ -1894,7 +1899,7 @@ export default function App() {
         >
           {/* Unmount Browser on Grove (native HWND bounds). Keep TerminalSlide
               mounted so a live PTY survives Grove ↔ Studio. */}
-          {wsLayout.leftRail === 'open'
+          {narrowRails.leftRail === 'open'
           && popout?.id !== wsLayout.left
           && (surface !== 'grove' || wsLayout.left === 'terminal')
             ? renderSlide(wsLayout.left)
@@ -2123,6 +2128,7 @@ export default function App() {
               onPromoteQueued={promoteQueued}
               onUpdateQueued={updateQueued}
               disabled={serverState !== 'ready'}
+              sendBlockedReason={modelSwitching ? 'Connecting to the selected model… Your draft is safe.' : undefined}
               planMode={planMode}
               chatMode={chatMode}
               onTogglePlanMode={togglePlanMode}
@@ -2156,15 +2162,13 @@ export default function App() {
           side="right"
           active={wsLayout.right}
           width={wsLayout.rightWidth}
-          railMode={wsLayout.rightRail}
+          railMode={narrowRails.rightRail}
           onSelect={(id) => patchWs({ right: id })}
           onWidth={(w) => patchWs({ rightWidth: w })}
-          onRailMode={(mode) =>
-            patchWs({
-              rightRail: mode,
-              rightOpen: mode === 'open',
-            })
-          }
+          onRailMode={(mode) => {
+            if (narrowRails.narrow) openNarrowRail(mode === 'open' ? 'right' : null)
+            else patchWs({ rightRail: mode, rightOpen: mode === 'open' })
+          }}
           onSwap={swapSides}
           onPopout={
             SLIDE_META[wsLayout.right]?.popout
@@ -2177,7 +2181,7 @@ export default function App() {
               : undefined
           }
         >
-          {wsLayout.rightRail === 'open'
+          {narrowRails.rightRail === 'open'
           && popout?.id !== wsLayout.right
           && (surface !== 'grove' || wsLayout.right === 'terminal')
             ? renderSlide(wsLayout.right)
@@ -2234,6 +2238,8 @@ export default function App() {
           />
           <div
             className="grove-settings-sheet"
+            ref={groveSettingsRef}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-label="Settings"

@@ -384,6 +384,9 @@ func (r *CognitionTurnRunner) fallbackModel(req TurnRequest, live cognition.Mode
 		exclude = cfgString(LoadConfig(r.HomeDir), "llm_provider", "")
 	}
 	alt := resolveChatModel(r.HomeDir, "", "", "", exclude)
+	if _, unavailable := alt.(unavailableModel); unavailable {
+		return nil
+	}
 	if alt == nil || sameChatEndpoint(live, alt) {
 		return nil
 	}
@@ -655,9 +658,6 @@ func (r *CognitionTurnRunner) runEngine(
 	// policy and the executor all see the same id.
 	model := cognition.Model(&resolvingModel{inner: live, resolve: oc.ResolveToolName})
 	model = &emittingModel{inner: model, emit: safeEmit}
-	if req.DrainNudges != nil {
-		model = &nudgeAwareModel{inner: model, drain: req.DrainNudges, emit: safeEmit}
-	}
 	coding := false
 	engine := cognition.Engine{
 		Model:        model,
@@ -665,6 +665,16 @@ func (r *CognitionTurnRunner) runEngine(
 		Policy:       r.turnPolicy(req),
 		Config:       r.turnConfig(req),
 		ApprovalGate: r.approvalGate(req, safeEmit),
+		DrainGuidance: func() []string {
+			if req.DrainNudges == nil {
+				return nil
+			}
+			nudges := req.DrainNudges()
+			if len(nudges) > 0 {
+				safeEmit("@@steered\n")
+			}
+			return nudges
+		},
 		EpochHook: func(epoch, totalSteps, toolCalls int, ledger []string, turn *cognition.Turn) {
 			safeEmit(fmt.Sprintf(
 				"@@status:Checkpoint %d — compacted context after %d steps / %d tools; continuing until the work is done…\n",
@@ -827,27 +837,6 @@ func sameChatEndpoint(a, b cognition.Model) bool {
 			strings.EqualFold(strings.TrimSpace(oa.Model), strings.TrimSpace(ob.Model))
 	}
 	return a == b
-}
-
-type nudgeAwareModel struct {
-	inner cognition.Model
-	drain func() []string
-	emit  func(string)
-}
-
-func (m *nudgeAwareModel) ContextWindow() int { return m.inner.ContextWindow() }
-
-func (m *nudgeAwareModel) Stream(ctx context.Context, turn cognition.Turn) (<-chan cognition.ModelEvent, error) {
-	if m.drain != nil {
-		if nudges := m.drain(); len(nudges) > 0 {
-			if m.emit != nil {
-				m.emit("@@steered\n")
-			}
-			turn.Messages = append(turn.Messages, cognition.UserText(
-				"[Owner mid-turn guidance]\n"+strings.Join(nudges, "\n")))
-		}
-	}
-	return m.inner.Stream(ctx, turn)
 }
 
 // resolvingModel rewrites every emitted ToolCall.Name from the advertised

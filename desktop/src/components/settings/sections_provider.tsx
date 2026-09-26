@@ -1,5 +1,5 @@
 /** Settings form sections — provider. */
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { connectReasonLabel, type ConnectedProvider } from '../../api/providers'
 import {
   CUSTOM_TEMPLATE_ID,
@@ -22,6 +22,7 @@ import { Field } from './shared'
 import { openExternalUrl } from '../../api/auth'
 
 export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
+  const fieldId = useId()
   const {
     sectionProps,
     provider,
@@ -101,7 +102,7 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
       {endpointMsg.text}
     </div>
   ) : null
-  const modelListId = `settings-model-ids-${provider || 'none'}`
+  const modelListId = `${fieldId}-model-ids`
   const sleevGateway =
     (sleevGatewayUrl || '').trim()
     || String(sleevStatus?.gateway_url || 'http://127.0.0.1:17321')
@@ -126,8 +127,8 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
           Free options: <strong style={{ color: 'var(--text-secondary)' }}>Demo</strong> (no signup),
           Gemini / Groq / OpenRouter / Mistral (free key), or Ollama (local).
         </FormHint>
-        <FormLabel>Type</FormLabel>
-        <FormSelect value={provider} onChange={handleProviderChange}>
+        <FormLabel htmlFor={`${fieldId}-provider`}>Type</FormLabel>
+        <FormSelect id={`${fieldId}-provider`} value={provider} onChange={handleProviderChange}>
           {primaryProviders.map((p) => (
             <option key={p.id} value={p.id}>
               {p.badge ? `${p.name} · ${p.badge}` : p.name}
@@ -188,8 +189,8 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
         {showBaseUrl && (
           <Field label="Base URL" value={baseUrl} onChange={setBaseUrl} />
         )}
-        <FormLabel>Model</FormLabel>
-        <FormSelect value={model} onChange={setModel}>
+        <FormLabel htmlFor={`${fieldId}-model`}>Model</FormLabel>
+        <FormSelect id={`${fieldId}-model`} value={model} onChange={setModel}>
           {providerModels.length === 0 && (
             <option value={model}>{model || (discoveryBusy ? 'Looking for models…' : '— none found —')}</option>
           )}
@@ -202,8 +203,9 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
         </FormSelect>
         {modelFreeText && (
           <div className="mb-2">
-            <FormLabel>Model id</FormLabel>
+            <FormLabel htmlFor={`${fieldId}-model-id`}>Model id</FormLabel>
             <input
+              id={`${fieldId}-model-id`}
               type="text"
               list={modelListId}
               value={model}
@@ -234,9 +236,17 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
                   : 'var(--text-secondary)',
               opacity: modelHint.kind === 'ok' ? 0.8 : 1,
             }}
-            title={modelHint.text}
+            title={modelHint.kind === 'error' ? undefined : modelHint.text}
           >
-            {modelHint.text}
+            {modelHint.kind === 'error' ? (
+              <>
+                <p>Could not refresh the model list. Check the provider connection. Saved choices are still available.</p>
+                <details className="mt-1">
+                  <summary className="cursor-pointer">Connection details</summary>
+                  <p className="mt-1 break-words">{modelHint.text}</p>
+                </details>
+              </>
+            ) : modelHint.text}
           </div>
         )}
         {discoveryBusy && modelHint.kind === 'none' && (

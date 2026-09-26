@@ -4,6 +4,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 const NEAR_PX = 48
 
 type Options = {
+  /** Empty welcome screens start at the top and must remain freely scrollable. */
+  enabled?: boolean
   /** A live turn is in progress (stream / tool run). Only affects the jump pill. */
   followActive?: boolean
   /** Values whose change should re-pin while attached (tokens, tool events…). */
@@ -37,12 +39,15 @@ type Options = {
  */
 export function useStickToBottom(options: Options = {}) {
   const {
+    enabled = true,
     followActive = false,
     deps = [],
     alwaysOfferJump = false,
     reattachKey,
     startAtBottom = true,
   } = options
+  const enabledRef = useRef(enabled)
+  enabledRef.current = enabled
 
   const scrollerRef = useRef<HTMLElement | null>(null)
   const contentRef = useRef<HTMLElement | null>(null)
@@ -106,10 +111,10 @@ export function useStickToBottom(options: Options = {}) {
   const pinToBottom = useCallback(
     (smooth = false) => {
       const el = scrollerRef.current
-      if (!el || !stuckRef.current) return
+      if (!enabledRef.current || !el || !stuckRef.current) return
 
       const apply = () => {
-        if (!stuckRef.current) return
+        if (!enabledRef.current || !stuckRef.current) return
         const max = Math.max(0, el.scrollHeight - el.clientHeight)
         if (smooth) {
           lockUntilRef.current = performance.now() + 450
@@ -140,6 +145,7 @@ export function useStickToBottom(options: Options = {}) {
    * reattachKey effect (Enter) and the Jump pill so the two never diverge.
    */
   const pinNow = useCallback(() => {
+    if (!enabledRef.current) return
     attach()
     const el = scrollerRef.current
     if (!el) return
@@ -209,10 +215,14 @@ export function useStickToBottom(options: Options = {}) {
 
   // New scroller (mount / session switch) starts at the floor.
   useLayoutEffect(() => {
+    if (scrollerEl && !enabled) {
+      scrollerEl.scrollTop = 0
+      return
+    }
     if (!scrollerEl || !startAtBottom) return
     attach()
     pinToBottom(false)
-  }, [scrollerEl, startAtBottom, attach, pinToBottom])
+  }, [enabled, scrollerEl, startAtBottom, attach, pinToBottom])
 
   // Re-pin from content deps while attached (tokens, tool rows, todos…).
   useLayoutEffect(() => {
@@ -248,7 +258,7 @@ export function useStickToBottom(options: Options = {}) {
   // look like gestures once content keeps growing underneath it.
   const jumpLatest = pinNow
 
-  const showJump = detached && (followActive || alwaysOfferJump)
+  const showJump = enabled && detached && (followActive || alwaysOfferJump)
 
   return {
     setScroller,

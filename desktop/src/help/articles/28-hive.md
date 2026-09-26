@@ -42,6 +42,17 @@ slice of the work — not a second personality asking you questions.
 roster: cadence, status, goal, last outcome. You can retire a daughter
 there. There is no transcript.
 
+## Background task controls
+
+Studio's **Automations** rail lets you describe a background task and choose
+**Run once** (a forager) or **Repeat** (a standing post). For repeating tasks,
+set the interval in seconds, then choose **Start task**. The list shows each
+task's status, last outcome, and blockers. **Stop** asks for confirmation and
+retires that task. **Include stopped** shows its retained history.
+
+You can update a repeating task with **Reassign**. If saving fails, the edited
+instructions stay available so you can correct or retry them.
+
 ## What daughters cannot do
 
 They cannot hire further daughters (depth 1). They cannot see mother-only

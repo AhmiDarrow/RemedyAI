@@ -356,7 +356,18 @@ def test_build_desktop_stages_runtime_and_core_not_pyinstaller(tmp_path: Path) -
     with pytest.raises(SystemExit):
         build_desktop.resolve_core_library(wrong_name)
 
-    assert "REQUIRED_CORE_ABI = 5" in source
+    from remedy.runtime.native_runtime import _ABI_VERSION
+
+    assert build_desktop.REQUIRED_CORE_ABI == _ABI_VERSION
+    assert build_desktop.REQUIRED_CORE_ABI == _prepush_module().REQUIRED_NATIVE_ABI
+    for path, pattern in (
+        ("native/zig/include/remedy_core.h", r"#define REMEDY_CORE_ABI_VERSION\s+(\d+)"),
+        ("native/zig/src/root.zig", r"pub const abi_version: u32 = (\d+)"),
+        ("native/go/core/status.go", r"const ABIVersion = (\d+)"),
+    ):
+        match = re.search(pattern, (ROOT / path).read_text("utf-8"))
+        assert match is not None, path
+        assert int(match.group(1)) == build_desktop.REQUIRED_CORE_ABI, path
     assert "remedy_core_abi_version()" in source
 
     parser_help = source[source.index("__main__") :]

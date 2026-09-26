@@ -1638,30 +1638,18 @@ export function useMessages(sessionId: string | null) {
   const beginEdit = useCallback(
     async (msgId: string, fallbackContent?: string): Promise<string | null> => {
       if (!sessionId || streamingRef.current) return null
-      // Snapshot for rollback if the API fails after optimistic truncate.
-      let preEdit: ChatMessage[] | null = null
-      setMessages((prev) => {
-        preEdit = prev
-        const idx = prev.findIndex((m) => m.id === msgId)
-        if (idx < 0) return prev.filter((m) => !m.reverted)
-        return prev.slice(0, idx)
-      })
+      // Keep the visible history intact until the server confirms the rollback.
+      // Restoring an optimistic snapshot after a tab switch can overwrite a
+      // different conversation, and returning fallback text masks failed edits.
       try {
-        const r = await editFromMessageApi(sessionId, msgId)
-        await load({ force: true })
-        const text =
-          typeof r.content === 'string' && r.content.length > 0
-            ? r.content
-            : (fallbackContent ?? '')
-        return text
-      } catch (e: unknown) {
-        console.warn('Edit failed:', e instanceof Error ? e.message : e)
-        if (preEdit) {
-          setMessages(preEdit)
-        } else {
-          await load({ force: true })
+        const result = await editFromMessageApi(sessionId, msgId)
+        if (sessionIdRef.current === sessionId) await load({ force: true })
+        return typeof result.content === 'string' ? result.content : (fallbackContent ?? '')
+      } catch (error: unknown) {
+        if (sessionIdRef.current === sessionId) {
+          setLoadError(error instanceof Error ? error.message : 'Could not edit this message')
         }
-        return fallbackContent ?? null
+        throw error
       }
     },
     [sessionId, load],

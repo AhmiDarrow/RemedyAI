@@ -6,7 +6,6 @@ import {
   normalizeToolProcess,
   pairToolResults,
   processDefaultCollapsed,
-  showsAdvancedDiagnostics,
   showsProcessTrace,
   stepsFromMessageTools,
   TOOL_PROCESS_CYCLE,
@@ -33,12 +32,10 @@ describe('tool process modes', () => {
     expect(processDefaultCollapsed('off', true)).toBe(false)
   })
 
-  it('process trail always on; advanced diagnostics removed', () => {
+  it('process trail is always available', () => {
     expect(showsProcessTrace('off')).toBe(true)
     expect(showsProcessTrace('medium')).toBe(true)
     expect(showsProcessTrace('full')).toBe(true)
-    expect(showsAdvancedDiagnostics('full+')).toBe(false)
-    expect(showsAdvancedDiagnostics('full')).toBe(false)
   })
 
   it('cycles Min → Med → Full', () => {

@@ -5,6 +5,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useId,
   type CSSProperties,
   type ReactNode,
   type SelectHTMLAttributes,
@@ -186,13 +187,6 @@ function collectOptions(node: ReactNode, out: Opt[] = []): Opt[] {
   return out
 }
 
-function pathsEqual(a: string, b: string): boolean {
-  if (a === b) return true
-  const na = a.replace(/\//g, '\\').toLowerCase()
-  const nb = b.replace(/\//g, '\\').toLowerCase()
-  return na === nb
-}
-
 function PortalSelect({
   value,
   onChange,
@@ -215,6 +209,9 @@ function PortalSelect({
   size?: 'md' | 'sm'
 }) {
   const [open, setOpen] = useState(false)
+  const menuId = useId()
+  const triggerId = useId()
+  const searchKeys = useRef({ text: '', at: 0 })
   const btnRef = useRef<HTMLButtonElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const [pos, setPos] = useState<{
@@ -229,7 +226,7 @@ function PortalSelect({
   const options =
     optionsProp && optionsProp.length > 0 ? optionsProp : fromChildren
   const selected =
-    options.find((o) => pathsEqual(o.value, value))
+    options.find((o) => o.value === value)
     || (value
       ? { value, label: value.replace(/^.*[\\/]/, '') || value }
       : options.find((o) => o.value === '') || options[0])
@@ -251,8 +248,8 @@ function PortalSelect({
       inStatusBar
       || inBottomBand
       || (spaceBelow < needed && spaceAbove >= spaceBelow)
-    const maxH = Math.max(120, Math.min(320, openUp ? spaceAbove : spaceBelow))
-    const width = Math.max(r.width, 160)
+    const maxH = Math.max(40, Math.min(320, (openUp ? spaceAbove : spaceBelow) - 4))
+    const width = Math.min(Math.max(r.width, 160), window.innerWidth - 16)
     const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8))
     setPos({
       top: openUp ? r.top : r.bottom + 4,
@@ -282,27 +279,64 @@ function PortalSelect({
       if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return
       setOpen(false)
     }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
     document.addEventListener('mousedown', onDoc)
-    window.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('mousedown', onDoc)
-      window.removeEventListener('keydown', onKey)
     }
   }, [open])
+
+  const positioned = Boolean(pos)
+  useLayoutEffect(() => {
+    if (!open || !positioned) return
+    const selectedOption = menuRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]:not(:disabled)')
+    const firstOption = menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')
+    ;(selectedOption ?? firstOption ?? menuRef.current)?.focus()
+  }, [open, positioned])
 
   const menu =
     open && pos
       ? createPortal(
           <div
             ref={menuRef}
+            id={menuId}
             role="listbox"
+            aria-labelledby={id || triggerId}
+            tabIndex={-1}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return
+              if (event.key === 'Escape' || event.key === 'Tab') {
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  event.stopPropagation()
+                }
+                setOpen(false)
+                btnRef.current?.focus()
+                return
+              }
+              const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
+              if (!items.length) return
+              const current = items.indexOf(document.activeElement as HTMLButtonElement)
+              let next = -1
+              if (event.key === 'ArrowDown') next = (current + 1) % items.length
+              if (event.key === 'ArrowUp') next = (current - 1 + items.length) % items.length
+              if (event.key === 'Home') next = 0
+              if (event.key === 'End') next = items.length - 1
+              if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey && event.key !== ' ') {
+                const now = Date.now()
+                const prev = now - searchKeys.current.at < 700 ? searchKeys.current.text : ''
+                const text = prev + event.key.toLocaleLowerCase()
+                searchKeys.current = { text, at: now }
+                next = items.findIndex((item) => item.textContent?.trim().toLocaleLowerCase().startsWith(text))
+              }
+              if (next >= 0) {
+                event.preventDefault()
+                items[next]?.focus()
+              }
+            }}
             className="settings-portal-select-menu"
             style={{
               position: 'fixed',
-              zIndex: 800,
+              zIndex: 1000,
               left: pos.left,
               width: pos.width,
               maxHeight: pos.maxH,
@@ -323,12 +357,13 @@ function PortalSelect({
               </div>
             ) : (
               options.map((o, idx) => {
-                const on = pathsEqual(o.value, value)
+                const on = o.value === value
                 return (
                   <button
                     key={`${idx}:${o.value}`}
                     type="button"
                     role="option"
+                    tabIndex={-1}
                     aria-selected={on}
                     disabled={o.disabled}
                     data-value={o.value}
@@ -358,6 +393,7 @@ function PortalSelect({
                       // Always pass explicit value from the option object
                       onChange(o.value)
                       setOpen(false)
+                      btnRef.current?.focus()
                     }}
                     title={o.label}
                   >
@@ -379,12 +415,19 @@ function PortalSelect({
     >
       <button
         ref={btnRef}
-        id={id}
+        id={id || triggerId}
         type="button"
         disabled={disabled}
         title={title}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault()
+            if (!disabled) setOpen(true)
+          }
+        }}
         className={`ui-select w-full text-left flex items-center gap-1 ${
           size === 'sm' ? 'ui-select-sm' : ''
         }`}
@@ -399,18 +442,6 @@ function PortalSelect({
           ▾
         </span>
       </button>
-      {/* Keep a hidden native select for form semantics / tests */}
-      <select
-        value={value}
-        disabled={disabled}
-        tabIndex={-1}
-        aria-hidden
-        className="sr-only"
-        style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {children}
-      </select>
       {menu}
     </div>
   )

@@ -1118,8 +1118,11 @@ test "host_session wrap/split C ABI" {
     var out_ptr: ?[*]u8 = null;
     var out_len: usize = 0;
     try std.testing.expectEqual(ok_status, remedy_core_host_session_wrap(wrap_in.ptr, wrap_in.len, &out_ptr, &out_len));
-    defer host.allocator.free(out_ptr.?[0..out_len]);
-    try std.testing.expect(std.mem.indexOf(u8, out_ptr.?[0..out_len], "ERRORLEVEL") != null);
+    // Defer captures the variables, not their current values. Keep each
+    // allocation before reusing the ABI output slots below.
+    const wrapped = out_ptr.?[0..out_len];
+    defer host.allocator.free(wrapped);
+    try std.testing.expect(std.mem.indexOf(u8, wrapped, "ERRORLEVEL") != null);
 
     const split_in =
         \\{"text":"hi\r\nREMEDY_HOST_DONE_x:0\r\n","sentinel":"REMEDY_HOST_DONE_x"}
@@ -1127,8 +1130,9 @@ test "host_session wrap/split C ABI" {
     out_ptr = null;
     out_len = 0;
     try std.testing.expectEqual(ok_status, remedy_core_host_session_split(split_in.ptr, split_in.len, &out_ptr, &out_len));
-    defer host.allocator.free(out_ptr.?[0..out_len]);
-    try std.testing.expect(std.mem.indexOf(u8, out_ptr.?[0..out_len], "\"exit_code\":0") != null);
+    const split = out_ptr.?[0..out_len];
+    defer host.allocator.free(split);
+    try std.testing.expect(std.mem.indexOf(u8, split, "\"exit_code\":0") != null);
 }
 
 test "host_session live echo round-trip" {

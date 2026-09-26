@@ -42,8 +42,8 @@ class Outcome:
 
 def grade(scenario: Scenario, turn: Turn, workspace: Path) -> Outcome:
     """Run the scenario's check and fold in the behavioural metrics."""
-    if turn.status == "error" or turn.error:
-        passed, detail = False, f"stream error: {turn.error[:200]}"
+    if not turn.ok:
+        passed, detail = False, f"stream {turn.status or 'incomplete'}: {turn.error[:200]}"
     else:
         try:
             passed, detail = scenario.check(turn, workspace)
@@ -106,6 +106,8 @@ class RunReport:
             by_tier.setdefault(o.tier, []).append(o)
         top = -1
         for tier in sorted(by_tier):
+            if tier != top + 1:
+                break
             if all(o.passed for o in by_tier[tier]):
                 top = tier
             else:
@@ -123,9 +125,13 @@ class RunReport:
     @property
     def verdict(self) -> str:
         """One-line judgement on whether this model can run Remedy."""
+        tiers = {o.tier for o in self.outcomes}
+        if tiers and tiers != set(range(max(tiers) + 1)):
+            passed = sum(o.passed for o in self.outcomes)
+            return f"PARTIAL SUITE - {passed}/{len(self.outcomes)} scenarios passed; full ladder not evaluated"
         t = self.top_tier
         if t >= 8:
-            return "RUNS REMEDY - sustained multi-step work, safe to leave running"
+            return "PASSED LADDER - sustained multi-step tasks in this suite"
         if t >= 6:
             return "RUNS REMEDY - handles real multi-file tasks"
         if t >= 5:

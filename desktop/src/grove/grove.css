@@ -14,10 +14,10 @@
 .grove-topbar {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 10px 18px;
+  gap: 16px;
+  padding: 12px 24px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-secondary);
+  background: var(--bg-primary);
   flex: none;
 }
 .grove-brand {
@@ -34,7 +34,7 @@
   border: 1px solid var(--border);
   background: none;
   padding: 5px 12px;
-  border-radius: 999px;
+  border-radius: 9px;
   cursor: pointer;
 }
 .grove-switch b { color: var(--text-primary); }
@@ -58,35 +58,39 @@
 }
 @keyframes grove-blink { 50% { opacity: 0.3; } }
 
-.grove-tabs { display: flex; gap: 6px; margin-left: 10px; }
+.grove-tabs { display: flex; gap: 4px; margin-left: 10px; padding: 4px; border-radius: 10px; background: var(--bg-secondary); }
 /* Home tab group sits just after the brand monogram. */
 .grove-tabs.home { margin-left: 6px; }
 .grove-tabs button {
-  border: 1px solid var(--border);
-  background: var(--bg-primary);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text-secondary);
-  border-radius: 999px;
-  padding: 5px 14px;
+  border-radius: 7px;
+  padding: 7px 12px;
   font-size: 0.82rem;
   cursor: pointer;
 }
 .grove-tabs button.on {
   color: var(--text-primary);
-  border-color: var(--accent);
+  border-color: var(--border);
   background: var(--bg-tertiary);
 }
 
 /* ---------- home ---------- */
 .grove-scroll { flex: 1; overflow: auto; padding-bottom: 110px; }
-.grove-hello { padding: 26px 32px 4px; font-size: 1.35rem; font-weight: 600; }
-.grove-hello span {
-  display: block;
-  margin-top: 4px;
+.grove-hello { padding: 32px 28px 8px; }
+.grove-hello h1 { font-size: clamp(1.35rem, 2vw, 1.8rem); font-weight: 600; letter-spacing: -0.035em; line-height: 1.25; margin: 8px 0; }
+.grove-eyebrow, .grove-section-label { font-size: 0.78rem; font-weight: 500; color: var(--text-secondary); }
+.grove-eyebrow { margin: 0; }
+.grove-section-label { margin: 24px 28px 12px; }
+.grove-hello .grove-intro {
+  margin: 0;
   font-size: 0.95rem;
-  font-weight: 400;
+  line-height: 1.6;
   color: var(--text-secondary);
 }
-.grove-away { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 32px 8px; }
+.grove-away { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 28px; }
+.grove-away:empty { display: none; }
 .grove-pill {
   display: flex; align-items: center; gap: 8px;
   background: var(--bg-secondary);
@@ -105,7 +109,7 @@
 .grove-mode-row {
   display: flex;
   gap: 8px;
-  padding: 8px 32px 0;
+  padding: 12px 28px 0;
 }
 .grove-mode-chip {
   font: inherit;
@@ -125,22 +129,25 @@
 
 .grove-plots {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
-  gap: 16px;
-  padding: 14px 32px 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  gap: 12px;
+  padding: 0 28px 24px;
 }
 .grove-plot {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: 12px;
   padding: 18px;
   cursor: pointer;
   text-align: left;
   color: var(--text-primary);
   font: inherit;
-  transition: transform 0.18s, border-color 0.18s;
+  transition: border-color 0.18s, background 0.18s;
 }
-.grove-plot:hover { transform: translateY(-3px); border-color: var(--accent); }
+.grove-plot:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, var(--bg-secondary)); }
+.grove-plot:has(.grove-plot-open) { padding: 0; }
+.grove-plot-open { display: block; width: 100%; height: 100%; padding: 20px; background: none; border: 0; text-align: left; color: inherit; font: inherit; border-radius: inherit; cursor: pointer; }
+.grove-plot-open h2 { padding-right: 40px; overflow-wrap: anywhere; }
 .grove-plot .kind {
   font-size: 0.68rem;
   letter-spacing: 0.13em;
@@ -164,21 +171,24 @@
   font-size: 0.78rem;
 }
 .grove-plot.seed {
-  border-style: dashed;
+  grid-column: 1 / -1;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
   background: none;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 8px;
   text-align: center;
   color: var(--text-secondary);
   font-size: 0.86rem;
   line-height: 1.55;
-  min-height: 150px;
+  min-height: 60px;
+  padding: 16px 0 0;
   cursor: default;
 }
-.grove-plot.seed em { color: var(--text-primary); font-style: normal; }
 .grove-plot.seed .seedbtn {
   border: 1px solid var(--border);
   background: var(--bg-secondary);
@@ -577,13 +587,33 @@
 /* Steer: the primary action while she works — same accent as Send. */
 .grove-mic.steer { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
 
-/* Narrow windows: stack cards over chat, divider still drags (vertical feel kept simple) */
+/* Narrow windows: stack goals over chat. A horizontal drag control must not
+   masquerade as a vertical resize handle when the layout changes axis. */
 @media (max-width: 860px) {
   .grove-split { flex-direction: column; }
-  .grove-split .grove-scroll { width: 100% !important; max-height: 45%; }
-  .grove-divider { width: auto; height: 10px; cursor: row-resize; }
-  .grove-divider .grip { width: 44px; height: 3px; }
+  .grove-split .grove-scroll { width: 100% !important; max-height: 40%; }
+  .grove-split > .grove-divider { display: none; }
   .grove-chatpane { border-left: none; border-top: 1px solid var(--border, rgba(127,127,127,0.18)); }
+  .grove-topbar { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
+  .grove-tabs.home { margin-left: 0; }
+  .grove-hello { padding: 20px 18px 8px; }
+  .grove-mode-row { padding-left: 18px; }
+  .grove-section-label { margin: 16px 18px 10px; }
+  .grove-plots { padding: 0 18px 16px; }
+  .grove-plot-actions { opacity: 1; }
+}
+@media (max-width: 540px) {
+  .grove-topbar .grove-tabs { order: 3; flex-basis: 100%; }
+  .grove-topbar .grove-tabs button { flex: 1; }
+  .grove-plots { grid-template-columns: 1fr; }
+  .grove-plot.example .last, .grove-plot.example .livechip { display: none; }
+  .grove-plot.example { display: flex; align-items: center; gap: 12px; padding: 14px; }
+  .grove-plot.example .kind, .grove-plot.example h2 { margin: 0; }
+  .grove-talkbar.chatbar { margin: 8px; width: auto; left: auto; transform: none; }
+  .grove-chat-feed .message-feed .chat-empty-hero { min-height: auto; padding: 18px 14px; gap: 10px; }
+  .grove-chat-feed .message-feed .chat-empty-hero > :first-child { display: none; }
+  .grove-chat-feed .message-feed .chat-empty-hero .chat-empty-title { font-size: 1.25rem; }
+  .grove-chat-feed .message-feed .chat-empty-hero .chat-empty-sub { font-size: 0.85rem; }
 }
 
 /* ---- card actions (remove / edit) + example plots ---- */
@@ -615,18 +645,20 @@
 }
 .grove-plot-act:hover { color: var(--text-primary, #eee); border-color: var(--accent, #4a9); }
 .grove-plot-act.del:hover { color: var(--danger, #e66); border-color: var(--danger, #e66); }
-.grove-plot.example { opacity: 0.9; border-style: dashed; }
+.grove-plot.example { border-style: solid; }
 .grove-plot.example .kind { color: var(--text-secondary, #999); }
-.grove-plot.example:hover { opacity: 1; border-color: var(--accent, #4a9); }
+.grove-plot.example:hover { border-color: var(--accent, #4a9); }
 
 /* ---- chat composer polish: multiline textarea + rounded rect ---- */
 .grove-talkbar.chatbar {
   align-items: flex-end;
-  border-radius: 22px;
-  padding: 8px 10px 8px 14px;
+  border-radius: 16px;
+  padding: 10px 12px;
 }
+.grove-talkbar.chatbar:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
 .grove-talkbar.chatbar textarea {
   flex: 1;
+  min-width: 0;
   background: none;
   border: none;
   outline: none;

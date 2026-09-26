@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react'
 import { browserStackHold } from '../utils/browserStack'
+import { useDialogFocus } from '../hooks/useDialogFocus'
 
 export function AboutDialog({
   open,
@@ -20,18 +21,11 @@ export function AboutDialog({
   onOpenSettings: () => void
   onOpenDiagnostics?: () => void
 }) {
+  const dialogRef = useDialogFocus<HTMLDivElement>(open, onClose)
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    const release = browserStackHold('about-dialog')
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      release()
-    }
-  }, [open, onClose])
+    return browserStackHold('about-dialog')
+  }, [open])
 
   if (!open) return null
 
@@ -39,6 +33,8 @@ export function AboutDialog({
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center p-4 ui-overlay"
       role="dialog"
+      ref={dialogRef}
+      tabIndex={-1}
       aria-modal="true"
       aria-labelledby="about-title"
       onClick={onClose}

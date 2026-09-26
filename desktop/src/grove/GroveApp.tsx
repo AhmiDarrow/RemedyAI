@@ -199,7 +199,6 @@ export function GroveApp({
   const [busy, setBusy] = useState(false)
   const [micErr, setMicErr] = useState('')
   const goalSessionsRef = useRef<Record<string, string>>(loadGoalSessions())
-  const inputRef = useRef<HTMLInputElement | null>(null)
 
   // ---- voice: speak-back (gender-matched) + hearing ----
   const [gender, setGender] = useState<GenderRole>('female')
@@ -420,7 +419,7 @@ export function GroveApp({
   const homeSplit = useSplit({
     storageKey: 'remedy.grove.split.home.v1',
     axis: 'x',
-    initial: 0.56,
+    initial: 0.44,
     min: 0.28,
     max: 0.72,
     label: 'Resize plots and chat',
@@ -509,10 +508,11 @@ export function GroveApp({
             <RemedyLogo size={18} variant="auto" title="Remedy" />
             {partnerName || 'Remedy'}
           </div>
-          <div className="grove-tabs home">
+          <div className="grove-tabs home" role="group" aria-label="Grove views">
             <button
               type="button"
               className={homeTab === 'plots' ? 'on' : ''}
+              aria-pressed={homeTab === 'plots'}
               onClick={() => setHomeTab('plots')}
             >
               Home
@@ -520,6 +520,7 @@ export function GroveApp({
             <button
               type="button"
               className={homeTab === 'alongside' ? 'on' : ''}
+              aria-pressed={homeTab === 'alongside'}
               onClick={() => setHomeTab('alongside')}
               title="Live stage — I drive the browser, you watch (shop, forms, email)"
             >
@@ -528,10 +529,11 @@ export function GroveApp({
             <button
               type="button"
               className={homeTab === 'storyline' ? 'on' : ''}
+              aria-pressed={homeTab === 'storyline'}
               onClick={() => setHomeTab('storyline')}
               title="Everything we say and do, in order, in plain words"
             >
-              📖 {t('grove.storyline')}
+              {t('grove.storyline')}
             </button>
           </div>
           <button
@@ -540,7 +542,7 @@ export function GroveApp({
             onClick={onSwitchToStudio}
             title="Full workbench: files, terminal, raw tools"
           >
-            {t('grove.switchStudio')}
+            {t('bar.studio')}
           </button>
         </div>
 
@@ -550,14 +552,15 @@ export function GroveApp({
           ref={homeSplit.containerRef}
         >
         <div className="grove-scroll" style={{ width: `${homeSplit.ratio * 100}%` }}>
-          <h1 className="grove-hello">
-            {timeOfDayGreeting(userName, t)}
-            <span>
+          <header className="grove-hello">
+            <p className="grove-eyebrow">Your space</p>
+            <h1>{timeOfDayGreeting(userName, t)}</h1>
+            <p className="grove-intro">
               {goals.length
-                ? `${goals.length} ${goals.length === 1 ? 'plot' : 'plots'} growing${needsYou ? ` · ${needsYou} thing${needsYou > 1 ? 's' : ''} need${needsYou > 1 ? '' : 's'} you` : ''}`
-                : 'Nothing planted yet — tell me a goal and we’ll grow it together.'}
-            </span>
-          </h1>
+                ? `${goals.length} ${goals.length === 1 ? 'goal' : 'goals'} in progress${needsYou ? ` · ${needsYou} waiting for you` : ''}`
+                : 'Bring a goal, a question, or something you’d like a hand with.'}
+            </p>
+          </header>
 
           <div className="grove-away">
             {goals.length > 0 && lastStep?.did && (
@@ -609,6 +612,7 @@ export function GroveApp({
                 key={id}
                 type="button"
                 className={`grove-mode-chip${workMode === id ? ' on' : ''}`}
+                aria-pressed={workMode === id}
                 title={title}
                 onClick={() => {
                   void ensureHomeSession().then((sid) => {
@@ -621,20 +625,12 @@ export function GroveApp({
             ))}
           </div>
 
+          <h2 className="grove-section-label">{goals.length ? 'Your goals' : 'A few places to start'}</h2>
           <div className="grove-plots">
             {goals.map((g) => (
               <div
                 key={g.id}
                 className="grove-plot"
-                role="button"
-                tabIndex={0}
-                onClick={() => openGoal(g)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    openGoal(g)
-                  }
-                }}
                 data-testid="grove-plot"
               >
                 <div className="grove-plot-actions">
@@ -663,6 +659,7 @@ export function GroveApp({
                     ×
                   </button>
                 </div>
+                <button type="button" className="grove-plot-open" onClick={() => openGoal(g)} aria-label={`Open goal: ${g.title}`}>
                 <div className="kind">
                   🌿 {g.horizon || g.status || 'growing'}
                 </div>
@@ -674,7 +671,8 @@ export function GroveApp({
                       : `Done looks like: ${g.done_looks_like}`}
                   </div>
                 )}
-                <span className="livechip">Sit with me →</span>
+                <span className="livechip">Continue <span aria-hidden>→</span></span>
+                </button>
               </div>
             ))}
 
@@ -687,33 +685,27 @@ export function GroveApp({
                   onClick={() => void plantGoal(ex.title)}
                   title="Start this — I'll make it a real plot"
                 >
-                  <div className="kind">✨ example</div>
+                  <div className="kind" aria-hidden>{ex.icon}</div>
                   <h2>
-                    {ex.icon} {ex.title}
+                    {ex.title}
                   </h2>
                   <div className="last">{ex.hint}</div>
-                  <span className="livechip">Start this →</span>
+                  <span className="livechip">Start here <span aria-hidden>→</span></span>
                 </button>
               ))}
 
             <div className="grove-plot seed">
-              <div>🌱</div>
               <div>
-                Plant something new — <em>“I want to…”</em> is enough.
+                Something else in mind?
               </div>
               <button
                 type="button"
                 className="seedbtn"
                 onClick={() => {
-                  inputRef.current?.focus()
-                  ;(
-                    document.querySelector(
-                      '.grove-chat input[aria-label="Talk to Remedy"]',
-                    ) as HTMLInputElement | null
-                  )?.focus()
+                  window.dispatchEvent(new Event('remedy:focus-composer'))
                 }}
               >
-                Start in the chat →
+                Tell Remedy <span aria-hidden>→</span>
               </button>
             </div>
           </div>
@@ -885,7 +877,7 @@ export function GroveApp({
           </button>
         </div>
         <button type="button" className="grove-switch" onClick={onSwitchToStudio}>
-          {t('grove.switchStudioShort')}
+          {t('bar.studio')}
         </button>
       </div>
 

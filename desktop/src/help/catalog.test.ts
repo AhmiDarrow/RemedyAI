@@ -3,11 +3,19 @@ import {
   HELP_ARTICLES,
   getArticle,
   resolveWikiHref,
+  resolveExternalHelpHref,
   searchArticles,
   articlesByCategory,
 } from './catalog'
 
 describe('help catalog', () => {
+  it('resolves repository links without navigating into the local API', () => {
+    expect(resolveExternalHelpHref('../DESKTOP.md')).toBe('https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/DESKTOP.md')
+    expect(resolveExternalHelpHref('../../README.md#usage')).toBe('https://github.com/AhmiDarrow/RemedyAI/blob/master/README.md#usage')
+    expect(resolveExternalHelpHref('https://example.com/help')).toBe('https://example.com/help')
+    expect(resolveExternalHelpHref('javascript:alert(1)')).toBeUndefined()
+    expect(resolveExternalHelpHref('file:///private')).toBeUndefined()
+  })
   it('bundles all expected chapters with non-empty bodies', () => {
     expect(HELP_ARTICLES.length).toBeGreaterThanOrEqual(16)
     for (const a of HELP_ARTICLES) {

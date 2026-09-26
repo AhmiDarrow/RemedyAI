@@ -340,9 +340,6 @@ export async function getLatestPlan(
   return apiFetch(`/plans/latest${q}`)
 }
 
-/** @deprecated Prefer `approvePlan` from `./plans` — kept for panel imports. */
-export { approvePlan, cancelPlan, setPlanStatus } from './plans'
-
 export async function getSkillReuseMetrics(): Promise<{
   total_activations: number
   skills_with_activation: number

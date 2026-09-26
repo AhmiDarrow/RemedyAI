@@ -222,7 +222,7 @@ EN: dict[str, str] = {
     "empty.jumpNew": "{n} new",
     "composer.hintChat": "Chat · no tools · Shift+Tab Plan",
     "composer.hintPlan": "Plan · research only · Shift+Tab Build",
-    "composer.hintQueue": "Enter queue · Ctrl+Enter interrupt",
+    "composer.hintQueue": "Enter steer · Ctrl+Enter interrupt · Alt+Enter queue",
     "composer.hintSend": "Enter send · / commands · @ files",
     "composer.streaming": "Streaming",
     "common.next": "Continue",

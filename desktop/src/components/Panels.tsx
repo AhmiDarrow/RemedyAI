@@ -2,125 +2,19 @@ import {
   useState,
   useEffect,
   useRef,
+  useId,
   type ComponentType,
   type CSSProperties,
-  type ReactNode,
 } from 'react'
 import { skillDeleteConfirm } from '../utils/confirmMessages'
 import { ConfirmDialog } from './ConfirmDialog'
 import { SkillsLibrary } from './SkillsLibrary'
-
-interface PanelProps {
-  open: boolean
-  onClose: () => void
-  title: string
-  children: ReactNode
-  /**
-   * Fixed chrome under the title (tabs, etc.) — not inside the scroll body,
-   * so it cannot scroll/clip above the visible viewport.
-   */
-  toolbar?: ReactNode
-}
-
-/** Side panel with basic focus trap + Escape to close (a11y). */
-export function Panel({ open, onClose, title, children, toolbar }: PanelProps) {
-  const rootRef = useRef<HTMLDivElement>(null)
-  const closeRef = useRef<HTMLButtonElement>(null)
-  const prevFocus = useRef<HTMLElement | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    prevFocus.current = document.activeElement as HTMLElement | null
-    closeRef.current?.focus()
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
-        return
-      }
-      if (e.key !== 'Tab' || !rootRef.current) return
-      const focusables = rootRef.current.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      )
-      const list = [...focusables].filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null)
-      if (list.length === 0) return
-      const first = list[0]!
-      const last = list[list.length - 1]!
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault()
-        last.focus()
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault()
-        first.focus()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      prevFocus.current?.focus?.()
-    }
-  }, [open, onClose])
-
-  // Critical: unmount when closed. A width:0 panel still contributes content height
-  // in a column flex parent and was collapsing the chat feed to 0px.
-  if (!open) return null
-
-  // Sit below the in-app title bar (36px). top:0 hid the Skills title + Library
-  // tabs under the window chrome so users only saw the filter list.
-  const TITLEBAR_H = 36
-  // Leave room for the bottom status bar so close/tabs aren't covered either.
-  const STATUSBAR_H = 28
-
-  return (
-    <div
-      ref={rootRef}
-      role="complementary"
-      aria-label={title}
-      data-keep-focus
-      className="flex flex-col border-l overflow-hidden fixed right-0 z-[80]"
-      style={{
-        background: 'color-mix(in srgb, var(--bg-secondary) 96%, var(--bg-primary))',
-        borderColor: 'color-mix(in srgb, var(--border) 85%, transparent)',
-        top: TITLEBAR_H,
-        bottom: STATUSBAR_H,
-        width: 300,
-        boxShadow: '-8px 0 24px rgba(0,0,0,0.22)',
-      }}
-    >
-      <div
-        className="flex items-center justify-between px-3 py-2.5 border-b text-xs font-semibold tracking-tight flex-shrink-0"
-        style={{
-          borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)',
-          color: 'var(--text-primary)',
-        }}
-      >
-        <span>{title}</span>
-        <button
-          ref={closeRef}
-          type="button"
-          onClick={onClose}
-          className="ui-btn ui-btn-ghost text-base leading-none"
-          style={{ padding: '0.15rem 0.4rem' }}
-          aria-label={`Close ${title}`}
-        >
-          {'\u00D7'}
-        </button>
-      </div>
-      {toolbar != null && (
-        <div
-          className="flex-shrink-0 px-2 py-2 border-b"
-          style={{ borderColor: 'var(--border)', background: 'var(--bg-tertiary)' }}
-        >
-          {toolbar}
-        </div>
-      )}
-      <div className="flex-1 min-h-0 overflow-y-auto p-2 text-xs">
-        {children}
-      </div>
-    </div>
-  )
-}
+import { Panel } from './Panel'
+import { useAsyncScope } from '../hooks/useAsyncScope'
+import { apiFetch } from '../api/client'
+import { getLatestCheckpoint, getLatestPlan, getLifeBoard, createLifeGoal, patchLifeGoal } from '../api/partner'
+import { approvePlan } from '../api/plans'
+import { isTauri, tauriInvoke } from '../api/tauri'
 
 export function MemoryPanel({
   open,
@@ -171,96 +65,90 @@ export function MemoryPanel({
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  const load = () => {
+  const [error, setError] = useState<string | null>(null)
+  const scope = useAsyncScope(open ? sessionId ?? '__global__' : null)
+  const actionBusy = useRef(false)
+  const viewId = useId()
+
+  const load = async () => {
+    const current = scope.latest()
     setLoading(true)
-    void Promise.all([
-      import('../api/client').then(({ apiFetch }) =>
-        Promise.all([
-          apiFetch<{ results?: { id: string; title: string; content: string; type: string }[] }>(
-            `/memory/search?query=${encodeURIComponent(memoryQuery)}&limit=20`,
-          )
-            .then((d) => setEntries(d.results || []))
-            .catch(() => setEntries([])),
-          apiFetch<{ facts?: { text: string; category: string }[] }>('/memory/facts?limit=12')
-            .then((d) => setFacts(d.facts || []))
-            .catch(() => setFacts([])),
-        ]),
+    setError(null)
+    const [notes, factList, progress, board, latestPlan] = await Promise.allSettled([
+      apiFetch<{ results?: { id: string; title: string; content: string; type: string }[] }>(
+        `/memory/search?query=${encodeURIComponent(memoryQuery)}&limit=20`,
       ),
-      import('../api/partner').then(({ getLatestCheckpoint, getLatestPlan, getLifeBoard }) =>
-        Promise.all([
-          getLatestCheckpoint(sessionId)
-            .then((d) => {
-              setCheckpoint(d.checkpoint)
-              setCheckpointMd(d.markdown || null)
-            })
-            .catch(() => {
-              setCheckpoint(null)
-              setCheckpointMd(null)
-            }),
-          getLifeBoard()
-            .then((board) => {
-              setLifeGoals(
-                board.goals.filter((x) => !['done', 'dropped'].includes(String(x.status || 'open'))),
-              )
-              setLifeFolder(board.life_folder || null)
-              setLastStep(board.last_step || null)
-              setLifeDigest(board.digest || null)
-            })
-            .catch(() => {
-              setLifeGoals([])
-              setLifeFolder(null)
-              setLastStep(null)
-              setLifeDigest(null)
-            }),
-          getLatestPlan(sessionId)
-            .then((d) => {
-              setPlan(
-                d.plan
-                  ? {
-                      id: d.plan.id,
-                      title: d.plan.title,
-                      status: d.plan.status,
-                      steps: d.plan.steps,
-                      markdown: d.markdown,
-                    }
-                  : null,
-              )
-            })
-            .catch(() => setPlan(null)),
-        ]),
-      ),
-    ]).finally(() => setLoading(false))
+      apiFetch<{ facts?: { text: string; category: string }[] }>('/memory/facts?limit=12'),
+      getLatestCheckpoint(sessionId),
+      getLifeBoard(),
+      getLatestPlan(sessionId),
+    ])
+    if (!current()) return
+    setEntries(notes.status === 'fulfilled' ? notes.value.results || [] : [])
+    setFacts(factList.status === 'fulfilled' ? factList.value.facts || [] : [])
+    setCheckpoint(progress.status === 'fulfilled' ? progress.value.checkpoint : null)
+    setCheckpointMd(progress.status === 'fulfilled' ? progress.value.markdown || null : null)
+    const life = board.status === 'fulfilled' ? board.value : null
+    setLifeGoals(life?.goals.filter((goal) => !['done', 'dropped'].includes(String(goal.status || 'open'))) || [])
+    setLifeFolder(life?.life_folder || null)
+    setLastStep(life?.last_step || null)
+    setLifeDigest(life?.digest || null)
+    setPlan(latestPlan.status === 'fulfilled' && latestPlan.value.plan
+      ? { ...latestPlan.value.plan, markdown: latestPlan.value.markdown } : null)
+    const failures = [notes, factList, progress, board, latestPlan].filter((result) => result.status === 'rejected').length
+    if (failures) setError('Some memory information could not be loaded. Check the connection and retry.')
+    setLoading(false)
   }
 
   useEffect(() => {
+    scope.latest() // Invalidate the previous query before the debounce delay.
     if (!open) return
-    const t = window.setTimeout(() => load(), memoryQuery ? 250 : 0)
-    return () => window.clearTimeout(t)
+    const timer = window.setTimeout(() => void load(), memoryQuery ? 250 : 0)
+    return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, sessionId, memoryQuery])
 
-  const approve = async () => {
-    if (!plan?.id) return
+  useEffect(() => {
+    actionBusy.current = false
+    setBusy(false)
+    setPlan(null)
+    setCheckpoint(null)
+  }, [open, sessionId])
+
+  const runAction = async (operation: () => Promise<unknown>, after?: () => void) => {
+    if (actionBusy.current) return
+    actionBusy.current = true
+    const current = scope.capture()
     setBusy(true)
+    setError(null)
     try {
-      const { approvePlan } = await import('../api/partner')
-      const p = await approvePlan(plan.id)
-      if (p) setPlan({ ...plan, status: p.status, title: p.title })
-    } catch {
-      /* ignore */
+      await operation()
+      if (!current()) return
+      after?.()
+      await load()
+    } catch (cause: unknown) {
+      if (current()) setError(cause instanceof Error ? cause.message : 'Could not save this change. Please retry.')
     } finally {
-      setBusy(false)
+      if (current()) { actionBusy.current = false; setBusy(false) }
     }
+  }
+
+  const approve = () => {
+    if (plan?.id) void runAction(() => approvePlan(plan.id))
   }
 
   const tabBtn = (id: typeof tab, label: string) => (
     <button
       type="button"
       onClick={() => setTab(id)}
+      role="tab"
+      id={`${viewId}-${id}`}
+      aria-selected={tab === id}
+      aria-controls={`${viewId}-content`}
       className="flex-1 text-[11px] py-1.5 rounded"
       style={{
         background: tab === id ? 'var(--accent)' : 'transparent',
-        color: tab === id ? '#fff' : 'var(--text-primary)',
+        color: tab === id ? 'var(--accent-foreground)' : 'var(--text-primary)',
         fontWeight: tab === id ? 700 : 600,
         border: 'none',
         cursor: 'pointer',
@@ -296,11 +184,10 @@ export function MemoryPanel({
 
   return (
     <Panel open={open} onClose={onClose} title="Memory" toolbar={memoryToolbar}>
-      {loading ? (
-        <div style={{ color: 'var(--text-muted)' }}>Loading…</div>
-      ) : tab === 'memory' ? (
-        <div className="space-y-2">
-          <input
+      {error && <div role="alert" className="mb-3 text-xs" style={{ color: 'var(--error)' }}>
+        {error} <button type="button" className="underline" onClick={() => void load()}>Retry</button>
+      </div>}
+      {tab === 'memory' && <div className="mb-3">          <input
             type="search"
             value={memoryQuery}
             onChange={(e) => setMemoryQuery(e.target.value)}
@@ -313,6 +200,12 @@ export function MemoryPanel({
               color: 'var(--text-primary)',
             }}
           />
+</div>}
+      <div role="tabpanel" id={`${viewId}-content`} aria-labelledby={`${viewId}-${tab}`}>
+      {loading ? (
+        <div style={{ color: 'var(--text-muted)' }}>Loading…</div>
+      ) : tab === 'memory' ? (
+        <div className="space-y-2">
           {facts.length > 0 ? (
             <div>
               <div
@@ -334,8 +227,9 @@ export function MemoryPanel({
           ) : null}
         {entries.length === 0 ? (
           <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', lineHeight: 1.45 }}>
-            No notes yet. When Remedy saves progress (memory tools, goals, long tasks), recent
-            notes appear here. Search above to look through them.
+            {memoryQuery.trim()
+              ? `No notes match “${memoryQuery.trim()}”. Try a different search.`
+              : 'No notes yet. When Remedy saves progress, recent notes appear here.'}
           </div>
         ) : (
           entries.map((e) => (
@@ -371,19 +265,13 @@ export function MemoryPanel({
             in a folder you can open; say <strong>I did it</strong> when you finish a move, or{' '}
             <strong>I&apos;m back</strong> to hear what Remedy already did.
           </div>
-          {lifeFolder ? (
+          {lifeFolder && isTauri() ? (
             <button
               type="button"
               className="btn btn-sm"
               onClick={() => {
-                void import('../api/tauri').then(async ({ isTauri, tauriInvoke }) => {
-                  if (!isTauri()) return
-                  try {
-                    await tauriInvoke('open_path', { path: lifeFolder })
-                  } catch {
-                    /* ignore */
-                  }
-                })
+                void tauriInvoke('open_path', { path: lifeFolder }).catch((cause: unknown) =>
+                  setError(cause instanceof Error ? cause.message : 'Could not open the Life folder.'))
               }}
             >
               Open Life folder
@@ -409,15 +297,8 @@ export function MemoryPanel({
             onSubmit={(e) => {
               e.preventDefault()
               const title = newGoal.trim()
-              if (!title || busy) return
-              setBusy(true)
-              void import('../api/partner')
-                .then(({ createLifeGoal }) => createLifeGoal(title))
-                .then(() => {
-                  setNewGoal('')
-                  load()
-                })
-                .finally(() => setBusy(false))
+              if (!title) return
+              void runAction(() => createLifeGoal(title), () => setNewGoal(''))
             }}
           >
             <input
@@ -458,14 +339,8 @@ export function MemoryPanel({
                     e.preventDefault()
                     const action = (nextDraft[g.id] || '').trim()
                     if (!action) return
-                    setBusy(true)
-                    void import('../api/partner')
-                      .then(({ patchLifeGoal }) => patchLifeGoal(g.id, { next_action: action }))
-                      .then(() => {
-                        setNextDraft((d) => ({ ...d, [g.id]: '' }))
-                        load()
-                      })
-                      .finally(() => setBusy(false))
+                    void runAction(() => patchLifeGoal(g.id, { next_action: action }),
+                      () => setNextDraft((draft) => ({ ...draft, [g.id]: '' })))
                   }}
                 >
                   <input
@@ -485,11 +360,7 @@ export function MemoryPanel({
                     className="btn btn-sm"
                     disabled={busy}
                     onClick={() => {
-                      setBusy(true)
-                      void import('../api/partner')
-                        .then(({ patchLifeGoal }) => patchLifeGoal(g.id, { status: 'done', evidence: 'marked done in Life tab' }))
-                        .then(() => load())
-                        .finally(() => setBusy(false))
+                      void runAction(() => patchLifeGoal(g.id, { status: 'done', evidence: 'marked done in Life tab' }))
                     }}
                   >
                     Done
@@ -499,11 +370,7 @@ export function MemoryPanel({
                     className="btn btn-sm"
                     disabled={busy}
                     onClick={() => {
-                      setBusy(true)
-                      void import('../api/partner')
-                        .then(({ patchLifeGoal }) => patchLifeGoal(g.id, { status: 'paused' }))
-                        .then(() => load())
-                        .finally(() => setBusy(false))
+                      void runAction(() => patchLifeGoal(g.id, { status: 'paused' }))
                     }}
                   >
                     Pause
@@ -642,7 +509,7 @@ export function MemoryPanel({
         )
       ) : !plan ? (
         <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', lineHeight: 1.45 }}>
-          No plan yet. Switch to Plan mode (Ctrl+B) and ask Remedy to outline steps, or type{' '}
+          No plan yet. Switch to Plan mode (Shift+Tab) and ask Remedy to outline steps, or type{' '}
           <code style={{ fontSize: '0.7rem' }}>/plan new …</code>.
         </div>
       ) : (
@@ -697,6 +564,7 @@ export function MemoryPanel({
           </div>
         </div>
       )}
+      </div>
     </Panel>
   )
 }
@@ -807,6 +675,8 @@ export function SkillsPanel({
   onClose: () => void
   onOpenHelp?: (articleId?: string) => void
 }) {
+  const scope = useAsyncScope(open ? 'skills' : null)
+  const actionBusy = useRef(false)
   const [panelTab, setPanelTab] = useState<'installed' | 'library'>('installed')
   const [skills, setSkills] = useState<SkillRow[]>([])
   const [learning, setLearning] = useState<LearningSummary | null>(null)
@@ -834,13 +704,14 @@ export function SkillsPanel({
   } | null>(null)
 
   const load = () => {
+    const current = scope.latest()
     setLoading(true)
     setError(null)
-    void import('../api/skills')
+    return import('../api/skills')
       .then(async ({ listSkills }) => {
         const { apiFetch } = await import('../api/client')
         const [list, summary, metrics, packs] = await Promise.all([
-          listSkills(filter),
+          listSkills(),
           apiFetch<LearningSummary>('/skills/learning/summary').catch(() => null),
           import('../api/partner')
             .then(({ getSkillReuseMetrics }) => getSkillReuseMetrics())
@@ -849,6 +720,7 @@ export function SkillsPanel({
             .then(({ getSkillPacks }) => getSkillPacks())
             .catch(() => null),
         ])
+        if (!current()) return
         setSkills(list)
         setLearning(summary)
         setBudgetBanner(packs?.budget_banner || null)
@@ -863,17 +735,22 @@ export function SkillsPanel({
         )
       })
       .catch(() => {
+        if (!current()) return
         setSkills([])
         setLearning(null)
         setReuse(null)
         setError('Failed to load skills')
       })
-      .finally(() => setLoading(false))
+      .finally(() => { if (current()) setLoading(false) })
   }
 
   useEffect(() => {
+    actionBusy.current = false
+    setBusy(null)
+    setEditSaving(false)
+    setConfirmSkill(null)
     if (!open) return
-    load()
+    void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
@@ -887,20 +764,26 @@ export function SkillsPanel({
   }
 
   const forcePromote = async (name: string) => {
+    if (actionBusy.current) return
+    actionBusy.current = true
+    const current = scope.capture()
     setBusy(name)
     setError(null)
     try {
       const { setSkillStatus } = await import('../api/skills')
       await setSkillStatus(name, 'active', { force_promote: true, quarantine: false })
-      await load()
+      if (current()) await load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Promote failed')
+      if (current()) setError(e instanceof Error ? e.message : 'Promote failed')
     } finally {
-      setBusy(null)
+      if (current()) { actionBusy.current = false; setBusy(null) }
     }
   }
 
   const archiveSkill = async (name: string, archive: boolean) => {
+    if (actionBusy.current) return
+    actionBusy.current = true
+    const current = scope.capture()
     setBusy(name)
     setError(null)
     try {
@@ -909,11 +792,11 @@ export function SkillsPanel({
         force_promote: !archive,
         quarantine: false,
       })
-      await load()
+      if (current()) await load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Archive update failed')
+      if (current()) setError(e instanceof Error ? e.message : 'Archive update failed')
     } finally {
-      setBusy(null)
+      if (current()) { actionBusy.current = false; setBusy(null) }
     }
   }
 
@@ -921,11 +804,15 @@ export function SkillsPanel({
     setConfirmSkill(name)
 
   const doDeleteSkill = async (name: string) => {
+    if (actionBusy.current) return
+    actionBusy.current = true
+    const current = scope.capture()
     setBusy(name)
     setError(null)
     try {
       const { deleteSkill } = await import('../api/skills')
       await deleteSkill(name)
+      if (!current()) return
       setSelected((prev) => {
         const next = new Set(prev)
         next.delete(name)
@@ -933,15 +820,17 @@ export function SkillsPanel({
       })
       if (editName === name) setEditName(null)
       setPackMsg(`Deleted ${name}`)
-      await load()
+      if (current()) await load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Delete failed')
+      if (current()) setError(e instanceof Error ? e.message : 'Delete failed')
     } finally {
-      setBusy(null)
+      if (current()) { actionBusy.current = false; setBusy(null) }
     }
   }
 
   const visibleSkills = skills.filter((s) => {
+    const query = filter.trim().toLowerCase()
+    if (query && ![s.name, s.description, ...(s.tags || [])].some((value) => value.toLowerCase().includes(query))) return false
     const st = (s.status || '').toLowerCase()
     if (statusFilter === 'all') return st !== 'archived' // hide archived from default list
     if (statusFilter === 'active') return st === 'active' && !s.quarantine
@@ -952,25 +841,32 @@ export function SkillsPanel({
   })
 
   const toggleQuarantine = async (name: string, on: boolean) => {
+    if (actionBusy.current) return
+    actionBusy.current = true
+    const current = scope.capture()
     setBusy(name)
     setError(null)
     try {
       const { setSkillQuarantine } = await import('../api/skills')
       await setSkillQuarantine(name, on)
-      await load()
+      if (current()) await load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Quarantine update failed')
+      if (current()) setError(e instanceof Error ? e.message : 'Quarantine update failed')
     } finally {
-      setBusy(null)
+      if (current()) { actionBusy.current = false; setBusy(null) }
     }
   }
 
   const openEditor = async (name: string) => {
+    if (actionBusy.current) return
+    actionBusy.current = true
+    const current = scope.capture()
     setBusy(name)
     setError(null)
     try {
       const { getSkillDetail } = await import('../api/skills')
       const d = await getSkillDetail(name)
+      if (!current()) return
       setEditName(name)
       setEditBody(
         typeof d.body === 'string' && d.body
@@ -978,29 +874,32 @@ export function SkillsPanel({
           : (d.instructions_preview || ''),
       )
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load skill body')
+      if (current()) setError(e instanceof Error ? e.message : 'Failed to load skill body')
     } finally {
-      setBusy(null)
+      if (current()) { actionBusy.current = false; setBusy(null) }
     }
   }
 
   const saveEditor = async () => {
-    if (!editName) return
+    const current = scope.capture()
+    if (!editName || editSaving || actionBusy.current) return
     setEditSaving(true)
     setError(null)
     try {
       const { saveSkillBody } = await import('../api/skills')
       await saveSkillBody(editName, editBody)
+      if (!current()) return
       setEditName(null)
-      await load()
+      if (current()) await load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed')
+      if (current()) setError(e instanceof Error ? e.message : 'Save failed')
     } finally {
-      setEditSaving(false)
+      if (current()) setEditSaving(false)
     }
   }
 
   const exportPack = async () => {
+    const current = scope.capture()
     setPackMsg(null)
     setError(null)
     try {
@@ -1013,11 +912,12 @@ export function SkillsPanel({
           : 'Exported all skills as ZIP',
       )
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Export failed')
+      if (current()) setError(e instanceof Error ? e.message : 'Export failed')
     }
   }
 
   const importPack = async () => {
+    const current = scope.capture()
     setPackMsg(null)
     setError(null)
     try {
@@ -1034,9 +934,9 @@ export function SkillsPanel({
       setPackMsg(
         `Imported ${r.imported} skill(s) in quarantine: ${r.names.join(', ')}`,
       )
-      await load()
+      if (current()) await load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Import failed')
+      if (current()) setError(e instanceof Error ? e.message : 'Import failed')
     }
   }
 
@@ -1078,7 +978,7 @@ export function SkillsPanel({
               className="flex-1 text-[12px] px-2 py-2 rounded"
               style={{
                 background: on ? 'var(--accent)' : 'transparent',
-                color: on ? '#fff' : 'var(--text-primary)',
+                color: on ? 'var(--accent-foreground)' : 'var(--text-primary)',
                 fontWeight: on ? 700 : 600,
                 border: 'none',
                 cursor: 'pointer',
@@ -1140,7 +1040,7 @@ export function SkillsPanel({
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               onKeyDown={(e) => {
-                e.stopPropagation()
+                if (e.nativeEvent.isComposing) return
                 if (e.key === 'Enter') {
                   e.preventDefault()
                   load()
@@ -1159,7 +1059,7 @@ export function SkillsPanel({
                 color: 'var(--text-primary)',
               }}
             />
-            <button type="button" onClick={load} className="text-[10px] px-2 py-1.5 rounded" style={btnGhost}>
+            <button type="button" onClick={() => void load()} aria-label="Refresh installed skills" className="text-[10px] px-2 py-1.5 rounded" style={btnGhost}>
               ↻
             </button>
           </div>
@@ -1230,7 +1130,7 @@ export function SkillsPanel({
           )}
 
           {error && (
-            <div className="mb-2 text-[11px]" style={{ color: 'var(--danger, #f66)' }}>
+            <div role="alert" className="mb-2 text-[11px]" style={{ color: 'var(--danger, #f66)' }}>
               {error}
             </div>
           )}
@@ -1322,7 +1222,7 @@ export function SkillsPanel({
                           {s.quarantine ? (
                             <button
                               type="button"
-                              disabled={busy === s.name}
+                              disabled={busy !== null || editSaving}
                               onClick={() => void forcePromote(s.name)}
                               className="text-[10px] px-1.5 py-0.5 rounded"
                               style={btnAccent}
@@ -1333,7 +1233,7 @@ export function SkillsPanel({
                           ) : !isActive && !isArchived ? (
                             <button
                               type="button"
-                              disabled={busy === s.name}
+                              disabled={busy !== null || editSaving}
                               onClick={() => void forcePromote(s.name)}
                               className="text-[10px] px-1.5 py-0.5 rounded"
                               style={btnGhost}
@@ -1344,7 +1244,7 @@ export function SkillsPanel({
                           {!s.quarantine && isActive && (
                             <button
                               type="button"
-                              disabled={busy === s.name}
+                              disabled={busy !== null || editSaving}
                               onClick={() => void toggleQuarantine(s.name, true)}
                               className="text-[10px] px-1.5 py-0.5 rounded"
                               style={btnGhost}
@@ -1355,7 +1255,7 @@ export function SkillsPanel({
                           )}
                           <button
                             type="button"
-                            disabled={busy === s.name}
+                            disabled={busy !== null || editSaving}
                             onClick={() => void archiveSkill(s.name, !isArchived)}
                             className="text-[10px] px-1.5 py-0.5 rounded"
                             style={btnGhost}
@@ -1364,7 +1264,7 @@ export function SkillsPanel({
                           </button>
                           <button
                             type="button"
-                            disabled={busy === s.name}
+                            disabled={busy !== null || editSaving}
                             onClick={() => void openEditor(s.name)}
                             className="text-[10px] px-1.5 py-0.5 rounded"
                             style={{ ...btnGhost, color: 'var(--accent)' }}
@@ -1373,7 +1273,7 @@ export function SkillsPanel({
                           </button>
                           <button
                             type="button"
-                            disabled={busy === s.name}
+                            disabled={busy !== null || editSaving}
                             onClick={() => void deleteSkillRow(s.name)}
                             className="text-[10px] px-1.5 py-0.5 rounded"
                             style={{

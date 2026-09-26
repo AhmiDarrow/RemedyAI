@@ -4,6 +4,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
+import { isThemeId, getResolvedTheme } from '../themes'
 
 interface RemedyLogoProps {
   size?: number
@@ -26,8 +27,7 @@ function isDarkTheme(): boolean {
   if (typeof document === 'undefined') return true
   const root = document.documentElement
   const attr = root.getAttribute('data-theme') || root.dataset.theme || ''
-  if (attr === 'light') return false
-  if (attr === 'dark') return true
+  if (isThemeId(attr)) return getResolvedTheme(attr).kind === 'dark'
   // Fallback: CSS color-scheme / prefers-color-scheme
   try {
     return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ?? true

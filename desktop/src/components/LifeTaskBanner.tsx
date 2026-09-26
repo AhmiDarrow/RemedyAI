@@ -1,3 +1,4 @@
+import { useAsyncScope } from '../hooks/useAsyncScope'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useI18n } from '../i18n'
 import {
@@ -73,6 +74,8 @@ export function LifeTaskBanner({
   onExplain?: (text: string) => void
 }) {
   const { t } = useI18n()
+  const scope = useAsyncScope(sessionId)
+  const actionBusy = useRef(false)
   const [card, setCard] = useState<LifeTaskCard | null>(null)
   const [busy, setBusy] = useState(false)
   const [explain, setExplain] = useState('')
@@ -81,12 +84,24 @@ export function LifeTaskBanner({
   const spokenRef = useRef('')
 
   const refresh = useCallback(async () => {
+    if (actionBusy.current) return
+    const isCurrent = scope.latest()
     try {
       const data = await getCurrentLifeTask(sessionId)
-      setCard(data.task || null)
+      if (isCurrent()) setCard(data.task || null)
     } catch {
       // server down
     }
+  }, [sessionId, scope])
+
+  useEffect(() => {
+    setCard(null)
+    setExplain('')
+    setMessage('')
+    setReviewOpen(false)
+    setBusy(false)
+    actionBusy.current = false
+    spokenRef.current = ''
   }, [sessionId])
 
   useEffect(() => {
@@ -103,12 +118,14 @@ export function LifeTaskBanner({
     if (!autoHandoff) return
     let cancelled = false
     const tick = async () => {
+      if (actionBusy.current) return
+      const isCurrent = scope.latest()
       try {
         const res = await probeLifeTask({
           sessionId,
           taskId: card?.task_id,
         })
-        if (cancelled) return
+        if (cancelled || !isCurrent()) return
         if (res.task) setCard(res.task)
         if (res.spoken && res.cleared) setMessage(res.spoken)
       } catch {
@@ -121,7 +138,7 @@ export function LifeTaskBanner({
       cancelled = true
       window.clearInterval(id)
     }
-  }, [autoHandoff, sessionId, card?.task_id])
+  }, [autoHandoff, sessionId, card?.task_id, scope])
 
   useEffect(() => {
     if (refreshSignal === 0) return
@@ -139,6 +156,10 @@ export function LifeTaskBanner({
   }, [card, onSpeak])
 
   const act = async (action: 'yes' | 'no' | 'explain') => {
+    if (actionBusy.current) return
+    actionBusy.current = true
+    scope.latest()
+    const isCurrent = scope.capture()
     setBusy(true)
     setMessage('')
     try {
@@ -147,6 +168,8 @@ export function LifeTaskBanner({
         taskId: card?.task_id,
         approvalId: card?.approval_id,
       })
+      if (!isCurrent()) return
+      if (res.ok === false) throw new Error(res.spoken || 'Could not complete that action. Try again.')
       if (action === 'explain') {
         const text = String(res.spoken || '')
         setExplain(text)
@@ -156,11 +179,11 @@ export function LifeTaskBanner({
         setMessage(String(res.spoken || (action === 'yes' ? t('lifeTask.yes') : t('lifeTask.no'))))
       }
       if (res.task) setCard(res.task)
-      else await refresh()
+      else { actionBusy.current = false; await refresh() }
     } catch (e: unknown) {
-      setMessage(e instanceof Error ? e.message : 'Failed')
+      if (isCurrent()) setMessage(e instanceof Error ? e.message : 'Failed')
     } finally {
-      setBusy(false)
+      if (isCurrent()) { actionBusy.current = false; setBusy(false) }
     }
   }
 

@@ -395,6 +395,29 @@ export function Sidebar({
         <button type="button" onClick={onNew} className="sidebar-new-btn">
           {t('sidebar.newSession')}
         </button>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t('sidebar.search')}
+          className="sidebar-search"
+          aria-label={t('sidebar.search')}
+        />
+        <div className="flex flex-wrap gap-1">
+          <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label={t('sidebar.all')} />
+          <FilterChip
+            active={filter === 'pinned'}
+            onClick={() => setFilter('pinned')}
+            label={t('sidebar.pin')}
+          />
+          <FilterChip
+            active={filter === 'archived'}
+            onClick={() => setFilter('archived')}
+            label={t('sidebar.archive')}
+          />
+        </div>
+        <details className="sidebar-options text-xs" style={{ color: 'var(--text-secondary)' }}>
+          <summary className="cursor-pointer py-1.5">Session options</summary>
+          <div className="space-y-3 pt-2 pb-1">
         {(onExport || onImport) && (
           <div className="flex gap-1.5">
             {onImport && (
@@ -428,28 +451,8 @@ export function Sidebar({
             )}
           </div>
         )}
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t('sidebar.search')}
-          className="sidebar-search"
-          aria-label={t('sidebar.search')}
-        />
-        <div className="flex flex-wrap gap-1">
-          <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label={t('sidebar.all')} />
-          <FilterChip
-            active={filter === 'pinned'}
-            onClick={() => setFilter('pinned')}
-            label={t('sidebar.pin')}
-          />
-          <FilterChip
-            active={filter === 'archived'}
-            onClick={() => setFilter('archived')}
-            label={t('sidebar.archive')}
-          />
-        </div>
         <label
-          className="flex items-center gap-1.5 text-[10px] cursor-pointer"
+          className="flex items-center gap-1.5 text-xs cursor-pointer"
           style={{ color: 'var(--text-muted)' }}
           title="When creating a session under a project, also save that folder as Settings default project"
         >
@@ -458,8 +461,10 @@ export function Sidebar({
             checked={setDefaultOnNew}
             onChange={(e) => setSetDefaultOnNew(e.target.checked)}
           />
-          New-in-project sets default
+          Use new project folders as the default
         </label>
+          </div>
+        </details>
         {/* Project browser — sticky above scrolling sessions */}
         <div className="pt-0.5">
           {!addingProject ? (
@@ -518,7 +523,7 @@ export function Sidebar({
                 <button
                   type="button"
                   className="flex-1 px-1.5 py-1 rounded text-[10px] font-medium"
-                  style={{ background: 'var(--accent)', color: '#fff' }}
+                  style={{ background: 'var(--accent)', color: 'var(--accent-foreground)' }}
                   disabled={!addProjectDraft.trim()}
                   onClick={() => void handleAddProject(addProjectDraft)}
                 >
@@ -877,11 +882,11 @@ function ProjectSection({
           outline: dropHover ? '1px dashed var(--accent)' : 'none',
           color: 'var(--text-secondary)',
         }}
-        onClick={onToggle}
         onDragOver={isPinnedStrip ? undefined : onDragOverProject}
         onDragLeave={isPinnedStrip ? undefined : onDragLeaveProject}
         onDrop={isPinnedStrip ? undefined : onDropProject}
       >
+        <button type="button" className="flex flex-1 min-w-0 items-center gap-1.5 text-left py-1" onClick={onToggle} aria-expanded={!collapsed}>
         <span
           className="text-[10px] w-3 text-center"
           style={{ color: 'var(--text-muted)' }}
@@ -908,13 +913,14 @@ function ProjectSection({
         <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
           {count}
         </span>
+        </button>
         {onToggleProjectLock && (
           <button
             type="button"
             className={
               locked
                 ? 'text-[11px] w-4 opacity-100'
-                : 'text-[11px] w-4 opacity-0 group-hover/header:opacity-100'
+                : 'text-[11px] w-4 opacity-0 group-hover/header:opacity-100 group-focus-within/header:opacity-100'
             }
             style={{ color: locked ? 'var(--accent)' : 'var(--text-muted)' }}
             title={
@@ -945,7 +951,7 @@ function ProjectSection({
         {onNewInProject && !isPinnedStrip && (
           <button
             type="button"
-            className="opacity-0 group-hover/header:opacity-100 text-[10px] px-1 rounded"
+            className="opacity-0 group-hover/header:opacity-100 group-focus-within/header:opacity-100 text-[10px] px-1 rounded"
             style={{ color: 'var(--accent)' }}
             title="New session in this project"
             onClick={(e) => {
@@ -959,7 +965,7 @@ function ProjectSection({
         {onRemoveKnownProject && !locked && !isPinnedStrip && (
           <button
             type="button"
-            className="opacity-0 group-hover/header:opacity-100 text-[10px] w-4"
+            className="opacity-0 group-hover/header:opacity-100 group-focus-within/header:opacity-100 text-[10px] w-4"
             style={{ color: 'var(--error)' }}
             title={
               count === 0
@@ -999,13 +1005,6 @@ function ProjectSection({
                   paddingBottom: 'var(--sidebar-row-py)',
                   marginLeft: isNone ? 0 : 4,
                 }}
-                onClick={() => {
-                  if (!isRenaming) onSelect(s.id)
-                }}
-                onDoubleClick={(e) => {
-                  e.stopPropagation()
-                  onStartRename(s)
-                }}
               >
                 <div className="flex items-center gap-0.5 px-1 min-w-0">
                   <input
@@ -1019,7 +1018,7 @@ function ProjectSection({
                   />
                   <button
                     type="button"
-                    className="flex-shrink-0 text-[10px] w-3.5 opacity-50 group-hover:opacity-100"
+                    className="flex-shrink-0 text-[10px] w-3.5 opacity-50 group-hover:opacity-100 group-focus-within:opacity-100"
                     style={{ color: pinned ? 'var(--accent)' : 'var(--text-muted)' }}
                     onClick={(e) => {
                       e.stopPropagation()
@@ -1027,17 +1026,21 @@ function ProjectSection({
                       refreshMeta()
                     }}
                     title={pinned ? 'Unpin' : 'Pin'}
+                    aria-label={pinned ? 'Unpin session' : 'Pin session'}
+                    aria-pressed={pinned}
                   >
                     {pinned ? '★' : '☆'}
                   </button>
                   {isRenaming ? (
                     <input
+                      aria-label="Session name"
                       ref={renameRef}
                       value={renameDraft}
                       onChange={(e) => setRenameDraft(e.target.value)}
                       onClick={(e) => e.stopPropagation()}
                       onBlur={() => onCommitRename(s.id)}
                       onKeyDown={(e) => {
+                        if (e.nativeEvent.isComposing) return
                         if (e.key === 'Enter') {
                           e.preventDefault()
                           onCommitRename(s.id)
@@ -1055,8 +1058,12 @@ function ProjectSection({
                       }}
                     />
                   ) : (
-                    <span
-                      className="truncate flex-1 min-w-0 text-[13px] font-medium leading-snug flex items-center gap-1"
+                    <button
+                      type="button"
+                      onClick={() => onSelect(s.id)}
+                      onDoubleClick={() => onStartRename(s)}
+                      aria-current={s.id === activeId ? "page" : undefined}
+                      className="text-left truncate flex-1 min-w-0 text-[13px] font-medium leading-snug flex items-center gap-1 py-1"
                       title={s.title || 'New Session'}
                     >
                       {s.origin_channel && (
@@ -1083,7 +1090,7 @@ function ProjectSection({
                       )}
                       {busySet.has(s.id) && <SessionBusyBadge />}
                       <span className="truncate">{s.title || 'New Session'}</span>
-                    </span>
+                    </button>
                   )}
                   {!pinned && onMoveSessionUp && onMoveSessionDown && (
                     <OrderButtons
@@ -1105,7 +1112,9 @@ function ProjectSection({
                   {onRename && !isRenaming && (
                     <button
                       type="button"
-                      className="opacity-0 group-hover:opacity-80 p-0.5 shrink-0"
+                      aria-label="Rename session"
+                      title="Rename session"
+                      className="opacity-0 group-hover:opacity-80 group-focus-within:opacity-100 p-0.5 shrink-0"
                       style={{ color: 'var(--text-muted)' }}
                       onClick={(e) => {
                         e.stopPropagation()
@@ -1118,7 +1127,7 @@ function ProjectSection({
                   <button
                     type="button"
                     className={`text-[10px] shrink-0 px-1 rounded ${
-                      m.archived ? 'opacity-100' : 'opacity-0 group-hover:opacity-90'
+                      m.archived ? 'opacity-100' : 'opacity-0 group-hover:opacity-90 group-focus-within:opacity-100'
                     }`}
                     style={{
                       color: m.archived ? 'var(--accent)' : 'var(--text-muted)',
@@ -1138,7 +1147,10 @@ function ProjectSection({
                     {m.archived ? 'Unarchive' : 'Archive'}
                   </button>
                   <button
-                    className="w-4 h-4 opacity-0 group-hover:opacity-70 shrink-0 text-[11px]"
+                    type="button"
+                    aria-label="Delete session"
+                    title="Delete session"
+                    className="w-4 h-4 opacity-0 group-hover:opacity-70 group-focus-within:opacity-100 shrink-0 text-[11px]"
                     style={{ color: 'var(--error)' }}
                     onClick={(e) => {
                       e.stopPropagation()
@@ -1176,7 +1188,7 @@ function ProjectSection({
                   ))}
                   <button
                     type="button"
-                    className="text-[10px] ml-auto opacity-0 group-hover:opacity-70"
+                    className="text-[10px] ml-auto opacity-0 group-hover:opacity-70 group-focus-within:opacity-100"
                     style={{ color: 'var(--text-muted)' }}
                     onClick={(e) => {
                       e.stopPropagation()
@@ -1190,13 +1202,15 @@ function ProjectSection({
                   {onSetSessionProject && (
                     <button
                       type="button"
-                      className="text-[10px] opacity-0 group-hover:opacity-70"
+                      className="text-[10px] opacity-0 group-hover:opacity-70 group-focus-within:opacity-100"
                       style={{ color: 'var(--text-muted)' }}
                       onClick={(e) => {
                         e.stopPropagation()
                         setMoveTarget(moveTarget === s.id ? null : s.id)
                         setTagTarget(null)
                       }}
+                      aria-label="Move session to project"
+                      title="Move session to project"
                     >
                       📁
                     </button>

@@ -1,6 +1,7 @@
+import { useDialogFocus } from '../hooks/useDialogFocus'
 /** Health Diagnostics — Remedy server, RMB, hardware, cloud providers. */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   getDiagnostics,
   getSelfInjectRounds,
@@ -216,37 +217,39 @@ function copyText(text: string) {
 }
 
 export function DiagnosticsPanel({ open, onClose }: DiagnosticsPanelProps) {
+  const dialogRef = useDialogFocus<HTMLDivElement>(open, onClose)
   const [data, setData] = useState<DiagnosticsSnapshot | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [auto, setAuto] = useState(true)
   const [probe, setProbe] = useState(false)
 
+  const generation = useRef(0)
+  const inFlight = useRef<number | null>(null)
   const [selfInject, setSelfInject] = useState<SelfInjectRoundsPayload | null>(null)
 
   const load = useCallback(async () => {
-    if (!open) return
+    if (!open || inFlight.current === generation.current) return
+    const current = ++generation.current
+    inFlight.current = current
     setLoading(true)
     setErr(null)
-    try {
-      const snap = await getDiagnostics({ probeProviders: probe })
-      setData(snap)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLoading(false)
-    }
-    // Independent of the main snapshot — a ledger hiccup must not blank diagnostics.
-    try {
-      setSelfInject(await getSelfInjectRounds(12))
-    } catch {
-      setSelfInject(null)
-    }
+    const [snapshot, ledger] = await Promise.allSettled([
+      getDiagnostics({ probeProviders: probe }), getSelfInjectRounds(12),
+    ])
+    if (current !== generation.current) return
+    if (snapshot.status === 'fulfilled') setData(snapshot.value)
+    else setErr(snapshot.reason instanceof Error ? snapshot.reason.message : String(snapshot.reason))
+    // A ledger hiccup must not blank the main diagnostics snapshot.
+    setSelfInject(ledger.status === 'fulfilled' ? ledger.value : null)
+    setLoading(false)
+    inFlight.current = null
   }, [open, probe])
 
   useEffect(() => {
     if (!open) return
     void load()
+    return () => { generation.current += 1 }
   }, [open, load])
 
   useEffect(() => {
@@ -259,13 +262,8 @@ export function DiagnosticsPanel({ open, onClose }: DiagnosticsPanelProps) {
 
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
     const release = browserStackHold('diagnostics-panel')
     return () => {
-      window.removeEventListener('keydown', onKey)
       release()
     }
   }, [open, onClose])
@@ -291,17 +289,21 @@ export function DiagnosticsPanel({ open, onClose }: DiagnosticsPanelProps) {
       className="fixed inset-0 z-50 flex items-center justify-center p-4 ui-overlay"
       onClick={onClose}
       role="presentation"
+      data-dialog-layer
     >
       <div
         className="ui-surface w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
         style={{ color: 'var(--text-primary)', background: 'var(--bg-primary)' }}
         onClick={(e) => e.stopPropagation()}
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
+        aria-modal="true"
         aria-label="Health diagnostics"
       >
         {/* Header */}
         <div
-          className="flex items-center justify-between gap-3 px-4 py-3 border-b flex-shrink-0"
+          className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b flex-shrink-0"
           style={{ borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)' }}
         >
           <div className="min-w-0">
@@ -326,7 +328,7 @@ export function DiagnosticsPanel({ open, onClose }: DiagnosticsPanelProps) {
               {data?.checked_at ? ` · ${data.checked_at.replace('T', ' ').replace('Z', ' UTC')}` : ''}
             </div>
           </div>
-          <div className="flex items-center gap-1.5 flex-shrink-0">
+          <div className="flex flex-wrap items-center gap-1.5 min-w-0">
             <label
               className="flex items-center gap-1 text-[10px] px-1.5 cursor-pointer"
               style={{ color: 'var(--text-muted)' }}
@@ -378,7 +380,7 @@ export function DiagnosticsPanel({ open, onClose }: DiagnosticsPanelProps) {
           {err && (
             <div
               className="text-xs rounded px-3 py-2"
-              style={{ background: 'var(--error)', color: '#fff' }}
+              style={{ background: 'var(--error)', color: 'var(--error-foreground)' }}
             >
               {err}
             </div>

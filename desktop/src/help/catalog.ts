@@ -367,6 +367,14 @@ export function resolveWikiHref(href: string): string | null {
   return art ? art.id : null
 }
 
+/** Unbundled repository docs must not become broken localhost routes. */
+export function resolveExternalHelpHref(href: string | undefined): string | undefined {
+  if (!href) return undefined
+  if (/^(https?:|mailto:)/i.test(href)) return href
+  if (/^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith('//')) return undefined
+  return new URL(href, 'https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/').href
+}
+
 export function searchArticles(query: string): HelpArticle[] {
   const q = query.trim().toLowerCase()
   if (!q) return HELP_ARTICLES

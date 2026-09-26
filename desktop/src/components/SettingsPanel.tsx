@@ -68,6 +68,7 @@ import {
 } from '../utils/messengerDrafts'
 import type { AssistantDraft } from './settings/AssistantSection'
 import { useSettingsPanelState } from '../hooks/useSettingsPanelState'
+import { EmptyState } from './EmptyState'
 
 interface SettingsPanelProps {
   open: boolean
@@ -241,6 +242,7 @@ export function SettingsPanel({
   const [assistantDraft, setAssistantDraft] = useState<AssistantDraft>({})
   const {
     settingsSearch,
+    visibleSectionCount,
     setSettingsSearch,
     visionSectionOpen,
     rmbSectionOpen,
@@ -1060,7 +1062,7 @@ export function SettingsPanel({
 
   return (
     <div
-      className={`flex flex-col h-full min-h-0 ${embedded ? '' : 'border-l'}`}
+      className={`settings-panel flex flex-col h-full min-h-0 ${embedded ? '' : 'border-l'}`}
       style={{
         width: embedded ? '100%' : 300,
         minWidth: embedded ? 0 : 300,
@@ -1105,6 +1107,7 @@ export function SettingsPanel({
             const next = settingsMode === 'simple' ? 'advanced' : 'simple'
             setSettingsMode(next)
             if (next === 'advanced') setShowAdvanced(true)
+            e.currentTarget.querySelector<HTMLButtonElement>(`#settings-tab-${next}`)?.focus()
           }}
         >
           {(['simple', 'advanced'] as const).map((m) => (
@@ -1114,6 +1117,7 @@ export function SettingsPanel({
               role="tab"
               id={`settings-tab-${m}`}
               aria-selected={settingsMode === m}
+              aria-controls="settings-content"
               tabIndex={settingsMode === m ? 0 : -1}
               title={
                 m === 'simple'
@@ -1151,15 +1155,24 @@ export function SettingsPanel({
               })
             }
           }}
-          placeholder="Search…"
+          placeholder="Search all settings…"
           className="ui-input"
           aria-label="Search settings"
         />
+        <p className="settings-search-hint" role="status">
+          {settingsSearch.trim()
+            ? `${visibleSectionCount} matching ${visibleSectionCount === 1 ? 'section' : 'sections'} across all settings`
+            : settingsMode === 'simple' ? 'Everyday essentials. Advanced has all controls.' : 'All controls, organized by category.'}
+        </p>
       </div>
 
-      <div ref={scrollBodyRef} className="flex-1 overflow-y-auto px-2.5 py-2.5 text-xs">
+      <div id="settings-content" role="tabpanel" aria-labelledby={`settings-tab-${settingsMode}`} ref={scrollBodyRef} className="settings-content flex-1 overflow-y-auto px-2.5 py-2.5 text-xs">
         {loading ? (
-          <div style={{ color: 'var(--text-muted)' }}>Loading…</div>
+          <EmptyState title="Loading settings…" compact />
+        ) : !settings ? (
+          <EmptyState title="Settings couldn’t load" description="Check your connection and try again." tone="error" actionLabel="Try again" onAction={() => void load()} />
+        ) : visibleSectionCount === 0 ? (
+          <EmptyState title="No settings found" description="Try a shorter word, such as model, voice, or theme." actionLabel="Clear search" onAction={() => setSettingsSearch('')} />
         ) : (
             <SettingsFormSections
               sectionProps={sectionProps}
@@ -1469,4 +1482,3 @@ export function SettingsPanel({
     </div>
   )
 }
-

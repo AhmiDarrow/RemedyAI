@@ -69,6 +69,15 @@ func ToolUseBlock(call ToolCall) Block {
 type Message struct {
 	Role   Role
 	Blocks []Block
+	// Internal identifies engine guidance, not an owner request. Providers
+	// still receive it as user-role context, but it must never replace the goal.
+	Internal bool
+}
+
+func contextNote(text string) Message {
+	m := UserText(text)
+	m.Internal = true
+	return m
 }
 
 // UserText is a user message carrying a single text block.
@@ -125,7 +134,7 @@ type Turn struct {
 // FirstUserText is the goal: the text of the first user message that carries prose.
 func (t Turn) FirstUserText() string {
 	for _, m := range t.Messages {
-		if m.Role != RoleUser || m.HasToolResults() {
+		if m.Role != RoleUser || m.Internal || m.HasToolResults() {
 			continue
 		}
 		if text := strings.TrimSpace(m.Text()); text != "" {
@@ -188,7 +197,22 @@ func cloneMessages(msgs []Message) []Message {
 	}
 	out := make([]Message, len(msgs))
 	for i, m := range msgs {
-		out[i] = Message{Role: m.Role, Blocks: append([]Block(nil), m.Blocks...)}
+		out[i] = m
+		out[i].Blocks = cloneBlocks(m.Blocks)
+	}
+	return out
+}
+
+func cloneBlocks(blocks []Block) []Block {
+	if blocks == nil {
+		return nil
+	}
+	out := make([]Block, len(blocks))
+	for i, b := range blocks {
+		out[i] = b
+		out[i].Data = append([]byte(nil), b.Data...)
+		out[i].Input = append(json.RawMessage(nil), b.Input...)
+		out[i].Content = cloneBlocks(b.Content)
 	}
 	return out
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import type { UsageSnapshot } from '../utils/tokenCost'
 import { formatCacheUsage, formatCost, formatTokens } from '../utils/tokenCost'
 
@@ -48,6 +48,7 @@ export function TokenCostTicker({
     }
   })
   const [expanded, setExpanded] = useState(false)
+  const detailsId = useId()
 
   useEffect(() => {
     try {
@@ -139,20 +140,15 @@ export function TokenCostTicker({
       style={shellStyle}
     >
       <div className="flex items-center gap-1.5 px-2.5 py-1.5">
-        <div
-          role="button"
-          tabIndex={0}
-          className="flex-1 text-left min-w-0"
-          onClick={() => setExpanded((e) => !e)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              setExpanded((v) => !v)
-            }
-          }}
-          title="Usage details"
-        >
-          <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap">
+          <button
+            type="button"
+            className="flex items-center gap-1.5 text-left rounded"
+            onClick={() => setExpanded((value) => !value)}
+            aria-expanded={expanded}
+            aria-controls={detailsId}
+            title="Usage details"
+          >
             <span
               className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
               style={{
@@ -164,9 +160,10 @@ export function TokenCostTicker({
             <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
               {streaming ? 'Run' : 'Usage'}
             </span>
-            {hasData ? (
-              <>
-                <span>{formatTokens(displayTok)} tok</span>
+            <span>{hasData ? <>{formatTokens(displayTok)} tok</> : 'idle'}</span>
+          </button>
+          {hasData && (
+            <>
                 {hideCost ? (
                   <button
                     type="button"
@@ -215,11 +212,8 @@ export function TokenCostTicker({
                 {streaming && (
                   <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>{src}</span>
                 )}
-              </>
-            ) : (
-              <span style={{ color: 'var(--text-muted)' }}>idle</span>
-            )}
-          </div>
+            </>
+          )}
         </div>
         <button
           type="button"
@@ -234,6 +228,7 @@ export function TokenCostTicker({
       </div>
       {expanded && (
         <div
+          id={detailsId}
           className="px-2.5 pb-2 pt-0 space-y-1 border-t"
           style={{ borderColor: 'var(--border)', fontSize: 10 }}
         >

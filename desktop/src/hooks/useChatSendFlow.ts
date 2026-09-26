@@ -354,7 +354,7 @@ export function useChatSendFlow(opts: {
               addCommandMessage(
                 text.trim(),
                 String(
-                  res.spoken
+                  (res.ok === false ? res.spoken || 'Remedy could not apply that choice. Try again from the task card.' : res.spoken)
                   || (choice === 'explain' ? 'Explain' : choice === 'yes' ? 'Yes.' : 'Stopped.'),
                 ),
               )
@@ -475,7 +475,16 @@ export function useChatSendFlow(opts: {
       const localText = content ?? ''
       setEditDraft({ text: localText, key: Date.now() })
       // Soft-delete this message + later ones on the server; refresh history.
-      const serverText = await beginEdit(msgId, localText)
+      let serverText: string | null | undefined
+      try {
+        serverText = await beginEdit(msgId, localText)
+      } catch (error: unknown) {
+        if (activeIdRef.current === sid) {
+          setEditDraft(null)
+          notify('Could not edit message', { body: error instanceof Error ? error.message : 'Please retry.' })
+        }
+        return
+      }
       // Tab switch already cleared editDraft via the activeId effect.
       if (activeIdRef.current !== sid) return
       // Prefer server content if it differs (authoritative), re-apply with new key.
@@ -483,7 +492,7 @@ export function useChatSendFlow(opts: {
         setEditDraft({ text: serverText, key: Date.now() })
       }
     },
-    [activeId, streaming, beginEdit],
+    [activeId, streaming, beginEdit, notify],
   )
 
   /** Regenerate: roll back to the preceding user turn and resend the same prompt. */
@@ -504,7 +513,13 @@ export function useChatSendFlow(opts: {
       const prompt = userMsg.content || ''
       // Strip attachment display block for resend text if present
       const clean = prompt.replace(/\n\n📎 Attachments:\n[\s\S]*$/, '').trim()
-      await beginEdit(userMsg.id, clean)
+      try {
+        const edited = await beginEdit(userMsg.id, clean)
+        if (edited == null) return
+      } catch (error: unknown) {
+        notify('Could not regenerate reply', { body: error instanceof Error ? error.message : 'Please retry.' })
+        return
+      }
       const toSend = clean || prompt.trim() || '(see attached files)'
       const sid = activeId
       const bind = sessionLlmMap[sid]
@@ -515,7 +530,7 @@ export function useChatSendFlow(opts: {
         chatMode,
       })
     },
-    [activeId, streaming, messages, beginEdit, send, model, sessionLlmMap, planMode, chatMode, bumpStick],
+    [activeId, streaming, messages, beginEdit, send, model, sessionLlmMap, planMode, chatMode, bumpStick, notify],
   )
 
   // Notify only when a turn we started on *this* session ends — not on tab switch.

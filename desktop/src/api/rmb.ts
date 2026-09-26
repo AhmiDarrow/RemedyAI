@@ -205,9 +205,6 @@ export async function applyRmbAsProvider(): Promise<Record<string, unknown>> {
   return apiFetch('/rmb/use', { method: 'POST', timeout: RMB_LONG_MS })
 }
 
-/** @deprecated Prefer applyRmbAsProvider — name looked like a React hook to linters. */
-export const useRmbAsProvider = applyRmbAsProvider
-
 export interface HfRepoOption {
   id: string
   downloads?: number

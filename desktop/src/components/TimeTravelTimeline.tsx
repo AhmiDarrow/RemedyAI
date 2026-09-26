@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Panel } from './Panel'
+import { useAsyncScope } from '../hooks/useAsyncScope'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiFetch } from '../api/client'
 import { EmptyState } from './EmptyState'
 
@@ -34,6 +36,8 @@ export function TimeTravelTimeline({
   sessionId,
   onRestored,
 }: TimeTravelTimelineProps) {
+  const scope = useAsyncScope(`${sessionId ?? ''}:${open}`)
+  const restoring = useRef(false)
   const [steps, setSteps] = useState<TimelineStep[]>([])
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
@@ -41,6 +45,8 @@ export function TimeTravelTimeline({
   const [confirmId, setConfirmId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
+    if (restoring.current) return
+    const isCurrent = scope.latest()
     if (!sessionId) {
       setSteps([])
       return
@@ -51,21 +57,31 @@ export function TimeTravelTimeline({
       const data = await apiFetch<{ steps: TimelineStep[] }>(
         `/sessions/${sessionId}/timeline`,
       )
+      if (!isCurrent()) return
       setSteps(Array.isArray(data.steps) ? data.steps : [])
     } catch (e) {
+      if (!isCurrent()) return
       setError(e instanceof Error ? e.message : 'Failed to load timeline')
       setSteps([])
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
-  }, [sessionId])
+  }, [sessionId, scope])
 
   useEffect(() => {
+    setSteps([])
+    setConfirmId(null)
+    setError(null)
+    setBusy(null)
+    restoring.current = false
     if (open) void load()
   }, [open, load])
 
   const restore = async (messageId: string) => {
-    if (!sessionId) return
+    if (!sessionId || restoring.current) return
+    restoring.current = true
+    scope.latest()
+    const isCurrent = scope.capture()
     setBusy(messageId)
     setError(null)
     try {
@@ -73,13 +89,15 @@ export function TimeTravelTimeline({
         method: 'POST',
         body: JSON.stringify({ message_id: messageId }),
       })
+      if (!isCurrent()) return
       setConfirmId(null)
       onRestored()
+      restoring.current = false
       await load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Restore failed')
+      if (isCurrent()) setError(e instanceof Error ? e.message : 'Restore failed')
     } finally {
-      setBusy(null)
+      if (isCurrent()) { restoring.current = false; setBusy(null) }
     }
   }
 
@@ -88,41 +106,13 @@ export function TimeTravelTimeline({
   const userSteps = steps.filter((s) => s.kind === 'user')
 
   return (
-    <div
-      className="flex flex-col border-l overflow-hidden"
-      style={{
-        width: 300,
-        minWidth: 300,
-        background: 'color-mix(in srgb, var(--bg-secondary) 96%, var(--bg-primary))',
-        borderColor: 'color-mix(in srgb, var(--border) 85%, transparent)',
-      }}
-      role="complementary"
-      aria-label="Time travel timeline"
-    >
-      <div
-        className="flex items-center justify-between px-3 py-2.5 border-b text-xs font-semibold tracking-tight"
-        style={{
-          borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)',
-          color: 'var(--text-primary)',
-        }}
-      >
-        <span>Time Travel</span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="ui-btn ui-btn-ghost"
-          style={{ padding: '0.15rem 0.4rem' }}
-          aria-label="Close timeline"
-        >
-          ×
-        </button>
-      </div>
-      <div className="px-3 py-2 text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+    <Panel open={open} onClose={onClose} title="Time Travel">
+      <div className="px-3 py-2 text-xs leading-snug" style={{ color: 'var(--text-muted)' }}>
         Click a step to roll back chat history, best-effort workspace file
         writes, and mid-task checkpoints to that moment.
       </div>
       {error && (
-        <div className="mx-3 mb-2 text-[11px]" style={{ color: 'var(--error)' }}>
+        <div className="mx-3 mb-2 text-sm" style={{ color: 'var(--error)' }}>
           {error}
         </div>
       )}
@@ -159,7 +149,7 @@ export function TimeTravelTimeline({
                   />
                   <button
                     type="button"
-                    disabled={busy === s.message_id || !s.can_restore}
+                    disabled={Boolean(busy) || !s.can_restore}
                     onClick={() => setConfirmId(s.message_id)}
                     className="w-full text-left p-2 rounded transition-opacity"
                     style={{
@@ -170,7 +160,7 @@ export function TimeTravelTimeline({
                     title="Restore to this step"
                   >
                     <div
-                      className="font-semibold text-[11px]"
+                      className="font-semibold text-sm"
                       style={{ color: 'var(--accent)' }}
                     >
                       {s.label}
@@ -182,14 +172,14 @@ export function TimeTravelTimeline({
                       ) : null}
                     </div>
                     <div
-                      className="mt-0.5 text-[11px] line-clamp-3"
+                      className="mt-0.5 text-sm line-clamp-3"
                       style={{ color: 'var(--text-primary)' }}
                     >
                       {s.preview}
                     </div>
                     {kids[0]?.preview && (
                       <div
-                        className="mt-1 text-[10px] line-clamp-2"
+                        className="mt-1 text-xs line-clamp-2"
                         style={{ color: 'var(--text-muted)' }}
                       >
                         → {kids[0].preview}
@@ -198,7 +188,7 @@ export function TimeTravelTimeline({
                   </button>
                   {confirmId === s.message_id && (
                     <div
-                      className="mt-1 p-2 rounded text-[10px]"
+                      className="mt-1 p-2 rounded text-xs"
                       style={{
                         background: 'var(--bg-primary)',
                         border: '1px solid var(--border)',
@@ -206,18 +196,18 @@ export function TimeTravelTimeline({
                     >
                       <div style={{ color: 'var(--text-secondary)' }}>
                         Restore to <strong>{s.label}</strong>? Later messages,
-                        file writes after this point, and checkpoints will be
-                        undone.
+                        and checkpoints will be rolled back. Remedy will try to restore
+                        workspace files; changes made outside Remedy may remain.
                       </div>
                       <div className="mt-1.5 flex gap-1">
                         <button
                           type="button"
                           disabled={!!busy}
                           onClick={() => void restore(s.message_id)}
-                          className="flex-1 py-1 rounded text-[11px] font-medium"
+                          className="flex-1 py-1 rounded text-sm font-medium"
                           style={{
                             background: 'var(--accent)',
-                            color: '#fff',
+                            color: 'var(--accent-foreground)',
                           }}
                         >
                           {busy === s.message_id ? 'Restoring…' : 'Restore here'}
@@ -225,7 +215,7 @@ export function TimeTravelTimeline({
                         <button
                           type="button"
                           onClick={() => setConfirmId(null)}
-                          className="px-2 py-1 rounded text-[11px]"
+                          className="px-2 py-1 rounded text-sm"
                           style={{ border: '1px solid var(--border)' }}
                         >
                           Cancel
@@ -242,6 +232,7 @@ export function TimeTravelTimeline({
       <div className="px-3 py-2 border-t" style={{ borderColor: 'var(--border)' }}>
         <button
           type="button"
+          disabled={loading || Boolean(busy)}
           onClick={() => void load()}
           className="w-full text-xs py-1 rounded"
           style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
@@ -249,6 +240,6 @@ export function TimeTravelTimeline({
           Refresh timeline
         </button>
       </div>
-    </div>
+    </Panel>
   )
 }

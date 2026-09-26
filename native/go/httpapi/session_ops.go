@@ -17,9 +17,9 @@ const (
 )
 
 var (
-	roleHeaderRE  = regexp.MustCompile(`(?i)^=====\s*(USER|ASSISTANT|SYSTEM|TOOL)\s*=====\s*$`)
-	legacyRoleRE  = regexp.MustCompile(`(?i)^\*\*(User|Assistant|System|Tool)\*\*`)
-	metaLineRE    = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$`)
+	roleHeaderRE = regexp.MustCompile(`(?i)^=====\s*(USER|ASSISTANT|SYSTEM|TOOL)\s*=====\s*$`)
+	legacyRoleRE = regexp.MustCompile(`(?i)^\*\*(User|Assistant|System|Tool)\*\*`)
+	metaLineRE   = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$`)
 )
 
 type parsedMessage struct {
@@ -43,6 +43,14 @@ func (s *Server) handleEditFromMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	sid := strings.TrimSpace(r.PathValue("id"))
 	msgID := strings.TrimSpace(r.PathValue("msg_id"))
+	if s.claims != nil {
+		epoch, _, claimed := s.claims.TryClaim(sid)
+		if !claimed {
+			writeJSON(w, http.StatusConflict, map[string]string{"detail": "Wait for this chat to finish before editing its history."})
+			return
+		}
+		defer s.claims.Release(sid, &epoch)
+	}
 	msg, msgSID, ok, err := s.sessions.GetMessage(msgID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})

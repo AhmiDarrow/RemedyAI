@@ -824,7 +824,7 @@ export function BrowserSlide() {
         <button
           type="submit"
           className="px-2 py-1 rounded font-medium disabled:opacity-60"
-          style={{ background: 'var(--accent)', color: '#fff' }}
+          style={{ background: 'var(--accent)', color: 'var(--accent-foreground)' }}
           disabled={busy}
           title={busy ? 'Loading…' : 'Navigate'}
         >

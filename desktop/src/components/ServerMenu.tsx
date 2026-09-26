@@ -62,7 +62,7 @@ export interface GatewayHealth {
 }
 
 /** Must sit above composer (z-index 5) and status-bar chrome. */
-const MENU_Z = 550
+const MENU_Z = 1000
 const REFRESH_MS = 4000
 
 export function formatUptime(startedAtMs: number | null | undefined, now = Date.now()): string {

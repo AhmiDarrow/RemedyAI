@@ -215,6 +215,18 @@ export function peekChatMediaUrl(src: string): string | null {
   return null
 }
 
+/** Discard a failed decoded image so retry performs a fresh authenticated fetch. */
+export function invalidateChatMediaUrl(src: string): void {
+  const raw = (src || '').trim().replace(/^<|>$/g, '')
+  const urls = new Set<string>()
+  for (const key of candidateCacheKeys(raw)) {
+    const url = blobCache.get(key)
+    if (url) urls.add(url)
+    blobCache.delete(key)
+  }
+  for (const url of urls) URL.revokeObjectURL(url)
+}
+
 async function fetchAuthedBlob(url: string, cacheKey: string): Promise<string> {
   const hit = cacheGet(cacheKey)
   if (hit) return hit

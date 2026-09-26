@@ -19,6 +19,7 @@ from typing import Any
 @dataclass
 class ToolCall:
     name: str
+    id: str = ""
     args: dict[str, Any] = field(default_factory=dict)
     ok: bool | None = None
     preview: str = ""
@@ -56,7 +57,7 @@ class Turn:
         return [t for t in self.tool_calls if t.name.lower() in wanted]
 
     def succeeded(self, *names: str) -> bool:
-        return any(t.ok is not False for t in self.calls_to(*names))
+        return any(t.ok is True for t in self.calls_to(*names))
 
     @property
     def failed_tools(self) -> list[ToolCall]:
@@ -64,7 +65,7 @@ class Turn:
 
     @property
     def ok(self) -> bool:
-        return self.status == "ok" and not self.error
+        return self.status == "ok" and not self.error and all(t.ok is not None for t in self.tool_calls)
 
 
 class RemedyClient:
@@ -167,23 +168,25 @@ class RemedyClient:
             method="POST",
         )
 
-        start = time.time()
+        start = time.monotonic()
         deadline = start + float(timeout)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 for name, payload in _iter_sse(resp):
-                    now = time.time() - start
+                    now = time.monotonic() - start
                     # urlopen's timeout is a *socket* timeout: it resets on
                     # every byte. SSE keepalives therefore keep it alive
                     # forever, and a stuck turn ran 32 minutes against a 600s
                     # scenario limit. Enforce the wall clock ourselves.
-                    if time.time() > deadline:
+                    if time.monotonic() > deadline:
                         turn.status = "timeout"
                         turn.error = (
                             f"scenario wall-clock limit of {timeout:.0f}s exceeded "
                             f"after {len(turn.tool_calls)} tool call(s)"
                         )
                         break
+                    if name == "keepalive":
+                        continue
                     if turn.first_event_s is None:
                         turn.first_event_s = now
                     turn.events.append({"event": name, "at": now, **payload})
@@ -198,7 +201,7 @@ class RemedyClient:
             turn.error = f"{type(e).__name__}: {e}"
             turn.status = "error"
         finally:
-            turn.seconds = time.time() - start
+            turn.seconds = time.monotonic() - start
 
         if not turn.status:
             turn.status = "incomplete"
@@ -211,6 +214,7 @@ class RemedyClient:
             turn.tool_calls.append(
                 ToolCall(
                     name=str(payload.get("name") or "?"),
+                    id=str(payload.get("id") or ""),
                     args=args if isinstance(args, dict) else {},
                     at=now,
                 )
@@ -219,17 +223,22 @@ class RemedyClient:
                 turn.first_tool_s = now
         elif name == "tool_result":
             tname = str(payload.get("name") or "")
-            ok = bool(payload.get("ok", True))
+            raw_ok = payload.get("ok")
+            ok = raw_ok if isinstance(raw_ok, bool) else None
             preview = str(payload.get("preview") or "")
-            # Attach to the most recent matching call still awaiting a result.
+            call_id = str(payload.get("id") or "")
+            # Concurrent calls to the same tool can finish out of order.
             for call in reversed(turn.tool_calls):
-                if call.ok is None and (not tname or call.name == tname):
+                matches = call.id == call_id if call_id else (not tname or call.name == tname)
+                if call.ok is None and matches:
                     call.ok = ok
                     call.preview = preview
                     break
             else:
+                if call_id and any(call.id == call_id for call in turn.tool_calls):
+                    return  # replayed result; never invent another tool execution
                 turn.tool_calls.append(
-                    ToolCall(name=tname or "?", ok=ok, preview=preview, at=now)
+                    ToolCall(name=tname or "?", id=call_id, ok=ok, preview=preview, at=now)
                 )
         elif name == "token":
             turn.text += str(payload.get("text") or payload.get("content") or "")
@@ -239,7 +248,7 @@ class RemedyClient:
                 k: v for k, v in payload.items() if k != "type"
             }
         elif name == "done":
-            turn.status = str(payload.get("status") or "ok")
+            turn.status = str(payload.get("status") or "incomplete")
             u = payload.get("usage")
             if isinstance(u, dict):
                 turn.usage = u
@@ -256,7 +265,8 @@ def _iter_sse(resp: Any) -> Iterator[tuple[str, dict[str, Any]]]:
     data_lines: list[str] = []
     for raw in resp:
         line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-        if line.startswith(":"):  # keepalive comment
+        if line.startswith(":"):  # allow the caller to enforce its deadline
+            yield "keepalive", {}
             continue
         if line == "":
             if data_lines:

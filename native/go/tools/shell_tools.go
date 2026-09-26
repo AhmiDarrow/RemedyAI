@@ -55,7 +55,7 @@ func RegisterShellTools(registry *Registry) error {
 		ID:      "bash",
 		Version: 1,
 		Description: "Run a shell command string (cmd on Windows, bash on POSIX) and capture its output. " +
-			"Always returns exit_code. Set background:true for a long-running command and follow it with the jobs tool. " +
+			"Foreground commands return exit_code. Set background:true to return a job_id for a long-running command, then follow it with the jobs tool. " +
 			"Cancellation and timeout kill the whole process tree.",
 		Runtime:      RuntimeZig,
 		Risk:         RiskMutation,

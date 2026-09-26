@@ -2,7 +2,7 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.63.2**. Local API and Desktop packaging run on the
+Current release: **v0.63.3**. Local API and Desktop packaging run on the
 native **Go + Zig** foundation. Installed apps update automatically. Partner
 line still starts at 0.31.0.
 
@@ -48,12 +48,28 @@ is no longer the product HTTP server or the packaged Desktop sidecar.
 | **Frontier** | [0.63.0](#0630---tools-the-model-knows) | Frontier tool names, native Anthropic, messenger identity, full-turn evidence |
 | **Boot** | [0.63.1](#0631---existing-homes-start) | Existing installs connect to the local server again |
 | **Sight** | [0.63.2](#0632---the-page-remedy-sees) | Browser page list, safer hive, Linux AppImage update |
+| **Polish** | [0.63.3](#0633---clearer-ui-and-reliable-tasks) | Clearer layouts, reliable saves and model changes, stronger task memory |
 
 Read newest first below; older partner notes follow after 0.48.
 
 ## Contents
 
+- [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 - [0.63.2](#0632---the-page-remedy-sees) · [0.63.1](#0631---existing-homes-start) · [0.63.0](#0630---tools-the-model-knows) · [0.62.3](#0623---coherent-builds) · [0.62.2](#0622---portable-native-core) · [0.62.1](#0621---windows-in-app-update-install) · [0.62.0](#0620---build-engine-and-claimidx-defaults) · [0.61.0](#0610---agency-on-the-native-foundation) · [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-prove-the-foundation) · [0.48.0](#0480---land-the-gozig-foundation) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+
+## 0.63.3 - Clearer UI and reliable tasks
+
+- **Easier to read and navigate.** Studio and Grove have clearer spacing,
+  typography, and contrast. Small windows preserve chat space; dialogs, Help,
+  selectors, and workspace panels work more consistently with the keyboard.
+- **Reliable saves and model changes.** Scratch keeps unsynced edits and saves
+  them in order. Model changes wait for confirmation from the server, and late
+  responses stay with their original chat. Failed history edits no longer resend.
+- **Long tasks keep the right context.** Mid-turn guidance and recent work survive
+  compaction. Command failures remain visible even when their output is shortened.
+- **Clearer recovery.** A missing model provider shows a setup message. Usage,
+  file paths, attachments, request cancellation, and connection handling are more
+  reliable across Desktop and WebUI.
 
 ## 0.63.2 - The page Remedy sees
 

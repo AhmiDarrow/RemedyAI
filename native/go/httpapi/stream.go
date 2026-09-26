@@ -717,7 +717,7 @@ func (s *Server) runDetachedStream(
 				if body := strings.TrimSpace(fullResponse.String()); body != "" {
 					note = body + "\n\n"
 				}
-				note += "*(Turn ended with an error: " + safe + ". History is intact — send **continue** to resume.)*"
+				note += "*(Turn ended with an error: " + strings.TrimRight(safe, ".!? ") + ". History is intact — send **continue** to resume.)*"
 				finalize(note)
 			} else {
 				persistDone = true

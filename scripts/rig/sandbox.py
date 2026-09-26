@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shutil
 import socket
 import subprocess
@@ -60,8 +61,10 @@ class Sandbox:
     port: int
     proc: subprocess.Popen | None = None
     log_path: Path | None = None
-    token: str = ""
-    env: dict[str, str] = field(default_factory=dict)
+    token: str = field(default="", repr=False)
+    env: dict[str, str] = field(default_factory=dict, repr=False)
+    api_key: str = field(default="", repr=False)
+    owns_root: bool = False
 
     @property
     def base(self) -> str:
@@ -117,8 +120,8 @@ class Sandbox:
         }
         if base_url:
             cfg["llm_base_url"] = base_url
-        if api_key:
-            cfg["llm_api_key"] = api_key
+        # Keep borrowed credentials out of retained configs and scorecards.
+        self.api_key = api_key
         cfg.update(extra or {})
 
         lines = [f"{k} = {tv(v)}" for k, v in cfg.items()]
@@ -165,14 +168,32 @@ class Sandbox:
 
     def start(self, *, timeout: float = 180.0, trace: bool = True) -> None:
         """Launch ``remedy serve`` against this sandbox and wait for readiness."""
-        env = dict(os.environ)
+        if self.proc is not None and self.proc.poll() is None:
+            raise RuntimeError("This sandbox is already running")
+        # A disposable home must not silently discover the operator's other
+        # providers through inherited environment variables. The selected
+        # evaluation credential is added explicitly below, in memory only.
+        env = {key: value for key, value in os.environ.items()
+               if key.upper() != "API_KEY" and not key.upper().endswith("_API_KEY")}
         env["REMEDY_HOME"] = str(self.home)
+        self.token = secrets.token_urlsafe(32)
+        env["REMEDY_API_KEY"] = self.token
         env["PYTHONPATH"] = str(SRC) + os.pathsep + env.get("PYTHONPATH", "")
         env["PYTHONUTF8"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
         # Unattended: no first-run wizard, no desktop sidecar, no auto-update.
         env["REMEDY_SKIP_SETUP"] = "1"
         env["REMEDY_DISABLE_AUTOUPDATE"] = "1"
+        if self.api_key:
+            env["REMEDY_LLM_API_KEY"] = self.api_key
+        else:
+            env.pop("REMEDY_LLM_API_KEY", None)
+        runtime = os.environ.get("REMEDY_RIG_RUNTIME", "")
+        argv = [runtime, "--listen", f"127.0.0.1:{self.port}"] if runtime else [
+            venv_python(), "-m", "remedy.interfaces.cli", "--home", str(self.home),
+            "serve", "--host", "127.0.0.1", "--port", str(self.port),
+            "--skip-setup", "--no-computer-host",
+        ]
         if trace:
             env["REMEDY_LLM_TRACE_DIR"] = str(self.trace_dir)
         else:
@@ -180,39 +201,24 @@ class Sandbox:
         self.env = env
 
         self.log_path = self.root / "serve.log"
-        log = self.log_path.open("w", encoding="utf-8", errors="replace")
-        self.proc = subprocess.Popen(
-            [
-                venv_python(),
-                "-m",
-                "remedy.interfaces.cli",
-                # Belt and braces: --home is what the instance lock and store
-                # actually follow, so never rely on REMEDY_HOME alone here.
-                "--home",
-                str(self.home),
-                "serve",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(self.port),
-                "--skip-setup",
-                "--no-computer-host",
-            ],
-            cwd=str(REPO),
-            env=env,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-        )
+        with self.log_path.open("w", encoding="utf-8", errors="replace") as log:
+            self.proc = subprocess.Popen(
+                argv,
+                cwd=str(REPO),
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
 
-        deadline = time.time() + timeout
-        while time.time() < deadline:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
             if self.proc.poll() is not None:
                 raise RuntimeError(
                     f"serve exited early (code {self.proc.returncode}). "
                     f"Log: {self.log_path}\n{self.tail_log()}"
                 )
             if self._status_ok():
-                self.token = self._resolve_token()
                 return
             time.sleep(0.5)
         raise TimeoutError(
@@ -225,21 +231,14 @@ class Sandbox:
             return False
         try:
             req = urllib.request.Request(
-                f"{self.base}/api/status", headers={"Accept": "application/json"}
+                f"{self.base}/api/status", headers={"Accept": "application/json", "Authorization": f"Bearer {self.token}"}
             )
             with urllib.request.urlopen(req, timeout=5) as resp:
-                return 200 <= resp.status < 500
-        except urllib.error.HTTPError as e:
-            # 401/403 still proves the app is up and routing.
-            return e.code in (401, 403)
+                return resp.status == 200
+        except urllib.error.HTTPError:
+            return False
         except Exception:
             return False
-
-    def _resolve_token(self) -> str:
-        sys.path.insert(0, str(REPO / "scripts"))
-        from lib_local_token import resolve_local_api_token
-
-        return resolve_local_api_token(home=self.home, base=self.base)
 
     def tail_log(self, lines: int = 40) -> str:
         if not self.log_path or not self.log_path.is_file():
@@ -266,7 +265,7 @@ class Sandbox:
 
     def cleanup(self, *, keep: bool = False) -> None:
         self.stop()
-        if keep:
+        if keep or not self.owns_root:
             return
         shutil.rmtree(self.root, ignore_errors=True)
 
@@ -286,4 +285,5 @@ def make_sandbox(*, root: Path | str | None = None, port: int | None = None) -> 
         workspace=workspace,
         trace_dir=traces,
         port=port or free_port(),
+        owns_root=root is None,
     )

@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import { apiFetch } from '../../api/client'
 import { isTauri, tauriInvoke } from '../../api/tauri'
 import { isLinuxDesktop } from '../../utils/platform'
+import { EmptyState } from '../EmptyState'
 import {
   TERMINAL_SET_CWD_EVENT,
   takePendingTerminalCwd,
@@ -285,19 +286,26 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
       startedRef.current = true
       try {
         unData = await listen<{ id: string; data: string }>('pty-data', (ev) => {
-          if (ev.payload.id === ptyIdRef.current) {
+          if (!cancelled && ev.payload.id === ptyIdRef.current) {
             term.write(ev.payload.data)
           }
         })
+        if (cancelled) { unData(); return }
         unExit = await listen<{ id: string }>('pty-exit', (ev) => {
-          if (ev.payload.id === ptyIdRef.current) {
+          if (!cancelled && ev.payload.id === ptyIdRef.current) {
             term.writeln('\r\n[shell exited]\r\n')
             ptyIdRef.current = null
             setStatus('Shell exited — Restart to open again')
           }
         })
+        if (cancelled) { unData(); unExit(); return }
       } catch (e) {
+        if (cancelled) return
+        unData?.()
+        unData = undefined
         term.writeln(`\r\nEvent listen failed: ${e}\r\n`)
+        setStatus('Could not connect to the terminal. Reopen this panel to retry.')
+        return
       }
       if (!cancelled) {
         await startPty(term, fit, cwdRef.current)
@@ -434,6 +442,18 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
     } catch {
       /* ignore */
     }
+  }
+
+  if (!isTauri()) {
+    return (
+      <div className="p-4">
+        <EmptyState
+          title="Terminal is available in the desktop app"
+          description="Open this project in Remedy Desktop to use an interactive terminal. Chat can still run permitted commands from the browser."
+        />
+        {cwd && <p className="mt-3 text-xs break-all" style={{ color: 'var(--text-secondary)' }}>Project folder: {cwd}</p>}
+      </div>
+    )
   }
 
   return (

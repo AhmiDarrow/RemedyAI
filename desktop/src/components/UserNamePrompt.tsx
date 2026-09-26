@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useDialogFocus } from '../hooks/useDialogFocus'
 import { RemedyLogo } from './RemedyLogo'
 import { useI18n } from '../i18n'
 
@@ -13,6 +14,8 @@ interface UserNamePromptProps {
 export function UserNamePrompt({ open, initial = '', onSave, onSkip }: UserNamePromptProps) {
   const { t } = useI18n()
   const [name, setName] = useState(initial)
+  const dialogRef = useDialogFocus<HTMLDivElement>(open, () => onSkip?.())
+  useEffect(() => { if (open) setName(initial) }, [open, initial])
   if (!open) return null
 
   const submit = () => {
@@ -25,6 +28,8 @@ export function UserNamePrompt({ open, initial = '', onSave, onSkip }: UserNameP
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center p-4 ui-overlay"
       role="dialog"
+      ref={dialogRef}
+      tabIndex={-1}
       aria-modal="true"
       aria-labelledby="user-name-title"
     >
@@ -45,9 +50,10 @@ export function UserNamePrompt({ open, initial = '', onSave, onSkip }: UserNameP
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') submit()
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing) submit()
           }}
           placeholder={t('userName.placeholder')}
+          aria-label={t('userName.title')}
           className="ui-input mb-4 text-sm"
           style={{ padding: '0.55rem 0.75rem', fontSize: '0.875rem' }}
         />
