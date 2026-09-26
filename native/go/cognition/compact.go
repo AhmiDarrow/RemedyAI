@@ -50,14 +50,14 @@ func compactTranscript(msgs []Message) []Message {
 	if keepGoal {
 		out = append(out, msgs[goal])
 	}
-	out = append(out, UserText(buildWorkingSet(middle).render(len(middle))))
+	out = append(out, contextNote(buildWorkingSet(middle).render(len(middle))))
 	out = append(out, msgs[cut:]...)
 	return out
 }
 
 func firstUserProseIndex(msgs []Message) int {
 	for i, m := range msgs {
-		if m.Role == RoleUser && !m.HasToolResults() && strings.TrimSpace(m.Text()) != "" {
+		if m.Role == RoleUser && !m.Internal && !m.HasToolResults() && strings.TrimSpace(m.Text()) != "" {
 			return i
 		}
 	}
@@ -66,7 +66,7 @@ func firstUserProseIndex(msgs []Message) int {
 
 func lastUserProseIndex(msgs []Message) int {
 	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == RoleUser && !msgs[i].HasToolResults() && strings.TrimSpace(msgs[i].Text()) != "" {
+		if msgs[i].Role == RoleUser && !msgs[i].Internal && !msgs[i].HasToolResults() && strings.TrimSpace(msgs[i].Text()) != "" {
 			return i
 		}
 	}
@@ -92,6 +92,7 @@ type workingSet struct {
 	failure   string
 	todo      string
 	decisions []string
+	requests  []string
 }
 
 const (
@@ -101,6 +102,8 @@ const (
 	maxFailureChars        = 1_200
 	maxTodoChars           = 1_200
 	maxCarriedChars        = 4_000
+	maxWorkingSetRequests  = 16
+	maxRequestChars        = 1_200
 )
 
 // buildWorkingSet walks the dropped middle of a transcript and records what the
@@ -109,40 +112,44 @@ const (
 func buildWorkingSet(msgs []Message) workingSet {
 	var ws workingSet
 	calls := map[string]Block{}
-	readSeen := map[string]int{}
-	editSeen := map[string]struct{}{}
 	for _, m := range msgs {
 		for _, b := range m.Blocks {
 			switch b.Type {
 			case BlockText:
 				if m.Role == RoleAssistant {
-					if line := firstSentence(b.Text); line != "" && len(ws.decisions) < maxWorkingSetDecisions {
-						ws.decisions = append(ws.decisions, line)
+					if line := firstSentence(b.Text); line != "" {
+						ws.decisions = appendRecent(ws.decisions, line, maxWorkingSetDecisions)
 					}
 					continue
 				}
 				// A second compaction must not throw the first one away: the
 				// previous working set is carried forward, bounded.
-				if strings.HasPrefix(strings.TrimSpace(b.Text), compactedHeader) {
+				if m.Internal && strings.HasPrefix(strings.TrimSpace(b.Text), compactedHeader) {
 					ws.carried = carriedBody(b.Text)
+				} else if m.Role == RoleUser && !m.Internal && !m.HasToolResults() && strings.TrimSpace(b.Text) != "" {
+					ws.requests = append(ws.requests, clipRunes(strings.TrimSpace(b.Text), maxRequestChars))
+					if len(ws.requests) > maxWorkingSetRequests {
+						ws.requests = ws.requests[1:]
+					}
 				}
 			case BlockToolUse:
 				calls[b.ID] = b
-				if isTodoTool(b.Name) {
-					ws.todo = clipRunes(strings.TrimSpace(string(b.Input)), maxTodoChars)
-				}
-				if path := inputPath(b.Input); path != "" && ClassifyTool(b.Name) == ToolMutate {
-					if _, ok := editSeen[path]; !ok && len(ws.edited) < maxWorkingSetFiles {
-						editSeen[path] = struct{}{}
-						ws.edited = append(ws.edited, path)
-					}
-				}
 			case BlockToolResult:
 				call, ok := calls[b.ToolUseID]
 				if !ok {
 					continue
 				}
 				body := blockText(b.Content)
+				if b.IsError {
+					ws.failure = fmt.Sprintf("%s failed\n%s", call.Name, tailRunes(body, maxFailureChars))
+				} else {
+					if isTodoTool(call.Name) {
+						ws.todo = clipRunes(strings.TrimSpace(string(call.Input)), maxTodoChars)
+					}
+					if path := inputPath(call.Input); path != "" && ClassifyTool(call.Name) == ToolMutate {
+						ws.edited = recentUnique(ws.edited, path, maxWorkingSetFiles)
+					}
+				}
 				switch ClassifyTool(call.Name) {
 				case ToolVerify:
 					cmd := inputCommand(call.Input)
@@ -150,31 +157,49 @@ func buildWorkingSet(msgs []Message) workingSet {
 						cmd = call.Name
 					}
 					exit := exitCodeLabel(body, b.IsError)
-					if len(ws.commands) < maxWorkingSetCommands {
-						ws.commands = append(ws.commands, commandNote{command: cmd, exit: exit})
-					}
-					if exit != "0" {
+					ws.commands = appendRecent(ws.commands, commandNote{command: cmd, exit: exit}, maxWorkingSetCommands)
+					if exit != "0" && exit != "unknown" {
 						ws.failure = fmt.Sprintf("`%s` exit %s\n%s", cmd, exit, clipRunes(tailRunes(body, maxFailureChars), maxFailureChars))
 					}
 				case ToolExplore:
+					if b.IsError {
+						continue
+					}
 					path := inputPath(call.Input)
 					if path == "" {
 						continue
 					}
 					note := fileNote{path: path, hash: hashPrefix(body)}
-					if idx, ok := readSeen[path]; ok {
-						ws.read[idx] = note
-						continue
+					for i, previous := range ws.read {
+						if previous.path == path {
+							ws.read = append(ws.read[:i], ws.read[i+1:]...)
+							break
+						}
 					}
-					if len(ws.read) < maxWorkingSetFiles {
-						readSeen[path] = len(ws.read)
-						ws.read = append(ws.read, note)
-					}
+					ws.read = appendRecent(ws.read, note, maxWorkingSetFiles)
 				}
 			}
 		}
 	}
 	return ws
+}
+
+func appendRecent[T any](items []T, value T, limit int) []T {
+	items = append(items, value)
+	if len(items) > limit {
+		items = items[len(items)-limit:]
+	}
+	return items
+}
+
+func recentUnique(items []string, value string, limit int) []string {
+	for i, previous := range items {
+		if previous == value {
+			items = append(items[:i], items[i+1:]...)
+			break
+		}
+	}
+	return appendRecent(items, value, limit)
 }
 
 func (w workingSet) render(dropped int) string {
@@ -186,6 +211,12 @@ func (w workingSet) render(dropped int) string {
 		b.WriteString("\nCarried forward from an earlier compaction:\n")
 		b.WriteString(w.carried)
 		b.WriteByte('\n')
+	}
+	if len(w.requests) > 0 {
+		b.WriteString("\nEarlier user requests and corrections (in chronological order):\n")
+		for _, request := range w.requests {
+			fmt.Fprintf(&b, "- %s\n", request)
+		}
 	}
 	if len(w.read) > 0 {
 		b.WriteString("\nFiles read:\n")
@@ -277,25 +308,43 @@ func inputCommand(input json.RawMessage) string {
 // exitCodeLabel reads exit_code out of a tool result body, falling back to the
 // error flag when the tool does not report one.
 func exitCodeLabel(body string, isError bool) string {
-	var out map[string]any
-	if json.Unmarshal([]byte(body), &out) == nil {
-		if code, ok := out["exit_code"].(float64); ok {
-			return fmt.Sprintf("%d", int(code))
-		}
+	var out struct {
+		ExitCode *int `json:"exit_code"`
+		TimedOut bool `json:"timed_out"`
 	}
-	if isError {
+	if json.Unmarshal([]byte(body), &out) == nil && out.ExitCode != nil && *out.ExitCode != 0 {
+		return fmt.Sprintf("%d", *out.ExitCode)
+	}
+	if isError || out.TimedOut {
 		return "err"
 	}
-	return "0"
+	if resultLooksGreen(ToolResult{Output: []byte(body)}) {
+		return "0"
+	}
+	return "unknown"
 }
 
 // resultLooksGreen reports a verify result that actually passed: no tool error
-// and, when the tool reports one, exit code 0.
+// and an explicit completed exit code 0.
 func resultLooksGreen(res ToolResult) bool {
 	if res.Err != "" || res.IsError {
 		return false
 	}
-	return exitCodeLabel(string(res.Output), false) == "0"
+	var body struct {
+		ExitCode *int   `json:"exit_code"`
+		TimedOut bool   `json:"timed_out"`
+		Status   string `json:"status"`
+	}
+	if json.Unmarshal(res.Output, &body) != nil || body.ExitCode == nil || body.TimedOut {
+		return false
+	}
+	// A successful background launch is not a completed verification.
+	switch strings.ToLower(strings.TrimSpace(body.Status)) {
+	case "", "completed", "exited", "done", "ok", "success":
+		return *body.ExitCode == 0
+	default:
+		return false
+	}
 }
 
 func blockText(blocks []Block) string {

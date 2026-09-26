@@ -56,4 +56,4 @@ def describe(provider: str) -> str:
     key = host_provider_key(provider)
     if not key:
         return f"no stored key for {provider}"
-    return f"{provider} key found ({len(key)} chars, ...{key[-4:]})"
+    return f"{provider} credentials available"

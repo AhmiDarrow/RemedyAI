@@ -17,6 +17,7 @@ import {
   normalizeLocalMediaPath,
   peekChatMediaUrl,
   resolveChatMediaUrl,
+  invalidateChatMediaUrl,
   shouldUseCorsForImage,
 } from './chatMedia'
 
@@ -165,6 +166,13 @@ describe('chatMedia request resolution (/api/media with Bearer)', () => {
       await resolveChatMediaUrl('attachments/sess1/a.png')
       expect(calls.length).toBe(2)
 
+      // A decode failure must evict only that image and fetch fresh bytes.
+      invalidateChatMediaUrl('<attachments/sess1/a.png>')
+      expect(peekChatMediaUrl('attachments/sess1/a.png')).toBe(null)
+      expect(peekChatMediaUrl(winPath)).toBe(abs)
+      await resolveChatMediaUrl('attachments/sess1/a.png')
+      expect(calls.length).toBe(3)
+
       // Pass-throughs
       expect(await resolveChatMediaUrl('data:image/png;base64,xx')).toBe(
         'data:image/png;base64,xx',
@@ -173,7 +181,7 @@ describe('chatMedia request resolution (/api/media with Bearer)', () => {
         'https://cdn.example/x.png',
       )
       expect(await resolveChatMediaUrl('data:text/html,<b>x</b>')).toBe('')
-      expect(calls.length).toBe(2)
+      expect(calls.length).toBe(3)
     } finally {
       globalThis.fetch = origFetch
       URL.createObjectURL = origCreate

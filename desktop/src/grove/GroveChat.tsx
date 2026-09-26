@@ -13,6 +13,7 @@ import type { BuildTodo } from '../components/BuildTodos'
 import type { SendAttachment } from '../components/Composer'
 import { useComposerAttachments } from '../hooks/useComposerAttachments'
 import { pickAttachFiles } from '../api/attachments'
+import { isTauri } from '../api/tauri'
 import { liveTurnForSession, plainTurnLabel, upsertTurn } from '../state/turns'
 import { useSessionTurns } from '../state/useTurns'
 import type { ChatMessage } from '../types'
@@ -124,9 +125,15 @@ export function GroveChat({
   } = useComposerAttachments({
     ensureSessionId,
     sessionKey,
-    disabled: !serverReady,
+    disabled: !serverReady || busy,
     onError: setAttachError,
   })
+
+  const attachmentsRef = useRef(attachments)
+  attachmentsRef.current = attachments
+  const sessionRef = useRef(sessionKey)
+  sessionRef.current = sessionKey
+  const canSend = serverReady && !busy && !uploading && (draft.trim().length > 0 || attachments.length > 0)
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -244,6 +251,8 @@ export function GroveChat({
 
   const pickFiles = useCallback(async () => {
     // Tauri-native picker first; browser file input as the dev fallback.
+    if (!serverReady || busy || uploading) return
+    if (!isTauri()) { fileInputRef.current?.click(); return }
     try {
       const payloads = await pickAttachFiles()
       if (payloads.length) {
@@ -252,24 +261,26 @@ export function GroveChat({
           return new File([bytes], p.filename, { type: p.content_type })
         })
         await addFiles(files)
-        return
       }
+      return // A cancelled native picker must not open a second picker.
     } catch {
       /* fall through to browser input */
     }
     fileInputRef.current?.click()
-  }, [addFiles])
+  }, [addFiles, serverReady, busy, uploading])
 
   const send = useCallback(async () => {
     const text = draft.trim()
-    if ((!text && attachments.length === 0) || busy || busyRef.current || !serverReady) return
+    const startedSession = sessionKey
+    const stillHere = () => startedSession == null || sessionRef.current === startedSession
+    if (!canSend || busyRef.current) return
     busyRef.current = true
     setBusy(true)
     try {
       if (text && onSpecialSend && attachments.length === 0) {
         const consumed = await onSpecialSend(text)
         if (consumed) {
-          setDraft('')
+          if (stillHere()) setDraft(current => current === draft ? '' : current)
           return
         }
       }
@@ -282,18 +293,21 @@ export function GroveChat({
         is_text: a.is_text,
       }))
       await onSend(text, payload.length ? payload : undefined)
-      setDraft('')
-      clearAttachments()
+      if (!stillHere()) return
+      setDraft(current => current === draft ? '' : current)
+      if (attachmentsRef.current === attachments) clearAttachments()
       setAttachError('')
       setAttachNotice('')
     } catch (e) {
-      setAttachError(e instanceof Error ? e.message : 'Send failed — try again.')
+      if (stillHere()) setAttachError(e instanceof Error ? e.message : 'Send failed — try again.')
     } finally {
       busyRef.current = false
       setBusy(false)
     }
   }, [
     draft,
+    canSend,
+    sessionKey,
     attachments,
     busy,
     serverReady,
@@ -422,7 +436,7 @@ export function GroveChat({
           type="button"
           className="grove-attachbtn"
           onClick={() => void pickFiles()}
-          disabled={!serverReady}
+          disabled={!serverReady || busy || uploading}
           aria-label="Attach a file, receipt, or image"
           title="Attach a file, receipt, or image — or paste / drop it here"
         >
@@ -492,6 +506,7 @@ export function GroveChat({
             </button>
             <button
               type="submit"
+              disabled={!canSend}
               className="grove-mic steer"
               title="Steer — she takes it in without stopping"
               aria-label="Steer: she takes it in without stopping"
@@ -500,7 +515,7 @@ export function GroveChat({
             </button>
           </>
         ) : (
-          <button type="submit" className="grove-mic" title="Send" aria-label="Send">
+          <button type="submit" disabled={!canSend} className="grove-mic" title="Send" aria-label="Send">
             ↑
           </button>
         )}

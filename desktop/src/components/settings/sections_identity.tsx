@@ -86,7 +86,7 @@ function PersonaWipeControl(): ReactNode {
                 disabled={!ready || busy}
                 onClick={() => void run()}
                 className="px-3 py-1.5 rounded text-xs font-semibold disabled:opacity-40"
-                style={{ background: 'var(--error)', color: '#fff' }}
+                style={{ background: 'var(--error)', color: 'var(--error-foreground)' }}
               >
                 {busy ? 'Wiping…' : 'Wipe what Remedy knows about me'}
               </button>

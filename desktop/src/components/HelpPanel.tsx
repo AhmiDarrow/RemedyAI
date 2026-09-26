@@ -1,3 +1,5 @@
+import { headingAnchor } from '../help/headingAnchor'
+import { useDialogFocus } from '../hooks/useDialogFocus'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -7,6 +9,7 @@ import {
   getArticle,
   getDefaultArticleId,
   resolveWikiHref,
+  resolveExternalHelpHref,
   searchArticles,
   type HelpArticle,
 } from '../help/catalog'
@@ -65,6 +68,7 @@ export interface HelpPanelProps {
  * Full-screen wiki-style Help: searchable TOC + offline owner's manual.
  */
 export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPanelProps) {
+  const dialogRef = useDialogFocus<HTMLDivElement>(open, onClose)
   const [query, setQuery] = useState('')
   const [articleId, setArticleId] = useState(getDefaultArticleId())
   const [history, setHistory] = useState<string[]>([getDefaultArticleId()])
@@ -80,19 +84,6 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
     const t = window.setTimeout(() => searchRef.current?.focus(), 50)
     return () => window.clearTimeout(t)
   }, [open, initialArticleId])
-
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        e.stopPropagation()
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [open, onClose])
 
   // WebView2 child always tops React; suppress embed while Help covers the window.
   useEffect(() => {
@@ -130,6 +121,8 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
 
   return (
     <div
+      ref={dialogRef}
+      tabIndex={-1}
       role="dialog"
       aria-modal="true"
       aria-label="Help — Owner's Manual"
@@ -139,7 +132,7 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
       }}
     >
       <div
-        className="ui-surface flex w-full max-w-5xl overflow-hidden"
+        className="help-panel ui-surface flex w-full max-w-5xl overflow-hidden"
         style={{
           background: 'var(--bg-primary)',
           maxHeight: 'min(920px, calc(100vh - 2rem))',
@@ -149,7 +142,7 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
       >
         {/* Sidebar */}
         <aside
-          className="flex w-[240px] shrink-0 flex-col border-r"
+          className="help-navigation flex w-[240px] shrink-0 flex-col border-r"
           style={{
             background: 'color-mix(in srgb, var(--bg-secondary) 94%, transparent)',
             borderColor: 'color-mix(in srgb, var(--border) 85%, transparent)',
@@ -245,9 +238,9 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
         </aside>
 
         {/* Article */}
-        <section className="flex min-w-0 flex-1 flex-col">
+        <section className="flex min-w-0 min-h-0 flex-1 flex-col">
           <header
-            className="flex items-start justify-between gap-3 border-b px-4 py-3"
+            className="flex shrink-0 items-start justify-between gap-3 border-b px-4 py-3"
             style={{
               borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)',
               background: 'color-mix(in srgb, var(--bg-secondary) 90%, transparent)',
@@ -280,7 +273,7 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
 
           <div
             ref={articleTopRef}
-            className="help-article flex-1 overflow-y-auto px-5 py-4 text-sm leading-relaxed"
+            className="help-article min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm leading-relaxed"
             style={{ color: 'var(--text-primary)' }}
           >
             {article && (
@@ -288,6 +281,21 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
                 remarkPlugins={[remarkGfm]}
                 components={{
                   a: ({ href, children }) => {
+                    if (href?.startsWith('#')) return (
+                      <a href={href} className="underline" style={{ color: 'var(--accent)' }} onClick={(event) => {
+                        event.preventDefault()
+                        let anchor = href.slice(1)
+                        try { anchor = decodeURIComponent(anchor) } catch { /* retain literal anchor */ }
+                        const heading = Array.from(articleTopRef.current?.querySelectorAll<HTMLElement>('[data-help-anchor]') ?? [])
+                          .find((el) => el.dataset.helpAnchor === anchor)
+                        const pane = articleTopRef.current
+                        if (pane && heading) pane.scrollTo({
+                          top: pane.scrollTop + heading.getBoundingClientRect().top - pane.getBoundingClientRect().top,
+                        })
+                        heading?.focus({ preventScroll: true })
+                      }}>{children}</a>
+                    )
+
                     const wikiId = href ? resolveWikiHref(href) : null
                     if (wikiId) {
                       return (
@@ -303,7 +311,7 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
                     }
                     return (
                       <a
-                        href={href}
+                        href={resolveExternalHelpHref(href)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="underline"
@@ -314,12 +322,12 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
                     )
                   },
                   h1: ({ children }) => (
-                    <h1 className="text-xl font-bold mb-3 mt-1" style={{ color: 'var(--text-primary)' }}>
+                    <h1 data-help-anchor={headingAnchor(children)} tabIndex={-1} className="text-xl font-bold mb-3 mt-1" style={{ color: 'var(--text-primary)' }}>
                       {children}
                     </h1>
                   ),
                   h2: ({ children }) => (
-                    <h2
+                    <h2 data-help-anchor={headingAnchor(children)} tabIndex={-1}
                       className="text-base font-semibold mt-5 mb-2 pb-1 border-b"
                       style={{ color: 'var(--text-primary)', borderColor: 'var(--border)' }}
                     >
@@ -327,7 +335,7 @@ export function HelpPanel({ open, onClose, initialArticleId, version }: HelpPane
                     </h2>
                   ),
                   h3: ({ children }) => (
-                    <h3 className="text-sm font-semibold mt-4 mb-1.5" style={{ color: 'var(--text-primary)' }}>
+                    <h3 data-help-anchor={headingAnchor(children)} tabIndex={-1} className="text-sm font-semibold mt-4 mb-1.5" style={{ color: 'var(--text-primary)' }}>
                       {children}
                     </h3>
                   ),

@@ -1,7 +1,8 @@
 /** Remedy's own confirm dialog — never the browser's "localhost:5173 says…". */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import { browserStackHold } from '../utils/browserStack'
+import { useDialogFocus } from '../hooks/useDialogFocus'
 
 export interface ConfirmRequest {
   /** Short title, e.g. "Delete this chat?" */
@@ -32,29 +33,14 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  const confirmRef = useRef<HTMLButtonElement | null>(null)
+  const cancelRef = useRef<HTMLButtonElement | null>(null)
+  const dialogRef = useDialogFocus<HTMLDivElement>(open, onCancel, cancelRef)
+  const titleId = useId()
 
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onCancel()
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        onConfirm()
-      }
-    }
-    window.addEventListener('keydown', onKey, true)
-    const release = browserStackHold('confirm-dialog')
-    // Focus the safe path first; Enter still confirms for speed.
-    confirmRef.current?.focus()
-    return () => {
-      window.removeEventListener('keydown', onKey, true)
-      release()
-    }
-  }, [open, onCancel, onConfirm])
+    return browserStackHold('confirm-dialog')
+  }, [open])
 
   if (!open) return null
   const paragraphs = String(body || '')
@@ -67,7 +53,9 @@ export function ConfirmDialog({
       className="fixed inset-0 z-[120] flex items-center justify-center p-4 ui-overlay"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="confirm-dialog-title"
+      aria-labelledby={titleId}
+      ref={dialogRef}
+      tabIndex={-1}
       onClick={onCancel}
     >
       <div
@@ -75,7 +63,7 @@ export function ConfirmDialog({
         style={{ color: 'var(--text-primary)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="confirm-dialog-title" className="text-sm font-semibold tracking-tight">
+        <h2 id={titleId} className="text-base font-semibold tracking-tight">
           {title}
         </h2>
         {paragraphs.map((p, i) => (
@@ -88,16 +76,15 @@ export function ConfirmDialog({
           </p>
         ))}
         <div className="flex justify-end gap-2 pt-1">
-          <button type="button" className="ui-btn ui-btn-secondary" onClick={onCancel}>
+          <button ref={cancelRef} type="button" className="ui-btn ui-btn-secondary" onClick={onCancel}>
             {cancelLabel}
           </button>
           <button
-            ref={confirmRef}
             type="button"
             className="ui-btn ui-btn-primary"
             style={
               danger
-                ? { background: 'var(--error)', borderColor: 'var(--error)', color: '#fff' }
+                ? { background: 'var(--error)', borderColor: 'var(--error)', color: 'var(--error-foreground)' }
                 : undefined
             }
             onClick={onConfirm}

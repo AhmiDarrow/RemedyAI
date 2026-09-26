@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"database/sql"
+	"encoding/csv"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -55,13 +57,22 @@ func openUsageDB(homeDir string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(usageEventsSchema); err != nil {
-		_ = db.Close()
-		return nil, err
+	// PRAGMAs are connection-local. Keep the configured connection and set
+	// lock waiting before schema initialization: summary and series open in
+	// parallel, including the first time the owner visits Usage.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	for _, statement := range []string{
+		"PRAGMA busy_timeout=5000",
+		usageEventsSchema,
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA synchronous=NORMAL",
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
 	}
-	_, _ = db.Exec("PRAGMA journal_mode=WAL")
-	_, _ = db.Exec("PRAGMA synchronous=NORMAL")
-	_, _ = db.Exec("PRAGMA busy_timeout=5000")
 	return db, nil
 }
 
@@ -71,7 +82,7 @@ func parseRangeDays(raw string, def float64) float64 {
 		return def
 	}
 	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil {
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
 		return def
 	}
 	if v < 0.01 {
@@ -134,21 +145,25 @@ func (s *Server) handleUsageExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var b strings.Builder
-	b.WriteString("day,provider,total_tokens,estimated_cost_usd,events\n")
+	csvOut := csv.NewWriter(&b)
+	_ = csvOut.Write([]string{"day", "provider", "total_tokens", "estimated_cost_usd", "events"})
+	writePoint := func(p map[string]any) {
+		_ = csvOut.Write([]string{fmt.Sprint(p["day"]), fmt.Sprint(p["group"]),
+			fmt.Sprint(p["total_tokens"]), fmt.Sprint(p["estimated_cost_usd"]), fmt.Sprint(p["events"])})
+	}
 	switch points := ser["points"].(type) {
 	case []map[string]any:
 		for _, p := range points {
-			b.WriteString(fmt.Sprintf("%v,%v,%v,%v,%v\n",
-				p["day"], p["group"], p["total_tokens"], p["estimated_cost_usd"], p["events"]))
+			writePoint(p)
 		}
 	case []any:
 		for _, raw := range points {
 			if p, ok := asStringMap(raw); ok {
-				b.WriteString(fmt.Sprintf("%v,%v,%v,%v,%v\n",
-					p["day"], p["group"], p["total_tokens"], p["estimated_cost_usd"], p["events"]))
+				writePoint(p)
 			}
 		}
 	}
+	csvOut.Flush()
 	filename := fmt.Sprintf("remedy-usage-%dd.csv", int(rangeDays))
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
@@ -252,8 +267,8 @@ func usageSummary(homeDir string, rangeDays float64, sessionID string) (map[stri
 		session = sessionID
 	}
 	return map[string]any{
-		"range_days":  rangeDays,
-		"session_id":  session,
+		"range_days": rangeDays,
+		"session_id": session,
 		"totals": map[string]any{
 			"prompt_tokens":      int(tpt.Int64),
 			"completion_tokens":  int(tct.Int64),

@@ -45,7 +45,7 @@ ZIG_DIR = ROOT / "native" / "zig"
 
 # Keep in lockstep with remedy.runtime.native_runtime._ABI_VERSION and
 # REMEDY_CORE_ABI_VERSION in native/zig/include/remedy_core.h.
-REQUIRED_CORE_ABI = 5
+REQUIRED_CORE_ABI = 7
 
 
 def _get_root_version() -> str:

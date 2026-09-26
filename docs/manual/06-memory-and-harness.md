@@ -73,6 +73,17 @@ Long chats fill the model context window. The harness:
 
 ## Continuity quality
 
+During a long tool sequence, mid-turn guidance stays in the active transcript
+for subsequent steps. When older steps are compacted, the working set retains
+bounded user requests and corrections alongside confirmed file changes and
+command outcomes. Failed edits and rejected checklist updates are not recorded
+as completed work.
+
+A check counts as successful only after a completed command reports exit code
+zero. Starting a background job is not verification. A failed check or a later
+edit means the result needs checking again; large-output previews preserve
+command status while completion checks use the full result.
+
 Remedy tracks **session quality** quietly: tokens saved by compress, stuck signals,
 and whether compress kept important files/decisions. Type **`/harness`** for a
 snapshot. Background continuity also:

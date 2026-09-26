@@ -1,3 +1,4 @@
+import { useDialogFocus } from '../../hooks/useDialogFocus'
 /** Settings → Connect — phone on this network. Own API, like Phone. */
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
@@ -91,6 +92,7 @@ function PairModal({
   exp?: number
   onClose: () => void
 }): ReactNode {
+  const dialogRef = useDialogFocus<HTMLDivElement>(true, onClose)
   const [copied, setCopied] = useState(false)
   const [qrUrl, setQrUrl] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
@@ -124,6 +126,8 @@ function PairModal({
   return (
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center p-4 ui-overlay"
+      ref={dialogRef}
+      tabIndex={-1}
       role="dialog"
       aria-modal="true"
       aria-labelledby="connect-pair-title"

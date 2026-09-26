@@ -1,3 +1,4 @@
+import { useAsyncScope } from '../hooks/useAsyncScope'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useI18n } from '../i18n'
 import {
@@ -15,6 +16,9 @@ interface ApprovalBannerProps {
 
 export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
   const { t } = useI18n()
+  const scope = useAsyncScope(sessionId)
+  const actionBusy = useRef(false)
+  const [messageError, setMessageError] = useState(false)
   const [items, setItems] = useState<PendingApproval[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
   const [message, setMessage] = useState('')
@@ -30,10 +34,13 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
   }
 
   const refresh = useCallback(async () => {
+    if (actionBusy.current) return
+    const isCurrent = scope.latest()
     try {
       // List every pending item, then keep this chat's plus blocking / hive
       // Asks so an owner looking at another tab still sees a waiter.
       const items = await listApprovals()
+      if (!isCurrent()) return
       const focused = (sessionId || '').trim()
       setItems(
         items.filter((i) => {
@@ -49,9 +56,13 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
     } catch {
       // server down
     }
-  }, [sessionId])
+  }, [sessionId, scope])
 
   useEffect(() => {
+    setItems([])
+    setMessage('')
+    setBusyId(null)
+    actionBusy.current = false
     void refresh()
     const id = window.setInterval(() => void refresh(), 4000)
     return () => {
@@ -63,21 +74,30 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
   const act = async (
     item: PendingApproval,
     approve: boolean,
-    scope: 'session' | 'always' | 'once' = 'once',
+    approvalScope: 'session' | 'always' | 'once' = 'once',
   ) => {
+    if (actionBusy.current) return
+    actionBusy.current = true
+    scope.latest()
+    const isCurrent = scope.capture()
+    setMessageError(false)
     setBusyId(item.id)
     setMessage('')
     try {
-      const res = await resolveApproval(item.id, approve, approve ? scope : 'once')
+      const res = await resolveApproval(item.id, approve, approve ? approvalScope : 'once')
+      if (!isCurrent()) return
       const msg = res.hint || (approve ? t('approval.approved') : t('approval.denied'))
       flashMsg(msg, 2800)
+      actionBusy.current = false
       await refresh()
-      onResolved?.(approve, item.command)
+      if (isCurrent()) onResolved?.(approve, item.command)
     } catch (e: unknown) {
+      if (!isCurrent()) return
+      setMessageError(true)
       const err = e instanceof Error ? e.message : 'Failed'
       flashMsg(err, 4500)
     } finally {
-      setBusyId(null)
+      if (isCurrent()) { actionBusy.current = false; setBusyId(null) }
     }
   }
 
@@ -149,7 +169,7 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
           <div className="flex gap-2 items-center flex-wrap">
             <button
               type="button"
-              disabled={busyId === item.id}
+              disabled={busyId !== null}
               onClick={() => void act(item, true, 'once')}
               className="ui-btn ui-btn-primary"
             >
@@ -161,7 +181,7 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
             </button>
             <button
               type="button"
-              disabled={busyId === item.id}
+              disabled={busyId !== null}
               onClick={() => void act(item, false)}
               className="ui-btn ui-btn-secondary"
             >
@@ -171,7 +191,7 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
         </div>
       ))}
       {message && (
-        <div className="text-xs px-1 font-medium" style={{ color: 'var(--success)' }}>
+        <div role={messageError ? 'alert' : 'status'} className="text-sm px-1 font-medium" style={{ color: messageError ? 'var(--error)' : 'var(--success)' }}>
           {message}
         </div>
       )}

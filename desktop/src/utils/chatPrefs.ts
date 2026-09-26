@@ -1,3 +1,4 @@
+import { contrastingText } from './colorContrast'
 /** UI prefs for density, accent, and accessibility (local). */
 
 export type Density = 'cozy' | 'compact'
@@ -87,8 +88,11 @@ export function applyCustomAccent(hex: string) {
     // by re-setting from computed data if present.
     return
   }
+  root.style.setProperty('--accent-foreground', contrastingText(hex))
+  root.style.setProperty('--chat-user-fg', contrastingText(hex))
   root.style.setProperty('--accent', hex)
   root.style.setProperty('--accent-hover', hoverFrom(hex))
+  root.style.setProperty('--accent-hover-foreground', contrastingText(hoverFrom(hex)))
   root.style.setProperty('--chat-user-bg', hex)
   root.style.setProperty('--chat-user-border', hex)
   root.style.setProperty('--custom-accent', hex)

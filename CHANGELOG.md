@@ -4,6 +4,36 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.63.3] - 2026-09-25
+
+### Changed
+
+- Studio, Grove, and WebUI have clearer typography, theme contrast, and spacing.
+  Small windows keep chat usable with temporary workspace panels, while Advanced
+  controls remain available.
+- Dialogs, Help navigation, provider selectors, and workspace rails have more
+  consistent keyboard navigation, focus handling, and readable controls.
+- Long tasks retain recent owner guidance, files, command outcomes, and decisions
+  through context compaction. Truncated tool output preserves completion evidence.
+
+### Fixed
+
+- Model changes use confirmed session bindings; late responses cannot change
+  another chat. Editing history cannot race a live turn or resend after failure.
+- Scratch saves run in order and preserve unsynced edits. File navigation handles
+  Windows, UNC, and POSIX paths; attachments preserve complete source paths.
+- Request deadlines include authentication, respect cancellation, and reject stale
+  bootstrap tokens without disrupting concurrent requests.
+- Missing model providers show an actionable setup error instead of a synthetic
+  reply. Custom providers inherit their configured endpoint.
+- Usage initialization handles simultaneous first opens; CSV exports quote provider
+  names and invalid date ranges fall back safely.
+- The evaluation harness uses disposable homes, isolates provider credentials,
+  and retains reliable per-turn evidence. Native tests release each host-session
+  buffer once, preventing allocator corruption in later checks.
+- Local Desktop staging accepts the current native ABI and tests its alignment
+  across packaging, runtime loaders, and the native library.
+
 ## [0.63.2] - 2026-09-13
 
 ### Security

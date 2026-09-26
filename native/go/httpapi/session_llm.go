@@ -191,10 +191,16 @@ func (s *Server) handleSetSessionLLM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only block if *this* session is streaming — other tabs may run freely.
-	if s.claims != nil && s.claims.IsClaimed(sid) {
-		writeJSON(w, http.StatusConflict, map[string]string{"detail": sessionLLMBusyDetail})
-		return
+	// Reserve the session through validation and persistence. A check alone lets
+	// a stream start between IsClaimed and UpdateLLMBind, changing its provider.
+	// Other sessions remain free to stream or change their model.
+	if s.claims != nil {
+		epoch, _, claimed := s.claims.TryClaim(sid)
+		if !claimed {
+			writeJSON(w, http.StatusConflict, map[string]string{"detail": sessionLLMBusyDetail})
+			return
+		}
+		defer s.claims.Release(sid, &epoch)
 	}
 
 	var req sessionLLMRequest

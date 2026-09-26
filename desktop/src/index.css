@@ -344,11 +344,8 @@
   border: 0;
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+/* Tailwind Preflight owns the reset inside its base layer. An unlayered
+   universal reset here overrides every spacing utility across the app. */
 
 html, body, #root {
   height: 100%;
@@ -361,7 +358,7 @@ html, body, #root {
 }
 
 html {
-  font-size: calc(14px * var(--ui-font-scale, 1));
+  font-size: calc(16px * var(--ui-font-scale, 1));
 }
 
 body {
@@ -390,7 +387,7 @@ html.theme-animating body * {
 :root[data-density="cozy"] {
   --chat-pad-y: 0.35rem;
   --chat-bubble-pad: 0.55rem 0.8rem;
-  --chat-font: 0.875rem;
+  --chat-font: 1rem;
   --chat-line-height: 1.55;
   --chat-avatar: 1.5rem;
   --composer-pad: 0.65rem;
@@ -399,7 +396,7 @@ html.theme-animating body * {
 :root[data-density="compact"] {
   --chat-pad-y: 0.18rem;
   --chat-bubble-pad: 0.35rem 0.55rem;
-  --chat-font: 0.8125rem;
+  --chat-font: 0.875rem;
   --chat-line-height: 1.45;
   --chat-avatar: 1.25rem;
   --composer-pad: 0.45rem;
@@ -539,8 +536,8 @@ html.theme-animating body * {
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0 0.75rem;
-  height: 36px;
-  min-height: 36px;
+  height: 54px;
+  min-height: 54px;
   box-sizing: border-box;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
   background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
@@ -556,14 +553,14 @@ html.theme-animating body * {
   flex: 1;
 }
 .chat-session-title {
-  font-size: 0.75rem;
+  font-size: 0.95rem;
   font-weight: 650;
   letter-spacing: -0.015em;
   color: var(--text-primary);
   line-height: 1.15;
 }
 .chat-session-sub {
-  font-size: 0.62rem;
+  font-size: 0.78rem;
   color: var(--text-muted);
   line-height: 1.15;
   display: flex;
@@ -578,7 +575,7 @@ html.theme-animating body * {
 .chat-session-model {
   color: var(--text-muted);
   font-family: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
-  font-size: 0.65rem;
+  font-size: 0.78rem;
 }
 .chat-session-count {
   color: var(--text-muted);
@@ -723,11 +720,11 @@ button.chat-chip:disabled {
 }
 .chat-status-banner .chat-status-btn-danger {
   background: var(--error);
-  color: #fff;
+  color: var(--error-foreground, #fff);
 }
 .chat-status-banner .chat-status-btn-primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-foreground, #fff);
 }
 
 @keyframes remedy-progress-slide {
@@ -970,14 +967,14 @@ pre code {
   color: var(--text-muted);
 }
 .message-feed .chat-empty-hero .chat-empty-title {
-  font-size: 1.2rem;
+  font-size: clamp(1.4rem, 2vw, 1.9rem);
   font-weight: 650;
   letter-spacing: -0.02em;
   color: var(--text-primary);
   line-height: 1.25;
 }
 .message-feed .chat-empty-hero .chat-empty-sub {
-  font-size: 0.8rem;
+  font-size: 0.95rem;
   line-height: 1.55;
   max-width: 22rem;
   color: var(--text-secondary);
@@ -1464,9 +1461,9 @@ pre code {
   border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
   background: color-mix(in srgb, var(--bg-secondary) 88%, var(--bg-primary));
   color: var(--text-secondary);
-  border-radius: 999px;
-  padding: 0.45rem 0.9rem;
-  font-size: 0.78rem;
+  border-radius: 10px;
+  padding: 0.7rem 1rem;
+  font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
@@ -1582,7 +1579,7 @@ pre code {
   padding: 0.2rem 0.45rem;
   border-radius: 999px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-foreground, #fff);
 }
 
 /* Process trail — Min chips stay dense but readable */
@@ -1644,11 +1641,11 @@ body {
   text-align: left;
   padding: 0.55rem 0.8rem;
   border-radius: 0.65rem;
-  font-size: 0.8125rem;
+  font-size: 0.95rem;
   font-weight: 650;
   letter-spacing: -0.01em;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-foreground, #fff);
   border: none;
   box-shadow:
     0 1px 0 color-mix(in srgb, #fff 12%, transparent) inset,
@@ -1668,8 +1665,8 @@ body {
 .sidebar-search {
   width: 100%;
   border-radius: 0.55rem;
-  padding: 0.4rem 0.65rem;
-  font-size: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.85rem;
   outline: none;
   background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
   border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
@@ -1684,8 +1681,8 @@ body {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 .sidebar-filter-chip {
-  font-size: 0.65rem;
-  padding: 0.2rem 0.55rem;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.65rem;
   border-radius: 999px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -1753,18 +1750,26 @@ body {
 }
 /* One row of equal-height controls — FormSelect + seg-btn used to sit on
    different baselines (worse when the window is maximized / wide). */
-[data-remedy-status-bar] .status-ctrl-row {
-  min-height: 34px;
+[data-remedy-status-bar].status-ctrl-row {
+  min-height: 44px;
+  padding: 6px 12px;
   align-items: center;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
-[data-remedy-status-bar] .status-ctrl-row .seg-btn,
-[data-remedy-status-bar] .status-ctrl-row .ui-select,
-[data-remedy-status-bar] .status-ctrl-row .status-chip {
+.status-controls { flex-wrap: wrap; }
+.status-actions, .status-models { flex-wrap: wrap; row-gap: 6px; min-width: 0; max-width: 100%; }
+@media (max-width: 800px) {
+  .status-controls { flex-basis: 100%; }
+  [data-remedy-status-bar].status-ctrl-row { max-height: 160px; overflow-y: auto; }
+}
+[data-remedy-status-bar].status-ctrl-row .seg-btn,
+[data-remedy-status-bar].status-ctrl-row .ui-select,
+[data-remedy-status-bar].status-ctrl-row .status-chip {
   box-sizing: border-box;
-  height: 26px;
-  min-height: 26px;
-  max-height: 26px;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  font-size: 0.8rem;
   padding-top: 0;
   padding-bottom: 0;
   display: inline-flex;
@@ -1772,14 +1777,14 @@ body {
   justify-content: center;
   line-height: 1;
 }
-[data-remedy-status-bar] .status-ctrl-row .ui-select {
+[data-remedy-status-bar].status-ctrl-row .ui-select {
   justify-content: flex-start;
 }
-[data-remedy-status-bar] .status-ctrl-row > .relative,
-[data-remedy-status-bar] .status-ctrl-row > .relative.w-full {
+[data-remedy-status-bar].status-ctrl-row > .relative,
+[data-remedy-status-bar].status-ctrl-row > .relative.w-full {
   display: flex;
   align-items: center;
-  height: 26px;
+  height: 32px;
 }
 /* Segmented control — global (settings FormSegmented, status bar, theme, usage) */
 .seg-btn {
@@ -1994,11 +1999,12 @@ body.is-rail-resizing [data-browser-embed-host] {
 }
 .ui-btn-primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-foreground, #fff);
   box-shadow: 0 1px 0 color-mix(in srgb, #fff 12%, transparent) inset;
 }
 .ui-btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
+  color: var(--accent-hover-foreground, #fff);
 }
 .ui-btn-secondary {
   background: color-mix(in srgb, var(--bg-tertiary) 85%, transparent);
@@ -2457,10 +2463,10 @@ body.is-rail-resizing [data-browser-embed-host] {
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: 0.7rem;
+  font-size: 0.85rem;
   font-weight: 650;
   letter-spacing: 0.01em;
-  padding: 0.34rem 0.5rem;
+  padding: 0.55rem 0.75rem;
   border-radius: 0.42rem;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
@@ -2491,6 +2497,7 @@ body.is-rail-resizing [data-browser-embed-host] {
   border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
 }
 .settings-section-head {
+  min-height: 60px;
   color: var(--text-primary);
   background: transparent;
   transition: background 0.12s ease;
@@ -2514,7 +2521,7 @@ body.is-rail-resizing [data-browser-embed-host] {
 }
 .settings-section-title {
   display: block;
-  font-size: 0.74rem;
+  font-size: 0.95rem;
   font-weight: 650;
   letter-spacing: -0.01em;
   line-height: 1.25;
@@ -2522,16 +2529,20 @@ body.is-rail-resizing [data-browser-embed-host] {
 .settings-section-summary {
   display: block;
   margin-top: 0.12rem;
-  font-size: 0.62rem;
-  line-height: 1.3;
-  color: var(--text-muted);
-  white-space: nowrap;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .settings-section-body {
   border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  padding: 16px;
 }
+.settings-panel .settings-chrome { padding: 16px; }
+.settings-panel .settings-content { padding: 16px; }
+.settings-search-hint { margin: 8px 0 0; font-size: 0.78rem; line-height: 1.5; color: var(--text-secondary); }
+.settings-panel .settings-form-sections { gap: 8px; }
 
 /* Segmented options sit in one track (Appearance, You & Agent, …) */
 .form-seg-track {
@@ -3137,3 +3148,50 @@ textarea:disabled {
 .connect-compact .chat-middle-feed {
   padding-inline: 0.4rem;
 }
+
+/* Help remains readable beside a keyboard or in a narrow window. */
+@media (max-width: 640px) {
+  .help-panel { flex-direction: column; }
+  .help-panel .help-navigation {
+    width: 100%; max-height: 34%; min-height: 150px;
+    border-right: 0; border-bottom: 1px solid var(--border);
+  }
+  .help-panel .help-navigation nav { min-height: 0; }
+  .command-palette-row { flex-wrap: wrap; gap: 6px; }
+  .command-palette-row > span:last-child { max-width: 100%; flex-basis: 100%; }
+}
+@media (hover: none) {
+  .sidebar-project-header button, .sidebar-session-row button { opacity: 1; }
+}
+
+/* Small windows keep chat usable; workspace panels temporarily cover it. */
+@media (max-width: 760px) {
+  .studio-shell { position: relative; min-width: 0; }
+  .studio-shell > [data-workspace-side] { width: 36px !important; }
+  .studio-shell .workspace-panel-body {
+    position: absolute;
+    inset: 0 36px;
+    z-index: 40;
+    border-inline: 1px solid var(--border);
+    box-shadow: 0 10px 30px rgb(0 0 0 / 15%);
+  }
+  .studio-shell .slide-resize-handle { display: none; }
+  .studio-shell .workspace-chrome-btn { min-width: 32px; min-height: 32px; }
+  .studio-shell .chat-middle { min-width: 0 !important; width: 0; }
+}
+
+.composer-root { container-type: inline-size; }
+@container (max-width: 420px) {
+  .composer-controls { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; }
+  .composer-controls > .composer-input { grid-row: 1; grid-column: 1 / -1; width: 100%; }
+  .composer-controls > button { grid-row: 2; }
+  .composer-controls > button:last-child { grid-column: 3; }
+}
+
+@media (max-width: 760px) {
+  .message-feed .chat-empty-hero { padding: 1.25rem 0.75rem; gap: 0.75rem; min-height: 0; }
+  .message-feed .chat-empty-hero > img { width: 48px !important; height: 48px !important; }
+  .message-feed .chat-empty-title { font-size: 1.25rem; }
+  .message-feed .chat-empty-sub { font-size: 0.875rem; }
+}
+.slide-resize-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

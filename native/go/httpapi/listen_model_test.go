@@ -3,6 +3,9 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,21 +16,58 @@ import (
 	"github.com/AhmiDarrow/RemedyAI/native/go/providers"
 )
 
-func TestResolveListenModelFallsBackToScripted(t *testing.T) {
+func TestResolveListenModelReportsMissingConfiguration(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REMEDY_HOME", home)
+	t.Setenv("REMEDY_LLM_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
 	InvalidateConfigCache()
 	model := ResolveListenModel(home)
 	ch, err := model.Stream(context.Background(), cognition.Turn{Messages: []cognition.Message{cognition.UserText("hi")}, Iteration: 1})
-	if err != nil {
+	if !errors.Is(err, errModelUnavailable) || ch != nil {
+		t.Fatalf("missing provider must fail explicitly, channel=%v error=%v", ch, err)
+	}
+}
+
+func TestSessionBindUsesConfiguredEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }))
+	defer server.Close()
+	home := t.TempDir()
+	base := server.URL + "/v1"
+	config := fmt.Sprintf("llm_provider = \"custom\"\nllm_model = \"local-model\"\nllm_base_url = %q\n", base)
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var b strings.Builder
-	for ev := range ch {
-		b.WriteString(ev.Text)
+	for _, explicitURL := range []string{"", base} {
+		model := ResolveChatModel(home, "custom", "local-model", explicitURL)
+		client, ok := model.(*providers.OpenAICompat)
+		if !ok || client.BaseURL != base {
+			t.Fatalf("session ignored configured endpoint: %T", model)
+		}
 	}
-	if b.String() != "Hello world" {
-		t.Fatalf("got %q", b.String())
+	// A different provider must never inherit this local server's URL.
+	t.Setenv("ANTHROPIC_API_KEY", "not-a-real-provider-key")
+	model := ResolveChatModel(home, "anthropic", "test-model", "")
+	if client, ok := model.(*providers.Anthropic); !ok || client.BaseURL == base {
+		t.Fatalf("endpoint leaked across providers: %T", model)
+	}
+}
+
+func TestCommandFailureStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		failed     bool
+	}{
+		{"bash", `{"exit_code":1}`, true},
+		{"shell.exec", `{"exit_code":-1}`, true},
+		{"bash", `{"exit_code":0,"timed_out":true}`, true},
+		{"bash", `{"exit_code":0}`, false},
+		{"bash", `{"status":"running","job_id":"j"}`, false},
+		{"read", `{"exit_code":1}`, false},
+	} {
+		if got := commandResultFailed(tc.name, []byte(tc.body)); got != tc.failed {
+			t.Errorf("%s %s: failed=%v", tc.name, tc.body, got)
+		}
 	}
 }
 

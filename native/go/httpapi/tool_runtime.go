@@ -143,11 +143,28 @@ func (e *RegistryToolExecutor) Execute(ctx context.Context, call cognition.ToolC
 		return cognition.ToolResult{ID: call.ID, Name: call.Name, Err: describeToolFailure(ctx, toolCtx, deadline, out.err)}
 	}
 	return cognition.ToolResult{
-		ID:     call.ID,
-		Name:   call.Name,
-		Output: append([]byte(nil), out.result.Output...),
-		Blocks: toolImageBlocks(out.result.Images),
+		ID:      call.ID,
+		Name:    call.Name,
+		Output:  append([]byte(nil), out.result.Output...),
+		Blocks:  toolImageBlocks(out.result.Images),
+		IsError: commandResultFailed(call.Name, out.result.Output),
 	}
+}
+
+// A process can run correctly while its command fails. Preserve that
+// distinction in the model transcript, SSE trail and completion evidence.
+func commandResultFailed(name string, output []byte) bool {
+	if cognition.ClassifyTool(name) != cognition.ToolVerify {
+		return false
+	}
+	var result struct {
+		ExitCode *int `json:"exit_code"`
+		TimedOut bool `json:"timed_out"`
+	}
+	if json.Unmarshal(output, &result) != nil {
+		return false
+	}
+	return result.TimedOut || (result.ExitCode != nil && *result.ExitCode != 0)
 }
 
 // toolImageBlocks lifts a tool's binary images (screenshot, read of an image

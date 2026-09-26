@@ -18,7 +18,7 @@ interface ThemeSwitcherProps {
 }
 
 /** Must sit above composer (z-index 5) and status-bar chrome. */
-const MENU_Z = 550
+const MENU_Z = 1000
 
 type MenuPos = {
   left: number

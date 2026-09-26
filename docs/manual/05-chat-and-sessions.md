@@ -13,11 +13,17 @@
 └────────────────────────────────────────────────────────────────┘
 ```
 
-**F1** / **Ctrl+/** open this Help wiki (not only a chat dump).  
-Minimize / maximize / close are the **OS** title-bar buttons. **Since 0.20.0**, **✕ always
-hides to the system tray** and keeps the local API running (always-ready partner — not
-optional). Fully exit only from the **tray menu → Quit** (or app menu Quit) — that stops
-the server and browser WebUI.
+**F1** / **Ctrl+/** open this Help wiki (not only a chat dump).
+Minimize / maximize / close are the **OS** title-bar buttons. On Windows,
+**✕ hides to the system tray** and keeps the local API running. On Linux and
+WSLg, **✕ minimizes to the taskbar**. Fully exit from **Quit** in the app menu
+(or the Windows tray menu); this also stops the server and browser WebUI.
+
+The default **Simple** view keeps common actions visible. **Advanced** adds
+usage, process, memory, and other workbench controls. Settings has its own
+Simple/Advanced switch; searching Settings finds matching sections in either
+mode. Text size, density, contrast, and theme are available in Appearance.
+
 
 ## Language
 
@@ -30,7 +36,9 @@ code, and file paths stay as written. Help in this wiki is still English.
 
 | Input | Action |
 |-------|--------|
-| **Enter** | Send |
+| **Enter** | Send; while Remedy works, steer the current turn |
+| **Ctrl+Enter** | Interrupt a running turn with your message |
+| **Alt+Enter** | Queue a message after the current turn |
 | **Shift+Enter** | New line |
 | **↑ / ↓** | Previous / next prompt (composer history) |
 | **@** | Search project files to attach references |
@@ -59,16 +67,16 @@ puts the file on the composer rail so you can point things out to Remedy.
 
 ## Sessions
 
-- **New session** — Ctrl+N, logo menu, or `/new` (root session — no project)  
-- **Reset this session** — `/reset` or `/clear` full clean slate **in place** (history, plans, brief, attachments; same session id; does not open another). Durable memory kept.  
-- **Delete a chat** — sidebar × warns first, then removes the transcript plus that chat’s notes, attachments, plans, and undo. Partner Memory stays until **Wipe persona**.  
-- **Click a session** — loads that chat in the middle pane  
-- **Add project folder** — paste a path or **Browse…** (native folder picker)  
-- **Archive** — filter + auto-hide after 30 days (not pinned); row toggle  
-- **Auto-title** — from the first prompt  
-- **Rename / pin / search / tags** — session sidebar features  
-- **Export** — `/export` or command palette → `.txt`  
-- **Import** — `/import-session` or palette → `.txt` / `.md`  
+- **New session** — Ctrl+N, logo menu, or `/new` (root session — no project)
+- **Reset this session** — `/reset` or `/clear` full clean slate **in place** (history, plans, brief, attachments; same session id; does not open another). Durable memory kept.
+- **Delete a chat** — sidebar × warns first, then removes the transcript plus that chat’s notes, attachments, plans, and undo. Partner Memory stays until **Wipe persona**.
+- **Click a session** — loads that chat in the middle pane
+- **Add project folder** — paste a path or **Browse…** (native folder picker)
+- **Archive** — filter + auto-hide after 30 days (not pinned); row toggle
+- **Auto-title** — from the first prompt
+- **Rename / pin / search / tags** — session sidebar features
+- **Export** — sidebar **Session options**, `/export`, or command palette → `.txt`
+- **Import** — sidebar **Session options**, `/import-session`, or palette → `.txt` / `.md`
 
 ## Three-frame workspace
 
@@ -85,11 +93,21 @@ Remedy is a **workbench**: chat in the center, real tools on the rails.
 | **Files** | In-app file browser for the session/project |
 | **Terminal** | In-app PowerShell (ConPTY) on this PC |
 | **Browser** | Embedded WebView2 research pane (**↗** = system browser) |
-| **Scratch** | Session-linked notepad |
+| **Scratch** | Session-linked notepad with local save and server sync |
+| **Automations** | Background tasks that run once or repeat |
 
-Each side: **thin strip** → **icon rail** → **open panel** (× collapses).  
-**⇄ Swap sides** · Terminal / Browser / Scratch: popout (↗) or fullscreen (⛶).  
-Fullscreen: **Exit fullscreen** / **Close** on the top bar, or **Esc**.
+Each side: **thin strip** → **icon rail** → **open panel** (× collapses).
+**⇄ Swap sides** · Terminal / Browser / Scratch: popout (↗) or fullscreen (⛶).
+Fullscreen: **Exit fullscreen** / **Close** on the top bar, or **Esc** when
+an inner control is not using it. Escape closes a nested dialog first.
+
+Scratch preserves unsynced notes on this device and retries server sync when
+you reopen the pad. Its text field waits for the selected session's notes to
+load, so a late response cannot replace text you have already started typing.
+
+Dropdowns support arrow keys, Home/End, and typing an option's name. Dialogs
+keep Tab navigation inside the active dialog and return focus when dismissed.
+Delete confirmations start on **Cancel**; Enter alone does not approve deletion.
 
 ## Plan vs Build
 
@@ -134,8 +152,8 @@ API: `GET/POST /api/plans`, `GET /api/plans/latest` (`?actionable=1` skips done/
 Long multi-step runs can go wrong mid-way. Use **⏱ Time travel** on the status bar
 (or Command Palette → *Time Travel*):
 
-1. Open the timeline of user/assistant steps for this session.  
-2. Click the step you want to return to (e.g. step 3 of 6).  
+1. Open the timeline of user/assistant steps for this session.
+2. Click the step you want to return to (e.g. step 3 of 6).
 3. Confirm **Restore here**.
 
 Remedy soft-deletes later chat messages, best-effort restores workspace files
@@ -172,15 +190,15 @@ Change via status bar or Settings. Full keeps process expanded after the turn so
 
 ## Thinking & approvals
 
-- **Think** level (Off–High) — how much reasoning detail the UI emphasizes  
-- **Ask / Auto** — approval policy for high-impact tools  
-- Live approvals appear as a banner above the feed  
+- **Think** level (Off–High) — how much reasoning detail the UI emphasizes
+- **Ask / Auto** — approval policy for high-impact tools
+- Live approvals appear as a banner above the feed
 
 ## Streaming & stick-to-bottom
 
-- Tokens stream into the assistant bubble.  
-- Feed follows the bottom unless you scroll up; **↓** resumes follow.  
-- **Stop** aborts the current generation.  
+- Tokens stream into the assistant bubble.
+- Feed follows the bottom unless you scroll up; **↓** resumes follow.
+- **Stop** aborts the current generation.
 
 ## Sessions by project
 
@@ -191,19 +209,19 @@ The left sidebar groups chats:
 | **No project** | Sessions not attached to a folder (tools use full access that turn) |
 | **📁 Project name** | Sessions under that directory; tools are jailed to that project for the turn |
 
-- **+** on a project header — new session in that project  
-- **+ Add project folder** — register a folder (browse or type path) even before any chats  
-- **📁** on a session row — move the chat to another project / No project  
-- **Checkbox** multi-select + toolbar move; **Shift+click** range; **drag** sessions onto a folder  
-- **Load more** when you have many sessions (paginated)  
-- **New-in-project sets default** — optional checkbox to also write Settings → project path  
+- **+** on a project header — new session in that project
+- **+ Add project folder** — register a folder (browse or type path) even before any chats
+- **📁** on a session row — move the chat to another project / No project
+- **Checkbox** multi-select + toolbar move; **Shift+click** range; **drag** sessions onto a folder
+- **Load more** when you have many sessions (paginated)
+- **New-in-project sets default** — optional checkbox to also write Settings → project path
 
 Default **New Session** still uses Settings → default project folder when set.
 
 ## Editing & regenerate
 
-- Edit a prior user message (when available) to branch the conversation.  
-- Regenerate an assistant reply when the UI offers refresh.  
+- Edit a prior user message (when available) to branch the conversation.
+- Regenerate an assistant reply when the UI offers refresh.
 
 ## Appearance
 

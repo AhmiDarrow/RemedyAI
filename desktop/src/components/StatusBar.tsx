@@ -1,4 +1,5 @@
 import { getServerUrl } from '../api/client'
+import { isTauri } from '../api/tauri'
 import { isConnectCompact } from '../utils/connectMode'
 import { useState, useEffect, useMemo } from 'react'
 import { getLatestCheckpoint, getPartnerStatus } from '../api/partner'
@@ -557,7 +558,7 @@ export function StatusBar({
           <button
             onClick={() => window.location.reload()}
             className="px-2 py-0.5 rounded text-xs flex-shrink-0"
-            style={{ background: 'var(--error)', color: '#fff' }}
+            style={{ background: 'var(--error)', color: 'var(--error-foreground)' }}
           >
             Reconnect
           </button>
@@ -597,7 +598,7 @@ export function StatusBar({
           </span>
         )}
 
-        {onToggleTimeTravel && (
+        {onToggleTimeTravel && (advanced || timeTravelOpen) && (
           <button
             type="button"
             onClick={onToggleTimeTravel}
@@ -725,15 +726,15 @@ export function StatusBar({
           <button
             onClick={() => window.location.reload()}
             className="px-2 py-0.5 rounded text-xs flex-shrink-0"
-            style={{ background: 'var(--error)', color: '#fff' }}
+            style={{ background: 'var(--error)', color: 'var(--error-foreground)' }}
           >
             Reconnect
           </button>
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-2 min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 min-w-0 flex-nowrap overflow-x-auto">
+      <div className="status-controls flex items-center justify-between gap-2 min-w-0 flex-1">
+        <div className="status-actions flex items-center gap-1.5 min-w-0">
           <SegButton
             active={planMode || chatMode}
             onClick={onTogglePlanMode}
@@ -777,7 +778,7 @@ export function StatusBar({
           >
             {t('settings.title')}
           </SegButton>
-          {onPrivacyModeChange && (
+          {onPrivacyModeChange && (advanced || privacyMode) && (
             <SegButton
               active={privacyMode}
               onClick={() => onPrivacyModeChange(!privacyMode)}
@@ -799,7 +800,7 @@ export function StatusBar({
               {t('bar.help')}
             </SegButton>
           )}
-          {advanced && (
+          {advanced && isTauri() && (
             <SegButton
               active={false}
               onClick={openWebUi}
@@ -817,26 +818,27 @@ export function StatusBar({
             <button
               onClick={() => (onInstallUpdate ? onInstallUpdate() : onCheckUpdates())}
               className="px-2 py-0.5 rounded text-xs font-medium"
-              style={{ background: 'var(--accent)', color: '#fff' }}
+              style={{ background: 'var(--accent)', color: 'var(--accent-foreground)' }}
             >
               {t('bar.update')}
             </button>
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 flex-shrink-0 flex-nowrap">
+        <div className="status-models flex items-center gap-1.5">
           {onToggleSpeak && (
             <button
               type="button"
               className={`seg-btn${speakReplies ? ' is-active' : ''}${speaking ? ' speaking' : ''}`}
               title={speakReplies ? t('bar.quiet') : t('bar.speak')}
+              aria-label={speakReplies ? t('bar.quiet') : t('bar.speak')}
               aria-pressed={speakReplies}
               onClick={onToggleSpeak}
             >
               {speakReplies ? '🔊' : '🔇'}
             </button>
           )}
-          {surface === 'grove' && onOpenStudio ? (
+          {surface === 'grove' && advanced && onOpenStudio ? (
             <button
               type="button"
               className="seg-btn"
@@ -845,7 +847,7 @@ export function StatusBar({
             >
               ▣ {t('bar.studio')}
             </button>
-          ) : onOpenGrove ? (
+          ) : surface !== 'grove' && onOpenGrove ? (
             <button
               type="button"
               className="seg-btn"

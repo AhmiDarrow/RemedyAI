@@ -141,6 +141,19 @@ func TestEditFromMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	epoch, _, claimed := s.claims.TryClaim(sess.ID)
+	if !claimed {
+		t.Fatal("could not reserve session for test")
+	}
+	code, raw = doGaps(t, s, http.MethodPost, "/api/sessions/"+sess.ID+"/messages/"+u.ID+"/edit", "")
+	if code != http.StatusConflict {
+		t.Fatalf("edit during stream status=%d body=%s", code, raw)
+	}
+	unchanged, _, _, err := s.sessions.GetMessage(u.ID)
+	if err != nil || unchanged.Reverted {
+		t.Fatalf("rejected edit changed history: reverted=%v err=%v", unchanged.Reverted, err)
+	}
+	s.claims.Release(sess.ID, &epoch)
 	code, raw = doGaps(t, s, http.MethodPost, "/api/sessions/"+sess.ID+"/messages/"+u.ID+"/edit", "")
 	if code != http.StatusOK {
 		t.Fatalf("edit status=%d body=%s", code, raw)
@@ -154,6 +167,9 @@ func TestEditFromMessage(t *testing.T) {
 	}
 	if out["reverted_count"].(float64) < 1 {
 		t.Fatalf("reverted=%v", out["reverted_count"])
+	}
+	if s.claims.IsClaimed(sess.ID) {
+		t.Fatal("edit leaked its reservation")
 	}
 }
 

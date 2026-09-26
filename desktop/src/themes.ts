@@ -1,3 +1,5 @@
+import { contrastingText } from './utils/colorContrast'
+
 export type ThemeId =
   | 'system'
   | 'dark'
@@ -74,7 +76,7 @@ const CHAT_GEOMETRY = {
 } as const
 
 function chatFromPalette(
-  kind: 'dark' | 'light',
+  _kind: 'dark' | 'light',
   accent: string,
   secondary: string,
   tertiary: string,
@@ -98,7 +100,7 @@ function chatFromPalette(
   return {
     // Keep chat user bubble = theme accent so swatches match what you see in chat.
     '--chat-user-bg': accent,
-    '--chat-user-fg': kind === 'light' ? '#ffffff' : '#ffffff',
+    '--chat-user-fg': contrastingText(accent),
     '--chat-user-border': accent,
     '--chat-assistant-bg': secondary,
     '--chat-assistant-fg': textPrimary,
@@ -532,6 +534,9 @@ export function applyTheme(theme: Theme, opts?: { customAccent?: string }): void
   for (const [k, v] of Object.entries(theme.colors)) {
     root.style.setProperty(k, v)
   }
+  root.style.setProperty('--accent-foreground', contrastingText(theme.colors['--accent']))
+  root.style.setProperty('--accent-hover-foreground', contrastingText(theme.colors['--accent-hover']))
+  root.style.setProperty('--error-foreground', contrastingText(theme.colors['--error']))
   // Optional custom accent override (after palette so it wins).
   const ca = (opts?.customAccent || '').trim()
   if (ca && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(ca)) {
@@ -548,8 +553,11 @@ export function applyTheme(theme: Theme, opts?: { customAccent?: string }): void
     const g = Math.max(0, ((n >> 8) & 255) - 18)
     const b = Math.max(0, (n & 255) - 18)
     const hover = `#${[r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('')}`
+    root.style.setProperty('--accent-foreground', contrastingText(ca))
+    root.style.setProperty('--chat-user-fg', contrastingText(ca))
     root.style.setProperty('--accent', ca)
     root.style.setProperty('--accent-hover', hover)
+    root.style.setProperty('--accent-hover-foreground', contrastingText(hover))
     root.style.setProperty('--chat-user-bg', ca)
     root.style.setProperty('--chat-user-border', ca)
   }

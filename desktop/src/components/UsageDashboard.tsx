@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useDialogFocus } from '../hooks/useDialogFocus'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   exportUsageCsv,
   getContinuityDashboard,
@@ -48,12 +49,12 @@ function BarChart({
   return (
     <div className="flex items-end gap-1 h-28 px-1">
       {byDay.map(([day, val]) => (
-        <div key={day} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+        <div key={day} className="flex-1 h-full flex flex-col justify-end items-center gap-1 min-w-0">
           <div
             className="w-full rounded-t"
             title={`${day}: ${valueKey === 'estimated_cost_usd' ? formatCost(val) : formatTokens(val)}`}
             style={{
-              height: `${Math.max(4, Math.round((val / max) * 100))}%`,
+              height: `${Math.max(val > 0 ? 3 : 0, Math.round((val / max) * 88))}px`,
               background: 'var(--accent)',
               opacity: 0.85,
             }}
@@ -74,6 +75,9 @@ export function UsageDashboard({
   provider,
   model,
 }: UsageDashboardProps) {
+  const dialogRef = useDialogFocus<HTMLDivElement>(open, onClose)
+  const loadGeneration = useRef(0)
+  const [loading, setLoading] = useState(false)
   const [range, setRange] = useState(7)
   const [summary, setSummary] = useState<UsageSummary | null>(null)
   const [series, setSeries] = useState<UsageSeriesPoint[]>([])
@@ -83,23 +87,29 @@ export function UsageDashboard({
 
   const load = useCallback(async () => {
     if (!open) return
+    const generation = ++loadGeneration.current
+    setLoading(true)
     setErr(null)
     try {
       const [s, ser, c] = await Promise.all([
         getUsageSummary(range),
-        getUsageSeries(Math.max(range, 14), 'provider'),
+        getUsageSeries(range, 'provider'),
         getContinuityDashboard(sessionId),
       ])
+      if (generation !== loadGeneration.current) return
       setSummary(s)
       setSeries(ser.points || [])
       setContinuity(c)
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
+      if (generation === loadGeneration.current) setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      if (generation === loadGeneration.current) setLoading(false)
     }
   }, [open, range, sessionId])
 
   useEffect(() => {
-    load()
+    void load()
+    return () => { loadGeneration.current += 1 }
   }, [load])
 
   if (!open) return null
@@ -114,12 +124,16 @@ export function UsageDashboard({
       className="fixed inset-0 z-50 flex items-center justify-center p-4 ui-overlay"
       onClick={onClose}
       role="presentation"
+      data-dialog-layer
     >
       <div
         className="ui-surface w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
         style={{ color: 'var(--text-primary)', background: 'var(--bg-primary)' }}
         onClick={(e) => e.stopPropagation()}
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
+        aria-modal="true"
         aria-label="Usage and continuity dashboard"
       >
         <div
@@ -129,7 +143,7 @@ export function UsageDashboard({
           <div>
             <div className="text-sm font-semibold tracking-tight">Usage & Continuity</div>
             <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-              NanoToken multiprovider accounting · harness quality
+              Token use, estimated costs, and conversation health
               {provider ? ` · active ${provider}/${model || '…'}` : ''}
             </div>
           </div>
@@ -138,12 +152,13 @@ export function UsageDashboard({
           </button>
         </div>
 
-        <div className="flex gap-1 px-4 pt-2">
+        <div className="flex flex-wrap gap-2 px-4 pt-2">
           {(['usage', 'continuity'] as const).map((t) => (
             <button
               key={t}
               type="button"
               className={`seg-btn capitalize${tab === t ? ' is-active' : ''}`}
+              aria-pressed={tab === t}
               onClick={() => setTab(t)}
             >
               {t === 'usage' ? 'Usage & cost' : 'Harness'}
@@ -153,6 +168,7 @@ export function UsageDashboard({
             <>
               <select
                 className="ml-auto text-xs rounded px-2 py-1"
+                aria-label="Usage date range"
                 value={range}
                 onChange={(e) => setRange(Number(e.target.value))}
                 style={{
@@ -190,14 +206,16 @@ export function UsageDashboard({
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 overflow-auto p-4 space-y-4" aria-busy={loading}>
+          {loading && <p role="status" className="text-sm" style={{ color: 'var(--text-muted)' }}>Loading usage…</p>}
           {err && (
-            <div className="text-xs rounded px-3 py-2" style={{ background: 'var(--error)', color: '#fff' }}>
+            <div role="alert" className="text-sm rounded px-3 py-2" style={{ background: 'var(--error)', color: 'var(--error-foreground)' }}>
               {err}
+              <button type="button" className="ml-3 underline" disabled={loading} onClick={() => void load()}>Try again</button>
             </div>
           )}
 
-          {tab === 'usage' && summary && (
+          {tab === 'usage' && summary && !loading && !err && (
             <>
               <div className="grid grid-cols-3 gap-2">
                 {[

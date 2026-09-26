@@ -47,11 +47,6 @@ export function showsProcessTrace(_mode?: ToolProcessMode | string): boolean {
   return true
 }
 
-/** @deprecated Full+ removed — always false (dev diagnostics not user-facing). */
-export function showsAdvancedDiagnostics(_mode?: ToolProcessMode | string): boolean {
-  return false
-}
-
 /** After a turn, Full starts expanded; Min/Med start collapsed. */
 export function processDefaultCollapsed(
   mode: ToolProcessMode | string | undefined,

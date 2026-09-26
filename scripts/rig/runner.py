@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
+from dataclasses import asdict
 from pathlib import Path
 
 from .client import RemedyClient
 from .sandbox import Sandbox, make_sandbox
-from .scenarios import Scenario, get_suite
+from .scenarios import Scenario, _jail_target, get_suite
 from .score import Outcome, RunReport, grade, host_info, now_stamp
 
 
@@ -45,7 +47,7 @@ def run_suite(
         started=now_stamp(),
         host=host_info(),
     )
-    started = time.time()
+    started = time.monotonic()
 
     try:
         if owns_sandbox:
@@ -65,11 +67,11 @@ def run_suite(
         client = RemedyClient(sb.base, sb.token)
 
         for scenario in scenarios:
-            outcome = _run_one(client, sb, scenario, provider, model, on_event)
+            outcome = _run_one(client, sb, scenario, provider, model, on_event, out_dir, label)
             report.outcomes.append(outcome)
 
     finally:
-        report.seconds = time.time() - started
+        report.seconds = time.monotonic() - started
         if owns_sandbox:
             if keep:
                 report.notes.append(f"sandbox kept at {sb.root}")
@@ -90,6 +92,8 @@ def _run_one(
     provider: str,
     model: str,
     on_event: Callable[[str], None],
+    out_dir: Path | None = None,
+    label: str = "run",
 ) -> Outcome:
     """Give the scenario its own workspace + session, then grade the turn."""
     ws = sb.workspace / scenario.id
@@ -123,18 +127,20 @@ def _run_one(
 
     turn = client.send(
         session_id,
-        scenario.prompt,
+        scenario.prompt.replace("{jail_target}", str(_jail_target(ws))),
         provider=provider or None,
         model=model or None,
         timeout=scenario.timeout,
     )
-    if turn.status not in ("ok", "error", "timeout"):
-        # Leave nothing generating behind for the next scenario.
+    if turn.status != "ok":
+        # Transport errors do not prove that server-side generation stopped.
         client.abort(session_id)
-
-    if turn.status == "timeout":
-        # Leave nothing generating behind, or the next scenario inherits it.
-        client.abort(session_id)
+    if out_dir:
+        evidence = Path(out_dir) / f"{label}-turns"
+        evidence.mkdir(parents=True, exist_ok=True)
+        (evidence / f"{scenario.id}.json").write_text(
+            json.dumps(asdict(turn), indent=2), encoding="utf-8"
+        )
     outcome = grade(scenario, turn, ws)
     mark = "PASS" if outcome.passed else "FAIL"
     on_event(

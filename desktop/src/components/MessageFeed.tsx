@@ -449,7 +449,7 @@ const MessageBubble = memo(function MessageBubble({
         height: 'var(--chat-avatar)',
         fontSize: isUser && userAv.length > 1 ? '0.55rem' : '0.65rem',
         background: isUser ? 'var(--accent)' : 'var(--error)',
-        color: '#fff',
+        color: isUser ? 'var(--accent-foreground)' : 'var(--error-foreground)',
         border: 'none',
         visibility: hideAvatar ? 'hidden' : 'visible',
       }}
@@ -466,8 +466,8 @@ const MessageBubble = memo(function MessageBubble({
         height: 'var(--chat-avatar)',
         fontSize: partnerAv.length > 1 ? '0.55rem' : '0.65rem',
         // Match user-side avatar style; initials from partner display name
-        background: 'color-mix(in srgb, var(--accent) 55%, var(--bg-tertiary))',
-        color: '#fff',
+        background: 'var(--bg-tertiary)',
+        color: 'var(--text-primary)',
         border: '1px solid var(--border)',
         visibility: hideAvatar ? 'hidden' : 'visible',
       }}
@@ -704,6 +704,7 @@ export function MessageFeed({
     showJump,
     jumpLatest,
   } = useStickToBottom({
+    enabled: messages.some((message) => !message.reverted) || streaming,
     followActive: streaming,
     alwaysOfferJump: messages.length > 2 || streaming,
     reattachKey: `${lastUserMsgId ?? ''}:${stickNonce}`,
@@ -797,7 +798,7 @@ export function MessageFeed({
             <strong>Plan mode</strong>
             {' — '}explore and save a structured plan; shell/file tools unlock in Build
             {' '}
-            <kbd style={{ opacity: 0.85 }}>Ctrl+B</kbd>
+            <kbd style={{ opacity: 0.85 }}>Shift+Tab</kbd>
           </span>
         </div>
       )}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractPlanOptions, stepStatusChip } from './PlanBanner'
+import { extractPlanOptions, stepStatusChip, planSignature } from './PlanBanner'
 
 describe('stepStatusChip', () => {
   it('maps backend step statuses to the four chip kinds', () => {
@@ -37,5 +37,17 @@ describe('extractPlanOptions', () => {
         steps: [{ id: 's', title: 'Do it' }],
       }),
     ).toEqual([])
+  })
+})
+
+describe('plan refresh evidence', () => {
+  it('refreshes edits to content even when id, title, and status stay the same', () => {
+    const plan = { id: 'p', title: 'Plan', status: 'draft', goal: 'Goal', risks: ['Risk'], steps: [{ id: 's', title: 'Step', detail: 'Detail', observed: 'Old result' }] }
+    for (const changed of [
+      { ...plan, goal: 'New goal' },
+      { ...plan, risks: ['Changed risk'] },
+      { ...plan, steps: [{ ...plan.steps[0], detail: 'New detail' }] },
+      { ...plan, steps: [{ ...plan.steps[0], observed: 'Verified result' }] },
+    ]) expect(planSignature(changed)).not.toBe(planSignature(plan))
   })
 })

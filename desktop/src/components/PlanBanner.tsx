@@ -1,3 +1,4 @@
+import { useAsyncScope } from '../hooks/useAsyncScope'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   approvePlan,
@@ -48,9 +49,9 @@ export function extractPlanOptions(plan: TaskPlan | null): string[] {
 }
 
 /** Cheap fingerprint so a changed plan re-renders even when the id is stable. */
-function planSignature(p: TaskPlan | null): string {
-  if (!p) return ''
-  return [p.id, p.status, p.title, (p.steps || []).map((s) => `${s.id}:${s.status || ''}:${s.title}`).join('|')].join('#')
+export function planSignature(p: TaskPlan | null): string {
+  // Detail, risks, and observed evidence can change without a title/status change.
+  return p ? JSON.stringify(p) : ''
 }
 
 /**
@@ -87,10 +88,12 @@ export function PlanBanner({
   onPlanChange?: (plan: TaskPlan | null) => void
 }) {
   const { t } = useI18n()
+  const scope = useAsyncScope(sessionId)
   const [plan, setPlanState] = useState<TaskPlan | null>(null)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const actionBusy = useRef(false)
   const sigRef = useRef('')
   const onPlanChangeRef = useRef(onPlanChange)
   onPlanChangeRef.current = onPlanChange
@@ -104,26 +107,30 @@ export function PlanBanner({
   }, [])
 
   const refresh = useCallback(async () => {
+    if (actionBusy.current) return
     if (!sessionId) {
       setPlan(null)
       return
     }
+    const isCurrent = scope.latest()
     setLoading(true)
     setError(null)
     try {
       // Actionable-only so done/cancelled do not reappear after finish/quit.
       const p = await fetchLatestPlan(sessionId, { actionableOnly: true })
-      setPlan(p)
+      if (isCurrent()) setPlan(p)
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
-  }, [sessionId, setPlan])
+  }, [sessionId, setPlan, scope])
 
   // Session switch: drop chrome immediately (avoid flash of previous plan).
   useEffect(() => {
     setPlan(null)
     setError(null)
-  }, [sessionId, setPlan])
+    setBusy(false)
+    actionBusy.current = false
+  }, [sessionId, setPlan, scope])
 
   // Load when entering Plan mode or after session settles; slow poll in Plan mode.
   useEffect(() => {
@@ -153,37 +160,45 @@ export function PlanBanner({
   const doneCount = steps.filter((s) => stepStatusChip(s.status).key === 'done').length
 
   const handleApprove = async (edit: boolean) => {
-    if (!plan?.id || locked || !isPlanActionable(status)) return
+    if (!plan?.id || locked || actionBusy.current || !isPlanActionable(status)) return
+    actionBusy.current = true
+    scope.latest() // discard reads started before this decision
+    const isCurrent = scope.capture()
     setBusy(true)
     setError(null)
     try {
       // Persist approval for drafts; already-approved/active just enter Build.
       if (status === 'draft') {
         const updated = await approvePlan(plan.id)
+        if (!isCurrent()) return
         if (updated) setPlan(updated)
       }
-      onApproveBuild({ edit })
+      if (isCurrent()) onApproveBuild({ edit })
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not approve plan')
+      if (isCurrent()) setError(e instanceof Error ? e.message : 'Could not approve plan')
     } finally {
-      setBusy(false)
+      if (isCurrent()) { actionBusy.current = false; setBusy(false) }
     }
   }
 
   const handleCancel = async () => {
-    if (busy) return
+    if (busy || actionBusy.current) return
+    actionBusy.current = true
+    scope.latest() // discard reads started before this decision
+    const isCurrent = scope.capture()
     setBusy(true)
     setError(null)
     try {
       if (plan?.id) {
         await cancelPlan(plan.id)
       }
+      if (!isCurrent()) return
       setPlan(null)
       onCancelled?.()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not cancel plan')
+      if (isCurrent()) setError(e instanceof Error ? e.message : 'Could not cancel plan')
     } finally {
-      setBusy(false)
+      if (isCurrent()) { actionBusy.current = false; setBusy(false) }
     }
   }
 

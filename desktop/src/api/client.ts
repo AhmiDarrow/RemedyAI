@@ -40,6 +40,7 @@ export function getServerUrl(): string {
   return resolveServerUrl()
 }
 
+let _tokenGeneration = 0
 let _apiToken: string | null = null
 let _tokenPromise: Promise<string | null> | null = null
 
@@ -57,6 +58,7 @@ function getApiBase(): string {
 }
 /** Clear cached token so the next call re-bootstraps (e.g. after server restart). */
 export function clearApiToken(): void {
+  _tokenGeneration += 1
   _apiToken = null
   _tokenPromise = null
 }
@@ -66,18 +68,27 @@ export async function ensureApiToken(): Promise<string | null> {
   if (_apiToken) return _apiToken
   if (_tokenPromise) return _tokenPromise
 
+  const generation = _tokenGeneration
   _tokenPromise = (async () => {
     // Prefer OS/desktop IPC (no HTTP bootstrap) when running inside Tauri.
     try {
       if (inTauriShell()) {
         const { invoke } = await import('@tauri-apps/api/core')
-        const t = await invoke<string>('get_local_api_token')
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 3000)
+        let t: string
+        try {
+          t = await waitWithAbort(invoke<string>('get_local_api_token'), controller.signal)
+        } finally {
+          clearTimeout(timer)
+        }
         // Reject sealed DPAPI envelopes if an older host returned the raw file
         // instead of decrypting — fall through to loopback bootstrap.
         const trimmed = (t || '').trim()
         const looksSealed =
           trimmed.startsWith('{')
           && (trimmed.includes('"dpapi"') || trimmed.includes('"encoding"'))
+        if (generation !== _tokenGeneration) return null
         if (trimmed.length >= 16 && !looksSealed) {
           _apiToken = trimmed
           return _apiToken
@@ -94,43 +105,47 @@ export async function ensureApiToken(): Promise<string | null> {
       if (typeof window !== 'undefined') {
         const origin = window.location.origin || ''
         // Same-origin when SPA is served by the local API (any port).
-        if (
-          /https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin)
-          || origin.includes('127.0.0.1:')
-          || origin.includes('localhost:')
-        ) {
-          // Prefer API origin, not Vite :517x (bootstrap is on the FastAPI host).
-          if (!origin.includes(':517') && !origin.includes(':1420')) {
-            bootstrapUrls.push(`${origin}/api/auth/local-bootstrap`)
-          }
+        if (/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(origin)) {
+          // Vite proxies /api too. Same-origin bootstrap works at every dev
+          // port without requiring extra CORS origins on the runtime.
+          bootstrapUrls.push(`${origin}/api/auth/local-bootstrap`)
         }
       }
       bootstrapUrls.push(`${getServerUrl()}/api/auth/local-bootstrap`)
-      for (const url of bootstrapUrls) {
+      for (const url of new Set(bootstrapUrls)) {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 3000)
         try {
           const r = await fetch(url, {
+            signal: controller.signal,
             headers: { Accept: 'application/json' },
           })
           if (r.ok) {
             const data = (await r.json()) as { token?: string }
-            if (data.token) {
-              _apiToken = data.token
+            if (generation !== _tokenGeneration) return null
+            if (typeof data.token === 'string' && data.token.trim().length >= 16) {
+              _apiToken = data.token.trim()
               return _apiToken
             }
           }
         } catch {
           /* try next URL */
+        } finally {
+          clearTimeout(timer)
         }
       }
     } catch {
       /* server may still be starting */
     }
     // Allow retry on next call (do not cache permanent failure)
-    _tokenPromise = null
+    if (generation === _tokenGeneration) _tokenPromise = null
     return null
   })()
 
-  return _tokenPromise
+  const pending = _tokenPromise
+  const settled = () => { if (_tokenPromise === pending) _tokenPromise = null }
+  void pending.then(settled, settled)
+  return pending
 }
 
 export function authHeaders(): Record<string, string> {
@@ -210,95 +225,67 @@ export async function waitForLocalApi(maxMs = 15000): Promise<boolean> {
   return healthCheck(1500)
 }
 
+/** Cancel waiting for shared work without cancelling another request's work. */
+function waitWithAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const aborted = () => reject(signal.reason ?? new DOMException('Request cancelled', 'AbortError'))
+    if (signal.aborted) { aborted(); return }
+    signal.addEventListener('abort', aborted, { once: true })
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', aborted))
+  })
+}
+
 export async function apiFetch<T = unknown>(
   path: string,
   options: FetchOptions = {},
 ): Promise<T> {
-  const { timeout = 30000, ...fetchOpts } = options
-
-  // Retry token bootstrap a few times — first-run can race the sidecar.
-  let token = await ensureApiToken()
-  if (!token) {
-    for (let i = 0; i < 4 && !token; i++) {
-      await new Promise((r) => setTimeout(r, 200 * (i + 1)))
-      clearApiToken()
-      token = await ensureApiToken()
-    }
-  }
-
+  const { timeout = 30000, signal: callerSignal, ...fetchOpts } = options
   const controller = new AbortController()
+  const abort = () => controller.abort(callerSignal?.reason)
+  if (callerSignal?.aborted) abort()
+  else callerSignal?.addEventListener('abort', abort, { once: true })
   const timeoutId = setTimeout(() => controller.abort(), timeout)
-
+  const wait = <V,>(work: Promise<V>) => waitWithAbort(work, controller.signal)
+  const request = () => {
+    controller.signal.throwIfAborted()
+    const headers = new Headers({ 'Content-Type': 'application/json', ...authHeaders() })
+    new Headers(fetchOpts.headers).forEach((value, key) => headers.set(key, value))
+    return fetch(`${getApiBase()}${path}`, { ...fetchOpts, signal: controller.signal, headers })
+  }
   try {
-    let res: Response
-    try {
-      res = await fetch(`${getApiBase()}${path}`, {
-        ...fetchOpts,
-        signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          ...authHeaders(),
-          ...fetchOpts.headers,
-        },
-      })
-    } catch (e: unknown) {
-      const name = e instanceof Error ? e.name : ''
-      if (name === 'AbortError') {
-        throw new ApiError(0, `Request timed out after ${timeout}ms (${path})`)
-      }
-      const msg = e instanceof Error ? e.message : String(e)
-      // "Failed to fetch" is also what Chromium reports for CORS preflight failures
-      // (auth middleware blocking OPTIONS used to look like a dead server).
-      const unreachable =
-        msg.includes('Failed to fetch')
-        || msg.includes('NetworkError')
-        || msg.includes('Load failed')
-      throw new ApiError(
-        0,
-        unreachable
-          ? `Cannot reach local API at ${getServerUrl()} (${path}). `
-            + 'Is the server running? If setup just opened, wait a second and retry. '
-            + 'Use Retry on the splash if the local server failed to start.'
-          : msg || `Network error (${path})`,
-      )
+    controller.signal.throwIfAborted()
+    // The overall deadline includes bootstrap and retries, not just fetch.
+    let token = await wait(ensureApiToken())
+    for (let i = 0; i < 4 && !token; i++) {
+      await wait(new Promise((resolve) => setTimeout(resolve, 200 * (i + 1))))
+      controller.signal.throwIfAborted()
+      token = await wait(ensureApiToken())
     }
-
-    // One retry after re-bootstrap on 401 (token rotated after wipe/reinstall)
+    let res = await request()
     if (res.status === 401) {
       clearApiToken()
-      await ensureApiToken()
-      try {
-        res = await fetch(`${getApiBase()}${path}`, {
-          ...fetchOpts,
-          signal: controller.signal,
-          headers: {
-            'Content-Type': 'application/json',
-            ...authHeaders(),
-            ...fetchOpts.headers,
-          },
-        })
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e)
-        throw new ApiError(
-          0,
-          msg.includes('Failed to fetch')
-            ? `Cannot reach local API at ${getServerUrl()} (${path}). Is the server running?`
-            : msg || `Network error (${path})`,
-        )
-      }
+      await wait(ensureApiToken())
+      res = await request()
     }
-
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
-      throw new ApiError(
-        res.status,
-        formatApiErrorBody(body, res.statusText || `HTTP ${res.status}`),
-      )
+      controller.signal.throwIfAborted()
+      throw new ApiError(res.status, formatApiErrorBody(body, res.statusText || `HTTP ${res.status}`))
     }
-
+    if (res.status === 204) return undefined as T
     return (await res.json()) as T
+  } catch (error: unknown) {
+    if (callerSignal?.aborted) throw callerSignal.reason ?? new DOMException('Request cancelled', 'AbortError')
+    if (controller.signal.aborted) throw new ApiError(0, `Request timed out after ${timeout}ms (${path})`)
+    if (error instanceof ApiError) throw error
+    const message = error instanceof Error ? error.message : String(error)
+    const unreachable = /failed to fetch|network\s?error|load failed/i.test(message)
+    throw new ApiError(0, unreachable
+      ? `Cannot reach local API at ${getServerUrl()} (${path}). Check the connection and try again.`
+      : message || `Network error (${path})`)
   } finally {
     clearTimeout(timeoutId)
+    callerSignal?.removeEventListener('abort', abort)
   }
 }
 

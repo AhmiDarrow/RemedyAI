@@ -674,7 +674,7 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
                     type="button"
                     onClick={() => onInstallUpdate?.()}
                     className="w-full mt-2 py-2 rounded text-xs font-semibold"
-                    style={{ background: 'var(--accent)', color: '#fff' }}
+                    style={{ background: 'var(--accent)', color: 'var(--accent-foreground)' }}
                   >
                     Update & Relaunch
                   </button>

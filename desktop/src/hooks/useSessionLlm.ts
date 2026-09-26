@@ -58,6 +58,12 @@ export function useSessionLlm(opts: {
     Record<string, SessionLlmBind>
   >({})
   const [switchToast, setSwitchToast] = useState<string | null>(null)
+  const activeIdRef = useRef(activeId)
+  activeIdRef.current = activeId
+  const pendingSwitches = useRef(new Set<string>())
+  const [switchingKeys, setSwitchingKeys] = useState<ReadonlySet<string>>(new Set())
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current) }, [])
 
   /**
    * Authoritative per-session LLM binds. Status bar + send() read this only.
@@ -73,12 +79,12 @@ export function useSessionLlm(opts: {
         if (cur?.provider === p && cur?.model === m) return prev
         return { ...prev, [sessionId]: { provider: p, model: m } }
       })
-      if (sessionId === activeId) {
+      if (sessionId === activeIdRef.current) {
         setLlmProvider(p)
         setModel(m)
       }
     },
-    [activeId],
+    [],
   )
 
   // Seed map from server for tabs that have never been bound locally.
@@ -126,12 +132,20 @@ export function useSessionLlm(opts: {
     return model
   }, [activeId, sessionLlmMap, model])
 
+  const activeProviderRef = useRef(barProvider || llmProvider)
+  activeProviderRef.current = barProvider || llmProvider
+  const modelRequests = useRef(new Map<string, number>())
+
   /** Refresh model list via GET /models[?provider=…] (live endpoint discovery). */
   const refreshModels = useCallback(
     async (opts?: { selectDefault?: boolean; provider?: string }) => {
       const want = (opts?.provider || llmProvider || '').toLowerCase()
+      const request = (modelRequests.current.get(want) ?? 0) + 1
+      modelRequests.current.set(want, request)
+      const sessionAtStart = activeIdRef.current
       try {
         const data = await fetchModels(want || undefined)
+        if (modelRequests.current.get(want) !== request) return null
         const activeProv = data.provider || want
         const list: ModelInfo[] = data.models.map((m) => ({
           id: m.id,
@@ -145,15 +159,17 @@ export function useSessionLlm(opts: {
           return [...list, ...others]
         })
         const disc = data.discovery || null
-        setModelsDiscovery(disc)
-        setModelsError(
-          disc && disc.attempted && !disc.ok
-            ? `Couldn't list models from ${disc.url || activeProv}: ${
-                disc.error || (disc.status != null ? `HTTP ${disc.status}` : 'no response')
-              }`
-            : null,
-        )
-        if (opts?.selectDefault) {
+        if (activeProviderRef.current.toLowerCase() === want) {
+          setModelsDiscovery(disc)
+          setModelsError(
+            disc && disc.attempted && !disc.ok
+              ? `Couldn't list models from ${disc.url || activeProv}: ${
+                  disc.error || (disc.status != null ? `HTTP ${disc.status}` : 'no response')
+                }`
+              : null,
+          )
+        }
+        if (opts?.selectDefault && activeIdRef.current === sessionAtStart && activeProviderRef.current.toLowerCase() === want) {
           const next = pickDefaultModel('', list, data.default)
           if (next) setModel(next)
         }
@@ -161,7 +177,9 @@ export function useSessionLlm(opts: {
       } catch (e: unknown) {
         // Keep the prior list; surface the failure instead of only logging it.
         const msg = e instanceof Error ? e.message : String(e)
-        setModelsError(`Model list unavailable${want ? ` for ${want}` : ''}: ${msg}`)
+        if (modelRequests.current.get(want) === request && activeProviderRef.current.toLowerCase() === want) {
+          setModelsError(`Model list unavailable${want ? ` for ${want}` : ''}: ${msg}`)
+        }
         console.warn('Model refresh failed:', msg)
         return null
       }
@@ -172,7 +190,8 @@ export function useSessionLlm(opts: {
   const showSwitchToast = useCallback((toast: string | null | undefined) => {
     if (!toast) return
     setSwitchToast(toast)
-    window.setTimeout(() => setSwitchToast(null), 4200)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setSwitchToast(null), 4200)
   }, [])
 
   const refreshConnected = useCallback(async () => {
@@ -184,6 +203,59 @@ export function useSessionLlm(opts: {
       return null
     }
   }, [])
+
+  const onProviderModelChange = useCallback(
+    (prov: string, mid: string) => {
+      if (streaming || !prov) return
+      const sessionId = activeId
+      const key = sessionId ?? '__default__'
+      if (pendingSwitches.current.has(key)) {
+        showSwitchToast('Finishing the previous model change…')
+        return
+      }
+      pendingSwitches.current.add(key)
+      setSwitchingKeys(new Set(pendingSwitches.current))
+      const modelId = (mid || '').trim()
+      void (async () => {
+        try {
+          if (sessionId) {
+            const result = await applySessionLlm(sessionId, prov, modelId || undefined, false)
+            // Only confirmed binds enter the send path. A late result updates its
+            // own session cache; setSessionBind never changes another tab's bar.
+            setSessionBind(sessionId, result.provider || prov, result.model || modelId)
+            if (activeIdRef.current === sessionId) showSwitchToast(result.toast || 'Model updated')
+          } else {
+            const result = await updateSettings({
+              llm_provider: prov,
+              ...(modelId ? { llm_model: modelId } : {}),
+            })
+            if (activeIdRef.current === null) {
+              setLlmProvider(result.llm_provider || prov)
+              setModel(result.llm_model || modelId)
+              showSwitchToast('Default model updated')
+            }
+          }
+          void refreshModels({ provider: prov })
+          void refreshConnected()
+        } catch (error: unknown) {
+          if (activeIdRef.current === sessionId) {
+            const message = error instanceof Error ? error.message : String(error)
+            showSwitchToast(message || 'Could not confirm the model change. Check the connection and retry.')
+          }
+        } finally {
+          pendingSwitches.current.delete(key)
+          setSwitchingKeys(new Set(pendingSwitches.current))
+        }
+      })()
+    },
+    [streaming, activeId, setSessionBind, refreshModels, refreshConnected, showSwitchToast],
+  )
+
+  const onModelChange = useCallback(
+    (id: string) => onProviderModelChange(barProvider || llmProvider, id),
+    [barProvider, llmProvider, onProviderModelChange],
+  )
+
 
   const refreshModelsRef = useRef(refreshModels)
   refreshModelsRef.current = refreshModels
@@ -221,6 +293,8 @@ export function useSessionLlm(opts: {
     const p = (barProvider || llmProvider || '').trim()
     if (!p || fetchedModelsFor.current === p) return
     fetchedModelsFor.current = p
+    setModelsError(null)
+    setModelsDiscovery(null)
     void refreshModels({ provider: p })
   }, [apiReady, barProvider, llmProvider, refreshModels])
 
@@ -241,21 +315,7 @@ export function useSessionLlm(opts: {
         showSwitchToast(`RMB loaded ${stem} — switch provider to use it`)
         return
       }
-      setLlmProvider('rmb')
-      setModel(stem)
-      if (activeId) {
-        setSessionBind(activeId, 'rmb', stem)
-        void applySessionLlm(activeId, 'rmb', stem, false).catch(() => {})
-      } else {
-        void updateSettings({
-          llm_provider: 'rmb',
-          llm_model: stem,
-          llm_base_url: 'http://127.0.0.1:8787/v1',
-        }).catch(() => {})
-      }
-      void refreshModels({ provider: 'rmb' }).catch(() => {})
-      void refreshConnected()
-      showSwitchToast(`Now using ${stem}`)
+      onProviderModelChange('rmb', stem)
     }
     window.addEventListener('remedy:rmb-model-changed', onRmb)
     return () => window.removeEventListener('remedy:rmb-model-changed', onRmb)
@@ -269,6 +329,7 @@ export function useSessionLlm(opts: {
     refreshModels,
     refreshConnected,
     showSwitchToast,
+    onProviderModelChange,
   ])
 
   // While on RMB, periodically adopt the host's Loaded GGUF (no user action)
@@ -313,74 +374,9 @@ export function useSessionLlm(opts: {
     refreshConnected,
   ])
 
-  const onProviderModelChange = useCallback(
-    (prov: string, mid: string) => {
-      if (streaming) return
-      const modelId = (mid || '').trim()
-      if (!prov) return
-      if (!activeId) {
-        setLlmProvider(prov)
-        if (modelId) setModel(modelId)
-        void updateSettings({
-          llm_provider: prov,
-          ...(modelId ? { llm_model: modelId } : {}),
-        }).catch((e: unknown) => {
-          const msg = e instanceof Error ? e.message : String(e)
-          showSwitchToast(msg || 'Could not save provider')
-        })
-        void refreshModels({ provider: prov })
-        void refreshConnected()
-        return
-      }
-      if (modelId) setSessionBind(activeId, prov, modelId)
-      else {
-        setLlmProvider(prov)
-      }
-      void applySessionLlm(activeId, prov, modelId || undefined, false)
-        .then(async (r) => {
-          // After RMB GGUF switch, server may return the resolved stem
-          const resolved = (r as { model?: string; provider?: string })?.model
-          if (resolved && prov === 'rmb') {
-            setSessionBind(activeId, 'rmb', resolved)
-            setModel(resolved)
-          }
-          showSwitchToast(r.toast)
-          await refreshModels({ provider: prov })
-          await refreshConnected()
-        })
-        .catch((e: unknown) => {
-          const msg = e instanceof Error ? e.message : String(e)
-          showSwitchToast(msg || 'Could not switch provider')
-        })
-    },
-    [
-      streaming,
-      activeId,
-      setSessionBind,
-      refreshModels,
-      refreshConnected,
-      showSwitchToast,
-    ],
-  )
-
-  const onModelChange = useCallback(
-    (id: string) => {
-      if (streaming) return
-      if (!activeId) {
-        setModel(id)
-        void updateSettings({ llm_model: id }).catch(() => {})
-        return
-      }
-      const prov = barProvider || llmProvider
-      setSessionBind(activeId, prov, id)
-      void applySessionLlm(activeId, prov, id, false)
-        .then((r) => showSwitchToast(r.toast))
-        .catch(() => {})
-    },
-    [streaming, activeId, barProvider, llmProvider, setSessionBind, showSwitchToast],
-  )
 
   return {
+    modelSwitching: switchingKeys.has(activeId ?? '__default__'),
     model,
     setModel,
     llmProvider,

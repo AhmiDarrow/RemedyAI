@@ -310,7 +310,10 @@ type Engine struct {
 	ApprovalGate ApprovalGate
 	EpochHook    EpochHook
 	ContinueGate ContinueGate
-	Now          func() time.Time
+	// DrainGuidance supplies owner steering at round boundaries. It is
+	// appended to the authoritative transcript before compaction and retries.
+	DrainGuidance func() []string
+	Now           func() time.Time
 }
 
 // Run drives a turn from a plain goal string (one user message).
@@ -378,6 +381,13 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 	var outcomeLedger []string
 
 	for iteration := 1; iteration <= config.MaxIterations; iteration++ {
+		if e.DrainGuidance != nil {
+			for _, guidance := range e.DrainGuidance() {
+				if strings.TrimSpace(guidance) != "" {
+					transcript = append(transcript, UserText("[Owner mid-turn guidance]\n"+guidance))
+				}
+			}
+		}
 		trace(StateObserve, iteration, "assemble transcript")
 		if est := estimateTokens(transcript); est > budget {
 			before := len(transcript)
@@ -399,7 +409,20 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 		var calls []ToolCall
 		completed := false
 		truncated := false
-		for event := range events {
+	streamEvents:
+		for {
+			var event ModelEvent
+			select {
+			case <-ctx.Done():
+				out.Err = ctx.Err()
+				trace(StateFailed, iteration, out.Err.Error())
+				return out
+			case next, open := <-events:
+				if !open {
+					break streamEvents
+				}
+				event = next
+			}
 			text.WriteString(event.Text)
 			thinking.WriteString(event.Thinking)
 			completed = completed || event.Done
@@ -435,7 +458,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 			transcript = appendAssistant(transcript, thinking.String(), roundText, nil)
 			if truncated && lengthContinues < config.MaxLengthContinues {
 				lengthContinues++
-				transcript = append(transcript, UserText(
+				transcript = append(transcript, contextNote(
 					"[Continue] Your output hit the length limit — pick up exactly where you left off. "+
 						"Do not restart, do not renumber, do not repeat what you already wrote."))
 				trace(StateUpdate, iteration, "length auto-continue")
@@ -451,7 +474,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 					if strings.TrimSpace(nudge) == "" {
 						nudge = "Work is unfinished — call tools now via the function-calling API. Do not narrate; execute."
 					}
-					transcript = append(transcript, UserText("[Re-arm] "+strings.TrimSpace(nudge)))
+					transcript = append(transcript, contextNote("[Re-arm] "+strings.TrimSpace(nudge)))
 					trace(StateUpdate, iteration, fmt.Sprintf("unfinished re-arm %d", rearmCount))
 					continue
 				}
@@ -498,7 +521,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 				// of the transcript (they would be unanswered tool calls); the
 				// nudge names them instead.
 				transcript = appendAssistant(transcript, thinking.String(), roundText, nil)
-				transcript = append(transcript, UserText(
+				transcript = append(transcript, contextNote(
 					"[Nudge] You just asked for the same tools again with the same arguments ("+
 						batchPreview(calls)+") and nothing changed. That batch was not run. "+
 						"Change approach: read a different path, edit the failing file, run a verify "+
@@ -546,30 +569,37 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 
 		allowed := callsWith(calls, decisions, Allow)
 		trace(StateAct, iteration, fmt.Sprintf("execute %d tools", len(allowed)))
-		results := capResults(e.executeDecided(ctx, calls, decisions, config.MaxParallelTools), config.MaxResultChars)
+		results := e.executeDecided(ctx, calls, decisions, config.MaxParallelTools)
 		out.Results = results
+		modelResults := capResults(results, config.MaxResultChars)
 
 		// One user message carrying every result in call order — never dropped.
 		blocks := make([]Block, 0, len(calls))
 		for i, call := range calls {
-			blocks = append(blocks, resultBlocks(call, results[i]))
+			blocks = append(blocks, resultBlocks(call, modelResults[i]))
 		}
 		transcript = append(transcript, Message{Role: RoleUser, Blocks: blocks})
 		appendOutcomes(&outcomeLedger, results, config.KeepLastResults)
 
-		// Evidence: a mutation invalidates the last green verify; a passing
-		// verify restores it. The ContinueGate reads this at completion time.
+		// Tools in a batch run concurrently. A check in the same batch as a
+		// mutation cannot prove the resulting state; every check in a batch
+		// must pass before verification is restored.
+		mutated, checked, allGreen := false, false, true
 		for i, call := range calls {
 			switch ClassifyTool(call.Name) {
 			case ToolMutate:
 				if results[i].Err == "" && !results[i].IsError {
-					verifySeen = false
+					mutated = true
 				}
 			case ToolVerify:
-				if resultLooksGreen(results[i]) {
-					verifySeen = true
-				}
+				checked = true
+				allGreen = allGreen && resultLooksGreen(results[i])
 			}
+		}
+		if mutated {
+			verifySeen = false
+		} else if checked {
+			verifySeen = allGreen
 		}
 		trace(StateUpdate, iteration, fmt.Sprintf("append %d tool results", len(results)))
 
@@ -685,6 +715,24 @@ func capResults(results []ToolResult, maxChars int) []ToolResult {
 	for i, r := range results {
 		out[i] = r
 		out[i].Output = clipBytes(r.Output, maxChars)
+		// Clipping JSON as text destroys machine-readable command evidence.
+		// Retain completion metadata beside a bounded preview, while the
+		// continuation gate receives the original, complete result above.
+		if len(r.Output) > maxChars {
+			var body map[string]json.RawMessage
+			if json.Unmarshal(r.Output, &body) == nil && body != nil {
+				preview := map[string]any{
+					"truncated":      true,
+					"output_preview": string(out[i].Output),
+				}
+				for _, key := range []string{"exit_code", "timed_out", "status", "job_id", "path", "offset", "next_offset", "total_lines", "count"} {
+					if value, ok := body[key]; ok && len(value) <= 256 {
+						preview[key] = value
+					}
+				}
+				out[i].Output, _ = json.Marshal(preview)
+			}
+		}
 	}
 	return out
 }
@@ -783,11 +831,20 @@ func (e *Engine) executeDecided(ctx context.Context, calls []ToolCall, decisions
 			results[i] = ToolResult{ID: call.ID, Name: call.Name, Err: "policy denied", IsError: true}
 			continue
 		}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			results[i] = ToolResult{ID: call.ID, Name: call.Name, Err: ctx.Err().Error(), IsError: true}
+			continue
+		}
 		wg.Add(1)
-		sem <- struct{}{}
 		go func(i int, call ToolCall) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			if err := ctx.Err(); err != nil {
+				results[i] = ToolResult{ID: call.ID, Name: call.Name, Err: err.Error(), IsError: true}
+				return
+			}
 			if e.Tools == nil {
 				results[i] = ToolResult{ID: call.ID, Name: call.Name, Err: "no tool executor", IsError: true}
 				return
@@ -802,6 +859,9 @@ func (e *Engine) executeDecided(ctx context.Context, calls []ToolCall, decisions
 func (e *Engine) streamWithRetry(ctx context.Context, turn Turn, config Config) (<-chan ModelEvent, error) {
 	var err error
 	for attempt := 0; attempt <= config.ModelRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		var events <-chan ModelEvent
 		events, err = e.Model.Stream(ctx, turn)
 		if err == nil {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 interface SettingsSectionProps {
   id: string
@@ -30,6 +30,7 @@ export function SettingsSection({
   children,
 }: SettingsSectionProps) {
   const [open, setOpen] = useState(defaultOpen)
+  const contentId = useId()
   // Track the last force directive we actually applied. A persistent
   // `forceOpen === true` must NOT re-open a section the user just collapsed:
   // the old effect depended on `onOpenChange` (a fresh function every parent
@@ -69,6 +70,7 @@ export function SettingsSection({
         onClick={toggle}
         className="settings-section-head w-full flex items-center gap-2 px-3 py-2 text-left"
         aria-expanded={open}
+        aria-controls={open ? contentId : undefined}
       >
         <span className="settings-section-chevron" aria-hidden>
           {open ? '▾' : '▸'}
@@ -81,7 +83,7 @@ export function SettingsSection({
         </span>
       </button>
       {open && (
-        <div className="settings-section-body px-3 pb-3 pt-1.5 space-y-2 text-xs">
+        <div id={contentId} className="settings-section-body px-3 pb-3 pt-1.5 space-y-2 text-xs">
           {children}
         </div>
       )}

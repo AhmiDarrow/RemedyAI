@@ -47,6 +47,8 @@ export function HiveInspector({ open }: { open: boolean }) {
       if (!res.ok) setErr(res.error || 'retire failed')
       setPending(null)
       await load()
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : 'Could not retire this helper. Try again.')
     } finally {
       setBusy(false)
     }

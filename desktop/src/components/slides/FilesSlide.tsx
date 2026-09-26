@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { apiFetch } from '../../api/client'
 import { isTauri, tauriInvoke } from '../../api/tauri'
 import { FILES_SET_PATH_EVENT, takePendingFilesPath } from '../../workspace/railNav'
 import { EmptyState } from '../EmptyState'
+import { absoluteFilePath, parentFilePath } from '../../utils/filePaths'
 
 type Entry = { name: string; path: string; is_dir: boolean }
 
@@ -28,6 +29,7 @@ export function FilesSlide({
   const [focusIdx, setFocusIdx] = useState(-1)
   const statusTimer = useRef<number | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
+  const listId = useId()
   /** Ignore out-of-order /files responses after session or path thrash. */
   const loadGen = useRef(0)
 
@@ -114,20 +116,11 @@ export function FilesSlide({
     return () => window.removeEventListener(FILES_SET_PATH_EVENT, onSet)
   }, [load])
 
-  const absPath = (rel: string) => {
-    if (!root) return rel
-    if (/^[A-Za-z]:[\\/]/.test(rel) || rel.startsWith('\\\\')) return rel
-    const sep = root.includes('\\') ? '\\' : '/'
-    const base = root.replace(/[/\\]+$/, '')
-    const tail = rel.replace(/^\.?[/\\]/, '')
-    return `${base}${sep}${tail.replace(/\//g, sep)}`
-  }
+  const absPath = (rel: string) => absoluteFilePath(root, rel)
 
   const goUp = () => {
     if (!path || path === '.') return
-    const parts = path.replace(/\\/g, '/').split('/').filter(Boolean)
-    parts.pop()
-    void load(parts.length ? parts.join('/') : '.')
+    void load(parentFilePath(path))
   }
 
   const openEntry = async (f: Entry) => {
@@ -137,7 +130,7 @@ export function FilesSlide({
       return
     }
     const full = absPath(f.path)
-    flashStatus(`Opening ${f.name}…`, 1500)
+    flashStatus(isTauri() ? `Opening ${f.name}…` : `Copying path for ${f.name}…`, 1500)
     try {
       if (isTauri()) {
         try {
@@ -148,8 +141,8 @@ export function FilesSlide({
           throw new Error('open failed')
         }
       }
-      window.open(`file:///${full.replace(/\\/g, '/')}`, '_blank')
-      flashStatus(`Opened ${f.name}`)
+      await navigator.clipboard.writeText(full)
+      flashStatus('Path copied. Paste it into your file manager to open this file; browsers cannot open local files directly.', 7000)
     } catch (e: unknown) {
       flashStatus(e instanceof Error ? e.message : String(e), 4000)
     }
@@ -176,12 +169,13 @@ export function FilesSlide({
 
   const dirCount = visible.filter((f) => f.is_dir).length
   const fileCount = visible.length - dirCount
-  const canGoUp = Boolean(path && path !== '.')
+  const canGoUp = Boolean(path && path !== '.' && parentFilePath(path) !== path.replace(/\\/g, '/'))
   const rootLabel = root
     ? root.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || root
     : 'Project files'
 
   const onListKeyDown = (e: KeyboardEvent) => {
+    if (e.nativeEvent.isComposing || e.target !== e.currentTarget || loading) return
     if (!visible.length) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -243,6 +237,7 @@ export function FilesSlide({
           value={path}
           onChange={(e) => setPath(e.target.value)}
           onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return
             if (e.key === 'Enter') void load(path || '.')
             if (e.key === 'Escape') e.currentTarget.blur()
           }}
@@ -278,10 +273,13 @@ export function FilesSlide({
             setFocusIdx(0)
           }}
           onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return
             if (e.key === 'Escape' && filter) {
               e.preventDefault()
               setFilter('')
             } else if (e.key === 'ArrowDown' || e.key === 'Enter') {
+              e.preventDefault()
+              setFocusIdx(0)
               // Hand off focus into the list
               listRef.current?.focus()
               if (e.key === 'Enter' && visible[0]) void openEntry(visible[0])
@@ -301,7 +299,7 @@ export function FilesSlide({
       </div>
       {status ? (
         <div
-          className="px-2 py-0.5 truncate shrink-0"
+          className="px-2 py-1 shrink-0 break-words"
           style={{ color: 'var(--text-muted)' }}
           role="status"
           title={status}
@@ -315,6 +313,8 @@ export function FilesSlide({
         tabIndex={0}
         role="listbox"
         aria-label="Files"
+        aria-busy={loading}
+        aria-activedescendant={focusIdx >= 0 ? `${listId}-${focusIdx}` : undefined}
         onKeyDown={onListKeyDown}
       >
         {loading && files.length === 0 && (
@@ -352,6 +352,7 @@ export function FilesSlide({
           visible.map((f, i) => (
             <div
               key={f.path}
+              id={`${listId}-${i}`}
               className={`files-row flex items-center gap-0.5 px-1 group${
                 i === focusIdx ? ' is-focused' : ''
               }`}
@@ -403,7 +404,7 @@ export function FilesSlide({
         style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
       >
         <span className="truncate flex-1">
-          ↑↓ open · drag into chat · filter
+          {isTauri() ? '↑↓ navigate · Enter open' : '↑↓ navigate · Enter copy file path'}
         </span>
         {!loading && !error && visible.length > 0 && (
           <span className="shrink-0 tabular-nums" title="Folders / files">

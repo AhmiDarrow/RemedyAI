@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect, useRef, type KeyboardEvent } from 'react'
+import { useDialogFocus } from '../hooks/useDialogFocus'
+import { useState, useCallback, useEffect, useRef, useId, type KeyboardEvent } from 'react'
 import { browserStackHold } from '../utils/browserStack'
 import { EmptyState } from './EmptyState'
 
@@ -22,6 +23,8 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
+  const dialogRef = useDialogFocus<HTMLDivElement>(open, onClose, inputRef)
+  const listId = useId()
   const q = query.trim().toLowerCase()
   const filtered = q
     ? commands.filter(
@@ -38,10 +41,6 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
   useEffect(() => {
     setIdx(0)
     setQuery('')
-    if (open) {
-      const t = window.setTimeout(() => inputRef.current?.focus(), 40)
-      return () => window.clearTimeout(t)
-    }
   }, [open])
 
   useEffect(() => {
@@ -79,6 +78,7 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      if (e.nativeEvent.isComposing) return
       const n = Math.max(visible.length, 1)
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -110,10 +110,13 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
       className="fixed inset-0 z-50 flex items-start justify-center pt-[14vh] px-4 ui-overlay"
       onClick={onClose}
       role="presentation"
+      data-dialog-layer
     >
       <div
         className="command-palette ui-surface w-full max-w-[560px] max-h-[62vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
@@ -139,7 +142,11 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
             className="flex-1 outline-none text-sm bg-transparent"
             style={{ color: 'var(--text-primary)' }}
             aria-label="Search commands"
-            aria-controls="command-palette-list"
+            role="combobox"
+            aria-expanded="true"
+            aria-autocomplete="list"
+            aria-activedescendant={visible[idx] ? `${listId}-${idx}` : undefined}
+            aria-controls={listId}
             autoComplete="off"
             spellCheck={false}
           />
@@ -165,7 +172,7 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
 
         <div
           ref={listRef}
-          id="command-palette-list"
+          id={listId}
           className="overflow-y-auto flex-1 py-1"
           role="listbox"
           aria-label="Commands"
@@ -181,14 +188,13 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
               <div
                 key={item.id}
                 data-cmd-idx={i}
+                id={`${listId}-${i}`}
                 role="option"
                 aria-selected={i === idx}
                 className={`command-palette-row text-sm${i === idx ? ' is-active' : ''}`}
                 onMouseEnter={() => setIdx(i)}
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  execute(item)
-                }}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => execute(item)}
               >
                 <span
                   className="text-[0.62rem] px-1.5 py-0.5 rounded-md flex-shrink-0 uppercase tracking-wide font-semibold"

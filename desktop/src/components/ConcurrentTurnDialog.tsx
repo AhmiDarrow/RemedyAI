@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { concurrentTurnConfirmMessage } from '../sessions/concurrentTurns'
 import { browserStackHold } from '../utils/browserStack'
+import { useDialogFocus } from '../hooks/useDialogFocus'
 
 interface ConcurrentTurnDialogProps {
   open: boolean
@@ -17,27 +18,19 @@ export function ConcurrentTurnDialog({
   onContinue,
   onCancel,
 }: ConcurrentTurnDialogProps) {
+  const dialogRef = useDialogFocus<HTMLDivElement>(open, onCancel)
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onCancel()
-      }
-    }
-    window.addEventListener('keydown', onKey, true)
-    const release = browserStackHold('concurrent-turn-dialog')
-    return () => {
-      window.removeEventListener('keydown', onKey, true)
-      release()
-    }
-  }, [open, onCancel])
+    return browserStackHold('concurrent-turn-dialog')
+  }, [open])
 
   if (!open) return null
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center p-4 ui-overlay"
       role="dialog"
+      ref={dialogRef}
+      tabIndex={-1}
       aria-modal="true"
       aria-labelledby="concurrent-turn-title"
       onClick={onCancel}
@@ -57,7 +50,7 @@ export function ConcurrentTurnDialog({
           <button type="button" className="ui-btn ui-btn-secondary" onClick={onCancel}>
             Cancel
           </button>
-          <button type="button" className="ui-btn ui-btn-primary" autoFocus onClick={onContinue}>
+          <button type="button" className="ui-btn ui-btn-primary" onClick={onContinue}>
             Continue
           </button>
         </div>

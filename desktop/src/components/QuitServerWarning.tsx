@@ -1,3 +1,4 @@
+import { useDialogFocus } from '../hooks/useDialogFocus'
 import { getServerUrl } from '../api/client'
 import { useEffect, useState } from 'react'
 import { isTauri, tauriInvoke } from '../api/tauri'
@@ -16,6 +17,7 @@ export interface QuitServerWarningProps {
  * Prefer Switch to WebUI / tray hide to keep the server running.
  */
 export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerWarningProps) {
+  const dialogRef = useDialogFocus<HTMLDivElement>(open, onCancel)
   const { t } = useI18n()
   const [dontWarn, setDontWarn] = useState(false)
 
@@ -28,6 +30,8 @@ export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerW
   return (
     <div
       className="fixed inset-0 z-[220] flex items-center justify-center p-4 ui-overlay"
+      ref={dialogRef}
+      tabIndex={-1}
       role="dialog"
       aria-modal="true"
       aria-labelledby="quit-warn-title"
@@ -106,7 +110,7 @@ export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerW
           <button
             type="button"
             className="ui-btn"
-            style={{ background: 'var(--error)', color: '#fff' }}
+            style={{ background: 'var(--error)', color: 'var(--error-foreground)' }}
             onClick={() => onConfirmQuit(dontWarn)}
           >
             {t('quit.confirm')}

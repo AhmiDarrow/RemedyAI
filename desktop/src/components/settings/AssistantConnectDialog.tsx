@@ -1,6 +1,7 @@
 /** Modal: privacy + optional app OAuth setup + Connect — keeps Settings lean. */
 
 import { useState, type ReactNode } from 'react'
+import { useDialogFocus } from '../../hooks/useDialogFocus'
 import { getServerUrl } from '../../api/client'
 import { saveGoogleApp } from '../../api/assistant'
 import { updateSettings } from '../../api/settings'
@@ -44,11 +45,16 @@ export function AssistantConnectDialog({
   const [err, setErr] = useState('')
   const [working, setWorking] = useState(false)
 
+  const dialogRef = useDialogFocus<HTMLDivElement>(open, () => {
+    if (!working && !busy) onClose()
+  })
+
   if (!open) return null
 
   const canContinue = privacyAi && accountAccess && (signInReady || Boolean(clientId.trim()))
 
   const submit = async () => {
+    if (working || busy) return
     setErr('')
     if (!privacyAi || !accountAccess) {
       setErr('Accept both notices to continue.')
@@ -86,6 +92,8 @@ export function AssistantConnectDialog({
   return (
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center p-4 ui-overlay"
+      ref={dialogRef}
+      tabIndex={-1}
       role="dialog"
       aria-modal="true"
       aria-labelledby="pa-connect-title"

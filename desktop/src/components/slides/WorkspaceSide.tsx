@@ -1,10 +1,12 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useDialogFocus } from '../../hooks/useDialogFocus'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { isTauri, tauriListen } from '../../api/tauri'
 import { ALL_SLIDES, SLIDE_META, type SlideId } from '../../workspace/types'
 import {
   clampRailWidth,
   RAIL_WIDTH_MIN,
+  RAIL_WIDTH_MAX,
   type RailMode,
 } from '../../workspace/layoutPrefs'
 
@@ -53,6 +55,8 @@ export function WorkspaceSide({
   /** Browser video/HTML fullscreen: hide panel header so host fills this rail tab. */
   const [browserPageFs, setBrowserPageFs] = useState(false)
   const [resizing, setResizing] = useState(false)
+  const stopResize = useRef<(() => void) | null>(null)
+  useEffect(() => () => stopResize.current?.(), [])
 
   useEffect(() => {
     if (!isTauri() || active !== 'browser') {
@@ -60,14 +64,17 @@ export function WorkspaceSide({
       return
     }
     let unlisten: (() => void) | undefined
+    let cancelled = false
     void tauriListen<{ fullscreen?: boolean }>('browser-page-fullscreen', (p) => {
-      setBrowserPageFs(Boolean(p?.fullscreen))
+      if (!cancelled) setBrowserPageFs(Boolean(p?.fullscreen))
     })
       .then((u) => {
-        unlisten = u
+        if (cancelled) u()
+        else unlisten = u
       })
       .catch(() => {})
     return () => {
+      cancelled = true
       unlisten?.()
       setBrowserPageFs(false)
     }
@@ -225,13 +232,14 @@ export function WorkspaceSide({
 
   if (!open) {
     return (
-      <div className="flex h-full min-h-0 shrink-0" style={{ width: RAIL_W }}>
+      <div data-workspace-side={side} className="flex h-full min-h-0 shrink-0" style={{ width: RAIL_W }}>
         {rail}
       </div>
     )
   }
 
   const startResize = (e: React.MouseEvent) => {
+    stopResize.current?.()
     e.preventDefault()
     e.stopPropagation()
     const startX = e.clientX
@@ -243,8 +251,12 @@ export function WorkspaceSide({
     }
     const up = () => {
       setResizing(false)
+      stopResize.current?.()
+    }
+    stopResize.current = () => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      stopResize.current = null
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
@@ -255,9 +267,24 @@ export function WorkspaceSide({
       className={`slide-resize-handle${resizing ? ' is-active' : ''}`}
       title="Drag to resize · double-click to reset width"
       role="separator"
+      tabIndex={0}
+      aria-label={`Resize ${side} panel`}
       aria-orientation="vertical"
       aria-valuenow={width}
       aria-valuemin={RAIL_WIDTH_MIN}
+      aria-valuemax={RAIL_WIDTH_MAX}
+      onKeyDown={(e) => {
+        if (e.nativeEvent.isComposing) return
+        const step = e.shiftKey ? 40 : 10
+        let next = width
+        if (e.key === 'Home') next = RAIL_WIDTH_MIN
+        else if (e.key === 'End') next = RAIL_WIDTH_MAX
+        else if (e.key === 'ArrowLeft') next += side === 'left' ? -step : step
+        else if (e.key === 'ArrowRight') next += side === 'left' ? step : -step
+        else return
+        e.preventDefault()
+        onWidth(clampRailWidth(next))
+      }}
       onMouseDown={startResize}
       onDoubleClick={(e) => {
         e.preventDefault()
@@ -366,25 +393,18 @@ export function PopoutOverlay({
   onToggleFullscreen: () => void
   children: ReactNode
 }) {
-  // Esc: exit fullscreen first, then close popout.
-  // Capture phase so it wins over xterm focus / helper textarea.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      e.preventDefault()
-      e.stopPropagation()
-      if (fullscreen) onToggleFullscreen()
-      else onClose()
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [fullscreen, onClose, onToggleFullscreen])
+  const dialogRef = useDialogFocus<HTMLDivElement>(true, () => {
+    if (fullscreen) onToggleFullscreen()
+    else onClose()
+  })
 
   // Portal to body so no parent transform/overflow can trap fixed positioning
   // or let xterm / layout paint over the exit chrome (Terminal, Browser, Scratch).
   const overlay = (
     <div
       className="fixed flex flex-col overflow-hidden shadow-2xl"
+      ref={dialogRef}
+      tabIndex={-1}
       data-popout-overlay
       data-fullscreen={fullscreen ? 'true' : 'false'}
       style={{

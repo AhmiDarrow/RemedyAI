@@ -69,6 +69,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [skipSaveFailed, setSkipSaveFailed] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [customName, setCustomName] = useState('')
   const [ollamaHint, setOllamaHint] = useState('')
@@ -571,6 +572,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     // Mark setup done so the wizard never blocks launch again.
     // User can configure the provider later in Settings.
     setSaving(true)
+    setSkipSaveFailed(false)
     setError('')
     try {
       try {
@@ -593,21 +595,9 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       closeOauthBrowser()
       onComplete()
     } catch (e: unknown) {
-      // Still enter the app if the server briefly fails — avoid lockout.
-      // Surface a soft notice so the user knows setup may reappear next launch.
       const msg = e instanceof Error ? e.message : String(e)
-      console.warn('Skip setup save failed:', e)
-      try {
-        window.alert(
-          `Could not save “setup complete” (${msg || 'server error'}). `
-          + 'You can still use the app; the setup wizard may show again next launch. '
-          + 'Use Settings or Retry if problems continue.',
-        )
-      } catch {
-        /* headless */
-      }
-      closeOauthBrowser()
-      onComplete()
+      setError(`Could not save setup: ${msg || 'server error'}. Retry, or continue for now. Setup may appear again next launch.`)
+      setSkipSaveFailed(true)
     } finally {
       setSaving(false)
     }
@@ -1313,6 +1303,12 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
           {error && (
             <div className="remedy-shell-error" role="alert">
               {error}
+              {skipSaveFailed && (
+                <button type="button" className="ui-btn ui-btn-secondary mt-3" onClick={() => {
+                  closeOauthBrowser()
+                  onComplete()
+                }}>Continue for now</button>
+              )}
             </div>
           )}
 

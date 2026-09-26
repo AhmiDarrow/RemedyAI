@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -12,7 +14,7 @@ import (
 
 // ResolveListenModel picks an OpenAI-compatible live model when settings+secret
 // (including xAI OAuth) are ready; otherwise prefers the local vision helper
-// when it is up; last resort is a ScriptedModel that emits Hello/world.
+// when it is up; otherwise returns an actionable model-unavailable error.
 func ResolveListenModel(home string) cognition.Model {
 	return ResolveChatModel(home, "", "", "")
 }
@@ -23,7 +25,7 @@ func ResolveListenModel(home string) cognition.Model {
 //  1. Explicit provider/model/baseURL (session bind) when credentials are ready
 //  2. Global config provider when the bind is missing credentials (or unset)
 //  3. Local vision helper (SmolVLM) when installed and listening
-//  4. Scripted Hello/world last resort
+//  4. Explicit setup error; synthetic replies are reserved for fixtures
 func ResolveChatModel(home, provider, model, baseURL string) cognition.Model {
 	return resolveChatModel(home, provider, model, baseURL, "")
 }
@@ -38,6 +40,11 @@ func resolveChatModel(home, provider, model, baseURL, excludeProvider string) co
 	explicitProv := strings.TrimSpace(provider)
 	explicitModel := strings.TrimSpace(model)
 	explicitURL := strings.TrimSpace(baseURL)
+	// Sessions bind provider/model, not a URL. Reuse the configured endpoint
+	// for that provider before probing a catalog default (especially custom).
+	if explicitURL == "" && explicitProv != "" && strings.EqualFold(explicitProv, cfgString(cfg, "llm_provider", "")) {
+		explicitURL = cfgString(cfg, "llm_base_url", "")
+	}
 
 	if !providerExcluded(explicitProv, exclude) {
 		if m := tryLiveModel(home, cfg, explicitProv, explicitModel, explicitURL); m != nil {
@@ -63,9 +70,17 @@ func resolveChatModel(home, provider, model, baseURL, excludeProvider string) co
 		return m
 	}
 
-	return &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
-		{{Text: "Hello ", Done: false}, {Text: "world", Done: true}},
-	}}
+	return unavailableModel{}
+}
+
+var errModelUnavailable = errors.New("No chat model is available. Open Settings to connect a model provider or start a local model, then try again.")
+
+type unavailableModel struct{}
+
+func (unavailableModel) ContextWindow() int { return 0 }
+
+func (unavailableModel) Stream(context.Context, cognition.Turn) (<-chan cognition.ModelEvent, error) {
+	return nil, errModelUnavailable
 }
 
 func providerExcluded(provider, excludeLower string) bool {

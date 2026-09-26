@@ -17,6 +17,7 @@ import {
 } from '../utils/imageMarkup'
 import { shouldUseCorsForImage } from '../utils/chatMedia'
 import { browserStackHold } from '../utils/browserStack'
+import { useDialogFocus } from '../hooks/useDialogFocus'
 
 interface ImageLightboxProps {
   src: string | null
@@ -49,6 +50,8 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
   const [status, setStatus] = useState<string | null>(null)
   const [textDraft, setTextDraft] = useState<string>('')
   const [showTextPrompt, setShowTextPrompt] = useState(false)
+  const dialogRef = useDialogFocus<HTMLDivElement>(!!src, onClose)
+  const textDialogRef = useDialogFocus<HTMLDivElement>(!!src && showTextPrompt, () => setShowTextPrompt(false))
   const textAnchorRef = useRef<Point | null>(null)
 
   const natRef = useRef(nat)
@@ -113,6 +116,8 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
 
   // Load image whenever src changes
   useEffect(() => {
+    setShowTextPrompt(false)
+    setTextDraft('')
     if (!src) {
       setReady(false)
       setLoadError(null)
@@ -190,14 +195,9 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
   useEffect(() => {
     if (!src) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (showTextPrompt) {
-          setShowTextPrompt(false)
-          return
-        }
-        onClose()
-        return
-      }
+      if (e.defaultPrevented || e.isComposing || showTextPrompt) return
+      const target = e.target
+      if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select'))) return
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault()
         draftRef.current = null
@@ -421,6 +421,8 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
 
   return (
     <div
+      ref={dialogRef}
+      tabIndex={-1}
       className="fixed inset-0 z-[100] flex flex-col"
       style={{ background: 'rgba(8,10,16,0.92)' }}
       role="dialog"
@@ -643,6 +645,11 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
           onClick={() => setShowTextPrompt(false)}
         >
           <div
+            ref={textDialogRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Add text label"
             className="rounded-xl p-4 w-[min(90vw,360px)] shadow-xl"
             style={{
               background: 'var(--bg-primary)',
@@ -661,14 +668,15 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
                 color: 'var(--text-primary)',
               }}
               placeholder="e.g. this button is wrong"
+              aria-label="Text label"
               value={textDraft}
               onChange={(e) => setTextDraft(e.target.value)}
               onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return
                 if (e.key === 'Enter') {
                   e.preventDefault()
                   commitText()
                 }
-                if (e.key === 'Escape') setShowTextPrompt(false)
               }}
             />
             <div className="flex justify-end gap-2">
@@ -683,7 +691,7 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
               <button
                 type="button"
                 className="px-3 py-1 rounded text-xs font-semibold"
-                style={{ background: 'var(--accent)', color: '#fff' }}
+                style={{ background: 'var(--accent)', color: 'var(--accent-foreground)' }}
                 onClick={commitText}
               >
                 Place text

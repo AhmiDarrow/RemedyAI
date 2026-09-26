@@ -3,6 +3,11 @@ import { apiFetch } from '../../api/client'
 import { isTauri, tauriInvoke } from '../../api/tauri'
 import { SCRATCH_RELOAD_EVENT } from '../../workspace/railNav'
 import { ConfirmDialog } from '../ConfirmDialog'
+import { createSerialWriter } from '../../utils/serialWriter'
+
+const writeScratch = createSerialWriter<string>(async (sid, text) => {
+  await apiFetch('/scratch', { method: 'PUT', body: JSON.stringify({ session_id: sid || null, text }) })
+})
 
 function storageKey(sessionId: string | null) {
   return `remedy.scratch.${sessionId || 'global'}`
@@ -24,6 +29,8 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
   const [preview, setPreview] = useState(false)
   const [status, setStatus] = useState('')
   const [dirty, setDirty] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const revision = useRef(0)
   const [confirmClear, setConfirmClear] = useState(false)
   const key = useMemo(() => storageKey(sessionId), [sessionId])
   const persistTimer = useRef<number | null>(null)
@@ -47,20 +54,30 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
   }
 
   const persistServer = (v: string, sid: string | null) => {
-    void apiFetch('/scratch', {
-      method: 'PUT',
-      body: JSON.stringify({ session_id: sid, text: v }),
+    const cacheKey = storageKey(sid)
+    try { localStorage.setItem(`${cacheKey}.pending`, '1') } catch { /* cache unavailable */ }
+    void writeScratch(sid || '', v).then(() => {
+      try {
+        if (localStorage.getItem(cacheKey) === v) localStorage.removeItem(`${cacheKey}.pending`)
+      } catch { /* cache unavailable */ }
     }).catch(() => {
-      /* local cache still holds it */
+      if (keyRef.current === cacheKey) flashStatus('Saved on this device; server sync will retry when you reopen these notes.', 6000)
     })
   }
 
   const loadFromServer = async (sid: string | null, storageKeyNow: string) => {
     try {
+      const cached = localStorage.getItem(storageKeyNow)
+      if (localStorage.getItem(`${storageKeyNow}.pending`) && cached !== null) {
+        persistServer(cached, sid)
+        return cached
+      }
+    } catch { /* cache unavailable */ }
+    try {
       const q = sid ? `?session_id=${encodeURIComponent(sid)}` : ''
       const data = await apiFetch<{ text?: string }>(`/scratch${q}`)
       let t = data.text || ''
-      if (!t) {
+      if (typeof data.text !== 'string') {
         try {
           t = localStorage.getItem(storageKeyNow) || ''
         } catch {
@@ -90,18 +107,24 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
       }
     }
     keyRef.current = key
+    textRef.current = ''
+    setText('')
+    setLoading(true)
     setPreview(false)
     setDirty(false)
     let cancelled = false
     void loadFromServer(sessionId, key).then((loaded) => {
       if (cancelled) return
+      setLoading(false)
       setText(loaded)
       textRef.current = loaded
       setStatus('')
     })
     const onReload = () => {
+      const requestedRevision = revision.current
+      if (persistTimer.current != null) return
       void loadFromServer(sessionId, key).then((loaded) => {
-        if (cancelled) return
+        if (cancelled || requestedRevision !== revision.current) return
         setText(loaded)
         textRef.current = loaded
       })
@@ -115,6 +138,7 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
         persistTimer.current = null
         try {
           localStorage.setItem(keyRef.current, textRef.current)
+          persistServer(textRef.current, sessionId)
         } catch {
           /* ignore */
         }
@@ -140,6 +164,7 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
 
   /** Immediate UI update; debounce localStorage writes while typing. */
   const save = (v: string, flush = false) => {
+    revision.current += 1
     setText(v)
     textRef.current = v
     setDirty(true)
@@ -204,7 +229,7 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
       >
         <span className="mr-auto truncate" title={`Scratch pad (${sessionLabel})`}>
           Scratch · {sessionLabel}
-          {dirty ? ' · saving…' : ' · auto-saves'}
+          {loading ? ' · loading…' : dirty ? ' · saving…' : ' · auto-saves'}
         </span>
         <button
           type="button"
@@ -285,6 +310,8 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
       ) : (
         <textarea
           ref={taRef}
+          disabled={loading}
+          aria-busy={loading}
           value={text}
           onChange={(e) => save(e.target.value)}
           onBlur={() => {

@@ -50,7 +50,7 @@ export function useSettingsPanelState() {
 
   const sectionProps = useCallback(
     (id: SettingsSectionId) => {
-      const modeHidden = !isSectionVisibleInMode(id, settingsMode)
+      const modeHidden = !settingsSearch.trim() && !isSectionVisibleInMode(id, settingsMode)
       const searchHidden = settingsSearch.trim().length > 0 && !matchSec(id)
       return {
         id,
@@ -120,6 +120,8 @@ export function useSettingsPanelState() {
     setSettingsMode,
     matchSec,
     sectionProps,
+    visibleSectionCount: (Object.keys(SETTINGS_SECTION_META) as SettingsSectionId[])
+      .filter((id) => !sectionProps(id).hidden).length,
     onPanelOpenChange,
   }
 }

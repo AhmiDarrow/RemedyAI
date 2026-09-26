@@ -347,7 +347,7 @@ func TestCognitionTurnRunnerAbortEmitsControlToken(t *testing.T) {
 	}
 }
 
-func TestCognitionTurnRunnerFallsBackOnProvider402(t *testing.T) {
+func TestCognitionTurnRunnerPreservesProviderErrorWithoutFallback(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REMEDY_HOME", home)
 	t.Setenv("XAI_API_KEY", "")
@@ -361,7 +361,7 @@ func TestCognitionTurnRunnerFallsBackOnProvider402(t *testing.T) {
 	failing := cognitionModelFunc(func(context.Context, cognition.Turn) (<-chan cognition.ModelEvent, error) {
 		return nil, errors.New(`openai-compat HTTP 402: {"error":{"message":"The model assistant requires an active Poe subscription for API access."}}`)
 	})
-	// No cloud credentials → resolveChatModel(exclude=poe) → Scripted Hello world.
+	// No other provider is ready: preserve the billing error, never fabricate a reply.
 	prov := "poe"
 	r := NewCognitionTurnRunner(nil)
 	r.HomeDir = home
@@ -370,14 +370,8 @@ func TestCognitionTurnRunnerFallsBackOnProvider402(t *testing.T) {
 		Prompt:   "hi",
 		Provider: &prov,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, "That provider isn't available") {
-		t.Fatalf("expected switch status, got %q", out)
-	}
-	if !strings.Contains(out, "Hello world") {
-		t.Fatalf("expected scripted fallback text, got %q", out)
+	if err == nil || !strings.Contains(err.Error(), "402") || out != "" {
+		t.Fatalf("expected original provider error without synthetic reply: %q, %v", out, err)
 	}
 }
 

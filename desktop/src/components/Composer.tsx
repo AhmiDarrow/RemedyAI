@@ -1,6 +1,7 @@
 import {
   useState,
   useRef,
+  useId,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -56,6 +57,7 @@ interface ComposerProps {
   onCommand: (command: string) => void
   streaming: boolean
   disabled: boolean
+  sendBlockedReason?: string
   /** Pending prompts while a turn is in flight. */
   queue?: ComposerQueuedItem[]
   onCancelQueued?: (id: string) => void
@@ -173,6 +175,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     onCommand,
     streaming,
     disabled,
+    sendBlockedReason,
     queue = [],
     onCancelQueued,
     onClearQueue,
@@ -289,6 +292,19 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }, [hasImageAttachments, attachments.length])
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    const field = textareaRef.current
+    if (!field) return
+    let width = -1
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width === width) return
+      width = entry.contentRect.width
+      resizeComposerTextarea(field)
+    })
+    observer.observe(field)
+    return () => observer.disconnect()
+  }, [])
+
   const attachFromPreview = useCallback(
     async (file: File) => {
       await addFiles([file])
@@ -300,6 +316,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachRailRef = useRef<HTMLDivElement>(null)
   const composerRootRef = useRef<HTMLDivElement>(null)
+  const suggestionListId = useId()
+  const suggestionGeneration = useRef(0)
+  useEffect(() => () => {
+    suggestionGeneration.current += 1
+    if (suggestTimer.current) clearTimeout(suggestTimer.current)
+  }, [sessionId])
   const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const submittingRef = useRef(false)
   /** Last applied edit key — re-apply when parent issues a new edit, including remount. */
@@ -374,6 +396,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const handleSuggestionSelect = useCallback(
     (item: SuggestionItem) => {
+      suggestionGeneration.current += 1
+      if (suggestTimer.current) clearTimeout(suggestTimer.current)
       const cursorPos = textareaRef.current?.selectionStart ?? input.length
       const before = input.slice(0, cursorPos)
       const after = input.slice(cursorPos)
@@ -543,8 +567,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const handleSubmit = useCallback(
     (mode: 'after' | 'interrupt' | 'steer' = 'steer') => {
+      suggestionGeneration.current += 1
+      if (suggestTimer.current) clearTimeout(suggestTimer.current)
+      setShowSuggestions(false)
       const text = input.trim()
-      if ((!text && attachments.length === 0) || disabled || uploading) return
+      if ((!text && attachments.length === 0) || disabled || uploading || sendBlockedReason) return
       // Commands still require a quiet moment (no concurrent turn side-effects).
       if (text.startsWith('/') && attachments.length === 0 && streaming) return
       if (submittingRef.current) return
@@ -597,6 +624,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       onCommand,
       streaming,
       disabled,
+      sendBlockedReason,
       uploading,
       pushPromptHistory,
       editingQueueId,
@@ -608,6 +636,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return
       if (showSuggestions) {
         if (e.key === 'ArrowDown') {
           e.preventDefault()
@@ -627,6 +656,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           return
         }
         if (e.key === 'Escape') {
+          e.preventDefault()
           setShowSuggestions(false)
           return
         }
@@ -707,6 +737,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const handleChange = useCallback(
     (text: string) => {
+      const generation = ++suggestionGeneration.current
+      if (suggestTimer.current) clearTimeout(suggestTimer.current)
       setInput(text)
       // User typed while browsing history → leave history mode; draft becomes current
       if (historyIndexRef.current >= 0) {
@@ -779,6 +811,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             }
           }
 
+          if (generation !== suggestionGeneration.current) return
           if (items.length > 0) {
             setSuggestions(items)
             setSuggestionIdx(0)
@@ -896,6 +929,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const canSend =
     !disabled &&
+    !sendBlockedReason &&
     !uploading &&
     (Boolean(input.trim()) || attachments.length > 0) &&
     // Slash commands still wait until the current turn ends.
@@ -957,7 +991,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                     style={{
                       background:
                         editingQueueId === q.id ? 'var(--accent)' : 'var(--bg-tertiary)',
-                      color: editingQueueId === q.id ? '#fff' : 'var(--text-secondary)',
+                      color: editingQueueId === q.id ? 'var(--accent-foreground)' : 'var(--text-secondary)',
                     }}
                     title="Edit this queued message in the composer"
                     onClick={() => {
@@ -981,7 +1015,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                     style={{
                       background:
                         q.mode === 'after' ? 'var(--accent)' : 'var(--bg-tertiary)',
-                      color: q.mode === 'after' ? '#fff' : 'var(--text-secondary)',
+                      color: q.mode === 'after' ? 'var(--accent-foreground)' : 'var(--text-secondary)',
                     }}
                     title="Send after current turn finishes"
                     onClick={() => onUpdateQueued?.(q.id, { mode: 'after' })}
@@ -1093,7 +1127,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             <button
               type="button"
               className="shrink-0 px-2 py-0.5 rounded text-[10px] font-medium"
-              style={{ background: 'var(--accent)', color: '#fff' }}
+              style={{ background: 'var(--accent)', color: 'var(--accent-foreground)' }}
               onClick={() => onOpenSettings()}
             >
               Settings
@@ -1102,8 +1136,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         </div>
       )}
 
+      {sendBlockedReason && <p role="status" className="px-3 py-1 text-xs" style={{ color: 'var(--text-secondary)' }}>{sendBlockedReason}</p>}
       {suggestions.length > 0 && showSuggestions && (
         <div
+          id={suggestionListId}
+          role="listbox"
+          aria-label="Message suggestions"
           className="mb-1 rounded-md border text-xs max-h-40 overflow-y-auto"
           style={{
             background: 'var(--bg-primary)',
@@ -1113,15 +1151,17 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           {suggestions.map((s, i) => (
             <button
               key={`${s.type}-${s.value}`}
+              id={`${suggestionListId}-${i}`}
+              type="button"
+              role="option"
+              aria-selected={i === suggestionIdx}
               className="flex items-center gap-2 w-full text-left px-3 py-1.5"
               style={{
                 background: i === suggestionIdx ? 'var(--bg-tertiary)' : 'transparent',
                 color: 'var(--text-primary)',
               }}
-              onMouseDown={(e) => {
-                e.preventDefault()
-                handleSuggestionSelect(s)
-              }}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSuggestionSelect(s)}
             >
               <span
                 style={{
@@ -1239,6 +1279,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                   className="ml-0.5 px-1.5 py-0.5 rounded text-sm font-bold"
                   style={{ color: 'var(--error)' }}
                   title="Remove attachment"
+                  aria-label={`Remove ${a.name}`}
                   onClick={() => removeAttachment(i)}
                 >
                   ×
@@ -1313,7 +1354,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             : undefined
         }
       >
-      <div className="flex items-end gap-2">
+      <div className="composer-controls flex items-end gap-2">
         <input
           ref={fileInputRef}
           type="file"
@@ -1369,7 +1410,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               ? 'var(--accent)'
               : 'color-mix(in srgb, var(--bg-tertiary) 80%, transparent)',
             border: '1px solid color-mix(in srgb, var(--border) 80%, transparent)',
-            color: attachments.length ? '#fff' : 'var(--text-secondary)',
+            color: attachments.length ? 'var(--accent-foreground)' : 'var(--text-secondary)',
             opacity: disabled || uploading ? 0.5 : 1,
           }}
         >
@@ -1388,6 +1429,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           ref={textareaRef}
           value={input}
           onChange={(e) => handleChange(e.target.value)}
+          aria-label="Message Remedy"
+          aria-controls={showSuggestions ? suggestionListId : undefined}
+          aria-activedescendant={showSuggestions ? `${suggestionListId}-${suggestionIdx}` : undefined}
           onKeyDown={handleKeyDown}
           onPaste={onPaste}
           placeholder={
@@ -1444,7 +1488,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 ? '#a33c2f'
                 : 'color-mix(in srgb, var(--bg-tertiary) 80%, transparent)',
               border: '1px solid var(--border)',
-              color: recording ? '#fff' : 'var(--text-secondary)',
+              color: recording ? 'var(--error-foreground)' : 'var(--text-secondary)',
               opacity: disabled || transcribing ? 0.5 : 1,
             }}
           >
@@ -1478,7 +1522,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             width: 40,
             height: 40,
             background: !canSend ? 'var(--bg-tertiary)' : 'var(--accent)',
-            color: !canSend ? 'var(--text-muted)' : '#fff',
+            color: !canSend ? 'var(--text-muted)' : 'var(--accent-foreground)',
             cursor: !canSend ? 'not-allowed' : 'pointer',
             border: '1px solid var(--border)',
           }}
@@ -1496,7 +1540,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             width: 40,
             height: 40,
             background: 'var(--error)',
-            color: '#fff',
+            color: 'var(--error-foreground)',
             border: 'none',
             cursor: 'pointer',
           }}

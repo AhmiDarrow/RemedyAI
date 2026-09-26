@@ -7,8 +7,10 @@ import {
   normalizeLocalMediaPath,
   peekChatMediaUrl,
   resolveChatMediaUrl,
+  invalidateChatMediaUrl,
 } from '../utils/chatMedia'
 import { isTauri, tauriInvoke } from '../api/tauri'
+import { useAsyncScope } from '../hooks/useAsyncScope'
 
 interface ChatImageProps {
   src?: string
@@ -39,10 +41,23 @@ export const ChatImage = memo(function ChatImage({ src, alt, onOpen }: ChatImage
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const retriedRef = useRef(false)
+  const scope = useAsyncScope(raw)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fullPath = isRemoteOrDataUrl(raw) ? raw : normalizeLocalMediaPath(raw)
+  const showCopied = useCallback(() => {
+    setCopied(true)
+    if (copiedTimer.current) clearTimeout(copiedTimer.current)
+    copiedTimer.current = setTimeout(() => setCopied(false), 1200)
+  }, [])
+  useEffect(() => {
+    setCopied(false)
+    return () => { if (copiedTimer.current) clearTimeout(copiedTimer.current) }
+  }, [raw])
 
   useEffect(() => {
     let cancelled = false
     retriedRef.current = false
+    setResolved(peekChatMediaUrl(raw))
     if (!raw) {
       setResolved(null)
       setError(null)
@@ -87,33 +102,34 @@ export const ChatImage = memo(function ChatImage({ src, alt, onOpen }: ChatImage
 
   const handleCopy = useCallback(async () => {
     if (!resolved) return
+    const current = scope.capture()
     try {
       const res = await fetch(resolved)
+      if (!res.ok) throw new Error(`Image download failed (${res.status})`)
       const blob = await res.blob()
       if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
         await navigator.clipboard.write([
           new ClipboardItem({ [blob.type || 'image/png']: blob }),
         ])
       } else {
-        await navigator.clipboard.writeText(resolved)
+        await navigator.clipboard.writeText(fullPath)
       }
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1200)
+      if (current()) showCopied()
     } catch {
       try {
-        await navigator.clipboard.writeText(resolved)
-        setCopied(true)
-        window.setTimeout(() => setCopied(false), 1200)
+        await navigator.clipboard.writeText(fullPath)
+        if (current()) showCopied()
       } catch {
         /* ignore */
       }
     }
-  }, [resolved])
+  }, [resolved, fullPath, scope, showCopied])
 
   const handleSave = useCallback(async () => {
     if (!resolved) return
     try {
       const res = await fetch(resolved)
+      if (!res.ok) throw new Error(`Image download failed (${res.status})`)
       const blob = await res.blob()
       const ext =
         blob.type.includes('jpeg') || blob.type.includes('jpg')
@@ -142,14 +158,14 @@ export const ChatImage = memo(function ChatImage({ src, alt, onOpen }: ChatImage
   const canReveal = isTauri() && isAbsoluteFsPath(raw)
 
   const copyPath = useCallback(async () => {
+    const current = scope.capture()
     try {
-      await navigator.clipboard.writeText(shownPath)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1200)
+      await navigator.clipboard.writeText(fullPath)
+      if (current()) showCopied()
     } catch {
       /* ignore */
     }
-  }, [shownPath])
+  }, [fullPath, scope, showCopied])
 
   const revealPath = useCallback(async () => {
     try {
@@ -264,12 +280,15 @@ export const ChatImage = memo(function ChatImage({ src, alt, onOpen }: ChatImage
             if (!retriedRef.current && raw && needsAuthResolve(raw)) {
               retriedRef.current = true
               setResolved(null)
+              const current = scope.capture()
+              invalidateChatMediaUrl(raw)
               void resolveChatMediaUrl(raw)
                 .then((url) => {
+                  if (!current()) return
                   if (url) setResolved(url)
                   else setError('decode failed')
                 })
-                .catch(() => setError('decode failed'))
+                .catch(() => { if (current()) setError('decode failed') })
               return
             }
             setError('decode failed')

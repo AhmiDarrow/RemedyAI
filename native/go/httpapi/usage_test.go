@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -132,5 +133,61 @@ func TestUsageSummaryEmpty(t *testing.T) {
 	totals, _ := body["totals"].(map[string]any)
 	if int(totals["events"].(float64)) != 0 {
 		t.Fatalf("expected empty ledger, got %s", text)
+	}
+}
+
+func TestUsageConcurrentFirstOpen(t *testing.T) {
+	home := t.TempDir()
+	start := make(chan struct{})
+	results := make(chan error, 16)
+	for i := 0; i < 16; i++ {
+		go func(series bool) {
+			<-start
+			var err error
+			if series {
+				_, err = usageSeries(home, 7, "provider")
+			} else {
+				_, err = usageSummary(home, 7, "")
+			}
+			results <- err
+		}(i%2 == 0)
+	}
+	close(start)
+	for i := 0; i < 16; i++ {
+		if err := <-results; err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestUsageRangeRejectsNonFinite(t *testing.T) {
+	for _, raw := range []string{"NaN", "+Inf", "-Inf", "Infinity", "invalid", ""} {
+		if got := parseRangeDays(raw, 7); got != 7 {
+			t.Errorf("%q = %v", raw, got)
+		}
+	}
+	for raw, want := range map[string]float64{"-2": 0.01, "9999": 3650, "0.5": 0.5, "30": 30} {
+		if got := parseRangeDays(raw, 7); got != want {
+			t.Errorf("%q = %v; want %v", raw, got, want)
+		}
+	}
+}
+
+func TestUsageCSVQuotesProvider(t *testing.T) {
+	s, home := newUsageTestServer(t)
+	provider := "custom, \"local\"\nmodel"
+	if err := seedUsageEvent(home, float64(time.Now().Unix()), "session", provider, "model", 1, 1, 2, 0); err != nil {
+		t.Fatal(err)
+	}
+	code, _, body := doUsage(t, s, http.MethodGet, "/api/usage/export?format=csv")
+	if code != http.StatusOK {
+		t.Fatalf("status %d: %s", code, body)
+	}
+	records, err := csv.NewReader(strings.NewReader(body)).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 || len(records[1]) != 5 || records[1][1] != provider {
+		t.Fatalf("bad csv: %#v", records)
 	}
 }

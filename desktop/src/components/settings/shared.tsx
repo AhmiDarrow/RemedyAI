@@ -2,6 +2,7 @@
 /* oxlint-disable react/only-export-components -- shared constants + helpers for form sections */
 
 import { FormInput, FormLabel } from './formUi'
+import { useId } from 'react'
 
 export const PERSONAS = [
   { id: 'balanced', name: 'Balanced', description: 'Helpful and adaptable to the task' },
@@ -34,10 +35,12 @@ export function Field({
   placeholder?: string
   password?: boolean
 }) {
+  const id = useId()
   return (
     <div className="mb-2.5">
-      <FormLabel>{label}</FormLabel>
+      <FormLabel htmlFor={id}>{label}</FormLabel>
       <FormInput
+        id={id}
         type={password ? 'password' : 'text'}
         value={value}
         onChange={onChange}
