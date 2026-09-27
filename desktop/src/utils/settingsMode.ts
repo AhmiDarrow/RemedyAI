@@ -31,7 +31,6 @@ export const ADVANCED_ONLY_SECTIONS = new Set([
   'memory-harness',
   'advanced',
   'mcp',
-  'always-ready',
   'license',
 ])
 

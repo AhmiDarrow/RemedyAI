@@ -1,5 +1,16 @@
 /** English chrome fallback — used before GET /api/i18n and when offline. */
 export const EN: Record<string, string> = {
+  'settings.categories': 'Settings categories',
+  'settings.category.general': 'General',
+  'settings.category.models': 'Models',
+  'settings.category.connections': 'Connections',
+  'settings.category.privacy': 'Privacy',
+  'settings.category.system': 'System',
+  'settings.category.generalHint': 'Make Remedy comfortable to use.',
+  'settings.category.modelsHint': 'Choose how Remedy runs and which model it uses.',
+  'settings.category.connectionsHint': 'Connect your devices, accounts, and messengers.',
+  'settings.category.privacyHint': 'Control access, approvals, and what you share.',
+  'settings.category.systemHint': 'Updates, help, and app preferences.',
   'bar.simple': 'Simple',
   'bar.advanced': 'Advanced',
   'bar.help': 'Help',
@@ -51,6 +62,7 @@ export const EN: Record<string, string> = {
   'composer.placeholderFiles': 'Add a note for these files…',
   'composer.placeholderEditQueue': 'Edit queued message — Enter saves to queue',
   'settings.language': 'Language',
+  'settings.languageHintShort': 'Language for menus and replies. Auto follows your computer and the language you use.',
   'settings.languageHint':
     "Chrome and Remedy's replies. Auto matches this computer and what you type. Tools, code, and file paths stay as written.",
   'settings.languageAuto': 'Auto (match you)',

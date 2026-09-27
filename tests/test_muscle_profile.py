@@ -32,12 +32,18 @@ def test_openai_default_frontier():
     assert p.tier == TIER_FRONTIER
 
 
-def test_tiny_local_lean():
+def test_tiny_local_gets_the_same_finish_rule():
     p = classify_muscle("ollama", "qwen2.5-1.5b")
     assert p.tier <= TIER_TINY + 1
     assert not p.builder_contract
-    assert builder_system_addendum(p) == ""
-    assert p.max_parallel_tools <= 8
+    add = builder_system_addendum(p)
+    assert "check you ran succeeded" in add
+    assert "stop" not in add.lower()
+    assert "one step" not in add.lower()
+    frontier = builder_system_addendum(classify_muscle("xai", "grok-4"))
+    assert "check you ran succeeded" in frontier
+    assert "one step" not in frontier.lower()
+    assert "parallel≤" not in frontier
 
 
 def test_chat_turns_do_not_get_the_coding_syllabus():

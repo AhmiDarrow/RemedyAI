@@ -13,6 +13,7 @@ describe('StatusBar keeps internals off the strip', () => {
     const alerts = src.slice(src.indexOf('const bits: string[] = []'), src.indexOf('setAlerts(bits'))
     expect(alerts).not.toMatch(/ mem`/)
     expect(alerts).not.toMatch(/soma\.label/)
+    expect(alerts).toContain('hearth?.greeting')
     expect(alerts).not.toMatch(/tier_label|`L\$\{/)
     expect(alerts).not.toMatch(/EU \$\{/)
     // Actionable bits stay.

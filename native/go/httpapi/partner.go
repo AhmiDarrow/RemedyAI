@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 	"strings"
+	"time"
 )
 
 func (s *Server) handlePartnerStatus(w http.ResponseWriter, r *http.Request) {
@@ -48,9 +49,9 @@ func (s *Server) handlePartnerStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	organism := map[string]any{
-		"alive":      openGoals > 0,
-		"open_count": openGoals,
-		"life_title": activeTitle,
+		"alive":       openGoals > 0,
+		"open_count":  openGoals,
+		"life_title":  activeTitle,
 		"next_action": nextAction,
 	}
 	if lastStep != nil {
@@ -81,6 +82,7 @@ func (s *Server) handlePartnerStatus(w http.ResponseWriter, r *http.Request) {
 		"provider_health":   map[string]any{},
 		"metabolism":        map[string]any{},
 		"soma":              map[string]any{},
+		"hearth":            s.hearthPublic(time.Now(), activeTitle, nextAction),
 	})
 }
 

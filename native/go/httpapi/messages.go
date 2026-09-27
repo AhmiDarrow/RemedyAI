@@ -798,6 +798,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.NoteUserActivity()
+	s.hearthTouch("desktop", time.Now())
 
 	epoch, claimCtx, claimed := s.claims.TryClaim(sid)
 	if !claimed {
@@ -907,6 +908,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
+	if turnErr == nil {
+		s.hearthAck(time.Now())
+	}
 
 	if errors.Is(turnErr, errSessionGone) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Session not found"})

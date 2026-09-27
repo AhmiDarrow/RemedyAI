@@ -1443,6 +1443,21 @@ def failed_verify_nudge(name: str, exit_code: int | None) -> str:
     )
 
 
+def knowledge_gap_nudge(name: str = "") -> str:
+    """Outside-the-repo failure: look it up once, then edit or stop."""
+    where = (
+        f"`{name}` failed on something outside this repo"
+        if name
+        else "This looks like a fact outside the repo"
+    )
+    return (
+        f"[Verify] {where} "
+        "(a missing module, an unknown command, or a missing page). "
+        f"Look it up once with {T['web_search']} before editing. "
+        "If that tool is off, say what you could not find."
+    )
+
+
 VERIFY_ONCE_NUDGE = (
     "[Verify] Files changed but nothing ran afterwards. Run the project's check "
     f"once with {T['shell']} (tests, compiler, or the program itself) before "
@@ -2600,6 +2615,34 @@ _EXPLORE_TOOL_NAMES = frozenset(
     }
 )
 _EXIT_CODE_RE = re.compile(r"(?i)\bexit[_ ]code\s*[=:]\s*(-?\d+)")
+# A check failed because the world outside the tree is missing or unknown.
+# A red test, a syntax error, or a missing project file is not this class.
+_KNOWLEDGE_FAILURE_RE = re.compile(
+    r"(?is)("
+    r"modulenotfounderror|"
+    r"\bno module named\b|"
+    r"importerror\s*:|"
+    r"\bcannot find module\b|"
+    r"\bcommand not found\b|"
+    r"is not recognized as an internal or external command|"
+    r"could not find a version that satisfies|"
+    r"no matching distribution found|"
+    r"\bunknown command\b|"
+    r"\bunrecognized (?:command|option|arguments)\b|"
+    r"\bunknown (?:flag|option)\b|"
+    r"\bhttp\s*404\b|"
+    r"\b404 not found\b"
+    r")"
+)
+_UNKNOWN_GIVEUP_RE = re.compile(
+    r"(?i)\b(?:i (?:do not|don't) know|i(?:'m| am) not sure how|"
+    r"not sure how|no idea how|"
+    r"could not find (?:any |a )?(?:docs|documentation|reference)|"
+    r"i (?:couldn't|could not) find)\b"
+)
+_WEB_TOOL_NAMES = frozenset(
+    {"web.search", "web.fetch", "web_search", "web_fetch"}
+)
 _COMPLETION_CLAIM_RE = re.compile(
     r"(?i)\b(?:"
     r"(?:all|everything|the\s+\w+)\s+(?:is|are)\s+(?:now\s+)?(?:done|complete|finished|fixed|passing|green)|"
@@ -2647,6 +2690,28 @@ def text_claims_completion(text: str | None) -> bool:
     return bool(_COMPLETION_CLAIM_RE.search(t[-1500:]))
 
 
+def failure_is_knowledge(tail: str | None) -> bool:
+    """True when a tool tail is a missing module, command, or page."""
+    return bool(_KNOWLEDGE_FAILURE_RE.search(str(tail or "")[:2000]))
+
+
+def text_admits_unknown(text: str | None) -> bool:
+    """True when the answer stops because a fact outside the repo is missing."""
+    t = str(text or "").strip()
+    if not t:
+        return False
+    return bool(_UNKNOWN_GIVEUP_RE.search(t[-800:]))
+
+
+def batch_used_web(names: Any) -> bool:
+    """True when this tool batch already called web search or fetch."""
+    for name in names or []:
+        n = str(name or "").strip().lower()
+        if n in _WEB_TOOL_NAMES or n.startswith("web."):
+            return True
+    return False
+
+
 def summarize_tool_evidence(last_results: Any) -> dict[str, Any]:
     """Fold the last tool batch (``{name, ok, tail}`` rows) into build evidence.
 
@@ -2667,6 +2732,7 @@ def summarize_tool_evidence(last_results: Any) -> dict[str, Any]:
         "last_verify_ok": None,
         "last_verify_exit": None,
         "last_verify_tail": "",
+        "failed_tail": "",
         "mutate_after_verify": False,
         "single_explore": False,
         "names": [],
@@ -2706,6 +2772,7 @@ def summarize_tool_evidence(last_results: Any) -> dict[str, Any]:
                 out["verify_failed"] = True
                 out["failed_name"] = name
                 out["failed_exit"] = code
+                out["failed_tail"] = tail[:2000]
             last_kind = "verify"
             continue
         last_kind = "other"

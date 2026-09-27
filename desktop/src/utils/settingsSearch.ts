@@ -31,7 +31,7 @@ export const SETTINGS_SECTION_META: Record<
   provider: {
     title: 'Provider',
     summary: 'Model & API key',
-    keywords: 'llm openai anthropic xai ollama key model',
+    keywords: 'llm openai anthropic xai ollama key model sleev gateway compression tokens',
   },
   'provider-catalog': {
     title: 'Provider catalog',
@@ -41,7 +41,7 @@ export const SETTINGS_SECTION_META: Record<
   'you-agent': {
     title: 'You & Agent',
     summary: 'Names, language & persona',
-    keywords: 'user name agent persona identity wipe memory forget whoami soul language locale i18n',
+    keywords: 'user name agent persona identity whoami soul language locale i18n',
   },
   voice: {
     title: 'Voice',
@@ -80,7 +80,7 @@ export const SETTINGS_SECTION_META: Record<
     title: 'Privacy',
     summary: 'What leaves this PC to your model',
     keywords:
-      'privacy mode pii email phone scrub redact tool results llm egress cloud mail calendar page',
+      'privacy mode pii email phone scrub redact tool results llm egress cloud mail calendar page wipe memory forget persona soul',
   },
   'always-ready': {
     title: 'Always ready',

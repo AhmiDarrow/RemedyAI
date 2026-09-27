@@ -2,7 +2,7 @@ import { getServerUrl } from '../api/client'
 import { isTauri } from '../api/tauri'
 import { isConnectCompact } from '../utils/connectMode'
 import { useState, useEffect, useMemo } from 'react'
-import { getLatestCheckpoint, getPartnerStatus } from '../api/partner'
+import { getLatestCheckpoint, getPartnerStatus, touchPartner } from '../api/partner'
 import { getVisionStatus, type VisionStatus } from '../api/vision'
 import {
   getCoordinationPresence,
@@ -10,6 +10,7 @@ import {
 } from '../api/coordination'
 import type { ConnectedProvider } from '../api/providers'
 import { ThemeSwitcher } from './ThemeSwitcher'
+import { SettingsDialog } from './settings/SettingsFlow'
 import { ServerMenu } from './ServerMenu'
 import { FormSelect } from './settings/formUi'
 import type { ThemeId, Theme } from '../themes'
@@ -256,6 +257,7 @@ export function StatusBar({
 }: StatusBarProps) {
   const { t } = useI18n()
   const advanced = uiMode === 'advanced'
+  const [modelOptionsOpen, setModelOptionsOpen] = useState(false)
   const [version, setVersion] = useState('')
   const [status, setStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
   const [alerts, setAlerts] = useState('')
@@ -293,6 +295,25 @@ export function StatusBar({
   // the live provider list arrives.
   const [hasCheckpoint, setHasCheckpoint] = useState(false)
 
+  // A key or click is the owner at this door. Hidden-to-tray does not fire
+  // these, so the hearth can tell desk from away without watching the screen.
+  useEffect(() => {
+    let last = 0
+    const door = surface === 'grove' ? 'grove' : 'studio'
+    const ping = () => {
+      const now = Date.now()
+      if (now - last < 60_000) return
+      last = now
+      void touchPartner(door).catch(() => {})
+    }
+    window.addEventListener('pointerdown', ping)
+    window.addEventListener('keydown', ping)
+    return () => {
+      window.removeEventListener('pointerdown', ping)
+      window.removeEventListener('keydown', ping)
+    }
+  }, [surface])
+
   useEffect(() => {
     let cancelled = false
     let failStreak = 0
@@ -327,6 +348,8 @@ export function StatusBar({
           try {
             if (cancelled) return
             const bits: string[] = []
+            const greeting = String(p.hearth?.greeting || '').trim()
+            if (greeting) bits.push(greeting.length > 72 ? `${greeting.slice(0, 70)}…` : greeting)
             if (p.pending_approvals > 0) bits.push(`${p.pending_approvals} approve`)
             if (p.active_goal) {
               const t = String(p.active_goal)
@@ -340,11 +363,11 @@ export function StatusBar({
             setAlerts(bits.join(' · '))
             setAccessScope(String(p.access_scope || ''))
             // Tray tooltip mirrors organism mood when running under Tauri
-            const soma = p.soma
-            if (soma?.tray_tooltip) {
+            const trayLine = String(p.hearth?.line || p.soma?.tray_tooltip || '').trim()
+            if (trayLine) {
               try {
                 const { invoke } = await import('@tauri-apps/api/core')
-                await invoke('set_tray_tooltip', { tooltip: soma.tray_tooltip })
+                await invoke('set_tray_tooltip', { tooltip: trayLine })
               } catch {
                 /* webui / no tray */
               }
@@ -528,6 +551,107 @@ export function StatusBar({
     })()
   }
 
+  const modelControls = (<>
+    {onProviderModelChange ? (
+            <>
+              <FormSelect
+                size="sm"
+                className="mb-0 max-w-[110px]"
+                disabled={streaming || connectedProviders.length === 0}
+                title={
+                  streaming
+                    ? t('bar.stopToSwitch')
+                    : connectedProviders.length === 0
+                      ? t('bar.providerLoading')
+                      : t('bar.providerTitle')
+                }
+                value={
+                  // Prefer exact provider; only fall back if missing from list (keep label stable).
+                  connectedProviders.some((p) => p.id === effectiveProvider)
+                    ? effectiveProvider
+                    : connectedProviders.some((p) => p.id === (provider || ''))
+                      ? (provider || '')
+                      : effectiveProvider || connectedProviders[0]?.id || ''
+                }
+                onChange={(pid) => {
+                  const p = connectedProviders.find((x) => x.id === pid)
+                  // Never carry the previous provider's model across; prefer the
+                  // provider's remembered model, then the backend catalog default.
+                  const preferred = p?.last_model || p?.default_model || undefined
+                  const nextModel = pickModelForProvider(
+                    pid,
+                    preferred,
+                    connectedProviders,
+                    models,
+                  )
+                  onProviderModelChange(pid, nextModel || '')
+                }}
+                options={
+                  connectedProviders.length === 0
+                    ? [
+                        {
+                          value: effectiveProvider || '',
+                          label: effectiveProvider || 'Provider…',
+                        },
+                      ]
+                    : [
+                        ...(effectiveProvider === 'demo'
+                          && !connectedProviders.some((p) => p.id === 'demo')
+                          ? [{ value: 'demo', label: 'Demo (Free)' }]
+                          : []),
+                        ...connectedProviders.map((p) => ({ value: p.id, label: p.name })),
+                      ]
+                }
+              />
+              <FormSelect
+                size="sm"
+                className="mb-0 max-w-[200px]"
+                disabled={streaming || connectedProviders.length === 0}
+                title={
+                  streaming
+                    ? t('bar.stopToSwitchModel')
+                    : connectedProviders.length === 0
+                      ? t('bar.providerLoading')
+                      : t('bar.modelTitle')
+                }
+                value={safeModel || model}
+                onChange={(id) =>
+                  onProviderModelChange(effectiveProvider || provider || '', id)
+                }
+                options={[
+                  ...(safeModel && !modelOpts.some((m) => m.id === safeModel)
+                    ? [{ value: safeModel, label: safeModel }]
+                    : []),
+                  ...modelOpts.map((m) => ({ value: m.id, label: modelOptionLabel(m) })),
+                ]}
+              />
+              {modelsError && (
+                <span
+                  className="px-1 text-[10px] flex-shrink-0"
+                  style={{ color: 'var(--warning)', cursor: 'help' }}
+                  title={modelsError}
+                >
+                  ⚠ models
+                </span>
+              )}
+            </>
+          ) : models.length > 0 && onModelChange ? (
+            <FormSelect
+              size="sm"
+              className="mb-0 max-w-[140px]"
+              disabled={streaming}
+              title={streaming ? 'Stop generation to switch model' : 'Active model'}
+              value={model}
+              onChange={(id) => onModelChange(id)}
+              options={models.map((m) => ({ value: m.id, label: modelOptionLabel(m) }))}
+            />
+          ) : (
+            <span className="truncate max-w-[8rem]" title={model}>
+              {model}
+            </span>
+          )}
+  </>)
+
   const compact = isConnectCompact()
   if (compact) {
     // Phone portal: one-line strip — status dot, streaming, reconnect.
@@ -661,7 +785,7 @@ export function StatusBar({
             title={providerHealthTip}
             onClick={() => onOpenUsage?.()}
           >
-            Provider: flaky
+            Connection issue
           </button>
         )}
 
@@ -877,104 +1001,18 @@ export function StatusBar({
               {t('bar.usage')}
             </button>
           )}
-          {onProviderModelChange ? (
-            <>
-              <FormSelect
-                size="sm"
-                className="mb-0 max-w-[110px]"
-                disabled={streaming || connectedProviders.length === 0}
-                title={
-                  streaming
-                    ? t('bar.stopToSwitch')
-                    : connectedProviders.length === 0
-                      ? t('bar.providerLoading')
-                      : t('bar.providerTitle')
-                }
-                value={
-                  // Prefer exact provider; only fall back if missing from list (keep label stable).
-                  connectedProviders.some((p) => p.id === effectiveProvider)
-                    ? effectiveProvider
-                    : connectedProviders.some((p) => p.id === (provider || ''))
-                      ? (provider || '')
-                      : effectiveProvider || connectedProviders[0]?.id || ''
-                }
-                onChange={(pid) => {
-                  const p = connectedProviders.find((x) => x.id === pid)
-                  // Never carry the previous provider's model across; prefer the
-                  // provider's remembered model, then the backend catalog default.
-                  const preferred = p?.last_model || p?.default_model || undefined
-                  const nextModel = pickModelForProvider(
-                    pid,
-                    preferred,
-                    connectedProviders,
-                    models,
-                  )
-                  onProviderModelChange(pid, nextModel || '')
-                }}
-                options={
-                  connectedProviders.length === 0
-                    ? [
-                        {
-                          value: effectiveProvider || '',
-                          label: effectiveProvider || 'Provider…',
-                        },
-                      ]
-                    : [
-                        ...(effectiveProvider === 'demo'
-                          && !connectedProviders.some((p) => p.id === 'demo')
-                          ? [{ value: 'demo', label: 'Demo (Free)' }]
-                          : []),
-                        ...connectedProviders.map((p) => ({ value: p.id, label: p.name })),
-                      ]
-                }
-              />
-              <FormSelect
-                size="sm"
-                className="mb-0 max-w-[200px]"
-                disabled={streaming || connectedProviders.length === 0}
-                title={
-                  streaming
-                    ? t('bar.stopToSwitchModel')
-                    : connectedProviders.length === 0
-                      ? t('bar.providerLoading')
-                      : t('bar.modelTitle')
-                }
-                value={safeModel || model}
-                onChange={(id) =>
-                  onProviderModelChange(effectiveProvider || provider || '', id)
-                }
-                options={[
-                  ...(safeModel && !modelOpts.some((m) => m.id === safeModel)
-                    ? [{ value: safeModel, label: safeModel }]
-                    : []),
-                  ...modelOpts.map((m) => ({ value: m.id, label: modelOptionLabel(m) })),
-                ]}
-              />
-              {modelsError && (
-                <span
-                  className="px-1 text-[10px] flex-shrink-0"
-                  style={{ color: 'var(--warning)', cursor: 'help' }}
-                  title={modelsError}
-                >
-                  ⚠ models
-                </span>
-              )}
-            </>
-          ) : models.length > 0 && onModelChange ? (
-            <FormSelect
-              size="sm"
-              className="mb-0 max-w-[140px]"
-              disabled={streaming}
-              title={streaming ? 'Stop generation to switch model' : 'Active model'}
-              value={model}
-              onChange={(id) => onModelChange(id)}
-              options={models.map((m) => ({ value: m.id, label: modelOptionLabel(m) }))}
-            />
-          ) : (
-            <span className="truncate max-w-[8rem]" title={model}>
-              {model}
-            </span>
+          {advanced ? modelControls : (
+            <button type="button" className="seg-btn status-model-button"
+              title={model || 'Choose a model'} aria-haspopup="dialog"
+              aria-label={`Model options: ${model || 'not selected'}`}
+              onClick={() => setModelOptionsOpen(true)}>
+              {model || 'Choose model'} <span aria-hidden>⌄</span>
+            </button>
           )}
+          <SettingsDialog open={modelOptionsOpen} onClose={() => setModelOptionsOpen(false)}
+            title="Choose a model" description="Applies to this chat. Stop the current reply before switching.">
+            <div className="status-model-dialog">{modelControls}</div>
+          </SettingsDialog>
 
           {advanced && (
             <>
@@ -1004,9 +1042,9 @@ export function StatusBar({
                 className="status-chip flex items-center justify-center rounded px-1.5 text-[10px] font-semibold uppercase tracking-wide transition-colors"
                 title={
                   fullControl
-                    ? 'Full (warn) — write jail off except auth. Click for Ask.'
+                    ? 'Full access with warnings. Click to ask before risky actions.'
                     : autoApprove
-                      ? 'Auto (in-project) — build/write without prompts. Jail stays outside the folder. Click for Full.'
+                      ? 'Automatic changes in your project. Click for full access.'
                       : 'Ask before risky tools (safe default). Click for Auto.'
                 }
                 aria-label={
@@ -1079,7 +1117,7 @@ export function StatusBar({
             </>
           )}
 
-          <ThemeSwitcher currentId={themeId} currentTheme={theme} onChange={onThemeChange} />
+          {advanced && <ThemeSwitcher currentId={themeId} currentTheme={theme} onChange={onThemeChange} />}
         </div>
       </div>
     </div>

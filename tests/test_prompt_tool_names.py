@@ -41,6 +41,8 @@ def _prompt_texts() -> dict[str, str]:
     # A frontier binding is the case that gets the builder contract.
     profile = classify_muscle("anthropic", "claude-opus-5")
     texts["muscle_profile.builder_system_addendum"] = builder_system_addendum(profile)
+    small = classify_muscle("ollama", "qwen2.5-1.5b")
+    texts["muscle_profile.small_harness"] = builder_system_addendum(small)
     return texts
 
 

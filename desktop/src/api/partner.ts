@@ -159,6 +159,22 @@ export interface PartnerStatus {
   metabolism?: Record<string, unknown>
   /** Soul somatic signal (mood / bond). */
   soma?: SomaStatus
+  /** Always-on presence. She is here; the model is not in this loop. */
+  hearth?: HearthStatus
+}
+
+export interface HearthStatus {
+  present?: boolean
+  /** desk, phone, messenger, or away. */
+  locus?: string
+  surface?: string
+  /** One sentence from a night she already finished. Empty when she has nothing to say. */
+  greeting?: string
+  /** Tray / status line. */
+  line?: string
+  idle_s?: number
+  watches_screen?: boolean
+  muscle?: string
 }
 
 export async function getPartnerStatus(
@@ -166,6 +182,14 @@ export async function getPartnerStatus(
 ): Promise<PartnerStatus> {
   const q = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
   return apiFetch<PartnerStatus>(`/partner/status${q}`)
+}
+
+/** Tell the hearth which door the owner just used. Does not ack a greeting. */
+export async function touchPartner(surface: string): Promise<void> {
+  await apiFetch('/partner/touch', {
+    method: 'POST',
+    body: JSON.stringify({ surface }),
+  })
 }
 
 export async function listApprovals(sessionId?: string | null): Promise<PendingApproval[]> {

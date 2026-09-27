@@ -17,7 +17,7 @@ func TestIsModelHiddenTool(t *testing.T) {
 	for _, id := range []string{
 		"text.slugify", "text.word_count", "runtime.probe", "json.canonical", "text.sha256",
 		"workspace.read", "workspace.list", "workspace.write", "workspace.edit", "workspace.search",
-		"shell.exec",
+		"shell.exec", "partner.pulse",
 	} {
 		if !IsModelHiddenTool(id) {
 			t.Fatalf("%s must be hidden from the model", id)
@@ -25,7 +25,7 @@ func TestIsModelHiddenTool(t *testing.T) {
 	}
 	for _, id := range []string{
 		"read", "edit", "write", "glob", "grep", "bash", "jobs", "todo", "screenshot", "delegate",
-		"web.fetch", "memory.search",
+		"web.fetch", "memory.search", "partner.vigil",
 	} {
 		if IsModelHiddenTool(id) {
 			t.Fatalf("%s must stay model-visible", id)

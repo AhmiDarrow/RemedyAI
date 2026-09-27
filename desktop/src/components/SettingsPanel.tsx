@@ -69,6 +69,7 @@ import {
 import type { AssistantDraft } from './settings/AssistantSection'
 import { useSettingsPanelState } from '../hooks/useSettingsPanelState'
 import { EmptyState } from './EmptyState'
+import { SETTINGS_CATEGORIES } from '../utils/settingsNavigation'
 
 interface SettingsPanelProps {
   open: boolean
@@ -241,6 +242,8 @@ export function SettingsPanel({
   const messengersDirtyRef = useRef(false)
   const [assistantDraft, setAssistantDraft] = useState<AssistantDraft>({})
   const {
+    category,
+    setCategory,
     settingsSearch,
     visibleSectionCount,
     setSettingsSearch,
@@ -809,8 +812,8 @@ export function SettingsPanel({
         (projectPath || '').trim() !== prevProject
           && (projectPath || '').trim() !== ''
       const okMsg = projectChanged
-        ? 'Settings saved · Project loaded · Remedy reloaded'
-        : 'Settings saved · Remedy reloaded'
+        ? 'Settings saved · Workspace updated'
+        : 'Settings saved'
       setStatusMessage(okMsg)
       setSaveToast({ kind: 'ok', text: okMsg })
       window.setTimeout(() => setSaveToast(null), 3200)
@@ -1139,30 +1142,31 @@ export function SettingsPanel({
           onChange={(e) => {
             const q = e.target.value
             setSettingsSearch(q)
-            // Jump to first matching section after expand paints.
-            if (q.trim()) {
-              window.requestAnimationFrame(() => {
-                const root = scrollBodyRef.current
-                const all = root?.querySelectorAll<HTMLElement>('[data-section]')
-                if (all) {
-                  for (const el of all) {
-                    if (el.offsetParent !== null) {
-                      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-                      break
-                    }
-                  }
-                }
-              })
-            }
+            scrollBodyRef.current?.scrollTo({ top: 0 })
           }}
           placeholder="Search all settings…"
           className="ui-input"
           aria-label="Search settings"
         />
+        <nav className="settings-categories" aria-label={t('settings.categories')}>
+          {SETTINGS_CATEGORIES.map((id) => (
+            <button
+              key={id}
+              type="button"
+              aria-current={!settingsSearch.trim() && category === id ? 'page' : undefined}
+              onClick={() => {
+                setCategory(id)
+                scrollBodyRef.current?.scrollTo({ top: 0 })
+              }}
+            >
+              {t(`settings.category.${id}`)}
+            </button>
+          ))}
+        </nav>
         <p className="settings-search-hint" role="status">
           {settingsSearch.trim()
             ? `${visibleSectionCount} matching ${visibleSectionCount === 1 ? 'section' : 'sections'} across all settings`
-            : settingsMode === 'simple' ? 'Everyday essentials. Advanced has all controls.' : 'All controls, organized by category.'}
+            : t(`settings.category.${category}Hint`)}
         </p>
       </div>
 
@@ -1171,9 +1175,11 @@ export function SettingsPanel({
           <EmptyState title="Loading settings…" compact />
         ) : !settings ? (
           <EmptyState title="Settings couldn’t load" description="Check your connection and try again." tone="error" actionLabel="Try again" onAction={() => void load()} />
-        ) : visibleSectionCount === 0 ? (
-          <EmptyState title="No settings found" description="Try a shorter word, such as model, voice, or theme." actionLabel="Clear search" onAction={() => setSettingsSearch('')} />
         ) : (
+          <>
+            {visibleSectionCount === 0 && (
+              <EmptyState title="No settings found" description="Try a shorter word, such as model, voice, or theme." actionLabel="Clear search" onAction={() => setSettingsSearch('')} />
+            )}
             <SettingsFormSections
               sectionProps={sectionProps}
               provider={provider}
@@ -1379,7 +1385,7 @@ export function SettingsPanel({
               onAssistantAccountsChanged={() => {
                 void load()
               }}
-              settingsMode={settingsMode}
+              settingsMode={settingsSearch.trim() ? 'advanced' : settingsMode}
               primaryProviders={primaryProviders}
               advancedProviders={advancedProviders}
               activeMeta={activeMeta}
@@ -1421,6 +1427,7 @@ export function SettingsPanel({
               onOpenHelp={onOpenHelp}
               settings={settings}
             />
+          </>
         )}
       </div>
 

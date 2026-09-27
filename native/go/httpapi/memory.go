@@ -516,12 +516,12 @@ func resetSoulPersonaFiles(home string) bool {
 			"rapport":      0.5,
 			"open_threads": []any{},
 		},
-		"pledges":         []any{},
-		"self_habits":     []any{},
-		"future_dreams":   []any{},
-		"episodes":        []any{},
+		"pledges":          []any{},
+		"self_habits":      []any{},
+		"future_dreams":    []any{},
+		"episodes":         []any{},
 		"organism_lessons": []any{},
-		"pledge_traces":   map[string]any{},
+		"pledge_traces":    map[string]any{},
 	}
 	_ = os.MkdirAll(filepath.Dir(path), 0o700)
 	return writeJSONAtomic(path, fresh) == nil
@@ -582,6 +582,7 @@ func wipePersonaFiles(home string) int {
 		filepath.Join(home, "soul", "proprioception.json"),
 		filepath.Join(home, "soul", "vigil.json"),
 		filepath.Join(home, "soul", "vigil_journal.jsonl"),
+		filepath.Join(home, "soul", "hearth.json"),
 		filepath.Join(home, "facts.jsonl"),
 		filepath.Join(home, "myelin", "ledger.json"),
 	}
@@ -627,4 +628,3 @@ func wipePersonaFiles(home string) int {
 	})
 	return n
 }
-

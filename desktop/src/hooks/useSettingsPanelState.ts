@@ -19,10 +19,14 @@ import {
 } from '../utils/settingsMode'
 import { sectionMatchesSearch } from '../components/SettingsSection'
 import { useI18n } from '../i18n'
+import {
+  SECTION_CATEGORY, isSettingsSection, settingsSectionVisible, type SettingsCategory,
+} from '../utils/settingsNavigation'
 
 export function useSettingsPanelState() {
   const { t } = useI18n()
   const [settingsSearch, setSettingsSearch] = useState('')
+  const [category, setCategoryRaw] = useState<SettingsCategory>('general')
   const [forceSection, setForceSection] = useState<string | null>(null)
   const [visionSectionOpen, setVisionSectionOpen] = useState(false)
   const [rmbSectionOpen, setRmbSectionOpen] = useState(false)
@@ -33,6 +37,12 @@ export function useSettingsPanelState() {
   const setSettingsMode = useCallback((m: SettingsMode) => {
     setSettingsModeRaw(m)
     saveSettingsMode(m)
+  }, [])
+
+  const setCategory = useCallback((next: SettingsCategory) => {
+    setCategoryRaw(next)
+    setSettingsSearch('')
+    setForceSection(null)
   }, [])
 
   const matchSec = useCallback(
@@ -50,17 +60,14 @@ export function useSettingsPanelState() {
 
   const sectionProps = useCallback(
     (id: SettingsSectionId) => {
-      const modeHidden = !settingsSearch.trim() && !isSectionVisibleInMode(id, settingsMode)
-      const searchHidden = settingsSearch.trim().length > 0 && !matchSec(id)
+      const hidden = !settingsSectionVisible(id, category, settingsMode, !!settingsSearch.trim(), matchSec(id))
       return {
         id,
         title: t(`sec.${id}`),
         summary: t(`sec.${id}Sum`),
         keywords: SETTINGS_SECTION_META[id].keywords,
-        forceOpen:
-          forceSection === id
-          || (settingsSearch.trim().length > 0 && matchSec(id) && !modeHidden),
-        hidden: modeHidden || searchHidden,
+        forceOpen: forceSection === id && !hidden,
+        hidden,
         onOpenChange: (isOpen: boolean) => {
           if (isOpen) {
             setForceSection(id)
@@ -75,7 +82,7 @@ export function useSettingsPanelState() {
         },
       }
     },
-    [forceSection, matchSec, settingsSearch, settingsMode, t],
+    [category, forceSection, matchSec, settingsSearch, settingsMode, t],
   )
 
   // Remedy asked to open a section (app_control / update_settings).
@@ -84,7 +91,9 @@ export function useSettingsPanelState() {
       const id = String(
         (ev as CustomEvent<{ section?: string }>).detail?.section || '',
       )
-      if (!id) return
+      if (!isSettingsSection(id)) return
+      setSettingsSearch('')
+      setCategoryRaw(SECTION_CATEGORY[id])
       if (ADVANCED_ONLY_SECTIONS.has(id)) setSettingsMode('advanced')
       setForceSection(id)
       saveLastSettingsSection(id)
@@ -99,7 +108,10 @@ export function useSettingsPanelState() {
   const onPanelOpenChange = useCallback((open: boolean) => {
     if (open) {
       const last = loadLastSettingsSection()
-      if (last) setForceSection(last)
+      if (isSettingsSection(last) && isSectionVisibleInMode(last, loadSettingsMode())) {
+        setCategoryRaw(SECTION_CATEGORY[last])
+        setForceSection(last)
+      }
     } else {
       setVisionSectionOpen(false)
       setRmbSectionOpen(false)
@@ -108,6 +120,8 @@ export function useSettingsPanelState() {
   }, [])
 
   return {
+    category,
+    setCategory,
     settingsSearch,
     setSettingsSearch,
     forceSection,

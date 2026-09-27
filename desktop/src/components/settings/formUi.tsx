@@ -15,8 +15,8 @@ import { createPortal } from 'react-dom'
 export function FormHint({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
     <div
-      className={`text-[10px] mb-2 leading-snug ${className}`.trim()}
-      style={{ color: 'var(--text-muted)' }}
+      className={`settings-form-hint text-xs mb-2 leading-relaxed ${className}`.trim()}
+      style={{ color: 'var(--text-secondary)' }}
     >
       {children}
     </div>
@@ -35,8 +35,8 @@ export function FormLabel({
   return (
     <label
       htmlFor={htmlFor}
-      className={`block mb-1 text-[0.68rem] font-semibold uppercase tracking-wide ${className}`.trim()}
-      style={{ color: 'var(--text-muted)' }}
+      className={`block mb-1 text-xs font-medium ${className}`.trim()}
+      style={{ color: 'var(--text-secondary)' }}
     >
       {children}
     </label>
@@ -516,7 +516,7 @@ export function FormToggle({
           {label}
         </span>
         {description ? (
-          <span className="block text-[10px] mt-0.5 leading-snug" style={{ color: 'var(--text-muted)' }}>
+          <span className="block text-xs mt-1 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
             {description}
           </span>
         ) : null}
@@ -558,7 +558,8 @@ export function FormNotice({
         : 'var(--text-muted)'
   return (
     <div
-      className={`text-[10px] rounded-lg px-2.5 py-1.5 mb-2 leading-snug ${className}`.trim()}
+      role={tone === 'error' ? 'alert' : 'status'}
+      className={`text-xs rounded-lg px-3 py-2 mb-2 leading-relaxed ${className}`.trim()}
       style={{ color, border: `1px solid ${border}`, background: bg }}
     >
       {children}
@@ -580,7 +581,7 @@ export function FormLinkButton({
   return (
     <button
       type="button"
-      className={`mb-2 text-[10px] underline block bg-transparent border-0 p-0 cursor-pointer ${className}`.trim()}
+      className={`mb-2 text-xs underline block bg-transparent border-0 py-1 cursor-pointer ${className}`.trim()}
       style={{ color: accent ? 'var(--accent)' : 'var(--text-muted)' }}
       onClick={onClick}
     >

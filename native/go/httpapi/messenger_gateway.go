@@ -171,6 +171,7 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 		runCtx = ctx
 	}
 	s.messengerGW.SendTyping(runCtx, ev.Channel, chatID)
+	s.hearthTouch(messengerOrigin(string(ev.Channel), senderID), time.Now())
 
 	projectPath := ""
 	if sess.ProjectPath != nil {
@@ -207,6 +208,9 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 		}
 		return nil
 	})
+	if turnErr == nil {
+		s.hearthAck(time.Now())
+	}
 	text := strings.TrimSpace(reply.String())
 	if turnErr != nil && text == "" {
 		text = redactStreamError(turnErr)

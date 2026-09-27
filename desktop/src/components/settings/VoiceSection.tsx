@@ -41,12 +41,14 @@ export function VoiceSection({
   const [status, setStatus] = useState<VoiceStatus | null>(null)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState('')
 
   const refresh = useCallback(async () => {
     try {
       setStatus(await getVoiceStatus({ timeout: 8000 }))
+      setLoadError('')
     } catch {
-      /* keep last status */
+      setLoadError('Could not check voice setup. Try again when Remedy is connected.')
     }
   }, [])
 
@@ -199,13 +201,21 @@ export function VoiceSection({
     return <FormHint>{label} downloads with Remedy — no extra step.</FormHint>
   }
 
+  if (!status) return (
+    <SettingsSection {...sectionProps}>
+      {loadError ? <>
+        <FormNotice tone="error">{loadError}</FormNotice>
+        <FormActionButton onClick={() => { setLoadError(''); void refresh() }}>Retry voice settings</FormActionButton>
+      </> : <FormHint>Checking voice setup…</FormHint>}
+    </SettingsSection>
+  )
+
   return (
     <SettingsSection {...sectionProps}>
       {tts?.enabled === false ? (
         <div className="flex flex-wrap items-center gap-1.5 mb-2">
           <FormNotice tone="warn">
-            Remedy's own voice is switched off — this computer's built-in voice is reading
-            replies instead of Remedy's own voice.
+            Replies use your computer’s built-in voice. Remedy’s voice is switched off.
           </FormNotice>
           <FormActionButton variant="primary" onClick={() => void patch({ tts_enabled: true })}>
             Use Remedy's voice
@@ -218,8 +228,8 @@ export function VoiceSection({
         label="Speak replies aloud"
         description={
           ttsReady
-            ? "Grove uses Remedy's voice on this computer. Audio never leaves the machine."
-            : "Works now with this computer's voices. Remedy's voice arrives with the rest of the install."
+            ? 'Speech is generated on this computer.'
+            : 'Uses your computer’s voice until Remedy’s voice is ready.'
         }
       />
 
@@ -262,8 +272,8 @@ export function VoiceSection({
       {voiceReady && !hqReady ? (
         <FormHint>
           {hqDownloading
-            ? 'Her full voice is still arriving; she speaks with the first one meanwhile.'
-            : 'Her full voice is not here yet; she speaks with the first one meanwhile.'}
+            ? 'The higher-quality voice is downloading. You can keep using voice meanwhile.'
+            : 'The standard voice is ready. The higher-quality voice is not installed yet.'}
         </FormHint>
       ) : null}
 
@@ -276,7 +286,7 @@ export function VoiceSection({
           <FormToggle
             checked={Boolean(stt?.enabled ?? true)}
             onChange={(on) => void patch({ stt_enabled: on })}
-            label="Hearing (whisper)"
+            label="Voice input"
           />
           {assetLine(
             Boolean(stt?.installed),
@@ -314,11 +324,7 @@ export function VoiceSection({
             turn?.install?.percent,
           )}
         </>
-      ) : (
-        <FormHint>
-          Hearing and live-call turn-taking live under Advanced.
-        </FormHint>
-      )}
+      ) : null}
 
       {msg ? (
         <FormNotice tone="error">{msg}</FormNotice>

@@ -66,7 +66,7 @@ _LOG_MAX_BYTES = 2 * 1024 * 1024
 _LOG_BACKUPS = 3
 
 # Tools sharing the cached BasicRuntime run one at a time.
-_SERIAL_PREFIXES = ("prompt.", "memory.", "skill.", "voice.", "vision.")
+_SERIAL_PREFIXES = ("prompt.", "memory.", "skill.", "voice.", "vision.", "partner.")
 _serial_lock = threading.Lock()
 
 # Envelope / input field the Go side sets after binding paths (see module doc).
@@ -825,6 +825,42 @@ def _calendar_create_event(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return calendar_create_event(inp)
 
 
+def _partner_home(inp: Mapping[str, Any]) -> str | None:
+    """home_dir is present only when the runtime bound it."""
+    home = str(inp.get("home_dir") or "").strip()
+    return home or None
+
+
+def _partner_vigil(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Owner yes/no for muscle-free nights. Does not call a provider."""
+    from remedy.memory.soul.vigil import set_vigil_enabled, vigil_status
+
+    action = str(inp.get("action") or "status").strip().lower()
+    home = _partner_home(inp)
+    if action == "enable":
+        set_vigil_enabled(True, home)
+    elif action == "disable":
+        set_vigil_enabled(False, home)
+    elif action != "status":
+        return {"ok": False, "error": "action must be status, enable, or disable"}
+    return {"ok": True, "vigil": vigil_status(home)}
+
+
+def _partner_pulse(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """One hearth night tick. Local field only — never a model call."""
+    from remedy.memory.soul.vigil import vigil_tick
+
+    home = _partner_home(inp)
+    try:
+        out = vigil_tick(home)
+    except Exception:
+        logger.exception("partner.pulse failed")
+        return {"ok": False, "error": "night pulse failed"}
+    keep = ("ok", "skipped", "woke", "rested", "act")
+    vigil = {k: out.get(k) for k in keep if k in out}
+    return {"ok": True, "vigil": vigil}
+
+
 _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("text.slugify", 1): lambda inp: {"slug": _slugify(str(inp.get("text", "")))},
     ("text.word_count", 1): lambda inp: {"words": _word_count(str(inp.get("text", "")))},
@@ -857,6 +893,8 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("mail.send", 1): _mail_send,
     ("calendar.list_events", 1): _calendar_list_events,
     ("calendar.create_event", 1): _calendar_create_event,
+    ("partner.vigil", 1): _partner_vigil,
+    ("partner.pulse", 1): _partner_pulse,
 }
 
 

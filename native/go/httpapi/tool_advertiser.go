@@ -8,8 +8,9 @@ import (
 
 // advertiseToolSurface pushes the Tool ABI surface onto any adapter that
 // implements providers.ToolAdvertiser — one seam for every provider instead of
-// a type assertion per adapter. coding selects the mid-build coding pack;
-// loopback runtimes always get it, along with the local request fitter.
+// a type assertion per adapter. coding selects the mid-build coding pack when
+// the caller asks for it. A loopback runtime keeps the full surface and the
+// local request fitter, so the model's own context window is the limit.
 func (r *CognitionTurnRunner) advertiseToolSurface(model cognition.Model, coding bool) {
 	if r == nil || r.Registry == nil || model == nil {
 		return
@@ -34,7 +35,6 @@ func (r *CognitionTurnRunner) advertiseToolSurface(model cognition.Model, coding
 			if oc.NCtx <= 0 {
 				oc.NCtx = providers.LocalContextWindow
 			}
-			useCoding = true
 		}
 	}
 	adv.SetTools(r.registryToolSurface(useCoding))

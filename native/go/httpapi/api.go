@@ -27,7 +27,7 @@ import (
 )
 
 // Version matches pyproject.toml; scripts/sync_version.py stamps this const.
-const Version = "0.63.3"
+const Version = "0.64.0"
 
 // Config controls the minimal local API server.
 type Config struct {
@@ -113,6 +113,9 @@ type Server struct {
 
 	// lastUserActivityUnixNano powers /api/self-improve idle_s (0 = none yet).
 	lastUserActivityUnixNano int64
+
+	hearthMu     sync.Mutex
+	hearthCancel context.CancelFunc
 }
 
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
@@ -333,6 +336,8 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/files/search", s.handleSearchFiles)
 	s.mux.HandleFunc("GET /api/media", s.handleServeMedia)
 	s.mux.HandleFunc("GET /api/partner/status", s.handlePartnerStatus)
+	s.mux.HandleFunc("POST /api/partner/touch", s.handlePartnerTouch)
+	s.mux.HandleFunc("POST /api/partner/hearth/ack", s.handlePartnerHearthAck)
 	s.mux.HandleFunc("GET /api/approvals", s.handleListApprovals)
 	s.mux.HandleFunc("POST /api/approvals/{approval_id}/resolve", s.handleResolveApproval)
 	s.mux.HandleFunc("GET /api/life-tasks/current", s.handleCurrentLifeTask)
@@ -411,6 +416,7 @@ func (s *Server) Close() error {
 	if s == nil {
 		return nil
 	}
+	s.stopHearthLoop()
 	s.stopSchedulerLoop()
 	s.stopMessengerGateway()
 	s.stopConnectGateway()
@@ -441,6 +447,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.startMessengerGateway()
 	s.startConnectGateway(s.apiListenPort)
 	s.startSchedulerLoop(ctx)
+	s.startHearthLoop(ctx)
 	httpServer := &http.Server{Handler: s.Handler()}
 	errCh := make(chan error, 1)
 	go func() {

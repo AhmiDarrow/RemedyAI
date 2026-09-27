@@ -30,6 +30,7 @@ export function SettingsSection({
   children,
 }: SettingsSectionProps) {
   const [open, setOpen] = useState(defaultOpen)
+  const [visited, setVisited] = useState(defaultOpen)
   const contentId = useId()
   // Track the last force directive we actually applied. A persistent
   // `forceOpen === true` must NOT re-open a section the user just collapsed:
@@ -43,24 +44,27 @@ export function SettingsSection({
     if (forceOpen === true) {
       setOpen(true)
       onOpenChange?.(true)
+    } else if (forceOpen === false) {
+      setOpen(false)
     }
     // Intentionally NOT depending on onOpenChange — its identity changes on
     // every parent render and would re-run this effect (reopening sections).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [forceOpen])
 
-  if (hidden) return null
+  useEffect(() => {
+    if (open) setVisited(true)
+  }, [open])
 
   const toggle = () => {
-    setOpen((o) => {
-      const next = !o
-      onOpenChange?.(next)
-      return next
-    })
+    const next = !open
+    setOpen(next)
+    onOpenChange?.(next)
   }
 
   return (
     <section
+      hidden={hidden}
       className={`settings-section${open ? ' is-open' : ''}`}
       data-section={id}
       data-keywords={`${title} ${summary || ''} ${keywords}`.toLowerCase()}
@@ -82,8 +86,8 @@ export function SettingsSection({
           ) : null}
         </span>
       </button>
-      {open && (
-        <div id={contentId} className="settings-section-body px-3 pb-3 pt-1.5 space-y-2 text-xs">
+      {(open || visited) && (
+        <div id={contentId} hidden={!open} className="settings-section-body px-3 pb-3 pt-1.5 space-y-2 text-xs">
           {children}
         </div>
       )}

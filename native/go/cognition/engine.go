@@ -368,6 +368,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 	budget := transcriptBudget(e.contextWindow())
 
 	var lastBatch string
+	var failNotes failNoteState
 	repeated := 0
 	repeatNudges := 0
 	lengthContinues := 0
@@ -602,6 +603,10 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 			verifySeen = allGreen
 		}
 		trace(StateUpdate, iteration, fmt.Sprintf("append %d tool results", len(results)))
+		if note := nextFailureNote(results, &failNotes); note != "" {
+			transcript = append(transcript, contextNote(note))
+			trace(StateUpdate, iteration, "failure note")
+		}
 
 		// Soft epoch: refresh the Session Brief and keep going. It never trims
 		// the transcript — the budget check at the top of the loop owns that.
