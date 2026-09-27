@@ -191,11 +191,82 @@ def test_offer_hint_rides_inject_then_disappears(tmp_path):
     _accumulate_episodes(tmp_path, n=13)
     # A status render (no contract) must NOT burn the one-time offer
     status_block = build_soul_context_block(home=tmp_path)
-    assert "soul_vigil action=enable" not in status_block
+    assert "partner.vigil" not in status_block
     block = build_soul_context_block(home=tmp_path, include_contract=True)
-    assert "soul_vigil action=enable" in block  # the one conversational ask
+    assert "partner.vigil with action enable" in block  # the one conversational ask
     block2 = build_soul_context_block(home=tmp_path, include_contract=True)
-    assert "soul_vigil action=enable" not in block2  # at-most-once, guaranteed
+    assert "partner.vigil" not in block2  # at-most-once, guaranteed
+    clear_soul_cache()
+
+
+def test_hearth_greeting_rides_once_in_the_inject(tmp_path):
+    import json
+
+    from remedy.memory.soul.field import soul_dir
+
+    soul_dir(tmp_path).mkdir(parents=True, exist_ok=True)
+    (soul_dir(tmp_path) / "hearth.json").write_text(
+        json.dumps(
+            {
+                "greeting": "While you were away I dreamed on our recent episodes.",
+                "watches_screen": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    block = build_soul_context_block(home=tmp_path)
+    assert "dreamed on our recent episodes" in block
+    assert "say it once" in block
+    assert "Vigil (your own time" not in block
+
+
+def test_partner_vigil_enable_is_local(tmp_path):
+    from remedy.runtime.rmdy_tool_worker import _partner_pulse, _partner_vigil
+
+    status = _partner_vigil({"action": "status", "home_dir": str(tmp_path)})
+    assert status["ok"] is True
+    assert status["vigil"]["enabled"] is False
+    enabled = _partner_vigil({"action": "enable", "home_dir": str(tmp_path)})
+    assert enabled["vigil"]["enabled"] is True
+    pulse = _partner_pulse({"home_dir": str(tmp_path)})
+    assert pulse["ok"] is True
+    assert pulse["vigil"].get("skipped") != "disabled"
+    assert _partner_vigil({"action": "status", "home_dir": str(tmp_path)})["vigil"]["enabled"] is True
+
+
+def test_night_names_the_move_and_stops_before_paying(tmp_path):
+    """Usefulness bar: a night says what changed, and a send/pay waits once."""
+    from remedy.memory.life_goals import LifeGoalStore
+    from remedy.memory.soul.vigil import phrase_for
+
+    clear_soul_cache()
+    LifeGoalStore(tmp_path).add("Land the job", next_action="Rewrite the resume")
+    set_vigil_enabled(True, tmp_path, min_gap_s=60)
+    moved = vigil_tick(tmp_path)
+    assert moved.get("act") == "life_step"
+    assert "Rewrite the resume" in str(moved.get("detail") or "")
+    report = night_report(tmp_path, since_ts=0.0)
+    assert "Rewrite the resume" in report
+    assert "moved “" in report
+    assert phrase_for("life_step", "quiet local step toward the active life goal") == (
+        "took a quiet step toward your goal"
+    )
+
+    store = LifeGoalStore(tmp_path)
+    assert store.set_next("Land the job", "Pay the filing fee") is not None
+    # The drive interval would hide the stop. This bench forces the next wake
+    # to see the irreversible action by clearing the last drive stamp.
+    goals = store._load()
+    store.last_drive_at = 0
+    store._save(goals)
+    stopped = vigil_tick(tmp_path, now=time.time() + 3600)
+    assert stopped.get("act") == "needs_you"
+    assert "Pay the filing fee" in str(stopped.get("detail") or "")
+    assert stopped.get("outcome", {}).get("result", {}).get("skipped") == "needs_you"
+    waiting = night_report(tmp_path, since_ts=0.0)
+    assert "waited on you before “Pay the filing fee”" in waiting
+    # She does not line up the same stop again while the drive interval holds.
+    assert not [h for h in wake_hungers(tmp_path) if h["act"] == "life_step"]
     clear_soul_cache()
 
 

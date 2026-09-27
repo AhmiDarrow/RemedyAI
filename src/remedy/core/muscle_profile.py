@@ -163,26 +163,41 @@ def muscle_from_runtime(runtime: Any = None) -> MuscleProfile:
 
 
 def builder_system_addendum(profile: MuscleProfile) -> str:
-    """Extra system block when muscle is capable of multi-step construction."""
-    if not profile.builder_contract:
-        return ""
+    """Work-turn harness for this muscle.
+
+    A frontier card and a smaller-model card are the same rule: finished
+    means a check that ran, not a sentence that says finished. The card
+    does not cap steps, retries, or tools. The model brings those limits.
+    """
     from remedy.core.react_policy import TOOL_NAME_TABLE as T
+
+    research = (
+        "If a check fails on a missing module or unknown command, "
+        f"search once with {T['web_search']} before editing."
+    )
+    if not profile.builder_contract:
+        return (
+            f"[Harness · {profile.label}]\n"
+            "Run until the request is finished. "
+            "Done means a check you ran succeeded.\n"
+            f"{research}"
+        )
 
     spread = (
         " Survey independent modules in one parallel batch."
         if profile.prefer_spread
         else ""
     )
-    parallel = profile.max_parallel_tools
     return (
         f"[Builder · {profile.label} · {profile.provider or 'provider'}"
-        f"{(' / ' + profile.model) if profile.model else ''} · "
-        f"parallel≤{parallel}]\n"
+        f"{(' / ' + profile.model) if profile.model else ''}]\n"
         "You can design and ship full systems with tools. After a runnable "
         f"with a window: run it, {T['computer']} screenshot the desktop, play it, "
         f"{T['edit']} what you see."
         f"{spread} "
-        "Run until the request is finished."
+        "Run until the request is finished. "
+        "Done means a check you ran succeeded. "
+        f"{research}"
     )
 
 

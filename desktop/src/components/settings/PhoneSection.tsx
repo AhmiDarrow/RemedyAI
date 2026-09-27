@@ -8,6 +8,10 @@ import {
   type TelephonyStatus,
 } from '../../api/telephony'
 import { SettingsSection } from '../SettingsSection'
+import { SettingsFlow } from './SettingsFlow'
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
+import { openExternalUrl } from '../../api/auth'
+import phoneTerms from '../../../../docs/TELEPHONY_TERMS.md?raw'
 import { FormActionButton, FormHint, FormNotice } from './formUi'
 
 type SectionProps = {
@@ -28,11 +32,17 @@ export function PhoneSection({
   const [st, setSt] = useState<TelephonyStatus | null>(null)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState(true)
 
-  const refresh = useCallback(() => {
-    getTelephonyStatus()
-      .then(setSt)
-      .catch(() => {})
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    try {
+      setSt(await getTelephonyStatus())
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : 'Could not load phone settings.')
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -70,20 +80,31 @@ export function PhoneSection({
     <SettingsSection {...sectionProps}>
       <FormHint>
         {st?.message
-          || 'Calling a real number is not on this computer yet. The voice and turn-taking are ready; the phone line is next.'}
+          || (loading ? 'Loading phone settings…' : 'Phone status is unavailable. Try again to check your setup.')}
       </FormHint>
-      {st && !st.terms.agreed ? (
-        <>
-          <FormHint>
-            {st.terms.ask
-              || 'Before Remedy can use a phone, you agree to the phone terms once.'}
-          </FormHint>
-          <FormActionButton disabled={busy} onClick={() => void agree()}>
-            I agree to the phone terms
-          </FormActionButton>
-        </>
+      {loading ? <FormHint>Checking phone setup…</FormHint> : !st ? (
+        <FormActionButton onClick={() => { setMsg(''); void refresh() }}>Retry phone settings</FormActionButton>
       ) : (
-        <FormHint>Phone terms are agreed on this computer.</FormHint>
+        <SettingsFlow title="Phone terms"
+          summary={st.terms.agreed && !st.terms.stale ? 'Accepted on this computer' : 'Review before enabling calls'} busy={busy}>
+          <div className="settings-terms"><ReactMarkdown
+            urlTransform={url => url === '../LICENSE'
+              ? 'https://github.com/AhmiDarrow/RemedyAI/blob/master/LICENSE'
+              : url === './THIRD_PARTY.md'
+                ? 'https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/THIRD_PARTY.md'
+                : defaultUrlTransform(url)}
+            components={{ a: ({ href, children }) => <a href={href} onClick={event => {
+              event.preventDefault()
+              if (href) void openExternalUrl(href)
+            }}>{children}</a> }}
+          >{phoneTerms}</ReactMarkdown></div>
+          {!st.terms.agreed || st.terms.stale ? <>
+            <FormHint>{st.terms.ask || 'Read the terms above before agreeing.'}</FormHint>
+            <FormActionButton disabled={busy} onClick={() => void agree()}>
+              I agree to the phone terms
+            </FormActionButton>
+          </> : <FormHint>Phone terms are agreed on this computer.</FormHint>}
+        </SettingsFlow>
       )}
       {(st?.lines || [])
         .filter((l) => l.achievable)
@@ -103,7 +124,8 @@ export function PhoneSection({
                   : '1px solid var(--border)',
               color: 'var(--text-primary)',
             }}
-            disabled={busy}
+            disabled={busy || loading || !st?.terms.agreed || st.terms.stale}
+            aria-pressed={st?.chosen === l.name}
             onClick={() => void pick(l.name)}
           >
             <span className="block text-xs font-semibold">{l.title}</span>

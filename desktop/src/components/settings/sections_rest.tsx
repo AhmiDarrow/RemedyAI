@@ -14,7 +14,6 @@ import {
 } from './formUi'
 import { openExternalUrl } from '../../api/auth'
 import { THEME_LIST } from '../../themes'
-import { ThemeColorDot } from '../ThemeSwitcher'
 import { HOTKEYS } from '../../hotkeys'
 import { MessengersSection } from './MessengersSection'
 import { AssistantSection } from './AssistantSection'
@@ -243,33 +242,9 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
       <SettingsSection
         {...sectionProps('theme')}
       >
-        <div className="flex flex-col gap-1">
-          {THEME_LIST.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => onThemeChange(t.id)}
-              className={`settings-choice-row flex items-center gap-2 px-2 py-1.5 text-xs text-left w-full${
-                t.id === themeId ? ' is-active' : ''
-              }`}
-              style={{ color: 'var(--text-primary)' }}
-            >
-              <ThemeColorDot themeId={t.id} />
-              <span>
-                {t.name}
-                {t.id === 'system' ? (
-                  <span style={{ color: 'var(--text-muted)' }}> · match OS</span>
-                ) : null}
-              </span>
-              {t.id === themeId && (
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="ml-auto">
-                  <path d="M2 6l3 3 5-5" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              )}
-            </button>
-          ))}
-        </div>
-
+        <FormLabel>Color theme</FormLabel>
+        <FormSelect value={themeId} onChange={id => onThemeChange(id as typeof themeId)}
+          title="Color theme" options={THEME_LIST.map(theme => ({value: theme.id, label: theme.name}))} />
         <div className="mt-3 space-y-2">
           <FormLabel>Text size</FormLabel>
           <FormSegmented
@@ -323,6 +298,7 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
               type="text"
               value={customAccent}
               onChange={(e) => onCustomAccentChange?.(e.target.value)}
+              aria-label="Custom accent color"
               placeholder="#hex or empty"
               className="ui-input flex-1 font-mono"
             />

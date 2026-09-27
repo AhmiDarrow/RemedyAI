@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { SettingsFormProps } from './formTypes'
 import { SettingsSection } from '../SettingsSection'
+import { SettingsFlow } from './SettingsFlow'
 import {
   FormActionButton,
   FormDownloadProgress,
@@ -439,14 +440,8 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
 
   return (
     <>
-      <SettingsSection {...sectionProps('rmb')}>
-        <FormHint>
-          <strong style={{ color: 'var(--text-secondary)' }}>Local models (RMB)</strong>
-          {' '}— pick a GGUF. Remedy <strong>loads it, sets chat to RMB, and keeps the
-          status bar in sync</strong> automatically. No other provider settings needed.
-          Files in Downloads or{' '}
-          <code className="text-[9px]">~/.remedy/rmb/models/</code>.
-        </FormHint>
+      <SettingsSection {...sectionProps('rmb')} title="Local models" summary="Run a model on this computer">
+        <FormHint>Choose a model file to load it and use it for chat. Model responses run on this computer.</FormHint>
         <FormStatusCard>
           <FormStatusRow label="Status">
             {!rmb
@@ -459,13 +454,14 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                     ? '○ Stopped'
                     : rmb.not_ready_hint || 'Not ready'}
           </FormStatusRow>
-          <FormStatusRow label="Loaded GGUF">
+          <FormStatusRow label="Model">
             <span className="font-mono text-[9px]" title={rmb?.model_path || undefined}>
               {rmb?.model_path
                 ? rmb.model_path.replace(/^.*[\\/]/, '')
                 : rmb?.model?.name || rmb?.model_id || '— none —'}
             </span>
           </FormStatusRow>
+          {p.settingsMode === 'advanced' && <>
           <FormStatusRow label="Endpoint">
             <span className="font-mono text-[9px]">
               {rmb?.base_url || 'http://127.0.0.1:8787/v1'}
@@ -491,6 +487,7 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
               ? 'Suspended (RMB exclusive)'
               : 'Available when RMB stops'}
           </FormStatusRow>
+          </>}
         </FormStatusCard>
         {rmbMsg ? (
           <FormNotice tone={/fail|error|not found|missing/i.test(rmbMsg) ? 'warn' : undefined}>
@@ -532,7 +529,7 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
 
         {/* Primary: pick GGUF from disk scan — options prop so values always stick */}
         <div className="mt-2 mb-2 space-y-1.5">
-          <FormLabel>GGUF model (select to load)</FormLabel>
+          <FormLabel>Model file</FormLabel>
           <FormSelect
             size="sm"
             disabled={rmbBusy}
@@ -662,7 +659,8 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             disabled={rmbBusy}
             defaultValue={rmb?.model_path || ''}
             key={rmb?.model_path || 'rmb-path'}
-            placeholder="C:\Users\…\model.gguf"
+            placeholder="Full path to a .gguf file"
+            aria-label="Model file path"
             onBlur={async (e) => {
               const model_path = e.target.value.trim()
               if (model_path === (rmb?.model_path || '')) return
@@ -692,6 +690,7 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
           />
         </div>
 
+        <SettingsFlow title="Download a model" summary="Find a model on Hugging Face">
         <HfPullPanel
           disabled={rmbBusy}
           onBusy={setRmbBusy}
@@ -704,7 +703,9 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             })()
           }}
         />
+        </SettingsFlow>
 
+        <SettingsFlow title="Model performance" summary="Memory, GPU, and advanced engine options">
         <FormSegmented
           value={((rmb?.profile || 'autofit') as 'autofit' | 'agent' | 'turbo' | 'quality')}
           options={[
@@ -1532,6 +1533,8 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
           </div>
         </details>
 
+        </SettingsFlow>
+
         <div className="flex flex-wrap gap-1.5 mt-1 mb-1">
           <FormActionButton
             variant="primary"
@@ -1559,7 +1562,7 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
               }
             }}
           >
-            Start RMB
+            Start
           </FormActionButton>
           <FormActionButton
             disabled={rmbBusy}
@@ -1604,7 +1607,7 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
               }
             }}
           >
-            Use as chat provider
+            Use for chat
           </FormActionButton>
           <FormActionButton
             variant="ghost"

@@ -50,8 +50,8 @@ func TestAdvertiseToolSurfaceKeepsCloudWindowOnCodingPack(t *testing.T) {
 	if !local.LocalFit || local.ContextWindow() != providers.LocalContextWindow {
 		t.Fatalf("a loopback model must keep the local fitter: %#v", local)
 	}
-	if len(local.Tools) >= full {
-		t.Fatalf("a loopback model must get the coding pack: %d", len(local.Tools))
+	if len(local.Tools) != full {
+		t.Fatalf("a loopback model keeps the full surface: %d, cloud %d", len(local.Tools), full)
 	}
 }
 

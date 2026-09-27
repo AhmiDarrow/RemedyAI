@@ -56,6 +56,9 @@ ACT_DREAM = "dream"
 ACT_LIFE_STEP = "life_step"
 ACT_TEND = "tend"
 ACT_MYELIN = "myelin_verify"
+ACT_NEEDS_YOU = "needs_you"
+# Hunger text, not news. A real step replaces it with what she did.
+GENERIC_LIFE_DETAIL = "quiet local step toward the active life goal"
 
 
 @dataclass
@@ -266,7 +269,7 @@ def wake_hungers(home: str | Path | None = None) -> list[dict[str, Any]]:
                 {
                     "act": ACT_LIFE_STEP,
                     "score": 0.7,
-                    "detail": "quiet local step toward the active life goal",
+                    "detail": GENERIC_LIFE_DETAIL,
                 }
             )
 
@@ -322,7 +325,9 @@ def _execute(act: str, detail: str, home: str | Path | None = None) -> dict[str,
         return {
             "ok": bool(res.get("ok")),
             "result": {
-                k: res.get(k) for k in ("goal", "skipped", "evidence") if k in res
+                k: res.get(k)
+                for k in ("goal", "skipped", "evidence", "did", "next", "action")
+                if k in res
             },
         }
     if act == ACT_MYELIN:
@@ -395,6 +400,7 @@ def vigil_tick(
     outcome = {"ok": False, "result": {}}
     with suppress(Exception):
         outcome = _execute(chosen["act"], str(chosen.get("detail") or ""), home)
+    journal_act, journal_detail, journal_ok = _journal_fact(chosen, outcome)
 
     with _lock:
         v = load_vigil(home)
@@ -402,19 +408,19 @@ def vigil_tick(
         if v.day != day:
             v.day = day
             v.wakes_today = max(1, v.wakes_today)  # this wake, already claimed
-        v.last_act = chosen["act"]
+        v.last_act = journal_act
         save_vigil(v, home)
     entry = {
         "ts": ts,
-        "act": chosen["act"],
-        "detail": str(chosen.get("detail") or "")[:160],
-        "ok": bool(outcome.get("ok")),
+        "act": journal_act,
+        "detail": journal_detail,
+        "ok": journal_ok,
     }
     _journal_append(entry, home)
     return {
         "ok": True,
         "woke": True,
-        "act": chosen["act"],
+        "act": journal_act,
         "detail": entry["detail"],
         "outcome": outcome,
         "wakes_today": v.wakes_today,
@@ -428,7 +434,50 @@ _ACT_PHRASES = {
     ACT_LIFE_STEP: "took a quiet step toward your goal",
     ACT_TEND: "noticed something waiting",
     ACT_MYELIN: "re-checked one of my learned skills",
+    ACT_NEEDS_YOU: "waited on you before a step only you can take",
 }
+
+
+def _journal_fact(
+    chosen: dict[str, Any], outcome: dict[str, Any]
+) -> tuple[str, str, bool]:
+    """What the ledger should say. A stopped send/pay is news, not a failure."""
+    act = str(chosen.get("act") or "")
+    detail = str(chosen.get("detail") or "")[:160]
+    ok = bool(outcome.get("ok"))
+    result = outcome.get("result")
+    if not isinstance(result, dict):
+        result = {}
+    if act != ACT_LIFE_STEP:
+        return act, detail, ok
+    if str(result.get("skipped") or "") == "needs_you":
+        action = str(result.get("action") or detail).strip()[:120]
+        return ACT_NEEDS_YOU, action, True
+    if not ok:
+        return act, detail, False
+    did = str(result.get("did") or "").strip()
+    nxt = str(result.get("next") or "").strip()
+    if did and nxt:
+        detail = f"{did} → {nxt}"
+    elif did:
+        detail = did
+    return act, detail[:160], True
+
+
+def phrase_for(act: str, detail: str = "") -> str:
+    """One clause for the morning line. Keep in step with hearth.go."""
+    text = (detail or "").strip()
+    if act == ACT_TEND and text:
+        return f"noticed “{text[:60]}” has been waiting"
+    if act == ACT_LIFE_STEP:
+        if text and text != GENERIC_LIFE_DETAIL:
+            return f"moved “{text[:100]}” forward"
+        return "took a quiet step toward your goal"
+    if act == ACT_NEEDS_YOU and text:
+        return f"waited on you before “{text[:80]}”"
+    if act == ACT_NEEDS_YOU:
+        return _ACT_PHRASES[ACT_NEEDS_YOU]
+    return _ACT_PHRASES.get(act, act)
 
 
 def night_report(
@@ -448,13 +497,8 @@ def night_report(
         if not e.get("ok"):
             continue  # honest mornings: a failed/blocked act is not progress
         act = str(e.get("act") or "")
-        phrase = _ACT_PHRASES.get(act, act)
         detail = str(e.get("detail") or "").strip()
-        if act == ACT_TEND and detail:
-            phrase = f"noticed “{detail[:60]}” has been waiting"
-        elif act == ACT_LIFE_STEP and detail:
-            phrase = "took a quiet step toward your goal"
-        bits.append(phrase)
+        bits.append(phrase_for(act, detail))
     # Dedup consecutive repeats, keep it a sentence not a log
     if not bits:
         return ""

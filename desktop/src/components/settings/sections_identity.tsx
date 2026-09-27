@@ -3,6 +3,7 @@ import { useState, type ReactNode } from 'react'
 import { useI18n } from '../../i18n'
 import type { SettingsFormProps } from './formTypes'
 import { SettingsSection } from '../SettingsSection'
+import { SettingsFlow } from './SettingsFlow'
 import {
   FormActionButton,
   FormHint,
@@ -47,10 +48,10 @@ function PersonaWipeControl(): ReactNode {
   }
 
   return (
-    <div className="mt-3 pt-3 space-y-2" style={{ borderTop: '1px solid var(--border)' }}>
-      <FormLabel>Persona wipe</FormLabel>
+    <SettingsFlow title="Forget personal memories" summary="Review and clear remembered facts and goals" busy={busy}>
+      <FormLabel>Delete personal memories</FormLabel>
       <FormHint>
-        Forget what Remedy learned about you (Partner Memory, soul residue, life goals).
+        Delete remembered facts about you, relationship context, and life goals.
         Chats, API keys, skills, and this app stay. Cannot be undone.
       </FormHint>
       {!open ? (
@@ -67,7 +68,7 @@ function PersonaWipeControl(): ReactNode {
         <FormNotice tone="error">
           <div className="space-y-2">
             <div>
-              This deletes remembered facts, whoami profile, soul/rapport residue, and life
+              This deletes your saved profile, personal memories, relationship context, and life
               goals. Type <strong>WIPE</strong> to confirm.
             </div>
             <input
@@ -115,7 +116,7 @@ function PersonaWipeControl(): ReactNode {
           {msg}
         </div>
       ) : null}
-    </div>
+    </SettingsFlow>
   )
 }
 
@@ -188,26 +189,20 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
       >
         <FormLabel>{t('settings.language')}</FormLabel>
         <FormSelect value={uiLanguage} onChange={setUiLanguage} options={langOptions} />
-        <FormHint>{t('settings.languageHint')}</FormHint>
-        <FormHint>{t('settings.helpEnglish')}</FormHint>
+        <FormHint>{t('settings.languageHintShort')}</FormHint>
+        {settingsMode === 'advanced' && <FormHint>{t('settings.helpEnglish')}</FormHint>}
         <Field
           label={t('settings.yourName')}
           value={userName}
           onChange={setUserName}
           placeholder="e.g. Alex"
         />
-        <FormHint>
-          {t('settings.yourNameHint')}
-        </FormHint>
         <Field
           label={t('settings.partnerName')}
           value={agentName}
           onChange={setAgentName}
           placeholder="Remedy"
         />
-        <FormHint>
-          {t('settings.partnerNameHint')}
-        </FormHint>
         <FormLabel>{t('settings.partnerGender')}</FormLabel>
         <FormSegmented
           value={agentGender}
@@ -218,46 +213,16 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
             { id: 'neutral', label: t('settings.neutral') },
           ]}
         />
-        <FormHint>
-          {t('settings.genderHint')}
-        </FormHint>
         <FormLabel>
-          Persona
+          Communication style
         </FormLabel>
-        <div className="space-y-1.5 mb-1">
-          {PERSONAS.map((p) => (
-            <label
-              key={p.id}
-              className="flex items-start gap-2 px-2 py-1.5 rounded cursor-pointer"
-              style={{
-                background: persona === p.id ? 'var(--bg-tertiary)' : 'transparent',
-                border: persona === p.id ? '1px solid var(--accent)' : '1px solid var(--border)',
-              }}
-            >
-              <input
-                type="radio"
-                name="settings-persona"
-                value={p.id}
-                checked={persona === p.id}
-                onChange={() => setPersona(p.id)}
-                className="mt-0.5"
-                style={{ accentColor: 'var(--accent)' }}
-              />
-              <span>
-                <span className="block font-medium" style={{ color: 'var(--text-primary)' }}>
-                  {p.name}
-                </span>
-                <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                  {p.description}
-                </span>
-              </span>
-            </label>
-          ))}
-        </div>
-        <FormHint>
-          Persona is a communication style. Identity stays your partner — change anytime.
-        </FormHint>
-        <PersonaWipeControl />
+        <FormSelect
+          value={persona}
+          onChange={setPersona}
+          options={PERSONAS.map(p => ({ value: p.id, label: p.name }))}
+          title="Communication style"
+        />
+        <FormHint>{PERSONAS.find(p => p.id === persona)?.description}</FormHint>
       </SettingsSection>
 
       <VoiceSection
@@ -380,108 +345,21 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
       {/* Privacy — simple + advanced (what leaves this PC to the model) */}
       <SettingsSection {...sectionProps('privacy')}>
         <FormHint>
-          Remedy is local-first. Chat and tool results still go to{' '}
-          <strong style={{ color: 'var(--text-secondary)' }}>your chosen LLM</strong> when
-          you use a cloud model. Privacy mode tightens what we send — default stays off for
-          maximum speed and capability.
+          Cloud models receive your chat and tool results. Choose how much personal
+          information to include.
         </FormHint>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={privacyMode}
-          onClick={() => setPrivacyMode(!privacyMode)}
-          className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition-colors"
-          style={{
-            background: privacyMode
-              ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-tertiary))'
-              : 'var(--bg-tertiary)',
-            border: `1px solid ${privacyMode ? 'var(--accent)' : 'var(--border)'}`,
-          }}
-          title={
-            privacyMode
-              ? 'Privacy mode on — click to return to full-speed secret scrub only'
-              : 'Privacy mode off — click for tighter tool caps + email/phone scrub to the model'
-          }
-        >
-          <div className="min-w-0">
-            <div
-              className="text-xs font-semibold"
-              style={{ color: privacyMode ? 'var(--accent)' : 'var(--text-primary)' }}
-            >
-              {privacyMode ? 'Privacy mode on' : 'Privacy mode off'}
-            </div>
-            <div className="text-[10px] leading-snug mt-0.5" style={{ color: 'var(--text-muted)' }}>
-              {privacyMode
-                ? 'Email, phone, and SSN shapes redacted · shorter tool results · still secret-safe'
-                : 'Lightning path — secrets redacted, full tool context for capable work'}
-            </div>
-          </div>
-          <span
-            className="flex-shrink-0 relative inline-flex h-6 w-11 rounded-full transition-colors"
-            style={{
-              background: privacyMode ? 'var(--accent)' : 'var(--border)',
-            }}
-            aria-hidden
-          >
-            <span
-              className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
-              style={{
-                left: privacyMode ? 'calc(100% - 1.35rem)' : '0.125rem',
-              }}
-            />
-          </span>
-        </button>
-        <div className="text-[10px] leading-snug mt-2" style={{ color: 'var(--text-muted)' }}>
-          Also on the status bar. API keys never leave this PC as model input. Keys stay under{' '}
-          <code className="text-[10px]">~/.remedy/auth/</code> (DPAPI on Windows).
-        </div>
-
-        <button
-          type="button"
-          role="switch"
-          aria-checked={soulFieldEnabled}
-          onClick={() => setSoulFieldEnabled(!soulFieldEnabled)}
-          className="w-full flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition-colors mt-2"
-          style={{
-            background: soulFieldEnabled
-              ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-tertiary))'
-              : 'var(--bg-tertiary)',
-            border: `1px solid ${soulFieldEnabled ? 'var(--accent)' : 'var(--border)'}`,
-          }}
-          title={
-            soulFieldEnabled
-              ? 'Soul Field on — continuity, bond, organism pulse'
-              : 'Soul Field off — lean chat without personhood inject'
-          }
-        >
-          <div className="min-w-0">
-            <div
-              className="text-xs font-semibold"
-              style={{ color: soulFieldEnabled ? 'var(--accent)' : 'var(--text-primary)' }}
-            >
-              {soulFieldEnabled ? 'Soul Field on' : 'Soul Field off'}
-            </div>
-            <div className="text-[10px] leading-snug mt-0.5" style={{ color: 'var(--text-muted)' }}>
-              {soulFieldEnabled
-                ? 'Same partner across models — bond, open threads, organism mood on the status bar'
-                : 'Disabled — no soul inject or residue updates (opt-out)'}
-            </div>
-          </div>
-          <span
-            className="flex-shrink-0 relative inline-flex h-6 w-11 rounded-full transition-colors"
-            style={{
-              background: soulFieldEnabled ? 'var(--accent)' : 'var(--border)',
-            }}
-            aria-hidden
-          >
-            <span
-              className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
-              style={{
-                left: soulFieldEnabled ? 'calc(100% - 1.35rem)' : '0.125rem',
-              }}
-            />
-          </span>
-        </button>
+        <FormToggle
+          checked={privacyMode} onChange={setPrivacyMode}
+          label="Redact personal information"
+          description="Remove email addresses, phone numbers, and similar identifiers from tool results before sending them to your model. Results may contain less detail."
+        />
+        <FormHint>Stored API keys are kept out of model input in both modes.</FormHint>
+        <FormToggle
+          checked={soulFieldEnabled} onChange={setSoulFieldEnabled}
+          label="Remember our working relationship"
+          description="Keep personal context and continuity when you switch models. Turning this off stops updates; it does not erase existing memories."
+        />
+        <PersonaWipeControl />
       </SettingsSection>
 
       {/* Access */}
@@ -504,24 +382,21 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
           {!projectPath.trim() || projectPath.trim() === '.' ? (
             <>
               Scope is forced to <strong>full</strong> while no project folder is set.
-              Choose a folder above to use Project / Home / Untrusted jails.
+              Choose a workspace in General to limit file access.
             </>
           ) : (
             <>
               <strong>Untrusted</strong> = project root only + always Ask for shell/write
-              (use for downloaded folders). Full still runs as your Windows user.
+              (use for downloaded folders). Full still runs with your user account permissions.
             </>
           )}
         </FormHint>
       </SettingsSection>
 
       {/* Security & power (owner keeps full capability; defaults stay safe) */}
-      <SettingsSection {...sectionProps('security-power')}>
+      <SettingsSection {...sectionProps('security-power')} title="Permissions" summary="When Remedy asks before acting">
         <FormHint>
-          Defaults are safe. <strong style={{ color: 'var(--text-secondary)' }}>Auto</strong>{' '}
-          stays inside the project. <strong style={{ color: 'var(--text-secondary)' }}>Full</strong>{' '}
-          turns the write jail into a warning (auth secrets stay closed).
-          Hard wipe/privilege blocks stay on for everyone.
+          Choose when Remedy asks before acting. Payment and message-sending checkpoints remain required.
         </FormHint>
               <div className="mb-2">
                 <FormLabel>Approvals</FormLabel>
@@ -544,12 +419,35 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
                 />
                 <FormHint>
                   {approvalMode === 'full'
-                    ? 'Full (warn): shell and file tools are not write-jailed. Auth secrets stay closed. Remedy warns when a path would have been blocked.'
+                    ? 'Full allows file and command actions beyond your project, with warnings. Protected credentials remain restricted.'
                     : approvalMode === 'auto'
-                      ? 'Auto (in-project): pytest, file writes, and host_run inside the focus folder run without prompts. OS, home, and sibling trees stay jailed.'
-                      : 'Ask: high-impact tools show Approve/Deny. Soft-risk patterns are labeled on the banner.'}
+                      ? 'Auto allows routine work within your project without repeated prompts. Access outside it stays restricted.'
+                      : 'Ask lets you review higher-impact actions before they run.'}
                 </FormHint>
               </div>
+              <div className="mb-2">
+                <FormLabel>Thinking level</FormLabel>
+                <FormSegmented
+                  value={thinkingLevel}
+                  onChange={setThinkingLevel}
+                  options={[
+                    { id: 'off', label: 'Off' },
+                    { id: 'low', label: 'Low' },
+                    { id: 'medium', label: 'Medium' },
+                    { id: 'high', label: 'High' },
+                  ]}
+                />
+                <FormHint>
+                  Also on the status bar. High = more deliberation when the model supports it.
+                </FormHint>
+              </div>
+              <FormToggle
+                checked={webToolsEnabled}
+                onChange={setWebToolsEnabled}
+                label="Search and read the web"
+                description="Allow web search and public-page fetching. This does not control cloud models or connected accounts."
+              />
+              <SettingsFlow title="Advanced permissions" summary="Trust behavior and browser access" saveBehavior="draft">
               <div className="mb-2">
                 <FormLabel>Trust</FormLabel>
                 <FormSegmented
@@ -581,40 +479,13 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
                       : 'Follows Approvals (Ask / Auto / Full). Mail and payment always stop.'}
                 </FormHint>
               </div>
-              <div className="mb-2">
-                <FormLabel>Thinking level</FormLabel>
-                <FormSegmented
-                  value={thinkingLevel}
-                  onChange={setThinkingLevel}
-                  options={[
-                    { id: 'off', label: 'Off' },
-                    { id: 'low', label: 'Low' },
-                    { id: 'medium', label: 'Medium' },
-                    { id: 'high', label: 'High' },
-                  ]}
-                />
-                <FormHint>
-                  Also on the status bar. High = more deliberation when the model supports it.
-                </FormHint>
-              </div>
-              <FormToggle
-                checked={privacyMode}
-                onChange={setPrivacyMode}
-                label="Privacy mode (tighter model egress)"
-                description="Same control as the Privacy section / status bar. Off by default so Remedy stays fast."
-              />
-              <FormToggle
-                checked={webToolsEnabled}
-                onChange={setWebToolsEnabled}
-                label="Web fetch and search"
-                description="On by default after install. Remedy downloads a local OpenSERP search backend on first run (~10 MB) and can fetch public pages. Private/localhost/metadata hosts stay blocked. Turn off to keep her offline."
-              />
               <FormToggle
                 checked={httpBootstrap}
                 onChange={setHttpBootstrap}
-                label="Allow browser token bootstrap"
-                description="Desktop default is off (IPC-only). On: browser Web UI can get the local token on loopback. Override anytime with REMEDY_HTTP_BOOTSTRAP."
+                label="Allow browser sign-in on this computer"
+                description="Lets the local WebUI obtain access to Remedy. The desktop works with this off. Only enable it if other users on this computer may access Remedy."
               />
+              </SettingsFlow>
             </SettingsSection>
 
       {/* Always ready */}

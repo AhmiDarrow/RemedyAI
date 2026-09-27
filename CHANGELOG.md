@@ -4,6 +4,24 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.64.0] - 2026-09-27
+
+### Changed
+
+- Settings are grouped into General, Models, Connections, Privacy, and System.
+  Simple shows everyday controls. Advanced reveals the rest of that category.
+  Search covers every category, and unsaved entries survive a category switch.
+  Longer setup tasks open in their own dialogs.
+- The main bar keeps its own Simple / Advanced choice, separate from Settings.
+  In Simple mode, the current model opens the model picker.
+- Remedy stays present on this PC. The tray says she is ready, or that she is
+  here when you are, after twenty quiet minutes. She does not watch the screen.
+  A night step runs only after you say yes, names the move it made, and waits
+  before send, pay, or publish.
+- A local model sees the same tools as a frontier model. The request still fits
+  that model's context window. Saying the work is done while a check is red
+  keeps the turn open. A missing module or unknown command is looked up once.
+
 ## [0.63.3] - 2026-09-25
 
 ### Changed

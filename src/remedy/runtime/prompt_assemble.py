@@ -39,8 +39,9 @@ _HISTORY_HEADER = (
 EPOCH_BRIEF_MARKER = "\n\n[Session Brief · epoch working memory]\n"
 EPOCH_BRIEF_CHAR_CAP = 1_200
 
-# Per-turn re-arm ceilings for the continue gate (keyed by session + goal).
-_GATE_VERIFY_FAILED_MAX = 3
+# Per-turn re-arm ceiling for mission nudges (keyed by session + goal).
+# A red check has no ceiling here: the model keeps the turn until the check
+# is green or the engine's own re-arm count ends the loop.
 _GATE_MISSION_MAX = 2
 
 _LEDGER_LINE_RE = re.compile(
@@ -587,10 +588,14 @@ async def _should_continue_async(inp: Mapping[str, Any]) -> dict[str, Any]:
         VERIFY_ONCE_NUDGE,
         agency_rearm_nudge_message,
         agency_tool_promise_claim,
+        batch_used_web,
         failed_verify_nudge,
+        failure_is_knowledge,
+        knowledge_gap_nudge,
         looks_like_pseudo_tools,
         message_wants_tools,
         summarize_tool_evidence,
+        text_admits_unknown,
         text_claims_completion,
         turn_has_unfinished_work,
     )
@@ -640,16 +645,36 @@ async def _should_continue_async(inp: Mapping[str, Any]) -> dict[str, Any]:
             )
 
         # 1. Evidence beats prose: a verify-class tool failed in the last batch
-        #    and the text still claims completion.
+        #    and the text still claims completion. A missing module or unknown
+        #    command is looked up once. The model keeps going after that.
         if evidence["verify_failed"] and text_claims_completion(text):
-            n = int(tracker.get("verify_failed", 0) or 0)
-            if n < _GATE_VERIFY_FAILED_MAX:
-                tracker["verify_failed"] = n + 1
+            if failure_is_knowledge(str(evidence.get("failed_tail") or "")) and (
+                not tracker.get("knowledge_once")
+            ):
+                tracker["knowledge_once"] = True
                 return _out(
                     True,
-                    failed_verify_nudge(evidence["failed_name"], evidence["failed_exit"]),
-                    "verify_failed",
+                    knowledge_gap_nudge(str(evidence.get("failed_name") or "")),
+                    "knowledge_gap",
                 )
+            return _out(
+                True,
+                failed_verify_nudge(evidence["failed_name"], evidence["failed_exit"]),
+                "verify_failed",
+            )
+
+        # 1b. A work answer that stops because a fact outside the repo is
+        #     missing, and this batch never searched.
+        if (
+            not plan_mode
+            and build_goal
+            and text_admits_unknown(text)
+            and not batch_used_web(evidence.get("names"))
+            and evidence.get("last_verify_ok") is not True
+            and not tracker.get("knowledge_once")
+        ):
+            tracker["knowledge_once"] = True
+            return _out(True, knowledge_gap_nudge(""), "knowledge_gap")
 
         # 2. Writes with no verify afterwards on a build goal: ask once per turn.
         batch_unverified = evidence["mutate_after_verify"] or (

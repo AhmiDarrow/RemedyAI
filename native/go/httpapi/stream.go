@@ -282,6 +282,7 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.NoteUserActivity()
+	s.hearthTouch("desktop", time.Now())
 
 	// Claim *before* persisting the user message (Python stream.py).
 	claimEpoch, claimCtx, claimed := s.claims.TryClaim(sid)
@@ -702,6 +703,9 @@ func (s *Server) runDetachedStream(
 	if turnErr != nil && (errors.Is(turnErr, context.Canceled) || errors.Is(turnErr, context.DeadlineExceeded)) {
 		aborted = true
 		turnErr = nil
+	}
+	if turnErr == nil && !aborted {
+		s.hearthAck(time.Now())
 	}
 	if aborted && !persistDone {
 		persistInterrupted()

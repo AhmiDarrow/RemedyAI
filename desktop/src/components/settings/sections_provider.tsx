@@ -9,6 +9,7 @@ import {
 } from '../../api/modelDiscovery'
 import type { SettingsFormProps } from './formTypes'
 import { SettingsSection } from '../SettingsSection'
+import { SettingsFlow } from './SettingsFlow'
 import {
   FormActionButton,
   FormHint,
@@ -84,6 +85,7 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
     sleevAllowRemoteGateway = false,
     setSleevAllowRemoteGateway,
     sleevStatus = null,
+    settingsMode = 'simple',
   } = p
 
   const sleevInstalled = Boolean(sleevStatus?.installed)
@@ -124,10 +126,9 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
         defaultOpen
       >
         <FormHint>
-          Free options: <strong style={{ color: 'var(--text-secondary)' }}>Demo</strong> (no signup),
-          Gemini / Groq / OpenRouter / Mistral (free key), or Ollama (local).
+          Choose the service and model Remedy uses to answer you.
         </FormHint>
-        <FormLabel htmlFor={`${fieldId}-provider`}>Type</FormLabel>
+        <FormLabel htmlFor={`${fieldId}-provider`}>AI service</FormLabel>
         <FormSelect id={`${fieldId}-provider`} value={provider} onChange={handleProviderChange}>
           {primaryProviders.map((p) => (
             <option key={p.id} value={p.id}>
@@ -146,14 +147,13 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
         </FormSelect>
         {!showAdvanced && advancedProviders.length > 0 && (
           <FormLinkButton onClick={() => setShowAdvanced(true)}>
-            Show advanced (custom endpoint)…
+            More services and custom connections…
           </FormLinkButton>
         )}
         {provider === 'demo' && (
           <FormNotice>
-            Demo is guest chat only (Codestral, Gemini Flash Lite, GPT-OSS). Image/video
-            and other gateway models are hidden — they need a real key or are not chat.
-            Add Gemini/Groq free key or Ollama for serious free use.
+            Demo offers guest text chat. Connect another service or use a local model
+            for more capabilities.
           </FormNotice>
         )}
         {activeMeta?.key_docs_url && provider !== 'demo' && (
@@ -165,7 +165,7 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
               ? 'Download Ollama…'
               : provider === 'anthropic'
                 ? 'Get Console API key…'
-                : 'Get free API key / docs…'}
+                : 'Get an API key…'}
           </FormLinkButton>
         )}
         {activeMeta?.limits_blurb && provider !== 'demo' && (
@@ -252,6 +252,7 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
         {discoveryBusy && modelHint.kind === 'none' && (
           <FormHint>Looking for models…</FormHint>
         )}
+        {settingsMode === 'advanced' && (
         <FormHint>
           Models for <strong>{activeMeta?.name || provider}</strong>
           {showBaseUrl ? ' · custom base URL enabled' : ''}.
@@ -261,6 +262,8 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
             return ` · ${connectReasonLabel(row.connect_reason, row.connected)}`
           })()}
         </FormHint>
+
+        )}
 
         {provider === 'xai' && (
           <div className="mb-2 p-2.5 rounded-lg space-y-2 ui-surface" style={{ boxShadow: 'none' }}>
@@ -462,10 +465,8 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
         )}
 
         {/* Sleev — local context-compression gateway (saves provider tokens) */}
-        <div
-          className="mt-3 p-2 rounded space-y-2"
-          style={{ border: '1px solid var(--border)', background: 'var(--bg-tertiary)' }}
-        >
+        {(settingsMode === 'advanced' || sleevEnabled) && (
+        <SettingsFlow title="Token savings" summary={sleevEnabled ? 'Sleev routing enabled' : 'Optional local compression gateway'} saveBehavior="draft">
           <div className="font-medium" style={{ color: 'var(--text-primary)' }}>
             Sleev · save tokens
           </div>
@@ -492,7 +493,7 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
               ? ` · signed in as ${sleevStatus.account_label}`
               : ''}
           </FormHint>
-          {showAdvanced && setSleevGatewayUrl && (
+          {settingsMode === 'advanced' && setSleevGatewayUrl && (
             <>
               <Field
                 label="Sleev gateway URL (optional)"
@@ -530,7 +531,8 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
           >
             Sleev docs…
           </FormLinkButton>
-        </div>
+        </SettingsFlow>
+        )}
       </SettingsSection>
 
       {/* Provider catalog — enable for main-screen picker */}

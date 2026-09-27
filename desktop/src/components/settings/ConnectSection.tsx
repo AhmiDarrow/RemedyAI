@@ -24,7 +24,7 @@ import {
   startConnectPair,
 } from '../../api/connect'
 import { openExternalUrl } from '../../api/auth'
-import { tauriInvoke } from '../../api/tauri'
+import { isTauri, tauriInvoke } from '../../api/tauri'
 import {
   CONNECT_LOOPBACK_BIND_WARNING,
   isConnectLoopbackHost,
@@ -32,6 +32,7 @@ import {
 } from '../../utils/connectMode'
 import QRCode from 'qrcode'
 import { SettingsSection } from '../SettingsSection'
+import { SettingsFlow } from './SettingsFlow'
 import {
   FormActionButton,
   FormHint,
@@ -298,12 +299,11 @@ export function ConnectSection({
     <SettingsSection
       {...sectionProps}
       title="Connect"
-      summary="Use this PC from a paired phone — Wi‑Fi or mobile data"
+      summary={st?.enabled ? `${st.devices.length} paired · ${st.paused ? 'paused' : 'enabled'}` : 'Pair a phone with this computer'}
     >
       <FormHint>
-        Let a paired phone drive this PC. Same Wi‑Fi works with no extra setup;
-        add the free Tailscale app for mobile data anywhere (install it below,
-        on this PC and on your phone — same account). Approvals stay on.
+        Use Remedy from your phone. Pair on the same Wi‑Fi to get started.
+        Approvals remain required.
       </FormHint>
       {!available ? (
         <FormNotice tone="muted">
@@ -319,6 +319,107 @@ export function ConnectSection({
       />
       {st?.enabled ? (
         <>
+          {notListening && !st.paused && (
+            <FormNotice tone="warn">Phone access is not ready. Open Connection setup to check the address.</FormNotice>
+          )}
+          {isConnectLoopbackHost(st.bind_host || selectedHost) && (
+            <FormNotice tone="warn">{CONNECT_LOOPBACK_BIND_WARNING}</FormNotice>
+          )}
+          <FormActionButton
+            variant="primary"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true)
+              setMsg('')
+              try {
+                const r = await startConnectPair()
+                if (!r.qr) {
+                  setMsg('Could not start pairing.')
+                  return
+                }
+                setPair(r)
+              } catch (err) {
+                setMsg(err instanceof Error ? err.message : String(err))
+              } finally {
+                setBusy(false)
+              }
+            }}
+          >
+            Pair phone
+          </FormActionButton>
+          <FormHint>Shows a code the phone scans. Revoke anytime.</FormHint>
+
+          {st.devices.length ? (
+            <div className="space-y-1 mb-2">
+              {st.devices.map((d) => (
+                <div
+                  key={d.id}
+                  className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
+                  style={{
+                    background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
+                      {d.name}
+                    </span>
+                    {connectPairedLabel(d.paired_at) ? (
+                      <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                        Paired {connectPairedLabel(d.paired_at)}
+                      </span>
+                    ) : null}
+                  </span>
+                  <FormActionButton
+                    variant="danger"
+                    disabled={busy}
+                    className="flex-shrink-0 mb-0"
+                    onClick={async () => {
+                      setBusy(true)
+                      setMsg('')
+                      try {
+                        await revokeConnectDevice(d.id)
+                        await refresh()
+                      } catch (err) {
+                        setMsg(err instanceof Error ? err.message : String(err))
+                      } finally {
+                        setBusy(false)
+                      }
+                    }}
+                  >
+                    Revoke
+                  </FormActionButton>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <FormHint>No phones paired yet.</FormHint>
+          )}
+
+          <FormToggle
+            checked={Boolean(st.paused)}
+            disabled={busy}
+            onChange={async (on) => {
+              setBusy(true)
+              setMsg('')
+              try {
+                // /pause and /resume answer {ok, paused}; that is the whole
+                // change, so no follow-up PUT unless the server balked.
+                const r = on ? await pauseConnect() : await resumeConnect()
+                if (r.status) setSt({ ...r.status, paused: r.paused })
+                else if (r.ok) setSt((prev) => (prev ? { ...prev, paused: r.paused } : prev))
+                else await persist({ paused: on })
+              } catch {
+                await persist({ paused: on })
+              } finally {
+                setBusy(false)
+              }
+            }}
+            label="Pause remote"
+            description="Paired phones stay listed but cannot use this PC until you resume."
+          />
+
+          <SettingsFlow title="Connection setup" summary="Network address and access away from home" busy={busy || tsBusy}>
           <FormLabel>This computer&apos;s address</FormLabel>
           {hostOptions.length ? (
             <FormSelect
@@ -427,6 +528,9 @@ export function ConnectSection({
             it includes the tailnet address, so RemedyConnect works anywhere.
           </FormHint>
 
+          </SettingsFlow>
+
+          <SettingsFlow title="Phone controls" summary="Choose what your paired phone can see" busy={busy}>
           <FormLabel>Remote shows</FormLabel>
           {CONNECT_PANE_KEYS.map((key: ConnectPaneKey) => {
             const locked = key === 'approvals'
@@ -447,100 +551,10 @@ export function ConnectSection({
             )
           })}
 
-          <FormActionButton
-            variant="primary"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true)
-              setMsg('')
-              try {
-                const r = await startConnectPair()
-                if (!r.qr) {
-                  setMsg('Could not start pairing.')
-                  return
-                }
-                setPair(r)
-              } catch (err) {
-                setMsg(err instanceof Error ? err.message : String(err))
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            Pair phone
-          </FormActionButton>
-          <FormHint>Shows a code the phone scans. Revoke anytime.</FormHint>
+          </SettingsFlow>
 
-          {st.devices.length ? (
-            <div className="space-y-1 mb-2">
-              {st.devices.map((d) => (
-                <div
-                  key={d.id}
-                  className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
-                  style={{
-                    background: 'var(--bg-tertiary)',
-                    border: '1px solid var(--border)',
-                  }}
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
-                      {d.name}
-                    </span>
-                    {connectPairedLabel(d.paired_at) ? (
-                      <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                        Paired {connectPairedLabel(d.paired_at)}
-                      </span>
-                    ) : null}
-                  </span>
-                  <FormActionButton
-                    variant="danger"
-                    disabled={busy}
-                    className="flex-shrink-0 mb-0"
-                    onClick={async () => {
-                      setBusy(true)
-                      setMsg('')
-                      try {
-                        await revokeConnectDevice(d.id)
-                        await refresh()
-                      } catch (err) {
-                        setMsg(err instanceof Error ? err.message : String(err))
-                      } finally {
-                        setBusy(false)
-                      }
-                    }}
-                  >
-                    Revoke
-                  </FormActionButton>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <FormHint>No phones paired yet.</FormHint>
-          )}
-
-          <FormToggle
-            checked={Boolean(st.paused)}
-            disabled={busy}
-            onChange={async (on) => {
-              setBusy(true)
-              setMsg('')
-              try {
-                // /pause and /resume answer {ok, paused}; that is the whole
-                // change, so no follow-up PUT unless the server balked.
-                const r = on ? await pauseConnect() : await resumeConnect()
-                if (r.status) setSt({ ...r.status, paused: r.paused })
-                else if (r.ok) setSt((prev) => (prev ? { ...prev, paused: r.paused } : prev))
-                else await persist({ paused: on })
-              } catch {
-                await persist({ paused: on })
-              } finally {
-                setBusy(false)
-              }
-            }}
-            label="Pause remote"
-            description="Paired phones stay listed but cannot use this PC until you resume."
-          />
-
+          <SettingsFlow title="Connection troubleshooting" summary="Restart the service or configure a relay" busy={busy}>
+          {isTauri() ? <>
           <FormActionButton
             disabled={busy}
             onClick={async () => {
@@ -559,10 +573,9 @@ export function ConnectSection({
             Restart server
           </FormActionButton>
           <FormHint>
-            Kills and respawns the Remedy server. Use this when the server is
-            hung or unreachable — Reconnect alone cannot help if the server
-            itself is down.
+            Restarts Remedy’s local service. Active connections will be interrupted.
           </FormHint>
+          </> : <FormHint>To restart the local service, use Remedy Desktop or the terminal where you started Remedy.</FormHint>}
 
           <FormLabel htmlFor="connect-relay-url">Owner relay (optional — for lower latency)</FormLabel>
           <FormInput
@@ -588,6 +601,7 @@ export function ConnectSection({
               Save relay URL
             </FormActionButton>
           ) : null}
+          </SettingsFlow>
         </>
       ) : null}
       {msg ? <FormNotice tone="error">{msg}</FormNotice> : null}

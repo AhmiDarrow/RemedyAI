@@ -2,7 +2,7 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.63.3**. Local API and Desktop packaging run on the
+Current release: **v0.64.0**. Local API and Desktop packaging run on the
 native **Go + Zig** foundation. Installed apps update automatically. Partner
 line still starts at 0.31.0.
 
@@ -48,14 +48,35 @@ is no longer the product HTTP server or the packaged Desktop sidecar.
 | **Frontier** | [0.63.0](#0630---tools-the-model-knows) | Frontier tool names, native Anthropic, messenger identity, full-turn evidence |
 | **Boot** | [0.63.1](#0631---existing-homes-start) | Existing installs connect to the local server again |
 | **Sight** | [0.63.2](#0632---the-page-remedy-sees) | Browser page list, safer hive, Linux AppImage update |
+| **Ready** | [0.64.0](#0640---grouped-settings-and-a-present-partner) | Settings in five categories; she stays ready without watching the screen |
 | **Polish** | [0.63.3](#0633---clearer-ui-and-reliable-tasks) | Clearer layouts, reliable saves and model changes, stronger task memory |
 
 Read newest first below; older partner notes follow after 0.48.
 
 ## Contents
 
+- [0.64.0 — Grouped settings and a present partner](#0640---grouped-settings-and-a-present-partner)
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 - [0.63.2](#0632---the-page-remedy-sees) · [0.63.1](#0631---existing-homes-start) · [0.63.0](#0630---tools-the-model-knows) · [0.62.3](#0623---coherent-builds) · [0.62.2](#0622---portable-native-core) · [0.62.1](#0621---windows-in-app-update-install) · [0.62.0](#0620---build-engine-and-claimidx-defaults) · [0.61.0](#0610---agency-on-the-native-foundation) · [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-prove-the-foundation) · [0.48.0](#0480---land-the-gozig-foundation) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+
+## 0.64.0 - Grouped settings and a present partner
+
+- **Settings in five places.** General, Models, Connections, Privacy, and
+  System. Simple shows the everyday controls. Advanced opens the rest of that
+  category. Search looks through all of them. Unsaved entries stay put when
+  you switch categories. Longer tasks, such as connecting an account or
+  downloading a model, open in their own dialog.
+- **The main bar is its own choice.** Simple and Advanced on the bar are
+  separate from Settings. In Simple mode, choose the current model to pick a
+  different one.
+- **She stays on this PC.** The tray says she is ready, or that she is here
+  when you are, after twenty quiet minutes. She does not watch the screen.
+  A night step happens only after you say yes. She names what she moved, and
+  she waits before send, pay, or publish.
+- **Any model can run the work.** A local model is offered the same tools as
+  a frontier model, fitted to that model's own context window. A red check
+  does not count as finished. A missing module or an unknown command is
+  looked up once.
 
 ## 0.63.3 - Clearer UI and reliable tasks
 

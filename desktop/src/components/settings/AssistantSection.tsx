@@ -20,6 +20,7 @@ import { openExternalUrl } from '../../api/auth'
 import type { SettingsMode } from '../../utils/settingsMode'
 import { SettingsSection } from '../SettingsSection'
 import { AssistantConnectDialog } from './AssistantConnectDialog'
+import { SettingsFlow } from './SettingsFlow'
 import {
   FormActionButton,
   FormHint,
@@ -342,7 +343,8 @@ export function AssistantSection({
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-1.5 mb-2">
-            <FormSelect
+            {advanced && <FormSelect
+              title="Account provider"
               value={provider}
               onChange={(v) => setProvider(v as ProviderId)}
               disabled={busy}
@@ -350,68 +352,49 @@ export function AssistantSection({
               size="sm"
             >
               {ACCOUNT_PROVIDERS.map((p) => (
-                <option key={p.id} value={p.id}>
+                <option key={p.id} value={p.id} disabled={!p.ready}>
                   {p.label}
                   {!p.ready ? ' · soon' : ''}
                 </option>
               ))}
-            </FormSelect>
+            </FormSelect>}
             <FormActionButton
               variant="primary"
               disabled={busy}
               onClick={handleConnectClick}
             >
-              {busy ? '…' : 'Connect'}
+              {busy ? 'Connecting…' : 'Connect Google'}
             </FormActionButton>
           </div>
         )}
         {msg ? <FormHint>{msg}</FormHint> : null}
 
-        <FormLabel className="mt-2">Morning brief</FormLabel>
-        <div
-          className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mb-2 text-[10px]"
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          <label className="flex items-center gap-1 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={Boolean(brief.enabled)}
-              onChange={(e) => patchBrief('enabled', e.target.checked)}
-              style={{ accentColor: 'var(--accent)' }}
-            />
-            On
-          </label>
-          <label className="flex items-center gap-1">
-            <input
-              type="number"
-              min={0}
-              max={23}
-              className="ui-input ui-input-sm w-10"
-              value={Number(brief.hour_local ?? 7)}
-              onChange={(e) => patchBrief('hour_local', Number(e.target.value))}
-              aria-label="Brief hour (local)"
-            />
-            h
-          </label>
-          {(
-            [
-              ['include_calendar', 'Cal'],
-              ['include_mail', 'Mail'],
-              ['include_goals', 'Goals'],
-              ['include_budget', 'Budget'],
-            ] as const
-          ).map(([key, label]) => (
-            <label key={key} className="flex items-center gap-1 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={Boolean(brief[key])}
-                onChange={(e) => patchBrief(key, e.target.checked)}
-                style={{ accentColor: 'var(--accent)' }}
-              />
-              {label}
-            </label>
-          ))}
-        </div>
+        <FormToggle
+          checked={Boolean(brief.enabled)}
+          onChange={on => patchBrief('enabled', on)}
+          label="Morning brief"
+          description="A daily summary of what needs your attention."
+        />
+        {brief.enabled && (
+          <SettingsFlow title="Brief schedule and content"
+            summary={`Daily at ${String(brief.hour_local ?? 7).padStart(2, '0')}:00`}
+            saveBehavior="draft">
+            <FormLabel>Time on this computer</FormLabel>
+            <FormSelect title="Morning brief time" value={String(brief.hour_local ?? 7)}
+              onChange={value => patchBrief('hour_local', Number(value))}
+              options={Array.from({length: 24}, (_, hour) => ({
+                value: String(hour), label: `${String(hour).padStart(2, '0')}:00`,
+              }))} />
+            <FormLabel>Include in your brief</FormLabel>
+            {([
+              ['include_calendar', 'Calendar'], ['include_mail', 'Mail'],
+              ['include_goals', 'Goals'], ['include_budget', 'Budget'],
+            ] as const).map(([key, label]) => (
+              <FormToggle key={key} label={label} checked={Boolean(brief[key])}
+                onChange={on => patchBrief(key, on)} />
+            ))}
+          </SettingsFlow>
+        )}
 
         <FormToggle
           checked={disclaimerAccepted}

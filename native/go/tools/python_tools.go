@@ -30,6 +30,7 @@ var modelHiddenToolIDs = map[string]struct{}{
 	"workspace.edit":   {},
 	"workspace.search": {},
 	"shell.exec":       {},
+	"partner.pulse":    {},
 }
 
 // IsModelHiddenTool reports whether id is a demo/diagnostic tool that must be
@@ -785,6 +786,53 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 				"error":{"type":"string"}
 			},
 			"additionalProperties":true
+		}`,
+		},
+		{
+			id:   "partner.vigil",
+			desc: "Grant or stop Remedy's muscle-free nights, or report whether they are on. Enable and disable only after the owner says yes or no.",
+			risk: RiskReadOnly,
+			in: `{
+			"type":"object",
+			"properties":{
+				"action":{"type":"string","enum":["status","enable","disable"],"description":"status reports the night grant; enable or disable is the owner's yes or no"},
+				` + propHomeDir + `,
+				` + propGoBound + `
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"required":["ok"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"vigil":{"type":"object"},
+				"error":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`,
+		},
+		{
+			id:   "partner.pulse",
+			desc: "One muscle-free night tick for the always-on hearth (internal; not model-callable)",
+			risk: RiskReadOnly,
+			in: `{
+			"type":"object",
+			"properties":{
+				` + propHomeDir + `,
+				` + propGoBound + `
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"required":["ok"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"vigil":{"type":"object"},
+				"error":{"type":"string"}
+			},
+			"additionalProperties":false
 		}`,
 		},
 	}

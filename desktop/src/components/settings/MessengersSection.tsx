@@ -16,6 +16,7 @@ import {
 import { SettingsSection } from '../SettingsSection'
 import type { MessengerDraftMap } from '../../utils/messengerDrafts'
 import { FormSegmented } from './formUi'
+import { SettingsFlow } from './SettingsFlow'
 
 type SectionProps = {
   id: string
@@ -110,7 +111,7 @@ export function MessengersSection({
   }
 
   const toggleRow = (id: string) => {
-    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }))
+    setExpanded((prev) => ({ [id]: !prev[id] }))
   }
 
   const onExposeWebhooks = async () => {
@@ -197,13 +198,13 @@ export function MessengersSection({
       {...sectionProps}
       summary={
         enabledCount > 0
-          ? `${enabledCount} connected · expand to configure`
+          ? `${enabledCount} enabled`
           : sectionProps.summary || 'Telegram, Discord, WhatsApp…'
       }
     >
       <div className="text-[10px] leading-snug mb-2" style={{ color: 'var(--text-muted)' }}>
-        Expand a messenger to set tokens and options. Chats show up in the session list
-        (realtime). Empty secret fields leave the current token unchanged.
+        Choose a messenger to connect. Messages appear alongside your chats.
+        Leave secret fields blank to keep the saved credentials.
       </div>
 
       {deniedInbound.length > 0 && (
@@ -238,6 +239,7 @@ export function MessengersSection({
         </div>
       )}
 
+      <SettingsFlow title="Webhook connection" summary={tunnelRunning ? 'Public connection running' : 'Setup for WhatsApp, Teams, and Google Chat'} busy={tunnelBusy}>
       <div
         className="rounded px-2 py-1.5 mb-2 space-y-1"
         style={{ border: '1px solid var(--border)', background: 'var(--bg-tertiary)' }}
@@ -285,6 +287,7 @@ export function MessengersSection({
             <input
               type="password"
               value={namedToken}
+              aria-label="Cloudflare tunnel token"
               placeholder="Cloudflare tunnel token"
               onChange={(e) => setNamedToken(e.target.value)}
               className="ui-input"
@@ -294,6 +297,7 @@ export function MessengersSection({
             <input
               type="url"
               value={namedPublicURL}
+              aria-label="Public webhook address"
               placeholder="https://messengers.example.com"
               onChange={(e) => setNamedPublicURL(e.target.value)}
               className="ui-input"
@@ -336,9 +340,11 @@ export function MessengersSection({
         )}
       </div>
 
+      </SettingsFlow>
+
       {messengers.length === 0 && (
         <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-          Catalog unavailable — save Settings once the server is up.
+          Messenger information is unavailable. Close and reopen Settings to retry.
         </div>
       )}
 
@@ -399,11 +405,12 @@ export function MessengersSection({
                   <input
                     type="checkbox"
                     checked={enabled}
+                    aria-label={`Enable ${m.name}`}
                     onChange={(e) => {
                       const on = e.target.checked
                       patch(m.id, 'enabled', on)
                       // Auto-expand when enabling so fields are one click away
-                      if (on) setExpanded((prev) => ({ ...prev, [m.id]: true }))
+                      if (on) setExpanded({ [m.id]: true })
                     }}
                     style={{ accentColor: 'var(--accent)' }}
                   />
@@ -542,6 +549,7 @@ export function MessengersSection({
                         </label>
                         <input
                           type={isSecret ? 'password' : 'text'}
+                          aria-label={`${m.name}: ${f.label}`}
                           value={val}
                           placeholder={
                             isSecret && m.token_set

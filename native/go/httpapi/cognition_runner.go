@@ -79,6 +79,21 @@ func (r *CognitionTurnRunner) AttachPythonWorker(caller tools.FrameCaller) error
 	return nil
 }
 
+// PulsePartner runs one muscle-free night tick on the Python worker.
+// The hearth calls this on its own clock. It does not call a provider.
+func (r *CognitionTurnRunner) PulsePartner(ctx context.Context) error {
+	if r == nil || r.promptAssemble == nil {
+		return errors.New("rmdy prompt worker unavailable")
+	}
+	input := map[string]any{}
+	if home := strings.TrimSpace(r.HomeDir); home != "" {
+		input["home_dir"] = home
+		input["_go_bound"] = true
+	}
+	_, err := r.rmdyCall(ctx, "partner.pulse", input)
+	return err
+}
+
 func (r *CognitionTurnRunner) rmdyCall(ctx context.Context, toolID string, input map[string]any) (map[string]any, error) {
 	if r == nil || r.promptAssemble == nil {
 		return nil, errors.New("rmdy prompt worker unavailable")
@@ -111,7 +126,8 @@ func modelVisibleTool(id string) bool {
 	}
 	return !strings.HasPrefix(id, "prompt.") &&
 		!strings.HasPrefix(id, "voice.") &&
-		!strings.HasPrefix(id, "vision.")
+		!strings.HasPrefix(id, "vision.") &&
+		id != "partner.pulse"
 }
 
 // ModelVisibleToolIDs is the tool surface advertised to the model for this

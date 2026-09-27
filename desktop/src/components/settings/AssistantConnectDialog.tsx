@@ -1,6 +1,7 @@
 /** Modal: privacy + optional app OAuth setup + Connect — keeps Settings lean. */
 
-import { useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
+import { browserStackHold } from '../../utils/browserStack'
 import { useDialogFocus } from '../../hooks/useDialogFocus'
 import { getServerUrl } from '../../api/client'
 import { saveGoogleApp } from '../../api/assistant'
@@ -37,13 +38,18 @@ export function AssistantConnectDialog({
   onClose,
   onContinue,
 }: AssistantConnectDialogProps): ReactNode {
-  const [privacyAi, setPrivacyAi] = useState(true)
-  const [accountAccess, setAccountAccess] = useState(true)
+  const [privacyAi, setPrivacyAi] = useState(false)
+  const [accountAccess, setAccountAccess] = useState(false)
   const [showFull, setShowFull] = useState(false)
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
   const [err, setErr] = useState('')
   const [working, setWorking] = useState(false)
+  const titleId = useId()
+  useEffect(() => {
+    if (!open) return
+    return browserStackHold(`assistant-connect-${titleId}`)
+  }, [open, titleId])
 
   const dialogRef = useDialogFocus<HTMLDivElement>(open, () => {
     if (!working && !busy) onClose()
@@ -96,7 +102,7 @@ export function AssistantConnectDialog({
       tabIndex={-1}
       role="dialog"
       aria-modal="true"
-      aria-labelledby="pa-connect-title"
+      aria-labelledby={titleId}
       onClick={(e) => {
         if (e.target === e.currentTarget && !working && !busy) onClose()
       }}
@@ -108,7 +114,7 @@ export function AssistantConnectDialog({
         <div className="flex items-center gap-3 mb-3">
           <RemedyLogo size={32} framed />
           <div>
-            <div id="pa-connect-title" className="font-semibold text-sm">
+            <div id={titleId} className="font-semibold text-sm">
               Connect {providerLabel}
             </div>
             <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
@@ -162,6 +168,7 @@ export function AssistantConnectDialog({
             </div>
             <input
               type="text"
+              aria-label="Google OAuth Client ID"
               placeholder="Client ID"
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
@@ -170,6 +177,7 @@ export function AssistantConnectDialog({
             />
             <input
               type="password"
+              aria-label="Google OAuth Client secret"
               placeholder="Client secret (if any)"
               value={clientSecret}
               onChange={(e) => setClientSecret(e.target.value)}

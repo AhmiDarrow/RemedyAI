@@ -83,6 +83,36 @@ def episode_in_scope(ep: Any, *, project_path: str = "", session_id: str = "") -
     return bool(proj and (proj.endswith(ep_proj) or ep_proj.endswith(proj)))
 
 
+def _hearth_return_line(home: str | Any = None) -> str:
+    """One sentence the hearth already prepared. Empty when she has nothing.
+
+    The runtime writes ``soul/hearth.json``. This only reads it. She does
+    not watch the screen to decide to speak; a greeting is a finished night.
+    """
+    import json
+
+    from remedy.memory.soul.field import soul_dir
+
+    path = soul_dir(home) / "hearth.json"
+    if not path.is_file():
+        return ""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not isinstance(raw, dict):
+        return ""
+    greeting = str(raw.get("greeting") or "").strip().replace("\n", " ")
+    if not greeting:
+        return ""
+    if len(greeting) > 220:
+        greeting = greeting[:219] + "…"
+    return (
+        "Hearth (one return, already journaled — say it once in your own "
+        f"voice, then let it go): {greeting}"
+    )
+
+
 def build_soul_context_block(
     field: SoulField | None = None,
     *,
@@ -168,8 +198,9 @@ def build_soul_context_block(
                     "when the moment fits, whether they'd like you to keep "
                     "gently working between visits — dreaming on your notes, "
                     "small local steps on their goals. If yes, call "
-                    "soul_vigil action=enable. If no or ignored, never raise "
-                    "it again."
+                    "partner.vigil with action enable. If no, call "
+                    "partner.vigil with action disable. If ignored, never "
+                    "raise it again."
                 )
 
     # Proprioception: corrective lines for the *current* muscle's known
@@ -208,7 +239,10 @@ def build_soul_context_block(
     )
     if rel.correction_style:
         lines.append(f"Correction style: {rel.correction_style}")
-    if work_threads:
+    hearth = _hearth_return_line(home)
+    if hearth:
+        lines.append(hearth)
+    elif work_threads:
         with suppress(Exception):
             from remedy.memory.soul.vigil import while_away_line
 

@@ -81,6 +81,33 @@ If the server fails or settings fail to load:
 
 ## After setup
 
+Open **Settings** from the Remedy menu or with **Ctrl+,**. Choose a category:
+
+- **General** — names, language, voice, workspace, and appearance.
+- **Models** — providers, API keys, and local models.
+- **Connections** — devices, messengers, phone, and personal assistant accounts.
+- **Privacy** — approvals, access, and information shared with your model.
+- **System** — help, updates, and app preferences.
+
+**Simple** shows everyday controls; **Advanced** reveals the full set within
+each category. Search looks across all categories, including advanced settings.
+Open a matching section to edit it. Switching categories keeps your unsaved
+form entries; use **Save** at the bottom for settings that require it.
+Persona deletion lives under **Privacy → Privacy**. Optional Sleev gateway
+setup is in **Advanced → Models → Provider**; an enabled gateway remains
+visible in Simple mode. Searching for **Sleev** also finds its controls.
+
+Settings opens one section at a time. Longer tasks—connection setup, model
+downloads and performance, phone terms, and morning brief scheduling—open in
+separate dialogs. **Done** closes the dialog and keeps unfinished entries.
+Each dialog says whether changes apply immediately or need **Save** in Settings.
+Use **Escape** to close a dialog when no operation is in progress.
+
+The main bar has its own **Simple / Advanced** control. In Simple mode, choose
+the current model to open the model picker. Advanced keeps the provider and
+model selectors directly on the bar. Change the theme in **General → Appearance**.
+Settings detail and main-bar detail are independent preferences.
+
 - Empty chat shows starters and a pointer to `/help` and **F1**  
 - You may be asked for your name if it was left blank  
 - Secondary loads (models list) must not block the wizard  

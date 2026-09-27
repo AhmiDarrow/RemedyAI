@@ -225,6 +225,21 @@ type RegistryPolicy struct {
 	LiveContext func(sessionID string) string
 }
 
+func partnerVigilMutates(input []byte) bool {
+	var body struct {
+		Action string `json:"action"`
+	}
+	if json.Unmarshal(input, &body) != nil {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(body.Action)) {
+	case "", "status":
+		return false
+	default:
+		return true
+	}
+}
+
 func (p *RegistryPolicy) livePageContext() string {
 	if p == nil || p.LiveContext == nil {
 		return ""
@@ -245,6 +260,12 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 	}
 	switch desc.Risk {
 	case tools.RiskReadOnly:
+		// Nights are a grant, not a lookup. A messenger or other untrusted
+		// turn can ask what the grant is; turning it on or off waits for the
+		// owner. The owner's own chat is the yes — no second card.
+		if call.Name == "partner.vigil" && p.ForceAsk && partnerVigilMutates(call.Input) {
+			return cognition.Ask
+		}
 		return cognition.Allow
 	case tools.RiskCheckpoint:
 		return p.decideOwnerMoment(call)
