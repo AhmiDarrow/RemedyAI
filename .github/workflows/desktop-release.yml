@@ -584,6 +584,8 @@ jobs:
 
             One partner on **Windows and Linux**. Continuity stays in `~/.remedy`.
 
+            What changed: [What's new](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md).
+
             ### Windows
             1. Download **`Remedy.Desktop_*_x64-setup.exe`**
             2. Run the installer

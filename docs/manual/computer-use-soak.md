@@ -1,11 +1,9 @@
-# Computer use — local soak checklist
+# Computer use — maintainer checklist
 
-**Audience:** maintainers / operators validating computer-use before merge or release.
-Not a day-to-day end-user feature guide.
+**Audience:** maintainers running the computer-use soak before a release.
+Not a day-to-day owner guide.
 
-**Branch:** `feature/computer-use` only. Do **not** push or merge until this checklist is solid.
-
-Run server + Desktop from this branch (not the installed stable release).
+Run the server and Desktop from this tree.
 
 **Agent note:** Remedy can always open this chapter with
 `help_read(id="computer-use-soak")` (or `help_list` first) — F1 help is not
@@ -67,7 +65,5 @@ outside access scope.
 | Date | |
 | Tester | |
 | Branch SHA | |
-| Ready to merge master? | no / yes |
+| Ready | no / yes |
 | Notes | |
-
-When solid: merge to master locally, then only push when you explicitly choose a release path.

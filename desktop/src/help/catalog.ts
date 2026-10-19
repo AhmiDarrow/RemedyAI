@@ -77,7 +77,7 @@ const META: HelpArticleMeta[] = [
     order: 18,
     tags: ['computer-use', 'browser', 'rail', 'soak', 'navigate'],
     summary:
-      'Maintainer QA checklist for computer-use (soak test). Not end-user how-to; agent can help_read it.',
+      'Maintainer checklist for computer use. Not an owner how-to. The agent can help_read it.',
   },
   {
     id: '01-install-windows',

@@ -177,7 +177,7 @@ Plan mode allows see/navigate/list only (no click/type). Build runs the full sur
 
 Status bar **PC host** means the Desktop app is claiming browser jobs.
 
-Local soak (feature branch only): [computer-use-soak.md](computer-use-soak.md).
+Maintainer checklist: [computer-use-soak.md](computer-use-soak.md).
 
 ## What stays unique to Remedy
 

@@ -4,7 +4,7 @@
 
 **Remedy Desktop** is the recommended way to use Remedy — your personal AI
 partner for knowledge, design, code, computer use, and get-it-done work (not a
-medical or clinical product). Current package series: **0.50.x** (see root
+medical or clinical product). Current release: **0.65.0** (see root
 `CHANGELOG.md`).
 
 ### Dev workflow (single build)
@@ -64,7 +64,7 @@ and versions cannot drift. Only stdlib-backed modules may be imported on
 the worker path (`remedy.voice.*`, `remedy.core.atomic_json`,
 `remedy.telephony.narrowband`).
 
-### Native runtime cutover (0.48+)
+### Runtime
 
 Installers ship the Go `remedy-runtime` (Tauri `externalBin`, owns `:7400`) and
 the Zig `remedy_core` shared library (`.dll` on Windows, `.so` on Linux) as a
@@ -79,7 +79,7 @@ process or loads a library. A native failure is replayed through compatibility
 only for an operation that declares itself idempotent; sends, payments, deletes,
 and other potentially partial side effects are never silently repeated.
 
-### Phase 6 — packaged + `remedy serve` use `remedy-runtime`
+### What the installer launches
 
 Tauri `externalBin` (Windows + Linux) is **`remedy-runtime`**. Packaged Desktop
 launches it on `127.0.0.1:7400` with `--serve` (or `--serve --listen` for a
@@ -92,14 +92,13 @@ Python venv is only a last-resort launcher for `remedy serve` →
 `remedy-runtime`. FastAPI `create_app` / `interfaces.api` are deleted; Go owns `:7400`.
 Python worker entry: `python -m remedy.runtime.rmdy_tool_worker`.
 
-**Remaining gaps (worker / parity — not dual-serve):**
+**Worker notes:**
 
 | Gap | Why it still matters |
 |-----|----------------------|
 | Full `/api/*` route parity | Go covers the production Desktop surface; Desktop-called paths still missing on Go are listed in `tests/test_desktop_api_contract.py` `KNOWN_GO_GAPS` (shrink only). FastAPI API harness is deleted |
 | Python worker over RMDY | Prompt assembly, soul/skills text, voice/vision/telephony still need a supervised worker |
 | Zig in-process from Go | Some host primitives still load via Python `host_binding` |
-| Release smoke | NSIS/deb/AppImage must prove :7400 health + session stream on both OS with the new `externalBin` triple names |
 
 
 ### Skills panel (0.10.30+; HITL + packs in 0.10.44)

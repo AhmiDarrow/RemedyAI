@@ -22,7 +22,7 @@ project access scope).
 | **Home surface** | **Grove** (partner). **Studio** is one tap away (workbench). |
 | **Data home** | `~/.remedy` (config, memory, voice, Vault, skills; DPAPI on Windows) |
 | **Models** | *Your* provider keys or Ollama / RMB — continuity stays on disk |
-| **Current tree** | **v0.63.2** — Go `remedy-runtime` + Zig `remedy_core` own local API `:7400` and Desktop. Public: GitHub **[v0.63.2](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.63.2)** · PyPI **`remedy-ai`** |
+| **Current release** | **v0.65.0** · GitHub **[v0.65.0](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.65.0)** · PyPI **`remedy-ai`** |
 | **Install** | [Windows](01-install-windows.md) · [Linux](01-install-linux.md) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · PyPI `remedy-ai` |
 
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.  
@@ -32,42 +32,12 @@ Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
 
 ## What’s new (start here)
 
-**v0.60** is the native runtime cutover: Desktop and `remedy serve` run Go
-`remedy-runtime` on `:7400` with Zig `remedy_core` — not Python FastAPI. Tools
-use the Tool ABI (`read` / `edit` / `write` / `glob` / `grep` / `bash`,
-`computer.*`, `settings.*`, and friends). Chat keeps a plain-language provider fallback when a key is missing
-or a local host is down. See [What’s new](13-whats-new.md).
+**v0.65.0** keeps a long task open until a check after the last change is
+green. A rule you set — a must, a never, a do-not — still stands after the
+chat is compacted. Settings are five categories. She stays ready on this PC
+and does not watch the screen. A night step happens only after you say yes.
 
-**v0.41** is **multilingual**: Language pins chrome *and* replies (default Auto
-= this PC + what you type; many languages + RTL). Verified Plan steps and
-memory as context not a grant. Hive cannot write parent Partner Memory.
-Payment checkpoints still cannot be recovered around.
-
-**v0.38.1** closes gates that were still open in 0.38.0: hired helpers cannot
-read your mail or calendar, one skill yes is not every skill, Autonomous still
-asks in an untrusted folder, and Trust no longer resets when you save Settings.
-
-**v0.38.0** is the capability architecture: policy owns authority, generic
-shell does not inherit GitHub/SSH tokens, and Settings → Security & power has
-a **Trust** control (Conservative / Balanced / Autonomous). Mail and payment
-still always stop.
-
-**v0.31.2** is the previous partner-line public release: thinking is this round’s scratchpad, and
-she can open a folder in the Files rail (and read scratch). **v0.31.1** lets her
-open Grove, Alongside, Settings, and rails herself. **v0.31.0** is a new Remedy,
-not a patch on the old coding-agent line.
-
-- **Grove** is home; she **speaks and hears** locally; Studio keeps the workbench
-- **Life tasks** finish with observed success, owner checkpoints, and the **Vault**
-- Silent **hive** daughters, a **research** studio, and a **game** studio
-- Web fetch/search on after install; robots.txt; third-party notices; colorblind themes
-- RMB defaults to **Qwen3.5-9B** — a local model that can actually call tools
-
-**v0.30.0** (local) put Grove, voice, life tasks and the Vault on the machine.
-
-**v0.26.2** was the last public coding-agent ship: work turns drive this PC; Build no longer hangs.
-
-Full list: **[What’s new](13-whats-new)** · engineering: repo `CHANGELOG.md`.
+Full notes: **[What’s new](13-whats-new.md)** · engineering: repo `CHANGELOG.md`.
 
 ---
 

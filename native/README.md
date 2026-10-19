@@ -1,7 +1,7 @@
 # Remedy Native
 
-Remedy Native is the Go runtime backed by a Zig capability core, with Python kept as
-supervised ML / compatibility workers.
+Remedy Native is the Go runtime and the Zig capability core. Python workers
+handle model, voice, and vision under that runtime.
 
 - `go/` owns lifecycle, orchestration, scheduling, events, language-neutral tool
   dispatch, and production loopback HTTP (`remedy-runtime` on `:7400`).
@@ -17,8 +17,7 @@ credential isolation, or Windows/Linux parity.
 The Zig library exposes its versioned C surface through `zig/include/remedy_core.h`.
 Capability bits are deny-by-default. Path validation is paired with the operating system's
 resolve-beneath file-open option and handle-relative, no-follow parent traversal for every
-mutation; process policy and signed capability tokens are added by the Phase 3 security
-boundary before the substrate is connected to production.
+mutation. Process policy and signed capability tokens sit on that same boundary.
 
 The security boundary now authenticates short-lived grants with HMAC-SHA-256, binds them
 to an agent and workspace scope, consumes each nonce once under synchronization, prunes
