@@ -295,6 +295,8 @@ func executeDelegate(ctx context.Context, request Request) (Result, error) {
 		"agent":     agent.id,
 		"exit_code": int64(run.exitCode),
 		"cwd":       filepath.ToSlash(workdir),
+		// The child's report is prose. The parent still has to run a check.
+		"not_a_check": "This report is not a passing check. Run the verify command and read its exit code before treating the mission as done.",
 	}
 	if truncated {
 		payload["truncated"] = true

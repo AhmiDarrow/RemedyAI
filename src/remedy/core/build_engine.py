@@ -69,9 +69,16 @@ _BUILD_FILE_CUE_RE = re.compile(
     r"(?i)(?:\.(?:py|tsx?|jsx?|rs|go|cpp|h|gd)\b|\.c\b|\bgcc\b|\bcompile\b|\bclang\b)"
 )
 
-# Source mutations only — shell is classified as verify when it looks like tests
+def _norm_tool(name: str) -> str:
+    """Dots and dashes match underscores, same as the Go tool classifier."""
+    return str(name or "").strip().lower().replace("-", "_").replace(".", "_")
+
+
+# Source mutations only — shell is classified as verify when it looks like tests.
+# Names are stored normalized. workspace.write and a click are writes too.
 _WRITE_TOOLS = frozenset(
-    {
+    _norm_tool(n)
+    for n in (
         "file_write",
         "file_edit",
         "file_edit_batch",
@@ -81,30 +88,65 @@ _WRITE_TOOLS = frozenset(
         "build_unit_hop",
         "build_drive",
         "build_parallel",
-    }
+        "workspace.write",
+        "workspace.edit",
+        "workspace.create",
+        "workspace.delete",
+        "workspace.rename",
+        "workspace.mkdir",
+        "search_replace",
+        "str_replace",
+        "computer.click",
+        "computer.type",
+        "computer.key",
+        "computer.key_hold",
+        "computer.scroll",
+        "computer.drag",
+        "computer.focus",
+        "computer.window",
+        "computer.navigate",
+        "computer.uia_action",
+        "clipboard.write",
+        "delegate",
+    )
 )
 _EXPLORE_TOOLS = frozenset(
-    {
+    _norm_tool(n)
+    for n in (
         "file_read",
         "list_dir",
         "repo_search",
         "file_glob",
         "memory_search",
+        "memory.search",
         "read",
         "glob",
         "grep",
-        "memory.search",
         "soul_recall",
-    }
+        "workspace.read",
+        "workspace.list",
+        "workspace.search",
+        "workspace.grep",
+        "web.search",
+        "skill.search",
+        "codebase.search",
+    )
 )
 _VERIFY_TOOLS = frozenset(
-    {
+    _norm_tool(n)
+    for n in (
         "bash_exec",
         "shell_exec",
+        "shell.exec",
         "bash",
         "job_run",
         "host_run",
-    }
+        "host.run",
+        "mission.verify",
+        "pytest",
+        "cargo.test",
+        "process.spawn",
+    )
 )
 _SHIP_TOOLS = frozenset(
     {
@@ -1215,7 +1257,7 @@ def build_protocol_block(state: BuildTurnState) -> str:
 
 def _tool_name(tc: dict[str, Any]) -> str:
     fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
-    return str((fn or {}).get("name") or tc.get("name") or "").strip().lower()
+    return _norm_tool((fn or {}).get("name") or tc.get("name") or "")
 
 
 def _args_obj(tc: dict[str, Any]) -> dict[str, Any]:
@@ -1285,7 +1327,18 @@ def observe_tool_batch(
     for tc in tcs:
         n = _tool_name(tc)
         tid = str(tc.get("id") or tc.get("tool_call_id") or "")
-        if n in ("bash_exec", "shell_exec", "bash", "job_run", "host_run"):
+        if n in _VERIFY_TOOLS and n not in {
+            "bash_exec",
+            "shell_exec",
+            "bash",
+            "job_run",
+            "host_run",
+            "process_spawn",
+        }:
+            any_verify = True
+            if tid:
+                verify_ids.add(tid)
+        elif n in ("bash_exec", "shell_exec", "bash", "job_run", "host_run", "process_spawn"):
             blob = _tool_command_blob(tc)
             if _blob_is_verify_command(blob):
                 any_verify = True

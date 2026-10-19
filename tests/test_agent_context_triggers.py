@@ -88,16 +88,20 @@ async def test_the_project_engine_skill_wins_for_a_game_ish_ask(tmp_path, reg):
     loop = _Loop()
     rt = _runtime("add a double jump for the player", reg, loop, project=str(proj))
     ctx = await build_turn_context(rt)
-    assert "BODY-OF-godot-4" in ctx
-    assert loop.activations == [("godot-4", "sess-42")]
+    assert "BODY-OF-godot-4" not in ctx
+    assert "godot-4" in ctx
+    assert "skill.activate" in ctx
+    assert loop.activations == []
 
 
 @pytest.mark.asyncio
 async def test_a_trigger_routes_outside_any_game_project(reg):
     ctx = await build_turn_context(_runtime("make a platformer", reg, _Loop()))
-    assert "BODY-OF-game-dev-studio" in ctx
+    assert "BODY-OF-game-dev-studio" not in ctx
+    assert "game-dev-studio" in ctx
     ctx = await build_turn_context(_runtime("check the blast radius of this", reg, _Loop()))
-    assert "BODY-OF-change-safety" in ctx
+    assert "BODY-OF-change-safety" not in ctx
+    assert "change-safety" in ctx
 
 
 @pytest.mark.asyncio
@@ -121,8 +125,9 @@ async def test_the_project_research_packs_win_for_a_research_ish_ask(tmp_path):
         "add a figure for the main result", r, loop, project=str(proj)
     )
     ctx = await build_turn_context(rt)
-    assert "BODY-OF-research-method" in ctx
-    assert loop.activations[0][0] == "research-method"
+    assert "BODY-OF-research-method" not in ctx
+    assert "research-method" in ctx
+    assert loop.activations == []
 
 
 @pytest.mark.asyncio

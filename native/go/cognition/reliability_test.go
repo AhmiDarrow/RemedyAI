@@ -221,7 +221,7 @@ func TestRepeatedCompactionKeepsGoalAndCorrections(t *testing.T) {
 	}
 	for cycle := 0; cycle < 3; cycle++ {
 		appendRounds()
-		msgs = compactTranscript(cloneMessages(msgs))
+		msgs = compactTranscript(cloneMessages(msgs), true)
 		if goal := lastUserProseIndex(msgs); goal < 0 || msgs[goal].Text() != "current task" {
 			t.Fatalf("cycle %d lost goal: %s", cycle, transcriptText(msgs))
 		}

@@ -12,6 +12,62 @@ _DECISION_HINT = re.compile(
     r"(?:decided to|will use|choosing|we(?:'ll| will) use|strategy:)\s+([^.!?\n]{4,100})",
     re.I,
 )
+# Binding owner language. "must not" is listed inside "must" so both forms hit.
+_CONSTRAINT_RE = re.compile(
+    r"\b(?:must(?:\s+not)?|never|do\s+not|don['\u2019]t|always|required|forbidden)\b",
+    re.I,
+)
+# Triggers identify a constraint; retention is judged on the content words.
+_CONSTRAINT_STOP = frozenset(
+    {
+        "the",
+        "and",
+        "for",
+        "with",
+        "that",
+        "this",
+        "from",
+        "will",
+        "use",
+        "not",
+        "must",
+        "never",
+        "always",
+        "required",
+        "forbidden",
+        "dont",
+        "don",
+        "does",
+        "did",
+        "are",
+        "was",
+        "were",
+        "you",
+        "your",
+        "our",
+        "but",
+        "any",
+        "all",
+        "can",
+        "may",
+        "into",
+        "onto",
+        "than",
+        "then",
+        "have",
+        "has",
+        "had",
+        "been",
+        "being",
+        "its",
+        "also",
+        "only",
+        "just",
+        "please",
+    }
+)
+_CONSTRAINT_LIMIT = 20
+_CONSTRAINT_CLIP = 240
 
 
 def _norm_path(p: str) -> str:
@@ -39,8 +95,72 @@ def _clean_path_candidate(p: str) -> str:
     return p
 
 
+def _clip_constraint(text: str) -> str:
+    text = re.sub(r"\s+", " ", (text or "").strip())
+    if len(text) <= _CONSTRAINT_CLIP:
+        return text
+    return text[:_CONSTRAINT_CLIP].rstrip()
+
+
+def _constraint_key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _constraint_chunks(content: str) -> list[str]:
+    chunks: list[str] = []
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        for part in re.split(r"(?<=[.!?])\s+|(?<=;)\s+", line):
+            part = re.sub(r"^(?:[-*•]+|\d+[.)])\s+", "", part).strip()
+            if part:
+                chunks.append(part)
+    return chunks
+
+
+def _extract_binding_constraints(messages: list[dict[str, Any]] | None) -> list[str]:
+    """Sentence or line snippets that bind the owner (user and assistant only)."""
+    found: list[str] = []
+    seen: set[str] = set()
+    for m in messages or []:
+        if m.get("role") not in ("user", "assistant"):
+            continue
+        content = m.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        for chunk in _constraint_chunks(content):
+            if not _CONSTRAINT_RE.search(chunk):
+                continue
+            clipped = _clip_constraint(chunk)
+            key = _constraint_key(clipped)
+            if len(key) < 3 or key in seen:
+                continue
+            seen.add(key)
+            found.append(clipped)
+            if len(found) >= _CONSTRAINT_LIMIT:
+                return found
+    return found
+
+
+def _constraint_kept(snippet: str, brief_flat: str) -> bool:
+    """Kept when the phrase, or enough of its content words, is in the brief."""
+    phrase = _constraint_key(snippet)
+    if phrase and phrase in brief_flat:
+        return True
+    words = [w for w in phrase.split() if len(w) >= 3 and w not in _CONSTRAINT_STOP][:8]
+    if not words:
+        return False
+    need = 1 if len(words) == 1 else max(2, (len(words) + 1) // 2)
+    hits = 0
+    for w in words:
+        if re.search(rf"(?<![a-z0-9]){re.escape(w)}(?![a-z0-9])", brief_flat):
+            hits += 1
+    return hits >= need
+
+
 def extract_fact_candidates(messages: list[dict[str, Any]] | None) -> dict[str, list[str]]:
-    """Pull paths + decision-like phrases from recent history (pre-compress ground truth)."""
+    """Pull paths, decisions, and binding constraints (pre-compress ground truth)."""
     paths: list[str] = []
     decisions: list[str] = []
     seen_p: set[str] = set()
@@ -66,7 +186,11 @@ def extract_fact_candidates(messages: list[dict[str, Any]] | None) -> dict[str, 
                 if dk and dk not in seen_d:
                     seen_d.add(dk)
                     decisions.append(d)
-    return {"paths": paths[:40], "decisions": decisions[:20]}
+    return {
+        "paths": paths[:40],
+        "decisions": decisions[:20],
+        "constraints": _extract_binding_constraints(messages),
+    }
 
 
 def review_compress_quality(
@@ -76,16 +200,20 @@ def review_compress_quality(
     tokens_before: int = 0,
     tokens_after: int = 0,
 ) -> dict[str, Any]:
-    """Score whether brief retained important paths/decisions from history.
+    """Score whether brief retained paths, decisions, and binding constraints.
 
     Returns score in [0, 1], lists of kept/lost facts, and human summary.
+    With zero constraints the 0.65/0.35 score and ok rule are unchanged.
+    One lost binding constraint forces ok False.
     """
     facts = extract_fact_candidates(messages_before)
     paths = facts["paths"]
     decisions = facts["decisions"]
+    constraints = facts["constraints"]
 
     brief_blob = ""
     if brief is not None:
+        # Raw user_constraints: the context block can truncate before them.
         brief_blob = (
             brief_to_context_block(brief, max_chars=4000)
             + " "
@@ -94,8 +222,11 @@ def review_compress_quality(
             + " ".join(brief.decisions or [])
             + " "
             + " ".join(brief.key_paths or [])
+            + " "
+            + " ".join(brief.user_constraints or [])
         )
     brief_l = brief_blob.lower().replace("\\", "/")
+    brief_flat = re.sub(r"[^a-z0-9]+", " ", brief_l).strip()
 
     paths_kept: list[str] = []
     paths_lost: list[str] = []
@@ -124,15 +255,30 @@ def review_compress_quality(
         else:
             dec_lost.append(d)
 
+    con_kept: list[str] = []
+    con_lost: list[str] = []
+    for c in constraints:
+        if _constraint_kept(c, brief_flat):
+            con_kept.append(c)
+        else:
+            con_lost.append(c)
+
     n_path = len(paths) or 0
     n_dec = len(decisions) or 0
+    n_con = len(constraints) or 0
     path_score = (len(paths_kept) / n_path) if n_path else 1.0
     dec_score = (len(dec_kept) / n_dec) if n_dec else 1.0
+    con_score = (len(con_kept) / n_con) if n_con else 1.0
     # Fail-closed when nothing extractable: do not authorize middle-history drop.
     # (Previously defaulted to 0.85, which always passed the 0.65 gate.)
-    score = (
-        0.65 * path_score + 0.35 * dec_score if (n_path or n_dec) else 0.40
-    )
+    # Constraints, when present, take a quarter without dropping path weight
+    # below half. Zero constraints stay on the historical 0.65/0.35 blend.
+    if not (n_path or n_dec or n_con):
+        score = 0.40
+    elif n_con:
+        score = 0.50 * path_score + 0.25 * dec_score + 0.25 * con_score
+    else:
+        score = 0.65 * path_score + 0.35 * dec_score
 
     brief_substance = False
     if brief is not None:
@@ -155,19 +301,23 @@ def review_compress_quality(
         summary_parts.append(f"paths {len(paths_kept)}/{n_path}")
     if n_dec:
         summary_parts.append(f"decisions {len(dec_kept)}/{n_dec}")
+    if n_con:
+        summary_parts.append(f"constraints {len(con_kept)}/{n_con}")
     if tokens_before:
         summary_parts.append(
             f"tokens {tokens_before}→{tokens_after} ({reduction*100:.0f}% less est.)"
         )
-    if not (n_path or n_dec):
+    if not (n_path or n_dec or n_con):
         summary_parts.append("no extractable facts (fail-closed)")
 
     path_loss_ok = len(paths_lost) <= max(2, n_path // 3) if n_path else True
+    # not con_lost is true when nothing was extracted, so the old ok rule holds.
     ok = (
         score >= 0.55
         and path_loss_ok
         and brief_substance
         and (n_path + n_dec) > 0
+        and not con_lost
     )
 
     return {
@@ -180,6 +330,10 @@ def review_compress_quality(
         "decisions_kept": len(dec_kept),
         "decisions_lost": len(dec_lost),
         "decisions_lost_sample": dec_lost[:5],
+        "constraints_total": n_con,
+        "constraints_kept": len(con_kept),
+        "constraints_lost": len(con_lost),
+        "constraints_lost_sample": con_lost[:5],
         "token_reduction_pct": round(reduction * 100, 1),
         "tokens_before": tokens_before,
         "tokens_after": tokens_after,

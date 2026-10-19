@@ -257,6 +257,9 @@ func TestDelegateStreamsTheSubAgentTrailAndReturnsItsReport(t *testing.T) {
 	if out["report"] != "Changed main.go and ran the build." {
 		t.Fatalf("the final result event is the tool result: %#v", out)
 	}
+	if note, _ := out["not_a_check"].(string); !strings.Contains(note, "not a passing check") {
+		t.Fatalf("delegate report must say it is not a check: %#v", out)
+	}
 	if out["agent"] != "claude-code" || out["session_id"] != "sess_fake" {
 		t.Fatalf("result should name the agent and its session: %#v", out)
 	}

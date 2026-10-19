@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -20,7 +21,7 @@ const (
 // the latest user prose that is not tool results (this turn's goal), and the
 // last compactKeepTail messages survive verbatim. The cut never separates an
 // assistant tool_use message from the user message carrying its results.
-func compactTranscript(msgs []Message) []Message {
+func compactTranscript(msgs []Message, verifySeen bool) []Message {
 	if len(msgs) <= compactKeepTail+2 {
 		return msgs
 	}
@@ -50,7 +51,7 @@ func compactTranscript(msgs []Message) []Message {
 	if keepGoal {
 		out = append(out, msgs[goal])
 	}
-	out = append(out, contextNote(buildWorkingSet(middle).render(len(middle))))
+	out = append(out, contextNote(buildWorkingSet(middle).render(len(middle), verifySeen)))
 	out = append(out, msgs[cut:]...)
 	return out
 }
@@ -85,30 +86,38 @@ type commandNote struct {
 
 // workingSet is the deterministic residue of the rounds a compaction drops.
 type workingSet struct {
-	carried   string
-	read      []fileNote
-	edited    []string
-	commands  []commandNote
-	failure   string
-	todo      string
-	decisions []string
-	requests  []string
+	carried     string
+	read        []fileNote
+	edited      []string
+	commands    []commandNote
+	failure     string
+	todo        string
+	constraints []string
+	decisions   []string
+	requests    []string
 }
 
 const (
-	maxWorkingSetFiles     = 40
-	maxWorkingSetCommands  = 30
-	maxWorkingSetDecisions = 16
-	maxFailureChars        = 1_200
-	maxTodoChars           = 1_200
-	maxCarriedChars        = 4_000
-	maxWorkingSetRequests  = 16
-	maxRequestChars        = 1_200
+	maxWorkingSetFiles       = 40
+	maxWorkingSetCommands    = 30
+	maxWorkingSetDecisions   = 16
+	maxFailureChars          = 1_200
+	maxTodoChars             = 1_200
+	maxCarriedChars          = 4_000
+	maxWorkingSetRequests    = 16
+	maxRequestChars          = 1_200
+	maxWorkingSetConstraints = 24
+	maxConstraintChars       = 240
 )
+
+// bindingConstraint matches a binding rule in dropped prose (case-insensitive):
+// must, must not, never, do not, don't, always, required, forbidden.
+var bindingConstraint = regexp.MustCompile(`(?i)\b(?:must(?:\s+not)?|never|do\s+not|don(?:'|\x{2019})t|always|required|forbidden)\b`)
 
 // buildWorkingSet walks the dropped middle of a transcript and records what the
 // model must not forget: files it touched, commands it ran with exit codes, the
-// last failing check, the TODO state and one decision line per assistant round.
+// last failing check, the TODO state, binding constraints, and one decision
+// line per assistant round.
 func buildWorkingSet(msgs []Message) workingSet {
 	var ws workingSet
 	calls := map[string]Block{}
@@ -120,6 +129,7 @@ func buildWorkingSet(msgs []Message) workingSet {
 					if line := firstSentence(b.Text); line != "" {
 						ws.decisions = appendRecent(ws.decisions, line, maxWorkingSetDecisions)
 					}
+					ws.constraints = appendConstraints(ws.constraints, b.Text)
 					continue
 				}
 				// A second compaction must not throw the first one away: the
@@ -127,7 +137,10 @@ func buildWorkingSet(msgs []Message) workingSet {
 				if m.Internal && strings.HasPrefix(strings.TrimSpace(b.Text), compactedHeader) {
 					ws.carried = carriedBody(b.Text)
 				} else if m.Role == RoleUser && !m.Internal && !m.HasToolResults() && strings.TrimSpace(b.Text) != "" {
-					ws.requests = append(ws.requests, clipRunes(strings.TrimSpace(b.Text), maxRequestChars))
+					// Lift constraints before the 16-slot window can evict this request.
+					text := strings.TrimSpace(b.Text)
+					ws.constraints = appendConstraints(ws.constraints, text)
+					ws.requests = append(ws.requests, clipRunes(text, maxRequestChars))
 					if len(ws.requests) > maxWorkingSetRequests {
 						ws.requests = ws.requests[1:]
 					}
@@ -202,11 +215,11 @@ func recentUnique(items []string, value string, limit int) []string {
 	return appendRecent(items, value, limit)
 }
 
-func (w workingSet) render(dropped int) string {
+func (w workingSet) render(dropped int, verifySeen bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s %d earlier messages were summarized to fit the context window. "+
 		"The goal above and the most recent messages are intact; nothing below has been undone. "+
-		"Do not restart or re-read what is already recorded here.\n", compactedHeader, dropped)
+		"Do not restart the task. Re-read a file only to recover a fact that is not written in this working set.\n", compactedHeader, dropped)
 	if w.carried != "" {
 		b.WriteString("\nCarried forward from an earlier compaction:\n")
 		b.WriteString(w.carried)
@@ -246,13 +259,106 @@ func (w workingSet) render(dropped int) string {
 		b.WriteString(w.todo)
 		b.WriteByte('\n')
 	}
+	if len(w.constraints) > 0 {
+		b.WriteString("\nConstraints still in force:\n")
+		for _, c := range w.constraints {
+			fmt.Fprintf(&b, "- %s\n", c)
+		}
+	}
 	if len(w.decisions) > 0 {
 		b.WriteString("\nDecisions so far:\n")
 		for _, d := range w.decisions {
 			fmt.Fprintf(&b, "- %s\n", d)
 		}
 	}
+	if !verifySeen {
+		b.WriteString("\nNext step: a check must exit 0 before this task is done. " +
+			"Read one path under Files changed before editing that path again.\n")
+	}
 	return b.String()
+}
+
+// elideMiddleObservations stubs tool-result bodies in the dropped middle and
+// leaves the opener, the goal, and the last compactKeepTail messages verbatim.
+// A stub is one line: tool, path or command, exit or ok, and the original size.
+// Short results are left alone. The caller compacts the original transcript
+// when the stubbed copy still does not fit.
+func elideMiddleObservations(msgs []Message) []Message {
+	if len(msgs) <= compactKeepTail+2 {
+		return msgs
+	}
+	head := firstUserProseIndex(msgs)
+	cut := len(msgs) - compactKeepTail
+	for cut > 1 && msgs[cut].Role == RoleUser && msgs[cut].HasToolResults() {
+		cut--
+	}
+	if cut <= head+1 {
+		return msgs
+	}
+	calls := map[string]Block{}
+	for i := 0; i < cut; i++ {
+		for _, b := range msgs[i].Blocks {
+			if b.Type == BlockToolUse && b.ID != "" {
+				calls[b.ID] = b
+			}
+		}
+	}
+	out := cloneMessages(msgs)
+	changed := false
+	for i := head + 1; i < cut; i++ {
+		next, did := elideResultBlocks(out[i].Blocks, calls)
+		if did {
+			out[i].Blocks = next
+			changed = true
+		}
+	}
+	if !changed {
+		return msgs
+	}
+	return out
+}
+
+func elideResultBlocks(blocks []Block, calls map[string]Block) ([]Block, bool) {
+	changed := false
+	out := cloneBlocks(blocks)
+	for i, b := range out {
+		if b.Type != BlockToolResult {
+			continue
+		}
+		body := blockText(b.Content)
+		call := calls[b.ToolUseID]
+		stub := observationStub(call, body, b.IsError)
+		if len(body) <= len(stub) {
+			continue
+		}
+		out[i].Content = []Block{TextBlock(stub)}
+		changed = true
+	}
+	return out, changed
+}
+
+func observationStub(call Block, body string, isError bool) string {
+	name := strings.TrimSpace(call.Name)
+	if name == "" {
+		name = "tool"
+	}
+	ref := ""
+	if len(call.Input) > 0 {
+		ref = inputPath(call.Input)
+		if ref == "" {
+			ref = inputCommand(call.Input)
+		}
+	}
+	status := "ok"
+	if ClassifyTool(name) == ToolVerify {
+		status = "exit " + exitCodeLabel(body, isError)
+	} else if isError {
+		status = "error"
+	}
+	if ref != "" {
+		return fmt.Sprintf("%s %s %s (%d chars elided)", name, ref, status, len(body))
+	}
+	return fmt.Sprintf("%s %s (%d chars elided)", name, status, len(body))
 }
 
 // carriedBody strips the explanatory header from a previous compaction message
@@ -365,6 +471,51 @@ func blockText(blocks []Block) string {
 func hashPrefix(body string) string {
 	sum := sha256.Sum256([]byte(body))
 	return hex.EncodeToString(sum[:4])
+}
+
+// appendConstraints keeps binding lines or sentences from dropped prose.
+// Duplicates collapse to the newest copy; past the cap the oldest are dropped.
+func appendConstraints(dst []string, text string) []string {
+	for _, sentence := range bindingSentences(text) {
+		dst = recentUnique(dst, sentence, maxWorkingSetConstraints)
+	}
+	return dst
+}
+
+// bindingSentences splits prose into lines and sentences and returns every
+// piece that states a binding constraint, clipped to maxConstraintChars.
+func bindingSentences(text string) []string {
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		for _, sentence := range splitSentences(line) {
+			sentence = strings.TrimSpace(sentence)
+			if sentence == "" || !bindingConstraint.MatchString(sentence) {
+				continue
+			}
+			out = append(out, clipRunes(sentence, maxConstraintChars))
+		}
+	}
+	return out
+}
+
+func splitSentences(line string) []string {
+	var out []string
+	start := 0
+	runes := []rune(line)
+	for i, r := range runes {
+		if r == '.' || r == '!' || r == '?' {
+			out = append(out, string(runes[start:i+1]))
+			start = i + 1
+		}
+	}
+	if start < len(runes) {
+		out = append(out, string(runes[start:]))
+	}
+	return out
 }
 
 // firstSentence is the decision line of an assistant round: its first sentence,

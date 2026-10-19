@@ -149,8 +149,8 @@ async def test_build_turn_context_uses_warm_skills_cache():
 
 
 @pytest.mark.asyncio
-async def test_review_project_auto_suggests_procedure():
-    """'review project' re-ranks and injects change-safety procedure into context."""
+async def test_review_project_lists_the_skill_without_its_procedure():
+    """'review project' names change-safety. The procedure loads on activate."""
     from pathlib import Path
 
     from remedy.skills.registry import SkillRegistry
@@ -183,7 +183,5 @@ async def test_review_project_auto_suggests_procedure():
     ctx = await build_turn_context(runtime)
     assert "Skills catalog" in ctx
     assert "change-safety" in ctx
-    assert "[Skill auto-suggest]" in ctx
-    # Procedure body (blast-radius checklist), not catalog-only
-    assert "blast radius" in ctx.lower() or "Blast-radius" in ctx
+    assert "[Skill auto-suggest]" not in ctx
     assert "skill.activate" in ctx

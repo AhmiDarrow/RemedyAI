@@ -4,6 +4,18 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-10-19
+
+### Changed
+
+- Long work keeps the rules you set. A must, a never, or a do-not still
+  stands after the chat is compacted, and a summary that drops one is refused.
+- The work stays open until a check after the last change is green. A later
+  read does not clear that. A click and a file write count as changes.
+- Skill packs are listed by name. The full procedure loads when it is needed.
+- A helper's report is not a passing check. Remedy runs the check and reads
+  the result before calling the mission done.
+
 ## [0.64.0] - 2026-09-27
 
 ### Changed

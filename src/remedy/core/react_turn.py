@@ -112,10 +112,48 @@ _OPERATE_DEFER_TOOLS = frozenset(
     }
 )
 
+def _norm_name(name: str) -> str:
+    return str(name or "").strip().lower().replace("-", "_").replace(".", "_")
+
+
 _EXPLORE_TOOLS = frozenset(
-    {"file_read", "list_dir", "repo_search", "memory_search", "soul_recall", "web_search", "web_fetch"}
+    _norm_name(n)
+    for n in (
+        "file_read",
+        "list_dir",
+        "repo_search",
+        "memory_search",
+        "soul_recall",
+        "web_search",
+        "web_fetch",
+        "workspace.read",
+        "workspace.list",
+        "workspace.search",
+        "workspace.grep",
+        "skill.search",
+        "codebase.search",
+    )
 )
-_WRITE_TOOLS = frozenset({"file_write", "file_edit", "file_edit_batch", "apply_patch"})
+_WRITE_TOOLS = frozenset(
+    _norm_name(n)
+    for n in (
+        "file_write",
+        "file_edit",
+        "file_edit_batch",
+        "apply_patch",
+        "workspace.write",
+        "workspace.edit",
+        "workspace.create",
+        "workspace.delete",
+        "search_replace",
+        "str_replace",
+        "computer.click",
+        "computer.type",
+        "computer.key",
+        "clipboard.write",
+        "delegate",
+    )
+)
 _VERIFY_TOOLS = frozenset(
     {
         "bash_exec",
@@ -245,9 +283,10 @@ class TurnState:
     ) -> None:
         self.tool_batches += 1
         self.tools_executed += len(names)
-        explore = bool(names) and all(n in _EXPLORE_TOOLS for n in names)
-        wrote = any(n in _WRITE_TOOLS for n in names)
-        verified = any(n in _VERIFY_TOOLS for n in names)
+        keys = [_norm_name(n) for n in names]
+        explore = bool(keys) and all(n in _EXPLORE_TOOLS for n in keys)
+        wrote = any(n in _WRITE_TOOLS for n in keys)
+        verified = any(n in {_norm_name(v) for v in _VERIFY_TOOLS} for n in keys)
         if explore:
             self.research_batches += 1
             if self.phase in ("idle", "research"):
@@ -914,7 +953,7 @@ def extract_write_paths(tool_calls: list[dict[str, Any]] | None) -> list[str]:
         if not isinstance(tc, dict):
             continue
         fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
-        name = str((fn or {}).get("name") or "").lower()
+        name = _norm_name((fn or {}).get("name") or "")
         if name not in _WRITE_TOOLS:
             continue
         raw = (fn or {}).get("arguments") or "{}"
