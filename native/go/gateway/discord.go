@@ -326,7 +326,9 @@ func (c *DiscordChannel) gatewayLoop(ctx context.Context) {
 		delay := c.nextBackoff(fatal)
 		if errors.Is(err, errDiscordReconnect) {
 			// Server-requested reconnect: resume promptly with light jitter.
+			c.mu.Lock()
 			delay = 500*time.Millisecond + time.Duration(c.rng.Int63n(int64(time.Second)))
+			c.mu.Unlock()
 		}
 		select {
 		case <-ctx.Done():
@@ -458,7 +460,9 @@ func (c *DiscordChannel) sessionOnce(ctx context.Context) error {
 				c.clearSession()
 			}
 			// Discord asks clients to wait 1-5 s before a new IDENTIFY.
+			c.mu.Lock()
 			wait := discordInvalidSessionWait(c.rng)
+			c.mu.Unlock()
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -584,12 +588,13 @@ func (c *DiscordChannel) sendHeartbeat(ws *wsConn, hb *discordHeartbeat) {
 func (c *DiscordChannel) heartbeatLoop(ctx context.Context, hb *discordHeartbeat) {
 	c.mu.Lock()
 	interval := time.Duration(c.heartbeatMS) * time.Millisecond
-	c.mu.Unlock()
 	if interval <= 0 {
 		interval = 41250 * time.Millisecond
 	}
 	// First heartbeat after interval * jitter (Discord recommendation).
+	// rng is shared with reconnect and backoff, so it stays under c.mu.
 	first := time.Duration(float64(interval) * c.rng.Float64())
+	c.mu.Unlock()
 	select {
 	case <-ctx.Done():
 		return
