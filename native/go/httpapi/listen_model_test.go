@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -201,9 +202,17 @@ func TestTryOpenAICompatSkipsDownLocalProvider(t *testing.T) {
 	if err := saveXaiCredentials(home, creds); err != nil {
 		t.Fatal(err)
 	}
-	// Ollama is credential-ready without a key, but nothing listens on :11434 —
-	// ResolveChatModel must skip it and fall back to xAI OAuth.
-	model := ResolveChatModel(home, "ollama", "llama3", "http://127.0.0.1:11434/v1")
+	// Ollama is credential-ready without a key. Probe a port this test just
+	// closed so a live Ollama on :11434 cannot look like the down host.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+	model := ResolveChatModel(home, "ollama", "llama3", "http://"+closed+"/v1")
 	oc, ok := model.(*providers.OpenAICompat)
 	if !ok || oc == nil {
 		t.Fatalf("want OpenAICompat fallback from down ollama, got %T", model)
