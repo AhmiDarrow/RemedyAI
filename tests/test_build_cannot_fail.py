@@ -42,6 +42,23 @@ def _write_call(path: str, cid: str = "w1") -> dict:
     }
 
 
+def test_workspace_write_and_a_click_count_as_writes() -> None:
+    for name in ("workspace.write", "computer.click"):
+        st = BuildTurnState(
+            active=True,
+            phase="scout",
+            goal="build the app",
+            project_path="",
+        )
+        call = {
+            "id": "c1",
+            "function": {"name": name, "arguments": '{"path": "app.py", "content": "x"}'},
+        }
+        observe_tool_batch(st, [call])
+        assert st.write_steps == 1, name
+        assert st.phase == "implement", name
+
+
 def test_landing_page_goal_is_a_build() -> None:
     assert looks_like_build_request(
         "Create a beautiful marketing landing page for Remedy reachable from the homepage"

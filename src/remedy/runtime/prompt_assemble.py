@@ -676,7 +676,10 @@ async def _should_continue_async(inp: Mapping[str, Any]) -> dict[str, Any]:
             tracker["knowledge_once"] = True
             return _out(True, knowledge_gap_nudge(""), "knowledge_gap")
 
-        # 2. Writes with no verify afterwards on a build goal: ask once per turn.
+        # 2. A build stays open until a check after the last edit is green.
+        #    The engine flag survives later reads. There is no once-latch:
+        #    another "done" while the check is still stale re-arms again.
+        #    Go MaxRearms is the only stop, and a real tool batch resets it.
         batch_unverified = evidence["mutate_after_verify"] or (
             evidence["mutates"] > 0 and not evidence["verify_seen"]
         )
@@ -685,10 +688,35 @@ async def _should_continue_async(inp: Mapping[str, Any]) -> dict[str, Any]:
             and int(getattr(st, "write_steps", 0) or 0) > 0
             and getattr(st, "last_verify_ok", None) is not True
         )
-        if build_goal and not plan_mode and (batch_unverified or state_unverified):
-            if not tracker.get("verify_once"):
-                tracker["verify_once"] = True
-                return _out(True, VERIFY_ONCE_NUDGE, "verify_once")
+        engine_flag = inp.get("verify_seen", None)
+        if isinstance(engine_flag, str):
+            engine_flag = engine_flag.strip().lower() not in ("", "false", "0", "no")
+        engine_unverified = engine_flag is False and tool_count > 0
+        # A delegated report can edit the tree and still exit 0. That exit is
+        # the child's, not a check the parent ran.
+        delegated = False
+        for raw_name in evidence.get("names") or []:
+            norm = str(raw_name or "").strip().lower().replace("-", "_").replace(".", "_")
+            if norm == "delegate":
+                delegated = True
+                break
+        if (
+            build_goal
+            and not plan_mode
+            and delegated
+            and evidence.get("last_verify_ok") is not True
+        ):
+            return _out(
+                True,
+                "The delegated report is not a passing check. Run the verify "
+                "command and read its exit code before reporting the result.",
+                "delegate_unverified",
+            )
+        # A true engine flag is this turn's evidence. Do not let a stale
+        # build-state row reopen a check the engine already saw pass.
+        if build_goal and not plan_mode and engine_flag is not True:
+            if engine_unverified or batch_unverified or state_unverified:
+                return _out(True, VERIFY_ONCE_NUDGE, "unverified")
 
         # 3. Explore streak with nothing written on a build goal: once per turn.
         if st is not None and build_goal and not plan_mode:

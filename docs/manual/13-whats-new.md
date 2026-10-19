@@ -2,7 +2,7 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.64.0**. Local API and Desktop packaging run on the
+Current release: **v0.65.0**. Local API and Desktop packaging run on the
 native **Go + Zig** foundation. Installed apps update automatically. Partner
 line still starts at 0.31.0.
 
@@ -49,15 +49,29 @@ is no longer the product HTTP server or the packaged Desktop sidecar.
 | **Boot** | [0.63.1](#0631---existing-homes-start) | Existing installs connect to the local server again |
 | **Sight** | [0.63.2](#0632---the-page-remedy-sees) | Browser page list, safer hive, Linux AppImage update |
 | **Ready** | [0.64.0](#0640---grouped-settings-and-a-present-partner) | Settings in five categories; she stays ready without watching the screen |
+| **Finish** | [0.65.0](#0650---a-check-finishes-the-work) | The work stays open until a check is green, and your rules survive a long chat |
 | **Polish** | [0.63.3](#0633---clearer-ui-and-reliable-tasks) | Clearer layouts, reliable saves and model changes, stronger task memory |
 
 Read newest first below; older partner notes follow after 0.48.
 
 ## Contents
 
+- [0.65.0 — A check finishes the work](#0650---a-check-finishes-the-work)
 - [0.64.0 — Grouped settings and a present partner](#0640---grouped-settings-and-a-present-partner)
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 - [0.63.2](#0632---the-page-remedy-sees) · [0.63.1](#0631---existing-homes-start) · [0.63.0](#0630---tools-the-model-knows) · [0.62.3](#0623---coherent-builds) · [0.62.2](#0622---portable-native-core) · [0.62.1](#0621---windows-in-app-update-install) · [0.62.0](#0620---build-engine-and-claimidx-defaults) · [0.61.0](#0610---agency-on-the-native-foundation) · [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-prove-the-foundation) · [0.48.0](#0480---land-the-gozig-foundation) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+
+## 0.65.0 - A check finishes the work
+
+- **Your rules stay in force.** A must, a never, or a do-not is kept when a
+  long chat is compacted. A summary that drops one of those lines is refused.
+- **Done means a check passed.** After a file change or a click, the work
+  stays open until a later check is green. Reading another file does not
+  clear that.
+- **Skills load when needed.** The list shows the pack names. The full
+  procedure loads for the one pack the task needs.
+- **A helper's report is not the check.** Remedy runs the check and reads
+  the result before calling that mission done.
 
 ## 0.64.0 - Grouped settings and a present partner
 

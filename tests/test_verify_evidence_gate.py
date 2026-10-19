@@ -200,3 +200,94 @@ def test_a_search_already_done_does_not_search_again(home: Path) -> None:
         }
     )
     assert out.get("reason") != "knowledge_gap"
+
+
+def test_stale_check_rearms_again_after_a_later_read(home: Path) -> None:
+    """A read after an edit must not clear the engine's stale-check flag."""
+    payload = {
+        "goal": "build the app",
+        "text": "Done. The edit is in.",
+        "session_id": "sess-stale",
+        "tool_count": 4,
+        "verify_seen": False,
+        "last_results": [
+            {"name": "read", "ok": True, "tail": "package main"},
+        ],
+    }
+    for _ in range(3):
+        out = should_continue(payload)
+        assert out.get("continue") is True
+        assert out.get("reason") == "unverified"
+    assert "check" in str(out.get("nudge") or "").lower()
+
+
+def test_a_click_and_a_workspace_write_still_need_a_check(home: Path) -> None:
+    for name in ("computer.click", "workspace.write", "workspace_write"):
+        out = should_continue(
+            {
+                "goal": "build the app",
+                "text": "Done. That change is in.",
+                "session_id": f"sess-{name}",
+                "tool_count": 2,
+                "verify_seen": False,
+                "last_results": [{"name": name, "ok": True, "tail": "ok"}],
+            }
+        )
+        assert out.get("continue") is True, name
+        assert out.get("reason") == "unverified", name
+
+
+def test_tool_kinds_match_the_go_classifier() -> None:
+    from remedy.core.react_policy import tool_kind
+
+    expect = {
+        "computer.click": "mutate",
+        "workspace.write": "mutate",
+        "workspace_write": "mutate",
+        "delegate": "mutate",
+        "shell.exec": "verify",
+        "host.run": "verify",
+        "pytest": "verify",
+        "workspace.read": "explore",
+        "web.search": "explore",
+        "read": "explore",
+    }
+    for name, kind in expect.items():
+        assert tool_kind(name) == kind, name
+
+
+def test_a_delegate_report_is_not_a_passing_check(home: Path) -> None:
+    out = should_continue(
+        {
+            "goal": "build the app",
+            "text": "Done. The delegated agent finished the mission.",
+            "session_id": "sess-delegate",
+            "tool_count": 2,
+            "verify_seen": False,
+            "last_results": [
+                {
+                    "name": "delegate",
+                    "ok": True,
+                    "exit_code": 0,
+                    "tail": "Changed main.go and ran the build.",
+                }
+            ],
+        }
+    )
+    assert out.get("continue") is True
+    assert out.get("reason") == "delegate_unverified"
+    assert "not a passing check" in str(out.get("nudge") or "")
+
+
+def test_a_question_does_not_rearm_on_a_stale_flag(home: Path) -> None:
+    out = should_continue(
+        {
+            "goal": "what is connect?",
+            "text": "Connect pairs a phone over LAN or Tailscale.",
+            "session_id": "sess-question",
+            "tool_count": 3,
+            "verify_seen": False,
+            "last_results": [{"name": "read", "ok": True, "tail": "connect docs"}],
+        }
+    )
+    assert out.get("continue") is False

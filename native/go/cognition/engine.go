@@ -249,7 +249,9 @@ func ClassifyTool(name string) ToolKind {
 		// Computer-use input changes the world even though it reads nothing back.
 		"computer_click", "computer_type", "computer_key", "computer_key_hold",
 		"computer_scroll", "computer_drag", "computer_focus", "computer_window",
-		"computer_navigate", "computer_uia_action", "clipboard_write":
+		"computer_navigate", "computer_uia_action", "clipboard_write",
+		// A delegated report can change the tree. It is not itself a check.
+		"delegate":
 		return ToolMutate
 	case "shell_exec", "bash", "bash_exec", "host_run", "job_run", "process_spawn",
 		"mission_verify", "build_drive", "pytest", "cargo_test":
@@ -392,9 +394,17 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 		trace(StateObserve, iteration, "assemble transcript")
 		if est := estimateTokens(transcript); est > budget {
 			before := len(transcript)
-			transcript = compactTranscript(transcript)
-			trace(StateUpdate, iteration, fmt.Sprintf(
-				"compacted transcript %d→%d messages (~%d tokens over %d)", before, len(transcript), est, budget))
+			elided := elideMiddleObservations(transcript)
+			if elidedEst := estimateTokens(elided); elidedEst <= budget && elidedEst < est {
+				transcript = elided
+				trace(StateUpdate, iteration, fmt.Sprintf(
+					"elided middle observations %d messages (~%d→~%d tokens, budget %d)",
+					before, est, elidedEst, budget))
+			} else {
+				transcript = compactTranscript(transcript, verifySeen)
+				trace(StateUpdate, iteration, fmt.Sprintf(
+					"compacted transcript %d→%d messages (~%d tokens over %d)", before, len(transcript), est, budget))
+			}
 		}
 		turn := Turn{System: system, Messages: cloneMessages(transcript), Iteration: iteration}
 		out.Messages = turn.Messages
@@ -580,6 +590,12 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 			blocks = append(blocks, resultBlocks(call, modelResults[i]))
 		}
 		transcript = append(transcript, Message{Role: RoleUser, Blocks: blocks})
+		// A batch that actually ran is new evidence, so text-only "done" claims
+		// after it get a fresh re-arm budget. Novelty refusals never get here,
+		// and a deny that executed nothing has no allowed calls.
+		if len(allowed) > 0 {
+			rearmCount = 0
+		}
 		appendOutcomes(&outcomeLedger, results, config.KeepLastResults)
 
 		// Tools in a batch run concurrently. A check in the same batch as a

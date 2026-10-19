@@ -1459,8 +1459,8 @@ def knowledge_gap_nudge(name: str = "") -> str:
 
 
 VERIFY_ONCE_NUDGE = (
-    "[Verify] Files changed but nothing ran afterwards. Run the project's check "
-    f"once with {T['shell']} (tests, compiler, or the program itself) before "
+    "[Verify] Files changed and no later check has passed. Run the project's check "
+    f"with {T['shell']} (tests, compiler, or the program itself) before "
     "reporting the result."
 )
 
@@ -2599,19 +2599,68 @@ def is_productive_tool_batch(tool_messages: list[dict[str, Any]]) -> bool:
 
 # --- Tool-result evidence (Go loop → prompt.should_continue) -----------------
 
-_VERIFY_TOOL_NAME_RE = re.compile(r"(?i)(test|verify|pytest|cargo)")
-_MUTATE_TOOL_NAMES = frozenset(
-    {"write", "edit", "workspace.write", "workspace.edit"}
-)
-_EXPLORE_TOOL_NAMES = frozenset(
+# Same classes as Go cognition.ClassifyTool. Dots and dashes are underscores
+# before the lookup, so workspace.write and workspace_write are one tool.
+_MUTATE_EXACT = frozenset(
     {
+        "workspace_edit",
+        "workspace_write",
+        "workspace_create",
+        "workspace_delete",
+        "workspace_rename",
+        "workspace_mkdir",
+        "file_edit",
+        "file_write",
+        "file_delete",
+        "apply_patch",
+        "str_replace",
+        "search_replace",
+        "write",
+        "edit",
+        "computer_click",
+        "computer_type",
+        "computer_key",
+        "computer_key_hold",
+        "computer_scroll",
+        "computer_drag",
+        "computer_focus",
+        "computer_window",
+        "computer_navigate",
+        "computer_uia_action",
+        "clipboard_write",
+        "delegate",
+    }
+)
+_VERIFY_EXACT = frozenset(
+    {
+        "shell_exec",
+        "bash",
+        "bash_exec",
+        "host_run",
+        "job_run",
+        "process_spawn",
+        "mission_verify",
+        "build_drive",
+        "pytest",
+        "cargo_test",
+    }
+)
+_EXPLORE_EXACT = frozenset(
+    {
+        "workspace_read",
+        "workspace_list",
+        "workspace_search",
+        "workspace_grep",
+        "file_read",
         "read",
-        "glob",
         "grep",
-        "workspace.read",
-        "workspace.list",
-        "workspace.search",
-        "memory.search",
+        "glob",
+        "list_dir",
+        "search",
+        "web_search",
+        "memory_search",
+        "skill_search",
+        "codebase_search",
     }
 )
 _EXIT_CODE_RE = re.compile(r"(?i)\bexit[_ ]code\s*[=:]\s*(-?\d+)")
@@ -2654,22 +2703,43 @@ _COMPLETION_CLAIM_RE = re.compile(
 )
 
 
-def is_verify_tool_name(name: str | None) -> bool:
-    n = str(name or "").strip().lower()
+def _tool_key(name: str | None) -> str:
+    return str(name or "").strip().lower().replace("-", "_").replace(".", "_")
+
+
+def tool_kind(name: str | None) -> str:
+    """Return ``mutate``, ``verify``, or ``explore``.
+
+    Keep this in lockstep with ``ClassifyTool`` in
+    ``native/go/cognition/engine.go``. Explicit names win. The substring
+    fallback is the Go default branch.
+    """
+    n = _tool_key(name)
     if not n:
-        return False
-    n = n.replace("-", "_")
-    if n in {"bash", "shell.exec", "shell_exec", "bash_exec"}:
-        return True
-    return bool(_VERIFY_TOOL_NAME_RE.search(n))
+        return "explore"
+    if n in _MUTATE_EXACT:
+        return "mutate"
+    if n in _VERIFY_EXACT:
+        return "verify"
+    if n in _EXPLORE_EXACT:
+        return "explore"
+    if any(part in n for part in ("write", "edit", "delete", "patch", "create")):
+        return "mutate"
+    if any(part in n for part in ("verify", "test", "shell", "exec")):
+        return "verify"
+    return "explore"
+
+
+def is_verify_tool_name(name: str | None) -> bool:
+    return tool_kind(name) == "verify"
 
 
 def is_mutate_tool_name(name: str | None) -> bool:
-    return str(name or "").strip().lower() in _MUTATE_TOOL_NAMES
+    return tool_kind(name) == "mutate"
 
 
 def is_explore_tool_name(name: str | None) -> bool:
-    return str(name or "").strip().lower() in _EXPLORE_TOOL_NAMES
+    return tool_kind(name) == "explore"
 
 
 def parse_exit_code(tail: str | None) -> int | None:

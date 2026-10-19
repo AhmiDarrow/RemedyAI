@@ -672,6 +672,47 @@ func TestEngineContinueGateSeesEvidence(t *testing.T) {
 	}
 }
 
+func TestEngineRearmResetsAfterTools(t *testing.T) {
+	// MaxRearms is 2, but a real tool batch between "done" claims must clear
+	// the counter. The gate stays red for four asks and only then lets go.
+	var rounds atomic.Int32
+	var asks atomic.Int32
+	engine := Engine{
+		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+			n := rounds.Add(1)
+			if n%2 == 1 {
+				return events(ModelEvent{Text: "done", Done: true}), nil
+			}
+			return events(ModelEvent{ToolCall: &ToolCall{
+				ID:    fmt.Sprintf("c%d", n),
+				Name:  "workspace.read",
+				Input: []byte(fmt.Sprintf(`{"path":"f%d"}`, n)),
+			}}), nil
+		}),
+		Tools: toolFunc(func(_ context.Context, c ToolCall) ToolResult {
+			return ToolResult{ID: c.ID, Name: c.Name, Output: []byte("ok")}
+		}),
+		Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+		Config: Config{MaxIterations: 40, SoftEpochSteps: -1, MaxRearms: 2},
+		ContinueGate: func(context.Context, Turn, int, []ToolResult, bool) (bool, string) {
+			if asks.Add(1) <= 4 {
+				return true, "still red"
+			}
+			return false, ""
+		},
+	}
+	out := engine.Run(context.Background(), "finish the check")
+	if out.Err != nil {
+		t.Fatalf("err=%v (stop must be the gate returning false, not MaxRearms)", out.Err)
+	}
+	if asks.Load() < 4 {
+		t.Fatalf("gate asks=%d, want at least 4 after tools reset the re-arm budget", asks.Load())
+	}
+	if notes := strings.Count(transcriptText(out.Messages), "[Re-arm] still red"); notes < 4 {
+		t.Fatalf("re-arm notes=%d, want at least 4:\n%s", notes, transcriptText(out.Messages))
+	}
+}
+
 func TestEngineRejectsStreamClosedWithoutDone(t *testing.T) {
 	engine := Engine{
 		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
@@ -939,7 +980,7 @@ func TestCompactTranscriptKeepsGoalAndLastEight(t *testing.T) {
 			{Type: BlockToolResult, ToolUseID: fmt.Sprintf("c%d", i), Content: []Block{TextBlock(fmt.Sprintf("wrote f%d.go", i))}},
 		}})
 	}
-	out := compactTranscript(msgs)
+	out := compactTranscript(msgs, true)
 	if len(out) >= len(msgs) {
 		t.Fatalf("nothing compacted: %d → %d", len(msgs), len(out))
 	}
@@ -966,6 +1007,76 @@ func TestCompactTranscriptKeepsGoalAndLastEight(t *testing.T) {
 	}
 }
 
+func TestCompactTranscriptKeepsBindingConstraints(t *testing.T) {
+	// The license rule is the assistant's second sentence, and the encoding
+	// rule is older than the 16-request window. The current goal is different
+	// prose, so neither rule is saved by the goal slot.
+	msgs := []Message{UserText("start the job")}
+	msgs = append(msgs, UserText("Do not change the UTF-8 encoding."))
+	for i := 1; i <= maxWorkingSetRequests; i++ {
+		msgs = append(msgs, UserText(fmt.Sprintf("parser note %d", i)))
+	}
+	msgs = append(msgs, Message{Role: RoleAssistant, Blocks: []Block{
+		TextBlock("Edited the parser to match the spec. Never rewrite the license header."),
+	}})
+	for i := 1; i <= 3; i++ {
+		msgs = append(msgs, Message{Role: RoleAssistant, Blocks: []Block{
+			TextBlock(fmt.Sprintf("Round %d.", i)),
+			{Type: BlockToolUse, ID: fmt.Sprintf("c%d", i), Name: "workspace.edit", Input: json.RawMessage(fmt.Sprintf(`{"path":"f%d.go"}`, i))},
+		}})
+		msgs = append(msgs, Message{Role: RoleUser, Blocks: []Block{
+			{Type: BlockToolResult, ToolUseID: fmt.Sprintf("c%d", i), Content: []Block{TextBlock(fmt.Sprintf("wrote f%d.go", i))}},
+		}})
+	}
+	msgs = append(msgs,
+		Message{Role: RoleAssistant, Blocks: []Block{TextBlock("Tail is intact.")}},
+		UserText("finish the parser"),
+	)
+
+	out := compactTranscript(msgs, true)
+	if len(out) >= len(msgs) {
+		t.Fatalf("nothing compacted: %d → %d", len(msgs), len(out))
+	}
+	if out[0].Text() != "start the job" {
+		t.Fatalf("opener dropped: %#v", out[0])
+	}
+	if !strings.Contains(out[1].Text(), compactedHeader) {
+		t.Fatalf("second message must be the working set: %q", out[1].Text())
+	}
+	ws := out[1].Text()
+	for _, want := range []string{
+		"Never rewrite the license header.",
+		"Do not change the UTF-8 encoding.",
+		"Do not restart the task. Re-read a file only to recover a fact that is not written in this working set.",
+		"Constraints still in force:",
+	} {
+		if !strings.Contains(ws, want) {
+			t.Fatalf("working set missing %q:\n%s", want, ws)
+		}
+	}
+	if strings.Contains(ws, "Do not restart or re-read") {
+		t.Fatalf("old re-read wording still present:\n%s", ws)
+	}
+	if c, d := strings.Index(ws, "Constraints still in force:"), strings.Index(ws, "Decisions so far:"); c < 0 || d < 0 || c > d {
+		t.Fatalf("constraints must render before decisions:\n%s", ws)
+	}
+	if goal := lastUserProseIndex(out); goal < 0 || out[goal].Text() != "finish the parser" {
+		t.Fatalf("current goal not kept verbatim")
+	}
+	tail := out[len(out)-compactKeepTail:]
+	wantTail := msgs[len(msgs)-compactKeepTail:]
+	for i := range tail {
+		if transcriptText(tail[i:i+1]) != transcriptText(wantTail[i:i+1]) {
+			t.Fatalf("tail message %d was rewritten", i)
+		}
+	}
+	// The tail never begins with tool results whose call was dropped.
+	first := out[2]
+	if first.Role == RoleUser && first.HasToolResults() {
+		t.Fatal("compaction orphaned a tool result")
+	}
+}
+
 func TestCompactTranscriptKeepsCurrentGoalAfterHistory(t *testing.T) {
 	msgs := []Message{UserText("remember the milk")}
 	for i := 0; i < 10; i++ {
@@ -982,7 +1093,7 @@ func TestCompactTranscriptKeepsCurrentGoalAfterHistory(t *testing.T) {
 			{Type: BlockToolResult, ToolUseID: fmt.Sprintf("n%d", i), Content: []Block{TextBlock("ok")}},
 		}})
 	}
-	out := compactTranscript(msgs)
+	out := compactTranscript(msgs, true)
 	joined := transcriptText(out)
 	if !strings.Contains(joined, "remember the milk") {
 		t.Fatalf("session opener dropped: %s", joined)
@@ -1007,7 +1118,7 @@ func TestWorkingSetRecordsCommandsFailuresAndTodo(t *testing.T) {
 		}},
 	}
 	ws := buildWorkingSet(msgs)
-	rendered := ws.render(len(msgs))
+	rendered := ws.render(len(msgs), true)
 	for _, want := range []string{
 		"go test ./...", "exit 1", "FAIL engine_test.go:42",
 		"fix engine", "engine.go", "I will run the tests.",
@@ -1020,7 +1131,7 @@ func TestWorkingSetRecordsCommandsFailuresAndTodo(t *testing.T) {
 		t.Fatalf("read files need a content hash: %#v", ws.read)
 	}
 	// Deterministic: same input, same bytes.
-	if buildWorkingSet(msgs).render(len(msgs)) != rendered {
+	if buildWorkingSet(msgs).render(len(msgs), true) != rendered {
 		t.Fatal("working set is not deterministic")
 	}
 }
@@ -1048,5 +1159,112 @@ func TestByteSafeSlicing(t *testing.T) {
 	}
 	if got := clipRunes(strings.Repeat("é", 50), 7); !utf8.ValidString(got) || len([]rune(got)) != 8 {
 		t.Fatalf("clipRunes=%q", got)
+	}
+}
+
+func TestClassifyToolMatchesTheABI(t *testing.T) {
+	cases := []struct {
+		name string
+		kind ToolKind
+	}{
+		{"computer.click", ToolMutate},
+		{"workspace.write", ToolMutate},
+		{"workspace_write", ToolMutate},
+		{"delegate", ToolMutate},
+		{"shell.exec", ToolVerify},
+		{"host.run", ToolVerify},
+		{"pytest", ToolVerify},
+		{"workspace.read", ToolExplore},
+		{"web.search", ToolExplore},
+		{"read", ToolExplore},
+	}
+	for _, tc := range cases {
+		if got := ClassifyTool(tc.name); got != tc.kind {
+			t.Fatalf("%s -> %d, want %d", tc.name, got, tc.kind)
+		}
+	}
+}
+
+func TestElideStubsMiddleResultsAndKeepsTheTail(t *testing.T) {
+	fat := strings.Repeat("FAILURE DETAIL the assertion wanted 1 got 0\n", 80)
+	msgs := []Message{UserText("make the suite green")}
+	msgs = append(msgs, Message{Role: RoleAssistant, Blocks: []Block{
+		{Type: BlockToolUse, ID: "fat", Name: "shell.exec", Input: json.RawMessage(`{"argv":["go","test"]}`)},
+	}})
+	msgs = append(msgs, Message{Role: RoleUser, Blocks: []Block{
+		{Type: BlockToolResult, ToolUseID: "fat", IsError: true, Content: []Block{TextBlock(fat)}},
+	}})
+	for i := 0; i < 8; i++ {
+		id := fmt.Sprintf("t%d", i)
+		msgs = append(msgs, Message{Role: RoleAssistant, Blocks: []Block{
+			{Type: BlockToolUse, ID: id, Name: "workspace.read", Input: json.RawMessage(`{"path":"keep.go"}`)},
+		}})
+		msgs = append(msgs, Message{Role: RoleUser, Blocks: []Block{
+			{Type: BlockToolResult, ToolUseID: id, Content: []Block{TextBlock("package keep")}},
+		}})
+	}
+	out := elideMiddleObservations(msgs)
+	text := transcriptText(out)
+	if strings.Contains(text, "FAILURE DETAIL") {
+		t.Fatal("middle tool body was kept")
+	}
+	if !strings.Contains(text, "chars elided") || !strings.Contains(text, "exit") {
+		t.Fatalf("missing stub: %s", text)
+	}
+	if !strings.Contains(text, "package keep") {
+		t.Fatal("tail result was stubbed")
+	}
+	// Compaction still reads the original bodies, not the stubs.
+	compacted := transcriptText(compactTranscript(msgs, false))
+	if !strings.Contains(compacted, "FAILURE DETAIL") {
+		t.Fatal("compaction lost the original failure")
+	}
+	if !strings.Contains(compacted, "Next step:") {
+		t.Fatal("a stale check must name the next step")
+	}
+	if strings.Contains(transcriptText(compactTranscript(msgs, true)), "Next step:") {
+		t.Fatal("a green check must not add a next-step line")
+	}
+}
+
+func TestEngineElidesWhenThatFits(t *testing.T) {
+	fat := strings.Repeat("FAILURE DETAIL the assertion wanted 1 got 0\n", 200)
+	msgs := []Message{UserText("make the suite green")}
+	msgs = append(msgs, Message{Role: RoleAssistant, Blocks: []Block{
+		{Type: BlockToolUse, ID: "fat", Name: "shell.exec", Input: json.RawMessage(`{"argv":["go","test"]}`)},
+	}})
+	msgs = append(msgs, Message{Role: RoleUser, Blocks: []Block{
+		{Type: BlockToolResult, ToolUseID: "fat", Content: []Block{TextBlock(fat)}},
+	}})
+	for i := 0; i < 8; i++ {
+		id := fmt.Sprintf("t%d", i)
+		msgs = append(msgs, Message{Role: RoleAssistant, Blocks: []Block{
+			{Type: BlockToolUse, ID: id, Name: "read", Input: json.RawMessage(`{"path":"keep.go"}`)},
+		}})
+		msgs = append(msgs, Message{Role: RoleUser, Blocks: []Block{
+			{Type: BlockToolResult, ToolUseID: id, Content: []Block{TextBlock("package keep")}},
+		}})
+	}
+	var seen string
+	engine := Engine{
+		Model: windowedModel{window: 8192, stream: func(_ context.Context, turn Turn) (<-chan ModelEvent, error) {
+			seen = transcriptText(turn.Messages)
+			return events(ModelEvent{Text: "still working", Done: true}), nil
+		}},
+		Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+		Config: Config{MaxIterations: 2, SoftEpochSteps: -1, MaxRepeatedBatch: 10},
+	}
+	out := engine.RunTurn(context.Background(), Turn{Messages: msgs})
+	if out.Err != nil {
+		t.Fatalf("err=%v", out.Err)
+	}
+	if strings.Contains(seen, "FAILURE DETAIL") {
+		t.Fatal("model was shown the fat body")
+	}
+	if strings.Contains(seen, compactedHeader) {
+		t.Fatal("elision fit, so the working-set drop should not run")
+	}
+	if !strings.Contains(seen, "chars elided") {
+		t.Fatalf("model did not see the stub: %s", seen[:400])
 	}
 }

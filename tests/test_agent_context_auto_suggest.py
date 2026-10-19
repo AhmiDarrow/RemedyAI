@@ -1,9 +1,5 @@
-"""The auto-suggest injection closes the loop: it is an activation, and it is
-remembered for end-of-turn grading.
-
-Before this, a skill whose procedure was injected into context never showed
-up in ``skill_stats.json`` — only explicit ``skill_activate`` calls did — so
-the lifecycle could not tell a useful learned skill from dead weight.
+"""The turn head lists skill names. It does not load a procedure body, and
+matching a skill is not an activation. skill.activate loads the one pack.
 """
 
 from __future__ import annotations
@@ -67,10 +63,12 @@ async def test_auto_suggest_records_activation_and_remembers_skill():
     rt = _runtime("review this", reg, loop)
     ctx = await build_turn_context(rt)
 
-    assert "[Skill auto-suggest]" in ctx
+    assert "[Skill auto-suggest]" not in ctx
     assert "change-safety" in ctx
-    assert loop.activations == [("change-safety", "sess-42")]
-    assert rt._turn_auto_suggested_skill == "change-safety"
+    assert "skill.activate" in ctx
+    assert "Procedure loaded into context" not in ctx
+    assert loop.activations == []
+    assert getattr(rt, "_turn_auto_suggested_skill", None) is None
 
 
 @pytest.mark.asyncio
@@ -86,9 +84,9 @@ async def test_auto_suggest_survives_a_broken_learning_loop():
 
     rt = _runtime("review this", reg, _Boom())
     ctx = await build_turn_context(rt)
-    assert "[Skill auto-suggest]" in ctx
-    # Still remembered for grading even though the stats write failed
-    assert rt._turn_auto_suggested_skill == "change-safety"
+    assert "[Skill auto-suggest]" not in ctx
+    assert "change-safety" in ctx
+    assert getattr(rt, "_turn_auto_suggested_skill", None) is None
 
 
 @pytest.mark.asyncio
@@ -99,7 +97,8 @@ async def test_no_learning_loop_is_fine():
     reg.discover(Path("skills"))
     rt = _runtime("review this", reg, None)
     ctx = await build_turn_context(rt)
-    assert "[Skill auto-suggest]" in ctx
-    assert rt._turn_auto_suggested_skill == "change-safety"
+    assert "[Skill auto-suggest]" not in ctx
+    assert "change-safety" in ctx
+    assert getattr(rt, "_turn_auto_suggested_skill", None) is None
 
 

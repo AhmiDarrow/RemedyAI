@@ -163,6 +163,8 @@ def build_compress_summary_prompt(focus: str | None = None) -> str:
         "Produce a compact Session Brief update for Memory Harness as JSON only:\n"
         '{"intent":"...","decisions":["..."],"open_tasks":["..."],'
         '"next_steps":["..."],"blockers":["..."],"notes":"..."}\n'
-        "Preserve file paths and technical specifics. Do not invent files."
+        "Preserve file paths and technical specifics. Do not invent files. "
+        "Copy binding owner constraints (must, must not, never, do not, always, "
+        "required, forbidden) into the brief verbatim."
         f"{focus_line}"
     )
