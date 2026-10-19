@@ -2,64 +2,18 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.65.0**. Local API and Desktop packaging run on the
-native **Go + Zig** foundation. Installed apps update automatically. Partner
-line still starts at 0.31.0.
+Current release: **v0.65.0**. Installed apps update on their own.
 
-## Why a Go + Zig foundation (0.48 → 0.61)
-
-Remedy is a **partner that drives this computer** — see the UI, run tools, keep
-memory, talk on messengers, and finish the owner's goal. That is more than a
-chat box glued to a Python web server.
-
-Python alone was the wrong shape for the product core:
-
-- **Two processes meant two owners.** FastAPI/uvicorn plus a Desktop sidecar
-  could disagree about lifecycle, restarts, and who still held `:7400`.
-- **“Tool returned ok” is not the goal done.** A partner needs one turn engine
-  that plans, acts, verifies, asks for Yes on money/credentials, and keeps
-  evidence — not a loose HTTP toolkit.
-- **Host actions need hard gates.** Filesystem, process, shell, and computer
-  clicks must go through checked paths and one-use grants, not soft shell
-  spawns the model can invent.
-
-So 0.48–0.61 build two durable layers and then cut over to them:
-
-| Layer | What it owns | Why this language |
-|-------|--------------|-------------------|
-| **Go `remedy-runtime`** | Local API on `:7400`, cognition / ReAct, Tool ABI, messengers, scheduling, approvals | One supervised process owns the product surface; concurrency and long-lived servers are first-class |
-| **Zig `remedy_core`** | Capability-checked filesystem, process, shell, and computer host ops (ABI 5) | Small, explicit host substrate; grants and path checks before OS work |
-
-**Python stays** for ML / voice workers and tool bodies over the RMDY wire. It
-is no longer the product HTTP server or the packaged Desktop sidecar.
-
-### The migration in four steps
-
-| Step | Release | What changed for you |
-|------|---------|----------------------|
-| **Land** | [0.48.0](#0480---land-the-gozig-foundation) | Go + Zig ship in Desktop beside Python; selector can try native safely |
-| **Prove** | [0.50.0–0.50.2](#0502---experimental-prove-the-foundation) | Harden native paths, full CI matrix, Claimidx first-run, Connect recovery — experimental line |
-| **Cut over** | [0.60.0](#0600---native-runtime-cutover) | Desktop and `remedy serve` launch **Go only**; FastAPI/uvicorn and the PyInstaller sidecar are gone |
-| **Agency** | [0.61.0](#0610---agency-on-the-native-foundation) | Browser, approvals, mail/calendar/settings, and messenger health finish on that stack |
-| **Stay on mission** | [0.62.0](#0620---build-engine-and-claimidx-defaults) | Long builds keep going; Claimidx submits by default; local CI matches GitHub |
-| **Updater** | [0.62.1](#0621---windows-in-app-update-install) | Windows in-app update finishes the install step after download |
-| **Boot** | [0.62.2](#0622---portable-native-core) | Native core builds for every x86_64 PC (no SHA-NI crash on connect) |
-| **Build loop** | [0.62.3](#0623---coherent-builds) | Long builds stay endless when productive; explore thrash stops |
-| **Frontier** | [0.63.0](#0630---tools-the-model-knows) | Frontier tool names, native Anthropic, messenger identity, full-turn evidence |
-| **Boot** | [0.63.1](#0631---existing-homes-start) | Existing installs connect to the local server again |
-| **Sight** | [0.63.2](#0632---the-page-remedy-sees) | Browser page list, safer hive, Linux AppImage update |
-| **Ready** | [0.64.0](#0640---grouped-settings-and-a-present-partner) | Settings in five categories; she stays ready without watching the screen |
-| **Finish** | [0.65.0](#0650---a-check-finishes-the-work) | The work stays open until a check is green, and your rules survive a long chat |
-| **Polish** | [0.63.3](#0633---clearer-ui-and-reliable-tasks) | Clearer layouts, reliable saves and model changes, stronger task memory |
-
-Read newest first below; older partner notes follow after 0.48.
+Remedy lives on this computer. She finishes the goal you set, keeps the rules
+you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
 - [0.65.0 — A check finishes the work](#0650---a-check-finishes-the-work)
 - [0.64.0 — Grouped settings and a present partner](#0640---grouped-settings-and-a-present-partner)
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
-- [0.63.2](#0632---the-page-remedy-sees) · [0.63.1](#0631---existing-homes-start) · [0.63.0](#0630---tools-the-model-knows) · [0.62.3](#0623---coherent-builds) · [0.62.2](#0622---portable-native-core) · [0.62.1](#0621---windows-in-app-update-install) · [0.62.0](#0620---build-engine-and-claimidx-defaults) · [0.61.0](#0610---agency-on-the-native-foundation) · [0.60.0](#0600---native-runtime-cutover) · [0.50.2](#0502---experimental-prove-the-foundation) · [0.48.0](#0480---land-the-gozig-foundation) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+
+Earlier notes follow on this page, newest first.
 
 ## 0.65.0 - A check finishes the work
 
