@@ -38,7 +38,7 @@ giving up local-first, without a copyleft dependency, and without a setup wizard
 
 ### The license constraint is load-bearing
 
-Remedy is source-available and commercially licensed (`LICENSE`, `COMMERCIAL.md`).
+Remedy is open source under Apache-2.0 (`LICENSE`).
 Copyleft is disqualifying, not merely inconvenient — this eliminates the default
 choice before any design starts.
 

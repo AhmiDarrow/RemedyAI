@@ -6,12 +6,12 @@ name = "remedy-ai"
 version = "0.65.0"
 description = "Personal AI partner for any ability level — drives this computer to finish goals (life tasks, research, games, code). Not a medical product."
 readme = "README.md"
-license = { text = "LicenseRef-Proprietary" }
+license = { text = "Apache-2.0" }
 authors = [
     { name = "Ahmi Darrow", email = "ahmitdarrow@gmail.com" }
 ]
 keywords = ["ai", "partner", "desktop", "agent", "voice", "computer-use", "skill", "memory", "llm", "tools"]
-# License is project.license (LicenseRef-Proprietary). Avoid deprecated
+# License is project.license (Apache-2.0). Avoid deprecated
 # "License :: …" classifiers (PEP 639 / packaging warning).
 classifiers = [
     "Development Status :: 3 - Alpha",

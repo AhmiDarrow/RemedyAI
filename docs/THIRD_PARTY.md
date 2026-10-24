@@ -84,7 +84,7 @@ An owner who never uses the phone features never downloads any of them.
 - **License:** **BSD-3-Clause**
 - **Redistribution:** not bundled; fetched to `~/.remedy/bin` on request
 - **Note:** PJSIP was rejected for this role — GPLv2-or-later or a paid
-  commercial licence, neither of which suits a source-available product.
+  commercial licence, neither of which suits an Apache-2.0 product.
 
 ### smart-turn (semantic endpointing)
 
