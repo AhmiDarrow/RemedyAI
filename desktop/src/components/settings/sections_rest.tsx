@@ -206,22 +206,14 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
       >
         <div className="text-[10px] leading-snug space-y-1.5" style={{ color: 'var(--text-secondary)' }}>
           <p style={{ margin: 0 }}>
-            <strong style={{ color: 'var(--text-primary)' }}>Source-available</strong> —
-            free for solo developers and small indies (&lt;$1M revenue and &lt;20 FTE).
-            Personal / education / research free.
-          </p>
-          <p style={{ margin: 0 }}>
-            Larger orgs, multi-tenant SaaS, or commercial resale: email{' '}
-            <code style={{ color: 'var(--accent)' }}>ahmitdarrow@gmail.com</code>
-            {' '}(subject: RemedyAI commercial license).
+            <strong style={{ color: 'var(--text-primary)' }}>Apache License 2.0</strong> —
+            free to use, modify, and redistribute, including commercially.
           </p>
           <p style={{ margin: 0, color: 'var(--text-muted)' }}>
-            Copyright (c) 2025–2026 Ahmi Darrow. Binding terms below and in repo LICENSE;
-            summary in COMMERCIAL.md. The Windows installer shows the same terms before
-            install. This build has no license keys or phone-home. Paid commercial
-            licenses are available; the free grant is for qualifying users of this copy.
-            You are responsible for how you use Remedy, including sites and accounts
-            you point it at.
+            Copyright (c) 2025–2026 Ahmi Darrow. Full terms below and in repo LICENSE;
+            the Windows installer shows the same terms before install. You are
+            responsible for how you use Remedy, including sites and accounts you
+            point it at.
           </p>
           <LicenseText />
           {onOpenHelp ? (

@@ -75,8 +75,8 @@ Contributing: [CONTRIBUTING.md](https://github.com/AhmiDarrow/RemedyAI/blob/mast
 
 ## License
 
-**Source-available** — [LICENSE](https://github.com/AhmiDarrow/RemedyAI/blob/master/LICENSE) · [COMMERCIAL.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/COMMERCIAL.md)
+**Apache License 2.0** — [LICENSE](https://github.com/AhmiDarrow/RemedyAI/blob/master/LICENSE) · [NOTICE](https://github.com/AhmiDarrow/RemedyAI/blob/master/NOTICE)
 
-Solo / small indies (under $1M revenue **and** under 20 FTE), personal, education, and research: free under LICENSE. Larger orgs, SaaS, commercial resale, or a paid deal: written license — **ahmitdarrow@gmail.com**. Use is at your own risk. Third-party notices: `desktop/public/THIRD_PARTY_NOTICES.txt`.
+Free to use, modify, and redistribute, including commercially. Use is at your own risk; see [TERMS](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/TERMS.md). Third-party notices: `desktop/public/THIRD_PARTY_NOTICES.txt`.
 
 Copyright © 2025–2026 **Ahmi Darrow**.

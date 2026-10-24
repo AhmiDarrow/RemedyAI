@@ -70,16 +70,11 @@ def test_spdx_files_exist_for_fallback_ids(gen) -> None:
         assert (gen.SPDX_DIR / f"{spdx_id}.txt").is_file(), spdx_id
 
 
-def test_binding_license_covers_use_notices_and_disclaimer() -> None:
+def test_binding_license_is_apache_2() -> None:
     text = (ROOT / "LICENSE").read_text(encoding="utf-8")
-    for needle in (
-        "By installing, copying, or using the Software, you agree",
-        "THIRD_PARTY_NOTICES.txt",
-        "Every action the Software takes",
-        "robots.txt",
-        'THE SOFTWARE IS PROVIDED "AS IS"',
-        "defend, indemnify",
-        "Nothing in this license prevents Ahmi Darrow from charging",
-        "dual licensing",
-    ):
-        assert needle in text, needle
+    assert "Apache License" in text and "Version 2.0, January 2004" in text
+    assert "Limitation of Liability" in text
+    assert "Redistribution" in text
+    assert (ROOT / "NOTICE").is_file()
+    assert not (ROOT / "COMMERCIAL.md").exists()
+

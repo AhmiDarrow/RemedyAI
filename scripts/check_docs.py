@@ -482,7 +482,7 @@ def check_pypi_readme_urls() -> CheckResult:
                 msgs.append(f"ok {kind}: {url}")
             continue
         # Relative path — PyPI will 404
-        if re.match(r"^(?:\./)?(?:docs/|assets/|CHANGELOG|AGENTS|LICENSE|COMMERCIAL)", url):
+        if re.match(r"^(?:\./)?(?:docs/|assets/|CHANGELOG|AGENTS|LICENSE|NOTICE)", url):
             msgs.append(f"relative link breaks on PyPI: {url}")
             bad += 1
         else:

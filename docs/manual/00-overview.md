@@ -57,7 +57,7 @@ Full notes: **[What’s new](13-whats-new.md)** · engineering: repo `CHANGELOG.
 | [How pieces fit](#how-the-pieces-fit) | Architecture sketch |
 | [Manual map](#manual-map) | All chapters |
 | [Day-1 tips](#day-1-tips) | Habits |
-| [License](#license-source-available) · [From the creator](#from-the-creator) | |
+| [License](#license-apache-20) · [From the creator](#from-the-creator) | |
 
 ---
 
@@ -238,18 +238,13 @@ You → Grove / Studio (chat + Files / Terminal / Browser / Scratch)
 
 ---
 
-## License (source-available)
+## License (Apache-2.0)
 
-| Who | Terms |
-|-----|--------|
-| Solo / small indies (&lt; $1M revenue **and** &lt; 20 FTE) | Free to use and modify (this copy) |
-| Personal / education / research | Free (this copy) |
-| Larger orgs, SaaS, commercial resale, or a paid deal | Written license — **ahmitdarrow@gmail.com** |
-
-Binding: repo `LICENSE` (also shown by the Windows installer, and under
-Settings → License) · Summary: `COMMERCIAL.md`. You are responsible for how
-you use Remedy, including sites and accounts you point it at. The free grant
-is not a promise Remedy stays free; paid licenses are available.
+Remedy is open source under the Apache License 2.0: free to use, modify, and
+redistribute, including commercially, subject to the notice terms in `LICENSE`
+(shown by the Windows installer and under Settings → License). The "Remedy" and
+"RemedyAI" names are not licensed. You are responsible for how you use Remedy,
+including sites and accounts you point it at.
 
 ---
 

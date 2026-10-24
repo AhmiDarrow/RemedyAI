@@ -1,272 +1,176 @@
-RemedyAI Source-Available License
+Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
 
-Copyright (c) 2025–2026 Ahmi Darrow. All rights reserved.
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 
-This software and its associated files (the "Software") are the exclusive
-property of Ahmi Darrow. The Software is protected by copyright law.
+   1. Definitions.
 
-The names "Remedy" and "RemedyAI", the logos, and related marks are
-trademarks of the copyright holder and are not licensed under this
-agreement.
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
 
-All rights not expressly granted in this license are reserved to
-Ahmi Darrow. Nothing in this license, COMMERCIAL.md, or any other
-project document is a promise that the Software will remain free of
-charge, or a waiver of the right to sell licenses, paid editions,
-support, hosting, or related services.
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
 
-By installing, copying, or using the Software, you agree to these terms.
-If you do not agree, do not install or use the Software.
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
 
-Plain-language pages (COMMERCIAL.md, docs/TERMS.md,
-docs/WEB_ETIQUETTE.md, and similar) do not grant rights this license
-does not. If they conflict with this license, this license controls.
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
 
-------------------------------------------------------------------------
-1. Free grant (individuals, hobbyists, and small indies)
-------------------------------------------------------------------------
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
 
-Subject to this license, Ahmi Darrow grants you a worldwide, royalty-free,
-non-exclusive, non-transferable license to use, copy, and modify the Software
-for any purpose (including commercial use of the Software on your own machines
-or within your organization) if BOTH of the following are true:
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
 
-  (a) Your organization (together with all affiliates) has less than
-      USD $1,000,000 in gross annual revenue; AND
-  (b) Your organization (together with all affiliates) has fewer than
-      twenty (20) full-time equivalent (FTE) employees.
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
 
-Individuals using the Software for personal, educational, or research purposes
-are always covered by this free grant, regardless of any employer size, so long
-as the use is not on behalf of an organization that exceeds (a) or (b).
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
 
-You may share modifications and non-commercial forks that retain this license
-and copyright notice. You may not sell the Software (or a substantially
-similar product based on it) as a standalone product without written permission.
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
 
-The royalty-free grant in this section is a limited license to qualifying
-users for the copy they received. It does not restrict the copyright
-holder, and it does not require any later version to be offered on the
-same terms.
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
 
-------------------------------------------------------------------------
-2. Commercial licenses and the copyright holder's rights
-------------------------------------------------------------------------
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
 
-Nothing in this license prevents Ahmi Darrow from charging for the
-Software. The copyright holder may, at any time and at any price:
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
 
-  - sell, rent, or otherwise charge for licenses, copies, editions,
-    subscriptions, support, hosting, and related services;
-  - offer different terms to different people (dual licensing), including
-    a paid license that sits alongside this one;
-  - add paid features, license keys, or entitlement checks in later
-    versions;
-  - change, narrow, or withdraw the free grant in later versions of the
-    Software (the version you received still governs that copy).
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
 
-You must obtain a separate written license from Ahmi Darrow before:
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
 
-  - Use by or on behalf of an organization that exceeds the revenue or FTE
-    limits in section 1;
-  - Offering the Software (or a hosted/managed service based on it) as a
-    multi-tenant SaaS or competing managed platform;
-  - Selling, renting, or commercially redistributing the Software or a
-    substantially similar product based on it;
-  - Any other use not covered by section 1.
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
 
-Commercial / enterprise inquiries:
-  Email: ahmitdarrow@gmail.com
-  Subject: RemedyAI commercial license — [Your organization]
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
 
-See COMMERCIAL.md for a short plain-language summary (this LICENSE controls
-if there is any conflict).
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
 
-------------------------------------------------------------------------
-3. Notice retention
-------------------------------------------------------------------------
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
 
-You must keep this copyright notice and license text in all copies or
-substantial portions of the Software that you distribute.
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
 
-If you distribute a binary that includes third-party components, you must
-also retain THIRD_PARTY_NOTICES.txt (or an equivalent attribution that
-includes each component's notice and licence text).
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
 
-------------------------------------------------------------------------
-4. Third-party software
-------------------------------------------------------------------------
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
 
-The Software includes or uses components written by other people. Those
-components are listed, with their licence texts, in THIRD_PARTY_NOTICES.txt
-(Settings → License in the app; also shipped with the UI bundle). They are
-licensed to you under their own terms, not these. This license does not
-change those terms or grant extra rights in those components.
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
 
-Optional models, voices, binaries, and telephony pieces that are downloaded
-at first use (rather than bundled) are documented in docs/THIRD_PARTY.md
-and are governed by their publishers' licences.
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
 
-------------------------------------------------------------------------
-5. Your use, your responsibility
-------------------------------------------------------------------------
-
-The Software is a tool that acts on this computer under your authority.
-It can run commands, edit and delete files, install software, drive a
-browser, use accounts you connect, and — where you enable it — reach
-other people and other machines.
-
-Every action the Software takes with the access you give it is your
-action, including actions taken while you were not watching, under
-away or scheduled operation, or from an approval you granted earlier.
-
-You are solely responsible for:
-
-  (a) complying with all laws that apply to your use, in every place you
-      and the people or systems you reach sit;
-  (b) complying with the terms of any third-party service, website,
-      account, or content you use the Software with;
-  (c) what you do with anything the Software retrieves, generates, or
-      sends — including copyright, database rights, privacy, and
-      publicity rights in that material;
-  (d) keeping backups, reviewing anything that matters, and not giving
-      the Software access you would not be willing to lose.
-
-The copyright holder does not warrant that any particular use of the
-Software is permitted.
-
-------------------------------------------------------------------------
-6. Third-party services, websites, and accounts
-------------------------------------------------------------------------
-
-You bring your own model providers, accounts, and credentials. Their
-terms, prices, rate limits, and bills are between you and them. Charges
-incurred through accounts you connect (tokens, phone minutes, purchases
-you approve, and anything else you authorise) are yours.
-
-The Software does not make any particular use of a third-party service
-lawful. A site's terms may restrict automated access even where
-robots.txt permits it, and even for a logged-in account holder.
-
-Search features that read a third party's results page rather than a
-documented API are used only at your option and at your risk; that
-party may throttle or block the use at any time.
-
-------------------------------------------------------------------------
-7. Automated access
-------------------------------------------------------------------------
-
-Web-fetch, web-search, and browser-driving features are off until you
-enable them. Enabling them is not permission from anyone else.
-
-The Software identifies itself, reads robots.txt when so configured,
-and does not circumvent CAPTCHA or similar human-check walls. Those
-are operational courtesies, not a warranty that a given request is
-allowed. See docs/WEB_ETIQUETTE.md for how the tools behave.
-
-------------------------------------------------------------------------
-8. Acceptable use
-------------------------------------------------------------------------
-
-You may not use the Software to:
-
-  - access, interfere with, or attack systems you do not own and are
-    not authorised to use;
-  - circumvent technical measures that control access to a computer or
-    service (including CAPTCHA and similar human-check walls);
-  - harass, impersonate, or defraud anyone;
-  - violate export-control, sanctions, or similar laws that apply to you;
-  - do anything you would not put your own name to.
-
-The Software's own safety stops (payment, credentials, irreversible
-send) are not a licence to ignore the law or a third party's terms.
-
-------------------------------------------------------------------------
-9. No warranty of output
-------------------------------------------------------------------------
-
-The Software is built on language models. It will be wrong sometimes,
-including with confidence. It can be misled by content it reads.
-Output is not professional advice (legal, medical, financial, or
-otherwise). Review anything that matters before relying on it.
-
-------------------------------------------------------------------------
-10. Local data
-------------------------------------------------------------------------
-
-Memory, session history, skills, approvals, and secrets live on this
-machine under ~/.remedy (or the path you configure). This copy of the
-Software has no account service and does not phone home for licensing.
-Later versions may include paid editions, license checks, or similar
-(see section 15). What leaves this computer is what you send to the
-model provider you chose, plus whatever a feature you enabled reaches
-out to.
-
-------------------------------------------------------------------------
-11. Termination
-------------------------------------------------------------------------
-
-Any breach of this license automatically terminates your rights under it.
-Upon termination you must stop using and distributing the Software.
-
-------------------------------------------------------------------------
-12. Disclaimer of warranty
-------------------------------------------------------------------------
-
-THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY
-OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
-WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
-TITLE, NON-INFRINGEMENT, ACCURACY, AVAILABILITY, AND UNINTERRUPTED
-OR ERROR-FREE OPERATION. THE COPYRIGHT HOLDER DOES NOT WARRANT THAT
-ANY USE OF THE SOFTWARE IS LAWFUL IN YOUR JURISDICTION, THAT OUTPUT
-IS CORRECT, OR THAT THIRD-PARTY SERVICES WILL PERMIT THE USE.
-
-------------------------------------------------------------------------
-13. Limitation of liability
-------------------------------------------------------------------------
-
-TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL
-THE AUTHOR OR COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR
-OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE,
-ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE
-OR OTHER DEALINGS IN THE SOFTWARE. THIS INCLUDES, WITHOUT LIMITATION:
-LOST, CORRUPTED, OR DELETED DATA; MONEY SPENT, MOVED, OR COMMITTED;
-WORK DESTROYED OR NEVER DONE; ACCOUNTS LOCKED, SUSPENDED, OR
-COMPROMISED; MESSAGES, CALLS, OR PUBLICATIONS YOU DID NOT INTEND;
-DECISIONS MADE ON THE SOFTWARE'S OUTPUT; AND ANY INDIRECT,
-INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, EVEN IF
-ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
-
-SOME JURISDICTIONS DO NOT ALLOW CERTAIN LIMITATIONS. IN THOSE
-JURISDICTIONS, THE COPYRIGHT HOLDER'S LIABILITY IS LIMITED TO THE
-MAXIMUM EXTENT PERMITTED BY LAW. IF ANY LIABILITY REMAINS, IT SHALL
-NOT EXCEED THE AMOUNT YOU PAID THE COPYRIGHT HOLDER FOR THE COPY OF
-THE SOFTWARE THAT GAVE RISE TO THE CLAIM (WHICH IS ZERO IF YOU PAID
-NOTHING).
-
-------------------------------------------------------------------------
-14. Responsibility for claims
-------------------------------------------------------------------------
-
-YOU ARE SOLELY RESPONSIBLE FOR YOUR USE OF THE SOFTWARE. To the
-extent permitted by applicable law, you agree to defend, indemnify,
-and hold harmless the copyright holder from and against any claims,
-damages, losses, and expenses (including reasonable legal fees)
-arising out of your use of the Software, your use of third-party
-services through it, or your breach of these terms, except to the
-extent caused by the copyright holder's willful misconduct.
-
-------------------------------------------------------------------------
-15. Miscellaneous
-------------------------------------------------------------------------
-
-If a court finds any part of this license unenforceable, the rest
-remains in effect. Failure to enforce a term is not a waiver. This
-license is the entire agreement for the Software as between you and
-the copyright holder for this copy. Later versions of the Software
-may ship a later license, a paid edition, or both; the version you
-received governs that copy.
-
-Contributions, if accepted, are licensed to the copyright holder as
-described in CONTRIBUTING.md, including the right to relicense them
-commercially.
+   END OF TERMS AND CONDITIONS

@@ -1,9 +1,9 @@
 # Remedy — terms of use
 
 **Version 1 · applies to all of Remedy.**
-The binding software terms are [LICENSE](../LICENSE); this page states, in plain
-language, what you are agreeing to when you run it. Nothing here grants rights
-the LICENSE does not, and where the two differ, the LICENSE wins.
+Remedy is licensed under the [Apache License 2.0](../LICENSE). This page states,
+in plain language, what you are agreeing to when you run it. Where it differs
+from the LICENSE on warranty or liability, the LICENSE wins.
 
 You are asked to agree to this once, on first run, in conversation. Some
 features — anything that reaches outside this machine — ask again for their own
