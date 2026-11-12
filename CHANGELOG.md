@@ -4,6 +4,19 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.66.5] - 2026-11-12
+
+### Fixed
+
+- Authorized one-shot process capture (`exec_capture_authorized`) now uses the
+  packed FFI calling convention on the Go side, so result pointers cannot be
+  dropped the way a 21-argument `SyscallN` can. The expanded export remains
+  for ctypes.
+- Authorized ConPTY spawn now uses the packed FFI calling convention on the
+  Go side, so result pointers cannot be dropped the way an 18-argument
+  `SyscallN` can. The expanded export remains for ctypes. Missing KeepAlive
+  on the spawn argument buffers is also fixed.
+
 ## [0.66.4] - 2026-11-12
 
 ### Fixed
