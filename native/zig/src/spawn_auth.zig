@@ -324,6 +324,12 @@ pub const ProcessExecCaptureAuthIn = extern struct {
     timeout_ms: u32,
 };
 
+pub const ProcessConptySpawnAuthIn = extern struct {
+    base: ProcessSpawnAuthIn,
+    cols: u16,
+    rows: u16,
+};
+
 pub const ProcessExecCaptureOut = extern struct {
     exit_code: u32 = 1,
     timed_out: u8 = 0,
@@ -344,6 +350,9 @@ comptime {
     // u32 + u8 + 3 pad, then four pointer/usize fields.
     if (@sizeOf(ProcessExecCaptureOut) != 40) @compileError("ProcessExecCaptureOut layout");
     if (@offsetOf(ProcessExecCaptureOut, "stdout") != 8) @compileError("ProcessExecCaptureOut.stdout offset");
+    // ProcessSpawnAuthIn + two u16 fields + 4 bytes of alignment padding.
+    if (@sizeOf(ProcessConptySpawnAuthIn) != 120) @compileError("ProcessConptySpawnAuthIn layout");
+    if (@offsetOf(ProcessConptySpawnAuthIn, "cols") != 112) @compileError("ProcessConptySpawnAuthIn.cols offset");
 }
 
 export fn remedy_core_process_spawn_authorized(
@@ -812,6 +821,44 @@ export fn remedy_core_conpty_spawn_authorized(
     pid_slot.* = spawned.pid;
     handle_slot.* = spawned.handle;
     return ok_status;
+}
+
+/// Packed ConPTY spawn so Go FFI stays inside a reliable SyscallN argument
+/// count. The expanded export above stays for ctypes.
+export fn remedy_core_conpty_spawn_authorized_pack(
+    args: ?*const ProcessConptySpawnAuthIn,
+    out: ?*ProcessSpawnOut,
+) callconv(.c) i32 {
+    const a = args orelse return invalid_status;
+    const o = out orelse return invalid_status;
+    o.* = .{ .pid = 0, .handle = 0 };
+    const b = a.base;
+    return remedy_core_conpty_spawn_authorized(
+        b.argv_json,
+        b.argv_len,
+        b.cwd,
+        b.cwd_len,
+        b.env_json,
+        b.env_len,
+        a.cols,
+        a.rows,
+        b.token,
+        b.token_len,
+        b.subject,
+        b.subject_len,
+        b.scope,
+        b.scope_len,
+        b.owner_confirmed,
+        b.now_ms,
+        &o.pid,
+        &o.handle,
+    );
+}
+
+test "conpty spawn authorized pack rejects null blocks" {
+    try std.testing.expectEqual(invalid_status, remedy_core_conpty_spawn_authorized_pack(null, null));
+    var out = ProcessSpawnOut{ .pid = 0, .handle = 0 };
+    try std.testing.expectEqual(invalid_status, remedy_core_conpty_spawn_authorized_pack(null, &out));
 }
 
 test "product rules allow git and deny sudo through authorizeProcess" {

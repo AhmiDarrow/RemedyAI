@@ -27,4 +27,10 @@ func TestProcessSpawnPackLayout(t *testing.T) {
 	if n := unsafe.Offsetof(processExecCaptureOut{}.Stdout); n != 8 {
 		t.Fatalf("processExecCaptureOut.Stdout offset=%d want 8", n)
 	}
+	if n := unsafe.Sizeof(processConptySpawnAuthIn{}); n != 120 {
+		t.Fatalf("processConptySpawnAuthIn size=%d want 120", n)
+	}
+	if n := unsafe.Offsetof(processConptySpawnAuthIn{}.cols); n != 112 {
+		t.Fatalf("processConptySpawnAuthIn.cols offset=%d want 112", n)
+	}
 }
