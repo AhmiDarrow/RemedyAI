@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ import pytest
 from remedy.interfaces.cli.cmd_runtime import (
     build_runtime_serve_argv,
     resolve_remedy_runtime_command,
+    serve_worker_python,
 )
 from remedy.interfaces.cli.parser import build_parser
 
@@ -127,7 +129,12 @@ def test_cmd_serve_sets_remedy_python_to_sys_executable(monkeypatch, tmp_path) -
     assert ei.value.code == 0
     env = called["env"]
     assert isinstance(env, dict)
-    assert env.get("REMEDY_PYTHON") == str(Path(sys.executable).resolve())
+    assert env.get("REMEDY_PYTHON") == os.path.abspath(sys.executable)
+    # A venv python is often a symlink to the base interpreter. Following
+    # that link would launch a python that has no remedy package.
+    assert env.get("REMEDY_PYTHON") != os.path.realpath(sys.executable) or (
+        os.path.abspath(sys.executable) == os.path.realpath(sys.executable)
+    )
 
 
 def test_cmd_serve_preserves_existing_remedy_python(monkeypatch, tmp_path) -> None:
@@ -430,3 +437,17 @@ def test_cmd_serve_downloads_runtime_when_missing(monkeypatch, tmp_path) -> None
     assert called["cmd"] == [str(runtime), "--serve"]
     assert called["core_env"] == str(core)
     assert called["parent_core_env"] is None
+
+def test_serve_worker_python_keeps_venv_symlink(tmp_path: Path) -> None:
+    """Do not resolve a venv python symlink to the system interpreter."""
+    base = tmp_path / "system-python"
+    base.write_text("", encoding="utf-8")
+    venv_bin = tmp_path / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    link = venv_bin / "python"
+    link.symlink_to(base)
+    got = serve_worker_python(str(link))
+    assert got == str(link)
+    assert os.path.realpath(got) == str(base.resolve())
+    assert got != os.path.realpath(got)
+
