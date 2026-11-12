@@ -96,7 +96,7 @@ func (s *Server) publishSessionEvent(ev SessionEvent) {
 		return
 	}
 	s.events.publish(ev)
-	if s.bus == nil {
+	if s.eventBus() == nil {
 		return
 	}
 	payload, err := json.Marshal(ev)

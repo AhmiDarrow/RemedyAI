@@ -12,6 +12,9 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   interpreter when setting `REMEDY_PYTHON`. That left the tool worker
   running a Python that has no `remedy` package, including when the venv
   was already on `PATH`.
+- Closing the runtime no longer races a still-running detached stream
+  against the durable event bus. In-flight turns are drained before the
+  bus is torn down, and bus access is synchronized.
 
 ## [0.66.3] - 2026-11-12
 
