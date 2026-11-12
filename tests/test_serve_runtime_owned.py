@@ -300,3 +300,61 @@ def test_resolve_never_returns_remedy_desktop(monkeypatch, tmp_path) -> None:
     joined = " ".join(str(x) for x in cmd).lower()
     assert "remedy-runtime" in joined
     assert "remedy-desktop" not in joined
+
+
+def test_cmd_serve_downloads_runtime_when_missing(monkeypatch, tmp_path) -> None:
+    """PyPI installs without a sidecar must fetch a checksum-verified runtime."""
+    import remedy.interfaces.cli.cmd_runtime as CR
+    from remedy.runtime.native_bootstrap import NativeInstall
+
+    called: dict[str, object] = {}
+    runtime = tmp_path / "cache" / "remedy-runtime"
+    core = tmp_path / "cache" / "libremedy_core.so"
+    runtime.parent.mkdir()
+    runtime.write_bytes(b"runtime")
+    core.write_bytes(b"core")
+
+    def fake_call(cmd, *args, **kwargs):
+        called["cmd"] = list(cmd)
+        env = kwargs.get("env") or {}
+        called["core_env"] = env.get("REMEDY_NATIVE_CORE_LIB")
+        called["parent_core_env"] = CR.os.environ.get("REMEDY_NATIVE_CORE_LIB")
+        return 0
+
+    monkeypatch.delenv("REMEDY_NATIVE_RUNTIME_BIN", raising=False)
+    monkeypatch.delenv("REMEDY_RUNTIME", raising=False)
+    monkeypatch.delenv("REMEDY_NATIVE_CORE_LIB", raising=False)
+    monkeypatch.setattr(CR, "resolve_remedy_runtime_command", lambda: None)
+    monkeypatch.setattr(CR.subprocess, "call", fake_call)
+
+    def fake_ensure(home):
+        called["home"] = str(home)
+        return NativeInstall(
+            version="0.65.1",
+            triple="x86_64-unknown-linux-gnu",
+            runtime_bin=runtime,
+            core_lib=core,
+            source="test",
+        )
+
+    monkeypatch.setattr(
+        "remedy.runtime.native_bootstrap.ensure_native_runtime", fake_ensure
+    )
+
+    with pytest.raises(SystemExit) as ei:
+        CR._cmd_serve(
+            SimpleNamespace(
+                home=str(tmp_path / "home"),
+                host="127.0.0.1",
+                port=7400,
+                skip_setup=True,
+                force_setup=False,
+                config_file=None,
+                computer_host=False,
+                no_computer_host=False,
+            )
+        )
+    assert ei.value.code == 0
+    assert called["cmd"] == [str(runtime), "--serve"]
+    assert called["core_env"] == str(core)
+    assert called["parent_core_env"] is None
