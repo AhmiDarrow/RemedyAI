@@ -62,6 +62,12 @@ type processExecCaptureOut struct {
 	StderrLen uintptr
 }
 
+type processConptySpawnAuthIn struct {
+	processSpawnAuthIn
+	cols, rows uint16
+	_          [4]byte
+}
+
 func newSpawnAuthIn(
 	argvRaw, cwdRaw, envRaw, tokenRaw, subjectRaw, scopeRaw []byte,
 	confirmed uint8,
