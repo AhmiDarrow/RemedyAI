@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
+	"unsafe"
 )
 
 // spawnEnvJSON encodes env exactly as the authorized spawn exports receive it:
@@ -13,6 +15,53 @@ import (
 // one encoding, so a token cannot be minted for one environment and spent on
 // another. A nil env without replacement means "inherit the parent block" and
 // yields no JSON at all.
+
+// Packed FFI argument and result blocks matching ProcessSpawnAuthIn /
+// ProcessSpawnOut / ProcessPipedSpawnOut in spawn_auth.zig. The two-pointer
+// pack exports keep spawn calls inside a reliable SyscallN argument count;
+// the expanded 16–19 argument forms can drop out-params when GC runs.
+type processSpawnAuthIn struct {
+	argvJSON, argvLen   uintptr
+	cwd, cwdLen         uintptr
+	envJSON, envLen     uintptr
+	token, tokenLen     uintptr
+	subject, subjectLen uintptr
+	scope, scopeLen     uintptr
+	ownerConfirmed      uint8
+	_                   [7]byte
+	nowMS               uint64
+}
+
+type processSpawnOut struct {
+	PID    uint32
+	_      uint32
+	Handle uint64
+}
+
+type processPipedSpawnOut struct {
+	PID                    uint32
+	_                      uint32
+	Handle, StdinWrite     uint64
+	StdoutRead, StderrRead uint64
+}
+
+func newSpawnAuthIn(
+	argvRaw, cwdRaw, envRaw, tokenRaw, subjectRaw, scopeRaw []byte,
+	confirmed uint8,
+	nowMS uint64,
+) processSpawnAuthIn {
+	return processSpawnAuthIn{
+		argvJSON: bytesPtr(argvRaw), argvLen: uintptr(len(argvRaw)),
+		cwd: bytesPtr(cwdRaw), cwdLen: uintptr(len(cwdRaw)),
+		envJSON: bytesPtr(envRaw), envLen: uintptr(len(envRaw)),
+		token: bytesPtr(tokenRaw), tokenLen: uintptr(len(tokenRaw)),
+		subject: bytesPtr(subjectRaw), subjectLen: uintptr(len(subjectRaw)),
+		scope: bytesPtr(scopeRaw), scopeLen: uintptr(len(scopeRaw)),
+		ownerConfirmed: confirmed,
+		nowMS:          nowMS,
+	}
+}
+
 func spawnEnvJSON(env map[string]string, replaceEnv bool) ([]byte, error) {
 	if env == nil && !replaceEnv {
 		return nil, nil
@@ -85,10 +134,12 @@ func ExecCaptureAuthorized(
 	if ownerConfirmed {
 		confirmed = 1
 	}
-	var exitCode uint32
-	var timedOut uint8
-	var stdoutPtr, stdoutLen uintptr
-	var stderrPtr, stderrLen uintptr
+	exitCode := new(uint32)
+	timedOut := new(uint8)
+	stdoutPtr := new(uintptr)
+	stdoutLen := new(uintptr)
+	stderrPtr := new(uintptr)
+	stderrLen := new(uintptr)
 	status, err := lib.call(
 		"remedy_core_process_exec_capture_authorized",
 		bytesPtr(argvRaw), uintptr(len(argvRaw)),
@@ -100,21 +151,33 @@ func ExecCaptureAuthorized(
 		uintptr(confirmed),
 		uintptr(nowMS),
 		uintptr(timeoutMS),
-		uint32Ptr(&exitCode),
-		uint8Ptr(&timedOut),
-		unsafePtrPtr(&stdoutPtr), sizePtr(&stdoutLen),
-		unsafePtrPtr(&stderrPtr), sizePtr(&stderrLen),
+		uint32Ptr(exitCode),
+		uint8Ptr(timedOut),
+		unsafePtrPtr(stdoutPtr), sizePtr(stdoutLen),
+		unsafePtrPtr(stderrPtr), sizePtr(stderrLen),
 	)
+	runtime.KeepAlive(argvRaw)
+	runtime.KeepAlive(cwdRaw)
+	runtime.KeepAlive(envRaw)
+	runtime.KeepAlive(tokenRaw)
+	runtime.KeepAlive(subjectRaw)
+	runtime.KeepAlive(scopeRaw)
+	runtime.KeepAlive(exitCode)
+	runtime.KeepAlive(timedOut)
+	runtime.KeepAlive(stdoutPtr)
+	runtime.KeepAlive(stdoutLen)
+	runtime.KeepAlive(stderrPtr)
+	runtime.KeepAlive(stderrLen)
 	if err != nil {
 		return out, err
 	}
 	if err := lib.check("process_exec_capture_authorized", int32(status)); err != nil {
 		return out, err
 	}
-	out.ExitCode = exitCode
-	out.TimedOut = timedOut != 0
-	out.Stdout = takeBytes(lib, stdoutPtr, stdoutLen)
-	out.Stderr = takeBytes(lib, stderrPtr, stderrLen)
+	out.ExitCode = *exitCode
+	out.TimedOut = *timedOut != 0
+	out.Stdout = takeBytes(lib, *stdoutPtr, *stdoutLen)
+	out.Stderr = takeBytes(lib, *stderrPtr, *stderrLen)
 	return out, nil
 }
 
@@ -159,32 +222,36 @@ func ProcessSpawnAuthorized(
 	subjectRaw := []byte(subject)
 	scopeRaw := []byte(scope)
 	tokenRaw := append([]byte(nil), token...)
-	var outPID uint32
-	var outHandle uint64
 	confirmed := uint8(0)
 	if ownerConfirmed {
 		confirmed = 1
 	}
+	args := new(processSpawnAuthIn)
+	*args = newSpawnAuthIn(argvRaw, cwdRaw, envRaw, tokenRaw, subjectRaw, scopeRaw, confirmed, nowMS)
+	out := new(processSpawnOut)
 	status, err := lib.call(
-		"remedy_core_process_spawn_authorized",
-		bytesPtr(argvRaw), uintptr(len(argvRaw)),
-		bytesPtr(cwdRaw), uintptr(len(cwdRaw)),
-		bytesPtr(envRaw), uintptr(len(envRaw)),
-		bytesPtr(tokenRaw), uintptr(len(tokenRaw)),
-		bytesPtr(subjectRaw), uintptr(len(subjectRaw)),
-		bytesPtr(scopeRaw), uintptr(len(scopeRaw)),
-		uintptr(confirmed),
-		uintptr(nowMS),
-		uint32Ptr(&outPID),
-		uint64Ptr(&outHandle),
+		"remedy_core_process_spawn_authorized_pack",
+		uintptr(unsafe.Pointer(args)),
+		uintptr(unsafe.Pointer(out)),
 	)
+	runtime.KeepAlive(argvRaw)
+	runtime.KeepAlive(cwdRaw)
+	runtime.KeepAlive(envRaw)
+	runtime.KeepAlive(tokenRaw)
+	runtime.KeepAlive(subjectRaw)
+	runtime.KeepAlive(scopeRaw)
+	runtime.KeepAlive(args)
+	runtime.KeepAlive(out)
 	if err != nil {
 		return 0, 0, err
 	}
 	if err := lib.check("process_spawn_authorized", int32(status)); err != nil {
 		return 0, 0, err
 	}
-	return outPID, outHandle, nil
+	if out.PID == 0 || out.Handle == 0 {
+		return 0, 0, fmt.Errorf("process_spawn_authorized: host returned an empty process handle")
+	}
+	return out.PID, out.Handle, nil
 }
 
 // PipedProcess is an authorized 3-pipe spawn. The pipe ends are parent-owned
@@ -256,31 +323,35 @@ func ProcessSpawnPipedAuthorized(
 	if ownerConfirmed {
 		confirmed = 1
 	}
-	var pid uint32
-	var handle, stdinW, stdoutR, stderrR uint64
+	args := new(processSpawnAuthIn)
+	*args = newSpawnAuthIn(argvRaw, cwdRaw, envRaw, tokenRaw, subjectRaw, scopeRaw, confirmed, nowMS)
+	spawned := new(processPipedSpawnOut)
 	status, err := lib.call(
-		"remedy_core_process_spawn_piped_authorized",
-		bytesPtr(argvRaw), uintptr(len(argvRaw)),
-		bytesPtr(cwdRaw), uintptr(len(cwdRaw)),
-		bytesPtr(envRaw), uintptr(len(envRaw)),
-		bytesPtr(tokenRaw), uintptr(len(tokenRaw)),
-		bytesPtr(subjectRaw), uintptr(len(subjectRaw)),
-		bytesPtr(scopeRaw), uintptr(len(scopeRaw)),
-		uintptr(confirmed),
-		uintptr(nowMS),
-		uint32Ptr(&pid),
-		uint64Ptr(&handle),
-		uint64Ptr(&stdinW),
-		uint64Ptr(&stdoutR),
-		uint64Ptr(&stderrR),
+		"remedy_core_process_spawn_piped_authorized_pack",
+		uintptr(unsafe.Pointer(args)),
+		uintptr(unsafe.Pointer(spawned)),
 	)
+	runtime.KeepAlive(argvRaw)
+	runtime.KeepAlive(cwdRaw)
+	runtime.KeepAlive(envRaw)
+	runtime.KeepAlive(tokenRaw)
+	runtime.KeepAlive(subjectRaw)
+	runtime.KeepAlive(scopeRaw)
+	runtime.KeepAlive(args)
+	runtime.KeepAlive(spawned)
 	if err != nil {
 		return out, err
 	}
 	if err := lib.check("process_spawn_piped_authorized", int32(status)); err != nil {
 		return out, err
 	}
-	out = PipedProcess{PID: pid, Handle: handle, StdinWrite: stdinW, StdoutRead: stdoutR, StderrRead: stderrR}
+	out = PipedProcess{
+		PID: spawned.PID, Handle: spawned.Handle,
+		StdinWrite: spawned.StdinWrite, StdoutRead: spawned.StdoutRead, StderrRead: spawned.StderrRead,
+	}
+	if out.PID == 0 || out.Handle == 0 {
+		return PipedProcess{}, fmt.Errorf("process_spawn_piped_authorized: host returned an empty process handle")
+	}
 	return out, nil
 }
 
@@ -290,25 +361,30 @@ func ProcessWait(handle uint64, timeoutMS uint32) (*uint32, error) {
 	if err != nil {
 		return nil, err
 	}
-	var exited uint8
-	var code uint32
+	// Heap-allocate out params and KeepAlive them. uintptr addresses of
+	// stack slots become dangling if the stack grows inside lib.call;
+	// Zig then sees a nil out pointer and returns invalid argument.
+	exited := new(uint8)
+	code := new(uint32)
 	status, err := lib.call(
 		"remedy_core_process_wait",
 		uintptr(handle),
 		uintptr(timeoutMS),
-		uint8Ptr(&exited),
-		uint32Ptr(&code),
+		uint8Ptr(exited),
+		uint32Ptr(code),
 	)
+	runtime.KeepAlive(exited)
+	runtime.KeepAlive(code)
 	if err != nil {
 		return nil, err
 	}
 	if err := lib.check("process_wait", int32(status)); err != nil {
 		return nil, err
 	}
-	if exited == 0 {
+	if *exited == 0 {
 		return nil, nil
 	}
-	c := code
+	c := *code
 	return &c, nil
 }
 

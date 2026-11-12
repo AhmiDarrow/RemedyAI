@@ -1944,6 +1944,12 @@ func waitShellCapture(ctx context.Context, proc core.PipedProcess, timeout time.
 	defer timer.Stop()
 	select {
 	case st := <-exited:
+		// A cancel or timeout that races with wait must still be reported
+		// as cancel/timeout, not as process_wait: invalid argument after
+		// the child is already being torn down.
+		if err := ctx.Err(); err != nil {
+			return finish(shellCapture{err: fmt.Errorf("shell.exec: %w", err)})
+		}
 		if st.err != nil {
 			return finish(shellCapture{err: fmt.Errorf("shell.exec wait: %w", st.err)})
 		}

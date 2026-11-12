@@ -36,13 +36,19 @@ func (n nativeLib) sym(name string) (uintptr, error) {
 	return purego.Dlsym(n.handle, name)
 }
 
+//go:uintptrescapes
+func syscallKeep(fn uintptr, args ...uintptr) uintptr {
+	r1, _, _ := purego.SyscallN(fn, args...)
+	return r1
+}
+
+//go:uintptrescapes
 func (l *Library) call(name string, args ...uintptr) (uintptr, error) {
 	sym, err := l.raw.sym(name)
 	if err != nil {
 		return 0, fmt.Errorf("%s: %w", name, err)
 	}
-	r1, _, _ := purego.SyscallN(sym, args...)
-	return r1, nil
+	return syscallKeep(sym, args...), nil
 }
 
 func (l *Library) abiVersion() (uint32, error) {
