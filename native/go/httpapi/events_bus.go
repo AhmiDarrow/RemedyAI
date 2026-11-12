@@ -23,15 +23,19 @@ func (s *Server) openEventBus(home string) error {
 		if err != nil {
 			return err
 		}
+		s.busMu.Lock()
 		s.ephemeralEventDir = dir
+		s.busMu.Unlock()
 		path = filepath.Join(dir, "events.log")
 	}
 	bus, err := events.Open(path)
 	if err != nil {
 		return err
 	}
+	s.busMu.Lock()
 	s.bus = bus
 	s.eventLogPath = path
+	s.busMu.Unlock()
 	return nil
 }
 
@@ -39,32 +43,55 @@ func (s *Server) closeEventBus() {
 	if s == nil {
 		return
 	}
-	if s.bus != nil {
-		_ = s.bus.Close()
-		s.bus = nil
+	s.busMu.Lock()
+	bus := s.bus
+	s.bus = nil
+	dir := s.ephemeralEventDir
+	s.ephemeralEventDir = ""
+	s.busMu.Unlock()
+	if bus != nil {
+		_ = bus.Close()
 	}
-	if s.ephemeralEventDir != "" {
-		_ = os.RemoveAll(s.ephemeralEventDir)
-		s.ephemeralEventDir = ""
+	if dir != "" {
+		_ = os.RemoveAll(dir)
 	}
 }
 
+// eventBus returns the live durable bus, or nil after Close.
+func (s *Server) eventBus() *events.Bus {
+	if s == nil {
+		return nil
+	}
+	s.busMu.Lock()
+	bus := s.bus
+	s.busMu.Unlock()
+	return bus
+}
+
 func (s *Server) publishBusEvent(ev events.Event) {
-	if s == nil || s.bus == nil {
+	if s == nil {
 		return
 	}
-	published, err := s.bus.Publish(ev)
+	s.busMu.Lock()
+	bus := s.bus
+	sched := s.sched
+	s.busMu.Unlock()
+	if bus == nil {
+		return
+	}
+	published, err := bus.Publish(ev)
 	if err != nil {
 		return
 	}
-	if s.sched != nil {
-		s.sched.HandleEvent(published)
+	if sched != nil {
+		sched.HandleEvent(published)
 	}
 }
 
 // handleEventsReplay serves GET /api/events?from=&limit= (durable bus ownership).
 func (s *Server) handleEventsReplay(w http.ResponseWriter, r *http.Request) {
-	if s.bus == nil {
+	bus := s.eventBus()
+	if bus == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"ok":    false,
 			"error": "event bus unavailable",
@@ -89,7 +116,7 @@ func (s *Server) handleEventsReplay(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	rows := s.bus.Replay(from, limit)
+	rows := bus.Replay(from, limit)
 	out := make([]map[string]any, 0, len(rows))
 	for _, ev := range rows {
 		out = append(out, eventToMap(ev))
@@ -103,7 +130,8 @@ func (s *Server) handleEventsReplay(w http.ResponseWriter, r *http.Request) {
 
 // handleEventsStream serves GET /api/events/stream — live durable-bus SSE.
 func (s *Server) handleEventsStream(w http.ResponseWriter, r *http.Request) {
-	if s.bus == nil {
+	bus := s.eventBus()
+	if bus == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"ok":    false,
 			"error": "event bus unavailable",
@@ -134,7 +162,7 @@ func (s *Server) handleEventsStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	source := strings.TrimSpace(r.URL.Query().Get("source"))
-	sub := s.bus.Subscribe(events.Filter{Types: typesFilter, Source: source}, 64, events.DropOldest)
+	sub := bus.Subscribe(events.Filter{Types: typesFilter, Source: source}, 64, events.DropOldest)
 	defer sub.Close()
 
 	ctx := r.Context()

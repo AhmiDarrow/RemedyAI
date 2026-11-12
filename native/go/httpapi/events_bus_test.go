@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -101,5 +102,36 @@ func TestPublishBusEventWakesScheduler(t *testing.T) {
 	done := s.sched.Tick(context.Background(), time.Now())
 	if len(done) != 1 || done[0].ID != "wake-me" {
 		t.Fatalf("scheduler tick = %#v", done)
+	}
+}
+
+func TestPublishBusEventDuringCloseHasNoRace(t *testing.T) {
+	home := t.TempDir()
+	s, err := New(Config{
+		Token:   "test-token-not-a-secret-16",
+		HomeDir: home,
+		DBPath:  filepath.Join(home, "memory.db"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	started := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		close(started)
+		for i := 0; i < 200; i++ {
+			s.publishBusEvent(events.Event{Type: "Wake", Source: "test"})
+		}
+	}()
+	<-started
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	if s.eventBus() != nil {
+		t.Fatal("event bus still live after Close")
 	}
 }
