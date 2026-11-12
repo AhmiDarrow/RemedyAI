@@ -550,3 +550,53 @@ def test_parser_epilog_points_at_serve_and_wrong_pypi_name() -> None:
     assert "pip install 'remedy'" in help_text or "pip install remedy" in help_text
     assert "different package" in help_text
     assert "https://github.com/AhmiDarrow/RemedyAI/releases/latest" in help_text
+
+
+def test_cmd_serve_warns_that_config_flag_is_ignored(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    import remedy.interfaces.cli.cmd_runtime as CR
+
+    monkeypatch.setenv("REMEDY_RUNTIME", str(tmp_path / "remedy-runtime"))
+    monkeypatch.setattr(CR.subprocess, "call", lambda *a, **k: 0)
+    with pytest.raises(SystemExit) as ei:
+        CR._cmd_serve(
+            SimpleNamespace(
+                home=str(tmp_path / "home"),
+                host="127.0.0.1",
+                port=7400,
+                skip_setup=True,
+                force_setup=False,
+                config_file=str(tmp_path / "custom.toml"),
+                computer_host=False,
+                no_computer_host=False,
+            )
+        )
+    assert ei.value.code == 0
+    out = capsys.readouterr().out.lower()
+    assert "--config is ignored" in out
+    assert "remedy_home" in out or "~/.remedy" in out
+
+
+def test_cmd_serve_is_silent_about_config_when_unset(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    import remedy.interfaces.cli.cmd_runtime as CR
+
+    monkeypatch.setenv("REMEDY_RUNTIME", str(tmp_path / "remedy-runtime"))
+    monkeypatch.setattr(CR.subprocess, "call", lambda *a, **k: 0)
+    with pytest.raises(SystemExit) as ei:
+        CR._cmd_serve(
+            SimpleNamespace(
+                home=str(tmp_path / "home"),
+                host="127.0.0.1",
+                port=7400,
+                skip_setup=True,
+                force_setup=False,
+                config_file=None,
+                computer_host=False,
+                no_computer_host=False,
+            )
+        )
+    assert ei.value.code == 0
+    assert "--config is ignored" not in capsys.readouterr().out.lower()

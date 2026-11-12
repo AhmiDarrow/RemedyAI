@@ -165,6 +165,15 @@ def _cmd_serve(args) -> None:
     except (TypeError, ValueError):
         port = 7400
 
+    # --config is kept as a suppressed no-op so older scripts still parse.
+    # It does not change which file remedy-runtime reads.
+    config_file = getattr(args, "config_file", None)
+    if config_file:
+        console.print(
+            "[yellow]--config is ignored.[/yellow] remedy-runtime reads "
+            "config from $REMEDY_HOME or ~/.remedy, not a --config path."
+        )
+
     # Go httpapi refuses non-loopback binds — fail closed here with a clear error.
     if not _is_loopback_host(host):
         console.print(
