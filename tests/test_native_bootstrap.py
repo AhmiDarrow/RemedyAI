@@ -305,3 +305,70 @@ def test_latest_fallback_cdn_resolves_tag_from_releases_latest(
     assert installed.version == "0.66.0"
     assert "0.66.0" in str(installed.runtime_bin)
     assert installed.runtime_bin.read_bytes() == runtime
+
+
+def test_cached_install_hashes_once_while_files_unchanged(
+    tmp_path: Path, linux_assets: nb.NativeAssets, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = b"runtime-bytes-memo"
+    core = b"core-bytes-memo"
+    sums = _sums(linux_assets, runtime, core)
+    base = "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.65.1"
+
+    def fake_open(req, timeout=0):  # noqa: ANN001
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if url.endswith(nb.SUMS_NAME):
+            return _Resp(sums, f"{base}/{nb.SUMS_NAME}")
+        if url.endswith(linux_assets.runtime_asset):
+            return _Resp(runtime, f"{base}/{linux_assets.runtime_asset}")
+        if url.endswith(linux_assets.core_asset):
+            return _Resp(core, f"{base}/{linux_assets.core_asset}")
+        raise AssertionError(url)
+
+    monkeypatch.setenv("REMEDY_ENSURE_ASSETS", "1")
+    monkeypatch.setattr(nb.urllib.request, "urlopen", fake_open)
+    installed = nb.ensure_native_runtime(tmp_path, version="0.65.1")
+
+    calls = {"n": 0}
+    real = nb._sha256_file
+
+    def counted(path: Path) -> str:
+        calls["n"] += 1
+        return real(path)
+
+    nb._verified_memo.clear()
+    monkeypatch.setattr(nb, "_sha256_file", counted)
+    again = nb.cached_install(tmp_path, version="0.65.1")
+    assert again is not None
+    assert again.runtime_bin == installed.runtime_bin
+    first_hashes = calls["n"]
+    assert first_hashes >= 2
+    nb.cached_runtime_bin(tmp_path)
+    nb.cached_core_lib(tmp_path)
+    assert calls["n"] == first_hashes
+
+
+def test_cached_install_rehashes_after_runtime_rewrite(
+    tmp_path: Path, linux_assets: nb.NativeAssets, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = b"runtime-bytes-orig"
+    core = b"core-bytes-orig"
+    sums = _sums(linux_assets, runtime, core)
+    base = "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.65.1"
+
+    def fake_open(req, timeout=0):  # noqa: ANN001
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if url.endswith(nb.SUMS_NAME):
+            return _Resp(sums, f"{base}/{nb.SUMS_NAME}")
+        if url.endswith(linux_assets.runtime_asset):
+            return _Resp(runtime, f"{base}/{linux_assets.runtime_asset}")
+        if url.endswith(linux_assets.core_asset):
+            return _Resp(core, f"{base}/{linux_assets.core_asset}")
+        raise AssertionError(url)
+
+    monkeypatch.setenv("REMEDY_ENSURE_ASSETS", "1")
+    monkeypatch.setattr(nb.urllib.request, "urlopen", fake_open)
+    installed = nb.ensure_native_runtime(tmp_path, version="0.65.1")
+    assert nb.cached_install(tmp_path, version="0.65.1") is not None
+    installed.runtime_bin.write_bytes(b"tampered-runtime-bytes")
+    assert nb.cached_install(tmp_path, version="0.65.1") is None
