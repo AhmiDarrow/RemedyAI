@@ -212,7 +212,6 @@ RUST = Lane(
     "Tauri shell (cargo)",
     (
         Step("cargo test", "cargo test --locked", cwd="desktop/src-tauri", env=RUST_ENV),
-        Step("cargo check", "cargo check --locked", cwd="desktop/src-tauri", env=RUST_ENV),
     ),
 )
 
@@ -509,7 +508,7 @@ def _wsl_cargo_command() -> str | None:
     inner = (
         f"cd {tauri} && "
         "export CARGO_TARGET_DIR=/tmp/remedy-prepush-cargo && "
-        "cargo test --locked && cargo check --locked"
+        "cargo test --locked"
     )
     return f'wsl -e bash -lc "{inner}"'
 
