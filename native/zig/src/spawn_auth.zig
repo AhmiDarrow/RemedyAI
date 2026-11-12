@@ -319,11 +319,31 @@ pub const ProcessPipedSpawnOut = extern struct {
     stderr_read: u64,
 };
 
+pub const ProcessExecCaptureAuthIn = extern struct {
+    base: ProcessSpawnAuthIn,
+    timeout_ms: u32,
+};
+
+pub const ProcessExecCaptureOut = extern struct {
+    exit_code: u32 = 1,
+    timed_out: u8 = 0,
+    stdout: ?[*]u8 = null,
+    stdout_len: usize = 0,
+    stderr: ?[*]u8 = null,
+    stderr_len: usize = 0,
+};
+
 comptime {
     // 12 pointer/usize fields, then u8 + 7 bytes of alignment padding, then u64.
     if (@sizeOf(ProcessSpawnAuthIn) != 112) @compileError("ProcessSpawnAuthIn layout");
     if (@sizeOf(ProcessSpawnOut) != 16) @compileError("ProcessSpawnOut layout");
     if (@sizeOf(ProcessPipedSpawnOut) != 40) @compileError("ProcessPipedSpawnOut layout");
+    // ProcessSpawnAuthIn + u32 timeout_ms + 4 bytes of alignment padding.
+    if (@sizeOf(ProcessExecCaptureAuthIn) != 120) @compileError("ProcessExecCaptureAuthIn layout");
+    if (@offsetOf(ProcessExecCaptureAuthIn, "timeout_ms") != 112) @compileError("ProcessExecCaptureAuthIn.timeout_ms offset");
+    // u32 + u8 + 3 pad, then four pointer/usize fields.
+    if (@sizeOf(ProcessExecCaptureOut) != 40) @compileError("ProcessExecCaptureOut layout");
+    if (@offsetOf(ProcessExecCaptureOut, "stdout") != 8) @compileError("ProcessExecCaptureOut.stdout offset");
 }
 
 export fn remedy_core_process_spawn_authorized(
@@ -386,7 +406,6 @@ export fn remedy_core_process_spawn_authorized(
     handle_slot.* = result.handle;
     return ok_status;
 }
-
 
 export fn remedy_core_process_spawn_authorized_pack(
     args: ?*const ProcessSpawnAuthIn,
@@ -491,7 +510,6 @@ export fn remedy_core_process_spawn_piped_authorized(
     stderr_slot.* = result.stderr_read;
     return ok_status;
 }
-
 
 export fn remedy_core_process_spawn_piped_authorized_pack(
     args: ?*const ProcessSpawnAuthIn,
@@ -696,6 +714,48 @@ export fn remedy_core_process_exec_capture_authorized(
     }
 }
 
+/// Packed exec-capture so Go FFI stays inside a reliable SyscallN argument
+/// count. The expanded export above stays for ctypes.
+export fn remedy_core_process_exec_capture_authorized_pack(
+    args: ?*const ProcessExecCaptureAuthIn,
+    out: ?*ProcessExecCaptureOut,
+) callconv(.c) i32 {
+    const a = args orelse return invalid_status;
+    const o = out orelse return invalid_status;
+    o.* = .{
+        .exit_code = 1,
+        .timed_out = 0,
+        .stdout = null,
+        .stdout_len = 0,
+        .stderr = null,
+        .stderr_len = 0,
+    };
+    const b = a.base;
+    return remedy_core_process_exec_capture_authorized(
+        b.argv_json,
+        b.argv_len,
+        b.cwd,
+        b.cwd_len,
+        b.env_json,
+        b.env_len,
+        b.token,
+        b.token_len,
+        b.subject,
+        b.subject_len,
+        b.scope,
+        b.scope_len,
+        b.owner_confirmed,
+        b.now_ms,
+        a.timeout_ms,
+        &o.exit_code,
+        &o.timed_out,
+        &o.stdout,
+        &o.stdout_len,
+        &o.stderr,
+        &o.stderr_len,
+    );
+}
+
 /// Authorize then ConPTY-spawn. argv[0] must already be an absolute path.
 export fn remedy_core_conpty_spawn_authorized(
     argv_json: ?[*]const u8,
@@ -870,6 +930,68 @@ test "exec capture authorized echoes through job/soft path" {
     try std.testing.expectEqual(@as(u8, 0), timed_out);
     try std.testing.expect(out_stdout_len > 0);
     try std.testing.expect(std.mem.indexOf(u8, out_stdout.?[0..out_stdout_len], "remedy-capture") != null);
+}
+
+test "exec capture authorized pack echoes through job/soft path" {
+    if (builtin.os.tag != .windows and builtin.os.tag != .linux) return error.SkipZigTest;
+
+    const key = [_]u8{0xC3} ** Hmac.key_length;
+    try std.testing.expectEqual(ok_status, remedy_core_security_set_signing_key(&key, key.len));
+    defer _ = remedy_core_security_clear_signing_key();
+
+    const argv: []const u8 = if (builtin.os.tag == .windows)
+        "[\"C:\\\\Windows\\\\System32\\\\cmd.exe\",\"/d\",\"/c\",\"echo remedy-pack\"]"
+    else
+        "[\"/bin/sh\",\"-c\",\"printf remedy-pack\"]";
+    const op = policy.hashArguments(if (builtin.os.tag == .windows)
+        &.{ "C:\\Windows\\System32\\cmd.exe", "/d", "/c", "echo remedy-pack" }
+    else
+        &.{ "/bin/sh", "-c", "printf remedy-pack" });
+    var token_buf: [security.token_size]u8 = undefined;
+    try std.testing.expectEqual(ok_status, remedy_core_capability_issue(
+        default_subject.ptr,
+        default_subject.len,
+        default_scope.ptr,
+        default_scope.len,
+        &op,
+        op.len,
+        capability.Set.one(.process_spawn).bits,
+        1000,
+        60_000,
+        &([_]u8{0x44} ** 16),
+        16,
+        &token_buf,
+        token_buf.len,
+    ));
+
+    var args = ProcessExecCaptureAuthIn{
+        .base = .{
+            .argv_json = argv.ptr,
+            .argv_len = argv.len,
+            .cwd = null,
+            .cwd_len = 0,
+            .env_json = null,
+            .env_len = 0,
+            .token = &token_buf,
+            .token_len = token_buf.len,
+            .subject = null,
+            .subject_len = 0,
+            .scope = null,
+            .scope_len = 0,
+            .owner_confirmed = 0,
+            .now_ms = 1500,
+        },
+        .timeout_ms = 15_000,
+    };
+    var out = ProcessExecCaptureOut{};
+    const st = remedy_core_process_exec_capture_authorized_pack(&args, &out);
+    defer if (out.stdout) |p| host.allocator.free(p[0..out.stdout_len]);
+    defer if (out.stderr) |p| host.allocator.free(p[0..out.stderr_len]);
+    try std.testing.expectEqual(ok_status, st);
+    try std.testing.expectEqual(@as(u32, 0), out.exit_code);
+    try std.testing.expectEqual(@as(u8, 0), out.timed_out);
+    try std.testing.expect(out.stdout_len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, out.stdout.?[0..out.stdout_len], "remedy-pack") != null);
 }
 
 test "exec capture authorized honors cwd on linux soft path" {
