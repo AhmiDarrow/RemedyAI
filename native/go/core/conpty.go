@@ -3,6 +3,8 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"runtime"
+	"unsafe"
 )
 
 // ConptyAvailable reports CreatePseudoConsole availability.
@@ -67,33 +69,35 @@ func ConptySpawnAuthorized(
 	subjectRaw := []byte(subject)
 	scopeRaw := []byte(scope)
 	tokenRaw := append([]byte(nil), token...)
-	var outPID uint32
-	var outHandle uint64
 	confirmed := uint8(0)
 	if ownerConfirmed {
 		confirmed = 1
 	}
+	args := new(processConptySpawnAuthIn)
+	args.processSpawnAuthIn = newSpawnAuthIn(argvRaw, cwdRaw, envRaw, tokenRaw, subjectRaw, scopeRaw, confirmed, nowMS)
+	args.cols = cols
+	args.rows = rows
+	out := new(processSpawnOut)
 	status, err := lib.call(
-		"remedy_core_conpty_spawn_authorized",
-		bytesPtr(argvRaw), uintptr(len(argvRaw)),
-		bytesPtr(cwdRaw), uintptr(len(cwdRaw)),
-		bytesPtr(envRaw), uintptr(len(envRaw)),
-		uintptr(cols), uintptr(rows),
-		bytesPtr(tokenRaw), uintptr(len(tokenRaw)),
-		bytesPtr(subjectRaw), uintptr(len(subjectRaw)),
-		bytesPtr(scopeRaw), uintptr(len(scopeRaw)),
-		uintptr(confirmed),
-		uintptr(nowMS),
-		uint32Ptr(&outPID),
-		uint64Ptr(&outHandle),
+		"remedy_core_conpty_spawn_authorized_pack",
+		uintptr(unsafe.Pointer(args)),
+		uintptr(unsafe.Pointer(out)),
 	)
+	runtime.KeepAlive(argvRaw)
+	runtime.KeepAlive(cwdRaw)
+	runtime.KeepAlive(envRaw)
+	runtime.KeepAlive(tokenRaw)
+	runtime.KeepAlive(subjectRaw)
+	runtime.KeepAlive(scopeRaw)
+	runtime.KeepAlive(args)
+	runtime.KeepAlive(out)
 	if err != nil {
 		return 0, 0, err
 	}
 	if err := lib.check("conpty_spawn_authorized", int32(status)); err != nil {
 		return 0, 0, err
 	}
-	return outPID, outHandle, nil
+	return out.PID, out.Handle, nil
 }
 
 // ConptyWrite writes bytes to the session stdin pipe.
