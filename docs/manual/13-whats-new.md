@@ -2,13 +2,14 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.66.3**. Installed apps update on their own.
+Current release: **v0.66.4**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [0.66.4 — The worker stays in the install venv](#0664---the-worker-stays-in-the-install-venv)
 - [0.66.3 — A more reliable first-run serve](#0663---a-more-reliable-first-run-serve)
 - [0.66.2 — More reliable Usage, Discord, and shell cancel](#0662---more-reliable-usage-discord-and-shell-cancel)
 - [0.66.1 — A first-run download URL fix](#0661---a-first-run-download-url-fix)
@@ -18,6 +19,12 @@ you gave her, and waits for you before money, send, or delete.
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
+
+## 0.66.4 - The worker stays in the install venv
+
+- **`remedy serve` keeps the venv interpreter.** A venv's `python` is often
+  a symlink to the system one. Following that link made the tool worker
+  start without the `remedy` package. It now uses the venv path as-is.
 
 ## 0.66.3 - A more reliable first-run serve
 
