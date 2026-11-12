@@ -4,6 +4,16 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.66.1] - 2026-11-12
+
+### Fixed
+
+- First-run `remedy serve` after `pip install` no longer builds runtime and
+  core download URLs from GitHub's post-redirect CDN location. Those URLs
+  carry a per-object JWT, so a sibling path failed with HTTP 618. Downloads
+  now always use the stable `releases/download/vX.Y.Z` prefix, and Latest
+  is resolved through `/releases/latest` when the checksum URL has no tag.
+
 ## [0.66.0] - 2026-11-12
 
 ### Added

@@ -2,19 +2,27 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.66.0**. Installed apps update on their own.
+Current release: **v0.66.1**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [0.66.1 — A first-run download URL fix](#0661---a-first-run-download-url-fix)
 - [0.66.0 — A first-run runtime download](#0660---a-first-run-runtime-download)
 - [0.65.0 — A check finishes the work](#0650---a-check-finishes-the-work)
 - [0.64.0 — Grouped settings and a present partner](#0640---grouped-settings-and-a-present-partner)
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
+
+## 0.66.1 - A first-run download URL fix
+
+- **First serve after `pip install` finds the runtime again.** GitHub now
+  redirects release files through a signed CDN URL. The download keeps using
+  the public `releases/download/vX.Y.Z` address so the checksum and both
+  binaries still verify.
 
 ## 0.66.0 - A first-run runtime download
 
