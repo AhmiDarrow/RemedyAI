@@ -17,9 +17,10 @@ import (
 // yields no JSON at all.
 
 // Packed FFI argument and result blocks matching ProcessSpawnAuthIn /
-// ProcessSpawnOut / ProcessPipedSpawnOut in spawn_auth.zig. The two-pointer
-// pack exports keep spawn calls inside a reliable SyscallN argument count;
-// the expanded 16–19 argument forms can drop out-params when GC runs.
+// ProcessSpawnOut / ProcessPipedSpawnOut / ProcessExecCaptureAuthIn /
+// ProcessExecCaptureOut in spawn_auth.zig. The two-pointer pack exports
+// keep spawn calls inside a reliable SyscallN argument count; the expanded
+// 16–21 argument forms can drop out-params when GC runs.
 type processSpawnAuthIn struct {
 	argvJSON, argvLen   uintptr
 	cwd, cwdLen         uintptr
@@ -43,6 +44,22 @@ type processPipedSpawnOut struct {
 	_                      uint32
 	Handle, StdinWrite     uint64
 	StdoutRead, StderrRead uint64
+}
+
+type processExecCaptureAuthIn struct {
+	processSpawnAuthIn
+	timeoutMS uint32
+	_         [4]byte
+}
+
+type processExecCaptureOut struct {
+	ExitCode  uint32
+	TimedOut  uint8
+	_         [3]byte
+	Stdout    uintptr
+	StdoutLen uintptr
+	Stderr    uintptr
+	StderrLen uintptr
 }
 
 func newSpawnAuthIn(
@@ -134,27 +151,14 @@ func ExecCaptureAuthorized(
 	if ownerConfirmed {
 		confirmed = 1
 	}
-	exitCode := new(uint32)
-	timedOut := new(uint8)
-	stdoutPtr := new(uintptr)
-	stdoutLen := new(uintptr)
-	stderrPtr := new(uintptr)
-	stderrLen := new(uintptr)
+	args := new(processExecCaptureAuthIn)
+	args.processSpawnAuthIn = newSpawnAuthIn(argvRaw, cwdRaw, envRaw, tokenRaw, subjectRaw, scopeRaw, confirmed, nowMS)
+	args.timeoutMS = timeoutMS
+	captured := new(processExecCaptureOut)
 	status, err := lib.call(
-		"remedy_core_process_exec_capture_authorized",
-		bytesPtr(argvRaw), uintptr(len(argvRaw)),
-		bytesPtr(cwdRaw), uintptr(len(cwdRaw)),
-		bytesPtr(envRaw), uintptr(len(envRaw)),
-		bytesPtr(tokenRaw), uintptr(len(tokenRaw)),
-		bytesPtr(subjectRaw), uintptr(len(subjectRaw)),
-		bytesPtr(scopeRaw), uintptr(len(scopeRaw)),
-		uintptr(confirmed),
-		uintptr(nowMS),
-		uintptr(timeoutMS),
-		uint32Ptr(exitCode),
-		uint8Ptr(timedOut),
-		unsafePtrPtr(stdoutPtr), sizePtr(stdoutLen),
-		unsafePtrPtr(stderrPtr), sizePtr(stderrLen),
+		"remedy_core_process_exec_capture_authorized_pack",
+		uintptr(unsafe.Pointer(args)),
+		uintptr(unsafe.Pointer(captured)),
 	)
 	runtime.KeepAlive(argvRaw)
 	runtime.KeepAlive(cwdRaw)
@@ -162,22 +166,18 @@ func ExecCaptureAuthorized(
 	runtime.KeepAlive(tokenRaw)
 	runtime.KeepAlive(subjectRaw)
 	runtime.KeepAlive(scopeRaw)
-	runtime.KeepAlive(exitCode)
-	runtime.KeepAlive(timedOut)
-	runtime.KeepAlive(stdoutPtr)
-	runtime.KeepAlive(stdoutLen)
-	runtime.KeepAlive(stderrPtr)
-	runtime.KeepAlive(stderrLen)
+	runtime.KeepAlive(args)
+	runtime.KeepAlive(captured)
 	if err != nil {
 		return out, err
 	}
 	if err := lib.check("process_exec_capture_authorized", int32(status)); err != nil {
 		return out, err
 	}
-	out.ExitCode = *exitCode
-	out.TimedOut = *timedOut != 0
-	out.Stdout = takeBytes(lib, *stdoutPtr, *stdoutLen)
-	out.Stderr = takeBytes(lib, *stderrPtr, *stderrLen)
+	out.ExitCode = captured.ExitCode
+	out.TimedOut = captured.TimedOut != 0
+	out.Stdout = takeBytes(lib, captured.Stdout, captured.StdoutLen)
+	out.Stderr = takeBytes(lib, captured.Stderr, captured.StderrLen)
 	return out, nil
 }
 
