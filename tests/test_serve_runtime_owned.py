@@ -381,7 +381,7 @@ def test_resolve_never_returns_remedy_desktop(monkeypatch, tmp_path) -> None:
     assert "remedy-desktop" not in joined
 
 
-def test_cmd_serve_downloads_runtime_when_missing(monkeypatch, tmp_path) -> None:
+def test_cmd_serve_downloads_runtime_when_missing(monkeypatch, tmp_path, capsys) -> None:
     """PyPI installs without a sidecar must fetch a checksum-verified runtime."""
     import remedy.interfaces.cli.cmd_runtime as CR
     from remedy.runtime.native_bootstrap import NativeInstall
@@ -437,6 +437,10 @@ def test_cmd_serve_downloads_runtime_when_missing(monkeypatch, tmp_path) -> None
     assert called["cmd"] == [str(runtime), "--serve"]
     assert called["core_env"] == str(core)
     assert called["parent_core_env"] is None
+    out = capsys.readouterr().out.lower()
+    assert "downloading" in out
+    assert "checksum" in out
+    assert "downloaded" in out
 
 def test_serve_worker_python_keeps_venv_symlink(tmp_path: Path) -> None:
     """Do not resolve a venv python symlink to the system interpreter."""
