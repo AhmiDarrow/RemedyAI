@@ -28,8 +28,25 @@ jobs:
         with:
           python-version: "3.12"
 
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+
       - name: Fetch base
         run: git fetch origin "${{ github.base_ref }}" --depth=80
+
+      # Zig remedy_core links X11/XTest/AT-SPI on Linux (see native/zig/build.zig).
+      - name: Install Linux Zig host libs
+        run: bash scripts/ci_install_linux_zig_host_deps.sh
+
+      # require_process_host loads remedy_core. Build it here rather than
+      # skipping or weakening that requirement. Same flags as ci.yml.
+      - name: Build native core (Zig)
+        working-directory: native/zig
+        run: |
+          zig build -Doptimize=ReleaseSafe
+          test -f zig-out/lib/libremedy_core.so
+          echo "REMEDY_NATIVE_CORE_LIB=${PWD}/zig-out/lib/libremedy_core.so" >> "$GITHUB_ENV"
 
       - name: Guard (stricter for forks)
         env:
@@ -51,8 +68,25 @@ jobs:
         with:
           python-version: "3.12"
 
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+
       - name: Fetch base
         run: git fetch origin "${{ github.base_ref }}" --depth=80
+
+      # Zig remedy_core links X11/XTest/AT-SPI on Linux (see native/zig/build.zig).
+      - name: Install Linux Zig host libs
+        run: bash scripts/ci_install_linux_zig_host_deps.sh
+
+      # require_process_host loads remedy_core. Build it here rather than
+      # skipping or weakening that requirement. Same flags as ci.yml.
+      - name: Build native core (Zig)
+        working-directory: native/zig
+        run: |
+          zig build -Doptimize=ReleaseSafe
+          test -f zig-out/lib/libremedy_core.so
+          echo "REMEDY_NATIVE_CORE_LIB=${PWD}/zig-out/lib/libremedy_core.so" >> "$GITHUB_ENV"
 
       - name: Independent behavior scan
         env:
