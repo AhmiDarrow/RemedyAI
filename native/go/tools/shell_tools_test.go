@@ -289,3 +289,36 @@ func TestJobsRefusesUnknownIdsAndActions(t *testing.T) {
 		t.Fatalf("jobs without a session: %v", err)
 	}
 }
+
+func TestBashCancelRepeatInProcess(t *testing.T) {
+	requireHostSpawn(t)
+	registry := shellRegistry(t)
+	command := "sleep 30"
+	if runtime.GOOS == "windows" {
+		command = "ping -n 30 127.0.0.1 >NUL"
+	}
+	input, err := json.Marshal(map[string]any{"command": command, "timeout_ms": 60000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			_, execErr := registry.Execute(ctx, Request{
+				ToolID: "bash", Version: 1, Input: input, CapabilityToken: []byte("test-token"),
+			})
+			done <- execErr
+		}()
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+		select {
+		case execErr := <-done:
+			if execErr == nil || !strings.Contains(execErr.Error(), "context canceled") {
+				t.Fatalf("iter %d cancel must stop the command: %v", i, execErr)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("iter %d Stop did not cancel a running command", i)
+		}
+	}
+}

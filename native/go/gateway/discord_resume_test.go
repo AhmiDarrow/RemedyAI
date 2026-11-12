@@ -329,7 +329,7 @@ func TestDiscordBackoffGrowsWithJitterAndIsBounded(t *testing.T) {
 // looks open. The heartbeat loop must notice and force a reconnect.
 func TestDiscordMissedHeartbeatACKMarksZombie(t *testing.T) {
 	c := newTestDiscord(t)
-	c.heartbeatMS = 5
+	c.heartbeatMS = 50
 	client, server, closeFn := wsPipe(t)
 	defer closeFn()
 	// Drain whatever the heartbeat loop writes; never ACK.
@@ -356,7 +356,9 @@ func TestDiscordMissedHeartbeatACKMarksZombie(t *testing.T) {
 // The mirror image: a link that keeps acknowledging is left alone.
 func TestDiscordAcknowledgedHeartbeatKeepsLinkAlive(t *testing.T) {
 	c := newTestDiscord(t)
-	c.heartbeatMS = 5
+	// 50ms is still far below Discord's ~41s interval, but long enough
+	// that a Windows scheduler slice cannot shrink the ACK window to zero.
+	c.heartbeatMS = 50
 	client, server, closeFn := wsPipe(t)
 	defer closeFn()
 	hb := &discordHeartbeat{ws: client, acked: true}
@@ -369,7 +371,7 @@ func TestDiscordAcknowledgedHeartbeatKeepsLinkAlive(t *testing.T) {
 		}
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	go c.heartbeatLoop(ctx, hb)
 	select {
