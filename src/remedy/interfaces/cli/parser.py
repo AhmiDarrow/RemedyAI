@@ -13,9 +13,14 @@ def build_parser() -> argparse.ArgumentParser:
         prog="remedy",
         description="Remedy: The self-improving, multi-channel AI agent framework.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="For the best experience, download the desktop app:\n"
-               "  https://github.com/AhmiDarrow/RemedyAI/releases\n"
-               "Power users: use 'remedy serve' to run the API server.",
+        epilog=(
+            "After pip install remedy-ai, start the local API with:\n"
+            "  remedy serve\n"
+            "First run downloads a checksum-verified remedy-runtime from GitHub Releases.\n"
+            "Do not pip install 'remedy' — that is a different package.\n"
+            "Desktop app (recommended for daily use):\n"
+            "  https://github.com/AhmiDarrow/RemedyAI/releases/latest"
+        ),
     )
     parser.add_argument("--version", action="version", version=f"remedy {__version__}")
     # Default through default_home() so REMEDY_HOME is honoured. A literal
