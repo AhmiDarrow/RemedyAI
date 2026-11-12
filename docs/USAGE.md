@@ -56,20 +56,29 @@ The chat **answer is never truncated** by this setting. After a turn, process st
 
 ## Getting Started
 
-### 1. Initialize configuration
+### 1. Start the local API
 
 ```bash
-remedy config init
+pip install remedy-ai
+# not: pip install remedy  (unrelated package)
+remedy serve
 ```
 
-This creates `~/.remedy/config.toml` with sensible defaults. View it:
+First run downloads a checksum-verified `remedy-runtime` from GitHub Releases
+and caches it in `~/.remedy/runtime/`. Open http://127.0.0.1:7400/ in a
+browser, or use the Desktop app from GitHub Releases. The API is loopback only
+(`127.0.0.1` / `::1`).
+
+A default `~/.remedy/config.toml` is created on first run. To inspect or
+recreate it:
 
 ```bash
 remedy config show
 remedy config path
+remedy config init
 ```
 
-### 1b. Connect a provider (xAI example)
+### 2. Connect a provider (xAI example)
 
 **Desktop:** Settings or first-run wizard → choose **xAI (Grok)** → **Sign in with xAI**
 (or paste a console API key). Known providers do not need a manual base URL.
@@ -102,19 +111,16 @@ Other key-only brands: set `llm_provider` / `llm_api_key` in config, or use
 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `GROQ_API_KEY`,
 `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`, etc.
 
-### 2. Discover skills
+### 3. Skills and memory
 
-Remedy ships with bundled skills in the `skills/` directory:
+Bundled skills are discovered automatically from the package (and from
+`~/.remedy/skills` for your own). After a pip install you do not need
+`remedy skill discover skills/` — that path only exists in a source checkout.
 
 ```bash
-remedy skill discover skills/
 remedy skill list
 remedy skill info memory-backup
-```
-
-### 3. Add your first memory
-
-```bash
+remedy skill discover /path/to/your/skills   # optional extra roots
 remedy memory add "start" "Remedy initial setup complete"
 remedy memory list --limit 5
 ```
@@ -498,7 +504,7 @@ remedy gateway status
 ### `remedy gateway serve`
 
 Same API server as `remedy serve` (instance lock, config, messengers, bind policy).
-Prefer `remedy serve` when you need flags (`--host`, `--port`, `--skip-setup`).
+Prefer `remedy serve` when you need flags (`--host`, `--port`). `--skip-setup` and `--config` are accepted for older scripts but are no-ops.
 
 ```bash
 remedy gateway serve
@@ -525,7 +531,7 @@ Python no longer binds uvicorn on `:7400`. Loopback only.
 ```bash
 remedy serve                                    # Defaults: 127.0.0.1:7400
 remedy serve --port 7410                        # Custom loopback port
-remedy serve --config ./custom.toml             # Custom config file
+# Config is read from $REMEDY_HOME or ~/.remedy; --config is a no-op.
 ```
 
 Looks for `remedy-runtime` on `REMEDY_NATIVE_RUNTIME_BIN` / `REMEDY_RUNTIME`,
