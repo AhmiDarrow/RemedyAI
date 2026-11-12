@@ -164,6 +164,11 @@ def _cmd_serve(args) -> None:
     os.environ.setdefault("REMEDY_FULL_CONTEXT", "1")
     os.environ.setdefault("REMEDY_REACT_AUTO_CONTINUE", "1")
     child_env = os.environ.copy()
+    # The worker is spawned by remedy-runtime from PATH python unless we
+    # point it at this interpreter. Without this, `venv/bin/remedy serve`
+    # fails when the venv is not on PATH (system python3 has no remedy).
+    if not str(child_env.get("REMEDY_PYTHON", "")).strip() and sys.executable:
+        child_env["REMEDY_PYTHON"] = str(Path(sys.executable).resolve())
 
     runtime_cmd = resolve_remedy_runtime_command()
     core_lib = None
