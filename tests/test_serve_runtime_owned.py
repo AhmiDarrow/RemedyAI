@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -92,6 +93,77 @@ def test_cmd_serve_dispatches_to_runtime(monkeypatch, tmp_path) -> None:
         str(tmp_path / "remedy-runtime.exe"),
         "--serve",
     ]
+
+
+def test_cmd_serve_sets_remedy_python_to_sys_executable(monkeypatch, tmp_path) -> None:
+    """pip-installed `venv/bin/remedy serve` must not pick a PATH python3."""
+    import remedy.interfaces.cli.cmd_runtime as CR
+
+    called: dict[str, object] = {}
+
+    def fake_call(cmd, *args, **kwargs):
+        called["env"] = dict(kwargs.get("env") or {})
+        return 0
+
+    monkeypatch.delenv("REMEDY_PYTHON", raising=False)
+    monkeypatch.setenv(
+        "REMEDY_NATIVE_RUNTIME_BIN", str(tmp_path / "remedy-runtime")
+    )
+    monkeypatch.setattr(CR.subprocess, "call", fake_call)
+
+    with pytest.raises(SystemExit) as ei:
+        CR._cmd_serve(
+            SimpleNamespace(
+                home=str(tmp_path / "home"),
+                host="127.0.0.1",
+                port=7400,
+                skip_setup=True,
+                force_setup=False,
+                config_file=None,
+                computer_host=False,
+                no_computer_host=False,
+            )
+        )
+    assert ei.value.code == 0
+    env = called["env"]
+    assert isinstance(env, dict)
+    assert env.get("REMEDY_PYTHON") == str(Path(sys.executable).resolve())
+
+
+def test_cmd_serve_preserves_existing_remedy_python(monkeypatch, tmp_path) -> None:
+    import remedy.interfaces.cli.cmd_runtime as CR
+
+    called: dict[str, object] = {}
+    custom = tmp_path / "custom-python"
+    custom.write_text("", encoding="utf-8")
+
+    def fake_call(cmd, *args, **kwargs):
+        called["env"] = dict(kwargs.get("env") or {})
+        return 0
+
+    monkeypatch.setenv("REMEDY_PYTHON", str(custom))
+    monkeypatch.setenv(
+        "REMEDY_NATIVE_RUNTIME_BIN", str(tmp_path / "remedy-runtime")
+    )
+    monkeypatch.setattr(CR.subprocess, "call", fake_call)
+
+    with pytest.raises(SystemExit) as ei:
+        CR._cmd_serve(
+            SimpleNamespace(
+                home=str(tmp_path / "home"),
+                host="127.0.0.1",
+                port=7400,
+                skip_setup=True,
+                force_setup=False,
+                config_file=None,
+                computer_host=False,
+                no_computer_host=False,
+            )
+        )
+    assert ei.value.code == 0
+    env = called["env"]
+    assert isinstance(env, dict)
+    assert env.get("REMEDY_PYTHON") == str(custom)
 
 
 def test_cmd_serve_passes_listen_for_custom_port(monkeypatch, tmp_path) -> None:
