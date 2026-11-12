@@ -4,6 +4,18 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.66.3] - 2026-11-12
+
+### Fixed
+
+- First-run `remedy serve` no longer exits with "environment denied" when
+  the parent environment has `BROWSER` or another loader-hook variable.
+  Those keys are omitted from inherited spawn overrides. The deny list and
+  `require_process_host` are unchanged.
+- `remedy serve` after `pip install` now points the tool worker at the same
+  Python interpreter as the `remedy` command, so it works when the install
+  venv is not on `PATH`.
+
 ## [0.66.2] - 2026-11-12
 
 ### Fixed
