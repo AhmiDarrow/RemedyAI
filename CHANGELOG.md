@@ -4,6 +4,22 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.66.2] - 2026-11-12
+
+### Fixed
+
+- The Usage page no longer errors on the first visit when summary and series
+  open the database at the same time. Busy timeout and WAL are set on
+  connect, and first-open is serialized per file.
+- A healthy Discord connection is no longer dropped because the heartbeat
+  ACK window started before the pulse was sent. The timer now starts after
+  each send, which matters on Windows' coarser timers.
+- Cancelling a waiting named-pipe accept no longer hangs the runtime until
+  a long default timeout. The listener is closed so Accept unblocks.
+- Cancelling a running shell command could leak the child and make the next
+  spawn fail with an invalid process handle. The native spawn FFI now keeps
+  its result pointers alive and uses a packed calling convention.
+
 ## [0.66.1] - 2026-11-12
 
 ### Fixed

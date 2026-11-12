@@ -2,13 +2,14 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.66.1**. Installed apps update on their own.
+Current release: **v0.66.2**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [0.66.2 — More reliable Usage, Discord, and shell cancel](#0662---more-reliable-usage-discord-and-shell-cancel)
 - [0.66.1 — A first-run download URL fix](#0661---a-first-run-download-url-fix)
 - [0.66.0 — A first-run runtime download](#0660---a-first-run-runtime-download)
 - [0.65.0 — A check finishes the work](#0650---a-check-finishes-the-work)
@@ -16,6 +17,15 @@ you gave her, and waits for you before money, send, or delete.
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
+
+## 0.66.2 - More reliable Usage, Discord, and shell cancel
+
+- **Usage opens cleanly the first time.** Summary and series no longer race
+  on creating the local usage database.
+- **Discord stays up.** A healthy gateway is not marked dead because the
+  heartbeat ACK timer started too early, especially on Windows.
+- **Shell cancel is safe.** Stopping a running command no longer leaks the
+  child or breaks the next spawn.
 
 ## 0.66.1 - A first-run download URL fix
 
