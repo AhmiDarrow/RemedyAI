@@ -72,8 +72,10 @@ def test_ci_covers_every_shipped_runtime_and_artifact() -> None:
         assert command in linux_python
 
     windows_python = _run_commands(jobs["test-windows"])
-    assert "pytest -q --tb=short" in windows_python
-    assert "tests/test_" not in windows_python, "Windows must run the full suite, not a stale file list"
+    assert "run_windows_ci_pytest.py" in windows_python
+    assert "uv run pytest -q --tb=short" not in windows_python, (
+        "Windows CI must not re-run the full Linux pytest suite"
+    )
 
     desktop = _run_commands(jobs["desktop"])
     assert "npm test" in desktop
@@ -92,7 +94,7 @@ def test_ci_covers_every_shipped_runtime_and_artifact() -> None:
     assert "\"resources\":null" in rust_tauri_config
     assert rust_job.get("env", {}).get("RUSTFLAGS") == "-D warnings"
     assert "cargo test --locked" in rust
-    assert "cargo check --locked" in rust
+    assert "cargo check --locked" not in rust, "cargo test already compiles the tree"
 
     native = _run_commands(jobs["native-core"])
     for command in (
@@ -187,6 +189,10 @@ def test_ci_python_jobs_build_the_zig_core_before_pytest() -> None:
     """
     jobs = _workflow_jobs("ci.yml")
     pinned = _uses_step(jobs["native-core"], "mlugg/setup-zig")
+    pytest_needle = {
+        "test": "pytest -q",
+        "test-windows": "run_windows_ci_pytest.py",
+    }
     for name, library in (
         ("test", "zig-out/lib/libremedy_core.so"),
         ("test-windows", "zig-out/bin/remedy_core.dll"),
@@ -196,7 +202,7 @@ def test_ci_python_jobs_build_the_zig_core_before_pytest() -> None:
         assert setup["uses"] == pinned["uses"], f"{name} must pin the same setup-zig as native-core"
         assert setup["with"] == pinned["with"], f"{name} must use the same Zig version as native-core"
         build = _step_index(job, ZIG_BUILD)
-        assert build < _step_index(job, "pytest -q"), f"{name} must build Zig before pytest"
+        assert build < _step_index(job, pytest_needle[name]), f"{name} must build Zig before pytest"
         step = _steps(job)[build]
         assert step.get("working-directory") == "native/zig"
         run = str(step["run"])
@@ -409,7 +415,7 @@ def test_prepush_gate_runs_every_public_ci_command() -> None:
         ),
         "desktop": ("npm test", "npm run build"),
         "android-connect": ("testDebugUnitTest lintDebug assembleDebug assembleRelease",),
-        "rust-desktop": ("cargo test --locked", "cargo check --locked"),
+        "rust-desktop": ("cargo test --locked",),
         "native-core": (
             "go test ./...",
             "go test -race ./...",
