@@ -600,8 +600,10 @@ func (c *DiscordChannel) heartbeatLoop(ctx context.Context, hb *discordHeartbeat
 		return
 	case <-time.After(first):
 	}
-	t := time.NewTicker(interval)
-	defer t.Stop()
+	// The ACK window must be a full interval after each send. A ticker
+	// started before the first write shrinks that window by however long
+	// the write takes, and on Windows a short timer can already be due
+	// when we block on t.C, marking a healthy link dead.
 	for {
 		hb.mu.Lock()
 		acked := hb.acked
@@ -617,10 +619,12 @@ func (c *DiscordChannel) heartbeatLoop(ctx context.Context, hb *discordHeartbeat
 			lock.Heartbeat()
 		}
 		c.sendHeartbeat(hb.ws, hb)
+		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-t.C:
+		case <-timer.C:
 		}
 	}
 }

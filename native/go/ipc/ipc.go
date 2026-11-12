@@ -26,6 +26,35 @@ const (
 	writeQueueDepth = 64
 )
 
+// AcceptContext waits for the next connection or until ctx is done. On
+// cancel it closes the listener so a blocked Accept cannot hang the process
+// until the default go-test timeout.
+func AcceptContext(ctx context.Context, listener net.Listener) (net.Conn, error) {
+	type outcome struct {
+		conn net.Conn
+		err  error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		conn, err := listener.Accept()
+		done <- outcome{conn, err}
+	}()
+	select {
+	case out := <-done:
+		return out.conn, out.err
+	case <-ctx.Done():
+		_ = listener.Close()
+		out := <-done
+		if out.conn != nil {
+			_ = out.conn.Close()
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return out.conn, out.err
+	}
+}
+
 type Handler interface {
 	Handle(context.Context, protocol.Frame) ([]protocol.Frame, error)
 }

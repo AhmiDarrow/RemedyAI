@@ -153,9 +153,15 @@ func TestUsageConcurrentFirstOpen(t *testing.T) {
 		}(i%2 == 0)
 	}
 	close(start)
+	deadline := time.After(15 * time.Second)
 	for i := 0; i < 16; i++ {
-		if err := <-results; err != nil {
-			t.Error(err)
+		select {
+		case err := <-results:
+			if err != nil {
+				t.Error(err)
+			}
+		case <-deadline:
+			t.Fatalf("concurrent first open hung after %d of 16 results", i)
 		}
 	}
 }
