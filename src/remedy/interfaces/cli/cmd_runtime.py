@@ -95,6 +95,15 @@ def resolve_remedy_runtime_command() -> list[str] | None:
             if candidate.is_file():
                 return [str(candidate)]
 
+    try:
+        from remedy.runtime.native_bootstrap import cached_runtime_bin
+
+        cached = cached_runtime_bin()
+        if cached is not None:
+            return [str(cached)]
+    except Exception:
+        pass
+
     if root is not None:
         go = shutil.which("go")
         if go:
@@ -150,7 +159,38 @@ def _cmd_serve(args) -> None:
         )
         raise SystemExit(2)
 
+    os.environ["REMEDY_HOME"] = str(home)
+    # Partner defaults still apply for any Python worker the runtime may spawn.
+    os.environ.setdefault("REMEDY_FULL_CONTEXT", "1")
+    os.environ.setdefault("REMEDY_REACT_AUTO_CONTINUE", "1")
+    child_env = os.environ.copy()
+
     runtime_cmd = resolve_remedy_runtime_command()
+    core_lib = None
+    if not runtime_cmd:
+        try:
+            from remedy.runtime.native_bootstrap import (
+                NativeBootstrapError,
+                ensure_native_runtime,
+            )
+
+            installed = ensure_native_runtime(home)
+            runtime_cmd = [str(installed.runtime_bin)]
+            core_lib = installed.core_lib
+            console.print(
+                f"[green]Downloaded remedy-runtime v{installed.version} "
+                f"for {installed.triple} (checksum verified).[/green]"
+            )
+        except NativeBootstrapError as exc:
+            console.print(
+                "[red]remedy serve:[/red] Go ``remedy-runtime`` owns the local API "
+                "(:7400). Binary not found and could not be downloaded.\n"
+                f"  {exc}\n"
+                "  Build ``native/go/cmd/remedy-runtime`` into ``desktop/bin``, put "
+                "it on PATH, or set REMEDY_NATIVE_RUNTIME_BIN.\n"
+                "  Python no longer starts uvicorn on :7400 (no dual-serve)."
+            )
+            raise SystemExit(2) from exc
     if not runtime_cmd:
         console.print(
             "[red]remedy serve:[/red] Go ``remedy-runtime`` owns the local API "
@@ -160,11 +200,20 @@ def _cmd_serve(args) -> None:
             "  Python no longer starts uvicorn on :7400 (no dual-serve)."
         )
         raise SystemExit(2)
+    if core_lib is None:
+        try:
+            from remedy.runtime.native_bootstrap import cached_core_lib
 
-    os.environ["REMEDY_HOME"] = str(home)
+            cached_core = cached_core_lib(home)
+            if cached_core is not None:
+                core_lib = cached_core
+        except Exception:
+            pass
+    if core_lib is not None and not child_env.get("REMEDY_NATIVE_CORE_LIB"):
+        # Only the child remedy-runtime needs this. Mutating the parent
+        # process would leak a bootstrap path into later in-process probes.
+        child_env["REMEDY_NATIVE_CORE_LIB"] = str(core_lib)
     # Partner defaults still apply for any Python worker the runtime may spawn.
-    os.environ.setdefault("REMEDY_FULL_CONTEXT", "1")
-    os.environ.setdefault("REMEDY_REACT_AUTO_CONTINUE", "1")
 
     argv = build_runtime_serve_argv(runtime_cmd, host=host, port=port)
     listen = f"{host}:{port}"
@@ -180,7 +229,7 @@ def _cmd_serve(args) -> None:
             cwd = str(root / "native" / "go")
 
     try:
-        raise SystemExit(subprocess.call(argv, cwd=cwd))
+        raise SystemExit(subprocess.call(argv, cwd=cwd, env=child_env))
     except OSError as exc:
         console.print(f"[red]remedy-runtime launch failed:[/red] {exc}")
         raise SystemExit(1) from exc
@@ -192,8 +241,9 @@ def _cmd_chat(args) -> None:
     console.print(
         "[bold red]remedy chat retired the Python ReAct loop.[/bold red]\n"
         "Production turns use Go CognitionTurnRunner on :7400.\n"
-        "  Use [green]remedy serve[/green] + Desktop / WebUI, or POST "
-        "/api/sessions/{id}/messages/stream against remedy-runtime."
+        "  Run [green]remedy serve[/green] (first run downloads a checksum-verified "
+        "runtime from GitHub Releases if needed) and open the Desktop or WebUI, "
+        "or POST /api/sessions/{id}/messages/stream against remedy-runtime."
     )
     raise SystemExit(2)
 

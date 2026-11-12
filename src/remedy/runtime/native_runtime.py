@@ -92,12 +92,42 @@ def configured_mode(config: Mapping[str, Any] | None = None) -> NativeRuntimeMod
         return NativeRuntimeMode.COMPATIBILITY
 
 
+# A real Go/Zig artifact is at least a few KiB. The serve-bootstrap tests
+# (and a truncated download) may leave a stub next to a temp HOME; never
+# dlopen those — CDLL would raise "file too short" and poison later probes.
+_MIN_NATIVE_BINARY_BYTES = 4096
+_ELF_MAGIC = b"\x7fELF"
+_PE_MAGIC = b"MZ"
+
+
+def _looks_like_native_binary(path: Path) -> bool:
+    """True when *path* is an ELF or PE file large enough to be a real binary."""
+    try:
+        if not path.is_file() or path.stat().st_size < _MIN_NATIVE_BINARY_BYTES:
+            return False
+        with path.open("rb") as handle:
+            magic = handle.read(4)
+    except OSError:
+        return False
+    return magic.startswith(_ELF_MAGIC) or magic.startswith(_PE_MAGIC)
+
+
 def _candidate_roots() -> list[Path]:
     roots = [Path(sys.executable).resolve().parent]
     bundle = getattr(sys, "_MEIPASS", None)
     if bundle:
         roots.append(Path(bundle))
     roots.append(Path(__file__).resolve().parents[3] / "desktop" / "bin")
+    # First-run cache written by native_bootstrap (PyPI CLI).
+    try:
+        from remedy.runtime.native_bootstrap import cached_core_lib, cached_runtime_bin
+
+        for getter in (cached_runtime_bin, cached_core_lib):
+            hit = getter()
+            if hit is not None:
+                roots.append(hit.parent)
+    except Exception:
+        pass
     return list(dict.fromkeys(roots))
 
 
@@ -105,11 +135,15 @@ def _resolve_component(env_name: str, names: tuple[str, ...]) -> Path | None:
     explicit = os.environ.get(env_name)
     if explicit:
         candidate = Path(explicit).expanduser()
-        return candidate if candidate.is_file() else None
+        if candidate.is_file() and _looks_like_native_binary(candidate):
+            return candidate
+        if not candidate.is_file():
+            return None
+        # Truncated or non-binary explicit path: keep searching.
     for root in _candidate_roots():
         for name in names:
             candidate = root / name
-            if candidate.is_file():
+            if candidate.is_file() and _looks_like_native_binary(candidate):
                 return candidate
     return None
 
@@ -174,7 +208,7 @@ def _first_library_in(roots: list[Path], names: tuple[str, ...]) -> Path | None:
     for root in roots:
         for name in names:
             candidate = root / name
-            if candidate.is_file():
+            if candidate.is_file() and _looks_like_native_binary(candidate):
                 return candidate
     return None
 
@@ -190,7 +224,11 @@ def _core_library_path() -> Path | None:
     explicit = os.environ.get("REMEDY_NATIVE_CORE_LIB")
     if explicit:
         candidate = Path(explicit).expanduser()
-        return candidate if candidate.is_file() else None
+        if candidate.is_file() and _looks_like_native_binary(candidate):
+            return candidate
+        if not candidate.is_file():
+            return None
+        # Truncated stubs must not win over a real packaged or zig-out library.
     names = _core_library_names()
     packaged = _first_library_in(_candidate_roots(), names)
     dev = _first_library_in([_dev_checkout_root()], names)
@@ -226,6 +264,10 @@ def _open_core_library(library_path: Path) -> Any:
         cached = _library_cache
         if cached is not None and cached[0] == library_path:
             return cached[1]
+        if not _looks_like_native_binary(library_path):
+            raise NativeRuntimeUnavailableError(
+                f"remedy_core at {library_path} is missing or is not a native library"
+            )
         try:
             library = ctypes.CDLL(str(library_path))
             library.remedy_core_abi_version.argtypes = []
