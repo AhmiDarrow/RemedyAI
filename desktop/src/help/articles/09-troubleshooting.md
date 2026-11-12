@@ -282,6 +282,43 @@ Trojan. Known historical / ML labels and status:
 - Close all Remedy processes first.  
 - Check disk space and antivirus quarantine.
 
+## `remedy serve` says the runtime binary was not found
+
+On a PyPI install, first serve downloads `remedy-runtime` and `remedy_core`
+from GitHub Releases and checksum-verifies them. If that fails:
+
+- Confirm this version's release attached `remedy-native-SHA256SUMS.txt` and
+  a pair of binaries for your OS (see the assets list on the GitHub Release).
+  Releases published before that file existed cannot bootstrap; use the
+  Desktop installer, or wait for the next release, or build from a checkout:
+  `go build` in `native/go` and `zig build -Doptimize=ReleaseSafe` in
+  `native/zig`, then put `desktop/bin` on PATH or set `REMEDY_NATIVE_RUNTIME_BIN`.
+- `REMEDY_NATIVE_BOOTSTRAP_DISABLE=1` skips the download on purpose.
+- Unsupported OS/arch (for example macOS) has no prebuilt yet; the error
+  text includes the build commands.
+
+The packaged Desktop app does not use this path — it already ships the
+binaries next to `Remedy Desktop.exe`.
+
+## Updating from 0.41.5 (last mostly-Python desktop)
+
+A 0.41.5 Desktop still checks
+`https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json`.
+That file keeps the same `windows-x86_64` / `linux-x86_64` platform keys and
+`Remedy.Desktop_*` asset names (dots, not spaces) that 0.62.1+ already
+normalized. In-app install still requires a **non-empty minisign signature**
+in `latest.json`; GitHub API asset URLs are never used as the installer.
+
+What a 0.41.5 client cannot fix by itself:
+
+- It will only move to a release marked **Latest**, not to a pre-release.
+  Keep experimental lines as pre-releases so they do not become Latest.
+- The next **Latest** build must stay baseline-x86_64 (the 0.62.2 SHA-NI
+  crash hung Desktop on older Intel CPUs while connecting). Current trees
+  already default Zig to `cpu_model = .baseline`.
+- After that jump, open the new app once and confirm `:7400` binds before
+  deleting the 0.41.5 install folder.
+
 ## Still stuck
 
 1. Note app version (Settings → About / F1 → What’s new).  

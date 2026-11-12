@@ -247,6 +247,8 @@ def _tool_runtime_request(
         console.print(
             "[bold red]remedy tool needs Go remedy-runtime.[/bold red]\n"
             "  Start [green]remedy serve[/green] (or Desktop), then retry.\n"
+            "  First serve downloads a checksum-verified runtime from GitHub "
+            "Releases when it is not already on PATH.\n"
             f"  [dim]({_tool_runtime_base()} unreachable: {exc})[/dim]\n"
             "  Tool ABI ids look like [cyan]runtime.probe[/cyan], "
             "[cyan]workspace.read[/cyan], [cyan]shell.exec[/cyan] — "

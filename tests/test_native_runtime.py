@@ -3,12 +3,21 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
 from remedy.runtime import native_runtime
+
+
+def _stub_native_binary(path: Path, payload: bytes = b"stub") -> Path:
+    """Write a large enough ELF/PE so the loader will consider the file real."""
+    magic = b"MZ" if sys.platform == "win32" else b"\x7fELF"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(magic + b"\x00" * 4096 + payload)
+    return path
 
 
 @pytest.fixture(autouse=True)
@@ -114,7 +123,7 @@ def test_go_probe_timeout_is_safe_and_path_free(
     monkeypatch: pytest.MonkeyPatch, tmp_path,
 ):
     executable = tmp_path / "remedy-runtime.exe"
-    executable.touch()
+    _stub_native_binary(executable)
     monkeypatch.setenv("REMEDY_NATIVE_RUNTIME_BIN", str(executable))
     # Go probe uses raw subprocess (Zig-independent); patch that path.
     monkeypatch.setattr(
@@ -207,7 +216,7 @@ def test_core_library_fails_clearly_when_the_library_is_absent(
 
 def test_core_library_rejects_a_library_at_the_wrong_abi(monkeypatch: pytest.MonkeyPatch, tmp_path):
     fake = tmp_path / "remedy_core.dll"
-    fake.write_bytes(b"")
+    _stub_native_binary(fake)
     monkeypatch.setenv("REMEDY_NATIVE_CORE_LIB", str(fake))
 
     class _OldLibrary:
@@ -249,9 +258,9 @@ def test_core_library_prefers_newer_zig_out_over_staged_desktop_bin(
     zig_root.mkdir(parents=True)
     staged = staged_root / name
     fresh = zig_root / name
-    staged.write_bytes(b"old")
+    _stub_native_binary(staged, b"old")
     time.sleep(0.02)
-    fresh.write_bytes(b"new")
+    _stub_native_binary(fresh, b"new")
     # Make mtime ordering unambiguous on coarse filesystems.
     older = time.time() - 60
     newer = time.time()
@@ -279,8 +288,8 @@ def test_core_library_keeps_staged_when_zig_out_is_older(
     zig_root.mkdir(parents=True)
     staged = staged_root / name
     stale = zig_root / name
-    staged.write_bytes(b"staged")
-    stale.write_bytes(b"stale")
+    _stub_native_binary(staged, b"staged")
+    _stub_native_binary(stale, b"stale")
     newer = time.time()
     older = newer - 60
     os.utime(staged, (newer, newer))
@@ -292,6 +301,26 @@ def test_core_library_keeps_staged_when_zig_out_is_older(
     monkeypatch.setattr(native_runtime, "_library_cache", None)
 
     assert native_runtime._core_library_path() == staged
+
+
+
+def test_core_library_skips_a_truncated_explicit_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path,
+):
+    """A leaked or half-downloaded REMEDY_NATIVE_CORE_LIB must not win."""
+    name = native_runtime._core_library_names()[0]
+    stub = tmp_path / "cache" / name
+    stub.parent.mkdir()
+    stub.write_bytes(b"core")
+    real_root = tmp_path / "desktop" / "bin"
+    real = _stub_native_binary(real_root / name, b"real")
+
+    monkeypatch.setenv("REMEDY_NATIVE_CORE_LIB", str(stub))
+    monkeypatch.setattr(native_runtime, "_candidate_roots", lambda: [real_root])
+    monkeypatch.setattr(native_runtime, "_dev_checkout_root", lambda: tmp_path / "missing-zig")
+    monkeypatch.setattr(native_runtime, "_library_cache", None)
+
+    assert native_runtime._core_library_path() == real
 
 
 def test_core_library_loads_the_built_core_when_present(

@@ -13,6 +13,13 @@ pip install remedy-ai
 # NOTE: do NOT `pip install remedy` — that is an unrelated package on PyPI.
 ```
 
+`remedy serve` needs Go `remedy-runtime` plus Zig `remedy_core`. On a PyPI
+install, the first serve downloads the pair for this OS from the matching
+GitHub Release (or Latest if that tag has no native assets yet), verifies
+`remedy-native-SHA256SUMS.txt`, and caches them in `~/.remedy/runtime/`.
+Set `REMEDY_NATIVE_BOOTSTRAP_DISABLE=1` to skip the download and require a
+local binary. The packaged Desktop installer already includes both binaries.
+
 ### From source
 
 ```bash
@@ -521,8 +528,11 @@ remedy serve --port 7410                        # Custom loopback port
 remedy serve --config ./custom.toml             # Custom config file
 ```
 
-Requires a built `remedy-runtime` on PATH / `desktop/bin`, or
-`REMEDY_NATIVE_RUNTIME_BIN`. After starting, access:
+Looks for `remedy-runtime` on `REMEDY_NATIVE_RUNTIME_BIN` / `REMEDY_RUNTIME`,
+PATH, `desktop/bin`, then a verified cache under `~/.remedy/runtime/`. If
+none is present, first serve downloads the prebuilt for this OS from GitHub
+Releases and checksum-verifies it. If no asset exists, it prints build
+instructions (`go build` / `zig build` into `desktop/bin`). After starting, access:
 - **Web UI / Dashboard**: http://127.0.0.1:7400/
 - **API**: http://127.0.0.1:7400/api/ping  (and the rest of the local API)
 
