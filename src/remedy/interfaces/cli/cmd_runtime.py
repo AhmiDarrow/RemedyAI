@@ -135,6 +135,18 @@ def _is_loopback_host(host: str) -> bool:
     return h in {"127.0.0.1", "localhost", "::1"}
 
 
+def serve_worker_python(executable: str | None = None) -> str:
+    """Absolute path of the interpreter ``remedy serve`` should hand the worker.
+
+    Must not follow a venv ``python`` symlink to the base interpreter — that
+    path has no ``remedy`` package. ``Path.resolve()`` / ``realpath`` would.
+    """
+    exe = executable if executable is not None else sys.executable
+    if not exe:
+        return ""
+    return os.path.abspath(exe)
+
+
 def _cmd_serve(args) -> None:
     """Hand production :7400 to ``remedy-runtime``. No Python uvicorn dual-serve."""
     _ensure_stdio()
@@ -167,8 +179,12 @@ def _cmd_serve(args) -> None:
     # The worker is spawned by remedy-runtime from PATH python unless we
     # point it at this interpreter. Without this, `venv/bin/remedy serve`
     # fails when the venv is not on PATH (system python3 has no remedy).
-    if not str(child_env.get("REMEDY_PYTHON", "")).strip() and sys.executable:
-        child_env["REMEDY_PYTHON"] = str(Path(sys.executable).resolve())
+    # Use abspath, not Path.resolve(): a venv's python is often a symlink
+    # to the system interpreter, and resolving it drops the venv.
+    if not str(child_env.get("REMEDY_PYTHON", "")).strip():
+        worker_py = serve_worker_python()
+        if worker_py:
+            child_env["REMEDY_PYTHON"] = worker_py
 
     runtime_cmd = resolve_remedy_runtime_command()
     core_lib = None
