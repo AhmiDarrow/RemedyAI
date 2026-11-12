@@ -198,6 +198,10 @@ def _cmd_serve(args) -> None:
                 ensure_native_runtime,
             )
 
+            console.print(
+                "[dim]Downloading a checksum-verified remedy-runtime "
+                "from GitHub Releases (cached after this)...[/dim]"
+            )
             installed = ensure_native_runtime(home)
             runtime_cmd = [str(installed.runtime_bin)]
             core_lib = installed.core_lib

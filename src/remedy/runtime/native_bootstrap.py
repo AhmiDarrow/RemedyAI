@@ -186,6 +186,23 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _stat_sig(path: Path) -> tuple[int, int] | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (int(st.st_mtime_ns), int(st.st_size))
+
+
+# Re-hashing both binaries on every cached_install call (serve looks up the
+# runtime, then the core) is wasted I/O. Remember a successful verify for
+# unchanged size+mtime; a rewrite invalidates the fingerprint.
+_verified_memo: dict[
+    tuple[str, str, str, tuple[int, int], tuple[int, int], tuple[int, int]],
+    NativeInstall,
+] = {}
+
+
 def parse_sha256sums(text: str) -> dict[str, str]:
     """Parse GNU ``sha256sum`` output; reject odd paths."""
     found: dict[str, str] = {}
@@ -226,18 +243,29 @@ def _verified_install(directory: Path, assets: NativeAssets, version: str) -> Na
     expected_core = marker.get("core_sha256")
     if not isinstance(expected_runtime, str) or not isinstance(expected_core, str):
         return None
+    sig_r = _stat_sig(runtime)
+    sig_c = _stat_sig(core)
+    sig_m = _stat_sig(_marker_path(directory))
+    if sig_r is None or sig_c is None or sig_m is None:
+        return None
+    key = (str(directory), version, assets.triple, sig_r, sig_c, sig_m)
+    remembered = _verified_memo.get(key)
+    if remembered is not None:
+        return remembered
     try:
         if _sha256_file(runtime) != expected_runtime or _sha256_file(core) != expected_core:
             return None
     except OSError:
         return None
-    return NativeInstall(
+    installed = NativeInstall(
         version=version,
         triple=assets.triple,
         runtime_bin=runtime,
         core_lib=core,
         source=str(marker.get("source") or "cache"),
     )
+    _verified_memo[key] = installed
+    return installed
 
 
 def cached_install(
