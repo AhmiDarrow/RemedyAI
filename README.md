@@ -51,7 +51,7 @@ uv run ruff check .
 uv run mypy
 uv run pytest -q
 cd desktop && npm test && npm run build
-cd ../desktop/src-tauri && cargo test --locked && cargo check --locked
+cd ../desktop/src-tauri && cargo test --locked
 cd ../../native/go && go test -race ./... && go vet ./...
 cd ../zig && zig build test -Doptimize=ReleaseSafe
 cd ../../android && ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
@@ -61,7 +61,7 @@ cd .. && uv run python scripts/check_docs.py && uv build
 Before a push, the same matrix runs locally as the pre-push gate: `uv run python scripts/prepush.py`
 (enable once per clone with `git config core.hooksPath .githooks`). Windows uses `gradlew.bat`;
 Go race detection also runs on Linux CI. CI exercises Python
-3.12/3.13, Windows-sensitive behavior, the React SPA, both Tauri targets,
+3.12/3.13, a Windows-sensitive pytest surface, the React SPA, both Tauri targets,
 RemedyConnect Android, the Go/Zig native runtime, and Python packaging.
 
 Version / help / docs / sanitize gates: `scripts/sync_version.py` · `scripts/sync_help_manual.py` · `scripts/check_docs.py` · `scripts/check_sanitize.py`.  
