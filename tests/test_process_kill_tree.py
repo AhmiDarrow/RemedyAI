@@ -230,7 +230,13 @@ def test_leaving_the_with_block_ends_a_running_tree():
         pid = child.pid
         assert _wait_until(lambda: len(_descendants(pid)) >= 1)
         tree = _descendants(pid)
-    assert _wait_until(lambda: not _alive(pid) and not any(_alive(p) for p in tree))
+    # close() drops the job handle (KILL_ON_JOB_CLOSE). Reaping the tree can
+    # take longer than the default 5s on a loaded Windows runner — this
+    # assertion flaked on master CI for 0.66.5, then passed on retry.
+    assert _wait_until(
+        lambda: not _alive(pid) and not any(_alive(p) for p in tree),
+        timeout=15.0,
+    )
 
 
 def test_spawn_hidden_host_abi_by_platform():
