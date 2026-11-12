@@ -64,26 +64,19 @@ def is_bind_all_host(host: str) -> bool:
 def evaluate_serve_bind(
     host: str,
     *,
-    has_auth: bool,
+    has_auth: bool = False,
     insecure_ok: bool | None = None,
 ) -> str:
     """Classify a ``remedy serve --host`` bind.
 
-    Returns ``ok`` (loopback, or operator opted in), ``warn`` (LAN bind with
-    auth), or ``refuse`` (LAN / wildcard bind with auth off and no flag).
+    Returns ``ok`` only for loopback. Non-loopback and wildcard binds are
+    ``refuse``. Go httpapi will not listen off-loopback, and the CLI fails
+    closed. ``has_auth`` and ``REMEDY_ALLOW_INSECURE_BIND`` do not loosen this.
     """
-    h = (host or "127.0.0.1").strip().lower()
-    if h in _LOOPBACK_HOSTS:
+    _ = has_auth, insecure_ok
+    if is_loopback_host(host or "127.0.0.1"):
         return "ok"
-    allow = insecure_bind_allowed() if insecure_ok is None else bool(insecure_ok)
-    exposed = h in _BIND_ALL_HOSTS or h not in _LOOPBACK_HOSTS
-    if not exposed:
-        return "ok"
-    if not has_auth and not allow:
-        return "refuse"
-    if not allow:
-        return "warn"
-    return "ok"
+    return "refuse"
 
 
 class UnsafeHomeError(ValueError):

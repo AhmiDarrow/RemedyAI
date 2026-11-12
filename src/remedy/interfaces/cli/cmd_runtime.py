@@ -17,6 +17,7 @@ from pathlib import Path
 from remedy.interfaces.cli.util import (
     UnsafeHomeError,
     console,
+    is_loopback_host,
     resolve_cli_home,
 )
 
@@ -81,7 +82,10 @@ def resolve_remedy_runtime_command() -> list[str] | None:
         if found:
             return [found]
 
-    roots: list[Path] = [Path(sys.executable).resolve().parent]
+    # abspath, not Path.resolve(): a venv python is often a symlink, and
+    # following it would look next to the system interpreter, missing a
+    # runtime placed in the venv bin.
+    roots: list[Path] = [Path(os.path.abspath(sys.executable)).parent]
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         roots.append(Path(meipass))
@@ -131,8 +135,7 @@ def build_runtime_serve_argv(
 
 
 def _is_loopback_host(host: str) -> bool:
-    h = (host or "").strip().lower()
-    return h in {"127.0.0.1", "localhost", "::1"}
+    return is_loopback_host(host)
 
 
 def serve_worker_python(executable: str | None = None) -> str:
@@ -240,7 +243,8 @@ def _cmd_serve(args) -> None:
     listen = f"{host}:{port}"
     console.print(
         f"[green]Starting remedy-runtime on http://{listen}[/green] "
-        "[dim](Go owns the local API; Python is worker-only)[/dim]"
+        f"[dim]Open http://{listen} in a browser, or the Desktop app. "
+        "Go owns the local API; Python is worker-only.[/dim]"
     )
 
     cwd = None
