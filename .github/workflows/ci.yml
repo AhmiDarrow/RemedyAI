@@ -124,8 +124,11 @@ jobs:
         shell: bash
         run: python3 scripts/check_remedy_core_isa.py || python scripts/check_remedy_core_isa.py
 
-      - name: Full Windows test suite
-        run: uv run pytest -q --tb=short
+      # Full pytest already runs on Linux 3.12 and 3.13. Windows CI covers
+      # path/shell/secret-store, spawn/jail/security, FFI/ABI, first-run
+      # bootstrap, and tests skipped on non-Windows. See tests/windows_ci_paths.txt.
+      - name: Windows-sensitive test surface
+        run: uv run python scripts/run_windows_ci_pytest.py
 
   desktop:
     runs-on: ubuntu-latest
@@ -212,11 +215,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # cargo test already compiles the tree; a second cargo check was redundant.
       - name: Rust tests
         run: cargo test --locked
-
-      - name: Rust compile check
-        run: cargo check --locked
 
   native-core:
     strategy:

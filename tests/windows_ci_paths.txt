@@ -1,0 +1,92 @@
+# Windows CI test surface.
+#
+# The full pytest suite already runs on Linux 3.12 and 3.13. test-windows used
+# to re-run every test (~11 minutes, the CI long pole). This list is the
+# Windows-sensitive plus required-keep surface: path/shell/secret-store,
+# spawn auth, path jail, FFI/ABI, first-run bootstrap, and every file that
+# has tests skipped on non-Windows (so they still run somewhere in public CI).
+#
+# Enforced by tests/test_windows_ci_paths.py. Add a file here when it is
+# Windows-only or covers those keep surfaces. Do not use this list to drop
+# security, spawn, jail, or bootstrap coverage.
+
+# --- Windows-only skip gates (must not vanish from CI) ---
+tests/test_authorized_spawn_gates.py
+tests/test_computer_use.py
+tests/test_desktop_uia_reads.py
+tests/test_host_binding_windows.py
+tests/test_host_op_prepare.py
+tests/test_jail_scope_contract.py
+tests/test_process_kill_tree.py
+tests/test_secret_acl_no_everyone.py
+tests/test_spawn_authorized.py
+tests/test_spawn_piped.py
+tests/test_telephony_registry.py
+
+# --- Security / capability ---
+tests/test_project_write_jail.py
+tests/test_shell_jail_false_positives.py
+tests/test_shell_jail_fuzz.py
+tests/test_fail_closed_guards.py
+tests/test_capability_gate_regressions.py
+tests/test_secret_store.py
+tests/test_secret_detection.py
+tests/test_secret_equals.py
+tests/test_vault.py
+tests/test_web_fetch_ssrf.py
+tests/test_web_robots.py
+tests/test_zip_import_security.py
+tests/test_scrub_env_git_tokens.py
+tests/test_macro_secret_scrub.py
+tests/test_host_signing_key.py
+tests/test_self_improve_pr.py
+tests/test_access_scope.py
+tests/test_policy_engine.py
+tests/test_web_search_host.py
+
+# --- FFI / ABI / native host ---
+tests/test_native_bootstrap.py
+tests/test_native_runtime.py
+tests/test_host_session_zig.py
+tests/test_computer_native.py
+tests/test_hidden_process.py
+tests/test_process_timeouts.py
+tests/test_check_remedy_core_isa.py
+tests/test_conpty_session.py
+tests/test_host_bridge.py
+
+# --- First-run bootstrap, install, serve ---
+tests/test_clean_home_smoke.py
+tests/test_first_run_assets.py
+tests/test_firstrun_guard.py
+tests/test_packaging_policy.py
+tests/test_python_interpreter_resolve.py
+tests/test_serve_runtime_owned.py
+tests/test_rmdy_worker_serve.py
+tests/test_rmdy_worker_deps.py
+tests/test_rmdy_workspace_root.py
+tests/test_cli_home_publishes_env.py
+tests/test_home_env_is_honoured.py
+tests/test_instance_lock.py
+tests/test_uninstall_wipe_paths.py
+
+# --- Windows path / shell / UI ---
+tests/test_win_paths.py
+tests/test_disconnect_winerror64.py
+tests/test_noconsole_logging.py
+tests/test_translate_posix.py
+tests/test_cli_computer_host.py
+tests/test_cli_harden.py
+tests/test_open_folder.py
+tests/test_rg_binary.py
+tests/test_relpath.py
+tests/test_workspace.py
+tests/test_atomic_json.py
+tests/test_companion_clipboard.py
+tests/harness/test_fake_win32_selfcheck.py
+
+# --- CI contract (protects this list) ---
+tests/test_ci_matrix.py
+tests/test_windows_ci_paths.py
+tests/test_docs_sync.py
+tests/test_check_sanitize.py

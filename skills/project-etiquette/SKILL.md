@@ -143,8 +143,8 @@ Use when `cwd` is the RemedyAI tree (or user says “this project”).
 | Gate | Remedy command / note |
 |------|------------------------|
 | Blast radius | Root `AGENTS.md` Change-safety protocol; skill **change-safety** |
-| Test (Python) | Full Windows + Linux `uv run pytest -q --tb=short`; never a hand-picked stale file list |
-| Test (desktop) | `cd desktop && npm test && npm run build`; `cd src-tauri && cargo test --locked && cargo check --locked` |
+| Test (Python) | Full Linux `uv run pytest -q --tb=short` on 3.12 and 3.13; Windows public CI uses `scripts/run_windows_ci_pytest.py` (see `tests/windows_ci_paths.txt`), guarded by `tests/test_windows_ci_paths.py` |
+| Test (desktop) | `cd desktop && npm test && npm run build`; `cd src-tauri && cargo test --locked` |
 | Test (native/mobile) | Go test + race + vet + boundaries + benchmark budgets; Zig debug + ReleaseSafe tests/build; Android unit + lint + debug/release APK |
 | **Local CI (before every push)** | Run the complete current matrix in root `AGENTS.md`, including docs/import/static checks and `uv build`. A first or follow-up push is forbidden while any local gate is red. After red remote CI, re-run the failed step locally before pushing again. |
 | Docs | Manuals in `docs/manual/`; `uv run python scripts/sync_help_manual.py`; gate `uv run python scripts/check_docs.py` |
