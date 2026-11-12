@@ -762,12 +762,45 @@ func lookPathAbs(name string) string {
 	return ""
 }
 
+// loaderDeniedEnvExact and loaderDeniedEnvPrefixes must stay identical to
+// env_denied_exact / env_denied_prefixes in native/zig/src/policy.zig.
+// inheritEnv strips these so a parent environment (BROWSER, LD_PRELOAD, …)
+// is not presented as a supplied spawn override, which Zig rejects as
+// StatusEnvDenied. The deny list and require_process_host are unchanged.
+var loaderDeniedEnvExact = []string{
+	"LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "GIT_SSH_COMMAND", "GIT_EXEC_PATH",
+	"BROWSER", "PYTHONSTARTUP", "PERL5OPT", "NODE_OPTIONS", "RUBYOPT",
+	"BASH_ENV", "ENV", "PROMPT_COMMAND",
+}
+
+var loaderDeniedEnvPrefixes = []string{"DYLD_"}
+
+func envKeyLoaderDenied(key string) bool {
+	for _, name := range loaderDeniedEnvExact {
+		if strings.EqualFold(key, name) {
+			return true
+		}
+	}
+	for _, prefix := range loaderDeniedEnvPrefixes {
+		if len(key) >= len(prefix) && strings.EqualFold(key[:len(prefix)], prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func inheritEnv() map[string]string {
 	env := map[string]string{}
 	for _, e := range os.Environ() {
-		if i := strings.IndexByte(e, '='); i > 0 {
-			env[e[:i]] = e[i+1:]
+		i := strings.IndexByte(e, '=')
+		if i <= 0 {
+			continue
 		}
+		key := e[:i]
+		if envKeyLoaderDenied(key) {
+			continue
+		}
+		env[key] = e[i+1:]
 	}
 	return env
 }

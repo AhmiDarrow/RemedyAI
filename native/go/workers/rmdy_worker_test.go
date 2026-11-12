@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -624,4 +625,82 @@ func TestAttachSucceedsWithStagedWorkerDependencies(t *testing.T) {
 		t.Fatalf("packaged worker attach failed: %v", err)
 	}
 	defer session.Close()
+}
+
+func TestInheritEnvStripsLoaderDeniedKeys(t *testing.T) {
+	t.Setenv("BROWSER", "/usr/bin/unwanted-browser")
+	t.Setenv("LD_PRELOAD", "/tmp/evil.so")
+	t.Setenv("ld_library_path", "/tmp/evil-lib")
+	t.Setenv("NODE_OPTIONS", "--require /tmp/evil.js")
+	t.Setenv("DYLD_INSERT_LIBRARIES", "/tmp/evil.dylib")
+	t.Setenv("REMEDY_HOME", "/tmp/remedy-home")
+	t.Setenv("PATH", "/usr/bin")
+
+	env := inheritEnv()
+	for _, key := range []string{
+		"BROWSER", "LD_PRELOAD", "ld_library_path", "NODE_OPTIONS", "DYLD_INSERT_LIBRARIES",
+	} {
+		if _, ok := env[key]; ok {
+			t.Fatalf("inheritEnv leaked denied key %q", key)
+		}
+	}
+	if env["REMEDY_HOME"] != "/tmp/remedy-home" {
+		t.Fatalf("inheritEnv dropped REMEDY_HOME: %q", env["REMEDY_HOME"])
+	}
+	if env["PATH"] != "/usr/bin" {
+		t.Fatalf("inheritEnv dropped PATH: %q", env["PATH"])
+	}
+}
+
+func TestLoaderDeniedEnvKeysMatchZigPolicy(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	zigPath := filepath.Join(root, "native", "zig", "src", "policy.zig")
+	raw, err := os.ReadFile(zigPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", zigPath, err)
+	}
+	exact := parseZigStringArray(t, string(raw), "env_denied_exact")
+	prefixes := parseZigStringArray(t, string(raw), "env_denied_prefixes")
+	if !stringSlicesEqualFold(exact, loaderDeniedEnvExact) {
+		t.Fatalf("loaderDeniedEnvExact drifted from policy.zig\n zig: %q\n go:  %q", exact, loaderDeniedEnvExact)
+	}
+	if !stringSlicesEqualFold(prefixes, loaderDeniedEnvPrefixes) {
+		t.Fatalf("loaderDeniedEnvPrefixes drifted from policy.zig\n zig: %q\n go:  %q", prefixes, loaderDeniedEnvPrefixes)
+	}
+}
+
+func parseZigStringArray(t *testing.T, src, name string) []string {
+	t.Helper()
+	marker := "pub const " + name
+	start := strings.Index(src, marker)
+	if start < 0 {
+		t.Fatalf("policy.zig missing %s", name)
+	}
+	open := strings.Index(src[start:], "{")
+	close := strings.Index(src[start:], "};")
+	if open < 0 || close < 0 || close < open {
+		t.Fatalf("policy.zig: could not find %s block", name)
+	}
+	block := src[start+open : start+close]
+	matches := regexp.MustCompile(`"([^"]+)"`).FindAllStringSubmatch(block, -1)
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		out = append(out, m[1])
+	}
+	if len(out) == 0 {
+		t.Fatalf("policy.zig %s was empty", name)
+	}
+	return out
+}
+
+func stringSlicesEqualFold(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !strings.EqualFold(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
 }
