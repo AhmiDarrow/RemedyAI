@@ -1,15 +1,15 @@
 {
-  "version": "v0.66.4",
-  "notes": "Remedy Desktop v0.66.4 \u2014 Windows installer and Linux AppImage",
-  "pub_date": "2026-11-12T21:33:00Z",
+  "version": "v0.66.5",
+  "notes": "Remedy Desktop v0.66.5 \u2014 Windows installer and Linux AppImage",
+  "pub_date": "2026-11-12T22:44:17Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.66.4/Remedy.Desktop_0.66.4_x64-setup.exe"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.66.5/Remedy.Desktop_0.66.5_x64-setup.exe"
     },
     "linux-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.66.4/Remedy.Desktop_0.66.4_amd64.AppImage"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.66.5/Remedy.Desktop_0.66.5_amd64.AppImage"
     }
   }
 }

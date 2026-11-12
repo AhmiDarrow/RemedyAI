@@ -2,13 +2,14 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.66.4**. Installed apps update on their own.
+Current release: **v0.66.5**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [0.66.5 — More reliable shell capture and terminal spawn](#0665---more-reliable-shell-capture-and-terminal-spawn)
 - [0.66.4 — The worker stays in the install venv](#0664---the-worker-stays-in-the-install-venv)
 - [0.66.3 — A more reliable first-run serve](#0663---a-more-reliable-first-run-serve)
 - [0.66.2 — More reliable Usage, Discord, and shell cancel](#0662---more-reliable-usage-discord-and-shell-cancel)
@@ -19,6 +20,14 @@ you gave her, and waits for you before money, send, or delete.
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
+
+## 0.66.5 - More reliable shell capture and terminal spawn
+
+- **Command capture keeps its results.** Authorized one-shot shell capture
+  no longer risks losing stdout, stderr, or the exit status on the Go
+  runtime path.
+- **Windows terminal spawn is safer.** ConPTY spawn uses the same packed
+  calling convention, and the argument buffers stay alive for the call.
 
 ## 0.66.4 - The worker stays in the install venv
 
