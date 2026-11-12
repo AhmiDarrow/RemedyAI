@@ -1063,21 +1063,19 @@ func runRDVDialLoop(ctx context.Context, home string, sid []byte, endpoints []RD
 			session.CloseWait()
 			break
 		}
+		// Always pause before another broker dial. After MaxBadHandshakes
+		// the session ends and a tight loop would open hundreds of MQTT
+		// connections per second on a public broker.
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
 		if !connected {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(backoff):
-			}
 			backoff = backoff + backoff/2
 			if backoff > 15*time.Second {
 				backoff = 15 * time.Second
 			}
-		}
-		select {
-		case <-ctx.Done():
-			return
-		default:
 		}
 	}
 }

@@ -223,7 +223,9 @@ func TestRendezvousBudgetsBadHandshakesOnOneBrokerSession(t *testing.T) {
 	refused := make(chan struct{}, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		_ = connect.RunRDVSupervisor(ctx, connect.RDVSupervisorOpts{
 			Home:        home,
 			Enabled:     true,
@@ -251,7 +253,16 @@ func TestRendezvousBudgetsBadHandshakesOnOneBrokerSession(t *testing.T) {
 		t.Fatalf("%d refused handshakes cost %d broker connections; they should share one",
 			connect.MaxBadHandshakes, got)
 	}
+	time.Sleep(200 * time.Millisecond)
+	if got := broker.connections(); got > 2 {
+		t.Fatalf("after the budget, connections grew to %d; the supervisor must back off instead of redialing immediately", got)
+	}
 	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("supervisor did not stop after cancel")
+	}
 }
 
 func readFull(conn net.Conn, buf []byte) (int, error) {
