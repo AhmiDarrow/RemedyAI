@@ -309,19 +309,67 @@ def _download_file(url: str, dest: Path, *, expected_sha256: str, timeout: float
         raise
 
 
+def _is_release_version(value: str) -> bool:
+    body = value[1:] if value.startswith("v") else value
+    if not body or body in {"latest", "download", "tag"}:
+        return False
+    # Allow 0.66.0 or 0.66.0-hotfix — two dots plus optional hyphenated suffix.
+    return body.replace(".", "", 2).replace("-", "").isalnum()
+
+
+def _tag_from_github_url(url: str) -> str:
+    """Extract vX.Y.Z from a GitHub releases download or tag URL.
+
+    Returns "" when the URL has no version (``/latest/download``, a CDN
+    object URL, etc.).
+    """
+    path = unquote(urlparse(url).path)
+    parts = [part for part in path.split("/") if part]
+    for i, part in enumerate(parts):
+        if part == "download" and i + 1 < len(parts):
+            tag = parts[i + 1].strip()
+            if tag.startswith("v") and _is_release_version(tag):
+                return tag[1:]
+        if part == "tag" and i > 0 and parts[i - 1] == "releases" and i + 1 < len(parts):
+            tag = parts[i + 1].strip()
+            if tag.startswith("v") and _is_release_version(tag):
+                return tag[1:]
+    return ""
+
+
 def _tag_from_final_url(final_url: str, fallback: str) -> str:
-    path = unquote(urlparse(final_url).path)
-    parts = path.split("/")
-    try:
-        idx = parts.index("download")
-        tag = parts[idx + 1] if idx + 1 < len(parts) else ""
-    except ValueError:
-        tag = ""
-    tag = tag.strip()
-    if tag.startswith("v") and tag[1:].replace(".", "", 2).replace("-", "").isalnum():
-        return tag[1:] if tag.startswith("v") else tag
-    # latest/download/... has no tag in the pre-redirect URL.
+    return _tag_from_github_url(final_url) or fallback
+
+
+def _version_from_github_urls(urls: tuple[str, ...] | list[str], fallback: str) -> str:
+    for url in urls:
+        tag = _tag_from_github_url(url)
+        if tag:
+            return tag
     return fallback
+
+
+def _asset_download_base(version: str) -> str:
+    """Stable GitHub download prefix for a resolved release tag.
+
+    Never derive this from a post-redirect CDN URL. GitHub now serves
+    release assets from ``release-assets.githubusercontent.com`` with a
+    per-object ``jwt`` query parameter; a sibling URL on that host
+    without the jwt returns HTTP 618 ``jwt:jwt-not-provided``.
+    """
+    tag = version if version.startswith("v") else f"v{version}"
+    return f"{release_base()}/download/{tag}"
+
+
+def _probe_latest_version() -> str:
+    """Resolve GitHub's Latest to a vX.Y.Z tag via ``/releases/latest``."""
+    url = f"{release_base()}/latest"
+    try:
+        with _urlopen(url, timeout=30.0) as response:
+            final_url = str(getattr(response, "geturl", lambda: url)())
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError):
+        return ""
+    return _tag_from_github_url(final_url)
 
 
 def _sums_candidates(version: str) -> list[tuple[str, str]]:
@@ -354,8 +402,15 @@ def _fetch_sums(version: str) -> tuple[str, dict[str, str], str]:
         if not sums:
             errors.append(f"{url}: no checksum lines")
             continue
-        resolved = _tag_from_final_url(final_url, label)
-        return resolved, sums, final_url.rsplit("/", 1)[0]
+        resolved = _version_from_github_urls((final_url, url), label)
+        if not _is_release_version(resolved):
+            resolved = _probe_latest_version() or resolved
+        if not _is_release_version(resolved):
+            raise NativeBootstrapError(
+                f"{SUMS_NAME} was found but the release tag could not be "
+                f"resolved (got {resolved!r}) after a CDN redirect"
+            )
+        return resolved, sums, _asset_download_base(resolved)
     detail = "; ".join(errors) if errors else "no checksum file URLs to try"
     raise NativeBootstrapError(
         f"No {SUMS_NAME} on the v{version} GitHub release (or Latest). {detail}. "

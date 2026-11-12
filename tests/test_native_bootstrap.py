@@ -208,3 +208,100 @@ def test_tag_from_final_url() -> None:
         )
         == "fallback"
     )
+
+    assert (
+        nb._tag_from_final_url(
+            "https://release-assets.githubusercontent.com/"
+            "github-production-release-asset/1308826022/"
+            "01234567-89ab-cdef-0123-456789abcdef?sp=r&jwt=sums-only-token",
+            "0.66.0",
+        )
+        == "0.66.0"
+    )
+    assert (
+        nb._tag_from_github_url(
+            "https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.66.0"
+        )
+        == "0.66.0"
+    )
+
+
+def test_asset_download_base_is_stable_github_prefix() -> None:
+    assert (
+        nb._asset_download_base("0.66.0")
+        == "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.66.0"
+    )
+    assert nb._asset_download_base("v0.66.1").endswith("/download/v0.66.1")
+
+
+def test_sums_cdn_redirect_still_uses_github_download_urls(
+    tmp_path: Path, linux_assets: nb.NativeAssets, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GitHub's asset CDN jwt is per-object; do not reuse that final URL."""
+    runtime = b"runtime-from-cdn-case"
+    core = b"core-from-cdn-case"
+    sums = _sums(linux_assets, runtime, core)
+    github_base = "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.66.0"
+    cdn_sums = (
+        "https://release-assets.githubusercontent.com/github-production-release-asset/"
+        "1308826022/01234567-89ab-cdef-0123-456789abcdef?sp=r&jwt=sums-only-token"
+    )
+    requested: list[str] = []
+
+    def fake_open(req, timeout=0):  # noqa: ANN001
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        requested.append(url)
+        if "release-assets.githubusercontent.com" in url:
+            raise AssertionError(f"must not fetch sibling CDN URL without jwt: {url}")
+        if url.endswith(nb.SUMS_NAME):
+            return _Resp(sums, cdn_sums)
+        if url == f"{github_base}/{linux_assets.runtime_asset}":
+            return _Resp(runtime, url)
+        if url == f"{github_base}/{linux_assets.core_asset}":
+            return _Resp(core, url)
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setenv("REMEDY_ENSURE_ASSETS", "1")
+    monkeypatch.setattr(nb.urllib.request, "urlopen", fake_open)
+    installed = nb.ensure_native_runtime(tmp_path, version="0.66.0")
+    assert installed.version == "0.66.0"
+    assert installed.runtime_bin.read_bytes() == runtime
+    assert installed.core_lib.read_bytes() == core
+    assert f"{github_base}/{linux_assets.runtime_asset}" in requested
+    assert f"{github_base}/{linux_assets.core_asset}" in requested
+
+
+def test_latest_fallback_cdn_resolves_tag_from_releases_latest(
+    tmp_path: Path, linux_assets: nb.NativeAssets, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = b"latest-cdn-runtime"
+    core = b"latest-cdn-core"
+    sums = _sums(linux_assets, runtime, core)
+    github_base = "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.66.0"
+    cdn_sums = (
+        "https://release-assets.githubusercontent.com/github-production-release-asset/"
+        "1308826022/fedcba98-7654-3210-fedc-ba9876543210?sp=r&jwt=sums-only-token"
+    )
+
+    def fake_open(req, timeout=0):  # noqa: ANN001
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if "release-assets.githubusercontent.com" in url:
+            raise AssertionError(f"must not fetch sibling CDN URL without jwt: {url}")
+        if "/download/v0.65.1/" in url:
+            raise HTTPError(url, 404, "Not Found", hdrs=None, fp=io.BytesIO())  # type: ignore[arg-type]
+        if url.endswith("/releases/latest") or url.endswith("/releases/latest/"):
+            return _Resp(b"", "https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.66.0")
+        if url.endswith(f"/latest/download/{nb.SUMS_NAME}"):
+            return _Resp(sums, cdn_sums)
+        if url == f"{github_base}/{linux_assets.runtime_asset}":
+            return _Resp(runtime, url)
+        if url == f"{github_base}/{linux_assets.core_asset}":
+            return _Resp(core, url)
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setenv("REMEDY_ENSURE_ASSETS", "1")
+    monkeypatch.setattr(nb.urllib.request, "urlopen", fake_open)
+    installed = nb.ensure_native_runtime(tmp_path, version="0.65.1")
+    assert installed.version == "0.66.0"
+    assert "0.66.0" in str(installed.runtime_bin)
+    assert installed.runtime_bin.read_bytes() == runtime
