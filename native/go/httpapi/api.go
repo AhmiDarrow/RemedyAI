@@ -92,6 +92,7 @@ type Server struct {
 	approvals *approvalQueue
 	lifeHub   *lifeTaskHub
 
+	busMu             sync.Mutex
 	bus               *events.Bus
 	eventLogPath      string
 	ephemeralEventDir string
@@ -411,7 +412,9 @@ func New(cfg Config) (*Server, error) {
 	return s, nil
 }
 
-// Close stops messenger, Connect, scheduler, hive, event bus, aborts turns, then releases sessions.
+// Close stops messenger, Connect, scheduler, hive, aborts in-flight turns,
+// then closes the event bus and releases sessions. Turns are drained before
+// the bus so a detached stream cannot publish into a torn-down bus.
 func (s *Server) Close() error {
 	if s == nil {
 		return nil
@@ -424,11 +427,11 @@ func (s *Server) Close() error {
 		s.hiveMgr.Shutdown()
 		s.hiveMgr = nil
 	}
-	s.closeEventBus()
 	if s.claims != nil {
 		s.claims.AbortAll()
 		s.claims.WaitTurns()
 	}
+	s.closeEventBus()
 	if s.sessions == nil {
 		return nil
 	}
@@ -566,7 +569,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"skills_count":        0,
 		"sessions_count":      0,
 		"chat_sessions_count": 0,
-		"event_bus":           s.bus != nil,
+		"event_bus":           s.eventBus() != nil,
 		"scheduler_jobs":      0,
 		"hive_agents":         0,
 	}
