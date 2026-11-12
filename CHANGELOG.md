@@ -4,6 +4,15 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.66.4] - 2026-11-12
+
+### Fixed
+
+- `remedy serve` no longer follows a venv `python` symlink to the system
+  interpreter when setting `REMEDY_PYTHON`. That left the tool worker
+  running a Python that has no `remedy` package, including when the venv
+  was already on `PATH`.
+
 ## [0.66.3] - 2026-11-12
 
 ### Fixed
