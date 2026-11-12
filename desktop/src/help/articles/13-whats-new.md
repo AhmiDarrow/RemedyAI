@@ -2,18 +2,29 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.65.0**. Installed apps update on their own.
+Current release: **v0.66.0**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [0.66.0 — A first-run runtime download](#0660---a-first-run-runtime-download)
 - [0.65.0 — A check finishes the work](#0650---a-check-finishes-the-work)
 - [0.64.0 — Grouped settings and a present partner](#0640---grouped-settings-and-a-present-partner)
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
+
+## 0.66.0 - A first-run runtime download
+
+- **`pip install` can start.** After `remedy serve`, a missing
+  `remedy-runtime` is downloaded from this release, checksum-verified, and
+  cached under `~/.remedy/runtime/`. The Desktop installer still ships both
+  binaries. A machine with no prebuilt gets the build commands instead of a
+  silent failure.
+- **Install docs match that path.** Linux and Windows install, troubleshooting,
+  and the updater notes for 0.41.5 describe what actually works.
 
 ## 0.65.0 - A check finishes the work
 

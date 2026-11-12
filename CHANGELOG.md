@@ -4,6 +4,30 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.66.0] - 2026-11-12
+
+### Added
+
+- **PyPI `remedy serve` downloads the native runtime.** When `remedy-runtime`
+  and `remedy_core` are not on PATH or in `desktop/bin`, first serve fetches
+  the platform pair from GitHub Releases, verifies
+  `remedy-native-SHA256SUMS.txt`, and caches them under `~/.remedy/runtime/`.
+  Desktop installers already ship both binaries. The release workflow now
+  publishes the standalone assets plus checksums. If this OS has no prebuilt,
+  the command prints build instructions instead of failing silently after a
+  "successful" `pip install`.
+
+### Fixed
+
+- Install docs (`docs/USAGE.md`, `docs/manual/01-install-linux.md`, Windows
+  install, troubleshooting) no longer describe `pip install` + `remedy serve`
+  as if a local Go/Zig toolchain were required, or as if the wheel itself
+  contained the runtime.
+- `remedy chat` and `remedy tool` error text now point at `remedy serve`'s
+  first-run download. Python `native_runtime` also searches the verified
+  cache so it does not drift from the serve launcher. A truncated or
+  non-binary `REMEDY_NATIVE_CORE_LIB` is skipped instead of being loaded.
+
 ## [0.65.0] - 2026-10-19
 
 ### Changed
