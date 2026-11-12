@@ -16,7 +16,7 @@ Remedy Desktop now runs on Linux (including WSLg) as well as Windows. Same partn
 | Path | Who it is for |
 |------|----------------|
 | **`.deb` / AppImage** | [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) — **v0.26.0+** |
-| **PyPI CLI** | `uv tool install remedy-ai` then `remedy serve` (browser WebUI) |
+| **PyPI CLI** | `uv tool install remedy-ai` then `remedy serve` (browser WebUI). First `remedy serve` downloads the Go `remedy-runtime` and Zig `remedy_core` for this version from GitHub Releases, verifies sha256 against `remedy-native-SHA256SUMS.txt`, and caches them under `~/.remedy/runtime/`. No Go or Zig toolchain is required. If this OS has no prebuilt, the command prints build instructions. |
 | **Dev / source** | This repo: `npm run tauri:dev` / `tauri:build` |
 
 ### Packaged desktop (v0.26.0+)

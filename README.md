@@ -36,7 +36,7 @@ Remedy lives on **this computer** (Windows, Linux, WSLg). **Grove** is home. **S
 | **Commands / keys** | [11-reference-commands](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/11-reference-commands.md) · [12-reference-shortcuts](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/12-reference-shortcuts.md) |
 | **Changelog** | [CHANGELOG.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/CHANGELOG.md) |
 
-Local API: `127.0.0.1:7400`. Close ✕ hides to the **tray** on Windows and **minimizes** on Linux/WSLg.
+Local API: `127.0.0.1:7400`. Close ✕ hides to the **tray** on Windows and **minimizes** on Linux/WSLg. `pip install remedy-ai` then `remedy serve` downloads a checksum-verified `remedy-runtime` from GitHub Releases on first run (cached in `~/.remedy/runtime/`).
 
 From the creator: *My name is Ahmi, I hope you enjoy my Remedy.*
 
