@@ -40,10 +40,7 @@ def test_rust_updater_still_accepts_0415_platform_keys() -> None:
 
 
 def test_release_workflow_publishes_native_cli_checksums() -> None:
-    """The live workflow, or the apply-once patch if workflow scope blocked the push."""
-    workflow = RELEASE_YML.read_text(encoding="utf-8")
-    patch = ROOT / "scripts" / "desktop-release-native-assets.patch"
-    text = workflow if "remedy-native-SHA256SUMS.txt" in workflow else patch.read_text(encoding="utf-8")
+    text = RELEASE_YML.read_text(encoding="utf-8")
     assert "remedy-native-SHA256SUMS.txt" in text
     assert "dist-native/*" in text
     assert "remedy-runtime-x86_64-unknown-linux-gnu" in text
