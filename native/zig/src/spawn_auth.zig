@@ -286,6 +286,46 @@ fn scopeOrDefault(ptr: ?[*]const u8, len: usize) []const u8 {
 }
 
 /// Authorize then hidden-spawn. argv[0] must already be an absolute path.
+/// Packed spawn argument/result blocks so FFI bindings can call through a
+/// two-pointer signature. The expanded exports below stay for ctypes; Go
+/// uses the packed forms because a 15+ uintptr SyscallN can drop out-params.
+pub const ProcessSpawnAuthIn = extern struct {
+    argv_json: ?[*]const u8,
+    argv_len: usize,
+    cwd: ?[*]const u8,
+    cwd_len: usize,
+    env_json: ?[*]const u8,
+    env_len: usize,
+    token: ?[*]const u8,
+    token_len: usize,
+    subject: ?[*]const u8,
+    subject_len: usize,
+    scope: ?[*]const u8,
+    scope_len: usize,
+    owner_confirmed: u8,
+    now_ms: u64,
+};
+
+pub const ProcessSpawnOut = extern struct {
+    pid: u32,
+    handle: u64,
+};
+
+pub const ProcessPipedSpawnOut = extern struct {
+    pid: u32,
+    handle: u64,
+    stdin_write: u64,
+    stdout_read: u64,
+    stderr_read: u64,
+};
+
+comptime {
+    // 12 pointer/usize fields, then u8 + 7 bytes of alignment padding, then u64.
+    if (@sizeOf(ProcessSpawnAuthIn) != 112) @compileError("ProcessSpawnAuthIn layout");
+    if (@sizeOf(ProcessSpawnOut) != 16) @compileError("ProcessSpawnOut layout");
+    if (@sizeOf(ProcessPipedSpawnOut) != 40) @compileError("ProcessPipedSpawnOut layout");
+}
+
 export fn remedy_core_process_spawn_authorized(
     argv_json: ?[*]const u8,
     argv_len: usize,
@@ -345,6 +385,34 @@ export fn remedy_core_process_spawn_authorized(
     pid_slot.* = result.pid;
     handle_slot.* = result.handle;
     return ok_status;
+}
+
+
+export fn remedy_core_process_spawn_authorized_pack(
+    args: ?*const ProcessSpawnAuthIn,
+    out: ?*ProcessSpawnOut,
+) callconv(.c) i32 {
+    const a = args orelse return invalid_status;
+    const o = out orelse return invalid_status;
+    o.* = .{ .pid = 0, .handle = 0 };
+    return remedy_core_process_spawn_authorized(
+        a.argv_json,
+        a.argv_len,
+        a.cwd,
+        a.cwd_len,
+        a.env_json,
+        a.env_len,
+        a.token,
+        a.token_len,
+        a.subject,
+        a.subject_len,
+        a.scope,
+        a.scope_len,
+        a.owner_confirmed,
+        a.now_ms,
+        &o.pid,
+        &o.handle,
+    );
 }
 
 /// Authorize then interactive 3-pipe spawn. Parent owns stdin_write / stdout_read /
@@ -422,6 +490,37 @@ export fn remedy_core_process_spawn_piped_authorized(
     stdout_slot.* = result.stdout_read;
     stderr_slot.* = result.stderr_read;
     return ok_status;
+}
+
+
+export fn remedy_core_process_spawn_piped_authorized_pack(
+    args: ?*const ProcessSpawnAuthIn,
+    out: ?*ProcessPipedSpawnOut,
+) callconv(.c) i32 {
+    const a = args orelse return invalid_status;
+    const o = out orelse return invalid_status;
+    o.* = .{ .pid = 0, .handle = 0, .stdin_write = 0, .stdout_read = 0, .stderr_read = 0 };
+    return remedy_core_process_spawn_piped_authorized(
+        a.argv_json,
+        a.argv_len,
+        a.cwd,
+        a.cwd_len,
+        a.env_json,
+        a.env_len,
+        a.token,
+        a.token_len,
+        a.subject,
+        a.subject_len,
+        a.scope,
+        a.scope_len,
+        a.owner_confirmed,
+        a.now_ms,
+        &o.pid,
+        &o.handle,
+        &o.stdin_write,
+        &o.stdout_read,
+        &o.stderr_read,
+    );
 }
 
 fn deliverCaptureOwned(

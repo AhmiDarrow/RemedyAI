@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -44,6 +45,23 @@ func usageDBPath(homeDir string) string {
 	return filepath.Join(home, "usage.db")
 }
 
+// usageOpenGates serialize first-open / schema init per database file.
+// Summary and series each open their own pool; without this, concurrent
+// first visits race on creating the file and switching it to WAL.
+var usageOpenGates sync.Map // string -> *sync.Mutex
+
+func usageOpenGate(path string) *sync.Mutex {
+	actual, _ := usageOpenGates.LoadOrStore(path, &sync.Mutex{})
+	return actual.(*sync.Mutex)
+}
+
+// usageDSN applies busy_timeout and WAL on connect, before any Exec.
+// A leading PRAGMA busy_timeout Exec is too late: creating the file can
+// already return SQLITE_BUSY.
+func usageDSN(path string) string {
+	return "file:" + filepath.ToSlash(path) + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+}
+
 func openUsageDB(homeDir string) (*sql.DB, error) {
 	home := ResolveHomeDir(homeDir)
 	if home == "" {
@@ -53,25 +71,22 @@ func openUsageDB(homeDir string) (*sql.DB, error) {
 		return nil, err
 	}
 	path := filepath.Join(home, "usage.db")
-	db, err := sql.Open("sqlite", path)
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	gate := usageOpenGate(path)
+	gate.Lock()
+	defer gate.Unlock()
+	db, err := sql.Open("sqlite", usageDSN(path))
 	if err != nil {
 		return nil, err
 	}
-	// PRAGMAs are connection-local. Keep the configured connection and set
-	// lock waiting before schema initialization: summary and series open in
-	// parallel, including the first time the owner visits Usage.
+	// One connection per pool: PRAGMAs in the DSN are connection-local.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	for _, statement := range []string{
-		"PRAGMA busy_timeout=5000",
-		usageEventsSchema,
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA synchronous=NORMAL",
-	} {
-		if _, err := db.Exec(statement); err != nil {
-			_ = db.Close()
-			return nil, err
-		}
+	if _, err := db.Exec(usageEventsSchema); err != nil {
+		_ = db.Close()
+		return nil, err
 	}
 	return db, nil
 }

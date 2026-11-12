@@ -510,6 +510,43 @@ int32_t remedy_core_process_spawn_piped_authorized(
     uint64_t *out_stdin_write, uint64_t *out_stdout_read, uint64_t *out_stderr_read
 );
 
+
+/* Packed two-pointer variants of the spawn_authorized exports. Prefer these
+ * from FFI trampolines with a limited argument-register/stack ABI (Go
+ * purego.SyscallN). The expanded forms above remain for ctypes. */
+typedef struct remedy_core_process_spawn_auth_in {
+    const uint8_t *argv_json; size_t argv_len;
+    const uint8_t *cwd; size_t cwd_len;
+    const uint8_t *env_json; size_t env_len;
+    const uint8_t *token; size_t token_len;
+    const uint8_t *subject; size_t subject_len;
+    const uint8_t *scope; size_t scope_len;
+    uint8_t owner_confirmed;
+    uint64_t now_ms;
+} remedy_core_process_spawn_auth_in;
+
+typedef struct remedy_core_process_spawn_out {
+    uint32_t pid;
+    uint64_t handle;
+} remedy_core_process_spawn_out;
+
+typedef struct remedy_core_process_piped_spawn_out {
+    uint32_t pid;
+    uint64_t handle;
+    uint64_t stdin_write;
+    uint64_t stdout_read;
+    uint64_t stderr_read;
+} remedy_core_process_piped_spawn_out;
+
+int32_t remedy_core_process_spawn_authorized_pack(
+    const remedy_core_process_spawn_auth_in *args,
+    remedy_core_process_spawn_out *out
+);
+int32_t remedy_core_process_spawn_piped_authorized_pack(
+    const remedy_core_process_spawn_auth_in *args,
+    remedy_core_process_piped_spawn_out *out
+);
+
 /* Policy + token authorize, then ConPTY spawn (same auth contract). */
 int32_t remedy_core_conpty_spawn_authorized(
     const uint8_t *argv_json, size_t argv_len,

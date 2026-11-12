@@ -36,6 +36,7 @@ func (n nativeLib) proc(name string) (*windows.Proc, error) {
 	return n.dll.FindProc(name)
 }
 
+//go:uintptrescapes
 func (l *Library) call(name string, args ...uintptr) (uintptr, error) {
 	p, err := l.raw.proc(name)
 	if err != nil {
