@@ -97,7 +97,7 @@ Authorization: Bearer <local_api_token>
 
 | Rule | Default |
 |------|---------|
-| Bind | `remedy serve` loopback only. Non-loopback / `0.0.0.0` without a Bearer token is **refused** unless `REMEDY_ALLOW_INSECURE_BIND=1`. |
+| Bind | `remedy serve` is loopback only (`127.0.0.1` / `::1`). Non-loopback and `0.0.0.0` are **refused**. `REMEDY_ALLOW_INSECURE_BIND` does not open the local API. |
 | `--home` | Refuses drive roots and OS trees (`C:\Windows`, `/etc`, …). |
 | `remedy exec` | Dangerous commands are blocked (exit **2**). Failed commands propagate the process exit code. |
 | `remedy config show` | Secret keys (`api_key`, tokens, passwords) are redacted. |

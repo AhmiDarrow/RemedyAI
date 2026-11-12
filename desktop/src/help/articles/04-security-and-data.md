@@ -91,7 +91,7 @@ API keys and OAuth tokens never leave as model input either way. Env override: `
   - **On** (default) — browser Web UI can obtain the loopback token (full Web UI power).  
   - **Off** — desktop IPC only (safer against lesser local processes; desktop app power unchanged).  
 - CORS `*` is **refused** while auth is on.  
-- Auth-off + non-loopback bind requires `REMEDY_ALLOW_INSECURE_BIND=1` (owner escape hatch).  
+- The local API (`remedy serve` / `:7400`) is loopback only. Non-loopback and wildcard binds are refused; `REMEDY_ALLOW_INSECURE_BIND` does not open `:7400`.  
 
 ## Grove Connect (phone remote, default off)
 

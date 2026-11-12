@@ -27,13 +27,14 @@ def test_evaluate_serve_bind_refuses_open_lan():
         assert evaluate_serve_bind(host, has_auth=False, insecure_ok=False) == "refuse"
 
 
-def test_evaluate_serve_bind_warns_when_authed():
-    assert evaluate_serve_bind("0.0.0.0", has_auth=True, insecure_ok=False) == "warn"
-    assert evaluate_serve_bind("10.0.0.5", has_auth=True, insecure_ok=False) == "warn"
+def test_evaluate_serve_bind_refuses_even_when_authed():
+    assert evaluate_serve_bind("0.0.0.0", has_auth=True, insecure_ok=False) == "refuse"
+    assert evaluate_serve_bind("10.0.0.5", has_auth=True, insecure_ok=False) == "refuse"
 
 
-def test_evaluate_serve_bind_insecure_flag_allows():
-    assert evaluate_serve_bind("0.0.0.0", has_auth=False, insecure_ok=True) == "ok"
+def test_evaluate_serve_bind_insecure_flag_does_not_open_lan():
+    assert evaluate_serve_bind("0.0.0.0", has_auth=False, insecure_ok=True) == "refuse"
+    assert evaluate_serve_bind("10.0.0.5", has_auth=True, insecure_ok=True) == "refuse"
 
 
 def test_resolve_cli_home_accepts_tmp(tmp_path: Path):

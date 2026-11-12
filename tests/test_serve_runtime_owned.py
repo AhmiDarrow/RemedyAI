@@ -451,3 +451,98 @@ def test_serve_worker_python_keeps_venv_symlink(tmp_path: Path) -> None:
     assert os.path.realpath(got) == str(base.resolve())
     assert got != os.path.realpath(got)
 
+
+
+def test_cmd_serve_refuses_non_loopback_even_with_insecure_flag(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    """REMEDY_ALLOW_INSECURE_BIND must not open :7400 off loopback."""
+    import remedy.interfaces.cli.cmd_runtime as CR
+
+    monkeypatch.setenv("REMEDY_ALLOW_INSECURE_BIND", "1")
+    monkeypatch.setenv("REMEDY_RUNTIME", str(tmp_path / "remedy-runtime"))
+    with pytest.raises(SystemExit) as ei:
+        CR._cmd_serve(
+            SimpleNamespace(
+                home=str(tmp_path / "home"),
+                host="0.0.0.0",
+                port=7400,
+                skip_setup=True,
+                force_setup=False,
+                config_file=None,
+                computer_host=False,
+                no_computer_host=False,
+            )
+        )
+    assert ei.value.code == 2
+    assert "loopback" in capsys.readouterr().out.lower()
+
+
+def test_cmd_serve_accepts_bracketed_ipv6_loopback(monkeypatch, tmp_path) -> None:
+    import remedy.interfaces.cli.cmd_runtime as CR
+
+    called: dict[str, object] = {}
+
+    def fake_call(cmd, *args, **kwargs):
+        called["cmd"] = list(cmd)
+        return 0
+
+    monkeypatch.setenv("REMEDY_RUNTIME", str(tmp_path / "remedy-runtime"))
+    monkeypatch.setattr(CR.subprocess, "call", fake_call)
+    with pytest.raises(SystemExit) as ei:
+        CR._cmd_serve(
+            SimpleNamespace(
+                home=str(tmp_path / "home"),
+                host="[::1]",
+                port=7400,
+                skip_setup=True,
+                force_setup=False,
+                config_file=None,
+                computer_host=False,
+                no_computer_host=False,
+            )
+        )
+    assert ei.value.code == 0
+    assert called["cmd"] == [
+        str(tmp_path / "remedy-runtime"),
+        "--serve",
+        "--listen",
+        "[::1]:7400",
+    ]
+
+
+def test_resolve_finds_runtime_next_to_venv_python_symlink(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A venv python symlink must not hide a runtime sitting in venv/bin."""
+    import remedy.interfaces.cli.cmd_runtime as CR
+
+    base = tmp_path / "system" / "python"
+    base.parent.mkdir(parents=True)
+    base.write_text("", encoding="utf-8")
+    venv_bin = tmp_path / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    link = venv_bin / "python"
+    link.symlink_to(base)
+    name = "remedy-runtime.exe" if sys.platform == "win32" else "remedy-runtime"
+    runtime = venv_bin / name
+    runtime.write_bytes(b"runtime")
+
+    monkeypatch.delenv("REMEDY_NATIVE_RUNTIME_BIN", raising=False)
+    monkeypatch.delenv("REMEDY_RUNTIME", raising=False)
+    monkeypatch.setattr(CR.shutil, "which", lambda *_a, **_k: None)
+    monkeypatch.setattr(CR.sys, "executable", str(link))
+    monkeypatch.setattr(CR, "_repo_root", lambda: None)
+    monkeypatch.setattr(
+        "remedy.runtime.native_bootstrap.cached_runtime_bin", lambda: None
+    )
+    cmd = CR.resolve_remedy_runtime_command()
+    assert cmd == [str(runtime)]
+
+
+def test_parser_epilog_points_at_serve_and_wrong_pypi_name() -> None:
+    help_text = build_parser().format_help()
+    assert "remedy serve" in help_text
+    assert "pip install 'remedy'" in help_text or "pip install remedy" in help_text
+    assert "different package" in help_text
+    assert "https://github.com/AhmiDarrow/RemedyAI/releases/latest" in help_text
