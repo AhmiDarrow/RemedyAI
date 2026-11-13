@@ -395,7 +395,7 @@ fn enableDpiAwarenessOnce() void {
     // display; resolved dynamically so the library still loads on older builds.
     if (GetModuleHandleW(std.unicode.utf8ToUtf16LeStringLiteral("user32.dll"))) |user32| {
         if (GetProcAddress(user32, "SetProcessDpiAwarenessContext")) |address| {
-            const set_context: DpiContextFn = @ptrCast(address);
+            const set_context: DpiContextFn = @ptrCast(@alignCast(address));
             if (set_context(@ptrFromInt(@as(usize, @bitCast(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)))) != 0) return;
         }
     }
