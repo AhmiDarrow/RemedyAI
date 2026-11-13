@@ -4,14 +4,14 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { apiFetch } from '../../api/client'
 import { isTauri, tauriInvoke } from '../../api/tauri'
-import { isLinuxDesktop } from '../../utils/platform'
+import { isLinuxDesktop, isMacDesktop } from '../../utils/platform'
 import { EmptyState } from '../EmptyState'
 import {
   TERMINAL_SET_CWD_EVENT,
   takePendingTerminalCwd,
 } from '../../workspace/railNav'
 
-const SHELL_LABEL = isLinuxDesktop() ? 'Terminal' : 'PowerShell'
+const SHELL_LABEL = isLinuxDesktop() || isMacDesktop() ? 'Terminal' : 'PowerShell'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 /** Read app theme tokens so xterm matches light/dark forest/etc. */

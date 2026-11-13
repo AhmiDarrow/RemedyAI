@@ -176,13 +176,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest]
+        os: [ubuntu-22.04, windows-latest, macos-15]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: desktop/src-tauri
     # This job compiles/tests Rust only. Release jobs build and validate the
-    # actual sidecars, SPA, and bundle resources on both operating systems.
+    # actual sidecars, SPA, and bundle resources on Windows, Linux, and macOS.
     env:
       # Rust compilation is intentionally independent of sidecars/resources
       # produced by the release jobs. JSON Merge Patch needs null to clear the
@@ -317,3 +317,97 @@ jobs:
       - name: Refuse host-ISA bake in remedy_core (SHA-NI)
         shell: bash
         run: python3 scripts/check_remedy_core_isa.py || python scripts/check_remedy_core_isa.py
+
+  # Unsigned macOS Desktop: native arm64 bundle + sidecar /api/ping smoke.
+  # The Intel app is built (and signed for the updater) on Desktop Release.
+  desktop-macos:
+    runs-on: macos-15
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: native/go/go.mod
+          cache-dependency-path: native/go/go.sum
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build sidecar, dylib, and worker deps
+        run: |
+          set -euo pipefail
+          mkdir -p desktop/bin
+          cd native/go
+          CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime-aarch64-apple-darwin ./cmd/remedy-runtime
+          cp ../../desktop/bin/remedy-runtime-aarch64-apple-darwin ../../desktop/bin/remedy-runtime
+          chmod +x ../../desktop/bin/remedy-runtime ../../desktop/bin/remedy-runtime-aarch64-apple-darwin
+          cd ../zig
+          zig build -Doptimize=ReleaseSafe
+          cp zig-out/lib/libremedy_core.dylib ../../desktop/bin/libremedy_core.dylib
+          cd ../..
+          python3 scripts/check_remedy_core_isa.py desktop/bin/libremedy_core.dylib
+          python3 scripts/build_rmdy_worker.py --out desktop/bin/rmdy_tool_worker.pyz --deps-out desktop/bin/rmdy-deps
+
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: desktop
+
+      - name: Build unsigned arm64 .dmg
+        # CI only smokes the .dmg / sidecar; updater signatures are produced
+        # on Desktop Release where TAURI_SIGNING_PRIVATE_KEY is available.
+        # tauri.conf.json bakes in the updater pubkey, so a full artifact
+        # build would fail here with "public key has been found, but no private key".
+        run: >
+          npx tauri build --bundles dmg,app --target aarch64-apple-darwin
+          --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        working-directory: desktop
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '12.0'
+
+      - name: Finalize bundle and smoke the sidecar
+        run: |
+          set -euo pipefail
+          APP=""
+          for dir in             desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos             desktop/src-tauri/target/release/bundle/macos
+          do
+            [[ -d "${dir}" ]] || continue
+            APP="$(find "${dir}" -maxdepth 2 -name '*.app' -type d | head -1 || true)"
+            [[ -n "${APP}" ]] && break
+          done
+          if [[ -z "${APP}" || ! -d "${APP}" ]]; then
+            echo "::error::tauri build did not produce a .app"
+            find desktop/src-tauri/target \( -name '*.app' -o -name '*.dmg' \) | head -50 || true
+            exit 1
+          fi
+          echo "Finalizing ${APP}"
+          bash scripts/macos_finalize_desktop_bundle.sh --app "${APP}" --dylib desktop/bin/libremedy_core.dylib
+          DMG=""
+          for dir in             desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg             desktop/src-tauri/target/release/bundle/dmg
+          do
+            [[ -d "${dir}" ]] || continue
+            DMG="$(find "${dir}" -name '*.dmg' -type f | head -1 || true)"
+            [[ -n "${DMG}" ]] && break
+          done
+          if [[ -z "${DMG}" || ! -f "${DMG}" ]]; then
+            echo "::error::tauri build did not produce a .dmg"
+            exit 1
+          fi
+          echo "Smoking ${DMG}"
+          bash scripts/smoke_macos_desktop.sh "${DMG}"

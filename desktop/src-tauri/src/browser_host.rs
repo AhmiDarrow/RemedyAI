@@ -3797,8 +3797,34 @@ pub fn browser_agent_action(
     let act = action.to_lowercase();
     let jid_owned = job_id.clone().unwrap_or_default();
     let button_cdp = button.clone();
+    // Trusted type/key path is Windows CDP / Linux GDK only; leave these
+    // bindings inside that cfg so macOS builds clean under -D warnings.
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
     let text_cdp = text.clone();
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
     let key_cdp = key.clone();
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
     let ref_cdp = r#ref.clone();
 
     // Press-and-hold: Remedy as the owner's authorized hands for an

@@ -236,7 +236,7 @@ fn spawn_bound_to_parent(mut c: Command) -> Option<Child> {
 /// Reap a fire-and-forget child on a detached thread so it does not linger as
 /// a zombie (defunct) until the app exits. Used for `xdg-open` launches, whose
 /// Child we otherwise drop without ever calling wait().
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(unix)]
 fn reap_detached(child: Child) {
     std::thread::spawn(move || {
         let mut c = child;
@@ -416,10 +416,11 @@ fn open_logs_folder() -> Result<String, String> {
     }
     #[cfg(target_os = "macos")]
     {
-        Command::new("open")
+        let child = Command::new("open")
             .arg(&path_str)
             .spawn()
             .map_err(|e| format!("Failed to open folder: {e}"))?;
+        reap_detached(child);
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -705,78 +706,52 @@ fn is_runtime_binary(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn runtime_sidecar_basenames() -> &'static [&'static str] {
+    #[cfg(target_os = "windows")]
+    {
+        &[
+            "remedy-runtime-x86_64-pc-windows-msvc.exe",
+            "remedy-runtime.exe",
+        ]
+    }
+    #[cfg(target_os = "macos")]
+    {
+        &[
+            "remedy-runtime-aarch64-apple-darwin",
+            "remedy-runtime-x86_64-apple-darwin",
+            "remedy-runtime",
+        ]
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        &[
+            "remedy-runtime-x86_64-unknown-linux-gnu",
+            "remedy-runtime-aarch64-unknown-linux-gnu",
+            "remedy-runtime",
+        ]
+    }
+}
+
 fn find_runtime_sidecar(
     searched: &dyn Fn(&str, &Path) -> Option<String>,
 ) -> Option<String> {
+    let names = runtime_sidecar_basenames();
     if let Some(dir) = current_exe_dir() {
-        #[cfg(target_os = "windows")]
-        {
-            if let Some(path) = searched(
-                "runtime-triple",
-                &dir.join("remedy-runtime-x86_64-pc-windows-msvc.exe"),
-            ) {
-                return Some(path);
-            }
-            if let Some(path) = searched("runtime-plain", &dir.join("remedy-runtime.exe")) {
-                return Some(path);
-            }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            if let Some(path) = searched(
-                "runtime-triple",
-                &dir.join("remedy-runtime-x86_64-unknown-linux-gnu"),
-            ) {
-                return Some(path);
-            }
-            if let Some(path) = searched("runtime-plain", &dir.join("remedy-runtime")) {
+        for name in names {
+            if let Some(path) = searched(name, &dir.join(name)) {
                 return Some(path);
             }
         }
     }
 
     if let Ok(cwd) = env::current_dir() {
-        #[cfg(target_os = "windows")]
-        let cwd_cands: [(&str, PathBuf); 4] = [
-            (
-                "runtime-dev-bin-triple",
-                cwd.join("bin")
-                    .join("remedy-runtime-x86_64-pc-windows-msvc.exe"),
-            ),
-            ("runtime-dev-bin", cwd.join("bin").join("remedy-runtime.exe")),
-            (
-                "runtime-dev-desktop-triple",
-                cwd.join("desktop")
-                    .join("bin")
-                    .join("remedy-runtime-x86_64-pc-windows-msvc.exe"),
-            ),
-            (
-                "runtime-dev-desktop",
-                cwd.join("desktop").join("bin").join("remedy-runtime.exe"),
-            ),
-        ];
-        #[cfg(not(target_os = "windows"))]
-        let cwd_cands: [(&str, PathBuf); 4] = [
-            (
-                "runtime-dev-bin-triple",
-                cwd.join("bin")
-                    .join("remedy-runtime-x86_64-unknown-linux-gnu"),
-            ),
-            ("runtime-dev-bin", cwd.join("bin").join("remedy-runtime")),
-            (
-                "runtime-dev-desktop-triple",
-                cwd.join("desktop")
-                    .join("bin")
-                    .join("remedy-runtime-x86_64-unknown-linux-gnu"),
-            ),
-            (
-                "runtime-dev-desktop",
-                cwd.join("desktop").join("bin").join("remedy-runtime"),
-            ),
-        ];
-        for (label, p) in cwd_cands {
-            if let Some(path) = searched(label, &p) {
-                return Some(path);
+        let roots = [cwd.join("bin"), cwd.join("desktop").join("bin")];
+        let labels = ["runtime-dev-bin", "runtime-dev-desktop"];
+        for (label, root) in labels.iter().zip(roots.iter()) {
+            for name in names {
+                if let Some(path) = searched(label, &root.join(name)) {
+                    return Some(path);
+                }
             }
         }
     }
@@ -2165,9 +2140,9 @@ fn open_terminal(cwd: Option<String>) -> Result<String, String> {
 
     #[cfg(target_os = "macos")]
     {
+        let escaped = dir_s.replace('\\', "\\\\").replace('"', "\\\"");
         let script = format!(
-            "tell application \"Terminal\" to do script \"cd {}\"",
-            dir_s.replace('\\', "\\\\").replace('"', "\\\"")
+            "tell application \"Terminal\" to do script \"cd \\\"{escaped}\\\"\""
         );
         let status = Command::new("osascript")
             .args(["-e", &script])
@@ -2421,8 +2396,85 @@ fn remove_legacy_run_key() {
     }
 }
 
-/// Windows: enable/disable "Start with Windows" via **Startup folder shortcut only**.
-/// Never writes the registry Run key (avoids Persistence.A!ml false positives).
+#[cfg(target_os = "macos")]
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+#[cfg(target_os = "macos")]
+fn macos_app_bundle_path() -> Option<PathBuf> {
+    let exe = env::current_exe().ok()?;
+    let mut p = exe.as_path();
+    for _ in 0..8 {
+        if p.extension().and_then(|s| s.to_str()) == Some("app") {
+            return Some(p.to_path_buf());
+        }
+        p = p.parent()?;
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn macos_launch_agent_path() -> PathBuf {
+    let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home)
+        .join("Library")
+        .join("LaunchAgents")
+        .join("com.remedy.desktop.plist")
+}
+
+#[cfg(target_os = "macos")]
+fn macos_launch_agent_plist(app: &Path) -> String {
+    let exe = app.join("Contents").join("MacOS").join("Remedy Desktop");
+    let program = if exe.is_file() {
+        exe
+    } else {
+        env::current_exe().unwrap_or_else(|_| app.to_path_buf())
+    };
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.remedy.desktop</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+</dict>
+</plist>
+"#,
+        xml_escape(&program.to_string_lossy())
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn macos_launchctl_bootout() {
+    let uid = unsafe { libc::getuid() };
+    let target = format!("gui/{uid}/com.remedy.desktop");
+    let _ = Command::new("launchctl").args(["bootout", &target]).status();
+}
+
+#[cfg(target_os = "macos")]
+fn macos_launchctl_bootstrap(plist: &Path) {
+    let uid = unsafe { libc::getuid() };
+    let domain = format!("gui/{uid}");
+    let _ = Command::new("launchctl")
+        .args(["bootstrap", &domain, &plist.to_string_lossy()])
+        .status();
+}
+
+/// Windows: Startup folder shortcut. macOS: Launch Agent plist.
+/// Never writes the Windows registry Run key (avoids Persistence.A!ml false positives).
 #[tauri::command]
 fn set_launch_at_login(enabled: bool) -> Result<bool, String> {
     #[cfg(target_os = "windows")]
@@ -2482,10 +2534,45 @@ $s.Save()
         }
         return Ok(enabled);
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        let Some(app) = macos_app_bundle_path() else {
+            return Err("Could not locate the Remedy Desktop.app bundle".into());
+        };
+        let app_s = app.to_string_lossy();
+        if app_s.starts_with("/Volumes/") {
+            return Err(
+                "Move Remedy Desktop to Applications before enabling Start at login (this copy is on a disk image)."
+                    .into(),
+            );
+        }
+        let plist = macos_launch_agent_path();
+        if enabled {
+            if let Some(dir) = plist.parent() {
+                std::fs::create_dir_all(dir)
+                    .map_err(|e| format!("create LaunchAgents folder: {e}"))?;
+            }
+            std::fs::write(&plist, macos_launch_agent_plist(&app))
+                .map_err(|e| format!("write Launch Agent: {e}"))?;
+            macos_launchctl_bootout();
+            macos_launchctl_bootstrap(&plist);
+            log::info!(
+                "Launch at login enabled via Launch Agent -> {}",
+                plist.display()
+            );
+        } else {
+            macos_launchctl_bootout();
+            if plist.exists() {
+                let _ = std::fs::remove_file(&plist);
+            }
+            log::info!("Launch at login disabled (Launch Agent removed)");
+        }
+        return Ok(enabled);
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = enabled;
-        Err("Launch at login is only implemented on Windows in this build".into())
+        Err("Launch at login is only implemented on Windows and macOS in this build".into())
     }
 }
 
@@ -2498,7 +2585,11 @@ fn get_launch_at_login() -> Result<bool, String> {
         let lnk = windows_startup_lnk_path();
         return Ok(lnk.is_file());
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        return Ok(macos_launch_agent_path().is_file());
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         Ok(false)
     }
@@ -2721,9 +2812,9 @@ fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
                     .spawn()
             })
             .map_err(|e| format!("open browser failed: {e}"))?;
-        #[cfg(all(unix, not(target_os = "macos")))]
+        #[cfg(unix)]
         reap_detached(spawned);
-        #[cfg(not(all(unix, not(target_os = "macos"))))]
+        #[cfg(not(unix))]
         drop(spawned);
     }
 
@@ -3313,10 +3404,11 @@ fn open_data_folder() -> Result<String, String> {
     }
     #[cfg(target_os = "macos")]
     {
-        Command::new("open")
+        let child = Command::new("open")
             .arg(&path_str)
             .spawn()
             .map_err(|e| format!("Failed to open folder: {e}"))?;
+        reap_detached(child);
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -3360,6 +3452,10 @@ fn updater_platform_keys() -> &'static [&'static str] {
         &["windows-x86_64", "windows-x86-64"]
     } else if cfg!(target_os = "linux") {
         &["linux-x86_64", "linux-x86-64"]
+    } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        &["darwin-aarch64", "darwin-arm64"]
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        &["darwin-x86_64", "darwin-x86-64"]
     } else {
         &[]
     }
@@ -3373,6 +3469,17 @@ fn asset_looks_like_this_platform(name: &str) -> bool {
             || (name.ends_with(".exe") && (lower.contains("setup") || lower.contains("remedy")))
     } else if cfg!(target_os = "linux") {
         lower.ends_with(".appimage") && lower.contains("remedy")
+    } else if cfg!(target_os = "macos") {
+        if !(lower.contains("remedy") && lower.ends_with(".app.tar.gz")) {
+            return false;
+        }
+        if cfg!(target_arch = "aarch64") {
+            lower.contains("aarch64") || lower.contains("arm64")
+        } else if cfg!(target_arch = "x86_64") {
+            lower.contains("x86_64") || lower.contains("_x64.") || lower.contains("-x64.")
+        } else {
+            false
+        }
     } else {
         false
     }
@@ -4497,14 +4604,289 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
     Ok(())
 }
 
+
+#[cfg(target_os = "macos")]
+fn validate_macos_update_archive(archive: &Path) -> Result<(), String> {
+    let meta = std::fs::metadata(archive).map_err(|e| format!("stat update archive: {e}"))?;
+    if meta.len() < 512 * 1024 {
+        return Err("Update archive is too small to be a Remedy app bundle".into());
+    }
+    let mut hdr = [0u8; 2];
+    let mut f = std::fs::File::open(archive).map_err(|e| format!("open update archive: {e}"))?;
+    f.read_exact(&mut hdr)
+        .map_err(|e| format!("read update archive: {e}"))?;
+    if hdr != [0x1f, 0x8b] {
+        return Err("Update archive is not a gzip-compressed tarball".into());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn extract_macos_app_from_archive(archive: &Path, staging: &Path) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(staging).map_err(|e| format!("create update staging: {e}"))?;
+    let status = Command::new("tar")
+        .args(["-xzf", &archive.to_string_lossy(), "-C", &staging.to_string_lossy()])
+        .status()
+        .map_err(|e| format!("extract update archive: {e}"))?;
+    if !status.success() {
+        return Err(format!("tar exited {status}"));
+    }
+    let mut found: Option<PathBuf> = None;
+    let walker = std::fs::read_dir(staging).map_err(|e| format!("list update staging: {e}"))?;
+    for entry in walker {
+        let entry = entry.map_err(|e| format!("read update staging: {e}"))?;
+        let p = entry.path();
+        if p.extension().and_then(|s| s.to_str()) == Some("app") && p.is_dir() {
+            found = Some(p);
+            break;
+        }
+    }
+    // Tauri sometimes nests the .app one directory down.
+    if found.is_none() {
+        for entry in std::fs::read_dir(staging).map_err(|e| format!("list update staging: {e}"))? {
+            let entry = entry.map_err(|e| format!("read update staging: {e}"))?;
+            let p = entry.path();
+            if !p.is_dir() {
+                continue;
+            }
+            if let Ok(inner) = std::fs::read_dir(&p) {
+                for child in inner.flatten() {
+                    let c = child.path();
+                    if c.extension().and_then(|s| s.to_str()) == Some("app") && c.is_dir() {
+                        found = Some(c);
+                        break;
+                    }
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+    }
+    let app = found.ok_or_else(|| "Update archive did not contain a .app bundle".to_string())?;
+    let macos_dir = app.join("Contents").join("MacOS");
+    if !macos_dir.is_dir() {
+        return Err("Update archive .app is missing Contents/MacOS".into());
+    }
+    let has_bin = std::fs::read_dir(&macos_dir)
+        .map_err(|e| format!("read updated MacOS dir: {e}"))?
+        .flatten()
+        .any(|e| e.path().is_file());
+    if !has_bin {
+        return Err("Update archive .app has an empty Contents/MacOS".into());
+    }
+    Ok(app)
+}
+
+/// macOS self-replace: download the signed `.app.tar.gz`, verify minisign,
+/// swap the running `.app`, and relaunch with `open`.
 #[tauri::command]
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(target_os = "macos")]
+fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), String> {
+    if !download_url.is_empty() && !is_trusted_download_url(&download_url) {
+        return Err("Download URL is not a trusted GitHub release host".into());
+    }
+    let Some(dest_app) = macos_app_bundle_path() else {
+        return Err(
+            "Could not locate Remedy Desktop.app. Install the app (drag it to Applications) and retry."
+                .into(),
+        );
+    };
+    let dest_s = dest_app.to_string_lossy();
+    if dest_s.starts_with("/Volumes/") {
+        return Err(
+            "This copy is on a disk image. Move Remedy Desktop to Applications, then update."
+                .into(),
+        );
+    }
+    if UPDATE_IN_FLIGHT.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return Err("An update is already in progress".into());
+    }
+
+    let app_for_thread = app.clone();
+    let ver_from = app_version(&app);
+    let server_state = app.state::<ServerState>();
+    let process_slot = server_state.process.clone();
+    let app_exiting = server_state.app_exiting.clone();
+    let client_url = download_url;
+    let dest = dest_app;
+
+    thread::spawn(move || {
+        let result = (|| -> Result<(), String> {
+            emit_progress_ver(
+                &app_for_thread,
+                "downloading",
+                0,
+                "Connecting to update server...",
+                &ver_from,
+                "",
+            );
+            let release = fetch_signed_release_asset()?;
+            ensure_release_is_newer(&release.version, &ver_from)?;
+            let mut download_url = release.url;
+            let client_norm = client_url
+                .trim()
+                .replace("Remedy_Desktop_", "Remedy.Desktop_")
+                .replace("Remedy Desktop_", "Remedy.Desktop_");
+            if !client_norm.is_empty() && client_norm != download_url {
+                log::warn!(
+                    "Update URL from UI differed from signed latest.json; using signed asset.\n  ui: {client_norm}\n  signed: {download_url}"
+                );
+            }
+            if download_url.is_empty() {
+                if client_norm.is_empty() {
+                    return Err("No download URL for this release".into());
+                }
+                download_url = client_norm;
+            }
+
+            let resp = ureq::get(&download_url)
+                .set("User-Agent", "RemedyDesktop-Updater/0.10")
+                .set("Accept", "application/octet-stream,*/*")
+                .timeout(Duration::from_secs(600))
+                .call()
+                .map_err(|e| format!("Download failed: {e}"))?;
+            if resp.status() != 200 {
+                return Err(format!("Download HTTP {}", resp.status()));
+            }
+            let content_type = resp
+                .header("Content-Type")
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if content_type.contains("text/html") {
+                return Err(
+                    "Download returned HTML instead of an app archive (check the release URL)."
+                        .into(),
+                );
+            }
+            let len = resp
+                .header("Content-Length")
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
+
+            let parent = dest
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."));
+            let temp = parent.join(format!(
+                "Remedy.Desktop.update-{}.app.tar.gz",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_file(&temp);
+            let mut file = std::fs::File::create(&temp)
+                .map_err(|e| format!("Cannot create temp update archive: {e}"))?;
+            let mut reader = resp.into_reader();
+            let mut buf = [0u8; 64 * 1024];
+            let mut done: u64 = 0;
+            loop {
+                let n = reader
+                    .read(&mut buf)
+                    .map_err(|e| format!("Download interrupted: {e}"))?;
+                if n == 0 {
+                    break;
+                }
+                file.write_all(&buf[..n])
+                    .map_err(|e| format!("Write failed: {e}"))?;
+                done += n as u64;
+                let pct = if len > 0 {
+                    ((done * 100) / len).min(99) as u8
+                } else {
+                    ((done / (512 * 1024)) % 90) as u8
+                };
+                let mb = done as f64 / (1024.0 * 1024.0);
+                emit_progress(
+                    &app_for_thread,
+                    "downloading",
+                    pct,
+                    &format!("Downloading update... {mb:.1} MB"),
+                );
+            }
+            drop(file);
+
+            validate_macos_update_archive(&temp)?;
+            emit_progress(
+                &app_for_thread,
+                "installing",
+                100,
+                "Verifying release signature...",
+            );
+            verify_installer_minisign(&temp, &release.sig)?;
+
+            let staging = parent.join(format!("Remedy.Desktop.staging-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&staging);
+            let new_app = match extract_macos_app_from_archive(&temp, &staging) {
+                Ok(p) => p,
+                Err(e) => {
+                    let _ = std::fs::remove_file(&temp);
+                    let _ = std::fs::remove_dir_all(&staging);
+                    return Err(e);
+                }
+            };
+
+            emit_progress(
+                &app_for_thread,
+                "closing",
+                100,
+                "Download complete. Restarting…",
+            );
+            app_exiting.store(true, Ordering::SeqCst);
+            match process_slot.lock() {
+                Ok(mut guard) => kill_child(&mut guard),
+                Err(poisoned) => {
+                    let mut guard = poisoned.into_inner();
+                    kill_child(&mut guard);
+                }
+            }
+            force_stop_remedy_processes();
+
+            let backup = parent.join(format!(
+                "{}.bak",
+                dest.file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "Remedy Desktop.app".into())
+            ));
+            let _ = std::fs::remove_dir_all(&backup);
+            std::fs::rename(&dest, &backup)
+                .map_err(|e| format!("Cannot move current app aside: {e}"))?;
+            if let Err(e) = std::fs::rename(&new_app, &dest) {
+                let _ = std::fs::rename(&backup, &dest);
+                let _ = std::fs::remove_file(&temp);
+                let _ = std::fs::remove_dir_all(&staging);
+                return Err(format!("Cannot install updated app: {e}"));
+            }
+            let _ = std::fs::remove_file(&temp);
+            let _ = std::fs::remove_dir_all(&staging);
+            let _ = std::fs::remove_dir_all(&backup);
+
+            Command::new("open")
+                .arg(&dest)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|e| format!("Failed to relaunch Remedy Desktop: {e}"))?;
+            thread::sleep(Duration::from_millis(700));
+            app_for_thread.exit(0);
+            Ok(())
+        })();
+        if let Err(e) = result {
+            log::error!("Update failed: {}", e);
+            UPDATE_IN_FLIGHT.store(false, std::sync::atomic::Ordering::SeqCst);
+            emit_progress(&app_for_thread, "error", 0, &e);
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 fn start_desktop_update(_app: AppHandle, _download_url: String) -> Result<(), String> {
     Err(
-        "In-app updates are available on Windows and Linux AppImage. Install from GitHub Releases."
+        "In-app updates are available on Windows, Linux AppImage, and macOS. Install from GitHub Releases."
             .into(),
     )
 }
+
 
 /// Download the NSIS installer, run it silently (/S /UPDATE), exit so files can be replaced.
 ///
@@ -6346,6 +6728,14 @@ mod updater_parse_tests {
                 "linux-x86_64": {
                     "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.63.2/Remedy.Desktop_0.63.2_amd64.AppImage",
                     "signature": "untrusted comment: minisign\nRWfake"
+                },
+                "darwin-aarch64": {
+                    "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.63.2/Remedy.Desktop_0.63.2_aarch64.app.tar.gz",
+                    "signature": "untrusted comment: minisign\nRWfake"
+                },
+                "darwin-x86_64": {
+                    "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.63.2/Remedy.Desktop_0.63.2_x64.app.tar.gz",
+                    "signature": "untrusted comment: minisign\nRWfake"
                 }
             }
         })
@@ -6359,6 +6749,10 @@ mod updater_parse_tests {
             assert!(got.url.ends_with("_x64-setup.exe"), "{}", got.url);
         } else if cfg!(target_os = "linux") {
             assert!(got.url.ends_with(".AppImage"), "{}", got.url);
+        } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            assert!(got.url.ends_with("_aarch64.app.tar.gz"), "{}", got.url);
+        } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+            assert!(got.url.ends_with("_x64.app.tar.gz"), "{}", got.url);
         }
         assert!(got.url.contains("AhmiDarrow/RemedyAI/releases/"));
     }
@@ -6366,7 +6760,7 @@ mod updater_parse_tests {
     #[test]
     fn parse_signed_release_refuses_empty_signature() {
         let mut v = sample_latest();
-        for key in ["windows-x86_64", "linux-x86_64"] {
+        for key in ["windows-x86_64", "linux-x86_64", "darwin-aarch64", "darwin-x86_64"] {
             v["platforms"][key]["signature"] = serde_json::json!("");
         }
         let err = parse_signed_release(&v).unwrap_err();
