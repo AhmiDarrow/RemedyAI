@@ -1,4 +1,14 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
+// Zig 0.16.0 std.debug.SelfInfo/Windows.zig @ptrCasts a GetProcAddress result
+// without @alignCast. That fails to compile on aarch64-windows-msvc (align 1
+// -> align 4) when building a static lib. Disable stack traces on that
+// triple only; other targets keep the default.
+pub const std_options: std.Options = .{
+    .allow_stack_tracing = !(builtin.os.tag == .windows and builtin.cpu.arch == .aarch64),
+};
+
 
 pub const capability = @import("capability.zig");
 pub const filesystem = @import("filesystem.zig");
