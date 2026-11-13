@@ -4,7 +4,21 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.68.1] - 2026-11-13
+
+### Fixed
+
+- Zig's Intel macOS cross from macos-15 now passes the macOS SDK
+  sysroot so `libremedy_core.dylib` can link ApplicationServices.
+  The `v0.68.0` tag was created, but Desktop Release failed on that
+  cross and no GitHub or PyPI 0.68.0 artifacts were published.
+  0.68.1 is the first shipped release with the unsigned macOS
+  Desktop app.
+
 ## [0.68.0] - 2026-11-13
+
+This version was tagged but never published. See 0.68.1.
+
 
 ### Added
 
