@@ -2,13 +2,14 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.66.6**. Installed apps update on their own.
+Current release: **v0.67.0**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [0.67.0 — macOS, ARM64, and a smaller wheel](#0670---macos-arm64-and-a-smaller-wheel)
 - [0.66.6 — A safer rendezvous and a clearer first serve](#0666---a-safer-rendezvous-and-a-clearer-first-serve)
 - [0.66.5 — More reliable shell capture and terminal spawn](#0665---more-reliable-shell-capture-and-terminal-spawn)
 - [0.66.4 — The worker stays in the install venv](#0664---the-worker-stays-in-the-install-venv)
@@ -21,6 +22,21 @@ you gave her, and waits for you before money, send, or delete.
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
+
+## 0.67.0 - macOS, ARM64, and a smaller wheel
+
+- **`remedy serve` on Apple silicon, Intel Macs, and Linux ARM64 can
+  download a prebuilt runtime.** First run still verifies the checksum.
+  Windows ARM64 is included when the release has that pair. Host features
+  that only exist on Windows or Linux (UI Automation, AT-SPI, sending
+  clicks) stay fail-closed on macOS. The macOS Desktop app is not in this
+  release; it would need Apple signing.
+- **The install wheel is smaller.** The two HQ voice reference clips are
+  downloaded on first Chatterbox use, checked, and cached under
+  `~/.remedy`, instead of shipping in the package. If that download can
+  be tried, Remedy does not quietly fall back to a Kokoro stand-in.
+- **A hive forager that already reported is no longer marked running.**
+  That race could leave a finished forager stuck in the roster.
 
 ## 0.66.6 - A safer rendezvous and a clearer first serve
 
