@@ -94,9 +94,6 @@ extern fn AXValueGetValue(value: CFTypeRef, typ: u32, value_ptr: *anyopaque) cal
 extern fn AXValueCreate(typ: u32, value_ptr: *const anyopaque) callconv(.c) CFTypeRef;
 extern fn AXUIElementSetAttributeValue(element: AXUIElementRef, attribute: CFStringRef, value: CFTypeRef) callconv(.c) AXError;
 
-const kAXValueTypeCGPoint: u32 = 1;
-const kAXValueTypeCGSize: u32 = 2;
-
 extern fn CGPreflightScreenCaptureAccess() callconv(.c) bool;
 extern fn CGRequestScreenCaptureAccess() callconv(.c) bool;
 extern fn CGMainDisplayID() callconv(.c) CGDirectDisplayID;
