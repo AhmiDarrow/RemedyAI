@@ -4,6 +4,23 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.67.1] - 2026-11-12
+
+### Added
+
+- The Windows ARM64 CLI runtime (`remedy-runtime` and `remedy_core`) now
+  ships in Desktop Release and `remedy-native-SHA256SUMS.txt`. A
+  post-release job on `windows-11-arm` checks the published checksums
+  and runs a basic smoke (`--probe` plus loading the DLL). CI
+  `native-core` on windows-latest cross-compiles the same pair.
+
+### Fixed
+
+- Zig 0.16.0 can compile `libremedy_core` for `aarch64-windows-msvc`.
+  `GetProcAddress` results are `@alignCast` to function pointers, and
+  stack traces are disabled only on Windows aarch64 to work around a
+  `std.debug.SelfInfo` alignment error in that Zig release.
+
 ## [0.67.0] - 2026-11-12
 
 ### Added
