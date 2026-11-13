@@ -37,8 +37,10 @@ _SHA_NI = (
 _CANDIDATES = (
     ROOT / "native" / "zig" / "zig-out" / "bin" / "remedy_core.dll",
     ROOT / "native" / "zig" / "zig-out" / "lib" / "libremedy_core.so",
+    ROOT / "native" / "zig" / "zig-out" / "lib" / "libremedy_core.dylib",
     ROOT / "desktop" / "bin" / "remedy_core.dll",
     ROOT / "desktop" / "bin" / "libremedy_core.so",
+    ROOT / "desktop" / "bin" / "libremedy_core.dylib",
 )
 
 

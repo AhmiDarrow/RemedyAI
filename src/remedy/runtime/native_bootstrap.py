@@ -97,6 +97,34 @@ _PLATFORM_ASSETS: dict[tuple[str, str], NativeAssets] = {
         "remedy-runtime",
         "libremedy_core.so",
     ),
+    ("Linux", "aarch64"): NativeAssets(
+        "aarch64-unknown-linux-gnu",
+        "remedy-runtime-aarch64-unknown-linux-gnu",
+        "libremedy_core-aarch64-unknown-linux-gnu.so",
+        "remedy-runtime",
+        "libremedy_core.so",
+    ),
+    ("Darwin", "arm64"): NativeAssets(
+        "aarch64-apple-darwin",
+        "remedy-runtime-aarch64-apple-darwin",
+        "libremedy_core-aarch64-apple-darwin.dylib",
+        "remedy-runtime",
+        "libremedy_core.dylib",
+    ),
+    ("Darwin", "x86_64"): NativeAssets(
+        "x86_64-apple-darwin",
+        "remedy-runtime-x86_64-apple-darwin",
+        "libremedy_core-x86_64-apple-darwin.dylib",
+        "remedy-runtime",
+        "libremedy_core.dylib",
+    ),
+    ("Windows", "ARM64"): NativeAssets(
+        "aarch64-pc-windows-msvc",
+        "remedy-runtime-aarch64-pc-windows-msvc.exe",
+        "remedy_core-aarch64-pc-windows-msvc.dll",
+        "remedy-runtime.exe",
+        "remedy_core.dll",
+    ),
 }
 
 
@@ -104,8 +132,13 @@ def assets_for_this_machine() -> NativeAssets | None:
     system = platform.system()
     machine = platform.machine()
     key = (system, machine)
-    if key == ("Linux", "arm64"):
-        key = ("Linux", "aarch64")
+    aliases = {
+        ("Linux", "arm64"): ("Linux", "aarch64"),
+        ("Darwin", "aarch64"): ("Darwin", "arm64"),
+        ("Windows", "arm64"): ("Windows", "ARM64"),
+        ("Windows", "aarch64"): ("Windows", "ARM64"),
+    }
+    key = aliases.get(key, key)
     return _PLATFORM_ASSETS.get(key)
 
 

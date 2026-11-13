@@ -201,6 +201,45 @@ jobs:
             desktop/bin/rmdy-deps/**
           retention-days: 1
 
+      # Cheap cross-compile: same windows-latest runner, no extra hosted ARM VM.
+      # If the ARM64 Windows SDK / Zig syslibs are missing, skip the pair rather
+      # than failing the x64 Desktop installer.
+      - name: Build Windows ARM64 runtime (cross)
+        id: winarm
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = "0"
+          $env:GOOS = "windows"
+          $env:GOARCH = "arm64"
+          Push-Location native/go
+          go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime-aarch64-pc-windows-msvc.exe ./cmd/remedy-runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Pop-Location
+          Push-Location native/zig
+          zig build -Doptimize=ReleaseSafe -Dtarget=aarch64-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Pop-Location
+          $dll = $null
+          foreach ($cand in @(
+            "native/zig/zig-out/bin/remedy_core.dll",
+            "native/zig/zig-out/lib/remedy_core.dll"
+          )) {
+            if (Test-Path $cand) { $dll = $cand; break }
+          }
+          if (-not $dll) { throw "Zig ARM64 build produced no remedy_core.dll" }
+          Copy-Item $dll desktop/bin/remedy_core-aarch64-pc-windows-msvc.dll
+
+      - name: Upload Windows ARM64 runtime
+        if: steps.winarm.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: remedy-runtime-windows-arm64
+          path: |
+            desktop/bin/remedy-runtime-aarch64-pc-windows-msvc.exe
+            desktop/bin/remedy_core-aarch64-pc-windows-msvc.dll
+          retention-days: 1
+
   build-tauri:
     needs: [verify, build-runtime]
     runs-on: windows-latest
@@ -362,6 +401,103 @@ jobs:
             desktop/bin/rmdy-deps/**
           retention-days: 1
 
+
+  build-runtime-linux-arm:
+    needs: verify
+    runs-on: ubuntu-24.04-arm
+    env:
+      REMEDY_RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: native/go/go.mod
+          cache-dependency-path: native/go/go.sum
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+
+      - name: Install Linux Zig host libs
+        run: bash scripts/ci_install_linux_zig_host_deps.sh
+
+      - name: Stamp release version
+        run: python3 scripts/sync_version.py "${REMEDY_RELEASE_VERSION}"
+
+      - name: Build Linux ARM64 native runtime
+        run: |
+          set -euo pipefail
+          mkdir -p desktop/bin
+          cd native/go
+          go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime-aarch64-unknown-linux-gnu ./cmd/remedy-runtime
+          cd ../zig
+          zig build -Doptimize=ReleaseSafe
+          cp zig-out/lib/libremedy_core.so ../../desktop/bin/libremedy_core-aarch64-unknown-linux-gnu.so
+          chmod +x ../../desktop/bin/remedy-runtime-aarch64-unknown-linux-gnu
+
+      - name: Upload Linux ARM64 runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: remedy-runtime-linux-arm
+          path: |
+            desktop/bin/remedy-runtime-aarch64-unknown-linux-gnu
+            desktop/bin/libremedy_core-aarch64-unknown-linux-gnu.so
+          retention-days: 1
+
+  # Prebuilt Go/Zig runtimes only. Desktop Tauri macOS bundles are skipped:
+  # signing and notarization would need the owner's Apple Developer credentials.
+  build-runtime-macos:
+    needs: verify
+    runs-on: macos-14
+    env:
+      REMEDY_RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: native/go/go.mod
+          cache-dependency-path: native/go/go.sum
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+
+      - name: Stamp release version
+        run: python3 scripts/sync_version.py "${REMEDY_RELEASE_VERSION}"
+
+      - name: Build macOS native runtimes (arm64 native, x86_64 cross)
+        run: |
+          set -euo pipefail
+          mkdir -p desktop/bin
+          cd native/go
+          CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime-aarch64-apple-darwin ./cmd/remedy-runtime
+          CGO_ENABLED=0 GOARCH=amd64 go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime-x86_64-apple-darwin ./cmd/remedy-runtime
+          cd ../zig
+          zig build -Doptimize=ReleaseSafe
+          cp zig-out/lib/libremedy_core.dylib ../../desktop/bin/libremedy_core-aarch64-apple-darwin.dylib
+          zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-macos
+          cp zig-out/lib/libremedy_core.dylib ../../desktop/bin/libremedy_core-x86_64-apple-darwin.dylib
+          chmod +x ../../desktop/bin/remedy-runtime-aarch64-apple-darwin ../../desktop/bin/remedy-runtime-x86_64-apple-darwin
+          cd ../..
+          python3 scripts/check_remedy_core_isa.py desktop/bin/libremedy_core-x86_64-apple-darwin.dylib
+
+      - name: Upload macOS runtimes
+        uses: actions/upload-artifact@v4
+        with:
+          name: remedy-runtime-macos
+          path: |
+            desktop/bin/remedy-runtime-aarch64-apple-darwin
+            desktop/bin/remedy-runtime-x86_64-apple-darwin
+            desktop/bin/libremedy_core-aarch64-apple-darwin.dylib
+            desktop/bin/libremedy_core-x86_64-apple-darwin.dylib
+          retention-days: 1
+
   build-tauri-linux:
     needs: [verify, build-runtime-linux]
     runs-on: ubuntu-22.04
@@ -453,7 +589,7 @@ jobs:
           retention-days: 7
 
   release:
-    needs: [verify, build-runtime, build-runtime-linux, build-tauri, build-tauri-linux]
+    needs: [verify, build-runtime, build-runtime-linux, build-runtime-linux-arm, build-runtime-macos, build-tauri, build-tauri-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -494,6 +630,25 @@ jobs:
           name: remedy-runtime-linux
           path: dist-native-linux/
 
+      - name: Download Linux ARM64 native runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: remedy-runtime-linux-arm
+          path: dist-native-linux-arm/
+
+      - name: Download macOS native runtimes
+        uses: actions/download-artifact@v4
+        with:
+          name: remedy-runtime-macos
+          path: dist-native-macos/
+
+      - name: Download Windows ARM64 native runtime
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: remedy-runtime-windows-arm64
+          path: dist-native-win-arm/
+
       - name: Stage standalone native CLI assets
         shell: bash
         run: |
@@ -515,6 +670,29 @@ jobs:
           if [[ -f dist-native-linux/libremedy_core.so ]]; then
             cp dist-native-linux/libremedy_core.so dist-native/libremedy_core-x86_64-unknown-linux-gnu.so
           fi
+          # Additional triples are already named in their artifacts.
+          for src in dist-native-linux-arm dist-native-macos dist-native-win-arm; do
+            if [[ -d "$src" ]]; then
+              find "$src" -maxdepth 1 -type f \( -name 'remedy-runtime-*' -o -name '*remedy_core*' \) -exec cp -f {} dist-native/ \;
+            fi
+          done
+          chmod +x dist-native/remedy-runtime-x86_64-unknown-linux-gnu 2>/dev/null || true
+          chmod +x dist-native/remedy-runtime-aarch64-unknown-linux-gnu 2>/dev/null || true
+          chmod +x dist-native/remedy-runtime-aarch64-apple-darwin 2>/dev/null || true
+          chmod +x dist-native/remedy-runtime-x86_64-apple-darwin 2>/dev/null || true
+          for required in \
+            remedy-runtime-aarch64-unknown-linux-gnu \
+            libremedy_core-aarch64-unknown-linux-gnu.so \
+            remedy-runtime-aarch64-apple-darwin \
+            libremedy_core-aarch64-apple-darwin.dylib \
+            remedy-runtime-x86_64-apple-darwin \
+            libremedy_core-x86_64-apple-darwin.dylib
+          do
+            if [[ ! -f "dist-native/${required}" ]]; then
+              echo "::error::Missing required native asset ${required}"
+              exit 1
+            fi
+          done
           for wav in assets/voice-references/female.wav assets/voice-references/male.wav; do
             if [[ ! -f "$wav" ]]; then
               echo "::error::Missing HQ voice reference $wav"
@@ -524,7 +702,6 @@ jobs:
           (cd assets/voice-references && sha256sum -c SHA256SUMS.txt)
           cp assets/voice-references/female.wav dist-native/remedy-voice-female.wav
           cp assets/voice-references/male.wav dist-native/remedy-voice-male.wav
-          chmod +x dist-native/remedy-runtime-x86_64-unknown-linux-gnu 2>/dev/null || true
           mapfile -t files < <(find dist-native -maxdepth 1 -type f \( -name 'remedy-runtime-*' -o -name '*remedy_core*' -o -name 'remedy-voice-*.wav' \) | sort)
           if [[ ${#files[@]} -eq 0 ]]; then
             echo "::error::No standalone remedy-runtime / remedy_core assets to publish"
@@ -671,3 +848,35 @@ jobs:
             dist-linux/*
             dist-native/*
           generate_release_notes: true
+
+  # Confirm published macOS / ARM assets match remedy-native-SHA256SUMS.txt.
+  # Runs on a macOS runner (and Linux ARM) after the GitHub release exists.
+  verify-native-assets:
+    name: Verify published macOS and ARM checksums
+    needs: [verify, release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            triples: aarch64-apple-darwin x86_64-apple-darwin
+          - os: ubuntu-24.04-arm
+            triples: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download published assets and check sha256
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.verify.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p verify-assets
+          gh release download "${TAG}" -R "${GITHUB_REPOSITORY}" -D verify-assets \
+            -p 'remedy-native-SHA256SUMS.txt' \
+            -p 'remedy-runtime-*' \
+            -p '*remedy_core*'
+          python3 scripts/verify_native_release_assets.py verify-assets ${{ matrix.triples }}
