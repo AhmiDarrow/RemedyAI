@@ -4,7 +4,26 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.68.2] - 2026-11-13
+
+### Fixed
+
+- Desktop Release now builds the Intel Go runtime, Zig core, and Tauri
+  app natively on `macos-15-intel` (Apple Silicon stays on `macos-15`).
+  Zig 0.16 only auto-fills Apple framework search paths for a native
+  target, so crossing `libremedy_core` to `x86_64-macos` from arm64
+  failed even with the macOS SDK `--sysroot` (`searched paths: none`).
+  A `workflow_dispatch` dry run can prove the full platform matrix
+  without publishing. The `v0.68.0` and `v0.68.1` tags were created,
+  but Desktop Release failed on that Intel cross both times and no
+  GitHub or PyPI artifacts were published for those versions.
+  0.68.2 is the first shipped release with the unsigned macOS Desktop
+  app.
+
 ## [0.68.1] - 2026-11-13
+
+This version was tagged but never published. See 0.68.2.
+
 
 ### Fixed
 
