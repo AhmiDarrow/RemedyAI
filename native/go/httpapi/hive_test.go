@@ -218,3 +218,51 @@ func TestHiveAssignRejectsForager(t *testing.T) {
 		t.Fatalf("forager assign should fail: %#v", assigned)
 	}
 }
+
+func TestCommitHiveSpawnStartPreservesForagerReport(t *testing.T) {
+	fs := openHiveStore(t.TempDir())
+	d, err := fs.hire("race", hiveCadenceForager, "", "", "", 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Status = hiveStatusReported
+	d.Packet = &hivePacket{Goal: d.Goal, Done: true, Outcome: "Hello world"}
+	d.Journal = map[string]any{"pulse_count": 1}
+	if err := fs.save(d); err != nil {
+		t.Fatal(err)
+	}
+
+	got := commitHiveSpawnStart(fs, hiveDaughter{ID: d.ID, Status: hiveStatusPending, Cadence: hiveCadenceForager}, hiveCadenceForager, true)
+	if got.Status != hiveStatusReported {
+		t.Fatalf("stale running write clobbered report: status=%s", got.Status)
+	}
+	fresh, ok, err := fs.get(d.ID)
+	if err != nil || !ok {
+		t.Fatalf("reload: ok=%v err=%v", ok, err)
+	}
+	if fresh.Status != hiveStatusReported {
+		t.Fatalf("persisted status=%s, want reported", fresh.Status)
+	}
+	if fresh.Journal["pulse_count"] != 1 && fresh.Journal["pulse_count"] != float64(1) {
+		t.Fatalf("pulse_count=%v, want 1", fresh.Journal["pulse_count"])
+	}
+}
+
+func TestCommitHiveSpawnStartMarksPendingForagerRunning(t *testing.T) {
+	fs := openHiveStore(t.TempDir())
+	d, err := fs.hire("pending", hiveCadenceForager, "", "", "", 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := commitHiveSpawnStart(fs, d, hiveCadenceForager, true)
+	if got.Status != hiveStatusRunning {
+		t.Fatalf("status=%s, want running", got.Status)
+	}
+	fresh, ok, err := fs.get(d.ID)
+	if err != nil || !ok {
+		t.Fatalf("reload: ok=%v err=%v", ok, err)
+	}
+	if fresh.Status != hiveStatusRunning {
+		t.Fatalf("persisted status=%s, want running", fresh.Status)
+	}
+}
