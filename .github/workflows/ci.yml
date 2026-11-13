@@ -68,16 +68,6 @@ jobs:
           test -f zig-out/lib/libremedy_core.so
           echo "REMEDY_NATIVE_CORE_LIB=${PWD}/zig-out/lib/libremedy_core.so" >> "$GITHUB_ENV"
 
-      # Same Intel-macOS cross Desktop Release uses for libremedy_core.dylib.
-      # Zig 0.16 needs the macOS SDK sysroot to find ApplicationServices when
-      # targeting x86_64-macos from a macos-15 arm64 runner.
-      - name: Cross-compile Intel macOS dylib
-        if: runner.os == 'macOS'
-        working-directory: native/zig
-        run: |
-          SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
-          zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-macos --sysroot "${SDKROOT}"
-
       # native-core has no uv; system Python is enough for this stdlib script.
       - name: Refuse host-ISA bake in remedy_core (SHA-NI)
         shell: bash
@@ -294,6 +284,18 @@ jobs:
       - name: Zig release-safe build
         run: zig build -Doptimize=ReleaseSafe
         working-directory: native/zig
+
+      # Same Intel-macOS cross Desktop Release uses for libremedy_core.dylib.
+      # Must run on native-core macos-15 (not the Linux test job). Zig 0.16
+      # does not search SDK frameworks for an explicit -Dtarget=x86_64-macos
+      # even with --sysroot; build.zig adds the framework path from sysroot.
+      - name: Cross-compile Intel macOS dylib
+        if: runner.os == 'macOS'
+        working-directory: native/zig
+        run: |
+          SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+          zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-macos --sysroot "${SDKROOT}"
+          test -f zig-out/lib/libremedy_core.dylib
 
       # Same cross that Desktop Release uses for the Windows ARM64 CLI pair.
       # Catches the Zig 0.16.0 aarch64-windows-msvc @ptrCast alignment issue
