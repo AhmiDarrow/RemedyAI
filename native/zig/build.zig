@@ -25,8 +25,11 @@ fn linkHostLibraries(module: *std.Build.Module, target: std.Build.ResolvedTarget
             module.linkSystemLibrary("gobject-2.0", .{});
         },
         .macos => {
-            // waitpid / kill / libproc for authorized worker spawn.
+            // AX, CGEvent, CGWindowList, Carbon Pasteboard, waitpid/libproc.
             module.link_libc = true;
+            module.linkFramework("ApplicationServices", .{});
+            module.linkFramework("CoreGraphics", .{});
+            module.linkFramework("CoreFoundation", .{});
         },
         else => {},
     }
