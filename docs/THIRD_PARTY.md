@@ -29,10 +29,11 @@ request** rather than bundled, so they are documented rather than attributed.
 
 ## Reference voices (LibriVox)
 
-- **Files:** `src/remedy/voice/references/female.wav` (Kara Shallenberg, *The Secret Garden*), `male.wav` (Stewart Wills, *Moby Dick*)
+- **Files:** `assets/voice-references/female.wav` (Kara Shallenberg, *The Secret Garden*), `male.wav` (Stewart Wills, *Moby Dick*). Attached to GitHub releases as `remedy-voice-female.wav` / `remedy-voice-male.wav` and listed in `remedy-native-SHA256SUMS.txt`.
 - **Use:** 12-second speech samples Remedy's voice clones, one per gender
 - **License:** **Public domain** (LibriVox; archive.org items carry the public-domain mark)
 - **Source:** https://archive.org/details/secret_garden_librivox · https://archive.org/details/moby_dick_librivox
+- **Redistribution:** Not in the PyPI wheel. Downloaded at first HQ use into `~/.remedy/voice/references/` after a sha256 pin check. No silent Kokoro fallback when that download can be attempted.
 
 ## llama.cpp
 
