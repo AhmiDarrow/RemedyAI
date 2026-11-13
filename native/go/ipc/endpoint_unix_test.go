@@ -4,14 +4,25 @@ package ipc
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
+// Darwin's sockaddr_un.sun_path is 104 bytes. t.TempDir() on GitHub
+// macOS runners is already too long, so tests use a short /tmp path.
+func shortUnixSocket(t *testing.T, name string) string {
+	t.Helper()
+	path := filepath.Join("/tmp", fmt.Sprintf("remedy-%d-%s.sock", os.Getpid(), name))
+	_ = os.Remove(path)
+	t.Cleanup(func() { _ = os.Remove(path) })
+	return path
+}
+
 func TestUnixSocketRoundTripAndCleanup(t *testing.T) {
-	endpoint := filepath.Join(t.TempDir(), "remedy-test.sock")
+	endpoint := shortUnixSocket(t, "rt")
 	listener, err := Listen(endpoint)
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +65,7 @@ func TestUnixSocketRoundTripAndCleanup(t *testing.T) {
 }
 
 func TestAcceptContextUnblocksOnCancel(t *testing.T) {
-	endpoint := filepath.Join(t.TempDir(), "remedy-test-cancel.sock")
+	endpoint := shortUnixSocket(t, "rc")
 	listener, err := Listen(endpoint)
 	if err != nil {
 		t.Fatal(err)
