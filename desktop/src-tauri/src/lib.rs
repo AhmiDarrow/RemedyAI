@@ -6728,6 +6728,14 @@ mod updater_parse_tests {
                 "linux-x86_64": {
                     "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.63.2/Remedy.Desktop_0.63.2_amd64.AppImage",
                     "signature": "untrusted comment: minisign\nRWfake"
+                },
+                "darwin-aarch64": {
+                    "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.63.2/Remedy.Desktop_0.63.2_aarch64.app.tar.gz",
+                    "signature": "untrusted comment: minisign\nRWfake"
+                },
+                "darwin-x86_64": {
+                    "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.63.2/Remedy.Desktop_0.63.2_x64.app.tar.gz",
+                    "signature": "untrusted comment: minisign\nRWfake"
                 }
             }
         })
@@ -6741,6 +6749,10 @@ mod updater_parse_tests {
             assert!(got.url.ends_with("_x64-setup.exe"), "{}", got.url);
         } else if cfg!(target_os = "linux") {
             assert!(got.url.ends_with(".AppImage"), "{}", got.url);
+        } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            assert!(got.url.ends_with("_aarch64.app.tar.gz"), "{}", got.url);
+        } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+            assert!(got.url.ends_with("_x64.app.tar.gz"), "{}", got.url);
         }
         assert!(got.url.contains("AhmiDarrow/RemedyAI/releases/"));
     }
@@ -6748,7 +6760,7 @@ mod updater_parse_tests {
     #[test]
     fn parse_signed_release_refuses_empty_signature() {
         let mut v = sample_latest();
-        for key in ["windows-x86_64", "linux-x86_64"] {
+        for key in ["windows-x86_64", "linux-x86_64", "darwin-aarch64", "darwin-x86_64"] {
             v["platforms"][key]["signature"] = serde_json::json!("");
         }
         let err = parse_signed_release(&v).unwrap_err();
