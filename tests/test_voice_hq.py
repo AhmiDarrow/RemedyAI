@@ -119,16 +119,16 @@ def test_every_gender_has_a_human_reference_out_of_the_box(tmp_path: Path):
 
     for g in ("female", "male", "neutral"):
         p = identity_prompt_path(g, tmp_path)
-        assert p is not None and p == bundled_reference(g)
+        assert p is not None and p == bundled_reference(g, tmp_path)
         assert p.suffix == ".wav" and p.stat().st_size > 100_000
-    assert bundled_reference("female") != bundled_reference("male")
+    assert bundled_reference("female", tmp_path) != bundled_reference("male", tmp_path)
 
     save(VoiceIdentity(gender="male"), tmp_path)
     own = tmp_path / "me.wav"
     own.write_bytes(b"RIFF" + bytes(200))
     set_reference(own, tmp_path)
     assert identity_prompt_path("male", tmp_path) == own
-    assert identity_prompt_path("female", tmp_path) == bundled_reference("female")
+    assert identity_prompt_path("female", tmp_path) == bundled_reference("female", tmp_path)
 
 
 def test_local_tts_streams_wav_pcm(tmp_path: Path, monkeypatch):

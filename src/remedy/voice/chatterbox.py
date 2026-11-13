@@ -496,44 +496,42 @@ def _floats(wav: Any) -> Any:
 _REFERENCES_DIR = Path(__file__).resolve().parent / "references"
 
 
-def bundled_reference(gender: str | None) -> Path | None:
-    """The shipped human reference for *gender* (public-domain LibriVox)."""
-    try:
-        from remedy.core.agent_identity import normalize_agent_gender
+def bundled_reference(gender: str | None, home_dir: Path | str | None = None) -> Path | None:
+    """Verified HQ human reference for *gender* (cache or checkout copy).
 
-        g = normalize_agent_gender(gender)
-    except Exception:
-        g = (gender or "female").strip().lower() or "female"
-    if g == "neutral":
-        g = "female"
-    p = _REFERENCES_DIR / f"{g}.wav"
-    return p if p.is_file() and p.stat().st_size > 64 else None
+    Does not download. The clips are no longer shipped in the wheel; first
+    use goes through :func:`remedy.voice.reference_assets.ensure_reference`.
+    """
+    from remedy.voice.reference_assets import local_reference
+
+    return local_reference(gender, home_dir)
 
 
-def identity_prompt_path(
-    gender: str | None, home_dir: Path | str | None = None
-) -> Path | None:
+def identity_prompt_path(gender: str | None, home_dir: Path | str | None = None) -> Path | None:
     """The clip Chatterbox clones for this utterance.
 
-    Order: the owner's own reference (for its gender) → the bundled human
-    voice → a Kokoro stand-in recorded earlier (only if the bundle is
-    somehow missing). Never Chatterbox's built-in speaker, which is not a
-    stable voice of either gender.
+    Order: the owner's own reference (for its gender) → a checksummed HQ
+    human voice (cache, checkout, or first-use download) → a Kokoro
+    stand-in recorded earlier, *only* when a download is not possible.
+    A failed download is raised, never swapped for Kokoro. Never
+    Chatterbox's built-in speaker, which is not a stable voice of either
+    gender.
     """
     from remedy.voice.identity import reference_wav
+    from remedy.voice.reference_assets import (
+        VoiceReferenceUnavailableError,
+        ensure_reference,
+        normalize_reference_gender,
+    )
 
     owned = reference_wav(gender, home_dir)
     if owned is not None:
         return owned
-    shipped = bundled_reference(gender)
-    if shipped is not None:
-        return shipped
     try:
-        from remedy.core.agent_identity import normalize_agent_gender
-
-        g = normalize_agent_gender(gender)
-    except Exception:
-        g = (gender or "female").strip().lower() or "female"
+        return ensure_reference(gender, home_dir)
+    except VoiceReferenceUnavailableError:
+        pass
+    g = normalize_reference_gender(gender)
     p = _identity_dir(home_dir) / f"{g}.wav"
     if p.is_file() and p.stat().st_size > 64:
         return p
@@ -597,7 +595,13 @@ def synthesize(
     model = get_chatterbox_engine(home_dir)
     if model is None:
         return None
-    prompt = identity_prompt_path(gender, home_dir)
+    from remedy.voice.reference_assets import VoiceReferenceError
+
+    try:
+        prompt = identity_prompt_path(gender, home_dir)
+    except VoiceReferenceError:
+        # Download was possible and failed. Do not record a Kokoro stand-in.
+        raise
     if prompt is None:
         prompt = _bootstrap_identity(gender, home_dir)
     from remedy.voice.identity import load as load_identity

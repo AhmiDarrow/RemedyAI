@@ -227,8 +227,7 @@ def reference_wav(
         p = Path(ident.reference_wav)
         if p.is_file() and p.stat().st_size > 64:
             return p
-    g = (want or ident.gender or "female").strip().lower()
-    fallback = _home(home_dir) / "chatterbox" / "identity" / f"{g}.wav"
-    if fallback.is_file() and fallback.stat().st_size > 64:
-        return fallback
+    # A file under chatterbox/identity/ is a last-resort Kokoro stand-in
+    # written by _bootstrap_identity, not an owner reference. identity_prompt_path
+    # may use it only when an HQ download is not possible.
     return None
