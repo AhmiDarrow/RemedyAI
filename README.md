@@ -24,7 +24,7 @@
 
 ---
 
-Remedy lives on **this computer**. The Desktop app runs on **Windows** and **Linux** (including WSLg). The CLI also runs on **macOS** and **Linux ARM64**. **Grove** is home. **Studio** is the workbench. Continuity is `~/.remedy`. You bring the model (cloud keys or **RMB** locally). Money, passwords, submit, send, and delete **stop for you**.
+Remedy lives on **this computer**. The Desktop app runs on **Windows x64** and **Linux** (including WSLg). The CLI also runs on **Windows ARM64**, **macOS**, and **Linux ARM64**. **Grove** is home. **Studio** is the workbench. Continuity is `~/.remedy`. You bring the model (cloud keys or **RMB** locally). Money, passwords, submit, send, and delete **stop for you**.
 
 | | |
 |--|--|
@@ -49,12 +49,13 @@ These are the platforms with published assets on the [latest GitHub release](htt
 | Platform | Desktop app | CLI (`pip install remedy-ai`) |
 |----------|-------------|-------------------------------|
 | Windows x64 | Yes — `Remedy.Desktop_*_x64-setup.exe` | Yes |
+| Windows ARM64 | — | Yes |
 | Linux x86_64 | Yes — AppImage and `.deb` | Yes |
 | Linux arm64 | — | Yes |
 | macOS arm64 (Apple Silicon) | — not in this release | Yes |
 | macOS x86_64 (Intel) | — not in this release | Yes |
 
-The macOS Desktop app is not shipped yet. A Windows ARM64 CLI runtime is not in this release.
+The macOS Desktop app is not shipped yet. There is no Windows ARM64 Desktop installer in this release.
 
 ### Install
 
@@ -67,7 +68,7 @@ The macOS Desktop app is not shipped yet. A Windows ARM64 CLI runtime is not in 
 
 Details: [Install on Linux](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-linux.md).
 
-**CLI on Windows x64, Linux (x86_64 and arm64), and macOS (arm64 and x86_64):**
+**CLI on Windows (x64 and ARM64), Linux (x86_64 and arm64), and macOS (arm64 and x86_64):**
 
 ```bash
 pip install remedy-ai
