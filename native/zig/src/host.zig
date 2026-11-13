@@ -22,8 +22,10 @@ const write_jail = @import("write_jail.zig");
 
 pub const is_windows = builtin.os.tag == .windows;
 pub const is_linux = builtin.os.tag == .linux;
+pub const is_macos = builtin.os.tag == .macos;
 const windows = if (is_windows) @import("host_windows.zig") else struct {};
 const linux = if (is_linux) @import("host_linux.zig") else struct {};
+const macos = if (is_macos) @import("host_macos.zig") else struct {};
 
 pub const Status = root.Status;
 
@@ -248,7 +250,6 @@ pub const WaitOutcome = struct { exited: bool, exit_code: u32 };
 fn unsupportedResult(comptime T: type) Error!T {
     return error.Unsupported;
 }
-
 
 pub const AbsPoint = struct { x: i32, y: i32 };
 
@@ -1092,6 +1093,8 @@ export fn remedy_core_process_spawn_hidden(
         windows.spawnHidden(slice(argv_json, argv_len), slice(cwd, cwd_len), slice(env_json, env_len))
     else if (is_linux)
         linux.spawnHidden(slice(argv_json, argv_len), slice(cwd, cwd_len), slice(env_json, env_len))
+    else if (is_macos)
+        macos.spawnHidden(slice(argv_json, argv_len), slice(cwd, cwd_len), slice(env_json, env_len))
     else
         unsupportedResult(Spawned);
     const result = spawned catch |err| return statusOf(err);
@@ -1112,6 +1115,8 @@ export fn remedy_core_process_wait(
         windows.processWait(handle, timeout_ms)
     else if (is_linux)
         linux.processWait(handle, timeout_ms)
+    else if (is_macos)
+        macos.processWait(handle, timeout_ms)
     else
         unsupportedResult(WaitOutcome);
     const result = outcome catch |err| return statusOf(err);
@@ -1123,12 +1128,14 @@ export fn remedy_core_process_wait(
 export fn remedy_core_process_kill_tree(pid: u32) callconv(.c) i32 {
     if (is_windows) return statusOfVoid(windows.killTree(pid));
     if (is_linux) return statusOfVoid(linux.killTree(pid));
+    if (is_macos) return statusOfVoid(macos.killTree(pid));
     return unsupported_status;
 }
 
 export fn remedy_core_process_close(handle: u64) callconv(.c) i32 {
     if (is_windows) return statusOfVoid(windows.processClose(handle));
     if (is_linux) return statusOfVoid(linux.processClose(handle));
+    if (is_macos) return statusOfVoid(macos.processClose(handle));
     return unsupported_status;
 }
 
@@ -1428,6 +1435,14 @@ test "host exports report unsupported off windows" {
         try std.testing.expectEqual(invalid_status, remedy_core_process_kill_tree(1));
         return;
     }
+    if (is_macos) {
+        // Process control is required for the sidecar worker; input stays closed.
+        try std.testing.expectEqual(unsupported_status, remedy_core_dpi_awareness_enable());
+        try std.testing.expectEqual(unsupported_status, remedy_core_mouse_move(0, 0));
+        try std.testing.expectEqual(invalid_status, remedy_core_process_kill_tree(0));
+        try std.testing.expectEqual(invalid_status, remedy_core_process_kill_tree(1));
+        return;
+    }
     try std.testing.expectEqual(unsupported_status, remedy_core_dpi_awareness_enable());
     try std.testing.expectEqual(unsupported_status, remedy_core_mouse_move(0, 0));
     try std.testing.expectEqual(unsupported_status, remedy_core_process_kill_tree(1));
@@ -1439,6 +1454,7 @@ test "host exports report unsupported off windows" {
 test {
     if (is_windows) _ = windows;
     if (is_linux) _ = linux;
+    if (is_macos) _ = macos;
 }
 
 test "other hosts fail closed" {

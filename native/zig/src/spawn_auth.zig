@@ -17,8 +17,10 @@ const write_jail = @import("write_jail.zig");
 
 const is_windows = builtin.os.tag == .windows;
 const is_linux = builtin.os.tag == .linux;
+const is_macos = builtin.os.tag == .macos;
 const windows_host = if (is_windows) @import("host_windows.zig") else struct {};
 const linux_host = if (is_linux) @import("host_linux.zig") else struct {};
+const macos_host = if (is_macos) @import("host_macos.zig") else struct {};
 const windows_conpty = if (is_windows) @import("conpty_windows.zig") else struct {};
 
 const Status = root.Status;
@@ -373,7 +375,7 @@ export fn remedy_core_process_spawn_authorized(
     out_pid: ?*u32,
     out_handle: ?*u64,
 ) callconv(.c) i32 {
-    if (!is_windows and !is_linux) return unsupported_status;
+    if (!is_windows and !is_linux and !is_macos) return unsupported_status;
     const pid_slot = out_pid orelse return invalid_status;
     const handle_slot = out_handle orelse return invalid_status;
     pid_slot.* = 0;
@@ -404,8 +406,14 @@ export fn remedy_core_process_spawn_authorized(
             slice(cwd, cwd_len),
             slice(env_json, env_len),
         )
-    else
+    else if (is_linux)
         linux_host.spawnHidden(
+            slice(argv_json, argv_len),
+            slice(cwd, cwd_len),
+            slice(env_json, env_len),
+        )
+    else
+        macos_host.spawnHidden(
             slice(argv_json, argv_len),
             slice(cwd, cwd_len),
             slice(env_json, env_len),

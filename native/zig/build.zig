@@ -24,6 +24,10 @@ fn linkHostLibraries(module: *std.Build.Module, target: std.Build.ResolvedTarget
             module.linkSystemLibrary("glib-2.0", .{});
             module.linkSystemLibrary("gobject-2.0", .{});
         },
+        .macos => {
+            // waitpid / kill / libproc for authorized worker spawn.
+            module.link_libc = true;
+        },
         else => {},
     }
 }
