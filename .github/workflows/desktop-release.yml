@@ -451,7 +451,7 @@ jobs:
   # signing and notarization would need the owner's Apple Developer credentials.
   build-runtime-macos:
     needs: verify
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       REMEDY_RELEASE_VERSION: ${{ needs.verify.outputs.version }}
     steps:
@@ -858,7 +858,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             triples: aarch64-apple-darwin x86_64-apple-darwin
           - os: ubuntu-24.04-arm
             triples: aarch64-unknown-linux-gnu
