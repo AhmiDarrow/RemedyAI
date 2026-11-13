@@ -1,11 +1,17 @@
 name: Desktop Release
 
 # A release is a verified commit, never a build of whatever a tag points at.
-# `verify` refuses to build unless the tagged commit is on master, every
+# `verify` refuses to publish unless the tagged commit is on master, every
 # version surface already reads the release version, and the public CI
 # workflow completed green for that exact commit. The local pre-push gate
 # (scripts/prepush.py) checks the same three things before the tag leaves
 # the owner's machine.
+#
+# workflow_dispatch defaults to a dry run: every platform build job runs
+# (including native Apple Silicon on macos-15 and native Intel on
+# macos-15-intel) and uploads artifacts, but the release job is skipped.
+# Tag pushes always publish. A manual publish requires dry_run=false and
+# still has to pass the master / version / green-CI gate.
 
 on:
   push:
@@ -16,6 +22,11 @@ on:
         description: 'Release version (e.g. 0.10.0 or v0.10.0). Required for manual runs.'
         required: true
         type: string
+      dry_run:
+        description: 'Build every platform job but do not create or edit a GitHub release. Defaults to true.'
+        required: false
+        type: boolean
+        default: true
 
 env:
   APP_NAME: Remedy Desktop
@@ -34,6 +45,7 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       sha: ${{ steps.version.outputs.sha }}
       prerelease: ${{ steps.channel.outputs.prerelease }}
+      dry_run: ${{ steps.version.outputs.dry_run }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,10 +76,21 @@ jobs:
           fi
           # Annotated tags make GITHUB_SHA the tag object; HEAD is the commit.
           SHA="$(git rev-parse HEAD)"
-          echo "Releasing ${VER} from ${SHA}"
+          DRY_RUN=false
+          # Tag pushes always publish. workflow_dispatch defaults to a dry
+          # run; only an explicit dry_run=false may publish from a dispatch.
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${{ inputs.dry_run }}" != "false" ]]; then
+            DRY_RUN=true
+          fi
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            echo "Dry run of ${VER} from ${SHA}: build every platform, do not publish"
+          else
+            echo "Releasing ${VER} from ${SHA}"
+          fi
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "tag=v${VER}" >> "$GITHUB_OUTPUT"
           echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "dry_run=${DRY_RUN}" >> "$GITHUB_OUTPUT"
 
       - name: Experimental versions publish as pre-releases
         id: channel
@@ -105,6 +128,7 @@ jobs:
           uv run python scripts/sync_version.py check
 
       - name: Released commit must be on master
+        if: ${{ steps.version.outputs.dry_run != 'true' }}
         shell: bash
         env:
           SHA: ${{ steps.version.outputs.sha }}
@@ -117,6 +141,7 @@ jobs:
           fi
 
       - name: Public CI must have completed green for this commit
+        if: ${{ steps.version.outputs.dry_run != 'true' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -445,12 +470,26 @@ jobs:
             desktop/bin/libremedy_core-aarch64-unknown-linux-gnu.so
           retention-days: 1
 
-  # Prebuilt Go/Zig runtimes for both Darwin triples. The unsigned (ad-hoc)
-  # Desktop Tauri bundles are built in build-tauri-macos. There are no Apple
-  # Developer credentials in this project, so the app is not notarized.
+  # Prebuilt Go/Zig runtimes, each built natively: Apple Silicon on
+  # macos-15, Intel on macos-15-intel. Zig 0.16 only auto-fills Apple
+  # framework search paths for a native target, so do not pass
+  # -Dtarget=x86_64-macos from arm64 (v0.68.0 / v0.68.1 failed there).
+  # The unsigned (ad-hoc) Desktop Tauri bundles are built in
+  # build-tauri-macos, also on the matching native runner. There are no
+  # Apple Developer credentials in this project, so the app is not notarized.
   build-runtime-macos:
     needs: verify
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            goarch: arm64
+            triple: aarch64-apple-darwin
+          - os: macos-15-intel
+            goarch: amd64
+            triple: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
     env:
       REMEDY_RELEASE_VERSION: ${{ needs.verify.outputs.version }}
     steps:
@@ -470,35 +509,30 @@ jobs:
       - name: Stamp release version
         run: python3 scripts/sync_version.py "${REMEDY_RELEASE_VERSION}"
 
-      - name: Build macOS native runtimes (arm64 native, x86_64 cross)
+      - name: Build native macOS runtime
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          TRIPLE: ${{ matrix.triple }}
         run: |
           set -euo pipefail
           mkdir -p desktop/bin
           cd native/go
-          CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime-aarch64-apple-darwin ./cmd/remedy-runtime
-          CGO_ENABLED=0 GOARCH=amd64 go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime-x86_64-apple-darwin ./cmd/remedy-runtime
+          CGO_ENABLED=0 GOARCH="${GOARCH}" go build -trimpath -ldflags '-s -w' \
+            -o "../../desktop/bin/remedy-runtime-${TRIPLE}" ./cmd/remedy-runtime
           cd ../zig
           zig build -Doptimize=ReleaseSafe
-          cp zig-out/lib/libremedy_core.dylib ../../desktop/bin/libremedy_core-aarch64-apple-darwin.dylib
-          # Zig 0.16 does not search Apple frameworks for an explicit
-          # -Dtarget=x86_64-macos, even with --sysroot (searched paths: none).
-          # Pass the SDK sysroot; build.zig adds System/Library/Frameworks.
-          SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
-          zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-macos --sysroot "${SDKROOT}"
-          cp zig-out/lib/libremedy_core.dylib ../../desktop/bin/libremedy_core-x86_64-apple-darwin.dylib
-          chmod +x ../../desktop/bin/remedy-runtime-aarch64-apple-darwin ../../desktop/bin/remedy-runtime-x86_64-apple-darwin
+          cp zig-out/lib/libremedy_core.dylib "../../desktop/bin/libremedy_core-${TRIPLE}.dylib"
+          chmod +x "../../desktop/bin/remedy-runtime-${TRIPLE}"
           cd ../..
-          python3 scripts/check_remedy_core_isa.py desktop/bin/libremedy_core-x86_64-apple-darwin.dylib
+          python3 scripts/check_remedy_core_isa.py "desktop/bin/libremedy_core-${TRIPLE}.dylib"
 
-      - name: Upload macOS runtimes
+      - name: Upload macOS runtime
         uses: actions/upload-artifact@v4
         with:
-          name: remedy-runtime-macos
+          name: remedy-runtime-macos-${{ matrix.triple }}
           path: |
-            desktop/bin/remedy-runtime-aarch64-apple-darwin
-            desktop/bin/remedy-runtime-x86_64-apple-darwin
-            desktop/bin/libremedy_core-aarch64-apple-darwin.dylib
-            desktop/bin/libremedy_core-x86_64-apple-darwin.dylib
+            desktop/bin/remedy-runtime-${{ matrix.triple }}
+            desktop/bin/libremedy_core-${{ matrix.triple }}.dylib
           retention-days: 1
 
   build-tauri-linux:
@@ -597,7 +631,7 @@ jobs:
   # as Windows and Linux, over the .app.tar.gz for each arch.
   build-tauri-macos:
     needs: [verify, build-runtime-macos]
-    runs-on: macos-15
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -608,11 +642,13 @@ jobs:
             asset_arch: aarch64
             smoke: true
             deps_platform: aarch64-apple-darwin
+            runner: macos-15
           - rust_target: x86_64-apple-darwin
             go_triple: x86_64-apple-darwin
             asset_arch: x64
             smoke: false
             deps_platform: x86_64-apple-darwin
+            runner: macos-15-intel
     steps:
       - uses: actions/checkout@v4
 
@@ -631,10 +667,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Download macOS runtimes
+      - name: Download macOS runtime
         uses: actions/download-artifact@v4
         with:
-          name: remedy-runtime-macos
+          name: remedy-runtime-macos-${{ matrix.go_triple }}
           path: desktop/bin/
 
       - name: Stage arch-specific sidecar, dylib, and worker deps
@@ -715,7 +751,19 @@ jobs:
           path: dist-macos/*
           retention-days: 7
 
+  dry-run-summary:
+    if: ${{ needs.verify.outputs.dry_run == 'true' }}
+    needs: [verify, build-runtime, build-runtime-linux, build-runtime-linux-arm, build-runtime-macos, build-tauri, build-tauri-linux, build-tauri-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dry run finished without publishing
+        run: |
+          set -euo pipefail
+          echo "Desktop Release dry run of v${{ needs.verify.outputs.version }} at ${{ needs.verify.outputs.sha }} succeeded."
+          echo "All platform build jobs completed. No GitHub release was created or edited."
+
   release:
+    if: ${{ needs.verify.outputs.dry_run != 'true' }}
     needs: [verify, build-runtime, build-runtime-linux, build-runtime-linux-arm, build-runtime-macos, build-tauri, build-tauri-linux, build-tauri-macos]
     runs-on: ubuntu-latest
     permissions:
@@ -778,7 +826,8 @@ jobs:
       - name: Download macOS native runtimes
         uses: actions/download-artifact@v4
         with:
-          name: remedy-runtime-macos
+          pattern: remedy-runtime-macos-*
+          merge-multiple: true
           path: dist-native-macos/
 
       - name: Download Windows ARM64 native runtime
