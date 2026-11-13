@@ -223,7 +223,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-15, ubuntu-24.04-arm]
+        os: [ubuntu-latest, windows-latest, macos-15, macos-15-intel, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -285,12 +285,12 @@ jobs:
         run: zig build -Doptimize=ReleaseSafe
         working-directory: native/zig
 
-      # Same Intel-macOS cross Desktop Release uses for libremedy_core.dylib.
-      # Must run on native-core macos-15 (not the Linux test job). Zig 0.16
-      # does not search SDK frameworks for an explicit -Dtarget=x86_64-macos
-      # even with --sysroot; build.zig adds the framework path from sysroot.
+      # Canary only: Zig 0.16 framework search for an explicit x86_64-macos
+      # target from Apple Silicon. Desktop Release builds Intel natively on
+      # macos-15-intel instead of this cross. Skip on Intel runners so we
+      # do not replace the native dylib with a -Dtarget build.
       - name: Cross-compile Intel macOS dylib
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && runner.arch == 'ARM64'
         working-directory: native/zig
         run: |
           SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
