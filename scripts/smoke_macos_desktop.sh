@@ -24,8 +24,16 @@ trap cleanup EXIT
 
 # licenseFile in tauri.conf.json is baked in as a DMG software license
 # agreement. A non-interactive attach otherwise prints the SLA and exits
-# "attach canceled".
-yes | hdiutil attach -nobrowse -readonly -mountpoint "${MNT}" "${DMG}"
+# "attach canceled". Feed one "Y", and temporarily drop pipefail so the
+# writer's SIGPIPE after a successful attach cannot fail the script.
+set +o pipefail
+echo Y | hdiutil attach -nobrowse -readonly -mountpoint "${MNT}" "${DMG}"
+attach_rc=$?
+set -o pipefail
+if [[ "${attach_rc}" -ne 0 ]]; then
+  echo "hdiutil attach failed (exit ${attach_rc})" >&2
+  exit 1
+fi
 APP="$(find "${MNT}" -maxdepth 2 -name '*.app' -type d | head -1)"
 if [[ -z "${APP}" || ! -d "${APP}" ]]; then
   echo "no .app in ${DMG}" >&2
