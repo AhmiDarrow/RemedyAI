@@ -2,7 +2,7 @@ import { useDialogFocus } from '../hooks/useDialogFocus'
 import { getServerUrl } from '../api/client'
 import { useEffect, useState } from 'react'
 import { isTauri, tauriInvoke } from '../api/tauri'
-import { isLinuxDesktop } from '../utils/platform'
+import { isLinuxDesktop, isMacDesktop } from '../utils/platform'
 import { useI18n } from '../i18n'
 
 export interface QuitServerWarningProps {
@@ -66,12 +66,16 @@ export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerW
             {t('quit.body2')}
             {isLinuxDesktop()
               ? ' — that minimizes the desktop and leaves the server running.'
-              : ' — that hides the desktop to the tray and leaves the server running.'}
+              : isMacDesktop()
+                ? ' — that hides the desktop to the menu bar and leaves the server running.'
+                : ' — that hides the desktop to the tray and leaves the server running.'}
           </p>
           <p style={{ color: 'var(--text-muted)' }}>
             {isLinuxDesktop()
               ? 'Window ✕ minimizes to the taskbar. Quit from this dialog or the app menu for a full stop.'
-              : 'Window ✕ always hides to tray. Use tray Quit for a full stop.'}
+              : isMacDesktop()
+                ? 'Window ✕ always hides to the menu bar. Use Quit in the menu bar for a full stop.'
+                : 'Window ✕ always hides to tray. Use tray Quit for a full stop.'}
           </p>
         </div>
         <label className="flex items-start gap-2 mb-4 cursor-pointer text-xs">

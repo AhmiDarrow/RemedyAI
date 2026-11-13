@@ -1,0 +1,17 @@
+{
+  "bundle": {
+    "targets": ["dmg", "app"],
+    "externalBin": ["../bin/remedy-runtime"],
+    "resources": {
+      "../bin/libremedy_core.dylib": "libremedy_core.dylib",
+      "../bin/rmdy_tool_worker.pyz": "rmdy_tool_worker.pyz",
+      "../bin/rmdy-deps": "rmdy-deps",
+      "../dist": "webui",
+      "windows/wslg_workarea.ps1": "windows/wslg_workarea.ps1"
+    },
+    "macOS": {
+      "signingIdentity": "-",
+      "minimumSystemVersion": "12.0"
+    }
+  }
+}

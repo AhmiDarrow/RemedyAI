@@ -58,7 +58,10 @@ class HostError(RuntimeError):
         self.function = function
         self.status = status
         self.os_error = os_error
-        detail = _STATUS_NAMES.get(status, f"status {status}")
+        if status == STATUS_UNSUPPORTED and sys.platform == "darwin":
+            detail = "not yet supported on macOS"
+        else:
+            detail = _STATUS_NAMES.get(status, f"status {status}")
         if os_error:
             label = "Win32 error" if sys.platform == "win32" else "errno"
             suffix = f" ({label} {os_error})"

@@ -152,7 +152,7 @@ def _bump_latest_json(ver: str) -> None:
     data = json.loads(PATHS["latest_json"].read_text(encoding="utf-8"))
     old_raw = str(data.get("version", "")).lstrip("v")
     data["version"] = f"v{ver}"
-    data["notes"] = f"Remedy Desktop v{ver} — Windows installer and Linux AppImage"
+    data["notes"] = f"Remedy Desktop v{ver} — Windows installer, Linux AppImage, and macOS app"
     data["pub_date"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Prefer rewriting known GitHub release URL shape so notes/URL/version stay aligned.
@@ -162,13 +162,21 @@ def _bump_latest_json(ver: str) -> None:
         platforms["windows-x86_64"] = {"signature": "", "url": ""}
     if "linux-x86_64" not in platforms:
         platforms["linux-x86_64"] = {"signature": "", "url": ""}
+    if "darwin-aarch64" not in platforms:
+        platforms["darwin-aarch64"] = {"signature": "", "url": ""}
+    if "darwin-x86_64" not in platforms:
+        platforms["darwin-x86_64"] = {"signature": "", "url": ""}
 
     def _asset_url(name: str) -> str:
-        asset = (
-            f"Remedy.Desktop_{ver}_amd64.AppImage"
-            if str(name).startswith("linux")
-            else f"Remedy.Desktop_{ver}_x64-setup.exe"
-        )
+        key = str(name)
+        if key.startswith("linux"):
+            asset = f"Remedy.Desktop_{ver}_amd64.AppImage"
+        elif key.startswith("darwin-aarch64") or key in {"darwin-arm64", "darwin-aarch-64"}:
+            asset = f"Remedy.Desktop_{ver}_aarch64.app.tar.gz"
+        elif key.startswith("darwin"):
+            asset = f"Remedy.Desktop_{ver}_x64.app.tar.gz"
+        else:
+            asset = f"Remedy.Desktop_{ver}_x64-setup.exe"
         return (
             f"https://github.com/AhmiDarrow/RemedyAI/releases/download/v{ver}/{asset}"
         )
@@ -186,7 +194,7 @@ def _bump_latest_json(ver: str) -> None:
         )
         # Heuristic: if signature blob mentions another setup version, drop it.
         if sig:
-            m = re.search(r"(\d+\.\d+\.\d+)_(?:x64-setup|amd64)", sig)
+            m = re.search(r"(\d+\.\d+\.\d+)_(?:x64-setup|amd64|aarch64|x64)", sig)
             if m and m.group(1) != ver:
                 stale_sig = True
         if stale_sig or version_changed:

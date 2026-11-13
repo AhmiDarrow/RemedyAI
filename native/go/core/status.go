@@ -6,6 +6,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"runtime"
 )
 
 // ABIVersion matches native/zig/include/remedy_core.h REMEDY_CORE_ABI_VERSION.
@@ -36,6 +37,22 @@ var (
 	ErrUnsupported = errors.New("remedy_core unsupported on this platform")
 )
 
+// PlatformUnsupported wraps ErrUnsupported with a host-specific message.
+// Computer use on macOS is fail-closed until an Accessibility / Screen
+// Recording host is implemented; callers should keep errors.Is on ErrUnsupported.
+func PlatformUnsupported(feature string) error {
+	if runtime.GOOS == "darwin" {
+		if feature == "" {
+			return fmt.Errorf("%w: not yet supported on macOS", ErrUnsupported)
+		}
+		return fmt.Errorf("%w: %s is not yet supported on macOS", ErrUnsupported, feature)
+	}
+	if feature == "" {
+		return ErrUnsupported
+	}
+	return fmt.Errorf("%w: %s", ErrUnsupported, feature)
+}
+
 // HostError is a non-OK remedy_core_status (optional Win32 last-error).
 type HostError struct {
 	Function string
@@ -62,6 +79,9 @@ func statusName(status int32) string {
 	case StatusOperationFailed:
 		return "operation failed"
 	case StatusUnsupported:
+		if runtime.GOOS == "darwin" {
+			return "not yet supported on macOS"
+		}
 		return "unsupported on this platform"
 	case StatusEnvDenied:
 		return "environment denied"

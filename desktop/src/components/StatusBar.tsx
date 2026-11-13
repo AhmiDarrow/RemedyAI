@@ -22,7 +22,7 @@ import {
 } from '../utils/toolLabels'
 import type { UiMode } from '../utils/uiMode'
 import { mergeModelOptions, modelOptionLabel, type ModelOption } from '../api/modelDiscovery'
-import { isLinuxDesktop } from '../utils/platform'
+import { isLinuxDesktop, isMacDesktop } from '../utils/platform'
 import { useI18n } from '../i18n'
 
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
@@ -931,7 +931,9 @@ export function StatusBar({
               title={
                 isLinuxDesktop()
                   ? 'Minimize the desktop and open the WebUI chat in your browser'
-                  : 'Hide desktop to tray and open the WebUI chat in your browser'
+                  : isMacDesktop()
+                    ? 'Hide desktop to the menu bar and open the WebUI chat in your browser'
+                    : 'Hide desktop to tray and open the WebUI chat in your browser'
               }
             >
               {t('bar.webui')}

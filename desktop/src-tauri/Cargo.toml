@@ -48,6 +48,10 @@ adblock = { version = "0.13.2", default-features = false, features = [
 gtk = "0.18"
 libc = "0.2"
 
+# macOS: setsid when relaunching after an in-app .app.tar.gz update.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
 # WebView2 COM for in-rail video fullscreen (ContainsFullScreenElementChanged).
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"

@@ -31,6 +31,8 @@ def test_rust_updater_still_accepts_0415_platform_keys() -> None:
     text = LIB_RS.read_text(encoding="utf-8")
     assert "windows-x86_64" in text
     assert "linux-x86_64" in text
+    assert "darwin-aarch64" in text
+    assert "darwin-x86_64" in text
     # Older aliases kept so a typo in a historic latest.json still resolves.
     assert "windows-x86-64" in text
     assert "linux-x86-64" in text
@@ -52,3 +54,13 @@ def test_pyproject_license_is_apache_2() -> None:
     text = PYPROJECT.read_text(encoding="utf-8")
     assert 'license = { text = "Apache-2.0" }' in text
     assert "LicenseRef-Proprietary" not in text
+
+
+def test_release_workflow_publishes_unsigned_macos_desktop() -> None:
+    text = RELEASE_YML.read_text(encoding="utf-8")
+    assert "build-tauri-macos" in text
+    assert "darwin-aarch64" in text
+    assert "darwin-x86_64" in text
+    assert "signingIdentity" in text or 'codesign --force --deep --sign -' in text
+    # Ad-hoc / unsigned: no claim of Apple Developer credentials or notarization.
+    assert "Apple Developer credentials" in text
