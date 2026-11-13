@@ -1052,15 +1052,20 @@ extern fn PasteboardGetItemIdentifier(pb: PasteboardRef, index: u64, out: *u64) 
 extern fn PasteboardCopyItemFlavorData(pb: PasteboardRef, item: u64, flavor: CFStringRef, data: *CFDataRef) callconv(.c) i32;
 extern fn PasteboardPutItemFlavor(pb: PasteboardRef, item: u64, flavor: CFStringRef, data: CFDataRef, flags: u32) callconv(.c) i32;
 extern fn CFDataCreate(alloc: CFTypeRef, bytes: [*]const u8, length: CFIndex) callconv(.c) CFDataRef;
-extern const kPasteboardClipboard: CFStringRef;
-
 fn publicUtf8Flavor() CFStringRef {
     return CFStringCreateWithCString(null, "public.utf8-plain-text", kCFStringEncodingUTF8);
 }
 
+// The general clipboard identifier is a CFSTR macro in the SDK, not a
+// linkable symbol. Create the same name at runtime.
+fn generalClipboardName() CFStringRef {
+    return CFStringCreateWithCString(null, "com.apple.pasteboard.clipboard", kCFStringEncodingUTF8);
+}
+
 pub fn clipboardGetText() Error![]u8 {
     var pb: PasteboardRef = null;
-    const name = kPasteboardClipboard;
+    const name = generalClipboardName();
+    defer cfRelease(@ptrCast(@constCast(name)));
     if (PasteboardCreate(name, &pb) != 0 or pb == null) return error.OperationFailed;
     defer cfRelease(@ptrCast(pb));
     var count: u64 = 0;
@@ -1083,7 +1088,9 @@ pub fn clipboardGetText() Error![]u8 {
 
 pub fn clipboardSetText(utf8: []const u8) Error!void {
     var pb: PasteboardRef = null;
-    if (PasteboardCreate(kPasteboardClipboard, &pb) != 0 or pb == null) return error.OperationFailed;
+    const name = generalClipboardName();
+    defer cfRelease(@ptrCast(@constCast(name)));
+    if (PasteboardCreate(name, &pb) != 0 or pb == null) return error.OperationFailed;
     defer cfRelease(@ptrCast(pb));
     if (PasteboardClear(pb) != 0) return error.OperationFailed;
     const flavor = publicUtf8Flavor();
