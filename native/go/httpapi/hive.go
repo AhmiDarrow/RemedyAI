@@ -126,14 +126,10 @@ func (s *Server) handleHiveSpawn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	started := s.superviseHiveDaughter(d)
-	if cad == hiveCadencePost {
-		d.Status = hiveStatusAsleep
-		d.NextPulseAt = ""
-		_ = s.hiveFS.save(d)
-	} else if started {
-		d.Status = hiveStatusRunning
-		_ = s.hiveFS.save(d)
-	}
+	// Reload after supervise: a forager pulse can finish (and persist
+	// "reported") before this handler writes again. Saving the stale
+	// hire-time record as "running" would clobber that report.
+	d = commitHiveSpawnStart(s.hiveFS, d, cad, started)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"hive_id": d.ID,
@@ -142,6 +138,41 @@ func (s *Server) handleHiveSpawn(w http.ResponseWriter, r *http.Request) {
 		"started": started,
 		"goal":    d.Goal,
 	})
+}
+
+// commitHiveSpawnStart records the post-supervise status without overwriting a
+// terminal forager report that already landed.
+func commitHiveSpawnStart(fs *hiveStore, d hiveDaughter, cadence string, started bool) hiveDaughter {
+	if fs == nil || !fs.ready() {
+		return d
+	}
+	if cadence == hiveCadencePost {
+		fresh, ok, err := fs.get(d.ID)
+		if err == nil && ok {
+			d = fresh
+		}
+		d.Status = hiveStatusAsleep
+		d.NextPulseAt = ""
+		_ = fs.save(d)
+		return d
+	}
+	if !started {
+		return d
+	}
+	fresh, ok, err := fs.get(d.ID)
+	if err != nil || !ok {
+		d.Status = hiveStatusRunning
+		_ = fs.save(d)
+		return d
+	}
+	switch fresh.Status {
+	case hiveStatusReported, hiveStatusBlocked, hiveStatusCancelled, hiveStatusRetired, hiveStatusAsleep, hiveStatusRunning:
+		return fresh
+	default:
+		fresh.Status = hiveStatusRunning
+		_ = fs.save(fresh)
+		return fresh
+	}
 }
 
 func (s *Server) handleHiveAssign(w http.ResponseWriter, r *http.Request) {
