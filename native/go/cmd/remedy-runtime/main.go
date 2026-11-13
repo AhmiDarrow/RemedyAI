@@ -14,8 +14,10 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"syscall"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/httpapi"
+	"github.com/AhmiDarrow/RemedyAI/native/go/parentwatch"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 	"github.com/AhmiDarrow/RemedyAI/native/go/servelock"
 	"github.com/AhmiDarrow/RemedyAI/native/go/workers"
@@ -79,7 +81,16 @@ func main() {
 		os.Exit(2)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// Desktop sidecar on macOS: exit when the GUI parent dies (Linux uses
+	// PR_SET_PDEATHSIG; Windows uses a kill-on-close job object).
+	parentwatch.StartIfDesktopSidecar()
+
+	// SIGTERM too: Linux pdeathsig and the macOS parent-PID watch both send it.
+	notify := []os.Signal{os.Interrupt}
+	if runtime.GOOS != "windows" {
+		notify = append(notify, syscall.SIGTERM)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), notify...)
 	defer stop()
 
 	home := httpapi.ResolveHomeDir("")
