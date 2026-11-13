@@ -11,6 +11,8 @@
 <p align="center">
   <a href="https://github.com/AhmiDarrow/RemedyAI/releases/latest"><strong>Download for Windows</strong></a>
   ·
+  <a href="https://github.com/AhmiDarrow/RemedyAI/releases/latest">Download for macOS</a>
+  ·
   <a href="https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-linux.md">Install on Linux</a>
   ·
   <a href="https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/00-overview.md">Owner’s manual</a>
@@ -24,19 +26,19 @@
 
 ---
 
-Remedy lives on **this computer**. The Desktop app runs on **Windows x64** and **Linux** (including WSLg). The CLI also runs on **Windows ARM64**, **macOS**, and **Linux ARM64**. **Grove** is home. **Studio** is the workbench. Continuity is `~/.remedy`. You bring the model (cloud keys or **RMB** locally). Money, passwords, submit, send, and delete **stop for you**.
+Remedy lives on **this computer**. The Desktop app runs on **Windows x64**, **Linux** (including WSLg), and **macOS** (Apple Silicon and Intel). The CLI also runs on **Windows ARM64** and **Linux ARM64**. **Grove** is home. **Studio** is the workbench. Continuity is `~/.remedy`. You bring the model (cloud keys or **RMB** locally). Money, passwords, submit, send, and delete **stop for you**.
 
 | | |
 |--|--|
 | **Latest release** | [![Latest GitHub release](https://img.shields.io/github/v/release/AhmiDarrow/RemedyAI?label=GitHub&color=2ea44f)](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · [![PyPI](https://img.shields.io/pypi/v/remedy-ai?label=PyPI&color=2ea44f)](https://pypi.org/project/remedy-ai/) |
 | **Source on `master`** | [![Version on master](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FAhmiDarrow%2FRemedyAI%2Fmaster%2Fpyproject.toml&query=%24.project.version&prefix=v&label=master&color=orange)](https://github.com/AhmiDarrow/RemedyAI/blob/master/CHANGELOG.md) · [What’s new](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md) |
 | **Owner’s manual** | [docs/manual/](https://github.com/AhmiDarrow/RemedyAI/tree/master/docs/manual/) · [index](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/README.md) |
-| **Install** | [Windows](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-windows.md) · [Linux](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-linux.md) · CLI on macOS via `pip install remedy-ai` |
+| **Install** | [Windows](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-windows.md) · [Linux](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-linux.md) · macOS Desktop from [Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · CLI via `pip install remedy-ai` |
 | **Security / data** | [04-security-and-data](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/04-security-and-data.md) |
 | **Commands / keys** | [11-reference-commands](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/11-reference-commands.md) · [12-reference-shortcuts](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/12-reference-shortcuts.md) |
 | **Changelog** | [CHANGELOG.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/CHANGELOG.md) |
 
-Local API: `127.0.0.1:7400`. Close ✕ hides to the **tray** on Windows and **minimizes** on Linux/WSLg. `pip install remedy-ai` then `remedy serve` downloads a checksum-verified `remedy-runtime` and `remedy_core` for this OS from GitHub Releases on first run (cached in `~/.remedy/runtime/`).
+Local API: `127.0.0.1:7400`. Close ✕ hides to the **tray** on Windows, the **menu bar** on macOS, and **minimizes** on Linux/WSLg. `pip install remedy-ai` then `remedy serve` downloads a checksum-verified `remedy-runtime` and `remedy_core` for this OS from GitHub Releases on first run (cached in `~/.remedy/runtime/`).
 
 From the creator: *My name is Ahmi, I hope you enjoy my Remedy.*
 
@@ -52,10 +54,10 @@ These are the platforms with published assets on the [latest GitHub release](htt
 | Windows ARM64 | — | Yes |
 | Linux x86_64 | Yes — AppImage and `.deb` | Yes |
 | Linux arm64 | — | Yes |
-| macOS arm64 (Apple Silicon) | — not in this release | Yes |
-| macOS x86_64 (Intel) | — not in this release | Yes |
+| macOS arm64 (Apple Silicon) | Yes — unsigned `Remedy.Desktop_*_aarch64.dmg` | Yes |
+| macOS x86_64 (Intel) | Yes — unsigned `Remedy.Desktop_*_x64.dmg` | Yes |
 
-The macOS Desktop app is not shipped yet. There is no Windows ARM64 Desktop installer in this release.
+There is no Windows ARM64 Desktop installer in this release. macOS builds are ad-hoc signed and not notarized.
 
 ### Install
 
@@ -67,6 +69,14 @@ The macOS Desktop app is not shipped yet. There is no Windows ARM64 Desktop inst
 - **AppImage:** `chmod +x Remedy.Desktop_*.AppImage && ./Remedy.Desktop_*.AppImage`
 
 Details: [Install on Linux](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-linux.md).
+
+**macOS (Desktop, Apple Silicon and Intel).** From the same [Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) page, download `Remedy.Desktop_*_aarch64.dmg` (Apple Silicon) or `Remedy.Desktop_*_x64.dmg` (Intel). Open the disk image and drag Remedy Desktop to Applications. This build is unsigned (ad-hoc codesign, no Apple notarization). First launch: right-click the app and choose Open, or clear quarantine:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Remedy Desktop.app"
+```
+
+In-app updates use the minisign-signed `.app.tar.gz` from the same release.
 
 **CLI on Windows (x64 and ARM64), Linux (x86_64 and arm64), and macOS (arm64 and x86_64):**
 
