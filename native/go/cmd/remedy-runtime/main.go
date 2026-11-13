@@ -14,7 +14,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"syscall"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/httpapi"
 	"github.com/AhmiDarrow/RemedyAI/native/go/parentwatch"
@@ -86,10 +85,7 @@ func main() {
 	parentwatch.StartIfDesktopSidecar()
 
 	// SIGTERM too: Linux pdeathsig and the macOS parent-PID watch both send it.
-	notify := []os.Signal{os.Interrupt}
-	if runtime.GOOS != "windows" {
-		notify = append(notify, syscall.SIGTERM)
-	}
+	notify := append([]os.Signal{os.Interrupt}, parentwatch.ShutdownSignals()...)
 	ctx, stop := signal.NotifyContext(context.Background(), notify...)
 	defer stop()
 
