@@ -1024,7 +1024,7 @@ func executeComputerSnapshot(_ context.Context, request Request) (Result, error)
 		})
 		return Result{Output: out}, err
 	default:
-		return Result{}, fmt.Errorf("%w: computer.snapshot", core.ErrUnsupported)
+		return Result{}, core.PlatformUnsupported("computer.snapshot")
 	}
 }
 

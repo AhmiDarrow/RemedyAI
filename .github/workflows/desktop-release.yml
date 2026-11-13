@@ -445,8 +445,9 @@ jobs:
             desktop/bin/libremedy_core-aarch64-unknown-linux-gnu.so
           retention-days: 1
 
-  # Prebuilt Go/Zig runtimes only. Desktop Tauri macOS bundles are skipped:
-  # signing and notarization would need the owner's Apple Developer credentials.
+  # Prebuilt Go/Zig runtimes for both Darwin triples. The unsigned (ad-hoc)
+  # Desktop Tauri bundles are built in build-tauri-macos. There are no Apple
+  # Developer credentials in this project, so the app is not notarized.
   build-runtime-macos:
     needs: verify
     runs-on: macos-15
@@ -586,8 +587,132 @@ jobs:
           path: dist-linux/*
           retention-days: 7
 
+  # Unsigned / ad-hoc codesign (`codesign --force --deep --sign -`). No Apple Developer credentials or
+  # notarization. Users first-open with right-click Open or
+  # `xattr -dr com.apple.quarantine`. Updater signatures are minisign, same
+  # as Windows and Linux, over the .app.tar.gz for each arch.
+  build-tauri-macos:
+    needs: [verify, build-runtime-macos]
+    runs-on: macos-15
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rust_target: aarch64-apple-darwin
+            go_triple: aarch64-apple-darwin
+            asset_arch: aarch64
+            smoke: true
+            deps_platform: aarch64-apple-darwin
+          - rust_target: x86_64-apple-darwin
+            go_triple: x86_64-apple-darwin
+            asset_arch: x64
+            smoke: false
+            deps_platform: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Setup Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download macOS runtimes
+        uses: actions/download-artifact@v4
+        with:
+          name: remedy-runtime-macos
+          path: desktop/bin/
+
+      - name: Stage arch-specific sidecar, dylib, and worker deps
+        env:
+          GO_TRIPLE: ${{ matrix.go_triple }}
+          DEPS_PLATFORM: ${{ matrix.deps_platform }}
+        run: |
+          set -euo pipefail
+          mkdir -p desktop/bin
+          chmod +x "desktop/bin/remedy-runtime-${GO_TRIPLE}"
+          cp -f "desktop/bin/remedy-runtime-${GO_TRIPLE}" desktop/bin/remedy-runtime
+          chmod +x desktop/bin/remedy-runtime
+          cp -f "desktop/bin/libremedy_core-${GO_TRIPLE}.dylib" desktop/bin/libremedy_core.dylib
+          python3 scripts/build_rmdy_worker.py --out desktop/bin/rmdy_tool_worker.pyz --deps-out desktop/bin/rmdy-deps --deps-platform "${DEPS_PLATFORM}"
+
+      - name: Stamp release version (match runtime job)
+        shell: bash
+        run: python3 scripts/sync_version.py "${{ needs.verify.outputs.version }}"
+
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: desktop
+
+      - name: Build Tauri (dmg + app, ad-hoc codesign)
+        run: npx tauri build --bundles dmg,app --target ${{ matrix.rust_target }}
+        working-directory: desktop
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '12.0'
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Finalize bundle, updater tarball, and optional smoke
+        env:
+          ASSET_ARCH: ${{ matrix.asset_arch }}
+          RUST_TARGET: ${{ matrix.rust_target }}
+          SMOKE: ${{ matrix.smoke }}
+          VER: ${{ needs.verify.outputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          BUNDLE_ROOT="desktop/src-tauri/target/${RUST_TARGET}/release/bundle"
+          if [[ ! -d "${BUNDLE_ROOT}/macos" ]]; then
+            BUNDLE_ROOT="desktop/src-tauri/target/release/bundle"
+          fi
+          APP=$(find "${BUNDLE_ROOT}/macos" -maxdepth 2 -name '*.app' -type d | head -1)
+          if [[ -z "${APP}" || ! -d "${APP}" ]]; then
+            echo "::error::tauri build did not produce a .app under ${BUNDLE_ROOT}/macos"
+            find desktop/src-tauri/target -name '*.app' -o -name '*.dmg' | head -50
+            exit 1
+          fi
+          mkdir -p dist-macos
+          TAR="dist-macos/Remedy.Desktop_${VER}_${ASSET_ARCH}.app.tar.gz"
+          bash scripts/macos_finalize_desktop_bundle.sh \
+            --app "${APP}" \
+            --dylib desktop/bin/libremedy_core.dylib \
+            --tar "${TAR}"
+          DMG=$(find "${BUNDLE_ROOT}/dmg" -name '*.dmg' 2>/dev/null | head -1 || true)
+          if [[ -z "${DMG}" || ! -f "${DMG}" ]]; then
+            echo "::error::tauri build did not produce a .dmg"
+            exit 1
+          fi
+          cp -f "${DMG}" "dist-macos/Remedy.Desktop_${VER}_${ASSET_ARCH}.dmg"
+          if [[ ! -f "${TAR}.sig" ]]; then
+            echo "::error::No updater signature for ${TAR}. Signed auto-update is required (createUpdaterArtifacts + TAURI_SIGNING_PRIVATE_KEY)."
+            ls -la dist-macos "${BUNDLE_ROOT}/macos" || true
+            exit 1
+          fi
+          if [[ "${SMOKE}" == "true" ]]; then
+            bash scripts/smoke_macos_desktop.sh "dist-macos/Remedy.Desktop_${VER}_${ASSET_ARCH}.dmg"
+          fi
+          ls -la dist-macos
+
+      - name: Upload macOS packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: remedy-macos-${{ matrix.asset_arch }}
+          path: dist-macos/*
+          retention-days: 7
+
   release:
-    needs: [verify, build-runtime, build-runtime-linux, build-runtime-linux-arm, build-runtime-macos, build-tauri, build-tauri-linux]
+    needs: [verify, build-runtime, build-runtime-linux, build-runtime-linux-arm, build-runtime-macos, build-tauri, build-tauri-linux, build-tauri-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -615,6 +740,18 @@ jobs:
         with:
           name: remedy-linux
           path: dist-linux/
+
+      - name: Download macOS packages (Apple Silicon)
+        uses: actions/download-artifact@v4
+        with:
+          name: remedy-macos-aarch64
+          path: dist-macos/
+
+      - name: Download macOS packages (Intel)
+        uses: actions/download-artifact@v4
+        with:
+          name: remedy-macos-x64
+          path: dist-macos/
 
       - name: Download Windows native runtime
         uses: actions/download-artifact@v4
@@ -775,6 +912,22 @@ jobs:
                       appimage = p.name
                   if p.name.endswith(".AppImage.sig"):
                       linux_sig = unwrap_sig(p.read_text(encoding="utf-8"))
+          macos_dir = Path("dist-macos")
+          darwin = {}
+          if macos_dir.is_dir():
+              for p in sorted(macos_dir.iterdir()):
+                  name = p.name
+                  if name.endswith(".app.tar.gz"):
+                      if "_aarch64.app.tar.gz" in name:
+                          darwin.setdefault("darwin-aarch64", {})["url_name"] = name
+                      elif "_x64.app.tar.gz" in name or "_x86_64.app.tar.gz" in name:
+                          darwin.setdefault("darwin-x86_64", {})["url_name"] = name
+                  if name.endswith(".app.tar.gz.sig"):
+                      body = unwrap_sig(p.read_text(encoding="utf-8"))
+                      if "_aarch64.app.tar.gz.sig" in name:
+                          darwin.setdefault("darwin-aarch64", {})["signature"] = body
+                      elif "_x64.app.tar.gz.sig" in name or "_x86_64.app.tar.gz.sig" in name:
+                          darwin.setdefault("darwin-x86_64", {})["signature"] = body
           platforms = {
               "windows-x86_64": {
                   "signature": sig,
@@ -786,16 +939,32 @@ jobs:
                   "signature": linux_sig,
                   "url": f"https://github.com/{owner}/{repo}/releases/download/{tag}/{appimage}",
               }
+          for key in ("darwin-aarch64", "darwin-x86_64"):
+              info = darwin.get(key) or {}
+              url_name = info.get("url_name")
+              dsig = info.get("signature") or ""
+              if not url_name or not dsig:
+                  raise SystemExit(f"missing signed macOS updater asset for {key}")
+              platforms[key] = {
+                  "signature": dsig,
+                  "url": f"https://github.com/{owner}/{repo}/releases/download/{tag}/{url_name}",
+              }
           payload = {
               "version": f"v{ver}",
-              "notes": f"Remedy Desktop v{ver} — Windows installer and Linux AppImage",
+              "notes": f"Remedy Desktop v{ver} — Windows installer, Linux AppImage, and macOS app",
               "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
               "platforms": platforms,
           }
           with open("dist/latest.json", "w", encoding="utf-8") as f:
               json.dump(payload, f, indent=2)
               f.write("\n")
-          print("Wrote dist/latest.json for", asset_name, "linux=", appimage or "none", "sig_chars=", len(sig))
+          print(
+              "Wrote dist/latest.json for",
+              asset_name,
+              "linux=", appimage or "none",
+              "darwin=", ",".join(sorted(darwin)),
+              "sig_chars=", len(sig),
+          )
           PY
         env:
           ASSET_NAME: ${{ steps.installer.outputs.asset_name }}
@@ -813,7 +982,7 @@ jobs:
 
             ${{ needs.verify.outputs.prerelease == 'true' && '> **Experimental pre-release.** This line is still being proven in daily use. Installed apps do not auto-update to it; the stable release stays the one marked Latest.' || '' }}
 
-            One partner on **Windows and Linux**. Continuity stays in `~/.remedy`.
+            One partner on **Windows, Linux, and macOS**. Continuity stays in `~/.remedy`.
 
             What changed: [What's new](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md).
 
@@ -828,6 +997,12 @@ jobs:
 
             Close (✕) on Linux / WSLg minimizes to the taskbar (no tray). Maximize uses the work area of the monitor the window is on.
 
+            ### macOS
+            1. Download **`Remedy.Desktop_*_aarch64.dmg`** (Apple Silicon) or **`Remedy.Desktop_*_x64.dmg`** (Intel)
+            2. Drag Remedy Desktop to Applications
+            3. This build is unsigned (ad-hoc codesign, no Apple Developer credentials or notarization). First launch: right-click the app and choose Open, or run `xattr -dr com.apple.quarantine "/Applications/Remedy Desktop.app"`
+            4. In-app updates use the minisign-signed `.app.tar.gz`, same as Windows and Linux
+
             No Python, Node, or Rust required.
 
             ### CLI runtime (``pip install remedy-ai``)
@@ -840,11 +1015,12 @@ jobs:
             ``~/.remedy/voice/references/``.
 
             ### Auto-update
-            This release is **minisign-signed**. Windows NSIS and Linux AppImage installs with the embedded updater pubkey (v0.10.2+) can check and install updates in-app. Linux `.deb` installs still update from this page (`sudo apt install` the new `.deb`).
+            This release is **minisign-signed**. Windows NSIS, Linux AppImage, and macOS `.app.tar.gz` installs with the embedded updater pubkey (v0.10.2+) can check and install updates in-app. Linux `.deb` installs still update from this page (`sudo apt install` the new `.deb`). macOS builds are not Apple-notarized.
           files: |
             dist/${{ steps.installer.outputs.name }}
             dist/latest.json
             dist-linux/*
+            dist-macos/*
             dist-native/*
           generate_release_notes: true
 

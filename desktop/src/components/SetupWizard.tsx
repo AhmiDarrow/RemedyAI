@@ -26,7 +26,7 @@ import {
 import type { MessengerInfo } from '../api/settings'
 import { MessengersWizardStep } from './setup/MessengersWizardStep'
 import { isCustomLikeProvider, mergeModelOptions, showsBaseUrl } from '../api/modelDiscovery'
-import { isLinuxDesktop } from '../utils/platform'
+import { isLinuxDesktop, isMacDesktop } from '../utils/platform'
 import { useI18n } from '../i18n'
 
 const PERSONAS = [
@@ -1266,7 +1266,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     />
                     <span>
                       <span className="block text-base font-medium" style={{ color: 'var(--text-primary)' }}>
-                        Start with Windows
+                        {isMacDesktop() ? 'Start at login' : 'Start with Windows'}
                       </span>
                       <span className="block text-sm" style={mutedStyles}>
                         Optional tray + warm server

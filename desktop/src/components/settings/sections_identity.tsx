@@ -18,7 +18,7 @@ import { VoiceSection } from './VoiceSection'
 import { PhoneSection } from './PhoneSection'
 import { ConnectSection } from './ConnectSection'
 import { TOOL_PROCESS_MODES } from '../../utils/toolLabels'
-import { isLinuxDesktop } from '../../utils/platform'
+import { isLinuxDesktop, isMacDesktop } from '../../utils/platform'
 
 function PersonaWipeControl(): ReactNode {
   const [open, setOpen] = useState(false)
@@ -494,18 +494,30 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
               <FormToggle
                 checked={launchAtLogin}
                 onChange={setLaunchAtLogin}
-                label="Start with Windows"
-                description="Uses the Windows Startup folder (Settings → Apps → Startup) — not the registry Run key."
+                label={isMacDesktop() ? "Start at login" : "Start with Windows"}
+                description={
+                  isMacDesktop()
+                    ? "Writes a Launch Agent in your account (~/Library/LaunchAgents) so Remedy opens when you log in. Drag the app to Applications first if you opened it from a disk image."
+                    : "Uses the Windows Startup folder (Settings → Apps → Startup) — not the registry Run key."
+                }
               />
               )}
               <FormToggle
                 checked={startInTray}
                 onChange={setStartInTray}
-                label={isLinuxDesktop() ? "Start minimized" : "Start hidden in tray"}
+                label={
+                  isLinuxDesktop()
+                    ? "Start minimized"
+                    : isMacDesktop()
+                      ? "Start hidden in the menu bar"
+                      : "Start hidden in tray"
+                }
                 description={
                   isLinuxDesktop()
                     ? "Off = window opens normally (recommended). On = start minimized to the taskbar (WSLg has no tray)."
-                    : 'Off = window opens normally (recommended). On = only a tray icon until you click it. Independent of "Start with Windows".'
+                    : isMacDesktop()
+                      ? 'Off = window opens normally (recommended). On = only a menu bar extra until you click it. Independent of "Start at login".'
+                      : 'Off = window opens normally (recommended). On = only a tray icon until you click it. Independent of "Start with Windows".'
                 }
               />
               <FormToggle
@@ -515,12 +527,16 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
                 label={
                   isLinuxDesktop()
                     ? "Close window (✕) minimizes to the taskbar"
-                    : "Close window (✕) always hides to tray"
+                    : isMacDesktop()
+                      ? "Close window (✕) always hides to the menu bar"
+                      : "Close window (✕) always hides to tray"
                 }
                 description={
                   isLinuxDesktop()
                     ? "Always on: ✕ keeps Remedy running and leaves a Windows taskbar button (WSLg has no tray). Fully stop from the app menu → Quit."
-                    : "Always on for the always-ready partner: the OS ✕ / Alt+F4 hides Remedy to the system tray and keeps the local API running. Fully stop only from tray Quit."
+                    : isMacDesktop()
+                      ? "Always on for the always-ready partner: the OS ✕ hides Remedy to the menu bar extra and keeps the local API running. Fully stop only from Quit in the menu bar."
+                      : "Always on for the always-ready partner: the OS ✕ / Alt+F4 hides Remedy to the system tray and keeps the local API running. Fully stop only from tray Quit."
                 }
               />
               <FormToggle

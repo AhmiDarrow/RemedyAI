@@ -60,10 +60,19 @@ func FindLibraryPath() string {
 	}
 	var packaged string
 	if exe, err := os.Executable(); err == nil {
-		if p := add(filepath.Dir(exe)); p != "" {
+		dir := filepath.Dir(exe)
+		if p := add(dir); p != "" {
 			packaged = p
-		} else if p := add(filepath.Join(filepath.Dir(exe), "bin")); p != "" {
+		} else if p := add(filepath.Join(dir, "bin")); p != "" {
 			packaged = p
+		} else if runtime.GOOS == "darwin" {
+			// Tauri places bundle.resources in Contents/Resources, while the
+			// sidecar lives in Contents/MacOS. Look there before giving up.
+			if p := add(filepath.Join(dir, "..", "Resources")); p != "" {
+				packaged = p
+			} else if p := add(filepath.Join(dir, "..", "Resources", "bin")); p != "" {
+				packaged = p
+			}
 		}
 	}
 	wd, err := os.Getwd()
