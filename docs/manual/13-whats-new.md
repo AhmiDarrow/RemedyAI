@@ -2,13 +2,14 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.67.1**. Installed apps update on their own.
+Current release: **v0.68.0**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [0.68.0 — Unsigned macOS Desktop](#0680---unsigned-macos-desktop)
 - [0.67.1 — Windows ARM64 CLI runtime](#0671---windows-arm64-cli-runtime)
 - [0.67.0 — macOS, ARM64, and a smaller wheel](#0670---macos-arm64-and-a-smaller-wheel)
 - [0.66.6 — A safer rendezvous and a clearer first serve](#0666---a-safer-rendezvous-and-a-clearer-first-serve)
@@ -23,6 +24,19 @@ you gave her, and waits for you before money, send, or delete.
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
+
+## 0.68.0 - Unsigned macOS Desktop
+
+- **The Desktop app now ships for macOS.** Apple Silicon and Intel each
+  get an unsigned `.dmg` and a minisign-signed `.app.tar.gz` for in-app
+  updates. First launch: right-click the app and choose Open, or run
+  `xattr -dr com.apple.quarantine` on the app in Applications. There is
+  no Apple notarization.
+- **macOS stays close to the Windows Desktop.** The sidecar sits in the
+  menu bar, can start at login, uses a unix PTY and unix-socket IPC, and
+  exits when the GUI does. Computer use is fail-closed: grant
+  Accessibility and Screen Recording in System Settings when asked.
+  Capability and owner-checkpoint gates stay the same as on Windows.
 
 ## 0.67.1 - Windows ARM64 CLI runtime
 

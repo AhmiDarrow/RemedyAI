@@ -4,6 +4,30 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.68.0] - 2026-11-13
+
+### Added
+
+- Unsigned macOS Desktop app (ad-hoc codesign, no Apple notarization) for
+  Apple Silicon and Intel. The release attaches `.dmg` and `.app.tar.gz`
+  for both architectures, with minisign updater signatures in
+  `latest.json` under `darwin-aarch64` and `darwin-x86_64`. The bundle
+  includes `remedy-runtime`, `libremedy_core.dylib`, the tool worker, and
+  `rmdy-deps`, the same way Windows bundles natives.
+- macOS Desktop parity with Windows where it was reasonable: menu-bar
+  tray, Launch Agent start-at-login, in-app updater over the signed
+  `.app.tar.gz`, unix PTY terminals, and unix-socket IPC. `remedy-runtime`
+  watches its parent PID on Darwin (`kqueue` `EVFILT_PROC` / `NOTE_EXIT`)
+  and exits when the GUI dies, matching the Windows job object and Linux
+  `PR_SET_PDEATHSIG`.
+- Fail-closed computer use on macOS: Accessibility (AX) for the element
+  tree, focus, and window actions; CGEvent for click and type;
+  `CGWindowListCreateImage` for snapshots. Missing Accessibility or
+  Screen Recording is `AccessDenied` with a System Settings pane message.
+  Capability and owner-checkpoint gates stay the same as Windows UIA.
+  CI on macos-15 covers the permission-denied paths and the unsigned
+  `.dmg` sidecar smoke (`/api/ping`, then quit).
+
 ## [0.67.1] - 2026-11-12
 
 ### Added
