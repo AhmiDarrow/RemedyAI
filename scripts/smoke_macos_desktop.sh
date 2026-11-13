@@ -22,7 +22,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-hdiutil attach -nobrowse -readonly -mountpoint "${MNT}" "${DMG}"
+# licenseFile in tauri.conf.json is baked in as a DMG software license
+# agreement. A non-interactive attach otherwise prints the SLA and exits
+# "attach canceled".
+yes | hdiutil attach -nobrowse -readonly -mountpoint "${MNT}" "${DMG}"
 APP="$(find "${MNT}" -maxdepth 2 -name '*.app' -type d | head -1)"
 if [[ -z "${APP}" || ! -d "${APP}" ]]; then
   echo "no .app in ${DMG}" >&2
