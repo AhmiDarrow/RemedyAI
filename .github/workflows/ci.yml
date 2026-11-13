@@ -68,6 +68,16 @@ jobs:
           test -f zig-out/lib/libremedy_core.so
           echo "REMEDY_NATIVE_CORE_LIB=${PWD}/zig-out/lib/libremedy_core.so" >> "$GITHUB_ENV"
 
+      # Same Intel-macOS cross Desktop Release uses for libremedy_core.dylib.
+      # Zig 0.16 needs the macOS SDK sysroot to find ApplicationServices when
+      # targeting x86_64-macos from a macos-15 arm64 runner.
+      - name: Cross-compile Intel macOS dylib
+        if: runner.os == 'macOS'
+        working-directory: native/zig
+        run: |
+          SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+          zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-macos --sysroot "${SDKROOT}"
+
       # native-core has no uv; system Python is enough for this stdlib script.
       - name: Refuse host-ISA bake in remedy_core (SHA-NI)
         shell: bash
