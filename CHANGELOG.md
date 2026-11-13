@@ -4,6 +4,26 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.66.6] - 2026-11-12
+
+### Fixed
+
+- Public-broker rendezvous no longer tight-loops MQTT reconnects after a
+  session ends, including after the five refused-handshake budget. The
+  supervisor waits a one-second backoff before the next dial, so a refused
+  rendezvous cannot open hundreds of broker connections per second.
+- `remedy serve` looks for a runtime next to a venv `python` without
+  following the interpreter symlink, treats `[::1]` as loopback, prints
+  the loopback URL to open, and prints a Downloading line before the
+  first-run GitHub fetch. A verified cache hit is not hashed twice in the
+  same process when size and mtime are unchanged.
+- `remedy serve --config` prints a warning that the flag is ignored; the
+  runtime still reads config from `$REMEDY_HOME` or `~/.remedy`.
+- Docs no longer claim `REMEDY_ALLOW_INSECURE_BIND` can open `:7400`. The
+  flag does not loosen the loopback-only serve bind. `remedy --help` tells
+  pip users to run `remedy serve`, warns that `pip install remedy` is a
+  different package, and points at the latest Desktop release.
+
 ## [0.66.5] - 2026-11-12
 
 ### Fixed

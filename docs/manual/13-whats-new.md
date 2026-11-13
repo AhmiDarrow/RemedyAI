@@ -2,13 +2,14 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.66.5**. Installed apps update on their own.
+Current release: **v0.66.6**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [0.66.6 — A safer rendezvous and a clearer first serve](#0666---a-safer-rendezvous-and-a-clearer-first-serve)
 - [0.66.5 — More reliable shell capture and terminal spawn](#0665---more-reliable-shell-capture-and-terminal-spawn)
 - [0.66.4 — The worker stays in the install venv](#0664---the-worker-stays-in-the-install-venv)
 - [0.66.3 — A more reliable first-run serve](#0663---a-more-reliable-first-run-serve)
@@ -20,6 +21,17 @@ you gave her, and waits for you before money, send, or delete.
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
+
+## 0.66.6 - A safer rendezvous and a clearer first serve
+
+- **A refused phone rendezvous no longer hammers the broker.** After a
+  public-broker session ends, including after five refused handshakes,
+  Remedy waits before dialing again instead of opening a flood of
+  connections.
+- **`pip install` then `remedy serve` is easier to follow.** Help points
+  at `remedy serve` (and warns that `pip install remedy` is a different
+  package), first run prints a Downloading line, and the loopback URL is
+  shown when the runtime starts. `--config` is called out as ignored.
 
 ## 0.66.5 - More reliable shell capture and terminal spawn
 
