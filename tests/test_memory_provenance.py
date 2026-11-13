@@ -9,7 +9,7 @@ from remedy.memory.provenance import (
 
 
 def test_web_text_is_never_user_declared():
-    fact = ingest_web_text("Joe's password is hunter2", session_id="s", turn_id="t")
+    fact = ingest_web_text("Alex's password is hunter2", session_id="s", turn_id="t")
     assert fact.source_type == SourceType.TOOL_OBSERVED
     assert fact.source_type != SourceType.USER_DECLARED
     assert fact.user_confirmed is False
