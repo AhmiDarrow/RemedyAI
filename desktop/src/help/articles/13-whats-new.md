@@ -2,13 +2,14 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.68.1**. Installed apps update on their own.
+Current release: **v0.68.2**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [0.68.2 — First published macOS Desktop](#0682---first-published-macos-desktop)
 - [0.68.1 — First published macOS Desktop](#0681---first-published-macos-desktop)
 - [0.68.0 — Unsigned macOS Desktop](#0680---unsigned-macos-desktop)
 - [0.67.1 — Windows ARM64 CLI runtime](#0671---windows-arm64-cli-runtime)
@@ -26,14 +27,21 @@ you gave her, and waits for you before money, send, or delete.
 
 Earlier notes follow on this page, newest first.
 
+## 0.68.2 - First published macOS Desktop
+
+- **0.68.2 is the first shipped release with the macOS Desktop app.**
+  The `v0.68.0` and `v0.68.1` tags were created, but Desktop Release
+  failed both times while crossing `libremedy_core` to Intel Macs
+  (Zig 0.16 does not search SDK frameworks for an explicit
+  `x86_64-macos` target even with `--sysroot`), and no GitHub or
+  PyPI artifacts were published for those versions. This cut builds
+  the Intel runtime and app natively on `macos-15-intel`.
+
 ## 0.68.1 - First published macOS Desktop
 
-- **0.68.1 is the first shipped release with the macOS Desktop app.**
-  The `v0.68.0` tag was created, but Desktop Release failed while
+- The `v0.68.1` tag was created, but Desktop Release failed while
   crossing `libremedy_core` to Intel Macs, and no GitHub or PyPI
-  0.68.0 artifacts were published. This cut passes the macOS SDK
-  sysroot to that Zig cross so both Apple Silicon and Intel
-  installers can build.
+  0.68.1 artifacts were published. See 0.68.2.
 
 ## 0.68.0 - Unsigned macOS Desktop
 
