@@ -209,13 +209,13 @@ fn windowBounds(dict: CFDictionaryRef) ?host.Rect {
         break :blk null;
     };
     _ = x;
-    var x_s = CFStringCreateWithCString(null, "X", kCFStringEncodingUTF8);
+    const x_s = CFStringCreateWithCString(null, "X", kCFStringEncodingUTF8);
     defer cfRelease(@ptrCast(@constCast(x_s)));
-    var y_s = CFStringCreateWithCString(null, "Y", kCFStringEncodingUTF8);
+    const y_s = CFStringCreateWithCString(null, "Y", kCFStringEncodingUTF8);
     defer cfRelease(@ptrCast(@constCast(y_s)));
-    var w_s = CFStringCreateWithCString(null, "Width", kCFStringEncodingUTF8);
+    const w_s = CFStringCreateWithCString(null, "Width", kCFStringEncodingUTF8);
     defer cfRelease(@ptrCast(@constCast(w_s)));
-    var h_s = CFStringCreateWithCString(null, "Height", kCFStringEncodingUTF8);
+    const h_s = CFStringCreateWithCString(null, "Height", kCFStringEncodingUTF8);
     defer cfRelease(@ptrCast(@constCast(h_s)));
     const xf = cfDictF64(bdict, @ptrCast(@constCast(x_s))) orelse return null;
     const yf = cfDictF64(bdict, @ptrCast(@constCast(y_s))) orelse return null;
@@ -252,7 +252,7 @@ fn promptAccessibility() void {
             @ptrCast(&kCFTypeDictionaryKeyCallBacks),
             @ptrCast(&kCFTypeDictionaryValueCallBacks),
         );
-        defer cfRelease(opts);
+        defer cfRelease(@ptrCast(@constCast(opts)));
         _ = AXIsProcessTrustedWithOptions(opts);
     } else {
         _ = AXIsProcessTrusted();
@@ -948,7 +948,7 @@ fn raiseAndActivate(wid: CGWindowID, pid: i32) Error!bool {
     const raise = axAttrString("AXRaise");
     defer cfRelease(@ptrCast(@constCast(raise)));
     // If we cannot match a window number, raise the first window of the pid.
-    var target: AXUIElementRef = if (CFArrayGetCount(arr) > 0) @ptrCast(CFArrayGetValueAtIndex(arr, 0)) else null;
+    const target: AXUIElementRef = if (CFArrayGetCount(arr) > 0) @ptrCast(CFArrayGetValueAtIndex(arr, 0)) else null;
     _ = wid;
     if (target == null) return false;
     _ = AXUIElementPerformAction(target, raise);
@@ -967,7 +967,7 @@ pub fn focusWindow(raw_hwnd: u64) Error!bool {
     return raiseAndActivate(wid, pid);
 }
 
-fn axSetPoint(element: AXUIElementRef, attr: []const u8, x: i32, y: i32) Error!void {
+fn axSetPoint(element: AXUIElementRef, attr: [*:0]const u8, x: i32, y: i32) Error!void {
     var point = CGPoint{ .x = @floatFromInt(x), .y = @floatFromInt(y) };
     const value = AXValueCreate(kAXValueTypeCGPoint, @ptrCast(&point)) orelse return error.OperationFailed;
     defer cfRelease(value);
@@ -976,7 +976,7 @@ fn axSetPoint(element: AXUIElementRef, attr: []const u8, x: i32, y: i32) Error!v
     if (AXUIElementSetAttributeValue(element, key, value) != kAXErrorSuccess) return error.OperationFailed;
 }
 
-fn axSetSize(element: AXUIElementRef, attr: []const u8, w: i32, h: i32) Error!void {
+fn axSetSize(element: AXUIElementRef, attr: [*:0]const u8, w: i32, h: i32) Error!void {
     var size = CGSize{ .width = @floatFromInt(w), .height = @floatFromInt(h) };
     const value = AXValueCreate(kAXValueTypeCGSize, @ptrCast(&size)) orelse return error.OperationFailed;
     defer cfRelease(value);
