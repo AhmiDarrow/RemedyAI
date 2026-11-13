@@ -1023,6 +1023,26 @@ func executeComputerSnapshot(_ context.Context, request Request) (Result, error)
 			"source": "atspi", "available": true, "controls": controls, "total": len(controls),
 		})
 		return Result{Output: out}, err
+	case "darwin":
+		limit := body.Limit
+		if limit <= 0 {
+			limit = 40
+		}
+		if limit > 200 {
+			limit = 200
+		}
+		raw, err := core.A11ySnapshotJSON(uint32(limit))
+		if err != nil {
+			return Result{}, err
+		}
+		controls, err := decodeJSONArrayOrNull(raw)
+		if err != nil {
+			return Result{}, fmt.Errorf("a11y_snapshot: invalid JSON: %w", err)
+		}
+		out, err := json.Marshal(map[string]any{
+			"source": "ax", "available": true, "controls": controls, "total": len(controls),
+		})
+		return Result{Output: out}, err
 	default:
 		return Result{}, core.PlatformUnsupported("computer.snapshot")
 	}
