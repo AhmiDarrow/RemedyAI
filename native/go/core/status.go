@@ -37,6 +37,12 @@ var (
 	ErrUnsupported = errors.New("remedy_core unsupported on this platform")
 )
 
+// last_os_error values set by the macOS host when a TCC permission is missing.
+const (
+	OSErrAccessibility   uint32 = 1001
+	OSErrScreenRecording uint32 = 1002
+)
+
 // PlatformUnsupported wraps ErrUnsupported with a host-specific message.
 // Computer use on macOS is fail-closed until an Accessibility / Screen
 // Recording host is implemented; callers should keep errors.Is on ErrUnsupported.
@@ -62,8 +68,20 @@ type HostError struct {
 
 func (e *HostError) Error() string {
 	detail := statusName(e.Status)
+	if e.Status == StatusAccessDenied {
+		switch e.OSError {
+		case OSErrAccessibility:
+			return e.Function + ": Accessibility permission is required. Open System Settings → Privacy & Security → Accessibility, enable Remedy Desktop, then retry"
+		case OSErrScreenRecording:
+			return e.Function + ": Screen Recording permission is required. Open System Settings → Privacy & Security → Screen Recording, enable Remedy Desktop, then retry"
+		}
+	}
 	if e.OSError != 0 {
-		return fmt.Sprintf("%s: %s (Win32 error %d)", e.Function, detail, e.OSError)
+		label := "errno"
+		if runtime.GOOS == "windows" {
+			label = "Win32 error"
+		}
+		return fmt.Sprintf("%s: %s (%s %d)", e.Function, detail, label, e.OSError)
 	}
 	return fmt.Sprintf("%s: %s", e.Function, detail)
 }
