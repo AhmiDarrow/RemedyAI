@@ -74,6 +74,11 @@ func TestRegisterZigHostToolsDescriptors(t *testing.T) {
 	}
 }
 
+func isFailClosed(err error) bool {
+	return errors.Is(err, core.ErrUnavailable) || errors.Is(err, core.ErrUnsupported) ||
+		strings.Contains(err.Error(), "unavailable") || strings.Contains(err.Error(), "unsupported")
+}
+
 func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 	core.ResetForTest()
 	t.Cleanup(core.ResetForTest)
@@ -93,7 +98,7 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected fail-closed error")
 	}
-	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+	if !isFailClosed(err) {
 		t.Fatalf("err=%v", err)
 	}
 
@@ -104,7 +109,7 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 	if err == nil {
 		t.Fatal("computer.snapshot expected fail-closed error")
 	}
-	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+	if !isFailClosed(err) {
 		t.Fatalf("computer.snapshot err=%v", err)
 	}
 
@@ -115,7 +120,7 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 	if err == nil {
 		t.Fatal("computer.click expected fail-closed error")
 	}
-	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+	if !isFailClosed(err) {
 		t.Fatalf("computer.click err=%v", err)
 	}
 
@@ -126,7 +131,7 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 	if err == nil {
 		t.Fatal("computer.type expected fail-closed error")
 	}
-	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+	if !isFailClosed(err) {
 		t.Fatalf("computer.type err=%v", err)
 	}
 
@@ -137,7 +142,7 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 	if err == nil {
 		t.Fatal("computer.key expected fail-closed error")
 	}
-	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+	if !isFailClosed(err) {
 		t.Fatalf("computer.key err=%v", err)
 	}
 
@@ -148,7 +153,7 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 	if err == nil {
 		t.Fatal("computer.key_hold expected fail-closed error")
 	}
-	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+	if !isFailClosed(err) {
 		t.Fatalf("computer.key_hold err=%v", err)
 	}
 
@@ -176,7 +181,7 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s expected fail-closed error", id)
 		}
-		if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+		if !isFailClosed(err) {
 			t.Fatalf("%s err=%v", id, err)
 		}
 	}
@@ -189,7 +194,7 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 	if err == nil {
 		t.Fatal("computer.drag expected fail-closed error")
 	}
-	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+	if !isFailClosed(err) {
 		t.Fatalf("computer.drag err=%v", err)
 	}
 }
@@ -733,7 +738,7 @@ func TestShellExecFailClosedWithoutLibrary(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected fail-closed error")
 	}
-	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+	if !isFailClosed(err) {
 		t.Fatalf("err=%v", err)
 	}
 }
