@@ -92,3 +92,12 @@ def test_gender_bootstrap_never_becomes_her_identity(tmp_path, monkeypatch):
     assert load(tmp_path).reference_wav == ""
     assert hq.identity_prompt_path("female", tmp_path).name == "female.wav"
     assert hq.identity_prompt_path("male", tmp_path).name == "male.wav"
+
+
+def test_kokoro_standin_is_not_an_owned_reference(tmp_path: Path):
+    """A clip written by _bootstrap_identity must not masquerade as her voice."""
+    from remedy.voice.chatterbox import _identity_dir
+
+    standin = _identity_dir(tmp_path) / "female.wav"
+    standin.write_bytes(b"RIFF" + b"\x00" * 200)
+    assert reference_wav("female", tmp_path) is None
