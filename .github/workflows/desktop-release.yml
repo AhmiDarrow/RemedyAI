@@ -480,7 +480,10 @@ jobs:
           cd ../zig
           zig build -Doptimize=ReleaseSafe
           cp zig-out/lib/libremedy_core.dylib ../../desktop/bin/libremedy_core-aarch64-apple-darwin.dylib
-          zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-macos
+          # Zig 0.16 does not find Apple frameworks when crossing aarch64 → x86_64
+          # without the macOS SDK sysroot (v0.68.0 Desktop Release failed here).
+          SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+          zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-macos --sysroot "${SDKROOT}"
           cp zig-out/lib/libremedy_core.dylib ../../desktop/bin/libremedy_core-x86_64-apple-darwin.dylib
           chmod +x ../../desktop/bin/remedy-runtime-aarch64-apple-darwin ../../desktop/bin/remedy-runtime-x86_64-apple-darwin
           cd ../..
