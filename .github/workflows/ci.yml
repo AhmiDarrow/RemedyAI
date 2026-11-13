@@ -285,6 +285,34 @@ jobs:
         run: zig build -Doptimize=ReleaseSafe
         working-directory: native/zig
 
+      # Same cross that Desktop Release uses for the Windows ARM64 CLI pair.
+      # Catches the Zig 0.16.0 aarch64-windows-msvc @ptrCast alignment issue
+      # without adding a second Windows runner.
+      - name: Cross-compile Windows ARM64 runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = "0"
+          $env:GOOS = "windows"
+          $env:GOARCH = "arm64"
+          New-Item -ItemType Directory -Force -Path desktop/bin | Out-Null
+          Push-Location native/go
+          go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime-aarch64-pc-windows-msvc.exe ./cmd/remedy-runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Pop-Location
+          Push-Location native/zig
+          zig build -Doptimize=ReleaseSafe -Dtarget=aarch64-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Pop-Location
+          $dll = $null
+          foreach ($cand in @(
+            "native/zig/zig-out/bin/remedy_core.dll",
+            "native/zig/zig-out/lib/remedy_core.dll"
+          )) {
+            if (Test-Path $cand) { $dll = $cand; break }
+          }
+          if (-not $dll) { throw "Zig ARM64 build produced no remedy_core.dll" }
+
       # native-core has no uv; system Python is enough for this stdlib script.
       - name: Refuse host-ISA bake in remedy_core (SHA-NI)
         shell: bash

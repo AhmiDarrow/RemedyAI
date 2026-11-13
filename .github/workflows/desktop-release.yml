@@ -202,11 +202,9 @@ jobs:
           retention-days: 1
 
       # Cheap cross-compile: same windows-latest runner, no extra hosted ARM VM.
-      # If the ARM64 Windows SDK / Zig syslibs are missing, skip the pair rather
-      # than failing the x64 Desktop installer.
+      # Required so the Windows ARM64 CLI pair is always in the release SUMS.
       - name: Build Windows ARM64 runtime (cross)
         id: winarm
-        continue-on-error: true
         shell: pwsh
         run: |
           $env:CGO_ENABLED = "0"
@@ -643,7 +641,6 @@ jobs:
           path: dist-native-macos/
 
       - name: Download Windows ARM64 native runtime
-        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: remedy-runtime-windows-arm64
@@ -686,7 +683,9 @@ jobs:
             remedy-runtime-aarch64-apple-darwin \
             libremedy_core-aarch64-apple-darwin.dylib \
             remedy-runtime-x86_64-apple-darwin \
-            libremedy_core-x86_64-apple-darwin.dylib
+            libremedy_core-x86_64-apple-darwin.dylib \
+            remedy-runtime-aarch64-pc-windows-msvc.exe \
+            remedy_core-aarch64-pc-windows-msvc.dll
           do
             if [[ ! -f "dist-native/${required}" ]]; then
               echo "::error::Missing required native asset ${required}"
@@ -850,7 +849,7 @@ jobs:
           generate_release_notes: true
 
   # Confirm published macOS / ARM assets match remedy-native-SHA256SUMS.txt.
-  # Runs on a macOS runner (and Linux ARM) after the GitHub release exists.
+  # Runs on macOS, Linux ARM, and Windows 11 ARM after the GitHub release exists.
   verify-native-assets:
     name: Verify published macOS and ARM checksums
     needs: [verify, release]
@@ -862,6 +861,8 @@ jobs:
             triples: aarch64-apple-darwin x86_64-apple-darwin
           - os: ubuntu-24.04-arm
             triples: aarch64-unknown-linux-gnu
+          - os: windows-11-arm
+            triples: aarch64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -869,6 +870,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download published assets and check sha256
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.verify.outputs.tag }}
@@ -879,4 +881,21 @@ jobs:
             -p 'remedy-native-SHA256SUMS.txt' \
             -p 'remedy-runtime-*' \
             -p '*remedy_core*'
-          python3 scripts/verify_native_release_assets.py verify-assets ${{ matrix.triples }}
+          if command -v python3 >/dev/null 2>&1; then
+            python3 scripts/verify_native_release_assets.py verify-assets ${{ matrix.triples }}
+          else
+            python scripts/verify_native_release_assets.py verify-assets ${{ matrix.triples }}
+          fi
+
+      - name: Smoke the Windows ARM64 runtime
+        if: matrix.os == 'windows-11-arm'
+        shell: bash
+        env:
+          REMEDY_HOME: ${{ runner.temp }}/remedy-winarm-smoke-home
+        run: |
+          set -euo pipefail
+          if command -v python3 >/dev/null 2>&1; then py=python3; else py=python; fi
+          mkdir -p "${RUNNER_TEMP}/winarm-smoke"
+          cp verify-assets/remedy-runtime-aarch64-pc-windows-msvc.exe "${RUNNER_TEMP}/winarm-smoke/remedy-runtime.exe"
+          cp verify-assets/remedy_core-aarch64-pc-windows-msvc.dll "${RUNNER_TEMP}/winarm-smoke/remedy_core.dll"
+          "$py" scripts/smoke_windows_arm_runtime.py "${RUNNER_TEMP}/winarm-smoke"

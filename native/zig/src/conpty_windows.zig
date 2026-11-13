@@ -162,8 +162,10 @@ fn loadApi() ?Api {
     const create_ptr = GetProcAddress(module, "CreatePseudoConsole") orelse return null;
     const close_ptr = GetProcAddress(module, "ClosePseudoConsole") orelse return null;
     const loaded: Api = .{
-        .create = @ptrCast(create_ptr),
-        .close = @ptrCast(close_ptr),
+        // GetProcAddress is typed *anyopaque (align 1); function pointers are
+        // align 4 on aarch64. The export address is always instruction-aligned.
+        .create = @ptrCast(@alignCast(create_ptr)),
+        .close = @ptrCast(@alignCast(close_ptr)),
     };
     api_cell = loaded;
     return loaded;
