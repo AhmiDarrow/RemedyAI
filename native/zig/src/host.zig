@@ -6,7 +6,8 @@
 //! This file owns the portable pieces (status/error model, allocation, JSON,
 //! PNG, UTF-8/UTF-16, argv/env parsing, command lines) and every export. The
 //! Windows implementation lives in `host_windows.zig`; Linux (X11/XTest +
-//! AT-SPI) in `host_linux.zig`. Other OS builds export the same symbols as
+//! AT-SPI) in `host_linux.zig`; macOS (CGEvent, CGWindowList, AX) in
+//! `host_macos.zig`. Other OS builds export the same symbols as
 //! `unsupported` so the library still builds and tests.
 //!
 //! Memory contract: every buffer handed to the caller is allocated by this
@@ -34,6 +35,9 @@ pub const Error = error{
     InvalidArgument,
     OperationFailed,
     OutOfMemory,
+    /// Missing OS permission (macOS Accessibility / Screen Recording).
+    /// Reported as `Status.access_denied`.
+    AccessDenied,
     /// A supplied environment override is denied by policy (loader hooks,
     /// pinned system variables). Reported as `Status.env_denied`.
     EnvDenied,
@@ -50,12 +54,17 @@ pub fn setOsError(code: u32) void {
     last_os_error = code;
 }
 
+pub fn lastOsErrorForTest() u32 {
+    return last_os_error;
+}
+
 pub fn statusOf(err: Error) i32 {
     return @intFromEnum(switch (err) {
         error.Unsupported => Status.unsupported,
         error.InvalidArgument => Status.invalid_argument,
         error.OperationFailed => Status.operation_failed,
         error.OutOfMemory => Status.operation_failed,
+        error.AccessDenied => Status.access_denied,
         error.EnvDenied => Status.env_denied,
     });
 }
@@ -738,6 +747,7 @@ export fn remedy_core_last_os_error() callconv(.c) u32 {
 export fn remedy_core_dpi_awareness_enable() callconv(.c) i32 {
     if (is_windows) return statusOfVoid(windows.enableDpiAwareness());
     if (is_linux) return statusOfVoid(linux.enableDpiAwareness());
+    if (is_macos) return statusOfVoid(macos.enableDpiAwareness());
     return unsupported_status;
 }
 
@@ -755,6 +765,8 @@ export fn remedy_core_virtual_screen_rect(
         windows.virtualScreen()
     else if (is_linux)
         linux.virtualScreen()
+    else if (is_macos)
+        macos.virtualScreen()
     else
         unsupportedResult(VirtualScreen);
     const value = screen catch |err| return statusOf(err);
@@ -768,6 +780,7 @@ export fn remedy_core_virtual_screen_rect(
 export fn remedy_core_list_monitors(out_json: ?*?[*]u8, out_len: ?*usize) callconv(.c) i32 {
     if (is_windows) return deliverBytes(windows.listMonitorsJson(), out_json, out_len);
     if (is_linux) return deliverBytes(linux.listMonitorsJson(), out_json, out_len);
+    if (is_macos) return deliverBytes(macos.listMonitorsJson(), out_json, out_len);
     return unsupported_status;
 }
 
@@ -809,6 +822,8 @@ export fn remedy_core_capture_virtual_screen(
         windows.captureVirtualScreen(bytes_per_pixel)
     else if (is_linux)
         linux.captureVirtualScreen(bytes_per_pixel)
+    else if (is_macos)
+        macos.captureVirtualScreen(bytes_per_pixel)
     else
         unsupportedResult(Pixels);
     return deliverPixels(result, out_pixels, out_len, out_width, out_height, out_stride, out_left, out_top);
@@ -829,6 +844,8 @@ export fn remedy_core_capture_region(
         windows.captureRegion(left, top, width, height, bytes_per_pixel)
     else if (is_linux)
         linux.captureRegion(left, top, width, height, bytes_per_pixel)
+    else if (is_macos)
+        macos.captureRegion(left, top, width, height, bytes_per_pixel)
     else
         unsupportedResult(Pixels)) catch |err| {
         return deliverBytes(err, out_pixels, out_len);
@@ -852,6 +869,8 @@ export fn remedy_core_print_window(
         windows.printWindow(hwnd, bytes_per_pixel)
     else if (is_linux)
         linux.printWindow(hwnd, bytes_per_pixel)
+    else if (is_macos)
+        macos.printWindow(hwnd, bytes_per_pixel)
     else
         unsupportedResult(Pixels);
     return deliverPixels(result, out_pixels, out_len, out_width, out_height, out_stride, out_left, out_top);
@@ -882,6 +901,7 @@ export fn remedy_core_encode_png(
 export fn remedy_core_mouse_move(x: i32, y: i32) callconv(.c) i32 {
     if (is_windows) return statusOfVoid(windows.mouseMove(x, y));
     if (is_linux) return statusOfVoid(linux.mouseMove(x, y));
+    if (is_macos) return statusOfVoid(macos.mouseMove(x, y));
     return unsupported_status;
 }
 
@@ -889,6 +909,7 @@ export fn remedy_core_mouse_click(x: i32, y: i32, button: u32, clicks: u32) call
     const which = MouseButton.fromRaw(button) catch |err| return statusOf(err);
     if (is_windows) return statusOfVoid(windows.mouseClick(x, y, which, clicks));
     if (is_linux) return statusOfVoid(linux.mouseClick(x, y, which, clicks));
+    if (is_macos) return statusOfVoid(macos.mouseClick(x, y, which, clicks));
     return unsupported_status;
 }
 
@@ -896,24 +917,28 @@ export fn remedy_core_mouse_button(button: u32, pressed: u8) callconv(.c) i32 {
     const which = MouseButton.fromRaw(button) catch |err| return statusOf(err);
     if (is_windows) return statusOfVoid(windows.mouseButton(which, pressed != 0));
     if (is_linux) return statusOfVoid(linux.mouseButton(which, pressed != 0));
+    if (is_macos) return statusOfVoid(macos.mouseButton(which, pressed != 0));
     return unsupported_status;
 }
 
 export fn remedy_core_mouse_drag(x1: i32, y1: i32, x2: i32, y2: i32, steps: u32) callconv(.c) i32 {
     if (is_windows) return statusOfVoid(windows.mouseDrag(x1, y1, x2, y2, steps));
     if (is_linux) return statusOfVoid(linux.mouseDrag(x1, y1, x2, y2, steps));
+    if (is_macos) return statusOfVoid(macos.mouseDrag(x1, y1, x2, y2, steps));
     return unsupported_status;
 }
 
 export fn remedy_core_mouse_scroll(x: i32, y: i32, dx: i32, dy: i32) callconv(.c) i32 {
     if (is_windows) return statusOfVoid(windows.mouseScroll(x, y, dx, dy));
     if (is_linux) return statusOfVoid(linux.mouseScroll(x, y, dx, dy));
+    if (is_macos) return statusOfVoid(macos.mouseScroll(x, y, dx, dy));
     return unsupported_status;
 }
 
 export fn remedy_core_type_text(utf8: ?[*]const u8, len: usize, per_char_delay_ms: u32) callconv(.c) i32 {
     if (is_windows) return statusOfVoid(windows.typeText(slice(utf8, len), per_char_delay_ms));
     if (is_linux) return statusOfVoid(linux.typeText(slice(utf8, len), per_char_delay_ms));
+    if (is_macos) return statusOfVoid(macos.typeText(slice(utf8, len), per_char_delay_ms));
     return unsupported_status;
 }
 
@@ -921,12 +946,14 @@ export fn remedy_core_key_combo(vks: ?[*]const u16, count: usize) callconv(.c) i
     const raw = vks orelse return invalid_status;
     if (is_windows) return statusOfVoid(windows.keyCombo(raw[0..count]));
     if (is_linux) return statusOfVoid(linux.keyCombo(raw[0..count]));
+    if (is_macos) return statusOfVoid(macos.keyCombo(raw[0..count]));
     return unsupported_status;
 }
 
 export fn remedy_core_key_hold(vk: u16, hold_ms: u32) callconv(.c) i32 {
     if (is_windows) return statusOfVoid(windows.keyHold(vk, hold_ms));
     if (is_linux) return statusOfVoid(linux.keyHold(vk, hold_ms));
+    if (is_macos) return statusOfVoid(macos.keyHold(vk, hold_ms));
     return unsupported_status;
 }
 
@@ -936,6 +963,8 @@ export fn remedy_core_vk_key_scan(codepoint: u32, out_scan: ?*i32) callconv(.c) 
         windows.vkKeyScan(codepoint)
     else if (is_linux)
         linux.vkKeyScan(codepoint)
+    else if (is_macos)
+        macos.vkKeyScan(codepoint)
     else
         unsupportedResult(i32);
     output.* = scan catch |err| return statusOf(err);
@@ -945,12 +974,14 @@ export fn remedy_core_vk_key_scan(codepoint: u32, out_scan: ?*i32) callconv(.c) 
 export fn remedy_core_list_windows(limit: u32, out_json: ?*?[*]u8, out_len: ?*usize) callconv(.c) i32 {
     if (is_windows) return deliverBytes(windows.listWindowsJson(limit), out_json, out_len);
     if (is_linux) return deliverBytes(linux.listWindowsJson(limit), out_json, out_len);
+    if (is_macos) return deliverBytes(macos.listWindowsJson(limit), out_json, out_len);
     return unsupported_status;
 }
 
 export fn remedy_core_window_class(hwnd: u64, out_utf8: ?*?[*]u8, out_len: ?*usize) callconv(.c) i32 {
     if (is_windows) return deliverBytes(windows.windowClass(hwnd), out_utf8, out_len);
     if (is_linux) return deliverBytes(linux.windowClass(hwnd), out_utf8, out_len);
+    if (is_macos) return deliverBytes(macos.windowClass(hwnd), out_utf8, out_len);
     return unsupported_status;
 }
 
@@ -969,6 +1000,8 @@ export fn remedy_core_window_rect(
         windows.windowRect(hwnd)
     else if (is_linux)
         linux.windowRect(hwnd)
+    else if (is_macos)
+        macos.windowRect(hwnd)
     else
         unsupportedResult(Rect);
     const value = rect catch |err| return statusOf(err);
@@ -989,6 +1022,8 @@ export fn remedy_core_foreground_window(
         windows.foregroundWindow()
     else if (is_linux)
         linux.foregroundWindow()
+    else if (is_macos)
+        macos.foregroundWindow()
     else
         unsupportedResult(ForegroundInfo);
     const value = info catch |err| return deliverBytes(err, out_title, out_len);
@@ -1002,6 +1037,8 @@ export fn remedy_core_focus_window(hwnd: u64, out_focused: ?*u8) callconv(.c) i3
         windows.focusWindow(hwnd)
     else if (is_linux)
         linux.focusWindow(hwnd)
+    else if (is_macos)
+        macos.focusWindow(hwnd)
     else
         unsupportedResult(bool);
     output.* = @intFromBool(focused catch |err| return statusOf(err));
@@ -1019,6 +1056,7 @@ export fn remedy_core_manage_window(
     const verb = WindowAction.fromRaw(action) catch |err| return statusOf(err);
     if (is_windows) return statusOfVoid(windows.manageWindow(hwnd, verb, x, y, width, height));
     if (is_linux) return statusOfVoid(linux.manageWindow(hwnd, verb, x, y, width, height));
+    if (is_macos) return statusOfVoid(macos.manageWindow(hwnd, verb, x, y, width, height));
     return unsupported_status;
 }
 
@@ -1035,6 +1073,8 @@ export fn remedy_core_find_child_hwnd(
         windows.findChildHwnd(parent, slice(class_substr, class_len), slice(title_substr, title_len))
     else if (is_linux)
         linux.findChildHwnd(parent, slice(class_substr, class_len), slice(title_substr, title_len))
+    else if (is_macos)
+        macos.findChildHwnd(parent, slice(class_substr, class_len), slice(title_substr, title_len))
     else
         unsupportedResult(u64);
     output.* = found catch |err| return statusOf(err);
@@ -1044,12 +1084,14 @@ export fn remedy_core_find_child_hwnd(
 export fn remedy_core_clipboard_get_text(out_utf8: ?*?[*]u8, out_len: ?*usize) callconv(.c) i32 {
     if (is_windows) return deliverBytes(windows.clipboardGetText(), out_utf8, out_len);
     if (is_linux) return deliverBytes(linux.clipboardGetText(), out_utf8, out_len);
+    if (is_macos) return deliverBytes(macos.clipboardGetText(), out_utf8, out_len);
     return unsupported_status;
 }
 
 export fn remedy_core_clipboard_set_text(utf8: ?[*]const u8, len: usize) callconv(.c) i32 {
     if (is_windows) return statusOfVoid(windows.clipboardSetText(slice(utf8, len)));
     if (is_linux) return statusOfVoid(linux.clipboardSetText(slice(utf8, len)));
+    if (is_macos) return statusOfVoid(macos.clipboardSetText(slice(utf8, len)));
     return unsupported_status;
 }
 
@@ -1069,6 +1111,7 @@ export fn remedy_core_clipboard_get_image_png(out_png: ?*?[*]u8, out_len: ?*usiz
 export fn remedy_core_foreground_detail(out_json: ?*?[*]u8, out_len: ?*usize) callconv(.c) i32 {
     if (is_windows) return deliverBytes(windows.foregroundDetailJson(), out_json, out_len);
     if (is_linux) return deliverBytes(linux.foregroundDetailJson(), out_json, out_len);
+    if (is_macos) return deliverBytes(macos.foregroundDetailJson(), out_json, out_len);
     return unsupported_status;
 }
 
@@ -1143,6 +1186,7 @@ export fn remedy_core_process_close(handle: u64) callconv(.c) i32 {
 /// (filled by the UIA agent); until then returns unsupported on Windows.
 export fn remedy_core_a11y_snapshot(limit: u32, out_json: ?*?[*]u8, out_len: ?*usize) callconv(.c) i32 {
     if (is_linux) return deliverBytes(linux.a11ySnapshotJson(limit), out_json, out_len);
+    if (is_macos) return deliverBytes(macos.a11ySnapshotJson(limit), out_json, out_len);
     return unsupported_status;
 }
 
@@ -1428,8 +1472,8 @@ test "encode png export validates its output slots" {
 
 test "host exports report unsupported off windows" {
     if (is_windows) return;
-    if (is_linux) {
-        // Linux implements desktop host + process control; pid 0/1 stay invalid.
+    if (is_linux or is_macos) {
+        // Linux and macOS implement desktop host + process control; pid 0/1 stay invalid.
         try std.testing.expectEqual(ok_status, remedy_core_dpi_awareness_enable());
         try std.testing.expectEqual(invalid_status, remedy_core_process_kill_tree(0));
         try std.testing.expectEqual(invalid_status, remedy_core_process_kill_tree(1));
@@ -1458,7 +1502,7 @@ test {
 }
 
 test "other hosts fail closed" {
-    if (is_windows or is_linux) return error.SkipZigTest;
+    if (is_windows or is_linux or is_macos) return error.SkipZigTest;
     try std.testing.expectEqual(unsupported_status, remedy_core_dpi_awareness_enable());
     try std.testing.expectEqual(unsupported_status, remedy_core_a11y_snapshot(8, null, null));
     try std.testing.expectEqual(unsupported_status, remedy_core_clipboard_get_text(null, null));
