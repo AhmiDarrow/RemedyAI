@@ -27,6 +27,16 @@ fn linkHostLibraries(module: *std.Build.Module, target: std.Build.ResolvedTarget
         .macos => {
             // AX, CGEvent, CGWindowList, Carbon Pasteboard, waitpid/libproc.
             module.link_libc = true;
+            // Zig 0.16 only auto-fills framework search paths for a native
+            // target (ziglang/zig#25010). `--sysroot` is forwarded to the
+            // compiler but those search paths stay "none" when crossing
+            // aarch64 → x86_64-macos, so the SDK framework dir has to be
+            // added explicitly (ziglang/zig#22704).
+            const b = module.owner;
+            if (b.sysroot) |sysroot| {
+                module.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include" }) });
+                module.addSystemFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "System/Library/Frameworks" }) });
+            }
             module.linkFramework("ApplicationServices", .{});
             module.linkFramework("CoreGraphics", .{});
             module.linkFramework("CoreFoundation", .{});
