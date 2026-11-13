@@ -4,9 +4,10 @@ package parentwatch
 
 import (
 	"os"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 func terminateSelf(p *os.Process) error {
-	return p.Signal(syscall.SIGTERM)
+	return p.Signal(unix.SIGTERM)
 }
