@@ -4,6 +4,38 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.67.0] - 2026-11-12
+
+### Added
+
+- First-run `remedy serve` can download prebuilt `remedy-runtime` and
+  `libremedy_core` for Linux ARM64, macOS Apple silicon, and Intel macOS,
+  plus Windows ARM64 when that pair is attached to the release. The
+  checksum file lists the new assets. Go loads `libremedy_core.dylib` on
+  macOS the same way it loads the Linux `.so`. Zig host APIs that have no
+  macOS implementation (AT-SPI, UIA, input, capture) fail closed.
+- Desktop Release also builds those native runtimes (`ubuntu-24.04-arm`,
+  `macos-15` for arm64 native and x86_64 cross, and a Windows ARM64 cross
+  when the SDK is present). A post-release job on macOS and Linux ARM
+  checks the published checksums. CI `native-core` covers the same
+  runners. Desktop Tauri macOS bundles are not shipped; signing and
+  notarization would need Apple Developer credentials.
+
+### Changed
+
+- The two HQ (Chatterbox) LibriVox reference WAVs are no longer in the
+  `remedy-ai` wheel. They are a checksummed first-use download, cached
+  under `~/.remedy/voice/references/`, and attached to the GitHub release
+  as `remedy-voice-*.wav`. A download that can be attempted is never
+  silently replaced with a Kokoro stand-in. The wheel zip drops from
+  3,390,382 bytes (3.23 MiB) to 2,375,825 bytes (2.27 MiB).
+
+### Fixed
+
+- Hive spawn no longer overwrites a forager that already reported its
+  pulse as still `running` (the cause of the flaky
+  `TestHiveRosterSpawnAssignRetire`).
+
 ## [0.66.6] - 2026-11-12
 
 ### Fixed
