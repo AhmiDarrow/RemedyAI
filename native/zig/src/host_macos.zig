@@ -46,9 +46,33 @@ fn processFrom(handle: u64) Error!*Process {
     return @ptrFromInt(handle);
 }
 
+const Timespec = extern struct {
+    sec: isize,
+    nsec: isize,
+};
+
+extern "c" fn nanosleep(req: *const Timespec, rem: ?*Timespec) callconv(.c) c_int;
+extern "c" fn clock_gettime(clock_id: c_int, tp: *Timespec) callconv(.c) c_int;
+
+// CLOCK_MONOTONIC is 6 on Darwin (1 on Linux).
+const CLOCK_MONOTONIC: c_int = 6;
+
 fn sleepMs(ms: u32) void {
     if (ms == 0) return;
-    std.Thread.sleep(@as(u64, ms) * std.time.ns_per_ms);
+    var req = Timespec{
+        .sec = @intCast(ms / 1000),
+        .nsec = @intCast((ms % 1000) * 1_000_000),
+    };
+    var rem: Timespec = undefined;
+    while (nanosleep(&req, &rem) != 0) {
+        req = rem;
+    }
+}
+
+fn monoMillis() i64 {
+    var ts: Timespec = undefined;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return @as(i64, @intCast(ts.sec)) * 1000 + @divTrunc(@as(i64, @intCast(ts.nsec)), 1_000_000);
 }
 
 fn reapNonBlocking(process: *Process) Error!bool {
@@ -169,9 +193,11 @@ pub fn processWait(handle: u64, timeout_ms: u32) Error!WaitOutcome {
     }
     if (timeout_ms == 0) return .{ .exited = false, .exit_code = 0 };
     const forever = timeout_ms == std.math.maxInt(u32);
-    const start = std.time.milliTimestamp();
-    const deadline: i64 = if (forever) std.math.maxInt(i64) else start + @as(i64, @intCast(timeout_ms));
-    while (forever or std.time.milliTimestamp() < deadline) {
+    const deadline: i64 = if (forever)
+        std.math.maxInt(i64)
+    else
+        monoMillis() + @as(i64, @intCast(timeout_ms));
+    while (forever or monoMillis() < deadline) {
         sleepMs(10);
         if (try reapNonBlocking(process)) {
             return .{ .exited = true, .exit_code = process.exit_code };
