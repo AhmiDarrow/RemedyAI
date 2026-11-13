@@ -370,7 +370,13 @@ jobs:
         working-directory: desktop
 
       - name: Build unsigned arm64 .dmg
-        run: npx tauri build --bundles dmg,app --target aarch64-apple-darwin
+        # CI only smokes the .dmg / sidecar; updater signatures are produced
+        # on Desktop Release where TAURI_SIGNING_PRIVATE_KEY is available.
+        # tauri.conf.json bakes in the updater pubkey, so a full artifact
+        # build would fail here with "public key has been found, but no private key".
+        run: >
+          npx tauri build --bundles dmg,app --target aarch64-apple-darwin
+          --config '{"bundle":{"createUpdaterArtifacts":false}}'
         working-directory: desktop
         env:
           MACOSX_DEPLOYMENT_TARGET: '12.0'
