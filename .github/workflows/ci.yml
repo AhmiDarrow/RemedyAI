@@ -384,19 +384,30 @@ jobs:
       - name: Finalize bundle and smoke the sidecar
         run: |
           set -euo pipefail
-          APP=$(find desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos -maxdepth 2 -name '*.app' -type d | head -1)
-          if [[ -z "${APP}" ]]; then
-            APP=$(find desktop/src-tauri/target/release/bundle/macos -maxdepth 2 -name '*.app' -type d | head -1)
-          fi
+          APP=""
+          for dir in             desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos             desktop/src-tauri/target/release/bundle/macos
+          do
+            [[ -d "${dir}" ]] || continue
+            APP="$(find "${dir}" -maxdepth 2 -name '*.app' -type d | head -1 || true)"
+            [[ -n "${APP}" ]] && break
+          done
           if [[ -z "${APP}" || ! -d "${APP}" ]]; then
             echo "::error::tauri build did not produce a .app"
-            find desktop/src-tauri/target -name '*.app' -o -name '*.dmg' | head -50
+            find desktop/src-tauri/target \( -name '*.app' -o -name '*.dmg' \) | head -50 || true
             exit 1
           fi
+          echo "Finalizing ${APP}"
           bash scripts/macos_finalize_desktop_bundle.sh --app "${APP}" --dylib desktop/bin/libremedy_core.dylib
-          DMG=$(find desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg desktop/src-tauri/target/release/bundle/dmg -name '*.dmg' 2>/dev/null | head -1)
+          DMG=""
+          for dir in             desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg             desktop/src-tauri/target/release/bundle/dmg
+          do
+            [[ -d "${dir}" ]] || continue
+            DMG="$(find "${dir}" -name '*.dmg' -type f | head -1 || true)"
+            [[ -n "${DMG}" ]] && break
+          done
           if [[ -z "${DMG}" || ! -f "${DMG}" ]]; then
             echo "::error::tauri build did not produce a .dmg"
             exit 1
           fi
+          echo "Smoking ${DMG}"
           bash scripts/smoke_macos_desktop.sh "${DMG}"
