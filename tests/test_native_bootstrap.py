@@ -51,13 +51,42 @@ def linux_assets(monkeypatch: pytest.MonkeyPatch) -> nb.NativeAssets:
 
 
 def test_unsupported_platform_is_honest(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(nb.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(nb.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(nb.platform, "system", lambda: "FreeBSD")
+    monkeypatch.setattr(nb.platform, "machine", lambda: "amd64")
     assert nb.assets_for_this_machine() is None
     reason = nb.unsupported_platform_reason()
     assert reason is not None
-    assert "Darwin" in reason
+    assert "FreeBSD" in reason
     assert "go build" in reason
+
+
+@pytest.mark.parametrize(
+    ("system", "machine", "triple", "core_local"),
+    [
+        ("Linux", "aarch64", "aarch64-unknown-linux-gnu", "libremedy_core.so"),
+        ("Linux", "arm64", "aarch64-unknown-linux-gnu", "libremedy_core.so"),
+        ("Darwin", "arm64", "aarch64-apple-darwin", "libremedy_core.dylib"),
+        ("Darwin", "aarch64", "aarch64-apple-darwin", "libremedy_core.dylib"),
+        ("Darwin", "x86_64", "x86_64-apple-darwin", "libremedy_core.dylib"),
+        ("Windows", "ARM64", "aarch64-pc-windows-msvc", "remedy_core.dll"),
+        ("Windows", "arm64", "aarch64-pc-windows-msvc", "remedy_core.dll"),
+    ],
+)
+def test_assets_for_macos_and_arm(
+    monkeypatch: pytest.MonkeyPatch,
+    system: str,
+    machine: str,
+    triple: str,
+    core_local: str,
+) -> None:
+    monkeypatch.setattr(nb.platform, "system", lambda: system)
+    monkeypatch.setattr(nb.platform, "machine", lambda: machine)
+    assets = nb.assets_for_this_machine()
+    assert assets is not None
+    assert assets.triple == triple
+    assert assets.core_local == core_local
+    assert triple in assets.runtime_asset
+    assert triple in assets.core_asset
 
 
 def test_parse_sha256sums_rejects_path_components() -> None:

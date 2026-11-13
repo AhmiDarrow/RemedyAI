@@ -237,6 +237,19 @@ pub const VirtualScreen = struct {
     height: i32,
 };
 
+/// Result types used by the fail-closed stubs when the host is neither
+/// Windows nor Linux (macOS, etc.). Same shapes as host_linux / host_windows.
+pub const ForegroundInfo = struct { hwnd: u64, title: []u8 };
+pub const Spawned = struct { pid: u32, handle: u64 };
+pub const WaitOutcome = struct { exited: bool, exit_code: u32 };
+
+/// `error.Unsupported` alone is an error *set*, not an error union, so a
+/// `value catch` on the else-branch does not compile on macOS.
+fn unsupportedResult(comptime T: type) Error!T {
+    return error.Unsupported;
+}
+
+
 pub const AbsPoint = struct { x: i32, y: i32 };
 
 /// Map virtual-screen pixels onto the 0..65535 range SendInput expects with
@@ -742,7 +755,7 @@ export fn remedy_core_virtual_screen_rect(
     else if (is_linux)
         linux.virtualScreen()
     else
-        error.Unsupported;
+        unsupportedResult(VirtualScreen);
     const value = screen catch |err| return statusOf(err);
     left.* = value.left;
     top.* = value.top;
@@ -796,7 +809,7 @@ export fn remedy_core_capture_virtual_screen(
     else if (is_linux)
         linux.captureVirtualScreen(bytes_per_pixel)
     else
-        error.Unsupported;
+        unsupportedResult(Pixels);
     return deliverPixels(result, out_pixels, out_len, out_width, out_height, out_stride, out_left, out_top);
 }
 
@@ -816,7 +829,7 @@ export fn remedy_core_capture_region(
     else if (is_linux)
         linux.captureRegion(left, top, width, height, bytes_per_pixel)
     else
-        error.Unsupported) catch |err| {
+        unsupportedResult(Pixels)) catch |err| {
         return deliverBytes(err, out_pixels, out_len);
     };
     stride.* = pixels.stride;
@@ -839,7 +852,7 @@ export fn remedy_core_print_window(
     else if (is_linux)
         linux.printWindow(hwnd, bytes_per_pixel)
     else
-        error.Unsupported;
+        unsupportedResult(Pixels);
     return deliverPixels(result, out_pixels, out_len, out_width, out_height, out_stride, out_left, out_top);
 }
 
@@ -923,7 +936,7 @@ export fn remedy_core_vk_key_scan(codepoint: u32, out_scan: ?*i32) callconv(.c) 
     else if (is_linux)
         linux.vkKeyScan(codepoint)
     else
-        error.Unsupported;
+        unsupportedResult(i32);
     output.* = scan catch |err| return statusOf(err);
     return ok_status;
 }
@@ -956,7 +969,7 @@ export fn remedy_core_window_rect(
     else if (is_linux)
         linux.windowRect(hwnd)
     else
-        error.Unsupported;
+        unsupportedResult(Rect);
     const value = rect catch |err| return statusOf(err);
     left.* = value.left;
     top.* = value.top;
@@ -976,7 +989,7 @@ export fn remedy_core_foreground_window(
     else if (is_linux)
         linux.foregroundWindow()
     else
-        error.Unsupported;
+        unsupportedResult(ForegroundInfo);
     const value = info catch |err| return deliverBytes(err, out_title, out_len);
     hwnd_slot.* = value.hwnd;
     return deliverBytes(value.title, out_title, out_len);
@@ -989,7 +1002,7 @@ export fn remedy_core_focus_window(hwnd: u64, out_focused: ?*u8) callconv(.c) i3
     else if (is_linux)
         linux.focusWindow(hwnd)
     else
-        error.Unsupported;
+        unsupportedResult(bool);
     output.* = @intFromBool(focused catch |err| return statusOf(err));
     return ok_status;
 }
@@ -1022,7 +1035,7 @@ export fn remedy_core_find_child_hwnd(
     else if (is_linux)
         linux.findChildHwnd(parent, slice(class_substr, class_len), slice(title_substr, title_len))
     else
-        error.Unsupported;
+        unsupportedResult(u64);
     output.* = found catch |err| return statusOf(err);
     return ok_status;
 }
@@ -1080,7 +1093,7 @@ export fn remedy_core_process_spawn_hidden(
     else if (is_linux)
         linux.spawnHidden(slice(argv_json, argv_len), slice(cwd, cwd_len), slice(env_json, env_len))
     else
-        error.Unsupported;
+        unsupportedResult(Spawned);
     const result = spawned catch |err| return statusOf(err);
     pid_slot.* = result.pid;
     handle_slot.* = result.handle;
@@ -1100,7 +1113,7 @@ export fn remedy_core_process_wait(
     else if (is_linux)
         linux.processWait(handle, timeout_ms)
     else
-        error.Unsupported;
+        unsupportedResult(WaitOutcome);
     const result = outcome catch |err| return statusOf(err);
     exited_slot.* = @intFromBool(result.exited);
     code_slot.* = result.exit_code;
@@ -1426,4 +1439,19 @@ test "host exports report unsupported off windows" {
 test {
     if (is_windows) _ = windows;
     if (is_linux) _ = linux;
+}
+
+test "other hosts fail closed" {
+    if (is_windows or is_linux) return error.SkipZigTest;
+    try std.testing.expectEqual(unsupported_status, remedy_core_dpi_awareness_enable());
+    try std.testing.expectEqual(unsupported_status, remedy_core_a11y_snapshot(8, null, null));
+    try std.testing.expectEqual(unsupported_status, remedy_core_clipboard_get_text(null, null));
+    var left: i32 = 0;
+    var top: i32 = 0;
+    var width: i32 = 0;
+    var height: i32 = 0;
+    try std.testing.expectEqual(
+        unsupported_status,
+        remedy_core_virtual_screen_rect(&left, &top, &width, &height),
+    );
 }
