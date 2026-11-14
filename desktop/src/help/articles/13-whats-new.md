@@ -2,13 +2,14 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.68.2**. Installed apps update on their own.
+Current release: **v0.69.0**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [0.69.0 — Reasoning settings and a clearer live turn](#0690---reasoning-settings-and-a-clearer-live-turn)
 - [0.68.2 — First published macOS Desktop](#0682---first-published-macos-desktop)
 - [0.68.1 — First published macOS Desktop](#0681---first-published-macos-desktop)
 - [0.68.0 — Unsigned macOS Desktop](#0680---unsigned-macos-desktop)
@@ -26,6 +27,26 @@ you gave her, and waits for you before money, send, or delete.
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
+
+## 0.69.0 - Reasoning settings and a clearer live turn
+
+- **Reasoning and context per model.** Set reasoning effort, a thinking
+  budget, max output tokens, and the context window for all models or one
+  model (Settings → Reasoning and context, `remedy settings set`, or
+  `config.toml`). Each provider only receives what it supports; unset keeps
+  its defaults.
+- **A clearer live turn.** The reply shows in its own bubble. Thinking,
+  interim notes, and tool steps sit in a collapsible "Working…" timeline
+  that folds away when the answer arrives. Sentences from separate model
+  rounds no longer run together.
+- **Pronouns follow the agent's gender setting** everywhere (she, he, or
+  they), and update as soon as you change it.
+- **A tidier download page.** The release shows only the desktop installers
+  and `latest.json`, with a "Which file do I need?" table. Runtime files for
+  `pip install` live on a matching `runtime-vX.Y.Z` release and first run
+  finds them there automatically.
+- Steadier Windows config saves, sortable timestamps, and config files that
+  stay readable when a model id contains `.` or `/`.
 
 ## 0.68.2 - First published macOS Desktop
 
