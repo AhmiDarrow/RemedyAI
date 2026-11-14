@@ -107,6 +107,7 @@ import { tauriInvoke, tauriListen } from './api/tauri'
 import { normalizeToolProcess, type ToolProcessMode } from './utils/toolLabels'
 import { HOTKEYS } from './hotkeys'
 import type { ShortcutDef } from './hooks/useKeyboardShortcuts'
+import { setAgentIdentity } from './i18n/pronouns'
 
 export type { ModelInfo }
 
@@ -1243,6 +1244,7 @@ export default function App() {
     getSettings()
       .then((s) => {
         const g = String(s.agent_gender || 'female').toLowerCase()
+        setAgentIdentity({ gender: g, name: s.name })
         setVoiceGender(g === 'male' ? 'male' : g === 'neutral' ? 'neutral' : 'female')
       })
       .catch(() => {})

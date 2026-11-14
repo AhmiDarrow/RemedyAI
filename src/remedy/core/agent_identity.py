@@ -93,14 +93,79 @@ def normalize_agent_gender(gender: str | None) -> str:
     return DEFAULT_GENDER
 
 
+_FEMALE_ALIASES = frozenset({"female", "f", "she", "her", "woman", "girl", "femme"})
+_MALE_ALIASES = frozenset({"male", "m", "he", "him", "man", "boy", "masc"})
+
+
+def pronoun_gender(gender: str | None) -> str:
+    """Gender for pronouns: female / male when clearly set, else neutral.
+
+    Unlike :func:`normalize_agent_gender` (which falls back to the persona
+    default), unset or unrecognised values give they/them.
+    """
+    g = (gender or "").strip().lower()
+    if g in _FEMALE_ALIASES:
+        return GENDER_FEMALE
+    if g in _MALE_ALIASES:
+        return GENDER_MALE
+    return GENDER_NEUTRAL
+
+
 def pronouns_for(gender: str | None) -> dict[str, str]:
-    """Subject / object / possessive for light natural language."""
-    g = normalize_agent_gender(gender)
-    if g == GENDER_MALE:
-        return {"subject": "he", "object": "him", "possessive": "his"}
-    if g == GENDER_NEUTRAL:
-        return {"subject": "they", "object": "them", "possessive": "their"}
-    return {"subject": "she", "object": "her", "possessive": "her"}
+    """The one pronoun table for third-person references to the agent.
+
+    Keys: subject, object, possessive (determiner), possessive_pronoun,
+    reflexive, plus verb agreement ``s`` ("work{s}"), ``is``, ``has``, ``was``.
+    """
+    g = pronoun_gender(gender)
+    if g == GENDER_FEMALE:
+        words = ("she", "her", "her", "hers", "herself")
+    elif g == GENDER_MALE:
+        words = ("he", "him", "his", "his", "himself")
+    else:
+        words = ("they", "them", "their", "theirs", "themself")
+    plural = g == GENDER_NEUTRAL
+    return {
+        "subject": words[0],
+        "object": words[1],
+        "possessive": words[2],
+        "possessive_pronoun": words[3],
+        "reflexive": words[4],
+        "s": "" if plural else "s",
+        "is": "are" if plural else "is",
+        "has": "have" if plural else "has",
+        "was": "were" if plural else "was",
+    }
+
+
+class _KeepMissing(dict[str, str]):
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
+def pronoun_vars(gender: str | None, name: str | None = None) -> dict[str, str]:
+    """Template tokens shared with the desktop (desktop/src/i18n/pronouns.ts)."""
+    p = pronouns_for(gender)
+    return {
+        "they": p["subject"],
+        "them": p["object"],
+        "their": p["possessive"],
+        "theirs": p["possessive_pronoun"],
+        "themself": p["reflexive"],
+        "They": p["subject"].capitalize(),
+        "Their": p["possessive"].capitalize(),
+        "s": p["s"],
+        "is": p["is"],
+        "has": p["has"],
+        "was": p["was"],
+        "agent": normalize_agent_name(name),
+    }
+
+
+def render_pronouns(template: str, gender: str | None = None, name: str | None = None) -> str:
+    """Fill {they} {them} {their} {theirs} {themself} {They} {Their} {s} {is}
+    {has} {was} {agent} in *template*; other braces are left untouched."""
+    return template.format_map(_KeepMissing(pronoun_vars(gender, name)))
 
 
 def gender_presentation_line(gender: str | None, name: str | None = None) -> str:

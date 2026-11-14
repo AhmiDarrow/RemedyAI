@@ -915,7 +915,7 @@ def register_computer_tools(runtime: Any) -> None:
         "computer_screenshot",
         "Screenshot browser or desktop. Built-in vision auto-decodes the PNG "
         "(OCR + click targets). For Remedy's own Grove / Alongside / Studio, "
-        "set hint='grove' (or alongside/studio) so we capture HER window — "
+        "set hint='grove' (or alongside/studio) so we capture YOUR window — "
         "do not pass monitor=0 on a multi-display desk (that is often wallpaper). "
         "Use computer_monitors to see which display holds Remedy Desktop.",
         computer_screenshot,
@@ -1422,7 +1422,7 @@ def register_computer_tools(runtime: Any) -> None:
             "self_ui": "app_control (Grove / Settings / rails)",
         }
         out["note"] = (
-            "This PC is her house. Use the drive table — do not list_dir C:\\ "
+            "This PC is your house. Use the drive table — do not list_dir C:\\ "
             "or only point the owner at Settings."
         )
         return json.dumps(out, indent=2, default=str)
@@ -1472,7 +1472,7 @@ def register_computer_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "house_status",
-        "What she is and what this PC is: census, RMB/vision/vault/apps, "
+        "What you are and what this PC is: census, RMB/vision/vault/apps, "
         "and which tool drives each organ. Call this instead of guessing "
         "or sending the owner to Settings.",
         house_status,

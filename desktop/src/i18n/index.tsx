@@ -9,6 +9,7 @@ import {
 } from 'react'
 import { fetchI18n, type UiLanguageOption } from '../api/i18n'
 import { EN, formatMsg } from './en'
+import { getAgentIdentity, pronounVars, useAgentIdentity } from './pronouns'
 
 type Catalog = Record<string, string>
 
@@ -76,12 +77,18 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     [reload],
   )
 
+  // Pronoun tokens ({they}, {their}, work{s}, {agent}, …) follow the configured
+  // agent gender and name, and t() changes identity when the setting does.
+  const identity = useAgentIdentity()
   const t = useCallback(
     (key: string, vars?: Record<string, string>) => {
       const raw = catalog[key] || EN[key] || key
-      return formatMsg(raw, vars)
+      return formatMsg(raw, {
+        ...(pronounVars(identity.gender, identity.name) as unknown as Record<string, string>),
+        ...vars,
+      })
     },
-    [catalog],
+    [catalog, identity],
   )
 
   const value = useMemo<I18nState>(
@@ -101,7 +108,13 @@ export function useI18n(): I18nState {
       dir: 'ltr',
       catalog: EN,
       languages: [],
-      t: (key, vars) => formatMsg(EN[key] || key, vars),
+      t: (key, vars) => {
+        const id = getAgentIdentity()
+        return formatMsg(EN[key] || key, {
+          ...(pronounVars(id.gender, id.name) as unknown as Record<string, string>),
+          ...vars,
+        })
+      },
       setStored: () => {},
       reload: async () => {},
     }
