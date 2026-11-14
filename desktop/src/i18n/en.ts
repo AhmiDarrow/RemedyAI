@@ -56,7 +56,7 @@ export const EN: Record<string, string> = {
   'composer.placeholder': 'Message Remedy — /command · @file · Shift+Tab Chat/Plan/Build',
   'composer.placeholderChat': 'Just talking — Shift+Tab for Plan',
   'composer.placeholderPlan': 'Plan mode — explore & plan (Shift+Tab → Build)',
-  'composer.placeholderQueue': 'Steer while she works (Enter) · Ctrl+Enter interrupt · Alt+Enter queue…',
+  'composer.placeholderQueue': 'Steer while {they} work{s} (Enter) · Ctrl+Enter interrupt · Alt+Enter queue…',
   'composer.placeholderListening': 'Listening…',
   'composer.placeholderHearing': 'Hearing what you said…',
   'composer.placeholderFiles': 'Add a note for these files…',
@@ -215,10 +215,10 @@ export const EN: Record<string, string> = {
   'plan.ready': 'Plan ready',
   'plan.working': 'working…',
   'plan.hint':
-    'Plan mode: Remedy explores with read-only tools and saves a plan for you to approve before she builds.',
+    'Plan mode: {agent} explores with read-only tools and saves a plan for you to approve before {they} build{s}.',
   'plan.loading': 'Loading plan…',
   'plan.researching':
-    'Remedy is researching — the plan appears here once she saves it.',
+    '{agent} is researching — the plan appears here once {they} save{s} it.',
   'plan.empty':
     'No plan for this session yet. Describe what you want; Remedy researches with read-only tools, then saves a plan here.',
   'plan.approve': 'Approve → Build',

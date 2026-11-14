@@ -1,4 +1,5 @@
 import { getServerUrl } from '../api/client'
+import { usePronouns, setAgentIdentity } from '../i18n/pronouns'
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { getSettings, updateSettings } from '../api/settings'
 import { openExternalUrl } from '../api/auth'
@@ -53,6 +54,7 @@ const STEPS: Step[] = [
 ]
 
 export function SetupWizard({ open, onComplete }: SetupWizardProps) {
+  const pr = usePronouns()
   const { t, languages, stored, setStored } = useI18n()
   const [step, setStep] = useState<Step>('welcome')
   const [catalog, setCatalog] = useState<ProviderInfo[]>(OFFLINE_PROVIDERS)
@@ -405,6 +407,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         ? { messengers: messengersBody }
         : {}),
     })
+    setAgentIdentity({ gender: agentGender || 'female', name: agentName.trim() || 'Remedy' })
   }, [
     apiKey,
     provider,
@@ -1156,7 +1159,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 </div>
                 <p className="text-sm leading-snug" style={mutedStyles}>
                   Vision, voice, and local helpers download automatically on this computer.
-                  Nothing to opt into — Remedy starts the downloads herself.
+                  Nothing to opt into — {pr.agent} starts the downloads {pr.themself}.
                 </p>
               </div>
               <div

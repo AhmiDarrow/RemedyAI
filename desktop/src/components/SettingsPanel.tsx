@@ -70,6 +70,7 @@ import type { AssistantDraft } from './settings/AssistantSection'
 import { useSettingsPanelState } from '../hooks/useSettingsPanelState'
 import { EmptyState } from './EmptyState'
 import { SETTINGS_CATEGORIES } from '../utils/settingsNavigation'
+import { setAgentIdentity } from '../i18n/pronouns'
 
 interface SettingsPanelProps {
   open: boolean
@@ -415,6 +416,7 @@ export function SettingsPanel({
       )
       setUserName((s.user_name || '').trim())
       setAgentName(s.name || 'Remedy')
+      setAgentIdentity({ gender: s.agent_gender || 'female', name: s.name || 'Remedy' })
       {
         const g = (s.agent_gender || 'female').toLowerCase()
         setAgentGender(
@@ -789,6 +791,7 @@ export function SettingsPanel({
         console.warn('desktop prefs OS sync:', e)
       }
       const result = await updateSettings(updates)
+      setAgentIdentity({ gender: updates.agent_gender, name: updates.name })
       messengersDirtyRef.current = false
       // Server may normalize provider/model/url — reflect that immediately.
       if (result && typeof result === 'object') {
