@@ -371,15 +371,15 @@ def _write_config(path: Path, cfg: dict[str, Any]) -> None:
         else:
             scalars.append((key, value))
     for key, value in scalars:
-        lines.append(f"{key} = {_serialize_toml(value)}\n")
+        lines.append(f"{_toml_key(key)} = {_serialize_toml(value)}\n")
     if scalars and tables:
         lines.append("\n")
     for key, value in tables:
-        lines.append(f"[{key}]\n")
+        lines.append(f"[{_toml_key(key)}]\n")
         for k, v in value.items():
             if v is None:
                 continue
-            lines.append(f"{k} = {_serialize_toml(v)}\n")
+            lines.append(f"{_toml_key(k)} = {_serialize_toml(v)}\n")
         lines.append("\n")
     content = "".join(lines)
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -143,7 +143,7 @@ func WriteConfig(path string, cfg ConfigMap) error {
 		if err != nil {
 			return err
 		}
-		b.WriteString(item.k)
+		b.WriteString(tomlKey(item.k))
 		b.WriteString(" = ")
 		b.WriteString(line)
 		b.WriteByte('\n')
@@ -154,7 +154,7 @@ func WriteConfig(path string, cfg ConfigMap) error {
 	for _, item := range tables {
 		m := item.v.(map[string]any)
 		b.WriteByte('[')
-		b.WriteString(item.k)
+		b.WriteString(tomlKey(item.k))
 		b.WriteString("]\n")
 		keys := make([]string, 0, len(m))
 		for k := range m {
@@ -170,7 +170,7 @@ func WriteConfig(path string, cfg ConfigMap) error {
 			if err != nil {
 				return err
 			}
-			b.WriteString(k)
+			b.WriteString(tomlKey(k))
 			b.WriteString(" = ")
 			b.WriteString(line)
 			b.WriteByte('\n')
@@ -236,6 +236,22 @@ func scrubConfigSecrets(cfg ConfigMap) ConfigMap {
 	return out
 }
 
+// tomlKey quotes a key that is not a TOML bare key. Model ids such as
+// "gemini-2.5-pro" or "anthropic/claude-sonnet-4-5" would otherwise be read
+// back as dotted keys or fail to parse, losing the whole config.
+func tomlKey(k string) string {
+	if k == "" {
+		return `""`
+	}
+	for _, r := range k {
+		if !(r == '_' || r == '-' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+			b, _ := json.Marshal(k)
+			return string(b)
+		}
+	}
+	return k
+}
+
 func serializeTOMLValue(v any) (string, error) {
 	switch t := v.(type) {
 	case bool:
@@ -295,7 +311,7 @@ func serializeTOMLValue(v any) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			parts = append(parts, k+" = "+s)
+			parts = append(parts, tomlKey(k)+" = "+s)
 		}
 		return "{" + strings.Join(parts, ", ") + "}", nil
 	default:
