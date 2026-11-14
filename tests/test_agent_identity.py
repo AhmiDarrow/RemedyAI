@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import pytest as _pytest
+
 from remedy.core.agent_identity import (
     DEFAULT_GENDER,
     DEFAULT_NAME,
     gender_presentation_line,
     normalize_agent_gender,
     normalize_agent_name,
+    pronoun_gender,
+    pronoun_vars,
     pronouns_for,
+    render_pronouns,
 )
 from remedy.core.react_policy import build_system_prompt
 
@@ -55,10 +60,6 @@ def test_presentation_line():
     assert "female" in gender_presentation_line("female", "Remedy").lower()
     assert "male" in gender_presentation_line("male", "Rex").lower()
 
-
-import pytest as _pytest
-
-from remedy.core.agent_identity import pronoun_gender, pronoun_vars, render_pronouns
 
 
 @_pytest.mark.parametrize(
