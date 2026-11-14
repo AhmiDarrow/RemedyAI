@@ -240,8 +240,20 @@ func (s *sessionStore) Close() error {
 	return err
 }
 
+// isoLayout is fixed-width (always six fractional digits) because chat rows are
+// ordered and range-compared as TEXT (ORDER BY created_at, revert's
+// "created_at > ?"). A trimmed layout like .999999999 sorts "05.35Z" after
+// "05.3512Z" ('Z' > '1'), so messages written in the same second could list
+// out of order and a revert could hide the wrong rows. Microseconds match the
+// Python writer (datetime.isoformat) and parse in Python and JavaScript.
+const isoLayout = "2006-01-02T15:04:05.000000Z07:00"
+
+func formatISO(t time.Time) string {
+	return t.UTC().Format(isoLayout)
+}
+
 func nowISO() string {
-	return time.Now().UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
+	return formatISO(time.Now())
 }
 
 func newSessionID() string {
