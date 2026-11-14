@@ -994,7 +994,7 @@ def register_rmb_tools(runtime: Any) -> None:
 
     runtime.tool_registry.register_builtin_handler(
         "rmb",
-        "Remedy Muscle Bridge — her own local llama.cpp host (not a second product). "
+        "Remedy Muscle Bridge — your own local llama.cpp host (not a second product). "
         "status | start | stop | use (chat on it) | catalog | models (local GGUFs) | "
         "search | files | pull | settings | progress. Autofit default. Starting "
         "suspends SmolVLM. Local inventory is action=models / status.local_ggufs — "

@@ -1369,7 +1369,7 @@ class ComputerExecutor:
             if home is not None:
                 msg += (
                     f"; Remedy Desktop is on monitor {home} "
-                    "(use computer_screenshot hint='grove' to capture her window)"
+                    "(use computer_screenshot hint='grove' to capture your window)"
                 )
             return public_result(
                 ok=True,
