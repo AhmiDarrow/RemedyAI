@@ -45,6 +45,14 @@ export interface Settings {
   harness_max_context_pct?: number
   /** Status bar: off | low | medium | high */
   thinking_level?: string
+  /** none | minimal | low | medium | high | xhigh; "" = provider default */
+  reasoning_effort?: string
+  /** 0 = provider default */
+  thinking_budget_tokens?: number
+  max_output_tokens?: number
+  context_window_tokens?: number
+  /** Per-model overrides keyed by "<provider>/<model>" or "<model>" */
+  model_settings?: Record<string, GenerationOverride>
   /** Status bar: ask | auto (in-project) | full (warn) */
   approval_mode?: string
   /** conservative | balanced (default) | autonomous — never waives mail/pay */
@@ -244,6 +252,14 @@ export interface SettingsUpdate {
   thinking_level?: string
   approval_mode?: string
   trust_profile?: string
+  /** none | minimal | low | medium | high | xhigh; "" = provider default */
+  reasoning_effort?: string
+  /** 0 = provider default */
+  thinking_budget_tokens?: number
+  max_output_tokens?: number
+  context_window_tokens?: number
+  /** Per-model overrides keyed by "<provider>/<model>" or "<model>" */
+  model_settings?: Record<string, GenerationOverride>
   tool_process?: string
   web_tools_enabled?: boolean
   http_bootstrap?: boolean
@@ -272,6 +288,13 @@ export interface SettingsUpdate {
   messengers?: Record<string, Record<string, unknown>>
   /** Personal assistant prefs (also mirrored under ~/.remedy/assistant.json) */
   assistant?: AssistantUpdate
+}
+
+export interface GenerationOverride {
+  reasoning_effort?: string
+  thinking_budget_tokens?: number
+  max_output_tokens?: number
+  context_window_tokens?: number
 }
 
 export async function getSettings(): Promise<Settings> {

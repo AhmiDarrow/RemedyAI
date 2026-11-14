@@ -77,6 +77,9 @@ type Anthropic struct {
 	HTTPClient *http.Client
 	// MaxTokens is the per-round output ceiling (0 = anthropicDefaultMaxTokens).
 	MaxTokens int
+	// Gen carries the owner's reasoning / output / context settings. Unset
+	// fields keep the shape-based defaults.
+	Gen GenerationOptions
 	// Shape selects effort and cache TTL. ShapeAuto derives it from the turn.
 	Shape TurnShape
 	// SystemStable overrides the stable/volatile split of Turn.System. Empty
@@ -147,6 +150,9 @@ func (a *Anthropic) AdvertisedToolCount() int {
 func (a *Anthropic) ContextWindow() int {
 	if a == nil {
 		return 0
+	}
+	if a.Gen.ContextWindow > 0 {
+		return a.Gen.ContextWindow
 	}
 	if n := envContextWindow(); n > 0 {
 		return n
@@ -421,8 +427,31 @@ func (a *Anthropic) buildParams(turn cognition.Turn) anthropic.MessageNewParams 
 	shape := a.shape()
 	model := strings.TrimSpace(a.Model)
 	maxTokens := a.MaxTokens
+	if a.Gen.MaxOutputTokens > 0 {
+		maxTokens = a.Gen.MaxOutputTokens
+	}
 	if maxTokens <= 0 {
 		maxTokens = anthropicDefaultMaxTokens
+	}
+	// Fixed-budget extended thinking (pre-adaptive Claude models). An explicit
+	// budget wins; otherwise an effort maps to a budget. budget_tokens must be
+	// below max_tokens, so the ceiling grows to fit when the owner left it unset.
+	budget := 0
+	if supportsBudgetThinking(model) && a.Gen.Effort != "none" {
+		budget = a.Gen.ThinkingBudget
+		if budget == 0 {
+			budget = anthropicEffortBudget(a.Gen.Effort)
+		}
+		if budget > 0 && budget >= maxTokens {
+			if a.Gen.MaxOutputTokens > 0 {
+				budget = maxTokens - 1
+			} else {
+				maxTokens = budget + 4096
+			}
+		}
+		if budget < 1024 {
+			budget = 0
+		}
 	}
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(model),
@@ -439,7 +468,13 @@ func (a *Anthropic) buildParams(turn cognition.Turn) anthropic.MessageNewParams 
 				Display: anthropic.ThinkingConfigAdaptiveDisplaySummarized,
 			},
 		}
-		params.OutputConfig = anthropic.OutputConfigParam{Effort: effortFor(shape, model)}
+		effort := effortFor(shape, model)
+		if e := a.Gen.Effort; e != "" {
+			effort = ownerEffort(e, model)
+		}
+		params.OutputConfig = anthropic.OutputConfigParam{Effort: effort}
+	} else if budget > 0 {
+		params.Thinking = anthropic.ThinkingConfigParamOfEnabled(int64(budget))
 	}
 	// tool_choice is never sent: Fable 5.1 rejects a forced choice with a 400,
 	// and "auto" is the default everywhere else.
@@ -470,6 +505,23 @@ func effortFor(shape TurnShape, model string) anthropic.OutputConfigEffort {
 		}
 		return anthropic.OutputConfigEffortXhigh
 	}
+}
+
+// ownerEffort maps the owner's effort onto output_config.effort. Adaptive
+// models have no "off", so none/minimal run at low; xhigh falls back to high
+// where the level does not exist.
+func ownerEffort(effort, model string) anthropic.OutputConfigEffort {
+	switch effort {
+	case "none", "minimal", "low":
+		return anthropic.OutputConfigEffortLow
+	case "medium":
+		return anthropic.OutputConfigEffortMedium
+	case "xhigh":
+		if supportsXHighEffort(model) {
+			return anthropic.OutputConfigEffortXhigh
+		}
+	}
+	return anthropic.OutputConfigEffortHigh
 }
 
 // supportsAdaptiveThinking reports whether the model takes

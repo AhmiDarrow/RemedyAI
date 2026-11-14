@@ -40,6 +40,8 @@ Remedy lives on **this computer**. The Desktop app runs on **Windows x64**, **Li
 
 Local API: `127.0.0.1:7400`. Close ✕ hides to the **tray** on Windows, the **menu bar** on macOS, and **minimizes** on Linux/WSLg. `pip install remedy-ai` then `remedy serve` downloads a checksum-verified `remedy-runtime` and `remedy_core` for this OS from GitHub Releases on first run (cached in `~/.remedy/runtime/`).
 
+Reasoning effort, thinking budget, max output tokens, and context window can be set for all models or per model (Settings → **Reasoning and context**, `remedy settings set reasoning_effort=high`, or `config.toml`). Unset keeps each provider's default. See [Reasoning effort and context](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/USAGE.md#reasoning-effort-and-context).
+
 From the creator: *My name is Ahmi, I hope you enjoy my Remedy.*
 
 ---
