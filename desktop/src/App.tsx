@@ -200,6 +200,7 @@ export default function App() {
     stallBannerDismissed,
     dismissStallBanner,
     partialText,
+    textBreaks,
     partialThinking,
     activeTools,
     processSteps,
@@ -1848,6 +1849,7 @@ export default function App() {
           createSession={create}
           messages={messages}
           partialText={partialText}
+          textBreaks={textBreaks}
           streaming={streaming}
           messagesLoading={messagesLoading}
           buildTodos={buildTodos}
@@ -2004,6 +2006,7 @@ export default function App() {
             <MessageFeed
               messages={messages}
               partialText={partialText}
+              textBreaks={textBreaks}
               partialThinking={partialThinking}
               streaming={streaming}
               loading={messagesLoading}
