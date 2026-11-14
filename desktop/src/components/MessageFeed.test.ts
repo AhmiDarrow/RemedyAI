@@ -15,15 +15,19 @@ describe('MessageFeed live chrome order', () => {
     expect(src).not.toMatch(/reattachKey:.*sessionId/)
   })
 
-  it('renders thinking/answer before live todos and process chips', () => {
+  it('routes the live turn through LiveTurnView: reply bubble plus a Working… section', () => {
     const dock = src.indexOf('className="live-stream-dock"')
-    const reply = src.indexOf('id: \'streaming\'', dock)
-    const work = src.indexOf('data-live-work="below-reply"', dock)
-    const liveTodos = src.indexOf('<BuildTodos items={buildTodos} live', dock)
+    const view = src.indexOf('<LiveTurnView', dock)
+    const reply = src.indexOf('renderReply=', view)
+    const work = src.indexOf('data-live-work="activity"', view)
+    const liveTodos = src.indexOf('<BuildTodos items={buildTodos} live', view)
     expect(dock).toBeGreaterThan(-1)
-    expect(reply).toBeGreaterThan(dock)
+    expect(view).toBeGreaterThan(dock)
+    expect(reply).toBeGreaterThan(view)
     expect(work).toBeGreaterThan(reply)
     expect(liveTodos).toBeGreaterThan(work)
+    // Thinking goes to the activity section, never into the reply bubble.
+    expect(src.slice(reply, work)).toContain('partialThinking=""')
   })
 
   it('keeps leftover todos after the live reply dock', () => {

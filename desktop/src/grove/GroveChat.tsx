@@ -47,6 +47,7 @@ const GROVE_STARTERS = [
 export interface GroveChatProps {
   messages: ChatMessage[]
   partialText: string
+  textBreaks?: number[]
   streaming: boolean
   loading: boolean
   userName: string
@@ -81,6 +82,7 @@ export interface GroveChatProps {
 export function GroveChat({
   messages,
   partialText,
+  textBreaks = [],
   streaming,
   loading,
   userName,
@@ -364,6 +366,7 @@ export function GroveChat({
         <MessageFeed
           messages={messages}
           partialText={partialText}
+          textBreaks={textBreaks}
           streaming={streaming}
           loading={loading}
           userName={userName}

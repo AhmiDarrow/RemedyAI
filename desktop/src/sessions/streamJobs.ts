@@ -19,6 +19,12 @@ export type StreamJobActiveTool = LiveToolChip
 /** Live stream paint owned by the job (survives session switch / reattach). */
 export type StreamJobPaint = {
   partialText: string
+  /**
+   * Offsets into partialText where a tool call started. Text before the last
+   * break is interim narration (background work); text after it is the reply
+   * that is streaming now.
+   */
+  textBreaks: number[]
   partialThinking: string
   processSteps: ProcessStep[]
   activeTools: StreamJobActiveTool[]
@@ -76,6 +82,7 @@ export type StreamJob = {
 export function emptyStreamPaint(): StreamJobPaint {
   return {
     partialText: '',
+    textBreaks: [],
     partialThinking: '',
     processSteps: [],
     activeTools: [],
@@ -216,6 +223,17 @@ export function appendJobToken(sessionId: string, token: string) {
   markLiveTurn(sessionId, 'running')
 }
 
+/** A tool call started: close the current narration segment, if it has text. */
+export function markJobTextBreak(sessionId: string): number[] {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return []
+  const breaks = j.paint.textBreaks || (j.paint.textBreaks = [])
+  const at = j.paint.partialText.length
+  const last = breaks.length ? breaks[breaks.length - 1] : 0
+  if (at > last && j.paint.partialText.slice(last).trim()) breaks.push(at)
+  return [...breaks]
+}
+
 /** Append thinking token into the job paint buffer. */
 export function appendJobThinking(sessionId: string, thought: string) {
   if (!thought) return
@@ -278,6 +296,7 @@ export function getJobPaint(sessionId: string): StreamJobPaint | null {
   const p = j.paint
   return {
     partialText: p.partialText,
+    textBreaks: [...(p.textBreaks || [])],
     partialThinking: p.partialThinking,
     processSteps: [...p.processSteps],
     activeTools: [...p.activeTools],
