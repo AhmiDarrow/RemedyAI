@@ -13,6 +13,7 @@ import {
   FormSelect,
   FormToggle,
 } from './formUi'
+import { ReasoningContextSection } from './ReasoningContextSection'
 import { Field, PERSONAS } from './shared'
 import { VoiceSection } from './VoiceSection'
 import { PhoneSection } from './PhoneSection'
@@ -441,6 +442,12 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
                   Also on the status bar. High = more deliberation when the model supports it.
                 </FormHint>
               </div>
+              <SettingsFlow
+                title="Reasoning and context"
+                summary="Reasoning effort, thinking budget, output and context limits"
+              >
+                <ReasoningContextSection provider={p.provider} model={p.model} />
+              </SettingsFlow>
               <FormToggle
                 checked={webToolsEnabled}
                 onChange={setWebToolsEnabled}

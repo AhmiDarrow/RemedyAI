@@ -19,6 +19,7 @@ from remedy.interfaces.api_support import (
     load_config,
 )
 from remedy.interfaces.config import normalize_llm_settings
+from remedy.interfaces.generation_settings import generation_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,11 @@ SETTABLE_KEYS = frozenset(
         "harness_min_context_pct",
         "harness_max_context_pct",
         "thinking_level",
+        "reasoning_effort",
+        "thinking_budget_tokens",
+        "max_output_tokens",
+        "context_window_tokens",
+        "model_settings",
         "approval_mode",
         "trust_profile",
         "show_tool_calls",
@@ -243,6 +249,7 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "harness_min_context_pct": float(raw.get("harness_min_context_pct", 0.75)),
         "harness_max_context_pct": float(raw.get("harness_max_context_pct", 0.92)),
         "thinking_level": str(raw.get("thinking_level") or "high").lower(),
+        **generation_snapshot(raw),
         "approval_mode": str(raw.get("approval_mode") or "auto").lower(),
         "trust_profile": _normalize_trust_profile_value(raw.get("trust_profile")),
         "tool_process": normalize_tool_process(raw),
@@ -543,6 +550,10 @@ async def _apply_settings_update_inner(
     if "thinking_level" in patch and patch["thinking_level"] is not None:
         tl = str(patch["thinking_level"]).strip().lower()
         patch["thinking_level"] = tl if tl in ("off", "low", "medium", "high") else "high"
+
+    from remedy.interfaces.generation_settings import normalize_generation_patch
+
+    normalize_generation_patch(patch, cfg)
 
     if "approval_mode" in patch and patch["approval_mode"] is not None:
         from remedy.core.approvals import normalize_approval_mode

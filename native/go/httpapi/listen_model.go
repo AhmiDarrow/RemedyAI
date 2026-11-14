@@ -169,7 +169,10 @@ func tryLiveModel(home string, cfg ConfigMap, provider, model, baseURL string) c
 	}
 	if prov == "anthropic" {
 		if k := strings.TrimSpace(key); k != "" && !isPlaceholderKey(k) {
-			return &providers.Anthropic{BaseURL: urlOut, APIKey: k, Model: modelID}
+			return &providers.Anthropic{
+				BaseURL: urlOut, APIKey: k, Model: modelID,
+				Gen: generationOptionsFor(cfg, prov, modelID),
+			}
 		}
 		// No usable key: fall through so the caller can try the owner's
 		// configured provider instead of binding a dead adapter.
@@ -179,6 +182,8 @@ func tryLiveModel(home string, cfg ConfigMap, provider, model, baseURL string) c
 		BaseURL: urlOut,
 		APIKey:  firstNonEmpty(key, "unused"),
 		Model:   modelID,
+		Family:  providers.FamilyFor(prov),
+		Gen:     generationOptionsFor(cfg, prov, modelID),
 	}
 }
 
