@@ -24,9 +24,10 @@ func TestWriteFileAtomicReplacesContent(t *testing.T) {
 	}
 }
 
-// A reader that keeps opening the destination must not make writes fail. On
-// Windows, Go opens files without FILE_SHARE_DELETE, so the replace has to
-// wait out each read instead of dropping the write.
+// Pollers that keep re-reading the destination (the host bridge Wait loop
+// reads job files every 20-50ms) must not make writes fail. On Windows, Go
+// opens files without FILE_SHARE_DELETE, so the replace has to wait out each
+// read instead of dropping the write.
 func TestWriteFileAtomicSurvivesConcurrentReaders(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "job.json")
 	if err := WriteFileAtomic(path, []byte("v0"), 0o600); err != nil {
@@ -45,6 +46,7 @@ func TestWriteFileAtomicSurvivesConcurrentReaders(t *testing.T) {
 				default:
 				}
 				_, _ = os.ReadFile(path)
+				time.Sleep(2 * time.Millisecond)
 			}
 		}()
 	}
