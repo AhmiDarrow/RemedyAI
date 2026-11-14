@@ -6812,4 +6812,21 @@ mod updater_parse_tests {
         assert!(info.download_url.is_some());
         assert!(info.error.is_none());
     }
+
+    #[test]
+    fn updater_trusts_runtime_companion_release_urls() {
+        // macOS updater tarballs moved to the runtime-v<ver> companion release.
+        assert!(is_trusted_download_url(
+            "https://github.com/AhmiDarrow/RemedyAI/releases/download/runtime-v0.69.0/Remedy.Desktop_0.69.0_aarch64.app.tar.gz"
+        ));
+        assert!(is_trusted_download_url(
+            "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.69.0/Remedy.Desktop_0.69.0_x64-setup.exe"
+        ));
+        assert!(!is_trusted_download_url(
+            "https://github.com/someone-else/RemedyAI/releases/download/runtime-v0.69.0/x.app.tar.gz"
+        ));
+        assert!(!is_trusted_download_url(
+            "http://github.com/AhmiDarrow/RemedyAI/releases/download/runtime-v0.69.0/x.app.tar.gz"
+        ));
+    }
 }

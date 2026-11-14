@@ -378,23 +378,48 @@ def _is_release_version(value: str) -> bool:
     return body.replace(".", "", 2).replace("-", "").isalnum()
 
 
-def _tag_from_github_url(url: str) -> str:
-    """Extract vX.Y.Z from a GitHub releases download or tag URL.
+RUNTIME_TAG_PREFIX = "runtime-v"
 
-    Returns "" when the URL has no version (``/latest/download``, a CDN
-    object URL, etc.).
+
+def runtime_release_tag(version: str) -> str:
+    """Companion release that carries the pip first-run assets for *version*.
+
+    From 0.69.0 the standalone runtime, core, voice references and
+    ``remedy-native-SHA256SUMS.txt`` live on ``runtime-v<ver>`` (a prerelease
+    that never becomes Latest) so the main ``v<ver>`` release only lists the
+    Desktop installers. Older releases keep them on ``v<ver>``.
+    """
+    body = version[len(RUNTIME_TAG_PREFIX):] if version.startswith(RUNTIME_TAG_PREFIX) else version
+    return f"{RUNTIME_TAG_PREFIX}{body.removeprefix('v')}"
+
+
+def _version_from_tag(tag: str) -> str:
+    tag = tag.strip()
+    if tag.startswith(RUNTIME_TAG_PREFIX):
+        body = tag[len(RUNTIME_TAG_PREFIX):]
+        return body if body and _is_release_version(body) else ""
+    if tag.startswith("v") and _is_release_version(tag):
+        return tag[1:]
+    return ""
+
+
+def _tag_from_github_url(url: str) -> str:
+    """Extract X.Y.Z from a GitHub releases download or tag URL.
+
+    Accepts both ``v<ver>`` and ``runtime-v<ver>`` tags. Returns "" when the
+    URL has no version (``/latest/download``, a CDN object URL, etc.).
     """
     path = unquote(urlparse(url).path)
     parts = [part for part in path.split("/") if part]
     for i, part in enumerate(parts):
         if part == "download" and i + 1 < len(parts):
-            tag = parts[i + 1].strip()
-            if tag.startswith("v") and _is_release_version(tag):
-                return tag[1:]
+            found = _version_from_tag(parts[i + 1])
+            if found:
+                return found
         if part == "tag" and i > 0 and parts[i - 1] == "releases" and i + 1 < len(parts):
-            tag = parts[i + 1].strip()
-            if tag.startswith("v") and _is_release_version(tag):
-                return tag[1:]
+            found = _version_from_tag(parts[i + 1])
+            if found:
+                return found
     return ""
 
 
@@ -433,51 +458,94 @@ def _probe_latest_version() -> str:
     return _tag_from_github_url(final_url)
 
 
-def _sums_candidates(version: str) -> list[tuple[str, str]]:
-    """(label, url) pairs: exact tag first, then GitHub Latest."""
+def _runtime_download_base(version: str) -> str:
+    """Stable GitHub download prefix of the ``runtime-v<ver>`` companion release."""
+    return f"{release_base()}/download/{runtime_release_tag(version)}"
+
+
+def _sums_candidates(version: str) -> list[tuple[str, str, str]]:
+    """(label, sums_url, asset_base) for this exact version, newest layout first.
+
+    1. ``runtime-v<ver>`` companion release (0.69.0 and later).
+    2. ``v<ver>`` main release (0.66.0 through 0.68.2 attached assets there).
+    An empty asset_base means "resolve the tag after download" (Latest).
+    """
     base = release_base()
-    tag = version if version.startswith("v") else f"v{version}"
+    ver = version.removeprefix("v")
     return [
-        (tag.lstrip("v"), f"{base}/download/{tag}/{SUMS_NAME}"),
-        ("latest", f"{base}/latest/download/{SUMS_NAME}"),
+        (ver, f"{_runtime_download_base(ver)}/{SUMS_NAME}", _runtime_download_base(ver)),
+        (ver, f"{base}/download/v{ver}/{SUMS_NAME}", _asset_download_base(ver)),
     ]
+
+
+def _latest_candidates(version: str) -> list[tuple[str, str, str]]:
+    """Fallbacks when this version's releases have no checksum file.
+
+    Resolve Latest (always a main ``v<ver>`` release) and try its
+    ``runtime-v`` companion, then the legacy ``latest/download`` path.
+    """
+    out: list[tuple[str, str, str]] = []
+    latest = _probe_latest_version()
+    if latest and latest != version.removeprefix("v"):
+        out.append(
+            (latest, f"{_runtime_download_base(latest)}/{SUMS_NAME}", _runtime_download_base(latest))
+        )
+    out.append(("latest", f"{release_base()}/latest/download/{SUMS_NAME}", ""))
+    return out
+
+
+def _try_sums(url: str, errors: list[str]) -> tuple[dict[str, str], str] | None:
+    try:
+        body, final_url = _download_bytes(url, max_bytes=64 * 1024)
+    except NativeBootstrapError as exc:
+        errors.append(str(exc))
+        return None
+    try:
+        text = body.decode("utf-8")
+    except UnicodeError as exc:
+        raise NativeBootstrapError(f"{SUMS_NAME} was not UTF-8: {exc}") from exc
+    sums = parse_sha256sums(text)
+    if not sums:
+        errors.append(f"{url}: no checksum lines")
+        return None
+    return sums, final_url
 
 
 def _fetch_sums(version: str) -> tuple[str, dict[str, str], str]:
     errors: list[str] = []
     seen_urls: set[str] = set()
-    for label, url in _sums_candidates(version):
-        if url in seen_urls:
-            continue
-        seen_urls.add(url)
-        try:
-            body, final_url = _download_bytes(url, max_bytes=64 * 1024)
-        except NativeBootstrapError as exc:
-            errors.append(str(exc))
-            continue
-        try:
-            text = body.decode("utf-8")
-        except UnicodeError as exc:
-            raise NativeBootstrapError(f"{SUMS_NAME} was not UTF-8: {exc}") from exc
-        sums = parse_sha256sums(text)
-        if not sums:
-            errors.append(f"{url}: no checksum lines")
-            continue
-        resolved = _version_from_github_urls((final_url, url), label)
-        if not _is_release_version(resolved):
-            resolved = _probe_latest_version() or resolved
-        if not _is_release_version(resolved):
-            raise NativeBootstrapError(
-                f"{SUMS_NAME} was found but the release tag could not be "
-                f"resolved (got {resolved!r}) after a CDN redirect"
-            )
-        return resolved, sums, _asset_download_base(resolved)
+
+    def attempt(cands: list[tuple[str, str, str]]) -> tuple[str, dict[str, str], str] | None:
+        for label, url, asset_base in cands:
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            got = _try_sums(url, errors)
+            if got is None:
+                continue
+            sums, final_url = got
+            if asset_base:
+                # Exact tag known from the URL we asked for; assets live beside it.
+                return label, sums, asset_base
+            resolved = _version_from_github_urls((final_url, url), label)
+            if not _is_release_version(resolved):
+                resolved = _probe_latest_version() or resolved
+            if not _is_release_version(resolved):
+                raise NativeBootstrapError(
+                    f"{SUMS_NAME} was found but the release tag could not be "
+                    f"resolved (got {resolved!r}) after a CDN redirect"
+                )
+            return resolved, sums, _asset_download_base(resolved)
+        return None
+
+    found = attempt(_sums_candidates(version)) or attempt(_latest_candidates(version))
+    if found is not None:
+        return found
     detail = "; ".join(errors) if errors else "no checksum file URLs to try"
     raise NativeBootstrapError(
-        f"No {SUMS_NAME} on the v{version} GitHub release (or Latest). {detail}. "
-        "The next Remedy release must attach standalone remedy-runtime / "
-        "remedy_core assets plus this checksum file. Until then, build from "
-        "a checkout (see the install manual) or use the Desktop installer."
+        f"No {SUMS_NAME} on the {runtime_release_tag(version)} or v{version} GitHub "
+        f"release (or Latest). {detail}. Build from a checkout (see the install "
+        "manual) or use the Desktop installer."
     )
 
 

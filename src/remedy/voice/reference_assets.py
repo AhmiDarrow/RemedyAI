@@ -15,6 +15,7 @@ import logging
 import os
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 from pathlib import Path
 
 from remedy.home import default_home
@@ -206,14 +207,40 @@ def _release_base() -> str:
     return release_base()
 
 
-def _download_candidates(version: str, asset: str) -> list[str]:
+def _download_candidates(version: str, asset: str) -> Iterator[str]:
+    """Release URLs to try for *asset*, newest layout first.
+
+    ``runtime-v<ver>`` (0.69.0+), then the main ``v<ver>`` release (0.67.x to
+    0.68.2), then the companion release of GitHub Latest, then the legacy
+    ``latest/download`` path. The file is pinned by sha256, so any copy will
+    do. Latest is only probed when the exact-version URLs all fail.
+    """
+    from remedy.runtime.native_bootstrap import _probe_latest_version, runtime_release_tag
+
     base = _release_base()
-    tag = version if version.startswith("v") else f"v{version}"
-    urls = [f"{base}/download/{tag}/{asset}"]
-    latest = f"{base}/latest/download/{asset}"
-    if latest not in urls:
-        urls.append(latest)
-    return urls
+    ver = version.removeprefix("v")
+    seen: set[str] = set()
+
+    def fresh(url: str) -> bool:
+        if url in seen:
+            return False
+        seen.add(url)
+        return True
+
+    for url in (
+        f"{base}/download/{runtime_release_tag(ver)}/{asset}",
+        f"{base}/download/v{ver}/{asset}",
+    ):
+        if fresh(url):
+            yield url
+    latest = _probe_latest_version()
+    if latest:
+        url = f"{base}/download/{runtime_release_tag(latest)}/{asset}"
+        if fresh(url):
+            yield url
+    url = f"{base}/latest/download/{asset}"
+    if fresh(url):
+        yield url
 
 
 def ensure_reference(

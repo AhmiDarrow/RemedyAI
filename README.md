@@ -46,7 +46,7 @@ From the creator: *My name is Ahmi, I hope you enjoy my Remedy.*
 
 ## Supported platforms
 
-These are the platforms with published assets on the [latest GitHub release](https://github.com/AhmiDarrow/RemedyAI/releases/latest). The table lists only triples that shipped and whose checksums were verified against `remedy-native-SHA256SUMS.txt`.
+These are the platforms with published assets on the [latest GitHub release](https://github.com/AhmiDarrow/RemedyAI/releases/latest). The table lists only triples that shipped and whose checksums were verified against `remedy-native-SHA256SUMS.txt`. From 0.69.0 the main release lists only the Desktop installers and `latest.json`. The CLI runtime files, macOS updater tarballs, and signatures are on a `runtime-v<version>` companion prerelease, which `pip` installs fetch automatically.
 
 | Platform | Desktop app | CLI (`pip install remedy-ai`) |
 |----------|-------------|-------------------------------|
