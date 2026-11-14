@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import pytest as _pytest
+
 from remedy.core.agent_identity import (
     DEFAULT_GENDER,
     DEFAULT_NAME,
     gender_presentation_line,
     normalize_agent_gender,
     normalize_agent_name,
+    pronoun_gender,
+    pronoun_vars,
     pronouns_for,
+    render_pronouns,
 )
 from remedy.core.react_policy import build_system_prompt
 
@@ -54,3 +59,59 @@ def test_system_prompt_name_and_gender():
 def test_presentation_line():
     assert "female" in gender_presentation_line("female", "Remedy").lower()
     assert "male" in gender_presentation_line("male", "Rex").lower()
+
+
+
+@_pytest.mark.parametrize(
+    ("gender", "expect"),
+    [
+        ("female", ("she", "her", "her", "hers", "herself", "s")),
+        ("male", ("he", "him", "his", "his", "himself", "s")),
+        ("neutral", ("they", "them", "their", "theirs", "themself", "")),
+        ("", ("they", "them", "their", "theirs", "themself", "")),
+        (None, ("they", "them", "their", "theirs", "themself", "")),
+        ("robot", ("they", "them", "their", "theirs", "themself", "")),
+    ],
+)
+def test_pronoun_table_per_gender(gender, expect) -> None:  # noqa: ANN001
+    p = pronouns_for(gender)
+    got = (p["subject"], p["object"], p["possessive"], p["possessive_pronoun"], p["reflexive"], p["s"])
+    assert got == expect
+
+
+def test_pronoun_gender_aliases() -> None:
+    assert pronoun_gender(" She ") == "female"
+    assert pronoun_gender("M") == "male"
+    assert pronoun_gender("nonbinary") == "neutral"
+
+
+def test_render_pronouns_matches_desktop_tokens() -> None:
+    tpl = "Steer while {they} work{s} · {agent} keeps {their} notes · {Their} call · {x}"
+    assert render_pronouns(tpl, "female") == (
+        "Steer while she works · Remedy keeps her notes · Her call · {x}"
+    )
+    assert render_pronouns(tpl, "male", "Atlas") == (
+        "Steer while he works · Atlas keeps his notes · His call · {x}"
+    )
+    assert render_pronouns(tpl, "neutral") == (
+        "Steer while they work · Remedy keeps their notes · Their call · {x}"
+    )
+    assert set(pronoun_vars("male")) == {
+        "they", "them", "their", "theirs", "themself", "They", "Their",
+        "s", "is", "has", "was", "agent",
+    }
+
+
+def test_english_catalogs_do_not_hardcode_agent_pronouns() -> None:
+    import json
+    import re
+    from pathlib import Path
+
+    from remedy.i18n import catalog as cat
+
+    gendered = re.compile(r"\b(she|her|hers|herself|he|him|his|himself)\b", re.I)
+    en_py = cat.EN
+    root = Path(__file__).resolve().parents[1]
+    en_go = json.loads((root / "native/go/httpapi/i18n_data.json").read_text(encoding="utf-8"))["en"]
+    for source in (en_py, en_go):
+        assert not {k: v for k, v in source.items() if gendered.search(str(v))}

@@ -186,7 +186,7 @@ class CallMetrics:
         out: list[str] = []
         t = self.ttfa
         if not t:
-            return ["she never spoke — no turns to measure"]
+            return ["the agent never spoke — no turns to measure"]
         p50, p95 = percentile(t, 50), percentile(t, 95)
         if p50 > self.bar.ttfa_p50_ms:
             out.append(
