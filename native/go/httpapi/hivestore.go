@@ -228,6 +228,10 @@ func (h *hiveStore) get(id string) (hiveDaughter, bool, error) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	return h.readLocked(id)
+}
+
+func (h *hiveStore) readLocked(id string) (hiveDaughter, bool, error) {
 	path := h.pathID(id)
 	if path == "" {
 		return hiveDaughter{}, false, nil
@@ -244,6 +248,27 @@ func (h *hiveStore) get(id string) (hiveDaughter, bool, error) {
 		d.Journal = map[string]any{}
 	}
 	return d, true, nil
+}
+
+// update reads, changes, and writes one record under a single lock, so a
+// concurrent writer (a forager pulse reporting) can never land between the
+// read and the write and be overwritten by a stale copy. fn returns false to
+// leave the record untouched.
+func (h *hiveStore) update(id string, fn func(d *hiveDaughter) bool) (hiveDaughter, bool, error) {
+	if !h.ready() {
+		return hiveDaughter{}, false, errHiveHomeMissing
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	d, ok, err := h.readLocked(id)
+	if err != nil || !ok {
+		return d, ok, err
+	}
+	if !fn(&d) {
+		return d, true, nil
+	}
+	d.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	return d, true, h.writeLocked(d)
 }
 
 func (h *hiveStore) listAll() ([]hiveDaughter, error) {
