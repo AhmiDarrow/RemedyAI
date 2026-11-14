@@ -32,6 +32,7 @@ import {
   IconRefresh,
 } from './icons'
 import { ProcessTrace } from './ProcessTrace'
+import { LiveTurnView } from './LiveTurnView'
 import {
   isFullProcessMode,
   processDefaultCollapsed,
@@ -50,6 +51,8 @@ export type ActiveTool = { name: string; status: 'running' | 'done' | 'error' }
 interface MessageFeedProps {
   messages: ChatMessage[]
   partialText: string
+  /** Offsets where tool calls split interim narration from the live reply. */
+  textBreaks?: number[]
   partialThinking?: string
   streaming: boolean
   loading: boolean
@@ -643,6 +646,7 @@ const MessageBubble = memo(function MessageBubble({
 export function MessageFeed({
   messages,
   partialText,
+  textBreaks = [],
   partialThinking = '',
   streaming,
   loading,
@@ -879,72 +883,60 @@ export function MessageFeed({
         )
       })}
 
-      {/* Reply first; checklist/tools attach under it so long thoughts do not bury them. */}
+      {/* Live turn: background work folds into "Working…"; the reply is its own bubble. */}
       {streaming && (
         <div className="live-stream-dock">
-          <div className="live-stream-card">
-            <div className="live-stream-header">
-              <span className="live-stream-dot" aria-hidden />
-              <span>Live</span>
-              <span style={{ color: 'var(--text-muted)', fontWeight: 500, letterSpacing: 0 }}>
-                · thinking & answer
-              </span>
-            </div>
-            <MessageBubble
-              msg={{
-                id: 'streaming',
-                role: 'assistant',
-                content: '',
-                thinking: null,
-                tool_calls: [],
-                tool_results: [],
-                model: null,
-                agent: null,
-                tokens: null,
-                created_at: '',
-                reverted: false,
-              }}
-              partial={partialText}
-              partialThinking={partialThinking}
-              toolProcessMode={toolProcessMode}
-              isStreamingPartial
-              onOpenImage={openLightbox}
-              partnerName={partnerName}
-            />
-          </div>
-          <div
-            className="px-3 overflow-y-auto"
-            data-live-work="below-reply"
-            style={{
-              // Room for Process depth without eating the whole feed
-              maxHeight:
-                toolProcessMode === 'full'
-                  ? 'min(42vh, 26rem)'
-                  : toolProcessMode === 'medium'
-                    ? 'min(34vh, 20rem)'
-                    : 'min(26vh, 14rem)',
-            }}
-          >
-            <BuildTodos items={buildTodos} live />
-            {/*
-              Progress bar always. Tool chips only if ProcessTrace is absent —
-              otherwise every mode double-lists the same steps.
-            */}
-            <TaskProgress
-              streaming={streaming}
-              activeTools={activeTools}
-              progress={taskProgress}
-              showToolDetails={processSteps.length === 0}
-            />
-            {processSteps.length > 0 && (
-              <ProcessTrace
-                mode={toolProcessMode}
-                steps={processSteps}
-                live
-                sessionId={sessionId}
+          <LiveTurnView
+            partialText={partialText}
+            textBreaks={textBreaks}
+            partialThinking={partialThinking}
+            processSteps={processSteps}
+            renderReply={(msg, reply) => (
+              <MessageBubble
+                msg={msg}
+                partial={reply}
+                partialThinking=""
+                toolProcessMode={toolProcessMode}
+                isStreamingPartial
+                onOpenImage={openLightbox}
+                partnerName={partnerName}
               />
             )}
-          </div>
+            activityExtras={
+              <div
+                className="overflow-y-auto"
+                data-live-work="activity"
+                style={{
+                  maxHeight:
+                    toolProcessMode === 'full'
+                      ? 'min(42vh, 26rem)'
+                      : toolProcessMode === 'medium'
+                        ? 'min(34vh, 20rem)'
+                        : 'min(26vh, 14rem)',
+                }}
+              >
+                <BuildTodos items={buildTodos} live />
+                {/*
+                  Progress bar always. Tool chips only if ProcessTrace is absent —
+                  otherwise every mode double-lists the same steps.
+                */}
+                <TaskProgress
+                  streaming={streaming}
+                  activeTools={activeTools}
+                  progress={taskProgress}
+                  showToolDetails={processSteps.length === 0}
+                />
+                {processSteps.length > 0 && (
+                  <ProcessTrace
+                    mode={toolProcessMode}
+                    steps={processSteps}
+                    live
+                    sessionId={sessionId}
+                  />
+                )}
+              </div>
+            }
+          />
         </div>
       )}
 
