@@ -100,7 +100,7 @@ func TestMergeModelSettingsKeepsOtherModels(t *testing.T) {
 }
 
 func TestTryLiveModelCarriesGeneration(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "sk-proj-0123456789abcdefghijklmnop")
+	t.Setenv("OPENAI_API_KEY", "sk-test-not-a-real-key-abcdef")
 	t.Setenv("REMEDY_LLM_BASE_URL", "")
 	cfg := ConfigMap{
 		"llm_provider":     "openai",
