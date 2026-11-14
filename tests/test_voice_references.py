@@ -154,3 +154,60 @@ def test_kokoro_standin_only_when_download_is_not_possible(
     standin = hq._identity_dir(tmp_path) / "female.wav"
     standin.write_bytes(b"RIFF" + b"\x00" * 200)
     assert hq.identity_prompt_path("female", tmp_path) == standin
+
+
+def test_download_prefers_runtime_release_then_legacy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _hide_checkout(monkeypatch)
+    female = (
+        Path(__file__).resolve().parents[1] / "assets" / "voice-references" / "female.wav"
+    ).read_bytes()
+    releases = "https://github.com/AhmiDarrow/RemedyAI/releases"
+    requested: list[str] = []
+
+    def fake_open(req, timeout=0):  # noqa: ANN001
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        requested.append(url)
+        if url == f"{releases}/download/runtime-v0.69.0/remedy-voice-female.wav":
+            return _Resp(female, url)
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setenv("REMEDY_ENSURE_ASSETS", "1")
+    monkeypatch.setattr(refs.urllib.request, "urlopen", fake_open)
+    refs.ensure_reference("female", tmp_path, version="0.69.0")
+    assert requested == [f"{releases}/download/runtime-v0.69.0/remedy-voice-female.wav"]
+
+    import itertools
+
+    urls = list(itertools.islice(refs._download_candidates("0.68.2", "remedy-voice-male.wav"), 2))
+    assert urls == [
+        f"{releases}/download/runtime-v0.68.2/remedy-voice-male.wav",
+        f"{releases}/download/v0.68.2/remedy-voice-male.wav",
+    ]
+
+
+def test_download_falls_back_to_latest_runtime_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+    from urllib.error import HTTPError
+
+    _hide_checkout(monkeypatch)
+    male = (
+        Path(__file__).resolve().parents[1] / "assets" / "voice-references" / "male.wav"
+    ).read_bytes()
+    releases = "https://github.com/AhmiDarrow/RemedyAI/releases"
+
+    def fake_open(req, timeout=0):  # noqa: ANN001
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if url.endswith("/releases/latest"):
+            return _Resp(b"", f"{releases}/tag/v0.69.1")
+        if url == f"{releases}/download/runtime-v0.69.1/remedy-voice-male.wav":
+            return _Resp(male, url)
+        raise HTTPError(url, 404, "Not Found", hdrs=None, fp=io.BytesIO())  # type: ignore[arg-type]
+
+    monkeypatch.setenv("REMEDY_ENSURE_ASSETS", "1")
+    monkeypatch.setattr(refs.urllib.request, "urlopen", fake_open)
+    path = refs.ensure_reference("male", tmp_path, version="0.69.0")
+    assert _sha(path.read_bytes()) == refs.REFERENCE_SHA256["male"]
