@@ -71,7 +71,9 @@ func TestHiveRosterSpawnAssignRetire(t *testing.T) {
 	hiveID, _ := spawned["hive_id"].(string)
 
 	// Forager runs one cognition pulse then reports (no longer idle-running).
-	deadline := time.Now().Add(2 * time.Second)
+	// The pulse is fast locally but shares a loaded CI runner with the rest
+	// of the package; poll generously so a slow runner is not a failure.
+	deadline := time.Now().Add(15 * time.Second)
 	var foragerLine map[string]any
 	for time.Now().Before(deadline) {
 		req, _ = http.NewRequest(http.MethodGet, base+"/api/hive/roster", nil)

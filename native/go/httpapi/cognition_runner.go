@@ -909,6 +909,47 @@ func drainEvents(src <-chan cognition.ModelEvent) {
 type emittingModel struct {
 	inner cognition.Model
 	emit  func(string)
+
+	// Round tracking so model text from separate rounds (narration before a
+	// tool call, then the next round's text) never runs together as
+	// "…work.The project tools…". Rounds are sequential; the mutex only
+	// guards against a late event from a drained round.
+	mu           sync.Mutex
+	round        int
+	textRound    int  // round that last emitted text (0 = none yet)
+	prevNewlines int  // trailing newlines of emitted text (capped at 2)
+}
+
+// roundSeparator returns what must precede text that opens a new round so it
+// reads as its own paragraph. Empty within a round or at the very start.
+func (m *emittingModel) roundSeparator(text string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sep := ""
+	if m.textRound != 0 && m.textRound != m.round {
+		lead := 0
+		for lead < len(text) && lead < 2 && text[lead] == '\n' {
+			lead++
+		}
+		if need := 2 - m.prevNewlines - lead; need > 0 {
+			sep = strings.Repeat("\n", need)
+		}
+	}
+	m.textRound = m.round
+	full := sep + text
+	trail := 0
+	for i := len(full) - 1; i >= 0 && full[i] == '\n' && trail < 2; i-- {
+		trail++
+	}
+	if trail == len(full) {
+		m.prevNewlines += trail
+		if m.prevNewlines > 2 {
+			m.prevNewlines = 2
+		}
+	} else {
+		m.prevNewlines = trail
+	}
+	return sep
 }
 
 // emitEvent mirrors one model event onto the token stream. Text that starts
@@ -922,7 +963,7 @@ func (m *emittingModel) emitEvent(ev cognition.ModelEvent) {
 		m.emit("@@status:" + ev.Status)
 	}
 	if ev.Text != "" {
-		m.emit("@@text:" + ev.Text)
+		m.emit("@@text:" + m.roundSeparator(ev.Text) + ev.Text)
 	}
 	if ev.ToolCall != nil {
 		m.emit(formatToolCallToken(*ev.ToolCall))
@@ -941,6 +982,12 @@ func (m *emittingModel) Stream(ctx context.Context, turn cognition.Turn) (<-chan
 	if err != nil {
 		return nil, err
 	}
+	m.mu.Lock()
+	m.round++
+	m.mu.Unlock()
+	m.mu.Lock()
+	m.round++
+	m.mu.Unlock()
 	out := make(chan cognition.ModelEvent, 16)
 	go func() {
 		defer close(out)

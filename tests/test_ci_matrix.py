@@ -580,4 +580,40 @@ def test_experimental_versions_publish_as_prereleases() -> None:
         if isinstance(s, dict) and "action-gh-release" in str(s.get("uses", ""))
     ]
     assert publish, "release job must publish with action-gh-release"
-    assert "needs.verify.outputs.prerelease" in str(publish[0]["with"]["prerelease"])
+    main = [s for s in publish if "outputs.tag" in str(s["with"]["tag_name"])]
+    assert len(main) == 1, "exactly one step publishes the main v<ver> release"
+    assert "needs.verify.outputs.prerelease" in str(main[0]["with"]["prerelease"])
+
+
+def test_runtime_assets_publish_on_a_companion_prerelease() -> None:
+    """The main release lists only installers + latest.json; pip runtime files,
+    macOS updater tarballs, and signatures go to runtime-v<ver>, which must
+    never take over Latest. Nothing publishes during a dry run."""
+    jobs = _workflow_jobs("desktop-release.yml")
+    release = jobs["release"]
+    assert isinstance(release, dict)
+    assert "if" not in release, "release staging must also run in dry runs"
+    steps = [s for s in release["steps"] if isinstance(s, dict)]
+    publish = [s for s in steps if "action-gh-release" in str(s.get("uses", ""))]
+    assert len(publish) == 2
+    for step in publish:
+        assert "dry_run != 'true'" in str(step.get("if", ""))
+    runtime, main = publish
+    assert str(runtime["with"]["tag_name"]).startswith("runtime-v")
+    assert runtime["with"]["prerelease"] is True
+    assert runtime["with"]["make_latest"] is False
+    assert "outputs.sha" in str(runtime["with"]["target_commitish"])
+    assert str(runtime["with"]["files"]).strip() == "release-runtime/*"
+    assert str(main["with"]["files"]).strip() == "release-main/*"
+    assert "Which file do I need?" in str(main["with"]["body"])
+    assert "right-click" in str(main["with"]["body"])
+    assert "pip install remedy-ai" in str(main["with"]["body"])
+    assert steps.index(runtime) < steps.index(main), "companion release exists before Latest moves"
+    split = next(s for s in steps if s.get("id") == "split")
+    assert "release-main" in split["run"] and "release-runtime" in split["run"]
+    latest = next(s for s in steps if s.get("name") == "Generate latest.json")
+    assert "runtime_tag" in latest["run"]
+    verify_assets = jobs["verify-native-assets"]
+    assert isinstance(verify_assets, dict)
+    assert "dry_run != 'true'" in str(verify_assets.get("if", ""))
+    assert "runtime-v" in str(verify_assets["steps"][1]["env"]["TAG"])

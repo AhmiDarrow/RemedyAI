@@ -92,7 +92,7 @@ def test_a_backchannel_alone_is_not_an_answer():
 
 
 def test_a_silent_call_says_so_plainly():
-    assert CallMetrics().failures() == ["she never spoke — no turns to measure"]
+    assert CallMetrics().failures() == ["the agent never spoke — no turns to measure"]
 
 
 def test_barge_in_is_judged_only_when_one_happened():

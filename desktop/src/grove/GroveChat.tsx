@@ -16,6 +16,7 @@ import { pickAttachFiles } from '../api/attachments'
 import { isTauri } from '../api/tauri'
 import { liveTurnForSession, plainTurnLabel, upsertTurn } from '../state/turns'
 import { useSessionTurns } from '../state/useTurns'
+import { usePronouns } from '../i18n/pronouns'
 import type { ChatMessage } from '../types'
 import type { ProcessStep, ToolProcessMode } from '../utils/toolLabels'
 
@@ -47,6 +48,7 @@ const GROVE_STARTERS = [
 export interface GroveChatProps {
   messages: ChatMessage[]
   partialText: string
+  textBreaks?: number[]
   streaming: boolean
   loading: boolean
   userName: string
@@ -81,6 +83,7 @@ export interface GroveChatProps {
 export function GroveChat({
   messages,
   partialText,
+  textBreaks = [],
   streaming,
   loading,
   userName,
@@ -102,6 +105,7 @@ export function GroveChat({
   processSteps = [],
   toolProcessMode = 'off',
 }: GroveChatProps) {
+  const pr = usePronouns()
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   // Synchronous re-entry guard: two Enter presses in one frame both see the
@@ -364,6 +368,7 @@ export function GroveChat({
         <MessageFeed
           messages={messages}
           partialText={partialText}
+          textBreaks={textBreaks}
           streaming={streaming}
           loading={loading}
           userName={userName}
@@ -386,7 +391,7 @@ export function GroveChat({
             <>
               <code>Enter</code> send · <code>Shift+Enter</code> new line ·{' '}
               <code>📎</code> attach{micSupported ? <> · <code>🎙</code> speak</> : null}
-              {' '}· while she works, <code>Enter</code> steers
+              {' '}· while {pr.they} work{pr.s}, <code>Enter</code> steers
             </>
           }
         />
@@ -508,8 +513,8 @@ export function GroveChat({
               type="submit"
               disabled={!canSend}
               className="grove-mic steer"
-              title="Steer — she takes it in without stopping"
-              aria-label="Steer: she takes it in without stopping"
+              title={`Steer — ${pr.they} take${pr.s} it in without stopping`}
+              aria-label={`Steer: ${pr.they} take${pr.s} it in without stopping`}
             >
               ↑
             </button>

@@ -279,9 +279,9 @@ def _scraping_acked(runtime: Any = None) -> bool:
 
 
 SCRAPING_ACK_PROMPT = (
-    "Web search is on. Remedy prefers the local OpenSERP instance she "
-    "downloads on first run, then DuckDuckGo's no-JavaScript results page. "
-    "You can point her at your own SearXNG with "
+    "Web search is on. It prefers the local OpenSERP instance downloaded "
+    "on first run, then DuckDuckGo's no-JavaScript results page. "
+    "You can point it at your own SearXNG with "
     'update_settings(web_search_url="http://…") or turn the tools off with '
     "update_settings(web_tools_enabled=false)."
 )

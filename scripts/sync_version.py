@@ -177,9 +177,10 @@ def _bump_latest_json(ver: str) -> None:
             asset = f"Remedy.Desktop_{ver}_x64.app.tar.gz"
         else:
             asset = f"Remedy.Desktop_{ver}_x64-setup.exe"
-        return (
-            f"https://github.com/AhmiDarrow/RemedyAI/releases/download/v{ver}/{asset}"
-        )
+        # macOS updater tarballs live on the runtime-v<ver> companion release;
+        # the installers the updater also uses stay on the main v<ver> release.
+        tag = f"runtime-v{ver}" if key.startswith("darwin") else f"v{ver}"
+        return f"https://github.com/AhmiDarrow/RemedyAI/releases/download/{tag}/{asset}"
 
     version_changed = bool(old_raw and old_raw != ver)
     for name, plat in platforms.items():

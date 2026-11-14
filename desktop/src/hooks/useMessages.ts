@@ -18,6 +18,7 @@ import {
 import {
   appendJobThinking,
   appendJobToken,
+  markJobTextBreak,
   replaceJobThinking,
   completeStreamJob,
   detachStreamJob,
@@ -108,6 +109,7 @@ export function useMessages(sessionId: string | null) {
   const [loading, setLoading] = useState(false)
   const [streaming, setStreaming] = useState(false)
   const [partialText, setPartialText] = useState('')
+  const [textBreaks, setTextBreaks] = useState<number[]>([])
   const [partialThinking, setPartialThinking] = useState('')
   const [activeTools, setActiveTools] = useState<ActiveTool[]>([])
   const [processSteps, setProcessSteps] = useState<ProcessStep[]>([])
@@ -415,6 +417,7 @@ export function useMessages(sessionId: string | null) {
     setStreamStalled(false)
     setStallSeconds(0)
     setPartialText('')
+    setTextBreaks([])
     setPartialThinking('')
     setActiveTools([])
     setProcessSteps([])
@@ -494,6 +497,7 @@ export function useMessages(sessionId: string | null) {
         streamAccumRef.current = paint.partialText || ''
         thinkingAccumRef.current = paint.partialThinking || ''
         setPartialText(paint.partialText || '')
+        setTextBreaks(paint.textBreaks || [])
         setPartialThinking(paint.partialThinking || '')
         processStepsRef.current = paint.processSteps || []
         setProcessSteps(paint.processSteps || [])
@@ -723,6 +727,7 @@ export function useMessages(sessionId: string | null) {
           setStreamCtrl(null)
           streamCtrlRef.current = null
           setPartialText('')
+          setTextBreaks([])
           setPartialThinking('')
           setActiveTools([])
           setTaskProgress(null)
@@ -863,6 +868,7 @@ export function useMessages(sessionId: string | null) {
           setStreamCtrl(null)
           streamCtrlRef.current = null
           setPartialText('')
+          setTextBreaks([])
           setPartialThinking('')
           setActiveTools([])
           setProcessSteps([])
@@ -992,7 +998,11 @@ export function useMessages(sessionId: string | null) {
           )
           setJobActiveTools(targetId, tools)
           markLiveTurn(targetId, 'running')
-          if (isFocusedTurn()) setActiveTools(tools)
+          const breaks = markJobTextBreak(targetId)
+          if (isFocusedTurn()) {
+            setActiveTools(tools)
+            setTextBreaks(breaks)
+          }
           pushSteps(steps)
         },
         onToolResult: (name, preview, ok = true, callId) => {
@@ -1122,6 +1132,7 @@ export function useMessages(sessionId: string | null) {
         if (after === 0) {
           clearStreamAccum()
           setPartialText('')
+          setTextBreaks([])
           setPartialThinking('')
           setActiveTools([])
           setProcessSteps([])
@@ -1222,6 +1233,7 @@ export function useMessages(sessionId: string | null) {
         setStreaming(true)
         clearStreamAccum()
         setPartialText('')
+        setTextBreaks([])
         setPartialThinking('')
         setActiveTools([])
         setProcessSteps([])
@@ -1394,6 +1406,7 @@ export function useMessages(sessionId: string | null) {
             sendLockRef.current = false
             setPartialThinking('')
             setPartialText('')
+            setTextBreaks([])
             streamAccumRef.current = ''
             thinkingAccumRef.current = ''
             setProcessSteps([])
@@ -1511,6 +1524,7 @@ export function useMessages(sessionId: string | null) {
     sendLockRef.current = false
     setPartialThinking('')
     setPartialText('')
+    setTextBreaks([])
     streamAccumRef.current = ''
     thinkingAccumRef.current = ''
     setProcessSteps([])
@@ -1574,6 +1588,7 @@ export function useMessages(sessionId: string | null) {
         sendLockRef.current = false
         setPartialThinking('')
         setPartialText('')
+        setTextBreaks([])
         streamAccumRef.current = ''
         thinkingAccumRef.current = ''
         setProcessSteps([])
@@ -1663,6 +1678,7 @@ export function useMessages(sessionId: string | null) {
     setHasOlder(false)
     setLoading(false)
     setPartialText('')
+    setTextBreaks([])
     setPartialThinking('')
     setActiveTools([])
     setProcessSteps([])
@@ -1743,6 +1759,7 @@ export function useMessages(sessionId: string | null) {
     stallBannerDismissed,
     dismissStallBanner,
     partialText,
+    textBreaks,
     partialThinking,
     activeTools,
     processSteps,
