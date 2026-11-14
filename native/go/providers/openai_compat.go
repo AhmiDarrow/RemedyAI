@@ -53,6 +53,11 @@ type OpenAICompat struct {
 	NCtx int
 	// LocalFit forces FitLocalRequest even when BaseURL is not loopback.
 	LocalFit bool
+	// Family is the request dialect (FamilyOpenAI / FamilyXAI / FamilyGoogle,
+	// "" for everything else) that decides which reasoning fields exist.
+	Family string
+	// Gen carries the owner's reasoning / output / context settings.
+	Gen GenerationOptions
 }
 
 // ContextWindow reports the prompt window in tokens: the configured n_ctx, the
@@ -63,7 +68,13 @@ func (c *OpenAICompat) ContextWindow() int {
 		return 0
 	}
 	if c.NCtx > 0 {
+		if c.Gen.ContextWindow > 0 && c.Gen.ContextWindow < c.NCtx {
+			return c.Gen.ContextWindow
+		}
 		return c.NCtx
+	}
+	if c.Gen.ContextWindow > 0 {
+		return c.Gen.ContextWindow
 	}
 	if n := envContextWindow(); n > 0 {
 		return n
@@ -105,6 +116,7 @@ func (c *OpenAICompat) Stream(ctx context.Context, turn cognition.Turn) (<-chan 
 	if len(toolSchemas) > 0 {
 		payload["tools"] = toolSchemas
 	}
+	ApplyOpenAICompatGeneration(payload, c.Family, model, c.Gen)
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err

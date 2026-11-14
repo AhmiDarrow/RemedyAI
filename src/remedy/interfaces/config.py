@@ -1184,6 +1184,13 @@ claimidx_public_ledger = true
 # approval_mode = "auto"    # ask | auto (in-project) | full (warn, jail off except auth)
 # trust_profile = "balanced"  # conservative | balanced | autonomous (mail/pay never skipped)
 # thinking_level = "high"   # off | low | medium | high
+# --- Reasoning and context (unset = each provider's default) ---
+# reasoning_effort = "medium"       # none | minimal | low | medium | high | xhigh
+# thinking_budget_tokens = 8000     # Anthropic budget thinking / Gemini thinking budget (1024-128000)
+# max_output_tokens = 8192          # per-round output ceiling (256-256000)
+# context_window_tokens = 128000    # history window used for truncation (4096-2000000)
+# [model_settings."o3"]             # per-model override ("<provider>/<model>" also works)
+# reasoning_effort = "high"
 # tool_process = "off"      # off | medium | full
 # web_tools_enabled = true  # public web_fetch + web_search (SSRF-guarded); set false to disable
 # web_respect_robots = true # obey robots.txt on fetched pages; false = owner override

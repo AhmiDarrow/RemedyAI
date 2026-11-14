@@ -22,6 +22,8 @@ var settableKeys = map[string]struct{}{
 	"access_scope": {}, "launch_at_login": {}, "start_in_tray": {}, "close_to_tray": {},
 	"harness_mode": {}, "harness_min_context_pct": {}, "harness_max_context_pct": {},
 	"thinking_level": {}, "approval_mode": {}, "trust_profile": {},
+	"reasoning_effort": {}, "thinking_budget_tokens": {}, "max_output_tokens": {},
+	"context_window_tokens": {}, "model_settings": {},
 	"show_tool_calls": {}, "tool_process": {},
 	"vision_enabled": {}, "vision_model_id": {}, "vision_force_decode": {},
 	"web_tools_enabled": {}, "http_bootstrap": {}, "privacy_mode": {},
@@ -186,6 +188,10 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 	}
 
 	normalizeSettingsPatch(patch, cfg)
+	if err := validateGenerationPatch(patch); err != nil {
+		return nil, settingsValueError{msg: err.Error()}
+	}
+	mergeModelSettings(patch, cfg)
 
 	messengersUpdate, _ := patch["messengers"].(map[string]any)
 	delete(patch, "messengers")
@@ -703,6 +709,9 @@ func (s *Server) settingsPayload() map[string]any {
 			"gateway_url": firstNonEmpty(strings.TrimSpace(cfgString(cfg, "sleev_gateway_url", "")), "http://127.0.0.1:17321"),
 			"harness":     "remedy",
 		},
+	}
+	for k, v := range generationSettingsView(cfg) {
+		out[k] = v
 	}
 	return out
 }

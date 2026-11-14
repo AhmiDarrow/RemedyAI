@@ -111,6 +111,48 @@ Other key-only brands: set `llm_provider` / `llm_api_key` in config, or use
 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `GROQ_API_KEY`,
 `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`, etc.
 
+### Reasoning effort and context
+
+Each model can run with its own reasoning effort, thinking budget, output
+ceiling, and context window. Leave a setting unset (the default) and the
+provider keeps its built-in behavior.
+
+| Key | Values | What it changes |
+|-----|--------|-----------------|
+| `reasoning_effort` | `none` `minimal` `low` `medium` `high` `xhigh` (unset = provider default) | OpenAI o-series and GPT-5: `reasoning_effort`. Grok 3 mini: `reasoning_effort` (`low`/`high`). Gemini 2.5+: `reasoning_effort`. Claude 4.6+: adaptive effort. Older Claude thinking models: a thinking budget (low 2048, medium 8192, high 16384, xhigh 32000). Models without the control never receive it. |
+| `thinking_budget_tokens` | 1024–128000 | Claude budget thinking (`budget_tokens`) and Gemini `thinking_budget`. Wins over the effort for those models. |
+| `max_output_tokens` | 256–256000 | Per-reply ceiling (`max_completion_tokens` on OpenAI reasoning models, `max_tokens` elsewhere). |
+| `context_window_tokens` | 4096–2000000 | History window used for trimming and compaction. A local server's real window stays the ceiling. |
+
+`0` or an empty string clears a value. Out-of-range values are refused when you
+save, and ignored (with a log line) if hand-edited into the config.
+
+**Desktop:** Settings → Thinking level → **Reasoning and context**. Pick **All
+models** or **This model**, then save. Changes apply from the next message.
+
+**CLI:**
+
+```bash
+remedy settings set reasoning_effort=high max_output_tokens=16000
+remedy settings set --json '{"model_settings": {"anthropic/claude-sonnet-4-5": {"thinking_budget_tokens": 8000}}}'
+remedy settings get model_settings
+remedy settings set reasoning_effort=default   # back to the provider default
+```
+
+**Config (`~/.remedy/config.toml`):**
+
+```toml
+reasoning_effort = "medium"
+context_window_tokens = 128000
+
+[model_settings."o3"]            # or "<provider>/<model>"
+reasoning_effort = "high"
+max_output_tokens = 32000
+```
+
+A per-model entry wins over the top-level values; any key it leaves out falls
+back to them. Saving one model's entry leaves the other models' entries alone.
+
 ### 3. Skills and memory
 
 Bundled skills are discovered automatically from the package (and from
