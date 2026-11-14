@@ -762,8 +762,12 @@ jobs:
           echo "Desktop Release dry run of v${{ needs.verify.outputs.version }} at ${{ needs.verify.outputs.sha }} succeeded."
           echo "All platform build jobs completed. No GitHub release was created or edited."
 
+  # Stages and checks both release file sets in dry runs too; only the publish
+  # steps are skipped there. Main release (v<ver>) = Desktop installers +
+  # latest.json. Companion release (runtime-v<ver>, prerelease, never Latest) =
+  # pip first-run runtime/core/voice assets + SHA256SUMS, macOS updater
+  # tarballs, and every .sig.
   release:
-    if: ${{ needs.verify.outputs.dry_run != 'true' }}
     needs: [verify, build-runtime, build-runtime-linux, build-runtime-linux-arm, build-runtime-macos, build-tauri, build-tauri-linux, build-tauri-macos]
     runs-on: ubuntu-latest
     permissions:
@@ -771,6 +775,7 @@ jobs:
     env:
       VER: ${{ needs.verify.outputs.version }}
       TAG: ${{ needs.verify.outputs.tag }}
+      RUNTIME_TAG: runtime-v${{ needs.verify.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -950,6 +955,7 @@ jobs:
 
           ver = os.environ["VER"]
           tag = os.environ["TAG"]
+          runtime_tag = os.environ["RUNTIME_TAG"]
           asset_name = os.environ["ASSET_NAME"]
           sig = unwrap_sig(open("dist/signature.txt", encoding="utf-8").read())
           if not sig:
@@ -1000,7 +1006,10 @@ jobs:
                   raise SystemExit(f"missing signed macOS updater asset for {key}")
               platforms[key] = {
                   "signature": dsig,
-                  "url": f"https://github.com/{owner}/{repo}/releases/download/{tag}/{url_name}",
+                  # macOS updater tarballs live on the runtime-v companion
+                  # release. Every shipped updater trusts any
+                  # github.com/<owner>/<repo>/releases/ URL.
+                  "url": f"https://github.com/{owner}/{repo}/releases/download/{runtime_tag}/{url_name}",
               }
           payload = {
               "version": f"v{ver}",
@@ -1024,7 +1033,102 @@ jobs:
           REPO_OWNER: ${{ env.REPO_OWNER }}
           REPO_NAME: ${{ env.REPO_NAME }}
 
+      - name: Split main and runtime release files
+        id: split
+        shell: bash
+        env:
+          INSTALLER_NAME: ${{ steps.installer.outputs.name }}
+        run: |
+          set -euo pipefail
+          rm -rf release-main release-runtime
+          mkdir -p release-main release-runtime
+          # Main release: only what a person downloads, plus the updater manifest
+          # that every shipped app fetches from releases/latest/download/.
+          cp "dist/${INSTALLER_NAME}" release-main/
+          cp dist/latest.json release-main/
+          cp dist-linux/*.AppImage dist-linux/*.deb release-main/
+          cp dist-macos/*.dmg release-main/
+          # Runtime companion release: pip first-run assets, updater tarballs, signatures.
+          cp dist-native/* release-runtime/
+          cp dist-macos/*.app.tar.gz release-runtime/
+          find dist dist-linux dist-macos -maxdepth 1 -type f -name '*.sig' -exec cp -f {} release-runtime/ \;
+          python3 - <<'PY'
+          import json, os, re, sys
+          from pathlib import Path
+
+          ver = os.environ["VER"]
+          main = sorted(p.name for p in Path("release-main").iterdir())
+          runtime = sorted(p.name for p in Path("release-runtime").iterdir())
+          print("Main release files:", *main, sep="\n  ")
+          print("Runtime release files:", *runtime, sep="\n  ")
+          want_main = [
+              r"_x64-setup\.exe$", r"^latest\.json$", r"_amd64\.AppImage$",
+              r"_amd64\.deb$", r"_aarch64\.dmg$", r"_x64\.dmg$",
+          ]
+          errors = []
+          if len(main) != len(want_main):
+              errors.append(f"main release must have {len(want_main)} files, has {len(main)}")
+          for pat in want_main:
+              if sum(1 for n in main if re.search(pat, n)) != 1:
+                  errors.append(f"main release needs exactly one file matching {pat}")
+          need_runtime = [
+              "remedy-native-SHA256SUMS.txt",
+              "remedy-voice-female.wav",
+              "remedy-voice-male.wav",
+              f"Remedy.Desktop_{ver}_aarch64.app.tar.gz",
+              f"Remedy.Desktop_{ver}_x64.app.tar.gz",
+              f"Remedy.Desktop_{ver}_aarch64.app.tar.gz.sig",
+              f"Remedy.Desktop_{ver}_x64.app.tar.gz.sig",
+          ]
+          for name in need_runtime:
+              if name not in runtime:
+                  errors.append(f"runtime release is missing {name}")
+          sums = Path("release-runtime/remedy-native-SHA256SUMS.txt").read_text(encoding="utf-8")
+          for line in sums.splitlines():
+              name = line.split()[-1].lstrip("*")
+              if name not in runtime:
+                  errors.append(f"SHA256SUMS lists {name} but it is not staged")
+          if any(n.endswith(".sig") for n in main):
+              errors.append("signatures belong on the runtime release")
+          manifest = json.loads(Path("release-main/latest.json").read_text(encoding="utf-8"))
+          for key, info in manifest["platforms"].items():
+              url = info["url"]
+              name = url.rsplit("/", 1)[-1]
+              home = "release-runtime" if f"/download/runtime-v{ver}/" in url else "release-main"
+              # GitHub turns spaces in asset names into dots.
+              if not any(n.replace(" ", ".") == name for n in os.listdir(home)):
+                  errors.append(f"latest.json {key} points at {url}, not staged in {home}")
+              if not info.get("signature"):
+                  errors.append(f"latest.json {key} has no signature")
+          if errors:
+              for e in errors:
+                  print(f"::error::{e}")
+              sys.exit(1)
+          print(f"OK: {len(main)} main files, {len(runtime)} runtime files")
+          PY
+
+      - name: Create runtime companion release
+        if: ${{ needs.verify.outputs.dry_run != 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: runtime-v${{ needs.verify.outputs.version }}
+          target_commitish: ${{ needs.verify.outputs.sha }}
+          name: Remedy runtime assets v${{ needs.verify.outputs.version }}
+          prerelease: true
+          make_latest: false
+          generate_release_notes: false
+          body: |
+            Support files for [Remedy Desktop v${{ needs.verify.outputs.version }}](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v${{ needs.verify.outputs.version }}). **You do not need to download anything here.**
+
+            - `pip install remedy-ai` fetches `remedy-runtime` / `remedy_core` and the HQ voice references from this release on first run and checks them against `remedy-native-SHA256SUMS.txt`.
+            - The in-app updater downloads the macOS `.app.tar.gz` from here. Every `.sig` is a minisign signature for an updater file.
+
+            Installers are on the [v${{ needs.verify.outputs.version }} release](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v${{ needs.verify.outputs.version }}).
+          files: |
+            release-runtime/*
+
       - name: Create GitHub Release
+        if: ${{ needs.verify.outputs.dry_run != 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.verify.outputs.tag }}
@@ -1034,6 +1138,18 @@ jobs:
             ## Remedy Desktop v${{ needs.verify.outputs.version }}
 
             ${{ needs.verify.outputs.prerelease == 'true' && '> **Experimental pre-release.** This line is still being proven in daily use. Installed apps do not auto-update to it; the stable release stays the one marked Latest.' || '' }}
+
+            ### Which file do I need?
+
+            | Your computer | Download |
+            | --- | --- |
+            | Windows (x64) | `Remedy.Desktop_${{ needs.verify.outputs.version }}_x64-setup.exe` |
+            | Mac with Apple Silicon (M1 and later) | `Remedy.Desktop_${{ needs.verify.outputs.version }}_aarch64.dmg` |
+            | Mac with Intel | `Remedy.Desktop_${{ needs.verify.outputs.version }}_x64.dmg` |
+            | Linux (x86_64) | `.AppImage` (any distro) or `.deb` (Debian/Ubuntu) |
+            | Command line, any OS | `pip install remedy-ai` |
+
+            The Mac app is unsigned: the first time, right-click it in Applications and choose **Open**. `latest.json` is for the in-app updater. Runtime and signature files are on the [runtime-v${{ needs.verify.outputs.version }}](https://github.com/AhmiDarrow/RemedyAI/releases/tag/runtime-v${{ needs.verify.outputs.version }}) companion release, and you never need to download them.
 
             One partner on **Windows, Linux, and macOS**. Continuity stays in `~/.remedy`.
 
@@ -1060,21 +1176,17 @@ jobs:
 
             ### CLI runtime (``pip install remedy-ai``)
 
-            This release also attaches standalone ``remedy-runtime`` / ``remedy_core``
-            binaries, the HQ voice reference WAVs, and ``remedy-native-SHA256SUMS.txt``.
-            First ``remedy serve`` on a PyPI install downloads the pair for this OS,
-            verifies the checksum, and caches them under ``~/.remedy/runtime/``.
-            Chatterbox HQ similarly downloads ``remedy-voice-*.wav`` into
+            The first ``remedy serve`` on a PyPI install downloads the standalone
+            ``remedy-runtime`` / ``remedy_core`` pair for this OS from the
+            ``runtime-v${{ needs.verify.outputs.version }}`` companion release, verifies it against
+            ``remedy-native-SHA256SUMS.txt``, and caches it under ``~/.remedy/runtime/``.
+            Chatterbox HQ downloads ``remedy-voice-*.wav`` the same way into
             ``~/.remedy/voice/references/``.
 
             ### Auto-update
             This release is **minisign-signed**. Windows NSIS, Linux AppImage, and macOS `.app.tar.gz` installs with the embedded updater pubkey (v0.10.2+) can check and install updates in-app. Linux `.deb` installs still update from this page (`sudo apt install` the new `.deb`). macOS builds are not Apple-notarized.
           files: |
-            dist/${{ steps.installer.outputs.name }}
-            dist/latest.json
-            dist-linux/*
-            dist-macos/*
-            dist-native/*
+            release-main/*
           generate_release_notes: true
 
   # Confirm published macOS / ARM assets match remedy-native-SHA256SUMS.txt.
@@ -1082,6 +1194,7 @@ jobs:
   verify-native-assets:
     name: Verify published macOS and ARM checksums
     needs: [verify, release]
+    if: ${{ needs.verify.outputs.dry_run != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1102,7 +1215,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.verify.outputs.tag }}
+          TAG: runtime-v${{ needs.verify.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p verify-assets

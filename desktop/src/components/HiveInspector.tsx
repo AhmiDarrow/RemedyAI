@@ -1,6 +1,7 @@
 /** Advanced hive roster — daughters report to Remedy, never the owner. */
 
 import { useCallback, useEffect, useState } from 'react'
+import { usePronouns } from '../i18n/pronouns'
 import {
   getHiveRoster,
   hiveIsLive,
@@ -11,6 +12,7 @@ import {
 } from '../api/hive'
 
 export function HiveInspector({ open }: { open: boolean }) {
+  const pr = usePronouns()
   const [roster, setRoster] = useState<HiveRoster | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [pending, setPending] = useState<string | null>(null)
@@ -69,7 +71,7 @@ export function HiveInspector({ open }: { open: boolean }) {
         <div>
           <div className="text-xs font-semibold tracking-tight">Hive</div>
           <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-            Daughters Remedy hired. They report to her, not you.
+            Daughters {pr.agent} hired. They report to {pr.them}, not you.
             {roster
               ? ` · ${live.length} live · ${roster.live_posts} posts · ${roster.live_foragers} foraging`
               : ''}

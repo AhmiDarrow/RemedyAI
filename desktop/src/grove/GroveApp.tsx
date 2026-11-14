@@ -35,6 +35,7 @@ import type { GenderRole } from '../voice/pickVoice'
 import type { ChatMessage, ChatSession } from '../types'
 import type { ProcessStep, ToolProcessMode } from '../utils/toolLabels'
 import './grove.css'
+import { setAgentIdentity } from '../i18n/pronouns'
 
 const GOAL_SESSIONS_KEY = 'remedy.grove.goalSessions.v1'
 const HOME_SESSION_KEY = 'remedy.grove.homeSession.v1'
@@ -107,6 +108,7 @@ export interface GroveAppProps {
   ) => Promise<ChatSession | null>
   messages: ChatMessage[]
   partialText: string
+  textBreaks?: number[]
   streaming: boolean
   messagesLoading: boolean
   buildTodos?: BuildTodo[]
@@ -147,6 +149,7 @@ export function GroveApp({
   createSession,
   messages,
   partialText,
+  textBreaks = [],
   streaming,
   messagesLoading,
   buildTodos = [],
@@ -206,6 +209,7 @@ export function GroveApp({
     getSettings()
       .then((s) => {
         const g = String(s.agent_gender || 'female').toLowerCase()
+        setAgentIdentity({ gender: g, name: s.name })
         setGender(g === 'male' ? 'male' : g === 'neutral' ? 'neutral' : 'female')
       })
       .catch(() => {})
@@ -733,6 +737,7 @@ export function GroveApp({
           <GroveChat
             messages={messages}
             partialText={partialText}
+            textBreaks={textBreaks}
             streaming={streaming}
             loading={messagesLoading}
             buildTodos={buildTodos}
@@ -782,6 +787,7 @@ export function GroveApp({
               <GroveChat
                 messages={messages}
                 partialText={partialText}
+                textBreaks={textBreaks}
                 streaming={streaming}
                 loading={messagesLoading}
                 buildTodos={buildTodos}
@@ -922,6 +928,7 @@ export function GroveApp({
             <GroveChat
               messages={messages}
               partialText={partialText}
+              textBreaks={textBreaks}
               streaming={streaming}
               loading={messagesLoading}
               buildTodos={buildTodos}

@@ -286,7 +286,7 @@ const META: HelpArticleMeta[] = [
     order: 7.7,
     tags: ['hive', 'subagent', 'forager', 'post', 'mother', 'diagnostics'],
     summary:
-      'Silent daughters Remedy hires for independent work. They report packets to her, never as extra chats. Standing posts survive Stop and restart.',
+      'Silent daughters Remedy hires for independent work. They report packets back to Remedy, never as extra chats. Standing posts survive Stop and restart.',
   },
   {
     id: '29-remedy-connect',

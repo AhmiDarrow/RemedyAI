@@ -372,7 +372,7 @@ def crystallize(
         "verified": passed,
         "test_output": output[:1200],
         "note": (
-            "Verified green — this competence is hers now, locally, forever."
+            "Verified green — this competence is yours now, locally, forever."
             if passed
             else "Test FAILED — sheath saved unverified; fix run.py/test.py and re-verify."
         ),
@@ -518,7 +518,7 @@ def myelin_status(home: str | Path | None = None) -> dict[str, Any]:
         "verified": sum(1 for s in sheaths if s.verified),
         "candidates": candidates(home),
         "note": (
-            "Sheaths are her crystallized competence: authored by muscle, "
+            "Sheaths are your crystallized competence: authored by muscle, "
             "verified by machine, run locally — inspectable in "
             "~/.remedy/myelin/sheaths/."
         ),
