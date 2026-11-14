@@ -45,8 +45,9 @@ Earlier notes follow on this page, newest first.
   and `latest.json`, with a "Which file do I need?" table. Runtime files for
   `pip install` live on a matching `runtime-vX.Y.Z` release and first run
   finds them there automatically.
-- Steadier Windows config saves, sortable timestamps, and config files that
-  stay readable when a model id contains `.` or `/`.
+- Steadier Windows config saves, sortable timestamps, config files that
+  stay readable when a model id contains `.` or `/`, and hive foragers whose
+  quick reports are no longer lost.
 
 ## 0.68.2 - First published macOS Desktop
 
