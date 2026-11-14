@@ -4,6 +4,23 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.69.0] - 2026-11-14
+
+### Added
+- Reasoning effort, thinking budget, max output tokens, and context window can be set for all models or per model (`model_settings`). Settings → Reasoning and context, `remedy settings set`, or `config.toml`. Each provider only receives the fields it supports: OpenAI reasoning models, Grok 3 mini, Gemini 2.5+, and Claude (adaptive effort or a budget_tokens thinking budget). Unset keeps the provider's defaults. (#44)
+- Pronouns follow the agent's gender setting everywhere through one helper: she/her, he/him, or they/them for unset or other. The text updates as soon as the setting changes. (#42)
+- The live turn keeps the reply in its own chat bubble. Thinking, interim notes, and tool steps move to a collapsible "Working…" timeline, which collapses once the answer arrives. (#43)
+
+### Changed
+- The main GitHub release now lists only the desktop installers and `latest.json`. Native runtime, updater bundles, and signatures move to a per-version `runtime-vX.Y.Z` companion prerelease. `pip install` first-run downloads and voice references try that release first and still fall back to the older layout. A "Which file do I need?" table heads each release. (#41)
+
+### Fixed
+- Text from separate model rounds no longer runs sentences together ("…done.Next…"). (#43)
+- Windows atomic config writes retry briefly when another process holds the file, instead of failing with "Access is denied". (#39)
+- Session and message timestamps use a fixed-width format, so they sort in true time order. (#40)
+- Config keys that are not bare TOML keys (model ids containing `.` or `/`) are now quoted. Before, they could make `config.toml` unreadable. (#44)
+- A hive forager's report is no longer lost when the pulse finishes while the spawn is still being recorded. The daughter used to stay "running" forever. (#47)
+
 ## [0.68.2] - 2026-11-13
 
 ### Fixed
