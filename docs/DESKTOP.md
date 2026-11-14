@@ -441,6 +441,7 @@ Metadata: `https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/lates
 | **GitHub Windows asset / `windows-x86_64` URL** | **`Remedy.Desktop_{X.Y.Z}_x64-setup.exe`** (dots for spaces) |
 | **GitHub Linux AppImage / `linux-x86_64` URL** | **`Remedy.Desktop_{X.Y.Z}_amd64.AppImage`** |
 | Metadata asset | `latest.json` (same release) |
+| **macOS `darwin-*` URLs** | **`…/releases/download/runtime-v{X.Y.Z}/Remedy.Desktop_{X.Y.Z}_{aarch64,x64}.app.tar.gz`** (companion release, 0.69.0+) |
 | Full Windows installer URL | `https://github.com/AhmiDarrow/RemedyAI/releases/download/v{X.Y.Z}/Remedy.Desktop_{X.Y.Z}_x64-setup.exe` |
 
 **Rules (do not break auto-update):**

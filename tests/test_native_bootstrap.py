@@ -187,8 +187,11 @@ def test_missing_sums_falls_back_to_latest_then_caches_real_tag(
 
     def fake_open(req, timeout=0):  # noqa: ANN001
         url = req.full_url if hasattr(req, "full_url") else str(req)
-        if "/download/v0.65.1/" in url:
+        if "/download/v0.65.1/" in url or "/download/runtime-v" in url:
             raise HTTPError(url, 404, "Not Found", hdrs=None, fp=io.BytesIO())  # type: ignore[arg-type]
+        if url.endswith("/releases/latest"):
+            # Latest predates the runtime-v layout: no companion release.
+            return _Resp(b"", "https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.66.0")
         if url.endswith(nb.SUMS_NAME):
             return _Resp(sums, f"{latest_base}/{nb.SUMS_NAME}")
         if url.endswith(linux_assets.runtime_asset):
@@ -282,6 +285,9 @@ def test_sums_cdn_redirect_still_uses_github_download_urls(
         requested.append(url)
         if "release-assets.githubusercontent.com" in url:
             raise AssertionError(f"must not fetch sibling CDN URL without jwt: {url}")
+        if "/download/runtime-v" in url:
+            # 0.66.0 predates the runtime-v companion release.
+            raise HTTPError(url, 404, "Not Found", hdrs=None, fp=io.BytesIO())  # type: ignore[arg-type]
         if url.endswith(nb.SUMS_NAME):
             return _Resp(sums, cdn_sums)
         if url == f"{github_base}/{linux_assets.runtime_asset}":
@@ -316,7 +322,7 @@ def test_latest_fallback_cdn_resolves_tag_from_releases_latest(
         url = req.full_url if hasattr(req, "full_url") else str(req)
         if "release-assets.githubusercontent.com" in url:
             raise AssertionError(f"must not fetch sibling CDN URL without jwt: {url}")
-        if "/download/v0.65.1/" in url:
+        if "/download/v0.65.1/" in url or "/download/runtime-v" in url:
             raise HTTPError(url, 404, "Not Found", hdrs=None, fp=io.BytesIO())  # type: ignore[arg-type]
         if url.endswith("/releases/latest") or url.endswith("/releases/latest/"):
             return _Resp(b"", "https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.66.0")
@@ -401,3 +407,118 @@ def test_cached_install_rehashes_after_runtime_rewrite(
     assert nb.cached_install(tmp_path, version="0.65.1") is not None
     installed.runtime_bin.write_bytes(b"tampered-runtime-bytes")
     assert nb.cached_install(tmp_path, version="0.65.1") is None
+
+
+RELEASES = "https://github.com/AhmiDarrow/RemedyAI/releases"
+
+
+def test_runtime_release_tag_and_url_parsing() -> None:
+    assert nb.runtime_release_tag("0.69.0") == "runtime-v0.69.0"
+    assert nb.runtime_release_tag("v0.69.0") == "runtime-v0.69.0"
+    assert nb.runtime_release_tag("runtime-v0.69.0") == "runtime-v0.69.0"
+    assert nb._tag_from_github_url(f"{RELEASES}/download/runtime-v0.69.0/{nb.SUMS_NAME}") == "0.69.0"
+    assert nb._tag_from_github_url(f"{RELEASES}/tag/runtime-v0.69.0") == "0.69.0"
+    assert nb._tag_from_github_url(f"{RELEASES}/download/runtime-vlatest/x") == ""
+    assert nb._tag_from_github_url(f"{RELEASES}/download/runtime-/x") == ""
+
+
+def test_new_layout_downloads_from_runtime_release(
+    tmp_path: Path, linux_assets: nb.NativeAssets, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = b"runtime-companion"
+    core = b"core-companion"
+    sums = _sums(linux_assets, runtime, core)
+    rt_base = f"{RELEASES}/download/runtime-v0.69.0"
+    requested: list[str] = []
+
+    def fake_open(req, timeout=0):  # noqa: ANN001
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        requested.append(url)
+        if url == f"{rt_base}/{nb.SUMS_NAME}":
+            return _Resp(sums, "https://release-assets.githubusercontent.com/obj?jwt=x")
+        if url == f"{rt_base}/{linux_assets.runtime_asset}":
+            return _Resp(runtime, url)
+        if url == f"{rt_base}/{linux_assets.core_asset}":
+            return _Resp(core, url)
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setenv("REMEDY_ENSURE_ASSETS", "1")
+    monkeypatch.setattr(nb.urllib.request, "urlopen", fake_open)
+    installed = nb.ensure_native_runtime(tmp_path, version="0.69.0")
+    assert installed.version == "0.69.0"
+    assert installed.runtime_bin.read_bytes() == runtime
+    # The main v0.69.0 release is never asked for runtime files.
+    assert not any("/download/v0.69.0/" in u for u in requested)
+    marker = (installed.runtime_bin.parent / "runtime.json").read_text(encoding="utf-8")
+    assert "runtime-v0.69.0" in marker
+
+
+def test_legacy_layout_falls_back_to_main_release(
+    tmp_path: Path, linux_assets: nb.NativeAssets, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = b"legacy-runtime"
+    core = b"legacy-core"
+    sums = _sums(linux_assets, runtime, core)
+    legacy = f"{RELEASES}/download/v0.68.2"
+
+    def fake_open(req, timeout=0):  # noqa: ANN001
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if "/download/runtime-v0.68.2/" in url:
+            raise HTTPError(url, 404, "Not Found", hdrs=None, fp=io.BytesIO())  # type: ignore[arg-type]
+        if url == f"{legacy}/{nb.SUMS_NAME}":
+            return _Resp(sums, url)
+        if url == f"{legacy}/{linux_assets.runtime_asset}":
+            return _Resp(runtime, url)
+        if url == f"{legacy}/{linux_assets.core_asset}":
+            return _Resp(core, url)
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setenv("REMEDY_ENSURE_ASSETS", "1")
+    monkeypatch.setattr(nb.urllib.request, "urlopen", fake_open)
+    installed = nb.ensure_native_runtime(tmp_path, version="0.68.2")
+    assert installed.version == "0.68.2"
+    assert installed.core_lib.read_bytes() == core
+
+
+def test_missing_version_falls_back_to_latest_runtime_release(
+    tmp_path: Path, linux_assets: nb.NativeAssets, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = b"latest-companion-runtime"
+    core = b"latest-companion-core"
+    sums = _sums(linux_assets, runtime, core)
+    rt_latest = f"{RELEASES}/download/runtime-v0.69.1"
+
+    def fake_open(req, timeout=0):  # noqa: ANN001
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if "0.69.0" in url:
+            raise HTTPError(url, 404, "Not Found", hdrs=None, fp=io.BytesIO())  # type: ignore[arg-type]
+        if url.endswith("/releases/latest"):
+            return _Resp(b"", f"{RELEASES}/tag/v0.69.1")
+        if url.startswith(f"{RELEASES}/latest/download/"):
+            raise AssertionError("legacy Latest path must not be needed")
+        if url == f"{rt_latest}/{nb.SUMS_NAME}":
+            return _Resp(sums, url)
+        if url == f"{rt_latest}/{linux_assets.runtime_asset}":
+            return _Resp(runtime, url)
+        if url == f"{rt_latest}/{linux_assets.core_asset}":
+            return _Resp(core, url)
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setenv("REMEDY_ENSURE_ASSETS", "1")
+    monkeypatch.setattr(nb.urllib.request, "urlopen", fake_open)
+    installed = nb.ensure_native_runtime(tmp_path, version="0.69.0")
+    assert installed.version == "0.69.1"
+    assert installed.runtime_bin.read_bytes() == runtime
+
+
+def test_no_sums_anywhere_names_both_layouts(
+    tmp_path: Path, linux_assets: nb.NativeAssets, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_open(req, timeout=0):  # noqa: ANN001
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        raise HTTPError(url, 404, "Not Found", hdrs=None, fp=io.BytesIO())  # type: ignore[arg-type]
+
+    monkeypatch.setenv("REMEDY_ENSURE_ASSETS", "1")
+    monkeypatch.setattr(nb.urllib.request, "urlopen", fake_open)
+    with pytest.raises(nb.NativeBootstrapError, match="runtime-v0.69.0 or v0.69.0"):
+        nb.ensure_native_runtime(tmp_path, version="0.69.0")
