@@ -287,8 +287,9 @@ Trojan. Known historical / ML labels and status:
 On a PyPI install, first serve downloads `remedy-runtime` and `remedy_core`
 from GitHub Releases and checksum-verifies them. If that fails:
 
-- Confirm this version's release attached `remedy-native-SHA256SUMS.txt` and
-  a pair of binaries for your OS (see the assets list on the GitHub Release).
+- Confirm `remedy-native-SHA256SUMS.txt` and a pair of binaries for your OS
+  are on the `runtime-v<version>` companion release (0.69.0 and later) or on
+  the `v<version>` release itself (0.66.0 through 0.68.2).
   Releases published before that file existed cannot bootstrap; use the
   Desktop installer, or wait for the next release, or build from a checkout:
   `go build` in `native/go` and `zig build -Doptimize=ReleaseSafe` in
