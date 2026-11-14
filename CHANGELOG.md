@@ -19,6 +19,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Windows atomic config writes retry briefly when another process holds the file, instead of failing with "Access is denied". (#39)
 - Session and message timestamps use a fixed-width format, so they sort in true time order. (#40)
 - Config keys that are not bare TOML keys (model ids containing `.` or `/`) are now quoted. Before, they could make `config.toml` unreadable. (#44)
+- A hive forager's report is no longer lost when the pulse finishes while the spawn is still being recorded. The daughter used to stay "running" forever. (#47)
 
 ## [0.68.2] - 2026-11-13
 
