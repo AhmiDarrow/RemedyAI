@@ -159,20 +159,20 @@ func commitHiveSpawnStart(fs *hiveStore, d hiveDaughter, cadence string, started
 	if !started {
 		return d
 	}
-	fresh, ok, err := fs.get(d.ID)
+	fresh, ok, err := fs.update(d.ID, func(cur *hiveDaughter) bool {
+		switch cur.Status {
+		case hiveStatusReported, hiveStatusBlocked, hiveStatusCancelled, hiveStatusRetired, hiveStatusAsleep, hiveStatusRunning:
+			return false
+		}
+		cur.Status = hiveStatusRunning
+		return true
+	})
 	if err != nil || !ok {
 		d.Status = hiveStatusRunning
 		_ = fs.save(d)
 		return d
 	}
-	switch fresh.Status {
-	case hiveStatusReported, hiveStatusBlocked, hiveStatusCancelled, hiveStatusRetired, hiveStatusAsleep, hiveStatusRunning:
-		return fresh
-	default:
-		fresh.Status = hiveStatusRunning
-		_ = fs.save(fresh)
-		return fresh
-	}
+	return fresh
 }
 
 func (s *Server) handleHiveAssign(w http.ResponseWriter, r *http.Request) {
@@ -399,25 +399,23 @@ func (s *Server) finishHiveForager(d hiveDaughter, pkt hivePacket, status string
 	if s == nil || s.hiveFS == nil || !s.hiveFS.ready() {
 		return
 	}
-	fresh, ok, err := s.hiveFS.get(d.ID)
-	if err != nil || !ok {
-		return
-	}
-	if fresh.Status == hiveStatusRetired || fresh.Status == hiveStatusCancelled {
-		return
-	}
-	fresh.Packet = &pkt
-	fresh.Status = status
-	if fresh.Journal == nil {
-		fresh.Journal = map[string]any{}
-	}
-	count := 0
-	switch v := fresh.Journal["pulse_count"].(type) {
-	case float64:
-		count = int(v)
-	case int:
-		count = v
-	}
-	fresh.Journal["pulse_count"] = count + 1
-	_ = s.hiveFS.save(fresh)
+	_, _, _ = s.hiveFS.update(d.ID, func(fresh *hiveDaughter) bool {
+		if fresh.Status == hiveStatusRetired || fresh.Status == hiveStatusCancelled {
+			return false
+		}
+		fresh.Packet = &pkt
+		fresh.Status = status
+		if fresh.Journal == nil {
+			fresh.Journal = map[string]any{}
+		}
+		count := 0
+		switch v := fresh.Journal["pulse_count"].(type) {
+		case float64:
+			count = int(v)
+		case int:
+			count = v
+		}
+		fresh.Journal["pulse_count"] = count + 1
+		return true
+	})
 }
