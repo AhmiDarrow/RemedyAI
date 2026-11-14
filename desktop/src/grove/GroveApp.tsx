@@ -107,6 +107,7 @@ export interface GroveAppProps {
   ) => Promise<ChatSession | null>
   messages: ChatMessage[]
   partialText: string
+  textBreaks?: number[]
   streaming: boolean
   messagesLoading: boolean
   buildTodos?: BuildTodo[]
@@ -147,6 +148,7 @@ export function GroveApp({
   createSession,
   messages,
   partialText,
+  textBreaks = [],
   streaming,
   messagesLoading,
   buildTodos = [],
@@ -733,6 +735,7 @@ export function GroveApp({
           <GroveChat
             messages={messages}
             partialText={partialText}
+            textBreaks={textBreaks}
             streaming={streaming}
             loading={messagesLoading}
             buildTodos={buildTodos}
@@ -782,6 +785,7 @@ export function GroveApp({
               <GroveChat
                 messages={messages}
                 partialText={partialText}
+                textBreaks={textBreaks}
                 streaming={streaming}
                 loading={messagesLoading}
                 buildTodos={buildTodos}
@@ -922,6 +926,7 @@ export function GroveApp({
             <GroveChat
               messages={messages}
               partialText={partialText}
+              textBreaks={textBreaks}
               streaming={streaming}
               loading={messagesLoading}
               buildTodos={buildTodos}
