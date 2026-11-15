@@ -2033,10 +2033,44 @@ async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
         .map_err(|e| format!("folder picker channel: {e}"))
 }
 
+/// UNC shares (`\\\\host\\share`, `//host/share`) and Win32 device
+/// namespaces (`\\\\?\\`, `\\\\.\\`), also behind a `file:` prefix.
+fn is_network_path(raw: &str) -> bool {
+    let mut v = raw.trim().trim_matches(|c| c == '<' || c == '>' || c == '"' || c == '\'');
+    if v.get(..5).is_some_and(|h| h.eq_ignore_ascii_case("file:")) {
+        let rest = &v[5..];
+        let body = rest.trim_start_matches(|c| c == '/' || c == '\\');
+        let lead = rest.len() - body.len();
+        let drive = body.len() >= 2 && body.as_bytes()[1] == b':' && body.as_bytes()[0].is_ascii_alphabetic();
+        if (lead == 2 || lead >= 4) && !drive {
+            return true;
+        }
+        v = body;
+    }
+    let b = v.as_bytes();
+    b.len() >= 2 && (b[0] == b'\\' || b[0] == b'/') && (b[1] == b'\\' || b[1] == b'/')
+}
+
+/// AppleScript that opens Terminal at `dir`. The shell sees the folder as
+/// one single-quoted word (so `$(…)`, backticks and quotes in a folder name
+/// are literal), and that command is then escaped as an AppleScript string.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn macos_terminal_cd_script(dir: &str) -> String {
+    let shell = format!("cd '{}'", dir.replace('\'', "'\\''"));
+    let applescript = shell.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("tell application \"Terminal\" to do script \"{applescript}\"")
+}
+
 /// Open a folder in Explorer, or reveal a file (select in parent).
 /// Never ShellExecute .md — that pops “Pick an app”. Agent reads via file_read.
 #[tauri::command]
 fn open_path(path: String) -> Result<String, String> {
+    // UNC / device paths: on Windows even exists() opens an SMB session and
+    // sends the user's NTLM hash to the share owner. Chat can hand us paths
+    // a reply chose, so refuse them before touching the filesystem.
+    if is_network_path(&path) {
+        return Err("network paths are not opened from Remedy".into());
+    }
     let p = PathBuf::from(path.trim());
     if !p.exists() {
         return Err(format!("path not found: {}", p.display()));
@@ -2063,7 +2097,14 @@ fn open_path(path: String) -> Result<String, String> {
     }
     #[cfg(target_os = "macos")]
     {
-        let status = Command::new("open")
+        // Same as Windows: folders open, files are revealed (selected in
+        // Finder), never launched. `open file.app` / `open x.command` would
+        // run whatever a chat link pointed at.
+        let mut c = Command::new("open");
+        if !p.is_dir() {
+            c.arg("-R");
+        }
+        let status = c
             .arg(&p)
             .status()
             .map_err(|e| format!("open_path: {e}"))?;
@@ -2076,15 +2117,22 @@ fn open_path(path: String) -> Result<String, String> {
     {
         // spawn, not status(): some xdg-open handlers block until the
         // launched app exits, which froze the Files slide on Linux/WSLg.
+        // Files: open the containing folder (no portable "select"), never
+        // the file itself — xdg-open on a .desktop or script can execute it.
+        let target = if p.is_dir() {
+            p.clone()
+        } else {
+            p.parent().map(Path::to_path_buf).unwrap_or_else(|| p.clone())
+        };
         let child = Command::new("xdg-open")
-            .arg(&p)
+            .arg(&target)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
             .map_err(|e| format!("open_path: {e}"))?;
         reap_detached(child);
-        return Ok(format!("Opened {}", p.display()));
+        return Ok(format!("Opened {}", target.display()));
     }
 }
 
@@ -2140,10 +2188,7 @@ fn open_terminal(cwd: Option<String>) -> Result<String, String> {
 
     #[cfg(target_os = "macos")]
     {
-        let escaped = dir_s.replace('\\', "\\\\").replace('"', "\\\"");
-        let script = format!(
-            "tell application \"Terminal\" to do script \"cd \\\"{escaped}\\\"\""
-        );
+        let script = macos_terminal_cd_script(&dir_s);
         let status = Command::new("osascript")
             .args(["-e", &script])
             .status()
@@ -6828,5 +6873,66 @@ mod updater_parse_tests {
         assert!(!is_trusted_download_url(
             "http://github.com/AhmiDarrow/RemedyAI/releases/download/runtime-v0.69.0/x.app.tar.gz"
         ));
+    }
+}
+
+#[cfg(test)]
+mod open_path_safety_tests {
+    use super::*;
+
+    #[test]
+    fn network_paths_are_refused_before_any_filesystem_access() {
+        for p in [
+            r"\\attacker.example\share\x.png",
+            "//attacker.example/share/x.png",
+            r"\\?\UNC\attacker.example\share\x.png",
+            r"\\.\pipe\x",
+            "file://attacker.example/share/x.png",
+            "file:////attacker.example/share/x.png",
+            r"file:\\attacker.example\share\x.png",
+            r"<\\attacker.example\share\x.png>",
+        ] {
+            assert!(is_network_path(p), "{p} should be refused");
+            let err = open_path(p.to_string()).unwrap_err();
+            assert!(err.contains("network paths"), "{p}: {err}");
+        }
+        for p in [r"C:\Users\me\a.png", "file:///C:/Users/me/a.png", "/home/me/a.png", "assets/a.png"] {
+            assert!(!is_network_path(p), "{p} is local");
+        }
+    }
+
+    /// Recover the shell command Terminal would run from the AppleScript.
+    fn shell_from_script(script: &str) -> String {
+        let prefix = "tell application \"Terminal\" to do script \"";
+        assert!(script.starts_with(prefix) && script.ends_with('"'), "{script}");
+        let inner = &script[prefix.len()..script.len() - 1];
+        let mut out = String::new();
+        let mut chars = inner.chars();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                out.push(chars.next().expect("dangling escape"));
+            } else {
+                assert!(c != '"', "unescaped quote ends the AppleScript string early: {script}");
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn macos_terminal_script_keeps_folder_names_literal() {
+        for dir in [
+            "/Users/me/proj",
+            "/Users/me/x$(touch /tmp/pwned)",
+            "/Users/me/x`id`",
+            "/Users/me/it's \"quoted\"",
+            r"/Users/me/back\slash",
+        ] {
+            let shell = shell_from_script(&macos_terminal_cd_script(dir));
+            // Single-quoted word: everything literal, only ' needs '\'' .
+            let expected = format!("cd '{}'", dir.replace('\'', "'\\''"));
+            assert_eq!(shell, expected, "dir={dir}");
+            assert!(!shell.contains("cd \""), "double-quoted cd lets $(…) run: {shell}");
+        }
     }
 }
