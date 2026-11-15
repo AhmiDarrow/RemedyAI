@@ -15,11 +15,14 @@ import pytest
 
 from remedy.voice.service import (
     encode_wav,
+    kokoro_voice_for_ui,
     load_voice_settings,
     save_voice_settings,
     speakable_text,
+    tts_voice_id,
     voice_for_gender,
     voice_status,
+    whisper_language_for_ui,
 )
 
 # ---------------------------------------------------------------------------
@@ -42,6 +45,50 @@ def test_voice_follows_agent_gender():
 def test_voice_override_wins():
     assert voice_for_gender("male", override="bf_emma") == "bf_emma"
     assert voice_for_gender("female", override="") == "af_heart"
+
+
+def test_ui_language_selects_whisper_and_kokoro(tmp_path: Path):
+    (tmp_path / "config.toml").write_text('ui_language = "ja"\n', encoding="utf-8")
+    assert whisper_language_for_ui(tmp_path) == "ja"
+    assert kokoro_voice_for_ui("female", tmp_path) == "jf_alpha"
+    assert kokoro_voice_for_ui("male", tmp_path) == "jm_kumo"
+    assert tts_voice_id("female", None, tmp_path) == "jf_alpha"
+
+    (tmp_path / "config.toml").write_text('ui_language = "de"\n', encoding="utf-8")
+    assert whisper_language_for_ui(tmp_path) == "de"
+    assert kokoro_voice_for_ui("female", tmp_path) is None
+    assert tts_voice_id("female", None, tmp_path) == "af_heart"
+
+    (tmp_path / "config.toml").write_text('ui_language = "zh-CN"\n', encoding="utf-8")
+    assert whisper_language_for_ui(tmp_path) == "zh"
+    assert kokoro_voice_for_ui("neutral", tmp_path) == "zf_xiaobei"
+
+    (tmp_path / "config.toml").write_text('ui_language = "pt-BR"\n', encoding="utf-8")
+    assert whisper_language_for_ui(tmp_path) == "pt"
+    assert kokoro_voice_for_ui("male", tmp_path) == "pm_alex"
+
+
+def test_auto_ui_language_leaves_voice_alone(tmp_path: Path):
+    (tmp_path / "config.toml").write_text(
+        '# ui_language = "ja"\nui_language = "auto"\n', encoding="utf-8"
+    )
+    assert whisper_language_for_ui(tmp_path) is None
+    assert kokoro_voice_for_ui("female", tmp_path) is None
+
+
+def test_voice_helpers_without_home_do_not_read_disk():
+    assert whisper_language_for_ui(None) is None
+    assert kokoro_voice_for_ui("female", None) is None
+    assert tts_voice_id("male", None, None) == "am_michael"
+    assert tts_voice_id("female", "bf_emma", None) == "bf_emma"
+
+
+def test_voice_override_beats_ui_language(tmp_path: Path):
+    (tmp_path / "config.toml").write_text('ui_language = "es"\n', encoding="utf-8")
+    save_voice_settings({"voice_override": "bf_emma"}, tmp_path)
+    assert tts_voice_id("female", None, tmp_path) == "bf_emma"
+    assert tts_voice_id("female", "af_bella", tmp_path) == "af_bella"
+    assert kokoro_voice_for_ui("female", tmp_path) == "ef_dora"
 
 
 # ---------------------------------------------------------------------------

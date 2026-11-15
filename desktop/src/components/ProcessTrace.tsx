@@ -11,6 +11,8 @@ import {
 } from '../api/turnEvidence'
 import { ChatImage } from './ChatImage'
 import { IconBtn, IconCheck, IconChevronDown, IconChevronUp, IconCopy } from './icons'
+import { useI18n } from '../i18n'
+import { formatCount } from '../i18n/locale'
 import { useStickToBottom } from '../hooks/useStickToBottom'
 import { DiffCode } from './DiffCode'
 import {
@@ -156,6 +158,7 @@ function StepEvidence({
   nonce,
   onToggle,
 }: StepEvidenceProps) {
+  const { resolved } = useI18n()
   const [copied, setCopied] = useState(false)
   const addressable = Boolean(sessionId && step.requestId && step.callId)
   const evidence: ToolEvidence | null =
@@ -259,7 +262,7 @@ function StepEvidence({
           )}
           {truncated && (
             <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-              Showing the first {clipFull(evidence.output).length.toLocaleString()} characters.
+              Showing the first {formatCount(clipFull(evidence.output).length, resolved)} characters.
             </div>
           )}
           {evidence.images.map((img) => (

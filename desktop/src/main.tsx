@@ -22,11 +22,11 @@ async function boot(): Promise<void> {
   }
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <ErrorBoundary>
-        <I18nProvider>
+      <I18nProvider>
+        <ErrorBoundary>
           <App />
-        </I18nProvider>
-      </ErrorBoundary>
+        </ErrorBoundary>
+      </I18nProvider>
     </StrictMode>,
   )
 }

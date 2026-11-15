@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { browserStackHold } from '../utils/browserStack'
 import { useDialogFocus } from '../hooks/useDialogFocus'
+import { useI18n } from '../i18n'
 
 export function AboutDialog({
   open,
@@ -21,7 +22,10 @@ export function AboutDialog({
   onOpenSettings: () => void
   onOpenDiagnostics?: () => void
 }) {
+  const { t, catalog } = useI18n()
   const dialogRef = useDialogFocus<HTMLDivElement>(open, onClose)
+  const blurb = catalog['about.blurb'] || t('about.blurb', { home: '~/.remedy' })
+  const blurbParts = blurb.split('{home}')
   useEffect(() => {
     if (!open) return
     return browserStackHold('about-dialog')
@@ -72,21 +76,26 @@ export function AboutDialog({
           />
         </div>
         <div id="about-title" className="text-sm font-semibold mb-1 tracking-tight">
-          About Remedy
+          {t('menu.about')}
         </div>
         <div className="text-xs mb-2.5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-          Your personal AI partner on this PC — knowledge, design, code, computer use,
-          and get-it-done. One continuous voice; continuity stays under{' '}
-          <code
-            className="px-1 py-0.5 rounded text-[0.65rem]"
-            style={{
-              background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-tertiary))',
-              color: 'var(--accent)',
-            }}
-          >
-            ~/.remedy
-          </code>
-          . Not a medical product.
+          {blurbParts.length === 2 ? (
+            <>
+              {blurbParts[0]}
+              <code
+                className="px-1 py-0.5 rounded text-[0.65rem]"
+                style={{
+                  background: 'color-mix(in srgb, var(--accent) 10%, var(--bg-tertiary))',
+                  color: 'var(--accent)',
+                }}
+              >
+                ~/.remedy
+              </code>
+              {blurbParts[1]}
+            </>
+          ) : (
+            blurb
+          )}
         </div>
         <div
           className="text-xs mb-3 leading-relaxed rounded-xl px-3 py-2.5"
@@ -100,19 +109,19 @@ export function AboutDialog({
             className="font-semibold mb-0.5 text-[0.7rem] uppercase tracking-wide"
             style={{ color: 'var(--accent)' }}
           >
-            From the creator
+            {t('about.fromCreator')}
           </div>
-          My name is Ahmi, I hope you enjoy my Remedy.
+          {t('about.creator')}
         </div>
         <div className="text-xs space-y-1 mb-4" style={{ color: 'var(--text-secondary)' }}>
           <div>
-            Version{' '}
+            {t('about.version')}{' '}
             <span className="font-semibold" style={{ color: 'var(--accent)' }}>
               {version || '—'}
             </span>
-            <span style={{ color: 'var(--text-muted)' }}> · Windows desktop + local API</span>
+            <span style={{ color: 'var(--text-muted)' }}> · {t('about.platform')}</span>
           </div>
-          {userName ? <div>Signed in as {userName}</div> : null}
+          {userName ? <div>{t('about.signedIn', { userName })}</div> : null}
         </div>
         <div className="flex flex-wrap justify-end gap-2">
           <button
@@ -123,7 +132,7 @@ export function AboutDialog({
               onOpenHelp('13-whats-new')
             }}
           >
-            What&apos;s new
+            {t('about.whatsNew')}
           </button>
           <button
             type="button"
@@ -133,7 +142,7 @@ export function AboutDialog({
               onOpenHelp('00-overview')
             }}
           >
-            Help
+            {t('menu.help')}
           </button>
           <button
             type="button"
@@ -143,7 +152,7 @@ export function AboutDialog({
               onOpenSettings()
             }}
           >
-            Settings
+            {t('settings.title')}
           </button>
           {onOpenDiagnostics ? (
             <button
@@ -154,11 +163,11 @@ export function AboutDialog({
                 onOpenDiagnostics()
               }}
             >
-              Diagnostics
+              {t('menu.diagnostics')}
             </button>
           ) : null}
           <button type="button" className="ui-btn ui-btn-primary" onClick={onClose}>
-            Close
+            {t('win.close')}
           </button>
         </div>
       </div>

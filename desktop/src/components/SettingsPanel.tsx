@@ -815,8 +815,8 @@ export function SettingsPanel({
         (projectPath || '').trim() !== prevProject
           && (projectPath || '').trim() !== ''
       const okMsg = projectChanged
-        ? 'Settings saved · Workspace updated'
-        : 'Settings saved'
+        ? t('settings.savedWorkspace')
+        : t('settings.saved')
       setStatusMessage(okMsg)
       setSaveToast({ kind: 'ok', text: okMsg })
       window.setTimeout(() => setSaveToast(null), 3200)
@@ -826,8 +826,8 @@ export function SettingsPanel({
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
       setSaved(false)
-      setErrorMessage(msg || 'Failed to save settings')
-      setSaveToast({ kind: 'err', text: msg || 'Failed to save settings' })
+      setErrorMessage(msg || t('settings.saveFailed'))
+      setSaveToast({ kind: 'err', text: msg || t('settings.saveFailed') })
       window.setTimeout(() => setSaveToast(null), 4200)
       console.warn('Settings save failed:', msg)
     } finally {
