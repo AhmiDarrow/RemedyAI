@@ -2,13 +2,14 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.69.1**. Installed apps update on their own.
+Current release: **v0.69.2**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [0.69.2 — The browser app in pip installs](#0692---the-browser-app-in-pip-installs)
 - [0.69.1 — Message reactions and a calmer live turn](#0691---message-reactions-and-a-calmer-live-turn)
 - [0.69.0 — Reasoning settings and a clearer live turn](#0690---reasoning-settings-and-a-clearer-live-turn)
 - [0.68.2 — First published macOS Desktop](#0682---first-published-macos-desktop)
@@ -28,6 +29,16 @@ you gave her, and waits for you before money, send, or delete.
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
+
+## 0.69.2 - The browser app in pip installs
+
+- **Full app from `pip install`.** `remedy serve` on a PyPI install now opens
+  the same app as Desktop in your browser, instead of a "WebUI assets not
+  bundled" page. Sign-in works as before: your own OS account goes straight
+  in, and `remedy open` prints a one-time link.
+- **Hardened browser mode.** The served app sends a strict content security
+  policy, cannot be framed by other sites, and never leaks a sign-in link
+  through the Referer header.
 
 ## 0.69.1 - Message reactions and a calmer live turn
 
