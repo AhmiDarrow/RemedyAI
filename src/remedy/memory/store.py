@@ -378,6 +378,28 @@ class MemoryStore:
 
     # -- memory entry CRUD ---------------------------------------------------
 
+    def _rows_to_entries(self, rows) -> list[MemoryEntry]:
+        """Rows this model can describe; skip the rest.
+
+        memory.db is shared with the Go runtime, which also writes rows such
+        as owner reaction feedback (id ``reaction:<message>``, entry_type
+        ``reaction_feedback``). One such row must not fail every search,
+        recent-memory read, or prompt assembly that happens to include it.
+        """
+        out: list[MemoryEntry] = []
+        for row in rows:
+            try:
+                out.append(self._row_to_entry(row))
+            except (ValueError, TypeError, KeyError, IndexError) as exc:
+                try:
+                    row_id = str(row["id"])[:64]
+                except (IndexError, KeyError):
+                    row_id = "?"
+                logging.getLogger(__name__).debug(
+                    "memory: skipping row %r not in the Python schema (%s)", row_id, exc
+                )
+        return out
+
     def _row_to_entry(self, row: sqlite3.Row) -> MemoryEntry:
         return MemoryEntry(
             id=UUID(row["id"]),
@@ -566,7 +588,8 @@ class MemoryStore:
                 ).fetchone()
             if row is None:
                 return None
-            return self._row_to_entry(row)
+            entries = self._rows_to_entries([row])
+            return entries[0] if entries else None
 
         return await self._off_loop(_go)
 
@@ -631,7 +654,7 @@ class MemoryStore:
                     "ORDER BY created_at DESC LIMIT ? OFFSET ?",
                     (entry_type.value, limit, offset),
                 ).fetchall()
-            return [self._row_to_entry(r) for r in rows]
+            return self._rows_to_entries(rows)
 
         return await self._off_loop(_go)
 
@@ -643,7 +666,7 @@ class MemoryStore:
                     "SELECT * FROM memory_entries ORDER BY created_at DESC LIMIT ?",
                     (limit,),
                 ).fetchall()
-            return [self._row_to_entry(r) for r in rows]
+            return self._rows_to_entries(rows)
 
         return await self._off_loop(_go)
 
@@ -660,7 +683,7 @@ class MemoryStore:
                     "ORDER BY created_at DESC LIMIT ? OFFSET ?",
                     (session_id, limit, offset),
                 ).fetchall()
-            return [self._row_to_entry(r) for r in rows]
+            return self._rows_to_entries(rows)
 
         return await self._off_loop(_go)
 
@@ -673,7 +696,7 @@ class MemoryStore:
                     "ORDER BY importance DESC LIMIT ?",
                     (threshold, limit),
                 ).fetchall()
-            return [self._row_to_entry(r) for r in rows]
+            return self._rows_to_entries(rows)
 
         return await self._off_loop(_go)
 
@@ -723,7 +746,7 @@ class MemoryStore:
                         if not match_q:
                             return []
                         rows = db.execute(sql, [match_q, *params[1:]]).fetchall()
-                return [self._row_to_entry(r) for r in rows]
+                return self._rows_to_entries(rows)
             except sqlite3.OperationalError as exc:
                 logger = logging.getLogger(__name__)
                 logger.debug(
@@ -762,7 +785,7 @@ class MemoryStore:
             "ORDER BY created_at DESC LIMIT ?",
                 (like_q, like_q, limit),
             ).fetchall()
-        return [self._row_to_entry(r) for r in rows]
+        return self._rows_to_entries(rows)
 
     async def _search_like(self, query: str, limit: int = 20) -> list[MemoryEntry]:
         return await self._off_loop(self._search_like_sync, query, limit)
