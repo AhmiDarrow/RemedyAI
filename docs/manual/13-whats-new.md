@@ -2,13 +2,14 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.69.0**. Installed apps update on their own.
+Current release: **v0.69.1**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [0.69.1 — Message reactions and a calmer live turn](#0691---message-reactions-and-a-calmer-live-turn)
 - [0.69.0 — Reasoning settings and a clearer live turn](#0690---reasoning-settings-and-a-clearer-live-turn)
 - [0.68.2 — First published macOS Desktop](#0682---first-published-macos-desktop)
 - [0.68.1 — First published macOS Desktop](#0681---first-published-macos-desktop)
@@ -27,6 +28,19 @@ you gave her, and waits for you before money, send, or delete.
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
+
+## 0.69.1 - Message reactions and a calmer live turn
+
+- **Reactions.** React to Remedy's replies with 👍 👎 ❤️ or 💔 from the
+  message actions, or long-press on a phone. Tap the same one again to remove
+  it. A reaction never starts a new turn: 👍 means go ahead, 👎 means try
+  again, and if Remedy is waiting on a yes or no for its latest reply, 👍 or
+  👎 answers it. Remedy may react to your messages too, now and then.
+- **A calmer live turn.** Background work sits in one quiet Working strip
+  above the reply, and the reply is the only bright bubble.
+- **Smarter scrolling.** The feed follows new output until you scroll up,
+  keeps your place when you open or close the timeline, and End jumps back
+  to the latest message.
 
 ## 0.69.0 - Reasoning settings and a clearer live turn
 

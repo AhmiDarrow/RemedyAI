@@ -4,6 +4,15 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.69.1] - 2026-11-14
+
+### Added
+- Message reactions: 👍 👎 ❤️ 💔. React to Remedy's replies from the message actions (or long-press on touch); the same reaction again removes it, one per side per message. Remedy can react to your messages too, sparingly, through a read-only `react` tool. A reaction never starts a turn: a running turn gets it as quiet guidance, 👍/👎 on the latest reply answers a single waiting confirmation once (no standing consent), and otherwise it is recorded as feedback and noted before your next message. Stored with the message in both the Go and Python stores. (#49)
+
+### Changed
+- A turn's background work is one quiet Working strip above the reply: a live status line, progress, and a grouped timeline with errors in muted red and thinking as its own item. The reply is the only full-contrast bubble and never contains narration; saved turns keep the same split. (#48)
+- Chat scrolling uses one follow/pause controller for the feed and the Working timeline. Expanding or collapsing keeps your place, End jumps to the latest message unless you are typing, and reduced motion is respected. (#48)
+
 ## [0.69.0] - 2026-11-14
 
 ### Added
