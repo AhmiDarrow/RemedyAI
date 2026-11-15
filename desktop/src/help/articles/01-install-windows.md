@@ -40,7 +40,7 @@ remedy serve
 The wheel does not contain `remedy-runtime.exe`. The first `remedy serve`
 downloads it plus `remedy_core.dll` from this version's `runtime-v<version>`
 GitHub release,
-verifies `remedy-native-SHA256SUMS.txt`, and caches them under
+verifies them against the checksums pinned inside the wheel, and caches them under
 `%USERPROFILE%\.remedy\runtime\`. Prefer the Desktop installer above if
 you want a Start Menu app; it already includes both binaries.
 

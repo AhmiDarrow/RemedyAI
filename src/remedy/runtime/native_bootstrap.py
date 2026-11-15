@@ -2,10 +2,18 @@
 
 Packaged Desktop already bundles these binaries. The PyPI CLI does not, so
 ``remedy serve`` calls :func:`ensure_native_runtime` on first use: download the
-platform assets for this Remedy version (falling back to GitHub's Latest
-release when this tag has no native assets yet), verify sha256 against
-``remedy-native-SHA256SUMS.txt``, and cache them under
+platform assets for exactly this Remedy version from its ``runtime-v<ver>``
+companion release, verify sha256, and cache them under
 ``~/.remedy/runtime/<version>/<triple>/``.
+
+Trust anchor: a published wheel carries ``native_pins.json`` (written at PyPI
+build time by ``scripts/pin_native_hashes.py`` from that release's build
+artifacts). The expected hashes come from the wheel, never from the release
+being downloaded, so a swapped release asset or checksum file is refused.
+There is no fallback to another version: a missing release fails closed and
+the runtime is never downgraded. A build without pins (a source checkout)
+refuses to download unless ``REMEDY_NATIVE_ALLOW_UNPINNED=1``, and even then
+only this exact version's checksum file is used.
 
 Same shape as the managed Claimidx wheel and the voice CPython: checksum
 pins, atomic replace, a failed download never leaves a half-file that later
@@ -34,6 +42,7 @@ from remedy.home import default_home
 logger = logging.getLogger(__name__)
 
 SUMS_NAME = "remedy-native-SHA256SUMS.txt"
+PINS_NAME = "native_pins.json"
 DEFAULT_RELEASE_BASE = "https://github.com/AhmiDarrow/RemedyAI/releases"
 USER_AGENT = "RemedyAI-NativeBootstrap/1.0"
 # Go/Zig binaries are small; refuse anything that would fill a disk.
@@ -160,6 +169,65 @@ def package_version() -> str:
     return str(__version__ or "").strip() or "0.0.0"
 
 
+@dataclass(frozen=True, slots=True)
+class NativePins:
+    """Expected sha256 per release asset, embedded in the wheel."""
+
+    version: str
+    sha256: dict[str, str]
+
+
+def _is_sha256(value: object) -> bool:
+    if not isinstance(value, str) or len(value) != 64:
+        return False
+    try:
+        int(value, 16)
+    except ValueError:
+        return False
+    return True
+
+
+def parse_pins(raw: object) -> NativePins | None:
+    """Validate a ``native_pins.json`` payload; None when absent or malformed."""
+    if not isinstance(raw, dict):
+        return None
+    version = raw.get("version")
+    hashes = raw.get("sha256")
+    if not isinstance(version, str) or not version.strip() or not isinstance(hashes, dict):
+        return None
+    clean: dict[str, str] = {}
+    for name, digest in hashes.items():
+        if not isinstance(name, str) or "/" in name or "\\" in name or ".." in name:
+            return None
+        if not _is_sha256(digest):
+            return None
+        clean[name] = str(digest).lower()
+    if not clean:
+        return None
+    return NativePins(version=version.strip().removeprefix("v"), sha256=clean)
+
+
+def load_pins() -> NativePins | None:
+    """Pins shipped beside this module (filled in for published wheels)."""
+    try:
+        text = (Path(__file__).with_name(PINS_NAME)).read_text(encoding="utf-8")
+        return parse_pins(json.loads(text))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+
+
+def pins_for(version: str) -> NativePins | None:
+    """Pins that apply to *version* exactly, else None."""
+    pins = load_pins()
+    if pins is None or pins.version != version.removeprefix("v"):
+        return None
+    return pins
+
+
+def _allow_unpinned() -> bool:
+    return os.environ.get("REMEDY_NATIVE_ALLOW_UNPINNED") == "1"
+
+
 def _home(home_dir: Path | str | None = None) -> Path:
     if home_dir is not None:
         return Path(home_dir).expanduser()
@@ -276,6 +344,14 @@ def _verified_install(directory: Path, assets: NativeAssets, version: str) -> Na
     expected_core = marker.get("core_sha256")
     if not isinstance(expected_runtime, str) or not isinstance(expected_core, str):
         return None
+    pins = pins_for(version)
+    if pins is not None and (
+        pins.sha256.get(assets.runtime_asset) != expected_runtime.lower()
+        or pins.sha256.get(assets.core_asset) != expected_core.lower()
+    ):
+        # A cache written before this wheel (or edited by hand) does not
+        # match what this wheel trusts: download again.
+        return None
     sig_r = _stat_sig(runtime)
     sig_c = _stat_sig(core)
     sig_m = _stat_sig(_marker_path(directory))
@@ -365,6 +441,12 @@ def _download_file(url: str, dest: Path, *, expected_sha256: str, timeout: float
                 f"{dest.name}: sha256 {actual} did not match {expected_sha256}"
             )
         tmp.replace(dest)
+    except urllib.error.HTTPError as exc:
+        tmp.unlink(missing_ok=True)
+        raise NativeBootstrapError(f"HTTP {exc.code} fetching {url}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        tmp.unlink(missing_ok=True)
+        raise NativeBootstrapError(f"could not fetch {url}: {exc}") from exc
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
@@ -468,7 +550,6 @@ def _sums_candidates(version: str) -> list[tuple[str, str, str]]:
 
     1. ``runtime-v<ver>`` companion release (0.69.0 and later).
     2. ``v<ver>`` main release (0.66.0 through 0.68.2 attached assets there).
-    An empty asset_base means "resolve the tag after download" (Latest).
     """
     base = release_base()
     ver = version.removeprefix("v")
@@ -476,22 +557,6 @@ def _sums_candidates(version: str) -> list[tuple[str, str, str]]:
         (ver, f"{_runtime_download_base(ver)}/{SUMS_NAME}", _runtime_download_base(ver)),
         (ver, f"{base}/download/v{ver}/{SUMS_NAME}", _asset_download_base(ver)),
     ]
-
-
-def _latest_candidates(version: str) -> list[tuple[str, str, str]]:
-    """Fallbacks when this version's releases have no checksum file.
-
-    Resolve Latest (always a main ``v<ver>`` release) and try its
-    ``runtime-v`` companion, then the legacy ``latest/download`` path.
-    """
-    out: list[tuple[str, str, str]] = []
-    latest = _probe_latest_version()
-    if latest and latest != version.removeprefix("v"):
-        out.append(
-            (latest, f"{_runtime_download_base(latest)}/{SUMS_NAME}", _runtime_download_base(latest))
-        )
-    out.append(("latest", f"{release_base()}/latest/download/{SUMS_NAME}", ""))
-    return out
 
 
 def _try_sums(url: str, errors: list[str]) -> tuple[dict[str, str], str] | None:
@@ -523,29 +588,25 @@ def _fetch_sums(version: str) -> tuple[str, dict[str, str], str]:
             got = _try_sums(url, errors)
             if got is None:
                 continue
-            sums, final_url = got
-            if asset_base:
-                # Exact tag known from the URL we asked for; assets live beside it.
-                return label, sums, asset_base
-            resolved = _version_from_github_urls((final_url, url), label)
-            if not _is_release_version(resolved):
-                resolved = _probe_latest_version() or resolved
-            if not _is_release_version(resolved):
-                raise NativeBootstrapError(
-                    f"{SUMS_NAME} was found but the release tag could not be "
-                    f"resolved (got {resolved!r}) after a CDN redirect"
-                )
-            return resolved, sums, _asset_download_base(resolved)
+            sums, _final_url = got
+            # Exact tag known from the URL we asked for; assets live beside it.
+            return label, sums, asset_base
         return None
 
-    found = attempt(_sums_candidates(version)) or attempt(_latest_candidates(version))
+    found = attempt(_sums_candidates(version))
     if found is not None:
+        label, sums, asset_base = found
+        if label != version.removeprefix("v"):
+            raise NativeBootstrapError(
+                f"{SUMS_NAME} resolved to v{label}, not v{version}; refusing a "
+                "different runtime version."
+            )
         return found
     detail = "; ".join(errors) if errors else "no checksum file URLs to try"
     raise NativeBootstrapError(
         f"No {SUMS_NAME} on the {runtime_release_tag(version)} or v{version} GitHub "
-        f"release (or Latest). {detail}. Build from a checkout (see the install "
-        "manual) or use the Desktop installer."
+        f"release. {detail}. Remedy does not fall back to another version. Build "
+        "from a checkout (see the install manual) or use the Desktop installer."
     )
 
 
@@ -579,6 +640,7 @@ def _stage_install(
     core_dest = target / assets.core_local
     _download_file(f"{asset_base}/{assets.runtime_asset}", runtime_dest, expected_sha256=runtime_sha)
     _download_file(f"{asset_base}/{assets.core_asset}", core_dest, expected_sha256=core_sha)
+    # Leave a cache that a later pinned check can trust only if it matches.
     _make_executable(runtime_dest)
     if sys.platform != "win32":
         # Shared libraries sometimes need +x to dlopen on strict systems.
@@ -618,18 +680,30 @@ def ensure_native_runtime(
         hit = cached_install(home_dir, version=ver)
         if hit is not None:
             return hit
-        # A Latest fallback may have already been cached under its real tag.
         if _skip_network():
             raise NativeBootstrapError(
                 "remedy-runtime is not cached and downloads are disabled "
                 "(tests, or REMEDY_NATIVE_BOOTSTRAP_DISABLE=1)."
             )
+        pins = pins_for(ver)
+        if pins is not None:
+            return _install_pinned(home_dir=home_dir, assets=assets, version=ver, pins=pins)
+        if not _allow_unpinned():
+            raise NativeBootstrapError(
+                f"This remedy-ai {ver} build has no pinned runtime checksums, so it "
+                "will not download remedy-runtime. Install the published wheel "
+                "(pip install -U remedy-ai), build from a checkout (see the "
+                "install manual), or set REMEDY_NATIVE_ALLOW_UNPINNED=1 to trust "
+                f"the {runtime_release_tag(ver)} checksum file for this exact version."
+            )
+        logger.warning(
+            "native bootstrap: no pinned checksums for %s; trusting %s from %s "
+            "(REMEDY_NATIVE_ALLOW_UNPINNED=1)",
+            ver,
+            SUMS_NAME,
+            runtime_release_tag(ver),
+        )
         resolved_version, sums, asset_base = _fetch_sums(ver)
-        # If Latest resolved to another tag, use that cache slot (and retry a hit).
-        if resolved_version != ver:
-            existing = cached_install(home_dir, version=resolved_version)
-            if existing is not None:
-                return existing
         return _stage_install(
             home_dir=home_dir,
             assets=assets,
@@ -637,6 +711,49 @@ def ensure_native_runtime(
             sums=sums,
             asset_base=asset_base,
         )
+
+
+def _install_pinned(
+    *,
+    home_dir: Path | str | None,
+    assets: NativeAssets,
+    version: str,
+    pins: NativePins,
+) -> NativeInstall:
+    """Download this exact version and verify it against the wheel's pins.
+
+    The release checksum file is not consulted: a tampered one changes
+    nothing. Assets are tried on ``runtime-v<ver>`` and then ``v<ver>``; both
+    are this version and every byte is checked against the pins.
+    """
+    if pins.sha256.get(assets.runtime_asset) is None or pins.sha256.get(assets.core_asset) is None:
+        raise NativeBootstrapError(
+            f"This wheel pins no runtime for {assets.triple} "
+            f"(need {assets.runtime_asset} and {assets.core_asset}). "
+            "Build from a checkout or install Desktop from GitHub Releases."
+        )
+    errors: list[str] = []
+    for label, _sums_url, asset_base in _sums_candidates(version):
+        if label != version.removeprefix("v"):
+            continue
+        try:
+            return _stage_install(
+                home_dir=home_dir,
+                assets=assets,
+                version=version,
+                sums=pins.sha256,
+                asset_base=asset_base,
+            )
+        except NativeBootstrapError as exc:
+            errors.append(str(exc))
+            if "did not match" in str(exc):
+                # Wrong bytes at the expected location: do not shop around.
+                break
+    raise NativeBootstrapError(
+        f"Could not download a remedy-runtime for v{version} that matches this "
+        f"wheel's pinned checksums. {'; '.join(errors)}. Remedy does not fall "
+        "back to another version."
+    )
 
 
 def cached_runtime_bin(home_dir: Path | str | None = None) -> Path | None:
