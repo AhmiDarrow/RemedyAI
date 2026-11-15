@@ -26,6 +26,7 @@ from remedy.memory.inline_images import (
 )
 from remedy.memory.profile import UserProfile
 from remedy.models import (
+    REACTION_SET,
     ChatMessage,
     ChatMessageRole,
     ChatSession,
@@ -204,6 +205,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     tokens INTEGER,
     created_at TEXT NOT NULL,
     reverted INTEGER NOT NULL DEFAULT 0,
+    reactions TEXT NOT NULL DEFAULT '{}',
     FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
 );
 
@@ -222,6 +224,44 @@ CREATE TABLE IF NOT EXISTS user_traits (
     FOREIGN KEY (user_id) REFERENCES user_profile(user_id)
 );
 """
+
+
+_REACTION_ALIASES = {
+    "👍": "👍", "+1": "👍", "thumbs_up": "👍",
+    "👎": "👎", "-1": "👎", "thumbs_down": "👎",
+    "❤️": "❤️", "❤": "❤️", "heart": "❤️",
+    "💔": "💔", "broken_heart": "💔",
+}
+
+
+def normalize_reaction(emoji: str | None) -> str:
+    """Map an emoji or alias onto REACTION_SET; empty clears."""
+    raw = (emoji or "").strip()
+    if not raw:
+        return ""
+    raw = "".join(ch for ch in raw if not 0x1F3FB <= ord(ch) <= 0x1F3FF)
+    value = _REACTION_ALIASES.get(raw.lower())
+    if value is None or value not in REACTION_SET:
+        raise ValueError("reaction must be one of 👍 👎 ❤️ 💔")
+    return value
+
+
+def _parse_reactions(row: Any) -> dict[str, str]:
+    """Reactions column → {"user": ..., "agent": ...}; tolerant of old rows."""
+    try:
+        raw = row["reactions"]
+    except (IndexError, KeyError):
+        return {}
+    try:
+        data = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {
+        k: v for k, v in data.items()
+        if k in ("user", "agent") and isinstance(v, str) and v in REACTION_SET
+    }
 
 
 class MemoryStore:
@@ -296,6 +336,14 @@ class MemoryStore:
                 self._db.execute(
                     f"ALTER TABLE chat_sessions ADD COLUMN {col} {decl}"
                 )
+        msg_cols = {
+            r[1]
+            for r in self._db.execute("PRAGMA table_info(chat_messages)").fetchall()
+        }
+        if "reactions" not in msg_cols:
+            self._db.execute(
+                "ALTER TABLE chat_messages ADD COLUMN reactions TEXT NOT NULL DEFAULT '{}'"
+            )
         # Index for messenger session lookup (safe to re-run)
         self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_chat_sessions_origin "
@@ -1070,6 +1118,7 @@ class MemoryStore:
             tokens=row["tokens"],
             created_at=datetime.fromisoformat(row["created_at"]),
             reverted=bool(row["reverted"]),
+            reactions=_parse_reactions(row),
         )
 
     async def create_chat_session(self, session: ChatSession) -> ChatSession:
@@ -1441,6 +1490,44 @@ class MemoryStore:
                 msg = self._row_to_message(row)
             self._heal_message_inline_images(msg)
             return msg
+
+        return await self._off_loop(_go)
+
+    async def set_chat_message_reaction(
+        self, msg_id: str, side: str, emoji: str | None
+    ) -> dict[str, str] | None:
+        """Set (or clear with ``None``/``""``) one side's reaction on a message.
+
+        ``side`` is ``"user"`` (the owner, on an assistant message) or
+        ``"agent"`` (Remedy, on a user message). Returns the message's
+        reactions, or ``None`` when the message is missing or the side may not
+        react to it. Raises ``ValueError`` for an emoji outside REACTION_SET.
+        """
+        value = normalize_reaction(emoji)
+        want_role = {"user": "assistant", "agent": "user"}.get(side)
+        if want_role is None:
+            return None
+
+        def _go() -> dict[str, str] | None:
+            with self._locked():
+                db = self._ensure_db()
+                row = db.execute(
+                    "SELECT role, reverted, reactions FROM chat_messages WHERE id = ?",
+                    (msg_id,),
+                ).fetchone()
+                if row is None or row["reverted"] or row["role"] != want_role:
+                    return None
+                current = _parse_reactions(row)
+                if value:
+                    current[side] = value
+                else:
+                    current.pop(side, None)
+                db.execute(
+                    "UPDATE chat_messages SET reactions = ? WHERE id = ?",
+                    (json.dumps(current, ensure_ascii=False), msg_id),
+                )
+                db.commit()
+                return current
 
         return await self._off_loop(_go)
 

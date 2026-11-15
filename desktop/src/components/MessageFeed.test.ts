@@ -104,3 +104,17 @@ describe('saved assistant turn layout', () => {
     expect(html).not.toContain('chat-bubble-assistant')
   })
 })
+
+describe('MessageFeed reactions', () => {
+  it('only offers the picker on settled assistant replies and shows pills under the bubble', () => {
+    expect(src).toContain("const canReact = Boolean(onReact) && msg.role === 'assistant' && !isStreamingPartial")
+    const pills = src.indexOf('<ReactionPills')
+    const bubble = src.indexOf('{showBubble && (')
+    expect(pills).toBeGreaterThan(bubble)
+  })
+
+  it('opens the picker on a touch long-press', () => {
+    expect(src).toContain("if (e.pointerType !== 'touch') return")
+    expect(src).toContain('setPickerOpen(true), 450')
+  })
+})

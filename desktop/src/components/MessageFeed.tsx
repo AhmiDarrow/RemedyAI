@@ -8,6 +8,7 @@ import {
   createContext,
   memo,
   type ReactNode,
+  type PointerEvent as ReactPointerEvent,
   Fragment,
 } from 'react'
 import ReactMarkdown from 'react-markdown'
@@ -33,6 +34,7 @@ import {
 } from './icons'
 import { LiveTurnView } from './LiveTurnView'
 import { WorkStrip } from './WorkStrip'
+import { ReactionPicker, ReactionPills } from './Reactions'
 import { FeedScrollContext } from './feedScroll'
 import { splitSavedReply } from '../utils/liveSegments'
 import {
@@ -77,6 +79,8 @@ interface MessageFeedProps {
   emptyHints?: ReactNode
   /** Regenerate from the user turn that produced this assistant message. */
   onRegenerate?: (assistantMsgId: string) => void
+  /** Owner reacts to one of Remedy's messages ('' clears). */
+  onReact?: (messageId: string, emoji: string) => void
   /** Display name for the human (avatar + label). */
   userName?: string
   /** Partner display name for assistant avatar initials (default Remedy). */
@@ -314,6 +318,7 @@ const MessageBubble = memo(function MessageBubble({
   userName,
   partnerName,
   sessionId = null,
+  onReact,
 }: {
   msg: ChatMessage
   partial?: string
@@ -328,6 +333,8 @@ const MessageBubble = memo(function MessageBubble({
   userName?: string
   partnerName?: string
   sessionId?: string | null
+  /** The owner reacts to Remedy's messages (one per message; same again removes). */
+  onReact?: (messageId: string, emoji: string) => void
 }) {
   const isUser = msg.role === 'user'
   const isSystem = msg.role === 'system'
@@ -352,6 +359,26 @@ const MessageBubble = memo(function MessageBubble({
   const timeLabel = formatTime(msg.created_at)
   const long = text.length > COLLAPSE_CHARS
   const [expanded, setExpanded] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  // Touch: a long press on the bubble opens the reaction picker.
+  const pressTimer = useRef<number | null>(null)
+  const canReact = Boolean(onReact) && msg.role === 'assistant' && !isStreamingPartial
+  const clearPress = () => {
+    if (pressTimer.current != null) window.clearTimeout(pressTimer.current)
+    pressTimer.current = null
+  }
+  const pressHandlers = canReact
+    ? {
+        onPointerDown: (e: ReactPointerEvent) => {
+          if (e.pointerType !== 'touch') return
+          clearPress()
+          pressTimer.current = window.setTimeout(() => setPickerOpen(true), 450)
+        },
+        onPointerUp: clearPress,
+        onPointerCancel: clearPress,
+        onPointerMove: clearPress,
+      }
+    : {}
   const [copied, setCopied] = useState(false)
   // Answer text is never truncated by process mode (COLLAPSE_CHARS is infinite).
   const rawDisplay =
@@ -482,6 +509,7 @@ const MessageBubble = memo(function MessageBubble({
 
         <div
           className={bubbleClass}
+          {...pressHandlers}
           style={{
             background: bubbleBg,
             color: bubbleFg,
@@ -587,10 +615,28 @@ const MessageBubble = memo(function MessageBubble({
                   <IconRefresh size={13} />
                 </IconBtn>
               )}
+              {canReact && onReact && (
+                <ReactionPicker
+                  messageId={msg.id}
+                  current={msg.reactions?.user}
+                  open={pickerOpen}
+                  onOpenChange={setPickerOpen}
+                  onReact={onReact}
+                />
+              )}
             </div>
           )}
         </div>
       </div>
+      )}
+      {showBubble && !isSystem && (
+        <ReactionPills
+          messageId={msg.id}
+          reactions={msg.reactions}
+          partnerName={partnerLabel}
+          onReact={canReact ? onReact : undefined}
+          align={isUser ? 'end' : 'start'}
+        />
       )}
     </div>
   )
@@ -616,6 +662,7 @@ export function MessageFeed({
   emptySub,
   emptyHints,
   onRegenerate,
+  onReact,
   userName,
   partnerName = 'Remedy',
   onAttachMarkup,
@@ -847,6 +894,7 @@ export function MessageFeed({
               hideAvatar={hideAvatar}
               onOpenImage={openLightbox}
               onRegenerate={onRegenerate}
+              onReact={onReact}
               userName={userName}
               partnerName={partnerName}
               sessionId={sessionId}

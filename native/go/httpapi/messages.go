@@ -40,6 +40,8 @@ type ChatMessage struct {
 	// it the process trail can only show the full output of a turn this client
 	// happened to watch live. Empty for rows written before turn logs.
 	RequestID string `json:"request_id,omitempty"`
+	// Reactions: the owner's and Remedy's, one each (see reactions.go).
+	Reactions *MessageReactions `json:"reactions,omitempty"`
 }
 
 type sendMessageRequest struct {
@@ -71,6 +73,9 @@ type TurnRequest struct {
 	// as {"role","content"}. They become transcript messages (not a system
 	// block) so prior turns are not rendered twice.
 	History []map[string]any
+	// UserMessageID is the persisted owner message that started this turn
+	// (the react tool's default target).
+	UserMessageID string
 	// Origin names where the prompt came from: "desktop" (default when empty),
 	// "webui", "cli", "hive:<parent-session>", "phone:<device>", or a
 	// messenger channel such as "telegram:<user-id>". Non-owner origins run
@@ -126,10 +131,14 @@ func (s *Server) turnHistory(sid string) []map[string]any {
 	out := make([]map[string]any, 0, len(msgs))
 	for _, m := range msgs {
 		content, _ := m.Content.(string)
-		out = append(out, map[string]any{
+		row := map[string]any{
 			"role":    m.Role,
 			"content": truncStr(content, turnHistoryContentChars),
-		})
+		}
+		if m.Reactions != nil && m.Reactions.User != "" {
+			row["owner_reaction"] = m.Reactions.User
+		}
+		out = append(out, row)
 	}
 	return out
 }
@@ -179,10 +188,10 @@ func (s *sessionStore) ListMessages(sessionID string, limit, offset int) ([]Chat
 	defer s.mu.Unlock()
 	rows, err := s.db.Query(
 		`SELECT id, role, content, thinking, tool_calls, tool_results,
-		        model, agent, tokens, created_at, reverted, draft, request_id
+		        model, agent, tokens, created_at, reverted, draft, request_id, reactions
 		 FROM (
 		   SELECT id, role, content, thinking, tool_calls, tool_results,
-		          model, agent, tokens, created_at, reverted, draft, request_id, rowid AS _rid
+		          model, agent, tokens, created_at, reverted, draft, request_id, COALESCE(reactions, '{}') AS reactions, rowid AS _rid
 		   FROM chat_messages
 		   WHERE session_id = ? AND reverted = 0
 		   ORDER BY created_at DESC, rowid DESC
@@ -219,10 +228,10 @@ func (s *sessionStore) ListMessagesExport(sessionID string, limit int) ([]ChatMe
 	defer s.mu.Unlock()
 	rows, err := s.db.Query(
 		`SELECT id, role, content, thinking, tool_calls, tool_results,
-		        model, agent, tokens, created_at, reverted, draft, request_id
+		        model, agent, tokens, created_at, reverted, draft, request_id, reactions
 		 FROM (
 		   SELECT id, role, content, thinking, tool_calls, tool_results,
-		          model, agent, tokens, created_at, reverted, draft, request_id, rowid AS _rid
+		          model, agent, tokens, created_at, reverted, draft, request_id, COALESCE(reactions, '{}') AS reactions, rowid AS _rid
 		   FROM chat_messages
 		   WHERE session_id = ? AND reverted = 0
 		   ORDER BY created_at DESC, rowid DESC
@@ -384,10 +393,11 @@ func scanMessage(row scannable) (ChatMessage, error) {
 		tokens                         sql.NullInt64
 		reverted, draft                int
 		requestID                      sql.NullString
+		reactionsJSON                  string
 	)
 	err := row.Scan(
 		&id, &role, &content, &thinking, &toolCallsJSON, &toolResultsJSON,
-		&model, &agent, &tokens, &created, &reverted, &draft, &requestID,
+		&model, &agent, &tokens, &created, &reverted, &draft, &requestID, &reactionsJSON,
 	)
 	if err != nil {
 		return ChatMessage{}, err
@@ -401,6 +411,7 @@ func scanMessage(row scannable) (ChatMessage, error) {
 		_ = json.Unmarshal([]byte(toolResultsJSON), &toolResults)
 	}
 	msg := ChatMessage{
+		Reactions:   parseReactions(reactionsJSON),
 		RequestID:   requestID.String,
 		ID:          id,
 		Role:        role,

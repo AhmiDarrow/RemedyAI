@@ -120,6 +120,8 @@ export interface GroveAppProps {
     opts?: { mode?: 'after' | 'interrupt' | 'steer'; sessionId?: string },
   ) => Promise<void> | void
   stickNonce: number
+  /** Owner reacts to one of Remedy's messages ('' clears). */
+  onReact?: (messageId: string, emoji: string) => void
   stop: () => void
   serverReady: boolean
   userName: string
@@ -157,6 +159,7 @@ export function GroveApp({
   toolProcessMode = 'off',
   handleSend,
   stickNonce,
+  onReact,
   stop,
   serverReady,
   userName,
@@ -749,6 +752,7 @@ export function GroveApp({
             placeholder="Tell me anything — a goal, an errand, a receipt, a bug…"
             onSend={sendFromGrove}
             stickNonce={stickNonce}
+            onReact={onReact}
             onStop={stop}
             ensureSessionId={ensureHomeSession}
             sessionKey={activeId}
@@ -803,6 +807,7 @@ export function GroveApp({
                 sessionKey={activeId}
                 waitingOnYou={waitingOnYou}
                 stickNonce={stickNonce}
+            onReact={onReact}
                 onSpecialSend={async (t) => {
                   if (/^i want to /i.test(t)) {
                     return plantGoal(t.replace(/^i want to /i, ''))
@@ -954,6 +959,7 @@ export function GroveApp({
               ]}
               onSend={sendFromGrove}
               stickNonce={stickNonce}
+            onReact={onReact}
               onStop={stop}
               ensureSessionId={() => ensureGoalSession(goal)}
               sessionKey={activeId}

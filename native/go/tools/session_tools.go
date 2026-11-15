@@ -28,7 +28,7 @@ const (
 	todoMaxTextLen = 240
 )
 
-// RegisterSessionTools installs todo, screenshot and delegate.
+// RegisterSessionTools installs todo, screenshot, delegate and react.
 func RegisterSessionTools(registry *Registry) error {
 	if registry == nil {
 		return fmt.Errorf("%w: nil registry", ErrInvalidDescriptor)
@@ -175,7 +175,64 @@ func RegisterSessionTools(registry *Registry) error {
 		return err
 	}
 
+	if err := registry.Register(Descriptor{
+		ID:      "react",
+		Version: 1,
+		Description: "React to the owner's message with one emoji, shown as a small pill under it. Use it sparingly: " +
+			"👍 to acknowledge an instruction when no written reply is needed, ❤️ for genuine thanks. " +
+			"Never react to every message. Never use 👎 or 💔 toward the owner except to signal you cannot do something. " +
+			"A reaction is not a reply — if the owner asked a question, answer it.",
+		Runtime: RuntimeGo,
+		Risk:    RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["emoji"],
+			"properties":{
+				"emoji":{"type":"string","enum":["👍","👎","❤️","💔"],"description":"The reaction. Sending the same one again keeps it; there is one reaction per message."},
+				"message_id":{"type":"string","description":"Owner message to react to. Defaults to the message that started this turn."}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["emoji","message_id"],
+			"properties":{
+				"emoji":{"type":"string"},
+				"message_id":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeReact)); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// reactEmojis is the closed reaction set (kept in step with httpapi/reactions.go).
+var reactEmojis = map[string]string{
+	"👍": "👍", "👎": "👎", "❤️": "❤️", "❤": "❤️", "💔": "💔",
+}
+
+// executeReact validates the reaction; the runtime persists it on the target
+// message (the turn knows the session and the owner message it answers).
+func executeReact(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		Emoji     string `json:"emoji"`
+		MessageID string `json:"message_id"`
+	}
+	if err := json.Unmarshal(request.Input, &body); err != nil {
+		return Result{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+	emoji, ok := reactEmojis[strings.TrimSpace(body.Emoji)]
+	if !ok {
+		return Result{}, fmt.Errorf("%w: emoji must be one of 👍 👎 ❤️ 💔", ErrInvalidInput)
+	}
+	out, err := json.Marshal(map[string]string{"emoji": emoji, "message_id": strings.TrimSpace(body.MessageID)})
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Output: out}, nil
 }
 
 // ---------------------------------------------------------------------------
