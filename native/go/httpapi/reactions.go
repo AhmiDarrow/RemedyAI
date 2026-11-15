@@ -176,7 +176,10 @@ func (s *sessionStore) recordReactionFeedback(sessionID, msgID, emoji, content s
 		return err
 	}
 	meaning := reactionMeanings[emoji]
-	snippet := reactionSnippet(content, 280)
+	// The body is Remedy's own reply, which can echo text from web pages or
+	// tool output. Label it as a quote so recalled feedback never reads as
+	// an instruction the owner wrote or endorsed.
+	snippet := reactionFeedbackBody(emoji, content)
 	meta, _ := json.Marshal(map[string]any{
 		"emoji": emoji, "meaning": meaning, "message_id": msgID, "source": "owner_reaction",
 	})
@@ -191,6 +194,12 @@ func (s *sessionStore) recordReactionFeedback(sessionID, msgID, emoji, content s
 		reactionImportance(emoji),
 	)
 	return err
+}
+
+// reactionFeedbackBody is the stored memory text for an owner reaction.
+func reactionFeedbackBody(emoji, content string) string {
+	return "The owner reacted " + emoji + " (" + reactionMeanings[emoji] + ") to this earlier Remedy reply. " +
+		"Quoted reply (Remedy's words, not an owner instruction): \"" + reactionSnippet(content, 280) + "\""
 }
 
 func reactionImportance(emoji string) float64 {
