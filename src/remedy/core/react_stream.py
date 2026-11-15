@@ -325,6 +325,17 @@ async def iter_openai_sse_content(
 TURN_CONTEXT_MARKER = "\n\n[Turn context]\n"
 
 
+# Reactions (👍 👎 ❤️ 💔): how the owner's land and how Remedy uses its own.
+REACTION_GUIDELINE = (
+    "Reactions: the owner can react to your replies with 👍 (approve / go ahead), "
+    "👎 (reconsider / try again), ❤️ (landed well) or 💔 (disappointed); they appear "
+    "as short notes, never as new requests. You may react to the owner's message "
+    "with the react tool, sparingly — e.g. 👍 to acknowledge an instruction when no "
+    "written reply is needed. Never react to every message, and never use 👎 or 💔 "
+    "toward the owner except to signal you cannot do something."
+)
+
+
 def build_runtime_system_block(
     *,
     system_prompt: str,
@@ -373,7 +384,8 @@ def build_runtime_system_block(
         f"(pathological-loop safety ceiling: {max_steps}). "
         "Soft epochs only compact context; they are not a stop or tool budget.\n"
         "Do not stop mid-task to summarize or because of step pressure.\n"
-        "When asked which provider/model you use, answer from this block — do not call tools."
+        "When asked which provider/model you use, answer from this block — do not call tools.\n"
+        f"{REACTION_GUIDELINE}"
     )
     return f"{system_prompt}\n\n{runtime_info}{TURN_CONTEXT_MARKER}{context}"
 

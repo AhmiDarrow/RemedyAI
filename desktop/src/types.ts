@@ -33,6 +33,13 @@ export interface ChatMessage {
   reverted: boolean
   /** Turn that produced this row — addresses recorded tool evidence. */
   request_id?: string
+  /** One reaction per side: the owner's (`user`) and Remedy's (`agent`). */
+  reactions?: MessageReactions
+}
+
+export interface MessageReactions {
+  user?: string
+  agent?: string
 }
 
 export interface ToolCall {

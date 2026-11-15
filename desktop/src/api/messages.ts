@@ -64,6 +64,25 @@ export function streamTransportErrorMessage(err: unknown): string {
   return msg || 'Stream failed'
 }
 
+export type ReactionResponse = {
+  message_id: string
+  reactions?: { user?: string; agent?: string }
+  /** recorded | delivered | confirmation_approved | confirmation_denied | cleared | unchanged */
+  signal: string
+}
+
+/** Set (or clear with '') the owner's reaction on one of Remedy's messages. */
+export async function setMessageReaction(
+  sessionId: string,
+  messageId: string,
+  emoji: string,
+): Promise<ReactionResponse> {
+  return apiFetch<ReactionResponse>(
+    `/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/reaction`,
+    { method: 'PUT', body: JSON.stringify({ emoji }) },
+  )
+}
+
 export type SessionTodosPayload = {
   todos: { id: string; content: string; status: string }[]
 }
