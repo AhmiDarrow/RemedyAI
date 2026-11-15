@@ -5,6 +5,8 @@
  * resolve in the Tauri app, the browser WebUI, and Vite dev.
  */
 import { useCallback, useState } from 'react'
+import { useI18n } from '../../i18n'
+import { formatCount } from '../../i18n/locale'
 
 /** Notices file is ~900 KB / 30k lines — render a head first, all of it on ask. */
 const HEAD_LINES = 400
@@ -24,6 +26,7 @@ function LegalFile({
   loadingLabel: string
   missingHint: string
 }) {
+  const { resolved } = useI18n()
   const [status, setStatus] = useState<Status>('idle')
   const [text, setText] = useState('')
   const [full, setFull] = useState(false)
@@ -94,7 +97,7 @@ function LegalFile({
               style={{ color: 'var(--accent)', background: 'none', border: 0, padding: 0 }}
               onClick={() => setFull(true)}
             >
-              Show all {lines.length.toLocaleString()} lines
+              Show all {formatCount(lines.length, resolved)} lines
             </button>
           ) : null}
         </div>

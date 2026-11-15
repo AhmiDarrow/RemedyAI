@@ -24,11 +24,19 @@ const MALE_NAMES = [
   'fred', 'oliver', 'thomas', 'male',
 ]
 
-function scoreVoice(v: NamedVoice, gender: GenderRole): number {
+function scoreVoice(v: NamedVoice, gender: GenderRole, locale?: string): number {
   const n = (v.name || '').toLowerCase()
   const lang = (v.lang || '').toLowerCase()
+  const want = (locale || '').trim().toLowerCase()
   let score = 0
-  if (lang.startsWith('en')) score += 4
+  if (want && want !== 'en' && !want.startsWith('en-')) {
+    const primary = want.split('-')[0]
+    if (lang === want || lang.startsWith(`${want}-`) || lang.startsWith(want) || (primary && (lang === primary || lang.startsWith(`${primary}-`)))) {
+      score += 20
+    }
+  } else if (lang.startsWith('en')) {
+    score += 4
+  }
   if (v.default) score += 1
   const namePool =
     gender === 'male' ? MALE_NAMES : gender === 'female' ? FEMALE_NAMES : []
@@ -53,12 +61,13 @@ function scoreVoice(v: NamedVoice, gender: GenderRole): number {
 export function pickFallbackVoice(
   voices: NamedVoice[],
   gender: GenderRole,
+  locale?: string,
 ): NamedVoice | null {
   if (!voices || voices.length === 0) return null
   let best: NamedVoice | null = null
   let bestScore = -Infinity
   for (const v of voices) {
-    const s = scoreVoice(v, gender)
+    const s = scoreVoice(v, gender, locale)
     if (s > bestScore) {
       best = v
       bestScore = s

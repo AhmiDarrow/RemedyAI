@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect, useRef, type ReactNode, type DragEvent } 
 import { useI18n } from '../i18n'
 import type { ChatSession } from '../types'
 import { relativeTime } from '../utils/relativeTime'
+import { intlLocale } from '../i18n/locale'
 import {
   getAllSessionMeta,
   isSessionArchived,
@@ -862,6 +863,8 @@ function ProjectSection({
   onRemoveKnownProject?: () => void
   onConfirmDeleteSession: (id: string, title: string) => void
 }) {
+  const { t, resolved } = useI18n()
+  const dateLocale = intlLocale(resolved)
   const isNone = !group.key && !isPinnedStrip
   const count = group.sessions.length
   const hasActive = group.sessions.some((s) => s.id === activeId)
@@ -1141,15 +1144,15 @@ function ProjectSection({
                       toggleSessionArchive(s.id)
                       refreshMeta()
                     }}
-                    title={m.archived ? 'Unarchive session' : 'Archive session'}
-                    aria-label={m.archived ? 'Unarchive session' : 'Archive session'}
+                    title={m.archived ? t('sidebar.unarchiveSession') : t('sidebar.archiveSession')}
+                    aria-label={m.archived ? t('sidebar.unarchiveSession') : t('sidebar.archiveSession')}
                   >
-                    {m.archived ? 'Unarchive' : 'Archive'}
+                    {m.archived ? t('sidebar.unarchive') : t('sidebar.archive')}
                   </button>
                   <button
                     type="button"
-                    aria-label="Delete session"
-                    title="Delete session"
+                    aria-label={t('sidebar.deleteSession')}
+                    title={t('sidebar.deleteSession')}
                     className="w-4 h-4 opacity-0 group-hover:opacity-70 group-focus-within:opacity-100 shrink-0 text-[11px]"
                     style={{ color: 'var(--error)' }}
                     onClick={(e) => {
@@ -1166,13 +1169,13 @@ function ProjectSection({
                     style={{ color: 'var(--text-muted)', opacity: 0.85 }}
                     title={s.updated_at || undefined}
                   >
-                    {relativeTime(s.updated_at)}
+                    {relativeTime(s.updated_at, Date.now(), dateLocale)}
                   </span>
                   <span className="text-[9px] shrink-0" style={{ color: 'var(--text-muted)' }}>
                     ·
                   </span>
                   <span className="text-[9px] shrink-0" style={{ color: 'var(--text-muted)' }}>
-                    {s.message_count} msg
+                    {t('sidebar.msgCount', { n: String(s.message_count) })}
                   </span>
                   {(m.tags || []).slice(0, 2).map((t) => (
                     <span

@@ -45,7 +45,7 @@ def _lang(
 LANGUAGE_ROWS: tuple[Language, ...] = (
     _lang("en", "English", "English", chrome=True),
     _lang("es", "Spanish", "Español", chrome=True),
-    _lang("pt", "Portuguese", "Português", chrome=True),
+    _lang("pt", "Portuguese", "Português (Brasil)", chrome=True),
     _lang("fr", "French", "Français", chrome=True),
     _lang("de", "German", "Deutsch", chrome=True),
     _lang("it", "Italian", "Italiano", chrome=True),

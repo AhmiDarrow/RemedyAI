@@ -125,6 +125,8 @@ def test_i18n_catalog_payload_and_settings_round_trip(tmp_path, monkeypatch):
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
     hinted = catalog_payload("auto", hint="pt-BR")
     assert hinted["resolved"] == "pt"
+    pt_row = next(x for x in hinted["languages"] if x["id"] == "pt")
+    assert pt_row["name_native"] == "Português (Brasil)"
     body = catalog_payload("es")
     assert body["resolved"] == "es"
     assert body["catalog"]["bar.help"] == "Ayuda"

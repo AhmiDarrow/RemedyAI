@@ -2,7 +2,20 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DesktopUpdateInfo, UpdateProgress } from '../api/updates'
 import { startDesktopUpdate } from '../api/updates'
 import { tauriListen } from '../api/tauri'
+import { useI18n } from '../i18n'
 import logoSrc from '/logo.png'
+
+type TFn = (key: string, vars?: Record<string, string>) => string
+
+/** Map known Rust progress lines onto catalog keys. Unknown text stays as-is. */
+function localizeBackendMessage(raw: string, t: TFn): string {
+  const msg = (raw || '').trim()
+  if (!msg) return ''
+  const downloading = /^Downloading update\.\.\.\s+([0-9]+(?:\.[0-9]+)?)\s+MB\s*$/i.exec(msg)
+  if (downloading) return t('update.downloadingMb', { mb: downloading[1] })
+  if (msg.startsWith('Download complete')) return t('update.downloadComplete')
+  return raw
+}
 
 interface UpdateScreenProps {
   info: DesktopUpdateInfo
@@ -18,9 +31,10 @@ type Phase = 'ready' | 'downloading' | 'closing' | 'installing' | 'relaunch' | '
  * Visual language matches SetupWizard (remedy-shell tokens).
  */
 export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenProps) {
+  const { t } = useI18n()
   const [phase, setPhase] = useState<Phase>(autoStart && info.download_url ? 'downloading' : 'ready')
   const [percent, setPercent] = useState(0)
-  const [message, setMessage] = useState(autoStart ? 'Starting download…' : '')
+  const [message, setMessage] = useState(autoStart ? t('update.startingDownload') : '')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const startedRef = useRef(false)
@@ -33,19 +47,19 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
       if (p.phase === 'downloading') {
         setPhase('downloading')
         setPercent(typeof p.percent === 'number' ? p.percent : 0)
-        setMessage(p.message || 'Downloading…')
+        setMessage(localizeBackendMessage(p.message || '', t) || t('update.downloadingShort'))
       } else if (p.phase === 'closing' || p.phase === 'installing' || p.phase === 'verifying') {
         // Single calm handoff phase in the UI (backend may emit several internal steps).
         setPhase('closing')
         setPercent(100)
-        setMessage(p.message || 'Download complete. Restarting to finish install…')
+        setMessage(localizeBackendMessage(p.message || '', t) || t('update.downloadComplete'))
       } else if (p.phase === 'relaunch' || p.phase === 'done') {
         setPhase('relaunch')
         setPercent(100)
-        setMessage(p.message || 'Almost done…')
+        setMessage(localizeBackendMessage(p.message || '', t) || t('update.almost'))
       } else if (p.phase === 'error') {
         setPhase('error')
-        setError(p.message || 'Update failed')
+        setError(p.message || t('update.failed'))
         setBusy(false)
         startedRef.current = false
       }
@@ -55,11 +69,11 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
     return () => {
       unlisten?.()
     }
-  }, [])
+  }, [t])
 
   const begin = useCallback(async () => {
     if (!info.download_url) {
-      setError('No installer URL for this release.')
+      setError(t('update.noUrl'))
       setPhase('error')
       return
     }
@@ -68,7 +82,7 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
     setBusy(true)
     setError('')
     setPhase('downloading')
-    setMessage('Starting download…')
+    setMessage(t('update.startingDownload'))
     setPercent(0)
     try {
       await startDesktopUpdate(info.download_url)
@@ -79,13 +93,13 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
       setError(
         msg
           + (info.download_url
-            ? `\n\nYou can install manually from:\n${info.download_url}`
-            : '\n\nDownload the latest installer from GitHub Releases.'),
+            ? `\n\n${t('update.manual')}\n${info.download_url}`
+            : `\n\n${t('update.github')}`),
       )
       setBusy(false)
       startedRef.current = false
     }
-  }, [info.download_url])
+  }, [info.download_url, t])
 
   // One-click: open this screen -> install starts immediately.
   useEffect(() => {
@@ -99,26 +113,26 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
 
   const subtitle =
     phase === 'ready'
-      ? 'A new version is ready'
+      ? t('update.ready')
       : phase === 'downloading'
-        ? 'Downloading update…'
+        ? t('update.downloading')
         : phase === 'closing' || phase === 'installing'
-          ? 'Finishing — Remedy will restart shortly'
+          ? t('update.finishing')
           : phase === 'relaunch'
-            ? 'Starting Remedy…'
-            : 'Update failed'
+            ? t('update.startingApp')
+            : t('update.failed')
 
   return (
     <div className="remedy-shell">
       <div className="remedy-shell-card" style={{ maxWidth: 420, padding: '1.75rem 1.75rem 1.5rem' }}>
         <div className="text-center mb-5">
           <img src={logoSrc} alt="Remedy" className="remedy-shell-logo" draggable={false} />
-          <h1 className="remedy-shell-title remedy-shell-title--accent">Remedy Update</h1>
+          <h1 className="remedy-shell-title remedy-shell-title--accent">{t('update.title')}</h1>
           <p className="remedy-shell-subtitle">{subtitle}</p>
         </div>
 
         <div className="remedy-shell-meta mb-5">
-          <span className="remedy-shell-muted">Version</span>
+          <span className="remedy-shell-muted">{t('update.version')}</span>
           <span className="font-medium tabular-nums" style={{ color: 'var(--text-primary)' }}>
             v{from} → <span style={{ color: 'var(--accent)' }}>v{to}</span>
           </span>
@@ -154,7 +168,7 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
 
         {phase === 'error' && (
           <div className="remedy-shell-error mb-5">
-            {error || 'Something went wrong.'}
+            {error || t('update.wrong')}
           </div>
         )}
 
@@ -166,7 +180,7 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
                 onClick={onClose}
                 className="ui-btn ui-btn-secondary"
               >
-                Later
+                {t('update.later')}
               </button>
               <button
                 type="button"
@@ -174,7 +188,7 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
                 disabled={busy || !info.download_url}
                 className="ui-btn ui-btn-primary"
               >
-                Update & Relaunch
+                {t('update.relaunch')}
               </button>
             </>
           )}
@@ -185,14 +199,14 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
                 onClick={onClose}
                 className="ui-btn ui-btn-secondary"
               >
-                Close
+                {t('win.close')}
               </button>
               <button
                 type="button"
                 onClick={() => void begin()}
                 className="ui-btn ui-btn-primary"
               >
-                Retry
+                {t('update.retry')}
               </button>
             </>
           )}
@@ -201,8 +215,8 @@ export function UpdateScreen({ info, onClose, autoStart = true }: UpdateScreenPr
               className="flex-1 py-2.5 text-center text-sm remedy-shell-muted"
             >
               {phase === 'downloading'
-                ? 'Please wait…'
-                : 'App restarts automatically — hang tight'}
+                ? t('update.pleaseWait')
+                : t('update.hangTight')}
             </div>
           )}
         </div>
