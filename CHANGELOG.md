@@ -4,6 +4,17 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.69.2] - 2026-11-15
+
+### Fixed
+- `pip install remedy-ai` then `remedy serve` now serves the full browser app instead of "WebUI assets not bundled". The wheel carries the built desktop frontend (`remedy/webui/dist`, about 2.7 MB more), which `remedy serve` hands to the runtime as the last place to look, so `REMEDY_WEBUI_DIR` and a live `desktop/dist` still win. (#60)
+
+### Security
+- The browser UI served by the local API sends a Content-Security-Policy matching the desktop one (inline scripts allowed only by hash, no framing, no plugins), plus `nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer` so a one-time sign-in link never leaks through a Referer header. (#60)
+
+### Changed
+- Release builds check every wheel: CI refuses a wheel without the browser UI, and the Desktop Release workflow builds the PyPI wheel from the tagged commit with the UI and that run's runtime hashes. (#60)
+
 ## [0.69.1] - 2026-11-15
 
 ### Security
