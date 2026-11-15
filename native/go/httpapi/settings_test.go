@@ -19,6 +19,10 @@ func TestLocalBootstrapLoopback(t *testing.T) {
 	const token = "bootstrap-token-not-sec"
 	t.Setenv("REMEDY_HTTP_BOOTSTRAP", "1")
 	t.Setenv("REMEDY_API_AUTH", "1")
+	if !peerLookupSupported() {
+		// macOS/BSD need a one-time link (bootstrap_same_user_test.go).
+		stubPeer(t, true, nil)
+	}
 	base, shutdown := startTestServer(t, Config{
 		Token:   token,
 		HomeDir: home,

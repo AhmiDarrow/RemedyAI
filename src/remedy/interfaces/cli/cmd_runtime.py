@@ -266,11 +266,67 @@ def _cmd_serve(args) -> None:
         if root is not None:
             cwd = str(root / "native" / "go")
 
+    _print_bootstrap_link_when_ready(f"http://{listen}", home)
+
     try:
         raise SystemExit(subprocess.call(argv, cwd=cwd, env=child_env))
     except OSError as exc:
         console.print(f"[red]remedy-runtime launch failed:[/red] {exc}")
         raise SystemExit(1) from exc
+
+
+def _print_bootstrap_link_when_ready(base: str, home: Path) -> None:
+    """Print a one-time WebUI link once the runtime is up (background thread).
+
+    The token handout only trusts processes of this OS user (Linux, Windows)
+    or a browser holding a one-time link (macOS). The link works everywhere.
+    """
+    from remedy.interfaces.local_auth import auth_enabled, http_bootstrap_enabled
+
+    if not auth_enabled() or not http_bootstrap_enabled():
+        return
+    import threading
+
+    from remedy.interfaces.bootstrap_link import wait_for_link
+
+    def run() -> None:
+        link = wait_for_link(base, home)
+        if link:
+            console.print(
+                f"[green]WebUI:[/green] {link}\n"
+                "[dim]One-time link (10 min). Run `remedy open` for a new one.[/dim]"
+            )
+
+    threading.Thread(target=run, name="remedy-bootstrap-link", daemon=True).start()
+
+
+def _cmd_open(args) -> None:
+    """Open the WebUI of a running ``remedy serve`` with a one-time link."""
+    _ensure_stdio()
+    try:
+        home = resolve_cli_home(args.home)
+    except UnsafeHomeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(2) from exc
+    host = str(getattr(args, "host", "127.0.0.1") or "127.0.0.1").strip() or "127.0.0.1"
+    if not _is_loopback_host(host):
+        console.print("[red]remedy open only talks to a loopback remedy-runtime.[/red]")
+        raise SystemExit(2)
+    port = int(getattr(args, "port", 7400) or 7400)
+    from remedy.interfaces.bootstrap_link import wait_for_link
+
+    link = wait_for_link(f"http://{host}:{port}", home, deadline_s=5.0)
+    if not link:
+        console.print(
+            f"[red]remedy open:[/red] no remedy-runtime answered on {host}:{port} "
+            "with this account's API token. Start it with `remedy serve`."
+        )
+        raise SystemExit(1)
+    console.print(f"[green]WebUI:[/green] {link}\n[dim]One-time link (10 min).[/dim]")
+    if not getattr(args, "no_browser", False):
+        import webbrowser
+
+        webbrowser.open(link)
 
 
 def _cmd_chat(args) -> None:

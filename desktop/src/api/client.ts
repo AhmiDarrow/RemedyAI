@@ -44,6 +44,43 @@ let _tokenGeneration = 0
 let _apiToken: string | null = null
 let _tokenPromise: Promise<string | null> | null = null
 
+/** Query parameter carrying a one-time token-handout link (see `remedy open`). */
+const BOOTSTRAP_PARAM = 'bootstrap'
+/** Per-tab copy of a token obtained through a one-time link (survives reload). */
+const LINK_TOKEN_KEY = 'remedy.linkToken'
+let _pendingNonce: string | null = null
+
+/**
+ * Take `?bootstrap=<nonce>` off the address bar (so it is not bookmarked or
+ * shared) and keep it until a handout succeeds. The runtime gives the token
+ * to a same-user process (Linux, Windows) or to a holder of the link (macOS).
+ */
+function takeBootstrapNonce(): string | null {
+  if (typeof window === 'undefined') return _pendingNonce
+  try {
+    const href = window.location?.href
+    if (!href) return _pendingNonce
+    const url = new URL(href)
+    const nonce = url.searchParams.get(BOOTSTRAP_PARAM)
+    if (nonce) {
+      _pendingNonce = nonce
+      url.searchParams.delete(BOOTSTRAP_PARAM)
+      window.history?.replaceState?.(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+    }
+  } catch {
+    /* non-browser */
+  }
+  return _pendingNonce
+}
+
+function linkTokenStore(): Storage | null {
+  try {
+    return typeof window !== 'undefined' && window.sessionStorage ? window.sessionStorage : null
+  } catch {
+    return null
+  }
+}
+
 function inTauriShell(): boolean {
   if (typeof window === 'undefined') return false
   return !!(window.__TAURI__ || window.__TAURI_INTERNALS__)
@@ -61,6 +98,7 @@ export function clearApiToken(): void {
   _tokenGeneration += 1
   _apiToken = null
   _tokenPromise = null
+  linkTokenStore()?.removeItem(LINK_TOKEN_KEY)
 }
 
 /** Load local API bearer token (retries when previous attempt failed). */
@@ -97,9 +135,17 @@ export async function ensureApiToken(): Promise<string | null> {
     } catch {
       /* command may be missing on older builds — fall through to HTTP */
     }
-    // Browser WebUI / dev: loopback-only bootstrap (same Windows user boundary).
+    // Browser WebUI / dev: loopback-only bootstrap, handed out only to a
+    // process of the same OS user or to a holder of a one-time link.
     // Prefer same-origin when the SPA is served by the local API (avoids
     // localhost vs 127.0.0.1 cross-origin "Failed to fetch" surprises).
+    const nonce = takeBootstrapNonce()
+    const saved = linkTokenStore()?.getItem(LINK_TOKEN_KEY)
+    if (!nonce && saved && saved.trim().length >= 16) {
+      if (generation !== _tokenGeneration) return null
+      _apiToken = saved.trim()
+      return _apiToken
+    }
     try {
       const bootstrapUrls: string[] = []
       if (typeof window !== 'undefined') {
@@ -112,11 +158,12 @@ export async function ensureApiToken(): Promise<string | null> {
         }
       }
       bootstrapUrls.push(`${getServerUrl()}/api/auth/local-bootstrap`)
+      const suffix = nonce ? `?nonce=${encodeURIComponent(nonce)}` : ''
       for (const url of new Set(bootstrapUrls)) {
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), 3000)
         try {
-          const r = await fetch(url, {
+          const r = await fetch(`${url}${suffix}`, {
             signal: controller.signal,
             headers: { Accept: 'application/json' },
           })
@@ -125,6 +172,11 @@ export async function ensureApiToken(): Promise<string | null> {
             if (generation !== _tokenGeneration) return null
             if (typeof data.token === 'string' && data.token.trim().length >= 16) {
               _apiToken = data.token.trim()
+              if (nonce) {
+                // The link is spent; keep this tab working across reloads.
+                _pendingNonce = null
+                linkTokenStore()?.setItem(LINK_TOKEN_KEY, _apiToken)
+              }
               return _apiToken
             }
           }

@@ -59,15 +59,16 @@ type Config struct {
 
 // Server is the production local HTTP API served by remedy-runtime.
 type Server struct {
-	started  time.Time
-	version  string
-	token    string
-	homeDir  string
-	webUIDir string
-	mux      *http.ServeMux
-	sessions *sessionStore
-	events   *sessionEventHub
-	claims   *streamClaims
+	bootLinks bootstrapLinks // one-time browser bootstrap links (bootstrap.go)
+	started   time.Time
+	version   string
+	token     string
+	homeDir   string
+	webUIDir  string
+	mux       *http.ServeMux
+	sessions  *sessionStore
+	events    *sessionEventHub
+	claims    *streamClaims
 	// turns tracks the turns currently writing a turn log so
 	// GET /api/sessions/{id}/stream/attach can tail a live one.
 	turns  *turnHub
@@ -208,6 +209,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/status", s.handleStatus)
 	s.mux.HandleFunc("GET /api/turn-active", s.handleTurnActive)
 	s.mux.HandleFunc("GET /api/auth/local-bootstrap", s.handleLocalBootstrap)
+	s.mux.HandleFunc("POST /api/auth/bootstrap-link", s.handleBootstrapLink)
 	s.mux.HandleFunc("GET /api/auth/xai", s.handleXaiAuthStatus)
 	s.mux.HandleFunc("GET /api/auth/xai/oauth-meta", s.handleXaiOAuthMeta)
 	s.mux.HandleFunc("POST /api/auth/xai/login", s.handleXaiAuthLogin)

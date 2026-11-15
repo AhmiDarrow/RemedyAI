@@ -14,6 +14,43 @@ describe('browser authentication', () => {
     },
   )
 
+  it('uses a one-time ?bootstrap= link once, strips it, and keeps the tab token', async () => {
+    const replaceState = vi.fn()
+    const store = new Map<string, string>()
+    const sessionStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => { store.set(k, v) },
+      removeItem: (k: string) => { store.delete(k) },
+    }
+    vi.stubGlobal('window', {
+      location: { origin: 'http://127.0.0.1:7400', href: 'http://127.0.0.1:7400/chat?bootstrap=one-time-nonce&x=1#h' },
+      history: { state: null, replaceState },
+      sessionStorage,
+    })
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ token: 'not-a-real-test-token' }) })
+    vi.stubGlobal('fetch', fetcher)
+    expect(await ensureApiToken()).toBe('not-a-real-test-token')
+    expect(fetcher.mock.calls[0][0]).toBe('http://127.0.0.1:7400/api/auth/local-bootstrap?nonce=one-time-nonce')
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/chat?x=1#h')
+    expect(store.get('remedy.linkToken')).toBe('not-a-real-test-token')
+
+    // Reload in the same tab: the spent link is not resent; the tab copy is used.
+    clearApiToken()
+    store.set('remedy.linkToken', 'not-a-real-test-token')
+    vi.stubGlobal('window', {
+      location: { origin: 'http://127.0.0.1:7400', href: 'http://127.0.0.1:7400/chat' },
+      history: { state: null, replaceState },
+      sessionStorage,
+    })
+    fetcher.mockClear()
+    expect(await ensureApiToken()).toBe('not-a-real-test-token')
+    expect(fetcher).not.toHaveBeenCalled()
+
+    // A rejected token (clearApiToken) drops the tab copy.
+    clearApiToken()
+    expect(store.has('remedy.linkToken')).toBe(false)
+  })
+
   it('does not send bootstrap to an origin that only contains localhost', async () => {
     vi.stubGlobal('window', { location: { origin: 'https://localhost:5177.attacker.invalid' } })
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ token: 'not-a-real-test-token' }) })
