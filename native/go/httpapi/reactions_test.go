@@ -204,7 +204,14 @@ func TestThumbsAnswerAPendingConfirmation(t *testing.T) {
 			s, base, token, shutdown := startReactionServer(t, &stubRunner{tokens: []string{"ok"}})
 			defer shutdown()
 			sid := createSessionID(t, &http.Client{Timeout: 5 * time.Second}, base, token)
-			reply, _ := s.sessions.AddMessage(sid, "assistant", "I need to run the installer — OK?", nil, nil)
+			// The ask belongs to the turn running now; the owner reacts to
+			// that turn's own reply row.
+			release := startLiveTurn(t, s, sid, "req-confirm")
+			defer release()
+			reply, err := s.sessions.UpsertDraftMessage(sid, "req-confirm", "assistant", "I need to run the installer — OK?", nil, nil, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
 			sidCopy := sid
 			item := s.approvals.Enqueue("bash", "installer.exe /quiet", "needs approval", &sidCopy, "")
 			got := make(chan bool, 1)
