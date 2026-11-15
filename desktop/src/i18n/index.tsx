@@ -9,6 +9,8 @@ import {
 } from 'react'
 import { fetchI18n, type UiLanguageOption } from '../api/i18n'
 import { EN, formatMsg } from './en'
+import { gapFor, gapLocaleId } from './gap'
+import { intlLocale } from './locale'
 import { getAgentIdentity, pronounVars, useAgentIdentity } from './pronouns'
 
 type Catalog = Record<string, string>
@@ -56,12 +58,16 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       setStoredState(data.ui_language || 'auto')
       setResolved(data.resolved || 'en')
       setDir(data.dir === 'rtl' ? 'rtl' : 'ltr')
-      setCatalog({ ...EN, ...(data.catalog || {}) })
+      const resolvedNow = data.resolved || 'en'
+      setCatalog({ ...EN, ...(data.catalog || {}), ...gapFor(resolvedNow) })
       if (data.languages?.length) setLanguages(data.languages)
-      applyDocument(data.resolved || 'en', data.dir === 'rtl' ? 'rtl' : 'ltr')
+      applyDocument(resolvedNow, data.dir === 'rtl' ? 'rtl' : 'ltr')
     } catch {
       const hint = hintFromNavigator()
-      applyDocument(hint.split('-')[0] || 'en', 'ltr')
+      const resolvedNow = gapLocaleId(hint) || 'en'
+      setResolved(resolvedNow)
+      setCatalog({ ...EN, ...gapFor(hint) })
+      applyDocument(intlLocale(hint) || 'en', 'ltr')
     }
   }, [])
 
@@ -102,15 +108,22 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 export function useI18n(): I18nState {
   const ctx = useContext(I18nContext)
   if (!ctx) {
+    let docLang = 'en'
+    try {
+      docLang = document.documentElement.lang || 'en'
+    } catch {
+      /* */
+    }
+    const offline = { ...EN, ...gapFor(docLang) }
     return {
       stored: 'auto',
-      resolved: 'en',
+      resolved: gapLocaleId(docLang) || 'en',
       dir: 'ltr',
-      catalog: EN,
+      catalog: offline,
       languages: [],
       t: (key, vars) => {
         const id = getAgentIdentity()
-        return formatMsg(EN[key] || key, {
+        return formatMsg(offline[key] || EN[key] || key, {
           ...(pronounVars(id.gender, id.name) as unknown as Record<string, string>),
           ...vars,
         })
