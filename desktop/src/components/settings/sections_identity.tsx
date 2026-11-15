@@ -14,6 +14,7 @@ import {
   FormToggle,
 } from './formUi'
 import { ReasoningContextSection } from './ReasoningContextSection'
+import { updateSettings } from '../../api/settings'
 import { Field, PERSONAS } from './shared'
 import { VoiceSection } from './VoiceSection'
 import { PhoneSection } from './PhoneSection'
@@ -168,16 +169,11 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
     handleBrowseProject,
     settingsMode = 'simple',
   } = p
-  const { t } = useI18n()
+  const { t, setStored } = useI18n()
   const langOptions = (uiLanguages.length ? uiLanguages : [{ id: 'auto', name_en: 'Auto', name_native: 'Auto', rtl: false, chrome: true }]).map(
     (row) => ({
       value: row.id,
-      label:
-        row.id === 'auto'
-          ? t('settings.languageAuto')
-          : row.name_native === row.name_en
-            ? row.name_native
-            : `${row.name_native} — ${row.name_en}`,
+      label: row.id === 'auto' ? t('settings.languageAuto') : row.name_native,
     }),
   )
 
@@ -189,14 +185,22 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
         summary={t('sec.youAgentSummary')}
       >
         <FormLabel>{t('settings.language')}</FormLabel>
-        <FormSelect value={uiLanguage} onChange={setUiLanguage} options={langOptions} />
+        <FormSelect
+          value={uiLanguage}
+          onChange={(code) => {
+            setUiLanguage(code)
+            setStored(code)
+            void updateSettings({ ui_language: code || 'auto' }).catch(() => {})
+          }}
+          options={langOptions}
+        />
         <FormHint>{t('settings.languageHintShort')}</FormHint>
         {settingsMode === 'advanced' && <FormHint>{t('settings.helpEnglish')}</FormHint>}
         <Field
           label={t('settings.yourName')}
           value={userName}
           onChange={setUserName}
-          placeholder="e.g. Alex"
+          placeholder={t('settings.nameExample')}
         />
         <Field
           label={t('settings.partnerName')}
@@ -215,15 +219,15 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
           ]}
         />
         <FormLabel>
-          Communication style
+          {t('settings.communicationStyle')}
         </FormLabel>
         <FormSelect
           value={persona}
           onChange={setPersona}
-          options={PERSONAS.map(p => ({ value: p.id, label: p.name }))}
-          title="Communication style"
+          options={PERSONAS.map(p => ({ value: p.id, label: t(`persona.${p.id}`) }))}
+          title={t('settings.communicationStyle')}
         />
-        <FormHint>{PERSONAS.find(p => p.id === persona)?.description}</FormHint>
+        <FormHint>{t(`persona.${persona}Hint`)}</FormHint>
       </SettingsSection>
 
       <VoiceSection
@@ -238,7 +242,7 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
         {...sectionProps('workspace')}
       >
         <FormLabel>
-          Default project folder
+          {t('settings.defaultProject')}
         </FormLabel>
         <div className="flex gap-1 mb-1">
           <input
@@ -252,7 +256,7 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
             onClick={() => void handleBrowseProject()}
             className="flex-shrink-0"
           >
-            <span className="inline-flex items-center gap-1" title="Browse for folder">
+            <span className="inline-flex items-center gap-1" title={t('settings.browseFolder')}>
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
                 <path
                   d="M1.5 3.5h4l1.5 1.5H14.5v8a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9.5z"
@@ -261,18 +265,16 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
                   fill="none"
                 />
               </svg>
-              Browse
+              {t('settings.browse')}
             </span>
           </FormActionButton>
         </div>
         <FormHint>
-          Type a path or browse. Save reloads the workspace (file tools, shell cwd, @file search).
+          {t('settings.projectHint')}
         </FormHint>
         {(!projectPath.trim() || projectPath.trim() === '.') && (
           <FormNotice tone="warn">
-            <strong>No project folder</strong> — tools use <strong>full</strong> access on
-            this PC (your Windows user). Fine for general help; for coding, pick a project
-            folder so work stays focused and safer.
+            {t('settings.noProject')}
           </FormNotice>
         )}
         <FormLabel className="mt-3">

@@ -151,6 +151,115 @@ def voice_for_gender(gender: str | None, override: str | None = None) -> str:
     return GENDER_VOICES.get(g, GENDER_VOICES["female"])
 
 
+# Kokoro-82M locale voices. Languages the pack does not ship (de, ko, ru, pl)
+# stay on the English gender voice. Neutral uses the female locale voice.
+_KOKORO_LOCALE: dict[str, dict[str, str]] = {
+    "es": {"female": "ef_dora", "male": "em_alex", "neutral": "ef_dora"},
+    "fr": {"female": "ff_siwis", "male": "ff_siwis", "neutral": "ff_siwis"},
+    "it": {"female": "if_sara", "male": "im_nicola", "neutral": "if_sara"},
+    "pt": {"female": "pf_dora", "male": "pm_alex", "neutral": "pf_dora"},
+    "ja": {"female": "jf_alpha", "male": "jm_kumo", "neutral": "jf_alpha"},
+    "zh-Hans": {"female": "zf_xiaobei", "male": "zm_yunxi", "neutral": "zf_xiaobei"},
+}
+
+# faster-whisper language codes. zh-Hans is "zh". Empty means autodetect.
+_WHISPER_FOR_UI: dict[str, str] = {
+    "es": "es",
+    "fr": "fr",
+    "de": "de",
+    "pt": "pt",
+    "it": "it",
+    "ru": "ru",
+    "pl": "pl",
+    "ja": "ja",
+    "ko": "ko",
+    "zh-Hans": "zh",
+}
+
+
+def _read_ui_language(home_dir: Path | str) -> str:
+    """``ui_language`` from config.toml. Does not create directories."""
+    path = Path(home_dir) / "config.toml"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        if key.strip() != "ui_language":
+            continue
+        return val.strip().strip('"').strip("'")
+    return ""
+
+
+def ui_language_for_voice(home_dir: Path | str | None) -> str:
+    """Concrete UI language for voice, or '' when auto / unknown / no home.
+
+    ``home_dir is None`` does not read disk (unit tests must not touch
+    ``~/.remedy``).
+    """
+    if home_dir is None:
+        return ""
+    raw = _read_ui_language(home_dir)
+    if not raw:
+        return ""
+    try:
+        from remedy.i18n.languages import normalize_ui_language
+
+        code = normalize_ui_language(raw)
+    except Exception:
+        code = (raw or "").strip()
+    if not code or code == "auto":
+        return ""
+    return code
+
+
+def kokoro_voice_for_ui(gender: str | None, home_dir: Path | str | None) -> str | None:
+    """Locale Kokoro id, or None when the pack has no voice for this UI language."""
+    table = _KOKORO_LOCALE.get(ui_language_for_voice(home_dir))
+    if not table:
+        return None
+    try:
+        from remedy.core.agent_identity import normalize_agent_gender
+
+        g = normalize_agent_gender(gender)
+    except Exception:
+        g = (gender or "").strip().lower()
+    return table.get(g) or table["female"]
+
+
+def whisper_language_for_ui(home_dir: Path | str | None) -> str | None:
+    """Whisper language code for the UI language, or None to autodetect."""
+    return _WHISPER_FOR_UI.get(ui_language_for_voice(home_dir))
+
+
+def tts_voice_id(
+    gender: str | None,
+    voice: str | None = None,
+    home_dir: Path | str | None = None,
+) -> str:
+    """Voice id for synthesis.
+
+    An explicit ``voice`` argument wins. With a home, ``voice_override`` wins
+    next, then a Kokoro locale voice, then the English gender voice. With no
+    home this does not read settings or config.
+    """
+    explicit = (voice or "").strip()
+    if explicit:
+        return voice_for_gender(gender, explicit)
+    if home_dir is not None:
+        override = str(load_voice_settings(home_dir).get("voice_override") or "").strip()
+        if override:
+            return voice_for_gender(gender, override)
+        local = kokoro_voice_for_ui(gender, home_dir)
+        if local:
+            return local
+    return voice_for_gender(gender, None)
+
+
 # ---------------------------------------------------------------------------
 # Speakable text: strip markdown/tool residue before synthesis
 # ---------------------------------------------------------------------------
@@ -403,9 +512,12 @@ def synthesize(
                     return hq_out
             except WorkerError as exc:
                 logger.warning("voice: full voice lane failed, using first voice: %s", exc)
+        bridge_voice = voice
+        if home_dir is not None and not (voice or "").strip():
+            bridge_voice = tts_voice_id(gender, None, home_dir)
         try:
             return get_bridge(home_dir).synthesize(
-                text, gender=gender, voice=voice, speed=speed
+                text, gender=gender, voice=bridge_voice, speed=speed
             )
         except WorkerError as exc:
             logger.warning("voice: managed synth failed: %s", exc)
@@ -432,12 +544,22 @@ def synthesize(
 
     ident = load_identity(home_dir)
     eff = ident.effective()
-    v = voice_for_gender(gender, voice or cfg.get("voice_override"))
+    if home_dir is not None:
+        v = tts_voice_id(gender, voice, home_dir)
+    else:
+        v = voice_for_gender(gender, voice or cfg.get("voice_override"))
     spd = float(speed or eff["pace"] or 1.0)
     clean = speakable_text(text)
     if not clean:
         return None
-    samples, sr = engine.create(clean, voice=v, speed=spd)
+    try:
+        samples, sr = engine.create(clean, voice=v, speed=spd)
+    except Exception:
+        fallback = voice_for_gender(gender, None)
+        if v == fallback:
+            raise
+        logger.warning("voice: locale voice %s missing, using %s", v, fallback)
+        samples, sr = engine.create(clean, voice=fallback, speed=spd)
     # Pace already applied natively; pitch and warmth follow the identity.
     shaped = shape_audio(
         samples, int(sr), pace=1.0, pitch_semitones=eff["pitch_semitones"], warmth=eff["warmth"]
@@ -1189,21 +1311,31 @@ def transcribe_file(
     home_dir: Path | str | None = None,
 ) -> dict[str, Any] | None:
     """Audio file (wav/webm/ogg/mp3 — PyAV decodes) → {text, language, duration}."""
+    lang_arg = (language or "").strip() or None
+    resolved = lang_arg
+    # Only an explicit home may consult config. None keeps today's disk path
+    # for the in-process engine and does not apply a UI language.
+    if resolved is None and home_dir is not None:
+        cfg_lang = str(load_voice_settings(home_dir).get("language") or "").strip()
+        resolved = cfg_lang or whisper_language_for_ui(home_dir)
     if _managed():
         if not stt_deps_available():
             return None
         from remedy.voice.bridge import WorkerError, get_bridge
 
+        bridge_lang = resolved if home_dir is not None else language
         try:
-            return get_bridge(home_dir).transcribe(path, language=language)
+            return get_bridge(home_dir).transcribe(path, language=bridge_lang)
         except WorkerError as exc:
             logger.warning("voice: managed transcribe failed: %s", exc)
             return None
     model = get_stt_model(home_dir)
     if model is None:
         return None
-    cfg = load_voice_settings(home_dir)
-    lang = (language or cfg.get("language") or "").strip() or None
+    if resolved is None:
+        cfg = load_voice_settings(home_dir)
+        resolved = (language or cfg.get("language") or "").strip() or None
+    lang = resolved
     start = time.time()
     try:
         segments, info = model.transcribe(

@@ -12,6 +12,8 @@ import {
   type StripProgress,
 } from '../utils/workTimeline'
 import { useStickToBottom } from '../hooks/useStickToBottom'
+import { useI18n } from '../i18n'
+import { formatCount } from '../i18n/locale'
 import { useAnchorToggle } from './feedScroll'
 import { ProcessTrace } from './ProcessTrace'
 
@@ -81,6 +83,7 @@ const StepRow = memo(function StepRow({ step }: { step: ProcessStep }) {
 })
 
 function ThinkingItem({ text, live }: { text: string; live?: boolean }) {
+  const { resolved } = useI18n()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
   const anchor = useAnchorToggle()
@@ -93,7 +96,7 @@ function ThinkingItem({ text, live }: { text: string; live?: boolean }) {
         onClick={() => anchor(ref.current, () => setOpen((o) => !o))}
       >
         <span aria-hidden>{open ? '▾' : '▸'}</span> {live ? 'Thinking' : 'Thought'}
-        <span className="ws-dim"> · {text.length.toLocaleString()} chars</span>
+        <span className="ws-dim"> · {formatCount(text.length, resolved)} chars</span>
       </button>
       {open && <div className="ws-thinking-body">{text}</div>}
     </div>

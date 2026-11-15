@@ -362,7 +362,8 @@ html {
 }
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', 'Yu Gothic UI', 'Yu Gothic', 'Meiryo', 'Malgun Gothic', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK', 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans KR', sans-serif;
+  overflow-wrap: break-word;
   background: var(--bg-primary);
   color: var(--text-primary);
   font-size: 1rem;
@@ -1040,7 +1041,7 @@ pre code {
 .message-feed .ws-group + .ws-group { margin-top: 0.4rem; }
 .message-feed .ws-narration {
   margin: 0 0 0.1rem;
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: system-ui, -apple-system, 'Segoe UI', 'Yu Gothic UI', 'Yu Gothic', 'Meiryo', 'Malgun Gothic', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK', 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans KR', sans-serif;
   font-size: 0.74rem;
   color: color-mix(in srgb, var(--text-secondary) 85%, var(--text-muted));
 }
@@ -1105,7 +1106,7 @@ pre code {
 .message-feed .ws-dim { opacity: 0.7; }
 .message-feed .ws-thinking-body {
   margin-top: 0.2rem;
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: system-ui, -apple-system, 'Segoe UI', 'Yu Gothic UI', 'Yu Gothic', 'Meiryo', 'Malgun Gothic', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK', 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans KR', sans-serif;
   font-size: 0.74rem;
   padding-left: 0.55rem;
   border-left: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
@@ -1495,7 +1496,7 @@ pre code {
   border-bottom: 1px solid var(--border);
   font-size: 0.68rem;
   color: var(--text-muted);
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-family: ui-sans-serif, system-ui, 'Segoe UI', 'Yu Gothic UI', 'Malgun Gothic', 'Microsoft YaHei', 'Noto Sans CJK', 'Noto Sans JP', 'Noto Sans KR', sans-serif;
   text-transform: lowercase;
   letter-spacing: 0.02em;
 }
@@ -2172,6 +2173,11 @@ body.is-rail-resizing [data-browser-embed-host] {
   cursor: pointer;
   border: 1px solid transparent;
   transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease, transform 0.1s ease;
+  white-space: normal;
+  text-align: center;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  max-width: 100%;
 }
 .ui-btn:disabled {
   opacity: 0.55;
@@ -2743,6 +2749,9 @@ body.is-rail-resizing [data-browser-embed-host] {
   color: var(--text-secondary);
   font-size: 0.8rem;
   cursor: pointer;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
 }
 .settings-categories button:nth-last-child(-n + 2) {
   grid-column: span 3;
