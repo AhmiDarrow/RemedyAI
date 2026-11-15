@@ -80,9 +80,14 @@ jobs:
           WAYLAND_DISPLAY: ""
         run: uv run pytest -q --tb=short
 
-      - name: Build Python distribution
+      # pip installs serve the browser UI from the wheel; never ship one without it.
+      - name: Build Python distribution (with WebUI)
         if: matrix.python-version == '3.12'
-        run: uv build
+        run: |
+          set -euo pipefail
+          uv run python scripts/stage_wheel_webui.py --build
+          uv build
+          uv run python scripts/check_wheel.py dist/*.whl
 
   # Windows-first product: path/shell/secret-store regressions.
   test-windows:

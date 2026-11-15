@@ -197,3 +197,4 @@ Thumbs.db
 native/zig/.zig-cache/
 native/zig/zig-out/
 native/benchmarks/latest*.txt
+src/remedy/webui/dist/
