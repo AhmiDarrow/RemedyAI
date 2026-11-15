@@ -15,6 +15,7 @@ import {
   todosHaveOpen,
   type BuildTodo,
 } from '../components/BuildTodos'
+import { narrationAtBreak } from '../utils/liveSegments'
 import {
   appendJobThinking,
   appendJobToken,
@@ -991,14 +992,18 @@ export function useMessages(sessionId: string | null) {
           const prevSteps = paint?.processSteps?.length
             ? paint.processSteps
             : processStepsRef.current
+          // Text since the previous tool call is narration about this step,
+          // not the reply: cut it here and hang it on the step.
+          const prevBreaks = [...(paint?.textBreaks || [])]
+          const breaks = markJobTextBreak(targetId)
+          const narration = narrationAtBreak(paint?.partialText || '', prevBreaks, breaks)
           const { steps, tools } = applyLiveToolCall(
             prevSteps,
             paint?.activeTools || [],
-            { name, args, callId, requestId: getJobRequestId(targetId) },
+            { name, args, callId, requestId: getJobRequestId(targetId), narration },
           )
           setJobActiveTools(targetId, tools)
           markLiveTurn(targetId, 'running')
-          const breaks = markJobTextBreak(targetId)
           if (isFocusedTurn()) {
             setActiveTools(tools)
             setTextBreaks(breaks)

@@ -198,3 +198,20 @@ describe('turn identity on live steps', () => {
     expect(out.steps[0]?.callId).toBe('c9')
   })
 })
+
+describe('step narration', () => {
+  it('a live call carries the narration written before it', () => {
+    const { steps } = applyLiveToolCall([], [], { name: 'bash', callId: 'c1', narration: '  Reaching the folder.  ' }, 1)
+    expect(steps[0]!.narration).toBe('Reaching the folder.')
+    const quiet = applyLiveToolCall(steps, [], { name: 'bash', callId: 'c2', narration: '' }, 2)
+    expect(quiet.steps[1]!.narration).toBeUndefined()
+  })
+
+  it('saved calls bring their narration back onto the steps', () => {
+    const steps = stepsFromMessageTools(
+      [{ name: 'bash', id: 'c1', narration: 'Reaching the folder.' }, { name: 'bash', id: 'c2' }],
+      [],
+    )
+    expect(steps.map((x) => x.narration)).toEqual(['Reaching the folder.', undefined])
+  })
+})

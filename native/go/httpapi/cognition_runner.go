@@ -916,8 +916,8 @@ type emittingModel struct {
 	// guards against a late event from a drained round.
 	mu           sync.Mutex
 	round        int
-	textRound    int  // round that last emitted text (0 = none yet)
-	prevNewlines int  // trailing newlines of emitted text (capped at 2)
+	textRound    int // round that last emitted text (0 = none yet)
+	prevNewlines int // trailing newlines of emitted text (capped at 2)
 }
 
 // roundSeparator returns what must precede text that opens a new round so it
@@ -982,9 +982,6 @@ func (m *emittingModel) Stream(ctx context.Context, turn cognition.Turn) (<-chan
 	if err != nil {
 		return nil, err
 	}
-	m.mu.Lock()
-	m.round++
-	m.mu.Unlock()
 	m.mu.Lock()
 	m.round++
 	m.mu.Unlock()
