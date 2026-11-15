@@ -198,6 +198,15 @@ def _cmd_serve(args) -> None:
         if worker_py:
             child_env["REMEDY_PYTHON"] = worker_py
 
+    # pip installs carry the browser UI inside the wheel. remedy-runtime only
+    # uses it when no explicit REMEDY_WEBUI_DIR or live desktop/dist exists.
+    if not str(child_env.get("REMEDY_BUNDLED_WEBUI_DIR", "")).strip():
+        from remedy.webui import bundled_webui_dir
+
+        bundled = bundled_webui_dir()
+        if bundled is not None:
+            child_env["REMEDY_BUNDLED_WEBUI_DIR"] = str(bundled)
+
     runtime_cmd = resolve_remedy_runtime_command()
     core_lib = None
     if not runtime_cmd:

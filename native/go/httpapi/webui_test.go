@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"io"
 	"net/http"
 	"os"
@@ -130,5 +132,101 @@ func TestWebUIMissingHelperPage(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "WebUI assets not bundled") {
 		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestFindWebUIDirBundledFallback(t *testing.T) {
+	bundled := t.TempDir()
+	writeTestWebUI(t, bundled)
+	t.Setenv("REMEDY_WEBUI_DIR", "")
+	t.Setenv("REMEDY_DEV_ROOT", "")
+	t.Setenv("REMEDY_BUNDLED_WEBUI_DIR", bundled)
+	// Run from an empty folder so no desktop/dist next to cwd wins.
+	t.Chdir(t.TempDir())
+	got := FindWebUIDir()
+	abs, _ := filepath.Abs(bundled)
+	if got == "" {
+		t.Skip("a desktop/dist next to the test binary was found first")
+	}
+	if filepath.Clean(got) != filepath.Clean(abs) {
+		// Only acceptable when a live build next to the executable exists.
+		if !strings.HasSuffix(filepath.Clean(got), filepath.Join("desktop", "dist")) {
+			t.Fatalf("FindWebUIDir = %q, want bundled %q", got, abs)
+		}
+	}
+}
+
+func TestFindWebUIDirExplicitBeatsBundled(t *testing.T) {
+	explicit := t.TempDir()
+	bundled := t.TempDir()
+	writeTestWebUI(t, explicit)
+	writeTestWebUI(t, bundled)
+	t.Setenv("REMEDY_WEBUI_DIR", explicit)
+	t.Setenv("REMEDY_BUNDLED_WEBUI_DIR", bundled)
+	got := FindWebUIDir()
+	abs, _ := filepath.Abs(explicit)
+	if filepath.Clean(got) != filepath.Clean(abs) {
+		t.Fatalf("FindWebUIDir = %q, want explicit %q", got, abs)
+	}
+}
+
+func TestWebUICSPHashesInlineScriptsOnly(t *testing.T) {
+	inline := "(function(){document.documentElement.dataset.x='1'})();"
+	html := []byte("<html><head><script>" + inline + "</script>" +
+		`<script type="module" src="./assets/index.js"></script></head></html>`)
+	sum := sha256.Sum256([]byte(inline))
+	want := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+	csp := webUICSP(html)
+	if !strings.Contains(csp, "script-src 'self' "+want+";") {
+		t.Fatalf("csp missing inline hash: %q", csp)
+	}
+	for _, bad := range []string{"'unsafe-inline' ;", "script-src 'self' 'unsafe-inline'", "'unsafe-eval'"} {
+		if strings.Contains(csp, bad) {
+			t.Fatalf("csp must not contain %q: %q", bad, csp)
+		}
+	}
+	for _, need := range []string{"frame-ancestors 'none'", "object-src 'none'", "base-uri 'self'"} {
+		if !strings.Contains(csp, need) {
+			t.Fatalf("csp missing %q: %q", need, csp)
+		}
+	}
+}
+
+func TestWebUIResponsesCarrySecurityHeaders(t *testing.T) {
+	dir := t.TempDir()
+	writeTestWebUI(t, dir)
+	inline := "window.__boot=1;"
+	if err := os.WriteFile(filepath.Join(dir, "index.html"),
+		[]byte("<!doctype html><title>Remedy</title><script>"+inline+"</script>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base, shutdown := startTestServer(t, Config{
+		Token:    "test-token-not-a-secret-16",
+		Version:  "0.50.2",
+		WebUIDir: dir,
+	})
+	defer shutdown()
+	client := &http.Client{Timeout: 3 * time.Second}
+	sum := sha256.Sum256([]byte(inline))
+	hash := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+	for _, path := range []string{"/", "/grove/chat", "/assets/app.js", "/favicon.ico"} {
+		resp, err := client.Get(base + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		csp := resp.Header.Get("Content-Security-Policy")
+		if !strings.Contains(csp, "frame-ancestors 'none'") {
+			t.Fatalf("%s: CSP = %q", path, csp)
+		}
+		if resp.Header.Get("Referrer-Policy") != "no-referrer" ||
+			resp.Header.Get("X-Content-Type-Options") != "nosniff" ||
+			resp.Header.Get("X-Frame-Options") != "DENY" {
+			t.Fatalf("%s: missing hardening headers: %v", path, resp.Header)
+		}
+		if (path == "/" || path == "/grove/chat") && !strings.Contains(csp, hash) {
+			t.Fatalf("%s: CSP lacks inline boot script hash: %q", path, csp)
+		}
 	}
 }

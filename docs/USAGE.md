@@ -584,7 +584,15 @@ Looks for `remedy-runtime` on `REMEDY_NATIVE_RUNTIME_BIN` / `REMEDY_RUNTIME`,
 PATH, `desktop/bin`, then a verified cache under `~/.remedy/runtime/`. If
 none is present, first serve downloads the prebuilt for this OS from GitHub
 Releases and checksum-verifies it. If no asset exists, it prints build
-instructions (`go build` / `zig build` into `desktop/bin`). After starting, access:
+instructions (`go build` / `zig build` into `desktop/bin`).
+
+The browser UI ships inside the PyPI wheel (0.69.2+, `remedy/webui/dist`), so a
+pip install serves the full app at `/`. `REMEDY_WEBUI_DIR` or a live
+`desktop/dist` checkout takes precedence over the bundled copy. The served UI
+carries a Content-Security-Policy (inline scripts allowed by hash only, no
+framing) and the same token handout as Desktop's browser mode: the same OS user
+is let in directly, and `remedy serve` / `remedy open` print a one-time link
+where the OS cannot tell who is asking. After starting, access:
 - **Web UI / Dashboard**: http://127.0.0.1:7400/
 - **API**: http://127.0.0.1:7400/api/ping  (and the rest of the local API)
 
