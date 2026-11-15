@@ -224,6 +224,8 @@ func TestForwardedHeadersAreRefusedOffTheWebhookPath(t *testing.T) {
 func TestTokenBootstrapRefusedWhileTunnelRunning(t *testing.T) {
 	t.Setenv("REMEDY_HTTP_BOOTSTRAP", "1")
 	s, _ := newConnectTestServer(t)
+	// In-process recorder: no socket to look up, so stand in for the owner.
+	stubPeer(t, true, nil)
 
 	code, _, text := doConnectJSON(t, s, http.MethodGet, "/api/auth/local-bootstrap", nil, connectAuthHeader())
 	if code != http.StatusOK {

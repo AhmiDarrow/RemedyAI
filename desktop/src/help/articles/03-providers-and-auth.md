@@ -143,7 +143,7 @@ See also Sleev’s [Harness Setup](https://sleev.ai/docs/harness-setup) and [Qui
 The desktop UI authenticates to `http://127.0.0.1:7400` with a **Bearer** token:
 
 - File: `~/.remedy/auth/local_api_token`  
-- Bootstrap: `GET /api/auth/local-bootstrap` (loopback only)  
+- Bootstrap: `GET /api/auth/local-bootstrap` (loopback only; handed only to a program of the same OS user, or to a browser with a one-time link from `remedy serve` / `remedy open`)  
 - Disable only for advanced debugging: `REMEDY_API_AUTH=0`  
 
 If you see **Unauthorized**, Retry / re-open the app so the token reloads (common after wipe).

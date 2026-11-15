@@ -88,7 +88,7 @@ API keys and OAuth tokens never leave as model input either way. Env override: `
 - Token file is ACL-hardened (no “Everyone” write).  
 - Desktop prefers OS/IPC token; browser WebUI uses loopback bootstrap only.  
 - **Browser token bootstrap** (Settings → Security & power, or `http_bootstrap` / `REMEDY_HTTP_BOOTSTRAP`):  
-  - **On** (default) — browser Web UI can obtain the loopback token (full Web UI power).  
+  - **On** (default) — browser Web UI can obtain the loopback token (full Web UI power). It is handed only to a program running as the same OS user (checked on Linux and Windows), or to a browser opened with the one-time link that `remedy serve` prints (`remedy open` makes a new one; required on macOS). Other accounts on a shared computer are refused.  
   - **Off** — desktop IPC only (safer against lesser local processes; desktop app power unchanged).  
 - CORS `*` is **refused** while auth is on.  
 - The local API (`remedy serve` / `:7400`) is loopback only. Non-loopback and wildcard binds are refused; `REMEDY_ALLOW_INSECURE_BIND` does not open `:7400`.  

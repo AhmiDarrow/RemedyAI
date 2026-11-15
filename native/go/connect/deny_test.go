@@ -68,6 +68,8 @@ func TestDenyLocalBootstrapFamilyIsHard403(t *testing.T) {
 		{"GET", "/api/auth/local-bootstrap/", ""},
 		{"GET", "/api/auth/local-bootstrap", "x=1"},
 		{"GET", "/api/auth/local-bootstrap?token=1", ""},
+		{"POST", "/api/auth/bootstrap-link", ""},
+		{"POST", "/api/auth/bootstrap-link/", ""},
 	}
 	for _, tc := range cases {
 		reason := ConnectForbidden(tc.method, tc.path, tc.query, def)

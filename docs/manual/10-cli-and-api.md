@@ -25,6 +25,7 @@ remedy config init
 remedy config show
 remedy auth login xai
 remedy serve --host 127.0.0.1 --port 7400
+remedy open                    # WebUI of a running serve, with a one-time link
 remedy skill list              # hides learned probation; --all / --learned
 remedy memory search "query"
 remedy mcp serve          # MCP stdio host for external MCP clients
@@ -64,7 +65,8 @@ Tools: `remedy_skill_list`, `remedy_skill_search`, `remedy_skill_get`, `remedy_s
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/status` | Health |
-| GET | `/api/auth/local-bootstrap` | Loopback token bootstrap |
+| GET | `/api/auth/local-bootstrap` | Loopback token bootstrap (same OS user, or `?nonce=` from a one-time link) |
+| POST | `/api/auth/bootstrap-link` | Mint a one-time WebUI link (needs the token) |
 | GET/PUT | `/api/settings` | Settings |
 | GET/POST | `/api/sessions` | Sessions |
 | POST | `/api/sessions/{id}/messages/stream` | SSE chat |
