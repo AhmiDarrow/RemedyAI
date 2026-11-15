@@ -1,9 +1,12 @@
 package httpapi
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -28,6 +31,7 @@ const webUIMissingHTML = `<!DOCTYPE html>
   <div class="card">
     <h1>WebUI assets not bundled</h1>
     <p>The local API is running, but the chat WebUI files were not found next to the server.</p>
+    <p>pip install: upgrade with <code>pip install --upgrade remedy-ai</code> (wheels include the UI from 0.69.2).</p>
     <p>Use the desktop app, or build with <code>cd desktop &amp;&amp; npm run build</code>.</p>
     <p>Or set <code>REMEDY_WEBUI_DIR</code> to a folder that contains <code>index.html</code>.</p>
   </div>
@@ -40,8 +44,61 @@ var webUIHTMLHeaders = map[string]string{
 	"Pragma":        "no-cache",
 }
 
+// webUICSPBase mirrors the desktop CSP in tauri.conf.json for the browser
+// mode, minus the Tauri-only ipc:/asset: sources. Inline scripts are allowed
+// only by sha256 hash (see webUICSP); frame-ancestors blocks framing.
+const webUICSPBase = "default-src 'self'; " +
+	"style-src 'self' 'unsafe-inline'; " +
+	"connect-src 'self' https: http:; " +
+	"img-src 'self' data: blob: https: http:; " +
+	"font-src 'self' data:; " +
+	"media-src 'self' blob: data:; " +
+	"worker-src 'self' blob:; " +
+	"frame-src https: http: data: blob:; " +
+	"child-src https: http: data: blob:; " +
+	"object-src 'none'; " +
+	"base-uri 'self'; " +
+	"form-action 'self'; " +
+	"frame-ancestors 'none'"
+
+// inlineScriptRE matches <script> blocks without a src attribute.
+var inlineScriptRE = regexp.MustCompile(`(?is)<script\b([^>]*)>(.*?)</script>`)
+var scriptSrcAttrRE = regexp.MustCompile(`(?i)\bsrc\s*=`)
+
+// webUICSP returns the CSP for a WebUI document. Inline <script> blocks in
+// html are allowed by their sha256 hash only, never 'unsafe-inline'.
+func webUICSP(html []byte) string {
+	sources := []string{"'self'"}
+	for _, m := range inlineScriptRE.FindAllSubmatch(html, -1) {
+		if scriptSrcAttrRE.Match(m[1]) {
+			continue
+		}
+		sum := sha256.Sum256(m[2])
+		sources = append(sources, "'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'")
+	}
+	return "script-src " + strings.Join(sources, " ") + "; " + webUICSPBase
+}
+
+// setWebUISecurityHeaders applies the browser-mode hardening headers.
+func setWebUISecurityHeaders(h http.Header, csp string) {
+	h.Set("Content-Security-Policy", csp)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("X-Frame-Options", "DENY")
+	// A one-time ?bootstrap= link must never leak through a Referer header.
+	h.Set("Referrer-Policy", "no-referrer")
+}
+
+func withWebUISecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setWebUISecurityHeaders(w.Header(), webUICSP(nil))
+		next.ServeHTTP(w, r)
+	})
+}
+
 // FindWebUIDir locates built desktop SPA assets (Python find_webui_dir parity).
-// Prefer REMEDY_WEBUI_DIR, then live desktop/dist, then staged webui/ui next to the binary.
+// Prefer REMEDY_WEBUI_DIR, then live desktop/dist, then staged webui/ui next to
+// the binary, then the copy bundled in the pip wheel (REMEDY_BUNDLED_WEBUI_DIR,
+// set by `remedy serve`).
 func FindWebUIDir() string {
 	candidates := make([]string, 0, 24)
 	if env := strings.TrimSpace(os.Getenv("REMEDY_WEBUI_DIR")); env != "" {
@@ -71,6 +128,9 @@ func FindWebUIDir() string {
 			filepath.Join(filepath.Dir(exeDir), "webui"),
 			filepath.Join(filepath.Dir(exeDir), "resources", "webui"),
 		)
+	}
+	if bundled := strings.TrimSpace(os.Getenv("REMEDY_BUNDLED_WEBUI_DIR")); bundled != "" {
+		candidates = append(candidates, expandUser(bundled))
 	}
 	if cwd, err := os.Getwd(); err == nil {
 		for _, p := range parentsOf(cwd) {
@@ -165,7 +225,7 @@ func (s *Server) mountWebUI() {
 	assets := filepath.Join(webDir, "assets")
 	if st, err := os.Stat(assets); err == nil && st.IsDir() {
 		fileServer := http.FileServer(http.Dir(assets))
-		s.mux.Handle("GET /assets/", http.StripPrefix("/assets/", fileServer))
+		s.mux.Handle("GET /assets/", withWebUISecurityHeaders(http.StripPrefix("/assets/", fileServer)))
 	}
 	// GET only — separate HEAD wildcards conflict with more-specific GET patterns on ServeMux.
 	s.mux.HandleFunc("GET /{$}", s.handleWebUIIndex)
@@ -173,6 +233,7 @@ func (s *Server) mountWebUI() {
 }
 
 func (s *Server) handleWebUIMissing(w http.ResponseWriter, _ *http.Request) {
+	setWebUISecurityHeaders(w.Header(), webUICSP(nil))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	for k, v := range webUIHTMLHeaders {
 		w.Header().Set(k, v)
@@ -186,6 +247,9 @@ func (s *Server) handleWebUIIndex(w http.ResponseWriter, r *http.Request) {
 	for k, v := range webUIHTMLHeaders {
 		w.Header().Set(k, v)
 	}
+	// Hash the file being served so a rebuilt desktop/dist stays allowed.
+	html, _ := os.ReadFile(index)
+	setWebUISecurityHeaders(w.Header(), webUICSP(html))
 	http.ServeFile(w, r, index)
 }
 
@@ -204,6 +268,7 @@ func (s *Server) handleWebUISPA(w http.ResponseWriter, r *http.Request) {
 		root, _ := filepath.Abs(s.webUIDir)
 		if root != "" && strings.HasPrefix(abs, root+string(os.PathSeparator)) {
 			if st, err := os.Stat(abs); err == nil && !st.IsDir() {
+				setWebUISecurityHeaders(w.Header(), webUICSP(nil))
 				http.ServeFile(w, r, abs)
 				return
 			}
