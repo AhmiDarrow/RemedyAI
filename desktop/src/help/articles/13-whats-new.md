@@ -34,8 +34,11 @@ Earlier notes follow on this page, newest first.
 - **Reactions.** React to Remedy's replies with 👍 👎 ❤️ or 💔 from the
   message actions, or long-press on a phone. Tap the same one again to remove
   it. A reaction never starts a new turn: 👍 means go ahead, 👎 means try
-  again, and if Remedy is waiting on a yes or no for its latest reply, 👍 or
-  👎 answers it. Remedy may react to your messages too, now and then.
+  again, and if Remedy is waiting on a yes or no for the reply it is writing
+  right now, 👍 or 👎 answers it. A reaction on an earlier reply never answers
+  a new question, and payments or other owner checkpoints always need the
+  approval banner (👎 can still decline one). Remedy may react to your
+  messages too, now and then.
 - **A calmer live turn.** Background work sits in one quiet Working strip
   above the reply, and the reply is the only bright bubble.
 - **Smarter scrolling.** The feed follows new output until you scroll up,
