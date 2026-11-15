@@ -41,3 +41,16 @@ describe('linkifyBareImagePaths', () => {
     expect(out).not.toMatch(/`C:\\Users/)
   })
 })
+
+describe('remote image URLs are left intact', () => {
+  it.each([
+    '![c](https://cdn.example/x.png)',
+    '![c](https://a.example/i/x.jpg?w=1)',
+    'see https://cdn.example/x.png here',
+  ])('%s', (s) => {
+    expect(linkifyBareImagePaths(s)).toBe(s)
+  })
+  it('still promotes a bare drive path', () => {
+    expect(linkifyBareImagePaths('saved C:/out/a.png')).toBe('saved ![a.png](C:/out/a.png)')
+  })
+})
