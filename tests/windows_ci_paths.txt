@@ -47,6 +47,7 @@ tests/test_web_search_host.py
 # --- FFI / ABI / native host ---
 tests/test_native_bootstrap.py
 tests/test_native_pins.py
+tests/test_wheel_webui.py
 tests/test_native_runtime.py
 tests/test_host_session_zig.py
 tests/test_computer_native.py

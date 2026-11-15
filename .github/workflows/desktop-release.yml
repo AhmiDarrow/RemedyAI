@@ -908,6 +908,14 @@ jobs:
           echo "Published native CLI assets:"
           cat dist-native/remedy-native-SHA256SUMS.txt
 
+      # The PyPI wheel job pins these exact hashes (dry runs included).
+      - name: Upload runtime checksums for the wheel build
+        uses: actions/upload-artifact@v4
+        with:
+          name: remedy-native-sha256sums
+          path: dist-native/remedy-native-SHA256SUMS.txt
+          retention-days: 7
+
       - name: Get installer filename and signature
         id: installer
         shell: bash
@@ -1241,3 +1249,66 @@ jobs:
           cp verify-assets/remedy-runtime-aarch64-pc-windows-msvc.exe "${RUNNER_TEMP}/winarm-smoke/remedy-runtime.exe"
           cp verify-assets/remedy_core-aarch64-pc-windows-msvc.dll "${RUNNER_TEMP}/winarm-smoke/remedy_core.dll"
           "$py" scripts/smoke_windows_arm_runtime.py "${RUNNER_TEMP}/winarm-smoke"
+
+  # The PyPI wheel, built from the same commit: the desktop frontend is built
+  # and staged into remedy/webui/dist (pip installs serve the browser UI), and
+  # the runtime hashes come from the release job's checksum file. Dry runs
+  # build and check it too. Publishing runs also re-verify the published
+  # runtime-v<ver> assets. Upload to PyPI from the remedy-pypi-dist artifact.
+  pypi-wheel:
+    name: PyPI wheel (WebUI + pinned runtime hashes)
+    needs: [verify, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download runtime checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: remedy-native-sha256sums
+          path: sums/
+
+      - name: Build and stage the WebUI
+        run: uv run python scripts/stage_wheel_webui.py --build
+
+      - name: Pin runtime hashes
+        run: uv run python scripts/pin_native_hashes.py --sums sums/remedy-native-SHA256SUMS.txt
+
+      - name: Re-verify published runtime assets against the pins
+        if: ${{ needs.verify.outputs.dry_run != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp src/remedy/runtime/native_pins.json /tmp/pins-from-build.json
+          uv run python scripts/pin_native_hashes.py --from-release --verify-assets
+          # The published checksum file must match the one this run built.
+          cmp /tmp/pins-from-build.json src/remedy/runtime/native_pins.json
+
+      - name: Build and check the wheel
+        run: |
+          set -euo pipefail
+          uv run python scripts/pin_native_hashes.py --check
+          rm -rf dist
+          uv build
+          uv run python scripts/check_wheel.py --release dist/*.whl
+          ls -l dist
+
+      - name: Upload PyPI distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: remedy-pypi-dist
+          path: dist/*
+          retention-days: 14
