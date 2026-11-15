@@ -120,9 +120,20 @@ export type ProcessStep = {
    * behind the trail's preview.
    */
   requestId?: string
+  /**
+   * What the model said to the reader just before this call ("I'll reach the
+   * folder through the shell"). Background narration, never the reply.
+   */
+  narration?: string
 }
 
-export type HistoryToolCall = { name: string; args?: Record<string, unknown>; id?: string }
+export type HistoryToolCall = {
+  name: string
+  args?: Record<string, unknown>
+  id?: string
+  /** Narration the model wrote right before this call (newer saves only). */
+  narration?: string
+}
 export type HistoryToolResult = { name: string; output?: string; error?: string; id?: string }
 
 /**
@@ -200,6 +211,7 @@ export function stepsFromMessageTools(
       error: res?.error,
       callId: tc.id,
       requestId,
+      narration: tc.narration?.trim() || undefined,
     })
   })
   if (!toolCalls.length && toolResults.length) {
@@ -233,6 +245,8 @@ export type LiveToolCall = {
   callId?: string
   /** Turn id from `event: start` — lets the trail fetch this call's evidence. */
   requestId?: string
+  /** Text the model streamed since the previous tool call (background narration). */
+  narration?: string
 }
 
 export type LiveToolResult = {
@@ -276,6 +290,7 @@ export function applyLiveToolCall(
   now = Date.now(),
 ): { steps: ProcessStep[]; tools: LiveToolChip[] } {
   const { name, args, callId, requestId } = call
+  const narration = call.narration?.trim() || undefined
   if (callId && steps.some((s) => s.callId === callId || s.id === callId)) {
     return { steps, tools }
   }
@@ -289,6 +304,7 @@ export function applyLiveToolCall(
     requestId: requestId || undefined,
     argsText:
       args && Object.keys(args).length ? JSON.stringify(args, null, 2) : undefined,
+    ...(narration ? { narration } : {}),
   }
   return {
     steps: [...steps, step],

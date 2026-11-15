@@ -16,7 +16,7 @@ import type { ChatMessage } from '../types'
 import { sanitizeAssistantText } from '../utils/sanitizeChat'
 import { dayKey, dayLabel } from '../utils/relativeTime'
 import { BuildTodos, todosHaveOpen, type BuildTodo } from './BuildTodos'
-import { TaskProgress, type TaskProgressInfo } from './TaskProgress'
+import type { TaskProgressInfo } from './TaskProgress'
 import { ImageLightbox } from './ImageLightbox'
 import { ChatImage } from './ChatImage'
 import { linkifyBareImagePaths } from '../utils/linkifyImages'
@@ -31,11 +31,12 @@ import {
   IconEdit,
   IconRefresh,
 } from './icons'
-import { ProcessTrace } from './ProcessTrace'
 import { LiveTurnView } from './LiveTurnView'
+import { WorkStrip } from './WorkStrip'
+import { FeedScrollContext } from './feedScroll'
+import { splitSavedReply } from '../utils/liveSegments'
 import {
   isFullProcessMode,
-  processDefaultCollapsed,
   showsProcessTrace,
   stepsFromMessageTools,
   type ProcessStep,
@@ -299,58 +300,6 @@ function CodeBlock({
   )
 }
 
-function ThinkingPanel({
-  text,
-  openDefault = false,
-}: {
-  text: string
-  openDefault?: boolean
-}) {
-  const [open, setOpen] = useState(openDefault)
-  const bodyRef = useRef<HTMLDivElement | null>(null)
-  // Keep expanded while streaming or when Full mode opens by default.
-  useEffect(() => {
-    if (openDefault) setOpen(true)
-  }, [openDefault])
-  // Stick to bottom of thinking while it grows (unless user scrolled up).
-  // Never force-scroll when openDefault alone — that trapped the panel during streams.
-  useEffect(() => {
-    const el = bodyRef.current
-    if (!el || !open) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    if (nearBottom) {
-      el.scrollTop = el.scrollHeight
-    }
-  }, [text, open])
-  if (!text.trim()) return null
-  // Flat strip with left accent — same look at every process mode.
-  return (
-    <div
-      className={`thinking-panel mb-2 w-full min-w-0 ${open ? 'thinking-panel-open' : ''}`}
-    >
-      <button
-        type="button"
-        className="thinking-panel-toggle w-full flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-left"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-      >
-        <span>
-          Thinking
-          {text.length > 80 ? ` · ${text.length.toLocaleString()} chars` : ''}
-        </span>
-        <span aria-hidden className="thinking-chevron">
-          {open ? '▾' : '▸'}
-        </span>
-      </button>
-      {open && (
-        <div ref={bodyRef} className="thinking-panel-body">
-          {text}
-        </div>
-      )}
-    </div>
-  )
-}
-
 const MessageBubble = memo(function MessageBubble({
   msg,
   partial,
@@ -382,13 +331,22 @@ const MessageBubble = memo(function MessageBubble({
 }) {
   const isUser = msg.role === 'user'
   const isSystem = msg.role === 'system'
-  const rawText = msg.content + (partial || '')
+  const isAssistant = !isUser && !isSystem
+  // Saved turns: narration recorded on tool calls belongs to the Working
+  // strip, not the bubble. Old saves without narration come back unchanged.
+  const savedReply = useMemo(
+    () =>
+      isAssistant && !isStreamingPartial
+        ? splitSavedReply(msg.content, msg.tool_calls || []).reply
+        : msg.content,
+    [isAssistant, isStreamingPartial, msg.content, msg.tool_calls],
+  )
+  const rawText = savedReply + (partial || '')
   const text = useMemo(
     () => (isUser || isSystem ? rawText : sanitizeAssistantText(rawText)),
     [rawText, isUser, isSystem],
   )
   const thinkingText = (msg.thinking || '') + (partialThinking || '')
-  const openThinkingByDefault = isFullProcessMode(toolProcessMode)
   const showEdit =
     msg.role === 'user' && !msg.reverted && !!onEditUserMessage && !streaming
   const timeLabel = formatTime(msg.created_at)
@@ -481,12 +439,20 @@ const MessageBubble = memo(function MessageBubble({
     </div>
   )
 
-  const histSteps =
-    !isUser && !isSystem && !isStreamingPartial && showsProcessTrace(toolProcessMode)
-      ? stepsFromMessageTools(msg.tool_calls || [], msg.tool_results || [], {
-          requestId: msg.request_id,
-        })
-      : []
+  const histSteps = useMemo(
+    () =>
+      isAssistant && !isStreamingPartial && showsProcessTrace(toolProcessMode)
+        ? stepsFromMessageTools(msg.tool_calls || [], msg.tool_results || [], {
+            requestId: msg.request_id,
+          })
+        : [],
+    [isAssistant, isStreamingPartial, toolProcessMode, msg.tool_calls, msg.tool_results, msg.request_id],
+  )
+  const savedThinking = isAssistant && !isStreamingPartial ? (msg.thinking || '').trim() : ''
+  const showStrip = histSteps.length > 0 || savedThinking.length > 0
+  // A tools-only turn has no reply; the strip says everything.
+  const placeholderOnly = /^\*\(Used tools — see process\.\)\*$/.test(text.trim())
+  const showBubble = !(showStrip && (!text.trim() || placeholderOnly))
 
   return (
     <div
@@ -495,9 +461,21 @@ const MessageBubble = memo(function MessageBubble({
       }`}
       style={{ paddingTop: 'var(--chat-pad-y)', paddingBottom: 'var(--chat-pad-y)' }}
     >
+      {showStrip && (
+        <div className="work-strip-slot">
+          <WorkStrip
+            steps={histSteps}
+            thinking={savedThinking}
+            mode={toolProcessMode}
+            defaultOpen={isFullProcessMode(toolProcessMode)}
+            sessionId={sessionId}
+          />
+        </div>
+      )}
+      {showBubble && (
       <div
-        className={`chat-cluster relative flex items-end gap-1.5 ${
-          isUser ? 'flex-row-reverse' : 'flex-row'
+        className={`chat-cluster relative flex gap-1.5 ${
+          isUser ? 'flex-row-reverse items-end' : 'flex-row items-start'
         }`}
       >
         {!isSystem && avatar}
@@ -531,15 +509,6 @@ const MessageBubble = memo(function MessageBubble({
                 </div>
               )}
             </div>
-          )}
-
-          {!isUser && !isSystem && (
-            <ThinkingPanel
-              text={thinkingText}
-              openDefault={
-                Boolean(isStreamingPartial && partialThinking) || openThinkingByDefault
-              }
-            />
           )}
 
           <div
@@ -622,22 +591,6 @@ const MessageBubble = memo(function MessageBubble({
           )}
         </div>
       </div>
-      {/* Process under answer — same chrome at every Min/Med/Full depth */}
-      {histSteps.length > 0 && showsProcessTrace(toolProcessMode) && (
-        <div
-          className="process-under-answer w-full mt-1"
-          style={{
-            maxWidth: 'min(var(--chat-max-width), 100%)',
-            paddingLeft: 'calc(var(--chat-avatar) + 0.35rem)',
-          }}
-        >
-          <ProcessTrace
-            mode={toolProcessMode}
-            steps={histSteps}
-            defaultCollapsed={processDefaultCollapsed(toolProcessMode)}
-            sessionId={sessionId}
-          />
-        </div>
       )}
     </div>
   )
@@ -707,7 +660,9 @@ export function MessageFeed({
     setContent,
     showJump,
     jumpLatest,
+    anchorToggle,
   } = useStickToBottom({
+    endKeyJumps: true,
     enabled: messages.some((message) => !message.reverted) || streaming,
     followActive: streaming,
     alwaysOfferJump: messages.length > 2 || streaming,
@@ -726,6 +681,22 @@ export function MessageFeed({
   })
 
   const visible = useMemo(() => messages.filter((m) => !m.reverted), [messages])
+
+  // Stable so the memoized live turn does not re-render the reply per parent render.
+  const renderLiveReply = useCallback(
+    (msg: ChatMessage, reply: string) => (
+      <MessageBubble
+        msg={msg}
+        partial={reply}
+        partialThinking=""
+        toolProcessMode={toolProcessMode}
+        isStreamingPartial
+        onOpenImage={openLightbox}
+        partnerName={partnerName}
+      />
+    ),
+    [toolProcessMode, openLightbox, partnerName],
+  )
 
   // Unread delta for the jump pill: messages that landed since the user
   // scrolled away (+1 while a reply is still streaming in).
@@ -787,6 +758,7 @@ export function MessageFeed({
         overflowX: 'hidden',
       }}
     >
+      <FeedScrollContext.Provider value={anchorToggle}>
       <div ref={setContent} className="message-feed-content min-h-full flex flex-col">
       {planMode && (
         <div
@@ -883,7 +855,7 @@ export function MessageFeed({
         )
       })}
 
-      {/* Live turn: background work folds into "Working…"; the reply is its own bubble. */}
+      {/* Live turn: one quiet Working strip; the reply is its own bubble. */}
       {streaming && (
         <div className="live-stream-dock">
           <LiveTurnView
@@ -891,51 +863,11 @@ export function MessageFeed({
             textBreaks={textBreaks}
             partialThinking={partialThinking}
             processSteps={processSteps}
-            renderReply={(msg, reply) => (
-              <MessageBubble
-                msg={msg}
-                partial={reply}
-                partialThinking=""
-                toolProcessMode={toolProcessMode}
-                isStreamingPartial
-                onOpenImage={openLightbox}
-                partnerName={partnerName}
-              />
-            )}
-            activityExtras={
-              <div
-                className="overflow-y-auto"
-                data-live-work="activity"
-                style={{
-                  maxHeight:
-                    toolProcessMode === 'full'
-                      ? 'min(42vh, 26rem)'
-                      : toolProcessMode === 'medium'
-                        ? 'min(34vh, 20rem)'
-                        : 'min(26vh, 14rem)',
-                }}
-              >
-                <BuildTodos items={buildTodos} live />
-                {/*
-                  Progress bar always. Tool chips only if ProcessTrace is absent —
-                  otherwise every mode double-lists the same steps.
-                */}
-                <TaskProgress
-                  streaming={streaming}
-                  activeTools={activeTools}
-                  progress={taskProgress}
-                  showToolDetails={processSteps.length === 0}
-                />
-                {processSteps.length > 0 && (
-                  <ProcessTrace
-                    mode={toolProcessMode}
-                    steps={processSteps}
-                    live
-                    sessionId={sessionId}
-                  />
-                )}
-              </div>
-            }
+            renderReply={renderLiveReply}
+            progress={taskProgress}
+            mode={toolProcessMode}
+            sessionId={sessionId}
+            extras={buildTodos.length ? <BuildTodos items={buildTodos} live /> : undefined}
           />
         </div>
       )}
@@ -990,6 +922,7 @@ export function MessageFeed({
 
       <div aria-hidden className="h-px w-full" />
       </div>
+      </FeedScrollContext.Provider>
 
       {/* Sticky dock: the pill is a child of the scroller, so position:absolute
           would scroll away with the content — sticky keeps it on the floor. */}

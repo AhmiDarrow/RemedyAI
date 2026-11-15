@@ -937,87 +937,187 @@ pre code {
   border-bottom: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
   background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
-/* Live turn: the reply is a normal chat bubble; background work is a quiet,
-   collapsible "Working…" timeline above it. */
+/* Turn layout: background work is ONE quiet, monospace Working strip above
+   the reply; the reply is the only full-contrast element. */
 .message-feed .live-turn {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
-  margin-inline: 0.15rem;
+  gap: 0.15rem;
 }
-.message-feed .live-activity {
-  border-radius: 0.75rem;
-  border: 1px dashed color-mix(in srgb, var(--border) 85%, transparent);
-  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
-  color: var(--text-muted);
-  font-size: 0.78rem;
-}
-.message-feed .live-activity.is-open {
-  border-style: solid;
-  border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
-}
-.message-feed .live-activity-header {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
+.message-feed .work-strip-slot {
   width: 100%;
-  padding: 0.35rem 0.7rem;
+  max-width: min(var(--chat-max-width), 100%);
+  padding-left: calc(var(--chat-avatar) + 0.35rem);
+  margin-bottom: 0.2rem;
+}
+.message-feed .work-strip {
+  --ws-err: color-mix(in srgb, var(--error) 78%, var(--text-muted));
+  --ws-ok: color-mix(in srgb, var(--accent) 75%, var(--text-muted));
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+  border-left: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 0.1rem 0 0.1rem 0.6rem;
+  overflow-anchor: none;
+}
+.message-feed .work-strip button {
+  font: inherit;
+  color: inherit;
   background: none;
   border: 0;
-  color: inherit;
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   cursor: pointer;
   text-align: left;
 }
-.message-feed .live-activity-header:hover,
-.message-feed .live-activity-header:focus-visible {
-  color: var(--text-secondary, var(--text-primary));
+.message-feed .ws-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.1rem 0.3rem 0.1rem 0;
+  border-radius: 0.3rem;
+  max-width: 100%;
 }
-.message-feed .live-activity-title { flex: 1; }
-.message-feed .live-activity-chevron { opacity: 0.7; }
-.message-feed .live-activity-body {
+.message-feed .ws-head:hover,
+.message-feed .ws-head:focus-visible {
+  color: var(--text-secondary);
+}
+.message-feed .ws-head-icon { opacity: 0.7; }
+.message-feed .ws-title {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.message-feed .ws-meta-err { color: var(--ws-err); }
+.message-feed .ws-chevron { opacity: 0.55; margin-left: 0.15rem; }
+.message-feed .ws-progress {
+  height: 2px;
+  max-width: 22rem;
+  margin: 0.2rem 0 0.15rem;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+  overflow: hidden;
+}
+.message-feed .ws-progress > span {
+  display: block;
+  height: 100%;
+  background: color-mix(in srgb, var(--accent) 80%, var(--text-muted));
+  transition: width 0.3s ease-out;
+}
+.message-feed .ws-status {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+  white-space: nowrap;
+}
+.message-feed .ws-status-caret { opacity: 0.6; }
+.message-feed .ws-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.message-feed .ws-tool {
+  color: color-mix(in srgb, var(--accent) 55%, var(--text-secondary));
+  flex-shrink: 0;
+}
+.message-feed .ws-body {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  padding: 0 0.7rem 0.55rem;
+  gap: 0.35rem;
+  margin-top: 0.3rem;
 }
-.message-feed .live-activity-thinking {
-  white-space: pre-wrap;
-  font-style: italic;
-  max-height: 7.5rem;
+.message-feed .ws-timeline {
+  max-height: min(40vh, 22rem);
   overflow-y: auto;
-  padding-left: 0.55rem;
-  border-left: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  opacity: 0.85;
+  overscroll-behavior: contain;
+  padding-right: 0.25rem;
 }
-.message-feed .live-activity-timeline {
+.message-feed .ws-groups,
+.message-feed .ws-steps {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
 }
-.message-feed .live-activity-timeline li {
-  position: relative;
-  padding-left: 1rem;
-  line-height: 1.35;
+.message-feed .ws-group + .ws-group { margin-top: 0.4rem; }
+.message-feed .ws-narration {
+  margin: 0 0 0.1rem;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 0.74rem;
+  color: color-mix(in srgb, var(--text-secondary) 85%, var(--text-muted));
 }
-.message-feed .live-activity-timeline li::before {
-  content: '';
-  position: absolute;
-  left: 0.2rem;
-  top: 0.45em;
-  width: 0.35rem;
-  height: 0.35rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 55%, var(--text-muted));
+.message-feed .ws-steps {
+  border-left: 1px dashed color-mix(in srgb, var(--border) 90%, transparent);
+  margin-left: 0.2rem;
+  padding-left: 0.45rem;
 }
-.message-feed .live-reply {
-  border-radius: 0.95rem;
+.message-feed .ws-step-row {
+  display: grid;
+  grid-template-columns: 0.9rem 2.9rem minmax(0, 1fr);
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0 0.25rem;
+  border-radius: 0.25rem;
+}
+.message-feed .ws-step-row:hover,
+.message-feed .ws-step-row:focus-visible {
+  background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
+  color: var(--text-secondary);
+}
+.message-feed .ws-target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.message-feed .ws-step.is-done .ws-icon { color: var(--ws-ok); }
+.message-feed .ws-step.is-error .ws-icon,
+.message-feed .ws-step.is-error .ws-tool { color: var(--ws-err); }
+.message-feed .ws-step.is-running .ws-icon {
+  color: var(--text-secondary);
+  animation: remedy-busy-pulse 1.4s ease-in-out infinite;
+}
+.message-feed .ws-err {
+  padding-left: calc(0.9rem + 2.9rem + 0.95rem);
+  color: var(--ws-err);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.message-feed .ws-detail {
+  margin: 0.15rem 0 0.25rem 1.2rem;
+  padding: 0.35rem 0.5rem;
+  max-height: 12rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--bg-primary) 70%, transparent);
+  font-size: 0.66rem;
+}
+.message-feed .ws-thinking-toggle,
+.message-feed .ws-raw,
+.message-feed .ws-more button {
+  padding: 0;
+}
+.message-feed .ws-thinking-toggle:hover,
+.message-feed .ws-raw:hover,
+.message-feed .ws-more button:hover {
+  color: var(--text-secondary);
+}
+.message-feed .ws-dim { opacity: 0.7; }
+.message-feed .ws-thinking-body {
+  margin-top: 0.2rem;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 0.74rem;
+  padding-left: 0.55rem;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  white-space: pre-wrap;
+  font-style: italic;
+  max-height: 10rem;
+  overflow-y: auto;
+}
+.message-feed .ws-raw { align-self: flex-start; opacity: 0.8; }
+@media (prefers-reduced-motion: reduce) {
+  .message-feed .ws-step.is-running .ws-icon { animation: none; }
+  .message-feed .ws-progress > span { transition: none; }
 }
 
 .message-feed .live-stream-dot,
