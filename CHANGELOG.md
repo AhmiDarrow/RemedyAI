@@ -4,9 +4,6 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
-### Security
-- Chat images can no longer leak Windows credentials. A reply (or prompt-injected tool output) embedding a UNC image such as `\\host\share\x.png` made `/api/media` stat the share before its root check, which on Windows opens an SMB session and sends the user's NTLM hash to the share's owner. UNC and device-namespace paths are now refused before any filesystem access, roots are checked before `stat`, and the desktop drops network paths from chat markdown. `/api/media` also resolves symlinks and re-checks the real target, so an image-named link in a project cannot serve the auth store or files outside the roots. Regression tests: `media_unc_test.go`, `chatMarkdownUrl.test.ts`, `chatMedia.test.ts`.
-
 ## [0.69.1] - 2026-11-14
 
 ### Added
