@@ -6,6 +6,7 @@ import {
   streamMessage,
   executeCommand,
   editFromMessageApi,
+  setMessageReaction,
   type StreamProgress,
   type TurnStreamHandlers,
   type UsagePayload,
@@ -16,6 +17,8 @@ import {
   type BuildTodo,
 } from '../components/BuildTodos'
 import { narrationAtBreak } from '../utils/liveSegments'
+import { setReactions, withReaction } from '../utils/reactions'
+import type { MessageReactions } from '../types'
 import {
   appendJobThinking,
   appendJobToken,
@@ -1068,6 +1071,20 @@ export function useMessages(sessionId: string | null) {
             reason: typeof payload.reason === 'string' ? payload.reason : undefined,
           })
         },
+        onReaction: (payload) => {
+          if (!isFocusedTurn()) return
+          const id = typeof payload.message_id === 'string' ? payload.message_id : ''
+          const reactions = (payload.reactions || null) as MessageReactions | null
+          setMessages((prev) => {
+            if (id && prev.some((m) => m.id === id)) return setReactions(prev, id, reactions)
+            // The turn's own user bubble may still carry its local id until
+            // the post-turn reload; Remedy's reaction belongs on it.
+            for (let i = prev.length - 1; i >= 0; i--) {
+              if (prev[i]!.role === 'user') return setReactions(prev, prev[i]!.id, reactions)
+            }
+            return prev
+          })
+        },
         onTodos: (payload) => {
           bumpActivity()
           const parsed = parseTodosPayload(payload)
@@ -1750,7 +1767,37 @@ export function useMessages(sessionId: string | null) {
     (q) => !sessionId || !q.sid || q.sid === sessionId,
   )
 
+  /**
+   * The owner's reaction on one of Remedy's messages: optimistic, then the
+   * server's answer. A quiet signal — it never starts a turn.
+   */
+  const react = useCallback(
+    async (messageId: string, emoji: string): Promise<boolean> => {
+      const sid = sessionIdRef.current
+      if (!sid) return false
+      let before = ''
+      setMessages((prev) => {
+        before = prev.find((m) => m.id === messageId)?.reactions?.user || ''
+        return withReaction(prev, messageId, 'user', emoji)
+      })
+      try {
+        const res = await setMessageReaction(sid, messageId, emoji)
+        if (sessionIdRef.current === sid) {
+          setMessages((prev) => setReactions(prev, messageId, res.reactions))
+        }
+        return true
+      } catch {
+        if (sessionIdRef.current === sid) {
+          setMessages((prev) => withReaction(prev, messageId, 'user', before))
+        }
+        return false
+      }
+    },
+    [],
+  )
+
   return {
+    react,
     messages,
     loading,
     loadError,

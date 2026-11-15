@@ -130,6 +130,8 @@ export type TurnStreamHandlers = {
   onUsage?: (usage: UsagePayload) => void
   onLibrarySuggest?: (payload: Record<string, unknown>) => void
   onTodos?: (payload: Record<string, unknown>) => void
+  /** Remedy reacted to a message (react tool). */
+  onReaction?: (payload: Record<string, unknown>) => void
   onLifeTask?: (payload: Record<string, unknown>) => void
   /**
    * Turn identity from the `start` frame. The request id is what a re-attach
@@ -227,6 +229,9 @@ function routeFrame(
       break
     case 'todos':
       handlers.onTodos?.(payload)
+      break
+    case 'reaction':
+      handlers.onReaction?.(payload)
       break
     case 'life_task':
       handlers.onLifeTask?.(payload)

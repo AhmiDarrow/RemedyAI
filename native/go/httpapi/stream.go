@@ -315,6 +315,7 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 
 	var sessProvider, sessModel *string
 	var history []map[string]any
+	var userMsgID string
 	projectPath := ""
 	if s.sessions != nil {
 		sess, ok, err := s.sessions.Get(sid)
@@ -346,7 +347,9 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 			sessProvider, sessModel = sp, sm
 		}
 		history = s.turnHistory(sid)
-		if _, err := s.sessions.AddMessage(sid, "user", displayContent, nil, nil); err != nil {
+		um, err := s.sessions.AddMessage(sid, "user", displayContent, nil, nil)
+		userMsgID = um.ID
+		if err != nil {
 			if _, ok, _ := s.sessions.Get(sid); !ok {
 				writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Session not found"})
 				return
@@ -367,15 +370,16 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 
 	sink := newFrameSink(requestID, streamQueueSize)
 	turnReq := TurnRequest{
-		SessionID:   sid,
-		Prompt:      prompt,
-		Model:       sessModel,
-		Provider:    sessProvider,
-		ProjectPath: projectPath,
-		PlanMode:    req.PlanMode,
-		ChatMode:    req.ChatMode,
-		Attachments: attDicts,
-		History:     history,
+		SessionID:     sid,
+		Prompt:        prompt,
+		Model:         sessModel,
+		Provider:      sessProvider,
+		ProjectPath:   projectPath,
+		PlanMode:      req.PlanMode,
+		ChatMode:      req.ChatMode,
+		Attachments:   attDicts,
+		History:       history,
+		UserMessageID: userMsgID,
 		DrainNudges: func() []string {
 			if s.claims == nil {
 				return nil
@@ -685,6 +689,18 @@ func (s *Server) runDetachedStream(
 			if err := json.Unmarshal([]byte(raw), &payload); err == nil && payload != nil {
 				delete(payload, "type")
 				ts.signal("life_task", payload)
+			}
+		case strings.HasPrefix(token, "@@reaction:"):
+			var rx struct {
+				Emoji     string `json:"emoji"`
+				MessageID string `json:"message_id"`
+			}
+			if err := json.Unmarshal([]byte(strings.TrimSpace(token[len("@@reaction:"):])), &rx); err == nil {
+				if target, reactions, err := s.applyAgentReaction(sid, req.UserMessageID, rx.MessageID, rx.Emoji); err == nil {
+					ts.signal("reaction", map[string]any{
+						"message_id": target, "side": "agent", "emoji": reactions.Agent, "reactions": reactions,
+					})
+				}
 			}
 		case strings.HasPrefix(token, "@@todos:"):
 			raw := token[len("@@todos:"):]

@@ -303,6 +303,12 @@ class ChatMessage(BaseModel):
     tokens: int | None = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     reverted: bool = Field(default=False)
+    # One reaction per side: {"user": "👍", "agent": "❤️"} (see REACTION_SET).
+    reactions: dict[str, str] = Field(default_factory=dict)
+
+
+# The closed reaction set, shared with the Go runtime (httpapi/reactions.go).
+REACTION_SET: tuple[str, ...] = ("👍", "👎", "❤️", "💔")
 
 
 class ChatSession(BaseModel):

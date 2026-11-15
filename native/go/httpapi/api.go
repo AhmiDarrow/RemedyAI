@@ -264,6 +264,7 @@ func New(cfg Config) (*Server, error) {
 		s.handleTurnToolEvidence,
 	)
 	s.mux.HandleFunc("POST /api/sessions/{id}/messages/{msg_id}/edit", s.handleEditFromMessage)
+	s.mux.HandleFunc("PUT /api/sessions/{id}/messages/{msg_id}/reaction", s.handleSetReaction)
 	s.mux.HandleFunc("POST /api/sessions/{id}/abort", s.handleAbortSession)
 	s.mux.HandleFunc("GET /api/sessions/{id}/export", s.handleExportSession)
 	s.mux.HandleFunc("POST /api/sessions/{id}/steer", s.handleSteerSession)
