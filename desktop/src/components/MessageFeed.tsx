@@ -21,7 +21,7 @@ import type { TaskProgressInfo } from './TaskProgress'
 import { ImageLightbox } from './ImageLightbox'
 import { ChatImage } from './ChatImage'
 import { linkifyBareImagePaths } from '../utils/linkifyImages'
-import { chatMarkdownUrlTransform } from '../utils/chatMarkdownUrl'
+import { chatMarkdownUrlTransform, remoteImageHost } from '../utils/chatMarkdownUrl'
 import { RemedyLogo } from './RemedyLogo'
 import {
   IconBtn,
@@ -169,7 +169,7 @@ const ChatMdCtx = createContext<{
 }>({ isUser: false })
 
 function MarkdownImg({ src, alt }: { src?: string; alt?: string }) {
-  const { onOpenImage } = useContext(ChatMdCtx)
+  const { onOpenImage, isUser } = useContext(ChatMdCtx)
   if (!src) {
     return (
       <span
@@ -186,7 +186,40 @@ function MarkdownImg({ src, alt }: { src?: string; alt?: string }) {
       </span>
     )
   }
+  if (!isUser && remoteImageHost(src)) {
+    return <RemoteImageGate src={src} alt={alt} onOpen={onOpenImage} />
+  }
   return <ChatImage src={src} alt={alt} onOpen={onOpenImage} />
+}
+
+/**
+ * A remote image in a reply loads only when the owner clicks. Painting it
+ * automatically would let a prompt-injected reply send data to any server
+ * through the image URL.
+ */
+function RemoteImageGate({ src, alt, onOpen }: { src: string; alt?: string; onOpen?: OpenImageFn }) {
+  const [load, setLoad] = useState(false)
+  if (load) return <ChatImage src={src} alt={alt} onOpen={onOpen} />
+  const host = remoteImageHost(src) || 'the web'
+  return (
+    <button
+      type="button"
+      data-testid="remote-image-gate"
+      className="chat-img-chip inline-flex items-center gap-1.5 my-1 px-2.5 py-1 rounded-lg text-xs"
+      title={`Load image from ${host}`}
+      onClick={() => setLoad(true)}
+      style={{
+        color: 'var(--text-secondary)',
+        background: 'var(--bg-tertiary)',
+        border: '1px solid var(--border)',
+        cursor: 'pointer',
+      }}
+    >
+      <span aria-hidden>🖼</span>
+      {alt || 'image'}
+      <span className="opacity-60">· from {host} · click to load</span>
+    </button>
+  )
 }
 
 function MarkdownLink({ href, children }: { href?: string; children?: ReactNode }) {

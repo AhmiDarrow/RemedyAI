@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chatMarkdownUrlTransform } from './chatMarkdownUrl'
+import { chatMarkdownUrlTransform, remoteImageHost } from './chatMarkdownUrl'
 
 describe('chatMarkdownUrlTransform', () => {
   it('allows https and http', () => {
@@ -73,5 +73,26 @@ describe('chatMarkdownUrlTransform', () => {
     expect(chatMarkdownUrlTransform('//evil.example/x.png')).toBe('')
     expect(chatMarkdownUrlTransform('ftp://host/x.png')).toBe('')
     expect(chatMarkdownUrlTransform('')).toBe('')
+  })
+})
+
+describe('remoteImageHost (red-team: zero-click image exfiltration)', () => {
+  it.each([
+    ['https://attacker.example/p.png?q=SECRET', 'attacker.example'],
+    ['http://10.0.0.5/x.png', '10.0.0.5'],
+    ['<https://cdn.example/x.png>', 'cdn.example'],
+  ])('%s is remote', (src, host) => {
+    expect(remoteImageHost(src)).toBe(host)
+  })
+  it.each([
+    'http://127.0.0.1:8188/view?filename=a.png',
+    'http://localhost:7400/api/media?path=a.png',
+    'http://[::1]:7400/a.png',
+    'data:image/png;base64,AAAA',
+    'blob:http://tauri.localhost/1',
+    'assets/a.png',
+    'C:\\Users\\me\\a.png',
+  ])('%s stays local', (src) => {
+    expect(remoteImageHost(src)).toBeNull()
   })
 })
