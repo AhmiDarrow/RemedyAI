@@ -71,7 +71,7 @@ func TestI18nSpanishCatalogOverlay(t *testing.T) {
 	if len(langs) < 60 {
 		t.Fatalf("languages=%d", len(langs))
 	}
-	var hasAuto, hasYo bool
+	var hasAuto, hasYo, hasPt bool
 	for _, row := range langs {
 		m, _ := row.(map[string]any)
 		switch m["id"] {
@@ -79,10 +79,15 @@ func TestI18nSpanishCatalogOverlay(t *testing.T) {
 			hasAuto = true
 		case "yo":
 			hasYo = true
+		case "pt":
+			hasPt = true
+			if m["name_native"] != "Português (Brasil)" {
+				t.Fatalf("pt name_native=%v", m["name_native"])
+			}
 		}
 	}
-	if !hasAuto || !hasYo {
-		t.Fatalf("missing language rows auto=%v yo=%v", hasAuto, hasYo)
+	if !hasAuto || !hasYo || !hasPt {
+		t.Fatalf("missing language rows auto=%v yo=%v pt=%v", hasAuto, hasYo, hasPt)
 	}
 }
 
