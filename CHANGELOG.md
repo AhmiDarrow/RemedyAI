@@ -4,10 +4,20 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
-## [0.69.1] - 2026-11-14
+## [0.69.1] - 2026-11-15
+
+### Security
+- Reactions can no longer answer an unrelated confirmation. 👍/👎 answers a waiting ask only when the reacted reply was written by the turn blocked on it (same request id) and is the newest reply; otherwise it only records feedback. 👍 never approves an owner checkpoint (payments, credentials, sensitive computer actions); 👎 may decline one. Repeated or cleared reactions never pre-approve a later ask. (#51)
+- Chat images can no longer leak Windows credentials: UNC and device paths are refused before any filesystem access in `/api/media`, roots are checked before `stat`, symlinks are resolved and re-checked (a symlink inside an allowed folder can no longer serve a file outside it), and the desktop drops network paths from chat markdown. (#52)
+- Internet images in Remedy's replies wait behind a click-to-load chip, so a reply cannot silently send data to a remote server; local, loopback, `data:` and `blob:` images still show inline. Pasted https image links are no longer garbled. (#53)
+- Desktop open/reveal refuses network paths before touching the disk, reveals files instead of running them on macOS and Linux, and macOS "Open Terminal here" quotes folder names safely. (#54)
+- Reaction feedback written by the Go runtime no longer crashes Python memory recall and search, and is stored as a labelled quote of Remedy's reply rather than as an owner instruction. (#55)
+- With `REMEDY_API_AUTH=0` (debugging only), `/api/*` accepts only a loopback Host and a loopback or desktop Origin, so websites cannot drive the API through DNS rebinding or cross-site requests. (#56)
+- The pip first-run download trusts the wheel, not the release: each published wheel pins the sha256 of every runtime asset of its own version. A missing version fails closed instead of falling back to Latest, and the runtime is never downgraded. A source checkout does not download unless `REMEDY_NATIVE_ALLOW_UNPINNED=1`. (#57)
+- `remedy serve` hands the API token to the browser only when it runs as the same OS user (checked on Linux and Windows) or opens the one-time link that `remedy serve` prints; the new `remedy open` makes a fresh link (needed on macOS). Other accounts on a shared computer are refused. (#58)
 
 ### Added
-- Message reactions: 👍 👎 ❤️ 💔. React to Remedy's replies from the message actions (or long-press on touch); the same reaction again removes it, one per side per message. Remedy can react to your messages too, sparingly, through a read-only `react` tool. A reaction never starts a turn: a running turn gets it as quiet guidance, 👍/👎 on the latest reply answers a single waiting confirmation once (no standing consent), and otherwise it is recorded as feedback and noted before your next message. Stored with the message in both the Go and Python stores. (#49)
+- Message reactions: 👍 👎 ❤️ 💔. React to Remedy's replies from the message actions (or long-press on touch); the same reaction again removes it, one per side per message. Remedy can react to your messages too, sparingly, through a read-only `react` tool. A reaction never starts a turn: a running turn gets it as quiet guidance, 👍/👎 on the reply being written answers that turn's single waiting confirmation once (no standing consent; payments and other owner checkpoints always need the approval banner), and otherwise it is recorded as feedback and noted before your next message. Stored with the message in both the Go and Python stores. (#49)
 
 ### Changed
 - A turn's background work is one quiet Working strip above the reply: a live status line, progress, and a grouped timeline with errors in muted red and thinking as its own item. The reply is the only full-contrast bubble and never contains narration; saved turns keep the same split. (#48)
