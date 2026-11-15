@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chatMarkdownUrlTransform } from './chatMarkdownUrl'
+import { chatMarkdownUrlTransform, isNetworkPath } from './chatMarkdownUrl'
 
 describe('chatMarkdownUrlTransform', () => {
   it('allows https and http', () => {
@@ -74,4 +74,28 @@ describe('chatMarkdownUrlTransform', () => {
     expect(chatMarkdownUrlTransform('ftp://host/x.png')).toBe('')
     expect(chatMarkdownUrlTransform('')).toBe('')
   })
+})
+
+describe('network paths (red-team: NTLM leak via UNC images)', () => {
+  it.each([
+    '\\\\attacker.example\\share\\x.png',
+    '//attacker.example/share/x.png',
+    '\\\\?\\UNC\\attacker.example\\share\\x.png',
+    '\\\\.\\pipe\\x.png',
+    'file://attacker.example/share/x.png',
+    'file:////attacker.example/share/x.png',
+    'file:\\\\attacker.example\\share\\x.png',
+    '<\\\\attacker.example\\share\\x.png>',
+  ])('drops %s', (src) => {
+    expect(isNetworkPath(src)).toBe(true)
+    expect(chatMarkdownUrlTransform(src)).toBe('')
+  })
+
+  it.each(['C:\\Users\\me\\a.png', 'file:///C:/Users/me/a.png', 'assets/a.png', '/api/media?path=a.png'])(
+    'keeps local %s',
+    (src) => {
+      expect(isNetworkPath(src)).toBe(false)
+      expect(chatMarkdownUrlTransform(src)).not.toBe('')
+    },
+  )
 })
