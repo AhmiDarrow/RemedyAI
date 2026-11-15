@@ -1,6 +1,6 @@
 //go:build linux
 
-package httpapi
+package secret
 
 import (
 	"net/netip"

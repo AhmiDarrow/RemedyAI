@@ -5,11 +5,12 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
-// errPeerUnsupported means this OS has no reliable way here to map a TCP
-// peer to its owning user; callers fall back to a one-time bootstrap link.
-var errPeerUnsupported = errors.New("peer user lookup unsupported on this OS")
+// errPeerUnsupported: see secret.ErrPeerUnsupported.
+var errPeerUnsupported = secret.ErrPeerUnsupported
 
 // connEndpoints returns the client (remote) and server (local) address of the
 // TCP connection that carried r.
@@ -39,5 +40,5 @@ var peerIsSameUser = func(r *http.Request) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return sameUserPeer(client, server)
+	return secret.SameUserPeer(client, server)
 }

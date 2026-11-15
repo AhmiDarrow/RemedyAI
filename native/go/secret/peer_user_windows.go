@@ -1,6 +1,6 @@
 //go:build windows
 
-package httpapi
+package secret
 
 import (
 	"encoding/binary"
@@ -20,7 +20,7 @@ const tcpTableOwnerPIDAll = 5
 
 // sameUserPeer finds the PID owning the client end of the connection with
 // GetExtendedTcpTable, then compares that process's token user SID with ours.
-func sameUserPeer(client, server netip.AddrPort) (bool, error) {
+func SameUserPeer(client, server netip.AddrPort) (bool, error) {
 	pid, err := tcpOwnerPID(client, server)
 	if err != nil {
 		return false, err
