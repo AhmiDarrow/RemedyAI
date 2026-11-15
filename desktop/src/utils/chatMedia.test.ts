@@ -189,3 +189,13 @@ describe('chatMedia request resolution (/api/media with Bearer)', () => {
     }
   })
 })
+
+describe('network paths are never fetched (red-team)', () => {
+  it.each(['\\\\attacker.example\\share\\x.png', '//attacker.example/share/x.png', 'file://attacker.example/s/x.png'])(
+    '%s is not local media and has no /api/media URL',
+    (src) => {
+      expect(isLocalMediaPath(src)).toBe(false)
+      expect(chatMediaRequestUrl(src)).toBeNull()
+    },
+  )
+})

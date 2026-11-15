@@ -5,6 +5,20 @@
  * Use this transform for chat bubbles so ChatImage receives a real src.
  */
 
+/** UNC shares and Win32 device namespaces, with or without a file: prefix. */
+export function isNetworkPath(url: string): boolean {
+  let v = (url || '').trim().replace(/^<|>$/g, '')
+  const file = /^file:/i.test(v)
+  if (file) {
+    const rest = v.slice(5)
+    const lead = rest.length - rest.replace(/^[\\/]+/, '').length
+    const body = rest.slice(lead)
+    if ((lead === 2 || lead >= 4) && !/^[A-Za-z]:/.test(body)) return true
+    v = body
+  }
+  return /^[\\/]{2}/.test(v)
+}
+
 /** Active content — never pass through. */
 const BLOCKED = /^(javascript|vbscript):/i
 
@@ -23,18 +37,16 @@ export function chatMarkdownUrlTransform(url: string): string {
 
   if (BLOCKED.test(v) || BLOCKED_DATA.test(v)) return ''
 
+  // UNC / device paths (\\host\share, //host, \\?\, \\.\): never. On Windows
+  // merely resolving one opens an SMB session that leaks the user's NTLM
+  // hash, so a reply (or injected tool output) must not be able to embed one.
+  if (isNetworkPath(v)) return ''
+
   // http(s), data:image/*, blob:, file:
   if (/^(https?:|data:image\/|blob:|file:)/i.test(v)) return v
 
   // Windows drive path: C:\… or C:/…
   if (/^[A-Za-z]:[\\/]/.test(v)) return v
-
-  // UNC
-  if (v.startsWith('\\\\') || v.startsWith('//')) {
-    // Protocol-relative //evil.com is not a local image — only UNC-style \\
-    if (v.startsWith('//') && !v.startsWith('\\\\')) return ''
-    return v
-  }
 
   // Relative / project paths (assets/…, .remedy/…, /api/…) — no scheme
   // Reject unknown schemes like ftp: or custom: while allowing paths with colons later in the string
