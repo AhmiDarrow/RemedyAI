@@ -4,6 +4,9 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Security
+- Reactions can no longer answer an unrelated confirmation. 👍/👎 now answers a waiting ask only when the reacted reply was written by the turn that is blocked on it (same request id) and it is the newest reply; a reaction on an earlier reply, or with no live turn, only records feedback. 👍 never approves an Owner checkpoint (payments, credentials, sensitive computer actions), which still needs the banner; 👎 may decline one. Repeated or cleared reactions never pre-approve a later ask. Regression tests: `reactions_binding_test.go`.
+
 ## [0.69.1] - 2026-11-14
 
 ### Added
