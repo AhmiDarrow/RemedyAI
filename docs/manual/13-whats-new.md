@@ -44,6 +44,11 @@ Earlier notes follow on this page, newest first.
 - **Smarter scrolling.** The feed follows new output until you scroll up,
   keeps your place when you open or close the timeline, and End jumps back
   to the latest message.
+- **Security fixes.** Internet images in replies wait for a click, network
+  paths are never opened from chat, the pip runtime download is checked
+  against hashes inside the package (no fallback to another version), and
+  `remedy serve` gives the browser token only to your own OS account or a
+  one-time link (`remedy open` makes a new one).
 
 ## 0.69.0 - Reasoning settings and a clearer live turn
 
