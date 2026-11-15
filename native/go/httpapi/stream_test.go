@@ -763,3 +763,71 @@ func (c *countingRunner) RunTurn(ctx context.Context, req TurnRequest, emit func
 	}()
 	return c.inner.RunTurn(ctx, req, emit)
 }
+
+// Text the model writes before each tool call is narration about that step.
+// It is recorded on the call so the saved bubble can show only the reply.
+func TestStreamRecordsNarrationOnToolCalls(t *testing.T) {
+	runner := &stubRunner{tokens: []string{
+		"I'll reach the folder ",
+		"through the shell.",
+		`@@tool_call:{"name":"bash","args":{"command":"dir"},"id":"c1"}`,
+		`@@tool_result:{"name":"bash","preview":"ok","ok":true,"id":"c1"}`,
+		`@@tool_call:{"name":"file_read","args":{"path":"a.lua"},"id":"c2"}`,
+		`@@tool_result:{"name":"file_read","preview":"x","ok":true,"id":"c2"}`,
+		"\n\nFound it. Patching next.",
+		`@@tool_call:{"name":"file_write","args":{"path":"a.lua"},"id":"c3"}`,
+		`@@tool_result:{"name":"file_write","preview":"ok","ok":true,"id":"c3"}`,
+		"\n\nThe addon loads again.",
+	}}
+	base, shutdown, token := startMessagesServer(t, runner, t.TempDir())
+	defer shutdown()
+	client := &http.Client{Timeout: 5 * time.Second}
+	sid := createSessionID(t, client, base, token)
+
+	req := authReq(t, http.MethodPost, base+"/api/sessions/"+sid+"/messages/stream", token,
+		bytes.NewBufferString(`{"message":"fix it"}`))
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = readSSE(t, resp)
+	resp.Body.Close()
+
+	req = authReq(t, http.MethodGet, base+"/api/sessions/"+sid+"/messages", token, nil)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var listed struct {
+		Messages []ChatMessage `json:"messages"`
+	}
+	_ = json.Unmarshal(raw, &listed)
+	var assistant *ChatMessage
+	for i := range listed.Messages {
+		if listed.Messages[i].Role == "assistant" {
+			assistant = &listed.Messages[i]
+		}
+	}
+	if assistant == nil {
+		t.Fatal("no assistant")
+	}
+	calls, _ := assistant.ToolCalls.([]any)
+	if len(calls) != 3 {
+		t.Fatalf("tool_calls = %#v", assistant.ToolCalls)
+	}
+	want := []any{"I'll reach the folder through the shell.", nil, "Found it. Patching next."}
+	for i, w := range want {
+		m, _ := calls[i].(map[string]any)
+		if got := m["narration"]; got != w {
+			t.Fatalf("call %d narration = %#v, want %#v", i, got, w)
+		}
+	}
+	// Content keeps the full text (older clients still render it whole).
+	content, _ := assistant.Content.(string)
+	if !strings.Contains(content, "The addon loads again.") ||
+		!strings.Contains(content, "through the shell.") {
+		t.Fatalf("content = %q", content)
+	}
+}

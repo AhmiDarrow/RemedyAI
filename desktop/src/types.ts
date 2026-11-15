@@ -40,6 +40,8 @@ export interface ToolCall {
   args: Record<string, unknown>
   /** Runtime call id — pairs results with calls when tools run in parallel. */
   id?: string
+  /** Narration the model wrote just before this call (kept out of the reply). */
+  narration?: string
 }
 
 export interface ToolResult {

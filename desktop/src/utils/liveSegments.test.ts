@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activityLabel, splitLiveText, summarizeSteps } from './liveSegments'
+import { narrationAtBreak, splitLiveText, splitSavedReply, summarizeSteps } from './liveSegments'
 
 describe('splitLiveText', () => {
   it('treats text before tool calls as narration and the rest as the reply', () => {
@@ -41,8 +41,41 @@ describe('activity summary', () => {
   it('counts steps by status', () => {
     expect(summarizeSteps(steps)).toEqual({ total: 3, running: 1, done: 1, errors: 1 })
   })
-  it('labels working vs worked', () => {
-    expect(activityLabel(summarizeSteps(steps), true)).toBe('Working… · 3 steps · 1 error')
-    expect(activityLabel(summarizeSteps([{ status: 'done' }]), false)).toBe('Worked · 1 step')
+})
+
+describe('narrationAtBreak', () => {
+  const text = 'Reaching the folder.\n\nFound it.'
+  it('returns the text cut by a newly added break', () => {
+    expect(narrationAtBreak(text, [], [20])).toBe('Reaching the folder.')
+    expect(narrationAtBreak(text, [20], [20, text.length])).toBe('Found it.')
+  })
+  it('is empty when the call added no break', () => {
+    expect(narrationAtBreak(text, [20], [20])).toBe('')
+  })
+})
+
+describe('splitSavedReply', () => {
+  const content =
+    "I'll reach the folder.\n\nFound the manifest.\n\nThe addon loads again.\n\n**What changed:** loader."
+  it('removes recorded narration so the bubble holds only the reply', () => {
+    const r = splitSavedReply(content, [
+      { narration: "I'll reach the folder." },
+      {},
+      { narration: 'Found the manifest.' },
+    ])
+    expect(r.narration).toEqual(["I'll reach the folder.", 'Found the manifest.'])
+    expect(r.reply).toBe('The addon loads again.\n\n**What changed:** loader.')
+  })
+  it('leaves older saves without narration untouched', () => {
+    expect(splitSavedReply(content, [{}, {}])).toEqual({ narration: [], reply: content })
+  })
+  it('skips narration that is not in the content instead of guessing', () => {
+    const r = splitSavedReply(content, [{ narration: 'Not there.' }])
+    expect(r.reply).toBe(content)
+  })
+  it('does not remove a repeated phrase from the reply after the narration', () => {
+    const c = 'Checking.\n\nDone. Checking again later is not needed.'
+    const r = splitSavedReply(c, [{ narration: 'Checking.' }])
+    expect(r.reply).toBe('Done. Checking again later is not needed.')
   })
 })

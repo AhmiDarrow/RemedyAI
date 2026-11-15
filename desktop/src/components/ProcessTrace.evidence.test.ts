@@ -47,9 +47,9 @@ describe('process trail evidence', () => {
   })
 
   it('the live trail is given the session so its rows are addressable', () => {
-    const live = feed.indexOf('steps={processSteps}')
+    const live = feed.indexOf('processSteps={processSteps}')
     expect(live).toBeGreaterThan(-1)
-    expect(feed.slice(live, live + 200)).toContain('sessionId={sessionId}')
+    expect(feed.slice(live, live + 300)).toContain('sessionId={sessionId}')
   })
 
   it('historical trails are given the session and the message request id', () => {
