@@ -15,9 +15,12 @@ pip install remedy-ai
 
 `remedy serve` needs Go `remedy-runtime` plus Zig `remedy_core`. On a PyPI
 install, the first serve downloads the pair for this OS from the matching
-`runtime-v<version>` GitHub release (older versions: the `v<version>` release;
-Latest's companion if neither has native assets), verifies
-`remedy-native-SHA256SUMS.txt`, and caches them in `~/.remedy/runtime/`.
+`runtime-v<version>` GitHub release, verifies each file against the sha256
+pinned inside the wheel at build time, and caches them in `~/.remedy/runtime/`.
+It never falls back to another version: if this version's files are missing or
+do not match, serve stops with an error. A source checkout has no pins and
+builds its own runtime (`REMEDY_NATIVE_ALLOW_UNPINNED=1` lets it trust this
+exact version's `remedy-native-SHA256SUMS.txt` instead).
 Set `REMEDY_NATIVE_BOOTSTRAP_DISABLE=1` to skip the download and require a
 local binary. The packaged Desktop installer already includes both binaries.
 
