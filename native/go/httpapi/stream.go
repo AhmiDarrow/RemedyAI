@@ -488,10 +488,12 @@ func (s *Server) runDetachedStream(
 	}
 
 	var (
-		fullResponse         strings.Builder
-		fullThinking         strings.Builder
-		thinkingReplaceNext  bool
-		collectedToolCalls   []map[string]any
+		fullResponse        strings.Builder
+		fullThinking        strings.Builder
+		thinkingReplaceNext bool
+		collectedToolCalls  []map[string]any
+		// fullResponse length at the last narration cut (see @@tool_call).
+		narrationMark        int
 		collectedToolResults []map[string]any
 		aborted              bool
 		persistDone          bool
@@ -614,6 +616,14 @@ func (s *Server) runDetachedStream(
 		switch {
 		case strings.HasPrefix(token, "@@tool_call:"):
 			parsed := parseToolCallToken(token)
+			// Text since the previous call is narration about this step; keep it
+			// on the call so the saved bubble can show only the reply.
+			if body := fullResponse.String(); len(body) > narrationMark {
+				if seg := strings.TrimSpace(body[narrationMark:]); seg != "" {
+					parsed["narration"] = seg
+					narrationMark = len(body)
+				}
+			}
 			collectedToolCalls = append(collectedToolCalls, parsed)
 			name, _ := parsed["name"].(string)
 			id, _ := parsed["id"].(string)

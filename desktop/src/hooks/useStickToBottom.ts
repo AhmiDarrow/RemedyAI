@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
+import {
+  anchorDelta,
+  canScroll,
+  initialFollowState,
+  isTypingTarget,
+  reduceFollow,
+  shouldPin,
+  type FollowEvent,
+  type ScrollMetrics,
+} from './followController'
 
-/** User counts as "at the bottom" within this many px of the floor. */
-const NEAR_PX = 48
+export { NEAR_PX } from './followController'
 
 type Options = {
   /** Empty welcome screens start at the top and must remain freely scrollable. */
@@ -19,23 +29,42 @@ type Options = {
   reattachKey?: unknown
   /** Begin attached (pinned to the floor) when the scroller mounts. Default true. */
   startAtBottom?: boolean
+  /**
+   * Window-level End key jumps to latest (ignored while typing in an input,
+   * textarea, or contenteditable — focus is never moved).
+   */
+  endKeyJumps?: boolean
+}
+
+const metricsOf = (el: HTMLElement): ScrollMetrics => ({
+  scrollTop: el.scrollTop,
+  scrollHeight: el.scrollHeight,
+  clientHeight: el.clientHeight,
+})
+
+export function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
 }
 
 /**
- * Stick-to-bottom contract:
+ * Stick-to-bottom for any scroller (the chat feed, the Working timeline).
  *
- * - Auto-follow ONLY while the user is already at the bottom (≤ NEAR_PX).
- * - Any user scroll away from the floor (wheel, touch, keyboard, scrollbar
- *   drag) detaches. Token appends, image decode, code blocks, process-trace
- *   growth — none of these re-attach.
- * - Re-attach only when the user scrolls back to the floor, clicks the jump
- *   pill, or `reattachKey` changes.
+ * The rules live in followController (pure, unit-tested); this hook only
+ * wires DOM events and writes scrollTop:
+ *
+ * - Auto-follow ONLY while the reader is at the bottom (≤ NEAR_PX).
+ * - Any scroll away from the floor (wheel, touch, keyboard, scrollbar drag)
+ *   pauses following. Content growth never re-attaches.
+ * - Re-attach when the reader scrolls back down, clicks the jump pill,
+ *   presses End, or `reattachKey` changes.
  * - While detached we never write scrollTop; native scroll anchoring keeps
  *   the view steady when content above the viewport grows.
- *
- * Programmatic scrolls are told apart from user scrolls by value: every pin
- * records the scrollTop it produced, and a scroll event landing on exactly
- * that value is an echo, not a gesture.
+ * - `anchorToggle` keeps an expanded/collapsed element where the reader saw
+ *   it, then re-derives follow state from the resulting position.
  */
 export function useStickToBottom(options: Options = {}) {
   const {
@@ -45,6 +74,7 @@ export function useStickToBottom(options: Options = {}) {
     alwaysOfferJump = false,
     reattachKey,
     startAtBottom = true,
+    endKeyJumps = false,
   } = options
   const enabledRef = useRef(enabled)
   enabledRef.current = enabled
@@ -54,28 +84,18 @@ export function useStickToBottom(options: Options = {}) {
   const [scrollerEl, setScrollerEl] = useState<HTMLElement | null>(null)
   const [contentEl, setContentEl] = useState<HTMLElement | null>(null)
 
-  const stuckRef = useRef(startAtBottom)
-  /** scrollTop we last set ourselves; a scroll event landing here is an echo. */
-  const expectedTopRef = useRef<number | null>(null)
-  /** During a smooth jump, intermediate scroll events are ours — ignore until this time. */
-  const lockUntilRef = useRef(0)
+  const stateRef = useRef(initialFollowState(startAtBottom))
   const pinRafRef = useRef<number | null>(null)
-
-  /**
-   * Set by an instant pin. Until then, scroll events that still sit at the
-   * floor are echoes of our write (layout may shift the clamp by a few px
-   * while a bubble mounts); events that land clearly above the floor are a
-   * real gesture and still detach — scrollbar drag and touch never emit
-   * wheel/keydown, so they must not be blanket-ignored.
-   */
-  const instantPinUntilRef = useRef(0)
-
   const [detached, setDetachedState] = useState(false)
-  const detachedRef = useRef(false)
-  const setDetached = useCallback((next: boolean) => {
-    if (detachedRef.current === next) return
-    detachedRef.current = next
-    setDetachedState(next)
+
+  const dispatch = useCallback((e: FollowEvent) => {
+    const next = reduceFollow(stateRef.current, e)
+    stateRef.current = next
+    if (!next.stuck && pinRafRef.current != null) {
+      window.cancelAnimationFrame(pinRafRef.current)
+      pinRafRef.current = null
+    }
+    setDetachedState(!next.stuck)
   }, [])
 
   const setScroller = useCallback((node: HTMLElement | null) => {
@@ -88,46 +108,25 @@ export function useStickToBottom(options: Options = {}) {
     setContentEl(node)
   }, [])
 
-  const distanceFromBottom = (el: HTMLElement) =>
-    el.scrollHeight - el.scrollTop - el.clientHeight
-
-  const canScroll = (el: HTMLElement) => el.scrollHeight - el.clientHeight > 1
-
-  const attach = useCallback(() => {
-    stuckRef.current = true
-    setDetached(false)
-  }, [setDetached])
-
-  const detach = useCallback(() => {
-    stuckRef.current = false
-    if (pinRafRef.current != null) {
-      window.cancelAnimationFrame(pinRafRef.current)
-      pinRafRef.current = null
-    }
-    setDetached(true)
-  }, [setDetached])
-
-  /** Coalesced (one per frame) scroll-to-floor, only while attached. */
+  /** Coalesced (one per frame) scroll-to-floor, only while following. */
   const pinToBottom = useCallback(
     (smooth = false) => {
       const el = scrollerRef.current
-      if (!enabledRef.current || !el || !stuckRef.current) return
-
+      if (!enabledRef.current || !el || !shouldPin(stateRef.current)) return
+      const glide = smooth && !prefersReducedMotion()
       const apply = () => {
-        if (!enabledRef.current || !stuckRef.current) return
+        if (!enabledRef.current || !shouldPin(stateRef.current)) return
         const max = Math.max(0, el.scrollHeight - el.clientHeight)
-        if (smooth) {
-          lockUntilRef.current = performance.now() + 450
+        if (glide) {
           el.scrollTo({ top: max, behavior: 'smooth' })
-          expectedTopRef.current = max
+          dispatch({ type: 'pinned', top: max, now: performance.now(), smoothMs: 450 })
           return
         }
         el.scrollTop = max
-        // Read back — the browser clamps, and we compare echoes by value.
-        expectedTopRef.current = el.scrollTop
+        // Read back — the browser clamps, and echoes are compared by value.
+        dispatch({ type: 'pinned', top: el.scrollTop, now: performance.now() })
       }
-
-      if (smooth) {
+      if (glide) {
         apply()
         return
       }
@@ -137,58 +136,32 @@ export function useStickToBottom(options: Options = {}) {
         apply()
       })
     },
-    [],
+    [dispatch],
   )
 
   /**
    * Instant pin: attach and write scrollTop synchronously. Shared by the
-   * reattachKey effect (Enter) and the Jump pill so the two never diverge.
+   * reattachKey effect (Enter), the Jump pill and End so they never diverge.
    */
   const pinNow = useCallback(() => {
     if (!enabledRef.current) return
-    attach()
+    dispatch({ type: 'attach' })
     const el = scrollerRef.current
     if (!el) return
-    const max = Math.max(0, el.scrollHeight - el.clientHeight)
-    el.scrollTop = max
-    // Read back — the browser clamps, and we compare echoes by value.
-    expectedTopRef.current = el.scrollTop
-    instantPinUntilRef.current = performance.now() + 280
-  }, [attach])
+    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight)
+    dispatch({ type: 'pinned', top: el.scrollTop, now: performance.now(), instant: true })
+  }, [dispatch])
 
   useEffect(() => {
     const el = scrollerEl
     if (!el) return
-
-    const onScroll = () => {
-      // Smooth glide: every intermediate event is ours.
-      if (performance.now() < lockUntilRef.current) return
-      const expected = expectedTopRef.current
-      if (expected != null && Math.abs(el.scrollTop - expected) <= 1) {
-        // Echo of our own pin (or a clamp onto it) — not a gesture.
-        return
-      }
-      if (
-        performance.now() < instantPinUntilRef.current
-        && distanceFromBottom(el) <= NEAR_PX
-      ) {
-        // Just pinned and still at the floor: layout settling, not a gesture.
-        return
-      }
-      expectedTopRef.current = null
-      if (distanceFromBottom(el) <= NEAR_PX) attach()
-      else detach()
-    }
-
+    const onScroll = () =>
+      dispatch({ type: 'scroll', metrics: metricsOf(el), now: performance.now() })
     // Wheel up = intent to read history, even before the scroll event lands.
-    const onWheel = (e: WheelEvent) => {
-      if (e.deltaY < 0 && canScroll(el)) detach()
-    }
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (!canScroll(el)) return
-      if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'Home') detach()
-    }
-
+    const onWheel = (e: WheelEvent) =>
+      dispatch({ type: 'wheel', deltaY: e.deltaY, canScroll: canScroll(metricsOf(el)) })
+    const onKeyDown = (e: KeyboardEvent) =>
+      dispatch({ type: 'key', key: e.key, canScroll: canScroll(metricsOf(el)) })
     el.addEventListener('scroll', onScroll, { passive: true })
     el.addEventListener('wheel', onWheel, { passive: true })
     el.addEventListener('keydown', onKeyDown)
@@ -197,7 +170,20 @@ export function useStickToBottom(options: Options = {}) {
       el.removeEventListener('wheel', onWheel)
       el.removeEventListener('keydown', onKeyDown)
     }
-  }, [scrollerEl, attach, detach])
+  }, [scrollerEl, dispatch])
+
+  // End = jump to latest, unless the reader is typing (composer keeps focus).
+  useEffect(() => {
+    if (!endKeyJumps) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'End' || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+      if (isTypingTarget(e.target as HTMLElement | null)) return
+      e.preventDefault()
+      pinNow()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [endKeyJumps, pinNow])
 
   /**
    * Owner sent a prompt (reattachKey changed). Pin *before paint* — a
@@ -220,27 +206,26 @@ export function useStickToBottom(options: Options = {}) {
       return
     }
     if (!scrollerEl || !startAtBottom) return
-    attach()
+    dispatch({ type: 'attach' })
     pinToBottom(false)
-  }, [enabled, scrollerEl, startAtBottom, attach, pinToBottom])
+  }, [enabled, scrollerEl, startAtBottom, dispatch, pinToBottom])
 
-  // Re-pin from content deps while attached (tokens, tool rows, todos…).
+  // Re-pin from content deps while following (tokens, tool rows, todos…).
   useLayoutEffect(() => {
-    if (!scrollerEl || !stuckRef.current) return
+    if (!scrollerEl || !shouldPin(stateRef.current)) return
     pinToBottom(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pinToBottom, scrollerEl, ...deps])
 
-  // Layout growth (images decoding, code blocks, process trace) and viewport
-  // shrink (composer autosize, window resize): attached → pin; detached → leave
-  // scrollTop alone so native anchoring keeps the reading position.
+  // Layout growth (images, code blocks, timeline rows) and viewport shrink
+  // (composer autosize, resize): following → pin; paused → leave scrollTop
+  // alone so native anchoring keeps the reading position.
   useEffect(() => {
     const content = contentEl
     const scroller = scrollerEl
-    if (!content || !scroller) return
+    if (!content || !scroller || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(() => {
-      if (!stuckRef.current) return
-      pinToBottom(false)
+      if (shouldPin(stateRef.current)) pinToBottom(false)
     })
     ro.observe(content)
     ro.observe(scroller)
@@ -252,6 +237,27 @@ export function useStickToBottom(options: Options = {}) {
       if (pinRafRef.current != null) window.cancelAnimationFrame(pinRafRef.current)
     },
     [],
+  )
+
+  /**
+   * Run a toggle (expand/collapse) without yanking the view: the element
+   * stays at the same viewport offset, then follow state is re-derived.
+   */
+  const anchorToggle = useCallback(
+    (anchor: HTMLElement | null, mutate: () => void) => {
+      const el = scrollerRef.current
+      if (!el || !anchor) {
+        mutate()
+        return
+      }
+      const before = anchor.getBoundingClientRect().top
+      dispatch({ type: 'anchorStart' })
+      flushSync(mutate)
+      const d = anchorDelta(before, anchor.getBoundingClientRect().top)
+      if (d) el.scrollTop += d
+      dispatch({ type: 'anchorEnd', metrics: metricsOf(el), top: el.scrollTop })
+    },
+    [dispatch],
   )
 
   // Instant, not smooth: a smooth glide emits intermediate scroll events that
@@ -270,6 +276,7 @@ export function useStickToBottom(options: Options = {}) {
     showJump,
     jumpLatest,
     pinToBottom,
-    isStuck: () => stuckRef.current,
+    anchorToggle,
+    isStuck: () => stateRef.current.stuck,
   }
 }

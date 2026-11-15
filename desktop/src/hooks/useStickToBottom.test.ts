@@ -31,11 +31,16 @@ describe('useStickToBottom send re-pin', () => {
     expect(body).not.toContain('scrollTop =')
   })
 
-  it('does not blanket-ignore scroll events after an instant pin', () => {
-    // Scrollbar drag / touch emit only `scroll`; a blanket lock swallows them.
-    const onScroll = src.slice(src.indexOf('const onScroll'), src.indexOf('const onWheel'))
-    expect(onScroll).toMatch(/instantPinUntilRef[\s\S]*distanceFromBottom\(el\) <= NEAR_PX/)
-    const pin = src.slice(src.indexOf('const pinNow'), src.indexOf('useEffect(() => {'))
-    expect(pin).not.toContain('lockUntilRef')
+  it('delegates follow/pause decisions to the pure controller', () => {
+    expect(src).toContain("from './followController'")
+    expect(src).toContain('shouldPin(stateRef.current)')
+    // No ad-hoc distance checks left in the hook itself.
+    expect(src).not.toMatch(/scrollHeight - el\.scrollTop - el\.clientHeight/)
+  })
+
+  it('never moves focus when End jumps to latest', () => {
+    const end = src.slice(src.indexOf("e.key !== 'End'"), src.indexOf('Owner sent a prompt'))
+    expect(end).toContain('isTypingTarget')
+    expect(end).not.toContain('.focus(')
   })
 })
