@@ -4,7 +4,9 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,6 +94,17 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		}
 		// No token configured ⇒ auth off (matches Python when api_key is empty).
 		if s.token == "" {
+			// Explicitly disabled auth (REMEDY_API_AUTH=0) leaves the Host and
+			// Origin as the only barrier: without this, any web page could
+			// drive the API via DNS rebinding or a no-cors POST.
+			if !AuthEnabled() && pathNeedsAPIAuth(r.URL.Path) && !sameMachineBrowserRequest(r) {
+				writeJSON(w, http.StatusForbidden, map[string]string{
+					"error": "Forbidden",
+					"detail": "API auth is off (REMEDY_API_AUTH=0), so only loopback " +
+						"Host and Origin values are accepted.",
+				})
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -168,4 +181,42 @@ func writeUnauthorized(w http.ResponseWriter) {
 		"error":  "Unauthorized",
 		"detail": unauthorizedDetail,
 	})
+}
+
+// sameMachineBrowserRequest reports whether the Host header names this machine
+// and any Origin is loopback or an allowed desktop origin. A DNS-rebinding page
+// keeps its own hostname in Host; a cross-site form or fetch carries its Origin.
+func sameMachineBrowserRequest(r *http.Request) bool {
+	if !loopbackHostPort(r.Host) {
+		return false
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	if _, ok := allowedOrigins()[origin]; ok {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	return loopbackHostPort(u.Host)
+}
+
+// loopbackHostPort accepts localhost, 127.0.0.0/8 and ::1, with or without a port.
+func loopbackHostPort(hostport string) bool {
+	host := strings.TrimSpace(hostport)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.Trim(host, "[]"))
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
