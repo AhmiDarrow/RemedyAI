@@ -26,6 +26,7 @@ var hostPollerPrefixes = []string{
 
 var bootstrapPrefixes = []string{
 	"/api/auth/local-bootstrap",
+	"/api/auth/bootstrap-link",
 }
 
 // connectMePaths are phone-safe Connect routes (not management).
@@ -395,7 +396,7 @@ func ConnectForbidden(method, path, query string, panes map[string]bool) string 
 	if starts(norm, hostPollerPrefixes) {
 		return "host-poller"
 	}
-	if starts(norm, bootstrapPrefixes) || strings.Contains(norm, "local-bootstrap") {
+	if starts(norm, bootstrapPrefixes) || strings.Contains(norm, "local-bootstrap") || strings.Contains(norm, "bootstrap-link") {
 		return "auth:local-bootstrap"
 	}
 	if starts(norm, serverKillPrefixes) {
