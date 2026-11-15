@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     reverted INTEGER NOT NULL DEFAULT 0,
     request_id TEXT,
     draft INTEGER NOT NULL DEFAULT 0,
+    reactions TEXT NOT NULL DEFAULT '{}',
     FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, created_at);
@@ -201,6 +202,11 @@ func (s *sessionStore) ensureChatMessageColumns() error {
 		if _, err := s.db.Exec(
 			`ALTER TABLE chat_messages ADD COLUMN draft INTEGER NOT NULL DEFAULT 0`,
 		); err != nil {
+			return err
+		}
+	}
+	if !have["reactions"] {
+		if _, err := s.db.Exec(`ALTER TABLE chat_messages ADD COLUMN reactions TEXT NOT NULL DEFAULT '{}'`); err != nil {
 			return err
 		}
 	}

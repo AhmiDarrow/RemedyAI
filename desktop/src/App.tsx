@@ -223,6 +223,7 @@ export default function App() {
     addCommandMessage,
     beginEdit,
     load: reloadMessages,
+    react: reactToMessage,
   } = useMessages(activeId)
   useEffect(() => {
     setFocusedSessionId(activeId)
@@ -429,6 +430,15 @@ export default function App() {
   const [serverError, setServerError] = useState('')
   const [agentDefs, setAgentDefs] = useState<{ name: string; description: string }[]>([])
   const { notify } = useNotifications()
+  // Owner reaction on a reply: a quiet signal, never a new turn.
+  const handleReact = useCallback(
+    (messageId: string, emoji: string) => {
+      void reactToMessage(messageId, emoji).then((ok) => {
+        if (!ok) notify('Could not save reaction', { body: 'Please try again.', silent: true })
+      })
+    },
+    [reactToMessage, notify],
+  )
   // Toast when a background (detached) turn finishes.
   useEffect(() => {
     return subscribeStreamJobs((ev) => {
@@ -1859,6 +1869,7 @@ export default function App() {
           toolProcessMode={toolProcessMode}
           handleSend={handleSend}
           stickNonce={stickNonce}
+          onReact={handleReact}
           stop={stop}
           serverReady={serverState === 'ready'}
           userName={userName}
@@ -2022,6 +2033,7 @@ export default function App() {
               onEditUserMessage={handleEditUserMessage}
               onQuickPrompt={(text) => void handleSend(text)}
               onRegenerate={(id) => void handleRegenerate(id)}
+              onReact={handleReact}
               userName={userName}
               partnerName={partnerName}
               onAttachMarkup={handleAttachMarkup}

@@ -159,7 +159,7 @@ func (r *CognitionTurnRunner) syncModelToolSchemas() {
 // local model that only knows workspace.* still gets its own tools.
 var frontierCodingPack = map[string]struct{}{
 	"read": {}, "edit": {}, "write": {}, "glob": {}, "grep": {},
-	"bash": {}, "jobs": {}, "todo": {}, "delegate": {},
+	"bash": {}, "jobs": {}, "todo": {}, "delegate": {}, "react": {},
 }
 
 func isCodingPackTool(id string) bool {
@@ -414,7 +414,7 @@ func (r *CognitionTurnRunner) fallbackModel(req TurnRequest, live cognition.Mode
 // conversation as real messages, then this turn's user message carrying the
 // attachment blocks.
 func seedTranscript(req TurnRequest, userText, homeDir string) []cognition.Message {
-	msgs := historyMessages(req.History)
+	msgs, pendingNote := historyMessagesWithReactions(req.History)
 	blocks := attachmentBlocks(req.Attachments, homeDir, req.SessionID)
 	text := strings.TrimSpace(userText)
 	if text == "" && len(blocks) > 0 {
@@ -425,6 +425,10 @@ func seedTranscript(req TurnRequest, userText, homeDir string) []cognition.Messa
 	}
 	if !OriginIsOwner(req.Origin) {
 		text = untrustedEnvelope(req.Origin, text)
+	} else if pendingNote != "" {
+		// The owner reacted to the last reply; that reaction is context for
+		// this message, not a request of its own.
+		text = pendingNote + "\n\n" + text
 	}
 	return append(msgs, cognition.Message{
 		Role:   cognition.RoleUser,
@@ -436,7 +440,17 @@ func seedTranscript(req TurnRequest, userText, homeDir string) []cognition.Messa
 // They are no longer folded into the system prompt (prompt.assemble receives no
 // history), so the model sees one conversation, not a summary of one.
 func historyMessages(history []map[string]any) []cognition.Message {
+	out, _ := historyMessagesWithReactions(history)
+	return out
+}
+
+// historyMessagesWithReactions also carries the owner's reactions: a reaction
+// on a reply becomes a short note ahead of the owner's next message. The note
+// for the newest reply (no later owner message yet) is returned for the
+// current prompt.
+func historyMessagesWithReactions(history []map[string]any) ([]cognition.Message, string) {
 	out := make([]cognition.Message, 0, len(history))
+	pending := ""
 	for _, row := range history {
 		role, _ := row["role"].(string)
 		content, _ := row["content"].(string)
@@ -446,15 +460,23 @@ func historyMessages(history []map[string]any) []cognition.Message {
 		}
 		switch strings.ToLower(strings.TrimSpace(role)) {
 		case "user":
+			if pending != "" {
+				content = pending + "\n\n" + content
+				pending = ""
+			}
 			out = append(out, cognition.UserText(content))
 		case "assistant":
 			out = append(out, cognition.Message{
 				Role:   cognition.RoleAssistant,
 				Blocks: []cognition.Block{cognition.TextBlock(content)},
 			})
+			pending = ""
+			if emoji, _ := row["owner_reaction"].(string); emoji != "" {
+				pending = reactionHistoryNote(emoji)
+			}
 		}
 	}
-	return out
+	return out, pending
 }
 
 // maxAttachmentImageBytes bounds one inlined image (base64 grows it by a third).
@@ -1032,6 +1054,9 @@ func (t *emittingTools) Execute(ctx context.Context, call cognition.ToolCall) co
 	if tok := todosToken(res); tok != "" {
 		t.emit(tok)
 	}
+	if tok := reactionToken(res); tok != "" {
+		t.emit(tok)
+	}
 	return res
 }
 
@@ -1057,6 +1082,26 @@ func todosToken(res cognition.ToolResult) string {
 		return ""
 	}
 	return "@@todos:" + string(payload) + "\n"
+}
+
+// reactionToken mirrors a successful react call onto the @@reaction: control
+// channel; the stream persists it on the target message and tells the UI.
+func reactionToken(res cognition.ToolResult) string {
+	if strings.TrimSpace(res.Name) != "react" || res.Err != "" || res.IsError || len(res.Output) == 0 {
+		return ""
+	}
+	var out struct {
+		Emoji     string `json:"emoji"`
+		MessageID string `json:"message_id"`
+	}
+	if err := json.Unmarshal(res.Output, &out); err != nil || out.Emoji == "" {
+		return ""
+	}
+	payload, err := json.Marshal(map[string]any{"emoji": out.Emoji, "message_id": out.MessageID})
+	if err != nil {
+		return ""
+	}
+	return "@@reaction:" + string(payload) + "\n"
 }
 
 // workspaceBoundTools injects the session binding into every call before it
