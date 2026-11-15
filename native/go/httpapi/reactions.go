@@ -161,6 +161,21 @@ func (s *sessionStore) LatestMessageID(sessionID, role string) string {
 	return id
 }
 
+// messageTurn returns the request_id of the turn that wrote msgID ("" for
+// rows written outside a streamed turn) and whether it is still a draft.
+func (s *sessionStore) messageTurn(msgID string) (requestID string, draft bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var rid sql.NullString
+	var d int
+	if err := s.db.QueryRow(
+		`SELECT request_id, draft FROM chat_messages WHERE id = ? AND reverted = 0`, msgID,
+	).Scan(&rid, &d); err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(rid.String), d != 0
+}
+
 // recordReactionFeedback keeps the owner's reaction as a memory entry Remedy
 // can search ("what landed vs. what didn't"). One entry per message; clearing
 // the reaction removes it.
@@ -232,16 +247,20 @@ func reactionHistoryNote(emoji string) string {
 }
 
 // deliverReactionSignal routes an owner reaction. It never starts a turn.
-//   - 👍 / 👎 on the latest reply while that turn is blocked on exactly one
-//     owner confirmation: approve once / deny it.
+//   - 👍 / 👎 answer a confirmation only when the reaction is bound to it:
+//     the reacted message is the newest reply AND was written by the turn
+//     that is running right now (same request_id), and that turn is blocked
+//     on exactly one owner-originated ask. A reaction on an earlier reply,
+//     or with no live turn, never answers anything.
+//   - 👍 never approves an Owner checkpoint (payments, credentials, other
+//     sensitive actions); those need the explicit banner. 👎 may deny one.
 //   - a turn is running: a labelled guidance note reaches it.
 //   - otherwise: recorded only (the next turn sees it in the transcript).
 func (s *Server) deliverReactionSignal(sid, msgID, emoji, content string) (signal string, approval map[string]any) {
 	if emoji == "" {
 		return "cleared", nil
 	}
-	if (emoji == ReactionThumbsUp || emoji == ReactionThumbsDown) && s.approvals != nil && s.sessions != nil &&
-		s.sessions.LatestMessageID(sid, "assistant") == msgID {
+	if (emoji == ReactionThumbsUp || emoji == ReactionThumbsDown) && s.reactionBoundToLiveTurn(sid, msgID) {
 		var waiting []*pendingApproval
 		for _, it := range s.approvals.ListPending(sid) {
 			// Only this session's own, owner-originated asks with a turn
@@ -255,11 +274,12 @@ func (s *Server) deliverReactionSignal(sid, msgID, emoji, content string) (signa
 			}
 			waiting = append(waiting, it)
 		}
-		if len(waiting) == 1 {
-			approve := emoji == ReactionThumbsUp
+		approve := emoji == ReactionThumbsUp
+		if len(waiting) == 1 && !(approve && waiting[0].Sensitive) {
 			// "once": a thumbs-up answers this ask; it is not standing consent.
 			item, _ := s.approvals.resolve(waiting[0].ID, approve, "once")
-			if item != nil {
+			if item != nil && item.Status != "pending" && item.ID == waiting[0].ID &&
+				((approve && item.Status == "approved") || (!approve && item.Status == "denied")) {
 				decision := "denied"
 				if approve {
 					decision = "approved"
@@ -328,6 +348,24 @@ func (s *Server) handleSetReaction(w http.ResponseWriter, r *http.Request) {
 		resp["approval"] = approval
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// reactionBoundToLiveTurn reports whether msgID is the reply the owner is
+// looking at for the turn running now: the newest assistant row of sid,
+// written under the session's active request_id.
+func (s *Server) reactionBoundToLiveTurn(sid, msgID string) bool {
+	if s.approvals == nil || s.sessions == nil || s.claims == nil {
+		return false
+	}
+	active := strings.TrimSpace(s.claims.ActiveRequest(sid))
+	if active == "" {
+		return false
+	}
+	if s.sessions.LatestMessageID(sid, "assistant") != msgID {
+		return false
+	}
+	rid, _ := s.sessions.messageTurn(msgID)
+	return rid != "" && rid == active
 }
 
 func (s *Server) publishReaction(sid, mid string) {
