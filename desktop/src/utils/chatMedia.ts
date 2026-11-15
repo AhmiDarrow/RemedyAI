@@ -5,6 +5,7 @@
  * URLs also need Bearer auth (raw <img src> gets 401).
  */
 import { ensureApiToken, getApiBase, authHeaders, getServerUrl } from '../api/client'
+import { isNetworkPath } from './chatMarkdownUrl'
 
 /** LRU-ish blob URL cache (path → object URL). Cap avoids unbounded memory. */
 const BLOB_CACHE_MAX = 96
@@ -111,8 +112,8 @@ export function isLocalMediaPath(src: string): boolean {
   if (s.startsWith('file:')) return true
   // Windows drive path
   if (/^[A-Za-z]:[\\/]/.test(s)) return true
-  // UNC
-  if (s.startsWith('\\\\')) return true
+  // UNC / device paths are never fetched (NTLM leak on Windows).
+  if (isNetworkPath(src) || isNetworkPath(s)) return false
   // Relative project path (assets/…, ./foo, previews/…)
   if (!s.includes('://') && !s.startsWith('//')) return true
   return false

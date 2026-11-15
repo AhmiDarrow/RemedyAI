@@ -10,6 +10,9 @@ import (
 
 const maxMediaBytes = 25 * 1024 * 1024
 
+// mediaStat is os.Stat; tests swap it to see which paths the handler touches.
+var mediaStat = os.Stat
+
 var mediaTypes = map[string]string{
 	".png":  "image/png",
 	".jpg":  "image/jpeg",
@@ -83,7 +86,7 @@ func (s *Server) resolveMediaCandidate(raw string) (string, error) {
 	base, _ := s.resolveFilesBase("")
 	cand := filepath.Join(base, raw)
 	if abs, err := resolveAbsPath(cand); err == nil {
-		if st, err := os.Stat(abs); err == nil && !st.IsDir() {
+		if st, err := mediaStat(abs); err == nil && !st.IsDir() {
 			return abs, nil
 		}
 	}
@@ -91,7 +94,7 @@ func (s *Server) resolveMediaCandidate(raw string) (string, error) {
 	if home != "" {
 		homeCand := filepath.Join(home, raw)
 		if abs, err := resolveAbsPath(homeCand); err == nil {
-			if st, err := os.Stat(abs); err == nil && !st.IsDir() {
+			if st, err := mediaStat(abs); err == nil && !st.IsDir() {
 				return abs, nil
 			}
 		}
@@ -155,8 +158,15 @@ func (s *Server) handleServeMedia(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "path required"})
 		return
 	}
+	if isNetworkOrDevicePath(raw) {
+		// UNC / \\?\ / \\.\ paths: on Windows even a stat opens an SMB
+		// session and hands the user's NTLM hash to whoever runs the share.
+		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "network paths are not served as chat media"})
+		return
+	}
+	roots := s.mediaAllowedRoots()
 	candidate, err := s.resolveMediaCandidate(raw)
-	if err != nil || candidate == "" {
+	if err != nil || candidate == "" || isNetworkOrDevicePath(candidate) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "invalid path"})
 		return
 	}
@@ -166,13 +176,25 @@ func (s *Server) handleServeMedia(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	st, err := os.Stat(candidate)
-	if err != nil || st.IsDir() {
+	// Lexical root check before touching the filesystem at all.
+	if !mediaUnderRoots(candidate, roots) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"detail": "path outside allowed roots"})
+		return
+	}
+	// Then follow symlinks / junctions and check the real target again, so an
+	// image-named link inside a root cannot point at the auth store or out.
+	real, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "media not found"})
 		return
 	}
-	if !mediaUnderRoots(candidate, s.mediaAllowedRoots()) {
+	if isNetworkOrDevicePath(real) || isProtectedSecretPath(real, s.remedyHomeDir()) || !mediaUnderRealRoots(real, roots) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"detail": "path outside allowed roots"})
+		return
+	}
+	st, err := mediaStat(real)
+	if err != nil || st.IsDir() {
+		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "media not found"})
 		return
 	}
 	suffix := strings.ToLower(filepath.Ext(candidate))
@@ -197,7 +219,7 @@ func (s *Server) handleServeMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := os.Open(candidate)
+	f, err := os.Open(real)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "cannot read"})
 		return
@@ -210,4 +232,43 @@ func (s *Server) handleServeMedia(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `inline; filename="`+filepath.Base(candidate)+`"`)
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, f)
+}
+
+// isNetworkOrDevicePath reports UNC shares (\\host\share, //host/share) and
+// Win32 device-namespace paths (\\?\, \\.\), also behind a file: prefix.
+// Chat media never comes from those.
+func isNetworkOrDevicePath(raw string) bool {
+	s := strings.TrimSpace(raw)
+	s = strings.Trim(s, `"'<>`)
+	if strings.HasPrefix(strings.ToLower(s), "file:") {
+		s = s[len("file:"):]
+		// file://host/share/x and file:////host/share/x name a share;
+		// file:///C:/x does not.
+		trimmed := strings.TrimLeft(s, `/\`)
+		lead := len(s) - len(trimmed)
+		if lead == 2 || lead >= 4 {
+			if !(len(trimmed) >= 2 && trimmed[1] == ':' && isDriveLetter(trimmed[0])) {
+				return true
+			}
+		}
+		s = trimmed
+	}
+	if len(s) >= 2 && (s[0] == '\\' || s[0] == '/') && (s[1] == '\\' || s[1] == '/') {
+		return true
+	}
+	return false
+}
+
+// mediaUnderRealRoots compares a symlink-resolved path against the roots,
+// both as configured and symlink-resolved (macOS /var → /private/var).
+func mediaUnderRealRoots(real string, roots []string) bool {
+	for _, root := range roots {
+		if pathUnder(real, root) {
+			return true
+		}
+		if rr, err := filepath.EvalSymlinks(root); err == nil && pathUnder(real, rr) {
+			return true
+		}
+	}
+	return false
 }
