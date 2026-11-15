@@ -13,7 +13,8 @@ const PATH_RE = new RegExp(
     String.raw`file:\/\/\/[^\s<>"'|]+?\.${EXT}` +
     String.raw`|` +
     // Windows drive path (allow spaces in path segments)
-    String.raw`[A-Za-z]:[\\/][^\n<>"'|]*?\.${EXT}` +
+    // (not the "s:/" inside "https://": no letter or scheme char before it)
+    String.raw`(?<![A-Za-z0-9+.-])[A-Za-z]:[\\/][^\n<>"'|]*?\.${EXT}` +
     String.raw`|` +
     // UNC
     String.raw`\\\\[^\n<>"'|]+?\.${EXT}` +

