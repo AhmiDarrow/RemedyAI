@@ -321,6 +321,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Start CLI computer host (default: off so Desktop owns the rail)",
     )
 
+    # remedy open — one-time WebUI link for a running remedy serve.
+    open_cmd = sub.add_parser(
+        "open",
+        help="Open the WebUI of a running `remedy serve` with a one-time link",
+    )
+    open_cmd.add_argument("--host", default="127.0.0.1", help="Loopback host of remedy serve")
+    open_cmd.add_argument("--port", type=int, default=7400)
+    open_cmd.add_argument(
+        "--no-browser", action="store_true", help="Print the link instead of opening it"
+    )
+
     # remedy serve — hands off to Go remedy-runtime (no Python uvicorn).
     serve_cmd = sub.add_parser(
         "serve",

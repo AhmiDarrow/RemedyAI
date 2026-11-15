@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 from remedy.interfaces.cli.cmd_gateway import main_gateway
-from remedy.interfaces.cli.cmd_runtime import _cmd_chat, _cmd_desktop, _cmd_serve
+from remedy.interfaces.cli.cmd_runtime import _cmd_chat, _cmd_desktop, _cmd_open, _cmd_serve
 from remedy.interfaces.cli.cmd_settings import (
     _cmd_auth,
     _cmd_computer,
@@ -128,6 +128,8 @@ def main(args: list[str] | None = None) -> None:
         _cmd_chat(parsed)
     elif parsed.command == "serve":
         _cmd_serve(parsed)
+    elif parsed.command == "open":
+        _cmd_open(parsed)
     elif parsed.command == "mcp":
         if getattr(parsed, "mcp_cmd", None) == "serve":
             from remedy.tools.mcp_server import run_stdio_server

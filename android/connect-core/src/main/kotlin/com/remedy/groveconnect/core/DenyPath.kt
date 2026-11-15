@@ -15,7 +15,7 @@ object DenyPath {
     )
 
     private val HOST = Regex("""(?:^|/)(?:api/)?computer/host(?:/|$|\?|#)""", RegexOption.IGNORE_CASE)
-    private val BOOTSTRAP = Regex("""local-bootstrap""", RegexOption.IGNORE_CASE)
+    private val BOOTSTRAP = Regex("""local-bootstrap|bootstrap-link""", RegexOption.IGNORE_CASE)
     private val JOBS_ANY = Regex("""(?:^|/)(?:api/)?computer/jobs/""", RegexOption.IGNORE_CASE)
     private val UI_COMMAND = Regex("""(?:^|/)(?:api/)?computer/ui/command""", RegexOption.IGNORE_CASE)
     private val CONNECT_ME = Regex(

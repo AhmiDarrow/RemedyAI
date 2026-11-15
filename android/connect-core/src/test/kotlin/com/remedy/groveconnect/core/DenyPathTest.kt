@@ -21,6 +21,7 @@ class DenyPathTest {
         "/api/computer/jobs%2Fnext?wait_ms=1",
         "/api/computer/jobs/next/ ",
         "/api/auth/local-bootstrap",
+        "/api/auth/bootstrap-link",
         "/api/computer/host/hello",
         "/api/computer/ui/command",
         "/api/computer/jobs/abc/complete",
