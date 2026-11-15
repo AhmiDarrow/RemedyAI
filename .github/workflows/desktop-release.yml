@@ -1120,7 +1120,7 @@ jobs:
           body: |
             Support files for [Remedy Desktop v${{ needs.verify.outputs.version }}](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v${{ needs.verify.outputs.version }}). **You do not need to download anything here.**
 
-            - `pip install remedy-ai` fetches `remedy-runtime` / `remedy_core` and the HQ voice references from this release on first run and checks them against `remedy-native-SHA256SUMS.txt`.
+            - `pip install remedy-ai` fetches `remedy-runtime` / `remedy_core` and the HQ voice references from this release on first run and checks each file against the sha256 pinned inside the wheel (the PyPI wheel is built from this file after the release).
             - The in-app updater downloads the macOS `.app.tar.gz` from here. Every `.sig` is a minisign signature for an updater file.
 
             Installers are on the [v${{ needs.verify.outputs.version }} release](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v${{ needs.verify.outputs.version }}).
@@ -1179,7 +1179,7 @@ jobs:
             The first ``remedy serve`` on a PyPI install downloads the standalone
             ``remedy-runtime`` / ``remedy_core`` pair for this OS from the
             ``runtime-v${{ needs.verify.outputs.version }}`` companion release, verifies it against
-            ``remedy-native-SHA256SUMS.txt``, and caches it under ``~/.remedy/runtime/``.
+            the checksums pinned inside the wheel, and caches it under ``~/.remedy/runtime/``.
             Chatterbox HQ downloads ``remedy-voice-*.wav`` the same way into
             ``~/.remedy/voice/references/``.
 

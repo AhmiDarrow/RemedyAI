@@ -42,6 +42,16 @@ def _sums(assets: nb.NativeAssets, runtime: bytes, core: bytes) -> bytes:
     return text.encode("utf-8")
 
 
+@pytest.fixture(autouse=True)
+def _unpinned_source_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These cases cover the unpinned (source checkout, opt-in) path.
+
+    Pinned wheels are covered in test_native_pins.py.
+    """
+    monkeypatch.setattr(nb, "load_pins", lambda: None)
+    monkeypatch.setenv("REMEDY_NATIVE_ALLOW_UNPINNED", "1")
+
+
 @pytest.fixture
 def linux_assets(monkeypatch: pytest.MonkeyPatch) -> nb.NativeAssets:
     assets = nb._PLATFORM_ASSETS[("Linux", "x86_64")]
@@ -177,35 +187,24 @@ def test_tampered_download_is_rejected(
     assert list(target.glob("*.part")) == []
 
 
-def test_missing_sums_falls_back_to_latest_then_caches_real_tag(
+def test_missing_version_never_falls_back_to_latest(
     tmp_path: Path, linux_assets: nb.NativeAssets, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    runtime = b"latest-runtime"
-    core = b"latest-core"
-    sums = _sums(linux_assets, runtime, core)
-    latest_base = "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.66.0"
+    requested: list[str] = []
 
     def fake_open(req, timeout=0):  # noqa: ANN001
         url = req.full_url if hasattr(req, "full_url") else str(req)
-        if "/download/v0.65.1/" in url or "/download/runtime-v" in url:
-            raise HTTPError(url, 404, "Not Found", hdrs=None, fp=io.BytesIO())  # type: ignore[arg-type]
-        if url.endswith("/releases/latest"):
-            # Latest predates the runtime-v layout: no companion release.
-            return _Resp(b"", "https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.66.0")
-        if url.endswith(nb.SUMS_NAME):
-            return _Resp(sums, f"{latest_base}/{nb.SUMS_NAME}")
-        if url.endswith(linux_assets.runtime_asset):
-            return _Resp(runtime, f"{latest_base}/{linux_assets.runtime_asset}")
-        if url.endswith(linux_assets.core_asset):
-            return _Resp(core, f"{latest_base}/{linux_assets.core_asset}")
-        raise AssertionError(url)
+        requested.append(url)
+        if "/latest" in url:
+            raise AssertionError(f"must not consult Latest: {url}")
+        raise HTTPError(url, 404, "Not Found", hdrs=None, fp=io.BytesIO())  # type: ignore[arg-type]
 
     monkeypatch.setenv("REMEDY_ENSURE_ASSETS", "1")
     monkeypatch.setattr(nb.urllib.request, "urlopen", fake_open)
-    installed = nb.ensure_native_runtime(tmp_path, version="0.65.1")
-    assert installed.version == "0.66.0"
-    assert installed.runtime_bin.parent.name == linux_assets.triple
-    assert "0.66.0" in str(installed.runtime_bin)
+    with pytest.raises(nb.NativeBootstrapError, match="does not fall back"):
+        nb.ensure_native_runtime(tmp_path, version="0.65.1")
+    assert requested and all("0.65.1" in u for u in requested)
+
 
 
 def test_checksum_file_without_this_platform_fails_clearly(
@@ -304,42 +303,6 @@ def test_sums_cdn_redirect_still_uses_github_download_urls(
     assert installed.core_lib.read_bytes() == core
     assert f"{github_base}/{linux_assets.runtime_asset}" in requested
     assert f"{github_base}/{linux_assets.core_asset}" in requested
-
-
-def test_latest_fallback_cdn_resolves_tag_from_releases_latest(
-    tmp_path: Path, linux_assets: nb.NativeAssets, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime = b"latest-cdn-runtime"
-    core = b"latest-cdn-core"
-    sums = _sums(linux_assets, runtime, core)
-    github_base = "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.66.0"
-    cdn_sums = (
-        "https://release-assets.githubusercontent.com/github-production-release-asset/"
-        "1308826022/fedcba98-7654-3210-fedc-ba9876543210?sp=r&jwt=sums-only-token"
-    )
-
-    def fake_open(req, timeout=0):  # noqa: ANN001
-        url = req.full_url if hasattr(req, "full_url") else str(req)
-        if "release-assets.githubusercontent.com" in url:
-            raise AssertionError(f"must not fetch sibling CDN URL without jwt: {url}")
-        if "/download/v0.65.1/" in url or "/download/runtime-v" in url:
-            raise HTTPError(url, 404, "Not Found", hdrs=None, fp=io.BytesIO())  # type: ignore[arg-type]
-        if url.endswith("/releases/latest") or url.endswith("/releases/latest/"):
-            return _Resp(b"", "https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.66.0")
-        if url.endswith(f"/latest/download/{nb.SUMS_NAME}"):
-            return _Resp(sums, cdn_sums)
-        if url == f"{github_base}/{linux_assets.runtime_asset}":
-            return _Resp(runtime, url)
-        if url == f"{github_base}/{linux_assets.core_asset}":
-            return _Resp(core, url)
-        raise AssertionError(f"unexpected url {url}")
-
-    monkeypatch.setenv("REMEDY_ENSURE_ASSETS", "1")
-    monkeypatch.setattr(nb.urllib.request, "urlopen", fake_open)
-    installed = nb.ensure_native_runtime(tmp_path, version="0.65.1")
-    assert installed.version == "0.66.0"
-    assert "0.66.0" in str(installed.runtime_bin)
-    assert installed.runtime_bin.read_bytes() == runtime
 
 
 def test_cached_install_hashes_once_while_files_unchanged(
@@ -480,35 +443,18 @@ def test_legacy_layout_falls_back_to_main_release(
     assert installed.core_lib.read_bytes() == core
 
 
-def test_missing_version_falls_back_to_latest_runtime_release(
+def test_unpinned_requires_explicit_opt_in(
     tmp_path: Path, linux_assets: nb.NativeAssets, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    runtime = b"latest-companion-runtime"
-    core = b"latest-companion-core"
-    sums = _sums(linux_assets, runtime, core)
-    rt_latest = f"{RELEASES}/download/runtime-v0.69.1"
+    def no_net(*args: object, **kwargs: object) -> None:
+        raise AssertionError("an unpinned build must not download without opt-in")
 
-    def fake_open(req, timeout=0):  # noqa: ANN001
-        url = req.full_url if hasattr(req, "full_url") else str(req)
-        if "0.69.0" in url:
-            raise HTTPError(url, 404, "Not Found", hdrs=None, fp=io.BytesIO())  # type: ignore[arg-type]
-        if url.endswith("/releases/latest"):
-            return _Resp(b"", f"{RELEASES}/tag/v0.69.1")
-        if url.startswith(f"{RELEASES}/latest/download/"):
-            raise AssertionError("legacy Latest path must not be needed")
-        if url == f"{rt_latest}/{nb.SUMS_NAME}":
-            return _Resp(sums, url)
-        if url == f"{rt_latest}/{linux_assets.runtime_asset}":
-            return _Resp(runtime, url)
-        if url == f"{rt_latest}/{linux_assets.core_asset}":
-            return _Resp(core, url)
-        raise AssertionError(f"unexpected url {url}")
-
+    monkeypatch.delenv("REMEDY_NATIVE_ALLOW_UNPINNED", raising=False)
     monkeypatch.setenv("REMEDY_ENSURE_ASSETS", "1")
-    monkeypatch.setattr(nb.urllib.request, "urlopen", fake_open)
-    installed = nb.ensure_native_runtime(tmp_path, version="0.69.0")
-    assert installed.version == "0.69.1"
-    assert installed.runtime_bin.read_bytes() == runtime
+    monkeypatch.setattr(nb.urllib.request, "urlopen", no_net)
+    with pytest.raises(nb.NativeBootstrapError, match="no pinned runtime checksums"):
+        nb.ensure_native_runtime(tmp_path, version="0.69.0")
+
 
 
 def test_no_sums_anywhere_names_both_layouts(

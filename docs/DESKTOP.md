@@ -506,6 +506,19 @@ CI workflow: [`.github/workflows/desktop-release.yml`](../.github/workflows/desk
 2. Jobs: stage `remedy-runtime` + `remedy_core` → build Tauri NSIS with `TAURI_SIGNING_*` secrets → publish GitHub Release + `latest.json`.
 3. Desktop checks `https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json`.
 
+### PyPI wheel (after the release workflow)
+
+The wheel pins the sha256 of every runtime asset of its own version, so the
+first-run download trusts the wheel, not the GitHub release it downloads from.
+Build it only after `runtime-v<ver>` is published:
+
+1. `uv run python scripts/pin_native_hashes.py --from-release --verify-assets`
+   (or `--sums <workflow artifact>/remedy-native-SHA256SUMS.txt`). This writes
+   `src/remedy/runtime/native_pins.json`; do not commit it.
+2. `uv run python scripts/pin_native_hashes.py --check` must print `pins: OK`.
+3. `uv build`, upload, then smoke `remedy serve` from a clean home: the runtime
+   must download and verify. A wheel without pins refuses to download.
+
 ### Signing checklist
 
 | Item | Location | Commit? |
