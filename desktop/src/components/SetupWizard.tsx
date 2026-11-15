@@ -30,12 +30,7 @@ import { isCustomLikeProvider, mergeModelOptions, showsBaseUrl } from '../api/mo
 import { isLinuxDesktop, isMacDesktop } from '../utils/platform'
 import { useI18n } from '../i18n'
 
-const PERSONAS = [
-  { id: 'balanced', name: 'Balanced', description: 'Helpful and adaptable to the task' },
-  { id: 'efficient', name: 'Efficient', description: 'Concise, code-first, minimal explanation' },
-  { id: 'detailed', name: 'Detailed', description: 'Thorough explanations with context' },
-  { id: 'playful', name: 'Playful', description: 'Casual tone with light humor' },
-] as const
+const PERSONA_IDS = ['balanced', 'efficient', 'detailed', 'playful'] as const
 
 interface SetupWizardProps {
   open: boolean
@@ -698,11 +693,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   >
                     {languages.map((row) => (
                       <option key={row.id} value={row.id}>
-                        {row.id === 'auto'
-                          ? t('settings.languageAuto')
-                          : row.name_native === row.name_en
-                            ? row.name_native
-                            : `${row.name_native} — ${row.name_en}`}
+                        {row.id === 'auto' ? t('settings.languageAuto') : row.name_native}
                       </option>
                     ))}
                   </select>
@@ -1111,24 +1102,24 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   {t('setup.style')}
                 </label>
                 <div className="grid grid-cols-2 gap-2">
-                  {PERSONAS.map((p) => (
+                  {PERSONA_IDS.map((id) => (
                     <button
-                      key={p.id}
+                      key={id}
                       type="button"
-                      onClick={() => setPersona(p.id)}
+                      onClick={() => setPersona(id)}
                       className="text-left px-3 py-3 rounded-lg transition-colors"
                       style={{
-                        background: persona === p.id
+                        background: persona === id
                           ? 'color-mix(in srgb, var(--accent) 14%, var(--bg-primary))'
                           : 'var(--bg-tertiary)',
-                        border: persona === p.id ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                        border: persona === id ? '1.5px solid var(--accent)' : '1px solid var(--border)',
                       }}
                     >
                       <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                        {p.name}
+                        {t(`persona.${id}`)}
                       </div>
                       <div className="text-xs mt-0.5" style={mutedStyles}>
-                        {p.description}
+                        {t(`persona.${id}Hint`)}
                       </div>
                     </button>
                   ))}

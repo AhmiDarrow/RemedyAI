@@ -1,6 +1,7 @@
 mod pty_host;
 mod browser_host;
 mod privacy_shield;
+mod tray_i18n;
 use std::env;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -482,6 +483,27 @@ fn desktop_prefs_path() -> PathBuf {
 
 fn config_toml_path() -> PathBuf {
     remedy_home().join("config.toml")
+}
+
+/// Parse a simple TOML string assignment, matching `key` as a whole token.
+fn toml_string(raw: &str, key: &str) -> Option<String> {
+    for line in raw.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        let mut parts = line.splitn(2, '=');
+        let found = parts.next().unwrap_or("").trim();
+        if found != key {
+            continue;
+        }
+        let val = parts.next().unwrap_or("").trim();
+        let val = val.trim_matches(|c| c == '"' || c == '\'');
+        return Some(val.to_string());
+    }
+    None
+}
+
+fn read_ui_language() -> String {
+    let raw = std::fs::read_to_string(config_toml_path()).unwrap_or_default();
+    toml_string(&raw, "ui_language").unwrap_or_else(|| "auto".to_string())
 }
 
 /// Parse a simple TOML bool assignment: `key = true` / `key = false`.
@@ -6370,19 +6392,22 @@ pub fn run() {
                 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
                 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 
-                let show_i = MenuItem::with_id(app, "show", "Show Remedy", true, None::<&str>)?;
+                let tray_copy =
+                    tray_i18n::labels(&read_ui_language(), &tray_i18n::os_locale_name());
+                let show_i = MenuItem::with_id(app, "show", tray_copy.show, true, None::<&str>)?;
                 let settings_i =
-                    MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
+                    MenuItem::with_id(app, "settings", tray_copy.settings, true, None::<&str>)?;
                 let updates_i = MenuItem::with_id(
                     app,
                     "check_updates",
-                    "Check for updates...",
+                    tray_copy.updates,
                     true,
                     None::<&str>,
                 )?;
-                let about_i = MenuItem::with_id(app, "about", "About Remedy", true, None::<&str>)?;
+                let about_i =
+                    MenuItem::with_id(app, "about", tray_copy.about, true, None::<&str>)?;
                 let sep = PredefinedMenuItem::separator(app)?;
-                let quit_i = MenuItem::with_id(app, "quit", "Quit Remedy", true, None::<&str>)?;
+                let quit_i = MenuItem::with_id(app, "quit", tray_copy.quit, true, None::<&str>)?;
                 let menu = Menu::with_items(
                     app,
                     &[&show_i, &settings_i, &updates_i, &about_i, &sep, &quit_i],
@@ -6393,9 +6418,7 @@ pub fn run() {
                     let _ = tray.set_menu(Some(menu.clone()));
                     // Left click / double-click = show window; right-click = menu.
                     let _ = tray.set_show_menu_on_left_click(false);
-                    let _ = tray.set_tooltip(Some(
-                        "Remedy — left-click to show · right-click for menu",
-                    ));
+                    let _ = tray.set_tooltip(Some(tray_copy.tooltip));
                     let app_for_menu = app.handle().clone();
                     tray.on_menu_event(move |_tray, event| match event.id.as_ref() {
                         "show" => {

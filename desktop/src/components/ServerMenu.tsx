@@ -14,6 +14,8 @@ import {
   useState,
   type CSSProperties,
 } from 'react'
+import { useI18n } from '../i18n'
+import { intlLocale } from '../i18n/locale'
 import { createPortal } from 'react-dom'
 import { getServerUrl } from '../api/client'
 import { getConnect, type ConnectStatus } from '../api/connect'
@@ -76,9 +78,25 @@ export function formatUptime(startedAtMs: number | null | undefined, now = Date.
   return `${Math.floor(h / 24)}d ${h % 24}h`
 }
 
-export function formatAgo(atMs: number | null | undefined, now = Date.now()): string {
+export function formatAgo(
+  atMs: number | null | undefined,
+  now = Date.now(),
+  locale?: string,
+): string {
   if (!atMs) return ''
   const s = Math.max(0, Math.floor((now - atMs) / 1000))
+  const tag = locale === undefined ? undefined : intlLocale(locale)
+  if (tag && tag !== 'en') {
+    try {
+      const rtf = new Intl.RelativeTimeFormat(tag, { numeric: 'auto' })
+      if (s < 45) return rtf.format(0, 'second')
+      if (s < 3600) return rtf.format(-Math.max(1, Math.floor(s / 60)), 'minute')
+      if (s < 86400 * 2) return rtf.format(-Math.max(1, Math.floor(s / 3600)), 'hour')
+      return rtf.format(-Math.floor(s / 86400), 'day')
+    } catch {
+      /* English compact form below */
+    }
+  }
   if (s < 5) return 'just now'
   if (s < 60) return `${s}s ago`
   const m = Math.floor(s / 60)
@@ -206,6 +224,7 @@ export function ServerMenu({
   alerts = '',
   onRestarted,
 }: ServerMenuProps) {
+  const { resolved } = useI18n()
   const tauri = isTauri()
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<MenuPos | null>(null)
@@ -391,7 +410,11 @@ export function ServerMenu({
     : lastExit
       ? describeExit(lastExit.status)
       : ''
-  const lastExitAgo = formatAgo(info?.last_exit_at_ms ?? lastExit?.at_ms ?? null, now)
+  const lastExitAgo = formatAgo(
+    info?.last_exit_at_ms ?? lastExit?.at_ms ?? null,
+    now,
+    intlLocale(resolved),
+  )
   const phones = connect?.devices.length ?? 0
 
   const panelStyle: CSSProperties | undefined = pos

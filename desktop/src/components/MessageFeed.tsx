@@ -16,6 +16,7 @@ import remarkGfm from 'remark-gfm'
 import type { ChatMessage } from '../types'
 import { sanitizeAssistantText } from '../utils/sanitizeChat'
 import { dayKey, dayLabel } from '../utils/relativeTime'
+import { intlLocale } from '../i18n/locale'
 import { BuildTodos, todosHaveOpen, type BuildTodo } from './BuildTodos'
 import type { TaskProgressInfo } from './TaskProgress'
 import { ImageLightbox } from './ImageLightbox'
@@ -121,35 +122,15 @@ function firstName(name: string | undefined | null): string {
   return t.split(/\s+/)[0] || 'You'
 }
 
-/** Studio workbench starters — Grove overrides these via the `starters` prop. */
-const STARTERS = [
-  {
-    label: 'What can you help with?',
-    text: 'What can you help me with on this machine?',
-  },
-  {
-    label: 'Explore this project',
-    text: 'Scan the open project and summarize structure, stack, and what I should know first.',
-  },
-  {
-    label: 'Review recent changes',
-    text: 'Review recent git changes and flag risks or follow-ups.',
-  },
-  {
-    label: 'Plan a task',
-    text: 'Help me plan: ',
-  },
-]
-
 /** Do not collapse answers — user wants full provider text visible. */
 const COLLAPSE_CHARS = Number.POSITIVE_INFINITY
 
-function formatTime(iso: string | null | undefined): string | null {
+function formatTime(iso: string | null | undefined, locale?: string): string | null {
   if (!iso) return null
   try {
     const d = new Date(iso)
     if (Number.isNaN(d.getTime())) return null
-    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    return d.toLocaleTimeString(locale ? [locale] : [], { hour: 'numeric', minute: '2-digit' })
   } catch {
     return null
   }
@@ -369,6 +350,7 @@ const MessageBubble = memo(function MessageBubble({
   /** The owner reacts to Remedy's messages (one per message; same again removes). */
   onReact?: (messageId: string, emoji: string) => void
 }) {
+  const { resolved } = useI18n()
   const isUser = msg.role === 'user'
   const isSystem = msg.role === 'system'
   const isAssistant = !isUser && !isSystem
@@ -389,7 +371,7 @@ const MessageBubble = memo(function MessageBubble({
   const thinkingText = (msg.thinking || '') + (partialThinking || '')
   const showEdit =
     msg.role === 'user' && !msg.reverted && !!onEditUserMessage && !streaming
-  const timeLabel = formatTime(msg.created_at)
+  const timeLabel = formatTime(msg.created_at, intlLocale(resolved))
   const long = text.length > COLLAPSE_CHARS
   const [expanded, setExpanded] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -706,7 +688,14 @@ export function MessageFeed({
   sessionId = null,
   stickNonce,
 }: MessageFeedProps) {
-  const { t } = useI18n()
+  const { t, resolved } = useI18n()
+  const dateLocale = intlLocale(resolved)
+  const defaultStarters = useMemo(() => [
+    { label: t('starter.help'), text: t('starter.helpPrompt') },
+    { label: t('starter.explore'), text: t('starter.explorePrompt') },
+    { label: t('starter.review'), text: t('starter.reviewPrompt') },
+    { label: t('starter.plan'), text: t('starter.planPrompt') },
+  ], [t])
   const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
   const openLightbox = useCallback((src: string, alt?: string) => {
     setLightbox({ src, alt })
@@ -814,7 +803,7 @@ export function MessageFeed({
       const dk = dayKey(msg.created_at)
       if (dk && dk !== lastDay) {
         lastDay = dk
-        items.push({ type: 'day', key: dk, label: dayLabel(msg.created_at) })
+        items.push({ type: 'day', key: dk, label: dayLabel(msg.created_at, Date.now(), dateLocale) })
         prevRole = null
       }
       const hideAvatar =
@@ -825,7 +814,7 @@ export function MessageFeed({
       items.push({ type: 'msg', msg, hideAvatar, index })
     })
     return items
-  }, [windowed])
+  }, [windowed, dateLocale])
 
   return (
     <div
@@ -982,7 +971,7 @@ export function MessageFeed({
               role="group"
               aria-label="Starter prompts"
             >
-              {(starters ?? STARTERS).map((s) => (
+              {(starters ?? defaultStarters).map((s) => (
                 <button
                   key={s.label}
                   type="button"

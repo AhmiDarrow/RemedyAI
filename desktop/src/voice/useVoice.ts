@@ -9,6 +9,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getVoiceStatus, reportVoiceClientIssue, speakToUrl, transcribeAudio, type VoiceStatus } from '../api/voice'
+import { useI18n } from '../i18n'
+import { intlLocale } from '../i18n/locale'
 import { pickFallbackVoice, type GenderRole } from './pickVoice'
 
 /** Light markdown → speakable text for the browser-TTS fallback path.
@@ -82,6 +84,9 @@ export function splitForSpeech(text: string, max = 220): string[] {
 export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
   const gender: GenderRole = opts.gender || 'female'
   const enabled = opts.enabled !== false
+  const { resolved } = useI18n()
+  const speechTag = intlLocale(resolved)
+  const speechLocale = speechTag && speechTag !== 'en' ? speechTag : undefined
   const [status, setStatus] = useState<VoiceStatus | null>(null)
   const [speaking, setSpeaking] = useState(false)
   const [recording, setRecording] = useState(false)
@@ -158,11 +163,13 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
         const match = pickFallbackVoice(
           voices.map((v) => ({ name: v.name, lang: v.lang, default: v.default })),
           gender,
+          speechLocale,
         )
         if (match) {
           const real = voices.find((v) => v.name === match.name)
           if (real) utter.voice = real
         }
+        if (speechLocale) utter.lang = speechLocale
         utter.onend = () => setSpeaking(false)
         utter.onerror = () => setSpeaking(false)
         setSpeaking(true)
@@ -188,7 +195,7 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
         }, 500)
       }
     },
-    [gender],
+    [gender, speechLocale],
   )
 
   const speak = useCallback(

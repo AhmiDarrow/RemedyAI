@@ -48,6 +48,18 @@ describe('pickFallbackVoice', () => {
     expect(pickFallbackVoice([], 'female')).toBeNull()
   })
 
+  it('prefers a voice in the chosen locale over English', () => {
+    const v = pickFallbackVoice(
+      [
+        { name: 'Microsoft Zira - English (United States)', lang: 'en-US', default: true },
+        { name: 'Microsoft Helena - Spanish (Spain)', lang: 'es-ES' },
+      ],
+      'female',
+      'es',
+    )
+    expect(v?.lang).toBe('es-ES')
+  })
+
   it('prefers English voices over the system default language', () => {
     const v = pickFallbackVoice(
       [
