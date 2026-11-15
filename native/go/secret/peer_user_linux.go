@@ -1,6 +1,6 @@
 //go:build linux
 
-package httpapi
+package secret
 
 import (
 	"bufio"
@@ -17,7 +17,7 @@ import (
 
 // sameUserPeer finds the client's socket in /proc/net/tcp{,6} (local = client
 // endpoint, remote = server endpoint) and compares its owner uid with ours.
-func sameUserPeer(client, server netip.AddrPort) (bool, error) {
+func SameUserPeer(client, server netip.AddrPort) (bool, error) {
 	for _, path := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
 		f, err := os.Open(path)
 		if err != nil {
