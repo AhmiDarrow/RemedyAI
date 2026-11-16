@@ -106,10 +106,12 @@ export function useAppBootstrap(opts: {
       if (cancelled) return
 
       if (!settings) {
-        setShowSetupWizard(true)
+        // A failed settings load (auth, restarting server) is NOT first run:
+        // never open the setup wizard here or an existing install looks reset.
         setServerError(
-          'Could not load settings yet — complete setup once the local server is ready. '
-            + 'If save fails, use Retry then Open setup.',
+          'Could not reach your Remedy settings (the local server is not '
+            + 'responding or this browser is not signed in to it). Your setup '
+            + 'is untouched. Use Retry, or reopen the Web UI from the desktop app.',
         )
         return
       }
