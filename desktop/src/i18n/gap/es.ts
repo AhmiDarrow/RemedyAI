@@ -57,6 +57,7 @@ export const es: Record<string, string> = {
   'about.platform': 'Escritorio de Windows + API local',
   'about.signedIn': 'Sesión iniciada como {userName}',
   'about.whatsNew': 'Novedades',
+  'about.source': 'Código fuente',
   'settings.saved': 'Ajustes guardados',
   'settings.savedWorkspace': 'Ajustes guardados · Espacio de trabajo actualizado',
   'settings.saveFailed': 'No se pudieron guardar los ajustes',

@@ -129,3 +129,5 @@ Contributing: [CONTRIBUTING.md](https://github.com/AhmiDarrow/RemedyAI/blob/mast
 Free to use, modify, and redistribute, including commercially. Use is at your own risk; see [TERMS](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/TERMS.md). Third-party notices: `desktop/public/THIRD_PARTY_NOTICES.txt`.
 
 Copyright © 2025–2026 **Ahmi Darrow**.
+
+"Hope this helps" - Ahmi

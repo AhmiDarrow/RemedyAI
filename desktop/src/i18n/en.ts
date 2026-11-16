@@ -285,6 +285,7 @@ export const EN: Record<string, string> = {
   'about.platform': 'Windows desktop + local API',
   'about.signedIn': 'Signed in as {userName}',
   'about.whatsNew': "What's new",
+  'about.source': 'Source code',
   'settings.saved': 'Settings saved',
   'settings.savedWorkspace': 'Settings saved · Workspace updated',
   'settings.saveFailed': 'Failed to save settings',

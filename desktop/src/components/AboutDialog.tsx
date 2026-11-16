@@ -1,6 +1,7 @@
 /** About Remedy dialog — extracted from App.tsx. */
 
 import { useEffect } from 'react'
+import { AboutSourceLink, AhmiSignature } from '../aboutLine'
 import { browserStackHold } from '../utils/browserStack'
 import { useDialogFocus } from '../hooks/useDialogFocus'
 import { useI18n } from '../i18n'
@@ -112,8 +113,9 @@ export function AboutDialog({
             {t('about.fromCreator')}
           </div>
           {t('about.creator')}
+          <AhmiSignature className="mt-1.5" />
         </div>
-        <div className="text-xs space-y-1 mb-4" style={{ color: 'var(--text-secondary)' }}>
+        <div className="text-xs space-y-1 mb-3" style={{ color: 'var(--text-secondary)' }}>
           <div>
             {t('about.version')}{' '}
             <span className="font-semibold" style={{ color: 'var(--accent)' }}>
@@ -123,6 +125,7 @@ export function AboutDialog({
           </div>
           {userName ? <div>{t('about.signedIn', { userName })}</div> : null}
         </div>
+        <AboutSourceLink className="text-xs mb-4" />
         <div className="flex flex-wrap justify-end gap-2">
           <button
             type="button"
