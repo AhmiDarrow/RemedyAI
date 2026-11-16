@@ -57,6 +57,7 @@ export const zhHans: Record<string, string> = {
   'about.platform': 'Windows 桌面 + 本地 API',
   'about.signedIn': '已登录为 {userName}',
   'about.whatsNew': '新功能',
+  'about.source': '源代码',
   'settings.saved': '设置已保存',
   'settings.savedWorkspace': '设置已保存 · 工作区已更新',
   'settings.saveFailed': '未能保存设置',

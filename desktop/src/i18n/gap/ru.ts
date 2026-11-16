@@ -57,6 +57,7 @@ export const ru: Record<string, string> = {
   'about.platform': 'Рабочий стол Windows и локальный API',
   'about.signedIn': 'Вы вошли как {userName}',
   'about.whatsNew': 'Что нового',
+  'about.source': 'Исходный код',
   'settings.saved': 'Настройки сохранены',
   'settings.savedWorkspace': 'Настройки сохранены · Рабочая область обновлена',
   'settings.saveFailed': 'Не удалось сохранить настройки',

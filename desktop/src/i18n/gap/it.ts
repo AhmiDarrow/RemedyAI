@@ -57,6 +57,7 @@ export const it: Record<string, string> = {
   'about.platform': 'Desktop Windows + API locale',
   'about.signedIn': 'Accesso come {userName}',
   'about.whatsNew': 'Novità',
+  'about.source': 'Codice sorgente',
   'settings.saved': 'Impostazioni salvate',
   'settings.savedWorkspace': 'Impostazioni salvate · Area di lavoro aggiornata',
   'settings.saveFailed': 'Impossibile salvare le impostazioni',

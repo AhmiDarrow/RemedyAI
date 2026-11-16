@@ -12,6 +12,7 @@ import {
   FormSelect,
   FormToggle,
 } from './formUi'
+import { AboutSourceLink, AhmiSignature } from '../../aboutLine'
 import { openExternalUrl } from '../../api/auth'
 import { THEME_LIST } from '../../themes'
 import { HOTKEYS } from '../../hotkeys'
@@ -473,6 +474,7 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
             From the creator
           </div>
           My name is Ahmi, I hope you enjoy my Remedy.
+          <AhmiSignature className="mt-1.5" />
         </div>
         <div className="space-y-1" style={{ color: 'var(--text-secondary)' }}>
           <div className="flex justify-between">
@@ -488,6 +490,7 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
             <span style={{ color: 'var(--text-muted)' }}>Config</span>
             <span style={{ fontFamily: 'monospace', fontSize: '0.65rem' }}>~/.remedy/config.toml</span>
           </div>
+          <AboutSourceLink className="pt-1" />
         </div>
         {onOpenHelp && (
           <button

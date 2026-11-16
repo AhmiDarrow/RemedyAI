@@ -57,6 +57,7 @@ export const pt: Record<string, string> = {
   'about.platform': 'Área de trabalho do Windows + API local',
   'about.signedIn': 'Conectado como {userName}',
   'about.whatsNew': 'Novidades',
+  'about.source': 'Código-fonte',
   'settings.saved': 'Ajustes salvos',
   'settings.savedWorkspace': 'Ajustes salvos · Espaço de trabalho atualizado',
   'settings.saveFailed': 'Não foi possível salvar os ajustes',
