@@ -56,6 +56,22 @@ func (b *bootstrapLinks) mint(now time.Time) string {
 	return nonce
 }
 
+// peek reports whether nonce is a live link without burning it.
+func (b *bootstrapLinks) peek(nonce string, now time.Time) bool {
+	nonce = strings.TrimSpace(nonce)
+	if len(nonce) < 32 {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for n, exp := range b.nonces {
+		if subtle.ConstantTimeCompare([]byte(n), []byte(nonce)) == 1 {
+			return now.Before(exp)
+		}
+	}
+	return false
+}
+
 // consume reports whether nonce is a live link, and burns it either way.
 func (b *bootstrapLinks) consume(nonce string, now time.Time) bool {
 	nonce = strings.TrimSpace(nonce)
@@ -126,7 +142,14 @@ func (s *Server) handleLocalBootstrap(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if !HTTPBootstrapEnabled(s.homeDir) {
+	// A live one-time link is explicit owner consent (only a caller that
+	// already holds the token can mint one), so it opens the default-off
+	// desktop sidecar too. An explicit REMEDY_HTTP_BOOTSTRAP=0 still wins.
+	linkOK := s.bootLinks.peek(r.URL.Query().Get("nonce"), time.Now())
+	if env, forced := envTruthy("REMEDY_HTTP_BOOTSTRAP"); forced && !env {
+		linkOK = false
+	}
+	if !HTTPBootstrapEnabled(s.homeDir) && !linkOK {
 		writeJSON(w, http.StatusForbidden, map[string]any{
 			"error": "http_bootstrap_disabled",
 			"detail": "Browser token bootstrap is off. Desktop still uses IPC " +

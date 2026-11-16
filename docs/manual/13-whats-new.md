@@ -2,13 +2,14 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.70.1**. Installed apps update on their own.
+Current release: **v0.70.2**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [0.70.2 — Switch to Web UI stays signed in](#0702---switch-to-web-ui-stays-signed-in)
 - [0.70.1 — About](#0701---about)
 - [0.70.0 — Ten languages](#0700---ten-languages)
 - [0.69.2 — The browser app in pip installs](#0692---the-browser-app-in-pip-installs)
@@ -31,6 +32,13 @@ you gave her, and waits for you before money, send, or delete.
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
+
+## 0.70.2 - Switch to Web UI stays signed in
+
+- **Switch to Web UI.** Opening the browser app from the desktop now signs you
+  in, so it keeps your chats and settings instead of showing the first-run
+  setup. If the browser ever can't reach Remedy, it says so and leaves your
+  setup untouched.
 
 ## 0.70.1 - About
 
