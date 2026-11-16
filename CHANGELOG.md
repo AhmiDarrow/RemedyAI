@@ -4,6 +4,11 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.70.0] - 2026-11-15
+
+### Added
+- Now available in Spanish, French, German, Portuguese (Brazil), Italian, Russian, Polish, Japanese, Korean and Chinese (Simplified). Apps use your system language by default; change it any time in Settings → Language. English stays the fallback when a phrase has no translation. (#62)
+
 ## [0.69.2] - 2026-11-15
 
 ### Fixed
