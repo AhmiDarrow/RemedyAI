@@ -2,13 +2,14 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.69.2**. Installed apps update on their own.
+Current release: **v0.70.0**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [0.70.0 — Ten languages](#0700---ten-languages)
 - [0.69.2 — The browser app in pip installs](#0692---the-browser-app-in-pip-installs)
 - [0.69.1 — Message reactions and a calmer live turn](#0691---message-reactions-and-a-calmer-live-turn)
 - [0.69.0 — Reasoning settings and a clearer live turn](#0690---reasoning-settings-and-a-clearer-live-turn)
@@ -29,6 +30,13 @@ you gave her, and waits for you before money, send, or delete.
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
+
+## 0.70.0 - Ten languages
+
+- **Your language.** Now available in Spanish, French, German, Portuguese
+  (Brazil), Italian, Russian, Polish, Japanese, Korean and Chinese
+  (Simplified). Apps use your system language by default; change it any time
+  in Settings → Language.
 
 ## 0.69.2 - The browser app in pip installs
 
