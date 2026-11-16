@@ -57,6 +57,7 @@ export const fr: Record<string, string> = {
   'about.platform': 'Bureau Windows + API locale',
   'about.signedIn': 'Connecté en tant que {userName}',
   'about.whatsNew': 'Nouveautés',
+  'about.source': 'Code source',
   'settings.saved': 'Réglages enregistrés',
   'settings.savedWorkspace': 'Réglages enregistrés · Espace de travail mis à jour',
   'settings.saveFailed': 'Échec de l’enregistrement des réglages',

@@ -57,6 +57,7 @@ export const de: Record<string, string> = {
   'about.platform': 'Windows-Desktop + lokale API',
   'about.signedIn': 'Angemeldet als {userName}',
   'about.whatsNew': 'Neuigkeiten',
+  'about.source': 'Quellcode',
   'settings.saved': 'Einstellungen gespeichert',
   'settings.savedWorkspace': 'Einstellungen gespeichert · Arbeitsbereich aktualisiert',
   'settings.saveFailed': 'Einstellungen konnten nicht gespeichert werden',

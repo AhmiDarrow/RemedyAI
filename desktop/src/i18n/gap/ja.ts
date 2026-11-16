@@ -57,6 +57,7 @@ export const ja: Record<string, string> = {
   'about.platform': 'Windows デスクトップ + ローカル API',
   'about.signedIn': '{userName} としてサインイン中',
   'about.whatsNew': '新機能',
+  'about.source': 'ソースコード',
   'settings.saved': '設定を保存しました',
   'settings.savedWorkspace': '設定を保存しました · ワークスペースを更新しました',
   'settings.saveFailed': '設定を保存できませんでした',
