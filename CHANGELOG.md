@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.70.2] - 2026-11-15
+
+### Fixed
+- Switch to Web UI now signs the browser in. The desktop mints a one-time sign-in link and opens it, so the browser app no longer loses its connection and shows the first-run wizard. A one-time link now works even while browser token bootstrap is off (the desktop default); an explicit `REMEDY_HTTP_BOOTSTRAP=0` still blocks it. (#65)
+- A settings load that fails (server restarting, browser not signed in) shows a connection message instead of the first-run setup wizard, so an existing install never looks reset. (#65)
+
 ## [0.70.1] - 2026-11-15
 
 ### Added

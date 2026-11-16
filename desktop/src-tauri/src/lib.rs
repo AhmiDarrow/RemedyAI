@@ -2825,6 +2825,35 @@ fn start_dragging_main_window(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// POST /api/auth/bootstrap-link with the desktop's own token; returns the URL.
+fn mint_web_ui_link() -> Result<String, String> {
+    use std::io::{Read, Write};
+    let token = get_local_api_token()?;
+    let mut s = TcpStream::connect_timeout(&status_addr(), Duration::from_secs(2))
+        .map_err(|e| format!("connect: {e}"))?;
+    let _ = s.set_read_timeout(Some(Duration::from_secs(3)));
+    let req = format!(
+        "POST /api/auth/bootstrap-link HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\
+         Authorization: Bearer {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        api_port(),
+        token
+    );
+    s.write_all(req.as_bytes()).map_err(|e| format!("write: {e}"))?;
+    let mut buf = String::new();
+    let _ = s.read_to_string(&mut buf);
+    if !(buf.starts_with("HTTP/1.1 200") || buf.starts_with("HTTP/1.0 200")) {
+        return Err(format!("unexpected response: {}", buf.lines().next().unwrap_or("")));
+    }
+    let body = buf.split("\r\n\r\n").nth(1).unwrap_or("");
+    let v: serde_json::Value =
+        serde_json::from_str(body.trim()).map_err(|e| format!("json: {e}"))?;
+    v.get("url")
+        .and_then(|u| u.as_str())
+        .filter(|u| u.starts_with("http://127.0.0.1:"))
+        .map(str::to_string)
+        .ok_or_else(|| "no url in response".to_string())
+}
+
 /// Hide desktop window to tray and open the browser WebUI (same chat app via local API).
 #[tauri::command]
 fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
@@ -2842,6 +2871,16 @@ fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
         }
         thread::sleep(Duration::from_millis(200));
     }
+
+    // The browser has no IPC token. Mint a one-time sign-in link (authenticated
+    // with the desktop's own token) so it does not land on a bogus first run.
+    let url = match mint_web_ui_link() {
+        Ok(link) => link,
+        Err(e) => {
+            log::warn!("switch_to_web_ui: one-time link not minted: {e}");
+            url
+        }
+    };
 
     // Same stay-ready path as title-bar Close (WSLg minimizes; others hide).
     if let Some(w) = primary_window(&app) {

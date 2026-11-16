@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -122,6 +123,32 @@ func TestBootstrapLinkIsSingleUseWhenPeerUnknown(t *testing.T) {
 	}
 	if code, _, _ := bootstrapGet(t, base, nonce); code != http.StatusForbidden {
 		t.Fatalf("link reused: %d", code)
+	}
+}
+
+func TestBootstrapLinkOpensDefaultOffSidecar(t *testing.T) {
+	t.Setenv("REMEDY_DESKTOP_SIDECAR", "1") // http_bootstrap defaults off
+	base := startBootstrapServer(t)
+	os.Unsetenv("REMEDY_HTTP_BOOTSTRAP") // helper forces it on; restored by t.Setenv cleanup
+	stubPeer(t, false, errPeerUnsupported)
+	if code, body, _ := bootstrapGet(t, base, ""); code != http.StatusForbidden || body["error"] != "http_bootstrap_disabled" {
+		t.Fatalf("no link on default-off sidecar: %d %v", code, body)
+	}
+	if code, _, _ := bootstrapGet(t, base, strings.Repeat("A", 43)); code != http.StatusForbidden {
+		t.Fatalf("guessed link accepted: %d", code)
+	}
+	nonce := mintLink(t, base)
+	if code, body, text := bootstrapGet(t, base, nonce); code != http.StatusOK || body["token"] != sameUserTestToken {
+		t.Fatalf("valid link on default-off sidecar: %d %s", code, text)
+	}
+}
+
+func TestBootstrapLinkRespectsExplicitLockdown(t *testing.T) {
+	base := startBootstrapServer(t)
+	nonce := mintLink(t, base)
+	t.Setenv("REMEDY_HTTP_BOOTSTRAP", "0")
+	if code, body, _ := bootstrapGet(t, base, nonce); code != http.StatusForbidden || body["error"] != "http_bootstrap_disabled" {
+		t.Fatalf("lockdown must beat a link: %d %v", code, body)
 	}
 }
 
