@@ -57,6 +57,7 @@ export const pl: Record<string, string> = {
   'about.platform': 'Pulpit Windows + lokalne API',
   'about.signedIn': 'Zalogowano jako {userName}',
   'about.whatsNew': 'Co nowego',
+  'about.source': 'Kod źródłowy',
   'settings.saved': 'Ustawienia zapisane',
   'settings.savedWorkspace': 'Ustawienia zapisane · Obszar roboczy zaktualizowany',
   'settings.saveFailed': 'Nie udało się zapisać ustawień',

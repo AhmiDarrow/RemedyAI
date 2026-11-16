@@ -57,6 +57,7 @@ export const ko: Record<string, string> = {
   'about.platform': 'Windows 데스크톱 + 로컬 API',
   'about.signedIn': '{userName}(으)로 로그인함',
   'about.whatsNew': '새로운 기능',
+  'about.source': '소스 코드',
   'settings.saved': '설정을 저장했습니다',
   'settings.savedWorkspace': '설정을 저장했습니다 · 작업 공간을 업데이트했습니다',
   'settings.saveFailed': '설정을 저장하지 못했습니다',
