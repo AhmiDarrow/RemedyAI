@@ -4,6 +4,11 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.70.1] - 2026-11-15
+
+### Added
+- Added an About section with version info.
+
 ## [0.70.0] - 2026-11-15
 
 ### Added
