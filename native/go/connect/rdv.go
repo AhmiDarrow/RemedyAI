@@ -710,6 +710,10 @@ func (r *RendezvousSession) Open(ctx context.Context) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	// ReaderLoop gives up on a read that outlasts Timeout, and an idle
+	// rendezvous only sees PINGRESP every PingEveryS. Keep the read window
+	// above two pings so a quiet subscription stays up.
+	r.MQTT.Timeout = 2*PingEveryS + 5*time.Second
 
 	loopCtx, loopCancel := context.WithCancel(ctx)
 	r.mu.Lock()
@@ -720,6 +724,9 @@ func (r *RendezvousSession) Open(ctx context.Context) (net.Conn, error) {
 	r.wg.Add(2)
 	go func() {
 		defer r.wg.Done()
+		// A dead broker link must end the rendezvous so the dial loop
+		// redials, instead of leaving the handshake on a deaf pipe.
+		defer r.Close()
 		r.MQTT.ReaderLoop(loopCtx)
 	}()
 	go func() {
