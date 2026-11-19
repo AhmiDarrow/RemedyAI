@@ -1,4 +1,9 @@
-"""Keep public CI aligned with the runtimes Remedy actually ships."""
+"""Keep the local CI gate and the release pipeline aligned with what Remedy ships.
+
+There is no CI on GitHub: scripts/prepush.py runs the full matrix on the owner's
+machine, GitHub only builds and signs release packages (desktop-release.yml),
+and scripts/release_local.py publishes.
+"""
 
 from __future__ import annotations
 
@@ -47,57 +52,27 @@ def _uses_step(job: object, action: str) -> dict[str, object]:
 ZIG_BUILD = "zig build -Doptimize=ReleaseSafe"
 
 
-def test_ci_covers_every_shipped_runtime_and_artifact() -> None:
-    jobs = _workflow_jobs("ci.yml")
-    assert {
-        "test",
-        "test-windows",
-        "desktop",
-        "android-connect",
-        "rust-desktop",
-        "native-core",
-    } <= jobs.keys()
 
-    linux_python = _run_commands(jobs["test"])
+def test_local_gate_covers_every_shipped_runtime_and_artifact() -> None:
+    """Every runtime, platform and check Remedy ships runs on every push."""
+    prepush = _prepush_module()
+    assert {lane.key for lane in prepush.LANES} == {
+        "checks", "linux", "desktop", "rust", "native", "android", "python",
+    }
+    local = "\n".join(step.command for lane in prepush.LANES for step in lane.steps)
     for command in (
         "check_sanitize.py",
-        "ruff check",
-        "mypy",
+        "ruff check . --no-fix",
+        "uv run mypy",
         "check_mypy_exclude.py",
         "import remedy",
         "check_docs.py",
-        "pytest -q",
+        "pytest -q --tb=short",
         "uv build",
-    ):
-        assert command in linux_python
-
-    windows_python = _run_commands(jobs["test-windows"])
-    assert "run_windows_ci_pytest.py" in windows_python
-    assert "uv run pytest -q --tb=short" not in windows_python, (
-        "Windows CI must not re-run the full Linux pytest suite"
-    )
-
-    desktop = _run_commands(jobs["desktop"])
-    assert "npm test" in desktop
-    assert "npm run build" in desktop
-
-    android = _run_commands(jobs["android-connect"])
-    for task in ("testDebugUnitTest", "lintDebug", "assembleDebug", "assembleRelease"):
-        assert task in android
-
-    rust = _run_commands(jobs["rust-desktop"])
-    rust_job = jobs["rust-desktop"]
-    assert isinstance(rust_job, dict)
-    rust_tauri_config = str(rust_job.get("env", {}).get("TAURI_CONFIG", ""))
-    assert "\"active\":false" in rust_tauri_config
-    assert "\"externalBin\":[]" in rust_tauri_config
-    assert "\"resources\":null" in rust_tauri_config
-    assert rust_job.get("env", {}).get("RUSTFLAGS") == "-D warnings"
-    assert "cargo test --locked" in rust
-    assert "cargo check --locked" not in rust, "cargo test already compiles the tree"
-
-    native = _run_commands(jobs["native-core"])
-    for command in (
+        "npm test",
+        "npm run build",
+        "testDebugUnitTest lintDebug assembleDebug assembleRelease",
+        "cargo test --locked",
         "go test ./...",
         "go test -race ./...",
         "go vet ./...",
@@ -108,7 +83,14 @@ def test_ci_covers_every_shipped_runtime_and_artifact() -> None:
         "zig build -Doptimize=ReleaseSafe",
         "check_remedy_core_isa.py",
     ):
-        assert command in native
+        assert command in local, f"scripts/prepush.py lost {command!r}"
+
+    for step in prepush.RUST.steps:
+        assert step.env["RUSTFLAGS"] == "-D warnings", "Rust warnings are errors"
+        config = step.env["TAURI_CONFIG"]
+        assert '"active":false' in config
+        assert '"externalBin":[]' in config
+        assert '"resources":null' in config
 
 
 def test_release_builds_both_desktop_operating_systems_and_native_cores() -> None:
@@ -180,44 +162,11 @@ def test_zig_build_defaults_to_baseline_cpu() -> None:
     assert "SHA-NI" in text or "sha256msg1" in text
 
 
-def test_ci_python_jobs_build_the_zig_core_before_pytest() -> None:
-    """Library-backed tests execute in CI instead of skipping.
 
-    Both pytest jobs install the same pinned Zig as native-core, build the
-    release-safe core before the suite, and hand its path to the loader via
-    REMEDY_NATIVE_CORE_LIB in $GITHUB_ENV.
-    """
-    jobs = _workflow_jobs("ci.yml")
-    pinned = _uses_step(jobs["native-core"], "mlugg/setup-zig")
-    pytest_needle = {
-        "test": "pytest -q",
-        "test-windows": "run_windows_ci_pytest.py",
-    }
-    for name, library in (
-        ("test", "zig-out/lib/libremedy_core.so"),
-        ("test-windows", "zig-out/bin/remedy_core.dll"),
-    ):
-        job = jobs[name]
-        setup = _uses_step(job, "mlugg/setup-zig")
-        assert setup["uses"] == pinned["uses"], f"{name} must pin the same setup-zig as native-core"
-        assert setup["with"] == pinned["with"], f"{name} must use the same Zig version as native-core"
-        build = _step_index(job, ZIG_BUILD)
-        assert build < _step_index(job, pytest_needle[name]), f"{name} must build Zig before pytest"
-        step = _steps(job)[build]
-        assert step.get("working-directory") == "native/zig"
-        run = str(step["run"])
-        assert "REMEDY_NATIVE_CORE_LIB=" in run, f"{name} must export the core library path"
-        assert "GITHUB_ENV" in run, f"{name} must export via $GITHUB_ENV so pytest sees it"
-        assert library in run
-
-
-def test_linux_ci_installs_zig_host_libs_before_building_remedy_core() -> None:
-    """ubuntu-latest has no X11/AT-SPI; Zig links them (native/zig/build.zig).
-
-    WSL developer boxes often already have the libs, so local green does not
-    prove GitHub runners can link remedy_core. Every Linux job that builds Zig
-    must run scripts/ci_install_linux_zig_host_deps.sh first.
-    """
+def test_linux_release_installs_zig_host_libs_before_building_remedy_core() -> None:
+    """GitHub's Ubuntu runners have no X11/AT-SPI; Zig links them
+    (native/zig/build.zig). Every Linux release job that builds Zig runs
+    scripts/ci_install_linux_zig_host_deps.sh first."""
     script = (ROOT / "scripts" / "ci_install_linux_zig_host_deps.sh").read_text("utf-8")
     for pkg in (
         "libx11-dev",
@@ -229,39 +178,11 @@ def test_linux_ci_installs_zig_host_libs_before_building_remedy_core() -> None:
         assert pkg in script, f"host-deps script missing {pkg}"
 
     install = "ci_install_linux_zig_host_deps.sh"
-    jobs = _workflow_jobs("ci.yml")
-    for name in ("test", "native-core"):
-        runs = _run_commands(jobs[name])
-        assert install in runs, f"ci.yml {name} must install Linux Zig host libs"
-        assert runs.index(install) < runs.index(ZIG_BUILD), (
-            f"ci.yml {name} must install host libs before zig build"
-        )
-
     release = _workflow_jobs("desktop-release.yml")
-    linux_runtime = _run_commands(release["build-runtime-linux"])
-    assert install in linux_runtime
-    assert linux_runtime.index(install) < linux_runtime.index(ZIG_BUILD)
-
-
-def test_ci_python_jobs_pin_node_for_lang_oracle() -> None:
-    """tsc shebangs need node; runner images alone have been a false-red source."""
-    jobs = _workflow_jobs("ci.yml")
-    for name in ("test", "test-windows"):
-        setup = _uses_step(jobs[name], "actions/setup-node")
-        assert setup["with"]["node-version"] == "20", f"{name} must pin Node 20"
-
-
-def test_ci_linux_pytest_is_explicitly_headless() -> None:
-    """AT-SPI must not see a display on GitHub; empty DISPLAY/WAYLAND in Test."""
-    jobs = _workflow_jobs("ci.yml")
-    test_steps = _steps(jobs["test"])
-    pytest_steps = [
-        s for s in test_steps if "pytest" in str(s.get("run", "")) and s.get("name") == "Test"
-    ]
-    assert pytest_steps, "ci.yml test job must have a Test pytest step"
-    env = pytest_steps[0].get("env") or {}
-    assert env.get("DISPLAY") == "", "Linux pytest must clear DISPLAY"
-    assert env.get("WAYLAND_DISPLAY") == "", "Linux pytest must clear WAYLAND_DISPLAY"
+    for name in ("build-runtime-linux", "build-runtime-linux-arm"):
+        runs = _run_commands(release[name])
+        assert install in runs, f"{name} must install Linux Zig host libs"
+        assert runs.index(install) < runs.index(ZIG_BUILD), f"{name} must install host libs before zig build"
 
 
 def test_prepush_linux_pytest_matches_headless_ci_env() -> None:
@@ -393,58 +314,14 @@ def _prepush_module():
     return module
 
 
-def test_prepush_gate_runs_every_public_ci_command() -> None:
-    """The local gate and public CI must not drift apart.
 
-    Every product command CI runs appears verbatim in scripts/prepush.py, and
-    the Rust lane compiles with the same flags CI uses (warnings are errors).
-    """
+def test_prepush_reproduces_linux_from_a_windows_checkout() -> None:
+    """The Linux suite, Linux cargo and Linux go test run from this checkout
+    under WSL, and pytest never shares the box with cargo or Gradle."""
     prepush = _prepush_module()
-    local = "\n".join(step.command for lane in prepush.LANES for step in lane.steps)
-    jobs = _workflow_jobs("ci.yml")
-    expected = {
-        "test": (
-            "check_sanitize.py",
-            "ruff check . --no-fix",
-            "uv run mypy",
-            "check_mypy_exclude.py",
-            "import remedy",
-            "check_docs.py",
-            "pytest -q --tb=short",
-            "uv build",
-        ),
-        "desktop": ("npm test", "npm run build"),
-        "android-connect": ("testDebugUnitTest lintDebug assembleDebug assembleRelease",),
-        "rust-desktop": ("cargo test --locked",),
-        "native-core": (
-            "go test ./...",
-            "go test -race ./...",
-            "go vet ./...",
-            "check-boundaries",
-            "benchcheck",
-            "zig build test",
-            "zig build test -Doptimize=ReleaseSafe",
-            "zig build -Doptimize=ReleaseSafe",
-            "check_remedy_core_isa.py",
-        ),
-    }
-    for job, commands in expected.items():
-        in_ci = _run_commands(jobs[job])
-        for command in commands:
-            assert command in in_ci, f"ci.yml {job} lost {command!r}"
-            assert command in local, f"scripts/prepush.py lost {command!r}"
-
-    rust_job = jobs["rust-desktop"]
-    assert isinstance(rust_job, dict)
-    ci_rust_env = rust_job.get("env", {})
-    for step in prepush.RUST.steps:
-        assert step.env["RUSTFLAGS"] == ci_rust_env["RUSTFLAGS"]
-        assert step.env["TAURI_CONFIG"] == ci_rust_env["TAURI_CONFIG"]
     assert any(step.command == "__wsl_cargo__" for step in prepush.LINUX.steps), (
         "Windows cargo alone misses Linux cfg(not windows) unused vars; WSL cargo is required"
     )
-
-    # The Linux suite is reproduced from this checkout when the host is Windows.
     assert any(step.command == "__wsl_pytest__" for step in prepush.LINUX.steps)
     assert any(step.command == "__wsl_go_test__" for step in prepush.LINUX.steps), (
         "Windows go test alone misses Linux filepath traps; WSL go test is required"
@@ -530,26 +407,62 @@ def test_prepush_protects_only_public_branches_and_release_tags() -> None:
     assert not prepush.RELEASE_TAG_RE.match("0.50.2")
 
 
+
 def test_release_builds_nothing_before_the_commit_is_verified() -> None:
+    """GitHub builds only from a master commit whose versions read the tag;
+    publishing needs this machine's green record for that commit."""
     jobs = _workflow_jobs("desktop-release.yml")
-    verify = jobs["verify"]
-    gate = _run_commands(verify)
-    assert "actions/workflows/ci.yml/runs?head_sha=" in gate, "release must check CI is green"
+    gate = _run_commands(jobs["verify"])
     assert "sync_version.py check" in gate, "release must check version surfaces"
     assert "merge-base --is-ancestor" in gate, "release must come from master"
-    for name in ("build-runtime", "build-tauri", "build-runtime-linux", "build-tauri-linux", "release"):
-        job = jobs[name]
+    for name, job in jobs.items():
+        if name == "verify":
+            continue
         assert isinstance(job, dict)
         needs = job.get("needs")
         needs = [needs] if isinstance(needs, str) else needs
         assert needs and "verify" in needs, f"{name} must need verify"
 
+    prepush = _prepush_module()
+    source = (ROOT / "scripts" / "prepush.py").read_text("utf-8")
+    check = source[source.index("def check_release(") :]
+    assert "verified_green(sha)" in check, "a release tag needs the local green record"
+    assert "actions/workflows" not in source, "the gate must not depend on GitHub CI"
+    assert callable(prepush.verified_green)
+    release_local = (ROOT / "scripts" / "release_local.py").read_text("utf-8")
+    assert "prepush.check_release(tag)" in release_local, "publishing reruns the release gate"
 
-def test_ci_reports_every_python_version() -> None:
-    jobs = _workflow_jobs("ci.yml")
-    test = jobs["test"]
-    assert isinstance(test, dict)
-    assert test["strategy"]["fail-fast"] is False
+
+def test_github_runs_no_ci_and_publishes_nothing() -> None:
+    """There is no CI on GitHub, and no workflow there creates or edits a release."""
+    workflows = ROOT / ".github" / "workflows"
+    names = sorted(p.name for p in workflows.glob("*.yml"))
+    assert names == ["desktop-release.yml", "verify-release-assets.yml"], names
+    for path in workflows.glob("*.yml"):
+        text = path.read_text("utf-8")
+        for job in yaml.safe_load(text)["jobs"].values():
+            for step in _steps(job):
+                assert "action-gh-release" not in str(step.get("uses", "")), f"{path.name} must not publish"
+                run = str(step.get("run", ""))
+                assert "gh release create" not in run and "gh release edit" not in run
+                assert "gh release upload" not in run, f"{path.name} must not publish"
+        assert "pull_request" not in text, f"{path.name} must not run CI on pull requests"
+    release = yaml.safe_load((workflows / "desktop-release.yml").read_text("utf-8"))
+    triggers = release.get(True) or release.get("on")
+    assert set(triggers) == {"push", "workflow_dispatch"}
+    assert triggers["push"] == {"tags": ["v*"]}, "builds only on release tags"
+
+
+
+def test_both_supported_python_versions_run_every_push() -> None:
+    """Windows runs the suite on 3.12 (.python-version), Linux on 3.13."""
+    prepush = _prepush_module()
+    assert (ROOT / ".python-version").read_text("utf-8").strip() == "3.12"
+    assert 'requires-python = ">=3.12"' in (ROOT / "pyproject.toml").read_text("utf-8")
+    source = (ROOT / "scripts" / "prepush.py").read_text("utf-8")
+    assert "uv run --python 3.13 pytest" in source
+    if prepush.IS_WINDOWS and prepush.shutil.which("wsl"):
+        assert "--python 3.13" in (prepush._wsl_pytest_command() or "")
 
 
 def test_public_changelog_never_carries_unreleased_notes() -> None:
@@ -564,56 +477,129 @@ def test_public_changelog_never_carries_unreleased_notes() -> None:
     assert prepush.unreleased_section(committed) == "", "keep pending notes in docs/UNRELEASED.md"
 
 
+
 def test_experimental_versions_publish_as_prereleases() -> None:
     """A version whose CHANGELOG section says Experimental never becomes GitHub's
     "latest" release, so installed apps do not auto-update to it."""
-    jobs = _workflow_jobs("desktop-release.yml")
-    verify = jobs["verify"]
-    assert isinstance(verify, dict)
-    assert "prerelease" in verify["outputs"]
-    assert "experimental" in _run_commands(verify).lower()
-    release = jobs["release"]
-    assert isinstance(release, dict)
-    publish = [
-        s
-        for s in release["steps"]
-        if isinstance(s, dict) and "action-gh-release" in str(s.get("uses", ""))
+    rl = _release_local_module()
+    log = "## [1.2.0] - x\n- Experimental voice\n\n## [1.1.0] - y\n- stable\n"
+    assert rl.is_prerelease(log, "1.2.0") is True
+    assert rl.is_prerelease(log, "1.1.0") is False
+    assert rl.is_prerelease(log, "9.9.9") is False
+    source = (ROOT / "scripts" / "release_local.py").read_text("utf-8")
+    main = source[source.index('f"v{version}", "-R", repo') :]
+    assert 'if prerelease:\n        cmd += ["--prerelease", "--latest=false"]' in main
+
+
+
+def _release_local_module():
+    import importlib.util
+    import sys
+
+    path = ROOT / "scripts" / "release_local.py"
+    spec = importlib.util.spec_from_file_location("remedy_release_local", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _good_sets(rl, ver: str = "1.2.0"):
+    main = [
+        f"Remedy.Desktop_{ver}_x64-setup.exe",
+        "latest.json",
+        f"Remedy.Desktop_{ver}_amd64.AppImage",
+        f"Remedy.Desktop_{ver}_amd64.deb",
+        f"Remedy.Desktop_{ver}_aarch64.dmg",
+        f"Remedy.Desktop_{ver}_x64.dmg",
     ]
-    assert publish, "release job must publish with action-gh-release"
-    main = [s for s in publish if "outputs.tag" in str(s["with"]["tag_name"])]
-    assert len(main) == 1, "exactly one step publishes the main v<ver> release"
-    assert "needs.verify.outputs.prerelease" in str(main[0]["with"]["prerelease"])
+    runtime = [
+        "remedy-native-SHA256SUMS.txt",
+        "remedy-voice-female.wav",
+        "remedy-voice-male.wav",
+        "remedy-runtime-aarch64-apple-darwin",
+        f"Remedy.Desktop_{ver}_aarch64.app.tar.gz",
+        f"Remedy.Desktop_{ver}_x64.app.tar.gz",
+        f"Remedy.Desktop_{ver}_aarch64.app.tar.gz.sig",
+        f"Remedy.Desktop_{ver}_x64.app.tar.gz.sig",
+    ]
+    sums = "aa  remedy-voice-female.wav\nbb  remedy-runtime-aarch64-apple-darwin\n"
+    darwin = {
+        "darwin-aarch64": {"url_name": f"Remedy.Desktop_{ver}_aarch64.app.tar.gz", "signature": "s"},
+        "darwin-x86_64": {"url_name": f"Remedy.Desktop_{ver}_x64.app.tar.gz", "signature": "s"},
+    }
+    manifest = rl.build_latest_json(
+        version=ver,
+        installer_asset=main[0],
+        windows_sig="w",
+        appimage=main[2],
+        linux_sig="l",
+        darwin=darwin,
+        pub_date="2026-01-01T00:00:00Z",
+    )
+    return main, runtime, sums, manifest
 
 
 def test_runtime_assets_publish_on_a_companion_prerelease() -> None:
     """The main release lists only installers + latest.json; pip runtime files,
-    macOS updater tarballs, and signatures go to runtime-v<ver>, which must
-    never take over Latest. Nothing publishes during a dry run."""
-    jobs = _workflow_jobs("desktop-release.yml")
-    release = jobs["release"]
-    assert isinstance(release, dict)
-    assert "if" not in release, "release staging must also run in dry runs"
-    steps = [s for s in release["steps"] if isinstance(s, dict)]
-    publish = [s for s in steps if "action-gh-release" in str(s.get("uses", ""))]
-    assert len(publish) == 2
-    for step in publish:
-        assert "dry_run != 'true'" in str(step.get("if", ""))
-    runtime, main = publish
-    assert str(runtime["with"]["tag_name"]).startswith("runtime-v")
-    assert runtime["with"]["prerelease"] is True
-    assert runtime["with"]["make_latest"] is False
-    assert "outputs.sha" in str(runtime["with"]["target_commitish"])
-    assert str(runtime["with"]["files"]).strip() == "release-runtime/*"
-    assert str(main["with"]["files"]).strip() == "release-main/*"
-    assert "Which file do I need?" in str(main["with"]["body"])
-    assert "right-click" in str(main["with"]["body"])
-    assert "pip install remedy-ai" in str(main["with"]["body"])
-    assert steps.index(runtime) < steps.index(main), "companion release exists before Latest moves"
-    split = next(s for s in steps if s.get("id") == "split")
-    assert "release-main" in split["run"] and "release-runtime" in split["run"]
-    latest = next(s for s in steps if s.get("name") == "Generate latest.json")
-    assert "runtime_tag" in latest["run"]
-    verify_assets = jobs["verify-native-assets"]
-    assert isinstance(verify_assets, dict)
-    assert "dry_run != 'true'" in str(verify_assets.get("if", ""))
-    assert "runtime-v" in str(verify_assets["steps"][1]["env"]["TAG"])
+    macOS updater tarballs and signatures go to runtime-v<ver>, which never
+    takes over Latest and is published first. A dry run publishes nothing."""
+    rl = _release_local_module()
+    main, runtime, sums, manifest = _good_sets(rl)
+    assert rl.check_release_sets("1.2.0", main, runtime, sums, manifest) == []
+
+    # macOS updater links point at the companion release; Windows/Linux at the main one.
+    platforms = manifest["platforms"]
+    assert "/download/runtime-v1.2.0/" in platforms["darwin-aarch64"]["url"]
+    assert "/download/v1.2.0/" in platforms["windows-x86_64"]["url"]
+
+    # The family of broken release sets each fails with a reason.
+    assert rl.check_release_sets("1.2.0", main + ["x.sig"], runtime, sums, manifest)
+    assert rl.check_release_sets("1.2.0", main[:-1], runtime, sums, manifest)
+    assert rl.check_release_sets("1.2.0", main, runtime[1:], sums, manifest)
+    assert rl.check_release_sets("1.2.0", main, runtime, sums + "cc  not-staged\n", manifest)
+    unsigned = {**manifest, "platforms": {**platforms, "windows-x86_64": {**platforms["windows-x86_64"], "signature": ""}}}
+    assert rl.check_release_sets("1.2.0", main, runtime, sums, unsigned)
+    import pytest
+
+    with pytest.raises(rl.ReleaseError):
+        rl.build_latest_json(
+            version="1.2.0", installer_asset="a.exe", windows_sig="w", appimage="",
+            linux_sig="", darwin={}, pub_date="x",
+        )
+
+    source = (ROOT / "scripts" / "release_local.py").read_text("utf-8")
+    publish = source[source.index("def publish_releases(") : source.index("def build_wheel(")]
+    assert publish.index('f"runtime-v{version}"') < publish.index('f"v{version}", "-R", repo'), (
+        "companion release exists before Latest moves"
+    )
+    assert '"--prerelease", "--latest=false"' in publish[: publish.index('f"v{version}", "-R", repo')]
+    notes = rl.main_notes("1.2.0", False)
+    assert "Which file do I need?" in notes and "right-click" in notes and "pip install remedy-ai" in notes
+    assert "Experimental pre-release" in rl.main_notes("1.2.0", True)
+    run_main = source[source.index("def main(") :]
+    assert "if not args.dry_run:\n            publish_releases(" in run_main
+    assert "upload=not args.dry_run" in run_main
+
+    # Published companion releases are re-checked on native macOS / ARM runners.
+    verify = yaml.safe_load((ROOT / ".github" / "workflows" / "verify-release-assets.yml").read_text("utf-8"))
+    triggers = verify.get(True) or verify.get("on")
+    assert triggers == {"release": {"types": ["published"]}}
+    job = verify["jobs"]["verify-native-assets"]
+    assert "runtime-v" in str(job.get("if", ""))
+    assert "release.tag_name" in str(job["steps"][1]["env"]["TAG"])
+
+
+def test_updater_signatures_stay_raw_minisign() -> None:
+    """latest.json carries raw minisign text, whether Tauri wrapped it in base64 or not."""
+    import base64
+
+    rl = _release_local_module()
+    raw = "untrusted comment: signature from tauri secret key\nRWQ...\ntrusted comment: t\nAAA\n"
+    assert rl.unwrap_sig(base64.b64encode(raw.encode()).decode()) == raw
+    assert rl.unwrap_sig(raw) == raw.strip()
+    assert rl.unwrap_sig("") == ""
+    assert rl.safe_asset_name("Remedy Desktop_1.2.0_x64-setup.exe") == "Remedy.Desktop_1.2.0_x64-setup.exe"
+
+

@@ -1,6 +1,6 @@
 """Repo sanitization gate — refuse to ship secrets, private docs, or junk.
 
-Runs in public CI and ``scripts/prepush.py`` (checks lane) so poor judgment
+Runs in ``scripts/prepush.py`` (checks lane), the local CI gate, so poor judgment
 never leaves the machine. Structural checks on the tracked tree; credential
 scan is high-signal only (private keys + live-looking tokens), with explicit
 fakes / detectors allowlisted.

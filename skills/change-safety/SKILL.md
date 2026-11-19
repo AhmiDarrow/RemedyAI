@@ -73,12 +73,13 @@ GPU. Green CI is **necessary, not sufficient** for those zones.
 
 ### 8. Local CI before every push
 
-Remote CI is not a surprise. Run the **same commands** `.github/workflows/ci.yml`
-runs (ruff, mypy, docs, pytest, desktop npm test+build — see root `AGENTS.md`
-**Local CI**). Pytest-only is not enough.
+There is no CI on GitHub: this machine is the CI. `uv run python scripts/prepush.py`
+runs the full matrix (ruff, mypy, docs, pytest on 3.12 and 3.13, desktop, Rust,
+Go, Zig, Android — see root `AGENTS.md` **Local CI**), and the pre-push hook refuses
+a push to `master` until it is green. Pytest-only is not enough.
 
-If remote CI fails: run **that failed step locally**, fix until green, **then**
-push. Do not push a guess.
+If a lane fails: fix it, rerun **that lane** with `--only`, then the full gate.
+Do not push a guess.
 
 ## After implementation
 

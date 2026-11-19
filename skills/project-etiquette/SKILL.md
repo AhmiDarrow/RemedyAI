@@ -143,17 +143,16 @@ Use when `cwd` is the RemedyAI tree (or user says “this project”).
 | Gate | Remedy command / note |
 |------|------------------------|
 | Blast radius | Root `AGENTS.md` Change-safety protocol; skill **change-safety** |
-| Test (Python) | Full Linux `uv run pytest -q --tb=short` on 3.12 and 3.13; Windows public CI uses `scripts/run_windows_ci_pytest.py` (see `tests/windows_ci_paths.txt`), guarded by `tests/test_windows_ci_paths.py` |
+| Test (Python) | Full `uv run pytest -q --tb=short`: Python 3.13 under WSL (`linux` lane) and 3.12 on Windows (`python` lane) |
 | Test (desktop) | `cd desktop && npm test && npm run build`; `cd src-tauri && cargo test --locked` |
 | Test (native/mobile) | Go test + race + vet + boundaries + benchmark budgets; Zig debug + ReleaseSafe tests/build; Android unit + lint + debug/release APK |
-| **Local CI (before every push)** | Run the complete current matrix in root `AGENTS.md`, including docs/import/static checks and `uv build`. A first or follow-up push is forbidden while any local gate is red. After red remote CI, re-run the failed step locally before pushing again. |
+| **Local CI (before every push)** | Run the complete current matrix in root `AGENTS.md`, including docs/import/static checks and `uv build`. A first or follow-up push is forbidden while any local gate is red. There is no CI on GitHub: this gate is the CI. |
 | Docs | Manuals in `docs/manual/`; `uv run python scripts/sync_help_manual.py`; gate `uv run python scripts/check_docs.py` |
 | Version | `uv run python scripts/sync_version.py {X.Y.Z}` |
 | Build wheel | `uv build` → `dist/remedy_ai-{ver}*` |
 | Commit | Push `master` only after local CI is green |
-| CI | GitHub Actions workflow **CI** on that commit — wait for success |
-| Publish PyPI | After CI green: `uv publish dist/remedy_ai-{ver}.*` (token via env / `~/.pypirc`) |
-| Desktop installer | Tag `v{X.Y.Z}` → **desktop-release**; asset must be `Remedy.Desktop_{X.Y.Z}_x64-setup.exe` (see root `AGENTS.md`) |
+| CI | The local gate above (`scripts/prepush.py`); the hook records a green run per tree |
+| Release | Push tag `v{X.Y.Z}` (the hook needs the local green record) → GitHub **desktop-release** builds and signs every platform → `uv run python scripts/release_local.py v{X.Y.Z}` publishes both GitHub releases and PyPI (`--dry-run` first). Asset must be `Remedy.Desktop_{X.Y.Z}_x64-setup.exe` (see root `AGENTS.md`) |
 
 Also respect root **`AGENTS.md`** (installer naming, version surfaces, smoke matrix).
 For end-of-session continuity use skill **`session-handoff`**.

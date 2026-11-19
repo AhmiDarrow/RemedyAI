@@ -19,8 +19,11 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | Native runtime | `native/` | Go runtime and Zig capability core. Python workers cover model, voice, and vision |
 | Claimidx host | `src/remedy/runtime/claimidx_host.py` | Pinned first-run install, private index, loopback lifecycle on `:17340` |
 
-Entry: `remedy serve` → `remedy-runtime` · verification: `.github/workflows/ci.yml`
-is the authoritative multi-stack matrix; pytest alone is not a release gate.
+Entry: `remedy serve` → `remedy-runtime` · verification: `scripts/prepush.py` runs
+the authoritative multi-stack matrix on the owner's machine (there is no CI on
+GitHub); pytest alone is not a release gate. Releases: GitHub builds and signs the
+packages on a `v*` tag (`.github/workflows/desktop-release.yml`), and
+`scripts/release_local.py` publishes them.
 
 ## Native boundary
 
