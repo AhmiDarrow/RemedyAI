@@ -2,14 +2,13 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.71.0**. Installed apps update on their own.
+Current release: **v0.70.2**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
-- [0.71.0 — Remedy at the head of Grove](#0710---remedy-at-the-head-of-grove)
 - [0.70.2 — Switch to Web UI stays signed in](#0702---switch-to-web-ui-stays-signed-in)
 - [0.70.1 — About](#0701---about)
 - [0.70.0 — Ten languages](#0700---ten-languages)
@@ -33,27 +32,6 @@ you gave her, and waits for you before money, send, or delete.
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
-
-## 0.71.0 - Remedy at the head of Grove
-
-- **Remedy and her side jobs.** Remedy can start side jobs for work that runs
-  alongside you. Each one reports back to her, and you can open it to watch
-  every step and stop it. Anything you type there goes to Remedy, in a small
-  chat bubble that is also in her main conversation.
-- **Routines and Keep watch.** Set standing jobs on a clock, or just
-  reminders, which use no AI. Keep watch has Remedy look around on her own
-  and leave one note under "While you were away" when something changed.
-- **Goals on their own.** Switch a goal to keep going by itself: one step at a
-  time, stopping whenever it needs you.
-- **One question at a time.** When Remedy needs your OK, a single card asks,
-  with Yes, No and Explain. Payment, password and send steps always ask.
-- **Kind to your PC.** Background work fits your computer and waits when
-  memory is low.
-- **Your phone, without an account.** The phone app opens on a conversation
-  with Remedy and can reach this PC over mobile data with no VPN or account
-  (turn it on in Settings → Connect).
-- **Search that works.** Remedy's local search engine starts again on its own,
-  and model lists always come from your provider.
 
 ## 0.70.2 - Switch to Web UI stays signed in
 
