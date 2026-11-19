@@ -9,6 +9,7 @@ class GroveApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.remedy.groveconnect.connect.IrohLink.init(this)
         controller = ConnectController(this)
     }
 

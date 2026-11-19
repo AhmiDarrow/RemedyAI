@@ -12,6 +12,8 @@ package com.remedy.groveconnect.core
  * v6=<optional>
  * relay=<host:port>   (optional; owner-run splice, no secrets)
  * rdv=<host:port;host:port>  (optional; public rendezvous brokers)
+ * ir=<64 hex>   (optional; PC iroh endpoint id, dial-by-key QUIC)
+ * irr=<https url>  (optional; owner's self-hosted iroh-relay)
  * exp=<unix>
  * ```
  */
@@ -27,6 +29,10 @@ data class QrPayload(
     val expUnix: Long,
     val tailscaleHost: String?,
     val tailscalePort: Int?,
+    /** iroh endpoint id (64 hex). Carries bytes only; Noise still pins [hostPub]. */
+    val irohId: String? = null,
+    /** Self-hosted iroh-relay URL; null → n0's public relays. */
+    val irohRelay: String? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -41,7 +47,9 @@ data class QrPayload(
             rdvHosts == other.rdvHosts &&
             expUnix == other.expUnix &&
             tailscaleHost == other.tailscaleHost &&
-            tailscalePort == other.tailscalePort
+            tailscalePort == other.tailscalePort &&
+            irohId == other.irohId &&
+            irohRelay == other.irohRelay
     }
 
     override fun hashCode(): Int {
@@ -56,6 +64,8 @@ data class QrPayload(
         r = 31 * r + expUnix.hashCode()
         r = 31 * r + (tailscaleHost?.hashCode() ?: 0)
         r = 31 * r + (tailscalePort ?: 0)
+        r = 31 * r + (irohId?.hashCode() ?: 0)
+        r = 31 * r + (irohRelay?.hashCode() ?: 0)
         return r
     }
 
@@ -115,10 +125,13 @@ data class QrPayload(
                 throw QrException("Tailscale line must not carry secrets.")
             }
             val tsEp = tsRaw?.let { parseLan(it) }
+            val irohId = fields["ir"]?.takeIf { it.isNotEmpty() }?.let { parseIrohId(it) }
+            val irohRelay = fields["irr"]?.takeIf { it.isNotEmpty() }?.let { parseIrohRelay(it) }
             return QrPayload(
                 hostPub, pairSecret, host, port, v6,
                 relay?.first, relay?.second, rdvHosts, exp,
                 tsEp?.first, tsEp?.second,
+                irohId, irohRelay,
             )
         }
 
@@ -182,6 +195,35 @@ data class QrPayload(
             if (out.isEmpty()) throw QrException("Rendezvous list is empty.")
             if (out.size > MAX_RDV_HOSTS) throw QrException("Rendezvous list has too many hosts.")
             return out
+        }
+
+        /** iroh 1.x prints an endpoint id as 64 lowercase hex chars. */
+        fun parseIrohId(raw: String): String {
+            val id = raw.trim().lowercase()
+            if (id.length != 64 || id.any { it !in '0'..'9' && it !in 'a'..'f' }) {
+                throw QrException("iroh id must be 64 hex characters.")
+            }
+            return id
+        }
+
+        /** An iroh-relay is an https URL with no credentials or query. */
+        fun parseIrohRelay(raw: String): String {
+            val text = raw.trim()
+            val uri = try {
+                java.net.URI(text)
+            } catch (_: Exception) {
+                throw QrException("iroh relay is not a valid URL.")
+            }
+            if (!uri.scheme.equals("https", ignoreCase = true) && !uri.scheme.equals("http", ignoreCase = true)) {
+                throw QrException("iroh relay must be an http(s) URL.")
+            }
+            if (uri.host.isNullOrBlank() || uri.rawUserInfo != null || uri.rawQuery != null || uri.rawFragment != null) {
+                throw QrException("iroh relay must not carry credentials or parameters.")
+            }
+            if (text.contains("bearer", ignoreCase = true) || text.contains("local_api_token", ignoreCase = true)) {
+                throw QrException("iroh relay must not carry secrets.")
+            }
+            return text
         }
 
         private const val MAX_QR_CHARS = 16 * 1024

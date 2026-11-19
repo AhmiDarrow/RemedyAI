@@ -127,20 +127,22 @@ var providerSafeKeys = map[string]struct{}{
 }
 
 var settingsLockKeys = map[string]struct{}{
-	"connect_enabled":     {},
-	"connect_bind_host":   {},
-	"connect_bind_port":   {},
-	"connect_relay_url":   {},
-	"connect_paused":      {},
-	"connect_panes":       {},
-	"connect_allow_ipv6":  {},
-	"connect_rdv_enabled": {},
-	"llm_api_key":         {},
-	"api_key":             {},
-	"http_bootstrap":      {},
-	"provider_keys":       {},
-	"messengers":          {},
-	"assistant":           {},
+	"connect_enabled":        {},
+	"connect_bind_host":      {},
+	"connect_bind_port":      {},
+	"connect_relay_url":      {},
+	"connect_paused":         {},
+	"connect_panes":          {},
+	"connect_allow_ipv6":     {},
+	"connect_rdv_enabled":    {},
+	"connect_iroh_enabled":   {},
+	"connect_iroh_relay_url": {},
+	"llm_api_key":            {},
+	"api_key":                {},
+	"http_bootstrap":         {},
+	"provider_keys":          {},
+	"messengers":             {},
+	"assistant":              {},
 }
 
 // SanitizeOriginPath returns a relative URL path only.

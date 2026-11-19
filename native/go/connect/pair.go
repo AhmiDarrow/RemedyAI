@@ -168,6 +168,12 @@ func StartPair(opts PairStartOpts) (string, error) {
 			lines = append(lines, fmt.Sprintf("ts=%s:%d", ts, port))
 		}
 	}
+	if ir := CurrentIrohAdvert(); ir.EndpointID != "" {
+		lines = append(lines, "ir="+ir.EndpointID)
+		if ir.RelayURL != "" {
+			lines = append(lines, "irr="+ir.RelayURL)
+		}
+	}
 	lines = append(lines, fmt.Sprintf("exp=%d", exp))
 	text := strings.Join(lines, "\n")
 	lowered := strings.ToLower(text)
