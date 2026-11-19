@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install system libraries required to link Zig remedy_core on Linux
-# (X11 / XTest / AT-SPI). Used by ci.yml and desktop-release.yml.
+# (X11 / XTest / AT-SPI). Used by the Linux release builds in desktop-release.yml.
 set -euo pipefail
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \

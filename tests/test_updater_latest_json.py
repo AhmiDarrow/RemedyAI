@@ -9,6 +9,13 @@ ROOT = Path(__file__).resolve().parents[1]
 LATEST = ROOT / "scripts" / "latest.json"
 LIB_RS = ROOT / "desktop" / "src-tauri" / "src" / "lib.rs"
 RELEASE_YML = ROOT / ".github" / "workflows" / "desktop-release.yml"
+RELEASE_LOCAL = ROOT / "scripts" / "release_local.py"
+
+
+def _release_pipeline_text() -> str:
+    """GitHub builds and signs (desktop-release.yml); this machine publishes
+    (scripts/release_local.py). Together they are the release pipeline."""
+    return RELEASE_YML.read_text(encoding="utf-8") + "\n" + RELEASE_LOCAL.read_text(encoding="utf-8")
 PYPROJECT = ROOT / "pyproject.toml"
 
 
@@ -42,9 +49,9 @@ def test_rust_updater_still_accepts_0415_platform_keys() -> None:
 
 
 def test_release_workflow_publishes_native_cli_checksums() -> None:
-    text = RELEASE_YML.read_text(encoding="utf-8")
+    text = _release_pipeline_text()
     assert "remedy-native-SHA256SUMS.txt" in text
-    assert "dist-native/*" in text
+    assert '"dist-native"' in text
     assert "remedy-runtime-x86_64-unknown-linux-gnu" in text
     assert "remedy_core-x86_64-pc-windows-msvc.dll" in text
     assert "libremedy_core-x86_64-unknown-linux-gnu.so" in text
@@ -57,7 +64,7 @@ def test_pyproject_license_is_apache_2() -> None:
 
 
 def test_release_workflow_publishes_unsigned_macos_desktop() -> None:
-    text = RELEASE_YML.read_text(encoding="utf-8")
+    text = _release_pipeline_text()
     assert "build-tauri-macos" in text
     assert "darwin-aarch64" in text
     assert "darwin-x86_64" in text
