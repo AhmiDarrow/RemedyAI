@@ -9,6 +9,7 @@ from remedy.interfaces.config import (
     PROVIDER_CATALOG,
     apply_env_provider_bootstrap,
     classify_provider_connection,
+    default_model_for_provider,
     normalize_llm_settings,
     provider_credentials_ready,
     public_provider_catalog,
@@ -76,11 +77,8 @@ def test_demo_in_catalog():
     # paced (llm7 allows ~1 request/second).
     assert "live_models" not in meta
     assert float(meta.get("min_request_interval_s") or 0) >= 1.0
-    ids = [m["id"] for m in (meta.get("models") or [])]
-    assert "codestral-latest" in ids
-    # Never ship image/promo/foreign paid brands in the curated demo list
-    for bad in ("deepseek", "flux", "kling", "seedance", "gpt-image", "veo"):
-        assert not any(bad in i.lower() for i in ids)
+    # Models come from the gateway's own listing, never compiled in.
+    assert not meta.get("models")
 
 
 def test_poe_in_catalog():
@@ -88,8 +86,7 @@ def test_poe_in_catalog():
     meta = PROVIDER_CATALOG["poe"]
     assert "api.poe.com" in str(meta.get("base_url") or "")
     assert "POE_API_KEY" in (meta.get("env_keys") or [])
-    ids = [m["id"] for m in (meta.get("models") or [])]
-    assert "Claude-Sonnet-4.6" in ids
+    assert not meta.get("models")
     p, m, u = normalize_llm_settings("poe", "Grok-4", None)
     assert p == "poe"
     assert m == "Grok-4"
@@ -100,17 +97,21 @@ def test_poe_in_catalog():
     assert m2 == "Some-Community-Bot"
     by_id = {i["id"]: i for i in public_provider_catalog()}
     assert by_id["poe"]["auth"] == ["api_key"]
-    assert by_id["poe"]["default_model"]
+    assert "default_model" in by_id["poe"]
 
 
-def test_demo_model_allowlist_blocks_junk():
-    """Curated demo catalog pins allowlist; live filter is Go demoModelAllowed."""
-    catalog = PROVIDER_CATALOG["demo"]["models"]
-    ids = {str(m.get("id") or "") for m in catalog}
-    assert "codestral-latest" in ids
-    assert "deepseek-v4-flash" not in ids
-    assert "flux-kontext-max" not in ids
-    assert "kling-v3.0-pro" not in ids
+def test_demo_listing_keeps_only_chat_models_the_gateway_lists():
+    """The gateway's own listing decides; non-chat (image/video) ids drop out."""
+    from remedy.interfaces import model_discovery as md
+
+    md.remember_live_models(
+        "demo",
+        [{"id": "flux-kontext-max", "chat": False}, {"id": "codestral-latest"}],
+    )
+    try:
+        assert default_model_for_provider("demo") == "codestral-latest"
+    finally:
+        md.remember_live_models("demo", [])
 
 
 def test_free_options_public_includes_demo_and_free_keys():
@@ -213,9 +214,9 @@ def test_probe_demo_curated_filter_and_missing_key():
             {"id": "claude-opus-5", "name": "claude-opus-5", "chat": True},
         ],
     )
-    allowed = {str(m.get("id")) for m in (meta.get("models") or [])}
-    rows = [m for m in disc.models if m.get("chat", True) and m.get("id") in allowed]
-    assert [m["id"] for m in rows] == ["codestral-latest", "gpt-oss:20b"]
+    assert not meta.get("models")
+    rows = [m for m in disc.models if m.get("chat", True)]
+    assert [m["id"] for m in rows] == ["codestral-latest", "gpt-oss:20b", "claude-opus-5"]
     assert not resolve_provider_api_key({"llm_provider": "demo"}, "openai")
 
 
@@ -285,24 +286,27 @@ def test_resolve_demo_api_key():
 def test_normalize_demo_settings():
     p, m, u = normalize_llm_settings("demo", None, None)
     assert p == "demo"
-    assert m
+    assert m == ""  # nothing listed yet: no invented model
     assert "llm7.io" in u
 
 
 def test_normalize_demo_clamps_junk_models():
-    """Guest free path must not keep image/foreign ids from a previous provider."""
-    default = PROVIDER_CATALOG["demo"]["models"][0]["id"]
-    p, m, u = normalize_llm_settings("demo", "deepseek-v4-flash", None)
-    assert p == "demo"
-    assert m == default
-    assert "llm7.io" in u
-    p2, m2, _ = normalize_llm_settings("demo", "flux-kontext-max", None)
-    assert m2 == default
-    p3, m3, _ = normalize_llm_settings("demo", "codestral-latest", None)
-    assert m3 == "codestral-latest"
-    with pytest.raises(ValueError, match="demo model"):
-        validate_provider_model("demo", "kling-v3.0-pro")
-    assert validate_provider_model("demo", "codestral-latest") == "codestral-latest"
+    """Guest free path must not keep ids the gateway does not offer."""
+    from remedy.interfaces import model_discovery as md
+
+    md.remember_live_models("demo", [{"id": "codestral-latest"}, {"id": "gpt-oss:20b"}])
+    try:
+        p, m, u = normalize_llm_settings("demo", "deepseek-v4-flash", None)
+        assert p == "demo"
+        assert m == "codestral-latest"
+        assert "llm7.io" in u
+        _, m3, _ = normalize_llm_settings("demo", "gpt-oss:20b", None)
+        assert m3 == "gpt-oss:20b"
+        with pytest.raises(ValueError, match="not offered"):
+            validate_provider_model("demo", "kling-v3.0-pro")
+        assert validate_provider_model("demo", "codestral-latest") == "codestral-latest"
+    finally:
+        md.remember_live_models("demo", [])
 
 
 def test_bootstrap_prefers_demo_when_empty(monkeypatch):

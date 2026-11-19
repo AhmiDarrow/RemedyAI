@@ -481,11 +481,6 @@ from remedy.interfaces.provider_catalog import (  # noqa: E402
     PROVIDER_CATALOG,
 )
 
-# Providers that keep a closed model catalog (foreign model ids are snapped).
-_CLOSED_PROVIDERS = frozenset(
-    {"openai", "anthropic", "google", "deepseek", "xai", "groq", "mistral"}
-)
-
 
 def infer_provider_from_model(model_id: str) -> str | None:
     """Guess which *native* provider owns a model id (not OpenRouter-prefixed)."""
@@ -619,38 +614,6 @@ def infer_provider_from_base_url(base_url: str) -> str | None:
     return None
 
 
-# Retired / renamed API model ids → current ids (before live discovery or chat).
-# Endpoint discovery is preferred; these keep saved config working offline.
-_LEGACY_MODEL_ALIASES: dict[str, str] = {
-    # DeepSeek: chat/reasoner retired 2026-07-24 (mapped to V4 Flash modes).
-    "deepseek-chat": "deepseek-v4-flash",
-    "deepseek-reasoner": "deepseek-v4-flash",
-    "deepseek-coder": "deepseek-v4-flash",
-    # xAI: older Grok slugs retired / redirected; prefer current flagship family.
-    "grok-3": "grok-4.3",
-    "grok-3-mini": "grok-4.3",
-    "grok-3-fast": "grok-4.3",
-    "grok-3-mini-fast": "grok-4.3",
-    "grok-2": "grok-4.3",
-    "grok-2-1212": "grok-4.3",
-    "grok-2-vision-1212": "grok-4.5",
-    "grok-2-vision": "grok-4.5",
-    "grok-beta": "grok-4.5",
-    "grok-vision-beta": "grok-4.5",
-    # Anthropic: dated 4.x snapshots retired mid-2026.
-    "claude-sonnet-4-20250514": "claude-sonnet-5",
-    "claude-opus-4-20250514": "claude-opus-5",
-    "claude-3-7-sonnet-latest": "claude-sonnet-5",
-    "claude-3-5-sonnet-latest": "claude-sonnet-5",
-    "claude-3-5-haiku-latest": "claude-haiku-4-5",
-    # Prior Settings catalog ids (0.25.x) — avoid 404 after the 5.x rename.
-    "claude-opus-4-1": "claude-opus-5",
-    "claude-opus-4-0": "claude-opus-5",
-    "claude-sonnet-4-0": "claude-sonnet-5",
-    "claude-sonnet-4-1": "claude-sonnet-5",
-}
-
-
 def _live_models_for(provider: str) -> dict[str, dict[str, Any]]:
     """Ids the provider's own endpoint listed recently (process-local)."""
     try:
@@ -662,12 +625,10 @@ def _live_models_for(provider: str) -> dict[str, dict[str, Any]]:
 
 
 def default_model_for_provider(provider: str | None) -> str:
-    """Best default model id for *provider* without guessing a foreign one.
+    """Default model for *provider*: a chat model its endpoint listed, else "".
 
-    Order: a chat model the endpoint actually listed → first curated catalog
-    entry → "" (local hosts with nothing pulled yet). The old behaviour of
-    falling back to ``gpt-4o-mini`` for every provider put an OpenAI id in
-    front of Ollama users.
+    Models always come from the provider's own models endpoint; Remedy never
+    falls back to ids compiled into it, because those go stale.
     """
     prov = (provider or "").strip().lower()
     live = _live_models_for(prov)
@@ -680,14 +641,6 @@ def default_model_for_provider(provider: str | None) -> str:
                 return picked
         except Exception:  # pragma: no cover - defensive
             pass
-    catalog = PROVIDER_CATALOG.get(prov) or {}
-    models = list(catalog.get("models") or [])
-    if models:
-        return str(models[0]["id"])
-    if prov not in PROVIDER_CATALOG and prov != "custom":
-        # Unknown label: behaves like "custom" (OpenAI-compatible, any id).
-        custom = list((PROVIDER_CATALOG.get("custom") or {}).get("models") or [])
-        return str(custom[0]["id"]) if custom else ""
     return ""
 
 
@@ -698,10 +651,12 @@ def normalize_llm_settings(
 ) -> tuple[str, str, str]:
     """Align provider, model, and base_url so they don't cross-wire.
 
-    Examples of bad states we fix:
-    - provider=deepseek, model=claude-3-haiku  → model=deepseek-v4-flash
-    - provider=deepseek, base_url=api.openai.com → base_url=api.deepseek.com
-    - provider=deepseek, model=deepseek-chat → deepseek-v4-flash (retired id)
+    - A base URL that belongs to another known provider snaps back to this
+      provider's URL (OpenRouter / custom / local hosts excepted).
+    - The model is checked against what the provider's endpoint lists right
+      now: an id it does not offer is replaced by the endpoint's default.
+      When the endpoint has not been listed, the chosen id is kept as is —
+      Remedy never second-guesses with model names compiled into it.
     """
     prov = (provider or "openai").strip().lower() or "openai"
     # Retired: spawning `claude -p` as a provider. Fall back to the API slot.
@@ -709,145 +664,52 @@ def normalize_llm_settings(
         prov = "anthropic"
         if (base_url or "").strip().lower().startswith("claude-code:"):
             base_url = None
-    if prov not in PROVIDER_CATALOG:
-        # Unknown label → treat as custom OpenAI-compatible
-        if prov not in ("custom",):
-            # keep name but use custom defaults for missing pieces
-            pass
     catalog = PROVIDER_CATALOG.get(prov) or PROVIDER_CATALOG["custom"]
     default_url = str(catalog.get("base_url") or "")
-    default_models = list(catalog.get("models") or [])
-    default_model = default_model_for_provider(prov)
 
     url = (base_url or "").strip() or default_url
-    mid = (model or "").strip() or default_model
+    mid = (model or "").strip()
 
-    # What the provider's endpoint itself listed is authoritative: such an id
-    # is never aliased away or snapped to the catalog default.
-    live = _live_models_for(prov)
-    live_ok = bool(mid) and mid in live
-
-    # Map retired provider model ids before ownership checks — only when the
-    # endpoint did not just tell us the old id is still served.
-    alias = _LEGACY_MODEL_ALIASES.get(mid.lower())
-    if alias and not live_ok:
-        mid = alias
-
-    # If URL clearly belongs to another known provider, snap to this provider's URL.
     url_owner = infer_provider_from_base_url(url)
     if url_owner and url_owner != prov and prov in PROVIDER_CATALOG:
-        # OpenRouter intentionally hosts many vendors — only snap when *this*
-        # provider is not openrouter/custom.
         if prov not in ("openrouter", "custom", "ollama", "poe"):
             url = default_url
 
-    # Flexible providers can host any model id (Ollama pulls deepseek-*, etc.).
-    # Poe hosts many labs' bots under Poe bot names (not closed native catalogs).
-    # RMB / llama.cpp load arbitrary GGUF stems — must NOT snap to catalog 7B.
-    # Demo is *not* flexible — guest gateway junk (image/video/foreign) is clamped
-    # to the curated allowlist so free-setup never silently hits blocked models.
-    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "poe", "rmb", "llamacpp"})
-    if (PROVIDER_CATALOG.get(prov) or {}).get("user_defined"):
-        # Saved custom endpoints host whatever the user's server serves.
-        _FLEXIBLE = _FLEXIBLE | {prov}
-
-    model_owner = infer_provider_from_model(mid)
-    if live_ok and prov != "demo":
-        pass
-    elif model_owner and model_owner != prov and prov not in _FLEXIBLE and prov != "demo":
-        mid = default_model
-    elif prov == "demo" and default_models:
-        known = {m["id"] for m in default_models}
-        if mid not in known:
-            mid = default_model
-    elif prov in PROVIDER_CATALOG and default_models and prov not in _FLEXIBLE:
-        known = {m["id"] for m in default_models}
-        if not mid:
-            mid = default_model
-        # Closed catalogs: snap foreign / garbage ids to provider default.
-        # Allow native-family prefixes (deepseek-*, grok-*) for live /models extras.
-        elif mid not in known and not _native_model_id_for_provider(prov, mid):
-            mid = default_model
-        if prov in _CLOSED_PROVIDERS and model_owner and model_owner != prov:
-            mid = default_model
-
+    live = _live_models_for(prov)
+    if live and mid not in live:
+        mid = default_model_for_provider(prov) or mid
+    if not mid:
+        mid = default_model_for_provider(prov)
     if not url:
         url = default_url
-    if not mid:
-        mid = default_model
-
     return prov, mid, url
 
 
-def _native_model_id_for_provider(provider: str, model_id: str) -> bool:
-    """True when *model_id* looks like a native id for *provider* (not catalog-only)."""
-    mid = (model_id or "").strip().lower()
-    prov = (provider or "").strip().lower()
-    if not mid or not prov:
-        return False
-    if prov == "deepseek":
-        return mid.startswith("deepseek")
-    if prov == "xai":
-        return mid.startswith("grok") or mid.startswith("xai/")
-    if prov == "openai":
-        return mid.startswith(("gpt-", "o1", "o3", "o4", "chatgpt-"))
-    if prov == "anthropic":
-        return mid.startswith("claude")
-    if prov == "google":
-        return mid.startswith("gemini") or mid.startswith("models/gemini")
-    if prov == "mistral":
-        return mid.startswith(("mistral", "codestral", "open-mistral"))
-    if prov == "groq":
-        return mid.startswith("groq/") or mid in {
-            m["id"] for m in (PROVIDER_CATALOG.get("groq") or {}).get("models") or []
-        }
-    return False
-
-
 def validate_provider_model(provider: str | None, model: str | None) -> str:
-    """Return a clean model id or raise ValueError for closed-catalog garbage.
+    """Return a clean model id, or raise ValueError.
 
-    Flexible providers (ollama/custom/openrouter) accept any non-empty id.
-    Closed providers accept catalog ids + native-family prefixes only.
+    The provider's endpoint is the only authority: an id it lists is valid; an
+    id it does not list is refused while that listing is known. When the
+    endpoint has not been listed (offline, no key yet) any non-empty id is
+    accepted rather than judged against names compiled into Remedy.
     """
     prov = (provider or "").strip().lower() or "openai"
     mid = (model or "").strip()
     if not mid:
         raise ValueError("Model id is required")
-    # Demo uses a hard curated allowlist (same as catalog route filter).
-    if prov == "demo":
-        catalog = PROVIDER_CATALOG.get("demo") or {}
-        known = {m["id"] for m in (catalog.get("models") or [])}
-        if mid in known:
-            return mid
-        sample = ", ".join(sorted(known)[:8]) or "(none)"
-        raise ValueError(
-            f"Unknown demo model {mid!r}. Guest free chat allows: {sample}."
-        )
-    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "poe", "rmb", "llamacpp"})
+    flexible = frozenset({"openrouter", "custom", "ollama", "poe", "rmb", "llamacpp"})
     if (
-        prov in _FLEXIBLE
+        prov in flexible
         or prov not in PROVIDER_CATALOG
         or (PROVIDER_CATALOG.get(prov) or {}).get("user_defined")
     ):
         return mid
-    # The provider's own endpoint listed it → valid, whatever the catalog says.
     live = _live_models_for(prov)
-    if mid in live:
+    if not live or mid in live:
         return mid
-    # Apply legacy aliases only for ids the endpoint did not vouch for.
-    mid = _LEGACY_MODEL_ALIASES.get(mid.lower(), mid)
-    if mid in live:
-        return mid
-    catalog = PROVIDER_CATALOG.get(prov) or {}
-    known = {m["id"] for m in (catalog.get("models") or [])}
-    if mid in known or _native_model_id_for_provider(prov, mid):
-        return mid
-    listed = sorted(live) if live else sorted(known)
-    sample = ", ".join(listed[:8]) or "(none)"
+    sample = ", ".join(sorted(live)[:8])
     raise ValueError(
-        f"Unknown model {mid!r} for provider {prov!r}. "
-        f"Pick a listed model (e.g. {sample})."
+        f"{mid!r} is not offered by {prov} right now. Pick a listed model (e.g. {sample})."
     )
 
 
@@ -1136,7 +998,7 @@ setup_completed = false
 # Supported: openai, anthropic, google, deepseek, xai, groq, mistral, openrouter, ollama, custom
 # xAI also supports OAuth (Sign in with xAI) via desktop Settings / `remedy auth login xai`
 llm_provider = "openai"
-llm_model = "gpt-4o-mini"
+# llm_model: leave unset to use the provider's own default from its models list.
 llm_base_url = "https://api.openai.com/v1"
 # llm_api_key - prefer secure store (desktop Settings) or REMEDY_LLM_API_KEY env:
 # llm_api_key = "sk-..."
@@ -1588,8 +1450,12 @@ def public_provider_catalog(config: dict[str, Any] | None = None) -> list[dict[s
         auth_modes = list(meta.get("auth") or ["api_key"])
         if pid in ("ollama", "demo", "rmb", "llamacpp"):
             auth_modes = ["none"]
+        # User-defined providers may carry the models the owner typed in;
+        # built-in providers list theirs live from their endpoint.
         models = list(meta.get("models") or [])
-        default_model = str(models[0]["id"]) if models else "default"
+        default_model = (
+            str(models[0]["id"]) if models else default_model_for_provider(pid)
+        )
         name = meta.get("label") or pid
         base_url = meta.get("base_url")
         if pid == "custom":
@@ -1680,7 +1546,9 @@ def apply_env_provider_bootstrap(config: dict[str, Any] | None = None) -> dict[s
         or os.environ.get("REMEDY_XAI_API_KEY", "").strip()
     )
     if xai_key and allow_switch:
-        prov, model, url = normalize_llm_settings("xai", cfg.get("llm_model"), cfg.get("llm_base_url"))
+        # Switching provider: the old provider's model id means nothing here;
+        # xAI's own endpoint picks.
+        prov, model, url = normalize_llm_settings("xai", None, None)
         cfg["llm_provider"] = prov
         cfg["llm_model"] = model
         cfg["llm_base_url"] = url
@@ -1720,9 +1588,8 @@ def apply_env_provider_bootstrap(config: dict[str, Any] | None = None) -> dict[s
         )
         for env_name, pid in env_map:
             if os.environ.get(env_name, "").strip():
-                prov, model, url = normalize_llm_settings(
-                    pid, cfg.get("llm_model"), cfg.get("llm_base_url")
-                )
+                # New provider: its endpoint picks the model, not the old one.
+                prov, model, url = normalize_llm_settings(pid, None, None)
                 cfg["llm_provider"] = prov
                 cfg["llm_model"] = model
                 cfg["llm_base_url"] = url
