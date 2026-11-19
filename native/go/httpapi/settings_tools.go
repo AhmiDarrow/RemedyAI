@@ -56,9 +56,10 @@ var toolForbiddenSettingsKeys = map[string]struct{}{
 	"connect_iroh_port":       {},
 	"connect_iroh_relay_mode": {},
 	"connect_iroh_relay_url":  {},
-	"llm_base_url":               {},
-	"llm_provider":               {},
-	"llm_model":                  {},
+	"connect_iroh_punch":      {},
+	"llm_base_url":            {},
+	"llm_provider":            {},
+	"llm_model":               {},
 }
 
 // RegisterSettingsTools installs settings.get (read-only, scrubbed) and

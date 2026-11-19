@@ -253,6 +253,8 @@ describe('mobile reach', () => {
     expect(m?.enabled).toBe(true)
     expect(m?.port).toBe(7403)
     expect(m?.relay_mode).toBe('off')
+    expect(m?.punch).toBe(false)
+    expect(parseMobileReach({ punch: true })?.punch).toBe(true)
     expect(m?.status.verdict).toBe('cgnat')
     expect(m?.status.steps).toEqual(['a'])
     expect(mobileVerdictTone('cgnat')).toBe('warn')

@@ -155,6 +155,11 @@ class PairStore(ctx: Context) {
             prefs.getString(IROH_RELAY, null)?.takeIf { it.isNotBlank() },
             addrs,
             prefs.getBoolean(IROH_N0, false),
+            prefs.getString(IROH_PUNCH, null)?.split(';')?.mapNotNull { chunk ->
+                val idx = chunk.lastIndexOf(':')
+                val port = chunk.substring(idx + 1).toIntOrNull()
+                if (idx <= 0 || port == null) null else chunk.substring(0, idx) to port
+            } ?: emptyList(),
         )
     }
 
@@ -202,6 +207,11 @@ class PairStore(ctx: Context) {
         if (irohId.isNullOrBlank() || irohRelay.isNullOrBlank()) edit.remove(IROH_RELAY) else edit.putString(IROH_RELAY, irohRelay)
         if (irohId.isNullOrBlank() || qr.irohAddrs.isEmpty()) edit.remove(IROH_ADDRS) else edit.putString(IROH_ADDRS, qr.irohAddrs.joinToString(","))
         if (irohId.isNullOrBlank() || !qr.irohN0) edit.remove(IROH_N0) else edit.putBoolean(IROH_N0, true)
+        if (irohId.isNullOrBlank() || qr.irohPunchBrokers.isEmpty()) {
+            edit.remove(IROH_PUNCH)
+        } else {
+            edit.putString(IROH_PUNCH, qr.irohPunchBrokers.joinToString(";") { "${it.first}:${it.second}" })
+        }
         if (qr.rdvHosts.isEmpty()) edit.remove(RDV)
         else edit.putString(RDV, qr.rdvHosts.joinToString(";") { "${it.first}:${it.second}" })
         check(edit.commit()) { "Could not save pairing securely." }
@@ -211,7 +221,7 @@ class PairStore(ctx: Context) {
     fun clearPair() {
         check(
             prefs.edit().remove(VERSION).remove(PIN).remove(LAN).remove(RELAY)
-                .remove(RDV).remove(DEVICE).remove(TS).remove(IROH).remove(IROH_RELAY).remove(IROH_ADDRS).remove(IROH_N0).commit(),
+                .remove(RDV).remove(DEVICE).remove(TS).remove(IROH).remove(IROH_RELAY).remove(IROH_ADDRS).remove(IROH_N0).remove(IROH_PUNCH).commit(),
         ) { "Could not securely remove this pairing." }
     }
 
@@ -225,6 +235,7 @@ class PairStore(ctx: Context) {
         private const val IROH_RELAY = "iroh_relay_url"
         private const val IROH_ADDRS = "iroh_addrs"
         private const val IROH_N0 = "iroh_n0"
+        private const val IROH_PUNCH = "iroh_punch_brokers"
         private const val DEVICE = "device_id"
         private const val VERSION = "pair_version"
     }

@@ -5,8 +5,15 @@
 //! caller (a Go test) then runs the real Noise initiator over that socket, so
 //! the probe, like the sidecar, only ever carries ciphertext.
 //!
-//! usage: iroh-probe <endpoint-id> [--addr ip:port]... [--no-relay] [--relay-only] [--relay URL] [--listen 127.0.0.1:0]
+//! usage: iroh-probe <endpoint-id> [--addr ip:port]... [--no-relay] [--relay-only] [--relay URL]
+//!                   [--punch] [--listen 127.0.0.1:0]
 //! stdout: JSON lines `listening`, `dialed` (dial ms, path, rtt), `path`.
+//! `--punch` (implies --no-relay): learn a STUN mapping on a fresh port, bind
+//! iroh there, print `punch_offer` {from, addrs}, then read one stdin line
+//! `{"addrs":[...]}` (the PC's answer) and dial those — like the phone does.
+
+#[path = "../stun.rs"]
+mod stun;
 
 use std::str::FromStr;
 use std::time::Instant;
@@ -43,10 +50,15 @@ async fn main() -> Result<()> {
     let mut listen = "127.0.0.1:0".to_string();
     let mut addrs: Vec<std::net::SocketAddr> = Vec::new();
     let mut no_relay = false;
+    let mut punch = false;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--relay-only" => relay_only = true,
             "--no-relay" => no_relay = true,
+            "--punch" => {
+                punch = true;
+                no_relay = true;
+            }
             "--addr" => addrs.push(args.next().context("--addr value")?.parse().context("--addr ip:port")?),
             "--relay" => relay = args.next(),
             "--listen" => listen = args.next().context("--listen value")?,
@@ -71,7 +83,41 @@ async fn main() -> Result<()> {
         // Mobile-data worst case: no direct path at all, relay only.
         builder = builder.clear_ip_transports();
     }
+    let mut punch_mapped: Option<std::net::SocketAddr> = None;
+    if punch {
+        let (port, mapped) = tokio::task::spawn_blocking(|| -> Result<(u16, std::net::SocketAddr)> {
+            let sock = std::net::UdpSocket::bind("0.0.0.0:0")?;
+            let port = sock.local_addr()?.port();
+            let servers: Vec<String> = stun::DEFAULT_STUN.iter().map(|s| s.to_string()).collect();
+            Ok((port, stun::stun_mapped(&sock, &servers)?))
+        })
+        .await??;
+        punch_mapped = Some(mapped);
+        builder = builder
+            .clear_ip_transports()
+            .bind_addr(std::net::SocketAddr::from(([0, 0, 0, 0], port)))
+            .map_err(|e| anyhow::anyhow!("bind: {e}"))?;
+    }
     let ep = builder.bind().await?;
+    if let Some(mapped) = punch_mapped {
+        let mut offer = vec![mapped.to_string()];
+        for a in ep.addr().ip_addrs() {
+            if a.is_ipv4() && !offer.contains(&a.to_string()) {
+                offer.push(a.to_string());
+            }
+        }
+        emit(json!({"event": "punch_offer", "from": ep.id().to_string(), "addrs": offer}));
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+        let ans: serde_json::Value = serde_json::from_str(line.trim()).context("answer line")?;
+        for a in ans["addrs"].as_array().into_iter().flatten() {
+            if let Some(s) = a.as_str() {
+                if let Ok(sa) = s.parse() {
+                    addrs.push(sa);
+                }
+            }
+        }
+    }
     if !no_relay {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(10), ep.online()).await;
     }

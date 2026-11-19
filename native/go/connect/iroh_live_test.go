@@ -16,6 +16,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -351,4 +352,174 @@ func liveRequest(t *testing.T, c net.Conn, client *connect.SessionCrypto, id uin
 			return joined
 		}
 	}
+}
+
+// TestIrohLivePunch drives the relay-free hole punch end to end: the probe
+// learns a STUN mapping, the test swaps encrypted offer/answer over a real
+// public MQTT broker exactly as the phone does, and the probe dials only the
+// addresses the PC answered with. Needs REMEDY_IROH_LIVE_PUNCH=1 as well.
+func TestIrohLivePunch(t *testing.T) {
+	bin := os.Getenv("REMEDY_IROH_BIN")
+	probe := os.Getenv("REMEDY_IROH_PROBE")
+	if bin == "" || probe == "" || os.Getenv("REMEDY_IROH_LIVE_PUNCH") == "" {
+		t.Skip("set REMEDY_IROH_BIN, REMEDY_IROH_PROBE and REMEDY_IROH_LIVE_PUNCH=1")
+	}
+	home := pipeHome(t)
+	hostKP := mustHostKP(t, home)
+	if os.Getenv("REMEDY_NATIVE_CORE_LIB") == "" {
+		defer connect.SetIrohStarterForTest(execIrohStarter)()
+	}
+	g := connect.NewGateway(nil)
+	defer func() { _ = g.Stop() }()
+	if err := g.MaybeStart(connect.GatewaySettings{
+		Enabled: true, Host: "127.0.0.1", Port: 0, Home: home, Sidecar: 7400,
+		Iroh: true, IrohPort: 7498, IrohPunch: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for connect.CurrentIrohAdvert().EndpointID == "" {
+		if time.Now().After(deadline) {
+			t.Fatal("sidecar never ready")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if connect.CurrentIrohAdvert().PunchBrokers == "" {
+		t.Fatal("advert lacks punch brokers")
+	}
+	_, secret := mustStartPair(t, home, 7401)
+	pcID := connect.CurrentIrohAdvert().EndpointID
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, probe, pcID, "--punch")
+	in, _ := cmd.StdinPipe()
+	out, _ := cmd.StdoutPipe()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { cancel(); _ = cmd.Wait() }()
+	sc := bufio.NewScanner(out)
+	next := func() map[string]any {
+		if !sc.Scan() {
+			t.Fatal("probe exited")
+		}
+		var ev map[string]any
+		_ = json.Unmarshal(sc.Bytes(), &ev)
+		return ev
+	}
+	offerEv := next()
+	if offerEv["event"] != "punch_offer" {
+		t.Fatalf("probe said %v", offerEv)
+	}
+	var phoneAddrs []string
+	for _, a := range offerEv["addrs"].([]any) {
+		phoneAddrs = append(phoneAddrs, a.(string))
+	}
+	t.Logf("phone side STUN offer: %v", phoneAddrs)
+	publicOnly := os.Getenv("REMEDY_IROH_PUNCH_PUBLIC_ONLY") != ""
+	if publicOnly {
+		phoneAddrs = phoneAddrs[:1] // STUN-mapped only: no LAN shortcut
+	}
+
+	// Signal over a real public broker, as the phone does.
+	var mq *connect.MqttSession
+	for _, b := range connect.DefaultPunchBrokers() {
+		s, err := connect.NewMqttSession(b.Host, b.Port, 8*time.Second)
+		if err != nil {
+			continue
+		}
+		cctx, cc := context.WithTimeout(ctx, 8*time.Second)
+		err = s.Connect(cctx)
+		cc()
+		if err == nil {
+			mq = s
+			t.Logf("signalling via %s", b.Host)
+			break
+		}
+	}
+	if mq == nil {
+		t.Skip("no public MQTT broker reachable")
+	}
+	defer mq.Close()
+	answers := make(chan []byte, 4)
+	mq.OnMessage = func(_ string, p []byte) { answers <- append([]byte(nil), p...) }
+	// Same read window as the PC's responder: above two keepalive pings.
+	mq.Timeout = 2*connect.PingEveryS + 5*time.Second
+	go mq.PingLoop(ctx)
+	go mq.ReaderLoop(ctx)
+	var answer connect.PunchAnswer
+	t0 := time.Now()
+	got := false
+	sent := map[string]bool{}
+	for attempt := 0; attempt < 5 && !got; attempt++ {
+		nb := make([]byte, 8)
+		_, _ = rand.Read(nb)
+		nonce := hex.EncodeToString(nb)
+		sent[nonce] = true
+		sctx, sc2 := context.WithTimeout(ctx, 8*time.Second)
+		_ = mq.Subscribe(sctx, []string{connect.PunchReplyTopic(hostKP.Public, nonce)}, 1)
+		sc2()
+		blob, _ := connect.SealPunch(hostKP.Public, connect.PunchOffer{V: 1, From: offerEv["from"].(string),
+			Addrs: phoneAddrs, Nonce: nonce, TS: time.Now().Unix()})
+		pctx, pc := context.WithTimeout(ctx, 8*time.Second)
+		_ = mq.Publish(pctx, connect.PunchTopic(hostKP.Public), blob, 1)
+		pc()
+		// The responder may still be subscribing when the first offer goes
+		// out; an answer to any offer we sent is a good answer.
+		wait := time.After(6 * time.Second)
+	collect:
+		for !got {
+			select {
+			case a := <-answers:
+				if connect.OpenPunch(hostKP.Public, a, &answer) == nil && sent[answer.Nonce] {
+					got = true
+				}
+			case <-wait:
+				break collect
+			}
+		}
+	}
+	if !got || answer.Error != "" || len(answer.Addrs) == 0 {
+		t.Fatalf("no usable answer: got=%v %+v", got, answer)
+	}
+	t.Logf("PC answered in %v with %v", time.Since(t0).Round(time.Millisecond), answer.Addrs)
+	if publicOnly {
+		answer.Addrs = answer.Addrs[:1]
+	}
+	line, _ := json.Marshal(map[string]any{"addrs": answer.Addrs})
+	_, _ = in.Write(append(line, '\n'))
+
+	listen := next()
+	c, err := net.DialTimeout("tcp", listen["addr"].(string), 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(30 * time.Second))
+	t1 := time.Now()
+	client, err := connect.HandshakeInitiator(c, mustKP(t), hostKP.Public, connect.PairPayload(secret, "punch-probe"))
+	if err != nil {
+		if publicOnly {
+			t.Skipf("public-only punch failed (%v): both ends share one router here, and it does not hairpin; "+
+				"this case needs the phone on a real mobile network", err)
+		}
+		t.Fatalf("noise over punched path: %v", err)
+	}
+	me := liveRequest(t, c, client, 3, connect.HTTPRequest{Method: "GET", Target: "/connect/me"}, nil)
+	if !bytes.Contains(me, []byte("HTTP/1.1 200")) {
+		t.Fatalf("/connect/me=%q", me)
+	}
+	dial := next()
+	t.Logf("punched connection: path=%v rtt=%vms dial=%vms; handshake+/connect/me %v",
+		dial["path"], dial["rtt_ms"], dial["dial_ms"], time.Since(t1).Round(time.Millisecond))
+}
+
+func mustKP(t *testing.T) connect.KeyPair {
+	t.Helper()
+	kp, err := connect.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kp
 }
