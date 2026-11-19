@@ -159,8 +159,10 @@ func TestCGNATVerdictMentionsPunching(t *testing.T) {
 }
 
 // fakeBroker accepts one MQTT client, acks CONNECT and SUBSCRIBE, answers
-// PINGREQ, and otherwise stays silent — like an idle offer topic.
-func fakeBroker(t *testing.T) (RDVEndpoint, <-chan struct{}) {
+// PINGREQ, and otherwise stays silent — like an idle offer topic. Each
+// accepted client is also sent on the returned conn channel so a test can
+// push a PUBLISH of its own.
+func fakeBroker(t *testing.T) (RDVEndpoint, <-chan struct{}, <-chan net.Conn) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -168,12 +170,14 @@ func fakeBroker(t *testing.T) (RDVEndpoint, <-chan struct{}) {
 	}
 	t.Cleanup(func() { _ = ln.Close() })
 	subscribed := make(chan struct{}, 4)
+	clients := make(chan net.Conn, 4)
 	go func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
 				return
 			}
+			clients <- c
 			go func(c net.Conn) {
 				defer c.Close()
 				for {
@@ -211,14 +215,14 @@ func fakeBroker(t *testing.T) (RDVEndpoint, <-chan struct{}) {
 		}
 	}()
 	addr := ln.Addr().(*net.TCPAddr)
-	return RDVEndpoint{Host: "127.0.0.1", Port: addr.Port}, subscribed
+	return RDVEndpoint{Host: "127.0.0.1", Port: addr.Port}, subscribed, clients
 }
 
 func TestPunchResponderStaysSubscribedAndStopsPromptly(t *testing.T) {
 	if testing.Short() {
 		t.Skip("waits past the old 8s read window")
 	}
-	ep, subscribed := fakeBroker(t)
+	ep, subscribed, _ := fakeBroker(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
