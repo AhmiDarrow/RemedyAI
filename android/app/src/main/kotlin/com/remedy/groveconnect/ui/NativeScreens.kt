@@ -14,7 +14,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -48,8 +49,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -99,27 +98,27 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Tab ids for the native home. */
+/** Sections of the "More" remote. */
 enum class HomeTab(val label: String) {
-    Chat("Chat"),
-    Sessions("Sessions"),
+    Chat("Any chat"),
+    Sessions("History"),
     Approvals("Approvals"),
     Terminal("Terminal"),
-    Grove("Grove"),
+    Grove("Goals"),
     Settings("Settings"),
 }
 
 /**
- * Native Grove Connect home. Replaces the desktop-WebView "Full remote" with
- * a phone-first UI that talks directly to the PC API through the tunnel.
+ * "More": the full remote the app had before the portal — any session's chat,
+ * history, the approvals list, terminal (when allowed), goals and settings.
+ * Nothing was removed; it just lives one tap away from Talk and Work.
  */
 @Composable
-fun HomeScreen(
+internal fun MoreRemote(
     state: RemoteState,
     api: RemedyApi,
     onClose: () -> Unit,
     onStop: () -> Unit,
-    onRefresh: () -> Unit,
 ) {
     var tab by remember { mutableStateOf(HomeTab.Chat) }
     var pendingSessionId by remember { mutableStateOf<String?>(null) }
@@ -131,20 +130,25 @@ fun HomeScreen(
         if (tab !in visibleTabs) tab = visibleTabs.firstOrNull() ?: HomeTab.Approvals
     }
 
-    Column(Modifier.fillMaxSize().background(BgPrimary).statusBarsPadding()) {
+    Column(Modifier.fillMaxSize()) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text("RemedyConnect", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 19.sp)
-            Spacer(Modifier.weight(1f))
-            StatusDot(state.reachable)
-            Spacer(Modifier.width(8.dp))
-            IconButton(onClick = onRefresh) {
-                Icon(Icons.Filled.Refresh, contentDescription = "Refresh", tint = TextSecondary, modifier = Modifier.size(20.dp))
-            }
-            IconButton(onClick = onClose) {
-                Icon(Icons.Filled.Close, contentDescription = "Close", tint = TextSecondary, modifier = Modifier.size(20.dp))
+            visibleTabs.forEach { t ->
+                val sel = t == tab
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (sel) Accent else BgSecondary)
+                        .clickable { tab = t }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(homeTabIcon(t), contentDescription = null, tint = if (sel) Color.White else TextMuted, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(t.label, color = if (sel) Color.White else TextSecondary, fontSize = 13.sp)
+                }
             }
         }
         ProviderModelBar(api, preferredModel, onModelPicked = { preferredModel = it })
@@ -166,23 +170,6 @@ fun HomeScreen(
                 HomeTab.Terminal -> TerminalTab(terminalApi)
                 HomeTab.Grove -> GroveTab(api)
                 HomeTab.Settings -> SettingsTab(api, state, onStop, onClose, onModelPicked = { preferredModel = it })
-            }
-        }
-        NavigationBar(containerColor = BgSecondary, contentColor = TextPrimary) {
-            visibleTabs.forEach { t ->
-                NavigationBarItem(
-                    selected = tab == t,
-                    onClick = { tab = t },
-                    icon = { Icon(homeTabIcon(t), contentDescription = t.label, modifier = Modifier.size(22.dp)) },
-                    label = { Text(t.label, fontSize = 11.sp) },
-                    colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
-                        selectedIconColor = Accent,
-                        selectedTextColor = TextPrimary,
-                        indicatorColor = BgTertiary,
-                        unselectedIconColor = TextMuted,
-                        unselectedTextColor = TextMuted,
-                    ),
-                )
             }
         }
     }
@@ -207,7 +194,7 @@ private fun homeTabIcon(tab: HomeTab) = when (tab) {
 }
 
 @Composable
-private fun StatusDot(r: Reachable) {
+internal fun StatusDot(r: Reachable) {
     val color = when (r) {
         Reachable.Connecting -> Warning
         Reachable.OnLan, Reachable.OnRelay -> Success

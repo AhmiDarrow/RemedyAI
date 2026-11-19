@@ -10,6 +10,14 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <!-- Voice input uses the phone's own speech recognizer through an intent
+         (no microphone permission in this app). Android 11+ needs this to see it. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+    </queries>
+
     <application
         android:name=".GroveApp"
         android:allowBackup="false"

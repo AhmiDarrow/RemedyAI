@@ -19,10 +19,46 @@ in your hand.
 | **Who runs Remedy** | This PC. The phone is not Remedy and does not keep your chats. |
 | **Phone app** | Sideload the RemedyConnect APK next to the Desktop download. Not a store SKU. |
 
-The phone home includes native Chat, Sessions, Approvals, Terminal, Grove, and
-Settings views. The PC controls which panes are available; disabled panes stay
-out of the phone navigation. If a saved PC is temporarily offline, tap
-**Reconnect** instead of pairing again.
+## What the phone shows
+
+The phone app is **a line to Remedy**, not a small copy of the desktop. It
+has three tabs at the bottom:
+
+| Tab | What it's for |
+|-----|---------------|
+| **Talk** | Remedy's own conversation (the same one Grove shows on the PC). Type, or tap the **microphone** to speak. Replies stream in as she writes. If she is already replying when you open the app, you see it live. |
+| **Work** | What Remedy is doing: her side jobs and their state, your goals, your routines, and **While you were away**. You can **Stop** a side job, put a goal on or off **autopilot**, and pause, resume or **Run now** a routine. |
+| **More** | The full remote from earlier versions: any chat, chat history, the approvals list, the terminal (only if you allowed it), goals, and the model picker / settings. |
+
+**When Remedy needs you**, one question shows at a time above Talk and Work:
+what she wants to do in plain words, then **Yes**, **No** or **Explain**
+(Explain shows exactly what would run). "1 of 3" means more are waiting; tap
+**Later** to tuck them away. A yes from the phone covers **that one action
+only**. Choose "allow for this chat" on the PC if you want that.
+**Money, password and send** steps get their own look and always ask, every
+time, in every mode.
+
+**Notifications:** if the app is open in the background, your phone shows
+*Remedy has a question for you*. The lock screen only says *Remedy needs
+you*. Tapping the notification opens the app, which asks for your screen lock
+first. The notification never answers anything for you. Swiping the app away
+ends the remote session, and with it these notifications.
+
+**Starting and stopping:** turning on autopilot, turning a routine back on, or
+running one now asks *are you sure* on the phone first. Pausing and stopping
+never start new work, so they go straight through. To start a new side job or
+routine, ask Remedy in **Talk** ("keep an eye on flight prices for me",
+"remind me every morning…"). That way the request goes through her.
+
+**If the connection drops** (Wi‑Fi to mobile data, a tunnel, the PC
+sleeping), the app stays where it was and shows *Reconnecting…*. A reply that
+was streaming picks up where it left off once the PC is back. If the PC is
+off for a long time, the full reply appears in Talk when it returns.
+
+The PC decides which parts the phone may use (**Settings → Connect →** the
+phone's panes). A part that is turned off shows a short note saying so. The
+terminal stays off until you turn it on for that phone. If a saved PC is
+temporarily offline, tap **Reconnect** instead of pairing again.
 
 ## Turn it on — 3 steps
 

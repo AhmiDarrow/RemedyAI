@@ -4,4 +4,6 @@
     <string name="notif_channel">Remote session</string>
     <string name="notif_title">RemedyConnect</string>
     <string name="notif_text">Remote session open. Closing the app ends it.</string>
+    <string name="notif_needs_you_channel">Remedy needs you</string>
+    <string name="notif_needs_you_title">Remedy needs you</string>
 </resources>
