@@ -195,6 +195,22 @@ class QrPayloadTest {
     }
 
     @Test
+    fun parseIrohAddrsAndMode() {
+        val id = "32f964994affa248ee05d85780291e07535c4229dfcba0bbde4c44f94594c602"
+        val q = QrPayload.parse(
+            qr(extra = "ir=$id\nira=74.167.84.108:7402,[2a00:1450::1]:7402,192.168.0.46:7402"),
+            nowUnix = now,
+        )
+        assertEquals(listOf("74.167.84.108:7402", "[2a00:1450::1]:7402", "192.168.0.46:7402"), q.irohAddrs)
+        assertEquals(false, q.irohN0)
+        assertNull(q.irohRelay)
+        assertTrue(QrPayload.parse(qr(extra = "ir=$id\nirm=n0"), nowUnix = now).irohN0)
+        for (bad in listOf("ira=example.com:7402", "ira=1.2.3.4", "ira=0.0.0.0:7402", "ira=1.2.3.4:99999", "irm=other")) {
+            assertFailsWith<QrException>(bad) { QrPayload.parse(qr(extra = bad), nowUnix = now) }
+        }
+    }
+
+    @Test
     fun rejectBadIrohFields() {
         assertFailsWith<QrException> { QrPayload.parse(qr(extra = "ir=abc"), nowUnix = now) }
         assertFailsWith<QrException> { QrPayload.parse(qr(extra = "ir=" + "g".repeat(64)), nowUnix = now) }

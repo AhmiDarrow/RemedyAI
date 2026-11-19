@@ -75,27 +75,46 @@ func TestIrohLiveRoundTrip(t *testing.T) {
 	if err := g.MaybeStart(connect.GatewaySettings{
 		Enabled: true, Host: "127.0.0.1", Port: 0, Home: home,
 		APIKey: "tok-iroh-live", Sidecar: apiPort, Iroh: true,
+		// Default policy: no relay; a test port so a running Remedy keeps 7402.
+		IrohPort: 7499,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(45 * time.Second)
-	for connect.CurrentIrohAdvert().EndpointID == "" {
-		if time.Now().After(deadline) {
-			t.Fatal("sidecar never reported ready")
+	for {
+		st := connect.CurrentIrohStatus()
+		if connect.CurrentIrohAdvert().EndpointID != "" && st.Verdict != connect.ReachChecking && st.Verdict != connect.ReachOff {
+			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		if time.Now().After(deadline) {
+			t.Fatalf("sidecar never finished its self-test: %+v", st)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
+	st := connect.CurrentIrohStatus()
+	t.Logf("self-test: verdict=%s protocols=%v mapped=%q public=%q v6=%v — %s",
+		st.Verdict, st.MapProtos, st.Mapped, st.PublicIP, st.GlobalV6, st.Message)
 	qr, secret := mustStartPair(t, home, 7401)
-	irID := ""
+	irID, ira := "", ""
 	for _, line := range strings.Split(qr, "\n") {
 		if strings.HasPrefix(line, "ir=") {
 			irID = line[3:]
 		}
+		if strings.HasPrefix(line, "ira=") {
+			ira = line[4:]
+		}
+		if strings.HasPrefix(line, "irr=") || strings.HasPrefix(line, "irm=") {
+			t.Fatalf("default QR must not name a relay: %q", line)
+		}
 	}
-	if irID == "" {
-		t.Fatalf("QR has no ir=: %q", qr)
+	if irID == "" || ira == "" {
+		t.Fatalf("QR lacks ir=/ira=: %q", qr)
 	}
-	t.Logf("PC endpoint id %s", irID)
+	t.Logf("PC endpoint id %s, QR addrs %s", irID, ira)
+	direct := []string{"--no-relay"}
+	for _, a := range strings.Split(ira, ",") {
+		direct = append(direct, "--addr", a)
+	}
 
 	deviceKP, err := connect.GenerateKeyPair()
 	if err != nil {
@@ -108,13 +127,26 @@ func TestIrohLiveRoundTrip(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"direct", nil},
-		{"relay-only", []string{"--relay-only"}},
+		{"qr-addrs-no-relay", direct},
+	}
+	if st.Mapped != "" {
+		// Only the router-mapped public address: from inside the LAN this
+		// needs NAT hairpinning, so it is informative, not authoritative.
+		modes = append(modes, struct {
+			name string
+			args []string
+		}{"mapped-public-only", []string{"--no-relay", "--addr", st.Mapped}})
 	}
 	for i, m := range modes {
 		payload := connect.HelloPayload(deviceID)
 		if i == 0 {
 			payload = connect.PairPayload(secret, "iroh-probe")
+		}
+		if m.name == "mapped-public-only" {
+			if err := tryLiveMode(t, probe, irID, m.name, m.args, deviceKP, hostKP.Public, payload); err != nil {
+				t.Logf("[%s] not reachable from inside the LAN (router does not hairpin): %v", m.name, err)
+			}
+			continue
 		}
 		runLiveMode(t, probe, irID, m.name, m.args, deviceKP, hostKP.Public, payload)
 	}
@@ -214,9 +246,44 @@ loop:
 		name, dial["dial_ms"], dial["path"], dial["rtt_ms"], handshake.Round(time.Millisecond),
 		meRTT.Round(time.Millisecond), first.Round(time.Millisecond), liveTokens,
 		total.Round(time.Millisecond), paths)
-	if name == "relay-only" && dial["path"] == "direct" {
-		t.Fatalf("relay-only probe reported a direct path")
+	if dial["path"] == "relay" {
+		t.Fatalf("%s: no-relay probe reported a relay path", name)
 	}
+}
+
+// tryLiveMode is a quick reachability check: dial and handshake only.
+func tryLiveMode(t *testing.T, probe, id, name string, args []string, deviceKP connect.KeyPair, hostPub, payload []byte) error {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, probe, append([]string{id}, args...)...)
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	defer func() { cancel(); _ = cmd.Wait() }()
+	sc := bufio.NewScanner(out)
+	if !sc.Scan() {
+		return fmt.Errorf("probe exited")
+	}
+	var ev map[string]any
+	_ = json.Unmarshal(sc.Bytes(), &ev)
+	addr, _ := ev["addr"].(string)
+	c, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(12 * time.Second))
+	t0 := time.Now()
+	if _, err := connect.HandshakeInitiator(c, deviceKP, hostPub, payload); err != nil {
+		return err
+	}
+	t.Logf("[%s] handshake over the router-mapped public address in %v", name, time.Since(t0).Round(time.Millisecond))
+	return nil
 }
 
 func execIrohStarter(ctx context.Context, _ string, bin string) (*connect.IrohProcess, error) {

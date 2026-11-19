@@ -170,8 +170,14 @@ func StartPair(opts PairStartOpts) (string, error) {
 	}
 	if ir := CurrentIrohAdvert(); ir.EndpointID != "" {
 		lines = append(lines, "ir="+ir.EndpointID)
-		if ir.RelayURL != "" {
+		if len(ir.Addrs) > 0 {
+			lines = append(lines, "ira="+strings.Join(ir.Addrs, ","))
+		}
+		if ir.RelayMode == "custom" && ir.RelayURL != "" {
 			lines = append(lines, "irr="+ir.RelayURL)
+		}
+		if ir.RelayMode == "n0" {
+			lines = append(lines, "irm=n0")
 		}
 	}
 	lines = append(lines, fmt.Sprintf("exp=%d", exp))

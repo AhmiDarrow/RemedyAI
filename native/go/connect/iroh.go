@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -89,8 +90,15 @@ func LoadOrCreateIrohKey(home string) ([]byte, error) {
 // IrohAdvert is what the pair QR advertises once the sidecar is online.
 type IrohAdvert struct {
 	EndpointID string
-	RelayURL   string
+	// Addrs are the direct ip:port candidates for the QR (router-mapped
+	// public address first, then global IPv6, then LAN).
+	Addrs     []string
+	RelayURL  string
+	RelayMode string // "off" (default), "custom", or "n0"
 }
+
+// maxIrohQRAddrs bounds the ira= list.
+const maxIrohQRAddrs = 6
 
 var (
 	irohAdvertMu sync.Mutex
@@ -138,9 +146,19 @@ func IrohSidecarPath() string {
 
 // IrohSupervisorOpts configures RunIrohSupervisor.
 type IrohSupervisorOpts struct {
-	Home     string
-	Bin      string // sidecar path; "" → IrohSidecarPath()
-	RelayURL string // self-hosted iroh-relay; "" → n0 public relays
+	Home string
+	Bin  string // sidecar path; "" → IrohSidecarPath()
+	// Port is the fixed UDP port (0 → IrohDefaultPort; -1 → ephemeral, tests).
+	Port int
+	// RelayMode: "off" (default: the PC is its own endpoint, no third party),
+	// "custom" (RelayURL, the owner's iroh-relay) or "n0" (public, advanced).
+	RelayMode string
+	RelayURL  string
+	// NoPortmap skips UPnP/PCP/NAT-PMP on the home router.
+	NoPortmap bool
+	// STUNServers for the self-test's public-address check (nil → defaults;
+	// empty non-nil → skip STUN).
+	STUNServers []string
 	// Session runs the Noise pipe for one spliced stream (supervisorSession).
 	Session func(context.Context, net.Conn) error
 	// OnEvent, when set, receives each sidecar event line (tests, metrics).
@@ -149,14 +167,73 @@ type IrohSupervisorOpts struct {
 
 // irohEvent is one stdout line from the sidecar.
 type irohEvent struct {
-	Event      string `json:"event"`
-	EndpointID string `json:"endpoint_id"`
-	RelayURL   string `json:"relay_url"`
-	Remote     string `json:"remote"`
-	Path       string `json:"path"`
-	RTTMs      int64  `json:"rtt_ms"`
-	Detail     string `json:"detail"`
-	Reason     string `json:"reason"`
+	Event      string         `json:"event"`
+	EndpointID string         `json:"endpoint_id"`
+	RelayURL   string         `json:"relay_url"`
+	Remote     string         `json:"remote"`
+	Path       string         `json:"path"`
+	RTTMs      int64          `json:"rtt_ms"`
+	Detail     string         `json:"detail"`
+	Reason     string         `json:"reason"`
+	RelayMode  string         `json:"relay_mode"`
+	Addrs      []string       `json:"addrs"`
+	External   *string        `json:"external"`
+	Probe      map[string]any `json:"probe"`
+}
+
+// irohRelayMode normalises the configured relay policy.
+func irohRelayMode(mode, url string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "n0":
+		return "n0"
+	case "custom":
+		return "custom"
+	case "off":
+		return "off"
+	}
+	if strings.TrimSpace(url) != "" {
+		return "custom"
+	}
+	return "off"
+}
+
+// irohLog is swappable so tests stay quiet.
+var logIroh = func(line string) { log.Print(line) }
+
+// orderIrohAddrs keeps public candidates first and drops loopback/link-local.
+func orderIrohAddrs(addrs []string, mapped string) []string {
+	var public, v6, lan []string
+	seen := map[string]bool{}
+	add := func(dst *[]string, a string) {
+		if !seen[a] {
+			seen[a] = true
+			*dst = append(*dst, a)
+		}
+	}
+	if mapped != "" {
+		add(&public, mapped)
+	}
+	for _, a := range addrs {
+		ap, err := netip.ParseAddrPort(a)
+		if err != nil {
+			continue
+		}
+		ip := ap.Addr().Unmap()
+		switch {
+		case ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified():
+		case isPublicAddr(ip) && ip.Is6():
+			add(&v6, a)
+		case isPublicAddr(ip):
+			add(&public, a)
+		default:
+			add(&lan, a)
+		}
+	}
+	out := append(append(public, v6...), lan...)
+	if len(out) > maxIrohQRAddrs {
+		out = out[:maxIrohQRAddrs]
+	}
+	return out
 }
 
 // RunIrohSupervisor keeps the sidecar running and feeds its loopback hops to
@@ -202,6 +279,9 @@ func RunIrohSupervisor(ctx context.Context, opts IrohSupervisorOpts) error {
 
 	backoff := time.Second
 	defer setIrohAdvert(IrohAdvert{})
+	defer updateIrohStatus(func(s *IrohStatus) {
+		*s = IrohStatus{Verdict: ReachOff, Message: "Reach from mobile data is off."}
+	})
 	for {
 		started := time.Now()
 		err := runIrohSidecar(ctx, bin, sk, token, ln.Addr().String(), opts)
@@ -240,12 +320,63 @@ func runIrohSidecar(ctx context.Context, bin string, sk, token []byte, forward s
 		case <-stopWatch:
 		}
 	}()
-	cfg, _ := json.Marshal(map[string]string{
+	mode := irohRelayMode(opts.RelayMode, opts.RelayURL)
+	port := opts.Port
+	if port == 0 {
+		port = IrohDefaultPort
+	}
+	if port < 0 {
+		port = 0
+	}
+	sidecarCfg := map[string]any{
 		"secret_key": hex.EncodeToString(sk),
 		"forward":    forward,
 		"token":      hex.EncodeToString(token),
-		"relay_url":  strings.TrimSpace(opts.RelayURL),
+		"relay_mode": mode,
+		"bind_port":  port,
+		"portmap":    !opts.NoPortmap,
+	}
+	if mode == "custom" {
+		sidecarCfg["relay_urls"] = []string{strings.TrimSpace(opts.RelayURL)}
+	}
+	cfg, _ := json.Marshal(sidecarCfg)
+	updateIrohStatus(func(s *IrohStatus) {
+		*s = IrohStatus{Enabled: true, Port: port, RelayMode: mode, Verdict: ReachChecking,
+			Message: "Checking whether your phone can reach this PC from mobile data…"}
 	})
+	var (
+		advMu   sync.Mutex
+		adv     = IrohAdvert{RelayMode: mode}
+		rawAddr []string
+		mapped  string
+		testGen int
+	)
+	if mode == "custom" {
+		adv.RelayURL = strings.TrimSpace(opts.RelayURL)
+	}
+	publish := func() {
+		adv.Addrs = orderIrohAddrs(rawAddr, mapped)
+		setIrohAdvert(adv)
+		updateIrohStatus(func(s *IrohStatus) {
+			s.EndpointID = adv.EndpointID
+			s.Addrs = append([]string(nil), rawAddr...)
+			s.Mapped = mapped
+		})
+	}
+	// Debounced self-test: addresses and the router mapping arrive over a
+	// few seconds; test once they settle.
+	scheduleTest := func() {
+		testGen++
+		gen := testGen
+		time.AfterFunc(3*time.Second, func() {
+			advMu.Lock()
+			current := gen == testGen
+			advMu.Unlock()
+			if current && ctx.Err() == nil {
+				runIrohSelfTest(ctx, opts.STUNServers)
+			}
+		})
+	}
 	if _, err := proc.Stdin.Write(append(cfg, '\n')); err != nil {
 		proc.Kill()
 		_ = proc.Wait()
@@ -260,16 +391,40 @@ func runIrohSidecar(ctx context.Context, bin string, sk, token []byte, forward s
 		if json.Unmarshal(sc.Bytes(), &ev) != nil {
 			continue
 		}
+		advMu.Lock()
 		switch ev.Event {
 		case "ready":
-			setIrohAdvert(IrohAdvert{EndpointID: ev.EndpointID, RelayURL: strings.TrimSpace(opts.RelayURL)})
-			log.Printf("connect: iroh ON — endpoint %s (home relay %s). Phones dial this id; "+
-				"relays see IPs and timing, never content.", shortIrohID(ev.EndpointID), ev.RelayURL)
+			adv.EndpointID = ev.EndpointID
+			publish()
+			scheduleTest()
+			logIroh(fmt.Sprintf("connect: mobile-data endpoint ON — iroh id %s, UDP %d, relay %s. "+
+				"Phones dial this PC directly; any relay sees IPs and timing, never content.",
+				shortIrohID(ev.EndpointID), port, mode))
+		case "addrs":
+			rawAddr = append([]string(nil), ev.Addrs...)
+			publish()
+			scheduleTest()
+		case "mapped":
+			mapped = ""
+			if ev.External != nil {
+				mapped = *ev.External
+			}
+			publish()
+			scheduleTest()
+		case "portmap_probe":
+			var protos []string
+			for _, k := range []string{"upnp", "pcp", "nat_pmp"} {
+				if v, _ := ev.Probe[k].(bool); v {
+					protos = append(protos, k)
+				}
+			}
+			updateIrohStatus(func(s *IrohStatus) { s.MapProtos = protos })
 		case "conn", "path":
 			log.Printf("connect: iroh %s %s path=%s rtt=%dms", ev.Event, ev.Remote, ev.Path, ev.RTTMs)
 		case "error":
 			log.Printf("connect: iroh error: %s", ev.Detail)
 		}
+		advMu.Unlock()
 		if opts.OnEvent != nil {
 			var raw map[string]any
 			if json.Unmarshal(sc.Bytes(), &raw) == nil {
