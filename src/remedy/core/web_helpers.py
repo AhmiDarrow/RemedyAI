@@ -253,6 +253,64 @@ class SearchConsentError(RuntimeError):
     """Raised when the scraping fallback is the only route and is un-acked."""
 
 
+class SearchBlockedError(RuntimeError):
+    """The search service answered with a "prove you are human" check.
+
+    Remedy never solves those. Reporting it as "no results" made the model
+    retry search after search and then fetch Google / Yelp directly (which
+    the robots gate refuses) — a dozen wasted tool calls per question.
+    """
+
+
+# Seconds to stop asking DuckDuckGo after it served a human check. Asking
+# again right away only earns another challenge and spends a tool call.
+DDG_BLOCK_COOLDOWN_S = 600.0
+_ddg_blocked_until = 0.0
+_ddg_block_lock = threading.Lock()
+
+SEARCH_BLOCKED_NOTE = (
+    "Web search is unavailable right now: DuckDuckGo answered with a "
+    "'prove you are human' check, and Remedy never solves those. Do not "
+    "retry web search, and do not fetch search engines or review sites "
+    "(Google, Bing, Yelp) instead — they refuse automated reads too. Answer "
+    "from what you already know and say it is unverified, fetch a specific "
+    "page you know the address of, or ask the owner to look it up in the "
+    "Browser."
+)
+
+
+def ddg_challenge_page(html: str) -> bool:
+    """True when a DuckDuckGo HTML response is its bot challenge, not results."""
+    low = (html or "").lower()
+    if not low:
+        return False
+    if 'class="result__a' in low or "class='result__a" in low:
+        return False
+    return (
+        "anomaly-modal" in low
+        or "bots use duckduckgo too" in low
+        or "confirm this search was made by a human" in low
+    )
+
+
+def _ddg_blocked_now(now: float | None = None) -> bool:
+    with _ddg_block_lock:
+        return (time.monotonic() if now is None else now) < _ddg_blocked_until
+
+
+def _ddg_mark_blocked(now: float | None = None) -> None:
+    global _ddg_blocked_until
+    with _ddg_block_lock:
+        _ddg_blocked_until = (time.monotonic() if now is None else now) + DDG_BLOCK_COOLDOWN_S
+
+
+def _ddg_reset_block() -> None:
+    """Tests: forget a remembered challenge."""
+    global _ddg_blocked_until
+    with _ddg_block_lock:
+        _ddg_blocked_until = 0.0
+
+
 def _cfg(key: str, runtime: Any = None) -> Any:
     try:
         from remedy.interfaces.config import load_config
@@ -349,6 +407,9 @@ def _direct_fetch(url: str, *, timeout: float) -> bytes:
 
 
 def _ddg_rows(q: str, n: int, timeout: float) -> list[dict[str, str]]:
+    if _ddg_blocked_now():
+        # Still inside the cooldown after a challenge: no network at all.
+        raise SearchBlockedError(SEARCH_BLOCKED_NOTE)
     search_url = _DDG_HTML_ENDPOINT + "?" + urlencode({"q": q})
     # Paced like any other host, but not robots-gated: their robots.txt says
     # Allow: / for every agent, so there is no stated rule to consult here.
@@ -356,7 +417,35 @@ def _ddg_rows(q: str, n: int, timeout: float) -> list[dict[str, str]]:
         search_url, max_chars=200_000, timeout=timeout, respect_robots=False
     )
     html = raw.decode(charset or "utf-8", errors="replace")
+    if ddg_challenge_page(html):
+        _ddg_mark_blocked()
+        raise SearchBlockedError(SEARCH_BLOCKED_NOTE)
     return parse_ddg_html_results(html, max_results=n)
+
+
+# Engines OpenSERP asks, in order. Ecosia was dropped: it refuses every
+# automated query (HTTP 403). Google is left off by default: its terms forbid
+# automated querying, and docs/WEB_ETIQUETTE.md leaves that call to the owner.
+OPENSERP_ENGINES: tuple[str, ...] = ("duckduckgo", "bing")
+
+
+def _revive_openserp(wait_s: float = 8.0) -> None:
+    """Bring the local engine back before giving up on it.
+
+    Installed but not running (first search after boot, or it died): start it
+    and wait a few seconds — far better than the DuckDuckGo HTML fallback,
+    which now answers automated reads with a human check. Not installed yet:
+    start the download in the background for next time.
+    """
+    with suppress(Exception):
+        from remedy.home import default_home
+        from remedy.runtime.web_search_host import find_binary, schedule_ensure, start
+
+        home = default_home()
+        if find_binary(home) is not None:
+            start(home, wait_s=wait_s)
+        else:
+            schedule_ensure(home)
 
 
 def _openserp_rows(q: str, n: int, timeout: float) -> list[dict[str, str]]:
@@ -366,9 +455,11 @@ def _openserp_rows(q: str, n: int, timeout: float) -> list[dict[str, str]]:
     from remedy.runtime.web_search_host import base_url, is_healthy
 
     if not is_healthy():
-        raise RuntimeError("openserp not healthy")
+        _revive_openserp()
+        if not is_healthy():
+            raise RuntimeError("openserp not healthy")
     base = base_url().rstrip("/")
-    engines = ("duckduckgo", "ecosia")
+    engines = OPENSERP_ENGINES
     last_err: Exception | None = None
     for engine in engines:
         url = f"{base}/{engine}/search?" + urlencode(

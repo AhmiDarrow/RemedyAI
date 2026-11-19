@@ -6,10 +6,12 @@ import { openExternalUrl } from '../api/auth'
 import { closeBrowserRail } from '../api/computer'
 import {
   beginXaiOAuth,
+  preopenSignInWindow,
   resumeXaiOAuthPoll,
   stopXaiOAuthPoll,
   subscribeXaiOAuth,
 } from '../api/xaiOAuth'
+import { isTauri } from '../api/tauri'
 import {
   listProviders,
   listFreeProviders,
@@ -274,6 +276,8 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   )
 
   const handleXaiSignIn = useCallback(async () => {
+    // Must run before any await: the browser only allows it inside the click.
+    const popup = preopenSignInWindow()
     setXaiLoginBusy(true)
     setXaiLoginMsg('')
     setError('')
@@ -301,7 +305,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         /* apiFetch will retry token */
       }
       setOauthBrowserOpen(true)
-      await beginXaiOAuth({ keepSettings: false, openRail: false, llmModel: model })
+      await beginXaiOAuth({ keepSettings: false, openRail: false, llmModel: model, popup })
     } catch (e: unknown) {
       setXaiLoginBusy(false)
       const msg = e instanceof Error ? e.message : String(e)
@@ -876,11 +880,15 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     <div className="text-sm" style={labelStyles}>
                       Code: <code style={{ color: 'var(--accent)' }}>{xaiUserCode}</code>
                       {xaiVerifyUrl && (
-                        <button
-                          type="button"
+                        <a
+                          href={xaiVerifyUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           className="block mt-1 underline"
                           style={{ color: 'var(--accent)' }}
-                          onClick={() => {
+                          onClick={(e) => {
+                            if (!isTauri()) return // plain link: the browser opens it
+                            e.preventDefault()
                             setOauthBrowserOpen(true)
                             void import('../api/computer').then(({ openUrlInBrowserRail }) =>
                               openUrlInBrowserRail(xaiVerifyUrl, {
@@ -891,7 +899,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                           }}
                         >
                           Open verification page
-                        </button>
+                        </a>
                       )}
                     </div>
                   )}

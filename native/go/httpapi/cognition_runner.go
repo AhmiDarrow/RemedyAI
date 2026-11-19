@@ -674,6 +674,7 @@ func (r *CognitionTurnRunner) boundTools(req TurnRequest) cognition.ToolExecutor
 		HomeDir:     r.HomeDir,
 		SessionID:   req.SessionID,
 		PageContext: live,
+		Origin:      req.Origin,
 	}}
 }
 
@@ -793,6 +794,12 @@ func (r *CognitionTurnRunner) shouldContinue(
 ) (bool, string) {
 	if req.ChatMode || r.promptAssemble == nil {
 		// Without RMDY never re-arm on tool_count alone (explore thrash).
+		return false, ""
+	}
+	if partnerRunConcluded(req.Origin, turn.LastAssistantText()) {
+		// Background work Remedy started (child, routine, autopilot) ends
+		// with an explicit STATUS report. Re-arming past it spends model
+		// usage on work nobody asked for (a "build" reflex writing files).
 		return false, ""
 	}
 	input := map[string]any{
@@ -1317,6 +1324,8 @@ func plainToolApprovalSummary(toolName, preview, boundRoot string) string {
 		return "Remedy wants to send an email."
 	case name == "calendar.create_event":
 		return "Remedy wants to create a calendar event."
+	case isPartnerTool(name):
+		return partnerApprovalSummary(name, preview)
 	case strings.HasPrefix(name, "computer."):
 		return "Remedy wants to use the computer (click, type, or navigate)."
 	default:

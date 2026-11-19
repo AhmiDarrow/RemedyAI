@@ -116,7 +116,7 @@ Delete confirmations start on **Cancel**; Enter alone does not approve deletion.
 | **Plan** | Research & design only: **read/search/list/fetch OK**; **writes/shell blocked**. Ask clarifying questions; save a structured plan (`plan_save`); ASCII outline in chat. |
 | **Build** | Implement changes, run tools, write files — follows the latest plan when present. |
 
-Status bar toggle or **Ctrl+B** / Shift+Tab in composer. Desktop sends `plan_mode` so the server enforces the allowlist.
+The Chat / Plan / Build badge at the top of the chat, or **Ctrl+B** / Shift+Tab in the composer. Desktop sends `plan_mode` so the server enforces the allowlist.
 
 **Plan banner** (above chat): **Approve → Build**, **Request changes**, **Cancel plan**.
 

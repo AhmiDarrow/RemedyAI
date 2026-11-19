@@ -839,3 +839,29 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		"cascade":    map[string]any{},
 	})
 }
+
+// RebindProvider moves every conversation bound to provider `from` onto
+// provider `to` (and model, when given). Returns how many rows changed.
+func (s *sessionStore) RebindProvider(from, to, model string) (int, error) {
+	from = strings.ToLower(strings.TrimSpace(from))
+	to = strings.ToLower(strings.TrimSpace(to))
+	if from == "" || to == "" || from == to {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var (
+		res sql.Result
+		err error
+	)
+	if m := strings.TrimSpace(model); m != "" {
+		res, err = s.db.Exec(`UPDATE chat_sessions SET llm_provider = ?, model = ? WHERE lower(llm_provider) = ?`, to, m, from)
+	} else {
+		res, err = s.db.Exec(`UPDATE chat_sessions SET llm_provider = ?, model = NULL WHERE lower(llm_provider) = ?`, to, from)
+	}
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}

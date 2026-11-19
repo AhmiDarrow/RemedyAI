@@ -338,7 +338,7 @@ func toolCommandPreview(call cognition.ToolCall) string {
 // serverOwnedInputFields are set by the runtime from the session, never by
 // the model or an API caller: they choose the jail root, the shell's write
 // roots and the owner home the Python worker reads.
-var serverOwnedInputFields = []string{"home_dir", "workspace_root", "project_path", "write_roots", "owner_confirmed", "page_context"}
+var serverOwnedInputFields = []string{"home_dir", "workspace_root", "project_path", "write_roots", "owner_confirmed", "page_context", "caller_origin"}
 
 // toolBinding is what the runtime, not the model, decides about a tool call:
 // which folder it is jailed to, how far outside it the shell may reach, and
@@ -349,6 +349,9 @@ type toolBinding struct {
 	HomeDir     string
 	SessionID   string
 	PageContext string
+	// Origin is the turn's origin; partner tools use it to refuse a child
+	// starting children of its own.
+	Origin string
 }
 
 // fileToolIDs and sessionToolIDs are the frontier surface's Go-native tools.
@@ -381,6 +384,10 @@ func bindToolInput(call cognition.ToolCall, b toolBinding) cognition.ToolCall {
 	// session so a model-supplied session_id cannot drive another chat's browser.
 	if isSessionTool || name == "bash" || isRail {
 		call.Input = injectSessionBinding(call.Input, b.HomeDir, b.SessionID)
+	}
+	if isPartnerTool(name) {
+		call.Input = injectSessionBinding(call.Input, "", b.SessionID)
+		call.Input = injectSingleField(call.Input, "caller_origin", strings.TrimSpace(b.Origin))
 	}
 	if isComputer {
 		live := strings.TrimSpace(b.PageContext)
@@ -576,7 +583,7 @@ func toolNameDotted(name string) string {
 func hiveDeniedTool(name string) bool {
 	n := toolNameDotted(name)
 	if strings.HasPrefix(n, "mail.") || strings.HasPrefix(n, "calendar.") ||
-		strings.HasPrefix(n, "hive.") || strings.HasPrefix(n, "mcp.") {
+		strings.HasPrefix(n, "hive.") || strings.HasPrefix(n, "mcp.") || isPartnerTool(n) {
 		return true
 	}
 	if n == "clipboard.write" {

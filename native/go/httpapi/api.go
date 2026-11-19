@@ -118,6 +118,9 @@ type Server struct {
 
 	hearthMu     sync.Mutex
 	hearthCancel context.CancelFunc
+
+	// partner is Remedy's head: children, routines, heartbeat, autopilot.
+	partner *partnerHub
 }
 
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
@@ -173,6 +176,7 @@ func New(cfg Config) (*Server, error) {
 		hiveMgr:   hive.New(context.Background(), 64),
 		hiveFS:    openHiveStore(home),
 		appCmd:    newAppControlBus(),
+		partner:   newPartnerHub(home),
 	}
 	_ = s.approvals.SyncFromConfig(LoadConfig(homeDir))
 	// What the owner was asked, and what they decided, belongs in the turn's
@@ -198,6 +202,8 @@ func New(cfg Config) (*Server, error) {
 		_ = cr.AttachRailTools(s.bridge)
 		// Settings Tool ABI (settings.get / settings.patch) uses the apply path.
 		_ = cr.AttachSettingsTools(func() *Server { return s })
+		// Remedy's head tools: children, routines, goals, owner notes.
+		_ = cr.AttachPartnerTools(func() *Server { return s })
 	}
 	if err := s.openEventBus(home); err != nil {
 		_ = store.Close()
@@ -342,6 +348,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/partner/status", s.handlePartnerStatus)
 	s.mux.HandleFunc("POST /api/partner/touch", s.handlePartnerTouch)
 	s.mux.HandleFunc("POST /api/partner/hearth/ack", s.handlePartnerHearthAck)
+	s.registerPartnerRoutes()
 	s.mux.HandleFunc("GET /api/approvals", s.handleListApprovals)
 	s.mux.HandleFunc("POST /api/approvals/{approval_id}/resolve", s.handleResolveApproval)
 	s.mux.HandleFunc("GET /api/life-tasks/current", s.handleCurrentLifeTask)
@@ -423,6 +430,7 @@ func (s *Server) Close() error {
 		return nil
 	}
 	s.stopHearthLoop()
+	s.stopPartnerDispatcher()
 	s.stopSchedulerLoop()
 	s.stopMessengerGateway()
 	s.stopConnectGateway()
@@ -454,6 +462,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.startConnectGateway(s.apiListenPort)
 	s.startSchedulerLoop(ctx)
 	s.startHearthLoop(ctx)
+	s.startPartnerDispatcher(ctx)
 	httpServer := &http.Server{Handler: s.Handler()}
 	errCh := make(chan error, 1)
 	go func() {

@@ -28,6 +28,11 @@ export function approvalOriginLabel(item: OriginFields): string | null {
   const key = raw.toLowerCase()
   if (ORIGIN_LABELS[key]) return ORIGIN_LABELS[key]
   if (key.startsWith('hive:')) return 'a hive task'
+  // Work Remedy started on her own (runtime-minted origins).
+  if (key.startsWith('partner:child:')) return 'a side job'
+  if (key.startsWith('partner:routine:')) return 'a routine'
+  if (key.startsWith('partner:goal:')) return 'goal autopilot'
+  if (key.startsWith('partner:')) return 'background work'
   return raw.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 

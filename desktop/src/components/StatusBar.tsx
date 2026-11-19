@@ -234,9 +234,9 @@ export function StatusBar({
   themeId,
   theme,
   onThemeChange,
-  planMode,
-  chatMode = false,
-  onTogglePlanMode,
+  // planMode / chatMode / onTogglePlanMode and onOpenGrove / onOpenStudio stay
+  // on the props for callers, but the bar no longer draws them: mode and the
+  // surface switch live at the top of each surface.
   panel,
   onTogglePanel,
   onOpenHelp,
@@ -246,9 +246,7 @@ export function StatusBar({
   onOpenUsage,
   timeTravelOpen = false,
   onToggleTimeTravel,
-  onOpenGrove,
   surface = 'studio',
-  onOpenStudio,
   speakReplies = false,
   speaking = false,
   onToggleSpeak,
@@ -859,20 +857,10 @@ export function StatusBar({
 
       <div className="status-controls flex items-center justify-between gap-2 min-w-0 flex-1">
         <div className="status-actions flex items-center gap-1.5 min-w-0">
-          <SegButton
-            active={planMode || chatMode}
-            onClick={onTogglePlanMode}
-            title={
-              chatMode
-                ? 'Chat — conversation. Click for Plan (Ctrl+B)'
-                : planMode
-                  ? 'Plan — outline first. Click for Build (Ctrl+B)'
-                  : 'Build — work when you ask. Click for Chat (Ctrl+B)'
-            }
-          >
-            {chatMode ? t('bar.chat') : planMode ? t('bar.plan') : t('bar.build')}
-          </SegButton>
-
+          {/* Mode (Chat / Plan / Build) and the Grove ↔ Studio switch live at
+              the top of each surface — Studio's chat header, Grove's top bar —
+              so the bottom bar keeps only status and settings. Ctrl+B still
+              cycles the mode everywhere. */}
           {advanced && (
             <>
               <SegButton
@@ -964,25 +952,6 @@ export function StatusBar({
               {speakReplies ? '🔊' : '🔇'}
             </button>
           )}
-          {surface === 'grove' && advanced && onOpenStudio ? (
-            <button
-              type="button"
-              className="seg-btn"
-              title={t('bar.studioTitle')}
-              onClick={onOpenStudio}
-            >
-              ▣ {t('bar.studio')}
-            </button>
-          ) : surface !== 'grove' && onOpenGrove ? (
-            <button
-              type="button"
-              className="seg-btn"
-              title={t('bar.groveTitle')}
-              onClick={onOpenGrove}
-            >
-              ✦ {t('bar.grove')}
-            </button>
-          ) : null}
           {onUiModeChange && (
             <button
               type="button"

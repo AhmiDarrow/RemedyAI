@@ -16,16 +16,17 @@ var alwaysForbidden = map[string]bool{"os/exec": true, "syscall": true, "plugin"
 
 // unsafeOwners may import "unsafe" (DPAPI DataBlob copies, Zig C ABI pointers,
 // core DLL buffers). Everyone else is denied.
-var unsafeOwners = map[string]bool{"secret": true, "core": true}
+var unsafeOwners = map[string]bool{"secret": true, "core": true, "sysres": true}
 
 // Owned external deps: only the listed packages may import them (same pattern as
 // ipc→go-winio). modernc.org/sqlite is CGO-free; its transitive libc uses
 // unsafe internally, so the driver surface stays httpapi-only.
+// sysres owns golang.org/x/sys + unsafe for GlobalMemoryStatusEx (free RAM).
 // secret owns golang.org/x/sys for CryptProtectData / CryptUnprotectData.
 // core owns golang.org/x/sys for LoadDLL of remedy_core and purego for Linux Dlopen.
 var externalOwners = map[string]string{
 	"github.com/Microsoft/go-winio":            "ipc",
-	"golang.org/x/sys":                         "ipc,state,secret,gateway,core,servelock,parentwatch",
+	"golang.org/x/sys":                         "ipc,state,secret,gateway,core,servelock,parentwatch,sysres",
 	"github.com/ebitengine/purego":             "core",
 	"github.com/santhosh-tekuri/jsonschema/v6": "tools",
 	"golang.org/x/crypto":                      "connect",

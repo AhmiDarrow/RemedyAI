@@ -604,7 +604,7 @@ def _workspace_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
 
 def _web_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     """Bridge Tool ABI web.search to the existing agent web_search backend."""
-    from remedy.core.web_helpers import run_search, web_tools_enabled
+    from remedy.core.web_helpers import SearchBlockedError, run_search, web_tools_enabled
 
     if not web_tools_enabled(None):
         raise PermissionError("web tools are disabled")
@@ -619,7 +619,18 @@ def _web_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     except (TypeError, ValueError):
         max_results = 5
     max_results = max(1, min(10, max_results))
-    rows, backend = run_search(query, max_results=max_results, timeout=20.0, runtime=None)
+    try:
+        rows, backend = run_search(query, max_results=max_results, timeout=20.0, runtime=None)
+    except SearchBlockedError as blocked:
+        # Say why there are no results, so the model stops searching instead
+        # of retrying and then scraping search engines that refuse it.
+        return {
+            "query": query,
+            "backend": "DuckDuckGo HTML",
+            "results": [],
+            "blocked": True,
+            "note": str(blocked),
+        }
     results: list[dict[str, str]] = []
     for row in rows:
         item: dict[str, str] = {
@@ -1531,6 +1542,24 @@ def serve_endpoint(endpoint: str) -> None:
     raise SystemExit(f"failed to dial RMDY endpoint {endpoint!r}: {last_err}")
 
 
+def _start_local_search() -> None:
+    """Bring up the managed OpenSERP in the background (docs/WEB_ETIQUETTE.md).
+
+    The Go runtime hosts web.search in this worker, so this is where the
+    first-run download + start belongs. Without it every search fell through
+    to DuckDuckGo's HTML page, which answers automated reads with a human
+    check. Never blocks the worker; failures only mean the fallback is used.
+    """
+    try:
+        from remedy.core.web_helpers import web_tools_enabled
+        from remedy.home import default_home
+        from remedy.runtime.web_search_host import schedule_ensure
+
+        schedule_ensure(default_home(), enabled=web_tools_enabled(None))
+    except Exception:
+        logger.debug("local search host not scheduled", exc_info=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="remedy.runtime.rmdy_tool_worker")
     parser.add_argument(
@@ -1547,6 +1576,7 @@ def main(argv: list[str] | None = None) -> int:
     if configured and deps_dir is None:
         logger.warning("%s points at a missing directory: %s", _ENV_DEPS_DIR, configured)
     verify_dependencies()
+    _start_local_search()
     endpoint = (args.endpoint or os.environ.get("REMEDY_RMDY_ENDPOINT") or "").strip()
     if endpoint:
         serve_endpoint(endpoint)

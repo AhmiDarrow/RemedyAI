@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { apiFetch, authHeaders, clearApiToken, ensureApiToken, formatApiErrorBody } from './client'
+import { apiFetch, authHeaders, clearApiToken, ensureApiToken, formatApiErrorBody, pickServerUrl } from './client'
 
 afterEach(() => { clearApiToken(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
@@ -159,4 +159,28 @@ describe('API request lifecycle', () => {
       await expect(apiFetch('/settings')).rejects.toThrow('Cannot reach local API')
     },
   )
+})
+
+describe('pickServerUrl', () => {
+  const base = { prod: true, desktop: false }
+  it('a built WebUI talks to the runtime that served it, on any port', () => {
+    expect(pickServerUrl({ ...base, origin: 'http://127.0.0.1:7410' })).toBe('http://127.0.0.1:7410')
+    expect(pickServerUrl({ ...base, origin: 'http://localhost:7400' })).toBe('http://localhost:7400')
+    expect(pickServerUrl({ ...base, origin: 'http://[::1]:7420' })).toBe('http://[::1]:7420')
+  })
+  it('keeps the default for desktop, the dev server, and non-loopback pages', () => {
+    expect(pickServerUrl({ ...base, desktop: true, origin: 'http://tauri.localhost' })).toBe('http://127.0.0.1:7400')
+    expect(pickServerUrl({ prod: false, desktop: false, origin: 'http://localhost:5173' })).toBe('http://127.0.0.1:7400')
+    expect(pickServerUrl({ ...base, origin: 'https://example.com' })).toBe('http://127.0.0.1:7400')
+    expect(pickServerUrl({ ...base, origin: 'http://127.0.0.1.evil.com:7410' })).toBe('http://127.0.0.1:7400')
+    expect(pickServerUrl({ ...base, origin: '' })).toBe('http://127.0.0.1:7400')
+  })
+  it('explicit env and injected origins still win', () => {
+    expect(pickServerUrl({ ...base, envUrl: 'http://127.0.0.1:7410/api/', origin: 'http://127.0.0.1:7999' })).toBe(
+      'http://127.0.0.1:7410',
+    )
+    expect(pickServerUrl({ ...base, injected: 'http://127.0.0.1:7411', origin: 'http://127.0.0.1:7999' })).toBe(
+      'http://127.0.0.1:7411',
+    )
+  })
 })

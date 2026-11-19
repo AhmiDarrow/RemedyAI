@@ -5,6 +5,54 @@ import { closeBrowserRail, openUrlInBrowserRail } from './computer'
 import { updateSettings } from './settings'
 import { fetchModels, pickDefaultModel } from './modelDiscovery'
 import { listProviders } from './providers'
+import { isTauri } from './tauri'
+
+/**
+ * Open the sign-in window *during the click*. A browser only lets a page open
+ * a window from a user gesture; by the time the device code comes back from
+ * the server (several awaits later) that permission is gone and window.open is
+ * silently blocked — the WebUI "sign-in does nothing" bug. The desktop app
+ * uses its own Browser rail instead, so this is a web-only step.
+ *
+ * Returns null on desktop, or when the browser refused even this.
+ */
+export function preopenSignInWindow(
+  open: (url: string, target: string) => Window | null = (u, t) => window.open(u, t),
+  desktop: () => boolean = isTauri,
+): Window | null {
+  if (desktop()) return null
+  try {
+    const w = open('about:blank', '_blank')
+    if (!w) return null
+    try {
+      w.document.title = 'Signing in to xAI…'
+      w.document.body.style.cssText = 'font-family:system-ui,sans-serif;padding:32px;color:#444'
+      w.document.body.textContent = 'Opening xAI sign-in…'
+    } catch {
+      /* cross-origin or locked — the navigation below still works */
+    }
+    return w
+  } catch {
+    return null
+  }
+}
+
+/** Point a pre-opened window at the verify page. False when it is gone. */
+export function sendSignInWindowTo(w: Window | null | undefined, url: string): boolean {
+  if (!w || w.closed || !url) return false
+  try {
+    // Sever the opener link the way noopener would have.
+    w.opener = null
+  } catch {
+    /* */
+  }
+  try {
+    w.location.href = url
+    return true
+  } catch {
+    return false
+  }
+}
 
 export const XAI_OAUTH_EVENT = 'remedy:xai-oauth'
 const SESSION_KEY = 'remedy.xaiOauthSession'
@@ -184,10 +232,22 @@ export async function beginXaiOAuth(opts?: {
   llmModel?: string
   /** Default true. Wizard passes false — no workspace rail yet. */
   openRail?: boolean
+  /** Web: the window opened during the click (preopenSignInWindow). */
+  popup?: Window | null
 }): Promise<XaiLoginStart> {
   stopXaiOAuthPoll()
   preferredModel = opts?.llmModel
-  const start = await startXaiLogin()
+  let start: XaiLoginStart
+  try {
+    start = await startXaiLogin()
+  } catch (e) {
+    try {
+      opts?.popup?.close()
+    } catch {
+      /* */
+    }
+    throw e
+  }
   sessionId = start.session_id
   deadlineMs = Date.now() + Math.max(60, Number(start.expires_in) || 900) * 1000
   writeStoredSession(start.session_id)
@@ -198,10 +258,12 @@ export async function beginXaiOAuth(opts?: {
     verifyUrl,
     message: start.message || `Enter code ${start.user_code} at xAI`,
   })
-  void openUrlInBrowserRail(verifyUrl, {
-    keepSettings: opts?.keepSettings !== false,
-    openRail: opts?.openRail,
-  })
+  if (!sendSignInWindowTo(opts?.popup, verifyUrl)) {
+    void openUrlInBrowserRail(verifyUrl, {
+      keepSettings: opts?.keepSettings !== false,
+      openRail: opts?.openRail,
+    })
+  }
   startPolling()
   return start
 }

@@ -14,6 +14,8 @@ export type ChatSessionHeaderProps = {
   streaming?: boolean
   messageCount?: number
   onTogglePlanMode?: () => void
+  /** Back to Grove — sits beside the mode badge, mirroring Grove's Studio pill. */
+  onOpenGrove?: () => void
 }
 
 function shortModel(model: string | null | undefined): string {
@@ -33,6 +35,7 @@ export const ChatSessionHeader = memo(function ChatSessionHeader({
   streaming = false,
   messageCount,
   onTogglePlanMode,
+  onOpenGrove,
 }: ChatSessionHeaderProps) {
   const displayTitle = (title || 'New chat').trim() || 'New chat'
   const model = shortModel(modelLabel)
@@ -91,6 +94,16 @@ export const ChatSessionHeader = memo(function ChatSessionHeader({
         >
           {chatMode ? 'Chat' : planMode ? 'Plan' : 'Build'}
         </button>
+        {onOpenGrove && (
+          <button
+            type="button"
+            className="chat-chip chat-chip-grove"
+            onClick={onOpenGrove}
+            title="Back to Grove — your goals and Remedy's side jobs"
+          >
+            ✦ Grove
+          </button>
+        )}
       </div>
     </header>
   )

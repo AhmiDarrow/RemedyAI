@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -93,6 +94,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	prevProvider := strings.ToLower(strings.TrimSpace(cfgString(LoadConfig(s.homeDir), "llm_provider", "")))
 	result, err := s.applySettingsUpdate(updates)
 	if err != nil {
 		if _, ok := err.(settingsValueError); ok {
@@ -104,7 +106,29 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	s.followDefaultOffDemo(prevProvider)
 	writeJSON(w, http.StatusOK, result)
+}
+
+// followDefaultOffDemo moves conversations off the free demo provider at the
+// moment the owner leaves it (signing in to xAI, adding a key). The demo is a
+// placeholder to get started; conversations that sat on it would otherwise
+// keep calling it — and its shared quota — after a real provider is set.
+// Only the switch away from demo moves anything, and only demo-bound rows:
+// a conversation the owner later sets back to the demo keeps it.
+func (s *Server) followDefaultOffDemo(prevProvider string) {
+	if s.sessions == nil || prevProvider != "demo" {
+		return
+	}
+	cfg := LoadConfig(s.homeDir)
+	next := strings.ToLower(strings.TrimSpace(cfgString(cfg, "llm_provider", "")))
+	if next == "" || next == "demo" {
+		return
+	}
+	model := strings.TrimSpace(cfgString(cfg, "llm_model", ""))
+	if n, err := s.sessions.RebindProvider("demo", next, model); err == nil && n > 0 {
+		log.Printf("settings: %d conversation(s) moved off the demo provider to %s", n, next)
+	}
 }
 
 type settingsValueError struct{ msg string }
@@ -632,67 +656,67 @@ func (s *Server) settingsPayload() map[string]any {
 	messengers := publicMessengers(cfg, keysSet, s.homeDir)
 
 	out := map[string]any{
-		"llm_provider":              provider,
-		"llm_model":                 model,
-		"llm_base_url":              baseURL,
-		"custom_llm_name":           strings.TrimSpace(cfgString(cfg, "custom_llm_name", "")),
-		"llm_api_key_set":           keySet,
-		"provider_keys_set":         keysSet,
-		"secrets_encoding":          secretStatus["encoding"],
-		"secrets_encoding_warning":  secretStatus["encoding_warning"],
-		"llm_ready":                 providerCredentialsReady(cfg, provider, effectiveKey) || keySet,
-		"name":                      cfgString(cfg, "name", "Remedy"),
-		"user_name":                 strings.TrimSpace(cfgString(cfg, "user_name", "")),
-		"agent_gender":              gender,
-		"ui_language":               cfgString(cfg, "ui_language", "auto"),
-		"ui_languages":              publicLanguageList(),
-		"persona":                   cfgString(cfg, "persona", "default"),
-		"project_path":              projectPath,
-		"access_scope":              cfgString(cfg, "access_scope", "project"),
-		"launch_at_login":           cfgBool(cfg, "launch_at_login", false),
-		"start_in_tray":             cfgBool(cfg, "start_in_tray", false),
-		"close_to_tray":             cfgBool(cfg, "close_to_tray", false),
-		"harness_mode":              cfgString(cfg, "harness_mode", "auto"),
-		"harness_min_context_pct":   cfgFloat(cfg, "harness_min_context_pct", 0.75),
-		"harness_max_context_pct":   cfgFloat(cfg, "harness_max_context_pct", 0.92),
-		"thinking_level":            strings.ToLower(cfgString(cfg, "thinking_level", "high")),
-		"approval_mode":             strings.ToLower(cfgString(cfg, "approval_mode", "auto")),
-		"trust_profile":             normalizeTrustProfile(cfg["trust_profile"]),
-		"tool_process":              normalizeToolProcess(cfg, nil),
-		"web_tools_enabled":         cfgBool(cfg, "web_tools_enabled", true),
-		"http_bootstrap":            HTTPBootstrapEnabled(s.homeDir),
-		"privacy_mode":              cfgBool(cfg, "privacy_mode", false),
-		"sleev_enabled":             cfgBool(cfg, "sleev_enabled", false),
-		"sleev_gateway_url":         strings.TrimSpace(cfgString(cfg, "sleev_gateway_url", "")),
-		"soul_field_enabled":        cfgBool(cfg, "soul_field_enabled", true),
-		"build_os_advanced":         cfgBool(cfg, "build_os_advanced", false),
-		"rmb_enabled":               cfgBool(cfg, "rmb_enabled", true),
-		"retention_session_days":    cfgInt(cfg, "retention_session_days", 180),
-		"retention_attachment_days": cfgInt(cfg, "retention_attachment_days", 90),
+		"llm_provider":                 provider,
+		"llm_model":                    model,
+		"llm_base_url":                 baseURL,
+		"custom_llm_name":              strings.TrimSpace(cfgString(cfg, "custom_llm_name", "")),
+		"llm_api_key_set":              keySet,
+		"provider_keys_set":            keysSet,
+		"secrets_encoding":             secretStatus["encoding"],
+		"secrets_encoding_warning":     secretStatus["encoding_warning"],
+		"llm_ready":                    providerCredentialsReady(cfg, provider, effectiveKey) || keySet,
+		"name":                         cfgString(cfg, "name", "Remedy"),
+		"user_name":                    strings.TrimSpace(cfgString(cfg, "user_name", "")),
+		"agent_gender":                 gender,
+		"ui_language":                  cfgString(cfg, "ui_language", "auto"),
+		"ui_languages":                 publicLanguageList(),
+		"persona":                      cfgString(cfg, "persona", "default"),
+		"project_path":                 projectPath,
+		"access_scope":                 cfgString(cfg, "access_scope", "project"),
+		"launch_at_login":              cfgBool(cfg, "launch_at_login", false),
+		"start_in_tray":                cfgBool(cfg, "start_in_tray", false),
+		"close_to_tray":                cfgBool(cfg, "close_to_tray", false),
+		"harness_mode":                 cfgString(cfg, "harness_mode", "auto"),
+		"harness_min_context_pct":      cfgFloat(cfg, "harness_min_context_pct", 0.75),
+		"harness_max_context_pct":      cfgFloat(cfg, "harness_max_context_pct", 0.92),
+		"thinking_level":               strings.ToLower(cfgString(cfg, "thinking_level", "high")),
+		"approval_mode":                strings.ToLower(cfgString(cfg, "approval_mode", "auto")),
+		"trust_profile":                normalizeTrustProfile(cfg["trust_profile"]),
+		"tool_process":                 normalizeToolProcess(cfg, nil),
+		"web_tools_enabled":            cfgBool(cfg, "web_tools_enabled", true),
+		"http_bootstrap":               HTTPBootstrapEnabled(s.homeDir),
+		"privacy_mode":                 cfgBool(cfg, "privacy_mode", false),
+		"sleev_enabled":                cfgBool(cfg, "sleev_enabled", false),
+		"sleev_gateway_url":            strings.TrimSpace(cfgString(cfg, "sleev_gateway_url", "")),
+		"soul_field_enabled":           cfgBool(cfg, "soul_field_enabled", true),
+		"build_os_advanced":            cfgBool(cfg, "build_os_advanced", false),
+		"rmb_enabled":                  cfgBool(cfg, "rmb_enabled", true),
+		"retention_session_days":       cfgInt(cfg, "retention_session_days", 180),
+		"retention_attachment_days":    cfgInt(cfg, "retention_attachment_days", 90),
 		"retention_computer_shot_days": cfgInt(cfg, "retention_computer_shot_days", 14),
-		"retention_undo_days":       cfgInt(cfg, "retention_undo_days", 30),
-		"retention_log_days":        cfgInt(cfg, "retention_log_days", 30),
-		"memory_encrypt":            cfgBool(cfg, "memory_encrypt", false),
-		"allow_skill_creation":      cfgBool(cfg, "allow_skill_creation", true),
-		"auto_approve_threshold":    cfgFloat(cfg, "auto_approve_threshold", 0.8),
-		"log_level":                 strings.ToUpper(cfgString(cfg, "log_level", "INFO")),
-		"sarcasm_mode":              cfgBool(cfg, "sarcasm_mode", false),
-		"claimidx_public_ledger":    cfgBool(cfg, "claimidx_public_ledger", true),
-		"enabled_providers":         cfg["enabled_providers"],
-		"enabled_models":            cfgMapOrEmpty(cfg, "enabled_models"),
-		"last_model_by_provider":    cfgMapOrEmpty(cfg, "last_model_by_provider"),
-		"skills_active_budget":      cfgInt(cfg, "skills_active_budget", 80),
-		"browser_home_url":          normalizeBrowserHomeURL(cfgString(cfg, "browser_home_url", "")),
-		"version":                   s.version,
-		"config_exists":             configExists,
-		"setup_completed":           setupCompleted,
-		"needs_setup":               !setupCompleted,
-		"config_path":               firstNonEmpty(path, defaultPath),
-		"enabled_channels":          enabledChannels,
-		"messengers":                messengers,
-		"vision_enabled":            visionEnabled,
-		"vision_model_id":           visionModelID,
-		"vision_force_decode":       visionForce,
+		"retention_undo_days":          cfgInt(cfg, "retention_undo_days", 30),
+		"retention_log_days":           cfgInt(cfg, "retention_log_days", 30),
+		"memory_encrypt":               cfgBool(cfg, "memory_encrypt", false),
+		"allow_skill_creation":         cfgBool(cfg, "allow_skill_creation", true),
+		"auto_approve_threshold":       cfgFloat(cfg, "auto_approve_threshold", 0.8),
+		"log_level":                    strings.ToUpper(cfgString(cfg, "log_level", "INFO")),
+		"sarcasm_mode":                 cfgBool(cfg, "sarcasm_mode", false),
+		"claimidx_public_ledger":       cfgBool(cfg, "claimidx_public_ledger", true),
+		"enabled_providers":            cfg["enabled_providers"],
+		"enabled_models":               cfgMapOrEmpty(cfg, "enabled_models"),
+		"last_model_by_provider":       cfgMapOrEmpty(cfg, "last_model_by_provider"),
+		"skills_active_budget":         cfgInt(cfg, "skills_active_budget", 80),
+		"browser_home_url":             normalizeBrowserHomeURL(cfgString(cfg, "browser_home_url", "")),
+		"version":                      s.version,
+		"config_exists":                configExists,
+		"setup_completed":              setupCompleted,
+		"needs_setup":                  !setupCompleted,
+		"config_path":                  firstNonEmpty(path, defaultPath),
+		"enabled_channels":             enabledChannels,
+		"messengers":                   messengers,
+		"vision_enabled":               visionEnabled,
+		"vision_model_id":              visionModelID,
+		"vision_force_decode":          visionForce,
 		"vision": map[string]any{
 			"enabled":      visionEnabled,
 			"installed":    false,
@@ -894,11 +918,11 @@ func publicMessengers(cfg ConfigMap, keysSet map[string]bool, home string) []map
 func publicAssistant(cfg ConfigMap) map[string]any {
 	section, _ := asStringMap(cfg["assistant"])
 	out := map[string]any{
-		"enabled":                    true,
-		"accounts":                   []any{},
-		"money_disclaimer_accepted":  false,
-		"privacy_ai_accepted":        false,
-		"account_access_accepted":    false,
+		"enabled":                   true,
+		"accounts":                  []any{},
+		"money_disclaimer_accepted": false,
+		"privacy_ai_accepted":       false,
+		"account_access_accepted":   false,
 		"providers_planned": []map[string]any{
 			{"id": "google", "name": "Google", "status": "planned"},
 			{"id": "microsoft", "name": "Microsoft", "status": "planned"},
