@@ -444,14 +444,19 @@ func TestIrohLivePunch(t *testing.T) {
 	defer mq.Close()
 	answers := make(chan []byte, 4)
 	mq.OnMessage = func(_ string, p []byte) { answers <- append([]byte(nil), p...) }
+	// Same read window as the PC's responder: above two keepalive pings.
+	mq.Timeout = 2*connect.PingEveryS + 5*time.Second
+	go mq.PingLoop(ctx)
 	go mq.ReaderLoop(ctx)
 	var answer connect.PunchAnswer
 	t0 := time.Now()
 	got := false
+	sent := map[string]bool{}
 	for attempt := 0; attempt < 5 && !got; attempt++ {
 		nb := make([]byte, 8)
 		_, _ = rand.Read(nb)
 		nonce := hex.EncodeToString(nb)
+		sent[nonce] = true
 		sctx, sc2 := context.WithTimeout(ctx, 8*time.Second)
 		_ = mq.Subscribe(sctx, []string{connect.PunchReplyTopic(hostKP.Public, nonce)}, 1)
 		sc2()
@@ -460,12 +465,19 @@ func TestIrohLivePunch(t *testing.T) {
 		pctx, pc := context.WithTimeout(ctx, 8*time.Second)
 		_ = mq.Publish(pctx, connect.PunchTopic(hostKP.Public), blob, 1)
 		pc()
-		select {
-		case a := <-answers:
-			if connect.OpenPunch(hostKP.Public, a, &answer) == nil && answer.Nonce == nonce {
-				got = true
+		// The responder may still be subscribing when the first offer goes
+		// out; an answer to any offer we sent is a good answer.
+		wait := time.After(6 * time.Second)
+	collect:
+		for !got {
+			select {
+			case a := <-answers:
+				if connect.OpenPunch(hostKP.Public, a, &answer) == nil && sent[answer.Nonce] {
+					got = true
+				}
+			case <-wait:
+				break collect
 			}
-		case <-time.After(6 * time.Second):
 		}
 	}
 	if !got || answer.Error != "" || len(answer.Addrs) == 0 {
