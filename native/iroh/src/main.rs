@@ -8,7 +8,8 @@
 //!
 //! Control channel (owned by the Go runtime):
 //!   stdin, first line: JSON [`Config`]. Keeping secrets off argv keeps them
-//!   out of process listings. stdin EOF (parent gone) stops the sidecar.
+//!   out of process listings. Later lines are commands (`{"cmd":"punch",…}`,
+//!   see `punch.rs`). stdin EOF (parent gone) stops the sidecar.
 //!   stdout: one JSON event per line (`ready`, `conn`, `path`, `closed`,
 //!   `error`). Events carry path kind and RTT, never peer IPs or payload.
 //!
@@ -18,6 +19,7 @@
 
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,12 +30,15 @@ use iroh::{RelayMode, RelayUrl, SecretKey};
 use n0_future::StreamExt;
 use serde::Deserialize;
 use serde_json::json;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, Semaphore};
 
 /// ALPN for RemedyConnect over iroh. Bump the suffix on a wire change.
-const ALPN: &[u8] = b"remedy-connect/1";
+pub(crate) const ALPN: &[u8] = b"remedy-connect/1";
+
+mod punch;
+mod stun;
 /// Concurrent phone connections. A household has a handful of devices; the
 /// cap bounds what an unauthenticated dialer can make us hold open.
 const MAX_CONNS: usize = 16;
@@ -86,10 +91,10 @@ fn hex_decode(text: &str, want: usize) -> Result<Vec<u8>> {
 
 /// Serialised stdout writer so concurrent tasks never interleave a line.
 #[derive(Clone)]
-struct Events(Arc<Mutex<tokio::io::Stdout>>);
+pub(crate) struct Events(Arc<Mutex<tokio::io::Stdout>>);
 
 impl Events {
-    async fn emit(&self, v: serde_json::Value) {
+    pub(crate) async fn emit(&self, v: serde_json::Value) {
         let mut line = v.to_string();
         line.push('\n');
         let mut out = self.0.lock().await;
@@ -216,31 +221,75 @@ async fn main() -> Result<()> {
     });
 
     let slots = Arc::new(Semaphore::new(MAX_CONNS));
-    let accept_ep = endpoint.clone();
-    let accept_events = events.clone();
-    let accept = tokio::spawn(async move {
-        while let Some(incoming) = accept_ep.accept().await {
+    let accept = spawn_accept(endpoint.clone(), forward, token.clone(), events.clone(), slots.clone(), None);
+
+    let punch_ctx = punch::PunchCtx { secret: sk_bytes, forward, token, events: events.clone(), slots };
+    // Parent owns our lifetime: stdin EOF → shut down. Lines are commands.
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match stdin.read_line(&mut line).await {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        let raw = line.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else {
+            events.emit(json!({"event": "error", "detail": "bad command line"})).await;
+            continue;
+        };
+        match v.get("cmd").and_then(|c| c.as_str()) {
+            Some("punch") => match serde_json::from_value::<punch::PunchCmd>(v) {
+                Ok(cmd) => {
+                    tokio::spawn(punch::run_punch(punch_ctx.clone(), cmd));
+                }
+                Err(e) => events.emit(json!({"event": "error", "detail": format!("punch: {e}")})).await,
+            },
+            _ => events.emit(json!({"event": "error", "detail": "unknown command"})).await,
+        }
+    }
+    accept.abort();
+    endpoint.close().await;
+    Ok(())
+}
+
+/// Accept phone connections on `endpoint` and splice each stream to the
+/// gateway. `counters` (live, ever-used) lets a punch endpoint know when it
+/// can close.
+pub(crate) fn spawn_accept(
+    endpoint: iroh::Endpoint,
+    forward: SocketAddr,
+    token: Arc<[u8]>,
+    events: Events,
+    slots: Arc<Semaphore>,
+    counters: Option<(Arc<AtomicUsize>, Arc<AtomicUsize>)>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        while let Some(incoming) = endpoint.accept().await {
             let Ok(permit) = slots.clone().try_acquire_owned() else {
                 incoming.refuse();
                 continue;
             };
-            let events = accept_events.clone();
+            let events = events.clone();
             let token = token.clone();
+            let counters = counters.clone();
             tokio::spawn(async move {
                 let _permit = permit;
+                if let Some((live, used)) = &counters {
+                    live.fetch_add(1, Ordering::SeqCst);
+                    used.fetch_add(1, Ordering::SeqCst);
+                }
                 if let Err(e) = serve_conn(incoming, forward, token, events.clone()).await {
                     events.emit(json!({"event": "error", "detail": format!("{e:#}")})).await;
                 }
+                if let Some((live, _)) = &counters {
+                    live.fetch_sub(1, Ordering::SeqCst);
+                }
             });
         }
-    });
-
-    // Parent owns our lifetime: stdin EOF → shut down.
-    let mut sink = Vec::new();
-    let _ = stdin.read_to_end(&mut sink).await;
-    accept.abort();
-    endpoint.close().await;
-    Ok(())
+    })
 }
 
 /// Map `port` on the home router (UPnP-IGD, PCP, NAT-PMP) and advertise

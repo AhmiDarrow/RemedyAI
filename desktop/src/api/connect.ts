@@ -90,6 +90,8 @@ export interface MobileReach {
   port: number
   relay_mode: 'off' | 'custom' | 'n0'
   relay_url: string
+  /** Relay-free hole punching through carrier-grade NAT (opt-in). */
+  punch: boolean
   status: MobileReachStatus
 }
 
@@ -98,6 +100,7 @@ export interface MobileReachPatch {
   mobile_port?: number
   mobile_relay_mode?: 'off' | 'custom' | 'n0'
   mobile_relay_url?: string
+  mobile_punch?: boolean
 }
 
 const MOBILE_VERDICTS: MobileVerdict[] = [
@@ -139,6 +142,7 @@ export function parseMobileReach(raw: unknown): MobileReach | undefined {
     port: numPort(o.port, 7403),
     relay_mode: mode,
     relay_url: typeof o.relay_url === 'string' ? o.relay_url : '',
+    punch: o.punch === true,
     status: parseMobileStatus(o.status),
   }
 }

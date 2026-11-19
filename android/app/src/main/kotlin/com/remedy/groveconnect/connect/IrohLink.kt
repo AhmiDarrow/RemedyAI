@@ -12,8 +12,18 @@ import computer.iroh.RelayMode
 import computer.iroh.SendStream
 import computer.iroh.presetMinimal
 import computer.iroh.presetN0
+import com.remedy.groveconnect.core.Crypto
+import com.remedy.groveconnect.core.MqttClient
+import com.remedy.groveconnect.core.PunchCrypto
+import com.remedy.groveconnect.core.Stun
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.DatagramSocket
+import java.net.Inet4Address
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import java.io.Closeable
 import java.io.IOException
 import java.io.InputStream
@@ -31,6 +41,8 @@ data class IrohTarget(
     val relayUrl: String?,
     val addrs: List<String> = emptyList(),
     val useN0: Boolean = false,
+    /** MQTT brokers the PC answers hole-punch offers on; empty = punching off. */
+    val punchBrokers: List<Pair<String, Int>> = emptyList(),
 )
 
 /**
@@ -104,6 +116,132 @@ object IrohLink {
         }
     }
 
+    /**
+     * Relay-free hole punch through carrier-grade NAT. Learn this phone's
+     * public mapping with STUN on a fresh UDP port, bind a one-off endpoint on
+     * that same port (so it inherits the mapping), swap encrypted addresses
+     * with the PC over a public MQTT broker, then dial while the PC sends
+     * toward us. The brokers see only ciphertext; Noise still pins the PC.
+     */
+    fun openPunched(target: IrohTarget, hostPub: ByteArray, timeoutMs: Long): IrohPipe {
+        if (target.punchBrokers.isEmpty()) throw IOException("hole punching is off on the PC")
+        synchronized(lock) {
+            if (!installed) {
+                appContext?.let { IrohAndroid.installAndroidContext(it) }
+                installed = true
+            }
+        }
+        val started = System.nanoTime()
+        val sock = DatagramSocket(0)
+        val port = sock.localPort
+        val mapped = try {
+            Stun.mapped(sock)
+        } finally {
+            sock.close()
+        }
+        android.util.Log.i("RemedyConnect", "punch STUN after ${(System.nanoTime() - started) / 1_000_000}ms")
+        val ep = runBlocking {
+            Endpoint.bind(
+                EndpointOptions(
+                    preset = presetMinimal(),
+                    relayMode = RelayMode.disabled(),
+                    bindAddr = "0.0.0.0:$port",
+                ),
+            )
+        }
+        try {
+            val mine = ArrayList<String>()
+            mine += "${mapped.address.hostAddress}:${mapped.port}"
+            for (a in ep.addr().directAddresses()) {
+                if (!a.startsWith("[") && a !in mine) mine += a
+            }
+            val nonce = Crypto.randomBytes(8).joinToString("") { "%02x".format(it) }
+            val offer = JSONObject()
+                .put("v", 1)
+                .put("from", ep.id().toString())
+                .put("addrs", JSONArray(mine))
+                .put("nonce", nonce)
+                .put("ts", System.currentTimeMillis() / 1000)
+                .toString()
+            val pcAddrs = swapAddresses(target.punchBrokers, hostPub, nonce, offer)
+            val pipe = runBlocking {
+                withTimeout(timeoutMs) {
+                    val addr = EndpointAddr(EndpointId.fromString(target.endpointId), null, pcAddrs)
+                    val conn = ep.connect(addr, ALPN)
+                    val bi = conn.openBi()
+                    IrohPipe(conn, bi.send(), bi.recv(), dialMs = (System.nanoTime() - started) / 1_000_000, owned = ep)
+                }
+            }
+            android.util.Log.i("RemedyConnect", "iroh hole punch: me=${mine.first()} pc=${pcAddrs.firstOrNull()}")
+            return pipe
+        } catch (e: Exception) {
+            runCatching { runBlocking { ep.shutdown() } }
+            throw e
+        }
+    }
+
+    /**
+     * Publish the sealed offer on every broker at once; the first valid answer
+     * wins. A slow or dead public broker then costs nothing.
+     */
+    private fun swapAddresses(
+        brokers: List<Pair<String, Int>>,
+        hostPub: ByteArray,
+        nonce: String,
+        offer: String,
+    ): List<String> {
+        val result = LinkedBlockingQueue<Result<List<String>>>()
+        val clients = java.util.concurrent.CopyOnWriteArrayList<MqttClient>()
+        val sealed = PunchCrypto.seal(hostPub, offer)
+        val t0 = System.nanoTime()
+        for ((host, port) in brokers) {
+            Thread({
+                val client = MqttClient(host, port, timeoutMs = 5_000)
+                clients += client
+                try {
+                    client.onMessage = { _, payload ->
+                        val ans = try {
+                            JSONObject(PunchCrypto.open(hostPub, payload))
+                        } catch (_: Exception) {
+                            null // junk on a public topic
+                        }
+                        if (ans != null && ans.optString("nonce") == nonce) {
+                            val err = ans.optString("error")
+                            if (err.isNotEmpty()) {
+                                result.offer(Result.failure(IOException("PC could not punch: $err")))
+                            } else {
+                                val arr = ans.optJSONArray("addrs") ?: JSONArray()
+                                val out = (0 until minOf(arr.length(), 8)).map { arr.getString(it) }
+                                if (out.isNotEmpty()) {
+                                    android.util.Log.i(
+                                        "RemedyConnect",
+                                        "punch answer via $host after ${(System.nanoTime() - t0) / 1_000_000}ms",
+                                    )
+                                    result.offer(Result.success(out))
+                                }
+                            }
+                        }
+                    }
+                    client.connect()
+                    client.subscribe(listOf(PunchCrypto.replyTopic(hostPub, nonce)))
+                    client.publish(PunchCrypto.topic(hostPub), sealed)
+                    android.util.Log.i(
+                        "RemedyConnect",
+                        "punch offer on $host after ${(System.nanoTime() - t0) / 1_000_000}ms",
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.i("RemedyConnect", "punch broker $host failed: ${e.message}")
+                }
+            }, "remedy-punch-$host").apply { isDaemon = true }.start()
+        }
+        try {
+            val r = result.poll(10_000, TimeUnit.MILLISECONDS) ?: throw IOException("no answer from the PC on any broker")
+            return r.getOrThrow()
+        } finally {
+            for (c in clients) runCatching { c.close() }
+        }
+    }
+
     /** Close the shared endpoint (app shutdown). */
     fun shutdown() = synchronized(lock) {
         endpoint?.let { runCatching { runBlocking { it.shutdown() } } }
@@ -118,6 +256,8 @@ class IrohPipe internal constructor(
     private val recv: RecvStream,
     /** Time from dial to an open stream, for the transport log. */
     val dialMs: Long,
+    /** A one-off endpoint (hole punch) this pipe owns and closes. */
+    private val owned: Endpoint? = null,
 ) : Closeable {
     /** Read deadline in ms, 0 = none. Bounds the Noise handshake like soTimeout. */
     @Volatile
@@ -190,6 +330,7 @@ class IrohPipe internal constructor(
         closed = true
         runCatching { runBlocking { send.finish() } }
         runCatching { conn.close(0L, "bye".toByteArray()) }
+        owned?.let { runCatching { runBlocking { it.shutdown() } } }
     }
 
     private companion object {

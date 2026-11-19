@@ -16,6 +16,7 @@ package com.remedy.groveconnect.core
  * ira=<ip:port,[v6]:port,...>  (optional; PC's direct iroh addresses, public first)
  * irr=<https url>  (optional; owner's self-hosted iroh-relay)
  * irm=n0        (optional; PC opted into n0's public relays — advanced)
+ * irp=<host:port;host:port>  (optional; PC answers hole-punch offers on these MQTT brokers)
  * exp=<unix>
  * ```
  */
@@ -39,6 +40,8 @@ data class QrPayload(
     val irohAddrs: List<String> = emptyList(),
     /** True only when the PC opted into n0's public relays and lookup. */
     val irohN0: Boolean = false,
+    /** Brokers the PC listens on for encrypted hole-punch offers; empty = punching off. */
+    val irohPunchBrokers: List<Pair<String, Int>> = emptyList(),
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -57,7 +60,8 @@ data class QrPayload(
             irohId == other.irohId &&
             irohRelay == other.irohRelay &&
             irohAddrs == other.irohAddrs &&
-            irohN0 == other.irohN0
+            irohN0 == other.irohN0 &&
+            irohPunchBrokers == other.irohPunchBrokers
     }
 
     override fun hashCode(): Int {
@@ -76,6 +80,7 @@ data class QrPayload(
         r = 31 * r + (irohRelay?.hashCode() ?: 0)
         r = 31 * r + irohAddrs.hashCode()
         r = 31 * r + irohN0.hashCode()
+        r = 31 * r + irohPunchBrokers.hashCode()
         return r
     }
 
@@ -148,6 +153,7 @@ data class QrPayload(
                 relay?.first, relay?.second, rdvHosts, exp,
                 tsEp?.first, tsEp?.second,
                 irohId, irohRelay, irohAddrs, irohN0,
+                fields["irp"]?.takeIf { it.isNotEmpty() }?.let { parseRdvList(it) } ?: emptyList(),
             )
         }
 

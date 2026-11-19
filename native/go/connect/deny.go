@@ -139,6 +139,7 @@ var settingsLockKeys = map[string]struct{}{
 	"connect_iroh_relay_url":  {},
 	"connect_iroh_relay_mode": {},
 	"connect_iroh_port":       {},
+	"connect_iroh_punch":      {},
 	"llm_api_key":             {},
 	"api_key":                 {},
 	"http_bootstrap":          {},
