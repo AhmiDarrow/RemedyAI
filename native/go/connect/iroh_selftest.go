@@ -28,7 +28,7 @@ import (
 //   - global IPv6 addresses on this PC.
 
 // IrohDefaultPort is the fixed UDP port the PC's iroh endpoint listens on.
-const IrohDefaultPort = 7402
+const IrohDefaultPort = 7403
 
 // DefaultSTUNServers are lookup-only servers for the public-address check.
 var DefaultSTUNServers = []string{"stun.l.google.com:19302", "stun.cloudflare.com:3478"}

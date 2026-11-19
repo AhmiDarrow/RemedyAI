@@ -27,7 +27,7 @@ export function SkillMarkdownEditor({
           color: 'var(--text-primary)',
         },
         '.cm-content': {
-          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+          fontFamily: "var(--font-code, ui-monospace, monospace)",
           caretColor: 'var(--accent)',
         },
         '.cm-gutters': {

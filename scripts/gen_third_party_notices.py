@@ -228,29 +228,36 @@ def _digest(text: str) -> str:
 # --------------------------------------------------------------------------
 
 
-def rust_components() -> list[Component]:
-    src = ROOT / "desktop" / "src-tauri"
-    try:
-        proc = subprocess.run(
-            ["cargo", "tree", "--offline", "-e", "normal", "--prefix", "none", "--no-dedupe"],
-            cwd=src, capture_output=True, text=True, timeout=600, check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        print(f"WARNING: cargo tree failed ({exc}) — Rust crates not attributed", file=sys.stderr)
-        return []
-    if proc.returncode != 0:
-        print(f"WARNING: cargo tree exited {proc.returncode} — Rust crates not attributed", file=sys.stderr)
-        print(proc.stderr[:400], file=sys.stderr)
-        return []
+# Rust workspaces that ship in the installer: the Tauri shell and the
+# remedy-iroh sidecar ("Reach this PC from mobile data").
+RUST_SHIPPED = (ROOT / "desktop" / "src-tauri", ROOT / "native" / "iroh")
+OWN_CRATES = {"app", "remedy-iroh"}
 
+
+def rust_components() -> list[Component]:
     wanted: dict[tuple[str, str], None] = {}
-    for line in proc.stdout.splitlines():
-        parts = line.replace(" (*)", "").split()
-        if len(parts) >= 2 and parts[1].startswith("v"):
-            name, version = parts[0], parts[1][1:]
-            if name == "app":  # Remedy's own crate
-                continue
-            wanted[(name, version)] = None
+    for src in RUST_SHIPPED:
+        try:
+            proc = subprocess.run(
+                ["cargo", "tree", "--offline", "-e", "normal", "--prefix", "none", "--no-dedupe"],
+                cwd=src, capture_output=True, text=True, timeout=600, check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"WARNING: cargo tree failed in {src.name} ({exc}) — its crates not attributed", file=sys.stderr)
+            continue
+        if proc.returncode != 0:
+            print(f"WARNING: cargo tree exited {proc.returncode} in {src.name} — its crates not attributed", file=sys.stderr)
+            print(proc.stderr[:400], file=sys.stderr)
+            continue
+        for line in proc.stdout.splitlines():
+            parts = line.replace(" (*)", "").split()
+            if len(parts) >= 2 and parts[1].startswith("v"):
+                name, version = parts[0], parts[1][1:]
+                if name in OWN_CRATES:  # Remedy's own crates
+                    continue
+                wanted[(name, version)] = None
+    if not wanted:
+        return []
 
     registries = sorted((Path.home() / ".cargo" / "registry" / "src").glob("*"))
     out: list[Component] = []
