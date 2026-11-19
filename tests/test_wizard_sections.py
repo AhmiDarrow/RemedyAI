@@ -126,7 +126,7 @@ def test_quick_mode_picks_openai_without_asking_anything(monkeypatch, capsys):
     cfg: dict = {}
     W._configure_llm_provider(cfg, quick=True)
     assert cfg["llm_provider"] == "openai"
-    assert cfg["llm_model"] == "gpt-4o-mini"
+    assert cfg["llm_model"] == ""  # the provider's endpoint picks; nothing compiled in
     assert cfg["llm_base_url"] == "https://api.openai.com/v1"
     assert cfg["llm_api_key"] == ""  # quick mode must never invent a key
     capsys.readouterr()
@@ -241,9 +241,10 @@ def test_a_provider_number_out_of_range_is_clamped(monkeypatch, capsys, answer, 
 
 
 def test_the_custom_provider_offers_working_defaults_not_blanks(monkeypatch, capsys):
-    """The 'custom' row has no model or URL of its own — pressing Enter through
-    it must still leave a usable config rather than empty strings."""
-    asked = Answers("gpt-4o-mini", "https://api.openai.com/v1")
+    """The 'custom' row has no model or URL of its own. Pressing Enter keeps
+    the model blank (the server's own default, read from its models list) and
+    still offers a usable URL."""
+    asked = Answers("", "https://api.openai.com/v1")
     patch_prompts(
         monkeypatch,
         confirm=lambda *a, **kw: True,
@@ -255,7 +256,7 @@ def test_the_custom_provider_offers_working_defaults_not_blanks(monkeypatch, cap
     W._configure_llm_provider(cfg)
     assert cfg["llm_provider"] == "custom"
     offered = [kw.get("default") for _, kw in asked.calls]
-    assert offered == ["gpt-4o-mini", "https://api.openai.com/v1"]
+    assert offered == ["", "https://api.openai.com/v1"]
     capsys.readouterr()
 
 

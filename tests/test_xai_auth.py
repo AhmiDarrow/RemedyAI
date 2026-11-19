@@ -47,8 +47,7 @@ class TestXaiCatalog:
         assert "xai" in PROVIDER_CATALOG
         assert PROVIDER_CATALOG["xai"]["base_url"] == "https://api.x.ai/v1"
         assert "oauth" in PROVIDER_CATALOG["xai"]["auth"]
-        models = {m["id"] for m in PROVIDER_CATALOG["xai"]["models"]}
-        assert models & {"grok-4.5", "grok-4.3", "grok-4"}
+        assert not PROVIDER_CATALOG["xai"].get("models")
 
     def test_infer_model_and_url(self):
         assert infer_provider_from_model("grok-3") == "xai"
@@ -56,9 +55,15 @@ class TestXaiCatalog:
         assert infer_provider_from_base_url("https://api.x.ai/v1") == "xai"
 
     def test_normalize_snaps_to_xai(self):
-        prov, model, url = normalize_llm_settings("xai", "gpt-4o", "https://api.openai.com/v1")
+        from remedy.interfaces import model_discovery as md
+
+        md.remember_live_models("xai", [{"id": "grok-9"}])
+        try:
+            prov, model, url = normalize_llm_settings("xai", "gpt-4o", "https://api.openai.com/v1")
+        finally:
+            md.remember_live_models("xai", [])
         assert prov == "xai"
-        assert model.startswith("grok")
+        assert model == "grok-9"  # what x.ai lists, not a foreign id
         assert "x.ai" in url
 
 
@@ -275,7 +280,8 @@ class TestEnvBootstrap:
         )
         assert out["llm_provider"] == "xai"
         assert "x.ai" in out["llm_base_url"]
-        assert out["llm_model"].startswith("grok")
+        # The old provider's model is not carried over; x.ai's endpoint picks.
+        assert out["llm_model"] == ""
 
     def test_no_switch_when_key_already_set(self, monkeypatch: pytest.MonkeyPatch):
         from remedy.interfaces.config import apply_env_provider_bootstrap

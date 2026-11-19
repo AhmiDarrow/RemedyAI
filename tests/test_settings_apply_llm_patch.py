@@ -53,7 +53,11 @@ def test_unrelated_patch_does_not_rewrite_llm(isolated_home: Path) -> None:
 
 
 def test_llm_patch_still_normalizes(isolated_home: Path) -> None:
+    from remedy.interfaces import model_discovery as md
     from remedy.interfaces.settings_apply import apply_settings_update
+
+    # The endpoint's listing decides what is valid (nothing compiled in).
+    md.remember_live_models("deepseek", [{"id": "deepseek-flash"}])
 
     out = asyncio.run(
         apply_settings_update(
@@ -64,7 +68,8 @@ def test_llm_patch_still_normalizes(isolated_home: Path) -> None:
         )
     )
     assert out["status"] == "saved"
-    # Invalid model should snap to a valid deepseek default
+    # A model the endpoint does not list snaps to the endpoint's default.
     assert out.get("llm_provider") == "deepseek"
-    assert out.get("llm_model")
+    assert out.get("llm_model") == "deepseek-flash"
+    md.remember_live_models("deepseek", [])
     assert out["llm_model"] != "not-a-real-model-zzz"

@@ -349,52 +349,52 @@ def _pick_channels() -> list[str]:
 LLM_PROVIDERS: dict[str, dict[str, str]] = {
     "openai": {
         "label": "OpenAI",
-        "model": "gpt-4o-mini",
+        "model": "",
         "base_url": "https://api.openai.com/v1",
     },
     "anthropic": {
         "label": "Anthropic",
-        "model": "claude-sonnet-5",
+        "model": "",
         "base_url": "https://api.anthropic.com/v1",
     },
     "google": {
         "label": "Google Gemini",
-        "model": "gemini-2.5-flash",
+        "model": "",
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
     },
     "deepseek": {
         "label": "DeepSeek",
-        "model": "deepseek-v4-flash",
+        "model": "",
         "base_url": "https://api.deepseek.com/v1",
     },
     "xai": {
         "label": "xAI (Grok) — OAuth or API key",
-        "model": "grok-4.5",
+        "model": "",
         "base_url": "https://api.x.ai/v1",
     },
     "groq": {
         "label": "Groq",
-        "model": "llama-3.3-70b-versatile",
+        "model": "",
         "base_url": "https://api.groq.com/openai/v1",
     },
     "mistral": {
         "label": "Mistral",
-        "model": "mistral-small-latest",
+        "model": "",
         "base_url": "https://api.mistral.ai/v1",
     },
     "poe": {
         "label": "Poe (multi-model API)",
-        "model": "Claude-Sonnet-4.6",
+        "model": "",
         "base_url": "https://api.poe.com/v1",
     },
     "openrouter": {
         "label": "OpenRouter",
-        "model": "openrouter/auto",
+        "model": "",
         "base_url": "https://openrouter.ai/api/v1",
     },
     "ollama": {
         "label": "Ollama (local)",
-        "model": "llama3.2",
+        "model": "",
         "base_url": "http://localhost:11434/v1",
     },
     "custom": {
@@ -413,7 +413,7 @@ def _configure_llm_provider(config: dict, quick: bool = False, skip: bool = Fals
             config["llm_model"] = LLM_PROVIDERS["openai"]["model"]
             config["llm_base_url"] = LLM_PROVIDERS["openai"]["base_url"]
             config["llm_api_key"] = ""
-            console.print("[dim]Quick mode: OpenAI / gpt-4o-mini (no API key)[/dim]")
+            console.print("[dim]Quick mode: OpenAI, provider default model (no API key)[/dim]")
         if skip:
             console.print("[dim]Skipping provider setup[/dim]")
         return
@@ -450,10 +450,10 @@ def _configure_llm_provider(config: dict, quick: bool = False, skip: bool = Fals
 
     # Model name
     default_model = provider_info["model"]
-    if provider_key == "custom" or not default_model:
-        model = Prompt.ask("  Model name", default="gpt-4o-mini", console=console)
-    else:
-        model = Prompt.ask("  Model name", default=default_model, console=console)
+    # Blank keeps the provider's own default (read from its models list).
+    model = Prompt.ask(
+        "  Model name (blank = provider default)", default=default_model, console=console
+    )
     config["llm_model"] = model
 
     # Base URL
@@ -565,7 +565,7 @@ def _print_config_summary(config: dict) -> None:
     table.add_row("Agent", config.get("name", "Remedy"))
     table.add_row("Persona", config.get("persona", "default"))
     # Provider row
-    model = config.get("llm_model", "gpt-4o-mini")
+    model = config.get("llm_model") or "provider default"
     api_key = config.get("llm_api_key", "")
     provider_label = model
     if api_key:

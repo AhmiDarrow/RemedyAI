@@ -413,22 +413,14 @@ def test_choose_default_prefers_listed_preferred_then_loaded_then_chat():
 
 
 def test_validator_accepts_ids_the_endpoint_listed():
-    with pytest.raises(ValueError):
-        validate_provider_model("groq", "qwen-qwq-32b")
+    # Nothing listed yet: any id is accepted, never judged by its name.
+    assert validate_provider_model("groq", "qwen-qwq-32b") == "qwen-qwq-32b"
     md.remember_live_models("groq", [{"id": "qwen-qwq-32b"}])
     assert validate_provider_model("groq", "qwen-qwq-32b") == "qwen-qwq-32b"
-    # Still rejects what nobody vouches for.
+    # Listed: what the endpoint does not offer is refused.
     with pytest.raises(ValueError) as exc:
         validate_provider_model("groq", "claude-opus-5")
     assert "qwen-qwq-32b" in str(exc.value)
-
-
-def test_legacy_alias_only_applies_when_the_old_id_is_gone():
-    assert validate_provider_model("xai", "grok-3") == "grok-4.3"
-    assert normalize_llm_settings("xai", "grok-3", None)[1] == "grok-4.3"
-    md.remember_live_models("xai", [{"id": "grok-3"}, {"id": "grok-4.5"}])
-    assert validate_provider_model("xai", "grok-3") == "grok-3"
-    assert normalize_llm_settings("xai", "grok-3", None)[1] == "grok-3"
 
 
 def test_default_model_comes_from_the_endpoint_before_the_catalog():
@@ -436,8 +428,8 @@ def test_default_model_comes_from_the_endpoint_before_the_catalog():
     md.remember_live_models("ollama", [{"id": "nomic-embed-text", "chat": False}, {"id": "phi3"}])
     assert default_model_for_provider("ollama") == "phi3"
     assert normalize_llm_settings("ollama", "", None)[1] == "phi3"
-    # Closed provider: curated first entry until the endpoint says otherwise.
-    assert default_model_for_provider("openai") != ""
+    # Nothing compiled in: no endpoint listing, no default.
+    assert default_model_for_provider("openai") == ""
 
 
 def test_ollama_never_defaults_to_an_openai_model_name():
