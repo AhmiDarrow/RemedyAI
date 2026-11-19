@@ -70,6 +70,27 @@ internal class BoundedLineReader(
     override fun close() = source.close()
 }
 
+/** Status + parsed body of one request; `code == 0` means it never arrived. */
+data class ApiResult(val code: Int, val json: JSONObject?, val transportError: String? = null) {
+    val ok: Boolean get() = code in 200..299
+
+    /** A plain sentence for the owner when the call did not succeed. */
+    fun problem(): String? = if (ok) null else plainProblem(code, json?.optString("detail"), transportError)
+}
+
+/** Plain-language failure text (pure; tested). */
+fun plainProblem(code: Int, detail: String?, transportError: String? = null): String {
+    val d = detail?.trim().orEmpty()
+    return when {
+        code == 0 -> "Couldn't reach your PC" + (transportError?.let { " ($it)" } ?: "") + "."
+        code == 403 -> "Your PC doesn't allow that from the phone." + if (d.isNotEmpty()) " ($d)" else ""
+        d.isNotEmpty() -> d.replaceFirstChar { it.uppercase() }
+        code == 404 -> "That's no longer there."
+        code == 409 -> "Remedy is busy with that right now."
+        else -> "That didn't go through (HTTP $code)."
+    }
+}
+
 /**
  * Minimal HTTP client that talks to the PC's API through the loopback shim.
  *
@@ -78,7 +99,10 @@ internal class BoundedLineReader(
  * JSON endpoints return parsed objects; SSE endpoints stream `event:`/`data:`
  * frames to a callback on a background thread.
  */
-class RemedyApi(private val baseUrl: String) {
+class RemedyApi(private val base: () -> String?) {
+    /** Fixed base (tests, one-off clients). */
+    constructor(baseUrl: String) : this({ baseUrl })
+
     private val io: ExecutorService = Executors.newFixedThreadPool(6) { r ->
         Thread(r, "grove-api").apply { isDaemon = true }
     }
@@ -93,7 +117,11 @@ class RemedyApi(private val baseUrl: String) {
     }
 
     private fun conn(path: String, method: String): HttpURLConnection {
-        val url = URL(baseUrl.trimEnd('/') + path)
+        // The base follows the live tunnel: after a redial the shim has a new
+        // port/token. While reconnecting, requests go to a closed loopback
+        // port so they fail fast inside each caller's own error handling.
+        val b = base()?.substringBefore('?')?.trimEnd('/') ?: NOT_CONNECTED_BASE
+        val url = URL(b + path)
         val c = url.openConnection() as HttpURLConnection
         c.requestMethod = method
         // Mobile data rides the relay/tunnel: 8s connect / 15s read is too
@@ -212,6 +240,37 @@ class RemedyApi(private val baseUrl: String) {
             throw e
         } catch (_: Exception) {
             null
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    /**
+     * Any method with an optional JSON body; keeps the status code and the
+     * server's plain-language `detail` so the UI can say why something failed.
+     */
+    fun send(method: String, path: String, body: JSONObject? = null): ApiResult {
+        val c = conn(path, method)
+        return try {
+            if (body != null) {
+                c.doOutput = true
+                c.setRequestProperty("Content-Type", "application/json")
+                val bytes = body.toString().toByteArray(Charsets.UTF_8)
+                c.setFixedLengthStreamingMode(bytes.size)
+                (c.outputStream as OutputStream).use { it.write(bytes) }
+            }
+            val code = c.responseCode
+            val text = readBody(c)
+            val json = try {
+                if (text.isBlank()) null else JSONObject(text)
+            } catch (_: Exception) {
+                null
+            }
+            ApiResult(code, json)
+        } catch (e: android.os.NetworkOnMainThreadException) {
+            throw e
+        } catch (e: Exception) {
+            ApiResult(0, null, e.message)
         } finally {
             c.disconnect()
         }
@@ -402,6 +461,7 @@ class RemedyApi(private val baseUrl: String) {
     }
 
     private companion object {
+        const val NOT_CONNECTED_BASE = "http://127.0.0.1:9/not-connected"
         const val MAX_SSE_EVENT_CHARS = 1024 * 1024
         const val MAX_SSE_LINE_CHARS = MAX_SSE_EVENT_CHARS + 16
     }

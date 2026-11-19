@@ -98,17 +98,14 @@ class MainActivity : FragmentActivity() {
                         onReconnect = { controller.connectLast() },
                     )
                     UiScreen.Home -> {
-                        val shim = ui.shimUrl
-                        if (shim != null) {
-                            // The shim URL is http://127.0.0.1:{port}/{token}/?connect=1 —
-                            // the API base must be the token path WITHOUT the query,
-                            // otherwise every request path lands after "?connect=1"
-                            // and the shim 403s it. substringBefore('?') fixes that.
-                            val apiBase = shim.substringBefore('?').trimEnd('/')
-                            val api = remember(apiBase) { RemedyApi(apiBase) }
-                            DisposableEffect(api) {
-                                onDispose { api.shutdown() }
-                            }
+                        // One client for the whole visit. Its base follows the
+                        // live shim, so a dropped link that redials keeps the
+                        // portal (and the conversation) on screen.
+                        val api = remember { RemedyApi { controller.state.shimUrl } }
+                        DisposableEffect(api) {
+                            onDispose { api.shutdown() }
+                        }
+                        if (ui.shimUrl != null || ui.reachable == Reachable.Connecting) {
                             HomeScreen(
                                 state = ui,
                                 api = api,
@@ -120,13 +117,23 @@ class MainActivity : FragmentActivity() {
                                 onRefresh = { controller.refreshNow() },
                             )
                         } else {
-                            // Not connected — bounce back to Pair.
+                            // Paused or closed — back to Pair (reconnect lives there).
                             LaunchedEffect(Unit) { screen = UiScreen.Pair }
                         }
                     }
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        controller.foreground = true
+    }
+
+    override fun onStop() {
+        controller.foreground = false
+        super.onStop()
     }
 
     override fun onDestroy() {

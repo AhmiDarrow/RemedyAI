@@ -22,6 +22,7 @@ data class ApprovalItem(
     val sensitive: Boolean,
     val choices: List<String>,
     val sessionId: String?,
+    val toolName: String = "",
 )
 
 data class RemoteState(
@@ -55,6 +56,11 @@ class ConnectController(private val ctx: Context) {
     var state = RemoteState(paired = store.isPaired(), lanLabel = store.lastLan())
         private set
     var onChange: (() -> Unit)? = null
+
+    /** True while the app is on screen; needs-you notifications wait otherwise. */
+    @Volatile
+    var foreground: Boolean = true
+    private val notifier = NeedsYouNotifier(ctx)
 
     fun unlock() {
         publish(state.copy(unlocked = true, error = null))
@@ -92,6 +98,7 @@ class ConnectController(private val ctx: Context) {
     }
 
     fun unpair() {
+        notifier.reset()
         shutdown()
         store.clearPair()
         publish(RemoteState(unlocked = true, paired = false))
@@ -250,7 +257,8 @@ class ConnectController(private val ctx: Context) {
     fun resolveApproval(id: String, approve: Boolean) {
         io.execute {
             try {
-                val body = JSONObject().put("approve", approve).put("scope", "session").toString()
+                // The phone answers for this one action only ("once").
+                val body = JSONObject().put("approve", approve).put("scope", "once").toString()
                     .toByteArray()
                 val response = client?.http(
                     "POST",
@@ -461,6 +469,7 @@ class ConnectController(private val ctx: Context) {
         }
         if (r.status !in 200..299) return false
         val items = parseApprovals(r.body.toString(Charsets.UTF_8))
+        notifier.onDecisions(items.filter { it.toolName != "life_drive" }, foreground)
         publish(state.copy(approvals = items))
         return true
     }
@@ -489,6 +498,7 @@ class ConnectController(private val ctx: Context) {
                 sensitive = o.optBoolean("sensitive"),
                 choices = ch,
                 sessionId = o.optString("session_id").ifBlank { null },
+                toolName = o.optString("tool_name"),
             )
         }
         return out

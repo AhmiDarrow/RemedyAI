@@ -33,6 +33,8 @@ class SessionsApi(private val api: RemedyApi) {
     /**
      * Send a message and stream the turn. Fires onToken/onThinking/onTool as
      * the SSE frames arrive, then onDone. Returns a cancel handle.
+     * [onMark] receives the turn's request id and the last frame seq so a
+     * dropped connection can resume with [attachStream].
      */
     fun sendStream(
         sessionId: String,
@@ -42,21 +44,49 @@ class SessionsApi(private val api: RemedyApi) {
         onTool: (String) -> Unit,
         onDone: () -> Unit,
         onError: (String) -> Unit,
+        onMark: (TurnMark) -> Unit = {},
     ): () -> Unit {
         val body = JSONObject().put("message", text)
         val completed = AtomicBoolean(false)
         val finish = { if (completed.compareAndSet(false, true)) onDone() }
+        val mark = TurnMark()
         return api.streamSsePost(
             "/api/sessions/$sessionId/messages/stream",
             body,
             onEvent = { event, payload ->
-                when (event) {
-                    "token" -> payload.optString("text").takeIf { it.isNotEmpty() }?.let(onToken)
-                    "thinking" -> payload.optString("text").takeIf { it.isNotEmpty() }?.let(onThinking)
-                    "tool_call" -> payload.optString("name").takeIf { it.isNotEmpty() }?.let(onTool)
-                    "tool_result" -> payload.optString("name").takeIf { it.isNotEmpty() }?.let { onTool("$it ✓") }
-                    "aborted", "done", "exit" -> finish()
-                }
+                if (mark.observe(payload)) onMark(mark.copy())
+                dispatchTurnEvent(event, payload, onToken, onThinking, onTool, finish)
+            },
+            onDone = finish,
+            onError = onError,
+        )
+    }
+
+    /**
+     * Re-attach to a turn that is still running (or finished while the phone
+     * was away). With [requestId] null the PC picks the session's live turn;
+     * an "HTTP 400" error then means nothing is running. Frames at or before
+     * [after] are skipped server-side.
+     */
+    fun attachStream(
+        sessionId: String,
+        requestId: String?,
+        after: Long,
+        onToken: (String) -> Unit,
+        onThinking: (String) -> Unit,
+        onTool: (String) -> Unit,
+        onDone: () -> Unit,
+        onError: (String) -> Unit,
+        onMark: (TurnMark) -> Unit = {},
+    ): () -> Unit {
+        val completed = AtomicBoolean(false)
+        val finish = { if (completed.compareAndSet(false, true)) onDone() }
+        val mark = TurnMark(requestId, after)
+        return api.streamSse(
+            attachPath(sessionId, requestId, after),
+            onEvent = { event, payload ->
+                if (mark.observe(payload)) onMark(mark.copy())
+                dispatchTurnEvent(event, payload, onToken, onThinking, onTool, finish)
             },
             onDone = finish,
             onError = onError,
@@ -117,11 +147,11 @@ class SessionsApi(private val api: RemedyApi) {
         return out
     }
 
-    /** Resolve an approval. */
+    /** Resolve an approval. The phone answers for this one action only. */
     fun resolveApproval(id: String, approve: Boolean): Boolean =
         api.postJson(
             "/api/approvals/$id/resolve",
-            JSONObject().put("approve", approve).put("scope", "session"),
+            JSONObject().put("approve", approve).put("scope", "once"),
         ) != null
 }
 
@@ -131,3 +161,48 @@ data class Approval(
     val sensitive: Boolean,
     val sessionId: String?,
 )
+
+/** Where a streamed turn has got to: its request id and the last frame seq. */
+data class TurnMark(var requestId: String? = null, var seq: Long = 0) {
+    /** Fold one frame in; true when anything changed. */
+    fun observe(payload: JSONObject): Boolean {
+        var changed = false
+        payload.optString("request_id").takeIf { it.isNotBlank() }?.let {
+            if (it != requestId) {
+                requestId = it
+                changed = true
+            }
+        }
+        val s = payload.optLong("seq", -1)
+        if (s > seq) {
+            seq = s
+            changed = true
+        }
+        return changed
+    }
+}
+
+/** `GET /api/sessions/{id}/stream/attach` path (pure; tested). */
+fun attachPath(sessionId: String, requestId: String?, after: Long): String {
+    val q = ArrayList<String>()
+    if (!requestId.isNullOrBlank()) q += "request_id=" + java.net.URLEncoder.encode(requestId, "UTF-8")
+    if (after > 0) q += "after=$after"
+    return "/api/sessions/$sessionId/stream/attach" + if (q.isEmpty()) "" else "?" + q.joinToString("&")
+}
+
+internal fun dispatchTurnEvent(
+    event: String,
+    payload: JSONObject,
+    onToken: (String) -> Unit,
+    onThinking: (String) -> Unit,
+    onTool: (String) -> Unit,
+    finish: () -> Unit,
+) {
+    when (event) {
+        "token" -> payload.optString("text").takeIf { it.isNotEmpty() }?.let(onToken)
+        "thinking" -> payload.optString("text").takeIf { it.isNotEmpty() }?.let(onThinking)
+        "tool_call" -> payload.optString("name").takeIf { it.isNotEmpty() }?.let(onTool)
+        "tool_result" -> payload.optString("name").takeIf { it.isNotEmpty() }?.let { onTool("$it ✓") }
+        "aborted", "done", "exit" -> finish()
+    }
+}
