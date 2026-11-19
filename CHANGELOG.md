@@ -4,6 +4,30 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.71.0] - 2026-11-19
+
+### Added
+- Grove puts Remedy at the head. She starts side jobs for work that runs alongside you; each reports back into her conversation, and you can open one to watch every step live and stop it. Typing in a side job's room talks to Remedy about it, in a floating bubble that also lands in her main thread. Side jobs cannot start side jobs of their own.
+- Routines: standing jobs on a clock ("every weekday at 7, brief me"). A reminder posts its text and uses no AI; a task has Remedy do it in the background. Remedy can set routines up herself when you ask, after you approve.
+- Keep watch: Remedy looks around on her own (decisions waiting, finished side jobs, overdue goals, failed routines) and leaves one plain note under "While you were away" when something changed. It runs on your PC and uses no AI; quiet hours and an optional chat app for the notes are in its settings.
+- Goals can keep going on their own: one step at a time, pausing whenever they need you, slowing down when stuck, and asking you to confirm when Remedy thinks a goal is done.
+- Decisions come one at a time in Grove: one card with Yes / No / Explain (Y / N / E), "1 of 3" when several wait, and "Later" to tuck it away. Payment, password and send steps keep their own look and only offer a one-time yes.
+- Reach this PC from mobile data without an account or VPN (opt-in, Settings → Connect). The PC hosts its own endpoint, maps the port where the router allows, can punch through carrier-grade NAT, and a self-test says in plain words what your network allows. There is no relay unless you add one.
+- The phone app is a portal: it opens on Talk (Remedy's Grove conversation, with voice input and resume after a dropped link), shows side jobs, goals, routines and "While you were away", answers decisions on the same one-at-a-time card, and notifies you when Remedy needs you. The previous remote is under More.
+- Remedy's own fonts: Remedy Sans UI for text, with headings, reading, accent and code fonts each set under Appearance.
+
+### Changed
+- Background work runs through one queue sized to your PC: a few jobs at once on a cloud model, one on a model that runs on your PC (none while you are talking to it), and none while memory is low. Remedy reads the same numbers and plans within them.
+- Model lists and defaults come from each provider's own models endpoint; nothing is baked in, so pickers never show a model the provider no longer serves.
+- Signing in to a real provider moves conversations that were on the free demo onto your new default.
+- Studio's way back to Grove sits at the top of the chat beside the Chat / Plan / Build badge; Grove rooms carry Talk / Plan / Build in their top bar; the bottom bar keeps status and settings.
+
+### Fixed
+- Web search works again: the local search engine (OpenSERP) starts with Remedy as documented, asking DuckDuckGo then Bing. When a search service answers with a "prove you are human" check, Remedy says search is blocked and pauses instead of retrying and scraping other sites.
+- Background work stops at its own report instead of continuing with work nobody asked for.
+- Signing in with xAI from the browser app opens its sign-in page instead of being blocked as a popup, and a browser app served on any port talks to the runtime that served it.
+- The phone app uses Remedy's own icon.
+
 ## [0.70.2] - 2026-11-15
 
 ### Fixed
