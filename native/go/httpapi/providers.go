@@ -202,11 +202,6 @@ func looksLikeDemoModel(id string) bool {
 	if low == "" {
 		return false
 	}
-	for _, x := range []string{"gemini-3.1-flash-lite", "codestral-latest", "gpt-oss:20b", "kimi-k3"} {
-		if strings.Contains(low, x) {
-			return true
-		}
-	}
 	return strings.Contains(low, "(demo)") || strings.HasSuffix(low, " demo")
 }
 
@@ -494,42 +489,7 @@ func (s *Server) listModels(reqProvider, overrideURL, overrideKey string) map[st
 
 	mergedRows := make([]map[string]any, 0)
 	seen := map[string]struct{}{}
-	if configuredProvider == "demo" {
-		liveIDs := map[string]struct{}{}
-		if disc.OK {
-			for _, r := range disc.Models {
-				liveIDs[fmtString(r["id"])] = struct{}{}
-			}
-		}
-		for _, c := range catalog {
-			mid := fmtString(c["id"])
-			if mid == "" {
-				continue
-			}
-			if disc.OK && len(liveIDs) > 0 {
-				if _, ok := liveIDs[mid]; !ok {
-					continue
-				}
-			}
-			seen[mid] = struct{}{}
-			row := cloneMap(c)
-			row["default"] = false
-			if disc.OK {
-				row["source"] = "endpoint"
-			} else {
-				row["source"] = "catalog"
-			}
-			mergedRows = append(mergedRows, row)
-		}
-		if len(mergedRows) == 0 {
-			for _, c := range catalog {
-				row := cloneMap(c)
-				row["default"] = false
-				row["source"] = "catalog"
-				mergedRows = append(mergedRows, row)
-			}
-		}
-	} else {
+	{
 		if disc.OK {
 			for _, m := range disc.Models {
 				mid := fmtString(m["id"])
@@ -575,10 +535,11 @@ func (s *Server) listModels(reqProvider, overrideURL, overrideKey string) map[st
 		}
 	}
 
-	if len(mergedRows) == 0 {
-		id := firstNonEmpty(configuredID, "default")
+	if len(mergedRows) == 0 && strings.TrimSpace(configuredID) != "" {
+		// The endpoint could not be listed: show only what the owner chose,
+		// never an invented placeholder.
 		mergedRows = []map[string]any{{
-			"id": id, "name": id, "provider": configuredProvider,
+			"id": configuredID, "name": configuredID, "provider": configuredProvider,
 			"default": true, "source": "config",
 		}}
 	}
@@ -591,9 +552,6 @@ func (s *Server) listModels(reqProvider, overrideURL, overrideKey string) map[st
 		if _, ok := ids[configuredID]; !ok {
 			_, flex := flexible[configuredProvider]
 			keep := explicitID && (!disc.OK || flex)
-			if configuredProvider == "demo" {
-				keep = explicitID && !disc.OK && demoModelAllowed(configuredID, catalog)
-			}
 			if keep {
 				mergedRows = append([]map[string]any{{
 					"id": configuredID, "name": configuredID, "provider": configuredProvider,
@@ -612,9 +570,6 @@ func (s *Server) listModels(reqProvider, overrideURL, overrideKey string) map[st
 		preferred = append(preferred, fmtString(catalog[0]["id"]))
 	}
 	defaultID := chooseDefaultModel(mergedRows, preferred, disc.Loaded)
-	if defaultID == "" {
-		defaultID = "default"
-	}
 	for _, m := range mergedRows {
 		m["default"] = fmtString(m["id"]) == defaultID
 		delete(m, "chat")
@@ -644,15 +599,6 @@ func catalogModelsForProviderMerged(provider string, merged map[string]providerM
 		})
 	}
 	return out
-}
-
-func demoModelAllowed(mid string, catalog []map[string]any) bool {
-	for _, c := range catalog {
-		if fmtString(c["id"]) == mid {
-			return true
-		}
-	}
-	return false
 }
 
 func chooseDefaultModel(rows []map[string]any, preferred []string, loaded []string) string {

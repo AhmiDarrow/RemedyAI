@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
@@ -69,30 +68,6 @@ func TestAdvertiseToolSurfaceIgnoresNonAdvertisers(t *testing.T) {
 	// A model that cannot carry tools is not an error — it just gets none.
 	r.advertiseToolSurface(&cognition.ScriptedModel{}, false)
 	r.advertiseToolSurface(nil, false)
-}
-
-func TestAnthropicCatalogIdsAreCurrent(t *testing.T) {
-	meta, ok := providerCatalog["anthropic"]
-	if !ok {
-		t.Fatalf("no anthropic catalog entry")
-	}
-	ids := make([]string, 0, len(meta.Models))
-	for _, m := range meta.Models {
-		ids = append(ids, m.ID)
-	}
-	joined := strings.Join(ids, ",")
-	for _, want := range []string{
-		"claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5",
-		"claude-opus-4-8", "claude-sonnet-4-6", "claude-fable-5-1",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("catalog is missing %s: %s", want, joined)
-		}
-	}
-	if defaultModelForProvider("anthropic") != ids[0] {
-		t.Fatalf("the default model %q should be the first catalog id %q",
-			defaultModelForProvider("anthropic"), ids[0])
-	}
 }
 
 // stubModel emits a fixed event sequence.

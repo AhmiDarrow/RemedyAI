@@ -143,10 +143,14 @@ func tryLiveModel(home string, cfg ConfigMap, provider, model, baseURL string) c
 	if rawModel != "" {
 		modelID = rawModel
 	} else if modelID == "" && len(meta.Models) > 0 {
+		// User-defined providers may list their own models in config.
 		modelID = meta.Models[0].ID
 	}
 
 	key := resolveProviderAPIKey(cfg, prov, home)
+	if modelID == "" {
+		modelID = pickEndpointModel(cfg, prov, urlOut, key)
+	}
 	if !providerCredentialsReady(cfg, prov, key) {
 		return nil
 	}

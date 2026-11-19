@@ -867,7 +867,7 @@ export function SettingsPanel({
           if (!discoveryGenRef.current.isCurrent(gen)) return
           setDiscovery(null)
           setDiscoveryError(
-            `Couldn't list models: ${e instanceof Error ? e.message : String(e)} — showing catalog defaults`,
+            `Couldn't list models from the provider: ${e instanceof Error ? e.message : String(e)}`,
           )
           // Last resort: the backend catalog default, only when nothing is selected.
           setModel((cur) => cur || activeMeta?.default_model || '')
