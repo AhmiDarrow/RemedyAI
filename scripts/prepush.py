@@ -329,7 +329,13 @@ def _require_no_unreleased_notes(commit: str) -> None:
 
 
 def _say(msg: str) -> None:
-    print(msg, flush=True)
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        # A Windows console in a legacy code page cannot print lane logs
+        # (vitest's ✓ / ×). Losing a glyph must never hide the gate's result.
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(msg.encode(enc, errors="replace").decode(enc, errors="replace"), flush=True)
 
 
 def _fail(msg: str) -> None:

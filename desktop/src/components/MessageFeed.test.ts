@@ -78,7 +78,7 @@ describe('saved assistant turn layout', () => {
     expect(body).toContain('The addon loads again.')
     expect(body).not.toContain('reach the folder')
     expect(body).not.toContain('Rename confirmed.')
-  })
+  }, 30_000) // cold import of the feed (markdown, highlighting) can pass 5 s on a loaded machine
 
   it('a tools-only turn shows the strip and no placeholder bubble', async () => {
     const { createElement } = await import('react')

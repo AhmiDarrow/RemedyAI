@@ -98,3 +98,15 @@ def _reset_live_model_registry():
     forget_live_models()
     yield
     forget_live_models()
+
+
+@pytest.fixture(autouse=True)
+def _reset_search_cooldown():
+    """A DuckDuckGo human check pauses search for ten minutes, process-wide.
+    One test that trips it must not make every later search test read
+    "search is blocked"."""
+    from remedy.core.web_helpers import _ddg_reset_block
+
+    _ddg_reset_block()
+    yield
+    _ddg_reset_block()
