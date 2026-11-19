@@ -51,9 +51,15 @@ var toolForbiddenSettingsKeys = map[string]struct{}{
 	"sleev_gateway_url":          {},
 	"sleev_allow_remote_gateway": {},
 	"connect_relay_url":          {},
-	"llm_base_url":               {},
-	"llm_provider":               {},
-	"llm_model":                  {},
+	// Opening this PC to the internet is an owner decision, never a tool's.
+	"connect_iroh_enabled":    {},
+	"connect_iroh_port":       {},
+	"connect_iroh_relay_mode": {},
+	"connect_iroh_relay_url":  {},
+	"connect_iroh_punch":      {},
+	"llm_base_url":            {},
+	"llm_provider":            {},
+	"llm_model":               {},
 }
 
 // RegisterSettingsTools installs settings.get (read-only, scrubbed) and

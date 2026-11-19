@@ -60,7 +60,8 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "../bin/remedy-runtime"
+      "../bin/remedy-runtime",
+      "../bin/remedy-iroh"
     ],
     "resources": {
       "../dist": "webui",

@@ -94,7 +94,7 @@ export function DiffCode({ text, className, compact }: DiffCodeProps) {
         fontSize: compact ? '0.65rem' : '0.78rem',
         lineHeight: 1.45,
         fontFamily:
-          "'Cascadia Code', 'Fira Code', 'JetBrains Mono', ui-monospace, monospace",
+          "var(--font-code, 'Cascadia Code', ui-monospace, monospace)",
       }}
     >
       <code className={className || 'language-diff'} style={{ background: 'none', display: 'block' }}>

@@ -1,7 +1,9 @@
 package com.remedy.groveconnect.ui
 
+import com.remedy.groveconnect.R
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -44,12 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -71,44 +68,14 @@ import com.remedy.groveconnect.ui.theme.TextPrimary
 import com.remedy.groveconnect.ui.theme.TextSecondary
 import com.remedy.groveconnect.ui.theme.Warning
 
-/** Small QR-style brand glyph drawn locally — no icon dependency. */
+/** Remedy's icon — the same circuit "R" as the Desktop app and launcher. */
 @Composable
 private fun BrandMark(size: Dp = 84.dp) {
-    val d = with(LocalDensity.current) { size.toPx() }
-    Canvas(Modifier.size(size)) {
-        val stroke = d * 0.05f
-        val finder = d * 0.44f
-        val off = d * 0.11f
-        val inner = finder * 0.5f
-        val r = CornerRadius(d * 0.06f)
-        // three finder corners
-        drawRoundRect(Accent, topLeft = Offset(off, off), size = Size(finder, finder), style = Stroke(stroke), cornerRadius = r)
-        drawRoundRect(
-            Accent,
-            topLeft = Offset(off + finder / 2 - inner / 2, off + finder / 2 - inner / 2),
-            size = Size(inner, inner),
-            cornerRadius = r,
-        )
-        drawRoundRect(Accent, topLeft = Offset(d - off - finder, off), size = Size(finder, finder), style = Stroke(stroke), cornerRadius = r)
-        drawRoundRect(
-            Accent,
-            topLeft = Offset(d - off - finder + finder / 2 - inner / 2, off + finder / 2 - inner / 2),
-            size = Size(inner, inner),
-            cornerRadius = r,
-        )
-        drawRoundRect(Accent, topLeft = Offset(off, d - off - finder), size = Size(finder, finder), style = Stroke(stroke), cornerRadius = r)
-        drawRoundRect(
-            Accent,
-            topLeft = Offset(off + finder / 2 - inner / 2, d - off - finder + finder / 2 - inner / 2),
-            size = Size(inner, inner),
-            cornerRadius = r,
-        )
-        // data dots
-        val dot = d * 0.04f
-        drawCircle(Accent, radius = dot, center = Offset(d * 0.60f, d * 0.60f))
-        drawCircle(Accent, radius = dot, center = Offset(d * 0.71f, d * 0.69f))
-        drawCircle(Accent, radius = dot, center = Offset(d * 0.57f, d * 0.73f))
-    }
+    Image(
+        painter = painterResource(R.drawable.remedy_mark),
+        contentDescription = "Remedy",
+        modifier = Modifier.size(size).clip(RoundedCornerShape(size * 0.22f)),
+    )
 }
 
 @Composable

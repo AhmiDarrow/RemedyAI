@@ -394,7 +394,9 @@ class AgentConfig(BaseModel):
         description="LLM provider: openai, anthropic, google, deepseek, openrouter, ollama, custom",
     )
     llm_api_key: str = Field(default="", description="API key for LLM calls")
-    llm_model: str = Field(default="gpt-4o-mini", description="LLM model name")
+    llm_model: str = Field(
+        default="", description="LLM model name (empty: the provider's own default)"
+    )
     llm_base_url: str = Field(default="https://api.openai.com/v1", description="LLM API base URL")
     sleev_enabled: bool = Field(
         default=False,

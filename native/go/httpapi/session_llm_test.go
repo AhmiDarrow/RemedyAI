@@ -231,19 +231,3 @@ func TestSetSessionLLMMakeDefaultWritesSettings(t *testing.T) {
 		t.Fatalf("loaded model=%q", cfgString(got, "llm_model", ""))
 	}
 }
-
-func TestSetSessionLLMRejectsGarbageModel(t *testing.T) {
-	s, _ := newSessionLLMTestServer(t)
-	sid := createTestSession(t, s)
-	code, body, text := doSessionLLMJSON(t, s, http.MethodPut, "/api/sessions/"+sid+"/llm", map[string]any{
-		"provider": "openai",
-		"model":    "not-a-real-model-zzz",
-	})
-	if code != http.StatusBadRequest {
-		t.Fatalf("status=%d body=%s", code, text)
-	}
-	detail, _ := body["detail"].(string)
-	if !strings.Contains(detail, "Unknown model") {
-		t.Fatalf("detail=%q body=%s", detail, text)
-	}
-}

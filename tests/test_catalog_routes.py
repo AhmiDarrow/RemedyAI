@@ -9,11 +9,11 @@ from __future__ import annotations
 from remedy.interfaces.config import PROVIDER_CATALOG
 
 
-def test_demo_curated_catalog_excludes_image_and_video_junk() -> None:
-    """Pinned without the deleted FastAPI helper - Go filters live discovery."""
-    catalog = PROVIDER_CATALOG["demo"]["models"]
-    ids = {str(m.get("id") or "") for m in catalog}
-    assert "codestral-latest" in ids
-    assert "deepseek-v4-flash" not in ids
-    assert "flux-kontext-max" not in ids
-    assert "kling-v3.0-pro" not in ids
+def test_builtin_catalog_bakes_in_no_models() -> None:
+    """Models come from each provider's endpoint; nothing is compiled in."""
+    for pid, meta in PROVIDER_CATALOG.items():
+        if meta.get("user_defined"):
+            continue
+        assert not meta.get("models"), pid
+
+

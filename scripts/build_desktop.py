@@ -42,6 +42,7 @@ NSIS_DIR = (
 )
 GO_MOD = ROOT / "native" / "go"
 ZIG_DIR = ROOT / "native" / "zig"
+IROH_DIR = ROOT / "native" / "iroh"
 
 # Keep in lockstep with remedy.runtime.native_runtime._ABI_VERSION and
 # REMEDY_CORE_ABI_VERSION in native/zig/include/remedy_core.h.
@@ -231,6 +232,37 @@ def runtime_bin_paths() -> tuple[Path, Path]:
     )
 
 
+def iroh_bin_paths() -> tuple[Path, Path]:
+    """``remedy-iroh`` (mobile-data endpoint) plus its Tauri-triple copy."""
+    suffix = ".exe" if sys.platform == "win32" else ""
+    triple = target_triple()
+    return (
+        DESKTOP_BIN / f"remedy-iroh{suffix}",
+        DESKTOP_BIN / f"remedy-iroh-{triple}{suffix}",
+    )
+
+
+def build_iroh_sidecar() -> tuple[Path, Path]:
+    """Build the Rust ``remedy-iroh`` sidecar beside the runtime.
+
+    The runtime finds it next to its own executable, which is where Tauri
+    installs every ``externalBin``. It only runs when the owner turns on
+    "Reach this PC from mobile data".
+    """
+    plain, triple_path = iroh_bin_paths()
+    DESKTOP_BIN.mkdir(parents=True, exist_ok=True)
+    _run(["cargo", "build", "--release", "--locked", "--bin", "remedy-iroh"], cwd=IROH_DIR)
+    suffix = ".exe" if sys.platform == "win32" else ""
+    built = IROH_DIR / "target" / "release" / f"remedy-iroh{suffix}"
+    if not built.is_file():
+        print(f"ERROR: cargo build produced no binary at {built}")
+        sys.exit(1)
+    shutil.copy2(built, plain)
+    shutil.copy2(built, triple_path)
+    print(f"Mobile endpoint: {plain} ({plain.stat().st_size / (1024 * 1024):.1f} MB)")
+    return plain, triple_path
+
+
 def staged_core_path() -> Path:
     """Where Tauri ``bundle.resources`` expects the Zig core."""
     return DESKTOP_BIN / core_library_name()
@@ -366,6 +398,7 @@ def build(
 
     if not skip_runtime:
         build_runtime()
+        build_iroh_sidecar()
     else:
         print("Skipping Go remedy-runtime (--skip-runtime)")
 

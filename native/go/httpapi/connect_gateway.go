@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/connect"
 )
@@ -122,6 +124,33 @@ type connectUpdateBody struct {
 	Paused   *bool          `json:"paused"`
 	Panes    map[string]any `json:"panes"`
 	RelayURL *string        `json:"relay_url"`
+	// "Reach this PC from mobile data" (iroh endpoint on the PC). Opt-in.
+	MobileReach     *bool   `json:"mobile_reach"`
+	MobilePort      *int    `json:"mobile_port"`
+	MobileRelayMode *string `json:"mobile_relay_mode"`
+	MobileRelayURL  *string `json:"mobile_relay_url"`
+	// MobilePunch: relay-free hole punching through carrier-grade NAT.
+	MobilePunch *bool `json:"mobile_punch"`
+}
+
+// mobileReachSnapshot is the owner-facing mobile-data block of GET /api/connect.
+func mobileReachSnapshot(cfg map[string]any) map[string]any {
+	port := cfgInt(cfg, "connect_iroh_port", connect.IrohDefaultPort)
+	if port < 1 || port > 65535 {
+		port = connect.IrohDefaultPort
+	}
+	mode := strings.TrimSpace(cfgString(cfg, "connect_iroh_relay_mode", ""))
+	if mode == "" {
+		mode = "off"
+	}
+	return map[string]any{
+		"enabled":    cfgBool(cfg, "connect_iroh_enabled", false) || connect.IrohEnabledFromEnv(),
+		"port":       port,
+		"relay_mode": mode,
+		"relay_url":  strings.TrimSpace(cfgString(cfg, "connect_iroh_relay_url", "")),
+		"punch":      cfgBool(cfg, "connect_iroh_punch", false),
+		"status":     connect.CurrentIrohStatus(),
+	}
 }
 
 func (s *Server) connectSnapshot(includeLive bool) map[string]any {
@@ -141,6 +170,7 @@ func (s *Server) connectSnapshot(includeLive bool) map[string]any {
 		"relay_url": strings.TrimSpace(cfgString(cfg, "connect_relay_url", "")),
 		"devices":   connect.DevicePublicMetaList(home),
 		"listening": nil,
+		"mobile":    mobileReachSnapshot(map[string]any(cfg)),
 	}
 	if !includeLive {
 		return snap
@@ -223,6 +253,36 @@ func (s *Server) handlePutConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.RelayURL != nil {
 		patch["connect_relay_url"] = strings.TrimSpace(*req.RelayURL)
+	}
+	if req.MobileReach != nil {
+		patch["connect_iroh_enabled"] = *req.MobileReach
+	}
+	if req.MobilePort != nil {
+		p := *req.MobilePort
+		if p < 1024 || p > 65535 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "mobile_port must be 1024-65535"})
+			return
+		}
+		patch["connect_iroh_port"] = p
+	}
+	if req.MobileRelayMode != nil {
+		m := strings.ToLower(strings.TrimSpace(*req.MobileRelayMode))
+		if m != "off" && m != "custom" && m != "n0" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "mobile_relay_mode must be off, custom or n0"})
+			return
+		}
+		patch["connect_iroh_relay_mode"] = m
+	}
+	if req.MobileRelayURL != nil {
+		u := strings.TrimSpace(*req.MobileRelayURL)
+		if u != "" && !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "mobile_relay_url must be an http(s) URL"})
+			return
+		}
+		patch["connect_iroh_relay_url"] = u
+	}
+	if req.MobilePunch != nil {
+		patch["connect_iroh_punch"] = *req.MobilePunch
 	}
 	if len(patch) == 0 {
 		writeJSON(w, http.StatusOK, s.connectSnapshot(false))
@@ -376,4 +436,14 @@ func (s *Server) handleConnectRevoke(w http.ResponseWriter, r *http.Request) {
 		"id":      saved.ID,
 		"revoked": true,
 	})
+}
+
+// handleConnectMobileTest re-runs the mobile-data reachability self-test.
+func (s *Server) handleConnectMobileTest(w http.ResponseWriter, r *http.Request) {
+	if refuseConnectProxy(w, r) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, connect.RecheckIrohReach(ctx))
 }

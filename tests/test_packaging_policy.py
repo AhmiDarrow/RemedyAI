@@ -25,11 +25,12 @@ def test_tauri_does_not_embed_resources_local():
 
 
 def test_tauri_external_bin_is_remedy_runtime_win_and_linux() -> None:
-    """Packaged Desktop launches Go remedy-runtime only (no remedy-desktop)."""
+    """Packaged Desktop launches Go remedy-runtime (no remedy-desktop); the only
+    other external binary is the opt-in remedy-iroh mobile-data endpoint."""
     for name in ("tauri.conf.json", "tauri.linux.conf.json"):
         conf = json.loads((TAURI / name).read_text(encoding="utf-8"))
         external = conf.get("bundle", {}).get("externalBin") or []
-        assert external == ["../bin/remedy-runtime"], f"{name}: {external!r}"
+        assert external == ["../bin/remedy-runtime", "../bin/remedy-iroh"], f"{name}: {external!r}"
         blob = json.dumps(conf).lower()
         assert "remedy-desktop" not in blob, f"{name} still references remedy-desktop"
 

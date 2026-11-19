@@ -60,6 +60,107 @@ export interface ConnectStatus {
    * not say (PUT echo, offline fallback).
    */
   listening?: [string, number] | null
+  /** "Reach this PC from mobile data" (the PC's own iroh endpoint). */
+  mobile?: MobileReach
+}
+
+export type MobileVerdict =
+  | 'off'
+  | 'checking'
+  | 'reachable'
+  | 'reachable_ipv6'
+  | 'cgnat'
+  | 'double_nat'
+  | 'needs_forward'
+
+export interface MobileReachStatus {
+  enabled: boolean
+  verdict: MobileVerdict
+  message: string
+  steps: string[]
+  mapped?: string
+  public_ip?: string
+  map_protocols: string[]
+  addrs: string[]
+  port?: number
+}
+
+export interface MobileReach {
+  enabled: boolean
+  port: number
+  relay_mode: 'off' | 'custom' | 'n0'
+  relay_url: string
+  /** Relay-free hole punching through carrier-grade NAT (opt-in). */
+  punch: boolean
+  status: MobileReachStatus
+}
+
+export interface MobileReachPatch {
+  mobile_reach?: boolean
+  mobile_port?: number
+  mobile_relay_mode?: 'off' | 'custom' | 'n0'
+  mobile_relay_url?: string
+  mobile_punch?: boolean
+}
+
+const MOBILE_VERDICTS: MobileVerdict[] = [
+  'off',
+  'checking',
+  'reachable',
+  'reachable_ipv6',
+  'cgnat',
+  'double_nat',
+  'needs_forward',
+]
+
+function strList(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+}
+
+export function parseMobileStatus(raw: unknown): MobileReachStatus {
+  const o = asRecord(raw) || {}
+  const verdict = MOBILE_VERDICTS.includes(o.verdict as MobileVerdict) ? (o.verdict as MobileVerdict) : 'off'
+  return {
+    enabled: Boolean(o.enabled),
+    verdict,
+    message: typeof o.message === 'string' ? o.message : '',
+    steps: strList(o.steps),
+    mapped: typeof o.mapped === 'string' && o.mapped ? o.mapped : undefined,
+    public_ip: typeof o.public_ip === 'string' && o.public_ip ? o.public_ip : undefined,
+    map_protocols: strList(o.map_protocols),
+    addrs: strList(o.addrs),
+    port: typeof o.port === 'number' ? o.port : undefined,
+  }
+}
+
+export function parseMobileReach(raw: unknown): MobileReach | undefined {
+  const o = asRecord(raw)
+  if (!o) return undefined
+  const mode = o.relay_mode === 'custom' || o.relay_mode === 'n0' ? o.relay_mode : 'off'
+  return {
+    enabled: Boolean(o.enabled),
+    port: numPort(o.port, 7403),
+    relay_mode: mode,
+    relay_url: typeof o.relay_url === 'string' ? o.relay_url : '',
+    punch: o.punch === true,
+    status: parseMobileStatus(o.status),
+  }
+}
+
+/** Plain words for the self-test verdict (the server's message carries the detail). */
+export function mobileVerdictTone(v: MobileVerdict): 'ok' | 'warn' | 'muted' {
+  if (v === 'reachable' || v === 'reachable_ipv6') return 'ok'
+  if (v === 'off' || v === 'checking') return 'muted'
+  return 'warn'
+}
+
+export async function putMobileReach(patch: MobileReachPatch): Promise<void> {
+  await apiFetch<unknown>('/connect', { method: 'PUT', body: JSON.stringify(patch) })
+}
+
+export async function testMobileReach(): Promise<MobileReachStatus> {
+  const raw = await apiFetch<unknown>('/connect/mobile/test', { method: 'POST' })
+  return parseMobileStatus(raw)
 }
 
 export type ConnectListening = [string, number]
@@ -225,6 +326,7 @@ export function normalizeConnectStatus(
     addresses,
     qr: typeof qrRaw === 'string' && qrRaw ? qrRaw : qrRaw === null ? null : undefined,
     listening,
+    mobile: parseMobileReach(o.mobile) ?? fb.mobile,
   }
 }
 

@@ -66,6 +66,10 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.1")
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    // iroh transport spike: n0's official Android AAR (uniffi + JNA). Ships
+    // libiroh_ffi.so for arm64-v8a, armeabi-v7a, x86 and x86_64.
+    implementation("computer.iroh:iroh-android:1.2.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     // Real org.json for JVM unit tests (the Android one is a stub off-device).

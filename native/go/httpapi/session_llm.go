@@ -107,77 +107,19 @@ func inferProviderFromModel(model string) *string {
 	return &id
 }
 
-// validateProviderModel mirrors interfaces/config.validate_provider_model for the
-// Phase-4 closed-catalog subset (native family prefixes + known defaults).
-// Flexible providers accept any non-empty id.
+// validateProviderModel only requires a model id. Whether the provider offers
+// it is checked against the provider's live models endpoint
+// (Server.checkModelOffered), never a baked-in list of names or prefixes.
 func validateProviderModel(provider, model string) error {
-	prov := strings.ToLower(strings.TrimSpace(provider))
-	if prov == "" {
-		prov = "openai"
-	}
-	mid := strings.TrimSpace(model)
-	if mid == "" {
+	_ = provider
+	if strings.TrimSpace(model) == "" {
 		return fmt.Errorf("Model id is required")
 	}
-	flexible := map[string]struct{}{
-		"openrouter": {}, "custom": {}, "ollama": {}, "poe": {}, "rmb": {}, "llamacpp": {},
-	}
-	if _, ok := flexible[prov]; ok {
-		return nil
-	}
-	if _, known := providerDefaults[prov]; !known {
-		// Unknown / user-defined provider — accept any non-empty id.
-		return nil
-	}
-	def := providerDefaults[prov]
-	if def.model != "" && mid == def.model {
-		return nil
-	}
-	if nativeModelIDForProvider(prov, mid) {
-		return nil
-	}
-	sample := def.model
-	if sample == "" {
-		sample = "(none)"
-	}
-	return fmt.Errorf(
-		"Unknown model %q for provider %q. Pick a listed model (e.g. %s).",
-		mid, prov, sample,
-	)
+	return nil
 }
 
-func nativeModelIDForProvider(provider, modelID string) bool {
-	mid := strings.ToLower(strings.TrimSpace(modelID))
-	prov := strings.ToLower(strings.TrimSpace(provider))
-	if mid == "" || prov == "" {
-		return false
-	}
-	switch prov {
-	case "deepseek":
-		return strings.HasPrefix(mid, "deepseek")
-	case "xai":
-		return strings.HasPrefix(mid, "grok") || strings.HasPrefix(mid, "xai/")
-	case "openai":
-		return strings.HasPrefix(mid, "gpt-") ||
-			strings.HasPrefix(mid, "o1") ||
-			strings.HasPrefix(mid, "o3") ||
-			strings.HasPrefix(mid, "o4") ||
-			strings.HasPrefix(mid, "chatgpt-")
-	case "anthropic":
-		return strings.HasPrefix(mid, "claude")
-	case "google":
-		return strings.HasPrefix(mid, "gemini") || strings.HasPrefix(mid, "models/gemini")
-	case "mistral":
-		return strings.HasPrefix(mid, "mistral") ||
-			strings.HasPrefix(mid, "codestral") ||
-			strings.HasPrefix(mid, "open-mistral")
-	case "groq":
-		return strings.HasPrefix(mid, "groq/")
-	case "demo":
-		return mid == "codestral-latest" || strings.HasPrefix(mid, "codestral")
-	default:
-		return false
-	}
+func modelNotOfferedError(provider, model string) error {
+	return fmt.Errorf("%q is not offered by %s right now. Pick one from the list.", model, provider)
 }
 
 func (s *Server) handleSetSessionLLM(w http.ResponseWriter, r *http.Request) {
@@ -238,7 +180,7 @@ func (s *Server) handleSetSessionLLM(w http.ResponseWriter, r *http.Request) {
 	}
 	// Fail closed on garbage ids before toast/persist.
 	if rawModel != "" {
-		if verr := validateProviderModel(rawProvider, rawModel); verr != nil {
+		if verr := s.checkModelOffered(rawProvider, rawModel); verr != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"detail": verr.Error()})
 			return
 		}

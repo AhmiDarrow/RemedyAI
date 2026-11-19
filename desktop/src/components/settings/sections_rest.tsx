@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import type { SettingsFormProps } from './formTypes'
 import { FONT_SCALE_OPTIONS, type Density } from '../../utils/chatPrefs'
 import { SettingsSection } from '../SettingsSection'
+import { FontPicker } from './FontPicker'
 import {
   FormActionButton,
   FormHint,
@@ -268,6 +269,7 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
               { id: 'compact', label: 'Compact' },
             ]}
           />
+          <FontPicker />
           <FormToggle
             checked={highContrast}
             onChange={(on) => onHighContrastChange?.(on)}

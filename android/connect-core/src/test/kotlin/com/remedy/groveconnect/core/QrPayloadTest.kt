@@ -184,6 +184,56 @@ class QrPayloadTest {
     }
 
     @Test
+    fun parseOptionalIroh() {
+        val id = "32f964994affa248ee05d85780291e07535c4229dfcba0bbde4c44f94594c602"
+        val q = QrPayload.parse(qr(extra = "ir=${id.uppercase()}\nirr=https://relay.example.net/"), nowUnix = now)
+        assertEquals(id, q.irohId)
+        assertEquals("https://relay.example.net/", q.irohRelay)
+        val plain = QrPayload.parse(qr(), nowUnix = now)
+        assertNull(plain.irohId)
+        assertNull(plain.irohRelay)
+    }
+
+    @Test
+    fun parseIrohAddrsAndMode() {
+        val id = "32f964994affa248ee05d85780291e07535c4229dfcba0bbde4c44f94594c602"
+        val q = QrPayload.parse(
+            qr(extra = "ir=$id\nira=74.167.84.108:7402,[2a00:1450::1]:7402,192.168.0.46:7402"),
+            nowUnix = now,
+        )
+        assertEquals(listOf("74.167.84.108:7402", "[2a00:1450::1]:7402", "192.168.0.46:7402"), q.irohAddrs)
+        assertEquals(false, q.irohN0)
+        assertNull(q.irohRelay)
+        assertTrue(QrPayload.parse(qr(extra = "ir=$id\nirm=n0"), nowUnix = now).irohN0)
+        for (bad in listOf("ira=example.com:7402", "ira=1.2.3.4", "ira=0.0.0.0:7402", "ira=1.2.3.4:99999", "irm=other")) {
+            assertFailsWith<QrException>(bad) { QrPayload.parse(qr(extra = bad), nowUnix = now) }
+        }
+    }
+
+    @Test
+    fun parseIrohPunchBrokers() {
+        val id = "32f964994affa248ee05d85780291e07535c4229dfcba0bbde4c44f94594c602"
+        val q = QrPayload.parse(qr(extra = "ir=$id\nirp=broker.emqx.io:1883;broker.hivemq.com:1883"), nowUnix = now)
+        assertEquals(listOf("broker.emqx.io" to 1883, "broker.hivemq.com" to 1883), q.irohPunchBrokers)
+        assertTrue(QrPayload.parse(qr(extra = "ir=$id"), nowUnix = now).irohPunchBrokers.isEmpty())
+        assertFailsWith<QrException> { QrPayload.parse(qr(extra = "irp=http://evil"), nowUnix = now) }
+    }
+
+    @Test
+    fun rejectBadIrohFields() {
+        assertFailsWith<QrException> { QrPayload.parse(qr(extra = "ir=abc"), nowUnix = now) }
+        assertFailsWith<QrException> { QrPayload.parse(qr(extra = "ir=" + "g".repeat(64)), nowUnix = now) }
+        for (bad in listOf(
+            "irr=ftp://relay.example.net",
+            "irr=https://user:pw@relay.example.net",
+            "irr=https://relay.example.net/?token=x",
+            "irr=https://relay.example.net/bearer",
+        )) {
+            assertFailsWith<QrException>(bad) { QrPayload.parse(qr(extra = bad), nowUnix = now) }
+        }
+    }
+
+    @Test
     fun rejectOversizedCodeAndRendezvousList() {
         assertFailsWith<QrException> { QrPayload.parse("x".repeat(16 * 1024 + 1), nowUnix = now) }
         val endpoints = (1..9).joinToString(";") { "broker$it.example:1883" }

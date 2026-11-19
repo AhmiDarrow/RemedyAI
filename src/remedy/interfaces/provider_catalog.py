@@ -28,34 +28,16 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "free_tier": "instant",
         "badge": "No signup",
         "limits_blurb": (
-            "Rate-limited guest chat only (third-party). Curated stable models — "
-            "not the full gateway catalog. Add a real provider for agents / vision."
+            "Rate-limited guest chat only (third-party). Models come from the "
+            "gateway itself. Add a real provider for agents / vision."
         ),
         "privacy_note": "Chat is sent to a free third-party API (not Remedy cloud). Prefer Ollama for private local use.",
         "key_docs_url": "https://llm7.io/",
-        # Curated guest-chat allowlist. The gateway's /models is probed to
-        # *validate* these ids (an id it stopped serving is dropped), never to
-        # dump its image/video/paid-key ids into the picker.
+        # Models come from the gateway's own /models listing, never a list
+        # compiled into Remedy.
         # llm7 guest traffic is limited to ~1 request/second (HTTP 429 with
         # retry_after otherwise); consecutive agent rounds are paced to this.
         "min_request_interval_s": 1.1,
-        "models": [
-            {
-                "id": "codestral-latest",
-                "name": "Codestral demo",
-                "vision": False,
-            },
-            {
-                "id": "gemini-3.1-flash-lite",
-                "name": "Gemini Flash Lite demo",
-                "vision": False,
-            },
-            {
-                "id": "gpt-oss:20b",
-                "name": "GPT-OSS 20B demo",
-                "vision": False,
-            },
-        ],
     },
     "openai": {
         "label": "OpenAI",
@@ -65,12 +47,6 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "show_base_url": False,
         "free_tier": "none",
         "key_docs_url": "https://platform.openai.com/api-keys",
-        "models": [
-            {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "vision": True},
-            {"id": "gpt-4o", "name": "GPT-4o", "vision": True},
-            {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "vision": True},
-            {"id": "o4-mini", "name": "o4-mini", "vision": False},
-        ],
     },
     "anthropic": {
         "label": "Anthropic",
@@ -85,14 +61,6 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
             "A Claude Pro / Max / Claude Code weekly limit does not pay for "
             "this. Do not paste sk-ant-oat login tokens here."
         ),
-        "models": [
-            {"id": "claude-opus-5", "name": "Claude Opus 5", "vision": True},
-            {"id": "claude-sonnet-5", "name": "Claude Sonnet 5", "vision": True},
-            {"id": "claude-haiku-4-5", "name": "Claude Haiku 4.5", "vision": True},
-            {"id": "claude-opus-4-8", "name": "Claude Opus 4.8", "vision": True},
-            {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "vision": True},
-            {"id": "claude-fable-5-1", "name": "Claude Fable 5.1", "vision": True},
-        ],
     },
     "google": {
         "label": "Google AI (Gemini)",
@@ -104,11 +72,6 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "badge": "Free key",
         "limits_blurb": "Generous free tier via AI Studio (region limits may apply).",
         "key_docs_url": "https://aistudio.google.com/app/apikey",
-        "models": [
-            {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "vision": True},
-            {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "vision": True},
-            {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro", "vision": True},
-        ],
     },
     "deepseek": {
         "label": "DeepSeek",
@@ -122,10 +85,6 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         # deepseek-chat / deepseek-reasoner retired 2026-07-24 → V4 ids.
         # Fallback only — live GET /models is the source of truth with a key.
         # V4 API currently exposes flash + pro (chat/reasoner ids map → flash).
-        "models": [
-            {"id": "deepseek-v4-flash", "name": "DeepSeek V4 Flash", "vision": False},
-            {"id": "deepseek-v4-pro", "name": "DeepSeek V4 Pro", "vision": False},
-        ],
     },
     "xai": {
         "label": "xAI (Grok)",
@@ -136,11 +95,6 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "free_tier": "none",
         "key_docs_url": "https://console.x.ai/team/default/api-keys",
         # Fallback only — live GET /models is preferred when a key is present.
-        "models": [
-            {"id": "grok-4.5", "name": "Grok 4.5", "vision": True},
-            {"id": "grok-4.3", "name": "Grok 4.3", "vision": True},
-            {"id": "grok-4", "name": "Grok 4", "vision": True},
-        ],
     },
     "groq": {
         "label": "Groq",
@@ -152,11 +106,6 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "badge": "Free key",
         "limits_blurb": "Very fast free tier — great for trying agent tools.",
         "key_docs_url": "https://console.groq.com/keys",
-        "models": [
-            {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "vision": False},
-            {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B Instant", "vision": False},
-            {"id": "mixtral-8x7b-32768", "name": "Mixtral 8x7B", "vision": False},
-        ],
     },
     "mistral": {
         "label": "Mistral",
@@ -168,11 +117,6 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "badge": "Free key",
         "limits_blurb": "Free Experiment plan (no card typical).",
         "key_docs_url": "https://console.mistral.ai/api-keys",
-        "models": [
-            {"id": "mistral-small-latest", "name": "Mistral Small", "vision": False},
-            {"id": "mistral-large-latest", "name": "Mistral Large", "vision": False},
-            {"id": "codestral-latest", "name": "Codestral", "vision": False},
-        ],
     },
     "openrouter": {
         "label": "OpenRouter",
@@ -187,15 +131,6 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
             "lists what your key can use. Curated fallbacks below are long-running free chat."
         ),
         "key_docs_url": "https://openrouter.ai/keys",
-        "models": [
-            # Stable free chat fallbacks only (not promo/image). Live discovery adds more.
-            {"id": "openrouter/auto", "name": "OpenRouter Auto"},
-            {"id": "openai/gpt-oss-20b:free", "name": "GPT-OSS 20B (free)"},
-            {
-                "id": "meta-llama/llama-3.3-70b-instruct:free",
-                "name": "Llama 3.3 70B (free)",
-            },
-        ],
     },
     "poe": {
         "label": "Poe",
@@ -214,13 +149,6 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "key_docs_url": "https://poe.com/api_key",
         # Bot names as used by Poe OpenAI-compatible API (case-sensitive).
         # Live discovery expands this when a key is present.
-        "models": [
-            {"id": "Claude-Sonnet-4.6", "name": "Claude Sonnet 4.6", "vision": True},
-            {"id": "Claude-Opus-4.7", "name": "Claude Opus 4.7", "vision": True},
-            {"id": "GPT-5.4", "name": "GPT-5.4", "vision": True},
-            {"id": "Gemini-3.1-Pro", "name": "Gemini 3.1 Pro", "vision": True},
-            {"id": "Grok-4", "name": "Grok 4", "vision": True},
-        ],
     },
     "ollama": {
         "label": "Ollama (local)",
@@ -235,7 +163,6 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         # No curated model list — Ollama models come ONLY from the live server
         # (GET /api/models on the local Ollama endpoint). Curated guesses were
         # almost never pulled by the user and produced dead chat sessions.
-        "models": [],
     },
     "rmb": {
         "label": "RMB (local agent)",
@@ -251,11 +178,6 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         ),
         "privacy_note": "Chat stays on this PC. Powered by llama.cpp under the RMB brand.",
         "key_docs_url": "",
-        "models": [
-            {"id": "Qwen2.5-Coder-7B-Instruct-Q4_K_M", "name": "Qwen2.5 Coder 7B"},
-            {"id": "Qwen2.5-Coder-14B-Instruct-Q4_K_M", "name": "Qwen2.5 Coder 14B"},
-            {"id": "default", "name": "Default (loaded model)"},
-        ],
     },
     "llamacpp": {
         "label": "llama.cpp (manual URL)",
@@ -267,9 +189,6 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "badge": "Local",
         "advanced": True,
         "limits_blurb": "Point at any OpenAI-compatible llama-server. Prefer Settings → RMB for managed local agent.",
-        "models": [
-            {"id": "default", "name": "Default"},
-        ],
     },
     "custom": {
         # Display name is user-settable via `custom_llm_name` (shown in Settings +
@@ -283,9 +202,6 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "env_keys": [],
         "show_base_url": True,
         "free_tier": "none",
-        "models": [
-            {"id": "default", "name": "Default (custom endpoint)"},
-        ],
     },
 }
 

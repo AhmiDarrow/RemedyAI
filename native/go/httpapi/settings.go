@@ -40,6 +40,8 @@ var settableKeys = map[string]struct{}{
 	"connect_enabled": {}, "connect_bind_host": {}, "connect_bind_port": {},
 	"connect_paused": {}, "connect_panes": {}, "connect_relay_url": {},
 	"connect_rdv_enabled": {},
+	"connect_iroh_enabled": {}, "connect_iroh_port": {}, "connect_iroh_relay_mode": {},
+	"connect_iroh_relay_url": {}, "connect_iroh_punch": {},
 }
 
 var knownMessengers = map[string]struct{}{
@@ -630,6 +632,9 @@ func (s *Server) settingsPayload() map[string]any {
 		keysSet = map[string]bool{}
 	}
 	effectiveKey := resolveProviderAPIKey(cfg, provider, home)
+	if strings.TrimSpace(model) == "" {
+		model = pickEndpointModel(cfg, provider, baseURL, effectiveKey)
+	}
 	keySet := effectiveKey != "" && !isPlaceholderKey(effectiveKey)
 	if provider == "xai" && !keySet {
 		// OAuth / console key in auth/xai.json counts even before bearer refresh.

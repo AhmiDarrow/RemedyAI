@@ -224,6 +224,11 @@ jobs:
       - name: Rust tests
         run: cargo test --locked
 
+      - name: Mobile-data endpoint sidecar (native/iroh)
+        if: runner.os != 'macOS'
+        working-directory: native/iroh
+        run: cargo test --locked
+
   native-core:
     strategy:
       fail-fast: false

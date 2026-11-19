@@ -4,10 +4,12 @@ import App from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { I18nProvider } from './i18n'
 import { applyStoredUiPrefs } from './utils/chatPrefs'
+import { applyFonts } from './utils/fontPrefs'
 import { isTauri, tauriInvoke } from './api/tauri'
 import './index.css'
 
 applyStoredUiPrefs()
+applyFonts()
 
 async function boot(): Promise<void> {
   if (isTauri()) {

@@ -240,3 +240,26 @@ describe('parseTailscaleAction', () => {
     expect(a.login_url).toBeUndefined()
   })
 })
+
+describe('mobile reach', () => {
+  it('parses the server block and defaults safely', async () => {
+    const { parseMobileReach, mobileVerdictTone } = await import('./connect')
+    const m = parseMobileReach({
+      enabled: true,
+      port: 7403,
+      relay_mode: 'bogus',
+      status: { verdict: 'cgnat', message: 'shared address', steps: ['a', 1], map_protocols: ['pcp'] },
+    })
+    expect(m?.enabled).toBe(true)
+    expect(m?.port).toBe(7403)
+    expect(m?.relay_mode).toBe('off')
+    expect(m?.punch).toBe(false)
+    expect(parseMobileReach({ punch: true })?.punch).toBe(true)
+    expect(m?.status.verdict).toBe('cgnat')
+    expect(m?.status.steps).toEqual(['a'])
+    expect(mobileVerdictTone('cgnat')).toBe('warn')
+    expect(mobileVerdictTone('reachable')).toBe('ok')
+    expect(parseMobileReach(null)).toBeUndefined()
+    expect(parseMobileReach({ status: { verdict: '???' } })?.status.verdict).toBe('off')
+  })
+})
