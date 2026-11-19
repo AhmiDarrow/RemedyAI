@@ -95,6 +95,8 @@ type IrohAdvert struct {
 	Addrs     []string
 	RelayURL  string
 	RelayMode string // "off" (default), "custom", or "n0"
+	// PunchBrokers is the irp= value when hole punching is on ("" = off).
+	PunchBrokers string
 }
 
 // maxIrohQRAddrs bounds the ira= list.
@@ -159,6 +161,11 @@ type IrohSupervisorOpts struct {
 	// STUNServers for the self-test's public-address check (nil → defaults;
 	// empty non-nil → skip STUN).
 	STUNServers []string
+	// Punch turns on relay-free hole punching through CGNAT: the PC answers
+	// encrypted address offers on public MQTT brokers (PunchBrokers, nil →
+	// the public rendezvous brokers). Off by default.
+	Punch        bool
+	PunchBrokers []RDVEndpoint
 	// Session runs the Noise pipe for one spliced stream (supervisorSession).
 	Session func(context.Context, net.Conn) error
 	// OnEvent, when set, receives each sidecar event line (tests, metrics).
@@ -179,6 +186,32 @@ type irohEvent struct {
 	Addrs      []string       `json:"addrs"`
 	External   *string        `json:"external"`
 	Probe      map[string]any `json:"probe"`
+	ID         string         `json:"id"`
+	PunchErr   string         `json:"error"`
+	Port       int            `json:"port"`
+}
+
+// Live punch hook: set while a sidecar runs, nil otherwise.
+var (
+	irohPunchMu sync.Mutex
+	irohPunch   PunchFunc
+)
+
+func setIrohPunch(f PunchFunc) {
+	irohPunchMu.Lock()
+	irohPunch = f
+	irohPunchMu.Unlock()
+}
+
+// currentIrohPunch asks whichever sidecar is running to open a punch port.
+func currentIrohPunch(ctx context.Context, peerID string, peerAddrs []string) ([]string, error) {
+	irohPunchMu.Lock()
+	f := irohPunch
+	irohPunchMu.Unlock()
+	if f == nil {
+		return nil, fmt.Errorf("%w: sidecar not running", ErrIroh)
+	}
+	return f(ctx, peerID, peerAddrs)
 }
 
 // irohRelayMode normalises the configured relay policy.
@@ -277,6 +310,22 @@ func RunIrohSupervisor(ctx context.Context, opts IrohSupervisorOpts) error {
 		_ = ln.Close()
 	}()
 
+	if opts.Punch {
+		hostKP, err := LoadOrCreateHostKeyPair(opts.Home)
+		if err != nil {
+			return fmt.Errorf("%w: host key: %v", ErrIroh, err)
+		}
+		brokers := opts.PunchBrokers
+		if len(brokers) == 0 {
+			brokers = DefaultPunchBrokers()
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			RunIrohPunchResponder(ctx, hostKP.Public, brokers, currentIrohPunch)
+		}()
+	}
+
 	backoff := time.Second
 	defer setIrohAdvert(IrohAdvert{})
 	defer updateIrohStatus(func(s *IrohStatus) {
@@ -341,7 +390,7 @@ func runIrohSidecar(ctx context.Context, bin string, sk, token []byte, forward s
 	}
 	cfg, _ := json.Marshal(sidecarCfg)
 	updateIrohStatus(func(s *IrohStatus) {
-		*s = IrohStatus{Enabled: true, Port: port, RelayMode: mode, Verdict: ReachChecking,
+		*s = IrohStatus{Enabled: true, Port: port, RelayMode: mode, Punch: opts.Punch, Verdict: ReachChecking,
 			Message: "Checking whether your phone can reach this PC from mobile data…"}
 	})
 	var (
@@ -353,6 +402,13 @@ func runIrohSidecar(ctx context.Context, bin string, sk, token []byte, forward s
 	)
 	if mode == "custom" {
 		adv.RelayURL = strings.TrimSpace(opts.RelayURL)
+	}
+	if opts.Punch {
+		brokers := opts.PunchBrokers
+		if len(brokers) == 0 {
+			brokers = DefaultPunchBrokers()
+		}
+		adv.PunchBrokers = PunchBrokerList(brokers)
 	}
 	publish := func() {
 		adv.Addrs = orderIrohAddrs(rawAddr, mapped)
@@ -382,13 +438,67 @@ func runIrohSidecar(ctx context.Context, bin string, sk, token []byte, forward s
 		_ = proc.Wait()
 		return err
 	}
-	// stdin stays open: closing it (or our exit) stops the sidecar.
+	// stdin stays open: closing it (or our exit) stops the sidecar. Later
+	// lines are commands; punch answers come back as punch_ready events.
 	stdin, stdout := proc.Stdin, proc.Stdout
+	var (
+		cmdMu   sync.Mutex
+		waiters = map[string]chan irohEvent{}
+	)
+	setIrohPunch(func(pctx context.Context, peerID string, peerAddrs []string) ([]string, error) {
+		idb := make([]byte, 8)
+		if _, err := rand.Read(idb); err != nil {
+			return nil, err
+		}
+		id := hex.EncodeToString(idb)
+		ch := make(chan irohEvent, 1)
+		stunList := opts.STUNServers
+		if stunList == nil {
+			stunList = []string{}
+		}
+		line, _ := json.Marshal(map[string]any{"cmd": "punch", "id": id, "peer_id": peerID,
+			"peer_addrs": peerAddrs, "stun": stunList})
+		cmdMu.Lock()
+		waiters[id] = ch
+		_, werr := stdin.Write(append(line, '\n'))
+		cmdMu.Unlock()
+		defer func() {
+			cmdMu.Lock()
+			delete(waiters, id)
+			cmdMu.Unlock()
+		}()
+		if werr != nil {
+			return nil, werr
+		}
+		select {
+		case ev := <-ch:
+			if ev.PunchErr != "" {
+				return nil, fmt.Errorf("%w: punch: %s", ErrIroh, ev.PunchErr)
+			}
+			logIroh(fmt.Sprintf("connect: hole punch port %d ready for %s", ev.Port, shortIrohID(peerID)))
+			return ev.Addrs, nil
+		case <-pctx.Done():
+			return nil, pctx.Err()
+		}
+	})
+	defer setIrohPunch(nil)
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 0, 4096), 64*1024)
 	for sc.Scan() {
 		var ev irohEvent
 		if json.Unmarshal(sc.Bytes(), &ev) != nil {
+			continue
+		}
+		if ev.Event == "punch_ready" {
+			cmdMu.Lock()
+			ch := waiters[ev.ID]
+			cmdMu.Unlock()
+			if ch != nil {
+				select {
+				case ch <- ev:
+				default:
+				}
+			}
 			continue
 		}
 		advMu.Lock()

@@ -129,6 +129,8 @@ type connectUpdateBody struct {
 	MobilePort      *int    `json:"mobile_port"`
 	MobileRelayMode *string `json:"mobile_relay_mode"`
 	MobileRelayURL  *string `json:"mobile_relay_url"`
+	// MobilePunch: relay-free hole punching through carrier-grade NAT.
+	MobilePunch *bool `json:"mobile_punch"`
 }
 
 // mobileReachSnapshot is the owner-facing mobile-data block of GET /api/connect.
@@ -146,6 +148,7 @@ func mobileReachSnapshot(cfg map[string]any) map[string]any {
 		"port":       port,
 		"relay_mode": mode,
 		"relay_url":  strings.TrimSpace(cfgString(cfg, "connect_iroh_relay_url", "")),
+		"punch":      cfgBool(cfg, "connect_iroh_punch", false),
 		"status":     connect.CurrentIrohStatus(),
 	}
 }
@@ -277,6 +280,9 @@ func (s *Server) handlePutConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		patch["connect_iroh_relay_url"] = u
+	}
+	if req.MobilePunch != nil {
+		patch["connect_iroh_punch"] = *req.MobilePunch
 	}
 	if len(patch) == 0 {
 		writeJSON(w, http.StatusOK, s.connectSnapshot(false))

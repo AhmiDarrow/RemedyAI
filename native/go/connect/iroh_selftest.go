@@ -55,6 +55,7 @@ type IrohStatus struct {
 	MapProtos  []string `json:"map_protocols,omitempty"`
 	PublicIP   string   `json:"public_ip,omitempty"`
 	GlobalV6   []string `json:"global_ipv6,omitempty"`
+	Punch      bool     `json:"punch"`
 	Verdict    string   `json:"verdict"`
 	Message    string   `json:"message"`
 	Steps      []string `json:"steps,omitempty"`
@@ -134,6 +135,7 @@ type ReachInput struct {
 	MapProtos []string // protocols that answered the probe
 	PublicIP  string   // what STUN saw, "" when STUN failed
 	GlobalV6  []string
+	Punch     bool // relay-free hole punching is on
 }
 
 // ClassifyReach turns evidence into a verdict, a plain message and, when the
@@ -155,6 +157,11 @@ func ClassifyReach(in ReachInput) (verdict, message string, steps []string) {
 	}
 	cgnatMsg := "Your internet provider shares one public address between many homes (carrier-grade NAT), " +
 		"so a phone on mobile data cannot reach this PC directly. LAN, Tailscale and your own relay still work."
+	if in.Punch {
+		cgnatMsg += " Hole punching is on, so Remedy will try to connect straight through it when your phone calls."
+	} else {
+		cgnatMsg += " Turn on “Get through carrier-grade NAT” to try a direct connection anyway."
+	}
 
 	switch {
 	case mappedIP.IsValid() && isCGNATAddr(mappedIP):
@@ -225,7 +232,7 @@ func runIrohSelfTest(ctx context.Context, servers []string) {
 	}
 	verdict, msg, steps := ClassifyReach(ReachInput{
 		Port: cur.Port, LANIP: lan, Mapped: cur.Mapped, MapProtos: cur.MapProtos,
-		PublicIP: publicIP, GlobalV6: v6,
+		PublicIP: publicIP, GlobalV6: v6, Punch: cur.Punch,
 	})
 	updateIrohStatus(func(s *IrohStatus) {
 		s.PublicIP = publicIP

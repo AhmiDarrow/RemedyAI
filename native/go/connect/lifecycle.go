@@ -52,8 +52,12 @@ type GatewaySettings struct {
 	IrohRelayURL string
 	// IrohRelayMode is connect_iroh_relay_mode: "off" (default), "custom", "n0".
 	IrohRelayMode string
-	// IrohPort is connect_iroh_port: the fixed UDP port (default 7402).
+	// IrohPort is connect_iroh_port: the fixed UDP port (default 7403).
 	IrohPort int
+	// IrohPunch is connect_iroh_punch: relay-free hole punching through
+	// carrier-grade NAT, using public MQTT brokers to swap encrypted
+	// addresses. Off by default.
+	IrohPunch bool
 }
 
 // Gateway owns the Connect listener lifecycle: start/stop, pause, health, self-heal.
@@ -214,6 +218,7 @@ func (g *Gateway) refreshSupervisors() {
 				Port:      live.IrohPort,
 				RelayMode: live.IrohRelayMode,
 				RelayURL:  relayURL,
+				Punch:     live.IrohPunch,
 				Session:   session,
 			}); err != nil && ctx.Err() == nil {
 				log.Printf("connect: iroh supervisor stopped: %v", err)
@@ -516,6 +521,7 @@ func SettingsFromMap(raw map[string]any) GatewaySettings {
 	cfg.IrohRelayURL = strings.TrimSpace(settingsString(raw["connect_iroh_relay_url"]))
 	cfg.IrohRelayMode = strings.TrimSpace(settingsString(raw["connect_iroh_relay_mode"]))
 	cfg.IrohPort = settingsInt(raw["connect_iroh_port"], 0)
+	cfg.IrohPunch = asBool(raw["connect_iroh_punch"])
 	if cfg.IrohPort < 0 || cfg.IrohPort > 65535 {
 		cfg.IrohPort = 0
 	}
