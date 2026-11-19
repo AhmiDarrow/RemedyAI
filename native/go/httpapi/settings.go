@@ -608,6 +608,9 @@ func (s *Server) settingsPayload() map[string]any {
 		keysSet = map[string]bool{}
 	}
 	effectiveKey := resolveProviderAPIKey(cfg, provider, home)
+	if strings.TrimSpace(model) == "" {
+		model = pickEndpointModel(cfg, provider, baseURL, effectiveKey)
+	}
 	keySet := effectiveKey != "" && !isPlaceholderKey(effectiveKey)
 	if provider == "xai" && !keySet {
 		// OAuth / console key in auth/xai.json counts even before bearer refresh.

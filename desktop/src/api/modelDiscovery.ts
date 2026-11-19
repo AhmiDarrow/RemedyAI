@@ -150,14 +150,13 @@ export function discoveryHint(
   const why = d.error || (d.status != null ? `HTTP ${d.status}` : 'no response')
   return {
     kind: 'error',
-    text: `Couldn't list models from ${d.url || 'endpoint'}: ${why} — showing catalog defaults`,
+    text: `Couldn't list models from ${d.url || 'endpoint'}: ${why}. Models come from the provider — check the key or connection.`,
   }
 }
 
-/** Label for a dropdown row; catalog-only rows are marked. */
+/** Label for a dropdown row: the provider's own name for the model. */
 export function modelOptionLabel(m: ModelOption): string {
-  const name = m.name || m.id
-  return m.source === 'catalog' ? `${name} (catalog)` : name
+  return m.name || m.id
 }
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]'])

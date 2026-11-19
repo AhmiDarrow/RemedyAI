@@ -41,26 +41,15 @@ var providerCatalog = map[string]providerMeta{
 	"demo": {
 		Label: "Demo (Free)", BaseURL: "https://api.llm7.io/v1",
 		Auth: []string{"none"}, FreeTier: "instant", Badge: "No signup",
-		LimitsBlurb: "Rate-limited guest chat only (third-party). Curated stable models — " +
-			"not the full gateway catalog. Add a real provider for agents / vision.",
+		LimitsBlurb: "Rate-limited guest chat only (third-party). Models come from the gateway itself. " +
+			"Add a real provider for agents / vision.",
 		PrivacyNote: "Chat is sent to a free third-party API (not Remedy cloud). Prefer Ollama for private local use.",
 		KeyDocsURL:  "https://llm7.io/",
-		Models: []catalogModel{
-			{ID: "codestral-latest", Name: "Codestral demo", Vision: boolPtr(false)},
-			{ID: "gemini-3.1-flash-lite", Name: "Gemini Flash Lite demo", Vision: boolPtr(false)},
-			{ID: "gpt-oss:20b", Name: "GPT-OSS 20B demo", Vision: boolPtr(false)},
-		},
 	},
 	"openai": {
 		Label: "OpenAI", BaseURL: "https://api.openai.com/v1",
 		Auth: []string{"api_key"}, EnvKeys: []string{"OPENAI_API_KEY", "REMEDY_LLM_API_KEY"},
 		FreeTier: "none", KeyDocsURL: "https://platform.openai.com/api-keys",
-		Models: []catalogModel{
-			{ID: "gpt-4o-mini", Name: "GPT-4o Mini", Vision: boolPtr(true)},
-			{ID: "gpt-4o", Name: "GPT-4o", Vision: boolPtr(true)},
-			{ID: "gpt-4.1-mini", Name: "GPT-4.1 Mini", Vision: boolPtr(true)},
-			{ID: "o4-mini", Name: "o4-mini", Vision: boolPtr(false)},
-		},
 	},
 	"anthropic": {
 		Label: "Anthropic", BaseURL: "https://api.anthropic.com/v1",
@@ -69,14 +58,6 @@ var providerCatalog = map[string]providerMeta{
 		LimitsBlurb: "Uses prepaid Anthropic API credits (console.anthropic.com). " +
 			"A Claude Pro / Max / Claude Code weekly limit does not pay for " +
 			"this. Do not paste sk-ant-oat login tokens here.",
-		Models: []catalogModel{
-			{ID: "claude-opus-5", Name: "Claude Opus 5", Vision: boolPtr(true)},
-			{ID: "claude-sonnet-5", Name: "Claude Sonnet 5", Vision: boolPtr(true)},
-			{ID: "claude-haiku-4-5", Name: "Claude Haiku 4.5", Vision: boolPtr(true)},
-			{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", Vision: boolPtr(true)},
-			{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", Vision: boolPtr(true)},
-			{ID: "claude-fable-5-1", Name: "Claude Fable 5.1", Vision: boolPtr(true)},
-		},
 	},
 	"google": {
 		Label:   "Google AI (Gemini)",
@@ -85,30 +66,16 @@ var providerCatalog = map[string]providerMeta{
 		FreeTier: "free_key", Badge: "Free key",
 		LimitsBlurb: "Generous free tier via AI Studio (region limits may apply).",
 		KeyDocsURL:  "https://aistudio.google.com/app/apikey",
-		Models: []catalogModel{
-			{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", Vision: boolPtr(true)},
-			{ID: "gemini-2.0-flash", Name: "Gemini 2.0 Flash", Vision: boolPtr(true)},
-			{ID: "gemini-1.5-pro", Name: "Gemini 1.5 Pro", Vision: boolPtr(true)},
-		},
 	},
 	"deepseek": {
 		Label: "DeepSeek", BaseURL: "https://api.deepseek.com/v1",
 		Auth: []string{"api_key"}, EnvKeys: []string{"DEEPSEEK_API_KEY"},
 		FreeTier: "none", KeyDocsURL: "https://platform.deepseek.com/api_keys",
-		Models: []catalogModel{
-			{ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", Vision: boolPtr(false)},
-			{ID: "deepseek-v4-pro", Name: "DeepSeek V4 Pro", Vision: boolPtr(false)},
-		},
 	},
 	"xai": {
 		Label: "xAI (Grok)", BaseURL: "https://api.x.ai/v1",
 		Auth: []string{"oauth", "api_key"}, EnvKeys: []string{"XAI_API_KEY", "REMEDY_XAI_API_KEY"},
 		FreeTier: "none", KeyDocsURL: "https://console.x.ai/team/default/api-keys",
-		Models: []catalogModel{
-			{ID: "grok-4.5", Name: "Grok 4.5", Vision: boolPtr(true)},
-			{ID: "grok-4.3", Name: "Grok 4.3", Vision: boolPtr(true)},
-			{ID: "grok-4", Name: "Grok 4", Vision: boolPtr(true)},
-		},
 	},
 	"groq": {
 		Label: "Groq", BaseURL: "https://api.groq.com/openai/v1",
@@ -116,11 +83,6 @@ var providerCatalog = map[string]providerMeta{
 		FreeTier: "free_key", Badge: "Free key",
 		LimitsBlurb: "Very fast free tier — great for trying agent tools.",
 		KeyDocsURL:  "https://console.groq.com/keys",
-		Models: []catalogModel{
-			{ID: "llama-3.3-70b-versatile", Name: "Llama 3.3 70B", Vision: boolPtr(false)},
-			{ID: "llama-3.1-8b-instant", Name: "Llama 3.1 8B Instant", Vision: boolPtr(false)},
-			{ID: "mixtral-8x7b-32768", Name: "Mixtral 8x7B", Vision: boolPtr(false)},
-		},
 	},
 	"mistral": {
 		Label: "Mistral", BaseURL: "https://api.mistral.ai/v1",
@@ -128,11 +90,6 @@ var providerCatalog = map[string]providerMeta{
 		FreeTier: "free_key", Badge: "Free key",
 		LimitsBlurb: "Free Experiment plan (no card typical).",
 		KeyDocsURL:  "https://console.mistral.ai/api-keys",
-		Models: []catalogModel{
-			{ID: "mistral-small-latest", Name: "Mistral Small", Vision: boolPtr(false)},
-			{ID: "mistral-large-latest", Name: "Mistral Large", Vision: boolPtr(false)},
-			{ID: "codestral-latest", Name: "Codestral", Vision: boolPtr(false)},
-		},
 	},
 	"openrouter": {
 		Label: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1",
@@ -141,11 +98,6 @@ var providerCatalog = map[string]providerMeta{
 		LimitsBlurb: "Free-tier models (ids ending in :free) come and go; live /models " +
 			"lists what your key can use. Curated fallbacks below are long-running free chat.",
 		KeyDocsURL: "https://openrouter.ai/keys",
-		Models: []catalogModel{
-			{ID: "openrouter/auto", Name: "OpenRouter Auto"},
-			{ID: "openai/gpt-oss-20b:free", Name: "GPT-OSS 20B (free)"},
-			{ID: "meta-llama/llama-3.3-70b-instruct:free", Name: "Llama 3.3 70B (free)"},
-		},
 	},
 	"poe": {
 		Label: "Poe", BaseURL: "https://api.poe.com/v1",
@@ -156,20 +108,12 @@ var providerCatalog = map[string]providerMeta{
 			"Live GET /models lists bots your account can call.",
 		PrivacyNote: "Chat is sent to Poe (Quora) and routed to the selected bot/provider.",
 		KeyDocsURL:  "https://poe.com/api_key",
-		Models: []catalogModel{
-			{ID: "Claude-Sonnet-4.6", Name: "Claude Sonnet 4.6", Vision: boolPtr(true)},
-			{ID: "Claude-Opus-4.7", Name: "Claude Opus 4.7", Vision: boolPtr(true)},
-			{ID: "GPT-5.4", Name: "GPT-5.4", Vision: boolPtr(true)},
-			{ID: "Gemini-3.1-Pro", Name: "Gemini 3.1 Pro", Vision: boolPtr(true)},
-			{ID: "Grok-4", Name: "Grok 4", Vision: boolPtr(true)},
-		},
 	},
 	"ollama": {
 		Label: "Ollama (local)", BaseURL: "http://127.0.0.1:11434/v1",
 		Auth: []string{"none"}, FreeTier: "local", Badge: "Local",
 		LimitsBlurb: "Fully free on your machine. Install Ollama and pull a model.",
 		KeyDocsURL:  "https://ollama.com/download",
-		Models:      nil,
 	},
 	"rmb": {
 		Label: "RMB (local agent)", BaseURL: "http://127.0.0.1:8787/v1",
@@ -177,23 +121,16 @@ var providerCatalog = map[string]providerMeta{
 		LimitsBlurb: "Remedy Muscle Bridge — built-in local chat host (llama.cpp) optimized " +
 			"for coding and tool use. Manage under Settings → RMB. Fully private on this PC.",
 		PrivacyNote: "Chat stays on this PC. Powered by llama.cpp under the RMB brand.",
-		Models: []catalogModel{
-			{ID: "Qwen2.5-Coder-7B-Instruct-Q4_K_M", Name: "Qwen2.5 Coder 7B"},
-			{ID: "Qwen2.5-Coder-14B-Instruct-Q4_K_M", Name: "Qwen2.5 Coder 14B"},
-			{ID: "default", Name: "Default (loaded model)"},
-		},
 	},
 	"llamacpp": {
 		Label: "llama.cpp (manual URL)", BaseURL: "http://127.0.0.1:8080/v1",
 		Auth: []string{"none"}, ShowBaseURL: true, Advanced: true,
 		FreeTier: "local", Badge: "Local",
 		LimitsBlurb: "Point at any OpenAI-compatible llama-server. Prefer Settings → RMB for managed local agent.",
-		Models:      []catalogModel{{ID: "default", Name: "Default"}},
 	},
 	"custom": {
 		Label: "Custom / OpenAI-compatible", BaseURL: "http://127.0.0.1:5001/v1",
 		Auth: []string{"api_key"}, ShowBaseURL: true, FreeTier: "none",
-		Models: []catalogModel{{ID: "default", Name: "Default (custom endpoint)"}},
 	},
 }
 

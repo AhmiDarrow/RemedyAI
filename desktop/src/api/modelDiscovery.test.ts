@@ -118,7 +118,7 @@ describe('discoveryHint', () => {
     )
     expect(h.kind).toBe('error')
     expect(h.text).toBe(
-      "Couldn't list models from http://127.0.0.1:11434/v1/models: unauthorized — showing catalog defaults",
+      "Couldn't list models from http://127.0.0.1:11434/v1/models: unauthorized. Models come from the provider — check the key or connection.",
     )
     expect(discoveryHint({ ...okDiscovery, ok: false, status: 503, error: null }, 0).text).toContain(
       'HTTP 503',
@@ -127,8 +127,8 @@ describe('discoveryHint', () => {
 })
 
 describe('modelOptionLabel', () => {
-  it('marks catalog-only rows', () => {
-    expect(modelOptionLabel({ id: 'a', name: 'A', source: 'catalog' })).toBe('A (catalog)')
+  it('uses the provider name, never a catalog marker', () => {
+    expect(modelOptionLabel({ id: 'a', name: 'A', source: 'catalog' })).toBe('A')
     expect(modelOptionLabel({ id: 'a', name: 'A', source: 'endpoint' })).toBe('A')
     expect(modelOptionLabel({ id: 'a', name: '' })).toBe('a')
   })

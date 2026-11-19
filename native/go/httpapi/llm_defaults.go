@@ -9,22 +9,23 @@ import (
 	"strings"
 )
 
-// Minimal provider defaults for settings normalize (catalog subset).
+// Provider base URLs for settings normalize. No model ids: the model always
+// comes from the provider's models endpoint (see endpoint_models.go).
 var providerDefaults = map[string]struct {
 	baseURL string
 	model   string
 	noAuth  bool
 }{
-	"demo":       {baseURL: "https://api.llm7.io/v1", model: "codestral-latest", noAuth: true},
-	"openai":     {baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini"},
-	"anthropic":  {baseURL: "https://api.anthropic.com/v1", model: "claude-opus-5"},
-	"google":     {baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash"},
-	"deepseek":   {baseURL: "https://api.deepseek.com/v1", model: "deepseek-v4-flash"},
-	"xai":        {baseURL: "https://api.x.ai/v1", model: "grok-4"},
-	"groq":       {baseURL: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile"},
-	"mistral":    {baseURL: "https://api.mistral.ai/v1", model: "mistral-small-latest"},
-	"openrouter": {baseURL: "https://openrouter.ai/api/v1", model: "openrouter/auto"},
-	"poe":        {baseURL: "https://api.poe.com/v1", model: "assistant"},
+	"demo":       {baseURL: "https://api.llm7.io/v1", model: "", noAuth: true},
+	"openai":     {baseURL: "https://api.openai.com/v1", model: ""},
+	"anthropic":  {baseURL: "https://api.anthropic.com/v1", model: ""},
+	"google":     {baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", model: ""},
+	"deepseek":   {baseURL: "https://api.deepseek.com/v1", model: ""},
+	"xai":        {baseURL: "https://api.x.ai/v1", model: ""},
+	"groq":       {baseURL: "https://api.groq.com/openai/v1", model: ""},
+	"mistral":    {baseURL: "https://api.mistral.ai/v1", model: ""},
+	"openrouter": {baseURL: "https://openrouter.ai/api/v1", model: ""},
+	"poe":        {baseURL: "https://api.poe.com/v1", model: ""},
 	"ollama":     {baseURL: "http://127.0.0.1:11434/v1", model: "", noAuth: true},
 	"custom":     {baseURL: "http://127.0.0.1:5001/v1", model: ""},
 	"rmb":        {baseURL: "http://127.0.0.1:8787/v1", model: "", noAuth: true},
