@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use iroh::endpoint::presets::{self, Preset};
-use iroh::endpoint::Connection;
+use iroh::endpoint::{BindOpts, Connection, PortmapperConfig};
 use iroh::{RelayMode, RelayUrl, SecretKey};
 use n0_future::StreamExt;
 use serde::Deserialize;
@@ -50,9 +50,28 @@ struct Config {
     forward: String,
     /// 64 hex chars written first on each loopback hop.
     token: String,
-    /// Optional self-hosted `iroh-relay` URL. Empty → n0's public relays.
+    /// Relay policy. "off" (default): no relay, no n0 address lookup — the
+    /// PC is its own endpoint and the phone dials the addresses in the QR.
+    /// "custom": the owner's `iroh-relay` URLs in `relay_urls`. "n0": n0's
+    /// public relays and DNS lookup (advanced, opt-in only).
+    #[serde(default)]
+    relay_mode: String,
+    #[serde(default)]
+    relay_urls: Vec<String>,
+    /// Legacy single relay URL (treated as relay_mode "custom").
     #[serde(default)]
     relay_url: String,
+    /// Fixed UDP port so port mapping and manual forwards stay stable.
+    /// 0 → ephemeral (tests).
+    #[serde(default)]
+    bind_port: u16,
+    /// UPnP-IGD / PCP / NAT-PMP mapping of `bind_port` on the home router.
+    #[serde(default = "default_true")]
+    portmap: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn hex_decode(text: &str, want: usize) -> Result<Vec<u8>> {
@@ -105,29 +124,96 @@ async fn main() -> Result<()> {
         bail!("forward must be loopback");
     }
 
-    let mut builder = presets::N0.apply(iroh::endpoint::Builder::empty());
+    let mut urls: Vec<String> = cfg.relay_urls.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+    if !cfg.relay_url.trim().is_empty() {
+        urls.push(cfg.relay_url.trim().to_string());
+    }
+    let mode = match cfg.relay_mode.trim() {
+        "" if !urls.is_empty() => "custom",
+        "" => "off",
+        m => m,
+    }
+    .to_string();
+
+    let mut builder = match mode.as_str() {
+        // n0 preset: n0 relays + n0 DNS/pkarr address lookup.
+        "n0" => presets::N0.apply(iroh::endpoint::Builder::empty()),
+        // Crypto provider only: nothing is published to or fetched from n0.
+        _ => presets::Minimal.apply(iroh::endpoint::Builder::empty()),
+    };
     builder = builder
         .secret_key(SecretKey::from_bytes(&sk_bytes))
         .alpns(vec![ALPN.to_vec()]);
-    let relay = cfg.relay_url.trim().to_string();
-    if !relay.is_empty() {
-        let url = RelayUrl::from_str(&relay).context("relay_url")?;
-        builder = builder.relay_mode(RelayMode::custom([url]));
+    match mode.as_str() {
+        "n0" => {}
+        "custom" => {
+            if urls.is_empty() {
+                bail!("relay_mode custom needs relay_urls");
+            }
+            let parsed = urls
+                .iter()
+                .map(|u| RelayUrl::from_str(u).context("relay url"))
+                .collect::<Result<Vec<_>>>()?;
+            builder = builder.relay_mode(RelayMode::custom(parsed));
+        }
+        "off" => builder = builder.relay_mode(RelayMode::Disabled).clear_relay_transports(),
+        other => bail!("unknown relay_mode {other}"),
     }
+    if cfg.bind_port != 0 {
+        builder = builder
+            .clear_ip_transports()
+            .bind_addr(SocketAddr::from(([0, 0, 0, 0], cfg.bind_port)))
+            .map_err(|e| anyhow!("bind v4: {e}"))?;
+        // IPv6 is best effort: hosts without v6 still serve v4.
+        builder = builder
+            .bind_addr_with_opts(
+                SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, cfg.bind_port)),
+                BindOpts::default().set_is_required(false),
+            )
+            .map_err(|e| anyhow!("bind v6: {e}"))?;
+    }
+    // iroh only drives its built-in portmapper alongside relay-based net
+    // reports; with relays off it never runs. We map the fixed port ourselves
+    // below and advertise the result, so turn the built-in one off.
+    builder = builder.portmapper_config(PortmapperConfig::Disabled);
     let endpoint = builder.bind().await.context("bind iroh endpoint")?;
 
     let events = Events(Arc::new(Mutex::new(tokio::io::stdout())));
-    // Wait (bounded) for a home relay so the advertised address is usable
-    // from mobile data straight away. Direct-only still works without it.
-    let _ = tokio::time::timeout(Duration::from_secs(10), endpoint.online()).await;
+    if mode != "off" {
+        // Wait (bounded) for a home relay so the advertised address works.
+        let _ = tokio::time::timeout(Duration::from_secs(10), endpoint.online()).await;
+    }
     let addr = endpoint.addr();
     events
         .emit(json!({
             "event": "ready",
             "endpoint_id": endpoint.id().to_string(),
+            "relay_mode": mode,
             "relay_url": addr.relay_urls().next().map(|u| u.to_string()),
+            "bound": endpoint.bound_sockets().iter().map(|s| s.to_string()).collect::<Vec<_>>(),
         }))
         .await;
+
+    if cfg.portmap && cfg.bind_port != 0 {
+        spawn_portmap(endpoint.clone(), cfg.bind_port, events.clone());
+    }
+
+    // Report direct addresses as they settle (interfaces, then the
+    // router-mapped public address once UPnP/PCP/NAT-PMP answers).
+    let addr_ep = endpoint.clone();
+    let addr_events = events.clone();
+    tokio::spawn(async move {
+        let mut last: Vec<String> = Vec::new();
+        loop {
+            let mut now: Vec<String> = addr_ep.addr().ip_addrs().map(|a| a.to_string()).collect();
+            now.sort();
+            if now != last {
+                addr_events.emit(json!({"event": "addrs", "addrs": now})).await;
+                last = now;
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    });
 
     let slots = Arc::new(Semaphore::new(MAX_CONNS));
     let accept_ep = endpoint.clone();
@@ -155,6 +241,46 @@ async fn main() -> Result<()> {
     accept.abort();
     endpoint.close().await;
     Ok(())
+}
+
+/// Map `port` on the home router (UPnP-IGD, PCP, NAT-PMP) and advertise
+/// the external address. Reports which protocols answered so the Go side
+/// can explain a failure (no mapping protocol, or a CGNAT/private "external"
+/// address that a phone on mobile data still cannot reach).
+fn spawn_portmap(endpoint: iroh::Endpoint, port: u16, events: Events) {
+    tokio::spawn(async move {
+        let client = portmapper::Client::new(portmapper::Config::default());
+        let probe = match tokio::time::timeout(Duration::from_secs(10), client.probe()).await {
+            Ok(Ok(Ok(p))) => json!({"upnp": p.upnp, "pcp": p.pcp, "nat_pmp": p.nat_pmp}),
+            Ok(Ok(Err(e))) => json!({"error": format!("{e}")}),
+            _ => json!({"error": "probe timed out"}),
+        };
+        events.emit(json!({"event": "portmap_probe", "probe": probe})).await;
+        let Some(local) = std::num::NonZeroU16::new(port) else { return };
+        client.update_local_port(local);
+        client.procure_mapping();
+        let mut watch = client.watch_external_address();
+        let mut current: Option<std::net::SocketAddrV4> = None;
+        loop {
+            let next = *watch.borrow_and_update();
+            if next != current {
+                if let Some(old) = current {
+                    endpoint.remove_external_addr(&SocketAddr::V4(old)).await;
+                }
+                if let Some(new) = next {
+                    endpoint.add_external_addr(SocketAddr::V4(new)).await;
+                }
+                events
+                    .emit(json!({"event": "mapped", "external": next.map(|a| a.to_string())}))
+                    .await;
+                current = next;
+            }
+            if watch.changed().await.is_err() {
+                break;
+            }
+        }
+        drop(client);
+    });
 }
 
 async fn serve_conn(

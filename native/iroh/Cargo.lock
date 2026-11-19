@@ -2149,6 +2149,7 @@ dependencies = [
  "anyhow",
  "iroh",
  "n0-future",
+ "portmapper",
  "serde",
  "serde_json",
  "tokio",

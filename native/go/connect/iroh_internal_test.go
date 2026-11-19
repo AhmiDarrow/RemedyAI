@@ -101,12 +101,13 @@ func TestPairQRAdvertisesIroh(t *testing.T) {
 		t.Fatalf("ir= advertised while iroh is off: %q", qr)
 	}
 
-	setIrohAdvert(IrohAdvert{EndpointID: "abc123", RelayURL: "https://relay.example.net/"})
+	setIrohAdvert(IrohAdvert{EndpointID: "abc123", RelayMode: "custom", RelayURL: "https://relay.example.net/",
+		Addrs: []string{"203.0.113.7:7402", "192.168.0.46:7402"}})
 	qr, err = StartPair(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"\nir=abc123\n", "\nirr=https://relay.example.net/\n"} {
+	for _, want := range []string{"\nir=abc123\n", "\nira=203.0.113.7:7402,192.168.0.46:7402\n", "\nirr=https://relay.example.net/\n"} {
 		if !strings.Contains(qr, want) {
 			t.Fatalf("missing %q in %q", want, qr)
 		}
@@ -146,5 +147,69 @@ func TestIrohSupervisorWithoutBinaryIsNoop(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestIrohRelayModeDefaultsOff(t *testing.T) {
+	cases := map[[2]string]string{
+		{"", ""}:                      "off",
+		{"", "https://r.example/"}:    "custom",
+		{"n0", ""}:                    "n0",
+		{"OFF", "https://r.example/"}: "off",
+		{"bogus", ""}:                 "off",
+	}
+	for in, want := range cases {
+		if got := irohRelayMode(in[0], in[1]); got != want {
+			t.Fatalf("irohRelayMode(%q,%q)=%q want %q", in[0], in[1], got, want)
+		}
+	}
+}
+
+func TestOrderIrohAddrsPublicFirst(t *testing.T) {
+	got := orderIrohAddrs([]string{
+		"127.0.0.1:7402", "192.168.0.46:7402", "[fe80::1]:7402",
+		"172.23.96.1:7402", "garbage",
+	}, "74.167.84.108:7402")
+	if len(got) == 0 || got[0] != "74.167.84.108:7402" {
+		t.Fatalf("mapped address must lead: %v", got)
+	}
+	for _, bad := range []string{"127.0.0.1:7402", "[fe80::1]:7402", "garbage"} {
+		for _, g := range got {
+			if g == bad {
+				t.Fatalf("%s must be dropped: %v", bad, got)
+			}
+		}
+	}
+}
+
+func TestClassifyReach(t *testing.T) {
+	cases := []struct {
+		name string
+		in   ReachInput
+		want string
+	}{
+		{"mapped public, stun agrees", ReachInput{Port: 7402, Mapped: "74.167.84.108:7402", PublicIP: "74.167.84.108"}, ReachMapped},
+		{"mapped public, stun failed", ReachInput{Mapped: "74.167.84.108:7402"}, ReachMapped},
+		{"mapped cgnat", ReachInput{Mapped: "100.70.1.2:7402", PublicIP: "74.167.84.108"}, ReachCGNAT},
+		{"stun cgnat", ReachInput{PublicIP: "100.100.1.1"}, ReachCGNAT},
+		{"double nat", ReachInput{Mapped: "74.167.84.108:7402", PublicIP: "198.51.100.9"}, ReachDoubleNAT},
+		{"mapped private", ReachInput{Mapped: "10.0.0.5:7402"}, ReachDoubleNAT},
+		{"ipv6 only", ReachInput{GlobalV6: []string{"2a00:1450::1"}}, ReachIPv6},
+		{"nothing", ReachInput{Port: 7402, LANIP: "192.168.0.46", PublicIP: "74.167.84.108"}, ReachManual},
+	}
+	for _, c := range cases {
+		got, msg, steps := ClassifyReach(c.in)
+		if got != c.want {
+			t.Fatalf("%s: verdict %s want %s (%s)", c.name, got, c.want, msg)
+		}
+		if msg == "" {
+			t.Fatalf("%s: empty message", c.name)
+		}
+		if got == ReachManual && !strings.Contains(strings.Join(steps, " "), "UDP port 7402 to 192.168.0.46") {
+			t.Fatalf("%s: manual steps must name the exact port and target: %v", c.name, steps)
+		}
+		if got == ReachCGNAT && !strings.Contains(msg, "carrier-grade NAT") {
+			t.Fatalf("%s: CGNAT must be said plainly: %s", c.name, msg)
+		}
 	}
 }

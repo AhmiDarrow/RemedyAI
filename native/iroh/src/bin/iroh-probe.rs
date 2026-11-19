@@ -5,7 +5,7 @@
 //! caller (a Go test) then runs the real Noise initiator over that socket, so
 //! the probe, like the sidecar, only ever carries ciphertext.
 //!
-//! usage: iroh-probe <endpoint-id> [--relay-only] [--relay URL] [--listen 127.0.0.1:0]
+//! usage: iroh-probe <endpoint-id> [--addr ip:port]... [--no-relay] [--relay-only] [--relay URL] [--listen 127.0.0.1:0]
 //! stdout: JSON lines `listening`, `dialed` (dial ms, path, rtt), `path`.
 
 use std::str::FromStr;
@@ -41,9 +41,13 @@ async fn main() -> Result<()> {
     let mut relay_only = false;
     let mut relay: Option<String> = None;
     let mut listen = "127.0.0.1:0".to_string();
+    let mut addrs: Vec<std::net::SocketAddr> = Vec::new();
+    let mut no_relay = false;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--relay-only" => relay_only = true,
+            "--no-relay" => no_relay = true,
+            "--addr" => addrs.push(args.next().context("--addr value")?.parse().context("--addr ip:port")?),
             "--relay" => relay = args.next(),
             "--listen" => listen = args.next().context("--listen value")?,
             other => bail!("unknown arg {other}"),
@@ -51,7 +55,15 @@ async fn main() -> Result<()> {
     }
     let target = EndpointId::from_str(id.trim()).context("endpoint id")?;
 
-    let mut builder = presets::N0.apply(iroh::endpoint::Builder::empty());
+    let mut builder = if no_relay {
+        // Like the phone's default: no relay, no n0 lookup, direct addrs only.
+        presets::Minimal
+            .apply(iroh::endpoint::Builder::empty())
+            .relay_mode(RelayMode::Disabled)
+            .clear_relay_transports()
+    } else {
+        presets::N0.apply(iroh::endpoint::Builder::empty())
+    };
     if let Some(r) = relay.as_deref().filter(|s| !s.is_empty()) {
         builder = builder.relay_mode(RelayMode::custom([RelayUrl::from_str(r)?]));
     }
@@ -60,12 +72,17 @@ async fn main() -> Result<()> {
         builder = builder.clear_ip_transports();
     }
     let ep = builder.bind().await?;
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), ep.online()).await;
+    if !no_relay {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), ep.online()).await;
+    }
 
     let ln = TcpListener::bind(listen.as_str()).await?;
     emit(json!({"event": "listening", "addr": ln.local_addr()?.to_string()}));
 
     let mut addr = EndpointAddr::new(target);
+    for a in &addrs {
+        addr = addr.with_ip_addr(*a);
+    }
     if let Some(r) = relay.as_deref().filter(|s| !s.is_empty()) {
         addr = addr.with_relay_url(RelayUrl::from_str(r)?);
     }

@@ -10,6 +10,7 @@ import computer.iroh.IrohAndroid
 import computer.iroh.RecvStream
 import computer.iroh.RelayMode
 import computer.iroh.SendStream
+import computer.iroh.presetMinimal
 import computer.iroh.presetN0
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -19,8 +20,18 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.SocketTimeoutException
 
-/** Where to dial the PC over iroh: its endpoint id, plus the owner's relay if any. */
-data class IrohTarget(val endpointId: String, val relayUrl: String?)
+/**
+ * Where to dial the PC over iroh: its endpoint id and direct addresses
+ * (router-mapped public address, IPv6, LAN). By default nothing else: no
+ * relay, no lookup service. [relayUrl] is the owner's own iroh-relay;
+ * [useN0] only when the PC opted into n0's public relays (advanced).
+ */
+data class IrohTarget(
+    val endpointId: String,
+    val relayUrl: String?,
+    val addrs: List<String> = emptyList(),
+    val useN0: Boolean = false,
+)
 
 /**
  * iroh transport (spike): dial the PC by public key over QUIC, with hole
@@ -39,7 +50,7 @@ object IrohLink {
     private var appContext: Context? = null
     private val lock = Any()
     private var endpoint: Endpoint? = null
-    private var endpointRelay: String? = null
+    private var endpointPolicy: String? = null
     private var installed = false
 
     /** Remember the app context. Loads nothing: the native lib loads on first dial. */
@@ -47,33 +58,45 @@ object IrohLink {
         appContext = ctx.applicationContext
     }
 
-    /** One endpoint per process, rebound only when the relay choice changes. */
-    private fun endpointFor(relayUrl: String?): Endpoint = synchronized(lock) {
+    /** One endpoint per process, rebound only when the relay policy changes. */
+    private fun endpointFor(target: IrohTarget): Endpoint = synchronized(lock) {
+        val policy = when {
+            target.useN0 -> "n0"
+            target.relayUrl != null -> "custom:${target.relayUrl}"
+            else -> "off"
+        }
         val current = endpoint
-        if (current != null && !current.isClosed() && endpointRelay == relayUrl) return current
+        if (current != null && !current.isClosed() && endpointPolicy == policy) return current
         current?.let { runCatching { runBlocking { it.shutdown() } } }
         if (!installed) {
             appContext?.let { IrohAndroid.installAndroidContext(it) }
             installed = true
         }
-        val opts = EndpointOptions(
-            preset = presetN0(),
-            relayMode = relayUrl?.let { RelayMode.customFromUrls(listOf(it)) },
-        )
+        val opts = when {
+            // Advanced, PC-side opt-in: n0 public relays + n0 address lookup.
+            target.useN0 -> EndpointOptions(preset = presetN0())
+            // Owner's own relay only; no n0 lookup.
+            target.relayUrl != null -> EndpointOptions(
+                preset = presetMinimal(),
+                relayMode = RelayMode.customFromUrls(listOf(target.relayUrl)),
+            )
+            // Default: direct to the PC's own addresses, no third party at all.
+            else -> EndpointOptions(preset = presetMinimal(), relayMode = RelayMode.disabled())
+        }
         val ep = runBlocking { Endpoint.bind(opts) }
         endpoint = ep
-        endpointRelay = relayUrl
+        endpointPolicy = policy
         ep
     }
 
     /** Dial [target] and open one bidirectional stream for a Noise session. */
     fun open(target: IrohTarget, timeoutMs: Long): IrohPipe {
-        val ep = endpointFor(target.relayUrl)
+        val ep = endpointFor(target)
         val started = System.nanoTime()
         return runBlocking {
             withTimeout(timeoutMs) {
                 val id = EndpointId.fromString(target.endpointId)
-                val addr = EndpointAddr(id, target.relayUrl, emptyList())
+                val addr = EndpointAddr(id, target.relayUrl, target.addrs)
                 val conn = ep.connect(addr, ALPN)
                 val bi = conn.openBi()
                 IrohPipe(conn, bi.send(), bi.recv(), dialMs = (System.nanoTime() - started) / 1_000_000)

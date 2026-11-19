@@ -39,6 +39,8 @@ var settableKeys = map[string]struct{}{
 	"connect_enabled": {}, "connect_bind_host": {}, "connect_bind_port": {},
 	"connect_paused": {}, "connect_panes": {}, "connect_relay_url": {},
 	"connect_rdv_enabled": {},
+	"connect_iroh_enabled": {}, "connect_iroh_port": {}, "connect_iroh_relay_mode": {},
+	"connect_iroh_relay_url": {},
 }
 
 var knownMessengers = map[string]struct{}{

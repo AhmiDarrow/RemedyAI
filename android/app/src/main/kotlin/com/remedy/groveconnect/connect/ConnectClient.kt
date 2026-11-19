@@ -83,7 +83,7 @@ class ConnectClient(
         val tsPort = qr.tailscalePort
         val payload = pairPayload(qr.pairSecret, deviceName)
         val qrIroh = qr.irohId
-        if (iroh == null && qrIroh != null) iroh = IrohTarget(qrIroh, qr.irohRelay)
+        if (iroh == null && qrIroh != null) iroh = IrohTarget(qrIroh, qr.irohRelay, qr.irohAddrs, qr.irohN0)
         // Tailscale first: the tailnet IP works on Wi-Fi AND mobile data
         // (DERP relays handle NAT), so it is the universal path when present.
         if (tsHost != null && tsPort != null) {

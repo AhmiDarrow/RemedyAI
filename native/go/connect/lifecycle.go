@@ -50,6 +50,10 @@ type GatewaySettings struct {
 	Iroh bool
 	// IrohRelayURL is connect_iroh_relay_url: a self-hosted iroh-relay.
 	IrohRelayURL string
+	// IrohRelayMode is connect_iroh_relay_mode: "off" (default), "custom", "n0".
+	IrohRelayMode string
+	// IrohPort is connect_iroh_port: the fixed UDP port (default 7402).
+	IrohPort int
 }
 
 // Gateway owns the Connect listener lifecycle: start/stop, pause, health, self-heal.
@@ -206,9 +210,11 @@ func (g *Gateway) refreshSupervisors() {
 		go func() {
 			defer g.supWG.Done()
 			if err := RunIrohSupervisor(ctx, IrohSupervisorOpts{
-				Home:     live.Home,
-				RelayURL: relayURL,
-				Session:  session,
+				Home:      live.Home,
+				Port:      live.IrohPort,
+				RelayMode: live.IrohRelayMode,
+				RelayURL:  relayURL,
+				Session:   session,
 			}); err != nil && ctx.Err() == nil {
 				log.Printf("connect: iroh supervisor stopped: %v", err)
 			}
@@ -508,6 +514,11 @@ func SettingsFromMap(raw map[string]any) GatewaySettings {
 		cfg.Iroh = asBool(raw["connect_iroh_enabled"])
 	}
 	cfg.IrohRelayURL = strings.TrimSpace(settingsString(raw["connect_iroh_relay_url"]))
+	cfg.IrohRelayMode = strings.TrimSpace(settingsString(raw["connect_iroh_relay_mode"]))
+	cfg.IrohPort = settingsInt(raw["connect_iroh_port"], 0)
+	if cfg.IrohPort < 0 || cfg.IrohPort > 65535 {
+		cfg.IrohPort = 0
+	}
 	if v := strings.TrimSpace(settingsString(raw["connect_home"])); v != "" {
 		cfg.Home = v
 	}
