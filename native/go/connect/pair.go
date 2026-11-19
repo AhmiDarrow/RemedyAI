@@ -179,6 +179,9 @@ func StartPair(opts PairStartOpts) (string, error) {
 		if ir.RelayMode == "n0" {
 			lines = append(lines, "irm=n0")
 		}
+		if ir.PunchBrokers != "" {
+			lines = append(lines, "irp="+ir.PunchBrokers)
+		}
 	}
 	lines = append(lines, fmt.Sprintf("exp=%d", exp))
 	text := strings.Join(lines, "\n")
