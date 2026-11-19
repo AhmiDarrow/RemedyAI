@@ -1,7 +1,7 @@
 {
   "bundle": {
     "targets": ["dmg", "app"],
-    "externalBin": ["../bin/remedy-runtime"],
+    "externalBin": ["../bin/remedy-runtime", "../bin/remedy-iroh"],
     "resources": {
       "../bin/libremedy_core.dylib": "libremedy_core.dylib",
       "../bin/rmdy_tool_worker.pyz": "rmdy_tool_worker.pyz",

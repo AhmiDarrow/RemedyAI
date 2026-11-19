@@ -366,3 +366,41 @@ async fn splice(
     let _ = tokio::join!(up, down);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_decode_checks_length_and_digits() {
+        assert_eq!(hex_decode("00ff", 2).unwrap(), vec![0, 255]);
+        assert!(hex_decode("00f", 2).is_err());
+        assert!(hex_decode("zz00", 2).is_err());
+    }
+
+    #[test]
+    fn config_defaults_are_private_and_mapped() {
+        let cfg: Config = serde_json::from_str(
+            r#"{"secret_key":"00","forward":"127.0.0.1:1","token":"00"}"#,
+        )
+        .unwrap();
+        // No relay unless asked for; router mapping on by default.
+        assert!(cfg.relay_mode.is_empty());
+        assert!(cfg.relay_urls.is_empty() && cfg.relay_url.is_empty());
+        assert!(cfg.portmap);
+        assert_eq!(cfg.bind_port, 0);
+    }
+
+    #[test]
+    fn config_reads_owner_choices() {
+        let cfg: Config = serde_json::from_str(
+            r#"{"secret_key":"00","forward":"127.0.0.1:1","token":"00","relay_mode":"custom",
+                "relay_urls":["https://relay.example.com"],"bind_port":7403,"portmap":false}"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.relay_mode, "custom");
+        assert_eq!(cfg.relay_urls, vec!["https://relay.example.com".to_string()]);
+        assert_eq!(cfg.bind_port, 7403);
+        assert!(!cfg.portmap);
+    }
+}

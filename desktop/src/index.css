@@ -3,6 +3,7 @@
 @import "@fontsource/inter/500.css";
 @import "@fontsource/inter/600.css";
 @import "@fontsource/inter/700.css";
+@import "./fonts.css";
 
 /* ---- base fallback = Dark Forest (DEFAULT_THEME_ID) — keep in sync with themes.ts ---- */
 :root {
@@ -362,7 +363,7 @@ html {
 }
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', 'Yu Gothic UI', 'Yu Gothic', 'Meiryo', 'Malgun Gothic', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK', 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans KR', sans-serif;
+  font-family: var(--font-ui, 'Remedy Sans UI', system-ui, sans-serif);
   overflow-wrap: break-word;
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -575,7 +576,7 @@ html.theme-animating body * {
 }
 .chat-session-model {
   color: var(--text-muted);
-  font-family: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
   font-size: 0.78rem;
 }
 .chat-session-count {
@@ -674,7 +675,7 @@ button.chat-chip:disabled {
   letter-spacing: 0.01em;
 }
 .composer-hint-row kbd {
-  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
   font-size: 0.6rem;
   padding: 0.08rem 0.28rem;
   border-radius: 0.25rem;
@@ -774,7 +775,7 @@ button.chat-chip:disabled {
 }
 
 code {
-  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
   font-size: 13px;
 }
 
@@ -954,7 +955,7 @@ pre code {
 .message-feed .work-strip {
   --ws-err: color-mix(in srgb, var(--error) 78%, var(--text-muted));
   --ws-ok: color-mix(in srgb, var(--accent) 75%, var(--text-muted));
-  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
   font-size: 0.7rem;
   line-height: 1.45;
   color: var(--text-muted);
@@ -1041,7 +1042,7 @@ pre code {
 .message-feed .ws-group + .ws-group { margin-top: 0.4rem; }
 .message-feed .ws-narration {
   margin: 0 0 0.1rem;
-  font-family: system-ui, -apple-system, 'Segoe UI', 'Yu Gothic UI', 'Yu Gothic', 'Meiryo', 'Malgun Gothic', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK', 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans KR', sans-serif;
+  font-family: var(--font-ui, 'Remedy Sans UI', system-ui, sans-serif);
   font-size: 0.74rem;
   color: color-mix(in srgb, var(--text-secondary) 85%, var(--text-muted));
 }
@@ -1106,7 +1107,7 @@ pre code {
 .message-feed .ws-dim { opacity: 0.7; }
 .message-feed .ws-thinking-body {
   margin-top: 0.2rem;
-  font-family: system-ui, -apple-system, 'Segoe UI', 'Yu Gothic UI', 'Yu Gothic', 'Meiryo', 'Malgun Gothic', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK', 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans KR', sans-serif;
+  font-family: var(--font-ui, 'Remedy Sans UI', system-ui, sans-serif);
   font-size: 0.74rem;
   padding-left: 0.55rem;
   border-left: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
@@ -1343,7 +1344,7 @@ pre code {
   padding: 0.12em 0.4em;
   border-radius: 4px;
   font-size: 0.88em;
-  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
 }
 .message-feed .chat-inline-code.user {
@@ -1496,7 +1497,7 @@ pre code {
   border-bottom: 1px solid var(--border);
   font-size: 0.68rem;
   color: var(--text-muted);
-  font-family: ui-sans-serif, system-ui, 'Segoe UI', 'Yu Gothic UI', 'Malgun Gothic', 'Microsoft YaHei', 'Noto Sans CJK', 'Noto Sans JP', 'Noto Sans KR', sans-serif;
+  font-family: var(--font-ui, 'Remedy Sans UI', system-ui, sans-serif);
   text-transform: lowercase;
   letter-spacing: 0.02em;
 }
@@ -1558,7 +1559,7 @@ pre code {
   background: transparent;
   padding: 0.55rem 0;
   overflow-x: auto;
-  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
   font-size: 0.78rem;
   line-height: 1.45;
   color: var(--text-primary);
@@ -3241,7 +3242,7 @@ body.is-rail-resizing [data-browser-embed-host] {
 .titlebar-menu-shortcut {
   color: var(--text-muted);
   font-size: 0.62rem;
-  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
 }
 
 /* Chat tabs */
@@ -3612,4 +3613,36 @@ button.reaction-pill:hover {
   font-weight: 700;
   background: var(--accent);
   color: #fff;
+}
+
+/* ---- Font roles (settings: utils/fontPrefs.ts). Remedy Sans UI is the
+   primary face; headings, long-form reading, accents and code each have
+   their own role so no single font carries everything. ---- */
+:root {
+  --font-sans: var(--font-ui, 'Remedy Sans UI', system-ui, sans-serif);
+  --font-mono: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
+}
+h1,
+h2,
+h3,
+.settings-section-title,
+.font-heading {
+  font-family: var(--font-heading, var(--font-ui, 'Remedy Sans', system-ui, sans-serif));
+}
+.help-article,
+.font-reading {
+  font-family: var(--font-reading, var(--font-ui, 'AhmiPrint', Georgia, serif));
+}
+.help-article h1,
+.help-article h2,
+.help-article h3 {
+  font-family: var(--font-heading, var(--font-ui, 'Remedy Sans', system-ui, sans-serif));
+}
+.help-article pre,
+.help-article code {
+  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
+}
+[data-testid='ahmi-signature'],
+.font-accent {
+  font-family: var(--font-accent, var(--font-ui, 'Ahmi Pixel', system-ui, sans-serif));
 }

@@ -1,0 +1,153 @@
+/*
+ * Fonts bundled with Remedy (all SIL Open Font License 1.1; licenses next to
+ * each family under assets/fonts/). Which faces are used is a setting:
+ * utils/fontPrefs.ts sets --font-ui / --font-code. Default text font:
+ * Remedy Sans UI.
+ */
+@import "@fontsource/cascadia-code/400.css";
+@import "@fontsource/cascadia-code/700.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/700.css";
+@import "@fontsource/fira-code/400.css";
+@import "@fontsource/fira-code/700.css";
+
+@font-face {
+  font-family: "Remedy Sans UI";
+  src: url("./assets/fonts/RemedySansUI/RemedySansUI-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Remedy Sans UI";
+  src: url("./assets/fonts/RemedySansUI/RemedySansUI-Semilight.woff2") format("woff2");
+  font-weight: 350;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Remedy Sans UI";
+  src: url("./assets/fonts/RemedySansUI/RemedySansUI-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Remedy Sans UI";
+  src: url("./assets/fonts/RemedySansUI/RemedySansUI-Semibold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Remedy Sans UI";
+  src: url("./assets/fonts/RemedySansUI/RemedySansUI-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Remedy Sans";
+  src: url("./assets/fonts/RemedySans/RemedySans-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Remedy Sans";
+  src: url("./assets/fonts/RemedySans/RemedySans-Semilight.woff2") format("woff2");
+  font-weight: 350;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Remedy Sans";
+  src: url("./assets/fonts/RemedySans/RemedySans-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Remedy Sans";
+  src: url("./assets/fonts/RemedySans/RemedySans-Semibold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Remedy Sans";
+  src: url("./assets/fonts/RemedySans/RemedySans-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "AhmiPrint";
+  src: url("./assets/fonts/AhmiPrint/AhmiPrint-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "AhmiPrint";
+  src: url("./assets/fonts/AhmiPrint/AhmiPrint-Semilight.woff2") format("woff2");
+  font-weight: 350;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "AhmiPrint";
+  src: url("./assets/fonts/AhmiPrint/AhmiPrint-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "AhmiPrint";
+  src: url("./assets/fonts/AhmiPrint/AhmiPrint-Semibold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "AhmiPrint";
+  src: url("./assets/fonts/AhmiPrint/AhmiPrint-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Ahmi Pixel";
+  src: url("./assets/fonts/AhmiPixelFont/AhmiPixel-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Ahmi Pixel";
+  src: url("./assets/fonts/AhmiPixelFont/AhmiPixel-Semilight.woff2") format("woff2");
+  font-weight: 350;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Ahmi Pixel";
+  src: url("./assets/fonts/AhmiPixelFont/AhmiPixel-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Ahmi Pixel";
+  src: url("./assets/fonts/AhmiPixelFont/AhmiPixel-Semibold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Ahmi Pixel";
+  src: url("./assets/fonts/AhmiPixelFont/AhmiPixel-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
