@@ -46,12 +46,23 @@ class ConnectClient(
         private set
     private var lastRekeyAt = System.currentTimeMillis()
 
-    /** How this session reached the PC: lan, v6, relay, or rdv. */
+    /** How this session reached the PC: lan, v6, tailscale, iroh, relay, or rdv. */
     @Volatile
     var via: String = "lan"
         private set
 
     private var rdv: RendezvousStreams? = null
+
+    /** The PC's iroh endpoint (from the pairing QR). Null → iroh is skipped. */
+    @Volatile
+    var iroh: IrohTarget? = null
+
+    private var irohPipe: IrohPipe? = null
+
+    /** "direct@12ms dial=300ms" when [via] is iroh, for the transport log. */
+    @Volatile
+    var irohPath: String? = null
+        private set
 
     /** True on relay / rendezvous transports, where junk records are tolerated. */
     @Volatile
@@ -71,6 +82,8 @@ class ConnectClient(
         val tsHost = qr.tailscaleHost
         val tsPort = qr.tailscalePort
         val payload = pairPayload(qr.pairSecret, deviceName)
+        val qrIroh = qr.irohId
+        if (iroh == null && qrIroh != null) iroh = IrohTarget(qrIroh, qr.irohRelay)
         // Tailscale first: the tailnet IP works on Wi-Fi AND mobile data
         // (DERP relays handle NAT), so it is the universal path when present.
         if (tsHost != null && tsPort != null) {
@@ -83,8 +96,10 @@ class ConnectClient(
             }
         }
         if (preferRelay) {
-            // Mobile data: the LAN is unreachable by definition — go straight
-            // to the owner relay (if any) then the public rendezvous.
+            // Mobile data: the LAN is unreachable by definition — iroh
+            // (dial by key, hole punch, public relay fallback), then the
+            // owner relay (if any), then the public rendezvous.
+            if (tryIroh(timeoutMs, qr.hostPub, qr.pairSecret, payload, errors)) return
             if (relayHost != null && relayPort != null) {
                 try {
                     val sid = SessionId.pair(qr.hostPub, qr.pairSecret)
@@ -125,6 +140,7 @@ class ConnectClient(
                 errors += e
             }
         }
+        if (tryIroh(timeoutMs, qr.hostPub, qr.pairSecret, payload, errors)) return
         if (relayHost != null && relayPort != null) {
             try {
                 val sid = SessionId.pair(qr.hostPub, qr.pairSecret)
@@ -194,8 +210,9 @@ class ConnectClient(
                 errors += e
             }
         }
-        if (preferRelay && (relayHost != null || rdvHosts.isNotEmpty())) {
-            // Mobile data: skip the doomed LAN probe, dial the relay first.
+        if (preferRelay && (iroh != null || relayHost != null || rdvHosts.isNotEmpty())) {
+            // Mobile data: skip the doomed LAN probe, dial iroh then the relay.
+            if (tryIroh(timeoutMs, hostPub, null, hello, errors)) return
             if (relayHost != null && relayPort != null) {
                 try {
                     val sid = SessionId.device(hostPub, devicePub)
@@ -225,6 +242,7 @@ class ConnectClient(
         } catch (e: Exception) {
             errors += e
         }
+        if (tryIroh(timeoutMs, hostPub, null, hello, errors)) return
         if (relayHost != null && relayPort != null) {
             try {
                 val sid = SessionId.device(hostPub, devicePub)
@@ -268,6 +286,47 @@ class ConnectClient(
         val idx = t.lastIndexOf(':')
         val port = t.substring(idx + 1).toIntOrNull() ?: defaultPort
         return t.substring(0, idx) to port
+    }
+
+    /**
+     * iroh hop: dial the PC's endpoint id and run the unchanged Noise IK
+     * handshake inside one QUIC bidirectional stream. A missing native
+     * library (e.g. an ABI the AAR does not ship) is recorded and skipped.
+     */
+    private fun tryIroh(
+        timeoutMs: Int,
+        hostPub: ByteArray,
+        pairSecret: ByteArray?,
+        hello: ByteArray?,
+        errors: MutableList<Exception>,
+    ): Boolean {
+        val target = iroh ?: return false
+        var pipe: IrohPipe? = null
+        try {
+            // Hole punching can take a few RTTs on mobile data; allow more
+            // than the TCP dial but stay bounded so fallbacks still run.
+            val p = IrohLink.open(target, maxOf(timeoutMs, 10_000).toLong())
+            pipe = p
+            p.readTimeoutMs = maxOf(timeoutMs, 5_000).toLong()
+            lenientRecords = false // the QUIC stream is authenticated to the endpoint id
+            completeHandshake(p.input, p.output, hostPub, pairSecret, hello) { p.readTimeoutMs = 0 }
+            irohPipe = p
+            socket = null
+            via = "iroh"
+            val (kind, rtt) = p.path()
+            irohPath = "$kind@${rtt}ms dial=${p.dialMs}ms"
+            android.util.Log.i("RemedyConnect", "iroh connected: $irohPath")
+            return true
+        } catch (e: Exception) {
+            errors += e
+        } catch (e: LinkageError) {
+            errors += NoiseException("iroh unavailable on this device: ${e.message}")
+        }
+        try {
+            pipe?.close()
+        } catch (_: Exception) {
+        }
+        return false
     }
 
     private fun connectTcp(
@@ -406,6 +465,10 @@ class ConnectClient(
             rdv?.close()
         } catch (_: Exception) {
         }
+        try {
+            irohPipe?.close()
+        } catch (_: Exception) {
+        }
         reader?.interrupt()
         pending.values.forEach { it.fail(NoiseException("session closed")) }
         pending.clear()
@@ -522,6 +585,10 @@ class ConnectClient(
                 }
                 try {
                     rdv?.close()
+                } catch (_: Exception) {
+                }
+                try {
+                    irohPipe?.close()
                 } catch (_: Exception) {
                 }
             }

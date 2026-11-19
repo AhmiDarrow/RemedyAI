@@ -184,6 +184,31 @@ class QrPayloadTest {
     }
 
     @Test
+    fun parseOptionalIroh() {
+        val id = "32f964994affa248ee05d85780291e07535c4229dfcba0bbde4c44f94594c602"
+        val q = QrPayload.parse(qr(extra = "ir=${id.uppercase()}\nirr=https://relay.example.net/"), nowUnix = now)
+        assertEquals(id, q.irohId)
+        assertEquals("https://relay.example.net/", q.irohRelay)
+        val plain = QrPayload.parse(qr(), nowUnix = now)
+        assertNull(plain.irohId)
+        assertNull(plain.irohRelay)
+    }
+
+    @Test
+    fun rejectBadIrohFields() {
+        assertFailsWith<QrException> { QrPayload.parse(qr(extra = "ir=abc"), nowUnix = now) }
+        assertFailsWith<QrException> { QrPayload.parse(qr(extra = "ir=" + "g".repeat(64)), nowUnix = now) }
+        for (bad in listOf(
+            "irr=ftp://relay.example.net",
+            "irr=https://user:pw@relay.example.net",
+            "irr=https://relay.example.net/?token=x",
+            "irr=https://relay.example.net/bearer",
+        )) {
+            assertFailsWith<QrException>(bad) { QrPayload.parse(qr(extra = bad), nowUnix = now) }
+        }
+    }
+
+    @Test
     fun rejectOversizedCodeAndRendezvousList() {
         assertFailsWith<QrException> { QrPayload.parse("x".repeat(16 * 1024 + 1), nowUnix = now) }
         val endpoints = (1..9).joinToString(";") { "broker$it.example:1883" }

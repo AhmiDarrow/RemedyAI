@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,11 @@ type GatewaySettings struct {
 	Sidecar  int
 	RelayURL string
 	RDV      bool // connect_rdv_enabled; opt-in (public MQTT brokers)
+	// Iroh is connect_iroh_enabled (or REMEDY_CONNECT_IROH=1): dial-by-key
+	// QUIC with hole punching and n0 public relays as fallback. Opt-in spike.
+	Iroh bool
+	// IrohRelayURL is connect_iroh_relay_url: a self-hosted iroh-relay.
+	IrohRelayURL string
 }
 
 // Gateway owns the Connect listener lifecycle: start/stop, pause, health, self-heal.
@@ -188,6 +194,24 @@ func (g *Gateway) refreshSupervisors() {
 				Home:    live.Home,
 				Handler: handler,
 			})
+		}()
+	}
+	if live.Iroh || IrohEnabledFromEnv() {
+		relayURL := live.IrohRelayURL
+		if relayURL == "" {
+			relayURL = strings.TrimSpace(os.Getenv(IrohRelayEnv))
+		}
+		session := g.supervisorSession()
+		g.supWG.Add(1)
+		go func() {
+			defer g.supWG.Done()
+			if err := RunIrohSupervisor(ctx, IrohSupervisorOpts{
+				Home:     live.Home,
+				RelayURL: relayURL,
+				Session:  session,
+			}); err != nil && ctx.Err() == nil {
+				log.Printf("connect: iroh supervisor stopped: %v", err)
+			}
 		}()
 	}
 	if live.RDV {
@@ -480,6 +504,10 @@ func SettingsFromMap(raw map[string]any) GatewaySettings {
 	if _, ok := raw["connect_rdv_enabled"]; ok {
 		cfg.RDV = asBool(raw["connect_rdv_enabled"])
 	}
+	if _, ok := raw["connect_iroh_enabled"]; ok {
+		cfg.Iroh = asBool(raw["connect_iroh_enabled"])
+	}
+	cfg.IrohRelayURL = strings.TrimSpace(settingsString(raw["connect_iroh_relay_url"]))
 	if v := strings.TrimSpace(settingsString(raw["connect_home"])); v != "" {
 		cfg.Home = v
 	}
