@@ -139,6 +139,7 @@ def test_local_engine_is_revived_before_falling_back(monkeypatch: pytest.MonkeyP
     from remedy.runtime import web_search_host as host
 
     state = {"up": False, "started": 0}
+    monkeypatch.setattr(host, "_skip_network", lambda: False)
     monkeypatch.setattr(host, "is_healthy", lambda **_kw: state["up"])
     monkeypatch.setattr(host, "find_binary", lambda _h=None: "openserp.exe")
 
@@ -161,6 +162,7 @@ def test_missing_local_engine_downloads_in_background_and_falls_back(monkeypatch
     from remedy.runtime import web_search_host as host
 
     scheduled: list[object] = []
+    monkeypatch.setattr(host, "_skip_network", lambda: False)
     monkeypatch.setattr(host, "is_healthy", lambda **_kw: False)
     monkeypatch.setattr(host, "find_binary", lambda _h=None: None)
     monkeypatch.setattr(host, "schedule_ensure", lambda home=None, **_kw: scheduled.append(home))
@@ -193,3 +195,17 @@ def test_schedule_ensure_retries_after_backoff(monkeypatch: pytest.MonkeyPatch) 
     clock["t"] += host.ENSURE_RETRY_S + 1
     host.schedule_ensure("h")  # a dead or failed host is tried again
     assert len(started) == 2
+
+
+def test_tests_never_start_a_real_search_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Under pytest the revive path must not spawn or download anything."""
+    from remedy.runtime import web_search_host as host
+
+    touched: list[str] = []
+    monkeypatch.setattr(host, "is_healthy", lambda **_kw: False)
+    monkeypatch.setattr(host, "find_binary", lambda _h=None: "openserp.exe")
+    monkeypatch.setattr(host, "start", lambda *_a, **_kw: touched.append("start") or {"ok": True})
+    monkeypatch.setattr(host, "schedule_ensure", lambda *_a, **_kw: touched.append("ensure"))
+    with pytest.raises(RuntimeError):
+        wh._openserp_rows("q", 3, 5.0)
+    assert touched == []

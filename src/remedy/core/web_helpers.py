@@ -439,8 +439,16 @@ def _revive_openserp(wait_s: float = 8.0) -> None:
     """
     with suppress(Exception):
         from remedy.home import default_home
-        from remedy.runtime.web_search_host import find_binary, schedule_ensure, start
+        from remedy.runtime.web_search_host import (
+            _skip_network,
+            find_binary,
+            schedule_ensure,
+            start,
+        )
 
+        if _skip_network():
+            # Tests never start or download a real search engine.
+            return
         home = default_home()
         if find_binary(home) is not None:
             start(home, wait_s=wait_s)
