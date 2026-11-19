@@ -1,8 +1,8 @@
-"""Pre-push gate: the public repo never receives a commit that CI would fail.
+"""Pre-push gate: this machine is Remedy's CI.
 
-One command runs the complete public CI matrix (`.github/workflows/ci.yml`)
-against the exact tree being pushed, on this machine, before the push leaves
-it. It is wired in as the git ``pre-push`` hook (`.githooks/pre-push`) and can
+There is no CI on GitHub. One command runs the complete matrix (every
+runtime, platform lane and check Remedy ships) against the exact tree being
+pushed, on this machine, before the push leaves it. It is wired in as the git ``pre-push`` hook (`.githooks/pre-push`) and can
 be run by hand.
 
     uv run python scripts/prepush.py                 # verify HEAD (full matrix)
@@ -18,10 +18,12 @@ Rules the hook enforces (see AGENTS.md "Local CI"):
   that tree. Green runs are remembered per tree hash under ``.git`` so a
   re-push of an already verified tree does not repeat forty minutes of work.
 * A push of a release tag ``v*`` needs the tagged commit already on the
-  remote's master, every version surface equal to the tag, and a completed,
-  successful public CI run for that commit. The release workflow checks the
-  same three things again on GitHub before it builds anything.
-* Other branches are not gated (public CI does not run on them).
+  remote's master, every version surface equal to the tag, and a green run
+  of this gate recorded for that commit's tree. GitHub only builds the two
+  macOS bundles from the tag (``desktop-release.yml``); the release itself is
+  published from this machine by ``scripts/release_local.py``, which checks
+  the same record.
+* Other branches are not gated.
 * A non-fast-forward push to ``master`` is refused. The one exception is a
   history rewrite the owner asked for: ``REMEDY_PREPUSH_ALLOW_REWRITE=1``
   lets it through, and the tree still has to be green.
@@ -67,8 +69,8 @@ IMPORT_SMOKE = 'python -c "import remedy; print(\'import OK\')"'
 
 
 # --------------------------------------------------------------------------- #
-# The matrix. `tests/test_ci_matrix.py` compares this with ci.yml so the local
-# gate and public CI cannot drift apart.
+# The matrix. `tests/test_ci_matrix.py` pins every lane and command, so the
+# gate cannot quietly lose a runtime, a platform or a check.
 # --------------------------------------------------------------------------- #
 
 
@@ -143,7 +145,7 @@ REQUIRED_NATIVE_ABI = required_native_abi()
 
 
 RUST_ENV = {
-    # Mirrors ci.yml rust-desktop: compile/test Rust alone, warnings are errors.
+    # Rust desktop shell alone: compile and test, warnings are errors.
     "TAURI_CONFIG": '{"bundle":{"active":false,"externalBin":[],"resources":null}}',
     "RUSTFLAGS": "-D warnings",
 }
@@ -477,9 +479,11 @@ def _wsl_pytest_command() -> str | None:
         "unset DISPLAY WAYLAND_DISPLAY && "
         f"{path_scrub} && "
         "REMEDY_HOME=/tmp/remedy-prepush-home "
-        "UV_PROJECT_ENVIRONMENT=/tmp/remedy-prepush-venv "
+        # Python 3.13 here, 3.12 in the Windows `python` lane: both supported
+        # versions run every push with no extra lane time.
+        "UV_PROJECT_ENVIRONMENT=/tmp/remedy-prepush-venv313 "
         f"{core}"
-        "uv run pytest -q --tb=short -p no:cacheprovider"
+        "uv run --python 3.13 pytest -q --tb=short -p no:cacheprovider"
     )
     return f'wsl -e bash -lc "{inner}"'
 
@@ -756,37 +760,11 @@ def verify_tree(commit: str, *, serial: bool, force: bool, only: set[str] | None
 # --------------------------------------------------------------------------- #
 
 
-def _ci_conclusion(sha: str) -> tuple[str, str]:
-    """(state, detail) for the public CI workflow on `sha` via the gh CLI."""
-    if shutil.which("gh") is None:
-        return "unknown", "the gh CLI is not installed, so CI status cannot be read"
-    proc = subprocess.run(
-        [
-            "gh",
-            "api",
-            f"repos/{{owner}}/{{repo}}/actions/workflows/ci.yml/runs?head_sha={sha}&per_page=20",
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    if proc.returncode != 0:
-        return "unknown", proc.stderr.strip() or "gh api failed"
-    try:
-        runs = json.loads(proc.stdout).get("workflow_runs", [])
-    except json.JSONDecodeError:
-        return "unknown", "gh api returned no JSON"
-    if not runs:
-        return "none", "public CI has not run for this commit"
-    latest = runs[0]
-    status, conclusion = latest.get("status"), latest.get("conclusion")
-    url = latest.get("html_url", "")
-    if status != "completed":
-        return "running", f"CI run is {status}: {url}"
-    if conclusion == "success":
-        return "success", url
-    return "failed", f"CI run concluded {conclusion}: {url}"
+def verified_green(commit: str) -> bool:
+    """True when this gate has recorded a green full-matrix run for the tree
+    `commit` points at. The record lives under ``.git/remedy-prepush``."""
+    tree = _tree_of(commit)
+    return bool(tree) and (_state_dir() / "verified" / tree).is_file()
 
 
 def check_release(tag: str, remote: str = "origin") -> None:
@@ -820,13 +798,15 @@ def check_release(tag: str, remote: str = "origin") -> None:
         ["git", "merge-base", "--is-ancestor", sha, f"{remote}/master"], cwd=ROOT
     ).returncode
     if on_master != 0:
-        _fail(f"{tag} is not on {remote}/master yet; push master first and wait for CI")
+        _fail(f"{tag} is not on {remote}/master yet; push master first")
     _say(f"  [ok] {tag} is on {remote}/master")
 
-    state, detail = _ci_conclusion(sha)
-    if state != "success":
-        _fail(f"public CI is not green for {sha[:12]}: {detail}")
-    _say(f"  [ok] public CI green: {detail}")
+    if not verified_green(sha):
+        _fail(
+            f"no green run of this gate is recorded for {sha[:12]}; "
+            "run `uv run python scripts/prepush.py` on that commit first"
+        )
+    _say(f"  [ok] full matrix verified green on this machine for {sha[:12]}")
     _say("prepush: release gate passed.")
 
 
