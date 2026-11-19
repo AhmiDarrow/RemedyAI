@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -153,5 +155,98 @@ func TestCGNATVerdictMentionsPunching(t *testing.T) {
 	_, on, _ := ClassifyReach(ReachInput{PublicIP: "100.100.1.1", Punch: true})
 	if !strings.Contains(off, "Get through carrier-grade NAT") || !strings.Contains(on, "Hole punching is on") {
 		t.Fatalf("off=%q on=%q", off, on)
+	}
+}
+
+// fakeBroker accepts one MQTT client, acks CONNECT and SUBSCRIBE, answers
+// PINGREQ, and otherwise stays silent — like an idle offer topic.
+func fakeBroker(t *testing.T) (RDVEndpoint, <-chan struct{}) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	subscribed := make(chan struct{}, 4)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				for {
+					hdr := make([]byte, 1)
+					if _, err := io.ReadFull(c, hdr); err != nil {
+						return
+					}
+					n, mul := 0, 1
+					for {
+						b := make([]byte, 1)
+						if _, err := io.ReadFull(c, b); err != nil {
+							return
+						}
+						n += int(b[0]&0x7f) * mul
+						if b[0]&0x80 == 0 {
+							break
+						}
+						mul *= 128
+					}
+					body := make([]byte, n)
+					if _, err := io.ReadFull(c, body); err != nil {
+						return
+					}
+					switch hdr[0] & 0xf0 {
+					case 0x10:
+						_, _ = c.Write([]byte{0x20, 0x02, 0x00, 0x00})
+					case 0x80:
+						_, _ = c.Write([]byte{0x90, 0x03, body[0], body[1], 0x01})
+						subscribed <- struct{}{}
+					case 0xc0:
+						_, _ = c.Write([]byte{0xd0, 0x00})
+					}
+				}
+			}(c)
+		}
+	}()
+	addr := ln.Addr().(*net.TCPAddr)
+	return RDVEndpoint{Host: "127.0.0.1", Port: addr.Port}, subscribed
+}
+
+func TestPunchResponderStaysSubscribedAndStopsPromptly(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits past the old 8s read window")
+	}
+	ep, subscribed := fakeBroker(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		RunIrohPunchResponder(ctx, testHostPub, []RDVEndpoint{ep}, func(context.Context, string, []string) ([]string, error) {
+			return nil, errors.New("unused")
+		})
+	}()
+	select {
+	case <-subscribed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("never subscribed")
+	}
+	// The old 8s read timeout dropped and re-made the subscription; a
+	// second SUBSCRIBE inside 12s of silence means it is still flapping.
+	select {
+	case <-subscribed:
+		t.Fatal("idle subscription was dropped and re-made")
+	case <-time.After(12 * time.Second):
+	}
+	start := time.Now()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("responder did not stop promptly on cancel")
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("stop took %v", d)
 	}
 }

@@ -72,6 +72,13 @@ export function MobileReachBlock({
               ))}
             </ol>
           ) : null}
+          <FormToggle
+            checked={mobile.punch}
+            disabled={disabled || busy}
+            onChange={(on) => void run(() => putMobileReach({ mobile_punch: on }))}
+            label="Get through carrier-grade NAT"
+            description="If your provider shares one address between many homes, try a direct connection anyway. Uses public MQTT brokers to swap encrypted addresses; they never see your chats or addresses. Re-pair the phone after changing this."
+          />
           <FormActionButton disabled={busy} onClick={() => void run(() => testMobileReach())}>
             {busy ? 'Testing…' : 'Test again'}
           </FormActionButton>

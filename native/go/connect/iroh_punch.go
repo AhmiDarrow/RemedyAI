@@ -255,6 +255,17 @@ func runPunchBroker(ctx context.Context, b RDVEndpoint, r *punchResponder) {
 			cancel()
 			if err == nil {
 				backoff = 2 * time.Second
+				// ReaderLoop gives up on a read that outlasts Timeout, and an
+				// idle offer topic only sees PINGRESP every PingEveryS. Keep
+				// the read window above two pings so a quiet subscription
+				// stays up instead of silently dropping offers.
+				mqtt.Timeout = 2*PingEveryS + 5*time.Second
+				// A blocked read ignores ctx; closing the session is what
+				// lets a settings change stop the responder at once.
+				go func(m *MqttSession) {
+					<-lctx.Done()
+					m.Close()
+				}(mqtt)
 				go mqtt.PingLoop(lctx)
 				mqtt.ReaderLoop(lctx)
 			}

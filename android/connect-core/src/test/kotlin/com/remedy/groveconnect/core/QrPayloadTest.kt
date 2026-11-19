@@ -211,6 +211,15 @@ class QrPayloadTest {
     }
 
     @Test
+    fun parseIrohPunchBrokers() {
+        val id = "32f964994affa248ee05d85780291e07535c4229dfcba0bbde4c44f94594c602"
+        val q = QrPayload.parse(qr(extra = "ir=$id\nirp=broker.emqx.io:1883;broker.hivemq.com:1883"), nowUnix = now)
+        assertEquals(listOf("broker.emqx.io" to 1883, "broker.hivemq.com" to 1883), q.irohPunchBrokers)
+        assertTrue(QrPayload.parse(qr(extra = "ir=$id"), nowUnix = now).irohPunchBrokers.isEmpty())
+        assertFailsWith<QrException> { QrPayload.parse(qr(extra = "irp=http://evil"), nowUnix = now) }
+    }
+
+    @Test
     fun rejectBadIrohFields() {
         assertFailsWith<QrException> { QrPayload.parse(qr(extra = "ir=abc"), nowUnix = now) }
         assertFailsWith<QrException> { QrPayload.parse(qr(extra = "ir=" + "g".repeat(64)), nowUnix = now) }

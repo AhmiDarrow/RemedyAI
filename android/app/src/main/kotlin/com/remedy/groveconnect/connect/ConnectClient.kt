@@ -83,7 +83,9 @@ class ConnectClient(
         val tsPort = qr.tailscalePort
         val payload = pairPayload(qr.pairSecret, deviceName)
         val qrIroh = qr.irohId
-        if (iroh == null && qrIroh != null) iroh = IrohTarget(qrIroh, qr.irohRelay, qr.irohAddrs, qr.irohN0)
+        if (iroh == null && qrIroh != null) {
+            iroh = IrohTarget(qrIroh, qr.irohRelay, qr.irohAddrs, qr.irohN0, qr.irohPunchBrokers)
+        }
         // Tailscale first: the tailnet IP works on Wi-Fi AND mobile data
         // (DERP relays handle NAT), so it is the universal path when present.
         if (tsHost != null && tsPort != null) {
@@ -301,30 +303,41 @@ class ConnectClient(
         errors: MutableList<Exception>,
     ): Boolean {
         val target = iroh ?: return false
-        var pipe: IrohPipe? = null
-        try {
-            // Hole punching can take a few RTTs on mobile data; allow more
-            // than the TCP dial but stay bounded so fallbacks still run.
-            val p = IrohLink.open(target, maxOf(timeoutMs, 10_000).toLong())
-            pipe = p
-            p.readTimeoutMs = maxOf(timeoutMs, 5_000).toLong()
-            lenientRecords = false // the QUIC stream is authenticated to the endpoint id
-            completeHandshake(p.input, p.output, hostPub, pairSecret, hello) { p.readTimeoutMs = 0 }
-            irohPipe = p
-            socket = null
-            via = "iroh"
-            val (kind, rtt) = p.path()
-            irohPath = "$kind@${rtt}ms dial=${p.dialMs}ms"
-            android.util.Log.i("RemedyConnect", "iroh connected: $irohPath")
-            return true
-        } catch (e: Exception) {
-            errors += e
-        } catch (e: LinkageError) {
-            errors += NoiseException("iroh unavailable on this device: ${e.message}")
+        val canPunch = target.punchBrokers.isNotEmpty()
+        val attempts = ArrayList<Pair<String, () -> IrohPipe>>()
+        if (target.addrs.isNotEmpty() || target.relayUrl != null || target.useN0) {
+            // With punching as a fallback, give the direct dial less time.
+            val directMs = if (canPunch) 4_000L else maxOf(timeoutMs, 10_000).toLong()
+            attempts += "direct" to { IrohLink.open(target, directMs) }
         }
-        try {
-            pipe?.close()
-        } catch (_: Exception) {
+        if (canPunch) {
+            attempts += "punch" to { IrohLink.openPunched(target, hostPub, 10_000L) }
+        }
+        for ((label, open) in attempts) {
+            var pipe: IrohPipe? = null
+            try {
+                val p = open()
+                pipe = p
+                p.readTimeoutMs = maxOf(timeoutMs, 5_000).toLong()
+                lenientRecords = false // the QUIC stream is authenticated to the endpoint id
+                completeHandshake(p.input, p.output, hostPub, pairSecret, hello) { p.readTimeoutMs = 0 }
+                irohPipe = p
+                socket = null
+                via = "iroh"
+                val (kind, rtt) = p.path()
+                irohPath = "$label $kind@${rtt}ms dial=${p.dialMs}ms"
+                android.util.Log.i("RemedyConnect", "iroh connected: $irohPath")
+                return true
+            } catch (e: Exception) {
+                errors += e
+            } catch (e: LinkageError) {
+                errors += NoiseException("iroh unavailable on this device: ${e.message}")
+                return false
+            }
+            try {
+                pipe?.close()
+            } catch (_: Exception) {
+            }
         }
         return false
     }
