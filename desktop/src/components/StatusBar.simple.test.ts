@@ -29,3 +29,24 @@ describe('Simple control bar', () => {
     expect(html).toContain('Ask before risky actions')
   })
 })
+
+describe('Bottom bar stays lean', () => {
+  it('carries no mode toggle or surface switch — those live at the top', () => {
+    for (const uiMode of ['simple', 'advanced'] as const) {
+      for (const surface of ['grove', 'studio'] as const) {
+        const html = renderToStaticMarkup(
+          createElement(StatusBar, {
+            ...props,
+            uiMode,
+            surface,
+            onOpenGrove: noop,
+            onOpenStudio: noop,
+          }),
+        )
+        expect(html).not.toContain('Build — work when you ask')
+        expect(html).not.toContain('✦')
+        expect(html).not.toContain('▣')
+      }
+    }
+  })
+})

@@ -77,19 +77,33 @@ type TurnRequest struct {
 	// (the react tool's default target).
 	UserMessageID string
 	// Origin names where the prompt came from: "desktop" (default when empty),
-	// "webui", "cli", "hive:<parent-session>", "phone:<device>", or a
-	// messenger channel such as "telegram:<user-id>". Non-owner origins run
-	// untrusted: the prompt is wrapped in an untrusted envelope and every
-	// mutation asks regardless of approval_mode (see OriginIsOwner).
+	// "webui", "cli", "hive:<parent-session>", "partner:…" (work Remedy started
+	// herself), or a messenger channel such as "telegram:<user-id>". Non-owner
+	// origins run untrusted: the prompt is wrapped in an untrusted envelope and
+	// every mutation asks regardless of approval_mode (see OriginIsOwner).
+	//
+	// The owner's paired phone (Remedy Connect) is the owner: its requests
+	// reach the local API through the Noise-authenticated tunnel and arrive
+	// with an empty origin, exactly like the desktop — an owner decision
+	// (2026-11). Payment, credential and send checkpoints still always ask.
+	// A literal "phone:<device>" origin, if anything ever sets one, stays
+	// untrusted.
 	Origin string
 }
 
 // OriginIsOwner reports whether a TurnRequest.Origin is one of the owner's own
-// surfaces. Empty means desktop. Messenger, phone, and hive origins are untrusted.
+// surfaces. Empty means desktop — including the owner's paired phone, whose
+// requests arrive through the Connect tunnel without an origin. Messenger,
+// "phone:" and hive origins are untrusted.
 func OriginIsOwner(origin string) bool {
 	o := strings.ToLower(strings.TrimSpace(origin))
 	switch {
 	case o == "", o == "desktop", o == "webui", o == "cli", o == "fixture":
+		return true
+	case isPartnerOrigin(o):
+		// Minted only by the runtime for work the owner authorized: a child
+		// Remedy started from an owner turn (or the owner approved), a
+		// routine, goal autopilot. Checkpoints still always ask.
 		return true
 	default:
 		return false

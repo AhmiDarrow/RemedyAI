@@ -60,6 +60,10 @@ _ASSETS: dict[str, str] = {
 _proc: Any | None = None
 _lock = threading.Lock()
 _ensure_started = False
+# Monotonic time of the last ensure attempt; a failed or dead host is
+# retried after ENSURE_RETRY_S instead of never again for the process.
+_ensure_last = 0.0
+ENSURE_RETRY_S = 300.0
 _atexit_registered = False
 
 
@@ -296,13 +300,15 @@ def schedule_ensure(
     home_dir: str | Path | None = None, *, enabled: bool = True
 ) -> None:
     """Kick off download/start once per process without blocking chat."""
-    global _ensure_started
+    global _ensure_started, _ensure_last
     if not enabled or _skip_network():
         return
     with _lock:
-        if _ensure_started:
+        now = time.monotonic()
+        if _ensure_started and now - _ensure_last < ENSURE_RETRY_S:
             return
         _ensure_started = True
+        _ensure_last = now
 
     def _worker() -> None:
         try:

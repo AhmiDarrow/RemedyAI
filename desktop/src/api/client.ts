@@ -13,26 +13,47 @@ declare global {
  * - `window.__REMEDY_API_ORIGIN__` optional inject
  * - default release: `http://127.0.0.1:7400`
  */
+export function pickServerUrl(opts: {
+  envUrl?: string
+  injected?: string
+  /** Built bundle (not the Vite dev server). */
+  prod: boolean
+  /** Running inside the desktop app (Tauri). */
+  desktop: boolean
+  /** window.location.origin of the page. */
+  origin?: string
+}): string {
+  const clean = (u: string) => u.trim().replace(/\/$/, '').replace(/\/api$/i, '')
+  if (opts.envUrl && opts.envUrl.trim()) return clean(opts.envUrl)
+  if (opts.injected && opts.injected.trim()) return clean(opts.injected)
+  // A built WebUI is always served by the runtime it talks to, so its own
+  // origin is the API — on any port. Without this a runtime on :7410 (an
+  // isolated or second install) served a page that called :7400.
+  const origin = (opts.origin || '').trim()
+  if (opts.prod && !opts.desktop && /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(origin)) {
+    return origin
+  }
+  return 'http://127.0.0.1:7400'
+}
+
 function resolveServerUrl(): string {
+  let envUrl = ''
+  let prod = false
   try {
-    const envUrl = (import.meta as ImportMeta & { env?: Record<string, string> }).env
-      ?.VITE_REMEDY_API
-    if (envUrl && String(envUrl).trim()) {
-      return String(envUrl)
-        .trim()
-        .replace(/\/$/, '')
-        .replace(/\/api$/i, '')
-    }
+    const env = (import.meta as ImportMeta & { env?: Record<string, unknown> }).env
+    envUrl = String(env?.VITE_REMEDY_API || '')
+    prod = Boolean(env?.PROD)
   } catch {
     /* non-vite */
   }
-  if (typeof window !== 'undefined' && window.__REMEDY_API_ORIGIN__) {
-    return String(window.__REMEDY_API_ORIGIN__)
-      .trim()
-      .replace(/\/$/, '')
-      .replace(/\/api$/i, '')
-  }
-  return 'http://127.0.0.1:7400'
+  const w = typeof window !== 'undefined' ? window : undefined
+  return pickServerUrl({
+    envUrl,
+    injected: w?.__REMEDY_API_ORIGIN__ ? String(w.__REMEDY_API_ORIGIN__) : '',
+    prod,
+    desktop: Boolean(w && (w.__TAURI__ || w.__TAURI_INTERNALS__)),
+    origin: w?.location?.origin || '',
+  })
 }
 
 /** Origin of the local API (e.g. http://127.0.0.1:7400 or :7410 for isolated dev). */

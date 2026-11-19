@@ -1954,6 +1954,7 @@ export default function App() {
                 : messages.length
             }
             onTogglePlanMode={togglePlanMode}
+            onOpenGrove={() => switchSurface('grove')}
           />
 
           <div className="chat-middle-banners" style={{ position: 'relative', zIndex: 6 }}>

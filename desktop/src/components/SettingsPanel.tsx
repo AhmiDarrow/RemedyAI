@@ -20,6 +20,7 @@ import {
 } from '../api/auth'
 import {
   beginXaiOAuth,
+  preopenSignInWindow,
   resumeXaiOAuthPoll,
   subscribeXaiOAuth,
   xaiModelAfterOauth,
@@ -637,6 +638,8 @@ export function SettingsPanel({
   }, [open, rmbSectionOpen, refreshRmb])
 
   const handleXaiSignIn = async () => {
+    // Must run before any await: the browser only allows it inside the click.
+    const popup = preopenSignInWindow()
     setXaiLoginBusy(true)
     setXaiLoginMsg('')
     setErrorMessage('')
@@ -662,8 +665,13 @@ export function SettingsPanel({
         }
         /* apiFetch will retry token */
       }
-      await beginXaiOAuth({ keepSettings: true, llmModel: model })
+      await beginXaiOAuth({ keepSettings: true, llmModel: model, popup })
     } catch (e: unknown) {
+      try {
+        popup?.close()
+      } catch {
+        /* */
+      }
       setXaiLoginBusy(false)
       const msg = e instanceof Error ? e.message : String(e)
       setErrorMessage(msg || 'Could not start xAI sign-in')

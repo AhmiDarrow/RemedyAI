@@ -21,6 +21,7 @@ import {
 } from './formUi'
 import { Field } from './shared'
 import { openExternalUrl } from '../../api/auth'
+import { isTauri } from '../../api/tauri'
 
 export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
   const fieldId = useId()
@@ -298,18 +299,22 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
                   Code: <code style={{ color: 'var(--accent)' }}>{xaiUserCode}</code>
                 </div>
                 {xaiVerifyUrl && (
-                  <button
-                    type="button"
+                  <a
+                    href={xaiVerifyUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="underline text-left"
                     style={{ color: 'var(--accent)' }}
-                    onClick={() => {
+                    onClick={(e) => {
+                      if (!isTauri()) return // plain link: the browser opens it
+                      e.preventDefault()
                       void import('../../api/computer').then(({ openUrlInBrowserRail }) =>
                         openUrlInBrowserRail(xaiVerifyUrl, { keepSettings: true }),
                       )
                     }}
                   >
                     Open verification page
-                  </button>
+                  </a>
                 )}
               </div>
             )}

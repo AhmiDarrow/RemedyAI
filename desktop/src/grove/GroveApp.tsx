@@ -15,11 +15,12 @@ import {
   clearLifeActivity,
   deleteLifeGoal,
   renameLifeGoal,
+  patchLifeGoal,
   type LifeBoard,
   type LifeGoal,
   type PendingApproval,
 } from '../api/partner'
-import { ApprovalBanner } from '../components/ApprovalBanner'
+import { DecisionCard } from './DecisionCard'
 import { LifeTaskBanner } from '../components/LifeTaskBanner'
 import { COMPUTER_UI_EVENT } from '../api/computer'
 import { RemedyLogo } from '../components/RemedyLogo'
@@ -36,6 +37,18 @@ import type { ChatMessage, ChatSession } from '../types'
 import type { ProcessStep, ToolProcessMode } from '../utils/toolLabels'
 import './grove.css'
 import { setAgentIdentity } from '../i18n/pronouns'
+import {
+  ensureHeadSession,
+  getHead,
+  needsOwner,
+  setGoalLink,
+  stateWords,
+  stepGoalNow,
+  type HeadChild,
+  type HeadOverview,
+} from '../api/head'
+import { RemedyHead } from './RemedyHead'
+import { ChildRoom } from './ChildRoom'
 
 const GOAL_SESSIONS_KEY = 'remedy.grove.goalSessions.v1'
 const HOME_SESSION_KEY = 'remedy.grove.homeSession.v1'
@@ -141,7 +154,10 @@ export interface GroveAppProps {
   onWorkModeChange?: (mode: 'chat' | 'plan' | 'build', sessionId?: string) => void
 }
 
-type GroveView = { kind: 'home' } | { kind: 'goal'; goal: LifeGoal }
+type GroveView =
+  | { kind: 'home' }
+  | { kind: 'goal'; goal: LifeGoal }
+  | { kind: 'child'; childId: string }
 type RoomTab = 'alongside' | 'storyline'
 
 export function GroveApp({
@@ -200,6 +216,11 @@ export function GroveApp({
   }, [])
   const [board, setBoard] = useState<LifeBoard | null>(null)
   const [approvals, setApprovals] = useState<PendingApproval[]>([])
+  // Remedy at the head: her children, routines, heartbeat, goal links.
+  const [head, setHead] = useState<HeadOverview | null>(null)
+  // Decisions surface as one card at a time; this brings a tucked card back.
+  const [decisionTucked, setDecisionTucked] = useState(false)
+  const decisionSeen = useRef<Set<string>>(new Set())
   // Draft lives inside GroveChat now; mic transcripts send directly.
   const [, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -260,6 +281,13 @@ export function GroveApp({
     }
   }, [voice])
 
+  const refreshHead = useCallback(() => {
+    if (!serverReady) return
+    getHead()
+      .then(setHead)
+      .catch(() => {})
+  }, [serverReady])
+
   const refreshBoard = useCallback(() => {
     if (!serverReady) return
     getLifeBoard()
@@ -268,13 +296,35 @@ export function GroveApp({
     listApprovals()
       .then(setApprovals)
       .catch(() => {})
-  }, [serverReady])
+    refreshHead()
+  }, [serverReady, refreshHead])
 
+  // Poll lightly, and not at all while the window is hidden — nothing to
+  // draw, nothing to spend. Faster while one of her children is working.
+  const someoneWorking =
+    head?.head.state === 'working' || (head?.children || []).some((c) => c.state === 'working' || c.state === 'queued')
   useEffect(() => {
     refreshBoard()
-    const t = setInterval(refreshBoard, 12_000)
+    const t = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return
+      refreshBoard()
+    }, someoneWorking ? 5_000 : 12_000)
     return () => clearInterval(t)
-  }, [refreshBoard])
+  }, [refreshBoard, someoneWorking])
+
+  // One-time move of goal↔conversation links from this browser to Remedy,
+  // so routines and autopilot (which run on the PC) find the same rooms.
+  const migratedRef = useRef(false)
+  useEffect(() => {
+    if (!head || migratedRef.current) return
+    migratedRef.current = true
+    const local = goalSessionsRef.current
+    for (const [gid, sid] of Object.entries(local)) {
+      if (!head.goals[gid]?.session_id && sessions.some((x) => x.id === sid)) {
+        void setGoalLink(gid, { session_id: sid }).catch(() => {})
+      }
+    }
+  }, [head, sessions])
 
   /** Session bound to a goal's room — reuse if it still exists, else create.
    *
@@ -284,6 +334,12 @@ export function GroveApp({
   const ensureGoalSession = useCallback(
     (goal: LifeGoal): Promise<string | null> => {
       const map = goalSessionsRef.current
+      const serverLinked = head?.goals[goal.id]?.session_id
+      if (serverLinked && sessions.some((s) => s.id === serverLinked)) {
+        map[goal.id] = serverLinked
+        setActiveId(serverLinked)
+        return Promise.resolve(serverLinked)
+      }
       const existing = map[goal.id]
       if (existing && sessions.some((s) => s.id === existing)) {
         setActiveId(existing)
@@ -296,6 +352,7 @@ export function GroveApp({
         if (s?.id) {
           map[goal.id] = s.id
           saveGoalSessions(map)
+          void setGoalLink(goal.id, { session_id: s.id }).catch(() => {})
           return s.id
         }
         return null
@@ -303,7 +360,7 @@ export function GroveApp({
       goalPendingRef.current.set(goal.id, p)
       return p
     },
-    [sessions, setActiveId, createSession],
+    [sessions, setActiveId, createSession, head],
   )
 
   const openGoal = useCallback(
@@ -348,10 +405,21 @@ export function GroveApp({
     // Base Grove is her HOME — the whole PC, no project folder. Reuse the
     // home session only if it exists AND carries no project_path; never
     // inherit a Studio project session (project folders are Studio-only).
+    // Remedy's head conversation (kept by the runtime) wins: it is where her
+    // children report and her routines speak.
+    const headId = head?.head.session_id
+    const headSess = headId ? sessions.find((s) => s.id === headId) : undefined
+    if (headSess && !headSess.project_path) {
+      homeSessionRef.current = headSess.id
+      saveHomeSession(headSess.id)
+      if (activeId !== headSess.id) setActiveId(headSess.id)
+      return Promise.resolve(headSess.id)
+    }
     const stored = homeSessionRef.current
     const storedSess = stored ? sessions.find((s) => s.id === stored) : undefined
     if (storedSess && !storedSess.project_path) {
       if (activeId !== storedSess.id) setActiveId(storedSess.id)
+      if (head && !head.head.session_id) void ensureHeadSession(storedSess.id).then(refreshHead).catch(() => {})
       return Promise.resolve(storedSess.id)
     }
     // The active session may already be a project-free one (not the stored
@@ -368,6 +436,7 @@ export function GroveApp({
       if (s?.id) {
         homeSessionRef.current = s.id
         saveHomeSession(s.id)
+        void ensureHeadSession(s.id).then(refreshHead).catch(() => {})
         return s.id
       }
       return null
@@ -376,7 +445,32 @@ export function GroveApp({
     })
     homeSessionPendingRef.current = p
     return p
-  }, [activeId, sessions, setActiveId, createSession])
+  }, [activeId, sessions, setActiveId, createSession, head, refreshHead])
+
+  const openChild = useCallback((c: HeadChild) => {
+    setView({ kind: 'child', childId: c.child_id })
+  }, [])
+
+  /** Timeline rows open the room they belong to: a child, a goal, or Remedy. */
+  const openAnySession = useCallback(
+    (sid: string) => {
+      const child = head?.children.find((c) => c.session_id === sid)
+      if (child) {
+        setView({ kind: 'child', childId: child.child_id })
+        return
+      }
+      const gid = Object.values(head?.goals || {}).find((l) => l.session_id === sid)?.goal_id
+      const g = gid ? (board?.goals || []).find((x) => x.id === gid) : undefined
+      if (g) {
+        openGoal(g)
+        return
+      }
+      setView({ kind: 'home' })
+      setHomeTab('plots')
+      if (sessions.some((x) => x.id === sid)) setActiveId(sid)
+    },
+    [head, board, openGoal, sessions, setActiveId],
+  )
 
   const sendFromGrove = useCallback(
     async (text: string, attachments?: SendAttachment[]) => {
@@ -387,6 +481,8 @@ export function GroveApp({
         let sid: string | null = null
         if (view.kind === 'goal') {
           sid = await ensureGoalSession(view.goal)
+        } else if (view.kind === 'child') {
+          sid = await ensureHomeSession()
         } else {
           sid = await ensureHomeSession()
         }
@@ -412,7 +508,7 @@ export function GroveApp({
   // Studio project chat). Her memory (Soul Field + Partner Memory) carries
   // the relationship across it, so it never feels like it has limits.
   useEffect(() => {
-    if (view.kind !== 'home' || !serverReady) return
+    if ((view.kind !== 'home' && view.kind !== 'child') || !serverReady) return
     // Delegate to ensureHomeSession: it reuses a stored/active project-free
     // session, and — crucially — PROVISIONS a fresh project-free home when the
     // only session around is a Studio project chat. Without provisioning, home
@@ -505,6 +601,46 @@ export function GroveApp({
       el.scrollTop = el.scrollHeight
   }, [moments.length, partialText, streaming, tab, homeTab])
 
+  /** Talk / Plan / Build for whichever conversation this view talks to.
+   * Lives in the view itself (home row, room top bars) — the bottom bar no
+   * longer carries a mode toggle. Ctrl+B still cycles it everywhere. */
+  const modeChips = (ensureSid: () => Promise<string | null>, compact = false) => (
+    <div className={`grove-mode-row${compact ? ' compact' : ''}`} role="group" aria-label="How we work">
+      {(
+        [
+          ['chat', 'Talk', 'Just talk — no tools unless you ask'],
+          ['plan', 'Plan', 'Outline first, then build'],
+          ['build', 'Build', 'Do the work when you ask'],
+        ] as const
+      ).map(([id, label, title]) => (
+        <button
+          key={id}
+          type="button"
+          className={`grove-mode-chip${workMode === id ? ' on' : ''}`}
+          aria-pressed={workMode === id}
+          title={title}
+          onClick={() => {
+            void ensureSid().then((sid) => {
+              if (sid) onWorkModeChange?.(id, sid)
+            })
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+
+  const decisionCard = (
+    <DecisionCard
+      serverReady={serverReady}
+      onResolved={refreshBoard}
+      tucked={decisionTucked}
+      onTucked={setDecisionTucked}
+      seen={decisionSeen.current}
+    />
+  )
+
   // ---------------- home ----------------
   if (view.kind === 'home') {
     return (
@@ -588,17 +724,14 @@ export function GroveApp({
               </div>
             )}
             {needsYou > 0 && (
-              <div className="grove-pill needs">
+              <button type="button" className="grove-pill needs" onClick={() => setDecisionTucked(false)}>
                 <span className="k" /> Needs you: {needsYou} decision
                 {needsYou > 1 ? 's' : ''} waiting
-              </div>
+              </button>
             )}
           </div>
 
           <div className="grove-approvals">
-            {needsYou > 0 && (
-              <ApprovalBanner sessionId={null} onResolved={refreshBoard} />
-            )}
             <LifeTaskBanner
               sessionId={null}
               onSpeak={(spoken) => {
@@ -607,30 +740,19 @@ export function GroveApp({
             />
           </div>
 
-          <div className="grove-mode-row" role="group" aria-label="How we work">
-            {(
-              [
-                ['chat', 'Talk', 'Just talk — no tools unless you ask'],
-                ['plan', 'Plan', 'Outline first, then build'],
-                ['build', 'Build', 'Do the work when you ask'],
-              ] as const
-            ).map(([id, label, title]) => (
-              <button
-                key={id}
-                type="button"
-                className={`grove-mode-chip${workMode === id ? ' on' : ''}`}
-                aria-pressed={workMode === id}
-                title={title}
-                onClick={() => {
-                  void ensureHomeSession().then((sid) => {
-                    if (sid) onWorkModeChange?.(id, sid)
-                  })
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <RemedyHead
+            overview={head}
+            partnerName={partnerName}
+            onChanged={refreshHead}
+            onOpenChild={(c) => openChild(c)}
+            onOpenHead={() => {
+              setHomeTab('plots')
+              void ensureHomeSession()
+            }}
+            onOpenSession={openAnySession}
+          />
+
+          {modeChips(ensureHomeSession)}
 
           <h2 className="grove-section-label">{goals.length ? 'Your goals' : 'A few places to start'}</h2>
           <div className="grove-plots">
@@ -678,8 +800,62 @@ export function GroveApp({
                       : `Done looks like: ${g.done_looks_like}`}
                   </div>
                 )}
+                {head?.goals[g.id]?.last_update && (
+                  <div className="last autopilot-note">
+                    <b>{stateWords(head.goals[g.id].state || 'idle')}</b> · {head.goals[g.id].last_update}
+                  </div>
+                )}
                 <span className="livechip">Continue <span aria-hidden>→</span></span>
                 </button>
+                <div className="grove-plot-foot">
+                  <label
+                    className="rh-switch mini"
+                    title="Keep going on its own — Remedy takes a step now and then, and stops when she needs you"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!head?.goals[g.id]?.autopilot}
+                      onChange={(e) => {
+                        void setGoalLink(g.id, { autopilot: e.target.checked })
+                          .then(refreshHead)
+                          .catch(() => {})
+                      }}
+                      aria-label={`Keep going on ${g.title} on its own`}
+                    />
+                    <span className="rh-switch-track" aria-hidden />
+                    <span>On its own</span>
+                  </label>
+                  {head?.goals[g.id]?.state && head.goals[g.id].state !== 'idle' && (
+                    <span className={`grove-plot-state s-${head.goals[g.id].state}${needsOwner(head.goals[g.id].state) ? ' needs' : ''}`}>
+                      {stateWords(head.goals[g.id].state)}
+                    </span>
+                  )}
+                  {head?.goals[g.id]?.state === 'done' && g.status !== 'done' ? (
+                    <button
+                      type="button"
+                      className="rh-link small"
+                      title="Remedy thinks this is finished — confirm it"
+                      onClick={() => {
+                        void patchLifeGoal(g.id, { status: 'done' })
+                          .then(refreshBoard)
+                          .catch(() => {})
+                      }}
+                    >
+                      Mark complete
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="rh-link small"
+                      title="Remedy takes one step on this now, in the background"
+                      onClick={() => {
+                        void stepGoalNow(g.id).then(refreshHead).catch(() => {})
+                      }}
+                    >
+                      Step now
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
 
@@ -716,6 +892,19 @@ export function GroveApp({
               </button>
             </div>
           </div>
+
+          <RemedyHead
+            part="house"
+            overview={head}
+            partnerName={partnerName}
+            onChanged={refreshHead}
+            onOpenChild={(c) => openChild(c)}
+            onOpenHead={() => {
+              setHomeTab('plots')
+              void ensureHomeSession()
+            }}
+            onOpenSession={openAnySession}
+          />
         </div>
 
         <div
@@ -854,6 +1043,50 @@ export function GroveApp({
             {t('grove.listening')}
           </div>
         )}
+        {decisionCard}
+      </div>
+    )
+  }
+
+  // ---------------- child room ----------------
+  if (view.kind === 'child') {
+    const child = head?.children.find((c) => c.child_id === view.childId)
+    return (
+      <div className="grove-surface" data-testid="grove-child">
+        <div className="grove-topbar">
+          <div className="grove-crumb">
+            <button type="button" className="seg" onClick={() => setView({ kind: 'home' })}>
+              Grove
+            </button>
+            <span className="sep">▸</span>
+            <button type="button" className="seg" onClick={() => setView({ kind: 'home' })}>
+              {partnerName || 'Remedy'}
+            </button>
+            <span className="sep">▸</span>
+            <span className="seg here">🌱 {child?.label || 'Side job'}</span>
+          </div>
+          {modeChips(ensureHomeSession, true)}
+          <button type="button" className="grove-switch" onClick={onSwitchToStudio}>
+            {t('bar.studio')}
+          </button>
+        </div>
+        {child ? (
+          <ChildRoom
+            key={child.child_id}
+            child={child}
+            partnerName={partnerName}
+            userName={userName}
+            toolProcessMode={toolProcessMode === 'off' ? 'medium' : toolProcessMode}
+            headMessages={messages}
+            headPartial={partialText}
+            headStreaming={streaming}
+            sendToRemedy={(text) => sendFromGrove(text)}
+            onChanged={refreshHead}
+          />
+        ) : (
+          <div className="grove-story-empty">This side job is no longer listed.</div>
+        )}
+        {decisionCard}
       </div>
     )
   }
@@ -887,13 +1120,13 @@ export function GroveApp({
             📖 {t('grove.storyline')}
           </button>
         </div>
+        {modeChips(() => ensureGoalSession(goal), true)}
         <button type="button" className="grove-switch" onClick={onSwitchToStudio}>
           {t('bar.studio')}
         </button>
       </div>
 
       <div className="grove-approvals">
-        <ApprovalBanner sessionId={activeId} onResolved={refreshBoard} />
         <LifeTaskBanner
           sessionId={activeId}
           onSpeak={(spoken) => {
@@ -1003,6 +1236,7 @@ export function GroveApp({
           )}
         </div>
       )}
+      {decisionCard}
     </div>
   )
 }

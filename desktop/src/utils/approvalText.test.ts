@@ -46,3 +46,17 @@ describe('approval copy', () => {
     expect(src).toContain('i.blocking')
   })
 })
+
+describe('approvalOriginLabel — background work Remedy started herself', () => {
+  it('names runtime origins in plain words, never raw ids', () => {
+    expect(approvalOriginLabel({ origin: 'partner:child:5f2e-41a8' })).toBe('a side job')
+    expect(approvalOriginLabel({ origin: 'PARTNER:routine:rt-1' })).toBe('a routine')
+    expect(approvalOriginLabel({ origin: 'partner:goal:abc' })).toBe('goal autopilot')
+    expect(approvalOriginLabel({ origin: 'partner:other' })).toBe('background work')
+    // Lookalikes are not background work.
+    expect(approvalOriginLabel({ origin: 'partnerx:child:1' })).not.toBe('a side job')
+    expect(approvalHeadline({ summary: 'Remedy wants to run a command.', reason: '', origin: 'partner:child:x' })).toBe(
+      'Remedy wants to run a command. · via a side job',
+    )
+  })
+})

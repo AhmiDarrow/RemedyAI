@@ -12,6 +12,7 @@ from urllib.error import HTTPError, URLError
 
 from remedy.core.errors import format_tool_error
 from remedy.core.web_helpers import (
+    SearchBlockedError,
     SearchConsentError,
     _host_is_blocked,
     _pinned_fetch,
@@ -27,6 +28,7 @@ from remedy.core.web_helpers import (
 )
 
 __all__ = [
+    "SearchBlockedError",
     "SearchConsentError",
     "_host_is_blocked",
     "_pinned_fetch",
@@ -207,6 +209,12 @@ def register_web_tools(runtime: Any) -> None:
             return format_tool_error(
                 str(consent),
                 code="SEARCH_CONSENT_REQUIRED",
+                tool_name="web_search",
+            )
+        except SearchBlockedError as blocked:
+            return format_tool_error(
+                str(blocked),
+                code="SEARCH_BLOCKED",
                 tool_name="web_search",
             )
         except Exception as e:

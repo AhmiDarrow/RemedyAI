@@ -61,6 +61,7 @@ var modelInternalInputKeys = []string{
 	"workspace_root",
 	"project_path",
 	"page_context",
+	"caller_origin",
 	GoBoundField,
 }
 

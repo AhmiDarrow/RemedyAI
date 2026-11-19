@@ -135,6 +135,7 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 	if err != nil || sess.ID == "" {
 		return err
 	}
+	s.partnerNoteMessenger(string(ev.Channel), chatID, username, msg, sess.ID)
 	var history []map[string]any
 	if s.sessions != nil {
 		history = s.turnHistory(sess.ID)

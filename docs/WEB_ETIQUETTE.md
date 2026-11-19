@@ -53,8 +53,13 @@ Order:
    / LAN still needs `web_search_url_allow_private = true` in `config.toml` by
    hand — `update_settings` cannot set it.
 2. **The managed OpenSERP** on loopback. Not written into `web_search_url`, so
-   it does not open the SSRF hole for anything else.
-3. **DuckDuckGo HTML** as the immediate fallback.
+   it does not open the SSRF hole for anything else. The tool worker starts it
+   when Remedy boots and starts it again if it stops. It asks DuckDuckGo, then
+   Bing. Google is not asked by default; its terms forbid automated queries.
+3. **DuckDuckGo HTML** only while OpenSERP is still downloading on the very
+   first run. If DuckDuckGo answers with its "are you human" check, Remedy
+   does not solve it: search reports that it is blocked, tells the model not
+   to scrape other search engines instead, and pauses for ten minutes.
 
 Research tools are separate and unaffected: arXiv, Crossref, OpenAlex, PubMed,
 and Semantic Scholar are queried through their own documented APIs, with the
