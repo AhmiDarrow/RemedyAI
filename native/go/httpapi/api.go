@@ -296,6 +296,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/connect/addresses", s.handleConnectAddresses)
 	s.mux.HandleFunc("POST /api/connect/pair/start", s.handleConnectPairStart)
 	s.mux.HandleFunc("POST /api/connect/pause", s.handleConnectPause)
+	s.mux.HandleFunc("POST /api/connect/mobile/test", s.handleConnectMobileTest)
 	s.mux.HandleFunc("POST /api/connect/resume", s.handleConnectResume)
 	s.mux.HandleFunc("POST /api/connect/devices/{id}/revoke", s.handleConnectRevoke)
 	s.mux.HandleFunc("GET /api/connect/tailscale/status", s.handleConnectTailscaleStatus)

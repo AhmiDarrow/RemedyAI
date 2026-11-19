@@ -129,6 +129,7 @@ class ConnectController(private val ctx: Context) {
                 val ts = store.lastTailscale()
                 val (priv, pub) = keys.staticPair()
                 val c = ConnectClient(priv, pub)
+                c.iroh = store.lastIroh()
                 c.reconnect(
                     hp, lanHost, lanPort, ts?.first, ts?.second, relay?.first, relay?.second, rdv, pub,
                     preferRelay = !NetProbe.isWifi(ctx),
@@ -166,10 +167,11 @@ class ConnectController(private val ctx: Context) {
 
     /** Relay, rendezvous and Tailscale are all "not on the LAN" for the UI. */
     private fun reachableFor(via: String?): Reachable =
-        if (via == "relay" || via == "rdv" || via == "tailscale") Reachable.OnRelay else Reachable.OnLan
+        if (via == "relay" || via == "rdv" || via == "tailscale" || via == "iroh") Reachable.OnRelay else Reachable.OnLan
 
     private fun viaLabel(via: String?, lan: String?): String? = when (via) {
         "tailscale" -> "via Tailscale"
+        "iroh" -> "via iroh"
         "relay", "rdv" -> "via relay"
         else -> lan
     }
@@ -374,6 +376,7 @@ class ConnectController(private val ctx: Context) {
             val ts = store.lastTailscale()
             val (priv, pub) = keys.staticPair()
             val c = ConnectClient(priv, pub)
+            c.iroh = store.lastIroh()
             c.reconnect(
                 hp, lanHost, lanPort, ts?.first, ts?.second, relay?.first, relay?.second, rdv, pub,
                 preferRelay = !NetProbe.isWifi(ctx),

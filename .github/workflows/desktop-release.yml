@@ -188,6 +188,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
+      - name: Setup Rust (mobile-data endpoint sidecar)
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Stamp release version
         shell: bash
         run: python scripts/sync_version.py "${REMEDY_RELEASE_VERSION}"
@@ -204,6 +207,11 @@ jobs:
           Pop-Location
           # Tauri externalBin requires the Rust target-triple suffix.
           Copy-Item desktop/bin/remedy-runtime.exe desktop/bin/remedy-runtime-x86_64-pc-windows-msvc.exe
+          # remedy-iroh: "Reach this PC from mobile data" (opt-in, externalBin).
+          cargo build --release --locked --bin remedy-iroh --manifest-path native/iroh/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item native/iroh/target/release/remedy-iroh.exe desktop/bin/remedy-iroh.exe
+          Copy-Item native/iroh/target/release/remedy-iroh.exe desktop/bin/remedy-iroh-x86_64-pc-windows-msvc.exe
           Push-Location native/zig
           zig build -Doptimize=ReleaseSafe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -221,6 +229,8 @@ jobs:
           path: |
             desktop/bin/remedy-runtime.exe
             desktop/bin/remedy-runtime-x86_64-pc-windows-msvc.exe
+            desktop/bin/remedy-iroh.exe
+            desktop/bin/remedy-iroh-x86_64-pc-windows-msvc.exe
             desktop/bin/remedy_core.dll
             desktop/bin/rmdy_tool_worker.pyz
             desktop/bin/rmdy-deps/**
@@ -395,6 +405,9 @@ jobs:
         shell: bash
         run: python scripts/sync_version.py "${REMEDY_RELEASE_VERSION}"
 
+      - name: Setup Rust (mobile-data endpoint sidecar)
+        uses: dtolnay/rust-toolchain@stable
+
       # Packaged Desktop launches Go remedy-runtime (externalBin) and ships
       # libremedy_core.so as a Tauri resource — no Python remedy-desktop.
       - name: Build Linux native runtime
@@ -409,6 +422,11 @@ jobs:
           cp zig-out/lib/libremedy_core.so ../../desktop/bin/libremedy_core.so
           chmod +x ../../desktop/bin/remedy-runtime ../../desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
           cd ../..
+          # remedy-iroh: "Reach this PC from mobile data" (opt-in, externalBin).
+          cargo build --release --locked --bin remedy-iroh --manifest-path native/iroh/Cargo.toml
+          cp native/iroh/target/release/remedy-iroh desktop/bin/remedy-iroh
+          cp native/iroh/target/release/remedy-iroh desktop/bin/remedy-iroh-x86_64-unknown-linux-gnu
+          chmod +x desktop/bin/remedy-iroh desktop/bin/remedy-iroh-x86_64-unknown-linux-gnu
           python scripts/check_remedy_core_isa.py desktop/bin/libremedy_core.so
           python scripts/build_rmdy_worker.py --out desktop/bin/rmdy_tool_worker.pyz --deps-out desktop/bin/rmdy-deps
 
@@ -419,6 +437,8 @@ jobs:
           path: |
             desktop/bin/remedy-runtime
             desktop/bin/remedy-runtime-x86_64-unknown-linux-gnu
+            desktop/bin/remedy-iroh
+            desktop/bin/remedy-iroh-x86_64-unknown-linux-gnu
             desktop/bin/libremedy_core.so
             desktop/bin/rmdy_tool_worker.pyz
             desktop/bin/rmdy-deps/**
@@ -506,6 +526,9 @@ jobs:
         with:
           version: 0.16.0
 
+      - name: Setup Rust (mobile-data endpoint sidecar)
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Stamp release version
         run: python3 scripts/sync_version.py "${REMEDY_RELEASE_VERSION}"
 
@@ -525,6 +548,11 @@ jobs:
           chmod +x "../../desktop/bin/remedy-runtime-${TRIPLE}"
           cd ../..
           python3 scripts/check_remedy_core_isa.py "desktop/bin/libremedy_core-${TRIPLE}.dylib"
+          # remedy-iroh: "Reach this PC from mobile data" (opt-in, externalBin).
+          # Native runner per triple, so the host target is the right one.
+          cargo build --release --locked --bin remedy-iroh --manifest-path native/iroh/Cargo.toml
+          cp native/iroh/target/release/remedy-iroh "desktop/bin/remedy-iroh-${TRIPLE}"
+          chmod +x "desktop/bin/remedy-iroh-${TRIPLE}"
 
       - name: Upload macOS runtime
         uses: actions/upload-artifact@v4
@@ -532,6 +560,7 @@ jobs:
           name: remedy-runtime-macos-${{ matrix.triple }}
           path: |
             desktop/bin/remedy-runtime-${{ matrix.triple }}
+            desktop/bin/remedy-iroh-${{ matrix.triple }}
             desktop/bin/libremedy_core-${{ matrix.triple }}.dylib
           retention-days: 1
 
@@ -683,6 +712,7 @@ jobs:
           chmod +x "desktop/bin/remedy-runtime-${GO_TRIPLE}"
           cp -f "desktop/bin/remedy-runtime-${GO_TRIPLE}" desktop/bin/remedy-runtime
           chmod +x desktop/bin/remedy-runtime
+          chmod +x "desktop/bin/remedy-iroh-${GO_TRIPLE}"
           cp -f "desktop/bin/libremedy_core-${GO_TRIPLE}.dylib" desktop/bin/libremedy_core.dylib
           python3 scripts/build_rmdy_worker.py --out desktop/bin/rmdy_tool_worker.pyz --deps-out desktop/bin/rmdy-deps --deps-platform "${DEPS_PLATFORM}"
 

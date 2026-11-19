@@ -78,6 +78,7 @@ def test_stage_removes_legacy_remedy_desktop(bd, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(bd, "sync_versions", lambda: "0.0.0")
     monkeypatch.setattr(bd, "check_third_party_notices", lambda: None)
     monkeypatch.setattr(bd, "build_runtime", lambda: None)
+    monkeypatch.setattr(bd, "build_iroh_sidecar", lambda: None)
     monkeypatch.setattr(bd, "stage_core", lambda *a, **k: None)
     monkeypatch.setattr(bd, "stage_rmdy_worker", lambda *a, **k: None)
 
@@ -86,16 +87,21 @@ def test_stage_removes_legacy_remedy_desktop(bd, tmp_path, monkeypatch) -> None:
 
 
 def test_tauri_external_bin_is_runtime_only() -> None:
-    """Phase 6: packaged Desktop launches remedy-runtime, never remedy-desktop."""
+    """Phase 6: packaged Desktop launches remedy-runtime, never remedy-desktop.
+
+    The only other external binary is remedy-iroh, the opt-in "Reach this PC
+    from mobile data" endpoint the runtime starts beside itself.
+    """
     import json
 
     for rel in (
         "desktop/src-tauri/tauri.conf.json",
         "desktop/src-tauri/tauri.linux.conf.json",
+        "desktop/src-tauri/tauri.macos.conf.json",
     ):
         conf = json.loads((ROOT / rel).read_text(encoding="utf-8"))
         bins = conf.get("bundle", {}).get("externalBin") or []
-        assert bins == ["../bin/remedy-runtime"], rel
+        assert bins == ["../bin/remedy-runtime", "../bin/remedy-iroh"], rel
         resources = conf.get("bundle", {}).get("resources") or {}
         resource_text = json.dumps(resources)
         assert "remedy-desktop" not in resource_text, rel

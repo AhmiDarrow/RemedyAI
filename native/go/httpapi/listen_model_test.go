@@ -154,8 +154,8 @@ func TestNormalizeLLMSettingsIncludesPoe(t *testing.T) {
 	if prov != "poe" {
 		t.Fatalf("prov = %q", prov)
 	}
-	if model != "assistant" {
-		t.Fatalf("model = %q", model)
+	if model != "" {
+		t.Fatalf("model = %q (no baked-in default: the endpoint picks)", model)
 	}
 	if base != "https://api.poe.com/v1" {
 		t.Fatalf("base = %q (must not fall through to custom :5001)", base)
@@ -295,9 +295,16 @@ func TestResolveChatModelBuildsNativeAnthropicAdapter(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REMEDY_HOME", home)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-unit-test-not-real")
+	t.Setenv("REMEDY_LIVE_MODELS", "0")
 	InvalidateConfigCache()
 
-	model := ResolveChatModel(home, "anthropic", "", "")
+	// No model chosen and the models endpoint unreachable: nothing baked in
+	// is substituted, the turn reports that no model is available.
+	if _, ok := ResolveChatModel(home, "anthropic", "", "").(*providers.Anthropic); ok {
+		t.Fatal("must not invent a model when the endpoint cannot be listed")
+	}
+
+	model := ResolveChatModel(home, "anthropic", "claude-from-endpoint", "")
 	claude, ok := model.(*providers.Anthropic)
 	if !ok || claude == nil {
 		t.Fatalf("provider anthropic with a key must build the native adapter, got %T", model)
@@ -305,7 +312,7 @@ func TestResolveChatModelBuildsNativeAnthropicAdapter(t *testing.T) {
 	if claude.APIKey != "sk-ant-unit-test-not-real" {
 		t.Fatalf("adapter key = %q", claude.APIKey)
 	}
-	if claude.Model != defaultModelForProvider("anthropic") {
+	if claude.Model != "claude-from-endpoint" {
 		t.Fatalf("adapter model = %q", claude.Model)
 	}
 	if !strings.Contains(claude.BaseURL, "api.anthropic.com") {

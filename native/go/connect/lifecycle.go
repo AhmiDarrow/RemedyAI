@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,19 @@ type GatewaySettings struct {
 	Sidecar  int
 	RelayURL string
 	RDV      bool // connect_rdv_enabled; opt-in (public MQTT brokers)
+	// Iroh is connect_iroh_enabled (or REMEDY_CONNECT_IROH=1): dial-by-key
+	// QUIC with hole punching and n0 public relays as fallback. Opt-in spike.
+	Iroh bool
+	// IrohRelayURL is connect_iroh_relay_url: a self-hosted iroh-relay.
+	IrohRelayURL string
+	// IrohRelayMode is connect_iroh_relay_mode: "off" (default), "custom", "n0".
+	IrohRelayMode string
+	// IrohPort is connect_iroh_port: the fixed UDP port (default 7403).
+	IrohPort int
+	// IrohPunch is connect_iroh_punch: relay-free hole punching through
+	// carrier-grade NAT, using public MQTT brokers to swap encrypted
+	// addresses. Off by default.
+	IrohPunch bool
 }
 
 // Gateway owns the Connect listener lifecycle: start/stop, pause, health, self-heal.
@@ -188,6 +202,27 @@ func (g *Gateway) refreshSupervisors() {
 				Home:    live.Home,
 				Handler: handler,
 			})
+		}()
+	}
+	if live.Iroh || IrohEnabledFromEnv() {
+		relayURL := live.IrohRelayURL
+		if relayURL == "" {
+			relayURL = strings.TrimSpace(os.Getenv(IrohRelayEnv))
+		}
+		session := g.supervisorSession()
+		g.supWG.Add(1)
+		go func() {
+			defer g.supWG.Done()
+			if err := RunIrohSupervisor(ctx, IrohSupervisorOpts{
+				Home:      live.Home,
+				Port:      live.IrohPort,
+				RelayMode: live.IrohRelayMode,
+				RelayURL:  relayURL,
+				Punch:     live.IrohPunch,
+				Session:   session,
+			}); err != nil && ctx.Err() == nil {
+				log.Printf("connect: iroh supervisor stopped: %v", err)
+			}
 		}()
 	}
 	if live.RDV {
@@ -479,6 +514,16 @@ func SettingsFromMap(raw map[string]any) GatewaySettings {
 	cfg.RelayURL = strings.TrimSpace(settingsString(raw["connect_relay_url"]))
 	if _, ok := raw["connect_rdv_enabled"]; ok {
 		cfg.RDV = asBool(raw["connect_rdv_enabled"])
+	}
+	if _, ok := raw["connect_iroh_enabled"]; ok {
+		cfg.Iroh = asBool(raw["connect_iroh_enabled"])
+	}
+	cfg.IrohRelayURL = strings.TrimSpace(settingsString(raw["connect_iroh_relay_url"]))
+	cfg.IrohRelayMode = strings.TrimSpace(settingsString(raw["connect_iroh_relay_mode"]))
+	cfg.IrohPort = settingsInt(raw["connect_iroh_port"], 0)
+	cfg.IrohPunch = asBool(raw["connect_iroh_punch"])
+	if cfg.IrohPort < 0 || cfg.IrohPort > 65535 {
+		cfg.IrohPort = 0
 	}
 	if v := strings.TrimSpace(settingsString(raw["connect_home"])); v != "" {
 		cfg.Home = v

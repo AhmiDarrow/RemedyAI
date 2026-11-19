@@ -604,7 +604,7 @@ export function ServerMenu({
                       background: 'var(--bg-primary)',
                       border: '1px solid var(--border)',
                       color: 'var(--text-secondary)',
-                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                      fontFamily: "var(--font-code, ui-monospace, monospace)",
                     }}
                   >
                     {info.output.slice(-80).join('\n')}

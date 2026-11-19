@@ -33,6 +33,7 @@ import {
 import QRCode from 'qrcode'
 import { SettingsSection } from '../SettingsSection'
 import { SettingsFlow } from './SettingsFlow'
+import { MobileReachBlock } from './MobileReachBlock'
 import {
   FormActionButton,
   FormHint,
@@ -527,6 +528,8 @@ export function ConnectSection({
             sign into the same account as this PC. Then scan the pairing QR —
             it includes the tailnet address, so RemedyConnect works anywhere.
           </FormHint>
+
+          <MobileReachBlock mobile={st.mobile} disabled={busy} onChanged={refresh} />
 
           </SettingsFlow>
 

@@ -50,12 +50,15 @@ def test_total_install_bytes_includes_runtime():
 
 
 def test_supports_vision_heuristics():
+    # Family words only; versions are left to the endpoint / owner setting.
     assert supports_vision("deepseek", "deepseek-chat") is False
     assert supports_vision("openai", "gpt-4o-mini") is True
+    assert supports_vision("openai", "gpt-realtime") is False
     assert supports_vision("xai", "grok-2-vision-1212") is True
-    assert supports_vision("xai", "grok-4.6") is True
+    assert supports_vision("xai", "grok-9") is False  # unknown: endpoint decides
     assert supports_vision("mistral", "codestral-latest") is False
     assert supports_vision("ollama", "llama3.2") is False
+    assert supports_vision("ollama", "qwen2.5-vl:7b") is True
     assert supports_vision("anthropic", "claude-3-5-sonnet-latest") is True
 
 

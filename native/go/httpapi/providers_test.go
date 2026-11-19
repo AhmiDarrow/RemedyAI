@@ -161,53 +161,6 @@ func TestListConnectedProviders(t *testing.T) {
 	}
 }
 
-func TestListModelsCatalogFallback(t *testing.T) {
-	s, _ := newProvidersTestServer(t)
-	code, body, text := doProvidersJSON(t, s, http.MethodGet, "/api/models?provider=openai")
-	if code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", code, text)
-	}
-	if body["provider"] != "openai" {
-		t.Fatalf("provider=%v", body["provider"])
-	}
-	models, ok := body["models"].([]any)
-	if !ok || len(models) == 0 {
-		t.Fatalf("expected catalog models: %s", text)
-	}
-	first, _ := models[0].(map[string]any)
-	if first["id"] == "" || first["source"] != "catalog" {
-		t.Fatalf("first model=%v", first)
-	}
-	if body["default"] == "" {
-		t.Fatalf("missing default: %s", text)
-	}
-	disc, _ := body["discovery"].(map[string]any)
-	if disc == nil {
-		t.Fatalf("missing discovery: %s", text)
-	}
-	// Live discovery disabled in tests.
-	if disc["ok"] == true {
-		t.Fatalf("expected no live discovery when REMEDY_LIVE_MODELS=0: %v", disc)
-	}
-}
-
-func TestListModelsDeepseekCatalog(t *testing.T) {
-	s, _ := newProvidersTestServer(t)
-	code, body, text := doProvidersJSON(t, s, http.MethodGet, "/api/models?provider=deepseek")
-	if code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", code, text)
-	}
-	ids := []string{}
-	for _, m := range body["models"].([]any) {
-		row, _ := m.(map[string]any)
-		ids = append(ids, fmtString(row["id"]))
-	}
-	joined := strings.Join(ids, ",")
-	if !strings.Contains(joined, "deepseek-v4-flash") {
-		t.Fatalf("expected deepseek catalog ids, got %v", ids)
-	}
-}
-
 func TestListModelsRefusesStoredKeyToForeignURL(t *testing.T) {
 	s, home := newProvidersTestServer(t)
 	if err := secret.SetProviderSecret(home, "openai", "sk-test"); err != nil {

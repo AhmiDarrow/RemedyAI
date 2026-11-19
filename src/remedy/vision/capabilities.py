@@ -4,57 +4,20 @@ from __future__ import annotations
 
 from typing import Any
 
-# Explicit non-vision (common text-only IDs that would otherwise false-positive).
-_NON_VISION_EXACT = frozenset(
-    {
-        "deepseek-chat",
-        "deepseek-reasoner",
-        "deepseek-v4-flash",
-        "deepseek-v4-pro",
-        "codestral-latest",
-        "codestral",
-        "o1",
-        "o1-mini",
-        "o1-preview",
-        "o3-mini",
-        "o4-mini",
-    }
-)
-
-# Substrings that strongly indicate multimodal vision support.
+# Fallback only: what the provider's endpoint reports, then the owner's
+# per-model setting (vision.chat_model_vision), win over this. Family words
+# only — never version numbers, which go stale as providers ship new models.
 _VISION_HINTS = (
     "vision",
-    "gpt-4o",
-    "gpt-4.1",
-    "gpt-4-turbo",
-    "gpt-5",
-    "claude-3",
-    "claude-4",
-    "claude-sonnet",
-    "claude-opus",
-    "claude-haiku",
-    "gemini",
+    "-vl",
+    "vl-",
     "llava",
     "moondream",
-    "qwen2-vl",
-    "qwen2.5-vl",
-    "qwen-vl",
-    "qwen2.5vl",
-    "qwen3-vl",
     "pixtral",
     "internvl",
     "minicpm-v",
     "smolvlm",
-    "phi-3-vision",
-    "phi-4-multimodal",
-    "llama-3.2-vision",
-    "llama3.2-vision",
-    "grok-2-vision",
-    "grok-vision",
-    "grok-4",
-    "grok-4.3",
-    "grok-4.5",
-    "grok-4.6",
+    "multimodal",
 )
 
 # Providers whose catalog models are vision-capable by default (when unknown).
@@ -81,7 +44,7 @@ def supports_vision(
 ) -> bool:
     """Return True when the *chat* model should receive native image parts.
 
-    Priority: explicit config override → catalog hint → heuristics.
+    Priority: explicit config override → endpoint hint → family rules.
     Conservative for unknown models (False → use visual decoder path when images present).
     """
     if config_override is not None:
@@ -94,13 +57,13 @@ def supports_vision(
 
     if not mid:
         return False
-    if mid in _NON_VISION_EXACT:
-        return False
     if any(h in mid for h in _VISION_HINTS):
         return True
-
-    # OpenAI GPT-4 family (non-o1) generally vision after 4o era
-    if prov == "openai" and mid.startswith("gpt-4") and "o1" not in mid:
+    # OpenAI chat models in the GPT line take images; reasoning-only and
+    # audio/realtime variants are left to the endpoint or the owner's setting.
+    if prov == "openai" and mid.startswith("gpt-") and not any(
+        x in mid for x in ("audio", "realtime", "transcribe", "tts")
+    ):
         return True
 
     default = _PROVIDER_DEFAULT_VISION.get(prov)
@@ -128,30 +91,13 @@ def endpoint_vision_flag(provider: str | None, model: str | None) -> bool | None
     return None
 
 
-def catalog_vision_flag(provider: str | None, model: str | None) -> bool | None:
-    """Look up optional ``vision`` flag from PROVIDER_CATALOG model entries."""
-    try:
-        from remedy.interfaces.config import PROVIDER_CATALOG
-    except Exception:
-        return None
-    prov = (provider or "").strip().lower()
-    mid = (model or "").strip()
-    entry = PROVIDER_CATALOG.get(prov) or {}
-    for m in entry.get("models") or []:
-        if not isinstance(m, dict):
-            continue
-        if str(m.get("id") or "") == mid and "vision" in m:
-            return bool(m.get("vision"))
-    return None
-
-
 def resolve_supports_vision(
     provider: str | None,
     model: str | None,
     *,
     config: dict[str, Any] | None = None,
 ) -> bool:
-    """Full resolve with config.toml overrides and catalog flags."""
+    """Full resolve: config.toml override, then the endpoint's flag, then family rules."""
     cfg = config or {}
     vision_raw = cfg.get("vision")
     vision_cfg: dict[str, Any] = vision_raw if isinstance(vision_raw, dict) else {}
@@ -167,6 +113,4 @@ def resolve_supports_vision(
         override = True
 
     hint = endpoint_vision_flag(provider, model)
-    if hint is None:
-        hint = catalog_vision_flag(provider, model)
     return supports_vision(provider, model, catalog_hint=hint, config_override=override)

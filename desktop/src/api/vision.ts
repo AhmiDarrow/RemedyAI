@@ -174,50 +174,22 @@ export async function getNanoSwarmStatus(): Promise<NanoSwarmStatus> {
   return apiFetch<NanoSwarmStatus>('/nanoswarm/status')
 }
 
-/** Rough client-side mirror of backend supports_vision for UI banners. */
+/**
+ * Rough client-side mirror of the backend's vision check, for UI banners.
+ * Family words only — never version numbers, which go stale as providers
+ * ship new models. The backend's real answer also uses what the provider's
+ * endpoint reports and the owner's per-model setting.
+ */
 export function chatModelSupportsVision(provider: string, model: string): boolean {
   const mid = (model || '').toLowerCase()
   const prov = (provider || '').toLowerCase()
   if (!mid) return false
-  const non = new Set([
-    'deepseek-chat',
-    'deepseek-reasoner',
-    'deepseek-v4-flash',
-    'deepseek-v4-pro',
-    'codestral-latest',
-    'codestral',
-    'o1',
-    'o1-mini',
-    'o1-preview',
-    'o3-mini',
-    'o4-mini',
-  ])
-  if (non.has(mid)) return false
-  const hints = [
-    'vision',
-    'gpt-4o',
-    'gpt-4.1',
-    'gpt-4-turbo',
-    'gpt-5',
-    'claude-3',
-    'claude-4',
-    'claude-sonnet',
-    'claude-opus',
-    'claude-haiku',
-    'gemini',
-    'llava',
-    'qwen2-vl',
-    'qwen2.5-vl',
-    'qwen-vl',
-    'pixtral',
-    'moondream',
-    'grok-2-vision',
-  ]
+  const hints = ['vision', '-vl', 'vl-', 'llava', 'moondream', 'pixtral', 'internvl', 'minicpm-v', 'smolvlm', 'multimodal']
   if (hints.some((h) => mid.includes(h))) return true
-  if (prov === 'openai' && mid.startsWith('gpt-4') && !mid.includes('o1')) return true
-  if (prov === 'anthropic' || prov === 'google') return true
-  if (prov === 'deepseek') return false
-  return false
+  if (prov === 'openai' && mid.startsWith('gpt-') && !['audio', 'realtime', 'transcribe', 'tts'].some((x) => mid.includes(x))) {
+    return true
+  }
+  return prov === 'anthropic' || prov === 'google'
 }
 
 export function formatDownloadGb(bytes?: number): string {

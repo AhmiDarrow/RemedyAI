@@ -11,7 +11,7 @@
   },
   "bundle": {
     "targets": ["deb", "appimage"],
-    "externalBin": ["../bin/remedy-runtime"],
+    "externalBin": ["../bin/remedy-runtime", "../bin/remedy-iroh"],
     "resources": {
       "../bin/libremedy_core.so": "libremedy_core.so",
       "../bin/rmdy_tool_worker.pyz": "rmdy_tool_worker.pyz",

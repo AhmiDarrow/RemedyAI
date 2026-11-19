@@ -212,6 +212,7 @@ RUST = Lane(
     "Tauri shell (cargo)",
     (
         Step("cargo test", "cargo test --locked", cwd="desktop/src-tauri", env=RUST_ENV),
+        Step("cargo test (iroh sidecar)", "cargo test --locked", cwd="native/iroh", env=RUST_ENV),
     ),
 )
 

@@ -154,7 +154,8 @@ def test_resolve_llm_slot_first_run_uses_demo(monkeypatch):
     assert p == "demo"
     assert "llm7.io" in url
     assert key == "unused"
-    assert m
+    # The model is whatever the gateway lists (nothing listed in this test).
+    assert m != "gpt-4o-mini"
 
 
 def test_resolve_llm_slot_runtime_demo_wins(monkeypatch):
