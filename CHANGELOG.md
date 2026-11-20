@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.70.4] - 2026-11-20
+
+### Fixed
+- Claude (Anthropic) turns no longer fail with HTTP 400 `For 'object' type, 'additionalProperties' must be explicitly set to false`. A tool is sent as strict only when every object in its schema says `additionalProperties: false` (`settings.patch` was the one that did not).
+- Claude Haiku 5.5 no longer fails every turn: it now gets adaptive thinking instead of the `budget_tokens` it rejects, and its 1M context window.
+
 ## [0.70.3] - 2026-11-20
 
 ### Fixed

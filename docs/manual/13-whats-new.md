@@ -2,13 +2,14 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.70.3**. Installed apps update on their own.
+Current release: **v0.70.4**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [0.70.4 — Claude fixes, round two](#0704---claude-fixes-round-two)
 - [0.70.3 — Claude works again](#0703---claude-works-again)
 - [0.70.2 — Switch to Web UI stays signed in](#0702---switch-to-web-ui-stays-signed-in)
 - [0.70.1 — About](#0701---about)
@@ -33,6 +34,11 @@ you gave her, and waits for you before money, send, or delete.
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
+
+## 0.70.4 - Claude fixes, round two
+
+- **Claude.** Fixes the second HTTP 400 Claude chats could stop with, and Claude
+  Haiku 5.5 now works. Send `continue` in a stopped chat to resume.
 
 ## 0.70.3 - Claude works again
 
