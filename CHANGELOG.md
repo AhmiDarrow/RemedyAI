@@ -4,6 +4,17 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.70.5] - 2026-11-20
+
+### Fixed
+- Claude (Anthropic) chats work again on every Claude model. Turns no longer fail with HTTP 400 about `additionalProperties`, too many strict tools, too many optional parameters, or cache TTL order: tools are no longer sent in strict mode (Remedy validates every tool call itself), and build turns cache the tool list for as long as the system prompt.
+- Claude Haiku 5.5 no longer fails every turn: it now gets adaptive thinking instead of the `budget_tokens` it rejects, and its 1M context window.
+
+## [0.70.3] - 2026-11-20
+
+### Fixed
+- Claude (Anthropic) turns no longer fail with HTTP 400 `tools.0.custom: For 'object' type, 'additionalProperties: object' is not supported`. A tool is sent as strict only when every nested object is closed, and the strict copy drops the constraints strict mode rejects (`minimum`/`maximum`, `minLength`/`maxLength`, `maxItems`, `uniqueItems`); the runtime still validates every call against the full schema.
+
 ## [0.70.2] - 2026-11-15
 
 ### Fixed
