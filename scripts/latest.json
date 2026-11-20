@@ -1,23 +1,23 @@
 {
-  "version": "v0.70.2",
-  "notes": "Remedy Desktop v0.70.2 \u2014 Windows installer, Linux AppImage, and macOS app",
-  "pub_date": "2026-11-16T05:58:45Z",
+  "version": "v0.70.5",
+  "notes": "Remedy Desktop v0.70.5 \u2014 Windows installer, Linux AppImage, and macOS app",
+  "pub_date": "2026-11-20T16:21:48Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.70.2/Remedy.Desktop_0.70.2_x64-setup.exe"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.70.5/Remedy.Desktop_0.70.5_x64-setup.exe"
     },
     "linux-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.70.2/Remedy.Desktop_0.70.2_amd64.AppImage"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.70.5/Remedy.Desktop_0.70.5_amd64.AppImage"
     },
     "darwin-aarch64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/runtime-v0.70.2/Remedy.Desktop_0.70.2_aarch64.app.tar.gz"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/runtime-v0.70.5/Remedy.Desktop_0.70.5_aarch64.app.tar.gz"
     },
     "darwin-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/runtime-v0.70.2/Remedy.Desktop_0.70.2_x64.app.tar.gz"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/runtime-v0.70.5/Remedy.Desktop_0.70.5_x64.app.tar.gz"
     }
   }
 }
