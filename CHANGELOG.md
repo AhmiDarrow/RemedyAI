@@ -4,6 +4,11 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.70.3] - 2026-11-20
+
+### Fixed
+- Claude (Anthropic) turns no longer fail with HTTP 400 `tools.0.custom: For 'object' type, 'additionalProperties: object' is not supported`. A tool is sent as strict only when every nested object is closed, and the strict copy drops the constraints strict mode rejects (`minimum`/`maximum`, `minLength`/`maxLength`, `maxItems`, `uniqueItems`); the runtime still validates every call against the full schema.
+
 ## [0.70.2] - 2026-11-15
 
 ### Fixed
