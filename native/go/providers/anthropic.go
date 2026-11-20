@@ -120,17 +120,12 @@ func (a *Anthropic) SetTools(list []RegistryTool) {
 		if _, ok := wireByABI[d.ID]; !ok {
 			wireByABI[d.ID] = wire
 		}
-		strict := schemaIsStrict(d.InputSchema)
-		raw := d.InputSchema
-		if strict {
-			raw = strictWireSchema(raw)
-		}
-		tool := anthropic.ToolParam{Name: wire, InputSchema: toolInputSchema(raw)}
+		// Never strict: strict tool use caps a request at 20 strict tools and 24
+		// optional parameters and rejects common schema keywords, so this surface
+		// 400s under it. The registry validates every call against the full schema.
+		tool := anthropic.ToolParam{Name: wire, InputSchema: toolInputSchema(d.InputSchema)}
 		if desc := strings.TrimSpace(d.Description); desc != "" {
 			tool.Description = anthropic.String(desc)
-		}
-		if strict {
-			tool.Strict = anthropic.Bool(true)
 		}
 		tools = append(tools, anthropic.ToolUnionParam{OfTool: &tool})
 	}
@@ -465,6 +460,17 @@ func (a *Anthropic) buildParams(turn cognition.Turn) anthropic.MessageNewParams 
 		System:    a.renderSystem(turn, shape),
 		Tools:     a.tools,
 	}
+	// A 1h system breakpoint may not follow a 5m one, and tools render first:
+	// build/mission turns cache the tool prefix for 1h too (on a copy, so the
+	// shared surface is never mutated under a concurrent stream).
+	if (shape == ShapeBuild || shape == ShapeMission) && len(a.tools) > 0 {
+		if last := a.tools[len(a.tools)-1].OfTool; last != nil {
+			tool := *last
+			tool.CacheControl = anthropic.NewCacheControlEphemeralParam()
+			tool.CacheControl.TTL = anthropic.CacheControlEphemeralTTLTTL1h
+			params.Tools = append(append([]anthropic.ToolUnionParam(nil), a.tools[:len(a.tools)-1]...), anthropic.ToolUnionParam{OfTool: &tool})
+		}
+	}
 	// Adaptive thinking with summaries is what feeds @@thinking:. Pre-4.6
 	// models reject it, and none of them are worth a fixed budget_tokens here.
 	if supportsAdaptiveThinking(model) {
@@ -747,7 +753,7 @@ func markLastUserBreakpoint(msgs []anthropic.MessageParam) {
 
 // toolInputSchema carries the registry's JSON Schema through unchanged:
 // properties and required are typed fields, everything else (notably
-// additionalProperties, which strict mode requires) rides in ExtraFields.
+// additionalProperties) rides in ExtraFields.
 func toolInputSchema(raw json.RawMessage) anthropic.ToolInputSchemaParam {
 	schema := anthropic.ToolInputSchemaParam{Properties: map[string]any{}}
 	var decoded map[string]any
@@ -776,122 +782,6 @@ func toolInputSchema(raw json.RawMessage) anthropic.ToolInputSchemaParam {
 		schema.ExtraFields = extra
 	}
 	return schema
-}
-
-// schemaIsStrict reports whether the schema is closed enough for strict tool
-// use: additionalProperties:false plus a non-empty required list.
-func schemaIsStrict(raw json.RawMessage) bool {
-	var decoded map[string]any
-	if len(raw) == 0 || json.Unmarshal(raw, &decoded) != nil || decoded == nil {
-		return false
-	}
-	closed, ok := decoded["additionalProperties"].(bool)
-	if !ok || closed {
-		return false
-	}
-	required, ok := decoded["required"].([]any)
-	return ok && len(required) > 0 && nestedClosed(decoded)
-}
-
-// strictUnsupported are the constraints strict tool use rejects with HTTP 400.
-// The registry still validates every call against the full schema, so dropping
-// them from the wire copy loses nothing (the Python/TS SDKs do the same).
-var strictUnsupported = []string{
-	"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
-	"minLength", "maxLength", "maxItems", "uniqueItems",
-}
-
-// strictWireSchema returns raw with strict-unsupported constraints removed.
-func strictWireSchema(raw json.RawMessage) json.RawMessage {
-	var decoded map[string]any
-	if json.Unmarshal(raw, &decoded) != nil {
-		return raw
-	}
-	stripStrictConstraints(decoded)
-	out, err := json.Marshal(decoded)
-	if err != nil {
-		return raw
-	}
-	return out
-}
-
-// stripStrictConstraints walks schema nodes only, so a property that happens
-// to be named "minimum" is kept.
-func stripStrictConstraints(node map[string]any) {
-	for _, k := range strictUnsupported {
-		delete(node, k)
-	}
-	if n, ok := node["minItems"].(float64); ok && n > 1 {
-		delete(node, "minItems")
-	}
-	for _, key := range []string{"properties", "$defs", "definitions"} {
-		if children, ok := node[key].(map[string]any); ok {
-			for _, child := range children {
-				if m, ok := child.(map[string]any); ok {
-					stripStrictConstraints(m)
-				}
-			}
-		}
-	}
-	for _, key := range []string{"items", "anyOf", "allOf", "oneOf", "prefixItems"} {
-		switch v := node[key].(type) {
-		case map[string]any:
-			stripStrictConstraints(v)
-		case []any:
-			for _, child := range v {
-				if m, ok := child.(map[string]any); ok {
-					stripStrictConstraints(m)
-				}
-			}
-		}
-	}
-}
-
-// nestedClosed reports whether no nested schema sets additionalProperties to
-// anything but false; strict mode rejects a map-shaped object such as
-// {"additionalProperties":{"type":"string"}} with HTTP 400.
-func nestedClosed(node any) bool {
-	switch v := node.(type) {
-	case map[string]any:
-		ap, has := v["additionalProperties"]
-		if has && ap != false {
-			return false
-		}
-		// Strict also 400s on an object that leaves additionalProperties out.
-		if !has && isObjectSchema(v) {
-			return false
-		}
-		for _, child := range v {
-			if !nestedClosed(child) {
-				return false
-			}
-		}
-	case []any:
-		for _, child := range v {
-			if !nestedClosed(child) {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-// isObjectSchema reports whether node describes a JSON object.
-func isObjectSchema(node map[string]any) bool {
-	if _, ok := node["properties"].(map[string]any); ok {
-		return true
-	}
-	switch t := node["type"].(type) {
-	case string:
-		return t == "object"
-	case []any:
-		for _, item := range t {
-			if item == "object" {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // roundUsage maps the round's token accounting, cache read/write included.
