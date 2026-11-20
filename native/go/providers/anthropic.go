@@ -120,11 +120,16 @@ func (a *Anthropic) SetTools(list []RegistryTool) {
 		if _, ok := wireByABI[d.ID]; !ok {
 			wireByABI[d.ID] = wire
 		}
-		tool := anthropic.ToolParam{Name: wire, InputSchema: toolInputSchema(d.InputSchema)}
+		strict := schemaIsStrict(d.InputSchema)
+		raw := d.InputSchema
+		if strict {
+			raw = strictWireSchema(raw)
+		}
+		tool := anthropic.ToolParam{Name: wire, InputSchema: toolInputSchema(raw)}
 		if desc := strings.TrimSpace(d.Description); desc != "" {
 			tool.Description = anthropic.String(desc)
 		}
-		if schemaIsStrict(d.InputSchema) {
+		if strict {
 			tool.Strict = anthropic.Bool(true)
 		}
 		tools = append(tools, anthropic.ToolUnionParam{OfTool: &tool})
@@ -784,7 +789,85 @@ func schemaIsStrict(raw json.RawMessage) bool {
 		return false
 	}
 	required, ok := decoded["required"].([]any)
-	return ok && len(required) > 0
+	return ok && len(required) > 0 && nestedClosed(decoded)
+}
+
+// strictUnsupported are the constraints strict tool use rejects with HTTP 400.
+// The registry still validates every call against the full schema, so dropping
+// them from the wire copy loses nothing (the Python/TS SDKs do the same).
+var strictUnsupported = []string{
+	"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+	"minLength", "maxLength", "maxItems", "uniqueItems",
+}
+
+// strictWireSchema returns raw with strict-unsupported constraints removed.
+func strictWireSchema(raw json.RawMessage) json.RawMessage {
+	var decoded map[string]any
+	if json.Unmarshal(raw, &decoded) != nil {
+		return raw
+	}
+	stripStrictConstraints(decoded)
+	out, err := json.Marshal(decoded)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+// stripStrictConstraints walks schema nodes only, so a property that happens
+// to be named "minimum" is kept.
+func stripStrictConstraints(node map[string]any) {
+	for _, k := range strictUnsupported {
+		delete(node, k)
+	}
+	if n, ok := node["minItems"].(float64); ok && n > 1 {
+		delete(node, "minItems")
+	}
+	for _, key := range []string{"properties", "$defs", "definitions"} {
+		if children, ok := node[key].(map[string]any); ok {
+			for _, child := range children {
+				if m, ok := child.(map[string]any); ok {
+					stripStrictConstraints(m)
+				}
+			}
+		}
+	}
+	for _, key := range []string{"items", "anyOf", "allOf", "oneOf", "prefixItems"} {
+		switch v := node[key].(type) {
+		case map[string]any:
+			stripStrictConstraints(v)
+		case []any:
+			for _, child := range v {
+				if m, ok := child.(map[string]any); ok {
+					stripStrictConstraints(m)
+				}
+			}
+		}
+	}
+}
+
+// nestedClosed reports whether no nested schema sets additionalProperties to
+// anything but false; strict mode rejects a map-shaped object such as
+// {"additionalProperties":{"type":"string"}} with HTTP 400.
+func nestedClosed(node any) bool {
+	switch v := node.(type) {
+	case map[string]any:
+		if ap, ok := v["additionalProperties"]; ok && ap != false {
+			return false
+		}
+		for _, child := range v {
+			if !nestedClosed(child) {
+				return false
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if !nestedClosed(child) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // roundUsage maps the round's token accounting, cache read/write included.

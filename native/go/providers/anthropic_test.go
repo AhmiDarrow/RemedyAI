@@ -329,6 +329,52 @@ func TestAnthropicFableNeverSendsForcedToolChoiceOrBudget(t *testing.T) {
 	}
 }
 
+// Strict mode 400s on any object whose additionalProperties is not false, at
+// any depth (the shell tool's env map tripped it).
+func TestSchemaIsStrictRequiresEveryObjectClosed(t *testing.T) {
+	cases := map[string]bool{
+		`{"type":"object","properties":{"a":{"type":"string"}},"required":["a"],"additionalProperties":false}`:                                                    true,
+		`{"type":"object","properties":{"o":{"type":"object","properties":{},"additionalProperties":false}},"required":["o"],"additionalProperties":false}`:       true,
+		`{"type":"object","properties":{"env":{"type":"object","additionalProperties":{"type":"string"}}},"required":["env"],"additionalProperties":false}`:       false,
+		`{"type":"object","properties":{"o":{"type":"object","additionalProperties":true}},"required":["o"],"additionalProperties":false}`:                        false,
+		`{"type":"object","properties":{"l":{"type":"array","items":{"type":"object","additionalProperties":{}}}},"required":["l"],"additionalProperties":false}`: false,
+		`{"type":"object","properties":{"a":{"type":"string"}},"required":["a"],"additionalProperties":true}`:                                                     false,
+		`{"type":"object","properties":{"a":{"type":"string"}},"additionalProperties":false}`:                                                                     false,
+	}
+	for schema, want := range cases {
+		if got := schemaIsStrict(json.RawMessage(schema)); got != want {
+			t.Errorf("schemaIsStrict(%s) = %v, want %v", schema, got, want)
+		}
+	}
+}
+
+func TestStrictWireSchemaDropsUnsupportedConstraints(t *testing.T) {
+	in := `{"type":"object","additionalProperties":false,"required":["minimum","n"],"properties":{
+		"minimum":{"type":"string","minLength":1,"maxLength":9,"pattern":"^a"},
+		"n":{"type":"integer","minimum":1,"maximum":5,"enum":[1,2]},
+		"l":{"type":"array","minItems":2,"maxItems":4,"uniqueItems":true,"items":{"type":"number","multipleOf":2}},
+		"one":{"type":"array","minItems":1,"items":{"anyOf":[{"type":"integer","exclusiveMinimum":0}]}}}}`
+	var got map[string]any
+	if err := json.Unmarshal(strictWireSchema(json.RawMessage(in)), &got); err != nil {
+		t.Fatal(err)
+	}
+	props := got["properties"].(map[string]any)
+	if _, ok := props["minimum"]; !ok {
+		t.Fatalf("a property named minimum must survive: %v", props)
+	}
+	flat, _ := json.Marshal(got)
+	for _, bad := range []string{"minLength", "maxLength", `"maximum"`, "maxItems", "uniqueItems", "multipleOf", "exclusiveMinimum", `"minItems":2`} {
+		if strings.Contains(string(flat), bad) {
+			t.Errorf("%s still on the wire: %s", bad, flat)
+		}
+	}
+	for _, keep := range []string{`"pattern":"^a"`, `"enum":[1,2]`, `"minItems":1`, `"additionalProperties":false`} {
+		if !strings.Contains(string(flat), keep) {
+			t.Errorf("%s dropped: %s", keep, flat)
+		}
+	}
+}
+
 func TestAnthropicStrictToolsOnlyForClosedSchemas(t *testing.T) {
 	rec := newRecorder(roundSSE("ok", "end_turn"))
 	srv := rec.serve(t)
