@@ -603,3 +603,44 @@ def test_updater_signatures_stay_raw_minisign() -> None:
     assert rl.safe_asset_name("Remedy Desktop_1.2.0_x64-setup.exe") == "Remedy.Desktop_1.2.0_x64-setup.exe"
 
 
+def test_reduced_gate_runs_only_the_lanes_docs_and_tests_need() -> None:
+    """Docs- and test-only changes on top of a green tree run the checks lane
+    plus the lanes that execute them; anything that can change what ships
+    needs the full matrix."""
+    prepush = _prepush_module()
+    lanes = prepush.lanes_for_paths
+    assert lanes(["README.md", "docs/manual/22-grove.md"]) == {"checks"}
+    assert lanes(["desktop/src/help/articles/22-grove.md"]) == {"checks", "desktop"}
+    assert lanes(["src/remedy/bundled_skills/x/SKILL.md"]) == {"checks", "linux", "python"}
+    assert lanes(["tests/test_ci_matrix.py"]) == {"checks", "linux", "python"}
+    assert lanes(["desktop/src/grove/head.test.ts"]) == {"checks", "desktop"}
+    assert lanes(["desktop/src/components/X.test.tsx"]) == {"checks", "desktop"}
+    assert lanes(["native/go/httpapi/partner_head_test.go"]) == {"checks", "native", "linux"}
+    assert lanes(["android/app/src/test/kotlin/A.kt"]) == {"checks", "android"}
+    assert lanes(["tests\\test_x.py"]) == {"checks", "linux", "python"}  # Windows separators
+
+    # Anything that ships, builds, or is read by another stack: full matrix.
+    for path in (
+        "scripts/prepush.py",
+        "src/remedy/core/web_helpers.py",
+        "desktop/src/grove/GroveApp.tsx",
+        "desktop/src/grove/head.test.ts.snap",
+        "native/go/httpapi/partner_head.go",
+        "android/app/src/main/kotlin/A.kt",
+        ".github/workflows/desktop-release.yml",
+        "pyproject.toml",
+        "tests/fixtures/connect/noise_ik_snow.json",
+        "desktop/package.json",
+    ):
+        assert lanes([path]) is None, path
+    assert lanes(["tests/test_x.py", "src/remedy/core/a.py"]) is None, "one shipping file widens to full"
+    assert lanes([]) is None, "no diff means nothing to reduce from"
+    assert set(prepush.ALL_LANE_KEYS) == {lane.key for lane in prepush.LANES}
+
+    source = (ROOT / "scripts" / "prepush.py").read_text("utf-8")
+    verify = source[source.index("def verify_tree(") :]
+    assert "if only is None and not force:" in verify, "--force always runs the full matrix"
+    assert 'record["reduced_from"] = reduced_from' in verify, "reduced runs say so in the record"
+    assert "if only is None or reduced_from is not None:" in verify, "hand-picked --only never stamps"
+
+

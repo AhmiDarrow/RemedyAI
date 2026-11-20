@@ -15,7 +15,8 @@ Rules the hook enforces (see AGENTS.md "Local CI"):
 
 * A push to ``master``/``main`` needs a clean working tree, HEAD equal to the
   commit being pushed, a fast-forward, and a green run of the full matrix on
-  that tree. Green runs are remembered per tree hash under ``.git`` so a
+  that tree. When everything that changed since a green ancestor is docs or
+  tests (see ``lanes_for_paths``), only the lanes covering them run. Green runs are remembered per tree hash under ``.git`` so a
   re-push of an already verified tree does not repeat forty minutes of work.
 * A push of a release tag ``v*`` needs the tagged commit already on the
   remote's master, every version surface equal to the tag, and a green run
@@ -703,6 +704,59 @@ def with_required_lanes(keys: set[str]) -> set[str]:
         wanted |= pulled
 
 
+# --------------------------------------------------------------------------- #
+# Reduced gate for test- and docs-only changes (owner decision, 2026-11)
+# --------------------------------------------------------------------------- #
+
+ALL_LANE_KEYS = frozenset({"checks", "linux", "desktop", "rust", "native", "android", "python"})
+
+
+def lanes_for_paths(paths: list[str]) -> set[str] | None:
+    """Lanes that cover a change made only of docs and tests, or None when any
+    path needs the full matrix.
+
+    Only files that cannot change what ships qualify: Markdown, Python tests,
+    desktop ``*.test.ts(x)``, Go ``*_test.go`` and Android unit tests. The
+    checks lane (sanitize, lint, types, docs) always runs. Anything else —
+    app code, scripts, workflows, build or config files, test fixtures that
+    other stacks read — needs every lane.
+    """
+    lanes = {"checks"}
+    if not paths:
+        return None
+    for raw in paths:
+        p = raw.replace("\\", "/").strip()
+        if not p:
+            continue
+        if p.endswith(".md"):
+            # Markdown that ships: help articles are bundled into the SPA,
+            # bundled skills are read by the Python runtime and its tests.
+            if p.startswith("desktop/"):
+                lanes.add("desktop")
+            elif p.startswith("src/"):
+                lanes |= {"linux", "python"}
+            continue
+        if p.startswith("tests/") and p.endswith(".py"):
+            lanes |= {"linux", "python"}
+        elif p.startswith("desktop/src/") and re.search(r"\.test\.tsx?$", p):
+            lanes.add("desktop")
+        elif p.startswith("native/go/") and p.endswith("_test.go"):
+            lanes |= {"native", "linux"}
+        elif p.startswith("android/") and "/src/test/" in p:
+            lanes.add("android")
+        else:
+            return None
+    return lanes
+
+
+def last_green_ancestor(commit: str, *, depth: int = 50) -> str | None:
+    """The newest ancestor of `commit` whose tree this gate recorded green."""
+    for ancestor in _git("rev-list", f"--max-count={depth}", commit, check=False).split()[1:]:
+        if verified_green(ancestor):
+            return ancestor
+    return None
+
+
 def verify_tree(commit: str, *, serial: bool, force: bool, only: set[str] | None) -> bool:
     tree = _tree_of(commit)
     stamp = _state_dir() / "verified" / tree
@@ -714,6 +768,21 @@ def verify_tree(commit: str, *, serial: bool, force: bool, only: set[str] | None
             "Use --force to rerun."
         )
         return True
+
+    reduced_from: str | None = None
+    if only is None and not force:
+        base = last_green_ancestor(commit)
+        if base:
+            changed = _git("diff", "--name-only", base, commit, check=False).splitlines()
+            needed = lanes_for_paths(changed)
+            if needed is not None and needed != ALL_LANE_KEYS:
+                only = needed
+                reduced_from = base
+                _say(
+                    f"prepush: only docs/tests changed since green {base[:12]} "
+                    f"({len(changed)} file(s)); running {', '.join(sorted(needed))}. "
+                    "Use --force for the full matrix."
+                )
 
     if only is not None:
         only = with_required_lanes(only)
@@ -738,19 +807,20 @@ def verify_tree(commit: str, *, serial: bool, force: bool, only: set[str] | None
         _say(f"prepush: RED after {minutes} min. Fix it here; do not push.")
         return False
 
-    if only is None:
-        stamp.write_text(
-            json.dumps(
-                {
-                    "commit": commit,
-                    "tree": tree,
-                    "when": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "host": platform.node(),
-                    "minutes": minutes,
-                }
-            ),
-            encoding="utf-8",
-        )
+    # A hand-picked --only run never stamps; a full run or a reduced run
+    # (docs/tests on top of a green tree) does.
+    if only is None or reduced_from is not None:
+        record: dict[str, object] = {
+            "commit": commit,
+            "tree": tree,
+            "when": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "host": platform.node(),
+            "minutes": minutes,
+        }
+        if reduced_from is not None:
+            record["reduced_from"] = reduced_from
+            record["lanes"] = sorted(ln.key for ln in lanes)
+        stamp.write_text(json.dumps(record), encoding="utf-8")
     _say(f"prepush: GREEN after {minutes} min.")
     return True
 
