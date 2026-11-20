@@ -46,6 +46,22 @@ From the creator: *My name is Ahmi, I hope you enjoy my Remedy.*
 
 ---
 
+## How it fits together
+
+```mermaid
+flowchart LR
+  desk[Desktop app<br/>Grove · Alongside · Studio] --> rt
+  cli["CLI: remedy serve"] --> rt
+  rt[remedy-runtime, Go<br/>127.0.0.1:7400] --> workers[Python workers<br/>model · voice · vision]
+  rt --> zig[Zig capability core<br/>checks before it acts]
+  rt --> home[(~/.remedy<br/>memory · state · events)]
+  rt --> gw[Gateway<br/>Telegram · Discord · Slack · more]
+  rt --> claim[ClaimIDX host<br/>known fixes for agents]
+  workers --> model{{Your model<br/>cloud key or local RMB}}
+```
+
+Details: [docs/ARCHITECTURE.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/ARCHITECTURE.md).
+
 ## Supported platforms
 
 These are the platforms with published assets on the [latest GitHub release](https://github.com/AhmiDarrow/RemedyAI/releases/latest). The table lists only triples that shipped and whose checksums were verified against `remedy-native-SHA256SUMS.txt`. From 0.69.0 the main release lists only the Desktop installers and `latest.json`. The CLI runtime files, macOS updater tarballs, and signatures are on a `runtime-v<version>` companion prerelease, which `pip` installs fetch automatically.
