@@ -258,6 +258,29 @@ func TestAnthropicEffortByShape(t *testing.T) {
 	}
 }
 
+// Haiku 5.5 is adaptive: budget_tokens is a 400 there, and its window is 1M.
+func TestAnthropicHaiku55UsesAdaptiveThinking(t *testing.T) {
+	rec := newRecorder(roundSSE("ok", "end_turn"))
+	srv := rec.serve(t)
+	a := newAdapter(srv, "claude-haiku-5-5")
+	collect(t, a, simpleTurn())
+	thinking, _ := rec.body(0)["thinking"].(map[string]any)
+	if thinking["type"] != "adaptive" {
+		t.Fatalf("Haiku 5.5 thinking = %v", rec.body(0)["thinking"])
+	}
+	if _, ok := thinking["budget_tokens"]; ok {
+		t.Fatalf("budget_tokens sent to Haiku 5.5: %v", thinking)
+	}
+	if a.ContextWindow() != anthropicFrontierWindow {
+		t.Fatalf("Haiku 5.5 window = %d", a.ContextWindow())
+	}
+	for _, legacy := range []string{"claude-haiku-4-5", "claude-3-5-haiku-latest", "claude-3-haiku-20240307", "claude-3-7-sonnet-latest"} {
+		if supportsAdaptiveThinking(legacy) {
+			t.Errorf("%s must stay on the legacy path", legacy)
+		}
+	}
+}
+
 func TestAnthropicHaikuOmitsAdaptiveThinkingAndEffort(t *testing.T) {
 	rec := newRecorder(roundSSE("ok", "end_turn"))
 	srv := rec.serve(t)
@@ -333,13 +356,18 @@ func TestAnthropicFableNeverSendsForcedToolChoiceOrBudget(t *testing.T) {
 // any depth (the shell tool's env map tripped it).
 func TestSchemaIsStrictRequiresEveryObjectClosed(t *testing.T) {
 	cases := map[string]bool{
-		`{"type":"object","properties":{"a":{"type":"string"}},"required":["a"],"additionalProperties":false}`:                                                    true,
-		`{"type":"object","properties":{"o":{"type":"object","properties":{},"additionalProperties":false}},"required":["o"],"additionalProperties":false}`:       true,
-		`{"type":"object","properties":{"env":{"type":"object","additionalProperties":{"type":"string"}}},"required":["env"],"additionalProperties":false}`:       false,
-		`{"type":"object","properties":{"o":{"type":"object","additionalProperties":true}},"required":["o"],"additionalProperties":false}`:                        false,
-		`{"type":"object","properties":{"l":{"type":"array","items":{"type":"object","additionalProperties":{}}}},"required":["l"],"additionalProperties":false}`: false,
-		`{"type":"object","properties":{"a":{"type":"string"}},"required":["a"],"additionalProperties":true}`:                                                     false,
-		`{"type":"object","properties":{"a":{"type":"string"}},"additionalProperties":false}`:                                                                     false,
+		`{"type":"object","properties":{"a":{"type":"string"}},"required":["a"],"additionalProperties":false}`:                                                                       true,
+		`{"type":"object","properties":{"o":{"type":"object","properties":{},"additionalProperties":false}},"required":["o"],"additionalProperties":false}`:                          true,
+		`{"type":"object","properties":{"env":{"type":"object","additionalProperties":{"type":"string"}}},"required":["env"],"additionalProperties":false}`:                          false,
+		`{"type":"object","properties":{"o":{"type":"object","additionalProperties":true}},"required":["o"],"additionalProperties":false}`:                                           false,
+		`{"type":"object","properties":{"l":{"type":"array","items":{"type":"object","additionalProperties":{}}}},"required":["l"],"additionalProperties":false}`:                    false,
+		`{"type":"object","properties":{"a":{"type":"string"}},"required":["a"],"additionalProperties":true}`:                                                                        false,
+		`{"type":"object","properties":{"o":{"type":"object","properties":{"x":{"type":"string"}}}},"required":["o"],"additionalProperties":false}`:                                  false,
+		`{"type":"object","properties":{"o":{"type":"object"}},"required":["o"],"additionalProperties":false}`:                                                                       false,
+		`{"type":"object","properties":{"o":{"type":["object","null"]}},"required":["o"],"additionalProperties":false}`:                                                              false,
+		`{"type":"object","properties":{"l":{"type":"array","items":{"type":"object","properties":{}}}},"required":["l"],"additionalProperties":false}`:                              false,
+		`{"type":"object","properties":{"l":{"type":"array","items":{"type":"object","properties":{},"additionalProperties":false}}},"required":["l"],"additionalProperties":false}`: true,
+		`{"type":"object","properties":{"a":{"type":"string"}},"additionalProperties":false}`:                                                                                        false,
 	}
 	for schema, want := range cases {
 		if got := schemaIsStrict(json.RawMessage(schema)); got != want {

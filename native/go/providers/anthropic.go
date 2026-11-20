@@ -162,7 +162,7 @@ func (a *Anthropic) ContextWindow() int {
 	if n := envContextWindow(); n > 0 {
 		return n
 	}
-	if strings.Contains(strings.ToLower(a.Model), "haiku") {
+	if strings.Contains(strings.ToLower(a.Model), "haiku") && !supportsAdaptiveThinking(a.Model) {
 		return anthropicHaikuWindow
 	}
 	return anthropicFrontierWindow
@@ -534,10 +534,11 @@ func ownerEffort(effort, model string) anthropic.OutputConfigEffort {
 // 4.6 generation; Haiku 4.5 and older reject them.
 func supportsAdaptiveThinking(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
-	if m == "" || strings.Contains(m, "haiku") {
+	if m == "" {
 		return false
 	}
-	for _, legacy := range []string{"-4-5", "-4-1", "-3-5", "-3-7", "-2-"} {
+	// Haiku 5.5 is adaptive (and rejects budget_tokens); Haiku 4.5 / 3.x match below.
+	for _, legacy := range []string{"-4-5", "-4-1", "-3-5", "-3-7", "-2-", "claude-3-"} {
 		if strings.Contains(m, legacy) {
 			return false
 		}
@@ -852,7 +853,12 @@ func stripStrictConstraints(node map[string]any) {
 func nestedClosed(node any) bool {
 	switch v := node.(type) {
 	case map[string]any:
-		if ap, ok := v["additionalProperties"]; ok && ap != false {
+		ap, has := v["additionalProperties"]
+		if has && ap != false {
+			return false
+		}
+		// Strict also 400s on an object that leaves additionalProperties out.
+		if !has && isObjectSchema(v) {
 			return false
 		}
 		for _, child := range v {
@@ -868,6 +874,24 @@ func nestedClosed(node any) bool {
 		}
 	}
 	return true
+}
+
+// isObjectSchema reports whether node describes a JSON object.
+func isObjectSchema(node map[string]any) bool {
+	if _, ok := node["properties"].(map[string]any); ok {
+		return true
+	}
+	switch t := node["type"].(type) {
+	case string:
+		return t == "object"
+	case []any:
+		for _, item := range t {
+			if item == "object" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // roundUsage maps the round's token accounting, cache read/write included.
