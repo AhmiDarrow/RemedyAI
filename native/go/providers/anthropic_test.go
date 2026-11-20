@@ -258,6 +258,82 @@ func TestAnthropicEffortByShape(t *testing.T) {
 	}
 }
 
+// The API 400s when a ttl=1h cache breakpoint follows a 5m one (tools, then
+// system, then messages). Every shape must keep the TTLs non-increasing.
+func TestAnthropicCacheTTLsNeverIncrease(t *testing.T) {
+	for _, shape := range []TurnShape{ShapeAuto, ShapeChat, ShapePlan, ShapeBuild, ShapeMission} {
+		rec := newRecorder(roundSSE("ok", "end_turn"))
+		srv := rec.serve(t)
+		a := newAdapter(srv, "claude-opus-5-5")
+		a.Shape = shape
+		a.SetTools(registrySurface())
+		collect(t, a, simpleTurn())
+		body := rec.body(0)
+		var ttls []string
+		var walk func(any)
+		walk = func(n any) {
+			switch v := n.(type) {
+			case map[string]any:
+				if cc, ok := v["cache_control"].(map[string]any); ok {
+					ttl, _ := cc["ttl"].(string)
+					if ttl == "" {
+						ttl = "5m"
+					}
+					ttls = append(ttls, ttl)
+				}
+				for _, k := range []string{"content"} {
+					walk(v[k])
+				}
+			case []any:
+				for _, c := range v {
+					walk(c)
+				}
+			}
+		}
+		walk(body["tools"])
+		walk(body["system"])
+		walk(body["messages"])
+		for i := 1; i < len(ttls); i++ {
+			if ttls[i] == "1h" && ttls[i-1] == "5m" {
+				t.Fatalf("shape %q: 1h breakpoint after 5m: %v", shape, ttls)
+			}
+		}
+		if len(ttls) == 0 {
+			t.Fatalf("shape %q: no cache breakpoints", shape)
+		}
+	}
+	// The shared surface keeps its 5m marker; only the request copy changes.
+	a := &Anthropic{Model: "claude-opus-5-5", Shape: ShapeBuild}
+	a.SetTools(registrySurface())
+	_ = a.buildParams(simpleTurn())
+	if ttl := a.tools[len(a.tools)-1].OfTool.CacheControl.TTL; ttl != "" {
+		t.Fatalf("buildParams mutated the shared tool surface: ttl=%q", ttl)
+	}
+}
+
+// Haiku 5.5 is adaptive: budget_tokens is a 400 there, and its window is 1M.
+func TestAnthropicHaiku55UsesAdaptiveThinking(t *testing.T) {
+	rec := newRecorder(roundSSE("ok", "end_turn"))
+	srv := rec.serve(t)
+	a := newAdapter(srv, "claude-haiku-5-5")
+	collect(t, a, simpleTurn())
+	thinking, _ := rec.body(0)["thinking"].(map[string]any)
+	if thinking["type"] != "adaptive" {
+		t.Fatalf("Haiku 5.5 thinking = %v", rec.body(0)["thinking"])
+	}
+	if _, ok := thinking["budget_tokens"]; ok {
+		t.Fatalf("budget_tokens sent to Haiku 5.5: %v", thinking)
+	}
+	if a.ContextWindow() != anthropicFrontierWindow {
+		t.Fatalf("Haiku 5.5 window = %d", a.ContextWindow())
+	}
+	for _, legacy := range []string{"claude-haiku-4-5", "claude-3-5-haiku-latest", "claude-3-haiku-20240307", "claude-3-7-sonnet-latest"} {
+		if supportsAdaptiveThinking(legacy) {
+			t.Errorf("%s must stay on the legacy path", legacy)
+		}
+	}
+}
+
 func TestAnthropicHaikuOmitsAdaptiveThinkingAndEffort(t *testing.T) {
 	rec := newRecorder(roundSSE("ok", "end_turn"))
 	srv := rec.serve(t)
@@ -329,7 +405,9 @@ func TestAnthropicFableNeverSendsForcedToolChoiceOrBudget(t *testing.T) {
 	}
 }
 
-func TestAnthropicStrictToolsOnlyForClosedSchemas(t *testing.T) {
+// No tool is strict: strict mode caps a request at 20 strict tools and 24
+// optional parameters, which the real surface exceeds (HTTP 400).
+func TestAnthropicToolsAreNeverStrict(t *testing.T) {
 	rec := newRecorder(roundSSE("ok", "end_turn"))
 	srv := rec.serve(t)
 	a := newAdapter(srv, "claude-opus-5")
@@ -349,8 +427,10 @@ func TestAnthropicStrictToolsOnlyForClosedSchemas(t *testing.T) {
 	if !ok {
 		t.Fatalf("tools advertised under %v", keysOf(byName))
 	}
-	if read["strict"] != true {
-		t.Fatalf("closed schema should be strict: %v", read)
+	for name, tool := range byName {
+		if _, ok := tool["strict"]; ok {
+			t.Fatalf("%s sent with strict: %v", name, tool)
+		}
 	}
 	schema, _ := read["input_schema"].(map[string]any)
 	if schema["additionalProperties"] != false {
@@ -358,9 +438,6 @@ func TestAnthropicStrictToolsOnlyForClosedSchemas(t *testing.T) {
 	}
 	if req, _ := schema["required"].([]any); len(req) != 1 || req[0] != "path" {
 		t.Fatalf("required lost in translation: %v", schema)
-	}
-	if open := byName["web_search"]; open["strict"] == true {
-		t.Fatalf("an open schema must not be strict: %v", open)
 	}
 }
 

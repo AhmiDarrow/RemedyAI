@@ -120,12 +120,12 @@ func (a *Anthropic) SetTools(list []RegistryTool) {
 		if _, ok := wireByABI[d.ID]; !ok {
 			wireByABI[d.ID] = wire
 		}
+		// Never strict: strict tool use caps a request at 20 strict tools and 24
+		// optional parameters and rejects common schema keywords, so this surface
+		// 400s under it. The registry validates every call against the full schema.
 		tool := anthropic.ToolParam{Name: wire, InputSchema: toolInputSchema(d.InputSchema)}
 		if desc := strings.TrimSpace(d.Description); desc != "" {
 			tool.Description = anthropic.String(desc)
-		}
-		if schemaIsStrict(d.InputSchema) {
-			tool.Strict = anthropic.Bool(true)
 		}
 		tools = append(tools, anthropic.ToolUnionParam{OfTool: &tool})
 	}
@@ -157,7 +157,7 @@ func (a *Anthropic) ContextWindow() int {
 	if n := envContextWindow(); n > 0 {
 		return n
 	}
-	if strings.Contains(strings.ToLower(a.Model), "haiku") {
+	if strings.Contains(strings.ToLower(a.Model), "haiku") && !supportsAdaptiveThinking(a.Model) {
 		return anthropicHaikuWindow
 	}
 	return anthropicFrontierWindow
@@ -460,6 +460,17 @@ func (a *Anthropic) buildParams(turn cognition.Turn) anthropic.MessageNewParams 
 		System:    a.renderSystem(turn, shape),
 		Tools:     a.tools,
 	}
+	// A 1h system breakpoint may not follow a 5m one, and tools render first:
+	// build/mission turns cache the tool prefix for 1h too (on a copy, so the
+	// shared surface is never mutated under a concurrent stream).
+	if (shape == ShapeBuild || shape == ShapeMission) && len(a.tools) > 0 {
+		if last := a.tools[len(a.tools)-1].OfTool; last != nil {
+			tool := *last
+			tool.CacheControl = anthropic.NewCacheControlEphemeralParam()
+			tool.CacheControl.TTL = anthropic.CacheControlEphemeralTTLTTL1h
+			params.Tools = append(append([]anthropic.ToolUnionParam(nil), a.tools[:len(a.tools)-1]...), anthropic.ToolUnionParam{OfTool: &tool})
+		}
+	}
 	// Adaptive thinking with summaries is what feeds @@thinking:. Pre-4.6
 	// models reject it, and none of them are worth a fixed budget_tokens here.
 	if supportsAdaptiveThinking(model) {
@@ -529,10 +540,11 @@ func ownerEffort(effort, model string) anthropic.OutputConfigEffort {
 // 4.6 generation; Haiku 4.5 and older reject them.
 func supportsAdaptiveThinking(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
-	if m == "" || strings.Contains(m, "haiku") {
+	if m == "" {
 		return false
 	}
-	for _, legacy := range []string{"-4-5", "-4-1", "-3-5", "-3-7", "-2-"} {
+	// Haiku 5.5 is adaptive (and rejects budget_tokens); Haiku 4.5 / 3.x match below.
+	for _, legacy := range []string{"-4-5", "-4-1", "-3-5", "-3-7", "-2-", "claude-3-"} {
 		if strings.Contains(m, legacy) {
 			return false
 		}
@@ -741,7 +753,7 @@ func markLastUserBreakpoint(msgs []anthropic.MessageParam) {
 
 // toolInputSchema carries the registry's JSON Schema through unchanged:
 // properties and required are typed fields, everything else (notably
-// additionalProperties, which strict mode requires) rides in ExtraFields.
+// additionalProperties) rides in ExtraFields.
 func toolInputSchema(raw json.RawMessage) anthropic.ToolInputSchemaParam {
 	schema := anthropic.ToolInputSchemaParam{Properties: map[string]any{}}
 	var decoded map[string]any
@@ -770,21 +782,6 @@ func toolInputSchema(raw json.RawMessage) anthropic.ToolInputSchemaParam {
 		schema.ExtraFields = extra
 	}
 	return schema
-}
-
-// schemaIsStrict reports whether the schema is closed enough for strict tool
-// use: additionalProperties:false plus a non-empty required list.
-func schemaIsStrict(raw json.RawMessage) bool {
-	var decoded map[string]any
-	if len(raw) == 0 || json.Unmarshal(raw, &decoded) != nil || decoded == nil {
-		return false
-	}
-	closed, ok := decoded["additionalProperties"].(bool)
-	if !ok || closed {
-		return false
-	}
-	required, ok := decoded["required"].([]any)
-	return ok && len(required) > 0
 }
 
 // roundUsage maps the round's token accounting, cache read/write included.
