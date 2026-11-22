@@ -84,7 +84,10 @@ func RegisterSettingsTools(registry *tools.Registry, server SettingsServerProvid
 		InputSchema: json.RawMessage(`{
 			"type":"object",
 			"properties":{
-				"keys":{"type":"array","items":{"type":"string"},"description":"Optional subset of safe keys to return"}
+				"keys":{"type":"array","items":{"type":"string"},"description":"Optional subset of safe keys to return"},
+				"caller_origin":{"type":"string","description":"Bound by the runtime"},
+				"session_id":{"type":"string","description":"Bound by the runtime"},
+				"home_dir":{"type":"string","description":"Bound by the runtime"}
 			},
 			"additionalProperties":false
 		}`),
@@ -115,7 +118,11 @@ func RegisterSettingsTools(registry *tools.Registry, server SettingsServerProvid
 			"type":"object",
 			"required":["patch"],
 			"properties":{
-				"patch":{"type":"object","description":"Partial settings object of safe keys only"}
+				"patch":{"type":"object","description":"Partial settings object of safe keys only"},
+				"confirm":{"type":"boolean","description":"Required to apply sensitive house-rules keys"},
+				"caller_origin":{"type":"string","description":"Bound by the runtime"},
+				"session_id":{"type":"string","description":"Bound by the runtime"},
+				"home_dir":{"type":"string","description":"Bound by the runtime"}
 			},
 			"additionalProperties":false
 		}`),
@@ -125,7 +132,8 @@ func RegisterSettingsTools(registry *tools.Registry, server SettingsServerProvid
 			"properties":{
 				"ok":{"type":"boolean"},
 				"status":{"type":"string"},
-				"changes":{"type":"array","items":{"type":"string"}},
+				"needs_confirmation":{"type":"boolean"},
+				"changes":{"type":["array","object"],"items":{"type":"string"}},
 				"settings":{"type":"object"},
 				"refused":{"type":"array","items":{"type":"string"}},
 				"error":{"type":"string"}
@@ -180,10 +188,16 @@ func executeSettingsPatch(server SettingsServerProvider, req tools.Request) (too
 		return tools.Result{Output: out}, nil
 	}
 	var body struct {
-		Patch map[string]any `json:"patch"`
+		Patch        map[string]any `json:"patch"`
+		Confirm      bool           `json:"confirm"`
+		CallerOrigin string         `json:"caller_origin"`
 	}
 	if err := json.Unmarshal(req.Input, &body); err != nil || body.Patch == nil {
 		return tools.Result{}, tools.ErrInvalidInput
+	}
+	if !originMayChangeHouseRules(body.CallerOrigin) {
+		out, _ := json.Marshal(map[string]any{"ok": false, "error": "peers cannot change house rules"})
+		return tools.Result{Output: out}, nil
 	}
 	if len(body.Patch) == 0 {
 		out, _ := json.Marshal(map[string]any{"ok": false, "error": "empty patch"})
@@ -221,6 +235,15 @@ func executeSettingsPatch(server SettingsServerProvider, req tools.Request) (too
 	}
 	if len(clean) == 0 {
 		out, _ := json.Marshal(map[string]any{"ok": false, "error": "no recognized safe settings keys in patch"})
+		return tools.Result{Output: out}, nil
+	}
+	if sensitiveSettingsNeedConfirm(clean) && !body.Confirm {
+		out, _ := json.Marshal(map[string]any{
+			"ok":                 true,
+			"needs_confirmation": true,
+			"changes":            settingDiff(s, clean),
+			"error":              "this change needs the owner's explicit confirmation",
+		})
 		return tools.Result{Output: out}, nil
 	}
 
@@ -318,4 +341,45 @@ func (r *CognitionTurnRunner) AttachSettingsTools(server SettingsServerProvider)
 	r.Policy = &RegistryPolicy{Registry: r.Registry, Approvals: r.Approvals, LiveContext: r.LiveContext}
 	r.syncModelToolSchemas()
 	return nil
+}
+
+// originMayChangeHouseRules matches Python house_rules.can_change_house_rules:
+// only the owner's own surfaces (desktop, web UI, CLI). Empty origin is desktop.
+func originMayChangeHouseRules(origin string) bool {
+	switch strings.ToLower(strings.TrimSpace(origin)) {
+	case "", "desktop", "webui", "cli", "fixture":
+		return true
+	default:
+		return false
+	}
+}
+
+func sensitiveSettingsKey(k string) bool {
+	switch strings.TrimSpace(k) {
+	case "approval_mode", "trust_profile", "privacy_mode", "memory_encrypt",
+		"inner_audit", "access_scope", "connect_enabled", "connect_bind_host",
+		"connect_bind_port", "claimidx_public_ledger", "interop_inbound",
+		"interop_bind", "interop_auto_reply", "interop_trust_policy":
+		return true
+	default:
+		return false
+	}
+}
+
+func sensitiveSettingsNeedConfirm(patch map[string]any) bool {
+	for k := range patch {
+		if sensitiveSettingsKey(k) {
+			return true
+		}
+	}
+	return false
+}
+
+func settingDiff(s *Server, patch map[string]any) map[string]any {
+	cur := scrubbedToolSettings(s)
+	out := map[string]any{}
+	for k, v := range patch {
+		out[k] = map[string]any{"from": cur[k], "to": v}
+	}
+	return out
 }

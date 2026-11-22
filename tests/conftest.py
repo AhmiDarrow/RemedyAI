@@ -38,6 +38,37 @@ os.environ["NO_COLOR"] = "1"
 os.environ.pop("FORCE_COLOR", None)
 os.environ.setdefault("TERM", "dumb")
 
+# Hidden ``remedy_core`` spawns refuse interpreter/launcher overrides
+# (BROWSER, LD_PRELOAD, NODE_OPTIONS, …). Agent and desktop shells often have
+# these set; if a test forwards ``os.environ`` into ``run_hidden``, the native
+# path returns env_denied. Drop them so the suite does not depend on the
+# parent shell. Same idea as NO_COLOR above.
+#
+# Also drop DISPLAY / WAYLAND_DISPLAY: with a live desktop (or this box's
+# agent display) computer observe tools can abort the whole process in glib /
+# AT-SPI. The suite must not drive a real display.
+for _env_key in (
+    "BROWSER",
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "LD_AUDIT",
+    "GIT_SSH_COMMAND",
+    "GIT_EXEC_PATH",
+    "PYTHONSTARTUP",
+    "PERL5OPT",
+    "NODE_OPTIONS",
+    "RUBYOPT",
+    "BASH_ENV",
+    "ENV",
+    "PROMPT_COMMAND",
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+):
+    os.environ.pop(_env_key, None)
+for _env_key in list(os.environ):
+    if _env_key.startswith("DYLD_"):
+        os.environ.pop(_env_key, None)
+
 
 @pytest.fixture(autouse=True)
 def _reset_provider_breaker():

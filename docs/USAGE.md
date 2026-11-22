@@ -56,6 +56,8 @@ The chat **answer is never truncated** by this setting. After a turn, process st
 
 **Settings → You & Agent → Your name** is what Remedy calls you (synced to profile). Set during setup or when prompted after first run.
 
+First launch: the app gets Remedy’s mind ready, then she talks you through house rules (Traditional setup is always a click away). See [SETUP.md](SETUP.md) and [HOUSE_RULES.md](HOUSE_RULES.md).
+
 ---
 
 ## Getting Started

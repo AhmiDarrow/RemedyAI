@@ -16,6 +16,7 @@ Type `/` in the composer for autocomplete. Commands also work via
 | `/forget` | `text` | Remove a matching Partner Memory fact |
 | `/pin` | `text` | Pin a fact so it always injects |
 | `/whoami` | | Profile / known facts + this-home census |
+| `/house-rules` | `revisit` | Show house rules, or go over them again |
 | `/stretch` | alias `/home` | Re-map this PC (hardware, tools, rooms, local ports) |
 | `/goals` | | List life goals and the next action |
 | `/goal` | `title` | Hold a life goal; takes one local step (Documents/Remedy Life) |

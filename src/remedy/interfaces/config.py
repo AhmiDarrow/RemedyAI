@@ -1126,6 +1126,10 @@ claimidx_public_ledger = true
 # inner_coinage_rate = 0.3
 # inner_lexicon_cap = 128
 # inner_audit = true
+# onboarding = true
+# onboarding_reask = false
+# house_rules_permission = "confirm_sensitive"
+# house_rules_audit = true
 
 # Memory harness (chat compression)
 # harness_mode = "auto"     # off | manual | auto
@@ -1133,6 +1137,7 @@ claimidx_public_ledger = true
 # harness_max_context_pct = 0.92
 
 # Desktop always-ready (also in Settings / desktop.json)
+# update_check = "auto"   # auto (check in-app, tell you) | ask (only when you check)
 # launch_at_login = false
 # start_in_tray = false
 # close_to_tray = true
@@ -1332,6 +1337,13 @@ def mark_setup_completed(
         threading.Thread(
             target=_bg_stretch, name="remedy-home-stretch", daemon=True
         ).start()
+    except Exception:
+        pass
+    # --skip-setup and similar paths: keep defaults, never nag later.
+    try:
+        from remedy.core.house_rules import close_onboarding_if_still_open
+
+        close_onboarding_if_still_open(path.parent)
     except Exception:
         pass
     return path

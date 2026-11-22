@@ -2,9 +2,11 @@
 
 ## Check for updates
 
+Updates are in-app only. House rules `update_check = auto` (the default) runs the automatic checks below. `update_check = ask` turns those off; you can still check from the logo menu, Settings → About, or the tray. There is no forced nag.
+
 | Where | Action |
 |-------|--------|
-| **On launch** | One automatic check after the local server is ready (silent unless an update exists) |
+| **On launch** | One automatic check after the local server is ready (silent unless an update exists); skipped when `update_check = ask` |
 | Logo menu | **Check for updates…** |
 | Settings → About | **Check for Updates** |
 | Tray | Updates entry |
