@@ -115,6 +115,68 @@ func TestEngineStreamsBatchesAndCompletes(t *testing.T) {
 	}
 }
 
+func TestEngineAfterToolBatchRunsOncePerBatch(t *testing.T) {
+	var batches atomic.Int32
+	var seen int
+	engine := Engine{
+		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+			if batches.Add(1) == 1 {
+				return events(
+					ModelEvent{ToolCall: &ToolCall{ID: "1", Name: "read", Input: []byte(`{"path":"a.py"}`)}},
+					ModelEvent{ToolCall: &ToolCall{ID: "2", Name: "grep", Input: []byte(`{"pattern":"x"}`)}},
+				), nil
+			}
+			return events(ModelEvent{Text: "done", Done: true}), nil
+		}),
+		Tools: toolFunc(func(_ context.Context, call ToolCall) ToolResult {
+			return ToolResult{ID: call.ID, Name: call.Name, Output: []byte("ok")}
+		}),
+		Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+		AfterToolBatch: func(_ context.Context, calls []ToolCall, results []ToolResult) {
+			seen++
+			if len(calls) != 2 || len(results) != 2 {
+				t.Errorf("batch size calls=%d results=%d", len(calls), len(results))
+			}
+			if calls[0].Name != "read" || results[0].Name != "read" {
+				t.Errorf("first tool = %s / %s", calls[0].Name, results[0].Name)
+			}
+		},
+	}
+	out := engine.Run(context.Background(), "goal")
+	if out.Err != nil {
+		t.Fatalf("err = %v", out.Err)
+	}
+	if seen != 1 {
+		t.Fatalf("AfterToolBatch calls = %d, want 1", seen)
+	}
+}
+
+func TestEngineAfterToolBatchPanicIsRecovered(t *testing.T) {
+	var n atomic.Int32
+	engine := Engine{
+		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+			if n.Add(1) == 1 {
+				return events(ModelEvent{ToolCall: &ToolCall{ID: "1", Name: "read"}}), nil
+			}
+			return events(ModelEvent{Text: "ok", Done: true}), nil
+		}),
+		Tools: toolFunc(func(_ context.Context, call ToolCall) ToolResult {
+			return ToolResult{ID: call.ID, Name: call.Name, Output: []byte("ok")}
+		}),
+		Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+		AfterToolBatch: func(context.Context, []ToolCall, []ToolResult) {
+			panic("hook boom")
+		},
+	}
+	out := engine.Run(context.Background(), "goal")
+	if out.Err != nil {
+		t.Fatalf("panic in hook must not fail the turn: %v", out.Err)
+	}
+	if !strings.Contains(out.Text, "ok") {
+		t.Fatalf("text = %q", out.Text)
+	}
+}
+
 func TestEngineRetriesModelAndPausesForOwner(t *testing.T) {
 	var attempts atomic.Int32
 	engine := Engine{Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {

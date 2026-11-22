@@ -718,6 +718,24 @@ def _prompt_should_continue(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return should_continue(inp)
 
 
+def _prompt_turn_end(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.core.production_learn import finish_production_turn
+
+    return finish_production_turn(inp)
+
+
+def _prompt_after_tool_batch(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.core.production_learn import admit_production_tool_batch
+
+    return admit_production_tool_batch(inp)
+
+
+def _partner_improve(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.core.production_learn import run_unattended_learn
+
+    return run_unattended_learn(inp)
+
+
 def _voice_speak(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     from remedy.runtime.voice_vision_rmdy import voice_speak
 
@@ -885,6 +903,8 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("prompt.assemble", 1): _prompt_assemble,
     ("prompt.slim_epoch", 1): _prompt_slim_epoch,
     ("prompt.should_continue", 1): _prompt_should_continue,
+    ("prompt.turn_end", 1): _prompt_turn_end,
+    ("prompt.after_tool_batch", 1): _prompt_after_tool_batch,
     ("voice.speak", 1): _voice_speak,
     ("voice.transcribe", 1): _voice_transcribe,
     ("voice.install", 1): _voice_install,
@@ -906,6 +926,7 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("calendar.create_event", 1): _calendar_create_event,
     ("partner.vigil", 1): _partner_vigil,
     ("partner.pulse", 1): _partner_pulse,
+    ("partner.improve", 1): _partner_improve,
 }
 
 
@@ -1560,6 +1581,16 @@ def _start_local_search() -> None:
         logger.debug("local search host not scheduled", exc_info=True)
 
 
+def _start_voice_evolution() -> None:
+    """Start daily voice drift once the worker is up. Local-only; fail-safe."""
+    try:
+        from remedy.voice.service import start_voice_evolution
+
+        start_voice_evolution()
+    except Exception:
+        logger.debug("voice evolution not started", exc_info=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="remedy.runtime.rmdy_tool_worker")
     parser.add_argument(
@@ -1576,6 +1607,7 @@ def main(argv: list[str] | None = None) -> int:
     if configured and deps_dir is None:
         logger.warning("%s points at a missing directory: %s", _ENV_DEPS_DIR, configured)
     verify_dependencies()
+    _start_voice_evolution()
     _start_local_search()
     endpoint = (args.endpoint or os.environ.get("REMEDY_RMDY_ENDPOINT") or "").strip()
     if endpoint:

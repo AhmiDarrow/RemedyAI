@@ -746,6 +746,106 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	})); err != nil {
 		return err
 	}
+
+	if err := registry.Register(Descriptor{
+		ID:          "prompt.turn_end",
+		Version:     1,
+		Description: "Post-turn learning (local mirror of Python worker)",
+		Runtime:     RuntimeGo,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"message":{"type":"string"},
+				"goal":{"type":"string"},
+				"user_text":{"type":"string"},
+				"assistant_text":{"type":"string"},
+				"text":{"type":"string"},
+				"session_id":{"type":"string"},
+				"plan_mode":{"type":"boolean"},
+				"chat_mode":{"type":"boolean"},
+				"tool_steps":{"type":"array","items":{"type":"object"}},
+				"home_dir":{"type":"string"},
+				"project_path":{"type":"string"}
+			},
+			"additionalProperties":true
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"ok":{"type":"boolean"},
+				"residue":{"type":"string"},
+				"genome":{"type":"integer"},
+				"learned":{"type":"boolean"}
+			},
+			"additionalProperties":true
+		}`),
+	}, ExecutorFunc(func(_ context.Context, request Request) (Result, error) {
+		out, err := json.Marshal(map[string]any{"ok": true, "residue": "", "genome": 0, "learned": false})
+		return Result{Output: out}, err
+	})); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:          "prompt.after_tool_batch",
+		Version:     1,
+		Description: "Mid-turn metabolism after a tool batch (local mirror of Python worker)",
+		Runtime:     RuntimeGo,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"session_id":{"type":"string"},
+				"tier":{"type":"integer"},
+				"results":{"type":"array","items":{"type":"object"}},
+				"home_dir":{"type":"string"},
+				"project_path":{"type":"string"}
+			},
+			"additionalProperties":true
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"ok":{"type":"boolean"},
+				"eu_new":{"type":"integer"},
+				"evidence_units":{"type":"integer"},
+				"tools":{"type":"integer"}
+			},
+			"additionalProperties":true
+		}`),
+	}, ExecutorFunc(func(_ context.Context, request Request) (Result, error) {
+		out, err := json.Marshal(map[string]any{"ok": true, "eu_new": 0, "evidence_units": 0, "tools": 0})
+		return Result{Output: out}, err
+	})); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:          "partner.improve",
+		Version:     1,
+		Description: "Unattended organism learning tick (local mirror of Python worker)",
+		Runtime:     RuntimeGo,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"home_dir":{"type":"string"},
+				"project_path":{"type":"string"}
+			},
+			"additionalProperties":true
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok"],
+			"properties":{"ok":{"type":"boolean"}}
+		}`),
+	}, ExecutorFunc(func(_ context.Context, request Request) (Result, error) {
+		out, err := json.Marshal(map[string]any{"ok": true, "organism": map[string]any{}})
+		return Result{Output: out}, err
+	})); err != nil {
+		return err
+	}
 	return nil
 }
 

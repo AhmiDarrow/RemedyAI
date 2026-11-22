@@ -23,9 +23,10 @@ tree or the running product broken.
 ## When to use
 
 - User says self-improve, hot-inject, improve the codebase, fix our own code, self-dev.
-- Triggered on command, or automatically by the sidecar scheduler (starts at
-  boot when enabled). Organism learning ticks every ~60s with no user prompt;
-  ruff self-heal waits for ~5 minutes of *user-turn* idle on a clean tree.
+- Triggered on command, or automatically when enabled. The production Go hearth
+  clock runs organism learning every ~60s (`partner.improve`) with no user
+  prompt; code self-inject stays opt-in. Ruff self-heal waits for ~5 minutes
+  of *user-turn* idle on a clean tree.
 
 ## Round steps (in order)
 

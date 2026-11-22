@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -30,6 +32,11 @@ def _rt(root: Path) -> SimpleNamespace:
 
 # --- A: behavioral hop ---
 def test_behavioral_hop_green(tmp_path):
+    from tests.conftest import core_available
+
+    if not core_available():
+        pytest.skip("remedy_core not built in this environment")
+
     root = tmp_path
     tests = (
         "def test_ok():\n"
@@ -52,6 +59,11 @@ def test_behavioral_hop_green(tmp_path):
 
 
 def test_behavioral_hop_red(tmp_path):
+    from tests.conftest import core_available
+
+    if not core_available():
+        pytest.skip("remedy_core not built in this environment")
+
     tests = (
         "def test_ok():\n"
         "    from widget import helper\n"

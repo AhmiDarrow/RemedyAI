@@ -13,6 +13,7 @@ import (
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
 	"github.com/AhmiDarrow/RemedyAI/native/go/ipc"
+	"github.com/AhmiDarrow/RemedyAI/native/go/protocol"
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
 
@@ -734,5 +735,205 @@ func TestModelToolSurfaceHidesDemoTools(t *testing.T) {
 		if strings.HasPrefix(id, "prompt.") || strings.HasPrefix(id, "voice.") || strings.HasPrefix(id, "vision.") {
 			t.Fatalf("internal tool advertised: %s", id)
 		}
+	}
+}
+
+type countingFrameCaller struct {
+	inner     tools.FrameCaller
+	turnEnd   atomic.Int32
+	improve   atomic.Int32
+	toolBatch atomic.Int32
+	got       chan string
+}
+
+func (c *countingFrameCaller) Call(ctx context.Context, frame protocol.Frame) (protocol.Frame, error) {
+	if req, err := tools.UnmarshalWireRequest(frame.Payload); err == nil {
+		switch req.ToolID {
+		case "prompt.turn_end":
+			c.turnEnd.Add(1)
+			c.note(req.ToolID)
+		case "partner.improve":
+			c.improve.Add(1)
+			c.note(req.ToolID)
+		case "prompt.after_tool_batch":
+			c.toolBatch.Add(1)
+			c.note(req.ToolID)
+		}
+	}
+	return c.inner.Call(ctx, frame)
+}
+
+func (c *countingFrameCaller) note(id string) {
+	if c.got == nil {
+		return
+	}
+	select {
+	case c.got <- id:
+	default:
+	}
+}
+
+func TestCognitionTurnRunnerSchedulesPromptTurnEnd(t *testing.T) {
+	serverReg := tools.NewRegistry()
+	if err := tools.RegisterPythonWorkerLocalMirrors(serverReg); err != nil {
+		t.Fatal(err)
+	}
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go ipc.ServeConn(ctx, serverConn, tools.WorkerHandler{Registry: serverReg})
+	client := ipc.NewClient(clientConn)
+	defer client.Close()
+	counter := &countingFrameCaller{inner: client, got: make(chan string, 2)}
+
+	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
+		{{Text: "assembled-ok", Done: true}},
+	}}
+	r := NewCognitionTurnRunner(model)
+	if err := r.AttachPythonWorker(counter); err != nil {
+		t.Fatal(err)
+	}
+	out, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "hello partner", SessionID: "s-end"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "assembled-ok") {
+		t.Fatalf("missing final text: %q", out)
+	}
+	select {
+	case id := <-counter.got:
+		if id != "prompt.turn_end" {
+			t.Fatalf("got %q", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt.turn_end was not called after RunTurn")
+	}
+	if counter.turnEnd.Load() < 1 {
+		t.Fatal("prompt.turn_end count is zero")
+	}
+}
+
+func TestCognitionTurnRunnerSkipsTurnEndWithoutWorker(t *testing.T) {
+	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
+		{{Text: "raw-ok", Done: true}},
+	}}
+	r := NewCognitionTurnRunner(model)
+	if _, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCognitionTurnRunnerSchedulesAfterToolBatch(t *testing.T) {
+	serverReg := tools.NewRegistry()
+	if err := tools.RegisterPythonWorkerLocalMirrors(serverReg); err != nil {
+		t.Fatal(err)
+	}
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go ipc.ServeConn(ctx, serverConn, tools.WorkerHandler{Registry: serverReg})
+	client := ipc.NewClient(clientConn)
+	defer client.Close()
+	counter := &countingFrameCaller{inner: client, got: make(chan string, 4)}
+
+	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
+		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "read", Input: []byte(`{"path":"a.py"}`)}}},
+		{{Text: "batch-done", Done: true}},
+	}}
+	r := NewCognitionTurnRunner(model)
+	if err := r.AttachPythonWorker(counter); err != nil {
+		t.Fatal(err)
+	}
+	// Allow the scripted tool to run: RegistryPolicy would Deny an unregistered
+	// name, and we only need Echo-style execution plus the Python worker.
+	r.Registry = nil
+	r.Policy = cognition.AllowAll{}
+	r.Tools = cognition.EchoTools{}
+
+	out, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "read a.py", SessionID: "s-batch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "batch-done") {
+		t.Fatalf("missing final text: %q", out)
+	}
+	deadline := time.After(2 * time.Second)
+	sawBatch := false
+	for !sawBatch {
+		select {
+		case id := <-counter.got:
+			if id == "prompt.after_tool_batch" {
+				sawBatch = true
+			}
+		case <-deadline:
+			t.Fatal("prompt.after_tool_batch was not called after the tool batch")
+		}
+	}
+	if counter.toolBatch.Load() < 1 {
+		t.Fatal("prompt.after_tool_batch count is zero")
+	}
+}
+
+func TestToolBatchInputIncludesArguments(t *testing.T) {
+	rows := toolBatchInput(
+		[]cognition.ToolCall{{ID: "1", Name: "read", Input: []byte(`{"path":"a.py"}`)}},
+		[]cognition.ToolResult{{ID: "1", Name: "read", Output: []byte("ok")}},
+	)
+	if len(rows) != 1 {
+		t.Fatalf("rows=%v", rows)
+	}
+	if rows[0]["tool"] != "read" || rows[0]["ok"] != true || rows[0]["tool_call_id"] != "1" {
+		t.Fatalf("row=%v", rows[0])
+	}
+	args, _ := rows[0]["arguments"].(map[string]any)
+	if args["path"] != "a.py" {
+		t.Fatalf("arguments=%v", rows[0]["arguments"])
+	}
+}
+
+func TestPulseLearnCallsPartnerImprove(t *testing.T) {
+	serverReg := tools.NewRegistry()
+	if err := tools.RegisterPythonWorkerLocalMirrors(serverReg); err != nil {
+		t.Fatal(err)
+	}
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go ipc.ServeConn(ctx, serverConn, tools.WorkerHandler{Registry: serverReg})
+	client := ipc.NewClient(clientConn)
+	defer client.Close()
+	counter := &countingFrameCaller{inner: client}
+
+	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
+		{{Text: "x", Done: true}},
+	}}
+	r := NewCognitionTurnRunner(model)
+	if err := r.AttachPythonWorker(counter); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.PulseLearn(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if counter.improve.Load() != 1 {
+		t.Fatalf("partner.improve calls=%d", counter.improve.Load())
+	}
+}
+
+func TestToolStepsFromOutcomeUsesResults(t *testing.T) {
+	steps := toolStepsFromOutcome(cognition.Outcome{
+		Results: []cognition.ToolResult{{
+			ID:     "1",
+			Name:   "bash",
+			Output: []byte("ok"),
+		}},
+	})
+	if len(steps) != 1 || steps[0]["tool"] != "bash" || steps[0]["ok"] != true {
+		t.Fatalf("steps=%v", steps)
 	}
 }

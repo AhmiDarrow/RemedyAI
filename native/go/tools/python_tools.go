@@ -31,6 +31,7 @@ var modelHiddenToolIDs = map[string]struct{}{
 	"workspace.search": {},
 	"shell.exec":       {},
 	"partner.pulse":    {},
+	"partner.improve":  {},
 }
 
 // IsModelHiddenTool reports whether id is a demo/diagnostic tool that must be
@@ -676,6 +677,101 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 		}`,
 		},
 		{
+			id: "prompt.turn_end", desc: "Post-turn learning: residue, soul, skill genome, LearningLoop (internal; not model-callable)",
+			risk: RiskReadOnly,
+			in: `{
+			"type":"object",
+			"properties":{
+				"message":{"type":"string"},
+				"goal":{"type":"string"},
+				"user_text":{"type":"string"},
+				"assistant_text":{"type":"string"},
+				"text":{"type":"string"},
+				"session_id":{"type":"string"},
+				"plan_mode":{"type":"boolean"},
+				"chat_mode":{"type":"boolean"},
+				"tool_steps":{
+					"type":"array",
+					"items":{
+						"type":"object",
+						"properties":{
+							"tool":{"type":"string"},
+							"name":{"type":"string"},
+							"ok":{"type":"boolean"},
+							"success":{"type":"boolean"},
+							"result":{"type":"string"},
+							"error":{"type":"string"},
+							"duration_ms":{"type":"number"}
+						},
+						"additionalProperties":true
+					}
+				},
+				` + propHomeDir + `,
+				` + propProjectPath + `,
+				` + propGoBound + `
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"properties":{
+				"ok":{"type":"boolean"},
+				"residue":{"type":"string"},
+				"genome":{"type":"integer"},
+				"learned":{"type":"boolean"},
+				"skill":{"type":"string"},
+				"skipped":{"type":"string"}
+			},
+			"additionalProperties":true
+		}`,
+		},
+		{
+			id: "prompt.after_tool_batch", desc: "Mid-turn metabolism after a tool batch: admit evidence, update the machine map (internal; not model-callable)",
+			risk: RiskReadOnly,
+			in: `{
+			"type":"object",
+			"properties":{
+				"session_id":{"type":"string"},
+				"tier":{"type":"integer"},
+				"results":{
+					"type":"array",
+					"items":{
+						"type":"object",
+						"properties":{
+							"tool":{"type":"string"},
+							"name":{"type":"string"},
+							"ok":{"type":"boolean"},
+							"success":{"type":"boolean"},
+							"result":{"type":"string"},
+							"error":{"type":"string"},
+							"tool_call_id":{"type":"string"},
+							"arguments":{"type":"object","additionalProperties":true},
+							"input":{"type":"object","additionalProperties":true},
+							"duration_ms":{"type":"number"}
+						},
+						"additionalProperties":true
+					}
+				},
+				` + propHomeDir + `,
+				` + propProjectPath + `,
+				` + propGoBound + `
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"properties":{
+				"ok":{"type":"boolean"},
+				"eu_new":{"type":"integer"},
+				"evidence_units":{"type":"integer"},
+				"tools":{"type":"integer"},
+				"skipped":{"type":"string"}
+			},
+			"additionalProperties":true
+		}`,
+		},
+
+		{
 			id: "mail.list", desc: "List recent email messages from the connected account (Python worker)",
 			risk: RiskReadOnly,
 			in: `{
@@ -834,6 +930,32 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 				"error":{"type":"string"}
 			},
 			"additionalProperties":false
+		}`,
+		},
+		{
+			id:   "partner.improve",
+			desc: "One unattended organism learning tick (internal; not model-callable)",
+			risk: RiskReadOnly,
+			in: `{
+			"type":"object",
+			"properties":{
+				` + propHomeDir + `,
+				` + propGoBound + `,
+				"project_path":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"required":["ok"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"organism":{"type":"object"},
+				"code":{"type":"object"},
+				"skipped":{"type":"string"},
+				"error":{"type":"string"}
+			},
+			"additionalProperties":true
 		}`,
 		},
 	}
