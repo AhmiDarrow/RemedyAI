@@ -28,18 +28,26 @@ remedy serve --host 127.0.0.1 --port 7400
 remedy open                    # WebUI of a running serve, with a one-time link
 remedy skill list              # hides learned probation; --all / --learned
 remedy memory search "query"
-remedy mcp serve          # MCP stdio host for external MCP clients
+remedy mcp serve          # MCP stdio host (skills + talk-to-Remedy tools)
 ```
 
 Desktop sidecar already runs `serve` with `--skip-setup`. Do not start a second server on 7400 while Desktop is open unless you know what you are doing.
 
-### MCP host (export skills to other apps)
+### MCP host (export skills and talk-to-Remedy)
 
 ```bash
 remedy mcp serve
 # equivalent console script (packaged with remedy-ai):
 remedy-mcp
+# optional Streamable HTTP on loopback (never port 7400; that is remedy serve):
+remedy mcp serve --http --host 127.0.0.1 --port 7401
 ```
+
+`remedy mcp serve` exposes this machine's skills **and** talk-to-Remedy tools
+(`remedy_ask`, `remedy_delegate`, `remedy_task_status`, `remedy_share_context`)
+so Claude, ChatGPT, Cursor, or another MCP app can talk to her as a peer.
+Inbound A2A and MCP on `remedy serve` (`:7400`) stay off until you enable
+them in Settings → Advanced. Details: `docs/AGENT_INTEROP.md`.
 
 Configure any MCP-compatible client with a stdio MCP server (same Python env as `remedy`):
 

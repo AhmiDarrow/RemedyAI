@@ -1,7 +1,8 @@
 """Remedy as an MCP *server* (stdio JSON-RPC) — personal partner Phase C.
 
-Exposes this machine's skills (and read-only helpers) to external hosts
-(any MCP-compatible client) over loopback/stdio only.
+Exposes this machine's skills and talk-to-Remedy tools (ask, delegate,
+task status, share context) to external MCP clients over stdio, and
+optionally Streamable HTTP on a loopback port other than :7400.
 
 No multi-tenant gateway — same-owner local capability export.
 """
@@ -18,6 +19,7 @@ from typing import Any
 
 from remedy import __version__
 from remedy.home import default_home
+from remedy.interop.mcp_talk import TALK_TOOLS, call_talk_tool, negotiate_version
 
 logger = logging.getLogger(__name__)
 
@@ -145,21 +147,30 @@ def _tool_defs() -> list[dict[str, Any]]:
                 "properties": {"plan_id": {"type": "string"}},
             },
         },
-    ]
+    ] + list(TALK_TOOLS)
 
 
 class RemedyMCPServer:
     """Minimal stdio MCP server (newline-delimited JSON-RPC 2.0)."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, runtime: Any | None = None) -> None:
         self._reg = None
         self._initialized = False
+        self._runtime = runtime
 
     @property
     def registry(self):
         if self._reg is None:
             self._reg = _load_registry()
         return self._reg
+
+    @property
+    def runtime(self):
+        if self._runtime is None:
+            from remedy.interop.runtime import InteropRuntime
+
+            self._runtime = InteropRuntime(_home())
+        return self._runtime
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any] | None:
         """Handle one JSON-RPC message. Returns response or None for notifications."""
@@ -182,7 +193,9 @@ class RemedyMCPServer:
                 "jsonrpc": "2.0",
                 "id": mid,
                 "result": {
-                    "protocolVersion": PROTOCOL_VERSION,
+                    "protocolVersion": negotiate_version(
+                        str((params or {}).get("protocolVersion") or "") or PROTOCOL_VERSION
+                    ),
                     "capabilities": {"tools": {}},
                     "serverInfo": {
                         "name": "remedy",
@@ -235,6 +248,8 @@ class RemedyMCPServer:
         return self._error(mid, -32601, f"Method not found: {method}")
 
     def _call_tool(self, name: str, args: dict[str, Any]) -> str:
+        if name in {"remedy_ask", "remedy_delegate", "remedy_task_status", "remedy_share_context"}:
+            return call_talk_tool(self.runtime, name, args, source="stdio")
         reg = self.registry
         if name == "remedy_skill_list":
             include_disabled = bool(args.get("include_disabled", False))
@@ -418,8 +433,28 @@ def run_stdio_server() -> int:
     return 0
 
 
+def run_http(host: str = "127.0.0.1", port: int = 7401) -> int:
+    """Streamable HTTP MCP + A2A on a loopback port that is not :7400."""
+    logging.basicConfig(stream=sys.stderr, level=logging.INFO)
+    from remedy.interop.http import run_http_server
+    from remedy.interop.runtime import InteropRuntime
+
+    runtime = InteropRuntime(_home(), inbound_enabled=True, listen_host=host,
+                             public_url=f"http://{host}:{port}/a2a")
+    runtime.ensure_inbound_token()
+    return run_http_server(runtime, host=host, port=port)
+
+
 def main(argv: list[str] | None = None) -> int:
-    _ = argv
+    argv = list(argv or [])
+    if "--http" in argv:
+        host = "127.0.0.1"
+        port = 7401
+        if "--host" in argv:
+            host = argv[argv.index("--host") + 1]
+        if "--port" in argv:
+            port = int(argv[argv.index("--port") + 1])
+        return run_http(host, port)
     return run_stdio_server()
 
 

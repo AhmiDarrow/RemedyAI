@@ -40,6 +40,8 @@ def test_defaults_match_production_constants() -> None:
     assert table["inner_lexicon_cap"] == 128
     assert table["mind_slots"] == 2
     assert table["always_send_images"] is False
+    assert table["interop_inbound"] is False
+    assert table["interop_trust_policy"] == "gated"
 
 
 def test_advanced_table_overrides_take_effect() -> None:

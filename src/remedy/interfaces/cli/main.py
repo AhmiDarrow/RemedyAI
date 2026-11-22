@@ -132,10 +132,14 @@ def main(args: list[str] | None = None) -> None:
         _cmd_open(parsed)
     elif parsed.command == "mcp":
         if getattr(parsed, "mcp_cmd", None) == "serve":
+            if getattr(parsed, "http", False):
+                from remedy.tools.mcp_server import run_http
+
+                raise SystemExit(run_http(host=parsed.host, port=parsed.port))
             from remedy.tools.mcp_server import run_stdio_server
 
             raise SystemExit(run_stdio_server())
-        console.print("[dim]Usage: remedy mcp serve[/dim]")
+        console.print("[dim]Usage: remedy mcp serve [--http][/dim]")
         raise SystemExit(2)
     elif parsed.command == "desktop":
         _cmd_desktop(parsed)
