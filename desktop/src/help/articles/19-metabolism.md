@@ -71,6 +71,7 @@ On `remedy serve` (and Desktop turns) the Go runtime owns the loop:
 - [Continuity philosophy](16-continuity-philosophy)  
 - [Memory & harness](06-memory-and-harness)  
 - Token optimization: `docs/TOKEN_OPTIMIZATION.md`
+- **More alive (opt-in messaging).** Internal drives (curiosity, social, competence, rest) drift slowly on the hearth tick and pick an idle action (dream, skills, rest, or a gentle offer). Dreams consolidate the day's moments into compact beliefs and a short autobiography, injected after the cache-stable marker (default 400 characters). Affect, shaped by recent outcomes and rapport, lightly colors tone and steers daily voice drift. Suggestion outcomes (accepted, fix held, unhappy) feed the skill genome. A weekly self-reflection may write a proposed self-change; it never applies without explicit approval. Proactive reach-out is **off by default** and, when enabled, arms at most one rate-limited check-in. All of this is under Settings → Advanced (`drives_enabled`, `proactive_reach_out`, `autobiography_chars`, `weekly_reflection`, and related knobs). The decoded state is on `GET /api/partner/status` as `alive`.
 - **Advanced knobs.** Every organism and token-budget tunable lives under `[advanced]` in `config.toml` (Settings → Advanced, hidden in simple mode). Current values stay the defaults. `REMEDY_NO_VOICE_EVOLUTION` and `REMEDY_REACT_MAX_RESULT_CHARS` still work and map onto these keys.
 - [Nanoswarm](17-nanoswarm)  
 - [Computer use soak](computer-use-soak)  

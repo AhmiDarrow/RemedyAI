@@ -54,6 +54,18 @@ var advancedKnobList = []advancedKnob{
 	{"organism_stall_after_s", 7 * 86400.0, "float", 3600, 90 * 86400, "s", "Cadence", "Idle time before the organism treats a skill path as stalled.", "", false},
 	{"voice_evolution", true, "bool", 0, 0, "", "Voice & self-inject", "Daily voice drift at worker start. Off via REMEDY_NO_VOICE_EVOLUTION=1.", "REMEDY_NO_VOICE_EVOLUTION", true},
 	{"self_inject_idle_s", 300, "int", 10, 7200, "s", "Voice & self-inject", "User-idle window before unattended code self-inject may run.", "", false},
+	{"drives_enabled", true, "bool", 0, 0, "", "Alive", "Internal drives (curiosity, social, competence, rest) drift on the hearth tick.", "", false},
+	{"drive_drift_rate", 0.04, "float", 0.005, 0.2, "", "Alive", "How far drives move toward a new value on each unattended tick.", "", false},
+	{"proactive_reach_out", false, "bool", 0, 0, "", "Alive", "Opt-in: when a drive crosses the threshold, arm one gentle check-in. Off by default.", "", false},
+	{"reach_out_threshold", 0.85, "float", 0.5, 1.0, "", "Alive", "Drive level that may arm a single reach-out offer.", "", false},
+	{"reach_out_min_interval_s", 7 * 86400.0, "float", 3600, 90 * 86400, "s", "Alive", "Minimum time between reach-out offers. Never nagging.", "", false},
+	{"autobiography_chars", 400, "int", 0, 2000, "chars", "Alive", "Max characters of the self-maintained autobiography injected after the cache marker.", "", false},
+	{"affect_enabled", true, "bool", 0, 0, "", "Alive", "Affect state, shaped by outcomes and rapport, may lightly color tone.", "", false},
+	{"affect_tone_weight", 0.15, "float", 0, 1, "", "Alive", "How strongly affect may influence tone. 0 turns the tone hint off.", "", false},
+	{"voice_drift_from_affect", true, "bool", 0, 0, "", "Alive", "Daily voice drift follows affect and rapport instead of a random daily step.", "", false},
+	{"outcome_learning", true, "bool", 0, 0, "", "Alive", "Track whether suggestions worked (accepted, fix held, unhappy) and feed the skill genome.", "", false},
+	{"weekly_reflection", true, "bool", 0, 0, "", "Alive", "Weekly self-reflection may write proposed self-changes. They never apply without approval.", "", false},
+	{"weekly_reflection_s", 7 * 86400.0, "float", 3600, 90 * 86400, "s", "Alive", "Minimum seconds between weekly reflection proposals.", "", false},
 }
 
 func advancedByKey() map[string]advancedKnob {

@@ -1108,6 +1108,18 @@ claimidx_public_ledger = true
 # organism_stall_after_s = 604800
 # voice_evolution = true
 # self_inject_idle_s = 300
+# drives_enabled = true
+# drive_drift_rate = 0.04
+# proactive_reach_out = false
+# reach_out_threshold = 0.85
+# reach_out_min_interval_s = 604800
+# autobiography_chars = 400
+# affect_enabled = true
+# affect_tone_weight = 0.15
+# voice_drift_from_affect = true
+# outcome_learning = true
+# weekly_reflection = true
+# weekly_reflection_s = 604800
 
 # Memory harness (chat compression)
 # harness_mode = "auto"     # off | manual | auto

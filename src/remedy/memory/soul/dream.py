@@ -392,9 +392,16 @@ def dream_cycle(
     save_soul_field(sf, home)
     _last_dream_ts[_home_key(home)] = time.time()
 
+    alive_out: dict[str, Any] = {}
+    with suppress(Exception):
+        from remedy.core.metabolism.alive import consolidate_from_dream
+
+        alive_out = consolidate_from_dream(home, field=sf)
+
     return {
         "ok": True,
         "skipped": False,
+        "alive": {k: alive_out.get(k) for k in ("beliefs_added",) if k in alive_out},
         "episodes_before": before_eps,
         "episodes_after": len(sf.episodes),
         "rehearsed": rehearsed_n,
