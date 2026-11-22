@@ -224,10 +224,15 @@ def maybe_idle_stop(
     """
     if idle_stop_s is None:
         try:
-            state = load_vision_json(home_dir)
-            idle_stop_s = int(state.get("idle_stop_s") or 600)
+            from remedy.core.organism_knobs import resolve_int
+
+            idle_stop_s = int(resolve_int("mind_idle_stop_s"))
         except Exception:
-            idle_stop_s = 600
+            try:
+                state = load_vision_json(home_dir)
+                idle_stop_s = int(state.get("idle_stop_s") or 600)
+            except Exception:
+                idle_stop_s = 600
     try:
         idle_stop_s = int(idle_stop_s or 0)
     except (TypeError, ValueError):
@@ -310,6 +315,37 @@ def ensure_idle_watcher(home_dir: str | Path | None = None) -> None:
     t.start()
 
 
+def yield_mind_for_muscle(home_dir: str | Path | None = None) -> dict[str, Any]:
+    """Keep the mind running but move it off the GPU so RMB can use VRAM.
+
+    Hidden restart with n_gpu_layers=0. No-op if the mind is not running
+    or mind_keep_gpu is on. Old weight files are never deleted.
+    """
+    try:
+        from remedy.core.organism_knobs import resolve_bool
+
+        if resolve_bool("mind_keep_gpu"):
+            return {"ok": True, "yielded": False, "reason": "mind_keep_gpu"}
+    except Exception:
+        pass
+    if not is_running(home_dir, force=True):
+        return {"ok": True, "yielded": False, "reason": "mind_not_running"}
+    stop_server(home_dir=home_dir)
+    result = start_server(home_dir=home_dir, n_gpu_layers=0, ignore_rmb=True)
+    result = dict(result or {})
+    result["yielded"] = bool(result.get("ok"))
+    return result
+
+
+def restore_mind_gpu(home_dir: str | Path | None = None) -> dict[str, Any]:
+    """After RMB stops, put the mind back on the GPU if one is present."""
+    if not is_running(home_dir, force=True):
+        return start_server(home_dir=home_dir, n_gpu_layers=-1)
+    # Already running — only bounce if we are currently on CPU layers.
+    stop_server(home_dir=home_dir)
+    return start_server(home_dir=home_dir, n_gpu_layers=-1)
+
+
 def start_server(
     *,
     home_dir: str | Path | None = None,
@@ -319,14 +355,14 @@ def start_server(
 ) -> dict[str, Any]:
     """Start llama-server if not already healthy.
 
-    Auto-activates the prebundled pinned SmolVLM2 stack when
-    ``vision.json`` is missing or points at missing files — no network.
+    Auto-activates the pinned 4B mind when ``vision.json`` is missing or
+    points at missing files — first-run download, no skip option.
 
-    Hard skip when RMB owns the local host (running or vision_suspended),
-    unless *ignore_rmb* (CPU-only observe wake, n_gpu_layers=0).
+    ``ignore_rmb`` still means "start even if the mind was explicitly
+    parked." A running RMB muscle no longer blocks this host; the mind
+    yields GPU layers instead (see yield_mind_for_muscle).
     """
     global _proc
-    # Exclusive with RMB: never load SmolVLM while RMB chat server is up
     try:
         from remedy.runtime.rmb.mode import should_skip_vision_stack
 
@@ -335,14 +371,13 @@ def start_server(
             cfg_hint = {"home_dir": str(home_dir)}
         if (not ignore_rmb) and should_skip_vision_stack(cfg_hint):
             logger.info(
-                "Skipping SmolVLM start_server — RMB exclusive host "
-                "(running or vision_suspended)"
+                "Skipping mind start_server — explicit vision_suspended park"
             )
             return {
                 "ok": False,
                 "skipped": True,
-                "reason": "rmb_exclusive_host",
-                "error": "SmolVLM disabled while RMB is running",
+                "reason": "vision_suspended",
+                "error": "Local mind parked (vision_suspended)",
             }
     except Exception:
         pass
@@ -350,15 +385,31 @@ def start_server(
     # Ignore retired local model pins left in vision.json (e.g. qwen2.5-vl-3b).
     # Prefer soft-migrate to the product default rather than KeyError spam in logs.
     mid = str((state or {}).get("model_id") or "")
-    if mid and mid not in ("", "smolvlm2-2.2b"):
-        from remedy.vision.catalog import DEFAULT_MODEL_ID, get_model_spec
+    from remedy.runtime.catalog import DEFAULT_MODEL_ID, LEGACY_LOCAL_MODEL_IDS, get_model_spec
 
+    if mid and mid in LEGACY_LOCAL_MODEL_IDS:
+        # Soft-migrate SmolVLM / retired pins to the required 4B mind.
+        # Old weight files are left on disk (zero data loss).
+        default_mid = DEFAULT_MODEL_ID
+        if isinstance(state, dict) and state:
+            state = dict(state)
+            state["model_id"] = default_mid
+            state.pop("model_path", None)
+            state.pop("mmproj_path", None)
+            state.pop("pid", None)
+            with contextlib.suppress(Exception):
+                save_vision_json(state, home_dir)
+            logger.info("Migrated legacy vision model_id %r → %r", mid, default_mid)
+        else:
+            state = {}
+        mid = default_mid
+    if mid and mid not in ("", DEFAULT_MODEL_ID):
         try:
             get_model_spec(mid)
         except Exception:
             # Retired / unknown pin: clear paths so bundle activate can rebind,
             # and rewrite model_id to the product default (no KeyError spam).
-            default_mid = DEFAULT_MODEL_ID or "smolvlm2-2.2b"
+            default_mid = DEFAULT_MODEL_ID or "qwen35-4b-mind"
             if isinstance(state, dict) and state:
                 state = dict(state)
                 state["model_id"] = default_mid
@@ -437,86 +488,99 @@ def start_server(
                 save_vision_json(state, home_dir)
                 break
 
-    cmd = [
-        str(binary),
-        "-m",
-        str(model_path),
-        "--mmproj",
-        str(mmproj_path),
-        "--host",
-        host,
-        "--port",
-        str(port),
-        "--ctx-size",
-        "4096",
-    ]
-    if n_gpu_layers is not None:
-        cmd.extend(["-ngl", str(int(n_gpu_layers))])
-
-    # Re-check exclusive host immediately before spawn (RMB may have started mid-path)
+    rmb_running = False
     try:
-        from remedy.runtime.rmb.mode import should_skip_vision_stack
+        from remedy.runtime.rmb.mode import rmb_server_running, should_skip_vision_stack
 
         cfg_hint2: dict[str, Any] | None = None
         if home_dir is not None:
             cfg_hint2 = {"home_dir": str(home_dir)}
         if (not ignore_rmb) and should_skip_vision_stack(cfg_hint2):
-            logger.info("Aborting SmolVLM spawn — RMB exclusive host re-check")
+            logger.info("Aborting mind spawn — explicit vision_suspended re-check")
             return {
                 "ok": False,
                 "skipped": True,
-                "reason": "rmb_exclusive_host",
-                "error": "SmolVLM disabled while RMB is running",
+                "reason": "vision_suspended",
+                "error": "Local mind parked (vision_suspended)",
             }
+        rmb_running = bool(rmb_server_running(home_dir))
     except Exception:
-        logger.warning("RMB exclusive-host re-check failed", exc_info=True)
+        logger.warning("mind start re-check failed", exc_info=True)
+
+    from remedy.runtime.mind_engine import (
+        build_mind_server_command,
+        command_fallbacks,
+        mind_n_gpu_layers,
+    )
+
+    ngl = mind_n_gpu_layers(
+        requested=n_gpu_layers,
+        rmb_running=rmb_running,
+    )
+    cmd = build_mind_server_command(
+        binary,
+        model_path,
+        mmproj_path,
+        host=host,
+        port=port,
+        n_gpu_layers=ngl,
+    )
 
     from remedy.core.computer.host_binding import HostError
     from remedy.execution.process import retain_detached, spawn_hidden
     from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
-    logger.info("Starting vision llama-server: %s", " ".join(cmd))
-    try:
-        _proc = retain_detached(spawn_hidden(cmd, cwd=str(binary.parent)))
-    except (OSError, HostError, NativeRuntimeUnavailableError, FileNotFoundError, ValueError) as e:
-        return {"ok": False, "error": f"Failed to start llama-server: {e}"}
-
-    invalidate_running_cache()
+    candidates = [cmd, *command_fallbacks(cmd)]
+    last_error: str | None = None
     deadline = time.time() + wait_s
-    while time.time() < deadline:
-        proc = _proc_ref()
-        if proc is None:
-            invalidate_running_cache()
-            return {
-                "ok": False,
-                "error": "llama-server handle cleared during start (stopped concurrently)",
-            }
-        if proc.poll() is not None:
-            invalidate_running_cache()
-            return {
-                "ok": False,
-                "error": f"llama-server exited early (code {proc.returncode})",
-            }
-        # Port first (cheap); then a short HTTP probe once listening.
-        if _port_open(host, port) and (
-            _health(base, timeout=0.6) or time.time() > deadline - 2
-        ):
-            mark_used()
-            ensure_idle_watcher(home_dir)
-            state["pid"] = proc.pid
-            save_vision_json(state, home_dir)
-            invalidate_running_cache()
-            # Seed cache as running so status polls stay cheap after start.
-            is_running(home_dir, force=True)
-            return {
-                "ok": True,
-                "already_running": False,
-                "base_url": base,
-                "pid": proc.pid,
-            }
-        time.sleep(0.4)
+    for attempt, argv in enumerate(candidates):
+        logger.info("Starting vision llama-server: %s", " ".join(argv))
+        try:
+            _proc = retain_detached(spawn_hidden(argv, cwd=str(binary.parent)))
+        except (OSError, HostError, NativeRuntimeUnavailableError, FileNotFoundError, ValueError) as e:
+            return {"ok": False, "error": f"Failed to start llama-server: {e}"}
+
+        invalidate_running_cache()
+        exited_early = False
+        while time.time() < deadline:
+            proc = _proc_ref()
+            if proc is None:
+                invalidate_running_cache()
+                return {
+                    "ok": False,
+                    "error": "llama-server handle cleared during start (stopped concurrently)",
+                }
+            if proc.poll() is not None:
+                last_error = f"llama-server exited early (code {proc.returncode})"
+                invalidate_running_cache()
+                exited_early = True
+                break
+            # Port first (cheap); then a short HTTP probe once listening.
+            if _port_open(host, port) and (
+                _health(base, timeout=0.6) or time.time() > deadline - 2
+            ):
+                mark_used()
+                ensure_idle_watcher(home_dir)
+                state["pid"] = proc.pid
+                save_vision_json(state, home_dir)
+                invalidate_running_cache()
+                # Seed cache as running so status polls stay cheap after start.
+                is_running(home_dir, force=True)
+                return {
+                    "ok": True,
+                    "already_running": False,
+                    "base_url": base,
+                    "pid": proc.pid,
+                }
+            time.sleep(0.4)
+        if exited_early and attempt + 1 < len(candidates):
+            logger.warning("%s; retrying with a softer command line", last_error)
+            continue
+        break
 
     invalidate_running_cache()
+    if last_error:
+        return {"ok": False, "error": last_error}
     return {"ok": False, "error": f"llama-server did not become healthy within {wait_s}s"}
 
 

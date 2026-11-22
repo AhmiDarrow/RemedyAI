@@ -50,7 +50,7 @@ Full notes: **[What’s new](13-whats-new.md)** · engineering: repo `CHANGELOG.
 | [Life on this computer](#life-on-this-computer) | Goals, checkpoints, Vault |
 | [Grove and voice](#grove-and-voice) | Partner home |
 | [Workspace tools](#workspace-tools) | Files, Terminal, Browser, Scratch, Computer |
-| [Local brain](#local-brain) | SmolVLM2 + RMB |
+| [Local brain](#local-brain) | Qwen3.5-4B mind + optional RMB |
 | [Partner metabolism](#partner-metabolism) | L0–L3 speed / accuracy / trust |
 | [Always ready](#always-ready-desktop) | Close → tray / taskbar |
 | [Quick start](#quick-start-60-seconds) | First hour |
@@ -73,7 +73,7 @@ Full notes: **[What’s new](13-whats-new.md)** · engineering: repo `CHANGELOG.
 | **Research** | Literature, citations that resolve, analysis ledger, field packs |
 | **Game studio** | Godot-first engine verify, playtest, export |
 | **Workspace** | **Files** · **Terminal** · **Browser** · **Scratch** · **Computer use** |
-| **Local brain** | **SmolVLM2 2.2B** vision + **RMB** (Qwen3.5-9B default) |
+| **Local brain** | **Qwen3.5-4B** local mind + optional **RMB** (Qwen3.5-9B) muscle |
 | **Continuity** | Session Brief, partner memory, skills, silent nano swarm |
 | **Metabolism** | Turn tiers L0–L3, evidence ledger, governor, portable identity |
 | **Messengers** | Telegram (live) + Discord / Slack / Mattermost / Matrix / WhatsApp / Teams / Google Chat / Signal |
@@ -131,7 +131,7 @@ When installed (Setup or **Settings → Advanced → Local model** — download 
 - **RMB** — on-device llama.cpp chat; default **Qwen3.5-9B Q6_K**
 - Binds to **127.0.0.1** only; auto-starts with Remedy when installed
 
-Details: [Local model (SmolVLM2)](14-visual-decoder) · [RMB](20-rmb-local-agent) · Workers: [Continuity workers](17-nanoswarm)
+Details: [Local mind (Qwen3.5-4B)](14-visual-decoder) · [RMB](20-rmb-local-agent) · Workers: [Continuity workers](17-nanoswarm)
 
 ---
 
@@ -182,7 +182,7 @@ You → Grove / Studio (chat + Files / Terminal / Browser / Scratch)
          → API 127.0.0.1:7400
               → Continuity (brief, memory, skills, budget)
               → Voice · Vault · hive
-              → Local SmolVLM2 / RMB (when installed)
+              → local 4B mind / RMB (when installed)
               → Your LLM provider (chat + tool results)
               → Tools, messengers, Google APIs (if connected)
          → ~/.remedy
@@ -202,7 +202,7 @@ You → Grove / Studio (chat + Files / Terminal / Browser / Scratch)
 | [Hive](28-hive) | Silent daughters |
 | [Research](27-research) | Papers, analysis, citations |
 | [Game dev](26-game-dev) | Godot, web, Bevy, Pygame, Love2D studio |
-| [Local vision & SmolVLM2](14-visual-decoder) | On-device efficiency |
+| [Local mind (Qwen3.5-4B)](14-visual-decoder) | On-device efficiency |
 | [RMB](20-rmb-local-agent) | Local llama.cpp chat |
 | [Continuity workers](17-nanoswarm) | Nano swarm (operators) |
 | [Install (Windows)](01-install-windows) | Installer & SmartScreen |

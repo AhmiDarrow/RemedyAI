@@ -726,10 +726,13 @@ def test_an_idle_server_is_stopped_and_the_reason_is_reported(idle_env) -> None:
     assert idle_env.stops == ["home"]
 
 
-def test_the_idle_limit_is_read_from_vision_json_when_not_given(
-    tmp_path: Path, idle_env
+def test_the_idle_limit_is_read_from_the_mind_knob_when_not_given(
+    tmp_path: Path, idle_env, monkeypatch
 ) -> None:
-    home = _write_state(tmp_path / "home", idle_stop_s=1234)
+    from remedy.core import organism_knobs as knobs
+
+    monkeypatch.setattr(knobs, "resolve_int", lambda key, cfg=None: 1234)
+    home = _write_state(tmp_path / "home")
     vr.mark_used()
     out = vr.maybe_idle_stop(home)
     assert out["reason"] == "active"
@@ -737,11 +740,11 @@ def test_the_idle_limit_is_read_from_vision_json_when_not_given(
 
 
 def test_a_zero_in_vision_json_does_not_disable_the_watchdog(tmp_path: Path, idle_env) -> None:
-    """Documents a sharp edge: ``idle_stop_s: 0`` on disk reads as the default 600.
+    """vision.json ``idle_stop_s`` is no longer the source of truth.
 
-    The value is loaded with ``or 600``, so only the explicit keyword argument
-    can switch the watchdog off. Anyone editing vision.json to keep the model
-    resident is not getting what they asked for.
+    The idle limit comes from the ``mind_idle_stop_s`` organism knob
+    (default 600). Only an explicit ``idle_stop_s=`` keyword, or setting
+    that knob to 0, switches the watchdog off.
     """
     home = _write_state(tmp_path / "home", idle_stop_s=0)
     vr.mark_used()
@@ -872,7 +875,7 @@ def startable(tmp_path: Path, monkeypatch):
             "host": "127.0.0.1",
             "port": port,
             "base_url": f"http://127.0.0.1:{port}/v1",
-            "model_id": "smolvlm2-2.2b",
+            "model_id": "qwen35-4b-mind",
             "model_path": str(model),
             "mmproj_path": str(mmproj),
             "runtime_binary": str(binary),
@@ -884,7 +887,7 @@ def startable(tmp_path: Path, monkeypatch):
     )
 
 
-def test_start_server_refuses_while_rmb_owns_the_local_host(
+def test_start_server_refuses_when_the_mind_is_explicitly_parked(
     startable, monkeypatch, no_real_spawn
 ) -> None:
     import remedy.runtime.rmb.mode as rmb_mode
@@ -893,7 +896,7 @@ def test_start_server_refuses_while_rmb_owns_the_local_host(
     out = vr.start_server(home_dir=startable.home)
     assert out["ok"] is False
     assert out["skipped"] is True
-    assert out["reason"] == "rmb_exclusive_host"
+    assert out["reason"] == "vision_suspended"
     assert no_real_spawn.spawn_calls == []
 
 
@@ -913,14 +916,14 @@ def test_ignore_rmb_lets_a_cpu_only_observe_wake_through(
 
     no_real_spawn.spawn = spawn
     out = vr.start_server(home_dir=startable.home, wait_s=0.01, ignore_rmb=True)
-    # Past both RMB guards: it really did spawn, and only then timed out.
+    # Past both park guards: it really did spawn, and only then timed out.
     assert len(spawned) == 1
     assert out["ok"] is False
-    assert out.get("reason") != "rmb_exclusive_host"
+    assert out.get("reason") != "vision_suspended"
 
 
-def test_rmb_starting_mid_path_aborts_the_spawn(startable, monkeypatch, no_real_spawn) -> None:
-    """The second guard exists because RMB can come up while we validate files."""
+def test_a_park_set_mid_path_aborts_the_spawn(startable, monkeypatch, no_real_spawn) -> None:
+    """The second guard exists because vision_suspended can flip while we validate files."""
     import remedy.runtime.rmb.mode as rmb_mode
 
     answers = iter([False, True])
@@ -932,7 +935,7 @@ def test_rmb_starting_mid_path_aborts_the_spawn(startable, monkeypatch, no_real_
 
     out = vr.start_server(home_dir=startable.home, wait_s=0.01)
     assert out["skipped"] is True
-    assert out["reason"] == "rmb_exclusive_host"
+    assert out["reason"] == "vision_suspended"
     assert no_real_spawn.spawn_calls == []
 
 
@@ -1191,7 +1194,7 @@ def test_a_successful_start_records_the_pid_and_the_command(
     assert cmd[cmd.index("--mmproj") + 1] == str(mmproj)
     assert cmd[cmd.index("--host") + 1] == fake_http.host
     assert cmd[cmd.index("--port") + 1] == str(fake_http.port)
-    assert cmd[cmd.index("--ctx-size") + 1] == "4096"
+    assert cmd[cmd.index("--ctx-size") + 1] == "8192"
     assert cmd[cmd.index("-ngl") + 1] == "0"
     # Zig spawn_hidden has no pipe kwargs; cwd is the binary's parent.
     assert spawned["kwargs"]["cwd"] == str(binary.parent)
@@ -1259,7 +1262,7 @@ def test_a_broken_rmb_check_does_not_block_the_decoder(
 
     out = vr.start_server(home_dir=startable.home, wait_s=0.01)
     assert len(spawned) == 1
-    assert out.get("reason") != "rmb_exclusive_host"
+    assert out.get("reason") != "vision_suspended"
 
 
 def test_a_successful_bundle_activation_rebinds_the_paths(

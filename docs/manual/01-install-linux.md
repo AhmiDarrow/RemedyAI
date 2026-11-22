@@ -43,7 +43,7 @@ The **AppImage** is more self-contained (media framework included);
 you still need FUSE to run it (`libfuse2` / `libfuse2t64` on Ubuntu).
 
 The **local vision / nano** stack is **not** in the installer (same as Windows):
-first use downloads pinned **SmolVLM2** weights plus **llama.cpp** `llama-server`
+first use downloads pinned **Qwen3.5-4B** mind weights plus **llama.cpp** `llama-server`
 for this OS (`ubuntu-x64` CPU or `ubuntu-vulkan-x64` when a GPU is present) into
 `~/.remedy/vision/`.
 

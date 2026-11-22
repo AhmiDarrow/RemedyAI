@@ -65,6 +65,10 @@ def decode_image(
     max_image_bytes: int = 4 * 1024 * 1024,
     extra_question: str | None = None,
     model: str = "vision-decoder",
+    as_digest: bool = False,
+    json_schema: dict[str, Any] | None = None,
+    system_prompt: str | None = None,
+    cache_prompt: bool = True,
 ) -> dict[str, Any]:
     """Decode one image file to a text brief via OpenAI-compat chat completions."""
     from remedy.core.security import is_loopback_service_url, urlopen_no_redirect
@@ -88,21 +92,36 @@ def decode_image(
             "text": "",
         }
 
+    system = system_prompt or DECODE_SYSTEM
+    user_text = decode_user_prompt(p.name, extra_question)
+    schema = json_schema
+    if as_digest:
+        from remedy.runtime.media_digest import DIGEST_PROMPT, DIGEST_SCHEMA
+
+        system = system_prompt or DIGEST_PROMPT
+        user_text = extra_question or (
+            f"Image file name: {p.name}. Emit the media digest JSON."
+        )
+        if schema is None:
+            schema = DIGEST_SCHEMA
     body = {
         "model": model,
         "temperature": 0.2,
         "max_tokens": 1200,
+        "cache_prompt": bool(cache_prompt),
         "messages": [
-            {"role": "system", "content": DECODE_SYSTEM},
+            {"role": "system", "content": system},
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": decode_user_prompt(p.name, extra_question)},
+                    {"type": "text", "text": user_text},
                     {"type": "image_url", "image_url": {"url": data_url}},
                 ],
             },
         ],
     }
+    if schema:
+        body["response_format"] = {"type": "json_schema", "schema": schema}
     url = base + "/chat/completions"
     if not url.endswith("/chat/completions"):
         # base_url already ends with /v1
@@ -185,6 +204,7 @@ def decode_images(
     timeout_s: float = 90.0,
     max_image_bytes: int = 4 * 1024 * 1024,
     extra_question: str | None = None,
+    as_digest: bool = True,
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for path in paths:
@@ -195,6 +215,7 @@ def decode_images(
                 timeout_s=timeout_s,
                 max_image_bytes=max_image_bytes,
                 extra_question=extra_question,
+                as_digest=as_digest,
             )
         )
     return results

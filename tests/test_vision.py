@@ -29,19 +29,23 @@ from remedy.vision.prompts import decode_user_prompt
 from remedy.vision.service import decode_for_turn, get_status
 
 
-def test_default_model_is_smolvlm2_2_2b():
-    assert DEFAULT_MODEL_ID == "smolvlm2-2.2b"
+def test_default_model_is_qwen35_4b_mind():
+    assert DEFAULT_MODEL_ID == "qwen35-4b-mind"
     assert DEFAULT_MODEL_ID in VISION_MODELS
     spec = get_model_spec()
-    assert spec.model_file.endswith("Q4_K_M.gguf")
+    assert spec.model_file.endswith("Q6_K.gguf")
     assert "mmproj" in spec.mmproj_file
-    assert "SmolVLM2" in spec.model_file
+    assert "Qwen3.5-4B" in spec.model_file
+    assert spec.fallback_model_file.endswith("Q4_K_M.gguf")
     assert getattr(spec, "license", "") in ("Apache-2.0", "Apache 2.0", "")
-    assert spec.approx_download_bytes > 1_000_000_000  # ~1.6GB model+mmproj
-    assert spec.approx_download_bytes < 2_500_000_000
+    # Q6_K + mmproj-F16 is about 4.2 GB; Q4 fallback is smaller.
+    assert spec.approx_download_bytes > 3_000_000_000
+    assert spec.approx_download_bytes < 6_000_000_000
     pub = catalog_public()
     assert pub["default_model_id"] == DEFAULT_MODEL_ID
+    assert pub.get("required") is True
     assert any(m["id"] == DEFAULT_MODEL_ID for m in pub["models"])
+    assert any(m.get("model_sha256") == "TODO" for m in pub["models"])
 
 
 def test_total_install_bytes_includes_runtime():
@@ -223,7 +227,7 @@ def test_vision_section_defaults():
     assert sec["enabled"] is True
 
 
-def test_legacy_qwen_model_id_migrates_to_smolvlm2():
+def test_legacy_qwen_model_id_migrates_to_mind():
     sec = vision_section_from_config(
         {"vision": {"enabled": True, "model_id": "qwen2.5-vl-3b"}}
     )
@@ -288,10 +292,11 @@ def test_save_vision_json(tmp_path: Path):
 
 def test_catalog_pins_are_complete():
     spec = get_model_spec(DEFAULT_MODEL_ID)
-    assert spec.model_file == "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf"
+    assert spec.model_file == "Qwen3.5-4B-Q6_K.gguf"
     assert "mmproj" in spec.mmproj_file
-    assert len(spec.model_sha256) == 64
-    assert len(spec.mmproj_sha256) == 64
+    # Language-model sha256 is TODO until the fine-tuned GGUF exists.
+    assert spec.model_sha256 in (None, "TODO") or spec.model_sha256 == "TODO"
+    assert spec.mmproj_sha256 and len(spec.mmproj_sha256) == 64
     assert LLAMA_CPP_TAG.startswith("b")
     cpu = get_runtime_spec("win-cpu-x64")
     assert cpu.zip_name.endswith(".zip")
@@ -341,7 +346,7 @@ def test_extract_archive_targz_and_slip(tmp_path: Path):
     from remedy.vision import install as inst
 
     dest = tmp_path / "runtime"
-    archive = tmp_path / "llama-b10107-bin-ubuntu-x64.tar.gz"
+    archive = tmp_path / "llama-b12628-bin-ubuntu-x64.tar.gz"
     src = tmp_path / "payload"
     (src / "build" / "bin").mkdir(parents=True)
     binary = src / "build" / "bin" / "llama-server"

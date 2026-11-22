@@ -13,8 +13,9 @@ you want muscle without a cloud provider.
 | **Endpoint** | Default `http://127.0.0.1:8787/v1` |
 | **Chat** | Settings → **Use as chat provider** switches the active provider to RMB |
 
-While RMB is running, the local **SmolVLM** visual decoder is **suspended** so
-GPU memory stays exclusive to the agent host. Stop RMB to free vision again.
+While RMB is running, the local **4B mind** stays up and **yields the GPU**
+(CPU + mmap) so the larger GGUF can use the card. Turn on **Keep mind on GPU**
+in Settings → Advanced if you want both on the GPU at once.
 
 ## When to use it
 
@@ -38,8 +39,8 @@ RMB is part of Remedy, not a bolt-on. Chat can call the **`rmb`** tool
 not search the whole user profile. A sibling `mtp-<name>.gguf` next to
 the main file auto-arms MTP on start (Settings restart keeps it). The
 living map shows `[House] RMB=…` so she knows whether the host is up.
-Starting RMB still uses this PC's GPU and **suspends** SmolVLM until you
-(or she) stop it.
+Starting RMB still uses this PC's GPU; the 4B mind yields its GPU layers
+until RMB stops (unless you keep the mind on the GPU).
 
 ## Setup (owner UI)
 
@@ -101,7 +102,7 @@ cloud key of its own.
 |---------|-------------|
 | Not ready | Confirm GGUF path + runtime present; open Settings status card |
 | Start failed | Check port 8787 free; lower context / GPU layers on small machines |
-| Vision missing | Stop RMB — SmolVLM is suspended while RMB owns the GPU path |
+| Mind went to CPU | Expected while RMB owns the GPU; it keeps running. Stop RMB, or enable Keep mind on GPU. |
 | Chat still cloud | Use **Use as chat provider**, then send a new message |
 
 See also: [Visual decoder](14-visual-decoder.md), [Free providers](15-free-providers.md),

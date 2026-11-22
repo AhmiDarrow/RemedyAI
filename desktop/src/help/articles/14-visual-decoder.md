@@ -1,8 +1,6 @@
-# Local model (SmolVLM2)
+# Local mind (Qwen3.5-4B)
 
-When your **chat model cannot see images** (DeepSeek Chat, many Ollama text models, etc.), or when you want **local** image understanding, Remedy uses a **local model on this PC**.
-
-This is Remedy’s **local efficiency stack** — not a second chat partner.
+Remedy’s **local mind** is a single Qwen3.5-4B multimodal model on this PC (text + vision). It is her inner mind — not a second chat partner. Frontier chat models are muscle: they usually get a compact **image digest**, not pixels, unless the mind asks for the image or you turn on **Always send images**.
 
 ## Contents
 
@@ -21,10 +19,10 @@ This is Remedy’s **local efficiency stack** — not a second chat partner.
 
 | Piece | Detail |
 |-------|--------|
-| **Model** | **SmolVLM2 2.2B** (quantized GGUF) — pinned id `smolvlm2-2.2b` · **Apache 2.0** |
-| **Runtime** | **llama.cpp** `llama-server` · loopback only · CPU default · GPU build when this PC has a matching card (Windows CUDA / Linux Vulkan) |
-| **Visual decoder** | Each image → structured **text brief** so any chat model can reason about it |
-| **Same weights** | Vision decode and nano/helper roles share **one** local server |
+| **Model** | **Qwen3.5-4B** (Q6_K, Q4_K_M autofit fallback, official mmproj-F16) — pinned id `qwen35-4b-mind` · **Apache 2.0** |
+| **Runtime** | **llama.cpp** `llama-server` (b12628) · loopback only (`127.0.0.1:8740`) · CPU default · GPU build when this PC has a matching card (Windows CUDA / Linux Vulkan) |
+| **Visual decoder** | Each image → a structured **JSON digest** so any chat model can reason about it. Pixels go to muscle only when needed. |
+| **Same weights** | Vision, nano, helper, dreams, workers, and media digest share **one** local server |
 
 It does **not** replace your configured Grok / Claude / GPT / Ollama chat model.
 
@@ -43,7 +41,7 @@ It does **not** replace your configured Grok / Claude / GPT / Ollama chat model.
 
 ## Delivery (not in the installer)
 
-Weights download automatically the first time Remedy starts (~1.6 GB). Same model files on every PC for a given Remedy release. The **llama-server** binary is OS-specific: Windows downloads the pinned CPU/CUDA zip; Linux downloads the pinned Ubuntu CPU/Vulkan `tar.gz` and marks it executable. Settings shows progress; **Retry download** is only if that first pull failed.
+Weights download automatically the first time Remedy starts (~4.2 GB for Q6_K + mmproj, or the Q4_K_M fallback on smaller machines). Same model files on every PC for a given Remedy release. The **llama-server** binary is OS-specific: Windows downloads the pinned CPU/CUDA zip; Linux downloads the pinned Ubuntu CPU/Vulkan `tar.gz` and marks it executable. Settings shows progress; **Retry download** is only if that first pull failed.
 
 ---
 
@@ -64,9 +62,9 @@ When installed and enabled, the local server **auto-starts** with the desktop ap
 
 ## When it runs (images)
 
-- Chat model has **no** native vision → decode path preferred.  
-- Prefer-local / force-decode can prefer the local brief even when the cloud model supports vision.  
-- Computer-use still prefers DOM/UIA before screenshots.
+- A user-attached photo is digested locally first; muscle gets the digest by default.  
+- If the mind is not ready and the chat model has native vision, Remedy falls back to sending the image so the turn is not left blind.  
+- Computer-use still prefers DOM/UIA before screenshots (click-target pixels may still be attached).  
 
 ---
 
@@ -87,7 +85,7 @@ See [Security & data](04-security-and-data).
 | Not installed | Wait for the first-run download, or Settings → Retry download |
 | Stuck downloading | Check disk space; resume install |
 | GPU runtime issues | CPU runtime still works; GPU is optional |
-| Wrong model name in old docs | Product default is **SmolVLM2 2.2B**, not a retired Qwen 3B pin |
+| Wrong model name in old docs | Product default is **Qwen3.5-4B** (`qwen35-4b-mind`). Legacy SmolVLM2 / Qwen-VL pins are migrated automatically; old files stay on disk. |
 
 ---
 

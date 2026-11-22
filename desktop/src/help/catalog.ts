@@ -197,7 +197,7 @@ const META: HelpArticleMeta[] = [
     category: 'Configuration',
     order: 14,
     tags: ['vision', 'image', 'ocr', 'llama', 'qwen', 'screenshot'],
-    summary: 'Local image→text for text-only models (SmolVLM2 2.2B).',
+    summary: 'Local Qwen3.5-4B mind: text, vision, and image digests for muscle.',
   },
   {
     id: '20-rmb-local-agent',

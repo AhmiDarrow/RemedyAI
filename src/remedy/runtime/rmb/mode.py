@@ -117,31 +117,23 @@ def rmb_server_running(home_dir: str | Path | None = None) -> bool:
 
 
 def should_skip_vision_stack(cfg: dict[str, Any] | None = None) -> bool:
-    """When RMB owns the GPU host, never *start* SmolVLM.
+    """True only when the local mind is explicitly parked.
 
-    RMB is "on" only when the owner called it on: Start, auto_start, or a
-    live/starting llama-server. A leftover ``llm_provider=rmb`` in config
-    while 8787 is closed is not a call-on — live 2026-08-27 skipped vision
-    and logged "Local model auto-started" during Grok sessions.
+    The unified 4B mind stays up while RMB muscle runs. RMB no longer
+    evicts the vision/nano/helper host. ``vision_suspended`` remains an
+    emergency / manual park switch; auto_start and a live RMB server
+    do not skip the mind.
     """
     try:
         from remedy.runtime.rmb.config import load_rmb_json, merge_state
-        from remedy.runtime.rmb.service import is_starting, managed_process_alive
 
         home = None
         if isinstance(cfg, dict):
             home = cfg.get("home_dir")
         st = merge_state(load_rmb_json(home))
-        if st.get("vision_suspended"):
-            return True
-        # Owner asked RMB to come up with Remedy — GPU is reserved.
-        if st.get("auto_start"):
-            return True
-        if is_starting() or managed_process_alive():
-            return True
+        return bool(st.get("vision_suspended"))
     except Exception:
-        pass
-    return bool(rmb_server_running(cfg.get("home_dir") if isinstance(cfg, dict) else None))
+        return False
 
 
 def force_path_only_images(

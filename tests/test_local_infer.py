@@ -561,7 +561,7 @@ def test_a_broken_rmb_check_falls_through_to_tier_routing(monkeypatch, tiers):
     tiers.add("medium")
 
     assert _resolve_mdl_url("text", "http://127.0.0.1:8740/v1") == (
-        "http://127.0.0.1:8742/v1",
+        "http://127.0.0.1:8740/v1",
         "medium",
     )
 
@@ -570,7 +570,7 @@ def test_a_running_tier_is_used_for_its_task(no_rmb, tiers):
     tiers.add("light")
 
     assert _resolve_mdl_url("continuity_core", "http://127.0.0.1:8740/v1") == (
-        "http://127.0.0.1:8741/v1",
+        "http://127.0.0.1:8740/v1",
         "light",
     )
 
@@ -618,7 +618,7 @@ def test_a_stopped_tier_is_started_from_the_recorded_vision_state(
     monkeypatch.setattr(mdl_runtime, "ensure_tier", _ensure)
 
     assert _resolve_mdl_url("brief_update", "http://127.0.0.1:8740/v1") == (
-        "http://127.0.0.1:8742/v1",
+        "http://127.0.0.1:8740/v1",
         "medium",
     )
     assert calls[0][0] == "medium"
@@ -711,7 +711,7 @@ def test_a_tier_that_will_not_start_degrades_to_the_light_tier(
     )
 
     assert _resolve_mdl_url("brief_update", "http://127.0.0.1:8740/v1") == (
-        "http://127.0.0.1:8741/v1",
+        "http://127.0.0.1:8740/v1",
         "light",
     )
 
@@ -767,7 +767,7 @@ def test_an_unknown_task_kind_routes_to_the_default_tier(no_rmb, tiers):
     tiers.add("medium")
 
     assert _resolve_mdl_url("something_new", "") == (
-        "http://127.0.0.1:8742/v1",
+        "http://127.0.0.1:8740/v1",
         "medium",
     )
 
@@ -983,13 +983,13 @@ def test_the_vision_handler_defaults_a_generous_timeout_and_size_cap(
             "brief_update",
             "remedy.memory.harness.local_brief",
             "process_brief_update_job",
-            8742,
+            8740,
         ),
         (
             "continuity_core",
             "remedy.memory.partner_state.continuity",
             "process_continuity_core_job",
-            8741,
+            8740,
         ),
     ],
 )

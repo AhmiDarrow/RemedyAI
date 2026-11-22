@@ -58,7 +58,11 @@ def test_phase6_soft_spawn_sites_drop_raw_subprocess() -> None:
 
 
 def test_phase1_long_lived_hosts_use_spawn_hidden_not_popen() -> None:
-    """claimidx / openserp / mdl / vision / rmb start via Zig authorized spawn."""
+    """claimidx / openserp / vision / rmb start via Zig authorized spawn.
+
+    MDL tiers share the unified mind host: start_tier delegates to
+    vision.runtime.start_server and must not spawn its own llama-server.
+    """
     from remedy.runtime import claimidx_host, mdl_runtime, web_search_host
     from remedy.runtime.rmb import service as rmb_service
     from remedy.vision import runtime as vision_runtime
@@ -66,7 +70,6 @@ def test_phase1_long_lived_hosts_use_spawn_hidden_not_popen() -> None:
     for mod, needle in (
         (claimidx_host, "def start"),
         (web_search_host, "def start"),
-        (mdl_runtime, "def start_tier"),
         (vision_runtime, "def start_server"),
         (rmb_service, "def _spawn"),
     ):
@@ -76,6 +79,13 @@ def test_phase1_long_lived_hosts_use_spawn_hidden_not_popen() -> None:
         # Nested _spawn in rmb is defined inside start; still must not Popen.
         if needle == "def _spawn":
             assert "subprocess.Popen" not in source, mod.__name__
+
+    mdl_src = inspect.getsource(mdl_runtime)
+    assert "hidden_subprocess_kwargs" not in mdl_src
+    assert "subprocess.Popen" not in mdl_src
+    assert "spawn_hidden" not in mdl_src
+    start_tier_src = inspect.getsource(mdl_runtime.start_tier)
+    assert "start_mind" in start_tier_src
 
 
 def test_mcp_client_uses_spawn_piped_not_async_soft_exec() -> None:
