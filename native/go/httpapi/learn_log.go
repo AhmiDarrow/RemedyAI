@@ -82,12 +82,29 @@ func appendLearnLog(home, kind string, duration time.Duration, timeout bool, err
 	rotateLearnLogLocked(path)
 }
 
+func learnLogCaps(path string) (maxBytes int64, maxLines int) {
+	maxBytes, maxLines = int64(learnLogMaxBytes), learnLogMaxLines
+	home := filepath.Dir(path)
+	if home == "" || home == "." {
+		return maxBytes, maxLines
+	}
+	cfg := LoadConfig(home)
+	if n := resolveAdvancedInt(cfg, "learn_log_max_bytes"); n > 0 {
+		maxBytes = int64(n)
+	}
+	if n := resolveAdvancedInt(cfg, "learn_log_max_lines"); n > 0 {
+		maxLines = n
+	}
+	return maxBytes, maxLines
+}
+
 func rotateLearnLogLocked(path string) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return
 	}
-	if info.Size() <= learnLogMaxBytes {
+	maxBytes, maxLines := learnLogCaps(path)
+	if info.Size() <= maxBytes {
 		return
 	}
 	f, err := os.Open(path)
@@ -104,12 +121,12 @@ func rotateLearnLogLocked(path string) {
 		}
 	}
 	_ = f.Close()
-	if len(lines) <= learnLogMaxLines/2 {
+	if len(lines) <= maxLines/2 {
 		return
 	}
 	keep := lines
-	if len(keep) > learnLogMaxLines {
-		keep = keep[len(keep)-learnLogMaxLines:]
+	if len(keep) > maxLines {
+		keep = keep[len(keep)-maxLines:]
 	} else {
 		keep = keep[len(keep)/2:]
 	}

@@ -39,6 +39,25 @@ DEFAULT_IDENTITY_VOW = (
 )
 
 
+
+def _knob_int(key: str, default: int) -> int:
+    try:
+        from remedy.core.organism_knobs import resolve_int
+
+        return resolve_int(key)
+    except Exception:
+        return default
+
+
+def _knob_float(key: str, default: float) -> float:
+    try:
+        from remedy.core.organism_knobs import resolve_float
+
+        return resolve_float(key)
+    except Exception:
+        return default
+
+
 def _home(home: str | Path | None = None) -> Path:
     import os
 
@@ -135,7 +154,9 @@ def trace_retention(
     except (TypeError, ValueError):
         return 0.0
     age_days = max(0.0, (now - anchor) / 86400.0)
-    half = EPISODE_HALFLIFE_DAYS if EPISODE_HALFLIFE_DAYS > 0 else 30.0
+    half = _knob_float("episode_halflife_days", EPISODE_HALFLIFE_DAYS)
+    if half <= 0:
+        half = 30.0
     decay = 0.5 ** (age_days / half)
     return base * decay + 0.10 * min(n, 5)
 
@@ -159,7 +180,7 @@ def episode_retention(ep: EpisodeResidue, now: float) -> float:
 
 
 def retain_episodes(
-    episodes: list[EpisodeResidue], now: float, cap: int = MAX_EPISODES
+    episodes: list[EpisodeResidue], now: float, cap: int | None = None
 ) -> list[EpisodeResidue]:
     """Salience-weighted eviction — the successor to ``episodes[-cap:]``.
 
@@ -172,10 +193,12 @@ def retain_episodes(
     step (NTP correction, VM resume) must never let the just-recorded episode
     sort out of the protected tail and be evicted the same instant it's stored.
     """
+    if cap is None:
+        cap = _knob_int("max_episodes", MAX_EPISODES)
     eps = [e for e in (episodes or []) if isinstance(e, EpisodeResidue)]
     if len(eps) <= cap:
         return eps
-    protect = max(0, min(EPISODE_RECENT_PROTECT, cap))
+    protect = max(0, min(_knob_int("episode_recent_protect", EPISODE_RECENT_PROTECT), cap))
     recent = eps[len(eps) - protect:] if protect else []
     recent_ids = {id(e) for e in recent}
     older = [e for e in eps if id(e) not in recent_ids]
@@ -269,10 +292,10 @@ class RelationalField:
         self.trust = max(0.05, min(0.98, float(self.trust)))
         self.turns_together = max(0, int(self.turns_together))
         # Newest markers win — speech evolves; do not freeze the first 12.
-        self.voice_markers = [v[:80] for v in self.voice_markers if v][-MAX_VOICE_MARKERS:]
+        self.voice_markers = [v[:80] for v in self.voice_markers if v][-_knob_int("max_voice_markers", MAX_VOICE_MARKERS):]
         self.speech_register = str(self.speech_register or "")[:32]
-        self.open_threads = [t[:160] for t in self.open_threads if t][-MAX_OPEN_THREADS:]
-        self.tensions = [t[:180] for t in self.tensions if t][-MAX_TENSIONS:]
+        self.open_threads = [t[:160] for t in self.open_threads if t][-_knob_int("max_open_threads", MAX_OPEN_THREADS):]
+        self.tensions = [t[:180] for t in self.tensions if t][-_knob_int("max_tensions", MAX_TENSIONS):]
 
 
 @dataclass
@@ -325,7 +348,7 @@ def lesson_retention(les: OrganismLesson, now: float) -> float:
 
 
 def retain_lessons(
-    lessons: list[OrganismLesson], now: float, cap: int = MAX_SELF_LESSONS
+    lessons: list[OrganismLesson], now: float, cap: int | None = None
 ) -> list[OrganismLesson]:
     """Salience-weighted lesson eviction — successor to ``lessons[-cap:]``.
 
@@ -334,6 +357,8 @@ def retain_lessons(
     surviving traces, so a hard-won old failure lesson outlives a run of
     routine green notes. Preserves insertion order for tail-slicing injectors.
     """
+    if cap is None:
+        cap = _knob_int("max_self_lessons", MAX_SELF_LESSONS)
     ls = [x for x in (lessons or []) if isinstance(x, OrganismLesson)]
     if len(ls) <= cap:
         return ls
@@ -414,7 +439,7 @@ class SoulField:
         self.organism_lessons = retain_lessons(self.organism_lessons, self.updated_ts)
         self.self_habits = [h[:120] for h in self.self_habits if h][:16]
         self.pledges = retain_pledges(self)
-        self.future_dreams = [d[:200] for d in self.future_dreams if d][:MAX_FUTURE_DREAMS]
+        self.future_dreams = [d[:200] for d in self.future_dreams if d][:_knob_int("max_future_dreams", MAX_FUTURE_DREAMS)]
 
     def to_dict(self) -> dict[str, Any]:
         self.touch()

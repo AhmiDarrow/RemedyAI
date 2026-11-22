@@ -78,9 +78,16 @@ def _home_key(home: str | Any) -> str:
 def should_dream(
     home: str | Any = None,
     *,
-    cooldown_s: float = _DEFAULT_DREAM_COOLDOWN_S,
+    cooldown_s: float | None = None,
     force: bool = False,
 ) -> bool:
+    if cooldown_s is None:
+        try:
+            from remedy.core.organism_knobs import resolve_float
+
+            cooldown_s = resolve_float("dream_cooldown_s")
+        except Exception:
+            cooldown_s = _DEFAULT_DREAM_COOLDOWN_S
     if force:
         return True
     key = _home_key(home)

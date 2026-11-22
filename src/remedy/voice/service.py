@@ -1133,8 +1133,14 @@ def start_voice_evolution(home_dir: Path | str | None = None, memory: Any = None
     Local JSON only — no downloads — so this may run in tests. Set
     ``REMEDY_NO_VOICE_EVOLUTION=1`` to suppress. Idempotent per process.
     """
-    if os.environ.get("REMEDY_NO_VOICE_EVOLUTION") == "1":
-        return
+    try:
+        from remedy.core.organism_knobs import resolve_bool
+
+        if not resolve_bool("voice_evolution"):
+            return
+    except Exception:
+        if os.environ.get("REMEDY_NO_VOICE_EVOLUTION") == "1":
+            return
     global _evolution_started
     with _evolution_lock:
         if _evolution_started:

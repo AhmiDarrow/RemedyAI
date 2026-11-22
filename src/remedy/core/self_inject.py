@@ -669,6 +669,13 @@ def should_run_now(home: str | Path | None = None) -> bool:
 
 
 def _idle_threshold(home: str | Path | None = None) -> float:
+    _ = home
+    try:
+        from remedy.core.organism_knobs import resolve_float
+
+        return resolve_float("self_inject_idle_s")
+    except Exception:
+        pass
     with suppress(Exception):
         from remedy.interfaces.config import load_config
 
