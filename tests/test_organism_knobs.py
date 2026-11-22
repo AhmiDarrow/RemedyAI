@@ -33,6 +33,8 @@ def test_defaults_match_production_constants() -> None:
     assert table["organism_stall_after_s"] == 7 * 86_400.0
     assert table["voice_evolution"] is True
     assert table["self_inject_idle_s"] == 300
+    assert table["proactive_reach_out"] is False
+    assert table["autobiography_chars"] == 400
 
 
 def test_advanced_table_overrides_take_effect() -> None:
