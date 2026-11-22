@@ -13,6 +13,7 @@ mod sse;
 mod status;
 mod studio;
 mod time;
+mod work;
 
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
 pub use runtime::Client;
