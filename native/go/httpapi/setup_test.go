@@ -152,3 +152,70 @@ func TestClassifyMindFailureReasons(t *testing.T) {
 	}
 }
 
+func TestUpdateOfferOnceForExistingInstall(t *testing.T) {
+	s := newSetupTestServer(t)
+	// Fresh test server writes setup_completed=false — no pop-up yet.
+	code, body := doSetupJSON(t, s, http.MethodGet, "/api/setup", "")
+	if code != 200 {
+		t.Fatalf("GET status=%d body=%v", code, body)
+	}
+	offer, _ := body["update_offer"].(map[string]any)
+	if offer == nil || offer["available"] == true {
+		t.Fatalf("new install must not get the update pop-up: %v", offer)
+	}
+
+	cfgPath := filepath.Join(s.homeDir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("setup_completed = true\nname = \"Remedy\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	InvalidateConfigCache()
+
+	code, body = doSetupJSON(t, s, http.MethodGet, "/api/setup", "")
+	if code != 200 {
+		t.Fatalf("GET after existing=%d %v", code, body)
+	}
+	offer, _ = body["update_offer"].(map[string]any)
+	if offer == nil || offer["available"] != true {
+		t.Fatalf("existing install should see the one-time offer: %v", offer)
+	}
+	if offer["primary"] != "Let's go" || offer["secondary"] != "Not now" {
+		t.Fatalf("buttons=%v / %v", offer["primary"], offer["secondary"])
+	}
+	bodyText, _ := offer["body"].(string)
+	if !strings.Contains(bodyText, "changed in some big ways") || !strings.Contains(bodyText, "worth a few minutes") {
+		t.Fatalf("copy should stress major changes: %q", bodyText)
+	}
+
+	code, body = doSetupJSON(t, s, http.MethodPut, "/api/setup", `{"action":"update_offer_later"}`)
+	if code != 200 {
+		t.Fatalf("Not now=%d %v", code, body)
+	}
+	offer, _ = body["update_offer"].(map[string]any)
+	if offer["available"] == true {
+		t.Fatal("Not now must consume the offer")
+	}
+	code, body = doSetupJSON(t, s, http.MethodGet, "/api/setup", "")
+	offer, _ = body["update_offer"].(map[string]any)
+	if offer["available"] == true {
+		t.Fatal("the pop-up must not appear a second time")
+	}
+}
+
+func TestUpdateOfferLetsGoStartsConversation(t *testing.T) {
+	s := newSetupTestServer(t)
+	if err := os.WriteFile(filepath.Join(s.homeDir, "config.toml"), []byte("setup_completed = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	InvalidateConfigCache()
+	code, body := doSetupJSON(t, s, http.MethodPut, "/api/setup", `{"action":"update_offer_go"}`)
+	if code != 200 {
+		t.Fatalf("Let's go=%d %v", code, body)
+	}
+	offer, _ := body["update_offer"].(map[string]any)
+	if offer["available"] == true {
+		t.Fatal("Let's go must consume the offer")
+	}
+	if body["mode"] != "conversation" || body["onboarding_pending"] != true {
+		t.Fatalf("expected conversation revisit, got %v", body)
+	}
+}

@@ -12,11 +12,13 @@ import {
 interface SetupFlowProps {
   open: boolean
   onComplete: () => void
+  /** Opened from the one-time update pop-up (or a later "go over house rules again"). */
+  revisit?: boolean
 }
 
 type Stage = 'mind' | 'conversation' | 'traditional'
 
-export function SetupFlow({ open, onComplete }: SetupFlowProps) {
+export function SetupFlow({ open, onComplete, revisit = false }: SetupFlowProps) {
   const [session, setSession] = useState<SetupSession | null>(null)
   const [stage, setStage] = useState<Stage>('mind')
   const [failReason, setFailReason] = useState('')
@@ -51,9 +53,17 @@ export function SetupFlow({ open, onComplete }: SetupFlowProps) {
       try {
         const next = await getSetupSession()
         if (cancelled) return
-        // Begin onboarding so the offer can fire once the mind is talking.
-        const begun = await updateSetupSession({ action: 'begin', onboarding_pending: true }).catch(() => next)
-        applySession(begun)
+        const begun = revisit
+          ? next
+          : await updateSetupSession({ action: 'begin', onboarding_pending: true }).catch(() => next)
+        if (revisit) {
+          const prefer = begun.mind_ready
+            ? 'conversation'
+            : (begun.mind_failure || begun.fallback_suggested ? 'traditional' : 'mind')
+          applySession(begun, prefer)
+        } else {
+          applySession(begun)
+        }
       } catch {
         if (!cancelled) setStage('mind')
       } finally {
@@ -63,7 +73,7 @@ export function SetupFlow({ open, onComplete }: SetupFlowProps) {
     return () => {
       cancelled = true
     }
-  }, [open, applySession])
+  }, [open, applySession, revisit])
 
   const goTraditional = useCallback(
     async (from?: SetupSession, reason?: string) => {

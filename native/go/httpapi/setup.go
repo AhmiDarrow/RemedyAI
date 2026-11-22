@@ -10,6 +10,14 @@ import (
 	"time"
 )
 
+const (
+	updateOfferID        = "major-changes-2026-11"
+	updateOfferTitle     = "House rules"
+	updateOfferBody      = "Remedy has changed in some big ways: a new built-in mind, smarter token saving, local muscle sharing, and talking with your other bots. It's worth a few minutes to go over the house rules together."
+	updateOfferPrimary   = "Let's go"
+	updateOfferSecondary = "Not now"
+)
+
 // First-run setup handoff: the installer places app files, the app downloads
 // the mind with a progress bar, then Remedy continues setup as a conversation
 // (Traditional setup is always available). Shared draft lives in setup_session.json.
@@ -17,19 +25,22 @@ import (
 var setupSessionMu sync.Mutex
 
 type setupSession struct {
-	Version            int            `json:"version"`
-	Mode               string         `json:"mode"`
-	Status             string         `json:"status"`
-	OnboardingPending  bool           `json:"onboarding_pending"`
-	MindFailure        map[string]any `json:"mind_failure"`
-	Draft              map[string]any `json:"draft"`
-	Skipped            []string       `json:"skipped"`
-	SecretsSet         []string       `json:"secrets_set"`
-	OfferedAt          string         `json:"offered_at"`
-	CompletedAt        string         `json:"completed_at"`
-	Source             string         `json:"source"`
-	SetupSessionID     string         `json:"setup_session_id"`
-	FallbackSuggested  bool           `json:"fallback_suggested,omitempty"`
+	Version           int            `json:"version"`
+	Mode              string         `json:"mode"`
+	Status            string         `json:"status"`
+	OnboardingPending bool           `json:"onboarding_pending"`
+	MindFailure       map[string]any `json:"mind_failure"`
+	Draft             map[string]any `json:"draft"`
+	Skipped           []string       `json:"skipped"`
+	SecretsSet        []string       `json:"secrets_set"`
+	OfferedAt         string         `json:"offered_at"`
+	CompletedAt       string         `json:"completed_at"`
+	Source            string         `json:"source"`
+	SetupSessionID    string         `json:"setup_session_id"`
+	FallbackSuggested bool           `json:"fallback_suggested,omitempty"`
+	UpdateOffer       string         `json:"update_offer,omitempty"`
+	UpdateOfferID     string         `json:"update_offer_id,omitempty"`
+	UpdateOfferAt     string         `json:"update_offer_at,omitempty"`
 }
 
 func setupSessionPath(home string) string {
@@ -210,29 +221,30 @@ func (s *Server) setupSnapshot() map[string]any {
 	var progressOut any
 	if progress != nil {
 		progressOut = map[string]any{
-			"phase":        progress["phase"],
-			"message":      progress["message"],
-			"bytes_done":   progress["bytes_done"],
-			"bytes_total":  progress["bytes_total"],
-			"error":        progress["error"],
-			"cancellable":  progress["cancellable"],
+			"phase":       progress["phase"],
+			"message":     progress["message"],
+			"bytes_done":  progress["bytes_done"],
+			"bytes_total": progress["bytes_total"],
+			"error":       progress["error"],
+			"cancellable": progress["cancellable"],
 		}
 	}
 	return map[string]any{
-		"version":             1,
-		"mode":                sess.Mode,
-		"status":              sess.Status,
-		"onboarding_pending":  sess.OnboardingPending,
-		"mind_ready":          mindIsReady(mind),
-		"mind_failure":        failure,
-		"mind_progress":       progressOut,
-		"fallback_suggested":  sess.FallbackSuggested || failure != nil,
-		"draft":               sess.Draft,
-		"skipped":             sess.Skipped,
-		"secrets_set":         sess.SecretsSet,
-		"setup_session_id":    sess.SetupSessionID,
+		"version":               1,
+		"mode":                  sess.Mode,
+		"status":                sess.Status,
+		"onboarding_pending":    sess.OnboardingPending,
+		"mind_ready":            mindIsReady(mind),
+		"mind_failure":          failure,
+		"mind_progress":         progressOut,
+		"fallback_suggested":    sess.FallbackSuggested || failure != nil,
+		"draft":                 sess.Draft,
+		"skipped":               sess.Skipped,
+		"secrets_set":           sess.SecretsSet,
+		"setup_session_id":      sess.SetupSessionID,
 		"traditional_available": true,
-		"questions":           setupQuestionCatalog(),
+		"questions":             setupQuestionCatalog(),
+		"update_offer":          s.updateOfferPayload(sess),
 	}
 }
 
@@ -241,13 +253,13 @@ func (s *Server) handleGetSetup(w http.ResponseWriter, _ *http.Request) {
 }
 
 type setupPatch struct {
-	Mode             *string        `json:"mode"`
-	Draft            map[string]any `json:"draft"`
-	Skipped          []string       `json:"skipped"`
-	Action           string         `json:"action"`
-	SetupSessionID   *string        `json:"setup_session_id"`
-	OnboardingPending *bool         `json:"onboarding_pending"`
-	Confirm          bool           `json:"confirm"`
+	Mode              *string        `json:"mode"`
+	Draft             map[string]any `json:"draft"`
+	Skipped           []string       `json:"skipped"`
+	Action            string         `json:"action"`
+	SetupSessionID    *string        `json:"setup_session_id"`
+	OnboardingPending *bool          `json:"onboarding_pending"`
+	Confirm           bool           `json:"confirm"`
 }
 
 func (s *Server) handlePutSetup(w http.ResponseWriter, r *http.Request) {
@@ -305,6 +317,19 @@ func (s *Server) handlePutSetup(w http.ResponseWriter, r *http.Request) {
 		if sess.Status == "" || sess.Status == "pending" {
 			sess.Status = "pending"
 		}
+	case "update_offer_go", "update_offer_accept":
+		if sess.UpdateOffer != "accepted" && sess.UpdateOffer != "declined" {
+			s.recordUpdateOffer(&sess, "accepted")
+			// Start the same conversation as a revisit; the pop-up itself is done.
+			sess.OnboardingPending = true
+			sess.Mode = "conversation"
+			sess.Status = "pending"
+			sess.Source = "revisit"
+		}
+	case "update_offer_later", "update_offer_dismiss":
+		if sess.UpdateOffer != "accepted" && sess.UpdateOffer != "declined" {
+			s.recordUpdateOffer(&sess, "declined")
+		}
 	}
 	var saveErr error
 	if actionErr == nil {
@@ -358,6 +383,7 @@ func (s *Server) finalizeSetupSession(sess *setupSession, status string) error {
 	sess.CompletedAt = now
 	sess.OnboardingPending = false
 	sess.Source = status
+	s.recordUpdateOffer(sess, "accepted")
 	return nil
 }
 
@@ -381,6 +407,49 @@ func (s *Server) handleSetupMindRetry(w http.ResponseWriter, r *http.Request) {
 		out = map[string]any{"ok": true}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) recordUpdateOffer(sess *setupSession, choice string) {
+	if sess == nil {
+		return
+	}
+	sess.UpdateOffer = choice
+	sess.UpdateOfferID = updateOfferID
+	sess.UpdateOfferAt = time.Now().UTC().Format("2006-01-02T15:04:05Z")
+}
+
+func (s *Server) updateOfferAvailable(sess setupSession) bool {
+	cfg := LoadConfig(s.homeDir)
+	if !coerceBool(cfg["setup_completed"], false) {
+		return false
+	}
+	if adv, ok := cfg["advanced"].(map[string]any); ok {
+		// onboarding defaults to true when unset.
+		if v, exists := adv["onboarding"]; exists && !coerceBool(v, true) {
+			return false
+		}
+	}
+	if sess.UpdateOffer == "accepted" || sess.UpdateOffer == "declined" {
+		return false
+	}
+	if sess.Status == "complete" || sess.Status == "skipped" {
+		return false
+	}
+	if sess.OnboardingPending && sess.Source != "revisit" {
+		return false
+	}
+	return true
+}
+
+func (s *Server) updateOfferPayload(sess setupSession) map[string]any {
+	return map[string]any{
+		"available": s.updateOfferAvailable(sess),
+		"id":        updateOfferID,
+		"title":     updateOfferTitle,
+		"body":      updateOfferBody,
+		"primary":   updateOfferPrimary,
+		"secondary": updateOfferSecondary,
+	}
 }
 
 func setupQuestionCatalog() []map[string]any {
