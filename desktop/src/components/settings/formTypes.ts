@@ -1,6 +1,6 @@
 /** Shared props for Settings form sections. */
 import type { Dispatch, SetStateAction } from 'react'
-import type { Settings, MessengerInfo } from '../../api/settings'
+import type { Settings, MessengerInfo, AdvancedKnobSchema } from '../../api/settings'
 import type { VisionStatus } from '../../api/vision'
 import type { RmbStatus } from '../../api/rmb'
 import type { XaiAuthStatus } from '../../api/auth'
@@ -126,6 +126,9 @@ export interface SettingsFormProps {
   setSarcasmMode: Dispatch<SetStateAction<boolean>>
   claimidxPublicLedger: boolean
   setClaimidxPublicLedger: Dispatch<SetStateAction<boolean>>
+  advanced: Record<string, number | boolean>
+  setAdvanced: Dispatch<SetStateAction<Record<string, number | boolean>>>
+  advancedSchema: AdvancedKnobSchema[]
   toolProcess: ToolProcessMode
   setToolProcess: Dispatch<SetStateAction<ToolProcessMode>>
   onToolProcessChange?: (mode: ToolProcessMode) => void

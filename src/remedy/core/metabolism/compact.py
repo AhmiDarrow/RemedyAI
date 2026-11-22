@@ -18,9 +18,9 @@ VIGIL_JOURNAL_MAX_BYTES = 64 * 1024
 def compact_personhood(
     home: str | Path | None,
     *,
-    soul_max_bytes: int = SOUL_MAX_BYTES,
-    residue_max_bytes: int = RESIDUE_MAX_BYTES,
-    journal_max_bytes: int = VIGIL_JOURNAL_MAX_BYTES,
+    soul_max_bytes: int | None = None,
+    residue_max_bytes: int | None = None,
+    journal_max_bytes: int | None = None,
 ) -> dict[str, Any]:
     """Force existing salience eviction and cap oversized local files.
 
@@ -30,6 +30,20 @@ def compact_personhood(
     out: dict[str, Any] = {"ok": True, "soul": False, "residue": False, "journal": False}
     if not home:
         return {**out, "ok": False, "skipped": "no_home"}
+    if soul_max_bytes is None or residue_max_bytes is None or journal_max_bytes is None:
+        try:
+            from remedy.core.organism_knobs import resolve_int
+
+            if soul_max_bytes is None:
+                soul_max_bytes = resolve_int("soul_max_bytes")
+            if residue_max_bytes is None:
+                residue_max_bytes = resolve_int("residue_max_bytes")
+            if journal_max_bytes is None:
+                journal_max_bytes = resolve_int("journal_max_bytes")
+        except Exception:
+            soul_max_bytes = soul_max_bytes if soul_max_bytes is not None else SOUL_MAX_BYTES
+            residue_max_bytes = residue_max_bytes if residue_max_bytes is not None else RESIDUE_MAX_BYTES
+            journal_max_bytes = journal_max_bytes if journal_max_bytes is not None else VIGIL_JOURNAL_MAX_BYTES
     root = Path(home).expanduser()
     try:
         out["soul"] = _compact_soul(root, soul_max_bytes)

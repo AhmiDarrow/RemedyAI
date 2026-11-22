@@ -71,5 +71,6 @@ On `remedy serve` (and Desktop turns) the Go runtime owns the loop:
 - [Continuity philosophy](16-continuity-philosophy)  
 - [Memory & harness](06-memory-and-harness)  
 - Token optimization: `docs/TOKEN_OPTIMIZATION.md`
+- **Advanced knobs.** Every organism and token-budget tunable lives under `[advanced]` in `config.toml` (Settings → Advanced, hidden in simple mode). Current values stay the defaults. `REMEDY_NO_VOICE_EVOLUTION` and `REMEDY_REACT_MAX_RESULT_CHARS` still work and map onto these keys.
 - [Nanoswarm](17-nanoswarm)  
 - [Computer use soak](computer-use-soak)  

@@ -1,12 +1,14 @@
 /** Settings form sections — rest. */
 import type { ReactNode } from 'react'
 import type { SettingsFormProps } from './formTypes'
+import type { AdvancedKnobSchema } from '../../api/settings'
 import { FONT_SCALE_OPTIONS, type Density } from '../../utils/chatPrefs'
 import { SettingsSection } from '../SettingsSection'
 import { FontPicker } from './FontPicker'
 import {
   FormActionButton,
   FormHint,
+  FormInput,
   FormLabel,
   FormRange,
   FormSegmented,
@@ -41,6 +43,9 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
     setSarcasmMode,
     claimidxPublicLedger,
     setClaimidxPublicLedger,
+    advanced = {},
+    setAdvanced,
+    advancedSchema = [],
     themeId,
     onThemeChange,
     density,
@@ -167,6 +172,17 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
         <FormHint>
           Advanced knobs only — defaults keep full owner power. Skill creation stays on so Remedy can improve.
         </FormHint>
+        {setAdvanced && advancedSchema.length > 0 ? (
+          <OrganismKnobs
+            schema={advancedSchema}
+            values={advanced}
+            onChange={setAdvanced}
+          />
+        ) : (
+          <FormHint>
+            Organism and token-budget knobs also live in config.toml under [advanced], or via <code>remedy settings set</code>.
+          </FormHint>
+        )}
       </SettingsSection>
 
       {setMessengerDrafts ? (
@@ -679,5 +695,73 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
               </div>
             </SettingsSection>
     </>
+  )
+}
+
+
+function OrganismKnobs({
+  schema,
+  values,
+  onChange,
+}: {
+  schema: AdvancedKnobSchema[]
+  values: Record<string, number | boolean>
+  onChange: (next: Record<string, number | boolean>) => void
+}) {
+  const groups: { name: string; items: AdvancedKnobSchema[] }[] = []
+  for (const knob of schema) {
+    const name = knob.group || 'Other'
+    const last = groups[groups.length - 1]
+    if (last && last.name === name) last.items.push(knob)
+    else groups.push({ name, items: [knob] })
+  }
+  const effective = (knob: AdvancedKnobSchema): number | boolean => {
+    const v = values[knob.key]
+    return v === undefined ? knob.default : v
+  }
+  const setValue = (key: string, value: number | boolean) => {
+    onChange({ ...values, [key]: value })
+  }
+  return (
+    <div className="mt-3 space-y-3">
+      {groups.map((g) => (
+        <div key={g.name}>
+          <FormLabel>{g.name}</FormLabel>
+          {g.items.map((knob) => {
+            const val = effective(knob)
+            if (knob.kind === 'bool') {
+              return (
+                <FormToggle
+                  key={knob.key}
+                  checked={Boolean(val)}
+                  onChange={(on) => setValue(knob.key, on)}
+                  label={knob.key.replace(/_/g, ' ')}
+                />
+              )
+            }
+            const unit = knob.unit ? ` (${knob.unit})` : ''
+            return (
+              <div key={knob.key} className="mb-1.5">
+                <FormLabel>
+                  {knob.key.replace(/_/g, ' ')}{unit}
+                </FormLabel>
+                <FormInput
+                  type="number"
+                  size="sm"
+                  mono
+                  value={String(val)}
+                  title={knob.help}
+                  onChange={(raw) => {
+                    const n = Number(raw)
+                    if (Number.isFinite(n)) setValue(knob.key, n)
+                  }}
+                />
+                {knob.help ? <FormHint>{knob.help}</FormHint> : null}
+              </div>
+            )
+          })}
+        </div>
+      ))}
+    </div>
   )
 }

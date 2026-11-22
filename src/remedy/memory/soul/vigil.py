@@ -172,7 +172,7 @@ def set_vigil_enabled(
 def take_vigil_offer(
     home: str | Path | None = None,
     *,
-    min_turns: int = 12,
+    min_turns: int | None = None,
 ) -> bool:
     """One-shot: True exactly once when the offer hint should be injected.
 
@@ -181,6 +181,13 @@ def take_vigil_offer(
     to keep working between visits. Marking happens here, at injection —
     at-most-once is guaranteed even if the model never voices it.
     """
+    if min_turns is None:
+        try:
+            from remedy.core.organism_knobs import resolve_int
+
+            min_turns = resolve_int("vigil_offer_turns")
+        except Exception:
+            min_turns = 12
     with _lock:
         v = load_vigil(home)
         if v.enabled or v.offered:
