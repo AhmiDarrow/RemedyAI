@@ -89,8 +89,9 @@ SENSITIVE_KEYS = frozenset(
     }
 )
 
-# Knobs that PRs #72 / #73 will honor. We persist them on [advanced] so they
-# take effect once those PRs merge; we do not define the knobs here.
+# Real [advanced] knobs defined in organism_knobs (interop from #72, muscle
+# from #73). House rules write them to config.toml [advanced] so they bind
+# immediately to the live table (resolve / normalizeAdvancedTable).
 FORWARD_ADVANCED_KEYS = frozenset(
     {
         "interop_inbound",
@@ -105,6 +106,7 @@ FORWARD_ADVANCED_KEYS = frozenset(
         "muscle_discover",
         "muscle_schedule",
         "mind_keep_gpu",
+        "mind_handles_easy_chats",
     }
 )
 
@@ -234,6 +236,7 @@ QUESTIONS: tuple[Question, ...] = (
         (
             Field("always_send_images", False, "bool", config="advanced"),
             Field("vision_force_decode", False, "bool"),
+            Field("mind_handles_easy_chats", True, "bool", config="advanced"),
             Field("muscle_route", "auto", "enum", ("auto", "mind", "rmb", "local", "frontier"), config="advanced"),
         ),
     ),
@@ -251,6 +254,7 @@ QUESTIONS: tuple[Question, ...] = (
                 ("auto", "share", "yield_mind", "keep_mind"),
                 config="advanced",
             ),
+            Field("mind_keep_gpu", False, "bool", config="advanced"),
         ),
     ),
     Question(

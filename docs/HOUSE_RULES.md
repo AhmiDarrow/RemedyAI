@@ -103,8 +103,7 @@ API keys and other secrets are written only to the existing secure store
 `house_rules.toml`, the setup draft, the audit log, or tool logs. A GET of
 the setup session may list that a key is set (`secrets_set`), never the value.
 
-Root-level settings go in `config.toml`. Reserved forward keys
-(`interop_*`, `muscle_*`, `mind_keep_gpu`) live under `[advanced]`.
+Root-level settings go in `config.toml`. Interop knobs (`interop_*`), local-muscle knobs (`muscle_*`, `mind_keep_gpu`, `mind_handles_easy_chats`), and other organism tunables live under `[advanced]` and bind to the live advanced-knob table as soon as they are saved.
 
 ## Rollback
 
