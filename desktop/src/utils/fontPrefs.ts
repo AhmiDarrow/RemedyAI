@@ -6,7 +6,7 @@
  *   headings → Remedy Sans (geometric, made for titles)
  *   reading  → AhmiPrint (slab serif for long-form pages like Help)
  *   accent   → Ahmi Pixel (small brand touches: signature, shortcut chips)
- *   code     → Cascadia Code (also JetBrains Mono, Fira Code)
+ *   code     → AhmiPrint (same-width figures; also Cascadia Code, JetBrains Mono, Fira Code)
  * Every face ships inside the app (src/fonts.css), so it looks the same on
  * every machine and works offline. CJK and other scripts fall through to
  * the system fonts at the end of each stack.
@@ -50,7 +50,7 @@ export const FONT_ROLES: { role: FontRole; label: string; hint: string; fallback
   { role: 'heading', label: 'Headings', hint: 'Page and section titles.', fallback: 'remedy-sans' },
   { role: 'reading', label: 'Reading', hint: 'Long-form pages such as Help articles.', fallback: 'ahmi-print' },
   { role: 'accent', label: 'Accent', hint: 'Small touches: the signature and shortcut keys.', fallback: 'ahmi-pixel' },
-  { role: 'code', label: 'Code', hint: 'Code blocks, diffs and logs.', fallback: 'cascadia-code' },
+  { role: 'code', label: 'Code', hint: 'Code blocks, diffs and logs.', fallback: 'ahmi-print' },
 ]
 
 export type FontChoices = Record<FontRole, FontFaceId>
@@ -60,7 +60,7 @@ export const DEFAULT_FONTS: FontChoices = {
   heading: 'remedy-sans',
   reading: 'ahmi-print',
   accent: 'ahmi-pixel',
-  code: 'cascadia-code',
+  code: 'ahmi-print',
 }
 
 const KEY = 'remedy-fonts'
@@ -69,11 +69,16 @@ function isFace(v: unknown): v is FontFaceId {
   return typeof v === 'string' && FONT_FACES.some((f) => f.id === v)
 }
 
-/** Faces offered for a role: code gets monospace faces first, others get text faces first. */
+/** Faces offered for a role: code leads with AhmiPrint, then monospace faces; others get text faces first. */
 export function facesForRole(role: FontRole) {
   const mono = FONT_FACES.filter((f) => f.mono)
   const text = FONT_FACES.filter((f) => !f.mono)
-  return role === 'code' ? [...mono, ...text.filter((f) => f.id === 'ahmi-pixel')] : [...text, ...mono]
+  if (role === 'code') {
+    const print = text.filter((f) => f.id === 'ahmi-print')
+    const pixel = text.filter((f) => f.id === 'ahmi-pixel')
+    return [...print, ...mono, ...pixel]
+  }
+  return [...text, ...mono]
 }
 
 export function loadFonts(): FontChoices {
