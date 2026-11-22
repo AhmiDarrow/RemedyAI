@@ -419,6 +419,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/telephony/status", s.handleTelephonyStatus)
 	s.mux.HandleFunc("POST /api/telephony/terms", s.handleTelephonyTerms)
 	s.mux.HandleFunc("POST /api/telephony/choose", s.handleTelephonyChoose)
+	s.mountInteropRoutes()
 	s.mountWebUI()
 	return s, nil
 }

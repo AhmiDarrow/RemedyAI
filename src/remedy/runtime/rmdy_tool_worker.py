@@ -890,6 +890,67 @@ def _partner_pulse(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return {"ok": True, "vigil": vigil}
 
 
+
+def _peer_home(inp: Mapping[str, Any]) -> str | None:
+    home = str(inp.get("home_dir") or "").strip()
+    return home or None
+
+
+def _peer_list(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.interop.runtime import InteropRuntime
+
+    rt = InteropRuntime(_peer_home(inp))
+    contacts = rt.list_contacts(enabled_only=False)
+    public = [
+        {
+            "id": p.get("id"),
+            "name": p.get("name"),
+            "protocol": p.get("protocol"),
+            "skills": p.get("skills") or [],
+            "enabled": p.get("enabled", True),
+        }
+        for p in contacts
+    ]
+    return {"ok": True, "peers": public, "total": len(public)}
+
+
+def _peer_dispatch(inp: Mapping[str, Any], field: str) -> Mapping[str, Any]:
+    from remedy.interop.orchestrate import delegate_to_peer, merge_results
+    from remedy.interop.runtime import InteropRuntime
+
+    text = str(inp.get(field) or inp.get("question") or inp.get("task") or "").strip()
+    if not text:
+        return {"ok": False, "error": f"{field} is required", "results": [], "summary": ""}
+    rt = InteropRuntime(_peer_home(inp))
+    peer_id = str(inp.get("peer_id") or "").strip()
+    if peer_id:
+        peer = rt.load_peer(peer_id)
+        if peer is None:
+            return {"ok": False, "error": "unknown peer", "results": [], "summary": ""}
+        one = delegate_to_peer(peer, text)
+        merged = merge_results([one])
+        return {"ok": bool(one.get("ok")), **merged}
+    return rt.orchestrate(text)
+
+
+def _peer_ask(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    return _peer_dispatch(inp, "question")
+
+
+def _peer_delegate(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    return _peer_dispatch(inp, "task")
+
+
+def _peer_status(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.interop.runtime import InteropRuntime
+
+    tid = str(inp.get("task_id") or "").strip()
+    if not tid:
+        return {"ok": False, "error": "task_id is required"}
+    rt = InteropRuntime(_peer_home(inp))
+    return rt.task_status(tid)
+
+
 _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("text.slugify", 1): lambda inp: {"slug": _slugify(str(inp.get("text", "")))},
     ("text.word_count", 1): lambda inp: {"words": _word_count(str(inp.get("text", "")))},
@@ -927,6 +988,10 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("partner.vigil", 1): _partner_vigil,
     ("partner.pulse", 1): _partner_pulse,
     ("partner.improve", 1): _partner_improve,
+    ("peer.list", 1): _peer_list,
+    ("peer.ask", 1): _peer_ask,
+    ("peer.delegate", 1): _peer_delegate,
+    ("peer.status", 1): _peer_status,
 }
 
 

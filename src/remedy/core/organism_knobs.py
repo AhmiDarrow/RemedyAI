@@ -157,6 +157,31 @@ KNOBS: tuple[Knob, ...] = (
          "Keep the mind on the GPU even when RMB muscle is running. Off: mind yields to CPU."),
     Knob("always_send_images", False, "bool", None, None, "", "Local mind",
          "Always attach original image pixels to frontier / RMB muscle. Off (default) sends a digest only."),
+    Knob("interop_inbound", False, "bool", None, None, "", "Agent interop",
+         "Accept inbound A2A and MCP from other bots. Off by default. Localhost-only unless interop_bind is changed.",
+         env="REMEDY_INTEROP_INBOUND"),
+    Knob("interop_bind", "127.0.0.1", "str", None, None, "", "Agent interop",
+         "Where inbound A2A/MCP is accepted: 127.0.0.1 (default), lan, or 0.0.0.0. lan and 0.0.0.0 still require a token."),
+    Knob("interop_a2a", True, "bool", None, None, "", "Agent interop",
+         "Serve the A2A Agent Card and JSON-RPC, and allow outbound A2A to peers."),
+    Knob("interop_mcp", True, "bool", None, None, "", "Agent interop",
+         "Expose talk-to-Remedy MCP tools (ask, delegate, task status, share context)."),
+    Knob("interop_claimidx", False, "bool", None, None, "", "Agent interop",
+         "Optionally verify peer DIDs with ClaimIDX. Off: identity is pluggable and not required."),
+    Knob("interop_trust_policy", "gated", "str", None, None, "", "Agent interop",
+         "open (known or unknown peers), gated (unverified peers limited), or verified (only DID-verified peers). Money, send, and delete always need the owner's approval."),
+    Knob("interop_auto_reply", False, "bool", None, None, "", "Agent interop",
+         "When inbound is on, automatically answer allowed asks. Off: queue them for the owner."),
+    Knob("interop_audit", True, "bool", None, None, "", "Agent interop",
+         "Write every inbound and outbound peer exchange to the interop audit log."),
+    Knob("interop_rate_per_min", 30, "int", 1, 600, "count", "Agent interop",
+         "Max inbound requests per peer per minute."),
+    Knob("interop_hop_limit", 3, "int", 1, 8, "hops", "Agent interop",
+         "Max forwarding hops. Stops ping-pong loops between bots."),
+    Knob("interop_max_peers", 64, "int", 1, 512, "count", "Agent interop",
+         "Cap on saved peer contacts."),
+    Knob("interop_task_ttl_s", 86400, "int", 60, 7 * 86_400, "s", "Agent interop",
+         "How long peer tasks are kept."),
 )
 
 KNOB_BY_KEY: dict[str, Knob] = {k.key: k for k in KNOBS}
@@ -186,6 +211,8 @@ def _coerce(knob: Knob, raw: Any) -> int | float | bool:
             "mind_kv_cache": ("q8_0", "f16", "bf16", "f8_e4m3"),
             "mind_spec": ("auto", "draft-mtp", "mtp", "ngram-mod", "ngram", "off", "none"),
             "mind_quant": ("auto", "q6_k", "q6", "q4_k_m", "q4"),
+            "interop_bind": ("127.0.0.1", "localhost", "loopback", "lan", "0.0.0.0", "off"),
+            "interop_trust_policy": ("open", "gated", "verified"),
         }
         opts = allowed.get(knob.key)
         if opts and s not in opts:

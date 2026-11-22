@@ -1,7 +1,7 @@
 # Architecture (living)
 
 Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
-`docs/TELEPHONY.md`, `docs/manual/`, root `AGENTS.md`.
+`docs/TELEPHONY.md`, `docs/AGENT_INTEROP.md`, `docs/manual/`, root `AGENTS.md`.
 
 ## Stack
 
@@ -18,6 +18,7 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | Gateway | `native/go/gateway/` + `native/go/httpapi` (SSOT `messenger_catalog.json`) | Go owns messenger inbound *and* outbound (Telegram/Discord/Slack/Matrix/Mattermost + WhatsApp/Teams/Google Chat webhooks + Signal via Zig exec-capture) + poll locks + desktop mirror + Settings field_schema via embedded JSON; Python `messenger_settings` loads that fixture fail-closed for TestClient/scrub/CLI only (no catalog twin; no adapter/router/session_bridge; no `/api/webhooks*` registrar) |
 | Native runtime | `native/` | Go runtime and Zig capability core. Python workers cover model, voice, and vision |
 | Claimidx host | `src/remedy/runtime/claimidx_host.py` | Pinned first-run install, private index, loopback lifecycle on `:17340` |
+| Peer interop | `src/remedy/interop/` + `native/go/httpapi/interop.go` | A2A v1.0 and MCP talk-to-Remedy. Peers, not muscles. Inbound off / localhost / token by default. See `docs/AGENT_INTEROP.md`. |
 
 Entry: `remedy serve` → `remedy-runtime` · verification: `scripts/prepush.py` runs
 the authoritative multi-stack matrix on the owner's machine (there is no CI on
@@ -105,6 +106,17 @@ on a chosen IPv4 (never `0.0.0.0`); `:7400` stays loopback. Owner-run relay
 (`remedy connect-relay` → Go `cmd/connect-relay`) forwards framed blobs
 without decrypting. Same-LAN mDNS (`_remedy-connect._udp`) advertises a
 host-pub hash only. See `docs/manual/29-remedy-connect.md`.
+
+
+## Peer interop
+
+Remedy talks with a user's other bots as a **peer** over A2A and MCP, not by
+wiring them in as muscles. Inbound is off until `[advanced] interop_inbound`
+is on; then `remedy-runtime` serves `/.well-known/agent-card.json`, `POST /a2a`,
+and `POST /mcp` on `:7400`, localhost-only, with a bearer token. `remedy mcp
+serve` exports talk-to-Remedy tools over stdio (and `--http` on :7401, never
+:7400). Contacts, tasks, and the audit log live under `{home}/interop/`.
+Money, send, and delete still need the owner. Details: `docs/AGENT_INTEROP.md`.
 
 ## Versioning
 

@@ -958,6 +958,110 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 			"additionalProperties":true
 		}`,
 		},
+		{
+			id:   "peer.list",
+			desc: "List the owner's peer-agent contacts (independent bots Remedy can talk to over A2A or MCP). Not muscles.",
+			risk: RiskReadOnly,
+			in: `{
+			"type":"object",
+			"properties":{
+				` + propHomeDir + `,
+				` + propGoBound + `
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"required":["ok","peers","total"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"peers":{"type":"array","items":{"type":"object"}},
+				"total":{"type":"integer","minimum":0},
+				"error":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`,
+		},
+		{
+			id:   "peer.ask",
+			desc: "Ask a named peer bot a question over A2A. Peers keep their own memory and permissions. Money, send, and delete still need the owner.",
+			risk: RiskMutation,
+			in: `{
+			"type":"object",
+			"required":["question"],
+			"properties":{
+				"question":{"type":"string","minLength":1,"description":"Plain-language question for the peer"},
+				"peer_id":{"type":"string","description":"Contact id from peer.list. If omitted, pick by skills."},
+				` + propHomeDir + `,
+				` + propGoBound + `
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"required":["ok"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"summary":{"type":"string"},
+				"results":{"type":"array","items":{"type":"object"}},
+				"error":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`,
+		},
+		{
+			id:   "peer.delegate",
+			desc: "Delegate a task to a peer bot (named, or picked by skills) over A2A and merge the replies.",
+			risk: RiskMutation,
+			in: `{
+			"type":"object",
+			"required":["task"],
+			"properties":{
+				"task":{"type":"string","minLength":1,"description":"Plain-language task for the peer"},
+				"peer_id":{"type":"string","description":"Contact id from peer.list. If omitted, pick by skills."},
+				` + propHomeDir + `,
+				` + propGoBound + `
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"required":["ok"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"summary":{"type":"string"},
+				"results":{"type":"array","items":{"type":"object"}},
+				"error":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`,
+		},
+		{
+			id:   "peer.status",
+			desc: "Look up a peer task Remedy started, or a local inbound peer task.",
+			risk: RiskReadOnly,
+			in: `{
+			"type":"object",
+			"required":["task_id"],
+			"properties":{
+				"task_id":{"type":"string","minLength":1},
+				"peer_id":{"type":"string"},
+				` + propHomeDir + `,
+				` + propGoBound + `
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"required":["ok"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"task":{"type":"object"},
+				"error":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`,
+		},
 	}
 }
 
