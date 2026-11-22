@@ -563,6 +563,8 @@ def empty_rules() -> dict[str, Any]:
         "answers": {},
         "provenance": {},
         "skipped": [],
+        "update_offer": "",
+        "update_offer_id": "",
     }
 
 
@@ -579,6 +581,9 @@ def empty_session() -> dict[str, Any]:
         "completed_at": "",
         "source": "",
         "setup_session_id": "",
+        "update_offer": "",
+        "update_offer_id": "",
+        "update_offer_at": "",
     }
 
 
@@ -926,6 +931,114 @@ def offer_prompt() -> str:
     )
 
 
+# One-shot pop-up for existing installs after this update. Never a nag:
+# Let's go or Not now, and it does not appear again.
+UPDATE_OFFER_ID = "major-changes-2026-11"
+UPDATE_OFFER_TITLE = "House rules"
+UPDATE_OFFER_BODY = (
+    "Remedy has changed in some big ways: a new built-in mind, smarter token "
+    "saving, local muscle sharing, and talking with your other bots. It's worth "
+    "a few minutes to go over the house rules together."
+)
+UPDATE_OFFER_PRIMARY = "Let's go"
+UPDATE_OFFER_SECONDARY = "Not now"
+
+
+def update_offer_available(home: str | Path | None = None) -> bool:
+    """True once, for an already-set-up install that has not yet had this pop-up."""
+    if not _onboarding_enabled():
+        return False
+    if not bool(_load_config(home).get("setup_completed")):
+        return False
+    session = load_session(home)
+    rules = load_rules(home)
+    seen = str(session.get("update_offer") or rules.get("update_offer") or "")
+    if seen in ("accepted", "declined"):
+        return False
+    status = str(rules.get("status") or session.get("status") or "")
+    # They already finished or skipped the house-rules conversation itself.
+    if status in (STATUS_COMPLETE, STATUS_SKIPPED):
+        return False
+    source = str(session.get("source") or rules.get("source") or "")
+    if session.get("onboarding_pending") and source != "revisit":
+        return False
+    return True
+
+
+def update_offer_public(home: str | Path | None = None) -> dict[str, Any]:
+    """Copy and availability for the desktop pop-up."""
+    return {
+        "available": update_offer_available(home),
+        "id": UPDATE_OFFER_ID,
+        "title": UPDATE_OFFER_TITLE,
+        "body": UPDATE_OFFER_BODY,
+        "primary": UPDATE_OFFER_PRIMARY,
+        "secondary": UPDATE_OFFER_SECONDARY,
+    }
+
+
+def resolve_update_offer(
+    choice: str,
+    *,
+    home: str | Path | None = None,
+    origin: str = "desktop",
+) -> dict[str, Any]:
+    """Record Let's go or Not now. The pop-up never shows again after either."""
+    if not can_change_house_rules(origin):
+        return {"ok": False, "error": "peers cannot change house rules"}
+    session = load_session(home)
+    rules = load_rules(home)
+    already = str(session.get("update_offer") or rules.get("update_offer") or "")
+    if already in ("accepted", "declined"):
+        return {
+            "ok": True,
+            "choice": already,
+            "already": True,
+            "update_offer": update_offer_public(home),
+        }
+    raw = (choice or "").strip().lower().replace(" ", "_").replace("'", "")
+    accepted = raw in ("go", "accepted", "lets_go", "letsgo", "update_offer_go")
+    recorded = "accepted" if accepted else "declined"
+    now = _now()
+    session["update_offer"] = recorded
+    session["update_offer_id"] = UPDATE_OFFER_ID
+    session["update_offer_at"] = now
+    rules["update_offer"] = recorded
+    rules["update_offer_id"] = UPDATE_OFFER_ID
+    save_session(session, home)
+    save_rules(rules, home)
+    _append_audit(
+        {
+            "action": "update_offer",
+            "actor": "owner",
+            "origin": origin,
+            "choice": recorded,
+            "id": UPDATE_OFFER_ID,
+        },
+        home,
+    )
+    out: dict[str, Any] = {
+        "ok": True,
+        "choice": recorded,
+        "update_offer": update_offer_public(home),
+    }
+    if accepted:
+        out.update(revisit(home=home, origin=origin))
+        # revisit reloads and saves the session — restore the consumed flag.
+        session = load_session(home)
+        rules = load_rules(home)
+        session["update_offer"] = "accepted"
+        session["update_offer_id"] = UPDATE_OFFER_ID
+        session["update_offer_at"] = now
+        rules["update_offer"] = "accepted"
+        rules["update_offer_id"] = UPDATE_OFFER_ID
+        save_session(session, home)
+        save_rules(rules, home)
+        out["update_offer"] = update_offer_public(home)
+        out["session"] = public_session(home)
+    return out
+
+
 def revisit_prompt() -> str:
     return (
         "The owner asked to go over house rules again. Walk through the same "
@@ -1129,6 +1242,8 @@ def _finalize(
     rules["status"] = status
     rules["completed_at"] = now
     rules["source"] = source
+    rules["update_offer"] = "accepted"
+    rules["update_offer_id"] = UPDATE_OFFER_ID
     save_rules(rules, home)
     session = load_session(home)
     session["draft"] = filled
@@ -1137,6 +1252,8 @@ def _finalize(
     session["completed_at"] = now
     session["onboarding_pending"] = False
     session["source"] = source
+    session["update_offer"] = "accepted"
+    session["update_offer_id"] = UPDATE_OFFER_ID
     save_session(session, home)
     try:
         from remedy.interfaces.config import mark_setup_completed
@@ -1504,6 +1621,7 @@ def public_session(
         "defaults": defaults(),
         "summary": "\n".join(summary_lines(home=home)),
         "offer_prompt": offer_prompt(),
+        "update_offer": update_offer_public(home),
     }
 
 
@@ -1550,7 +1668,11 @@ def close_onboarding_if_still_open(home: str | Path | None = None) -> None:
 
 
 _MUTATING = frozenset(
-    {"record", "skip_all", "confirm", "propose", "decline", "rollback", "revisit", "set_mode", "finalize"}
+    {
+        "record", "skip_all", "confirm", "propose", "decline", "rollback",
+        "revisit", "set_mode", "finalize",
+        "update_offer_go", "update_offer_later", "update_offer_accept", "update_offer_dismiss",
+    }
 )
 
 
@@ -1611,6 +1733,8 @@ def dispatch(inp: dict[str, Any] | None = None) -> dict[str, Any]:
             return update_draft(patch, skipped=skipped, home=home, origin=origin)
         if action == "offer_prompt":
             return {"ok": True, "prompt": offer_prompt()}
+        if action in ("update_offer_go", "update_offer_later", "update_offer_accept", "update_offer_dismiss"):
+            return resolve_update_offer(action, home=home, origin=origin)
         return {"ok": False, "error": f"unknown action {action}"}
     except Exception as exc:
         logger.exception("house_rules.dispatch failed")

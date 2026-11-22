@@ -215,3 +215,60 @@ def test_skip_setup_inherits_without_nag(home: Path) -> None:
     rules = hr.load_rules(home)
     assert rules["status"] == hr.STATUS_INHERITED
     assert hr.take_onboarding_offer(home) is False
+
+
+def test_update_offer_once_for_existing_install(home: Path) -> None:
+    """Existing / inherited installs get one pop-up; Let's go or Not now ends it."""
+    (home / "config.toml").write_text("setup_completed = true\nname = \"Remedy\"\n", encoding="utf-8")
+    offer = hr.update_offer_public(home)
+    assert offer["available"] is True
+    assert offer["primary"] == "Let's go"
+    assert offer["secondary"] == "Not now"
+    assert "changed in some big ways" in offer["body"]
+    assert "worth a few minutes" in offer["body"]
+    # First-run chat inject still stays quiet.
+    assert hr.take_onboarding_offer(home) is False
+
+    later = hr.resolve_update_offer("later", home=home, origin="desktop")
+    assert later["ok"] is True
+    assert later["choice"] == "declined"
+    assert later["update_offer"]["available"] is False
+    assert hr.update_offer_available(home) is False
+    # Not now is final — never a second pop-up.
+    again = hr.resolve_update_offer("go", home=home, origin="desktop")
+    assert again["update_offer"]["available"] is False
+    assert hr.load_session(home)["update_offer"] == "declined"
+
+
+def test_update_offer_lets_go_starts_revisit(home: Path) -> None:
+    (home / "config.toml").write_text("setup_completed = true\nname = \"Remedy\"\n", encoding="utf-8")
+    out = hr.resolve_update_offer("go", home=home, origin="desktop")
+    assert out["ok"] is True
+    assert out["choice"] == "accepted"
+    assert out["update_offer"]["available"] is False
+    session = hr.load_session(home)
+    assert session["update_offer"] == "accepted"
+    assert session["status"] == hr.STATUS_PENDING
+    assert session["onboarding_pending"] is True
+    assert session["source"] == "revisit"
+    # After Let's go the pop-up itself does not come back.
+    assert hr.update_offer_available(home) is False
+
+
+def test_update_offer_not_for_fresh_or_finished_setup(home: Path) -> None:
+    # Fresh install (setup not completed) — first-run conversation, not this pop-up.
+    (home / "config.toml").write_text("setup_completed = false\n", encoding="utf-8")
+    assert hr.update_offer_available(home) is False
+
+    # Finished first-run conversation — already went over house rules.
+    hr.mark_onboarding_pending(home)
+    hr.skip_all(home=home, origin="desktop")
+    assert hr.load_rules(home)["status"] == hr.STATUS_SKIPPED
+    assert hr.update_offer_available(home) is False
+
+
+def test_update_offer_peers_cannot_resolve(home: Path) -> None:
+    (home / "config.toml").write_text("setup_completed = true\n", encoding="utf-8")
+    out = hr.resolve_update_offer("go", home=home, origin="a2a:peer")
+    assert out["ok"] is False
+    assert hr.update_offer_available(home) is True

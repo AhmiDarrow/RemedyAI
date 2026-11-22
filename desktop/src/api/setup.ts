@@ -25,6 +25,15 @@ export interface SetupQuestion {
   skippable?: boolean
 }
 
+export interface SetupUpdateOffer {
+  available: boolean
+  id?: string
+  title?: string
+  body?: string
+  primary?: string
+  secondary?: string
+}
+
 export interface SetupSession {
   version?: number
   mode: 'conversation' | 'traditional'
@@ -41,6 +50,7 @@ export interface SetupSession {
   traditional_available?: boolean
   questions?: SetupQuestion[]
   summary?: string
+  update_offer?: SetupUpdateOffer
 }
 
 export async function getSetupSession(): Promise<SetupSession> {
@@ -51,7 +61,7 @@ export async function updateSetupSession(patch: {
   mode?: 'conversation' | 'traditional'
   draft?: Record<string, unknown>
   skipped?: string[]
-  action?: 'begin' | 'skip_all' | 'confirm'
+  action?: 'begin' | 'skip_all' | 'confirm' | 'update_offer_go' | 'update_offer_later'
   setup_session_id?: string
   onboarding_pending?: boolean
 }): Promise<SetupSession> {
@@ -78,4 +88,14 @@ export function mindFailureMessage(failure?: SetupMindFailure | null): string {
     default:
       return detail || 'The mind could not start. You can retry, or continue with Traditional setup.'
   }
+}
+
+export const UPDATE_OFFER_FALLBACK: SetupUpdateOffer = {
+  available: false,
+  id: 'major-changes-2026-11',
+  title: 'House rules',
+  body:
+    "Remedy has changed in some big ways: a new built-in mind, smarter token saving, local muscle sharing, and talking with your other bots. It's worth a few minutes to go over the house rules together.",
+  primary: "Let's go",
+  secondary: 'Not now',
 }

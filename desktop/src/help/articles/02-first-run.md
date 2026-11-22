@@ -25,7 +25,7 @@ Setup opens when **any** of these is true:
 - Config file is **corrupt / unreadable** (e.g. bad TOML after an older bug)
 - Settings cannot load yet on a fresh install (setup still opens so you are not stuck)
 
-After you finish or **Skip**, `setup_completed = true` is written and setup will not auto-show again. You can still say “let’s go over house rules again,” or run `/house-rules`.
+After you finish or **Skip**, `setup_completed = true` is written and setup will not auto-show again. You can still say “let’s go over house rules again,” or run `/house-rules`. Existing installs get one pop-up after this update (Let's go / Not now) and are not asked again.
 
 ## Conversation (default)
 

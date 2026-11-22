@@ -24,8 +24,13 @@ If the mind cannot start (a failed download or verify, or not enough memory),
 Remedy opens Traditional setup, explains why, and offers a retry. Running
 without a GPU is fine — the mind can use the CPU.
 
-Existing installs and `remedy --skip-setup` are not interrupted. Those
-sessions are marked inherited and are never nagged. You can still say
+Existing installs and `remedy --skip-setup` are not pulled back into
+first-run setup. Those sessions are marked inherited and are not nagged
+in chat. After this update, existing installs get one desktop pop-up
+that makes the case for going over house rules (a new built-in mind,
+smarter token saving, local muscle sharing, and talking with other
+bots). **Let's go** starts the conversation; **Not now** dismisses it.
+Either choice is final — the pop-up shows only once. You can still say
 “let’s go over house rules again,” or run `/house-rules`.
 
 The full first-launch path, including what the installer does and does not
@@ -119,8 +124,9 @@ In `config.toml` under `[advanced]`:
 | `house_rules_permission` | `confirm_sensitive` | `confirm_sensitive`, `confirm_all`, or `plain` (sensitive keys still confirm). |
 | `house_rules_audit` | `true` | When false, new audit lines are not written. Existing files are left alone. |
 
-These follow Joe’s app rule: no forced nags. The auto-offer is a single
-non-repeating prompt. Inherited and completed installs are left alone.
+These follow Joe’s app rule: no forced nags. The first-run auto-offer is
+a single non-repeating prompt. Existing installs get one update pop-up
+(Let's go / Not now) and then are left alone.
 
 ## Tools and API
 

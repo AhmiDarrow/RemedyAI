@@ -74,8 +74,12 @@ provider.
 - `remedy --skip-setup` (and the desktop sidecar, which uses it so the API
   is up for the UI) marks onboarding as `inherited`. It does not rewrite
   your config and does not nag later.
-- Existing installs that already finished setup are left alone. You can
-  still say “let’s go over house rules again.”
+- Existing installs that already finished setup are not sent through
+  first-run again. After this update they get one pop-up: Remedy has
+  changed in some big ways, and it's worth a few minutes to go over
+  house rules. **Let's go** starts the conversation; **Not now**
+  dismisses it. It shows only once. You can still say “let’s go over
+  house rules again.”
 
 ## Language and updates
 
