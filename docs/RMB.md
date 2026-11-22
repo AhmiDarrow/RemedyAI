@@ -22,17 +22,19 @@ leaves a small headroom (`muscle_vram_headroom_mib`, default 768).
   **share** the GPU and overlap work. The mind stays responsive.
 - If a MoE muscle (for example Qwen3.6-35B-A3B with experts on CPU)
   plus the mind fit, they share. Experts stay in RAM (`--n-cpu-moe`).
-- If a dense muscle (the default Qwen3.5-9B Q6_K) cannot sit fully
-  beside the mind, the mind **keeps** its GPU layers and the muscle
-  takes the leftover layers. On a 12 GB card this is the usual plan.
-- Only when even a useful partial offload will not fit (about 8 GB and
-  below for a dense 9B) does the mind **yield** to CPU with mmap so the
-  muscle can have the card. Wake stays a process start against a warm
-  page cache, not a cold read.
+- If a dense muscle cannot sit fully beside the mind but **would fit
+  alone**, auto **yields** the mind to CPU with mmap so the muscle can
+  run at full GPU speed. On a 12 GB card with the default Qwen3.5-9B
+  Q6_K, that is the usual plan. Wake stays a process start against a
+  warm page cache, not a cold read.
+- If the muscle would not fit even alone, the mind still yields and
+  autofit shrinks or offloads the muscle.
 
 `mind_keep_gpu` (or `muscle_gpu_policy=keep_mind`) forces the mind to
-keep the GPU; the muscle offloads or runs on CPU. `muscle_gpu_policy=yield_mind`
-restores the older "muscle owns the card" behavior. `share` never yields.
+keep the GPU; the muscle offloads or runs on CPU. `muscle_gpu_policy=share`
+keeps both on the GPU and offloads leftover muscle layers (the previous
+12 GB auto plan). `muscle_gpu_policy=yield_mind` always gives the card
+to the muscle.
 
 The planner also sets whether work **overlaps** or is **serialized**
 (`muscle_schedule`). A tight split serializes so the two hosts do not
@@ -49,17 +51,21 @@ base URL. The mind still adapts its GPU footprint to the reserved VRAM.
 
 `muscle_route=auto` (default):
 
-- Easy or inner work (briefs, continuity, short questions) stays on
-  the 4B mind. That path is free and already loaded.
+- Clearly easy user chats — greetings, thanks, short simple questions —
+  go to the 4B mind, even when the selected chat provider is a cloud
+  model, to save tokens. The classifier is conservative: if a turn
+  looks like design, explanation, coding, or anything more involved, it
+  stays on the selected provider so quality does not drop.
+- Inner work (briefs, continuity) stays on the 4B mind.
 - Coding and heavier tool loops go to RMB if it is up, otherwise to a
   discovered local server.
 - The hardest work escalates to a configured frontier provider. If
   there is no frontier, local muscle keeps it.
 
-The owner can force `mind`, `rmb`, `local`, or `frontier`. Auto never
-steals a session (or the configured chat provider) that is already a
-cloud model; set a forced knob if you want the 4B mind or RMB to take
-those turns instead.
+Turn this off with `mind_handles_easy_chats=false` (Local mind). The
+owner can also force `mind`, `rmb`, `local`, or `frontier`. Each reply
+is labeled with the model that answered (chat meta, status line, and
+the serve log).
 
 The muscle still gets **digests and briefs**, not raw pixels, unless
 the mind sets `needs_pixels` or `always_send_images` is on.
@@ -94,6 +100,7 @@ Settings → Advanced, group **Local muscle**. Defaults are safe.
 
 | Knob | Default | Meaning |
 |------|---------|---------|
+| `mind_handles_easy_chats` | `true` | Local mind. Auto-route clearly easy chats to the 4B mind, even when a cloud provider is selected. Off leaves every user turn on the selected provider. |
 | `muscle_gpu_policy` | `auto` | `auto`, `share`, `yield_mind`, or `keep_mind`. |
 | `muscle_schedule` | `auto` | `auto`, `overlap`, or `serialize`. |
 | `muscle_route` | `auto` | `auto`, `mind`, `rmb`, `local`, or `frontier`. |

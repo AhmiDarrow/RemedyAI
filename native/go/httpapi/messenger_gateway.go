@@ -181,6 +181,7 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 	var reply strings.Builder
 	var collectedToolCalls []map[string]any
 	var collectedToolResults []map[string]any
+	var answeredModel *string
 	lastTyping := time.Now()
 	turnErr := s.runner.RunTurn(runCtx, TurnRequest{
 		SessionID:   sess.ID,
@@ -198,6 +199,9 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 			return nil
 		} else if strings.HasPrefix(token, "@@tool_result:") {
 			collectedToolResults = append(collectedToolResults, parseToolResultToken(token).record())
+			return nil
+		} else if name := parseAnsweringModelToken(token); name != nil {
+			answeredModel = name
 			return nil
 		} else if strings.HasPrefix(token, "@@") {
 			return nil
@@ -234,7 +238,7 @@ func (s *Server) handleMessengerEvent(ctx context.Context, ev gateway.Event) err
 		if len(collectedToolResults) > 0 {
 			results = collectedToolResults
 		}
-		if _, err := s.sessions.AddMessageFull(sess.ID, "assistant", text, nil, calls, results, sess.Model, nil, nil); err == nil {
+		if _, err := s.sessions.AddMessageFull(sess.ID, "assistant", text, nil, calls, results, firstNonEmptyPtr(answeredModel, sess.Model), nil, nil); err == nil {
 			if fresh, ok, _ := s.sessions.Get(sess.ID); ok {
 				title := fresh.Title
 				count := fresh.MessageCount
