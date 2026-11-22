@@ -126,4 +126,4 @@ and tells you where to get it.
 
 - [Providers & auth](03-providers-and-auth.md) — model keys and app passwords
 - [Security & data](04-security-and-data.md) — the secret store, jails, SSRF
-- [Local vision & SmolVLM2](14-visual-decoder.md) — what reads your documents
+- [Local mind (Qwen3.5-4B)](14-visual-decoder.md) — what reads your documents

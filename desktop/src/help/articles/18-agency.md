@@ -80,7 +80,7 @@ When a request spans **independent** modules/paths (or you say “in parallel”
 - You still talk to **one Remedy** — workers are not separate chat personas.
 - Workers are **depth-1** (they cannot spawn more workers).
 - Work that needs its own memory window is a [hive daughter](28-hive.md), not `spread_run`.
-- Most workers are **non-LLM** jobs (fast). Optional local SmolVLM2 only refines the plan or compresses long digests when the server is already up.
+- Most workers are **non-LLM** jobs (fast). Optional the local 4B mind only refines the plan or compresses long digests when the server is already up.
 - Continuity may inject a **[Spread]** system hint when fan-out looks useful; pure chat and single-file edits do not spread.
 
 Config (optional, under `~/.remedy/config.toml`):

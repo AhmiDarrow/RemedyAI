@@ -10,7 +10,7 @@ Remedy is **local-first**. Understand what is stored where and what leaves your 
 | `~/.remedy/auth/` | Local API token, provider keys (DPAPI when available), xAI OAuth, Google OAuth |
 | `~/.remedy/memory.db` | Chat sessions, messages, tool results, memories, profile (SQLite) |
 | `~/.remedy/assistant.json` | PA prefs, budget/debts/bills (local; not OAuth tokens) |
-| `~/.remedy/vision/` | Local model weights (SmolVLM2) + llama-server runtime |
+| `~/.remedy/vision/` | Local model weights (Qwen3.5-4B mind) + llama-server runtime |
 | `~/.remedy/skills/` | User / learned skill packs |
 | `~/.remedy/skill_stats.json` | Skill success / lifecycle stats |
 | `~/.remedy/backups/` | Optional memory backups |

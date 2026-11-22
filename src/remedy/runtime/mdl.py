@@ -15,9 +15,9 @@ prompt characteristics to a tier recommendation.
 
 Integration
 -----------
-Uses multiple llama-server instances (or tiered GGUF files) on different
-ports. Each tier loads only its required layer range from the shared
-model file (mmap sharing keeps physical RAM low).
+All tiers share the single unified mind llama-server on DEFAULT_PORT
+(8740). Parallel slots, not extra processes, handle concurrent inner
+tasks. The n_layers figures are documentary (Qwen3.5-4B has 32 layers).
 """
 
 from __future__ import annotations
@@ -29,8 +29,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Tier configuration
-# SmolVLM2-2.2B: 32 layers total
-# Q4_K_M: ~30.9 MB per layer (attention + FFN + norms)
+# Qwen3.5-4B: 32 layers total. One host, not per-tier processes.
 
 @dataclass(frozen=True)
 class MdlTier:
@@ -42,33 +41,33 @@ class MdlTier:
     description: str
 
 
-# SmolVLM2-2.2B: 24 layers total (~1061 MB Q4_K_M)
-# Single model file with varied -ngl for GPU layer count
-# Port defaults (8740 = legacy single-server = FULL tier).
+# Unified mind host (8740). Tier names remain for routing API compatibility.
+from remedy.runtime.catalog import DEFAULT_PORT as _MIND_PORT
+
 MDL_TIERS: dict[str, MdlTier] = {
     "light": MdlTier(
         name="light",
-        n_layers=4,
-        port=8741,
-        vram_mb_est=300,
+        n_layers=32,
+        port=_MIND_PORT,
+        vram_mb_est=4200,
         resident=True,
-        description="Continuity core, low-density briefs, speculative classify",
+        description="Short inner tasks on the unified 4B mind (shared host)",
     ),
     "medium": MdlTier(
         name="medium",
-        n_layers=16,
-        port=8742,
-        vram_mb_est=670,
-        resident=False,
-        description="Classify final pass, standard brief, continuity",
+        n_layers=32,
+        port=_MIND_PORT,
+        vram_mb_est=4200,
+        resident=True,
+        description="Standard briefs and classify on the unified 4B mind",
     ),
     "full": MdlTier(
         name="full",
-        n_layers=24,
-        port=8740,
-        vram_mb_est=1060,
-        resident=False,
-        description="Vision decode, full-quality local chat — same port as legacy server",
+        n_layers=32,
+        port=_MIND_PORT,
+        vram_mb_est=4200,
+        resident=True,
+        description="Vision, digest, and full-quality local mind — single host",
     ),
 }
 

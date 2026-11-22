@@ -122,6 +122,14 @@ def is_installed(
     return False
 
 
+def _usable_sha256(value: str | None) -> str | None:
+    """None when the catalog hash is missing or a TODO placeholder."""
+    raw = (value or "").strip()
+    if not raw or raw.upper() == "TODO":
+        return None
+    return raw
+
+
 def _sha256_file(path: Path, chunk: int = 1024 * 1024) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -143,7 +151,7 @@ def _asset_complete(path: Path, asset: DownloadAsset) -> bool:
         return False
     if asset.size_bytes and path.stat().st_size != asset.size_bytes:
         return False
-    if asset.sha256:
+    if _usable_sha256(asset.sha256):
         try:
             return _sha256_file(path).lower() == asset.sha256.lower()
         except OSError:
@@ -220,7 +228,7 @@ def _download_asset(
         raise RuntimeError(
             f"Size mismatch for {asset.name}: expected {asset.size_bytes}, got {got}"
         )
-    if asset.sha256:
+    if _usable_sha256(asset.sha256):
         digest = _sha256_file(partial)
         if digest.lower() != asset.sha256.lower():
             partial.unlink(missing_ok=True)

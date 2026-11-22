@@ -116,6 +116,27 @@ def rmb_guard(monkeypatch: pytest.MonkeyPatch) -> Any:
     svc._flag_cap_cache.clear()
     svc._discover_ggufs_cache.update({"ts": 0.0, "key": "", "value": []})
     svc.invalidate_cache()
+    # Unified mind stays up; never let yield/restore hit the real llama-server.
+    monkeypatch.setattr(
+        "remedy.vision.runtime.yield_mind_for_muscle",
+        lambda home_dir=None: {"ok": True, "yielded": False, "reason": "test"},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "remedy.vision.runtime.restore_mind_gpu",
+        lambda home_dir=None: {"ok": True},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "remedy.vision.runtime.start_server",
+        lambda *a, **k: {"ok": True, "already_running": True},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "remedy.vision.runtime.stop_server",
+        lambda *a, **k: {"ok": True},
+        raising=False,
+    )
     yield guard
     svc._proc = None
     svc._user_stopped = False
