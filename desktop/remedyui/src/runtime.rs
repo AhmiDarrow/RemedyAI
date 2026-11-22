@@ -70,16 +70,31 @@ pub fn load_token() -> Option<String> {
     None
 }
 
-fn remedy_home() -> PathBuf {
-    if let Ok(h) = std::env::var("REMEDY_HOME") {
-        let p = PathBuf::from(h);
-        if !p.as_os_str().is_empty() {
-            return p;
-        }
+/// Same directory the Tauri shell uses: `REMEDY_HOME`, else `%USERPROFILE%\.remedy`
+/// on Windows, else `$HOME/.remedy`. Updates must keep reading this tree.
+pub(crate) fn remedy_home() -> PathBuf {
+    let remedy = std::env::var("REMEDY_HOME").ok();
+    let profile = std::env::var("USERPROFILE").ok();
+    let home = std::env::var("HOME").ok();
+    remedy_home_from(remedy.as_deref(), profile.as_deref(), home.as_deref())
+}
+
+pub(crate) fn remedy_home_from(
+    remedy_home: Option<&str>,
+    userprofile: Option<&str>,
+    home: Option<&str>,
+) -> PathBuf {
+    if let Some(h) = remedy_home.map(str::trim).filter(|s| !s.is_empty()) {
+        return PathBuf::from(h);
     }
-    std::env::var("HOME")
-        .map(|h| PathBuf::from(h).join(".remedy"))
-        .unwrap_or_else(|_| PathBuf::from(".remedy"))
+    // Windows prefers USERPROFILE even when a Git Bash HOME is also set.
+    let base = if cfg!(windows) {
+        userprofile
+    } else {
+        home
+    };
+    let base = base.map(str::trim).filter(|s| !s.is_empty()).unwrap_or(".");
+    PathBuf::from(base).join(".remedy")
 }
 
 /// Starts `remedy-runtime --serve` (or `remedy serve`) if nothing is already on the port.
@@ -498,3 +513,29 @@ pub fn stream_message(
 }
 
 // Request::delete — confirm it exists; if not we'll use a generic method.
+
+#[cfg(test)]
+mod home_tests {
+    use super::remedy_home_from;
+    use std::path::PathBuf;
+
+    #[test]
+    fn windows_home_follows_userprofile() {
+        let home = remedy_home_from(
+            None,
+            Some(r"C:\Users\Ada"),
+            Some(r"C:\GitBashHome"),
+        );
+        if cfg!(windows) {
+            assert_eq!(home, PathBuf::from(r"C:\Users\Ada\.remedy"));
+        } else {
+            assert_eq!(home, PathBuf::from(r"C:\GitBashHome\.remedy"));
+        }
+    }
+
+    #[test]
+    fn remedy_home_env_wins() {
+        let home = remedy_home_from(Some(r"D:\custom\.remedy"), Some(r"C:\Users\Ada"), Some("/home/ada"));
+        assert_eq!(home, PathBuf::from(r"D:\custom\.remedy"));
+    }
+}

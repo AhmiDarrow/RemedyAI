@@ -13,6 +13,7 @@ mod sse;
 mod status;
 mod studio;
 mod time;
+mod update;
 
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
 pub use runtime::Client;
@@ -29,6 +30,7 @@ use remedy_ui::{App, El, Ui, WindowSpec};
 
 const SHOW: u32 = 1;
 const QUIT: u32 = 2;
+const UPDATE: u32 = 3;
 /// Matches the current app's 270 px session column.
 pub(crate) const SIDEBAR_WIDTH: f32 = 270.0;
 /// Visible 32 px hit target for tool buttons (New-session plus, close ×).
@@ -40,6 +42,7 @@ pub(crate) const SELECT_MARK: f32 = 3.0;
 /// Opens the window and puts the app in the tray.
 pub fn app(app: &App) {
     app.keep_running(true);
+    update::spawn_startup_check(app);
     let studio = Studio::new();
     if !runtime::spawn_disabled() {
         runtime::ensure_running();
@@ -63,11 +66,22 @@ pub fn app(app: &App) {
                     enabled: true,
                     default: id == SHOW,
                 };
+                let offer = update::offer_signal().get();
+                let note = update::note_signal().get();
+                let update_label = if !offer.is_empty() {
+                    format!("{} {offer}", m.text(&u, "status-update"))
+                } else if !note.is_empty() {
+                    note
+                } else {
+                    m.text(&u, "tray-check-updates")
+                };
                 a.set_tray(Some(TrayIcon::new(
                     m.text(&u, "app-title"),
                     tray_icon(),
                     vec![
                         item(SHOW, m.text(&u, "tray-show")),
+                        TrayItem::Separator,
+                        item(UPDATE, update_label),
                         TrayItem::Separator,
                         item(QUIT, m.text(&u, "tray-quit")),
                     ],
@@ -82,6 +96,7 @@ pub fn app(app: &App) {
             w2.focus();
         }
         TrayEvent::Menu(QUIT) => a2.quit(),
+        TrayEvent::Menu(UPDATE) => update::on_update_menu(&a2),
         _ => {}
     });
     app.on_second_instance(move |_| {

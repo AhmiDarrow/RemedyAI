@@ -2,7 +2,7 @@
 
 Items stay red until proven (headless tests on the box, then a hidden Windows run on Joe's PC). First ship is 1.0 on Windows, Linux and macOS. Grove is in. Full browser parity is in. `com.remedy.desktop`, the installer asset name, the minisign key, NSIS `/S /UPDATE` and `~/.remedy` stay intact.
 
-Identity and engine pins: RemedyUI `main` at `3b3a026` (includes theme names Protan/Deutan/Tritan and Tauri `latest.json` feeds).
+Identity and engine pins: RemedyUI `main` at `7dec309` (PRs #118–#120: theme names Protan/Deutan/Tritan, Tauri `latest.json` feeds, AhmiPrint weights). Packaging scripts live in `desktop/remedyui/packaging/`. They do not tag or publish.
 
 ## Shell (this milestone)
 

@@ -45,22 +45,10 @@ impl Fonts {
     }
 }
 
-/// The config file we read: `$REMEDY_HOME/config.toml` when that env is set,
-/// otherwise `~/.remedy/config.toml`.
+/// `$REMEDY_HOME/config.toml`, or `%USERPROFILE%\.remedy\config.toml` on Windows,
+/// or `~/.remedy/config.toml` elsewhere. Same home the Tauri shell keeps across updates.
 pub fn config_path() -> std::path::PathBuf {
-    if let Ok(home) = std::env::var("REMEDY_HOME") {
-        let p = std::path::PathBuf::from(home);
-        if !p.as_os_str().is_empty() {
-            return p.join("config.toml");
-        }
-    }
-    std::env::var("HOME")
-        .map(|h| {
-            std::path::PathBuf::from(h)
-                .join(".remedy")
-                .join("config.toml")
-        })
-        .unwrap_or_else(|_| std::path::PathBuf::from("config.toml"))
+    crate::runtime::remedy_home().join("config.toml")
 }
 
 fn load_from_path(path: &std::path::Path) -> Option<Fonts> {

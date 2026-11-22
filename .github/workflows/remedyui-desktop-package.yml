@@ -1,0 +1,130 @@
+# RemedyUI desktop packages for the 1.0.0 shell.
+#
+# workflow_dispatch only. Uploads artifacts. Does not create a tag and does
+# not publish a GitHub Release. Joe cuts the 1.0.0 tag and latest.json.
+# desktop-release.yml remains the Tauri 0.70.x pipeline. Do not point this
+# file at softprops/action-gh-release or `gh release`.
+
+name: RemedyUI desktop package
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: Windows NSIS
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Allow cargo to read RemedyUI
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.REMEDYUI_READ_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          git config --global url."https://x-access-token:${TOKEN}@github.com/AhmiDarrow/RemedyUI".insteadOf "https://github.com/AhmiDarrow/RemedyUI"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis -y --no-progress
+
+      - name: Package
+        shell: pwsh
+        working-directory: desktop/remedyui
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: ./packaging/package-windows.ps1 -Jobs 4
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis
+          path: |
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_x64-setup.exe
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_x64-setup.exe.sig
+          if-no-files-found: error
+
+  linux:
+    name: Linux AppImage and deb
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Allow cargo to read RemedyUI
+        env:
+          TOKEN: ${{ secrets.REMEDYUI_READ_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          git config --global url."https://x-access-token:${TOKEN}@github.com/AhmiDarrow/RemedyUI".insteadOf "https://github.com/AhmiDarrow/RemedyUI"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install packaging tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev libfuse2 curl
+
+      - name: Package
+        working-directory: desktop/remedyui
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bash ./packaging/package-linux.sh --jobs 4
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage-deb
+          path: |
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_amd64.AppImage
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_amd64.AppImage.sig
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_amd64.deb
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_amd64.deb.sig
+          if-no-files-found: error
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            arch: aarch64
+          - os: macos-15-intel
+            arch: x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Allow cargo to read RemedyUI
+        env:
+          TOKEN: ${{ secrets.REMEDYUI_READ_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          git config --global url."https://x-access-token:${TOKEN}@github.com/AhmiDarrow/RemedyUI".insteadOf "https://github.com/AhmiDarrow/RemedyUI"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Package
+        working-directory: desktop/remedyui
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bash ./packaging/package-macos.sh --jobs 4
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: |
+            desktop/remedyui/target/packaging/Remedy.Desktop_*.dmg
+            desktop/remedyui/target/packaging/Remedy.Desktop_*.dmg.sig
+            desktop/remedyui/target/packaging/Remedy.Desktop_*.app.tar.gz
+            desktop/remedyui/target/packaging/Remedy.Desktop_*.app.tar.gz.sig
+          if-no-files-found: error

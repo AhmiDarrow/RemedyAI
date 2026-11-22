@@ -5,17 +5,15 @@ edition = "2024"
 publish = false
 
 [dependencies]
-# A RemedyUI checkout on main at 7dec309 or later (PRs #118–#120).
-remedy-ui = { path = "/workspace/RemedyUI-update/crates/remedy-ui", features = ["net", "image"] }
-# remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "7dec309c224fd4c85c38eaa108c869fe43331768", features = ["net", "image"] }
+# RemedyUI main at 7dec309 (PRs #118–#120): theme names, Feed::Json, AhmiPrint weights.
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "7dec309c224fd4c85c38eaa108c869fe43331768", features = ["net", "image", "update"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
-remedy-ui = { path = "/workspace/RemedyUI-update/crates/remedy-ui", features = ["headless", "devtools", "net", "image"] }
-# remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "7dec309c224fd4c85c38eaa108c869fe43331768", features = ["headless", "devtools", "net", "image"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "7dec309c224fd4c85c38eaa108c869fe43331768", features = ["headless", "devtools", "net", "image", "update"] }
 
 [profile.release]
 lto = "fat"
