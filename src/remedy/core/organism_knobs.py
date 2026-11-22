@@ -11,13 +11,13 @@ import os
 from dataclasses import dataclass
 from typing import Any, Literal
 
-Kind = Literal["int", "float", "bool"]
+Kind = Literal["int", "float", "bool", "str"]
 
 
 @dataclass(frozen=True)
 class Knob:
     key: str
-    default: int | float | bool
+    default: int | float | bool | str
     kind: Kind
     minimum: int | float | None
     maximum: int | float | None
@@ -113,6 +113,18 @@ KNOBS: tuple[Knob, ...] = (
          "Weekly self-reflection may write proposed self-changes. They never apply without approval."),
     Knob("weekly_reflection_s", 7 * 86_400.0, "float", 3600.0, 90 * 86_400.0, "s", "Alive",
          "Minimum seconds between weekly reflection proposals."),
+    Knob("inner_language", True, "bool", None, None, "", "Inner language",
+         "Use Remedy's self-evolving inner language on inner and worker channels."),
+    Knob("inner_language_verbosity", "dense", "str", None, None, "", "Inner language",
+         "off, natural, or dense. Dense is the default for inner and worker channels."),
+    Knob("inner_coinage", True, "bool", None, None, "", "Inner language",
+         "Allow dreams and reflection to coin new terms (always with a gloss)."),
+    Knob("inner_coinage_rate", 0.3, "float", 0.0, 1.0, "", "Inner language",
+         "How freely she may coin terms on a given dream or reflection pass."),
+    Knob("inner_lexicon_cap", 128, "int", 8, 1024, "count", "Inner language",
+         "Maximum coined terms. The seed core is not counted and cannot be pruned."),
+    Knob("inner_audit", True, "bool", None, None, "", "Inner language",
+         "Keep an audit log of dense + decoded forms. The log cannot hide entries while the language is in use."),
 )
 
 KNOB_BY_KEY: dict[str, Knob] = {k.key: k for k in KNOBS}
@@ -135,6 +147,11 @@ def _coerce(knob: Knob, raw: Any) -> int | float | bool:
         if isinstance(raw, str):
             return raw.strip().lower() in ("1", "true", "yes", "on")
         return bool(raw)
+    if knob.kind == "str":
+        s = str(raw).strip().lower()
+        if knob.key == "inner_language_verbosity" and s not in ("off", "natural", "dense"):
+            return "dense"
+        return s
     if knob.kind == "float":
         val: int | float = float(raw)
     else:
@@ -169,7 +186,7 @@ def _legacy(knob: Knob, cfg: dict[str, Any]) -> Any:
     return None
 
 
-def resolve(key: str, cfg: dict[str, Any] | None = None) -> int | float | bool:
+def resolve(key: str, cfg: dict[str, Any] | None = None) -> int | float | bool | str:
     """Effective value: env (if mapped) > ``[advanced]`` > legacy > default."""
     knob = KNOB_BY_KEY[key]
     env_val = _from_env(knob)
@@ -203,7 +220,7 @@ def resolve_bool(key: str, cfg: dict[str, Any] | None = None) -> bool:
     return bool(resolve(key, cfg))
 
 
-def effective_table(cfg: dict[str, Any] | None = None) -> dict[str, int | float | bool]:
+def effective_table(cfg: dict[str, Any] | None = None) -> dict[str, int | float | bool | str]:
     data = _load_cfg(cfg)
     return {k.key: resolve(k.key, data) for k in KNOBS}
 
@@ -225,11 +242,11 @@ def schema() -> list[dict[str, Any]]:
     ]
 
 
-def normalize_table(raw: Any) -> dict[str, int | float | bool]:
+def normalize_table(raw: Any) -> dict[str, int | float | bool | str]:
     """Clamp known keys; drop unknown keys and values that match defaults."""
     if not isinstance(raw, dict):
         return {}
-    out: dict[str, int | float | bool] = {}
+    out: dict[str, int | float | bool | str] = {}
     for key, value in raw.items():
         knob = KNOB_BY_KEY.get(str(key))
         if knob is None or value is None:

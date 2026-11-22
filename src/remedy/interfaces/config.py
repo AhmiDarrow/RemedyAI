@@ -1120,6 +1120,12 @@ claimidx_public_ledger = true
 # outcome_learning = true
 # weekly_reflection = true
 # weekly_reflection_s = 604800
+# inner_language = true
+# inner_language_verbosity = "dense"
+# inner_coinage = true
+# inner_coinage_rate = 0.3
+# inner_lexicon_cap = 128
+# inner_audit = true
 
 # Memory harness (chat compression)
 # harness_mode = "auto"     # off | manual | auto
