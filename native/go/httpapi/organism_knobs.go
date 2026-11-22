@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -66,6 +67,12 @@ var advancedKnobList = []advancedKnob{
 	{"outcome_learning", true, "bool", 0, 0, "", "Alive", "Track whether suggestions worked (accepted, fix held, unhappy) and feed the skill genome.", "", false},
 	{"weekly_reflection", true, "bool", 0, 0, "", "Alive", "Weekly self-reflection may write proposed self-changes. They never apply without approval.", "", false},
 	{"weekly_reflection_s", 7 * 86400.0, "float", 3600, 90 * 86400, "s", "Alive", "Minimum seconds between weekly reflection proposals.", "", false},
+	{"inner_language", true, "bool", 0, 0, "", "Inner language", "Use Remedy's self-evolving inner language on inner and worker channels.", "", false},
+	{"inner_language_verbosity", "dense", "str", 0, 0, "", "Inner language", "off, natural, or dense. Dense is the default for inner and worker channels.", "", false},
+	{"inner_coinage", true, "bool", 0, 0, "", "Inner language", "Allow dreams and reflection to coin new terms (always with a gloss).", "", false},
+	{"inner_coinage_rate", 0.3, "float", 0, 1, "", "Inner language", "How freely she may coin terms on a given dream or reflection pass.", "", false},
+	{"inner_lexicon_cap", 128, "int", 8, 1024, "count", "Inner language", "Maximum coined terms. The seed core is not counted and cannot be pruned.", "", false},
+	{"inner_audit", true, "bool", 0, 0, "", "Inner language", "Keep an audit log of dense + decoded forms. The log cannot hide entries while the language is in use.", "", false},
 }
 
 func advancedByKey() map[string]advancedKnob {
@@ -79,6 +86,13 @@ func advancedByKey() map[string]advancedKnob {
 func coerceAdvanced(k advancedKnob, raw any) (any, bool) {
 	if k.Kind == "bool" {
 		return coerceBool(raw, false), true
+	}
+	if k.Kind == "str" {
+		s := strings.ToLower(strings.TrimSpace(fmt.Sprint(raw)))
+		if k.Key == "inner_language_verbosity" && s != "off" && s != "natural" && s != "dense" {
+			s = "dense"
+		}
+		return s, true
 	}
 	n, ok := anyToFloat(raw)
 	if !ok {

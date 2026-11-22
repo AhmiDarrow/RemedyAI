@@ -85,6 +85,7 @@ func (s *Server) handlePartnerStatus(w http.ResponseWriter, r *http.Request) {
 		"hearth":            s.hearthPublic(time.Now(), activeTitle, nextAction),
 		"learn_log":         readLearnLog(s.homeDir, 20),
 		"alive":             readAlivePublic(s.homeDir),
+		"inner_language":    readInnerLanguagePublic(s.homeDir),
 	})
 }
 

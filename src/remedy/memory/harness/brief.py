@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
+
 from datetime import UTC, datetime
 from typing import Any
 
@@ -248,6 +250,13 @@ def brief_to_context_block(brief: SessionBrief | None, *, max_chars: int = 2200)
         lines.append(f"- Notes: {brief.notes[:400]}")
     if brief.last_quality_score is not None:
         lines.append(f"- Continuity quality: {brief.last_quality_score:.0%}")
+    with suppress(Exception):
+        from remedy.core.inner_language import encode, lexicon_slice
+        from remedy.interfaces.config import get_home_dir
+
+        slice_ = lexicon_slice(get_home_dir())
+        if slice_:
+            lines.append(encode("lex", {"ver": 1, "lex": slice_}))
     if len(lines) <= 1:
         return ""
     text = "\n".join(lines)

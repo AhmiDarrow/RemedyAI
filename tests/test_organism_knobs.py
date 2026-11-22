@@ -35,6 +35,9 @@ def test_defaults_match_production_constants() -> None:
     assert table["self_inject_idle_s"] == 300
     assert table["proactive_reach_out"] is False
     assert table["autobiography_chars"] == 400
+    assert table["inner_language"] is True
+    assert table["inner_language_verbosity"] == "dense"
+    assert table["inner_lexicon_cap"] == 128
 
 
 def test_advanced_table_overrides_take_effect() -> None:
