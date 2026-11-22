@@ -35,7 +35,7 @@ var settableKeys = map[string]struct{}{
 	"memory_encrypt": {}, "allow_skill_creation": {}, "auto_approve_threshold": {},
 	"log_level": {}, "sarcasm_mode": {}, "claimidx_public_ledger": {},
 	"enabled_providers": {}, "enabled_models": {}, "last_model_by_provider": {},
-	"skills_active_budget": {}, "browser_home_url": {}, "enabled_channels": {},
+	"skills_active_budget": {}, "browser_home_url": {}, "update_check": {}, "enabled_channels": {},
 	"messengers": {}, "assistant": {},
 	"connect_enabled": {}, "connect_bind_host": {}, "connect_bind_port": {},
 	"connect_paused": {}, "connect_panes": {}, "connect_relay_url": {},
@@ -420,6 +420,9 @@ func normalizeSettingsPatch(patch, cfg ConfigMap) {
 	if v, ok := patch["browser_home_url"]; ok && v != nil {
 		patch["browser_home_url"] = normalizeBrowserHomeURL(fmt.Sprint(v))
 	}
+	if v, ok := patch["update_check"]; ok && v != nil {
+		patch["update_check"] = normalizeUpdateCheck(fmt.Sprint(v))
+	}
 	if v, ok := patch["agent_gender"]; ok && v != nil {
 		g := strings.ToLower(strings.TrimSpace(fmt.Sprint(v)))
 		if g != "female" && g != "male" && g != "neutral" {
@@ -715,6 +718,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"last_model_by_provider":       cfgMapOrEmpty(cfg, "last_model_by_provider"),
 		"skills_active_budget":         cfgInt(cfg, "skills_active_budget", 80),
 		"browser_home_url":             normalizeBrowserHomeURL(cfgString(cfg, "browser_home_url", "")),
+		"update_check":                 normalizeUpdateCheck(cfgString(cfg, "update_check", "auto")),
 		"version":                      s.version,
 		"config_exists":                configExists,
 		"setup_completed":              setupCompleted,
@@ -799,6 +803,14 @@ func normalizeTrustProfile(raw any) string {
 	default:
 		return "balanced"
 	}
+}
+
+func normalizeUpdateCheck(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if s == "ask" || s == "manual" || s == "off" {
+		return "ask"
+	}
+	return "auto"
 }
 
 func normalizeBrowserHomeURL(raw string) string {

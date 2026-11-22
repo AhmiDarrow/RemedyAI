@@ -40,6 +40,7 @@ _BUILTIN_COMMANDS: list[dict] = [
     {"name": "/forget", "description": "Remove a remembered fact: /forget <text>", "aliases": [], "arguments": "text"},
     {"name": "/pin", "description": "Pin a fact so it always injects: /pin <text>", "aliases": [], "arguments": "text"},
     {"name": "/whoami", "description": "Show what Remedy knows about you", "aliases": [], "arguments": None},
+    {"name": "/house-rules", "description": "Show house rules, or go over them again", "aliases": ["/houserules"], "arguments": "revisit"},
     {
         "name": "/stretch",
         "description": "Map this PC (hardware, tools, rooms) — first-home census",
@@ -528,6 +529,35 @@ async def handle_slash_command(
             return {"text": text}
         except Exception as e:
             return {"text": f"Profile error: {e}"}
+
+    if stripped in ("/house-rules", "/houserules", "/house_rules"):
+        home = None
+        if runtime is not None:
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        try:
+            from remedy.core.house_rules import dispatch, summarize
+
+            arg = (args or "").strip().lower()
+            if arg in ("again", "revisit", "redo", "review"):
+                out = dispatch({"action": "revisit", "home_dir": home, "caller_origin": "cli"})
+                if not out.get("ok"):
+                    return {"text": out.get("error") or "Could not reopen house rules."}
+                prompt = out.get("prompt") or "Let's go over house rules again."
+                summary = (out.get("session") or {}).get("summary") or ""
+                text = prompt
+                if summary:
+                    text += "\n\nCurrent rules:\n" + summary
+                return {"text": text}
+            sm = summarize(home=home)
+            text = "**House rules**\n\n" + (sm.get("summary") or "Defaults are in effect.")
+            text += (
+                "\n\nSay “let's go over house rules again” anytime, or "
+                "`/house-rules revisit`. Change a setting in chat or in Settings. "
+                "Skipped items keep their defaults."
+            )
+            return {"text": text}
+        except Exception as e:
+            return {"text": f"House rules error: {e}"}
 
     if stripped in ("/stretch", "/home"):
         home = None

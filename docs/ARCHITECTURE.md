@@ -87,6 +87,7 @@ Grove unmounts off-surface. Studio must own its own voice instance (`useVoice` i
 
 - API: `src/remedy/interfaces/routes/voice.py` → `src/remedy/voice/service.py`
 - First-run: `ensure_voice_assets` + `maybe_ensure_local_model` on API lifespan (skipped in pytest). Chatterbox HQ is **opt-in**, not first-run.
+- First-run setup session lives in `setup_session.json` and `GET`/`PUT /api/setup`; house rules are `src/remedy/core/house_rules.py` plus `/house_rules` and `settings.patch` confirmation. Docs: [SETUP.md](SETUP.md), [HOUSE_RULES.md](HOUSE_RULES.md).
 - UI: `desktop/src/components/settings/VoiceSection.tsx` (HQ toggle), Grove `GroveVoiceControls` (speak/quiet only), Studio composer/status bar
 - Smart-turn: pinned ONNX under `~/.remedy/voice/models/smart-turn/`; detector `voice.realtime.turn.make_detector` globs `*.onnx` (no restart)
 - Identity: `~/.remedy/voice/identity.json`. Owner clone: `voice/clone.py` (named task, expiry, revoke).

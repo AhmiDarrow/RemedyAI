@@ -38,6 +38,8 @@ import { QuitServerWarning } from './components/QuitServerWarning'
 import { SplashScreen } from './components/SplashScreen'
 import { TitleBar, type AppMenuAction } from './components/TitleBar'
 import { UserNamePrompt } from './components/UserNamePrompt'
+import { HouseRulesUpdateOffer } from './components/setup/HouseRulesUpdateOffer'
+import { getSetupSession, updateSetupSession, type SetupUpdateOffer } from './api/setup'
 import { CommandPalette, type CommandItem } from './components/CommandPalette'
 import { ChatSessionHeader } from './components/ChatSessionHeader'
 import { AboutDialog } from './components/AboutDialog'
@@ -49,8 +51,8 @@ const SettingsPanel = lazy(() =>
 const HelpPanel = lazy(() =>
   import('./components/HelpPanel').then((m) => ({ default: m.HelpPanel })),
 )
-const SetupWizard = lazy(() =>
-  import('./components/SetupWizard').then((m) => ({ default: m.SetupWizard })),
+const SetupFlow = lazy(() =>
+  import('./components/SetupFlow').then((m) => ({ default: m.SetupFlow })),
 )
 const UpdateScreen = lazy(() =>
   import('./components/UpdateScreen').then((m) => ({ default: m.UpdateScreen })),
@@ -469,6 +471,8 @@ export default function App() {
   // Always run in Tauri — do not wait for serverState or the poller never starts
   // and navigate looks "offline" forever. Loopback host APIs need no SPA token.
   const [showSetupWizard, setShowSetupWizard] = useState(false)
+  const [houseRulesOffer, setHouseRulesOffer] = useState<SetupUpdateOffer | null>(null)
+  const [showHouseRulesRevisit, setShowHouseRulesRevisit] = useState(false)
   const [showUpdateScreen, setShowUpdateScreen] = useState(false)
   const [userName, setUserName] = useState('')
   const [voiceGender, setVoiceGender] = useState<GenderRole>('female')
@@ -1511,7 +1515,30 @@ export default function App() {
     onCloseHelp: () => setHelpOpen(false),
   }
 
+  useEffect(() => {
+    if (serverState !== 'ready' || showSetupWizard) return
+    let cancelled = false
+    void getSetupSession()
+      .then((session) => {
+        if (cancelled) return
+        if (session.update_offer?.available) {
+          setHouseRulesOffer(session.update_offer)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [serverState, showSetupWizard])
+
+  const dismissHouseRulesOffer = useCallback((go: boolean) => {
+    setHouseRulesOffer(null)
+    void updateSetupSession({ action: go ? 'update_offer_go' : 'update_offer_later' }).catch(() => {})
+    if (go) setShowHouseRulesRevisit(true)
+  }, [])
+
   if (serverState === 'connecting') {
+
     return (
       <AppShell {...shellProps}>
         <SplashScreen
@@ -1544,7 +1571,7 @@ export default function App() {
             </div>
           }
         >
-          <SetupWizard
+          <SetupFlow
             open={showSetupWizard}
             onComplete={() => {
               setShowSetupWizard(false)
@@ -2425,8 +2452,27 @@ export default function App() {
         )}
     </div>
 
+    <HouseRulesUpdateOffer
+      open={Boolean(houseRulesOffer) && !showSetupWizard && !showHouseRulesRevisit}
+      offer={houseRulesOffer}
+      onGo={() => dismissHouseRulesOffer(true)}
+      onLater={() => dismissHouseRulesOffer(false)}
+    />
+
+    {showHouseRulesRevisit && !showSetupWizard ? (
+      <div className="fixed inset-0 z-[85]" style={{ background: 'var(--bg-primary)' }}>
+        <Suspense fallback={null}>
+          <SetupFlow
+            open
+            revisit
+            onComplete={() => setShowHouseRulesRevisit(false)}
+          />
+        </Suspense>
+      </div>
+    ) : null}
+
     <UserNamePrompt
-      open={askUserName && !showSetupWizard}
+      open={askUserName && !showSetupWizard && !houseRulesOffer && !showHouseRulesRevisit}
       initial={userName}
       onSave={(n) => {
         setUserName(n)

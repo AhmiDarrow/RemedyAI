@@ -23,6 +23,15 @@ func TestAdvancedDefaultsMatchProduction(t *testing.T) {
 	if tbl["self_inject_idle_s"] != 300 {
 		t.Fatalf("self_inject_idle_s=%v", tbl["self_inject_idle_s"])
 	}
+	if tbl["onboarding"] != true {
+		t.Fatalf("onboarding=%v", tbl["onboarding"])
+	}
+	if tbl["onboarding_reask"] != false {
+		t.Fatalf("onboarding_reask=%v", tbl["onboarding_reask"])
+	}
+	if tbl["house_rules_permission"] != "confirm_sensitive" {
+		t.Fatalf("house_rules_permission=%v", tbl["house_rules_permission"])
+	}
 	if len(advancedSchema()) != len(advancedKnobList) {
 		t.Fatalf("schema=%d list=%d", len(advancedSchema()), len(advancedKnobList))
 	}
