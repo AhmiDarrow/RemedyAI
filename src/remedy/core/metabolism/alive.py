@@ -211,6 +211,12 @@ def tick_alive(
         if now - float(state.get("last_reflection_ts") or 0) >= interval:
             _queue_reflection(state, now)
             state["last_reflection_ts"] = now
+            with suppress(Exception):
+                from remedy.core.inner_language import evolve_from_phrases
+
+                phrases = [str(p.get("proposal") or "") for p in state.get("pending_changes") or []]
+                phrases += list(state.get("beliefs") or [])
+                evolve_from_phrases(home, phrases, source="reflection")
     save_alive(state, home)
     return {"ok": True, "idle": action, "changed": True, "state": public_alive(state)}
 
@@ -368,7 +374,15 @@ def consolidate_from_dream(home: str | Path | None, field: Any = None) -> dict[s
     aff["label"] = _label(aff["valence"], aff["arousal"])
     _nudge(state["drives"], "curiosity", -0.05)
     save_alive(state, home)
-    return {"ok": True, "beliefs_added": added, "autobiography": state["autobiography"]}
+    coined = 0
+    with suppress(Exception):
+        from remedy.core.inner_language import evolve_from_phrases
+
+        phrases = list(state.get("beliefs") or [])
+        if state.get("autobiography"):
+            phrases.append(str(state["autobiography"]))
+        coined = len(evolve_from_phrases(home, phrases, source="dream"))
+    return {"ok": True, "beliefs_added": added, "autobiography": state["autobiography"], "coined": coined}
 
 
 def _belief_line(arc: str, user_name: str) -> str:
@@ -486,6 +500,27 @@ def build_alive_inject(home: str | Path | None) -> str:
     if cap <= 0:
         return ""
     state = load_alive(home)
+    # Dense inner language for the inject, when enabled. Natural/off keep prose.
+    try:
+        from remedy.core.organism_knobs import resolve
+
+        if _knob_bool("inner_language", True) and str(resolve("inner_language_verbosity") or "dense") == "dense":
+            from remedy.core.inner_language import encode_state
+
+            fields = {
+                "drv": dict(state.get("drives") or {}),
+                "aff": str((state.get("affect") or {}).get("label") or ""),
+                "bio": str(state.get("autobiography") or "").strip()[:cap],
+                "bel": list(state.get("beliefs") or [])[-4:],
+            }
+            dense = encode_state(home, fields)
+            offer = state.get("reach_out") or {}
+            if _knob_bool("proactive_reach_out", False) and offer.get("pending") and offer.get("gloss"):
+                dense = dense + " " + str(offer["gloss"])[:160]
+                mark_reach_out_voiced(home)
+            return dense[: cap + 200]
+    except Exception:
+        pass
     lines: list[str] = []
     auto = str(state.get("autobiography") or "").strip()
     if auto:

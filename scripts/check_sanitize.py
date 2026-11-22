@@ -35,6 +35,8 @@ PUBLIC_TOP_LEVEL_DOCS = frozenset(
         "WEB_ETIQUETTE.md",
         "WINDOWS_SIGNING.md",
         "TOKEN_OPTIMIZATION.md",
+        "INNER_LANGUAGE.md",
+        "INNER_LANGUAGE_RESEARCH.md",
     }
 )
 

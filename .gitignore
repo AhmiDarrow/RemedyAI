@@ -133,6 +133,8 @@ docs/*.md
 !docs/WEB_ETIQUETTE.md
 !docs/WINDOWS_SIGNING.md
 !docs/TOKEN_OPTIMIZATION.md
+!docs/INNER_LANGUAGE.md
+!docs/INNER_LANGUAGE_RESEARCH.md
 docs/_*/
 docs/_*.json
 docs/*soak*
