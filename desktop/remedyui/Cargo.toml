@@ -1,0 +1,22 @@
+[package]
+name = "remedy-desktop"
+version = "1.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# A RemedyUI checkout on main at 3b3a026 or later (PRs #118 and #119).
+remedy-ui = { path = "/workspace/RemedyUI-update/crates/remedy-ui" }
+# remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "3b3a0261786a9282cbc46f0e4bdfd9998028600b" }
+
+[dev-dependencies]
+# Tests run the app on the in-memory host and check its previews.
+remedy-ui = { path = "/workspace/RemedyUI-update/crates/remedy-ui", features = ["headless", "devtools"] }
+# remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "3b3a0261786a9282cbc46f0e4bdfd9998028600b", features = ["headless", "devtools"] }
+
+[profile.release]
+lto = "fat"
+opt-level = "s"
+codegen-units = 1
+strip = true
+panic = "abort"
