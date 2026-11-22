@@ -724,6 +724,12 @@ def _prompt_turn_end(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return finish_production_turn(inp)
 
 
+def _prompt_after_tool_batch(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.core.production_learn import admit_production_tool_batch
+
+    return admit_production_tool_batch(inp)
+
+
 def _partner_improve(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     from remedy.core.production_learn import run_unattended_learn
 
@@ -898,6 +904,7 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("prompt.slim_epoch", 1): _prompt_slim_epoch,
     ("prompt.should_continue", 1): _prompt_should_continue,
     ("prompt.turn_end", 1): _prompt_turn_end,
+    ("prompt.after_tool_batch", 1): _prompt_after_tool_batch,
     ("voice.speak", 1): _voice_speak,
     ("voice.transcribe", 1): _voice_transcribe,
     ("voice.install", 1): _voice_install,

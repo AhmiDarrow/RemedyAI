@@ -130,6 +130,13 @@ type EpochHook func(epoch, totalSteps, toolCalls int, ledger []string, turn *Tur
 // since the last mutation. Return continue=true and an optional nudge string.
 type ContinueGate func(ctx context.Context, turn Turn, toolCount int, lastResults []ToolResult, verifySeen bool) (shouldContinue bool, nudge string)
 
+// AfterToolBatch runs after each executed tool batch (policy-denied calls
+// included, so the ledger sees the full batch). The engine calls it
+// synchronously with recover, so a panic cannot fail the turn. The hook
+// itself must return quickly or launch its own work — production fires
+// prompt.after_tool_batch in the background.
+type AfterToolBatch func(ctx context.Context, calls []ToolCall, results []ToolResult)
+
 // Config controls ReAct pacing. Soft epochs refresh the brief and continue;
 // absolute ceilings exist only as pathological-loop safety nets — not task
 // budgets. Same operating model as a Build agent: run until the request is
@@ -305,13 +312,14 @@ type Outcome struct {
 }
 
 type Engine struct {
-	Model        Model
-	Tools        ToolExecutor
-	Policy       Policy
-	Config       Config
-	ApprovalGate ApprovalGate
-	EpochHook    EpochHook
-	ContinueGate ContinueGate
+	Model          Model
+	Tools          ToolExecutor
+	Policy         Policy
+	Config         Config
+	ApprovalGate   ApprovalGate
+	EpochHook      EpochHook
+	ContinueGate   ContinueGate
+	AfterToolBatch AfterToolBatch
 	// DrainGuidance supplies owner steering at round boundaries. It is
 	// appended to the authoritative transcript before compaction and retries.
 	DrainGuidance func() []string
@@ -582,6 +590,12 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 		trace(StateAct, iteration, fmt.Sprintf("execute %d tools", len(allowed)))
 		results := e.executeDecided(ctx, calls, decisions, config.MaxParallelTools)
 		out.Results = results
+		if e.AfterToolBatch != nil {
+			func() {
+				defer func() { _ = recover() }()
+				e.AfterToolBatch(ctx, calls, results)
+			}()
+		}
 		modelResults := capResults(results, config.MaxResultChars)
 
 		// One user message carrying every result in call order — never dropped.

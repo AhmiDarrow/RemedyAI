@@ -725,6 +725,51 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 			"additionalProperties":true
 		}`,
 		},
+		{
+			id: "prompt.after_tool_batch", desc: "Mid-turn metabolism after a tool batch: admit evidence, update the machine map (internal; not model-callable)",
+			risk: RiskReadOnly,
+			in: `{
+			"type":"object",
+			"properties":{
+				"session_id":{"type":"string"},
+				"tier":{"type":"integer"},
+				"results":{
+					"type":"array",
+					"items":{
+						"type":"object",
+						"properties":{
+							"tool":{"type":"string"},
+							"name":{"type":"string"},
+							"ok":{"type":"boolean"},
+							"success":{"type":"boolean"},
+							"result":{"type":"string"},
+							"error":{"type":"string"},
+							"tool_call_id":{"type":"string"},
+							"arguments":{"type":"object","additionalProperties":true},
+							"input":{"type":"object","additionalProperties":true},
+							"duration_ms":{"type":"number"}
+						},
+						"additionalProperties":true
+					}
+				},
+				` + propHomeDir + `,
+				` + propProjectPath + `,
+				` + propGoBound + `
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"properties":{
+				"ok":{"type":"boolean"},
+				"eu_new":{"type":"integer"},
+				"evidence_units":{"type":"integer"},
+				"tools":{"type":"integer"},
+				"skipped":{"type":"string"}
+			},
+			"additionalProperties":true
+		}`,
+		},
 
 		{
 			id: "mail.list", desc: "List recent email messages from the connected account (Python worker)",

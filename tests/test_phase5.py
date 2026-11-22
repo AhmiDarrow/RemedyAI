@@ -6,6 +6,12 @@ import json
 
 import pytest
 
+from tests.conftest import core_available
+
+requires_core = pytest.mark.skipif(
+    not core_available(), reason="remedy_core not built in this environment"
+)
+
 from remedy.execution.docker import DockerSandbox
 from remedy.execution.result import ExecutionResult, SubprocessSandbox
 from remedy.execution.runtime import ToolContext, ToolRuntime
@@ -261,6 +267,7 @@ class TestToolContext:
 class TestIntegration:
     """Runtime + policy + sandbox integration."""
 
+    @requires_core
     @pytest.mark.asyncio
     async def test_end_to_end_approved(self):
         sandbox = SubprocessSandbox()

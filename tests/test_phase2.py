@@ -4,6 +4,12 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import core_available
+
+requires_core = pytest.mark.skipif(
+    not core_available(), reason="remedy_core not built in this environment"
+)
+
 from remedy.models import Skill, SkillManifest, SkillStatus, ToolDefinition, ToolSource
 from remedy.skills.adapters.hermes_deep import (
     batch_migrate_hermes,
@@ -46,6 +52,7 @@ echo test
         blocks = executor._extract_code_blocks("plain text")
         assert blocks == []
 
+    @requires_core
     @pytest.mark.asyncio
     async def test_run_python_block(self, tmp_path):
         executor = SkillExecutor(sandbox_dir=tmp_path)
@@ -53,6 +60,7 @@ echo test
         assert result.success
         assert "hello world" in result.stdout
 
+    @requires_core
     @pytest.mark.asyncio
     async def test_run_failing_script(self, tmp_path):
         executor = SkillExecutor(sandbox_dir=tmp_path)
@@ -60,6 +68,7 @@ echo test
         assert not result.success
         assert result.exit_code == 1
 
+    @requires_core
     @pytest.mark.asyncio
     async def test_run_script_async(self, tmp_path):
         script = tmp_path / "test_script.py"
@@ -76,6 +85,7 @@ echo test
         assert not result.success
         assert result.exit_code != 0
 
+    @requires_core
     @pytest.mark.asyncio
     async def test_run_all_scripts(self, tmp_path):
         (tmp_path / "scripts").mkdir()
@@ -87,6 +97,7 @@ echo test
         assert results["scripts/a.py"].success
         assert results["scripts/b.py"].success
 
+    @requires_core
     @pytest.mark.asyncio
     async def test_run_instructions(self, tmp_path):
         executor = SkillExecutor(sandbox_dir=tmp_path)

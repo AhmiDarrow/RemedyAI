@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from remedy.core.computer.browse_intent import (
     parse_browse_navigate_url,
     resolve_site_alias,
@@ -9,6 +11,26 @@ from remedy.core.computer.browse_intent import (
 )
 from remedy.core.computer.router import normalize_url
 
+
+
+@pytest.fixture(autouse=True)
+def _offline_public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Alias and parse tests must not depend on live public DNS.
+
+    Production still resolves public IPs in is_valid_navigate_url; this
+    stub returns a public address for ordinary hosts and nothing for
+    obviously fake or invalid names, so security rejects still work.
+    """
+
+    def fake_resolve(hostname: str) -> list[str]:
+        host = (hostname or "").strip().lower().rstrip(".")
+        if not host or host.endswith(".invalid") or " " in host:
+            return []
+        if host in {"localhost"} or host.endswith(".localhost"):
+            return []
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr("remedy.core.web_helpers._resolve_public_ips", fake_resolve)
 
 def test_site_aliases() -> None:
     assert resolve_site_alias("gmail") == "https://mail.google.com"

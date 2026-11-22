@@ -185,3 +185,99 @@ def test_start_voice_evolution_runs_daily_drift(
     # Idempotent: a second start does not spawn another loop.
     voice_service.start_voice_evolution(tmp_path)
     released.set()
+
+
+
+def test_after_tool_batch_admits_evidence_and_logs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from remedy.core.metabolism.evidence import get_evidence_ledger
+    from remedy.core.production_learn import recent_learn_runs
+
+    home = _write_home(tmp_path)
+    monkeypatch.setenv("REMEDY_HOME", str(home))
+    sid = "sess-batch"
+    out = worker._prompt_after_tool_batch(
+        {
+            "session_id": sid,
+            "home_dir": str(home),
+            "results": [
+                {
+                    "tool": "read",
+                    "ok": True,
+                    "result": "def add(a, b):\n    return a + b",
+                    "tool_call_id": "1",
+                    "arguments": {"path": "math.py"},
+                },
+                {
+                    "tool": "bash",
+                    "ok": True,
+                    "result": "tests green",
+                    "tool_call_id": "2",
+                },
+            ],
+        }
+    )
+    assert out.get("ok") is True
+    assert int(out.get("tools") or 0) == 2
+    assert int(out.get("eu_new") or 0) >= 1
+    ledger = get_evidence_ledger(sid)
+    assert ledger.evidence_units >= 1
+    runs = recent_learn_runs(str(home))
+    assert runs, "expected a learn_log.jsonl entry"
+    assert runs[-1]["kind"] == "after_tool_batch"
+    assert runs[-1]["ok"] is True
+    assert "duration_ms" in runs[-1]
+
+
+def test_turn_end_and_improve_write_learn_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from remedy.core.metabolism.organism import persist_vitals
+    from remedy.core.production_learn import recent_learn_runs
+    from remedy.memory.cas import configure_cas
+    from remedy.memory.middleman import reset_middleman_state
+
+    home = _write_home(tmp_path)
+    monkeypatch.setenv("REMEDY_HOME", str(home))
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(home))
+    reset_middleman_state()
+    configure_cas(home)
+    persist_vitals({"ts": time.time(), "alive": True, "life_title": "Finish the novel"}, home)
+
+    worker._prompt_turn_end(
+        {
+            "message": "remember this preference",
+            "assistant_text": "I'll remember that.",
+            "session_id": "sess-log",
+            "home_dir": str(home),
+            "tool_steps": [
+                {"tool": "file_read", "ok": True, "result": "ok"},
+                {"tool": "bash_exec", "ok": True, "result": "ok"},
+            ],
+        }
+    )
+    worker._partner_improve({"home_dir": str(home)})
+    kinds = [row["kind"] for row in recent_learn_runs(str(home), limit=20)]
+    assert "turn_end" in kinds, kinds
+    assert "improve" in kinds, kinds
+    for row in recent_learn_runs(str(home)):
+        assert "duration_ms" in row
+        assert "ts" in row
+    configure_cas(None)
+    reset_middleman_state()
+
+
+def test_learn_log_rotates_when_large(tmp_path: Path) -> None:
+    from remedy.core import production_learn as pl
+
+    home = _write_home(tmp_path)
+    path = pl.learn_log_path(str(home))
+    assert path is not None
+    line = '{"ts":"2026-01-01T00:00:00Z","kind":"improve","duration_ms":1,"ok":true}\n'
+    path.write_text(line * ((pl.LEARN_LOG_MAX_BYTES // len(line)) + 8), encoding="utf-8")
+    pl.record_learn_run(kind="turn_end", home=str(home), duration_ms=2.5, ok=True, changed={"learned": True})
+    assert path.stat().st_size < pl.LEARN_LOG_MAX_BYTES
+    rows = pl.recent_learn_runs(str(home), limit=50)
+    assert rows and rows[-1]["kind"] == "turn_end"
+    assert rows[-1]["changed"]["learned"] is True

@@ -107,7 +107,9 @@ func (r *CognitionTurnRunner) PulseLearn(ctx context.Context) error {
 		input["home_dir"] = home
 		input["_go_bound"] = true
 	}
+	started := time.Now()
 	_, err := r.rmdyCall(ctx, "partner.improve", input)
+	r.noteLearnCall("improve", started, ctx, err)
 	return err
 }
 
@@ -442,7 +444,109 @@ func (r *CognitionTurnRunner) finishTurn(req TurnRequest, out cognition.Outcome)
 	if proj := strings.TrimSpace(req.ProjectPath); proj != "" && !isUnsetProjectPath(proj) {
 		input["project_path"] = proj
 	}
-	_, _ = r.rmdyCall(ctx, "prompt.turn_end", input)
+	started := time.Now()
+	_, err := r.rmdyCall(ctx, "prompt.turn_end", input)
+	r.noteLearnCall("turn_end", started, ctx, err)
+}
+
+// scheduleAfterToolBatch fires mid-turn metabolism after a tool batch
+// without blocking the next model round. Failures are ignored.
+func (r *CognitionTurnRunner) scheduleAfterToolBatch(req TurnRequest, calls []cognition.ToolCall, results []cognition.ToolResult) {
+	if r == nil || r.promptAssemble == nil || len(results) == 0 {
+		return
+	}
+	calls = append([]cognition.ToolCall(nil), calls...)
+	results = append([]cognition.ToolResult(nil), results...)
+	go r.finishToolBatch(req, calls, results)
+}
+
+func (r *CognitionTurnRunner) finishToolBatch(req TurnRequest, calls []cognition.ToolCall, results []cognition.ToolResult) {
+	if r == nil || r.promptAssemble == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	input := map[string]any{
+		"session_id": req.SessionID,
+		"results":    toolBatchInput(calls, results),
+	}
+	if home := strings.TrimSpace(r.HomeDir); home != "" {
+		input["home_dir"] = home
+		input["_go_bound"] = true
+	}
+	if proj := strings.TrimSpace(req.ProjectPath); proj != "" && !isUnsetProjectPath(proj) {
+		input["project_path"] = proj
+	}
+	started := time.Now()
+	_, err := r.rmdyCall(ctx, "prompt.after_tool_batch", input)
+	r.noteLearnCall("after_tool_batch", started, ctx, err)
+}
+
+// noteLearnCall writes a local learn-log line only when the RMDY call
+// timed out or failed. Successful runs are recorded by the Python worker.
+func (r *CognitionTurnRunner) noteLearnCall(kind string, started time.Time, ctx context.Context, err error) {
+	if r == nil {
+		return
+	}
+	home := strings.TrimSpace(r.HomeDir)
+	if home == "" {
+		return
+	}
+	timeout := err != nil && (errors.Is(err, context.DeadlineExceeded) ||
+		(ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded)))
+	if err == nil && !timeout {
+		return
+	}
+	appendLearnLog(home, kind, time.Since(started), timeout, err, nil)
+}
+
+func toolBatchInput(calls []cognition.ToolCall, results []cognition.ToolResult) []map[string]any {
+	out := make([]map[string]any, 0, len(results))
+	for i, res := range results {
+		name := strings.TrimSpace(res.Name)
+		var input any
+		id := strings.TrimSpace(res.ID)
+		if i < len(calls) {
+			if name == "" {
+				name = strings.TrimSpace(calls[i].Name)
+			}
+			if id == "" {
+				id = strings.TrimSpace(calls[i].ID)
+			}
+			if len(calls[i].Input) > 0 {
+				var parsed any
+				if json.Unmarshal(calls[i].Input, &parsed) == nil {
+					input = parsed
+				}
+			}
+		}
+		if name == "" {
+			continue
+		}
+		tail := strings.TrimSpace(string(res.Output))
+		if len(tail) > 500 {
+			tail = tail[:500]
+		}
+		ok := !res.IsError && strings.TrimSpace(res.Err) == ""
+		row := map[string]any{
+			"tool": name, "name": name, "ok": ok, "success": ok,
+			"result": tail, "tool_call_id": id,
+		}
+		if input != nil {
+			row["arguments"] = input
+			row["input"] = input
+		}
+		if !ok {
+			errText := strings.TrimSpace(res.Err)
+			if errText == "" {
+				errText = tail
+			}
+			row["error"] = errText
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 func toolStepsFromOutcome(out cognition.Outcome) []map[string]any {
@@ -869,6 +973,9 @@ func (r *CognitionTurnRunner) runEngine(
 		},
 		ContinueGate: func(gateCtx context.Context, turn cognition.Turn, toolCount int, last []cognition.ToolResult, verifySeen bool) (bool, string) {
 			return r.shouldContinue(gateCtx, req, turn, toolCount, last, verifySeen)
+		},
+		AfterToolBatch: func(_ context.Context, calls []cognition.ToolCall, results []cognition.ToolResult) {
+			r.scheduleAfterToolBatch(req, calls, results)
 		},
 	}
 	return engine.RunTurn(ctx, seed)

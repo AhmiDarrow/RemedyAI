@@ -83,6 +83,7 @@ func (s *Server) handlePartnerStatus(w http.ResponseWriter, r *http.Request) {
 		"metabolism":        map[string]any{},
 		"soma":              map[string]any{},
 		"hearth":            s.hearthPublic(time.Now(), activeTitle, nextAction),
+		"learn_log":         readLearnLog(s.homeDir, 20),
 	})
 }
 
