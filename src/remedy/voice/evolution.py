@@ -181,6 +181,14 @@ def relationship_signals(home_dir: Path | str | None, memory: Any = None) -> dic
         stance = str(v.get("last_stance") or v.get("stance") or v.get("mood") or "")
     except Exception:
         stance = ""
+    try:
+        from remedy.core.metabolism.alive import affect_stance
+
+        affect = affect_stance(home_dir)
+        if affect:
+            stance = affect
+    except Exception:
+        pass
     return {"days_together": days, "exchanges": exchanges, "style": style, "stance": stance}
 
 

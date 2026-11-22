@@ -439,6 +439,19 @@ def _finish_production_turn_inner(inp: Mapping[str, Any]) -> dict[str, Any]:
             if skill is not None:
                 out["learned"] = True
                 out["skill"] = str(getattr(getattr(skill, "manifest", None), "name", "") or "")
+
+        if home:
+            with suppress(Exception):
+                from remedy.core.metabolism.alive import note_turn_outcome
+
+                noted = note_turn_outcome(
+                    home,
+                    user_text=user_text,
+                    assistant_text=assistant_text,
+                    steps=steps,
+                )
+                if noted.get("kind"):
+                    out["outcome"] = noted["kind"]
     except Exception:
         logger.debug("finish_production_turn failed", exc_info=True)
         return {"ok": True, "skipped": "error", "residue": "", "genome": 0, "learned": False}
