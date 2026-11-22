@@ -225,6 +225,29 @@ type RegistryPolicy struct {
 	LiveContext func(sessionID string) string
 }
 
+
+func houseRulesMutation(call cognition.ToolCall) bool {
+	name := strings.TrimSpace(call.Name)
+	if name == "settings.patch" {
+		return true
+	}
+	if name != "house_rules" && name != "setup.session" {
+		return false
+	}
+	var body struct {
+		Action string `json:"action"`
+	}
+	if json.Unmarshal(call.Input, &body) != nil {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(body.Action)) {
+	case "", "status", "get", "summarize", "offer_prompt":
+		return false
+	default:
+		return true
+	}
+}
+
 func partnerVigilMutates(input []byte) bool {
 	var body struct {
 		Action string `json:"action"`
@@ -252,6 +275,11 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 		return cognition.Deny
 	}
 	if p.HiveRestricted && hiveDeniedTool(call.Name) {
+		return cognition.Deny
+	}
+	// Peers and other untrusted origins can never change house rules,
+	// even if the owner would otherwise be prompted to approve.
+	if p.ForceAsk && houseRulesMutation(call) {
 		return cognition.Deny
 	}
 	desc, err := p.Registry.Latest(call.Name)
@@ -389,6 +417,14 @@ func bindToolInput(call cognition.ToolCall, b toolBinding) cognition.ToolCall {
 		call.Input = injectSessionBinding(call.Input, "", b.SessionID)
 		call.Input = injectSingleField(call.Input, "caller_origin", strings.TrimSpace(b.Origin))
 	}
+	if isHouseRulesTool(name) {
+		home := strings.TrimSpace(b.HomeDir)
+		call.Input = injectSessionBinding(call.Input, home, b.SessionID)
+		call.Input = injectSingleField(call.Input, "caller_origin", strings.TrimSpace(b.Origin))
+		if home != "" {
+			call.Input = injectBoolField(call.Input, tools.GoBoundField, true)
+		}
+	}
 	if isComputer {
 		live := strings.TrimSpace(b.PageContext)
 		if live != "" {
@@ -461,6 +497,28 @@ func injectSingleField(raw []byte, field, value string) []byte {
 	}
 	return b
 }
+
+
+func isHouseRulesTool(name string) bool {
+	n := strings.TrimSpace(name)
+	return n == "house_rules" || n == "setup.session" || n == "settings.patch" || n == "settings.get"
+}
+
+func injectBoolField(raw []byte, field string, value bool) []byte {
+	args := map[string]any{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &args); err != nil {
+			return raw
+		}
+	}
+	args[field] = value
+	b, err := json.Marshal(args)
+	if err != nil {
+		return raw
+	}
+	return b
+}
+
 
 func stripServerOwnedFields(raw []byte) []byte {
 	if len(raw) == 0 {

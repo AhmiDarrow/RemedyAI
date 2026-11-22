@@ -209,6 +209,11 @@ def build_soul_context_block(
                     "partner.vigil with action disable. If ignored, never "
                     "raise it again."
                 )
+            with suppress(Exception):
+                from remedy.core.house_rules import offer_prompt, take_onboarding_offer
+
+                if take_onboarding_offer(home):
+                    lines.append(offer_prompt())
 
     # Proprioception: corrective lines for the *current* muscle's known
     # drift. Rides directly after the identity kernel — it IS identity

@@ -62,8 +62,8 @@ you want a Start Menu app; it already includes both binaries.
 ## First launch
 
 1. Splash screen waits for the local API (`http://127.0.0.1:7400`).
-2. **Setup wizard** opens when setup is not completed (fresh install or wiped data).
-3. Complete [First run](02-first-run), then chat.
+2. On a fresh install, **Getting Remedy’s mind ready** downloads and verifies the local mind (this is not part of the NSIS installer).
+3. When the mind is ready, Remedy starts a short setup conversation. **Traditional setup** is always available. If the mind cannot start, the form opens with an explanation and a retry. See [SETUP.md](../SETUP.md) and [First run](02-first-run).
 
 Remedy also installs Claimidx after first launch. It is downloaded rather than
 bundled, verified before installation, and runs as a private loopback helper.

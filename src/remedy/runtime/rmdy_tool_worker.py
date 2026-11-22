@@ -66,7 +66,7 @@ _LOG_MAX_BYTES = 2 * 1024 * 1024
 _LOG_BACKUPS = 3
 
 # Tools sharing the cached BasicRuntime run one at a time.
-_SERIAL_PREFIXES = ("prompt.", "memory.", "skill.", "voice.", "vision.", "partner.")
+_SERIAL_PREFIXES = ("prompt.", "memory.", "skill.", "voice.", "vision.", "partner.", "house_rules", "setup.")
 _serial_lock = threading.Lock()
 
 # Envelope / input field the Go side sets after binding paths (see module doc).
@@ -875,6 +875,42 @@ def _partner_vigil(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return {"ok": True, "vigil": vigil_status(home)}
 
 
+
+def _house_rules(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """First-run house rules and talk-to-change settings."""
+    from remedy.core.house_rules import dispatch
+
+    data = dict(inp)
+    home = _partner_home(inp)
+    if home:
+        data["home_dir"] = home
+    try:
+        out = dispatch(data)
+    except Exception:
+        logger.exception("house_rules failed")
+        return {"ok": False, "error": "house rules action failed"}
+    return out if isinstance(out, dict) else {"ok": False, "error": "invalid house rules result"}
+
+
+def _setup_session(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Internal first-run setup session (same store as house_rules)."""
+    from remedy.core.house_rules import dispatch
+
+    data = dict(inp)
+    home = _partner_home(inp)
+    if home:
+        data["home_dir"] = home
+    action = str(data.get("action") or "status").strip().lower()
+    if action in ("", "get"):
+        data["action"] = "status"
+    try:
+        out = dispatch(data)
+    except Exception:
+        logger.exception("setup.session failed")
+        return {"ok": False, "error": "setup session action failed"}
+    return out if isinstance(out, dict) else {"ok": False, "error": "invalid setup session result"}
+
+
 def _partner_pulse(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     """One hearth night tick. Local field only — never a model call."""
     from remedy.memory.soul.vigil import vigil_tick
@@ -986,6 +1022,8 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("calendar.list_events", 1): _calendar_list_events,
     ("calendar.create_event", 1): _calendar_create_event,
     ("partner.vigil", 1): _partner_vigil,
+    ("house_rules", 1): _house_rules,
+    ("setup.session", 1): _setup_session,
     ("partner.pulse", 1): _partner_pulse,
     ("partner.improve", 1): _partner_improve,
     ("peer.list", 1): _peer_list,

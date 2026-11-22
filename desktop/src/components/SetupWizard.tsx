@@ -2,6 +2,7 @@ import { getServerUrl } from '../api/client'
 import { usePronouns, setAgentIdentity } from '../i18n/pronouns'
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { getSettings, updateSettings } from '../api/settings'
+import { getSetupSession, updateSetupSession } from '../api/setup'
 import { openExternalUrl } from '../api/auth'
 import { closeBrowserRail } from '../api/computer'
 import {
@@ -37,6 +38,10 @@ const PERSONA_IDS = ['balanced', 'efficient', 'detailed', 'playful'] as const
 interface SetupWizardProps {
   open: boolean
   onComplete: () => void
+  /** Switch back to the conversation setup without losing the shared draft. */
+  onSwitchToConversation?: () => void
+  /** Why the mind fell back to this form, if it did. */
+  mindFailedReason?: string
 }
 
 type Step = 'welcome' | 'provider' | 'workspace' | 'persona' | 'messengers' | 'vision' | 'finish'
@@ -50,7 +55,7 @@ const STEPS: Step[] = [
   'finish',
 ]
 
-export function SetupWizard({ open, onComplete }: SetupWizardProps) {
+export function SetupWizard({ open, onComplete, onSwitchToConversation, mindFailedReason }: SetupWizardProps) {
   const pr = usePronouns()
   const { t, languages, stored, setStored } = useI18n()
   const [step, setStep] = useState<Step>('welcome')
@@ -220,6 +225,28 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         }
       } catch {
         // offline — keep demo default
+      }
+      try {
+        const setup = await getSetupSession()
+        if (cancelled) return
+        const draft = setup.draft || {}
+        const str = (k: string) => (typeof draft[k] === 'string' ? String(draft[k]) : '')
+        if (str('llm_provider')) {
+          setProvider(str('llm_provider'))
+          if (str('llm_model')) setModel(str('llm_model'))
+          if (str('llm_base_url')) setBaseUrl(str('llm_base_url'))
+          if (str('custom_llm_name')) setCustomName(str('custom_llm_name'))
+        }
+        if (str('project_path')) setProjectPath(str('project_path'))
+        if (str('persona')) setPersona(str('persona') === 'default' ? 'balanced' : str('persona'))
+        if (str('user_name')) setUserName(str('user_name'))
+        if (str('name')) setAgentName(str('name'))
+        if (str('agent_gender')) setAgentGender(str('agent_gender') as 'female' | 'male' | 'neutral')
+        if (typeof draft.launch_at_login === 'boolean') setLaunchAtLogin(Boolean(draft.launch_at_login))
+        if (str('ui_language')) setStored(str('ui_language'))
+        await updateSetupSession({ mode: 'traditional' }).catch(() => {})
+      } catch {
+        /* session hydrate is best-effort */
       }
       try {
         const ollama = await detectOllama()
@@ -533,6 +560,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     setError('')
     try {
       await saveSetupCore()
+      await updateSetupSession({ action: 'confirm' }).catch(() => {})
       await runVisionInstall()
       closeOauthBrowser()
       onComplete()
@@ -554,6 +582,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     setError('')
     try {
       await saveSetupCore()
+      await updateSetupSession({ action: 'confirm' }).catch(() => {})
       finishAbortRef.current = true
       void runVisionInstall({ backgroundOnly: true })
       closeOauthBrowser()
@@ -594,6 +623,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         ...(demo?.default_model ? { llm_model: demo.default_model } : {}),
         llm_base_url: demo?.base_url || 'https://api.llm7.io/v1',
       })
+      await updateSetupSession({ action: 'skip_all' }).catch(() => {})
       closeOauthBrowser()
       onComplete()
     } catch (e: unknown) {
@@ -604,6 +634,29 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       setSaving(false)
     }
   }, [onComplete, catalog, closeOauthBrowser, stored])
+
+  // Keep the shared setup draft in sync so switching to conversation never loses answers.
+  // Never write the API key here — keys go through updateSettings / the secure store.
+  useEffect(() => {
+    if (!open) return
+    const timer = window.setTimeout(() => {
+      const draft: Record<string, unknown> = {
+        llm_provider: provider,
+        llm_model: model,
+        llm_base_url: baseUrl,
+        custom_llm_name: customName,
+        project_path: projectPath,
+        persona: persona === 'balanced' ? 'default' : persona,
+        user_name: userName,
+        name: agentName,
+        agent_gender: agentGender,
+        ui_language: stored || 'auto',
+        launch_at_login: launchAtLogin,
+      }
+      void updateSetupSession({ mode: 'traditional', draft }).catch(() => {})
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [open, provider, model, baseUrl, customName, projectPath, persona, userName, agentName, agentGender, stored, launchAtLogin])
 
   if (!open) return null
 
@@ -645,7 +698,27 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
           <img src="/logo.png" alt="Remedy" className="remedy-shell-logo" draggable={false} />
           <h1 className="remedy-shell-title">Remedy</h1>
           <p className="remedy-shell-subtitle">{t('setup.subtitle')}</p>
+          {onSwitchToConversation ? (
+            <button
+              type="button"
+              className="ui-btn ui-btn-ghost mt-3"
+              onClick={onSwitchToConversation}
+            >
+              Talk with Remedy instead
+            </button>
+          ) : null}
         </div>
+        {mindFailedReason ? (
+          <div className="px-7 pb-2">
+            <div className="setup-banner" role="status">
+              <p>
+                <strong>The mind couldn’t start.</strong> {mindFailedReason}{' '}
+                Traditional setup has the same settings. You can retry the mind
+                from Talk with Remedy, or keep going here.
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         <div className="px-7 pb-2">
           <div className="remedy-shell-progress-track">
@@ -713,6 +786,16 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 >
                   {t('setup.getStarted')}
                 </button>
+                {onSwitchToConversation ? (
+                  <button
+                    type="button"
+                    onClick={onSwitchToConversation}
+                    disabled={saving}
+                    className="ui-btn ui-btn-ghost w-full"
+                  >
+                    Talk with Remedy instead
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={handleSkip}

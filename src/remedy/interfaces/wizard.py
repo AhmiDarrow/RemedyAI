@@ -293,8 +293,11 @@ def _print_welcome() -> None:
     console.print(
         Panel.fit(
             "Welcome to the Remedy setup wizard.\n"
-            "I'll walk you through configuring your agent.\n"
-            "You can always change these later in ~/.remedy/config.toml",
+            "This is the traditional (form) setup. On the desktop app,\n"
+            "Remedy talks you through the same settings as a conversation,\n"
+            "and you can switch to this form at any time without losing answers.\n"
+            "Every question is skippable; skipped items keep the defaults.\n"
+            "You can always change these later in chat or in ~/.remedy/config.toml",
             title="Setup Wizard",
             border_style="bold green",
         )

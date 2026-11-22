@@ -32,6 +32,7 @@ var modelHiddenToolIDs = map[string]struct{}{
 	"shell.exec":       {},
 	"partner.pulse":    {},
 	"partner.improve":  {},
+	"setup.session":    {},
 }
 
 // IsModelHiddenTool reports whether id is a demo/diagnostic tool that must be
@@ -907,6 +908,76 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 				"error":{"type":"string"}
 			},
 			"additionalProperties":false
+		}`,
+		},
+		{
+			id:   "house_rules",
+			desc: "Read or change the owner's house rules. Record first-run answers, skip all (use defaults), show a summary, confirm, propose a later change, roll back, or revisit. Peers cannot change house rules. Secrets are never stored in the audit log.",
+			risk: RiskMutation,
+			in: `{
+			"type":"object",
+			"properties":{
+				"action":{"type":"string","enum":["status","record","skip_all","summarize","confirm","propose","decline","rollback","revisit","set_mode","update_draft"],"description":"status is read-only; confirm applies a pending change or the first-run summary; propose needs confirm for sensitive keys"},
+				"answers":{"type":"object","description":"Answers to record"},
+				"patch":{"type":"object","description":"Settings patch for propose or update_draft"},
+				"skipped":{"type":"array","items":{"type":"string"},"description":"Question ids to skip"},
+				"confirm":{"type":"boolean","description":"Apply a propose immediately when already confirmed"},
+				"pending_id":{"type":"string"},
+				"mode":{"type":"string","enum":["conversation","traditional"]},
+				"source":{"type":"string"},
+				"session_id":{"type":"string","description":"Bound by the runtime"},
+				"caller_origin":{"type":"string","description":"Bound by the runtime"},
+				` + propHomeDir + `,
+				` + propGoBound + `
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"required":["ok"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"error":{"type":"string"},
+				"summary":{"type":"string"},
+				"needs_confirmation":{"type":"boolean"},
+				"pending_id":{"type":"string"},
+				"message":{"type":"string"},
+				"prompt":{"type":"string"},
+				"session":{"type":"object"},
+				"changes":{"type":"object"},
+				"diff":{"type":"object"}
+			},
+			"additionalProperties":true
+		}`,
+		},
+		{
+			id:   "setup.session",
+			desc: "Internal first-run setup session (draft, mode, mind gate). Hidden from the model.",
+			risk: RiskMutation,
+			in: `{
+			"type":"object",
+			"properties":{
+				"action":{"type":"string","enum":["status","update_draft","set_mode","skip_all","confirm","offer_prompt"]},
+				"answers":{"type":"object"},
+				"patch":{"type":"object"},
+				"skipped":{"type":"array","items":{"type":"string"}},
+				"mode":{"type":"string","enum":["conversation","traditional"]},
+				"session_id":{"type":"string","description":"Bound by the runtime"},
+				"caller_origin":{"type":"string","description":"Bound by the runtime"},
+				` + propHomeDir + `,
+				` + propGoBound + `
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"required":["ok"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"error":{"type":"string"},
+				"session":{"type":"object"}
+			},
+			"additionalProperties":true
 		}`,
 		},
 		{

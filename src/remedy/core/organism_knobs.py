@@ -202,6 +202,14 @@ KNOBS: tuple[Knob, ...] = (
          "Max live inbound session turns running at once."),
     Knob("interop_task_ttl_s", 86400, "int", 60, 7 * 86_400, "s", "Agent interop",
          "How long peer tasks are kept, and the timeout for a live inbound turn."),
+    Knob("onboarding", True, "bool", None, None, "", "House rules",
+         "Offer a first-run house-rules conversation after the mind is ready. Off: skip straight to defaults (or Traditional setup if the user opens it)."),
+    Knob("onboarding_reask", False, "bool", None, None, "", "House rules",
+         "If the first-run offer was ignored (not completed or skipped), offer it once more. Off (default): never auto-prompt again. The owner can still say “let’s go over house rules.”"),
+    Knob("house_rules_permission", "confirm_sensitive", "str", None, None, "", "House rules",
+         "How talk-to-change settings is allowed: confirm_sensitive (default — ordinary prefs apply on request, consent/privacy/interop need an explicit yes), confirm_all, or plain (ordinary prefs apply on request; sensitive keys still need a yes)."),
+    Knob("house_rules_audit", True, "bool", None, None, "", "House rules",
+         "Write house-rules changes to the local audit log (secrets are never written)."),
 )
 
 KNOB_BY_KEY: dict[str, Knob] = {k.key: k for k in KNOBS}
@@ -238,6 +246,7 @@ def _coerce(knob: Knob, raw: Any) -> int | float | bool:
             "muscle_spec": ("auto", "draft-mtp", "mtp", "ngram-mod", "ngram", "off", "none"),
             "interop_bind": ("127.0.0.1", "localhost", "loopback", "lan", "0.0.0.0", "off"),
             "interop_trust_policy": ("open", "gated", "verified"),
+            "house_rules_permission": ("confirm_sensitive", "confirm_all", "plain"),
         }
         opts = allowed.get(knob.key)
         if opts and s not in opts:
