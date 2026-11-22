@@ -6,7 +6,7 @@ arrive, the soul updates only when spoken to. Turns are her heartbeat —
 the last human assumption baked into her. No living thing works that way.
 
 The vigil gives her time of her own. On each tick (from a host timer, an
-idle hook, or `start_vigil_thread`) she may *wake*: a budgeted decision
+idle hook, or the hearth clock) she may *wake*: a budgeted decision
 about her own attention — which hunger deserves this wake? Dreaming on
 accumulated episodes; taking one quiet local step toward the partner's
 life goal; noticing a thread that has waited too long. Or none: a tick
@@ -523,31 +523,3 @@ def while_away_line(
     if len(line) > max_chars:
         line = line[: max_chars - 1] + "…"
     return line
-
-
-# --- host loop -------------------------------------------------------------
-
-
-def start_vigil_thread(
-    home: str | Path | None = None,
-    *,
-    interval_s: int = 15 * 60,
-    stop_event: threading.Event | None = None,
-) -> threading.Thread:
-    """Daemon heartbeat for host apps. Budgets make the interval forgiving.
-
-    The host owns lifecycle: call once at startup, set `stop_event` on
-    shutdown. Does nothing until the partner enables the vigil.
-    """
-    ev = stop_event or threading.Event()
-
-    def _beat() -> None:
-        while not ev.is_set():
-            with suppress(Exception):
-                vigil_tick(home)
-            ev.wait(max(60, int(interval_s)))
-
-    t = threading.Thread(target=_beat, name="remedy-vigil", daemon=True)
-    t._vigil_stop = ev  # type: ignore[attr-defined]
-    t.start()
-    return t

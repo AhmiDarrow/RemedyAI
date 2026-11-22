@@ -239,3 +239,50 @@ func TestHearthPulseLearnCallsPartnerImprove(t *testing.T) {
 		t.Fatalf("hearthPulseLearn must call partner.improve, got %d", counter.improve.Load())
 	}
 }
+
+func TestNextLearnIntervalBoundsAndBackoff(t *testing.T) {
+	if got := nextLearnInterval(0, false, false, false); got != 2*hearthLearnDefault {
+		t.Fatalf("zero current with no change = %s, want 2x default", got)
+	}
+	if got := nextLearnInterval(0, true, false, false); got != hearthLearnDefault {
+		t.Fatalf("zero current after a change = %s, want default", got)
+	}
+	// Nothing changed: back off, never past max.
+	got := nextLearnInterval(hearthLearnDefault, false, false, false)
+	if got != 2*hearthLearnDefault {
+		t.Fatalf("backoff = %s", got)
+	}
+	got = nextLearnInterval(hearthLearnMax, false, false, false)
+	if got != hearthLearnMax {
+		t.Fatalf("capped backoff = %s", got)
+	}
+	// Heavy use snaps to the minimum.
+	got = nextLearnInterval(hearthLearnMax, false, true, true)
+	if got != hearthLearnMin {
+		t.Fatalf("heavy = %s", got)
+	}
+	// After a useful tick with no heavy use, ease toward default.
+	got = nextLearnInterval(8*hearthLearnDefault, true, false, false)
+	if got != 4*hearthLearnDefault {
+		t.Fatalf("ease = %s", got)
+	}
+	got = nextLearnInterval(hearthLearnDefault, true, false, false)
+	if got != hearthLearnDefault {
+		t.Fatalf("steady = %s", got)
+	}
+}
+
+func TestRecentlyHeavyReadsLearnLog(t *testing.T) {
+	home := t.TempDir()
+	s := &Server{homeDir: home}
+	if s.recentlyHeavy(time.Now()) {
+		t.Fatal("empty log should not be heavy")
+	}
+	appendLearnLog(home, "turn_end", time.Millisecond, false, nil, nil)
+	if !s.recentlyHeavy(time.Now()) {
+		t.Fatal("fresh turn_end should be heavy")
+	}
+	if s.recentlyHeavy(time.Now().Add(hearthLearnHeavy + time.Minute)) {
+		t.Fatal("old turn_end should not be heavy")
+	}
+}
