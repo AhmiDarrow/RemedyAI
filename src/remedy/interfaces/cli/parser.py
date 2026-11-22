@@ -371,16 +371,23 @@ def build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
 
-    # remedy mcp serve — expose skills to external MCP clients (stdio)
+    # remedy mcp serve — expose skills + talk-to-Remedy tools (stdio or --http)
     mcp_cmd = sub.add_parser(
         "mcp",
         help="MCP host: expose local skills to external apps (stdio)",
     )
     mcp_sub = mcp_cmd.add_subparsers(dest="mcp_cmd", required=True)
-    mcp_sub.add_parser(
+    mcp_serve = mcp_sub.add_parser(
         "serve",
-        help="Run MCP server on stdio (for any MCP-compatible client config)",
+        help="Run MCP server on stdio, or Streamable HTTP with --http (not :7400)",
     )
+    mcp_serve.add_argument(
+        "--http",
+        action="store_true",
+        help="Serve Streamable HTTP MCP (and A2A) on a loopback port; default 127.0.0.1:7401",
+    )
+    mcp_serve.add_argument("--host", default="127.0.0.1", help="Bind host for --http (loopback default)")
+    mcp_serve.add_argument("--port", type=int, default=7401, help="Bind port for --http (must not be 7400)")
 
     # remedy desktop
     desktop_cmd = sub.add_parser("desktop", help="Desktop app management")
