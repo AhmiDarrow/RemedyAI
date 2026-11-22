@@ -86,6 +86,8 @@ filterwarnings = []
 testpaths = ["tests"]
 markers = [
     "live: requires live RMB/local host (skipped when host down)",
+    "requires_core: needs the zig remedy_core library built in this checkout",
+    "requires_public_dns: needs public DNS/IP checks (is_valid_navigate_url)",
 ]
 
 [tool.ruff]

@@ -79,6 +79,26 @@ func TestPartnerStatusLean(t *testing.T) {
 	if body["approval_mode"] != "ask" {
 		t.Fatalf("mode=%v", body["approval_mode"])
 	}
+	if _, ok := body["learn_log"].([]any); !ok {
+		t.Fatalf("learn_log=%T %v", body["learn_log"], body["learn_log"])
+	}
+}
+
+func TestPartnerStatusIncludesLearnLogRows(t *testing.T) {
+	s, home := newPartnerTestServer(t)
+	appendLearnLog(home, "turn_end", 0, false, nil, map[string]any{"learned": true})
+	code, body := doPartnerReq(t, s, http.MethodGet, "/api/partner/status", "")
+	if code != http.StatusOK {
+		t.Fatalf("status=%d body=%v", code, body)
+	}
+	rows, _ := body["learn_log"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("learn_log=%v", body["learn_log"])
+	}
+	row, _ := rows[0].(map[string]any)
+	if row["kind"] != "turn_end" {
+		t.Fatalf("row=%v", row)
+	}
 }
 
 func TestApprovalsListAndResolve(t *testing.T) {

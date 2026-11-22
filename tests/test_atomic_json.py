@@ -331,7 +331,7 @@ class TestScratchNames:
                         and getattr(n.func, "attr", "") == "with_suffix"
                         and n.args
                         and _is_fixed_tmp_name(n.args[0])):
-                    offenders.append(f"{path.relative_to('src/remedy')}:{n.lineno}")
+                    offenders.append(f"{path.relative_to(_SRC).as_posix()}:{n.lineno}")
         assert not offenders, (
             "fixed scratch names (use atomic_json.scratch_path):\n  "
             + "\n  ".join(offenders)

@@ -7,11 +7,36 @@ skill-genome, and LearningLoop work at turn end without blocking the reply.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import time
 from contextlib import suppress
+from pathlib import Path
 from typing import Any, Mapping
 
 logger = logging.getLogger(__name__)
+
+LEARN_LOG_NAME = "learn_log.jsonl"
+LEARN_LOG_MAX_BYTES = 256 * 1024
+LEARN_LOG_MAX_LINES = 400
+
+# Frontier / workspace ABI names → the metabolism ledger's historical names.
+_ABI_TO_METABOLISM = {
+    "read": "file_read",
+    "workspace.read": "file_read",
+    "write": "file_write",
+    "workspace.write": "file_write",
+    "edit": "file_edit",
+    "workspace.edit": "file_edit",
+    "bash": "bash_exec",
+    "shell.exec": "bash_exec",
+    "computer.navigate": "computer_navigate",
+    "computer.screenshot": "computer_screenshot",
+    "computer.snapshot": "computer_snapshot",
+    "computer.act": "computer_act",
+    "computer.windows": "computer_windows",
+}
 
 
 def _home_of(inp: Mapping[str, Any], runtime: Any = None) -> str | None:
@@ -30,6 +55,216 @@ def _home_of(inp: Mapping[str, Any], runtime: Any = None) -> str | None:
             return home
     return None
 
+
+
+
+def learn_log_path(home: str | None) -> Path | None:
+    raw = str(home or "").strip()
+    if not raw:
+        return None
+    return Path(raw).expanduser() / LEARN_LOG_NAME
+
+
+def record_learn_run(
+    *,
+    kind: str,
+    home: str | None,
+    duration_ms: float = 0.0,
+    timeout: bool = False,
+    error: str = "",
+    changed: Mapping[str, Any] | None = None,
+    ok: bool = True,
+    source: str = "python",
+) -> None:
+    """Append one background-learning line and cap the file. Never raises."""
+    path = learn_log_path(home)
+    if path is None or not str(kind or "").strip():
+        return
+    entry = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + f".{int((time.time() % 1) * 1_000_000):06d}Z",
+        "kind": str(kind).strip(),
+        "duration_ms": round(float(duration_ms or 0.0), 3),
+        "ok": bool(ok) and not timeout and not error,
+        "source": source,
+    }
+    if timeout:
+        entry["timeout"] = True
+        entry["ok"] = False
+    if error:
+        entry["error"] = str(error)[:240]
+        entry["ok"] = False
+    if changed:
+        clean = {k: v for k, v in dict(changed).items() if v not in (None, "", [], {})}
+        if clean:
+            entry["changed"] = clean
+    line = json.dumps(entry, ensure_ascii=False, default=str) + "\n"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(line)
+        _rotate_learn_log(path)
+    except Exception:
+        logger.debug("record_learn_run failed", exc_info=True)
+
+
+def recent_learn_runs(home: str | None, limit: int = 20) -> list[dict[str, Any]]:
+    """Return the newest learn-log rows (oldest first), for status / diagnostics."""
+    path = learn_log_path(home)
+    if path is None or not path.is_file():
+        return []
+    if limit <= 0:
+        limit = 20
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in lines:
+        raw = line.strip()
+        if not raw:
+            continue
+        with suppress(Exception):
+            item = json.loads(raw)
+            if isinstance(item, dict):
+                rows.append(item)
+    return rows[-limit:]
+
+
+def _rotate_learn_log(path: Path) -> None:
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return
+    if size <= LEARN_LOG_MAX_BYTES:
+        return
+    try:
+        lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    except OSError:
+        return
+    if len(lines) <= LEARN_LOG_MAX_LINES // 2:
+        return
+    keep = lines[-LEARN_LOG_MAX_LINES:] if len(lines) > LEARN_LOG_MAX_LINES else lines[len(lines) // 2 :]
+    try:
+        from remedy.core.atomic_json import replace_with_retry, scratch_path
+
+        tmp = scratch_path(path)
+        tmp.write_text("\n".join(keep) + "\n", encoding="utf-8")
+        replace_with_retry(tmp, path)
+    except Exception:
+        with suppress(Exception):
+            tmp = locals().get("tmp")
+            if tmp is not None:
+                Path(tmp).unlink(missing_ok=True)
+
+
+def _changed_from(out: Mapping[str, Any]) -> dict[str, Any]:
+    keys = (
+        "residue",
+        "genome",
+        "learned",
+        "skill",
+        "eu_new",
+        "evidence_units",
+        "tools",
+        "organism",
+        "code",
+        "skipped",
+        "idle_ready",
+    )
+    changed: dict[str, Any] = {}
+    for key in keys:
+        if key not in out:
+            continue
+        val = out[key]
+        if val in (None, "", 0, False, [], {}):
+            continue
+        if key == "organism" and isinstance(val, dict) and not any(val.values()):
+            continue
+        changed[key] = val
+    return changed
+
+
+def _with_learn_log(kind: str, home: str | None, fn):
+    started = time.perf_counter()
+    error = ""
+    out: dict[str, Any] = {}
+    try:
+        result = fn()
+        out = result if isinstance(result, dict) else {"ok": True, "result": result}
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"[:240]
+        logger.debug("%s failed", kind, exc_info=True)
+        out = {"ok": False, "error": error, "skipped": "error"}
+    duration_ms = (time.perf_counter() - started) * 1000.0
+    record_learn_run(
+        kind=kind,
+        home=home,
+        duration_ms=duration_ms,
+        error=error,
+        changed=_changed_from(out),
+        ok=bool(out.get("ok", True)) and not error,
+    )
+    out.setdefault("duration_ms", round(duration_ms, 3))
+    return out
+
+
+def metabolism_tool_name(name: str) -> str:
+    raw = (name or "").strip()
+    return _ABI_TO_METABOLISM.get(raw, raw)
+
+
+def admit_production_tool_batch(inp: Mapping[str, Any]) -> dict[str, Any]:
+    """Admit one mid-turn tool batch into metabolism. Never raises."""
+
+    def _run() -> dict[str, Any]:
+        from remedy.core.metabolism.turn import after_tool_batch
+
+        session_id = str(inp.get("session_id") or "").strip()
+        try:
+            tier = int(inp.get("tier") or 2)
+        except (TypeError, ValueError):
+            tier = 2
+        raw = inp.get("results") or inp.get("tool_steps") or inp.get("last_results") or []
+        if not isinstance(raw, list):
+            raw = []
+        totals: dict[str, Any] = {"ok": True, "eu_new": 0, "evidence_units": 0, "tools": 0}
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            name = metabolism_tool_name(
+                str(item.get("tool") or item.get("name") or item.get("tool_name") or "")
+            )
+            if not name:
+                continue
+            args = item.get("arguments") or item.get("input") or {}
+            if not isinstance(args, dict):
+                args = {}
+            content = str(item.get("result") or item.get("content") or item.get("tail") or item.get("output") or "")
+            error = str(item.get("error") or "")
+            ok = item.get("ok", item.get("success", error == ""))
+            try:
+                success = bool(ok) and not error
+            except Exception:
+                success = not error
+            admitted = after_tool_batch(
+                session_id=session_id,
+                tool_name=name,
+                arguments=args,
+                content=content,
+                tool_call_id=str(item.get("tool_call_id") or item.get("id") or ""),
+                success=success,
+                tier=tier,
+            )
+            totals["eu_new"] = int(totals["eu_new"]) + int(admitted.get("eu_new") or 0)
+            totals["evidence_units"] = int(admitted.get("evidence_units") or totals["evidence_units"])
+            totals["tools"] = int(totals["tools"]) + 1
+        return totals
+
+    try:
+        return _with_learn_log("after_tool_batch", _home_of(inp), _run)
+    except Exception:
+        logger.debug("admit_production_tool_batch failed", exc_info=True)
+        return {"ok": True, "skipped": "error", "eu_new": 0, "evidence_units": 0, "tools": 0}
 
 def _runtime_for(inp: Mapping[str, Any]) -> Any | None:
     """Reuse the cached assemble runtime so soul/memory stay on one home."""
@@ -79,6 +314,10 @@ def _normalize_steps(raw: Any) -> list[dict[str, Any]]:
 
 def finish_production_turn(inp: Mapping[str, Any]) -> dict[str, Any]:
     """Post-turn learning for a Go cognition turn. Never raises to the caller."""
+    return _with_learn_log("turn_end", _home_of(inp), lambda: _finish_production_turn_inner(inp))
+
+
+def _finish_production_turn_inner(inp: Mapping[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {"ok": True, "residue": "", "genome": 0, "learned": False}
     try:
         runtime = _runtime_for(inp)
@@ -202,6 +441,10 @@ def run_unattended_learn(inp: Mapping[str, Any]) -> dict[str, Any]:
     Code self-inject stays opt-in and idle-gated inside run_unattended_improve.
     Never raises to the caller; never calls a provider.
     """
+    return _with_learn_log("improve", _home_of(inp), lambda: _run_unattended_learn_inner(inp))
+
+
+def _run_unattended_learn_inner(inp: Mapping[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {"ok": True, "organism": {}, "code": None}
     try:
         import asyncio

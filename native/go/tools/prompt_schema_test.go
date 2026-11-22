@@ -63,6 +63,20 @@ func TestPromptSchemasAcceptRunnerPayloads(t *testing.T) {
 				},
 			},
 		},
+		{
+			tool: "prompt.after_tool_batch",
+			input: map[string]any{
+				"session_id": "s1",
+				"home_dir":   "h",
+				"results": []any{
+					map[string]any{
+						"tool": "read", "ok": true, "result": "ok",
+						"tool_call_id": "1",
+						"arguments":    map[string]any{"path": "a.py"},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range cases {

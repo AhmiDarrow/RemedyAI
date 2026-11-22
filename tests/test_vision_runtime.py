@@ -211,6 +211,14 @@ def test_a_released_port_is_reported_closed() -> None:
 
 def test_port_open_returns_false_instead_of_raising_on_a_bad_host() -> None:
     """A garbage host in vision.json must not raise out of a status poll."""
+    import socket
+
+    try:
+        socket.getaddrinfo("this-host-does-not-resolve.invalid", None)
+    except OSError:
+        pass
+    else:
+        pytest.skip("resolver hijacks NXDOMAIN / .invalid in this environment")
     assert vr._port_open("this-host-does-not-resolve.invalid", 9) is False
 
 
