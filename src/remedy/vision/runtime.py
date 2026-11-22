@@ -316,24 +316,57 @@ def ensure_idle_watcher(home_dir: str | Path | None = None) -> None:
 
 
 def yield_mind_for_muscle(home_dir: str | Path | None = None) -> dict[str, Any]:
-    """Keep the mind running but move it off the GPU so RMB can use VRAM.
+    """Reconcile the mind's GPU layers with a local muscle via the VRAM planner.
 
-    Hidden restart with n_gpu_layers=0. No-op if the mind is not running
-    or mind_keep_gpu is on. Old weight files are never deleted.
+    May leave the mind on the GPU (share), drop it to a split, or move it
+    to CPU (mmap). Hidden restart only when the planned layer count changes.
+    Old weight files are never deleted.
     """
     try:
-        from remedy.core.organism_knobs import resolve_bool
+        from remedy.runtime.rmb.coresidence import plan_coresidence
 
-        if resolve_bool("mind_keep_gpu"):
-            return {"ok": True, "yielded": False, "reason": "mind_keep_gpu"}
+        plan = plan_coresidence(rmb_running=True)
     except Exception:
-        pass
+        plan = None
+    ngl = 0
+    if plan is not None:
+        ngl = int(plan.mind_n_gpu_layers)
+    else:
+        try:
+            from remedy.core.organism_knobs import resolve_bool
+
+            if resolve_bool("mind_keep_gpu"):
+                return {"ok": True, "yielded": False, "reason": "mind_keep_gpu"}
+        except Exception:
+            pass
     if not is_running(home_dir, force=True):
-        return {"ok": True, "yielded": False, "reason": "mind_not_running"}
+        out = {"ok": True, "yielded": False, "reason": "mind_not_running", "n_gpu_layers": ngl}
+        if plan is not None:
+            out["coresidence"] = plan.to_public()
+        return out
+    if ngl != 0 and ngl != -1:
+        # Partial share: bounce the mind onto the planned layer count.
+        stop_server(home_dir=home_dir)
+        result = start_server(home_dir=home_dir, n_gpu_layers=ngl, ignore_rmb=True)
+        result = dict(result or {})
+        result["yielded"] = bool(result.get("ok"))
+        result["n_gpu_layers"] = ngl
+        if plan is not None:
+            result["coresidence"] = plan.to_public()
+        return result
+    if ngl == -1:
+        out = {"ok": True, "yielded": False, "reason": "share", "n_gpu_layers": -1}
+        if plan is not None:
+            out["coresidence"] = plan.to_public()
+        return out
+    # ngl == 0: classic yield to CPU
     stop_server(home_dir=home_dir)
     result = start_server(home_dir=home_dir, n_gpu_layers=0, ignore_rmb=True)
     result = dict(result or {})
     result["yielded"] = bool(result.get("ok"))
+    result["n_gpu_layers"] = 0
+    if plan is not None:
+        result["coresidence"] = plan.to_public()
     return result
 
 

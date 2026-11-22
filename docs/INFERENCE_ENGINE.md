@@ -8,9 +8,12 @@ not pixels, unless the mind sets `needs_pixels` or the owner turns on
 `always_send_images`.
 
 RMB remains optional extra muscle for larger GGUFs (the 9B coding
-host on :8787). It no longer evicts the mind. When RMB needs the GPU,
-the mind yields its GPU layers and keeps running on CPU with mmap so
-wake stays fast.
+host on :8787), and so does any user-run OpenAI-compatible local
+server (Ollama, LM Studio, vLLM, another llama-server). A VRAM
+planner splits layers and KV so the always-on mind and the muscle
+can share one GPU when they fit. The mind stays responsive; it only
+yields to CPU (mmap) when a dense muscle cannot sit fully beside it
+but would fit alone (typical 12 GB + 9B). 24 GB still shares. See `docs/RMB.md`.
 
 The language-model sha256 in the catalog is `TODO` until the
 fine-tuned GGUF is published. Until then the public unsloth
@@ -43,7 +46,7 @@ end of this document and in `/workspace/remedy-mind-ENGINE-NOTES.md`.
 | --- | --- | --- |
 | One host, not two | required | SmolVLM2 + Qwen3.5-9B could not share the GPU. The 4B already sees; one process is her whole mind. |
 | Q6_K + Q4_K_M autofit | auto | Q6_K + mmproj is ~4.2 GB, under today's two-model budget (~9.2 GB). Q4_K_M is the weak-machine fallback. |
-| llama.cpp b12628 | pinned | Materially newer than b10107: MTP+vision, image token caps, ngram-mod, cache-idle-slots, FP8 KV, schema fixes. |
+| llama.cpp b12628 | pinned | Materially newer than b10107: MTP+vision, image token caps, ngram-mod, cache-idle-slots, FP8 KV, schema fixes. Nightlies b12629–b12634 (22 Nov 2026) were backend-only (Adreno OpenCL, WebGPU, HIP CDNA3); the pin stays so the mind GGUF work is not disturbed. |
 | Parallel slots | 2 (1–4 autofit) | Concurrent inner tasks (dream + digest + worker) without a second server. |
 | Prefix / prompt cache | on | The system prefix above `\n\n[Turn context]\n` is byte-stable (`TURN_CONTEXT_MARKER`). `cache_prompt` is set on local calls. |
 | KV quant | `q8_0` | Cuts KV RAM so 2×8k slots fit a 12 GB GPU with the 4B + mmproj. `f16` and `f8_e4m3` are Advanced options. |
@@ -53,7 +56,7 @@ end of this document and in `/workspace/remedy-mind-ENGINE-NOTES.md`.
 | Image token cap | 1024 | Matches the training budget (longest side ≤ 768). |
 | Thinking | off | Short inner jobs should not emit `<think>` blocks. |
 | mmap + idle-stop | mmap on, 600s idle | The host can sleep to save RAM/GPU; wake is a process start against a warm page cache, not a full cold read. |
-| CPU yield when RMB runs | on | Both stay loaded. `mind_keep_gpu` keeps the mind on the GPU if the owner wants that. |
+| CPU yield when RMB runs | auto | Share when both fully fit. If the muscle would fit alone but not beside the mind, yield the mind to CPU + mmap. `mind_keep_gpu` / `muscle_gpu_policy=share` override. |
 | Media digest default | on | Saves frontier tokens. `always_send_images` is the escape hatch. |
 
 Not adopted (yet): a distilled EAGLE / draft model (would have to be trained alongside the mind); L=2/L=3 inner language; running the official 262k context; hosting a second llama-server for MDL layer tiers (8741/8742). MDL still routes task kinds, but every tier is the same 8740 host.
@@ -66,7 +69,12 @@ Settings → Advanced, group **Local mind**. Defaults are safe.
 `mind_cache_prompt`, `mind_cache_ram_mib`, `mind_mmap`, `mind_spec`,
 `mind_spec_draft_n`, `mind_image_max_tokens`, `mind_thinking`,
 `mind_json_schema`, `mind_idle_stop_s`, `mind_quant`, `mind_keep_gpu`,
-`always_send_images`.
+`mind_handles_easy_chats`, `always_send_images`.
+
+Local muscle (see `docs/RMB.md`): `muscle_gpu_policy`,
+`muscle_schedule`, `muscle_route`, `muscle_discover`,
+`muscle_vram_headroom_mib`, `muscle_kv_cache`, `muscle_flash_attn`,
+`muscle_spec`.
 
 ## Install and updates
 

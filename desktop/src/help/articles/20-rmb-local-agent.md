@@ -13,9 +13,14 @@ you want muscle without a cloud provider.
 | **Endpoint** | Default `http://127.0.0.1:8787/v1` |
 | **Chat** | Settings → **Use as chat provider** switches the active provider to RMB |
 
-While RMB is running, the local **4B mind** stays up and **yields the GPU**
-(CPU + mmap) so the larger GGUF can use the card. Turn on **Keep mind on GPU**
-in Settings → Advanced if you want both on the GPU at once.
+While RMB is running, the local **4B mind** stays up. A VRAM planner shares the GPU when the 4B mind and the muscle both fit
+(typical 24 GB card). If a dense muscle would fit alone but not beside
+the mind (typical 12 GB + 9B), the mind yields to CPU (mmap) so the
+muscle can have the card. Turn on **Keep mind on GPU** in Settings →
+Advanced to force the mind to stay on the GPU, or set the GPU policy to
+**share**. Discovery will reuse an already-running Ollama / LM Studio /
+vLLM / llama-server instead of starting a second copy. Details:
+[RMB.md](../RMB.md).
 
 ## When to use it
 
@@ -39,8 +44,8 @@ RMB is part of Remedy, not a bolt-on. Chat can call the **`rmb`** tool
 not search the whole user profile. A sibling `mtp-<name>.gguf` next to
 the main file auto-arms MTP on start (Settings restart keeps it). The
 living map shows `[House] RMB=…` so she knows whether the host is up.
-Starting RMB still uses this PC's GPU; the 4B mind yields its GPU layers
-until RMB stops (unless you keep the mind on the GPU).
+Starting RMB still uses this PC's GPU; the planner shares or yields
+layers so the 4B mind stays as responsive as the card allows.
 
 ## Setup (owner UI)
 
@@ -102,7 +107,7 @@ cloud key of its own.
 |---------|-------------|
 | Not ready | Confirm GGUF path + runtime present; open Settings status card |
 | Start failed | Check port 8787 free; lower context / GPU layers on small machines |
-| Mind went to CPU | Expected while RMB owns the GPU; it keeps running. Stop RMB, or enable Keep mind on GPU. |
+| Mind went to CPU | Expected on a 12 GB card with the default 9B muscle so the 9B can have the GPU. The mind keeps running on CPU. Stop RMB, pick a MoE or smaller muscle, or enable Keep mind on GPU. |
 | Chat still cloud | Use **Use as chat provider**, then send a new message |
 
 See also: [Visual decoder](14-visual-decoder.md), [Free providers](15-free-providers.md),

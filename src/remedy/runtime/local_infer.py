@@ -71,8 +71,12 @@ def local_text_complete(
     )
     try:
         # Never follow Location (loopback 302 → metadata/LAN SSRF).
-        with urlopen_no_redirect(req, timeout=timeout_s) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        from remedy.runtime.rmb.coresidence import GpuSchedule
+
+        who = "mind" if ":8740" in url else "muscle"
+        with GpuSchedule(who):
+            with urlopen_no_redirect(req, timeout=timeout_s) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
     except HTTPError as e:
         err = ""
         try:
