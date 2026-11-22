@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
@@ -94,6 +95,22 @@ func (r *CognitionTurnRunner) PulsePartner(ctx context.Context) error {
 	return err
 }
 
+// PulseLearn runs one unattended organism learning tick on the Python worker.
+// The hearth calls this about once a minute. It does not call a provider.
+// Code self-inject remains opt-in and idle-gated in Python.
+func (r *CognitionTurnRunner) PulseLearn(ctx context.Context) error {
+	if r == nil || r.promptAssemble == nil {
+		return errors.New("rmdy prompt worker unavailable")
+	}
+	input := map[string]any{}
+	if home := strings.TrimSpace(r.HomeDir); home != "" {
+		input["home_dir"] = home
+		input["_go_bound"] = true
+	}
+	_, err := r.rmdyCall(ctx, "partner.improve", input)
+	return err
+}
+
 func (r *CognitionTurnRunner) rmdyCall(ctx context.Context, toolID string, input map[string]any) (map[string]any, error) {
 	if r == nil || r.promptAssemble == nil {
 		return nil, errors.New("rmdy prompt worker unavailable")
@@ -127,7 +144,8 @@ func modelVisibleTool(id string) bool {
 	return !strings.HasPrefix(id, "prompt.") &&
 		!strings.HasPrefix(id, "voice.") &&
 		!strings.HasPrefix(id, "vision.") &&
-		id != "partner.pulse"
+		id != "partner.pulse" &&
+		id != "partner.improve"
 }
 
 // ModelVisibleToolIDs is the tool surface advertised to the model for this
@@ -285,6 +303,8 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 		return errors.New("cognition turn runner requires a policy")
 	}
 
+	var out cognition.Outcome
+
 	seed := cognition.Turn{}
 	userText := req.Prompt
 	// Production serve always AttachPythonWorker. When attached, assemble is
@@ -296,6 +316,8 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 		}
 		seed.System = assembled.System
 		userText = assembled.Goal
+		// Only after a successful assemble. Fire-and-forget so the reply is not delayed.
+		defer r.scheduleTurnEnd(req, &out)
 	}
 	seed.Messages = seedTranscript(req, userText, r.HomeDir)
 
@@ -322,7 +344,7 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 		return emitted
 	}
 
-	out := r.runEngine(ctx, req, live, seed, safeEmit)
+	out = r.runEngine(ctx, req, live, seed, safeEmit)
 
 	// Credentialed-but-unusable (401/402/403, subscription) — switch once to
 	// another provider so selecting Poe without a sub doesn't hard-fail chat.
@@ -384,6 +406,121 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 		return out.Err
 	}
 	return nil
+}
+
+// scheduleTurnEnd fires post-turn learning on the Python worker without
+// blocking the reply. Failures are ignored. No worker means a no-op.
+func (r *CognitionTurnRunner) scheduleTurnEnd(req TurnRequest, out *cognition.Outcome) {
+	if r == nil || r.promptAssemble == nil || out == nil {
+		return
+	}
+	snapshot := *out
+	reqCopy := req
+	go r.finishTurn(reqCopy, snapshot)
+}
+
+// finishTurn asks the Python worker to ingest residue, update the soul,
+// record the skill genome, and run the LearningLoop. It must never affect
+// the already-finished turn.
+func (r *CognitionTurnRunner) finishTurn(req TurnRequest, out cognition.Outcome) {
+	if r == nil || r.promptAssemble == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	input := map[string]any{
+		"message":        req.Prompt,
+		"goal":           req.Prompt,
+		"user_text":      req.Prompt,
+		"assistant_text": strings.TrimSpace(out.Text),
+		"session_id":     req.SessionID,
+		"plan_mode":      req.PlanMode,
+		"chat_mode":      req.ChatMode,
+		"tool_steps":     toolStepsFromOutcome(out),
+	}
+	if proj := strings.TrimSpace(req.ProjectPath); proj != "" && !isUnsetProjectPath(proj) {
+		input["project_path"] = proj
+	}
+	_, _ = r.rmdyCall(ctx, "prompt.turn_end", input)
+}
+
+func toolStepsFromOutcome(out cognition.Outcome) []map[string]any {
+	uses := map[string]cognition.Block{}
+	for _, msg := range out.Messages {
+		for _, b := range msg.ToolUses() {
+			if b.ID != "" {
+				uses[b.ID] = b
+			}
+		}
+	}
+	steps := make([]map[string]any, 0, len(out.Results)+len(uses))
+	seen := map[string]bool{}
+	for _, res := range out.Results {
+		name := strings.TrimSpace(res.Name)
+		id := strings.TrimSpace(res.ID)
+		if name == "" && id != "" {
+			if u, ok := uses[id]; ok {
+				name = u.Name
+			}
+		}
+		if name == "" {
+			continue
+		}
+		seen[id] = true
+		tail := strings.TrimSpace(string(res.Output))
+		if len(tail) > 500 {
+			tail = tail[:500]
+		}
+		ok := !res.IsError && strings.TrimSpace(res.Err) == ""
+		step := map[string]any{"tool": name, "name": name, "ok": ok, "success": ok, "result": tail}
+		if !ok {
+			errText := strings.TrimSpace(res.Err)
+			if errText == "" {
+				errText = tail
+			}
+			step["error"] = errText
+		}
+		steps = append(steps, step)
+	}
+	for _, msg := range out.Messages {
+		if !msg.HasToolResults() {
+			continue
+		}
+		for _, b := range msg.Blocks {
+			if b.Type != cognition.BlockToolResult {
+				continue
+			}
+			if seen[b.ToolUseID] {
+				continue
+			}
+			name := ""
+			if u, ok := uses[b.ToolUseID]; ok {
+				name = u.Name
+			}
+			if name == "" {
+				continue
+			}
+			var tail strings.Builder
+			for _, c := range b.Content {
+				if c.Type == cognition.BlockText {
+					tail.WriteString(c.Text)
+				}
+			}
+			body := tail.String()
+			if len(body) > 500 {
+				body = body[:500]
+			}
+			ok := !b.IsError
+			step := map[string]any{"tool": name, "name": name, "ok": ok, "success": ok, "result": body}
+			if b.IsError {
+				step["error"] = body
+			}
+			steps = append(steps, step)
+			seen[b.ToolUseID] = true
+		}
+	}
+	return steps
 }
 
 // fallbackModel resolves another configured provider after live proved

@@ -53,6 +53,16 @@ Normal chat still talks to **one Remedy**. These organs never appear as named bo
 - Hot path never blocks on local model inference  
 - Plan mode stays research-only (no `computer_act` / click / type mutations)
 
+## Production wiring
+
+On `remedy serve` (and Desktop turns) the Go runtime owns the loop:
+
+- **Turn start.** `prompt.assemble` pulses metabolism (`begin_turn_metabolism`) and appends those notes after the turn-context marker so the Anthropic prompt-cache prefix stays byte-stable.
+- **Turn end.** After the reply is finished, Go fires `prompt.turn_end` in the background (30s cap, fail-safe). That ingests durable residue, updates the soul, records the skill genome, and runs the LearningLoop when the turn earned it.
+- **Unattended learning.** The hearth clock calls `partner.improve` about every 60 seconds (`run_unattended_improve`). Organism work (skill promote/prune, dream when due, life cycle) always runs. Code self-inject stays opt-in and idle-gated — never forced.
+- **Vigil.** Still off until the owner accepts the one-time offer (after about 12 turns together). The hearth already ticks `partner.pulse`; a disabled vigil is a no-op.
+- **Voice.** Daily voice drift starts when the Python worker comes up (local JSON only). Set `REMEDY_NO_VOICE_EVOLUTION=1` to skip.
+
 ## Related
 
 - [Continuity philosophy](16-continuity-philosophy)  

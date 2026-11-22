@@ -49,6 +49,20 @@ func TestPromptSchemasAcceptRunnerPayloads(t *testing.T) {
 				},
 			},
 		},
+		{
+			tool: "prompt.turn_end",
+			input: map[string]any{
+				"message":        "I want to always use TypeScript",
+				"assistant_text": "From now on we will use TypeScript.",
+				"session_id":     "s1",
+				"home_dir":       "h",
+				"tool_steps": []any{
+					map[string]any{"tool": "read", "ok": true, "result": "ok"},
+					map[string]any{"tool": "edit", "ok": true, "result": "ok"},
+					map[string]any{"tool": "bash", "ok": true, "result": "exit 0"},
+				},
+			},
+		},
 	}
 
 	for _, tc := range cases {
