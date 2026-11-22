@@ -228,11 +228,9 @@ func isVisionHelperCompat(oc *providers.OpenAICompat) bool {
 	if oc == nil {
 		return false
 	}
-	if strings.EqualFold(strings.TrimSpace(oc.Model), "vision-decoder") {
-		return true
-	}
-	base := strings.TrimSpace(oc.BaseURL)
-	return isLocalURL(base) && strings.Contains(base, fmt.Sprintf(":%d", visionDefaultPort))
+	// Only the legacy VLM placeholder is tool-less. The always-on Qwen3.5-4B
+	// mind also listens on the unified :8740 host and must keep the Tool ABI.
+	return strings.EqualFold(strings.TrimSpace(oc.Model), "vision-decoder")
 }
 
 func (r *CognitionTurnRunner) modelForTurn(req TurnRequest) cognition.Model {
@@ -252,8 +250,9 @@ func (r *CognitionTurnRunner) modelForTurn(req TurnRequest) cognition.Model {
 			model = strings.TrimSpace(*req.Model)
 		}
 		live := ResolveChatModel(home, prov, model, "")
+		live = applyMuscleRoute(home, req, live)
 		r.advertiseToolSurface(live, false)
-		return live
+		return wrapGPUSchedule(home, live)
 	}
 	return r.Model
 }
@@ -671,7 +670,7 @@ func (r *CognitionTurnRunner) fallbackModel(req TurnRequest, live cognition.Mode
 		return nil
 	}
 	r.advertiseToolSurface(alt, false)
-	return alt
+	return wrapGPUSchedule(r.HomeDir, alt)
 }
 
 // seedTranscript is the transcript the first model round sees: the prior

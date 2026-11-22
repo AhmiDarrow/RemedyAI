@@ -10,6 +10,11 @@ from remedy.runtime.rmb.autofit import (
     plan_autofit,
     should_autofit,
 )
+from remedy.runtime.rmb.coresidence import (
+    discover_local_servers,
+    plan_coresidence,
+    route_request,
+)
 from remedy.runtime.rmb.config import (
     DEFAULT_CHAT_PORT,
     DEFAULT_HOST,
@@ -53,7 +58,10 @@ __all__ = [
     "is_rmb_base_url",
     "is_rmb_provider",
     "load_rmb_json",
+    "discover_local_servers",
     "plan_autofit",
+    "plan_coresidence",
+    "route_request",
     "rmb_chat_base_url",
     "rmb_home",
     "rmb_is_set_up",

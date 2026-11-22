@@ -1742,6 +1742,19 @@ def _build_cmd(
             )
     else:
         _emit_classic_owner_draft()
+    # No MTP head: muscle_spec=auto (and ngram-mod) still drafts with ngram-mod
+    # when the binary allows it. Soft-retry below strips the flags if rejected.
+    if (
+        "--spec-type" not in cmd
+        and "--model-draft" not in cmd
+        and enable_mtp is not False
+    ):
+        want = str(profile.get("spec_type") or "auto").strip().lower()
+        if want in {"ngram-mod", "ngram"} or (
+            want in {"", "auto"} and not profile.get("mtp")
+        ):
+            cmd.extend(["--spec-type", "ngram-mod"])
+            logger.info("RMB autoconfig: ngram-mod speculation for %s", model.name)
     # Prefix cache: ReAct tool loops resubmit the same system head every step.
     if cache_reuse is not None and int(cache_reuse) > 0 and binary_supports_cache_reuse(binary):
         cmd.extend(["--cache-reuse", str(int(cache_reuse))])
@@ -1764,6 +1777,65 @@ def _set_vision_suspended(
         save_rmb_json(state, home_dir)
     except Exception:
         logger.debug("RMB: failed to persist vision_suspended=%s", suspended, exc_info=True)
+
+
+
+def _coresidence_plan_for_start(
+    state: dict[str, Any],
+    *,
+    hardware: Any | None = None,
+    model: Path | str | None = None,
+) -> Any:
+    """VRAM plan for this start. Best-effort — never blocks a start on failure."""
+    try:
+        from remedy.runtime.rmb.coresidence import plan_coresidence
+
+        mid = str(state.get("model_id") or "") or None
+        ctx = int(state.get("ctx_size") or 0)
+        moe = state.get("n_cpu_moe")
+        return plan_coresidence(
+            hardware=hardware,
+            muscle_model_id=mid,
+            muscle_ctx=ctx,
+            muscle_n_cpu_moe=int(moe) if moe not in (None, "") else None,
+            rmb_running=True,
+        )
+    except Exception:
+        logger.debug("RMB: coresidence plan failed", exc_info=True)
+        return None
+
+
+def _reuse_external_muscle(state: dict[str, Any], model: Path | None) -> dict[str, Any] | None:
+    """If a user-run local server already hosts this model, do not start a second copy."""
+    try:
+        from remedy.runtime.rmb.coresidence import already_served, discover_local_servers, plan_coresidence
+
+        servers = discover_local_servers()
+        hints = [str(state.get("model_id") or ""), (model.name if model else "")]
+        hit = None
+        for h in hints:
+            hit = already_served(h, servers)
+            if hit is not None:
+                break
+        if hit is None:
+            return None
+        plan = plan_coresidence(
+            muscle_model_id=str(state.get("model_id") or "") or None,
+            servers=servers,
+            rmb_running=False,
+        )
+        return {
+            "ok": True,
+            "reused": True,
+            "skipped_start": True,
+            "base_url": hit.base_url,
+            "provider_kind": hit.kind,
+            "coresidence": plan.to_public(),
+            "models": list(hit.models),
+        }
+    except Exception:
+        logger.debug("RMB: external reuse probe failed", exc_info=True)
+        return None
 
 
 def _suspend_smolvlm(home_dir: str | Path | None = None) -> dict[str, Any]:
@@ -2095,6 +2167,18 @@ def _start_rmb_server_impl(
     want_model = _resolve_model_path(st_probe, home_dir, trust_sticky_path=True)
     want_name = want_model.name.lower() if want_model else ""
 
+    reused = _reuse_external_muscle(st_probe, want_model)
+    if reused:
+        # Still reconcile the mind with whatever VRAM the external server holds.
+        with contextlib.suppress(Exception):
+            _suspend_smolvlm(home_dir)
+        logger.info(
+            "RMB: reusing %s at %s instead of starting a second copy",
+            reused.get("provider_kind"),
+            reused.get("base_url"),
+        )
+        return reused
+
     # Fast path only if healthy AND already the desired GGUF (check via /v1/models id)
     if is_running(home_dir, force=True, require_http=True):
         same = True
@@ -2342,17 +2426,37 @@ def _start_rmb_server_impl(
             if isinstance(state.get("last_good_fit"), dict)
             else None
         )
+        # Coresidence first: if the mind stays on the GPU, autofit must plan
+        # against the leftover VRAM, not the whole card.
+        from dataclasses import replace as _replace
+
+        co = _coresidence_plan_for_start(state, hardware=hw, model=model)
+        hw_for_fit = hw
+        if co is not None and co.mode == "share" and co.mind_n_gpu_layers != 0:
+            leftover = max(2048, int(co.budget_mib) - int(co.mind_used_mib))
+            hw_for_fit = _replace(
+                hw,
+                vram_total_mb=min(hw.vram_total_mb, leftover + 256),
+                vram_free_mb=min(hw.vram_free_mb or leftover, leftover),
+            )
         if should_autofit(state):
-            plan = plan_autofit(model, hardware=hw, last_good=last_good)
+            plan = plan_autofit(model, hardware=hw_for_fit, last_good=last_good)
             apply_plan_to_state(state, plan)
             logger.info("RMB autofit: %s", plan.summary())
         else:
-            plan = plan_from_state(state, model, hardware=hw)
+            plan = plan_from_state(state, model, hardware=hw_for_fit)
             if plan.n_gpu_layers < 0 and not hw.usable_gpu:
-                from dataclasses import replace as _replace
-
                 plan = _replace(plan, n_gpu_layers=0, flash_attn=False)
             apply_plan_to_state(state, plan)
+        if co is not None:
+            from remedy.runtime.rmb.coresidence import apply_plan_to_rmb_state
+
+            apply_plan_to_rmb_state(state, co)
+            if co.muscle_n_gpu_layers >= 0 and (
+                plan.n_gpu_layers < 0 or co.muscle_n_gpu_layers < plan.n_gpu_layers
+            ):
+                plan = _replace(plan, n_gpu_layers=co.muscle_n_gpu_layers)
+                apply_plan_to_state(state, plan)
         # Don't push GPU layers onto a runtime that cannot drive this card.
         if plan.n_gpu_layers != 0:
             try:
@@ -3059,10 +3163,11 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             "note": (
                 "Context is automatic — Session Brief + harness keep long sessions "
                 "alive without user-facing compress talk. "
-                "SmolVLM is unloaded while RMB is running."
+                "The 4B mind stays up; the VRAM planner splits or yields GPU layers."
             ),
         },
         "autofit": _status_autofit(state, model_path, running=ready),
+        "coresidence": _status_coresidence(state, running=ready),
     }
 
 
@@ -3077,6 +3182,31 @@ def _status_host_auto(state: dict[str, Any], model_path: Path | None) -> dict[st
         # Filename-only — do not walk GGUF KV on the 8s status poll.
         ha = detect_gguf_host_profile(model_path, sniff_template=False)
     return overlay_owner_on_profile(ha or {}, state)
+
+
+
+def _status_coresidence(state: dict[str, Any], *, running: bool) -> dict[str, Any]:
+    """Best-effort planner + discovery snapshot for Settings / status."""
+    out: dict[str, Any] = {"running": running}
+    try:
+        from remedy.runtime.rmb.coresidence import discover_local_servers, plan_coresidence
+
+        servers = discover_local_servers()
+        out["local_servers"] = [s.to_public() for s in servers]
+        cached = state.get("last_coresidence")
+        if isinstance(cached, dict) and cached:
+            out["plan"] = cached
+        else:
+            plan = plan_coresidence(
+                muscle_model_id=str(state.get("model_id") or "") or None,
+                muscle_ctx=int(state.get("ctx_size") or 0),
+                servers=servers,
+                rmb_running=running,
+            )
+            out["plan"] = plan.to_public()
+    except Exception as exc:
+        out["error"] = str(exc)
+    return out
 
 
 def _status_autofit(

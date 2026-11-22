@@ -13,9 +13,13 @@ you want muscle without a cloud provider.
 | **Endpoint** | Default `http://127.0.0.1:8787/v1` |
 | **Chat** | Settings → **Use as chat provider** switches the active provider to RMB |
 
-While RMB is running, the local **4B mind** stays up and **yields the GPU**
-(CPU + mmap) so the larger GGUF can use the card. Turn on **Keep mind on GPU**
-in Settings → Advanced if you want both on the GPU at once.
+While RMB is running, the local **4B mind** stays up. A VRAM planner
+keeps the mind on the GPU when it can, offloads part of a dense muscle
+if they will not both fit fully, and only then yields the mind to CPU
+(mmap) so a large GGUF can have the card. Turn on **Keep mind on GPU**
+in Settings → Advanced to force the mind to stay on the GPU. Discovery
+will reuse an already-running Ollama / LM Studio / vLLM / llama-server
+instead of starting a second copy. Details: [RMB.md](../RMB.md).
 
 ## When to use it
 
@@ -39,8 +43,8 @@ RMB is part of Remedy, not a bolt-on. Chat can call the **`rmb`** tool
 not search the whole user profile. A sibling `mtp-<name>.gguf` next to
 the main file auto-arms MTP on start (Settings restart keeps it). The
 living map shows `[House] RMB=…` so she knows whether the host is up.
-Starting RMB still uses this PC's GPU; the 4B mind yields its GPU layers
-until RMB stops (unless you keep the mind on the GPU).
+Starting RMB still uses this PC's GPU; the planner shares or yields
+layers so the 4B mind stays as responsive as the card allows.
 
 ## Setup (owner UI)
 
