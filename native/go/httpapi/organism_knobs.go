@@ -95,12 +95,13 @@ var advancedKnobList = []advancedKnob{
 	{"interop_mcp", true, "bool", 0, 0, "", "Agent interop", "Expose talk-to-Remedy MCP tools (ask, delegate, task status, share context).", "", false},
 	{"interop_claimidx", false, "bool", 0, 0, "", "Agent interop", "Optionally verify peer DIDs with ClaimIDX. Off: identity is pluggable and not required.", "", false},
 	{"interop_trust_policy", "gated", "str", 0, 0, "", "Agent interop", "open (known or unknown peers), gated (unverified peers limited), or verified (only DID-verified peers). Money, send, and delete always need the owner's approval.", "", false},
-	{"interop_auto_reply", false, "bool", 0, 0, "", "Agent interop", "When inbound is on, automatically answer allowed asks. Off: queue them for the owner.", "", false},
+	{"interop_auto_reply", true, "bool", 0, 0, "", "Agent interop", "When inbound is on, automatically answer allowed asks with a live session turn. Off: queue them for the owner. Does nothing while inbound itself is off.", "", false},
 	{"interop_audit", true, "bool", 0, 0, "", "Agent interop", "Write every inbound and outbound peer exchange to the interop audit log.", "", false},
 	{"interop_rate_per_min", 30, "int", 1, 600, "count", "Agent interop", "Max inbound requests per peer per minute.", "", false},
 	{"interop_hop_limit", 3, "int", 1, 8, "hops", "Agent interop", "Max forwarding hops. Stops ping-pong loops between bots.", "", false},
 	{"interop_max_peers", 64, "int", 1, 512, "count", "Agent interop", "Cap on saved peer contacts.", "", false},
-	{"interop_task_ttl_s", 86400, "int", 60, 7 * 86400, "s", "Agent interop", "How long peer tasks are kept.", "", false},
+	{"interop_max_concurrent", 2, "int", 1, 16, "count", "Agent interop", "Max live inbound session turns running at once.", "", false},
+	{"interop_task_ttl_s", 86400, "int", 60, 7 * 86400, "s", "Agent interop", "How long peer tasks are kept, and the timeout for a live inbound turn.", "", false},
 }
 
 func advancedByKey() map[string]advancedKnob {
@@ -123,7 +124,7 @@ func coerceAdvanced(k advancedKnob, raw any) (any, bool) {
 			"mind_spec":                {"auto", "draft-mtp", "mtp", "ngram-mod", "ngram", "off", "none"},
 			"mind_quant":               {"auto", "q6_k", "q6", "q4_k_m", "q4"},
 			"interop_bind":             {"127.0.0.1", "localhost", "loopback", "lan", "0.0.0.0", "off"},
-			"interop_trust_policy":    {"open", "gated", "verified"},
+			"interop_trust_policy":     {"open", "gated", "verified"},
 		}
 		if opts, ok := allowed[k.Key]; ok {
 			okVal := false

@@ -126,16 +126,23 @@ Environment variables, when set, still win.
 | `interop_mcp` | `true` | Serve talk-to-Remedy MCP tools. |
 | `interop_claimidx` | `false` | Optionally verify peer DIDs with ClaimIDX. |
 | `interop_trust_policy` | `gated` | `open`, `gated`, or `verified`. |
-| `interop_auto_reply` | `false` | When inbound is on, answer allowed asks automatically. Off: queue them. |
+| `interop_auto_reply` | `true` | When inbound is on, answer allowed asks with a live session turn. Off: queue them. Does nothing while inbound is off. |
 | `interop_audit` | `true` | Write the audit log. |
 | `interop_rate_per_min` | `30` | Max inbound requests per peer per minute. |
 | `interop_hop_limit` | `3` | Max forwarding hops. |
 | `interop_max_peers` | `64` | Cap on saved contacts. |
-| `interop_task_ttl_s` | `86400` | How long peer tasks are kept. |
+| `interop_max_concurrent` | `2` | Max live inbound session turns running at once. |
+| `interop_task_ttl_s` | `86400` | How long peer tasks are kept, and the timeout for a live inbound turn. |
 
-Automatic replies stay off until you turn them on. Inbound messages are
-queued in `{home}/interop/inbox.jsonl` and recorded as A2A tasks in
-`{home}/interop/tasks.json`.
+When inbound is on, allowed asks and delegates start a real Remedy session
+turn automatically (`interop_auto_reply`, on by default). The turn uses an
+untrusted origin, so money, send, and delete still queue for you instead of
+executing. Per-peer permissions, rate limits, hop limits, and the ping-pong
+guard still apply. At most `interop_max_concurrent` live turns run at once,
+and a turn that outlives `interop_task_ttl_s` fails. Inbound itself stays
+off until you enable it. Inbound messages are also written to
+`{home}/interop/inbox.jsonl` and recorded as A2A tasks in
+`{home}/interop/tasks.json`, and every exchange is audited.
 
 ## What this is not
 

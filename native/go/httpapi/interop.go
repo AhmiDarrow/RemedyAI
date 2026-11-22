@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -27,20 +28,20 @@ const (
 )
 
 var a2aMethods = map[string]string{
-	"SendMessage":                          "SendMessage",
-	"message/send":                         "SendMessage",
-	"SendStreamingMessage":                 "SendStreamingMessage",
-	"message/stream":                       "SendStreamingMessage",
-	"GetTask":                              "GetTask",
-	"tasks/get":                            "GetTask",
-	"ListTasks":                            "ListTasks",
-	"tasks/list":                           "ListTasks",
-	"CancelTask":                           "CancelTask",
-	"tasks/cancel":                         "CancelTask",
-	"GetExtendedAgentCard":                 "GetExtendedAgentCard",
-	"agent/getAuthenticatedExtendedCard":   "GetExtendedAgentCard",
-	"SubscribeToTask":                      "SubscribeToTask",
-	"tasks/resubscribe":                    "SubscribeToTask",
+	"SendMessage":                        "SendMessage",
+	"message/send":                       "SendMessage",
+	"SendStreamingMessage":               "SendStreamingMessage",
+	"message/stream":                     "SendStreamingMessage",
+	"GetTask":                            "GetTask",
+	"tasks/get":                          "GetTask",
+	"ListTasks":                          "ListTasks",
+	"tasks/list":                         "ListTasks",
+	"CancelTask":                         "CancelTask",
+	"tasks/cancel":                       "CancelTask",
+	"GetExtendedAgentCard":               "GetExtendedAgentCard",
+	"agent/getAuthenticatedExtendedCard": "GetExtendedAgentCard",
+	"SubscribeToTask":                    "SubscribeToTask",
+	"tasks/resubscribe":                  "SubscribeToTask",
 }
 
 var interopMu sync.Mutex
@@ -52,6 +53,7 @@ func (s *Server) mountInteropRoutes() {
 	s.mux.HandleFunc("POST /a2a", s.handleInteropA2A)
 	s.mux.HandleFunc("POST /a2a/v1", s.handleInteropA2A)
 	s.mux.HandleFunc("POST /mcp", s.handleInteropMCP)
+	s.mux.HandleFunc("POST /interop/turn", s.handleInteropTurn)
 }
 
 func (s *Server) interopCfg() ConfigMap {
@@ -212,9 +214,9 @@ func (s *Server) interopAgentCard(extended bool) map[string]any {
 			{"url": s.interopPublicURL(), "protocolBinding": "JSONRPC", "protocolVersion": a2aProtocolVersion},
 		},
 		"capabilities": map[string]any{
-			"streaming":          true,
-			"pushNotifications":  false,
-			"extendedAgentCard":  true,
+			"streaming":         true,
+			"pushNotifications": false,
+			"extendedAgentCard": true,
 		},
 		"securitySchemes": map[string]any{
 			"bearer": map[string]any{
@@ -279,18 +281,54 @@ func (s *Server) handleInteropA2A(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, rpcErr(id, -32601, "Method not found: "+method))
 		return
 	}
+	accept := r.Header.Get("Accept")
+	wantStream := (canon == "SendStreamingMessage" || canon == "SubscribeToTask") && strings.Contains(accept, "text/event-stream")
+
+	switch canon {
+	case "SendMessage", "SendStreamingMessage":
+		task, err := s.interopRecordInbound("a2a", params)
+		if err != nil {
+			writeJSON(w, http.StatusOK, rpcErr(id, -32602, err.Error()))
+			return
+		}
+		if wantStream {
+			s.interopStreamLive(w, r, id, "a2a", task)
+			return
+		}
+		if s.interopShouldLive(task) {
+			if interopBlocking(params) {
+				task = s.interopRunLive(r.Context(), "a2a", task, nil)
+			} else {
+				go s.interopRunLive(context.Background(), "a2a", task, nil)
+				if fresh := s.interopGetTask(stringVal(task, "id")); fresh != nil {
+					task = fresh
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"jsonrpc": "2.0", "id": id, "result": map[string]any{"task": task}})
+		return
+	case "SubscribeToTask":
+		tid := stringVal(params, "id", "taskId")
+		if tid == "" {
+			writeJSON(w, http.StatusOK, rpcErr(id, -32602, "id is required"))
+			return
+		}
+		task := s.interopGetTask(tid)
+		if task == nil {
+			writeJSON(w, http.StatusOK, rpcErr(id, -32001, "TaskNotFoundError"))
+			return
+		}
+		if wantStream {
+			s.interopSubscribeStream(w, r, id, task)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"jsonrpc": "2.0", "id": id, "result": task})
+		return
+	}
+
 	result, code, msg := s.dispatchA2A(canon, params)
 	if msg != "" {
 		writeJSON(w, http.StatusOK, rpcErr(id, code, msg))
-		return
-	}
-	wantStream := canon == "SendStreamingMessage" || canon == "SubscribeToTask"
-	if wantStream && strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-store")
-		w.WriteHeader(http.StatusOK)
-		payload, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
-		fmt.Fprintf(w, "data: %s\n\n", payload)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
@@ -360,11 +398,11 @@ func (s *Server) handleInteropMCP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	result := s.dispatchMCP(id, method, body)
+	result := s.dispatchMCP(r.Context(), id, method, body)
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) dispatchMCP(id any, method string, body map[string]any) map[string]any {
+func (s *Server) dispatchMCP(ctx context.Context, id any, method string, body map[string]any) map[string]any {
 	params, _ := body["params"].(map[string]any)
 	if params == nil {
 		params = map[string]any{}
@@ -390,7 +428,7 @@ func (s *Server) dispatchMCP(id any, method string, body map[string]any) map[str
 		if args == nil {
 			args = map[string]any{}
 		}
-		text, err := s.callInteropMCPTool(name, args)
+		text, err := s.callInteropMCPTool(ctx, name, args)
 		if err != nil {
 			return map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{"code": -32601, "message": err.Error()}}
 		}
@@ -416,30 +454,36 @@ func interopMCPTools() []map[string]any {
 	}
 }
 
-func (s *Server) callInteropMCPTool(name string, args map[string]any) (string, error) {
+func (s *Server) callInteropMCPTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	switch name {
 	case "remedy_ask":
-		task, err := s.interopRecordText("mcp", "ask", stringVal(args, "question"), stringVal(args, "peer_id"), "")
+		task, err := s.interopRecordText("mcp", "ask", stringVal(args, "question"), stringVal(args, "peer_id"), "", args)
 		if err != nil {
 			return "", err
 		}
-		return interopMustJSON(map[string]any{"ok": true, "queued": true, "task_id": task["id"], "state": statusState(task)}), nil
+		if s.interopShouldLive(task) {
+			task = s.interopRunLive(ctx, "mcp", task, nil)
+		}
+		return interopMCPToolResult(task), nil
 	case "remedy_delegate":
 		text := stringVal(args, "task")
-		if ctx := stringVal(args, "context"); ctx != "" {
-			text = text + "\n\nContext:\n" + ctx
+		if extra := stringVal(args, "context"); extra != "" {
+			text = text + "\n\nContext:\n" + extra
 		}
-		task, err := s.interopRecordText("mcp", "delegate", text, stringVal(args, "peer_id"), "")
+		task, err := s.interopRecordText("mcp", "delegate", text, stringVal(args, "peer_id"), "", args)
 		if err != nil {
 			return "", err
 		}
-		return interopMustJSON(map[string]any{"ok": true, "queued": true, "task_id": task["id"], "state": statusState(task)}), nil
+		if s.interopShouldLive(task) {
+			task = s.interopRunLive(ctx, "mcp", task, nil)
+		}
+		return interopMCPToolResult(task), nil
 	case "remedy_share_context":
-		task, err := s.interopRecordText("mcp", "share_context", stringVal(args, "context"), stringVal(args, "peer_id"), stringVal(args, "task_id"))
+		task, err := s.interopRecordText("mcp", "share_context", stringVal(args, "context"), stringVal(args, "peer_id"), stringVal(args, "task_id"), args)
 		if err != nil {
 			return "", err
 		}
-		return interopMustJSON(map[string]any{"ok": true, "queued": true, "task_id": task["id"], "state": statusState(task)}), nil
+		return interopMCPToolResult(task), nil
 	case "remedy_task_status":
 		tid := stringVal(args, "task_id")
 		task := s.interopGetTask(tid)
@@ -476,28 +520,50 @@ func (s *Server) interopRecordInbound(protocol string, params map[string]any) (m
 	if action == "" {
 		action = "ask"
 	}
-	return s.interopRecordText(protocol, action, text, peerID, "")
+	if cid := stringVal(params, "contextId"); cid != "" {
+		if _, ok := meta["contextId"]; !ok {
+			meta["contextId"] = cid
+		}
+	}
+	if msg != nil {
+		if cid := stringVal(msg, "contextId"); cid != "" {
+			if _, ok := meta["contextId"]; !ok {
+				meta["contextId"] = cid
+			}
+		}
+	}
+	return s.interopRecordText(protocol, action, text, peerID, "", meta)
 }
 
-func (s *Server) interopRecordText(protocol, action, text, peerID, existingID string) (map[string]any, error) {
-	action = strings.ToLower(strings.TrimSpace(action))
+func (s *Server) interopRecordText(protocol, action, text, peerID, existingID string, meta map[string]any) (map[string]any, error) {
+	action = interopNormalizeAction(action)
 	switch action {
 	case "ask", "delegate", "share_context", "task_status":
 	default:
-		action = "ask"
+		// spend/send/delete and anything else still go through decide().
 	}
-	// Money, send, and delete always need the owner — never auto-run.
 	state := "TASK_STATE_SUBMITTED"
 	reason := "queued"
-	switch action {
-	case "spend", "send", "delete", "irreversible", "transact", "communicate":
-		state = "TASK_STATE_INPUT_REQUIRED"
-		reason = "money, send, and delete always need the owner"
-	}
+	trust := "unverified"
 	// Guards first — they take interopMu themselves.
-	if err := s.interopGuards(peerID, text); err != "" {
+	if err := s.interopGuards(peerID, text, meta); err != "" {
 		state = "TASK_STATE_REJECTED"
 		reason = err
+	} else {
+		peer := s.interopLoadPeer(peerID)
+		trust = interopTrustLevel(peer, meta)
+		decision := interopDecide(action, peer, trust, interopTrustPolicy(s.interopCfg()))
+		action = decision.Action
+		reason = decision.Reason
+		trust = decision.Trust
+		switch decision.Outcome {
+		case "need_approval":
+			state = "TASK_STATE_INPUT_REQUIRED"
+		case "deny":
+			state = "TASK_STATE_REJECTED"
+		default:
+			state = "TASK_STATE_SUBMITTED"
+		}
 	}
 	interopMu.Lock()
 	defer interopMu.Unlock()
@@ -515,6 +581,9 @@ func (s *Server) interopRecordText(protocol, action, text, peerID, existingID st
 	}
 	id := uuid.NewString()
 	ctx := uuid.NewString()
+	if cid := stringVal(meta, "contextId", "context_id"); cid != "" {
+		ctx = cid
+	}
 	now := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	msg := a2aUserMessage(text)
 	task := map[string]any{
@@ -528,6 +597,8 @@ func (s *Server) interopRecordText(protocol, action, text, peerID, existingID st
 			"action":     action,
 			"created_ts": float64(time.Now().Unix()),
 			"reason":     reason,
+			"trust":      trust,
+			"hop":        interopHopCount(meta),
 		},
 	}
 	store[id] = task
@@ -537,13 +608,15 @@ func (s *Server) interopRecordText(protocol, action, text, peerID, existingID st
 	return task, nil
 }
 
-func (s *Server) interopGuards(peerID, text string) string {
+func (s *Server) interopGuards(peerID, text string, meta map[string]any) string {
 	cfg := s.interopCfg()
 	hopLimit := resolveAdvancedInt(cfg, "interop_hop_limit")
 	if hopLimit <= 0 {
 		hopLimit = 3
 	}
-	// metadata hop is checked by caller; rate and loop live here.
+	if hops := interopHopCount(meta); hops >= hopLimit {
+		return fmt.Sprintf("hop limit %d exceeded", hopLimit)
+	}
 	rateLimit := resolveAdvancedInt(cfg, "interop_rate_per_min")
 	if rateLimit <= 0 {
 		rateLimit = 30
@@ -683,13 +756,21 @@ func (s *Server) interopCancelTask(id string) (map[string]any, string) {
 	task["status"] = map[string]any{"state": "TASK_STATE_CANCELED", "timestamp": now}
 	store[id] = task
 	s.saveInteropTasks(store)
+	s.interopCancelLive(id)
 	return task, ""
 }
 
 func (s *Server) appendInteropAudit(protocol, direction, peerID, action, summary, taskID string) {
+	s.appendInteropAuditExtra(protocol, direction, peerID, action, summary, map[string]any{"task_id": taskID})
+}
+
+func (s *Server) appendInteropAuditExtra(protocol, direction, peerID, action, summary string, extra map[string]any) {
 	cfg := s.interopCfg()
 	if !coerceBool(resolveAdvanced(advancedByKey()["interop_audit"], cfg), true) {
 		return
+	}
+	if extra == nil {
+		extra = map[string]any{}
 	}
 	path := filepath.Join(s.interopDir(), "audit.jsonl")
 	entry, _ := json.Marshal(map[string]any{
@@ -699,7 +780,7 @@ func (s *Server) appendInteropAudit(protocol, direction, peerID, action, summary
 		"peer_id":   peerID,
 		"action":    action,
 		"summary":   redactInteropText(summary),
-		"extra":     map[string]any{"task_id": taskID},
+		"extra":     extra,
 	})
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -830,4 +911,3 @@ func redactInteropText(s string) string {
 	s = strings.ReplaceAll(s, os.Getenv(interopTokenEnv), "***")
 	return s
 }
-

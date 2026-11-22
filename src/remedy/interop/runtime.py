@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 import uuid
 from typing import Any, Callable
 
@@ -42,15 +44,22 @@ class InteropRuntime:
         public_url: str | None = None,
         listen_host: str | None = None,
         inbound_enabled: bool | None = None,
+        turn_client: Callable[[str, dict[str, Any]], str] | None = None,
+        turn_timeout_s: float | None = None,
     ) -> None:
         self.home = str(resolve_home(home))
         self.cfg = cfg if isinstance(cfg, dict) else {}
         self.responder = responder
+        self.turn_client = turn_client
+        self._turn_timeout_s = turn_timeout_s
         self._verifier_override = verifier
         self.public_url = public_url or "http://127.0.0.1:7400/a2a"
         self._listen_host = listen_host
         self._inbound_override = inbound_enabled
         self._mcp = None  # lazy RemedyMCPServer-compatible handle
+        self._live_mu = threading.Lock()
+        self._live_active = 0
+        self._live_cv = threading.Condition(self._live_mu)
 
     # --- knobs -------------------------------------------------------------
 
@@ -76,7 +85,18 @@ class InteropRuntime:
         return resolve_bool("interop_mcp", self.cfg)
 
     def auto_reply(self) -> bool:
+        # The knob defaults to on, but is inert until inbound itself is enabled.
+        if not self.inbound_enabled():
+            return False
         return resolve_bool("interop_auto_reply", self.cfg)
+
+    def max_concurrent(self) -> int:
+        return max(1, int(resolve_int("interop_max_concurrent", self.cfg)))
+
+    def turn_timeout_s(self) -> float:
+        if self._turn_timeout_s is not None:
+            return max(0.05, float(self._turn_timeout_s))
+        return max(1.0, float(resolve_int("interop_task_ttl_s", self.cfg)))
 
     def require_token(self) -> bool:
         # Inbound HTTP always requires a token once inbound is on.
@@ -304,13 +324,16 @@ class InteropRuntime:
                 "task_id": task["id"],
                 "state": taskstore.REJECTED,
             }
-        if decision.outcome == "need_approval" or not self.auto_reply() or self.responder is None:
+        if decision.outcome == "need_approval" or not self.auto_reply() or not self._can_live_reply():
             state = taskstore.INPUT_REQUIRED if decision.outcome == "need_approval" else taskstore.SUBMITTED
             task = self._new_task(action, text, peer_id, decision, metadata=metadata, state=state)
-            english, _ = for_peer(
-                "Queued for the owner." if decision.outcome == "need_approval"
-                else "Received and queued. Automatic replies are off."
-            )
+            if decision.outcome == "need_approval":
+                note = "Queued for the owner."
+            elif not self.auto_reply():
+                note = "Received and queued. Automatic replies are off."
+            else:
+                note = "Received and queued. Start Remedy serve for live answers."
+            english, _ = for_peer(note)
             self._audit("in", protocol, peer_id, action, text, {"task_id": task["id"], "decision": decision.outcome})
             return {
                 "ok": True,
@@ -321,15 +344,21 @@ class InteropRuntime:
                 "state": state,
                 "text": english,
             }
-        # auto-reply via injectable responder (tests, or a future session hook)
+        # Live answer: injectable responder, turn_client, or the local runtime.
         task = self._new_task(action, text, peer_id, decision, metadata=metadata, state=taskstore.WORKING)
+        payload = {"action": action, "peer_id": peer_id, "task_id": task["id"], "metadata": metadata or {}}
         try:
-            reply = self.responder(text, {"action": action, "peer_id": peer_id, "task_id": task["id"]})
+            reply = self._live_reply(text, payload)
+        except TimeoutError as exc:
+            store = taskstore.load(self.home)
+            taskstore.update_state(store, task["id"], taskstore.FAILED, home=self.home, message=text_message(str(exc)))
+            self._audit("out", protocol, peer_id, action, str(exc), {"task_id": task["id"], "failed": True, "timeout": True})
+            return {"ok": False, "error": "live reply timed out", "task_id": task["id"], "state": taskstore.FAILED}
         except Exception as exc:
             store = taskstore.load(self.home)
             taskstore.update_state(store, task["id"], taskstore.FAILED, home=self.home, message=text_message(str(exc)))
             self._audit("out", protocol, peer_id, action, str(exc), {"task_id": task["id"], "failed": True})
-            return {"ok": False, "error": "responder failed", "task_id": task["id"], "state": taskstore.FAILED}
+            return {"ok": False, "error": "live reply failed", "task_id": task["id"], "state": taskstore.FAILED}
         english, structured = for_peer(str(reply), home=self.home)
         artifact = {
             "artifactId": str(uuid.uuid4()),
@@ -344,7 +373,7 @@ class InteropRuntime:
             message=text_message(english, context_id=task.get("contextId")),
             artifact=artifact,
         )
-        self._audit("out", protocol, peer_id, action, english, {"task_id": task["id"]})
+        self._audit("out", protocol, peer_id, action, english, {"task_id": task["id"], "live": True})
         return {
             "ok": True,
             "queued": False,
@@ -354,6 +383,108 @@ class InteropRuntime:
             "data": structured,
             "task": updated,
         }
+
+    def _can_live_reply(self) -> bool:
+        if self.responder is not None or self.turn_client is not None:
+            return True
+        return self._local_runtime_available()
+
+    def _acquire_live_slot(self, timeout_s: float) -> bool:
+        deadline = time.monotonic() + timeout_s
+        with self._live_cv:
+            while self._live_active >= self.max_concurrent():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._live_cv.wait(timeout=remaining)
+            self._live_active += 1
+            return True
+
+    def _release_live_slot(self) -> None:
+        with self._live_cv:
+            if self._live_active > 0:
+                self._live_active -= 1
+            self._live_cv.notify()
+
+    def _live_reply(self, text: str, payload: dict[str, Any]) -> str:
+        timeout_s = self.turn_timeout_s()
+        if not self._acquire_live_slot(timeout_s):
+            raise TimeoutError("timed out waiting for a live-reply slot")
+        try:
+            return self._call_with_timeout(lambda: self._invoke_live(text, payload), timeout_s)
+        finally:
+            self._release_live_slot()
+
+    def _invoke_live(self, text: str, payload: dict[str, Any]) -> str:
+        if self.responder is not None:
+            return str(self.responder(text, payload))
+        if self.turn_client is not None:
+            return str(self.turn_client(text, payload))
+        return self._try_local_runtime_turn(text, payload)
+
+    def _call_with_timeout(self, fn: Callable[[], str], timeout_s: float) -> str:
+        box: dict[str, Any] = {}
+
+        def run() -> None:
+            try:
+                box["v"] = fn()
+            except Exception as exc:  # noqa: BLE001 — surface to waiter
+                box["e"] = exc
+
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+        worker.join(timeout_s)
+        if worker.is_alive():
+            raise TimeoutError("live reply timed out")
+        if "e" in box:
+            raise box["e"]
+        return str(box.get("v") or "")
+
+    def _local_runtime_url(self) -> str:
+        return "http://127.0.0.1:7400/interop/turn"
+
+    def _local_runtime_available(self) -> bool:
+        # Cheap TCP probe — we do not send the token until we actually turn.
+        import socket
+
+        try:
+            with socket.create_connection(("127.0.0.1", 7400), timeout=0.15):
+                return True
+        except OSError:
+            return False
+
+    def _try_local_runtime_turn(self, text: str, payload: dict[str, Any]) -> str:
+        import urllib.error
+        import urllib.request
+
+        token = resolve_token(self.home, create=False)
+        body = json.dumps(
+            {
+                "text": text,
+                "action": payload.get("action") or "ask",
+                "peer_id": payload.get("peer_id") or "",
+                "task_id": payload.get("task_id") or "",
+                "protocol": "mcp",
+                "context_id": (payload.get("metadata") or {}).get("contextId") or "",
+            }
+        ).encode("utf-8")
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if token:
+            headers["Authorization"] = "Bearer " + token
+        req = urllib.request.Request(self._local_runtime_url(), data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=self.turn_timeout_s()) as resp:
+                raw = resp.read().decode("utf-8")
+        except urllib.error.URLError as exc:
+            raise RuntimeError("live runtime is not reachable") from exc
+        data = json.loads(raw) if raw else {}
+        if not isinstance(data, dict):
+            raise RuntimeError("live runtime returned an unexpected payload")
+        if data.get("text"):
+            return str(data["text"])
+        if data.get("ok"):
+            return ""
+        raise RuntimeError(str(data.get("error") or "live runtime declined the turn"))
 
     # --- A2A ---------------------------------------------------------------
 
