@@ -7,6 +7,7 @@ import {
   type UpdateInfo,
 } from '../api/updates'
 import { isTauri } from '../api/tauri'
+import { getSettings } from '../api/settings'
 
 const CHECK_INTERVAL = 30 * 60 * 1000 // 30 minutes
 
@@ -209,6 +210,23 @@ export function useUpdateChecker(options?: { ready?: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const autoUpdatesEnabled = useCallback(async () => {
+    try {
+      const s = await getSettings()
+      const mode = String(s.update_check || 'auto').trim().toLowerCase()
+      // ask / manual / off: no launch or background check. Manual check() still works.
+      return !['ask', 'manual', 'off'].includes(mode)
+    } catch {
+      return true
+    }
+  }, [])
+
+  const maybeAutoCheck = useCallback(async () => {
+    if (await autoUpdatesEnabled()) {
+      await check()
+    }
+  }, [autoUpdatesEnabled, check])
+
   useEffect(() => {
     // Wait until the shell is ready (sidecar up) so launch check is real, not a
     // silent miss during "connecting". Was 25s from mount — felt like "never".
@@ -220,12 +238,12 @@ export function useUpdateChecker(options?: { ready?: boolean }) {
       didLaunchCheckRef.current = true
       // Short settle so settings/sessions bind first; still clearly "on launch".
       launchTimer = window.setTimeout(() => {
-        void check()
+        void maybeAutoCheck()
       }, 2_000)
     }
 
     intervalRef.current = window.setInterval(() => {
-      void check()
+      void maybeAutoCheck()
     }, CHECK_INTERVAL)
     return () => {
       if (launchTimer != null) window.clearTimeout(launchTimer)
@@ -234,7 +252,7 @@ export function useUpdateChecker(options?: { ready?: boolean }) {
         intervalRef.current = null
       }
     }
-  }, [check, ready])
+  }, [maybeAutoCheck, ready])
 
   return {
     updateInfo,

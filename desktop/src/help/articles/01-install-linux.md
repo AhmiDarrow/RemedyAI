@@ -60,8 +60,8 @@ Do **not** launch a Windows `remedy.exe` via `/mnt/c` as the sidecar. The Linux 
 ## First launch
 
 1. Start the app (or `remedy serve` + open the WebUI).
-2. Finish the setup wizard (or Skip — you can open Setup later).
-3. Add a provider key or sign in with xAI from Settings. Google OAuth uses **this** sign-in, not a leftover linked account.
+2. On a fresh desktop install, **Getting Remedy’s mind ready** downloads and verifies the local mind, then Remedy starts a short setup conversation. **Traditional setup** is always available. See [SETUP.md](../SETUP.md) and [First run](02-first-run.md).
+3. Add a provider key during that conversation (or later in Settings). Google OAuth uses **this** sign-in, not a leftover linked account. Skip uses the defaults.
 
 Data stays in `~/.remedy` on the Linux filesystem. If you share a home with Windows (`/mnt/c/Users/…/.remedy`), Linux will **not** overwrite the Windows DPAPI token; it writes `local_api_token.posix` beside it.
 
@@ -78,5 +78,6 @@ Data stays in `~/.remedy` on the Linux filesystem. If you share a home with Wind
 ## See also
 
 - [Install (Windows)](01-install-windows.md)
+- [SETUP.md](../SETUP.md)
 - [First run](02-first-run.md)
 - [Troubleshooting](09-troubleshooting.md)

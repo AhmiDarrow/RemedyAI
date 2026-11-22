@@ -143,6 +143,8 @@ export interface Settings {
   version: string
   config_exists: boolean
   setup_completed: boolean
+  /** auto = check in the background; ask = only when you check */
+  update_check?: string
   needs_setup?: boolean
   llm_ready?: boolean
   xai_auth?: XaiAuthInfo
@@ -259,6 +261,8 @@ export interface SettingsUpdate {
   ui_language?: string
   persona?: string
   setup_completed?: boolean
+  /** auto | ask */
+  update_check?: string
   access_scope?: string
   launch_at_login?: boolean
   start_in_tray?: boolean

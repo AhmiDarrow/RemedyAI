@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,7 +125,7 @@ func TestSettingsGetKeysFilter(t *testing.T) {
 
 func TestSettingsPatchSafeFields(t *testing.T) {
 	s, reg := newSettingsToolsServer(t)
-	body := execSettingsTool(t, reg, "settings.patch", `{"patch":{"approval_mode":"auto","web_tools_enabled":false}}`)
+	body := execSettingsTool(t, reg, "settings.patch", `{"patch":{"approval_mode":"auto","web_tools_enabled":false},"confirm":true}`)
 	if body["ok"] != true {
 		t.Fatalf("patch=%v", body)
 	}
@@ -160,7 +161,7 @@ func TestSettingsPatchRefusesSecrets(t *testing.T) {
 func TestSettingsPatchPartialRefuseKeepsSafe(t *testing.T) {
 	s, reg := newSettingsToolsServer(t)
 	body := execSettingsTool(t, reg, "settings.patch",
-		`{"patch":{"approval_mode":"full","llm_api_key":"sk-nope","messengers":{"telegram":{"bot_token":"t"}}}}`)
+		`{"patch":{"approval_mode":"full","llm_api_key":"sk-nope","messengers":{"telegram":{"bot_token":"t"}}},"confirm":true}`)
 	if body["ok"] != true {
 		t.Fatalf("partial patch=%v", body)
 	}
@@ -222,3 +223,36 @@ func TestAttachSettingsToolsIdempotent(t *testing.T) {
 	}
 }
 
+
+func TestSettingsPatchSensitiveNeedsConfirm(t *testing.T) {
+	s, reg := newSettingsToolsServer(t)
+	body := execSettingsTool(t, reg, "settings.patch", `{"patch":{"approval_mode":"full"}}`)
+	if body["needs_confirmation"] != true {
+		t.Fatalf("expected needs_confirmation: %v", body)
+	}
+	if s.settingsPayload()["approval_mode"] == "full" {
+		t.Fatal("sensitive patch applied without confirm")
+	}
+	body = execSettingsTool(t, reg, "settings.patch", `{"patch":{"approval_mode":"full"},"confirm":true}`)
+	if body["ok"] != true {
+		t.Fatalf("confirm should apply: %v", body)
+	}
+	if s.settingsPayload()["approval_mode"] != "full" {
+		t.Fatalf("approval_mode=%v", s.settingsPayload()["approval_mode"])
+	}
+}
+
+func TestSettingsPatchRefusesPeerOrigin(t *testing.T) {
+	s, reg := newSettingsToolsServer(t)
+	body := execSettingsTool(t, reg, "settings.patch",
+		`{"patch":{"persona":"playful"},"caller_origin":"a2a:peer-1"}`)
+	if body["ok"] != false {
+		t.Fatalf("peer must be refused: %v", body)
+	}
+	if !strings.Contains(fmt.Sprint(body["error"]), "peers cannot change") {
+		t.Fatalf("error=%v", body["error"])
+	}
+	if s.settingsPayload()["persona"] == "playful" {
+		t.Fatal("peer patch was applied")
+	}
+}

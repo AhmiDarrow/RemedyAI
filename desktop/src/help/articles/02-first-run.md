@@ -1,19 +1,42 @@
-# First run & Setup wizard
+# First run & setup
 
-The **Setup wizard** is the desktop first-run experience. The CLI setup wizard is skipped when the desktop sidecar starts (`--skip-setup`) so the API is always available for the UI.
+A new install only copies the app files. The first time you open Remedy, the
+app downloads and verifies her local mind with a progress bar (**Getting
+Remedy’s mind ready**). As soon as the mind is ready, she starts a short
+conversation to set house rules and the rest of first-run (provider, workspace,
+language, and the other topics listed in [HOUSE_RULES.md](../HOUSE_RULES.md)).
 
-## When the wizard appears
+**Traditional setup** is always on screen if you would rather use the form.
+You can switch back and forth without losing answers. Skipped items use the
+defaults. If the mind cannot start (not enough memory, or a failed download
+or verify — a missing GPU is fine), Traditional setup opens with an
+explanation and a retry. See [SETUP.md](../SETUP.md) for the full path.
+
+The CLI setup wizard is skipped when the desktop sidecar starts
+(`--skip-setup`) so the API is always available for the UI. That marks
+onboarding inherited and does not nag later.
+
+## When setup appears
 
 Setup opens when **any** of these is true:
 
-- No `config.toml` yet  
-- `setup_completed = false`  
-- Config file is **corrupt / unreadable** (e.g. bad TOML after an older bug)  
-- Settings cannot load yet on a fresh install (wizard still opens so you are not stuck)
+- No `config.toml` yet
+- `setup_completed = false`
+- Config file is **corrupt / unreadable** (e.g. bad TOML after an older bug)
+- Settings cannot load yet on a fresh install (setup still opens so you are not stuck)
 
-After you finish or **Skip**, `setup_completed = true` is written and the wizard will not auto-show again.
+After you finish or **Skip**, `setup_completed = true` is written and setup will not auto-show again. You can still say “let’s go over house rules again,” or run `/house-rules`.
 
-## Wizard steps
+## Conversation (default)
+
+Remedy greets you and walks through the topics. Every question is skippable;
+**Skip all, use defaults** applies defaults plus anything you already answered.
+**Looks good — use these** confirms the summary and enters the app.
+
+## Traditional setup (form)
+
+The form below is the same settings, in the older step-by-step wizard. Use
+**Talk with Remedy instead** to return to the conversation.
 
 ### 1. Welcome
 
@@ -69,7 +92,7 @@ tray icon at login.
 
 ## Skip setup
 
-Skip marks setup complete without a provider. Chat stays offline until you configure **Settings → Provider**. Use Skip if you want to explore the UI first.
+Skip (conversation or form) marks setup complete without a provider. Chat stays offline until you configure **Settings → Provider**. Use Skip if you want to explore the UI first.
 
 ## Error screen: Open setup
 

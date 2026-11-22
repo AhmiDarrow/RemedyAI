@@ -146,6 +146,7 @@ SETTABLE_KEYS = frozenset(
         "last_model_by_provider",
         "skills_active_budget",
         "browser_home_url",
+        "update_check",
         "enabled_channels",
         "messengers",
         "assistant",
@@ -244,6 +245,11 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "project_path": raw.get("project_path") or "",
         "access_scope": raw.get("access_scope", "project"),
         "launch_at_login": bool(raw.get("launch_at_login", False)),
+        "update_check": (
+            "ask"
+            if str(raw.get("update_check") or "auto").strip().lower() in ("ask", "manual", "off")
+            else "auto"
+        ),
         "start_in_tray": bool(raw.get("start_in_tray", False)),
         "close_to_tray": bool(raw.get("close_to_tray", False)),
         "harness_mode": raw.get("harness_mode", "auto"),
@@ -733,6 +739,10 @@ async def _apply_settings_update_inner(
 
     if "setup_completed" in patch and patch["setup_completed"] is not None:
         patch["setup_completed"] = _as_bool(patch["setup_completed"])
+
+    if "update_check" in patch and patch["update_check"] is not None:
+        uc = str(patch["update_check"]).strip().lower()
+        patch["update_check"] = "ask" if uc in ("ask", "manual", "off") else "auto"
 
     if "launch_at_login" in patch and patch["launch_at_login"] is not None:
         patch["launch_at_login"] = _as_bool(patch["launch_at_login"])

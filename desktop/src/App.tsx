@@ -49,8 +49,8 @@ const SettingsPanel = lazy(() =>
 const HelpPanel = lazy(() =>
   import('./components/HelpPanel').then((m) => ({ default: m.HelpPanel })),
 )
-const SetupWizard = lazy(() =>
-  import('./components/SetupWizard').then((m) => ({ default: m.SetupWizard })),
+const SetupFlow = lazy(() =>
+  import('./components/SetupFlow').then((m) => ({ default: m.SetupFlow })),
 )
 const UpdateScreen = lazy(() =>
   import('./components/UpdateScreen').then((m) => ({ default: m.UpdateScreen })),
@@ -1544,7 +1544,7 @@ export default function App() {
             </div>
           }
         >
-          <SetupWizard
+          <SetupFlow
             open={showSetupWizard}
             onComplete={() => {
               setShowSetupWizard(false)

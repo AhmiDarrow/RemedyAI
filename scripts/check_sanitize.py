@@ -41,6 +41,8 @@ PUBLIC_TOP_LEVEL_DOCS = frozenset(
         "INFERENCE_ENGINE_BENCHMARKS.md",
         "AGENT_INTEROP.md",
         "RMB.md",
+        "HOUSE_RULES.md",
+        "SETUP.md",
     }
 )
 

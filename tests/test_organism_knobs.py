@@ -42,6 +42,9 @@ def test_defaults_match_production_constants() -> None:
     assert table["always_send_images"] is False
     assert table["interop_inbound"] is False
     assert table["interop_trust_policy"] == "gated"
+    assert table["onboarding"] is True
+    assert table["onboarding_reask"] is False
+    assert table["house_rules_permission"] == "confirm_sensitive"
 
 
 def test_advanced_table_overrides_take_effect() -> None:
