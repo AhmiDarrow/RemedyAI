@@ -155,6 +155,7 @@ SETTABLE_KEYS = frozenset(
         "connect_paused",
         "connect_panes",
         "connect_relay_url",
+        "advanced",
     }
 )
 
@@ -303,6 +304,10 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "connect_panes": _connect_panes_public(raw.get("connect_panes")),
         "connect_relay_url": str(raw.get("connect_relay_url") or "").strip(),
     }
+    from remedy.core.organism_knobs import effective_table, schema as knobs_schema
+
+    out["advanced"] = effective_table(raw)
+    out["advanced_schema"] = knobs_schema()
     # Live device list is owned by remedy-runtime (Go Connect store).
     out["connect_devices"] = []
     # Live Sleev install/gateway so agent can configure + report status.
@@ -735,6 +740,11 @@ async def _apply_settings_update_inner(
         patch["start_in_tray"] = _as_bool(patch["start_in_tray"])
     if "close_to_tray" in patch and patch["close_to_tray"] is not None:
         patch["close_to_tray"] = _as_bool(patch["close_to_tray"])
+
+    if "advanced" in patch and patch["advanced"] is not None:
+        from remedy.core.organism_knobs import normalize_table
+
+        patch["advanced"] = normalize_table(patch["advanced"])
 
     incoming_key = patch.pop("llm_api_key", None)
     cfg.update(patch)

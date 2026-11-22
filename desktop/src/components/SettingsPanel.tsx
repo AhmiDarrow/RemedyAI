@@ -7,6 +7,7 @@ import {
   type MessengerInfo,
   type Settings,
   type SettingsUpdate,
+  type AdvancedKnobSchema,
 } from '../api/settings'
 import {
   getVisionStatus,
@@ -199,6 +200,8 @@ export function SettingsPanel({
   const [logLevel, setLogLevel] = useState('INFO')
   const [sarcasmMode, setSarcasmMode] = useState(false)
   const [claimidxPublicLedger, setClaimidxPublicLedger] = useState(true)
+  const [advanced, setAdvanced] = useState<Record<string, number | boolean>>({})
+  const [advancedSchema, setAdvancedSchema] = useState<AdvancedKnobSchema[]>([])
   const [toolProcess, setToolProcess] = useState<ToolProcessMode>(
     () => toolProcessMode || 'off',
   )
@@ -474,6 +477,8 @@ export function SettingsPanel({
       setSarcasmMode(Boolean(s.sarcasm_mode))
       // Default on (Claimidx submit-by-default); only explicit false opts out.
       setClaimidxPublicLedger(s.claimidx_public_ledger !== false)
+      setAdvanced((s.advanced && typeof s.advanced === 'object') ? { ...s.advanced } : {})
+      setAdvancedSchema(Array.isArray(s.advanced_schema) ? s.advanced_schema : [])
       setWebToolsEnabled(Boolean(s.web_tools_enabled))
       setHttpBootstrap(s.http_bootstrap === true)
       setPrivacyMode(Boolean(s.privacy_mode))
@@ -753,6 +758,7 @@ export function SettingsPanel({
       log_level: logLevel,
       sarcasm_mode: sarcasmMode,
       claimidx_public_ledger: claimidxPublicLedger,
+      advanced,
     }
     if (enabledProviders !== null) {
       const allIds = catalog.map((p) => p.id)
@@ -1340,6 +1346,9 @@ export function SettingsPanel({
               setSarcasmMode={setSarcasmMode}
               claimidxPublicLedger={claimidxPublicLedger}
               setClaimidxPublicLedger={setClaimidxPublicLedger}
+              advanced={advanced}
+              setAdvanced={setAdvanced}
+              advancedSchema={advancedSchema}
               toolProcess={toolProcess}
               setToolProcess={setToolProcess}
               onToolProcessChange={onToolProcessChange}

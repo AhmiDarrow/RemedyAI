@@ -452,7 +452,7 @@ func (r *CognitionTurnRunner) finishTurn(req TurnRequest, out cognition.Outcome)
 		return
 	}
 	defer func() { _ = recover() }()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), r.learnTimeout("turn_end_timeout_s", 30*time.Second))
 	defer cancel()
 	input := map[string]any{
 		"message":        req.Prompt,
@@ -488,7 +488,7 @@ func (r *CognitionTurnRunner) finishToolBatch(req TurnRequest, calls []cognition
 		return
 	}
 	defer func() { _ = recover() }()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), r.learnTimeout("after_tool_batch_timeout_s", 10*time.Second))
 	defer cancel()
 	input := map[string]any{
 		"session_id": req.SessionID,
@@ -872,8 +872,25 @@ func (r *CognitionTurnRunner) turnPolicy(req TurnRequest) cognition.Policy {
 	}
 }
 
+func (r *CognitionTurnRunner) learnTimeout(key string, fallback time.Duration) time.Duration {
+	if r == nil {
+		return fallback
+	}
+	d := resolveAdvancedSeconds(loadHomeConfig(r.HomeDir), key)
+	if d <= 0 {
+		return fallback
+	}
+	return d
+}
+
 func (r *CognitionTurnRunner) turnConfig(req TurnRequest) cognition.Config {
 	cfg := r.Config
+	if cfg.MaxResultChars <= 0 {
+		n := resolveAdvancedInt(loadHomeConfig(r.HomeDir), "max_result_chars")
+		if n > 0 {
+			cfg.MaxResultChars = n
+		}
+	}
 	if req.MaxIterations > 0 {
 		// Explicit budgets (e.g. hive foragers) are absolute ceilings only.
 		cfg.MaxIterations = req.MaxIterations

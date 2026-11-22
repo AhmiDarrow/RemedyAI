@@ -130,20 +130,30 @@ def recent_learn_runs(home: str | None, limit: int = 20) -> list[dict[str, Any]]
     return rows[-limit:]
 
 
+def _learn_log_caps() -> tuple[int, int]:
+    try:
+        from remedy.core.organism_knobs import resolve_int
+
+        return resolve_int("learn_log_max_bytes"), resolve_int("learn_log_max_lines")
+    except Exception:
+        return LEARN_LOG_MAX_BYTES, LEARN_LOG_MAX_LINES
+
+
 def _rotate_learn_log(path: Path) -> None:
     try:
         size = path.stat().st_size
     except OSError:
         return
-    if size <= LEARN_LOG_MAX_BYTES:
+    max_bytes, max_lines = _learn_log_caps()
+    if size <= max_bytes:
         return
     try:
         lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
     except OSError:
         return
-    if len(lines) <= LEARN_LOG_MAX_LINES // 2:
+    if len(lines) <= max_lines // 2:
         return
-    keep = lines[-LEARN_LOG_MAX_LINES:] if len(lines) > LEARN_LOG_MAX_LINES else lines[len(lines) // 2 :]
+    keep = lines[-max_lines:] if len(lines) > max_lines else lines[len(lines) // 2 :]
     try:
         from remedy.core.atomic_json import replace_with_retry, scratch_path
 

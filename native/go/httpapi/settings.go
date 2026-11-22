@@ -39,9 +39,9 @@ var settableKeys = map[string]struct{}{
 	"messengers": {}, "assistant": {},
 	"connect_enabled": {}, "connect_bind_host": {}, "connect_bind_port": {},
 	"connect_paused": {}, "connect_panes": {}, "connect_relay_url": {},
-	"connect_rdv_enabled": {},
+	"connect_rdv_enabled":  {},
 	"connect_iroh_enabled": {}, "connect_iroh_port": {}, "connect_iroh_relay_mode": {},
-	"connect_iroh_relay_url": {}, "connect_iroh_punch": {},
+	"connect_iroh_relay_url": {}, "connect_iroh_punch": {}, "advanced": {},
 }
 
 var knownMessengers = map[string]struct{}{
@@ -401,6 +401,9 @@ func normalizeSettingsPatch(patch, cfg ConfigMap) {
 		}
 	}
 	delete(patch, "show_tool_calls")
+	if v, ok := patch["advanced"]; ok && v != nil {
+		patch["advanced"] = normalizeAdvancedTable(v)
+	}
 
 	for _, flag := range []string{
 		"web_tools_enabled", "http_bootstrap", "privacy_mode",
@@ -739,6 +742,8 @@ func (s *Server) settingsPayload() map[string]any {
 			"harness":     "remedy",
 		},
 	}
+	out["advanced"] = advancedTable(cfg)
+	out["advanced_schema"] = advancedSchema()
 	for k, v := range generationSettingsView(cfg) {
 		out[k] = v
 	}

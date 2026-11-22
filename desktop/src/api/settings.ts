@@ -9,6 +9,20 @@ export interface XaiAuthInfo {
   expires_at?: number | null
 }
 
+export type AdvancedKnobKind = 'int' | 'float' | 'bool'
+
+export interface AdvancedKnobSchema {
+  key: string
+  default: number | boolean
+  kind: AdvancedKnobKind
+  min?: number | null
+  max?: number | null
+  unit?: string
+  group?: string
+  help?: string
+  env?: string
+}
+
 export interface Settings {
   llm_provider: string
   llm_model: string
@@ -103,6 +117,9 @@ export interface Settings {
   log_level?: string
   sarcasm_mode?: boolean
   claimidx_public_ledger?: boolean
+  /** Organism / token-budget knobs (Settings → Advanced). Effective values. */
+  advanced?: Record<string, number | boolean>
+  advanced_schema?: AdvancedKnobSchema[]
   /** Local visual decoder enabled in config */
   vision_enabled?: boolean
   vision_model_id?: string
@@ -276,6 +293,7 @@ export interface SettingsUpdate {
   log_level?: string
   sarcasm_mode?: boolean
   claimidx_public_ledger?: boolean
+  advanced?: Record<string, number | boolean>
   vision_enabled?: boolean
   vision_model_id?: string
   vision_force_decode?: boolean

@@ -1075,6 +1075,40 @@ claimidx_public_ledger = true
 # retention_log_days = 30
 # memory_encrypt = false       # SQLCipher when a cipher-linked sqlite is installed
 
+# Organism / token-budget knobs (Settings → Advanced; omit to keep defaults).
+# Also: REMEDY_NO_VOICE_EVOLUTION=1, REMEDY_REACT_MAX_RESULT_CHARS, and
+# [self_inject] idle_seconds still work and map onto these keys.
+# [advanced]
+# improve_tick_s = 60
+# improve_tick_min_s = 20
+# improve_tick_max_s = 900
+# improve_heavy_window_s = 300
+# turn_end_timeout_s = 30
+# after_tool_batch_timeout_s = 10
+# pulse_learn_timeout_s = 45
+# soul_inject_chars = 1400
+# max_result_chars = 24000
+# soul_max_bytes = 65536
+# residue_max_bytes = 262144
+# journal_max_bytes = 65536
+# learn_log_max_bytes = 262144
+# learn_log_max_lines = 400
+# max_episodes = 12
+# max_future_dreams = 8
+# max_phenotypes = 128
+# episode_recent_protect = 4
+# episode_halflife_days = 30.0
+# max_tensions = 16
+# max_self_lessons = 24
+# max_voice_markers = 12
+# max_open_threads = 10
+# vigil_offer_turns = 12
+# dream_cooldown_s = 120
+# organism_compact_every_s = 86400
+# organism_stall_after_s = 604800
+# voice_evolution = true
+# self_inject_idle_s = 300
+
 # Memory harness (chat compression)
 # harness_mode = "auto"     # off | manual | auto
 # harness_min_context_pct = 0.75
