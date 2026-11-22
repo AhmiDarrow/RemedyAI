@@ -1274,7 +1274,11 @@ class _Dispatcher:
         self._writer.send(_KIND_TOOL_RESULT, correlation, response)
 
     def shutdown(self) -> None:
-        self._pool.shutdown(wait=True, cancel_futures=True)
+        # Wait for tools already submitted. Cancelling pending futures would
+        # drop work the peer already sent if EOF arrives before a pool thread
+        # picks it up (the system-exit-then-next-tool test, and a real
+        # short-lived attach).
+        self._pool.shutdown(wait=True, cancel_futures=False)
 
 
 def serve(reader: BinaryIO, writer: BinaryIO) -> None:
