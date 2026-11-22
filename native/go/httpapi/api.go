@@ -121,6 +121,10 @@ type Server struct {
 
 	// partner is Remedy's head: children, routines, heartbeat, autopilot.
 	partner *partnerHub
+
+	// interopLive bounds concurrent inbound session turns and tracks
+	// in-flight task cancellation / SSE subscribers.
+	interopLive *interopLiveCtl
 }
 
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
@@ -156,27 +160,28 @@ func New(cfg Config) (*Server, error) {
 	}
 	home := ResolveHomeDir(homeDir)
 	s := &Server{
-		started:   time.Now(),
-		version:   version,
-		token:     token,
-		homeDir:   homeDir,
-		webUIDir:  strings.TrimSpace(cfg.WebUIDir),
-		mux:       http.NewServeMux(),
-		sessions:  store,
-		events:    newSessionEventHub(),
-		claims:    newStreamClaims(),
-		turns:     newTurnHub(),
-		runner:    cfg.TurnRunner,
-		voice:     cfg.VoiceWorker,
-		rmb:       cfg.RmbController,
-		vision:    cfg.VisionWorker,
-		hf:        newHFProgress(),
-		approvals: newApprovalQueue(),
-		lifeHub:   newLifeTaskHub(),
-		hiveMgr:   hive.New(context.Background(), 64),
-		hiveFS:    openHiveStore(home),
-		appCmd:    newAppControlBus(),
-		partner:   newPartnerHub(home),
+		started:     time.Now(),
+		version:     version,
+		token:       token,
+		homeDir:     homeDir,
+		webUIDir:    strings.TrimSpace(cfg.WebUIDir),
+		mux:         http.NewServeMux(),
+		sessions:    store,
+		events:      newSessionEventHub(),
+		claims:      newStreamClaims(),
+		turns:       newTurnHub(),
+		runner:      cfg.TurnRunner,
+		voice:       cfg.VoiceWorker,
+		rmb:         cfg.RmbController,
+		vision:      cfg.VisionWorker,
+		hf:          newHFProgress(),
+		approvals:   newApprovalQueue(),
+		lifeHub:     newLifeTaskHub(),
+		hiveMgr:     hive.New(context.Background(), 64),
+		hiveFS:      openHiveStore(home),
+		appCmd:      newAppControlBus(),
+		partner:     newPartnerHub(home),
+		interopLive: newInteropLiveCtl(),
 	}
 	_ = s.approvals.SyncFromConfig(LoadConfig(homeDir))
 	// What the owner was asked, and what they decided, belongs in the turn's
@@ -419,6 +424,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/telephony/status", s.handleTelephonyStatus)
 	s.mux.HandleFunc("POST /api/telephony/terms", s.handleTelephonyTerms)
 	s.mux.HandleFunc("POST /api/telephony/choose", s.handleTelephonyChoose)
+	s.mountInteropRoutes()
 	s.mountWebUI()
 	return s, nil
 }

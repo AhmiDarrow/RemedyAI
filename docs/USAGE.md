@@ -802,6 +802,17 @@ Available hooks: `on_startup`, `on_shutdown`, `pre_tool_exec`, `post_tool_exec`,
 
 ---
 
+
+## Talking with other bots
+
+Remedy can talk with your other bots (Claude, ChatGPT, Cursor, Grok Bot, and
+anyone who speaks A2A or MCP) as a peer, not as a model she runs. Inbound is
+off until you enable it in Settings → Advanced (`interop_inbound`). When it is
+on, it stays on localhost and needs a token. `remedy mcp serve` is the
+opt-in stdio server other apps can add as "talk to Remedy".
+
+Details, knobs, and the Agent Card path: [docs/AGENT_INTEROP.md](AGENT_INTEROP.md).
+
 ## Troubleshooting
 
 ### `[LLM ERROR — HTTP 400] … tool_calls must be followed by tool messages`

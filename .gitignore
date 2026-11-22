@@ -137,6 +137,7 @@ docs/*.md
 !docs/INNER_LANGUAGE_RESEARCH.md
 !docs/INFERENCE_ENGINE.md
 !docs/INFERENCE_ENGINE_BENCHMARKS.md
+!docs/AGENT_INTEROP.md
 docs/_*/
 docs/_*.json
 docs/*soak*
