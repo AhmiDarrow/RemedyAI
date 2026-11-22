@@ -95,9 +95,36 @@ pub fn status_bar(ui: &Ui, studio: Studio) -> El {
                 .align(Align::Center)
                 .gap(unit * 2.0)
                 .child(indicator)
-                .child(settings),
+                .child(settings)
+                .child(update_button(ui)),
         )
         .child(picker)
+}
+
+/// Quiet control. Absent from layout while no newer release is offered, so idle
+/// previews keep the same status row.
+fn update_button(ui: &Ui) -> El {
+    let u = ui.clone();
+    show(
+        ui,
+        || !crate::update::offer_signal().get().is_empty(),
+        move || {
+            let u = u.clone();
+            w::button(
+                &u,
+                {
+                    let u = u.clone();
+                    move || {
+                        let ver = crate::update::offer_signal().get();
+                        format!("{} {ver}", messages().text(&u, "status-update"))
+                    }
+                },
+                crate::update::press_offer,
+            )
+            .variant("quiet")
+        },
+    )
+    .el()
 }
 
 fn model_picker(ui: &Ui, studio: Studio) -> El {

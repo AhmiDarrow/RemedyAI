@@ -6,6 +6,6 @@ This is the first working surface: Studio session list, close-to-tray, single in
 
 - `cargo test` runs the app on the in-memory host and writes / checks previews in `tests/golden` (every palette, 1100×700). Copy those PNGs for visual review.
 - `cargo remedy run` runs a window; press F12 for the inspector. `--watch` rebuilds on save. Do not pop visible windows on a machine Joe is using.
-- `cargo remedy package` builds installers (`remedy.toml`). The Windows asset name, minisign key, NSIS `/S /UPDATE` and `~/.remedy` rules are unchanged; packaging is not this milestone.
+- Windows, Linux, and macOS packages are `packaging/package-windows.ps1`, `packaging/package-linux.sh`, and `packaging/package-macos.sh`. The 1.0 Windows artifact is NSIS (`Remedy.Desktop_{ver}_x64-setup.exe`), not the Inno Setup file from `cargo remedy package`. See `packaging/README.md` for `/S /UPDATE` and for how each platform is built. Those scripts do not tag or publish.
 
-The checkout of RemedyUI this crate depends on should include [PR #118](https://github.com/AhmiDarrow/RemedyUI/pull/118) (Protan / Deutan / Tritan names) and [PR #119](https://github.com/AhmiDarrow/RemedyUI/pull/119) (`Feed::Json` reads Tauri `latest.json`), merged to `main` at `3b3a026`.
+The RemedyUI pin is `main` at `7dec309` ([PR #118](https://github.com/AhmiDarrow/RemedyUI/pull/118) theme names, [PR #119](https://github.com/AhmiDarrow/RemedyUI/pull/119) `Feed::Json`, [PR #120](https://github.com/AhmiDarrow/RemedyUI/pull/120) AhmiPrint weights).
