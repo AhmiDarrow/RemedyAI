@@ -210,16 +210,30 @@ def mind_n_gpu_layers(
     requested: int | None = None,
     rmb_running: bool = False,
     cfg: dict[str, Any] | None = None,
+    plan: Any | None = None,
 ) -> int:
     """GPU layers for the mind host.
 
-    When RMB muscle is using the GPU, the mind yields and stays on CPU
-    (mmap keeps wake fast) unless mind_keep_gpu is on.
+    When local muscle is using the GPU, the VRAM planner decides whether
+    the mind keeps its layers, shares a split, or yields to CPU (mmap).
+    ``mind_keep_gpu`` / ``muscle_gpu_policy=keep_mind`` force a full mind
+    reservation. A caller that already computed a plan should pass it so
+    we do not probe hardware twice.
     """
     if requested is not None and int(requested) >= 0 and not rmb_running:
         return int(requested)
-    if rmb_running and not _knob_bool("mind_keep_gpu", False, cfg):
-        return 0
+    if rmb_running:
+        if plan is None:
+            try:
+                from remedy.runtime.rmb.coresidence import plan_coresidence
+
+                plan = plan_coresidence(cfg=cfg, rmb_running=True)
+            except Exception:
+                plan = None
+        if plan is not None:
+            return int(plan.mind_n_gpu_layers)
+        if not _knob_bool("mind_keep_gpu", False, cfg):
+            return 0
     if requested is not None:
         return int(requested)
     return -1

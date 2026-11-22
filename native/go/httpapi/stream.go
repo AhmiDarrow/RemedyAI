@@ -501,6 +501,7 @@ func (s *Server) runDetachedStream(
 		collectedToolResults []map[string]any
 		aborted              bool
 		persistDone          bool
+		answeredModel        *string
 		draftAt              = time.Now()
 		draftLen             int
 		writeFailed          bool
@@ -560,7 +561,7 @@ func (s *Server) runDetachedStream(
 			return
 		}
 		if _, err := s.sessions.UpsertDraftMessage(
-			sid, requestID, "assistant", body, thinkingPtr(), calls, results, req.Model,
+			sid, requestID, "assistant", body, thinkingPtr(), calls, results, firstNonEmptyPtr(answeredModel, req.Model),
 		); err != nil {
 			noteWriteFailure("draft", err)
 		}
@@ -577,7 +578,7 @@ func (s *Server) runDetachedStream(
 		persistDone = true
 		calls, results := toolLedger()
 		if _, err := s.sessions.FinalizeMessage(
-			sid, requestID, "assistant", content, thinkingPtr(), calls, results, req.Model, nil, nil,
+			sid, requestID, "assistant", content, thinkingPtr(), calls, results, firstNonEmptyPtr(answeredModel, req.Model), nil, nil,
 		); err != nil {
 			noteWriteFailure("assistant message", err)
 			return
@@ -651,6 +652,10 @@ func (s *Server) runDetachedStream(
 				}
 			}
 			ts.signal("progress", payload)
+		case strings.HasPrefix(token, "@@model:"):
+			if name := parseAnsweringModelToken(token); name != nil {
+				answeredModel = name
+			}
 		case strings.HasPrefix(token, "@@status:"):
 			ts.status(strings.TrimSpace(token[len("@@status:"):]))
 		case strings.HasPrefix(token, "@@steered"):
