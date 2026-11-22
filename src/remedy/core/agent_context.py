@@ -80,6 +80,12 @@ async def build_turn_context(runtime: Any) -> str:
             )
             if soul:
                 parts.append(soul)
+            with suppress(Exception):
+                from remedy.core.metabolism.alive import build_alive_inject
+
+                alive_blk = build_alive_inject(home)
+                if alive_blk:
+                    parts.append(alive_blk)
         with suppress(Exception):
             from remedy.core.react_policy import runtime_turn_is_chat_only
 
