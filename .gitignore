@@ -135,6 +135,8 @@ docs/*.md
 !docs/TOKEN_OPTIMIZATION.md
 !docs/INNER_LANGUAGE.md
 !docs/INNER_LANGUAGE_RESEARCH.md
+!docs/INFERENCE_ENGINE.md
+!docs/INFERENCE_ENGINE_BENCHMARKS.md
 docs/_*/
 docs/_*.json
 docs/*soak*

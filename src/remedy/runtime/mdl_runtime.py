@@ -144,7 +144,7 @@ def start_tier(
     n_gpu_layers: int | None = None,
     wait_s: float = 30.0,
 ) -> dict[str, Any]:
-    """Start a single tier's llama-server instance."""
+    """Start the unified mind host (all tiers share port 8740)."""
     tier = MDL_TIERS.get(tier_name)
     if tier is None:
         return {"ok": False, "error": f"Unknown tier: {tier_name}"}
@@ -156,62 +156,42 @@ def start_tier(
             "already_running": True,
             "base_url": get_tier_base_url(tier_name),
             "tier": tier_name,
+            "unified": True,
         }
-
-    host = DEFAULT_HOST
-    port = tier.port
-
-    # A child we already spawned may still be loading its weights. Spawning a
-    # second one would double the VRAM and race for the port; killing the first
-    # because it is slow would mean a tier that needs longer than wait_s can
-    # never come up. So wait on the one we have, and only ever spawn when the
-    # slot is empty or holds a corpse.
-    existing = _tier_procs.get(tier_name)
-    if existing is not None:
-        if existing.poll() is None:
-            return _await_ready(tier_name, existing, host, port, wait_s, already_running=True)
-        logger.info(
-            "MDL tier %s exited (code %s) before becoming ready; respawning",
-            tier_name,
-            existing.returncode,
-        )
-        _tier_procs[tier_name] = None
 
     binary = Path(runtime_binary)
     if not binary.is_file():
         return {"ok": False, "error": f"llama-server binary not found: {runtime_binary}"}
-
     mpath = Path(model_path)
     if not mpath.is_file():
         return {"ok": False, "error": f"Model file not found: {model_path}"}
     if mmproj_path and not Path(mmproj_path).is_file():
         return {"ok": False, "error": f"Vision projection file not found: {mmproj_path}"}
 
-    cmd: list[str] = [
-        str(binary),
-        "-m", str(model_path),
-        "--host", host,
-        "--port", str(port),
-        "--ctx-size", "4096",
-    ]
+    # One llama-server. Do not spawn extra processes on 8741/8742.
+    from remedy.vision.runtime import is_running as mind_running
+    from remedy.vision.runtime import start_server as start_mind
 
-    cmd.extend(["-ngl", str(n_gpu_layers) if n_gpu_layers is not None else str(tier.n_layers)])
-
-    if mmproj_path:
-        cmd.extend(["--mmproj", str(mmproj_path)])
-
-    from remedy.core.computer.host_binding import HostError
-    from remedy.execution.process import retain_detached, spawn_hidden
-    from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
-
-    logger.info("Starting MDL tier %s: %s", tier_name, " ".join(cmd))
-    try:
-        proc = retain_detached(spawn_hidden(cmd, cwd=str(binary.parent)))
-        _tier_procs[tier_name] = proc
-    except (OSError, HostError, NativeRuntimeUnavailableError, FileNotFoundError, ValueError) as e:
-        return {"ok": False, "error": f"Failed to start tier {tier_name}: {e}"}
-
-    return _await_ready(tier_name, proc, host, port, wait_s, already_running=False)
+    if mind_running(force=True, require_http=True):
+        mark_tier_used(tier_name)
+        return {
+            "ok": True,
+            "already_running": True,
+            "base_url": get_tier_base_url(tier_name),
+            "tier": tier_name,
+            "unified": True,
+        }
+    result = start_mind(
+        n_gpu_layers=n_gpu_layers if n_gpu_layers is not None else -1,
+        wait_s=wait_s,
+    )
+    if result.get("ok"):
+        mark_tier_used(tier_name)
+    out = dict(result)
+    out["tier"] = tier_name
+    out["unified"] = True
+    out.setdefault("base_url", get_tier_base_url(tier_name))
+    return out
 
 
 def _await_ready(

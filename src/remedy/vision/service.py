@@ -578,6 +578,7 @@ def _decode_images_queued(
                     "base_url": base_url,
                     "timeout_s": timeout_s,
                     "max_image_bytes": max_image_bytes,
+                    "as_digest": True,
                 },
                 priority=10,  # vision slightly ahead of nano classify
             )
@@ -656,46 +657,12 @@ def decode_for_turn(
 
         cfg_d = cfg if isinstance(cfg, dict) else None
         base_hint = str((cfg_d or {}).get("llm_base_url") or "")
+        # RMB muscle still gets a mind digest (not pixels) unless
+        # always_send_images or needs_pixels. Fall through to the digest path.
         if force_path_only_images(cfg_d, provider=provider, base_url=base_hint):
-            paths: list[str] = []
-            for a in atts:
-                mime = str(a.get("mime") or "")
-                if a.get("is_image") or mime.startswith("image/"):
-                    if "svg" in mime.lower():
-                        continue
-                    p = Path(str(a.get("path") or ""))
-                    if p.suffix.lower() == ".svg":
-                        continue
-                    paths.append(str(p))
-            if not paths:
-                return {
-                    "mode": "text_only",
-                    "briefs": [],
-                    "combined": "",
-                    "events": ["RMB local agent: no image attachments"],
-                    "hint": None,
-                }
-            listing = "\n".join(f"- {p}" for p in paths[:12])
-            return {
-                "mode": "text_only",
-                "briefs": [
-                    "[RMB] Image path(s) on disk — use tools "
-                    f"(read/list); SmolVLM is unloaded while RMB runs:\n{listing}"
-                ],
-                "combined": (
-                    "[RMB] Attached image file path(s) available on this machine. "
-                    "Inspect with tools if needed; SmolVLM is not loaded while RMB runs.\n"
-                    + listing
-                ),
-                "events": [
-                    "RMB local agent: skipped SmolVLM — images as local paths"
-                ],
-                "hint": None,
-            }
-        # Exclusive GPU: do not start Smol for cloud chat either — use native
+            pass
         if should_skip_vision_stack(cfg_d):
-            # Fall through with decoder treated unavailable; native path later
-            # if chat_has_vision. Mark skip so start_server is not attempted.
+            # Explicit park only — otherwise the mind stays available.
             pass
     except Exception:
         pass
@@ -744,16 +711,33 @@ def decode_for_turn(
     status = get_status(cfg)
     decoder_ready = bool(status.get("ready"))
 
-    # Prefer local decoder when asked — but never leave a vision-capable chat
-    # model blind if the decoder is missing/disabled.
+    # Default: the local mind writes a digest and muscle does not get pixels
+    # unless always_send_images or a digest sets needs_pixels.
+    # prefer_local / force_decode still takes the decode path.
+    try:
+        from remedy.runtime.media_digest import always_send_images as _always_pixels
+
+        send_pixels = bool(_always_pixels(cfg if isinstance(cfg, dict) else None))
+    except Exception:
+        send_pixels = False
     if prefer_local and decoder_ready:
-        pass  # fall through to decode
-    elif chat_has_vision and not prefer_local:
+        pass  # fall through to decode (digest-formatted)
+    elif chat_has_vision and not prefer_local and send_pixels:
         return {
             "mode": "native",
             "briefs": [],
             "combined": "",
-            "events": [],
+            "events": ["always_send_images: attaching original pixels"],
+            "hint": None,
+        }
+    elif chat_has_vision and not decoder_ready:
+        # Mind not ready — still attach pixels so a vision-capable chat model
+        # is not left blind. Digest is used once the mind is up.
+        return {
+            "mode": "native",
+            "briefs": [],
+            "combined": "",
+            "events": ["Local mind not ready — using provider vision"],
             "hint": None,
         }
     elif prefer_local and not decoder_ready and chat_has_vision:
@@ -890,12 +874,43 @@ def decode_for_turn(
                 )
 
     combined = "\n\n".join(b for b in briefs if b).strip()
+    needs_pixels = False
+    formatted: list[str] = []
+    try:
+        from remedy.runtime.media_digest import (
+            always_send_images,
+            format_digest_for_muscle,
+            parse_digest,
+        )
+
+        send_pixels = bool(always_send_images(cfg if isinstance(cfg, dict) else None))
+        for i, brief in enumerate(briefs):
+            digest = parse_digest(brief)
+            if digest.get("needs_pixels"):
+                needs_pixels = True
+            # path hint when we still have the images list
+            src = str(images[i]) if i < len(images) else ""
+            formatted.append(format_digest_for_muscle(digest, path=src))
+        if formatted and any(formatted):
+            briefs = formatted
+            combined = "\n\n".join(b for b in briefs if b).strip()
+    except Exception:
+        send_pixels = False
+        logger.debug("digest format failed; keeping raw briefs", exc_info=True)
+
+    mode = "decode"
+    if (needs_pixels or send_pixels) and chat_has_vision:
+        mode = "native"
+        events.append(
+            "needs_pixels or always_send_images — attaching original image to muscle"
+        )
     return {
-        "mode": "decode",
+        "mode": mode,
         "briefs": briefs,
         "combined": combined,
         "events": events,
         "hint": None,
+        "needs_pixels": needs_pixels,
     }
 
 

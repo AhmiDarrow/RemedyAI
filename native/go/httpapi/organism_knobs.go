@@ -73,6 +73,22 @@ var advancedKnobList = []advancedKnob{
 	{"inner_coinage_rate", 0.3, "float", 0, 1, "", "Inner language", "How freely she may coin terms on a given dream or reflection pass.", "", false},
 	{"inner_lexicon_cap", 128, "int", 8, 1024, "count", "Inner language", "Maximum coined terms. The seed core is not counted and cannot be pruned.", "", false},
 	{"inner_audit", true, "bool", 0, 0, "", "Inner language", "Keep an audit log of dense + decoded forms. The log cannot hide entries while the language is in use.", "", false},
+	{"mind_slots", 2, "int", 1, 8, "slots", "Local mind", "Parallel llama-server slots for concurrent inner tasks.", "", false},
+	{"mind_ctx", 8192, "int", 2048, 32768, "tokens", "Local mind", "Context tokens per slot for the unified 4B mind host.", "", false},
+	{"mind_flash_attn", true, "bool", 0, 0, "", "Local mind", "Enable flash attention on the local mind host.", "", false},
+	{"mind_kv_cache", "q8_0", "str", 0, 0, "", "Local mind", "KV cache type: q8_0 (default), f16, bf16, or f8_e4m3.", "", false},
+	{"mind_cache_prompt", true, "bool", 0, 0, "", "Local mind", "Reuse the prompt / prefix KV cache across calls (align with the Turn context marker).", "", false},
+	{"mind_cache_ram_mib", 4096, "int", 0, 32768, "MiB", "Local mind", "Prompt-cache RAM cap for llama-server. 0 disables the cache-ram cap.", "", false},
+	{"mind_mmap", true, "bool", 0, 0, "", "Local mind", "Memory-map the GGUF so idle-stop wake is a process start, not a full disk re-read.", "", false},
+	{"mind_spec", "auto", "str", 0, 0, "", "Local mind", "Speculative decoding: auto (MTP if present, else ngram-mod), draft-mtp, ngram-mod, or off.", "", false},
+	{"mind_spec_draft_n", 3, "int", 1, 8, "tokens", "Local mind", "Max draft tokens for speculative decoding.", "", false},
+	{"mind_image_max_tokens", 1024, "int", 64, 4096, "tokens", "Local mind", "Cap on vision tokens per image (--image-max-tokens).", "", false},
+	{"mind_thinking", false, "bool", 0, 0, "", "Local mind", "Allow Qwen thinking / <think> blocks on the local mind. Off by default.", "", false},
+	{"mind_json_schema", true, "bool", 0, 0, "", "Local mind", "Constrain tool-call arguments and media digests with JSON schema / grammar.", "", false},
+	{"mind_idle_stop_s", 600, "int", 0, 86400, "s", "Local mind", "Stop the mind host after this many idle seconds. 0 disables. Fast wake via mmap.", "", false},
+	{"mind_quant", "auto", "str", 0, 0, "", "Local mind", "Weight quant: auto (Q6_K, or Q4_K_M on weak machines), q6_k, or q4_k_m.", "", false},
+	{"mind_keep_gpu", false, "bool", 0, 0, "", "Local mind", "Keep the mind on the GPU even when RMB muscle is running. Off: mind yields to CPU.", "", false},
+	{"always_send_images", false, "bool", 0, 0, "", "Local mind", "Always attach original image pixels to frontier / RMB muscle. Off (default) sends a digest only.", "", false},
 }
 
 func advancedByKey() map[string]advancedKnob {
@@ -89,8 +105,23 @@ func coerceAdvanced(k advancedKnob, raw any) (any, bool) {
 	}
 	if k.Kind == "str" {
 		s := strings.ToLower(strings.TrimSpace(fmt.Sprint(raw)))
-		if k.Key == "inner_language_verbosity" && s != "off" && s != "natural" && s != "dense" {
-			s = "dense"
+		allowed := map[string][]string{
+			"inner_language_verbosity": {"off", "natural", "dense"},
+			"mind_kv_cache":            {"q8_0", "f16", "bf16", "f8_e4m3"},
+			"mind_spec":                {"auto", "draft-mtp", "mtp", "ngram-mod", "ngram", "off", "none"},
+			"mind_quant":               {"auto", "q6_k", "q6", "q4_k_m", "q4"},
+		}
+		if opts, ok := allowed[k.Key]; ok {
+			okVal := false
+			for _, o := range opts {
+				if s == o {
+					okVal = true
+					break
+				}
+			}
+			if !okVal {
+				s = strings.ToLower(fmt.Sprint(k.Default))
+			}
 		}
 		return s, true
 	}

@@ -125,6 +125,38 @@ KNOBS: tuple[Knob, ...] = (
          "Maximum coined terms. The seed core is not counted and cannot be pruned."),
     Knob("inner_audit", True, "bool", None, None, "", "Inner language",
          "Keep an audit log of dense + decoded forms. The log cannot hide entries while the language is in use."),
+    Knob("mind_slots", 2, "int", 1, 8, "slots", "Local mind",
+         "Parallel llama-server slots for concurrent inner tasks."),
+    Knob("mind_ctx", 8192, "int", 2048, 32768, "tokens", "Local mind",
+         "Context tokens per slot for the unified 4B mind host."),
+    Knob("mind_flash_attn", True, "bool", None, None, "", "Local mind",
+         "Enable flash attention on the local mind host."),
+    Knob("mind_kv_cache", "q8_0", "str", None, None, "", "Local mind",
+         "KV cache type: q8_0 (default), f16, bf16, or f8_e4m3."),
+    Knob("mind_cache_prompt", True, "bool", None, None, "", "Local mind",
+         "Reuse the prompt / prefix KV cache across calls (align with the Turn context marker)."),
+    Knob("mind_cache_ram_mib", 4096, "int", 0, 32768, "MiB", "Local mind",
+         "Prompt-cache RAM cap for llama-server. 0 disables the cache-ram cap."),
+    Knob("mind_mmap", True, "bool", None, None, "", "Local mind",
+         "Memory-map the GGUF so idle-stop wake is a process start, not a full disk re-read."),
+    Knob("mind_spec", "auto", "str", None, None, "", "Local mind",
+         "Speculative decoding: auto (MTP if present, else ngram-mod), draft-mtp, ngram-mod, or off."),
+    Knob("mind_spec_draft_n", 3, "int", 1, 8, "tokens", "Local mind",
+         "Max draft tokens for speculative decoding."),
+    Knob("mind_image_max_tokens", 1024, "int", 64, 4096, "tokens", "Local mind",
+         "Cap on vision tokens per image (--image-max-tokens)."),
+    Knob("mind_thinking", False, "bool", None, None, "", "Local mind",
+         "Allow Qwen thinking / <think> blocks on the local mind. Off by default."),
+    Knob("mind_json_schema", True, "bool", None, None, "", "Local mind",
+         "Constrain tool-call arguments and media digests with JSON schema / grammar."),
+    Knob("mind_idle_stop_s", 600, "int", 0, 86400, "s", "Local mind",
+         "Stop the mind host after this many idle seconds. 0 disables. Fast wake via mmap."),
+    Knob("mind_quant", "auto", "str", None, None, "", "Local mind",
+         "Weight quant: auto (Q6_K, or Q4_K_M on weak machines), q6_k, or q4_k_m."),
+    Knob("mind_keep_gpu", False, "bool", None, None, "", "Local mind",
+         "Keep the mind on the GPU even when RMB muscle is running. Off: mind yields to CPU."),
+    Knob("always_send_images", False, "bool", None, None, "", "Local mind",
+         "Always attach original image pixels to frontier / RMB muscle. Off (default) sends a digest only."),
 )
 
 KNOB_BY_KEY: dict[str, Knob] = {k.key: k for k in KNOBS}
@@ -149,8 +181,15 @@ def _coerce(knob: Knob, raw: Any) -> int | float | bool:
         return bool(raw)
     if knob.kind == "str":
         s = str(raw).strip().lower()
-        if knob.key == "inner_language_verbosity" and s not in ("off", "natural", "dense"):
-            return "dense"
+        allowed = {
+            "inner_language_verbosity": ("off", "natural", "dense"),
+            "mind_kv_cache": ("q8_0", "f16", "bf16", "f8_e4m3"),
+            "mind_spec": ("auto", "draft-mtp", "mtp", "ngram-mod", "ngram", "off", "none"),
+            "mind_quant": ("auto", "q6_k", "q6", "q4_k_m", "q4"),
+        }
+        opts = allowed.get(knob.key)
+        if opts and s not in opts:
+            return str(knob.default)
         return s
     if knob.kind == "float":
         val: int | float = float(raw)

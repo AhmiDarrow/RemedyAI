@@ -13,7 +13,7 @@ You (goals, taste, judgment)
    · Memory (facts that last)
    · Skills (procedures that improve)
    · Context budget & quality
-   · Local SmolVLM2 (when installed) — vision briefs, nano assist
+   · The local 4B mind (when installed) — vision briefs, nano assist
         │
         ▼
    Provider model (Grok / Claude / GPT / Ollama / …)
@@ -26,14 +26,14 @@ You (goals, taste, judgment)
 
 You should feel **Remedy**, not a network of agents. Internal workers (continuity layer / nanoswarm in code) measure, prune, rank, and distill — they do not compete for the microphone.
 
-**Local SmolVLM2** (when installed) is part of that efficiency story: image→text for any chat model, and background assist that would otherwise cost another paid call. See [Local model (SmolVLM2)](14-visual-decoder).
+**The local 4B mind** (when installed) is part of that efficiency story: image→text for any chat model, and background assist that would otherwise cost another paid call. See [Local mind (Qwen3.5-4B)](14-visual-decoder).
 
 ## What you get
 
 | Feeling | What is actually happening |
 |---------|----------------------------|
 | **Fast** | Hot path stays cheap: no mini-model debate on every keystroke |
-| **Cheaper** | Less tool sludge re-sent; local SmolVLM2 for vision/briefs when it helps |
+| **Cheaper** | Less tool sludge re-sent; the local 4B mind for vision/briefs when it helps |
 | **Accurate over long work** | Session Brief keeps intent, files, decisions, next steps |
 | **Same partner on any model** | Continuity lives on your PC, not in the vendor’s chat product |
 
@@ -87,6 +87,6 @@ You should return to progress, not a queue of clarifying questions.
 - [Memory & Memory Harness](06-memory-and-harness)  
 - [Partner Metabolism](19-metabolism) — turn tiers, evidence, governor, identity  
 - [Skills](07-skills)  
-- [Local vision](14-visual-decoder)  
+- [Local mind](14-visual-decoder)  
 - [Continuity workers (nano swarm)](17-nanoswarm) — operator detail  
 - [Security & data](04-security-and-data)  

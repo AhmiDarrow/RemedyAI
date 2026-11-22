@@ -1767,25 +1767,21 @@ def _set_vision_suspended(
 
 
 def _suspend_smolvlm(home_dir: str | Path | None = None) -> dict[str, Any]:
-    out: dict[str, Any] = {"stopped": False, "suspended": True}
-    try:
-        from remedy.vision.runtime import is_running as vision_running
-        from remedy.vision.runtime import stop_server as vision_stop
+    """Yield the unified mind's GPU layers so RMB muscle can use VRAM.
 
-        if vision_running(home_dir, force=True):
-            vision_stop(home_dir=home_dir)
-            out["stopped"] = True
-            logger.info("RMB: stopped SmolVLM/vision llama-server (exclusive host)")
+    The mind stays running (CPU / mmap). It is no longer unloaded.
+    """
+    out: dict[str, Any] = {"stopped": False, "suspended": False, "yielded": False}
+    try:
+        from remedy.vision.runtime import yield_mind_for_muscle
+
+        result = yield_mind_for_muscle(home_dir)
+        out["yielded"] = bool((result or {}).get("yielded"))
+        out["mind"] = result
+        logger.info("RMB: yielded local mind GPU layers (mind stays up)")
     except Exception as e:
         out["error"] = str(e)
-        logger.debug("RMB: vision stop failed: %s", e)
-    try:
-        from remedy.runtime.mdl_runtime import stop_all_tiers
-
-        stop_all_tiers()
-        out["mdl_stopped"] = True
-    except Exception:
-        pass
+        logger.debug("RMB: mind yield failed: %s", e)
     return out
 
 
@@ -1813,7 +1809,12 @@ def _resume_smolvlm_if_wanted(home_dir: str | Path | None = None) -> dict[str, A
         if not bool(vcfg.get("auto_start", True)):
             out["reason"] = "auto_start_off"
             return out
-        r = ensure_server(cfg if isinstance(cfg, dict) else None)
+        try:
+            from remedy.vision.runtime import restore_mind_gpu
+
+            r = restore_mind_gpu(home_dir)
+        except Exception:
+            r = ensure_server(cfg if isinstance(cfg, dict) else None)
         out["resumed"] = bool(r.get("ok"))
         out["server"] = r
     except Exception as e:
@@ -2012,7 +2013,7 @@ def start_rmb_server(
 ) -> dict[str, Any]:
     """Start RMB chat llama-server if not healthy.
 
-    Unloads SmolVLM first. On failure, clears vision_suspended.
+    Yields the local mind's GPU layers first (mind stays up). On failure, clears the park flag.
     Health wait does **not** hold the process lock so Stop can interrupt.
 
     Never returns ``already_running`` when the disk model_path differs from
@@ -2158,7 +2159,8 @@ def _start_rmb_server_impl(
                 _user_stopped = False
             else:
                 mark_used()
-                _set_vision_suspended(home_dir, True)
+                with contextlib.suppress(Exception):
+                    _suspend_smolvlm(home_dir)
                 with contextlib.suppress(Exception):
                     sync_context_window_cache(st_probe)
                 # Always re-align chat identity to the live GGUF (status bar / settings)
@@ -2175,7 +2177,7 @@ def _start_rmb_server_impl(
                     else st_probe.get("model_path"),
                     "chat_sync": chat_sync,
                     "chat_model": chat_sync.get("stem"),
-                    "vision_suspended": True,
+                    "vision_suspended": False,
                     "host_auto": prev_auto or want_profile,
                 }
         else:
@@ -2255,12 +2257,12 @@ def _start_rmb_server_impl(
         if managed_process_alive():
             # Another start in progress
             _mark_starting(float(wait_s) + 30)
-            return {"ok": True, "starting": True, "vision_suspended": True}
+            return {"ok": True, "starting": True, "vision_suspended": False}
 
         state = merge_state(load_rmb_json(home_dir))
         vision_suspend = _suspend_smolvlm(home_dir)
-        state["vision_suspended"] = True
-        state["vision_was_running"] = bool(vision_suspend.get("stopped"))
+        state["vision_suspended"] = False
+        state["vision_was_running"] = bool(vision_suspend.get("yielded") or vision_suspend.get("stopped"))
         save_rmb_json(state, home_dir)
         _mark_starting(float(wait_s) + 60)
         _user_stopped = False

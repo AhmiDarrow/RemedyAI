@@ -37,6 +37,8 @@ PUBLIC_TOP_LEVEL_DOCS = frozenset(
         "TOKEN_OPTIMIZATION.md",
         "INNER_LANGUAGE.md",
         "INNER_LANGUAGE_RESEARCH.md",
+        "INFERENCE_ENGINE.md",
+        "INFERENCE_ENGINE_BENCHMARKS.md",
     }
 )
 

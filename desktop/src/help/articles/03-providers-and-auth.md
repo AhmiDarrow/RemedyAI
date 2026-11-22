@@ -2,7 +2,7 @@
 
 Remedy talks to one **active LLM provider** at a time for **chat**. Configure it in the **Setup wizard** or **Settings**.
 
-Separately, Remedy can install an **on-device SmolVLM2** model for vision decode and harness assist — that is not a chat provider. See [Local vision & on-device SmolVLM2](14-visual-decoder).
+Separately, Remedy can install an **on-device Qwen3.5-4B mind** model for vision decode and harness assist — that is not a chat provider. See [Local mind (Qwen3.5-4B)](14-visual-decoder).
 
 ## Supported chat providers
 
