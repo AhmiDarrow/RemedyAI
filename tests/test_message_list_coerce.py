@@ -59,7 +59,7 @@ def test_fast_path_list_message_does_not_crash_strip() -> None:
     assert match_assistant_fast_path([]) is None
 
 
-def test_preamble_list_message_does_not_crash_strip(monkeypatch, tmp_path) -> None:
+def test_preamble_list_message_does_not_crash_strip(monkeypatch, tmp_path, stub_public_dns) -> None:
     """suppress used to hide AttributeError so away/companion never injected."""
     monkeypatch.setattr(
         "remedy.core.turn_context.current_last_user_text",

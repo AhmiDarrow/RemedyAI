@@ -200,7 +200,7 @@ def _patch_native_open_url(monkeypatch, fn):
     monkeypatch.setattr(native(), "open_url", fn)
 
 
-def test_a_ui_open_command_opens_the_url(host, monkeypatch):
+def test_a_ui_open_command_opens_the_url(host, monkeypatch, stub_public_dns):
     opened: list[str] = []
     _patch_native_open_url(monkeypatch, lambda u: opened.append(u))
     host._handle_ui(FakeBridge(), {"action": "open_browser", "url": "https://example.com"})
@@ -234,7 +234,7 @@ def test_an_unrelated_ui_command_is_ignored(host, monkeypatch):
     host._handle_ui(FakeBridge(), {"action": "focus_window", "url": "https://x.example"})
 
 
-def test_a_failure_to_open_is_recorded_not_raised(host, monkeypatch):
+def test_a_failure_to_open_is_recorded_not_raised(host, monkeypatch, stub_public_dns):
     def boom(_u):
         raise OSError("no browser registered")
 

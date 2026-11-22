@@ -348,8 +348,10 @@ func (s *Server) startHearthLoop(ctx context.Context) {
 	go func() {
 		orient := time.NewTicker(time.Minute)
 		night := time.NewTicker(15 * time.Minute)
+		learn := time.NewTicker(60 * time.Second)
 		defer orient.Stop()
 		defer night.Stop()
+		defer learn.Stop()
 		for {
 			select {
 			case <-loopCtx.Done():
@@ -358,6 +360,8 @@ func (s *Server) startHearthLoop(ctx context.Context) {
 				s.hearthTick(now)
 			case <-night.C:
 				s.hearthPulseNight(loopCtx)
+			case <-learn.C:
+				s.hearthPulseLearn(loopCtx)
 			}
 		}
 	}()
@@ -389,6 +393,22 @@ func (s *Server) hearthPulseNight(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	_ = cr.PulsePartner(ctx)
+}
+
+// hearthPulseLearn runs one unattended organism learning tick (skill
+// promote/prune, dream, life cycle). Code self-inject stays opt-in inside
+// the Python worker. Never calls a provider.
+func (s *Server) hearthPulseLearn(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	cr, ok := s.runner.(*CognitionTurnRunner)
+	if !ok || cr == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	_ = cr.PulseLearn(ctx)
 }
 
 func locusForSurface(surface string) (locus, clean string, ok bool) {

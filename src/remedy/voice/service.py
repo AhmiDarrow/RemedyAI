@@ -1116,10 +1116,30 @@ def install_voice_pack(home_dir: Path | str | None = None) -> None:
         raise
 
 
+_evolution_lock = threading.Lock()
+_evolution_started = False
+
+
+def reset_voice_evolution_for_tests() -> None:
+    """Allow tests to start the drift loop more than once in one process."""
+    global _evolution_started
+    with _evolution_lock:
+        _evolution_started = False
+
+
 def start_voice_evolution(home_dir: Path | str | None = None, memory: Any = None) -> None:
-    """Daily drift of her voice baseline: now, then every six hours while up."""
-    if _skip_first_run_download() and os.environ.get("REMEDY_ENSURE_ASSETS") != "1":
+    """Daily drift of her voice baseline: now, then every six hours while up.
+
+    Local JSON only — no downloads — so this may run in tests. Set
+    ``REMEDY_NO_VOICE_EVOLUTION=1`` to suppress. Idempotent per process.
+    """
+    if os.environ.get("REMEDY_NO_VOICE_EVOLUTION") == "1":
         return
+    global _evolution_started
+    with _evolution_lock:
+        if _evolution_started:
+            return
+        _evolution_started = True
 
     def _loop() -> None:
         from remedy.voice.evolution import daily_drift
@@ -1198,6 +1218,10 @@ def ensure_voice_assets(
     """
     if not force and _skip_first_run_download():
         return {"ok": True, "skipped": True, "reason": "tests_or_disabled"}
+    try:
+        start_voice_evolution(home_dir)
+    except Exception:
+        logger.debug("voice evolution not started", exc_info=True)
     started: list[str] = []
     already: list[str] = []
     if not tts_deps_available() or not stt_deps_available():

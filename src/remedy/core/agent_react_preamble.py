@@ -367,19 +367,25 @@ def select_tools_for_turn(
     return tools
 
 
-def apply_metabolism_injects(
+def prime_turn_metabolism(
     runtime: Any,
-    messages: list[dict[str, Any]],
     message: str,
     *,
     session_id: str | None,
-    plan_mode: bool,
-    attachments: list[dict[str, Any]] | None,
-    all_tools: list[dict[str, Any]],
-    browse: BrowseIntentFlags,
-    pure_action_kick: bool,
-) -> None:
+    plan_mode: bool = False,
+    attachments: list[dict[str, Any]] | None = None,
+    all_tools: list[Any] | None = None,
+    browse: BrowseIntentFlags | None = None,
+    pure_action_kick: bool = False,
+) -> list[str]:
+    """Run begin_turn_metabolism, stash turn flags, return inject strings.
+
+    Shared by the (legacy) Python preamble and production ``prompt.assemble``.
+    Fail-safe: returns [] on any error.
+    """
     message = coerce_text_arg(message)
+    all_tools = list(all_tools or [])
+    injects: list[str] = []
     with suppress(Exception):
         from remedy.core.metabolism.turn import begin_turn_metabolism
 
@@ -406,6 +412,10 @@ def apply_metabolism_injects(
         home_m = None
         with suppress(Exception):
             home_m = getattr(getattr(runtime, "config", None), "home_dir", None)
+        browse_on = bool(
+            browse is not None
+            and (browse.browse_pre_url or browse.page_interaction)
+        )
         meta = begin_turn_metabolism(
             session_id=sid_m,
             user_text=message or "",
@@ -414,7 +424,7 @@ def apply_metabolism_injects(
             has_attachments=bool(attachments),
             tools_enabled=bool(all_tools),
             pure_action=bool(pure_action_kick),
-            browse=bool(browse.browse_pre_url or browse.page_interaction),
+            browse=browse_on,
             project_path=str(getattr(runtime, "_project_path", "") or ""),
             work_roots=roots_m or None,
             brief_head=(message or "")[:200],
@@ -431,8 +441,6 @@ def apply_metabolism_injects(
             take_pending_verify_remedy,
         )
 
-        # `or 1` here turned a classified L0_INSTANT (tier 0) into L1 at the
-        # moment it was stored, so the fast path could never fire.
         _raw_tier = meta.get("tier")
         set_turn_tier(
             int(_raw_tier) if _raw_tier is not None else 1,
@@ -456,19 +464,44 @@ def apply_metabolism_injects(
 
             if get_governor(sid_m).shadow_strict:
                 set_turn_shadow_strict(True, runtime)
-        injects = list(meta.get("injects") or [])
+        injects = [str(x) for x in (meta.get("injects") or []) if x]
         with suppress(Exception):
             pending = take_pending_verify_remedy(sid_m)
             if pending:
                 injects.append(str(pending))
-        if injects:
-            messages.insert(
-                -1,
-                {
-                    "role": "system",
-                    "content": "\n\n".join(str(x) for x in injects if x),
-                },
-            )
+    return injects
+
+
+def apply_metabolism_injects(
+    runtime: Any,
+    messages: list[dict[str, Any]],
+    message: str,
+    *,
+    session_id: str | None,
+    plan_mode: bool,
+    attachments: list[dict[str, Any]] | None,
+    all_tools: list[dict[str, Any]],
+    browse: BrowseIntentFlags,
+    pure_action_kick: bool,
+) -> None:
+    injects = prime_turn_metabolism(
+        runtime,
+        message,
+        session_id=session_id,
+        plan_mode=plan_mode,
+        attachments=attachments,
+        all_tools=all_tools,
+        browse=browse,
+        pure_action_kick=pure_action_kick,
+    )
+    if injects:
+        messages.insert(
+            -1,
+            {
+                "role": "system",
+                "content": "\n\n".join(str(x) for x in injects if x),
+            },
+        )
 
 
 async def prepare_turn_preamble(

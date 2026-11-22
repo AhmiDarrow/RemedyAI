@@ -189,7 +189,7 @@ def test_normalize_url_rejects_task_text_leak(monkeypatch):
     from remedy.core.computer.router import is_valid_navigate_url, normalize_url
 
     monkeypatch.setattr(
-        "remedy.core.agent_web_tools._resolve_public_ips",
+        "remedy.core.web_helpers._resolve_public_ips",
         lambda host: ["8.8.8.8"] if host else [],
     )
     junk = "gmail sign in, once I want you to log me in the login input my username user@example.com"
@@ -458,7 +458,7 @@ def test_wants_system_browser_only_when_explicit():
 
 
 def test_desktop_navigate_refuses_system_browser_without_explicit_ask(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, stub_public_dns
 ):
     """Mis-routed desktop navigate must not open OS browser by surprise."""
     import json
@@ -1375,7 +1375,7 @@ def test_find_recent_success_filters_other_session(tmp_path: Path):
     assert stolen is None
 
 
-def test_navigate_rail_fast_optimistic_when_host_alive(tmp_path: Path, monkeypatch):
+def test_navigate_rail_fast_optimistic_when_host_alive(tmp_path: Path, monkeypatch, stub_public_dns):
     """Open-url must return quickly even if host is slow; must not claim SUCCESS."""
     import json
 
