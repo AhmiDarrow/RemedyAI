@@ -473,6 +473,17 @@ def _run_unattended_learn_inner(inp: Mapping[str, Any]) -> dict[str, Any]:
             out["code"] = result.get("code")
             out["idle_s"] = result.get("idle_s")
             out["idle_ready"] = result.get("idle_ready")
+            out["compact"] = result.get("compact") or result.get("organism", {}).get("compact")
+            org = out["organism"] if isinstance(out["organism"], dict) else {}
+            compacted = bool(
+                (isinstance(out.get("compact"), dict) and out["compact"].get("changed"))
+                or org.get("compacted")
+                or org.get("dreamed")
+                or org.get("did")
+                or org.get("recalled")
+                or result.get("code")
+            )
+            out["changed"] = compacted
     except Exception:
         logger.debug("run_unattended_learn failed", exc_info=True)
         out["skipped"] = "error"

@@ -98,9 +98,9 @@ func (r *CognitionTurnRunner) PulsePartner(ctx context.Context) error {
 // PulseLearn runs one unattended organism learning tick on the Python worker.
 // The hearth calls this about once a minute. It does not call a provider.
 // Code self-inject remains opt-in and idle-gated in Python.
-func (r *CognitionTurnRunner) PulseLearn(ctx context.Context) error {
+func (r *CognitionTurnRunner) PulseLearn(ctx context.Context) (changed bool, err error) {
 	if r == nil || r.promptAssemble == nil {
-		return errors.New("rmdy prompt worker unavailable")
+		return false, errors.New("rmdy prompt worker unavailable")
 	}
 	input := map[string]any{}
 	if home := strings.TrimSpace(r.HomeDir); home != "" {
@@ -108,9 +108,32 @@ func (r *CognitionTurnRunner) PulseLearn(ctx context.Context) error {
 		input["_go_bound"] = true
 	}
 	started := time.Now()
-	_, err := r.rmdyCall(ctx, "partner.improve", input)
+	out, err := r.rmdyCall(ctx, "partner.improve", input)
 	r.noteLearnCall("improve", started, ctx, err)
-	return err
+	return learnOutputChanged(out), err
+}
+
+func learnOutputChanged(out map[string]any) bool {
+	if len(out) == 0 {
+		return false
+	}
+	if v, ok := out["changed"].(bool); ok {
+		return v
+	}
+	if s, ok := out["skipped"].(string); ok && s != "" {
+		return false
+	}
+	if org, ok := out["organism"].(map[string]any); ok && len(org) > 0 {
+		for _, val := range org {
+			if val != nil && val != "" && val != false && val != 0.0 && val != 0 {
+				return true
+			}
+		}
+	}
+	if compact, ok := out["compacted"].(bool); ok && compact {
+		return true
+	}
+	return false
 }
 
 func (r *CognitionTurnRunner) rmdyCall(ctx context.Context, toolID string, input map[string]any) (map[string]any, error) {

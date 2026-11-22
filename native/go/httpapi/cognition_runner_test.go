@@ -917,7 +917,7 @@ func TestPulseLearnCallsPartnerImprove(t *testing.T) {
 	if err := r.AttachPythonWorker(counter); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.PulseLearn(context.Background()); err != nil {
+	if _, err := r.PulseLearn(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if counter.improve.Load() != 1 {
