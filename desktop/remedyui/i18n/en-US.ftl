@@ -1,5 +1,4 @@
-# Remedy Desktop's text, in Fluent (https://projectfluent.org). Add a file per language:
-# i18n/de.ftl, i18n/ar.ftl, ... with the same ids.
+# Remedy Desktop's text, in Fluent (https://projectfluent.org).
 
 app-title = Remedy Desktop
 studio = Studio
@@ -12,17 +11,43 @@ filter-pin = Pin
 filter-archive = Archive
 no-project = No project
 session-options = Session options
+sidebar-import = Import
+sidebar-export = Export
 add-project = + Add project folder
-ready-title = Ready when you are
-ready-hint = Ask anything, plan, research, or open a project to build.
-ready-keys = Enter send · Shift+Enter new line · @ files · / commands
+project-path = Project folder
+project-add = Add
+cancel = Cancel
+pin = Pin session
+unpin = Unpin session
+archive = Archive
+unarchive = Unarchive
+move-project = Move to project
+row-hint = Pin, archive, and close stay visible
+msg-count = msgs
+ready-named = Ready when you are, {name}
+ready-hint = Ask anything, plan, research, or open a project to build. /help lists commands · F1 opens Help.
+ready-keys = Enter send · Shift+Enter new line · @ files · / commands · Shift+Tab Chat/Plan/Build
+starter-help = What can you help with?
+starter-help-prompt = What can you help me with on this machine?
+starter-explore = Explore this project
+starter-explore-prompt = Scan the open project and summarize structure, stack, and what I should know first.
+starter-review = Review recent changes
+starter-review-prompt = Review recent git changes and flag risks or follow-ups.
+starter-plan = Plan a task
+starter-plan-prompt = Help me plan:
 composer-placeholder = Message Remedy — /command · @file · Shift+Tab Chat/Plan/Build
 composer-send = Send
+composer-stop = Stop
 composer-attach = Attach
-well-hint = The mind is not connected. Start this chat once it is.
-status-disconnected = Mind  ·  not connected
-status-settings = Settings
+composer-hint = Enter send · / commands · @ files
+work-mode = Chat, Plan or Build
 partner-name = Remedy
+status-disconnected = Mind  ·  not connected
+status-connecting = Connecting...
+status-connected = Connected
+status-settings = Settings
+status-model = Model
+well-hint = The mind is not connected. Start this chat once it is.
 tray-hint = Close this window and { app-title } keeps running in the tray.
 tray-show = Show { app-title }
 tray-quit = Quit
