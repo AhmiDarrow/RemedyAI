@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
@@ -34,12 +35,14 @@ def test_knob_defaults_are_safe() -> None:
     assert table["interop_mcp"] is True
     assert table["interop_claimidx"] is False
     assert table["interop_trust_policy"] == "gated"
-    assert table["interop_auto_reply"] is False
+    assert table["interop_auto_reply"] is True
     assert table["interop_audit"] is True
     assert table["interop_rate_per_min"] == 30
     assert table["interop_hop_limit"] == 3
+    assert table["interop_max_concurrent"] == 2
     keys = {item["key"] for item in knobs.schema()}
     assert "interop_inbound" in keys
+    assert "interop_max_concurrent" in keys
 
 
 def test_agent_card_is_a2a_v1(tmp_path) -> None:
@@ -194,10 +197,12 @@ def test_peers_never_persist_secrets(tmp_path) -> None:
 def test_stdio_mcp_talk_tools_roundtrip(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
     rt = _rt(tmp_path, responder=lambda text, meta: f"You asked: {text}")
-    # auto-reply off queues; local stdio is still allowed
+    # inbound is on (via _rt) and auto-reply defaults on, so stdio gets a live answer
     out = json.loads(call_talk_tool(rt, "remedy_ask", {"question": "How are you?"}, source="stdio"))
     assert out["ok"] is True
     assert out["task_id"]
+    assert out.get("queued") is False
+    assert "How are you?" in (out.get("text") or "")
     status = json.loads(call_talk_tool(rt, "remedy_task_status", {"task_id": out["task_id"]}, source="stdio"))
     assert status["ok"] is True
     names = {t["name"] for t in TALK_TOOLS}
@@ -360,3 +365,132 @@ def test_a2a_client_discover_and_send_with_fake_transport() -> None:
 
 def test_score_peer_empty_skills() -> None:
     assert score_peer({"skills": []}, "code") == 0.0
+
+def test_auto_reply_inert_when_inbound_is_off(tmp_path) -> None:
+    seen = []
+
+    def responder(text, meta):
+        seen.append(text)
+        return "should not run"
+
+    rt = InteropRuntime(
+        str(tmp_path),
+        cfg={"advanced": {"interop_auto_reply": True, "interop_inbound": False, "interop_trust_policy": "open"}},
+        inbound_enabled=False,
+        responder=responder,
+    )
+    out = rt.ask("Hello?", peer_id="claude", metadata={"peer_id": "claude"})
+    assert out["queued"] is True
+    assert out["state"] == taskstore.SUBMITTED
+    assert seen == []
+
+
+def test_auto_reply_still_queues_spend_send_delete(tmp_path) -> None:
+    rt = _rt(
+        tmp_path,
+        responder=lambda text, meta: "should not run",
+        cfg={"advanced": {"interop_auto_reply": True, "interop_inbound": True, "interop_trust_policy": "open"}},
+    )
+    peers.upsert(
+        peers.load(str(tmp_path)),
+        {"id": "claude", "protocol": "a2a", "enabled": True, "permissions": ["ask", "spend", "send", "delete"]},
+        home=str(tmp_path),
+    )
+    for action, fn in (
+        ("spend", lambda: rt._run("spend", "pay the invoice", rt.gate("spend", peer_id="claude", metadata={}, text="pay the invoice", source="http"), peer_id="claude", metadata={})),
+        ("send", lambda: rt._run("send", "email them", rt.gate("send", peer_id="claude", metadata={}, text="email them", source="http"), peer_id="claude", metadata={})),
+        ("delete", lambda: rt._run("delete", "remove the file", rt.gate("delete", peer_id="claude", metadata={}, text="remove the file", source="http"), peer_id="claude", metadata={})),
+    ):
+        out = fn()
+        assert out["queued"] is True, action
+        assert out["needs_approval"] is True, action
+        assert out["state"] == taskstore.INPUT_REQUIRED, action
+
+
+def test_live_reply_times_out(tmp_path) -> None:
+    release = threading.Event()
+
+    def slow(text, meta):
+        release.wait(timeout=2)
+        return f"done:{text}"
+
+    rt = _rt(
+        tmp_path,
+        responder=slow,
+        turn_timeout_s=0.2,
+        cfg={
+            "advanced": {
+                "interop_auto_reply": True,
+                "interop_inbound": True,
+                "interop_trust_policy": "open",
+            }
+        },
+    )
+    out = rt.ask("held", peer_id="p")
+    assert out["ok"] is False
+    assert out["state"] == taskstore.FAILED
+    assert "timed out" in (out.get("error") or "")
+    release.set()
+
+
+def test_live_reply_respects_concurrency(tmp_path) -> None:
+    release = threading.Event()
+    started = threading.Event()
+    in_flight = []
+
+    def slow(text, meta):
+        in_flight.append(text)
+        started.set()
+        if not release.wait(timeout=2):
+            raise TimeoutError("test hold expired")
+        return f"done:{text}"
+
+    rt = _rt(
+        tmp_path,
+        responder=slow,
+        turn_timeout_s=2,
+        cfg={
+            "advanced": {
+                "interop_auto_reply": True,
+                "interop_inbound": True,
+                "interop_trust_policy": "open",
+                "interop_max_concurrent": 1,
+            }
+        },
+    )
+    results = [None, None]
+
+    def run(i, prompt):
+        results[i] = rt.ask(prompt, peer_id=f"p{i}")
+
+    t1 = threading.Thread(target=run, args=(0, "one"))
+    t1.start()
+    assert started.wait(timeout=1)
+    t2 = threading.Thread(target=run, args=(1, "two"))
+    t2.start()
+    t2.join(timeout=0.15)
+    # Second still waiting for the single slot; only one responder entered.
+    assert in_flight == ["one"]
+    assert results[1] is None
+    release.set()
+    t1.join(timeout=2)
+    t2.join(timeout=2)
+    assert results[0]["ok"] is True
+    assert results[0]["queued"] is False
+    assert results[0]["text"].startswith("done:")
+    assert results[1]["ok"] is True
+    assert results[1]["text"].startswith("done:")
+
+
+def test_live_reply_is_audited(tmp_path) -> None:
+    rt = _rt(
+        tmp_path,
+        responder=lambda text, meta: f"ack {text}",
+        cfg={"advanced": {"interop_auto_reply": True, "interop_inbound": True, "interop_trust_policy": "open", "interop_audit": True}},
+    )
+    out = rt.ask("ping", peer_id="claude")
+    assert out["queued"] is False
+    log = (tmp_path / "interop" / "audit.jsonl").read_text(encoding="utf-8")
+    assert "ping" in log
+    assert '"live": true' in log or '"live":true' in log
+

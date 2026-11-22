@@ -170,8 +170,8 @@ KNOBS: tuple[Knob, ...] = (
          "Optionally verify peer DIDs with ClaimIDX. Off: identity is pluggable and not required."),
     Knob("interop_trust_policy", "gated", "str", None, None, "", "Agent interop",
          "open (known or unknown peers), gated (unverified peers limited), or verified (only DID-verified peers). Money, send, and delete always need the owner's approval."),
-    Knob("interop_auto_reply", False, "bool", None, None, "", "Agent interop",
-         "When inbound is on, automatically answer allowed asks. Off: queue them for the owner."),
+    Knob("interop_auto_reply", True, "bool", None, None, "", "Agent interop",
+         "When inbound is on, automatically answer allowed asks with a live session turn. Off: queue them for the owner. Does nothing while inbound itself is off."),
     Knob("interop_audit", True, "bool", None, None, "", "Agent interop",
          "Write every inbound and outbound peer exchange to the interop audit log."),
     Knob("interop_rate_per_min", 30, "int", 1, 600, "count", "Agent interop",
@@ -180,8 +180,10 @@ KNOBS: tuple[Knob, ...] = (
          "Max forwarding hops. Stops ping-pong loops between bots."),
     Knob("interop_max_peers", 64, "int", 1, 512, "count", "Agent interop",
          "Cap on saved peer contacts."),
+    Knob("interop_max_concurrent", 2, "int", 1, 16, "count", "Agent interop",
+         "Max live inbound session turns running at once."),
     Knob("interop_task_ttl_s", 86400, "int", 60, 7 * 86_400, "s", "Agent interop",
-         "How long peer tasks are kept."),
+         "How long peer tasks are kept, and the timeout for a live inbound turn."),
 )
 
 KNOB_BY_KEY: dict[str, Knob] = {k.key: k for k in KNOBS}
