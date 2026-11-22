@@ -111,7 +111,29 @@ async def _get_runtime(config: Any) -> Any:
     return runtime
 
 
+def runtime_for_learn(inp: Mapping[str, Any]) -> Any | None:
+    """Return the cached assemble runtime for post-turn learning, or build one."""
+    home_dir = str(inp.get("home_dir") or "").strip() or None
+    project_path = str(inp.get("project_path") or "").strip() or None
+    provider = str(inp.get("provider") or "").strip() or None
+    model = str(inp.get("model") or "").strip() or None
+    base_url = str(inp.get("base_url") or "").strip() or None
+    config = _agent_config(
+        home_dir=home_dir,
+        project_path=project_path,
+        provider=provider,
+        model=model,
+        base_url=base_url,
+    )
+    key = _home_key(getattr(config, "home_dir", None))
+    cached = _runtime_cache.get(key)
+    if cached is not None:
+        return cached
+    return _run_coro(_get_runtime(config))
+
+
 def _binding_of(runtime: Any) -> tuple[str, str, str]:
+
     return (
         str(getattr(runtime, "_llm_provider", "") or "openai"),
         str(getattr(runtime, "_llm_model", "") or ""),
@@ -299,6 +321,29 @@ async def _assemble_async(inp: Mapping[str, Any]) -> dict[str, Any]:
                 runtime=runtime,
                 message=message,
             )
+            # Organism / metabolism pulse: tail of context, after the cache
+            # boundary, so the stable prefix is unchanged.
+            with suppress(Exception):
+                from remedy.core.agent_react_preamble import (
+                    parse_browse_intent,
+                    prime_turn_metabolism,
+                )
+
+                browse = parse_browse_intent(message)
+                injects = prime_turn_metabolism(
+                    runtime,
+                    message,
+                    session_id=session_id,
+                    plan_mode=bool(plan_mode) and not bool(chat_mode),
+                    attachments=None,
+                    all_tools=[] if chat_mode else ["_enabled"],
+                    browse=browse,
+                    pure_action_kick=bool(getattr(browse, "pure_action_kick", False)),
+                )
+                if injects:
+                    chunk = "\n\n".join(str(x) for x in injects if x)
+                    if chunk:
+                        context = (context or "") + (("\n\n" if context else "") + chunk)
             system = build_runtime_system_block(
                 system_prompt=system_prompt,
                 provider=bind.provider,

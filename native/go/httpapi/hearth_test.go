@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
+	"github.com/AhmiDarrow/RemedyAI/native/go/ipc"
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
 
@@ -206,5 +208,34 @@ func TestHearthReadyLineNamesTheNextStep(t *testing.T) {
 	}
 	if got := st.line("Finish novel", ""); got != "Ready. Still on Finish novel." {
 		t.Fatalf("line=%q", got)
+	}
+}
+
+func TestHearthPulseLearnCallsPartnerImprove(t *testing.T) {
+	serverReg := tools.NewRegistry()
+	if err := tools.RegisterPythonWorkerLocalMirrors(serverReg); err != nil {
+		t.Fatal(err)
+	}
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go ipc.ServeConn(ctx, serverConn, tools.WorkerHandler{Registry: serverReg})
+	client := ipc.NewClient(clientConn)
+	defer client.Close()
+	counter := &countingFrameCaller{inner: client}
+
+	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
+		{{Text: "x", Done: true}},
+	}}
+	r := NewCognitionTurnRunner(model)
+	if err := r.AttachPythonWorker(counter); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{runner: r}
+	s.hearthPulseLearn(context.Background())
+	if counter.improve.Load() != 1 {
+		t.Fatalf("hearthPulseLearn must call partner.improve, got %d", counter.improve.Load())
 	}
 }
