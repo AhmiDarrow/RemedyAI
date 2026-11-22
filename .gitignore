@@ -132,6 +132,7 @@ docs/*.md
 !docs/USAGE.md
 !docs/WEB_ETIQUETTE.md
 !docs/WINDOWS_SIGNING.md
+!docs/TOKEN_OPTIMIZATION.md
 docs/_*/
 docs/_*.json
 docs/*soak*

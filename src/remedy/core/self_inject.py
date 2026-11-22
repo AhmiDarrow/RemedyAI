@@ -818,6 +818,13 @@ def _organism_tick(runtime: Any, *, home: str | Path | None) -> dict[str, Any]:
 
         cycle = organism_cycle(home, runtime=runtime, session_id="life")
         out.update(cycle)
+    with suppress(Exception):
+        from remedy.core.metabolism.compact import compact_personhood
+
+        compacted = compact_personhood(home)
+        out["compact"] = compacted
+        if compacted.get("changed"):
+            out["compacted"] = True
     return out
 
 

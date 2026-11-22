@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -26,6 +28,15 @@ import (
 const (
 	hearthSchema   = 1
 	hearthIdleAway = 20 * time.Minute
+
+	// Adaptive unattended-learn clock. Defaults stay at one tick a minute;
+	// the loop backs off when nothing changed or the machine is busy, and
+	// speeds up after recent turn-end / mid-turn learning (heavy use).
+	hearthLearnDefault = 60 * time.Second
+	hearthLearnMin     = 20 * time.Second
+	hearthLearnMax     = 15 * time.Minute
+	hearthLearnHeavy   = 5 * time.Minute
+
 	hearthFileName = "hearth.json"
 
 	hearthLocusAway      = "away"
@@ -348,7 +359,8 @@ func (s *Server) startHearthLoop(ctx context.Context) {
 	go func() {
 		orient := time.NewTicker(time.Minute)
 		night := time.NewTicker(15 * time.Minute)
-		learn := time.NewTicker(60 * time.Second)
+		interval := hearthLearnDefault
+		learn := time.NewTimer(interval)
 		defer orient.Stop()
 		defer night.Stop()
 		defer learn.Stop()
@@ -361,7 +373,9 @@ func (s *Server) startHearthLoop(ctx context.Context) {
 			case <-night.C:
 				s.hearthPulseNight(loopCtx)
 			case <-learn.C:
-				s.hearthPulseLearn(loopCtx)
+				changed := s.hearthPulseLearn(loopCtx)
+				interval = nextLearnInterval(interval, changed, systemBusy(), s.recentlyHeavy(time.Now()))
+				learn.Reset(interval)
 			}
 		}
 	}()
@@ -398,17 +412,106 @@ func (s *Server) hearthPulseNight(ctx context.Context) {
 // hearthPulseLearn runs one unattended organism learning tick (skill
 // promote/prune, dream, life cycle). Code self-inject stays opt-in inside
 // the Python worker. Never calls a provider.
-func (s *Server) hearthPulseLearn(ctx context.Context) {
+func (s *Server) hearthPulseLearn(ctx context.Context) bool {
 	if s == nil {
-		return
+		return false
 	}
 	cr, ok := s.runner.(*CognitionTurnRunner)
 	if !ok || cr == nil {
-		return
+		return false
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	_ = cr.PulseLearn(ctx)
+	changed, _ := cr.PulseLearn(ctx)
+	return changed
+}
+
+// nextLearnInterval chooses the delay until the next unattended learn tick.
+func nextLearnInterval(current time.Duration, changed, busy, heavy bool) time.Duration {
+	if current <= 0 {
+		current = hearthLearnDefault
+	}
+	next := current
+	switch {
+	case heavy:
+		// Recent turn-end / mid-turn learning: check sooner for a while.
+		next = hearthLearnMin
+	case busy && !changed:
+		next = minDuration(current*2, hearthLearnMax)
+	case !changed:
+		next = minDuration(current*2, hearthLearnMax)
+	default:
+		// Something changed, but no heavy use — ease toward the default.
+		if current > hearthLearnDefault {
+			next = maxDuration(current/2, hearthLearnDefault)
+		} else {
+			next = hearthLearnDefault
+		}
+	}
+	if next < hearthLearnMin {
+		next = hearthLearnMin
+	}
+	if next > hearthLearnMax {
+		next = hearthLearnMax
+	}
+	return next
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxDuration(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func systemBusy() bool {
+	raw, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		return false
+	}
+	field := strings.Fields(string(raw))
+	if len(field) == 0 {
+		return false
+	}
+	load, err := strconv.ParseFloat(field[0], 64)
+	if err != nil {
+		return false
+	}
+	cpus := float64(runtime.NumCPU())
+	if cpus < 1 {
+		cpus = 1
+	}
+	return load > cpus
+}
+
+func (s *Server) recentlyHeavy(now time.Time) bool {
+	if s == nil {
+		return false
+	}
+	rows := readLearnLog(s.homeDir, 16)
+	cut := now.Add(-hearthLearnHeavy)
+	for _, row := range rows {
+		kind, _ := row["kind"].(string)
+		if kind != "turn_end" && kind != "after_tool_batch" {
+			continue
+		}
+		ts, _ := row["ts"].(string)
+		t, err := time.Parse(time.RFC3339Nano, ts)
+		if err != nil {
+			t, err = time.Parse(time.RFC3339, ts)
+		}
+		if err == nil && t.After(cut) {
+			return true
+		}
+	}
+	return false
 }
 
 func locusForSurface(surface string) (locus, clean string, ok bool) {
