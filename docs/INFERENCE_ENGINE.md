@@ -12,8 +12,8 @@ host on :8787), and so does any user-run OpenAI-compatible local
 server (Ollama, LM Studio, vLLM, another llama-server). A VRAM
 planner splits layers and KV so the always-on mind and the muscle
 can share one GPU when they fit. The mind stays responsive; it only
-yields to CPU (mmap) when a dense muscle cannot keep a useful GPU
-footprint beside it. See `docs/RMB.md`.
+yields to CPU (mmap) when a dense muscle cannot sit fully beside it
+but would fit alone (typical 12 GB + 9B). 24 GB still shares. See `docs/RMB.md`.
 
 The language-model sha256 in the catalog is `TODO` until the
 fine-tuned GGUF is published. Until then the public unsloth
@@ -56,7 +56,7 @@ end of this document and in `/workspace/remedy-mind-ENGINE-NOTES.md`.
 | Image token cap | 1024 | Matches the training budget (longest side ≤ 768). |
 | Thinking | off | Short inner jobs should not emit `<think>` blocks. |
 | mmap + idle-stop | mmap on, 600s idle | The host can sleep to save RAM/GPU; wake is a process start against a warm page cache, not a full cold read. |
-| CPU yield when RMB runs | auto | The VRAM planner shares or partially offloads first. The mind yields to CPU only when a dense muscle cannot fit beside it. `mind_keep_gpu` / `muscle_gpu_policy` override. |
+| CPU yield when RMB runs | auto | Share when both fully fit. If the muscle would fit alone but not beside the mind, yield the mind to CPU + mmap. `mind_keep_gpu` / `muscle_gpu_policy=share` override. |
 | Media digest default | on | Saves frontier tokens. `always_send_images` is the escape hatch. |
 
 Not adopted (yet): a distilled EAGLE / draft model (would have to be trained alongside the mind); L=2/L=3 inner language; running the official 262k context; hosting a second llama-server for MDL layer tiers (8741/8742). MDL still routes task kinds, but every tier is the same 8740 host.
@@ -69,7 +69,7 @@ Settings → Advanced, group **Local mind**. Defaults are safe.
 `mind_cache_prompt`, `mind_cache_ram_mib`, `mind_mmap`, `mind_spec`,
 `mind_spec_draft_n`, `mind_image_max_tokens`, `mind_thinking`,
 `mind_json_schema`, `mind_idle_stop_s`, `mind_quant`, `mind_keep_gpu`,
-`always_send_images`.
+`mind_handles_easy_chats`, `always_send_images`.
 
 Local muscle (see `docs/RMB.md`): `muscle_gpu_policy`,
 `muscle_schedule`, `muscle_route`, `muscle_discover`,

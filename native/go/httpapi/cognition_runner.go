@@ -368,6 +368,12 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 		return emitted
 	}
 
+	home := ""
+	if r != nil {
+		home = r.HomeDir
+	}
+	emitAnsweringModel(safeEmit, live, selectedProviderIsCloud(req, home))
+
 	out = r.runEngine(ctx, req, live, seed, safeEmit)
 
 	// Credentialed-but-unusable (401/402/403, subscription) — switch once to

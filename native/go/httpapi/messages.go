@@ -897,6 +897,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	var responseText strings.Builder
 	var collectedToolCalls []map[string]any
 	var collectedToolResults []map[string]any
+	var answeredModel *string
 	turnErr := s.runner.RunTurn(ctx, TurnRequest{
 		SessionID:   sid,
 		Prompt:      prompt,
@@ -921,6 +922,9 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 			return nil
 		} else if strings.HasPrefix(token, "@@tool_result:") {
 			collectedToolResults = append(collectedToolResults, parseToolResultToken(token).record())
+			return nil
+		} else if name := parseAnsweringModelToken(token); name != nil {
+			answeredModel = name
 			return nil
 		} else if strings.HasPrefix(token, "@@") {
 			return nil
@@ -979,7 +983,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		if len(collectedToolResults) > 0 {
 			results = collectedToolResults
 		}
-		if _, err := s.sessions.AddMessageFull(sid, "assistant", reply, nil, calls, results, sessModel, nil, nil); err != nil {
+		if _, err := s.sessions.AddMessageFull(sid, "assistant", reply, nil, calls, results, firstNonEmptyPtr(answeredModel, sessModel), nil, nil); err != nil {
 			if _, ok, _ := s.sessions.Get(sid); !ok {
 				writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Session not found"})
 				return

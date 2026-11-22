@@ -990,3 +990,12 @@ func firstNonEmpty(vals ...string) string {
 	}
 	return ""
 }
+
+func firstNonEmptyPtr(vals ...*string) *string {
+	for _, v := range vals {
+		if v != nil && strings.TrimSpace(*v) != "" {
+			return v
+		}
+	}
+	return nil
+}

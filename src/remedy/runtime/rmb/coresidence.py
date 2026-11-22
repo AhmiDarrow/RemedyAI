@@ -488,10 +488,7 @@ def plan_coresidence(
             schedule="overlap",
         )
 
-    # Keep a mind reservation and offload the muscle (MoE experts or layers).
-    # A dense muscle that still has room for ~half its weights plus KV can
-    # share; otherwise a 9B Q6 on 12GB would be crippled.
-    muscle_half = muscle_w // 2 + muscle_kv_m
+    # MoE experts live in RAM, so the GPU-resident slice can still share.
     muscle_moe_need = 4096 + muscle_kv_m
     can_moe = moe or spec.n_cpu_moe
     if policy != "yield_mind" and can_moe and (mind_need + muscle_moe_need) <= budget:
@@ -506,9 +503,27 @@ def plan_coresidence(
             schedule="overlap",
         )
 
-    if policy in {"keep_mind", "share"} or (
-        policy == "auto" and mind_need + muscle_half <= budget
-    ):
+    # Auto: if the muscle cannot sit fully beside the mind but would fit
+    # alone, yield the mind (CPU + mmap) so the muscle runs at full GPU speed.
+    # A 12 GB card + default 9B Q6 takes this path; 24 GB still shares above.
+    if policy == "auto" and muscle_need <= budget:
+        return _plan(
+            mode="yield_mind",
+            mind_n_gpu_layers=0,
+            muscle_n_gpu_layers=-1,
+            muscle_n_cpu_moe=moe,
+            mind_used_mib=0,
+            muscle_used_mib=min(budget, muscle_need),
+            reason=(
+                "muscle fits on the GPU alone but not beside the mind; "
+                "mind yields to CPU with mmap so the muscle can have the card. "
+                "Turn on mind_keep_gpu or muscle_gpu_policy=share to keep "
+                "the mind on the GPU instead."
+            ),
+            schedule="overlap",
+        )
+
+    if policy in {"keep_mind", "share"}:
         # Partial GPU offload for the dense muscle; mind keeps all layers.
         leftover = max(0, budget - mind_need - muscle_kv_m)
         frac = leftover / max(muscle_w, 1)
@@ -539,8 +554,8 @@ def plan_coresidence(
             schedule="serialize" if leftover < muscle_w * 0.6 else "overlap",
         )
 
-    # Auto / yield_mind: a dense muscle needs nearly the whole card.
-    # Yield the (small, mmap'd) mind to CPU so the muscle can run at full speed.
+    # Auto (muscle does not fit alone either) or yield_mind: give the card
+    # to the muscle and let autofit shrink it. Mind stays on CPU + mmap.
     return _plan(
         mode="yield_mind",
         mind_n_gpu_layers=0,
@@ -718,6 +733,47 @@ _HARD_HINTS = (
     "optimize the algorithm",
 )
 _CODE_HINTS = ("```", "def ", "class ", "fn ", "func ", "#!/", "error:", "failed tests")
+# Conservative: these bump a user chat out of the "easy enough for the 4B" band
+# so quality does not drop when a cloud provider is the selected muscle.
+_COMPLEX_HINTS = (
+    "explain",
+    "compare",
+    "design",
+    "architect",
+    "tradeoff",
+    "trade-off",
+    "recommend",
+    "analyze",
+    "analyse",
+    "review this",
+    "step by step",
+    "how should",
+    "how would",
+    "how can i",
+    "why does",
+    "why is",
+    "why are",
+    "write a",
+    "write me",
+    "draft a",
+    "difference between",
+    "pros and cons",
+    "best way",
+    "help me build",
+    "help me write",
+    "walk me through",
+    "outline a",
+    "propose a",
+)
+_EASY_INNER_KINDS = {
+    "continuity_core",
+    "nano_classify",
+    "brief_update",
+    "dream",
+    "digest",
+    "media_digest",
+}
+_EASY_CHAT_MAX_CHARS = 280
 
 
 def estimate_difficulty(prompt: str, *, task_kind: str = "") -> float:
@@ -747,6 +803,44 @@ def estimate_difficulty(prompt: str, *, task_kind: str = "") -> float:
     return max(0.0, min(1.0, score))
 
 
+def is_easy_user_chat(prompt: str, *, task_kind: str = "", has_attachments: bool = False) -> bool:
+    """True only for clearly simple chats (or inner jobs). When unsure, False.
+
+    Used to divert easy user turns to the always-on 4B mind, including when
+    the selected chat provider is a cloud model. Conservative on purpose:
+    a missed divert costs tokens, a false easy divert costs quality.
+    """
+    kind = (task_kind or "").strip().lower()
+    if kind in _EASY_INNER_KINDS:
+        return True
+    if kind in {"agent", "coding", "tool_loop", "react", "vision_decode"}:
+        return False
+    if has_attachments:
+        return False
+    text = (prompt or "").strip()
+    if not text or len(text) > _EASY_CHAT_MAX_CHARS:
+        return False
+    low = text.lower()
+    if any(h in low for h in _HARD_HINTS):
+        return False
+    if any(h in low for h in _CODE_HINTS):
+        return False
+    if any(h in low for h in _COMPLEX_HINTS):
+        return False
+    if text.count("?") > 1:
+        return False
+    if "\n-" in text or "\n*" in text or "\n1." in text:
+        return False
+    return estimate_difficulty(prompt, task_kind=task_kind) < 0.25
+
+
+def mind_handles_easy_chats(cfg: dict[str, Any] | None = None) -> bool:
+    raw = resolve("mind_handles_easy_chats", cfg)
+    if raw is None:
+        return True
+    return bool(raw)
+
+
 @dataclass(frozen=True)
 class MuscleRoute:
     target: str  # mind | rmb | local | frontier
@@ -770,10 +864,16 @@ def route_request(
     mind_base_url: str = "http://127.0.0.1:8740/v1",
     servers: list[LocalMuscleServer] | None = None,
     plan: CoresidencePlan | None = None,
+    active_cloud: bool = False,
+    has_attachments: bool = False,
 ) -> MuscleRoute:
     """Pick mind vs local muscle vs frontier. Owner-forced knobs always win."""
     policy = route_policy(cfg)
     diff = estimate_difficulty(prompt, task_kind=task_kind)
+    easy_on = mind_handles_easy_chats(cfg)
+    easy = easy_on and is_easy_user_chat(
+        prompt, task_kind=task_kind, has_attachments=has_attachments
+    )
     ext = [s for s in (servers or []) if s.healthy]
     local_url = ext[0].base_url if ext else ""
     local_kind = ext[0].kind if ext else ""
@@ -798,9 +898,18 @@ def route_request(
             return _r("rmb", rmb_base_url, "muscle_route=frontier but no cloud provider; using RMB", "local-vram")
         return _r("mind", mind_base_url, "muscle_route=frontier but no cloud provider; using the mind", "free-local")
 
-    # auto
-    if diff < 0.4:
-        return _r("mind", mind_base_url, "easy/inner work stays on the always-on 4B mind", "free-local")
+    # auto: clearly easy chats go to the 4B mind even if a cloud provider
+    # is selected, to save tokens. Hard or complex chats stay on the
+    # selected provider. The easy gate is conservative.
+    if easy:
+        return _r("mind", mind_base_url, "easy chat answered by the always-on 4B mind", "free-local")
+    if active_cloud:
+        return _r(
+            "frontier",
+            "",
+            "complex chat stays on the selected cloud provider",
+            "frontier-tokens",
+        )
     if rmb_running:
         target, url, label = "rmb", rmb_base_url, "RMB"
     elif local_url:

@@ -15,6 +15,7 @@ from remedy.runtime.rmb.coresidence import (
     apply_plan_to_rmb_state,
     estimate_difficulty,
     gpu_policy,
+    is_easy_user_chat,
     plan_coresidence,
     route_request,
 )
@@ -58,6 +59,7 @@ def test_knob_defaults() -> None:
     assert table["muscle_kv_cache"] == "auto"
     assert table["muscle_flash_attn"] is True
     assert table["muscle_spec"] == "auto"
+    assert table["mind_handles_easy_chats"] is True
     keys = {item["key"] for item in knobs.schema()}
     assert "muscle_gpu_policy" in keys
     assert "muscle_discover" in keys
@@ -81,17 +83,16 @@ def test_24gb_card_shares_mind_and_9b() -> None:
     assert plan.skip_rmb_start is False
 
 
-def test_12gb_card_keeps_mind_and_partially_offloads_dense_9b() -> None:
+def test_12gb_card_yields_mind_so_dense_9b_has_the_gpu() -> None:
     plan = plan_coresidence(
         hardware=_gpu(12288),
         muscle_model_id="qwen35-9b",
         servers=[],
     )
-    # The always-on mind stays on the GPU; the 9B takes the leftover layers.
-    assert plan.mode == "share"
-    assert plan.mind_n_gpu_layers == -1
-    assert plan.muscle_n_gpu_layers >= 4
-    assert plan.muscle_n_gpu_layers != -1
+    # Auto: the 9B fits alone but not beside the mind, so the mind yields.
+    assert plan.mode == "yield_mind"
+    assert plan.mind_n_gpu_layers == 0
+    assert plan.muscle_n_gpu_layers == -1
 
 
 def test_8gb_card_yields_mind_for_dense_9b() -> None:
@@ -228,6 +229,17 @@ def test_difficulty_and_auto_route() -> None:
         task_kind="coding",
     )
     assert hard >= 0.8
+    assert is_easy_user_chat("hi")
+    assert is_easy_user_chat("thanks!")
+    assert is_easy_user_chat("ok", task_kind="brief_update")
+    assert not is_easy_user_chat(
+        "What's the best way to structure a multi-tenant SaaS billing system?"
+    )
+    assert not is_easy_user_chat("Explain gravity in simple terms")
+    assert not is_easy_user_chat(
+        "def foo():\n    pass\nPlease refactor this module.",
+        task_kind="coding",
+    )
     easy = route_request("hi", task_kind="brief_update", has_frontier=False, rmb_running=False, servers=[])
     assert easy.target == "mind"
     mid = route_request(
@@ -246,6 +258,30 @@ def test_difficulty_and_auto_route() -> None:
         servers=[],
     )
     assert hardest.target == "frontier"
+    cloud_easy = route_request(
+        "hi",
+        rmb_running=False,
+        has_frontier=True,
+        active_cloud=True,
+        servers=[],
+    )
+    assert cloud_easy.target == "mind"
+    cloud_hard = route_request(
+        "What's the best way to design a billing system?",
+        rmb_running=False,
+        has_frontier=True,
+        active_cloud=True,
+        servers=[],
+    )
+    assert cloud_hard.target == "frontier"
+    off = route_request(
+        "hi",
+        cfg={"advanced": {"mind_handles_easy_chats": False}},
+        has_frontier=True,
+        active_cloud=True,
+        servers=[],
+    )
+    assert off.target == "frontier"
     forced = route_request("anything", cfg={"advanced": {"muscle_route": "mind"}}, rmb_running=True)
     assert forced.target == "mind"
 

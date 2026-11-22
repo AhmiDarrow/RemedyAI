@@ -538,6 +538,14 @@ const MessageBubble = memo(function MessageBubble({
             <div className="chat-meta flex items-center gap-2 mb-1 w-fit max-w-full">
               <div className="chat-meta-label">{partnerLabel}</div>
               {timeLabel && <div className="chat-meta-time">{timeLabel}</div>}
+              {msg.model && (
+                <div
+                  className="chat-meta-time"
+                  title={`Answered by ${msg.model}`}
+                >
+                  {msg.model}
+                </div>
+              )}
             </div>
           )}
 
