@@ -2,7 +2,7 @@
 
 Two jobs, both resumable and both hash-checked where the catalog pins a hash:
 
-* the CUDA llama.cpp build (Remedy pins ``b10107``), because the runtime that
+* the CUDA llama.cpp build (Remedy pins ``b12628``), because the runtime that
   ships with the vision stack is CPU-only and silently ignores GPU offload;
 * a GGUF (plus its ``mmproj`` when the model is multimodal).
 

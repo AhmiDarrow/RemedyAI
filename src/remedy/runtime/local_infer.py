@@ -58,6 +58,7 @@ def local_text_complete(
         "temperature": temperature,
         "max_tokens": max(1, min(512, int(max_tokens or 16))),
         "messages": messages,
+        "cache_prompt": True,
     }
     req = Request(
         url,
@@ -211,12 +212,16 @@ def ensure_handlers_registered() -> None:
         p = job.payload or {}
         prompt = str(p.get("extra_question") or "")
         url, _ = _resolve_mdl_url("vision_decode", str(p.get("base_url") or ""), prompt)
+        as_digest = p.get("as_digest")
+        if as_digest is None:
+            as_digest = True
         return decode_image(
             p.get("path") or "",
             base_url=url,
             timeout_s=float(p.get("timeout_s") or 90),
             max_image_bytes=int(p.get("max_image_bytes") or 4 * 1024 * 1024),
             extra_question=p.get("extra_question"),
+            as_digest=bool(as_digest),
         )
 
     def _nano_classify(job: LocalJob) -> Any:

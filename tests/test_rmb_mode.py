@@ -96,9 +96,10 @@ def test_leftover_rmb_provider_does_not_skip_vision_when_host_is_off(
     ) is False
     st["auto_start"] = True
     save_rmb_json(st, str(tmp_path))
+    # The unified mind stays up even when RMB is set to auto-start.
     assert should_skip_vision_stack(
         {"home_dir": str(tmp_path), "llm_provider": "xai"}
-    ) is True
+    ) is False
 
 
 def test_vision_suspended_skips_stack(monkeypatch):

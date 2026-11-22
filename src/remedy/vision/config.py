@@ -83,7 +83,9 @@ def vision_section_from_config(cfg: dict[str, Any] | None) -> dict[str, Any]:
     except (TypeError, ValueError):
         port = DEFAULT_PORT
     model_id = str(raw.get("model_id") or DEFAULT_MODEL_ID).strip() or DEFAULT_MODEL_ID
-    # Migrate retired local pins → SmolVLM2 (product ships a single local VLM).
+    # Migrate retired local pins (SmolVLM2, old Qwen VL) → the required 4B mind.
+    from remedy.runtime.catalog import LEGACY_LOCAL_MODEL_IDS
+
     _LEGACY_LOCAL_MODELS = {
         "qwen2.5-vl-3b",
         "qwen2.5-vl",
@@ -91,6 +93,7 @@ def vision_section_from_config(cfg: dict[str, Any] | None) -> dict[str, Any]:
         "qwen-vl-3b",
         "qwen2-vl",
         "qwen-vl",
+        *LEGACY_LOCAL_MODEL_IDS,
     }
     if model_id.lower() in _LEGACY_LOCAL_MODELS:
         model_id = DEFAULT_MODEL_ID

@@ -21,6 +21,8 @@ or taskkill something on the machine running the suite.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import socket
 import subprocess
 import threading
@@ -105,6 +107,26 @@ def isolate(monkeypatch):
     monkeypatch.setattr(subprocess, "run", _no_run)
     monkeypatch.setattr("remedy.execution.process.spawn_hidden", _no_spawn)
     monkeypatch.setattr("remedy.execution.process.run_hidden", _no_run)
+
+    # start_tier now delegates to the unified mind host. Never let a test
+    # call the real start_server (it would try a first-run download).
+    monkeypatch.setattr(
+        "remedy.vision.runtime.is_running",
+        lambda *a, **k: False,
+    )
+
+    state = SimpleNamespace(last_mind_start=None)
+
+    def _fake_start_mind(**kwargs):
+        state.last_mind_start = dict(kwargs)
+        return {
+            "ok": True,
+            "already_running": False,
+            "base_url": "http://127.0.0.1:8740/v1",
+        }
+
+    monkeypatch.setattr("remedy.vision.runtime.start_server", _fake_start_mind)
+    return state
 
 
 def _binary(tmp_path, name="llama-server.exe"):
@@ -306,7 +328,7 @@ def test_a_dead_child_with_an_open_port_falls_back_to_the_health_probe(monkeypat
     probed = []
     monkeypatch.setattr(mr, "_health", lambda base: probed.append(base) or True)
     assert mr.is_tier_running("medium") is True
-    assert probed == ["http://127.0.0.1:8742/v1"]
+    assert probed == ["http://127.0.0.1:8740/v1"]
 
 
 def test_a_foreign_listener_that_fails_the_health_probe_is_not_our_tier(monkeypatch):
@@ -363,16 +385,15 @@ def test_a_recently_used_tier_is_left_alone(monkeypatch):
     assert mr.tier_idle_stop("full", idle_s=600) is False
 
 
-def test_an_idle_tier_is_stopped():
+def test_an_idle_tier_is_not_reaped_on_the_unified_host(monkeypatch):
+    """Every MDL tier shares the mind host, so per-tier idle stop is a no-op."""
+    monkeypatch.setattr(mr, "stop_tier", lambda *a, **k: pytest.fail("reaped unified mind"))
     mr._tier_last_used["medium"] = time.time() - 10_000
-    result = mr.tier_idle_stop("medium", idle_s=600)
-    # Annotated ``-> bool`` but stop_tier's dict is returned verbatim.
-    assert result == {"ok": True, "stopped": False, "tier": "medium"}
+    assert mr.tier_idle_stop("medium", idle_s=600) is False
 
 
-def test_a_tier_never_used_counts_as_idle():
-    """last_used 0.0 means "never" — that must reap, not be treated as fresh."""
-    assert mr.tier_idle_stop("full", idle_s=600) == {"ok": True, "stopped": False, "tier": "full"}
+def test_a_never_used_tier_is_also_resident():
+    assert mr.tier_idle_stop("full", idle_s=600) is False
 
 
 # --------------------------------------------------------------------------
@@ -492,12 +513,10 @@ def test_starting_a_running_tier_is_a_no_op_that_refreshes_the_idle_clock(monkey
         model_path=str(tmp_path / "missing.gguf"),
         runtime_binary=str(tmp_path / "missing.exe"),
     )
-    assert out == {
-        "ok": True,
-        "already_running": True,
-        "base_url": "http://127.0.0.1:8742/v1",
-        "tier": "medium",
-    }
+    assert out["ok"] is True
+    assert out["already_running"] is True
+    assert out["base_url"] == "http://127.0.0.1:8740/v1"
+    assert out["tier"] == "medium"
     assert mr._tier_last_used["medium"] > 0
 
 
@@ -532,76 +551,59 @@ def test_a_missing_model_file_is_reported_not_spawned(monkeypatch, tmp_path):
     assert "Model file not found" in out["error"]
 
 
-def test_a_spawn_failure_is_returned_and_leaves_no_handle(monkeypatch, tmp_path):
+def test_a_mind_start_failure_is_returned_and_leaves_no_handle(monkeypatch, tmp_path):
     monkeypatch.setattr(mr, "is_tier_running", lambda n: False)
-
-    def _boom(*a, **k):
-        raise OSError("ENOEXEC")
-
-    monkeypatch.setattr("remedy.execution.process.spawn_hidden", _boom)
+    monkeypatch.setattr(
+        "remedy.vision.runtime.start_server",
+        lambda **k: {"ok": False, "error": "Failed to start tier medium"},
+    )
     out = mr.start_tier(
         "medium",
         model_path=str(_model(tmp_path)),
         runtime_binary=str(_binary(tmp_path)),
     )
     assert out["ok"] is False
-    assert "Failed to start tier medium" in out["error"]
+    assert "Failed to start" in out["error"]
     assert mr._tier_procs["medium"] is None
 
 
-def test_the_command_line_carries_the_tier_port_and_layer_budget(monkeypatch, tmp_path):
+def test_start_tier_delegates_to_the_unified_mind(monkeypatch, tmp_path, isolate):
     monkeypatch.setattr(mr, "is_tier_running", lambda n: False)
-    monkeypatch.setattr(mr, "_port_open", lambda *a, **k: True)
-    monkeypatch.setattr(mr, "_health", lambda *a, **k: True)
     binary = _binary(tmp_path)
     model = _model(tmp_path)
-    rec = _popen_recorder(monkeypatch)
-
     out = mr.start_tier("medium", model_path=str(model), runtime_binary=str(binary))
-
     assert out["ok"] is True
-    cmd = rec["cmd"]
-    assert cmd[0] == str(binary)
-    assert cmd[cmd.index("--port") + 1] == "8742"
-    assert cmd[cmd.index("--host") + 1] == "127.0.0.1"
-    assert cmd[cmd.index("-ngl") + 1] == "16"  # medium tier's n_layers
-    assert cmd[cmd.index("-m") + 1] == str(model)
-    assert "--mmproj" not in cmd
-    assert rec["kwargs"].get("cwd") == str(binary.parent)
+    assert out["unified"] is True
+    assert out["base_url"] == "http://127.0.0.1:8740/v1"
+    assert isolate.last_mind_start is not None
+    assert isolate.last_mind_start.get("n_gpu_layers") == -1
 
 
 @pytest.mark.parametrize("ngl", [0, 1, 24])
-def test_an_explicit_gpu_layer_count_overrides_the_tier_default(monkeypatch, tmp_path, ngl):
+def test_an_explicit_gpu_layer_count_is_forwarded(monkeypatch, tmp_path, isolate, ngl):
     """0 is a real value (CPU-only) and must not be mistaken for "unset"."""
     monkeypatch.setattr(mr, "is_tier_running", lambda n: False)
-    monkeypatch.setattr(mr, "_port_open", lambda *a, **k: True)
-    monkeypatch.setattr(mr, "_health", lambda *a, **k: True)
-    rec = _popen_recorder(monkeypatch)
     mr.start_tier(
         "light",
         model_path=str(_model(tmp_path)),
         runtime_binary=str(_binary(tmp_path)),
         n_gpu_layers=ngl,
     )
-    cmd = rec["cmd"]
-    assert cmd[cmd.index("-ngl") + 1] == str(ngl)
+    assert isolate.last_mind_start["n_gpu_layers"] == ngl
 
 
-def test_an_existing_mmproj_is_passed_through(monkeypatch, tmp_path):
+def test_an_existing_mmproj_is_accepted_before_delegate(monkeypatch, tmp_path):
     monkeypatch.setattr(mr, "is_tier_running", lambda n: False)
-    monkeypatch.setattr(mr, "_port_open", lambda *a, **k: True)
-    monkeypatch.setattr(mr, "_health", lambda *a, **k: True)
     mmproj = tmp_path / "mmproj.gguf"
     mmproj.write_bytes(b"MM")
-    rec = _popen_recorder(monkeypatch)
-    mr.start_tier(
+    out = mr.start_tier(
         "full",
         model_path=str(_model(tmp_path)),
         mmproj_path=str(mmproj),
         runtime_binary=str(_binary(tmp_path)),
     )
-    cmd = rec["cmd"]
-    assert cmd[cmd.index("--mmproj") + 1] == str(mmproj)
+    assert out["ok"] is True
+    assert out["unified"] is True
 
 
 def test_a_missing_mmproj_is_refused_before_start(monkeypatch, tmp_path):
@@ -620,6 +622,7 @@ def test_a_missing_mmproj_is_refused_before_start(monkeypatch, tmp_path):
     assert "cmd" not in rec
 
 
+@pytest.mark.skip(reason="per-tier llama-server spawn removed; start_tier delegates to the unified mind host")
 def test_a_child_that_exits_early_is_reported_with_its_code(monkeypatch, tmp_path):
     monkeypatch.setattr(mr, "is_tier_running", lambda n: False)
     monkeypatch.setattr(mr, "_port_open", lambda *a, **k: pytest.fail("probed a dead child"))
@@ -634,6 +637,7 @@ def test_a_child_that_exits_early_is_reported_with_its_code(monkeypatch, tmp_pat
     assert mr._tier_procs["medium"] is None
 
 
+@pytest.mark.skip(reason="per-tier llama-server spawn removed; start_tier delegates to the unified mind host")
 def test_a_healthy_start_returns_the_base_url_and_pid(monkeypatch, tmp_path):
     monkeypatch.setattr(mr, "is_tier_running", lambda n: False)
     monkeypatch.setattr(mr, "_port_open", lambda *a, **k: True)
@@ -656,6 +660,7 @@ def test_a_healthy_start_returns_the_base_url_and_pid(monkeypatch, tmp_path):
     assert mr._tier_last_used["full"] > 0
 
 
+@pytest.mark.skip(reason="per-tier llama-server spawn removed; start_tier delegates to the unified mind host")
 def test_an_open_port_alone_is_not_enough_to_declare_the_start_healthy(monkeypatch, tmp_path):
     """The port binds well before the model finishes loading."""
     monkeypatch.setattr(mr, "is_tier_running", lambda n: False)
@@ -674,6 +679,7 @@ def test_an_open_port_alone_is_not_enough_to_declare_the_start_healthy(monkeypat
     assert "not ready yet" in out["error"]
 
 
+@pytest.mark.skip(reason="per-tier llama-server spawn removed; start_tier delegates to the unified mind host")
 def test_a_slow_tier_is_left_loading_and_picked_up_by_the_next_call_without_a_second_spawn(
     monkeypatch, tmp_path
 ):
@@ -717,6 +723,7 @@ def test_a_slow_tier_is_left_loading_and_picked_up_by_the_next_call_without_a_se
     assert mr._tier_last_used["medium"] > 0
 
 
+@pytest.mark.skip(reason="per-tier llama-server spawn removed; start_tier delegates to the unified mind host")
 def test_a_registered_child_that_died_while_loading_is_cleared_and_respawned(
     monkeypatch, tmp_path
 ):
@@ -739,6 +746,7 @@ def test_a_registered_child_that_died_while_loading_is_cleared_and_respawned(
     assert mr._tier_procs["medium"] is fresh
 
 
+@pytest.mark.skip(reason="per-tier llama-server spawn removed; start_tier delegates to the unified mind host")
 def test_a_child_that_exits_during_a_later_wait_is_reported_and_unregistered(
     monkeypatch, tmp_path
 ):
@@ -757,6 +765,7 @@ def test_a_child_that_exits_during_a_later_wait_is_reported_and_unregistered(
     assert mr._tier_procs["full"] is None
 
 
+@pytest.mark.skip(reason="per-tier llama-server spawn removed; start_tier delegates to the unified mind host")
 def test_there_is_never_more_than_one_popen_per_tier(monkeypatch, tmp_path):
     """Repeated starts against a tier that never becomes ready must not stack
     up servers — that was the VRAM leak the old timeout-kill existed to stop."""
@@ -780,6 +789,7 @@ def test_there_is_never_more_than_one_popen_per_tier(monkeypatch, tmp_path):
     assert spawned[0].kill_tree_calls == 0
 
 
+@pytest.mark.skip(reason="per-tier llama-server spawn removed; start_tier delegates to the unified mind host")
 def test_a_slot_cleared_by_a_concurrent_stop_aborts_the_start(monkeypatch, tmp_path):
     """stop_tier from another thread nulls the slot; the wait loop must notice
     instead of dereferencing None."""
@@ -810,7 +820,7 @@ def test_ensuring_a_running_tier_does_not_start_anything(monkeypatch):
     monkeypatch.setattr(mr, "is_tier_running", lambda n: True)
     monkeypatch.setattr(mr, "start_tier", lambda *a, **k: pytest.fail("restarted a live tier"))
     out = mr.ensure_tier("light", model_path="x", runtime_binary="y")
-    assert out == {"ok": True, "base_url": "http://127.0.0.1:8741/v1", "tier": "light"}
+    assert out == {"ok": True, "base_url": "http://127.0.0.1:8740/v1", "tier": "light"}
     assert mr._tier_last_used["light"] > 0
 
 
@@ -863,7 +873,7 @@ def test_status_reports_every_tier_and_hides_the_url_when_down(monkeypatch):
     assert set(out["tiers"]) == set(MDL_TIERS)
     assert out["tiers"]["medium"] == {
         "running": True,
-        "base_url": "http://127.0.0.1:8742/v1",
+        "base_url": "http://127.0.0.1:8740/v1",
         "last_used": 123.0,
     }
     assert out["tiers"]["light"]["base_url"] is None
@@ -919,19 +929,22 @@ def test_a_second_call_does_not_start_a_second_watcher(fake_threads, monkeypatch
 
 
 def test_the_watcher_loop_skips_resident_tiers(fake_threads, monkeypatch):
+    """Every MDL tier shares the unified mind host, so the idle loop reaps none."""
     reaped = []
+    ticks = []
     monkeypatch.setattr(mr, "tier_idle_stop", lambda n: reaped.append(n))
 
     def _sleep(_s):
-        if len(reaped) >= 2:
+        ticks.append(1)
+        if len(ticks) >= 2:
             raise _Stop
 
     monkeypatch.setattr(time, "sleep", _sleep)
     mr.ensure_idle_watcher(resident_first=False)
     with pytest.raises(_Stop):
         fake_threads[0].target()
-    assert "light" not in reaped
-    assert set(reaped) == {"medium", "full"}
+    assert reaped == []
+    assert len(ticks) == 2
 
 
 def test_a_failing_reap_does_not_kill_the_watcher(fake_threads, monkeypatch):
