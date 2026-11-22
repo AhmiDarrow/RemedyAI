@@ -138,6 +138,7 @@ docs/*.md
 !docs/INFERENCE_ENGINE.md
 !docs/INFERENCE_ENGINE_BENCHMARKS.md
 !docs/AGENT_INTEROP.md
+!docs/RMB.md
 docs/_*/
 docs/_*.json
 docs/*soak*

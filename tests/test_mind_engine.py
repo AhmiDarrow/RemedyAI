@@ -125,8 +125,10 @@ def test_command_fallbacks_drop_spec() -> None:
 
 
 def test_mind_yields_gpu_when_rmb_runs() -> None:
-    assert mind_n_gpu_layers(requested=-1, rmb_running=True) == 0
-    assert mind_n_gpu_layers(requested=-1, rmb_running=False) == -1
+    # Explicit yield stays the old "mind goes to CPU" path. Auto uses the planner.
+    cfg = {"advanced": {"muscle_gpu_policy": "yield_mind"}}
+    assert mind_n_gpu_layers(requested=-1, rmb_running=True, cfg=cfg) == 0
+    assert mind_n_gpu_layers(requested=-1, rmb_running=False, cfg=cfg) == -1
 
 
 def test_spec_off_knob() -> None:
