@@ -33,6 +33,9 @@ def test_defaults_and_questions_cover_setup_topics() -> None:
     assert d["ui_language"] == "auto"
     assert d["proactive_reach_out"] is False
     assert d["always_send_images"] is False
+    assert d["mind_handles_easy_chats"] is True
+    assert d["muscle_gpu_policy"] == "auto"
+    assert d["mind_keep_gpu"] is False
     assert d["interop_inbound"] is False
     assert d["update_check"] == "auto"
     assert d["approval_mode"] == "auto"
@@ -196,6 +199,10 @@ def test_knobs_defaults() -> None:
     assert table["onboarding_reask"] is False
     assert table["house_rules_permission"] == "confirm_sensitive"
     assert table["house_rules_audit"] is True
+    assert table["interop_inbound"] is False
+    assert table["muscle_gpu_policy"] == "auto"
+    assert table["mind_handles_easy_chats"] is True
+    assert table["mind_keep_gpu"] is False
 
 
 def test_dispatch_status_and_summarize(home: Path) -> None:
@@ -272,3 +279,35 @@ def test_update_offer_peers_cannot_resolve(home: Path) -> None:
     out = hr.resolve_update_offer("go", home=home, origin="a2a:peer")
     assert out["ok"] is False
     assert hr.update_offer_available(home) is True
+
+
+def test_interop_and_muscle_answers_bind_to_live_knobs(home: Path) -> None:
+    """House-rules answers write the real #72 / #73 advanced knobs."""
+    from remedy.interfaces.config import load_config
+
+    out = hr.propose(
+        {
+            "muscle_gpu_policy": "yield_mind",
+            "mind_handles_easy_chats": True,
+            "mind_keep_gpu": False,
+        },
+        home=home,
+        origin="desktop",
+    )
+    assert out["ok"] is True
+    assert out.get("needs_confirmation") is not True
+    cfg = load_config(home / "config.toml")
+    assert knobs.resolve("muscle_gpu_policy", cfg) == "yield_mind"
+    assert knobs.resolve("mind_handles_easy_chats", cfg) is True
+    assert knobs.resolve("mind_keep_gpu", cfg) is False
+
+    proposed = hr.propose({"interop_inbound": True}, home=home, origin="desktop")
+    assert proposed["ok"] is True
+    assert proposed["needs_confirmation"] is True
+    assert knobs.resolve("interop_inbound", load_config(home / "config.toml")) is False
+    ok = hr.confirm_pending(home=home, origin="desktop")
+    assert ok["ok"] is True
+    cfg = load_config(home / "config.toml")
+    advanced = cfg.get("advanced") if isinstance(cfg.get("advanced"), dict) else {}
+    assert advanced.get("interop_inbound") is True
+    assert knobs.resolve("interop_inbound", cfg) is True

@@ -374,8 +374,8 @@ func (s *Server) finalizeSetupSession(sess *setupSession, status string) error {
 		return err
 	}
 	if len(advanced) > 0 {
-		// Persist reserved keys (interop_*, muscle_gpu_policy, …) even when
-		// this tree does not yet have those knobs in normalizeAdvancedTable.
+		// Re-apply interop / muscle / house-rules advanced knobs so a
+		// partial settings patch cannot drop them from [advanced].
 		s.mergeForwardAdvanced(advanced)
 	}
 	now := time.Now().UTC().Format("2006-01-02T15:04:05Z")
