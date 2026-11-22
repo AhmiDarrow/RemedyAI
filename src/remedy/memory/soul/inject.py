@@ -117,7 +117,7 @@ def build_soul_context_block(
     field: SoulField | None = None,
     *,
     home: str | Any = None,
-    max_chars: int = DEFAULT_SOUL_CHARS,
+    max_chars: int | None = None,
     include_contract: bool = False,
     provider: str = "",
     model: str = "",
@@ -132,6 +132,13 @@ def build_soul_context_block(
     from this session or this project are shown. Threads, habits and dreams
     that are work residue are never shown (see ``scrub_work_residue``).
     """
+    if max_chars is None:
+        try:
+            from remedy.core.organism_knobs import resolve_int
+
+            max_chars = resolve_int("soul_inject_chars")
+        except Exception:
+            max_chars = DEFAULT_SOUL_CHARS
     sf = field if field is not None else load_soul_field(home)
     from remedy.core.metabolism.time_crystal import looks_like_work_residue
     # Prefer config identity when available

@@ -73,6 +73,8 @@ the prefix.
 
 ## Budgets (defaults)
 
+These are also Settings → Advanced knobs (`soul_inject_chars`, `max_result_chars`, caps, and the improve-tick / learn timeouts).
+
 | Budget | Default | Where |
 |--------|---------|-------|
 | Soul inject | 1,400 characters | `DEFAULT_SOUL_CHARS` |

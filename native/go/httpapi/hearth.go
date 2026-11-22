@@ -359,7 +359,9 @@ func (s *Server) startHearthLoop(ctx context.Context) {
 	go func() {
 		orient := time.NewTicker(time.Minute)
 		night := time.NewTicker(15 * time.Minute)
-		interval := hearthLearnDefault
+		cfg := LoadConfig(s.homeDir)
+		def, min, max, heavy := learnClockFrom(cfg)
+		interval := def
 		learn := time.NewTimer(interval)
 		defer orient.Stop()
 		defer night.Stop()
@@ -374,7 +376,9 @@ func (s *Server) startHearthLoop(ctx context.Context) {
 				s.hearthPulseNight(loopCtx)
 			case <-learn.C:
 				changed := s.hearthPulseLearn(loopCtx)
-				interval = nextLearnInterval(interval, changed, systemBusy(), s.recentlyHeavy(time.Now()))
+				cfg = LoadConfig(s.homeDir)
+				def, min, max, heavy = learnClockFrom(cfg)
+				interval = nextLearnIntervalBounds(interval, changed, systemBusy(), s.recentlyHeavyWindow(time.Now(), heavy), def, min, max)
 				learn.Reset(interval)
 			}
 		}
@@ -420,7 +424,11 @@ func (s *Server) hearthPulseLearn(ctx context.Context) bool {
 	if !ok || cr == nil {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	timeout := resolveAdvancedSeconds(LoadConfig(s.homeDir), "pulse_learn_timeout_s")
+	if timeout <= 0 {
+		timeout = 45 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	changed, _ := cr.PulseLearn(ctx)
 	return changed
@@ -428,31 +436,44 @@ func (s *Server) hearthPulseLearn(ctx context.Context) bool {
 
 // nextLearnInterval chooses the delay until the next unattended learn tick.
 func nextLearnInterval(current time.Duration, changed, busy, heavy bool) time.Duration {
+	return nextLearnIntervalBounds(current, changed, busy, heavy, hearthLearnDefault, hearthLearnMin, hearthLearnMax)
+}
+
+func nextLearnIntervalBounds(current time.Duration, changed, busy, heavy bool, def, min, max time.Duration) time.Duration {
+	if def <= 0 {
+		def = hearthLearnDefault
+	}
+	if min <= 0 {
+		min = hearthLearnMin
+	}
+	if max <= 0 {
+		max = hearthLearnMax
+	}
 	if current <= 0 {
-		current = hearthLearnDefault
+		current = def
 	}
 	next := current
 	switch {
 	case heavy:
 		// Recent turn-end / mid-turn learning: check sooner for a while.
-		next = hearthLearnMin
+		next = min
 	case busy && !changed:
-		next = minDuration(current*2, hearthLearnMax)
+		next = minDuration(current*2, max)
 	case !changed:
-		next = minDuration(current*2, hearthLearnMax)
+		next = minDuration(current*2, max)
 	default:
 		// Something changed, but no heavy use — ease toward the default.
-		if current > hearthLearnDefault {
-			next = maxDuration(current/2, hearthLearnDefault)
+		if current > def {
+			next = maxDuration(current/2, def)
 		} else {
-			next = hearthLearnDefault
+			next = def
 		}
 	}
-	if next < hearthLearnMin {
-		next = hearthLearnMin
+	if next < min {
+		next = min
 	}
-	if next > hearthLearnMax {
-		next = hearthLearnMax
+	if next > max {
+		next = max
 	}
 	return next
 }
@@ -492,11 +513,18 @@ func systemBusy() bool {
 }
 
 func (s *Server) recentlyHeavy(now time.Time) bool {
+	return s.recentlyHeavyWindow(now, hearthLearnHeavy)
+}
+
+func (s *Server) recentlyHeavyWindow(now time.Time, window time.Duration) bool {
 	if s == nil {
 		return false
 	}
+	if window <= 0 {
+		window = hearthLearnHeavy
+	}
 	rows := readLearnLog(s.homeDir, 16)
-	cut := now.Add(-hearthLearnHeavy)
+	cut := now.Add(-window)
 	for _, row := range rows {
 		kind, _ := row["kind"].(string)
 		if kind != "turn_end" && kind != "after_tool_batch" {

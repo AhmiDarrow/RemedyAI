@@ -47,6 +47,25 @@ _STALL_AFTER_S = 7 * 86400.0
 _COMPACT_EVERY_S = 86_400.0
 
 
+def _stall_after_s() -> float:
+    try:
+        from remedy.core.organism_knobs import resolve_float
+
+        return resolve_float("organism_stall_after_s")
+    except Exception:
+        return _STALL_AFTER_S
+
+
+def _compact_every_s() -> float:
+    try:
+        from remedy.core.organism_knobs import resolve_float
+
+        return resolve_float("organism_compact_every_s")
+    except Exception:
+        return _COMPACT_EVERY_S
+
+
+
 def _lines_from_vitals(v: dict[str, Any]) -> list[str]:
     out: list[str] = []
     title = str(v.get("life_title") or "").strip()
@@ -584,7 +603,7 @@ def _stalled_from_clock(
         return False
     if stamp <= 0:
         return False
-    return ((now if now is not None else time.time()) - stamp) >= _STALL_AFTER_S
+    return ((now if now is not None else time.time()) - stamp) >= _stall_after_s()
 
 
 def _life_updated_ts(store: Any) -> float:
@@ -702,7 +721,7 @@ def organism_cycle(
     with suppress(TypeError, ValueError):
         last_compact = float(prev.get("last_compact_at") or 0)
     cas_known = prev.get("cas_count") is not None
-    compact_due = (now - last_compact) >= _COMPACT_EVERY_S if last_compact > 0 else (not cas_known)
+    compact_due = (now - last_compact) >= _compact_every_s() if last_compact > 0 else (not cas_known)
     if compact_due:
         with suppress(Exception):
             from remedy.memory.cas import ensure_cas

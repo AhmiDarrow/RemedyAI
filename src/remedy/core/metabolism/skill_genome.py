@@ -20,6 +20,16 @@ from remedy.home import default_home
 MAX_PHENOTYPES = 128
 
 
+def _max_phenotypes() -> int:
+    try:
+        from remedy.core.organism_knobs import resolve_int
+
+        return resolve_int("max_phenotypes")
+    except Exception:
+        return MAX_PHENOTYPES
+
+
+
 @dataclass
 class SkillPhenotype:
     skill_id: str
@@ -74,7 +84,7 @@ class SkillGenome:
 
     def _prune_locked(self) -> None:
         """Drop lowest-score unprotected phenotypes when over MAX_PHENOTYPES."""
-        if len(self.phenotypes) <= MAX_PHENOTYPES:
+        if len(self.phenotypes) <= _max_phenotypes():
             return
         items = list(self.phenotypes.values())
         # Evict unprotected first, then lowest score / oldest last_ts.
@@ -85,7 +95,7 @@ class SkillGenome:
                 p.last_ts,
             )
         )
-        keep = items[-MAX_PHENOTYPES:]
+        keep = items[-_max_phenotypes():]
         self.phenotypes = {p.skill_id: p for p in keep}
 
     def record(
@@ -104,7 +114,7 @@ class SkillGenome:
                 ph = SkillPhenotype(skill_id=sid)
                 self.phenotypes[sid] = ph
             ph.record(ok=ok, latency_ms=latency_ms)
-            if len(self.phenotypes) > MAX_PHENOTYPES:
+            if len(self.phenotypes) > _max_phenotypes():
                 self._prune_locked()
             return ph
 

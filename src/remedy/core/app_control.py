@@ -174,6 +174,7 @@ _PATCH_KEY_TO_SECTION = {
     "project_path": "workspace",
     "vision_enabled": "vision",
     "sleev_enabled": "security-power",
+    "advanced": "advanced",
 }
 
 
