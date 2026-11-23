@@ -274,6 +274,18 @@ impl Studio {
         s.live_message_id.set(Some("draft-1".into()));
         s.live_user_reaction.set("👍".into());
         s.streaming.set(true);
+        s.depth.todos.set(vec![
+            crate::depth::TodoItem {
+                id: "t1".into(),
+                content: "Patch the entry path".into(),
+                status: "in_progress".into(),
+            },
+            crate::depth::TodoItem {
+                id: "t2".into(),
+                content: "Re-run the addon check".into(),
+                status: "pending".into(),
+            },
+        ]);
         s
     }
 
@@ -749,6 +761,7 @@ fn preview_messages() -> Vec<ChatMessage> {
         },
         ChatMessage {
             created_at: Some("2026-11-22T15:00:20Z".into()),
+            thinking: "The manifest still named init.lua, but the last update renamed the entry. I'll patch the three files and run the addon check.".into(),
             steps: vec![
                 WorkStep::done("c1", "file_read"),
                 WorkStep::failed("c2", "bash", "exit 1"),
