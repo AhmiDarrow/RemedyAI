@@ -36,7 +36,9 @@ pub const RELEASE_BASE: &str = "https://github.com/AhmiDarrow/RemedyAI/releases/
 /// Marker the NSIS POSTINSTALL hook consumes so it does not also start the app.
 pub const OWNS_RELAUNCH_FLAG: &str = "RemedyDesktop-UpdaterOwnsRelaunch.flag";
 
-const BUSY: AtomicBool = AtomicBool::new(false);
+// `static`, not `const`. A const atomic is a new temporary on every use, so
+// the download thread and the UI-thread poller would not share the flag.
+static BUSY: AtomicBool = AtomicBool::new(false);
 /// Bytes received. Written on the download thread, read on the UI thread.
 static PROGRESS_GOT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Total bytes, or `u64::MAX` when the server did not say.
