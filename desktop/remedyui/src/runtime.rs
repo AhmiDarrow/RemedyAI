@@ -28,9 +28,12 @@ impl Client {
         Client { http }
     }
 
-    /// The bearer-backed client. Grove uses it for sessions the Studio list never shows.
-    pub(crate) fn http(&self) -> &Http {
-        &self.http
+    /// A clone of the bearer-backed client.
+    ///
+    /// Grove chains calls on it. Settings moves one onto a worker thread.
+    /// Cloning shares the cookie jar and the headers.
+    pub(crate) fn http(&self) -> Http {
+        self.http.clone()
     }
 }
 

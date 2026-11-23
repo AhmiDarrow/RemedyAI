@@ -284,8 +284,11 @@ pub struct LifeTask {
     pub approval_id: String,
 }
 
-/// Borrow the runtime HTTP client. Grove stays on the same bearer and base.
-pub(crate) fn http(client: &Client) -> &Http {
+/// The runtime HTTP client. Grove stays on the same bearer and base.
+///
+/// [`Http`] cloning shares the cookie jar, so this is the same client Studio
+/// and Settings use.
+pub(crate) fn http(client: &Client) -> Http {
     client.http()
 }
 

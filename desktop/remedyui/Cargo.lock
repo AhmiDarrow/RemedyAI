@@ -3342,6 +3342,7 @@ dependencies = [
  "remedy-ui-reactive",
  "remedy-ui-render-cpu",
  "remedy-ui-render-gpu",
+ "remedy-ui-services-desktop",
  "remedy-ui-services-i18n",
  "remedy-ui-services-net",
  "remedy-ui-style",
@@ -3661,6 +3662,26 @@ dependencies = [
  "web-sys",
  "wgpu",
  "windows",
+]
+
+[[package]]
+name = "remedy-ui-services-desktop"
+version = "1.0.0-rc.1"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=9466a695e9f452049f6d020b24afb5fe3eb38b71#9466a695e9f452049f6d020b24afb5fe3eb38b71"
+dependencies = [
+ "futures-core",
+ "jni 0.21.1",
+ "js-sys",
+ "ndk-context",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "wasm-bindgen",
+ "web-sys",
+ "windows",
+ "windows-core",
+ "windows-sys 0.61.2",
+ "zbus 6.3.0",
 ]
 
 [[package]]
