@@ -6,6 +6,7 @@
 
 mod chat;
 mod fonts;
+mod help;
 mod logo;
 mod runtime;
 mod sidebar;
@@ -16,6 +17,7 @@ mod time;
 mod work;
 
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
+pub use help::HelpPanel;
 pub use runtime::Client;
 pub use studio::Studio;
 
@@ -99,6 +101,12 @@ pub fn home(ui: &Ui) -> El {
 /// Chat-feed preview with a finished turn, for side-by-side review.
 pub fn home_chat(ui: &Ui) -> El {
     shell(ui, Studio::preview_chat())
+}
+
+/// Owner's manual, open on the overview. RA-chrome mounts [`HelpPanel::view`]
+/// inside the shell; this entry is the panel on its own for a golden.
+pub fn help_home(ui: &Ui) -> El {
+    HelpPanel::preview().view(ui)
 }
 
 /// The Studio shell: session list, well, composer, status.
