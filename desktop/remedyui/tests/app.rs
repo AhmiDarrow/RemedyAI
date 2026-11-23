@@ -17,7 +17,14 @@ fn no_spawn() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
         // Integration tests compile the lib without cfg(test); never launch a sidecar.
-        unsafe { std::env::set_var("REMEDY_DESKTOP_NO_SPAWN", "1") }
+        // Grove prefs live under REMEDY_HOME. Point them at a temp dir so a test
+        // cannot read or write the owner's ~/.remedy/ui/grove.json.
+        let home = std::env::temp_dir().join("remedy-desktop-test-home");
+        let _ = std::fs::create_dir_all(&home);
+        unsafe {
+            std::env::set_var("REMEDY_DESKTOP_NO_SPAWN", "1");
+            std::env::set_var("REMEDY_HOME", &home);
+        }
     });
 }
 
@@ -32,6 +39,10 @@ fn the_app_opens_its_window() {
 fn new_session_and_close_are_visible_and_work() {
     no_spawn();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    assert!(
+        app.press(Role::Button, "Studio"),
+        "Grove is home; Studio is one tap away"
+    );
     assert!(
         app.find(Role::Button, "New session").is_some(),
         "New session is visible without hover"
@@ -77,4 +88,5 @@ fn assert_goldens(name: &str, build: fn(&remedy_ui::Ui) -> remedy_ui::El) {
 fn previews_match_their_golden_images() {
     assert_goldens("studio", remedy_desktop::home);
     assert_goldens("studio-chat", remedy_desktop::home_chat);
+    assert_goldens("grove-home", remedy_desktop::grove_home);
 }
