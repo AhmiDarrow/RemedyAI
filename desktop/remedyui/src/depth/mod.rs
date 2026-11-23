@@ -117,7 +117,7 @@ impl StreamJob {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TodoItem {
     pub id: String,
     pub content: String,

@@ -5,6 +5,7 @@
 //! to remedy-runtime over HTTP+SSE on 127.0.0.1:7400.
 
 mod chat;
+mod chat_split;
 mod chrome;
 mod depth;
 mod diagnostics;

@@ -5,9 +5,8 @@ edition = "2024"
 publish = false
 
 [dependencies]
-# RemedyUI origin/main (6f36405, after 68ad3a19). Setup, Grove, chrome, and
-# chat-depth share this pin. Features: net + image (setup and chat), playback
-# (mic and spoken replies), desktop + term (rails and the terminal).
+# RemedyUI 6f36405 is main after #135: color emoji (COLR/CBDT/sbix) and bundled Twemoji.
+# Setup, Grove, chrome, two-pane chat, and chat-depth share this pin.
 # No script-lua and no rhai: 1.0 core stays plain RemedyUI Rust.
 remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "6f36405aa0840a2c332b80a1c17375d7ea4901c6", features = ["net", "image", "playback", "desktop", "term"] }
 
