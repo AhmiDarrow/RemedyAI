@@ -787,7 +787,7 @@ fn providers_from(providers: Option<&Value>) -> Providers {
         probes: providers
             .and_then(|p| p.get("probes"))
             .and_then(Value::as_array)
-            .and_then(probe_line),
+            .and_then(|probes| probe_line(probes)),
         remote,
         local,
         usage,

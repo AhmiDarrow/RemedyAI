@@ -738,7 +738,7 @@ fn meter_bar(ui: &Ui, meter: &Meter) -> El {
             ui.el("meter-fill")
                 .layout(move |l| {
                     l.height = Length::Px(6.0);
-                    l.width = Length::Percent(pct / 100.0);
+                    l.width = Length::Percent((pct / 100.0) as f32);
                 })
                 .style(StylePatch::new().background(fill).radius(RADIUS_FULL)),
         );
