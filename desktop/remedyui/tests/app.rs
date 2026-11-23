@@ -1,10 +1,10 @@
 //! The app on the in-memory host, and its previews as golden images.
 
 use remedy_ui::a11y::{Action, Role};
+use remedy_ui::core::{Point, Vec2};
 use remedy_ui::devtools::{check_golden, GoldenError, Preview};
 use remedy_ui::input::{Key, KeyEvent, Modifiers};
 use remedy_ui::testing::TestApp;
-use remedy_ui::core::{Point, Vec2};
 use remedy_ui::themes::PALETTES;
 use remedy_ui::AppConfig;
 use std::path::PathBuf;
@@ -274,7 +274,10 @@ fn chat_panes_keep_size_on_swap_and_fill_when_rails_collapse() {
     );
 
     // Collapse the open Sessions rail so the well can grow.
-    assert!(app.press(Role::Button, "Collapse rail"), "collapse left rail");
+    assert!(
+        app.press(Role::Button, "Collapse rail"),
+        "collapse left rail"
+    );
     app.frames(4);
     let actions2 = region_box(&app, "Coding / Actions");
     let chat2 = region_box(&app, "Chat");
@@ -333,7 +336,8 @@ fn session_list_scrolls_with_the_wheel() {
         .find(Role::Button, "Queued task 0")
         .and_then(|el| el.bounds())
         .unwrap_or_else(|| panic!("first session missing after wheel"));
-    if (first_after.min.y - first.min.y).abs() < 20.0 && (last_after.min.y - last.min.y).abs() < 20.0
+    if (first_after.min.y - first.min.y).abs() < 20.0
+        && (last_after.min.y - last.min.y).abs() < 20.0
     {
         // Some hosts sign the wheel the other way; try the opposite delta once.
         app.host().wheel(window, over, Vec2::new(0.0, -400.0));
@@ -764,6 +768,49 @@ fn settings_fields_stay_inside_a_narrow_window() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn settings_search_stays_visible_in_studio_at_700() {
+    // #117 residual: at 700px (below NARROW_MAX) with Studio chrome and both
+    // icon rails, crossing into the narrow band used to clear `narrow_side`,
+    // collapse Settings, and hide "Search all settings".
+    fresh_profile();
+    reset_saved_layout();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.frames(2);
+    assert!(
+        app.press(Role::Button, "Studio"),
+        "open the session workspace"
+    );
+    app.frames(2);
+    app.key(KeyEvent::press(Key::char(',')).with_modifiers(Modifiers::CTRL));
+    app.frames(4);
+    let win = app.runner().app().windows().first().cloned();
+    if let Some(win) = win {
+        win.set_size(1180.0, 740.0);
+        app.frames(2);
+        win.set_size(700.0, 520.0);
+        app.frames(4);
+    }
+    let names = accessible_names(&app);
+    let search = app.find(Role::TextInput, "Search all settings");
+    assert!(
+        search.is_some(),
+        "Search must stay laid out in Studio at 700px: {names:?}"
+    );
+    let window_w = 700.0;
+    if let Some(bounds) = search.and_then(|el| el.bounds()) {
+        assert!(
+            bounds.max.x <= window_w + 1.0,
+            "Search overflows the window: {bounds:?}"
+        );
+        assert!(bounds.min.x >= -1.0, "Search starts off-screen: {bounds:?}");
+        assert!(
+            bounds.max.x - bounds.min.x >= 80.0,
+            "Search collapsed instead of shrinking to fit: {bounds:?}"
+        );
     }
 }
 
