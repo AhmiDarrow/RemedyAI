@@ -126,8 +126,12 @@ impl Model {
         let shield = shield::load_shield();
         let layout = layout::load_workspace_layout();
         let home = resolve_browser_home(None);
-        Model {
-            inner: Rc::new(Inner {
+        // Boot runs from the window `.bind()`. Signals created there are
+        // owned by that binding and get disposed when setup changes surface.
+        // A detached scope lives with the window, so `refresh_home_once`
+        // can still write `browser_home_url` after the splash goes away.
+        let (inner, _scope) = remedy_ui::reactive::Scope::detached(|| {
+            Rc::new(Inner {
                 live,
                 layout: remedy_ui::reactive::Signal::new(layout),
                 address: remedy_ui::reactive::Signal::new(String::new()),
@@ -153,8 +157,9 @@ impl Model {
                 studio,
                 flash_gen: Cell::new(0),
                 auto_started: Cell::new(false),
-            }),
-        }
+            })
+        });
+        Model { inner }
     }
 
     /// Chrome preview. Not installed, so it cannot start pollers or clobber the live rail.
@@ -1532,5 +1537,19 @@ mod tests {
         assert_eq!(major_from_browser_version(raw).as_deref(), Some("120"));
         assert_eq!(major_from_browser_version(r#"{"browserVersion":"131.0.0"}"#).as_deref(), Some("131"));
         assert!(major_from_browser_version("not json").is_none());
+    }
+
+    #[test]
+    fn browser_home_survives_after_the_bind_scope_is_disposed() {
+        // The live boot path creates the model from the window `.bind()`.
+        // That used to own the signals, so a later settings write panicked
+        // with "the signal was disposed" at Model::home.
+        unsafe { std::env::set_var("REMEDY_DESKTOP_NO_SPAWN", "1") };
+        let studio = crate::studio::Studio::new();
+        let (model, bind) = remedy_ui::reactive::Scope::new(|| Model::build(true, Some(studio)));
+        bind.dispose();
+        let _ = model.home();
+        model.set_home_url("https://example.com/docs");
+        assert_eq!(model.home(), "https://example.com/docs");
     }
 }
