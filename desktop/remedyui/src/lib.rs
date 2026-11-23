@@ -5,6 +5,7 @@
 //! window talks to remedy-runtime over HTTP+SSE on 127.0.0.1:7400.
 
 mod chat;
+mod depth;
 mod fonts;
 mod logo;
 mod runtime;
@@ -54,6 +55,7 @@ pub fn app(app: &App) {
             .hide_on_close()
             .persist_geometry("main"),
         move |ui, window| {
+            depth::set_host(a.clone(), window.clone());
             let (u, win, a) = (ui.clone(), window.clone(), a.clone());
             ui.root().child(shell(ui, studio.clone())).bind(move || {
                 let m = messages();
@@ -103,6 +105,7 @@ pub fn home_chat(ui: &Ui) -> El {
 
 /// The Studio shell: session list, well, composer, status.
 pub fn shell(ui: &Ui, studio: Studio) -> El {
+    depth::set_ui(ui.clone());
     fonts::prepare_theme(ui, &Fonts::load());
     w::column(ui)
         .layout(|l| {
