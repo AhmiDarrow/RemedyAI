@@ -12,7 +12,7 @@ publish = false
 # `net`, `image`, `desktop`, and `term` stay for the shell, rails, Grove, and
 # Settings. Same features on Windows and Linux. No path override. No script-lua
 # and no rhai: 1.0 core stays plain RemedyUI Rust.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "1d4ec0ae619928eba75b6d0f52a224007675ad1b", features = ["net", "image", "webview", "playback", "desktop", "term", "update"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "f74c91ee8ef533c938284f7a19ffb697632997bc", features = ["net", "image", "webview", "playback", "desktop", "term", "update"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -24,7 +24,7 @@ portable-pty = "0.9"
 
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "1d4ec0ae619928eba75b6d0f52a224007675ad1b", features = ["headless", "devtools", "net", "image", "webview", "playback", "desktop", "term", "update"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "f74c91ee8ef533c938284f7a19ffb697632997bc", features = ["headless", "devtools", "net", "image", "webview", "playback", "desktop", "term", "update"] }
 
 [profile.release]
 lto = "fat"
