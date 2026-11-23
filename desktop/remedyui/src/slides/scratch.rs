@@ -543,10 +543,14 @@ fn editor(ui: &Ui, model: &ScratchModel, colors: &remedy_ui::style::ColorRoles) 
                                 t
                             }
                         }
+                    }).layout(|l| {
+                        l.width = Length::Percent(1.0);
+                        l.min_width = Length::Px(0.0);
                     }))
                     .layout(|l| {
                         l.grow = 1.0;
                         l.width = Length::Percent(1.0);
+                        l.min_width = Length::Px(0.0);
                         l.min_height = Length::Px(0.0);
                     })
             }
@@ -625,8 +629,10 @@ fn scratch_field(ui: &Ui, model: &ScratchModel, bg: remedy_ui::core::Color, fg: 
         l.grow = 1.0;
         l.basis = Length::Px(0.0);
         l.min_height = Length::Px(0.0);
+        l.min_width = Length::Px(0.0);
         l.height = Length::Percent(1.0);
         l.width = Length::Percent(1.0);
+        l.max_width = Length::Percent(1.0);
     })
 }
 

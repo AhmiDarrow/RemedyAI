@@ -284,7 +284,14 @@ pub fn panel(ui: &Ui, studio: Studio, chrome: Chrome) -> El {
         }
         let lines = c_out.server_output.get();
         let body = if lines.is_empty() { "—".into() } else { lines.join("\n") };
-        let _ = out_h.clone().child(w::text(&out_ui, body).variant("muted"));
+        let _ = out_h.clone().child(
+            w::text(&out_ui, body)
+                .variant("muted")
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                }),
+        );
     });
     w::column(ui)
         .gap(unit * 2.0)
