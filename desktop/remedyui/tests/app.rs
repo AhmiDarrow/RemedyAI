@@ -525,6 +525,31 @@ fn palette_opens_and_closes_from_the_keyboard() {
 }
 
 #[test]
+fn opening_memory_and_resizing_does_not_panic() {
+    // Opening the Memory overlay used to flush the sidebar tree bind after its
+    // `rows` signal was disposed ("the signal was disposed" at sidebar.rs:460).
+    fresh_profile();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.frames(2);
+    app.key(KeyEvent::press(Key::char('k')).with_modifiers(Modifiers::CTRL));
+    app.frames(1);
+    for ch in "Memory".chars() {
+        app.key(KeyEvent::press(Key::char(ch)));
+    }
+    app.key(KeyEvent::press(Key::Enter));
+    app.frames(3);
+    let win = app.runner().app().windows().first().cloned();
+    if let Some(win) = win {
+        win.set_size(700.0, 520.0);
+        app.frames(2);
+        win.set_size(1180.0, 740.0);
+        app.frames(2);
+        win.set_size(1440.0, 900.0);
+        app.frames(2);
+    }
+}
+
+#[test]
 fn help_about_diagnostics_and_quit_use_the_title_menu() {
     fresh_profile();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
