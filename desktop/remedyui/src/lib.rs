@@ -90,7 +90,7 @@ pub fn app(app: &App) {
     let live = if runtime::spawn_disabled() {
         None
     } else {
-        runtime::ensure_running();
+        let _ = runtime::ensure_running();
         let client = runtime::Client::new(
             &runtime::origin(),
             runtime::load_token().as_deref(),
@@ -470,22 +470,51 @@ pub(crate) fn tool_button_sized(
     b
 }
 
-/// A 32 px tray mark: a solid forest square, not a soft blob.
+/// The same 32 px Remedy tray mark 0.70.5 shipped.
 pub fn tray_icon() -> TrayImage {
-    let size = 32u32;
-    let mut rgba = Vec::with_capacity((size * size * 4) as usize);
-    for y in 0..size {
-        for x in 0..size {
-            let inset = 6u32;
-            let on = x >= inset && x < size - inset && y >= inset && y < size - inset;
-            if on {
-                rgba.extend([61, 139, 95, 255]);
-            } else {
-                rgba.extend([0, 0, 0, 0]);
+    const TRAY_PNG: &[u8] = include_bytes!("../../src-tauri/icons/tray-icon.png");
+    let decoded = remedy_ui::image::decode(TRAY_PNG, Some((32, 32)))
+        .or_else(|_| remedy_ui::image::decode(TRAY_PNG, None))
+        .expect("0.70.5 tray-icon.png must decode");
+    let img = decoded.image;
+    TrayImage {
+        size: img.width.max(1),
+        rgba: img.pixels.to_vec(),
+    }
+}
+
+#[cfg(test)]
+mod tray_icon_tests {
+    use super::tray_icon;
+
+    #[test]
+    fn tray_uses_the_remedy_mark_not_a_green_square() {
+        let icon = tray_icon();
+        assert_eq!(icon.size, 32, "Windows tray mark is 32 px, same as 0.70.5");
+        assert_eq!(icon.rgba.len(), 32 * 32 * 4);
+        let mut forest = 0u32;
+        let mut opaque = 0u32;
+        let mut colors = std::collections::BTreeSet::new();
+        for px in icon.rgba.chunks_exact(4) {
+            colors.insert((px[0], px[1], px[2], px[3]));
+            if px[3] == 0 {
+                continue;
+            }
+            opaque += 1;
+            if px == [61, 139, 95, 255] {
+                forest += 1;
             }
         }
+        assert!(opaque > 0, "tray mark must have visible pixels");
+        assert!(
+            colors.len() > 2,
+            "the 0.70.5 mark is a multi-color circuit R, not a flat square"
+        );
+        assert!(
+            forest * 2 < opaque,
+            "tray must not be the solid forest square 1.0.0 shipped"
+        );
     }
-    TrayImage { size, rgba }
 }
 
 /// The app's strings, from `i18n/<locale>.ftl`.
