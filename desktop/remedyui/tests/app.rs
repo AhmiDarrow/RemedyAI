@@ -4,6 +4,7 @@ use remedy_ui::a11y::{Action, Role};
 use remedy_ui::devtools::{check_golden, GoldenError, Preview};
 use remedy_ui::input::{Key, KeyEvent, Modifiers};
 use remedy_ui::testing::TestApp;
+use remedy_ui::core::{Point, Vec2};
 use remedy_ui::themes::PALETTES;
 use remedy_ui::AppConfig;
 use std::path::PathBuf;
@@ -214,6 +215,143 @@ fn chat_workspace_is_two_panes_with_a_swap() {
     assert!(
         names.iter().any(|n| n.contains("Actions on the right")),
         "swap persists in the session: {names:?}"
+    );
+}
+
+fn region_box(app: &TestApp, name: &str) -> remedy_ui::core::Rect {
+    app.find(Role::Region, name)
+        .and_then(|el| el.bounds())
+        .unwrap_or_else(|| panic!("missing region {name}"))
+}
+
+#[test]
+fn chat_panes_keep_size_on_swap_and_fill_when_rails_collapse() {
+    no_spawn();
+    let mut app = preview_window_size(remedy_desktop::home_chat, 1180.0, 740.0);
+    app.frames(4);
+    let actions0 = region_box(&app, "Coding / Actions");
+    let chat0 = region_box(&app, "Chat");
+    assert!(
+        actions0.width() > 80.0 && chat0.width() > 80.0,
+        "both panes visible before swap: actions={:?} chat={:?}",
+        actions0,
+        chat0
+    );
+    assert!(
+        actions0.min.x < chat0.min.x,
+        "actions start on the left: actions={:?} chat={:?}",
+        actions0,
+        chat0
+    );
+    let actions_w = actions0.width();
+    let chat_w = chat0.width();
+
+    assert!(app.press(Role::Button, "Swap Actions and Chat"), "swap");
+    app.frames(4);
+    let actions1 = region_box(&app, "Coding / Actions");
+    let chat1 = region_box(&app, "Chat");
+    assert!(
+        actions1.width() > 80.0 && chat1.width() > 80.0,
+        "both panes must stay rendered after swap: actions={:?} chat={:?}",
+        actions1,
+        chat1
+    );
+    assert!(
+        (actions1.width() - actions_w).abs() < 8.0,
+        "actions width kept: before={actions_w} after={}",
+        actions1.width()
+    );
+    assert!(
+        (chat1.width() - chat_w).abs() < 8.0,
+        "chat width kept: before={chat_w} after={}",
+        chat1.width()
+    );
+    assert!(
+        actions1.min.x > chat1.min.x,
+        "actions move to the right: actions={:?} chat={:?}",
+        actions1,
+        chat1
+    );
+
+    // Collapse the open Sessions rail so the well can grow.
+    assert!(app.press(Role::Button, "Collapse rail"), "collapse left rail");
+    app.frames(4);
+    let actions2 = region_box(&app, "Coding / Actions");
+    let chat2 = region_box(&app, "Chat");
+    assert!(
+        actions2.width() > 80.0 && chat2.width() > 80.0,
+        "both panes stay after collapse: actions={:?} chat={:?}",
+        actions2,
+        chat2
+    );
+    let sum1 = actions1.width() + chat1.width();
+    let sum2 = actions2.width() + chat2.width();
+    assert!(
+        sum2 > sum1 + 80.0,
+        "center must fill the width the rail freed: before={sum1} after={sum2}"
+    );
+}
+
+#[test]
+fn session_list_scrolls_with_the_wheel() {
+    no_spawn();
+    let mut app = preview_window_size(remedy_desktop::home_sessions_long, 900.0, 740.0);
+    app.frames(4);
+    assert!(
+        app.find(Role::Button, "New session").is_some(),
+        "sessions rail is open"
+    );
+    let last = app
+        .find(Role::Button, "Queued task 39")
+        .and_then(|el| el.bounds())
+        .unwrap_or_else(|| panic!("last session missing"));
+    let first = app
+        .find(Role::Button, "Queued task 0")
+        .and_then(|el| el.bounds())
+        .unwrap_or_else(|| panic!("first extra session missing"));
+    assert!(
+        last.min.y > first.max.y,
+        "rows stack: first={:?} last={:?}",
+        first,
+        last
+    );
+    assert!(
+        last.min.y > 740.0,
+        "the list must overflow the window so it can scroll, last={last:?}"
+    );
+    let window = app.host().window_ids().first().copied().expect("window");
+    // Wheel inside the window, over the open Sessions rail (not past the fold).
+    let over_y = first.min.y.clamp(80.0, 700.0);
+    let over = Point::new(first.min.x + 20.0, over_y);
+    app.host().wheel(window, over, Vec2::new(0.0, 400.0));
+    app.frames(4);
+    let mut last_after = app
+        .find(Role::Button, "Queued task 39")
+        .and_then(|el| el.bounds())
+        .unwrap_or_else(|| panic!("last session missing after wheel"));
+    let mut first_after = app
+        .find(Role::Button, "Queued task 0")
+        .and_then(|el| el.bounds())
+        .unwrap_or_else(|| panic!("first session missing after wheel"));
+    if (first_after.min.y - first.min.y).abs() < 20.0 && (last_after.min.y - last.min.y).abs() < 20.0
+    {
+        // Some hosts sign the wheel the other way; try the opposite delta once.
+        app.host().wheel(window, over, Vec2::new(0.0, -400.0));
+        app.frames(4);
+        last_after = app
+            .find(Role::Button, "Queued task 39")
+            .and_then(|el| el.bounds())
+            .unwrap_or_else(|| panic!("last session missing after opposite wheel"));
+        first_after = app
+            .find(Role::Button, "Queued task 0")
+            .and_then(|el| el.bounds())
+            .unwrap_or_else(|| panic!("first session missing after opposite wheel"));
+    }
+    assert!(
+        first_after.min.y < first.min.y - 20.0 || last_after.min.y < last.min.y - 20.0
+            || first_after.min.y > first.min.y + 20.0
+            || last_after.min.y > last.min.y + 20.0,
+        "wheel should move the session list: first {first:?} -> {first_after:?}, last {last:?} -> {last_after:?}"
     );
 }
 

@@ -32,6 +32,7 @@ pub fn sidebar(ui: &Ui, studio: Studio) -> El {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
             l.height = Length::Percent(1.0);
+            l.min_height = Length::Px(0.0);
             l.grow = 1.0;
             l.basis = Length::Px(0.0);
             l.shrink = 1.0;
@@ -450,10 +451,12 @@ fn tree(ui: &Ui, studio: Studio) -> El {
     let rows: Signal<Vec<TreeItem>> = Signal::new(Vec::new());
     let rows_out = rows.clone();
     let st = studio.clone();
+    // Natural height inside the scroll, so the list can overflow the rail
+    // instead of stretching the viewport to fit every row.
     let col = w::column(ui).gap(unit * 1.5).layout(|l| {
         l.width = Length::Percent(1.0);
-        l.grow = 1.0;
-        l.basis = Length::Px(0.0);
+        l.grow = 0.0;
+        l.shrink = 0.0;
         l.min_height = Length::Px(0.0);
     });
     let _ = col.clone().bind(move || {
@@ -489,9 +492,11 @@ fn tree(ui: &Ui, studio: Studio) -> El {
     w::scroll(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
+            l.height = Length::Percent(1.0);
             l.grow = 1.0;
             l.basis = Length::Px(0.0);
             l.min_height = Length::Px(0.0);
+            l.max_height = Length::Percent(1.0);
         })
         .child(col)
 }
