@@ -2,7 +2,7 @@
 
 Items stay red until proven (headless tests on the box, then a hidden Windows run on Joe's PC). First ship is 1.0 on Windows, Linux and macOS. Grove is in. Full browser parity is in. `com.remedy.desktop`, the installer asset name, the minisign key, NSIS `/S /UPDATE` and `~/.remedy` stay intact.
 
-Identity and engine pins: RemedyUI `main` at `68ad3a198571e702fc4696bc8b000edc6c5e7980` (`webview`, `desktop`, `term`, and the preview features).
+Identity and engine pins: RemedyUI `main` at `68ad3a198571e702fc4696bc8b000edc6c5e7980` (`webview`, `playback`, `desktop`, `term`, and the preview features).
 
 ## Shell (this milestone)
 
