@@ -78,7 +78,7 @@ pub fn load_token() -> Option<String> {
     None
 }
 
-fn remedy_home() -> PathBuf {
+pub(crate) fn remedy_home() -> PathBuf {
     if let Ok(h) = std::env::var("REMEDY_HOME") {
         let p = PathBuf::from(h);
         if !p.as_os_str().is_empty() {

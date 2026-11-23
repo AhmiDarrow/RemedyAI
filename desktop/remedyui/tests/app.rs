@@ -303,6 +303,40 @@ fn button_named_like(app: &TestApp, needle: &str) -> Option<String> {
     })
 }
 
+/// Forest, a light theme, and a colorblind palette. A missing PNG is written and is not a failure.
+#[test]
+fn usage_previews_match_their_golden_images() {
+    assert_settings_goldens("usage", remedy_desktop::preview_usage);
+    assert_settings_goldens("usage-harness", remedy_desktop::preview_usage_harness);
+}
+
+/// The diagnostics overlay is a new surface. Forest, light, and deutan lock it.
+/// A missing PNG is written and is not a failure the first time.
+#[test]
+fn diagnostics_preview_matches_its_golden_images() {
+    assert_settings_goldens("diagnostics", remedy_desktop::diagnostics_preview);
+}
+
+#[test]
+fn diagnostics_preview_names_the_panel_and_the_hive() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::diagnostics_preview);
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("Diagnostics")),
+        "diagnostics title: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Hive")),
+        "hive inspector: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Health diagnostics")),
+        "dialog name: {names:?}"
+    );
+}
+
 fn press_nth(app: &mut TestApp, role: Role, name: &str, nth: usize) -> bool {
     let Some(ui) = app.ui() else { return false };
     let nodes: Vec<_> = app
@@ -385,7 +419,7 @@ fn narrow_window_keeps_one_panel_and_restores_the_thin_rail() {
     );
     let names = accessible_names(&app);
     assert!(
-        names.iter().any(|n| n.contains("In-app terminal on this PC")),
+        names.iter().any(|n| n.contains("Clear terminal")),
         "the right panel opened for this width only: {names:?}"
     );
     app.host().user_resize(id, remedy_ui::core::Size::new(1100.0, 700.0));
@@ -397,7 +431,7 @@ fn narrow_window_keeps_one_panel_and_restores_the_thin_rail() {
     assert!(app.find(Role::Button, "Expand left rail").is_none());
     let names = accessible_names(&app);
     assert!(
-        !names.iter().any(|n| n.contains("In-app terminal on this PC")),
+        !names.iter().any(|n| n.contains("Clear terminal")),
         "widening does not keep the temporary panel: {names:?}"
     );
 }
