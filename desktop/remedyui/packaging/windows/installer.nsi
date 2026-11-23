@@ -51,6 +51,9 @@ CRCCheck on
 !ifndef RUNTIMESRCPATH
   !error "Pass /DRUNTIMESRCPATH=path\to\remedy-runtime.exe"
 !endif
+!ifndef CORESRCPATH
+  !error "Pass /DCORESRCPATH=path\to\remedy_core.dll"
+!endif
 
 !define PLACEHOLDER_INSTALL_DIR "C:\__REMEDY_PLACEHOLDER_DO_NOT_INSTALL__"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}"
@@ -224,6 +227,7 @@ Section Install
   File "/oname=${MAINBINARYNAME}" "${MAINBINARYSRCPATH}"
   ; Local API sidecar. The shell looks for remedy-runtime.exe next to the app.
   File "/oname=remedy-runtime.exe" "${RUNTIMESRCPATH}"
+  File "/oname=remedy_core.dll" "${CORESRCPATH}"
 
   SetOutPath "$INSTDIR\windows"
   File "/oname=uninstall_options.ps1" "${UNINSTALL_OPTIONS}"
@@ -273,6 +277,7 @@ Section Uninstall
   Delete "$INSTDIR\app.exe"
   Delete "$INSTDIR\remedy-desktop.exe"
   Delete "$INSTDIR\remedy-runtime.exe"
+  Delete "$INSTDIR\remedy_core.dll"
   Delete "$INSTDIR\remedy-runtime-x86_64-pc-windows-msvc.exe"
   Delete "$INSTDIR\remedy-iroh.exe"
   Delete "$INSTDIR\windows\uninstall_options.ps1"

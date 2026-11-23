@@ -74,9 +74,21 @@ if [[ ! -f "${RUNTIME}" ]]; then
 fi
 
 install -m 0755 "${BINARY}" "${OUT}/AppDir/remedy-desktop"
+CORE="${REPO}/native/zig/zig-out/lib/libremedy_core.so"
+if [[ "${SKIP_BUILD}" -eq 0 || ! -f "${CORE}" ]]; then
+  command -v zig >/dev/null 2>&1 || { echo "zig is required to build libremedy_core.so" >&2; exit 1; }
+  ( cd "${REPO}/native/zig" && zig build -Doptimize=ReleaseSafe )
+fi
+if [[ ! -f "${CORE}" ]]; then
+  echo "Core not found: ${CORE}" >&2
+  exit 1
+fi
+
 install -m 0755 "${RUNTIME}" "${OUT}/AppDir/remedy-runtime"
+install -m 0755 "${CORE}" "${OUT}/AppDir/libremedy_core.so"
 install -m 0755 "${BINARY}" "${OUT}/deb/usr/bin/remedy-desktop"
 install -m 0755 "${RUNTIME}" "${OUT}/deb/usr/bin/remedy-runtime"
+install -m 0755 "${CORE}" "${OUT}/deb/usr/bin/libremedy_core.so"
 cp -f "${ROOT}/assets/icon.png" "${OUT}/AppDir/remedy-desktop.png"
 cp -f "${ROOT}/assets/icon.png" "${OUT}/deb/usr/share/icons/hicolor/256x256/apps/remedy-desktop.png"
 

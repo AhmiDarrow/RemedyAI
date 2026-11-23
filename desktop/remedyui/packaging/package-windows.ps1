@@ -63,6 +63,23 @@ if (-not (Test-Path -LiteralPath $Runtime)) {
     throw "Runtime not found: $Runtime"
 }
 
+$Core = Join-Path $repoRoot "native\zig\zig-out\bin\remedy_core.dll"
+if (-not $SkipBuild -or -not (Test-Path -LiteralPath $Core)) {
+    $zig = Get-Command zig -ErrorAction SilentlyContinue
+    if (-not $zig) { throw "zig is required to build remedy_core.dll" }
+    $zigDir = Join-Path $repoRoot "native\zig"
+    Push-Location $zigDir
+    try {
+        & $zig.Source build -Doptimize=ReleaseSafe
+        if ($LASTEXITCODE -ne 0) { throw "zig build remedy_core failed ($LASTEXITCODE)" }
+    } finally {
+        Pop-Location
+    }
+}
+if (-not (Test-Path -LiteralPath $Core)) {
+    throw "Core not found: $Core"
+}
+
 $makensis = Get-Command makensis -ErrorAction SilentlyContinue
 if (-not $makensis) {
     throw "makensis is not on PATH. Install NSIS 3 and leave the GUI tools closed."
@@ -83,9 +100,10 @@ $wipe = To-NsisPath (Join-Path $desktop "src-tauri\windows\uninstall_wipe.ps1")
 $icon = To-NsisPath (Join-Path $desktop "src-tauri\icons\icon.ico")
 $binaryNsis = (Resolve-Path -LiteralPath $Binary).Path
 $runtimeNsis = (Resolve-Path -LiteralPath $Runtime).Path
+$coreNsis = (Resolve-Path -LiteralPath $Core).Path
 $outNsis = $out
 
-& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DRUNTIMESRCPATH=$runtimeNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
+& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DRUNTIMESRCPATH=$runtimeNsis" "/DCORESRCPATH=$coreNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
 if ($LASTEXITCODE -ne 0) { throw "makensis failed ($LASTEXITCODE)" }
 if (-not (Test-Path -LiteralPath $out)) { throw "makensis did not write $out" }
 
