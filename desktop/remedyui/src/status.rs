@@ -2,6 +2,7 @@
 
 use crate::studio::{Conn, Studio};
 use crate::{messages, say};
+use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::layout::{Align, Justify, Length};
 use remedy_ui::reactive::Signal;
@@ -51,7 +52,13 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
                 Conn::Error(e) => e,
                 Conn::Disconnected => messages().text(&u, "status-disconnected"),
             }
-        }));
+        }))
+        .on_click(|| crate::chrome::toggle_server_menu())
+        .semantics(
+            Semantics::new(Role::Button)
+                .label(messages().text(ui, "server-menu"))
+                .action(Action::Click),
+        );
 
     let settings =
         w::button(ui, move || messages().text(&u, "status-settings"), on_settings).variant("quiet");
@@ -90,13 +97,31 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
             l.min_height = Length::Px(40.0);
             l.shrink = 0.0;
         })
-        .child(
-            w::row(ui)
+        .child({
+            let mut cluster = w::row(ui)
                 .align(Align::Center)
                 .gap(unit * 2.0)
                 .child(indicator)
-                .child(settings),
-        )
+                .child(settings);
+            // Built once with the shell. Advanced mode at that moment shows Usage.
+            // A later toggle waits until Grove and Studio swap, so this row stays
+            // pixel-identical to the studio goldens while the mode is simple.
+            if crate::chrome::advanced_now() {
+                let u = ui.clone();
+                let usage_studio = studio.clone();
+                cluster = cluster.child(
+                    w::button(
+                        ui,
+                        move || messages().text(&u, "bar-usage"),
+                        move || {
+                            crate::chrome::open_usage(&usage_studio);
+                        },
+                    )
+                    .variant("quiet"),
+                );
+            }
+            cluster
+        })
         .child(picker)
 }
 

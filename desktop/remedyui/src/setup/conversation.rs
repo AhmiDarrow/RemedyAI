@@ -183,6 +183,7 @@ impl Conversation {
             "",
             "",
             WorkMode::Chat,
+            &[],
             move |kind, data| {
                 if kind == "done" {
                     let setup = super::api::get_json(&client_live, "setup").ok();
