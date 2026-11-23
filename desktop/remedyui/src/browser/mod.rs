@@ -17,7 +17,7 @@ mod ua;
 mod url;
 
 pub use host::live;
-pub use slide::{bind_app, body, page, preview, rail};
+pub use slide::{bind_app, body, page, preview, preview_at, rail};
 
 /// Start the poller and register the Browser slide. Safe to call again.
 /// Loops wait for a UI-thread waker, so call this from the window callback.

@@ -335,6 +335,11 @@ pub fn browser_preview(ui: &Ui) -> El {
     browser::preview(ui)
 }
 
+/// Browser chrome at `width` logical pixels (a narrow rail).
+pub fn browser_preview_at(ui: &Ui, width: f32) -> El {
+    browser::preview_at(ui, width)
+}
+
 /// Left rail open on Sessions, right rail a thin strip. Same shell as [`home`].
 pub fn home_rails_left(ui: &Ui) -> El {
     shell_with(
