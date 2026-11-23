@@ -14,6 +14,7 @@ mod sse;
 mod status;
 mod studio;
 mod time;
+mod work;
 
 pub use setup::{
     preview_conversation, preview_mind, preview_offer, preview_update, preview_wizard,
