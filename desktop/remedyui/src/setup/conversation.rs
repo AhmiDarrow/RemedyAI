@@ -445,7 +445,7 @@ fn chat_column(ui: &Ui, talk: Conversation) -> El {
         move |b| {
             let mine = b.role == "user";
             let bg = if mine { colors.accent.mix_oklab(colors.bg, 0.8) } else { colors.card };
-            w::text(&ui_bubbles, b.text)
+            w::text(&ui_bubbles, b.text.clone())
                 .padding(remedy_ui::core::Insets::all(unit * 1.5))
                 .style(
                     StylePatch::new()
@@ -487,12 +487,11 @@ fn chat_column(ui: &Ui, talk: Conversation) -> El {
             talk.send_text(text);
         }
     });
-    let send2 = send.clone();
     let input2 = input.clone();
     let busy = talk.busy.clone();
-    send.bind(move || {
-        let _ = send2.disabled(busy.get() || input2.get().trim().is_empty());
-    });
+    // `disabled` takes the element by value and returns it. A closure keeps the
+    // button in step without moving it out of the row.
+    let send = send.disabled(move || busy.get() || input2.get().trim().is_empty());
     let form = w::row(ui)
         .gap(unit)
         .align(Align::Center)

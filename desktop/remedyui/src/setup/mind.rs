@@ -230,7 +230,7 @@ pub fn mind_view(ui: &Ui, mind: Mind) -> El {
         ],
     );
     let root2 = root.clone();
-    root.bind(move || {
+    let root = root.bind(move || {
         label.set(model::mind_status_line(&phase2.get(), &bytes2.get(), pct2.get()));
         let _ = &root2;
     });

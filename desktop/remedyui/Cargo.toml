@@ -5,9 +5,8 @@ edition = "2024"
 publish = false
 
 [dependencies]
-# RemedyUI main at 7dec309 (PRs #118–#120). The Linux path checkout is not on this machine.
-# remedy-ui = { path = "/workspace/RemedyUI-update/crates/remedy-ui", features = ["net", "image"] }
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "7dec309c224fd4c85c38eaa108c869fe43331768", features = ["net", "image"] }
+# RemedyUI main at 9466a695. Features stay net + image so Windows builds the same tree.
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "9466a695e9f452049f6d020b24afb5fe3eb38b71", features = ["net", "image"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -17,8 +16,7 @@ base64 = "0.22"
 
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
-# remedy-ui = { path = "/workspace/RemedyUI-update/crates/remedy-ui", features = ["headless", "devtools", "net", "image"] }
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "7dec309c224fd4c85c38eaa108c869fe43331768", features = ["headless", "devtools", "net", "image"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "9466a695e9f452049f6d020b24afb5fe3eb38b71", features = ["headless", "devtools", "net", "image"] }
 
 [profile.release]
 lto = "fat"

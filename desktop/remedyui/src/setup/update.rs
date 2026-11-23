@@ -5,6 +5,7 @@
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
 use std::process::{Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
@@ -12,8 +13,8 @@ use std::time::Duration;
 use base64::Engine;
 use minisign_verify::{PublicKey, Signature};
 use remedy_ui::layout::{Align, Justify, Length};
-use remedy_ui::net::{Cancel, Http, Request};
-use remedy_ui::reactive::Signal;
+use remedy_ui::net::{Http, Request};
+use remedy_ui::reactive::{Cancel, Signal};
 use remedy_ui::style::StylePatch;
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui, show};
@@ -468,7 +469,7 @@ pub fn update_screen(ui: &Ui, updater: Updater) -> El {
     let kick = updater.clone();
     let screen = chrome::center(ui, body(ui, updater), 420.0);
     let screen2 = screen.clone();
-    screen.bind(move || {
+    let screen = screen.bind(move || {
         if auto.get() && !started.get() && phase_watch.get() == UpdatePhase::Ready {
             kick.begin();
         }
@@ -646,12 +647,9 @@ fn actions(ui: &Ui, updater: Updater, phase: Signal<UpdatePhase>) -> El {
                     let updater = updater.clone();
                     move || updater.begin()
                 });
-                let go2 = go.clone();
                 let url = updater.url.clone();
                 let started = updater.started.clone();
-                go.bind(move || {
-                    let _ = go2.disabled(url.get().is_empty() || started.get());
-                });
+                let go = go.disabled(move || url.get().is_empty() || started.get());
                 chrome::actions(&ui_ready, vec![later, go])
             }
         }).el())
@@ -685,7 +683,7 @@ fn actions(ui: &Ui, updater: Updater, phase: Signal<UpdatePhase>) -> El {
                 let phase = phase.clone();
                 w::text(&ui_busy, "")
                     .variant("muted")
-                    .text(move || {
+                    .text(move || -> String {
                         if phase.get() == UpdatePhase::Downloading {
                             UPDATE_PLEASE_WAIT.into()
                         } else {

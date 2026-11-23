@@ -10,8 +10,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use remedy_ui::layout::{Align, Justify, Length};
-use remedy_ui::net::{Cancel, Request};
-use remedy_ui::reactive::{Signal, Waker};
+use remedy_ui::net::Request;
+use remedy_ui::reactive::{Cancel, Signal, Waker};
 use remedy_ui::widgets as w;
 use remedy_ui::{App, El, Ui, show};
 use serde_json::{Value, json};
@@ -579,7 +579,7 @@ pub fn host(ui: &Ui, studio: Studio, app: App, client: Client) -> El {
         })
         .child(surface(ui, gate));
     let root2 = root.clone();
-    root.bind(move || {
+    let root = root.bind(move || {
         watching.watch();
         let _ = &root2;
     });

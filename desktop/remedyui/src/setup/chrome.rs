@@ -111,7 +111,7 @@ fn chip(ui: &Ui, label: &'static str, index: usize, step: Signal<usize>) -> El {
         } else {
             (colors.panel, colors.muted)
         };
-        wrapped2.style(
+        wrapped2.clone().style(
             StylePatch::new()
                 .background(bg)
                 .foreground(fg)
@@ -150,7 +150,7 @@ pub fn choice(
             colors.panel
         };
         let border = if on { colors.accent } else { colors.line.unwrap_or(colors.muted) };
-        el2.style(
+        el2.clone().style(
             StylePatch::new()
                 .background(bg)
                 .border(border)

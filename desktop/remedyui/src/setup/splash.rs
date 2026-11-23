@@ -40,9 +40,9 @@ fn status_line(ui: &Ui, status: Signal<String>, muted: Color, danger: Color, fg:
         .text(move || line(&status.get()))
         .style(StylePatch::new().foreground(fg));
     let painted = line_el.clone();
-    line_el.bind(move || {
+    let line_el = line_el.bind(move || {
         let color = if status_color.get() == "error" { danger } else { muted };
-        painted.style(StylePatch::new().foreground(color));
+        painted.clone().style(StylePatch::new().foreground(color));
     });
     line_el
 }

@@ -4,7 +4,8 @@
 use std::time::Duration;
 
 use crate::runtime::Client;
-use remedy_ui::net::{Cancel, Request};
+use remedy_ui::net::Request;
+use remedy_ui::reactive::Cancel;
 use serde_json::{Value, json};
 
 pub fn get_json(client: &Client, path: &str) -> Result<Value, String> {
