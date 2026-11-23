@@ -13,11 +13,13 @@ mod sse;
 mod status;
 mod studio;
 mod time;
+mod timetravel;
 mod work;
 
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
 pub use runtime::Client;
 pub use studio::Studio;
+pub use timetravel::{TimeTravel, preview as time_travel_preview};
 
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::host::{TrayEvent, TrayIcon, TrayImage, TrayItem};
@@ -104,6 +106,8 @@ pub fn home_chat(ui: &Ui) -> El {
 /// The Studio shell: session list, well, composer, status.
 pub fn shell(ui: &Ui, studio: Studio) -> El {
     fonts::prepare_theme(ui, &Fonts::load());
+    // Hidden overlay keeper. A closed rail is not a child of this column.
+    studio.time_travel.mount(ui, studio.clone());
     w::column(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);

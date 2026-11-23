@@ -176,6 +176,8 @@ pub struct Studio {
     pub local_only: bool,
     /// Fixed "now" for relative times in previews (Unix seconds).
     pub clock: Signal<Option<i64>>,
+    /// Time Travel rail. The shell mounts it; chrome calls [`crate::timetravel::TimeTravel::open`].
+    pub time_travel: crate::timetravel::TimeTravel,
     next_id: Signal<u64>,
     next_msg: Signal<u64>,
     client: Signal<Option<Client>>,
@@ -258,6 +260,7 @@ impl Studio {
             user_name: Signal::new(user.to_string()),
             local_only,
             clock: Signal::new(None),
+            time_travel: crate::timetravel::TimeTravel::new(),
             next_id: Signal::new(next_id),
             next_msg: Signal::new(1),
             client: Signal::new(None),
@@ -634,6 +637,17 @@ impl Studio {
             runtime::abort_session(&client, &sid, |_| {});
         }
         self.finish_assistant(None);
+    }
+
+    /// Reloads the session list and the open chat after a Time Travel restore.
+    pub(crate) fn reload_open(&self) {
+        if self.local_only {
+            return;
+        }
+        let Some(client) = self.client.get() else {
+            return;
+        };
+        self.refresh(&client);
     }
 
     /// Hooks a runtime client and loads sessions (no-op for local previews).
