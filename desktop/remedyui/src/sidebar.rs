@@ -175,20 +175,130 @@ fn filter_chip(
         })
 }
 
+/// Left-aligned disclosure row: chevron, label, optional trailing count.
+///
+/// Project headers stay keyed by path, so the arrow and count are closures.
+fn disclosure_button(
+    ui: &Ui,
+    label: impl Fn() -> String + Clone + 'static,
+    expanded: impl Fn() -> bool + Clone + 'static,
+    on_press: impl Fn() + 'static,
+    count: impl Fn() -> String + Clone + 'static,
+    show_count: bool,
+    emphasize: bool,
+) -> El {
+    let colors = ui.theme().colors.clone();
+    let label_color = if emphasize { colors.text } else { colors.muted };
+    let weight = if emphasize { 600.0 } else { 500.0 };
+    let open = expanded.clone();
+    let u_open = ui.clone();
+    let u_shut = ui.clone();
+    let chevron = show(
+        ui,
+        move || open(),
+        move || {
+            w::icon(&u_open, w::Icon::ChevronDown, 12.0)
+                .style(StylePatch::new().foreground(colors.muted))
+        },
+    )
+    .fallback(move || {
+        w::icon(&u_shut, w::Icon::ChevronRight, 12.0)
+            .style(StylePatch::new().foreground(colors.muted))
+    })
+    .el()
+    .layout(|l| {
+        l.width = Length::Px(12.0);
+        l.height = Length::Px(12.0);
+        l.shrink = 0.0;
+    });
+    let label_text = w::text(ui, "")
+        .text({
+            let label = label.clone();
+            move || label()
+        })
+        .nowrap()
+        .style(
+            StylePatch::new()
+                .foreground(label_color)
+                .text_size(12.0)
+                .weight(weight),
+        )
+        .layout(|l| {
+            l.grow = 1.0;
+            l.shrink = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_width = Length::Px(0.0);
+        });
+    let mut button = ui
+        .el("button")
+        .variant("quiet")
+        .row()
+        .align(Align::Center)
+        .justify(Justify::Start)
+        .gap(6.0)
+        .padding(Insets {
+            top: 4.0,
+            end: 8.0,
+            bottom: 4.0,
+            start: 2.0,
+        })
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_height = Length::Px(28.0);
+            l.shrink = 0.0;
+        })
+        .style(StylePatch::new().foreground(colors.muted))
+        .child(chevron)
+        .child(label_text);
+    if show_count {
+        let count_text = count.clone();
+        button = button.child(
+            w::text(ui, "")
+                .text(move || count_text())
+                .nowrap()
+                .style(
+                    StylePatch::new()
+                        .foreground(colors.muted)
+                        .text_size(10.0)
+                        .weight(500.0),
+                ),
+        );
+    }
+    let label_sem = label.clone();
+    let count_sem = count;
+    let exp_sem = expanded;
+    button
+        .on_click(on_press)
+        .semantics(move || {
+            let name = if show_count {
+                format!("{}, {}", label_sem(), count_sem())
+            } else {
+                label_sem()
+            };
+            Semantics::new(Role::Button)
+                .label(name)
+                .expanded(exp_sem())
+                .action(Action::Click)
+        })
+}
+
 fn session_options(ui: &Ui, studio: Studio) -> El {
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
     let toggle = studio.clone();
     let u = ui.clone();
-    let header = w::button(
+    let open = studio.clone();
+    let header = disclosure_button(
         ui,
         move || messages().text(&u, "session-options"),
+        move || open.options_open.get(),
         move || {
             toggle.options_open.update(|v| *v = !*v);
         },
-    )
-    .variant("quiet")
-    .layout(|l| l.width = Length::Percent(1.0));
+        || String::new(),
+        false,
+        false,
+    );
     let st = studio.clone();
     let u = ui.clone();
     let actions = show(
@@ -364,12 +474,6 @@ fn tree(ui: &Ui, studio: Studio) -> El {
                 });
             session_row(&ui_rows, &studio_rows, &session)
         }
-        TreeItem::Hint => {
-            let hint = ui_rows.clone();
-            w::text(&ui_rows, "")
-                .variant("muted")
-                .text(move || messages().text(&hint, "row-hint"))
-        }
     });
     w::scroll(ui)
         .layout(|l| {
@@ -385,7 +489,6 @@ fn tree(ui: &Ui, studio: Studio) -> El {
 enum TreeItem {
     Header(Option<String>),
     Session(String),
-    Hint,
 }
 
 impl TreeItem {
@@ -393,7 +496,6 @@ impl TreeItem {
         match self {
             TreeItem::Header(path) => format!("h:{}", path.as_deref().unwrap_or("-")),
             TreeItem::Session(id) => format!("s:{id}"),
-            TreeItem::Hint => "hint".into(),
         }
     }
 }
@@ -413,39 +515,49 @@ fn tree_items(
             }
         }
     }
-    out.push(TreeItem::Hint);
     out
 }
 
 fn project_header(ui: &Ui, studio: &Studio, path: Option<String>) -> El {
-    let colors = ui.theme().colors.clone();
-    let u = ui.clone();
-    let st = studio.clone();
-    let path_for_label = path.clone();
-    let label = move || {
-        let groups = grouped(
-            &st.sessions.get(),
-            &st.projects.get(),
-            st.filter.get(),
-            &st.query.get(),
-        );
-        let count = groups
-            .iter()
-            .find(|(p, _)| p.path == path_for_label)
-            .map(|(_, m)| m.len())
-            .unwrap_or(0);
-        let base = if path_for_label.is_none() {
-            messages().text(&u, "no-project")
-        } else {
-            crate::studio::project_label(path_for_label.as_deref())
-        };
-        format!("{base}  {count}")
-    };
-    let s = studio.clone();
-    w::button(ui, label, move || s.toggle_collapsed(path.as_deref()))
-        .variant("quiet")
-        .layout(|l| l.width = Length::Percent(1.0))
-        .style(StylePatch::new().foreground(colors.muted))
+    let base_ui = ui.clone();
+    let base_path = path.clone();
+    let exp_st = studio.clone();
+    let exp_path = path.clone();
+    let count_st = studio.clone();
+    let count_path = path.clone();
+    let press = studio.clone();
+    let press_path = path;
+    disclosure_button(
+        ui,
+        move || project_base(&base_ui, &base_path),
+        move || project_stats(&exp_st, &exp_path).1,
+        move || press.toggle_collapsed(press_path.as_deref()),
+        move || project_stats(&count_st, &count_path).0.to_string(),
+        true,
+        true,
+    )
+}
+
+fn project_base(ui: &Ui, path: &Option<String>) -> String {
+    if path.is_none() {
+        messages().text(ui, "no-project")
+    } else {
+        crate::studio::project_label(path.as_deref())
+    }
+}
+
+fn project_stats(studio: &Studio, path: &Option<String>) -> (usize, bool) {
+    let groups = grouped(
+        &studio.sessions.get(),
+        &studio.projects.get(),
+        studio.filter.get(),
+        &studio.query.get(),
+    );
+    let found = groups.iter().find(|(p, _)| &p.path == path);
+    (
+        found.map(|(_, members)| members.len()).unwrap_or(0),
+        found.map(|(project, _)| !project.collapsed).unwrap_or(true),
+    )
 }
 
 fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {

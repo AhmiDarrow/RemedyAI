@@ -71,6 +71,74 @@ fn new_session_and_close_are_visible_and_work() {
 }
 
 #[test]
+fn sidebar_rows_are_disclosures_and_the_helper_line_is_gone() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home);
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        !names
+            .iter()
+            .any(|n| n.contains("Pin, archive, and close stay visible")),
+        "helper text should be gone: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Session options")),
+        "session options disclosure: {names:?}"
+    );
+    assert!(
+        names
+            .iter()
+            .any(|n| n.contains("No project") && n.contains('3')),
+        "project header keeps its count: {names:?}"
+    );
+    let options = app.reader_view().into_iter().find(|n| {
+        n.role == Role::Button
+            && n.name
+                .as_deref()
+                .is_some_and(|s| s.contains("Session options"))
+    });
+    assert!(
+        options.is_some_and(|n| n.expanded == Some(false)),
+        "session options starts collapsed"
+    );
+}
+
+#[test]
+fn chat_preview_shows_worked_steps_and_errors() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home_chat);
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("Worked")
+            && n.contains("3")
+            && n.contains("step")
+            && n.contains("1")
+            && n.contains("error")),
+        "worked meta above the assistant reply: {names:?}"
+    );
+}
+
+fn preview_window(build: fn(&remedy_ui::Ui) -> remedy_ui::El) -> TestApp {
+    TestApp::new(AppConfig::new("Remedy Desktop test"), move |app| {
+        app.open(
+            remedy_ui::WindowSpec::new("preview").size(1100.0, 700.0),
+            move |ui, _| {
+                ui.root().child(build(ui));
+            },
+        );
+    })
+}
+
+fn accessible_names(app: &TestApp) -> Vec<String> {
+    app.reader_view()
+        .into_iter()
+        .filter_map(|n| n.name)
+        .collect()
+}
+
+#[test]
 fn every_palette_is_covered_by_the_shell_preview() {
     let ids: Vec<&str> = PALETTES.iter().map(|p| p.id).collect();
     assert_eq!(ids, THEMES);
