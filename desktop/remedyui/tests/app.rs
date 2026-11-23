@@ -183,10 +183,69 @@ fn live_turn_seals_mid_turn_speech_with_reactions() {
     }
 }
 
+#[test]
+fn chat_workspace_is_two_panes_with_a_swap() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home_chat);
+    app.frames(3);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("Coding / Actions")),
+        "actions pane: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n == "Chat" || n.contains("Messages to you")),
+        "chat pane: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Actions on the left")),
+        "default side: {names:?}"
+    );
+    assert!(
+        names
+            .iter()
+            .any(|n| n.contains("The manifest still named init.lua")),
+        "thinking lives in the actions pane: {names:?}"
+    );
+    assert!(
+        app.press(Role::Button, "Swap Actions and Chat"),
+        "swap"
+    );
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("Actions on the right")),
+        "swap persists in the session: {names:?}"
+    );
+}
+
+#[test]
+fn narrow_chat_falls_back_to_tabs() {
+    no_spawn();
+    let mut app = preview_window_size(remedy_desktop::home_chat, 640.0, 700.0);
+    app.frames(3);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("Chat or actions")),
+        "tab list: {names:?}"
+    );
+    assert!(
+        app.find(Role::Tab, "Chat").is_some() && app.find(Role::Tab, "Actions").is_some(),
+        "tabs: {names:?}"
+    );
+}
+
 fn preview_window(build: fn(&remedy_ui::Ui) -> remedy_ui::El) -> TestApp {
+    preview_window_size(build, 1100.0, 700.0)
+}
+
+fn preview_window_size(
+    build: fn(&remedy_ui::Ui) -> remedy_ui::El,
+    width: f32,
+    height: f32,
+) -> TestApp {
     TestApp::new(AppConfig::new("Remedy Desktop test"), move |app| {
         app.open(
-            remedy_ui::WindowSpec::new("preview").size(1100.0, 700.0),
+            remedy_ui::WindowSpec::new("preview").size(width, height),
             move |ui, _| {
                 ui.root().child(build(ui));
             },
