@@ -1053,6 +1053,15 @@ impl Grove {
         self.save();
     }
 
+    /// The browser rail starred or unstarred `url`. Match that state here.
+    pub(crate) fn apply_browser_star(&self, url: &str, on: bool) {
+        let mut list = self.bookmarks.get();
+        if store::set_star(&mut list, url, on) {
+            self.bookmarks.set(list);
+            self.save();
+        }
+    }
+
     pub(crate) fn open_bookmark(&self, url: &str) {
         self.bookmarks_open.set(false);
         self.go(url);

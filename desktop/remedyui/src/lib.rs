@@ -75,6 +75,7 @@ pub fn app(app: &App) {
     app.keep_running(true);
     let studio = Studio::new();
     let grove = grove::Grove::new(studio.clone(), true);
+    grove::bind_live(grove.clone());
     let chrome = Chrome::load();
     if !runtime::spawn_disabled() {
         runtime::ensure_running();
