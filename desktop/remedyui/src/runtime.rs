@@ -78,7 +78,7 @@ pub fn load_token() -> Option<String> {
     None
 }
 
-fn remedy_home() -> PathBuf {
+pub(crate) fn remedy_home() -> PathBuf {
     if let Ok(h) = std::env::var("REMEDY_HOME") {
         let p = PathBuf::from(h);
         if !p.as_os_str().is_empty() {
@@ -412,6 +412,49 @@ pub fn list_models(
                 .map_err(|e| e.to_string())
                 .and_then(|r| r.json::<serde_json::Value>().map_err(|e| e.to_string()))
                 .map(|v| parse_models(&v));
+            done(out);
+        })
+        .ok();
+}
+
+/// GET a JSON path (`diagnostics`, or a full `https://` address) on a worker thread.
+pub fn get_json(
+    client: &Client,
+    path: &str,
+    done: impl FnOnce(Result<serde_json::Value, String>) + Send + 'static,
+) {
+    let http = client.http.clone();
+    let path = path.to_string();
+    std::thread::Builder::new()
+        .name("remedy-get".into())
+        .spawn(move || {
+            let cancel = Cancel::new();
+            let out = http
+                .send_blocking(Request::get(&path), &cancel)
+                .map_err(|e| e.to_string())
+                .and_then(|r| r.json().map_err(|e| e.to_string()));
+            done(out);
+        })
+        .ok();
+}
+
+/// POST a JSON body on a worker thread.
+pub fn post_json(
+    client: &Client,
+    path: &str,
+    body: serde_json::Value,
+    done: impl FnOnce(Result<serde_json::Value, String>) + Send + 'static,
+) {
+    let http = client.http.clone();
+    let path = path.to_string();
+    std::thread::Builder::new()
+        .name("remedy-post".into())
+        .spawn(move || {
+            let cancel = Cancel::new();
+            let out = http
+                .send_blocking(Request::post(&path).json(&body), &cancel)
+                .map_err(|e| e.to_string())
+                .and_then(|r| r.json().map_err(|e| e.to_string()));
             done(out);
         })
         .ok();
