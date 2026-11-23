@@ -468,13 +468,19 @@ fn settings_chord_opens_the_rail_and_composer_ignores_new_session() {
         "settings rail: {names:?}"
     );
     let composer = "Message Remedy — /command · @file · Shift+Tab Chat/Plan/Build";
-    let field = app.find(Role::TextInput, composer);
+    // Chat-depth draws the composer as a text area.
+    let field = app.find(Role::MultilineTextInput, composer);
     assert!(
         field.is_some(),
         "composer missing among text fields: {:?}",
         app.reader_view()
             .into_iter()
-            .filter(|n| n.role == Role::TextInput)
+            .filter(|n| {
+                matches!(
+                    n.role,
+                    Role::TextInput | Role::MultilineTextInput | Role::SearchInput
+                )
+            })
             .filter_map(|n| n.name)
             .collect::<Vec<_>>()
     );

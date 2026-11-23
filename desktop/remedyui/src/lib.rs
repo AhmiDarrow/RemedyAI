@@ -6,6 +6,7 @@
 
 mod chat;
 mod chrome;
+mod depth;
 mod diagnostics;
 mod fonts;
 mod grove;
@@ -89,6 +90,7 @@ pub fn app(app: &App) {
     let a = app.clone();
     let win = app.open(spec, move |ui, window| {
         chrome.attach(&a, window, ui);
+        depth::set_host(a.clone(), window.clone());
         settings::install(ui, studio.clone());
         let tag = tray_copy::fluent_tag(&chrome.locale.get());
         ui.set_locale(&tag);
@@ -284,6 +286,9 @@ pub(crate) fn shell_fixed(ui: &Ui, studio: Studio) -> El {
 }
 
 fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
+    // Chat-depth workers hop back onto this Ui (audio, dialogs). Every shell
+    // path, including rail previews, goes through here.
+    depth::set_ui(ui.clone());
     fonts::prepare_theme(ui, &Fonts::load());
     // Hidden overlay keeper. A closed rail is not a child of this column.
     studio.time_travel.mount(ui, studio.clone());
