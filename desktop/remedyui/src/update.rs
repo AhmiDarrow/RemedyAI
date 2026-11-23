@@ -52,11 +52,19 @@ thread_local! {
 }
 
 fn signal(slot: &std::cell::RefCell<Option<Signal<String>>>) -> Signal<String> {
-    let mut guard = slot.borrow_mut();
-    if guard.is_none() {
-        *guard = Some(Signal::new(String::new()));
+    if let Some(existing) = slot.borrow().as_ref().copied() {
+        if existing.is_alive() {
+            return existing;
+        }
     }
-    guard.clone().unwrap()
+    // `Signal::new` is owned by whatever binding is running. That binding
+    // disposes the signal before it runs again, and the test harness reuses
+    // the thread after the runtime is gone. A detached scope lives until the
+    // runtime drops, which is the window, not the binding.
+    let (created, _scope) =
+        remedy_ui::reactive::Scope::detached(|| Signal::new(String::new()));
+    *slot.borrow_mut() = Some(created);
+    created
 }
 
 pub(crate) fn offer_signal() -> Signal<String> {

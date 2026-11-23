@@ -86,12 +86,20 @@ impl DiagnosticsPanel {
 
     /// Closes the overlay. The mounted view removes it.
     pub fn close(&self) {
-        self.open.set(false);
+        if self.open.is_alive() {
+            self.open.set(false);
+        }
     }
 
     /// Whether the overlay should be up.
     pub fn is_open(&self) -> bool {
-        self.open.get()
+        self.open.try_get().unwrap_or(false)
+    }
+
+    /// False after the runtime that created the panel has been disposed.
+    /// Thread-local install slots outlive a single test.
+    pub(crate) fn is_alive(&self) -> bool {
+        self.open.is_alive()
     }
 
     /// Host element. Mount it once under the window. It draws nothing until [`open`](Self::open).
@@ -103,7 +111,7 @@ impl DiagnosticsPanel {
         let layer_b = layer.clone();
         let ui_b = ui.clone();
         let host = host.bind(move || {
-            let is_open = panel_b.open.get();
+            let is_open = panel_b.open.try_get().unwrap_or(false);
             let panel = panel_b.clone();
             let ui = ui_b.clone();
             let layer = layer_b.clone();

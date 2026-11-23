@@ -93,7 +93,7 @@ impl HelpPanel {
 
     /// Hides the manual and returns focus to whatever had it.
     pub fn close(&self) {
-        if !self.open.get() {
+        if !self.open.try_get().unwrap_or(false) {
             return;
         }
         let restore = self.restore.borrow_mut().take();
@@ -106,7 +106,12 @@ impl HelpPanel {
 
     /// Whether the overlay is up.
     pub fn is_open(&self) -> bool {
-        self.open.get()
+        self.open.try_get().unwrap_or(false)
+    }
+
+    /// False after the runtime that created the panel has been disposed.
+    pub(crate) fn is_alive(&self) -> bool {
+        self.open.is_alive()
     }
 
     /// Desktop version written into Report an issue. A leading `v` is stripped later.
@@ -128,7 +133,7 @@ impl HelpPanel {
             ui,
             {
                 let panel = panel.clone();
-                move || panel.open.get()
+                move || panel.open.try_get().unwrap_or(false)
             },
             move || panel.mount(&ui_for),
         )

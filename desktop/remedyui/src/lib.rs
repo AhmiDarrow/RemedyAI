@@ -127,8 +127,8 @@ pub fn app(app: &App) {
                 };
                 // Download progress wins, then an offered version, then the
                 // shell's check label. The signed install lives behind that item.
-                let note = update::note_signal().get();
-                let offer = update::offer_signal().get();
+                let note = update::note_signal().try_get().unwrap_or_default();
+                let offer = update::offer_signal().try_get().unwrap_or_default();
                 let updates_label = if !note.is_empty() {
                     note
                 } else if !offer.is_empty() {

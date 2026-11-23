@@ -49,7 +49,7 @@ fn current_diag() -> crate::diagnostics::DiagnosticsPanel {
         let fresh = DIAG_FRESH.with(|flag| flag.replace(false));
         let mut guard = slot.borrow_mut();
         if fresh {
-            if let Some(panel) = guard.clone() {
+            if let Some(panel) = guard.clone().filter(|panel| panel.is_alive()) {
                 return panel;
             }
         }
@@ -60,7 +60,7 @@ fn current_diag() -> crate::diagnostics::DiagnosticsPanel {
 }
 
 fn diag_now() -> Option<crate::diagnostics::DiagnosticsPanel> {
-    DIAG.with(|slot| slot.borrow().clone())
+    DIAG.with(|slot| slot.borrow().clone().filter(|panel| panel.is_alive()))
 }
 
 fn close_diag() {
@@ -88,7 +88,7 @@ fn current_help() -> crate::help::HelpPanel {
         let fresh = HELP_FRESH.with(|flag| flag.replace(false));
         let mut guard = slot.borrow_mut();
         if fresh {
-            if let Some(panel) = guard.clone() {
+            if let Some(panel) = guard.clone().filter(|panel| panel.is_alive()) {
                 return panel;
             }
         }
@@ -99,7 +99,7 @@ fn current_help() -> crate::help::HelpPanel {
 }
 
 fn help_now() -> Option<crate::help::HelpPanel> {
-    HELP.with(|slot| slot.borrow().clone())
+    HELP.with(|slot| slot.borrow().clone().filter(|panel| panel.is_alive()))
 }
 
 fn close_help() {
