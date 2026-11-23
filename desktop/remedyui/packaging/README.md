@@ -4,7 +4,7 @@ The first RemedyUI ship is **1.0.0** (`com.remedy.desktop`), which is newer than
 
 `cargo remedy package` writes an Inno Setup installer on Windows, a prefix tarball on Linux, and a zipped `.app` on macOS. None of those is the 0.70.5 update payload. Use the scripts in this directory.
 
-Outputs land in `desktop/remedyui/target/packaging/` (gitignored with the rest of `target/`).
+Outputs land in `desktop/remedyui/target/packaging/` (gitignored with the rest of `target/`). The scripts read the built `remedy-desktop` binary from `$CARGO_TARGET_DIR` when that variable is set, and from `desktop/remedyui/target/` otherwise. The installer or bundle is still written under `desktop/remedyui/target/packaging/`, which is the path the package workflow uploads.
 
 ## What an installed 0.70.5 client sends
 
@@ -90,4 +90,4 @@ The crate depends on the private RemedyUI git repo. The workflow sets a git `ins
 
 ## In the app
 
-The shell checks `https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json` through `remedy_ui::update` (`Feed::Json`). `REMEDY_DESKTOP_NO_SPAWN` or `REMEDY_DESKTOP_NO_UPDATE` skips the network, which is how tests and golden previews stay offline. A newer version adds a quiet status button and changes the tray item to `Update {version}`. Idle previews have no offer, so that button is not in the tree.
+The shell checks `https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json` through `remedy_ui::update` (`Feed::Json`). `REMEDY_DESKTOP_NO_SPAWN` or `REMEDY_DESKTOP_NO_UPDATE` skips the network, which is how tests and golden previews stay offline. A newer version adds a quiet status button and changes the tray item to `Update {version}`. Choosing it downloads on a background thread. The status line and the tray item then show `Downloading N%` (or `Downloading N MB` when the length is unknown), the same facts the old update screen read from `update-progress`. There is still no popup. Idle previews have no offer and no note, so neither is in the tree.

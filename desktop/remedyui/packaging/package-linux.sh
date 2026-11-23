@@ -38,7 +38,9 @@ if [[ "${SKIP_BUILD}" -eq 0 ]]; then
 fi
 
 if [[ -z "${BINARY}" ]]; then
-  BINARY="${ROOT}/target/release/remedy-desktop"
+  # Honor CARGO_TARGET_DIR. CI leaves it unset and builds into the crate's target/.
+  TARGET_ROOT="${CARGO_TARGET_DIR:-${ROOT}/target}"
+  BINARY="${TARGET_ROOT}/release/remedy-desktop"
 fi
 if [[ ! -f "${BINARY}" ]]; then
   echo "Binary not found: ${BINARY}" >&2

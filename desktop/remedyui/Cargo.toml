@@ -5,15 +5,18 @@ edition = "2024"
 publish = false
 
 [dependencies]
-# RemedyUI main at 7dec309 (PRs #118–#120): theme names, Feed::Json, AhmiPrint weights.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "7dec309c224fd4c85c38eaa108c869fe43331768", features = ["net", "image", "update"] }
+# RemedyUI main at 68ad3a19. `desktop` and `term` are the shell (Grove, rails,
+# settings, terminal). `update` is the signed Tauri latest.json feed. `net`
+# and `image` are the runtime client and the previews.
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "68ad3a198571e702fc4696bc8b000edc6c5e7980", features = ["net", "image", "desktop", "term", "update"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+portable-pty = "0.9"
 
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "7dec309c224fd4c85c38eaa108c869fe43331768", features = ["headless", "devtools", "net", "image", "update"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "68ad3a198571e702fc4696bc8b000edc6c5e7980", features = ["headless", "devtools", "net", "image", "desktop", "term", "update"] }
 
 [profile.release]
 lto = "fat"

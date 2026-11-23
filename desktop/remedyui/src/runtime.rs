@@ -27,6 +27,14 @@ impl Client {
         }
         Client { http }
     }
+
+    /// A clone of the bearer-backed client.
+    ///
+    /// Grove chains calls on it. Settings moves one onto a worker thread.
+    /// Cloning shares the cookie jar and the headers.
+    pub(crate) fn http(&self) -> Http {
+        self.http.clone()
+    }
 }
 
 /// Origin override: `$REMEDY_API`, else the default loopback port.
@@ -378,16 +386,27 @@ fn parse_messages(v: &serde_json::Value) -> Vec<ChatMessage> {
                 .and_then(|t| t.as_str())
                 .unwrap_or("")
                 .to_string();
+            let calls = crate::work::json_array(row.get("tool_calls"));
+            let results = crate::work::json_array(row.get("tool_results"));
+            let steps = crate::work::steps_from_history(&calls, &results);
+            let narrations: Vec<String> = steps.iter().filter_map(|s| s.narration.clone()).collect();
+            let content = crate::work::strip_narration(&content, &narrations);
+            let thinking = match row.get("thinking") {
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(serde_json::Value::Array(items)) => {
+                    items.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("")
+                }
+                _ => String::new(),
+            };
             let created_at = row
                 .get("created_at")
                 .and_then(|t| t.as_str())
                 .map(|s| s.to_string());
             Some(ChatMessage {
-                id,
-                role,
-                content,
                 created_at,
-                streaming: false,
+                steps,
+                thinking,
+                ..ChatMessage::plain(id, role, content)
             })
         })
         .collect()
@@ -512,12 +531,26 @@ pub fn stream_message(
     );
 }
 
-// Request::delete — confirm it exists; if not we'll use a generic method.
-
 #[cfg(test)]
-mod home_tests {
+mod tests {
+    use super::parse_sessions;
     use super::remedy_home_from;
+    use serde_json::json;
     use std::path::PathBuf;
+
+    #[test]
+    fn grove_sessions_stay_out_of_the_studio_list() {
+        let rows = parse_sessions(&json!({
+            "sessions": [
+                {"id": "g1", "title": "Home", "origin_channel": "grove", "project_path": ""},
+                {"id": "s1", "title": "New chat", "origin_channel": "studio"},
+                {"id": "s2", "title": "Older", "message_count": 3}
+            ]
+        }));
+        let ids: Vec<&str> = rows.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["s1", "s2"]);
+        assert_eq!(rows[1].message_count, 3);
+    }
 
     #[test]
     fn windows_home_follows_userprofile() {

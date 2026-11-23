@@ -33,8 +33,10 @@ if (-not $SkipBuild) {
 }
 
 if (-not $Binary) {
+    # Honor CARGO_TARGET_DIR. CI leaves it unset and builds into the crate's target/.
+    $targetRoot = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $manifestDir "target" }
     $dirName = if ($Profile -eq "dev") { "debug" } else { $Profile }
-    $Binary = Join-Path $manifestDir "target\$dirName\remedy-desktop.exe"
+    $Binary = Join-Path $targetRoot "$dirName\remedy-desktop.exe"
 }
 if (-not (Test-Path -LiteralPath $Binary)) {
     throw "Binary not found: $Binary"
