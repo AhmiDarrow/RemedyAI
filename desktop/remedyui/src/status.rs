@@ -108,11 +108,14 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
             // pixel-identical to the studio goldens while the mode is simple.
             if crate::chrome::advanced_now() {
                 let u = ui.clone();
+                let usage_studio = studio.clone();
                 cluster = cluster.child(
                     w::button(
                         ui,
                         move || messages().text(&u, "bar-usage"),
-                        || crate::chrome::open_usage(),
+                        move || {
+                            crate::chrome::open_usage(&usage_studio);
+                        },
                     )
                     .variant("quiet"),
                 );

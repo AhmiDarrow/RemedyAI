@@ -1,4 +1,4 @@
-//! Overlay bodies: About, Diagnostics, Usage, Time Travel, Settings, quit.
+//! Overlay bodies: About, Diagnostics, Time Travel, Settings, quit.
 
 use remedy_ui::a11y::{Role, Semantics};
 use remedy_ui::core::Insets;
@@ -210,100 +210,6 @@ fn hive_block(ui: &Ui, hive: &serde_json::Value, pending: Signal<String>, pendin
         );
     }
     col
-}
-
-pub fn usage_body(ui: &Ui, studio: Studio, chrome: Chrome) -> El {
-    let unit = ui.theme().spacing.unit;
-    let host = ui.el("usage-body").column().gap(unit * 2.0);
-    let slot = host.clone();
-    let u = ui.clone();
-    let host = host.bind(move || {
-        let v = chrome.usage.get();
-        slot.clear();
-        if v.is_null() {
-            let _ = slot.clone().child(w::text(&u, messages().text(&u, "usage-loading")).variant("muted"));
-            return;
-        }
-        let totals = v.get("totals").cloned().unwrap_or(serde_json::Value::Null);
-        let tokens = totals.get("total_tokens").and_then(|n| n.as_i64()).unwrap_or(0);
-        let cost = totals.get("estimated_cost_usd").and_then(|n| n.as_f64()).unwrap_or(0.0);
-        let events = totals.get("events").and_then(|n| n.as_i64()).unwrap_or(0);
-        let days = v.get("range_days").and_then(|n| n.as_i64()).unwrap_or(7);
-        let _ = slot.clone().child(w::text(&u, messages().format(&u, "usage-range", &[("days", days.into())])));
-        if tokens == 0 && events == 0 {
-            let _ = slot.clone().child(w::text(&u, messages().text(&u, "usage-empty")).variant("muted"));
-        }
-        let _ = slot.clone().child(kv(&u, &messages().text(&u, "usage-tokens"), &tokens.to_string()));
-        let _ = slot.clone().child(kv(&u, &messages().text(&u, "usage-cost"), &format!("${cost:.4}")));
-        let _ = slot.clone().child(kv(&u, &messages().text(&u, "usage-events"), &events.to_string()));
-        let _ = slot.clone().child(w::text(&u, messages().text(&u, "usage-byProvider")).variant("muted"));
-        if let Some(rows) = v.get("by_provider").and_then(|a| a.as_array()) {
-            for row in rows {
-                let name = row.get("provider").and_then(|s| s.as_str()).unwrap_or("");
-                let n = row.get("total_tokens").and_then(|n| n.as_i64()).unwrap_or(0);
-                let _ = slot.clone().child(w::text(&u, format!("{name} · {n}")));
-            }
-        }
-        let series = chrome.usage_series.get();
-        if let Some(points) = series.get("points").and_then(|a| a.as_array()) {
-            if !points.is_empty() {
-                let _ = slot.clone().child(bars(&u, points));
-            }
-        }
-        let snap = v.clone();
-        let toast_ui = u.clone();
-        let _ = slot.clone().child(quiet(&u, "usage-export", move || {
-            let csv = usage_csv(&snap);
-            if let Some(app) = chrome.app() {
-                app.copy(csv, false);
-            }
-            chrome.toast(&toast_ui, messages().text(&toast_ui, "toast-copied"));
-        }));
-        let s = studio.clone();
-        let _ = slot.clone().child(quiet(&u, "diag-refresh", move || chrome.load_usage(&s)));
-    });
-    host
-}
-
-fn bars(ui: &Ui, points: &[serde_json::Value]) -> El {
-    let mut max = 1.0f64;
-    for p in points {
-        let n = p.get("total_tokens").and_then(|n| n.as_f64()).unwrap_or(0.0);
-        if n > max {
-            max = n;
-        }
-    }
-    let mut row = w::row(ui).align(Align::End).gap(ui.theme().spacing.unit);
-    let colors = ui.theme().colors.clone();
-    for p in points.iter().take(24) {
-        let n = p.get("total_tokens").and_then(|n| n.as_f64()).unwrap_or(0.0);
-        let h = ((n / max) * 64.0).max(2.0) as f32;
-        row = row.child(
-            ui.el("bar")
-                .style(StylePatch::new().background(colors.accent).radius(2.0))
-                .layout(|l| {
-                    l.width = Length::Px(8.0);
-                    l.height = Length::Px(h);
-                }),
-        );
-    }
-    row
-}
-
-fn usage_csv(v: &serde_json::Value) -> String {
-    let mut lines = vec!["provider,model,tokens,cost,events".to_string()];
-    if let Some(rows) = v.get("by_provider").and_then(|a| a.as_array()) {
-        for row in rows {
-            lines.push(format!(
-                "{},,{},{},{}",
-                row.get("provider").and_then(|s| s.as_str()).unwrap_or(""),
-                row.get("total_tokens").and_then(|n| n.as_i64()).unwrap_or(0),
-                row.get("estimated_cost_usd").and_then(|n| n.as_f64()).unwrap_or(0.0),
-                row.get("events").and_then(|n| n.as_i64()).unwrap_or(0),
-            ));
-        }
-    }
-    lines.join("\n")
 }
 
 pub fn timeline_body(ui: &Ui, studio: Studio, chrome: Chrome) -> El {

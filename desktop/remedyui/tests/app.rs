@@ -222,6 +222,13 @@ fn settings_previews_match_their_golden_images() {
     assert_settings_goldens("settings-error", remedy_desktop::preview_error);
 }
 
+/// Forest, a light theme, and a colorblind palette. A missing PNG is written and is not a failure.
+#[test]
+fn usage_previews_match_their_golden_images() {
+    assert_settings_goldens("usage", remedy_desktop::preview_usage);
+    assert_settings_goldens("usage-harness", remedy_desktop::preview_usage_harness);
+}
+
 const CHROME_THEMES: &[&str] = &["forest", "deutan"];
 
 fn assert_chrome_goldens(name: &str, build: fn(&remedy_ui::Ui) -> remedy_ui::El) {
