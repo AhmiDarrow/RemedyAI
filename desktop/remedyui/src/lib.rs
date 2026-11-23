@@ -5,6 +5,7 @@
 //! window talks to remedy-runtime over HTTP+SSE on 127.0.0.1:7400.
 
 mod chat;
+mod depth;
 mod diagnostics;
 mod fonts;
 mod grove;
@@ -73,6 +74,7 @@ pub fn app(app: &App) {
             .hide_on_close()
             .persist_geometry("main"),
         move |ui, window| {
+            depth::set_host(a.clone(), window.clone());
             let (u, win, a) = (ui.clone(), window.clone(), a.clone());
             let grove_ui = grove.clone();
             let hidden = std::rc::Rc::new(std::cell::Cell::new(0u64));
@@ -205,6 +207,9 @@ pub fn shell(ui: &Ui, studio: Studio) -> El {
 }
 
 fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
+    // Chat-depth workers hop back onto this Ui (audio, dialogs). Every shell
+    // path, including rail previews, goes through here.
+    depth::set_ui(ui.clone());
     fonts::prepare_theme(ui, &Fonts::load());
     // Hidden overlay keeper. A closed rail is not a child of this column.
     studio.time_travel.mount(ui, studio.clone());
