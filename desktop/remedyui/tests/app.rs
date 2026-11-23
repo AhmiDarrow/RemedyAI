@@ -3,7 +3,7 @@
 use remedy_ui::AppConfig;
 use remedy_ui::a11y::{Action, Role};
 use remedy_ui::devtools::{GoldenError, Preview, check_golden};
-use remedy_ui::input::{Key, KeyEvent};
+use remedy_ui::input::{Key, KeyEvent, Modifiers};
 use remedy_ui::testing::TestApp;
 use remedy_ui::themes::PALETTES;
 use std::path::PathBuf;
@@ -22,10 +22,8 @@ fn no_spawn() {
         // Grove prefs live under REMEDY_HOME. A fresh directory per process, so a
         // previous run that switched to Studio cannot open this one there.
         // Rails persist beside that home, not in the user's ~/.remedy.
-        let home = std::env::temp_dir().join(format!(
-            "remedy-desktop-test-home-{}",
-            std::process::id()
-        ));
+        let home =
+            std::env::temp_dir().join(format!("remedy-desktop-test-home-{}", std::process::id()));
         let layout = std::env::temp_dir().join(format!(
             "remedy-desktop-rails-layout-{}",
             std::process::id()
@@ -58,7 +56,8 @@ fn reset_saved_layout() {
 
 fn saved_layout_text() -> String {
     let dir = std::env::var("REMEDY_LAYOUT_DIR").expect("layout dir");
-    std::fs::read_to_string(PathBuf::from(dir).join("workspace-layout.v3.json")).expect("saved layout")
+    std::fs::read_to_string(PathBuf::from(dir).join("workspace-layout.v3.json"))
+        .expect("saved layout")
 }
 
 #[test]
@@ -154,6 +153,36 @@ fn chat_preview_shows_worked_steps_and_errors() {
     );
 }
 
+#[test]
+fn live_turn_seals_mid_turn_speech_with_reactions() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home_chat_live);
+    app.frames(3);
+    let names = accessible_names(&app);
+    assert!(
+        names
+            .iter()
+            .any(|n| n.contains("I'll reach the folder through the shell.")),
+        "sealed mid-turn speech is a bubble: {names:?}"
+    );
+    assert!(
+        names
+            .iter()
+            .any(|n| n.contains("Cmd is eating the search patterns")),
+        "later sealed beat is its own bubble: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Patching the entry path")),
+        "in-progress reply stays live: {names:?}"
+    );
+    for label in ["Thumbs up", "Thumbs down", "Heart", "Broken heart"] {
+        assert!(
+            names.iter().any(|n| n == label || n.contains(label)),
+            "reaction {label} on sealed bubbles: {names:?}"
+        );
+    }
+}
+
 fn preview_window(build: fn(&remedy_ui::Ui) -> remedy_ui::El) -> TestApp {
     TestApp::new(AppConfig::new("Remedy Desktop test"), move |app| {
         app.open(
@@ -191,7 +220,9 @@ fn assert_goldens(name: &str, themes: &[&str], build: fn(&remedy_ui::Ui) -> reme
 const SETTINGS_THEMES: &[&str] = &["forest", "light", "deutan"];
 
 fn assert_settings_goldens(name: &str, build: fn(&remedy_ui::Ui) -> remedy_ui::El) {
-    let preview = Preview::new(name, build).sizes(&[SHELL]).themes(SETTINGS_THEMES);
+    let preview = Preview::new(name, build)
+        .sizes(&[SHELL])
+        .themes(SETTINGS_THEMES);
     match check_golden(&preview, std::path::Path::new("tests/golden")) {
         Ok(()) | Err(GoldenError::Missing(_)) => {}
         Err(e) => panic!("{e}"),
@@ -206,6 +237,12 @@ fn previews_match_their_golden_images() {
     assert_goldens("rails-left", rails, remedy_desktop::home_rails_left);
     assert_goldens("rails-right", rails, remedy_desktop::home_rails_right);
     assert_goldens("rails-dual", rails, remedy_desktop::home_rails_dual);
+}
+
+#[test]
+fn live_chat_preview_matches_its_golden_images() {
+    // New mid-turn surface: a missing PNG is written and is not a failure.
+    assert_settings_goldens("studio-live-react", remedy_desktop::home_chat_live);
 }
 
 #[test]
@@ -229,7 +266,9 @@ fn help_preview_shows_the_manual() {
     app.frames(3);
     let names = accessible_names(&app);
     assert!(
-        names.iter().any(|n| n.contains("Owner's Manual") || n.contains("Help")),
+        names
+            .iter()
+            .any(|n| n.contains("Owner's Manual") || n.contains("Help")),
         "help dialog: {names:?}"
     );
     assert!(
@@ -277,7 +316,9 @@ fn time_travel_preview_lists_steps_and_asks_before_restore() {
         "the rail names itself: {names:?}"
     );
     assert!(
-        names.iter().any(|n| n.contains("Step 1") && n.contains("Restore")),
+        names
+            .iter()
+            .any(|n| n.contains("Step 1") && n.contains("Restore")),
         "step 1 is a restore point: {names:?}"
     );
     assert!(
@@ -303,13 +344,20 @@ fn time_travel_preview_lists_steps_and_asks_before_restore() {
     );
     let asked = accessible_names(&app);
     assert!(
-        asked.iter().any(|n| n.contains("Restore to") && n.contains("Later messages")),
+        asked
+            .iter()
+            .any(|n| n.contains("Restore to") && n.contains("Later messages")),
         "confirm copy matches the current app: {asked:?}"
     );
-    assert!(app.press(Role::Button, "Cancel"), "cancel the confirm: {asked:?}");
+    assert!(
+        app.press(Role::Button, "Cancel"),
+        "cancel the confirm: {asked:?}"
+    );
     let closed = accessible_names(&app);
     assert!(
-        !closed.iter().any(|n| n.contains("changes made outside Remedy")),
+        !closed
+            .iter()
+            .any(|n| n.contains("changes made outside Remedy")),
         "cancel closes the confirm: {closed:?}"
     );
     assert!(
@@ -339,6 +387,166 @@ fn button_named_like(app: &TestApp, needle: &str) -> Option<String> {
 fn usage_previews_match_their_golden_images() {
     assert_settings_goldens("usage", remedy_desktop::preview_usage);
     assert_settings_goldens("usage-harness", remedy_desktop::preview_usage_harness);
+}
+
+const CHROME_THEMES: &[&str] = &["forest", "deutan"];
+
+fn assert_chrome_goldens(name: &str, build: fn(&remedy_ui::Ui) -> remedy_ui::El) {
+    let preview = Preview::new(name, build).sizes(&[SHELL]).themes(CHROME_THEMES);
+    match check_golden(&preview, std::path::Path::new("tests/golden")) {
+        Ok(()) | Err(GoldenError::Missing(_)) => {}
+        Err(e) => panic!("{e}"),
+    }
+}
+
+#[test]
+fn chrome_previews_match_their_golden_images() {
+    assert_chrome_goldens("chrome-palette", remedy_desktop::home_palette);
+    assert_chrome_goldens("chrome-help", remedy_desktop::home_help);
+    assert_chrome_goldens("chrome-about", remedy_desktop::home_about);
+    assert_chrome_goldens("chrome-diagnostics", remedy_desktop::home_diagnostics);
+    assert_chrome_goldens("chrome-menu", remedy_desktop::home_menu);
+}
+
+fn has(names: &[String], needle: &str) -> bool {
+    names.iter().any(|n| n.contains(needle))
+}
+
+#[test]
+fn palette_opens_and_closes_from_the_keyboard() {
+    fresh_profile();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.frames(2);
+    assert!(app.press(Role::Button, "Studio"), "leave Grove before the chord");
+    app.key(KeyEvent::press(Key::char('k')).with_modifiers(Modifiers::CTRL));
+    app.frames(1);
+    let names = accessible_names(&app);
+    for needle in [
+        "New Session",
+        "Time Travel",
+        "Export Session",
+        "Import Session",
+        "Memory",
+        "Skills",
+        "Diagnostics",
+        "Troubleshooting",
+        "Slash commands reference",
+    ] {
+        assert!(has(&names, needle), "{needle} missing: {names:?}");
+    }
+    app.key(KeyEvent::press(Key::Escape));
+    app.frames(1);
+    assert!(
+        !has(&accessible_names(&app), "Search commands"),
+        "escape closes the palette"
+    );
+    app.key(KeyEvent::press(Key::char('p')).with_modifiers(Modifiers::CTRL));
+    app.frames(1);
+    assert!(has(&accessible_names(&app), "New Session"), "Ctrl+P reopens");
+}
+
+#[test]
+fn help_about_diagnostics_and_quit_use_the_title_menu() {
+    fresh_profile();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.frames(2);
+    app.key(KeyEvent::press(Key::F(1)));
+    app.frames(3);
+    assert!(
+        has(&accessible_names(&app), "Overview"),
+        "F1 opens the manual: {:?}",
+        accessible_names(&app)
+    );
+    app.key(KeyEvent::press(Key::Escape));
+    app.frames(1);
+    assert!(app.press(Role::Button, "Open Remedy menu"));
+    assert!(app.press(Role::Button, "About Remedy (v1.0.0)"));
+    app.frames(1);
+    assert!(
+        has(&accessible_names(&app), "Hope this helps"),
+        "about signature: {:?}",
+        accessible_names(&app)
+    );
+    app.key(KeyEvent::press(Key::Escape));
+    app.frames(1);
+    assert!(app.press(Role::Button, "Open Remedy menu"));
+    assert!(app.press(Role::Button, "Diagnostics"));
+    app.frames(2);
+    let names = accessible_names(&app);
+    // The live app has no server under REMEDY_DESKTOP_NO_SPAWN. The landed
+    // panel stays on its dialog, the hive group, and either the loading line
+    // or the offline error. The sample golden is the Healthy snapshot.
+    assert!(has(&names, "Diagnostics"), "diagnostics title: {names:?}");
+    assert!(has(&names, "Health diagnostics"), "dialog: {names:?}");
+    assert!(has(&names, "Hive"), "hive: {names:?}");
+    assert!(
+        has(&names, "Loading diagnostics")
+            || has(&names, "Could not reach the runtime")
+            || has(&names, "Cannot reach local API"),
+        "offline diagnostics: {names:?}"
+    );
+    app.key(KeyEvent::press(Key::Escape));
+    app.frames(1);
+    assert!(app.press(Role::Button, "Open Remedy menu"));
+    assert!(app.press(Role::Button, "Quit Remedy"));
+    app.frames(1);
+    assert!(
+        has(&accessible_names(&app), "stop the local server"),
+        "quit warning: {:?}",
+        accessible_names(&app)
+    );
+}
+
+#[test]
+fn settings_chord_opens_the_rail_and_composer_ignores_new_session() {
+    fresh_profile();
+    reset_saved_layout();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.frames(2);
+    assert!(app.press(Role::Button, "Studio"));
+    app.key(KeyEvent::press(Key::char(',')).with_modifiers(Modifiers::CTRL));
+    app.frames(2);
+    let names = accessible_names(&app);
+    // The live app has no settings client under REMEDY_DESKTOP_NO_SPAWN, so
+    // ensure_loaded stops on "Settings couldn’t load" and never mounts
+    // You & Agent / Appearance. The rail is still open. Language and font
+    // size render once a client loads; the settings goldens cover that.
+    assert!(
+        has(&names, "Search all settings") || has(&names, "Settings couldn’t load"),
+        "settings rail: {names:?}"
+    );
+    let composer = "Message Remedy";
+    // Chat-depth draws the composer as a text area.
+    let field = app.find(Role::MultilineTextInput, composer);
+    assert!(
+        field.is_some(),
+        "composer missing among text fields: {:?}",
+        app.reader_view()
+            .into_iter()
+            .filter(|n| {
+                matches!(
+                    n.role,
+                    Role::TextInput | Role::MultilineTextInput | Role::SearchInput
+                )
+            })
+            .filter_map(|n| n.name)
+            .collect::<Vec<_>>()
+    );
+    field.unwrap().focus();
+    app.frames(1);
+    app.key(KeyEvent::press(Key::char('n')).with_modifiers(Modifiers::CTRL));
+    app.frames(1);
+    assert!(
+        app.find(Role::Button, "Close New chat 2").is_none(),
+        "Ctrl+N does not fire while typing"
+    );
+    app.key(KeyEvent::press(Key::Tab).with_modifiers(Modifiers::SHIFT));
+    app.frames(1);
+    assert!(
+        has(&accessible_names(&app), "— Chat"),
+        "Shift+Tab cycles Build to Chat: {:?}",
+        accessible_names(&app)
+    );
 }
 
 /// The diagnostics overlay is a new surface. Forest, light, and deutan lock it.
@@ -375,8 +583,12 @@ fn press_nth(app: &mut TestApp, role: Role, name: &str, nth: usize) -> bool {
         .into_iter()
         .filter(|n| n.role == role && n.name.as_deref() == Some(name))
         .collect();
-    let Some(node) = nodes.get(nth) else { return false };
-    let Some(el) = ui.element_by_node_id(node.id) else { return false };
+    let Some(node) = nodes.get(nth) else {
+        return false;
+    };
+    let Some(el) = ui.element_by_node_id(node.id) else {
+        return false;
+    };
     let done = ui.accessibility_action(el.node_id(), Action::Click);
     app.frames(1);
     done
@@ -398,7 +610,10 @@ fn swap_exchanges_which_rail_is_thin() {
     app.frames(1);
     assert!(app.find(Role::Button, "Expand right rail").is_some());
     assert!(app.find(Role::Button, "Expand left rail").is_none());
-    assert!(app.press(Role::Button, "Swap left and right panels"), "swap");
+    assert!(
+        app.press(Role::Button, "Swap left and right panels"),
+        "swap"
+    );
     assert!(
         app.find(Role::Button, "Expand left rail").is_some(),
         "after swap the left rail is the thin one"
@@ -416,7 +631,10 @@ fn status_settings_toggles_the_right_rail() {
     let mut app = preview_window(remedy_desktop::home);
     app.frames(1);
     assert!(app.find(Role::Button, "Expand right rail").is_some());
-    assert!(press_last(&mut app, Role::Button, "Settings"), "status Settings");
+    assert!(
+        press_last(&mut app, Role::Button, "Settings"),
+        "status Settings"
+    );
     assert!(
         app.find(Role::Button, "Expand right rail").is_none(),
         "settings opened the right rail"
@@ -425,7 +643,10 @@ fn status_settings_toggles_the_right_rail() {
         app.find(Role::Toolbar, "Right workspace rail").is_some(),
         "right rail is icons plus the panel"
     );
-    assert!(press_last(&mut app, Role::Button, "Settings"), "status Settings again");
+    assert!(
+        press_last(&mut app, Role::Button, "Settings"),
+        "status Settings again"
+    );
     assert!(
         app.find(Role::Button, "Expand right rail").is_some(),
         "the second press collapses the right rail to thin"
@@ -438,7 +659,8 @@ fn narrow_window_keeps_one_panel_and_restores_the_thin_rail() {
     let mut app = preview_window(remedy_desktop::home);
     app.frames(1);
     let id = app.host().window_ids()[0];
-    app.host().user_resize(id, remedy_ui::core::Size::new(700.0, 700.0));
+    app.host()
+        .user_resize(id, remedy_ui::core::Size::new(700.0, 700.0));
     app.frames(2);
     assert!(app.find(Role::Button, "Expand left rail").is_none());
     assert!(app.find(Role::Button, "Expand right rail").is_none());
@@ -453,7 +675,8 @@ fn narrow_window_keeps_one_panel_and_restores_the_thin_rail() {
         names.iter().any(|n| n.contains("Clear terminal")),
         "the right panel opened for this width only: {names:?}"
     );
-    app.host().user_resize(id, remedy_ui::core::Size::new(1100.0, 700.0));
+    app.host()
+        .user_resize(id, remedy_ui::core::Size::new(1100.0, 700.0));
     app.frames(2);
     assert!(
         app.find(Role::Button, "Expand right rail").is_some(),
@@ -473,11 +696,23 @@ fn terminal_pops_out_of_the_right_rail() {
     let mut app = preview_window(remedy_desktop::home);
     app.frames(1);
     assert!(app.press(Role::Button, "Expand right rail"));
-    assert!(press_nth(&mut app, Role::Button, "Terminal", 1), "right Terminal");
-    assert!(app.press(Role::Button, "Pop out to floating window"), "pop out");
-    assert!(app.find(Role::Dialog, "Terminal").is_some(), "floating terminal");
+    assert!(
+        press_nth(&mut app, Role::Button, "Terminal", 1),
+        "right Terminal"
+    );
+    assert!(
+        app.press(Role::Button, "Pop out to floating window"),
+        "pop out"
+    );
+    assert!(
+        app.find(Role::Dialog, "Terminal").is_some(),
+        "floating terminal"
+    );
     app.key(KeyEvent::press(Key::Escape));
-    assert!(app.find(Role::Dialog, "Terminal").is_none(), "escape closes it");
+    assert!(
+        app.find(Role::Dialog, "Terminal").is_none(),
+        "escape closes it"
+    );
 }
 
 #[test]

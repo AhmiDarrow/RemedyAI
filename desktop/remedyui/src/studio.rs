@@ -1,7 +1,6 @@
 //! Studio state: sessions, the open chat, composer, and connection.
 
 use crate::runtime::{self, Client};
-use crate::sse;
 use crate::time;
 use crate::work::{self, WorkStep};
 use remedy_ui::reactive::{Signal, waker};
@@ -32,9 +31,9 @@ impl WorkMode {
     /// The chip label.
     pub fn label(self) -> &'static str {
         match self {
-            WorkMode::Chat => "CHAT",
-            WorkMode::Plan => "PLAN",
-            WorkMode::Build => "BUILD",
+            WorkMode::Chat => "Chat",
+            WorkMode::Plan => "Plan",
+            WorkMode::Build => "Build",
         }
     }
 
@@ -80,6 +79,28 @@ pub struct Session {
     pub message_count: u32,
     /// RFC3339 `updated_at`, for the age line.
     pub updated_at: Option<String>,
+    /// The runtime still owns a turn on this session.
+    pub claimed: bool,
+    /// Server request id for a claimed turn, when one is attached.
+    pub active_request_id: String,
+}
+
+impl Session {
+    /// A living, unpinned chat with no project.
+    pub(crate) fn fresh(id: impl Into<String>, title: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            title: title.into(),
+            project_path: None,
+            pinned: false,
+            archived: false,
+            tags: Vec::new(),
+            message_count: 0,
+            updated_at: None,
+            claimed: false,
+            active_request_id: String::new(),
+        }
+    }
 }
 
 /// One chat message in the well.
@@ -99,6 +120,10 @@ pub struct ChatMessage {
     pub(crate) steps: Vec<WorkStep>,
     /// Model thinking for this turn. Empty when the runtime sent none.
     pub(crate) thinking: String,
+    /// The person's reaction on an assistant row. Empty when unset.
+    pub user_reaction: String,
+    /// The agent's reaction on a user row. Empty when unset.
+    pub agent_reaction: String,
 }
 
 impl ChatMessage {
@@ -116,6 +141,8 @@ impl ChatMessage {
             streaming: false,
             steps: Vec::new(),
             thinking: String::new(),
+            user_reaction: String::new(),
+            agent_reaction: String::new(),
         }
     }
 }
@@ -158,6 +185,10 @@ pub struct Studio {
     pub live_thinking: Signal<String>,
     /// Byte offsets in [`Self::partial`] where a tool call started.
     pub live_breaks: Signal<Vec<usize>>,
+    /// Real draft message id from the runtime's `event: draft`, when it has one.
+    pub live_message_id: Signal<Option<String>>,
+    /// Optimistic user reaction on the live draft, before the row is saved.
+    pub live_user_reaction: Signal<String>,
     /// A turn is streaming.
     pub streaming: Signal<bool>,
     /// Chat / Plan / Build.
@@ -181,22 +212,15 @@ pub struct Studio {
     next_id: Signal<u64>,
     next_msg: Signal<u64>,
     client: Signal<Option<Client>>,
+    /// Attachments, jobs, banners, order, and voice for this Studio.
+    pub depth: crate::depth::Depth,
 }
 
 impl Studio {
     /// One empty chat, as a first launch looks.
     pub fn new() -> Self {
         Self::with(
-            vec![Session {
-                id: "1".into(),
-                title: "New chat".into(),
-                project_path: None,
-                pinned: false,
-                archived: false,
-                tags: Vec::new(),
-                message_count: 0,
-                updated_at: None,
-            }],
+            vec![Session::fresh("1", "New chat")],
             Some("1".into()),
             2,
             "Joe",
@@ -227,6 +251,32 @@ impl Studio {
         s
     }
 
+    /// Mid-turn chat: sealed speech already reacted to, only the last reply still live.
+    pub fn preview_chat_live() -> Self {
+        let s = Self::preview_chat();
+        let user = preview_messages()
+            .into_iter()
+            .find(|m| m.role == "user")
+            .expect("preview user turn");
+        s.messages.set(vec![user]);
+        let first = "I'll reach the folder through the shell.\n\n";
+        let second = "Cmd is eating the search patterns...\n\n";
+        let reply = "Patching the entry path and the";
+        s.partial.set(format!("{first}{second}{reply}"));
+        s.live_breaks
+            .set(vec![first.len(), first.len() + second.len()]);
+        let mut step = WorkStep::done("c1", "bash");
+        step.status = crate::work::StepStatus::Running;
+        step.narration = Some("I'll reach the folder through the shell.".into());
+        s.live_steps.set(vec![step]);
+        s.live_thinking
+            .set("Looking through the loader and the manifest.".into());
+        s.live_message_id.set(Some("draft-1".into()));
+        s.live_user_reaction.set("👍".into());
+        s.streaming.set(true);
+        s
+    }
+
     fn with(
         sessions: Vec<Session>,
         active: Option<String>,
@@ -251,6 +301,8 @@ impl Studio {
             live_steps: Signal::new(Vec::new()),
             live_thinking: Signal::new(String::new()),
             live_breaks: Signal::new(Vec::new()),
+            live_message_id: Signal::new(None),
+            live_user_reaction: Signal::new(String::new()),
             streaming: Signal::new(false),
             mode: Signal::new(WorkMode::Build),
             conn: Signal::new(Conn::Disconnected),
@@ -264,7 +316,15 @@ impl Studio {
             next_id: Signal::new(next_id),
             next_msg: Signal::new(1),
             client: Signal::new(None),
+            depth: crate::depth::Depth::new(local_only),
         }
+    }
+
+    /// The next local message id.
+    pub(crate) fn alloc_msg_id(&self) -> u64 {
+        let id = self.next_msg.get();
+        self.next_msg.set(id + 1);
+        id
     }
 
     /// Unix seconds used for age lines.
@@ -298,17 +358,12 @@ impl Studio {
             list.push(Session {
                 id: sid.clone(),
                 title,
-                project_path: None,
-                pinned: false,
-                archived: false,
-                tags: Vec::new(),
-                message_count: 0,
-                updated_at: None,
+                ..Session::fresh("", "")
             });
         });
-        self.active.set(Some(sid));
+        self.active.set(Some(sid.clone()));
         self.messages.set(Vec::new());
-        self.clear_live();
+        crate::depth::focus_session(self, &sid);
     }
 
     fn create_remote(&self, client: Client) {
@@ -324,9 +379,9 @@ impl Studio {
                             list.insert(0, s.clone());
                         }
                     });
-                    studio.active.set(Some(s.id));
+                    studio.active.set(Some(s.id.clone()));
                     studio.messages.set(Vec::new());
-                    studio.clear_live();
+                    crate::depth::focus_session(&studio, &s.id);
                 }
                 Err(e) => studio.conn.set(Conn::Error(e)),
             });
@@ -364,11 +419,11 @@ impl Studio {
         }
         self.active.set(Some(id.to_string()));
         self.messages.set(Vec::new());
-        self.clear_live();
+        crate::depth::focus_session(self, id);
         self.load_messages(id);
     }
 
-    fn load_messages(&self, id: &str) {
+    pub(crate) fn load_messages(&self, id: &str) {
         if self.local_only {
             return;
         }
@@ -469,125 +524,38 @@ impl Studio {
         self.mode.update(|m| *m = m.next());
     }
 
-    /// Sends `text` from the composer: a user row immediately, then a stream if connected.
+    /// Sends `text` from the composer or a starter. Slash commands, a busy turn,
+    /// and attachments are handled by [`crate::depth::submit`].
     pub fn send(&self, text: String) {
-        let text = text.trim().to_string();
-        if text.is_empty() || self.streaming.get() {
-            return;
-        }
-        let mut id = self.active.get();
-        if id.is_none() {
-            self.add();
-            id = self.active.get();
-        }
-        let Some(sid) = id else {
-            return;
-        };
-        let mid = self.next_msg.get();
-        self.next_msg.set(mid + 1);
-        let user = ChatMessage::plain(format!("local-u-{mid}"), "user", text.clone());
-        self.messages.update(|m| m.push(user));
-        self.sessions.update(|list| {
-            if let Some(s) = list.iter_mut().find(|s| s.id == sid) {
-                s.message_count = s.message_count.saturating_add(1);
-                if s.title == "New chat" || s.title.starts_with("New chat ") {
-                    let t = text.clone();
-                    s.title = if t.chars().count() > 42 {
-                        t.chars().take(40).collect::<String>() + "…"
-                    } else {
-                        t
-                    };
-                }
-            }
-        });
-        if self.local_only || self.client.get().is_none() {
-            self.messages.update(|m| {
-                m.push(ChatMessage::plain(
-                    format!("local-sys-{mid}"),
-                    "system",
-                    "The mind is not connected. Start this chat once it is.",
-                ));
-            });
-            return;
-        }
-        self.clear_live();
-        self.streaming.set(true);
-        let client = self.client.get().unwrap();
-        let studio = self.clone();
-        let mode = self.mode.get();
-        let model = self.model.get();
-        let provider = self.provider.get();
-        let Ok(waker) = waker() else {
-            self.streaming.set(false);
-            return;
-        };
-        runtime::stream_message(
-            &client,
-            &sid,
-            &text,
-            &model,
-            &provider,
-            mode,
-            move |kind, data| {
-                let studio = studio.clone();
-                let _ = waker.post(move || studio.on_frame(&kind, &data));
-            },
-        );
+        crate::depth::submit(self, text, Vec::new(), crate::depth::SubmitKind::Send, true);
     }
 
     /// Drops the in-flight tail so a new session does not keep the previous turn.
-    fn clear_live(&self) {
+    pub(crate) fn clear_live(&self) {
         self.partial.set(String::new());
         self.live_steps.set(Vec::new());
         self.live_thinking.set(String::new());
         self.live_breaks.set(Vec::new());
+        self.live_message_id.set(None);
+        self.live_user_reaction.set(String::new());
     }
 
-    fn on_frame(&self, kind: &str, data: &str) {
-        match kind {
-            "token" | "text" => {
-                let bit = sse::token_text(data);
-                if !bit.is_empty() {
-                    self.partial.update(|p| p.push_str(&bit));
-                }
-            }
-            "thinking" => {
-                self.live_thinking
-                    .update(|buf| work::on_thinking(buf, data));
-            }
-            "tool_call" => {
-                let partial = self.partial.get();
-                let mut steps = self.live_steps.get();
-                let mut breaks = self.live_breaks.get();
-                work::on_tool_call(&mut steps, &mut breaks, &partial, data);
-                self.live_steps.set(steps);
-                self.live_breaks.set(breaks);
-            }
-            "tool_result" => {
-                self.live_steps
-                    .update(|steps| work::on_tool_result(steps, data));
-            }
-            "step" => {
-                self.live_steps.update(|steps| work::on_step(steps, data));
-            }
-            "error" => {
-                if work::is_step_error(data) {
-                    self.live_steps
-                        .update(|steps| work::on_step_error(steps, data));
-                } else {
-                    self.finish_assistant(Some(sse::error_text(data)));
-                }
-            }
-            "done" | "end" | "aborted" => self.finish_assistant(None),
-            _ => {}
-        }
+    /// Applies one SSE frame to the session it belongs to.
+    pub(crate) fn on_frame_for(&self, sid: &str, kind: &str, data: &str) {
+        crate::depth::apply_frame(self, sid, kind, data);
     }
 
-    fn finish_assistant(&self, error: Option<String>) {
+    pub(crate) fn finish_assistant(&self, error: Option<String>) {
         let partial = self.partial.get();
         let breaks = self.live_breaks.get();
         let mut steps = self.live_steps.get();
         let thinking = self.live_thinking.get();
+        let id = self
+            .live_message_id
+            .get()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("local-a-{}", self.alloc_msg_id()));
+        let reaction = self.live_user_reaction.get();
         self.clear_live();
         self.streaming.set(false);
         let mut body = work::reply_after(&partial, &breaks);
@@ -601,29 +569,44 @@ impl Studio {
             }
         }
         if body.is_empty() && steps.is_empty() && thinking.trim().is_empty() {
+            crate::depth::after_finish(self);
             return;
         }
-        let mid = self.next_msg.get();
-        self.next_msg.set(mid + 1);
         let role = if error.is_some() && body.starts_with("The mind") {
             "system"
         } else {
             "assistant"
         };
+        let spoken = body.clone();
+        let speak = role == "assistant";
         let message = ChatMessage {
             role: role.into(),
             steps,
             thinking,
-            ..ChatMessage::plain(format!("local-a-{mid}"), "assistant", body)
+            user_reaction: reaction,
+            ..ChatMessage::plain(id.clone(), "assistant", body)
         };
-        self.messages.update(move |m| m.push(message));
-        if let Some(sid) = self.active.get() {
-            self.sessions.update(|list| {
-                if let Some(s) = list.iter_mut().find(|s| s.id == sid) {
-                    s.message_count = s.message_count.saturating_add(1);
-                }
-            });
+        let existed = self.messages.get().iter().any(|row| row.id == id);
+        self.messages.update(move |m| {
+            if let Some(existing) = m.iter_mut().find(|row| row.id == id) {
+                *existing = message.clone();
+            } else {
+                m.push(message);
+            }
+        });
+        if !existed {
+            if let Some(sid) = self.active.get() {
+                self.sessions.update(|list| {
+                    if let Some(s) = list.iter_mut().find(|s| s.id == sid) {
+                        s.message_count = s.message_count.saturating_add(1);
+                    }
+                });
+            }
         }
+        if speak {
+            crate::depth::speak_reply(self, &spoken);
+        }
+        crate::depth::after_finish(self);
     }
 
     /// Stops a live turn (local flag; server abort when connected).
@@ -639,6 +622,11 @@ impl Studio {
         self.finish_assistant(None);
     }
 
+    /// The runtime client, when this Studio is attached.
+    pub fn client(&self) -> Option<Client> {
+        self.client.get()
+    }
+
     /// Reloads the session list and the open chat after a Time Travel restore.
     pub(crate) fn reload_open(&self) {
         if self.local_only {
@@ -652,7 +640,11 @@ impl Studio {
 
     /// The runtime client, when this Studio is allowed to talk to one.
     pub(crate) fn runtime(&self) -> Option<Client> {
-        if self.local_only { None } else { self.client.get() }
+        if self.local_only {
+            None
+        } else {
+            self.client.get()
+        }
     }
 
     /// Hooks a runtime client and loads sessions (no-op for local previews).
@@ -671,6 +663,9 @@ impl Studio {
                 if ok {
                     studio.conn.set(Conn::Ready);
                     studio.refresh(&client);
+                    if !runtime::spawn_disabled() {
+                        crate::depth::boot(&studio);
+                    }
                 } else {
                     studio
                         .conn
@@ -726,34 +721,18 @@ pub fn preview_now() -> i64 {
 fn preview_sessions() -> Vec<Session> {
     vec![
         Session {
-            id: "s3".into(),
-            title: "New chat".into(),
-            project_path: None,
-            pinned: false,
-            archived: false,
-            tags: Vec::new(),
-            message_count: 0,
             updated_at: Some("2026-11-22T20:00:00Z".into()),
+            ..Session::fresh("s3", "New chat")
         },
         Session {
-            id: "s1".into(),
-            title: "Port to RemedyUI".into(),
-            project_path: None,
-            pinned: false,
-            archived: false,
-            tags: Vec::new(),
             message_count: 2,
             updated_at: Some("2026-11-22T20:00:00Z".into()),
+            ..Session::fresh("s1", "Port to RemedyUI")
         },
         Session {
-            id: "s2".into(),
-            title: "House rules".into(),
-            project_path: None,
-            pinned: false,
-            archived: false,
-            tags: Vec::new(),
             message_count: 2,
             updated_at: Some("2026-11-22T09:15:00Z".into()),
+            ..Session::fresh("s2", "House rules")
         },
     ]
 }

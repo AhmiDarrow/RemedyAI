@@ -413,6 +413,37 @@ pub(crate) fn spawn_startup_check(app: &App) {
     app.background(check_feed, move |result| finish_check(&app2, result));
 }
 
+/// Menu Install. Uses a release already checked, or checks and then installs.
+pub(crate) fn install_from_menu(app: &App) {
+    if checks_disabled() {
+        return;
+    }
+    if PENDING.with(|p| p.borrow().is_some()) {
+        spawn_install(app);
+        return;
+    }
+    if BUSY.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app2 = app.clone();
+    app.background(check_feed, move |result| {
+        BUSY.store(false, Ordering::SeqCst);
+        match result {
+            Ok(Some(release)) => {
+                offer_signal().set(release.version.clone());
+                note_signal().set(String::new());
+                PENDING.with(|p| *p.borrow_mut() = Some(release));
+                spawn_install(&app2);
+            }
+            Ok(None) => {
+                offer_signal().set(String::new());
+                PENDING.with(|p| *p.borrow_mut() = None);
+            }
+            Err(e) => note_signal().set(trim_note(&e)),
+        }
+    });
+}
+
 pub(crate) fn on_update_menu(app: &App) {
     if checks_disabled() {
         return;
