@@ -50,7 +50,7 @@ describe('MessageFeed live chrome order', () => {
 })
 
 describe('saved assistant turn layout', () => {
-  it('keeps narration out of the bubble and shows the strip above it', async () => {
+  it('keeps user-facing text in the bubble and the strip above it', async () => {
     const { createElement } = await import('react')
     const { renderToStaticMarkup } = await import('react-dom/server')
     const { MessageFeed } = await import('./MessageFeed')
@@ -70,14 +70,17 @@ describe('saved assistant turn layout', () => {
     const html = renderToStaticMarkup(
       createElement(MessageFeed, { messages: [msg], partialText: '', streaming: false, loading: false } as never),
     )
-    const strip = html.indexOf('data-testid="work-strip"')
+    const stripAt = html.indexOf('data-testid="work-strip"')
     const bubble = html.indexOf('chat-bubble-assistant')
-    expect(strip).toBeGreaterThan(-1)
-    expect(bubble).toBeGreaterThan(strip)
+    expect(stripAt).toBeGreaterThan(-1)
+    expect(bubble).toBeGreaterThan(stripAt)
     const body = html.slice(bubble)
     expect(body).toContain('The addon loads again.')
-    expect(body).not.toContain('reach the folder')
+    expect(body).toContain('reach the folder')
     expect(body).not.toContain('Rename confirmed.')
+    const stripHtml = html.slice(stripAt, bubble)
+    expect(stripHtml).not.toContain('reach the folder')
+    expect(stripHtml).not.toContain('Rename confirmed.')
   }, 30_000) // cold import of the feed (markdown, highlighting) can pass 5 s on a loaded machine
 
   it('a tools-only turn shows the strip and no placeholder bubble', async () => {

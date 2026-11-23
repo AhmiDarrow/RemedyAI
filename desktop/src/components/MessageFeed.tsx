@@ -37,9 +37,7 @@ import { LiveTurnView } from './LiveTurnView'
 import { WorkStrip } from './WorkStrip'
 import { ReactionPicker, ReactionPills } from './Reactions'
 import { FeedScrollContext } from './feedScroll'
-import { splitSavedReply } from '../utils/liveSegments'
 import {
-  isFullProcessMode,
   showsProcessTrace,
   stepsFromMessageTools,
   type ProcessStep,
@@ -354,16 +352,9 @@ const MessageBubble = memo(function MessageBubble({
   const isUser = msg.role === 'user'
   const isSystem = msg.role === 'system'
   const isAssistant = !isUser && !isSystem
-  // Saved turns: narration recorded on tool calls belongs to the Working
-  // strip, not the bubble. Old saves without narration come back unchanged.
-  const savedReply = useMemo(
-    () =>
-      isAssistant && !isStreamingPartial
-        ? splitSavedReply(msg.content, msg.tool_calls || []).reply
-        : msg.content,
-    [isAssistant, isStreamingPartial, msg.content, msg.tool_calls],
-  )
-  const rawText = savedReply + (partial || '')
+  // User-facing prose stays in the bubble (including text written before a
+  // tool call). Thinking and tool traces belong to the Working strip.
+  const rawText = msg.content + (partial || '')
   const text = useMemo(
     () => (isUser || isSystem ? rawText : sanitizeAssistantText(rawText)),
     [rawText, isUser, isSystem],
@@ -509,7 +500,7 @@ const MessageBubble = memo(function MessageBubble({
             steps={histSteps}
             thinking={savedThinking}
             mode={toolProcessMode}
-            defaultOpen={isFullProcessMode(toolProcessMode)}
+            defaultOpen={false}
             sessionId={sessionId}
           />
         </div>
@@ -825,12 +816,14 @@ export function MessageFeed({
   }, [windowed, dateLocale])
 
   return (
+    <div className="message-feed-shell">
     <div
       ref={setScroller}
       className="message-feed py-2 relative w-full"
       style={{
-        position: 'absolute',
-        inset: 0,
+        position: 'relative',
+        flex: 1,
+        minHeight: 0,
         overflowY: 'auto',
         overflowX: 'hidden',
       }}
@@ -1002,8 +995,13 @@ export function MessageFeed({
       </div>
       </FeedScrollContext.Provider>
 
-      {/* Sticky dock: the pill is a child of the scroller, so position:absolute
-          would scroll away with the content — sticky keeps it on the floor. */}
+      <ImageLightbox
+        src={lightbox?.src ?? null}
+        alt={lightbox?.alt}
+        onClose={closeLightbox}
+        onAttachMarkup={onAttachMarkup}
+      />
+    </div>
       {showJump && (
         <div className="scroll-latest-dock">
           <button
@@ -1025,13 +1023,6 @@ export function MessageFeed({
           </button>
         </div>
       )}
-
-      <ImageLightbox
-        src={lightbox?.src ?? null}
-        alt={lightbox?.alt}
-        onClose={closeLightbox}
-        onAttachMarkup={onAttachMarkup}
-      />
     </div>
   )
 }

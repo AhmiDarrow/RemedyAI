@@ -21,6 +21,12 @@ const speed = Number(params.get('speed')) || 1
 // owner's picker live (state is local to the harness).
 const reactionsOn = Boolean(params.get('reactions'))
 const seedUser = params.get('mine') || ''
+const todosOn = Boolean(params.get('todos'))
+const DEMO_TODOS = [
+  { id: '1', content: 'Explore the addon folder', status: 'completed' as const },
+  { id: '2', content: 'Patch the loader entry', status: 'in_progress' as const },
+  { id: '3', content: 'Run the addon self-check', status: 'pending' as const },
+]
 
 function Harness() {
   const [t, setT] = useState(() => (fixed != null ? Number(fixed) : 0))
@@ -65,6 +71,7 @@ function Harness() {
         partnerName="Remedy"
         sessionId="demo"
         stickNonce={0}
+        buildTodos={todosOn ? DEMO_TODOS : []}
         onReact={reactionsOn ? onReact : undefined}
       />
       <textarea data-testid="composer" aria-label="Composer" style={{ position: 'absolute', bottom: -60, left: 0, width: 300, height: 40 }} />

@@ -26,7 +26,7 @@ const render = (props: Partial<Parameters<typeof LiveTurnView>[0]>) =>
 const narration = 'Reaching the portal folder through the shell.'
 
 describe('LiveTurnView', () => {
-  it('shows only the compact Working strip (no bubble) until reply text streams', () => {
+  it('shows user-facing text as a bubble while work stays in the collapsed strip', () => {
     const html = render({
       partialText: narration,
       textBreaks: [narration.length],
@@ -38,13 +38,15 @@ describe('LiveTurnView', () => {
     expect(html).toContain('data-testid="ws-status"')
     expect(html).toContain('Bash')
     expect(html).toContain('dir')
-    expect(html).not.toContain('data-testid="live-reply"')
-    // Collapsed by default: narration and thinking wait behind the toggle.
-    expect(html).not.toContain(narration)
+    const bubble = html.slice(html.indexOf('data-testid="live-reply"'))
+    expect(bubble).toContain(narration)
+    // Collapsed by default: thinking and tool details wait behind the toggle.
     expect(html).not.toContain('Need the folder path first.')
+    expect(html).not.toContain('data-testid="ws-timeline"')
+    expect(html).not.toContain('data-testid="ws-thinking"')
   })
 
-  it('renders the reply in its own bubble without narration once it streams', () => {
+  it('keeps all user-facing text in the bubble once the reply streams', () => {
     const reply = 'The addon loads now.'
     const html = render({
       partialText: `${narration}\n\n${reply}`,
@@ -57,18 +59,21 @@ describe('LiveTurnView', () => {
     expect(html).not.toContain('data-testid="ws-status"')
     const bubble = html.slice(html.indexOf('data-testid="live-reply"'))
     expect(bubble).toContain(reply)
-    expect(bubble).not.toContain(narration)
+    expect(bubble).toContain(narration)
+    // Collapsed strip does not repeat the prose.
+    const strip = html.slice(html.indexOf('data-testid="work-strip"'), html.indexOf('data-testid="live-reply"'))
+    expect(strip).not.toContain(narration)
   })
 
-  it('opens the strip by default in full process mode', () => {
+  it('stays collapsed by default even in full process mode', () => {
     const html = render({
       partialText: narration,
       textBreaks: [narration.length],
       mode: 'full',
       processSteps: [step('1', 'running', { narration })],
     })
-    expect(html).toContain('aria-expanded="true"')
-    expect(html).toContain(narration)
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('data-testid="ws-timeline"')
   })
 
   it('a plain reply with no background work is just the bubble', () => {

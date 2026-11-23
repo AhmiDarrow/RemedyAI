@@ -804,12 +804,19 @@ pre code {
      decode) must not shift what the reader is looking at. */
   overflow-anchor: auto;
 }
+.message-feed-shell {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 .message-feed-content {
   width: 100%;
   max-width: min(52rem, 100%);
   margin-inline: auto;
   padding-inline: var(--chat-col-pad-x, 0.75rem);
-  padding-bottom: 0.75rem;
+  padding-bottom: 2.75rem;
   box-sizing: border-box;
 }
 .message-feed .chat-row {
@@ -903,18 +910,13 @@ pre code {
   white-space: nowrap;
 }
 
-/* Live stream dock at bottom of feed */
+/* Live turn sits in normal document flow so it cannot paint over earlier
+   bubbles. The feed's scroll controller already follows the stream. */
 .message-feed .live-stream-dock {
-  position: sticky;
-  bottom: 0;
-  z-index: 20;
+  position: relative;
+  z-index: auto;
   padding: 0.35rem 0 0.5rem;
-  background: linear-gradient(
-    180deg,
-    transparent 0%,
-    color-mix(in srgb, var(--bg-primary) 88%, transparent) 28%,
-    var(--bg-primary) 70%
-  );
+  background: none;
 }
 .message-feed .live-stream-card {
   margin-inline: 0.15rem;
@@ -978,6 +980,11 @@ pre code {
   padding: 0.1rem 0.3rem 0.1rem 0;
   border-radius: 0.3rem;
   max-width: 100%;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-primary);
+  pointer-events: auto;
 }
 .message-feed .ws-head:hover,
 .message-feed .ws-head:focus-visible {
@@ -1026,9 +1033,13 @@ pre code {
   flex-direction: column;
   gap: 0.35rem;
   margin-top: 0.3rem;
+  max-height: min(36vh, 20rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 0.25rem;
 }
 .message-feed .ws-timeline {
-  max-height: min(40vh, 22rem);
+  max-height: min(28vh, 16rem);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 0.25rem;
@@ -1117,6 +1128,31 @@ pre code {
   overflow-y: auto;
 }
 .message-feed .ws-raw { align-self: flex-start; opacity: 0.8; }
+
+.message-feed .build-todos-head {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  pointer-events: auto;
+}
+.message-feed .build-todos-head:hover,
+.message-feed .build-todos-head:focus-visible {
+  color: var(--text-secondary);
+}
+.message-feed .build-todos-list {
+  max-height: 10rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.message-feed .work-strip .build-todos {
+  padding-left: 0;
+  padding-right: 0;
+  padding-top: 0.15rem;
+  padding-bottom: 0.15rem;
+}
 @media (prefers-reduced-motion: reduce) {
   .message-feed .ws-step.is-running .ws-icon { animation: none; }
   .message-feed .ws-progress > span { transition: none; }
@@ -1726,26 +1762,32 @@ pre code {
   border-color: var(--accent);
 }
 
-/* Jump-to-latest pill (feed): sticky dock inside the scroller */
+/* Jump-to-latest lives in a footer below the scroller, never over a bubble. */
+.message-feed-shell > .scroll-latest-dock,
 .message-feed .scroll-latest-dock {
-  position: sticky;
-  bottom: 12px;
-  height: 0;
+  position: relative;
+  bottom: auto;
+  height: 2.5rem;
+  flex-shrink: 0;
   display: flex;
   justify-content: center;
+  align-items: center;
   overflow: visible;
   pointer-events: none;
-  z-index: 20;
+  z-index: 5;
+  background: var(--bg-primary);
 }
+.message-feed-shell > .scroll-latest-dock .scroll-latest-pill,
 .message-feed .scroll-latest-dock .scroll-latest-pill {
   position: relative;
   left: auto;
   bottom: auto;
-  transform: translateY(-100%);
+  transform: none;
   pointer-events: auto;
 }
+.message-feed-shell > .scroll-latest-dock .scroll-latest-pill:hover,
 .message-feed .scroll-latest-dock .scroll-latest-pill:hover {
-  transform: translateY(calc(-100% - 1px));
+  transform: translateY(-1px);
 }
 .scroll-latest-pill {
   width: auto;

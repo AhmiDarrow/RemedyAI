@@ -22,9 +22,9 @@ import { ProcessTrace } from './ProcessTrace'
  *   ● Working · 36 steps · 2 errors · 0:06            ▸
  *   › Bash  powershell -c "Get-ChildItem …"
  * Collapsed it is a single summary line (plus the live status line while the
- * turn runs). Expanded it is a timeline grouped under each narration line:
- * tool, short target, result icon, errors in muted red; thinking is its own
- * expandable item. The reply never renders here.
+ * turn runs). Expanded it is a height-capped timeline of tool rows (short
+ * target, result icon, errors in muted red); thinking is its own expandable
+ * item. Assistant prose never renders here — that belongs in the chat bubble.
  */
 export interface WorkStripProps {
   steps: ProcessStep[]
@@ -128,7 +128,6 @@ function Timeline({ steps, live }: { steps: ProcessStep[]; live?: boolean }) {
         )}
         {groups.map((g) => (
           <li key={g.steps[0]!.id} className="ws-group">
-            {g.narration && <p className="ws-narration">{g.narration}</p>}
             <ul className="ws-steps">
               {g.steps.map((s) => (
                 <StepRow key={s.id} step={s} />
@@ -154,6 +153,11 @@ export const WorkStrip = memo(function WorkStrip({
   extras,
 }: WorkStripProps) {
   const [open, setOpen] = useState(defaultOpen)
+  const wasLive = useRef(live)
+  useEffect(() => {
+    if (wasLive.current && !live) setOpen(false)
+    wasLive.current = live
+  }, [live])
   const [rawTrace, setRawTrace] = useState(false)
   const ref = useRef<HTMLElement | null>(null)
   const anchor = useAnchorToggle()
