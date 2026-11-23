@@ -1127,6 +1127,15 @@ pub fn show_plan(card: &PlanCard, mode: WorkMode) -> bool {
 }
 
 fn start_poll(studio: &Studio) {
+    start_poll_every(studio, Duration::from_secs(4));
+}
+
+/// Approvals polling. `waker()` is bound to this thread's runtime, so it
+/// must be captured on the UI thread and moved into the worker. The 1.0.0
+/// build called `studio.runtime()` on `remedy-approvals` itself, which
+/// panics (`the signal belongs to another thread's runtime`) about four
+/// seconds after launch.
+fn start_poll_every(studio: &Studio, every: Duration) {
     if studio
         .depth
         .poll_flag()
@@ -1134,28 +1143,40 @@ fn start_poll(studio: &Studio) {
     {
         return;
     }
+    let Ok(wake) = waker() else {
+        studio
+            .depth
+            .poll_flag()
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        return;
+    };
     let studio = studio.clone();
     let _ = std::thread::Builder::new()
         .name("remedy-approvals".into())
         .spawn(move || {
             loop {
-                std::thread::sleep(Duration::from_secs(4));
-                let Some(client) = studio.runtime() else {
-                    continue;
-                };
+                std::thread::sleep(every);
                 let studio = studio.clone();
-                let Ok(wake) = waker() else {
-                    continue;
-                };
-                api::spawn_json(&client, Request::get("approvals"), move |out| {
-                    let _ = wake.post(move || {
-                        if let Ok(v) = out {
-                            studio.depth.approvals.set(parse_approvals(&v));
-                        }
-                    });
-                });
+                let _ = wake.post(move || poll_approvals(&studio));
             }
         });
+}
+
+fn poll_approvals(studio: &Studio) {
+    let Some(client) = studio.runtime() else {
+        return;
+    };
+    let studio = studio.clone();
+    let Ok(wake) = waker() else {
+        return;
+    };
+    api::spawn_json(&client, Request::get("approvals"), move |out| {
+        let _ = wake.post(move || {
+            if let Ok(v) = out {
+                studio.depth.approvals.set(parse_approvals(&v));
+            }
+        });
+    });
 }
 
 fn start_tick(studio: &Studio) {
@@ -1166,15 +1187,19 @@ fn start_tick(studio: &Studio) {
     {
         return;
     }
+    let Ok(wake) = waker() else {
+        studio
+            .depth
+            .tick_flag()
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        return;
+    };
     let studio = studio.clone();
     let _ = std::thread::Builder::new()
         .name("remedy-tick".into())
         .spawn(move || {
             loop {
                 std::thread::sleep(Duration::from_secs(5));
-                let Ok(wake) = waker() else {
-                    continue;
-                };
                 let studio = studio.clone();
                 let _ = wake.post(move || studio.depth.tick.update(|n| *n = n.wrapping_add(1)));
             }
@@ -2257,6 +2282,12 @@ mod tests {
     use super::*;
     use crate::studio::Studio;
     use crate::work::{StepStatus, WorkStep};
+    use crate::shell;
+    use remedy_ui::testing::TestApp;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::Instant;
 
     #[test]
     fn draft_event_stores_the_real_message_id() {
@@ -2306,5 +2337,72 @@ mod tests {
         assert_eq!(a.steps[0].narration.as_deref(), Some("I'll look."));
         assert!(studio.live_message_id.get().is_none());
         assert!(studio.live_user_reaction.get().is_empty());
+    }
+
+    #[test]
+    fn approvals_poll_reads_the_client_on_the_ui_thread() {
+        // The live app starts this poller after the sidecar is up. Reading
+        // `studio.runtime()` on the worker used to abort the process.
+        unsafe { std::env::set_var("REMEDY_DESKTOP_NO_SPAWN", "1") };
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock");
+        let addr = listener.local_addr().expect("addr");
+        thread::Builder::new()
+            .name("mock-approvals".into())
+            .spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(mut s) = stream else { continue };
+                    let mut buf = vec![0u8; 4096];
+                    let n = match s.read(&mut buf) {
+                        Ok(n) => n,
+                        Err(_) => continue,
+                    };
+                    let req = String::from_utf8_lossy(&buf[..n]);
+                    let path = req
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap_or("/");
+                    let body = if path.contains("approvals") {
+                        r#"{"approvals":[{"id":"ap-1","tool":"bash","summary":"list files"}]}"#
+                    } else {
+                        r#"{"ok":true}"#
+                    };
+                    let _ = write!(
+                        s,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                }
+            })
+            .expect("spawn mock");
+
+        let studio = Studio::new();
+        studio.attach_client(Client::new(&format!("http://{addr}"), Some("test-token-1")));
+        let mut app = TestApp::window({
+            let studio = studio.clone();
+            move |ui, _| {
+                ui.root().child(shell(ui, studio.clone()));
+            }
+        });
+        // The poller thread can only obtain a Waker after the window is up.
+        app.frames(2);
+        start_poll_every(&studio, Duration::from_millis(10));
+        let start = Instant::now();
+        let mut saw = false;
+        while start.elapsed() < Duration::from_secs(3) {
+            app.frames(2);
+            thread::sleep(Duration::from_millis(20));
+            if studio.depth.approvals.get().iter().any(|a| a.id == "ap-1") {
+                saw = true;
+                break;
+            }
+        }
+        assert!(
+            saw,
+            "the approvals poller must post the list onto the UI thread without panicking"
+        );
     }
 }
