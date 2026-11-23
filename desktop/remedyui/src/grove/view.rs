@@ -43,11 +43,13 @@ pub(super) fn root(ui: &Ui, grove: Grove, app: Option<App>) -> El {
         l.width = Length::Percent(1.0);
     });
     let studio_flag = grove.clone();
+    let studio_grove = grove.clone();
+    let on_grove = grove.clone();
     let ui_studio = ui.clone();
     let studio_on = show(
         ui,
         move || matches!(studio_flag.surface.get(), Surface::Studio),
-        move || studio_face(&ui_studio, grove.clone()),
+        move || studio_face(&ui_studio, studio_grove.clone()),
     )
     .el()
     .layout(|l| {
@@ -56,13 +58,27 @@ pub(super) fn root(ui: &Ui, grove: Grove, app: Option<App>) -> El {
         l.min_height = Length::Px(0.0);
         l.width = Length::Percent(1.0);
     });
-    w::column(ui)
+    let body = w::column(ui)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.height = Length::Percent(1.0);
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .child(grove_on)
+        .child(studio_on);
+    w::row(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.height = Length::Percent(1.0);
         })
-        .child(grove_on)
-        .child(studio_on)
+        .child(body)
+        .child(crate::settings::grove_rail(ui, move || {
+            matches!(on_grove.surface.get(), Surface::Grove)
+        }))
+        .on_key_capture(crate::settings::shell_chord_current)
+        .on_key(crate::settings::shell_escape_current)
 }
 
 /// The Grove window: bars, the open page, the shared status line, and the
