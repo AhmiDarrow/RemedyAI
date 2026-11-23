@@ -228,7 +228,7 @@ fn home_bar(ui: &Ui, grove: Grove) -> El {
                         .padding(bar_insets(unit))
                         .layout(|l| l.width = Length::Percent(1.0))
                         .child(brand(&ui, grove.clone()))
-                        .child(home_tabs(&ui, grove))
+                        .child(home_tabs(&ui, grove.clone()))
                         .child(spacer(&ui))
                         .child(studio),
                 )
@@ -524,6 +524,21 @@ fn home_plots(ui: &Ui, grove: Grove, app: Option<App>) -> El {
         .child(section_label(ui, grove.clone()))
         .child(plots(ui, grove.clone()))
         .child(head::house_block(ui, grove.clone()));
+    // The split sizes this pane. Without a height, the scroll grows with its
+    // content and paints over the status bar. 16 px matches the desktop split.
+    let scroll = scroll
+        .padding(Insets {
+            top: 0.0,
+            end: 0.0,
+            bottom: unit * 4.0,
+            start: 0.0,
+        })
+        .layout(|l| {
+            l.height = Length::Percent(1.0);
+            l.min_height = Length::Px(0.0);
+            l.min_width = Length::Px(0.0);
+            l.align_self = Some(Align::Stretch);
+        });
     // The widget clamps a drag to 0.05–0.95. React's home divider stops at
     // 0.28–0.72. 0.44, the saved start, is inside both.
     let chat = chat::pane(ui, grove.clone(), app, chat::RoomKind::Home);
@@ -843,9 +858,9 @@ fn section_label(ui: &Ui, grove: Grove) -> El {
     let unit = ui.theme().spacing.unit;
     w::heading(ui, 2, move || {
         if grove.goals.get().is_empty() {
-            "A few places to start".into()
+            "A few places to start".to_string()
         } else {
-            "Your goals".into()
+            "Your goals".to_string()
         }
     })
     .layout(|l| {
@@ -1004,7 +1019,7 @@ fn plot_card(ui: &Ui, grove: &Grove, id: &str) -> El {
             .gap(unit)
             .child(actions)
             .child(open)
-            .child(plot_foot(ui, grove, id)),
+            .child(plot_foot(ui, grove.clone(), id)),
     )
 }
 
@@ -1052,16 +1067,14 @@ fn plot_update(ui: &Ui, grove: Grove, id: String) -> El {
         {
             let ui = ui.clone();
             move || {
-                w::text(&ui, "").variant("muted").text({
-                    let g = grove;
-                    let id = id;
-                    move || {
-                        link_of(&g, &id)
-                            .map(|l| {
-                                format!("{} · {}", logic::state_words(&l.state), l.last_update)
-                            })
-                            .unwrap_or_default()
-                    }
+                let g = grove.clone();
+                let id = id.clone();
+                w::text(&ui, "").variant("muted").text(move || {
+                    link_of(&g, &id)
+                        .map(|l| {
+                            format!("{} · {}", logic::state_words(&l.state), l.last_update)
+                        })
+                        .unwrap_or_default()
                 })
             }
         },
@@ -1112,6 +1125,8 @@ fn plot_foot(ui: &Ui, grove: Grove, id: String) -> El {
             let g = grove.clone();
             let id = id.clone();
             move || {
+                let g = g.clone();
+                let id = id.clone();
                 w::text(&ui, "").variant("muted").text(move || {
                     link_of(&g, &id)
                         .map(|l| logic::state_words(&l.state).to_string())
@@ -1135,6 +1150,8 @@ fn plot_foot(ui: &Ui, grove: Grove, id: String) -> El {
             let g = grove.clone();
             let id = id.clone();
             move || {
+                let g = g.clone();
+                let id = id.clone();
                 let b = w::button(&ui, "Mark complete", move || g.mark_complete(&id)).variant("quiet");
                 w::tooltip(&b, "Remedy thinks this is finished — confirm it");
                 b
@@ -1146,6 +1163,8 @@ fn plot_foot(ui: &Ui, grove: Grove, id: String) -> El {
         let g = grove;
         let id = id.clone();
         move || {
+            let g = g.clone();
+            let id = id.clone();
             let b = w::button(&ui, "Step now", move || g.step_now(&id)).variant("quiet");
             w::tooltip(&b, "Remedy takes one step on this now, in the background");
             b
@@ -1231,12 +1250,13 @@ fn room_hint(ui: &Ui, grove: Grove) -> El {
             let ui = ui.clone();
             let g = grove;
             move || {
+                let g = g.clone();
                 let unit = ui.theme().spacing.unit;
                 w::text(&ui, "").variant("muted").text(move || {
                     if g.loading.get() {
-                        "Opening this goal’s room…".into()
+                        "Opening this goal’s room…".to_string()
                     } else {
-                        "Say what you’d like to do — I’ll drive, you watch.".into()
+                        "Say what you’d like to do — I’ll drive, you watch.".to_string()
                     }
                 })
                 .layout(|l| {

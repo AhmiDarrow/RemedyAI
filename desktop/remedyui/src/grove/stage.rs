@@ -64,9 +64,9 @@ fn toolbar(ui: &Ui, grove: Grove) -> El {
         ui,
         move || {
             if g.shield.get() {
-                "Shield on".into()
+                "Shield on".to_string()
             } else {
-                "Shield off".into()
+                "Shield off".to_string()
             }
         },
         {
@@ -96,9 +96,9 @@ fn toolbar(ui: &Ui, grove: Grove) -> El {
         move || {
             let url = g.stage_url.get();
             if g.bookmarks.get().iter().any(|b| b.url == url) {
-                "Unstar".into()
+                "Unstar".to_string()
             } else {
-                "Star".into()
+                "Star".to_string()
             }
         },
         {
@@ -115,9 +115,9 @@ fn toolbar(ui: &Ui, grove: Grove) -> El {
         ui,
         move || {
             if g.desktop_site.get() {
-                "Desktop site".into()
+                "Desktop site".to_string()
             } else {
-                "Mobile view".into()
+                "Mobile view".to_string()
             }
         },
         {

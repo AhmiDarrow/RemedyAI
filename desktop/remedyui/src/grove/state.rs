@@ -588,7 +588,6 @@ impl Grove {
     }
 
     pub(crate) fn stop(&self) {
-        self.pending.set(None);
         if let (false, Some(client), sid) = (
             self.local_only,
             self.client.get(),
@@ -811,7 +810,7 @@ impl Grove {
                 g.uploading.set(false);
                 match out {
                     Ok((sid, files)) => {
-                        g.remember_session(&job_kind_home(&sid, &g), sid);
+                        g.remember_session(job_kind_home(&sid, &g), sid);
                         g.attachments.update(|list| list.extend(files));
                     }
                     Err(e) => g.attach_error.set(e),
@@ -906,12 +905,13 @@ impl Grove {
     }
 
     pub(crate) fn set_channel(&self, channel: Option<api::Channel>) {
+        let noted = channel.clone();
         self.spawn(
             move |c| api::set_owner_channel(&c, channel.as_ref()),
             move |g, out| {
                 g.note.set(if out.is_err() {
                     "That did not go through — try again.".into()
-                } else if channel.is_some() {
+                } else if noted.is_some() {
                     "Updates will reach you there too.".into()
                 } else {
                     "Updates stay in Grove.".into()

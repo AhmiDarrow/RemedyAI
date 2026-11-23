@@ -77,20 +77,28 @@ fn head_row(ui: &Ui, grove: Grove) -> El {
                 }
             })
     };
-    let name = w::text(ui, "").variant("strong").text({
-        let g = grove.clone();
-        move || g.partner()
-    });
-    let tag = w::text(ui, "").variant("muted").text({
-        let g = grove.clone();
-        move || {
-            if g.head.get().is_some_and(|h| h.heartbeat.enabled) {
-                "Always on".into()
-            } else {
-                "On call".into()
+    let name = w::text(ui, "")
+        .variant("strong")
+        .text({
+            let g = grove.clone();
+            move || g.partner()
+        })
+        .nowrap()
+        .layout(|l| l.shrink = 0.0);
+    let tag = w::text(ui, "")
+        .variant("muted")
+        .text({
+            let g = grove.clone();
+            move || {
+                if g.head.get().is_some_and(|h| h.heartbeat.enabled) {
+                    "Always on".to_string()
+                } else {
+                    "On call".to_string()
+                }
             }
-        }
-    });
+        })
+        .nowrap()
+        .layout(|l| l.shrink = 0.0);
     let status = w::text(ui, "").text({
         let g = grove.clone();
         move || status_line(&g)
@@ -119,16 +127,27 @@ fn head_row(ui: &Ui, grove: Grove) -> El {
     w::row(ui)
         .align(Align::Center)
         .gap(unit * 2.0)
-        .child(open)
+        .layout(|l| l.width = Length::Percent(1.0))
+        .child(open.layout(|l| l.shrink = 0.0))
         .child(
             w::column(ui)
                 .gap(unit * 0.4)
-                .layout(|l| l.grow = 1.0)
-                .child(w::row(ui).align(Align::Center).gap(unit).child(name).child(tag))
+                .layout(|l| {
+                    l.grow = 1.0;
+                    l.shrink = 1.0;
+                    l.min_width = Length::Px(0.0);
+                })
+                .child(
+                    w::row(ui)
+                        .align(Align::Center)
+                        .gap(unit)
+                        .child(name)
+                        .child(tag),
+                )
                 .child(status),
         )
-        .child(watch)
-        .child(gear)
+        .child(watch.layout(|l| l.shrink = 0.0))
+        .child(gear.layout(|l| l.shrink = 0.0))
 }
 
 fn status_line(grove: &Grove) -> String {
@@ -444,7 +463,6 @@ fn settings(ui: &Ui, grove: Grove) -> El {
 
 fn routines(ui: &Ui, grove: Grove) -> El {
     let unit = ui.theme().spacing.unit;
-    let g = grove.clone();
     let header = w::row(ui)
         .align(Align::Center)
         .justify(remedy_ui::layout::Justify::SpaceBetween)

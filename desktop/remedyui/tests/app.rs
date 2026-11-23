@@ -17,9 +17,12 @@ fn no_spawn() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
         // Integration tests compile the lib without cfg(test); never launch a sidecar.
-        // Grove prefs live under REMEDY_HOME. Point them at a temp dir so a test
-        // cannot read or write the owner's ~/.remedy/ui/grove.json.
-        let home = std::env::temp_dir().join("remedy-desktop-test-home");
+        // Grove prefs live under REMEDY_HOME. A fresh directory per process, so a
+        // previous run that switched to Studio cannot open this one there.
+        let home = std::env::temp_dir().join(format!(
+            "remedy-desktop-test-home-{}",
+            std::process::id()
+        ));
         let _ = std::fs::create_dir_all(&home);
         unsafe {
             std::env::set_var("REMEDY_DESKTOP_NO_SPAWN", "1");
@@ -28,16 +31,24 @@ fn no_spawn() {
     });
 }
 
+/// Live-app tests start on Grove. Drop a surface another test in this process saved.
+fn fresh_profile() {
+    no_spawn();
+    if let Ok(home) = std::env::var("REMEDY_HOME") {
+        let _ = std::fs::remove_file(std::path::Path::new(&home).join("ui").join("grove.json"));
+    }
+}
+
 #[test]
 fn the_app_opens_its_window() {
-    no_spawn();
+    fresh_profile();
     let app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     assert!(app.ui().is_some(), "a window opened");
 }
 
 #[test]
 fn new_session_and_close_are_visible_and_work() {
-    no_spawn();
+    fresh_profile();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     assert!(
         app.press(Role::Button, "Studio"),

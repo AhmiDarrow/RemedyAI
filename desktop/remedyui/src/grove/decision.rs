@@ -3,7 +3,7 @@
 //! Y / N / E / ? / Esc apply only while the card itself has focus, so typing
 //! in the composer is not a decision. A new unseen decision untucks the card.
 
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use remedy_ui::a11y::{Action, Role, Semantics};
@@ -104,8 +104,8 @@ fn open_card(ui: &Ui, grove: Grove) -> El {
     let ui = ui.clone();
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
-    let seen = Rc::new(Cell::new(String::new()));
-    let body = w::column(ui)
+    let seen = Rc::new(RefCell::new(String::new()));
+    let body = w::column(&ui)
         .gap(unit * 1.5)
         .padding(Insets::all(unit * 2.0))
         .layout(|l| {
@@ -133,8 +133,8 @@ fn open_card(ui: &Ui, grove: Grove) -> El {
                 .border(border)
                 .border_width(if sensitive { 2.0 } else { 1.0 }),
         );
-        if !id.is_empty() && seen.get() != id && !g_focus.tucked.get() {
-            seen.set(id);
+        if !id.is_empty() && *seen.borrow() != id && !g_focus.tucked.get() {
+            *seen.borrow_mut() = id;
             body2.focus();
         }
     });
@@ -151,7 +151,7 @@ fn open_card(ui: &Ui, grove: Grove) -> El {
     });
 
     let g = grove.clone();
-    let kicker = w::text(ui, "").text(move || {
+    let kicker = w::text(&ui, "").text(move || {
         let Some(d) = g.current_decision() else {
             return String::new();
         };
@@ -162,7 +162,7 @@ fn open_card(ui: &Ui, grove: Grove) -> El {
         }
     });
     let g = grove.clone();
-    let count = w::text(ui, "").variant("muted").text(move || {
+    let count = w::text(&ui, "").variant("muted").text(move || {
         let n = g.ordered_decisions().len();
         if n > 1 {
             format!("1 of {n}")
@@ -171,8 +171,8 @@ fn open_card(ui: &Ui, grove: Grove) -> El {
         }
     });
     let g = grove.clone();
-    let later = w::button(ui, "Later", move || g.tuck(true));
-    let top = w::row(ui)
+    let later = w::button(&ui, "Later", move || g.tuck(true));
+    let top = w::row(&ui)
         .align(Align::Center)
         .justify(Justify::SpaceBetween)
         .gap(unit)
@@ -181,7 +181,7 @@ fn open_card(ui: &Ui, grove: Grove) -> El {
         .child(later);
 
     let g = grove.clone();
-    let headline = w::heading(ui, 3, move || {
+    let headline = w::heading(&ui, 3, move || {
         g.current_decision()
             .map(|d| {
                 let h = headline_of(&d);
@@ -194,7 +194,7 @@ fn open_card(ui: &Ui, grove: Grove) -> El {
             .unwrap_or_default()
     });
     let g = grove.clone();
-    let sub = w::text(ui, "").text(move || {
+    let sub = w::text(&ui, "").text(move || {
         let Some(d) = g.current_decision() else {
             return String::new();
         };
@@ -206,8 +206,8 @@ fn open_card(ui: &Ui, grove: Grove) -> El {
             "Remedy will pick this up once you decide.".into()
         }
     });
-    let explain = explain_block(ui, grove.clone());
-    let actions = actions(ui, grove);
+    let explain = explain_block(&ui, grove.clone());
+    let actions = actions(&ui, grove);
     body.child(top).child(headline).child(sub).child(explain).child(actions)
 }
 
@@ -258,11 +258,11 @@ fn actions(ui: &Ui, grove: Grove) -> El {
         ui,
         move || {
             if g.decision_busy.get() {
-                "Working…".into()
+                "Working…".to_string()
             } else if g.current_decision().is_some_and(|d| d.sensitive) {
-                "Yes, go ahead".into()
+                "Yes, go ahead".to_string()
             } else {
-                "Yes".into()
+                "Yes".to_string()
             }
         },
         {
@@ -280,9 +280,9 @@ fn actions(ui: &Ui, grove: Grove) -> El {
         ui,
         move || {
             if g.current_decision().is_some_and(|d| d.sensitive) {
-                "Not now".into()
+                "Not now".to_string()
             } else {
-                "No".into()
+                "No".to_string()
             }
         },
         {
@@ -301,7 +301,7 @@ fn actions(ui: &Ui, grove: Grove) -> El {
             let open = g
                 .current_decision()
                 .is_some_and(|d| g.explain_id.get().as_deref() == Some(d.id.as_str()));
-            if open { "Hide details".into() } else { "Explain".into() }
+            if open { "Hide details".to_string() } else { "Explain".to_string() }
         },
         {
             let g = grove.clone();
@@ -316,7 +316,12 @@ fn actions(ui: &Ui, grove: Grove) -> El {
             let ui = ui.clone();
             let g = grove.clone();
             move || {
-                w::button(&ui, "Allow for this chat", move || g.decide(true, "session")).disabled({
+                let g = g.clone();
+                w::button(&ui, "Allow for this chat", {
+                    let g = g.clone();
+                    move || g.decide(true, "session")
+                })
+                .disabled({
                     let g = g.clone();
                     move || g.decision_busy.get()
                 })

@@ -921,7 +921,7 @@ pub fn upload_file(client: &Client, session_id: &str, path: &std::path::Path) ->
         },
         mime: {
             let m = str_of(&v, "mime");
-            if m.is_empty() { mime } else { m }
+            if m.is_empty() { mime.clone() } else { m }
         },
         size: i64_of(&v, "size").max(0) as u64,
         is_image: bool_of(&v, "is_image") || mime.starts_with("image/"),
