@@ -617,11 +617,15 @@ fn home_plots(ui: &Ui, grove: Grove, app: Option<App>) -> El {
             start: 0.0,
         })
         .layout(|l| {
+            l.width = Length::Percent(1.0);
             l.height = Length::Percent(1.0);
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
             l.min_height = Length::Px(0.0);
             l.min_width = Length::Px(0.0);
             l.align_self = Some(Align::Stretch);
-        });
+        })
+        .semantics(Semantics::new(Role::Region).label("Home plots"));
     // The widget clamps a drag to 0.05–0.95. React's home divider stops at
     // 0.28–0.72. 0.44, the saved start, is inside both.
     let chat = chat::pane(ui, grove.clone(), app, chat::RoomKind::Home);

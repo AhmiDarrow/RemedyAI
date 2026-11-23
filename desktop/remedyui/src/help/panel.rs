@@ -540,7 +540,12 @@ impl HelpPanel {
 
     fn article_body(&self, ui: &Ui) -> El {
         let unit = ui.theme().spacing.unit;
-        let scroller = w::scroll(ui).layout(|l| l.width = Length::Percent(1.0));
+        let scroller = w::scroll(ui).layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
+        });
         let body = ui
             .el("help_body")
             .column()

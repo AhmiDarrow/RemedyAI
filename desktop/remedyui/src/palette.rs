@@ -240,7 +240,12 @@ pub fn panel(ui: &Ui, studio: Studio, chrome: Chrome) -> El {
                     input.focus();
                     input.layout(|l| l.grow = 1.0)
                 })
-                .child(w::text(ui, "Esc").variant("muted")),
+                .child(
+                    w::text(ui, "Esc")
+                        .variant("muted")
+                        .nowrap()
+                        .layout(|l| l.shrink = 0.0),
+                ),
         )
         .child(w::divider(ui, false))
         .child(w::scroll(ui).child(list).layout(|l| {
