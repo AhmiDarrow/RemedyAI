@@ -5,10 +5,9 @@ edition = "2024"
 publish = false
 
 [dependencies]
-# RemedyUI main at 9466a695 (PRs #118–#121). Grove and Settings share this pin.
-# Same features on Windows and Linux. Filled inline-code chips still wait on a
-# RichText background span, which this rev does not have.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "9466a695e9f452049f6d020b24afb5fe3eb38b71", features = ["net", "image", "desktop", "term"] }
+# RemedyUI c325991 is on main: chips (#124), Request::patch (#127), desktop,
+# playback (mic and spoken replies), and term (the in-app terminal).
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "c325991d72d795e34e5ea18f0de7991484e151e4", features = ["net", "image", "playback", "desktop", "term"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -16,7 +15,7 @@ portable-pty = "0.9"
 
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "9466a695e9f452049f6d020b24afb5fe3eb38b71", features = ["headless", "devtools", "net", "image", "desktop", "term"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "c325991d72d795e34e5ea18f0de7991484e151e4", features = ["headless", "devtools", "net", "image", "playback", "desktop", "term"] }
 
 [profile.release]
 lto = "fat"
