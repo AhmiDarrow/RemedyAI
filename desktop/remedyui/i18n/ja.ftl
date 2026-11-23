@@ -101,6 +101,7 @@ chat-split-tabs = チャットまたはアクション
 chat-split-tab-actions = アクション
 chat-split-tab-chat = チャット
 chat-split-working = 作業中
+chat-split-thinking = 思考
 chat-split-build = BUILD
 chat-split-side-left = アクションは左
 chat-split-side-right = アクションは右

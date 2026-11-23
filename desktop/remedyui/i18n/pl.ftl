@@ -101,6 +101,7 @@ chat-split-tabs = Czat lub działania
 chat-split-tab-actions = Działania
 chat-split-tab-chat = Czat
 chat-split-working = Pracuje
+chat-split-thinking = Myślenie
 chat-split-build = BUILD
 chat-split-side-left = Działania po lewej
 chat-split-side-right = Działania po prawej
