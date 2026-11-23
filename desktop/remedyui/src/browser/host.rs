@@ -447,6 +447,10 @@ impl Model {
         let (next, on) = super::bookmarks::toggle_bookmark(url, None, &self.bookmarks());
         if self.is_live() {
             super::bookmarks::save_bookmarks(&next);
+            let normalized = super::url::normalize_browser_url(url);
+            if !normalized.is_empty() {
+                crate::grove::sync_browser_bookmark(&normalized, on);
+            }
         }
         self.inner.bookmarks.set(next);
         self.flash(if on { "Bookmark added" } else { "Bookmark removed" });
@@ -1480,6 +1484,46 @@ mod tests {
         assert_eq!(status_hold("error: blocked").as_millis(), 5_000);
         assert_eq!(status_hold("not available").as_millis(), 5_000);
         assert_eq!(status_hold("Back").as_millis(), 3_200);
+    }
+
+    #[test]
+    fn rail_star_writes_grove_prefs_and_updates_a_live_grove() {
+        struct HomeGuard(Option<String>);
+        impl Drop for HomeGuard {
+            fn drop(&mut self) {
+                crate::grove::unbind_live();
+                unsafe {
+                    match self.0.take() {
+                        Some(value) => std::env::set_var("REMEDY_HOME", value),
+                        None => std::env::remove_var("REMEDY_HOME"),
+                    }
+                }
+            }
+        }
+
+        let dir = std::env::temp_dir().join(format!("remedy-rail-star-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let guard = HomeGuard(std::env::var("REMEDY_HOME").ok());
+        unsafe { std::env::set_var("REMEDY_HOME", &dir) };
+        crate::grove::unbind_live();
+
+        let model = Model::build(true, None);
+        model.toggle_bookmark("https://example.com/docs");
+        let path = dir.join("ui").join("grove.json");
+        let raw = std::fs::read_to_string(&path).expect("grove prefs");
+        assert!(raw.contains("https://example.com/docs"), "{raw}");
+
+        let grove = crate::grove::Grove::new(crate::Studio::preview(), true);
+        assert!(grove.bookmarks.get().iter().any(|b| b.url == "https://example.com/docs"));
+        crate::grove::bind_live(grove.clone());
+        model.toggle_bookmark("https://example.com/docs");
+        assert!(grove.bookmarks.get().iter().all(|b| b.url != "https://example.com/docs"));
+        let raw = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(!raw.contains("https://example.com/docs"), "{raw}");
+
+        drop(guard);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
