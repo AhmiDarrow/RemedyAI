@@ -6,6 +6,8 @@ publish = false
 
 [dependencies]
 # RemedyUI main (PRs #118–#121). Same features on Windows and Linux.
+# Newer than the Studio polish pin (7dec309); filled inline-code chips still
+# wait on a RichText background span, which this rev does not have.
 remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "9466a695e9f452049f6d020b24afb5fe3eb38b71", features = ["net", "image", "desktop"] }
 
 serde = { version = "1", features = ["derive"] }
