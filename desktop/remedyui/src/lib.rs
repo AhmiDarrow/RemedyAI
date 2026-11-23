@@ -5,6 +5,7 @@
 //! window talks to remedy-runtime over HTTP+SSE on 127.0.0.1:7400.
 
 mod chat;
+mod diagnostics;
 mod fonts;
 mod grove;
 mod layout;
@@ -21,6 +22,7 @@ mod time;
 mod usage;
 mod work;
 
+pub use diagnostics::DiagnosticsPanel;
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
 pub use runtime::Client;
 pub use settings::{preview_appearance, preview_connect, preview_error, preview_general, preview_models};
@@ -130,6 +132,11 @@ pub fn home_chat(ui: &Ui) -> El {
         Studio::preview_chat(),
         rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
     )
+}
+
+/// Diagnostics golden: server, host, hardware, and the hive inspector. No network.
+pub fn diagnostics_preview(ui: &Ui) -> El {
+    diagnostics::preview(ui)
 }
 
 /// Morning Grove with example plots, for goldens. It does not touch disk or the network.
