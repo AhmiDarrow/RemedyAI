@@ -21,6 +21,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 renice -n 10 -p $$ >/dev/null 2>&1 || true
 
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "${DIR}/check.py"
+
+command -v dpkg-deb >/dev/null 2>&1 || { echo "dpkg-deb is required" >&2; exit 1; }
+command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
+
 VER="$(sed -n 's/^version = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' Cargo.toml | head -n 1)"
 if [[ -z "${VER}" ]]; then
   echo "Could not read the package version from Cargo.toml" >&2
@@ -41,6 +47,11 @@ fi
 MAGIC="$(od -An -t x1 -N 4 "${BINARY}" | tr -d ' \n')"
 if [[ "${MAGIC}" != "7f454c46" ]]; then
   echo "Binary is not an ELF executable: ${BINARY}" >&2
+  exit 1
+fi
+MACHINE="$(od -An -t x1 -j 18 -N 2 "${BINARY}" | tr -d ' \n')"
+if [[ "${MACHINE}" != "3e00" ]]; then
+  echo "Binary is not x86_64 (e_machine ${MACHINE}). The feed's linux asset is amd64." >&2
   exit 1
 fi
 
@@ -69,10 +80,18 @@ Icon=remedy-desktop
 Type=Application
 Categories=Utility;
 StartupWMClass=Remedy Desktop
+X-AppImage-Version=${VER}
 EOF
 cp -f "${OUT}/AppDir/Remedy Desktop.desktop" "${OUT}/deb/usr/share/applications/com.remedy.desktop.desktop"
 
 SIZE_KB="$(du -sk "${OUT}/deb/usr" | awk '{print $1}')"
+SHLIBS="libc6 (>= 2.35)"
+if command -v dpkg-shlibdeps >/dev/null 2>&1; then
+  LINE="$(dpkg-shlibdeps -O "${BINARY}" 2>/dev/null | sed -n 's/^shlibs:Depends=//p' | head -n 1 || true)"
+  if [[ -n "${LINE}" ]]; then
+    SHLIBS="${LINE}"
+  fi
+fi
 cat > "${OUT}/deb/DEBIAN/control" <<EOF
 Package: remedy-desktop
 Version: ${VER}
@@ -81,8 +100,10 @@ Priority: optional
 Architecture: amd64
 Maintainer: Remedy <ahmitdarrow@gmail.com>
 Installed-Size: ${SIZE_KB}
+Depends: ${SHLIBS}
 Description: Remedy Desktop
  Remedy Desktop (${VER}), identifier com.remedy.desktop.
+ User data stays in ~/.remedy and is not removed by install or upgrade.
 EOF
 
 DEB="${OUT}/Remedy.Desktop_${VER}_amd64.deb"
@@ -103,11 +124,8 @@ fi
 ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "${TOOL}" "${OUT}/AppDir" "${APPIMAGE}"
 chmod 0755 "${APPIMAGE}"
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -x "${DIR}/sign-minisign.sh" ]]; then
-  bash "${DIR}/sign-minisign.sh" "${APPIMAGE}"
-  bash "${DIR}/sign-minisign.sh" "${DEB}"
-fi
+bash "${DIR}/sign-minisign.sh" "${APPIMAGE}"
+bash "${DIR}/sign-minisign.sh" "${DEB}"
 
 echo "${APPIMAGE}"
 echo "${DEB}"

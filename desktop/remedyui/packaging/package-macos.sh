@@ -22,6 +22,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 renice -n 10 -p $$ >/dev/null 2>&1 || true
 
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "${DIR}/check.py"
+
 VER="$(sed -n 's/^version = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' Cargo.toml | head -n 1)"
 if [[ -z "${VER}" ]]; then
   echo "Could not read the package version from Cargo.toml" >&2
@@ -52,7 +55,13 @@ APP="${STAGE}/Remedy Desktop.app"
 mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
 install -m 0755 "${BINARY}" "${APP}/Contents/MacOS/Remedy Desktop"
 ln -sf "Remedy Desktop" "${APP}/Contents/MacOS/remedy-desktop"
+ICON_FILE="icon.png"
 cp -f "${ROOT}/assets/icon.png" "${APP}/Contents/Resources/icon.png"
+ICNS="${ROOT}/../src-tauri/icons/icon.icns"
+if [[ -f "${ICNS}" ]]; then
+  cp -f "${ICNS}" "${APP}/Contents/Resources/icon.icns"
+  ICON_FILE="icon.icns"
+fi
 
 cat > "${APP}/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -66,7 +75,7 @@ cat > "${APP}/Contents/Info.plist" <<EOF
   <key>CFBundleShortVersionString</key><string>${VER}</string>
   <key>CFBundleExecutable</key><string>Remedy Desktop</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleIconFile</key><string>icon.png</string>
+  <key>CFBundleIconFile</key><string>${ICON_FILE}</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict>
@@ -78,16 +87,25 @@ codesign --force --deep --sign - "${APP}"
 DMG="${OUT}/Remedy.Desktop_${VER}_${ARCH}.dmg"
 TAR="${OUT}/Remedy.Desktop_${VER}_${ARCH}.app.tar.gz"
 rm -f "${DMG}" "${TAR}"
-hdiutil create -volname "Remedy Desktop" -srcfolder "${APP}" -ov -format UDZO "${DMG}"
+# -srcfolder copies the directory's contents. STAGE holds only the .app,
+# so the volume root is Remedy Desktop.app rather than its Contents folder.
+hdiutil create -volname "Remedy Desktop" -srcfolder "${STAGE}" -ov -format UDZO "${DMG}"
+hdiutil verify "${DMG}"
 
 # Sole top-level entry, same shape the 0.70.5 updater extracts.
 tar -C "${STAGE}" -czf "${TAR}" "Remedy Desktop.app"
-
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -x "${DIR}/sign-minisign.sh" ]]; then
-  bash "${DIR}/sign-minisign.sh" "${TAR}"
-  bash "${DIR}/sign-minisign.sh" "${DMG}"
+if tar -tzf "${TAR}" | grep -E '(^|/)\.\.(/|$)|^/' >/dev/null; then
+  echo "tarball contains a path that escapes the archive root" >&2
+  exit 1
 fi
+FIRST="$(tar -tzf "${TAR}" | head -n 1)"
+case "${FIRST}" in
+  "Remedy Desktop.app"|"Remedy Desktop.app/"*) ;;
+  *) echo "tarball top-level is '${FIRST}', expected Remedy Desktop.app" >&2; exit 1 ;;
+esac
+
+bash "${DIR}/sign-minisign.sh" "${TAR}"
+bash "${DIR}/sign-minisign.sh" "${DMG}"
 
 echo "${DMG}"
 echo "${TAR}"

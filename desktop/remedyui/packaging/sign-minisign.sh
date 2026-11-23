@@ -22,6 +22,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# GNU coreutils accepts -d. Apple's base64 wants -D. python3 covers both.
+b64_decode() {
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "$1" | python3 -c 'import sys,base64; sys.stdout.buffer.write(base64.b64decode(sys.stdin.read().strip()))'
+    return
+  fi
+  if printf '%s' "$1" | base64 -d >/dev/null 2>&1; then
+    printf '%s' "$1" | base64 -d
+    return
+  fi
+  printf '%s' "$1" | base64 -D
+}
+
 KEY=""
 PASS=""
 if [[ -n "${REMEDY_UPDATE_KEY:-}" ]]; then
@@ -39,7 +52,7 @@ elif [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
   else
     TEXT="${RAW}"
     if [[ "${TEXT}" != *"untrusted comment"* ]]; then
-      if ! TEXT="$(printf '%s' "${RAW}" | tr -d '[:space:]' | base64 -d 2>/dev/null)"; then
+      if ! TEXT="$(b64_decode "$(printf '%s' "${RAW}" | tr -d '[:space:]')" 2>/dev/null)"; then
         echo "unsigned: no usable minisign secret ($(basename "${FILE}"))"
         exit 0
       fi

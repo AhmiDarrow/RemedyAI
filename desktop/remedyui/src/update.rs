@@ -205,6 +205,57 @@ pub fn elf_magic(bytes: &[u8]) -> bool {
     bytes.len() >= 4 && bytes[..4] == *b"\x7fELF"
 }
 
+pub fn pe_magic(bytes: &[u8]) -> bool {
+    bytes.len() >= 2 && bytes[0] == b'M' && bytes[1] == b'Z'
+}
+
+/// Stage the new AppImage beside the running one so `rename` stays on that volume.
+pub fn appimage_stage_path(dest: &Path, pid: u32) -> PathBuf {
+    let parent = dest.parent().unwrap_or(Path::new("."));
+    let name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("AppImage");
+    parent.join(format!(".{name}.{pid}.partial"))
+}
+
+/// A tar entry that stays under the directory it is extracted into.
+pub fn archive_entry_is_safe(entry: &str) -> bool {
+    let entry = entry.trim();
+    if entry.is_empty() || entry.starts_with('/') || entry.starts_with('\\') {
+        return false;
+    }
+    if entry.as_bytes().get(1) == Some(&b':') {
+        return false;
+    }
+    !entry.split(['/', '\\']).any(|part| part == "..")
+}
+
+/// The archive's only top-level name, which must be one `.app`.
+pub fn archive_top_level_app(entries: &[String]) -> Result<String, String> {
+    if entries.is_empty() {
+        return Err("archive is empty".into());
+    }
+    let mut top: Option<String> = None;
+    for entry in entries {
+        if !archive_entry_is_safe(entry) {
+            return Err(format!("archive entry is not safe: {entry}"));
+        }
+        let Some(name) = entry.split(['/', '\\']).next().filter(|n| !n.is_empty()) else {
+            continue;
+        };
+        match &top {
+            None => top = Some(name.to_string()),
+            Some(have) if have == name => {}
+            Some(have) => {
+                return Err(format!("archive has more than one top-level entry ({have}, {name})"));
+            }
+        }
+    }
+    let top = top.ok_or_else(|| "archive has no files".to_string())?;
+    if !top.ends_with(".app") {
+        return Err(format!("archive top-level is {top}, expected a .app bundle"));
+    }
+    Ok(top)
+}
+
 pub(crate) struct WindowsWaiter<'a> {
     pub parent_pid: u32,
     pub installer: &'a str,
@@ -217,7 +268,7 @@ fn ps_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-/// Hidden waiter. It does not delete `~/.remedy`. `/D=` is appended last.
+/// Hidden waiter. It does not delete the per-user data directory. `/D=` is last.
 pub fn windows_waiter_script(w: &WindowsWaiter<'_>) -> String {
     format!(
         r#"$ErrorActionPreference = 'Continue'
@@ -226,58 +277,98 @@ $ownsFlag = {flag}
 $installer = {installer}
 $priorDir = {prior}
 $parentPid = {pid}
+$lock = Join-Path $env:TEMP 'RemedyDesktop-Update.lock'
+$code = 0
 function Log($m) {{
   Add-Content -LiteralPath $log -Value (("{{0:u}} {{1}}" -f (Get-Date), $m)) -ErrorAction SilentlyContinue
 }}
 try {{
   Add-Content -LiteralPath $log -Value (("{{0:u}} BOOT pid={{1}}" -f (Get-Date), $PID)) -ErrorAction SilentlyContinue
 }} catch {{}}
-$lock = Join-Path $env:TEMP 'RemedyDesktop-Update.lock'
-if (Test-Path -LiteralPath $lock) {{ Log 'another waiter holds the lock'; exit 0 }}
-Set-Content -LiteralPath $lock -Value $PID -Encoding ASCII
-try {{ Set-Content -LiteralPath $ownsFlag -Value 'owned_by=update_script' -Encoding ASCII }} catch {{}}
-while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) {{
-  Start-Sleep -Milliseconds 400
+# Three hosts start this script. One proceeds. A lock whose PID is gone is stale.
+function Take-Lock {{
+  if (Test-Path -LiteralPath $lock) {{
+    $old = ''
+    try {{ $old = (Get-Content -LiteralPath $lock -TotalCount 1 -ErrorAction SilentlyContinue) }} catch {{}}
+    $alive = $false
+    if ($old -match '^\d+$') {{
+      $alive = $null -ne (Get-Process -Id ([int]$old) -ErrorAction SilentlyContinue)
+    }}
+    if ($alive) {{ return $false }}
+    Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
+  }}
+  try {{
+    $fs = [System.IO.File]::Open($lock, 'CreateNew', 'Write', 'Read')
+    $bytes = [System.Text.Encoding]::ASCII.GetBytes("$PID")
+    $fs.Write($bytes, 0, $bytes.Length)
+    $fs.Close()
+    return $true
+  }} catch {{
+    return $false
+  }}
 }}
-Start-Sleep -Seconds 1
-if (-not (Test-Path -LiteralPath $installer)) {{
-  Log 'ERROR: installer missing'
-  exit 2
-}}
-# Silent update. /UPDATE keeps user data. /NOAUTOLAUNCH plus the flag file:
-# NSIS POSTINSTALL must not start the app. This script relaunches once.
-$nsisArgs = @('/S', '/NCRC', '/UPDATE', '/NOAUTOLAUNCH')
-if ($priorDir -and (Test-Path -LiteralPath $priorDir)) {{
-  $nsisArgs += "/D=$priorDir"
-  Log "Using /D=$priorDir"
-}}
-try {{ Set-Content -LiteralPath $ownsFlag -Value 'owned_by=update_script' -Encoding ASCII }} catch {{}}
-Log ("Starting NSIS: $installer " + ($nsisArgs -join ' '))
-$p = Start-Process -FilePath $installer -ArgumentList $nsisArgs -PassThru -WindowStyle Hidden
-if (-not $p) {{
-  Log 'ERROR: Start-Process returned null'
-  exit 3
-}}
-try {{ Wait-Process -Id $p.Id -Timeout 420 -ErrorAction Stop }} catch {{ Log $_.Exception.Message }}
-$candidates = @(
-  (Join-Path $env:LOCALAPPDATA 'Programs\Remedy Desktop\Remedy Desktop.exe'),
-  (Join-Path $env:LOCALAPPDATA 'Programs\Remedy Desktop\app.exe'),
-  (Join-Path $env:LOCALAPPDATA 'Remedy Desktop\Remedy Desktop.exe'),
-  (Join-Path $env:LOCALAPPDATA 'Remedy Desktop\app.exe'),
-  (Join-Path $env:LOCALAPPDATA 'Programs\remedy-desktop\Remedy Desktop.exe')
-)
-$launch = $null
-foreach ($c in $candidates) {{
-  if (Test-Path -LiteralPath $c) {{ $launch = $c; break }}
-}}
-if ($launch) {{
-  Start-Process -FilePath $launch
-  try {{ Remove-Item -LiteralPath $ownsFlag -Force -ErrorAction SilentlyContinue }} catch {{}}
+if (-not (Take-Lock)) {{ Log 'another waiter holds the lock'; exit 0 }}
+try {{
+  try {{ Set-Content -LiteralPath $ownsFlag -Value 'owned_by=update_script' -Encoding ASCII }} catch {{}}
+  while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) {{
+    Start-Sleep -Milliseconds 400
+  }}
+  Start-Sleep -Seconds 1
+  Get-Process -ErrorAction SilentlyContinue | Where-Object {{
+    $n = $_.ProcessName
+    if ($n -match '^(powershell|pwsh|cmd|wscript|cscript|schtasks)$') {{ return $false }}
+    if ($n -match '^(app|remedy-desktop|Remedy Desktop)$') {{ return $true }}
+    if ($_.Path -and ($_.Path -like '*\Remedy Desktop.exe' -or $_.Path -like '*\app.exe')) {{ return $true }}
+    return $false
+  }} | ForEach-Object {{ Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }}
+  if (-not (Test-Path -LiteralPath $installer)) {{
+    Log 'ERROR: installer missing'
+    $code = 2
+  }} else {{
+    # Silent update. /UPDATE keeps user data. /NOAUTOLAUNCH plus the flag file:
+    # NSIS POSTINSTALL must not start the app. This script relaunches once.
+    $nsisArgs = @('/S', '/NCRC', '/UPDATE', '/NOAUTOLAUNCH')
+    if ($priorDir -and (Test-Path -LiteralPath $priorDir)) {{
+      $nsisArgs += "/D=$priorDir"
+      Log "Using /D=$priorDir"
+    }}
+    try {{ Set-Content -LiteralPath $ownsFlag -Value 'owned_by=update_script' -Encoding ASCII }} catch {{}}
+    Log ("Starting NSIS: $installer " + ($nsisArgs -join ' '))
+    $p = Start-Process -FilePath $installer -ArgumentList $nsisArgs -PassThru -WindowStyle Hidden
+    if (-not $p) {{
+      Log 'ERROR: Start-Process returned null'
+      $code = 3
+    }} else {{
+      try {{ Wait-Process -Id $p.Id -Timeout 420 -ErrorAction Stop }} catch {{ Log $_.Exception.Message }}
+      $candidates = @()
+      if ($priorDir) {{
+        $candidates += (Join-Path $priorDir 'Remedy Desktop.exe')
+      }}
+      $candidates += @(
+        (Join-Path $env:LOCALAPPDATA 'Remedy Desktop\Remedy Desktop.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\Remedy Desktop\Remedy Desktop.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Remedy Desktop\app.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\Remedy Desktop\app.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\remedy-desktop\Remedy Desktop.exe')
+      )
+      $launch = $null
+      foreach ($c in $candidates) {{
+        if ($c -and (Test-Path -LiteralPath $c)) {{ $launch = $c; break }}
+      }}
+      if ($launch) {{
+        Start-Process -FilePath $launch
+        try {{ Remove-Item -LiteralPath $ownsFlag -Force -ErrorAction SilentlyContinue }} catch {{}}
+        $code = 0
+      }} else {{
+        Log 'ERROR: Remedy Desktop.exe was not found after install'
+        $code = 4
+      }}
+    }}
+  }}
+}} finally {{
   try {{ Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue }} catch {{}}
-  exit 0
 }}
-Log 'ERROR: Remedy Desktop.exe was not found after install'
-exit 4
+exit $code
 "#,
         log = ps_quote(w.log_path),
         flag = ps_quote(w.flag_path),
@@ -411,6 +502,26 @@ fn apply_verified(file: &Path) -> Result<(), String> {
 
 #[cfg(windows)]
 fn apply_windows(installer: &Path) -> Result<(), String> {
+    let meta = std::fs::metadata(installer).map_err(|e| format!("Cannot stat installer: {e}"))?;
+    if meta.len() < 512 * 1024 {
+        return Err(format!(
+            "Downloaded installer is too small ({} bytes) to be a real NSIS package",
+            meta.len()
+        ));
+    }
+    let mut hdr = [0u8; 2];
+    {
+        use std::io::Read;
+        let mut f = std::fs::File::open(installer).map_err(|e| format!("Cannot open installer: {e}"))?;
+        f.read_exact(&mut hdr).map_err(|e| format!("Cannot read installer header: {e}"))?;
+    }
+    if !pe_magic(&hdr) {
+        return Err(
+            "Downloaded file is not a Windows executable (missing MZ header). \
+             GitHub may have returned an HTML error page."
+                .into(),
+        );
+    }
     write_owns_flag()?;
     let log = std::env::temp_dir().join("RemedyDesktop-Update.log");
     let flag = std::env::temp_dir().join(OWNS_RELAUNCH_FLAG);
@@ -603,12 +714,22 @@ fn apply_linux(verified: &Path) -> Result<(), String> {
     if !elf_magic(&hdr) {
         return Err("Downloaded file is not a Linux executable".into());
     }
+    // Copy onto the AppImage's own volume, then rename over it. A rename from
+    // the temp directory fails when that directory is a different filesystem.
+    let staged = appimage_stage_path(&appimage, std::process::id());
+    let _ = std::fs::remove_file(&staged);
+    std::fs::copy(verified, &staged).map_err(|e| format!("Cannot stage AppImage: {e}"))?;
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(verified, std::fs::Permissions::from_mode(0o755))
-            .map_err(|e| e.to_string())?;
+        if let Err(e) = std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755)) {
+            let _ = std::fs::remove_file(&staged);
+            return Err(e.to_string());
+        }
     }
-    std::fs::rename(verified, &appimage).map_err(|e| format!("Cannot replace AppImage: {e}"))?;
+    if let Err(e) = std::fs::rename(&staged, &appimage) {
+        let _ = std::fs::remove_file(&staged);
+        return Err(format!("Cannot replace AppImage: {e}"));
+    }
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
     let mut cmd = Command::new(&appimage);
@@ -638,6 +759,16 @@ fn apply_macos(archive: &Path) -> Result<(), String> {
     if dest.to_string_lossy().starts_with("/Volumes/") {
         return Err("This copy is on a disk image. Move Remedy Desktop to Applications, then update.".into());
     }
+    let listing = Command::new("tar")
+        .args(["-tzf", &archive.to_string_lossy()])
+        .output()
+        .map_err(|e| format!("Cannot list update archive: {e}"))?;
+    if !listing.status.success() {
+        return Err("tar could not list the update archive".into());
+    }
+    let text = String::from_utf8_lossy(&listing.stdout);
+    let entries: Vec<String> = text.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect();
+    let top = archive_top_level_app(&entries)?;
     let parent = dest.parent().unwrap_or(Path::new(".")).to_path_buf();
     let staging = parent.join(format!("Remedy.Desktop.staging-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&staging);
@@ -650,12 +781,24 @@ fn apply_macos(archive: &Path) -> Result<(), String> {
         let _ = std::fs::remove_dir_all(&staging);
         return Err(format!("tar exited {status}"));
     }
-    let new_app = find_app(&staging).ok_or("Update archive did not contain a .app bundle")?;
+    let new_app = staging.join(&top);
+    if !new_app.is_dir() {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err("Update archive did not contain a .app bundle".into());
+    }
+    let plist = std::fs::read_to_string(new_app.join("Contents").join("Info.plist")).unwrap_or_default();
+    if !plist.contains(BUNDLE_ID) {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(format!("Update bundle identifier is not {BUNDLE_ID}"));
+    }
     let macos_dir = new_app.join("Contents").join("MacOS");
-    let has_bin = std::fs::read_dir(&macos_dir)
-        .map_err(|e| e.to_string())?
-        .flatten()
-        .any(|e| e.path().is_file());
+    let has_bin = match std::fs::read_dir(&macos_dir) {
+        Ok(dir) => dir.flatten().any(|e| e.path().is_file()),
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(e.to_string());
+        }
+    };
     if !has_bin {
         let _ = std::fs::remove_dir_all(&staging);
         return Err("Update archive .app has an empty Contents/MacOS".into());
@@ -694,34 +837,6 @@ fn macos_app_bundle() -> Option<PathBuf> {
         p = p.parent()?;
     }
     None
-}
-
-#[cfg(target_os = "macos")]
-fn find_app(staging: &Path) -> Option<PathBuf> {
-    let mut found = None;
-    for entry in std::fs::read_dir(staging).ok()?.flatten() {
-        let p = entry.path();
-        if p.extension().and_then(|s| s.to_str()) == Some("app") && p.is_dir() {
-            return Some(p);
-        }
-    }
-    for entry in std::fs::read_dir(staging).ok()?.flatten() {
-        let p = entry.path();
-        if !p.is_dir() {
-            continue;
-        }
-        for child in std::fs::read_dir(&p).ok()?.flatten() {
-            let c = child.path();
-            if c.extension().and_then(|s| s.to_str()) == Some("app") && c.is_dir() {
-                found = Some(c);
-                break;
-            }
-        }
-        if found.is_some() {
-            break;
-        }
-    }
-    found
 }
 
 #[cfg(test)]
@@ -810,13 +925,18 @@ mod tests {
         assert!(nsi.contains("NSIS_HOOK_PREUNINSTALL"));
         assert!(nsi.contains("NSIS_HOOK_POSTUNINSTALL"));
         assert!(nsi.contains("/UPDATE"));
+        assert!(nsi.contains("Function UninstallPrevious"));
+        assert!(nsi.contains("ExecWait '\"$R1\" /S /UPDATE _?=$R2'"));
         assert!(nsi.contains("Remedy.Desktop_${VERSION}_x64-setup.exe") || nsi.contains("Remedy.Desktop_"));
         assert!(nsi.contains("com.remedy.desktop"));
         assert!(nsi.contains(r"$LOCALAPPDATA\${PRODUCTNAME}"));
         assert!(nsi.contains("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${PRODUCTNAME}")
             || nsi.contains("Uninstall\\${PRODUCTNAME}"));
         assert!(nsi.contains("hooks.nsh"));
-        assert!(!nsi.contains(".remedy"), "the installer script must not delete ~/.remedy");
+        // "com.remedy.desktop" contains the letters ".remedy". The data directory is
+        // a different path, and this script must not name it.
+        assert!(!nsi.contains("/.remedy") && !nsi.contains("\\.remedy"),
+            "the installer script must not name the per-user data directory");
         assert!(hooks.contains("/NOAUTOLAUNCH"));
         assert!(hooks.contains("IfSilent"));
         assert!(hooks.contains("Update-mode uninstall: keeping user data"));
@@ -837,8 +957,26 @@ mod tests {
         assert!(script.contains("$nsisArgs += \"/D=$priorDir\""));
         assert!(script.contains("-WindowStyle Hidden"));
         assert!(script.contains("RemedyDesktop-UpdaterOwnsRelaunch.flag"));
+        assert!(script.contains("Join-Path $priorDir 'Remedy Desktop.exe'"));
+        assert!(script.contains("another waiter holds the lock"));
+        assert!(script.contains("CreateNew"));
         assert!(!script.contains(".remedy"));
         assert!(script.contains("$parentPid = 42"));
+        let appimage = Path::new("/home/a/Remedy.Desktop_1.0.0_amd64.AppImage");
+        let stage = appimage_stage_path(appimage, 7);
+        assert_eq!(stage.parent(), appimage.parent());
+        assert_eq!(
+            stage.file_name().and_then(|s| s.to_str()),
+            Some(".Remedy.Desktop_1.0.0_amd64.AppImage.7.partial")
+        );
+        assert!(archive_entry_is_safe("Remedy Desktop.app/Contents/Info.plist"));
+        assert!(!archive_entry_is_safe("../etc/passwd"));
+        assert!(!archive_entry_is_safe("/tmp/x"));
+        let entries = vec!["Remedy Desktop.app/Contents/Info.plist".to_string()];
+        assert_eq!(archive_top_level_app(&entries).unwrap(), "Remedy Desktop.app");
+        assert!(archive_top_level_app(&["../x".into()]).is_err());
+        assert!(pe_magic(b"MZ"));
+        assert!(!pe_magic(b"\x7fELF"));
     }
 
     #[test]
@@ -865,12 +1003,28 @@ mod tests {
         let stub = dir.join("stub.exe");
         std::fs::write(&stub, b"MZ remedy packaging stub\n").unwrap();
         let outfile = dir.join("Remedy.Desktop_1.0.0_x64-setup.exe");
-        let nsi = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("packaging/windows/installer.nsi");
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let desktop = manifest.parent().expect("desktop dir");
+        let nsi = manifest.join("packaging/windows/installer.nsi");
+        // Windows makensis does not open forward-slash !include or File paths.
+        let as_nsis = |p: &Path| p.display().to_string();
+        // Compile from an unrelated directory. Absolute backslash /D paths.
         let status = std::process::Command::new(&makensis)
+            .current_dir(&dir)
             .arg("/V2")
             .arg("/DVERSION=1.0.0")
-            .arg(format!("/DOUTFILE={}", outfile.display()))
-            .arg(format!("/DMAINBINARYSRCPATH={}", stub.display()))
+            .arg(format!("/DOUTFILE={}", as_nsis(&outfile)))
+            .arg(format!("/DMAINBINARYSRCPATH={}", as_nsis(&stub)))
+            .arg(format!("/DHOOKS={}", as_nsis(&desktop.join("src-tauri/windows/hooks.nsh"))))
+            .arg(format!(
+                "/DUNINSTALL_OPTIONS={}",
+                as_nsis(&desktop.join("src-tauri/windows/uninstall_options.ps1"))
+            ))
+            .arg(format!(
+                "/DUNINSTALL_WIPE={}",
+                as_nsis(&desktop.join("src-tauri/windows/uninstall_wipe.ps1"))
+            ))
+            .arg(format!("/DINSTALLERICON={}", as_nsis(&desktop.join("src-tauri/icons/icon.ico"))))
             .arg(&nsi)
             .status()
             .expect("spawn makensis");
