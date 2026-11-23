@@ -122,6 +122,23 @@ pub(crate) fn load() -> Prefs {
     serde_json::from_str(&raw).unwrap_or_default()
 }
 
+/// Add or remove one bookmark. `true` when the list changed.
+pub(crate) fn set_star(list: &mut Vec<Bookmark>, url: &str, on: bool) -> bool {
+    let has = list.iter().any(|b| b.url == url);
+    if on && !has {
+        list.push(Bookmark {
+            title: url.to_string(),
+            url: url.to_string(),
+        });
+        true
+    } else if !on && has {
+        list.retain(|b| b.url != url);
+        true
+    } else {
+        false
+    }
+}
+
 /// Writes Grove's own file. A failure leaves the previous file in place.
 pub(crate) fn save(prefs: &Prefs) {
     let path = prefs_path();
@@ -137,5 +154,22 @@ pub(crate) fn save(prefs: &Prefs) {
     let tmp = path.with_extension("json.tmp");
     if fs::write(&tmp, body).is_ok() {
         let _ = fs::rename(&tmp, &path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_star_adds_then_removes_one_url() {
+        let mut list = Vec::new();
+        assert!(set_star(&mut list, "https://example.com/docs", true));
+        assert!(!set_star(&mut list, "https://example.com/docs", true));
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].url, "https://example.com/docs");
+        assert!(set_star(&mut list, "https://example.com/docs", false));
+        assert!(list.is_empty());
+        assert!(!set_star(&mut list, "https://example.com/docs", false));
     }
 }
