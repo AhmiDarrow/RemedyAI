@@ -5,10 +5,9 @@ edition = "2024"
 publish = false
 
 [dependencies]
-# RemedyUI main at 68ad3a19. `desktop` and `term` are the shell (Grove, rails,
-# settings, terminal). `update` is the signed Tauri latest.json feed. `net`
-# and `image` are the runtime client and the previews.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "68ad3a198571e702fc4696bc8b000edc6c5e7980", features = ["net", "image", "desktop", "term", "update"] }
+# RemedyUI c325991 is on main, later than 68ad3a19. Shell features from
+# remedyui, plus `update` for the signed latest.json installer.
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "c325991d72d795e34e5ea18f0de7991484e151e4", features = ["net", "image", "playback", "desktop", "term", "update"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -16,7 +15,7 @@ portable-pty = "0.9"
 
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "68ad3a198571e702fc4696bc8b000edc6c5e7980", features = ["headless", "devtools", "net", "image", "desktop", "term", "update"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "c325991d72d795e34e5ea18f0de7991484e151e4", features = ["headless", "devtools", "net", "image", "playback", "desktop", "term", "update"] }
 
 [profile.release]
 lto = "fat"

@@ -2,8 +2,9 @@
 //!
 //! Matches the current app's collapsed WorkStrip and `liveSegments`: tool
 //! calls, tool results, step frames, and named error frames become steps.
-//! The reply is the text after the last tool-call break. Narration before a
-//! call stays off the bubble.
+//! The reply is the text after the last tool-call break. Text before each
+//! break is sealed into its own settled bubble, with reactions once the
+//! runtime sends a draft id.
 
 use serde_json::Value;
 
@@ -29,7 +30,7 @@ pub struct WorkStep {
     pub status: StepStatus,
     /// Short failure text, when `status` is [`StepStatus::Error`].
     pub error: Option<String>,
-    /// What the model wrote just before this call. Not part of the reply.
+    /// What the model wrote just before this call. Shown as a settled mid-turn bubble.
     pub narration: Option<String>,
 }
 
@@ -112,6 +113,49 @@ pub fn reply_after(text: &str, breaks: &[usize]) -> String {
         .unwrap_or(0);
     let from = char_floor(text, from);
     text[from..].trim_start().to_string()
+}
+
+/// Completed mid-turn speech: everything before the last tool-call break.
+pub fn sealed_before(text: &str, breaks: &[usize]) -> String {
+    let Some(at) = breaks
+        .iter()
+        .copied()
+        .filter(|n| *n > 0 && *n <= text.len())
+        .max()
+    else {
+        return String::new();
+    };
+    let at = char_floor(text, at);
+    text[..at].to_string()
+}
+
+/// Sealed mid-turn beats, in order, split on each tool-call break.
+pub fn narration_beats(text: &str, breaks: &[usize]) -> Vec<String> {
+    let sealed = sealed_before(text, breaks);
+    if sealed.trim().is_empty() {
+        return Vec::new();
+    }
+    let mut cuts: Vec<usize> = breaks
+        .iter()
+        .copied()
+        .filter(|n| *n > 0 && *n <= sealed.len())
+        .map(|n| char_floor(&sealed, n))
+        .collect();
+    cuts.sort_unstable();
+    cuts.dedup();
+    let mut beats = Vec::new();
+    let mut from = 0usize;
+    for at in cuts {
+        if at <= from {
+            continue;
+        }
+        let seg = sealed[from..at].trim();
+        if !seg.is_empty() {
+            beats.push(seg.to_string());
+        }
+        from = at;
+    }
+    beats
 }
 
 /// Removes saved narration from a stored reply, in order. No narration leaves the text alone.
@@ -221,7 +265,11 @@ pub fn on_tool_result(steps: &mut Vec<WorkStep>, data: &str) {
     } else {
         Some(preview)
     };
-    let status = if ok { StepStatus::Done } else { StepStatus::Error };
+    let status = if ok {
+        StepStatus::Done
+    } else {
+        StepStatus::Error
+    };
     mark_or_push(steps, &id, &name, status, error);
 }
 
@@ -572,13 +620,17 @@ mod tests {
             &mut steps,
             r#"{"name":"file_read","id":"s1","status":"running"}"#,
         );
-        on_step(&mut steps, r#"{"name":"file_read","id":"s1","status":"done"}"#);
+        on_step(
+            &mut steps,
+            r#"{"name":"file_read","id":"s1","status":"done"}"#,
+        );
         assert_eq!(steps[0].status, StepStatus::Done);
         assert!(!is_step_error(r#"{"message":"the mind hit an error"}"#));
-        assert!(is_step_error(
-            r#"{"name":"bash","message":"exit 2"}"#
-        ));
-        on_step_error(&mut steps, r#"{"name":"file_write","id":"s2","message":"denied"}"#);
+        assert!(is_step_error(r#"{"name":"bash","message":"exit 2"}"#));
+        on_step_error(
+            &mut steps,
+            r#"{"name":"file_write","id":"s2","message":"denied"}"#,
+        );
         let sum = summarize(&steps);
         assert_eq!(sum.total, 2);
         assert_eq!(sum.errors, 1);
@@ -591,6 +643,31 @@ mod tests {
         let at = "I'll reach the folder.\n\n".len();
         assert_eq!(reply_after(text, &[at]), "The portal loads again.");
         assert_eq!(reply_after("Hello", &[]), "Hello");
+    }
+
+    #[test]
+    fn mid_turn_beats_seal_at_each_break() {
+        let first = "I'll reach the folder through the shell.\n\n";
+        let second = "Cmd is eating the search patterns...\n\n";
+        let reply = "Patching the entry path.";
+        let text = format!("{first}{second}{reply}");
+        let breaks = [first.len(), first.len() + second.len()];
+        assert_eq!(sealed_before(&text, &breaks), format!("{first}{second}"));
+        assert_eq!(
+            narration_beats(&text, &breaks),
+            vec![
+                "I'll reach the folder through the shell.".to_string(),
+                "Cmd is eating the search patterns...".to_string(),
+            ]
+        );
+        assert_eq!(reply_after(&text, &breaks), reply);
+        assert!(narration_beats("Hello", &[]).is_empty());
+        let only = first.to_string();
+        assert_eq!(
+            narration_beats(&only, &[first.len()]),
+            vec!["I'll reach the folder through the shell.".to_string()]
+        );
+        assert_eq!(reply_after(&only, &[first.len()]), "");
     }
 
     #[test]
@@ -617,7 +694,10 @@ mod tests {
         assert_eq!(saved.len(), 2);
         assert_eq!(saved[0].status, StepStatus::Done);
         assert_eq!(saved[1].status, StepStatus::Error);
-        let reply = strip_narration("Reading.\n\nIt loads.", &[saved[0].narration.clone().unwrap()]);
+        let reply = strip_narration(
+            "Reading.\n\nIt loads.",
+            &[saved[0].narration.clone().unwrap()],
+        );
         assert_eq!(reply, "It loads.");
         assert!(!visible(&WorkSummary::default(), false));
         assert!(visible(&summarize(&saved), false));

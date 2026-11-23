@@ -2,6 +2,7 @@
 
 use crate::studio::{Conn, Studio};
 use crate::{messages, say};
+use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::layout::{Align, Justify, Length};
 use remedy_ui::reactive::Signal;
@@ -51,10 +52,45 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
                 Conn::Error(e) => e,
                 Conn::Disconnected => messages().text(&u, "status-disconnected"),
             }
-        }));
+        }))
+        .on_click(|| crate::chrome::toggle_server_menu())
+        .semantics(
+            Semantics::new(Role::Button)
+                .label(messages().text(ui, "server-menu"))
+                .action(Action::Click),
+        );
 
-    let settings =
-        w::button(ui, move || messages().text(&u, "status-settings"), on_settings).variant("quiet");
+    let settings = ui
+        .el("button")
+        .row()
+        .align(Align::Center)
+        .gap(unit)
+        .padding(Insets {
+            top: unit,
+            end: unit * 1.5,
+            bottom: unit,
+            start: unit * 1.5,
+        })
+        .style(
+            StylePatch::new()
+                .foreground(colors.text)
+                .radius(ui.theme().radii.small),
+        )
+        .child(w::icon(ui, w::Icon::Settings, 16.0))
+        .child(
+            w::text(ui, "")
+                .text(move || messages().text(&u, "status-settings"))
+                .nowrap(),
+        )
+        .on_click(on_settings)
+        .semantics({
+            let u = ui.clone();
+            move || {
+                Semantics::new(Role::Button)
+                    .label(messages().text(&u, "status-settings"))
+                    .action(Action::Click)
+            }
+        });
 
     let st = studio.clone();
     let u = ui.clone();
@@ -87,18 +123,35 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
         })
         .layout(|l| {
             l.width = Length::Percent(1.0);
-            l.min_height = Length::Px(40.0);
+            l.min_height = Length::Px(44.0);
             l.shrink = 0.0;
         })
-        .child(
-            w::row(ui)
+        .child({
+            let mut cluster = w::row(ui)
                 .align(Align::Center)
                 .gap(unit * 2.0)
                 .child(indicator)
-                .child(settings)
-                .child(update_button(ui))
-                .child(update_note(ui)),
-        )
+                .child(settings);
+            // Built once with the shell. Advanced mode at that moment shows Usage.
+            // A later toggle waits until Grove and Studio swap, so this row stays
+            // pixel-identical to the studio goldens while the mode is simple.
+            if crate::chrome::advanced_now() {
+                let u = ui.clone();
+                let usage_studio = studio.clone();
+                cluster = cluster.child(
+                    w::button(
+                        ui,
+                        move || messages().text(&u, "bar-usage"),
+                        move || {
+                            crate::chrome::open_usage(&usage_studio);
+                        },
+                    )
+                    .variant("quiet"),
+                );
+            }
+            // Absent while idle, so the studio goldens keep this row.
+            cluster.child(update_button(ui)).child(update_note(ui))
+        })
         .child(picker)
 }
 
