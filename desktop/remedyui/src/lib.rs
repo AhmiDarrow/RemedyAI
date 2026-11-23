@@ -7,7 +7,9 @@
 mod chat;
 mod fonts;
 mod grove;
+mod layout;
 mod logo;
+mod rails;
 mod runtime;
 mod settings;
 mod sidebar;
@@ -35,8 +37,6 @@ use remedy_ui::{App, El, Ui, WindowSpec};
 
 const SHOW: u32 = 1;
 const QUIT: u32 = 2;
-/// Matches the current app's 270 px session column.
-pub(crate) const SIDEBAR_WIDTH: f32 = 270.0;
 /// Visible 32 px hit target for tool buttons (New-session plus, close ×).
 pub(crate) const TOOL: f32 = 32.0;
 pub(crate) const GLYPH: f32 = 20.0;
@@ -113,14 +113,18 @@ pub fn app(app: &App) {
     });
 }
 
-/// Empty-well preview (goldens and visual review).
+/// Empty-well preview (goldens and visual review). Left rail open, right thin.
 pub fn home(ui: &Ui) -> El {
-    shell(ui, Studio::preview())
+    home_rails_left(ui)
 }
 
 /// Chat-feed preview with a finished turn, for side-by-side review.
 pub fn home_chat(ui: &Ui) -> El {
-    shell(ui, Studio::preview_chat())
+    shell_with(
+        ui,
+        Studio::preview_chat(),
+        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+    )
 }
 
 /// Morning Grove with example plots, for goldens. It does not touch disk or the network.
@@ -128,10 +132,56 @@ pub fn grove_home(ui: &Ui) -> El {
     grove::preview_home(ui)
 }
 
-/// The Studio shell: session list, well, composer, status.
+/// Left rail open on Sessions, right rail a thin strip. Same shell as [`home`].
+pub fn home_rails_left(ui: &Ui) -> El {
+    shell_with(
+        ui,
+        Studio::preview(),
+        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+    )
+}
+
+/// Right rail open on Settings, left rail a thin strip.
+pub fn home_rails_right(ui: &Ui) -> El {
+    let layout = layout::WorkspaceLayout {
+        left_rail: layout::RailMode::Thin,
+        left_open: false,
+        right: layout::SlideId::Settings,
+        right_width: 300,
+        right_rail: layout::RailMode::Open,
+        right_open: true,
+        ..layout::WorkspaceLayout::default()
+    };
+    shell_with(ui, Studio::preview(), rails::WorkspaceChrome::fixed(layout))
+}
+
+/// Both rails open: Sessions on the left, Settings on the right.
+pub fn home_rails_dual(ui: &Ui) -> El {
+    let layout = layout::WorkspaceLayout {
+        right: layout::SlideId::Settings,
+        right_width: 300,
+        right_rail: layout::RailMode::Open,
+        right_open: true,
+        ..layout::WorkspaceLayout::default()
+    };
+    shell_with(ui, Studio::preview(), rails::WorkspaceChrome::fixed(layout))
+}
+
+/// The Studio shell: left rail, chat well, right rail, status.
 pub fn shell(ui: &Ui, studio: Studio) -> El {
+    shell_with(ui, studio, rails::WorkspaceChrome::load())
+}
+
+fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
     fonts::prepare_theme(ui, &Fonts::load());
     let panel = settings::install(ui, studio.clone());
+    let toggle = chrome.clone();
+    let dismiss = chrome.clone();
+    let status_toggle = chrome.clone();
+    let hooks = settings::bind_studio_hooks(
+        move || toggle.toggle_settings(),
+        move || rails::dismiss_settings(&dismiss),
+    );
     w::column(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
@@ -143,16 +193,18 @@ pub fn shell(ui: &Ui, studio: Studio) -> El {
                     l.width = Length::Percent(1.0);
                     l.grow = 1.0;
                     l.basis = Length::Px(0.0);
+                    l.min_height = Length::Px(0.0);
                 })
-                .child(sidebar::sidebar(ui, studio.clone()))
-                .child(w::divider(ui, true))
+                .child(rails::side(ui, chrome.clone(), layout::Side::Left, studio.clone()))
                 .child(chat::well(ui, studio.clone()))
-                .child(settings::rail(ui, panel)),
+                .child(rails::side(ui, chrome.clone(), layout::Side::Right, studio.clone())),
         )
         .child(w::divider(ui, false))
-        .child(status::status_bar(ui, studio))
+        .child(status::status_bar(ui, studio, move || status_toggle.toggle_settings()))
+        .child(rails::hosts(ui, chrome))
         .on_key_capture(move |ev| settings::shell_chord(panel, ev))
         .on_key(move |ev| settings::shell_escape(panel, ev))
+        .on_removed(move || settings::clear_studio_hooks(hooks))
 }
 
 /// A square tool control: 32 px hit target, 20 px glyph, always visible.

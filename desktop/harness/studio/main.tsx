@@ -5,6 +5,7 @@
  *
  * screen=chat (default) — sessions sidebar, a finished turn, composer, status bar
  * screen=empty — selected empty session, no messages
+ * screen=rails-left | rails-right | rails-dual — real WorkspaceSide chrome
  */
 import { StrictMode, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -13,6 +14,10 @@ import { Composer } from '../../src/components/Composer'
 import { MessageFeed } from '../../src/components/MessageFeed'
 import { Sidebar } from '../../src/components/Sidebar'
 import { StatusBar } from '../../src/components/StatusBar'
+import { WorkspaceSide } from '../../src/components/slides/WorkspaceSide'
+import { useNarrowRails } from '../../src/hooks/useNarrowRails'
+import type { WorkspaceLayout } from '../../src/workspace/layoutPrefs'
+import type { SlideId } from '../../src/workspace/types'
 import { I18nProvider } from '../../src/i18n'
 import { applyTheme, getResolvedTheme, type ThemeId, THEMES } from '../../src/themes'
 import { applyFonts, DEFAULT_FONTS } from '../../src/utils/fontPrefs'
@@ -62,6 +67,190 @@ const SESSIONS: ChatSession[] = [
   },
 ]
 
+const RAIL_BLURB: Record<SlideId, string> = {
+  sessions: 'Chats and projects for this studio.',
+  settings: 'Provider, the local mind, messengers, appearance.',
+  files: 'In-app file browser for the session or project.',
+  terminal: 'In-app terminal on this PC.',
+  browser: 'Research pane.',
+  scratch: 'Session notepad.',
+  automations: 'Background tasks that run once or repeat.',
+}
+
+function railPreset(which: string): WorkspaceLayout {
+  const base: WorkspaceLayout = {
+    left: 'sessions',
+    right: 'settings',
+    leftWidth: 280,
+    rightWidth: 300,
+    leftOpen: true,
+    rightOpen: false,
+    leftRail: 'open',
+    rightRail: 'thin',
+  }
+  if (which === 'rails-right') {
+    return { ...base, leftOpen: false, leftRail: 'thin', rightOpen: true, rightRail: 'open' }
+  }
+  if (which === 'rails-dual') {
+    return { ...base, rightOpen: true, rightRail: 'open' }
+  }
+  return base
+}
+
+function RailsShell({
+  which,
+  theme,
+  setTheme,
+  resolved,
+}: {
+  which: string
+  theme: ThemeId
+  setTheme: (id: ThemeId) => void
+  resolved: ReturnType<typeof getResolvedTheme>
+}) {
+  const [layout, setLayout] = useState<WorkspaceLayout>(() => railPreset(which))
+  const [activeId, setActiveId] = useState('s3')
+  const narrow = useNarrowRails(layout)
+  const slide = (id: SlideId) => {
+    if (id === 'sessions') {
+      return (
+        <Sidebar
+          embedded
+          sessions={SESSIONS}
+          activeId={activeId}
+          onSelect={setActiveId}
+          onNew={() => setActiveId('s3')}
+          onDelete={() => {}}
+        />
+      )
+    }
+    return (
+      <p style={{ margin: 16, color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.45 }}>
+        {RAIL_BLURB[id]}
+      </p>
+    )
+  }
+  const side = (whichSide: 'left' | 'right') => (
+    <WorkspaceSide
+      side={whichSide}
+      active={whichSide === 'left' ? layout.left : layout.right}
+      width={whichSide === 'left' ? layout.leftWidth : layout.rightWidth}
+      railMode={whichSide === 'left' ? narrow.leftRail : narrow.rightRail}
+      onSelect={(id) => {
+        setLayout((prev) => ({ ...prev, [whichSide]: id }))
+      }}
+      onWidth={(w) => {
+        setLayout((prev) => ({ ...prev, [whichSide === 'left' ? 'leftWidth' : 'rightWidth']: w }))
+      }}
+      onRailMode={(mode) => {
+        if (narrow.narrow) {
+          narrow.open(mode === 'open' ? whichSide : null)
+          return
+        }
+        setLayout((prev) => ({
+          ...prev,
+          [whichSide === 'left' ? 'leftRail' : 'rightRail']: mode,
+          [whichSide === 'left' ? 'leftOpen' : 'rightOpen']: mode === 'open',
+        }))
+      }}
+      onSwap={() => {
+        setLayout((prev) => ({
+          ...prev,
+          left: prev.right,
+          right: prev.left,
+          leftWidth: prev.rightWidth,
+          rightWidth: prev.leftWidth,
+          leftOpen: prev.rightOpen,
+          rightOpen: prev.leftOpen,
+          leftRail: prev.rightRail,
+          rightRail: prev.leftRail,
+        }))
+      }}
+    >
+      {slide(whichSide === 'left' ? layout.left : layout.right)}
+    </WorkspaceSide>
+  )
+  return (
+    <div
+      className="flex flex-col h-full min-h-0"
+      style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+      data-harness-ready="1"
+    >
+      <div className="studio-shell flex flex-1 min-h-0 h-full items-stretch">
+        {side('left')}
+        <div className="chat-middle" style={{ minWidth: 240 }}>
+          <ChatSessionHeader
+            title="New chat"
+            partnerName="Remedy"
+            modelLabel={null}
+            providerLabel="local"
+            messageCount={0}
+          />
+          <div className="chat-middle-feed flex-1 min-h-0">
+            <MessageFeed
+              messages={[]}
+              partialText=""
+              textBreaks={[]}
+              streaming={false}
+              loading={false}
+              processSteps={[]}
+              activeTools={[]}
+              taskProgress={null}
+              toolProcessMode="off"
+              userName="Joe"
+              partnerName="Remedy"
+              sessionId={activeId}
+              stickNonce={0}
+            />
+          </div>
+          <div className="chat-middle-composer flex flex-col">
+            <Composer
+              onSend={() => {}}
+              onStop={() => {}}
+              onCommand={() => {}}
+              streaming={false}
+              disabled={false}
+              slashCommands={[{ name: '/help', description: 'List commands', aliases: [], arguments: null }]}
+              sessionId={activeId}
+              acceptNativeDrops={false}
+            />
+          </div>
+        </div>
+        {side('right')}
+      </div>
+      <StatusBar
+        sessionId={activeId}
+        streaming={false}
+        model="remedy"
+        models={[{ id: 'remedy', name: 'Remedy', provider: 'local', default: true }]}
+        provider="local"
+        connectedProviders={[]}
+        thinkingLevel="medium"
+        approvalMode="ask"
+        themeId={theme}
+        theme={resolved}
+        onThemeChange={(id) => {
+          setTheme(id)
+          applyTheme(getResolvedTheme(id))
+        }}
+        planMode={false}
+        onTogglePlanMode={() => {}}
+        onTogglePanel={() => {
+          setLayout((prev) => {
+            if (prev.right === 'settings' && prev.rightRail === 'open') {
+              return { ...prev, rightRail: 'thin', rightOpen: false }
+            }
+            return { ...prev, right: 'settings', rightRail: 'open', rightOpen: true }
+          })
+        }}
+        updateAvailable={false}
+        onCheckUpdates={() => {}}
+        surface="studio"
+      />
+    </div>
+  )
+}
+
 function Harness() {
   const empty = screen === 'empty'
   const [activeId, setActiveId] = useState(empty ? 's3' : 's1')
@@ -69,6 +258,9 @@ function Harness() {
   const resolved = useMemo(() => getResolvedTheme(theme), [theme])
   const feed = empty ? { messages: [], partialText: '', textBreaks: [] as number[], processSteps: [], activeTools: [], taskProgress: null, streaming: false } : stateAt(SCENARIO_END + 1, Date.now(), 0)
   const active = SESSIONS.find((s) => s.id === activeId) ?? SESSIONS[0]
+  if (screen === 'rails-left' || screen === 'rails-right' || screen === 'rails-dual') {
+    return <RailsShell which={screen} theme={theme} setTheme={setTheme} resolved={resolved} />
+  }
 
   return (
     <div
