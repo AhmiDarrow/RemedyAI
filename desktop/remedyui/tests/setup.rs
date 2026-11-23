@@ -169,3 +169,39 @@ fn hosted_home_keeps_composer_and_name_at_install_size() {
         "composer still visible after Not now"
     );
 }
+
+
+#[test]
+fn status_dock_stays_on_screen_in_hosted_grove() {
+    no_spawn();
+    let mut app = TestApp::new(AppConfig::new("Remedy status dock test"), move |app| {
+        app.open(
+            remedy_ui::WindowSpec::new("preview").size(1180.0, 740.0),
+            move |ui, _| {
+                ui.root().child(remedy_desktop::grove_home_chrome(ui));
+            },
+        );
+    });
+    app.frames(4);
+    let on_screen = |app: &TestApp, role: Role, name: &str| -> bool {
+        app.find(role, name)
+            .and_then(|el| el.bounds())
+            .is_some_and(|r| r.min.y >= 0.0 && r.max.y <= 740.0 && r.max.y - r.min.y >= 8.0)
+    };
+    assert!(
+        app.find(Role::Toolbar, "Status").is_some(),
+        "status dock is in the tree"
+    );
+    assert!(
+        on_screen(&app, Role::Toolbar, "Status") || on_screen(&app, Role::Button, "Help"),
+        "status dock must be visible at the bottom of an 1180x740 window"
+    );
+    // Opening Settings must not push the dock off the bottom (it is a sibling rail).
+    if app.press(Role::Button, "Settings") {
+        app.frames(4);
+        assert!(
+            on_screen(&app, Role::Toolbar, "Status") || on_screen(&app, Role::Button, "Help"),
+            "status dock must stay on screen while Settings is open"
+        );
+    }
+}

@@ -203,7 +203,9 @@ pub(crate) fn rail(ui: &Ui, s: Settings) -> El {
     })
     .el()
     .layout(|l| {
-        l.shrink = 0.0;
+        l.shrink = 1.0;
+        l.min_height = Length::Px(0.0);
+        l.max_height = Length::Percent(1.0);
         l.height = Length::Percent(1.0);
     })
 }
