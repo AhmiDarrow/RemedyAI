@@ -208,7 +208,7 @@ impl DiagnosticsPanel {
             return;
         }
         let panel = self.clone();
-        let ui = ui.clone();
+        let tick = ui.clone();
         let id = ui.after(Duration::from_secs(8), move || {
             panel.timer.set(None);
             if !panel.open.get() {
@@ -218,7 +218,7 @@ impl DiagnosticsPanel {
                 panel.load_diagnostics();
             }
             panel.load_hive(false);
-            panel.arm_timer(&ui);
+            panel.arm_timer(&tick);
         });
         self.timer.set(Some(id));
     }
@@ -364,7 +364,6 @@ impl DiagnosticsPanel {
             "budget_steps": budget,
             "pulse_s": pulse,
         });
-        let panel = self.clone();
         self.post_hive(
             "remedy-hive-spawn",
             epoch,
@@ -482,7 +481,7 @@ impl DiagnosticsPanel {
         );
     }
 
-    fn post_hive(
+    fn post_hive<F>(
         &self,
         thread_name: &str,
         epoch: u64,
@@ -492,13 +491,22 @@ impl DiagnosticsPanel {
             &Value,
             &remedy_ui::reactive::Cancel,
         ) -> Result<HiveOp, String>,
-        apply: impl FnOnce(&DiagnosticsPanel, Result<HiveOp, String>) + Send + 'static,
-    ) {
+        apply: F,
+    ) where
+        F: FnOnce(&DiagnosticsPanel, Result<HiveOp, String>) + Send + 'static,
+    {
+        // The callback has to stay callable if the thread never starts. A failed
+        // `spawn` drops its closure, so the callback lives in a slot both sides share.
+        let slot = std::sync::Arc::new(std::sync::Mutex::new(Some(apply)));
         let panel = self.clone();
+        let fail = "Could not reach the runtime.".to_string();
         let Ok(waker) = waker() else {
-            apply(self, Err("Could not reach the runtime.".into()));
+            if let Some(apply) = take_apply(&slot) {
+                apply(self, Err(fail));
+            }
             return;
         };
+        let slot_thread = std::sync::Arc::clone(&slot);
         let spawned = std::thread::Builder::new()
             .name(thread_name.into())
             .spawn(move || {
@@ -510,13 +518,24 @@ impl DiagnosticsPanel {
                     if panel.session.get() != epoch {
                         return;
                     }
-                    apply(&panel, result);
+                    if let Some(apply) = take_apply(&slot_thread) {
+                        apply(&panel, result);
+                    }
                 });
             });
         if spawned.is_err() {
-            apply(self, Err("Could not reach the runtime.".into()));
+            if let Some(apply) = take_apply(&slot) {
+                apply(self, Err(fail));
+            }
         }
     }
+}
+
+fn take_apply<F>(slot: &std::sync::Mutex<Option<F>>) -> Option<F>
+where
+    F: FnOnce(&DiagnosticsPanel, Result<HiveOp, String>),
+{
+    slot.lock().ok().and_then(|mut guard| guard.take())
 }
 
 fn sync_layer(panel: &DiagnosticsPanel, ui: &Ui, layer: &Rc<RefCell<Option<El>>>, is_open: bool) {

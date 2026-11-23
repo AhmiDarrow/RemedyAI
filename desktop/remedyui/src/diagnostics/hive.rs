@@ -427,6 +427,7 @@ fn retire_button(ui: &Ui, panel: &DiagnosticsPanel, id: &str) -> El {
                 let pending = panel.pending_retire;
                 let busy = panel.hive_busy;
                 let id_label = id.clone();
+                let id_tone = id.clone();
                 let panel_c = panel.clone();
                 let id_c = id.clone();
                 w::button(
@@ -441,7 +442,7 @@ fn retire_button(ui: &Ui, panel: &DiagnosticsPanel, id: &str) -> El {
                     move || panel_c.retire_task(&id_c),
                 )
                 .variant(move || {
-                    if pending.get().as_deref() == Some(id.as_str()) {
+                    if pending.get().as_deref() == Some(id_tone.as_str()) {
                         "danger_solid"
                     } else {
                         "danger"
