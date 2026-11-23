@@ -105,8 +105,8 @@ impl UsageDashboard {
         if !self.live {
             return;
         }
-        let gen = self.load_gen.get().wrapping_add(1);
-        self.load_gen.set(gen);
+        let generation = self.load_gen.get().wrapping_add(1);
+        self.load_gen.set(generation);
         self.loading.set(true);
         self.error.set(None);
         self.export_note.set(None);
@@ -125,7 +125,7 @@ impl UsageDashboard {
                 let http = api::runtime_http();
                 let result = api::fetch_dashboard(&http, range, session.as_deref());
                 let token = api::fetch_token_status(&http);
-                let _ = waker.post(move || apply_load(dash, gen, result, token));
+                let _ = waker.post(move || apply_load(dash, generation, result, token));
             });
         if spawned.is_err() {
             self.loading.set(false);
@@ -139,8 +139,8 @@ impl UsageDashboard {
         if !self.live || self.exporting.get() {
             return;
         }
-        let gen = self.export_gen.get().wrapping_add(1);
-        self.export_gen.set(gen);
+        let generation = self.export_gen.get().wrapping_add(1);
+        self.export_gen.set(generation);
         self.exporting.set(true);
         self.export_note.set(None);
         let range = api::range_days(self.range_index.get());
@@ -158,7 +158,7 @@ impl UsageDashboard {
                 let result = api::fetch_export(&http, range).and_then(|(bytes, name)| {
                     api::save_csv(&name, &bytes).map(|path| path.display().to_string())
                 });
-                let _ = waker.post(move || apply_export(dash, gen, result));
+                let _ = waker.post(move || apply_export(dash, generation, result));
             });
         if spawned.is_err() {
             self.exporting.set(false);
@@ -189,11 +189,11 @@ impl UsageDashboard {
 
 fn apply_load(
     dash: UsageDashboard,
-    gen: u64,
+    generation: u64,
     result: Result<api::DashboardData, String>,
     token: Result<TokenStatus, String>,
 ) {
-    if dash.load_gen.get() != gen {
+    if dash.load_gen.get() != generation {
         return;
     }
     batch(|| {
@@ -213,8 +213,8 @@ fn apply_load(
     });
 }
 
-fn apply_export(dash: UsageDashboard, gen: u64, result: Result<String, String>) {
-    if dash.export_gen.get() != gen {
+fn apply_export(dash: UsageDashboard, generation: u64, result: Result<String, String>) {
+    if dash.export_gen.get() != generation {
         return;
     }
     batch(|| {
@@ -471,7 +471,7 @@ fn toolbar(ui: &Ui, dash: UsageDashboard) -> El {
         .child(w::segmented(
             ui,
             "Usage and continuity",
-            &["Usage & cost", "Harness"],
+            &["Usage & Cost", "Harness"],
             tabs.tab,
         ))
         .child(w::spacer(ui))
@@ -1004,19 +1004,19 @@ fn continuity_body(ui: &Ui, dash: UsageDashboard) -> El {
             }),
         ))
         .child(quality_grid(ui, dash))
-        .child(note_card(ui, "Pattern window (this session)", dash, pattern_block))
+        .child(note_card(ui, "Pattern window (this session)", dash, pattern_block, true))
         .child(
             show(ui, move || dash.continuity.get().is_some_and(|c| c.snapshot.is_some()), {
                 let u = ui.clone();
                 let dash = dash;
-                move || note_card(&u, "Last continuity snapshot", dash, snapshot_block)
+                move || note_card(&u, "Last continuity snapshot", dash, snapshot_block, true)
             })
             .el(),
         )
         .child(pair(
             ui,
-            note_card(ui, "Goals", dash, goals_block),
-            note_card(ui, "Provider health", dash, health_block),
+            note_card(ui, "Goals", dash, goals_block, false),
+            note_card(ui, "Provider health", dash, health_block, false),
         ))
 }
 
@@ -1102,9 +1102,10 @@ fn tile(ui: &Ui, label: &str, value: impl Fn() -> String + 'static) -> El {
         .gap(unit * 0.5)
         .padding(Insets::all(unit * 2.0))
         .layout(|l| {
+            // Three across in the dialog, same as the Tauri `grid-cols-3` row.
             l.grow = 1.0;
-            l.basis = Length::Px(140.0);
-            l.min_width = Length::Px(120.0);
+            l.basis = Length::Px(180.0);
+            l.min_width = Length::Px(160.0);
         })
         .child(
             w::text(ui, label)
@@ -1125,6 +1126,7 @@ fn note_card(
     title: &str,
     dash: UsageDashboard,
     block: fn(&Ui, UsageDashboard) -> El,
+    stacked: bool,
 ) -> El {
     let unit = ui.theme().spacing.unit;
     w::card(ui)
@@ -1135,10 +1137,17 @@ fn note_card(
             bottom: unit * 2.0,
             start: unit * 3.0,
         })
-        .layout(|l| {
-            l.grow = 1.0;
-            l.basis = Length::Px(200.0);
-            l.min_width = Length::Px(180.0);
+        .layout(move |l| {
+            // A stacked card hugs its text. Sharing a row, it takes half the width.
+            // Grow on a column child would stretch the card down the dialog.
+            if stacked {
+                l.width = Length::Percent(1.0);
+                l.grow = 0.0;
+            } else {
+                l.grow = 1.0;
+                l.basis = Length::Px(200.0);
+                l.min_width = Length::Px(180.0);
+            }
         })
         .child(caption(ui, title))
         .child(block(ui, dash))

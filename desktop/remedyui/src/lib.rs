@@ -132,6 +132,16 @@ pub fn grove_home(ui: &Ui) -> El {
     grove::preview_home(ui)
 }
 
+/// Filled usage tab, for goldens. No runtime calls.
+pub fn preview_usage(ui: &Ui) -> El {
+    usage::UsagePanel::preview(ui)
+}
+
+/// Filled harness tab, for goldens. No runtime calls.
+pub fn preview_usage_harness(ui: &Ui) -> El {
+    usage::UsagePanel::preview_harness(ui)
+}
+
 /// Left rail open on Sessions, right rail a thin strip. Same shell as [`home`].
 pub fn home_rails_left(ui: &Ui) -> El {
     shell_with(
