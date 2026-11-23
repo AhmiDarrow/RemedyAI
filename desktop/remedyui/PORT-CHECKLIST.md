@@ -23,6 +23,7 @@ Identity and engine pins: RemedyUI `main` at `3b3a026` (includes theme names Pro
 - [ ] Settings (every category, providers, RMB/muscle, interop, fonts, notices)
 - [ ] House-rules setup and the one-time update offer
 - [ ] Workspace: Files, Scratch, Automations, skills, Terminal, Browser (full parity)
-- [ ] Voice, messengers, Grove, Hive, diagnostics, usage, help, downloads, QR
+- [ ] Voice, messengers, Hive, diagnostics, usage, help, downloads, QR
+- [ ] Grove (ported on `remedyui-grove`; Linux `cargo test` still has to prove it)
 - [ ] Update jump from the last Tauri build through the same signed `latest.json`
 - [ ] Joe reviews screenshots before ship; no tag or release without him
