@@ -241,11 +241,7 @@ pub fn menu(ui: &Ui, studio: &Studio, chrome: Chrome) -> El {
         .child(item(ui, chrome, messages().text(ui, "menu-diagnostics"), "", Kind::Normal, {
             let c = chrome;
             let s = studio.clone();
-            move || {
-                c.menu_open.set(false);
-                c.overlay.set(Overlay::Diagnostics);
-                c.load_diag(&s);
-            }
+            move || c.open_diagnostics(&s)
         }))
         .child(item(ui, chrome, messages().text(ui, "menu-help"), "F1", Kind::Normal, {
             let c = chrome;

@@ -8,6 +8,7 @@
  * screen=rails-left | rails-right | rails-dual — real WorkspaceSide chrome
  * screen=palette | help | about | diagnostics | menu — chrome overlays
  * screen=usage | usage-harness — Usage dashboard on a fixture, no runtime
+ * screen=diagnostics — Diagnostics panel and hive inspector on a fixture, no runtime
  */
 import { StrictMode, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -41,6 +42,7 @@ const themeId: ThemeId = themeParam in THEMES || themeParam === 'system' ? theme
 applyFonts(DEFAULT_FONTS)
 applyTheme(getResolvedTheme(themeId))
 if (screen === 'usage' || screen === 'usage-harness') installUsageFixture()
+if (screen === 'diagnostics') installDiagnosticsFixture()
 document.documentElement.setAttribute('data-density', 'cozy')
 document.documentElement.classList.add('app-ready')
 document.body.style.background = 'var(--bg-primary)'
@@ -413,7 +415,194 @@ function UsageScreen({ harness }: { harness: boolean }) {
   )
 }
 
+/**
+ * Same payload as the RemedyUI diagnostics golden.
+ * Answers GET /diagnostics, /self-inject/rounds, and /hive/roster without a runtime.
+ */
+function installDiagnosticsFixture() {
+  const json = (body: unknown) =>
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  const snapshot = {
+    ok: false,
+    overall: 'degraded',
+    checked_at: '2026-11-22T21:04:05Z',
+    collect_ms: 128,
+    issues: [{
+      severity: 'warn',
+      area: 'rmb',
+      message: 'RMB is still starting.',
+      hint: 'Give the weights a moment.',
+    }],
+    remedy: {
+      version: '1.0.0',
+      uptime: '2h 14m',
+      api: { host: '127.0.0.1', port: 7400, base_url: 'http://127.0.0.1:7400', listening: true },
+      process: { pid: 4242, rss_mb: 180.5, cpu_pct: 3.2, threads: 12 },
+      memory_entries: 40,
+      chat_sessions_count: 3,
+      skills_count: 7,
+      active_provider: 'grok',
+      active_model: 'grok-4',
+      home_dir: 'C:\\Users\\Ahmi\\.remedy',
+      home_disk: { free_gb: 120.5, used_pct: 62 },
+    },
+    rmb: {
+      enabled: true,
+      running: true,
+      ready: false,
+      model_name: 'Qwen2.5',
+      model_path: 'C:\\models\\qwen2.5-7b.gguf',
+      model_present: true,
+      runtime_present: true,
+      ctx_size: 8192,
+      n_gpu_layers: 20,
+      profile: 'balanced',
+      base_url: 'http://127.0.0.1:8787',
+      nvidia: true,
+      latency_ms: 40,
+      not_ready_hint: 'Loading weights.',
+      vision_suspended: true,
+    },
+    hardware: {
+      platform: 'Windows-11',
+      system: 'Windows',
+      machine: 'AMD64',
+      python: '3.12.6',
+      hostname: 'hub',
+      cpu: { count_logical: 16, percent: 22, brand: 'Ryzen' },
+      memory: { total_gb: 64, available_gb: 12, used_pct: 82 },
+      gpu: {
+        nvidia: true,
+        gpus: [{
+          name: 'RTX 4090',
+          memory_total_mb: 24576,
+          memory_used_mb: 23000,
+          util_pct: 12,
+          temp_c: 48,
+        }],
+      },
+    },
+    providers: {
+      active: { provider: 'grok', model: 'grok-4' },
+      connected_count: 2,
+      remote_connected_count: 1,
+      local_connected_count: 1,
+      providers: [
+        { id: 'grok', label: 'Grok', connected: true, local: false, last_model: 'grok-4' },
+        { id: 'ollama', label: 'Ollama', connected: true, local: true, last_model: 'qwen2.5' },
+        { id: 'openai', label: 'OpenAI', connected: false, local: false, reason: 'no key' },
+      ],
+      usage_7d: [{ provider: 'grok', total_tokens: 12345, estimated_cost_usd: 1.25 }],
+      probes: [
+        { id: 'ollama', ok: true, latency_ms: 18 },
+        { id: 'lmstudio', ok: false, latency_ms: null },
+      ],
+    },
+    vision: {
+      enabled: true,
+      running: false,
+      ready: false,
+      model_id: 'SmolVLM',
+      port: 8790,
+      base_url: 'http://127.0.0.1:8790',
+      suspended_for_rmb: true,
+      not_ready_hint: 'Paused while RMB loads.',
+    },
+    computer: {
+      host_connected: true,
+      pending_jobs: 1,
+      jobs_root: 'C:\\Users\\Ahmi\\.remedy\\jobs',
+    },
+  }
+  const rounds = {
+    serve_started_utc: '2026-11-22T20:00:00Z',
+    rounds: [
+      {
+        round_id: 'r-live',
+        status: 'applied',
+        tree: 'desktop',
+        summary: 'Diagnostics panel wired to the runtime.',
+        finished_utc: '2026-11-22T21:01:00Z',
+        live_state: 'live',
+      },
+      {
+        round_id: 'r-back',
+        status: 'rolled_back',
+        tree: 'python',
+        summary: 'Gate failed, serve kept the previous tree.',
+        finished_utc: '2026-11-22T18:12:00Z',
+        live_state: '',
+      },
+      {
+        round_id: 'r-red',
+        status: 'red',
+        tree: 'both',
+        summary: 'Typecheck failed.',
+        finished_utc: '2026-11-22T16:00:00Z',
+      },
+    ],
+  }
+  const roster = {
+    daughters: [
+      {
+        id: 'post-1',
+        cadence: 'post',
+        status: 'running',
+        goal: 'Watch the build queue and report when a job stalls overnight',
+        outcome: 'Last check was clean.',
+        blockers: [],
+      },
+      {
+        id: 'forage-1',
+        cadence: 'forager',
+        status: 'pending',
+        goal: 'Collect overnight logs',
+        outcome: '',
+        blockers: ['disk full', 'retry later', 'ignored third'],
+      },
+      {
+        id: 'old-1',
+        cadence: 'forager',
+        status: 'retired',
+        goal: 'Old sweep',
+        outcome: 'finished',
+        blockers: [],
+      },
+    ],
+    live_posts: 1,
+    live_foragers: 1,
+    count: 3,
+  }
+  const previous = window.fetch.bind(window)
+  window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (url.includes('local-bootstrap')) return Promise.resolve(json({ token: 'harness-token-ok!!' }))
+    if (url.includes('/diagnostics')) return Promise.resolve(json(snapshot))
+    if (url.includes('/self-inject/rounds')) return Promise.resolve(json(rounds))
+    if (url.includes('/hive/roster')) return Promise.resolve(json(roster))
+    return previous(input, init)
+  }
+}
+
+function DiagnosticsScreen() {
+  return (
+    <div
+      className="h-full"
+      style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+      data-harness-ready="1"
+    >
+      <DiagnosticsPanel open onClose={() => {}} />
+    </div>
+  )
+}
+
 function Harness() {
+  if (screen === 'diagnostics') {
+    return <DiagnosticsScreen />
+  }
   if (screen === 'usage' || screen === 'usage-harness') {
     return <UsageScreen harness={screen === 'usage-harness'} />
   }

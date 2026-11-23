@@ -6,6 +6,7 @@
 
 mod chat;
 mod chrome;
+mod diagnostics;
 mod fonts;
 mod grove;
 mod help_data;
@@ -19,6 +20,7 @@ mod rails;
 mod runtime;
 mod server_menu;
 mod settings;
+mod slides;
 mod sidebar;
 mod sse;
 mod status;
@@ -30,9 +32,14 @@ mod updates;
 mod usage;
 mod work;
 
+pub use diagnostics::DiagnosticsPanel;
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
 pub use runtime::Client;
 pub use settings::{preview_appearance, preview_connect, preview_error, preview_general, preview_models};
+pub use slides::{
+    automations_preview, bind_host, files_preview, scratch_preview, set_browser_body,
+    terminal_context_items, terminal_preview,
+};
 pub use studio::Studio;
 pub use usage::{UsageContext, UsageDashboard, UsagePanel, UsageWindow};
 
@@ -171,6 +178,11 @@ pub fn home_chat(ui: &Ui) -> El {
     )
 }
 
+/// Diagnostics golden: server, host, hardware, and the hive inspector. No network.
+pub fn diagnostics_preview(ui: &Ui) -> El {
+    diagnostics::preview(ui)
+}
+
 /// Morning Grove with example plots, for goldens. It does not touch disk or the network.
 pub fn grove_home(ui: &Ui) -> El {
     grove::preview_home(ui)
@@ -191,9 +203,10 @@ pub fn home_about(ui: &Ui) -> El {
     chrome::preview_frame(ui, chrome::Overlay::About, false)
 }
 
-/// Diagnostics, including the hive row.
+/// Diagnostics over the chrome frame. The landed panel's sample, not the thin sheet.
 pub fn home_diagnostics(ui: &Ui) -> El {
-    chrome::preview_frame(ui, chrome::Overlay::Diagnostics, false)
+    chrome::install_diag(diagnostics::DiagnosticsPanel::sample());
+    chrome::preview_frame(ui, chrome::Overlay::None, false)
 }
 
 /// Title-bar logo menu open.
@@ -262,6 +275,10 @@ pub(crate) fn shell_fixed(ui: &Ui, studio: Studio) -> El {
 
 fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
     fonts::prepare_theme(ui, &Fonts::load());
+    let workspace = slides::Workspace::for_studio(&studio);
+    slides::install(workspace.clone());
+    let follow_ws = workspace;
+    let follow_studio = studio.clone();
     let panel = settings::install(ui, studio.clone());
     let toggle = chrome.clone();
     let dismiss = chrome.clone();
@@ -270,7 +287,7 @@ fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
         move || toggle.toggle_settings(),
         move || rails::dismiss_settings(&dismiss),
     );
-    w::column(ui)
+    let shell = w::column(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.height = Length::Percent(1.0);
@@ -292,7 +309,12 @@ fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
         .child(rails::hosts(ui, chrome))
         .on_key_capture(move |ev| settings::shell_chord(panel, ev))
         .on_key(move |ev| settings::shell_escape(panel, ev))
-        .on_removed(move || settings::clear_studio_hooks(hooks))
+        .on_removed(move || {
+            settings::clear_studio_hooks(hooks);
+            slides::uninstall();
+        });
+    follow_ws.follow(&shell, &follow_studio);
+    shell
 }
 
 /// A square tool control: 32 px hit target, 20 px glyph, always visible.
