@@ -283,26 +283,23 @@ fn panes_row(
     let chat = pane_shell(&ui, studio, prefs.clone(), mobile, narrow.clone(), false);
     let handle = resize_handle(&ui, prefs.clone(), narrow);
 
-    let left_first = {
-        let p = prefs;
-        move || p.get().actions_side == ActionsSide::Left
-    };
-    let u_left = ui.clone();
-    let u_right = ui.clone();
-    let a = actions.clone();
-    let h = handle.clone();
-    let c = chat.clone();
-    show(&ui, left_first, move || {
-        pane_pair(&u_left, a.clone(), h.clone(), c.clone())
-    })
-    .fallback(move || pane_pair(&u_right, chat.clone(), handle.clone(), actions.clone()))
-    .el()
-    .layout(|l| {
-        l.width = Length::Percent(1.0);
-        l.grow = 1.0;
-        l.basis = Length::Px(0.0);
-        l.min_height = Length::Px(0.0);
-        l.height = Length::Percent(1.0);
+    // One mounted row. Remounting the same pane elements through `show()`
+    // left both panes with empty bounds after a swap. Row-reverse keeps them
+    // alive and keeps their sizes; the handle stays between them.
+    let row = pane_pair(&ui, actions, handle, chat);
+    let row_b = row.clone();
+    let p = prefs;
+    row.bind(move || {
+        let reverse = p.get().actions_side == ActionsSide::Right;
+        let _ = row_b.clone().layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
+            l.height = Length::Percent(1.0);
+            l.reverse = reverse;
+        });
     })
 }
 
@@ -349,7 +346,7 @@ fn pane_shell(
     let st = studio;
     let pr = prefs;
     let n = narrow.clone();
-    show(ui, visible, move || {
+    let shell = show(ui, visible, move || {
         let pane = if is_actions {
             actions_column(&u, st.clone(), pr.clone(), n.get())
         } else {
@@ -364,15 +361,27 @@ fn pane_shell(
         )
         .clip()
     })
-    .el()
-    .layout(move |l| {
-        if is_actions {
-            // Width is applied on the inner column; this wrapper still grows when stacked.
-        }
-        l.min_width = Length::Px(0.0);
-        l.min_height = Length::Px(0.0);
-        l.height = Length::Percent(1.0);
-        l.shrink = 1.0;
+    .el();
+    let shell_b = shell.clone();
+    let n_layout = narrow;
+    shell.bind(move || {
+        let stacked = n_layout.get();
+        let _ = shell_b.clone().layout(move |l| {
+            l.min_width = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
+            l.height = Length::Percent(1.0);
+            if stacked || !is_actions {
+                // Chat (and both panes when stacked) fills leftover well width
+                // when the side rails collapse.
+                l.grow = 1.0;
+                l.shrink = 1.0;
+                l.basis = Length::Px(0.0);
+                l.width = Length::Percent(1.0);
+            } else {
+                l.grow = 0.0;
+                l.shrink = 0.0;
+            }
+        });
     })
 }
 

@@ -145,3 +145,110 @@ fn rail_surfaces_stay_in_their_box() {
     }
     assert!(failures.is_empty(), "rail standing-bar failures:\n{}", failures.join("\n\n"));
 }
+
+fn status_overlaps(app: &TestApp) -> Vec<String> {
+    let Some(bar) = app.find(Role::Toolbar, "Status").and_then(|el| el.bounds()) else {
+        return vec!["no Status toolbar".into()];
+    };
+    let mut items: Vec<(String, remedy_ui::core::Rect)> = Vec::new();
+    for role in [Role::Button, Role::ComboBox] {
+        for n in app.reader_view().into_iter().filter(|n| n.role == role) {
+            let Some(ui) = app.ui() else { continue };
+            let Some(el) = ui.element_by_node_id(n.id) else { continue };
+            let Some(b) = el.bounds() else { continue };
+            if b.width() <= 1.0 || b.height() <= 1.0 {
+                continue;
+            }
+            if b.max.y < bar.min.y - 1.0 || b.min.y > bar.max.y + 1.0 {
+                continue;
+            }
+            if b.max.x < bar.min.x - 1.0 || b.min.x > bar.max.x + 1.0 {
+                continue;
+            }
+            let name = n.name.clone().unwrap_or_else(|| format!("{role:?}"));
+            items.push((name, b));
+        }
+    }
+    let mut out = Vec::new();
+    for i in 0..items.len() {
+        for j in (i + 1)..items.len() {
+            let (na, a) = &items[i];
+            let (nb, b) = &items[j];
+            let left = a.min.x.max(b.min.x);
+            let right = a.max.x.min(b.max.x);
+            let top = a.min.y.max(b.min.y);
+            let bottom = a.max.y.min(b.max.y);
+            if right - left > 1.5 && bottom - top > 1.5 {
+                out.push(format!(
+                    "{na} x={:.1}..{:.1} overlaps {nb} x={:.1}..{:.1}",
+                    a.min.x, a.max.x, b.min.x, b.max.x
+                ));
+            }
+        }
+    }
+    out
+}
+
+fn names_of(app: &TestApp) -> Vec<String> {
+    app.reader_view()
+        .into_iter()
+        .filter_map(|n| n.name)
+        .collect()
+}
+
+#[test]
+fn status_dock_keeps_priority_items_and_does_not_overlap() {
+    no_spawn();
+    const WIDTHS: [f32; 4] = [400.0, 700.0, 1180.0, 1440.0];
+    let mut failures = Vec::new();
+    for &w in &WIDTHS {
+        for advanced in [false, true] {
+            let mode = if advanced { "Advanced" } else { "Simple" };
+            let mut app = open("status-dock", w, 700.0, remedy_desktop::home_chat);
+            app.frames(4);
+            // Settings mode is process-wide; a previous width may already have
+            // flipped the chip. Drive it to the mode this pass wants.
+            let names0 = names_of(&app);
+            let already_advanced = names0.iter().any(|n| n == "Advanced");
+            if advanced != already_advanced {
+                let from = if already_advanced { "Advanced" } else { "Simple" };
+                if !app.press(Role::Button, from) {
+                    failures.push(format!("{mode} at {w}: could not switch from {from}"));
+                    continue;
+                }
+                app.frames(3);
+            }
+            let names = names_of(&app);
+            if !names.iter().any(|n| n == "Connected" || n.contains("Connected")) {
+                failures.push(format!("{mode} at {w}: Connected missing: {names:?}"));
+            }
+            let mode_chip = if advanced { "Advanced" } else { "Simple" };
+            if !names.iter().any(|n| n == mode_chip) {
+                failures.push(format!("{mode} at {w}: {mode_chip} chip missing: {names:?}"));
+            }
+            if !names.iter().any(|n| n == "Model" || n == "remedy" || n.contains("remedy")) {
+                failures.push(format!("{mode} at {w}: model picker missing: {names:?}"));
+            }
+            let overlaps = status_overlaps(&app);
+            if !overlaps.is_empty() {
+                failures.push(format!(
+                    "{mode} at {w}: overlapping status items:\n  {}",
+                    overlaps.join("\n  ")
+                ));
+            }
+            let off = overflow(&app, w, 700.0);
+            // Only report status-bar overflow; the helper already checks the window.
+            if !off.is_empty() {
+                failures.push(format!(
+                    "{mode} at {w}: painted off-box:\n  {}",
+                    off.join("\n  ")
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "status dock failures:\n{}",
+        failures.join("\n\n")
+    );
+}
