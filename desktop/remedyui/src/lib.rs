@@ -20,6 +20,7 @@ mod layout;
 mod logo;
 mod palette;
 mod panels;
+mod plan_dock;
 mod prefs;
 mod rails;
 mod runtime;

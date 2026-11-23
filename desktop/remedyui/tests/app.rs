@@ -1,11 +1,11 @@
 //! The app on the in-memory host, and its previews as golden images.
 
-use remedy_ui::AppConfig;
 use remedy_ui::a11y::{Action, Role};
-use remedy_ui::devtools::{GoldenError, Preview, check_golden};
+use remedy_ui::devtools::{check_golden, GoldenError, Preview};
 use remedy_ui::input::{Key, KeyEvent, Modifiers};
 use remedy_ui::testing::TestApp;
 use remedy_ui::themes::PALETTES;
+use remedy_ui::AppConfig;
 use std::path::PathBuf;
 use std::sync::Once;
 
@@ -627,6 +627,153 @@ fn settings_fields_stay_inside_a_narrow_window() {
             }
         }
     }
+}
+
+#[test]
+fn chat_plan_build_switcher_updates_composer_and_plan_empty() {
+    fresh_profile();
+    reset_saved_layout();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.frames(2);
+    assert!(app.press(Role::Button, "Studio"), "open Studio");
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        has(&names, "Chat") && has(&names, "Plan") && has(&names, "Build"),
+        "mode switcher shows all three modes: {names:?}"
+    );
+    // Default is Build: composer uses the build placeholder and hint.
+    assert!(
+        app.find(Role::TextInput, "Message Remedy").is_some() || has(&names, "Message Remedy"),
+        "Build placeholder in the composer: {names:?}"
+    );
+    assert!(
+        names
+            .iter()
+            .any(|n| n.contains("Enter send") || n.contains("Shift+Tab Chat")),
+        "Build hint stays short: {names:?}"
+    );
+
+    assert!(app.press(Role::Button, "Plan"), "switch to Plan");
+    app.frames(3);
+    let names = accessible_names(&app);
+    assert!(
+        has(&names, "No plan yet") || names.iter().any(|n| n.contains("outline the work")),
+        "Plan mode shows its empty state: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("research only")
+            || n.contains("Shift+Tab Build")
+            || n.contains("Outline the work")),
+        "Plan placeholder/hint reflects the mode: {names:?}"
+    );
+
+    assert!(app.press(Role::Button, "Chat"), "switch to Chat");
+    app.frames(3);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("Just talking")
+            || n.contains("Shift+Tab for Plan")
+            || n.contains("no tools")),
+        "Chat placeholder/hint reflects the mode: {names:?}"
+    );
+
+    // Shift+Tab cycles Chat → Plan.
+    app.key(KeyEvent::press(Key::Tab).with_modifiers(Modifiers::SHIFT));
+    app.frames(3);
+    let names = accessible_names(&app);
+    assert!(
+        has(&names, "No plan yet")
+            || names
+                .iter()
+                .any(|n| n.contains("outline the work") || n.contains("Shift+Tab for Build")),
+        "Shift+Tab lands on Plan: {names:?}"
+    );
+
+    // Ctrl+B cycles Plan → Build.
+    app.key(KeyEvent::press(Key::char('b')).with_modifiers(Modifiers::CTRL));
+    app.frames(3);
+    let names = accessible_names(&app);
+    assert!(
+        app.find(Role::TextInput, "Message Remedy").is_some()
+            || has(&names, "Message Remedy")
+            || names.iter().any(|n| n.contains("Enter send")),
+        "Ctrl+B lands on Build: {names:?}"
+    );
+}
+
+#[test]
+fn plan_list_pane_docks_collapses_and_toggles_from_the_keyboard() {
+    fresh_profile();
+    reset_saved_layout();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.frames(2);
+    assert!(app.press(Role::Button, "Studio"), "open Studio");
+    app.frames(2);
+    assert!(app.press(Role::Button, "Plan"), "switch to Plan");
+    app.frames(3);
+    let names = accessible_names(&app);
+    assert!(
+        has(&names, "Plans") || names.iter().any(|n| n.contains("Plans")),
+        "Plan mode shows the plan list pane: {names:?}"
+    );
+    assert!(
+        has(&names, "No plan yet") || names.iter().any(|n| n.contains("outline the work")),
+        "the pane shows the empty plan: {names:?}"
+    );
+    assert!(
+        app.find(Role::Button, "Collapse Plans").is_some(),
+        "a chevron collapses the pane: {names:?}"
+    );
+    let plans = app.find(Role::Region, "Plans").and_then(|el| el.bounds());
+    let chat = app
+        .find(Role::Region, "Chat")
+        .and_then(|el| el.bounds())
+        .or_else(|| {
+            app.find_all(Role::Region).into_iter().find_map(|el| {
+                el.bounds().filter(|b| {
+                    b.width() > 80.0 && plans.as_ref().is_some_and(|p| b.min.x >= p.max.x - 1.0)
+                })
+            })
+        });
+    if let (Some(plans), Some(chat)) = (plans, chat) {
+        assert!(
+            plans.min.x < chat.min.x,
+            "the plan list starts on the left: plans={plans:?} chat={chat:?}"
+        );
+        assert!(
+            plans.width() >= 180.0 && plans.width() <= 560.0,
+            "the plan list is a usable column: {plans:?}"
+        );
+    }
+
+    assert!(app.press(Role::Button, "Collapse Plans"), "collapse");
+    app.frames(3);
+    let names = accessible_names(&app);
+    assert!(
+        app.find(Role::Button, "Expand Plans").is_some()
+            || names
+                .iter()
+                .any(|n| n.contains("Expand Plans") || n.contains("Plans (collapsed)")),
+        "collapsed strip names the expand action: {names:?}"
+    );
+    assert!(
+        !has(&names, "No plan yet"),
+        "the body is hidden while collapsed: {names:?}"
+    );
+
+    // Ctrl+Shift+[ expands it again, even while the composer is focused.
+    app.key(KeyEvent::press(Key::char('[')).with_modifiers(Modifiers {
+        ctrl: true,
+        shift: true,
+        ..Modifiers::NONE
+    }));
+    app.frames(3);
+    let names = accessible_names(&app);
+    assert!(
+        app.find(Role::Button, "Collapse Plans").is_some() || has(&names, "No plan yet"),
+        "Ctrl+Shift+[ expands the plan list: {names:?}"
+    );
 }
 
 #[test]

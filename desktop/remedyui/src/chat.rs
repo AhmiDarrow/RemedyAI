@@ -4,7 +4,7 @@ use crate::depth::logic::{self, reaction_label};
 use crate::depth::{self, react};
 use crate::logo;
 use crate::runtime;
-use crate::studio::{ChatMessage, Studio};
+use crate::studio::{ChatMessage, Studio, WorkMode};
 use crate::tokens;
 use crate::work::{self, WorkStep};
 use crate::{messages, say, time};
@@ -14,9 +14,9 @@ use remedy_ui::core::Vec2;
 use remedy_ui::input::Key;
 use remedy_ui::layout::{Align, Justify, Length};
 use remedy_ui::reactive::Signal;
-use remedy_ui::style::{BorderEdge, BorderSide, StylePatch};
+use remedy_ui::style::{BorderEdge, BorderSide, States, StylePatch};
 use remedy_ui::widgets as w;
-use remedy_ui::{El, Ui, show};
+use remedy_ui::{show, El, Ui};
 
 /// The chat well: session header, the two-pane workspace, composer.
 pub fn well(ui: &Ui, studio: Studio) -> El {
@@ -38,7 +38,29 @@ pub fn well(ui: &Ui, studio: Studio) -> El {
                     l.min_height = Length::Px(0.0);
                     l.width = Length::Percent(1.0);
                 })
-                .child(crate::chat_split::workspace(ui, studio.clone()))
+                .child({
+                    let st = studio.clone();
+                    let u = ui.clone();
+                    show(ui, move || st.mode.get() == WorkMode::Plan, {
+                        let u = u.clone();
+                        let studio = studio.clone();
+                        move || crate::plan_dock::workspace(&u, studio.clone())
+                    })
+                    .fallback({
+                        let u = u.clone();
+                        let studio = studio.clone();
+                        move || crate::chat_split::workspace(&u, studio.clone())
+                    })
+                    .el()
+                    .layout(|l| {
+                        l.grow = 1.0;
+                        l.basis = Length::Px(0.0);
+                        l.min_width = Length::Px(0.0);
+                        l.min_height = Length::Px(0.0);
+                        l.width = Length::Percent(1.0);
+                        l.height = Length::Percent(1.0);
+                    })
+                })
                 .child(depth::panels::side(ui, studio.clone())),
         )
         .child(depth::banners::ticker(ui, studio.clone()))
@@ -54,8 +76,6 @@ fn header(ui: &Ui, studio: Studio) -> El {
     let st_title = studio.clone();
     let u_sub = ui.clone();
     let st_sub = studio.clone();
-    let cycle = studio.clone();
-
     let left = w::column(ui)
         .gap(unit * 0.4)
         .layout(|l| {
@@ -122,26 +142,46 @@ fn header(ui: &Ui, studio: Studio) -> El {
     let chips = w::row(ui)
         .align(Align::Center)
         .gap(unit)
-        .child(panel_button(ui, studio.clone(), "memory", move || {
-            let open = mem.depth.panel.get() == depth::SidePanel::Memory;
-            if open {
-                mem.depth.panel.set(depth::SidePanel::None);
-            } else {
-                mem.depth.panel.set(depth::SidePanel::Memory);
-                mem.depth.panel_tab.set("memory".into());
-                depth::load_memory(&mem);
-            }
-        }))
-        .child(panel_button(ui, studio.clone(), "skills", move || {
-            let open = skills_st.depth.panel.get() == depth::SidePanel::Skills;
-            if open {
-                skills_st.depth.panel.set(depth::SidePanel::None);
-            } else {
-                skills_st.depth.panel.set(depth::SidePanel::Skills);
-                skills_st.depth.panel_tab.set("installed".into());
-                depth::load_skills(&skills_st);
-            }
-        }))
+        .child(panel_button(
+            ui,
+            studio.clone(),
+            "memory",
+            "memory-tip",
+            {
+                let st = studio.clone();
+                move || st.depth.panel.get() == depth::SidePanel::Memory
+            },
+            move || {
+                let open = mem.depth.panel.get() == depth::SidePanel::Memory;
+                if open {
+                    mem.depth.panel.set(depth::SidePanel::None);
+                } else {
+                    mem.depth.panel.set(depth::SidePanel::Memory);
+                    mem.depth.panel_tab.set("memory".into());
+                    depth::load_memory(&mem);
+                }
+            },
+        ))
+        .child(panel_button(
+            ui,
+            studio.clone(),
+            "skills",
+            "skills-tip",
+            {
+                let st = studio.clone();
+                move || st.depth.panel.get() == depth::SidePanel::Skills
+            },
+            move || {
+                let open = skills_st.depth.panel.get() == depth::SidePanel::Skills;
+                if open {
+                    skills_st.depth.panel.set(depth::SidePanel::None);
+                } else {
+                    skills_st.depth.panel.set(depth::SidePanel::Skills);
+                    skills_st.depth.panel_tab.set("installed".into());
+                    depth::load_skills(&skills_st);
+                }
+            },
+        ))
         .child(
             show(ui, move || live_st.streaming.get(), {
                 let u = ui.clone();
@@ -180,37 +220,7 @@ fn header(ui: &Ui, studio: Studio) -> El {
             })
             .el(),
         )
-        .child(
-            w::button(
-                ui,
-                {
-                    let cycle = studio.clone();
-                    move || cycle.mode.get().label().to_string()
-                },
-                move || cycle.cycle_mode(),
-            )
-            .variant("quiet")
-            .style(
-                StylePatch::new()
-                    .radius(ui.theme().radii.medium)
-                    .border(colors.line.unwrap_or(colors.muted))
-                    .border_width(1.0)
-                    .foreground(colors.text),
-            )
-            .semantics({
-                let u = ui.clone();
-                let st = studio.clone();
-                move || {
-                    Semantics::new(Role::Button)
-                        .label(format!(
-                            "{} — {}",
-                            messages().text(&u, "work-mode"),
-                            st.mode.get().label()
-                        ))
-                        .action(Action::Click)
-                }
-            }),
-        );
+        .child(mode_switcher(ui, studio.clone()));
 
     let chips = chips.layout(|l| {
         l.shrink = 0.0;
@@ -482,7 +492,11 @@ fn day_heading_for(studio: &Studio, msg: &ChatMessage) -> Option<String> {
         .as_deref()
         .map(time::day_label)
         .unwrap_or_default();
-    if prev == label { None } else { Some(label) }
+    if prev == label {
+        None
+    } else {
+        Some(label)
+    }
 }
 
 fn day_chip(ui: &Ui, label: &str) -> El {
@@ -937,7 +951,11 @@ fn count_chip(
             let sum = work::summarize(&steps());
             let n = if errors { sum.errors } else { sum.total };
             let key = if errors {
-                if n == 1 { "work-error" } else { "work-errors" }
+                if n == 1 {
+                    "work-error"
+                } else {
+                    "work-errors"
+                }
             } else if n == 1 {
                 "work-step"
             } else {
@@ -963,28 +981,87 @@ fn live_body(ui: &Ui, text: impl Fn() -> String + 'static) -> El {
         })
 }
 
+fn mode_switcher(ui: &Ui, studio: Studio) -> El {
+    let unit = ui.theme().spacing.unit;
+    let mut row = w::row(ui)
+        .align(Align::Center)
+        .gap(unit)
+        .semantics(Semantics::new(Role::Group).label(messages().text(ui, "work-mode")));
+    let modes = [
+        (WorkMode::Chat, "work-mode-chat", "work-mode-chat-tip"),
+        (WorkMode::Plan, "work-mode-plan", "work-mode-plan-tip"),
+        (WorkMode::Build, "work-mode-build", "work-mode-build-tip"),
+    ];
+    for (mode, label, tip) in modes {
+        let st = studio.clone();
+        let u = ui.clone();
+        let b = w::button(ui, move || messages().text(&u, label), {
+            let st = studio.clone();
+            move || st.set_mode(mode)
+        })
+        .variant("quiet");
+        let paint = b.clone();
+        let colors = ui.theme().colors.clone();
+        let b = b.bind(move || {
+            let on = st.mode.get() == mode;
+            paint.state(States::SELECTED, on);
+            let _ = paint.clone().style(mode_chip_style(&colors, on));
+        });
+        let u = ui.clone();
+        w::tooltip(&b, move || messages().text(&u, tip));
+        let st = studio.clone();
+        let u = ui.clone();
+        row = row.child(b.semantics(move || {
+            Semantics::new(Role::Button)
+                .label(messages().text(&u, label))
+                .checked(st.mode.get() == mode)
+                .action(Action::Click)
+        }));
+    }
+    row
+}
+
+fn mode_chip_style(colors: &remedy_ui::style::ColorRoles, on: bool) -> StylePatch {
+    let radius = StylePatch::new().radius(8.0).weight(550.0);
+    if on {
+        radius
+            .foreground(colors.accent)
+            .background(colors.accent.mix_oklab(colors.card, 0.88))
+            .border(colors.accent)
+            .border_width(1.0)
+    } else {
+        radius
+            .foreground(colors.text)
+            .border(colors.line.unwrap_or(colors.muted))
+            .border_width(1.0)
+    }
+}
+
 fn panel_button(
     ui: &Ui,
     _studio: Studio,
     label: &'static str,
+    tip: &'static str,
+    selected: impl Fn() -> bool + 'static,
     on_press: impl Fn() + 'static,
 ) -> El {
     let u = ui.clone();
-    w::button(ui, move || messages().text(&u, label), on_press)
-        .variant("quiet")
-        .style(
-            StylePatch::new()
-                .weight(500.0)
-                .foreground(ui.theme().colors.text),
-        )
-        .semantics({
-            let u = ui.clone();
-            move || {
-                Semantics::new(Role::Button)
-                    .label(messages().text(&u, label))
-                    .action(Action::Click)
-            }
-        })
+    let b = w::button(ui, move || messages().text(&u, label), on_press).variant("quiet");
+    let paint = b.clone();
+    let colors = ui.theme().colors.clone();
+    let b = b.bind(move || {
+        let on = selected();
+        paint.state(States::SELECTED, on);
+        let _ = paint.clone().style(mode_chip_style(&colors, on));
+    });
+    let u = ui.clone();
+    w::tooltip(&b, move || messages().text(&u, tip));
+    let u = ui.clone();
+    b.semantics(move || {
+        Semantics::new(Role::Button)
+            .label(messages().text(&u, label))
+            .action(Action::Click)
+    })
 }
 
 fn reaction_is_on(studio: &Studio, id: &str, emoji: &str) -> bool {
