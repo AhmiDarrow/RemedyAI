@@ -68,6 +68,16 @@ if [[ ! -f "${RUNTIME}" ]]; then
   exit 1
 fi
 install -m 0755 "${RUNTIME}" "${APP}/Contents/MacOS/remedy-runtime"
+CORE="${REPO}/native/zig/zig-out/lib/libremedy_core.dylib"
+if [[ "${SKIP_BUILD}" -eq 0 || ! -f "${CORE}" ]]; then
+  command -v zig >/dev/null 2>&1 || { echo "zig is required to build libremedy_core.dylib" >&2; exit 1; }
+  ( cd "${REPO}/native/zig" && zig build -Doptimize=ReleaseSafe )
+fi
+if [[ ! -f "${CORE}" ]]; then
+  echo "Core not found: ${CORE}" >&2
+  exit 1
+fi
+install -m 0755 "${CORE}" "${APP}/Contents/MacOS/libremedy_core.dylib"
 ICON_FILE="icon.png"
 cp -f "${ROOT}/assets/icon.png" "${APP}/Contents/Resources/icon.png"
 ICNS="${ROOT}/../src-tauri/icons/icon.icns"
