@@ -35,7 +35,7 @@ pub fn well(ui: &Ui, studio: Studio) -> El {
         .layout(|l| {
             l.grow = 1.0;
             l.basis = Length::Px(0.0);
-            l.min_width = Length::Px(0.0);
+            l.min_width = Length::Px(240.0);
             l.height = Length::Percent(1.0);
         })
         .child(header(ui, studio.clone()))

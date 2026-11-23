@@ -9,7 +9,7 @@ use crate::depth::{
 };
 use crate::studio::{Filter, Project, Session, Studio};
 use crate::time;
-use crate::{SELECT_MARK, SIDEBAR_WIDTH, messages, tool_button, tool_button_sized};
+use crate::{SELECT_MARK, messages, tool_button, tool_button_sized};
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::host::{DragData, DropEffect};
@@ -21,18 +21,19 @@ use remedy_ui::view::{Drag, IntoProp};
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui, show};
 
-/// The 270 px session column.
+/// Session list filling the Sessions rail body.
 pub fn sidebar(ui: &Ui, studio: Studio) -> El {
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
     w::column(ui)
         .style(StylePatch::new().background(colors.panel))
         .layout(|l| {
-            l.width = Length::Px(SIDEBAR_WIDTH);
-            l.min_width = Length::Px(SIDEBAR_WIDTH);
-            l.max_width = Length::Px(SIDEBAR_WIDTH);
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
             l.height = Length::Percent(1.0);
-            l.shrink = 0.0;
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.shrink = 1.0;
         })
         .padding(Insets {
             top: unit * 3.0,
