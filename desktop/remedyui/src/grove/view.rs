@@ -61,6 +61,7 @@ pub(super) fn root(
                     l.max_height = Length::Px(h);
                     l.min_height = Length::Px(0.0);
                     l.grow = 1.0;
+                    l.shrink = 1.0;
                     l.basis = Length::Px(0.0);
                     l.width = Length::Percent(1.0);
                 });
@@ -70,8 +71,11 @@ pub(super) fn root(
     .el()
     .layout(|l| {
         l.grow = 1.0;
+        l.shrink = 1.0;
         l.basis = Length::Px(0.0);
         l.min_height = Length::Px(0.0);
+        l.max_height = Length::Percent(1.0);
+        l.height = Length::Percent(1.0);
         l.width = Length::Percent(1.0);
     });
     let studio_flag = grove.clone();
@@ -163,6 +167,9 @@ pub(super) fn frame(
             l.height = Length::Percent(1.0);
             l.min_height = Length::Px(0.0);
             l.max_height = Length::Percent(1.0);
+            l.grow = 1.0;
+            l.shrink = 1.0;
+            l.basis = Length::Px(0.0);
         })
         .style(
             StylePatch::new()

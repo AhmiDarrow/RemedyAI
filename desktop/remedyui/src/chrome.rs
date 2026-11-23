@@ -1104,8 +1104,10 @@ pub fn preview_frame(ui: &Ui, overlay: Overlay, menu: bool) -> El {
     hosted(ui, studio, chrome, move |ui| {
         crate::shell_fixed(ui, body_studio.clone()).layout(|l| {
             l.grow = 1.0;
+            l.shrink = 1.0;
             l.basis = Length::Px(0.0);
-            l.height = Length::Auto;
+            l.height = Length::Percent(1.0);
+            l.max_height = Length::Percent(1.0);
             l.min_height = Length::Px(0.0);
         })
     })
@@ -1141,8 +1143,10 @@ fn build_hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: El) -> El {
         .child(titlebar::bar(ui, &studio, chrome))
         .child(body.layout(|l| {
             l.grow = 1.0;
+            l.shrink = 1.0;
             l.basis = Length::Px(0.0);
-            l.height = Length::Auto;
+            l.height = Length::Percent(1.0);
+            l.max_height = Length::Percent(1.0);
             l.min_height = Length::Px(0.0);
         }));
     let overlays = overlay_slot(ui, studio.clone(), chrome);
