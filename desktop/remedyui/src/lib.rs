@@ -17,12 +17,14 @@ mod sse;
 mod status;
 mod studio;
 mod time;
+mod usage;
 mod work;
 
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
 pub use runtime::Client;
 pub use settings::{preview_appearance, preview_connect, preview_error, preview_general, preview_models};
 pub use studio::Studio;
+pub use usage::{UsageContext, UsageDashboard, UsagePanel, UsageWindow};
 
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::host::{TrayEvent, TrayIcon, TrayImage, TrayItem};
@@ -128,6 +130,16 @@ pub fn home_chat(ui: &Ui) -> El {
 /// Morning Grove with example plots, for goldens. It does not touch disk or the network.
 pub fn grove_home(ui: &Ui) -> El {
     grove::preview_home(ui)
+}
+
+/// Filled usage tab, for goldens. No runtime calls.
+pub fn preview_usage(ui: &Ui) -> El {
+    usage::UsagePanel::preview(ui)
+}
+
+/// Filled harness tab, for goldens. No runtime calls.
+pub fn preview_usage_harness(ui: &Ui) -> El {
+    usage::UsagePanel::preview_harness(ui)
 }
 
 /// Left rail open on Sessions, right rail a thin strip. Same shell as [`home`].
