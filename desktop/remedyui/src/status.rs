@@ -54,7 +54,7 @@ pub fn status_bar(ui: &Ui, studio: Studio) -> El {
         }));
 
     let settings =
-        w::button(ui, move || messages().text(&u, "status-settings"), || {}).variant("quiet");
+        w::button(ui, move || messages().text(&u, "status-settings"), || crate::settings::toggle()).variant("quiet");
 
     let st = studio.clone();
     let u = ui.clone();
