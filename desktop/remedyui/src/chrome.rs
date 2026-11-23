@@ -50,13 +50,45 @@ pub fn toggle_server_menu() {
     });
 }
 
-/// Usage dashboard from the status bar.
-pub fn open_usage() {
-    LIVE.with(|slot| {
-        if let Some(c) = slot.get() {
-            c.open(Overlay::Usage);
+/// Usage dashboard from the status bar. The landed panel owns the modal.
+pub fn open_usage(studio: &Studio) -> bool {
+    let Some(c) = LIVE.with(|slot| slot.get()) else {
+        return false;
+    };
+    let Some(ui) = c.ui_slot.get() else { return false };
+    c.present_usage(&ui, studio);
+    true
+}
+
+/// App-control `open_panel` for the overlays this frame owns.
+/// False leaves Grove's previous behavior in place.
+pub fn handle_panel(panel: &str, article: Option<&str>, studio: &Studio) -> bool {
+    let Some(c) = LIVE.with(|slot| slot.get()) else {
+        return false;
+    };
+    match panel {
+        "usage" => open_usage(studio),
+        "diagnostics" => {
+            c.open(Overlay::Diagnostics);
+            true
         }
-    });
+        "help" => {
+            if let Some(id) = article.filter(|s| !s.is_empty()) {
+                c.help_id.set(id.into());
+            }
+            c.open(Overlay::Help);
+            true
+        }
+        "time_travel" => {
+            c.open(Overlay::TimeTravel);
+            true
+        }
+        "about" => {
+            c.open(Overlay::About);
+            true
+        }
+        _ => false,
+    }
 }
 
 /// Phone-portal shell: hide the session rail. Dead signals count as off.
@@ -99,7 +131,6 @@ pub enum Overlay {
     Help,
     About,
     Diagnostics,
-    Usage,
     TimeTravel,
     Quit,
     Settings,
@@ -150,9 +181,8 @@ pub struct Chrome {
     pub agents: Signal<Vec<Agent>>,
     pub diag: Signal<serde_json::Value>,
     pub hive: Signal<serde_json::Value>,
-    pub usage: Signal<serde_json::Value>,
-    pub usage_series: Signal<serde_json::Value>,
     pub timeline: Signal<serde_json::Value>,
+    usage_win: Signal<Option<crate::usage::UsageWindow>>,
     pub tooltip: Signal<String>,
     app: Signal<Option<App>>,
     window: Signal<Option<Window>>,
@@ -193,9 +223,8 @@ impl Chrome {
             agents: Signal::new(Vec::new()),
             diag: Signal::new(serde_json::Value::Null),
             hive: Signal::new(serde_json::Value::Null),
-            usage: Signal::new(serde_json::Value::Null),
-            usage_series: Signal::new(serde_json::Value::Null),
             timeline: Signal::new(serde_json::Value::Null),
+            usage_win: Signal::new(None),
             tooltip: Signal::new(String::new()),
             app: Signal::new(None),
             window: Signal::new(None),
@@ -216,7 +245,6 @@ impl Chrome {
         }]);
         c.diag.set(sample_diag());
         c.hive.set(sample_hive());
-        c.usage.set(sample_usage());
         c.timeline.set(sample_timeline());
         c.help_id.set(help_view::default_id().into());
         c
@@ -453,13 +481,23 @@ impl Chrome {
         fetch_slot(&client, "hive/roster", self.hive);
     }
 
-    pub fn load_usage(self, studio: &Studio) {
-        if self.preview {
-            return;
+    /// The usage dashboard from PR #83. One modal, not a second sheet.
+    fn present_usage(self, ui: &Ui, studio: &Studio) {
+        self.menu_open.set(false);
+        self.server_open.set(false);
+        self.close_overlay();
+        if let Some(prev) = self.usage_win.get() {
+            prev.close();
         }
-        let Some(client) = studio.client() else { return };
-        fetch_slot(&client, "usage/summary?range_days=7", self.usage);
-        fetch_slot(&client, "usage/series?range_days=30&group=provider", self.usage_series);
+        let win = crate::usage::UsagePanel::open(
+            ui,
+            crate::usage::UsageContext::new(
+                studio.active.get(),
+                studio.provider.get(),
+                studio.model.get(),
+            ),
+        );
+        self.usage_win.set(Some(win));
     }
 
     pub fn load_timeline(self, studio: &Studio) {
@@ -537,6 +575,18 @@ impl Chrome {
                 self.apply_font(ui, e);
             }
             return true;
+        }
+        if let Some(win) = self.usage_win.get() {
+            if !win.is_open() {
+                self.usage_win.set(None);
+            } else if e.key == Key::Escape {
+                win.close();
+                self.usage_win.set(None);
+                return true;
+            } else {
+                // The dashboard is a dialog. Shift+Tab stays with it.
+                return false;
+            }
         }
         if self.confirm.get() != Confirm::None {
             if e.key == Key::Escape {
@@ -836,15 +886,6 @@ fn sample_hive() -> serde_json::Value {
     })
 }
 
-fn sample_usage() -> serde_json::Value {
-    serde_json::json!({
-        "range_days": 7,
-        "totals": { "total_tokens": 1200, "estimated_cost_usd": 0.0, "events": 4 },
-        "by_provider": [{ "provider": "local", "total_tokens": 1200, "estimated_cost_usd": 0.0, "events": 4 }],
-        "by_model": [{ "model": "remedy", "total_tokens": 1200, "estimated_cost_usd": 0.0, "events": 4 }]
-    })
-}
-
 fn sample_timeline() -> serde_json::Value {
     serde_json::json!({
         "steps": [{
@@ -1024,7 +1065,6 @@ fn overlay_slot(ui: &Ui, studio: Studio, chrome: Chrome) -> El {
 fn ensure_loaded(chrome: Chrome, studio: &Studio, overlay: Overlay) {
     match overlay {
         Overlay::Diagnostics if chrome.diag.get().is_null() => chrome.load_diag(studio),
-        Overlay::Usage if chrome.usage.get().is_null() => chrome.load_usage(studio),
         Overlay::TimeTravel if chrome.timeline.get().is_null() => chrome.load_timeline(studio),
         _ => {}
     }
@@ -1057,14 +1097,6 @@ fn overlay_layer(ui: &Ui, studio: Studio, chrome: Chrome, overlay: Overlay) -> E
             true,
             false,
             crate::panels::diagnostics_body(ui, studio, chrome),
-            move || chrome.close_overlay(),
-        ),
-        Overlay::Usage => sheet(
-            ui,
-            &messages().text(ui, "usage-title"),
-            true,
-            false,
-            crate::panels::usage_body(ui, studio, chrome),
             move || chrome.close_overlay(),
         ),
         Overlay::TimeTravel => sheet(

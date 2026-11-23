@@ -7,6 +7,7 @@
  * screen=empty — selected empty session, no messages
  * screen=rails-left | rails-right | rails-dual — real WorkspaceSide chrome
  * screen=palette | help | about | diagnostics | menu — chrome overlays
+ * screen=usage | usage-harness — Usage dashboard on a fixture, no runtime
  */
 import { StrictMode, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -20,6 +21,7 @@ import { CommandPalette, type CommandItem } from '../../src/components/CommandPa
 import { DiagnosticsPanel } from '../../src/components/DiagnosticsPanel'
 import { HelpPanel } from '../../src/components/HelpPanel'
 import { TitleBar } from '../../src/components/TitleBar'
+import { UsageDashboard } from '../../src/components/UsageDashboard'
 import { WorkspaceSide } from '../../src/components/slides/WorkspaceSide'
 import { useNarrowRails } from '../../src/hooks/useNarrowRails'
 import type { WorkspaceLayout } from '../../src/workspace/layoutPrefs'
@@ -38,6 +40,7 @@ const themeId: ThemeId = themeParam in THEMES || themeParam === 'system' ? theme
 
 applyFonts(DEFAULT_FONTS)
 applyTheme(getResolvedTheme(themeId))
+if (screen === 'usage' || screen === 'usage-harness') installUsageFixture()
 document.documentElement.setAttribute('data-density', 'cozy')
 document.documentElement.classList.add('app-ready')
 document.body.style.background = 'var(--bg-primary)'
@@ -311,7 +314,109 @@ function MenuBar() {
   return <TitleBar version="1.0.0" />
 }
 
+/** Same figures as the RemedyUI usage golden. Answers `/api` without a runtime. */
+function installUsageFixture() {
+  const json = (body: unknown) =>
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  const summary = {
+    range_days: 7,
+    totals: {
+      prompt_tokens: 5894,
+      completion_tokens: 2526,
+      total_tokens: 8420,
+      estimated_cost_usd: 1.28,
+      events: 37,
+    },
+    by_provider: [
+      { provider: 'local', model: '', total_tokens: 5200, estimated_cost_usd: 1.28, events: 22, prompt_tokens: 3640, completion_tokens: 1560 },
+      { provider: 'openai', model: '', total_tokens: 3220, estimated_cost_usd: 2.4, events: 15, prompt_tokens: 2254, completion_tokens: 966 },
+    ],
+    by_model: [
+      { provider: 'local', model: 'remedy', total_tokens: 5200, estimated_cost_usd: 1.28, events: 22, prompt_tokens: 3640, completion_tokens: 1560 },
+      { provider: 'openai', model: 'gpt', total_tokens: 3220, estimated_cost_usd: 2.4, events: 15, prompt_tokens: 2254, completion_tokens: 966 },
+    ],
+  }
+  const series = {
+    range_days: 7,
+    group: 'provider',
+    points: [
+      ['2026-11-16', 1200],
+      ['2026-11-17', 800],
+      ['2026-11-18', 2400],
+      ['2026-11-19', 400],
+      ['2026-11-20', 6400],
+      ['2026-11-21', 1600],
+      ['2026-11-22', 2100],
+    ].map(([day, tokens]) => ({
+      day,
+      group: 'local',
+      total_tokens: tokens,
+      estimated_cost_usd: 0,
+      events: 1,
+    })),
+  }
+  const continuity = {
+    session_id: 'preview',
+    harness_mode: 'auto',
+    session_quality: {
+      turns: 14,
+      tokens_saved_by_compress: 3200,
+      soft_nudge_count: 2,
+      strong_nudge_count: 1,
+      compress_count: 3,
+      stuck_rate: 0.125,
+      re_explain_rate: 0.4,
+      max_tool_fail_streak: 2,
+    },
+    pattern: { step_count: 8, success_rate: 0.75, recent: ['read', 'edit', 'test'] },
+    goal: { open: ['ship the usage panel', 'keep the ledger on the runtime'], stale: false },
+    health: { samples: 20, error_rate: 0.05, avg_latency_ms: 840, flaky: false, rate_limit_hits: 0 },
+    token: { last_method: 'bpe', last_estimate: 18420, last_remeasure: { fill_pct: 0.62 } },
+    context_snapshot: { intent: 'port the usage dashboard', policy_id: 'house', nudge: 'stay on the usage panel', fill_pct: 0.4 },
+    swarm: { event_count: 0 },
+  }
+  const previous = window.fetch.bind(window)
+  window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (url.includes('local-bootstrap')) return Promise.resolve(json({ token: 'harness-token-ok!!' }))
+    if (url.includes('/usage/summary')) return Promise.resolve(json(summary))
+    if (url.includes('/usage/series')) return Promise.resolve(json(series))
+    if (url.includes('/continuity/dashboard')) return Promise.resolve(json(continuity))
+    if (url.includes('/nanoswarm/token/status')) {
+      return Promise.resolve(json({
+        label: 'NanoToken',
+        last_method: 'bpe',
+        last_estimate: 4096,
+        active_provider: 'local',
+        active_model: 'remedy',
+        worker: 'attached',
+        ip_note: 'Remedy-owned BBPE tokenizer.',
+      }))
+    }
+    return previous(input, init)
+  }
+}
+
+function UsageScreen({ harness }: { harness: boolean }) {
+  useEffect(() => {
+    if (!harness) return
+    const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent === 'Harness')
+    btn?.click()
+  }, [harness])
+  return (
+    <div className="h-full" style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }} data-harness-ready="1">
+      <UsageDashboard open onClose={() => {}} sessionId="preview" provider="local" model="remedy" />
+    </div>
+  )
+}
+
 function Harness() {
+  if (screen === 'usage' || screen === 'usage-harness') {
+    return <UsageScreen harness={screen === 'usage-harness'} />
+  }
   const empty = screen === 'empty'
   const [activeId, setActiveId] = useState(empty ? 's3' : 's1')
   const [theme, setTheme] = useState<ThemeId>(themeId)
