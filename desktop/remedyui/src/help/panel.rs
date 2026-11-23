@@ -253,11 +253,13 @@ impl HelpPanel {
         }
         self.focused_search.set(true);
         let field = self.field.borrow().clone();
-        let ui = ui.clone();
+        // `after` borrows `ui` for the call. The closure has to own its own
+        // handle, or edition 2024 rejects the move (E0505).
+        let later = ui.clone();
         let _ = ui.after(Duration::from_millis(50), move || {
             if let Some(field) = field {
                 let el = field.el();
-                if ui.tree().contains(el.id()) {
+                if later.tree().contains(el.id()) {
                     el.focus();
                 }
             }
@@ -578,6 +580,10 @@ impl HelpPanel {
             .row()
             .gap(unit * 3.0)
             .align(Align::Center)
+            .layout(|l| {
+                // Whole links stay intact. The tip takes the leftover width and wraps.
+                l.shrink = 0.0;
+            })
             .child(self.footer_nav(ui, "Commands", "11-reference-commands"))
             .child(self.footer_nav(ui, "Shortcuts", "12-reference-shortcuts"))
             .child(self.footer_nav(ui, "Fix a problem", "09-troubleshooting"))
@@ -612,15 +618,15 @@ impl HelpPanel {
 
     fn footer_nav(&self, ui: &Ui, label: &str, id: &'static str) -> El {
         let panel = self.clone();
-        w::link(ui, label, move || panel.navigate(id))
+        footer_link(w::link(ui, label, move || panel.navigate(id)))
     }
 
     fn footer_report(&self, ui: &Ui) -> El {
         let panel = self.clone();
-        w::link(ui, "Report an issue", move || {
+        footer_link(w::link(ui, "Report an issue", move || {
             let url = report_issue_url(&panel.version.get());
             panel.open_external(&url);
-        })
+        }))
     }
 
     fn follow(&self) -> Rc<dyn Fn(&str)> {
@@ -701,6 +707,11 @@ impl Default for HelpPanel {
     }
 }
 
+/// A footer link stays one line. Squeezing the row must not break "Commands" in half.
+fn footer_link(link: El) -> El {
+    link.nowrap().layout(|l| l.shrink = 0.0)
+}
+
 fn toc_button(ui: &Ui, title: &str, subtitle: Option<&str>, active: bool, on_press: impl Fn() + 'static) -> El {
     let colors = ui.theme().colors.clone();
     let mark = if active { colors.accent } else { colors.panel.with_alpha(0.0) };
@@ -710,11 +721,10 @@ fn toc_button(ui: &Ui, title: &str, subtitle: Option<&str>, active: bool, on_pre
         colors.panel.with_alpha(0.0)
     };
     let fg = if active { colors.accent } else { colors.text };
+    // Titles wrap inside the 240 px nav, the same way the current wiki does.
+    // Truncating them hides "continuity" and "nano swarm".
     let mut column = ui.el("help_toc_label").column().grow(1.0).gap(1.0).child(
-        w::text(ui, title.to_string())
-            .nowrap()
-            .truncate()
-            .style(StylePatch::new().foreground(fg)),
+        w::text(ui, title.to_string()).style(StylePatch::new().foreground(fg)),
     );
     if let Some(subtitle) = subtitle {
         column = column.child(
