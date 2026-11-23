@@ -32,6 +32,8 @@ pub struct WorkStep {
     pub error: Option<String>,
     /// What the model wrote just before this call. Shown as a settled mid-turn bubble.
     pub narration: Option<String>,
+    /// A short argument preview (`command`, `path`, …), when the call carried one.
+    pub detail: Option<String>,
 }
 
 impl WorkStep {
@@ -42,6 +44,7 @@ impl WorkStep {
             status,
             error: None,
             narration: None,
+            detail: None,
         }
     }
 
@@ -243,6 +246,7 @@ pub fn on_tool_call(steps: &mut Vec<WorkStep>, breaks: &mut Vec<usize>, partial:
     if !narration.is_empty() {
         step.narration = Some(narration.to_string());
     }
+    step.detail = short_args(&v);
     steps.push(step);
 }
 
@@ -423,6 +427,45 @@ fn mark_or_push(
     steps.push(step);
 }
 
+
+/// A one-line argument preview from a tool-call payload.
+pub fn short_args(v: &Value) -> Option<String> {
+    let args = v.get("args")?;
+    if let Some(s) = args.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+        return Some(truncate_arg(s));
+    }
+    let obj = args.as_object()?;
+    const KEYS: &[&str] = &[
+        "command", "cmd", "path", "file", "query", "pattern", "url", "target", "name",
+    ];
+    for key in KEYS {
+        if let Some(s) = obj
+            .get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return Some(truncate_arg(s));
+        }
+    }
+    for val in obj.values() {
+        if let Some(s) = val.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+            return Some(truncate_arg(s));
+        }
+    }
+    None
+}
+
+fn truncate_arg(s: &str) -> String {
+    let mut chars = s.chars();
+    let taken: String = chars.by_ref().take(56).collect();
+    if chars.next().is_some() {
+        format!("{taken}…")
+    } else {
+        taken
+    }
+}
+
 fn parse_status(v: &Value) -> Option<StepStatus> {
     if v.get("ok").and_then(|x| x.as_bool()) == Some(false) {
         return Some(StepStatus::Error);
@@ -593,11 +636,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn short_args_reads_command() {
+        let v: Value = serde_json::from_str(r#"{"args":{"command":"npm test"}}"#).unwrap();
+        assert_eq!(short_args(&v).as_deref(), Some("npm test"));
+    }
+
+    #[test]
     fn tool_call_and_failed_result_count_one_error() {
         let mut steps = Vec::new();
         let mut breaks = Vec::new();
         let call = r#"{"name":"bash","id":"c1","args":{"command":"npm test"}}"#;
         on_tool_call(&mut steps, &mut breaks, "I'll run the tests.", call);
+        assert_eq!(steps[0].detail.as_deref(), Some("npm test"));
         on_tool_call(&mut steps, &mut breaks, "I'll run the tests.", call);
         assert_eq!(steps.len(), 1, "a repeated call id is one step");
         assert_eq!(breaks, vec!["I'll run the tests.".len()]);

@@ -25,6 +25,36 @@ pub fn relative(rfc3339: &str, now_secs: i64) -> String {
     }
 }
 
+/// Uppercase day stamp for the chat feed, e.g. `SUN, NOV 22`.
+pub fn day_label(rfc3339: &str) -> String {
+    let s = rfc3339.trim();
+    let date = s.split(['T', ' ']).next().unwrap_or(s);
+    let mut d = date.split('-');
+    let Some(y) = d.next().and_then(|v| v.parse::<i64>().ok()) else {
+        return String::new();
+    };
+    let Some(mo) = d.next().and_then(|v| v.parse::<i64>().ok()) else {
+        return String::new();
+    };
+    let Some(day) = d.next().and_then(|v| v.parse::<i64>().ok()) else {
+        return String::new();
+    };
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&day) {
+        return String::new();
+    }
+    let Some(secs) = parse_rfc3339(&format!("{y:04}-{mo:02}-{day:02}T00:00:00Z")) else {
+        return String::new();
+    };
+    let days = secs.div_euclid(86400);
+    // 1970-01-01 was a Thursday. Index 0 = Monday.
+    let wday = ((days + 3).rem_euclid(7)) as usize;
+    const WDAYS: [&str; 7] = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+    const MONTHS: [&str; 12] = [
+        "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+    ];
+    format!("{}, {} {}", WDAYS[wday], MONTHS[(mo - 1) as usize], day)
+}
+
 /// Unix seconds now.
 pub fn now_secs() -> i64 {
     SystemTime::now()
@@ -79,5 +109,12 @@ mod tests {
             "1h ago",
             "preview clock and parser stay in lockstep"
         );
+    }
+
+    #[test]
+    fn day_stamp_is_uppercase_and_stable() {
+        assert_eq!(day_label("2026-11-22T15:00:00Z"), "SUN, NOV 22");
+        assert_eq!(day_label("1970-01-01T00:00:00Z"), "THU, JAN 1");
+        assert_eq!(day_label(""), "");
     }
 }
