@@ -101,6 +101,7 @@ chat-split-tabs = 채팅 또는 작업
 chat-split-tab-actions = 작업
 chat-split-tab-chat = 채팅
 chat-split-working = 작업 중
+chat-split-thinking = 생각
 chat-split-build = BUILD
 chat-split-side-left = 작업이 왼쪽
 chat-split-side-right = 작업이 오른쪽

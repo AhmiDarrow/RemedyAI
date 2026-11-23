@@ -3,6 +3,7 @@
 use super::api;
 use super::logic::{self, at_query, filter_commands, slash_query};
 use super::{Attachment, SubmitKind, add_paths, pick_attachments, submit, toggle_mic};
+use crate::tokens;
 use crate::messages;
 use crate::studio::Studio;
 use crate::{Glyph, tool_button};
@@ -233,10 +234,10 @@ pub fn composer(ui: &Ui, studio: Studio) -> El {
     w::column(ui)
         .gap(unit)
         .padding(Insets {
-            top: unit,
-            end: unit * 4.0,
-            bottom: unit * 2.0,
-            start: unit * 4.0,
+            top: unit * 2.0,
+            end: tokens::GUTTER,
+            bottom: tokens::GUTTER,
+            start: tokens::GUTTER,
         })
         .layout(|l| {
             l.width = Length::Percent(1.0);
@@ -250,7 +251,7 @@ pub fn composer(ui: &Ui, studio: Studio) -> El {
         .child(vision)
         .child(drop_hint)
         .child(shell)
-        .child(crate::say(ui, "composer-hint", "muted"))
+        .child(crate::say(ui, "composer-hint", "muted").style(tokens::typo(tokens::META)))
 }
 
 fn field_row(ui: &Ui, studio: &Studio, field: &remedy_ui::TextField, unit: f32) -> El {

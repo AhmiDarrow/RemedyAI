@@ -3,9 +3,11 @@
 use crate::depth::logic::{self, reaction_label};
 use crate::depth::{self, react};
 use crate::logo;
+use crate::runtime;
 use crate::studio::{ChatMessage, Studio};
+use crate::tokens;
 use crate::work::{self, WorkStep};
-use crate::{messages, say};
+use crate::{messages, say, time};
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::core::Vec2;
@@ -20,7 +22,7 @@ use remedy_ui::{El, Ui, show};
 pub fn well(ui: &Ui, studio: Studio) -> El {
     let colors = ui.theme().colors.clone();
     w::column(ui)
-        .style(StylePatch::new().background(colors.bg))
+        .style(StylePatch::new().background(tokens::surface_base(&colors)))
         .layout(|l| {
             l.grow = 1.0;
             l.basis = Length::Px(0.0);
@@ -74,7 +76,8 @@ fn header(ui: &Ui, studio: Studio) -> El {
                         None => messages().text(&u_title, "no-session"),
                     }
                 })
-                .nowrap(),
+                .nowrap()
+                .style(tokens::typo(tokens::TITLE).foreground(colors.text)),
         )
         .child(
             w::text(ui, "")
@@ -107,7 +110,8 @@ fn header(ui: &Ui, studio: Studio) -> El {
                     }
                     sub
                 })
-                .nowrap(),
+                .nowrap()
+                .style(tokens::typo(tokens::META).foreground(colors.muted)),
         );
 
     let live_st = studio.clone();
@@ -168,7 +172,11 @@ fn header(ui: &Ui, studio: Studio) -> El {
                         )
                         .child(
                             w::text(&u, "Live")
-                                .style(StylePatch::new().foreground(accent).weight(500.0)),
+                                .style(
+                                    tokens::typo(tokens::META)
+                                        .foreground(accent)
+                                        .weight(620.0),
+                                ),
                         )
                 }
             })
@@ -210,10 +218,10 @@ fn header(ui: &Ui, studio: Studio) -> El {
         .align(Align::Center)
         .justify(Justify::SpaceBetween)
         .padding(Insets {
-            top: unit * 3.0,
-            end: unit * 4.0,
-            bottom: unit * 2.0,
-            start: unit * 4.0,
+            top: tokens::GUTTER,
+            end: tokens::GUTTER,
+            bottom: unit * 3.0,
+            start: tokens::GUTTER,
         })
         .layout(|l| {
             l.width = Length::Percent(1.0);
@@ -250,12 +258,12 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
     let items_out = items.clone();
     let st = studio.clone();
     let col = w::column(ui)
-        .gap(unit * 3.0)
+        .gap(tokens::GUTTER)
         .padding(Insets {
             top: unit * 2.0,
-            end: unit * 4.0,
+            end: tokens::GUTTER,
             bottom: unit * 2.0,
-            start: unit * 4.0,
+            start: tokens::GUTTER,
         })
         .layout(|l| l.width = Length::Percent(1.0));
     let _ = col.clone().bind(move || {
@@ -290,15 +298,26 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
         items,
         |m| m.id.clone(),
         move |m| {
-            if m.id == "live" {
-                return live_turn(&u, studio_rows.clone());
-            }
-            let name = if m.role == "user" {
-                studio_rows.user_name.get()
+            let day = day_heading_for(&studio_rows, m);
+            let body = if m.id == "live" {
+                live_turn(&u, studio_rows.clone())
             } else {
-                "Remedy".into()
+                let name = if m.role == "user" {
+                    studio_rows.user_name.get()
+                } else {
+                    "Remedy".into()
+                };
+                saved_turn(&u, studio_rows.clone(), m, &name)
             };
-            saved_turn(&u, studio_rows.clone(), m, &name)
+            if let Some(label) = day {
+                w::column(&u)
+                    .gap(unit * 2.0)
+                    .layout(|l| l.width = Length::Percent(1.0))
+                    .child(day_chip(&u, &label))
+                    .child(body)
+            } else {
+                body
+            }
         },
     );
     let scroll = w::scroll(ui)
@@ -326,9 +345,11 @@ fn empty_well(ui: &Ui, studio: Studio) -> El {
     let unit = ui.theme().spacing.unit;
     let name = studio.greeting_name();
     let u = ui.clone();
+    let colors = ui.theme().colors.clone();
     let title = w::text(ui, "")
         .variant("heading")
-        .text(move || messages().text(&u, "ready-named").replace("{name}", &name));
+        .text(move || messages().text(&u, "ready-named").replace("{name}", &name))
+        .style(tokens::typo(tokens::TITLE).foreground(colors.text));
     let mut starters = w::row(ui)
         .align(Align::Center)
         .justify(Justify::Center)
@@ -357,18 +378,25 @@ fn empty_well(ui: &Ui, studio: Studio) -> El {
             )
             .variant("quiet")
             .style(
-                StylePatch::new()
+                tokens::typo(tokens::META)
+                    .weight(550.0)
                     .radius(ui.theme().radii.medium)
-                    .border(ui.theme().colors.line.unwrap_or(ui.theme().colors.muted))
-                    .border_width(1.0),
+                    .border(tokens::hairline(&ui.theme().colors))
+                    .border_width(1.0)
+                    .padding(Insets {
+                        top: 6.0,
+                        end: 12.0,
+                        bottom: 6.0,
+                        start: 12.0,
+                    }),
             ),
         );
     }
     w::column(ui)
         .align(Align::Center)
         .justify(Justify::Center)
-        .gap(unit * 2.0)
-        .padding(Insets::all(unit * 8.0))
+        .gap(unit * 3.0)
+        .padding(Insets::all(tokens::GUTTER * 2.0))
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.grow = 1.0;
@@ -376,15 +404,23 @@ fn empty_well(ui: &Ui, studio: Studio) -> El {
         })
         .child(logo::empty_mark(ui))
         .child(title)
-        .child(say(ui, "ready-hint", "muted").layout(|l| {
-            l.max_width = Length::Px(520.0);
-            l.width = Length::Percent(1.0);
-        }))
+        .child(
+            say(ui, "ready-hint", "muted")
+                .layout(|l| {
+                    l.max_width = Length::Px(440.0);
+                    l.width = Length::Percent(1.0);
+                })
+                .style(tokens::typo(tokens::BODY).foreground(colors.muted)),
+        )
         .child(starters)
-        .child(say(ui, "ready-keys", "muted").layout(|l| {
-            l.max_width = Length::Px(520.0);
-            l.width = Length::Percent(1.0);
-        }))
+        .child(
+            say(ui, "ready-keys", "muted")
+                .layout(|l| {
+                    l.max_width = Length::Px(440.0);
+                    l.width = Length::Percent(1.0);
+                })
+                .style(tokens::typo(tokens::META).foreground(colors.muted)),
+        )
 }
 
 fn mid_turn_beats(msg: &ChatMessage) -> Vec<String> {
@@ -397,13 +433,189 @@ fn mid_turn_beats(msg: &ChatMessage) -> Vec<String> {
         .collect()
 }
 
-fn sealed_bubble(ui: &Ui, studio: Studio, text: &str, name: &str) -> El {
+fn day_heading_for(studio: &Studio, msg: &ChatMessage) -> Option<String> {
+    if msg.id == "live" {
+        return None;
+    }
+    let label = msg
+        .created_at
+        .as_deref()
+        .map(time::day_label)
+        .filter(|s| !s.is_empty())?;
+    let msgs = studio.messages.get();
+    let idx = msgs.iter().position(|m| m.id == msg.id)?;
+    if idx == 0 {
+        return Some(label);
+    }
+    let prev = msgs[idx - 1]
+        .created_at
+        .as_deref()
+        .map(time::day_label)
+        .unwrap_or_default();
+    if prev == label { None } else { Some(label) }
+}
+
+fn day_chip(ui: &Ui, label: &str) -> El {
+    let colors = ui.theme().colors.clone();
+    w::row(ui)
+        .align(Align::Center)
+        .justify(Justify::Center)
+        .layout(|l| l.width = Length::Percent(1.0))
+        .padding(Insets {
+            top: 4.0,
+            end: 0.0,
+            bottom: 2.0,
+            start: 0.0,
+        })
+        .semantics({
+            let label = label.to_string();
+            move || Semantics::new(Role::Label).label(label.clone())
+        })
+        .child(
+            w::text(ui, label).style(tokens::section_kicker(&colors)),
+        )
+}
+
+fn bubble_card(ui: &Ui, body: El, user: bool, system: bool) -> El {
+    let colors = ui.theme().colors.clone();
+    let (bg, fg, border) = if user {
+        (colors.accent, colors.on_accent, colors.accent)
+    } else if system {
+        (
+            colors.card,
+            colors.danger,
+            colors.danger.mix_oklab(tokens::hairline(&colors), 0.4),
+        )
+    } else {
+        (tokens::surface_overlay(&colors), colors.text, tokens::hairline(&colors))
+    };
+    w::column(ui)
+        .gap(tokens::SPACE)
+        .padding(Insets {
+            top: 10.0,
+            end: 14.0,
+            bottom: 10.0,
+            start: 14.0,
+        })
+        .layout(|l| {
+            l.max_width = Length::Px(tokens::BUBBLE_MAX);
+            l.shrink = 1.0;
+        })
+        .style(
+            StylePatch::new()
+                .background(bg)
+                .foreground(fg)
+                .radius(ui.theme().radii.large)
+                .border(border)
+                .border_width(1.0),
+        )
+        .child(body)
+}
+
+fn stamp_text(created_at: Option<&str>, now: i64) -> Option<String> {
+    created_at
+        .map(|t| time::relative(t, now))
+        .filter(|s| !s.is_empty())
+}
+
+fn speaker_meta(ui: &Ui, name: &str, created_at: Option<&str>, now: i64, user: bool) -> El {
+    let colors = ui.theme().colors.clone();
+    let name_el = w::text(ui, name).nowrap().style(
+        tokens::typo(tokens::META)
+            .weight(620.0)
+            .foreground(colors.text),
+    );
+    let mut row = w::row(ui)
+        .align(Align::Baseline)
+        .gap(8.0)
+        .layout(|l| l.shrink = 1.0);
+    let stamp = stamp_text(created_at, now).map(|s| {
+        w::text(ui, s).nowrap().style(tokens::typo(tokens::META).foreground(colors.muted))
+    });
+    if user {
+        if let Some(s) = stamp {
+            row = row.child(s);
+        }
+        row.child(name_el)
+    } else {
+        row = row.child(name_el);
+        if let Some(s) = stamp {
+            row = row.child(s);
+        }
+        row
+    }
+}
+
+fn speaker_cluster(
+    ui: &Ui,
+    name: &str,
+    user: bool,
+    created_at: Option<&str>,
+    now: i64,
+    cards: El,
+    trailing: Option<El>,
+    extras: Option<(El, f32)>,
+) -> El {
+    let content = w::column(ui)
+        .gap(6.0)
+        .layout(|l| {
+            l.shrink = 1.0;
+            l.min_width = Length::Px(0.0);
+            l.max_width = Length::Px(tokens::BUBBLE_MAX + 8.0);
+        })
+        .child(speaker_meta(ui, name, created_at, now, user))
+        .child(cards);
+    let content = if let Some(tr) = trailing {
+        content.child(tr)
+    } else {
+        content
+    };
+    let avatar = logo::persona(ui, name, user, tokens::AVATAR);
+    let mut row = w::row(ui)
+        .align(Align::Start)
+        .gap(10.0)
+        .layout(|l| l.width = Length::Percent(1.0));
+    row = if user {
+        row.justify(Justify::End).child(content).child(avatar)
+    } else {
+        row.justify(Justify::Start).child(avatar).child(content)
+    };
+    if let Some((extras, width)) = extras {
+        w::reveal_on_hover(row, &extras, width)
+    } else {
+        row
+    }
+}
+
+fn sealed_card(ui: &Ui, studio: Studio, text: &str, animate: bool) -> El {
     let body = depth::blocks(ui, text, true, {
         let st = studio;
         move |src| st.depth.show_image(src)
     });
-    message_row(ui, body, false, false, name)
+    let card = bubble_card(ui, body, false, false);
+    if animate {
+        maybe_seal_anim(ui, card)
+    } else {
+        card
+    }
 }
+
+fn maybe_seal_anim(ui: &Ui, el: El) -> El {
+    if runtime::spawn_disabled() || ui.reduced_motion() {
+        return el;
+    }
+    use remedy_ui::view::motion::{Easing, Motion, Target};
+    el.set_animated(Target::Opacity(0.0));
+    el.animate(
+        Target::Opacity(1.0),
+        Motion::Tween {
+            duration: ui.theme().motion.quick,
+            easing: Easing::EASE_IN_OUT,
+        },
+    );
+    el
+}
+
 
 fn saved_turn(ui: &Ui, studio: Studio, msg: &ChatMessage, name: &str) -> El {
     let user = msg.role == "user";
@@ -411,42 +623,47 @@ fn saved_turn(ui: &Ui, studio: Studio, msg: &ChatMessage, name: &str) -> El {
     let assistant = msg.role == "assistant";
     let beats = mid_turn_beats(msg);
     let show_body = !msg.content.trim().is_empty();
-    let show_meta = assistant
-        && work::visible(
-            &work::summarize(&msg.steps),
-            !msg.thinking.trim().is_empty(),
-        );
-    let unit = ui.theme().spacing.unit;
-    let bubble_gap = if beats.is_empty() { 4.0 } else { unit * 3.0 };
-    let _ = show_meta;
-    let mut col = w::column(ui)
-        .gap(bubble_gap)
-        .layout(|l| l.width = Length::Percent(1.0));
+    let mut cards = w::column(ui)
+        .gap(8.0)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        });
     for beat in &beats {
-        col = col.child(sealed_bubble(ui, studio.clone(), beat, name));
+        cards = cards.child(sealed_card(ui, studio.clone(), beat, false));
     }
     if show_body {
         let body = depth::blocks(ui, &msg.content, assistant, {
             let st = studio.clone();
             move |src| st.depth.show_image(src)
         });
-        col = col.child(message_row(ui, body, user, system, name));
+        cards = cards.child(bubble_card(ui, body, user, system));
     }
-    if assistant && (show_body || !beats.is_empty()) {
-        col = col.child(reactions(ui, studio, msg.id.clone()));
+    let (trailing, extras) = if assistant && (show_body || !beats.is_empty()) {
+        reaction_bar(ui, studio.clone(), msg.id.clone())
     } else if user {
-        col = col.child(agent_reaction(ui, studio, msg.id.clone()));
-    }
-    col
+        (Some(agent_reaction(ui, studio.clone(), msg.id.clone())), None)
+    } else {
+        (None, None)
+    };
+    speaker_cluster(
+        ui,
+        name,
+        user,
+        msg.created_at.as_deref(),
+        studio.now(),
+        cards,
+        trailing,
+        extras,
+    )
 }
 
 fn live_turn(ui: &Ui, studio: Studio) -> El {
-    let unit = ui.theme().spacing.unit;
     let beats: Signal<Vec<(usize, String)>> = Signal::new(Vec::new());
     let beats_out = beats.clone();
     let st_beats = studio.clone();
     let sealed = w::column(ui)
-        .gap(unit * 3.0)
+        .gap(8.0)
         .layout(|l| l.width = Length::Percent(1.0));
     let _ = sealed.clone().bind(move || {
         let next: Vec<(usize, String)> =
@@ -464,65 +681,67 @@ fn live_turn(ui: &Ui, studio: Studio) -> El {
         &sealed,
         beats,
         |b| format!("{}:{}", b.0, b.1),
-        move |(_i, beat)| sealed_bubble(&u_beat, st_beat.clone(), &beat, "Remedy"),
+        move |(_i, beat)| sealed_card(&u_beat, st_beat.clone(), &beat, true),
     );
-    let st_react_when = studio.clone();
-    let u_react = ui.clone();
-    let st_react = studio.clone();
-    let sealed = sealed.child(
-        show(
-            ui,
-            move || {
-                let has_beats = !work::narration_beats(
-                    &st_react_when.partial.get(),
-                    &st_react_when.live_breaks.get(),
-                )
-                .is_empty();
-                has_beats
-                    && st_react_when
-                        .live_message_id
-                        .get()
-                        .is_some_and(|id| !id.is_empty())
-            },
-            move || {
-                let id = st_react.live_message_id.get().unwrap_or_default();
-                reactions(&u_react, st_react.clone(), id)
-            },
-        )
-        .el(),
-    );
+    let react_id = studio
+        .live_message_id
+        .get()
+        .filter(|id| !id.is_empty())
+        .unwrap_or_default();
+    let (trailing, react_ex) = if react_id.is_empty() {
+        (None, None)
+    } else {
+        reaction_bar(ui, studio.clone(), react_id)
+    };
+
     let u = ui.clone();
     let s_card = studio.clone();
     let s_body = studio.clone();
-    w::column(ui)
-        .gap(unit * 3.0)
-        .layout(|l| l.width = Length::Percent(1.0))
-        .child(sealed)
-        .child(
-            show(
-                ui,
-                move || live_shows_bubble(&s_card),
-                move || {
-                    let s = s_body.clone();
-                    let u = u.clone();
-                    message_row(
-                        &u,
-                        live_body(&u, move || {
-                            let reply = work::reply_after(&s.partial.get(), &s.live_breaks.get());
-                            if reply.trim().is_empty() {
-                                "…".to_string()
-                            } else {
-                                reply
-                            }
-                        }),
-                        false,
-                        false,
-                        "Remedy",
-                    )
-                },
+    let live = show(
+        ui,
+        move || live_shows_bubble(&s_card),
+        move || {
+            let s = s_body.clone();
+            let u = u.clone();
+            maybe_seal_anim(
+                &u,
+                bubble_card(
+                    &u,
+                    live_body(&u, move || {
+                        let reply = work::reply_after(&s.partial.get(), &s.live_breaks.get());
+                        if reply.trim().is_empty() {
+                            "…".to_string()
+                        } else {
+                            reply
+                        }
+                    }),
+                    false,
+                    false,
+                ),
             )
-            .el(),
-        )
+        },
+    )
+    .el();
+
+    let mut cards = w::column(ui)
+        .gap(8.0)
+        .layout(|l| l.width = Length::Percent(1.0))
+        .child(sealed);
+    if let Some(bar) = trailing {
+        cards = cards.child(bar);
+    }
+    let cards = cards.child(live);
+
+    speaker_cluster(
+        ui,
+        "Remedy",
+        false,
+        None,
+        studio.now(),
+        cards,
+        None,
+        react_ex,
+    )
 }
 
 fn live_shows_bubble(studio: &Studio) -> bool {
@@ -575,11 +794,9 @@ fn work_meta_row(
         })
         .nowrap()
         .style(
-            StylePatch::new()
+            tokens::typo(tokens::MONO)
                 .foreground(colors.text)
-                .text_size(11.0)
-                .weight(600.0)
-                .mono(true),
+                .weight(600.0),
         );
     let steps_n = steps.clone();
     let u_steps = ui.clone();
@@ -695,77 +912,7 @@ fn count_chip(
             format!("· {n} {}", messages().text(&u, key))
         })
         .nowrap()
-        .style(
-            StylePatch::new()
-                .foreground(color)
-                .text_size(11.0)
-                .weight(500.0)
-                .mono(true),
-        )
-}
-
-fn message_row(ui: &Ui, body: El, user: bool, system: bool, name: &str) -> El {
-    let unit = ui.theme().spacing.unit;
-    let colors = ui.theme().colors.clone();
-    let (bg, fg, border) = if user {
-        (colors.accent, colors.on_accent, colors.accent)
-    } else if system {
-        (
-            colors.card,
-            colors.danger,
-            colors
-                .danger
-                .mix_oklab(colors.line.unwrap_or(colors.muted), 0.4),
-        )
-    } else {
-        (
-            colors.card,
-            colors.text,
-            colors
-                .line
-                .unwrap_or(colors.muted.mix_oklab(colors.card, 0.4)),
-        )
-    };
-    let radius = ui.theme().radii.large;
-    let bubble = w::column(ui)
-        .gap(unit)
-        .padding(Insets {
-            top: unit * 2.0,
-            end: unit * 3.0,
-            bottom: unit * 2.0,
-            start: unit * 3.0,
-        })
-        .layout(|l| {
-            l.max_width = Length::Px(640.0);
-            l.shrink = 1.0;
-        })
-        .style(
-            StylePatch::new()
-                .background(bg)
-                .foreground(fg)
-                .radius(radius)
-                .border(border)
-                .border_width(1.0),
-        )
-        .child(body);
-    let avatar_color = if user { colors.accent } else { colors.card };
-    let avatar_name = if user { name } else { "Remedy" };
-    let row = w::row(ui)
-        .align(Align::End)
-        .gap(unit)
-        .layout(|l| l.width = Length::Percent(1.0));
-    if user {
-        row.justify(Justify::End).child(bubble).child(w::avatar(
-            ui,
-            avatar_name,
-            28.0,
-            avatar_color,
-        ))
-    } else {
-        row.justify(Justify::Start)
-            .child(w::avatar(ui, avatar_name, 28.0, avatar_color))
-            .child(bubble)
-    }
+        .style(tokens::typo(tokens::MONO).foreground(color))
 }
 
 fn live_body(ui: &Ui, text: impl Fn() -> String + 'static) -> El {
@@ -810,34 +957,69 @@ fn reaction_is_on(studio: &Studio, id: &str, emoji: &str) -> bool {
     studio.live_message_id.get().as_deref() == Some(id) && studio.live_user_reaction.get() == emoji
 }
 
-fn reactions(ui: &Ui, studio: Studio, id: String) -> El {
-    let mut row = w::row(ui).gap(4.0).align(Align::Center);
+fn reaction_bar(ui: &Ui, studio: Studio, id: String) -> (Option<El>, Option<(El, f32)>) {
+    let colors = ui.theme().colors.clone();
+    let mut extras = w::row(ui).gap(2.0).align(Align::Center);
+    let mut selected: Option<El> = None;
+    let mut extra_count = 0;
     for (emoji, _) in logic::REACTIONS {
         let emoji = (*emoji).to_string();
         let st_press = studio.clone();
         let id_press = id.clone();
         let em_press = emoji.clone();
-        let accent = ui.theme().colors.accent;
-        let muted = ui.theme().colors.muted;
+        let accent = colors.accent;
+        let muted = colors.muted;
         let st_style = studio.clone();
         let id_style = id.clone();
         let em_style = emoji.clone();
         let em_name = emoji.clone();
-        row = row.child(
-            w::button(ui, emoji, move || react(&st_press, &id_press, &em_press))
-                .variant("quiet")
-                .style(move || {
-                    let on = reaction_is_on(&st_style, &id_style, &em_style);
-                    StylePatch::new().foreground(if on { accent } else { muted })
-                })
-                .semantics(move || {
-                    Semantics::new(Role::Button)
-                        .label(reaction_label(&em_name).to_string())
-                        .action(Action::Click)
-                }),
-        );
+        let on = reaction_is_on(&studio, &id, &emoji);
+        let btn = w::button(ui, emoji, move || react(&st_press, &id_press, &em_press))
+            .variant("quiet")
+            .style(move || {
+                let on = reaction_is_on(&st_style, &id_style, &em_style);
+                let mut p = tokens::typo(tokens::BODY).foreground(if on { accent } else { muted });
+                if on {
+                    p = p
+                        .background(accent.with_alpha(0.14))
+                        .radius(8.0)
+                        .padding(Insets {
+                            top: 2.0,
+                            end: 6.0,
+                            bottom: 2.0,
+                            start: 6.0,
+                        });
+                }
+                p
+            })
+            .semantics(move || {
+                Semantics::new(Role::Button)
+                    .label(reaction_label(&em_name).to_string())
+                    .action(Action::Click)
+            });
+        if on && selected.is_none() {
+            selected = Some(btn);
+        } else {
+            extras = extras.child(btn);
+            extra_count += 1;
+        }
     }
-    row
+    let extras_width = 32.0 * extra_count as f32;
+    let extras_el = extras;
+    let mut row = w::row(ui)
+        .gap(4.0)
+        .align(Align::Center)
+        .padding(Insets {
+            top: 2.0,
+            end: 0.0,
+            bottom: 0.0,
+            start: 0.0,
+        });
+    if let Some(chip) = selected {
+        row = row.child(chip);
+    }
+    row = row.child(extras_el.clone());
+    (Some(row), Some((extras_el, extras_width)))
 }
 
 fn agent_reaction(ui: &Ui, studio: Studio, id: String) -> El {

@@ -9,6 +9,7 @@ use crate::depth::{
 };
 use crate::studio::{Filter, Project, Session, Studio};
 use crate::time;
+use crate::tokens;
 use crate::{Glyph, ROW_ACTIONS, ROW_GLYPH, ROW_TOOL, SELECT_MARK, messages, tool_button_sized};
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
@@ -748,9 +749,9 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
         .align(Align::Center)
         .gap(unit)
         .padding(Insets {
-            top: unit * 1.5,
-            end: unit,
-            bottom: unit * 1.5,
+            top: 8.0,
+            end: 8.0,
+            bottom: 8.0,
             start: 0.0,
         })
         .layout(|l| {
@@ -763,14 +764,19 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
         .style({
             let st = studio.clone();
             let sid = id.clone();
+            let colors = colors.clone();
             move || {
                 let selected = st.active.get().as_deref() == Some(sid.as_str());
-                let fill = if selected {
-                    colors.card.mix_oklab(colors.accent, 0.12)
+                let mut p = StylePatch::new().radius(radius);
+                if selected {
+                    p = p
+                        .background(tokens::selected_fill(&colors))
+                        .border(colors.accent.with_alpha(0.35))
+                        .border_width(1.0);
                 } else {
-                    colors.panel.with_alpha(0.0)
-                };
-                StylePatch::new().background(fill).radius(radius)
+                    p = p.background(colors.panel.with_alpha(0.0));
+                }
+                p
             }
         })
         .on_click(move || studio_sel.select(&sid))
@@ -785,6 +791,7 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
                 .style({
                     let st = studio.clone();
                     let sid = id.clone();
+                    let colors = colors.clone();
                     move || {
                         let selected = st.active.get().as_deref() == Some(sid.as_str());
                         let mark = if selected {
@@ -879,10 +886,13 @@ fn session_title(ui: &Ui, studio: &Studio, id: &str, title: &str) -> El {
         move || rename_field(&u_edit, &st_edit, &id_edit, &seed),
     )
     .fallback(move || {
-        w::text(&u_show, shown.clone()).nowrap().layout(|l| {
-            l.width = Length::Percent(1.0);
-            l.min_width = Length::Px(0.0);
-        })
+        w::text(&u_show, shown.clone())
+            .nowrap()
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            })
+            .style(tokens::typo(tokens::BODY).weight(550.0).text_size(13.5))
     })
     .el()
 }
@@ -931,10 +941,16 @@ fn session_sub(ui: &Ui, studio: &Studio, id: &str, count: u32, age: Option<Strin
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
         })
-        .child(w::text(ui, line).variant("muted").nowrap().layout(|l| {
-            l.shrink = 1.0;
-            l.min_width = Length::Px(0.0);
-        }))
+        .child(
+            w::text(ui, line)
+                .variant("muted")
+                .nowrap()
+                .layout(|l| {
+                    l.shrink = 1.0;
+                    l.min_width = Length::Px(0.0);
+                })
+                .style(tokens::typo(tokens::META).foreground(ui.theme().colors.muted)),
+        )
         .child(
             show(
                 ui,

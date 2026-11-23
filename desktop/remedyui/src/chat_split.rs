@@ -18,7 +18,7 @@ use remedy_ui::core::Insets;
 use remedy_ui::input::{Buttons, Key, PointerPhase};
 use remedy_ui::layout::{Align, Justify, Length};
 use remedy_ui::reactive::Signal;
-use remedy_ui::style::{BorderEdge, BorderSide, LetterSpacing, StylePatch, TextTransform};
+use remedy_ui::style::{BorderEdge, BorderSide, StylePatch};
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui, show};
 
@@ -26,6 +26,7 @@ use crate::depth::TodoItem;
 use crate::runtime::{self, spawn_disabled};
 use crate::studio::{ChatMessage, Studio};
 use crate::work::{StepStatus, WorkStep};
+use crate::tokens;
 use crate::{messages, say};
 
 /// Matches `--chat-bubble-radius: 0.85rem` in the current app (at 16px).
@@ -330,7 +331,6 @@ fn pane_shell(
     is_actions: bool,
 ) -> El {
     let colors = ui.theme().colors.clone();
-    let line = colors.line.unwrap_or(colors.muted);
     let visible = {
         let n = narrow.clone();
         let m = mobile;
@@ -356,8 +356,8 @@ fn pane_shell(
         };
         pane.style(
             StylePatch::new()
-                .background(colors.panel.mix_oklab(colors.bg, 0.18))
-                .border(line.with_alpha(0.5))
+                .background(tokens::pane_fill(&colors))
+                .border(tokens::hairline(&colors))
                 .border_width(1.0)
                 .radius(PANE_RADIUS),
         )
@@ -482,28 +482,21 @@ fn pane_head(
         .child(
             say(ui, kicker, "strong")
                 .layout(|l| l.width = Length::Percent(1.0))
-                .style(
-                    StylePatch::new()
-                        .text_size(10.0)
-                        .weight(650.0)
-                        .letter_spacing(LetterSpacing::Em(0.08))
-                        .text_transform(TextTransform::Upper)
-                        .foreground(colors.muted),
-                ),
+                .style(tokens::section_kicker(&colors)),
         )
         .child(
             say(ui, sub, "muted")
                 .layout(|l| l.width = Length::Percent(1.0))
-                .style(StylePatch::new().text_size(11.5).foreground(colors.muted)),
+                .style(tokens::typo(tokens::META).foreground(colors.muted)),
         );
     let mut row = w::row(ui)
         .align(Align::Center)
         .gap(unit)
         .padding(Insets {
-            top: unit * 1.6,
-            end: unit * 2.0,
-            bottom: unit * 1.6,
-            start: unit * 2.2,
+            top: 10.0,
+            end: tokens::GUTTER,
+            bottom: 10.0,
+            start: tokens::GUTTER,
         })
         .layout(|l| {
             l.width = Length::Percent(1.0);
@@ -529,11 +522,7 @@ fn pane_head(
                         })
                         .nowrap()
                         .style(
-                            StylePatch::new()
-                                .text_size(10.5)
-                                .weight(650.0)
-                                .letter_spacing(LetterSpacing::Em(0.06))
-                                .text_transform(TextTransform::Upper)
+                            tokens::section_kicker(&u.theme().colors)
                                 .foreground(u.theme().colors.accent),
                         )
                 },
@@ -722,10 +711,10 @@ fn actions_feed(ui: &Ui, studio: Studio) -> El {
     let col = w::column(ui)
         .gap(unit * 3.0)
         .padding(Insets {
-            top: unit * 2.0,
-            end: unit * 2.2,
-            bottom: unit * 2.4,
-            start: unit * 2.2,
+            top: 12.0,
+            end: tokens::GUTTER,
+            bottom: tokens::GUTTER,
+            start: tokens::GUTTER,
         })
         .layout(|l| l.width = Length::Percent(1.0));
     let _ = col.clone().bind(move || {
@@ -734,13 +723,15 @@ fn actions_feed(ui: &Ui, studio: Studio) -> El {
             out.set(next);
         }
     });
+    let collapsed: Signal<Vec<String>> = Signal::new(Vec::new());
     let u = ui.clone();
     let st_rows = studio;
+    let col_state = collapsed;
     let col = w::for_each(
         &col,
         turns,
         |t| t.id.clone(),
-        move |t| action_turn(&u, st_rows.clone(), t.clone()),
+        move |t| action_turn(&u, st_rows.clone(), t.clone(), col_state.clone()),
     );
     w::scroll(ui)
         .layout(|l| {
@@ -802,14 +793,14 @@ fn skip_idle(m: &ChatMessage) -> bool {
     m.thinking.trim().is_empty() && m.steps.is_empty()
 }
 
-fn action_turn(ui: &Ui, studio: Studio, turn: ActionTurn) -> El {
+fn action_turn(ui: &Ui, studio: Studio, turn: ActionTurn, collapsed: Signal<Vec<String>>) -> El {
     let unit = ui.theme().spacing.unit;
     let thinking = turn.thinking.clone();
     let steps = turn.steps.clone();
     let todos = turn.todos.clone();
     let live = turn.live;
     let mut col = w::column(ui)
-        .gap(unit * 1.5)
+        .gap(unit * 2.0)
         .layout(|l| l.width = Length::Percent(1.0))
         .child(crate::chat::work_meta(
             ui,
@@ -823,8 +814,8 @@ fn action_turn(ui: &Ui, studio: Studio, turn: ActionTurn) -> El {
             },
             live,
         ));
-    for para in thinking_chunks(&thinking) {
-        col = col.child(thinking_para(ui, &para));
+    if !thinking.trim().is_empty() {
+        col = col.child(thinking_block(ui, &turn.id, &thinking, collapsed));
     }
     if !steps.is_empty() {
         col = col.child(tools_block(ui, &steps));
@@ -834,6 +825,69 @@ fn action_turn(ui: &Ui, studio: Studio, turn: ActionTurn) -> El {
     }
     let _ = studio;
     col
+}
+
+fn thinking_block(ui: &Ui, id: &str, thinking: &str, collapsed: Signal<Vec<String>>) -> El {
+    let colors = ui.theme().colors.clone();
+    let chunks = thinking_chunks(thinking);
+    let open = {
+        let collapsed = collapsed.clone();
+        let id = id.to_string();
+        move || !collapsed.get().iter().any(|x| x == &id)
+    };
+    let toggle = {
+        let collapsed = collapsed.clone();
+        let id = id.to_string();
+        move || {
+            let mut next = collapsed.get();
+            if let Some(i) = next.iter().position(|x| x == &id) {
+                next.remove(i);
+            } else {
+                next.push(id.clone());
+            }
+            collapsed.set(next);
+        }
+    };
+    let chevron = {
+        let open = open.clone();
+        move || if open() { "▾".to_string() } else { "▸".to_string() }
+    };
+    let u = ui.clone();
+    let header = w::row(ui)
+        .align(Align::Center)
+        .gap(8.0)
+        .layout(|l| l.width = Length::Percent(1.0))
+        .on_click(toggle)
+        .semantics({
+            let u = u.clone();
+            move || {
+                Semantics::new(Role::Button)
+                    .label(messages().text(&u, "chat-split-thinking"))
+                    .action(remedy_ui::a11y::Action::Click)
+            }
+        })
+        .child(
+            w::text(ui, "")
+                .text(chevron)
+                .style(tokens::typo(tokens::META).foreground(colors.muted)),
+        )
+        .child(say(ui, "chat-split-thinking", "muted").style(tokens::section_kicker(&colors)));
+    let u_body = ui.clone();
+    let body = show(ui, open, move || {
+        let mut paras = w::column(&u_body)
+            .gap(tokens::SPACE)
+            .layout(|l| l.width = Length::Percent(1.0));
+        for para in &chunks {
+            paras = paras.child(thinking_para(&u_body, para));
+        }
+        paras
+    })
+    .el();
+    w::column(ui)
+        .gap(tokens::SPACE)
+        .layout(|l| l.width = Length::Percent(1.0))
+        .child(header)
+        .child(body)
 }
 
 /// Thinking arrives as one buffer; blank lines become readable paragraphs.
@@ -868,12 +922,7 @@ fn thinking_para(ui: &Ui, text: &str) -> El {
         .child(
             w::text(ui, text)
                 .layout(|l| l.width = Length::Percent(1.0))
-                .style(
-                    StylePatch::new()
-                        .foreground(ink)
-                        .text_size(13.5)
-                        .weight(450.0),
-                ),
+                .style(tokens::typo(tokens::THINKING).foreground(ink)),
         )
 }
 
@@ -892,16 +941,22 @@ fn tool_row(ui: &Ui, step: &WorkStep) -> El {
     let colors = ui.theme().colors.clone();
     let (mark, mark_color) = match step.status {
         StepStatus::Running => ("◌", colors.accent),
-        StepStatus::Done => ("✓", colors.accent),
+        StepStatus::Done => ("✓", colors.ok),
         StepStatus::Error => ("✕", colors.danger),
     };
     let name = short_tool(&step.name);
+    let detail = step.detail.clone();
+    let mut label = format!("{mark} {name}");
+    if let Some(d) = &detail {
+        label.push(' ');
+        label.push_str(d);
+    }
     let mut row = w::row(ui)
         .align(Align::Center)
         .gap(8.0)
         .layout(|l| l.width = Length::Percent(1.0))
         .semantics({
-            let label = format!("{mark} {name}");
+            let label = label.clone();
             let err = step.error.clone();
             move || {
                 let mut s = label.clone();
@@ -916,22 +971,29 @@ fn tool_row(ui: &Ui, step: &WorkStep) -> El {
         })
         .child(
             w::text(ui, mark).style(
-                StylePatch::new()
+                tokens::typo(tokens::MONO)
                     .foreground(mark_color)
-                    .text_size(12.0)
-                    .weight(650.0)
-                    .mono(true),
+                    .weight(650.0),
             ),
         )
         .child(
             w::text(ui, &name).style(
-                StylePatch::new()
+                tokens::typo(tokens::MONO)
                     .foreground(colors.text)
-                    .text_size(12.0)
-                    .weight(550.0)
-                    .mono(true),
+                    .weight(600.0),
             ),
         );
+    if let Some(detail) = detail.as_deref().filter(|s| !s.is_empty()) {
+        row = row.child(
+            w::text(ui, detail)
+                .layout(|l| {
+                    l.grow = 1.0;
+                    l.shrink = 1.0;
+                    l.min_width = Length::Px(0.0);
+                })
+                .style(tokens::typo(tokens::MONO).foreground(colors.muted)),
+        );
+    }
     if let Some(err) = step.error.as_deref().filter(|s| !s.is_empty()) {
         row = row.child(
             w::text(ui, err)
@@ -940,7 +1002,7 @@ fn tool_row(ui: &Ui, step: &WorkStep) -> El {
                     l.shrink = 1.0;
                     l.min_width = Length::Px(0.0);
                 })
-                .style(StylePatch::new().foreground(colors.danger).text_size(11.5)),
+                .style(tokens::typo(tokens::META).foreground(colors.danger)),
         );
     }
     row
@@ -959,18 +1021,22 @@ fn build_block(ui: &Ui, todos: &[TodoItem]) -> El {
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
     let mut col = w::column(ui)
-        .gap(unit * 0.7)
+        .gap(unit)
+        .padding(Insets {
+            top: 10.0,
+            end: 12.0,
+            bottom: 10.0,
+            start: 12.0,
+        })
         .layout(|l| l.width = Length::Percent(1.0))
-        .child(
-            say(ui, "chat-split-build", "strong").style(
-                StylePatch::new()
-                    .text_size(10.0)
-                    .weight(650.0)
-                    .letter_spacing(LetterSpacing::Em(0.08))
-                    .text_transform(TextTransform::Upper)
-                    .foreground(colors.muted),
-            ),
-        );
+        .style(
+            StylePatch::new()
+                .background(tokens::surface_overlay(&colors).mix_oklab(colors.bg, 0.12))
+                .border(tokens::hairline(&colors))
+                .border_width(1.0)
+                .radius(ui.theme().radii.medium),
+        )
+        .child(say(ui, "chat-split-build", "strong").style(tokens::section_kicker(&colors)));
     for t in todos {
         col = col.child(todo_row(ui, t));
     }
@@ -996,11 +1062,9 @@ fn todo_row(ui: &Ui, item: &TodoItem) -> El {
         })
         .child(
             w::text(ui, mark).style(
-                StylePatch::new()
+                tokens::typo(tokens::MONO)
                     .foreground(color)
-                    .text_size(12.0)
-                    .weight(650.0)
-                    .mono(true),
+                    .weight(650.0),
             ),
         )
         .child(
@@ -1010,7 +1074,7 @@ fn todo_row(ui: &Ui, item: &TodoItem) -> El {
                     l.shrink = 1.0;
                     l.min_width = Length::Px(0.0);
                 })
-                .style(StylePatch::new().foreground(colors.text).text_size(13.0)),
+                .style(tokens::typo(tokens::BODY).foreground(colors.text).text_size(13.5)),
         )
 }
 
