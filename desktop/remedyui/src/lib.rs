@@ -44,7 +44,7 @@ mod work;
 pub use diagnostics::DiagnosticsPanel;
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
 pub use help::HelpPanel;
-pub use runtime::Client;
+pub use runtime::{Client, install_panic_hook};
 pub use settings::{
     preview_appearance, preview_connect, preview_error, preview_general, preview_models,
 };
@@ -76,6 +76,7 @@ pub(crate) const SELECT_MARK: f32 = 3.0;
 
 /// Opens the window and puts the app in the tray.
 pub fn app(app: &App) {
+    install_panic_hook();
     settings::bind_host(app);
     app.keep_running(true);
     update::spawn_startup_check(app);

@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    remedy_desktop::install_panic_hook();
     let config = remedy_ui::AppConfig::new("Remedy Desktop")
         .edition(remedy_ui::Edition::E2026)
         .app_id("com.remedy.desktop")

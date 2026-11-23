@@ -201,6 +201,58 @@ fn log_desktop(msg: &str) {
     }
 }
 
+/// Writes panics (thread, message, backtrace) to `desktop.log` as well as
+/// stderr. The 1.0.0 Windows build aborted on a background-thread panic
+/// with nothing in the log, because the binary is a Windows subsystem app.
+pub fn install_panic_hook() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let thread = std::thread::current();
+            let name = thread.name().unwrap_or("unnamed");
+            let id = thread.id();
+            let loc = info
+                .location()
+                .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+                .unwrap_or_else(|| "unknown".into());
+            let payload = panic_payload(info);
+            let backtrace = std::backtrace::Backtrace::force_capture();
+            log_desktop(&format_panic(
+                name,
+                &format!("{id:?}"),
+                &loc,
+                &payload,
+                &backtrace.to_string(),
+            ));
+            previous(info);
+        }));
+    });
+}
+
+fn panic_payload(info: &std::panic::PanicHookInfo<'_>) -> String {
+    if let Some(s) = info.payload().downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = info.payload().downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "Box<dyn Any>".into()
+    }
+}
+
+pub(crate) fn format_panic(
+    thread: &str,
+    thread_id: &str,
+    location: &str,
+    payload: &str,
+    backtrace: &str,
+) -> String {
+    format!(
+        "PANIC thread={thread} id={thread_id} at {location}: {payload}\n{backtrace}"
+    )
+}
+
 fn file_name_starts(p: &Path, prefix: &str) -> bool {
     p.file_name()
         .and_then(|n| n.to_str())
@@ -855,5 +907,20 @@ mod tests {
             "splash must reach a connected state when the backend answers /api/ping"
         );
         let _ = server.join();
+    }
+
+    #[test]
+    fn panic_log_line_names_the_thread_and_the_message() {
+        let line = super::format_panic(
+            "remedy-approvals",
+            "ThreadId(1)",
+            "src/studio.rs:659:25",
+            "the signal belongs to another thread's runtime; post a closure with a Waker to reach it",
+            "stack backtrace:\n   0: rust_begin_unwind",
+        );
+        assert!(line.starts_with("PANIC thread=remedy-approvals"), "{line}");
+        assert!(line.contains("src/studio.rs:659:25"), "{line}");
+        assert!(line.contains("the signal belongs to another thread's runtime"), "{line}");
+        assert!(line.contains("stack backtrace:"), "{line}");
     }
 }
