@@ -1113,6 +1113,16 @@ pub fn preview_frame(ui: &Ui, overlay: Overlay, menu: bool) -> El {
     })
 }
 
+thread_local! {
+    static DOCK_IN_HOST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// True while the window chrome owns the status dock, so Grove/Studio shells
+/// do not paint a second copy (and the dock cannot be clipped by their caps).
+pub fn dock_in_host() -> bool {
+    DOCK_IN_HOST.with(|c| c.get())
+}
+
 /// Title bar, overlays, and shortcuts around `body` (Grove, or a fixed Studio shell).
 pub fn hosted(
     ui: &Ui,
@@ -1127,6 +1137,7 @@ pub fn hosted(
         ui,
         move |err, retry| crate::panels::crash(&u_err, err, retry, chrome),
         move || {
+            DOCK_IN_HOST.with(|c| c.set(true));
             let body = body(&u_build);
             build_hosted(&u_build, studio.clone(), chrome, body)
         },
@@ -1135,19 +1146,38 @@ pub fn hosted(
 
 fn build_hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: El) -> El {
     fonts::prepare_theme(ui, &Fonts::load());
+    DOCK_IN_HOST.with(|c| c.set(true));
     let shell = w::column(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.height = Length::Percent(1.0);
         })
         .child(titlebar::bar(ui, &studio, chrome))
-        .child(body.layout(|l| {
-            l.grow = 1.0;
-            l.shrink = 1.0;
-            l.basis = Length::Px(0.0);
-            l.height = Length::Percent(1.0);
-            l.max_height = Length::Percent(1.0);
-            l.min_height = Length::Px(0.0);
+        .child({
+            let body = body.layout(|l| {
+                l.grow = 1.0;
+                l.shrink = 1.0;
+                l.basis = Length::Px(0.0);
+                l.min_height = Length::Px(0.0);
+            });
+            let cap = body.clone();
+            let cap_ui = ui.clone();
+            body.bind(move || {
+                // Title bar (36) + status dock (~44). Leave the rest for Grove/Studio.
+                let h = (cap_ui.window_size().height - 36.0 - 44.0).max(160.0);
+                let _ = cap.clone().layout(|l| {
+                    l.height = Length::Px(h);
+                    l.max_height = Length::Px(h);
+                    l.min_height = Length::Px(0.0);
+                    l.grow = 1.0;
+                    l.shrink = 1.0;
+                    l.basis = Length::Px(0.0);
+                    l.width = Length::Percent(1.0);
+                });
+            })
+        })
+        .child(crate::status::status_bar(ui, studio.clone(), || {
+            crate::settings::toggle()
         }));
     let overlays = overlay_slot(ui, studio.clone(), chrome);
     let toast = toast_layer(ui, chrome);
@@ -1185,7 +1215,8 @@ fn build_hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: El) -> El {
         .child(overlays)
         .child(toast)
         .child(diag_host)
-        .child(help_host);
+        .child(help_host)
+        .on_removed(|| DOCK_IN_HOST.with(|c| c.set(false)));
 
     let root_ui = ui.clone();
     let root_studio = studio.clone();

@@ -411,6 +411,10 @@ fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.height = Length::Percent(1.0);
+            l.grow = 1.0;
+            l.shrink = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
         })
         .child(
             w::row(ui)
@@ -434,10 +438,19 @@ fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
                     studio.clone(),
                 )),
         )
-        .child(w::divider(ui, false))
-        .child(status::status_bar(ui, studio, move || {
-            status_toggle.toggle_settings()
-        }))
+        .child(if crate::chrome::dock_in_host() {
+            ui.el("status-hosted").layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.height = Length::Px(0.0);
+            })
+        } else {
+            w::column(ui)
+                .layout(|l| l.width = Length::Percent(1.0))
+                .child(w::divider(ui, false))
+                .child(status::status_bar(ui, studio, move || {
+                    status_toggle.toggle_settings()
+                }))
+        })
         .child(rails::hosts(ui, chrome))
         .on_key_capture(move |ev| settings::shell_chord(panel, ev))
         .on_key(move |ev| settings::shell_escape(panel, ev))
