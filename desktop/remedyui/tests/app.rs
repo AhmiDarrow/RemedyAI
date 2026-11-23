@@ -222,6 +222,37 @@ fn settings_previews_match_their_golden_images() {
     assert_settings_goldens("settings-error", remedy_desktop::preview_error);
 }
 
+#[test]
+fn help_preview_shows_the_manual() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::help_home);
+    app.frames(3);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("Owner's Manual") || n.contains("Help")),
+        "help dialog: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Close help")),
+        "close control: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Overview")),
+        "overview chapter: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Search help")),
+        "search field: {names:?}"
+    );
+}
+
+/// Forest, light, and a colorblind palette. The manual is a new surface, so
+/// these PNGs are the intended baseline. A missing file is written, not a failure.
+#[test]
+fn help_preview_matches_its_golden_image() {
+    assert_settings_goldens("help", remedy_desktop::help_home);
+}
+
 /// Forest, a light theme, and a colorblind palette. A missing PNG is written and is not a failure.
 #[test]
 fn usage_previews_match_their_golden_images() {

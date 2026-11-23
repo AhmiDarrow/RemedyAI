@@ -8,6 +8,7 @@ mod chat;
 mod diagnostics;
 mod fonts;
 mod grove;
+mod help;
 mod layout;
 mod logo;
 mod rails;
@@ -24,6 +25,7 @@ mod work;
 
 pub use diagnostics::DiagnosticsPanel;
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
+pub use help::HelpPanel;
 pub use runtime::Client;
 pub use settings::{preview_appearance, preview_connect, preview_error, preview_general, preview_models};
 pub use slides::{
@@ -142,6 +144,12 @@ pub fn diagnostics_preview(ui: &Ui) -> El {
 /// Morning Grove with example plots, for goldens. It does not touch disk or the network.
 pub fn grove_home(ui: &Ui) -> El {
     grove::preview_home(ui)
+}
+
+/// Owner's manual, open on the overview. RA-chrome mounts [`HelpPanel::view`]
+/// inside the shell; this entry is the panel on its own for a golden.
+pub fn help_home(ui: &Ui) -> El {
+    HelpPanel::preview().view(ui)
 }
 
 /// Filled usage tab, for goldens. No runtime calls.
