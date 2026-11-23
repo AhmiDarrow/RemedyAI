@@ -101,6 +101,7 @@ chat-split-tabs = 对话或操作
 chat-split-tab-actions = 操作
 chat-split-tab-chat = 对话
 chat-split-working = 进行中
+chat-split-thinking = 思考
 chat-split-build = BUILD
 chat-split-side-left = 操作栏在左
 chat-split-side-right = 操作栏在右
