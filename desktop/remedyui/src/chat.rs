@@ -76,7 +76,8 @@ fn header(ui: &Ui, studio: Studio) -> El {
                         None => messages().text(&u_title, "no-session"),
                     }
                 })
-                .nowrap()
+                .truncate()
+                .layout(|l| l.min_width = Length::Px(0.0))
                 .style(tokens::typo(tokens::TITLE).foreground(colors.text)),
         )
         .child(
@@ -110,7 +111,8 @@ fn header(ui: &Ui, studio: Studio) -> El {
                     }
                     sub
                 })
-                .nowrap()
+                .truncate()
+                .layout(|l| l.min_width = Length::Px(0.0))
                 .style(tokens::typo(tokens::META).foreground(colors.muted)),
         );
 
@@ -172,11 +174,7 @@ fn header(ui: &Ui, studio: Studio) -> El {
                         )
                         .child(
                             w::text(&u, "Live")
-                                .style(
-                                    tokens::typo(tokens::META)
-                                        .foreground(accent)
-                                        .weight(620.0),
-                                ),
+                                .style(tokens::typo(tokens::META).foreground(accent).weight(620.0)),
                         )
                 }
             })
@@ -214,9 +212,13 @@ fn header(ui: &Ui, studio: Studio) -> El {
             }),
         );
 
+    let chips = chips.layout(|l| {
+        l.shrink = 0.0;
+    });
     w::row(ui)
         .align(Align::Center)
         .justify(Justify::SpaceBetween)
+        .gap(unit)
         .padding(Insets {
             top: tokens::GUTTER,
             end: tokens::GUTTER,
@@ -225,8 +227,10 @@ fn header(ui: &Ui, studio: Studio) -> El {
         })
         .layout(|l| {
             l.width = Length::Percent(1.0);
-            l.shrink = 0.0;
+            l.min_width = Length::Px(0.0);
+            l.shrink = 1.0;
         })
+        .clip()
         .child(left)
         .child(chips)
 }
@@ -351,6 +355,12 @@ fn empty_well(ui: &Ui, studio: Studio) -> El {
     let title = w::text(ui, "")
         .variant("heading")
         .text(move || messages().text(&u, "ready-named").replace("{name}", &name))
+        .text_align(remedy_ui::style::TextAlign::Center)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.max_width = Length::Px(440.0);
+            l.min_width = Length::Px(0.0);
+        })
         .style(tokens::typo(tokens::TITLE).foreground(colors.text));
     let mut starters = w::row(ui)
         .align(Align::Center)
@@ -424,7 +434,9 @@ fn empty_well(ui: &Ui, studio: Studio) -> El {
                         .layout(|l| {
                             l.max_width = Length::Px(440.0);
                             l.width = Length::Percent(1.0);
+                            l.min_width = Length::Px(0.0);
                         })
+                        .text_align(remedy_ui::style::TextAlign::Center)
                         .style(tokens::typo(tokens::BODY).foreground(colors.muted)),
                 )
                 .child(starters)
@@ -433,7 +445,9 @@ fn empty_well(ui: &Ui, studio: Studio) -> El {
                         .layout(|l| {
                             l.max_width = Length::Px(440.0);
                             l.width = Length::Percent(1.0);
+                            l.min_width = Length::Px(0.0);
                         })
+                        .text_align(remedy_ui::style::TextAlign::Center)
                         .style(tokens::typo(tokens::META).foreground(colors.muted)),
                 ),
         )
@@ -487,9 +501,7 @@ fn day_chip(ui: &Ui, label: &str) -> El {
             let label = label.to_string();
             move || Semantics::new(Role::Label).label(label.clone())
         })
-        .child(
-            w::text(ui, label).style(tokens::section_kicker(&colors)),
-        )
+        .child(w::text(ui, label).style(tokens::section_kicker(&colors)))
 }
 
 fn bubble_card(ui: &Ui, body: El, user: bool, system: bool) -> El {
@@ -503,7 +515,11 @@ fn bubble_card(ui: &Ui, body: El, user: bool, system: bool) -> El {
             colors.danger.mix_oklab(tokens::hairline(&colors), 0.4),
         )
     } else {
-        (tokens::surface_overlay(&colors), colors.text, tokens::hairline(&colors))
+        (
+            tokens::surface_overlay(&colors),
+            colors.text,
+            tokens::hairline(&colors),
+        )
     };
     w::column(ui)
         .gap(tokens::SPACE)
@@ -546,7 +562,9 @@ fn speaker_meta(ui: &Ui, name: &str, created_at: Option<&str>, now: i64, user: b
         .gap(8.0)
         .layout(|l| l.shrink = 1.0);
     let stamp = stamp_text(created_at, now).map(|s| {
-        w::text(ui, s).nowrap().style(tokens::typo(tokens::META).foreground(colors.muted))
+        w::text(ui, s)
+            .nowrap()
+            .style(tokens::typo(tokens::META).foreground(colors.muted))
     });
     if user {
         if let Some(s) = stamp {
@@ -632,19 +650,16 @@ fn maybe_seal_anim(ui: &Ui, el: El) -> El {
     el
 }
 
-
 fn saved_turn(ui: &Ui, studio: Studio, msg: &ChatMessage, name: &str) -> El {
     let user = msg.role == "user";
     let system = msg.role == "system";
     let assistant = msg.role == "assistant";
     let beats = mid_turn_beats(msg);
     let show_body = !msg.content.trim().is_empty();
-    let mut cards = w::column(ui)
-        .gap(8.0)
-        .layout(|l| {
-            l.width = Length::Percent(1.0);
-            l.min_width = Length::Px(0.0);
-        });
+    let mut cards = w::column(ui).gap(8.0).layout(|l| {
+        l.width = Length::Percent(1.0);
+        l.min_width = Length::Px(0.0);
+    });
     for beat in &beats {
         cards = cards.child(sealed_card(ui, studio.clone(), beat, false));
     }
@@ -658,7 +673,10 @@ fn saved_turn(ui: &Ui, studio: Studio, msg: &ChatMessage, name: &str) -> El {
     let (trailing, extras) = if assistant && (show_body || !beats.is_empty()) {
         reaction_bar(ui, studio.clone(), msg.id.clone())
     } else if user {
-        (Some(agent_reaction(ui, studio.clone(), msg.id.clone())), None)
+        (
+            Some(agent_reaction(ui, studio.clone(), msg.id.clone())),
+            None,
+        )
     } else {
         (None, None)
     };
@@ -1025,15 +1043,12 @@ fn reaction_bar(ui: &Ui, studio: Studio, id: String) -> (Option<El>, Option<(El,
     }
     let extras_width = 32.0 * extra_count as f32;
     let extras_el = extras;
-    let mut row = w::row(ui)
-        .gap(4.0)
-        .align(Align::Center)
-        .padding(Insets {
-            top: 2.0,
-            end: 0.0,
-            bottom: 0.0,
-            start: 0.0,
-        });
+    let mut row = w::row(ui).gap(4.0).align(Align::Center).padding(Insets {
+        top: 2.0,
+        end: 0.0,
+        bottom: 0.0,
+        start: 0.0,
+    });
     if let Some(chip) = selected {
         row = row.child(chip);
     }

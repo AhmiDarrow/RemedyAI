@@ -550,6 +550,72 @@ fn opening_memory_and_resizing_does_not_panic() {
 }
 
 #[test]
+fn squeezed_chat_split_stacks_instead_of_overlapping() {
+    // Sessions + Settings at 1180×740 leave the chat well far under 720px.
+    // The split used to keep both panes and paint them on top of each other.
+    fresh_profile();
+    reset_saved_layout();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.frames(2);
+    assert!(
+        app.press(Role::Button, "Studio"),
+        "open the session workspace"
+    );
+    app.frames(2);
+    app.key(KeyEvent::press(Key::char(',')).with_modifiers(Modifiers::CTRL));
+    app.frames(4);
+    let names = accessible_names(&app);
+    assert!(
+        has(&names, "Search all settings")
+            || has(&names, "Settings couldn’t load")
+            || has(&names, "Settings"),
+        "settings rail should stay open: {names:?}"
+    );
+    assert!(
+        has(&names, "Chat or actions") || (has(&names, "Actions") && has(&names, "Chat")),
+        "squeezed well should stack into Actions/Chat tabs, not overlap panes: {names:?}"
+    );
+}
+
+#[test]
+fn settings_fields_stay_inside_a_narrow_window() {
+    fresh_profile();
+    reset_saved_layout();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.frames(2);
+    app.key(KeyEvent::press(Key::char(',')).with_modifiers(Modifiers::CTRL));
+    app.frames(2);
+    let win = app.runner().app().windows().first().cloned();
+    if let Some(win) = win {
+        win.set_size(700.0, 520.0);
+        app.frames(3);
+    }
+    let names = accessible_names(&app);
+    assert!(
+        has(&names, "Search all settings")
+            || has(&names, "Settings couldn’t load")
+            || has(&names, "Settings"),
+        "settings still open at 700px: {names:?}"
+    );
+    let window_w = 700.0;
+    for (role, name) in [
+        (Role::TextInput, "Search all settings"),
+        (Role::TextInput, "Base URL"),
+        (Role::TextInput, "Model"),
+    ] {
+        if let Some(el) = app.find(role, name) {
+            if let Some(bounds) = el.bounds() {
+                assert!(
+                    bounds.max.x <= window_w + 1.0,
+                    "{name} overflows the window: {bounds:?}"
+                );
+                assert!(bounds.min.x >= -1.0, "{name} starts off-screen: {bounds:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn help_about_diagnostics_and_quit_use_the_title_menu() {
     fresh_profile();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
@@ -859,8 +925,10 @@ fn hover(app: &mut TestApp, at: remedy_ui::core::Point) {
     use remedy_ui::host::HostEvent;
     use remedy_ui::input::{PointerEvent, PointerPhase};
     let id = first_window(app);
-    app.host()
-        .send(HostEvent::Pointer(id, PointerEvent::new(PointerPhase::Move, at)));
+    app.host().send(HostEvent::Pointer(
+        id,
+        PointerEvent::new(PointerPhase::Move, at),
+    ));
     app.frames(1);
 }
 
@@ -913,7 +981,10 @@ fn scroll_with_wheel_and_keys(app: &mut TestApp, name: &str) {
         after_page > 1.0 || after_end > 1.0,
         "{name} should move with Page Down or End: page {after_page} end {after_end} (max {max})"
     );
-    assert!(after_home.abs() < 1.0, "{name} Home jumps back to the start: {after_home}");
+    assert!(
+        after_home.abs() < 1.0,
+        "{name} Home jumps back to the start: {after_home}"
+    );
 }
 
 /// Studio's empty well and Grove's left column stay scroll containers, and the
@@ -963,7 +1034,10 @@ fn middle_click_autoscrolls_an_overflowing_home_pane() {
     app.frames(2);
     let feed = region(&app, "Chat messages");
     let max = force_overflow(&mut app, &feed);
-    assert!(max > 1.0, "Chat messages should overflow so autoscroll has room: max {max}");
+    assert!(
+        max > 1.0,
+        "Chat messages should overflow so autoscroll has room: max {max}"
+    );
     let feed = region(&app, "Chat messages");
     let at = mid_of(&feed);
     let before = offset_y(&app, &feed);
@@ -994,7 +1068,9 @@ fn settings_help_and_files_panes_are_scroll_containers() {
     settings.frames(2);
     let names = accessible_names(&settings);
     assert!(
-        names.iter().any(|n| n.contains("General") || n.contains("Appearance") || n.contains("Settings")),
+        names
+            .iter()
+            .any(|n| n.contains("General") || n.contains("Appearance") || n.contains("Settings")),
         "settings preview opened: {names:?}"
     );
 
@@ -1007,7 +1083,6 @@ fn settings_help_and_files_panes_are_scroll_containers() {
         "help is on screen: {names:?}"
     );
 }
-
 
 #[test]
 fn status_dock_shows_the_0_70_5_rail_controls() {
@@ -1034,7 +1109,14 @@ fn status_dock_shows_the_0_70_5_rail_controls() {
     assert!(app.press(Role::Button, "Simple"), "switch to Advanced");
     app.frames(4);
     let names = accessible_names(&app);
-    for label in ["Usage", "Advanced", "Think med", "Ask", "Web UI", "Time travel"] {
+    for label in [
+        "Usage",
+        "Advanced",
+        "Think med",
+        "Ask",
+        "Web UI",
+        "Time travel",
+    ] {
         assert!(
             app.find(Role::Button, label).is_some(),
             "{label} belongs on the Advanced status rail: {names:?}"
