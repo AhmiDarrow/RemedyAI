@@ -69,8 +69,11 @@ def main() -> int:
         r"$LOCALAPPDATA\${PRODUCTNAME}",
         r"Uninstall\${PRODUCTNAME}",
         "!ifndef RUNTIMESRCPATH",
+        "!ifndef CORESRCPATH",
         r'File "/oname=remedy-runtime.exe" "${RUNTIMESRCPATH}"',
+        r'File "/oname=remedy_core.dll" "${CORESRCPATH}"',
         r'Delete "$INSTDIR\remedy-runtime.exe"',
+        r'Delete "$INSTDIR\remedy_core.dll"',
     ):
         need(snippet in nsi, f"installer.nsi missing {snippet}")
     need("/.remedy" not in nsi and "\\.remedy" not in nsi,
@@ -135,9 +138,13 @@ def main() -> int:
     need('--jobs "${JOBS}"' in mac and 'JOBS="${JOBS:-4}"' in mac, "macos jobs default")
     need('"/DHOOKS=' in win, "windows script must pass an absolute hooks path")
     need('"/DRUNTIMESRCPATH=' in win, "windows script must pass the remedy-runtime path")
+    need('"/DCORESRCPATH=' in win, "windows script must pass the remedy_core.dll path")
     need("go build" in win and "remedy-runtime" in win, "windows script must build remedy-runtime")
+    need("zig build" in win and "remedy_core.dll" in win, "windows script must build remedy_core.dll")
     need("go build" in linux and "remedy-runtime" in linux, "linux script must build and pack remedy-runtime")
+    need("libremedy_core.so" in linux and "zig build" in linux, "linux script must pack libremedy_core.so")
     need("go build" in mac and "Contents/MacOS/remedy-runtime" in mac, "macos script must pack remedy-runtime next to the app")
+    need("libremedy_core.dylib" in mac and "zig build" in mac, "macos script must pack libremedy_core.dylib")
     need("-srcfolder \"${STAGE}\"" in mac, "dmg must be built from the stage directory")
     need("Remedy Desktop.app" in mac, "macos tarball name")
     need("3e00" in linux, "linux script must require an x86_64 ELF")
