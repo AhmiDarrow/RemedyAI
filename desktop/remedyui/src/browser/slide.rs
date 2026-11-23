@@ -8,7 +8,7 @@ use std::rc::Rc;
 use remedy_ui::input::Key;
 use remedy_ui::layout::{Align, Justify, Length};
 use remedy_ui::style::{Pad, StylePatch};
-use remedy_ui::webview::{WebViewOptions, web_view};
+use remedy_ui::webview::{WebViewOptions, WebViewStatus, web_view};
 use remedy_ui::widgets as w;
 use remedy_ui::{App, El, Ui, show};
 
@@ -309,7 +309,9 @@ fn host(ui: &Ui, model: &Model) -> El {
         .layout(|l| {
             l.basis = Length::Px(0.0);
             l.min_height = Length::Px(160.0);
+            l.min_width = Length::Px(0.0);
             l.width = Length::Percent(1.0);
+            l.height = Length::Percent(1.0);
         })
         .on_placed(move |placement| {
             if let Some(place) = placement {
@@ -325,7 +327,15 @@ fn host(ui: &Ui, model: &Model) -> El {
     area.child(
         show(ui, move || gate.loaded(), move || embed(&page_ui, &page_model))
             .fallback(move || empty_state(&empty_ui, &empty_model))
-            .el(),
+            .el()
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.height = Length::Percent(1.0);
+                l.grow = 1.0;
+                l.basis = Length::Px(0.0);
+                l.min_width = Length::Px(0.0);
+                l.min_height = Length::Px(0.0);
+            }),
     )
 }
 
@@ -345,11 +355,32 @@ fn embed(ui: &Ui, model: &Model) -> El {
     model.attach_view(view.clone());
     let progress = model.clone();
     let watched = view.clone();
-    element.bind(move || {
-        let url = watched.url();
-        let loading = watched.is_loading();
-        progress.on_progress(&url, loading);
-    })
+    let last_status = std::rc::Rc::new(std::cell::RefCell::new(None::<WebViewStatus>));
+    element
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.height = Length::Percent(1.0);
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_width = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
+        })
+        .bind(move || {
+            let url = watched.url();
+            let loading = watched.is_loading();
+            progress.on_progress(&url, loading);
+            let status = watched.status();
+            let mut last = last_status.borrow_mut();
+            if last.as_ref() != Some(&status) {
+                *last = Some(status.clone());
+                match &status {
+                    WebViewStatus::Unsupported(reason) | WebViewStatus::Failed(reason) => {
+                        progress.flash(&format!("Browser unavailable: {reason}"));
+                    }
+                    _ => {}
+                }
+            }
+        })
 }
 
 fn empty_state(ui: &Ui, model: &Model) -> El {
