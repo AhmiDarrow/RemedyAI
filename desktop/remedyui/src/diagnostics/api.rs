@@ -1,10 +1,9 @@
 //! Loopback client for diagnostics and hive.
 //!
-//! `runtime::Client`'s HTTP handle is private, and this slice does not own
-//! `runtime.rs`. The base URL and bearer are the same ones `Client::new` uses:
+//! Uses [`runtime::Client`], the same base and bearer Grove and Settings use:
 //! `{origin}/api` plus `runtime::load_token()`.
 
-use crate::runtime;
+use crate::runtime::{self, Client};
 use remedy_ui::net::{Http, NetError, Request};
 use remedy_ui::reactive::Cancel;
 use serde_json::Value;
@@ -12,14 +11,7 @@ use serde_json::Value;
 use super::model::{self, HiveOp};
 
 pub(crate) fn client() -> Http {
-    let origin = runtime::origin();
-    let token = runtime::load_token();
-    let base = format!("{}/api", origin.trim_end_matches('/'));
-    let mut http = Http::new(&base);
-    if let Some(t) = token.filter(|t| !t.is_empty()) {
-        http = http.header("Authorization", format!("Bearer {t}"));
-    }
-    http
+    Client::new(&runtime::origin(), runtime::load_token().as_deref()).http()
 }
 
 pub(crate) fn diagnostics(http: &Http, probe: bool, cancel: &Cancel) -> Result<Value, String> {
