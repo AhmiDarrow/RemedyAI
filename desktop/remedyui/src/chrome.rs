@@ -126,6 +126,39 @@ pub fn toggle_server_menu() {
     });
 }
 
+/// Toggle a chrome overlay from the status dock (Help, Memory, Skills, Time Travel).
+pub fn toggle_overlay(overlay: Overlay) {
+    LIVE.with(|slot| {
+        if let Some(c) = slot.get() {
+            c.toggle(overlay);
+        }
+    });
+}
+
+/// Persist Simple / Advanced from the status dock.
+pub fn set_advanced(on: bool) {
+    LIVE.with(|slot| {
+        if let Some(c) = slot.get() {
+            c.advanced.set(on);
+            c.save_prefs();
+        }
+    });
+    if let Some(s) = crate::settings::current() {
+        s.mode.set(if on { "advanced".into() } else { "simple".into() });
+    }
+}
+
+/// Hide the desktop and open the Web UI, matching the 0.70.5 status-bar control.
+pub fn open_web_now() {
+    LIVE.with(|slot| {
+        if let Some(c) = slot.get() {
+            if let Some(ui) = c.ui_slot.get() {
+                c.open_web(&ui);
+            }
+        }
+    });
+}
+
 /// Usage dashboard from the status bar. The landed panel owns the modal.
 pub fn open_usage(studio: &Studio) -> bool {
     let Some(c) = LIVE.with(|slot| slot.get()) else {

@@ -55,6 +55,30 @@ pub(crate) fn current() -> Option<Settings> {
     alive()
 }
 
+/// Current "speak replies" setting, including a mid-session override.
+pub(crate) fn speak_replies_on() -> bool {
+    if let Some(on) = crate::depth::speak_override() {
+        return on;
+    }
+    current()
+        .and_then(|s| s.voice.try_get().ok())
+        .and_then(|v| v.pointer("/settings/speak_replies").and_then(|x| x.as_bool()))
+        .unwrap_or(false)
+}
+
+/// Toggle spoken replies from the status dock and persist the change.
+pub(crate) fn set_speak_replies(on: bool) {
+    crate::depth::note_speak_replies(on);
+    let Some(s) = current() else { return };
+    bits::ask(
+        s,
+        "POST",
+        "voice/settings",
+        Some(serde_json::json!({ "speak_replies": on })),
+        "Voice updated.",
+    );
+}
+
 /// Settings filling a workspace rail body. The rail header already names the slide.
 pub(crate) fn embedded(ui: &Ui, s: Settings) -> El {
     view(ui, s, false)
