@@ -1765,17 +1765,44 @@ func formatToolResultToken(res cognition.ToolResult) string {
 		obj["id"] = res.ID
 	}
 	if !ok {
-		obj["preview"] = previewOf(res.Err)
-		obj["error"] = res.Err
+		errMsg := toolFailureMessage(res)
+		obj["preview"] = previewOfLimit(errMsg, toolErrorPreviewLimit)
+		obj["error"] = errMsg
+		if strings.TrimSpace(output) == "" {
+			obj["output"] = errMsg
+		}
 	}
 	if blocks := toolResultImageBlocks(res.Blocks); len(blocks) > 0 {
 		obj["blocks"] = blocks
 	}
 	b, err := json.Marshal(obj)
 	if err != nil {
-		return "@@tool_result:" + res.Name + "\n"
+		// Never emit a name-only result: the UI used to render that as
+		// "tool failed" with no exit code or stderr.
+		fallback, _ := json.Marshal(map[string]any{
+			"name":    firstNonEmpty(res.Name, "tool"),
+			"ok":      false,
+			"preview": "could not encode the tool result",
+			"error":   "could not encode the tool result",
+			"id":      res.ID,
+		})
+		return "@@tool_result:" + string(fallback) + "\n"
 	}
 	return "@@tool_result:" + string(b) + "\n"
+}
+
+// toolFailureMessage is the text a failed tool result must carry. A command
+// that ran and failed (non-zero exit, IsError, empty Err) still has stdout
+// and stderr in Output; those are surfaced here so the trail is never the
+// bare string "tool failed".
+func toolFailureMessage(res cognition.ToolResult) string {
+	if msg := strings.TrimSpace(res.Err); msg != "" {
+		return msg
+	}
+	if msg := strings.TrimSpace(tools.FormatFailedCommandPreview(res.Output)); msg != "" {
+		return msg
+	}
+	return "command failed with no stdout or stderr"
 }
 
 // toolResultImageBlocks base64s the image blocks of a tool result (screenshot)

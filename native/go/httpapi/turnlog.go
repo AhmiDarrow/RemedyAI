@@ -30,9 +30,13 @@ import (
 
 const (
 	turnLogDirName = "turns"
-	// toolPreviewLimit is the SSE preview cap. The full body lives in the log
-	// and is served by GET .../turns/{request_id}/tools/{call_id}.
+	// toolPreviewLimit is the SSE preview cap for a successful result. The
+	// full body lives in the log and is served by GET .../turns/{request_id}/tools/{call_id}.
 	toolPreviewLimit = 500
+	// toolErrorPreviewLimit is large enough for an exit code plus the last
+	// 40 lines of stderr and stdout, so a failed command is never reduced to
+	// the bare string "tool failed".
+	toolErrorPreviewLimit = 16 << 10
 )
 
 // logBlock is one block inside a turn-log message record.
@@ -955,10 +959,14 @@ func findToolEvidence(path, callID string) (toolEvidence, error) {
 }
 
 func previewOf(s string) string {
-	if len(s) <= toolPreviewLimit {
+	return previewOfLimit(s, toolPreviewLimit)
+}
+
+func previewOfLimit(s string, limit int) string {
+	if limit <= 0 || len(s) <= limit {
 		return s
 	}
-	cut := toolPreviewLimit
+	cut := limit
 	for cut > 0 && !utf8RuneStart(s[cut]) {
 		cut--
 	}

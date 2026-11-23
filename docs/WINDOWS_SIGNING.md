@@ -38,6 +38,8 @@ dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ2MDEwQzVERTNBQ0JDRTAKUldU
 
 Install **only** from this repository’s GitHub Releases. In-app updates refuse assets that fail signature or publisher URL checks.
 
+The RemedyUI 1.0 shell uses this same public key and the same `latest.json` shape. Its Windows package is still an NSIS `Remedy.Desktop_{ver}_x64-setup.exe` that accepts `/S /NCRC /UPDATE /NOAUTOLAUNCH` (and `/D=` last). An upgrade runs the previous uninstaller with `/S /UPDATE` and waits for it (`_?=`), so the per-user data directory stays. Build steps are in `desktop/remedyui/packaging/README.md`. That path does not generate a new minisign key and does not publish the release.
+
 ## What removes the SmartScreen warning
 
 1. Buy an **Authenticode code-signing certificate**

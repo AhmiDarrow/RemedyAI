@@ -74,7 +74,7 @@ func RegisterFileTools(registry *Registry) error {
 			"type":"object",
 			"required":["path"],
 			"properties":{
-				"path":{"type":"string","minLength":1,"description":"File to read. Absolute (must be inside the workspace root) or relative to that root."},
+				"path":{"type":"string","minLength":1,"description":"File to read. Absolute (must be inside the workspace root) or relative to that root. Windows drive-letter paths, backslashes and ~ are accepted and normalized."},
 				"offset":{"type":"integer","minimum":1,"description":"1-based line number to start from. Defaults to 1; pass next_offset from a previous call to continue."},
 				"limit":{"type":"integer","minimum":1,"maximum":2000,"description":"Maximum lines to return (default and maximum 2000). The result is also capped at 256 KB."},
 				` + propWorkspaceRoot + `
@@ -115,7 +115,7 @@ func RegisterFileTools(registry *Registry) error {
 			"type":"object",
 			"required":["path","old_string","new_string"],
 			"properties":{
-				"path":{"type":"string","minLength":1,"description":"File to edit. Absolute (must be inside the workspace root) or relative to that root. The file must already exist — use write to create one."},
+				"path":{"type":"string","minLength":1,"description":"File to edit. Absolute (must be inside the workspace root) or relative to that root. Windows drive-letter paths, backslashes and ~ are accepted. The file must already exist — use write to create one."},
 				"old_string":{"type":"string","minLength":1,"description":"Exact text to replace, including indentation. Add surrounding lines until it is unique."},
 				"new_string":{"type":"string","description":"Replacement text. Write it with \\n line breaks; a CRLF file gets CRLF back automatically."},
 				"replace_all":{"type":"boolean","description":"Replace every occurrence instead of requiring exactly one. Default false."},
@@ -150,7 +150,7 @@ func RegisterFileTools(registry *Registry) error {
 			"type":"object",
 			"required":["path","content"],
 			"properties":{
-				"path":{"type":"string","minLength":1,"description":"File to write. Absolute (must be inside the workspace root) or relative to that root."},
+				"path":{"type":"string","minLength":1,"description":"File to write. Absolute (must be inside the workspace root) or relative to that root. Windows drive-letter paths, backslashes and ~ are accepted and normalized."},
 				"content":{"type":"string","description":"Full new file contents. This replaces the whole file — use edit for a targeted change."},
 				` + propWorkspaceRoot + `
 			},
@@ -182,7 +182,7 @@ func RegisterFileTools(registry *Registry) error {
 			"required":["pattern"],
 			"properties":{
 				"pattern":{"type":"string","minLength":1,"description":"Slash-separated glob: ** any depth, * within a segment, ? one character, [abc] a class. Example: src/**/*.ts"},
-				"path":{"type":"string","description":"Directory to search, absolute inside the workspace root or relative to it. Defaults to the root."},
+				"path":{"type":"string","description":"Directory to search, absolute inside the workspace root or relative to it. Windows drive-letter paths, backslashes and ~ are accepted. Defaults to the root."},
 				` + propWorkspaceRoot + `
 			},
 			"additionalProperties":false
@@ -215,7 +215,7 @@ func RegisterFileTools(registry *Registry) error {
 			"required":["pattern"],
 			"properties":{
 				"pattern":{"type":"string","minLength":1,"description":"Regular expression (Go/RE2 syntax). An invalid expression is an error, never a silent literal search."},
-				"path":{"type":"string","description":"File or directory to search, absolute inside the workspace root or relative to it. Defaults to the root."},
+				"path":{"type":"string","description":"File or directory to search, absolute inside the workspace root or relative to it. Windows drive-letter paths, backslashes and ~ are accepted. Defaults to the root."},
 				"glob":{"type":"string","description":"Only search files whose root-relative path matches this glob, e.g. **/*.go"},
 				"context":{"type":"integer","minimum":0,"maximum":10,"description":"Lines of context to include before and after each match. Default 0."},
 				"max_results":{"type":"integer","minimum":1,"maximum":1000,"description":"Global cap on returned matches (default 500, maximum 1000). Each file also stops after 200 matches."},
@@ -289,24 +289,41 @@ func boundRoot(raw string) (*os.Root, string, error) {
 // error says which root, because a model that is told the boundary can correct
 // itself and one that is not will guess again.
 func resolveBoundPath(rootAbs, p string) (string, error) {
+	return resolveBoundPathOS(rootAbs, p, userHomeDir(), hostPathOS())
+}
+
+// resolveBoundPathOS maps a model-supplied path to a slash-separated path
+// relative to rootAbs. Absolute inputs must already be inside the root; the
+// error says which root, because a model that is told the boundary can correct
+// itself and one that is not will guess again.
+//
+// osName is the path convention, not necessarily this process's GOOS, so
+// Windows drive-letter paths, backslashes and ~ can be tested on Linux.
+func resolveBoundPathOS(rootAbs, p, home string, osName PathOS) (string, error) {
 	p = strings.TrimSpace(p)
 	if p == "" {
 		return "", fmt.Errorf("%w: path is required", ErrInvalidInput)
 	}
-	native := filepath.FromSlash(p)
-	if filepath.IsAbs(native) {
-		rel, ok := relUnder(rootAbs, filepath.Clean(native))
+	native := normalizeInputPath(p, home, osName)
+	if isAbsPath(native, osName) {
+		rel, ok := relUnderOS(rootAbs, native, osName)
 		if !ok {
 			return "", outsideRootError(p, rootAbs)
 		}
 		return normalizeRel(rel, p, rootAbs)
 	}
-	if strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`) {
+	if strings.HasPrefix(p, "/") || (osName != PathOSWindows && strings.HasPrefix(p, `\`)) {
 		return "", fmt.Errorf(
 			"%w: %q starts at a filesystem root but is not an absolute path on this host. "+
 				"Pass a path relative to %s, or a full absolute path inside it", ErrInvalidInput, p, rootAbs)
 	}
-	rel := filepath.Clean(native)
+	rel := native
+	if osName != PathOSWindows {
+		rel = filepath.Clean(filepath.FromSlash(p))
+	} else {
+		// Relative Windows paths become slash-separated for the jail.
+		rel = strings.ReplaceAll(native, `\`, "/")
+	}
 	return normalizeRel(rel, p, rootAbs)
 }
 
