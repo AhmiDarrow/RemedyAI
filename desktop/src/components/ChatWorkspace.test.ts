@@ -116,3 +116,25 @@ describe('ChatWorkspace split', () => {
     expect(actions).toContain('Need the path.')
   }, 30_000)
 })
+
+describe('ChatWorkspace layout CSS', () => {
+  it('uncaps the actions-pane work body and rounds both panes as cards', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { dirname, join } = await import('node:path')
+    const { fileURLToPath } = await import('node:url')
+    const css = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../index.css'),
+      'utf8',
+    )
+    const uncap = css.slice(css.indexOf('/* The pane itself scrolls.'))
+    expect(uncap).toContain('.actions-pane .ws-body')
+    expect(uncap).toContain('.actions-pane .ws-timeline')
+    expect(uncap).toContain('.actions-pane .build-todos-list')
+    expect(uncap).toMatch(/max-height:\s*none/)
+    expect(css).toMatch(/\.actions-pane,[\s\S]*?border-radius:\s*var\(--chat-bubble-radius\)/)
+    expect(css).toMatch(/\.chat-workspace \{[\s\S]*?gap:\s*0\.55rem/)
+    // Last mid-turn bubble: caret stays on the text line.
+    expect(css).toContain('.chat-bubble-body.stream-md > p:last-of-type')
+    expect(css).toContain('display: inline')
+  })
+})

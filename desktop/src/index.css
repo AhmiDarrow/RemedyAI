@@ -3366,12 +3366,26 @@ body.is-rail-resizing [data-browser-embed-host] {
   opacity: 1;
 }
 
-/* Streaming markdown: subtle caret after last text node */
+/* Streaming markdown: caret sits on the last text line, not on a
+   new blank line under the paragraph (ReactMarkdown emits a block <p>,
+   then the caret as a sibling). */
 .message-feed .stream-md {
   position: relative;
 }
 .message-feed .stream-md .stream-caret {
   margin-left: 1px;
+  display: inline;
+}
+.message-feed .chat-bubble-body.stream-md > p:last-of-type {
+  display: inline;
+  margin-bottom: 0;
+}
+.message-feed .chat-beats .chat-beat.is-mid {
+  height: fit-content;
+  align-self: flex-start;
+}
+.message-feed .chat-beats .chat-beat.is-mid .chat-bubble-body {
+  margin-bottom: 0;
 }
 
 /* Loading skeleton for chat history */
@@ -3886,6 +3900,9 @@ h3,
   width: 100%;
   position: relative;
   overflow: hidden;
+  box-sizing: border-box;
+  gap: 0.55rem;
+  padding: 0.5rem 0.65rem 0.6rem;
 }
 /* Side is expressed by DOM order, not row-reverse (that would double-swap). */
 
@@ -3897,11 +3914,16 @@ h3,
   height: 100%;
   overflow: hidden;
   position: relative;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: var(--chat-bubble-radius);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 4%, transparent);
 }
 .chat-pane {
   flex: 1 1 0%;
   min-width: 280px;
-  background: transparent;
+  background: color-mix(in srgb, var(--bg-secondary) 62%, var(--bg-primary));
 }
 .actions-pane {
   min-width: 240px;
@@ -3913,16 +3935,6 @@ h3,
       var(--bg-secondary) 22%,
       var(--bg-secondary) 100%
     );
-  border-right: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  box-shadow: inset -18px 0 40px -28px color-mix(in srgb, var(--bg-primary) 70%, transparent);
-}
-.chat-workspace.is-actions-right .actions-pane {
-  border-right: 0;
-  border-left: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  box-shadow: inset 18px 0 40px -28px color-mix(in srgb, var(--bg-primary) 70%, transparent);
-}
-.chat-workspace.is-actions-left .chat-pane {
-  border-left: 0;
 }
 
 .split-pane-head {
@@ -4091,8 +4103,13 @@ h3,
   opacity: 0.7;
 }
 
-.actions-pane .ws-head {
+.actions-pane .work-strip > .ws-head {
+  display: flex;
+  width: 100%;
+  box-sizing: border-box;
   background: var(--bg-secondary);
+  background-color: var(--bg-secondary);
+  z-index: 3;
 }
 .actions-pane .work-strip {
   padding-left: 0.55rem;
@@ -4100,6 +4117,19 @@ h3,
 .actions-pane .work-strip .build-todos {
   margin: 0.35rem 0 0.2rem;
   padding: 0;
+}
+/* The pane itself scrolls. Do not height-cap the live turn's body,
+   timeline, or BUILD list — those were clipping tool rows mid-card. */
+.actions-pane .ws-body,
+.actions-pane .ws-timeline,
+.actions-pane .build-todos-list {
+  max-height: none;
+  overflow: visible;
+}
+/* Thinking stays collapsible; only cap a very long run so tools/BUILD
+   below it remain reachable without a huge first scroll. */
+.actions-pane .ws-thinking-body {
+  max-height: min(40rem, 70vh);
 }
 
 .chat-working-hint {
@@ -4144,8 +4174,12 @@ h3,
   width: auto !important;
   min-width: 0;
   max-width: none;
-  border: 0;
-  box-shadow: none;
+}
+.chat-workspace.is-narrow .chat-split-tabs {
+  margin: 0 0 0.15rem;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: var(--chat-bubble-radius);
+  background: color-mix(in srgb, var(--bg-secondary) 85%, transparent);
 }
 .chat-workspace.is-narrow[data-mobile-pane="chat"] .actions-pane {
   display: none;
