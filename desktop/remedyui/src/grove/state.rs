@@ -1011,7 +1011,10 @@ impl Grove {
             return;
         }
         self.stage_url.set(url.clone());
-        self.stage_draft.set(url);
+        self.stage_draft.set(url.clone());
+        if let Some(model) = crate::browser::live() {
+            model.navigate_here(&url);
+        }
         self.stage_status.set(
             "Asked the stage to open this address. The browser host owns the page.".into(),
         );
@@ -1029,18 +1032,34 @@ impl Grove {
             return;
         }
         let mut list = self.bookmarks.get();
-        if let Some(i) = list.iter().position(|b| b.url == url) {
+        let starred = if let Some(i) = list.iter().position(|b| b.url == url) {
             list.remove(i);
             self.stage_status.set("Bookmark removed".into());
+            false
         } else {
             list.push(Bookmark {
                 title: url.clone(),
                 url: url.clone(),
             });
             self.stage_status.set("Bookmarked".into());
-        }
+            true
+        };
         self.bookmarks.set(list);
+        if let Some(model) = crate::browser::live()
+            && model.bookmarked(&url) != starred
+        {
+            model.toggle_bookmark(&url);
+        }
         self.save();
+    }
+
+    /// The browser rail starred or unstarred `url`. Match that state here.
+    pub(crate) fn apply_browser_star(&self, url: &str, on: bool) {
+        let mut list = self.bookmarks.get();
+        if store::set_star(&mut list, url, on) {
+            self.bookmarks.set(list);
+            self.save();
+        }
     }
 
     pub(crate) fn open_bookmark(&self, url: &str) {

@@ -8,6 +8,7 @@
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use remedy_ui::a11y::{Action, Current, Role, Semantics};
 use remedy_ui::core::{Color, Insets, Size};
@@ -295,6 +296,63 @@ impl WorkspaceChrome {
         }
         *self.previous.borrow_mut() = layout;
     }
+
+    /// Live shells write the layout. Previews use [`Self::fixed`] and must not.
+    pub fn persists(&self) -> bool {
+        self.persist.is_some()
+    }
+}
+
+thread_local! {
+    static LIVE_CHROME: RefCell<Option<WorkspaceChrome>> = const { RefCell::new(None) };
+}
+
+static PENDING_BROWSER: AtomicBool = AtomicBool::new(false);
+static PENDING_BESIDE: AtomicBool = AtomicBool::new(false);
+
+/// Remember the Studio rails so the computer-use host can open Browser.
+pub fn bind_chrome(chrome: WorkspaceChrome) {
+    if PENDING_BESIDE.swap(false, Ordering::SeqCst) {
+        chrome.open_browser_beside_settings();
+    } else if PENDING_BROWSER.swap(false, Ordering::SeqCst) {
+        chrome.open_browser();
+    }
+    LIVE_CHROME.with(|slot| *slot.borrow_mut() = Some(chrome));
+}
+
+/// Drop the rails when the Studio shell goes away (Grove disposes that branch).
+pub fn unbind_chrome() {
+    LIVE_CHROME.with(|slot| *slot.borrow_mut() = None);
+}
+
+pub fn chrome_bound() -> bool {
+    LIVE_CHROME.with(|slot| slot.borrow().is_some())
+}
+
+/// Browser on the right. If Studio is not mounted yet, the next [`bind_chrome`] opens it.
+pub fn request_open_browser() -> bool {
+    LIVE_CHROME.with(|slot| {
+        if let Some(chrome) = slot.borrow().clone() {
+            chrome.open_browser();
+            true
+        } else {
+            PENDING_BROWSER.store(true, Ordering::SeqCst);
+            false
+        }
+    })
+}
+
+/// OAuth: Browser beside Settings, so the form stays mounted.
+pub fn request_open_browser_beside_settings() -> bool {
+    LIVE_CHROME.with(|slot| {
+        if let Some(chrome) = slot.borrow().clone() {
+            chrome.open_browser_beside_settings();
+            true
+        } else {
+            PENDING_BESIDE.store(true, Ordering::SeqCst);
+            false
+        }
+    })
 }
 
 /// One side of the shell. The structure is rebuilt when the mode, the slide,
@@ -1251,4 +1309,23 @@ fn hairline(colors: &remedy_ui::style::ColorRoles) -> Color {
 
 fn msg(ui: &Ui, id: &'static str) -> String {
     messages().text(ui, id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_requested_before_studio_opens_when_the_rails_mount() {
+        unbind_chrome();
+        PENDING_BROWSER.store(false, Ordering::SeqCst);
+        PENDING_BESIDE.store(false, Ordering::SeqCst);
+        assert!(!request_open_browser());
+        let chrome = WorkspaceChrome::fixed(WorkspaceLayout::default());
+        bind_chrome(chrome.clone());
+        assert_eq!(chrome.layout().right, SlideId::Browser);
+        assert!(chrome.layout().right_rail == RailMode::Open);
+        unbind_chrome();
+        PENDING_BROWSER.store(false, Ordering::SeqCst);
+    }
 }
