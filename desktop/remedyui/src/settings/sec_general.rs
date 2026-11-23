@@ -94,6 +94,7 @@ fn voice(ui: &Ui, s: Settings) -> El {
             if on == server {
                 return;
             }
+            crate::depth::note_speak_replies(on);
             bits::ask(s, "POST", "voice/settings", Some(json!({ "speak_replies": on })), "Voice updated.");
         });
         Effect::new(move || {

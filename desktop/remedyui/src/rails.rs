@@ -39,7 +39,7 @@ struct Popout {
 }
 
 struct Built {
-    key: (RailMode, SlideId, bool),
+    key: (RailMode, SlideId, bool, bool),
     /// The panel body, so a width drag can resize it without remounting.
     body: Option<El>,
 }
@@ -295,7 +295,8 @@ pub(crate) fn side(ui: &Ui, chrome: WorkspaceChrome, which: Side, studio: Studio
         let mode = shown_mode(window_w, narrow_side, layout, which);
         let slide = layout.slide(which);
         let hide_body = popped.is_some_and(|p| p.slide == slide);
-        let key = (mode, slide, hide_body);
+        let compact = which == Side::Left && crate::chrome::compact_now();
+        let key = (mode, slide, hide_body, compact);
         let same = built.borrow().as_ref().is_some_and(|b| b.key == key);
         if !same {
             let built = built.clone();
@@ -304,11 +305,16 @@ pub(crate) fn side(ui: &Ui, chrome: WorkspaceChrome, which: Side, studio: Studio
             let chrome = chrome_b.clone();
             let studio = studio_b.clone();
             untrack(move || {
-                let body = mount(&ui, &root, &chrome, which, mode, slide, hide_body, &studio);
-                *built.borrow_mut() = Some(Built { key, body });
+                if compact {
+                    root.clear();
+                    *built.borrow_mut() = Some(Built { key, body: None });
+                } else {
+                    let body = mount(&ui, &root, &chrome, which, mode, slide, hide_body, &studio);
+                    *built.borrow_mut() = Some(Built { key, body });
+                }
             });
         }
-        let total = side_width(mode, layout.width(which));
+        let total = if compact { 0.0 } else { side_width(mode, layout.width(which)) };
         root_b.clone().layout(|l| {
             l.width = Length::Px(total);
             l.min_width = Length::Px(total);

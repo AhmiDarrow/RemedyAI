@@ -6,6 +6,7 @@
  * screen=chat (default) — sessions sidebar, a finished turn, composer, status bar
  * screen=empty — selected empty session, no messages
  * screen=rails-left | rails-right | rails-dual — real WorkspaceSide chrome
+ * screen=palette | help | about | diagnostics | menu — chrome overlays
  * screen=usage | usage-harness — Usage dashboard on a fixture, no runtime
  * screen=diagnostics — Diagnostics panel and hive inspector on a fixture, no runtime
  */
@@ -16,7 +17,11 @@ import { Composer } from '../../src/components/Composer'
 import { MessageFeed } from '../../src/components/MessageFeed'
 import { Sidebar } from '../../src/components/Sidebar'
 import { StatusBar } from '../../src/components/StatusBar'
+import { AboutDialog } from '../../src/components/AboutDialog'
+import { CommandPalette, type CommandItem } from '../../src/components/CommandPalette'
 import { DiagnosticsPanel } from '../../src/components/DiagnosticsPanel'
+import { HelpPanel } from '../../src/components/HelpPanel'
+import { TitleBar } from '../../src/components/TitleBar'
 import { UsageDashboard } from '../../src/components/UsageDashboard'
 import { WorkspaceSide } from '../../src/components/slides/WorkspaceSide'
 import { useNarrowRails } from '../../src/hooks/useNarrowRails'
@@ -255,6 +260,60 @@ function RailsShell({
       />
     </div>
   )
+}
+
+const PALETTE: CommandItem[] = [
+  ['new', 'New Session', 'Start a new chat session', 'session'],
+  ['time-travel', 'Time Travel', 'Timeline: restore chat & files to an earlier step', 'session'],
+  ['export', 'Export Session', 'Download active session as .txt', 'session'],
+  ['import', 'Import Session', 'Import a session from .txt / .md', 'session'],
+  ['palette', 'Command palette', 'Open this palette', 'general'],
+  ['plan', 'Cycle Chat / Plan / Build', 'Pin conversation, planning, or building', 'general'],
+  ['memory', 'Memory', 'Toggle memory panel', 'panel'],
+  ['skills', 'Skills', 'Toggle skills panel', 'panel'],
+  ['settings', 'Settings', 'Open Settings', 'panel'],
+  ['help', 'Help', 'Searchable offline wiki (F1 / Ctrl+/)', 'general'],
+  ['diagnostics', 'Diagnostics', 'Server, local host, hardware, hive', 'panel'],
+  ['help-troubleshoot', 'Troubleshooting', 'Open Help → Troubleshooting', 'general'],
+  ['help-commands', 'Slash commands reference', 'Open Help → Commands', 'general'],
+  ['session-s3', 'New chat', '0 messages', 'session'],
+  ['session-s1', 'Port to RemedyUI', '2 messages', 'session'],
+  ['session-s2', 'House rules', '2 messages', 'session'],
+  ['agent-remedy', '@remedy', 'House partner', 'agent'],
+  ['model-remedy', 'remedy', 'local', 'model'],
+].map(([id, label, description, category]) => ({
+  id, label, description, category, action: () => {},
+}))
+
+function ChromeLayer({ which }: { which: string }) {
+  const noop = () => {}
+  if (which === 'palette') return <CommandPalette open onClose={noop} commands={PALETTE} />
+  if (which === 'help') return <HelpPanel open onClose={noop} initialArticleId="00-overview" version="1.0.0" />
+  if (which === 'about') {
+    return (
+      <AboutDialog
+        open
+        onClose={noop}
+        version="1.0.0"
+        userName="Joe"
+        onOpenHelp={noop}
+        onOpenSettings={noop}
+        onOpenDiagnostics={noop}
+      />
+    )
+  }
+  if (which === 'diagnostics') return <DiagnosticsPanel open onClose={noop} />
+  return null
+}
+
+function MenuBar() {
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      document.querySelector<HTMLButtonElement>('[aria-label="Open Remedy menu"]')?.click()
+    }, 200)
+    return () => window.clearTimeout(id)
+  }, [])
+  return <TitleBar version="1.0.0" />
 }
 
 /** Same figures as the RemedyUI usage golden. Answers `/api` without a runtime. */
@@ -563,6 +622,7 @@ function Harness() {
       style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
       data-harness-ready="1"
     >
+      {screen === 'menu' ? <MenuBar /> : null}
       <div className="studio-shell flex flex-1 min-h-0 h-full items-stretch">
         <Sidebar
           sessions={SESSIONS}
@@ -651,6 +711,7 @@ function Harness() {
         onCheckUpdates={() => {}}
         surface="studio"
       />
+      <ChromeLayer which={screen} />
     </div>
   )
 }
