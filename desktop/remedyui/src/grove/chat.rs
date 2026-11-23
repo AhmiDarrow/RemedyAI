@@ -243,17 +243,32 @@ fn empty_state(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
             let grove = grove.clone();
             move || {
                 let unit = ui.theme().spacing.unit;
-                let mut col = w::column(&ui)
-                    .gap(unit * 2.0)
-                    .padding(Insets::all(unit * 3.0))
-                    .child(w::text(
-                        &ui,
-                        "Tell me what you’re carrying — a goal, an errand, a receipt, a bug. You can drop a file right here.",
-                    ))
-                    .child(w::text(&ui, hint_line(&grove.agent_gender.get())).variant("muted"));
-                let mut row = w::row(&ui).gap(unit).layout(|l| {
+                let g = grove.clone();
+                let title = w::text(&ui, "")
+                    .variant("heading")
+                    .text_align(remedy_ui::style::TextAlign::Center)
+                    .text(move || ready_title(&g));
+                let sub = w::text(
+                    &ui,
+                    "Tell me what you’re carrying — a goal, an errand, a receipt, a bug. You can drop a file right here.",
+                )
+                .variant("muted")
+                .text_align(remedy_ui::style::TextAlign::Center)
+                .layout(|l| {
+                    l.max_width = Length::Px(352.0);
                     l.width = Length::Percent(1.0);
                 });
+                let hints = w::text(&ui, hint_line(&grove.agent_gender.get()))
+                    .variant("muted")
+                    .text_align(remedy_ui::style::TextAlign::Center)
+                    .layout(|l| {
+                        l.max_width = Length::Px(416.0);
+                        l.width = Length::Percent(1.0);
+                    });
+                let mut row = w::wrap(&ui)
+                    .gap(unit)
+                    .justify(Justify::Center)
+                    .layout(|l| l.width = Length::Percent(1.0));
                 for (label, text) in starters {
                     let label = (*label).to_string();
                     let text = (*text).to_string();
@@ -261,7 +276,23 @@ fn empty_state(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
                     let b = w::button(&ui, label, move || starter(&g, &text)).variant("quiet");
                     row = row.child(b);
                 }
-                col.child(row)
+                // Same empty hero as the desktop feed: mark, greeting, the
+                // note, starter chips, then the key line. Centered in the pane.
+                w::column(&ui)
+                    .align(Align::Center)
+                    .justify(Justify::Center)
+                    .gap(unit * 2.0)
+                    .padding(Insets::all(unit * 3.0))
+                    .layout(|l| {
+                        l.width = Length::Percent(1.0);
+                        l.grow = 1.0;
+                        l.min_height = Length::Px(0.0);
+                    })
+                    .child(crate::logo::empty_mark(&ui))
+                    .child(title)
+                    .child(sub)
+                    .child(row)
+                    .child(hints)
             }
         },
     )
@@ -277,18 +308,21 @@ fn starter(grove: &Grove, text: &str) {
     }
 }
 
+fn ready_title(grove: &Grove) -> String {
+    let name = grove.studio.user_name.get();
+    match name.split_whitespace().next() {
+        Some(first) if !first.is_empty() => format!("Ready when you are, {first}"),
+        _ => "Your partner is ready".to_string(),
+    }
+}
+
 fn hint_line(gender: &str) -> String {
-    let (who, verb) = match gender.to_ascii_lowercase().as_str() {
-        "male" => ("he", "takes"),
-        "neutral" => ("they", "take"),
-        _ => ("she", "takes"),
-    };
     let work = match gender.to_ascii_lowercase().as_str() {
         "male" => "while he works",
         "neutral" => "while they work",
         _ => "while she works",
     };
-    format!("Enter send · Shift+Enter new line · Attach · Speak · {work}, Enter steers · Steer — {who} {verb} it in without stopping")
+    format!("Enter send · Shift+Enter new line · Attach · Speak · {work}, Enter steers")
 }
 
 fn steer_label(gender: &str) -> String {
@@ -384,11 +418,12 @@ fn turn_line(ui: &Ui, grove: Grove) -> El {
             let ui = ui.clone();
             let g = grove.clone();
             move || {
+                let g = g.clone();
                 w::text(&ui, "").variant("muted").text(move || {
                     if g.waiting_on_you() {
-                        "Waiting for you…".into()
+                        "Waiting for you…".to_string()
                     } else {
-                        "Working…".into()
+                        "Working…".to_string()
                     }
                 })
             }
@@ -468,19 +503,30 @@ fn composer(ui: &Ui, grove: Grove, app: Option<App>, kind: RoomKind) -> El {
     let g_dis = grove.clone();
     let el = el.disabled(move || !ready(&g_dis));
 
-    let hint = w::text(ui, "").variant("muted").text({
-        let g = grove.clone();
-        let base = placeholder_for(&grove, &kind);
-        move || {
-            if !ready(&g) {
-                "Connecting…".into()
-            } else if g.streaming.get() {
-                "Steer me — say it and I fold it in as I go".into()
-            } else {
-                base.clone()
+    // Idle copy lives in the field's placeholder. This line is only the
+    // connecting and steer states, which replace that placeholder on desktop.
+    let hint = show(
+        ui,
+        {
+            let g = grove.clone();
+            move || !ready(&g) || g.streaming.get()
+        },
+        {
+            let ui = ui.clone();
+            let g = grove.clone();
+            move || {
+                let g = g.clone();
+                w::text(&ui, "").variant("muted").text(move || {
+                    if !ready(&g) {
+                        "Connecting…".to_string()
+                    } else {
+                        "Steer me — say it and I fold it in as I go".to_string()
+                    }
+                })
             }
-        }
-    });
+        },
+    )
+    .el();
 
     let g_att = grove.clone();
     let app_att = app.clone();
@@ -504,6 +550,7 @@ fn composer(ui: &Ui, grove: Grove, app: Option<App>, kind: RoomKind) -> El {
         let ui = ui.clone();
         let g = grove.clone();
         move || {
+            let g = g.clone();
             w::button(&ui, "Pause", move || g.stop())
                 .semantics(Semantics::new(Role::Button).label("Pause").action(Action::Click))
         }
@@ -518,9 +565,9 @@ fn composer(ui: &Ui, grove: Grove, app: Option<App>, kind: RoomKind) -> El {
             let g = grove.clone();
             move || {
                 if g.streaming.get() {
-                    "Steer".into()
+                    "Steer".to_string()
                 } else {
-                    "Send".into()
+                    "Send".to_string()
                 }
             }
         },
@@ -585,10 +632,6 @@ fn composer(ui: &Ui, grove: Grove, app: Option<App>, kind: RoomKind) -> El {
         })
         .child(hint)
         .child(shell)
-        .child(w::text(ui, "").variant("muted").text({
-            let g = grove.clone();
-            move || hint_line(&g.agent_gender.get())
-        }))
 }
 
 fn send_field(grove: &Grove, field: &remedy_ui::TextField) {

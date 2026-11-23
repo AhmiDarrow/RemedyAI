@@ -124,6 +124,8 @@ fn child_head(ui: &Ui, grove: Grove, id: String) -> El {
             let g = grove.clone();
             let id = id.clone();
             move || {
+                let g = g.clone();
+                let id = id.clone();
                 w::button(&ui, "Stop", move || {
                     if let Some(c) = child_of(&g, &id) {
                         g.stop_child(&c.child_id);
@@ -192,15 +194,17 @@ fn child_feed(ui: &Ui, grove: Grove, id: String) -> El {
         {
             let ui = ui.clone();
             move || {
+                let empty_body = empty_body.clone();
+                let empty_id = empty_id.clone();
                 w::text(&ui, "").variant("muted").text(move || {
                     if empty_body.child_loading.get() {
-                        "Opening…".into()
+                        "Opening…".to_string()
                     } else if child_of(&empty_body, &empty_id)
                         .is_some_and(|c| c.state == "working" || c.state == "queued")
                     {
-                        "Starting up…".into()
+                        "Starting up…".to_string()
                     } else {
-                        "Nothing here yet.".into()
+                        "Nothing here yet.".to_string()
                     }
                 })
             }
@@ -219,17 +223,19 @@ fn child_talk(ui: &Ui, grove: Grove, id: String) -> El {
             g.partner()
         )
     };
-    let field = w::text_input(ui, {
-        let g = grove.clone();
-        let id = id.clone();
-        move || {
-            let label = child_of(&g, &id)
-                .map(|c| c.label)
-                .unwrap_or_else(|| "this side job".into());
-            format!("Message {} about {label}", g.partner())
-        }
-    })
-    .placeholder("Tell Remedy about this job — she’ll answer right here");
+    let field = w::text_input(ui, "Message Remedy about this side job")
+        .placeholder("Tell Remedy about this job — she’ll answer right here");
+    let label_field = field.clone();
+    let g_label = grove.clone();
+    let id_label = id.clone();
+    let _ = field.el().bind(move || {
+        let job = child_of(&g_label, &id_label)
+            .map(|c| c.label)
+            .unwrap_or_else(|| "this side job".into());
+        let _ = label_field
+            .clone()
+            .label(format!("Message {} about {job}", g_label.partner()));
+    });
     let empty = Rc::new(Cell::new(true));
     let f = field.clone();
     let empty_c = empty.clone();
@@ -379,18 +385,22 @@ fn bubble(ui: &Ui, grove: Grove) -> El {
         let ui = ui.clone();
         let g = grove.clone();
         move || {
+            let g = g.clone();
             w::text(&ui, "").text(move || {
                 let t = g.partial.get();
-                if t.is_empty() { "…".into() } else { t }
+                if t.is_empty() { "…".to_string() } else { t }
             })
         }
     })
     .el();
-    let field = w::text_input(ui, {
-        let g = grove.clone();
-        move || format!("Reply to {}", g.partner())
-    })
-    .placeholder("Reply to Remedy…");
+    let field = w::text_input(ui, "Reply to Remedy").placeholder("Reply to Remedy…");
+    let label_field = field.clone();
+    let g_label = grove.clone();
+    let _ = field.el().bind(move || {
+        let _ = label_field
+            .clone()
+            .label(format!("Reply to {}", g_label.partner()));
+    });
     let f = field.clone();
     let g = grove.clone();
     field.intercept_keys(move |e| {
