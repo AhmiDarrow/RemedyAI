@@ -27,6 +27,11 @@ impl Client {
         }
         Client { http }
     }
+
+    /// The `/api` client. Setup and the update check call through it.
+    pub fn http(&self) -> &Http {
+        &self.http
+    }
 }
 
 /// Origin override: `$REMEDY_API`, else the default loopback port.
@@ -70,11 +75,20 @@ pub fn load_token() -> Option<String> {
     None
 }
 
-fn remedy_home() -> PathBuf {
+/// Remedy's home directory. `$REMEDY_HOME`, then `%USERPROFILE%\.remedy`, then `$HOME/.remedy`.
+///
+/// Nothing here deletes that folder. Callers only add their own files under it.
+pub fn remedy_home() -> PathBuf {
     if let Ok(h) = std::env::var("REMEDY_HOME") {
         let p = PathBuf::from(h);
         if !p.as_os_str().is_empty() {
             return p;
+        }
+    }
+    if let Ok(h) = std::env::var("USERPROFILE") {
+        let p = PathBuf::from(h);
+        if !p.as_os_str().is_empty() {
+            return p.join(".remedy");
         }
     }
     std::env::var("HOME")

@@ -1,10 +1,13 @@
-//! Optional messenger step. Tokens stay in signals and are never written into the setup draft.
+//! Optional messenger step. Tokens stay in the secret field and are never written into the setup draft.
+
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use remedy_ui::layout::Length;
 use remedy_ui::reactive::Signal;
 use remedy_ui::style::StylePatch;
 use remedy_ui::widgets as w;
-use remedy_ui::{El, Ui};
+use remedy_ui::{El, TextField, Ui};
 
 use super::chrome;
 
@@ -14,7 +17,8 @@ pub struct Messenger {
     pub name: String,
     pub status: String,
     pub enabled: Signal<bool>,
-    pub token: Signal<String>,
+    /// Secret field, created when the row is shown. `value()` is empty for secrets.
+    pub token_field: Rc<RefCell<Option<TextField>>>,
 }
 
 pub fn fallback_list() -> Vec<Messenger> {
@@ -31,9 +35,20 @@ pub fn fallback_list() -> Vec<Messenger> {
             .into(),
             status: "ready".into(),
             enabled: Signal::new(false),
-            token: Signal::new(String::new()),
+            token_field: Rc::new(RefCell::new(None)),
         })
         .collect()
+}
+
+/// Takes the token out of the secret field. Empty when the row was never opened.
+pub fn take_token(m: &Messenger) -> String {
+    let Some(field) = m.token_field.borrow().clone() else {
+        return String::new();
+    };
+    if field.is_empty() {
+        return String::new();
+    }
+    field.take_secret().expose().trim().to_string()
 }
 
 pub fn status_text(status: &str, reason: &str) -> String {
@@ -65,7 +80,8 @@ pub fn view(ui: &Ui, rows: Signal<Vec<Messenger>>) -> El {
     let list = w::column(ui)
         .gap(unit)
         .layout(|l| l.width = Length::Percent(1.0));
-    w::for_each(&list, rows, |m| m.id.clone(), move |m| row(ui, m));
+    let ui_rows = ui.clone();
+    w::for_each(&list, rows, |m| m.id.clone(), move |m| row(&ui_rows, m));
     chrome::stack(ui, vec![intro, list])
 }
 
@@ -74,18 +90,17 @@ fn row(ui: &Ui, m: Messenger) -> El {
     let colors = ui.theme().colors.clone();
     let line = colors.line.unwrap_or(colors.muted);
     let enabled = m.enabled.clone();
-    let token = m.token.clone();
-    let check = w::check(ui, format!("{}  {}", m.name, m.status), enabled.clone());
-    let field = w::secret_input(ui, "Bot token (optional now)")
-        .placeholder("Bot token (optional now)");
-    let f2 = field.clone();
-    let token2 = token.clone();
-    let field = field.on_change(move || {
-        let shown = f2.value();
-        if !shown.is_empty() {
-            token2.set(shown);
+    let check = w::check(ui, format!("{}  {}", m.name, status_text(&m.status, "")), enabled.clone());
+    let slot = m.token_field.clone();
+    let field = {
+        let mut held = slot.borrow_mut();
+        if held.is_none() {
+            *held = Some(
+                w::secret_input(ui, "Bot token (optional now)").placeholder("Bot token (optional now)"),
+            );
         }
-    });
+        held.clone().unwrap()
+    };
     w::column(ui)
         .gap(unit)
         .padding(remedy_ui::core::Insets::all(unit * 1.5))

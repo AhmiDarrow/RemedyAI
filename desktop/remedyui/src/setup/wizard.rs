@@ -1,12 +1,14 @@
-//! Traditional setup wizard. The API key stays in a signal and never enters the draft.
+//! Traditional setup wizard. The API key stays in the secret field and never enters the draft.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Duration;
 
 use remedy_ui::layout::{Align, Length};
 use remedy_ui::reactive::Signal;
 use remedy_ui::widgets as w;
-use remedy_ui::{El, Ui};
-use serde_json::json;
+use remedy_ui::{El, TextField, Ui};
+use serde_json::{Map, Value, json};
 
 use super::chrome;
 use super::messengers::{self, Messenger};
@@ -18,7 +20,9 @@ use crate::runtime::Client;
 pub struct Wizard {
     pub step: Signal<usize>,
     pub provider: Signal<String>,
+    /// Legacy copy. Live keys are read from `key_field` (`value()` is empty for secrets).
     pub api_key: Signal<String>,
+    pub key_field: Rc<RefCell<Option<TextField>>>,
     pub model_name: Signal<String>,
     pub base_url: Signal<String>,
     pub project_path: Signal<String>,
@@ -47,7 +51,8 @@ pub struct Wizard {
     pub done: Signal<bool>,
     pub talk: Signal<bool>,
     pub failure: Signal<String>,
-    pub client: Option<Client>,
+    /// Shared with the gate so a token loaded after splash is the one we save with.
+    pub client: Signal<Option<Client>>,
     booted: Signal<bool>,
 }
 
@@ -61,6 +66,7 @@ impl Wizard {
             step: Signal::new(STEP_WELCOME),
             provider: Signal::new("demo".into()),
             api_key: Signal::new(String::new()),
+            key_field: Rc::new(RefCell::new(None)),
             model_name: Signal::new(String::new()),
             base_url: Signal::new(String::new()),
             project_path: Signal::new(String::new()),
@@ -89,7 +95,7 @@ impl Wizard {
             done: Signal::new(false),
             talk: Signal::new(false),
             failure: Signal::new(String::new()),
-            client,
+            client: Signal::new(client),
             booted: Signal::new(false),
         }
     }
@@ -99,7 +105,7 @@ impl Wizard {
             return;
         }
         self.booted.set(true);
-        let Some(client) = self.client.clone() else {
+        let Some(client) = self.client.get() else {
             return;
         };
         std::thread::spawn(move || {
@@ -108,7 +114,7 @@ impl Wizard {
     }
 
     fn remember_draft(&self) {
-        let Some(client) = self.client.clone() else {
+        let Some(client) = self.client.get() else {
             return;
         };
         let body = json!({
@@ -153,7 +159,7 @@ impl Wizard {
         if step == STEP_PROVIDER
             && model::provider_blocks_next(
                 &self.provider.get(),
-                &self.api_key.get(),
+                &self.api_key_text(),
                 &self.base_url.get(),
                 self.xai_connected.get(),
             )
@@ -176,7 +182,7 @@ impl Wizard {
     }
 
     pub fn skip(&self) {
-        let Some(client) = self.client.clone() else {
+        let Some(client) = self.client.get() else {
             self.error.set(model::SERVER_UNREACHABLE.into());
             return;
         };
@@ -221,7 +227,7 @@ impl Wizard {
                 return;
             }
         }
-        let Some(client) = self.client.clone() else {
+        let Some(client) = self.client.get() else {
             self.error.set(model::SERVER_UNREACHABLE.into());
             return;
         };
@@ -272,24 +278,47 @@ impl Wizard {
         });
     }
 
-    fn settings_body(&self) -> serde_json::Value {
-        let mut messengers = Vec::new();
-        for row in self.messengers.get() {
-            if row.enabled.get() {
-                let token = row.token.get();
-                let mut item = json!({ "id": row.id, "enabled": true });
-                if !token.trim().is_empty() {
-                    item["bot_token"] = json!(token.trim());
-                }
-                messengers.push(item);
+    /// The key currently in the secret field, without removing it.
+    ///
+    /// `TextField::value` is always empty for a secret. `take_secret` would clear the
+    /// field, so Continue only checks length here and the save copies it out once.
+    fn api_key_text(&self) -> String {
+        if let Some(field) = self.key_field.borrow().clone() {
+            if !field.is_empty() {
+                return "present".into();
             }
         }
-        json!({
+        self.api_key.get()
+    }
+
+    fn take_api_key(&self) -> String {
+        if let Some(field) = self.key_field.borrow().clone() {
+            if !field.is_empty() {
+                return field.take_secret().expose().trim().to_string();
+            }
+        }
+        self.api_key.get()
+    }
+
+    fn settings_body(&self) -> Value {
+        let mut messengers = Map::new();
+        for row in self.messengers.get() {
+            if row.enabled.get() {
+                let mut item = Map::new();
+                item.insert("enabled".into(), json!(true));
+                let token = messengers::take_token(&row);
+                if !token.is_empty() {
+                    item.insert("bot_token".into(), json!(token));
+                }
+                messengers.insert(row.id, Value::Object(item));
+            }
+        }
+        let mut body = json!({
             "llm_provider": self.provider.get(),
             "llm_model": self.model_name.get(),
             "llm_base_url": self.base_url.get(),
             "custom_llm_name": self.custom_name.get(),
-            "llm_api_key": self.api_key.get(),
+            "llm_api_key": self.take_api_key(),
             "project_path": self.project_path.get(),
             "persona": model::persona_wire(&self.persona.get()),
             "user_name": self.user_name.get(),
@@ -302,12 +331,15 @@ impl Wizard {
             "close_to_tray": true,
             "vision_enabled": true,
             "vision_model_id": "smolvlm2-2.2b",
-            "messengers": messengers,
-        })
+        });
+        if !messengers.is_empty() {
+            body["messengers"] = Value::Object(messengers);
+        }
+        body
     }
 
     pub fn xai_sign_in(&self) {
-        let Some(client) = self.client.clone() else {
+        let Some(client) = self.client.get() else {
             self.xai_msg
                 .set("Enter code at xAI when the local server is running.".into());
             return;
@@ -327,12 +359,13 @@ impl Wizard {
         };
         std::thread::spawn(move || {
             let started = super::api::xai_login(&client);
+            let for_ui = started.clone();
             let _ = waker.post({
                 let busy = busy.clone();
                 let code = code.clone();
                 let url = url.clone();
                 let msg = msg.clone();
-                move || match &started {
+                move || match &for_ui {
                     Ok(v) => {
                         let user_code = v.get("user_code").and_then(|s| s.as_str()).unwrap_or("");
                         let verify = v
@@ -410,6 +443,7 @@ pub fn wizard_screen(ui: &Ui, wiz: Wizard) -> El {
             let wiz = wiz.clone();
             move || wiz.talk.set(true)
         }));
+    let ui_banner = ui.clone();
     let banner = chrome::when(
         ui,
         {
@@ -419,7 +453,7 @@ pub fn wizard_screen(ui: &Ui, wiz: Wizard) -> El {
         {
             let f = wiz.failure.clone();
             move || {
-                w::text(ui, "").variant("muted").text(move || {
+                w::text(&ui_banner, "").variant("muted").text(move || {
                     format!(
                         "The mind couldn’t start. {} Traditional setup has the same settings. You can retry the mind from Talk with Remedy, or keep going here.",
                         f.get()
@@ -446,6 +480,13 @@ pub fn wizard_screen(ui: &Ui, wiz: Wizard) -> El {
             nav(ui, wiz.clone()),
         ],
     );
+    // The seven steps are taller than the card. Scroll the stack instead of clipping it.
+    let inner = w::scroll(ui).child(inner).layout(|l| {
+        l.width = Length::Percent(1.0);
+        l.max_height = Length::Px(560.0);
+        l.grow = 0.0;
+        l.min_height = Length::Px(0.0);
+    });
     let screen = chrome::center(ui, inner, 520.0);
     let screen2 = screen.clone();
     screen.bind(move || {
@@ -461,32 +502,23 @@ fn on_step(wiz: &Wizard, step: usize) -> impl Fn() -> bool + 'static {
 }
 
 fn welcome(ui: &Ui, wiz: Wizard) -> El {
-    chrome::when(ui, on_step(&wiz, STEP_WELCOME), move || {
-        let langs = wiz.languages.clone();
+    let wiz_body = wiz.clone();
+    chrome::when_ui(ui, on_step(&wiz, STEP_WELCOME), move |ui| {
+        let langs = wiz_body.languages.clone();
+        let wiz_lang = wiz_body.clone();
+        let wiz_go = wiz_body.clone();
+        let wiz_talk = wiz_body.clone();
+        let wiz_skip = wiz_body.clone();
         chrome::stack(
             ui,
             vec![
                 w::text(ui, "Set up a provider and start chatting. Takes about a minute."),
-                chrome::when(
-                    ui,
-                    move || !langs.get().is_empty(),
-                    {
-                        let wiz = wiz.clone();
-                        move || language_select(ui, wiz.clone())
-                    },
-                ),
-                chrome::primary(ui, "Get Started", {
-                    let wiz = wiz.clone();
-                    move || wiz.advance()
+                chrome::when_ui(ui, move || !langs.get().is_empty(), move |ui| {
+                    language_select(ui, wiz_lang.clone())
                 }),
-                chrome::quiet(ui, "Talk with Remedy instead", {
-                    let wiz = wiz.clone();
-                    move || wiz.talk.set(true)
-                }),
-                chrome::quiet(ui, "Skip for now", {
-                    let wiz = wiz.clone();
-                    move || wiz.skip()
-                }),
+                chrome::primary(ui, "Get Started", move || wiz_go.advance()),
+                chrome::quiet(ui, "Talk with Remedy instead", move || wiz_talk.talk.set(true)),
+                chrome::quiet(ui, "Skip for now", move || wiz_skip.skip()),
             ],
         )
     })
@@ -510,7 +542,9 @@ fn language_select(ui: &Ui, wiz: Wizard) -> El {
 }
 
 fn provider_step(ui: &Ui, wiz: Wizard) -> El {
-    chrome::when(ui, on_step(&wiz, STEP_PROVIDER), move || {
+    let wiz_body = wiz.clone();
+    chrome::when_ui(ui, on_step(&wiz, STEP_PROVIDER), move |ui| {
+        let wiz = wiz_body.clone();
         let unit = ui.theme().spacing.unit;
         let demo = chrome::choice(
             ui,
@@ -565,13 +599,13 @@ fn provider_step(ui: &Ui, wiz: Wizard) -> El {
                 ollama,
                 w::text(ui, "Or pick a paid / full provider").variant("muted"),
                 paid,
-                chrome::when(
+                chrome::when_ui(
                     ui,
                     {
                         let p = wiz.provider.clone();
                         move || p.get() == "demo"
                     },
-                    || {
+                    |ui| {
                         w::text(
                             ui,
                             "Demo is rate-limited and not private. Prefer Ollama or your own key for real work.",
@@ -579,7 +613,7 @@ fn provider_step(ui: &Ui, wiz: Wizard) -> El {
                         .variant("muted")
                     },
                 ),
-                chrome::when(
+                chrome::when_ui(
                     ui,
                     {
                         let p = wiz.provider.clone();
@@ -587,7 +621,7 @@ fn provider_step(ui: &Ui, wiz: Wizard) -> El {
                     },
                     {
                         let wiz = wiz.clone();
-                        move || xai_box(ui, wiz.clone())
+                        move |ui| xai_box(ui, wiz.clone())
                     },
                 ),
                 chrome::when(
@@ -602,7 +636,7 @@ fn provider_step(ui: &Ui, wiz: Wizard) -> El {
                     move || key.clone(),
                 ),
                 model_field,
-                chrome::when(
+                chrome::when_ui(
                     ui,
                     {
                         let p = wiz.provider.clone();
@@ -610,10 +644,10 @@ fn provider_step(ui: &Ui, wiz: Wizard) -> El {
                     },
                     {
                         let wiz = wiz.clone();
-                        move || base_field(ui, wiz.clone())
+                        move |ui| base_field(ui, wiz.clone())
                     },
                 ),
-                chrome::when(
+                chrome::when_ui(
                     ui,
                     {
                         let p = wiz.provider.clone();
@@ -621,7 +655,7 @@ fn provider_step(ui: &Ui, wiz: Wizard) -> El {
                     },
                     {
                         let wiz = wiz.clone();
-                        move || custom_name_field(ui, wiz.clone())
+                        move |ui| custom_name_field(ui, wiz.clone())
                     },
                 ),
             ],
@@ -636,15 +670,14 @@ fn api_key_field(ui: &Ui, wiz: Wizard) -> El {
     } else {
         "API key"
     };
-    let field = w::secret_input(ui, label);
-    let f2 = field.clone();
-    let key = wiz.api_key.clone();
-    field.on_change(move || {
-        let shown = f2.value();
-        if !shown.is_empty() {
-            key.set(shown);
+    let slot = wiz.key_field.clone();
+    let field = {
+        let mut held = slot.borrow_mut();
+        if held.is_none() {
+            *held = Some(w::secret_input(ui, label));
         }
-    });
+        held.clone().unwrap()
+    };
     field.el()
 }
 
@@ -675,62 +708,34 @@ fn custom_name_field(ui: &Ui, wiz: Wizard) -> El {
 
 fn xai_box(ui: &Ui, wiz: Wizard) -> El {
     let unit = ui.theme().spacing.unit;
+    let connected = wiz.xai_connected.clone();
+    let signed_out = wiz.xai_connected.clone();
+    let busy = wiz.xai_busy.clone();
+    let code_on = wiz.xai_code.clone();
+    let wiz_sign = wiz.clone();
+    let wiz_code = wiz.clone();
     chrome::stack(
         ui,
         vec![
-            chrome::when(
-                ui,
-                {
-                    let c = wiz.xai_connected.clone();
-                    move || c.get()
-                },
-                || w::text(ui, "Signed in with xAI").variant("strong"),
-            ),
-            chrome::when(
-                ui,
-                {
-                    let c = wiz.xai_connected.clone();
-                    move || !c.get()
-                },
-                {
-                    let wiz = wiz.clone();
-                    move || {
-                        chrome::primary(ui, "Sign in with xAI", {
-                            let wiz = wiz.clone();
-                            move || wiz.xai_sign_in()
-                        })
+            chrome::when_ui(ui, move || connected.get(), |ui| {
+                w::text(ui, "Signed in with xAI").variant("strong")
+            }),
+            chrome::when_ui(ui, move || !signed_out.get(), move |ui| {
+                chrome::primary(ui, "Sign in with xAI", move || wiz_sign.xai_sign_in())
+            }),
+            chrome::when_ui(ui, move || busy.get(), |ui| w::text(ui, "Waiting…").variant("muted")),
+            chrome::when_ui(ui, move || !code_on.get().is_empty(), move |ui| {
+                let wiz = wiz_code.clone();
+                w::text(ui, "").variant("muted").text(move || {
+                    let code = wiz.xai_code.get();
+                    let url = wiz.xai_url.get();
+                    if url.is_empty() {
+                        format!("Enter code {code} at xAI.")
+                    } else {
+                        format!("Enter code {code} at xAI.\n{url}")
                     }
-                },
-            ),
-            chrome::when(
-                ui,
-                {
-                    let b = wiz.xai_busy.clone();
-                    move || b.get()
-                },
-                || w::text(ui, "Waiting…").variant("muted"),
-            ),
-            chrome::when(
-                ui,
-                {
-                    let c = wiz.xai_code.clone();
-                    move || !c.get().is_empty()
-                },
-                {
-                    let wiz = wiz.clone();
-                    move || {
-                        w::text(ui, "").variant("muted").text(move || {
-                            let code = wiz.xai_code.get();
-                            let url = wiz.xai_url.get();
-                            if url.is_empty() {
-                                format!("Enter code {code} at xAI.")
-                            } else {
-                                format!("Enter code {code} at xAI.\n{url}")
-                            }
-                        })
-                    }
-                },
-            ),
+                })
+            }),
             chrome::error_text(ui, wiz.xai_msg.clone()),
         ],
     )
@@ -738,10 +743,11 @@ fn xai_box(ui: &Ui, wiz: Wizard) -> El {
 }
 
 fn folder_step(ui: &Ui, wiz: Wizard) -> El {
-    chrome::when(ui, on_step(&wiz, STEP_FOLDER), move || {
+    let path_sig = wiz.project_path.clone();
+    chrome::when_ui(ui, on_step(&wiz, STEP_FOLDER), move |ui| {
         let field = w::text_input(ui, "Default project folder").placeholder(model::WORKSPACE_PLACEHOLDER);
         let f2 = field.clone();
-        let path = wiz.project_path.clone();
+        let path = path_sig.clone();
         let field = field.on_change(move || path.set(f2.value()));
         chrome::stack(
             ui,
@@ -754,7 +760,9 @@ fn folder_step(ui: &Ui, wiz: Wizard) -> El {
 }
 
 fn style_step(ui: &Ui, wiz: Wizard) -> El {
-    chrome::when(ui, on_step(&wiz, STEP_STYLE), move || {
+    let wiz_body = wiz.clone();
+    chrome::when_ui(ui, on_step(&wiz, STEP_STYLE), move |ui| {
+        let wiz = wiz_body.clone();
         let name = labeled_input(ui, "Your name", "e.g. Alex", wiz.user_name.clone());
         let agent = labeled_input(ui, "Partner name", "Remedy", wiz.agent_name.clone());
         let genders = chrome::stack(
@@ -829,14 +837,15 @@ fn style_card(ui: &Ui, wiz: Wizard, id: &'static str, title: &'static str, hint:
 }
 
 fn chat_step(ui: &Ui, wiz: Wizard) -> El {
-    chrome::when(ui, on_step(&wiz, model::STEP_CHAT), move || {
-        messengers::view(ui, wiz.messengers.clone())
+    let rows = wiz.messengers.clone();
+    chrome::when_ui(ui, on_step(&wiz, model::STEP_CHAT), move |ui| {
+        messengers::view(ui, rows.clone())
     })
 }
 
 fn vision_step(ui: &Ui, wiz: Wizard) -> El {
-    chrome::when(ui, on_step(&wiz, STEP_VISION), move || {
-        let ready = wiz.vision_ready.clone();
+    let ready = wiz.vision_ready.clone();
+    chrome::when_ui(ui, on_step(&wiz, STEP_VISION), move |ui| {
         chrome::stack(
             ui,
             vec![
@@ -850,7 +859,10 @@ fn vision_step(ui: &Ui, wiz: Wizard) -> El {
                     ui,
                     "Downloading local vision, voice, and helpers",
                     "Pinned SmolVLM2 2.2B plus Remedy's voice. You can keep going — this continues in the background.",
-                    move || !ready.get(),
+                    {
+                        let ready = ready.clone();
+                        move || !ready.get()
+                    },
                     || {},
                 ),
             ],
@@ -859,50 +871,36 @@ fn vision_step(ui: &Ui, wiz: Wizard) -> El {
 }
 
 fn ready_step(ui: &Ui, wiz: Wizard) -> El {
-    chrome::when(ui, on_step(&wiz, STEP_READY), move || {
+    let wiz_body = wiz.clone();
+    chrome::when_ui(ui, on_step(&wiz, STEP_READY), move |ui| {
+        let wiz = wiz_body.clone();
         let launch = w::check(
             ui,
             "Start with Windows — Optional tray + warm server",
             wiz.launch.clone(),
         );
+        let installing = wiz.installing.clone();
+        let idle = wiz.installing.clone();
+        let wiz_install = wiz.clone();
+        let wiz_idle = wiz.clone();
         chrome::stack(
             ui,
             vec![
-                chrome::when(
-                    ui,
-                    {
-                        let i = wiz.installing.clone();
-                        move || i.get()
-                    },
-                    {
-                        let wiz = wiz.clone();
-                        move || installing_block(ui, wiz.clone())
-                    },
-                ),
-                chrome::when(
-                    ui,
-                    {
-                        let i = wiz.installing.clone();
-                        move || !i.get()
-                    },
-                    {
-                        let wiz = wiz.clone();
-                        move || {
-                            chrome::stack(
-                                ui,
-                                vec![
-                                    chrome::heading(ui, "You're ready"),
-                                    chrome::sub(ui, "Enter to send · F1 for help"),
-                                    launch,
-                                    chrome::primary(ui, "Start chatting", {
-                                        let wiz = wiz.clone();
-                                        move || wiz.finish()
-                                    }),
-                                ],
-                            )
-                        }
-                    },
-                ),
+                chrome::when_ui(ui, move || installing.get(), move |ui| {
+                    installing_block(ui, wiz_install.clone())
+                }),
+                chrome::when_ui(ui, move || !idle.get(), move |ui| {
+                    let wiz = wiz_idle.clone();
+                    chrome::stack(
+                        ui,
+                        vec![
+                            chrome::heading(ui, "You're ready"),
+                            chrome::sub(ui, "Enter to send · F1 for help"),
+                            launch.clone(),
+                            chrome::primary(ui, "Start chatting", move || wiz.finish()),
+                        ],
+                    )
+                }),
             ],
         )
     })
@@ -927,36 +925,29 @@ fn installing_block(ui: &Ui, wiz: Wizard) -> El {
 }
 
 fn nav(ui: &Ui, wiz: Wizard) -> El {
-    chrome::when(
+    let step = wiz.step.clone();
+    let wiz_body = wiz.clone();
+    chrome::when_ui(
         ui,
-        {
-            let s = wiz.step.clone();
-            move || {
-                let step = s.get();
-                step != STEP_WELCOME && step != STEP_READY
-            }
-        },
         move || {
+            let step = step.get();
+            step != STEP_WELCOME && step != STEP_READY
+        },
+        move |ui| {
+            let wiz_back = wiz_body.clone();
+            let wiz_next = wiz_body.clone();
+            let wiz_skip = wiz_body.clone();
             chrome::stack(
                 ui,
                 vec![
                     chrome::actions(
                         ui,
                         vec![
-                            chrome::quiet(ui, "Back", {
-                                let wiz = wiz.clone();
-                                move || wiz.back()
-                            }),
-                            chrome::primary(ui, "Continue", {
-                                let wiz = wiz.clone();
-                                move || wiz.advance()
-                            }),
+                            chrome::quiet(ui, "Back", move || wiz_back.back()),
+                            chrome::primary(ui, "Continue", move || wiz_next.advance()),
                         ],
                     ),
-                    chrome::quiet(ui, "Skip remaining", {
-                        let wiz = wiz.clone();
-                        move || wiz.skip()
-                    }),
+                    chrome::quiet(ui, "Skip remaining", move || wiz_skip.skip()),
                 ],
             )
         },

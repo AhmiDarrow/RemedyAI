@@ -31,14 +31,46 @@ fn monogram(dark: bool) -> Option<Image> {
 
 /// The 88 px monogram used on the empty well, theme-aware (light strokes on dark).
 pub fn empty_mark(ui: &Ui) -> El {
+    mark(ui, 88.0)
+}
+
+/// Framed-size monogram for the house-rules pop-up and the name prompt.
+pub fn mark(ui: &Ui, size: f32) -> El {
     let dark = ui.theme().derive().dark;
     if let Some(image) = monogram(dark) {
         w::image(ui, image, "Remedy").layout(|l| {
-            l.width = remedy_ui::layout::Length::Px(88.0);
-            l.height = remedy_ui::layout::Length::Px(88.0);
+            l.width = remedy_ui::layout::Length::Px(size);
+            l.height = remedy_ui::layout::Length::Px(size);
             l.shrink = 0.0;
         })
     } else {
         w::text(ui, "R").variant("heading")
+    }
+}
+
+fn wordmark_image() -> Option<(Image, f32)> {
+    static LOGO: OnceLock<Option<(Image, f32)>> = OnceLock::new();
+    LOGO.get_or_init(|| {
+        let decoded = decode(include_bytes!("../../public/logo.png"), None).ok()?;
+        let w = decoded.image.width.max(1);
+        let h = decoded.image.height.max(1);
+        let aspect = w as f32 / h as f32;
+        let image = Image::new(w, h, decoded.image.pixels);
+        Some((image, aspect))
+    })
+    .clone()
+}
+
+/// The wide Remedy wordmark. `height` is in px; width follows the image.
+pub fn wordmark(ui: &Ui, height: f32) -> El {
+    if let Some((image, aspect)) = wordmark_image() {
+        let width = (height * aspect).clamp(height, 280.0);
+        w::image(ui, image, "Remedy").layout(move |l| {
+            l.width = remedy_ui::layout::Length::Px(width);
+            l.height = remedy_ui::layout::Length::Px(height);
+            l.shrink = 0.0;
+        })
+    } else {
+        w::text(ui, "Remedy").variant("heading")
     }
 }

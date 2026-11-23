@@ -15,6 +15,12 @@ pub fn when(ui: &Ui, on: impl Fn() -> bool + 'static, body: impl Fn() -> El + 's
     show(ui, on, body).fallback(move || u.el("off")).el()
 }
 
+/// `when`, but the body receives its own `Ui`. A `'static` closure cannot borrow the caller's.
+pub fn when_ui(ui: &Ui, on: impl Fn() -> bool + 'static, body: impl Fn(&Ui) -> El + 'static) -> El {
+    let ui_body = ui.clone();
+    when(ui, on, move || body(&ui_body))
+}
+
 /// Centered card on the setup wash.
 pub fn center(ui: &Ui, inner: El, width: f32) -> El {
     crate::fonts::prepare_theme(ui, &crate::fonts::Fonts::load());
@@ -95,6 +101,7 @@ fn chip(ui: &Ui, label: &'static str, index: usize, step: Signal<usize>) -> El {
         })
         .style(StylePatch::new().radius(ui.theme().radii.small));
     let wrapped2 = wrapped.clone();
+    let radius = ui.theme().radii.small;
     wrapped.bind(move || {
         let cur = step.get();
         let (bg, fg) = if index == cur {
@@ -108,7 +115,7 @@ fn chip(ui: &Ui, label: &'static str, index: usize, step: Signal<usize>) -> El {
             StylePatch::new()
                 .background(bg)
                 .foreground(fg)
-                .radius(ui.theme().radii.small),
+                .radius(radius),
         );
         let _ = &el2;
     })
@@ -134,6 +141,7 @@ pub fn choice(
         .on_click(on_press)
         .semantics(Semantics::new(Role::Button).label(title).action(Action::Click));
     let el2 = el.clone();
+    let radius = ui.theme().radii.medium;
     el.bind(move || {
         let on = selected();
         let bg = if on {
@@ -147,7 +155,7 @@ pub fn choice(
                 .background(bg)
                 .border(border)
                 .border_width(if on { 1.5 } else { 1.0 })
-                .radius(ui.theme().radii.medium),
+                .radius(radius),
         );
     })
 }
@@ -193,6 +201,7 @@ pub fn sub(ui: &Ui, text: &str) -> El {
 
 pub fn error_text(ui: &Ui, text: Signal<String>) -> El {
     let colors = ui.theme().colors.clone();
+    let ui_body = ui.clone();
     when(
         ui,
         {
@@ -200,7 +209,7 @@ pub fn error_text(ui: &Ui, text: Signal<String>) -> El {
             move || !text.get().trim().is_empty()
         },
         move || {
-            w::text(ui, "")
+            w::text(&ui_body, "")
                 .variant("muted")
                 .text({
                     let text = text.clone();

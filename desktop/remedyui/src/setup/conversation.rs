@@ -31,7 +31,7 @@ pub struct Conversation {
     pub done: Signal<bool>,
     pub session_id: Signal<String>,
     pub failure: Signal<String>,
-    pub client: Option<Client>,
+    pub client: Signal<Option<Client>>,
     started: Signal<bool>,
 }
 
@@ -57,7 +57,7 @@ impl Conversation {
             done: Signal::new(false),
             session_id: Signal::new(String::new()),
             failure,
-            client,
+            client: Signal::new(client),
             started: Signal::new(false),
         }
     }
@@ -67,11 +67,14 @@ impl Conversation {
             return;
         }
         self.started.set(true);
-        let Some(client) = self.client.clone() else {
+        let Some(client) = self.client.get() else {
             return;
         };
         let session_id = self.session_id.clone();
         let questions = self.questions.clone();
+        let skipped_boot = self.skipped.clone();
+        let draft_boot = self.draft_keys.clone();
+        let bubbles = self.bubbles.clone();
         let Ok(waker) = remedy_ui::reactive::waker() else {
             return;
         };
@@ -79,36 +82,42 @@ impl Conversation {
             .name("remedy-house-rules".into())
             .spawn(move || {
                 let _ = super::api::begin_setup(&client, "conversation");
-                let created = super::api::create_house_session(&client).ok();
-                let setup = super::api::get_json(&client, "setup").ok();
+                let setup_first = super::api::get_json(&client, "setup").ok();
+                let mut sid = setup_first
+                    .as_ref()
+                    .and_then(|v| v.get("setup_session_id"))
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if sid.is_empty() {
+                    if let Ok(created) = super::api::create_house_session(&client) {
+                        sid = created;
+                        let _ = super::api::put_setup(
+                            &client,
+                            &serde_json::json!({ "setup_session_id": sid }),
+                        );
+                    }
+                }
+                let prior = if sid.is_empty() {
+                    Vec::new()
+                } else {
+                    super::api::list_messages(&client, &sid).unwrap_or_default()
+                };
+                let setup = super::api::get_json(&client, "setup").ok().or(setup_first);
                 let _ = waker.post(move || {
-                    if let Some(id) = created {
-                        if session_id.get().is_empty() {
-                            session_id.set(id);
-                        }
+                    if !sid.is_empty() {
+                        session_id.set(sid);
                     }
                     if let Some(v) = setup {
-                        if let Some(id) = v.get("setup_session_id").and_then(|s| s.as_str()) {
-                            if !id.is_empty() {
-                                session_id.set(id.to_string());
-                            }
-                        }
-                        if let Some(arr) = v.get("questions").and_then(|q| q.as_array()) {
-                            let parsed: Vec<Question> = arr
-                                .iter()
-                                .filter_map(|q| {
-                                    Some(Question {
-                                        id: q.get("id")?.as_str()?.to_string(),
-                                        title: q.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-                                        prompt: q.get("prompt").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-                                    })
-                                })
-                                .filter(|q| !q.id.is_empty())
-                                .collect();
-                            if !parsed.is_empty() {
-                                questions.set(parsed);
-                            }
-                        }
+                        apply_session(&questions, &skipped_boot, &draft_boot, &v);
+                    }
+                    if !prior.is_empty() {
+                        bubbles.set(
+                            prior
+                                .into_iter()
+                                .map(|(id, role, text)| Bubble { id, role, text })
+                                .collect(),
+                        );
                     }
                 });
             })
@@ -137,7 +146,7 @@ impl Conversation {
                 text: text.clone(),
             });
         });
-        let Some(client) = self.client.clone() else {
+        let Some(client) = self.client.get() else {
             self.error.set(model::MIND_ANSWER_FAILED.into());
             return;
         };
@@ -163,6 +172,10 @@ impl Conversation {
         let bubbles = self.bubbles.clone();
         let busy = self.busy.clone();
         let error = self.error.clone();
+        let questions_live = self.questions.clone();
+        let skipped_live = self.skipped.clone();
+        let draft_live = self.draft_keys.clone();
+        let client_live = client.clone();
         crate::runtime::stream_message(
             &client,
             &sid,
@@ -171,6 +184,20 @@ impl Conversation {
             "",
             WorkMode::Chat,
             move |kind, data| {
+                if kind == "done" {
+                    let setup = super::api::get_json(&client_live, "setup").ok();
+                    let busy = busy.clone();
+                    let questions_live = questions_live.clone();
+                    let skipped_live = skipped_live.clone();
+                    let draft_live = draft_live.clone();
+                    let _ = waker.post(move || {
+                        busy.set(false);
+                        if let Some(v) = setup.as_ref() {
+                            apply_session(&questions_live, &skipped_live, &draft_live, v);
+                        }
+                    });
+                    return;
+                }
                 let bubbles = bubbles.clone();
                 let busy = busy.clone();
                 let error = error.clone();
@@ -178,10 +205,6 @@ impl Conversation {
                     if kind == "error" {
                         busy.set(false);
                         error.set(model::MIND_ANSWER_FAILED.into());
-                        return;
-                    }
-                    if kind == "done" {
-                        busy.set(false);
                         return;
                     }
                     let bit = crate::sse::token_text(&data);
@@ -226,7 +249,7 @@ impl Conversation {
                 text: "skip all".into(),
             });
         });
-        if let Some(client) = self.client.clone() {
+        if let Some(client) = self.client.get() {
             std::thread::spawn(move || {
                 let _ = super::api::put_setup(&client, &serde_json::json!({ "action": "skip_all" }));
             });
@@ -235,7 +258,7 @@ impl Conversation {
     }
 
     pub fn confirm(&self) {
-        let Some(client) = self.client.clone() else {
+        let Some(client) = self.client.get() else {
             self.error.set(model::SERVER_UNREACHABLE.into());
             return;
         };
@@ -251,6 +274,40 @@ impl Conversation {
                 Err(e) => error.set(e),
             });
         });
+    }
+}
+
+fn apply_session(
+    questions: &Signal<Vec<Question>>,
+    skipped: &Signal<Vec<String>>,
+    draft_keys: &Signal<Vec<String>>,
+    v: &serde_json::Value,
+) {
+    if let Some(arr) = v.get("questions").and_then(|q| q.as_array()) {
+        let parsed: Vec<Question> = arr
+            .iter()
+            .filter_map(|q| {
+                Some(Question {
+                    id: q.get("id")?.as_str()?.to_string(),
+                    title: q.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+                    prompt: q.get("prompt").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+                })
+            })
+            .filter(|q| !q.id.is_empty())
+            .collect();
+        if !parsed.is_empty() {
+            questions.set(parsed);
+        }
+    }
+    if let Some(arr) = v.get("skipped").and_then(|s| s.as_array()) {
+        skipped.set(
+            arr.iter()
+                .filter_map(|s| s.as_str().map(|x| x.to_string()))
+                .collect(),
+        );
+    }
+    if let Some(draft) = v.get("draft").and_then(|d| d.as_object()) {
+        draft_keys.set(draft.keys().cloned().collect());
     }
 }
 
@@ -289,6 +346,7 @@ pub fn conversation_view(ui: &Ui, talk: Conversation) -> El {
                 move || talk.skip_all()
             })),
         );
+    let ui_fail = ui.clone();
     let failure = chrome::when(
         ui,
         {
@@ -298,7 +356,7 @@ pub fn conversation_view(ui: &Ui, talk: Conversation) -> El {
         {
             let f = talk.failure.clone();
             move || {
-                w::text(ui, "")
+                w::text(&ui_fail, "")
                     .variant("muted")
                     .text(move || {
                         format!(
@@ -338,11 +396,9 @@ pub fn conversation_view(ui: &Ui, talk: Conversation) -> El {
 fn topic_rail(ui: &Ui, talk: Conversation) -> El {
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
-    let col = w::column(ui)
-        .gap(unit)
-        .layout(|l| l.width = Length::Px(220.0));
     let head = w::text(ui, "Topics").variant("strong");
     let list = w::column(ui).gap(unit * 0.6);
+    let ui_rows = ui.clone();
     w::for_each(
         &list,
         talk.questions.clone(),
@@ -352,10 +408,10 @@ fn topic_rail(ui: &Ui, talk: Conversation) -> El {
             let draft = talk.draft_keys.clone();
             let id = q.id.clone();
             let title = q.title.clone();
-            w::row(ui)
+            w::row(&ui_rows)
                 .justify(Justify::SpaceBetween)
-                .child(w::text(ui, title).variant("muted"))
-                .child(w::text(ui, "").variant("muted").text(move || {
+                .child(w::text(&ui_rows, title).variant("muted"))
+                .child(w::text(&ui_rows, "").variant("muted").text(move || {
                     let status = model::topic_status(&id, &skipped.get(), &draft.get());
                     model::topic_status_label(status).to_string()
                 }))
@@ -369,9 +425,9 @@ fn topic_rail(ui: &Ui, talk: Conversation) -> El {
                 .background(colors.panel)
                 .radius(ui.theme().radii.medium),
         )
+        .layout(|l| l.width = Length::Px(220.0))
         .child(head)
         .child(list)
-        .child(col)
 }
 
 fn chat_column(ui: &Ui, talk: Conversation) -> El {
@@ -380,6 +436,8 @@ fn chat_column(ui: &Ui, talk: Conversation) -> El {
     let log_parent = w::column(ui)
         .gap(unit)
         .layout(|l| l.width = Length::Percent(1.0));
+    let ui_bubbles = ui.clone();
+    let radius = ui.theme().radii.medium;
     w::for_each(
         &log_parent,
         talk.bubbles.clone(),
@@ -387,12 +445,12 @@ fn chat_column(ui: &Ui, talk: Conversation) -> El {
         move |b| {
             let mine = b.role == "user";
             let bg = if mine { colors.accent.mix_oklab(colors.bg, 0.8) } else { colors.card };
-            w::text(ui, b.text)
+            w::text(&ui_bubbles, b.text)
                 .padding(remedy_ui::core::Insets::all(unit * 1.5))
                 .style(
                     StylePatch::new()
                         .background(bg)
-                        .radius(ui.theme().radii.medium)
+                        .radius(radius)
                         .foreground(colors.text),
                 )
         },

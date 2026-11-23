@@ -606,8 +606,164 @@ pub struct ReleaseInfo {
     pub version: String,
     pub notes: String,
     pub download_url: String,
-    pub signed: bool,
+    pub signature: String,
 }
+
+/// This desktop's version. Newer than the last Tauri build (0.70.5).
+pub fn shell_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+/// Only this repository's release assets, plus the GitHub release CDNs.
+pub fn is_trusted_download_url(url: &str) -> bool {
+    if url.starts_with("https://github.com/AhmiDarrow/RemedyAI/releases/") {
+        return true;
+    }
+    if url.starts_with("https://objects.githubusercontent.com/")
+        || url.starts_with("https://release-assets.githubusercontent.com/")
+    {
+        return !url.contains("..") && url.len() < 2048;
+    }
+    false
+}
+
+pub fn normalize_installer_url(url: &str) -> String {
+    url.replace("Remedy_Desktop_", "Remedy.Desktop_")
+        .replace("Remedy Desktop_", "Remedy.Desktop_")
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OfferCopy {
+    pub title: String,
+    pub body: String,
+    pub primary: String,
+    pub secondary: String,
+}
+
+impl Default for OfferCopy {
+    fn default() -> Self {
+        Self {
+            title: OFFER_TITLE.into(),
+            body: OFFER_BODY.into(),
+            primary: OFFER_PRIMARY.into(),
+            secondary: OFFER_SECONDARY.into(),
+        }
+    }
+}
+
+fn offer_text(v: &Value, key: &str, fallback: &str) -> String {
+    v.get(key)
+        .and_then(|s| s.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+/// The pop-up copy when the server says an update offer is waiting.
+pub fn offer_from_session(session: &Value) -> Option<OfferCopy> {
+    let offer = session.get("update_offer")?;
+    if offer.get("available").and_then(|b| b.as_bool()) != Some(true) {
+        return None;
+    }
+    Some(OfferCopy {
+        title: offer_text(offer, "title", OFFER_TITLE),
+        body: offer_text(offer, "body", OFFER_BODY),
+        primary: offer_text(offer, "primary", OFFER_PRIMARY),
+        secondary: offer_text(offer, "secondary", OFFER_SECONDARY),
+    })
+}
+
+pub fn flags_from_settings(v: &Value) -> SettingsFlags {
+    SettingsFlags {
+        loaded: true,
+        needs_setup: v.get("needs_setup").and_then(|b| b.as_bool()),
+        setup_completed: v.get("setup_completed").and_then(|b| b.as_bool()),
+        config_exists: v.get("config_exists").and_then(|b| b.as_bool()),
+    }
+}
+
+pub fn user_name_from_settings(v: &Value) -> String {
+    v.get("user_name")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
+fn failure_present(v: &Value) -> bool {
+    match v {
+        Value::Null | Value::Bool(false) => false,
+        Value::String(s) => !s.trim().is_empty(),
+        Value::Bool(true) | Value::Number(_) => true,
+        Value::Array(a) => !a.is_empty(),
+        Value::Object(m) => !m.is_empty(),
+    }
+}
+
+fn failure_text(v: &Value) -> String {
+    if let Some(s) = v.as_str() {
+        return mind_failure_message(s, "");
+    }
+    let reason = v.get("reason").and_then(|r| r.as_str()).unwrap_or("");
+    let detail = v.get("detail").and_then(|r| r.as_str()).unwrap_or("");
+    mind_failure_message(reason, detail)
+}
+
+/// Stage plus the banner text when the mind failed and we land on Traditional setup.
+pub fn stage_from_session(session: &Value, revisit: bool) -> (Stage, String) {
+    let mode = session.get("mode").and_then(|s| s.as_str()).unwrap_or("");
+    let mind_ready = session.get("mind_ready").and_then(|b| b.as_bool()).unwrap_or(false);
+    let failure = session.get("mind_failure").filter(|v| failure_present(v));
+    let fallback = session
+        .get("fallback_suggested")
+        .and_then(|b| b.as_bool())
+        .unwrap_or(false);
+    let stage = stage_for(mode, mind_ready, failure.is_some() || fallback, revisit);
+    let msg = if stage == Stage::Traditional {
+        failure.map(failure_text).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    (stage, msg)
+}
+
+/// `1.2 GB / 4.0 GB`, or empty when the size is unknown.
+pub fn gb_pair(done: f64, total: f64) -> String {
+    if total <= 0.0 {
+        return String::new();
+    }
+    let gb = 1024f64 * 1024.0 * 1024.0;
+    format!("{:.1} GB / {:.1} GB", done / gb, total / gb)
+}
+
+pub fn mind_status_line(phase: &str, bytes: &str, fraction: Option<f32>) -> String {
+    let mut line = mind_phase_label(phase).to_string();
+    if !bytes.is_empty() {
+        line.push_str(" · ");
+        line.push_str(bytes);
+    }
+    if let Some(f) = fraction {
+        let pct = (f.clamp(0.0, 1.0) * 100.0).round() as u32;
+        line.push_str(&format!(" · {pct}%"));
+    }
+    line
+}
+
+pub const SETTINGS_UNREACHABLE: &str = "Could not reach your Remedy settings (the local server is not responding or this browser is not signed in to it). Your setup is untouched. Use Retry, or reopen the Web UI from the desktop app.";
+pub const UPDATE_TITLE: &str = "Remedy Update";
+pub const UPDATE_LATER: &str = "Later";
+pub const UPDATE_RELAUNCH: &str = "Update & Relaunch";
+pub const UPDATE_RETRY: &str = "Retry";
+pub const UPDATE_CLOSE: &str = "Close";
+pub const UPDATE_PLEASE_WAIT: &str = "Please wait…";
+pub const UPDATE_HANG_TIGHT: &str = "App restarts automatically — hang tight";
+pub const UPDATE_STARTING: &str = "Starting download…";
+pub const UPDATE_MANUAL: &str = "You can install manually from:";
+pub const UPDATE_GITHUB: &str = "Download the latest installer from GitHub Releases.";
+pub const UPDATE_NO_URL: &str = "No installer URL for this release.";
+pub const UPDATE_WRONG: &str = "Something went wrong.";
+pub const UPDATE_VERSION: &str = "Version";
 
 pub fn platform_keys() -> &'static [&'static str] {
     if cfg!(windows) {
@@ -644,12 +800,12 @@ pub fn parse_latest(body: &str, keys: &[&str]) -> Option<ReleaseInfo> {
             .trim()
             .to_string();
         let signature = row.get("signature").and_then(|s| s.as_str()).unwrap_or("").trim();
-        if !url.is_empty() && !signature.is_empty() {
+        if !url.is_empty() && !signature.is_empty() && is_trusted_download_url(&url) {
             return Some(ReleaseInfo {
                 version,
                 notes,
-                download_url: url,
-                signed: true,
+                download_url: normalize_installer_url(&url),
+                signature: signature.to_string(),
             });
         }
     }
@@ -662,3 +818,164 @@ pub const WORKSPACE_PLACEHOLDER: &str = "e.g. C:\\Users\\You\\Projects\\MyApp";
 pub const SERVER_UNREACHABLE: &str = "Could not reach the local server to save setup.";
 pub const XAI_SAVE_FAILED: &str = "Signed in with xAI, but could not save the provider. You can enter an API key instead.";
 pub const MIND_ANSWER_FAILED: &str = "The mind could not answer. You can retry, or switch to Traditional setup.";
+
+/// Tauri's message when this build cannot hand the installer off itself.
+pub const UPDATE_PLATFORM: &str = "In-app updates are available on Windows, Linux AppImage, and macOS. Install from GitHub Releases.";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn traditional_wins_until_a_revisit() {
+        assert_eq!(stage_for("traditional", true, false, false), Stage::Traditional);
+        assert_eq!(stage_for("traditional", true, false, true), Stage::Conversation);
+        assert_eq!(stage_for("conversation", false, true, true), Stage::Traditional);
+        assert_eq!(stage_for("conversation", false, false, true), Stage::Mind);
+        assert_eq!(stage_for("conversation", true, true, false), Stage::Conversation);
+    }
+
+    #[test]
+    fn wizard_stays_closed_when_settings_did_not_load() {
+        assert!(!needs_wizard(None));
+        assert!(!needs_wizard(Some(&SettingsFlags { loaded: false, ..SettingsFlags::default() })));
+        assert!(needs_wizard(Some(&SettingsFlags {
+            loaded: true,
+            needs_setup: Some(true),
+            ..SettingsFlags::default()
+        })));
+        assert!(needs_wizard(Some(&SettingsFlags {
+            loaded: true,
+            setup_completed: Some(false),
+            ..SettingsFlags::default()
+        })));
+        assert!(needs_wizard(Some(&SettingsFlags {
+            loaded: true,
+            config_exists: Some(false),
+            ..SettingsFlags::default()
+        })));
+        assert!(!needs_wizard(Some(&SettingsFlags {
+            loaded: true,
+            needs_setup: Some(false),
+            setup_completed: Some(true),
+            config_exists: Some(true),
+        })));
+    }
+
+    #[test]
+    fn name_prompt_waits_for_a_quiet_studio() {
+        assert!(ask_user_name(false, false, false, "", false));
+        assert!(ask_user_name(false, false, false, "  ", false));
+        assert!(!ask_user_name(true, false, false, "", false));
+        assert!(!ask_user_name(false, true, false, "", false));
+        assert!(!ask_user_name(false, false, true, "", false));
+        assert!(!ask_user_name(false, false, false, "Joe", false));
+        assert!(!ask_user_name(false, false, false, "", true));
+        assert!(reject_empty_name("  "));
+        assert!(!reject_empty_name("Ada"));
+    }
+
+    #[test]
+    fn this_desktop_is_newer_than_the_last_tauri_build() {
+        assert_eq!(shell_version(), "1.0.0");
+        assert!(is_newer("1.0.0", "0.70.5"));
+        assert!(!is_newer("0.70.5", "1.0.0"));
+        assert!(!is_newer("1.0.0", "1.0.0"));
+        assert!(is_newer("v1.0.1", "1.0.0"));
+    }
+
+    #[test]
+    fn installer_urls_stay_on_this_repo() {
+        assert!(is_trusted_download_url(
+            "https://github.com/AhmiDarrow/RemedyAI/releases/download/v1.2.0/Remedy.Desktop_1.2.0_x64-setup.exe"
+        ));
+        assert!(is_trusted_download_url(
+            "https://objects.githubusercontent.com/github-production-release-asset-abc"
+        ));
+        assert!(!is_trusted_download_url("https://objects.githubusercontent.com/a/../b"));
+        assert!(!is_trusted_download_url("https://evil.example/Remedy.Desktop.exe"));
+        assert!(!is_trusted_download_url("http://github.com/AhmiDarrow/RemedyAI/releases/a"));
+        assert_eq!(
+            normalize_installer_url("https://example/Remedy_Desktop_1.exe"),
+            "https://example/Remedy.Desktop_1.exe"
+        );
+        assert_eq!(
+            normalize_installer_url("https://example/Remedy Desktop_1.exe"),
+            "https://example/Remedy.Desktop_1.exe"
+        );
+    }
+
+    #[test]
+    fn latest_json_needs_a_signature_and_a_trusted_url() {
+        let ok = r#"{
+            "version": "1.2.0",
+            "notes": "house rules",
+            "platforms": {
+                "windows-x86_64": {
+                    "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v1.2.0/Remedy_Desktop_1.2.0.exe",
+                    "signature": "untrusted comment: signature"
+                }
+            }
+        }"#;
+        let info = parse_latest(ok, &["windows-x86_64"]).expect("release");
+        assert_eq!(info.version, "1.2.0");
+        assert!(info.download_url.contains("Remedy.Desktop_"));
+        assert!(!info.signature.is_empty());
+        let unsigned = ok.replace("untrusted comment: signature", "");
+        assert!(parse_latest(&unsigned, &["windows-x86_64"]).is_none());
+        let evil = ok.replace(
+            "https://github.com/AhmiDarrow/RemedyAI/releases/download/v1.2.0/Remedy_Desktop_1.2.0.exe",
+            "https://evil.example/setup.exe",
+        );
+        assert!(parse_latest(&evil, &["windows-x86_64"]).is_none());
+    }
+
+    #[test]
+    fn offer_falls_back_when_the_server_leaves_a_blank() {
+        assert!(offer_from_session(&json!({"update_offer": {"available": false}})).is_none());
+        let copy = offer_from_session(&json!({
+            "update_offer": {"available": true, "title": "", "body": "Custom body"}
+        }))
+        .expect("offer");
+        assert_eq!(copy.title, OFFER_TITLE);
+        assert_eq!(copy.body, "Custom body");
+        assert_eq!(copy.primary, OFFER_PRIMARY);
+        assert!(OFFER_BODY.contains("some big ways"));
+    }
+
+    #[test]
+    fn title_bar_hides_a_bar_under_three_percent() {
+        assert!(!titlebar_known(None));
+        assert!(!titlebar_known(Some(0)));
+        assert!(!titlebar_known(Some(2)));
+        assert!(titlebar_known(Some(3)));
+        let jobs = [
+            DownloadJob { id: "voice".into(), label: "Remedy's voice".into(), percent: Some(40) },
+            DownloadJob { id: "hf".into(), label: "Language model".into(), percent: None },
+        ];
+        assert_eq!(download_caption(&jobs), "Remedy's voice 40% · Language model");
+    }
+
+    #[test]
+    fn session_json_picks_the_same_stage_as_the_react_flow() {
+        let (stage, msg) = stage_from_session(
+            &json!({"mode": "traditional", "mind_ready": true}),
+            false,
+        );
+        assert_eq!(stage, Stage::Traditional);
+        assert!(msg.is_empty());
+        let (stage, msg) = stage_from_session(
+            &json!({"mode": "traditional", "mind_ready": true}),
+            true,
+        );
+        assert_eq!(stage, Stage::Conversation);
+        assert!(msg.is_empty());
+        let (stage, msg) = stage_from_session(
+            &json!({"mind_failure": {"reason": "download", "detail": ""}}),
+            true,
+        );
+        assert_eq!(stage, Stage::Traditional);
+        assert!(msg.contains("could not be downloaded"));
+    }
+}
