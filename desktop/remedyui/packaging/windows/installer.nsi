@@ -29,6 +29,9 @@
 
 Unicode true
 ManifestDPIAware true
+; Per-user, same as 0.70.5. The installed exe embeds requireAdministrator
+; and elevates when launched. Keep this `user` so silent /S /UPDATE installs
+; into %LOCALAPPDATA% are not blocked by a UAC prompt.
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 CRCCheck on

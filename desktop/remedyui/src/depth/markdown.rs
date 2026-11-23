@@ -44,7 +44,10 @@ pub fn blocks(ui: &Ui, content: &str, assistant: bool, on_image: impl Fn(String)
     let unit = ui.theme().spacing.unit;
     let mut col = w::column(ui)
         .gap(unit)
-        .layout(|l| l.width = Length::Percent(1.0));
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        });
     if text.trim().is_empty() {
         return col.child(w::text(ui, "…").variant("muted"));
     }
@@ -181,7 +184,10 @@ fn render_block(ui: &Ui, block: &Block, on_image: impl Fn(String) + Clone + 'sta
         Block::Paragraph(text) => ui
             .el("bubble-body")
             .text(inline_rich(text, chip))
-            .layout(|l| l.width = Length::Percent(1.0)),
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            }),
         Block::Code { lang, text } => {
             if is_diff_language(lang) || looks_like_unified_diff(text) || crate::depth::logic::should_render_as_diff(text, lang)
             {
@@ -199,7 +205,10 @@ fn code_block(ui: &Ui, lang: &str, text: &str) -> El {
     let mut col = w::column(ui)
         .gap(2.0)
         .padding(Insets::all(8.0))
-        .layout(|l| l.width = Length::Percent(1.0))
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
         .style(
             StylePatch::new()
                 .background(colors.bg)
@@ -223,7 +232,10 @@ fn code_block(ui: &Ui, lang: &str, text: &str) -> El {
                 .mono(true)
                 .text_size(12.5)
                 .foreground(colors.text),
-        ),
+        ).layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        }),
     )
 }
 
@@ -232,7 +244,10 @@ fn diff_block(ui: &Ui, text: &str) -> El {
     let mut col = w::column(ui)
         .gap(0.0)
         .padding(Insets::all(6.0))
-        .layout(|l| l.width = Length::Percent(1.0))
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
         .style(
             StylePatch::new()
                 .background(colors.bg)
@@ -250,8 +265,11 @@ fn diff_block(ui: &Ui, text: &str) -> El {
         };
         col = col.child(
             w::text(ui, line)
-                .nowrap()
-                .style(StylePatch::new().foreground(color).mono(true).text_size(12.0)),
+                .style(StylePatch::new().foreground(color).mono(true).text_size(12.0))
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                }),
         );
     }
     col
