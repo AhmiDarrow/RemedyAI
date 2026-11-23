@@ -161,7 +161,10 @@ fn update_button(ui: &Ui) -> El {
     let u = ui.clone();
     show(
         ui,
-        || !crate::update::offer_signal().get().is_empty(),
+        || !crate::update::offer_signal()
+            .try_get()
+            .unwrap_or_default()
+            .is_empty(),
         move || {
             let u = u.clone();
             w::button(
@@ -169,7 +172,7 @@ fn update_button(ui: &Ui) -> El {
                 {
                     let u = u.clone();
                     move || {
-                        let ver = crate::update::offer_signal().get();
+                        let ver = crate::update::offer_signal().try_get().unwrap_or_default();
                         format!("{} {ver}", messages().text(&u, "status-update"))
                     }
                 },
@@ -187,12 +190,15 @@ fn update_note(ui: &Ui) -> El {
     let u = ui.clone();
     show(
         ui,
-        || !crate::update::note_signal().get().is_empty(),
+        || !crate::update::note_signal()
+            .try_get()
+            .unwrap_or_default()
+            .is_empty(),
         move || {
             let u = u.clone();
             w::text(&u, "")
                 .variant("muted")
-                .text(move || crate::update::note_signal().get())
+                .text(move || crate::update::note_signal().try_get().unwrap_or_default())
         },
     )
     .el()
