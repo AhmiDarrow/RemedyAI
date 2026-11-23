@@ -982,3 +982,51 @@ fn settings_help_and_files_panes_are_scroll_containers() {
         "help is on screen: {names:?}"
     );
 }
+
+
+#[test]
+fn status_dock_shows_the_0_70_5_rail_controls() {
+    use remedy_ui::a11y::Role;
+    let mut app = preview_window_size(remedy_desktop::home_chat, 1180.0, 740.0);
+    app.frames(4);
+    let names = accessible_names(&app);
+    assert!(
+        app.find(Role::Toolbar, "Status").is_some(),
+        "status dock is on screen: {names:?}"
+    );
+    for label in ["Settings", "Help", "Simple", "Speak"] {
+        assert!(
+            app.find(Role::Button, label).is_some(),
+            "{label} belongs on the 0.70.5 status rail: {names:?}"
+        );
+    }
+    // Memory/Skills already live in the chat header in Simple; Usage, thinking,
+    // and approval are Advanced-only dock controls.
+    assert!(
+        app.find(Role::Button, "Usage").is_none(),
+        "Usage stays in Advanced: {names:?}"
+    );
+    assert!(app.press(Role::Button, "Simple"), "switch to Advanced");
+    app.frames(4);
+    let names = accessible_names(&app);
+    for label in ["Usage", "Advanced", "Think med", "Ask", "Web UI", "Time travel"] {
+        assert!(
+            app.find(Role::Button, label).is_some(),
+            "{label} belongs on the Advanced status rail: {names:?}"
+        );
+    }
+    assert!(app.press(Role::Button, "Help"), "open Help from the rail");
+    app.frames(2);
+}
+
+#[test]
+fn status_dock_shows_streaming_on_a_live_turn() {
+    use remedy_ui::a11y::Role;
+    let mut app = preview_window_size(remedy_desktop::home_chat_live, 1180.0, 740.0);
+    app.frames(4);
+    let names = accessible_names(&app);
+    assert!(
+        app.find(Role::Status, "Streaming").is_some() || names.iter().any(|n| n == "Streaming"),
+        "a live turn shows Streaming on the status dock: {names:?}"
+    );
+}
