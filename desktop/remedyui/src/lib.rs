@@ -5,24 +5,35 @@
 //! window talks to remedy-runtime over HTTP+SSE on 127.0.0.1:7400.
 
 mod chat;
+mod diagnostics;
 mod fonts;
 mod grove;
 mod help;
+mod layout;
 mod logo;
+mod rails;
 mod runtime;
+mod slides;
 mod settings;
 mod sidebar;
 mod sse;
 mod status;
 mod studio;
 mod time;
+mod usage;
 mod work;
 
+pub use diagnostics::DiagnosticsPanel;
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
 pub use help::HelpPanel;
 pub use runtime::Client;
 pub use settings::{preview_appearance, preview_connect, preview_error, preview_general, preview_models};
+pub use slides::{
+    automations_preview, bind_host, files_preview, scratch_preview, set_browser_body,
+    terminal_context_items, terminal_preview,
+};
 pub use studio::Studio;
+pub use usage::{UsageContext, UsageDashboard, UsagePanel, UsageWindow};
 
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::host::{TrayEvent, TrayIcon, TrayImage, TrayItem};
@@ -35,8 +46,6 @@ use remedy_ui::{App, El, Ui, WindowSpec};
 
 const SHOW: u32 = 1;
 const QUIT: u32 = 2;
-/// Matches the current app's 270 px session column.
-pub(crate) const SIDEBAR_WIDTH: f32 = 270.0;
 /// Visible 32 px hit target for tool buttons (New-session plus, close ×).
 pub(crate) const TOOL: f32 = 32.0;
 pub(crate) const GLYPH: f32 = 20.0;
@@ -113,14 +122,23 @@ pub fn app(app: &App) {
     });
 }
 
-/// Empty-well preview (goldens and visual review).
+/// Empty-well preview (goldens and visual review). Left rail open, right thin.
 pub fn home(ui: &Ui) -> El {
-    shell(ui, Studio::preview())
+    home_rails_left(ui)
 }
 
 /// Chat-feed preview with a finished turn, for side-by-side review.
 pub fn home_chat(ui: &Ui) -> El {
-    shell(ui, Studio::preview_chat())
+    shell_with(
+        ui,
+        Studio::preview_chat(),
+        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+    )
+}
+
+/// Diagnostics golden: server, host, hardware, and the hive inspector. No network.
+pub fn diagnostics_preview(ui: &Ui) -> El {
+    diagnostics::preview(ui)
 }
 
 /// Morning Grove with example plots, for goldens. It does not touch disk or the network.
@@ -134,11 +152,71 @@ pub fn help_home(ui: &Ui) -> El {
     HelpPanel::preview().view(ui)
 }
 
-/// The Studio shell: session list, well, composer, status.
+/// Filled usage tab, for goldens. No runtime calls.
+pub fn preview_usage(ui: &Ui) -> El {
+    usage::UsagePanel::preview(ui)
+}
+
+/// Filled harness tab, for goldens. No runtime calls.
+pub fn preview_usage_harness(ui: &Ui) -> El {
+    usage::UsagePanel::preview_harness(ui)
+}
+
+/// Left rail open on Sessions, right rail a thin strip. Same shell as [`home`].
+pub fn home_rails_left(ui: &Ui) -> El {
+    shell_with(
+        ui,
+        Studio::preview(),
+        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+    )
+}
+
+/// Right rail open on Settings, left rail a thin strip.
+pub fn home_rails_right(ui: &Ui) -> El {
+    let layout = layout::WorkspaceLayout {
+        left_rail: layout::RailMode::Thin,
+        left_open: false,
+        right: layout::SlideId::Settings,
+        right_width: 300,
+        right_rail: layout::RailMode::Open,
+        right_open: true,
+        ..layout::WorkspaceLayout::default()
+    };
+    shell_with(ui, Studio::preview(), rails::WorkspaceChrome::fixed(layout))
+}
+
+/// Both rails open: Sessions on the left, Settings on the right.
+pub fn home_rails_dual(ui: &Ui) -> El {
+    let layout = layout::WorkspaceLayout {
+        right: layout::SlideId::Settings,
+        right_width: 300,
+        right_rail: layout::RailMode::Open,
+        right_open: true,
+        ..layout::WorkspaceLayout::default()
+    };
+    shell_with(ui, Studio::preview(), rails::WorkspaceChrome::fixed(layout))
+}
+
+/// The Studio shell: left rail, chat well, right rail, status.
 pub fn shell(ui: &Ui, studio: Studio) -> El {
+    shell_with(ui, studio, rails::WorkspaceChrome::load())
+}
+
+fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
     fonts::prepare_theme(ui, &Fonts::load());
+    let workspace = slides::Workspace::for_studio(&studio);
+    slides::install(workspace.clone());
+    let follow_ws = workspace;
+    let follow_studio = studio.clone();
     let panel = settings::install(ui, studio.clone());
-    w::column(ui)
+    let toggle = chrome.clone();
+    let dismiss = chrome.clone();
+    let status_toggle = chrome.clone();
+    let hooks = settings::bind_studio_hooks(
+        move || toggle.toggle_settings(),
+        move || rails::dismiss_settings(&dismiss),
+    );
+    let shell = w::column(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.height = Length::Percent(1.0);
@@ -149,16 +227,23 @@ pub fn shell(ui: &Ui, studio: Studio) -> El {
                     l.width = Length::Percent(1.0);
                     l.grow = 1.0;
                     l.basis = Length::Px(0.0);
+                    l.min_height = Length::Px(0.0);
                 })
-                .child(sidebar::sidebar(ui, studio.clone()))
-                .child(w::divider(ui, true))
+                .child(rails::side(ui, chrome.clone(), layout::Side::Left, studio.clone()))
                 .child(chat::well(ui, studio.clone()))
-                .child(settings::rail(ui, panel)),
+                .child(rails::side(ui, chrome.clone(), layout::Side::Right, studio.clone())),
         )
         .child(w::divider(ui, false))
-        .child(status::status_bar(ui, studio))
+        .child(status::status_bar(ui, studio, move || status_toggle.toggle_settings()))
+        .child(rails::hosts(ui, chrome))
         .on_key_capture(move |ev| settings::shell_chord(panel, ev))
         .on_key(move |ev| settings::shell_escape(panel, ev))
+        .on_removed(move || {
+            settings::clear_studio_hooks(hooks);
+            slides::uninstall();
+        });
+    follow_ws.follow(&shell, &follow_studio);
+    shell
 }
 
 /// A square tool control: 32 px hit target, 20 px glyph, always visible.
