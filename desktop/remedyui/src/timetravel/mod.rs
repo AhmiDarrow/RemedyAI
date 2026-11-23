@@ -675,7 +675,8 @@ fn stem(ui: &Ui, color: Color, grow: bool) -> El {
 
 fn step_main(ui: &Ui, tt: &TimeTravel, studio: &Studio, message_id: String) -> El {
     let unit = ui.theme().spacing.unit;
-    let id = message_id.clone();
+    let id_when = message_id.clone();
+    let id_box = message_id.clone();
     let tt_confirm = tt.clone();
     let travel = tt.clone();
     let studio = studio.clone();
@@ -692,8 +693,8 @@ fn step_main(ui: &Ui, tt: &TimeTravel, studio: &Studio, message_id: String) -> E
         .child(
             show(
                 ui,
-                move || tt_confirm.confirm.get().as_deref() == Some(id.as_str()),
-                move || confirm_box(&u, &travel, &studio, id.clone()),
+                move || tt_confirm.confirm.get().as_deref() == Some(id_when.as_str()),
+                move || confirm_box(&u, &travel, &studio, id_box.clone()),
             )
             .el(),
         )
