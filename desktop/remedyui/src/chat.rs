@@ -1,21 +1,35 @@
 //! Chat column: session header, empty monogram, bubbles, composer.
 
+use crate::depth::logic::{self, reaction_label};
+use crate::depth::{self, react};
 use crate::logo;
 use crate::studio::{ChatMessage, Studio};
 use crate::work::{self, WorkStep};
-use crate::{messages, say, tool_button};
+use crate::{messages, say};
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::layout::{Align, Justify, Length};
 use remedy_ui::reactive::Signal;
 use remedy_ui::style::{BorderEdge, BorderSide, StylePatch};
-use remedy_ui::text::{RichText, TextStylePatch};
+use remedy_ui::core::Vec2;
+use remedy_ui::input::Key;
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui, show};
 
 /// The chat column: header, feed or empty well, composer.
 pub fn well(ui: &Ui, studio: Studio) -> El {
     let colors = ui.theme().colors.clone();
+    let thread = w::column(ui)
+        .layout(|l| {
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_width = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
+            l.width = Length::Percent(1.0);
+        })
+        .child(depth::banners::lead(ui, studio.clone()))
+        .child(feed(ui, studio.clone()))
+        .child(depth::banners::status(ui, studio.clone()));
     w::column(ui)
         .style(StylePatch::new().background(colors.bg))
         .layout(|l| {
@@ -25,8 +39,21 @@ pub fn well(ui: &Ui, studio: Studio) -> El {
             l.height = Length::Percent(1.0);
         })
         .child(header(ui, studio.clone()))
-        .child(feed(ui, studio.clone()))
-        .child(composer(ui, studio))
+        .child(
+            w::row(ui)
+                .layout(|l| {
+                    l.grow = 1.0;
+                    l.basis = Length::Px(0.0);
+                    l.min_height = Length::Px(0.0);
+                    l.width = Length::Percent(1.0);
+                })
+                .child(thread)
+                .child(depth::panels::side(ui, studio.clone())),
+        )
+        .child(depth::banners::ticker(ui, studio.clone()))
+        .child(depth::banners::library(ui, studio.clone()))
+        .child(depth::composer::composer(ui, studio.clone()))
+        .child(depth::dialogs::mount(ui, studio))
 }
 
 fn header(ui: &Ui, studio: Studio) -> El {
@@ -66,7 +93,7 @@ fn header(ui: &Ui, studio: Studio) -> El {
                 .text(move || {
                     let partner = messages().text(&u_sub, "partner-name");
                     let provider = st_sub.provider.get();
-                    let model = st_sub.model.get();
+                    let model = logic::short_model(&st_sub.model.get());
                     let active = st_sub.active.get();
                     let list = st_sub.sessions.get();
                     let count = active
@@ -95,9 +122,31 @@ fn header(ui: &Ui, studio: Studio) -> El {
         );
 
     let live_st = studio.clone();
+    let mem = studio.clone();
+    let skills_st = studio.clone();
     let chips = w::row(ui)
         .align(Align::Center)
         .gap(unit)
+        .child(panel_button(ui, studio.clone(), "memory", move || {
+            let open = mem.depth.panel.get() == depth::SidePanel::Memory;
+            if open {
+                mem.depth.panel.set(depth::SidePanel::None);
+            } else {
+                mem.depth.panel.set(depth::SidePanel::Memory);
+                mem.depth.panel_tab.set("memory".into());
+                depth::load_memory(&mem);
+            }
+        }))
+        .child(panel_button(ui, studio.clone(), "skills", move || {
+            let open = skills_st.depth.panel.get() == depth::SidePanel::Skills;
+            if open {
+                skills_st.depth.panel.set(depth::SidePanel::None);
+            } else {
+                skills_st.depth.panel.set(depth::SidePanel::Skills);
+                skills_st.depth.panel_tab.set("installed".into());
+                depth::load_skills(&skills_st);
+            }
+        }))
         .child(
             show(ui, move || live_st.streaming.get(), {
                 let u = ui.clone();
@@ -220,17 +269,28 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
             } else {
                 "Remedy".into()
             };
-            saved_turn(&u, m, &name)
+            saved_turn(&u, studio_rows.clone(), m, &name)
         },
     );
-    w::scroll(ui)
+    let scroll = w::scroll(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.grow = 1.0;
             l.basis = Length::Px(0.0);
             l.min_height = Length::Px(0.0);
         })
-        .child(col)
+        .child(col);
+    let scroller = follow_scroll(scroll, studio.clone());
+    let latest = latest_row(ui, studio);
+    w::column(ui)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
+        })
+        .child(scroller)
+        .child(latest)
 }
 
 fn empty_well(ui: &Ui, studio: Studio) -> El {
@@ -295,10 +355,28 @@ fn empty_well(ui: &Ui, studio: Studio) -> El {
         }))
 }
 
-fn saved_turn(ui: &Ui, msg: &ChatMessage, name: &str) -> El {
+fn saved_turn(ui: &Ui, studio: Studio, msg: &ChatMessage, name: &str) -> El {
     let user = msg.role == "user";
     let system = msg.role == "system";
-    let row = message_row(ui, bubble_body(ui, &msg.content), user, system, name);
+    let assistant = msg.role == "assistant";
+    let body = depth::blocks(ui, &msg.content, assistant, {
+        let st = studio.clone();
+        move |src| st.depth.show_image(src)
+    });
+    let row = message_row(ui, body, user, system, name);
+    let row = if assistant {
+        w::column(ui)
+            .gap(4.0)
+            .layout(|l| l.width = Length::Percent(1.0))
+            .child(row)
+            .child(reactions(ui, studio.clone(), msg.id.clone()))
+    } else {
+        w::column(ui)
+            .gap(4.0)
+            .layout(|l| l.width = Length::Percent(1.0))
+            .child(row)
+            .child(agent_reaction(ui, studio.clone(), msg.id.clone()))
+    };
     if msg.role != "assistant" {
         return row;
     }
@@ -625,163 +703,161 @@ fn message_row(ui: &Ui, body: El, user: bool, system: bool, name: &str) -> El {
     }
 }
 
-/// Plain text with `backtick` runs in AhmiPrint. Filled chips wait on a
-/// RichText background span; until then a run is weight 600 in the code face.
-fn bubble_body(ui: &Ui, content: &str) -> El {
-    ui.el("bubble-body")
-        .text(rich_from(content))
-        .layout(|l| l.width = Length::Percent(1.0))
-}
-
 fn live_body(ui: &Ui, text: impl Fn() -> String + 'static) -> El {
+    let chip = ui.theme().colors.accent.mix_oklab(ui.theme().colors.bg, 0.72);
     ui.el("bubble-body")
-        .text(move || rich_from(&text()))
+        .text(move || depth::inline_rich(&text(), chip))
         .layout(|l| l.width = Length::Percent(1.0))
 }
 
-fn rich_from(content: &str) -> RichText {
-    let mut rich = RichText::new();
-    let mut code = TextStylePatch::default();
-    code.families = Some(vec!["AhmiPrint".into()]);
-    code.weight = Some(600.0);
-    for (i, line) in content.split('\n').enumerate() {
-        if i > 0 {
-            rich.push_text("\n");
-        }
-        let mut is_code = false;
-        for part in line.split('`') {
-            if !part.is_empty() {
-                if is_code {
-                    rich.push_styled(part, code.clone());
-                } else {
-                    rich.push_text(part);
+fn panel_button(ui: &Ui, _studio: Studio, label: &'static str, on_press: impl Fn() + 'static) -> El {
+    let u = ui.clone();
+    w::button(ui, move || messages().text(&u, label), on_press)
+        .variant("quiet")
+        .semantics({
+            let u = ui.clone();
+            move || {
+                Semantics::new(Role::Button)
+                    .label(messages().text(&u, label))
+                    .action(Action::Click)
+            }
+        })
+}
+
+fn reactions(ui: &Ui, studio: Studio, id: String) -> El {
+    let mut row = w::row(ui).gap(4.0).align(Align::Center);
+    for (emoji, _) in logic::REACTIONS {
+        let emoji = (*emoji).to_string();
+        let st_press = studio.clone();
+        let id_press = id.clone();
+        let em_press = emoji.clone();
+        let accent = ui.theme().colors.accent;
+        let muted = ui.theme().colors.muted;
+        let st_style = studio.clone();
+        let id_style = id.clone();
+        let em_style = emoji.clone();
+        let em_name = emoji.clone();
+        row = row.child(
+            w::button(ui, emoji, move || react(&st_press, &id_press, &em_press))
+                .variant("quiet")
+                .style(move || {
+                    let on = st_style
+                        .messages
+                        .get()
+                        .iter()
+                        .find(|m| m.id == id_style)
+                        .is_some_and(|m| m.user_reaction == em_style);
+                    StylePatch::new().foreground(if on { accent } else { muted })
+                })
+                .semantics(move || {
+                    Semantics::new(Role::Button)
+                        .label(reaction_label(&em_name).to_string())
+                        .action(Action::Click)
+                }),
+        );
+    }
+    row
+}
+
+fn agent_reaction(ui: &Ui, studio: Studio, id: String) -> El {
+    let st = studio.clone();
+    let id_when = id.clone();
+    show(
+        ui,
+        move || {
+            st.messages
+                .get()
+                .iter()
+                .find(|m| m.id == id_when)
+                .is_some_and(|m| !m.agent_reaction.is_empty())
+        },
+        move || {
+            let st = studio.clone();
+            let id = id.clone();
+            w::text(ui, "").text(move || {
+                st.messages
+                    .get()
+                    .iter()
+                    .find(|m| m.id == id)
+                    .map(|m| m.agent_reaction.clone())
+                    .unwrap_or_default()
+            })
+        },
+    )
+    .el()
+}
+
+fn follow_scroll(scroll: El, studio: Studio) -> El {
+    let last_y = Signal::new(0.0f32);
+    let stuck = studio.depth.stuck.clone();
+    let scroller_key = scroll.clone();
+    let scroller_bind = scroll.clone();
+    let st_key = studio.clone();
+    scroll
+        .on_scroll(move |off| {
+            let y = off.y;
+            if y + 2.0 < last_y.get() {
+                stuck.set(false);
+            }
+            last_y.set(y);
+        })
+        .on_key(move |e| {
+            if !e.pressed {
+                return false;
+            }
+            match e.key {
+                Key::Home | Key::PageUp | Key::ArrowUp => {
+                    st_key.depth.stuck.set(false);
+                    false
+                }
+                Key::End => {
+                    st_key.depth.stuck.set(true);
+                    scroller_key.scroll_to(Vec2::new(0.0, 1.0e9));
+                    true
+                }
+                _ => false,
+            }
+        })
+        .bind({
+            let scroller = scroller_bind;
+            let st = studio.clone();
+            move || {
+                let _ = st.messages.get();
+                let _ = st.partial.get();
+                let _ = st.depth.tick.get();
+                if st.depth.stuck.get() {
+                    scroller.scroll_to(Vec2::new(0.0, 1.0e9));
                 }
             }
-            is_code = !is_code;
-        }
-    }
-    rich
+        })
 }
 
-fn composer(ui: &Ui, studio: Studio) -> El {
-    let unit = ui.theme().spacing.unit;
-    let colors = ui.theme().colors.clone();
-    let line = colors
-        .line
-        .unwrap_or(colors.accent.mix_oklab(colors.bg, 0.65));
-    let field = w::text_input(ui, messages().text(ui, "composer-placeholder"))
-        .placeholder(messages().text(ui, "composer-placeholder"));
-    let f2 = field.clone();
-    let s = studio.clone();
-    let field = field.on_submit(move || {
-        let text = f2.value();
-        if !text.trim().is_empty() {
-            f2.set_value("");
-            s.send(text);
-        }
-    });
-    let attach = {
-        let u = ui.clone();
-        tool_button(
-            ui,
-            w::Icon::File,
-            move || messages().text(&u, "composer-attach"),
-            || {},
-        )
-        .style(
-            StylePatch::new()
-                .background(colors.card)
-                .radius(18.0)
-                .foreground(colors.text),
-        )
-    };
-    let streaming = {
-        let s = studio.clone();
-        move || s.streaming.get()
-    };
-    let send_or_stop = show(ui, streaming, {
-        let s = studio.clone();
-        let u = ui.clone();
+fn latest_row(ui: &Ui, studio: Studio) -> El {
+    let st_when = studio.clone();
+    let st_go = studio.clone();
+    let u = ui.clone();
+    let u_btn = ui.clone();
+    show(
+        ui,
         move || {
-            let s = s.clone();
-            tool_button(
-                &u,
-                w::Icon::Close,
+            !st_when.depth.stuck.get()
+                && (!st_when.messages.get().is_empty() || st_when.streaming.get())
+        },
+        move || {
+            let st = st_go.clone();
+            w::button(
+                &u_btn,
                 {
                     let u = u.clone();
-                    move || messages().text(&u, "composer-stop")
+                    move || messages().text(&u, "latest")
                 },
-                move || s.stop(),
-            )
-        }
-    })
-    .fallback({
-        let s = studio.clone();
-        let f = field.clone();
-        let u = ui.clone();
-        move || {
-            tool_button(
-                &u,
-                w::Icon::Send,
-                {
-                    let u = u.clone();
-                    move || messages().text(&u, "composer-send")
-                },
-                {
-                    let s = s.clone();
-                    let f = f.clone();
-                    move || {
-                        let text = f.value();
-                        if !text.trim().is_empty() {
-                            f.set_value("");
-                            s.send(text);
-                        }
-                    }
+                move || {
+                    st.depth.stuck.set(true);
+                    st.depth.tick.update(|n| *n = n.wrapping_add(1));
                 },
             )
-        }
-    })
-    .el();
-    let shell = w::row(ui)
-        .align(Align::Center)
-        .gap(unit)
-        .padding(Insets {
-            top: unit * 1.5,
-            end: unit * 1.5,
-            bottom: unit * 1.5,
-            start: unit * 1.5,
-        })
-        .layout(|l| {
-            l.width = Length::Percent(1.0);
-            l.min_height = Length::Px(52.0);
-            l.shrink = 0.0;
-        })
-        .style(
-            StylePatch::new()
-                .background(colors.panel)
-                .radius(ui.theme().radii.large)
-                .border(line)
-                .border_width(1.0),
-        )
-        .child(attach)
-        .child(field.el().layout(|l| {
-            l.grow = 1.0;
-            l.shrink = 1.0;
-            l.min_width = Length::Px(0.0);
-        }))
-        .child(send_or_stop);
-    w::column(ui)
-        .gap(unit)
-        .padding(Insets {
-            top: unit,
-            end: unit * 4.0,
-            bottom: unit * 2.0,
-            start: unit * 4.0,
-        })
-        .layout(|l| {
-            l.width = Length::Percent(1.0);
-            l.shrink = 0.0;
-        })
-        .child(shell)
-        .child(say(ui, "composer-hint", "muted"))
+            .variant("quiet")
+        },
+    )
+    .el()
 }

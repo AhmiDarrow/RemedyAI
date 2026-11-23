@@ -27,6 +27,11 @@ impl Client {
         }
         Client { http }
     }
+
+    /// The HTTP client, base already set to `{origin}/api`.
+    pub(crate) fn http(&self) -> Http {
+        self.http.clone()
+    }
 }
 
 /// Origin override: `$REMEDY_API`, else the default loopback port.
@@ -70,7 +75,7 @@ pub fn load_token() -> Option<String> {
     None
 }
 
-fn remedy_home() -> PathBuf {
+pub(crate) fn remedy_home() -> PathBuf {
     if let Ok(h) = std::env::var("REMEDY_HOME") {
         let p = PathBuf::from(h);
         if !p.as_os_str().is_empty() {
@@ -258,15 +263,34 @@ fn parse_sessions(v: &serde_json::Value) -> Vec<Session> {
                 .get("updated_at")
                 .and_then(|t| t.as_str())
                 .map(|s| s.to_string());
+            let pinned = row.get("pinned").and_then(|p| p.as_bool()).unwrap_or(false);
+            let archived = row.get("archived").and_then(|p| p.as_bool()).unwrap_or(false);
+            let tags = row
+                .get("tags")
+                .and_then(|t| t.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let claimed = row.get("claimed").and_then(|p| p.as_bool()).unwrap_or(false);
+            let active_request_id = row
+                .get("active_request_id")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string();
             Some(Session {
                 id,
                 title,
                 project_path,
-                pinned: false,
-                archived: false,
-                tags: Vec::new(),
+                pinned,
+                archived,
+                tags,
                 message_count,
                 updated_at,
+                claimed,
+                active_request_id,
             })
         })
         .collect()
@@ -379,10 +403,23 @@ fn parse_messages(v: &serde_json::Value) -> Vec<ChatMessage> {
                 .get("created_at")
                 .and_then(|t| t.as_str())
                 .map(|s| s.to_string());
+            let user_reaction = row
+                .get("user_reaction")
+                .or_else(|| row.get("reaction"))
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string();
+            let agent_reaction = row
+                .get("agent_reaction")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string();
             Some(ChatMessage {
                 created_at,
                 steps,
                 thinking,
+                user_reaction,
+                agent_reaction,
                 ..ChatMessage::plain(id, role, content)
             })
         })
@@ -426,23 +463,31 @@ fn parse_models(v: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
-/// POST `/api/sessions/{id}/abort`.
+/// POST `/api/sessions/{id}/abort` with reason `stop`.
 pub fn abort_session(
     client: &Client,
     id: &str,
     done: impl FnOnce(Result<(), String>) + Send + 'static,
 ) {
+    abort_with(client, id, "stop", done);
+}
+
+/// POST `/api/sessions/{id}/abort` with `reason` (`stop` or `supersede`).
+pub fn abort_with(
+    client: &Client,
+    id: &str,
+    reason: &str,
+    done: impl FnOnce(Result<(), String>) + Send + 'static,
+) {
     let http = client.http.clone();
     let path = format!("sessions/{id}/abort");
+    let body = serde_json::json!({ "reason": reason });
     std::thread::Builder::new()
         .name("remedy-abort".into())
         .spawn(move || {
             let cancel = Cancel::new();
             let out = http
-                .send_blocking(
-                    Request::post(&path).json(&serde_json::json!({ "reason": "stop" })),
-                    &cancel,
-                )
+                .send_blocking(Request::post(&path).json(&body), &cancel)
                 .map(|_| ())
                 .map_err(|e| e.to_string());
             done(out);
@@ -452,7 +497,8 @@ pub fn abort_session(
 
 /// POST `/api/sessions/{id}/messages/stream` and deliver SSE frames to `on_frame`.
 ///
-/// `on_frame` runs on a worker thread; hop to the UI with a [`Waker`] before touching signals.
+/// A 409 (this session is already streaming) becomes `steered` when there are no
+/// attachments, and `queued` when there are. `on_frame` runs on a worker thread.
 pub fn stream_message(
     client: &Client,
     session_id: &str,
@@ -460,17 +506,39 @@ pub fn stream_message(
     model: &str,
     provider: &str,
     mode: WorkMode,
+    attachments: &[serde_json::Value],
     on_frame: impl Fn(String, String) + Send + Sync + 'static,
 ) {
-    let http = client.http.clone();
     let path = format!("sessions/{session_id}/messages/stream");
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "message": text,
         "model": model,
         "provider": provider,
         "plan_mode": matches!(mode, WorkMode::Plan),
         "chat_mode": matches!(mode, WorkMode::Chat),
     });
+    let files = !attachments.is_empty();
+    if files {
+        body["attachments"] = serde_json::Value::Array(attachments.to_vec());
+    }
+    drive_stream_inner(client.http(), Request::post(&path).json(&body), files, on_frame);
+}
+
+/// GET or POST an SSE request and deliver frames to `on_frame` (worker thread).
+pub fn drive_stream(
+    http: Http,
+    request: Request,
+    on_frame: impl Fn(String, String) + Send + Sync + 'static,
+) {
+    drive_stream_inner(http, request, false, on_frame);
+}
+
+fn drive_stream_inner(
+    http: Http,
+    request: Request,
+    files: bool,
+    on_frame: impl Fn(String, String) + Send + Sync + 'static,
+) {
     let parser = Arc::new(Mutex::new(Parser::new()));
     let on_frame = Arc::new(on_frame);
     let on_chunk = {
@@ -490,22 +558,32 @@ pub fn stream_message(
     };
     let on_done = {
         let on_frame = on_frame.clone();
-        move |out: Result<remedy_ui::net::Response, remedy_ui::net::NetError>| {
-            if let Err(e) = out {
+        move |out: Result<remedy_ui::net::Response, remedy_ui::net::NetError>| match out {
+            Ok(res) if res.status == 409 => busy_frame(&on_frame, files),
+            Err(e) if e.status() == Some(409) => busy_frame(&on_frame, files),
+            Err(e) => {
                 let data =
                     serde_json::json!({ "type": "error", "message": e.to_string() }).to_string();
                 on_frame("error".into(), data);
-            } else {
-                on_frame("done".into(), "{\"type\":\"done\"}".into());
             }
+            Ok(res) if !(200..300).contains(&res.status) => {
+                let data = serde_json::json!({
+                    "type": "error",
+                    "message": format!("HTTP {}", res.status),
+                })
+                .to_string();
+                on_frame("error".into(), data);
+            }
+            Ok(_) => on_frame("done".into(), "{\"type\":\"done\"}".into()),
         }
     };
-    http.stream(
-        Request::post(&path).json(&body),
-        &Cancel::new(),
-        on_chunk,
-        on_done,
-    );
+    http.stream(request, &Cancel::new(), on_chunk, on_done);
 }
 
-// Request::delete — confirm it exists; if not we'll use a generic method.
+fn busy_frame(on_frame: &Arc<impl Fn(String, String)>, files: bool) {
+    if files {
+        on_frame("queued".into(), "{}".into());
+    } else {
+        on_frame("steered".into(), "{}".into());
+    }
+}

@@ -5,16 +5,17 @@ edition = "2024"
 publish = false
 
 [dependencies]
-# RemedyUI main at 7dec309 (PRs #118–#120). Filled inline-code chips need a
-# later RichText background-span revision; this pin stays until that API exists.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "7dec309c224fd4c85c38eaa108c869fe43331768", features = ["net", "image"] }
+# RemedyUI main at c325991. That rev includes filled inline-code chips (#124),
+# Request::patch (#127), and the desktop feature Grove and Settings already use.
+# playback is the composer mic and spoken replies.
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "c325991d72d795e34e5ea18f0de7991484e151e4", features = ["net", "image", "playback", "desktop"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "7dec309c224fd4c85c38eaa108c869fe43331768", features = ["headless", "devtools", "net", "image"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "c325991d72d795e34e5ea18f0de7991484e151e4", features = ["headless", "devtools", "net", "image", "playback", "desktop"] }
 
 [profile.release]
 lto = "fat"
