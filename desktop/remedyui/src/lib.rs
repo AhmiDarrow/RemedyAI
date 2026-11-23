@@ -140,6 +140,15 @@ pub fn home_chat(ui: &Ui) -> El {
     )
 }
 
+/// Mid-turn chat: sealed bubbles already reacted to, only the last reply still live.
+pub fn home_chat_live(ui: &Ui) -> El {
+    shell_with(
+        ui,
+        Studio::preview_chat_live(),
+        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+    )
+}
+
 /// Diagnostics golden: server, host, hardware, and the hive inspector. No network.
 pub fn diagnostics_preview(ui: &Ui) -> El {
     diagnostics::preview(ui)
