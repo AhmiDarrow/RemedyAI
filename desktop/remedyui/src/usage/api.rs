@@ -164,15 +164,14 @@ pub(crate) fn range_days(index: usize) -> u32 {
 }
 
 /// Same base and bearer as [`crate::runtime::Client::new`] with [`crate::runtime::origin`]
-/// and [`crate::runtime::load_token`]. The client's HTTP handle stays private to the
-/// runtime module, so the panel builds the loopback client the same way.
+/// and [`crate::runtime::load_token`]. Grove and Settings clone this handle; the panel
+/// does too, so a later header on `Client::new` reaches the ledger calls.
 pub(crate) fn runtime_http() -> Http {
-    let base = format!("{}/api", crate::runtime::origin().trim_end_matches('/'));
-    let mut http = Http::new(base);
-    if let Some(t) = crate::runtime::load_token().filter(|t| !t.is_empty()) {
-        http = http.header("Authorization", format!("Bearer {t}"));
-    }
-    http
+    crate::runtime::Client::new(
+        &crate::runtime::origin(),
+        crate::runtime::load_token().as_deref(),
+    )
+    .http()
 }
 
 pub(crate) fn summary_path(range_days: u32, session_id: Option<&str>) -> String {
