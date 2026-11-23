@@ -62,7 +62,10 @@ pub(crate) fn speak_replies_on() -> bool {
     }
     current()
         .and_then(|s| s.voice.try_get().ok())
-        .and_then(|v| v.pointer("/settings/speak_replies").and_then(|x| x.as_bool()))
+        .and_then(|v| {
+            v.pointer("/settings/speak_replies")
+                .and_then(|x| x.as_bool())
+        })
         .unwrap_or(false)
 }
 
@@ -111,7 +114,10 @@ pub(crate) fn studio_rail_owns_close() -> bool {
 }
 
 /// `toggle` is Ctrl+, and the status button's chord. `dismiss` is Escape.
-pub(crate) fn bind_studio_hooks(toggle: impl Fn() + 'static, dismiss: impl Fn() -> bool + 'static) -> u64 {
+pub(crate) fn bind_studio_hooks(
+    toggle: impl Fn() + 'static,
+    dismiss: impl Fn() -> bool + 'static,
+) -> u64 {
     let id = STUDIO_IDS.with(|c| {
         let id = c.get();
         c.set(id.wrapping_add(1));
@@ -198,9 +204,11 @@ pub(crate) fn toggle() {
 
 pub(crate) fn rail(ui: &Ui, s: Settings) -> El {
     let ui_rail = ui.clone();
-    show(ui, move || s.open.try_get().unwrap_or(false), move || {
-        open_rail(&ui_rail, s)
-    })
+    show(
+        ui,
+        move || s.open.try_get().unwrap_or(false),
+        move || open_rail(&ui_rail, s),
+    )
     .el()
     .layout(|l| {
         l.shrink = 1.0;
@@ -214,8 +222,13 @@ fn open_rail(ui: &Ui, s: Settings) -> El {
     w::row(ui)
         .layout(|l| {
             l.height = Length::Percent(1.0);
-            l.shrink = 0.0;
+            l.min_width = Length::Px(0.0);
+            l.max_width = Length::Px(320.0);
+            l.shrink = 1.0;
+            l.grow = 0.0;
+            l.basis = Length::Px(320.0);
         })
+        .clip()
         .child(w::divider(ui, true))
         .child(view(ui, s, true))
 }
@@ -238,7 +251,9 @@ pub(crate) fn grove_rail(ui: &Ui, on_grove: impl Fn() -> bool + 'static) -> El {
     )
     .el()
     .layout(|l| {
-        l.shrink = 0.0;
+        l.shrink = 1.0;
+        l.min_width = Length::Px(0.0);
+        l.max_width = Length::Px(320.0);
         l.height = Length::Percent(1.0);
     })
 }

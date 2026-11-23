@@ -25,8 +25,8 @@ use remedy_ui::{El, Ui, show};
 use crate::depth::TodoItem;
 use crate::runtime::{self, spawn_disabled};
 use crate::studio::{ChatMessage, Studio};
-use crate::work::{StepStatus, WorkStep};
 use crate::tokens;
+use crate::work::{StepStatus, WorkStep};
 use crate::{messages, say};
 
 /// Matches `--chat-bubble-radius: 0.85rem` in the current app (at 16px).
@@ -134,22 +134,21 @@ pub fn workspace(ui: &Ui, studio: Studio) -> El {
     let unit = ui.theme().spacing.unit;
 
     let n_out = narrow.clone();
-    let p_n = prefs.clone();
-    let ui_n = ui.clone();
-    let root = w::column(ui).layout(|l| {
-        l.width = Length::Percent(1.0);
-        l.grow = 1.0;
-        l.basis = Length::Px(0.0);
-        l.min_width = Length::Px(0.0);
-        l.min_height = Length::Px(0.0);
-        l.height = Length::Percent(1.0);
-    });
-    let _ = root.clone().bind(move || {
-        let well = (ui_n.window_size().width - RAIL_SLACK).max(0.0);
-        let width = p_n.get().actions_width;
-        let _ = width;
-        n_out.set(should_stack(well));
-    });
+    let root = w::column(ui)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_width = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
+            l.height = Length::Percent(1.0);
+        })
+        // Use the well's laid-out width, not the window minus a rail guess: a
+        // Sessions sidebar or Settings rail makes the well much narrower, and
+        // the two panes must stack instead of painting over each other.
+        .on_resize(move |size| {
+            n_out.set_if_changed(should_stack(size.width));
+        });
 
     let tabs = {
         let u = ui.clone();
@@ -314,9 +313,11 @@ fn pane_pair(ui: &Ui, first: El, handle: El, second: El) -> El {
             l.width = Length::Percent(1.0);
             l.grow = 1.0;
             l.basis = Length::Px(0.0);
+            l.min_width = Length::Px(0.0);
             l.min_height = Length::Px(0.0);
             l.height = Length::Percent(1.0);
         })
+        .clip()
         .child(first)
         .child(handle)
         .child(second)
@@ -481,12 +482,20 @@ fn pane_head(
         })
         .child(
             say(ui, kicker, "strong")
-                .layout(|l| l.width = Length::Percent(1.0))
+                .truncate()
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                })
                 .style(tokens::section_kicker(&colors)),
         )
         .child(
             say(ui, sub, "muted")
-                .layout(|l| l.width = Length::Percent(1.0))
+                .truncate()
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                })
                 .style(tokens::typo(tokens::META).foreground(colors.muted)),
         );
     let mut row = w::row(ui)
@@ -850,7 +859,13 @@ fn thinking_block(ui: &Ui, id: &str, thinking: &str, collapsed: Signal<Vec<Strin
     };
     let chevron = {
         let open = open.clone();
-        move || if open() { "▾".to_string() } else { "▸".to_string() }
+        move || {
+            if open() {
+                "▾".to_string()
+            } else {
+                "▸".to_string()
+            }
+        }
     };
     let u = ui.clone();
     let header = w::row(ui)
@@ -1060,13 +1075,7 @@ fn todo_row(ui: &Ui, item: &TodoItem) -> El {
             let label = format!("{mark} {}", item.content);
             move || Semantics::new(Role::Label).label(label.clone())
         })
-        .child(
-            w::text(ui, mark).style(
-                tokens::typo(tokens::MONO)
-                    .foreground(color)
-                    .weight(650.0),
-            ),
-        )
+        .child(w::text(ui, mark).style(tokens::typo(tokens::MONO).foreground(color).weight(650.0)))
         .child(
             w::text(ui, &item.content)
                 .layout(|l| {
@@ -1074,7 +1083,11 @@ fn todo_row(ui: &Ui, item: &TodoItem) -> El {
                     l.shrink = 1.0;
                     l.min_width = Length::Px(0.0);
                 })
-                .style(tokens::typo(tokens::BODY).foreground(colors.text).text_size(13.5)),
+                .style(
+                    tokens::typo(tokens::BODY)
+                        .foreground(colors.text)
+                        .text_size(13.5),
+                ),
         )
 }
 

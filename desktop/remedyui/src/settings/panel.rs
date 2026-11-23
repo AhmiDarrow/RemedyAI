@@ -43,12 +43,15 @@ pub fn view(ui: &Ui, s: Settings, rail: bool) -> El {
         .child(footer(ui, s));
     if rail {
         root.layout(|l| {
-            l.width = Length::Px(320.0);
-            l.min_width = Length::Px(320.0);
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
             l.max_width = Length::Px(320.0);
             l.height = Length::Percent(1.0);
-            l.shrink = 0.0;
+            l.shrink = 1.0;
+            l.grow = 0.0;
+            l.basis = Length::Px(320.0);
         })
+        .clip()
     } else {
         bits::fill(root)
     }
@@ -188,7 +191,10 @@ fn search_row(ui: &Ui, s: Settings) -> El {
         .gap(form::gap(ui))
         .fill_width()
         .child(w::icon(ui, w::Icon::Search, 16.0))
-        .child(input.grow(1.0))
+        .child(input.grow(1.0).layout(|l| {
+            l.min_width = Length::Px(0.0);
+            l.shrink = 1.0;
+        }))
         .on_key(move |ev| {
             if ev.pressed && ev.key == Key::Escape && logic::searching(&s.search.get()) {
                 state::clear_search(s);

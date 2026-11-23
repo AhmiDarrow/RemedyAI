@@ -39,16 +39,23 @@ pub fn notice(ui: &Ui, tone: &str, text: impl IntoProp<String>) -> El {
         "ok" => colors.ok,
         _ => colors.accent,
     };
-    w::text(ui, text).variant(if tone == "error" { "error" } else { "small" }).style(
-        StylePatch::new()
-            .background(colors.card.mix_oklab(tint, 0.18))
-            .foreground(colors.text)
-            .radius(ui.theme().radii.small)
-            .padding(Insets::all(gap(ui) * 1.5)),
-    )
+    w::text(ui, text)
+        .variant(if tone == "error" { "error" } else { "small" })
+        .style(
+            StylePatch::new()
+                .background(colors.card.mix_oklab(tint, 0.18))
+                .foreground(colors.text)
+                .radius(ui.theme().radii.small)
+                .padding(Insets::all(gap(ui) * 1.5)),
+        )
 }
 
-pub fn bound_line(ui: &Ui, name: impl Into<String>, value: Signal<String>, placeholder: &str) -> El {
+pub fn bound_line(
+    ui: &Ui,
+    name: impl Into<String>,
+    value: Signal<String>,
+    placeholder: &str,
+) -> El {
     let field = w::text_input(ui, name).placeholder(placeholder);
     let initial = value.get();
     if !initial.is_empty() {
@@ -59,7 +66,11 @@ pub fn bound_line(ui: &Ui, name: impl Into<String>, value: Signal<String>, place
         value.set_if_changed(watch.value());
     });
     let sync = field.clone();
-    let el = field.el();
+    let el = field.el().layout(|l| {
+        l.width = Length::Percent(1.0);
+        l.min_width = Length::Px(0.0);
+        l.shrink = 1.0;
+    });
     el.clone().bind(move || {
         let next = value.get();
         if sync.value() != next {
@@ -101,7 +112,10 @@ pub fn pick(ui: &Ui, name: &str, pairs: &[(String, String)], value: Signal<Strin
     let ids_from_value = ids;
     Effect::new(move || {
         let current = value.get();
-        let i = ids_from_value.iter().position(|id| id == &current).unwrap_or(0);
+        let i = ids_from_value
+            .iter()
+            .position(|id| id == &current)
+            .unwrap_or(0);
         selected.set_if_changed(i);
     });
     el
@@ -127,7 +141,10 @@ pub fn segments(ui: &Ui, name: &str, pairs: &[(&str, &str)], value: Signal<Strin
     let ids_from_value = ids;
     Effect::new(move || {
         let current = value.get();
-        let i = ids_from_value.iter().position(|id| id == &current).unwrap_or(0);
+        let i = ids_from_value
+            .iter()
+            .position(|id| id == &current)
+            .unwrap_or(0);
         selected.set_if_changed(i);
     });
     el
@@ -143,11 +160,22 @@ pub fn toggle(ui: &Ui, title: &str, description: &str, value: Signal<bool>) -> E
     }
 }
 
-pub fn action(ui: &Ui, title: impl Into<String>, variant: &'static str, on_press: impl Fn() + 'static) -> El {
+pub fn action(
+    ui: &Ui,
+    title: impl Into<String>,
+    variant: &'static str,
+    on_press: impl Fn() + 'static,
+) -> El {
     w::button(ui, title.into(), on_press).variant(variant)
 }
 
-pub fn flow(ui: &Ui, title: &str, summary: &str, immediate: bool, build: impl Fn(&Ui) -> El + 'static) -> El {
+pub fn flow(
+    ui: &Ui,
+    title: &str,
+    summary: &str,
+    immediate: bool,
+    build: impl Fn(&Ui) -> El + 'static,
+) -> El {
     let title_owned = title.to_string();
     let build: std::rc::Rc<dyn Fn(&Ui) -> El> = std::rc::Rc::new(build);
     let open_title = title_owned.clone();
@@ -169,21 +197,30 @@ fn open_flow(ui: &Ui, title: String, immediate: bool, build: std::rc::Rc<dyn Fn(
     } else {
         "Use Save in Settings to apply your changes."
     };
-    let holder: std::rc::Rc<std::cell::RefCell<Option<w::Modal>>> = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let holder: std::rc::Rc<std::cell::RefCell<Option<w::Modal>>> =
+        std::rc::Rc::new(std::cell::RefCell::new(None));
     let close_holder = holder.clone();
     let done = action(ui, "Done", "primary", move || {
         if let Some(modal) = close_holder.borrow().as_ref() {
             modal.close();
         }
     });
-    let body = stack(ui).child(build(ui)).child(hint(ui, note.to_string())).child(done);
+    let body = stack(ui)
+        .child(build(ui))
+        .child(hint(ui, note.to_string()))
+        .child(done);
     let modal = w::modal(ui, title, body, true);
     *holder.borrow_mut() = Some(modal);
 }
 
 /// A collapsible section. Hidden (no gap) when the category, mode, or search
 /// leaves it out. The body stays mounted so fields keep what was typed.
-pub fn block(ui: &Ui, s: Settings, id: &'static str, body: impl Fn(&Ui, Settings) -> El + 'static) -> El {
+pub fn block(
+    ui: &Ui,
+    s: Settings,
+    id: &'static str,
+    body: impl Fn(&Ui, Settings) -> El + 'static,
+) -> El {
     let Some(sec) = logic::section(id) else {
         return ui.el("settings-missing");
     };
@@ -192,7 +229,13 @@ pub fn block(ui: &Ui, s: Settings, id: &'static str, body: impl Fn(&Ui, Settings
     let summary = logic::shown_summary(sec).to_string();
     let mark = w::text(ui, {
         let s = s;
-        move || -> String { if s.is_open(id) { "▾".into() } else { "▸".into() } }
+        move || -> String {
+            if s.is_open(id) {
+                "▾".into()
+            } else {
+                "▸".into()
+            }
+        }
     });
     let head = w::row(ui)
         .align(Align::Center)
@@ -231,22 +274,29 @@ pub fn block(ui: &Ui, s: Settings, id: &'static str, body: impl Fn(&Ui, Settings
         .child(inner);
     let card_flag = card.clone();
     card.clone().bind(move || {
-        let visible = logic::section_visible(sec, &s.category.get(), &s.mode.get(), &s.search.get());
+        let visible =
+            logic::section_visible(sec, &s.category.get(), &s.mode.get(), &s.search.get());
         card_flag.clone().hidden(!visible);
     });
     card
 }
 
 pub fn swatch(ui: &Ui, bg: Color, accent: Color, split: Option<Color>) -> El {
-    let left = ui.el("swatch-l").style(StylePatch::new().background(bg)).layout(|l| {
-        l.width = Length::Px(14.0);
-        l.height = Length::Px(14.0);
-    });
+    let left = ui
+        .el("swatch-l")
+        .style(StylePatch::new().background(bg))
+        .layout(|l| {
+            l.width = Length::Px(14.0);
+            l.height = Length::Px(14.0);
+        });
     let right_color = split.unwrap_or(accent);
-    let right = ui.el("swatch-r").style(StylePatch::new().background(right_color)).layout(|l| {
-        l.width = Length::Px(14.0);
-        l.height = Length::Px(14.0);
-    });
+    let right = ui
+        .el("swatch-r")
+        .style(StylePatch::new().background(right_color))
+        .layout(|l| {
+            l.width = Length::Px(14.0);
+            l.height = Length::Px(14.0);
+        });
     w::row(ui).child(left).child(right)
 }
 
