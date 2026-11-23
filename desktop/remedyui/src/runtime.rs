@@ -30,7 +30,8 @@ impl Client {
 
     /// A clone of the bearer-backed client.
     ///
-    /// Chat-depth, Grove, and Settings share it. Cloning shares the cookie jar
+    /// Setup, chat-depth, Grove, diagnostics, and the rails call through it.
+    /// Settings moves one onto a worker thread. Cloning shares the cookie jar
     /// and the headers. The base is already `{origin}/api`.
     pub(crate) fn http(&self) -> Http {
         self.http.clone()
@@ -78,11 +79,20 @@ pub fn load_token() -> Option<String> {
     None
 }
 
-pub(crate) fn remedy_home() -> PathBuf {
+/// Remedy's home directory. `$REMEDY_HOME`, then `%USERPROFILE%\.remedy`, then `$HOME/.remedy`.
+///
+/// Nothing here deletes that folder. Callers only add their own files under it.
+pub fn remedy_home() -> PathBuf {
     if let Ok(h) = std::env::var("REMEDY_HOME") {
         let p = PathBuf::from(h);
         if !p.as_os_str().is_empty() {
             return p;
+        }
+    }
+    if let Ok(h) = std::env::var("USERPROFILE") {
+        let p = PathBuf::from(h);
+        if !p.as_os_str().is_empty() {
+            return p.join(".remedy");
         }
     }
     std::env::var("HOME")

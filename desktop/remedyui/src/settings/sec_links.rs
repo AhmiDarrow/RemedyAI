@@ -660,7 +660,7 @@ fn start_google(s: Settings, err: Signal<String>, close_when: Signal<bool>) {
             Ok(v) => {
                 let url = state::jstr(&v, "auth_url", "");
                 if !url.is_empty() {
-                    bits::open_http(&url);
+                    bits::open_in_browser_rail(&url);
                 }
                 s.banner.set("Continue in the browser, then return here.".into());
                 close_when.set(true);

@@ -115,3 +115,30 @@ pub fn persona(ui: &Ui, name: &str, user: bool, size: f32) -> El {
             l.shrink = 0.0;
         })
 }
+
+fn wordmark_image() -> Option<(Image, f32)> {
+    static LOGO: OnceLock<Option<(Image, f32)>> = OnceLock::new();
+    LOGO.get_or_init(|| {
+        let decoded = decode(include_bytes!("../../public/logo.png"), None).ok()?;
+        let w = decoded.image.width.max(1);
+        let h = decoded.image.height.max(1);
+        let aspect = w as f32 / h as f32;
+        let image = Image::new(w, h, decoded.image.pixels);
+        Some((image, aspect))
+    })
+    .clone()
+}
+
+/// The wide Remedy wordmark. `height` is in px; width follows the image.
+pub fn wordmark(ui: &Ui, height: f32) -> El {
+    if let Some((image, aspect)) = wordmark_image() {
+        let width = (height * aspect).clamp(height, 280.0);
+        w::image(ui, image, "Remedy").layout(move |l| {
+            l.width = remedy_ui::layout::Length::Px(width);
+            l.height = remedy_ui::layout::Length::Px(height);
+            l.shrink = 0.0;
+        })
+    } else {
+        w::text(ui, "Remedy").variant("heading")
+    }
+}
