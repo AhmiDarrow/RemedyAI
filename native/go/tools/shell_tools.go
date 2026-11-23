@@ -39,6 +39,7 @@ const (
 	jobTailDefault   = 100
 	jobTailMaxLines  = 1000
 	jobTailMaxBytes  = 256 << 10
+	jobListTailLines = 20
 	jobIDRandomBytes = 6
 )
 
@@ -52,11 +53,9 @@ func RegisterShellTools(registry *Registry) error {
 	}
 
 	if err := registry.Register(Descriptor{
-		ID:      "bash",
-		Version: 1,
-		Description: "Run a shell command string (cmd on Windows, bash on POSIX) and capture its output. " +
-			"Foreground commands return exit_code. Set background:true to return a job_id for a long-running command, then follow it with the jobs tool. " +
-			"Cancellation and timeout kill the whole process tree.",
+		ID:           "bash",
+		Version:      1,
+		Description:  bashToolDescription(),
 		Runtime:      RuntimeZig,
 		Risk:         RiskMutation,
 		Capabilities: []string{"process.spawn"},
@@ -68,6 +67,7 @@ func RegisterShellTools(registry *Registry) error {
 				"cwd":{"type":"string","description":"Absolute working directory. Defaults to the bound project folder; a directory outside the allowed scope is clamped back to it."},
 				"timeout_ms":{"type":"integer","minimum":1,"maximum":600000,"description":"Kill the command after this long (default 600000, ten minutes). On timeout exit_code is 1 and timed_out is true."},
 				"background":{"type":"boolean","description":"Start the command and return a job_id immediately instead of waiting. Use the jobs tool to tail or kill it."},
+				"wsl":{"type":"boolean","description":"Run the command in WSL bash instead of the host shell. Windows drive-letter paths (C:\\...) in the command and cwd are converted to /mnt/c/.... Only available on Windows."},
 				"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Extra environment variables merged into the child's environment. Module-search paths (PYTHONPATH, NODE_PATH, …) are refused."},
 				"write_roots":{"type":"array","items":{"type":"string","minLength":1},"maxItems":16,"description":"Write-jail roots (bound by the runtime from the session; model-supplied values are ignored)"},
 				` + propHomeDir + `,
@@ -89,7 +89,9 @@ func RegisterShellTools(registry *Registry) error {
 				"job_id":{"type":"string"},
 				"status":{"type":"string"},
 				"log_path":{"type":"string"},
-				"pid":{"type":"integer","minimum":0}
+				"pid":{"type":"integer","minimum":0},
+				"shell":{"type":"string"},
+				"scratch_dir":{"type":"string"}
 			},
 			"additionalProperties":false
 		}`),
@@ -98,10 +100,9 @@ func RegisterShellTools(registry *Registry) error {
 	}
 
 	if err := registry.Register(Descriptor{
-		ID:      "jobs",
-		Version: 1,
-		Description: "List, tail or kill the background commands started by bash with background:true. " +
-			"list and tail only read; kill terminates the whole process tree.",
+		ID:           "jobs",
+		Version:      1,
+		Description:  jobsToolDescription(),
 		Runtime:      RuntimeGo,
 		Risk:         RiskMutation,
 		Capabilities: []string{"process.spawn"},
@@ -147,6 +148,7 @@ func executeBash(ctx context.Context, request Request) (Result, error) {
 		Cwd        string            `json:"cwd"`
 		TimeoutMS  uint32            `json:"timeout_ms"`
 		Background bool              `json:"background"`
+		WSL        bool              `json:"wsl"`
 		Env        map[string]string `json:"env"`
 		WriteRoots []string          `json:"write_roots"`
 		HomeDir    string            `json:"home_dir"`
@@ -159,8 +161,9 @@ func executeBash(ctx context.Context, request Request) (Result, error) {
 	if command == "" {
 		return Result{}, fmt.Errorf("%w: command is required — pass the command line as a single string", ErrInvalidInput)
 	}
-	if body.Cwd != "" && !filepath.IsAbs(body.Cwd) {
-		return Result{}, fmt.Errorf("%w: cwd must be an absolute path when set (got %q)", ErrInvalidInput, body.Cwd)
+	cwd, err := normalizeBashCwd(body.Cwd)
+	if err != nil {
+		return Result{}, err
 	}
 	if bad := modelDeniedEnvKey(body.Env); bad != "" {
 		return Result{}, fmt.Errorf(
@@ -168,14 +171,43 @@ func executeBash(ctx context.Context, request Request) (Result, error) {
 				"before the command runs. Put the path on the command line instead",
 			ErrInvalidInput, bad)
 	}
-	argv, err := platformShellArgv(command)
-	if err != nil {
-		return Result{}, err
+
+	var (
+		argv      []string
+		shellKind string
+	)
+	if body.WSL {
+		if runtime.GOOS != "windows" {
+			return Result{}, fmt.Errorf("%w: wsl:true is only available on Windows", ErrInvalidInput)
+		}
+		command = rewriteWindowsPathsForWSL(command)
+		if cwd != "" {
+			cwd = windowsPathToWSL(cwd)
+		}
+		argv, err = wslArgvFor(command, cwd, lookPath)
+		if err != nil {
+			return Result{}, err
+		}
+		shellKind = hostShellWSL
+	} else {
+		// Intercept file-search / file-read idioms on Windows. A reminder in
+		// the prompt is not enough; the tool has to refuse to run them.
+		if runtime.GOOS == "windows" {
+			if msg := interceptWindowsFileIdiom(command); msg != "" {
+				return Result{}, fmt.Errorf("%s", msg)
+			}
+		}
+		argv, shellKind, err = platformShellArgvFor(runtime.GOOS, command, os.Getenv, lookPath)
+		if err != nil {
+			return Result{}, err
+		}
 	}
-	spec := shellSpawnSpec{argv: argv, cwd: body.Cwd, env: body.Env, writeRoots: body.WriteRoots}
+
+	spec := shellSpawnSpec{argv: argv, cwd: cwd, env: body.Env, writeRoots: body.WriteRoots}
+	spec, scratch := withScratchEnv(spec, body.HomeDir, body.SessionID)
 
 	if body.Background {
-		return startBackgroundJob(ctx, spec, command, body.HomeDir, body.SessionID)
+		return startBackgroundJob(ctx, spec, command, body.HomeDir, body.SessionID, shellKind, scratch)
 	}
 
 	timeout := body.TimeoutMS
@@ -195,7 +227,7 @@ func executeBash(ctx context.Context, request Request) (Result, error) {
 	}
 	stdout, outClipped := clipHeadTail(capture.stdout)
 	stderr, errClipped := clipHeadTail(capture.stderr)
-	out, err := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"exit_code":        capture.exitCode,
 		"timed_out":        capture.timedOut,
 		"stdout":           stdout,
@@ -203,45 +235,26 @@ func executeBash(ctx context.Context, request Request) (Result, error) {
 		"stdout_truncated": outClipped,
 		"stderr_truncated": errClipped,
 		"command":          command,
-		"cwd":              body.Cwd,
-	})
+		"cwd":              cwd,
+		"shell":            shellKind,
+	}
+	if scratch != "" {
+		payload["scratch_dir"] = scratch
+	}
+	out, err := json.Marshal(payload)
 	return Result{Output: out}, err
 }
 
-// platformShellArgv wraps a command string in the host shell. The wrapper is
-// the argv the classifier inspects: policy.isDangerousProcess recognises cmd,
-// bash, sh and pwsh as wrappers and scans the payload that follows.
-func platformShellArgv(command string) ([]string, error) {
-	if runtime.GOOS == "windows" {
-		shell := filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
-		if _, err := os.Stat(shell); err != nil {
-			resolved, lookErr := lookPath("cmd.exe")
-			if lookErr != nil {
-				return nil, fmt.Errorf("%w: no command shell on this host: %v", ErrInvalidInput, lookErr)
-			}
-			shell = resolved
-		}
-		abs, err := filepath.Abs(shell)
-		if err != nil {
-			return nil, fmt.Errorf("%w: command shell path %q is unusable: %v", ErrInvalidInput, shell, err)
-		}
-		// /d skips AutoRun, /s keeps the quoting of the command string intact.
-		return []string{abs, "/d", "/s", "/c", command}, nil
+func normalizeBashCwd(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
 	}
-	shell, err := lookPath("bash")
-	flag := "-lc"
-	if err != nil {
-		shell, err = lookPath("sh")
-		flag = "-c"
-		if err != nil {
-			return nil, fmt.Errorf("%w: neither bash nor sh is on PATH: %v", ErrInvalidInput, err)
-		}
+	cwd := normalizeInputPath(raw, userHomeDir(), hostPathOS())
+	if !isAbsPath(cwd, hostPathOS()) && !filepath.IsAbs(cwd) {
+		return "", fmt.Errorf("%w: cwd must be an absolute path when set (got %q)", ErrInvalidInput, raw)
 	}
-	abs, absErr := filepath.Abs(shell)
-	if absErr != nil {
-		return nil, fmt.Errorf("%w: shell path %q is unusable: %v", ErrInvalidInput, shell, absErr)
-	}
-	return []string{abs, flag, command}, nil
+	return cwd, nil
 }
 
 // clipHeadTail keeps the first and last 64 KB of a captured stream. A verbose
@@ -321,7 +334,7 @@ func newJobID() string {
 	return "job_" + hex.EncodeToString(buf)
 }
 
-func startBackgroundJob(ctx context.Context, spec shellSpawnSpec, command, home, sessionID string) (Result, error) {
+func startBackgroundJob(ctx context.Context, spec shellSpawnSpec, command, home, sessionID, shellKind, scratch string) (Result, error) {
 	dir, err := jobsDir(home, sessionID)
 	if err != nil {
 		return Result{}, err
@@ -360,14 +373,19 @@ func startBackgroundJob(ctx context.Context, spec shellSpawnSpec, command, home,
 	// goroutine and never on the call's context.
 	go superviseJob(dir, record, proc, logFile)
 
-	out, err := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"job_id":   id,
 		"status":   "running",
 		"log_path": record.LogPath,
 		"pid":      int64(proc.PID),
 		"command":  command,
 		"cwd":      spec.cwd,
-	})
+		"shell":    shellKind,
+	}
+	if scratch != "" {
+		payload["scratch_dir"] = scratch
+	}
+	out, err := json.Marshal(payload)
 	return Result{Output: out}, err
 }
 
@@ -539,7 +557,14 @@ func listJobs(dir string) (Result, error) {
 	}
 	rows := make([]map[string]any, 0, len(records))
 	for _, record := range records {
-		rows = append(rows, jobPublic(record))
+		row := jobPublic(record)
+		if tail, truncated, err := tailFile(record.LogPath, jobListTailLines); err == nil {
+			row["log_tail"] = tail
+			if truncated {
+				row["log_truncated"] = true
+			}
+		}
+		rows = append(rows, row)
 	}
 	out, err := json.Marshal(map[string]any{"action": "list", "jobs": rows, "count": len(rows)})
 	return Result{Output: out}, err
