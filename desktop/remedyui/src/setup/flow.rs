@@ -12,8 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use remedy_ui::layout::{Align, Justify, Length};
-use remedy_ui::net::Request;
-use remedy_ui::reactive::{Cancel, Signal, Waker};
+use remedy_ui::reactive::{Signal, Waker};
 use remedy_ui::widgets as w;
 use remedy_ui::{App, El, Ui, show};
 use serde_json::{Value, json};
@@ -135,7 +134,22 @@ impl Gate {
         let enter_studio = self.enter_studio.clone();
         let offer_checked = self.offer_checked.clone();
         let spawned = thread::Builder::new().name("remedy-boot".into()).spawn(move || {
-            runtime::ensure_running();
+            let outcome = runtime::ensure_running();
+            if matches!(
+                outcome,
+                runtime::EnsureOutcome::MissingBinary | runtime::EnsureOutcome::SpawnFailed
+            ) {
+                let epoch_now = Arc::clone(&epoch);
+                let _ = waker.post(move || {
+                    if epoch_now.load(Ordering::SeqCst) != ticket {
+                        return;
+                    }
+                    splash.set("error".into());
+                    error.set(model::SPLASH_FAILED.into());
+                    surface.set(Surface::Error);
+                });
+                return;
+            }
             let started_at = Instant::now();
             let mut attempts = 0u32;
             let mut up = false;
@@ -152,8 +166,7 @@ impl Gate {
                         splash_now.set(label.into());
                     }
                 });
-                let client = Client::new(&runtime::origin(), runtime::load_token().as_deref());
-                if ping(&client) {
+                if runtime::wait_until_up(&runtime::origin(), runtime::load_token().as_deref(), 1) {
                     up = true;
                     break;
                 }
@@ -498,12 +511,6 @@ fn spawn_put(slot: Signal<Option<Client>>, body: Value) {
             let _ = api::put_setup(&client, &body);
         })
         .ok();
-}
-
-fn ping(client: &Client) -> bool {
-    let cancel = Cancel::new();
-    client.http().send_blocking(Request::get("ping"), &cancel).is_ok()
-        || client.http().send_blocking(Request::get("status"), &cancel).is_ok()
 }
 
 fn open_data_folder() {

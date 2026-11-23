@@ -331,7 +331,7 @@ fn restart(studio: &Studio, chrome: Chrome, ui: &Ui) {
         chrome.push_output("restart skipped (REMEDY_DESKTOP_NO_SPAWN)");
         return;
     }
-    runtime::ensure_running();
+    let _ = runtime::ensure_running();
     chrome.toast(ui, messages().text(ui, "toast-restartAsk"));
     chrome.push_output("restart requested");
     if let Some(client) = studio.client() {

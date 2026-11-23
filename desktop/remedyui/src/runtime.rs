@@ -108,16 +108,33 @@ pub(crate) fn remedy_home_from(
     PathBuf::from(base).join(".remedy")
 }
 
+/// What [`ensure_running`] did. The splash uses `MissingBinary` to fail
+/// immediately instead of waiting ~90s for a server that will never start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnsureOutcome {
+    /// Tests, or an explicit opt-out.
+    Disabled,
+    /// `/api/ping` or `/api/status` already answered.
+    AlreadyUp,
+    /// A sidecar process was started.
+    Spawned,
+    /// No `remedy-runtime` (or `remedy`) next to the app or on PATH.
+    MissingBinary,
+    /// The process could not be started.
+    SpawnFailed,
+}
+
 /// Starts `remedy-runtime --serve` (or `remedy serve`) if nothing is already on the port.
-pub fn ensure_running() {
+pub fn ensure_running() -> EnsureOutcome {
     if spawn_disabled() {
-        return;
+        return EnsureOutcome::Disabled;
     }
     if ping_blocking(&origin(), load_token().as_deref()) {
-        return;
+        return EnsureOutcome::AlreadyUp;
     }
     let Some(cmd) = find_runtime() else {
-        return;
+        log_desktop("sidecar missing: no remedy-runtime next to the app or on PATH");
+        return EnsureOutcome::MissingBinary;
     };
     let mut command = Command::new(&cmd);
     if file_name_starts(&cmd, "remedy-runtime") {
@@ -128,11 +145,60 @@ pub fn ensure_running() {
     if let Ok(key) = std::env::var("REMEDY_API_KEY") {
         command.env("REMEDY_API_KEY", key);
     }
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _ = command.spawn();
+    if let Some(dir) = cmd.parent() {
+        command.current_dir(dir);
+    }
+    command.stdin(Stdio::null()).stdout(Stdio::null());
+    let log_path = remedy_home().join("logs").join("desktop.log");
+    if let Some(parent) = log_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+        Ok(f) => {
+            command.stderr(Stdio::from(f));
+        }
+        Err(_) => {
+            command.stderr(Stdio::null());
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    match command.spawn() {
+        Ok(child) => {
+            log_desktop(&format!(
+                "sidecar spawned pid={} cmd={}",
+                child.id(),
+                cmd.display()
+            ));
+            // The child is supervised only by staying alive; we must not wait
+            // on it here. Forgetting the handle is the point.
+            std::mem::forget(child);
+            EnsureOutcome::Spawned
+        }
+        Err(err) => {
+            log_desktop(&format!("sidecar spawn failed cmd={} err={err}", cmd.display()));
+            EnsureOutcome::SpawnFailed
+        }
+    }
+}
+
+fn log_desktop(msg: &str) {
+    let path = remedy_home().join("logs").join("desktop.log");
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        use std::io::Write;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| format!("{}.{:03}", d.as_secs(), d.subsec_millis()))
+            .unwrap_or_else(|_| "0".into());
+        let _ = writeln!(f, "{ts} {msg}");
+    }
 }
 
 fn file_name_starts(p: &Path, prefix: &str) -> bool {
@@ -142,60 +208,121 @@ fn file_name_starts(p: &Path, prefix: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// File names the installer and the old Tauri bundle use, plus PATH fallbacks.
+pub(crate) const RUNTIME_NAMES: &[&str] = &[
+    "remedy-runtime.exe",
+    "remedy-runtime",
+    "remedy-runtime-x86_64-pc-windows-msvc.exe",
+    "remedy-runtime-x86_64-pc-windows-msvc",
+    "remedy-runtime-aarch64-pc-windows-msvc.exe",
+    "remedy-runtime-aarch64-pc-windows-msvc",
+    "remedy-runtime-x86_64-unknown-linux-gnu",
+    "remedy-runtime-aarch64-unknown-linux-gnu",
+    "remedy-runtime-x86_64-apple-darwin",
+    "remedy-runtime-aarch64-apple-darwin",
+];
+
 fn find_runtime() -> Option<PathBuf> {
-    let names = [
-        "remedy-runtime",
-        "remedy-runtime-x86_64-unknown-linux-gnu",
-        "remedy-runtime-aarch64-unknown-linux-gnu",
-    ];
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            for name in names {
-                let p = dir.join(name);
-                if p.is_file() {
-                    return Some(p);
-                }
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    let cwd = std::env::current_dir().ok();
+    find_runtime_from(exe_dir.as_deref(), cwd.as_deref(), std::env::var_os("PATH").as_deref())
+}
+
+/// Locate the sidecar given explicit search roots. Used by tests so a
+/// `remedy-runtime.exe` next to the app is found on every host, including Linux CI.
+pub(crate) fn find_runtime_from(
+    exe_dir: Option<&Path>,
+    cwd: Option<&Path>,
+    path: Option<&std::ffi::OsStr>,
+) -> Option<PathBuf> {
+    if let Some(dir) = exe_dir {
+        for name in RUNTIME_NAMES {
+            if let Some(p) = existing_file(&dir.join(name)) {
+                return Some(p);
             }
         }
     }
-    if let Ok(cwd) = std::env::current_dir() {
+    if let Some(cwd) = cwd {
         for rel in ["bin", "desktop/bin"] {
-            for name in names {
-                let p = cwd.join(rel).join(name);
-                if p.is_file() {
+            for name in RUNTIME_NAMES {
+                if let Some(p) = existing_file(&cwd.join(rel).join(name)) {
                     return Some(p);
                 }
             }
         }
         for rel in [
             ".venv/bin/remedy",
+            ".venv/Scripts/remedy.exe",
+            ".venv/Scripts/remedy",
             "../.venv/bin/remedy",
+            "../.venv/Scripts/remedy.exe",
             "../../.venv/bin/remedy",
+            "../../.venv/Scripts/remedy.exe",
         ] {
-            let p = cwd.join(rel);
-            if p.is_file() {
+            if let Some(p) = existing_file(&cwd.join(rel)) {
                 return Some(p);
             }
         }
     }
     if let Ok(uv) = std::env::var("UV_PROJECT_ENVIRONMENT") {
-        let p = PathBuf::from(uv).join("bin").join("remedy");
-        if p.is_file() {
-            return Some(p);
+        for name in ["remedy", "remedy.exe"] {
+            if let Some(p) = existing_file(&PathBuf::from(&uv).join("bin").join(name)) {
+                return Some(p);
+            }
+            if let Some(p) = existing_file(&PathBuf::from(&uv).join("Scripts").join(name)) {
+                return Some(p);
+            }
         }
     }
-    which("remedy-runtime").or_else(|| which("remedy"))
+    which_in("remedy-runtime", path).or_else(|| which_in("remedy", path))
+}
+
+/// `path` is a file, or on Windows the same path with `.exe` appended.
+fn existing_file(p: &Path) -> Option<PathBuf> {
+    if p.is_file() {
+        return Some(p.to_path_buf());
+    }
+    if p.extension().is_none() {
+        let exe = p.with_extension("exe");
+        if exe.is_file() {
+            return Some(exe);
+        }
+    }
+    None
 }
 
 fn which(name: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let p = dir.join(name);
-        if p.is_file() {
+    which_in(name, std::env::var_os("PATH").as_deref())
+}
+
+fn which_in(name: &str, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    let path = path?;
+    for dir in std::env::split_paths(path) {
+        if let Some(p) = existing_file(&dir.join(name)) {
             return Some(p);
         }
     }
     None
+}
+
+/// Probe `/api/ping` then `/api/status` up to `attempts` times, with the same
+/// backoff the splash uses (250ms doubling to 2s). True once the backend answers.
+pub fn wait_until_up(origin: &str, token: Option<&str>, attempts: u32) -> bool {
+    let attempts = attempts.max(1);
+    for n in 1..=attempts {
+        if ping_blocking(origin, token) {
+            return true;
+        }
+        if n == attempts {
+            break;
+        }
+        let shift = (n - 1).min(3);
+        let wait = 250u64.saturating_mul(1u64 << shift).min(2000);
+        std::thread::sleep(std::time::Duration::from_millis(wait));
+    }
+    false
 }
 
 fn ping_blocking(origin: &str, token: Option<&str>) -> bool {
@@ -688,5 +815,45 @@ mod tests {
     fn remedy_home_env_wins() {
         let home = remedy_home_from(Some(r"D:\custom\.remedy"), Some(r"C:\Users\Ada"), Some("/home/ada"));
         assert_eq!(home, PathBuf::from(r"D:\custom\.remedy"));
+    }
+
+    #[test]
+    fn finds_windows_runtime_exe_next_to_the_app() {
+        use super::{find_runtime_from, wait_until_up};
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let dir = std::env::temp_dir().join(format!("remedy-find-runtime-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("remedy-runtime.exe");
+        std::fs::write(&exe, b"not-a-real-binary").unwrap();
+        let found = find_runtime_from(Some(&dir), None, None).expect("exe next to the app");
+        assert_eq!(found, exe);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // A listening backend is a connected state: wait_until_up must return
+        // true once /api/ping answers, which is what the splash waits for.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let body = b"{\"ok\":true}";
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(resp.as_bytes());
+                let _ = stream.write_all(body);
+            }
+        });
+        let origin = format!("http://127.0.0.1:{port}");
+        assert!(
+            wait_until_up(&origin, None, 8),
+            "splash must reach a connected state when the backend answers /api/ping"
+        );
+        let _ = server.join();
     }
 }
