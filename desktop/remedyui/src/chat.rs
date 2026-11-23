@@ -324,9 +324,11 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.grow = 1.0;
+            l.shrink = 1.0;
             l.basis = Length::Px(0.0);
             l.min_height = Length::Px(0.0);
         })
+        .semantics(Semantics::new(Role::Region).label("Chat messages"))
         .child(col);
     let scroller = follow_scroll(scroll, studio.clone());
     let latest = latest_row(ui, studio);
@@ -392,34 +394,48 @@ fn empty_well(ui: &Ui, studio: Studio) -> El {
             ),
         );
     }
-    w::column(ui)
-        .align(Align::Center)
-        .justify(Justify::Center)
-        .gap(unit * 3.0)
-        .padding(Insets::all(tokens::GUTTER * 2.0))
+    // Scroll so the greeting and starter cards stay above the composer when
+    // the well is shorter than this column (1180×740 and smaller).
+    w::scroll(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.grow = 1.0;
+            l.shrink = 1.0;
             l.basis = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
         })
-        .child(logo::empty_mark(ui))
-        .child(title)
+        .semantics(Semantics::new(Role::Region).label("Home starters"))
         .child(
-            say(ui, "ready-hint", "muted")
+            w::column(ui)
+                .align(Align::Center)
+                .justify(Justify::Center)
+                .gap(unit * 3.0)
+                .padding(Insets::all(tokens::GUTTER * 2.0))
                 .layout(|l| {
-                    l.max_width = Length::Px(440.0);
                     l.width = Length::Percent(1.0);
+                    l.grow = 1.0;
+                    l.basis = Length::Px(0.0);
+                    l.min_height = Length::Px(0.0);
                 })
-                .style(tokens::typo(tokens::BODY).foreground(colors.muted)),
-        )
-        .child(starters)
-        .child(
-            say(ui, "ready-keys", "muted")
-                .layout(|l| {
-                    l.max_width = Length::Px(440.0);
-                    l.width = Length::Percent(1.0);
-                })
-                .style(tokens::typo(tokens::META).foreground(colors.muted)),
+                .child(logo::empty_mark(ui))
+                .child(title)
+                .child(
+                    say(ui, "ready-hint", "muted")
+                        .layout(|l| {
+                            l.max_width = Length::Px(440.0);
+                            l.width = Length::Percent(1.0);
+                        })
+                        .style(tokens::typo(tokens::BODY).foreground(colors.muted)),
+                )
+                .child(starters)
+                .child(
+                    say(ui, "ready-keys", "muted")
+                        .layout(|l| {
+                            l.max_width = Length::Px(440.0);
+                            l.width = Length::Percent(1.0);
+                        })
+                        .style(tokens::typo(tokens::META).foreground(colors.muted)),
+                ),
         )
 }
 
