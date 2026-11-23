@@ -1,7 +1,7 @@
 //! Memory and Skills, opened from the chat header.
 
 use super::{
-    ask_delete_skill, install_named, load_memory, load_skills, open_skill, save_skill, search_library,
+    ask_delete_skill, install_named, load_skills, open_skill, save_skill, search_library,
     search_memory, trust_skill, SidePanel, SkillRow,
 };
 use crate::messages;
@@ -16,13 +16,17 @@ use remedy_ui::{show, El, Ui};
 /// The right-hand column. Empty until Memory or Skills is opened.
 pub fn side(ui: &Ui, studio: Studio) -> El {
     let st = studio.clone();
+    let u = ui.clone();
     show(
         ui,
         move || st.depth.panel.get() != SidePanel::None,
-        move || match studio.depth.panel.get() {
-            SidePanel::Memory => memory(ui, studio.clone()),
-            SidePanel::Skills => skills(ui, studio.clone()),
-            SidePanel::None => w::column(ui),
+        move || {
+            let studio = st.clone();
+            match studio.depth.panel.get() {
+                SidePanel::Memory => memory(&u, studio.clone()),
+                SidePanel::Skills => skills(&u, studio),
+                SidePanel::None => w::column(&u),
+            }
         },
     )
     .el()
@@ -157,7 +161,7 @@ fn skills(ui: &Ui, studio: Studio) -> El {
     )
     .fallback({
         let st = studio.clone();
-        move || library(&u_lib, st)
+        move || library(&u_lib, st.clone())
     })
     .el()
     .layout(|l| {
@@ -186,7 +190,7 @@ fn installed(ui: &Ui, studio: Studio) -> El {
     let list = w::for_each(&list, rows, |row: &SkillRow| row.name.clone(), {
         let st = studio.clone();
         let u = u.clone();
-        move |row| skill_button(&u, st.clone(), row.name, row.description.clone(), false)
+        move |row| skill_button(&u, st.clone(), row.name.clone(), row.description.clone(), false)
     });
     let editor = skill_editor(ui, studio);
     w::column(ui)

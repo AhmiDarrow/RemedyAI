@@ -578,7 +578,7 @@ fn refresh_files(
     }
     last_q.set(q.clone());
     studio.depth.suggest_gen.update(|n| *n += 1);
-    let gen = studio.depth.suggest_gen.get();
+    let generation = studio.depth.suggest_gen.get();
     let Some(client) = studio.runtime() else {
         files.set(Vec::new());
         return;
@@ -591,7 +591,7 @@ fn refresh_files(
     };
     api::spawn_json(&client, Request::get(&path), move |out| {
         let _ = wake.post(move || {
-            if studio.depth.suggest_gen.get() != gen {
+            if studio.depth.suggest_gen.get() != generation {
                 return;
             }
             let names = match out {
@@ -705,6 +705,9 @@ fn queue_list(ui: &Ui, studio: Studio, field: remedy_ui::TextField, editing: Sig
                         item.text.chars().take(80).collect()
                     };
                     let id = item.id;
+                    let f = f.clone();
+                    let st = st.clone();
+                    let editing = editing.clone();
                     w::button(&u, label, move || {
                         let found = st.depth.queue.get().into_iter().find(|q| q.id == id);
                         let Some(found) = found else {

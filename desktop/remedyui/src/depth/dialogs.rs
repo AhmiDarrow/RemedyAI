@@ -28,23 +28,23 @@ pub fn mount(ui: &Ui, studio: Studio) -> El {
             l.height = Length::Px(0.0);
         })
         .bind(move || {
-            let gen = st.depth.confirm_gen.get();
-            if gen != seen_confirm.get() {
-                seen_confirm.set(gen);
+            let confirm_ticket = st.depth.confirm_gen.get();
+            if confirm_ticket != seen_confirm.get() {
+                seen_confirm.set(confirm_ticket);
                 if let Some(confirm) = st.depth.confirm.get() {
                     open_confirm(&u, &st, confirm);
                 }
             }
-            let gen = st.depth.concurrent_gen.get();
-            if gen != seen_turns.get() {
-                seen_turns.set(gen);
+            let turn_ticket = st.depth.concurrent_gen.get();
+            if turn_ticket != seen_turns.get() {
+                seen_turns.set(turn_ticket);
                 if st.depth.concurrent_open.get() {
                     open_turns(&u, &st);
                 }
             }
-            let gen = st.depth.lightbox_gen.get();
-            if gen != seen_image.get() {
-                seen_image.set(gen);
+            let image_ticket = st.depth.lightbox_gen.get();
+            if image_ticket != seen_image.get() {
+                seen_image.set(image_ticket);
                 if let Some(src) = st.depth.lightbox.get() {
                     open_lightbox(&u, &st, src);
                 }
@@ -76,9 +76,9 @@ fn open_confirm(ui: &Ui, studio: &Studio, confirm: Confirm) {
             w::DialogButton::new(messages().text(ui, "cancel"), "quiet", move || {
                 st_no.depth.confirm.set(None);
             }),
-            w::DialogButton::new(danger, "danger_solid", move || match confirm_yes {
-                Confirm::RemoveProject(path) => remove_project(&st_yes, &path),
-                Confirm::DeleteSkill(name) => delete_skill(&st_yes, &name),
+            w::DialogButton::new(danger, "danger_solid", move || match &confirm_yes {
+                Confirm::RemoveProject(path) => remove_project(&st_yes, path),
+                Confirm::DeleteSkill(name) => delete_skill(&st_yes, name),
             }),
         ],
     );

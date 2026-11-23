@@ -985,7 +985,7 @@ fn project_move_menu(ui: &Ui, studio: &Studio, id: &str) -> Vec<w::MenuItem> {
         let st = studio.clone();
         let sid = id.to_string();
         items.push(w::MenuItem::new(label, move || {
-            assign_project(&st, &sid, Some(path));
+            assign_project(&st, &sid, Some(path.clone()));
         }));
     }
     items
@@ -1000,7 +1000,7 @@ fn session_menu(ui: &Ui, studio: &Studio, id: &str, project: Option<String>) -> 
     let id_down = id.to_string();
     let mut items = vec![
         w::MenuItem::new(messages().text(ui, "rename"), move || {
-            st_ren.depth.rename_id.set(Some(id_ren));
+            st_ren.depth.rename_id.set(Some(id_ren.clone()));
         }),
         w::MenuItem::new(messages().text(ui, "move-up"), move || {
             move_session_order(&st_up, &id_up, -1);
