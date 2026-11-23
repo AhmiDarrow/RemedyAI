@@ -1,21 +1,21 @@
 //! Approval, plan, life, library, stall, cost, todos, and the live trace.
 
 use super::logic::{self, show_life_banner};
-use super::{Approval, submit};
 use super::{
-    SubmitKind, approve_plan, background_title, dismiss_library, focused_steps, install_library,
+    approve_plan, background_title, dismiss_library, focused_steps, install_library,
     refresh_banners, request_plan_changes, resolve_approval, send_life, show_plan, stall_seconds,
-    visible_approval,
+    visible_approval, SubmitKind,
 };
+use super::{submit, Approval};
 use crate::messages;
-use crate::studio::Studio;
+use crate::studio::{Studio, WorkMode};
 use crate::work::WorkStep;
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::layout::{Align, Length};
 use remedy_ui::style::StylePatch;
 use remedy_ui::widgets as w;
-use remedy_ui::{El, Ui, show};
+use remedy_ui::{show, El, Ui};
 
 /// Approval, life-task, and plan, in that order, above the feed.
 pub fn lead(ui: &Ui, studio: Studio) -> El {
@@ -34,7 +34,7 @@ pub fn lead(ui: &Ui, studio: Studio) -> El {
         })
         .child(approval(ui, studio.clone()))
         .child(life(ui, studio.clone()))
-        .child(plan(ui, studio))
+        .child(plan(ui, studio, false))
 }
 
 /// Remote-busy, background job, stall, todos, progress, and the live trace.
@@ -176,19 +176,79 @@ fn scope_button(
     })
 }
 
-fn plan(ui: &Ui, studio: Studio) -> El {
+pub(crate) fn plan(ui: &Ui, studio: Studio, for_dock: bool) -> El {
     let st = studio.clone();
     let u = ui.clone();
     show(
         ui,
         move || {
-            st.depth
+            let mode = st.mode.get();
+            let visible = st
+                .depth
                 .plan
                 .get()
                 .as_ref()
-                .is_some_and(|card| show_plan(card, st.mode.get()))
+                .is_some_and(|card| show_plan(card, mode));
+            visible && (for_dock == (mode == WorkMode::Plan))
         },
         move || plan_card(&u, studio.clone()),
+    )
+    .el()
+}
+
+pub(crate) fn plan_empty(ui: &Ui, studio: Studio) -> El {
+    let st = studio.clone();
+    let u = ui.clone();
+    show(
+        ui,
+        move || {
+            st.mode.get() == WorkMode::Plan
+                && !st
+                    .depth
+                    .plan
+                    .get()
+                    .as_ref()
+                    .is_some_and(|card| show_plan(card, WorkMode::Plan))
+        },
+        move || {
+            let colors = u.theme().colors.clone();
+            w::column(&u)
+                .gap(8.0)
+                .padding(Insets::all(12.0))
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                })
+                .style(
+                    StylePatch::new()
+                        .background(colors.card)
+                        .border(colors.line.unwrap_or(colors.muted).with_alpha(0.5))
+                        .border_width(1.0)
+                        .radius(u.theme().radii.medium),
+                )
+                .child(
+                    w::text(&u, {
+                        let u = u.clone();
+                        move || messages().text(&u, "plan-empty")
+                    })
+                    .variant("strong")
+                    .layout(|l| {
+                        l.width = Length::Percent(1.0);
+                        l.min_width = Length::Px(0.0);
+                    }),
+                )
+                .child(
+                    w::text(&u, {
+                        let u = u.clone();
+                        move || messages().text(&u, "plan-empty-hint")
+                    })
+                    .variant("muted")
+                    .layout(|l| {
+                        l.width = Length::Percent(1.0);
+                        l.min_width = Length::Px(0.0);
+                    }),
+                )
+        },
     )
     .el()
 }
@@ -208,42 +268,64 @@ fn plan_card(ui: &Ui, studio: Studio) -> El {
     let st_no = studio.clone();
     let st_re = studio.clone();
     let u = ui.clone();
-    card_shell(ui, &title, &body)
-        .child(w::text(ui, &count).variant("muted"))
-        .child(
-            w::row(ui)
-                .gap(8.0)
-                .child(
-                    w::button(
-                        ui,
-                        move || messages().text(&u, "plan-approve"),
-                        move || approve_plan(&st_ok),
-                    )
-                    .variant("primary"),
+    let mut card_el = card_shell(ui, &title, &body).child(w::text(ui, &count).variant("muted"));
+    if !card.steps.is_empty() {
+        let mut steps = w::column(ui).gap(4.0).layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        });
+        for (i, (title, reason)) in card.steps.iter().enumerate() {
+            let line = if reason.is_empty() {
+                format!("{}. {title}", i + 1)
+            } else {
+                format!("{}. {title} — {reason}", i + 1)
+            };
+            steps = steps.child(w::text(ui, line).variant("muted").layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            }));
+        }
+        card_el = card_el.child(steps);
+    }
+    card_el.child(
+        w::row(ui)
+            .gap(8.0)
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.wrap = true;
+                l.min_width = Length::Px(0.0);
+            })
+            .child(
+                w::button(
+                    ui,
+                    move || messages().text(&u, "plan-approve"),
+                    move || approve_plan(&st_ok),
                 )
-                .child(
-                    w::button(
-                        ui,
-                        {
-                            let u = ui.clone();
-                            move || messages().text(&u, "plan-changes")
-                        },
-                        move || request_plan_changes(&st_no),
-                    )
-                    .variant("quiet"),
+                .variant("primary"),
+            )
+            .child(
+                w::button(
+                    ui,
+                    {
+                        let u = ui.clone();
+                        move || messages().text(&u, "plan-changes")
+                    },
+                    move || request_plan_changes(&st_no),
                 )
-                .child(
-                    w::button(
-                        ui,
-                        {
-                            let u = ui.clone();
-                            move || messages().text(&u, "plan-refresh")
-                        },
-                        move || refresh_banners(&st_re),
-                    )
-                    .variant("quiet"),
-                ),
-        )
+                .variant("quiet"),
+            )
+            .child(
+                w::button(
+                    ui,
+                    {
+                        let u = ui.clone();
+                        move || messages().text(&u, "plan-refresh")
+                    },
+                    move || refresh_banners(&st_re),
+                )
+                .variant("quiet"),
+            ),
+    )
 }
 
 fn life(ui: &Ui, studio: Studio) -> El {

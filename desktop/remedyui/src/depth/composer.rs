@@ -3,9 +3,9 @@
 use super::api;
 use super::logic::{self, at_query, filter_commands, slash_query};
 use super::{Attachment, SubmitKind, add_paths, pick_attachments, submit, toggle_mic};
-use crate::tokens;
 use crate::messages;
-use crate::studio::Studio;
+use crate::studio::{Studio, WorkMode};
+use crate::tokens;
 use crate::{Glyph, tool_button};
 use remedy_ui::core::Insets;
 use remedy_ui::host::DropEffect;
@@ -30,7 +30,7 @@ struct Offer {
 /// The composer under the feed: field, files, suggestions, queue, and send.
 pub fn composer(ui: &Ui, studio: Studio) -> El {
     let unit = ui.theme().spacing.unit;
-    let placeholder = messages().text(ui, "composer-placeholder");
+    let placeholder = composer_placeholder(ui, &studio);
     let field = w::text_area(ui, placeholder.clone())
         .placeholder(placeholder)
         .submit_on_enter(true);
@@ -164,6 +164,7 @@ pub fn composer(ui: &Ui, studio: Studio) -> El {
     let f_draft = field.clone();
     let st_draft = studio.clone();
     let seen = Signal::new(0u64);
+    let u_ph = ui.clone();
     let _ = field.el().bind(move || {
         let n = st_draft.depth.draft_nonce.get();
         if n != seen.get() {
@@ -172,6 +173,11 @@ pub fn composer(ui: &Ui, studio: Studio) -> El {
             f_draft.set_value(&text);
             st_draft.depth.composer_value.set(text);
         }
+        let _ = st_draft.mode.get();
+        let _ = st_draft.streaming.get();
+        f_draft
+            .clone()
+            .placeholder(composer_placeholder(&u_ph, &st_draft));
     });
 
     let shell = field_row(ui, &studio, &field, unit);
@@ -251,7 +257,45 @@ pub fn composer(ui: &Ui, studio: Studio) -> El {
         .child(vision)
         .child(drop_hint)
         .child(shell)
-        .child(crate::say(ui, "composer-hint", "muted").style(tokens::typo(tokens::META)))
+        .child(composer_hint_line(ui, studio))
+}
+
+fn composer_placeholder(ui: &Ui, studio: &Studio) -> String {
+    let key = if studio.streaming.get() {
+        "composer-placeholder-queue"
+    } else {
+        match studio.mode.get() {
+            WorkMode::Chat => "composer-placeholder-chat",
+            WorkMode::Plan => "composer-placeholder-plan",
+            WorkMode::Build => "composer-placeholder",
+        }
+    };
+    messages().text(ui, key)
+}
+
+fn composer_hint_line(ui: &Ui, studio: Studio) -> El {
+    let st = studio.clone();
+    let u = ui.clone();
+    let colors = ui.theme().colors.clone();
+    w::text(ui, "")
+        .variant("muted")
+        .text(move || {
+            let key = if st.streaming.get() {
+                "composer-hint-queue"
+            } else {
+                match st.mode.get() {
+                    WorkMode::Chat => "composer-hint-chat",
+                    WorkMode::Plan => "composer-hint-plan",
+                    WorkMode::Build => "composer-hint",
+                }
+            };
+            messages().text(&u, key)
+        })
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .style(tokens::typo(tokens::META).foreground(colors.muted))
 }
 
 fn field_row(ui: &Ui, studio: &Studio, field: &remedy_ui::TextField, unit: f32) -> El {
