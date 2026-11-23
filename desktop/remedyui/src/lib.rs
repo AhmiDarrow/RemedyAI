@@ -1,4 +1,4 @@
-//! Remedy Desktop: Studio in RemedyUI.
+//! Remedy Desktop: Grove is home, and Studio is one tap away.
 //!
 //! Visual language follows the current Tauri/React app, then goes a little
 //! further (always-visible row actions, a 16 px Remedy Sans UI face). The
@@ -6,6 +6,7 @@
 
 mod chat;
 mod fonts;
+mod grove;
 mod logo;
 mod runtime;
 mod sidebar;
@@ -41,10 +42,12 @@ pub(crate) const SELECT_MARK: f32 = 3.0;
 pub fn app(app: &App) {
     app.keep_running(true);
     let studio = Studio::new();
+    let grove = grove::Grove::new(studio.clone(), true);
     if !runtime::spawn_disabled() {
         runtime::ensure_running();
         let client = runtime::Client::new(&runtime::origin(), runtime::load_token().as_deref());
-        studio.attach_client(client);
+        studio.attach_client(client.clone());
+        grove.attach_client(client);
     }
     let a = app.clone();
     let win = app.open(
@@ -54,25 +57,36 @@ pub fn app(app: &App) {
             .persist_geometry("main"),
         move |ui, window| {
             let (u, win, a) = (ui.clone(), window.clone(), a.clone());
-            ui.root().child(shell(ui, studio.clone())).bind(move || {
-                let m = messages();
-                win.set_title(m.text(&u, "app-title"));
-                let item = |id, label: String| TrayItem::Item {
-                    id,
-                    label,
-                    enabled: true,
-                    default: id == SHOW,
-                };
-                a.set_tray(Some(TrayIcon::new(
-                    m.text(&u, "app-title"),
-                    tray_icon(),
-                    vec![
-                        item(SHOW, m.text(&u, "tray-show")),
-                        TrayItem::Separator,
-                        item(QUIT, m.text(&u, "tray-quit")),
-                    ],
-                )));
-            });
+            let grove_ui = grove.clone();
+            let hidden = std::rc::Rc::new(std::cell::Cell::new(0u64));
+            ui.root()
+                .child(grove::root(ui, grove.clone(), Some(a.clone())))
+                .bind(move || {
+                    let m = messages();
+                    win.set_title(m.text(&u, "app-title"));
+                    let item = |id, label: String| TrayItem::Item {
+                        id,
+                        label,
+                        enabled: true,
+                        default: id == SHOW,
+                    };
+                    a.set_tray(Some(TrayIcon::new(
+                        m.text(&u, "app-title"),
+                        tray_icon(),
+                        vec![
+                            item(SHOW, m.text(&u, "tray-show")),
+                            TrayItem::Separator,
+                            item(QUIT, m.text(&u, "tray-quit")),
+                        ],
+                    )));
+                    let n = grove_ui.hide_window.get();
+                    if n != hidden.get() {
+                        hidden.set(n);
+                        if n != 0 {
+                            win.set_visible(false);
+                        }
+                    }
+                });
         },
     );
     let (w2, a2) = (win.clone(), app.clone());
@@ -98,6 +112,11 @@ pub fn home(ui: &Ui) -> El {
 /// Chat-feed preview with a finished turn, for side-by-side review.
 pub fn home_chat(ui: &Ui) -> El {
     shell(ui, Studio::preview_chat())
+}
+
+/// Morning Grove with example plots, for goldens. It does not touch disk or the network.
+pub fn grove_home(ui: &Ui) -> El {
+    grove::preview_home(ui)
 }
 
 /// The Studio shell: session list, well, composer, status.
