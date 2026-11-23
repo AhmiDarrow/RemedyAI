@@ -4,6 +4,7 @@
 //! further (always-visible row actions, a 16 px Remedy Sans UI face). The
 //! window talks to remedy-runtime over HTTP+SSE on 127.0.0.1:7400.
 
+mod browser;
 mod chat;
 mod fonts;
 mod logo;
@@ -54,6 +55,7 @@ pub fn app(app: &App) {
             .persist_geometry("main"),
         move |ui, window| {
             let (u, win, a) = (ui.clone(), window.clone(), a.clone());
+            browser::bind_app(a.clone());
             ui.root().child(shell(ui, studio.clone())).bind(move || {
                 let m = messages();
                 win.set_title(m.text(&u, "app-title"));
@@ -90,35 +92,46 @@ pub fn app(app: &App) {
     });
 }
 
-/// Empty-well preview (goldens and visual review).
+/// Empty-well preview (goldens and visual review). No browser rail, so the
+/// studio goldens stay the chat shell.
 pub fn home(ui: &Ui) -> El {
-    shell(ui, Studio::preview())
+    shell_with(ui, Studio::preview(), false)
 }
 
 /// Chat-feed preview with a finished turn, for side-by-side review.
 pub fn home_chat(ui: &Ui) -> El {
-    shell(ui, Studio::preview_chat())
+    shell_with(ui, Studio::preview_chat(), false)
 }
 
-/// The Studio shell: session list, well, composer, status.
+/// Browser chrome alone, for the computer-use side-by-side and the chrome test.
+pub fn browser_preview(ui: &Ui) -> El {
+    browser::preview(ui)
+}
+
+/// The Studio shell: session list, well, composer, status, and the browser rail
+/// when the workspace layout has it open.
 pub fn shell(ui: &Ui, studio: Studio) -> El {
+    shell_with(ui, studio, true)
+}
+
+fn shell_with(ui: &Ui, studio: Studio, browser_rail: bool) -> El {
     fonts::prepare_theme(ui, &Fonts::load());
+    let row = w::row(ui)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+        })
+        .child(sidebar::sidebar(ui, studio.clone()))
+        .child(w::divider(ui, true))
+        .child(chat::well(ui, studio.clone()));
+    let row = if browser_rail { row.child(browser::rail(ui, studio.clone())) } else { row };
     w::column(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.height = Length::Percent(1.0);
         })
-        .child(
-            w::row(ui)
-                .layout(|l| {
-                    l.width = Length::Percent(1.0);
-                    l.grow = 1.0;
-                    l.basis = Length::Px(0.0);
-                })
-                .child(sidebar::sidebar(ui, studio.clone()))
-                .child(w::divider(ui, true))
-                .child(chat::well(ui, studio.clone())),
-        )
+        .child(row)
         .child(w::divider(ui, false))
         .child(status::status_bar(ui, studio))
 }
