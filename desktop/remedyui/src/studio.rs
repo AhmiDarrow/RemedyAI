@@ -636,6 +636,11 @@ impl Studio {
         self.finish_assistant(None);
     }
 
+    /// The runtime client, when this Studio is attached.
+    pub fn client(&self) -> Option<Client> {
+        self.client.get()
+    }
+
     /// Hooks a runtime client and loads sessions (no-op for local previews).
     pub fn attach_client(&self, client: Client) {
         self.client.set(Some(client.clone()));
