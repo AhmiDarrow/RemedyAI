@@ -137,13 +137,23 @@ fn watch_force(s: Settings) {
 }
 
 fn header(ui: &Ui, s: Settings) -> El {
-    w::row(ui)
+    let row = w::row(ui)
         .align(Align::Center)
         .justify(Justify::SpaceBetween)
         .gap(form::gap(ui))
         .fill_width()
-        .child(form::segments(ui, "Settings detail", &[("simple", "Simple"), ("advanced", "Advanced")], s.mode))
-        .child(form::action(ui, "Close", "quiet", move || close_panel(s)))
+        .child(form::segments(
+            ui,
+            "Settings detail",
+            &[("simple", "Simple"), ("advanced", "Advanced")],
+            s.mode,
+        ));
+    // The workspace rail already has a header and a collapse button.
+    if super::studio_rail_owns_close() {
+        row
+    } else {
+        row.child(form::action(ui, "Close", "quiet", move || close_panel(s)))
+    }
 }
 
 fn search_row(ui: &Ui, s: Settings) -> El {

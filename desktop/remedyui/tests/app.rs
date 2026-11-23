@@ -1,10 +1,12 @@
 //! The app on the in-memory host, and its previews as golden images.
 
 use remedy_ui::AppConfig;
-use remedy_ui::a11y::Role;
+use remedy_ui::a11y::{Action, Role};
 use remedy_ui::devtools::{GoldenError, Preview, check_golden};
+use remedy_ui::input::{Key, KeyEvent};
 use remedy_ui::testing::TestApp;
 use remedy_ui::themes::PALETTES;
+use std::path::PathBuf;
 use std::sync::Once;
 
 const SHELL: (f32, f32) = (1100.0, 700.0);
@@ -19,14 +21,21 @@ fn no_spawn() {
         // Integration tests compile the lib without cfg(test); never launch a sidecar.
         // Grove prefs live under REMEDY_HOME. A fresh directory per process, so a
         // previous run that switched to Studio cannot open this one there.
+        // Rails persist beside that home, not in the user's ~/.remedy.
         let home = std::env::temp_dir().join(format!(
             "remedy-desktop-test-home-{}",
             std::process::id()
         ));
+        let layout = std::env::temp_dir().join(format!(
+            "remedy-desktop-rails-layout-{}",
+            std::process::id()
+        ));
         let _ = std::fs::create_dir_all(&home);
+        let _ = std::fs::create_dir_all(&layout);
         unsafe {
             std::env::set_var("REMEDY_DESKTOP_NO_SPAWN", "1");
             std::env::set_var("REMEDY_HOME", &home);
+            std::env::set_var("REMEDY_LAYOUT_DIR", &layout);
         }
     });
 }
@@ -39,6 +48,19 @@ fn fresh_profile() {
     }
 }
 
+/// Drop a layout a previous test saved so `app()` starts from the defaults.
+fn reset_saved_layout() {
+    no_spawn();
+    if let Ok(dir) = std::env::var("REMEDY_LAYOUT_DIR") {
+        let _ = std::fs::remove_file(PathBuf::from(dir).join("workspace-layout.v3.json"));
+    }
+}
+
+fn saved_layout_text() -> String {
+    let dir = std::env::var("REMEDY_LAYOUT_DIR").expect("layout dir");
+    std::fs::read_to_string(PathBuf::from(dir).join("workspace-layout.v3.json")).expect("saved layout")
+}
+
 #[test]
 fn the_app_opens_its_window() {
     fresh_profile();
@@ -49,6 +71,7 @@ fn the_app_opens_its_window() {
 #[test]
 fn new_session_and_close_are_visible_and_work() {
     fresh_profile();
+    reset_saved_layout();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     assert!(
         app.press(Role::Button, "Studio"),
@@ -155,10 +178,11 @@ fn every_palette_is_covered_by_the_shell_preview() {
     assert_eq!(ids, THEMES);
 }
 
-fn assert_goldens(name: &str, build: fn(&remedy_ui::Ui) -> remedy_ui::El) {
-    let preview = Preview::new(name, build).sizes(&[SHELL]).themes(THEMES);
+fn assert_goldens(name: &str, themes: &[&str], build: fn(&remedy_ui::Ui) -> remedy_ui::El) {
+    let preview = Preview::new(name, build).sizes(&[SHELL]).themes(themes);
     match check_golden(&preview, std::path::Path::new("tests/golden")) {
-        Ok(()) | Err(GoldenError::Missing(_)) => {}
+        Ok(()) => {}
+        // Missing is written, then reported, so a deleted golden cannot pass quietly.
         Err(e) => panic!("{e}"),
     }
 }
@@ -176,9 +200,17 @@ fn assert_settings_goldens(name: &str, build: fn(&remedy_ui::Ui) -> remedy_ui::E
 
 #[test]
 fn previews_match_their_golden_images() {
-    assert_goldens("studio", remedy_desktop::home);
-    assert_goldens("studio-chat", remedy_desktop::home_chat);
-    assert_goldens("grove-home", remedy_desktop::grove_home);
+    assert_goldens("studio", THEMES, remedy_desktop::home);
+    assert_goldens("studio-chat", THEMES, remedy_desktop::home_chat);
+    let rails = &["forest", "deutan"][..];
+    assert_goldens("rails-left", rails, remedy_desktop::home_rails_left);
+    assert_goldens("rails-right", rails, remedy_desktop::home_rails_right);
+    assert_goldens("rails-dual", rails, remedy_desktop::home_rails_dual);
+}
+
+#[test]
+fn grove_preview_matches_its_golden_images() {
+    assert_goldens("grove-home", THEMES, remedy_desktop::grove_home);
 }
 
 #[test]
@@ -188,4 +220,135 @@ fn settings_previews_match_their_golden_images() {
     assert_settings_goldens("settings-models", remedy_desktop::preview_models);
     assert_settings_goldens("settings-connect", remedy_desktop::preview_connect);
     assert_settings_goldens("settings-error", remedy_desktop::preview_error);
+}
+
+fn press_nth(app: &mut TestApp, role: Role, name: &str, nth: usize) -> bool {
+    let Some(ui) = app.ui() else { return false };
+    let nodes: Vec<_> = app
+        .reader_view()
+        .into_iter()
+        .filter(|n| n.role == role && n.name.as_deref() == Some(name))
+        .collect();
+    let Some(node) = nodes.get(nth) else { return false };
+    let Some(el) = ui.element_by_node_id(node.id) else { return false };
+    let done = ui.accessibility_action(el.node_id(), Action::Click);
+    app.frames(1);
+    done
+}
+
+fn press_last(app: &mut TestApp, role: Role, name: &str) -> bool {
+    let count = app
+        .reader_view()
+        .into_iter()
+        .filter(|n| n.role == role && n.name.as_deref() == Some(name))
+        .count();
+    count > 0 && press_nth(app, role, name, count - 1)
+}
+
+#[test]
+fn swap_exchanges_which_rail_is_thin() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home);
+    app.frames(1);
+    assert!(app.find(Role::Button, "Expand right rail").is_some());
+    assert!(app.find(Role::Button, "Expand left rail").is_none());
+    assert!(app.press(Role::Button, "Swap left and right panels"), "swap");
+    assert!(
+        app.find(Role::Button, "Expand left rail").is_some(),
+        "after swap the left rail is the thin one"
+    );
+    assert!(app.find(Role::Button, "Expand right rail").is_none());
+    assert!(
+        app.find(Role::Button, "New session").is_some(),
+        "sessions moved with the open rail"
+    );
+}
+
+#[test]
+fn status_settings_toggles_the_right_rail() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home);
+    app.frames(1);
+    assert!(app.find(Role::Button, "Expand right rail").is_some());
+    assert!(press_last(&mut app, Role::Button, "Settings"), "status Settings");
+    assert!(
+        app.find(Role::Button, "Expand right rail").is_none(),
+        "settings opened the right rail"
+    );
+    assert!(
+        app.find(Role::Toolbar, "Right workspace rail").is_some(),
+        "right rail is icons plus the panel"
+    );
+    assert!(press_last(&mut app, Role::Button, "Settings"), "status Settings again");
+    assert!(
+        app.find(Role::Button, "Expand right rail").is_some(),
+        "the second press collapses the right rail to thin"
+    );
+}
+
+#[test]
+fn narrow_window_keeps_one_panel_and_restores_the_thin_rail() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home);
+    app.frames(1);
+    let id = app.host().window_ids()[0];
+    app.host().user_resize(id, remedy_ui::core::Size::new(700.0, 700.0));
+    app.frames(2);
+    assert!(app.find(Role::Button, "Expand left rail").is_none());
+    assert!(app.find(Role::Button, "Expand right rail").is_none());
+    assert!(app.find(Role::Toolbar, "Left workspace rail").is_some());
+    assert!(app.find(Role::Toolbar, "Right workspace rail").is_some());
+    assert!(
+        press_nth(&mut app, Role::Button, "Terminal", 1),
+        "the right rail's Terminal"
+    );
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("In-app terminal on this PC")),
+        "the right panel opened for this width only: {names:?}"
+    );
+    app.host().user_resize(id, remedy_ui::core::Size::new(1100.0, 700.0));
+    app.frames(2);
+    assert!(
+        app.find(Role::Button, "Expand right rail").is_some(),
+        "the saved thin right rail comes back"
+    );
+    assert!(app.find(Role::Button, "Expand left rail").is_none());
+    let names = accessible_names(&app);
+    assert!(
+        !names.iter().any(|n| n.contains("In-app terminal on this PC")),
+        "widening does not keep the temporary panel: {names:?}"
+    );
+}
+
+#[test]
+fn terminal_pops_out_of_the_right_rail() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home);
+    app.frames(1);
+    assert!(app.press(Role::Button, "Expand right rail"));
+    assert!(press_nth(&mut app, Role::Button, "Terminal", 1), "right Terminal");
+    assert!(app.press(Role::Button, "Pop out to floating window"), "pop out");
+    assert!(app.find(Role::Dialog, "Terminal").is_some(), "floating terminal");
+    app.key(KeyEvent::press(Key::Escape));
+    assert!(app.find(Role::Dialog, "Terminal").is_none(), "escape closes it");
+}
+
+#[test]
+fn resize_left_panel_from_the_keyboard() {
+    fresh_profile();
+    reset_saved_layout();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    assert!(app.press(Role::Button, "Studio"), "open Studio");
+    let handle = app
+        .find(Role::Separator, "Resize left panel")
+        .expect("left resize handle");
+    handle.focus();
+    app.frames(1);
+    app.key(KeyEvent::press(Key::ArrowRight));
+    let saved = saved_layout_text();
+    assert!(
+        saved.contains("\"leftWidth\":290"),
+        "arrow grows the left body by 10: {saved}"
+    );
 }
