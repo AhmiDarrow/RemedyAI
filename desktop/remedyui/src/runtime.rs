@@ -30,7 +30,8 @@ impl Client {
 
     /// A clone of the bearer-backed client.
     ///
-    /// Chat-depth, Grove, and Settings share it. Cloning shares the cookie jar
+    /// Setup, chat-depth, Grove, diagnostics, and the rails call through it.
+    /// Settings moves one onto a worker thread. Cloning shares the cookie jar
     /// and the headers. The base is already `{origin}/api`.
     pub(crate) fn http(&self) -> Http {
         self.http.clone()
@@ -79,8 +80,10 @@ pub fn load_token() -> Option<String> {
 }
 
 /// Same directory the Tauri shell uses: `REMEDY_HOME`, else `%USERPROFILE%\.remedy`
-/// on Windows, else `$HOME/.remedy`. Updates must keep reading this tree.
-pub(crate) fn remedy_home() -> PathBuf {
+/// on Windows (even when a Git Bash `HOME` is set), else `$HOME/.remedy`.
+/// Updates must keep reading this tree. Nothing here deletes that folder;
+/// callers only add their own files under it.
+pub fn remedy_home() -> PathBuf {
     let remedy = std::env::var("REMEDY_HOME").ok();
     let profile = std::env::var("USERPROFILE").ok();
     let home = std::env::var("HOME").ok();

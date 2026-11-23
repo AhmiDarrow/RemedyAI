@@ -268,6 +268,7 @@ impl Studio {
         let mut step = WorkStep::done("c1", "bash");
         step.status = crate::work::StepStatus::Running;
         step.narration = Some("I'll reach the folder through the shell.".into());
+        step.detail = Some("Get-ChildItem".into());
         s.live_steps.set(vec![step]);
         s.live_thinking
             .set("Looking through the loader and the manifest.".into());
@@ -763,9 +764,21 @@ fn preview_messages() -> Vec<ChatMessage> {
             created_at: Some("2026-11-22T15:00:20Z".into()),
             thinking: "The manifest still named init.lua, but the last update renamed the entry. I'll patch the three files and run the addon check.".into(),
             steps: vec![
-                WorkStep::done("c1", "file_read"),
-                WorkStep::failed("c2", "bash", "exit 1"),
-                WorkStep::done("c3", "file_write"),
+                {
+                    let mut s = WorkStep::done("c1", "file_read");
+                    s.detail = Some("manifest.json".into());
+                    s
+                },
+                {
+                    let mut s = WorkStep::failed("c2", "bash", "exit 1");
+                    s.detail = Some("portal.exe --addon-check --all".into());
+                    s
+                },
+                {
+                    let mut s = WorkStep::done("c3", "file_write");
+                    s.detail = Some("loader.lua".into());
+                    s
+                },
             ],
             ..ChatMessage::plain(
                 "m2",

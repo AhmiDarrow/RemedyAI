@@ -174,6 +174,31 @@ popout-exit-fullscreen = Exit fullscreen (Esc)
 popout-close = Close
 popout-close-title = Close panel (Esc when not fullscreen)
 
+browser-back = Back
+browser-forward = Forward
+browser-home = Home
+browser-reload = Reload
+browser-go = Go
+browser-address = Browser address — URL or search
+browser-address-placeholder = Search or enter URL
+browser-bookmark = Bookmark
+browser-unbookmark = Remove bookmark
+browser-bookmarks = Bookmarks
+browser-bookmarks-empty = No bookmarks yet. Star a page to save it here.
+browser-shield-on = Privacy Shield on
+browser-shield-off = Privacy Shield off
+browser-desktop = Desktop
+browser-mobile = Mobile
+browser-external = Open in system browser
+browser-close = Close embedded browser
+browser-title = Browser
+browser-empty-title = Embedded browser
+browser-empty-body = WebView loads inside this panel automatically. Press Go to retry, or the external button for the system browser.
+browser-loading = Loading…
+browser-ready = Ready
+browser-remove = Remove
+browser-rail-hint = The in-app browser follows the agent. Back, the address bar, and Go stay in this rail.
+
 # Chrome and overlays (title bar, palette, help, tray prefs).
 
 menu-newSession = New session
@@ -320,6 +345,7 @@ chat-split-tabs = Chat or actions
 chat-split-tab-actions = Actions
 chat-split-tab-chat = Chat
 chat-split-working = Working
+chat-split-thinking = Thinking
 chat-split-build = BUILD
 chat-split-side-left = Actions on the left
 chat-split-side-right = Actions on the right

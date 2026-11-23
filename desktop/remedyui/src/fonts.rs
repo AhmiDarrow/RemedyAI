@@ -102,18 +102,19 @@ fn unquote(v: &str) -> String {
 
 /// Applies the desktop type scale and the chosen families to `theme`.
 ///
-/// Body is 16 px (the current app's root size at `--ui-font-scale: 1`), not the
-/// toolkit's 13 px default, so the shell matches today's density.
+/// Body is 15 px, with a title at 18 and small at 12, so chrome, chat and meta
+/// can sit on a real scale instead of one size. The toolkit default is 13.
 pub fn apply_to_theme(theme: &mut Theme, fonts: &Fonts) {
     theme.font_families = vec![fonts.ui.clone()];
     theme.mono_families = vec![fonts.code.clone(), fonts.ui.clone()];
     theme.heading_families = vec![DEFAULT_HEADING_FONT.into()];
-    theme.type_scale.small = 13.0;
-    theme.type_scale.body = 16.0;
-    theme.type_scale.title = 20.0;
+    theme.type_scale.small = 12.0;
+    theme.type_scale.body = 15.0;
+    theme.type_scale.title = 18.0;
     theme.radii.small = 6.0;
     theme.radii.medium = 10.0;
     theme.radii.large = 14.0;
+    theme.spacing.unit = 4.0;
     theme.spacing.control_height = 36.0;
 }
 
