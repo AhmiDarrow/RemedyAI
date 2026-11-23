@@ -36,6 +36,7 @@ mod timetravel;
 mod titlebar;
 mod tokens;
 mod tray_copy;
+mod update;
 mod updates;
 mod usage;
 mod work;
@@ -77,6 +78,7 @@ pub(crate) const SELECT_MARK: f32 = 3.0;
 pub fn app(app: &App) {
     settings::bind_host(app);
     app.keep_running(true);
+    update::spawn_startup_check(app);
     let studio = Studio::new();
     // Grove is home. On a real launch the setup gate sits in front of it
     // (splash, mind, house rules, wizard, update), inside the Studio chrome.
@@ -159,13 +161,24 @@ pub fn app(app: &App) {
                     enabled: true,
                     default: id == TRAY_SHOW,
                 };
+                // Download progress wins, then an offered version, then the
+                // shell's check label. The signed install lives behind that item.
+                let note = update::note_signal().try_get().unwrap_or_default();
+                let offer = update::offer_signal().try_get().unwrap_or_default();
+                let updates_label = if !note.is_empty() {
+                    note
+                } else if !offer.is_empty() {
+                    format!("{} {offer}", copy.updates)
+                } else {
+                    copy.updates.to_string()
+                };
                 a.set_tray(Some(TrayIcon::new(
                     tip,
                     tray_icon(),
                     vec![
                         item(TRAY_SHOW, copy.show.to_string()),
                         item(TRAY_SETTINGS, copy.settings.to_string()),
-                        item(TRAY_UPDATES, copy.updates.to_string()),
+                        item(TRAY_UPDATES, updates_label),
                         item(TRAY_ABOUT, copy.about.to_string()),
                         TrayItem::Separator,
                         item(TRAY_QUIT, copy.quit.to_string()),
@@ -181,6 +194,7 @@ pub fn app(app: &App) {
             });
     });
     let (w2, c2) = (win.clone(), chrome);
+    let a_up = app.clone();
     app.on_tray(move |e| match e {
         TrayEvent::Activate | TrayEvent::Menu(TRAY_SHOW) => {
             w2.set_visible(true);
@@ -195,6 +209,7 @@ pub fn app(app: &App) {
             w2.set_visible(true);
             w2.focus();
             c2.begin_check();
+            update::on_update_menu(&a_up);
         }
         TrayEvent::Menu(TRAY_ABOUT) => {
             w2.set_visible(true);

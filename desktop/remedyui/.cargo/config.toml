@@ -1,0 +1,3 @@
+# Private git dependency. The git CLI picks up gh credentials; libgit2 does not.
+[net]
+git-fetch-with-cli = true

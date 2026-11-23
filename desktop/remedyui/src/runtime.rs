@@ -79,25 +79,33 @@ pub fn load_token() -> Option<String> {
     None
 }
 
-/// Remedy's home directory. `$REMEDY_HOME`, then `%USERPROFILE%\.remedy`, then `$HOME/.remedy`.
-///
-/// Nothing here deletes that folder. Callers only add their own files under it.
+/// Same directory the Tauri shell uses: `REMEDY_HOME`, else `%USERPROFILE%\.remedy`
+/// on Windows (even when a Git Bash `HOME` is set), else `$HOME/.remedy`.
+/// Updates must keep reading this tree. Nothing here deletes that folder;
+/// callers only add their own files under it.
 pub fn remedy_home() -> PathBuf {
-    if let Ok(h) = std::env::var("REMEDY_HOME") {
-        let p = PathBuf::from(h);
-        if !p.as_os_str().is_empty() {
-            return p;
-        }
+    let remedy = std::env::var("REMEDY_HOME").ok();
+    let profile = std::env::var("USERPROFILE").ok();
+    let home = std::env::var("HOME").ok();
+    remedy_home_from(remedy.as_deref(), profile.as_deref(), home.as_deref())
+}
+
+pub(crate) fn remedy_home_from(
+    remedy_home: Option<&str>,
+    userprofile: Option<&str>,
+    home: Option<&str>,
+) -> PathBuf {
+    if let Some(h) = remedy_home.map(str::trim).filter(|s| !s.is_empty()) {
+        return PathBuf::from(h);
     }
-    if let Ok(h) = std::env::var("USERPROFILE") {
-        let p = PathBuf::from(h);
-        if !p.as_os_str().is_empty() {
-            return p.join(".remedy");
-        }
-    }
-    std::env::var("HOME")
-        .map(|h| PathBuf::from(h).join(".remedy"))
-        .unwrap_or_else(|_| PathBuf::from(".remedy"))
+    // Windows prefers USERPROFILE even when a Git Bash HOME is also set.
+    let base = if cfg!(windows) {
+        userprofile
+    } else {
+        home
+    };
+    let base = base.map(str::trim).filter(|s| !s.is_empty()).unwrap_or(".");
+    PathBuf::from(base).join(".remedy")
 }
 
 /// Starts `remedy-runtime --serve` (or `remedy serve`) if nothing is already on the port.
@@ -647,7 +655,9 @@ fn busy_frame(on_frame: &Arc<impl Fn(String, String)>, files: bool) {
 #[cfg(test)]
 mod tests {
     use super::parse_sessions;
+    use super::remedy_home_from;
     use serde_json::json;
+    use std::path::PathBuf;
 
     #[test]
     fn grove_sessions_stay_out_of_the_studio_list() {
@@ -661,5 +671,22 @@ mod tests {
         let ids: Vec<&str> = rows.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, ["s1", "s2"]);
         assert_eq!(rows[1].message_count, 3);
+    }
+
+    #[test]
+    fn windows_home_follows_userprofile() {
+        let profile = r"C:\Users\Ada";
+        let git_bash = r"C:\GitBashHome";
+        let home = remedy_home_from(None, Some(profile), Some(git_bash));
+        // Windows uses USERPROFILE. Other hosts use HOME. The join follows
+        // the host separator, so a Linux run does not expect a backslash.
+        let root = if cfg!(windows) { profile } else { git_bash };
+        assert_eq!(home, PathBuf::from(root).join(".remedy"));
+    }
+
+    #[test]
+    fn remedy_home_env_wins() {
+        let home = remedy_home_from(Some(r"D:\custom\.remedy"), Some(r"C:\Users\Ada"), Some("/home/ada"));
+        assert_eq!(home, PathBuf::from(r"D:\custom\.remedy"));
     }
 }
