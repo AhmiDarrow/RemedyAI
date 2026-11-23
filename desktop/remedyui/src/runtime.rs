@@ -28,7 +28,10 @@ impl Client {
         Client { http }
     }
 
-    /// The HTTP client, base already set to `{origin}/api`.
+    /// A clone of the bearer-backed client.
+    ///
+    /// Chat-depth, Grove, and Settings share it. Cloning shares the cookie jar
+    /// and the headers. The base is already `{origin}/api`.
     pub(crate) fn http(&self) -> Http {
         self.http.clone()
     }
@@ -585,5 +588,25 @@ fn busy_frame(on_frame: &Arc<impl Fn(String, String)>, files: bool) {
         on_frame("queued".into(), "{}".into());
     } else {
         on_frame("steered".into(), "{}".into());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_sessions;
+    use serde_json::json;
+
+    #[test]
+    fn grove_sessions_stay_out_of_the_studio_list() {
+        let rows = parse_sessions(&json!({
+            "sessions": [
+                {"id": "g1", "title": "Home", "origin_channel": "grove", "project_path": ""},
+                {"id": "s1", "title": "New chat", "origin_channel": "studio"},
+                {"id": "s2", "title": "Older", "message_count": 3}
+            ]
+        }));
+        let ids: Vec<&str> = rows.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["s1", "s2"]);
+        assert_eq!(rows[1].message_count, 3);
     }
 }
