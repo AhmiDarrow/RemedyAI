@@ -80,8 +80,9 @@ func bashToolDescription() string {
 }
 
 func jobsToolDescription() string {
-	return "List, tail or kill the background commands started by bash with background:true. " +
-		"list returns a short log tail for each job so you can see progress without a separate tail call; tail reads more of one log; kill terminates the whole process tree."
+	return "List, tail, read or kill the background commands started by bash with background:true. " +
+		"list returns a short log tail for each job so you can see progress without a separate tail call; tail reads more of one log; " +
+		"read pages a full job log with offset/limit; kill terminates the whole process tree."
 }
 
 // resolveHostShellFor picks the wrapper binary and its flags. look and getenv

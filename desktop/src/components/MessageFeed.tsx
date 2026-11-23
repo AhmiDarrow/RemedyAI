@@ -37,9 +37,9 @@ import { LiveTurnView } from './LiveTurnView'
 import { WorkStrip } from './WorkStrip'
 import { ReactionPicker, ReactionPills } from './Reactions'
 import { FeedScrollContext } from './feedScroll'
-import { splitSavedReply } from '../utils/liveSegments'
+import { assistantBeats, splitLiveText, splitSavedReply, splitSealedLive } from '../utils/liveSegments'
+import { turnIdForMessages } from '../utils/workTurns'
 import {
-  isFullProcessMode,
   showsProcessTrace,
   stepsFromMessageTools,
   type ProcessStep,
@@ -52,7 +52,7 @@ import { useI18n } from '../i18n'
 
 export type ActiveTool = { name: string; status: 'running' | 'done' | 'error' }
 
-interface MessageFeedProps {
+export interface MessageFeedProps {
   messages: ChatMessage[]
   partialText: string
   /** Offsets where tool calls split interim narration from the live reply. */
@@ -70,6 +70,10 @@ interface MessageFeedProps {
   buildTodos?: BuildTodo[]
   /** off | medium | full — never hides the chat answer */
   toolProcessMode?: ToolProcessMode
+  /** Studio split: thinking/tools/BUILD render in the actions pane, not here. */
+  hideWork?: boolean
+  /** Click a Remedy bubble to scroll the actions pane to that turn's work. */
+  onSelectTurn?: (turnId: string) => void
   onEditUserMessage?: (msgId: string, content: string) => void
   onQuickPrompt?: (text: string) => void
   /** Empty-state starter chips — Studio set by default; Grove passes its own. */
@@ -82,6 +86,8 @@ interface MessageFeedProps {
   onRegenerate?: (assistantMsgId: string) => void
   /** Owner reacts to one of Remedy's messages ('' clears). */
   onReact?: (messageId: string, emoji: string) => void
+  /** Draft id of the in-flight assistant row, so mid-turn bubbles can be reacted to. */
+  liveMessageId?: string | null
   /** Display name for the human (avatar + label). */
   userName?: string
   /** Partner display name for assistant avatar initials (default Remedy). */
@@ -332,7 +338,11 @@ const MessageBubble = memo(function MessageBubble({
   userName,
   partnerName,
   sessionId = null,
+  textBreaks = [],
   onReact,
+  hideWork = false,
+  turnId,
+  onSelectTurn,
 }: {
   msg: ChatMessage
   partial?: string
@@ -347,32 +357,41 @@ const MessageBubble = memo(function MessageBubble({
   userName?: string
   partnerName?: string
   sessionId?: string | null
+  /** Live turn offsets; mid-turn speech becomes its own bubble at each break. */
+  textBreaks?: number[]
   /** The owner reacts to Remedy's messages (one per message; same again removes). */
   onReact?: (messageId: string, emoji: string) => void
+  hideWork?: boolean
+  turnId?: string | null
+  onSelectTurn?: (turnId: string) => void
 }) {
   const { resolved } = useI18n()
   const isUser = msg.role === 'user'
   const isSystem = msg.role === 'system'
   const isAssistant = !isUser && !isSystem
-  // Saved turns: narration recorded on tool calls belongs to the Working
-  // strip, not the bubble. Old saves without narration come back unchanged.
-  const savedReply = useMemo(
-    () =>
-      isAssistant && !isStreamingPartial
-        ? splitSavedReply(msg.content, msg.tool_calls || []).reply
-        : msg.content,
-    [isAssistant, isStreamingPartial, msg.content, msg.tool_calls],
-  )
-  const rawText = savedReply + (partial || '')
+  // User-facing prose stays in the bubble (including text written before a
+  // tool call). Thinking and tool traces belong to the Working strip.
+  const rawText = msg.content + (partial || '')
+  const beats = useMemo(() => {
+    if (!isAssistant) return []
+    const segs = isStreamingPartial
+      ? splitLiveText(rawText, textBreaks)
+      : splitSavedReply(rawText, msg.tool_calls || [])
+    return assistantBeats(segs).map((b) => ({
+      ...b,
+      text: linkifyBareImagePaths(sanitizeAssistantText(b.text)),
+    }))
+  }, [isAssistant, isStreamingPartial, rawText, textBreaks, msg.tool_calls])
   const text = useMemo(
-    () => (isUser || isSystem ? rawText : sanitizeAssistantText(rawText)),
-    [rawText, isUser, isSystem],
+    () => (isUser || isSystem ? rawText : beats.map((b) => b.text).join('\n\n') || sanitizeAssistantText(rawText)),
+    [rawText, isUser, isSystem, beats],
   )
   const thinkingText = (msg.thinking || '') + (partialThinking || '')
   const showEdit =
     msg.role === 'user' && !msg.reverted && !!onEditUserMessage && !streaming
   const timeLabel = formatTime(msg.created_at, intlLocale(resolved))
-  const long = text.length > COLLAPSE_CHARS
+  const lastBeatText = beats.length ? beats[beats.length - 1]!.text : text
+  const long = lastBeatText.length > COLLAPSE_CHARS
   const [expanded, setExpanded] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   // Touch: a long press on the bubble opens the reaction picker.
@@ -496,20 +515,28 @@ const MessageBubble = memo(function MessageBubble({
   const placeholderOnly = /^\*\(Used tools — see process\.\)\*$/.test(text.trim())
   const showBubble = !(showStrip && (!text.trim() || placeholderOnly))
 
+  const selectTurn = (e: ReactPointerEvent) => {
+    if (!onSelectTurn || !turnId || isUser || isSystem) return
+    if ((e.target as HTMLElement).closest('button, a, input, textarea')) return
+    onSelectTurn(turnId)
+  }
+
   return (
     <div
       className={`group chat-row flex w-full flex-col ${
         isUser ? 'items-end' : isSystem ? 'items-center' : 'items-start'
       }`}
+      data-turn-id={turnId || undefined}
+      onClick={onSelectTurn && turnId && isAssistant ? selectTurn : undefined}
       style={{ paddingTop: 'var(--chat-pad-y)', paddingBottom: 'var(--chat-pad-y)' }}
     >
-      {showStrip && (
+      {showStrip && !hideWork && (
         <div className="work-strip-slot">
           <WorkStrip
             steps={histSteps}
             thinking={savedThinking}
             mode={toolProcessMode}
-            defaultOpen={isFullProcessMode(toolProcessMode)}
+            defaultOpen={false}
             sessionId={sessionId}
           />
         </div>
@@ -522,6 +549,124 @@ const MessageBubble = memo(function MessageBubble({
       >
         {!isSystem && avatar}
 
+        {isAssistant && beats.length > 0 ? (
+        <div className="chat-beats" data-testid="assistant-beats">
+          {beats.map((beat, i) => {
+            const isLast = i === beats.length - 1
+            const body = isLast && long && !expanded && !isStreamingPartial
+              ? `${beat.text.slice(0, COLLAPSE_CHARS).trimEnd()}…`
+              : beat.text
+            return (
+              <div
+                key={`${msg.id}:beat:${i}`}
+                className={`${bubbleClass} chat-beat is-${beat.kind}`}
+                data-testid={beat.kind === 'final' ? 'assistant-beat-final' : 'assistant-beat'}
+                {...(isLast ? pressHandlers : {})}
+                style={{
+                  background: bubbleBg,
+                  color: bubbleFg,
+                  border: `1px solid ${bubbleBorder}`,
+                  borderRadius: 'var(--chat-bubble-radius)',
+                  padding: 'var(--chat-bubble-pad)',
+                  fontSize: 'var(--chat-font)',
+                }}
+              >
+                {i === 0 && (
+                  <div className="chat-meta flex items-center gap-2 mb-1 w-fit max-w-full">
+                    <div className="chat-meta-label">{partnerLabel}</div>
+                    {timeLabel && <div className="chat-meta-time">{timeLabel}</div>}
+                    {beats.length === 1 && msg.model && (
+                      <div className="chat-meta-time" title={`Answered by ${msg.model}`}>
+                        {msg.model}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {beat.kind === 'final' && i > 0 && msg.model && (
+                  <div className="chat-meta flex items-center gap-2 mb-1 w-fit max-w-full">
+                    <div className="chat-meta-time" title={`Answered by ${msg.model}`}>
+                      {msg.model}
+                    </div>
+                  </div>
+                )}
+                <div
+                  className={`message-body chat-bubble-body${
+                    isStreamingPartial && isLast ? ' stream-md' : ''
+                  }`}
+                >
+                  {body ? (
+                    <>
+                      <ChatMdCtx.Provider value={mdCtx}>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        urlTransform={chatMarkdownUrlTransform}
+                        components={CHAT_MD_COMPONENTS}
+                      >
+                        {body}
+                      </ReactMarkdown>
+                      </ChatMdCtx.Provider>
+                      {isStreamingPartial && isLast ? (
+                        <span className="stream-caret" aria-hidden>
+                          ▍
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <span className="chat-empty-placeholder">
+                      {isStreamingPartial ? (
+                        <>
+                          {thinkingText ? 'Thinking' : 'Generating'}
+                          <span className="stream-caret" aria-hidden />
+                        </>
+                      ) : (
+                        '(empty)'
+                      )}
+                    </span>
+                  )}
+                </div>
+                {isLast && long && !isStreamingPartial && (
+                  <div className="mt-1 flex" style={{ justifyContent: 'flex-start' }}>
+                    <IconBtn
+                      title={expanded ? 'Show less' : 'Show more'}
+                      onClick={() => setExpanded((e) => !e)}
+                    >
+                      {expanded ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
+                    </IconBtn>
+                  </div>
+                )}
+                {isLast && !isStreamingPartial && text && (
+                  <div
+                    className="chat-actions mt-1.5 flex items-center transition-opacity"
+                    style={{ justifyContent: 'flex-start' }}
+                  >
+                    <IconBtn
+                      title={copied ? 'Copied' : 'Copy message'}
+                      onClick={() => void copyMsg()}
+                      active={copied}
+                    >
+                      {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
+                    </IconBtn>
+                    {onRegenerate && !streaming && (
+                      <IconBtn title="Regenerate reply" onClick={() => onRegenerate(msg.id)}>
+                        <IconRefresh size={13} />
+                      </IconBtn>
+                    )}
+                    {canReact && onReact && (
+                      <ReactionPicker
+                        messageId={msg.id}
+                        current={msg.reactions?.user}
+                        open={pickerOpen}
+                        onOpenChange={setPickerOpen}
+                        onReact={onReact}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        ) : (
         <div
           className={bubbleClass}
           {...pressHandlers}
@@ -534,21 +679,6 @@ const MessageBubble = memo(function MessageBubble({
             fontSize: 'var(--chat-font)',
           }}
         >
-          {!isUser && !isSystem && (
-            <div className="chat-meta flex items-center gap-2 mb-1 w-fit max-w-full">
-              <div className="chat-meta-label">{partnerLabel}</div>
-              {timeLabel && <div className="chat-meta-time">{timeLabel}</div>}
-              {msg.model && (
-                <div
-                  className="chat-meta-time"
-                  title={`Answered by ${msg.model}`}
-                >
-                  {msg.model}
-                </div>
-              )}
-            </div>
-          )}
-
           {isUser && (
             <div className="chat-meta chat-meta-user flex items-center justify-end gap-1.5 mb-1 w-fit max-w-full ml-auto">
               <div className="chat-meta-label" style={{ color: 'inherit', opacity: 0.9 }}>
@@ -569,7 +699,6 @@ const MessageBubble = memo(function MessageBubble({
           >
             {displayText ? (
               <>
-                {/* Live markdown while streaming for smoother final morph. */}
                 <ChatMdCtx.Provider value={mdCtx}>
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
@@ -633,23 +762,10 @@ const MessageBubble = memo(function MessageBubble({
                   <IconEdit size={13} />
                 </IconBtn>
               )}
-              {!isUser && onRegenerate && !streaming && (
-                <IconBtn title="Regenerate reply" onClick={() => onRegenerate(msg.id)}>
-                  <IconRefresh size={13} />
-                </IconBtn>
-              )}
-              {canReact && onReact && (
-                <ReactionPicker
-                  messageId={msg.id}
-                  current={msg.reactions?.user}
-                  open={pickerOpen}
-                  onOpenChange={setPickerOpen}
-                  onReact={onReact}
-                />
-              )}
             </div>
           )}
         </div>
+        )}
       </div>
       )}
       {showBubble && !isSystem && (
@@ -686,6 +802,7 @@ export function MessageFeed({
   emptyHints,
   onRegenerate,
   onReact,
+  liveMessageId = null,
   userName,
   partnerName = 'Remedy',
   onAttachMarkup,
@@ -695,6 +812,8 @@ export function MessageFeed({
   projectPath = null,
   sessionId = null,
   stickNonce,
+  hideWork = false,
+  onSelectTurn,
 }: MessageFeedProps) {
   const { t, resolved } = useI18n()
   const dateLocale = intlLocale(resolved)
@@ -757,7 +876,49 @@ export function MessageFeed({
     ],
   })
 
-  const visible = useMemo(() => messages.filter((m) => !m.reverted), [messages])
+  const liveId = liveMessageId || messages.find((m) => m.draft && m.role === 'assistant' && !m.reverted)?.id || null
+  const liveSplit = useMemo(
+    () => (streaming ? splitSealedLive(partialText, textBreaks) : { narration: [], reply: '', sealed: '' }),
+    [streaming, partialText, textBreaks],
+  )
+  const liveSettledMsg = useMemo<ChatMessage | null>(() => {
+    if (!streaming || !liveSplit.sealed.trim()) return null
+    const calls = processSteps
+      .filter((s) => s.narration?.trim())
+      .map((s) => ({
+        name: s.name,
+        args: {},
+        id: s.callId || s.id,
+        narration: s.narration,
+      }))
+    const existing = liveId ? messages.find((m) => m.id === liveId) : undefined
+    return {
+      id: liveId || 'streaming',
+      role: 'assistant',
+      content: liveSplit.sealed,
+      thinking: null,
+      tool_calls: calls,
+      tool_results: [],
+      model: existing?.model ?? null,
+      agent: existing?.agent ?? null,
+      tokens: null,
+      created_at: existing?.created_at || '',
+      reverted: false,
+      request_id: existing?.request_id,
+      reactions: existing?.reactions,
+    }
+  }, [streaming, liveSplit.sealed, processSteps, liveId, messages])
+
+  const visible = useMemo(
+    () =>
+      messages.filter(
+        (m) =>
+          !m.reverted
+          && !(streaming && liveId && m.id === liveId),
+      ),
+    [messages, streaming, liveId],
+  )
+  const turnIds = useMemo(() => turnIdForMessages(visible), [visible])
 
   // Stable so the memoized live turn does not re-render the reply per parent render.
   const renderLiveReply = useCallback(
@@ -766,13 +927,17 @@ export function MessageFeed({
         msg={msg}
         partial={reply}
         partialThinking=""
+        textBreaks={textBreaks}
         toolProcessMode={toolProcessMode}
         isStreamingPartial
         onOpenImage={openLightbox}
         partnerName={partnerName}
+        hideWork={hideWork}
+        turnId={lastUserMsgId}
+        onSelectTurn={onSelectTurn}
       />
     ),
-    [toolProcessMode, openLightbox, partnerName],
+    [toolProcessMode, openLightbox, partnerName, textBreaks, hideWork, lastUserMsgId, onSelectTurn],
   )
 
   // Unread delta for the jump pill: messages that landed since the user
@@ -825,12 +990,14 @@ export function MessageFeed({
   }, [windowed, dateLocale])
 
   return (
+    <div className="message-feed-shell">
     <div
       ref={setScroller}
-      className="message-feed py-2 relative w-full"
+      className="message-feed work-host py-2 relative w-full"
       style={{
-        position: 'absolute',
-        inset: 0,
+        position: 'relative',
+        flex: 1,
+        minHeight: 0,
         overflowY: 'auto',
         overflowX: 'hidden',
       }}
@@ -928,29 +1095,55 @@ export function MessageFeed({
               userName={userName}
               partnerName={partnerName}
               sessionId={sessionId}
+              hideWork={hideWork}
+              turnId={turnIds.get(msg.id) ?? null}
+              onSelectTurn={onSelectTurn}
             />
           </Fragment>
         )
       })}
 
-      {/* Live turn: one quiet Working strip; the reply is its own bubble. */}
-      {streaming && (
+      {/* Live turn: sealed mid-turn speech is a settled, reactable bubble;
+          only the in-progress reply stays on the streaming path. Work stays
+          in the strip (or the actions pane when hideWork). */}
+      {streaming && hideWork && (
+        <div className="chat-working-hint" data-testid="chat-working-hint" role="status">
+          <span className="live-stream-dot" aria-hidden />
+          <span>Working</span>
+        </div>
+      )}
+      {streaming && liveSettledMsg && (
+        <div className="live-settled-dock" data-testid="live-settled-reply">
+          <MessageBubble
+            msg={liveSettledMsg}
+            toolProcessMode={toolProcessMode}
+            onOpenImage={openLightbox}
+            onReact={onReact}
+            partnerName={partnerName}
+            hideWork={hideWork}
+            turnId={lastUserMsgId}
+            onSelectTurn={onSelectTurn}
+          />
+        </div>
+      )}
+      {streaming && (!hideWork || liveSplit.reply.trim()) && (
         <div className="live-stream-dock">
           <LiveTurnView
-            partialText={partialText}
-            textBreaks={textBreaks}
+            partialText={liveSplit.reply}
+            textBreaks={[]}
             partialThinking={partialThinking}
             processSteps={processSteps}
             renderReply={renderLiveReply}
             progress={taskProgress}
             mode={toolProcessMode}
             sessionId={sessionId}
-            extras={buildTodos.length ? <BuildTodos items={buildTodos} live /> : undefined}
+            showWork={!hideWork}
+            extras={!hideWork && buildTodos.length ? <BuildTodos items={buildTodos} live /> : undefined}
           />
         </div>
       )}
 
-      {!streaming && todosHaveOpen(buildTodos) && (
+      {!hideWork && !streaming && todosHaveOpen(buildTodos) && (
         <BuildTodos items={buildTodos} />
       )}
 
@@ -1002,8 +1195,13 @@ export function MessageFeed({
       </div>
       </FeedScrollContext.Provider>
 
-      {/* Sticky dock: the pill is a child of the scroller, so position:absolute
-          would scroll away with the content — sticky keeps it on the floor. */}
+      <ImageLightbox
+        src={lightbox?.src ?? null}
+        alt={lightbox?.alt}
+        onClose={closeLightbox}
+        onAttachMarkup={onAttachMarkup}
+      />
+    </div>
       {showJump && (
         <div className="scroll-latest-dock">
           <button
@@ -1025,13 +1223,6 @@ export function MessageFeed({
           </button>
         </div>
       )}
-
-      <ImageLightbox
-        src={lightbox?.src ?? null}
-        alt={lightbox?.alt}
-        onClose={closeLightbox}
-        onAttachMarkup={onAttachMarkup}
-      />
     </div>
   )
 }

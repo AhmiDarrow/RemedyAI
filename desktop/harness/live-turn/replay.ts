@@ -74,6 +74,10 @@ export function stateAt(t: number, wallNow = Date.now(), history = 0): FeedState
     const now = base + e.at
     switch (e.type) {
       case 'thinking':
+        // A new thought after tools is a new round, not a glued suffix.
+        if (lastWasTool && thinking) {
+          thinking = thinking.replace(/\s+$/, '') + '\n\n'
+        }
         thinking += e.text
         break
       case 'text':
