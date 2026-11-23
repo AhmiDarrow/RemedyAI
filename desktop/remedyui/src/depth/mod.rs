@@ -19,8 +19,8 @@ pub(crate) use actions::{
     load_memory, load_skills, move_project_order, move_session_order, open_skill, pick_attachments,
     pick_folder, place_session, project_confirm_body, react, remove_project, rename_session,
     request_plan_changes, resolve_approval, refresh_banners, save_skill, search_library,
-    search_memory, send_life, show_plan, stall_seconds, submit, toggle_mic, trust_skill,
-    visible_approval,
+    search_memory, send_life, show_plan, speak_reply, stall_seconds, submit, toggle_mic,
+    trust_skill, visible_approval,
 };
 pub(crate) use markdown::{blocks, inline_rich};
 

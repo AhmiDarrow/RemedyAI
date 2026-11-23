@@ -762,6 +762,7 @@ fn reactions(ui: &Ui, studio: Studio, id: String) -> El {
 fn agent_reaction(ui: &Ui, studio: Studio, id: String) -> El {
     let st = studio.clone();
     let id_when = id.clone();
+    let u = ui.clone();
     show(
         ui,
         move || {
@@ -774,7 +775,7 @@ fn agent_reaction(ui: &Ui, studio: Studio, id: String) -> El {
         move || {
             let st = studio.clone();
             let id = id.clone();
-            w::text(ui, "").text(move || {
+            w::text(&u, "").text(move || {
                 st.messages
                     .get()
                     .iter()

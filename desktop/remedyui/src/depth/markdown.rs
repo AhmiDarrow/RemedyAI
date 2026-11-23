@@ -357,10 +357,13 @@ fn loaded_image(ui: &Ui, src: &str, alt: &str, on_image: impl Fn(String) + Clone
         let u = ui.clone();
         let err = err.clone();
         let alt = alt.clone();
-        move || w::text(&u, "").text(move || {
-            let e = err.get();
-            if e.is_empty() { alt.clone() } else { e }
-        }).variant("muted")
+        move || {
+            let alt = alt.clone();
+            w::text(&u, "").text(move || {
+                let e = err.get();
+                if e.is_empty() { alt.clone() } else { e }
+            }).variant("muted")
+        }
     })
     .el()
 }

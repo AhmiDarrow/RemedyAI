@@ -952,7 +952,7 @@ fn parse_plan(v: &Value) -> Option<PlanCard> {
         let g = api::str_field(src, "goal");
         if g.is_empty() { api::str_field(src, "title") } else { g }
     };
-    let steps = src
+    let steps: Vec<(String, String)> = src
         .get("steps")
         .and_then(|s| s.as_array())
         .map(|arr| {
@@ -1446,13 +1446,14 @@ fn transcript(studio: &Studio) -> String {
 
 fn save_text(studio: &Studio, name: &str, text: String) {
     let studio = studio.clone();
+    let dialog_studio = studio.clone();
     let name = name.to_string();
     let ok = with_host(move |app, window| {
         let mut dialog = FileDialog::default();
         dialog.title = "Export session".into();
         dialog.save = true;
         dialog.file_name = Some(name);
-        let studio = studio.clone();
+        let studio = dialog_studio.clone();
         app.file_dialog(Some(window), dialog, move |paths| {
             if let Some(path) = paths.into_iter().next() {
                 match std::fs::write(&path, &text) {
@@ -1463,17 +1464,18 @@ fn save_text(studio: &Studio, name: &str, text: String) {
         });
     });
     if !ok {
-        studio_notice_window(studio);
+        studio_notice_window(&studio);
     }
 }
 
 pub fn import_session(studio: &Studio) {
     let studio = studio.clone();
+    let dialog_studio = studio.clone();
     let ok = with_host(move |app, window| {
         let mut dialog = FileDialog::default();
         dialog.title = "Import session".into();
         dialog.filters = vec![("Text".into(), vec!["txt".into(), "md".into()])];
-        let studio = studio.clone();
+        let studio = dialog_studio.clone();
         app.file_dialog(Some(window), dialog, move |paths| {
             let Some(path) = paths.into_iter().next() else {
                 return;
@@ -1525,11 +1527,12 @@ pub fn import_session(studio: &Studio) {
 
 pub fn pick_attachments(studio: &Studio) {
     let studio = studio.clone();
+    let dialog_studio = studio.clone();
     let ok = with_host(move |app, window| {
         let mut dialog = FileDialog::default();
         dialog.title = "Attach files".into();
         dialog.multiple = true;
-        let studio = studio.clone();
+        let studio = dialog_studio.clone();
         app.file_dialog(Some(window), dialog, move |paths| add_paths(&studio, &paths));
     });
     if !ok {
@@ -1539,11 +1542,12 @@ pub fn pick_attachments(studio: &Studio) {
 
 pub fn pick_folder(studio: &Studio) {
     let studio = studio.clone();
+    let dialog_studio = studio.clone();
     let ok = with_host(move |app, window| {
         let mut dialog = FileDialog::default();
         dialog.title = "Project folder".into();
         dialog.folders = true;
-        let studio = studio.clone();
+        let studio = dialog_studio.clone();
         app.file_dialog(Some(window), dialog, move |paths| {
             if let Some(path) = paths.into_iter().next() {
                 studio.add_project(path.display().to_string(), false);
