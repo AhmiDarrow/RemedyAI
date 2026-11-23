@@ -805,7 +805,7 @@ pub fn clear_search(s: Settings) {
     });
 }
 
-fn take_api_key() -> String {
+pub(crate) fn take_api_key() -> String {
     API_KEY.with(|c| {
         let Some(field) = c.borrow().clone() else { return String::new() };
         let el = field.el();

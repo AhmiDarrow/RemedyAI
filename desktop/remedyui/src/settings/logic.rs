@@ -120,7 +120,7 @@ pub fn section_visible(sec: &Section, category: &str, mode: &str, query: &str) -
     }
 }
 
-pub fn category_label(id: &str) -> &'static str {
+pub fn category_label(id: &str) -> &str {
     CATEGORIES.iter().find(|(k, _, _)| *k == id).map(|(_, n, _)| *n).unwrap_or(id)
 }
 
@@ -267,7 +267,9 @@ pub fn generation_patch(scope: &str, provider: &str, model: &str, effort: &str, 
 
 pub fn couple_harness_min(min: f64, max: f64) -> Option<f64> {
     if min >= max {
-        Some((min + 0.02).min(0.99))
+        // Percent slider steps are whole points. Stay in cents so 0.95 + 0.02 is 0.97.
+        let cents = ((min * 100.0).round() as i32 + 2).min(99);
+        Some(cents as f64 / 100.0)
     } else {
         None
     }
@@ -275,7 +277,8 @@ pub fn couple_harness_min(min: f64, max: f64) -> Option<f64> {
 
 pub fn couple_harness_max(min: f64, max: f64) -> Option<f64> {
     if max <= min {
-        Some((max - 0.02).max(0.05))
+        let cents = ((max * 100.0).round() as i32 - 2).max(5);
+        Some(cents as f64 / 100.0)
     } else {
         None
     }
@@ -385,7 +388,7 @@ pub fn merge_connect_panes(raw: &Value) -> Map<String, Value> {
     next
 }
 
-pub fn pane_label(key: &str) -> &'static str {
+pub fn pane_label(key: &str) -> &str {
     match key {
         "live_ui" => "Live host UI",
         "chat" => "Chat/stream",
@@ -843,7 +846,6 @@ pub fn upsert_keys(text: &str, table: &str, updates: &[(&str, String)]) -> Strin
             if in_table {
                 flush_missing(&mut out, &seen);
                 seen.fill(false);
-                in_table = false;
             }
             let name = trim.trim_start_matches('[').trim_end_matches(']').trim();
             in_table = name == table;
@@ -1065,13 +1067,14 @@ mod tests {
     #[test]
     fn save_sends_llm_when_edited_and_custom_name_only_for_custom() {
         let mut d = SaveDraft::default();
-        d.provider = "custom";
+        d.provider = "custom".into();
         d.custom_name = " Home ".into();
-        d.model = "llama";
-        d.api_key = "sk-test";
+        d.model = "llama".into();
+        d.api_key = "sk-test".into();
         d.providers_touched = true;
         d.enabled_providers = vec!["xai".into()];
-        d.catalog_ids = vec!["demo".into(), "xai".into()];
+        // Ollama stays off, so the save is a list (demo is forced on) rather than null.
+        d.catalog_ids = vec!["demo".into(), "xai".into(), "ollama".into()];
         d.messengers_dirty = true;
         d.messengers = Some(json!({"telegram": {"enabled": true}}));
         d.assistant = json!({"enabled": true});
