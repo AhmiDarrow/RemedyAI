@@ -15,7 +15,7 @@ use remedy_ui::layout::{Align, Justify, Length, Position, AUTO};
 use remedy_ui::reactive::Signal;
 use remedy_ui::style::StylePatch;
 use remedy_ui::widgets as w;
-use remedy_ui::{App, El, Ui, Window, catch_errors};
+use remedy_ui::{catch_errors, App, El, Ui, Window};
 
 use std::cell::{Cell, RefCell};
 
@@ -25,7 +25,7 @@ use crate::palette;
 use crate::prefs;
 use crate::runtime::{self, Client};
 use crate::server_menu;
-use crate::studio::Studio;
+use crate::studio::{Studio, WorkMode};
 use crate::titlebar;
 use crate::updates::{self, VERSION};
 use crate::{fonts, Fonts};
@@ -144,7 +144,11 @@ pub fn set_advanced(on: bool) {
         }
     });
     if let Some(s) = crate::settings::current() {
-        s.mode.set(if on { "advanced".into() } else { "simple".into() });
+        s.mode.set(if on {
+            "advanced".into()
+        } else {
+            "simple".into()
+        });
     }
 }
 
@@ -164,7 +168,9 @@ pub fn open_usage(studio: &Studio) -> bool {
     let Some(c) = LIVE.with(|slot| slot.get()) else {
         return false;
     };
-    let Some(ui) = c.ui_slot.get() else { return false };
+    let Some(ui) = c.ui_slot.get() else {
+        return false;
+    };
     c.present_usage(&ui, studio);
     true
 }
@@ -443,7 +449,8 @@ impl Chrome {
         close_diag();
         close_help();
         let skipped = self.skip_quit.get()
-            || crate::settings::current().is_some_and(|s| s.skip_quit_warn.try_get().unwrap_or(false));
+            || crate::settings::current()
+                .is_some_and(|s| s.skip_quit_warn.try_get().unwrap_or(false));
         if skipped {
             if let Some(app) = self.app() {
                 app.quit();
@@ -530,7 +537,11 @@ impl Chrome {
             start_in_tray: self.start_in_tray.get(),
             skip_quit_server_warning: self.skip_quit.get(),
             ui_language: self.locale.get(),
-            ui_mode: if self.advanced.get() { "advanced".into() } else { "simple".into() },
+            ui_mode: if self.advanced.get() {
+                "advanced".into()
+            } else {
+                "simple".into()
+            },
             font_scale: prefs::font_name(self.font_idx.get()).into(),
             launch_at_login: self.launch_at_login.get(),
         };
@@ -559,7 +570,9 @@ impl Chrome {
 
     pub fn begin_check(self) {
         if self.preview {
-            self.toast_text.set(format!("Remedy {VERSION} is the newest desktop build in the feed."));
+            self.toast_text.set(format!(
+                "Remedy {VERSION} is the newest desktop build in the feed."
+            ));
             return;
         }
         let c = self;
@@ -593,7 +606,9 @@ impl Chrome {
         if self.preview {
             return;
         }
-        let Some(client) = studio.client() else { return };
+        let Some(client) = studio.client() else {
+            return;
+        };
         fetch_slot(&client, "diagnostics", self.diag);
         fetch_slot(&client, "hive/roster", self.hive);
     }
@@ -678,17 +693,29 @@ impl Chrome {
         if self.preview {
             return;
         }
-        let Some(client) = studio.client() else { return };
-        let Some(id) = studio.active.get() else { return };
-        fetch_slot(&client, &format!("sessions/{}/timeline", path_seg(&id)), self.timeline);
+        let Some(client) = studio.client() else {
+            return;
+        };
+        let Some(id) = studio.active.get() else {
+            return;
+        };
+        fetch_slot(
+            &client,
+            &format!("sessions/{}/timeline", path_seg(&id)),
+            self.timeline,
+        );
     }
 
     pub fn restore_step(self, studio: &Studio, message: &str) {
         if self.preview {
             return;
         }
-        let Some(client) = studio.client() else { return };
-        let Some(id) = studio.active.get() else { return };
+        let Some(client) = studio.client() else {
+            return;
+        };
+        let Some(id) = studio.active.get() else {
+            return;
+        };
         let body = serde_json::json!({ "message_id": message });
         let path = format!("sessions/{}/time-travel", path_seg(&id));
         let c = self;
@@ -700,7 +727,9 @@ impl Chrome {
         if self.preview {
             return;
         }
-        let Some(client) = studio.client() else { return };
+        let Some(client) = studio.client() else {
+            return;
+        };
         let body = serde_json::json!({ "hive_id": hive_id });
         let c = self;
         let s = studio.clone();
@@ -712,7 +741,9 @@ impl Chrome {
         if self.preview || studio.local_only {
             return;
         }
-        let Some(client) = studio.client() else { return };
+        let Some(client) = studio.client() else {
+            return;
+        };
         let agents = self.agents;
         let waker = remedy_ui::reactive::waker().ok();
         runtime::get_json(&client, "agents", {
@@ -863,6 +894,14 @@ impl Chrome {
                 studio.cycle_mode();
                 true
             }
+            Key::Character(c) if ctrl && e.modifiers.shift && (c == "[" || c == "{") => {
+                if studio.mode.get() == WorkMode::Plan {
+                    crate::plan_dock::toggle(studio);
+                    true
+                } else {
+                    false
+                }
+            }
             Key::Tab if e.modifiers.shift && !ctrl => {
                 studio.cycle_mode();
                 true
@@ -912,7 +951,10 @@ impl Chrome {
 }
 
 pub fn connect_flag(raw: &str) -> bool {
-    matches!(raw.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
 fn is_font(e: &KeyEvent) -> bool {
@@ -931,6 +973,9 @@ fn allow_in_input(e: &KeyEvent) -> bool {
     }
     match &e.key {
         Key::Character(c) if e.modifiers.ctrl && (c == "b" || c == "/") => true,
+        Key::Character(c) if e.modifiers.ctrl && e.modifiers.shift && (c == "[" || c == "{") => {
+            true
+        }
         _ => false,
     }
 }
@@ -947,7 +992,10 @@ fn field_focused(ui: &Ui) -> bool {
         n.focused
             && matches!(
                 n.role,
-                Role::TextInput | Role::SearchInput | Role::MultilineTextInput | Role::PasswordInput
+                Role::TextInput
+                    | Role::SearchInput
+                    | Role::MultilineTextInput
+                    | Role::PasswordInput
             )
     })
 }
@@ -980,7 +1028,9 @@ fn apply_feed(c: Chrome, res: Result<updates::Feed, String>) {
 }
 
 fn fetch_slot(client: &Client, path: &str, slot: Signal<serde_json::Value>) {
-    let Some(waker) = remedy_ui::reactive::waker().ok() else { return };
+    let Some(waker) = remedy_ui::reactive::waker().ok() else {
+        return;
+    };
     runtime::get_json(client, path, move |res| {
         let _ = waker.post(move || match res {
             Ok(v) => slot.set(v),
@@ -995,7 +1045,9 @@ fn post_then(
     body: serde_json::Value,
     done: impl FnOnce(Result<serde_json::Value, String>) + Send + 'static,
 ) {
-    let Some(waker) = remedy_ui::reactive::waker().ok() else { return };
+    let Some(waker) = remedy_ui::reactive::waker().ok() else {
+        return;
+    };
     runtime::post_json(client, path, body, move |res| {
         let _ = waker.post(move || done(res));
     });
@@ -1013,7 +1065,11 @@ fn parse_agents(v: &serde_json::Value) -> Vec<Agent> {
             }
             Some(Agent {
                 name: name.to_string(),
-                description: a.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string(),
+                description: a
+                    .get("description")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("")
+                    .to_string(),
             })
         })
         .collect()
@@ -1124,12 +1180,7 @@ pub fn dock_in_host() -> bool {
 }
 
 /// Title bar, overlays, and shortcuts around `body` (Grove, or a fixed Studio shell).
-pub fn hosted(
-    ui: &Ui,
-    studio: Studio,
-    chrome: Chrome,
-    body: impl Fn(&Ui) -> El + 'static,
-) -> El {
+pub fn hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: impl Fn(&Ui) -> El + 'static) -> El {
     bind_live(chrome);
     let u_err = ui.clone();
     let u_build = ui.clone();
@@ -1220,7 +1271,8 @@ fn build_hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: El) -> El {
 
     let root_ui = ui.clone();
     let root_studio = studio.clone();
-    ui.root().on_key(move |e| chrome.on_key(&root_ui, &root_studio, e));
+    ui.root()
+        .on_key(move |e| chrome.on_key(&root_ui, &root_studio, e));
 
     let watch = frame.clone();
     let watch_ui = ui.clone();
@@ -1257,7 +1309,10 @@ fn build_hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: El) -> El {
                     let head = messages().text(&u, "toast-turn");
                     c.toast_text.set(format!("{head} — {title}"));
                     if let Some(app) = c.app() {
-                        app.notify(Notification::new(TURN_NOTE, head, title).silent(true), |_| {});
+                        app.notify(
+                            Notification::new(TURN_NOTE, head, title).silent(true),
+                            |_| {},
+                        );
                     }
                 });
             }
@@ -1273,12 +1328,21 @@ fn session_title(studio: &Studio) -> String {
         .get()
         .into_iter()
         .find(|s| Some(&s.id) == id.as_ref())
-        .map(|s| if s.title.is_empty() { "Untitled".into() } else { s.title })
+        .map(|s| {
+            if s.title.is_empty() {
+                "Untitled".into()
+            } else {
+                s.title
+            }
+        })
         .unwrap_or_else(|| "Remedy".into())
 }
 
 fn overlay_slot(ui: &Ui, studio: Studio, chrome: Chrome) -> El {
-    let host = ui.el("chrome-overlays").layout(|l| crate::abs_fill(l)).pass_through();
+    let host = ui
+        .el("chrome-overlays")
+        .layout(|l| crate::abs_fill(l))
+        .pass_through();
     let slot = host.clone();
     let u = ui.clone();
     let s = studio.clone();
@@ -1292,20 +1356,37 @@ fn overlay_slot(ui: &Ui, studio: Studio, chrome: Chrome) -> El {
         // `El::child` takes the handle by value. Clone it; the clone is the same node.
         remedy_ui::reactive::untrack(|| {
             if menu {
-                let _ = slot.clone().child(dismiss_layer(&u, move || chrome.menu_open.set(false)));
-                let _ = slot.clone().child(placed(&u, 36.0, 6.0, true, titlebar::menu(&u, &s, chrome)));
-            }
-            if server {
-                let _ = slot.clone().child(dismiss_layer(&u, move || chrome.server_open.set(false)));
-                let _ = slot.clone().child(placed(&u, 0.0, 8.0, false, server_menu::panel(&u, s.clone(), chrome)));
-            }
-            if overlay != Overlay::None {
-                let _ = slot.clone().child(overlay_layer(&u, s.clone(), chrome, overlay));
-            }
-            if confirm != Confirm::None {
                 let _ = slot
                     .clone()
-                    .child(modal(&u, false, move || chrome.confirm.set(Confirm::None), crate::panels::confirm_card(&u, s.clone(), chrome)));
+                    .child(dismiss_layer(&u, move || chrome.menu_open.set(false)));
+                let _ =
+                    slot.clone()
+                        .child(placed(&u, 36.0, 6.0, true, titlebar::menu(&u, &s, chrome)));
+            }
+            if server {
+                let _ = slot
+                    .clone()
+                    .child(dismiss_layer(&u, move || chrome.server_open.set(false)));
+                let _ = slot.clone().child(placed(
+                    &u,
+                    0.0,
+                    8.0,
+                    false,
+                    server_menu::panel(&u, s.clone(), chrome),
+                ));
+            }
+            if overlay != Overlay::None {
+                let _ = slot
+                    .clone()
+                    .child(overlay_layer(&u, s.clone(), chrome, overlay));
+            }
+            if confirm != Confirm::None {
+                let _ = slot.clone().child(modal(
+                    &u,
+                    false,
+                    move || chrome.confirm.set(Confirm::None),
+                    crate::panels::confirm_card(&u, s.clone(), chrome),
+                ));
             }
         });
     });
@@ -1393,15 +1474,26 @@ fn overlay_layer(ui: &Ui, studio: Studio, chrome: Chrome, overlay: Overlay) -> E
     modal(ui, top, move || chrome.close_overlay(), content)
 }
 
-fn sheet(ui: &Ui, title: &str, wide: bool, fill: bool, body: El, on_close: impl Fn() + 'static) -> El {
+fn sheet(
+    ui: &Ui,
+    title: &str,
+    wide: bool,
+    fill: bool,
+    body: El,
+    on_close: impl Fn() + 'static,
+) -> El {
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
     let title_text = title.to_string();
     let heading = w::heading(ui, 2, title_text.clone()).layout(|l| l.grow = 1.0);
     let close_ui = ui.clone();
-    let close = w::button(ui, move || messages().text(&close_ui, "diag-close"), on_close)
-        .variant("quiet")
-        .style(StylePatch::new().foreground(colors.muted));
+    let close = w::button(
+        ui,
+        move || messages().text(&close_ui, "diag-close"),
+        on_close,
+    )
+    .variant("quiet")
+    .style(StylePatch::new().foreground(colors.muted));
     w::column(ui)
         .style(crate::surface_of(ui))
         .semantics(Semantics::new(Role::Dialog).label(title_text).modal(true))
@@ -1433,10 +1525,12 @@ fn sheet(ui: &Ui, title: &str, wide: bool, fill: bool, body: El, on_close: impl 
                 l.height = Length::Percent(1.0);
             })
         } else {
-            w::scroll(ui).child(body.padding(Insets::all(unit * 3.0))).layout(|l| {
-                l.grow = 1.0;
-                l.min_height = Length::Px(0.0);
-            })
+            w::scroll(ui)
+                .child(body.padding(Insets::all(unit * 3.0)))
+                .layout(|l| {
+                    l.grow = 1.0;
+                    l.min_height = Length::Px(0.0);
+                })
         })
 }
 
@@ -1462,15 +1556,23 @@ fn modal(ui: &Ui, top: bool, on_close: impl Fn() + 'static, content: El) -> El {
     } else {
         col = col.justify(Justify::Center).child(content);
     }
-    ui.el("modal").layout(|l| crate::abs_fill(l)).child(scrim).child(col)
+    ui.el("modal")
+        .layout(|l| crate::abs_fill(l))
+        .child(scrim)
+        .child(col)
 }
 
 fn dismiss_layer(ui: &Ui, on_close: impl Fn() + 'static) -> El {
-    ui.el("dismiss").layout(|l| crate::abs_fill(l)).on_click(on_close)
+    ui.el("dismiss")
+        .layout(|l| crate::abs_fill(l))
+        .on_click(on_close)
 }
 
 fn placed(ui: &Ui, top: f32, start: f32, from_top: bool, child: El) -> El {
-    let host = ui.el("placed").pass_through().layout(|l| crate::abs_fill(l));
+    let host = ui
+        .el("placed")
+        .pass_through()
+        .layout(|l| crate::abs_fill(l));
     host.child(child.layout(move |l| {
         l.position = Position::Absolute;
         if from_top {
@@ -1503,8 +1605,13 @@ fn toast_layer(ui: &Ui, chrome: Chrome) -> El {
         }
         let colors = u.theme().colors.clone();
         let _ = slot.clone().child(
-            w::text(&u, text.clone())
-                .style(StylePatch::new().background(colors.card).foreground(colors.text).radius(u.theme().radii.medium).padding(Insets::all(u.theme().spacing.unit * 2.0))),
+            w::text(&u, text.clone()).style(
+                StylePatch::new()
+                    .background(colors.card)
+                    .foreground(colors.text)
+                    .radius(u.theme().radii.medium)
+                    .padding(Insets::all(u.theme().spacing.unit * 2.0)),
+            ),
         );
         let c = chrome;
         let current = text;
@@ -1525,10 +1632,18 @@ mod tests {
     fn quit_label_matches_the_menu() {
         let m = crate::messages();
         assert_eq!(m.format_in("en-US", "menu-quit", None, &[]), "Quit Remedy");
-        assert_eq!(m.format_in("en-US", "menu-about", None, &[]), "About Remedy");
+        assert_eq!(
+            m.format_in("en-US", "menu-about", None, &[]),
+            "About Remedy"
+        );
         // Fluent wraps the placeable in bidi isolates. The menu label is built
         // without them so the accessible name is the visible version string.
-        let about = m.format_in("en-US", "menu-aboutVersion", None, &[("version", VERSION.into())]);
+        let about = m.format_in(
+            "en-US",
+            "menu-aboutVersion",
+            None,
+            &[("version", VERSION.into())],
+        );
         let about = about.replace(['\u{2068}', '\u{2069}'], "");
         assert_eq!(about, "About Remedy (v1.0.0)");
     }
@@ -1541,5 +1656,3 @@ mod tests {
         assert!(!connect_flag("0"));
     }
 }
-
-

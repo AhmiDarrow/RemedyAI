@@ -3,7 +3,7 @@
 use crate::runtime::{self, Client};
 use crate::time;
 use crate::work::{self, WorkStep};
-use remedy_ui::reactive::{Signal, waker};
+use remedy_ui::reactive::{waker, Signal};
 
 /// How the session list is filtered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -193,6 +193,8 @@ pub struct Studio {
     pub streaming: Signal<bool>,
     /// Chat / Plan / Build.
     pub mode: Signal<WorkMode>,
+    /// Plan-mode plan list dock (side, width, collapsed).
+    pub plan_dock: Signal<remedy_ui::widgets::DockState>,
     /// Connection to remedy-runtime.
     pub conn: Signal<Conn>,
     /// Active model id.
@@ -318,6 +320,7 @@ impl Studio {
             live_user_reaction: Signal::new(String::new()),
             streaming: Signal::new(false),
             mode: Signal::new(WorkMode::Build),
+            plan_dock: Signal::new(crate::plan_dock::initial_state()),
             conn: Signal::new(Conn::Disconnected),
             model: Signal::new("remedy".into()),
             provider: Signal::new("local".into()),
@@ -532,9 +535,14 @@ impl Studio {
         });
     }
 
+    /// Sets Chat, Plan, or Build.
+    pub fn set_mode(&self, mode: WorkMode) {
+        self.mode.set(mode);
+    }
+
     /// Cycles Chat → Plan → Build.
     pub fn cycle_mode(&self) {
-        self.mode.update(|m| *m = m.next());
+        self.set_mode(self.mode.get().next());
     }
 
     /// Sends `text` from the composer or a starter. Slash commands, a busy turn,
