@@ -3,6 +3,7 @@
 use crate::runtime::{self, Client};
 use crate::sse;
 use crate::time;
+use crate::work::{self, WorkStep};
 use remedy_ui::reactive::{Signal, waker};
 
 /// How the session list is filtered.
@@ -94,6 +95,29 @@ pub struct ChatMessage {
     pub created_at: Option<String>,
     /// True while tokens are still arriving.
     pub streaming: bool,
+    /// Tool steps behind the Worked line. Empty for a plain reply.
+    pub(crate) steps: Vec<WorkStep>,
+    /// Model thinking for this turn. Empty when the runtime sent none.
+    pub(crate) thinking: String,
+}
+
+impl ChatMessage {
+    /// A finished message with no tool steps and no thinking.
+    pub(crate) fn plain(
+        id: impl Into<String>,
+        role: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            role: role.into(),
+            content: content.into(),
+            created_at: None,
+            streaming: false,
+            steps: Vec::new(),
+            thinking: String::new(),
+        }
+    }
 }
 
 /// A known project folder, even if it has no sessions yet.
@@ -128,6 +152,12 @@ pub struct Studio {
     pub messages: Signal<Vec<ChatMessage>>,
     /// In-flight assistant text, not yet a finished row (or the live tail).
     pub partial: Signal<String>,
+    /// Tool steps for the turn that is streaming.
+    pub live_steps: Signal<Vec<WorkStep>>,
+    /// Thinking text for the turn that is streaming.
+    pub live_thinking: Signal<String>,
+    /// Byte offsets in [`Self::partial`] where a tool call started.
+    pub live_breaks: Signal<Vec<usize>>,
     /// A turn is streaming.
     pub streaming: Signal<bool>,
     /// Chat / Plan / Build.
@@ -146,6 +176,8 @@ pub struct Studio {
     pub local_only: bool,
     /// Fixed "now" for relative times in previews (Unix seconds).
     pub clock: Signal<Option<i64>>,
+    /// Time Travel rail. The shell mounts it; chrome calls [`crate::timetravel::TimeTravel::open`].
+    pub time_travel: crate::timetravel::TimeTravel,
     next_id: Signal<u64>,
     next_msg: Signal<u64>,
     client: Signal<Option<Client>>,
@@ -216,6 +248,9 @@ impl Studio {
             }]),
             messages: Signal::new(Vec::new()),
             partial: Signal::new(String::new()),
+            live_steps: Signal::new(Vec::new()),
+            live_thinking: Signal::new(String::new()),
+            live_breaks: Signal::new(Vec::new()),
             streaming: Signal::new(false),
             mode: Signal::new(WorkMode::Build),
             conn: Signal::new(Conn::Disconnected),
@@ -225,6 +260,7 @@ impl Studio {
             user_name: Signal::new(user.to_string()),
             local_only,
             clock: Signal::new(None),
+            time_travel: crate::timetravel::TimeTravel::new(),
             next_id: Signal::new(next_id),
             next_msg: Signal::new(1),
             client: Signal::new(None),
@@ -272,7 +308,7 @@ impl Studio {
         });
         self.active.set(Some(sid));
         self.messages.set(Vec::new());
-        self.partial.set(String::new());
+        self.clear_live();
     }
 
     fn create_remote(&self, client: Client) {
@@ -290,7 +326,7 @@ impl Studio {
                     });
                     studio.active.set(Some(s.id));
                     studio.messages.set(Vec::new());
-                    studio.partial.set(String::new());
+                    studio.clear_live();
                 }
                 Err(e) => studio.conn.set(Conn::Error(e)),
             });
@@ -314,7 +350,7 @@ impl Studio {
             let list = self.sessions.get();
             self.active.set(list.first().map(|s| s.id.clone()));
             self.messages.set(Vec::new());
-            self.partial.set(String::new());
+            self.clear_live();
             if let Some(next) = self.active.get() {
                 self.load_messages(&next);
             }
@@ -328,7 +364,7 @@ impl Studio {
         }
         self.active.set(Some(id.to_string()));
         self.messages.set(Vec::new());
-        self.partial.set(String::new());
+        self.clear_live();
         self.load_messages(id);
     }
 
@@ -449,13 +485,7 @@ impl Studio {
         };
         let mid = self.next_msg.get();
         self.next_msg.set(mid + 1);
-        let user = ChatMessage {
-            id: format!("local-u-{mid}"),
-            role: "user".into(),
-            content: text.clone(),
-            created_at: None,
-            streaming: false,
-        };
+        let user = ChatMessage::plain(format!("local-u-{mid}"), "user", text.clone());
         self.messages.update(|m| m.push(user));
         self.sessions.update(|list| {
             if let Some(s) = list.iter_mut().find(|s| s.id == sid) {
@@ -472,18 +502,16 @@ impl Studio {
         });
         if self.local_only || self.client.get().is_none() {
             self.messages.update(|m| {
-                m.push(ChatMessage {
-                    id: format!("local-sys-{mid}"),
-                    role: "system".into(),
-                    content: "The mind is not connected. Start this chat once it is.".into(),
-                    created_at: None,
-                    streaming: false,
-                });
+                m.push(ChatMessage::plain(
+                    format!("local-sys-{mid}"),
+                    "system",
+                    "The mind is not connected. Start this chat once it is.",
+                ));
             });
             return;
         }
+        self.clear_live();
         self.streaming.set(true);
-        self.partial.set(String::new());
         let client = self.client.get().unwrap();
         let studio = self.clone();
         let mode = self.mode.get();
@@ -507,6 +535,14 @@ impl Studio {
         );
     }
 
+    /// Drops the in-flight tail so a new session does not keep the previous turn.
+    fn clear_live(&self) {
+        self.partial.set(String::new());
+        self.live_steps.set(Vec::new());
+        self.live_thinking.set(String::new());
+        self.live_breaks.set(Vec::new());
+    }
+
     fn on_frame(&self, kind: &str, data: &str) {
         match kind {
             "token" | "text" => {
@@ -515,26 +551,47 @@ impl Studio {
                     self.partial.update(|p| p.push_str(&bit));
                 }
             }
-            "error" => {
-                let err = sse::error_text(data);
-                self.finish_assistant(Some(err));
+            "thinking" => {
+                self.live_thinking
+                    .update(|buf| work::on_thinking(buf, data));
             }
-            "done" | "end" => self.finish_assistant(None),
-            "start" => {}
             "tool_call" => {
-                self.partial.update(|p| {
-                    if !p.is_empty() && !p.ends_with('\n') {
-                        p.push('\n');
-                    }
-                    p.push_str("· working…\n");
-                });
+                let partial = self.partial.get();
+                let mut steps = self.live_steps.get();
+                let mut breaks = self.live_breaks.get();
+                work::on_tool_call(&mut steps, &mut breaks, &partial, data);
+                self.live_steps.set(steps);
+                self.live_breaks.set(breaks);
             }
+            "tool_result" => {
+                self.live_steps
+                    .update(|steps| work::on_tool_result(steps, data));
+            }
+            "step" => {
+                self.live_steps.update(|steps| work::on_step(steps, data));
+            }
+            "error" => {
+                if work::is_step_error(data) {
+                    self.live_steps
+                        .update(|steps| work::on_step_error(steps, data));
+                } else {
+                    self.finish_assistant(Some(sse::error_text(data)));
+                }
+            }
+            "done" | "end" | "aborted" => self.finish_assistant(None),
             _ => {}
         }
     }
 
     fn finish_assistant(&self, error: Option<String>) {
-        let mut body = self.partial.get();
+        let partial = self.partial.get();
+        let breaks = self.live_breaks.get();
+        let mut steps = self.live_steps.get();
+        let thinking = self.live_thinking.get();
+        self.clear_live();
+        self.streaming.set(false);
+        let mut body = work::reply_after(&partial, &breaks);
+        work::settle(&mut steps, error.is_some());
         if let Some(ref err) = error {
             if body.is_empty() {
                 body = err.clone();
@@ -543,9 +600,7 @@ impl Studio {
                 body.push_str(err);
             }
         }
-        self.partial.set(String::new());
-        self.streaming.set(false);
-        if body.is_empty() {
+        if body.is_empty() && steps.is_empty() && thinking.trim().is_empty() {
             return;
         }
         let mid = self.next_msg.get();
@@ -555,15 +610,13 @@ impl Studio {
         } else {
             "assistant"
         };
-        self.messages.update(|m| {
-            m.push(ChatMessage {
-                id: format!("local-a-{mid}"),
-                role: role.into(),
-                content: body,
-                created_at: None,
-                streaming: false,
-            });
-        });
+        let message = ChatMessage {
+            role: role.into(),
+            steps,
+            thinking,
+            ..ChatMessage::plain(format!("local-a-{mid}"), "assistant", body)
+        };
+        self.messages.update(move |m| m.push(message));
         if let Some(sid) = self.active.get() {
             self.sessions.update(|list| {
                 if let Some(s) = list.iter_mut().find(|s| s.id == sid) {
@@ -584,6 +637,22 @@ impl Studio {
             runtime::abort_session(&client, &sid, |_| {});
         }
         self.finish_assistant(None);
+    }
+
+    /// Reloads the session list and the open chat after a Time Travel restore.
+    pub(crate) fn reload_open(&self) {
+        if self.local_only {
+            return;
+        }
+        let Some(client) = self.client.get() else {
+            return;
+        };
+        self.refresh(&client);
+    }
+
+    /// The runtime client, when this Studio is allowed to talk to one.
+    pub(crate) fn runtime(&self) -> Option<Client> {
+        if self.local_only { None } else { self.client.get() }
     }
 
     /// Hooks a runtime client and loads sessions (no-op for local previews).
@@ -692,17 +761,24 @@ fn preview_sessions() -> Vec<Session> {
 fn preview_messages() -> Vec<ChatMessage> {
     vec![
         ChatMessage {
-            id: "m1".into(),
-            role: "user".into(),
-            content: "The portal addon stopped loading after the last update. Can you fix it?"
-                .into(),
             created_at: Some("2026-11-22T15:00:00Z".into()),
-            streaming: false,
+            ..ChatMessage::plain(
+                "m1",
+                "user",
+                "The portal addon stopped loading after the last update. Can you fix it?",
+            )
         },
         ChatMessage {
-            id: "m2".into(),
-            role: "assistant".into(),
-            content: "The portal addon loads again.\n\n\
+            created_at: Some("2026-11-22T15:00:20Z".into()),
+            steps: vec![
+                WorkStep::done("c1", "file_read"),
+                WorkStep::failed("c2", "bash", "exit 1"),
+                WorkStep::done("c3", "file_write"),
+            ],
+            ..ChatMessage::plain(
+                "m2",
+                "assistant",
+                "The portal addon loads again.\n\n\
 What was wrong: the last update renamed `init.lua` to `init_main.lua`, but \
 `manifest.json` and `loader.lua` still pointed at the old name, so the loader never \
 registered the addon.\n\n\
@@ -710,10 +786,8 @@ What I changed:\n\
 `manifest.json`: entry now `init_main.lua`; minimum version guard relaxed to 2.4.\n\
 `loader.lua`: registers the entry before the version check.\n\
 `config.json`: removed the stale `init.lua` override.\n\n\
-`portal.exe --addon-check --all` reports all 6 addons OK. Restart the portal to pick it up."
-                .into(),
-            created_at: Some("2026-11-22T15:00:20Z".into()),
-            streaming: false,
+`portal.exe --addon-check --all` reports all 6 addons OK. Restart the portal to pick it up.",
+            )
         },
     ]
 }

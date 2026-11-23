@@ -37,6 +37,10 @@ pub const RELEASE_BASE: &str = "https://github.com/AhmiDarrow/RemedyAI/releases/
 pub const OWNS_RELAUNCH_FLAG: &str = "RemedyDesktop-UpdaterOwnsRelaunch.flag";
 
 const BUSY: AtomicBool = AtomicBool::new(false);
+/// Bytes received. Written on the download thread, read on the UI thread.
+static PROGRESS_GOT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Total bytes, or `u64::MAX` when the server did not say.
+static PROGRESS_TOTAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
 
 thread_local! {
     static OFFER: std::cell::RefCell<Option<Signal<String>>> = const { std::cell::RefCell::new(None) };
@@ -457,6 +461,9 @@ pub(crate) fn spawn_install(app: &App) {
         BUSY.store(false, Ordering::SeqCst);
         return;
     };
+    store_progress(0, None);
+    note_signal().set(download_note(0, None));
+    watch_download(app);
     let app2 = app.clone();
     app.background(
         move || download_and_stage(&release),
@@ -470,12 +477,55 @@ pub(crate) fn spawn_install(app: &App) {
     );
 }
 
+/// What the status line and the tray say while bytes are arriving.
+/// `total` is `None` when the server did not send a length.
+pub fn download_note(received: u64, total: Option<u64>) -> String {
+    match total {
+        Some(total) if total > 0 => {
+            let pct = (received.saturating_mul(100) / total).min(100);
+            format!("Downloading {pct}%")
+        }
+        _ if received >= 1024 * 1024 => {
+            format!("Downloading {} MB", received / (1024 * 1024))
+        }
+        _ => "Downloading…".to_string(),
+    }
+}
+
+fn store_progress(received: u64, total: Option<u64>) {
+    use std::sync::atomic::Ordering::Relaxed;
+    PROGRESS_GOT.store(received, Relaxed);
+    PROGRESS_TOTAL.store(total.unwrap_or(u64::MAX), Relaxed);
+}
+
+fn load_progress() -> (u64, Option<u64>) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let got = PROGRESS_GOT.load(Relaxed);
+    let total = PROGRESS_TOTAL.load(Relaxed);
+    let total = (total != u64::MAX).then_some(total);
+    (got, total)
+}
+
+/// Copies the download counters onto the note. The counters move on the
+/// download thread; a signal can only be written on the UI thread.
+fn watch_download(app: &App) {
+    let app2 = app.clone();
+    app.after(std::time::Duration::from_millis(200), move || {
+        if !BUSY.load(Ordering::SeqCst) {
+            return;
+        }
+        let (got, total) = load_progress();
+        note_signal().set(download_note(got, total));
+        watch_download(&app2);
+    });
+}
+
 pub fn download_and_stage(release: &Release) -> Result<(), String> {
     if !trusted_download(&release.url) {
         return Err("Download URL is not a trusted GitHub release host".into());
     }
     let dir = std::env::temp_dir().join(format!("RemedyDesktop-Update-{}", std::process::id()));
-    let file = remedy_ui::update::download(&updater_config(), release, &dir, |_, _| {})
+    let file = remedy_ui::update::download(&updater_config(), release, &dir, store_progress)
         .map_err(|e| e.to_string())?;
     apply_verified(&file)
 }
@@ -987,6 +1037,14 @@ mod tests {
         assert!(!trusted_download("http://github.com/AhmiDarrow/RemedyAI/releases/download/v1.0.0/x.exe"));
         assert!(gzip_magic(&[0x1f, 0x8b, 0x08]));
         assert!(elf_magic(b"\x7fELF"));
+    }
+
+    #[test]
+    fn download_note_names_the_percent_the_screen_used_to_show() {
+        assert_eq!(download_note(0, None), "Downloading…");
+        assert_eq!(download_note(50, Some(100)), "Downloading 50%");
+        assert_eq!(download_note(3 * 1024 * 1024, None), "Downloading 3 MB");
+        assert_eq!(download_note(u64::MAX, Some(1)), "Downloading 100%");
     }
 
     #[cfg(windows)]

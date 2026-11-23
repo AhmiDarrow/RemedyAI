@@ -2,12 +2,13 @@
 
 use crate::logo;
 use crate::studio::{ChatMessage, Studio};
+use crate::work::{self, WorkStep};
 use crate::{messages, say, tool_button};
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::layout::{Align, Justify, Length};
 use remedy_ui::reactive::Signal;
-use remedy_ui::style::StylePatch;
+use remedy_ui::style::{BorderEdge, BorderSide, StylePatch};
 use remedy_ui::text::{RichText, TextStylePatch};
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui, show};
@@ -20,7 +21,7 @@ pub fn well(ui: &Ui, studio: Studio) -> El {
         .layout(|l| {
             l.grow = 1.0;
             l.basis = Length::Px(0.0);
-            l.min_width = Length::Px(0.0);
+            l.min_width = Length::Px(240.0);
             l.height = Length::Percent(1.0);
         })
         .child(header(ui, studio.clone()))
@@ -194,32 +195,32 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
         let streaming = st.streaming.get();
         if !partial.is_empty() || streaming {
             msgs.push(ChatMessage {
-                id: "live".into(),
-                role: "assistant".into(),
-                content: if partial.is_empty() {
-                    "…".into()
-                } else {
-                    partial
-                },
-                created_at: None,
                 streaming: true,
+                ..ChatMessage::plain(
+                    "live",
+                    "assistant",
+                    if partial.is_empty() { "…".to_string() } else { partial },
+                )
             });
         }
         items_out.set(msgs);
     });
     let u = ui.clone();
-    let user = studio.user_name.clone();
+    let studio_rows = studio.clone();
     let col = w::for_each(
         &col,
         items,
         |m| m.id.clone(),
         move |m| {
+            if m.id == "live" {
+                return live_turn(&u, studio_rows.clone());
+            }
             let name = if m.role == "user" {
-                user.get()
+                studio_rows.user_name.get()
             } else {
                 "Remedy".into()
             };
-            bubble(&u, m, &name, m.streaming)
+            saved_turn(&u, m, &name)
         },
     );
     w::scroll(ui)
@@ -294,11 +295,275 @@ fn empty_well(ui: &Ui, studio: Studio) -> El {
         }))
 }
 
-fn bubble(ui: &Ui, msg: &ChatMessage, name: &str, _live: bool) -> El {
-    let unit = ui.theme().spacing.unit;
-    let colors = ui.theme().colors.clone();
+fn saved_turn(ui: &Ui, msg: &ChatMessage, name: &str) -> El {
     let user = msg.role == "user";
     let system = msg.role == "system";
+    let row = message_row(ui, bubble_body(ui, &msg.content), user, system, name);
+    if msg.role != "assistant" {
+        return row;
+    }
+    let show_meta = work::visible(
+        &work::summarize(&msg.steps),
+        !msg.thinking.trim().is_empty(),
+    );
+    let show_body = !msg.content.trim().is_empty();
+    if !show_meta {
+        return row;
+    }
+    let steps = msg.steps.clone();
+    let thinking = msg.thinking.clone();
+    let mut col = w::column(ui)
+        .gap(2.0)
+        .layout(|l| l.width = Length::Percent(1.0))
+        .child(work_meta(
+            ui,
+            move || steps.clone(),
+            move || thinking.clone(),
+            false,
+        ));
+    if show_body {
+        col = col.child(row);
+    }
+    col
+}
+
+fn live_turn(ui: &Ui, studio: Studio) -> El {
+    let steps = {
+        let s = studio.clone();
+        move || s.live_steps.get()
+    };
+    let thinking = {
+        let s = studio.clone();
+        move || s.live_thinking.get()
+    };
+    let u = ui.clone();
+    let s_card = studio.clone();
+    let s_body = studio.clone();
+    w::column(ui)
+        .gap(2.0)
+        .layout(|l| l.width = Length::Percent(1.0))
+        .child(work_meta(ui, steps, thinking, true))
+        .child(
+            show(
+                ui,
+                move || live_shows_bubble(&s_card),
+                move || {
+                    let s = s_body.clone();
+                    let u = u.clone();
+                    message_row(
+                        &u,
+                        live_body(&u, move || {
+                            let reply = work::reply_after(&s.partial.get(), &s.live_breaks.get());
+                            if reply.trim().is_empty() {
+                                "…".to_string()
+                            } else {
+                                reply
+                            }
+                        }),
+                        false,
+                        false,
+                        "Remedy",
+                    )
+                },
+            )
+            .el(),
+        )
+}
+
+fn live_shows_bubble(studio: &Studio) -> bool {
+    let reply = work::reply_after(&studio.partial.get(), &studio.live_breaks.get());
+    if !reply.trim().is_empty() {
+        return true;
+    }
+    let sum = work::summarize(&studio.live_steps.get());
+    !work::visible(&sum, !studio.live_thinking.get().trim().is_empty())
+}
+
+/// "Worked · N steps · N errors" above an assistant reply. Hidden for a plain chat.
+fn work_meta(
+    ui: &Ui,
+    steps: impl Fn() -> Vec<WorkStep> + Clone + 'static,
+    thinking: impl Fn() -> String + Clone + 'static,
+    live: bool,
+) -> El {
+    let steps_when = steps.clone();
+    let think_when = thinking.clone();
+    let u = ui.clone();
+    show(
+        ui,
+        move || {
+            let sum = work::summarize(&steps_when());
+            work::visible(&sum, !think_when().trim().is_empty())
+        },
+        move || work_meta_row(&u, steps.clone(), thinking.clone(), live),
+    )
+    .el()
+}
+
+fn work_meta_row(
+    ui: &Ui,
+    steps: impl Fn() -> Vec<WorkStep> + Clone + 'static,
+    thinking: impl Fn() -> String + Clone + 'static,
+    live: bool,
+) -> El {
+    let unit = ui.theme().spacing.unit;
+    let colors = ui.theme().colors.clone();
+    let dot_color = if live { colors.accent } else { colors.muted };
+    let steps_title = steps.clone();
+    let think_title = thinking.clone();
+    let u_title = ui.clone();
+    let title = w::text(ui, "")
+        .text(move || {
+            let sum = work::summarize(&steps_title());
+            let thought = !think_title().trim().is_empty();
+            messages().text(&u_title, work::title_key(&sum, thought, live))
+        })
+        .nowrap()
+        .style(
+            StylePatch::new()
+                .foreground(colors.text)
+                .text_size(11.0)
+                .weight(600.0)
+                .mono(true),
+        );
+    let steps_n = steps.clone();
+    let u_steps = ui.clone();
+    let muted = colors.muted;
+    let step_part = show(
+        ui,
+        move || work::summarize(&steps_n()).total > 0,
+        {
+            let steps = steps.clone();
+            move || count_chip(&u_steps, steps.clone(), muted, false)
+        },
+    )
+    .el();
+    let steps_err = steps.clone();
+    let u_err = ui.clone();
+    let danger = colors.danger;
+    let error_part = show(
+        ui,
+        move || work::summarize(&steps_err()).errors > 0,
+        {
+            let steps = steps.clone();
+            move || count_chip(&u_err, steps.clone(), danger, true)
+        },
+    )
+    .el();
+    let steps_sem = steps;
+    let think_sem = thinking;
+    let u_sem = ui.clone();
+    let dot = ui
+        .el("work-dot")
+        .layout(|l| {
+            l.width = Length::Px(6.0);
+            l.height = Length::Px(6.0);
+            l.min_width = Length::Px(6.0);
+            l.min_height = Length::Px(6.0);
+            l.shrink = 0.0;
+        })
+        .style(StylePatch::new().background(dot_color).radius(3.0));
+    w::row(ui)
+        .layout(|l| l.width = Length::Percent(1.0))
+        .padding(Insets {
+            top: 0.0,
+            end: 0.0,
+            bottom: 0.0,
+            start: 28.0 + unit,
+        })
+        .child(
+            w::row(ui)
+                .align(Align::Center)
+                .gap(6.0)
+                .padding(Insets {
+                    top: 2.0,
+                    end: 4.0,
+                    bottom: 2.0,
+                    start: 10.0,
+                })
+                .layout(|l| l.width = Length::Percent(1.0))
+                .style(StylePatch::new().border_side(
+                    BorderEdge::Start,
+                    BorderSide::new(2.0, colors.accent.with_alpha(0.30)),
+                ))
+                .semantics(move || {
+                    let sum = work::summarize(&steps_sem());
+                    let thought = !think_sem().trim().is_empty();
+                    let mut label = messages().text(&u_sem, work::title_key(&sum, thought, live));
+                    if sum.total > 0 {
+                        label.push_str(&format!(
+                            ", {} {}",
+                            sum.total,
+                            messages().text(
+                                &u_sem,
+                                if sum.total == 1 {
+                                    "work-step"
+                                } else {
+                                    "work-steps"
+                                }
+                            )
+                        ));
+                    }
+                    if sum.errors > 0 {
+                        label.push_str(&format!(
+                            ", {} {}",
+                            sum.errors,
+                            messages().text(
+                                &u_sem,
+                                if sum.errors == 1 {
+                                    "work-error"
+                                } else {
+                                    "work-errors"
+                                }
+                            )
+                        ));
+                    }
+                    Semantics::new(Role::Label).label(label)
+                })
+                .child(dot)
+                .child(title)
+                .child(step_part)
+                .child(error_part),
+        )
+}
+
+fn count_chip(
+    ui: &Ui,
+    steps: impl Fn() -> Vec<WorkStep> + 'static,
+    color: remedy_ui::core::Color,
+    errors: bool,
+) -> El {
+    let u = ui.clone();
+    w::text(ui, "")
+        .text(move || {
+            let sum = work::summarize(&steps());
+            let n = if errors { sum.errors } else { sum.total };
+            let key = if errors {
+                if n == 1 {
+                    "work-error"
+                } else {
+                    "work-errors"
+                }
+            } else if n == 1 {
+                "work-step"
+            } else {
+                "work-steps"
+            };
+            format!("· {n} {}", messages().text(&u, key))
+        })
+        .nowrap()
+        .style(
+            StylePatch::new()
+                .foreground(color)
+                .text_size(11.0)
+                .weight(500.0)
+                .mono(true),
+        )
+}
+
+fn message_row(ui: &Ui, body: El, user: bool, system: bool, name: &str) -> El {
+    let unit = ui.theme().spacing.unit;
+    let colors = ui.theme().colors.clone();
     let (bg, fg, border) = if user {
         (colors.accent, colors.on_accent, colors.accent)
     } else if system {
@@ -319,7 +584,6 @@ fn bubble(ui: &Ui, msg: &ChatMessage, name: &str, _live: bool) -> El {
         )
     };
     let radius = ui.theme().radii.large;
-    let body = bubble_body(ui, &msg.content);
     let bubble = w::column(ui)
         .gap(unit)
         .padding(Insets {
@@ -361,8 +625,21 @@ fn bubble(ui: &Ui, msg: &ChatMessage, name: &str, _live: bool) -> El {
     }
 }
 
-/// Plain text with `backtick` runs in AhmiPrint, wrapping as one rich paragraph.
+/// Plain text with `backtick` runs in AhmiPrint. Filled chips wait on a
+/// RichText background span; until then a run is weight 600 in the code face.
 fn bubble_body(ui: &Ui, content: &str) -> El {
+    ui.el("bubble-body")
+        .text(rich_from(content))
+        .layout(|l| l.width = Length::Percent(1.0))
+}
+
+fn live_body(ui: &Ui, text: impl Fn() -> String + 'static) -> El {
+    ui.el("bubble-body")
+        .text(move || rich_from(&text()))
+        .layout(|l| l.width = Length::Percent(1.0))
+}
+
+fn rich_from(content: &str) -> RichText {
     let mut rich = RichText::new();
     let mut code = TextStylePatch::default();
     code.families = Some(vec!["AhmiPrint".into()]);
@@ -383,9 +660,7 @@ fn bubble_body(ui: &Ui, content: &str) -> El {
             is_code = !is_code;
         }
     }
-    ui.el("bubble-body")
-        .text(rich)
-        .layout(|l| l.width = Length::Percent(1.0))
+    rich
 }
 
 fn composer(ui: &Ui, studio: Studio) -> El {

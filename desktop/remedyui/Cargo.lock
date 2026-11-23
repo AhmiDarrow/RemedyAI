@@ -214,6 +214,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
+name = "anyhow"
+version = "1.0.104"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+
+[[package]]
 name = "ar_archive_writer"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -653,6 +659,12 @@ name = "cfg-if"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
+
+[[package]]
+name = "cfg_aliases"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
 
 [[package]]
 name = "cfg_aliases"
@@ -1143,6 +1155,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.10",
+]
+
+[[package]]
+name = "filedescriptor"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e40758ed24c9b2eeb76c35fb0aebc66c626084edd827e07e1552279814c6682d"
+dependencies = [
+ "libc",
+ "thiserror 1.0.69",
+ "winapi",
 ]
 
 [[package]]
@@ -2092,6 +2115,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "lazy_static"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
+
+[[package]]
 name = "lexical"
 version = "7.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2344,7 +2373,7 @@ dependencies = [
  "bit-set 0.10.0",
  "bitflags 2.13.2",
  "cfg-if",
- "cfg_aliases",
+ "cfg_aliases 0.2.2",
  "codespan-reporting",
  "half",
  "hashbrown 0.17.1",
@@ -2407,6 +2436,18 @@ name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
+
+[[package]]
+name = "nix"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "cfg_aliases 0.1.1",
+ "libc",
+]
 
 [[package]]
 name = "nom"
@@ -3175,6 +3216,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "portable-pty"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4a596a2b3d2752d94f51fac2d4a96737b8705dddd311a32b9af47211f08671e"
+dependencies = [
+ "anyhow",
+ "bitflags 1.3.2",
+ "downcast-rs",
+ "filedescriptor",
+ "lazy_static",
+ "libc",
+ "log",
+ "nix",
+ "serial2",
+ "shared_library",
+ "shell-words",
+ "winapi",
+ "winreg",
+]
+
+[[package]]
 name = "potential_utf"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3371,6 +3433,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 name = "remedy-desktop"
 version = "1.0.0"
 dependencies = [
+ "portable-pty",
  "remedy-ui",
  "serde",
  "serde_json",
@@ -3379,7 +3442,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-a11y",
  "remedy-ui-bridge-android",
@@ -3401,6 +3464,7 @@ dependencies = [
  "remedy-ui-reactive",
  "remedy-ui-render-cpu",
  "remedy-ui-render-gpu",
+ "remedy-ui-services-desktop",
  "remedy-ui-services-i18n",
  "remedy-ui-services-net",
  "remedy-ui-services-update",
@@ -3412,13 +3476,14 @@ dependencies = [
  "remedy-ui-widgets-core",
  "remedy-ui-widgets-forms",
  "remedy-ui-widgets-nav",
+ "remedy-ui-widgets-term",
  "zeroize",
 ]
 
 [[package]]
 name = "remedy-ui-a11y"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "accesskit",
  "remedy-ui-core",
@@ -3427,7 +3492,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-bridge-android"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "accesskit_android",
  "jni 0.21.1",
@@ -3442,7 +3507,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-bridge-headless"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-core",
  "remedy-ui-host",
@@ -3452,7 +3517,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-bridge-linux"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "arboard",
  "futures-core",
@@ -3472,7 +3537,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-bridge-macos"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "block2 0.6.2",
  "objc2 0.6.5",
@@ -3489,7 +3554,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-bridge-windows"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "png",
  "remedy-ui-bridge-winit",
@@ -3506,7 +3571,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-bridge-winit"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "accesskit_winit",
  "remedy-ui-core",
@@ -3519,7 +3584,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-compositor"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-core",
  "remedy-ui-input",
@@ -3530,7 +3595,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-core"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "cpu-time",
  "tracing",
@@ -3540,7 +3605,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-devtools"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "png",
  "remedy-ui-a11y",
@@ -3567,7 +3632,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-effects"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-core",
  "remedy-ui-paint",
@@ -3576,12 +3641,12 @@ dependencies = [
 [[package]]
 name = "remedy-ui-fonts"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 
 [[package]]
 name = "remedy-ui-fonts-cjk"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-fonts",
 ]
@@ -3589,7 +3654,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-host"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "accesskit",
  "raw-window-handle",
@@ -3600,7 +3665,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-input"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-core",
 ]
@@ -3608,7 +3673,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-layout"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-core",
  "stacker",
@@ -3618,7 +3683,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-macros"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3629,7 +3694,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-media-effects"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-core",
  "remedy-ui-effects",
@@ -3641,7 +3706,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-media-image"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "image",
  "js-sys",
@@ -3661,7 +3726,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-motion"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-core",
 ]
@@ -3669,7 +3734,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-paint"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-core",
  "remedy-ui-text",
@@ -3678,7 +3743,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-reactive"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-core",
  "serde",
@@ -3691,7 +3756,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-render-cpu"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-compositor",
  "remedy-ui-core",
@@ -3703,7 +3768,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-render-gpu"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "ash",
  "glow",
@@ -3724,9 +3789,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "remedy-ui-services-desktop"
+version = "1.0.0-rc.1"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
+dependencies = [
+ "futures-core",
+ "jni 0.21.1",
+ "js-sys",
+ "ndk-context",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "wasm-bindgen",
+ "web-sys",
+ "windows",
+ "windows-core",
+ "windows-sys 0.61.2",
+ "zbus 6.3.0",
+]
+
+[[package]]
 name = "remedy-ui-services-i18n"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "fluent-bundle",
  "fluent-langneg",
@@ -3750,7 +3835,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-services-net"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "js-sys",
  "remedy-ui-reactive",
@@ -3766,7 +3851,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-services-update"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "base64",
  "minisign-verify",
@@ -3785,7 +3870,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-style"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-core",
 ]
@@ -3793,7 +3878,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-text"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "fontique",
  "icu_normalizer",
@@ -3813,7 +3898,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-themes"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-core",
  "remedy-ui-style",
@@ -3823,7 +3908,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-tree"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-core",
  "remedy-ui-reactive",
@@ -3832,7 +3917,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-view"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "fluent-bundle",
  "fluent-syntax",
@@ -3858,7 +3943,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-widgets-core"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-a11y",
  "remedy-ui-core",
@@ -3873,7 +3958,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-widgets-forms"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-a11y",
  "remedy-ui-core",
@@ -3891,7 +3976,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-widgets-nav"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "remedy-ui-a11y",
  "remedy-ui-core",
@@ -3905,9 +3990,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "remedy-ui-widgets-term"
+version = "1.0.0-rc.1"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
+dependencies = [
+ "base64",
+ "remedy-ui-a11y",
+ "remedy-ui-core",
+ "remedy-ui-host",
+ "remedy-ui-input",
+ "remedy-ui-layout",
+ "remedy-ui-paint",
+ "remedy-ui-reactive",
+ "remedy-ui-style",
+ "remedy-ui-text",
+ "remedy-ui-view",
+ "unicode-width",
+ "vte",
+]
+
+[[package]]
 name = "remedy-vello-cpu"
 version = "0.4.0"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=7dec309c224fd4c85c38eaa108c869fe43331768#7dec309c224fd4c85c38eaa108c869fe43331768"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=68ad3a198571e702fc4696bc8b000edc6c5e7980#68ad3a198571e702fc4696bc8b000edc6c5e7980"
 dependencies = [
  "bytemuck",
  "fearless_simd",
@@ -4081,7 +4186,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4227,6 +4332,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serial2"
+version = "0.2.39"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c924c7ef58d1fb741cfecb65b9b38a9e049841edd1e419544089f0cbb5a127e7"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "sha2"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4246,6 +4362,22 @@ dependencies = [
  "digest 0.10.7",
  "keccak",
 ]
+
+[[package]]
+name = "shared_library"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a9e7e0f2bfae24d8a5b5a66c5b257a83c7412304311512a0c054cd5e619da11"
+dependencies = [
+ "lazy_static",
+ "libc",
+]
+
+[[package]]
+name = "shell-words"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc6fe69c597f9c37bfeeeeeb33da3530379845f10be461a66d16d03eca2ded77"
 
 [[package]]
 name = "shlex"
@@ -4896,6 +5028,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vte"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5924018406ce0063cd67f8e008104968b74b563ee1b85dde3ed1f7cb87d3dbd"
+dependencies = [
+ "arrayvec",
+ "memchr",
+]
+
+[[package]]
 name = "walkdir"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5158,7 +5300,7 @@ dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
  "cfg-if",
- "cfg_aliases",
+ "cfg_aliases 0.2.2",
  "document-features",
  "hashbrown 0.17.1",
  "js-sys",
@@ -5189,7 +5331,7 @@ dependencies = [
  "bit-vec 0.9.1",
  "bitflags 2.13.2",
  "bytemuck",
- "cfg_aliases",
+ "cfg_aliases 0.2.2",
  "document-features",
  "hashbrown 0.17.1",
  "indexmap",
@@ -5263,7 +5405,7 @@ dependencies = [
  "block2 0.6.2",
  "bytemuck",
  "cfg-if",
- "cfg_aliases",
+ "cfg_aliases 0.2.2",
  "glow",
  "glutin_wgl_sys",
  "gpu-allocator",
@@ -5670,7 +5812,7 @@ dependencies = [
  "block2 0.5.1",
  "bytemuck",
  "calloop",
- "cfg_aliases",
+ "cfg_aliases 0.2.2",
  "concurrent-queue",
  "core-foundation 0.9.4",
  "core-graphics",
@@ -5715,6 +5857,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c3b93199df0ab874cdf0c6a94f0a0dc3423fe41f1cafb62b8bd7b1deb277aef"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "winreg"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80d0f4e272c85def139476380b12f9ac60926689dd2e01d4923222f40580869d"
+dependencies = [
+ "winapi",
 ]
 
 [[package]]

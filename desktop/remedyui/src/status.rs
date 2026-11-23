@@ -10,7 +10,7 @@ use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui, show};
 
 /// Full-width status bar under the shell.
-pub fn status_bar(ui: &Ui, studio: Studio) -> El {
+pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> El {
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
     let u = ui.clone();
@@ -54,7 +54,7 @@ pub fn status_bar(ui: &Ui, studio: Studio) -> El {
         }));
 
     let settings =
-        w::button(ui, move || messages().text(&u, "status-settings"), || {}).variant("quiet");
+        w::button(ui, move || messages().text(&u, "status-settings"), on_settings).variant("quiet");
 
     let st = studio.clone();
     let u = ui.clone();
@@ -96,7 +96,8 @@ pub fn status_bar(ui: &Ui, studio: Studio) -> El {
                 .gap(unit * 2.0)
                 .child(indicator)
                 .child(settings)
-                .child(update_button(ui)),
+                .child(update_button(ui))
+                .child(update_note(ui)),
         )
         .child(picker)
 }
@@ -122,6 +123,23 @@ fn update_button(ui: &Ui) -> El {
                 crate::update::press_offer,
             )
             .variant("quiet")
+        },
+    )
+    .el()
+}
+
+/// Download percent or a check failure. Absent while the note is empty, so idle
+/// previews keep the same status row.
+fn update_note(ui: &Ui) -> El {
+    let u = ui.clone();
+    show(
+        ui,
+        || !crate::update::note_signal().get().is_empty(),
+        move || {
+            let u = u.clone();
+            w::text(&u, "")
+                .variant("muted")
+                .text(move || crate::update::note_signal().get())
         },
     )
     .el()
