@@ -92,8 +92,9 @@ pub fn toggle_bookmark(url: &str, title: Option<&str>, list: &[Bookmark]) -> (Ve
         url: u,
         created_at: 0,
     };
+    let first_url = next_item.url.clone();
     let mut out = vec![next_item];
-    out.extend(list.iter().filter(|b| b.url != out[0].url).cloned());
+    out.extend(list.iter().filter(|b| b.url != first_url).cloned());
     out.truncate(MAX);
     (out, true)
 }

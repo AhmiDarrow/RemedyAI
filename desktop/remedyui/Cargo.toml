@@ -5,12 +5,11 @@ edition = "2024"
 publish = false
 
 [dependencies]
-# Computer-use needs RemedyUI branch feat/webview-eval-devtools at 8ba3671 or
-# later (WebView::eval, set_user_agent, devtools). Bare main 7dec309 does not
-# have those methods. The Linux builder's checkout at this path has to be that
-# branch (or a merge of it); do not retarget this path at a Windows absolute.
+# Computer-use needs RemedyUI main at 9466a69 or later (PR #121: WebView::eval,
+# set_user_agent, devtools). The Linux builder's checkout at this path has to be
+# that main (or later); do not retarget this path at a Windows absolute.
 remedy-ui = { path = "/workspace/RemedyUI-update/crates/remedy-ui", features = ["net", "image", "webview"] }
-# remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "7dec309c224fd4c85c38eaa108c869fe43331768", features = ["net", "image"] }
+# remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "9466a695e9f452049f6d020b24afb5fe3eb38b71", features = ["net", "image", "webview"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -19,7 +18,7 @@ url = "2"
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
 remedy-ui = { path = "/workspace/RemedyUI-update/crates/remedy-ui", features = ["headless", "devtools", "net", "image", "webview"] }
-# remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "7dec309c224fd4c85c38eaa108c869fe43331768", features = ["headless", "devtools", "net", "image"] }
+# remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "9466a695e9f452049f6d020b24afb5fe3eb38b71", features = ["headless", "devtools", "net", "image", "webview"] }
 
 [profile.release]
 lto = "fat"
