@@ -69,6 +69,24 @@ export function splitSavedReply(
   return { narration, reply: narration.length ? out.replace(/\n{3,}/g, '\n\n').trim() : src }
 }
 
+
+export type AssistantBeat = {
+  text: string
+  /** Mid-turn speech before a tool call, the final reply, or a lone bubble. */
+  kind: 'mid' | 'final' | 'solo'
+}
+
+/** User-facing assistant speech as separate beats, in order. */
+export function assistantBeats(segments: LiveSegments): AssistantBeat[] {
+  const mid = segments.narration.map((s) => s.trim()).filter(Boolean)
+  const reply = (segments.reply || '').replace(/^\s+/, '')
+  const beats: AssistantBeat[] = mid.map((text) => ({ text, kind: 'mid' }))
+  if (reply.trim()) {
+    beats.push({ text: reply, kind: mid.length ? 'final' : 'solo' })
+  }
+  return beats
+}
+
 export interface ActivitySummary {
   total: number
   running: number
