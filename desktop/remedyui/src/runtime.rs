@@ -27,6 +27,11 @@ impl Client {
         }
         Client { http }
     }
+
+    /// The bearer-bearing client Settings uses for `/api` calls.
+    pub(crate) fn http(&self) -> Http {
+        self.http.clone()
+    }
 }
 
 /// Origin override: `$REMEDY_API`, else the default loopback port.
