@@ -15,6 +15,7 @@ import { useStickToBottom } from '../hooks/useStickToBottom'
 import { useI18n } from '../i18n'
 import { formatCount } from '../i18n/locale'
 import { useAnchorToggle } from './feedScroll'
+import { thinkingDisplayChunks } from '../utils/thinkingText'
 import { ProcessTrace } from './ProcessTrace'
 
 /**
@@ -98,7 +99,15 @@ function ThinkingItem({ text, live }: { text: string; live?: boolean }) {
         <span aria-hidden>{open ? '▾' : '▸'}</span> {live ? 'Thinking' : 'Thought'}
         <span className="ws-dim"> · {formatCount(text.length, resolved)} chars</span>
       </button>
-      {open && <div className="ws-thinking-body">{text}</div>}
+      {open && (
+        <div className="ws-thinking-body">
+          {thinkingDisplayChunks(text).map((chunk, i) => (
+            <p key={i} className="ws-thinking-chunk">
+              {chunk}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

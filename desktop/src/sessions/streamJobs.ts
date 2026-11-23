@@ -11,6 +11,7 @@ import { upsertTurn } from '../state/turns'
 import type { StreamProgress, UsagePayload } from '../api/messages'
 import type { BuildTodo } from '../components/BuildTodos'
 import type { LiveToolChip, ProcessStep } from '../utils/toolLabels'
+import { closeThinkingRound, joinThinkingDelta } from '../utils/thinkingText'
 
 export type StreamJobStatus = 'running' | 'done' | 'error' | 'aborted'
 
@@ -239,15 +240,23 @@ export function appendJobThinking(sessionId: string, thought: string) {
   if (!thought) return
   const j = jobs.get(sessionId)
   if (!j || j.status !== 'running') return
-  j.paint.partialThinking += thought
+  j.paint.partialThinking = joinThinkingDelta(j.paint.partialThinking, thought)
   j.lastActivityAt = Date.now()
 }
 
-/** Start of a new model round — this scratchpad replaces the last one. */
+/** Snapshot of the current thinking round. Earlier closed rounds are kept. */
 export function replaceJobThinking(sessionId: string, thought: string) {
   const j = jobs.get(sessionId)
   if (!j || j.status !== 'running') return
-  j.paint.partialThinking = thought || ''
+  j.paint.partialThinking = joinThinkingDelta(j.paint.partialThinking, thought || '', 'replace-round')
+  j.lastActivityAt = Date.now()
+}
+
+/** End the current thinking round so later deltas start a new paragraph. */
+export function closeJobThinkingRound(sessionId: string) {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  j.paint.partialThinking = closeThinkingRound(j.paint.partialThinking)
   j.lastActivityAt = Date.now()
 }
 

@@ -37,6 +37,7 @@ import { LiveTurnView } from './LiveTurnView'
 import { WorkStrip } from './WorkStrip'
 import { ReactionPicker, ReactionPills } from './Reactions'
 import { FeedScrollContext } from './feedScroll'
+import { assistantBeats, splitLiveText, splitSavedReply } from '../utils/liveSegments'
 import {
   showsProcessTrace,
   stepsFromMessageTools,
@@ -330,6 +331,7 @@ const MessageBubble = memo(function MessageBubble({
   userName,
   partnerName,
   sessionId = null,
+  textBreaks = [],
   onReact,
 }: {
   msg: ChatMessage
@@ -345,6 +347,8 @@ const MessageBubble = memo(function MessageBubble({
   userName?: string
   partnerName?: string
   sessionId?: string | null
+  /** Live turn offsets; mid-turn speech becomes its own bubble at each break. */
+  textBreaks?: number[]
   /** The owner reacts to Remedy's messages (one per message; same again removes). */
   onReact?: (messageId: string, emoji: string) => void
 }) {
@@ -355,15 +359,26 @@ const MessageBubble = memo(function MessageBubble({
   // User-facing prose stays in the bubble (including text written before a
   // tool call). Thinking and tool traces belong to the Working strip.
   const rawText = msg.content + (partial || '')
+  const beats = useMemo(() => {
+    if (!isAssistant) return []
+    const segs = isStreamingPartial
+      ? splitLiveText(rawText, textBreaks)
+      : splitSavedReply(rawText, msg.tool_calls || [])
+    return assistantBeats(segs).map((b) => ({
+      ...b,
+      text: linkifyBareImagePaths(sanitizeAssistantText(b.text)),
+    }))
+  }, [isAssistant, isStreamingPartial, rawText, textBreaks, msg.tool_calls])
   const text = useMemo(
-    () => (isUser || isSystem ? rawText : sanitizeAssistantText(rawText)),
-    [rawText, isUser, isSystem],
+    () => (isUser || isSystem ? rawText : beats.map((b) => b.text).join('\n\n') || sanitizeAssistantText(rawText)),
+    [rawText, isUser, isSystem, beats],
   )
   const thinkingText = (msg.thinking || '') + (partialThinking || '')
   const showEdit =
     msg.role === 'user' && !msg.reverted && !!onEditUserMessage && !streaming
   const timeLabel = formatTime(msg.created_at, intlLocale(resolved))
-  const long = text.length > COLLAPSE_CHARS
+  const lastBeatText = beats.length ? beats[beats.length - 1]!.text : text
+  const long = lastBeatText.length > COLLAPSE_CHARS
   const [expanded, setExpanded] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   // Touch: a long press on the bubble opens the reaction picker.
@@ -513,6 +528,124 @@ const MessageBubble = memo(function MessageBubble({
       >
         {!isSystem && avatar}
 
+        {isAssistant && beats.length > 0 ? (
+        <div className="chat-beats" data-testid="assistant-beats">
+          {beats.map((beat, i) => {
+            const isLast = i === beats.length - 1
+            const body = isLast && long && !expanded && !isStreamingPartial
+              ? `${beat.text.slice(0, COLLAPSE_CHARS).trimEnd()}…`
+              : beat.text
+            return (
+              <div
+                key={`${msg.id}:beat:${i}`}
+                className={`${bubbleClass} chat-beat is-${beat.kind}`}
+                data-testid={beat.kind === 'final' ? 'assistant-beat-final' : 'assistant-beat'}
+                {...(isLast ? pressHandlers : {})}
+                style={{
+                  background: bubbleBg,
+                  color: bubbleFg,
+                  border: `1px solid ${bubbleBorder}`,
+                  borderRadius: 'var(--chat-bubble-radius)',
+                  padding: 'var(--chat-bubble-pad)',
+                  fontSize: 'var(--chat-font)',
+                }}
+              >
+                {i === 0 && (
+                  <div className="chat-meta flex items-center gap-2 mb-1 w-fit max-w-full">
+                    <div className="chat-meta-label">{partnerLabel}</div>
+                    {timeLabel && <div className="chat-meta-time">{timeLabel}</div>}
+                    {beats.length === 1 && msg.model && (
+                      <div className="chat-meta-time" title={`Answered by ${msg.model}`}>
+                        {msg.model}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {beat.kind === 'final' && i > 0 && msg.model && (
+                  <div className="chat-meta flex items-center gap-2 mb-1 w-fit max-w-full">
+                    <div className="chat-meta-time" title={`Answered by ${msg.model}`}>
+                      {msg.model}
+                    </div>
+                  </div>
+                )}
+                <div
+                  className={`message-body chat-bubble-body${
+                    isStreamingPartial && isLast ? ' stream-md' : ''
+                  }`}
+                >
+                  {body ? (
+                    <>
+                      <ChatMdCtx.Provider value={mdCtx}>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        urlTransform={chatMarkdownUrlTransform}
+                        components={CHAT_MD_COMPONENTS}
+                      >
+                        {body}
+                      </ReactMarkdown>
+                      </ChatMdCtx.Provider>
+                      {isStreamingPartial && isLast ? (
+                        <span className="stream-caret" aria-hidden>
+                          ▍
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <span className="chat-empty-placeholder">
+                      {isStreamingPartial ? (
+                        <>
+                          {thinkingText ? 'Thinking' : 'Generating'}
+                          <span className="stream-caret" aria-hidden />
+                        </>
+                      ) : (
+                        '(empty)'
+                      )}
+                    </span>
+                  )}
+                </div>
+                {isLast && long && !isStreamingPartial && (
+                  <div className="mt-1 flex" style={{ justifyContent: 'flex-start' }}>
+                    <IconBtn
+                      title={expanded ? 'Show less' : 'Show more'}
+                      onClick={() => setExpanded((e) => !e)}
+                    >
+                      {expanded ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
+                    </IconBtn>
+                  </div>
+                )}
+                {isLast && !isStreamingPartial && text && (
+                  <div
+                    className="chat-actions mt-1.5 flex items-center transition-opacity"
+                    style={{ justifyContent: 'flex-start' }}
+                  >
+                    <IconBtn
+                      title={copied ? 'Copied' : 'Copy message'}
+                      onClick={() => void copyMsg()}
+                      active={copied}
+                    >
+                      {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
+                    </IconBtn>
+                    {onRegenerate && !streaming && (
+                      <IconBtn title="Regenerate reply" onClick={() => onRegenerate(msg.id)}>
+                        <IconRefresh size={13} />
+                      </IconBtn>
+                    )}
+                    {canReact && onReact && (
+                      <ReactionPicker
+                        messageId={msg.id}
+                        current={msg.reactions?.user}
+                        open={pickerOpen}
+                        onOpenChange={setPickerOpen}
+                        onReact={onReact}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        ) : (
         <div
           className={bubbleClass}
           {...pressHandlers}
@@ -525,21 +658,6 @@ const MessageBubble = memo(function MessageBubble({
             fontSize: 'var(--chat-font)',
           }}
         >
-          {!isUser && !isSystem && (
-            <div className="chat-meta flex items-center gap-2 mb-1 w-fit max-w-full">
-              <div className="chat-meta-label">{partnerLabel}</div>
-              {timeLabel && <div className="chat-meta-time">{timeLabel}</div>}
-              {msg.model && (
-                <div
-                  className="chat-meta-time"
-                  title={`Answered by ${msg.model}`}
-                >
-                  {msg.model}
-                </div>
-              )}
-            </div>
-          )}
-
           {isUser && (
             <div className="chat-meta chat-meta-user flex items-center justify-end gap-1.5 mb-1 w-fit max-w-full ml-auto">
               <div className="chat-meta-label" style={{ color: 'inherit', opacity: 0.9 }}>
@@ -560,7 +678,6 @@ const MessageBubble = memo(function MessageBubble({
           >
             {displayText ? (
               <>
-                {/* Live markdown while streaming for smoother final morph. */}
                 <ChatMdCtx.Provider value={mdCtx}>
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
@@ -624,23 +741,10 @@ const MessageBubble = memo(function MessageBubble({
                   <IconEdit size={13} />
                 </IconBtn>
               )}
-              {!isUser && onRegenerate && !streaming && (
-                <IconBtn title="Regenerate reply" onClick={() => onRegenerate(msg.id)}>
-                  <IconRefresh size={13} />
-                </IconBtn>
-              )}
-              {canReact && onReact && (
-                <ReactionPicker
-                  messageId={msg.id}
-                  current={msg.reactions?.user}
-                  open={pickerOpen}
-                  onOpenChange={setPickerOpen}
-                  onReact={onReact}
-                />
-              )}
             </div>
           )}
         </div>
+        )}
       </div>
       )}
       {showBubble && !isSystem && (
@@ -757,13 +861,14 @@ export function MessageFeed({
         msg={msg}
         partial={reply}
         partialThinking=""
+        textBreaks={textBreaks}
         toolProcessMode={toolProcessMode}
         isStreamingPartial
         onOpenImage={openLightbox}
         partnerName={partnerName}
       />
     ),
-    [toolProcessMode, openLightbox, partnerName],
+    [toolProcessMode, openLightbox, partnerName, textBreaks],
   )
 
   // Unread delta for the jump pill: messages that landed since the user

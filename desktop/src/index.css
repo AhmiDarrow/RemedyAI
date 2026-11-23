@@ -868,6 +868,30 @@ pre code {
     0 1px 3px rgba(0, 0, 0, 0.08),
     inset 0 1px 0 color-mix(in srgb, var(--text-primary) 4%, transparent);
 }
+/* Remedy's mid-turn speech: each beat is its own bubble, hugging the
+   sentence, with a little air between them. The final reply is the
+   fuller closing message. */
+.message-feed .chat-beats {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.72rem;
+  min-width: 0;
+  flex: 1;
+  max-width: 100%;
+}
+.message-feed .chat-beats .chat-beat.is-mid {
+  width: fit-content;
+  max-width: 100%;
+}
+.message-feed .chat-beats .chat-beat.is-final {
+  width: 100%;
+  margin-top: 0.2rem;
+}
+.message-feed .chat-beats .chat-beat.is-solo {
+  width: 100%;
+}
+
 .message-feed .chat-bubble-system {
   width: fit-content;
   max-width: min(92%, 32rem);
@@ -1122,10 +1146,19 @@ pre code {
   font-size: 0.74rem;
   padding-left: 0.55rem;
   border-left: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
-  white-space: pre-wrap;
   font-style: italic;
-  max-height: 10rem;
+  max-height: 14rem;
   overflow-y: auto;
+}
+.message-feed .ws-thinking-chunk {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.message-feed .ws-thinking-chunk + .ws-thinking-chunk {
+  margin-top: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border));
 }
 .message-feed .ws-raw { align-self: flex-start; opacity: 0.8; }
 
