@@ -148,41 +148,54 @@ pub fn bar(ui: &Ui, _studio: &Studio, chrome: Chrome) -> El {
                     bottom: 0.0,
                 }),
         )
-        .child(win_btn(ui, chrome, "win-minimize", false, move || c.minimize()))
+        .child(win_btn(ui, "win-minimize", false, w::Icon::Minus, move || c.minimize()))
         .child(win_btn_max(ui, chrome))
-        .child(win_btn(&u, chrome, "win-close", true, {
+        .child(win_btn(&u, "win-close", true, w::Icon::Close, {
             let c = chrome;
             move || c.hide()
         }))
 }
 
-fn win_btn(ui: &Ui, _chrome: Chrome, id: &'static str, close: bool, on: impl Fn() + 'static) -> El {
+/// Icon button. The accessible name stays the translated window command.
+fn win_btn(
+    ui: &Ui,
+    id: &'static str,
+    close: bool,
+    glyph: w::Icon,
+    on: impl Fn() + 'static,
+) -> El {
     let colors = ui.theme().colors.clone();
-    let u = ui.clone();
-    let mut b = w::button(ui, move || messages().text(&u, id), on).variant("quiet");
-    if close {
-        b = b.style(StylePatch::new().foreground(colors.danger));
-    }
-    b.layout(|l| {
-        l.width = Length::Px(46.0);
-        l.height = Length::Px(BAR);
-        l.shrink = 0.0;
-    })
+    let fg = if close { colors.danger } else { colors.text };
+    let label = messages().text(ui, id);
+    ui.el(id)
+        .child(w::icon(ui, glyph, 12.0))
+        .row()
+        .align(Align::Center)
+        .justify(Justify::Center)
+        .style(StylePatch::new().foreground(fg))
+        .layout(|l| {
+            l.width = Length::Px(46.0);
+            l.height = Length::Px(BAR);
+            l.shrink = 0.0;
+        })
+        .on_click(on)
+        .semantics(Semantics::new(Role::Button).label(label).action(Action::Click))
 }
 
 fn win_btn_max(ui: &Ui, chrome: Chrome) -> El {
+    let host = ui.el("win-max-host");
+    let slot = host.clone();
     let u = ui.clone();
     let c = chrome;
-    w::button(
-        ui,
-        move || messages().text(&u, if c.maximized.get() { "win-restore" } else { "win-maximize" }),
-        move || c.toggle_max(),
-    )
-    .variant("quiet")
-    .layout(|l| {
-        l.width = Length::Px(46.0);
-        l.height = Length::Px(BAR);
-        l.shrink = 0.0;
+    host.bind(move || {
+        let maxed = c.maximized.get();
+        let id = if maxed { "win-restore" } else { "win-maximize" };
+        let glyph = if maxed { w::Icon::Restore } else { w::Icon::Maximize };
+        slot.clear();
+        let toggle = c;
+        let _ = slot
+            .clone()
+            .child(win_btn(&u, id, false, glyph, move || toggle.toggle_max()));
     })
 }
 
