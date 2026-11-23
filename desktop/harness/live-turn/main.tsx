@@ -1,5 +1,6 @@
 import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { ChatWorkspace } from '../../src/components/ChatWorkspace'
 import { MessageFeed } from '../../src/components/MessageFeed'
 import { I18nProvider } from '../../src/i18n'
 import { applyStoredUiPrefs } from '../../src/utils/chatPrefs'
@@ -21,6 +22,16 @@ const speed = Number(params.get('speed')) || 1
 // owner's picker live (state is local to the harness).
 const reactionsOn = Boolean(params.get('reactions'))
 const seedUser = params.get('mine') || ''
+const todosOn = Boolean(params.get('todos'))
+// Studio split is the default for after3 shots; ?split=0 restores the single feed.
+const splitOn = params.get('split') !== '0'
+const swapOn = params.get('swap') === '1'
+const width = Number(params.get('w')) || (splitOn ? 1180 : 760)
+const DEMO_TODOS = [
+  { id: '1', content: 'Explore the addon folder', status: 'completed' as const },
+  { id: '2', content: 'Patch the loader entry', status: 'in_progress' as const },
+  { id: '3', content: 'Run the addon self-check', status: 'pending' as const },
+]
 
 function Harness() {
   const [t, setT] = useState(() => (fixed != null ? Number(fixed) : 0))
@@ -37,6 +48,29 @@ function Harness() {
   const base = stateAt(t, Date.now(), history)
   const [reacts, setReacts] = useState<Record<string, MessageReactions>>({})
   let messages = base.messages.map((m) => (reacts[m.id] ? { ...m, reactions: reacts[m.id] } : m))
+  if (base.streaming) {
+    const already = messages.some((m) => m.id === 'a1')
+    if (!already) {
+      messages = [
+        ...messages,
+        {
+          id: 'a1',
+          role: 'assistant' as const,
+          content: base.partialText,
+          thinking: null,
+          tool_calls: [],
+          tool_results: [],
+          model: null,
+          agent: null,
+          tokens: null,
+          created_at: '',
+          reverted: false,
+          draft: true,
+          reactions: reacts.a1,
+        },
+      ]
+    }
+  }
   if (reactionsOn) {
     const lastUser = [...messages].reverse().find((m) => m.role === 'user')
     if (lastUser && !reacts[lastUser.id]) messages = withReaction(messages, lastUser.id, 'agent', '👍')
@@ -45,28 +79,59 @@ function Harness() {
   }
   const s = { ...base, messages }
   const onReact = (id: string, emoji: string) => {
-    const next = withReaction(messages, id, 'user', emoji).find((m) => m.id === id)
+    const stubs: typeof messages = messages.some((m) => m.id === id)
+      ? messages
+      : [
+          ...messages,
+          {
+            id,
+            role: 'assistant',
+            content: '',
+            thinking: null,
+            tool_calls: [],
+            tool_results: [],
+            model: null,
+            agent: null,
+            tokens: null,
+            created_at: '',
+            reverted: false,
+            reactions: reacts[id],
+          },
+        ]
+    const next = withReaction(stubs, id, 'user', emoji).find((m) => m.id === id)
     setReacts((r) => ({ ...r, [id]: next?.reactions || {} }))
   }
+  const feedProps = {
+    messages: s.messages,
+    partialText: s.partialText,
+    textBreaks: s.textBreaks,
+    partialThinking: s.partialThinking,
+    streaming: s.streaming,
+    loading: false,
+    processSteps: s.processSteps,
+    activeTools: s.activeTools,
+    taskProgress: s.taskProgress,
+    toolProcessMode: mode,
+    userName: 'Sam',
+    partnerName: 'Remedy',
+    sessionId: 'demo',
+    liveMessageId: 'a1',
+    stickNonce: 0,
+    buildTodos: todosOn ? DEMO_TODOS : [],
+    onReact: reactionsOn ? onReact : undefined,
+  }
   return (
-    <div className="harness-shell" style={{ width: 760, height, position: 'relative', margin: '0 auto' }}>
-      <MessageFeed
-        messages={s.messages}
-        partialText={s.partialText}
-        textBreaks={s.textBreaks}
-        partialThinking={s.partialThinking}
-        streaming={s.streaming}
-        loading={false}
-        processSteps={s.processSteps}
-        activeTools={s.activeTools}
-        taskProgress={s.taskProgress}
-        toolProcessMode={mode}
-        userName="Sam"
-        partnerName="Remedy"
-        sessionId="demo"
-        stickNonce={0}
-        onReact={reactionsOn ? onReact : undefined}
-      />
+    <div className="harness-shell" style={{ width, height, position: 'relative', margin: '0 auto' }}>
+      {splitOn ? (
+        <ChatWorkspace
+          {...feedProps}
+          persist={false}
+          actionsSide={swapOn ? 'right' : 'left'}
+          actionsWidth={Number(params.get('aw')) || 400}
+        />
+      ) : (
+        <MessageFeed {...feedProps} />
+      )}
       <textarea data-testid="composer" aria-label="Composer" style={{ position: 'absolute', bottom: -60, left: 0, width: 300, height: 40 }} />
     </div>
   )

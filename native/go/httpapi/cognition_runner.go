@@ -890,7 +890,7 @@ func (r *CognitionTurnRunner) learnTimeout(key string, fallback time.Duration) t
 
 func (r *CognitionTurnRunner) turnConfig(req TurnRequest) cognition.Config {
 	cfg := r.Config
-	if cfg.MaxResultChars <= 0 {
+	if cfg.MaxResultChars <= 0 && advancedExplicit(loadHomeConfig(r.HomeDir), "max_result_chars") {
 		n := resolveAdvancedInt(loadHomeConfig(r.HomeDir), "max_result_chars")
 		if n > 0 {
 			cfg.MaxResultChars = n

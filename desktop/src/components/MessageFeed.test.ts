@@ -31,7 +31,7 @@ describe('MessageFeed live chrome order', () => {
 
   it('keeps leftover todos after the live reply dock', () => {
     const dock = src.indexOf('className="live-stream-dock"')
-    const leftover = src.indexOf('{!streaming && todosHaveOpen(buildTodos) && (')
+    const leftover = src.indexOf('{!hideWork && !streaming && todosHaveOpen(buildTodos) && (')
     expect(leftover).toBeGreaterThan(dock)
   })
 
@@ -50,7 +50,7 @@ describe('MessageFeed live chrome order', () => {
 })
 
 describe('saved assistant turn layout', () => {
-  it('keeps narration out of the bubble and shows the strip above it', async () => {
+  it('keeps user-facing text in the bubble and the strip above it', async () => {
     const { createElement } = await import('react')
     const { renderToStaticMarkup } = await import('react-dom/server')
     const { MessageFeed } = await import('./MessageFeed')
@@ -70,14 +70,26 @@ describe('saved assistant turn layout', () => {
     const html = renderToStaticMarkup(
       createElement(MessageFeed, { messages: [msg], partialText: '', streaming: false, loading: false } as never),
     )
-    const strip = html.indexOf('data-testid="work-strip"')
+    const stripAt = html.indexOf('data-testid="work-strip"')
     const bubble = html.indexOf('chat-bubble-assistant')
-    expect(strip).toBeGreaterThan(-1)
-    expect(bubble).toBeGreaterThan(strip)
-    const body = html.slice(bubble)
-    expect(body).toContain('The addon loads again.')
-    expect(body).not.toContain('reach the folder')
-    expect(body).not.toContain('Rename confirmed.')
+    expect(stripAt).toBeGreaterThan(-1)
+    expect(bubble).toBeGreaterThan(stripAt)
+    expect(html).toContain('The addon loads again.')
+    expect(html).toContain('reach the folder')
+    expect(html.slice(bubble)).not.toContain('Rename confirmed.')
+    expect(html).toContain('data-testid="assistant-beats"')
+    const beats = html.slice(html.indexOf('data-testid="assistant-beats"'))
+    expect(beats).toContain('data-testid="assistant-beat"')
+    expect(beats).toContain('data-testid="assistant-beat-final"')
+    const mid = beats.slice(beats.indexOf('data-testid="assistant-beat"'), beats.indexOf('data-testid="assistant-beat-final"'))
+    const fin = beats.slice(beats.indexOf('data-testid="assistant-beat-final"'))
+    expect(mid).toContain('reach the folder')
+    expect(mid).not.toContain('The addon loads again.')
+    expect(fin).toContain('The addon loads again.')
+    expect(fin).not.toContain('reach the folder')
+    const stripHtml = html.slice(stripAt, bubble)
+    expect(stripHtml).not.toContain('reach the folder')
+    expect(stripHtml).not.toContain('Rename confirmed.')
   }, 30_000) // cold import of the feed (markdown, highlighting) can pass 5 s on a loaded machine
 
   it('a tools-only turn shows the strip and no placeholder bubble', async () => {
@@ -146,4 +158,97 @@ describe('remote images in replies wait for a click (red-team)', () => {
     )
     expect(html).not.toContain('remote-image-gate')
   })
+})
+
+describe('MessageFeed hideWork (studio split)', () => {
+  const history = {
+    id: 'a1',
+    role: 'assistant' as const,
+    content: "I'll reach the folder through the shell.\n\nThe addon loads again.",
+    thinking: 'Rename confirmed.',
+    tool_calls: [{ name: 'bash', args: { command: 'dir' }, id: 'c1', narration: "I'll reach the folder through the shell." }],
+    tool_results: [{ name: 'bash', output: 'ok', id: 'c1' }],
+    model: null,
+    agent: null,
+    tokens: null,
+    created_at: '2026-11-14T21:00:00Z',
+    reverted: false,
+  }
+
+  it('keeps Remedy beats in the feed and omits the Working strip', async () => {
+    const { createElement } = await import('react')
+    const { renderToStaticMarkup } = await import('react-dom/server')
+    const { MessageFeed } = await import('./MessageFeed')
+    const html = renderToStaticMarkup(
+      createElement(MessageFeed, {
+        messages: [history],
+        partialText: '',
+        streaming: false,
+        loading: false,
+        hideWork: true,
+      } as never),
+    )
+    expect(html).not.toContain('data-testid="work-strip"')
+    expect(html).toContain('data-testid="assistant-beats"')
+    expect(html).toContain('reach the folder')
+    expect(html).toContain('The addon loads again.')
+    expect(html).not.toContain('Rename confirmed.')
+  }, 30_000)
+
+  it('shows a tiny working hint while streaming, not the work log', async () => {
+    const { createElement } = await import('react')
+    const { renderToStaticMarkup } = await import('react-dom/server')
+    const { MessageFeed } = await import('./MessageFeed')
+    const html = renderToStaticMarkup(
+      createElement(MessageFeed, {
+        messages: [],
+        partialText: "I'll reach the folder.",
+        textBreaks: [],
+        partialThinking: 'Need the path.',
+        streaming: true,
+        loading: false,
+        hideWork: true,
+        processSteps: [{ id: '1', name: 'bash', label: 'Running', status: 'running', startedAt: 1 }],
+      } as never),
+    )
+    expect(html).toContain('data-testid="chat-working-hint"')
+    expect(html).toContain('live-reply')
+    expect(html).toMatch(/I(?:'|&#x27;)ll reach the folder/)
+    expect(html).not.toContain('data-testid="work-strip"')
+    expect(html).not.toContain('Need the path.')
+  }, 30_000)
+
+  it('seals mid-turn speech as a reactable bubble while the turn is still live', async () => {
+    const { createElement } = await import('react')
+    const { renderToStaticMarkup } = await import('react-dom/server')
+    const { MessageFeed } = await import('./MessageFeed')
+    const narration = "I'll reach the folder through the shell."
+    const html = renderToStaticMarkup(
+      createElement(MessageFeed, {
+        messages: [],
+        partialText: narration,
+        textBreaks: [narration.length],
+        partialThinking: 'Need the path.',
+        streaming: true,
+        loading: false,
+        hideWork: true,
+        liveMessageId: 'draft-1',
+        onReact: () => {},
+        processSteps: [{
+          id: '1',
+          name: 'bash',
+          label: 'Running',
+          status: 'running',
+          startedAt: 1,
+          narration,
+        }],
+      } as never),
+    )
+    expect(html).toContain('data-testid="live-settled-reply"')
+    expect(html).toContain('aria-label="Add reaction"')
+    expect(html).toMatch(/I(?:'|&#x27;)ll reach the folder through the shell/)
+    expect(html).not.toContain('Need the path.')
+    // In-progress reply has not started, so the streaming dock is absent.
+    expect(html).not.toContain('data-testid="live-reply"')
+  }, 30_000)
 })

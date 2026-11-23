@@ -11,6 +11,7 @@ import { upsertTurn } from '../state/turns'
 import type { StreamProgress, UsagePayload } from '../api/messages'
 import type { BuildTodo } from '../components/BuildTodos'
 import type { LiveToolChip, ProcessStep } from '../utils/toolLabels'
+import { closeThinkingRound, joinThinkingDelta } from '../utils/thinkingText'
 
 export type StreamJobStatus = 'running' | 'done' | 'error' | 'aborted'
 
@@ -68,6 +69,8 @@ export type StreamJob = {
   lastSeq?: number
   /** True when this job follows a turn the server already owned (re-attach). */
   attached?: boolean
+  /** Server draft / final id of the in-flight assistant message. */
+  liveMessageId?: string
   /** Accumulated stream paint (tokens/tools) — always updated, even when detached. */
   paint: StreamJobPaint
   /**
@@ -239,15 +242,23 @@ export function appendJobThinking(sessionId: string, thought: string) {
   if (!thought) return
   const j = jobs.get(sessionId)
   if (!j || j.status !== 'running') return
-  j.paint.partialThinking += thought
+  j.paint.partialThinking = joinThinkingDelta(j.paint.partialThinking, thought)
   j.lastActivityAt = Date.now()
 }
 
-/** Start of a new model round — this scratchpad replaces the last one. */
+/** Snapshot of the current thinking round. Earlier closed rounds are kept. */
 export function replaceJobThinking(sessionId: string, thought: string) {
   const j = jobs.get(sessionId)
   if (!j || j.status !== 'running') return
-  j.paint.partialThinking = thought || ''
+  j.paint.partialThinking = joinThinkingDelta(j.paint.partialThinking, thought || '', 'replace-round')
+  j.lastActivityAt = Date.now()
+}
+
+/** End the current thinking round so later deltas start a new paragraph. */
+export function closeJobThinkingRound(sessionId: string) {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  j.paint.partialThinking = closeThinkingRound(j.paint.partialThinking)
   j.lastActivityAt = Date.now()
 }
 
@@ -436,6 +447,16 @@ export function completeStreamJob(
 }
 
 /** Remember the server turn id (from `event: start` or a re-attach). */
+/** Record the draft assistant message id so mid-turn reactions can target it. */
+export function setJobLiveMessageId(sessionId: string, messageId: string): void {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  const id = messageId.trim()
+  if (!id || j.liveMessageId === id) return
+  j.liveMessageId = id
+  j.lastActivityAt = Date.now()
+}
+
 export function setJobRequestId(sessionId: string, requestId: string): void {
   const j = jobs.get(sessionId)
   if (!j || j.status !== 'running') return

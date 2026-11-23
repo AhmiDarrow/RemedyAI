@@ -132,6 +132,8 @@ export type TurnStreamHandlers = {
   onTodos?: (payload: Record<string, unknown>) => void
   /** Remedy reacted to a message (react tool). */
   onReaction?: (payload: Record<string, unknown>) => void
+  /** Server draft id for the in-flight assistant message. */
+  onDraft?: (messageId: string) => void
   onLifeTask?: (payload: Record<string, unknown>) => void
   /**
    * Turn identity from the `start` frame. The request id is what a re-attach
@@ -233,6 +235,11 @@ function routeFrame(
     case 'reaction':
       handlers.onReaction?.(payload)
       break
+    case 'draft': {
+      const id = typeof payload.message_id === 'string' ? payload.message_id.trim() : ''
+      if (id) handlers.onDraft?.(id)
+      break
+    }
     case 'life_task':
       handlers.onLifeTask?.(payload)
       break

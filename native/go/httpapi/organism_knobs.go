@@ -34,7 +34,7 @@ var advancedKnobList = []advancedKnob{
 	{"after_tool_batch_timeout_s", 10, "int", 2, 60, "s", "Learn timeouts", "Cap for mid-turn prompt.after_tool_batch.", "", false},
 	{"pulse_learn_timeout_s", 45, "int", 10, 180, "s", "Learn timeouts", "Cap for one hearth partner.improve pulse.", "", false},
 	{"soul_inject_chars", 1400, "int", 200, 8000, "chars", "Token budgets", "Max characters of soul injected after the cache-stable marker.", "", false},
-	{"max_result_chars", 24000, "int", 2000, 256000, "chars", "Token budgets", "Max characters of each tool result kept for the model.", "REMEDY_REACT_MAX_RESULT_CHARS", false},
+	{"max_result_chars", 30000, "int", 2000, 256000, "chars", "Token budgets", "Max characters of each tool result kept for the model. Auto-tightens to 8,000 on a small local context window unless this knob or REMEDY_REACT_MAX_RESULT_CHARS is set.", "REMEDY_REACT_MAX_RESULT_CHARS", false},
 	{"soul_max_bytes", 64 * 1024, "int", 8 * 1024, 1024 * 1024, "bytes", "Caps", "Hard cap on the on-disk soul field.", "", false},
 	{"residue_max_bytes", 256 * 1024, "int", 16 * 1024, 4 * 1024 * 1024, "bytes", "Caps", "Hard cap on residue dumps during compact.", "", false},
 	{"journal_max_bytes", 64 * 1024, "int", 4 * 1024, 1024 * 1024, "bytes", "Caps", "Hard cap on the vigil journal tail.", "", false},
@@ -230,6 +230,24 @@ func resolveAdvanced(k advancedKnob, cfg ConfigMap) any {
 		}
 	}
 	return k.Default
+}
+
+// advancedExplicit reports whether the owner (or an env var) overrode this
+// knob, so callers can leave zero-value Config fields as "auto".
+func advancedExplicit(cfg ConfigMap, key string) bool {
+	k, ok := advancedByKey()[key]
+	if !ok {
+		return false
+	}
+	if _, ok := envAdvanced(k); ok {
+		return true
+	}
+	if table, ok := asStringMap(cfg["advanced"]); ok {
+		if raw, exists := table[key]; exists && raw != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveAdvancedInt(cfg ConfigMap, key string) int {

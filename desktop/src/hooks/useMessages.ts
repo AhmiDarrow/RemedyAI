@@ -17,6 +17,7 @@ import {
   type BuildTodo,
 } from '../components/BuildTodos'
 import { narrationAtBreak } from '../utils/liveSegments'
+import { joinThinkingDelta } from '../utils/thinkingText'
 import { setReactions, withReaction } from '../utils/reactions'
 import type { MessageReactions } from '../types'
 import {
@@ -24,6 +25,7 @@ import {
   appendJobToken,
   markJobTextBreak,
   replaceJobThinking,
+  closeJobThinkingRound,
   completeStreamJob,
   detachStreamJob,
   getJobPaint,
@@ -41,6 +43,7 @@ import {
   registerStreamJob,
   setJobClaimEpoch,
   setJobLastSeq,
+  setJobLiveMessageId,
   setJobRequestId,
   setJobActiveTools,
   setJobProcessSteps,
@@ -115,6 +118,7 @@ export function useMessages(sessionId: string | null) {
   const [partialText, setPartialText] = useState('')
   const [textBreaks, setTextBreaks] = useState<number[]>([])
   const [partialThinking, setPartialThinking] = useState('')
+  const [liveMessageId, setLiveMessageId] = useState<string | null>(null)
   const [activeTools, setActiveTools] = useState<ActiveTool[]>([])
   const [processSteps, setProcessSteps] = useState<ProcessStep[]>([])
   const [taskProgress, setTaskProgress] = useState<StreamProgress | null>(null)
@@ -254,8 +258,12 @@ export function useMessages(sessionId: string | null) {
         thinkingRafRef.current = null
       }
       thinkingBufRef.current = ''
-      thinkingAccumRef.current = thought || ''
-      setPartialThinking(thought || '')
+      thinkingAccumRef.current = joinThinkingDelta(
+        thinkingAccumRef.current,
+        thought || '',
+        'replace-round',
+      )
+      setPartialThinking(thinkingAccumRef.current)
     },
     [],
   )
@@ -422,6 +430,7 @@ export function useMessages(sessionId: string | null) {
     setStallSeconds(0)
     setPartialText('')
     setTextBreaks([])
+    setLiveMessageId(null)
     setPartialThinking('')
     setActiveTools([])
     setProcessSteps([])
@@ -503,6 +512,7 @@ export function useMessages(sessionId: string | null) {
         setPartialText(paint.partialText || '')
         setTextBreaks(paint.textBreaks || [])
         setPartialThinking(paint.partialThinking || '')
+        setLiveMessageId(job.liveMessageId || null)
         processStepsRef.current = paint.processSteps || []
         setProcessSteps(paint.processSteps || [])
         setActiveTools(paint.activeTools || [])
@@ -696,7 +706,7 @@ export function useMessages(sessionId: string | null) {
           && sessionIdRef.current === targetId
         ) {
           const optimistic: ChatMessage = {
-            id: crypto.randomUUID(),
+            id: getStreamJob(targetId)?.liveMessageId || crypto.randomUUID(),
             role: 'assistant',
             content: assistantText,
             thinking: thinkingText,
@@ -732,6 +742,7 @@ export function useMessages(sessionId: string | null) {
           streamCtrlRef.current = null
           setPartialText('')
           setTextBreaks([])
+          setLiveMessageId(null)
           setPartialThinking('')
           setActiveTools([])
           setTaskProgress(null)
@@ -873,6 +884,7 @@ export function useMessages(sessionId: string | null) {
           streamCtrlRef.current = null
           setPartialText('')
           setTextBreaks([])
+          setLiveMessageId(null)
           setPartialThinking('')
           setActiveTools([])
           setProcessSteps([])
@@ -968,6 +980,10 @@ export function useMessages(sessionId: string | null) {
           }
           void finishErr(errMsg, { quiet: joinFailed })
         },
+        onDraft: (messageId) => {
+          setJobLiveMessageId(targetId, messageId)
+          if (isFocusedTurn()) setLiveMessageId(messageId)
+        },
         onStart: (info) => {
           if (info.requestId) setJobRequestId(targetId, info.requestId)
           // Stop must send the claim generation, on a re-attach as much as on
@@ -999,6 +1015,7 @@ export function useMessages(sessionId: string | null) {
           // not the reply: cut it here and hang it on the step.
           const prevBreaks = [...(paint?.textBreaks || [])]
           const breaks = markJobTextBreak(targetId)
+          closeJobThinkingRound(targetId)
           const narration = narrationAtBreak(paint?.partialText || '', prevBreaks, breaks)
           const { steps, tools } = applyLiveToolCall(
             prevSteps,
@@ -1010,6 +1027,11 @@ export function useMessages(sessionId: string | null) {
           if (isFocusedTurn()) {
             setActiveTools(tools)
             setTextBreaks(breaks)
+            const closed = getJobPaint(targetId)?.partialThinking
+            if (closed != null) {
+              thinkingAccumRef.current = closed
+              setPartialThinking(closed)
+            }
           }
           pushSteps(steps)
         },
@@ -1155,6 +1177,7 @@ export function useMessages(sessionId: string | null) {
           clearStreamAccum()
           setPartialText('')
           setTextBreaks([])
+          setLiveMessageId(null)
           setPartialThinking('')
           setActiveTools([])
           setProcessSteps([])
@@ -1256,6 +1279,7 @@ export function useMessages(sessionId: string | null) {
         clearStreamAccum()
         setPartialText('')
         setTextBreaks([])
+        setLiveMessageId(null)
         setPartialThinking('')
         setActiveTools([])
         setProcessSteps([])
@@ -1701,6 +1725,7 @@ export function useMessages(sessionId: string | null) {
     setLoading(false)
     setPartialText('')
     setTextBreaks([])
+    setLiveMessageId(null)
     setPartialThinking('')
     setActiveTools([])
     setProcessSteps([])
@@ -1813,6 +1838,7 @@ export function useMessages(sessionId: string | null) {
     partialText,
     textBreaks,
     partialThinking,
+    liveMessageId,
     activeTools,
     processSteps,
     taskProgress,

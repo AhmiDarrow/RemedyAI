@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 export type BuildTodoStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
 
 export type BuildTodo = {
@@ -10,6 +12,8 @@ interface BuildTodosProps {
   items: BuildTodo[]
   /** True while the current turn is still streaming. */
   live?: boolean
+  /** Open when first mounted. The header always toggles closed. */
+  defaultOpen?: boolean
 }
 
 function statusOf(raw: string): BuildTodoStatus {
@@ -36,7 +40,8 @@ export function todosHaveOpen(items: BuildTodo[] | undefined | null): boolean {
 /**
  * User-facing build checklist. Items strike through as Remedy marks them done.
  */
-export function BuildTodos({ items, live = false }: BuildTodosProps) {
+export function BuildTodos({ items, live = false, defaultOpen = true }: BuildTodosProps) {
+  const [expanded, setExpanded] = useState(defaultOpen)
   if (!todosHaveOpen(items)) return null
   const open = items.filter((t) => {
     const s = statusOf(t.status)
@@ -45,18 +50,22 @@ export function BuildTodos({ items, live = false }: BuildTodosProps) {
   const done = items.filter((t) => statusOf(t.status) === 'completed').length
 
   return (
-    <div className="px-4 py-2 flex justify-start w-full">
+    <div className="build-todos px-4 py-2 flex justify-start w-full" data-testid="build-todos">
       <div
-        className="w-full max-w-[min(var(--chat-max-width),100%)] rounded-lg px-3 py-2"
+        className="build-todos-card w-full max-w-[min(var(--chat-max-width),100%)] rounded-lg px-3 py-2"
         style={{
           background: 'var(--bg-tertiary)',
           border: '1px solid var(--border)',
         }}
-        role="list"
         aria-label="Build checklist"
         aria-live="polite"
       >
-        <div className="flex items-center justify-between gap-2 mb-1.5">
+        <button
+          type="button"
+          className="build-todos-head flex items-center justify-between gap-2 mb-0 w-full"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+        >
           <span
             className="text-[11px] font-semibold tracking-wide uppercase"
             style={{ color: 'var(--text-muted)' }}
@@ -66,12 +75,17 @@ export function BuildTodos({ items, live = false }: BuildTodosProps) {
               <span className="font-medium normal-case tracking-normal"> · live</span>
             ) : null}
           </span>
-          <span className="text-[11px] tabular-nums" style={{ color: 'var(--text-muted)' }}>
-            {done}/{items.length}
-            {open ? ` · ${open} open` : ' · done'}
+          <span className="flex items-center gap-1.5">
+            <span className="text-[11px] tabular-nums" style={{ color: 'var(--text-muted)' }}>
+              {done}/{items.length}
+              {open ? ` · ${open} open` : ' · done'}
+            </span>
+            <span aria-hidden style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+              {expanded ? '▾' : '▸'}
+            </span>
           </span>
-        </div>
-        <ul className="space-y-1">
+        </button>
+        {expanded && <ul className="build-todos-list space-y-1 mt-1.5" role="list">
           {items.map((t) => {
             const status = statusOf(t.status)
             const closed = status === 'completed' || status === 'cancelled'
@@ -120,7 +134,7 @@ export function BuildTodos({ items, live = false }: BuildTodosProps) {
               </li>
             )
           })}
-        </ul>
+        </ul>}
       </div>
     </div>
   )

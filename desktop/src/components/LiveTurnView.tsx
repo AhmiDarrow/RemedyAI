@@ -1,16 +1,17 @@
-import { memo, useMemo, type ReactNode } from 'react'
+import { memo, type ReactNode } from 'react'
 import type { ChatMessage } from '../types'
 import type { ProcessStep, ToolProcessMode } from '../utils/toolLabels'
-import { splitLiveText } from '../utils/liveSegments'
 import type { StripProgress } from '../utils/workTimeline'
 import { WorkStrip } from './WorkStrip'
 
 /**
  * The live turn, split by audience:
- *  - background work (thinking, narration, tools, progress) is one compact,
- *    low-contrast Working strip with a single live status line;
- *  - the reply bubble appears only once real reply text is streaming, and
- *    never contains narration (text written before a tool call).
+ *  - thinking, tool calls, progress, and build extras live in one compact
+ *    Working strip, collapsed by default;
+ *  - every line written to the user (including text before a tool call)
+ *    renders as a normal assistant bubble, including while streaming.
+ * textBreaks is accepted so stream callers can keep passing it; the bubble
+ * uses the full partialText rather than splitting narration out.
  */
 export interface LiveTurnViewProps {
   partialText: string
@@ -24,6 +25,8 @@ export interface LiveTurnViewProps {
   sessionId?: string | null
   /** Live todos for the open strip body. */
   extras?: ReactNode
+  /** False hides the Working strip (work lives in the actions pane). */
+  showWork?: boolean
 }
 
 const STREAMING_MSG: ChatMessage = {
@@ -42,7 +45,6 @@ const STREAMING_MSG: ChatMessage = {
 
 export const LiveTurnView = memo(function LiveTurnView({
   partialText,
-  textBreaks = [],
   partialThinking = '',
   processSteps,
   renderReply,
@@ -50,27 +52,31 @@ export const LiveTurnView = memo(function LiveTurnView({
   mode = 'off',
   sessionId = null,
   extras,
+  showWork = true,
 }: LiveTurnViewProps) {
-  const { reply } = useMemo(() => splitLiveText(partialText, textBreaks), [partialText, textBreaks])
-  const hasReply = reply.trim().length > 0
+  // All assistant prose belongs in the bubble, including text written before
+  // a tool call. The Working strip is only thinking, tools, and extras (todos).
+  const hasReply = partialText.trim().length > 0
   return (
     <div className="live-turn" data-testid="live-turn">
-      <div className="work-strip-slot">
-        <WorkStrip
-          steps={processSteps}
-          thinking={partialThinking}
-          live
-          replying={hasReply && !processSteps.some((s) => s.status === 'running')}
-          progress={progress}
-          mode={mode}
-          defaultOpen={mode === 'full'}
-          sessionId={sessionId}
-          extras={extras}
-        />
-      </div>
+      {showWork && (
+        <div className="work-strip-slot">
+          <WorkStrip
+            steps={processSteps}
+            thinking={partialThinking}
+            live
+            replying={hasReply && !processSteps.some((s) => s.status === 'running')}
+            progress={progress}
+            mode={mode}
+            defaultOpen={false}
+            sessionId={sessionId}
+            extras={extras}
+          />
+        </div>
+      )}
       {hasReply && (
         <div className="live-reply" data-testid="live-reply">
-          {renderReply(STREAMING_MSG, reply)}
+          {renderReply(STREAMING_MSG, partialText)}
         </div>
       )}
     </div>

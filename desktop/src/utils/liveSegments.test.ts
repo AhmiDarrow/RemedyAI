@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { narrationAtBreak, splitLiveText, splitSavedReply, summarizeSteps } from './liveSegments'
+import { assistantBeats, narrationAtBreak, splitLiveText, splitSavedReply, splitSealedLive, summarizeSteps } from './liveSegments'
 
 describe('splitLiveText', () => {
   it('treats text before tool calls as narration and the rest as the reply', () => {
@@ -43,6 +43,27 @@ describe('activity summary', () => {
   })
 })
 
+describe('splitSealedLive', () => {
+  it('exposes completed mid-turn speech separately from the live reply', () => {
+    const a = "I'll reach the folder."
+    const b = 'Found it.'
+    const reply = 'The addon loads.'
+    const text = `${a}\n\n${b}\n\n${reply}`
+    const out = splitSealedLive(text, [a.length, a.length + 2 + b.length])
+    expect(out.narration).toEqual([a, b])
+    expect(out.reply).toBe(reply)
+    expect(out.sealed).toBe(`${a}\n\n${b}`)
+  })
+
+  it('has no sealed text before the first tool-call break', () => {
+    expect(splitSealedLive('Hello there.', [])).toEqual({
+      narration: [],
+      reply: 'Hello there.',
+      sealed: '',
+    })
+  })
+})
+
 describe('narrationAtBreak', () => {
   const text = 'Reaching the folder.\n\nFound it.'
   it('returns the text cut by a newly added break', () => {
@@ -77,5 +98,26 @@ describe('splitSavedReply', () => {
     const c = 'Checking.\n\nDone. Checking again later is not needed.'
     const r = splitSavedReply(c, [{ narration: 'Checking.' }])
     expect(r.reply).toBe('Done. Checking again later is not needed.')
+  })
+})
+
+describe('assistantBeats', () => {
+  it('turns mid-turn narration into separate beats and keeps the final reply distinct', () => {
+    const segs = splitLiveText(
+      "I'll reach the folder.\n\nFound the manifest.\n\nThe addon loads now.",
+      [22, 44],
+    )
+    const beats = assistantBeats(segs)
+    expect(beats.map((b) => [b.kind, b.text])).toEqual([
+      ['mid', "I'll reach the folder."],
+      ['mid', 'Found the manifest.'],
+      ['final', 'The addon loads now.'],
+    ])
+  })
+
+  it('a plain reply with no breaks is a single solo beat', () => {
+    expect(assistantBeats(splitLiveText('Hi there.', []))).toEqual([
+      { text: 'Hi there.', kind: 'solo' },
+    ])
   })
 })

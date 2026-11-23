@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -182,7 +183,7 @@ func TestClipHeadTailKeepsBothEnds(t *testing.T) {
 	if !strings.HasPrefix(out, "HEAD-MARKER") || !strings.HasSuffix(out, "TAIL-MARKER") {
 		t.Fatalf("head and tail must both survive: %q … %q", out[:20], out[len(out)-20:])
 	}
-	if !strings.Contains(out, "omitted from the middle") {
+	if !strings.Contains(out, "from the middle") {
 		t.Fatal("the clip must say what it dropped")
 	}
 	small := []byte("short")
@@ -255,6 +256,58 @@ func TestBackgroundJobIsListedTailedAndKilled(t *testing.T) {
 	}
 	if rows[0]["status"] != "killed" {
 		t.Fatalf("a killed job must stay killed: %#v", rows[0])
+	}
+}
+
+func TestPageJobLogPagesFromStartAndTail(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "job.log")
+	var b strings.Builder
+	for i := 1; i <= 80; i++ {
+		b.WriteString("line-")
+		b.WriteString(strconv.Itoa(i))
+		b.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := pageJobLog(path, 1, 20, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.total != 80 || first.offset != 1 || first.next != 21 || !first.truncated {
+		t.Fatalf("first page: %#v", first)
+	}
+	if !strings.HasPrefix(first.text, "line-1\n") || !strings.Contains(first.text, "line-20") || strings.Contains(first.text, "line-21") {
+		t.Fatalf("first page text=%q", first.text)
+	}
+	if !strings.Contains(first.note, "offset=21") {
+		t.Fatalf("note should tell the model how to page: %q", first.note)
+	}
+
+	second, err := pageJobLog(path, first.next, 20, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.offset != 21 || second.next != 41 || !strings.Contains(second.text, "line-21") {
+		t.Fatalf("second page: %#v", second)
+	}
+
+	tail, err := pageJobLog(path, 0, 10, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tail.offset != 71 || tail.total != 80 || !strings.HasSuffix(tail.text, "line-80") {
+		t.Fatalf("tail page: %#v text=%q", tail, tail.text)
+	}
+	if !strings.Contains(tail.note, "action=read") {
+		t.Fatalf("tail note=%q", tail.note)
+	}
+
+	text, truncated, err := tailFile(path, 10)
+	if err != nil || !truncated || !strings.HasSuffix(text, "line-80") {
+		t.Fatalf("tailFile=%q truncated=%v err=%v", text, truncated, err)
 	}
 }
 

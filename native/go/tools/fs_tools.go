@@ -39,12 +39,12 @@ const (
 
 	globMaxResults = 500
 
-	grepDefaultResults = 200
+	grepDefaultResults = 500
 	grepMaxResults     = 1000
-	grepMaxPerFile     = 50
+	grepMaxPerFile     = 200
 	grepMaxContext     = 10
 	grepMaxFileBytes   = 2 << 20
-	grepMaxLineBytes   = 512
+	grepMaxLineBytes   = 2000
 )
 
 // walkSkipDirs are never descended by glob or grep unless the caller's pattern
@@ -94,7 +94,8 @@ func RegisterFileTools(registry *Registry) error {
 				"bytes":{"type":"integer","minimum":0},
 				"line_ending":{"type":"string"},
 				"media_type":{"type":"string"},
-				"is_image":{"type":"boolean"}
+				"is_image":{"type":"boolean"},
+				"note":{"type":"string"}
 			},
 			"additionalProperties":false
 		}`),
@@ -193,7 +194,8 @@ func RegisterFileTools(registry *Registry) error {
 				"files":{"type":"array","items":{"type":"string"}},
 				"count":{"type":"integer","minimum":0},
 				"truncated":{"type":"boolean"},
-				"searched":{"type":"string"}
+				"searched":{"type":"string"},
+				"note":{"type":"string"}
 			},
 			"additionalProperties":false
 		}`),
@@ -216,7 +218,7 @@ func RegisterFileTools(registry *Registry) error {
 				"path":{"type":"string","description":"File or directory to search, absolute inside the workspace root or relative to it. Windows drive-letter paths, backslashes and ~ are accepted. Defaults to the root."},
 				"glob":{"type":"string","description":"Only search files whose root-relative path matches this glob, e.g. **/*.go"},
 				"context":{"type":"integer","minimum":0,"maximum":10,"description":"Lines of context to include before and after each match. Default 0."},
-				"max_results":{"type":"integer","minimum":1,"maximum":1000,"description":"Global cap on returned matches (default 200). Each file also stops after 50 matches."},
+				"max_results":{"type":"integer","minimum":1,"maximum":1000,"description":"Global cap on returned matches (default 500, maximum 1000). Each file also stops after 200 matches."},
 				"literal":{"type":"boolean","description":"Treat pattern as plain text instead of a regular expression. Default false."},
 				"case_insensitive":{"type":"boolean","description":"Match without regard to case. Default false."},
 				` + propWorkspaceRoot + `
@@ -246,7 +248,8 @@ func RegisterFileTools(registry *Registry) error {
 				"files_matched":{"type":"integer","minimum":0},
 				"files_searched":{"type":"integer","minimum":0},
 				"truncated":{"type":"boolean"},
-				"truncated_files":{"type":"array","items":{"type":"string"}}
+				"truncated_files":{"type":"array","items":{"type":"string"}},
+				"note":{"type":"string"}
 			},
 			"additionalProperties":false
 		}`),
@@ -468,7 +471,7 @@ func executeRead(_ context.Context, request Request) (Result, error) {
 	if truncated && last < total {
 		next = last + 1
 	}
-	out, err := json.Marshal(map[string]any{
+	result := map[string]any{
 		"path":        shown,
 		"content":     content.String(),
 		"total_lines": total,
@@ -477,7 +480,13 @@ func executeRead(_ context.Context, request Request) (Result, error) {
 		"truncated":   truncated,
 		"bytes":       len(data),
 		"line_ending": lineEndingName(data),
-	})
+	}
+	if truncated && next > 0 {
+		result["note"] = fmt.Sprintf(
+			"showing lines %d-%d of %d; pass offset=%d and limit up to %d to continue",
+			offset, last, total, next, readMaxLines)
+	}
+	out, err := json.Marshal(result)
 	return Result{Output: out}, err
 }
 
@@ -760,12 +769,18 @@ func executeGlob(ctx context.Context, request Request) (Result, error) {
 	for _, h := range hits {
 		files = append(files, filepath.ToSlash(filepath.Join(rootAbs, h.rel)))
 	}
-	out, err := json.Marshal(map[string]any{
+	result := map[string]any{
 		"files":     files,
 		"count":     len(files),
 		"truncated": truncated,
 		"searched":  filepath.ToSlash(filepath.Join(rootAbs, base)),
-	})
+	}
+	if truncated {
+		result["note"] = fmt.Sprintf(
+			"results truncated at %d files; narrow the pattern or search a subdirectory to see the rest",
+			globMaxResults)
+	}
+	out, err := json.Marshal(result)
 	return Result{Output: out}, err
 }
 
@@ -998,14 +1013,22 @@ func executeGrep(ctx context.Context, request Request) (Result, error) {
 		return Result{}, err
 	}
 
-	out, err := json.Marshal(map[string]any{
+	result := map[string]any{
 		"matches":         matches,
 		"count":           len(matches),
 		"files_matched":   filesMatched,
 		"files_searched":  filesSearched,
 		"truncated":       truncated,
 		"truncated_files": truncatedFiles,
-	})
+	}
+	if truncated {
+		note := fmt.Sprintf("results truncated at %d matches (per-file cap %d)", grepMaxResults, grepMaxPerFile)
+		if len(truncatedFiles) > 0 {
+			note += "; raise the pattern specificity or page with a tighter path to see matches past the cap"
+		}
+		result["note"] = note
+	}
+	out, err := json.Marshal(result)
 	return Result{Output: out}, err
 }
 
@@ -1017,7 +1040,8 @@ func orPattern(primary, fallback string) string {
 }
 
 // clipLine bounds one reported line so a minified file cannot flood the
-// transcript. Truncation never splits a UTF-8 sequence.
+// transcript. Truncation never splits a UTF-8 sequence and says how much
+// was cut.
 func clipLine(s string) string {
 	s = strings.TrimSuffix(s, "\r")
 	if len(s) <= grepMaxLineBytes {
@@ -1027,7 +1051,7 @@ func clipLine(s string) string {
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
-	return s[:cut] + "…"
+	return s[:cut] + fmt.Sprintf("…[truncated %d chars]", len(s)-cut)
 }
 
 func clipLines(in []string) []string {

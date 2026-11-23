@@ -718,6 +718,29 @@ func TestStreamThinkingAndProgressFrames(t *testing.T) {
 	}
 }
 
+func TestStreamAnnouncesDraftMessageID(t *testing.T) {
+	runner := &stubRunner{tokens: []string{
+		"I'll reach the folder.",
+		`@@tool_call:{"name":"bash","args":{"command":"dir"},"id":"c1"}`,
+		"The addon loads.",
+	}}
+	base, shutdown, token := startMessagesServer(t, runner, t.TempDir())
+	defer shutdown()
+	client := &http.Client{Timeout: 5 * time.Second}
+	sid := createSessionID(t, client, base, token)
+	req := authReq(t, http.MethodPost, base+"/api/sessions/"+sid+"/messages/stream", token,
+		bytes.NewBufferString(`{"message":"hi"}`))
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readSSE(t, resp)
+	resp.Body.Close()
+	if !strings.Contains(body, "event: draft") || !strings.Contains(body, `"message_id"`) {
+		t.Fatalf("draft frame: %s", body)
+	}
+}
+
 func TestInterruptedTurnContentHelpers(t *testing.T) {
 	if interruptedTurnContent("", "", false) != stopNote {
 		t.Fatal("stop note")

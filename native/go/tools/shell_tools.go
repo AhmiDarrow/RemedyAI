@@ -36,9 +36,10 @@ const (
 
 	jobLogLimit      = 8 << 20
 	jobsListLimit    = 50
-	jobTailDefault   = 100
-	jobTailMaxLines  = 1000
-	jobTailMaxBytes  = 256 << 10
+	jobTailDefault   = 500
+	jobTailMaxLines  = 2000
+	jobTailMaxBytes  = 512 << 10
+	jobReadDefault   = 2000
 	jobListTailLines = 20
 	jobIDRandomBytes = 6
 )
@@ -110,9 +111,10 @@ func RegisterShellTools(registry *Registry) error {
 			"type":"object",
 			"required":["action"],
 			"properties":{
-				"action":{"type":"string","enum":["list","tail","kill"],"description":"list every job of this session, tail one job's output, or kill one job."},
-				"job_id":{"type":"string","description":"Job to tail or kill, as returned by bash with background:true. Required for tail and kill."},
-				"lines":{"type":"integer","minimum":1,"maximum":1000,"description":"How many trailing output lines tail returns (default 100)."},
+				"action":{"type":"string","enum":["list","tail","read","kill"],"description":"list every job of this session, tail the end of one job's log, read a page of one job's log from a line offset, or kill one job."},
+				"job_id":{"type":"string","description":"Job to tail, read or kill, as returned by bash with background:true. Required for tail, read and kill."},
+				"lines":{"type":"integer","minimum":1,"maximum":2000,"description":"How many lines tail or read returns (default 500 for tail, 2000 for read, maximum 2000)."},
+				"offset":{"type":"integer","minimum":1,"description":"1-based line to start from for action=read. Pass next_offset from a previous read to continue. Ignored for tail."},
 				` + propHomeDir + `,
 				"session_id":{"type":"string","description":"Session that owns the jobs (bound by the runtime; model-supplied values are ignored)"}
 			},
@@ -127,7 +129,11 @@ func RegisterShellTools(registry *Registry) error {
 				"job":{"type":"object"},
 				"count":{"type":"integer","minimum":0},
 				"output":{"type":"string"},
-				"truncated":{"type":"boolean"}
+				"truncated":{"type":"boolean"},
+				"total_lines":{"type":"integer","minimum":0},
+				"offset":{"type":"integer","minimum":0},
+				"next_offset":{"type":"integer","minimum":0},
+				"note":{"type":"string"}
 			},
 			"additionalProperties":false
 		}`),
@@ -266,7 +272,7 @@ func clipHeadTail(b []byte) (string, bool) {
 	}
 	head := b[:runeFloorAt(b, bashOutputHead)]
 	start := runeCeilAt(b, len(b)-bashOutputTail)
-	note := fmt.Sprintf("\n…[remedy: %d bytes omitted from the middle]…\n", start-len(head))
+	note := fmt.Sprintf("\n…[remedy: omitted %d bytes from the middle of %d total; rerun redirected to a file and use read with offset/limit, or start with background:true and jobs read, to page the rest]…\n", start-len(head), len(b))
 	return string(head) + note + string(b[start:]), true
 }
 
@@ -511,6 +517,7 @@ func executeJobs(_ context.Context, request Request) (Result, error) {
 		Action    string `json:"action"`
 		JobID     string `json:"job_id"`
 		Lines     int    `json:"lines"`
+		Offset    int    `json:"offset"`
 		HomeDir   string `json:"home_dir"`
 		SessionID string `json:"session_id"`
 	}
@@ -527,10 +534,12 @@ func executeJobs(_ context.Context, request Request) (Result, error) {
 		return listJobs(dir)
 	case "tail":
 		return tailJob(dir, body.JobID, body.Lines)
+	case "read":
+		return readJob(dir, body.JobID, body.Offset, body.Lines)
 	case "kill":
 		return killJob(dir, body.JobID)
 	default:
-		return Result{}, fmt.Errorf("%w: action must be list, tail or kill (got %q)", ErrInvalidInput, action)
+		return Result{}, fmt.Errorf("%w: action must be list, tail, read or kill (got %q)", ErrInvalidInput, action)
 	}
 }
 
@@ -581,13 +590,49 @@ func tailJob(dir, id string, lines int) (Result, error) {
 	if lines > jobTailMaxLines {
 		lines = jobTailMaxLines
 	}
-	text, truncated, err := tailFile(record.LogPath, lines)
+	page, err := pageJobLog(record.LogPath, 0, lines, true)
 	if err != nil {
 		return Result{}, err
 	}
-	out, err := json.Marshal(map[string]any{
-		"action": "tail", "job": jobPublic(record), "output": text, "truncated": truncated,
-	})
+	result := map[string]any{
+		"action": "tail", "job": jobPublic(record), "output": page.text,
+		"truncated": page.truncated, "total_lines": page.total, "offset": page.offset,
+		"next_offset": page.next,
+	}
+	if page.truncated {
+		result["note"] = page.note
+	}
+	out, err := json.Marshal(result)
+	return Result{Output: out}, err
+}
+
+func readJob(dir, id string, offset, lines int) (Result, error) {
+	record, err := requireJob(dir, id)
+	if err != nil {
+		return Result{}, err
+	}
+	if lines <= 0 {
+		lines = jobReadDefault
+	}
+	if lines > jobTailMaxLines {
+		lines = jobTailMaxLines
+	}
+	if offset <= 0 {
+		offset = 1
+	}
+	page, err := pageJobLog(record.LogPath, offset, lines, false)
+	if err != nil {
+		return Result{}, err
+	}
+	result := map[string]any{
+		"action": "read", "job": jobPublic(record), "output": page.text,
+		"truncated": page.truncated, "total_lines": page.total, "offset": page.offset,
+		"next_offset": page.next,
+	}
+	if page.note != "" {
+		result["note"] = page.note
+	}
+	out, err := json.Marshal(result)
 	return Result{Output: out}, err
 }
 
@@ -650,25 +695,103 @@ func jobPublic(record jobRecord) map[string]any {
 	return row
 }
 
-// tailFile returns the last n lines of a job log, bounded by bytes as well as
-// lines so a single enormous line cannot flood the transcript.
-func tailFile(path string, n int) (string, bool, error) {
+type jobLogPage struct {
+	text      string
+	total     int
+	offset    int
+	next      int
+	truncated bool
+	note      string
+}
+
+// pageJobLog returns a line window of a job log. fromEnd true means the last
+// n lines (tail); otherwise offset is a 1-based start line. The returned page
+// is also bounded by jobTailMaxBytes so one enormous line cannot flood the
+// transcript. The note always explains how to page for the rest.
+func pageJobLog(path string, offset, n int, fromEnd bool) (jobLogPage, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", false, nil
+			return jobLogPage{}, nil
 		}
-		return "", false, fmt.Errorf("%w: could not read the job log %s: %v", ErrInvalidInput, path, err)
-	}
-	truncated := false
-	if len(data) > jobTailMaxBytes {
-		data = data[runeCeilAt(data, len(data)-jobTailMaxBytes):]
-		truncated = true
+		return jobLogPage{}, fmt.Errorf("%w: could not read the job log %s: %v", ErrInvalidInput, path, err)
 	}
 	lines := splitLines(string(data))
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
+	total := len(lines)
+	if total == 0 {
+		return jobLogPage{total: 0, offset: 1}, nil
+	}
+	if n <= 0 {
+		n = jobReadDefault
+	}
+	if n > jobTailMaxLines {
+		n = jobTailMaxLines
+	}
+
+	start := 0
+	if fromEnd {
+		if n < total {
+			start = total - n
+		}
+	} else {
+		start = offset - 1
+		if start < 0 {
+			start = 0
+		}
+		if start >= total {
+			return jobLogPage{}, fmt.Errorf("%w: offset %d is past the last line of the job log (total_lines %d)",
+				ErrInvalidInput, offset, total)
+		}
+	}
+
+	var b strings.Builder
+	last := start
+	truncated := start > 0
+	for i := start; i < total; i++ {
+		if i-start >= n {
+			truncated = true
+			break
+		}
+		line := lines[i]
+		if b.Len()+len(line)+1 > jobTailMaxBytes && b.Len() > 0 {
+			truncated = true
+			break
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(line)
+		last = i + 1
+	}
+	if last < total {
 		truncated = true
 	}
-	return strings.Join(lines, "\n"), truncated, nil
+	next := 0
+	if truncated && last < total {
+		next = last + 1
+	}
+	page := jobLogPage{
+		text:      b.String(),
+		total:     total,
+		offset:    start + 1,
+		next:      next,
+		truncated: truncated,
+	}
+	if truncated && next > 0 {
+		page.note = fmt.Sprintf(
+			"showing lines %d-%d of %d; pass action=read and offset=%d (lines up to %d) to continue, or offset=1 to read from the start",
+			page.offset, last, total, next, jobTailMaxLines)
+	} else if truncated && start > 0 {
+		page.note = fmt.Sprintf(
+			"showing lines %d-%d of %d; pass action=read and offset=1 (lines up to %d) to page from the start",
+			page.offset, last, total, jobTailMaxLines)
+	}
+	return page, nil
+}
+
+// tailFile returns the last n lines of a job log, bounded by bytes as well as
+// lines so a single enormous line cannot flood the transcript.
+func tailFile(path string, n int) (string, bool, error) {
+	page, err := pageJobLog(path, 0, n, true)
+	return page.text, page.truncated, err
 }

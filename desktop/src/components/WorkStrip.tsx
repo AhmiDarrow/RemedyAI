@@ -15,6 +15,7 @@ import { useStickToBottom } from '../hooks/useStickToBottom'
 import { useI18n } from '../i18n'
 import { formatCount } from '../i18n/locale'
 import { useAnchorToggle } from './feedScroll'
+import { thinkingDisplayChunks } from '../utils/thinkingText'
 import { ProcessTrace } from './ProcessTrace'
 
 /**
@@ -22,9 +23,9 @@ import { ProcessTrace } from './ProcessTrace'
  *   ● Working · 36 steps · 2 errors · 0:06            ▸
  *   › Bash  powershell -c "Get-ChildItem …"
  * Collapsed it is a single summary line (plus the live status line while the
- * turn runs). Expanded it is a timeline grouped under each narration line:
- * tool, short target, result icon, errors in muted red; thinking is its own
- * expandable item. The reply never renders here.
+ * turn runs). Expanded it is a height-capped timeline of tool rows (short
+ * target, result icon, errors in muted red); thinking is its own expandable
+ * item. Assistant prose never renders here — that belongs in the chat bubble.
  */
 export interface WorkStripProps {
   steps: ProcessStep[]
@@ -38,6 +39,8 @@ export interface WorkStripProps {
   elapsedMs?: number | null
   mode?: ToolProcessMode
   defaultOpen?: boolean
+  /** Open the thinking section with the strip (closable). */
+  defaultThinkingOpen?: boolean
   sessionId?: string | null
   /** Extra live items for the open body (todos). */
   extras?: ReactNode
@@ -82,9 +85,9 @@ const StepRow = memo(function StepRow({ step }: { step: ProcessStep }) {
   )
 })
 
-function ThinkingItem({ text, live }: { text: string; live?: boolean }) {
+function ThinkingItem({ text, live, defaultOpen = false }: { text: string; live?: boolean; defaultOpen?: boolean }) {
   const { resolved } = useI18n()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(defaultOpen)
   const ref = useRef<HTMLDivElement | null>(null)
   const anchor = useAnchorToggle()
   return (
@@ -98,7 +101,15 @@ function ThinkingItem({ text, live }: { text: string; live?: boolean }) {
         <span aria-hidden>{open ? '▾' : '▸'}</span> {live ? 'Thinking' : 'Thought'}
         <span className="ws-dim"> · {formatCount(text.length, resolved)} chars</span>
       </button>
-      {open && <div className="ws-thinking-body">{text}</div>}
+      {open && (
+        <div className="ws-thinking-body">
+          {thinkingDisplayChunks(text).map((chunk, i) => (
+            <p key={i} className="ws-thinking-chunk">
+              {chunk}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -128,7 +139,6 @@ function Timeline({ steps, live }: { steps: ProcessStep[]; live?: boolean }) {
         )}
         {groups.map((g) => (
           <li key={g.steps[0]!.id} className="ws-group">
-            {g.narration && <p className="ws-narration">{g.narration}</p>}
             <ul className="ws-steps">
               {g.steps.map((s) => (
                 <StepRow key={s.id} step={s} />
@@ -150,10 +160,16 @@ export const WorkStrip = memo(function WorkStrip({
   elapsedMs = null,
   mode = 'off',
   defaultOpen = false,
+  defaultThinkingOpen = false,
   sessionId = null,
   extras,
 }: WorkStripProps) {
   const [open, setOpen] = useState(defaultOpen)
+  const wasLive = useRef(live)
+  useEffect(() => {
+    if (wasLive.current && !live) setOpen(false)
+    wasLive.current = live
+  }, [live])
   const [rawTrace, setRawTrace] = useState(false)
   const ref = useRef<HTMLElement | null>(null)
   const anchor = useAnchorToggle()
@@ -232,7 +248,7 @@ export const WorkStrip = memo(function WorkStrip({
       )}
       {open && (
         <div className="ws-body">
-          {thought && <ThinkingItem text={thought} live={live} />}
+          {thought && <ThinkingItem text={thought} live={live} defaultOpen={defaultThinkingOpen} />}
           {extras}
           {steps.length > 0 && <Timeline steps={steps} live={live} />}
           {steps.length > 0 && !live && (

@@ -28,6 +28,19 @@ export function splitLiveText(text: string, breaks: readonly number[] = []): Liv
   return { narration, reply: src.slice(from).replace(/^\s+/, '') }
 }
 
+/** Completed mid-turn speech (text before the last tool-call break) plus the live reply. */
+export function splitSealedLive(text: string, breaks: readonly number[] = []): LiveSegments & { sealed: string } {
+  const segs = splitLiveText(text, breaks)
+  if (!segs.narration.length) return { ...segs, sealed: '' }
+  const src = text || ''
+  const last = [...breaks]
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .map((n) => Math.min(n, src.length))
+    .sort((a, b) => a - b)
+    .pop()
+  return { ...segs, sealed: last ? src.slice(0, last) : '' }
+}
+
 /**
  * Narration cut by the newest break: the text between the previous break and
  * the one a tool call just added. Empty when the call added no break.
@@ -67,6 +80,24 @@ export function splitSavedReply(
   }
   out += src.slice(cursor)
   return { narration, reply: narration.length ? out.replace(/\n{3,}/g, '\n\n').trim() : src }
+}
+
+
+export type AssistantBeat = {
+  text: string
+  /** Mid-turn speech before a tool call, the final reply, or a lone bubble. */
+  kind: 'mid' | 'final' | 'solo'
+}
+
+/** User-facing assistant speech as separate beats, in order. */
+export function assistantBeats(segments: LiveSegments): AssistantBeat[] {
+  const mid = segments.narration.map((s) => s.trim()).filter(Boolean)
+  const reply = (segments.reply || '').replace(/^\s+/, '')
+  const beats: AssistantBeat[] = mid.map((text) => ({ text, kind: 'mid' }))
+  if (reply.trim()) {
+    beats.push({ text: reply, kind: mid.length ? 'final' : 'solo' })
+  }
+  return beats
 }
 
 export interface ActivitySummary {

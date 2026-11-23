@@ -14,7 +14,7 @@ func TestAdvancedDefaultsMatchProduction(t *testing.T) {
 	if tbl["soul_inject_chars"] != 1400 {
 		t.Fatalf("soul_inject_chars=%v", tbl["soul_inject_chars"])
 	}
-	if tbl["max_result_chars"] != 24000 {
+	if tbl["max_result_chars"] != 30000 {
 		t.Fatalf("max_result_chars=%v", tbl["max_result_chars"])
 	}
 	if tbl["voice_evolution"] != true {
@@ -90,10 +90,10 @@ func TestNoVoiceEvolutionEnvStillDisables(t *testing.T) {
 
 func TestLearnClockFromAdvanced(t *testing.T) {
 	cfg := ConfigMap{"advanced": map[string]any{
-		"improve_tick_s":          90,
-		"improve_tick_min_s":      15,
-		"improve_tick_max_s":      600,
-		"improve_heavy_window_s":  120,
+		"improve_tick_s":         90,
+		"improve_tick_min_s":     15,
+		"improve_tick_max_s":     600,
+		"improve_heavy_window_s": 120,
 	}}
 	def, min, max, heavy := learnClockFrom(cfg)
 	if def != 90*time.Second || min != 15*time.Second || max != 600*time.Second || heavy != 120*time.Second {
