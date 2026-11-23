@@ -44,7 +44,8 @@ pub fn view(ui: &Ui, s: Settings, rail: bool) -> El {
     if rail {
         root.layout(|l| {
             l.width = Length::Percent(1.0);
-            l.min_width = Length::Px(0.0);
+            // Shrink to fit a tight window, but never collapse to an empty strip.
+            l.min_width = Length::Px(220.0);
             l.max_width = Length::Px(320.0);
             l.height = Length::Percent(1.0);
             l.shrink = 1.0;
