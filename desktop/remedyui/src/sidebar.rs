@@ -457,7 +457,9 @@ fn tree(ui: &Ui, studio: Studio) -> El {
         l.min_height = Length::Px(0.0);
     });
     let _ = col.clone().bind(move || {
-        rows_out.set(tree_items(
+        // The tree is rebuilt when a chrome overlay (Memory, Skills, …) opens;
+        // the bind can still flush once after `rows` is disposed.
+        let _ = rows_out.try_set(tree_items(
             &st.sessions.get(),
             &st.projects.get(),
             st.filter.get(),
