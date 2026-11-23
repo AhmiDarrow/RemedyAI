@@ -21,7 +21,7 @@ Identity and engine pins: RemedyUI `main` at `3b3a026` (includes theme names Pro
 
 - [ ] Chat core (feed, composer, SSE, markdown, approvals, model badge)
 - [ ] Settings (every category, providers, RMB/muscle, interop, fonts, notices)
-- [ ] House-rules setup and the one-time update offer
+- [ ] House-rules setup and the one-time update offer (wired on `remedyui-setup`: splash, wizard, mind, conversation, offer pop-up, name prompt, update screen, download strip; still red until a headless Linux run)
 - [ ] Workspace: Files, Scratch, Automations, skills, Terminal, Browser (full parity)
 - [ ] Voice, messengers, Grove, Hive, diagnostics, usage, help, downloads, QR
 - [ ] Update jump from the last Tauri build through the same signed `latest.json`

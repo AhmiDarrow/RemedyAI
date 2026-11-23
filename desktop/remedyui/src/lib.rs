@@ -8,11 +8,16 @@ mod chat;
 mod fonts;
 mod logo;
 mod runtime;
+mod setup;
 mod sidebar;
 mod sse;
 mod status;
 mod studio;
 mod time;
+
+pub use setup::{
+    preview_conversation, preview_mind, preview_offer, preview_update, preview_wizard,
+};
 
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
 pub use runtime::Client;
@@ -41,11 +46,16 @@ pub(crate) const SELECT_MARK: f32 = 3.0;
 pub fn app(app: &App) {
     app.keep_running(true);
     let studio = Studio::new();
-    if !runtime::spawn_disabled() {
-        runtime::ensure_running();
-        let client = runtime::Client::new(&runtime::origin(), runtime::load_token().as_deref());
-        studio.attach_client(client);
-    }
+    // The gate boots the sidecar off the UI thread. Tests set REMEDY_DESKTOP_NO_SPAWN and
+    // keep today's Studio shell, so New session / Close still run with no server.
+    let live = if runtime::spawn_disabled() {
+        None
+    } else {
+        Some(runtime::Client::new(
+            &runtime::origin(),
+            runtime::load_token().as_deref(),
+        ))
+    };
     let a = app.clone();
     let win = app.open(
         WindowSpec::new("Remedy Desktop")
@@ -54,7 +64,12 @@ pub fn app(app: &App) {
             .persist_geometry("main"),
         move |ui, window| {
             let (u, win, a) = (ui.clone(), window.clone(), a.clone());
-            ui.root().child(shell(ui, studio.clone())).bind(move || {
+            let root = if let Some(client) = live.clone() {
+                setup::host(ui, studio.clone(), a.clone(), client)
+            } else {
+                shell(ui, studio.clone())
+            };
+            ui.root().child(root).bind(move || {
                 let m = messages();
                 win.set_title(m.text(&u, "app-title"));
                 let item = |id, label: String| TrayItem::Item {
