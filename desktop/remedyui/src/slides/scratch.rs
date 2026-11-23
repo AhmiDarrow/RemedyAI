@@ -441,18 +441,29 @@ fn toolbar(ui: &Ui, model: &ScratchModel, unit: f32, colors: &remedy_ui::style::
     })
     .style(StylePatch::new().foreground(colors.danger));
 
-    w::row(ui)
-        .align(Align::Center)
+    let title = title.truncate().layout(|l| {
+        l.grow = 1.0;
+        l.min_width = Length::Px(0.0);
+    });
+    w::overflow_row(ui)
         .gap(unit)
+        .flex(title)
+        .child_fn(
+            {
+                let m = model.clone();
+                move || if m.markdown.get() { "Edit".into() } else { "Preview".into() }
+            },
+            preview,
+        )
+        .child("Copy", copy)
+        .child("Save as…", save)
+        .child("Clear", clear)
+        .el()
         .padding(pad(unit, unit * 2.0))
-        .child(title.layout(|l| {
-            l.grow = 1.0;
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
-        }))
-        .child(preview)
-        .child(copy)
-        .child(save)
-        .child(clear)
+        })
 }
 
 fn confirm_clear(ui: &Ui, model: &ScratchModel) {
