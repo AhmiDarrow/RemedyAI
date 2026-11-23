@@ -1,4 +1,4 @@
-//! Remedy Desktop: Studio in RemedyUI.
+//! Remedy Desktop: Grove is home, and Studio is one tap away.
 //!
 //! Visual language follows the current Tauri/React app, then goes a little
 //! further (always-visible row actions, a 16 px Remedy Sans UI face). The
@@ -6,18 +6,37 @@
 
 mod browser;
 mod chat;
+mod diagnostics;
 mod fonts;
+mod grove;
+mod help;
+mod layout;
 mod logo;
+mod rails;
 mod runtime;
+mod slides;
+mod settings;
 mod sidebar;
 mod sse;
 mod status;
 mod studio;
 mod time;
+mod timetravel;
+mod usage;
+mod work;
 
+pub use diagnostics::DiagnosticsPanel;
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
+pub use help::HelpPanel;
 pub use runtime::Client;
+pub use settings::{preview_appearance, preview_connect, preview_error, preview_general, preview_models};
+pub use slides::{
+    automations_preview, bind_host, files_preview, scratch_preview, set_browser_body,
+    terminal_context_items, terminal_preview,
+};
 pub use studio::Studio;
+pub use timetravel::{TimeTravel, preview as time_travel_preview};
+pub use usage::{UsageContext, UsageDashboard, UsagePanel, UsageWindow};
 
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::host::{TrayEvent, TrayIcon, TrayImage, TrayItem};
@@ -30,8 +49,6 @@ use remedy_ui::{App, El, Ui, WindowSpec};
 
 const SHOW: u32 = 1;
 const QUIT: u32 = 2;
-/// Matches the current app's 270 px session column.
-pub(crate) const SIDEBAR_WIDTH: f32 = 270.0;
 /// Visible 32 px hit target for tool buttons (New-session plus, close ×).
 pub(crate) const TOOL: f32 = 32.0;
 pub(crate) const GLYPH: f32 = 20.0;
@@ -40,12 +57,15 @@ pub(crate) const SELECT_MARK: f32 = 3.0;
 
 /// Opens the window and puts the app in the tray.
 pub fn app(app: &App) {
+    settings::bind_host(app);
     app.keep_running(true);
     let studio = Studio::new();
+    let grove = grove::Grove::new(studio.clone(), true);
     if !runtime::spawn_disabled() {
         runtime::ensure_running();
         let client = runtime::Client::new(&runtime::origin(), runtime::load_token().as_deref());
-        studio.attach_client(client);
+        studio.attach_client(client.clone());
+        grove.attach_client(client);
     }
     let a = app.clone();
     let win = app.open(
@@ -55,26 +75,44 @@ pub fn app(app: &App) {
             .persist_geometry("main"),
         move |ui, window| {
             let (u, win, a) = (ui.clone(), window.clone(), a.clone());
+            let grove_ui = grove.clone();
+            let hidden = std::rc::Rc::new(std::cell::Cell::new(0u64));
+            let boot_studio = studio.clone();
+            // Window scope, not a Grove/Studio `show` branch. Those branches
+            // are disposed on the way between surfaces; Settings has to outlive both.
+            // The computer-use poller starts here too: Grove is the default surface,
+            // and the Studio rails (where the Browser slide lives) are not mounted yet.
             browser::bind_app(a.clone());
-            ui.root().child(shell(ui, studio.clone())).bind(move || {
-                let m = messages();
-                win.set_title(m.text(&u, "app-title"));
-                let item = |id, label: String| TrayItem::Item {
-                    id,
-                    label,
-                    enabled: true,
-                    default: id == SHOW,
-                };
-                a.set_tray(Some(TrayIcon::new(
-                    m.text(&u, "app-title"),
-                    tray_icon(),
-                    vec![
-                        item(SHOW, m.text(&u, "tray-show")),
-                        TrayItem::Separator,
-                        item(QUIT, m.text(&u, "tray-quit")),
-                    ],
-                )));
-            });
+            settings::install(ui, studio.clone());
+            ui.root()
+                .child(grove::root(ui, grove.clone(), Some(a.clone())))
+                .bind(move || {
+                    browser::boot(boot_studio.clone());
+                    let m = messages();
+                    win.set_title(m.text(&u, "app-title"));
+                    let item = |id, label: String| TrayItem::Item {
+                        id,
+                        label,
+                        enabled: true,
+                        default: id == SHOW,
+                    };
+                    a.set_tray(Some(TrayIcon::new(
+                        m.text(&u, "app-title"),
+                        tray_icon(),
+                        vec![
+                            item(SHOW, m.text(&u, "tray-show")),
+                            TrayItem::Separator,
+                            item(QUIT, m.text(&u, "tray-quit")),
+                        ],
+                    )));
+                    let n = grove_ui.hide_window.get();
+                    if n != hidden.get() {
+                        hidden.set(n);
+                        if n != 0 {
+                            win.set_visible(false);
+                        }
+                    }
+                });
         },
     );
     let (w2, a2) = (win.clone(), app.clone());
@@ -92,15 +130,44 @@ pub fn app(app: &App) {
     });
 }
 
-/// Empty-well preview (goldens and visual review). No browser rail, so the
-/// studio goldens stay the chat shell.
+/// Empty-well preview (goldens and visual review). Left rail open, right thin.
 pub fn home(ui: &Ui) -> El {
-    shell_with(ui, Studio::preview(), false)
+    home_rails_left(ui)
 }
 
 /// Chat-feed preview with a finished turn, for side-by-side review.
 pub fn home_chat(ui: &Ui) -> El {
-    shell_with(ui, Studio::preview_chat(), false)
+    shell_with(
+        ui,
+        Studio::preview_chat(),
+        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+    )
+}
+
+/// Diagnostics golden: server, host, hardware, and the hive inspector. No network.
+pub fn diagnostics_preview(ui: &Ui) -> El {
+    diagnostics::preview(ui)
+}
+
+/// Morning Grove with example plots, for goldens. It does not touch disk or the network.
+pub fn grove_home(ui: &Ui) -> El {
+    grove::preview_home(ui)
+}
+
+/// Owner's manual, open on the overview. RA-chrome mounts [`HelpPanel::view`]
+/// inside the shell; this entry is the panel on its own for a golden.
+pub fn help_home(ui: &Ui) -> El {
+    HelpPanel::preview().view(ui)
+}
+
+/// Filled usage tab, for goldens. No runtime calls.
+pub fn preview_usage(ui: &Ui) -> El {
+    usage::UsagePanel::preview(ui)
+}
+
+/// Filled harness tab, for goldens. No runtime calls.
+pub fn preview_usage_harness(ui: &Ui) -> El {
+    usage::UsagePanel::preview_harness(ui)
 }
 
 /// Browser chrome alone, for the computer-use side-by-side and the chrome test.
@@ -108,32 +175,95 @@ pub fn browser_preview(ui: &Ui) -> El {
     browser::preview(ui)
 }
 
-/// The Studio shell: session list, well, composer, status, and the browser rail
-/// when the workspace layout has it open.
-pub fn shell(ui: &Ui, studio: Studio) -> El {
-    shell_with(ui, studio, true)
+/// Left rail open on Sessions, right rail a thin strip. Same shell as [`home`].
+pub fn home_rails_left(ui: &Ui) -> El {
+    shell_with(
+        ui,
+        Studio::preview(),
+        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+    )
 }
 
-fn shell_with(ui: &Ui, studio: Studio, browser_rail: bool) -> El {
+/// Right rail open on Settings, left rail a thin strip.
+pub fn home_rails_right(ui: &Ui) -> El {
+    let layout = layout::WorkspaceLayout {
+        left_rail: layout::RailMode::Thin,
+        left_open: false,
+        right: layout::SlideId::Settings,
+        right_width: 300,
+        right_rail: layout::RailMode::Open,
+        right_open: true,
+        ..layout::WorkspaceLayout::default()
+    };
+    shell_with(ui, Studio::preview(), rails::WorkspaceChrome::fixed(layout))
+}
+
+/// Both rails open: Sessions on the left, Settings on the right.
+pub fn home_rails_dual(ui: &Ui) -> El {
+    let layout = layout::WorkspaceLayout {
+        right: layout::SlideId::Settings,
+        right_width: 300,
+        right_rail: layout::RailMode::Open,
+        right_open: true,
+        ..layout::WorkspaceLayout::default()
+    };
+    shell_with(ui, Studio::preview(), rails::WorkspaceChrome::fixed(layout))
+}
+
+/// The Studio shell: left rail, chat well, right rail, status.
+pub fn shell(ui: &Ui, studio: Studio) -> El {
+    shell_with(ui, studio, rails::WorkspaceChrome::load())
+}
+
+fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
     fonts::prepare_theme(ui, &Fonts::load());
-    let row = w::row(ui)
-        .layout(|l| {
-            l.width = Length::Percent(1.0);
-            l.grow = 1.0;
-            l.basis = Length::Px(0.0);
-        })
-        .child(sidebar::sidebar(ui, studio.clone()))
-        .child(w::divider(ui, true))
-        .child(chat::well(ui, studio.clone()));
-    let row = if browser_rail { row.child(browser::rail(ui, studio.clone())) } else { row };
-    w::column(ui)
+    if !studio.local_only {
+        rails::bind_chrome(chrome.clone());
+        browser::boot(studio.clone());
+    }
+    // Hidden overlay keeper. A closed rail is not a child of this column.
+    studio.time_travel.mount(ui, studio.clone());
+    let workspace = slides::Workspace::for_studio(&studio);
+    slides::install(workspace.clone());
+    let follow_ws = workspace;
+    let follow_studio = studio.clone();
+    let panel = settings::install(ui, studio.clone());
+    let toggle = chrome.clone();
+    let dismiss = chrome.clone();
+    let status_toggle = chrome.clone();
+    let hooks = settings::bind_studio_hooks(
+        move || toggle.toggle_settings(),
+        move || rails::dismiss_settings(&dismiss),
+    );
+    let shell = w::column(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.height = Length::Percent(1.0);
         })
-        .child(row)
+        .child(
+            w::row(ui)
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.grow = 1.0;
+                    l.basis = Length::Px(0.0);
+                    l.min_height = Length::Px(0.0);
+                })
+                .child(rails::side(ui, chrome.clone(), layout::Side::Left, studio.clone()))
+                .child(chat::well(ui, studio.clone()))
+                .child(rails::side(ui, chrome.clone(), layout::Side::Right, studio.clone())),
+        )
         .child(w::divider(ui, false))
-        .child(status::status_bar(ui, studio))
+        .child(status::status_bar(ui, studio, move || status_toggle.toggle_settings()))
+        .child(rails::hosts(ui, chrome))
+        .on_key_capture(move |ev| settings::shell_chord(panel, ev))
+        .on_key(move |ev| settings::shell_escape(panel, ev))
+        .on_removed(move || {
+            settings::clear_studio_hooks(hooks);
+            slides::uninstall();
+            rails::unbind_chrome();
+        });
+    follow_ws.follow(&shell, &follow_studio);
+    shell
 }
 
 /// A square tool control: 32 px hit target, 20 px glyph, always visible.
@@ -204,16 +334,23 @@ pub fn tray_icon() -> TrayImage {
 }
 
 /// The app's strings, from `i18n/<locale>.ftl`.
+///
+/// The catalog's revision signal lives in a detached scope. The first caller is
+/// often a `show` branch (Grove's status line). That branch is disposed when the
+/// owner switches to Studio, and a signal owned by it would die with the branch.
 pub fn messages() -> Messages {
     thread_local!(static MESSAGES: Messages = {
-        let m = Messages::new("en-US").embedded("en-US", include_str!("../i18n/en-US.ftl"));
-        if cfg!(debug_assertions) {
-            let m = m.folder(concat!(env!("CARGO_MANIFEST_DIR"), "/i18n"));
-            m.watch();
-            m
-        } else {
-            m
-        }
+        let (m, _scope) = remedy_ui::reactive::Scope::detached(|| {
+            let m = Messages::new("en-US").embedded("en-US", include_str!("../i18n/en-US.ftl"));
+            if cfg!(debug_assertions) {
+                let m = m.folder(concat!(env!("CARGO_MANIFEST_DIR"), "/i18n"));
+                m.watch();
+                m
+            } else {
+                m
+            }
+        });
+        m
     });
     MESSAGES.with(Clone::clone)
 }

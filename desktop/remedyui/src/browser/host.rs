@@ -270,12 +270,24 @@ impl Model {
     }
 
     pub fn open_browser_rail(&self) {
-        let next = layout::layout_open_browser(&self.layout());
+        self.remember_layout(false);
+        crate::rails::request_open_browser();
+    }
+
+    /// OAuth and provider sign-in: keep the Settings form mounted.
+    pub fn open_browser_beside_settings(&self) {
+        self.remember_layout(true);
+        crate::rails::request_open_browser_beside_settings();
+    }
+
+    fn remember_layout(&self, beside_settings: bool) {
+        let next = if beside_settings {
+            layout::layout_open_browser_beside_settings(&self.layout())
+        } else {
+            layout::layout_open_browser(&self.layout())
+        };
         if next != self.layout() {
-            self.inner.layout.set(next.clone());
-            if self.is_live() {
-                layout::save_workspace_layout(&next);
-            }
+            self.inner.layout.set(next);
         }
     }
 
@@ -289,16 +301,39 @@ impl Model {
     }
 
     pub fn navigate_url(&self, raw: &str, job_id: Option<String>) {
+        self.navigate(raw, job_id, false);
+    }
+
+    /// Same navigation as [`Self::navigate_url`], without replacing an open Settings rail.
+    pub fn navigate_keeping_settings(&self, raw: &str) {
+        self.navigate(raw, None, true);
+    }
+
+    /// Grove's Alongside stage is already showing the page. Do not move the Studio rails.
+    pub fn navigate_here(&self, raw: &str) {
+        let Some(url) = self.prepare_url(raw) else { return };
+        self.navigate_prepared(&url, None);
+    }
+
+    fn navigate(&self, raw: &str, job_id: Option<String>, keep_settings: bool) {
+        let Some(url) = self.prepare_url(raw) else { return };
+        if keep_settings {
+            self.open_browser_beside_settings();
+        } else {
+            self.open_browser_rail();
+        }
+        self.navigate_prepared(&url, job_id);
+    }
+
+    fn prepare_url(&self, raw: &str) -> Option<String> {
         let url = match normalize_url(raw) {
             Ok(u) => u,
             Err(e) => {
                 self.flash(&e);
-                return;
+                return None;
             }
         };
-        let url = oauth::rewrite_oauth_navigation(&url).unwrap_or(url);
-        self.open_browser_rail();
-        self.navigate_prepared(&url, job_id);
+        Some(oauth::rewrite_oauth_navigation(&url).unwrap_or(url))
     }
 
     fn navigate_prepared(&self, url: &str, job_id: Option<String>) {
@@ -368,26 +403,38 @@ impl Model {
     }
 
     pub fn toggle_shield(&self) {
-        let next = !self.shield_on();
+        self.set_shield(!self.shield_on());
+    }
+
+    pub fn set_shield(&self, on: bool) {
+        if self.shield_on() == on {
+            return;
+        }
         if self.is_live() {
-            let prefs = shield::set_enabled(next);
+            let prefs = shield::set_enabled(on);
             self.inner.shield.set(prefs.enabled);
         } else {
-            self.inner.shield.set(next);
+            self.inner.shield.set(on);
         }
-        self.flash(if next { "Privacy Shield on" } else { "Privacy Shield off" });
+        self.flash(if on { "Privacy Shield on" } else { "Privacy Shield off" });
     }
 
     pub fn toggle_desktop(&self) {
-        let next = !self.desktop();
-        self.inner.desktop.set(next);
-        if self.is_live() {
-            ua::save_rail_prefs(&RailPrefs { desktop_site: next });
+        self.set_desktop_site(!self.desktop());
+    }
+
+    pub fn set_desktop_site(&self, on: bool) {
+        if self.desktop() == on {
+            return;
         }
-        self.flash(if next { "Desktop site — reloading…" } else { "Mobile view — reloading…" });
+        self.inner.desktop.set(on);
+        if self.is_live() {
+            ua::save_rail_prefs(&RailPrefs { desktop_site: on });
+        }
+        self.flash(if on { "Desktop site — reloading…" } else { "Mobile view — reloading…" });
         let url = self.inner.current_url.borrow().clone();
         if let Some(view) = self.view() {
-            view.set_user_agent(rail_user_agent(next));
+            view.set_user_agent(rail_user_agent(on));
             if !url.is_empty() && !url.starts_with("about:") {
                 view.navigate(&url);
                 self.inner.busy.set(true);
@@ -605,26 +652,89 @@ impl Model {
     fn session_id(&self) -> String {
         self.inner.studio.as_ref().and_then(|s| s.active.get()).unwrap_or_default()
     }
+
+    /// Settings → `browser_home_url`. Seeds the address only while it is still the default.
+    pub fn set_home_url(&self, raw: &str) {
+        let home = resolve_browser_home(Some(raw));
+        let previous = self.home();
+        self.inner.home.set(home.clone());
+        let seed = |value: &str| {
+            let trimmed = value.trim();
+            trimmed.is_empty()
+                || trimmed == super::url::DEFAULT_BROWSER_HOME
+                || trimmed == "https://example.com"
+                || trimmed == previous
+        };
+        if seed(&self.address()) {
+            self.inner.address.set(home.clone());
+        }
+        if !self.loaded() && seed(&self.live_url()) {
+            self.inner.live_url.set(home);
+        }
+    }
 }
 
 /// Install the live rail and start the host loops. Safe to call again.
 pub fn ensure(studio: Studio) -> Model {
-    if let Some(existing) = installed() {
-        return existing;
+    let model = if let Some(existing) = installed() {
+        existing
+    } else {
+        let model = Model::build(true, Some(studio));
+        INSTALLED.with(|slot| *slot.borrow_mut() = Some(model.clone()));
+        model
+    };
+    start_if_ready();
+    refresh_home_once();
+    model
+}
+
+/// The installed computer-use host, if [`ensure`] has run.
+pub fn live() -> Option<Model> {
+    installed()
+}
+
+fn installed() -> Option<Model> {
+    INSTALLED.with(|slot| slot.borrow().clone())
+}
+
+fn start_if_ready() {
+    if super::paths::spawn_disabled() || LOOPS.load(Ordering::SeqCst) {
+        return;
     }
-    let model = Model::build(true, Some(studio));
-    INSTALLED.with(|slot| *slot.borrow_mut() = Some(model.clone()));
     if let Ok(waker) = remedy_ui::reactive::waker() {
         if let Ok(mut slot) = WAKER.lock() {
             *slot = Some(waker);
         }
         start_loops();
     }
-    model
 }
 
-fn installed() -> Option<Model> {
-    INSTALLED.with(|slot| slot.borrow().clone())
+fn refresh_home_once() {
+    if super::paths::spawn_disabled() {
+        return;
+    }
+    static ASKED: AtomicBool = AtomicBool::new(false);
+    if ASKED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    thread::spawn(|| {
+        below_normal();
+        let Ok(resp) = send(Request::get("settings").timeout(Duration::from_secs(4))) else {
+            return;
+        };
+        let Ok(v) = resp.json::<Value>() else { return };
+        let raw = v
+            .get("browser_home_url")
+            .and_then(|u| u.as_str())
+            .or_else(|| {
+                v.get("settings")
+                    .and_then(|s| s.get("browser_home_url"))
+                    .and_then(|u| u.as_str())
+            })
+            .unwrap_or("")
+            .to_string();
+        let _ = on_ui(Duration::from_secs(2), move |m| m.set_home_url(&raw));
+    });
 }
 
 fn waker_handle() -> Result<Waker, String> {
