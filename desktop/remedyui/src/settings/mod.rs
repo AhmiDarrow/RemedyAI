@@ -17,7 +17,7 @@ mod sec_system;
 mod sections;
 mod state;
 
-use std::cell::RefCell;
+use std::cell::Cell;
 
 use remedy_ui::input::{Key, KeyEvent};
 use remedy_ui::layout::Length;
@@ -31,29 +31,57 @@ use sec_system::HELP_HOME;
 use state::Settings;
 
 thread_local! {
-    static CURRENT: RefCell<Option<Settings>> = RefCell::new(None);
+    static CURRENT: Cell<Option<Settings>> = const { Cell::new(None) };
+    /// Appearance is read once per process window. Re-entering Studio must not
+    /// reload the file over edits the owner already made.
+    static APPEARANCE: Cell<bool> = const { Cell::new(false) };
 }
 
 pub(crate) fn bind_host(app: &App) {
     prefs::bind_host(app);
 }
 
+fn alive() -> Option<Settings> {
+    let s = CURRENT.with(|c| c.get())?;
+    if s.open.is_alive() { Some(s) } else { None }
+}
+
+fn load_appearance(s: Settings) {
+    if APPEARANCE.with(|c| c.replace(true)) {
+        return;
+    }
+    prefs::load_into(s);
+    prefs::capture_system(s);
+    prefs::apply(s);
+}
+
 /// Loads appearance for a real window. Studio previews (`local_only`) skip
 /// that so a golden palette is not replaced with Forest.
+///
+/// The first live call owns the signals for the whole window. Grove and Studio
+/// are `show` branches that dispose each other; a second `install` from the
+/// Studio shell reuses the window's settings instead of building a set that
+/// dies on the way back to Grove.
 pub(crate) fn install(ui: &Ui, studio: Studio) -> Settings {
     prefs::bind_ui(ui);
+    if let Some(s) = alive() {
+        if !studio.local_only {
+            load_appearance(s);
+        }
+        return s;
+    }
+    // The previous window's settings are gone. The next live window reads its own file.
+    APPEARANCE.with(|c| c.set(false));
     let s = Settings::live();
-    CURRENT.with(|c| *c.borrow_mut() = Some(s));
+    CURRENT.with(|c| c.set(Some(s)));
     if !studio.local_only {
-        prefs::load_into(s);
-        prefs::capture_system(s);
-        prefs::apply(s);
+        load_appearance(s);
     }
     s
 }
 
 pub(crate) fn toggle() {
-    let Some(s) = CURRENT.with(|c| *c.borrow()) else { return };
+    let Some(s) = alive() else { return };
     if s.open.get() {
         close_panel(s);
     } else {
@@ -63,20 +91,59 @@ pub(crate) fn toggle() {
 
 pub(crate) fn rail(ui: &Ui, s: Settings) -> El {
     let ui_rail = ui.clone();
-    show(ui, move || s.open.get(), move || {
-        w::row(&ui_rail)
-            .layout(|l| {
-                l.height = Length::Percent(1.0);
-                l.shrink = 0.0;
-            })
-            .child(w::divider(&ui_rail, true))
-            .child(view(&ui_rail, s, true))
+    show(ui, move || s.open.try_get().unwrap_or(false), move || {
+        open_rail(&ui_rail, s)
     })
     .el()
     .layout(|l| {
         l.shrink = 0.0;
         l.height = Length::Percent(1.0);
     })
+}
+
+fn open_rail(ui: &Ui, s: Settings) -> El {
+    w::row(ui)
+        .layout(|l| {
+            l.height = Length::Percent(1.0);
+            l.shrink = 0.0;
+        })
+        .child(w::divider(ui, true))
+        .child(view(ui, s, true))
+}
+
+/// The same rail, beside Grove. Studio's shell has its own copy, so this one
+/// stays out of the tree while Studio is showing and while the panel is closed.
+/// Grove's morning golden calls [`crate::grove::preview_home`], not this.
+pub(crate) fn grove_rail(ui: &Ui, on_grove: impl Fn() -> bool + 'static) -> El {
+    let Some(s) = alive() else {
+        return ui.el("settings-grove-rail").layout(|l| {
+            l.width = Length::Px(0.0);
+            l.height = Length::Px(0.0);
+        });
+    };
+    let ui_rail = ui.clone();
+    show(
+        ui,
+        move || on_grove() && s.open.try_get().unwrap_or(false),
+        move || open_rail(&ui_rail, s),
+    )
+    .el()
+    .layout(|l| {
+        l.shrink = 0.0;
+        l.height = Length::Percent(1.0);
+    })
+}
+
+/// Chords for a parent of both Grove and Studio. No-ops when Settings is gone.
+pub(crate) fn shell_chord_current(ev: &KeyEvent) -> bool {
+    let Some(s) = alive() else { return false };
+    shell_chord(s, ev)
+}
+
+/// Escape for a parent of both Grove and Studio. No-ops when Settings is gone.
+pub(crate) fn shell_escape_current(ev: &KeyEvent) -> bool {
+    let Some(s) = alive() else { return false };
+    shell_escape(s, ev)
 }
 
 /// Ctrl/Cmd chords. Capture phase, so they work while a field is focused.
