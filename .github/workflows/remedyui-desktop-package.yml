@@ -2,17 +2,23 @@
 #
 # workflow_dispatch only. Uploads artifacts. Does not create a tag and does
 # not publish a GitHub Release. Joe cuts the 1.0.0 tag and latest.json.
-# desktop-release.yml remains the Tauri 0.70.x pipeline. Do not point this
-# file at softprops/action-gh-release or `gh release`.
+# desktop-release.yml remains the Tauri 0.70.x pipeline. Do not add a
+# release-publishing action to this file. Joe publishes the 1.0.0 assets.
 
 name: RemedyUI desktop package
 
 on:
   workflow_dispatch:
 
+# Read-only. This file must not create a tag or a GitHub Release.
+permissions:
+  contents: read
+
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: "4"
+  RAYON_NUM_THREADS: "4"
 
 jobs:
   windows:
@@ -31,9 +37,18 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install NSIS
+      - name: Install NSIS and minisign
         shell: pwsh
-        run: choco install nsis -y --no-progress
+        run: |
+          choco install nsis -y --no-progress
+          $zip = Join-Path $env:RUNNER_TEMP "minisign.zip"
+          Invoke-WebRequest -Uri "https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip" -OutFile $zip
+          $dest = Join-Path $env:RUNNER_TEMP "minisign"
+          Expand-Archive $zip -DestinationPath $dest
+          $exe = Get-ChildItem -Recurse $dest -Filter minisign.exe | Select-Object -First 1
+          if (-not $exe) { throw "minisign.exe was not in the 0.12 archive" }
+          $dir = $exe.DirectoryName
+          Add-Content -Path $env:GITHUB_PATH -Value $dir
 
       - name: Package
         shell: pwsh
@@ -66,11 +81,18 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install packaging tools
+      - name: Install packaging tools and minisign
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev libfuse2 curl
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libwayland-dev libxkbcommon-dev \
+            dpkg-dev file curl ca-certificates libfuse2 python3
+          curl -fsSL -o /tmp/minisign.tar.gz \
+            https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
+          sudo tar -C /usr/local/bin -xzf /tmp/minisign.tar.gz --strip-components=2 minisign-linux/x86_64/minisign
+          sudo chmod 0755 /usr/local/bin/minisign
+          command -v minisign
 
       - name: Package
         working-directory: desktop/remedyui
@@ -96,7 +118,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          - os: macos-15
             arch: aarch64
           - os: macos-15-intel
             arch: x64
@@ -111,6 +133,16 @@ jobs:
           git config --global url."https://x-access-token:${TOKEN}@github.com/AhmiDarrow/RemedyUI".insteadOf "https://github.com/AhmiDarrow/RemedyUI"
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install minisign
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/minisign.zip \
+            https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip
+          unzip -q /tmp/minisign.zip -d /tmp/minisign
+          BIN="$(find /tmp/minisign -type f -name minisign | head -n 1)"
+          sudo install -m 0755 "${BIN}" /usr/local/bin/minisign
+          command -v minisign
 
       - name: Package
         working-directory: desktop/remedyui

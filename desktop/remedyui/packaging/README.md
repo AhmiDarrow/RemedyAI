@@ -18,7 +18,7 @@ If a previous install directory is known, `/D=<that directory>` is the last argu
 
 `packaging/windows/installer.nsi` is that NSIS program. It includes `hooks.nsh` unchanged. `.onInit` records `/P` and `/UPDATE`, keeps a `/D=` override, and otherwise installs to `%LOCALAPPDATA%\Remedy Desktop` or the previous `HKCU\Software\Remedy\Remedy Desktop` path. The uninstall key is `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Remedy Desktop`.
 
-`/S` and `/UPDATE` skip the uninstall choices dialog. The hooks then write keep-choices (`config=0`, `skills=0`, `full=0`). The per-user data directory (`%USERPROFILE%\.remedy` or `~/.remedy`) is removed only when an interactive uninstall sets `full=1`. The NSIS script itself never deletes that directory.
+Before it copies files, the installer runs that previous uninstaller when the registry still has one: `ExecWait '"<old uninstall.exe>" /S /UPDATE _?=<old dir>'`. `/S` and `/UPDATE` skip the choices dialog. `_?=` is last so NSIS waits until the old files are gone instead of returning as soon as the uninstaller copies itself to `%TEMP%`. The hooks then write keep-choices (`config=0`, `skills=0`, `full=0`). The per-user data directory (`%USERPROFILE%\.remedy` or `~/.remedy`) is removed only when an interactive uninstall sets `full=1`. The NSIS script itself never deletes that directory.
 
 The 1.0 client uses the same flags, the same flag file, and the same three hidden hosts the 0.70.5 client used (PowerShell with job breakaway, a hidden `wscript` launch, and a one-shot scheduled task). It does not show the old update popup.
 
@@ -45,7 +45,7 @@ From `desktop/remedyui`, with NSIS 3 (`makensis`) on `PATH` and `NSISDIR` set:
 ./packaging/package-windows.ps1
 ```
 
-That runs `cargo build --release --jobs 4 --locked` at below-normal priority, then `makensis` on `packaging/windows/installer.nsi`. The cargo binary is `remedy-desktop.exe`. The installer writes it as `Remedy Desktop.exe`.
+That runs `cargo build --release --jobs 4 --locked` at below-normal priority, then `makensis` on `packaging/windows/installer.nsi`. The script passes absolute backslash paths. Windows NSIS does not open `!include` or `File` paths written with forward slashes. The cargo binary is `remedy-desktop.exe`. The installer writes it as `Remedy Desktop.exe`. The installed exe keeps the default Rust icon until a Windows resource is embedded on the Windows CI machine. The installer icon is `desktop/src-tauri/icons/icon.ico`.
 
 A stub compile (no need to run the installer) is `cargo test nsis_script_compiles`. Do not execute the produced setup on a machine that already has Remedy installed unless you mean to. `hooks.nsh` taskkills Remedy processes.
 
@@ -57,7 +57,7 @@ On an x86_64 Linux host, from `desktop/remedyui`:
 ./packaging/package-linux.sh
 ```
 
-Needs `dpkg-deb`, `curl`, and either `appimagetool` or network access to download the continuous AppImage tool. The script passes `--jobs 4` and `nice -n 10`. The update payload is the AppImage. When `APPIMAGE` points at a real file, the app verifies the download, replaces that file, and relaunches it. Otherwise it shows the GitHub releases URL.
+Needs `dpkg-deb`, `curl`, and either `appimagetool` or network access to download the continuous AppImage tool. The script passes `--jobs 4` and `nice -n 10`, and it refuses a binary that is not an x86_64 ELF. `dpkg-shlibdeps` fills the `.deb` `Depends` line when it is available. The update payload is the AppImage. When `APPIMAGE` points at a real file, the app verifies the download, copies it beside that file (so the replace stays on the same volume), and relaunches it. Otherwise it shows the GitHub releases URL.
 
 ## macOS
 
@@ -67,7 +67,7 @@ On a Mac, from `desktop/remedyui`:
 ./packaging/package-macos.sh
 ```
 
-`uname -m` picks the asset arch (`arm64` → `aarch64`, `x86_64` → `x64`). The script ad-hoc signs (`codesign --force --deep --sign -`), writes a DMG with `hdiutil`, and writes a gzip tarball whose only top-level entry is `Remedy Desktop.app`. `CFBundleIdentifier` is `com.remedy.desktop`. `Contents/MacOS/Remedy Desktop` is the executable (`remedy-desktop` is a symlink to it). Build once per arch. This Windows tree cannot produce those binaries.
+`uname -m` picks the asset arch (`arm64` → `aarch64`, `x86_64` → `x64`). The script ad-hoc signs (`codesign --force --deep --sign -`), writes a DMG with `hdiutil` from the stage directory (the volume root is `Remedy Desktop.app`, not the bundle's contents), and writes a gzip tarball whose only top-level entry is `Remedy Desktop.app`. The updater lists that tarball before extracting it and refuses a path that escapes the archive or a bundle id other than `com.remedy.desktop`. `Contents/MacOS/Remedy Desktop` is the executable (`remedy-desktop` is a symlink to it). The icon is `desktop/src-tauri/icons/icon.icns` when that file is present. Build once per arch. This Windows tree cannot produce those binaries.
 
 ## Signing
 
@@ -82,7 +82,9 @@ An encrypted key is unlocked from the password variable via minisign's stdin. Th
 
 ## CI
 
-`.github/workflows/remedyui-desktop-package.yml` is `workflow_dispatch` only. It uploads artifacts. It does not create a tag or a GitHub Release. `desktop-release.yml` stays the Tauri pipeline and is not a 1.0 publisher.
+`.github/workflows/remedyui-desktop-package.yml` is `workflow_dispatch` only, with `contents: read`. It uploads artifacts. It does not create a tag or a GitHub Release. `desktop-release.yml` stays the Tauri pipeline and is not a 1.0 publisher. The workflow installs NSIS, minisign 0.12, and the Linux link libraries (`libwayland`, `libxkbcommon`). macOS runs on `macos-15` and `macos-15-intel`, the same runners as the Tauri pipeline. `CARGO_BUILD_JOBS` and `RAYON_NUM_THREADS` are 4.
+
+`packaging/check.py` checks the feed, the NSIS flags, the waiter, and that this workflow cannot publish. The three package scripts run it before `cargo build`.
 
 The crate depends on the private RemedyUI git repo. The workflow sets a git `insteadOf` from `REMEDYUI_READ_TOKEN` (else `github.token`) and `CARGO_NET_GIT_FETCH_WITH_CLI=true`. Do not print that token.
 

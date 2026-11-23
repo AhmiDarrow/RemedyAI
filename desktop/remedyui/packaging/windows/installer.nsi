@@ -16,9 +16,13 @@
 ; Uninstall key: HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Remedy Desktop
 ; Product id written into the version resource: com.remedy.desktop
 ;
-; This script never deletes the per-user Remedy data directory. The included
-; hooks delete that tree only when an interactive uninstall's options dialog
-; sets full=1. /S and /UPDATE skip that dialog and write keep-choices.
+; This script never deletes the per-user data directory. The included hooks
+; delete that tree only when an interactive uninstall's options dialog sets
+; full=1. /S and /UPDATE skip that dialog and write keep-choices.
+;
+; An upgrade runs the previous uninstaller first, with /S /UPDATE, and waits
+; for it (_?= so NSIS does not return early). That removes the old app files
+; and keeps the per-user data directory.
 ;
 ; Hooks live in the Tauri tree and must be included, not rewritten:
 ;   desktop/src-tauri/windows/hooks.nsh
@@ -48,10 +52,21 @@ CRCCheck on
 !define PLACEHOLDER_INSTALL_DIR "C:\__REMEDY_PLACEHOLDER_DO_NOT_INSTALL__"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}"
 !define MANUPRODUCTKEY "Software\${MANUFACTURER}\${PRODUCTNAME}"
-!define HOOKS "../../../src-tauri/windows/hooks.nsh"
-!define UNINSTALL_OPTIONS "../../../src-tauri/windows/uninstall_options.ps1"
-!define UNINSTALL_WIPE "../../../src-tauri/windows/uninstall_wipe.ps1"
-!define INSTALLERICON "../../../src-tauri/icons/icon.ico"
+; Anchored at this script. Windows makensis does not open forward-slash
+; paths for !include or File. package-windows.ps1 passes absolute backslash
+; /D defines so the compile does not depend on the working directory.
+!ifndef HOOKS
+  !define HOOKS "${__FILEDIR__}\..\..\..\src-tauri\windows\hooks.nsh"
+!endif
+!ifndef UNINSTALL_OPTIONS
+  !define UNINSTALL_OPTIONS "${__FILEDIR__}\..\..\..\src-tauri\windows\uninstall_options.ps1"
+!endif
+!ifndef UNINSTALL_WIPE
+  !define UNINSTALL_WIPE "${__FILEDIR__}\..\..\..\src-tauri\windows\uninstall_wipe.ps1"
+!endif
+!ifndef INSTALLERICON
+  !define INSTALLERICON "${__FILEDIR__}\..\..\..\src-tauri\icons\icon.ico"
+!endif
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
@@ -174,7 +189,30 @@ Function RunMainBinary
   Exec '"$INSTDIR\${MAINBINARYNAME}"'
 FunctionEnd
 
+; Previous install, if the registry still points at one. /S skips the wipe
+; dialog. /UPDATE is the same signal the hooks already honor. _?= is last so
+; ExecWait does not return while the uninstaller is still deleting files.
+Function UninstallPrevious
+  ReadRegStr $R0 HKCU "${UNINSTKEY}" "UninstallString"
+  ${If} $R0 == ""
+    Return
+  ${EndIf}
+  StrCpy $R1 $R0
+  StrCpy $R2 $R1 1
+  ${If} $R2 == '"'
+    StrCpy $R1 $R1 "" 1
+    StrCpy $R1 $R1 -1
+  ${EndIf}
+  IfFileExists "$R1" 0 done_prev
+  ${GetParent} "$R1" $R2
+  DetailPrint "Removing the previous install. Per-user data stays."
+  ExecWait '"$R1" /S /UPDATE _?=$R2'
+  done_prev:
+FunctionEnd
+
 Section Install
+  Call UninstallPrevious
+
   SetOutPath "$INSTDIR"
 
   !insertmacro NSIS_HOOK_PREINSTALL
@@ -245,7 +283,7 @@ Section Uninstall
   ${EndIf}
 
   ; App-data checkbox from the Tauri template. This script never sets it.
-  ; ~/.remedy is not under $INSTDIR and is not removed here.
+  ; The per-user data directory is not under $INSTDIR and is not removed here.
   ${If} $DeleteAppDataCheckboxState = 1
   ${AndIf} $UpdateMode <> 1
     DeleteRegKey HKCU "${MANUPRODUCTKEY}"

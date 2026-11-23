@@ -22,6 +22,11 @@ if ($cargo -notmatch '(?m)^version\s*=\s*"(\d+\.\d+\.\d+)"') {
 }
 $version = $Matches[1]
 
+$py = Get-Command python -ErrorAction SilentlyContinue
+if (-not $py) { throw "python is required to run packaging/check.py" }
+& $py.Source (Join-Path $PSScriptRoot "check.py")
+if ($LASTEXITCODE -ne 0) { throw "packaging check failed ($LASTEXITCODE)" }
+
 if (-not $SkipBuild) {
     & cargo build --profile $Profile --jobs $Jobs --locked --manifest-path (Join-Path $manifestDir "Cargo.toml")
     if ($LASTEXITCODE -ne 0) { throw "cargo build failed ($LASTEXITCODE)" }
@@ -45,8 +50,19 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $out = Join-Path $outDir "Remedy.Desktop_${version}_x64-setup.exe"
 if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Force }
 $nsi = Join-Path $PSScriptRoot "windows\installer.nsi"
+$desktop = Split-Path -Parent $manifestDir
+# Windows makensis rejects forward slashes in !include and File.
+function To-NsisPath([string]$Path) {
+    return (Resolve-Path -LiteralPath $Path).Path
+}
+$hooks = To-NsisPath (Join-Path $desktop "src-tauri\windows\hooks.nsh")
+$options = To-NsisPath (Join-Path $desktop "src-tauri\windows\uninstall_options.ps1")
+$wipe = To-NsisPath (Join-Path $desktop "src-tauri\windows\uninstall_wipe.ps1")
+$icon = To-NsisPath (Join-Path $desktop "src-tauri\icons\icon.ico")
+$binaryNsis = (Resolve-Path -LiteralPath $Binary).Path
+$outNsis = $out
 
-& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$out" "/DMAINBINARYSRCPATH=$Binary" $nsi
+& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
 if ($LASTEXITCODE -ne 0) { throw "makensis failed ($LASTEXITCODE)" }
 if (-not (Test-Path -LiteralPath $out)) { throw "makensis did not write $out" }
 
