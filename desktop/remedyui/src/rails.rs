@@ -405,6 +405,7 @@ pub(crate) fn side(ui: &Ui, chrome: WorkspaceChrome, which: Side, studio: Studio
             l.min_width = Length::Px(total);
             l.max_width = Length::Px(total);
             l.height = Length::Percent(1.0);
+            l.min_height = Length::Px(0.0);
             l.shrink = 0.0;
         });
         if mode == RailMode::Open
@@ -416,7 +417,8 @@ pub(crate) fn side(ui: &Ui, chrome: WorkspaceChrome, which: Side, studio: Studio
                 l.min_width = Length::Px(w);
                 l.max_width = Length::Px(w);
                 l.height = Length::Percent(1.0);
-                l.shrink = 0.0;
+                l.min_height = Length::Px(0.0);
+                l.shrink = 1.0;
             });
         }
     });
@@ -746,8 +748,12 @@ fn panel(
         .el("panel_body")
         .column()
         .layout(|l| {
+            l.width = Length::Percent(1.0);
             l.height = Length::Percent(1.0);
-            l.shrink = 0.0;
+            l.min_height = Length::Px(0.0);
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.shrink = 1.0;
         })
         .style(StylePatch::new().background(colors.panel))
         .clip()
