@@ -1,7 +1,7 @@
 //! Session list: New session, search, chips, project tree, row actions.
 
 use crate::depth::logic::{
-    ordered_groups, session_delete_body, should_show_busy_badge, PINNED_GROUP_KEY,
+    PINNED_GROUP_KEY, ordered_groups, session_delete_body, should_show_busy_badge,
 };
 use crate::depth::{
     ask_remove_project, assign_project, export_active, import_session, move_project_order,
@@ -9,7 +9,7 @@ use crate::depth::{
 };
 use crate::studio::{Filter, Project, Session, Studio};
 use crate::time;
-use crate::{SELECT_MARK, messages, tool_button, tool_button_sized};
+use crate::{Glyph, ROW_ACTIONS, ROW_GLYPH, ROW_TOOL, SELECT_MARK, messages, tool_button_sized};
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::host::{DragData, DropEffect};
@@ -263,33 +263,28 @@ fn disclosure_button(
     if show_count {
         let count_text = count.clone();
         button = button.child(
-            w::text(ui, "")
-                .text(move || count_text())
-                .nowrap()
-                .style(
-                    StylePatch::new()
-                        .foreground(colors.muted)
-                        .text_size(10.0)
-                        .weight(500.0),
-                ),
+            w::text(ui, "").text(move || count_text()).nowrap().style(
+                StylePatch::new()
+                    .foreground(colors.muted)
+                    .text_size(10.0)
+                    .weight(500.0),
+            ),
         );
     }
     let label_sem = label.clone();
     let count_sem = count;
     let exp_sem = expanded;
-    button
-        .on_click(on_press)
-        .semantics(move || {
-            let name = if show_count {
-                format!("{}, {}", label_sem(), count_sem())
-            } else {
-                label_sem()
-            };
-            Semantics::new(Role::Button)
-                .label(name)
-                .expanded(exp_sem())
-                .action(Action::Click)
-        })
+    button.on_click(on_press).semantics(move || {
+        let name = if show_count {
+            format!("{}, {}", label_sem(), count_sem())
+        } else {
+            label_sem()
+        };
+        Semantics::new(Role::Button)
+            .label(name)
+            .expanded(exp_sem())
+            .action(Action::Click)
+    })
 }
 
 fn session_options(ui: &Ui, studio: Studio) -> El {
@@ -325,22 +320,22 @@ fn session_options(ui: &Ui, studio: Studio) -> El {
                         let st = st.clone();
                         move || import_session(&st)
                     })
-                        .variant("quiet")
-                        .layout(|l| {
-                            l.grow = 1.0;
-                            l.basis = Length::Px(0.0);
-                        }),
+                    .variant("quiet")
+                    .layout(|l| {
+                        l.grow = 1.0;
+                        l.basis = Length::Px(0.0);
+                    }),
                 )
                 .child(
                     w::button(&u, move || messages().text(&u_ex, "sidebar-export"), {
                         let st = st.clone();
                         move || export_active(&st)
                     })
-                        .variant("quiet")
-                        .layout(|l| {
-                            l.grow = 1.0;
-                            l.basis = Length::Px(0.0);
-                        }),
+                    .variant("quiet")
+                    .layout(|l| {
+                        l.grow = 1.0;
+                        l.basis = Length::Px(0.0);
+                    }),
                 )
         },
     )
@@ -567,26 +562,25 @@ fn project_header(ui: &Ui, studio: &Studio, path: Option<String>) -> El {
     let drop_path = path.clone();
     let menu_path = path.clone();
     w::context_menu(
-        &button
-            .on_drop(
-                |drag, _| {
-                    if drag.local::<String>().is_some() {
-                        DropEffect::Move
-                    } else {
-                        DropEffect::None
-                    }
-                },
-                move |drag, _, _| {
-                    let Some(id) = drag.local::<String>().cloned() else {
-                        return;
-                    };
-                    match drop_path.as_deref() {
-                        Some(PINNED_GROUP_KEY) => {}
-                        Some(path) => assign_project(&st_drop, &id, Some(path.to_string())),
-                        None => assign_project(&st_drop, &id, None),
-                    }
-                },
-            ),
+        &button.on_drop(
+            |drag, _| {
+                if drag.local::<String>().is_some() {
+                    DropEffect::Move
+                } else {
+                    DropEffect::None
+                }
+            },
+            move |drag, _, _| {
+                let Some(id) = drag.local::<String>().cloned() else {
+                    return;
+                };
+                match drop_path.as_deref() {
+                    Some(PINNED_GROUP_KEY) => {}
+                    Some(path) => assign_project(&st_drop, &id, Some(path.to_string())),
+                    None => assign_project(&st_drop, &id, None),
+                }
+            },
+        ),
         move || project_menu(&u, &st_menu, menu_path.clone()),
     )
 }
@@ -656,10 +650,13 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
     let pin = studio.clone();
     let pin_id = id.clone();
     let pin_lookup = studio.clone();
-    let pin_btn = w::button(
+    let colors_pin = colors.clone();
+    let pin_btn = tool_button_sized(
         ui,
+        Glyph::Star,
         {
-            let st = studio.clone();
+            let u = ui.clone();
+            let st = pin_lookup.clone();
             let pin_id = id.clone();
             move || {
                 let pinned = st
@@ -669,14 +666,14 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
                     .find(|s| s.id == pin_id)
                     .map(|s| s.pinned)
                     .unwrap_or(false);
-                if pinned { "★" } else { "☆" }.to_string()
+                messages().text(&u, if pinned { "unpin" } else { "pin" })
             }
         },
         move || pin.toggle_pin(&pin_id),
+        ROW_TOOL,
+        ROW_GLYPH,
     )
-    .variant("quiet")
-    .semantics({
-        let u = ui.clone();
+    .style({
         let st = pin_lookup;
         let pin_id = id.clone();
         move || {
@@ -687,15 +684,12 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
                 .find(|s| s.id == pin_id)
                 .map(|s| s.pinned)
                 .unwrap_or(false);
-            Semantics::new(Role::Button)
-                .label(messages().text(&u, if pinned { "unpin" } else { "pin" }))
-                .action(Action::Click)
+            StylePatch::new().foreground(if pinned {
+                colors_pin.accent
+            } else {
+                crate::tokens::icon_fg(&colors_pin)
+            })
         }
-    })
-    .layout(|l| {
-        l.shrink = 0.0;
-        l.min_width = Length::Px(28.0);
-        l.width = Length::Px(28.0);
     });
 
     let arch = studio.clone();
@@ -718,8 +712,8 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
                 messages().text(&u, if archived { "unarchive" } else { "archive" })
             },
             move || arch.toggle_archive(&arch_id),
-            28.0,
-            16.0,
+            ROW_TOOL,
+            ROW_GLYPH,
         )
     };
 
@@ -741,8 +735,8 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
                 };
                 w::menu(&ui_menu, &anchor, project_move_menu(&ui_menu, &st, &sid));
             },
-            28.0,
-            16.0,
+            ROW_TOOL,
+            ROW_GLYPH,
         )
     };
     *folder_slot.borrow_mut() = Some(folder_btn.clone());
@@ -752,10 +746,10 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
 
     let row = w::row(ui)
         .align(Align::Center)
-        .gap(unit * 0.25)
+        .gap(unit)
         .padding(Insets {
             top: unit * 1.5,
-            end: 0.0,
+            end: unit,
             bottom: unit * 1.5,
             start: 0.0,
         })
@@ -809,12 +803,27 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
                 }),
         )
         .child(pin_btn)
-        .child(text_col)
+        .child(text_col);
+    let actions = w::row(ui)
+        .align(Align::Center)
+        .gap(2.0)
+        .layout(|l| {
+            l.shrink = 0.0;
+            l.min_width = Length::Px(0.0);
+        })
         .child(arch_btn)
         .child(folder_btn)
-        .child(tool_button(ui, w::Icon::Close, close_label, move || {
-            studio_close.close(&close_id);
-        }));
+        .child(tool_button_sized(
+            ui,
+            w::Icon::Close,
+            close_label,
+            move || {
+                studio_close.close(&close_id);
+            },
+            ROW_TOOL,
+            ROW_GLYPH,
+        ));
+    let row = w::reveal_on_hover(row.child(actions.clone()), &actions, ROW_ACTIONS);
 
     let drag_id = id.clone();
     let row = row.draggable(
@@ -870,12 +879,10 @@ fn session_title(ui: &Ui, studio: &Studio, id: &str, title: &str) -> El {
         move || rename_field(&u_edit, &st_edit, &id_edit, &seed),
     )
     .fallback(move || {
-        w::text(&u_show, shown.clone())
-            .nowrap()
-            .layout(|l| {
-                l.width = Length::Percent(1.0);
-                l.min_width = Length::Px(0.0);
-            })
+        w::text(&u_show, shown.clone()).nowrap().layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
     })
     .el()
 }
@@ -924,19 +931,22 @@ fn session_sub(ui: &Ui, studio: &Studio, id: &str, count: u32, age: Option<Strin
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
         })
-        .child(
-            w::text(ui, line).variant("muted").nowrap().layout(|l| {
-                l.shrink = 1.0;
-                l.min_width = Length::Px(0.0);
-            }),
-        )
+        .child(w::text(ui, line).variant("muted").nowrap().layout(|l| {
+            l.shrink = 1.0;
+            l.min_width = Length::Px(0.0);
+        }))
         .child(
             show(
                 ui,
                 move || {
-                    should_show_busy_badge(st.depth.running_count()) && st.depth.session_running(&sid)
+                    should_show_busy_badge(st.depth.running_count())
+                        && st.depth.session_running(&sid)
                 },
-                move || w::text(&u, messages().text(&u, "busy-badge")).variant("small").nowrap(),
+                move || {
+                    w::text(&u, messages().text(&u, "busy-badge"))
+                        .variant("small")
+                        .nowrap()
+                },
             )
             .el(),
         )
@@ -971,9 +981,12 @@ fn project_menu(ui: &Ui, studio: &Studio, path: Option<String>) -> Vec<w::MenuIt
 fn project_move_menu(ui: &Ui, studio: &Studio, id: &str) -> Vec<w::MenuItem> {
     let st_none = studio.clone();
     let id_none = id.to_string();
-    let mut items = vec![w::MenuItem::new(messages().text(ui, "no-project"), move || {
-        assign_project(&st_none, &id_none, None);
-    })];
+    let mut items = vec![w::MenuItem::new(
+        messages().text(ui, "no-project"),
+        move || {
+            assign_project(&st_none, &id_none, None);
+        },
+    )];
     for project in studio.projects.get() {
         let Some(path) = project.path else {
             continue;
@@ -1021,20 +1034,23 @@ fn session_menu(ui: &Ui, studio: &Studio, id: &str, project: Option<String>) -> 
     let st_del = studio.clone();
     let id_del = id.to_string();
     let u = ui.clone();
-    items.push(w::MenuItem::new(messages().text(ui, "delete-session"), move || {
-        let title = messages().text(&u, "delete-session");
-        let cancel = messages().text(&u, "cancel");
-        let st_yes = st_del.clone();
-        let sid = id_del.clone();
-        w::dialog(
-            &u,
-            title.clone(),
-            session_delete_body(),
-            vec![
-                w::DialogButton::new(cancel, "quiet", || {}),
-                w::DialogButton::new(title, "danger_solid", move || st_yes.close(&sid)),
-            ],
-        );
-    }));
+    items.push(w::MenuItem::new(
+        messages().text(ui, "delete-session"),
+        move || {
+            let title = messages().text(&u, "delete-session");
+            let cancel = messages().text(&u, "cancel");
+            let st_yes = st_del.clone();
+            let sid = id_del.clone();
+            w::dialog(
+                &u,
+                title.clone(),
+                session_delete_body(),
+                vec![
+                    w::DialogButton::new(cancel, "quiet", || {}),
+                    w::DialogButton::new(title, "danger_solid", move || st_yes.close(&sid)),
+                ],
+            );
+        },
+    ));
     items
 }

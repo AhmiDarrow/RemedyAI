@@ -152,9 +152,35 @@ fn header(ui: &Ui, studio: Studio) -> El {
                 let u = ui.clone();
                 let accent = colors.accent;
                 move || {
-                    w::text(&u, "Live")
-                        .variant("muted")
-                        .style(StylePatch::new().foreground(accent))
+                    w::row(&u)
+                        .align(Align::Center)
+                        .gap(6.0)
+                        .padding(Insets {
+                            top: 4.0,
+                            end: 8.0,
+                            bottom: 4.0,
+                            start: 8.0,
+                        })
+                        .style(
+                            StylePatch::new()
+                                .background(accent.with_alpha(0.16))
+                                .foreground(accent)
+                                .radius(999.0),
+                        )
+                        .child(
+                            u.el("live-dot")
+                                .style(StylePatch::new().background(accent).radius(999.0))
+                                .layout(|l| {
+                                    l.width = Length::Px(6.0);
+                                    l.height = Length::Px(6.0);
+                                    l.min_width = Length::Px(6.0);
+                                    l.shrink = 0.0;
+                                }),
+                        )
+                        .child(
+                            w::text(&u, "Live")
+                                .style(StylePatch::new().foreground(accent).weight(500.0)),
+                        )
                 }
             })
             .el(),
@@ -178,9 +204,14 @@ fn header(ui: &Ui, studio: Studio) -> El {
             )
             .semantics({
                 let u = ui.clone();
+                let st = studio.clone();
                 move || {
                     Semantics::new(Role::Button)
-                        .label(messages().text(&u, "work-mode"))
+                        .label(format!(
+                            "{} — {}",
+                            messages().text(&u, "work-mode"),
+                            st.mode.get().label()
+                        ))
                         .action(Action::Click)
                 }
             }),
@@ -787,6 +818,11 @@ fn panel_button(
     let u = ui.clone();
     w::button(ui, move || messages().text(&u, label), on_press)
         .variant("quiet")
+        .style(
+            StylePatch::new()
+                .weight(500.0)
+                .foreground(ui.theme().colors.text),
+        )
         .semantics({
             let u = ui.clone();
             move || {
