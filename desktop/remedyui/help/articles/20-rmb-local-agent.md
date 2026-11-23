@@ -1,0 +1,114 @@
+# RMB local agent (Remedy Muscle Bridge)
+
+**RMB** is Remedy’s optional **on-device agent host** for long coding sessions.
+It runs a local **llama.cpp** server so chat and tools can stay on this PC when
+you want muscle without a cloud provider.
+
+## What it is
+
+| Piece | Role |
+|-------|------|
+| **Engine** | llama.cpp (OpenAI-compatible HTTP API) |
+| **Models** | Any GGUF you place under `~/.remedy/rmb/models/`, a path you set, or a file pulled from Hugging Face |
+| **Endpoint** | Default `http://127.0.0.1:8787/v1` |
+| **Chat** | Settings → **Use as chat provider** switches the active provider to RMB |
+
+While RMB is running, the local **4B mind** stays up. A VRAM planner shares the GPU when the 4B mind and the muscle both fit
+(typical 24 GB card). If a dense muscle would fit alone but not beside
+the mind (typical 12 GB + 9B), the mind yields to CPU (mmap) so the
+muscle can have the card. Turn on **Keep mind on GPU** in Settings →
+Advanced to force the mind to stay on the GPU, or set the GPU policy to
+**share**. Discovery will reuse an already-running Ollama / LM Studio /
+vLLM / llama-server instead of starting a second copy. Details:
+[RMB.md](../RMB.md).
+
+## When to use it
+
+- Offline or low-bandwidth coding
+- Sensitive repos you prefer not to send to a cloud LLM
+- Long multi-tool sessions with a fixed local model
+
+Cloud providers remain first-class; RMB is an optional local muscle, not a
+second product personality.
+
+Local models emit bash. The **Host Bridge** (see [Agency](18-agency.md)) rewrites
+POSIX-ish `bash_exec` strings for Windows cmd, runs PowerShell via `pwsh -File`,
+and prefers `host_run(argv)` so quoting does not burn the small window.
+
+## She can drive it
+
+RMB is part of Remedy, not a bolt-on. Chat can call the **`rmb`** tool
+(`status`, `start`, `stop`, `use`, `catalog`, `models`, `search`, `pull`,
+`settings`) instead of sending you to this page. **`status`** and
+**`models`** list GGUFs already in `~/.remedy/rmb/models/` — she should
+not search the whole user profile. A sibling `mtp-<name>.gguf` next to
+the main file auto-arms MTP on start (Settings restart keeps it). The
+living map shows `[House] RMB=…` so she knows whether the host is up.
+Starting RMB still uses this PC's GPU; the planner shares or yields
+layers so the 4B mind stays as responsive as the card allows.
+
+## Setup (owner UI)
+
+1. Open **Settings → Remedy Muscle Bridge** (local models).
+2. Drop a GGUF into `~/.remedy/rmb/models/`, pick a catalog / path, or
+   **Pull from Hugging Face**:
+   - Paste a **file URL** (`…/resolve/main/….gguf`) to download that file.
+   - Paste **`owner/repo`** to list every `.gguf` in that repo, then pick one.
+   - Type a **model name**. The same weights are often hosted by more than one
+     account — Remedy lists the matching repos (sorted by downloads). Pick the
+     host, then the quant file. Remedy does not guess.
+   Files land in `~/.remedy/rmb/models/` (resumable). **Pull and load** then
+   starts RMB on that file. Gated repos need `HF_TOKEN` (or
+   `HUGGING_FACE_HUB_TOKEN`) in the environment.
+3. Leave **Autofit** on (default) — Remedy sizes context, GPU layers, and KV
+   cache from this PC’s VRAM/RAM so the GGUF actually loads. Or pick a fixed
+   profile (agent / turbo / quality) or type a context size to lock it.
+   Switching GGUFs **re-fits** automatically. Remedy also auto-loads host
+   knobs from the file (Jinja chat template, mmap, MTP single-slot, or a
+   sibling `mtp-*.gguf` draft). **Thinking stays on** unless you turn it
+   off under RMB options. Every auto knob is in Settings (and
+   `rmb action=settings`) — Jinja, mmap, MTP, MoE CPU experts, draft
+   layers, reasoning budget. Too many GPU layers on a GGUF bigger than
+   VRAM will crawl — Autofit is the safe default.
+4. **Start RMB** (required — RMB does **not** auto-start when the API/serve
+   process comes up). Optionally enable **auto-start** only if you want the host
+   to load with every Remedy launch.
+5. **Use as chat provider** if you want chat on that host.
+6. Start a **new message** so the session binds to the new provider.
+
+Refresh status after install or path changes. Restart RMB after changing
+model, context, or GPU layer settings.
+
+## Profiles (short)
+
+- **Autofit** — default. Measures VRAM/RAM + the GGUF and starts the largest
+  stable window that fits (full GPU offload when possible, quantized KV or
+  fewer layers if not). If load OOMs, RMB walks the fit down and retries.
+- **Agent** — fixed 8k window
+- **Turbo** — fixed 4k, snappier turns
+- **Quality** — fixed 16k (can OOM on small GPUs; prefer Autofit)
+
+Exact sampling knobs live in RMB settings; Autofit / profiles only pick host
+size. Prefix cache (`--cache-reuse`) is on when the runtime supports it so
+tool loops do not re-process the system prompt every step.
+
+## Safety and scope
+
+RMB still runs as **your Windows user** with the same **filesystem scope** and
+**approval** settings as cloud modes. Untrusted project scope, write jails, and
+Ask/Auto approvals apply the same way.
+
+API keys for cloud providers never leave this PC as model input; RMB has no
+cloud key of its own.
+
+## Troubleshooting
+
+| Symptom | What to try |
+|---------|-------------|
+| Not ready | Confirm GGUF path + runtime present; open Settings status card |
+| Start failed | Check port 8787 free; lower context / GPU layers on small machines |
+| Mind went to CPU | Expected on a 12 GB card with the default 9B muscle so the 9B can have the GPU. The mind keeps running on CPU. Stop RMB, pick a MoE or smaller muscle, or enable Keep mind on GPU. |
+| Chat still cloud | Use **Use as chat provider**, then send a new message |
+
+See also: [Visual decoder](14-visual-decoder.md), [Free providers](15-free-providers.md),
+[Security & data](04-security-and-data.md).

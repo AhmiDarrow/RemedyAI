@@ -9,6 +9,7 @@ mod depth;
 mod diagnostics;
 mod fonts;
 mod grove;
+mod help;
 mod layout;
 mod logo;
 mod rails;
@@ -20,11 +21,13 @@ mod sse;
 mod status;
 mod studio;
 mod time;
+mod timetravel;
 mod usage;
 mod work;
 
 pub use diagnostics::DiagnosticsPanel;
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
+pub use help::HelpPanel;
 pub use runtime::Client;
 pub use settings::{preview_appearance, preview_connect, preview_error, preview_general, preview_models};
 pub use slides::{
@@ -32,6 +35,7 @@ pub use slides::{
     terminal_context_items, terminal_preview,
 };
 pub use studio::Studio;
+pub use timetravel::{TimeTravel, preview as time_travel_preview};
 pub use usage::{UsageContext, UsageDashboard, UsagePanel, UsageWindow};
 
 use remedy_ui::a11y::{Action, Role, Semantics};
@@ -146,6 +150,12 @@ pub fn grove_home(ui: &Ui) -> El {
     grove::preview_home(ui)
 }
 
+/// Owner's manual, open on the overview. RA-chrome mounts [`HelpPanel::view`]
+/// inside the shell; this entry is the panel on its own for a golden.
+pub fn help_home(ui: &Ui) -> El {
+    HelpPanel::preview().view(ui)
+}
+
 /// Filled usage tab, for goldens. No runtime calls.
 pub fn preview_usage(ui: &Ui) -> El {
     usage::UsagePanel::preview(ui)
@@ -201,6 +211,8 @@ fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
     // path, including rail previews, goes through here.
     depth::set_ui(ui.clone());
     fonts::prepare_theme(ui, &Fonts::load());
+    // Hidden overlay keeper. A closed rail is not a child of this column.
+    studio.time_travel.mount(ui, studio.clone());
     let workspace = slides::Workspace::for_studio(&studio);
     slides::install(workspace.clone());
     let follow_ws = workspace;
