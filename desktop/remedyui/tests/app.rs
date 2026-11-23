@@ -222,6 +222,13 @@ fn settings_previews_match_their_golden_images() {
     assert_settings_goldens("settings-error", remedy_desktop::preview_error);
 }
 
+/// Forest, a light theme, and a colorblind palette. A missing PNG is written and is not a failure.
+#[test]
+fn usage_previews_match_their_golden_images() {
+    assert_settings_goldens("usage", remedy_desktop::preview_usage);
+    assert_settings_goldens("usage-harness", remedy_desktop::preview_usage_harness);
+}
+
 fn press_nth(app: &mut TestApp, role: Role, name: &str, nth: usize) -> bool {
     let Some(ui) = app.ui() else { return false };
     let nodes: Vec<_> = app
