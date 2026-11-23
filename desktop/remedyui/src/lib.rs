@@ -4,6 +4,7 @@
 //! further (Remedy Sans UI in the chrome, AhmiPrint in code). The window talks
 //! to remedy-runtime over HTTP+SSE on 127.0.0.1:7400.
 
+mod browser;
 mod chat;
 mod chat_split;
 mod chrome;
@@ -24,6 +25,7 @@ mod rails;
 mod runtime;
 mod server_menu;
 mod settings;
+mod setup;
 mod sidebar;
 mod slides;
 mod sse;
@@ -49,6 +51,9 @@ pub use slides::{
     automations_preview, bind_host, files_preview, scratch_preview, set_browser_body,
     terminal_context_items, terminal_preview,
 };
+pub use setup::{
+    preview_conversation, preview_mind, preview_offer, preview_update, preview_wizard,
+};
 pub use studio::Studio;
 pub use timetravel::{TimeTravel, preview as time_travel_preview};
 pub use usage::{UsageContext, UsageDashboard, UsagePanel, UsageWindow};
@@ -73,15 +78,26 @@ pub fn app(app: &App) {
     settings::bind_host(app);
     app.keep_running(true);
     let studio = Studio::new();
+    // Grove is home. On a real launch the setup gate sits in front of it
+    // (splash, mind, house rules, wizard, update), inside the Studio chrome.
+    // REMEDY_DESKTOP_NO_SPAWN keeps Grove, with Studio one tap away, and does
+    // not start a sidecar.
     let grove = grove::Grove::new(studio.clone(), true);
+    grove::bind_live(grove.clone());
     let chrome = Chrome::load();
-    if !runtime::spawn_disabled() {
+    let live = if runtime::spawn_disabled() {
+        None
+    } else {
         runtime::ensure_running();
-        let client = runtime::Client::new(&runtime::origin(), runtime::load_token().as_deref());
+        let client = runtime::Client::new(
+            &runtime::origin(),
+            runtime::load_token().as_deref(),
+        );
         studio.attach_client(client.clone());
-        grove.attach_client(client);
+        grove.attach_client(client.clone());
         chrome.watch_runtime(&studio);
-    }
+        Some(client)
+    };
     let start_hidden = chrome.start_in_tray.get() && !runtime::spawn_disabled();
     let mut spec = WindowSpec::new("Remedy Desktop")
         .size(1180.0, 740.0)
@@ -95,20 +111,40 @@ pub fn app(app: &App) {
     let win = app.open(spec, move |ui, window| {
         chrome.attach(&a, window, ui);
         depth::set_host(a.clone(), window.clone());
+        // Window scope, not a Grove/Studio/setup `show` branch. Those
+        // branches are disposed on the way between surfaces. Settings
+        // has to outlive all of them. The computer-use poller starts
+        // here too: Grove is the default surface, and the Studio rails
+        // (where the Browser slide lives) are not mounted yet.
+        let boot_studio = studio.clone();
+        browser::bind_app(a.clone());
         settings::install(ui, studio.clone());
         let tag = tray_copy::fluent_tag(&chrome.locale.get());
         ui.set_locale(&tag);
         a.set_locale(Some(tag));
         let body_grove = grove.clone();
         let body_app = a.clone();
+        let body_studio = studio.clone();
+        let body_live = live.clone();
         let (u, win, a) = (ui.clone(), window.clone(), a.clone());
         let grove_ui = grove.clone();
         let hidden = std::rc::Rc::new(std::cell::Cell::new(0u64));
         ui.root()
             .child(chrome::hosted(ui, studio.clone(), chrome, move |ui| {
-                grove::root(ui, body_grove.clone(), Some(body_app.clone()))
+                if let Some(client) = body_live.clone() {
+                    setup::host(
+                        ui,
+                        body_studio.clone(),
+                        body_grove.clone(),
+                        body_app.clone(),
+                        client,
+                    )
+                } else {
+                    grove::root(ui, body_grove.clone(), Some(body_app.clone()))
+                }
             }))
             .bind(move || {
+                browser::boot(boot_studio.clone());
                 let copy = tray_copy::labels(&chrome.locale.get(), &tray_copy::os_locale_name());
                 let custom = chrome.tooltip.get();
                 let tip = if custom.is_empty() {
@@ -249,6 +285,11 @@ pub fn preview_usage_harness(ui: &Ui) -> El {
     usage::UsagePanel::preview_harness(ui)
 }
 
+/// Browser chrome alone, for the computer-use side-by-side and the chrome test.
+pub fn browser_preview(ui: &Ui) -> El {
+    browser::preview(ui)
+}
+
 /// Left rail open on Sessions, right rail a thin strip. Same shell as [`home`].
 pub fn home_rails_left(ui: &Ui) -> El {
     shell_with(
@@ -303,6 +344,10 @@ fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
     // path, including rail previews, goes through here.
     depth::set_ui(ui.clone());
     fonts::prepare_theme(ui, &Fonts::load());
+    if !studio.local_only {
+        rails::bind_chrome(chrome.clone());
+        browser::boot(studio.clone());
+    }
     // Hidden overlay keeper. A closed rail is not a child of this column.
     studio.time_travel.mount(ui, studio.clone());
     let workspace = slides::Workspace::for_studio(&studio);
@@ -354,6 +399,7 @@ fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
         .on_removed(move || {
             settings::clear_studio_hooks(hooks);
             slides::uninstall();
+            rails::unbind_chrome();
         });
     follow_ws.follow(&shell, &follow_studio);
     shell

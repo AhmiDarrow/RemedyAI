@@ -48,13 +48,23 @@ fn toolbar(ui: &Ui, grove: Grove) -> El {
     let go = w::button(ui, "Go", move || g.go(&f.value()));
     let g = grove.clone();
     let back = w::button(ui, "Back", move || {
-        g.stage_status
-            .set("Back is the browser host’s. This rail does not move the page.".into());
+        if let Some(model) = crate::browser::live() {
+            model.go_back();
+            g.stage_status.set("Back".into());
+        } else {
+            g.stage_status
+                .set("Back is the browser host’s. This rail does not move the page.".into());
+        }
     });
     let g = grove.clone();
     let forward = w::button(ui, "Forward", move || {
-        g.stage_status
-            .set("Forward is the browser host’s. This rail does not move the page.".into());
+        if let Some(model) = crate::browser::live() {
+            model.go_forward();
+            g.stage_status.set("Forward".into());
+        } else {
+            g.stage_status
+                .set("Forward is the browser host’s. This rail does not move the page.".into());
+        }
     });
     let g = grove.clone();
     let home = w::button(ui, "Home", move || g.go(logic::BROWSER_HOME))
@@ -74,6 +84,9 @@ fn toolbar(ui: &Ui, grove: Grove) -> El {
             move || {
                 let next = !g.shield.get();
                 g.shield.set(next);
+                if let Some(model) = crate::browser::live() {
+                    model.set_shield(next);
+                }
                 g.stage_status.set(
                     if next {
                         "Privacy Shield on — the browser host applies it.".into()
@@ -87,8 +100,13 @@ fn toolbar(ui: &Ui, grove: Grove) -> El {
     );
     let g = grove.clone();
     let reload = w::button(ui, "Reload", move || {
-        g.stage_status
-            .set("Reload is the browser host’s. The address stays put.".into());
+        if let Some(model) = crate::browser::live() {
+            model.reload();
+            g.stage_status.set("Reload".into());
+        } else {
+            g.stage_status
+                .set("Reload is the browser host’s. The address stays put.".into());
+        }
     });
     let g = grove.clone();
     let star = w::button(
@@ -125,6 +143,9 @@ fn toolbar(ui: &Ui, grove: Grove) -> El {
             move || {
                 let next = !g.desktop_site.get();
                 g.desktop_site.set(next);
+                if let Some(model) = crate::browser::live() {
+                    model.set_desktop_site(next);
+                }
                 g.stage_status.set(
                     if next {
                         "Desktop site — the browser host applies it.".into()
@@ -204,6 +225,23 @@ fn bookmarks(ui: &Ui, grove: Grove) -> El {
 }
 
 fn page(ui: &Ui, grove: Grove) -> El {
+    if crate::browser::live().is_some() {
+        let g = grove.clone();
+        return w::column(ui)
+            .layout(|l| {
+                l.grow = 1.0;
+                l.basis = Length::Px(0.0);
+                l.min_height = Length::Px(0.0);
+                l.width = Length::Percent(1.0);
+                l.height = Length::Percent(1.0);
+            })
+            .child(crate::browser::page(ui).layout(|l| {
+                l.grow = 1.0;
+                l.basis = Length::Px(0.0);
+                l.min_height = Length::Px(0.0);
+            }))
+            .child(w::text(ui, "").variant("muted").text(move || g.stage_status.get()));
+    }
     let unit = ui.theme().spacing.unit;
     let g = grove.clone();
     w::column(ui)
