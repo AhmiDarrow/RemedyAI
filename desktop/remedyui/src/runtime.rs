@@ -554,16 +554,13 @@ mod tests {
 
     #[test]
     fn windows_home_follows_userprofile() {
-        let home = remedy_home_from(
-            None,
-            Some(r"C:\Users\Ada"),
-            Some(r"C:\GitBashHome"),
-        );
-        if cfg!(windows) {
-            assert_eq!(home, PathBuf::from(r"C:\Users\Ada\.remedy"));
-        } else {
-            assert_eq!(home, PathBuf::from(r"C:\GitBashHome\.remedy"));
-        }
+        let profile = r"C:\Users\Ada";
+        let git_bash = r"C:\GitBashHome";
+        let home = remedy_home_from(None, Some(profile), Some(git_bash));
+        // Windows uses USERPROFILE. Other hosts use HOME. The join follows
+        // the host separator, so a Linux run does not expect a backslash.
+        let root = if cfg!(windows) { profile } else { git_bash };
+        assert_eq!(home, PathBuf::from(root).join(".remedy"));
     }
 
     #[test]
