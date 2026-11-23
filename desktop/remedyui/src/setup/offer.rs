@@ -1,8 +1,9 @@
-//! House-rules pop-up shown after an update. It is not the installer screen.
+//! House-rules banner shown after an update. It is not the installer screen.
 //!
 //! Buttons clear `open`. `go` and `later` tell the gate which one was pressed.
-//! The copy comes from the server when it has any, otherwise the fallback that
-//! says some major things have changed.
+//! The copy comes from the server when it has any, otherwise the fallback.
+//! The banner lives in the Grove page flow, below the header and above the
+//! composer, so it cannot cover either.
 
 use remedy_ui::a11y::{Role, Semantics};
 use remedy_ui::core::Insets;
@@ -10,10 +11,10 @@ use remedy_ui::layout::{Align, Justify, Length};
 use remedy_ui::reactive::Signal;
 use remedy_ui::style::StylePatch;
 use remedy_ui::widgets as w;
-use remedy_ui::{El, Ui};
+use remedy_ui::{El, Ui, show};
 
 use super::chrome;
-use super::model::{OfferCopy, OFFER_BODY, OFFER_PRIMARY, OFFER_SECONDARY, OFFER_TITLE};
+use super::model::{OFFER_BODY, OFFER_PRIMARY, OFFER_SECONDARY, OFFER_TITLE, OfferCopy};
 use crate::logo;
 
 #[derive(Clone)]
@@ -32,7 +33,7 @@ impl Offer {
         Self::with(false)
     }
 
-    /// Open, with the fallback that names the big changes.
+    /// Open, with the fallback that names the changes that actually ship.
     pub fn preview() -> Self {
         Self::with(true)
     }
@@ -64,9 +65,21 @@ impl Offer {
 
 fn fill_blanks(copy: OfferCopy) -> OfferCopy {
     OfferCopy {
-        title: if copy.title.trim().is_empty() { OFFER_TITLE.into() } else { copy.title },
-        body: if copy.body.trim().is_empty() { OFFER_BODY.into() } else { copy.body },
-        primary: if copy.primary.trim().is_empty() { OFFER_PRIMARY.into() } else { copy.primary },
+        title: if copy.title.trim().is_empty() {
+            OFFER_TITLE.into()
+        } else {
+            copy.title
+        },
+        body: if copy.body.trim().is_empty() {
+            OFFER_BODY.into()
+        } else {
+            copy.body
+        },
+        primary: if copy.primary.trim().is_empty() {
+            OFFER_PRIMARY.into()
+        } else {
+            copy.primary
+        },
         secondary: if copy.secondary.trim().is_empty() {
             OFFER_SECONDARY.into()
         } else {
@@ -75,32 +88,59 @@ fn fill_blanks(copy: OfferCopy) -> OfferCopy {
     }
 }
 
-pub fn offer_layer(ui: &Ui, offer: Offer) -> El {
+/// In-flow banner for the Grove content area. Closed, it takes no space.
+pub fn offer_banner(ui: &Ui, offer: Offer) -> El {
     let open = offer.open.clone();
     let ui_body = ui.clone();
-    chrome::when(ui, move || open.get(), move || card(&ui_body, offer.clone()))
+    show(
+        ui,
+        move || open.get(),
+        move || banner_card(&ui_body, offer.clone()),
+    )
+    .el()
+    .layout(|l| {
+        l.width = Length::Percent(1.0);
+        l.shrink = 0.0;
+    })
 }
 
-/// Overlay with no fallback, so a dismissed pop-up does not cover the studio.
+/// Standalone preview of the banner on a plain page (button tests).
 pub fn offer_overlay(ui: &Ui, offer: Offer) -> El {
-    let open = offer.open.clone();
-    let ui_body = ui.clone();
-    remedy_ui::show(ui, move || open.get(), move || card(&ui_body, offer.clone())).el()
+    let unit = ui.theme().spacing.unit;
+    let colors = ui.theme().colors.clone();
+    w::column(ui)
+        .align(Align::Center)
+        .justify(Justify::Start)
+        .padding(Insets::all(unit * 3.0))
+        .style(
+            StylePatch::new()
+                .background(colors.bg)
+                .foreground(colors.text),
+        )
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.height = Length::Percent(1.0);
+        })
+        .child(offer_banner(ui, offer))
 }
 
-fn card(ui: &Ui, offer: Offer) -> El {
+fn banner_card(ui: &Ui, offer: Offer) -> El {
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
     let line = colors.line.unwrap_or(colors.muted);
     let title = offer.title.clone();
     let body = w::column(ui)
         .gap(unit * 2.0)
-        .layout(|l| l.width = Length::Px(420.0))
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.max_width = Length::Px(640.0);
+            l.shrink = 1.0;
+        })
         .child(
             w::row(ui)
                 .align(Align::Center)
                 .gap(unit * 1.5)
-                .child(logo::mark(ui, 36.0))
+                .child(logo::mark(ui, 22.0))
                 .child(w::text(ui, "").variant("strong").text({
                     let title = title.clone();
                     move || title.get()
@@ -115,6 +155,7 @@ fn card(ui: &Ui, offer: Offer) -> El {
                 .gap(unit)
                 .align(Align::Center)
                 .justify(Justify::End)
+                .layout(|l| l.width = Length::Percent(1.0))
                 .child(chrome::quiet(ui, offer.secondary.get(), {
                     let offer = offer.clone();
                     move || {
@@ -132,19 +173,24 @@ fn card(ui: &Ui, offer: Offer) -> El {
         );
     w::column(ui)
         .align(Align::Center)
-        .justify(Justify::Center)
-        .style(StylePatch::new().background(colors.bg.mix_oklab(colors.text, 0.35)))
-        .layout(|l| {
-            l.width = Length::Percent(1.0);
-            l.height = Length::Percent(1.0);
+        .padding(Insets {
+            top: unit,
+            end: unit * 3.0,
+            bottom: unit,
+            start: unit * 3.0,
         })
+        .layout(|l| l.width = Length::Percent(1.0))
         .semantics({
             let title = title.clone();
-            move || Semantics::new(Role::Dialog).label(title.get()).modal(true)
+            move || Semantics::new(Role::Region).label(title.get())
         })
         .child(
             w::column(ui)
-                .padding(Insets::all(unit * 3.0))
+                .padding(Insets::all(unit * 2.0))
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.max_width = Length::Px(720.0);
+                })
                 .style(
                     StylePatch::new()
                         .background(colors.card)

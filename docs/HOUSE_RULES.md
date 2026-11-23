@@ -27,9 +27,9 @@ without a GPU is fine — the mind can use the CPU.
 Existing installs and `remedy --skip-setup` are not pulled back into
 first-run setup. Those sessions are marked inherited and are not nagged
 in chat. After this update, existing installs get one desktop pop-up
-that makes the case for going over house rules (a new built-in mind,
-smarter token saving, local muscle sharing, and talking with other
-bots). **Let's go** starts the conversation; **Not now** dismisses it.
+that makes the case for going over house rules (smarter token saving,
+local muscle sharing, and talking with other bots over A2A and MCP).
+**Let's go** starts the conversation; **Not now** dismisses it.
 Either choice is final — the pop-up shows only once. You can still say
 “let’s go over house rules again,” or run `/house-rules`.
 

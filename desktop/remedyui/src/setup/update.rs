@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use std::process::{Command, Stdio};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use base64::Engine;
@@ -21,9 +21,9 @@ use remedy_ui::{El, Ui, show};
 
 use super::chrome;
 use super::model::{
-    self, ReleaseInfo, UpdatePhase, UPDATE_GITHUB, UPDATE_HANG_TIGHT, UPDATE_LATER, UPDATE_MANUAL,
-    UPDATE_NO_URL, UPDATE_PLEASE_WAIT, UPDATE_RELAUNCH, UPDATE_RETRY, UPDATE_STARTING, UPDATE_TITLE,
-    UPDATE_VERSION, UPDATE_WRONG,
+    self, ReleaseInfo, UPDATE_GITHUB, UPDATE_HANG_TIGHT, UPDATE_LATER, UPDATE_MANUAL,
+    UPDATE_NO_URL, UPDATE_PLEASE_WAIT, UPDATE_RELAUNCH, UPDATE_RETRY, UPDATE_STARTING,
+    UPDATE_TITLE, UPDATE_VERSION, UPDATE_WRONG, UpdatePhase,
 };
 use crate::logo;
 
@@ -75,7 +75,7 @@ impl Updater {
         let u = Self::new();
         u.to.set("1.1.0".into());
         u.notes.set(
-            "A new built-in mind, smarter token saving, and house rules you can go over again after an update."
+            "Smarter token saving, local muscle sharing, talking with other bots (A2A and MCP), and house rules you can go over again after an update."
                 .into(),
         );
         u.url.set(
@@ -182,12 +182,28 @@ impl Updater {
                 });
                 if let Err(e) = downloaded {
                     let _ = std::fs::remove_file(&dest);
-                    report_fail(&waker, phase, error, started, message, with_manual(&e, &url));
+                    report_fail(
+                        &waker,
+                        phase,
+                        error,
+                        started,
+                        message,
+                        with_manual(&e, &url),
+                    );
                     return;
                 }
-                if let Err(e) = inspect_installer(&dest).and_then(|_| verify_installer(&dest, &signature)) {
+                if let Err(e) =
+                    inspect_installer(&dest).and_then(|_| verify_installer(&dest, &signature))
+                {
                     let _ = std::fs::remove_file(&dest);
-                    report_fail(&waker, phase, error, started, message, with_manual(&e, &url));
+                    report_fail(
+                        &waker,
+                        phase,
+                        error,
+                        started,
+                        message,
+                        with_manual(&e, &url),
+                    );
                     return;
                 }
                 let phase_f = phase.clone();
@@ -307,7 +323,10 @@ fn download_installer(
                     cancel_c.cancel();
                     return;
                 }
-                if let Some(len) = resp.header("content-length").and_then(|s| s.trim().parse().ok()) {
+                if let Some(len) = resp
+                    .header("content-length")
+                    .and_then(|s| s.trim().parse().ok())
+                {
                     st.total = Some(len);
                 }
             }
@@ -324,7 +343,9 @@ fn download_installer(
             st.written += chunk.len() as u64;
             let written = st.written;
             let total = st.total;
-            if written.saturating_sub(st.last_report) >= 64 * 1024 || total.is_some_and(|t| written >= t) {
+            if written.saturating_sub(st.last_report) >= 64 * 1024
+                || total.is_some_and(|t| written >= t)
+            {
                 st.last_report = written;
                 drop(st);
                 progress(written, total);
@@ -336,7 +357,11 @@ fn download_installer(
     );
     let rejected = {
         let result = rx.recv_timeout(Duration::from_secs(620));
-        let rejected = state.lock().unwrap_or_else(|e| e.into_inner()).rejected.clone();
+        let rejected = state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .rejected
+            .clone();
         match result {
             Ok(Ok(_)) => rejected,
             Ok(Err(e)) => {
@@ -360,7 +385,9 @@ fn download_installer(
 
 fn looks_like_html(chunk: &[u8]) -> bool {
     let n = chunk.len().min(64);
-    let text = String::from_utf8_lossy(&chunk[..n]).trim_start().to_ascii_lowercase();
+    let text = String::from_utf8_lossy(&chunk[..n])
+        .trim_start()
+        .to_ascii_lowercase();
     text.starts_with("<!doctype") || text.starts_with("<html") || text.starts_with("<head")
 }
 
@@ -554,7 +581,11 @@ fn notes_block(ui: &Ui, updater: Updater) -> El {
                     l.max_height = Length::Px(112.0);
                     l.grow = 0.0;
                 })
-                .child(w::text(&ui_notes, "").variant("muted").text(move || model::notes_slice(&notes.get())))
+                .child(
+                    w::text(&ui_notes, "")
+                        .variant("muted")
+                        .text(move || model::notes_slice(&notes.get())),
+                )
         },
     )
     .el()
@@ -588,18 +619,14 @@ fn progress_block(ui: &Ui, updater: Updater) -> El {
                         l.height = Length::Px(8.0);
                     }),
                 )
-                .child(
-                    w::text(&ui_bar, "")
-                        .variant("muted")
-                        .text(move || {
-                            let msg = message.get();
-                            if msg.is_empty() {
-                                model::update_subtitle(waiting.get()).to_string()
-                            } else {
-                                msg
-                            }
-                        }),
-                )
+                .child(w::text(&ui_bar, "").variant("muted").text(move || {
+                    let msg = message.get();
+                    if msg.is_empty() {
+                        model::update_subtitle(waiting.get()).to_string()
+                    } else {
+                        msg
+                    }
+                }))
         },
     )
     .el()
@@ -619,7 +646,11 @@ fn error_block(ui: &Ui, updater: Updater) -> El {
                 .variant("muted")
                 .text(move || {
                     let msg = error.get();
-                    if msg.trim().is_empty() { UPDATE_WRONG.into() } else { msg }
+                    if msg.trim().is_empty() {
+                        UPDATE_WRONG.into()
+                    } else {
+                        msg
+                    }
                 })
                 .style(StylePatch::new().foreground(colors.danger))
         },
@@ -636,62 +667,71 @@ fn actions(ui: &Ui, updater: Updater, phase: Signal<UpdatePhase>) -> El {
     let ui_busy = ui.clone();
     w::column(ui)
         .layout(|l| l.width = Length::Percent(1.0))
-        .child(show(ui, move || ready.get() == UpdatePhase::Ready, {
-            let updater = updater.clone();
-            move || {
-                let later = chrome::quiet(&ui_ready, UPDATE_LATER, {
-                    let updater = updater.clone();
-                    move || updater.request_close()
-                });
-                let go = chrome::primary(&ui_ready, UPDATE_RELAUNCH, {
-                    let updater = updater.clone();
-                    move || updater.begin()
-                });
-                let url = updater.url.clone();
-                let started = updater.started.clone();
-                let go = go.disabled(move || url.get().is_empty() || started.get());
-                chrome::actions(&ui_ready, vec![later, go])
-            }
-        }).el())
-        .child(show(ui, move || failed.get() == UpdatePhase::Failed, {
-            let updater = updater.clone();
-            move || {
-                chrome::actions(
-                    &ui_failed,
-                    vec![
-                        chrome::quiet(&ui_failed, model::UPDATE_CLOSE, {
-                            let updater = updater.clone();
-                            move || updater.request_close()
-                        }),
-                        chrome::primary(&ui_failed, UPDATE_RETRY, {
-                            let updater = updater.clone();
-                            move || updater.begin()
-                        }),
-                    ],
-                )
-            }
-        }).el())
-        .child(show(
-            ui,
-            move || {
-                matches!(
-                    busy.get(),
-                    UpdatePhase::Downloading | UpdatePhase::Finishing | UpdatePhase::StartingApp
-                )
-            },
-            move || {
-                let phase = phase.clone();
-                w::text(&ui_busy, "")
-                    .variant("muted")
-                    .text(move || -> String {
-                        if phase.get() == UpdatePhase::Downloading {
-                            UPDATE_PLEASE_WAIT.into()
-                        } else {
-                            UPDATE_HANG_TIGHT.into()
-                        }
-                    })
-            },
-        ).el())
+        .child(
+            show(ui, move || ready.get() == UpdatePhase::Ready, {
+                let updater = updater.clone();
+                move || {
+                    let later = chrome::quiet(&ui_ready, UPDATE_LATER, {
+                        let updater = updater.clone();
+                        move || updater.request_close()
+                    });
+                    let go = chrome::primary(&ui_ready, UPDATE_RELAUNCH, {
+                        let updater = updater.clone();
+                        move || updater.begin()
+                    });
+                    let url = updater.url.clone();
+                    let started = updater.started.clone();
+                    let go = go.disabled(move || url.get().is_empty() || started.get());
+                    chrome::actions(&ui_ready, vec![later, go])
+                }
+            })
+            .el(),
+        )
+        .child(
+            show(ui, move || failed.get() == UpdatePhase::Failed, {
+                let updater = updater.clone();
+                move || {
+                    chrome::actions(
+                        &ui_failed,
+                        vec![
+                            chrome::quiet(&ui_failed, model::UPDATE_CLOSE, {
+                                let updater = updater.clone();
+                                move || updater.request_close()
+                            }),
+                            chrome::primary(&ui_failed, UPDATE_RETRY, {
+                                let updater = updater.clone();
+                                move || updater.begin()
+                            }),
+                        ],
+                    )
+                }
+            })
+            .el(),
+        )
+        .child(
+            show(
+                ui,
+                move || {
+                    matches!(
+                        busy.get(),
+                        UpdatePhase::Downloading
+                            | UpdatePhase::Finishing
+                            | UpdatePhase::StartingApp
+                    )
+                },
+                move || {
+                    let phase = phase.clone();
+                    w::text(&ui_busy, "")
+                        .variant("muted")
+                        .text(move || -> String {
+                            if phase.get() == UpdatePhase::Downloading {
+                                UPDATE_PLEASE_WAIT.into()
+                            } else {
+                                UPDATE_HANG_TIGHT.into()
+                            }
+                        })
+                },
+            )
+            .el(),
+        )
 }
-
-

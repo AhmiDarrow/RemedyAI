@@ -108,8 +108,7 @@ pub fn progress_fraction(step: usize) -> f32 {
     (step.min(STEP_LABELS.len() - 1) as f32) / denom
 }
 
-pub const KEY_ERROR: &str =
-    "Enter an API key, or choose Demo (no signup) / Ollama for free use.";
+pub const KEY_ERROR: &str = "Enter an API key, or choose Demo (no signup) / Ollama for free use.";
 pub const XAI_KEY_ERROR: &str =
     "Sign in with xAI or enter an API key. Or pick Demo / Ollama for free use.";
 
@@ -167,7 +166,11 @@ pub fn shows_base_url(provider: &str) -> bool {
 
 /// Balanced is stored as `default`, matching the wizard draft.
 pub fn persona_wire(persona: &str) -> &str {
-    if persona == "balanced" { "default" } else { persona }
+    if persona == "balanced" {
+        "default"
+    } else {
+        persona
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -179,24 +182,76 @@ pub struct ProviderOpt {
 
 /// Offline catalog. No `advanced` flag, so the paid list is everything except Demo and Ollama.
 pub const OFFLINE_PROVIDERS: &[ProviderOpt] = &[
-    ProviderOpt { id: "demo", name: "Demo (Free)", base_url: "https://api.llm7.io/v1" },
-    ProviderOpt { id: "openai", name: "OpenAI", base_url: "https://api.openai.com/v1" },
-    ProviderOpt { id: "anthropic", name: "Anthropic", base_url: "https://api.anthropic.com/v1" },
+    ProviderOpt {
+        id: "demo",
+        name: "Demo (Free)",
+        base_url: "https://api.llm7.io/v1",
+    },
+    ProviderOpt {
+        id: "openai",
+        name: "OpenAI",
+        base_url: "https://api.openai.com/v1",
+    },
+    ProviderOpt {
+        id: "anthropic",
+        name: "Anthropic",
+        base_url: "https://api.anthropic.com/v1",
+    },
     ProviderOpt {
         id: "google",
         name: "Google AI (Gemini)",
         base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
     },
-    ProviderOpt { id: "deepseek", name: "DeepSeek", base_url: "https://api.deepseek.com/v1" },
-    ProviderOpt { id: "xai", name: "xAI (Grok)", base_url: "https://api.x.ai/v1" },
-    ProviderOpt { id: "groq", name: "Groq", base_url: "https://api.groq.com/openai/v1" },
-    ProviderOpt { id: "mistral", name: "Mistral", base_url: "https://api.mistral.ai/v1" },
-    ProviderOpt { id: "openrouter", name: "OpenRouter", base_url: "https://openrouter.ai/api/v1" },
-    ProviderOpt { id: "poe", name: "Poe", base_url: "https://api.poe.com/v1" },
-    ProviderOpt { id: "ollama", name: "Ollama (local)", base_url: "http://127.0.0.1:11434/v1" },
-    ProviderOpt { id: "llamacpp", name: "llama.cpp (local)", base_url: "http://127.0.0.1:8080/v1" },
-    ProviderOpt { id: "rmb", name: "RMB (local agent)", base_url: "http://127.0.0.1:8787/v1" },
-    ProviderOpt { id: "custom", name: "Custom / OpenAI-compatible", base_url: "http://127.0.0.1:5001/v1" },
+    ProviderOpt {
+        id: "deepseek",
+        name: "DeepSeek",
+        base_url: "https://api.deepseek.com/v1",
+    },
+    ProviderOpt {
+        id: "xai",
+        name: "xAI (Grok)",
+        base_url: "https://api.x.ai/v1",
+    },
+    ProviderOpt {
+        id: "groq",
+        name: "Groq",
+        base_url: "https://api.groq.com/openai/v1",
+    },
+    ProviderOpt {
+        id: "mistral",
+        name: "Mistral",
+        base_url: "https://api.mistral.ai/v1",
+    },
+    ProviderOpt {
+        id: "openrouter",
+        name: "OpenRouter",
+        base_url: "https://openrouter.ai/api/v1",
+    },
+    ProviderOpt {
+        id: "poe",
+        name: "Poe",
+        base_url: "https://api.poe.com/v1",
+    },
+    ProviderOpt {
+        id: "ollama",
+        name: "Ollama (local)",
+        base_url: "http://127.0.0.1:11434/v1",
+    },
+    ProviderOpt {
+        id: "llamacpp",
+        name: "llama.cpp (local)",
+        base_url: "http://127.0.0.1:8080/v1",
+    },
+    ProviderOpt {
+        id: "rmb",
+        name: "RMB (local agent)",
+        base_url: "http://127.0.0.1:8787/v1",
+    },
+    ProviderOpt {
+        id: "custom",
+        name: "Custom / OpenAI-compatible",
+        base_url: "http://127.0.0.1:5001/v1",
+    },
 ];
 
 pub fn paid_providers() -> Vec<&'static ProviderOpt> {
@@ -216,7 +271,7 @@ pub fn provider_base(id: &str) -> &'static str {
 
 pub const OFFER_ID: &str = "major-changes-2026-11";
 pub const OFFER_TITLE: &str = "House rules";
-pub const OFFER_BODY: &str = "Remedy has changed in some big ways: a new built-in mind, smarter token saving, local muscle sharing, and talking with your other bots. It's worth a few minutes to go over the house rules together.";
+pub const OFFER_BODY: &str = "Remedy now has smarter token saving, local muscle sharing, and talking with other bots (A2A and MCP). It's worth a few minutes to go over the house rules together.";
 pub const OFFER_PRIMARY: &str = "Let's go";
 pub const OFFER_SECONDARY: &str = "Not now";
 
@@ -226,11 +281,22 @@ pub const TOPIC_KEYS: &[(&str, &[&str])] = &[
     ("names", &["user_name", "name", "agent_gender"]),
     ("language", &["ui_language"]),
     ("tone", &["persona", "sarcasm_mode"]),
-    ("provider", &["llm_provider", "llm_model", "llm_base_url", "custom_llm_name"]),
+    (
+        "provider",
+        &[
+            "llm_provider",
+            "llm_model",
+            "llm_base_url",
+            "custom_llm_name",
+        ],
+    ),
     ("workspace", &["project_path"]),
     ("proactive", &["proactive_reach_out", "drives_enabled"]),
     ("privacy", &["privacy_mode", "inner_audit"]),
-    ("tokens", &["always_send_images", "vision_force_decode", "muscle_route"]),
+    (
+        "tokens",
+        &["always_send_images", "vision_force_decode", "muscle_route"],
+    ),
     ("gpu", &["muscle_gpu_policy"]),
     ("consent", &["approval_mode", "trust_profile"]),
     ("interop", &["interop_inbound", "interop_auto_reply"]),
@@ -247,19 +313,71 @@ pub struct Question {
 
 pub fn default_questions() -> Vec<Question> {
     const RAW: &[(&str, &str, &str)] = &[
-        ("names", "Names", "What should I call you, and what should you call me? You can keep Remedy, or pick another name."),
-        ("language", "Language", "Which language should I use? The default is this computer's language, and I can follow what you type."),
-        ("tone", "Tone", "How should I talk — balanced, concise, detailed, or playful?"),
-        ("provider", "Provider", "If you want a cloud model as muscle, which provider should I use? You can skip this and add a key later in Settings. I will not write API keys into logs or the house-rules file."),
-        ("workspace", "Workspace", "Is there a default project folder I should use for tools and files? You can leave this empty."),
-        ("proactive", "How proactive", "Should I reach out between visits, and keep my own drives going? Reaching out stays off unless you say yes."),
-        ("privacy", "Privacy and audit", "Should I keep a visible audit of inner work, and turn on privacy mode that strips personal details from provider traffic?"),
-        ("tokens", "Token saving", "I can handle easy chats and pictures here on this PC, and send the muscle a short description instead of the raw image. That saves your tokens. Want that?"),
-        ("gpu", "Local muscle and the GPU", "If a local muscle (a bigger model on this PC) is running, how should we share the GPU? Auto is fine for most machines. On a 12 GB card, yielding the mind to the CPU lets a 9B muscle run at full speed."),
-        ("consent", "Consent", "I will always ask before spending money, sending messages, or deleting things — that's recommended and already the rule. Should I also ask before other tools run, or use the usual in-project auto mode?"),
-        ("interop", "Other bots", "Should other bots be able to talk to me (A2A or MCP), and should I answer them automatically? Both stay off until you turn them on. Inbound connections stay on this computer and need a token."),
-        ("updates", "Updates", "Updates happen in the app. Should I check for them automatically and let you know, or only when you ask? Installs always wait for you."),
-        ("launch", "Start with the computer", "Should I start with this computer so I'm ready when you are?"),
+        (
+            "names",
+            "Names",
+            "What should I call you, and what should you call me? You can keep Remedy, or pick another name.",
+        ),
+        (
+            "language",
+            "Language",
+            "Which language should I use? The default is this computer's language, and I can follow what you type.",
+        ),
+        (
+            "tone",
+            "Tone",
+            "How should I talk — balanced, concise, detailed, or playful?",
+        ),
+        (
+            "provider",
+            "Provider",
+            "If you want a cloud model as muscle, which provider should I use? You can skip this and add a key later in Settings. I will not write API keys into logs or the house-rules file.",
+        ),
+        (
+            "workspace",
+            "Workspace",
+            "Is there a default project folder I should use for tools and files? You can leave this empty.",
+        ),
+        (
+            "proactive",
+            "How proactive",
+            "Should I reach out between visits, and keep my own drives going? Reaching out stays off unless you say yes.",
+        ),
+        (
+            "privacy",
+            "Privacy and audit",
+            "Should I keep a visible audit of inner work, and turn on privacy mode that strips personal details from provider traffic?",
+        ),
+        (
+            "tokens",
+            "Token saving",
+            "I can handle easy chats and pictures here on this PC, and send the muscle a short description instead of the raw image. That saves your tokens. Want that?",
+        ),
+        (
+            "gpu",
+            "Local muscle and the GPU",
+            "If a local muscle (a bigger model on this PC) is running, how should we share the GPU? Auto is fine for most machines. On a 12 GB card, yielding the mind to the CPU lets a 9B muscle run at full speed.",
+        ),
+        (
+            "consent",
+            "Consent",
+            "I will always ask before spending money, sending messages, or deleting things — that's recommended and already the rule. Should I also ask before other tools run, or use the usual in-project auto mode?",
+        ),
+        (
+            "interop",
+            "Other bots",
+            "Should other bots be able to talk to me (A2A or MCP), and should I answer them automatically? Both stay off until you turn them on. Inbound connections stay on this computer and need a token.",
+        ),
+        (
+            "updates",
+            "Updates",
+            "Updates happen in the app. Should I check for them automatically and let you know, or only when you ask? Installs always wait for you.",
+        ),
+        (
+            "launch",
+            "Start with the computer",
+            "Should I start with this computer so I'm ready when you are?",
+        ),
     ];
     RAW.iter()
         .map(|(id, title, prompt)| Question {
@@ -330,7 +448,8 @@ pub fn mind_failure_message(reason: &str, detail: &str) -> String {
         }
         _ => {
             if detail.is_empty() {
-                "The mind could not start. You can retry, or continue with Traditional setup.".into()
+                "The mind could not start. You can retry, or continue with Traditional setup."
+                    .into()
             } else {
                 detail.into()
             }
@@ -357,7 +476,8 @@ pub const SPLASH_STARTING: &str = "Starting Remedy";
 pub const SPLASH_CONNECTING: &str = "Connecting to local server";
 pub const SPLASH_READY: &str = "Ready";
 pub const SPLASH_FAILED: &str = "Server connection failed. Is Remedy installed?";
-pub const SPLASH_TIMEOUT: &str = "Server failed to start after ~90s. On a fresh install, wait a moment and Retry.";
+pub const SPLASH_TIMEOUT: &str =
+    "Server failed to start after ~90s. On a fresh install, wait a moment and Retry.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UpdatePhase {
@@ -518,22 +638,34 @@ fn voice_job(v: &Value) -> Option<DownloadJob> {
     }
     let label = active
         .iter()
-        .find_map(|s| s.get("message").and_then(|m| m.as_str()).filter(|m| !m.is_empty()))
+        .find_map(|s| {
+            s.get("message")
+                .and_then(|m| m.as_str())
+                .filter(|m| !m.is_empty())
+        })
         .unwrap_or("Remedy's voice")
         .to_string();
-    let percent = active.iter().filter_map(|s| s.get("percent").and_then(|n| n.as_f64())).fold(
-        None,
-        |best, n| {
+    let percent = active
+        .iter()
+        .filter_map(|s| s.get("percent").and_then(|n| n.as_f64()))
+        .fold(None, |best, n| {
             let n = clamp_pct(n);
             Some(best.map(|b: u32| b.max(n)).unwrap_or(n))
-        },
-    );
-    Some(DownloadJob { id: "voice".into(), label, percent })
+        });
+    Some(DownloadJob {
+        id: "voice".into(),
+        label,
+        percent,
+    })
 }
 
 fn vision_job(v: &Value) -> Option<DownloadJob> {
     let p = v.get("progress")?;
-    let phase = p.get("phase").and_then(|s| s.as_str()).unwrap_or("").to_ascii_lowercase();
+    let phase = p
+        .get("phase")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     const BUSY: &[&str] = &[
         "downloading",
         "download",
@@ -567,11 +699,19 @@ fn vision_job(v: &Value) -> Option<DownloadJob> {
         .unwrap_or("Local model")
         .trim()
         .to_string();
-    Some(DownloadJob { id: "vision".into(), label, percent })
+    Some(DownloadJob {
+        id: "vision".into(),
+        label,
+        percent,
+    })
 }
 
 fn hf_job(v: &Value) -> Option<DownloadJob> {
-    let phase = v.get("phase").and_then(|s| s.as_str()).unwrap_or("").to_ascii_lowercase();
+    let phase = v
+        .get("phase")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     if phase != "downloading" && phase != "loading" {
         return None;
     }
@@ -594,7 +734,11 @@ fn hf_job(v: &Value) -> Option<DownloadJob> {
         .unwrap_or("Language model")
         .trim()
         .to_string();
-    Some(DownloadJob { id: "hf".into(), label, percent })
+    Some(DownloadJob {
+        id: "hf".into(),
+        label,
+        percent,
+    })
 }
 
 fn clamp_pct(n: f64) -> u32 {
@@ -713,7 +857,10 @@ fn failure_text(v: &Value) -> String {
 /// Stage plus the banner text when the mind failed and we land on Traditional setup.
 pub fn stage_from_session(session: &Value, revisit: bool) -> (Stage, String) {
     let mode = session.get("mode").and_then(|s| s.as_str()).unwrap_or("");
-    let mind_ready = session.get("mind_ready").and_then(|b| b.as_bool()).unwrap_or(false);
+    let mind_ready = session
+        .get("mind_ready")
+        .and_then(|b| b.as_bool())
+        .unwrap_or(false);
     let failure = session.get("mind_failure").filter(|v| failure_present(v));
     let fallback = session
         .get("fallback_suggested")
@@ -778,7 +925,12 @@ pub fn platform_keys() -> &'static [&'static str] {
 /// A release is showable when it has a version, a download URL, and a signature.
 pub fn parse_latest(body: &str, keys: &[&str]) -> Option<ReleaseInfo> {
     let v: Value = serde_json::from_str(body).ok()?;
-    let version = v.get("version").and_then(|s| s.as_str()).unwrap_or("").trim().to_string();
+    let version = v
+        .get("version")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if version.is_empty() {
         return None;
     }
@@ -799,7 +951,11 @@ pub fn parse_latest(body: &str, keys: &[&str]) -> Option<ReleaseInfo> {
             .unwrap_or("")
             .trim()
             .to_string();
-        let signature = row.get("signature").and_then(|s| s.as_str()).unwrap_or("").trim();
+        let signature = row
+            .get("signature")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .trim();
         if !url.is_empty() && !signature.is_empty() && is_trusted_download_url(&url) {
             return Some(ReleaseInfo {
                 version,
@@ -816,8 +972,10 @@ pub const DEMO_BASE: &str = "https://api.llm7.io/v1";
 pub const OLLAMA_HINT: &str = "Requires Ollama installed locally. No cloud API key.";
 pub const WORKSPACE_PLACEHOLDER: &str = "e.g. C:\\Users\\You\\Projects\\MyApp";
 pub const SERVER_UNREACHABLE: &str = "Could not reach the local server to save setup.";
-pub const XAI_SAVE_FAILED: &str = "Signed in with xAI, but could not save the provider. You can enter an API key instead.";
-pub const MIND_ANSWER_FAILED: &str = "The mind could not answer. You can retry, or switch to Traditional setup.";
+pub const XAI_SAVE_FAILED: &str =
+    "Signed in with xAI, but could not save the provider. You can enter an API key instead.";
+pub const MIND_ANSWER_FAILED: &str =
+    "The mind could not answer. You can retry, or switch to Traditional setup.";
 
 /// Tauri's message when this build cannot hand the installer off itself.
 pub const UPDATE_PLATFORM: &str = "In-app updates are available on Windows, Linux AppImage, and macOS. Install from GitHub Releases.";
@@ -829,17 +987,32 @@ mod tests {
 
     #[test]
     fn traditional_wins_until_a_revisit() {
-        assert_eq!(stage_for("traditional", true, false, false), Stage::Traditional);
-        assert_eq!(stage_for("traditional", true, false, true), Stage::Conversation);
-        assert_eq!(stage_for("conversation", false, true, true), Stage::Traditional);
+        assert_eq!(
+            stage_for("traditional", true, false, false),
+            Stage::Traditional
+        );
+        assert_eq!(
+            stage_for("traditional", true, false, true),
+            Stage::Conversation
+        );
+        assert_eq!(
+            stage_for("conversation", false, true, true),
+            Stage::Traditional
+        );
         assert_eq!(stage_for("conversation", false, false, true), Stage::Mind);
-        assert_eq!(stage_for("conversation", true, true, false), Stage::Conversation);
+        assert_eq!(
+            stage_for("conversation", true, true, false),
+            Stage::Conversation
+        );
     }
 
     #[test]
     fn wizard_stays_closed_when_settings_did_not_load() {
         assert!(!needs_wizard(None));
-        assert!(!needs_wizard(Some(&SettingsFlags { loaded: false, ..SettingsFlags::default() })));
+        assert!(!needs_wizard(Some(&SettingsFlags {
+            loaded: false,
+            ..SettingsFlags::default()
+        })));
         assert!(needs_wizard(Some(&SettingsFlags {
             loaded: true,
             needs_setup: Some(true),
@@ -893,9 +1066,15 @@ mod tests {
         assert!(is_trusted_download_url(
             "https://objects.githubusercontent.com/github-production-release-asset-abc"
         ));
-        assert!(!is_trusted_download_url("https://objects.githubusercontent.com/a/../b"));
-        assert!(!is_trusted_download_url("https://evil.example/Remedy.Desktop.exe"));
-        assert!(!is_trusted_download_url("http://github.com/AhmiDarrow/RemedyAI/releases/a"));
+        assert!(!is_trusted_download_url(
+            "https://objects.githubusercontent.com/a/../b"
+        ));
+        assert!(!is_trusted_download_url(
+            "https://evil.example/Remedy.Desktop.exe"
+        ));
+        assert!(!is_trusted_download_url(
+            "http://github.com/AhmiDarrow/RemedyAI/releases/a"
+        ));
         assert_eq!(
             normalize_installer_url("https://example/Remedy_Desktop_1.exe"),
             "https://example/Remedy.Desktop_1.exe"
@@ -941,7 +1120,10 @@ mod tests {
         assert_eq!(copy.title, OFFER_TITLE);
         assert_eq!(copy.body, "Custom body");
         assert_eq!(copy.primary, OFFER_PRIMARY);
-        assert!(OFFER_BODY.contains("some big ways"));
+        assert!(OFFER_BODY.contains("smarter token saving"));
+        assert!(OFFER_BODY.contains("A2A and MCP"));
+        assert!(OFFER_BODY.contains("house rules"));
+        assert!(!OFFER_BODY.contains("built-in mind"));
     }
 
     #[test]
@@ -951,24 +1133,31 @@ mod tests {
         assert!(!titlebar_known(Some(2)));
         assert!(titlebar_known(Some(3)));
         let jobs = [
-            DownloadJob { id: "voice".into(), label: "Remedy's voice".into(), percent: Some(40) },
-            DownloadJob { id: "hf".into(), label: "Language model".into(), percent: None },
+            DownloadJob {
+                id: "voice".into(),
+                label: "Remedy's voice".into(),
+                percent: Some(40),
+            },
+            DownloadJob {
+                id: "hf".into(),
+                label: "Language model".into(),
+                percent: None,
+            },
         ];
-        assert_eq!(download_caption(&jobs), "Remedy's voice 40% · Language model");
+        assert_eq!(
+            download_caption(&jobs),
+            "Remedy's voice 40% · Language model"
+        );
     }
 
     #[test]
     fn session_json_picks_the_same_stage_as_the_react_flow() {
-        let (stage, msg) = stage_from_session(
-            &json!({"mode": "traditional", "mind_ready": true}),
-            false,
-        );
+        let (stage, msg) =
+            stage_from_session(&json!({"mode": "traditional", "mind_ready": true}), false);
         assert_eq!(stage, Stage::Traditional);
         assert!(msg.is_empty());
-        let (stage, msg) = stage_from_session(
-            &json!({"mode": "traditional", "mind_ready": true}),
-            true,
-        );
+        let (stage, msg) =
+            stage_from_session(&json!({"mode": "traditional", "mind_ready": true}), true);
         assert_eq!(stage, Stage::Conversation);
         assert!(msg.is_empty());
         let (stage, msg) = stage_from_session(

@@ -48,12 +48,12 @@ pub use runtime::{Client, install_panic_hook};
 pub use settings::{
     preview_appearance, preview_connect, preview_error, preview_general, preview_models,
 };
+pub use setup::{
+    preview_conversation, preview_mind, preview_offer, preview_update, preview_wizard,
+};
 pub use slides::{
     automations_preview, bind_host, files_preview, scratch_preview, set_browser_body,
     terminal_context_items, terminal_preview,
-};
-pub use setup::{
-    preview_conversation, preview_mind, preview_offer, preview_update, preview_wizard,
 };
 pub use studio::Studio;
 pub use timetravel::{TimeTravel, preview as time_travel_preview};
@@ -92,10 +92,7 @@ pub fn app(app: &App) {
         None
     } else {
         let _ = runtime::ensure_running();
-        let client = runtime::Client::new(
-            &runtime::origin(),
-            runtime::load_token().as_deref(),
-        );
+        let client = runtime::Client::new(&runtime::origin(), runtime::load_token().as_deref());
         studio.attach_client(client.clone());
         grove.attach_client(client.clone());
         chrome.watch_runtime(&studio);
@@ -143,7 +140,7 @@ pub fn app(app: &App) {
                         client,
                     )
                 } else {
-                    grove::root(ui, body_grove.clone(), Some(body_app.clone()))
+                    grove::root(ui, body_grove.clone(), Some(body_app.clone()), None)
                 }
             }))
             .bind(move || {
@@ -257,6 +254,38 @@ pub fn diagnostics_preview(ui: &Ui) -> El {
 /// Morning Grove with example plots, for goldens. It does not touch disk or the network.
 pub fn grove_home(ui: &Ui) -> El {
     grove::preview_home(ui)
+}
+
+/// Grove home inside the real window chrome, with the post-update house-rules banner open.
+pub fn grove_home_offer(ui: &Ui) -> El {
+    let chrome = Chrome::preview(chrome::Overlay::None);
+    let studio = Studio::preview();
+    let grove = grove::Grove::preview(studio.clone());
+    let offer = setup::Offer::preview();
+    chrome::hosted(ui, studio, chrome, move |ui| {
+        grove::root(ui, grove.clone(), None, Some(offer.clone())).layout(|l| {
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.height = Length::Percent(1.0);
+            l.min_height = Length::Px(0.0);
+        })
+    })
+}
+
+/// Grove home inside the real window chrome, no banner. Used to check the
+/// composer and the partner name at the same size as a typical install.
+pub fn grove_home_chrome(ui: &Ui) -> El {
+    let chrome = Chrome::preview(chrome::Overlay::None);
+    let studio = Studio::preview();
+    let grove = grove::Grove::preview(studio.clone());
+    chrome::hosted(ui, studio, chrome, move |ui| {
+        grove::root(ui, grove.clone(), None, None).layout(|l| {
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.height = Length::Percent(1.0);
+            l.min_height = Length::Px(0.0);
+        })
+    })
 }
 
 /// Command palette over the Studio preview.

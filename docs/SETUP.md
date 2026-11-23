@@ -75,9 +75,10 @@ provider.
   is up for the UI) marks onboarding as `inherited`. It does not rewrite
   your config and does not nag later.
 - Existing installs that already finished setup are not sent through
-  first-run again. After this update they get one pop-up: Remedy has
-  changed in some big ways, and it's worth a few minutes to go over
-  house rules. **Let's go** starts the conversation; **Not now**
+  first-run again. After this update they get one pop-up: smarter token
+  saving, local muscle sharing, and talking with other bots (A2A and MCP)
+  are in, and it's worth a few minutes to go over the house rules.
+  **Let's go** starts the conversation; **Not now**
   dismisses it. It shows only once. You can still say “let’s go over
   house rules again.”
 

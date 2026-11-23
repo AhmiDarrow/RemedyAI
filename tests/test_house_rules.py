@@ -231,7 +231,10 @@ def test_update_offer_once_for_existing_install(home: Path) -> None:
     assert offer["available"] is True
     assert offer["primary"] == "Let's go"
     assert offer["secondary"] == "Not now"
-    assert "changed in some big ways" in offer["body"]
+    assert "smarter token saving" in offer["body"]
+    assert "A2A and MCP" in offer["body"]
+    assert "house rules" in offer["body"]
+    assert "built-in mind" not in offer["body"]
     assert "worth a few minutes" in offer["body"]
     # First-run chat inject still stays quiet.
     assert hr.take_onboarding_offer(home) is False
