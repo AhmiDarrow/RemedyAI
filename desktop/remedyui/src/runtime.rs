@@ -363,16 +363,27 @@ fn parse_messages(v: &serde_json::Value) -> Vec<ChatMessage> {
                 .and_then(|t| t.as_str())
                 .unwrap_or("")
                 .to_string();
+            let calls = crate::work::json_array(row.get("tool_calls"));
+            let results = crate::work::json_array(row.get("tool_results"));
+            let steps = crate::work::steps_from_history(&calls, &results);
+            let narrations: Vec<String> = steps.iter().filter_map(|s| s.narration.clone()).collect();
+            let content = crate::work::strip_narration(&content, &narrations);
+            let thinking = match row.get("thinking") {
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(serde_json::Value::Array(items)) => {
+                    items.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("")
+                }
+                _ => String::new(),
+            };
             let created_at = row
                 .get("created_at")
                 .and_then(|t| t.as_str())
                 .map(|s| s.to_string());
             Some(ChatMessage {
-                id,
-                role,
-                content,
                 created_at,
-                streaming: false,
+                steps,
+                thinking,
+                ..ChatMessage::plain(id, role, content)
             })
         })
         .collect()
