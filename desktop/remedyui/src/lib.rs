@@ -391,6 +391,24 @@ pub fn home_rails_dual(ui: &Ui) -> El {
     shell_with(ui, Studio::preview(), rails::WorkspaceChrome::fixed(layout))
 }
 
+/// Sessions rail filled past its viewport, for scroll tests.
+pub fn home_sessions_long(ui: &Ui) -> El {
+    let studio = Studio::preview_chat();
+    let mut sessions = studio.sessions.get();
+    for i in 0..40 {
+        sessions.push(crate::studio::Session::fresh(
+            format!("extra-{i}"),
+            format!("Queued task {i}"),
+        ));
+    }
+    studio.sessions.set(sessions);
+    shell_with(
+        ui,
+        studio,
+        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+    )
+}
+
 /// The Studio shell: left rail, chat well, right rail, status.
 pub fn shell(ui: &Ui, studio: Studio) -> El {
     shell_with(ui, studio, rails::WorkspaceChrome::load())

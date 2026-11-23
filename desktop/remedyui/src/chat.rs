@@ -24,7 +24,9 @@ pub fn well(ui: &Ui, studio: Studio) -> El {
     w::column(ui)
         .style(StylePatch::new().background(tokens::surface_base(&colors)))
         .layout(|l| {
+            l.width = Length::Percent(1.0);
             l.grow = 1.0;
+            l.shrink = 1.0;
             l.basis = Length::Px(0.0);
             l.min_width = Length::Px(240.0);
             l.height = Length::Percent(1.0);

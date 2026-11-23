@@ -4,7 +4,7 @@ use crate::studio::{Conn, Studio};
 use crate::{messages, say};
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
-use remedy_ui::layout::{Align, Justify, Length};
+use remedy_ui::layout::{Align, Length};
 use remedy_ui::reactive::Signal;
 use remedy_ui::style::{RADIUS_FULL, StylePatch};
 use remedy_ui::widgets as w;
@@ -15,6 +15,10 @@ const THINKING: [&str; 4] = ["off", "low", "medium", "high"];
 const APPROVAL: [&str; 3] = ["ask", "auto", "full"];
 
 /// Full-width status bar under the shell.
+///
+/// One [`w::overflow_row`]: fixed gaps, priority items stay (Connected, the
+/// model picker, Simple/Advanced), and everything else moves into a "…" menu
+/// instead of overlapping or clipping as the window narrows.
 pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> El {
     if crate::chrome::compact_now() {
         return compact_bar(ui, studio);
@@ -23,10 +27,146 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
 
+    let picker_studio = studio.clone();
+    let st = studio.clone();
+    let u = ui.clone();
+    let picker = show(
+        ui,
+        move || !st.models.get().is_empty(),
+        move || model_picker(&u, picker_studio.clone()),
+    )
+    .fallback({
+        let u = ui.clone();
+        move || say(&u, "partner-name", "muted")
+    })
+    .el();
+
+    let mem = studio.clone();
+    let skills = studio.clone();
+    let usage = studio.clone();
+
+    let bar = w::overflow_row(ui)
+        .gap(unit)
+        .keep(connection_indicator(ui, studio.clone()))
+        .keep(streaming_slot(ui, studio.clone()))
+        .child_maybe_fn(
+            bar_label(ui, "bar-reconnect"),
+            reconnect_slot(ui, studio.clone()),
+        )
+        .child_maybe_fn(
+            bar_label(ui, "bar-time-travel"),
+            time_travel_slot(ui, studio.clone()),
+        )
+        .child_maybe_fn(
+            {
+                let u = ui.clone();
+                move || {
+                    let id = if access_scope() == "untrusted" {
+                        "bar-scope-untrusted"
+                    } else {
+                        "bar-scope-full"
+                    };
+                    messages().text(&u, id)
+                }
+            },
+            access_scope_slot(ui),
+        )
+        .child_maybe_fn(
+            {
+                let u = ui.clone();
+                move || {
+                    let ver = crate::update::offer_signal().try_get().unwrap_or_default();
+                    format!("{} {ver}", messages().text(&u, "status-update"))
+                }
+            },
+            update_button(ui),
+        )
+        .keep(update_note(ui))
+        .child_maybe_fn(
+            bar_label(ui, "bar-memory"),
+            advanced_slot(ui, "bar-memory", move || {
+                toggle_memory(&mem);
+            }),
+        )
+        .child_maybe_fn(
+            bar_label(ui, "bar-skills"),
+            advanced_slot(ui, "bar-skills", move || {
+                toggle_skills(&skills);
+            }),
+        )
+        .child(
+            messages().text(ui, "status-settings"),
+            chip(ui, "status-settings", settings_open(), on_settings),
+        )
+        .child_maybe_fn(
+            {
+                let u = ui.clone();
+                move || {
+                    messages().text(&u, if privacy_on() { "bar-privacy-on" } else { "bar-privacy" })
+                }
+            },
+            privacy_slot(ui),
+        )
+        .child(
+            messages().text(ui, "bar-help"),
+            chip(ui, "bar-help", false, || {
+                crate::chrome::toggle_overlay(crate::chrome::Overlay::Help);
+            }),
+        )
+        .child_maybe_fn(bar_label(ui, "bar-webui"), webui_slot(ui))
+        .child_fn(
+            {
+                let u = ui.clone();
+                move || messages().text(&u, if speak_on() { "bar-quiet" } else { "bar-speak" })
+            },
+            speak_chip(ui),
+        )
+        .child_maybe_fn(
+            bar_label(ui, "bar-usage"),
+            advanced_slot(ui, "bar-usage", move || {
+                crate::chrome::open_usage(&usage);
+            }),
+        )
+        .child_maybe_fn(
+            {
+                let u = ui.clone();
+                move || {
+                    let id = match thinking_level().as_str() {
+                        "off" => "bar-thinking-off",
+                        "low" => "bar-thinking-low",
+                        "high" => "bar-thinking-high",
+                        _ => "bar-thinking-med",
+                    };
+                    messages().text(&u, id)
+                }
+            },
+            thinking_slot(ui),
+        )
+        .child_maybe_fn(
+            {
+                let u = ui.clone();
+                move || {
+                    let id = match approval_mode().as_str() {
+                        "auto" => "bar-approval-auto",
+                        "full" => "bar-approval-full",
+                        _ => "bar-approval-ask",
+                    };
+                    messages().text(&u, id)
+                }
+            },
+            approval_slot(ui),
+        )
+        .flex(ui.el("status-flex").layout(|l| {
+            l.grow = 1.0;
+            l.shrink = 1.0;
+            l.min_width = Length::Px(0.0);
+            l.basis = Length::Px(0.0);
+        }))
+        .keep(mode_chip(ui))
+        .keep(picker);
+
     w::row(ui)
         .align(Align::Center)
-        .justify(Justify::SpaceBetween)
-        .gap(unit * 2.0)
         .style(
             StylePatch::new()
                 .background(colors.panel)
@@ -40,13 +180,17 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
         })
         .layout(|l| {
             l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
             l.min_height = Length::Px(44.0);
             l.shrink = 0.0;
         })
         .semantics(Semantics::new(Role::Toolbar).label(messages().text(ui, "status-bar")))
-        .child(left_cluster(ui, studio.clone()))
-        .child(action_cluster(ui, studio.clone(), on_settings))
-        .child(right_cluster(ui, studio))
+        .child(bar.el().layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+            l.grow = 1.0;
+            l.shrink = 1.0;
+        }))
 }
 
 /// Phone portal: status, a live pill, and reconnect. Power controls stay on the desktop.
@@ -82,78 +226,10 @@ fn compact_bar(ui: &Ui, studio: Studio) -> El {
         .child(reconnect_slot(ui, studio))
 }
 
-fn left_cluster(ui: &Ui, studio: Studio) -> El {
-    let unit = ui.theme().spacing.unit;
-    w::row(ui)
-        .align(Align::Center)
-        .gap(unit * 1.5)
-        .layout(|l| l.shrink = 0.0)
-        .child(connection_indicator(ui, studio.clone()))
-        .child(streaming_slot(ui, studio.clone()))
-        .child(time_travel_slot(ui, studio.clone()))
-        .child(access_scope_slot(ui))
-        .child(reconnect_slot(ui, studio.clone()))
-        .child(update_button(ui))
-        .child(update_note(ui))
-}
 
-fn action_cluster(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> El {
-    let unit = ui.theme().spacing.unit;
-    let mem = studio.clone();
-    let skills = studio.clone();
-    w::row(ui)
-        .align(Align::Center)
-        .gap(unit)
-        .layout(|l| {
-            l.grow = 1.0;
-            l.shrink = 1.0;
-            l.min_width = Length::Px(0.0);
-        })
-        .child(advanced_slot(ui, "bar-memory", move || {
-            toggle_memory(&mem);
-        }))
-        .child(advanced_slot(ui, "bar-skills", move || {
-            toggle_skills(&skills);
-        }))
-        .child(chip(ui, "status-settings", settings_open(), on_settings))
-        .child(privacy_slot(ui))
-        .child(chip(ui, "bar-help", false, || {
-            crate::chrome::toggle_overlay(crate::chrome::Overlay::Help);
-        }))
-        .child(webui_slot(ui))
-}
-
-fn right_cluster(ui: &Ui, studio: Studio) -> El {
-    let unit = ui.theme().spacing.unit;
-    let st = studio.clone();
-    let picker_studio = studio.clone();
+fn bar_label(ui: &Ui, id: &'static str) -> impl Fn() -> String + 'static {
     let u = ui.clone();
-    let picker = show(
-        ui,
-        move || !st.models.get().is_empty(),
-        move || model_picker(&u, picker_studio.clone()),
-    )
-    .fallback({
-        let u = ui.clone();
-        move || say(&u, "partner-name", "muted")
-    })
-    .el();
-
-    w::row(ui)
-        .align(Align::Center)
-        .gap(unit)
-        .layout(|l| l.shrink = 0.0)
-        .child(speak_chip(ui))
-        .child(mode_chip(ui))
-        .child(advanced_slot(ui, "bar-usage", {
-            let st = studio;
-            move || {
-                crate::chrome::open_usage(&st);
-            }
-        }))
-        .child(picker)
-        .child(thinking_slot(ui))
-        .child(approval_slot(ui))
+    move || messages().text(&u, id)
 }
 
 fn connection_indicator(ui: &Ui, studio: Studio) -> El {
