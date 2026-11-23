@@ -36,6 +36,33 @@ pub fn rail(ui: &Ui, studio: Studio) -> El {
     show(ui, move || browser_is_open(&gate.layout()), move || open_rail(&ui_build, &built)).el()
 }
 
+/// Browser slide body for the Studio rail and its pop-out. Fills the parent.
+pub fn body(ui: &Ui) -> El {
+    match super::host::live() {
+        Some(model) => chrome(ui, &model, None),
+        None => preview(ui),
+    }
+}
+
+/// The page alone. Grove's Alongside toolbar stays; this is the web view under it.
+pub fn page(ui: &Ui) -> El {
+    let Some(model) = super::host::live() else {
+        return w::column(ui);
+    };
+    if model.is_live() {
+        model.autostart();
+    }
+    w::column(ui)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.height = Length::Percent(1.0);
+            l.min_height = Length::Px(0.0);
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+        })
+        .child(host(ui, &model))
+}
+
 fn open_rail(ui: &Ui, model: &Model) -> El {
     let width = browser_width(&model.layout());
     w::row(ui)
@@ -44,26 +71,30 @@ fn open_rail(ui: &Ui, model: &Model) -> El {
             l.shrink = 0.0;
         })
         .child(w::divider(ui, true))
-        .child(chrome(ui, model, width))
+        .child(chrome(ui, model, Some(width)))
 }
 
 /// Toolbar and empty state with no web view and no poller. Screenshot and chrome tests use this.
 pub fn preview(ui: &Ui) -> El {
-    chrome(ui, &Model::preview(), 480.0)
+    chrome(ui, &Model::preview(), Some(480.0))
 }
 
-fn chrome(ui: &Ui, model: &Model, width: f32) -> El {
+fn chrome(ui: &Ui, model: &Model, width: Option<f32>) -> El {
     if model.is_live() {
         model.autostart();
     }
     let colors = ui.theme().colors.clone();
     let column = w::column(ui)
         .style(StylePatch::new().background(colors.bg))
-        .layout(|l| {
-            l.width = Length::Px(width);
+        .layout(move |l| {
+            l.width = match width {
+                Some(px) => Length::Px(px),
+                None => Length::Percent(1.0),
+            };
             l.height = Length::Percent(1.0);
             l.shrink = 0.0;
             l.min_width = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
         });
     let field = address_field(ui, model);
     let column = column

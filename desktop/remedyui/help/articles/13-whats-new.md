@@ -1,0 +1,1032 @@
+# What's new (recent)
+
+High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
+
+Current release: **v0.70.5**. Installed apps update on their own.
+
+Remedy lives on this computer. She finishes the goal you set, keeps the rules
+you gave her, and waits for you before money, send, or delete.
+
+## Contents
+
+- [0.70.5 — Claude works on every model](#0705---claude-works-on-every-model)
+- [0.70.3 — Claude works again](#0703---claude-works-again)
+- [0.70.2 — Switch to Web UI stays signed in](#0702---switch-to-web-ui-stays-signed-in)
+- [0.70.1 — About](#0701---about)
+- [0.70.0 — Ten languages](#0700---ten-languages)
+- [0.69.2 — The browser app in pip installs](#0692---the-browser-app-in-pip-installs)
+- [0.69.1 — Message reactions and a calmer live turn](#0691---message-reactions-and-a-calmer-live-turn)
+- [0.69.0 — Reasoning settings and a clearer live turn](#0690---reasoning-settings-and-a-clearer-live-turn)
+- [0.68.2 — First published macOS Desktop](#0682---first-published-macos-desktop)
+- [0.68.1 — First published macOS Desktop](#0681---first-published-macos-desktop)
+- [0.68.0 — Unsigned macOS Desktop](#0680---unsigned-macos-desktop)
+- [0.67.1 — Windows ARM64 CLI runtime](#0671---windows-arm64-cli-runtime)
+- [0.67.0 — macOS, ARM64, and a smaller wheel](#0670---macos-arm64-and-a-smaller-wheel)
+- [0.66.6 — A safer rendezvous and a clearer first serve](#0666---a-safer-rendezvous-and-a-clearer-first-serve)
+- [0.66.5 — More reliable shell capture and terminal spawn](#0665---more-reliable-shell-capture-and-terminal-spawn)
+- [0.66.4 — The worker stays in the install venv](#0664---the-worker-stays-in-the-install-venv)
+- [0.66.3 — A more reliable first-run serve](#0663---a-more-reliable-first-run-serve)
+- [0.66.2 — More reliable Usage, Discord, and shell cancel](#0662---more-reliable-usage-discord-and-shell-cancel)
+- [0.66.1 — A first-run download URL fix](#0661---a-first-run-download-url-fix)
+- [0.66.0 — A first-run runtime download](#0660---a-first-run-runtime-download)
+- [0.65.0 — A check finishes the work](#0650---a-check-finishes-the-work)
+- [0.64.0 — Grouped settings and a present partner](#0640---grouped-settings-and-a-present-partner)
+- [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
+
+Earlier notes follow on this page, newest first.
+
+## 0.70.5 - Claude works on every model
+
+- **Claude.** Chats no longer stop with an HTTP 400 on any Claude model,
+  Claude Haiku 5.5 included. Send `continue` in a stopped chat to resume.
+
+## 0.70.3 - Claude works again
+
+- **Claude.** Chats using Claude (Anthropic) no longer stop with an HTTP 400
+  about `additionalProperties`. Send `continue` in a stopped chat to resume.
+
+## 0.70.2 - Switch to Web UI stays signed in
+
+- **Switch to Web UI.** Opening the browser app from the desktop now signs you
+  in, so it keeps your chats and settings instead of showing the first-run
+  setup. If the browser ever can't reach Remedy, it says so and leaves your
+  setup untouched.
+
+## 0.70.1 - About
+
+- **About.** About Remedy shows the app version, a link to the source on GitHub, and the line "Hope this helps" - Ahmi.
+
+## 0.70.0 - Ten languages
+
+- **Your language.** Now available in Spanish, French, German, Portuguese
+  (Brazil), Italian, Russian, Polish, Japanese, Korean and Chinese
+  (Simplified). Apps use your system language by default; change it any time
+  in Settings → Language.
+
+## 0.69.2 - The browser app in pip installs
+
+- **Full app from `pip install`.** `remedy serve` on a PyPI install now opens
+  the same app as Desktop in your browser, instead of a "WebUI assets not
+  bundled" page. Sign-in works as before: your own OS account goes straight
+  in, and `remedy open` prints a one-time link.
+- **Hardened browser mode.** The served app sends a strict content security
+  policy, cannot be framed by other sites, and never leaks a sign-in link
+  through the Referer header.
+
+## 0.69.1 - Message reactions and a calmer live turn
+
+- **Reactions.** React to Remedy's replies with 👍 👎 ❤️ or 💔 from the
+  message actions, or long-press on a phone. Tap the same one again to remove
+  it. A reaction never starts a new turn: 👍 means go ahead, 👎 means try
+  again, and if Remedy is waiting on a yes or no for the reply it is writing
+  right now, 👍 or 👎 answers it. A reaction on an earlier reply never answers
+  a new question, and payments or other owner checkpoints always need the
+  approval banner (👎 can still decline one). Remedy may react to your
+  messages too, now and then.
+- **A calmer live turn.** Background work sits in one quiet Working strip
+  above the reply, and the reply is the only bright bubble.
+- **Smarter scrolling.** The feed follows new output until you scroll up,
+  keeps your place when you open or close the timeline, and End jumps back
+  to the latest message.
+- **Security fixes.** Internet images in replies wait for a click, network
+  paths are never opened from chat, the pip runtime download is checked
+  against hashes inside the package (no fallback to another version), and
+  `remedy serve` gives the browser token only to your own OS account or a
+  one-time link (`remedy open` makes a new one).
+
+## 0.69.0 - Reasoning settings and a clearer live turn
+
+- **Reasoning and context per model.** Set reasoning effort, a thinking
+  budget, max output tokens, and the context window for all models or one
+  model (Settings → Reasoning and context, `remedy settings set`, or
+  `config.toml`). Each provider only receives what it supports; unset keeps
+  its defaults.
+- **A clearer live turn.** The reply shows in its own bubble. Thinking,
+  interim notes, and tool steps sit in a collapsible "Working…" timeline
+  that folds away when the answer arrives. Sentences from separate model
+  rounds no longer run together.
+- **Pronouns follow the agent's gender setting** everywhere (she, he, or
+  they), and update as soon as you change it.
+- **A tidier download page.** The release shows only the desktop installers
+  and `latest.json`, with a "Which file do I need?" table. Runtime files for
+  `pip install` live on a matching `runtime-vX.Y.Z` release and first run
+  finds them there automatically.
+- Steadier Windows config saves, sortable timestamps, config files that
+  stay readable when a model id contains `.` or `/`, and hive foragers whose
+  quick reports are no longer lost.
+
+## 0.68.2 - First published macOS Desktop
+
+- **0.68.2 is the first shipped release with the macOS Desktop app.**
+  The `v0.68.0` and `v0.68.1` tags were created, but Desktop Release
+  failed both times while crossing `libremedy_core` to Intel Macs
+  (Zig 0.16 does not search SDK frameworks for an explicit
+  `x86_64-macos` target even with `--sysroot`), and no GitHub or
+  PyPI artifacts were published for those versions. This cut builds
+  the Intel runtime and app natively on `macos-15-intel`.
+
+## 0.68.1 - First published macOS Desktop
+
+- The `v0.68.1` tag was created, but Desktop Release failed while
+  crossing `libremedy_core` to Intel Macs, and no GitHub or PyPI
+  0.68.1 artifacts were published. See 0.68.2.
+
+## 0.68.0 - Unsigned macOS Desktop
+
+- **The Desktop app now ships for macOS.** Apple Silicon and Intel each
+  get an unsigned `.dmg` and a minisign-signed `.app.tar.gz` for in-app
+  updates. First launch: right-click the app and choose Open, or run
+  `xattr -dr com.apple.quarantine` on the app in Applications. There is
+  no Apple notarization.
+- **macOS stays close to the Windows Desktop.** The sidecar sits in the
+  menu bar, can start at login, uses a unix PTY and unix-socket IPC, and
+  exits when the GUI does. Computer use is fail-closed: grant
+  Accessibility and Screen Recording in System Settings when asked.
+  Capability and owner-checkpoint gates stay the same as on Windows.
+
+## 0.67.1 - Windows ARM64 CLI runtime
+
+- **`remedy serve` on Windows ARM64 can download a prebuilt runtime.**
+  First run still verifies the checksum. Desktop Release always attaches
+  that pair, and a `windows-11-arm` job checks it after the tag is
+  published. The Desktop app itself is still Windows x64 and Linux
+  x86_64; there is no Windows ARM64 or macOS Desktop installer in this
+  release.
+
+## 0.67.0 - macOS, ARM64, and a smaller wheel
+
+- **`remedy serve` on Apple silicon, Intel Macs, and Linux ARM64 can
+  download a prebuilt runtime.** First run still verifies the checksum.
+  Windows ARM64 is included when the release has that pair. Host features
+  that only exist on Windows or Linux (UI Automation, AT-SPI, sending
+  clicks) stay fail-closed on macOS. The macOS Desktop app is not in this
+  release; it would need Apple signing.
+- **The install wheel is smaller.** The two HQ voice reference clips are
+  downloaded on first Chatterbox use, checked, and cached under
+  `~/.remedy`, instead of shipping in the package. If that download can
+  be tried, Remedy does not quietly fall back to a Kokoro stand-in.
+- **A hive forager that already reported is no longer marked running.**
+  That race could leave a finished forager stuck in the roster.
+
+## 0.66.6 - A safer rendezvous and a clearer first serve
+
+- **A refused phone rendezvous no longer hammers the broker.** After a
+  public-broker session ends, including after five refused handshakes,
+  Remedy waits before dialing again instead of opening a flood of
+  connections.
+- **`pip install` then `remedy serve` is easier to follow.** Help points
+  at `remedy serve` (and warns that `pip install remedy` is a different
+  package), first run prints a Downloading line, and the loopback URL is
+  shown when the runtime starts. `--config` is called out as ignored.
+
+## 0.66.5 - More reliable shell capture and terminal spawn
+
+- **Command capture keeps its results.** Authorized one-shot shell capture
+  no longer risks losing stdout, stderr, or the exit status on the Go
+  runtime path.
+- **Windows terminal spawn is safer.** ConPTY spawn uses the same packed
+  calling convention, and the argument buffers stay alive for the call.
+
+## 0.66.4 - The worker stays in the install venv
+
+- **`remedy serve` keeps the venv interpreter.** A venv's `python` is often
+  a symlink to the system one. Following that link made the tool worker
+  start without the `remedy` package. It now uses the venv path as-is.
+
+## 0.66.3 - A more reliable first-run serve
+
+- **`pip install` then `remedy serve` survives a normal environment.** A
+  `BROWSER` variable (or other loader-hook keys) no longer stops the tool
+  worker with "environment denied".
+- **The worker uses the same Python as `remedy`.** You do not have to
+  activate the venv first, or put it on `PATH`.
+
+## 0.66.2 - More reliable Usage, Discord, and shell cancel
+
+- **Usage opens cleanly the first time.** Summary and series no longer race
+  on creating the local usage database.
+- **Discord stays up.** A healthy gateway is not marked dead because the
+  heartbeat ACK timer started too early, especially on Windows.
+- **Shell cancel is safe.** Stopping a running command no longer leaks the
+  child or breaks the next spawn.
+
+## 0.66.1 - A first-run download URL fix
+
+- **First serve after `pip install` finds the runtime again.** GitHub now
+  redirects release files through a signed CDN URL. The download keeps using
+  the public `releases/download/vX.Y.Z` address so the checksum and both
+  binaries still verify.
+
+## 0.66.0 - A first-run runtime download
+
+- **`pip install` can start.** After `remedy serve`, a missing
+  `remedy-runtime` is downloaded from this release, checksum-verified, and
+  cached under `~/.remedy/runtime/`. The Desktop installer still ships both
+  binaries. A machine with no prebuilt gets the build commands instead of a
+  silent failure.
+- **Install docs match that path.** Linux and Windows install, troubleshooting,
+  and the updater notes for 0.41.5 describe what actually works.
+
+## 0.65.0 - A check finishes the work
+
+- **Your rules stay in force.** A must, a never, or a do-not is kept when a
+  long chat is compacted. A summary that drops one of those lines is refused.
+- **Done means a check passed.** After a file change or a click, the work
+  stays open until a later check is green. Reading another file does not
+  clear that.
+- **Skills load when needed.** The list shows the pack names. The full
+  procedure loads for the one pack the task needs.
+- **A helper's report is not the check.** Remedy runs the check and reads
+  the result before calling that mission done.
+
+## 0.64.0 - Grouped settings and a present partner
+
+- **Settings in five places.** General, Models, Connections, Privacy, and
+  System. Simple shows the everyday controls. Advanced opens the rest of that
+  category. Search looks through all of them. Unsaved entries stay put when
+  you switch categories. Longer tasks, such as connecting an account or
+  downloading a model, open in their own dialog.
+- **The main bar is its own choice.** Simple and Advanced on the bar are
+  separate from Settings. In Simple mode, choose the current model to pick a
+  different one.
+- **She stays on this PC.** The tray says she is ready, or that she is here
+  when you are, after twenty quiet minutes. She does not watch the screen.
+  A night step happens only after you say yes. She names what she moved, and
+  she waits before send, pay, or publish.
+- **Any model can run the work.** A local model is offered the same tools as
+  a frontier model, fitted to that model's own context window. A red check
+  does not count as finished. A missing module or an unknown command is
+  looked up once.
+
+## 0.63.3 - Clearer UI and reliable tasks
+
+- **Easier to read and navigate.** Studio and Grove have clearer spacing,
+  typography, and contrast. Small windows preserve chat space; dialogs, Help,
+  selectors, and workspace panels work more consistently with the keyboard.
+- **Reliable saves and model changes.** Scratch keeps unsynced edits and saves
+  them in order. Model changes wait for confirmation from the server, and late
+  responses stay with their original chat. Failed history edits no longer resend.
+- **Long tasks keep the right context.** Mid-turn guidance and recent work survive
+  compaction. Command failures remain visible even when their output is shortened.
+- **Clearer recovery.** A missing model provider shows a setup message. Usage,
+  file paths, attachments, request cancellation, and connection handling are more
+  reliable across Desktop and WebUI.
+
+## 0.63.2 - The page Remedy sees
+
+**Remedy looks at the in-app Browser the way you do, and hive work asks you
+every time.** When Desktop is open, seeing the page lists the controls on the
+Browser rail (including parts of the page that sit in shadow DOM). A hive
+helper can look, not click or send, and it does not inherit Always from the
+parent chat. Payment and sign-in still use the URL the computer actually
+shows.
+
+- Hive approval cards appear even if you are looking at another chat.
+- Linux AppImage can take a signed in-app update; `.deb` still needs a manual
+  install. Unsigned releases are not offered as an in-app update.
+- Reopening a live turn keeps what is already on screen.
+
+## 0.63.1 - Existing homes start
+
+**Desktop connects to the local server on an existing install.** 0.63.0
+stopped at "Connecting to local server" because chat history from earlier
+versions had no `request_id` column yet, and serve exited while indexing it.
+
+## 0.63.0 - Tools the model knows
+
+**Coding models get the tools they already know how to call, and a turn can
+finish.** Frontier models now see `read` / `edit` / `write` / `glob` / `grep` /
+`bash` (and friends). A claim that the work is done over a failing command no
+longer ends the turn. Anthropic is reached directly, with prompt caching on
+the stable prefix of the system prompt. Messenger senders must be on the
+allowlist — group membership is not enough — and Telegram user ids compare as
+plain numbers. You can reopen the app mid-run and rejoin the work; every turn
+keeps its tool output for 30 days.
+
+- Approvals unlock on the next call; Stop kills the running command tree.
+- Commands inherit the existing environment; extra variables cannot smuggle
+  loaders past the safety check.
+- A packaged install ships the Python worker's libraries, so tools start.
+
+## 0.62.3 - Coherent builds
+
+**Long builds keep going when they change the tree; incoherent search loops stop.**
+Soft-epoch runway now extends only on edit/verify work. Pure explore thrash
+gets one clear “implement or deliver” nudge, then stops — instead of widening
+the same empty sweep forever. Real builds can still run for as many tool rounds
+as the work needs.
+
+## 0.62.2 - Portable native core
+
+**Desktop connects again on every common x86_64 PC.** 0.62.1's `remedy_core.dll`
+was compiled for the GitHub runner CPU, which includes Intel SHA-NI. On older
+desktops without those instructions (Comet Lake and similar), the local server
+crashed while hashing process-spawn policy and never opened `:7400`, so the app
+stayed on "connecting to local server." The core now builds for baseline x86_64,
+and CI refuses any DLL that still contains SHA-NI opcodes.
+
+## 0.62.1 - Windows in-app update install
+
+**In-app update finishes after download.** On 0.61→0.62 the signed installer
+landed in `%TEMP%` but the install script never wrote BOOT under Tauri's Job
+Object, so the UI stopped with "Could not start the install step after
+download." The updater now arms PowerShell, WScript, and a scheduled task
+together, re-arms if BOOT is still missing, and normalizes `Remedy Desktop_`
+asset names to the dotted GitHub form.
+
+## 0.62.0 - Build engine and Claimidx defaults
+
+**Long builds stay on mission, and Claimidx is on by default.** Soft epochs,
+memory harness reconnect, and unfinished-work re-arm keep coding and life-task
+turns from dying mid-flight. Managed Claimidx is pinned to 0.7.2 and submits
+unless you turn the public ledger off. Local prepush now matches the headless
+Go/Zig GitHub gate so a push is not how we discover Linux failures.
+
+- Soft epochs + progress-extends (absolute caps 1M steps / 10M tools).
+- Memory Harness and unfinished-work re-arm at soft epochs; lean outcome ledger.
+- Coding tool pack mid-build; local/RMB fit before chat completions.
+- Claimidx 0.7.2; ledger default **on**.
+- Prepush/CI: headless WSL, Node 20, WSL `go test`, no Windows `node_modules/.bin`
+  masquerading as ubuntu tools.
+
+## 0.61.0 - Agency on the native foundation
+
+**Finish the partner surfaces on the stack that now owns them.** With Go/Zig
+running the runtime, computer and messenger work that was half-wired can
+complete for real.
+
+- The Browser rail opens through `computer.navigate` (Desktop HostBridge).
+- Saying **Yes** on an approval continues the cognition turn; deny stops
+  without running the tool.
+- Mail, calendar, and settings tools ride the same Tool ABI as workspace /
+  shell / computer.
+- Messengers report **ready** or **needs_setup** with a plain reason — never a
+  vague partial. Optional HTTPS tunnel helper for WhatsApp / Teams / Google
+  Chat; managed signal-cli install (native on Linux, JVM path on Windows).
+
+## 0.60.0 - Native runtime cutover
+
+**This is the switch.** Packaged Desktop and `remedy serve` launch **Go
+`remedy-runtime` only** on `:7400` with Zig `remedy_core`. Python FastAPI /
+uvicorn no longer own the local API; the PyInstaller Desktop sidecar is out of
+release.
+
+- Cognition / ReAct runs in Go. Production prompts advertise Tool ABI ids only
+  (`workspace.*`, `shell.exec`, `computer.*`, `memory.*`, `skill.*`).
+- Chat keeps working when the chosen provider has no key, a down local host, or
+  a blocked subscription: Remedy switches to your usual model and says so in
+  plain language.
+- Packaged installs seed missing skills on discover.
+- Process list/kill and uninstaller stops use authorized Zig paths — no raw
+  `ps` / `pkill` soft spawns.
+- The 0.50 experimental line is superseded.
+
+## 0.50.2 - Experimental: prove the foundation
+
+**Experimental line (0.50.0–0.50.2).** After landing Go/Zig, this line proved
+them in daily use before anyone cut the Python server away. Expect rough edges
+on that line; last stable public before the arc was
+[v0.41.5](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.41.5).
+
+- **Native hardness:** closed link/junction escapes; rollback-safe event and
+  memory writes; bounded IPC; automatic recovery when the desktop server exits.
+  Closing or losing the phone can no longer leave the API offline.
+- **Gates that match the product:** public CI grew to the full matrix — Python
+  on Windows and Linux, React, Rust (warnings fail), Android, Go, Zig, docs,
+  and packaging — so the foundation could not ship without its gates.
+- **Claimidx on first run:** pinned wheel under `~/.remedy/claimidx`, offline
+  launch never blocked.
+- **RemedyConnect:** reconnect, host-controlled navigation, per-session Stop,
+  bounded network inputs, durable pairing, secrets kept out of Android backup.
+- A cloud provider outage no longer wakes RMB on a machine that was never set
+  up for local models.
+
+## 0.48.0 - Land the Go/Zig foundation
+
+**Start of the migration.** Remedy adds a versioned **Go nervous system** and
+**Zig capability core** under `native/`, built into Windows and Linux Desktop
+releases beside the then-default Python compatibility path. Nothing forced
+native yet — both ABIs had to probe healthy first.
+
+- **Go:** supervised lifecycle, local IPC, ReAct state, Tool ABI, durable
+  memory / events / state, scheduling, scoped Hive workers, and Python worker
+  supervision.
+- **Zig:** capability-checked filesystem / process / system substrate, compact
+  records, signed one-use grants, and the public C ABI.
+- A layered selector (`compatibility` default, then `auto` / `native`) kept
+  Python as fallback while both ABIs were proven. Failed native attempts replay
+  through Python only when the operation is explicitly idempotent.
+- CI and release jobs begin verifying Go and Zig alongside Python, React, Rust,
+  Android, and both desktop OS targets — the same discipline the cutover later
+  requires.
+
+## 0.47.0 - RemedyConnect cannot end Remedy
+
+The phone can stop only its own session, cannot shut down the desktop server,
+and reconnects after network loss. Native Grove, selectable sessions, terminal
+input, Tailscale setup, and a desktop server-restart control make Connect useful
+without giving it authority over Remedy's lifecycle. That lifecycle lesson is
+part of why Go later owns a single supervised runtime.
+
+## 0.46.0 - RemedyConnect follows the PC
+
+**Settings → Connect** stays **off** until you turn it on. Pair a phone with a
+60-second QR on this PC. The phone drives **this computer**; it does not run
+Remedy. Chosen IPv4 only; the local API on `:7400` stays loopback. Computer-use
+poller and local-bootstrap are refused on Connect. Optional owner-run relay:
+`remedy connect-relay`.
+
+## 0.41.7 - Life-task owner card
+
+A life task shows as one spoken sentence, **Yes / No / Explain**, and
+live **Step N of M**. Recipes (`open` / `search` / `shop` / `fill` /
+`sign_in`) plus a URL and vault handles expand on this PC — the model
+does not invent the JSON. After a password, 2FA, or CAPTCHA wall the
+Browser rail stays interactive and remaining steps continue. Pay / send
+/ delete never auto-resume. **What Remedy did** shows intended vs
+observed. Casual writes actually run the project's tests (Ask still
+gates). Desktop clicks try UIA Invoke/Toggle before click-at-center.
+Saying Yes, No, or Explain acts on the card.
+
+This tree **v0.41.7**. Public is still **v0.41.5**.
+
+## 0.41.6 - Hands stay on, first run talks
+
+Enter while she is working steers the live turn (Ctrl+Enter interrupts, Alt+Enter queues).
+If steer cannot land, the words wait in line — they do not stop her hands.
+A new home actually talks on guest llm7 instead of dummy OpenAI. Leftover
+"Stay with: Continue…" residue no longer arms as a job. Linux vision extract
+keeps its library links. The Grok work pack keeps computer hands. RMB stays
+off until you start it. Desktop OCR can click on-screen words when DOM/UIA
+is empty. Native type finds a field by its visible label, same as click.
+
+## 0.41.5 - RMB thinking is an option
+
+Local models keep their thinking channel **on** unless you turn it off in
+Settings → RMB (or `rmb action=settings thinking=off`). Jinja, MTP, mmap,
+MoE CPU experts, draft layers, and reasoning budget are the same options
+list — auto-load no longer hides them.
+
+**Public:** GitHub **[v0.41.5](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.41.5)** · PyPI **`remedy-ai==0.41.5`**.
+
+## 0.41.4 - Local muscle without leftover jobs
+
+A new chat does not inherit the last tab's "keep going" job. Asking how a
+local model feels is an answer, not a tool storm. RMB lists GGUFs already
+in her house and keeps a sibling MTP draft across Settings restarts.
+
+## 0.41.3 - She knows the house
+
+RMB is her muscle, not a Settings-only add-on. She can start, stop, and
+switch chat onto it. She can list this PC's apps, walk the doors, and
+say which tool drives each organ. A build without tests is still not
+your goal done.
+
+## 0.41.2 - Closed loop
+
+She does not call a page loaded until she has seen it. A build without tests
+is not your goal done. The phone keeps listening while a long turn runs.
+Memory inject stays small and labeled. Inbox drops wait until you ask.
+
+## 0.41.1 - Checkpoints on the wired path
+
+Vault fill and payment-shaped clicks stop for you even in Auto (ordinary
+typing still does not). Browser vault types only into a named snapshot
+field. Stored provider keys stay on that provider's own host. Setup saves
+keys into the secret store. High-quality voice stays opt-in. Self-inject
+apply asks you first. Telegram does not rewrite the chat's model. Linux
+can capture and click. Grove remembers your Studio chat.
+
+## 0.41.0 - Multilingual, Plan, and memory authority
+
+**Remedy is multilingual.** **Settings → You & Agent → Language** (default
+**Auto**) pins chrome *and* replies to this PC and the language you type —
+Spanish, Portuguese, French, German, Arabic, Hindi, Chinese, Japanese, Korean,
+Swahili, and more; RTL flips the layout. Tools, code, and paths stay as
+written. Help wiki stays English for now. Plan steps can record what she meant
+to do, what she saw, and why a step stopped — a tool-ok is not your goal done.
+Partner Memory is context, not a grant; Hive cannot write parent facts.
+Payment and credential checkpoints still cannot be recovered around. Stale
+screen snapshots are re-taken before a `ref=` click. The status-bar provider
+list hydrates at launch.
+
+Shipped in the **0.41** public line (current tag **v0.41.5**).
+
+## 0.38.1 - Trust gates
+
+A helper she hires cannot read your mail or calendar. Saying yes to one
+skill run does not approve a different one. **Autonomous** still asks in an
+untrusted folder. **Trust** in Settings no longer snaps back to Balanced
+when you save something else. Voice status no longer stalls the window
+while engines load.
+
+Was public as PyPI **`remedy-ai==0.38.1`** · tag **v0.38.1** (superseded by **v0.41.5**).
+
+## 0.38.0 - Capability architecture
+
+She still does the work. Authority is now explicit: tools declare what they
+may do, policy decides, generic shell does not inherit your GitHub or SSH
+tokens, and a command that exits 0 is not treated as “the goal is done”
+until verification says so. Turns have ids. Hive daughters cannot use
+credentials the parent did not have. Pages she reads are observed facts,
+not things you declared. Grove shows a single quiet line while a turn is
+running (**Working…**, **Waiting for you…** when she needs a yes, **Checking…**
+after tools until the next reply).
+
+**Trust** lives in Settings → Security & power (Conservative / Balanced /
+Autonomous). Conservative still asks before shell, files, and skills even
+in Auto. Autonomous skips in-project high-impact asks the same way Auto
+does. Mail and payment still always stop. README is a short pointer into
+this manual, not a second wiki. Grove shows the live checklist while she
+works. **Stop** on one chat does not resume that work from another tab.
+
+Tagged as **v0.38.0**. **v0.38.1** is the follow-up that closes the
+trust gates still open in that cut.
+
+## 0.31.2 - This round, this folder
+
+Thinking is **this model round’s scratchpad**, not a recap stack. Ask her to
+open a directory in the Files rail, a URL in Browser, or a chat in Sessions —
+she does it in the app. Scratch notes live on disk so she can read what you
+typed. Source reads keep `bot_token: str`; long tool results say
+`…[truncated]` on a line break instead of looking like a cut file.
+
+PyPI **`remedy-ai==0.31.2`** · tag **v0.31.2**.
+
+## 0.31.1 - She drives her own UI
+
+Ask her to open Alongside, Voice settings, Help, or the Terminal rail —
+she does it in the app. She does not click her own chrome. Changing a
+setting opens that Settings section so you can see it. Grove / Studio
+screenshots capture **her window**, not a random monitor. Linux `.deb`
+and AppImage now build (the 0.31.0 tag never got a GitHub Release).
+
+PyPI **`remedy-ai==0.31.1`** · tag **v0.31.1**.
+
+## 0.31.0 - A partner for any ability level
+
+This is a new Remedy. She is no longer “a coding agent that also has a
+browser.” She is a partner who lives on this computer and finishes the
+goal you set — errands, research, games, and code — for owners at every
+ability level.
+
+**Grove** is home. She **speaks and hears** locally (Chatterbox Nano on
+bundled public-domain references, Kokoro until that lands, whisper for
+hearing). One speak-aloud control on the status bar, which now sits on
+Grove and Studio. You can talk while she works (mid-turn steer). Her
+voice identity actually reaches the speakers, drifts with the
+relationship, and stays put when you ask (`voice_hold`). The installed
+app fetches a pinned Python into `~/.remedy/voice/` so Desktop can
+speak — no `pip install` for the owner.
+
+**Life tasks** — order, book, fill, pay — are whole jobs: one plan-level
+approval, act → verify → retry, non-waivable checkpoints for money /
+credentials / send / delete. Cards live in the **Vault** and type only
+into verified fields. 2FA, CAPTCHA, and the last payment click are
+designed owner moments. Reminders, mail, calendar, documents stay.
+
+**Hive.** Silent foragers (one bounded job) and standing posts (pulse on
+an interval). They never appear as extra chats. They report a capped
+packet; she still talks to you. Diagnostics shows the roster.
+
+**Research.** Notebooks, R, Julia, manuscripts: literature, a citation
+library that has to resolve, analysis in *your* environment with a run
+ledger, a priori power, reporting checklists. Fourteen field packs route
+themselves; an ordinary coding turn does not list them.
+
+**Game studio.** Godot 4, Phaser/Pixi, Bevy, Pygame, Love2D — engine
+detection, headless verification, playtest, export. Unity/Unreal
+knowledge. Optional MCP editor bridge.
+
+**Web, licence, colour.** Fetch and search are on after install
+(OpenSERP on loopback; DuckDuckGo HTML while it downloads). `web_fetch`
+reads robots.txt. The installer shows the product terms and carries
+third-party notices. Three colorblind-safe themes.
+
+**Local models.** RMB defaults to **Qwen3.5-9B (Q6_K)** on measurements
+— a 9B at 6-bit holds tool-call structure that larger 4-bit models drop.
+The 35B-A3B stays in the catalog for VRAM-scarce setups. A local-model
+harness fixed the agent loop so tool calls are not stripped, green
+verifies no longer end the turn before the run, and markup is not shown
+as the reply.
+
+**Build stays the job.** Frontier models are not taught a syllabus every
+turn. Long jobs keep going when the SSE pane blinks. Enter jumps to the
+latest message. Money / send / close cannot be waived by auto/full.
+
+**Browser sign-in.** “Sign in with Google” in the rail opens a real account
+window instead of parking on Google’s transformer page.
+
+PyPI **`remedy-ai==0.31.0`** · tag **v0.31.0**.
+
+## Hive
+
+Remedy can hire silent daughters for a slice of work — a forager for one
+bounded job, a standing post that pulses on an interval. They never appear
+as extra chats. They report a compact packet to her; she still talks to you.
+Stop cancels foragers hired by that turn; posts keep going until she retires
+them. Diagnostics shows the roster. See [Hive](28-hive.md).
+
+## Research
+
+Point Remedy at a notebook, an R or Julia analysis, a Snakefile or a
+manuscript and she works the research loop: literature search, a citation
+library that has to resolve, analysis in *your* environment with a run
+ledger (so a figure can be checked against the data that produced it),
+a priori power and effect sizes, and reporting checklists (CONSORT,
+PRISMA, STROBE, ARRIVE, MDAR). Fourteen field packs
+(`research-method`, `statistics`, `ml-research`, `clinical-research`,
+…) route themselves from what you say and from the project files; an
+ordinary coding turn does not list them. See [Research](27-research.md).
+
+## Game dev studio
+
+Remedy works game projects like a small studio. She recognises **Godot 4**,
+Phaser/PixiJS, Bevy, Pygame/Arcade and Love2D projects (Unity and Unreal
+are known, not driven), finds the engine from your environment or the
+project folder, verifies every change with the engine itself — headless
+runs, `--check-only` on scripts, scene references checked offline — plays
+the build with screenshots and key presses, lists and runs export presets,
+and keeps a design document and a cut list. Headless engine runs used to
+be mistaken for GUI launches and returned nothing; that is fixed. A new
+set of packs (`game-dev-studio`, `godot-4`, `game-assets`, engine packs,
+`engine-mcp-bridge`) route themselves from what you say. Optional: list a
+Godot MCP server in `config.toml` for live editor control.
+
+Skills she learns are now actually graded by how the turn went; unused
+ones retire after three weeks, and *Allow skill creation* in Settings is
+a real switch. Providers discover models from their endpoints and a saved
+custom endpoint becomes a provider of its own. See [Game dev](26-game-dev.md).
+
+## 0.30.0 - Grove, voice, life tasks and the Vault
+
+Remedy has a new home: **Grove**, the partner surface, with Studio one tap
+away. She speaks and hears locally (Kokoro / faster-whisper, optional
+Chatterbox for a human-bar voice), downloads show in the title bar, and
+Settings stay on Grove. Life tasks — ordering, booking, paying — are whole
+jobs with observed success and non-waivable owner checkpoints; payment
+details live in the **Remedy Vault** and are never typed by guesswork.
+Reminders fire, mail and calendar work on an app password, documents are
+read. Telephony is bench-only (Phase 0): policy, transcripts and hard
+checkpoints are in code; nothing is called. A review pass fixed form
+filling, the phone checkpoints, and voice installs that could stall the
+server. mypy now covers the whole tree.
+
+Local line (not a public tag). The next public package is **0.31.0**.
+
+## 0.26.2 - Host in Remedy's hands
+
+Work turns drive this PC without an Ask pause. Build no longer sticks on a
+hung `pytest --lf` ledger or a stale checklist in the user profile.
+Frustrated follow-ups keep tools. Jail, Plan, and auth stay closed.
+
+PyPI **`remedy-ai==0.26.2`** · tag **v0.26.2**.
+
+## 0.26.1 - Build finishes
+
+Build no longer stops to ask permission, and it cannot mark a page done
+when the file is empty or missing. Frustrated “why is this failing?”
+follow-ups keep tools on. The sidecar path with a space in
+`Remedy Desktop` is not a write dest; overwriting `cmd.exe` still is.
+
+PyPI **`remedy-ai==0.26.1`** · tag **v0.26.1**.
+
+## 0.26.0 - Windows + Linux desktop
+
+Remedy is one partner on **Windows and Linux** (including WSLg). Maximize
+uses the work area of the monitor the window is on. Close on Linux
+minimizes to the taskbar. Plan mode cannot write. `/reset` and Stop leave
+a clean session. Settings no longer stall the Windows API. Write jail and
+host rewrite cover Combine / `which` metacharacters. Linux first-run
+downloads the same pinned llama.cpp runtime as Windows (Ubuntu CPU /
+Vulkan). The `.deb` pulls WebKitGTK / GTK; the AppImage is more
+self-contained.
+
+PyPI **`remedy-ai==0.26.0`** · tag **v0.26.0**.
+
+## 0.25.1 - Jail, Stop, and tab isolation
+
+Project-bound shell dests now catch Windows root-relative paths and launched
+script bodies. Local/RMB turns no longer flip Ask to Auto on disk. Start RMB
+does not steal the chat provider; Stop stays stopped across API recycle.
+Desktop Stop posts abort before killing the stream. Tabs no longer paint the
+wrong transcript or double-send a promoted queue item.
+
+PyPI **`remedy-ai==0.25.1`** · tag **v0.25.1**.
+
+## 0.25.0 - Stable tabs + Settings chrome
+
+Tabs stay isolated: drafts, attachments, RMB reloads, and computer-use jobs
+no longer leak across chats. Settings Simple / Advanced is a single tab
+track with quieter search and switch-style toggles. Stop aborts web fetch
+between hops and ConPTY no longer leaks ReadFile workers.
+
+PyPI **`remedy-ai==0.25.0`** · tag **v0.25.0**.
+
+## 0.24.0 - Host Bridge + first home
+
+Remedy learns **this PC** instead of one vendor or one shell. Host Bridge
+rewrites POSIX to cmd, runs PowerShell via `-File`, and exposes
+`host_run` / `host_mkdir` / `host_which` / `host_script`. **`/stretch`**
+(alias `/home`) maps hardware, PATH tools, rooms, and local ports;
+**`/whoami`** includes that census. GPU probe is vendor-neutral (NVIDIA /
+AMD / Intel); RMB autofit uses VRAM.
+
+Work turns stay armed until tools actually run. Settings no longer steal
+the active chat’s model. Shell jail closes `C:/` dests and `$HOME`
+redirects; `/api/files` no longer lists `SAM` / `win.ini` / `hosts` as
+empty success. Packaged self-inject defaults **off**.
+
+PyPI **`remedy-ai==0.24.0`** · tag **v0.24.0**.
+
+## 0.23.2 - Defender Execution false positive
+
+The desktop UI is **`Remedy Desktop.exe`**, not generic `app.exe`. Stops
+Windows Defender ML (`Behavior:Win32/Execution.A!ml`) from treating first
+launch as an attacker payload. PyPI **`remedy-ai==0.23.2`** · tag **v0.23.2**.
+
+## 0.23.1 - First-turn agency
+
+Short task kicks like **full bugsweep** now keep tools on and run recovered
+DeepSeek XML dumps instead of leaving `tool_c` in the chat. PyPI
+**`remedy-ai==0.23.1`** · tag **v0.23.1**.
+
+## 0.23.0 - Build ability + companion
+
+A Claude-class **machine build loop** plus a PC companion so Remedy can
+finish software and design work from *this* machine — not just chat about
+it. PyPI **`remedy-ai==0.23.0`** · tag **v0.23.0**.
+
+- **`build_drive` / `build_parallel` / `apply_patch`** — spec → TDD → isolated
+  hops → gate tower → review-fix. Overlays merge only when the oracle is
+  green. `file_glob` and `todo_write`/`todo_read` cut list-dir thrash.
+- **Companion** — clipboard, focused window, drop-a-file inbox, taste
+  memory, and visual observe after UI writes. “Look at this / I copied”
+  starts from the actual PC.
+- **Play-to-iterate** — compile/run stay on the desktop after `computer_app`;
+  write jail no longer mistakes `python.exe game.py` for a write.
+- **Ship harden** — patch/hop jail fail-closed; uninstall targets only
+  `remedy-ai`; messenger shares the desktop stream claim; Stop drains the
+  next queued send; Browser rail blocks IMDS / public IPs.
+
+## 0.22.3 - Clear mid-turn stops
+
+Disconnects, Stop, and stream errors leave a **real chat message** (not a
+vanishing status banner). Recovery after a dead Sleev proxy stays on the real
+provider. PyPI **`remedy-ai==0.22.3`** · tag **v0.22.3**.
+
+## 0.22.2 - Sleev fail-open
+
+If the Sleev proxy is down (or a remote gateway is unreachable), Remedy **falls
+open** to your normal provider instead of looping on “waiting for local model.”
+PyPI **`remedy-ai==0.22.2`** · tag **v0.22.2**.
+
+## 0.22.1 - Sleev + gateway lock
+
+Optional **Sleev** token-compression gateway for long cloud sessions, with a
+hard **loopback lock** so provider keys cannot be redirected off-machine without
+an explicit owner opt-in. Full detail: `CHANGELOG.md` · PyPI **`remedy-ai==0.22.1`**
+· GitHub tag **v0.22.1**.
+
+- **Sleev routing** — Settings → Provider (or *“configure Sleev”* in chat); Ollama /
+  RMB / Demo stay direct.
+- **Loopback by default** — non-local gateway URLs need **Allow non-loopback Sleev
+  gateway** (Advanced).
+- **Theme menu stacking** — theme picker no longer paints under Streaming/Stop.
+- **Soak scripts** — local API token loads through DPAPI decode (no sealed JSON
+  in `Authorization` headers).
+
+## 0.22.0 - Living organism + builder continuity
+
+One continuous partner that *stays* mid-work — Soul Field on by default, organism
+pulse, continuity steering, and stricter done/verify. Full detail: `CHANGELOG.md` ·
+PyPI **`remedy-ai==0.22.0`** · GitHub tag **v0.22.0**.
+
+- **Soul Field default on** — bond, open threads, organism mood on the status bar;
+  Settings → Identity to opt out.
+- **Organism pulse** — mood + forge (builder) + immune (false-done) + EU/DU on each
+  real work turn.
+- **Continuity steering** — open tasks and mid-ship resume inject so models do not
+  monologue past unfinished work.
+- **Multi-tab + messengers** — safer concurrent streams; remote chats get the same
+  post-turn continuity as desktop.
+- **Retention defaults** — sessions 180 days, attachments 90 days (set 0 to keep forever).
+- **Ship path** — after green verify: `git_push` / `gh_release` tools; no re-pytest
+  thrash on continue; Stop unblocks stuck 409 streams.
+- **RMB** — does **not** auto-start with `remedy serve` (start from Settings when
+  you want local muscle).
+
+## 0.21.1 - Continuity + self-inject safety
+
+One continuous partner across tabs and providers — stronger isolation and safer
+self-improvement. Full detail: `CHANGELOG.md` · PyPI **`remedy-ai==0.21.1`** ·
+GitHub tag **v0.21.1**.
+
+- **Soul Field (experimental)** — providers are muscle; local soul carries
+  identity, relationship residue, and open episodes so Remedy feels continuous
+  across models (`docs/SOUL_FIELD.md`).
+- **Turn-local continuity** — Session Brief, Partner State, and work roots freeze
+  per stream so multi-tab work cannot cross-wire mid-turn.
+- **Self-inject rollback** — restores the pre-round git snapshot (keeps unrelated
+  dirty tracked files); only round-created untracked debris is removed.
+- **Shell privilege nest** — `bash -c` / `pwsh -Command` payloads hard-block
+  `reg` / `net user` / `schtasks /create` and kin.
+- **Webhooks** — generic `X-Remedy-Webhook-Secret` works with Bearer middleware;
+  Google Chat challenge skip is verification-shaped only.
+
+## 0.20.0 - Partner metabolism + always-ready
+
+The “so” leap: a **Partner Metabolism OS** under one voice, plus desktop chrome that
+stays ready on this PC. Full detail: [19-metabolism](19-metabolism) · `CHANGELOG.md` ·
+PyPI **`remedy-ai==0.20.0`** · GitHub tag **v0.20.0**.
+
+- **Turn tiers L0–L3** — L0 instant local answers (model / skills / version / whoami);
+  L1 lean chat; L2 full tools (review, implement, files, shell, computer); L3 deep /
+  work-alone + force-spread.
+- **Evidence + decisions** — tool facts get IDs; waste scoring; mid-turn delta inject.
+- **Shadow + write jail** — high-blast dry-run on top of project write roots; shell
+  cannot mutate `~/.remedy/auth` even under home scope; global package installs outside
+  write roots are blocked.
+- **Agency that actually runs tools** — “review project” keeps tools on; if the model
+  only *says* “activating skill”, Remedy re-arms tools and demands real function calls.
+- **Skills** — progressive disclosure; review injects change-safety procedure when useful;
+  CLI `skill list` hides noisy auto-learned probation packs unless `--all`.
+- **Desktop always-ready** — **✕ / Alt+F4 always hides to the system tray** (local API
+  stays up). Full stop only from tray **Quit**. Multi-tab stream paint, abort UX, and
+  session-scoped partner status.
+- **Privacy mode (opt-in)** — status bar + Simple settings; redacts secret-shaped content
+  on the provider path when on; **zero cost when off**.
+- **Browser rail** — video **fullscreen stays inside the rail** (not full-app); Mobile /
+  Desktop site toggle; same-window OAuth for major IdPs; chat attachment / Comfy images
+  load with Bearer media auth; double-click chat links open in-rail.
+- **Computer use** — host jobs require Bearer; shot TTL; multi-tab cancel; open_app
+  protocol/UNC harden; host reliability (snapshot / page_text / click).
+- **Security** — web_fetch SSRF (userinfo, CGNAT, redirects), Teams JWKS RS256, DPAPI
+  local API token, identity export HMAC + rate limits, MCP residual purge, plugin
+  path-required load.
+- **Docs** — owner’s manual + README: About + What’s new near the top; architecture
+  diagram in F1 overview.
+
+## 0.19.0 - Parallel multi-provider + background turns
+
+- **True parallel multi-provider:** Grok and DeepSeek (or any pair) can stream at the
+  same time on one runtime — each turn freezes provider/model/key in a per-turn binding.
+- **Background turns:** switch sessions without aborting live work; sidebar busy pulse;
+  confirm before a 3rd concurrent turn.
+- **Session sticky bind:** each chat keeps its provider+model pair (no more cross-tab
+  404s sending Grok’s model to DeepSeek’s host).
+- **Sidebar:** ↑↓ reorder for projects and sessions; clearer **Archive**; no false
+  “drag onto folders” claims (Tauri drag is unreliable).
+- **Agency:** mid-task `ok` / status-only lines keep tools on and re-nudge instead of
+  stopping after a short snippet; DSML idle/stall recovery improved.
+- **Attach:** image/file attach works again (WebView drops + paperclip picker).
+- **Themes:** **Dark Forest** (muted moss on dark); calmer text on colored themes.
+- **Memory panel** shows recent notes without a search query; control tokens no longer
+  leak into chat (`@@status:…`).
+
+## 0.18.6 - OS chrome + browser embed
+
+- **Window min / max / close** use the real Windows title bar (no more dead WebView buttons after move).
+- **Built-in Browser** auto-loads the homepage and recovers from blank embeds more reliably.
+- Note: **✕ always → tray** is a **0.20.0** product rule (earlier builds could still full-quit on close depending on prefs).
+
+## 0.18.5 - Telegram poll lock recovery
+
+- **Messenger stays live after restarts:** a dead process can no longer “own” the Telegram poll forever on Windows.
+- **Auto-recover** if a second instance or crash left the bot lock behind (heartbeat + retry).
+
+## 0.18.4 - Messenger realtime + sync
+
+- **Telegram realtime:** only one Remedy process may long-poll the bot (stops HTTP 409 “another poller” thrash).
+- **No catch-up flood** on restart — update offset is saved; first run drains backlog without replaying into chat.
+- **Desktop replies reach Telegram** when you chat in a messenger session (was inbound-only).
+- **Smoother live sync** while a reply is streaming (no force full-thread reload mid-turn).
+- **Concurrent sessions:** safer provider/model bind across tabs and messengers.
+
+## 0.18.3 - Provider switch + stability
+
+- **Status bar provider/model switch** sticks for the session (no more DeepSeek API + Grok model name mismatch).
+- **Missing model / HTTP 404** stops cleanly with “switch model” (no soft-retry spam).
+- **Quit warning “Don’t show again”** is saved before exit.
+- **Update check on launch** after the local server is ready.
+- **Fewer Windows cmd flashes** during search/spread/git tool work.
+
+## 0.18.2 - Spread run fix
+
+- **`spread_run` no longer fails** when the model passes `tasks` as a native list (common with tool calling). Process trail showed a red **Spread Run** error; that path is fixed.
+- `tasks` accepts a JSON array, a single task object, or a JSON string; `goal=` still auto-plans workers.
+
+## 0.18.1 - Run until finished + title bar
+
+- **Long coding / missions keep going** until the work is done — soft “epochs” only compact context and checkpoint; they do **not** stop tools with a fake tool-limit answer (Build-class agency).
+- Pathological loops still have a high safety ceiling; idle pauses only after long stretches with **no** tool activity.
+- **Title bar:** min / max / close stay clickable after you move, minimize, or maximize the window (explicit drag on the middle strip; controls never steal-hit as drag). Always-hide-to-tray on ✕ is **0.20.0**.
+
+## 0.18.0 - Spread + Library suggest
+
+- **`spread_run`:** silent parallel explore/search/verify workers so multi-area tasks cover ground faster — still one Remedy voice.
+- **Library skill check:** on real work, a soft tip when a signed Library pack would help; **Install** from the chip (or open Skills); never auto-installs without a click.
+- **Hardening:** tighter path jail and shell approvals on jobs; Stop kills in-flight shell trees; chat hot path stays free of blocking local-model waits.
+
+## 0.17.0 - Coding agency + Process trail
+
+- **Code search** works for any text language (not just Python/JS) — optional bundled ripgrep; no need to install tools for basic discovery.
+- Work on **any folder path** without forcing a project jail; focus folder is optional convenience.
+- Stronger **Build** tools: longer shell timeouts, multi-file edits, explore/verify jobs, mission verify before “done”.
+- **Process** Min / Med / Full is readable on long tool runs (no double chip clouds; grouped steps on Min/Med; full dumps on Full).
+
+## 0.16.0 - Messengers + polish
+
+- **Settings → Messengers:** connect Telegram (live) and modular Discord / Slack / Mattermost / Matrix / WhatsApp / Teams / Google Chat / Signal adapters — tokens stay in the secret store.
+- Messenger threads show up as normal sessions in the desktop; history and live updates stay in sync.
+- Skills Library refresh is smoother; empty chat shows a clean monogram; Memory Progress is calmer.
+- Owner docs showcase workspace tools, local SmolVLM2, and messengers; download link always means **latest**.
+- WebUI and desktop share one SPA; rebuild + restart picks up UI changes correctly.
+
+## 0.15.9 - Skills Library visibility + first-session fix
+
+- **Installed | Library** tabs fixed under the Skills title (not clipped by chrome).
+- **Memory → Progress**: calmer checkpoint wording (not raw scare-logs).
+- Empty chat monogram (no plate bubble); WebUI uses same SPA as desktop.
+- First message after boot waits for sessions/model; re-bootstrap token on 401 after update.
+- Messengers + session history SQL fix for long / messenger chats.
+
+## 0.15.8 - Skills Library
+
+- **Skills → Library:** browse the signed community catalog, install into quarantine, then **Trust**.
+- **Installed** panel cleaned up: Trust / Promote / Quarantine / Archive / Edit / Delete without the old control clutter.
+- Library installs are checksummed and path-safe; delete removes user packs under `~/.remedy/skills/`.
+
+## 0.15.7 - Memory Harness v2
+
+- Long chats stay sharp: Auto harness **enforces** a lean model send-view (your full transcript is still saved).
+- **Session Brief** keeps intent, decisions *why*, files, and a history thread; local model can refresh the brief in the background.
+- Process trail is **Min / Med / Full** (Full+ removed). Plan mode is per chat session.
+- Browser only on one rail at a time (stable embed).
+
+## 0.15.6 - Images in chat for every model
+
+- Drag/drop or paste an image → it **shows in the chat bubble** (markdown preview), not only a file path.
+- Works with any chat model; vision understanding still uses the provider or local visual decoder when available.
+- Stream finish is smoother (no empty flash before the reply lands).
+
+## 0.15.5 - Popout exit, embed browser, homepage
+
+- **Fullscreen** (Terminal / Browser / Scratch): top bar **Exit fullscreen** + **Close**, or **Esc**.
+- **Browser:** stays embedded in the panel; default homepage is the **Remedy GitHub** repo (change under **Settings → Project workspace → Browser homepage**).
+- Quit and window chrome reliability improvements from the 0.15.x shell work.
+
+## 0.15.4 - Chrome, chat, rails, browser
+
+- **Title bar:** minimize / maximize / close work again (drag strip no longer steals clicks; close hides to tray).
+- **Chat:** prompt stays at the **bottom**; empty-session landing page restored; session list clicks always load history.
+- **Sessions:** open-tab chip strip removed; **Browse…** for project folders uses the native picker on the UI thread.
+- **Browser:** embedded panel (iframe), not a blank popup window.
+- **Terminal:** bright blinking block cursor; click to focus.
+- **Rails:** thin strip → icons → open panel (both sides).
+- **Usage ticker** above the composer; **About** includes Ahmi’s note.
+
+## 0.15.3 - Shell + in-app tools
+
+- True three-column workspace; in-app PowerShell and browser; original shell icons; path images.
+- **New Session = root** (no project). New Project folder is first-run only, not every session.
+
+## 0.15.2 - Workspace harden
+
+- Safer workspace prefs (bad slide ids no longer crash).
+- Plan stays visible after Approve -> Build until you Hide it.
+- Browser URL hardening; scratch pad writes debounced.
+
+## 0.15.1 - Workspace polish
+
+- PowerShell terminal, Firefox browser open, archive fix, quieter plan banner.
+
+## 0.15.0 - Workspace / plan mode / images
+
+- Three-frame slides, image markup attach, session archive, Plan approve banner.
+
+## 0.14.10 - Image viewer + markup
+
+- Full-screen viewer for any chat image.
+- Snipping-Tool-style markup; attach annotated PNG to your next prompt.
+
+## 0.14.9 - Icons + faster export/import
+
+- Theme-aware alpha chat monogram; bold tray plate; clearer taskbar icon.
+- Native save/open dialogs; smaller/faster session export (tool dumps capped).
+
+## 0.14.8 - Project etiquette (ship skill)
+
+- Bundled **`project-etiquette`** skill: test -> docs -> build -> commit -> CI -> publish only if green.
+- Same gate chain is default ship protocol in `AGENTS.md` (works for any serious project).
+
+## 0.14.7 - Calmer update + install always starts
+
+- One clear update message (download, then restart to finish).
+- App waits until the install script is alive before closing.
+- Multi-path install schedule from 0.14.6 kept (PowerShell + WScript + schtasks).
+
+## 0.14.6 - Autoupdate install reliability + alpha logos
+
+- Multi-path install schedule so install runs after close.
+- Full alpha brand kit regenerated for public/ + Tauri icons.

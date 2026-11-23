@@ -1,0 +1,155 @@
+# First run & setup
+
+A new install only copies the app files. The first time you open Remedy, the
+app downloads and verifies her local mind with a progress bar (**Getting
+Remedy’s mind ready**). As soon as the mind is ready, she starts a short
+conversation to set house rules and the rest of first-run (provider, workspace,
+language, and the other topics listed in [HOUSE_RULES.md](../HOUSE_RULES.md)).
+
+**Traditional setup** is always on screen if you would rather use the form.
+You can switch back and forth without losing answers. Skipped items use the
+defaults. If the mind cannot start (not enough memory, or a failed download
+or verify — a missing GPU is fine), Traditional setup opens with an
+explanation and a retry. See [SETUP.md](../SETUP.md) for the full path.
+
+The CLI setup wizard is skipped when the desktop sidecar starts
+(`--skip-setup`) so the API is always available for the UI. That marks
+onboarding inherited and does not nag later.
+
+## When setup appears
+
+Setup opens when **any** of these is true:
+
+- No `config.toml` yet
+- `setup_completed = false`
+- Config file is **corrupt / unreadable** (e.g. bad TOML after an older bug)
+- Settings cannot load yet on a fresh install (setup still opens so you are not stuck)
+
+After you finish or **Skip**, `setup_completed = true` is written and setup will not auto-show again. You can still say “let’s go over house rules again,” or run `/house-rules`. Existing installs get one pop-up after this update (Let's go / Not now) and are not asked again.
+
+## Conversation (default)
+
+Remedy greets you and walks through the topics. Every question is skippable;
+**Skip all, use defaults** applies defaults plus anything you already answered.
+**Looks good — use these** confirms the summary and enters the app.
+
+## Traditional setup (form)
+
+The form below is the same settings, in the older step-by-step wizard. Use
+**Talk with Remedy instead** to return to the conversation.
+
+### 1. Welcome
+
+- Short product intro  
+- **Language** pick (default Auto — matches this computer). Change anytime in Settings → You & Agent.  
+- **Get Started** or **Skip setup (configure later)**  
+
+### 2. Provider
+
+| Choice | Notes |
+|--------|--------|
+| OpenAI / Anthropic / Google / DeepSeek / Groq / Mistral / OpenRouter | Paste API key |
+| **xAI (Grok)** | **Sign in with xAI** (OAuth) *or* console API key |
+| **Ollama** | No key if Ollama is running locally |
+| **Custom** (Advanced) | OpenAI-compatible base URL |
+
+- Model list follows the selected provider.  
+- Local URLs (`127.0.0.1` / `localhost`) do not require a key.  
+- You cannot proceed without a key (or xAI sign-in / Ollama) unless you **Skip**.
+
+### 3. Workspace
+
+Optional default **project folder** — working directory for tools, shell, and `@file` search. Leave empty to use the current default later.
+
+### 4. Persona & name
+
+- **Your name** — what Remedy calls you (also in Settings later)  
+- **Communication style** — Balanced, Efficient, Detailed, Playful  
+
+### 5. On this PC
+
+Vision, voice, Claimidx, and local helpers **download automatically** the first time
+Remedy starts. You can finish setup while they continue in the background.
+If the voice pack did not arrive, Settings → Voice has **Download Remedy's
+voice**. In Remedy Desktop the voice engines live in a small Python of their
+own under `~/.remedy/voice/runtime/` (downloaded and verified on first use,
+~70 MB) together with her voice model. From a
+`pip` install, Advanced still shows the pip command.
+
+Claimidx is installed in its own environment under `~/.remedy/claimidx/`,
+seeded with prior art, and started with Remedy on `127.0.0.1:17340`. It uses a
+private database and write token. Public claim sharing remains off by default.
+
+### 6. Ready
+
+- Optional **Keep Remedy ready (Start with Windows)**  
+- **Start Chatting** saves settings and closes the wizard  
+
+**Always-ready after first run (0.20.0+):** the title-bar **✕** hides Remedy to the
+**system tray** and keeps the local API running. Use **tray → Quit** for a full stop
+(stops the server). Optional: **Start hidden in tray** (Settings) if you want only a
+tray icon at login.
+
+## Skip setup
+
+Skip (conversation or form) marks setup complete without a provider. Chat stays offline until you configure **Settings → Provider**. Use Skip if you want to explore the UI first.
+
+## Error screen: Open setup
+
+If the server fails or settings fail to load:
+
+1. **Retry** — restarts / waits for the local API  
+2. **Open setup** — opens the wizard and warms the API token  
+3. **Open data folder** — jumps to user data for support  
+
+## After setup
+
+Open **Settings** from the Remedy menu or with **Ctrl+,**. Choose a category:
+
+- **General** — names, language, voice, workspace, and appearance.
+- **Models** — providers, API keys, and local models.
+- **Connections** — devices, messengers, phone, and personal assistant accounts.
+- **Privacy** — approvals, access, and information shared with your model.
+- **System** — help, updates, and app preferences.
+
+**Simple** shows everyday controls; **Advanced** reveals the full set within
+each category. Search looks across all categories, including advanced settings.
+Open a matching section to edit it. Switching categories keeps your unsaved
+form entries; use **Save** at the bottom for settings that require it.
+Persona deletion lives under **Privacy → Privacy**. Optional Sleev gateway
+setup is in **Advanced → Models → Provider**; an enabled gateway remains
+visible in Simple mode. Searching for **Sleev** also finds its controls.
+
+Settings opens one section at a time. Longer tasks—connection setup, model
+downloads and performance, phone terms, and morning brief scheduling—open in
+separate dialogs. **Done** closes the dialog and keeps unfinished entries.
+Each dialog says whether changes apply immediately or need **Save** in Settings.
+Use **Escape** to close a dialog when no operation is in progress.
+
+The main bar has its own **Simple / Advanced** control. In Simple mode, choose
+the current model to open the model picker. Advanced keeps the provider and
+model selectors directly on the bar. Change the theme in **General → Appearance**.
+Settings detail and main-bar detail are independent preferences.
+
+- Empty chat shows starters and a pointer to `/help` and **F1**  
+- You may be asked for your name if it was left blank  
+- Secondary loads (models list) must not block the wizard  
+- Remedy **stretches out** in the background: hardware (RAM / GPU), tools on
+  PATH (`python`, `git`, `uv`, …), user folders (Desktop / Documents / …),
+  and a few local doors (Ollama, ComfyUI, RMB). No disk crawl. The map lives
+  in `~/.remedy/host/home.json` and injects as a **This home** line. Refresh
+  with `/stretch` (alias `/home`) after you install tools. `/whoami` shows it.
+
+## Corrupt config recovery
+
+Older builds could write root keys after TOML `[table]` sections, breaking parse. Current builds:
+
+1. Detect unreadable config → treat as needs setup  
+2. Write **scalars before tables** on every save  
+3. Completing setup rewrites a healthy `config.toml`  
+
+See [Troubleshooting](09-troubleshooting) if save still fails.
+
+## Related
+
+- [Providers & auth](03-providers-and-auth) · [Security & data](04-security-and-data)
