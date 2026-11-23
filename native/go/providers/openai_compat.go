@@ -257,9 +257,9 @@ func uniqueSanitizedToolName(id string, used map[string]struct{}) string {
 }
 
 const (
-	maxToolArgChars    = 12_000
-	maxToolResultChars = 24_000
-	maxAssistantChars  = 12_000
+	maxToolArgChars    = 48_000
+	maxToolResultChars = 30_000
+	maxAssistantChars  = 64_000
 )
 
 // clipString keeps the head and tail of s within max bytes, cutting only on

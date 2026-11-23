@@ -410,8 +410,14 @@ func TestEngineDefaultCeilingsAreBuildScale(t *testing.T) {
 	if cfg.KeepLastResults < 8 {
 		t.Fatalf("KeepLastResults=%d", cfg.KeepLastResults)
 	}
-	if cfg.MaxResultChars < 8_000 {
-		t.Fatalf("MaxResultChars=%d", cfg.MaxResultChars)
+	if cfg.MaxResultChars != 0 {
+		t.Fatalf("MaxResultChars=%d want 0 (auto from the model window)", cfg.MaxResultChars)
+	}
+	if got := defaultMaxResultChars(DefaultContextWindow); got != FrontierMaxResultChars {
+		t.Fatalf("frontier result cap=%d want %d", got, FrontierMaxResultChars)
+	}
+	if got := defaultMaxResultChars(SmallContextWindow); got != LocalMaxResultChars {
+		t.Fatalf("local result cap=%d want %d", got, LocalMaxResultChars)
 	}
 	if cfg.MaxRepeatedBatch != 2 || cfg.RepeatNudgeBudget != 1 {
 		t.Fatalf("repeat gate = %d batches / %d nudges", cfg.MaxRepeatedBatch, cfg.RepeatNudgeBudget)
@@ -419,7 +425,7 @@ func TestEngineDefaultCeilingsAreBuildScale(t *testing.T) {
 }
 
 func TestTranscriptBudgetFromContextWindow(t *testing.T) {
-	if got := transcriptBudget(0); got != int(float64(DefaultContextWindow)*0.75)-16_000 {
+	if got := transcriptBudget(0); got != int(float64(DefaultContextWindow)*promptBudgetFraction)-16_000 {
 		t.Fatalf("cloud budget=%d", got)
 	}
 	if got := transcriptBudget(8192); got != 2048 {
@@ -1009,7 +1015,7 @@ func TestEngineCompactsOverBudgetAndKeepsTheGoal(t *testing.T) {
 	last := turns[len(turns)-1]
 	// Twelve uncompacted rounds would be 25 messages and ~24k tokens; the kept
 	// tail is deliberately verbatim, so the bound is "stops growing", not "fits".
-	if len(last.Messages) > compactKeepTail+3 {
+	if len(last.Messages) > compactKeepCount(8192)+3 {
 		t.Fatalf("compaction did not bound the transcript: %d messages, ~%d tokens",
 			len(last.Messages), estimateTokens(last.Messages))
 	}
@@ -1032,6 +1038,7 @@ func TestEngineCompactsOverBudgetAndKeepsTheGoal(t *testing.T) {
 }
 
 func TestCompactTranscriptKeepsGoalAndLastEight(t *testing.T) {
+	keep := compactKeepTailLocal
 	msgs := []Message{UserText("the goal")}
 	for i := 1; i <= 12; i++ {
 		msgs = append(msgs, Message{Role: RoleAssistant, Blocks: []Block{
@@ -1042,7 +1049,7 @@ func TestCompactTranscriptKeepsGoalAndLastEight(t *testing.T) {
 			{Type: BlockToolResult, ToolUseID: fmt.Sprintf("c%d", i), Content: []Block{TextBlock(fmt.Sprintf("wrote f%d.go", i))}},
 		}})
 	}
-	out := compactTranscript(msgs, true)
+	out := compactTranscriptKeep(msgs, true, keep)
 	if len(out) >= len(msgs) {
 		t.Fatalf("nothing compacted: %d → %d", len(msgs), len(out))
 	}
@@ -1095,7 +1102,7 @@ func TestCompactTranscriptKeepsBindingConstraints(t *testing.T) {
 		UserText("finish the parser"),
 	)
 
-	out := compactTranscript(msgs, true)
+	out := compactTranscriptKeep(msgs, true, compactKeepTailLocal)
 	if len(out) >= len(msgs) {
 		t.Fatalf("nothing compacted: %d → %d", len(msgs), len(out))
 	}
@@ -1125,8 +1132,8 @@ func TestCompactTranscriptKeepsBindingConstraints(t *testing.T) {
 	if goal := lastUserProseIndex(out); goal < 0 || out[goal].Text() != "finish the parser" {
 		t.Fatalf("current goal not kept verbatim")
 	}
-	tail := out[len(out)-compactKeepTail:]
-	wantTail := msgs[len(msgs)-compactKeepTail:]
+	tail := out[len(out)-compactKeepTailLocal:]
+	wantTail := msgs[len(msgs)-compactKeepTailLocal:]
 	for i := range tail {
 		if transcriptText(tail[i:i+1]) != transcriptText(wantTail[i:i+1]) {
 			t.Fatalf("tail message %d was rewritten", i)
