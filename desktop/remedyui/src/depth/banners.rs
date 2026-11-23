@@ -55,7 +55,7 @@ pub fn status(ui: &Ui, studio: Studio) -> El {
         .child(remote(ui, studio.clone()))
         .child(background(ui, studio.clone()))
         .child(stall(ui, studio.clone()))
-        .child(todos(ui, studio.clone()))
+        // BUILD todos render in the Actions pane, not under the chat bubbles.
         .child(progress(ui, studio.clone()))
         .child(trace(ui, studio))
 }
