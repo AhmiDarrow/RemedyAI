@@ -5,9 +5,9 @@ edition = "2024"
 publish = false
 
 [dependencies]
-# RemedyUI c325991 is on main, later than 68ad3a19. Shell features from
-# remedyui, plus `update` for the signed latest.json installer.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "c325991d72d795e34e5ea18f0de7991484e151e4", features = ["net", "image", "playback", "desktop", "term", "update"] }
+# RemedyUI 6f36405 is main after #135: color emoji (COLR/CBDT/sbix) and bundled Twemoji.
+# Packaging keeps the `update` feature for the signed latest.json installer.
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "6f36405aa0840a2c332b80a1c17375d7ea4901c6", features = ["net", "image", "playback", "desktop", "term", "update"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -15,7 +15,7 @@ portable-pty = "0.9"
 
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "c325991d72d795e34e5ea18f0de7991484e151e4", features = ["headless", "devtools", "net", "image", "playback", "desktop", "term", "update"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "6f36405aa0840a2c332b80a1c17375d7ea4901c6", features = ["headless", "devtools", "net", "image", "playback", "desktop", "term", "update"] }
 
 [profile.release]
 lto = "fat"

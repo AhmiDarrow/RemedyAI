@@ -16,20 +16,9 @@ use remedy_ui::style::{BorderEdge, BorderSide, StylePatch};
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui, show};
 
-/// The chat column: header, feed or empty well, composer.
+/// The chat well: session header, the two-pane workspace, composer.
 pub fn well(ui: &Ui, studio: Studio) -> El {
     let colors = ui.theme().colors.clone();
-    let thread = w::column(ui)
-        .layout(|l| {
-            l.grow = 1.0;
-            l.basis = Length::Px(0.0);
-            l.min_width = Length::Px(0.0);
-            l.min_height = Length::Px(0.0);
-            l.width = Length::Percent(1.0);
-        })
-        .child(depth::banners::lead(ui, studio.clone()))
-        .child(feed(ui, studio.clone()))
-        .child(depth::banners::status(ui, studio.clone()));
     w::column(ui)
         .style(StylePatch::new().background(colors.bg))
         .layout(|l| {
@@ -47,7 +36,7 @@ pub fn well(ui: &Ui, studio: Studio) -> El {
                     l.min_height = Length::Px(0.0);
                     l.width = Length::Percent(1.0);
                 })
-                .child(thread)
+                .child(crate::chat_split::workspace(ui, studio.clone()))
                 .child(depth::panels::side(ui, studio.clone())),
         )
         .child(depth::banners::ticker(ui, studio.clone()))
@@ -234,7 +223,7 @@ fn header(ui: &Ui, studio: Studio) -> El {
         .child(chips)
 }
 
-fn feed(ui: &Ui, studio: Studio) -> El {
+pub(crate) fn feed(ui: &Ui, studio: Studio) -> El {
     let st = studio.clone();
     let empty =
         move || st.messages.get().is_empty() && st.partial.get().is_empty() && !st.streaming.get();
@@ -344,7 +333,10 @@ fn empty_well(ui: &Ui, studio: Studio) -> El {
         .align(Align::Center)
         .justify(Justify::Center)
         .gap(unit)
-        .layout(|l| l.width = Length::Percent(1.0));
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.wrap = true;
+        });
     for (label_id, prompt_id) in [
         ("starter-help", "starter-help-prompt"),
         ("starter-explore", "starter-explore-prompt"),
@@ -426,23 +418,10 @@ fn saved_turn(ui: &Ui, studio: Studio, msg: &ChatMessage, name: &str) -> El {
         );
     let unit = ui.theme().spacing.unit;
     let bubble_gap = if beats.is_empty() { 4.0 } else { unit * 3.0 };
+    let _ = show_meta;
     let mut col = w::column(ui)
-        .gap(if show_meta && beats.is_empty() {
-            2.0
-        } else {
-            bubble_gap
-        })
+        .gap(bubble_gap)
         .layout(|l| l.width = Length::Percent(1.0));
-    if show_meta {
-        let steps = msg.steps.clone();
-        let thinking = msg.thinking.clone();
-        col = col.child(work_meta(
-            ui,
-            move || steps.clone(),
-            move || thinking.clone(),
-            false,
-        ));
-    }
     for beat in &beats {
         col = col.child(sealed_bubble(ui, studio.clone(), beat, name));
     }
@@ -462,14 +441,6 @@ fn saved_turn(ui: &Ui, studio: Studio, msg: &ChatMessage, name: &str) -> El {
 }
 
 fn live_turn(ui: &Ui, studio: Studio) -> El {
-    let steps = {
-        let s = studio.clone();
-        move || s.live_steps.get()
-    };
-    let thinking = {
-        let s = studio.clone();
-        move || s.live_thinking.get()
-    };
     let unit = ui.theme().spacing.unit;
     let beats: Signal<Vec<(usize, String)>> = Signal::new(Vec::new());
     let beats_out = beats.clone();
@@ -526,7 +497,6 @@ fn live_turn(ui: &Ui, studio: Studio) -> El {
     w::column(ui)
         .gap(unit * 3.0)
         .layout(|l| l.width = Length::Percent(1.0))
-        .child(work_meta(ui, steps, thinking, true))
         .child(sealed)
         .child(
             show(
@@ -564,8 +534,8 @@ fn live_shows_bubble(studio: &Studio) -> bool {
     !work::visible(&sum, !studio.live_thinking.get().trim().is_empty())
 }
 
-/// "Worked · N steps · N errors" above an assistant reply. Hidden for a plain chat.
-fn work_meta(
+/// "Worked · N steps · N errors" for a turn. Hidden for a plain chat.
+pub(crate) fn work_meta(
     ui: &Ui,
     steps: impl Fn() -> Vec<WorkStep> + Clone + 'static,
     thinking: impl Fn() -> String + Clone + 'static,
