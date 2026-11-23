@@ -13,23 +13,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use remedy_ui::a11y::{Action, Current, Role, Semantics};
 use remedy_ui::core::{Color, Insets, Size};
 use remedy_ui::input::{Buttons, Key, KeyEvent, PointerPhase};
-use remedy_ui::layout::{Align, Justify, Length, Position, AUTO};
+use remedy_ui::layout::{AUTO, Align, Justify, Length, Position};
 use remedy_ui::reactive::{Signal, untrack};
 use remedy_ui::style::{BorderEdge, BorderSide, Shadow, StylePatch};
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui};
 
 use crate::layout::{
-    self, LayoutPatch, NARROW_MAX, RAIL_WIDTH_DEFAULT, RAIL_WIDTH_MAX, RAIL_WIDTH_MIN, RailMode, Side,
-    SlideId, WorkspaceLayout, clamp_rail_width, layout_open_browser, layout_open_browser_beside_settings,
-    layout_open_settings, layout_open_slide, layout_patch, layout_swap, layout_toggle_settings, normalize,
+    self, LayoutPatch, NARROW_MAX, RAIL_WIDTH_DEFAULT, RAIL_WIDTH_MAX, RAIL_WIDTH_MIN, RailMode,
+    Side, SlideId, WorkspaceLayout, clamp_rail_width, layout_open_browser,
+    layout_open_browser_beside_settings, layout_open_settings, layout_open_slide, layout_patch,
+    layout_swap, layout_toggle_settings, normalize,
 };
 use crate::{messages, sidebar, studio::Studio};
 
 const THIN_W: f32 = 12.0;
-const RAIL_W: f32 = 36.0;
+const RAIL_W: f32 = crate::tokens::RAIL;
 const HANDLE_W: f32 = 5.0;
-const ICON_BTN: f32 = 32.0;
+const ICON_BTN: f32 = crate::tokens::RAIL_BTN;
 const HEADER_H: f32 = 36.0;
 
 /// A slide pulled out of its rail. Not persisted: it is window state.
@@ -40,7 +41,7 @@ struct Popout {
 }
 
 struct Built {
-    key: (RailMode, SlideId, bool),
+    key: (RailMode, SlideId, bool, bool),
     /// The panel body, so a width drag can resize it without remounting.
     body: Option<El>,
 }
@@ -119,8 +120,14 @@ impl WorkspaceChrome {
             return;
         }
         let patch = match side {
-            Side::Left => LayoutPatch { left: Some(id), ..LayoutPatch::default() },
-            Side::Right => LayoutPatch { right: Some(id), ..LayoutPatch::default() },
+            Side::Left => LayoutPatch {
+                left: Some(id),
+                ..LayoutPatch::default()
+            },
+            Side::Right => LayoutPatch {
+                right: Some(id),
+                ..LayoutPatch::default()
+            },
         };
         self.commit(layout_patch(&layout, &patch));
         if mode != RailMode::Open {
@@ -158,7 +165,11 @@ impl WorkspaceChrome {
 
     fn set_mode(&self, side: Side, mode: RailMode) {
         if self.was_narrow.get() {
-            let next = if mode == RailMode::Open { Some(side) } else { None };
+            let next = if mode == RailMode::Open {
+                Some(side)
+            } else {
+                None
+            };
             self.narrow_side.set_if_changed(next);
             return;
         }
@@ -185,8 +196,14 @@ impl WorkspaceChrome {
             return;
         }
         let patch = match side {
-            Side::Left => LayoutPatch { left_width: Some(width), ..LayoutPatch::default() },
-            Side::Right => LayoutPatch { right_width: Some(width), ..LayoutPatch::default() },
+            Side::Left => LayoutPatch {
+                left_width: Some(width),
+                ..LayoutPatch::default()
+            },
+            Side::Right => LayoutPatch {
+                right_width: Some(width),
+                ..LayoutPatch::default()
+            },
         };
         self.patch(patch);
     }
@@ -200,7 +217,9 @@ impl WorkspaceChrome {
     /// Collapse every rail that is showing Settings. Used by Escape.
     pub fn collapse_settings(&self) {
         for side in [Side::Left, Side::Right] {
-            if self.display_mode(side) == RailMode::Open && self.layout.get().slide(side) == SlideId::Settings {
+            if self.display_mode(side) == RailMode::Open
+                && self.layout.get().slide(side) == SlideId::Settings
+            {
                 self.collapse_thin(side);
             }
         }
@@ -236,7 +255,8 @@ impl WorkspaceChrome {
         if !slide.popout() {
             return;
         }
-        self.popout.set_if_changed(Some(Popout { slide, fullscreen }));
+        self.popout
+            .set_if_changed(Some(Popout { slide, fullscreen }));
     }
 
     /// Put the slide back in its rail.
@@ -247,7 +267,10 @@ impl WorkspaceChrome {
     /// Full window, or the floating frame.
     pub fn toggle_popout_fullscreen(&self) {
         let Some(pop) = self.popout.get() else { return };
-        self.popout.set_if_changed(Some(Popout { fullscreen: !pop.fullscreen, ..pop }));
+        self.popout.set_if_changed(Some(Popout {
+            fullscreen: !pop.fullscreen,
+            ..pop
+        }));
     }
 
     /// Viewport bookkeeping. `width` and `layout` are read by the caller so a
@@ -353,7 +376,8 @@ pub(crate) fn side(ui: &Ui, chrome: WorkspaceChrome, which: Side, studio: Studio
         let mode = shown_mode(window_w, narrow_side, layout, which);
         let slide = layout.slide(which);
         let hide_body = popped.is_some_and(|p| p.slide == slide);
-        let key = (mode, slide, hide_body);
+        let compact = which == Side::Left && crate::chrome::compact_now();
+        let key = (mode, slide, hide_body, compact);
         let same = built.borrow().as_ref().is_some_and(|b| b.key == key);
         if !same {
             let built = built.clone();
@@ -362,11 +386,20 @@ pub(crate) fn side(ui: &Ui, chrome: WorkspaceChrome, which: Side, studio: Studio
             let chrome = chrome_b.clone();
             let studio = studio_b.clone();
             untrack(move || {
-                let body = mount(&ui, &root, &chrome, which, mode, slide, hide_body, &studio);
-                *built.borrow_mut() = Some(Built { key, body });
+                if compact {
+                    root.clear();
+                    *built.borrow_mut() = Some(Built { key, body: None });
+                } else {
+                    let body = mount(&ui, &root, &chrome, which, mode, slide, hide_body, &studio);
+                    *built.borrow_mut() = Some(Built { key, body });
+                }
             });
         }
-        let total = side_width(mode, layout.width(which));
+        let total = if compact {
+            0.0
+        } else {
+            side_width(mode, layout.width(which))
+        };
         root_b.clone().layout(|l| {
             l.width = Length::Px(total);
             l.min_width = Length::Px(total);
@@ -444,10 +477,19 @@ fn popout_host(ui: &Ui, chrome: &WorkspaceChrome, host: &El) {
     });
 }
 
-fn shown_mode(window_w: f32, narrow_side: Option<Side>, layout: WorkspaceLayout, side: Side) -> RailMode {
+fn shown_mode(
+    window_w: f32,
+    narrow_side: Option<Side>,
+    layout: WorkspaceLayout,
+    side: Side,
+) -> RailMode {
     let narrow = window_w > 0.0 && window_w <= NARROW_MAX;
     if narrow {
-        if narrow_side == Some(side) { RailMode::Open } else { RailMode::Icons }
+        if narrow_side == Some(side) {
+            RailMode::Open
+        } else {
+            RailMode::Icons
+        }
     } else {
         layout.rail(side)
     }
@@ -498,9 +540,21 @@ fn mount(
 fn thin_strip(ui: &Ui, chrome: &WorkspaceChrome, side: Side) -> El {
     let colors = ui.theme().colors.clone();
     let line = hairline(&colors);
-    let label_id = if side == Side::Left { "rail-expand-left" } else { "rail-expand-right" };
-    let edge = if side == Side::Left { BorderEdge::End } else { BorderEdge::Start };
-    let glyph = if side == Side::Left { w::Icon::ChevronRight } else { w::Icon::ChevronLeft };
+    let label_id = if side == Side::Left {
+        "rail-expand-left"
+    } else {
+        "rail-expand-right"
+    };
+    let edge = if side == Side::Left {
+        BorderEdge::End
+    } else {
+        BorderEdge::Start
+    };
+    let glyph = if side == Side::Left {
+        w::Icon::ChevronRight
+    } else {
+        w::Icon::ChevronLeft
+    };
     let chrome = chrome.clone();
     let u = ui.clone();
     let btn = ui
@@ -517,14 +571,18 @@ fn thin_strip(ui: &Ui, chrome: &WorkspaceChrome, side: Side) -> El {
         .style(
             StylePatch::new()
                 .background(colors.card)
-                .foreground(colors.muted.with_alpha(0.55))
+                .foreground(crate::tokens::icon_fg(&colors))
                 .border_side(edge, BorderSide::new(1.0, line)),
         )
         .child(w::icon(ui, glyph, 10.0))
         .on_click(move || chrome.set_mode(side, RailMode::Icons))
         .semantics({
             let u = u.clone();
-            move || Semantics::new(Role::Button).label(messages().text(&u, label_id)).action(Action::Click)
+            move || {
+                Semantics::new(Role::Button)
+                    .label(messages().text(&u, label_id))
+                    .action(Action::Click)
+            }
         });
     w::tooltip(&btn, {
         let u = ui.clone();
@@ -536,15 +594,28 @@ fn thin_strip(ui: &Ui, chrome: &WorkspaceChrome, side: Side) -> El {
 fn icon_rail(ui: &Ui, chrome: &WorkspaceChrome, side: Side, open: bool) -> El {
     let colors = ui.theme().colors.clone();
     let line = hairline(&colors);
-    let edge = if side == Side::Left { BorderEdge::End } else { BorderEdge::Start };
-    let label_id = if side == Side::Left { "rail-left" } else { "rail-right" };
+    let edge = if side == Side::Left {
+        BorderEdge::End
+    } else {
+        BorderEdge::Start
+    };
+    let label_id = if side == Side::Left {
+        "rail-left"
+    } else {
+        "rail-right"
+    };
     let rail_bg = colors.card.mix_oklab(colors.bg, 0.08);
     let mut rail = ui
         .el("slide_rail")
         .column()
         .align(Align::Center)
-        .gap(3.0)
-        .padding(Insets { top: 6.0, end: 0.0, bottom: 6.0, start: 0.0 })
+        .gap(4.0)
+        .padding(Insets {
+            top: 8.0,
+            end: 0.0,
+            bottom: 8.0,
+            start: 0.0,
+        })
         .layout(|l| {
             l.width = Length::Px(RAIL_W);
             l.min_width = Length::Px(RAIL_W);
@@ -569,7 +640,8 @@ fn icon_rail(ui: &Ui, chrome: &WorkspaceChrome, side: Side, open: bool) -> El {
             rail = rail.child(rail_divider(ui, &colors));
         }
     }
-    rail.child(w::spacer(ui)).child(collapse_button(ui, chrome, side))
+    rail.child(w::spacer(ui))
+        .child(collapse_button(ui, chrome, side))
 }
 
 fn chevron_button(ui: &Ui, chrome: &WorkspaceChrome, side: Side, open: bool) -> El {
@@ -578,13 +650,21 @@ fn chevron_button(ui: &Ui, chrome: &WorkspaceChrome, side: Side, open: bool) -> 
         (Side::Left, true) | (Side::Right, false) => w::Icon::ChevronLeft,
         (Side::Left, false) | (Side::Right, true) => w::Icon::ChevronRight,
     };
-    let label_id = if open { "rail-collapse-panel" } else { "rail-open-panel" };
-    let title_id = if open { "rail-collapse-panel-title" } else { "rail-open-panel" };
+    let label_id = if open {
+        "rail-collapse-panel"
+    } else {
+        "rail-open-panel"
+    };
+    let title_id = if open {
+        "rail-collapse-panel-title"
+    } else {
+        "rail-open-panel"
+    };
     let chrome = chrome.clone();
     icon_btn(
         ui,
         glyph,
-        12.0,
+        crate::tokens::RAIL_GLYPH - 2.0,
         ICON_BTN,
         msg(ui, label_id),
         msg(ui, title_id),
@@ -594,14 +674,21 @@ fn chevron_button(ui: &Ui, chrome: &WorkspaceChrome, side: Side, open: bool) -> 
     )
 }
 
-fn slide_button(ui: &Ui, chrome: &WorkspaceChrome, side: Side, id: SlideId, on: bool, open: bool) -> El {
+fn slide_button(
+    ui: &Ui,
+    chrome: &WorkspaceChrome,
+    side: Side,
+    id: SlideId,
+    on: bool,
+    open: bool,
+) -> El {
     let colors = ui.theme().colors.clone();
     let name = msg(ui, id.label_id());
     let chrome = chrome.clone();
     icon_btn(
         ui,
         slide_icon(id),
-        15.0,
+        crate::tokens::RAIL_GLYPH,
         ICON_BTN,
         name.clone(),
         name,
@@ -634,7 +721,12 @@ fn rail_divider(ui: &Ui, colors: &remedy_ui::style::ColorRoles) -> El {
         .layout(|l| {
             l.width = Length::Px(20.0);
             l.height = Length::Px(1.0);
-            l.margin = Insets { top: 4.0, end: 0.0, bottom: 4.0, start: 0.0 };
+            l.margin = Insets {
+                top: 4.0,
+                end: 0.0,
+                bottom: 4.0,
+                start: 0.0,
+            };
             l.shrink = 0.0;
         })
         .style(StylePatch::new().background(line))
@@ -678,7 +770,12 @@ fn swap_header(
     let mut header = w::row(ui)
         .align(Align::Center)
         .gap(2.0)
-        .padding(Insets { top: 0.0, end: 8.0, bottom: 0.0, start: 8.0 })
+        .padding(Insets {
+            top: 0.0,
+            end: 8.0,
+            bottom: 0.0,
+            start: 8.0,
+        })
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.height = Length::Px(HEADER_H);
@@ -763,10 +860,14 @@ fn swap_button(ui: &Ui, chrome: &WorkspaceChrome, colors: &remedy_ui::style::Col
             l.shrink = 0.0;
         })
         .style(quiet_style(colors))
-        .child(w::icon(ui, w::Icon::ChevronLeft, 10.0))
-        .child(w::icon(ui, w::Icon::ChevronRight, 10.0))
+        .child(w::icon(ui, w::Icon::ChevronLeft, 12.0))
+        .child(w::icon(ui, w::Icon::ChevronRight, 12.0))
         .on_click(move || chrome.swap())
-        .semantics(Semantics::new(Role::Button).label(name.clone()).action(Action::Click));
+        .semantics(
+            Semantics::new(Role::Button)
+                .label(name.clone())
+                .action(Action::Click),
+        );
     w::tooltip(&btn, name);
     btn
 }
@@ -776,7 +877,8 @@ fn swap_button(ui: &Ui, chrome: &WorkspaceChrome, colors: &remedy_ui::style::Col
 /// popout dialog can take Escape.
 pub(crate) fn dismiss_settings(chrome: &WorkspaceChrome) -> bool {
     let open = [Side::Left, Side::Right].into_iter().any(|side| {
-        chrome.display_mode(side) == RailMode::Open && chrome.layout().slide(side) == SlideId::Settings
+        chrome.display_mode(side) == RailMode::Open
+            && chrome.layout().slide(side) == SlideId::Settings
     });
     if !open {
         return false;
@@ -817,7 +919,12 @@ fn blurb(ui: &Ui, slide: SlideId) -> El {
     let u = ui.clone();
     let id = slide.blurb_id();
     w::column(ui)
-        .padding(Insets { top: 16.0, end: 16.0, bottom: 16.0, start: 16.0 })
+        .padding(Insets {
+            top: 16.0,
+            end: 16.0,
+            bottom: 16.0,
+            start: 16.0,
+        })
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.height = Length::Percent(1.0);
@@ -846,7 +953,11 @@ fn resize_handle(ui: &Ui, chrome: &WorkspaceChrome, side: Side) -> El {
     let chrome_down = chrome.clone();
     let chrome_move = chrome.clone();
     let chrome_key = chrome.clone();
-    let label_id = if side == Side::Left { "rail-resize-left" } else { "rail-resize-right" };
+    let label_id = if side == Side::Left {
+        "rail-resize-left"
+    } else {
+        "rail-resize-right"
+    };
     let handle = ui
         .el("resize_handle")
         .row()
@@ -880,7 +991,11 @@ fn resize_handle(ui: &Ui, chrome: &WorkspaceChrome, side: Side) -> El {
             }
             PointerPhase::Move => match move_drag.get() {
                 Some((x0, w0)) => {
-                    let dx = if side == Side::Left { e.position.x - x0 } else { x0 - e.position.x };
+                    let dx = if side == Side::Left {
+                        e.position.x - x0
+                    } else {
+                        x0 - e.position.x
+                    };
                     let next = f64::from(w0) + f64::from(dx);
                     chrome_move.set_width(side, clamp_rail_width(next, w0));
                     true
@@ -953,7 +1068,9 @@ fn popout_layer(ui: &Ui, chrome: &WorkspaceChrome, pop: Popout, size: Size) -> E
             }
         })
         .style({
-            let mut s = StylePatch::new().background(colors.bg).foreground(colors.text);
+            let mut s = StylePatch::new()
+                .background(colors.bg)
+                .foreground(colors.text);
             if pop.fullscreen {
                 s = s.radius(0.0);
             } else {
@@ -965,7 +1082,11 @@ fn popout_layer(ui: &Ui, chrome: &WorkspaceChrome, pop: Popout, size: Size) -> E
             }
             s
         })
-        .semantics(Semantics::new(Role::Dialog).label(title.clone()).modal(true))
+        .semantics(
+            Semantics::new(Role::Dialog)
+                .label(title.clone())
+                .modal(true),
+        )
         .on_key({
             let chrome = chrome.clone();
             move |e| {
@@ -992,8 +1113,22 @@ fn popout_chrome(
     colors: &remedy_ui::style::ColorRoles,
     line: Color,
 ) -> El {
-    let hint = msg(ui, if pop.fullscreen { "popout-esc-exit" } else { "popout-esc-close" });
-    let full_label = msg(ui, if pop.fullscreen { "popout-exit-fullscreen" } else { "popout-fullscreen" });
+    let hint = msg(
+        ui,
+        if pop.fullscreen {
+            "popout-esc-exit"
+        } else {
+            "popout-esc-close"
+        },
+    );
+    let full_label = msg(
+        ui,
+        if pop.fullscreen {
+            "popout-exit-fullscreen"
+        } else {
+            "popout-fullscreen"
+        },
+    );
     let close_title = msg(ui, "popout-close-title");
     let close_label = msg(ui, "popout-close");
     let toggle = chrome.clone();
@@ -1001,7 +1136,12 @@ fn popout_chrome(
     w::row(ui)
         .align(Align::Center)
         .gap(8.0)
-        .padding(Insets { top: 0.0, end: 12.0, bottom: 0.0, start: 12.0 })
+        .padding(Insets {
+            top: 0.0,
+            end: 12.0,
+            bottom: 0.0,
+            start: 12.0,
+        })
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.height = Length::Px(44.0);
@@ -1025,12 +1165,28 @@ fn popout_chrome(
                 }),
         )
         .child(w::text(ui, hint).variant("muted"))
-        .child(text_btn(ui, &full_label, &full_label, colors.text, colors.card, colors.line, move || {
-            toggle.toggle_popout_fullscreen();
-        }))
-        .child(text_btn(ui, &close_label, &close_title, Color::WHITE, colors.danger, None, move || {
-            close.close_popout();
-        }))
+        .child(text_btn(
+            ui,
+            &full_label,
+            &full_label,
+            colors.text,
+            colors.card,
+            colors.line,
+            move || {
+                toggle.toggle_popout_fullscreen();
+            },
+        ))
+        .child(text_btn(
+            ui,
+            &close_label,
+            &close_title,
+            Color::WHITE,
+            colors.danger,
+            None,
+            move || {
+                close.close_popout();
+            },
+        ))
 }
 
 fn text_btn(
@@ -1051,11 +1207,20 @@ fn text_btn(
         .row()
         .align(Align::Center)
         .justify(Justify::Center)
-        .padding(Insets { top: 6.0, end: 12.0, bottom: 6.0, start: 12.0 })
+        .padding(Insets {
+            top: 6.0,
+            end: 12.0,
+            bottom: 6.0,
+            start: 12.0,
+        })
         .style(style)
         .child(w::text(ui, label.to_string()))
         .on_click(on_press)
-        .semantics(Semantics::new(Role::Button).label(title.to_string()).action(Action::Click));
+        .semantics(
+            Semantics::new(Role::Button)
+                .label(title.to_string())
+                .action(Action::Click),
+        );
     w::tooltip(&btn, title.to_string());
     btn
 }
@@ -1083,7 +1248,9 @@ fn icon_btn(
     current: bool,
     on_press: impl Fn() + 'static,
 ) -> El {
-    let mut sem = Semantics::new(Role::Button).label(label).action(Action::Click);
+    let mut sem = Semantics::new(Role::Button)
+        .label(label)
+        .action(Action::Click);
     if current {
         sem = sem.selected(true).current(Current::Page);
     }
@@ -1110,7 +1277,7 @@ fn icon_btn(
 fn quiet_style(colors: &remedy_ui::style::ColorRoles) -> StylePatch {
     StylePatch::new()
         .background(Color::TRANSPARENT)
-        .foreground(colors.muted)
+        .foreground(crate::tokens::icon_fg(colors))
         .border(Color::TRANSPARENT)
         .border_width(1.0)
         .radius(8.0)
@@ -1121,14 +1288,14 @@ fn mark_style(colors: &remedy_ui::style::ColorRoles, current: bool, open: bool) 
         StylePatch::new()
             .background(colors.accent.mix_oklab(colors.panel, 0.78))
             .foreground(colors.accent)
-            .border(colors.accent.with_alpha(0.40))
+            .border(colors.accent.with_alpha(0.45))
             .border_width(1.0)
             .radius(8.0)
     } else if current {
         StylePatch::new()
-            .background(colors.accent.with_alpha(0.10))
+            .background(colors.accent.with_alpha(0.14))
             .foreground(colors.accent)
-            .border(colors.accent.with_alpha(0.22))
+            .border(colors.accent.with_alpha(0.30))
             .border_width(1.0)
             .radius(8.0)
     } else {

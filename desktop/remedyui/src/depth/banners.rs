@@ -1,20 +1,21 @@
 //! Approval, plan, life, library, stall, cost, todos, and the live trace.
 
 use super::logic::{self, show_life_banner};
+use super::{Approval, submit};
 use super::{
-    approve_plan, background_title, dismiss_library, focused_steps, install_library, refresh_banners,
-    request_plan_changes, resolve_approval, send_life, show_plan, stall_seconds, visible_approval,
-    SubmitKind,
+    SubmitKind, approve_plan, background_title, dismiss_library, focused_steps, install_library,
+    refresh_banners, request_plan_changes, resolve_approval, send_life, show_plan, stall_seconds,
+    visible_approval,
 };
-use super::{submit, Approval};
 use crate::messages;
 use crate::studio::Studio;
 use crate::work::WorkStep;
+use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::layout::{Align, Length};
 use remedy_ui::style::StylePatch;
 use remedy_ui::widgets as w;
-use remedy_ui::{show, El, Ui};
+use remedy_ui::{El, Ui, show};
 
 /// Approval, life-task, and plan, in that order, above the feed.
 pub fn lead(ui: &Ui, studio: Studio) -> El {
@@ -54,7 +55,7 @@ pub fn status(ui: &Ui, studio: Studio) -> El {
         .child(remote(ui, studio.clone()))
         .child(background(ui, studio.clone()))
         .child(stall(ui, studio.clone()))
-        .child(todos(ui, studio.clone()))
+        // BUILD todos render in the Actions pane, not under the chat bubbles.
         .child(progress(ui, studio.clone()))
         .child(trace(ui, studio))
 }
@@ -115,30 +116,42 @@ fn approval_card(ui: &Ui, studio: Studio) -> El {
     } else {
         card.summary.clone()
     };
-    card_shell(ui, &messages().text(ui, "approval-title"), &summary).child(w::row(ui).gap(8.0).child(
-        scope_button(ui, studio.clone(), &card, "approval-once", "once", true),
-    ).child(scope_button(
-        ui,
-        studio.clone(),
-        &card,
-        "approval-session",
-        "session",
-        true,
-    )).child(scope_button(
-        ui,
-        studio.clone(),
-        &card,
-        "approval-always",
-        "always",
-        true,
-    )).child(scope_button(
-        ui,
-        studio,
-        &card,
-        "approval-deny",
-        "once",
-        false,
-    )))
+    card_shell(ui, &messages().text(ui, "approval-title"), &summary).child(
+        w::row(ui)
+            .gap(8.0)
+            .child(scope_button(
+                ui,
+                studio.clone(),
+                &card,
+                "approval-once",
+                "once",
+                true,
+            ))
+            .child(scope_button(
+                ui,
+                studio.clone(),
+                &card,
+                "approval-session",
+                "session",
+                true,
+            ))
+            .child(scope_button(
+                ui,
+                studio.clone(),
+                &card,
+                "approval-always",
+                "always",
+                true,
+            ))
+            .child(scope_button(
+                ui,
+                studio,
+                &card,
+                "approval-deny",
+                "once",
+                false,
+            )),
+    )
 }
 
 fn scope_button(
@@ -156,7 +169,11 @@ fn scope_button(
         move || messages().text(&u, label),
         move || resolve_approval(&studio, &id, approve, scope),
     )
-    .variant(if approve && scope == "once" { "primary" } else { "quiet" })
+    .variant(if approve && scope == "once" {
+        "primary"
+    } else {
+        "quiet"
+    })
 }
 
 fn plan(ui: &Ui, studio: Studio) -> El {
@@ -197,27 +214,35 @@ fn plan_card(ui: &Ui, studio: Studio) -> El {
             w::row(ui)
                 .gap(8.0)
                 .child(
-                    w::button(ui, move || messages().text(&u, "plan-approve"), move || {
-                        approve_plan(&st_ok)
-                    })
+                    w::button(
+                        ui,
+                        move || messages().text(&u, "plan-approve"),
+                        move || approve_plan(&st_ok),
+                    )
                     .variant("primary"),
                 )
-                .child(w::button(
-                    ui,
-                    {
-                        let u = ui.clone();
-                        move || messages().text(&u, "plan-changes")
-                    },
-                    move || request_plan_changes(&st_no),
-                ).variant("quiet"))
-                .child(w::button(
-                    ui,
-                    {
-                        let u = ui.clone();
-                        move || messages().text(&u, "plan-refresh")
-                    },
-                    move || refresh_banners(&st_re),
-                ).variant("quiet")),
+                .child(
+                    w::button(
+                        ui,
+                        {
+                            let u = ui.clone();
+                            move || messages().text(&u, "plan-changes")
+                        },
+                        move || request_plan_changes(&st_no),
+                    )
+                    .variant("quiet"),
+                )
+                .child(
+                    w::button(
+                        ui,
+                        {
+                            let u = ui.clone();
+                            move || messages().text(&u, "plan-refresh")
+                        },
+                        move || refresh_banners(&st_re),
+                    )
+                    .variant("quiet"),
+                ),
         )
 }
 
@@ -244,9 +269,8 @@ fn life_card(ui: &Ui, studio: Studio) -> El {
     let yes = word_button(ui, studio.clone(), "life-yes", "yes");
     let no = word_button(ui, studio.clone(), "life-no", "no");
     let explain = word_button(ui, studio, "life-explain", "explain");
-    card_shell(ui, &messages().text(ui, "life-title"), &line).child(
-        w::row(ui).gap(8.0).child(yes).child(no).child(explain),
-    )
+    card_shell(ui, &messages().text(ui, "life-title"), &line)
+        .child(w::row(ui).gap(8.0).child(yes).child(no).child(explain))
 }
 
 fn word_button(ui: &Ui, studio: Studio, label: &'static str, word: &'static str) -> El {
@@ -275,31 +299,40 @@ fn library_card(ui: &Ui, studio: Studio) -> El {
         w::row(ui)
             .gap(8.0)
             .child(
-                w::button(ui, move || messages().text(&u, "library-install"), move || {
-                    install_library(&st_in)
-                })
+                w::button(
+                    ui,
+                    move || messages().text(&u, "library-install"),
+                    move || install_library(&st_in),
+                )
                 .variant("primary"),
             )
-            .child(w::button(
-                ui,
-                {
-                    let u = ui.clone();
-                    move || messages().text(&u, "library-dismiss")
-                },
-                move || dismiss_library(&st_out),
-            ).variant("quiet")),
+            .child(
+                w::button(
+                    ui,
+                    {
+                        let u = ui.clone();
+                        move || messages().text(&u, "library-dismiss")
+                    },
+                    move || dismiss_library(&st_out),
+                )
+                .variant("quiet"),
+            ),
     )
 }
 
 fn remote(ui: &Ui, studio: Studio) -> El {
     let st = studio.clone();
     let u = ui.clone();
-    show(ui, move || st.depth.remote_busy.get(), move || {
-        let label = u.clone();
-        w::text(&u, "")
-            .variant("muted")
-            .text(move || messages().text(&label, "remote-busy"))
-    })
+    show(
+        ui,
+        move || st.depth.remote_busy.get(),
+        move || {
+            let label = u.clone();
+            w::text(&u, "")
+                .variant("muted")
+                .text(move || messages().text(&label, "remote-busy"))
+        },
+    )
     .el()
 }
 
@@ -313,12 +346,10 @@ fn background(ui: &Ui, studio: Studio) -> El {
         move || {
             let st = st_body.clone();
             let label = u.clone();
-            w::text(&u, "")
-                .variant("muted")
-                .text(move || {
-                    let title = background_title(&st).unwrap_or_default();
-                    format!("{} {title}", messages().text(&label, "background-job"))
-                })
+            w::text(&u, "").variant("muted").text(move || {
+                let title = background_title(&st).unwrap_or_default();
+                format!("{} {title}", messages().text(&label, "background-job"))
+            })
         },
     )
     .el()
@@ -345,27 +376,36 @@ fn stall_card(ui: &Ui, studio: Studio) -> El {
     card_shell(ui, &title, "").child(
         w::row(ui)
             .gap(8.0)
-            .child(w::button(
-                ui,
-                move || messages().text(&u, "stall-hide"),
-                move || st_hide.depth.stall_hidden.set(true),
-            ).variant("quiet"))
-            .child(w::button(
-                ui,
-                {
-                    let u = ui.clone();
-                    move || messages().text(&u, "stall-stop")
-                },
-                move || st_stop.stop(),
-            ).variant("quiet"))
-            .child(w::button(
-                ui,
-                {
-                    let u = ui.clone();
-                    move || messages().text(&u, "stall-retry")
-                },
-                move || retry_outgoing(&st_retry),
-            ).variant("primary")),
+            .child(
+                w::button(
+                    ui,
+                    move || messages().text(&u, "stall-hide"),
+                    move || st_hide.depth.stall_hidden.set(true),
+                )
+                .variant("quiet"),
+            )
+            .child(
+                w::button(
+                    ui,
+                    {
+                        let u = ui.clone();
+                        move || messages().text(&u, "stall-stop")
+                    },
+                    move || st_stop.stop(),
+                )
+                .variant("quiet"),
+            )
+            .child(
+                w::button(
+                    ui,
+                    {
+                        let u = ui.clone();
+                        move || messages().text(&u, "stall-retry")
+                    },
+                    move || retry_outgoing(&st_retry),
+                )
+                .variant("primary"),
+            ),
     )
 }
 
@@ -399,19 +439,24 @@ fn todos(ui: &Ui, studio: Studio) -> El {
                 .gap(2.0)
                 .child(w::text(&u, title).variant("strong"));
             let rows = studio.depth.todos.clone();
-            w::for_each(&col, rows, |item: &super::TodoItem| {
-                if item.id.is_empty() {
-                    item.content.clone()
-                } else {
-                    item.id.clone()
-                }
-            }, {
-                let u = u.clone();
-                move |item| {
-                    let line = format!("{}  {}", mark(&item.status), item.content);
-                    w::text(&u, line).variant("muted")
-                }
-            })
+            w::for_each(
+                &col,
+                rows,
+                |item: &super::TodoItem| {
+                    if item.id.is_empty() {
+                        item.content.clone()
+                    } else {
+                        item.id.clone()
+                    }
+                },
+                {
+                    let u = u.clone();
+                    move |item| {
+                        let line = format!("{}  {}", mark(&item.status), item.content);
+                        w::text(&u, line).variant("muted")
+                    }
+                },
+            )
         },
     )
     .el()
@@ -450,31 +495,67 @@ fn trace(ui: &Ui, studio: Studio) -> El {
             let open = studio.depth.trace_open.clone();
             let toggle = open.clone();
             let label = u.clone();
+            let colors = u.theme().colors.clone();
+            let line = colors.line.unwrap_or(colors.muted);
+            let radius = u.theme().radii.medium;
+            let open_style = open.clone();
             let button = w::button(
                 &u,
                 move || messages().text(&label, "trace"),
                 move || toggle.update(|v| *v = !*v),
             )
-            .variant("quiet");
+            .variant("quiet")
+            .style({
+                let colors = colors.clone();
+                move || {
+                    let on = open_style.get();
+                    StylePatch::new()
+                        .weight(500.0)
+                        .foreground(if on { colors.text } else { colors.muted })
+                        .border(line)
+                        .border_width(1.0)
+                        .radius(radius)
+                }
+            })
+            .semantics({
+                let u = u.clone();
+                let open = open.clone();
+                move || {
+                    Semantics::new(Role::Button)
+                        .label(messages().text(&u, "trace"))
+                        .expanded(open.get())
+                        .action(Action::Click)
+                }
+            });
             let lines_ui = u.clone();
             let rows = steps.clone();
-            w::column(&u).gap(2.0).child(button).child(
-                show(&u, move || open.get(), move || {
-                    let host = w::column(&lines_ui).gap(2.0);
-                    w::for_each(&host, rows.clone(), step_key, {
-                        let u = lines_ui.clone();
-                        move |step| {
-                            let line = logic::trace_lines(std::slice::from_ref(step))
-                                .into_iter()
-                                .next()
-                                .map(|(name, state)| format!("{name}  {state}"))
-                                .unwrap_or_default();
-                            w::text(&u, line).variant("muted")
-                        }
-                    })
-                })
-                .el(),
-            )
+            w::column(&u)
+                .gap(6.0)
+                .child(w::row(&u).child(button.layout(|l| {
+                    l.shrink = 0.0;
+                    l.grow = 0.0;
+                })))
+                .child(
+                    show(
+                        &u,
+                        move || open.get(),
+                        move || {
+                            let host = w::column(&lines_ui).gap(2.0);
+                            w::for_each(&host, rows.clone(), step_key, {
+                                let u = lines_ui.clone();
+                                move |step| {
+                                    let line = logic::trace_lines(std::slice::from_ref(step))
+                                        .into_iter()
+                                        .next()
+                                        .map(|(name, state)| format!("{name}  {state}"))
+                                        .unwrap_or_default();
+                                    w::text(&u, line).variant("muted")
+                                }
+                            })
+                        },
+                    )
+                    .el(),
+                )
         },
     )
     .el()
@@ -493,7 +574,13 @@ fn ticker_row(ui: &Ui, studio: Studio) -> El {
     let run = studio.depth.usage_run.get();
     let session = studio.depth.usage_session.get();
     let hide_cost = studio.depth.hide_cost.get();
-    let run_line = usage_line(&messages().text(ui, "cost-run"), run.input, run.output, run.cost, hide_cost);
+    let run_line = usage_line(
+        &messages().text(ui, "cost-run"),
+        run.input,
+        run.output,
+        run.cost,
+        hide_cost,
+    );
     let session_line = usage_line(
         &messages().text(ui, "cost-session"),
         session.input,
@@ -515,19 +602,25 @@ fn ticker_row(ui: &Ui, studio: Studio) -> El {
         })
         .child(w::text(ui, run_line).variant("muted"))
         .child(w::text(ui, session_line).variant("muted"))
-        .child(w::button(
-            ui,
-            move || messages().text(&u, "cost-hide"),
-            move || st_hide.depth.hide_ticker.set(true),
-        ).variant("quiet"))
-        .child(w::button(
-            ui,
-            {
-                let u = ui.clone();
-                move || messages().text(&u, "cost-hide-price")
-            },
-            move || st_cost.depth.hide_cost.update(|v| *v = !*v),
-        ).variant("quiet"))
+        .child(
+            w::button(
+                ui,
+                move || messages().text(&u, "cost-hide"),
+                move || st_hide.depth.hide_ticker.set(true),
+            )
+            .variant("quiet"),
+        )
+        .child(
+            w::button(
+                ui,
+                {
+                    let u = ui.clone();
+                    move || messages().text(&u, "cost-hide-price")
+                },
+                move || st_cost.depth.hide_cost.update(|v| *v = !*v),
+            )
+            .variant("quiet"),
+        )
 }
 
 fn usage_line(label: &str, input: u64, output: u64, cost: Option<f64>, hide_cost: bool) -> String {

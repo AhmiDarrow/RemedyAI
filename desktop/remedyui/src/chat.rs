@@ -8,28 +8,17 @@ use crate::work::{self, WorkStep};
 use crate::{messages, say};
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
+use remedy_ui::core::Vec2;
+use remedy_ui::input::Key;
 use remedy_ui::layout::{Align, Justify, Length};
 use remedy_ui::reactive::Signal;
 use remedy_ui::style::{BorderEdge, BorderSide, StylePatch};
-use remedy_ui::core::Vec2;
-use remedy_ui::input::Key;
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui, show};
 
-/// The chat column: header, feed or empty well, composer.
+/// The chat well: session header, the two-pane workspace, composer.
 pub fn well(ui: &Ui, studio: Studio) -> El {
     let colors = ui.theme().colors.clone();
-    let thread = w::column(ui)
-        .layout(|l| {
-            l.grow = 1.0;
-            l.basis = Length::Px(0.0);
-            l.min_width = Length::Px(0.0);
-            l.min_height = Length::Px(0.0);
-            l.width = Length::Percent(1.0);
-        })
-        .child(depth::banners::lead(ui, studio.clone()))
-        .child(feed(ui, studio.clone()))
-        .child(depth::banners::status(ui, studio.clone()));
     w::column(ui)
         .style(StylePatch::new().background(colors.bg))
         .layout(|l| {
@@ -47,7 +36,7 @@ pub fn well(ui: &Ui, studio: Studio) -> El {
                     l.min_height = Length::Px(0.0);
                     l.width = Length::Percent(1.0);
                 })
-                .child(thread)
+                .child(crate::chat_split::workspace(ui, studio.clone()))
                 .child(depth::panels::side(ui, studio.clone())),
         )
         .child(depth::banners::ticker(ui, studio.clone()))
@@ -152,9 +141,35 @@ fn header(ui: &Ui, studio: Studio) -> El {
                 let u = ui.clone();
                 let accent = colors.accent;
                 move || {
-                    w::text(&u, "Live")
-                        .variant("muted")
-                        .style(StylePatch::new().foreground(accent))
+                    w::row(&u)
+                        .align(Align::Center)
+                        .gap(6.0)
+                        .padding(Insets {
+                            top: 4.0,
+                            end: 8.0,
+                            bottom: 4.0,
+                            start: 8.0,
+                        })
+                        .style(
+                            StylePatch::new()
+                                .background(accent.with_alpha(0.16))
+                                .foreground(accent)
+                                .radius(999.0),
+                        )
+                        .child(
+                            u.el("live-dot")
+                                .style(StylePatch::new().background(accent).radius(999.0))
+                                .layout(|l| {
+                                    l.width = Length::Px(6.0);
+                                    l.height = Length::Px(6.0);
+                                    l.min_width = Length::Px(6.0);
+                                    l.shrink = 0.0;
+                                }),
+                        )
+                        .child(
+                            w::text(&u, "Live")
+                                .style(StylePatch::new().foreground(accent).weight(500.0)),
+                        )
                 }
             })
             .el(),
@@ -178,9 +193,14 @@ fn header(ui: &Ui, studio: Studio) -> El {
             )
             .semantics({
                 let u = ui.clone();
+                let st = studio.clone();
                 move || {
                     Semantics::new(Role::Button)
-                        .label(messages().text(&u, "work-mode"))
+                        .label(format!(
+                            "{} — {}",
+                            messages().text(&u, "work-mode"),
+                            st.mode.get().label()
+                        ))
                         .action(Action::Click)
                 }
             }),
@@ -203,7 +223,7 @@ fn header(ui: &Ui, studio: Studio) -> El {
         .child(chips)
 }
 
-fn feed(ui: &Ui, studio: Studio) -> El {
+pub(crate) fn feed(ui: &Ui, studio: Studio) -> El {
     let st = studio.clone();
     let empty =
         move || st.messages.get().is_empty() && st.partial.get().is_empty() && !st.streaming.get();
@@ -242,13 +262,22 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
         let mut msgs = st.messages.get();
         let partial = st.partial.get();
         let streaming = st.streaming.get();
+        if streaming {
+            if let Some(id) = st.live_message_id.get() {
+                msgs.retain(|m| m.id != id);
+            }
+        }
         if !partial.is_empty() || streaming {
             msgs.push(ChatMessage {
                 streaming: true,
                 ..ChatMessage::plain(
                     "live",
                     "assistant",
-                    if partial.is_empty() { "…".to_string() } else { partial },
+                    if partial.is_empty() {
+                        "…".to_string()
+                    } else {
+                        partial
+                    },
                 )
             });
         }
@@ -304,7 +333,10 @@ fn empty_well(ui: &Ui, studio: Studio) -> El {
         .align(Align::Center)
         .justify(Justify::Center)
         .gap(unit)
-        .layout(|l| l.width = Length::Percent(1.0));
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.wrap = true;
+        });
     for (label_id, prompt_id) in [
         ("starter-help", "starter-help-prompt"),
         ("starter-explore", "starter-explore-prompt"),
@@ -355,72 +387,117 @@ fn empty_well(ui: &Ui, studio: Studio) -> El {
         }))
 }
 
+fn mid_turn_beats(msg: &ChatMessage) -> Vec<String> {
+    msg.steps
+        .iter()
+        .filter_map(|s| s.narration.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn sealed_bubble(ui: &Ui, studio: Studio, text: &str, name: &str) -> El {
+    let body = depth::blocks(ui, text, true, {
+        let st = studio;
+        move |src| st.depth.show_image(src)
+    });
+    message_row(ui, body, false, false, name)
+}
+
 fn saved_turn(ui: &Ui, studio: Studio, msg: &ChatMessage, name: &str) -> El {
     let user = msg.role == "user";
     let system = msg.role == "system";
     let assistant = msg.role == "assistant";
-    let body = depth::blocks(ui, &msg.content, assistant, {
-        let st = studio.clone();
-        move |src| st.depth.show_image(src)
-    });
-    let row = message_row(ui, body, user, system, name);
-    let row = if assistant {
-        w::column(ui)
-            .gap(4.0)
-            .layout(|l| l.width = Length::Percent(1.0))
-            .child(row)
-            .child(reactions(ui, studio.clone(), msg.id.clone()))
-    } else {
-        w::column(ui)
-            .gap(4.0)
-            .layout(|l| l.width = Length::Percent(1.0))
-            .child(row)
-            .child(agent_reaction(ui, studio.clone(), msg.id.clone()))
-    };
-    if msg.role != "assistant" {
-        return row;
-    }
-    let show_meta = work::visible(
-        &work::summarize(&msg.steps),
-        !msg.thinking.trim().is_empty(),
-    );
+    let beats = mid_turn_beats(msg);
     let show_body = !msg.content.trim().is_empty();
-    if !show_meta {
-        return row;
-    }
-    let steps = msg.steps.clone();
-    let thinking = msg.thinking.clone();
+    let show_meta = assistant
+        && work::visible(
+            &work::summarize(&msg.steps),
+            !msg.thinking.trim().is_empty(),
+        );
+    let unit = ui.theme().spacing.unit;
+    let bubble_gap = if beats.is_empty() { 4.0 } else { unit * 3.0 };
+    let _ = show_meta;
     let mut col = w::column(ui)
-        .gap(2.0)
-        .layout(|l| l.width = Length::Percent(1.0))
-        .child(work_meta(
-            ui,
-            move || steps.clone(),
-            move || thinking.clone(),
-            false,
-        ));
+        .gap(bubble_gap)
+        .layout(|l| l.width = Length::Percent(1.0));
+    for beat in &beats {
+        col = col.child(sealed_bubble(ui, studio.clone(), beat, name));
+    }
     if show_body {
-        col = col.child(row);
+        let body = depth::blocks(ui, &msg.content, assistant, {
+            let st = studio.clone();
+            move |src| st.depth.show_image(src)
+        });
+        col = col.child(message_row(ui, body, user, system, name));
+    }
+    if assistant && (show_body || !beats.is_empty()) {
+        col = col.child(reactions(ui, studio, msg.id.clone()));
+    } else if user {
+        col = col.child(agent_reaction(ui, studio, msg.id.clone()));
     }
     col
 }
 
 fn live_turn(ui: &Ui, studio: Studio) -> El {
-    let steps = {
-        let s = studio.clone();
-        move || s.live_steps.get()
-    };
-    let thinking = {
-        let s = studio.clone();
-        move || s.live_thinking.get()
-    };
+    let unit = ui.theme().spacing.unit;
+    let beats: Signal<Vec<(usize, String)>> = Signal::new(Vec::new());
+    let beats_out = beats.clone();
+    let st_beats = studio.clone();
+    let sealed = w::column(ui)
+        .gap(unit * 3.0)
+        .layout(|l| l.width = Length::Percent(1.0));
+    let _ = sealed.clone().bind(move || {
+        let next: Vec<(usize, String)> =
+            work::narration_beats(&st_beats.partial.get(), &st_beats.live_breaks.get())
+                .into_iter()
+                .enumerate()
+                .collect();
+        if beats_out.get() != next {
+            beats_out.set(next);
+        }
+    });
+    let u_beat = ui.clone();
+    let st_beat = studio.clone();
+    let sealed = w::for_each(
+        &sealed,
+        beats,
+        |b| format!("{}:{}", b.0, b.1),
+        move |(_i, beat)| sealed_bubble(&u_beat, st_beat.clone(), &beat, "Remedy"),
+    );
+    let st_react_when = studio.clone();
+    let u_react = ui.clone();
+    let st_react = studio.clone();
+    let sealed = sealed.child(
+        show(
+            ui,
+            move || {
+                let has_beats = !work::narration_beats(
+                    &st_react_when.partial.get(),
+                    &st_react_when.live_breaks.get(),
+                )
+                .is_empty();
+                has_beats
+                    && st_react_when
+                        .live_message_id
+                        .get()
+                        .is_some_and(|id| !id.is_empty())
+            },
+            move || {
+                let id = st_react.live_message_id.get().unwrap_or_default();
+                reactions(&u_react, st_react.clone(), id)
+            },
+        )
+        .el(),
+    );
     let u = ui.clone();
     let s_card = studio.clone();
     let s_body = studio.clone();
     w::column(ui)
-        .gap(2.0)
+        .gap(unit * 3.0)
         .layout(|l| l.width = Length::Percent(1.0))
-        .child(work_meta(ui, steps, thinking, true))
+        .child(sealed)
         .child(
             show(
                 ui,
@@ -457,8 +534,8 @@ fn live_shows_bubble(studio: &Studio) -> bool {
     !work::visible(&sum, !studio.live_thinking.get().trim().is_empty())
 }
 
-/// "Worked · N steps · N errors" above an assistant reply. Hidden for a plain chat.
-fn work_meta(
+/// "Worked · N steps · N errors" for a turn. Hidden for a plain chat.
+pub(crate) fn work_meta(
     ui: &Ui,
     steps: impl Fn() -> Vec<WorkStep> + Clone + 'static,
     thinking: impl Fn() -> String + Clone + 'static,
@@ -507,26 +584,18 @@ fn work_meta_row(
     let steps_n = steps.clone();
     let u_steps = ui.clone();
     let muted = colors.muted;
-    let step_part = show(
-        ui,
-        move || work::summarize(&steps_n()).total > 0,
-        {
-            let steps = steps.clone();
-            move || count_chip(&u_steps, steps.clone(), muted, false)
-        },
-    )
+    let step_part = show(ui, move || work::summarize(&steps_n()).total > 0, {
+        let steps = steps.clone();
+        move || count_chip(&u_steps, steps.clone(), muted, false)
+    })
     .el();
     let steps_err = steps.clone();
     let u_err = ui.clone();
     let danger = colors.danger;
-    let error_part = show(
-        ui,
-        move || work::summarize(&steps_err()).errors > 0,
-        {
-            let steps = steps.clone();
-            move || count_chip(&u_err, steps.clone(), danger, true)
-        },
-    )
+    let error_part = show(ui, move || work::summarize(&steps_err()).errors > 0, {
+        let steps = steps.clone();
+        move || count_chip(&u_err, steps.clone(), danger, true)
+    })
     .el();
     let steps_sem = steps;
     let think_sem = thinking;
@@ -617,11 +686,7 @@ fn count_chip(
             let sum = work::summarize(&steps());
             let n = if errors { sum.errors } else { sum.total };
             let key = if errors {
-                if n == 1 {
-                    "work-error"
-                } else {
-                    "work-errors"
-                }
+                if n == 1 { "work-error" } else { "work-errors" }
             } else if n == 1 {
                 "work-step"
             } else {
@@ -704,16 +769,30 @@ fn message_row(ui: &Ui, body: El, user: bool, system: bool, name: &str) -> El {
 }
 
 fn live_body(ui: &Ui, text: impl Fn() -> String + 'static) -> El {
-    let chip = ui.theme().colors.accent.mix_oklab(ui.theme().colors.bg, 0.72);
+    let chip = ui
+        .theme()
+        .colors
+        .accent
+        .mix_oklab(ui.theme().colors.bg, 0.72);
     ui.el("bubble-body")
         .text(move || depth::inline_rich(&text(), chip))
         .layout(|l| l.width = Length::Percent(1.0))
 }
 
-fn panel_button(ui: &Ui, _studio: Studio, label: &'static str, on_press: impl Fn() + 'static) -> El {
+fn panel_button(
+    ui: &Ui,
+    _studio: Studio,
+    label: &'static str,
+    on_press: impl Fn() + 'static,
+) -> El {
     let u = ui.clone();
     w::button(ui, move || messages().text(&u, label), on_press)
         .variant("quiet")
+        .style(
+            StylePatch::new()
+                .weight(500.0)
+                .foreground(ui.theme().colors.text),
+        )
         .semantics({
             let u = ui.clone();
             move || {
@@ -722,6 +801,13 @@ fn panel_button(ui: &Ui, _studio: Studio, label: &'static str, on_press: impl Fn
                     .action(Action::Click)
             }
         })
+}
+
+fn reaction_is_on(studio: &Studio, id: &str, emoji: &str) -> bool {
+    if let Some(m) = studio.messages.get().iter().find(|m| m.id == id) {
+        return m.user_reaction == emoji;
+    }
+    studio.live_message_id.get().as_deref() == Some(id) && studio.live_user_reaction.get() == emoji
 }
 
 fn reactions(ui: &Ui, studio: Studio, id: String) -> El {
@@ -741,12 +827,7 @@ fn reactions(ui: &Ui, studio: Studio, id: String) -> El {
             w::button(ui, emoji, move || react(&st_press, &id_press, &em_press))
                 .variant("quiet")
                 .style(move || {
-                    let on = st_style
-                        .messages
-                        .get()
-                        .iter()
-                        .find(|m| m.id == id_style)
-                        .is_some_and(|m| m.user_reaction == em_style);
+                    let on = reaction_is_on(&st_style, &id_style, &em_style);
                     StylePatch::new().foreground(if on { accent } else { muted })
                 })
                 .semantics(move || {
