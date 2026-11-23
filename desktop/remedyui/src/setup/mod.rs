@@ -15,6 +15,7 @@ mod update;
 mod wizard;
 
 pub(crate) use flow::host;
+pub(crate) use offer::{Offer, offer_banner};
 
 use remedy_ui::{App, WindowSpec};
 

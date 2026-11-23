@@ -1,12 +1,8 @@
 //! 36 px title bar: logo menu, drag, download chip, min / max / close.
 
-use std::sync::OnceLock;
-
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
-use remedy_ui::image::decode;
 use remedy_ui::layout::{Align, Justify, Length};
-use remedy_ui::paint::Image;
 use remedy_ui::style::StylePatch;
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui};
@@ -40,7 +36,11 @@ pub fn bar(ui: &Ui, _studio: &Studio, chrome: Chrome) -> El {
         let open = c.menu_open.get();
         let _ = mark
             .clone()
-            .style(StylePatch::new().background(if open { colors_logo.card } else { colors_logo.panel }))
+            .style(StylePatch::new().background(if open {
+                colors_logo.card
+            } else {
+                colors_logo.panel
+            }))
             .row()
             .align(Align::Center)
             .gap(unit * 0.5)
@@ -89,7 +89,11 @@ pub fn bar(ui: &Ui, _studio: &Studio, chrome: Chrome) -> El {
             return;
         }
         let pct = c.download_pct.get().unwrap_or(0.32);
-        let pct = if pct <= 0.02 { 0.32 } else { pct.clamp(0.0, 1.0) };
+        let pct = if pct <= 0.02 {
+            0.32
+        } else {
+            pct.clamp(0.0, 1.0)
+        };
         let _ = chip_host.clone().child(
             w::row(&u)
                 .align(Align::Center)
@@ -97,14 +101,22 @@ pub fn bar(ui: &Ui, _studio: &Studio, chrome: Chrome) -> El {
                 .child(w::text(&u, caption).variant("muted"))
                 .child(
                     u.el("dl-track")
-                        .style(StylePatch::new().background(u.theme().colors.card).radius(999.0))
+                        .style(
+                            StylePatch::new()
+                                .background(u.theme().colors.card)
+                                .radius(999.0),
+                        )
                         .layout(|l| {
                             l.width = Length::Px(72.0);
                             l.height = Length::Px(4.0);
                         })
                         .child(
                             u.el("dl-fill")
-                                .style(StylePatch::new().background(u.theme().colors.accent).radius(999.0))
+                                .style(
+                                    StylePatch::new()
+                                        .background(u.theme().colors.accent)
+                                        .radius(999.0),
+                                )
                                 .layout(|l| {
                                     l.width = Length::Percent(pct);
                                     l.height = Length::Percent(1.0);
@@ -124,7 +136,10 @@ pub fn bar(ui: &Ui, _studio: &Studio, chrome: Chrome) -> El {
                 .foreground(colors.text)
                 .border_side(
                     remedy_ui::style::BorderEdge::Bottom,
-                    remedy_ui::style::BorderSide::new(1.0, colors.line.unwrap_or(colors.muted.with_alpha(0.35))),
+                    remedy_ui::style::BorderSide::new(
+                        1.0,
+                        colors.line.unwrap_or(colors.muted.with_alpha(0.35)),
+                    ),
                 ),
         )
         .layout(|l| {
@@ -148,7 +163,13 @@ pub fn bar(ui: &Ui, _studio: &Studio, chrome: Chrome) -> El {
                     bottom: 0.0,
                 }),
         )
-        .child(win_btn(ui, "win-minimize", false, w::Icon::Minus, move || c.minimize()))
+        .child(win_btn(
+            ui,
+            "win-minimize",
+            false,
+            w::Icon::Minus,
+            move || c.minimize(),
+        ))
         .child(win_btn_max(ui, chrome))
         .child(win_btn(&u, "win-close", true, w::Icon::Close, {
             let c = chrome;
@@ -157,13 +178,7 @@ pub fn bar(ui: &Ui, _studio: &Studio, chrome: Chrome) -> El {
 }
 
 /// Icon button. The accessible name stays the translated window command.
-fn win_btn(
-    ui: &Ui,
-    id: &'static str,
-    close: bool,
-    glyph: w::Icon,
-    on: impl Fn() + 'static,
-) -> El {
+fn win_btn(ui: &Ui, id: &'static str, close: bool, glyph: w::Icon, on: impl Fn() + 'static) -> El {
     let colors = ui.theme().colors.clone();
     let fg = if close { colors.danger } else { colors.text };
     let label = messages().text(ui, id);
@@ -179,7 +194,11 @@ fn win_btn(
             l.shrink = 0.0;
         })
         .on_click(on)
-        .semantics(Semantics::new(Role::Button).label(label).action(Action::Click))
+        .semantics(
+            Semantics::new(Role::Button)
+                .label(label)
+                .action(Action::Click),
+        )
 }
 
 fn win_btn_max(ui: &Ui, chrome: Chrome) -> El {
@@ -190,7 +209,11 @@ fn win_btn_max(ui: &Ui, chrome: Chrome) -> El {
     host.bind(move || {
         let maxed = c.maximized.get();
         let id = if maxed { "win-restore" } else { "win-maximize" };
-        let glyph = if maxed { w::Icon::Restore } else { w::Icon::Maximize };
+        let glyph = if maxed {
+            w::Icon::Restore
+        } else {
+            w::Icon::Maximize
+        };
         slot.clear();
         let toggle = c;
         let _ = slot
@@ -208,54 +231,103 @@ pub fn menu(ui: &Ui, studio: &Studio, chrome: Chrome) -> El {
             start: 0.0,
             end: 0.0,
         })
-        .child(item(ui, chrome, messages().text(ui, "menu-newSession"), "Ctrl+N", Kind::Normal, {
-            let s = studio.clone();
-            let c = chrome;
-            move || {
-                c.menu_open.set(false);
-                s.add();
-            }
-        }))
+        .child(item(
+            ui,
+            chrome,
+            messages().text(ui, "menu-newSession"),
+            "Ctrl+N",
+            Kind::Normal,
+            {
+                let s = studio.clone();
+                let c = chrome;
+                move || {
+                    c.menu_open.set(false);
+                    s.add();
+                }
+            },
+        ))
         .child(sep(ui))
-        .child(item(ui, chrome, messages().text(ui, "menu-settings"), "Ctrl+,", Kind::Normal, {
-            let c = chrome;
-            move || {
-                c.menu_open.set(false);
-                c.open_settings();
-            }
-        }))
-        .child(item(ui, chrome, messages().text(ui, "menu-memory"), "", Kind::Normal, {
-            let c = chrome;
-            move || {
-                c.menu_open.set(false);
-                c.toggle(Overlay::Memory);
-            }
-        }))
-        .child(item(ui, chrome, messages().text(ui, "menu-skills"), "", Kind::Normal, {
-            let c = chrome;
-            move || {
-                c.menu_open.set(false);
-                c.toggle(Overlay::Skills);
-            }
-        }))
-        .child(item(ui, chrome, messages().text(ui, "menu-diagnostics"), "", Kind::Normal, {
-            let c = chrome;
-            let s = studio.clone();
-            move || c.open_diagnostics(&s)
-        }))
-        .child(item(ui, chrome, messages().text(ui, "menu-help"), "F1", Kind::Normal, {
-            let c = chrome;
-            let s = studio.clone();
-            move || c.open_help(&s, crate::help_view::default_id())
-        }))
-        .child(item(ui, chrome, messages().text(ui, "menu-openBrowser"), "", Kind::Normal, {
-            let c = chrome;
-            let u = ui.clone();
-            move || {
-                c.menu_open.set(false);
-                c.open_web(&u);
-            }
-        }))
+        .child(item(
+            ui,
+            chrome,
+            messages().text(ui, "menu-settings"),
+            "Ctrl+,",
+            Kind::Normal,
+            {
+                let c = chrome;
+                move || {
+                    c.menu_open.set(false);
+                    c.open_settings();
+                }
+            },
+        ))
+        .child(item(
+            ui,
+            chrome,
+            messages().text(ui, "menu-memory"),
+            "",
+            Kind::Normal,
+            {
+                let c = chrome;
+                move || {
+                    c.menu_open.set(false);
+                    c.toggle(Overlay::Memory);
+                }
+            },
+        ))
+        .child(item(
+            ui,
+            chrome,
+            messages().text(ui, "menu-skills"),
+            "",
+            Kind::Normal,
+            {
+                let c = chrome;
+                move || {
+                    c.menu_open.set(false);
+                    c.toggle(Overlay::Skills);
+                }
+            },
+        ))
+        .child(item(
+            ui,
+            chrome,
+            messages().text(ui, "menu-diagnostics"),
+            "",
+            Kind::Normal,
+            {
+                let c = chrome;
+                let s = studio.clone();
+                move || c.open_diagnostics(&s)
+            },
+        ))
+        .child(item(
+            ui,
+            chrome,
+            messages().text(ui, "menu-help"),
+            "F1",
+            Kind::Normal,
+            {
+                let c = chrome;
+                let s = studio.clone();
+                move || c.open_help(&s, crate::help_view::default_id())
+            },
+        ))
+        .child(item(
+            ui,
+            chrome,
+            messages().text(ui, "menu-openBrowser"),
+            "",
+            Kind::Normal,
+            {
+                let c = chrome;
+                let u = ui.clone();
+                move || {
+                    c.menu_open.set(false);
+                    c.open_web(&u);
+                }
+            },
+        ))
         .child(sep(ui))
         .child(update_item(ui, chrome))
         .child(item(
@@ -273,13 +345,20 @@ pub fn menu(ui: &Ui, studio: &Studio, chrome: Chrome) -> El {
             },
         ))
         .child(sep(ui))
-        .child(item(ui, chrome, messages().text(ui, "menu-quit"), "", Kind::Danger, {
-            let c = chrome;
-            move || {
-                c.menu_open.set(false);
-                c.request_quit();
-            }
-        }));
+        .child(item(
+            ui,
+            chrome,
+            messages().text(ui, "menu-quit"),
+            "",
+            Kind::Danger,
+            {
+                let c = chrome;
+                move || {
+                    c.menu_open.set(false);
+                    c.request_quit();
+                }
+            },
+        ));
     rows.style(crate::surface_of(ui))
         .layout(|l| {
             l.min_width = Length::Px(220.0);
@@ -356,7 +435,11 @@ fn item(
             end: unit * 3.0,
         })
         .on_click(on)
-        .semantics(Semantics::new(Role::Button).label(label.clone()).action(Action::Click))
+        .semantics(
+            Semantics::new(Role::Button)
+                .label(label.clone())
+                .action(Action::Click),
+        )
         .child(w::text(ui, label).style(StylePatch::new().foreground(fg)))
         .child(w::text(ui, shortcut).variant("muted"))
 }
@@ -373,24 +456,16 @@ fn sep(ui: &Ui) -> El {
 }
 
 pub(crate) fn wordmark(ui: &Ui) -> El {
-    static MARK: OnceLock<Option<Image>> = OnceLock::new();
-    let image = MARK.get_or_init(|| {
-        let decoded = decode(include_bytes!("../../public/logo.png"), Some((280, 36))).ok()?;
-        Some(Image::new(
-            decoded.image.width,
-            decoded.image.height,
-            decoded.image.pixels,
-        ))
-    });
-    if let Some(image) = image.clone() {
-        w::image(ui, image, "Remedy").layout(|l| {
-            l.height = Length::Px(28.0);
-            l.max_width = Length::Px(160.0);
-            l.shrink = 0.0;
-        })
-    } else {
-        w::text(ui, "Remedy")
-    }
+    // The bundled logo.png is a 640×320 poster. Decoding it to 280×36, as this
+    // bar used to, squashed it into a smear. A 36 px title bar needs the
+    // circuit-R monogram and the word, not that poster.
+    let unit = ui.theme().spacing.unit;
+    w::row(ui)
+        .align(Align::Center)
+        .gap(unit)
+        .layout(|l| l.shrink = 0.0)
+        .child(crate::logo::mark(ui, 18.0))
+        .child(w::text(ui, "Remedy").variant("strong").nowrap())
 }
 
 trait MarginY {

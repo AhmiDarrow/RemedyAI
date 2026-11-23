@@ -194,7 +194,9 @@ fn chat_workspace_is_two_panes_with_a_swap() {
         "actions pane: {names:?}"
     );
     assert!(
-        names.iter().any(|n| n == "Chat" || n.contains("Messages to you")),
+        names
+            .iter()
+            .any(|n| n == "Chat" || n.contains("Messages to you")),
         "chat pane: {names:?}"
     );
     assert!(
@@ -207,10 +209,7 @@ fn chat_workspace_is_two_panes_with_a_swap() {
             .any(|n| n.contains("The manifest still named init.lua")),
         "thinking lives in the actions pane: {names:?}"
     );
-    assert!(
-        app.press(Role::Button, "Swap Actions and Chat"),
-        "swap"
-    );
+    assert!(app.press(Role::Button, "Swap Actions and Chat"), "swap");
     let names = accessible_names(&app);
     assert!(
         names.iter().any(|n| n.contains("Actions on the right")),
@@ -451,7 +450,9 @@ fn usage_previews_match_their_golden_images() {
 const CHROME_THEMES: &[&str] = &["forest", "deutan"];
 
 fn assert_chrome_goldens(name: &str, build: fn(&remedy_ui::Ui) -> remedy_ui::El) {
-    let preview = Preview::new(name, build).sizes(&[SHELL]).themes(CHROME_THEMES);
+    let preview = Preview::new(name, build)
+        .sizes(&[SHELL])
+        .themes(CHROME_THEMES);
     match check_golden(&preview, std::path::Path::new("tests/golden")) {
         Ok(()) | Err(GoldenError::Missing(_)) => {}
         Err(e) => panic!("{e}"),
@@ -465,6 +466,19 @@ fn chrome_previews_match_their_golden_images() {
     assert_chrome_goldens("chrome-about", remedy_desktop::home_about);
     assert_chrome_goldens("chrome-diagnostics", remedy_desktop::home_diagnostics);
     assert_chrome_goldens("chrome-menu", remedy_desktop::home_menu);
+    assert_chrome_goldens("grove-chrome", remedy_desktop::grove_home_chrome);
+    assert_chrome_goldens("grove-offer", remedy_desktop::grove_home_offer);
+}
+
+#[test]
+fn house_rules_banner_fits_a_1024_window() {
+    let preview = Preview::new("grove-offer-compact", remedy_desktop::grove_home_offer)
+        .sizes(&[(1024.0, 642.0)])
+        .themes(&["forest"]);
+    match check_golden(&preview, std::path::Path::new("tests/golden")) {
+        Ok(()) | Err(GoldenError::Missing(_)) => {}
+        Err(e) => panic!("{e}"),
+    }
 }
 
 fn has(names: &[String], needle: &str) -> bool {
@@ -476,7 +490,10 @@ fn palette_opens_and_closes_from_the_keyboard() {
     fresh_profile();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     app.frames(2);
-    assert!(app.press(Role::Button, "Studio"), "leave Grove before the chord");
+    assert!(
+        app.press(Role::Button, "Studio"),
+        "leave Grove before the chord"
+    );
     app.key(KeyEvent::press(Key::char('k')).with_modifiers(Modifiers::CTRL));
     app.frames(1);
     let names = accessible_names(&app);
@@ -501,7 +518,10 @@ fn palette_opens_and_closes_from_the_keyboard() {
     );
     app.key(KeyEvent::press(Key::char('p')).with_modifiers(Modifiers::CTRL));
     app.frames(1);
-    assert!(has(&accessible_names(&app), "New Session"), "Ctrl+P reopens");
+    assert!(
+        has(&accessible_names(&app), "New Session"),
+        "Ctrl+P reopens"
+    );
 }
 
 #[test]
