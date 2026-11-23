@@ -68,6 +68,9 @@ def main() -> int:
         r"${__FILEDIR__}\..\..\..\src-tauri\windows\hooks.nsh",
         r"$LOCALAPPDATA\${PRODUCTNAME}",
         r"Uninstall\${PRODUCTNAME}",
+        "!ifndef RUNTIMESRCPATH",
+        r'File "/oname=remedy-runtime.exe" "${RUNTIMESRCPATH}"',
+        r'Delete "$INSTDIR\remedy-runtime.exe"',
     ):
         need(snippet in nsi, f"installer.nsi missing {snippet}")
     need("/.remedy" not in nsi and "\\.remedy" not in nsi,
@@ -131,6 +134,10 @@ def main() -> int:
     need('--jobs "${JOBS}"' in linux and 'JOBS="${JOBS:-4}"' in linux, "linux jobs default")
     need('--jobs "${JOBS}"' in mac and 'JOBS="${JOBS:-4}"' in mac, "macos jobs default")
     need('"/DHOOKS=' in win, "windows script must pass an absolute hooks path")
+    need('"/DRUNTIMESRCPATH=' in win, "windows script must pass the remedy-runtime path")
+    need("go build" in win and "remedy-runtime" in win, "windows script must build remedy-runtime")
+    need("go build" in linux and "remedy-runtime" in linux, "linux script must build and pack remedy-runtime")
+    need("go build" in mac and "Contents/MacOS/remedy-runtime" in mac, "macos script must pack remedy-runtime next to the app")
     need("-srcfolder \"${STAGE}\"" in mac, "dmg must be built from the stage directory")
     need("Remedy Desktop.app" in mac, "macos tarball name")
     need("3e00" in linux, "linux script must require an x86_64 ELF")

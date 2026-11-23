@@ -62,8 +62,21 @@ rm -rf "${OUT}/AppDir" "${OUT}/deb"
 mkdir -p "${OUT}/AppDir" "${OUT}/deb/DEBIAN" "${OUT}/deb/usr/bin" \
   "${OUT}/deb/usr/share/applications" "${OUT}/deb/usr/share/icons/hicolor/256x256/apps"
 
+REPO="$(cd "${ROOT}/../.." && pwd)"
+RUNTIME="${OUT}/remedy-runtime"
+if [[ "${SKIP_BUILD}" -eq 0 || ! -f "${RUNTIME}" ]]; then
+  command -v go >/dev/null 2>&1 || { echo "go is required to build remedy-runtime" >&2; exit 1; }
+  ( cd "${REPO}/native/go" && go build -trimpath -ldflags "-s -w" -o "${RUNTIME}" ./cmd/remedy-runtime )
+fi
+if [[ ! -f "${RUNTIME}" ]]; then
+  echo "Runtime not found: ${RUNTIME}" >&2
+  exit 1
+fi
+
 install -m 0755 "${BINARY}" "${OUT}/AppDir/remedy-desktop"
+install -m 0755 "${RUNTIME}" "${OUT}/AppDir/remedy-runtime"
 install -m 0755 "${BINARY}" "${OUT}/deb/usr/bin/remedy-desktop"
+install -m 0755 "${RUNTIME}" "${OUT}/deb/usr/bin/remedy-runtime"
 cp -f "${ROOT}/assets/icon.png" "${OUT}/AppDir/remedy-desktop.png"
 cp -f "${ROOT}/assets/icon.png" "${OUT}/deb/usr/share/icons/hicolor/256x256/apps/remedy-desktop.png"
 

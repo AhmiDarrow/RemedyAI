@@ -4,6 +4,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- Desktop 1.0.0 stayed on "Connecting to local server" because the installer never shipped `remedy-runtime`, and the shell did not look for `remedy-runtime.exe` on Windows. The sidecar is packed next to the app again, and a missing binary fails the splash immediately instead of waiting ~90s.
+- The Windows tray icon is the Remedy mark from 0.70.5 (`tray-icon.png` / `icon.ico`) again, not a solid forest-green square.
+
 ### Changed
 - Frontier-sized tool and context limits: tool results keep 30,000 characters (8,000 on a small local window), compaction starts near 88% of the model's real context window, job logs can be paged with `jobs read`, grep lines go to 2,000 characters, and truncation notes say how much was cut and how to read the rest.
 
