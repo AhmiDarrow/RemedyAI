@@ -31,6 +31,8 @@ export interface ChatMessage {
   tokens: number | null
   created_at: string
   reverted: boolean
+  /** True while the server is still writing this assistant row. */
+  draft?: boolean
   /** Turn that produced this row — addresses recorded tool evidence. */
   request_id?: string
   /** One reaction per side: the owner's (`user`) and Remedy's (`agent`). */

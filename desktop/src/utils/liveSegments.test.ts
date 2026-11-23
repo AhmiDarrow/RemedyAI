@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assistantBeats, narrationAtBreak, splitLiveText, splitSavedReply, summarizeSteps } from './liveSegments'
+import { assistantBeats, narrationAtBreak, splitLiveText, splitSavedReply, splitSealedLive, summarizeSteps } from './liveSegments'
 
 describe('splitLiveText', () => {
   it('treats text before tool calls as narration and the rest as the reply', () => {
@@ -40,6 +40,27 @@ describe('activity summary', () => {
   ]
   it('counts steps by status', () => {
     expect(summarizeSteps(steps)).toEqual({ total: 3, running: 1, done: 1, errors: 1 })
+  })
+})
+
+describe('splitSealedLive', () => {
+  it('exposes completed mid-turn speech separately from the live reply', () => {
+    const a = "I'll reach the folder."
+    const b = 'Found it.'
+    const reply = 'The addon loads.'
+    const text = `${a}\n\n${b}\n\n${reply}`
+    const out = splitSealedLive(text, [a.length, a.length + 2 + b.length])
+    expect(out.narration).toEqual([a, b])
+    expect(out.reply).toBe(reply)
+    expect(out.sealed).toBe(`${a}\n\n${b}`)
+  })
+
+  it('has no sealed text before the first tool-call break', () => {
+    expect(splitSealedLive('Hello there.', [])).toEqual({
+      narration: [],
+      reply: 'Hello there.',
+      sealed: '',
+    })
   })
 })
 

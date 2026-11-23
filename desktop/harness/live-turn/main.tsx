@@ -48,6 +48,29 @@ function Harness() {
   const base = stateAt(t, Date.now(), history)
   const [reacts, setReacts] = useState<Record<string, MessageReactions>>({})
   let messages = base.messages.map((m) => (reacts[m.id] ? { ...m, reactions: reacts[m.id] } : m))
+  if (base.streaming) {
+    const already = messages.some((m) => m.id === 'a1')
+    if (!already) {
+      messages = [
+        ...messages,
+        {
+          id: 'a1',
+          role: 'assistant' as const,
+          content: base.partialText,
+          thinking: null,
+          tool_calls: [],
+          tool_results: [],
+          model: null,
+          agent: null,
+          tokens: null,
+          created_at: '',
+          reverted: false,
+          draft: true,
+          reactions: reacts.a1,
+        },
+      ]
+    }
+  }
   if (reactionsOn) {
     const lastUser = [...messages].reverse().find((m) => m.role === 'user')
     if (lastUser && !reacts[lastUser.id]) messages = withReaction(messages, lastUser.id, 'agent', '👍')
@@ -56,7 +79,26 @@ function Harness() {
   }
   const s = { ...base, messages }
   const onReact = (id: string, emoji: string) => {
-    const next = withReaction(messages, id, 'user', emoji).find((m) => m.id === id)
+    const stubs: typeof messages = messages.some((m) => m.id === id)
+      ? messages
+      : [
+          ...messages,
+          {
+            id,
+            role: 'assistant',
+            content: '',
+            thinking: null,
+            tool_calls: [],
+            tool_results: [],
+            model: null,
+            agent: null,
+            tokens: null,
+            created_at: '',
+            reverted: false,
+            reactions: reacts[id],
+          },
+        ]
+    const next = withReaction(stubs, id, 'user', emoji).find((m) => m.id === id)
     setReacts((r) => ({ ...r, [id]: next?.reactions || {} }))
   }
   const feedProps = {
@@ -73,6 +115,7 @@ function Harness() {
     userName: 'Sam',
     partnerName: 'Remedy',
     sessionId: 'demo',
+    liveMessageId: 'a1',
     stickNonce: 0,
     buildTodos: todosOn ? DEMO_TODOS : [],
     onReact: reactionsOn ? onReact : undefined,

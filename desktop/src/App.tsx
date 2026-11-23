@@ -205,6 +205,7 @@ export default function App() {
     partialText,
     textBreaks,
     partialThinking,
+    liveMessageId,
     activeTools,
     processSteps,
     taskProgress,
@@ -2049,6 +2050,7 @@ export default function App() {
               partialText={partialText}
               textBreaks={textBreaks}
               partialThinking={partialThinking}
+              liveMessageId={liveMessageId}
               streaming={streaming}
               loading={messagesLoading}
               loadError={messagesLoadError}

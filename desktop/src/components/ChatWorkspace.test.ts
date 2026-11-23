@@ -115,6 +115,39 @@ describe('ChatWorkspace split', () => {
     expect(actions).toContain('data-testid="work-strip"')
     expect(actions).toContain('Need the path.')
   }, 30_000)
+
+  it('offers reactions on mid-turn Remedy bubbles before the turn ends', () => {
+    const narration = "I'll reach the folder through the shell."
+    const html = render({
+      messages: [user],
+      streaming: true,
+      partialText: narration,
+      textBreaks: [narration.length],
+      partialThinking: 'Need the path.',
+      liveMessageId: 'draft-1',
+      onReact: () => {},
+      processSteps: [
+        {
+          id: 's1',
+          name: 'bash',
+          label: 'Running command',
+          status: 'running',
+          startedAt: 1,
+          narration,
+        },
+      ],
+    } as never)
+    const chat = html.slice(html.indexOf('data-testid="chat-column"'))
+    const actions = html.slice(
+      html.indexOf('data-testid="actions-column"'),
+      html.indexOf('data-testid="chat-column"'),
+    )
+    expect(chat).toContain('data-testid="live-settled-reply"')
+    expect(chat).toContain('aria-label="Add reaction"')
+    expect(chat).toMatch(/I(?:'|&#x27;)ll reach the folder through the shell/)
+    expect(chat).not.toContain('Need the path.')
+    expect(actions).toContain('Need the path.')
+  }, 30_000)
 })
 
 describe('ChatWorkspace layout CSS', () => {
