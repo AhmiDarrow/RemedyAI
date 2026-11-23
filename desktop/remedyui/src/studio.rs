@@ -285,11 +285,6 @@ impl Studio {
         }
     }
 
-    /// The runtime client, when this Studio is connected.
-    pub(crate) fn runtime(&self) -> Option<Client> {
-        self.client.get()
-    }
-
     /// The next local message id.
     pub(crate) fn alloc_msg_id(&self) -> u64 {
         let id = self.next_msg.get();
@@ -573,6 +568,11 @@ impl Studio {
             runtime::abort_session(&client, &sid, |_| {});
         }
         self.finish_assistant(None);
+    }
+
+    /// The runtime client, when this Studio is allowed to talk to one.
+    pub(crate) fn runtime(&self) -> Option<Client> {
+        if self.local_only { None } else { self.client.get() }
     }
 
     /// Hooks a runtime client and loads sessions (no-op for local previews).
