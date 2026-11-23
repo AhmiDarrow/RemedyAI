@@ -42,6 +42,7 @@ if (-not (Test-Path -LiteralPath $Binary)) {
     throw "Binary not found: $Binary"
 }
 
+$desktop = Split-Path -Parent $manifestDir
 $repoRoot = Split-Path -Parent $desktop
 $outDirEarly = Join-Path $manifestDir "target\packaging"
 New-Item -ItemType Directory -Force -Path $outDirEarly | Out-Null
@@ -72,7 +73,6 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $out = Join-Path $outDir "Remedy.Desktop_${version}_x64-setup.exe"
 if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Force }
 $nsi = Join-Path $PSScriptRoot "windows\installer.nsi"
-$desktop = Split-Path -Parent $manifestDir
 # Windows makensis rejects forward slashes in !include and File.
 function To-NsisPath([string]$Path) {
     return (Resolve-Path -LiteralPath $Path).Path
