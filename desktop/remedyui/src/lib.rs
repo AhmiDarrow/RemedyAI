@@ -1,4 +1,4 @@
-//! Remedy Desktop: Studio in RemedyUI.
+//! Remedy Desktop: Grove is home, and Studio is one tap away.
 //!
 //! Visual language follows the current Tauri/React app, then goes a little
 //! further (always-visible row actions, a 16 px Remedy Sans UI face). The
@@ -7,8 +7,10 @@
 mod chat;
 mod depth;
 mod fonts;
+mod grove;
 mod logo;
 mod runtime;
+mod settings;
 mod sidebar;
 mod sse;
 mod status;
@@ -18,6 +20,7 @@ mod work;
 
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
 pub use runtime::Client;
+pub use settings::{preview_appearance, preview_connect, preview_error, preview_general, preview_models};
 pub use studio::Studio;
 
 use remedy_ui::a11y::{Action, Role, Semantics};
@@ -41,12 +44,15 @@ pub(crate) const SELECT_MARK: f32 = 3.0;
 
 /// Opens the window and puts the app in the tray.
 pub fn app(app: &App) {
+    settings::bind_host(app);
     app.keep_running(true);
     let studio = Studio::new();
+    let grove = grove::Grove::new(studio.clone(), true);
     if !runtime::spawn_disabled() {
         runtime::ensure_running();
         let client = runtime::Client::new(&runtime::origin(), runtime::load_token().as_deref());
-        studio.attach_client(client);
+        studio.attach_client(client.clone());
+        grove.attach_client(client);
     }
     let a = app.clone();
     let win = app.open(
@@ -57,25 +63,39 @@ pub fn app(app: &App) {
         move |ui, window| {
             depth::set_host(a.clone(), window.clone());
             let (u, win, a) = (ui.clone(), window.clone(), a.clone());
-            ui.root().child(shell(ui, studio.clone())).bind(move || {
-                let m = messages();
-                win.set_title(m.text(&u, "app-title"));
-                let item = |id, label: String| TrayItem::Item {
-                    id,
-                    label,
-                    enabled: true,
-                    default: id == SHOW,
-                };
-                a.set_tray(Some(TrayIcon::new(
-                    m.text(&u, "app-title"),
-                    tray_icon(),
-                    vec![
-                        item(SHOW, m.text(&u, "tray-show")),
-                        TrayItem::Separator,
-                        item(QUIT, m.text(&u, "tray-quit")),
-                    ],
-                )));
-            });
+            let grove_ui = grove.clone();
+            let hidden = std::rc::Rc::new(std::cell::Cell::new(0u64));
+            // Window scope, not a Grove/Studio `show` branch. Those branches
+            // are disposed on the way between surfaces; Settings has to outlive both.
+            settings::install(ui, studio.clone());
+            ui.root()
+                .child(grove::root(ui, grove.clone(), Some(a.clone())))
+                .bind(move || {
+                    let m = messages();
+                    win.set_title(m.text(&u, "app-title"));
+                    let item = |id, label: String| TrayItem::Item {
+                        id,
+                        label,
+                        enabled: true,
+                        default: id == SHOW,
+                    };
+                    a.set_tray(Some(TrayIcon::new(
+                        m.text(&u, "app-title"),
+                        tray_icon(),
+                        vec![
+                            item(SHOW, m.text(&u, "tray-show")),
+                            TrayItem::Separator,
+                            item(QUIT, m.text(&u, "tray-quit")),
+                        ],
+                    )));
+                    let n = grove_ui.hide_window.get();
+                    if n != hidden.get() {
+                        hidden.set(n);
+                        if n != 0 {
+                            win.set_visible(false);
+                        }
+                    }
+                });
         },
     );
     let (w2, a2) = (win.clone(), app.clone());
@@ -103,10 +123,16 @@ pub fn home_chat(ui: &Ui) -> El {
     shell(ui, Studio::preview_chat())
 }
 
+/// Morning Grove with example plots, for goldens. It does not touch disk or the network.
+pub fn grove_home(ui: &Ui) -> El {
+    grove::preview_home(ui)
+}
+
 /// The Studio shell: session list, well, composer, status.
 pub fn shell(ui: &Ui, studio: Studio) -> El {
     depth::set_ui(ui.clone());
     fonts::prepare_theme(ui, &Fonts::load());
+    let panel = settings::install(ui, studio.clone());
     w::column(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
@@ -121,10 +147,13 @@ pub fn shell(ui: &Ui, studio: Studio) -> El {
                 })
                 .child(sidebar::sidebar(ui, studio.clone()))
                 .child(w::divider(ui, true))
-                .child(chat::well(ui, studio.clone())),
+                .child(chat::well(ui, studio.clone()))
+                .child(settings::rail(ui, panel)),
         )
         .child(w::divider(ui, false))
         .child(status::status_bar(ui, studio))
+        .on_key_capture(move |ev| settings::shell_chord(panel, ev))
+        .on_key(move |ev| settings::shell_escape(panel, ev))
 }
 
 /// A square tool control: 32 px hit target, 20 px glyph, always visible.
@@ -195,16 +224,23 @@ pub fn tray_icon() -> TrayImage {
 }
 
 /// The app's strings, from `i18n/<locale>.ftl`.
+///
+/// The catalog's revision signal lives in a detached scope. The first caller is
+/// often a `show` branch (Grove's status line). That branch is disposed when the
+/// owner switches to Studio, and a signal owned by it would die with the branch.
 pub fn messages() -> Messages {
     thread_local!(static MESSAGES: Messages = {
-        let m = Messages::new("en-US").embedded("en-US", include_str!("../i18n/en-US.ftl"));
-        if cfg!(debug_assertions) {
-            let m = m.folder(concat!(env!("CARGO_MANIFEST_DIR"), "/i18n"));
-            m.watch();
-            m
-        } else {
-            m
-        }
+        let (m, _scope) = remedy_ui::reactive::Scope::detached(|| {
+            let m = Messages::new("en-US").embedded("en-US", include_str!("../i18n/en-US.ftl"));
+            if cfg!(debug_assertions) {
+                let m = m.folder(concat!(env!("CARGO_MANIFEST_DIR"), "/i18n"));
+                m.watch();
+                m
+            } else {
+                m
+            }
+        });
+        m
     });
     MESSAGES.with(Clone::clone)
 }

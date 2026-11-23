@@ -475,10 +475,20 @@ fn load_disk() -> (Vec<String>, Vec<String>, Vec<(String, Vec<String>)>) {
 }
 
 thread_local! {
+    static SPEAK: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
     static UI: RefCell<Option<Ui>> = const { RefCell::new(None) };
     static HOST: RefCell<Option<(App, Window)>> = const { RefCell::new(None) };
     static MIC: RefCell<Option<remedy_ui::playback::Microphone>> = const { RefCell::new(None) };
     static PLAYER: RefCell<Option<remedy_ui::playback::Player>> = const { RefCell::new(None) };
+}
+
+/// The Settings toggle for spoken replies, when the person has changed it this window.
+pub(crate) fn note_speak_replies(on: bool) {
+    SPEAK.with(|c| c.set(Some(on)));
+}
+
+pub(crate) fn speak_override() -> Option<bool> {
+    SPEAK.with(|c| c.get())
 }
 
 /// The shell's `Ui`, so a worker can hop back and play audio on the UI thread.

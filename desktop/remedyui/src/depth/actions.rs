@@ -1711,7 +1711,8 @@ fn transcribe(studio: &Studio, samples: Vec<f32>) {
 
 pub fn speak_reply(studio: &Studio, text: &str) {
     let prefs = studio.depth.voice.get();
-    if !prefs.speak_replies {
+    let speak = super::speak_override().unwrap_or(prefs.speak_replies);
+    if !speak {
         return;
     }
     let spoken = strip_markdown_for_speech(text);
