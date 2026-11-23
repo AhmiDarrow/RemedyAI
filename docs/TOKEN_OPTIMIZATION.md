@@ -27,7 +27,7 @@ context editing and the March 2026 cookbook make the same split: clearing
 old `tool_result` blocks is safer and cheaper than summarizing the whole
 transcript. OpenAI's `ToolOutputTrimmer` keeps the last few user turns at
 full fidelity and trims older bulky tool output. Remedy already caps each
-tool result for the model (`MaxResultChars`, default 24,000) and elides
+tool result for the model (`MaxResultChars`, default 30,000 on frontier windows, 8,000 on small local windows) and elides
 middle observations when the transcript is over budget. The unattended
 tick now also caps on-disk soul and residue so those injects cannot grow
 without bound.
@@ -78,7 +78,7 @@ These are also Settings → Advanced knobs (`soul_inject_chars`, `max_result_cha
 | Budget | Default | Where |
 |--------|---------|-------|
 | Soul inject | 1,400 characters | `DEFAULT_SOUL_CHARS` |
-| Tool result kept for the model | 24,000 characters | `MaxResultChars` / `REMEDY_REACT_MAX_RESULT_CHARS` |
+| Tool result kept for the model | 30,000 characters (8,000 on a small local window) | `MaxResultChars` / `REMEDY_REACT_MAX_RESULT_CHARS` |
 | On-disk soul field | 64 KiB | `compact_personhood` |
 | On-disk residue / journal tails | 256 KiB / 64 KiB | `compact_personhood` |
 | Learn log | 256 KiB, 400 lines | `learn_log` |

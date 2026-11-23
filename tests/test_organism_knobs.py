@@ -18,7 +18,7 @@ def test_defaults_match_production_constants() -> None:
     assert table["after_tool_batch_timeout_s"] == 10
     assert table["pulse_learn_timeout_s"] == 45
     assert table["soul_inject_chars"] == DEFAULT_SOUL_CHARS == 1400
-    assert table["max_result_chars"] == 24_000
+    assert table["max_result_chars"] == 30_000
     assert table["soul_max_bytes"] == 64 * 1024
     assert table["residue_max_bytes"] == 256 * 1024
     assert table["journal_max_bytes"] == 64 * 1024

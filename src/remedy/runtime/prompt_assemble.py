@@ -13,6 +13,7 @@ sessions sharing one worker process never read each other's working memory.
 from __future__ import annotations
 
 import asyncio
+import os
 import contextlib
 import hashlib
 import logging
@@ -26,9 +27,12 @@ logger = logging.getLogger("remedy.runtime.prompt_assemble")
 _runtime_cache: dict[str, Any] = {}
 
 # Recent-conversation block appended after the stable operational prompt.
-HISTORY_BLOCK_CHAR_CAP = 12_000
-HISTORY_ENTRY_CHAR_CAP = 4_000
-HISTORY_MAX_ENTRIES = 12
+# Tight caps stay available for a small local host via REMEDY_FULL_CONTEXT=0.
+_FULL_ENV = str(os.environ.get("REMEDY_FULL_CONTEXT", "1")).strip().lower()
+_FULL = _FULL_ENV not in ("0", "false", "no", "off")
+HISTORY_BLOCK_CHAR_CAP = 48_000 if _FULL else 12_000
+HISTORY_ENTRY_CHAR_CAP = 16_000 if _FULL else 4_000
+HISTORY_MAX_ENTRIES = 40 if _FULL else 12
 _HISTORY_HEADER = (
     "Recent conversation (oldest first; the current message follows separately "
     "— do not repeat it):"
@@ -37,7 +41,7 @@ _HISTORY_HEADER = (
 # Epoch material is append-only: everything after this marker is replaced on
 # the next epoch, so the cached system prefix only ever grows at the end.
 EPOCH_BRIEF_MARKER = "\n\n[Session Brief · epoch working memory]\n"
-EPOCH_BRIEF_CHAR_CAP = 1_200
+EPOCH_BRIEF_CHAR_CAP = 4_000 if _FULL else 1_200
 
 # Per-turn re-arm ceiling for mission nudges (keyed by session + goal).
 # A red check has no ceiling here: the model keeps the turn until the check

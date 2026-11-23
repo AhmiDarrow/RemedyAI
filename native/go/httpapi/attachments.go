@@ -18,8 +18,8 @@ var (
 )
 
 const (
-	maxTextInjectChars  = 24_000
-	maxAttachmentBytes  = 15 * 1024 * 1024
+	maxTextInjectChars = 80_000
+	maxAttachmentBytes = 15 * 1024 * 1024
 )
 
 func safeSessionID(sessionID string) string {
@@ -189,7 +189,8 @@ func injectTextFileSnippets(atts []map[string]any, homeDir, sessionID string) st
 		text := string(data)
 		remain := maxTextInjectChars - total
 		if len(text) > remain {
-			text = text[:remain] + "\n…[truncated]"
+			cut := len(text) - remain
+			text = text[:runeFloorStr(text, remain)] + fmt.Sprintf("\n…[truncated %d chars — use read on this path with offset/limit to page the rest]", cut)
 		}
 		chunks.WriteString("\n---\nFile: ")
 		chunks.WriteString(name)

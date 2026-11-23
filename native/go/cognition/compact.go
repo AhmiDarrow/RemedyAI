@@ -10,11 +10,23 @@ import (
 )
 
 const (
-	// compactKeepTail is how many trailing messages survive compaction verbatim.
-	compactKeepTail = 8
+	// compactKeepTail is how many trailing messages survive compaction verbatim
+	// on a frontier context window.
+	compactKeepTail = 16
+	// compactKeepTailLocal is the tighter tail used on a small local window,
+	// where 16 verbatim tool results would refill the prompt by themselves.
+	compactKeepTailLocal = 8
 	// compactedHeader opens the deterministic replacement message.
 	compactedHeader = "[Compacted context]"
 )
+
+// compactKeepCount chooses how many trailing messages stay verbatim.
+func compactKeepCount(window int) int {
+	if window > 0 && window <= SmallContextWindow {
+		return compactKeepTailLocal
+	}
+	return compactKeepTail
+}
 
 // compactTranscript replaces the middle of an over-budget transcript with one
 // deterministic working-set message. The first user prose (session opener),
@@ -22,12 +34,19 @@ const (
 // last compactKeepTail messages survive verbatim. The cut never separates an
 // assistant tool_use message from the user message carrying its results.
 func compactTranscript(msgs []Message, verifySeen bool) []Message {
-	if len(msgs) <= compactKeepTail+2 {
+	return compactTranscriptKeep(msgs, verifySeen, compactKeepTail)
+}
+
+func compactTranscriptKeep(msgs []Message, verifySeen bool, keep int) []Message {
+	if keep <= 0 {
+		keep = compactKeepTail
+	}
+	if len(msgs) <= keep+2 {
 		return msgs
 	}
 	head := firstUserProseIndex(msgs)
 	goal := lastUserProseIndex(msgs)
-	cut := len(msgs) - compactKeepTail
+	cut := len(msgs) - keep
 	// Never start the kept tail on tool results whose tool_use is being dropped.
 	for cut > 1 && msgs[cut].Role == RoleUser && msgs[cut].HasToolResults() {
 		cut--
