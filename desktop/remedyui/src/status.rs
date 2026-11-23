@@ -60,8 +60,37 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
                 .action(Action::Click),
         );
 
-    let settings =
-        w::button(ui, move || messages().text(&u, "status-settings"), on_settings).variant("quiet");
+    let settings = ui
+        .el("button")
+        .row()
+        .align(Align::Center)
+        .gap(unit)
+        .padding(Insets {
+            top: unit,
+            end: unit * 1.5,
+            bottom: unit,
+            start: unit * 1.5,
+        })
+        .style(
+            StylePatch::new()
+                .foreground(colors.text)
+                .radius(ui.theme().radii.small),
+        )
+        .child(w::icon(ui, w::Icon::Settings, 16.0))
+        .child(
+            w::text(ui, "")
+                .text(move || messages().text(&u, "status-settings"))
+                .nowrap(),
+        )
+        .on_click(on_settings)
+        .semantics({
+            let u = ui.clone();
+            move || {
+                Semantics::new(Role::Button)
+                    .label(messages().text(&u, "status-settings"))
+                    .action(Action::Click)
+            }
+        });
 
     let st = studio.clone();
     let u = ui.clone();
@@ -94,7 +123,7 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
         })
         .layout(|l| {
             l.width = Length::Percent(1.0);
-            l.min_height = Length::Px(40.0);
+            l.min_height = Length::Px(44.0);
             l.shrink = 0.0;
         })
         .child({
