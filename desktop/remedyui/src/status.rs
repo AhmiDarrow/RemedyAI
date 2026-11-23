@@ -10,7 +10,7 @@ use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui, show};
 
 /// Full-width status bar under the shell.
-pub fn status_bar(ui: &Ui, studio: Studio) -> El {
+pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> El {
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
     let u = ui.clone();
@@ -54,7 +54,7 @@ pub fn status_bar(ui: &Ui, studio: Studio) -> El {
         }));
 
     let settings =
-        w::button(ui, move || messages().text(&u, "status-settings"), || crate::settings::toggle()).variant("quiet");
+        w::button(ui, move || messages().text(&u, "status-settings"), on_settings).variant("quiet");
 
     let st = studio.clone();
     let u = ui.clone();

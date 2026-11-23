@@ -134,7 +134,7 @@ pub(super) fn frame(ui: &Ui, grove: Grove, app: Option<App>) -> El {
         .child(zero(watch))
         .child(slot)
         .child(w::divider(ui, false))
-        .child(crate::status::status_bar(ui, grove.studio.clone()))
+        .child(crate::status::status_bar(ui, grove.studio.clone(), || crate::settings::toggle()))
         .child(decision::layer(ui, grove.clone()))
         .child(child::bubble_layer(ui, grove.clone()))
         .child(zero(split_saver(ui, grove)))
