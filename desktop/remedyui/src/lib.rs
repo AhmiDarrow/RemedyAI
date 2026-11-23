@@ -9,6 +9,7 @@ mod chrome;
 mod diagnostics;
 mod fonts;
 mod grove;
+mod help;
 mod help_data;
 mod help_view;
 mod layout;
@@ -26,6 +27,7 @@ mod sse;
 mod status;
 mod studio;
 mod time;
+mod timetravel;
 mod titlebar;
 mod tray_copy;
 mod updates;
@@ -34,6 +36,7 @@ mod work;
 
 pub use diagnostics::DiagnosticsPanel;
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
+pub use help::HelpPanel;
 pub use runtime::Client;
 pub use settings::{preview_appearance, preview_connect, preview_error, preview_general, preview_models};
 pub use slides::{
@@ -41,6 +44,7 @@ pub use slides::{
     terminal_context_items, terminal_preview,
 };
 pub use studio::Studio;
+pub use timetravel::{TimeTravel, preview as time_travel_preview};
 pub use usage::{UsageContext, UsageDashboard, UsagePanel, UsageWindow};
 
 use remedy_ui::a11y::{Action, Role, Semantics};
@@ -193,9 +197,15 @@ pub fn home_palette(ui: &Ui) -> El {
     chrome::preview_frame(ui, chrome::Overlay::Palette, false)
 }
 
-/// Help wiki open on Overview.
+/// Help wiki open on Overview, inside the chrome frame.
 pub fn home_help(ui: &Ui) -> El {
-    chrome::preview_frame(ui, chrome::Overlay::Help, false)
+    chrome::install_help(HelpPanel::preview());
+    chrome::preview_frame(ui, chrome::Overlay::None, false)
+}
+
+/// Owner's manual, open on the overview. The panel on its own, for its golden.
+pub fn help_home(ui: &Ui) -> El {
+    HelpPanel::preview().view(ui)
 }
 
 /// About Remedy.
@@ -275,6 +285,8 @@ pub(crate) fn shell_fixed(ui: &Ui, studio: Studio) -> El {
 
 fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
     fonts::prepare_theme(ui, &Fonts::load());
+    // Hidden overlay keeper. A closed rail is not a child of this column.
+    studio.time_travel.mount(ui, studio.clone());
     let workspace = slides::Workspace::for_studio(&studio);
     slides::install(workspace.clone());
     let follow_ws = workspace;

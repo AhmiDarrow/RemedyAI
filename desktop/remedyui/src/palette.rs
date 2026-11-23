@@ -94,9 +94,7 @@ pub fn filter(items: &[Command], query: &str) -> Vec<Command> {
 
 pub fn run(id: &str, studio: &Studio, chrome: Chrome, ui: &Ui) {
     let open_help = |article: &str| {
-        chrome.help_id.set(article.into());
-        chrome.help_query.set(String::new());
-        chrome.overlay.set(Overlay::Help);
+        chrome.open_help(studio, article);
     };
     if let Some(rest) = id.strip_prefix("session-") {
         studio.select(rest);
@@ -118,7 +116,7 @@ pub fn run(id: &str, studio: &Studio, chrome: Chrome, ui: &Ui) {
             studio.add();
             chrome.close_overlay();
         }
-        "time-travel" => chrome.overlay.set(Overlay::TimeTravel),
+        "time-travel" => chrome.open_time_travel(studio),
         "export" => {
             chrome.toast(ui, messages().text(ui, "toast-export"));
             chrome.close_overlay();

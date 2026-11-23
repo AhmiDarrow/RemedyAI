@@ -71,6 +71,45 @@ fn close_diag() {
     }
 }
 
+thread_local! {
+    /// Help panel mounted by `hosted`. `HELP_FRESH` is set only by `install_help`.
+    static HELP: RefCell<Option<crate::help::HelpPanel>> = RefCell::new(None);
+    static HELP_FRESH: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The next `hosted` frame mounts this manual once, instead of a closed one.
+pub fn install_help(panel: crate::help::HelpPanel) {
+    HELP.with(|slot| *slot.borrow_mut() = Some(panel));
+    HELP_FRESH.with(|flag| flag.set(true));
+}
+
+fn current_help() -> crate::help::HelpPanel {
+    HELP.with(|slot| {
+        let fresh = HELP_FRESH.with(|flag| flag.replace(false));
+        let mut guard = slot.borrow_mut();
+        if fresh {
+            if let Some(panel) = guard.clone() {
+                return panel;
+            }
+        }
+        let panel = crate::help::HelpPanel::new();
+        *guard = Some(panel.clone());
+        panel
+    })
+}
+
+fn help_now() -> Option<crate::help::HelpPanel> {
+    HELP.with(|slot| slot.borrow().clone())
+}
+
+fn close_help() {
+    if let Some(panel) = help_now() {
+        if panel.is_open() {
+            panel.close();
+        }
+    }
+}
+
 fn bind_live(chrome: Chrome) {
     LIVE.with(|slot| slot.set(Some(chrome)));
 }
@@ -110,14 +149,14 @@ pub fn handle_panel(panel: &str, article: Option<&str>, studio: &Studio) -> bool
             true
         }
         "help" => {
-            if let Some(id) = article.filter(|s| !s.is_empty()) {
-                c.help_id.set(id.into());
-            }
-            c.open(Overlay::Help);
+            let id = article
+                .filter(|s| !s.is_empty())
+                .unwrap_or(help_view::default_id());
+            c.open_help(studio, id);
             true
         }
         "time_travel" => {
-            c.open(Overlay::TimeTravel);
+            c.open_time_travel(studio);
             true
         }
         "about" => {
@@ -333,6 +372,7 @@ impl Chrome {
     pub fn open(self, overlay: Overlay) {
         self.menu_open.set(false);
         close_diag();
+        close_help();
         if overlay == Overlay::Palette {
             self.palette_query.set(String::new());
             self.palette_idx.set(0);
@@ -368,6 +408,7 @@ impl Chrome {
     pub fn request_quit(self) {
         self.menu_open.set(false);
         close_diag();
+        close_help();
         let skipped = self.skip_quit.get()
             || crate::settings::current().is_some_and(|s| s.skip_quit_warn.try_get().unwrap_or(false));
         if skipped {
@@ -530,6 +571,8 @@ impl Chrome {
             prev.close();
             self.usage_win.set(None);
         }
+        close_help();
+        studio.time_travel.close();
         if let Some(panel) = diag_now() {
             panel.open();
         } else {
@@ -538,12 +581,48 @@ impl Chrome {
         }
     }
 
+    /// The landed Help wiki. The thin sheet is only the fallback before mount.
+    pub fn open_help(self, studio: &Studio, id: &str) {
+        self.menu_open.set(false);
+        self.server_open.set(false);
+        self.close_overlay();
+        close_diag();
+        studio.time_travel.close();
+        if let Some(prev) = self.usage_win.get() {
+            prev.close();
+            self.usage_win.set(None);
+        }
+        self.help_id.set(id.into());
+        self.help_query.set(String::new());
+        if let Some(panel) = help_now() {
+            panel.open(Some(id));
+        } else {
+            self.overlay.set(Overlay::Help);
+        }
+    }
+
+    /// The landed Time Travel rail.
+    pub fn open_time_travel(self, studio: &Studio) {
+        self.menu_open.set(false);
+        self.server_open.set(false);
+        self.close_overlay();
+        close_diag();
+        close_help();
+        if let Some(prev) = self.usage_win.get() {
+            prev.close();
+            self.usage_win.set(None);
+        }
+        studio.time_travel.open();
+    }
+
     /// The usage dashboard from PR #83. One modal, not a second sheet.
     fn present_usage(self, ui: &Ui, studio: &Studio) {
         self.menu_open.set(false);
         self.server_open.set(false);
         self.close_overlay();
         close_diag();
+        close_help();
+        studio.time_travel.close();
         if let Some(prev) = self.usage_win.get() {
             prev.close();
         }
@@ -656,6 +735,22 @@ impl Chrome {
                 return false;
             }
         }
+        if let Some(panel) = help_now() {
+            if panel.is_open() {
+                if e.key == Key::Escape {
+                    panel.close();
+                    return true;
+                }
+                return false;
+            }
+        }
+        if studio.time_travel.is_open() {
+            if e.key == Key::Escape {
+                studio.time_travel.close();
+                return true;
+            }
+            return false;
+        }
         if self.confirm.get() != Confirm::None {
             if e.key == Key::Escape {
                 self.confirm.set(Confirm::None);
@@ -740,11 +835,11 @@ impl Chrome {
                 true
             }
             Key::Character(c) if ctrl && c == "/" => {
-                self.open_help(help_view::default_id());
+                self.open_help(studio, help_view::default_id());
                 true
             }
             Key::F(1) => {
-                self.open_help(help_view::default_id());
+                self.open_help(studio, help_view::default_id());
                 true
             }
             Key::Escape => {
@@ -760,12 +855,6 @@ impl Chrome {
             }
             _ => false,
         }
-    }
-
-    fn open_help(self, id: &str) {
-        self.help_id.set(id.into());
-        self.help_query.set(String::new());
-        self.open(Overlay::Help);
     }
 
     fn apply_font(self, ui: &Ui, e: &KeyEvent) {
@@ -1028,9 +1117,18 @@ fn build_hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: El) -> El {
         l.position = Position::Absolute;
         l.width = Length::Px(0.0);
         l.height = Length::Px(0.0);
-        l.top = Length::Px(0.0);
-        l.left = Length::Px(0.0);
+        l.inset.top = 0.0;
+        l.inset.start = 0.0;
     });
+    let help = current_help();
+    let help_host = help.view(ui).layout(|l| {
+        l.position = Position::Absolute;
+        l.width = Length::Px(0.0);
+        l.height = Length::Px(0.0);
+        l.inset.top = 0.0;
+        l.inset.start = 0.0;
+    });
+    studio.time_travel.mount(ui, studio.clone());
 
     let frame = ui.el("chrome").column().layout(|l| {
         l.position = Position::Relative;
@@ -1045,7 +1143,8 @@ fn build_hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: El) -> El {
         .child(shell)
         .child(overlays)
         .child(toast)
-        .child(diag_host);
+        .child(diag_host)
+        .child(help_host);
 
     let root_ui = ui.clone();
     let root_studio = studio.clone();
