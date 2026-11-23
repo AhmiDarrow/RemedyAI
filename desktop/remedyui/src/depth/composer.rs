@@ -2,21 +2,20 @@
 
 use super::api;
 use super::logic::{self, at_query, filter_commands, slash_query};
-use super::{add_paths, pick_attachments, submit, toggle_mic, Attachment, SubmitKind};
+use super::{Attachment, SubmitKind, add_paths, pick_attachments, submit, toggle_mic};
 use crate::messages;
 use crate::studio::Studio;
-use crate::tool_button;
-use remedy_ui::a11y::{Action, Role, Semantics};
+use crate::{Glyph, tool_button};
 use remedy_ui::core::Insets;
 use remedy_ui::host::DropEffect;
 use remedy_ui::input::{Buttons, Key, PointerPhase};
 use remedy_ui::layout::{Align, Length};
 use remedy_ui::net::Request;
-use remedy_ui::reactive::{waker, Signal};
+use remedy_ui::reactive::{Signal, waker};
 use remedy_ui::style::StylePatch;
 use remedy_ui::view::Drag;
 use remedy_ui::widgets as w;
-use remedy_ui::{show, El, Ui};
+use remedy_ui::{El, Ui, show};
 
 #[derive(Clone)]
 struct Offer {
@@ -150,7 +149,13 @@ pub fn composer(ui: &Ui, studio: Studio) -> El {
         let text = f_key.value();
         let one_line = !text.contains('\n');
         if one_line && f_key.caret() == 0 && matches!(e.key, Key::ArrowUp | Key::ArrowDown) {
-            return walk_history(&f_key, &st_key, &hist_key, &saved_key, e.key == Key::ArrowUp);
+            return walk_history(
+                &f_key,
+                &st_key,
+                &hist_key,
+                &saved_key,
+                e.key == Key::ArrowUp,
+            );
         }
         false
     });
@@ -201,12 +206,7 @@ pub fn composer(ui: &Ui, studio: Studio) -> El {
                 l.height = Length::Px(0.0);
             })
             .bind(move || {
-                out.set(current_offers(
-                    &st,
-                    caret.get(),
-                    &files.get(),
-                    menu.get(),
-                ));
+                out.set(current_offers(&st, caret.get(), &files.get(), menu.get()));
             })
     };
     let suggests = suggestion_list(ui, studio.clone(), offers, picked, field.clone());
@@ -217,12 +217,16 @@ pub fn composer(ui: &Ui, studio: Studio) -> El {
     let drop_hint = {
         let st = studio.clone();
         let u = ui.clone();
-        show(ui, move || st.depth.drag_over.get(), move || {
-            let label = u.clone();
-            w::text(&u, "").variant("muted").text(move || {
-                messages().text(&label, "composer-drop")
-            })
-        })
+        show(
+            ui,
+            move || st.depth.drag_over.get(),
+            move || {
+                let label = u.clone();
+                w::text(&u, "")
+                    .variant("muted")
+                    .text(move || messages().text(&label, "composer-drop"))
+            },
+        )
         .el()
     };
 
@@ -259,15 +263,9 @@ fn field_row(ui: &Ui, studio: &Studio, field: &remedy_ui::TextField, unit: f32) 
         let st = studio.clone();
         tool_button(
             ui,
-            w::Icon::File,
+            Glyph::Paperclip,
             move || messages().text(&u, "composer-attach"),
             move || pick_attachments(&st),
-        )
-        .style(
-            StylePatch::new()
-                .background(colors.card)
-                .radius(18.0)
-                .foreground(colors.text),
         )
     };
     let mic = mic_button(ui, studio);
@@ -292,7 +290,8 @@ fn field_row(ui: &Ui, studio: &Studio, field: &remedy_ui::TextField, unit: f32) 
                     .background(colors.panel)
                     .radius(ui.theme().radii.large)
                     .border(line)
-                    .border_width(1.0),
+                    .border_width(1.0)
+                    .shadow(crate::tokens::elevation(&colors)),
             )
             .child(attach)
             .child(mic)
@@ -313,36 +312,47 @@ fn field_row(ui: &Ui, studio: &Studio, field: &remedy_ui::TextField, unit: f32) 
 }
 
 fn mic_button(ui: &Ui, studio: &Studio) -> El {
-    let u = ui.clone();
-    let st = studio.clone();
-    let label = {
-        let u = u.clone();
-        let st = st.clone();
+    let listening = {
+        let st = studio.clone();
+        move || st.depth.mic_on.get()
+    };
+    let stop = {
+        let u = ui.clone();
+        let st = studio.clone();
         move || {
-            let id = if st.depth.mic_on.get() {
-                "composer-mic-stop"
-            } else {
-                "composer-mic"
-            };
-            messages().text(&u, id)
+            tool_button(
+                &u,
+                Glyph::Stop,
+                {
+                    let u = u.clone();
+                    move || messages().text(&u, "composer-mic-stop")
+                },
+                {
+                    let st = st.clone();
+                    move || toggle_mic(&st)
+                },
+            )
         }
     };
-    w::button(ui, label, move || toggle_mic(&st))
-        .variant("quiet")
-        .semantics({
-            let u = u.clone();
-            let st = studio.clone();
-            move || {
-                let id = if st.depth.mic_on.get() {
-                    "composer-mic-stop"
-                } else {
-                    "composer-mic"
-                };
-                Semantics::new(Role::Button)
-                    .label(messages().text(&u, id))
-                    .action(Action::Click)
-            }
-        })
+    let mic = {
+        let u = ui.clone();
+        let st = studio.clone();
+        move || {
+            tool_button(
+                &u,
+                Glyph::Mic,
+                {
+                    let u = u.clone();
+                    move || messages().text(&u, "composer-mic")
+                },
+                {
+                    let st = st.clone();
+                    move || toggle_mic(&st)
+                },
+            )
+        }
+    };
+    show(ui, listening, stop).fallback(mic).el()
 }
 
 fn send_button(ui: &Ui, studio: &Studio, field: &remedy_ui::TextField) -> El {
@@ -357,7 +367,7 @@ fn send_button(ui: &Ui, studio: &Studio, field: &remedy_ui::TextField) -> El {
             let s = s.clone();
             tool_button(
                 &u,
-                w::Icon::Close,
+                Glyph::Stop,
                 {
                     let u = u.clone();
                     move || messages().text(&u, "composer-stop")
@@ -404,7 +414,9 @@ fn send_button(ui: &Ui, studio: &Studio, field: &remedy_ui::TextField) -> El {
     let st = studio.clone();
     let f = field.clone();
     btn.on_pointer(move |e| {
-        if e.phase == PointerPhase::Down && e.buttons.contains(Buttons::SECONDARY) && st.streaming.get()
+        if e.phase == PointerPhase::Down
+            && e.buttons.contains(Buttons::SECONDARY)
+            && st.streaming.get()
         {
             let text = f.value();
             let files = st.depth.attachments.get();
@@ -435,12 +447,18 @@ fn composer_menu(ui: &Ui, studio: &Studio, field: &remedy_ui::TextField) -> Vec<
     };
     let _ = (text, files);
     vec![
-        w::MenuItem::new(messages().text(ui, "composer-steer"), send_as(SubmitKind::Steer)),
+        w::MenuItem::new(
+            messages().text(ui, "composer-steer"),
+            send_as(SubmitKind::Steer),
+        ),
         w::MenuItem::new(
             messages().text(ui, "composer-interrupt"),
             send_as(SubmitKind::Interrupt),
         ),
-        w::MenuItem::new(messages().text(ui, "composer-queue"), send_as(SubmitKind::After)),
+        w::MenuItem::new(
+            messages().text(ui, "composer-queue"),
+            send_as(SubmitKind::After),
+        ),
         w::MenuItem::new(messages().text(ui, "composer-clear-files"), {
             let st = studio.clone();
             move || st.depth.attachments.set(Vec::new())
@@ -754,9 +772,8 @@ fn attachment_row(ui: &Ui, studio: Studio) -> El {
                         let size = file.size;
                         w::button(&u, label, move || {
                             st.depth.attachments.update(|list| {
-                                if let Some(i) = list
-                                    .iter()
-                                    .position(|a| a.path == path && a.size == size)
+                                if let Some(i) =
+                                    list.iter().position(|a| a.path == path && a.size == size)
                                 {
                                     list.remove(i);
                                 }
@@ -792,7 +809,9 @@ fn needs_vision(model: &str, files: &[Attachment]) -> bool {
         return false;
     }
     let m = model.to_lowercase();
-    let known = ["vision", "vl", "gpt-4o", "gemini", "claude-3", "llava", "pixtral"];
+    let known = [
+        "vision", "vl", "gpt-4o", "gemini", "claude-3", "llava", "pixtral",
+    ];
     !known.iter().any(|k| m.contains(k))
 }
 

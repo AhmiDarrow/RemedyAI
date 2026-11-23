@@ -515,7 +515,7 @@ fn settings_chord_opens_the_rail_and_composer_ignores_new_session() {
         has(&names, "Search all settings") || has(&names, "Settings couldn’t load"),
         "settings rail: {names:?}"
     );
-    let composer = "Message Remedy — /command · @file · Shift+Tab Chat/Plan/Build";
+    let composer = "Message Remedy";
     // Chat-depth draws the composer as a text area.
     let field = app.find(Role::MultilineTextInput, composer);
     assert!(
@@ -543,7 +543,7 @@ fn settings_chord_opens_the_rail_and_composer_ignores_new_session() {
     app.key(KeyEvent::press(Key::Tab).with_modifiers(Modifiers::SHIFT));
     app.frames(1);
     assert!(
-        has(&accessible_names(&app), "CHAT"),
+        has(&accessible_names(&app), "— Chat"),
         "Shift+Tab cycles Build to Chat: {:?}",
         accessible_names(&app)
     );

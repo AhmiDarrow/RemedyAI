@@ -1,8 +1,8 @@
 //! Remedy Desktop: Grove is home, and Studio is one tap away.
 //!
 //! Visual language follows the current Tauri/React app, then goes a little
-//! further (always-visible row actions, a 16 px Remedy Sans UI face). The
-//! window talks to remedy-runtime over HTTP+SSE on 127.0.0.1:7400.
+//! further (Remedy Sans UI in the chrome, AhmiPrint in code). The window talks
+//! to remedy-runtime over HTTP+SSE on 127.0.0.1:7400.
 
 mod chat;
 mod chrome;
@@ -13,6 +13,7 @@ mod grove;
 mod help;
 mod help_data;
 mod help_view;
+mod icons;
 mod layout;
 mod logo;
 mod palette;
@@ -22,14 +23,15 @@ mod rails;
 mod runtime;
 mod server_menu;
 mod settings;
-mod slides;
 mod sidebar;
+mod slides;
 mod sse;
 mod status;
 mod studio;
 mod time;
 mod timetravel;
 mod titlebar;
+mod tokens;
 mod tray_copy;
 mod updates;
 mod usage;
@@ -39,7 +41,9 @@ pub use diagnostics::DiagnosticsPanel;
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
 pub use help::HelpPanel;
 pub use runtime::Client;
-pub use settings::{preview_appearance, preview_connect, preview_error, preview_general, preview_models};
+pub use settings::{
+    preview_appearance, preview_connect, preview_error, preview_general, preview_models,
+};
 pub use slides::{
     automations_preview, bind_host, files_preview, scratch_preview, set_browser_body,
     terminal_context_items, terminal_preview,
@@ -58,9 +62,8 @@ use remedy_ui::widgets as w;
 use remedy_ui::{App, El, Ui, WindowSpec};
 
 use chrome::{Chrome, TRAY_ABOUT, TRAY_QUIT, TRAY_SETTINGS, TRAY_SHOW, TRAY_UPDATES};
-/// Visible 32 px hit target for tool buttons (New-session plus, close ×).
-pub(crate) const TOOL: f32 = 32.0;
-pub(crate) const GLYPH: f32 = 20.0;
+pub(crate) use icons::{Glyph, glyph};
+pub(crate) use tokens::{ROW_ACTIONS, ROW_GLYPH, ROW_TOOL, TOOL, TOOL_GLYPH};
 /// Inset accent bar on the selected row; reserved on every row so close × stays lined up.
 pub(crate) const SELECT_MARK: f32 = 3.0;
 
@@ -326,12 +329,24 @@ fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
                     l.basis = Length::Px(0.0);
                     l.min_height = Length::Px(0.0);
                 })
-                .child(rails::side(ui, chrome.clone(), layout::Side::Left, studio.clone()))
+                .child(rails::side(
+                    ui,
+                    chrome.clone(),
+                    layout::Side::Left,
+                    studio.clone(),
+                ))
                 .child(chat::well(ui, studio.clone()))
-                .child(rails::side(ui, chrome.clone(), layout::Side::Right, studio.clone())),
+                .child(rails::side(
+                    ui,
+                    chrome.clone(),
+                    layout::Side::Right,
+                    studio.clone(),
+                )),
         )
         .child(w::divider(ui, false))
-        .child(status::status_bar(ui, studio, move || status_toggle.toggle_settings()))
+        .child(status::status_bar(ui, studio, move || {
+            status_toggle.toggle_settings()
+        }))
         .child(rails::hosts(ui, chrome))
         .on_key_capture(move |ev| settings::shell_chord(panel, ev))
         .on_key(move |ev| settings::shell_escape(panel, ev))
@@ -346,27 +361,28 @@ fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
 /// A square tool control: 32 px hit target, 20 px glyph, always visible.
 pub(crate) fn tool_button(
     ui: &Ui,
-    glyph: w::Icon,
+    glyph: impl Into<Glyph>,
     label: impl IntoProp<String>,
     on_press: impl Fn() + 'static,
 ) -> El {
-    tool_button_sized(ui, glyph, label, on_press, TOOL, GLYPH)
+    tool_button_sized(ui, glyph, label, on_press, TOOL, TOOL_GLYPH)
 }
 
 /// A tool control at a chosen size (row actions use 28 px so titles still fit).
 pub(crate) fn tool_button_sized(
     ui: &Ui,
-    glyph: w::Icon,
+    glyph: impl Into<Glyph>,
     label: impl IntoProp<String>,
     on_press: impl Fn() + 'static,
     size: f32,
     glyph_size: f32,
 ) -> El {
     let label = label.into_prop();
+    let mark = glyph.into();
     let colors = ui.theme().colors.clone();
     let b = ui
         .el("icon_button")
-        .child(w::icon(ui, glyph, glyph_size))
+        .child(crate::glyph(ui, mark, glyph_size))
         .row()
         .align(Align::Center)
         .justify(Justify::Center)
@@ -379,7 +395,7 @@ pub(crate) fn tool_button_sized(
         })
         .style(
             StylePatch::new()
-                .foreground(colors.text)
+                .foreground(crate::tokens::icon_fg(&colors))
                 .radius(ui.theme().radii.small),
         )
         .on_click(on_press)
