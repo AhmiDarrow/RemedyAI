@@ -182,8 +182,11 @@ func TestUpdateOfferOnceForExistingInstall(t *testing.T) {
 		t.Fatalf("buttons=%v / %v", offer["primary"], offer["secondary"])
 	}
 	bodyText, _ := offer["body"].(string)
-	if !strings.Contains(bodyText, "changed in some big ways") || !strings.Contains(bodyText, "worth a few minutes") {
-		t.Fatalf("copy should stress major changes: %q", bodyText)
+	if !strings.Contains(bodyText, "smarter token saving") || !strings.Contains(bodyText, "A2A and MCP") || !strings.Contains(bodyText, "house rules") {
+		t.Fatalf("copy should name what ships: %q", bodyText)
+	}
+	if strings.Contains(bodyText, "built-in mind") {
+		t.Fatalf("copy must not mention the shelved mind: %q", bodyText)
 	}
 
 	code, body = doSetupJSON(t, s, http.MethodPut, "/api/setup", `{"action":"update_offer_later"}`)

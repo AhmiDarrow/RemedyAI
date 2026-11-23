@@ -55,13 +55,28 @@ pub(crate) fn sync_browser_bookmark(url: &str, on: bool) {
 }
 
 /// Grove or, when the owner switched, a way back plus the Studio shell.
-pub(crate) fn root(ui: &Ui, grove: Grove, app: Option<App>) -> El {
-    view::root(ui, grove, app)
+pub(crate) fn root(
+    ui: &Ui,
+    grove: Grove,
+    app: Option<App>,
+    offer: Option<crate::setup::Offer>,
+) -> El {
+    view::root(ui, grove, app, offer)
 }
 
 /// Morning Grove with example plots, for goldens. It does not touch disk or the network.
 pub(crate) fn preview_home(ui: &Ui) -> El {
-    view::frame(ui, Grove::preview(crate::Studio::preview()), None)
+    view::frame(ui, Grove::preview(crate::Studio::preview()), None, None)
+}
+
+/// Morning Grove with the post-update house-rules banner open, for goldens.
+pub(crate) fn preview_home_offer(ui: &Ui) -> El {
+    view::frame(
+        ui,
+        Grove::preview(crate::Studio::preview()),
+        None,
+        Some(crate::setup::Offer::preview()),
+    )
 }
 
 #[cfg(test)]
