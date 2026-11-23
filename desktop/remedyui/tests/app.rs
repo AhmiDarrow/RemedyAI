@@ -3,7 +3,7 @@
 use remedy_ui::AppConfig;
 use remedy_ui::a11y::{Action, Role};
 use remedy_ui::devtools::{GoldenError, Preview, check_golden};
-use remedy_ui::input::{Key, KeyEvent};
+use remedy_ui::input::{Key, KeyEvent, Modifiers};
 use remedy_ui::testing::TestApp;
 use remedy_ui::themes::PALETTES;
 use std::path::PathBuf;
@@ -387,6 +387,166 @@ fn button_named_like(app: &TestApp, needle: &str) -> Option<String> {
 fn usage_previews_match_their_golden_images() {
     assert_settings_goldens("usage", remedy_desktop::preview_usage);
     assert_settings_goldens("usage-harness", remedy_desktop::preview_usage_harness);
+}
+
+const CHROME_THEMES: &[&str] = &["forest", "deutan"];
+
+fn assert_chrome_goldens(name: &str, build: fn(&remedy_ui::Ui) -> remedy_ui::El) {
+    let preview = Preview::new(name, build).sizes(&[SHELL]).themes(CHROME_THEMES);
+    match check_golden(&preview, std::path::Path::new("tests/golden")) {
+        Ok(()) | Err(GoldenError::Missing(_)) => {}
+        Err(e) => panic!("{e}"),
+    }
+}
+
+#[test]
+fn chrome_previews_match_their_golden_images() {
+    assert_chrome_goldens("chrome-palette", remedy_desktop::home_palette);
+    assert_chrome_goldens("chrome-help", remedy_desktop::home_help);
+    assert_chrome_goldens("chrome-about", remedy_desktop::home_about);
+    assert_chrome_goldens("chrome-diagnostics", remedy_desktop::home_diagnostics);
+    assert_chrome_goldens("chrome-menu", remedy_desktop::home_menu);
+}
+
+fn has(names: &[String], needle: &str) -> bool {
+    names.iter().any(|n| n.contains(needle))
+}
+
+#[test]
+fn palette_opens_and_closes_from_the_keyboard() {
+    fresh_profile();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.frames(2);
+    assert!(app.press(Role::Button, "Studio"), "leave Grove before the chord");
+    app.key(KeyEvent::press(Key::char('k')).with_modifiers(Modifiers::CTRL));
+    app.frames(1);
+    let names = accessible_names(&app);
+    for needle in [
+        "New Session",
+        "Time Travel",
+        "Export Session",
+        "Import Session",
+        "Memory",
+        "Skills",
+        "Diagnostics",
+        "Troubleshooting",
+        "Slash commands reference",
+    ] {
+        assert!(has(&names, needle), "{needle} missing: {names:?}");
+    }
+    app.key(KeyEvent::press(Key::Escape));
+    app.frames(1);
+    assert!(
+        !has(&accessible_names(&app), "Search commands"),
+        "escape closes the palette"
+    );
+    app.key(KeyEvent::press(Key::char('p')).with_modifiers(Modifiers::CTRL));
+    app.frames(1);
+    assert!(has(&accessible_names(&app), "New Session"), "Ctrl+P reopens");
+}
+
+#[test]
+fn help_about_diagnostics_and_quit_use_the_title_menu() {
+    fresh_profile();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.frames(2);
+    app.key(KeyEvent::press(Key::F(1)));
+    app.frames(3);
+    assert!(
+        has(&accessible_names(&app), "Overview"),
+        "F1 opens the manual: {:?}",
+        accessible_names(&app)
+    );
+    app.key(KeyEvent::press(Key::Escape));
+    app.frames(1);
+    assert!(app.press(Role::Button, "Open Remedy menu"));
+    assert!(app.press(Role::Button, "About Remedy (v1.0.0)"));
+    app.frames(1);
+    assert!(
+        has(&accessible_names(&app), "Hope this helps"),
+        "about signature: {:?}",
+        accessible_names(&app)
+    );
+    app.key(KeyEvent::press(Key::Escape));
+    app.frames(1);
+    assert!(app.press(Role::Button, "Open Remedy menu"));
+    assert!(app.press(Role::Button, "Diagnostics"));
+    app.frames(2);
+    let names = accessible_names(&app);
+    // The live app has no server under REMEDY_DESKTOP_NO_SPAWN. The landed
+    // panel stays on its dialog, the hive group, and either the loading line
+    // or the offline error. The sample golden is the Healthy snapshot.
+    assert!(has(&names, "Diagnostics"), "diagnostics title: {names:?}");
+    assert!(has(&names, "Health diagnostics"), "dialog: {names:?}");
+    assert!(has(&names, "Hive"), "hive: {names:?}");
+    assert!(
+        has(&names, "Loading diagnostics")
+            || has(&names, "Could not reach the runtime")
+            || has(&names, "Cannot reach local API"),
+        "offline diagnostics: {names:?}"
+    );
+    app.key(KeyEvent::press(Key::Escape));
+    app.frames(1);
+    assert!(app.press(Role::Button, "Open Remedy menu"));
+    assert!(app.press(Role::Button, "Quit Remedy"));
+    app.frames(1);
+    assert!(
+        has(&accessible_names(&app), "stop the local server"),
+        "quit warning: {:?}",
+        accessible_names(&app)
+    );
+}
+
+#[test]
+fn settings_chord_opens_the_rail_and_composer_ignores_new_session() {
+    fresh_profile();
+    reset_saved_layout();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.frames(2);
+    assert!(app.press(Role::Button, "Studio"));
+    app.key(KeyEvent::press(Key::char(',')).with_modifiers(Modifiers::CTRL));
+    app.frames(2);
+    let names = accessible_names(&app);
+    // The live app has no settings client under REMEDY_DESKTOP_NO_SPAWN, so
+    // ensure_loaded stops on "Settings couldn’t load" and never mounts
+    // You & Agent / Appearance. The rail is still open. Language and font
+    // size render once a client loads; the settings goldens cover that.
+    assert!(
+        has(&names, "Search all settings") || has(&names, "Settings couldn’t load"),
+        "settings rail: {names:?}"
+    );
+    let composer = "Message Remedy — /command · @file · Shift+Tab Chat/Plan/Build";
+    // Chat-depth draws the composer as a text area.
+    let field = app.find(Role::MultilineTextInput, composer);
+    assert!(
+        field.is_some(),
+        "composer missing among text fields: {:?}",
+        app.reader_view()
+            .into_iter()
+            .filter(|n| {
+                matches!(
+                    n.role,
+                    Role::TextInput | Role::MultilineTextInput | Role::SearchInput
+                )
+            })
+            .filter_map(|n| n.name)
+            .collect::<Vec<_>>()
+    );
+    field.unwrap().focus();
+    app.frames(1);
+    app.key(KeyEvent::press(Key::char('n')).with_modifiers(Modifiers::CTRL));
+    app.frames(1);
+    assert!(
+        app.find(Role::Button, "Close New chat 2").is_none(),
+        "Ctrl+N does not fire while typing"
+    );
+    app.key(KeyEvent::press(Key::Tab).with_modifiers(Modifiers::SHIFT));
+    app.frames(1);
+    assert!(
+        has(&accessible_names(&app), "CHAT"),
+        "Shift+Tab cycles Build to Chat: {:?}",
+        accessible_names(&app)
+    );
 }
 
 /// The diagnostics overlay is a new surface. Forest, light, and deutan lock it.
