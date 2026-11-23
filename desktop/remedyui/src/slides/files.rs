@@ -913,20 +913,33 @@ fn path_row(
     .variant("quiet");
     w::tooltip(&sort, "Cycle sort: folders first, A–Z, Z–A");
 
+    let crumbs = crumb_host.clip().layout(|l| {
+        l.grow = 1.0;
+        l.basis = Length::Px(0.0);
+        l.min_width = Length::Px(0.0);
+    });
+    let sort_model = model.clone();
     w::column(ui)
         .gap(0.0)
         .child(
-            w::row(ui)
-                .align(Align::Center)
+            w::overflow_row(ui)
                 .gap(unit)
+                .keep(back)
+                .keep(forward)
+                .keep(up)
+                .flex(crumbs)
+                .child("Refresh", refresh)
+                .child_fn(
+                    move || format!("Sort: {}", sort_model.sort.get().label()),
+                    sort,
+                )
+                .el()
                 .padding(pad(unit * 0.5, unit * 2.0))
-                .child(back)
-                .child(forward)
-                .child(up)
-                .child(crumb_host)
-                .child(refresh)
-                .child(sort)
-                .style(StylePatch::new().foreground(colors.text)),
+                .style(StylePatch::new().foreground(colors.text))
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                }),
         )
         .child(
             w::row(ui)
