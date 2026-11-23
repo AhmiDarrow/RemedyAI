@@ -59,6 +59,11 @@ pub fn spawn_disabled() -> bool {
 }
 
 /// Bearer: `$REMEDY_API_KEY`, then `~/.remedy/auth/local_api_token` (or `.posix`).
+///
+/// The file may be a legacy plaintext token or a Windows DPAPI envelope
+/// (`{"v":2,"dpapi":"<base64>"}`), the same format the 0.70.5 Tauri shell
+/// wrote. Skipping the envelope left the 1.0 port signed out of the local
+/// API, so setup sat on "Could not reach your Remedy settings".
 pub fn load_token() -> Option<String> {
     if let Ok(k) = std::env::var("REMEDY_API_KEY") {
         let k = k.trim().to_string();
@@ -66,17 +71,137 @@ pub fn load_token() -> Option<String> {
             return Some(k);
         }
     }
-    let home = remedy_home();
-    for name in ["local_api_token", "local_api_token.posix"] {
-        let path = home.join("auth").join(name);
-        if let Ok(raw) = std::fs::read_to_string(&path) {
-            let t = raw.trim().to_string();
-            if t.len() >= 8 && !t.starts_with('{') {
-                return Some(t);
+    let dir = remedy_home().join("auth");
+    let primary = dir.join("local_api_token");
+    if primary.is_file() {
+        if let Ok(raw) = std::fs::read(&primary) {
+            match decode_local_api_token_bytes(&raw) {
+                Ok(tok) => return Some(tok),
+                Err(_) => {
+                    let alt = dir.join("local_api_token.posix");
+                    if let Ok(raw2) = std::fs::read(&alt) {
+                        if let Ok(tok) = decode_local_api_token_bytes(&raw2) {
+                            return Some(tok);
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        let alt = dir.join("local_api_token.posix");
+        if let Ok(raw) = std::fs::read(&alt) {
+            if let Ok(tok) = decode_local_api_token_bytes(&raw) {
+                return Some(tok);
             }
         }
     }
     None
+}
+
+/// Decode on-disk local API token bytes. Same rules as the Tauri shell:
+/// a plaintext line, or a `{"v": 2, "dpapi": "<base64>"}` envelope.
+pub(crate) fn decode_local_api_token_bytes(raw: &[u8]) -> Result<String, String> {
+    let text = String::from_utf8_lossy(raw).trim().to_string();
+    if text.is_empty() {
+        return Err("local API token is empty or invalid".into());
+    }
+    if text.starts_with('{') {
+        let v: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| format!("token envelope JSON: {e}"))?;
+        let is_v2 = v.get("v").and_then(|x| x.as_i64()) == Some(2)
+            || v.get("v").and_then(|x| x.as_u64()) == Some(2);
+        if is_v2 {
+            if let Some(b64) = v.get("dpapi").and_then(|x| x.as_str()) {
+                use base64::Engine;
+                let cipher = base64::engine::general_purpose::STANDARD
+                    .decode(b64.trim())
+                    .map_err(|e| format!("token dpapi base64: {e}"))?;
+                let plain = dpapi_unprotect_user(&cipher)?;
+                let tok = String::from_utf8(plain)
+                    .map_err(|e| format!("token utf-8: {e}"))?
+                    .trim()
+                    .to_string();
+                if tok.len() < 16 {
+                    return Err("local API token is empty or invalid".into());
+                }
+                return Ok(tok);
+            }
+        }
+        return Err("local API token envelope unrecognized".into());
+    }
+    if text.len() < 16 {
+        return Err("local API token is empty or invalid".into());
+    }
+    Ok(text)
+}
+
+#[cfg(target_os = "windows")]
+fn dpapi_unprotect_user(cipher: &[u8]) -> Result<Vec<u8>, String> {
+    use std::ptr;
+
+    #[repr(C)]
+    struct DataBlob {
+        cb_data: u32,
+        pb_data: *mut u8,
+    }
+
+    #[link(name = "crypt32")]
+    extern "system" {
+        fn CryptUnprotectData(
+            p_data_in: *const DataBlob,
+            ppsz_data_descr: *mut *mut u16,
+            p_optional_entropy: *const DataBlob,
+            pv_reserved: *mut core::ffi::c_void,
+            p_prompt_struct: *mut core::ffi::c_void,
+            dw_flags: u32,
+            p_data_out: *mut DataBlob,
+        ) -> i32;
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn LocalFree(h: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
+    }
+
+    if cipher.is_empty() {
+        return Err("empty DPAPI ciphertext".into());
+    }
+    let in_blob = DataBlob {
+        cb_data: cipher.len() as u32,
+        // CryptUnprotectData does not mutate input; cast is for C ABI only.
+        pb_data: cipher.as_ptr() as *mut u8,
+    };
+    let mut out_blob = DataBlob {
+        cb_data: 0,
+        pb_data: ptr::null_mut(),
+    };
+    // CRYPTPROTECT_UI_FORBIDDEN = 0x1
+    let ok = unsafe {
+        CryptUnprotectData(
+            &in_blob,
+            ptr::null_mut(),
+            ptr::null(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            0x1,
+            &mut out_blob,
+        )
+    };
+    if ok == 0 {
+        return Err("CryptUnprotectData failed for local API token".into());
+    }
+    let result = unsafe {
+        let slice = std::slice::from_raw_parts(out_blob.pb_data, out_blob.cb_data as usize);
+        let v = slice.to_vec();
+        LocalFree(out_blob.pb_data as *mut core::ffi::c_void);
+        v
+    };
+    Ok(result)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn dpapi_unprotect_user(_cipher: &[u8]) -> Result<Vec<u8>, String> {
+    Err("DPAPI envelopes are only supported on Windows".into())
 }
 
 /// Same directory the Tauri shell uses: `REMEDY_HOME`, else `%USERPROFILE%\.remedy`
@@ -922,5 +1047,27 @@ mod tests {
         assert!(line.contains("src/studio.rs:659:25"), "{line}");
         assert!(line.contains("the signal belongs to another thread's runtime"), "{line}");
         assert!(line.contains("stack backtrace:"), "{line}");
+    }
+
+    #[test]
+    fn plaintext_local_api_token_is_accepted() {
+        let tok = super::decode_local_api_token_bytes(b"plain-token-value-ok").unwrap();
+        assert_eq!(tok, "plain-token-value-ok");
+    }
+
+    #[test]
+    fn dpapi_envelope_is_not_used_as_a_bearer() {
+        let raw = br#"{"v":2,"dpapi":"@@@not-base64@@@","updated_at":0}"#;
+        let err = super::decode_local_api_token_bytes(raw).unwrap_err();
+        assert!(
+            err.contains("dpapi base64") || err.contains("only supported on Windows"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn unrecognized_json_envelope_is_rejected() {
+        let err = super::decode_local_api_token_bytes(br#"{"v":1,"token":"nope"}"#).unwrap_err();
+        assert!(err.contains("unrecognized"), "{err}");
     }
 }
