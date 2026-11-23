@@ -95,7 +95,7 @@ export const UPDATE_OFFER_FALLBACK: SetupUpdateOffer = {
   id: 'major-changes-2026-11',
   title: 'House rules',
   body:
-    "Remedy has changed in some big ways: a new built-in mind, smarter token saving, local muscle sharing, and talking with your other bots. It's worth a few minutes to go over the house rules together.",
+    "Remedy now has smarter token saving, local muscle sharing, and talking with other bots (A2A and MCP). It's worth a few minutes to go over the house rules together.",
   primary: "Let's go",
   secondary: 'Not now',
 }

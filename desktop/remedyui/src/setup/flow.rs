@@ -6,12 +6,13 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use remedy_ui::layout::{Align, Justify, Length};
+use remedy_ui::core::Insets;
+use remedy_ui::layout::{Align, Justify, Length, Position};
 use remedy_ui::reactive::{Signal, Waker};
 use remedy_ui::widgets as w;
 use remedy_ui::{App, El, Ui, show};
@@ -19,15 +20,15 @@ use serde_json::{Value, json};
 
 use super::api;
 use super::chrome;
-use super::conversation::{conversation_view, Conversation};
+use super::conversation::{Conversation, conversation_view};
 use super::downloads::{self, Downloads};
-use super::mind::{mind_view, Mind};
+use super::mind::{Mind, mind_view};
 use super::model::{self, Stage, UpdatePhase};
-use super::name::{self, name_overlay, NamePrompt};
-use super::offer::{offer_overlay, Offer};
+use super::name::{self, NamePrompt, name_overlay};
+use super::offer::Offer;
 use super::splash;
-use super::update::{update_screen, Updater};
-use super::wizard::{wizard_screen, Wizard};
+use super::update::{Updater, update_screen};
+use super::wizard::{Wizard, wizard_screen};
 use crate::fonts::{self, Fonts};
 use crate::grove::Grove;
 use crate::runtime::{self, Client};
@@ -133,101 +134,111 @@ impl Gate {
         let update_ready = self.downloads.update_ready.clone();
         let enter_studio = self.enter_studio.clone();
         let offer_checked = self.offer_checked.clone();
-        let spawned = thread::Builder::new().name("remedy-boot".into()).spawn(move || {
-            let outcome = runtime::ensure_running();
-            if matches!(
-                outcome,
-                runtime::EnsureOutcome::MissingBinary | runtime::EnsureOutcome::SpawnFailed
-            ) {
-                let epoch_now = Arc::clone(&epoch);
-                let _ = waker.post(move || {
-                    if epoch_now.load(Ordering::SeqCst) != ticket {
+        let spawned = thread::Builder::new()
+            .name("remedy-boot".into())
+            .spawn(move || {
+                let outcome = runtime::ensure_running();
+                if matches!(
+                    outcome,
+                    runtime::EnsureOutcome::MissingBinary | runtime::EnsureOutcome::SpawnFailed
+                ) {
+                    let epoch_now = Arc::clone(&epoch);
+                    let _ = waker.post(move || {
+                        if epoch_now.load(Ordering::SeqCst) != ticket {
+                            return;
+                        }
+                        splash.set("error".into());
+                        error.set(model::SPLASH_FAILED.into());
+                        surface.set(Surface::Error);
+                    });
+                    return;
+                }
+                let started_at = Instant::now();
+                let mut attempts = 0u32;
+                let mut up = false;
+                while attempts < 45 {
+                    if epoch.load(Ordering::SeqCst) != ticket {
                         return;
                     }
-                    splash.set("error".into());
-                    error.set(model::SPLASH_FAILED.into());
-                    surface.set(Surface::Error);
-                });
-                return;
-            }
-            let started_at = Instant::now();
-            let mut attempts = 0u32;
-            let mut up = false;
-            while attempts < 45 {
+                    attempts += 1;
+                    let label = if attempts <= 1 {
+                        "starting"
+                    } else {
+                        "connecting"
+                    };
+                    let splash_now = splash.clone();
+                    let epoch_now = Arc::clone(&epoch);
+                    let _ = waker.post(move || {
+                        if epoch_now.load(Ordering::SeqCst) == ticket {
+                            splash_now.set(label.into());
+                        }
+                    });
+                    if runtime::wait_until_up(
+                        &runtime::origin(),
+                        runtime::load_token().as_deref(),
+                        1,
+                    ) {
+                        up = true;
+                        break;
+                    }
+                    let shift = (attempts - 1).min(3);
+                    let wait = 250u64.saturating_mul(1u64 << shift).min(2000);
+                    thread::sleep(Duration::from_millis(wait));
+                }
                 if epoch.load(Ordering::SeqCst) != ticket {
                     return;
                 }
-                attempts += 1;
-                let label = if attempts <= 1 { "starting" } else { "connecting" };
-                let splash_now = splash.clone();
-                let epoch_now = Arc::clone(&epoch);
-                let _ = waker.post(move || {
-                    if epoch_now.load(Ordering::SeqCst) == ticket {
-                        splash_now.set(label.into());
-                    }
-                });
-                if runtime::wait_until_up(&runtime::origin(), runtime::load_token().as_deref(), 1) {
-                    up = true;
-                    break;
+                publish_update(&waker, &updater, &update_ready);
+                if !up {
+                    let epoch_now = Arc::clone(&epoch);
+                    let _ = waker.post(move || {
+                        if epoch_now.load(Ordering::SeqCst) != ticket {
+                            return;
+                        }
+                        splash.set("error".into());
+                        error.set(model::SPLASH_TIMEOUT.into());
+                        surface.set(Surface::Error);
+                    });
+                    return;
                 }
-                let shift = (attempts - 1).min(3);
-                let wait = 250u64.saturating_mul(1u64 << shift).min(2000);
-                thread::sleep(Duration::from_millis(wait));
-            }
-            if epoch.load(Ordering::SeqCst) != ticket {
-                return;
-            }
-            publish_update(&waker, &updater, &update_ready);
-            if !up {
+                let elapsed = started_at.elapsed();
+                if elapsed < Duration::from_millis(350) {
+                    thread::sleep(Duration::from_millis(350) - elapsed);
+                }
+                thread::sleep(Duration::from_millis(180));
+                if epoch.load(Ordering::SeqCst) != ticket {
+                    return;
+                }
+                let fresh = Client::new(&runtime::origin(), runtime::load_token().as_deref());
+                let settings = api::get_json(&fresh, "settings");
+                let setup_doc = api::get_json(&fresh, "setup").ok();
                 let epoch_now = Arc::clone(&epoch);
                 let _ = waker.post(move || {
                     if epoch_now.load(Ordering::SeqCst) != ticket {
                         return;
                     }
-                    splash.set("error".into());
-                    error.set(model::SPLASH_TIMEOUT.into());
-                    surface.set(Surface::Error);
-                });
-                return;
-            }
-            let elapsed = started_at.elapsed();
-            if elapsed < Duration::from_millis(350) {
-                thread::sleep(Duration::from_millis(350) - elapsed);
-            }
-            thread::sleep(Duration::from_millis(180));
-            if epoch.load(Ordering::SeqCst) != ticket {
-                return;
-            }
-            let fresh = Client::new(&runtime::origin(), runtime::load_token().as_deref());
-            let settings = api::get_json(&fresh, "settings");
-            let setup_doc = api::get_json(&fresh, "setup").ok();
-            let epoch_now = Arc::clone(&epoch);
-            let _ = waker.post(move || {
-                if epoch_now.load(Ordering::SeqCst) != ticket {
-                    return;
-                }
-                slot.set(Some(fresh));
-                splash.set("ready".into());
-                match settings {
-                    Err(_) => {
-                        error.set(model::SETTINGS_UNREACHABLE.into());
-                        surface.set(Surface::Error);
-                    }
-                    Ok(v) => {
-                        let flags = model::flags_from_settings(&v);
-                        let name_s = model::user_name_from_settings(&v);
-                        user_name.set(name_s.clone());
-                        if model::needs_wizard(Some(&flags)) {
-                            surface.set(Surface::Setup);
-                        } else {
-                            offer_checked.set(true);
-                            reveal_offer_or_name(&offer, &name, &setup_doc, &name_s);
-                            enter_studio.set(true);
+                    slot.set(Some(fresh));
+                    splash.set("ready".into());
+                    match settings {
+                        Err(_) => {
+                            error.set(model::SETTINGS_UNREACHABLE.into());
+                            surface.set(Surface::Error);
+                        }
+                        Ok(v) => {
+                            let flags = model::flags_from_settings(&v);
+                            let name_s = model::user_name_from_settings(&v);
+                            user_name.set(name_s.clone());
+                            if model::needs_wizard(Some(&flags)) {
+                                surface.set(Surface::Setup);
+                            } else {
+                                offer_checked.set(true);
+                                reveal_offer_or_name(&offer, &name, &setup_doc, &name_s);
+                                enter_studio.set(true);
+                            }
                         }
                     }
-                }
+                });
             });
-        });
         if spawned.is_err() {
             self.error.set(model::SPLASH_TIMEOUT.into());
             self.surface.set(Surface::Error);
@@ -303,7 +314,11 @@ impl Gate {
         }
         if self.wizard.talk.get() {
             self.wizard.talk.set(false);
-            let next = if self.mind.ready.get() { Stage::Conversation } else { Stage::Mind };
+            let next = if self.mind.ready.get() {
+                Stage::Conversation
+            } else {
+                Stage::Mind
+            };
             self.stage.set(next);
             spawn_put(self.slot.clone(), json!({ "mode": "conversation" }));
         }
@@ -536,7 +551,9 @@ fn open_troubleshooting(error: Signal<String>) {
 }
 
 fn find_manual() -> Option<PathBuf> {
-    let rel = Path::new("docs").join("manual").join("09-troubleshooting.md");
+    let rel = Path::new("docs")
+        .join("manual")
+        .join("09-troubleshooting.md");
     let mut starts = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
         starts.push(cwd);
@@ -580,7 +597,7 @@ fn open_path(path: &Path) {
 pub fn host(ui: &Ui, studio: Studio, grove: Grove, app: App, client: Client) -> El {
     fonts::prepare_theme(ui, &Fonts::load());
     if runtime::spawn_disabled() {
-        return crate::grove::root(ui, grove, Some(app));
+        return crate::grove::root(ui, grove, Some(app), None);
     }
     let gate = Gate::new(studio, grove, app, client);
     gate.start_boot();
@@ -616,10 +633,14 @@ fn surface(ui: &Ui, gate: Gate) -> El {
             l.height = Length::Percent(1.0);
             l.grow = 1.0;
         })
-        .child(fill(show(ui, move || splash_on.get() == Surface::Splash, {
-            let status = gate.splash.clone();
-            move || splash::splash_view(&ui_splash, status.clone())
-        })))
+        .child(fill(show(
+            ui,
+            move || splash_on.get() == Surface::Splash,
+            {
+                let status = gate.splash.clone();
+                move || splash::splash_view(&ui_splash, status.clone())
+            },
+        )))
         .child(fill(show(ui, move || error_on.get() == Surface::Error, {
             let gate = gate.clone();
             move || error_view(&ui_error, gate.clone())
@@ -628,14 +649,22 @@ fn surface(ui: &Ui, gate: Gate) -> El {
             let gate = gate.clone();
             move || setup_screen(&ui_setup, gate.clone())
         })))
-        .child(fill(show(ui, move || update_on.get() == Surface::Update, {
-            let updater = gate.updater.clone();
-            move || update_screen(&ui_update, updater.clone())
-        })))
-        .child(fill(show(ui, move || studio_on.get() == Surface::Studio, {
-            let gate = gate.clone();
-            move || studio_layer(&ui_studio, gate.clone())
-        })))
+        .child(fill(show(
+            ui,
+            move || update_on.get() == Surface::Update,
+            {
+                let updater = gate.updater.clone();
+                move || update_screen(&ui_update, updater.clone())
+            },
+        )))
+        .child(fill(show(
+            ui,
+            move || studio_on.get() == Surface::Studio,
+            {
+                let gate = gate.clone();
+                move || studio_layer(&ui_studio, gate.clone())
+            },
+        )))
 }
 
 fn fill(layer: remedy_ui::view::Show) -> El {
@@ -663,33 +692,53 @@ fn setup_screen(ui: &Ui, gate: Gate) -> El {
             l.width = Length::Percent(1.0);
             l.height = Length::Percent(1.0);
         })
-        .child(show(ui, move || !loaded.get(), move || {
-            chrome::center(&ui_load, w::text(&ui_load, "Loading setup…").variant("muted"), 420.0)
-        }).el())
-        .child(show(
-            ui,
-            move || loaded_mind.get() && stage_mind.get() == Stage::Mind,
-            {
-                let mind = gate.mind.clone();
-                move || mind_view(&ui_mind, mind.clone())
-            },
-        ).el())
-        .child(show(
-            ui,
-            move || loaded_talk.get() && stage_talk.get() == Stage::Conversation,
-            {
-                let talk = gate.talk.clone();
-                move || conversation_view(&ui_talk, talk.clone())
-            },
-        ).el())
-        .child(show(
-            ui,
-            move || loaded_wiz.get() && stage_wiz.get() == Stage::Traditional,
-            {
-                let wizard = gate.wizard.clone();
-                move || wizard_screen(&ui_wiz, wizard.clone())
-            },
-        ).el())
+        .child(
+            show(
+                ui,
+                move || !loaded.get(),
+                move || {
+                    chrome::center(
+                        &ui_load,
+                        w::text(&ui_load, "Loading setup…").variant("muted"),
+                        420.0,
+                    )
+                },
+            )
+            .el(),
+        )
+        .child(
+            show(
+                ui,
+                move || loaded_mind.get() && stage_mind.get() == Stage::Mind,
+                {
+                    let mind = gate.mind.clone();
+                    move || mind_view(&ui_mind, mind.clone())
+                },
+            )
+            .el(),
+        )
+        .child(
+            show(
+                ui,
+                move || loaded_talk.get() && stage_talk.get() == Stage::Conversation,
+                {
+                    let talk = gate.talk.clone();
+                    move || conversation_view(&ui_talk, talk.clone())
+                },
+            )
+            .el(),
+        )
+        .child(
+            show(
+                ui,
+                move || loaded_wiz.get() && stage_wiz.get() == Stage::Traditional,
+                {
+                    let wizard = gate.wizard.clone();
+                    move || wizard_screen(&ui_wiz, wizard.clone())
+                },
+            )
+            .el(),
+        )
 }
 
 fn studio_layer(ui: &Ui, gate: Gate) -> El {
@@ -700,28 +749,61 @@ fn studio_layer(ui: &Ui, gate: Gate) -> El {
     let revisit_on = gate.revisit.clone();
     let gate_setup = gate.clone();
     let ui_revisit = ui.clone();
-    let stack = w::stack(
+    // Grove stays in the document flow so the page, composer, and status bar
+    // get a real height. The old `w::stack` placed every child absolutely, and
+    // the house-rules `show` overlay then collapsed the page to zero height:
+    // the banner clipped off the top of the window, the main area was empty,
+    // and only a sliver of the composer remained.
+    let grove = crate::grove::root(
         ui,
-        [
-            crate::grove::root(ui, gate.grove.clone(), Some(gate.app.clone())),
-            offer_overlay(ui, gate.offer.clone()),
-            name_overlay(ui, gate.name.clone()),
-            show(ui, move || revisit_on.get(), move || setup_screen(&ui_revisit, gate_setup.clone())).el(),
-        ],
+        gate.grove.clone(),
+        Some(gate.app.clone()),
+        Some(gate.offer.clone()),
     )
     .layout(|l| {
         l.width = Length::Percent(1.0);
         l.height = Length::Percent(1.0);
         l.grow = 1.0;
         l.basis = Length::Px(0.0);
+        l.min_height = Length::Px(0.0);
     });
+    let name = name_overlay(ui, gate.name.clone()).layout(|l| {
+        l.position = Position::Absolute;
+        l.inset = Insets::ZERO;
+        l.width = Length::Percent(1.0);
+        l.height = Length::Percent(1.0);
+    });
+    let revisit = show(
+        ui,
+        move || revisit_on.get(),
+        move || setup_screen(&ui_revisit, gate_setup.clone()),
+    )
+    .el()
+    .layout(|l| {
+        l.position = Position::Absolute;
+        l.inset = Insets::ZERO;
+        l.width = Length::Percent(1.0);
+        l.height = Length::Percent(1.0);
+    });
+    let body = w::column(ui)
+        .layout(|l| {
+            l.position = Position::Relative;
+            l.width = Length::Percent(1.0);
+            l.height = Length::Percent(1.0);
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
+        })
+        .child(grove)
+        .child(name)
+        .child(revisit);
     w::column(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.height = Length::Percent(1.0);
         })
         .child(downloads::top_strip(ui, gate.downloads.clone(), on_update))
-        .child(stack)
+        .child(body)
 }
 
 fn error_view(ui: &Ui, gate: Gate) -> El {
