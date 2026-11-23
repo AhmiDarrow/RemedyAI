@@ -149,9 +149,59 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
                     .variant("quiet"),
                 );
             }
-            cluster
+            // Absent while idle, so the studio goldens keep this row.
+            cluster.child(update_button(ui)).child(update_note(ui))
         })
         .child(picker)
+}
+
+/// Quiet control. Absent from layout while no newer release is offered, so idle
+/// previews keep the same status row.
+fn update_button(ui: &Ui) -> El {
+    let u = ui.clone();
+    show(
+        ui,
+        || !crate::update::offer_signal()
+            .try_get()
+            .unwrap_or_default()
+            .is_empty(),
+        move || {
+            let u = u.clone();
+            w::button(
+                &u,
+                {
+                    let u = u.clone();
+                    move || {
+                        let ver = crate::update::offer_signal().try_get().unwrap_or_default();
+                        format!("{} {ver}", messages().text(&u, "status-update"))
+                    }
+                },
+                crate::update::press_offer,
+            )
+            .variant("quiet")
+        },
+    )
+    .el()
+}
+
+/// Download percent or a check failure. Absent while the note is empty, so idle
+/// previews keep the same status row.
+fn update_note(ui: &Ui) -> El {
+    let u = ui.clone();
+    show(
+        ui,
+        || !crate::update::note_signal()
+            .try_get()
+            .unwrap_or_default()
+            .is_empty(),
+        move || {
+            let u = u.clone();
+            w::text(&u, "")
+                .variant("muted")
+                .text(move || crate::update::note_signal().try_get().unwrap_or_default())
+        },
+    )
+    .el()
 }
 
 fn model_picker(ui: &Ui, studio: Studio) -> El {

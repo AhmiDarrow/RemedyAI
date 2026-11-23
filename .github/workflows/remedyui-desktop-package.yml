@@ -1,0 +1,162 @@
+# RemedyUI desktop packages for the 1.0.0 shell.
+#
+# workflow_dispatch only. Uploads artifacts. Does not create a tag and does
+# not publish a GitHub Release. Joe cuts the 1.0.0 tag and latest.json.
+# desktop-release.yml remains the Tauri 0.70.x pipeline. Do not add a
+# release-publishing action to this file. Joe publishes the 1.0.0 assets.
+
+name: RemedyUI desktop package
+
+on:
+  workflow_dispatch:
+
+# Read-only. This file must not create a tag or a GitHub Release.
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: "4"
+  RAYON_NUM_THREADS: "4"
+
+jobs:
+  windows:
+    name: Windows NSIS
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Allow cargo to read RemedyUI
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.REMEDYUI_READ_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          git config --global url."https://x-access-token:${TOKEN}@github.com/AhmiDarrow/RemedyUI".insteadOf "https://github.com/AhmiDarrow/RemedyUI"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install NSIS and minisign
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          $zip = Join-Path $env:RUNNER_TEMP "minisign.zip"
+          Invoke-WebRequest -Uri "https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip" -OutFile $zip
+          $dest = Join-Path $env:RUNNER_TEMP "minisign"
+          Expand-Archive $zip -DestinationPath $dest
+          $exe = Get-ChildItem -Recurse $dest -Filter minisign.exe | Select-Object -First 1
+          if (-not $exe) { throw "minisign.exe was not in the 0.12 archive" }
+          $dir = $exe.DirectoryName
+          Add-Content -Path $env:GITHUB_PATH -Value $dir
+
+      - name: Package
+        shell: pwsh
+        working-directory: desktop/remedyui
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: ./packaging/package-windows.ps1 -Jobs 4
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis
+          path: |
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_x64-setup.exe
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_x64-setup.exe.sig
+          if-no-files-found: error
+
+  linux:
+    name: Linux AppImage and deb
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Allow cargo to read RemedyUI
+        env:
+          TOKEN: ${{ secrets.REMEDYUI_READ_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          git config --global url."https://x-access-token:${TOKEN}@github.com/AhmiDarrow/RemedyUI".insteadOf "https://github.com/AhmiDarrow/RemedyUI"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install packaging tools and minisign
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libwayland-dev libxkbcommon-dev \
+            dpkg-dev file curl ca-certificates libfuse2 python3
+          curl -fsSL -o /tmp/minisign.tar.gz \
+            https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
+          sudo tar -C /usr/local/bin -xzf /tmp/minisign.tar.gz --strip-components=2 minisign-linux/x86_64/minisign
+          sudo chmod 0755 /usr/local/bin/minisign
+          command -v minisign
+
+      - name: Package
+        working-directory: desktop/remedyui
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bash ./packaging/package-linux.sh --jobs 4
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage-deb
+          path: |
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_amd64.AppImage
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_amd64.AppImage.sig
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_amd64.deb
+            desktop/remedyui/target/packaging/Remedy.Desktop_*_amd64.deb.sig
+          if-no-files-found: error
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: aarch64
+          - os: macos-15-intel
+            arch: x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Allow cargo to read RemedyUI
+        env:
+          TOKEN: ${{ secrets.REMEDYUI_READ_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          git config --global url."https://x-access-token:${TOKEN}@github.com/AhmiDarrow/RemedyUI".insteadOf "https://github.com/AhmiDarrow/RemedyUI"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install minisign
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/minisign.zip \
+            https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip
+          unzip -q /tmp/minisign.zip -d /tmp/minisign
+          BIN="$(find /tmp/minisign -type f -name minisign | head -n 1)"
+          sudo install -m 0755 "${BIN}" /usr/local/bin/minisign
+          command -v minisign
+
+      - name: Package
+        working-directory: desktop/remedyui
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bash ./packaging/package-macos.sh --jobs 4
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: |
+            desktop/remedyui/target/packaging/Remedy.Desktop_*.dmg
+            desktop/remedyui/target/packaging/Remedy.Desktop_*.dmg.sig
+            desktop/remedyui/target/packaging/Remedy.Desktop_*.app.tar.gz
+            desktop/remedyui/target/packaging/Remedy.Desktop_*.app.tar.gz.sig
+          if-no-files-found: error
