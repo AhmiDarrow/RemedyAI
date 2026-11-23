@@ -598,11 +598,21 @@ fn settings_fields_stay_inside_a_narrow_window() {
         "settings still open at 700px: {names:?}"
     );
     let window_w = 700.0;
-    for (role, name) in [
-        (Role::TextInput, "Search all settings"),
-        (Role::TextInput, "Base URL"),
-        (Role::TextInput, "Model"),
-    ] {
+    let search = app
+        .find(Role::TextInput, "Search all settings")
+        .expect("Search must stay laid out when the window is 700px wide");
+    if let Some(bounds) = search.bounds() {
+        assert!(
+            bounds.max.x <= window_w + 1.0,
+            "Search overflows the window: {bounds:?}"
+        );
+        assert!(bounds.min.x >= -1.0, "Search starts off-screen: {bounds:?}");
+        assert!(
+            bounds.max.x - bounds.min.x >= 80.0,
+            "Search collapsed instead of shrinking to fit: {bounds:?}"
+        );
+    }
+    for (role, name) in [(Role::TextInput, "Base URL"), (Role::TextInput, "Model")] {
         if let Some(el) = app.find(role, name) {
             if let Some(bounds) = el.bounds() {
                 assert!(
@@ -610,6 +620,10 @@ fn settings_fields_stay_inside_a_narrow_window() {
                     "{name} overflows the window: {bounds:?}"
                 );
                 assert!(bounds.min.x >= -1.0, "{name} starts off-screen: {bounds:?}");
+                assert!(
+                    bounds.max.x - bounds.min.x >= 80.0,
+                    "{name} collapsed instead of shrinking to fit: {bounds:?}"
+                );
             }
         }
     }

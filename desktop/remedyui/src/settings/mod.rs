@@ -222,7 +222,7 @@ fn open_rail(ui: &Ui, s: Settings) -> El {
     w::row(ui)
         .layout(|l| {
             l.height = Length::Percent(1.0);
-            l.min_width = Length::Px(0.0);
+            l.min_width = Length::Px(220.0);
             l.max_width = Length::Px(320.0);
             l.shrink = 1.0;
             l.grow = 0.0;
@@ -252,7 +252,7 @@ pub(crate) fn grove_rail(ui: &Ui, on_grove: impl Fn() -> bool + 'static) -> El {
     .el()
     .layout(|l| {
         l.shrink = 1.0;
-        l.min_width = Length::Px(0.0);
+        l.min_width = Length::Px(220.0);
         l.max_width = Length::Px(320.0);
         l.height = Length::Percent(1.0);
     })
