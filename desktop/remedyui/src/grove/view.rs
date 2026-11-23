@@ -186,10 +186,19 @@ pub(super) fn frame(
         .child(zero(watch))
         .child(offer_slot(ui, offer))
         .child(slot)
-        .child(w::divider(ui, false))
-        .child(crate::status::status_bar(ui, grove.studio.clone(), || {
-            crate::settings::toggle()
-        }))
+        .child(if crate::chrome::dock_in_host() {
+            ui.el("status-hosted").layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.height = Length::Px(0.0);
+            })
+        } else {
+            w::column(ui)
+                .layout(|l| l.width = Length::Percent(1.0))
+                .child(w::divider(ui, false))
+                .child(crate::status::status_bar(ui, grove.studio.clone(), || {
+                    crate::settings::toggle()
+                }))
+        })
         .child(decision::layer(ui, grove.clone()))
         .child(child::bubble_layer(ui, grove.clone()))
         .child(zero(split_saver(ui, grove)))
