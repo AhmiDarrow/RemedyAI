@@ -245,11 +245,8 @@ pub fn menu(ui: &Ui, studio: &Studio, chrome: Chrome) -> El {
         }))
         .child(item(ui, chrome, messages().text(ui, "menu-help"), "F1", Kind::Normal, {
             let c = chrome;
-            move || {
-                c.menu_open.set(false);
-                c.help_id.set(crate::help_view::default_id().into());
-                c.overlay.set(Overlay::Help);
-            }
+            let s = studio.clone();
+            move || c.open_help(&s, crate::help_view::default_id())
         }))
         .child(item(ui, chrome, messages().text(ui, "menu-openBrowser"), "", Kind::Normal, {
             let c = chrome;
