@@ -311,7 +311,7 @@ fn narrow_window_keeps_one_panel_and_restores_the_thin_rail() {
     );
     let names = accessible_names(&app);
     assert!(
-        names.iter().any(|n| n.contains("In-app terminal on this PC")),
+        names.iter().any(|n| n.contains("Clear terminal")),
         "the right panel opened for this width only: {names:?}"
     );
     app.host().user_resize(id, remedy_ui::core::Size::new(1100.0, 700.0));
@@ -323,7 +323,7 @@ fn narrow_window_keeps_one_panel_and_restores_the_thin_rail() {
     assert!(app.find(Role::Button, "Expand left rail").is_none());
     let names = accessible_names(&app);
     assert!(
-        !names.iter().any(|n| n.contains("In-app terminal on this PC")),
+        !names.iter().any(|n| n.contains("Clear terminal")),
         "widening does not keep the temporary panel: {names:?}"
     );
 }
