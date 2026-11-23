@@ -140,10 +140,7 @@ pub fn run(id: &str, studio: &Studio, chrome: Chrome, ui: &Ui) {
         "skills" => chrome.toggle(Overlay::Skills),
         "settings" => chrome.open_settings(),
         "help" => open_help(help_view::default_id()),
-        "diagnostics" => {
-            chrome.overlay.set(Overlay::Diagnostics);
-            chrome.load_diag(studio);
-        }
+        "diagnostics" => chrome.open_diagnostics(studio),
         "help-troubleshoot" => open_help("09-troubleshooting"),
         "help-commands" => open_help("11-reference-commands"),
         _ => chrome.close_overlay(),

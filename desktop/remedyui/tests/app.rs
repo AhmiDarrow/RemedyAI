@@ -313,13 +313,18 @@ fn help_about_diagnostics_and_quit_use_the_title_menu() {
     assert!(app.press(Role::Button, "Diagnostics"));
     app.frames(2);
     let names = accessible_names(&app);
-    // The live app has no server under REMEDY_DESKTOP_NO_SPAWN, so the badge is
-    // "Checking…" or the offline line. The preview golden is the Healthy sample.
-    assert!(
-        has(&names, "Healthy") || has(&names, "Checking") || has(&names, "not connected"),
-        "diagnostics: {names:?}"
-    );
+    // The live app has no server under REMEDY_DESKTOP_NO_SPAWN. The landed
+    // panel stays on its dialog, the hive group, and either the loading line
+    // or the offline error. The sample golden is the Healthy snapshot.
+    assert!(has(&names, "Diagnostics"), "diagnostics title: {names:?}");
+    assert!(has(&names, "Health diagnostics"), "dialog: {names:?}");
     assert!(has(&names, "Hive"), "hive: {names:?}");
+    assert!(
+        has(&names, "Loading diagnostics")
+            || has(&names, "Could not reach the runtime")
+            || has(&names, "Cannot reach local API"),
+        "offline diagnostics: {names:?}"
+    );
     app.key(KeyEvent::press(Key::Escape));
     app.frames(1);
     assert!(app.press(Role::Button, "Open Remedy menu"));
@@ -375,6 +380,33 @@ fn settings_chord_opens_the_rail_and_composer_ignores_new_session() {
         has(&accessible_names(&app), "CHAT"),
         "Shift+Tab cycles Build to Chat: {:?}",
         accessible_names(&app)
+    );
+}
+
+/// The diagnostics overlay is a new surface. Forest, light, and deutan lock it.
+/// A missing PNG is written and is not a failure the first time.
+#[test]
+fn diagnostics_preview_matches_its_golden_images() {
+    assert_settings_goldens("diagnostics", remedy_desktop::diagnostics_preview);
+}
+
+#[test]
+fn diagnostics_preview_names_the_panel_and_the_hive() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::diagnostics_preview);
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("Diagnostics")),
+        "diagnostics title: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Hive")),
+        "hive inspector: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Health diagnostics")),
+        "dialog name: {names:?}"
     );
 }
 
@@ -460,7 +492,7 @@ fn narrow_window_keeps_one_panel_and_restores_the_thin_rail() {
     );
     let names = accessible_names(&app);
     assert!(
-        names.iter().any(|n| n.contains("In-app terminal on this PC")),
+        names.iter().any(|n| n.contains("Clear terminal")),
         "the right panel opened for this width only: {names:?}"
     );
     app.host().user_resize(id, remedy_ui::core::Size::new(1100.0, 700.0));
@@ -472,7 +504,7 @@ fn narrow_window_keeps_one_panel_and_restores_the_thin_rail() {
     assert!(app.find(Role::Button, "Expand left rail").is_none());
     let names = accessible_names(&app);
     assert!(
-        !names.iter().any(|n| n.contains("In-app terminal on this PC")),
+        !names.iter().any(|n| n.contains("Clear terminal")),
         "widening does not keep the temporary panel: {names:?}"
     );
 }

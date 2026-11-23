@@ -17,7 +17,7 @@ use remedy_ui::style::StylePatch;
 use remedy_ui::widgets as w;
 use remedy_ui::{App, El, Ui, Window, catch_errors};
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use crate::help_view;
 use crate::messages;
@@ -32,6 +32,43 @@ use crate::{fonts, Fonts};
 
 thread_local! {
     static LIVE: Cell<Option<Chrome>> = const { Cell::new(None) };
+    /// Panel mounted by `hosted`. `DIAG_FRESH` is set only by `install_diag`,
+    /// so one golden's open sample is not reused by the next test.
+    static DIAG: RefCell<Option<crate::diagnostics::DiagnosticsPanel>> = RefCell::new(None);
+    static DIAG_FRESH: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The next `hosted` frame mounts this panel once, instead of a closed one.
+pub fn install_diag(panel: crate::diagnostics::DiagnosticsPanel) {
+    DIAG.with(|slot| *slot.borrow_mut() = Some(panel));
+    DIAG_FRESH.with(|flag| flag.set(true));
+}
+
+fn current_diag() -> crate::diagnostics::DiagnosticsPanel {
+    DIAG.with(|slot| {
+        let fresh = DIAG_FRESH.with(|flag| flag.replace(false));
+        let mut guard = slot.borrow_mut();
+        if fresh {
+            if let Some(panel) = guard.clone() {
+                return panel;
+            }
+        }
+        let panel = crate::diagnostics::DiagnosticsPanel::new();
+        *guard = Some(panel.clone());
+        panel
+    })
+}
+
+fn diag_now() -> Option<crate::diagnostics::DiagnosticsPanel> {
+    DIAG.with(|slot| slot.borrow().clone())
+}
+
+fn close_diag() {
+    if let Some(panel) = diag_now() {
+        if panel.is_open() {
+            panel.close();
+        }
+    }
 }
 
 fn bind_live(chrome: Chrome) {
@@ -69,7 +106,7 @@ pub fn handle_panel(panel: &str, article: Option<&str>, studio: &Studio) -> bool
     match panel {
         "usage" => open_usage(studio),
         "diagnostics" => {
-            c.open(Overlay::Diagnostics);
+            c.open_diagnostics(studio);
             true
         }
         "help" => {
@@ -295,6 +332,7 @@ impl Chrome {
 
     pub fn open(self, overlay: Overlay) {
         self.menu_open.set(false);
+        close_diag();
         if overlay == Overlay::Palette {
             self.palette_query.set(String::new());
             self.palette_idx.set(0);
@@ -329,6 +367,7 @@ impl Chrome {
 
     pub fn request_quit(self) {
         self.menu_open.set(false);
+        close_diag();
         let skipped = self.skip_quit.get()
             || crate::settings::current().is_some_and(|s| s.skip_quit_warn.try_get().unwrap_or(false));
         if skipped {
@@ -481,11 +520,30 @@ impl Chrome {
         fetch_slot(&client, "hive/roster", self.hive);
     }
 
+    /// The landed diagnostics window. The thin sheet is only the fallback
+    /// when this frame has not mounted a panel yet.
+    pub fn open_diagnostics(self, studio: &Studio) {
+        self.menu_open.set(false);
+        self.server_open.set(false);
+        self.close_overlay();
+        if let Some(prev) = self.usage_win.get() {
+            prev.close();
+            self.usage_win.set(None);
+        }
+        if let Some(panel) = diag_now() {
+            panel.open();
+        } else {
+            self.overlay.set(Overlay::Diagnostics);
+            self.load_diag(studio);
+        }
+    }
+
     /// The usage dashboard from PR #83. One modal, not a second sheet.
     fn present_usage(self, ui: &Ui, studio: &Studio) {
         self.menu_open.set(false);
         self.server_open.set(false);
         self.close_overlay();
+        close_diag();
         if let Some(prev) = self.usage_win.get() {
             prev.close();
         }
@@ -585,6 +643,16 @@ impl Chrome {
                 return true;
             } else {
                 // The dashboard is a dialog. Shift+Tab stays with it.
+                return false;
+            }
+        }
+        if let Some(panel) = diag_now() {
+            if panel.is_open() {
+                if e.key == Key::Escape {
+                    panel.close();
+                    return true;
+                }
+                // Same rule as the usage dialog: other keys stay with the panel.
                 return false;
             }
         }
@@ -953,6 +1021,16 @@ fn build_hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: El) -> El {
         }));
     let overlays = overlay_slot(ui, studio.clone(), chrome);
     let toast = toast_layer(ui, chrome);
+    // Closed, the host is a zero-size absolute child. The open panel draws
+    // through `ui.overlay`, so studio and chrome goldens keep their pixels.
+    let diag = current_diag();
+    let diag_host = crate::diagnostics::DiagnosticsPanel::view(ui, &diag).layout(|l| {
+        l.position = Position::Absolute;
+        l.width = Length::Px(0.0);
+        l.height = Length::Px(0.0);
+        l.top = Length::Px(0.0);
+        l.left = Length::Px(0.0);
+    });
 
     let frame = ui.el("chrome").column().layout(|l| {
         l.position = Position::Relative;
@@ -966,7 +1044,8 @@ fn build_hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: El) -> El {
         .on_key_capture(move |e| chrome.on_key(&key_ui, &key_studio, e))
         .child(shell)
         .child(overlays)
-        .child(toast);
+        .child(toast)
+        .child(diag_host);
 
     let root_ui = ui.clone();
     let root_studio = studio.clone();
