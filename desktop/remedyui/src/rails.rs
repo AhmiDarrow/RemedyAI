@@ -280,7 +280,14 @@ impl WorkspaceChrome {
         let crossed = narrow != self.was_narrow.get();
         if crossed {
             self.was_narrow.set(narrow);
-            self.narrow_side.set_if_changed(None);
+            // Keep an already-open panel (prefer Settings) so Search stays
+            // reachable at 700px. Clearing this used to collapse both sides
+            // to icon rails as soon as the window crossed NARROW_MAX.
+            self.narrow_side.set_if_changed(if narrow {
+                preferred_narrow_side(layout)
+            } else {
+                None
+            });
         }
         let old = *self.previous.borrow();
         if !crossed && narrow && old != layout {
@@ -477,6 +484,24 @@ fn popout_host(ui: &Ui, chrome: &WorkspaceChrome, host: &El) {
             *slot.borrow_mut() = Some(el);
         });
     });
+}
+
+/// Which panel stays open when the window first crosses into the narrow
+/// band. Settings wins so the Search field is not replaced by two icon rails.
+fn preferred_narrow_side(layout: WorkspaceLayout) -> Option<Side> {
+    let left_open = layout.left_rail == RailMode::Open;
+    let right_open = layout.right_rail == RailMode::Open;
+    if right_open && layout.right == SlideId::Settings {
+        Some(Side::Right)
+    } else if left_open && layout.left == SlideId::Settings {
+        Some(Side::Left)
+    } else if right_open {
+        Some(Side::Right)
+    } else if left_open {
+        Some(Side::Left)
+    } else {
+        None
+    }
 }
 
 fn shown_mode(
