@@ -14,6 +14,7 @@ import {
   setJobRequestId,
   appendJobThinking,
   replaceJobThinking,
+  closeJobThinkingRound,
   completeStreamJob,
   countRunningJobs,
   detachStreamJob,
@@ -154,6 +155,20 @@ describe('streamJobs', () => {
     expect(getJobPaint('tab-a')?.partialThinking).toBe('round-two')
     completeStreamJob('tab-a', 'done')
     completeStreamJob('tab-b', 'done')
+  })
+
+  it('keeps earlier thinking rounds when a new round starts after tools', () => {
+    const c = new AbortController()
+    registerStreamJob('think-rounds', c)
+    appendJobThinking('think-rounds', 'Round one starts. ')
+    appendJobThinking('think-rounds', 'It ends here.')
+    closeJobThinkingRound('think-rounds')
+    replaceJobThinking('think-rounds', 'Round two.')
+    appendJobThinking('think-rounds', ' More of two.')
+    expect(getJobPaint('think-rounds')?.partialThinking).toBe(
+      'Round one starts. It ends here.\n\nRound two. More of two.',
+    )
+    completeStreamJob('think-rounds', 'done')
   })
 
   it('abort UX: Stopped marker + uiCommitted double-commit guard', async () => {

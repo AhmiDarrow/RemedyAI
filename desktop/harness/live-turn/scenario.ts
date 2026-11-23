@@ -123,6 +123,14 @@ export function buildScenario(): { events: ScenarioEvent[]; end: number } {
       ev.push({ at: t, type: 'thinking', text: 'Rename confirmed in history. Patch manifest and loader together. ' })
       t += 80
     }
+    if (ri === 5) {
+      const later =
+        'The first self-check failed because the entry still was not registered, so the second write to the loader has to happen before I trust the all-addon run. ' +
+        'I should also read the addon log after the check passes, in case a warning slipped through. ' +
+        'Only then is it safe to delete the scratch copies and leave a clean tree.'
+      ev.push({ at: t, type: 'thinking', text: later })
+      t += 120
+    }
   })
   t += 200
   for (const w of ANSWER.match(/\S+\s*/g) || []) {

@@ -41,14 +41,13 @@ describe('WorkStrip', () => {
     expect(html).not.toContain('reach the portal folder')
   })
 
-  it('expands to a timeline grouped under each narration line', () => {
+  it('expands to a height-capped tool timeline without user-facing prose', () => {
     const html = render({ steps, defaultOpen: true })
     expect(html).toContain('data-testid="ws-timeline"')
-    const first = html.indexOf("reach the portal folder")
-    const second = html.indexOf('Found the manifest')
-    expect(first).toBeGreaterThan(-1)
-    expect(second).toBeGreaterThan(first)
     expect(html.match(/class="ws-group"/g)?.length).toBe(2)
+    // Assistant prose belongs in the bubble, not the work log.
+    expect(html).not.toContain('reach the portal folder')
+    expect(html).not.toContain('Found the manifest')
     // Short tool names and short targets.
     expect(html).toContain('>Bash<')
     expect(html).toContain('>Read<')
