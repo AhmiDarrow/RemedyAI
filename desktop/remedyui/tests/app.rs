@@ -222,6 +222,118 @@ fn settings_previews_match_their_golden_images() {
     assert_settings_goldens("settings-error", remedy_desktop::preview_error);
 }
 
+#[test]
+fn help_preview_shows_the_manual() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::help_home);
+    app.frames(3);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("Owner's Manual") || n.contains("Help")),
+        "help dialog: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Close help")),
+        "close control: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Overview")),
+        "overview chapter: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Search help")),
+        "search field: {names:?}"
+    );
+}
+
+/// Forest, light, and a colorblind palette. The manual is a new surface, so
+/// these PNGs are the intended baseline. A missing file is written, not a failure.
+#[test]
+fn help_preview_matches_its_golden_image() {
+    assert_settings_goldens("help", remedy_desktop::help_home);
+}
+
+/// Forest, a light theme, and a colorblind palette. A missing PNG is written and is not a failure.
+#[test]
+fn time_travel_preview_matches_its_golden_images() {
+    let themes = &["forest", "light", "deutan"][..];
+    let preview = Preview::new("timetravel", remedy_desktop::time_travel_preview)
+        .sizes(&[SHELL])
+        .themes(themes);
+    match check_golden(&preview, std::path::Path::new("tests/golden")) {
+        Ok(()) | Err(GoldenError::Missing(_)) => {}
+        Err(e) => panic!("{e}"),
+    }
+}
+
+#[test]
+fn time_travel_preview_lists_steps_and_asks_before_restore() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::time_travel_preview);
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("Time Travel")),
+        "the rail names itself: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Step 1") && n.contains("Restore")),
+        "step 1 is a restore point: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains('3') && n.contains("tools")),
+        "tool count sits on the step: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("The rail is up")),
+        "the assistant line hangs under the user step: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Step 3")),
+        "the latest step is on the rail: {names:?}"
+    );
+    assert!(
+        app.find(Role::Button, "Refresh timeline").is_some(),
+        "refresh stays in the footer: {names:?}"
+    );
+    let step = button_named_like(&app, "Step 1");
+    assert!(
+        app.press(Role::Button, step.as_deref().unwrap_or("")),
+        "clicking a step asks before it restores: {names:?}"
+    );
+    let asked = accessible_names(&app);
+    assert!(
+        asked.iter().any(|n| n.contains("Restore to") && n.contains("Later messages")),
+        "confirm copy matches the current app: {asked:?}"
+    );
+    assert!(app.press(Role::Button, "Cancel"), "cancel the confirm: {asked:?}");
+    let closed = accessible_names(&app);
+    assert!(
+        !closed.iter().any(|n| n.contains("changes made outside Remedy")),
+        "cancel closes the confirm: {closed:?}"
+    );
+    assert!(
+        app.press(Role::Button, step.as_deref().unwrap_or("")),
+        "the step opens the confirm again"
+    );
+    assert!(
+        app.press(Role::Button, "Restore here"),
+        "restore is offered"
+    );
+    let refused = accessible_names(&app);
+    assert!(
+        refused.iter().any(|n| n.contains("not connected")),
+        "a preview does not call the runtime: {refused:?}"
+    );
+}
+
+fn button_named_like(app: &TestApp, needle: &str) -> Option<String> {
+    app.reader_view().into_iter().find_map(|n| {
+        let name = n.name?;
+        (n.role == Role::Button && name.contains(needle)).then_some(name)
+    })
+}
+
 /// Forest, a light theme, and a colorblind palette. A missing PNG is written and is not a failure.
 #[test]
 fn usage_previews_match_their_golden_images() {
