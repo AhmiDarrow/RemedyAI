@@ -5,6 +5,7 @@
 //! window talks to remedy-runtime over HTTP+SSE on 127.0.0.1:7400.
 
 mod chat;
+mod diagnostics;
 mod fonts;
 mod logo;
 mod runtime;
@@ -15,6 +16,7 @@ mod studio;
 mod time;
 mod work;
 
+pub use diagnostics::DiagnosticsPanel;
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
 pub use runtime::Client;
 pub use studio::Studio;
@@ -99,6 +101,11 @@ pub fn home(ui: &Ui) -> El {
 /// Chat-feed preview with a finished turn, for side-by-side review.
 pub fn home_chat(ui: &Ui) -> El {
     shell(ui, Studio::preview_chat())
+}
+
+/// Diagnostics golden: server, host, hardware, and the hive inspector. No network.
+pub fn diagnostics_preview(ui: &Ui) -> El {
+    diagnostics::preview(ui)
 }
 
 /// The Studio shell: session list, well, composer, status.
