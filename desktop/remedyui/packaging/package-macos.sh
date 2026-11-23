@@ -57,6 +57,17 @@ APP="${STAGE}/Remedy Desktop.app"
 mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
 install -m 0755 "${BINARY}" "${APP}/Contents/MacOS/Remedy Desktop"
 ln -sf "Remedy Desktop" "${APP}/Contents/MacOS/remedy-desktop"
+REPO="$(cd "${ROOT}/../.." && pwd)"
+RUNTIME="${OUT}/remedy-runtime"
+if [[ "${SKIP_BUILD}" -eq 0 || ! -f "${RUNTIME}" ]]; then
+  command -v go >/dev/null 2>&1 || { echo "go is required to build remedy-runtime" >&2; exit 1; }
+  ( cd "${REPO}/native/go" && go build -trimpath -ldflags "-s -w" -o "${RUNTIME}" ./cmd/remedy-runtime )
+fi
+if [[ ! -f "${RUNTIME}" ]]; then
+  echo "Runtime not found: ${RUNTIME}" >&2
+  exit 1
+fi
+install -m 0755 "${RUNTIME}" "${APP}/Contents/MacOS/remedy-runtime"
 ICON_FILE="icon.png"
 cp -f "${ROOT}/assets/icon.png" "${APP}/Contents/Resources/icon.png"
 ICNS="${ROOT}/../src-tauri/icons/icon.icns"

@@ -48,6 +48,9 @@ CRCCheck on
 !ifndef MAINBINARYSRCPATH
   !error "Pass /DMAINBINARYSRCPATH=path\to\remedy-desktop.exe"
 !endif
+!ifndef RUNTIMESRCPATH
+  !error "Pass /DRUNTIMESRCPATH=path\to\remedy-runtime.exe"
+!endif
 
 !define PLACEHOLDER_INSTALL_DIR "C:\__REMEDY_PLACEHOLDER_DO_NOT_INSTALL__"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}"
@@ -219,6 +222,8 @@ Section Install
 
   ; Installed name stays "Remedy Desktop.exe" even when the cargo bin is remedy-desktop.exe.
   File "/oname=${MAINBINARYNAME}" "${MAINBINARYSRCPATH}"
+  ; Local API sidecar. The shell looks for remedy-runtime.exe next to the app.
+  File "/oname=remedy-runtime.exe" "${RUNTIMESRCPATH}"
 
   SetOutPath "$INSTDIR\windows"
   File "/oname=uninstall_options.ps1" "${UNINSTALL_OPTIONS}"
@@ -267,6 +272,9 @@ Section Uninstall
   Delete "$INSTDIR\${MAINBINARYNAME}"
   Delete "$INSTDIR\app.exe"
   Delete "$INSTDIR\remedy-desktop.exe"
+  Delete "$INSTDIR\remedy-runtime.exe"
+  Delete "$INSTDIR\remedy-runtime-x86_64-pc-windows-msvc.exe"
+  Delete "$INSTDIR\remedy-iroh.exe"
   Delete "$INSTDIR\windows\uninstall_options.ps1"
   Delete "$INSTDIR\windows\uninstall_wipe.ps1"
   RMDir "$INSTDIR\windows"

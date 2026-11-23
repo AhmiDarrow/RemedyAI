@@ -42,6 +42,26 @@ if (-not (Test-Path -LiteralPath $Binary)) {
     throw "Binary not found: $Binary"
 }
 
+$repoRoot = Split-Path -Parent $desktop
+$outDirEarly = Join-Path $manifestDir "target\packaging"
+New-Item -ItemType Directory -Force -Path $outDirEarly | Out-Null
+$Runtime = Join-Path $outDirEarly "remedy-runtime.exe"
+if (-not $SkipBuild -or -not (Test-Path -LiteralPath $Runtime)) {
+    $go = Get-Command go -ErrorAction SilentlyContinue
+    if (-not $go) { throw "go is required to build remedy-runtime.exe" }
+    $goMod = Join-Path $repoRoot "native\go"
+    Push-Location $goMod
+    try {
+        & $go.Source build -trimpath -ldflags "-s -w" -o $Runtime ./cmd/remedy-runtime
+        if ($LASTEXITCODE -ne 0) { throw "go build remedy-runtime failed ($LASTEXITCODE)" }
+    } finally {
+        Pop-Location
+    }
+}
+if (-not (Test-Path -LiteralPath $Runtime)) {
+    throw "Runtime not found: $Runtime"
+}
+
 $makensis = Get-Command makensis -ErrorAction SilentlyContinue
 if (-not $makensis) {
     throw "makensis is not on PATH. Install NSIS 3 and leave the GUI tools closed."
@@ -62,9 +82,10 @@ $options = To-NsisPath (Join-Path $desktop "src-tauri\windows\uninstall_options.
 $wipe = To-NsisPath (Join-Path $desktop "src-tauri\windows\uninstall_wipe.ps1")
 $icon = To-NsisPath (Join-Path $desktop "src-tauri\icons\icon.ico")
 $binaryNsis = (Resolve-Path -LiteralPath $Binary).Path
+$runtimeNsis = (Resolve-Path -LiteralPath $Runtime).Path
 $outNsis = $out
 
-& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
+& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DRUNTIMESRCPATH=$runtimeNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
 if ($LASTEXITCODE -ne 0) { throw "makensis failed ($LASTEXITCODE)" }
 if (-not (Test-Path -LiteralPath $out)) { throw "makensis did not write $out" }
 
