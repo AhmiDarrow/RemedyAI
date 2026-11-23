@@ -939,7 +939,10 @@ fn live_body(ui: &Ui, text: impl Fn() -> String + 'static) -> El {
         .mix_oklab(ui.theme().colors.bg, 0.72);
     ui.el("bubble-body")
         .text(move || depth::inline_rich(&text(), chip))
-        .layout(|l| l.width = Length::Percent(1.0))
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
 }
 
 fn panel_button(

@@ -206,6 +206,79 @@ pub fn open_path(path: String) -> Result<String, String> {
     }
 }
 
+/// Open a file or folder with the OS default app (not just reveal it).
+/// Network paths are refused, same as [`open_path`].
+pub fn launch_path(path: String) -> Result<String, String> {
+    if is_network_path(&path) {
+        return Err("network paths are not opened from Remedy".into());
+    }
+    let p = PathBuf::from(path.trim());
+    if !p.exists() {
+        return Err(format!("path not found: {}", p.display()));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return launch_path_windows(&p);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return launch_path_macos(&p);
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        return launch_path_unix(&p);
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        let _ = p;
+        Err("launch_path unsupported on this platform".into())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn launch_path_windows(p: &Path) -> Result<String, String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    // `start` is a cmd builtin. The empty quoted title is required so paths
+    // with spaces are not taken as the window title.
+    let status = Command::new("cmd")
+        .args(["/c", "start", "", &p.display().to_string()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map_err(|e| format!("open: {e}"))?;
+    let _ = status;
+    Ok(format!("Opened {}", p.display()))
+}
+
+#[cfg(target_os = "macos")]
+fn launch_path_macos(p: &Path) -> Result<String, String> {
+    let status = Command::new("open")
+        .arg(p)
+        .status()
+        .map_err(|e| format!("open: {e}"))?;
+    if status.success() {
+        Ok(format!("Opened {}", p.display()))
+    } else {
+        Err(format!("open failed: {status}"))
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn launch_path_unix(p: &Path) -> Result<String, String> {
+    let status = Command::new("xdg-open")
+        .arg(p)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|e| format!("open: {e}"))?;
+    if status.success() {
+        Ok(format!("Opened {}", p.display()))
+    } else {
+        Err(format!("open failed: {status}"))
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn open_path_windows(p: &Path) -> Result<String, String> {
     use std::os::windows::process::CommandExt;
@@ -246,7 +319,9 @@ fn open_path_unix(p: &Path) -> Result<String, String> {
     let target = if p.is_dir() {
         p.to_path_buf()
     } else {
-        p.parent().map(Path::to_path_buf).unwrap_or_else(|| p.to_path_buf())
+        p.parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| p.to_path_buf())
     };
     let child = Command::new("xdg-open")
         .arg(&target)
@@ -322,7 +397,13 @@ fn open_terminal_windows(dir_s: &str) -> Result<String, String> {
         return Ok(format!("Opened Windows Terminal (PowerShell) in {dir_s}"));
     }
     let status = Command::new("cmd.exe")
-        .args(["/c", "start", "cmd.exe", "/k", &format!("cd /d \"{dir_s}\"")])
+        .args([
+            "/c",
+            "start",
+            "cmd.exe",
+            "/k",
+            &format!("cd /d \"{dir_s}\""),
+        ])
         .status()
         .map_err(|e| format!("open terminal failed: {e}"))?;
     if status.success() {
@@ -519,6 +600,9 @@ mod tests {
             sanitize_export_filename("a<b>c:d\"e/f\\g|h?i*j"),
             "a_b_c_d_e_f_g_h_i_j"
         );
-        assert_eq!(sanitize_export_filename("scratch-global.md"), "scratch-global.md");
+        assert_eq!(
+            sanitize_export_filename("scratch-global.md"),
+            "scratch-global.md"
+        );
     }
 }
