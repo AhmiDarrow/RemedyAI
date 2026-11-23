@@ -154,7 +154,10 @@ type Config struct {
 	MaxStaleEpochs int
 	// KeepLastResults how many outcome lines the epoch ledger keeps (default 32).
 	KeepLastResults int
-	// MaxResultChars caps each tool output retained for the model (default 24_000).
+	// MaxResultChars caps each tool output retained for the model.
+	// Zero (the default) means auto: 30_000 on a frontier context window,
+	// 8_000 on a small local window (≤ 32_768 tokens). An explicit value,
+	// REMEDY_REACT_MAX_RESULT_CHARS, or the max_result_chars knob wins.
 	MaxResultChars int
 	// MaxLengthContinues caps finish_reason=length auto-continues (default 64).
 	MaxLengthContinues int
@@ -210,8 +213,14 @@ func (c Config) normalized() Config {
 	if c.KeepLastResults <= 0 {
 		c.KeepLastResults = 32
 	}
-	if c.MaxResultChars <= 0 {
-		c.MaxResultChars = envInt("REMEDY_REACT_MAX_RESULT_CHARS", 24_000, 2_000, 256_000)
+	if c.MaxResultChars < 0 {
+		c.MaxResultChars = 0
+	} else if c.MaxResultChars == 0 {
+		// 0 stays auto and is resolved from the model window in RunTurn.
+		// An explicit env override is treated as a configured cap.
+		if raw := strings.TrimSpace(os.Getenv("REMEDY_REACT_MAX_RESULT_CHARS")); raw != "" {
+			c.MaxResultChars = envInt("REMEDY_REACT_MAX_RESULT_CHARS", FrontierMaxResultChars, 2_000, 256_000)
+		}
 	}
 	if c.MaxLengthContinues <= 0 {
 		c.MaxLengthContinues = envInt("REMEDY_REACT_MAX_LENGTH_CONTINUES", 64, 1, 512)
@@ -335,10 +344,19 @@ const (
 	// DefaultContextWindow is the assumed prompt window when an adapter cannot
 	// report one (every current frontier cloud model is at least this large).
 	DefaultContextWindow = 200_000
+	// SmallContextWindow is the largest window treated as a local / small model
+	// when auto-sizing per-result caps.
+	SmallContextWindow = 32_768
+	// FrontierMaxResultChars is the auto tool-result cap on a frontier window.
+	FrontierMaxResultChars = 30_000
+	// LocalMaxResultChars is the auto tool-result cap on a small local window.
+	LocalMaxResultChars = 8_000
 	// reservedOutputTokens is held back from the window for the reply.
 	reservedOutputTokens = 16_000
 	// promptBudgetFraction of the window may be spent on the transcript.
-	promptBudgetFraction = 0.75
+	// Compaction starts near 80–90% of the model's real window after the
+	// reserved reply budget is taken out.
+	promptBudgetFraction = 0.88
 )
 
 // transcriptBudget is the token ceiling the transcript may reach before the
@@ -355,6 +373,17 @@ func transcriptBudget(window int) int {
 		budget = 512
 	}
 	return budget
+}
+
+// defaultMaxResultChars chooses the tool-result cap from the model's window.
+// A small local n_ctx keeps a tight cap so one dump cannot fill the prompt;
+// frontier windows get a generous one. An explicit Config/env/knob value
+// bypasses this.
+func defaultMaxResultChars(window int) int {
+	if window > 0 && window <= SmallContextWindow {
+		return LocalMaxResultChars
+	}
+	return FrontierMaxResultChars
 }
 
 // RunTurn drives ReAct over an append-only transcript. seed.Messages is the
@@ -375,7 +404,11 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 		transcript = []Message{UserText("continue")}
 	}
 	system := seed.System
-	budget := transcriptBudget(e.contextWindow())
+	window := e.contextWindow()
+	if config.MaxResultChars <= 0 {
+		config.MaxResultChars = defaultMaxResultChars(window)
+	}
+	budget := transcriptBudget(window)
 
 	var lastBatch string
 	var failNotes failNoteState
@@ -409,7 +442,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 					"elided middle observations %d messages (~%d→~%d tokens, budget %d)",
 					before, est, elidedEst, budget))
 			} else {
-				transcript = compactTranscript(transcript, verifySeen)
+				transcript = compactTranscriptKeep(transcript, verifySeen, compactKeepCount(window))
 				trace(StateUpdate, iteration, fmt.Sprintf(
 					"compacted transcript %d→%d messages (~%d tokens over %d)", before, len(transcript), est, budget))
 			}
