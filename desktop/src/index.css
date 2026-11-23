@@ -581,7 +581,7 @@ html.theme-animating body * {
 }
 .chat-session-model {
   color: var(--text-muted);
-  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
+  font-family: var(--font-code, 'AhmiPrint', ui-monospace, monospace);
   font-size: 0.78rem;
 }
 .chat-session-count {
@@ -680,7 +680,7 @@ button.chat-chip:disabled {
   letter-spacing: 0.01em;
 }
 .composer-hint-row kbd {
-  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
+  font-family: var(--font-code, 'AhmiPrint', ui-monospace, monospace);
   font-size: 0.6rem;
   padding: 0.08rem 0.28rem;
   border-radius: 0.25rem;
@@ -780,7 +780,7 @@ button.chat-chip:disabled {
 }
 
 code {
-  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
+  font-family: var(--font-code, 'AhmiPrint', ui-monospace, monospace);
   font-size: 13px;
 }
 
@@ -986,7 +986,7 @@ pre code {
 .work-host .work-strip {
   --ws-err: color-mix(in srgb, var(--error) 78%, var(--text-muted));
   --ws-ok: color-mix(in srgb, var(--accent) 75%, var(--text-muted));
-  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
+  font-family: var(--font-code, 'AhmiPrint', ui-monospace, monospace);
   font-size: 0.7rem;
   line-height: 1.45;
   color: var(--text-muted);
@@ -1418,7 +1418,7 @@ pre code {
   padding: 0.12em 0.4em;
   border-radius: 4px;
   font-size: 0.88em;
-  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
+  font-family: var(--font-code, 'AhmiPrint', ui-monospace, monospace);
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
 }
 .message-feed .chat-inline-code.user {
@@ -1633,7 +1633,7 @@ pre code {
   background: transparent;
   padding: 0.55rem 0;
   overflow-x: auto;
-  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
+  font-family: var(--font-code, 'AhmiPrint', ui-monospace, monospace);
   font-size: 0.78rem;
   line-height: 1.45;
   color: var(--text-primary);
@@ -3483,7 +3483,7 @@ body.is-rail-resizing [data-browser-embed-host] {
 .titlebar-menu-shortcut {
   color: var(--text-muted);
   font-size: 0.62rem;
-  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
+  font-family: var(--font-code, 'AhmiPrint', ui-monospace, monospace);
 }
 
 /* Chat tabs */
@@ -3861,7 +3861,7 @@ button.reaction-pill:hover {
    their own role so no single font carries everything. ---- */
 :root {
   --font-sans: var(--font-ui, 'Remedy Sans UI', system-ui, sans-serif);
-  --font-mono: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
+  --font-mono: var(--font-code, 'AhmiPrint', ui-monospace, monospace);
 }
 h1,
 h2,
@@ -3881,7 +3881,7 @@ h3,
 }
 .help-article pre,
 .help-article code {
-  font-family: var(--font-code, 'Cascadia Code', ui-monospace, monospace);
+  font-family: var(--font-code, 'AhmiPrint', ui-monospace, monospace);
 }
 [data-testid='ahmi-signature'],
 .font-accent {

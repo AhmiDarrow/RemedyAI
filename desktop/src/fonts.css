@@ -2,7 +2,7 @@
  * Fonts bundled with Remedy (all SIL Open Font License 1.1; licenses next to
  * each family under assets/fonts/). Which faces are used is a setting:
  * utils/fontPrefs.ts sets --font-ui / --font-code. Default text font:
- * Remedy Sans UI.
+ * Remedy Sans UI. Default code / monospace font: AhmiPrint.
  */
 @import "@fontsource/cascadia-code/400.css";
 @import "@fontsource/cascadia-code/700.css";

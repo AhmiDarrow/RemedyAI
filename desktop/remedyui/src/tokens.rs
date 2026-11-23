@@ -1,0 +1,183 @@
+//! Shared spacing, type, surfaces and elevation for the Studio shell.
+
+use remedy_ui::core::Color;
+use remedy_ui::style::{
+    ColorRoles, LetterSpacing, LineHeight, Shadow, StylePatch, TextTransform,
+};
+
+/// Default tool control (composer, status, title bar).
+pub const TOOL: f32 = 32.0;
+/// Glyph inside [`TOOL`].
+pub const TOOL_GLYPH: f32 = 18.0;
+/// Session-row tool (fits beside the title).
+pub const ROW_TOOL: f32 = 28.0;
+/// Glyph inside [`ROW_TOOL`].
+pub const ROW_GLYPH: f32 = 16.0;
+/// Thin icon rail width.
+pub const RAIL: f32 = 44.0;
+/// Hit target on the icon rail.
+pub const RAIL_BTN: f32 = 36.0;
+/// Glyph on the icon rail.
+pub const RAIL_GLYPH: f32 = 18.0;
+/// Width reserved for the three session-row actions when they are revealed.
+pub const ROW_ACTIONS: f32 = ROW_TOOL * 3.0 + 8.0;
+
+/// 4 px grid unit the shell is built on (matches the theme default).
+pub const SPACE: f32 = 4.0;
+/// Shared gutter for headers, feeds, the composer and the sidebar.
+pub const GUTTER: f32 = 16.0;
+/// Circular persona badge.
+pub const AVATAR: f32 = 28.0;
+/// Chat bubble cap, inside a split pane.
+pub const BUBBLE_MAX: f32 = 560.0;
+
+/// A named step on the type scale: size, weight, leading and tracking.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Type {
+    /// Size in logical pixels.
+    pub size: f32,
+    /// Font weight (400 regular, 600 semibold).
+    pub weight: f32,
+    /// Line height as a multiple of size.
+    pub leading: f32,
+    /// Tracking, in em. Negative tightens titles.
+    pub tracking: f32,
+    /// Monospace (AhmiPrint) when true.
+    pub mono: bool,
+}
+
+/// Session titles and empty-state headlines.
+pub const TITLE: Type = Type {
+    size: 16.0,
+    weight: 600.0,
+    leading: 1.25,
+    tracking: -0.012,
+    mono: false,
+};
+/// Section kickers (CODING / ACTIONS, BUILD, day stamps). Drawn uppercase.
+pub const SECTION: Type = Type {
+    size: 11.0,
+    weight: 620.0,
+    leading: 1.2,
+    tracking: 0.08,
+    mono: false,
+};
+/// Chat body and readable prose.
+pub const BODY: Type = Type {
+    size: 15.0,
+    weight: 450.0,
+    leading: 1.55,
+    tracking: 0.0,
+    mono: false,
+};
+/// Timestamps, helper lines, session ages.
+pub const META: Type = Type {
+    size: 11.5,
+    weight: 500.0,
+    leading: 1.35,
+    tracking: 0.02,
+    mono: false,
+};
+/// Tool names, arguments, and other code-like rows.
+pub const MONO: Type = Type {
+    size: 12.5,
+    weight: 500.0,
+    leading: 1.45,
+    tracking: 0.0,
+    mono: true,
+};
+/// Thinking paragraphs: a half-step quieter than body.
+pub const THINKING: Type = Type {
+    size: 13.5,
+    weight: 430.0,
+    leading: 1.5,
+    tracking: 0.0,
+    mono: false,
+};
+
+/// Style for one step on the type scale.
+pub fn typo(t: Type) -> StylePatch {
+    let mut p = StylePatch::new()
+        .text_size(t.size)
+        .weight(t.weight)
+        .line_height(LineHeight::Relative(t.leading));
+    if t.tracking != 0.0 {
+        p = p.letter_spacing(LetterSpacing::Em(t.tracking));
+    }
+    if t.mono {
+        p = p.mono(true);
+    }
+    p
+}
+
+/// Uppercase section kicker in the muted color.
+pub fn section_kicker(colors: &ColorRoles) -> StylePatch {
+    typo(SECTION)
+        .text_transform(TextTransform::Upper)
+        .foreground(colors.muted)
+}
+
+/// Icon color with more contrast than `muted`, for rails and toolbars at rest.
+pub fn icon_fg(colors: &ColorRoles) -> Color {
+    colors.text.mix_oklab(colors.muted, 0.28)
+}
+
+/// Subtle 1px hairline between surfaces.
+pub fn hairline(colors: &ColorRoles) -> Color {
+    colors
+        .line
+        .unwrap_or_else(|| colors.muted.mix_oklab(colors.bg, 0.35))
+        .with_alpha(0.55)
+}
+
+/// Window / well background.
+pub fn surface_base(colors: &ColorRoles) -> Color {
+    colors.bg
+}
+
+/// Raised panels and sidebars.
+pub fn surface_raised(colors: &ColorRoles) -> Color {
+    colors.panel
+}
+
+/// Overlay cards, menus, and assistant bubbles.
+pub fn surface_overlay(colors: &ColorRoles) -> Color {
+    colors.card
+}
+
+/// Fill for the rounded Actions and Chat panes, sitting on the well.
+pub fn pane_fill(colors: &ColorRoles) -> Color {
+    colors.panel.mix_oklab(colors.bg, 0.06)
+}
+
+/// Selected row or chip, accent used sparingly.
+pub fn selected_fill(colors: &ColorRoles) -> Color {
+    colors.card.mix_oklab(colors.accent, 0.16)
+}
+
+/// A soft lift under the composer and menus.
+pub fn elevation(colors: &ColorRoles) -> Shadow {
+    let ink = colors.text.mix_oklab(colors.bg, 0.15);
+    Shadow::new(0.0, 1.0, 10.0, ink.with_alpha(0.22))
+}
+
+/// A slightly stronger lift for menus and overlays.
+pub fn elevation_overlay(colors: &ColorRoles) -> Shadow {
+    let ink = colors.text.mix_oklab(colors.bg, 0.12);
+    Shadow::new(0.0, 4.0, 18.0, ink.with_alpha(0.28))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scale_steps_are_distinct() {
+        assert!(TITLE.size > BODY.size);
+        assert!(BODY.size > THINKING.size);
+        assert!(THINKING.size > MONO.size);
+        assert!(MONO.size > META.size);
+        assert!(META.size >= SECTION.size);
+        assert!(TITLE.weight > BODY.weight);
+    }
+}

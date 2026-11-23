@@ -36,10 +36,11 @@ describe('fontPrefs', () => {
     props.clear()
   })
 
-  it('defaults give each role its own face, Remedy Sans UI for text', () => {
+  it('defaults use Remedy Sans UI for text and AhmiPrint for code', () => {
     expect(loadFonts()).toEqual(DEFAULT_FONTS)
     expect(DEFAULT_FONTS.ui).toBe('remedy-sans-ui')
-    expect(new Set(Object.values(DEFAULT_FONTS)).size).toBe(FONT_ROLES.length)
+    expect(DEFAULT_FONTS.code).toBe('ahmi-print')
+    expect(DEFAULT_FONTS.reading).toBe('ahmi-print')
   })
 
   it('applies every role as a CSS variable', () => {
@@ -49,7 +50,7 @@ describe('fontPrefs', () => {
     expect(st.getPropertyValue('--font-heading')).toContain('Remedy Sans')
     expect(st.getPropertyValue('--font-reading')).toContain('AhmiPrint')
     expect(st.getPropertyValue('--font-accent')).toContain('Ahmi Pixel')
-    expect(st.getPropertyValue('--font-code')).toContain('Cascadia Code')
+    expect(st.getPropertyValue('--font-code')).toContain('AhmiPrint')
   })
 
   it('saves one role without touching the others, and resets', () => {
@@ -68,8 +69,9 @@ describe('fontPrefs', () => {
     expect(f.code).toBe('fira-code')
   })
 
-  it('offers monospace faces first for code and keeps fallbacks', () => {
-    expect(facesForRole('code')[0].mono).toBe(true)
+  it('offers AhmiPrint first for code, then monospace faces, and keeps fallbacks', () => {
+    expect(facesForRole('code')[0].id).toBe('ahmi-print')
+    expect(facesForRole('code').some((f) => f.mono)).toBe(true)
     expect(facesForRole('ui')[0].id).toBe('remedy-sans-ui')
     expect(fontStack('ahmi-print')).toContain('serif')
   })

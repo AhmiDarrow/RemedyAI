@@ -1,0 +1,32 @@
+# How `cargo remedy package` builds and labels the app.
+
+[app]
+name = "Remedy Desktop"
+# A reverse-DNS id, unique to this app.
+id = "com.remedy.desktop"
+publisher = "Remedy"
+description = "Remedy Desktop"
+# A square PNG, 256 px or larger.
+icon = "assets/icon.png"
+
+[windows]
+# Sign the executable and installer with this certificate from your certificate store
+# (its SHA-1 thumbprint). Without it, packages are unsigned.
+# sign_thumbprint = "0123456789ABCDEF0123456789ABCDEF01234567"
+# timestamp_url = "http://timestamp.digicert.com"
+
+[web]
+# `cargo remedy package --target web`: the name under the icon once installed, the color of
+# the browser's own bars, and the icon (SVG or PNG; the app's icon if not set).
+# short_name = "Remedy Desktop"
+# theme_color = "#1e2a24"
+# icon = "assets/icon.svg"
+
+# The 1.0 Windows ship artifact is packaging/windows/installer.nsi (NSIS),
+# named Remedy.Desktop_{version}_x64-setup.exe. `cargo remedy package` writes
+# Inno Setup, which does not accept /S /NCRC /UPDATE /NOAUTOLAUNCH.
+# See packaging/README.md. Do not rotate the minisign key.
+#
+# Auto-update: set REMEDY_UPDATE_KEY (or TAURI_SIGNING_PRIVATE_KEY) and the
+# matching password. packaging/sign-minisign.ps1 writes a .sig beside the
+# installer. The app checks Feed::Json with the existing public key.
