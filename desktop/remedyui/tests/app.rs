@@ -17,21 +17,43 @@ fn no_spawn() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
         // Integration tests compile the lib without cfg(test); never launch a sidecar.
-        unsafe { std::env::set_var("REMEDY_DESKTOP_NO_SPAWN", "1") }
+        // Grove prefs live under REMEDY_HOME. A fresh directory per process, so a
+        // previous run that switched to Studio cannot open this one there.
+        let home = std::env::temp_dir().join(format!(
+            "remedy-desktop-test-home-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&home);
+        unsafe {
+            std::env::set_var("REMEDY_DESKTOP_NO_SPAWN", "1");
+            std::env::set_var("REMEDY_HOME", &home);
+        }
     });
+}
+
+/// Live-app tests start on Grove. Drop a surface another test in this process saved.
+fn fresh_profile() {
+    no_spawn();
+    if let Ok(home) = std::env::var("REMEDY_HOME") {
+        let _ = std::fs::remove_file(std::path::Path::new(&home).join("ui").join("grove.json"));
+    }
 }
 
 #[test]
 fn the_app_opens_its_window() {
-    no_spawn();
+    fresh_profile();
     let app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     assert!(app.ui().is_some(), "a window opened");
 }
 
 #[test]
 fn new_session_and_close_are_visible_and_work() {
-    no_spawn();
+    fresh_profile();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    assert!(
+        app.press(Role::Button, "Studio"),
+        "Grove is home; Studio is one tap away"
+    );
     assert!(
         app.find(Role::Button, "New session").is_some(),
         "New session is visible without hover"
@@ -156,6 +178,7 @@ fn assert_settings_goldens(name: &str, build: fn(&remedy_ui::Ui) -> remedy_ui::E
 fn previews_match_their_golden_images() {
     assert_goldens("studio", remedy_desktop::home);
     assert_goldens("studio-chat", remedy_desktop::home_chat);
+    assert_goldens("grove-home", remedy_desktop::grove_home);
 }
 
 #[test]
