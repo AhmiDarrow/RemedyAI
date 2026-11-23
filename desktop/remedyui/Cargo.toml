@@ -5,14 +5,14 @@ edition = "2024"
 publish = false
 
 [dependencies]
-# RemedyUI 6f36405 is main after #135: color emoji (COLR/CBDT/sbix) and bundled Twemoji.
+# RemedyUI 50c414f is main after #138: Home/End jump a scroll container to its start or end. Also #136 icons and #137 field text size.
 # Setup, Grove, chrome, two-pane chat, and chat-depth share this pin.
 # `webview` is the in-app browser (eval, set_user_agent, devtools). `playback` is
 # the mic and spoken-reply path. `update` is the signed latest.json installer.
 # `net`, `image`, `desktop`, and `term` stay for the shell, rails, Grove, and
 # Settings. Same features on Windows and Linux. No path override. No script-lua
 # and no rhai: 1.0 core stays plain RemedyUI Rust.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "6f36405aa0840a2c332b80a1c17375d7ea4901c6", features = ["net", "image", "webview", "playback", "desktop", "term", "update"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "50c414f1d31f383129588d1145ad5b338a96ed81", features = ["net", "image", "webview", "playback", "desktop", "term", "update"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -24,7 +24,7 @@ portable-pty = "0.9"
 
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "6f36405aa0840a2c332b80a1c17375d7ea4901c6", features = ["headless", "devtools", "net", "image", "webview", "playback", "desktop", "term", "update"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "50c414f1d31f383129588d1145ad5b338a96ed81", features = ["headless", "devtools", "net", "image", "webview", "playback", "desktop", "term", "update"] }
 
 [profile.release]
 lto = "fat"

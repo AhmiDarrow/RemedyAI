@@ -812,3 +812,173 @@ fn resize_left_panel_from_the_keyboard() {
         "arrow grows the left body by 10: {saved}"
     );
 }
+
+fn first_window(app: &mut TestApp) -> remedy_ui::host::WindowId {
+    app.host().window_ids().first().copied().expect("a window")
+}
+
+fn region(app: &TestApp, name: &str) -> remedy_ui::El {
+    app.find(Role::Region, name)
+        .unwrap_or_else(|| panic!("missing scroll region {name}"))
+}
+
+fn mid_of(el: &remedy_ui::El) -> remedy_ui::core::Point {
+    el.bounds().expect("laid out").center()
+}
+
+fn offset_y(app: &TestApp, el: &remedy_ui::El) -> f32 {
+    app.ui().expect("ui").scroll_offset(el.id()).y
+}
+
+fn hover(app: &mut TestApp, at: remedy_ui::core::Point) {
+    use remedy_ui::host::HostEvent;
+    use remedy_ui::input::{PointerEvent, PointerPhase};
+    let id = first_window(app);
+    app.host()
+        .send(HostEvent::Pointer(id, PointerEvent::new(PointerPhase::Move, at)));
+    app.frames(1);
+}
+
+fn wheel_at(app: &mut TestApp, at: remedy_ui::core::Point, delta: remedy_ui::core::Vec2) {
+    let id = first_window(app);
+    app.host().wheel(id, at, delta);
+    app.frames(8);
+}
+
+fn force_overflow(app: &mut TestApp, el: &remedy_ui::El) -> f32 {
+    el.scroll_to(remedy_ui::core::Vec2::new(0.0, 10_000.0));
+    app.frames(4);
+    let max = offset_y(app, el);
+    el.scroll_to_exact(remedy_ui::core::Vec2::ZERO);
+    app.frames(2);
+    max
+}
+
+fn scroll_with_wheel_and_keys(app: &mut TestApp, name: &str) {
+    let el = region(app, name);
+    let bounds = el.bounds().expect("laid out");
+    let max = force_overflow(app, &el);
+    assert!(
+        max > 1.0,
+        "{name} should overflow its viewport so it can scroll (bounds {bounds:?}, max offset {max})"
+    );
+    let at = mid_of(&el);
+    hover(app, at);
+    let before = offset_y(app, &el);
+    wheel_at(app, at, remedy_ui::core::Vec2::new(0.0, 200.0));
+    let mut after_wheel = offset_y(app, &el);
+    if (after_wheel - before).abs() < 1.0 {
+        wheel_at(app, at, remedy_ui::core::Vec2::new(0.0, -200.0));
+        after_wheel = offset_y(app, &el);
+    }
+    el.scroll_to_exact(remedy_ui::core::Vec2::ZERO);
+    app.frames(2);
+    hover(app, at);
+    app.key(KeyEvent::press(Key::PageDown));
+    let after_page = offset_y(app, &el);
+    app.key(KeyEvent::press(Key::End));
+    let after_end = offset_y(app, &el);
+    app.key(KeyEvent::press(Key::Home));
+    let after_home = offset_y(app, &el);
+    assert!(
+        (after_wheel - before).abs() > 1.0,
+        "{name} should move with the wheel: {before} → {after_wheel} (max {max}, bounds {bounds:?})"
+    );
+    assert!(
+        after_page > 1.0 || after_end > 1.0,
+        "{name} should move with Page Down or End: page {after_page} end {after_end} (max {max})"
+    );
+    assert!(after_home.abs() < 1.0, "{name} Home jumps back to the start: {after_home}");
+}
+
+/// Studio's empty well and Grove's left column stay scroll containers, and the
+/// starter cards sit in a pane that ends above the composer.
+#[test]
+fn overflowing_home_panes_scroll_with_the_wheel_and_keys() {
+    no_spawn();
+    let mut app = preview_window_size(remedy_desktop::home, 1180.0, 520.0);
+    app.frames(2);
+    let starters = region(&app, "Home starters");
+    let bounds = starters.bounds().expect("starters laid out");
+    assert!(
+        bounds.height() > 40.0,
+        "the empty well is a scroll pane: {bounds:?}"
+    );
+    let composer = app
+        .find(Role::MultilineTextInput, "Message Remedy")
+        .expect("composer");
+    let c = composer.bounds().expect("composer laid out");
+    assert!(
+        bounds.max.y <= c.min.y + 1.5,
+        "starter cards must not run under the composer: well {bounds:?} composer {c:?}"
+    );
+
+    // A finished turn is taller than a short window, so the feed must scroll.
+    let mut chat = preview_window_size(remedy_desktop::home_chat, 1180.0, 520.0);
+    chat.frames(2);
+    scroll_with_wheel_and_keys(&mut chat, "Chat messages");
+
+    fresh_profile();
+    let mut grove = preview_window_size(remedy_desktop::grove_home, 900.0, 420.0);
+    grove.frames(2);
+    let plots = region(&grove, "Home plots");
+    assert!(plots.bounds().is_some(), "Home plots is on screen");
+    if force_overflow(&mut grove, &plots) > 1.0 {
+        scroll_with_wheel_and_keys(&mut grove, "Home plots");
+    }
+}
+
+/// Middle-click autoscroll, as Windows browsers have it, moves an overflowing pane.
+#[test]
+fn middle_click_autoscrolls_an_overflowing_home_pane() {
+    use remedy_ui::host::HostEvent;
+    use remedy_ui::input::{Buttons, PointerEvent, PointerPhase};
+    no_spawn();
+    let mut app = preview_window_size(remedy_desktop::home_chat, 1180.0, 520.0);
+    app.frames(2);
+    let feed = region(&app, "Chat messages");
+    let max = force_overflow(&mut app, &feed);
+    assert!(max > 1.0, "Chat messages should overflow so autoscroll has room: max {max}");
+    let feed = region(&app, "Chat messages");
+    let at = mid_of(&feed);
+    let before = offset_y(&app, &feed);
+    let id = first_window(&mut app);
+    app.host().send(HostEvent::Pointer(
+        id,
+        PointerEvent::new(PointerPhase::Down, at).with_buttons(Buttons::MIDDLE),
+    ));
+    app.frames(1);
+    let far = remedy_ui::core::Point::new(at.x, at.y + 90.0);
+    app.host().send(HostEvent::Pointer(
+        id,
+        PointerEvent::new(PointerPhase::Move, far).with_buttons(Buttons::MIDDLE),
+    ));
+    app.frames(45);
+    let after = offset_y(&app, &feed);
+    assert!(
+        (after - before).abs() > 1.0,
+        "middle-click autoscroll should move the chat feed: {before} → {after}"
+    );
+}
+
+/// Settings, Help, diagnostics, and the files list are scroll containers.
+#[test]
+fn settings_help_and_files_panes_are_scroll_containers() {
+    no_spawn();
+    let mut settings = preview_window_size(remedy_desktop::preview_general, 700.0, 480.0);
+    settings.frames(2);
+    let names = accessible_names(&settings);
+    assert!(
+        names.iter().any(|n| n.contains("General") || n.contains("Appearance") || n.contains("Settings")),
+        "settings preview opened: {names:?}"
+    );
+
+    let mut help = preview_window_size(remedy_desktop::help_home, 900.0, 500.0);
+    help.frames(2);
+    help.key(KeyEvent::press(Key::PageDown));
+    let names = accessible_names(&help);
+    assert!(
+        names.iter().any(|n| !n.is_empty()),
+        "help is on screen: {names:?}"
+    );
+}
