@@ -320,6 +320,21 @@ pub fn home_menu(ui: &Ui) -> El {
     chrome::preview_frame(ui, chrome::Overlay::None, true)
 }
 
+/// Settings overlay inside the chrome frame.
+pub fn home_settings(ui: &Ui) -> El {
+    chrome::preview_frame(ui, chrome::Overlay::Settings, false)
+}
+
+/// Memory overlay inside the chrome frame.
+pub fn home_memory(ui: &Ui) -> El {
+    chrome::preview_frame(ui, chrome::Overlay::Memory, false)
+}
+
+/// Skills overlay inside the chrome frame.
+pub fn home_skills(ui: &Ui) -> El {
+    chrome::preview_frame(ui, chrome::Overlay::Skills, false)
+}
+
 /// Filled usage tab, for goldens. No runtime calls.
 pub fn preview_usage(ui: &Ui) -> El {
     usage::UsagePanel::preview(ui)

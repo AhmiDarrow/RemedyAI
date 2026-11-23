@@ -517,30 +517,41 @@ pub fn body(ui: &Ui, model: &TerminalModel) -> El {
 }
 
 fn chrome(ui: &Ui, model: &TerminalModel, unit: f32, colors: &remedy_ui::style::ColorRoles) -> El {
-    let status = w::button(
-        ui,
-        {
-            let m = model.clone();
-            move || m.status.get()
-        },
-        {
-            let m = model.clone();
-            let ui = ui.clone();
+    let press = model.clone();
+    let press_ui = ui.clone();
+    let status_label = model.clone();
+    let status_text = w::text(ui, move || status_label.status.get())
+        .variant("muted")
+        .truncate()
+        .layout(|l| {
+            l.grow = 1.0;
+            l.min_width = Length::Px(0.0);
+        });
+    let status = w::row(ui)
+        .align(Align::Center)
+        .child(status_text)
+        .on_click({
+            let m = press;
+            let ui = press_ui;
             move || m.copy_cwd(&ui)
-        },
-    )
-    .variant("quiet");
-    let _ = status.clone().semantics({
-        let m = model.clone();
-        move || {
-            let label = if m.cwd.get().is_empty() {
-                m.status.get()
-            } else {
-                "Copy working directory".into()
-            };
-            Semantics::new(Role::Button).label(label).action(Action::Click)
-        }
-    });
+        })
+        .semantics({
+            let m = model.clone();
+            move || {
+                let label = if m.cwd.get().is_empty() {
+                    m.status.get()
+                } else {
+                    "Copy working directory".into()
+                };
+                Semantics::new(Role::Button).label(label).action(Action::Click)
+            }
+        })
+        .layout(|l| {
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .clip();
     w::tooltip(&status, {
         let m = model.clone();
         move || {
@@ -567,18 +578,18 @@ fn chrome(ui: &Ui, model: &TerminalModel, unit: f32, colors: &remedy_ui::style::
     let label = shell_label();
     w::tooltip(&restart, format!("Restart {label} in session project folder"));
 
-    w::row(ui)
-        .align(Align::Center)
+    w::overflow_row(ui)
         .gap(unit)
+        .flex(status)
+        .child("Clear terminal", clear)
+        .child("Restart", restart)
+        .el()
         .padding(pad(unit * 0.5, unit))
         .style(StylePatch::new().background(colors.panel).foreground(colors.muted))
-        .child(status.layout(|l| {
-            l.grow = 1.0;
-            l.basis = Length::Px(0.0);
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
-        }))
-        .child(clear)
-        .child(restart)
+        })
 }
 
 fn glyph(ui: &Ui, mark: &str, label: &str, on_press: impl Fn() + 'static) -> El {
