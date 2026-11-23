@@ -146,7 +146,7 @@ fn dpapi_unprotect_user(cipher: &[u8]) -> Result<Vec<u8>, String> {
     }
 
     #[link(name = "crypt32")]
-    extern "system" {
+    unsafe extern "system" {
         fn CryptUnprotectData(
             p_data_in: *const DataBlob,
             ppsz_data_descr: *mut *mut u16,
@@ -159,7 +159,7 @@ fn dpapi_unprotect_user(cipher: &[u8]) -> Result<Vec<u8>, String> {
     }
 
     #[link(name = "kernel32")]
-    extern "system" {
+    unsafe extern "system" {
         fn LocalFree(h: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
     }
 
