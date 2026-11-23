@@ -11,6 +11,7 @@ mod layout;
 mod logo;
 mod rails;
 mod runtime;
+mod slides;
 mod settings;
 mod sidebar;
 mod sse;
@@ -22,6 +23,10 @@ mod work;
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
 pub use runtime::Client;
 pub use settings::{preview_appearance, preview_connect, preview_error, preview_general, preview_models};
+pub use slides::{
+    automations_preview, bind_host, files_preview, scratch_preview, set_browser_body,
+    terminal_context_items, terminal_preview,
+};
 pub use studio::Studio;
 
 use remedy_ui::a11y::{Action, Role, Semantics};
@@ -172,6 +177,10 @@ pub fn shell(ui: &Ui, studio: Studio) -> El {
 
 fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
     fonts::prepare_theme(ui, &Fonts::load());
+    let workspace = slides::Workspace::for_studio(&studio);
+    slides::install(workspace.clone());
+    let follow_ws = workspace;
+    let follow_studio = studio.clone();
     let panel = settings::install(ui, studio.clone());
     let toggle = chrome.clone();
     let dismiss = chrome.clone();
@@ -180,7 +189,7 @@ fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
         move || toggle.toggle_settings(),
         move || rails::dismiss_settings(&dismiss),
     );
-    w::column(ui)
+    let shell = w::column(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.height = Length::Percent(1.0);
@@ -202,7 +211,12 @@ fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
         .child(rails::hosts(ui, chrome))
         .on_key_capture(move |ev| settings::shell_chord(panel, ev))
         .on_key(move |ev| settings::shell_escape(panel, ev))
-        .on_removed(move || settings::clear_studio_hooks(hooks))
+        .on_removed(move || {
+            settings::clear_studio_hooks(hooks);
+            slides::uninstall();
+        });
+    follow_ws.follow(&shell, &follow_studio);
+    shell
 }
 
 /// A square tool control: 32 px hit target, 20 px glyph, always visible.
