@@ -28,6 +28,19 @@ export function splitLiveText(text: string, breaks: readonly number[] = []): Liv
   return { narration, reply: src.slice(from).replace(/^\s+/, '') }
 }
 
+/** Completed mid-turn speech (text before the last tool-call break) plus the live reply. */
+export function splitSealedLive(text: string, breaks: readonly number[] = []): LiveSegments & { sealed: string } {
+  const segs = splitLiveText(text, breaks)
+  if (!segs.narration.length) return { ...segs, sealed: '' }
+  const src = text || ''
+  const last = [...breaks]
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .map((n) => Math.min(n, src.length))
+    .sort((a, b) => a - b)
+    .pop()
+  return { ...segs, sealed: last ? src.slice(0, last) : '' }
+}
+
 /**
  * Narration cut by the newest break: the text between the previous break and
  * the one a tool call just added. Empty when the call added no break.

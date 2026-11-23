@@ -37,7 +37,7 @@ import { LiveTurnView } from './LiveTurnView'
 import { WorkStrip } from './WorkStrip'
 import { ReactionPicker, ReactionPills } from './Reactions'
 import { FeedScrollContext } from './feedScroll'
-import { assistantBeats, splitLiveText, splitSavedReply } from '../utils/liveSegments'
+import { assistantBeats, splitLiveText, splitSavedReply, splitSealedLive } from '../utils/liveSegments'
 import { turnIdForMessages } from '../utils/workTurns'
 import {
   showsProcessTrace,
@@ -86,6 +86,8 @@ export interface MessageFeedProps {
   onRegenerate?: (assistantMsgId: string) => void
   /** Owner reacts to one of Remedy's messages ('' clears). */
   onReact?: (messageId: string, emoji: string) => void
+  /** Draft id of the in-flight assistant row, so mid-turn bubbles can be reacted to. */
+  liveMessageId?: string | null
   /** Display name for the human (avatar + label). */
   userName?: string
   /** Partner display name for assistant avatar initials (default Remedy). */
@@ -800,6 +802,7 @@ export function MessageFeed({
   emptyHints,
   onRegenerate,
   onReact,
+  liveMessageId = null,
   userName,
   partnerName = 'Remedy',
   onAttachMarkup,
@@ -873,7 +876,48 @@ export function MessageFeed({
     ],
   })
 
-  const visible = useMemo(() => messages.filter((m) => !m.reverted), [messages])
+  const liveId = liveMessageId || messages.find((m) => m.draft && m.role === 'assistant' && !m.reverted)?.id || null
+  const liveSplit = useMemo(
+    () => (streaming ? splitSealedLive(partialText, textBreaks) : { narration: [], reply: '', sealed: '' }),
+    [streaming, partialText, textBreaks],
+  )
+  const liveSettledMsg = useMemo<ChatMessage | null>(() => {
+    if (!streaming || !liveSplit.sealed.trim()) return null
+    const calls = processSteps
+      .filter((s) => s.narration?.trim())
+      .map((s) => ({
+        name: s.name,
+        args: {},
+        id: s.callId || s.id,
+        narration: s.narration,
+      }))
+    const existing = liveId ? messages.find((m) => m.id === liveId) : undefined
+    return {
+      id: liveId || 'streaming',
+      role: 'assistant',
+      content: liveSplit.sealed,
+      thinking: null,
+      tool_calls: calls,
+      tool_results: [],
+      model: existing?.model ?? null,
+      agent: existing?.agent ?? null,
+      tokens: null,
+      created_at: existing?.created_at || '',
+      reverted: false,
+      request_id: existing?.request_id,
+      reactions: existing?.reactions,
+    }
+  }, [streaming, liveSplit.sealed, processSteps, liveId, messages])
+
+  const visible = useMemo(
+    () =>
+      messages.filter(
+        (m) =>
+          !m.reverted
+          && !(streaming && liveId && m.id === liveId),
+      ),
+    [messages, streaming, liveId],
+  )
   const turnIds = useMemo(() => turnIdForMessages(visible), [visible])
 
   // Stable so the memoized live turn does not re-render the reply per parent render.
@@ -1059,18 +1103,34 @@ export function MessageFeed({
         )
       })}
 
-      {/* Live turn: work stays in the strip (or the actions pane when hideWork). */}
+      {/* Live turn: sealed mid-turn speech is a settled, reactable bubble;
+          only the in-progress reply stays on the streaming path. Work stays
+          in the strip (or the actions pane when hideWork). */}
       {streaming && hideWork && (
         <div className="chat-working-hint" data-testid="chat-working-hint" role="status">
           <span className="live-stream-dot" aria-hidden />
           <span>Working</span>
         </div>
       )}
-      {streaming && (
+      {streaming && liveSettledMsg && (
+        <div className="live-settled-dock" data-testid="live-settled-reply">
+          <MessageBubble
+            msg={liveSettledMsg}
+            toolProcessMode={toolProcessMode}
+            onOpenImage={openLightbox}
+            onReact={onReact}
+            partnerName={partnerName}
+            hideWork={hideWork}
+            turnId={lastUserMsgId}
+            onSelectTurn={onSelectTurn}
+          />
+        </div>
+      )}
+      {streaming && (!hideWork || liveSplit.reply.trim()) && (
         <div className="live-stream-dock">
           <LiveTurnView
-            partialText={partialText}
-            textBreaks={textBreaks}
+            partialText={liveSplit.reply}
+            textBreaks={[]}
             partialThinking={partialThinking}
             processSteps={processSteps}
             renderReply={renderLiveReply}
