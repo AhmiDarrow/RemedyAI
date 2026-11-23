@@ -8,14 +8,15 @@ publish = false
 # RemedyUI main at 9466a695 (PRs #118–#121). Grove and Settings share this pin.
 # Same features on Windows and Linux. Filled inline-code chips still wait on a
 # RichText background span, which this rev does not have.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "9466a695e9f452049f6d020b24afb5fe3eb38b71", features = ["net", "image", "desktop"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "9466a695e9f452049f6d020b24afb5fe3eb38b71", features = ["net", "image", "desktop", "term"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+portable-pty = "0.9"
 
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "9466a695e9f452049f6d020b24afb5fe3eb38b71", features = ["headless", "devtools", "net", "image", "desktop"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "9466a695e9f452049f6d020b24afb5fe3eb38b71", features = ["headless", "devtools", "net", "image", "desktop", "term"] }
 
 [profile.release]
 lto = "fat"

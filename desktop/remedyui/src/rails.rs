@@ -738,6 +738,8 @@ fn slide_body(ui: &Ui, studio: &Studio, slide: SlideId) -> El {
         sidebar::sidebar(ui, studio.clone())
     } else if slide == SlideId::Settings && !studio.local_only {
         settings_slide(ui)
+    } else if let Some(body) = crate::slides::rail_body(ui, slide) {
+        body
     } else {
         blurb(ui, slide)
     };
