@@ -69,6 +69,8 @@ export type StreamJob = {
   lastSeq?: number
   /** True when this job follows a turn the server already owned (re-attach). */
   attached?: boolean
+  /** Server draft / final id of the in-flight assistant message. */
+  liveMessageId?: string
   /** Accumulated stream paint (tokens/tools) — always updated, even when detached. */
   paint: StreamJobPaint
   /**
@@ -445,6 +447,16 @@ export function completeStreamJob(
 }
 
 /** Remember the server turn id (from `event: start` or a re-attach). */
+/** Record the draft assistant message id so mid-turn reactions can target it. */
+export function setJobLiveMessageId(sessionId: string, messageId: string): void {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  const id = messageId.trim()
+  if (!id || j.liveMessageId === id) return
+  j.liveMessageId = id
+  j.lastActivityAt = Date.now()
+}
+
 export function setJobRequestId(sessionId: string, requestId: string): void {
   const j = jobs.get(sessionId)
   if (!j || j.status !== 'running') return

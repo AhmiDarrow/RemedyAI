@@ -217,4 +217,38 @@ describe('MessageFeed hideWork (studio split)', () => {
     expect(html).not.toContain('data-testid="work-strip"')
     expect(html).not.toContain('Need the path.')
   }, 30_000)
+
+  it('seals mid-turn speech as a reactable bubble while the turn is still live', async () => {
+    const { createElement } = await import('react')
+    const { renderToStaticMarkup } = await import('react-dom/server')
+    const { MessageFeed } = await import('./MessageFeed')
+    const narration = "I'll reach the folder through the shell."
+    const html = renderToStaticMarkup(
+      createElement(MessageFeed, {
+        messages: [],
+        partialText: narration,
+        textBreaks: [narration.length],
+        partialThinking: 'Need the path.',
+        streaming: true,
+        loading: false,
+        hideWork: true,
+        liveMessageId: 'draft-1',
+        onReact: () => {},
+        processSteps: [{
+          id: '1',
+          name: 'bash',
+          label: 'Running',
+          status: 'running',
+          startedAt: 1,
+          narration,
+        }],
+      } as never),
+    )
+    expect(html).toContain('data-testid="live-settled-reply"')
+    expect(html).toContain('aria-label="Add reaction"')
+    expect(html).toMatch(/I(?:'|&#x27;)ll reach the folder through the shell/)
+    expect(html).not.toContain('Need the path.')
+    // In-progress reply has not started, so the streaming dock is absent.
+    expect(html).not.toContain('data-testid="live-reply"')
+  }, 30_000)
 })

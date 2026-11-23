@@ -505,6 +505,7 @@ func (s *Server) runDetachedStream(
 		draftAt              = time.Now()
 		draftLen             int
 		writeFailed          bool
+		draftAnnounced       bool
 	)
 
 	// noteWriteFailure surfaces a lost persist as an SSE error frame rather
@@ -560,10 +561,16 @@ func (s *Server) runDetachedStream(
 		if strings.TrimSpace(body) == "" && len(collectedToolCalls) == 0 {
 			return
 		}
-		if _, err := s.sessions.UpsertDraftMessage(
+		msg, err := s.sessions.UpsertDraftMessage(
 			sid, requestID, "assistant", body, thinkingPtr(), calls, results, firstNonEmptyPtr(answeredModel, req.Model),
-		); err != nil {
+		)
+		if err != nil {
 			noteWriteFailure("draft", err)
+			return
+		}
+		if !draftAnnounced && strings.TrimSpace(msg.ID) != "" {
+			draftAnnounced = true
+			ts.signal("draft", map[string]any{"message_id": msg.ID})
 		}
 	}
 

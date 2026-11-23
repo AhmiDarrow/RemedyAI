@@ -43,6 +43,7 @@ import {
   registerStreamJob,
   setJobClaimEpoch,
   setJobLastSeq,
+  setJobLiveMessageId,
   setJobRequestId,
   setJobActiveTools,
   setJobProcessSteps,
@@ -117,6 +118,7 @@ export function useMessages(sessionId: string | null) {
   const [partialText, setPartialText] = useState('')
   const [textBreaks, setTextBreaks] = useState<number[]>([])
   const [partialThinking, setPartialThinking] = useState('')
+  const [liveMessageId, setLiveMessageId] = useState<string | null>(null)
   const [activeTools, setActiveTools] = useState<ActiveTool[]>([])
   const [processSteps, setProcessSteps] = useState<ProcessStep[]>([])
   const [taskProgress, setTaskProgress] = useState<StreamProgress | null>(null)
@@ -428,6 +430,7 @@ export function useMessages(sessionId: string | null) {
     setStallSeconds(0)
     setPartialText('')
     setTextBreaks([])
+    setLiveMessageId(null)
     setPartialThinking('')
     setActiveTools([])
     setProcessSteps([])
@@ -509,6 +512,7 @@ export function useMessages(sessionId: string | null) {
         setPartialText(paint.partialText || '')
         setTextBreaks(paint.textBreaks || [])
         setPartialThinking(paint.partialThinking || '')
+        setLiveMessageId(job.liveMessageId || null)
         processStepsRef.current = paint.processSteps || []
         setProcessSteps(paint.processSteps || [])
         setActiveTools(paint.activeTools || [])
@@ -702,7 +706,7 @@ export function useMessages(sessionId: string | null) {
           && sessionIdRef.current === targetId
         ) {
           const optimistic: ChatMessage = {
-            id: crypto.randomUUID(),
+            id: getStreamJob(targetId)?.liveMessageId || crypto.randomUUID(),
             role: 'assistant',
             content: assistantText,
             thinking: thinkingText,
@@ -738,6 +742,7 @@ export function useMessages(sessionId: string | null) {
           streamCtrlRef.current = null
           setPartialText('')
           setTextBreaks([])
+          setLiveMessageId(null)
           setPartialThinking('')
           setActiveTools([])
           setTaskProgress(null)
@@ -879,6 +884,7 @@ export function useMessages(sessionId: string | null) {
           streamCtrlRef.current = null
           setPartialText('')
           setTextBreaks([])
+          setLiveMessageId(null)
           setPartialThinking('')
           setActiveTools([])
           setProcessSteps([])
@@ -973,6 +979,10 @@ export function useMessages(sessionId: string | null) {
             setRemoteBusy(true)
           }
           void finishErr(errMsg, { quiet: joinFailed })
+        },
+        onDraft: (messageId) => {
+          setJobLiveMessageId(targetId, messageId)
+          if (isFocusedTurn()) setLiveMessageId(messageId)
         },
         onStart: (info) => {
           if (info.requestId) setJobRequestId(targetId, info.requestId)
@@ -1167,6 +1177,7 @@ export function useMessages(sessionId: string | null) {
           clearStreamAccum()
           setPartialText('')
           setTextBreaks([])
+          setLiveMessageId(null)
           setPartialThinking('')
           setActiveTools([])
           setProcessSteps([])
@@ -1268,6 +1279,7 @@ export function useMessages(sessionId: string | null) {
         clearStreamAccum()
         setPartialText('')
         setTextBreaks([])
+        setLiveMessageId(null)
         setPartialThinking('')
         setActiveTools([])
         setProcessSteps([])
@@ -1713,6 +1725,7 @@ export function useMessages(sessionId: string | null) {
     setLoading(false)
     setPartialText('')
     setTextBreaks([])
+    setLiveMessageId(null)
     setPartialThinking('')
     setActiveTools([])
     setProcessSteps([])
@@ -1825,6 +1838,7 @@ export function useMessages(sessionId: string | null) {
     partialText,
     textBreaks,
     partialThinking,
+    liveMessageId,
     activeTools,
     processSteps,
     taskProgress,
