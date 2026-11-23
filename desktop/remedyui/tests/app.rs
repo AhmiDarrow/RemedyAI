@@ -141,8 +141,28 @@ fn assert_goldens(name: &str, build: fn(&remedy_ui::Ui) -> remedy_ui::El) {
     }
 }
 
+/// Forest, a light theme, and a colorblind palette. Missing PNGs are not a failure.
+const SETTINGS_THEMES: &[&str] = &["forest", "light", "deutan"];
+
+fn assert_settings_goldens(name: &str, build: fn(&remedy_ui::Ui) -> remedy_ui::El) {
+    let preview = Preview::new(name, build).sizes(&[SHELL]).themes(SETTINGS_THEMES);
+    match check_golden(&preview, std::path::Path::new("tests/golden")) {
+        Ok(()) | Err(GoldenError::Missing(_)) => {}
+        Err(e) => panic!("{e}"),
+    }
+}
+
 #[test]
 fn previews_match_their_golden_images() {
     assert_goldens("studio", remedy_desktop::home);
     assert_goldens("studio-chat", remedy_desktop::home_chat);
+}
+
+#[test]
+fn settings_previews_match_their_golden_images() {
+    assert_settings_goldens("settings-general", remedy_desktop::preview_general);
+    assert_settings_goldens("settings-appearance", remedy_desktop::preview_appearance);
+    assert_settings_goldens("settings-models", remedy_desktop::preview_models);
+    assert_settings_goldens("settings-connect", remedy_desktop::preview_connect);
+    assert_settings_goldens("settings-error", remedy_desktop::preview_error);
 }
