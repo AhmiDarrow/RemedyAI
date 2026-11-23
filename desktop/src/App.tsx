@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense } fro
 import { Sidebar } from './components/Sidebar'
 import { ApprovalBanner } from './components/ApprovalBanner'
 import { LifeTaskBanner } from './components/LifeTaskBanner'
-import { MessageFeed } from './components/MessageFeed'
+import { ChatWorkspace } from './components/ChatWorkspace'
 import { Composer, type ComposerHandle } from './components/Composer'
 import { StatusBar, type ThinkingLevel, type ApprovalMode } from './components/StatusBar'
 import { WorkspaceSide, PopoutOverlay } from './components/slides/WorkspaceSide'
@@ -2044,7 +2044,7 @@ export default function App() {
                 Grove is the surface, so streaming chunks aren't rendered
                 twice. Remount on switch-back re-sticks to bottom. */}
             {surface !== 'grove' && (
-            <MessageFeed
+            <ChatWorkspace
               messages={messages}
               partialText={partialText}
               textBreaks={textBreaks}

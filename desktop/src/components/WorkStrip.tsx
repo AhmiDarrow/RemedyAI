@@ -39,6 +39,8 @@ export interface WorkStripProps {
   elapsedMs?: number | null
   mode?: ToolProcessMode
   defaultOpen?: boolean
+  /** Open the thinking section with the strip (closable). */
+  defaultThinkingOpen?: boolean
   sessionId?: string | null
   /** Extra live items for the open body (todos). */
   extras?: ReactNode
@@ -83,9 +85,9 @@ const StepRow = memo(function StepRow({ step }: { step: ProcessStep }) {
   )
 })
 
-function ThinkingItem({ text, live }: { text: string; live?: boolean }) {
+function ThinkingItem({ text, live, defaultOpen = false }: { text: string; live?: boolean; defaultOpen?: boolean }) {
   const { resolved } = useI18n()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(defaultOpen)
   const ref = useRef<HTMLDivElement | null>(null)
   const anchor = useAnchorToggle()
   return (
@@ -158,6 +160,7 @@ export const WorkStrip = memo(function WorkStrip({
   elapsedMs = null,
   mode = 'off',
   defaultOpen = false,
+  defaultThinkingOpen = false,
   sessionId = null,
   extras,
 }: WorkStripProps) {
@@ -245,7 +248,7 @@ export const WorkStrip = memo(function WorkStrip({
       )}
       {open && (
         <div className="ws-body">
-          {thought && <ThinkingItem text={thought} live={live} />}
+          {thought && <ThinkingItem text={thought} live={live} defaultOpen={defaultThinkingOpen} />}
           {extras}
           {steps.length > 0 && <Timeline steps={steps} live={live} />}
           {steps.length > 0 && !live && (

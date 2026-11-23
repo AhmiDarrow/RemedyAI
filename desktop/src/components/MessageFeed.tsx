@@ -38,6 +38,7 @@ import { WorkStrip } from './WorkStrip'
 import { ReactionPicker, ReactionPills } from './Reactions'
 import { FeedScrollContext } from './feedScroll'
 import { assistantBeats, splitLiveText, splitSavedReply } from '../utils/liveSegments'
+import { turnIdForMessages } from '../utils/workTurns'
 import {
   showsProcessTrace,
   stepsFromMessageTools,
@@ -51,7 +52,7 @@ import { useI18n } from '../i18n'
 
 export type ActiveTool = { name: string; status: 'running' | 'done' | 'error' }
 
-interface MessageFeedProps {
+export interface MessageFeedProps {
   messages: ChatMessage[]
   partialText: string
   /** Offsets where tool calls split interim narration from the live reply. */
@@ -69,6 +70,10 @@ interface MessageFeedProps {
   buildTodos?: BuildTodo[]
   /** off | medium | full — never hides the chat answer */
   toolProcessMode?: ToolProcessMode
+  /** Studio split: thinking/tools/BUILD render in the actions pane, not here. */
+  hideWork?: boolean
+  /** Click a Remedy bubble to scroll the actions pane to that turn's work. */
+  onSelectTurn?: (turnId: string) => void
   onEditUserMessage?: (msgId: string, content: string) => void
   onQuickPrompt?: (text: string) => void
   /** Empty-state starter chips — Studio set by default; Grove passes its own. */
@@ -333,6 +338,9 @@ const MessageBubble = memo(function MessageBubble({
   sessionId = null,
   textBreaks = [],
   onReact,
+  hideWork = false,
+  turnId,
+  onSelectTurn,
 }: {
   msg: ChatMessage
   partial?: string
@@ -351,6 +359,9 @@ const MessageBubble = memo(function MessageBubble({
   textBreaks?: number[]
   /** The owner reacts to Remedy's messages (one per message; same again removes). */
   onReact?: (messageId: string, emoji: string) => void
+  hideWork?: boolean
+  turnId?: string | null
+  onSelectTurn?: (turnId: string) => void
 }) {
   const { resolved } = useI18n()
   const isUser = msg.role === 'user'
@@ -502,14 +513,22 @@ const MessageBubble = memo(function MessageBubble({
   const placeholderOnly = /^\*\(Used tools — see process\.\)\*$/.test(text.trim())
   const showBubble = !(showStrip && (!text.trim() || placeholderOnly))
 
+  const selectTurn = (e: ReactPointerEvent) => {
+    if (!onSelectTurn || !turnId || isUser || isSystem) return
+    if ((e.target as HTMLElement).closest('button, a, input, textarea')) return
+    onSelectTurn(turnId)
+  }
+
   return (
     <div
       className={`group chat-row flex w-full flex-col ${
         isUser ? 'items-end' : isSystem ? 'items-center' : 'items-start'
       }`}
+      data-turn-id={turnId || undefined}
+      onClick={onSelectTurn && turnId && isAssistant ? selectTurn : undefined}
       style={{ paddingTop: 'var(--chat-pad-y)', paddingBottom: 'var(--chat-pad-y)' }}
     >
-      {showStrip && (
+      {showStrip && !hideWork && (
         <div className="work-strip-slot">
           <WorkStrip
             steps={histSteps}
@@ -790,6 +809,8 @@ export function MessageFeed({
   projectPath = null,
   sessionId = null,
   stickNonce,
+  hideWork = false,
+  onSelectTurn,
 }: MessageFeedProps) {
   const { t, resolved } = useI18n()
   const dateLocale = intlLocale(resolved)
@@ -853,6 +874,7 @@ export function MessageFeed({
   })
 
   const visible = useMemo(() => messages.filter((m) => !m.reverted), [messages])
+  const turnIds = useMemo(() => turnIdForMessages(visible), [visible])
 
   // Stable so the memoized live turn does not re-render the reply per parent render.
   const renderLiveReply = useCallback(
@@ -866,9 +888,12 @@ export function MessageFeed({
         isStreamingPartial
         onOpenImage={openLightbox}
         partnerName={partnerName}
+        hideWork={hideWork}
+        turnId={lastUserMsgId}
+        onSelectTurn={onSelectTurn}
       />
     ),
-    [toolProcessMode, openLightbox, partnerName, textBreaks],
+    [toolProcessMode, openLightbox, partnerName, textBreaks, hideWork, lastUserMsgId, onSelectTurn],
   )
 
   // Unread delta for the jump pill: messages that landed since the user
@@ -924,7 +949,7 @@ export function MessageFeed({
     <div className="message-feed-shell">
     <div
       ref={setScroller}
-      className="message-feed py-2 relative w-full"
+      className="message-feed work-host py-2 relative w-full"
       style={{
         position: 'relative',
         flex: 1,
@@ -1026,12 +1051,21 @@ export function MessageFeed({
               userName={userName}
               partnerName={partnerName}
               sessionId={sessionId}
+              hideWork={hideWork}
+              turnId={turnIds.get(msg.id) ?? null}
+              onSelectTurn={onSelectTurn}
             />
           </Fragment>
         )
       })}
 
-      {/* Live turn: one quiet Working strip; the reply is its own bubble. */}
+      {/* Live turn: work stays in the strip (or the actions pane when hideWork). */}
+      {streaming && hideWork && (
+        <div className="chat-working-hint" data-testid="chat-working-hint" role="status">
+          <span className="live-stream-dot" aria-hidden />
+          <span>Working</span>
+        </div>
+      )}
       {streaming && (
         <div className="live-stream-dock">
           <LiveTurnView
@@ -1043,12 +1077,13 @@ export function MessageFeed({
             progress={taskProgress}
             mode={toolProcessMode}
             sessionId={sessionId}
-            extras={buildTodos.length ? <BuildTodos items={buildTodos} live /> : undefined}
+            showWork={!hideWork}
+            extras={!hideWork && buildTodos.length ? <BuildTodos items={buildTodos} live /> : undefined}
           />
         </div>
       )}
 
-      {!streaming && todosHaveOpen(buildTodos) && (
+      {!hideWork && !streaming && todosHaveOpen(buildTodos) && (
         <BuildTodos items={buildTodos} />
       )}
 

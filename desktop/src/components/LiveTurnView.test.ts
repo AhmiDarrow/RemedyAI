@@ -87,4 +87,17 @@ describe('LiveTurnView', () => {
     expect(html).toContain('data-testid="work-strip"')
     expect(html).toContain('Starting…')
   })
+
+  it('hides the Working strip when showWork is false', () => {
+    const html = render({
+      partialText: narration,
+      partialThinking: 'Need the folder path first.',
+      processSteps: [step('1', 'running', { narration, argsText: '{"command":"dir"}' })],
+      showWork: false,
+    })
+    expect(html).toContain('data-testid="live-reply"')
+    expect(html).toContain(narration)
+    expect(html).not.toContain('data-testid="work-strip"')
+    expect(html).not.toContain('Need the folder path first.')
+  })
 })

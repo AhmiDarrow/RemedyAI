@@ -31,7 +31,7 @@ describe('MessageFeed live chrome order', () => {
 
   it('keeps leftover todos after the live reply dock', () => {
     const dock = src.indexOf('className="live-stream-dock"')
-    const leftover = src.indexOf('{!streaming && todosHaveOpen(buildTodos) && (')
+    const leftover = src.indexOf('{!hideWork && !streaming && todosHaveOpen(buildTodos) && (')
     expect(leftover).toBeGreaterThan(dock)
   })
 
@@ -158,4 +158,63 @@ describe('remote images in replies wait for a click (red-team)', () => {
     )
     expect(html).not.toContain('remote-image-gate')
   })
+})
+
+describe('MessageFeed hideWork (studio split)', () => {
+  const history = {
+    id: 'a1',
+    role: 'assistant' as const,
+    content: "I'll reach the folder through the shell.\n\nThe addon loads again.",
+    thinking: 'Rename confirmed.',
+    tool_calls: [{ name: 'bash', args: { command: 'dir' }, id: 'c1', narration: "I'll reach the folder through the shell." }],
+    tool_results: [{ name: 'bash', output: 'ok', id: 'c1' }],
+    model: null,
+    agent: null,
+    tokens: null,
+    created_at: '2026-11-14T21:00:00Z',
+    reverted: false,
+  }
+
+  it('keeps Remedy beats in the feed and omits the Working strip', async () => {
+    const { createElement } = await import('react')
+    const { renderToStaticMarkup } = await import('react-dom/server')
+    const { MessageFeed } = await import('./MessageFeed')
+    const html = renderToStaticMarkup(
+      createElement(MessageFeed, {
+        messages: [history],
+        partialText: '',
+        streaming: false,
+        loading: false,
+        hideWork: true,
+      } as never),
+    )
+    expect(html).not.toContain('data-testid="work-strip"')
+    expect(html).toContain('data-testid="assistant-beats"')
+    expect(html).toContain('reach the folder')
+    expect(html).toContain('The addon loads again.')
+    expect(html).not.toContain('Rename confirmed.')
+  }, 30_000)
+
+  it('shows a tiny working hint while streaming, not the work log', async () => {
+    const { createElement } = await import('react')
+    const { renderToStaticMarkup } = await import('react-dom/server')
+    const { MessageFeed } = await import('./MessageFeed')
+    const html = renderToStaticMarkup(
+      createElement(MessageFeed, {
+        messages: [],
+        partialText: "I'll reach the folder.",
+        textBreaks: [],
+        partialThinking: 'Need the path.',
+        streaming: true,
+        loading: false,
+        hideWork: true,
+        processSteps: [{ id: '1', name: 'bash', label: 'Running', status: 'running', startedAt: 1 }],
+      } as never),
+    )
+    expect(html).toContain('data-testid="chat-working-hint"')
+    expect(html).toContain('live-reply')
+    expect(html).toMatch(/I(?:'|&#x27;)ll reach the folder/)
+    expect(html).not.toContain('data-testid="work-strip"')
+    expect(html).not.toContain('Need the path.')
+  }, 30_000)
 })

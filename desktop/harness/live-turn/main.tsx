@@ -1,5 +1,6 @@
 import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { ChatWorkspace } from '../../src/components/ChatWorkspace'
 import { MessageFeed } from '../../src/components/MessageFeed'
 import { I18nProvider } from '../../src/i18n'
 import { applyStoredUiPrefs } from '../../src/utils/chatPrefs'
@@ -22,6 +23,10 @@ const speed = Number(params.get('speed')) || 1
 const reactionsOn = Boolean(params.get('reactions'))
 const seedUser = params.get('mine') || ''
 const todosOn = Boolean(params.get('todos'))
+// Studio split is the default for after3 shots; ?split=0 restores the single feed.
+const splitOn = params.get('split') !== '0'
+const swapOn = params.get('swap') === '1'
+const width = Number(params.get('w')) || (splitOn ? 1180 : 760)
 const DEMO_TODOS = [
   { id: '1', content: 'Explore the addon folder', status: 'completed' as const },
   { id: '2', content: 'Patch the loader entry', status: 'in_progress' as const },
@@ -54,26 +59,36 @@ function Harness() {
     const next = withReaction(messages, id, 'user', emoji).find((m) => m.id === id)
     setReacts((r) => ({ ...r, [id]: next?.reactions || {} }))
   }
+  const feedProps = {
+    messages: s.messages,
+    partialText: s.partialText,
+    textBreaks: s.textBreaks,
+    partialThinking: s.partialThinking,
+    streaming: s.streaming,
+    loading: false,
+    processSteps: s.processSteps,
+    activeTools: s.activeTools,
+    taskProgress: s.taskProgress,
+    toolProcessMode: mode,
+    userName: 'Sam',
+    partnerName: 'Remedy',
+    sessionId: 'demo',
+    stickNonce: 0,
+    buildTodos: todosOn ? DEMO_TODOS : [],
+    onReact: reactionsOn ? onReact : undefined,
+  }
   return (
-    <div className="harness-shell" style={{ width: 760, height, position: 'relative', margin: '0 auto' }}>
-      <MessageFeed
-        messages={s.messages}
-        partialText={s.partialText}
-        textBreaks={s.textBreaks}
-        partialThinking={s.partialThinking}
-        streaming={s.streaming}
-        loading={false}
-        processSteps={s.processSteps}
-        activeTools={s.activeTools}
-        taskProgress={s.taskProgress}
-        toolProcessMode={mode}
-        userName="Sam"
-        partnerName="Remedy"
-        sessionId="demo"
-        stickNonce={0}
-        buildTodos={todosOn ? DEMO_TODOS : []}
-        onReact={reactionsOn ? onReact : undefined}
-      />
+    <div className="harness-shell" style={{ width, height, position: 'relative', margin: '0 auto' }}>
+      {splitOn ? (
+        <ChatWorkspace
+          {...feedProps}
+          persist={false}
+          actionsSide={swapOn ? 'right' : 'left'}
+          actionsWidth={Number(params.get('aw')) || 400}
+        />
+      ) : (
+        <MessageFeed {...feedProps} />
+      )}
       <textarea data-testid="composer" aria-label="Composer" style={{ position: 'absolute', bottom: -60, left: 0, width: 300, height: 40 }} />
     </div>
   )

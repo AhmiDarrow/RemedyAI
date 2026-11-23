@@ -25,6 +25,8 @@ export interface LiveTurnViewProps {
   sessionId?: string | null
   /** Live todos for the open strip body. */
   extras?: ReactNode
+  /** False hides the Working strip (work lives in the actions pane). */
+  showWork?: boolean
 }
 
 const STREAMING_MSG: ChatMessage = {
@@ -50,25 +52,28 @@ export const LiveTurnView = memo(function LiveTurnView({
   mode = 'off',
   sessionId = null,
   extras,
+  showWork = true,
 }: LiveTurnViewProps) {
   // All assistant prose belongs in the bubble, including text written before
   // a tool call. The Working strip is only thinking, tools, and extras (todos).
   const hasReply = partialText.trim().length > 0
   return (
     <div className="live-turn" data-testid="live-turn">
-      <div className="work-strip-slot">
-        <WorkStrip
-          steps={processSteps}
-          thinking={partialThinking}
-          live
-          replying={hasReply && !processSteps.some((s) => s.status === 'running')}
-          progress={progress}
-          mode={mode}
-          defaultOpen={false}
-          sessionId={sessionId}
-          extras={extras}
-        />
-      </div>
+      {showWork && (
+        <div className="work-strip-slot">
+          <WorkStrip
+            steps={processSteps}
+            thinking={partialThinking}
+            live
+            replying={hasReply && !processSteps.some((s) => s.status === 'running')}
+            progress={progress}
+            mode={mode}
+            defaultOpen={false}
+            sessionId={sessionId}
+            extras={extras}
+          />
+        </div>
+      )}
       {hasReply && (
         <div className="live-reply" data-testid="live-reply">
           {renderReply(STREAMING_MSG, partialText)}
