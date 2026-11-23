@@ -1,6 +1,8 @@
 //! First-run gate: splash, setup, the house-rules pop-up, the name prompt, and the update screen.
 //!
-//! `REMEDY_DESKTOP_NO_SPAWN` keeps the existing Studio shell so the session tests still open it.
+//! When the gate is done, Grove is home and Studio is one tap away. The offer
+//! and the name prompt sit on that window. `REMEDY_DESKTOP_NO_SPAWN` skips the
+//! gate and opens Grove so the session tests still see today's shell.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -28,6 +30,7 @@ use super::splash;
 use super::update::{update_screen, Updater};
 use super::wizard::{wizard_screen, Wizard};
 use crate::fonts::{self, Fonts};
+use crate::grove::Grove;
 use crate::runtime::{self, Client};
 use crate::studio::Studio;
 
@@ -65,11 +68,12 @@ struct Gate {
     updater: Updater,
     downloads: Downloads,
     studio: Studio,
+    grove: Grove,
     app: App,
 }
 
 impl Gate {
-    fn new(studio: Studio, app: App, client: Client) -> Self {
+    fn new(studio: Studio, grove: Grove, app: App, client: Client) -> Self {
         let slot = Signal::new(Some(client));
         let failure = Signal::new(String::new());
         let mut wizard = Wizard::new(None);
@@ -106,6 +110,7 @@ impl Gate {
             updater: Updater::new(),
             downloads,
             studio,
+            grove,
             app,
         }
     }
@@ -323,7 +328,8 @@ impl Gate {
     fn show_studio(&self) {
         if !self.studio_attached.get() {
             if let Some(client) = self.slot.get() {
-                self.studio.attach_client(client);
+                self.studio.attach_client(client.clone());
+                self.grove.attach_client(client);
                 self.studio_attached.set(true);
             }
         }
@@ -563,13 +569,13 @@ fn open_path(path: &Path) {
         .spawn();
 }
 
-/// Live window. Tests call [`crate::shell`] directly when spawn is disabled.
-pub fn host(ui: &Ui, studio: Studio, app: App, client: Client) -> El {
+/// Live window. Tests call [`crate::app`] with spawn disabled and land on Grove.
+pub fn host(ui: &Ui, studio: Studio, grove: Grove, app: App, client: Client) -> El {
     fonts::prepare_theme(ui, &Fonts::load());
     if runtime::spawn_disabled() {
-        return crate::shell(ui, studio);
+        return crate::grove::root(ui, grove, Some(app));
     }
-    let gate = Gate::new(studio, app, client);
+    let gate = Gate::new(studio, grove, app, client);
     gate.start_boot();
     let watching = gate.clone();
     let root = w::column(ui)
@@ -690,7 +696,7 @@ fn studio_layer(ui: &Ui, gate: Gate) -> El {
     let stack = w::stack(
         ui,
         [
-            crate::shell(ui, gate.studio.clone()),
+            crate::grove::root(ui, gate.grove.clone(), Some(gate.app.clone())),
             offer_overlay(ui, gate.offer.clone()),
             name_overlay(ui, gate.name.clone()),
             show(ui, move || revisit_on.get(), move || setup_screen(&ui_revisit, gate_setup.clone())).el(),

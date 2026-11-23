@@ -29,16 +29,11 @@ fn monogram(dark: bool) -> Option<Image> {
     }
 }
 
-/// The 88 px monogram used on the empty well, theme-aware (light strokes on dark).
-pub fn empty_mark(ui: &Ui) -> El {
-    mark(ui, 88.0)
-}
-
-/// Framed-size monogram for the house-rules pop-up and the name prompt.
+/// The circuit-R monogram at `size` px, theme-aware (light strokes on a dark theme).
 pub fn mark(ui: &Ui, size: f32) -> El {
     let dark = ui.theme().derive().dark;
     if let Some(image) = monogram(dark) {
-        w::image(ui, image, "Remedy").layout(|l| {
+        w::image(ui, image, "Remedy").layout(move |l| {
             l.width = remedy_ui::layout::Length::Px(size);
             l.height = remedy_ui::layout::Length::Px(size);
             l.shrink = 0.0;
@@ -46,6 +41,11 @@ pub fn mark(ui: &Ui, size: f32) -> El {
     } else {
         w::text(ui, "R").variant("heading")
     }
+}
+
+/// The 88 px monogram used on the empty well, theme-aware (light strokes on dark).
+pub fn empty_mark(ui: &Ui) -> El {
+    mark(ui, 88.0)
 }
 
 fn wordmark_image() -> Option<(Image, f32)> {

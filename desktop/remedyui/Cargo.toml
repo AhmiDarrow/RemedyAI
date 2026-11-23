@@ -5,20 +5,20 @@ edition = "2024"
 publish = false
 
 [dependencies]
-# RemedyUI main at 9466a695 (later than the Studio polish pin at 7dec309).
-# Features stay net + image so Windows builds the same tree. Filled inline-code
-# chips still need the RichText background-span API, which is later than this pin.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "9466a695e9f452049f6d020b24afb5fe3eb38b71", features = ["net", "image"] }
+# RemedyUI origin/main. Setup, Grove, rails, and Settings share this pin.
+# Features: net + image (setup and chat), desktop + term (rails and the terminal).
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "68ad3a198571e702fc4696bc8b000edc6c5e7980", features = ["net", "image", "desktop", "term"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Same verifier the Tauri shell uses for latest.json (do not invent a second key).
 minisign-verify = "0.2"
 base64 = "0.22"
+portable-pty = "0.9"
 
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "9466a695e9f452049f6d020b24afb5fe3eb38b71", features = ["headless", "devtools", "net", "image"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "68ad3a198571e702fc4696bc8b000edc6c5e7980", features = ["headless", "devtools", "net", "image", "desktop", "term"] }
 
 [profile.release]
 lto = "fat"

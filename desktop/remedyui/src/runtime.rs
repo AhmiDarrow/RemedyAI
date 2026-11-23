@@ -28,9 +28,13 @@ impl Client {
         Client { http }
     }
 
-    /// The `/api` client. Setup and the update check call through it.
-    pub fn http(&self) -> &Http {
-        &self.http
+    /// A clone of the bearer-backed client.
+    ///
+    /// Setup, Grove, diagnostics, and the rails call through it. Settings
+    /// moves one onto a worker thread. Cloning shares the cookie jar and
+    /// the headers.
+    pub fn http(&self) -> Http {
+        self.http.clone()
     }
 }
 
@@ -522,4 +526,22 @@ pub fn stream_message(
     );
 }
 
-// Request::delete — confirm it exists; if not we'll use a generic method.
+#[cfg(test)]
+mod tests {
+    use super::parse_sessions;
+    use serde_json::json;
+
+    #[test]
+    fn grove_sessions_stay_out_of_the_studio_list() {
+        let rows = parse_sessions(&json!({
+            "sessions": [
+                {"id": "g1", "title": "Home", "origin_channel": "grove", "project_path": ""},
+                {"id": "s1", "title": "New chat", "origin_channel": "studio"},
+                {"id": "s2", "title": "Older", "message_count": 3}
+            ]
+        }));
+        let ids: Vec<&str> = rows.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["s1", "s2"]);
+        assert_eq!(rows[1].message_count, 3);
+    }
+}
