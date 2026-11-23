@@ -13,11 +13,13 @@ mod sse;
 mod status;
 mod studio;
 mod time;
+mod usage;
 mod work;
 
 pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
 pub use runtime::Client;
 pub use studio::Studio;
+pub use usage::{UsageContext, UsageDashboard, UsagePanel, UsageWindow};
 
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::host::{TrayEvent, TrayIcon, TrayImage, TrayItem};
