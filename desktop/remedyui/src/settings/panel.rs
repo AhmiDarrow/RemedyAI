@@ -259,7 +259,7 @@ fn footer(ui: &Ui, s: Settings) -> El {
         .justify(Justify::End)
         .fill_width()
         .child(
-            w::button(ui, move || if s.saving.get() { "Saving…".into() } else { "Save".into() }, move || s.save())
+            w::button(ui, move || -> String { if s.saving.get() { "Saving…".into() } else { "Save".into() } }, move || s.save())
                 .variant("primary")
                 .disabled(move || s.saving.get() || s.phase.get() != "ready"),
         )

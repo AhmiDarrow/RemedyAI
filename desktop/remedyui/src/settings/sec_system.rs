@@ -64,7 +64,7 @@ fn wipe_block(ui: &Ui, s: Settings, busy: Signal<bool>, msg: Signal<String>) -> 
             ))
             .child(form::bound_line(ui, "Type WIPE to confirm persona wipe", s.wipe_text, "Type WIPE"))
             .child(
-                w::button(ui, move || if busy.get() { "Wiping…".into() } else { "Wipe what Remedy knows about me".into() }, move || {
+                w::button(ui, move || -> String { if busy.get() { "Wiping…".into() } else { "Wipe what Remedy knows about me".into() } }, move || {
                     run_wipe(s, busy, msg);
                 })
                 .variant("danger")
@@ -341,7 +341,7 @@ fn generation(ui: &Ui, s: Settings) -> El {
         ))
         .child(form::hint(ui, "This button saves reasoning and context only. The main Settings Save does not send these limits."))
         .child(
-            w::button(ui, move || if s.saving.get() { "Saving…".into() } else { "Save reasoning and context".into() }, move || {
+            w::button(ui, move || -> String { if s.saving.get() { "Saving…".into() } else { "Save reasoning and context".into() } }, move || {
                 save_generation(s);
             })
             .variant("primary")
@@ -401,11 +401,9 @@ fn remember_model_gen(s: Settings, patch: &Value) {
 fn always_ready(ui: &Ui, s: Settings) -> El {
     let copy = tray_copy();
     form::block(ui, s, "always-ready", move |ui, s| {
-        let mut col = form::stack(ui);
+        let col = form::stack(ui);
         #[cfg(not(target_os = "linux"))]
-        {
-            col = col.child(form::toggle(ui, copy.launch_label, copy.launch_hint, s.launch_at_login));
-        }
+        let col = col.child(form::toggle(ui, copy.launch_label, copy.launch_hint, s.launch_at_login));
         col.child(form::toggle(ui, copy.start_label, copy.start_hint, s.start_in_tray))
             .child(locked_close(ui, copy.close_label, copy.close_hint))
             .child(form::toggle(
@@ -833,7 +831,7 @@ fn about(ui: &Ui, s: Settings) -> El {
             }))
             .child(form::hint(ui, "Opens the local WebUI in your browser. Tray → Show Remedy returns to the desktop."))
             .child(
-                w::button(ui, move || if checking.get() { "Checking for updates…".into() } else { "Check for Updates".into() }, move || {
+                w::button(ui, move || -> String { if checking.get() { "Checking for updates…".into() } else { "Check for Updates".into() } }, move || {
                     check_updates(s, checking, info, status);
                 })
                 .variant("quiet")

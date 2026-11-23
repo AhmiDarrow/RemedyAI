@@ -102,41 +102,42 @@ fn connect(ui: &Ui, s: Settings) -> El {
             let raw = address_list(&s.connect.get());
             addresses.set_if_changed(logic::filter_connect_addresses(&raw));
         });
-        let host = form::stack(ui);
+        let host = form::stack(&ui);
+        let ui_pick = ui.clone();
         let _ = w::for_each(&host, addresses, |ip| ip.clone(), move |ip| {
             let label = ip.clone();
             let pick = ip.clone();
-            form::action(&ui, label, "quiet", move || {
+            form::action(&ui_pick, label, "quiet", move || {
                 bind.set(pick.clone());
                 put_connect_bind(s, &pick);
             })
         });
-        let loop_warn = form::notice(ui, "warn", logic::CONNECT_LOOPBACK_WARNING);
+        let loop_warn = form::notice(&ui, "warn", logic::CONNECT_LOOPBACK_WARNING);
         let loop_warn = bits::visible_when(loop_warn, move || logic::is_connect_loopback(&bind.get()));
-        let panes = pane_list(ui, s);
-        let qr = w::text(ui, move || {
+        let panes = pane_list(&ui, s);
+        let qr = w::text(&ui, move || {
             let q = s.pair_qr.get();
             if q.is_empty() { "Pairing code appears here.".into() } else { q }
         })
         .variant("code");
-        form::stack(ui)
-            .child(form::toggle(ui, "Connect is on", "Phones on this network can reach this PC.", enabled))
-            .child(form::action(ui, "Apply on/off", "primary", move || put_connect_flag(s, "enabled", enabled.get())))
-            .child(form::toggle(ui, "Paused", "Keep the pairing and stop accepting phones for now.", paused))
-            .child(form::action(ui, if false { "" } else { "Pause or resume" }, "quiet", move || {
+        form::stack(&ui)
+            .child(form::toggle(&ui, "Connect is on", "Phones on this network can reach this PC.", enabled))
+            .child(form::action(&ui, "Apply on/off", "primary", move || put_connect_flag(s, "enabled", enabled.get())))
+            .child(form::toggle(&ui, "Paused", "Keep the pairing and stop accepting phones for now.", paused))
+            .child(form::action(&ui, if false { "" } else { "Pause or resume" }, "quiet", move || {
                 if paused.get() {
                     bits::ask(s, "POST", "connect/pause", Some(json!({})), "Connect paused.");
                 } else {
                     bits::ask(s, "POST", "connect/resume", Some(json!({})), "Connect resumed.");
                 }
             }))
-            .child(form::label(ui, "Bind address"))
-            .child(bits::field(ui, "Bind host", bind, "192.168.1.20"))
+            .child(form::label(&ui, "Bind address"))
+            .child(bits::field(&ui, "Bind host", bind, "192.168.1.20"))
             .child(host)
             .child(loop_warn)
-            .child(form::action(ui, "Use this bind address", "quiet", move || put_connect_bind(s, &bind.get())))
+            .child(form::action(&ui, "Use this bind address", "quiet", move || put_connect_bind(s, &bind.get())))
             .child(panes)
-            .child(form::action(ui, "Show pairing code", "primary", move || {
+            .child(form::action(&ui, "Show pairing code", "primary", move || {
                 if s.preview {
                     s.banner.set("Not available in this preview.".into());
                     return;
@@ -150,11 +151,11 @@ fn connect(ui: &Ui, s: Settings) -> El {
                 });
             }))
             .child(qr)
-            .child(device_list(ui, s))
-            .child(form::action(ui, "Tailscale status", "quiet", move || bits::ask(s, "GET", "connect/tailscale/status", None, "Tailscale status updated.")))
-            .child(form::action(ui, "Install Tailscale", "quiet", move || bits::ask(s, "POST", "connect/tailscale/install", Some(json!({})), "Tailscale install started.")))
-            .child(form::action(ui, "Tailscale login", "quiet", move || bits::ask(s, "POST", "connect/tailscale/login", Some(json!({})), "Tailscale login started.")))
-            .child(mobile_reach(ui, s))
+            .child(device_list(&ui, s))
+            .child(form::action(&ui, "Tailscale status", "quiet", move || bits::ask(s, "GET", "connect/tailscale/status", None, "Tailscale status updated.")))
+            .child(form::action(&ui, "Install Tailscale", "quiet", move || bits::ask(s, "POST", "connect/tailscale/install", Some(json!({})), "Tailscale install started.")))
+            .child(form::action(&ui, "Tailscale login", "quiet", move || bits::ask(s, "POST", "connect/tailscale/login", Some(json!({})), "Tailscale login started.")))
+            .child(mobile_reach(&ui, s))
     })
 }
 
@@ -305,30 +306,30 @@ fn channels(ui: &Ui, s: Settings) -> El {
         Effect::new(move || {
             ids.set_if_changed(messenger_ids(&s.messengers.get()));
         });
-        let list = form::stack(ui);
+        let list = form::stack(&ui);
         let _ = w::for_each(&list, ids, |id| id.clone(), {
             let ui = ui.clone();
             move |id| messenger_card(&ui, s, id)
         });
-        let tunnel = w::text(ui, move || tunnel_line(&s.tunnel.get())).variant("small");
-        let denied = w::text(ui, move || denied_line(&s.denied.get())).variant("small");
-        form::stack(ui)
-            .child(form::hint(ui, "A webhook tunnel gives messengers an https address. Quick mode needs no account."))
+        let tunnel = w::text(&ui, move || tunnel_line(&s.tunnel.get())).variant("small");
+        let denied = w::text(&ui, move || denied_line(&s.denied.get())).variant("small");
+        form::stack(&ui)
+            .child(form::hint(&ui, "A webhook tunnel gives messengers an https address. Quick mode needs no account."))
             .child(tunnel)
-            .child(form::action(ui, "Start quick tunnel", "primary", move || {
+            .child(form::action(&ui, "Start quick tunnel", "primary", move || {
                 bits::ask(s, "POST", "messengers/tunnel/start", Some(json!({ "mode": "quick" })), "Tunnel starting.");
             }))
-            .child(form::action(ui, "Start named tunnel", "quiet", move || {
+            .child(form::action(&ui, "Start named tunnel", "quiet", move || {
                 bits::ask(s, "POST", "messengers/tunnel/start", Some(json!({ "mode": "named" })), "Named tunnel starting.");
             }))
-            .child(form::action(ui, "Stop tunnel", "danger", move || {
+            .child(form::action(&ui, "Stop tunnel", "danger", move || {
                 bits::ask(s, "POST", "messengers/tunnel/stop", Some(json!({})), "Tunnel stopping.");
             }))
-            .child(form::action(ui, "Prepare Signal CLI", "quiet", move || {
+            .child(form::action(&ui, "Prepare Signal CLI", "quiet", move || {
                 bits::ask(s, "POST", "messengers/signal/ensure", Some(json!({})), "Signal CLI check finished.");
             }))
-            .child(form::hint(ui, "Signal’s CLI needs Java on this computer. Temurin 21 is the build Remedy expects."))
-            .child(form::action(ui, "Java download", "quiet", || {
+            .child(form::hint(&ui, "Signal’s CLI needs Java on this computer. Temurin 21 is the build Remedy expects."))
+            .child(form::action(&ui, "Java download", "quiet", || {
                 bits::open_http("https://adoptium.net/temurin/releases/?version=21");
             }))
             .child(denied)

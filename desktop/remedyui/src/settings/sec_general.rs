@@ -42,7 +42,7 @@ fn you_agent(ui: &Ui, s: Settings) -> El {
         form::stack(ui)
             .child(bits::picker(ui, "Language", &langs, s.ui_language))
             .child(form::hint(ui, "Menus follow this language. Auto uses the system language."))
-            .child(help)
+            .child(help.clone())
             .child(bits::field(ui, "Your name", s.user_name, "Ada"))
             .child(bits::field(ui, "Partner name", s.agent_name, "Remedy"))
             .child(bits::choice(
@@ -62,7 +62,7 @@ fn you_agent(ui: &Ui, s: Settings) -> El {
                 ],
                 s.persona,
             ))
-            .child(persona_hint)
+            .child(persona_hint.clone())
     })
 }
 

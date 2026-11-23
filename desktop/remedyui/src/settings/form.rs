@@ -192,7 +192,7 @@ pub fn block(ui: &Ui, s: Settings, id: &'static str, body: impl Fn(&Ui, Settings
     let summary = logic::shown_summary(sec).to_string();
     let mark = w::text(ui, {
         let s = s;
-        move || if s.is_open(id) { "▾".into() } else { "▸".into() }
+        move || -> String { if s.is_open(id) { "▾".into() } else { "▸".into() } }
     });
     let head = w::row(ui)
         .align(Align::Center)

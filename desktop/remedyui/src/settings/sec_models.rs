@@ -68,7 +68,7 @@ fn provider(ui: &Ui, s: Settings) -> El {
             .child(w::text(ui, move || s.discovery.get()).variant("small"))
             .child(form::label(ui, "API key"))
             .child(form::secret_line(ui, "API key"))
-            .child(form::hint(ui, move || {
+            .child(form::hint(ui, move || -> String {
                 if s.api_key_set.get() {
                     "A key is saved. Leave the field blank to keep it.".into()
                 } else {
@@ -112,7 +112,7 @@ fn provider(ui: &Ui, s: Settings) -> El {
                             "Required when the URL is not loopback. Save is refused until this is on.",
                             s.sleev_allow_remote,
                         ))
-                        .child(sleev_warn)
+                        .child(sleev_warn.clone())
                         .child(form::action(ui, "Sleev docs", "quiet", || bits::open_http("https://sleev.ai/docs/quickstart")))
                 },
             ))
@@ -533,7 +533,7 @@ fn knob_row(ui: &Ui, s: Settings, knob: Knob) -> El {
         .child(w::slider(ui, knob.label, value, knob.min, knob.max, knob.step))
         .child(w::text(ui, move || format!("{:.2}", value.get())).variant("small"))
         .child(form::action(ui, "Apply", "quiet", move || {
-            let n = logic::clamp_knob(knob, value.get());
+            let n = logic::clamp_knob(&knob, value.get());
             let stored = if knob.kind == "int" { json!(n as i64) } else { json!(n) };
             patch_rmb(s, one_key(key, stored));
         }))
