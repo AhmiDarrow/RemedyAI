@@ -81,7 +81,7 @@ pub fn view(ui: &Ui, rows: Signal<Vec<Messenger>>) -> El {
         .gap(unit)
         .layout(|l| l.width = Length::Percent(1.0));
     let ui_rows = ui.clone();
-    w::for_each(&list, rows, |m| m.id.clone(), move |m| row(&ui_rows, m));
+    w::for_each(&list, rows, |m| m.id.clone(), move |m| row(&ui_rows, m.clone()));
     chrome::stack(ui, vec![intro, list])
 }
 

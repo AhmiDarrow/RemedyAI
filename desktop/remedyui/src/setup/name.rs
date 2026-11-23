@@ -135,11 +135,8 @@ fn card(ui: &Ui, prompt: NamePrompt) -> El {
         let prompt = prompt.clone();
         move || prompt.save()
     });
-    let save2 = save.clone();
     let name3 = name.clone();
-    save.bind(move || {
-        let _ = save2.disabled(reject_empty_name(&name3.get()));
-    });
+    let save = save.disabled(move || reject_empty_name(&name3.get()));
     let body = w::column(ui)
         .gap(unit * 2.0)
         .layout(|l| l.width = Length::Px(360.0))

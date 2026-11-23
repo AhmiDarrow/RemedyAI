@@ -127,7 +127,7 @@ fn bar(ui: &Ui, jobs: Signal<Vec<DownloadJob>>) -> El {
                 .text(move || model::download_caption(&caption.get())),
         );
     let root2 = root.clone();
-    root.bind(move || {
+    let root = root.bind(move || {
         fraction_live.set(known_fraction(&jobs_live.get()));
         let _ = &root2;
     });

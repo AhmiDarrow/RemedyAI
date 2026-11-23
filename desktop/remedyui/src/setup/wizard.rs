@@ -489,7 +489,7 @@ pub fn wizard_screen(ui: &Ui, wiz: Wizard) -> El {
     });
     let screen = chrome::center(ui, inner, 520.0);
     let screen2 = screen.clone();
-    screen.bind(move || {
+    let screen = screen.bind(move || {
         pct2.set(Some(model::progress_fraction(step.get())));
         let _ = &screen2;
     });
@@ -531,7 +531,7 @@ fn language_select(ui: &Ui, wiz: Wizard) -> El {
     let language = wiz.language.clone();
     let row = w::select(ui, "Language", options, index);
     let row2 = row.clone();
-    row.bind(move || {
+    let row = row.bind(move || {
         let langs = wiz.languages.get();
         if let Some(code) = langs.get(index2.get()) {
             language.set(code.clone());
@@ -578,7 +578,7 @@ fn provider_step(ui: &Ui, wiz: Wizard) -> El {
         let paid = w::select(ui, "Or pick a paid / full provider", paid_names, wiz.paid_index.clone());
         let paid2 = paid.clone();
         let wiz_paid = wiz.clone();
-        paid.bind(move || {
+        let paid = paid.bind(move || {
             let i = wiz_paid.paid_index.get();
             if i > 0 {
                 if let Some(p) = model::paid_providers().get(i - 1) {
@@ -721,6 +721,7 @@ fn xai_box(ui: &Ui, wiz: Wizard) -> El {
                 w::text(ui, "Signed in with xAI").variant("strong")
             }),
             chrome::when_ui(ui, move || !signed_out.get(), move |ui| {
+                let wiz_sign = wiz_sign.clone();
                 chrome::primary(ui, "Sign in with xAI", move || wiz_sign.xai_sign_in())
             }),
             chrome::when_ui(ui, move || busy.get(), |ui| w::text(ui, "Waiting…").variant("muted")),
