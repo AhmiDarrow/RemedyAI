@@ -561,8 +561,8 @@ impl Model {
 
     pub fn flash(&self, msg: &str) {
         self.inner.status.set(msg.to_string());
-        let gen = self.inner.flash_gen.get().wrapping_add(1);
-        self.inner.flash_gen.set(gen);
+        let tick = self.inner.flash_gen.get().wrapping_add(1);
+        self.inner.flash_gen.set(tick);
         if !self.is_live() {
             return;
         }
@@ -570,7 +570,7 @@ impl Model {
         thread::spawn(move || {
             thread::sleep(hold);
             let _ = on_ui(Duration::from_secs(1), move |m| {
-                if m.inner.flash_gen.get() == gen {
+                if m.inner.flash_gen.get() == tick {
                     m.inner.status.set(String::new());
                 }
             });
