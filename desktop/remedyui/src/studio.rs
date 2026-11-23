@@ -650,6 +650,11 @@ impl Studio {
         self.refresh(&client);
     }
 
+    /// The runtime client, when this Studio is allowed to talk to one.
+    pub(crate) fn runtime(&self) -> Option<Client> {
+        if self.local_only { None } else { self.client.get() }
+    }
+
     /// Hooks a runtime client and loads sessions (no-op for local previews).
     pub fn attach_client(&self, client: Client) {
         self.client.set(Some(client.clone()));
