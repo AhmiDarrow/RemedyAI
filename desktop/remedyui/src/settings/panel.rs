@@ -19,6 +19,7 @@ use super::logic;
 use super::prefs;
 use super::sections;
 use super::state::{self, Settings};
+use crate::tool_button;
 
 pub fn view(ui: &Ui, s: Settings, rail: bool) -> El {
     watch_appearance(s);
@@ -28,7 +29,11 @@ pub fn view(ui: &Ui, s: Settings, rail: bool) -> El {
     let root = w::column(ui)
         .gap(form::gap(ui))
         .padding(Insets::all(form::gap(ui) * 2.0))
-        .style(StylePatch::new().background(colors.panel).foreground(colors.text))
+        .style(
+            StylePatch::new()
+                .background(colors.panel)
+                .foreground(colors.text),
+        )
         .child(header(ui, s))
         .child(search_row(ui, s))
         .child(categories(ui, s))
@@ -70,7 +75,12 @@ pub fn open_panel(s: Settings) {
 pub fn close_panel(s: Settings) {
     s.open.set(false);
     state::clear_search(s);
-    let open: Vec<String> = s.open_ids.get().into_iter().filter(|id| id != "vision" && id != "rmb").collect();
+    let open: Vec<String> = s
+        .open_ids
+        .get()
+        .into_iter()
+        .filter(|id| id != "vision" && id != "rmb")
+        .collect();
     s.open_ids.set(open);
     s.vision_loaded.set(false);
     s.rmb_loaded.set(false);
@@ -152,7 +162,9 @@ fn header(ui: &Ui, s: Settings) -> El {
     if super::studio_rail_owns_close() {
         row
     } else {
-        row.child(form::action(ui, "Close", "quiet", move || close_panel(s)))
+        row.child(tool_button(ui, w::Icon::Close, "Close", move || {
+            close_panel(s)
+        }))
     }
 }
 
@@ -206,7 +218,13 @@ fn category_button(ui: &Ui, s: Settings, id: &'static str, label: &'static str) 
         s.category.set(id.to_string());
         state::clear_search(s);
     })
-    .variant(move || if s.category.get() == id { "primary" } else { "quiet" })
+    .variant(move || {
+        if s.category.get() == id {
+            "primary"
+        } else {
+            "quiet"
+        }
+    })
 }
 
 fn hint_line(s: Settings) -> String {
@@ -227,11 +245,9 @@ fn body(ui: &Ui, s: Settings) -> El {
     show(ui, move || s.phase.get() == "ready", {
         let ui = ui.clone();
         move || {
-            w::scroll(&ui)
-                .child(sections::all(&ui, s))
-                .layout(|l| {
-                    l.width = Length::Percent(1.0);
-                })
+            w::scroll(&ui).child(sections::all(&ui, s)).layout(|l| {
+                l.width = Length::Percent(1.0);
+            })
         }
     })
     .fallback({
@@ -243,7 +259,11 @@ fn body(ui: &Ui, s: Settings) -> El {
                     form::stack(&ui)
                         .child(w::empty_state(&ui, "Settings couldn’t load", move || {
                             let err = s.error.get();
-                            if err.is_empty() { "Settings couldn’t load".into() } else { err }
+                            if err.is_empty() {
+                                "Settings couldn’t load".into()
+                            } else {
+                                err
+                            }
                         }))
                         .child(form::action(&ui, "Try again", "primary", move || s.retry()))
                 }
@@ -269,8 +289,18 @@ fn footer(ui: &Ui, s: Settings) -> El {
         .justify(Justify::End)
         .fill_width()
         .child(
-            w::button(ui, move || -> String { if s.saving.get() { "Saving…".into() } else { "Save".into() } }, move || s.save())
-                .variant("primary")
-                .disabled(move || s.saving.get() || s.phase.get() != "ready"),
+            w::button(
+                ui,
+                move || -> String {
+                    if s.saving.get() {
+                        "Saving…".into()
+                    } else {
+                        "Save".into()
+                    }
+                },
+                move || s.save(),
+            )
+            .variant("primary")
+            .disabled(move || s.saving.get() || s.phase.get() != "ready"),
         )
 }
