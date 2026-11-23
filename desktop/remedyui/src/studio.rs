@@ -31,9 +31,9 @@ impl WorkMode {
     /// The chip label.
     pub fn label(self) -> &'static str {
         match self {
-            WorkMode::Chat => "CHAT",
-            WorkMode::Plan => "PLAN",
-            WorkMode::Build => "BUILD",
+            WorkMode::Chat => "Chat",
+            WorkMode::Plan => "Plan",
+            WorkMode::Build => "Build",
         }
     }
 
@@ -185,6 +185,10 @@ pub struct Studio {
     pub live_thinking: Signal<String>,
     /// Byte offsets in [`Self::partial`] where a tool call started.
     pub live_breaks: Signal<Vec<usize>>,
+    /// Real draft message id from the runtime's `event: draft`, when it has one.
+    pub live_message_id: Signal<Option<String>>,
+    /// Optimistic user reaction on the live draft, before the row is saved.
+    pub live_user_reaction: Signal<String>,
     /// A turn is streaming.
     pub streaming: Signal<bool>,
     /// Chat / Plan / Build.
@@ -247,6 +251,44 @@ impl Studio {
         s
     }
 
+    /// Mid-turn chat: sealed speech already reacted to, only the last reply still live.
+    pub fn preview_chat_live() -> Self {
+        let s = Self::preview_chat();
+        let user = preview_messages()
+            .into_iter()
+            .find(|m| m.role == "user")
+            .expect("preview user turn");
+        s.messages.set(vec![user]);
+        let first = "I'll reach the folder through the shell.\n\n";
+        let second = "Cmd is eating the search patterns...\n\n";
+        let reply = "Patching the entry path and the";
+        s.partial.set(format!("{first}{second}{reply}"));
+        s.live_breaks
+            .set(vec![first.len(), first.len() + second.len()]);
+        let mut step = WorkStep::done("c1", "bash");
+        step.status = crate::work::StepStatus::Running;
+        step.narration = Some("I'll reach the folder through the shell.".into());
+        s.live_steps.set(vec![step]);
+        s.live_thinking
+            .set("Looking through the loader and the manifest.".into());
+        s.live_message_id.set(Some("draft-1".into()));
+        s.live_user_reaction.set("👍".into());
+        s.streaming.set(true);
+        s.depth.todos.set(vec![
+            crate::depth::TodoItem {
+                id: "t1".into(),
+                content: "Patch the entry path".into(),
+                status: "in_progress".into(),
+            },
+            crate::depth::TodoItem {
+                id: "t2".into(),
+                content: "Re-run the addon check".into(),
+                status: "pending".into(),
+            },
+        ]);
+        s
+    }
+
     fn with(
         sessions: Vec<Session>,
         active: Option<String>,
@@ -271,6 +313,8 @@ impl Studio {
             live_steps: Signal::new(Vec::new()),
             live_thinking: Signal::new(String::new()),
             live_breaks: Signal::new(Vec::new()),
+            live_message_id: Signal::new(None),
+            live_user_reaction: Signal::new(String::new()),
             streaming: Signal::new(false),
             mode: Signal::new(WorkMode::Build),
             conn: Signal::new(Conn::Disconnected),
@@ -504,6 +548,8 @@ impl Studio {
         self.live_steps.set(Vec::new());
         self.live_thinking.set(String::new());
         self.live_breaks.set(Vec::new());
+        self.live_message_id.set(None);
+        self.live_user_reaction.set(String::new());
     }
 
     /// Applies one SSE frame to the session it belongs to.
@@ -516,6 +562,12 @@ impl Studio {
         let breaks = self.live_breaks.get();
         let mut steps = self.live_steps.get();
         let thinking = self.live_thinking.get();
+        let id = self
+            .live_message_id
+            .get()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("local-a-{}", self.alloc_msg_id()));
+        let reaction = self.live_user_reaction.get();
         self.clear_live();
         self.streaming.set(false);
         let mut body = work::reply_after(&partial, &breaks);
@@ -532,7 +584,6 @@ impl Studio {
             crate::depth::after_finish(self);
             return;
         }
-        let mid = self.alloc_msg_id();
         let role = if error.is_some() && body.starts_with("The mind") {
             "system"
         } else {
@@ -544,15 +595,25 @@ impl Studio {
             role: role.into(),
             steps,
             thinking,
-            ..ChatMessage::plain(format!("local-a-{mid}"), "assistant", body)
+            user_reaction: reaction,
+            ..ChatMessage::plain(id.clone(), "assistant", body)
         };
-        self.messages.update(move |m| m.push(message));
-        if let Some(sid) = self.active.get() {
-            self.sessions.update(|list| {
-                if let Some(s) = list.iter_mut().find(|s| s.id == sid) {
-                    s.message_count = s.message_count.saturating_add(1);
-                }
-            });
+        let existed = self.messages.get().iter().any(|row| row.id == id);
+        self.messages.update(move |m| {
+            if let Some(existing) = m.iter_mut().find(|row| row.id == id) {
+                *existing = message.clone();
+            } else {
+                m.push(message);
+            }
+        });
+        if !existed {
+            if let Some(sid) = self.active.get() {
+                self.sessions.update(|list| {
+                    if let Some(s) = list.iter_mut().find(|s| s.id == sid) {
+                        s.message_count = s.message_count.saturating_add(1);
+                    }
+                });
+            }
         }
         if speak {
             crate::depth::speak_reply(self, &spoken);
@@ -573,6 +634,11 @@ impl Studio {
         self.finish_assistant(None);
     }
 
+    /// The runtime client, when this Studio is attached.
+    pub fn client(&self) -> Option<Client> {
+        self.client.get()
+    }
+
     /// Reloads the session list and the open chat after a Time Travel restore.
     pub(crate) fn reload_open(&self) {
         if self.local_only {
@@ -586,7 +652,11 @@ impl Studio {
 
     /// The runtime client, when this Studio is allowed to talk to one.
     pub(crate) fn runtime(&self) -> Option<Client> {
-        if self.local_only { None } else { self.client.get() }
+        if self.local_only {
+            None
+        } else {
+            self.client.get()
+        }
     }
 
     /// Hooks a runtime client and loads sessions (no-op for local previews).
@@ -691,6 +761,7 @@ fn preview_messages() -> Vec<ChatMessage> {
         },
         ChatMessage {
             created_at: Some("2026-11-22T15:00:20Z".into()),
+            thinking: "The manifest still named init.lua, but the last update renamed the entry. I'll patch the three files and run the addon check.".into(),
             steps: vec![
                 WorkStep::done("c1", "file_read"),
                 WorkStep::failed("c2", "bash", "exit 1"),

@@ -1627,7 +1627,11 @@ impl Grove {
                 self.settings_open.set(true);
             }
             "open_panel" => {
-                self.show_grove();
+                let panel = params.get("panel").and_then(|v| v.as_str()).unwrap_or("");
+                let article = params.get("article").and_then(|v| v.as_str());
+                if !crate::chrome::handle_panel(panel, article, &self.studio) {
+                    self.show_grove();
+                }
             }
             "close_ui" => {
                 let n = self.hide_window.get();
