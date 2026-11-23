@@ -5,10 +5,11 @@ edition = "2024"
 publish = false
 
 [dependencies]
-# RemedyUI main at 68ad3a19 (#133). WebView eval, set_user_agent, and devtools
-# landed in #121 and are on this rev. `desktop` and `term` stay for the rails,
-# Grove, and Settings. Same features on Windows and Linux. No path override.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "68ad3a198571e702fc4696bc8b000edc6c5e7980", features = ["net", "image", "webview", "desktop", "term"] }
+# RemedyUI main at 68ad3a19 (#133), which is later than chat-depth's c325991.
+# WebView eval, set_user_agent, and devtools are on this rev. `playback` is the
+# mic and spoken-reply path from chat-depth. `desktop` and `term` stay for the
+# rails, Grove, and Settings. Same features on Windows and Linux. No path override.
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "68ad3a198571e702fc4696bc8b000edc6c5e7980", features = ["net", "image", "webview", "playback", "desktop", "term"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -17,7 +18,7 @@ portable-pty = "0.9"
 
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "68ad3a198571e702fc4696bc8b000edc6c5e7980", features = ["headless", "devtools", "net", "image", "webview", "desktop", "term"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "68ad3a198571e702fc4696bc8b000edc6c5e7980", features = ["headless", "devtools", "net", "image", "webview", "playback", "desktop", "term"] }
 
 [profile.release]
 lto = "fat"
