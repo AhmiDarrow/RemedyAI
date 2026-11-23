@@ -82,6 +82,13 @@ fn feed(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
     };
     w::scroll(ui)
         .style(StylePatch::new().background(colors.bg))
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
+        })
+        .semantics(Semantics::new(Role::Region).label("Chat feed"))
         .child(list)
         .child(partial)
         .child(todo_block(ui, grove.clone()))

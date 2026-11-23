@@ -247,6 +247,9 @@ fn body(ui: &Ui, s: Settings) -> El {
         move || {
             w::scroll(&ui).child(sections::all(&ui, s)).layout(|l| {
                 l.width = Length::Percent(1.0);
+                l.grow = 1.0;
+                l.basis = Length::Px(0.0);
+                l.min_height = Length::Px(0.0);
             })
         }
     })
