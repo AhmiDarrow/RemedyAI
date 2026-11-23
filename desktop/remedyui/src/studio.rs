@@ -31,9 +31,9 @@ impl WorkMode {
     /// The chip label.
     pub fn label(self) -> &'static str {
         match self {
-            WorkMode::Chat => "CHAT",
-            WorkMode::Plan => "PLAN",
-            WorkMode::Build => "BUILD",
+            WorkMode::Chat => "Chat",
+            WorkMode::Plan => "Plan",
+            WorkMode::Build => "Build",
         }
     }
 
