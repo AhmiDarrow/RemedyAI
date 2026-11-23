@@ -177,7 +177,7 @@ fn xai_block(ui: &Ui, s: Settings) -> El {
                     session.set(state::jstr(&v, "session_id", ""));
                     s.xai.set(v);
                     if !link.is_empty() {
-                        bits::open_http(&link);
+                        bits::open_in_browser_rail(&link);
                     }
                     s.banner.set("Enter the code in the browser, then check status.".into());
                 }
@@ -211,7 +211,7 @@ fn xai_block(ui: &Ui, s: Settings) -> El {
             if link.is_empty() {
                 s.banner.set("Start sign-in first.".into());
             } else {
-                bits::open_http(&link);
+                bits::open_in_browser_rail(&link);
             }
         }))
         .child(form::action(ui, "Save API key to xAI", "quiet", move || {

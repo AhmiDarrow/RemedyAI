@@ -77,6 +77,19 @@ pub fn open_http(url: &str) {
     app.open_url(url.to_string(), |_| {});
 }
 
+/// OAuth and provider verification. The in-app browser keeps Settings mounted.
+/// Anything the host cannot take still opens in the system browser.
+pub fn open_in_browser_rail(url: &str) {
+    let url = url.trim();
+    if url.is_empty() {
+        return;
+    }
+    if crate::browser::open_in_rail(url, true) {
+        return;
+    }
+    open_http(url);
+}
+
 pub fn browse_folder(s: Settings) {
     let Some(app) = prefs::host() else {
         s.banner.set("Folder picker is not available in this preview.".into());
