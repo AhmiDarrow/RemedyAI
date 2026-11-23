@@ -12,7 +12,7 @@ use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::input::{Key, KeyEvent};
 use remedy_ui::layout::{Align, Justify, Length};
 use remedy_ui::net::Request;
-use remedy_ui::reactive::{Signal, Waker, waker};
+use remedy_ui::reactive::{waker, Signal, Waker};
 use remedy_ui::style::StylePatch;
 use remedy_ui::term::{self, Terminal, TerminalOptions};
 use remedy_ui::widgets::{self as w, MenuItem};
@@ -38,7 +38,11 @@ pub fn terminal_context_items(has_selection: bool) -> Vec<&'static str> {
 
 /// "Terminal" on Linux and macOS, "PowerShell" on Windows.
 pub fn shell_label() -> &'static str {
-    if cfg!(windows) { "PowerShell" } else { "Terminal" }
+    if cfg!(windows) {
+        "PowerShell"
+    } else {
+        "Terminal"
+    }
 }
 
 /// Monospace fallbacks, then the configured code face (AhmiPrint by default).
@@ -75,6 +79,7 @@ pub struct TerminalModel {
     last_cwd: Rc<RefCell<Option<String>>>,
     pty: PtyHost,
     pty_id: Arc<Mutex<Option<String>>>,
+    pending_size: Arc<Mutex<Option<(u16, u16)>>>,
     generation: Arc<AtomicU64>,
     started: Rc<Cell<bool>>,
     mount_token: Rc<Cell<u64>>,
@@ -82,6 +87,7 @@ pub struct TerminalModel {
     waker: Rc<RefCell<Option<Waker>>>,
     host: Rc<RefCell<Option<El>>>,
     status_timer: Rc<Cell<u64>>,
+    launch_seq: Signal<u64>,
 }
 
 impl TerminalModel {
@@ -118,6 +124,7 @@ impl TerminalModel {
             last_cwd: Rc::new(RefCell::new(None)),
             pty: PtyHost::new(),
             pty_id: Arc::new(Mutex::new(None)),
+            pending_size: Arc::new(Mutex::new(None)),
             generation: Arc::new(AtomicU64::new(0)),
             started: Rc::new(Cell::new(false)),
             mount_token: Rc::new(Cell::new(0)),
@@ -125,6 +132,7 @@ impl TerminalModel {
             waker: Rc::new(RefCell::new(None)),
             host: Rc::new(RefCell::new(None)),
             status_timer: Rc::new(Cell::new(0)),
+            launch_seq: Signal::new(0),
         }
     }
 
@@ -190,7 +198,11 @@ impl TerminalModel {
             }
             let next = res
                 .ok()
-                .and_then(|v| v.get("project_path").and_then(|p| p.as_str()).map(|s| s.trim().to_string()))
+                .and_then(|v| {
+                    v.get("project_path")
+                        .and_then(|p| p.as_str())
+                        .map(|s| s.trim().to_string())
+                })
                 .unwrap_or_default();
             model.set_cwd(next);
         });
@@ -258,12 +270,22 @@ impl TerminalModel {
         };
         let feeder = term.feeder();
         let feeder_exit = feeder.clone();
+        let feeder_err = feeder.clone();
         let pty_id = Arc::clone(&self.pty_id);
+        let pty_id_done = Arc::clone(&self.pty_id);
         let generation = Arc::clone(&self.generation);
+        let generation_done = Arc::clone(&self.generation);
         let status = self.status.clone();
+        let status_done = self.status.clone();
         let pty = self.pty.clone();
+        let pending_size = Arc::clone(&self.pending_size);
+        let launch_seq = self.launch_seq.clone();
         let workdir_owned = workdir.to_string();
-        match self.pty.open(
+        // Never block the UI thread on ConPTY open/spawn. The posted
+        // callback is Send, so it cannot capture Terminal/El; a bind on
+        // `launch_seq` focuses and syncs on the UI thread.
+        let wake_done = wake.clone();
+        self.pty.open_async(
             if workdir.trim().is_empty() { None } else { Some(workdir) },
             cols,
             rows,
@@ -285,33 +307,46 @@ impl TerminalModel {
                     status.set("Shell exited — Restart to open again".into());
                 });
             },
-        ) {
-            Ok(id) => {
-                if self.generation.load(Ordering::Relaxed) != ticket {
-                    let _ = pty.close(&id);
-                    return;
+            {
+                let wake = wake_done;
+                move |result| {
+                    let _ = wake.post(move || {
+                        match result {
+                            Ok(id) => {
+                                if generation_done.load(Ordering::Relaxed) != ticket {
+                                    let _ = pty.close(&id);
+                                    return;
+                                }
+                                if let Ok(mut pending) = pending_size.lock() {
+                                    if let Some((c, r)) = pending.take() {
+                                        let _ = pty.resize(&id, c, r);
+                                    }
+                                }
+                                if let Ok(mut slot) = pty_id_done.lock() {
+                                    *slot = Some(id);
+                                }
+                                let shown = if workdir_owned.trim().is_empty() {
+                                    label.to_string()
+                                } else {
+                                    format!("{label} · {workdir_owned}")
+                                };
+                                status_done.set(shown);
+                                launch_seq.update(|n| *n = n.wrapping_add(1));
+                            }
+                            Err(e) => {
+                                if generation_done.load(Ordering::Relaxed) != ticket {
+                                    return;
+                                }
+                                let msg = format!("\r\nFailed to start {label}: {e}\r\n");
+                                feeder_err.feed(msg.as_bytes());
+                                status_done.set(format!("Error: {e}"));
+                                launch_seq.update(|n| *n = n.wrapping_add(1));
+                            }
+                        }
+                    });
                 }
-                if let Ok(mut slot) = self.pty_id.lock() {
-                    *slot = Some(id);
-                }
-                let shown = if workdir_owned.trim().is_empty() {
-                    label.to_string()
-                } else {
-                    format!("{label} · {workdir_owned}")
-                };
-                self.status.set(shown);
-                term.input_element().focus();
-            }
-            Err(e) => {
-                if self.generation.load(Ordering::Relaxed) != ticket {
-                    return;
-                }
-                let msg = format!("\r\nFailed to start {label}: {e}\r\n");
-                term.feeder().feed(msg.as_bytes());
-                term.sync();
-                self.status.set(format!("Error: {e}"));
-            }
-        }
+            },
+        );
     }
 
     fn consider_start(&self, host: &El, term: &Terminal, token: u64, attempt: u32) {
@@ -319,8 +354,12 @@ impl TerminalModel {
             return;
         }
         let size = term.size();
-        let px = size.cell_width.saturating_mul(u32::try_from(size.cols).unwrap_or(u32::MAX));
-        let py = size.cell_height.saturating_mul(u32::try_from(size.rows).unwrap_or(u32::MAX));
+        let px = size
+            .cell_width
+            .saturating_mul(u32::try_from(size.cols).unwrap_or(u32::MAX));
+        let py = size
+            .cell_height
+            .saturating_mul(u32::try_from(size.rows).unwrap_or(u32::MAX));
         let ready = px >= 40 && py >= 40;
         if ready || attempt >= 20 {
             self.started.set(true);
@@ -330,9 +369,12 @@ impl TerminalModel {
         let host = host.clone();
         let model = self.clone();
         let term = term.clone();
-        let _ = host.clone().ui().after(Duration::from_millis(100), move || {
-            model.consider_start(&host, &term, token, attempt + 1);
-        });
+        let _ = host
+            .clone()
+            .ui()
+            .after(Duration::from_millis(100), move || {
+                model.consider_start(&host, &term, token, attempt + 1);
+            });
     }
 
     fn clear_screen(&self) {
@@ -429,8 +471,23 @@ pub fn body(ui: &Ui, model: &TerminalModel) -> El {
             l.height = Length::Percent(1.0);
             l.min_height = Length::Px(0.0);
         })
-        .style(StylePatch::new().background(colors.bg).foreground(colors.text));
+        .style(
+            StylePatch::new()
+                .background(colors.bg)
+                .foreground(colors.text),
+        );
     *model.host.borrow_mut() = Some(root.clone());
+
+    let launch_model = model.clone();
+    let _ = root.clone().bind(move || {
+        if launch_model.launch_seq.get() == 0 {
+            return;
+        }
+        if let Some(term) = launch_model.term.borrow().clone() {
+            term.sync();
+            term.input_element().focus();
+        }
+    });
 
     let end_model = model.clone();
     let _ = root.clone().on_removed(move || end_model.end_mount(token));
@@ -488,12 +545,17 @@ pub fn body(ui: &Ui, model: &TerminalModel) -> El {
             if m.mount_token.get() != token {
                 return;
             }
+            let cols = u16::try_from(size.cols).unwrap_or(u16::MAX).max(20);
+            let rows = u16::try_from(size.rows).unwrap_or(u16::MAX).max(5);
             if let Some(id) = m.pty_id.lock().ok().and_then(|slot| slot.clone()) {
-                let cols = u16::try_from(size.cols).unwrap_or(u16::MAX).max(20);
-                let rows = u16::try_from(size.rows).unwrap_or(u16::MAX).max(5);
                 let _ = m.pty.resize(&id, cols, rows);
-            } else if !m.started.get() {
-                m.consider_start(&host, &term_r, token, 0);
+            } else {
+                if let Ok(mut pending) = m.pending_size.lock() {
+                    *pending = Some((cols, rows));
+                }
+                if !m.started.get() {
+                    m.consider_start(&host, &term_r, token, 0);
+                }
             }
         });
         let m = model.clone();
@@ -543,7 +605,9 @@ fn chrome(ui: &Ui, model: &TerminalModel, unit: f32, colors: &remedy_ui::style::
                 } else {
                     "Copy working directory".into()
                 };
-                Semantics::new(Role::Button).label(label).action(Action::Click)
+                Semantics::new(Role::Button)
+                    .label(label)
+                    .action(Action::Click)
             }
         })
         .layout(|l| {
@@ -576,7 +640,10 @@ fn chrome(ui: &Ui, model: &TerminalModel, unit: f32, colors: &remedy_ui::style::
     })
     .variant("quiet");
     let label = shell_label();
-    w::tooltip(&restart, format!("Restart {label} in session project folder"));
+    w::tooltip(
+        &restart,
+        format!("Restart {label} in session project folder"),
+    );
 
     w::overflow_row(ui)
         .gap(unit)
@@ -585,7 +652,11 @@ fn chrome(ui: &Ui, model: &TerminalModel, unit: f32, colors: &remedy_ui::style::
         .child("Restart", restart)
         .el()
         .padding(pad(unit * 0.5, unit))
-        .style(StylePatch::new().background(colors.panel).foreground(colors.muted))
+        .style(
+            StylePatch::new()
+                .background(colors.panel)
+                .foreground(colors.muted),
+        )
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
@@ -607,7 +678,11 @@ fn glyph(ui: &Ui, mark: &str, label: &str, on_press: impl Fn() + 'static) -> El 
                 .foreground(colors.muted),
         )
         .on_click(on_press)
-        .semantics(Semantics::new(Role::Button).label(label).action(Action::Click))
+        .semantics(
+            Semantics::new(Role::Button)
+                .label(label)
+                .action(Action::Click),
+        )
 }
 
 fn on_term_key(term: &Terminal, ui: &Ui, e: &KeyEvent) -> bool {
