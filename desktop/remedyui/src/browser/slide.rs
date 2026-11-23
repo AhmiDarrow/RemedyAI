@@ -10,7 +10,7 @@ use remedy_ui::layout::{Align, Justify, Length};
 use remedy_ui::style::{Pad, StylePatch};
 use remedy_ui::webview::{WebViewOptions, WebViewStatus, web_view};
 use remedy_ui::widgets as w;
-use remedy_ui::{App, El, Ui, show};
+use remedy_ui::{App, El, InputPurpose, Ui, show};
 
 use super::host::Model;
 use super::layout::{browser_is_open, browser_width};
@@ -123,6 +123,7 @@ fn address_field(ui: &Ui, model: &Model) -> remedy_ui::view::TextField {
     let hint_ui = ui.clone();
     let submit_field_model = model.clone();
     let field = w::text_input(ui, messages().text(ui, "browser-address"))
+        .purpose(InputPurpose::Url)
         .placeholder(messages().text(&hint_ui, "browser-address-placeholder"));
     let typed = field.clone();
     let typing = model.clone();
