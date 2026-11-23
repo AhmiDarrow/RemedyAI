@@ -622,6 +622,11 @@ impl Studio {
         self.finish_assistant(None);
     }
 
+    /// The runtime client, when this Studio is attached.
+    pub fn client(&self) -> Option<Client> {
+        self.client.get()
+    }
+
     /// Reloads the session list and the open chat after a Time Travel restore.
     pub(crate) fn reload_open(&self) {
         if self.local_only {
