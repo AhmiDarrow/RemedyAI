@@ -129,9 +129,9 @@ func (t toolResultToken) record() map[string]any {
 		item["id"] = t.ID
 	}
 	if !t.OK {
-		errMsg := t.Preview
-		if errMsg == "" {
-			errMsg = "tool failed"
+		errMsg := firstNonEmpty(t.Error, t.Preview, t.Output)
+		if strings.TrimSpace(errMsg) == "" {
+			errMsg = "command failed with no stdout or stderr"
 		}
 		item["error"] = errMsg
 	}
