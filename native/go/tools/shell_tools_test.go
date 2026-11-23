@@ -79,8 +79,13 @@ func TestBashTakesACommandStringAndWrapsItInTheHostShell(t *testing.T) {
 	}
 	base := strings.ToLower(filepath.Base(argv[0]))
 	if runtime.GOOS == "windows" {
-		if base != "cmd.exe" || argv[1] != "/d" || argv[2] != "/s" || argv[3] != "/c" {
+		switch base {
+		case "pwsh.exe", "powershell.exe", "bash.exe", "cmd.exe":
+		default:
 			t.Fatalf("windows wrapper=%v", argv)
+		}
+		if argv[len(argv)-1] != "echo hi && exit 3" {
+			t.Fatalf("command must remain one argv element: %v", argv)
 		}
 	} else if base != "bash" && base != "sh" {
 		t.Fatalf("posix wrapper=%v", argv)
