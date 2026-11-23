@@ -2,12 +2,13 @@
 
 use super::api;
 use super::logic::{
-    self, name_size_key, project_key, rehome_order, should_confirm_new_turn,
-    strip_markdown_for_speech, MAX_ATTACHMENTS,
+    self, MAX_ATTACHMENTS, name_size_key, project_key, rehome_order, should_confirm_new_turn,
+    strip_markdown_for_speech,
 };
 use super::{
-    now_ms, put_mic, take_mic, with_host, with_ui, Approval, Attachment, Confirm, Depth, LibraryChip,
-    LifeCard, PendingSend, PlanCard, SkillRow, StreamJob, SubmitKind, TodoItem, Usage, VoicePrefs,
+    Approval, Attachment, Confirm, Depth, LibraryChip, LifeCard, PendingSend, PlanCard, SkillRow,
+    StreamJob, SubmitKind, TodoItem, Usage, VoicePrefs, now_ms, put_mic, take_mic, with_host,
+    with_ui,
 };
 use crate::runtime::{self, Client};
 use crate::sse;
@@ -15,9 +16,11 @@ use crate::studio::{ChatMessage, Studio, WorkMode};
 use crate::work::{self, WorkStep};
 use remedy_ui::host::FileDialog;
 use remedy_ui::net::Request;
-use remedy_ui::playback::{MediaSource, Microphone, MicrophoneOptions, MicrophoneState, Player, PlayerOptions};
-use remedy_ui::reactive::{waker, Cancel};
-use serde_json::{json, Value};
+use remedy_ui::playback::{
+    MediaSource, Microphone, MicrophoneOptions, MicrophoneState, Player, PlayerOptions,
+};
+use remedy_ui::reactive::{Cancel, waker};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -47,12 +50,16 @@ pub fn submit(
     let Some(sid) = sid else {
         return;
     };
-    let busy = studio.depth.session_running(&sid) || (studio.streaming.get() && studio.active.get().as_deref() == Some(sid.as_str()));
+    let busy = studio.depth.session_running(&sid)
+        || (studio.streaming.get() && studio.active.get().as_deref() == Some(sid.as_str()));
     if busy {
         match kind {
             SubmitKind::After => {
                 studio.depth.push_queued(text, "after", attachments);
-                studio.depth.notice.set("Queued until this turn ends.".into());
+                studio
+                    .depth
+                    .notice
+                    .set("Queued until this turn ends.".into());
             }
             SubmitKind::Interrupt => interrupt(studio, &sid, text, attachments),
             SubmitKind::Send | SubmitKind::Steer => {
@@ -125,7 +132,12 @@ fn pump(studio: &Studio) {
     if sid.is_none() {
         return;
     }
-    begin_turn(studio, sid.as_deref().unwrap_or(""), next.text, next.attachments);
+    begin_turn(
+        studio,
+        sid.as_deref().unwrap_or(""),
+        next.text,
+        next.attachments,
+    );
 }
 
 fn interrupt(studio: &Studio, sid: &str, text: String, attachments: Vec<Attachment>) {
@@ -216,7 +228,10 @@ fn begin_turn(studio: &Studio, sid: &str, text: String, attachments: Vec<Attachm
                         });
                         let path = format!("sessions/{sid}/attachments");
                         let cancel = Cancel::new();
-                        match client.http().send_blocking(Request::post(&path).json(&body), &cancel) {
+                        match client
+                            .http()
+                            .send_blocking(Request::post(&path).json(&body), &cancel)
+                        {
                             Ok(r) => {
                                 if let Ok(v) = r.json::<Value>() {
                                     metas.push(attachment_meta(&v, file));
@@ -232,7 +247,10 @@ fn begin_turn(studio: &Studio, sid: &str, text: String, attachments: Vec<Attachm
                                         studio.streaming.set(false);
                                         studio.depth.finish_job(&sid, "error");
                                         studio.depth.notice.set(msg);
-                                        studio.depth.attachments.set(attachments_back(&studio, &sid));
+                                        studio
+                                            .depth
+                                            .attachments
+                                            .set(attachments_back(&studio, &sid));
                                     }
                                 });
                                 return;
@@ -305,7 +323,9 @@ fn run_slash(studio: &Studio, text: &str) {
         export_active(studio);
         return;
     }
-    if stripped == "/import-session" || stripped == "/session-import" || stripped.starts_with("/import-session ")
+    if stripped == "/import-session"
+        || stripped == "/session-import"
+        || stripped.starts_with("/import-session ")
     {
         import_session(studio);
         return;
@@ -317,7 +337,10 @@ fn run_slash(studio: &Studio, text: &str) {
     }
     let Some(client) = studio.runtime() else {
         push_user(studio, &ensure_session(studio).unwrap_or_default(), text);
-        push_system(studio, "The mind is not connected. Start this chat once it is.");
+        push_system(
+            studio,
+            "The mind is not connected. Start this chat once it is.",
+        );
         return;
     };
     let sid = ensure_session(studio).unwrap_or_default();
@@ -383,7 +406,11 @@ fn push_user(studio: &Studio, sid: &str, text: &str) {
 fn push_system(studio: &Studio, text: &str) {
     let id = studio.alloc_msg_id();
     studio.messages.update(|m| {
-        m.push(ChatMessage::plain(format!("local-sys-{id}"), "system", text));
+        m.push(ChatMessage::plain(
+            format!("local-sys-{id}"),
+            "system",
+            text,
+        ));
     });
 }
 
@@ -427,9 +454,13 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
             }
         }
         "thinking" => {
-            studio.depth.map_job(sid, |job| work::on_thinking(&mut job.thinking, data));
+            studio
+                .depth
+                .map_job(sid, |job| work::on_thinking(&mut job.thinking, data));
             if active {
-                studio.live_thinking.update(|buf| work::on_thinking(buf, data));
+                studio
+                    .live_thinking
+                    .update(|buf| work::on_thinking(buf, data));
             }
         }
         "tool_call" => {
@@ -447,13 +478,19 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
             }
         }
         "tool_result" => {
-            studio.depth.map_job(sid, |job| work::on_tool_result(&mut job.steps, data));
+            studio
+                .depth
+                .map_job(sid, |job| work::on_tool_result(&mut job.steps, data));
             if active {
-                studio.live_steps.update(|steps| work::on_tool_result(steps, data));
+                studio
+                    .live_steps
+                    .update(|steps| work::on_tool_result(steps, data));
             }
         }
         "step" => {
-            studio.depth.map_job(sid, |job| work::on_step(&mut job.steps, data));
+            studio
+                .depth
+                .map_job(sid, |job| work::on_step(&mut job.steps, data));
             if active {
                 studio.live_steps.update(|steps| work::on_step(steps, data));
             }
@@ -466,16 +503,32 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
                 }
             }
         }
+        "draft" => {
+            if let Ok(v) = serde_json::from_str::<Value>(data) {
+                let mut id = api::str_field(&v, "message_id");
+                if id.is_empty() {
+                    id = api::str_field(&v, "id");
+                }
+                if !id.is_empty() {
+                    studio.depth.map_job(sid, |job| job.message_id = id.clone());
+                    if active {
+                        studio.live_message_id.set(Some(id));
+                    }
+                }
+            }
+        }
         "usage" => {
             if active {
                 if let Ok(v) = serde_json::from_str::<Value>(data) {
                     let usage = Usage {
-                        input: api::u64_field(&v, "input_tokens").max(api::u64_field(&v, "prompt_tokens")),
+                        input: api::u64_field(&v, "input_tokens")
+                            .max(api::u64_field(&v, "prompt_tokens")),
                         output: api::u64_field(&v, "output_tokens")
                             .max(api::u64_field(&v, "completion_tokens")),
-                        cost: v.get("cost").and_then(|c| c.as_f64()).or_else(|| {
-                            v.get("cost_usd").and_then(|c| c.as_f64())
-                        }),
+                        cost: v
+                            .get("cost")
+                            .and_then(|c| c.as_f64())
+                            .or_else(|| v.get("cost_usd").and_then(|c| c.as_f64())),
                     };
                     let mut session = studio.depth.usage_session.get();
                     session.input = session.input.saturating_add(usage.input);
@@ -527,15 +580,45 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
         "reaction" => {
             if let Ok(v) = serde_json::from_str::<Value>(data) {
                 let id = api::str_field(&v, "message_id");
-                let user = api::str_field(&v, "user");
-                let agent = api::str_field(&v, "agent");
+                let reactions = v.get("reactions");
+                let user = {
+                    let top = api::str_field(&v, "user");
+                    if !top.is_empty() {
+                        top
+                    } else {
+                        reactions
+                            .and_then(|r| r.get("user"))
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .to_string()
+                    }
+                };
+                let agent = {
+                    let top = api::str_field(&v, "agent");
+                    if !top.is_empty() {
+                        top
+                    } else {
+                        reactions
+                            .and_then(|r| r.get("agent"))
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .to_string()
+                    }
+                };
+                let has_user =
+                    v.get("user").is_some() || reactions.and_then(|r| r.get("user")).is_some();
+                let has_agent =
+                    v.get("agent").is_some() || reactions.and_then(|r| r.get("agent")).is_some();
                 if active && !id.is_empty() {
+                    if has_user && studio.live_message_id.get().as_deref() == Some(id.as_str()) {
+                        studio.live_user_reaction.set(user.clone());
+                    }
                     studio.messages.update(|list| {
                         if let Some(m) = list.iter_mut().find(|m| m.id == id) {
-                            if v.get("user").is_some() {
+                            if has_user {
                                 m.user_reaction = user;
                             }
-                            if v.get("agent").is_some() {
+                            if has_agent {
                                 m.agent_reaction = agent;
                             }
                         }
@@ -554,10 +637,7 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
             if active {
                 studio.streaming.set(true);
                 studio.depth.remote_busy.set(true);
-                studio
-                    .depth
-                    .notice
-                    .set("Sent to the live turn.".into());
+                studio.depth.notice.set("Sent to the live turn.".into());
             }
         }
         "queued" => {
@@ -576,9 +656,13 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
         }
         "error" => {
             if work::is_step_error(data) {
-                studio.depth.map_job(sid, |job| work::on_step_error(&mut job.steps, data));
+                studio
+                    .depth
+                    .map_job(sid, |job| work::on_step_error(&mut job.steps, data));
                 if active {
-                    studio.live_steps.update(|steps| work::on_step_error(steps, data));
+                    studio
+                        .live_steps
+                        .update(|steps| work::on_step_error(steps, data));
                 }
             } else if active {
                 studio.finish_assistant(Some(sse::error_text(data)));
@@ -606,7 +690,11 @@ fn parse_todos(v: &Value) -> Vec<TodoItem> {
             id: api::str_field(row, "id"),
             content: {
                 let c = api::str_field(row, "content");
-                if c.is_empty() { api::str_field(row, "title") } else { c }
+                if c.is_empty() {
+                    api::str_field(row, "title")
+                } else {
+                    c
+                }
             },
             status: {
                 let s = api::str_field(row, "status");
@@ -622,12 +710,20 @@ fn parse_library(v: &Value) -> LibraryChip {
     LibraryChip {
         id: {
             let id = api::str_field(src, "skill_id");
-            if id.is_empty() { api::str_field(src, "id") } else { id }
+            if id.is_empty() {
+                api::str_field(src, "id")
+            } else {
+                id
+            }
         },
         name: api::str_field(src, "name"),
         reason: {
             let r = api::str_field(src, "reason");
-            if r.is_empty() { api::str_field(src, "description") } else { r }
+            if r.is_empty() {
+                api::str_field(src, "description")
+            } else {
+                r
+            }
         },
     }
 }
@@ -656,7 +752,10 @@ fn parse_life(v: &Value) -> LifeCard {
         step: v.get("step").and_then(|n| n.as_u64()),
         total: v.get("total").and_then(|n| n.as_u64()),
         steps,
-        approval: v.get("approval_id").and_then(|s| s.as_str()).is_some_and(|s| !s.is_empty()),
+        approval: v
+            .get("approval_id")
+            .and_then(|s| s.as_str())
+            .is_some_and(|s| !s.is_empty()),
     }
 }
 
@@ -669,6 +768,11 @@ pub fn focus_session(studio: &Studio, id: &str) {
             studio.live_breaks.set(job.breaks);
             studio.live_thinking.set(job.thinking);
             studio.live_steps.set(job.steps);
+            studio.live_message_id.set(if job.message_id.is_empty() {
+                None
+            } else {
+                Some(job.message_id)
+            });
             studio.streaming.set(true);
             studio.depth.todos.set(job.todos);
             studio.depth.progress.set(job.progress);
@@ -709,7 +813,11 @@ fn reattach(studio: &Studio, id: &str) {
             let local = studio.depth.job(&sid).filter(|j| j.status == "running");
             let plan = logic::reattach_plan(
                 claimed,
-                if request.is_empty() { None } else { Some(request.as_str()) },
+                if request.is_empty() {
+                    None
+                } else {
+                    Some(request.as_str())
+                },
                 local.is_some(),
                 local.as_ref().map(|j| j.request_id.as_str()),
             );
@@ -826,7 +934,11 @@ fn parse_commands(v: &Value) -> Vec<logic::SlashCommand> {
                 s.to_string()
             } else {
                 let n = api::str_field(row, "name");
-                if n.is_empty() { api::str_field(row, "command") } else { n }
+                if n.is_empty() {
+                    api::str_field(row, "command")
+                } else {
+                    n
+                }
             };
             if name.is_empty() {
                 return None;
@@ -875,7 +987,10 @@ pub fn refresh_banners(studio: &Studio) {
     let path = format!("plans/latest?session_id={}", api::query(&sid));
     api::spawn_json(&client, Request::get(&path), move |out| {
         let _ = wake.post(move || {
-            studio_p.depth.plan.set(out.ok().as_ref().and_then(parse_plan));
+            studio_p
+                .depth
+                .plan
+                .set(out.ok().as_ref().and_then(parse_plan));
         });
     });
     let studio_l = studio.clone();
@@ -885,7 +1000,11 @@ pub fn refresh_banners(studio: &Studio) {
     api::spawn_json(&client, Request::get("goals"), move |out| {
         let _ = wake.post(move || {
             if let Ok(v) = out {
-                if let Some(card) = v.get("life").or_else(|| v.get("task")).or_else(|| v.get("current")) {
+                if let Some(card) = v
+                    .get("life")
+                    .or_else(|| v.get("task"))
+                    .or_else(|| v.get("current"))
+                {
                     studio_l.depth.life.set(Some(parse_life(card)));
                 }
             }
@@ -903,7 +1022,11 @@ fn parse_approvals(v: &Value) -> Vec<Approval> {
             }
             let tool = {
                 let t = api::str_field(row, "tool");
-                if t.is_empty() { api::str_field(row, "tool_name") } else { t }
+                if t.is_empty() {
+                    api::str_field(row, "tool_name")
+                } else {
+                    t
+                }
             };
             let summary = {
                 let s = api::str_field(row, "summary");
@@ -923,7 +1046,11 @@ fn parse_approvals(v: &Value) -> Vec<Approval> {
                 blocking: row.get("blocking").is_none() || api::bool_field(row, "blocking"),
                 origin: {
                     let o = api::str_field(row, "origin");
-                    if o.is_empty() { api::str_field(row, "origin_channel") } else { o }
+                    if o.is_empty() {
+                        api::str_field(row, "origin_channel")
+                    } else {
+                        o
+                    }
                 },
             })
         })
@@ -950,7 +1077,11 @@ fn parse_plan(v: &Value) -> Option<PlanCard> {
     let status = api::str_field(src, "status");
     let goal = {
         let g = api::str_field(src, "goal");
-        if g.is_empty() { api::str_field(src, "title") } else { g }
+        if g.is_empty() {
+            api::str_field(src, "title")
+        } else {
+            g
+        }
     };
     let steps: Vec<(String, String)> = src
         .get("steps")
@@ -961,7 +1092,10 @@ fn parse_plan(v: &Value) -> Option<PlanCard> {
                     if let Some(s) = step.as_str() {
                         return (s.to_string(), String::new());
                     }
-                    (api::str_field(step, "title"), api::str_field(step, "block_reason"))
+                    (
+                        api::str_field(step, "title"),
+                        api::str_field(step, "block_reason"),
+                    )
                 })
                 .filter(|(t, _)| !t.is_empty())
                 .collect()
@@ -975,7 +1109,13 @@ fn parse_plan(v: &Value) -> Option<PlanCard> {
         let t = api::u64_field(src, "total") as u32;
         if t == 0 { steps.len() as u32 } else { t }
     };
-    Some(PlanCard { status, goal, steps, done, total })
+    Some(PlanCard {
+        status,
+        goal,
+        steps,
+        done,
+        total,
+    })
 }
 
 pub fn show_plan(card: &PlanCard, mode: WorkMode) -> bool {
@@ -987,45 +1127,57 @@ pub fn show_plan(card: &PlanCard, mode: WorkMode) -> bool {
 }
 
 fn start_poll(studio: &Studio) {
-    if studio.depth.poll_flag().swap(true, std::sync::atomic::Ordering::Relaxed) {
+    if studio
+        .depth
+        .poll_flag()
+        .swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
         return;
     }
     let studio = studio.clone();
     let _ = std::thread::Builder::new()
         .name("remedy-approvals".into())
-        .spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(4));
-            let Some(client) = studio.runtime() else {
-                continue;
-            };
-            let studio = studio.clone();
-            let Ok(wake) = waker() else {
-                continue;
-            };
-            api::spawn_json(&client, Request::get("approvals"), move |out| {
-                let _ = wake.post(move || {
-                    if let Ok(v) = out {
-                        studio.depth.approvals.set(parse_approvals(&v));
-                    }
+        .spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_secs(4));
+                let Some(client) = studio.runtime() else {
+                    continue;
+                };
+                let studio = studio.clone();
+                let Ok(wake) = waker() else {
+                    continue;
+                };
+                api::spawn_json(&client, Request::get("approvals"), move |out| {
+                    let _ = wake.post(move || {
+                        if let Ok(v) = out {
+                            studio.depth.approvals.set(parse_approvals(&v));
+                        }
+                    });
                 });
-            });
+            }
         });
 }
 
 fn start_tick(studio: &Studio) {
-    if studio.depth.tick_flag().swap(true, std::sync::atomic::Ordering::Relaxed) {
+    if studio
+        .depth
+        .tick_flag()
+        .swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
         return;
     }
     let studio = studio.clone();
     let _ = std::thread::Builder::new()
         .name("remedy-tick".into())
-        .spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(5));
-            let Ok(wake) = waker() else {
-                continue;
-            };
-            let studio = studio.clone();
-            let _ = wake.post(move || studio.depth.tick.update(|n| *n = n.wrapping_add(1)));
+        .spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_secs(5));
+                let Ok(wake) = waker() else {
+                    continue;
+                };
+                let studio = studio.clone();
+                let _ = wake.post(move || studio.depth.tick.update(|n| *n = n.wrapping_add(1)));
+            }
         });
 }
 
@@ -1042,7 +1194,10 @@ pub fn resolve_approval(studio: &Studio, id: &str, approve: bool, scope: &str) {
     };
     api::spawn_json(&client, Request::post(&path).json(&body), move |_| {
         let _ = wake.post(move || {
-            studio.depth.approvals.update(|list| list.retain(|a| a.id != id));
+            studio
+                .depth
+                .approvals
+                .update(|list| list.retain(|a| a.id != id));
         });
     });
 }
@@ -1069,7 +1224,13 @@ pub fn request_plan_changes(studio: &Studio) {
 }
 
 pub fn send_life(studio: &Studio, word: &str) {
-    submit(studio, word.to_string(), Vec::new(), SubmitKind::Send, false);
+    submit(
+        studio,
+        word.to_string(),
+        Vec::new(),
+        SubmitKind::Send,
+        false,
+    );
 }
 
 pub fn install_library(studio: &Studio) {
@@ -1084,42 +1245,46 @@ pub fn install_library(studio: &Studio) {
     let Ok(wake) = waker() else {
         return;
     };
-    api::spawn_json(&client, Request::post("skills/library/install").json(&body), move |out| {
-        let _ = wake.post(move || match out {
-            Ok(v) => {
-                let name = v
-                    .get("names")
-                    .and_then(|n| n.as_array())
-                    .and_then(|a| a.first())
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                if !name.is_empty() {
-                    if let Some(client) = studio.runtime() {
-                        let path = format!("skills/{}/status", api::query(&name));
-                        api::spawn_json(
-                            &client,
-                            Request::post(&path).json(&json!({
-                                "status": "active",
-                                "force_promote": true,
-                                "quarantine": false,
-                            })),
-                            |_| {},
-                        );
-                        let qpath = format!("skills/{}/quarantine", api::query(&name));
-                        api::spawn_json(
-                            &client,
-                            Request::post(&qpath).json(&json!({ "quarantine": false })),
-                            |_| {},
-                        );
+    api::spawn_json(
+        &client,
+        Request::post("skills/library/install").json(&body),
+        move |out| {
+            let _ = wake.post(move || match out {
+                Ok(v) => {
+                    let name = v
+                        .get("names")
+                        .and_then(|n| n.as_array())
+                        .and_then(|a| a.first())
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if !name.is_empty() {
+                        if let Some(client) = studio.runtime() {
+                            let path = format!("skills/{}/status", api::query(&name));
+                            api::spawn_json(
+                                &client,
+                                Request::post(&path).json(&json!({
+                                    "status": "active",
+                                    "force_promote": true,
+                                    "quarantine": false,
+                                })),
+                                |_| {},
+                            );
+                            let qpath = format!("skills/{}/quarantine", api::query(&name));
+                            api::spawn_json(
+                                &client,
+                                Request::post(&qpath).json(&json!({ "quarantine": false })),
+                                |_| {},
+                            );
+                        }
                     }
+                    dismiss_library(&studio);
+                    studio.depth.notice.set("Installed. It is active.".into());
                 }
-                dismiss_library(&studio);
-                studio.depth.notice.set("Installed. It is active.".into());
-            }
-            Err(e) => studio.depth.notice.set(e),
-        });
-    });
+                Err(e) => studio.depth.notice.set(e),
+            });
+        },
+    );
 }
 
 pub fn dismiss_library(studio: &Studio) {
@@ -1143,15 +1308,27 @@ pub fn dismiss_library(studio: &Studio) {
 }
 
 pub fn react(studio: &Studio, message_id: &str, emoji: &str) {
+    if message_id.is_empty() {
+        return;
+    }
     let current = studio
         .messages
         .get()
         .iter()
         .find(|m| m.id == message_id)
         .map(|m| m.user_reaction.clone())
-        .unwrap_or_default();
+        .unwrap_or_else(|| {
+            if studio.live_message_id.get().as_deref() == Some(message_id) {
+                studio.live_user_reaction.get()
+            } else {
+                String::new()
+            }
+        });
     let next = logic::next_reaction(&current, emoji);
     let message_id = message_id.to_string();
+    if studio.live_message_id.get().as_deref() == Some(message_id.as_str()) {
+        studio.live_user_reaction.set(next.clone());
+    }
     studio.messages.update(|list| {
         if let Some(m) = list.iter_mut().find(|m| m.id == message_id) {
             m.user_reaction = next.clone();
@@ -1341,7 +1518,9 @@ pub fn remove_project(studio: &Studio, path: &str) {
     for id in &ids {
         assign_project(studio, id, None);
     }
-    studio.projects.update(|list| list.retain(|p| p.path.as_deref() != Some(path.as_str())));
+    studio
+        .projects
+        .update(|list| list.retain(|p| p.path.as_deref() != Some(path.as_str())));
     studio.depth.project_order.update(|keys| {
         keys.retain(|k| k != &project_key(Some(&path)));
     });
@@ -1390,7 +1569,10 @@ pub fn delete_skill(studio: &Studio, name: &str) {
             studio.depth.confirm.set(None);
             match out {
                 Ok(_) => {
-                    studio.depth.skills.update(|list| list.retain(|s| s.name != name));
+                    studio
+                        .depth
+                        .skills
+                        .update(|list| list.retain(|s| s.name != name));
                     if studio.depth.skill_name.get() == name {
                         studio.depth.skill_name.set(String::new());
                         studio.depth.skill_body.set(String::new());
@@ -1423,7 +1605,11 @@ pub fn export_active(studio: &Studio) {
             let text = match out {
                 Ok(v) => {
                     let t = api::str_field(&v, "text");
-                    if t.is_empty() { api::str_field(&v, "markdown") } else { t }
+                    if t.is_empty() {
+                        api::str_field(&v, "markdown")
+                    } else {
+                        t
+                    }
                 }
                 Err(_) => transcript(&studio),
             };
@@ -1457,7 +1643,10 @@ fn save_text(studio: &Studio, name: &str, text: String) {
         app.file_dialog(Some(window), dialog, move |paths| {
             if let Some(path) = paths.into_iter().next() {
                 match std::fs::write(&path, &text) {
-                    Ok(()) => studio.depth.notice.set(format!("Exported {}", path.display())),
+                    Ok(()) => studio
+                        .depth
+                        .notice
+                        .set(format!("Exported {}", path.display())),
                     Err(e) => studio.depth.notice.set(e.to_string()),
                 }
             }
@@ -1533,7 +1722,9 @@ pub fn pick_attachments(studio: &Studio) {
         dialog.title = "Attach files".into();
         dialog.multiple = true;
         let studio = dialog_studio.clone();
-        app.file_dialog(Some(window), dialog, move |paths| add_paths(&studio, &paths));
+        app.file_dialog(Some(window), dialog, move |paths| {
+            add_paths(&studio, &paths)
+        });
     });
     if !ok {
         studio_notice_window(&studio);
@@ -1574,7 +1765,10 @@ pub fn add_paths(studio: &Studio, paths: &[PathBuf]) {
     let mut list = studio.depth.attachments.get();
     for path in paths {
         if list.len() >= MAX_ATTACHMENTS {
-            studio.depth.notice.set("Twelve attachments is the limit.".into());
+            studio
+                .depth
+                .notice
+                .set("Twelve attachments is the limit.".into());
             break;
         }
         let name = path
@@ -1589,7 +1783,10 @@ pub fn add_paths(studio: &Studio, paths: &[PathBuf]) {
         }
         let key = name_size_key(&name, size);
         if list.iter().any(|a| name_size_key(&a.name, a.size) == key) {
-            studio.depth.notice.set(format!("{name} is already attached."));
+            studio
+                .depth
+                .notice
+                .set(format!("{name} is already attached."));
             continue;
         }
         let mime = mime_for(&name);
@@ -1678,7 +1875,10 @@ fn transcribe(studio: &Studio, samples: Vec<f32>) {
     }
     studio.depth.notice.set("Hearing…".into());
     let Some(client) = studio.runtime() else {
-        studio.depth.notice.set("Voice needs the local mind.".into());
+        studio
+            .depth
+            .notice
+            .set("Voice needs the local mind.".into());
         return;
     };
     let wav = api::wav_bytes(&samples, 48_000);
@@ -1723,7 +1923,10 @@ pub fn speak_reply(studio: &Studio, text: &str) {
     if spoken.trim().is_empty() {
         return;
     }
-    let chunk = logic::split_for_speech(&spoken).into_iter().next().unwrap_or(spoken);
+    let chunk = logic::split_for_speech(&spoken)
+        .into_iter()
+        .next()
+        .unwrap_or(spoken);
     let Some(client) = studio.runtime() else {
         return;
     };
@@ -1761,7 +1964,10 @@ pub fn speak_reply(studio: &Studio, text: &str) {
 
 pub fn load_memory(studio: &Studio) {
     let Some(client) = studio.runtime() else {
-        studio.depth.memory_body.set("The mind is not connected.".into());
+        studio
+            .depth
+            .memory_body
+            .set("The mind is not connected.".into());
         return;
     };
     let sid = studio.active.get().unwrap_or_default();
@@ -1875,7 +2081,11 @@ pub fn open_skill(studio: &Studio, name: &str) {
             if let Ok(v) = out {
                 let body = {
                     let b = api::str_field(&v, "body");
-                    if b.is_empty() { api::str_field(&v, "instructions") } else { b }
+                    if b.is_empty() {
+                        api::str_field(&v, "instructions")
+                    } else {
+                        b
+                    }
                 };
                 studio.depth.skill_body.set(body);
             }
@@ -1930,7 +2140,9 @@ pub fn search_library(studio: &Studio, q: &str) {
                         .into_iter()
                         .filter_map(|row| {
                             let name = api::str_field(row, "name");
-                            if name.is_empty() { return None; }
+                            if name.is_empty() {
+                                return None;
+                            }
                             Some(SkillRow {
                                 name,
                                 description: api::str_field(row, "description"),
@@ -1957,15 +2169,22 @@ pub fn install_named(studio: &Studio, skill_id: &str) {
     let Ok(wake) = waker() else {
         return;
     };
-    api::spawn_json(&client, Request::post("skills/library/install").json(&body), move |out| {
-        let _ = wake.post(move || match out {
-            Ok(_) => {
-                studio.depth.notice.set("Installed. Trust it before it runs.".into());
-                load_skills(&studio);
-            }
-            Err(e) => studio.depth.notice.set(e),
-        });
-    });
+    api::spawn_json(
+        &client,
+        Request::post("skills/library/install").json(&body),
+        move |out| {
+            let _ = wake.post(move || match out {
+                Ok(_) => {
+                    studio
+                        .depth
+                        .notice
+                        .set("Installed. Trust it before it runs.".into());
+                    load_skills(&studio);
+                }
+                Err(e) => studio.depth.notice.set(e),
+            });
+        },
+    );
 }
 
 /// The confirm copy for a project, including how many chats move.
@@ -1980,11 +2199,15 @@ pub fn project_confirm_body(studio: &Studio, path: &str) -> String {
 }
 
 pub fn ask_remove_project(studio: &Studio, path: &str) {
-    studio.depth.ask_confirm(Confirm::RemoveProject(path.to_string()));
+    studio
+        .depth
+        .ask_confirm(Confirm::RemoveProject(path.to_string()));
 }
 
 pub fn ask_delete_skill(studio: &Studio, name: &str) {
-    studio.depth.ask_confirm(Confirm::DeleteSkill(name.to_string()));
+    studio
+        .depth
+        .ask_confirm(Confirm::DeleteSkill(name.to_string()));
 }
 
 /// Quiet time for the stall banner, in whole seconds. None when it should stay hidden.
@@ -2008,9 +2231,9 @@ pub fn stall_seconds(studio: &Studio) -> Option<u64> {
 pub fn background_title(studio: &Studio) -> Option<String> {
     let active = studio.active.get();
     let jobs = studio.depth.jobs.get();
-    let other = jobs.iter().find(|j| {
-        j.status == "running" && active.as_deref() != Some(j.session_id.as_str())
-    })?;
+    let other = jobs
+        .iter()
+        .find(|j| j.status == "running" && active.as_deref() != Some(j.session_id.as_str()))?;
     let title = studio
         .sessions
         .get()
@@ -2027,4 +2250,61 @@ pub fn focused_steps(studio: &Studio) -> Vec<WorkStep> {
         return studio.live_steps.get();
     }
     Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::studio::Studio;
+    use crate::work::{StepStatus, WorkStep};
+
+    #[test]
+    fn draft_event_stores_the_real_message_id() {
+        let studio = Studio::new();
+        studio.active.set(Some("s1".into()));
+        apply_frame(&studio, "s1", "draft", r#"{"message_id":"msg-42"}"#);
+        assert_eq!(studio.live_message_id.get().as_deref(), Some("msg-42"));
+        let job = studio.depth.job("s1").expect("job recorded");
+        assert_eq!(job.message_id, "msg-42");
+    }
+
+    #[test]
+    fn mid_turn_react_uses_the_draft_id() {
+        let studio = Studio::new();
+        studio.active.set(Some("s1".into()));
+        studio.live_message_id.set(Some("msg-42".into()));
+        react(&studio, "msg-42", "👍");
+        assert_eq!(studio.live_user_reaction.get(), "👍");
+        react(&studio, "msg-42", "👍");
+        assert_eq!(studio.live_user_reaction.get(), "", "toggle off");
+        react(&studio, "msg-42", "❤️");
+        assert_eq!(studio.live_user_reaction.get(), "❤️");
+    }
+
+    #[test]
+    fn finish_assistant_keeps_draft_id_and_mid_turn_reaction() {
+        let studio = Studio::new();
+        studio.active.set(Some("1".into()));
+        let first = "I'll look.\n\n";
+        studio.partial.set(format!("{first}The portal loads."));
+        studio.live_breaks.set(vec![first.len()]);
+        let mut step = WorkStep::done("c1", "bash");
+        step.status = StepStatus::Done;
+        step.narration = Some("I'll look.".into());
+        studio.live_steps.set(vec![step]);
+        studio.live_message_id.set(Some("draft-9".into()));
+        studio.live_user_reaction.set("👍".into());
+        studio.finish_assistant(None);
+        let msgs = studio.messages.get();
+        let a = msgs
+            .iter()
+            .find(|m| m.role == "assistant")
+            .expect("assistant row");
+        assert_eq!(a.id, "draft-9");
+        assert_eq!(a.user_reaction, "👍");
+        assert_eq!(a.content, "The portal loads.");
+        assert_eq!(a.steps[0].narration.as_deref(), Some("I'll look."));
+        assert!(studio.live_message_id.get().is_none());
+        assert!(studio.live_user_reaction.get().is_empty());
+    }
 }

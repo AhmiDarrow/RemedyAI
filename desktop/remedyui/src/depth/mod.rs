@@ -17,8 +17,8 @@ pub(crate) use actions::{
     assign_project, background_title, boot, continue_pending, delete_skill, dismiss_library,
     export_active, focus_session, focused_steps, import_session, install_library, install_named,
     load_memory, load_skills, move_project_order, move_session_order, open_skill, pick_attachments,
-    pick_folder, place_session, project_confirm_body, react, remove_project, rename_session,
-    request_plan_changes, resolve_approval, refresh_banners, save_skill, search_library,
+    pick_folder, place_session, project_confirm_body, react, refresh_banners, remove_project,
+    rename_session, request_plan_changes, resolve_approval, save_skill, search_library,
     search_memory, send_life, show_plan, speak_reply, stall_seconds, submit, toggle_mic,
     trust_skill, visible_approval,
 };
@@ -84,6 +84,7 @@ pub struct StreamJob {
     pub status: String,
     pub partial: String,
     pub breaks: Vec<usize>,
+    pub message_id: String,
     pub thinking: String,
     pub steps: Vec<WorkStep>,
     pub request_id: String,
@@ -102,6 +103,7 @@ impl StreamJob {
             status: "running".into(),
             partial: String::new(),
             breaks: Vec::new(),
+            message_id: String::new(),
             thinking: String::new(),
             steps: Vec::new(),
             request_id: String::new(),
@@ -333,10 +335,7 @@ impl Depth {
     }
 
     pub fn job(&self, sid: &str) -> Option<StreamJob> {
-        self.jobs
-            .get()
-            .into_iter()
-            .find(|j| j.session_id == sid)
+        self.jobs.get().into_iter().find(|j| j.session_id == sid)
     }
 
     pub fn map_job(&self, sid: &str, f: impl FnOnce(&mut StreamJob)) {
