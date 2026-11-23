@@ -20,6 +20,7 @@ mod sse;
 mod status;
 mod studio;
 mod time;
+mod timetravel;
 mod usage;
 mod work;
 
@@ -33,6 +34,7 @@ pub use slides::{
     terminal_context_items, terminal_preview,
 };
 pub use studio::Studio;
+pub use timetravel::{TimeTravel, preview as time_travel_preview};
 pub use usage::{UsageContext, UsageDashboard, UsagePanel, UsageWindow};
 
 use remedy_ui::a11y::{Action, Role, Semantics};
@@ -204,6 +206,8 @@ pub fn shell(ui: &Ui, studio: Studio) -> El {
 
 fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
     fonts::prepare_theme(ui, &Fonts::load());
+    // Hidden overlay keeper. A closed rail is not a child of this column.
+    studio.time_travel.mount(ui, studio.clone());
     let workspace = slides::Workspace::for_studio(&studio);
     slides::install(workspace.clone());
     let follow_ws = workspace;
