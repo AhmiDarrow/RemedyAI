@@ -585,19 +585,15 @@ impl Settings {
         http::request(self, "GET", q, None, move |out| {
             match out {
                 Ok(v) => {
-                    let mut names: Vec<String> = crate::model_picker::parse_model_rows(Some(&v))
-                        .into_iter()
-                        .map(|m| m.id)
-                        .collect();
-                    let current = self.model.get();
-                    if !current.is_empty() && !names.iter().any(|m| m == &current) {
-                        names.insert(0, current);
-                    }
+                    let page = crate::model_picker::parse_models_page(&v);
+                    let names: Vec<String> = page.models.into_iter().map(|m| m.id).collect();
                     self.models.set(names);
-                    let hint = v.get("discovery").and_then(|d| d.get("message").or_else(|| d.get("error"))).and_then(|x| x.as_str()).unwrap_or("").to_string();
-                    self.discovery.set(hint);
+                    self.discovery.set(page.hint);
                 }
-                Err(e) => self.discovery.set(e),
+                Err(e) => {
+                    self.models.set(Vec::new());
+                    self.discovery.set(e);
+                }
             }
         });
     }
