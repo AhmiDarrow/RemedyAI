@@ -18,6 +18,7 @@ pub(crate) use actions::{
     export_active, focus_session, focused_steps, import_session, install_library, install_named,
     load_memory, load_skills, move_project_order, move_session_order, open_skill, pick_attachments,
     pick_folder, place_session, project_confirm_body, react, regenerate, refresh_banners, remove_project,
+    ask_archive_unused, export_skills_pack, import_skills_pack, archive_unused_skills,
     rename_session, request_plan_changes, resolve_approval, save_skill, search_library,
     search_memory, send_life, show_plan, speak_reply, stall_seconds, submit, toggle_mic,
     trust_skill, visible_approval,
@@ -197,6 +198,7 @@ pub enum SidePanel {
 pub enum Confirm {
     RemoveProject(String),
     DeleteSkill(String),
+    ArchiveUnusedSkills,
 }
 
 /// Signals the chat column, sidebar, and dialogs share.
