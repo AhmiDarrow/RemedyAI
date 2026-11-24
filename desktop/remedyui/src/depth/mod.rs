@@ -204,6 +204,7 @@ pub enum Confirm {
 pub struct Depth {
     pub save_enabled: bool,
     poll_started: Arc<AtomicBool>,
+    session_events_started: Arc<AtomicBool>,
     tick_started: Arc<AtomicBool>,
     pub samples: Arc<Mutex<Vec<f32>>>,
     pub draft_nonce: Signal<u64>,
@@ -267,6 +268,7 @@ impl Depth {
         Self {
             save_enabled,
             poll_started: Arc::new(AtomicBool::new(false)),
+            session_events_started: Arc::new(AtomicBool::new(false)),
             tick_started: Arc::new(AtomicBool::new(false)),
             samples: Arc::new(Mutex::new(Vec::new())),
             draft_nonce: Signal::new(0),
@@ -433,6 +435,10 @@ impl Depth {
 
     pub fn poll_flag(&self) -> Arc<AtomicBool> {
         self.poll_started.clone()
+    }
+
+    pub fn session_events_flag(&self) -> Arc<AtomicBool> {
+        self.session_events_started.clone()
     }
 
     pub fn tick_flag(&self) -> Arc<AtomicBool> {

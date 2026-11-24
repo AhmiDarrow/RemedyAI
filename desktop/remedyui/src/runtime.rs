@@ -914,6 +914,39 @@ fn busy_frame(on_frame: &Arc<impl Fn(String, String)>, files: bool) {
     }
 }
 
+/// GET `/api/events/sessions` and deliver SSE frames to `on_frame`.
+///
+/// `on_frame` and `on_done` run on a worker thread. The caller owns `cancel`
+/// so a reconnect loop can drop a stalled stream.
+pub fn stream_session_events(
+    client: &Client,
+    cancel: Cancel,
+    on_frame: impl Fn(String, String) + Send + Sync + 'static,
+    on_done: impl FnOnce() + Send + 'static,
+) {
+    let http = client.http.clone();
+    let request = Request::get("events/sessions").header("Accept", "text/event-stream");
+    let parser = Arc::new(Mutex::new(Parser::new()));
+    let on_frame = Arc::new(on_frame);
+    let on_chunk = {
+        let parser = parser.clone();
+        let on_frame = on_frame.clone();
+        move |_res: &remedy_ui::net::Response, chunk: &[u8]| {
+            let text = String::from_utf8_lossy(chunk);
+            let frames = parser
+                .lock()
+                .ok()
+                .map(|mut p| p.push(&text))
+                .unwrap_or_default();
+            for f in frames {
+                on_frame(f.kind, f.data);
+            }
+        }
+    };
+    http.stream(request, &cancel, on_chunk, move |_| on_done());
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::{parse_messages, parse_sessions};
