@@ -24,6 +24,19 @@ export function resolveActiveAfterRefresh(
   return 'fetch'
 }
 
+/** Merge a freshly fetched page with rows kept from earlier pages, skipping tombstoned ids.
+ *  A stale in-flight list that still contains a just-deleted session must not put it back. */
+export function mergeSessionPages<T extends { id: string }>(
+  page: T[],
+  prev: T[],
+  deleted: Set<string>,
+): T[] {
+  const fresh = page.filter((s) => !deleted.has(s.id))
+  const ids = new Set(fresh.map((s) => s.id))
+  const extras = prev.filter((s) => !ids.has(s.id) && !deleted.has(s.id))
+  return [...fresh, ...extras]
+}
+
 export function useSessions() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -34,6 +47,7 @@ export function useSessions() {
   const offsetRef = useRef(0)
   /** Avoid a full GET /settings on every New Session once we know project_path. */
   const projectPathCache = useRef<string | undefined | null>(null)
+  const deletedIds = useRef<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -42,11 +56,7 @@ export function useSessions() {
       if (offsetRef.current < page.sessions.length) {
         offsetRef.current = page.sessions.length
       }
-      setSessions((prev) => {
-        const fresh = new Map(page.sessions.map((s) => [s.id, s]))
-        const extras = prev.filter((s) => !fresh.has(s.id))
-        return [...page.sessions, ...extras]
-      })
+      setSessions((prev) => mergeSessionPages(page.sessions, prev, deletedIds.current))
       setHasMore(page.has_more)
       const pageIds = page.sessions.map((s) => s.id)
       let focused: string | null = null
@@ -88,7 +98,7 @@ export function useSessions() {
       offsetRef.current += page.sessions.length
       setSessions((prev) => {
         const seen = new Set(prev.map((s) => s.id))
-        const extra = page.sessions.filter((s) => !seen.has(s.id))
+        const extra = page.sessions.filter((s) => !seen.has(s.id) && !deletedIds.current.has(s.id))
         return [...prev, ...extra]
       })
       setHasMore(page.has_more && page.sessions.length > 0)
@@ -226,17 +236,29 @@ export function useSessions() {
     clearProjectCache: useCallback(() => {
       projectPathCache.current = null
     }, []),
+    forget: useCallback((id: string) => {
+      if (!id) return
+      deletedIds.current.add(id)
+      setSessions((prev) => prev.filter((s) => s.id !== id))
+      setActiveId((cur) => (cur === id ? null : cur))
+    }, [setActiveId]),
     remove: useCallback(async (id: string) => {
       // Stop in-flight client/server turn before deleting the session row.
+      deletedIds.current.add(id)
+      setSessions((prev) => prev.filter((s) => s.id !== id))
+      setActiveId((cur) => (cur === id ? null : cur))
       try {
         const { stopStreamJob } = await import('../sessions/streamJobs')
         await stopStreamJob(id)
       } catch {
         /* */
       }
-      await deleteSession(id)
-      setSessions((prev) => prev.filter((s) => s.id !== id))
-      setActiveId((cur) => (cur === id ? null : cur))
+      try {
+        await deleteSession(id)
+      } catch (e) {
+        deletedIds.current.delete(id)
+        throw e
+      }
     }, [setActiveId]),
     rename: useCallback(async (id: string, title: string) => {
       await updateSession(id, { title })

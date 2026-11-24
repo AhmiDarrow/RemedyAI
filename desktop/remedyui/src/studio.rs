@@ -451,15 +451,7 @@ impl Studio {
                 runtime::delete_session(&client, &id, move |out| {
                     let Some(wake) = wake else { return };
                     let _ = wake.post(move || {
-                        studio
-                            .pending_deletes
-                            .update(|ids| ids.retain(|s| s != &dropped));
-                        if out.is_err() {
-                            // DELETE failed: let the next list refresh restore the row.
-                            if let Some(c) = studio.client.get() {
-                                studio.refresh(&c);
-                            }
-                        }
+                        studio.on_delete_result(&dropped, out.is_ok());
                     });
                 });
             }
@@ -474,6 +466,48 @@ impl Studio {
             self.select_anchor.set(None);
         }
         if self.active.get().as_deref() == Some(id.as_str()) {
+            let list = self.sessions.get();
+            self.active.set(list.first().map(|s| s.id.clone()));
+            self.messages.set(Vec::new());
+            self.clear_live();
+            if let Some(next) = self.active.get() {
+                self.load_messages(&next);
+            }
+        }
+    }
+
+    /// Sidecar DELETE finished. A successful delete keeps the id in
+    /// `pending_deletes` (a tombstone) so a stale in-flight GET /api/sessions
+    /// cannot put the row back; a failure drops the tombstone and refreshes.
+    pub(crate) fn on_delete_result(&self, id: &str, ok: bool) {
+        if ok {
+            return;
+        }
+        self.pending_deletes.update(|ids| ids.retain(|s| s != id));
+        if let Some(c) = self.client.get() {
+            self.refresh(&c);
+        }
+    }
+
+    /// A `session_deleted` event from the sidecar (this surface or the Web UI).
+    /// Tombstone the id immediately so a stale list refresh cannot restore it.
+    pub fn forget_deleted(&self, id: &str) {
+        if id.is_empty() {
+            return;
+        }
+        if !self.pending_deletes.get().iter().any(|s| s == id) {
+            self.pending_deletes.update(|ids| ids.push(id.to_string()));
+        }
+        self.sessions.update(|list| {
+            if let Some(i) = list.iter().position(|s| s.id == id) {
+                list.remove(i);
+            }
+        });
+        self.selected_ids.update(|ids| ids.retain(|s| s != id));
+        if self.select_anchor.get().as_deref() == Some(id) {
+            self.select_anchor.set(None);
+        }
+        if self.active.get().as_deref() == Some(id) {
             let list = self.sessions.get();
             self.active.set(list.first().map(|s| s.id.clone()));
             self.messages.set(Vec::new());
@@ -1059,5 +1093,53 @@ mod tests {
         let ids: Vec<String> = studio.sessions.get().into_iter().map(|s| s.id).collect();
         assert!(!ids.contains(&id), "pending delete came back: {ids:?}");
         assert!(ids.contains(&"keep".to_string()));
+    }
+
+    #[test]
+    fn close_drops_the_row_and_tombs_the_id() {
+        let studio = Studio::preview();
+        let id = studio.sessions.get()[0].id.clone();
+        studio.close(&id);
+        let ids: Vec<String> = studio.sessions.get().into_iter().map(|s| s.id).collect();
+        assert!(!ids.contains(&id));
+        assert!(
+            studio.pending_deletes.get().iter().any(|s| s == &id),
+            "X / Delete must tombstone so a stale list cannot restore the row"
+        );
+        studio.on_delete_result(&id, true);
+        assert!(
+            studio.pending_deletes.get().iter().any(|s| s == &id),
+            "a successful DELETE must keep the tombstone"
+        );
+        studio.apply_live_sessions(vec![
+            Session::fresh(&id, "Stale snapshot"),
+            Session::fresh("keep", "Keep me"),
+        ]);
+        let ids: Vec<String> = studio.sessions.get().into_iter().map(|s| s.id).collect();
+        assert!(!ids.contains(&id), "stale GET after DELETE restored the row");
+    }
+
+    #[test]
+    fn failed_delete_drops_the_tombstone() {
+        let studio = Studio::preview();
+        let id = studio.sessions.get()[0].id.clone();
+        studio.close(&id);
+        studio.on_delete_result(&id, false);
+        assert!(
+            !studio.pending_deletes.get().iter().any(|s| s == &id),
+            "a failed DELETE must allow the next refresh to restore the row"
+        );
+    }
+
+    #[test]
+    fn forget_deleted_tombs_a_row_removed_on_the_other_surface() {
+        let studio = Studio::preview();
+        let id = studio.sessions.get()[0].id.clone();
+        studio.forget_deleted(&id);
+        let ids: Vec<String> = studio.sessions.get().into_iter().map(|s| s.id).collect();
+        assert!(!ids.contains(&id));
+        studio.apply_live_sessions(vec![Session::fresh(&id, "Stale"), Session::fresh("keep", "Keep")]);
+        let ids: Vec<String> = studio.sessions.get().into_iter().map(|s| s.id).collect();
+        assert!(!ids.contains(&id));
     }
 }
