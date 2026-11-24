@@ -19,10 +19,42 @@ pub fn sections(ui: &Ui, s: Settings) -> El {
         .child(harness(ui, s))
 }
 
+fn form_shows_base_url(s: Settings) -> bool {
+    let id = s.provider.get();
+    crate::setup::model::shows_base_url(&id)
+        || s.catalog
+            .get()
+            .iter()
+            .any(|p| p.id == id && p.show_base_url)
+}
+
+fn form_has_oauth(s: Settings) -> bool {
+    let id = s.provider.get();
+    crate::setup::model::has_oauth(&id)
+        || s.catalog.get().iter().any(|p| p.id == id && p.has_oauth())
+}
+
 fn provider(ui: &Ui, s: Settings) -> El {
+    let last_provider = Signal::new(s.provider.get_untracked().unwrap_or_default());
     Effect::new(move || {
         let id = s.provider.get();
         let catalog = s.catalog.get();
+        let prev = last_provider.get_untracked().unwrap_or_default();
+        if prev != id {
+            if !prev.is_empty() {
+                let current = s.base_url.get_untracked().unwrap_or_default();
+                let urls: Vec<(String, String)> = catalog
+                    .iter()
+                    .map(|p| (p.id.clone(), p.base_url.clone()))
+                    .collect();
+                let refs: Vec<(&str, &str)> =
+                    urls.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+                if let Some(next) = crate::setup::model::adopt_base_url(&id, &current, &refs) {
+                    s.base_url.set(next);
+                }
+            }
+            last_provider.set(id.clone());
+        }
         if let Some(p) = catalog.iter().find(|p| p.id == id) {
             if s.base_url.get_untracked().unwrap_or_default().is_empty() && !p.base_url.is_empty() {
                 s.base_url.set(p.base_url.clone());
@@ -51,7 +83,30 @@ fn provider(ui: &Ui, s: Settings) -> El {
         let custom = bits::field(ui, "Custom endpoint name", s.custom_name, "LM Studio");
         let custom = bits::visible_when(custom, move || s.provider.get() == logic::CUSTOM_PROVIDER);
         let xai = xai_block(ui, s);
-        let xai = bits::visible_when(xai, move || s.provider.get() == "xai");
+        let xai = bits::visible_when(xai, move || form_has_oauth(s));
+        let base = bits::field(ui, "Base URL", s.base_url, "https://api.example/v1");
+        let base = bits::visible_when(base, move || form_shows_base_url(s));
+        let base_hint = form::hint(
+            ui,
+            "The catalog fills this with this provider's default when you switch, unless you've typed your own.",
+        );
+        let base_hint = bits::visible_when(base_hint, move || form_shows_base_url(s));
+        let check_ollama = form::action(ui, "Check Ollama", "quiet", move || {
+            bits::ask(s, "GET", "providers/ollama/detect", None, "Ollama check finished.");
+        });
+        let check_ollama = bits::visible_when(check_ollama, move || s.provider.get() == "ollama");
+        let save_custom = form::action(ui, "Save custom endpoint", "quiet", move || {
+            bits::ask(
+                s,
+                "POST",
+                "providers/custom",
+                Some(json!({ "name": s.custom_name.get(), "base_url": s.base_url.get() })),
+                "Custom endpoint saved. The API key still goes with Save.",
+            );
+        });
+        let save_custom = bits::visible_when(save_custom, move || {
+            crate::setup::model::is_custom_like(&s.provider.get())
+        });
         let sleev_warn = form::notice(
             ui,
             "warn",
@@ -61,20 +116,27 @@ fn provider(ui: &Ui, s: Settings) -> El {
         form::stack(ui)
             .child(providers)
             .child(custom)
-            .child(bits::field(ui, "Base URL", s.base_url, "https://api.example/v1"))
-            .child(form::hint(ui, "Switching providers fills this only when it is empty."))
+            .child(base)
+            .child(base_hint)
             .child(models)
             .child(bits::field(ui, "Model", s.model, "Model id"))
             .child(w::text(ui, move || s.discovery.get()).variant("small"))
             .child(form::label(ui, "API key"))
             .child(form::secret_line(ui, "API key"))
             .child(form::hint(ui, move || -> String {
-                if s.api_key_set.get() {
+                if form_has_oauth(s) {
+                    if s.api_key_set.get() {
+                        "A key is saved. Leave the field blank to keep it, or sign in with xAI.".into()
+                    } else {
+                        "Sign in with xAI, or enter an API key.".into()
+                    }
+                } else if s.api_key_set.get() {
                     "A key is saved. Leave the field blank to keep it.".into()
                 } else {
                     "No key saved yet.".into()
                 }
             }))
+            .child(xai)
             .child(form::action(ui, "Test connection", "quiet", move || {
                 bits::ask(
                     s,
@@ -84,19 +146,8 @@ fn provider(ui: &Ui, s: Settings) -> El {
                     "Connection looks good.",
                 );
             }))
-            .child(form::action(ui, "Check Ollama", "quiet", move || {
-                bits::ask(s, "GET", "providers/ollama/detect", None, "Ollama check finished.");
-            }))
-            .child(form::action(ui, "Save custom endpoint", "quiet", move || {
-                bits::ask(
-                    s,
-                    "POST",
-                    "providers/custom",
-                    Some(json!({ "name": s.custom_name.get(), "base_url": s.base_url.get() })),
-                    "Custom endpoint saved. The API key still goes with Save.",
-                );
-            }))
-            .child(xai)
+            .child(check_ollama)
+            .child(save_custom)
             .child(form::flow(
                 ui,
                 "Token savings",

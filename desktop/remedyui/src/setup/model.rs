@@ -393,6 +393,59 @@ pub fn provider_base(id: &str) -> &'static str {
         .unwrap_or("")
 }
 
+/// Auth modes the sidecar catalog advertises for a built-in provider.
+pub fn provider_auth(id: &str) -> &'static [&'static str] {
+    match id {
+        "demo" | "ollama" | "rmb" | "llamacpp" => &["none"],
+        "xai" => &["oauth", "api_key"],
+        _ => &["api_key"],
+    }
+}
+
+/// True when the provider offers a sign-in (device-code OAuth) path.
+pub fn has_oauth(id: &str) -> bool {
+    provider_auth(id).iter().any(|mode| *mode == "oauth")
+}
+
+/// Catalog default for `id`, preferring a live catalog row when one is supplied.
+pub fn catalog_base_url(id: &str, catalog: &[(&str, &str)]) -> String {
+    catalog
+        .iter()
+        .find(|(pid, url)| *pid == id && !url.trim().is_empty())
+        .map(|(_, url)| (*url).to_string())
+        .filter(|url| !url.is_empty())
+        .unwrap_or_else(|| provider_base(id).to_string())
+}
+
+fn is_known_base_url(url: &str, catalog: &[(&str, &str)]) -> bool {
+    let url = url.trim();
+    if url.is_empty() {
+        return true;
+    }
+    catalog.iter().any(|(_, known)| known.trim() == url)
+        || OFFLINE_PROVIDERS.iter().any(|p| p.base_url == url)
+}
+
+/// Next base URL after a provider switch, matching the old Settings rule:
+/// adopt the new catalog default when the field is empty or still a known
+/// preset. Hidden-URL providers always adopt their own default so a leftover
+/// OpenRouter (or other) URL cannot appear as this provider's endpoint.
+pub fn adopt_base_url(new_id: &str, current_url: &str, catalog: &[(&str, &str)]) -> Option<String> {
+    let next = catalog_base_url(new_id, catalog);
+    if next.is_empty() {
+        return None;
+    }
+    let current = current_url.trim();
+    if current == next {
+        return None;
+    }
+    if current.is_empty() || is_known_base_url(current, catalog) || !shows_base_url(new_id) {
+        Some(next)
+    } else {
+        None
+    }
+}
+
 pub const OFFER_ID: &str = "major-changes-2026-11";
 pub const OFFER_TITLE: &str = "House rules";
 pub const OFFER_BODY: &str = "Remedy now has smarter token saving, local muscle sharing, and talking with other bots (A2A and MCP). It's worth a few minutes to go over the house rules together.";
@@ -1322,6 +1375,99 @@ mod tests {
         let paid = paid_providers_except(&offline.iter().map(|o| o.id.clone()).collect::<Vec<_>>());
         assert!(paid.iter().all(|p| p.id != "google" && p.id != "groq"));
         assert!(paid.iter().any(|p| p.id == "openai"));
+    }
+
+    /// Sidecar / old-Remedy defaults this port must keep per provider.
+    const EXPECTED: &[(&str, &str, &str, &[&str], bool)] = &[
+        ("demo", "Demo (Free)", "https://api.llm7.io/v1", &["none"], false),
+        ("openai", "OpenAI", "https://api.openai.com/v1", &["api_key"], false),
+        ("anthropic", "Anthropic", "https://api.anthropic.com/v1", &["api_key"], false),
+        (
+            "google",
+            "Google AI (Gemini)",
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+            &["api_key"],
+            false,
+        ),
+        ("deepseek", "DeepSeek", "https://api.deepseek.com/v1", &["api_key"], false),
+        ("xai", "xAI (Grok)", "https://api.x.ai/v1", &["oauth", "api_key"], false),
+        ("groq", "Groq", "https://api.groq.com/openai/v1", &["api_key"], false),
+        ("mistral", "Mistral", "https://api.mistral.ai/v1", &["api_key"], false),
+        ("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", &["api_key"], false),
+        ("poe", "Poe", "https://api.poe.com/v1", &["api_key"], false),
+        ("ollama", "Ollama (local)", "http://127.0.0.1:11434/v1", &["none"], true),
+        ("llamacpp", "llama.cpp (local)", "http://127.0.0.1:8080/v1", &["none"], true),
+        ("rmb", "RMB (local agent)", "http://127.0.0.1:8787/v1", &["none"], true),
+        (
+            "custom",
+            "Custom / OpenAI-compatible",
+            "http://127.0.0.1:5001/v1",
+            &["api_key"],
+            true,
+        ),
+    ];
+
+    #[test]
+    fn each_provider_row_keeps_its_own_label_url_and_auth() {
+        assert_eq!(OFFLINE_PROVIDERS.len(), EXPECTED.len());
+        for (i, p) in OFFLINE_PROVIDERS.iter().enumerate() {
+            let (id, name, url, auth, show) = EXPECTED[i];
+            assert_eq!(p.id, id, "catalog order drifted at {i}");
+            assert_eq!(p.name, name, "{id} label");
+            assert_eq!(p.base_url, url, "{id} default base URL");
+            assert_eq!(provider_auth(p.id), auth, "{id} auth");
+            assert_eq!(has_oauth(p.id), p.id == "xai", "{id} oauth");
+            assert_eq!(shows_base_url(p.id), show, "{id} show_base_url");
+            if p.id != "openrouter" {
+                assert!(
+                    !p.name.to_ascii_lowercase().contains("openrouter"),
+                    "{id} must not reuse the OpenRouter label"
+                );
+                assert!(
+                    !p.base_url.contains("openrouter.ai"),
+                    "{id} must not reuse the OpenRouter URL"
+                );
+            }
+        }
+        assert_eq!(provider_base("anthropic"), "https://api.anthropic.com/v1");
+        assert_eq!(provider_base("xai"), "https://api.x.ai/v1");
+        assert_eq!(provider_base("openrouter"), "https://openrouter.ai/api/v1");
+        assert!(has_oauth("xai"));
+        assert!(!has_oauth("anthropic"));
+        assert!(!has_oauth("openrouter"));
+    }
+
+    #[test]
+    fn switching_providers_adopts_each_catalog_url_and_keeps_a_custom_one() {
+        let openrouter = "https://openrouter.ai/api/v1";
+        for p in OFFLINE_PROVIDERS {
+            let next = adopt_base_url(p.id, openrouter, &[]);
+            if p.id == "openrouter" {
+                assert!(next.is_none(), "OpenRouter should keep its own URL");
+            } else {
+                assert_eq!(
+                    next.as_deref(),
+                    Some(p.base_url),
+                    "switching from OpenRouter onto {} should adopt its own URL",
+                    p.id
+                );
+            }
+        }
+        assert_eq!(
+            adopt_base_url("xai", "https://api.anthropic.com/v1", &[]).as_deref(),
+            Some("https://api.x.ai/v1")
+        );
+        // A typable custom URL is kept when the new provider shows the field.
+        assert_eq!(
+            adopt_base_url("custom", "http://127.0.0.1:1234/v1", &[]),
+            None
+        );
+        // Hidden-URL providers still drop a leftover custom URL so it cannot
+        // appear as that provider's endpoint.
+        assert_eq!(
+            adopt_base_url("anthropic", "http://127.0.0.1:1234/v1", &[]).as_deref(),
+            Some("https://api.anthropic.com/v1")
+        );
     }
 
 }

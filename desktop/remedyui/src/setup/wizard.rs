@@ -160,13 +160,11 @@ impl Wizard {
 
     pub fn select_provider(&self, id: &str) {
         self.on_this_pc.set(false);
+        let current = self.base_url.get();
         self.provider.set(id.into());
         self.error.set(String::new());
-        if self.base_url.get().is_empty() || id == "ollama" || id == "custom" {
-            let base = model::provider_base(id);
-            if !base.is_empty() {
-                self.base_url.set(base.into());
-            }
+        if let Some(base) = model::adopt_base_url(id, &current, &[]) {
+            self.base_url.set(base);
         }
         self.remember_draft();
     }
