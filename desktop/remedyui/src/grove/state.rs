@@ -403,6 +403,10 @@ impl Grove {
         }
     }
 
+    pub(crate) fn on_studio(&self) -> bool {
+        matches!(self.surface.get(), Surface::Studio)
+    }
+
     pub(crate) fn show_studio(&self) {
         self.surface.set(Surface::Studio);
         self.save();
