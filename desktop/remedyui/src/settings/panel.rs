@@ -59,6 +59,10 @@ pub fn view(ui: &Ui, s: Settings, rail: bool) -> El {
 }
 
 pub fn open_panel(s: Settings) {
+    if crate::settings::take_open_models() {
+        s.last_section.set("provider".into());
+        s.category.set("models".into());
+    }
     let id = s.last_section.get();
     if let Some(sec) = logic::section(&id) {
         s.category.set(sec.category.to_string());
