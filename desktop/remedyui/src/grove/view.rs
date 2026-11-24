@@ -2,8 +2,8 @@
 //!
 //! The page body is one keyed child. Switching Home, Alongside, or Storyline
 //! replaces that child. The talk field lives inside the page, so a new message
-//! does not rebuild it. The Studio button sits in the top bar, outside that
-//! list, so it is on screen the moment Grove opens.
+//! does not rebuild it. Grove / Studio switching lives in the window title bar
+//! so it stays on screen on both surfaces, including at narrow widths.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -205,31 +205,14 @@ pub(super) fn frame(
 }
 
 fn studio_face(ui: &Ui, grove: Grove) -> El {
-    let g = grove.clone();
-    let back = w::button(ui, "Grove", move || g.show_grove());
-    w::tooltip(&back, "Back to your space");
-    let strip = w::row(ui)
-        .align(Align::Center)
-        .padding(Insets::all(ui.theme().spacing.unit * 1.5))
-        .layout(|l| l.width = Length::Percent(1.0))
-        .child(back);
-    let shell = crate::shell(ui, grove.studio.clone()).layout(|l| {
+    // The title-bar Grove/Studio switcher is the way back; don't add a second strip.
+    crate::shell(ui, grove.studio.clone()).layout(|l| {
         l.grow = 1.0;
         l.basis = Length::Px(0.0);
-        l.height = Length::Auto;
+        l.height = Length::Percent(1.0);
         l.min_height = Length::Px(0.0);
         l.width = Length::Percent(1.0);
-    });
-    w::column(ui)
-        .layout(|l| {
-            l.width = Length::Percent(1.0);
-            l.height = Length::Percent(1.0);
-            l.grow = 1.0;
-            l.min_height = Length::Px(0.0);
-        })
-        .child(strip)
-        .child(w::divider(ui, false))
-        .child(shell)
+    })
 }
 
 /// Ctrl+B cycles Talk, Plan, and Build. It is on the Grove frame, so typing
@@ -297,9 +280,6 @@ fn home_bar(ui: &Ui, grove: Grove) -> El {
         let grove = grove.clone();
         move || {
             let unit = ui.theme().spacing.unit;
-            let g = grove.clone();
-            let studio = w::button(&ui, "Studio", move || g.show_studio());
-            w::tooltip(&studio, "Full workbench: files, terminal, raw tools");
             w::column(&ui)
                 .child(
                     w::row(&ui)
@@ -309,8 +289,7 @@ fn home_bar(ui: &Ui, grove: Grove) -> El {
                         .layout(|l| l.width = Length::Percent(1.0))
                         .child(brand(&ui, grove.clone()))
                         .child(home_tabs(&ui, grove.clone()))
-                        .child(spacer(&ui))
-                        .child(studio),
+                        .child(spacer(&ui)),
                 )
                 .child(w::divider(&ui, false))
         }
@@ -325,9 +304,6 @@ fn goal_bar(ui: &Ui, grove: Grove) -> El {
         let grove = grove.clone();
         move || {
             let unit = ui.theme().spacing.unit;
-            let g = grove.clone();
-            let studio = w::button(&ui, "Studio", move || g.show_studio());
-            w::tooltip(&studio, "Full workbench: files, terminal, raw tools");
             let title = w::text(&ui, "").variant("strong").text({
                 let g = grove.clone();
                 move || match g.place.get() {
@@ -389,8 +365,7 @@ fn goal_bar(ui: &Ui, grove: Grove) -> El {
                         .child(crumb)
                         .child(tabs)
                         .child(mode_chips(&ui, &grove))
-                        .child(spacer(&ui))
-                        .child(studio),
+                        .child(spacer(&ui)),
                 )
                 .child(w::divider(&ui, false))
         }
@@ -405,9 +380,6 @@ fn child_bar(ui: &Ui, grove: Grove) -> El {
         let grove = grove.clone();
         move || {
             let unit = ui.theme().spacing.unit;
-            let g = grove.clone();
-            let studio = w::button(&ui, "Studio", move || g.show_studio());
-            w::tooltip(&studio, "Full workbench: files, terminal, raw tools");
             let here = w::text(&ui, "").variant("strong").text({
                 let g = grove.clone();
                 move || match g.place.get() {
@@ -438,8 +410,7 @@ fn child_bar(ui: &Ui, grove: Grove) -> El {
                         .layout(|l| l.width = Length::Percent(1.0))
                         .child(crumb)
                         .child(mode_chips(&ui, &grove))
-                        .child(spacer(&ui))
-                        .child(studio),
+                        .child(spacer(&ui)),
                 )
                 .child(w::divider(&ui, false))
         }
