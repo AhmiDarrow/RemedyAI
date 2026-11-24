@@ -1114,6 +1114,36 @@ pub fn speak(client: &Client, text: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// 16-bit PCM WAV, mono, at `rate`.
+pub fn wav_bytes(samples: &[f32], rate: u32) -> Vec<u8> {
+    let mut pcm = Vec::with_capacity(samples.len() * 2);
+    for s in samples {
+        let n = (s.clamp(-1.0, 1.0) * 32767.0) as i16;
+        pcm.extend_from_slice(&n.to_le_bytes());
+    }
+    let mut out = Vec::with_capacity(44 + pcm.len());
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36u32 + pcm.len() as u32).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&rate.to_le_bytes());
+    out.extend_from_slice(&(rate * 2).to_le_bytes());
+    out.extend_from_slice(&2u16.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
+    out.extend(pcm);
+    out
+}
+
+/// POST `/api/voice/transcribe` with a WAV body.
+pub fn transcribe(client: &Client, wav: Vec<u8>) -> Result<String, String> {
+    let v = send(client, Request::post("voice/transcribe").body(wav, "audio/wav"))?;
+    Ok(str_of(&v, "text"))
+}
+
 /// PATCH through a short loopback request.
 ///
 /// `remedy_ui::net::Request` has GET, POST, PUT, and DELETE. Goal rename and
@@ -1182,4 +1212,18 @@ fn loopback_host(origin: &str) -> Result<(String, u16), String> {
         return Err("Grove PATCH stays on loopback".into());
     }
     Ok((host, port))
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wav_header_is_valid() {
+        let bytes = wav_bytes(&[0.0, 0.5, -0.5], 48_000);
+        assert_eq!(&bytes[..4], b"RIFF");
+        assert_eq!(&bytes[8..12], b"WAVE");
+        assert_eq!(bytes.len(), 44 + 6);
+    }
 }

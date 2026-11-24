@@ -4,11 +4,13 @@
 //! back through a waker. Studio keeps its own session list; Grove never
 //! writes a `grove` session into it.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+use remedy_ui::playback::{Microphone, MicrophoneOptions, MicrophoneState};
 use remedy_ui::reactive::{waker, Signal};
 use serde_json::{json, Value};
 
@@ -177,6 +179,8 @@ pub(crate) struct Grove {
     pub attach_error: Signal<String>,
     pub plant_error: Signal<String>,
     pub mic_error: Signal<String>,
+    pub mic_on: Signal<bool>,
+    pub composer_value: Signal<String>,
     pub session_id: Signal<String>,
     pub child_messages: Signal<Vec<StoryMessage>>,
     pub child_loading: Signal<bool>,
@@ -213,6 +217,7 @@ pub(crate) struct Grove {
     pub draft_empty: Signal<bool>,
     pub local_only: bool,
     persist: bool,
+    samples: Arc<Mutex<Vec<f32>>>,
     client: Signal<Option<Client>>,
     home_session: Signal<String>,
     goal_sessions: Signal<BTreeMap<String, String>>,
@@ -224,6 +229,19 @@ pub(crate) struct Grove {
     migrated: Arc<std::sync::atomic::AtomicBool>,
     seen_armed: Arc<std::sync::atomic::AtomicBool>,
     poll_query: Arc<Mutex<PollQuery>>,
+}
+
+
+thread_local! {
+    static MIC: RefCell<Option<Microphone>> = const { RefCell::new(None) };
+}
+
+fn take_mic() -> Option<Microphone> {
+    MIC.with(|slot| slot.borrow_mut().take())
+}
+
+fn put_mic(mic: Microphone) {
+    MIC.with(|slot| *slot.borrow_mut() = Some(mic));
 }
 
 impl Grove {
@@ -263,6 +281,8 @@ impl Grove {
             attach_error: Signal::new(String::new()),
             plant_error: Signal::new(String::new()),
             mic_error: Signal::new(String::new()),
+            mic_on: Signal::new(false),
+            composer_value: Signal::new(String::new()),
             session_id: Signal::new(String::new()),
             child_messages: Signal::new(Vec::new()),
             child_loading: Signal::new(false),
@@ -297,6 +317,7 @@ impl Grove {
             draft_empty: Signal::new(true),
             local_only: false,
             persist,
+            samples: Arc::new(Mutex::new(Vec::new())),
             client: Signal::new(None),
             home_session: Signal::new(prefs.home_session),
             goal_sessions: Signal::new(prefs.goal_sessions),
@@ -833,8 +854,75 @@ impl Grove {
     }
 
     pub(crate) fn mic(&self) {
-        self.mic_error.set(
-            "Microphone capture is not in this desktop build yet. Type instead.".into(),
+        self.mic_error.set(String::new());
+        if self.mic_on.get() {
+            self.mic_on.set(false);
+            if let Some(mic) = take_mic() {
+                mic.stop();
+            }
+            let samples = self
+                .samples
+                .lock()
+                .map(|mut g| std::mem::take(&mut *g))
+                .unwrap_or_default();
+            self.transcribe(samples);
+            return;
+        }
+        if let Ok(mut g) = self.samples.lock() {
+            g.clear();
+        }
+        let buf = self.samples.clone();
+        let mic = Microphone::open_platform(MicrophoneOptions::default(), move |frames| {
+            if let Ok(mut g) = buf.lock() {
+                if g.len() < 48_000 * 60 {
+                    g.extend_from_slice(frames);
+                }
+            }
+        });
+        if mic.state() == MicrophoneState::Failed {
+            let msg = mic
+                .error()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "The microphone did not open.".into());
+            self.mic_error.set(msg);
+            return;
+        }
+        self.mic_on.set(true);
+        put_mic(mic);
+    }
+
+    fn transcribe(&self, samples: Vec<f32>) {
+        if samples.is_empty() {
+            self.mic_error.set("No speech captured.".into());
+            return;
+        }
+        if self.local_only {
+            self.mic_error.set("Voice needs the local mind.".into());
+            return;
+        }
+        self.note.set("Hearing…".into());
+        let wav = api::wav_bytes(&samples, 48_000);
+        self.spawn(
+            move |c| api::transcribe(c, wav),
+            |g, out| match out {
+                Ok(heard) if heard.trim().is_empty() => {
+                    g.mic_error.set("Nothing to transcribe.".into());
+                }
+                Ok(heard) => {
+                    g.note.set(String::new());
+                    g.mic_error.set(String::new());
+                    let cur = g.composer_value.get();
+                    let next = if cur.trim().is_empty() {
+                        heard
+                    } else {
+                        format!("{cur} {heard}")
+                    };
+                    g.composer_value.set(next.clone());
+                    g.draft_empty.set(next.trim().is_empty());
+                    g.prefill.set(Some(next));
+                }
+                Err(e) => g.mic_error.set(e),
+            },
         );
     }
 
@@ -1953,5 +2041,23 @@ fn local_hour() -> u32 {
             }
         }
         9
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::studio::Studio;
+
+    #[test]
+    fn grove_mic_does_not_stub() {
+        let g = Grove::preview(Studio::preview());
+        g.mic();
+        let err = g.mic_error.get();
+        assert_ne!(
+            err,
+            "Microphone capture is not in this desktop build yet. Type instead."
+        );
     }
 }
