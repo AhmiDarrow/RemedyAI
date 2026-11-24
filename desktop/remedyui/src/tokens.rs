@@ -26,7 +26,7 @@ pub const ROW_ACTIONS: f32 = ROW_TOOL * 3.0 + 8.0;
 pub const SPACE: f32 = crate::theme_pack::DARK_FOREST.space.unit;
 /// Shared gutter for headers, feeds, the composer and the sidebar.
 pub const GUTTER: f32 = crate::theme_pack::DARK_FOREST.space.gutter;
-/// Circular persona badge.
+/// Persona badge (square, hairline).
 pub const AVATAR: f32 = crate::theme_pack::DARK_FOREST.layout.presence_avatar;
 /// Chat bubble cap, inside a split pane.
 pub const BUBBLE_MAX: f32 = crate::theme_pack::DARK_FOREST.layout.bubble_max;
@@ -48,7 +48,16 @@ pub struct Type {
     pub display: bool,
 }
 
-/// Session titles and empty-state headlines.
+/// Home greeting and other display headlines. 24 is a multiple of 8 (Ahmi Pixel is sharp there).
+pub const HERO: Type = Type {
+    size: 24.0,
+    weight: 600.0,
+    leading: 1.15,
+    tracking: 0.0,
+    mono: false,
+    display: true,
+};
+/// Smaller display titles (presence state names, compact headings).
 pub const TITLE: Type = Type {
     size: 16.0,
     weight: 600.0,
@@ -77,7 +86,7 @@ pub const BODY: Type = Type {
 };
 /// Timestamps, helper lines, session ages.
 pub const META: Type = Type {
-    size: 11.5,
+    size: 12.0,
     weight: 500.0,
     leading: 1.35,
     tracking: 0.02,
@@ -86,7 +95,7 @@ pub const META: Type = Type {
 };
 /// Tool names, arguments, and other code-like rows.
 pub const MONO: Type = Type {
-    size: 12.5,
+    size: 12.0,
     weight: 500.0,
     leading: 1.45,
     tracking: 0.0,
@@ -95,7 +104,7 @@ pub const MONO: Type = Type {
 };
 /// Thinking paragraphs: a half-step quieter than body.
 pub const THINKING: Type = Type {
-    size: 13.5,
+    size: 14.0,
     weight: 430.0,
     leading: 1.5,
     tracking: 0.0,
@@ -192,6 +201,16 @@ pub fn chip(colors: &ColorRoles, on: bool) -> StylePatch {
     }
 }
 
+/// A primary action in the hairline system: accent stroke and text, no fill.
+pub fn primary_button(colors: &ColorRoles) -> StylePatch {
+    chip(colors, true).weight(600.0).padding(Insets {
+        top: SPACE * 2.0,
+        end: SPACE * 3.0,
+        bottom: SPACE * 2.0,
+        start: SPACE * 3.0,
+    })
+}
+
 /// Session metadata and similar quiet lines: muted small caps.
 pub fn meta_caps(colors: &ColorRoles) -> StylePatch {
     typo(META)
@@ -208,7 +227,7 @@ pub fn info_panel(ui: &remedy_ui::Ui, title: impl Into<String>, body: remedy_ui:
     let title = title.into();
     w::column(ui)
         .gap(SPACE * 2.0)
-        .padding(Insets::all(SPACE * 2.0))
+        .padding(Insets::all(SPACE * 3.0))
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
@@ -235,14 +254,19 @@ mod tests {
 
     #[test]
     fn scale_steps_are_distinct() {
+        assert_eq!(HERO.size, 24.0);
+        assert_eq!(TITLE.size, 16.0);
+        assert_eq!(META.size, 12.0);
+        assert_eq!(MONO.size, 12.0);
+        assert_eq!(THINKING.size, 14.0);
+        assert!(HERO.size > TITLE.size);
         assert!(TITLE.size > BODY.size);
         assert!(BODY.size > THINKING.size);
         assert!(THINKING.size > MONO.size);
-        assert!(MONO.size > META.size);
-        assert_eq!(TITLE.size, 16.0);
-        assert!(TITLE.display);
-        assert!(!SECTION.display);
-        assert!(SECTION.size < BODY.size);
+        assert!(HERO.display && TITLE.display);
+        assert!(!SECTION.display && !BODY.display && !MONO.display);
+        assert_eq!(HERO.size % 8.0, 0.0);
+        assert_eq!(TITLE.size % 8.0, 0.0);
         assert!(TITLE.weight > BODY.weight);
     }
 }

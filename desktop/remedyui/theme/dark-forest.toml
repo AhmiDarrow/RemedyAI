@@ -69,8 +69,8 @@ status_height = 44
 # Crisp square, not a glowing orb.
 connected_mark = 6
 presence_home = 48
-presence_avatar = 28
-presence_review = 64
+presence_avatar = 24
+presence_review = 72
 bubble_max = 560
 composer_hint = "under"
 

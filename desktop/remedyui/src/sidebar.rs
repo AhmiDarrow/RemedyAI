@@ -74,20 +74,21 @@ fn new_session_button(ui: &Ui, studio: Studio) -> El {
     let u = ui.clone();
     let add = studio.clone();
     ui.el("button")
-        .variant("primary")
+        .variant("quiet")
         .row()
         .align(Align::Center)
         .justify(Justify::Start)
-        .gap(ui.theme().spacing.unit)
+        .gap(ui.theme().spacing.unit * 2.0)
         .padding(Insets {
             top: 8.0,
             end: 12.0,
             bottom: 8.0,
             start: 12.0,
         })
+        .style(tokens::primary_button(&colors))
         .layout(|l| {
             l.width = Length::Percent(1.0);
-            l.min_height = Length::Px(36.0);
+            l.min_height = Length::Px(tokens::TOOL);
             l.shrink = 0.0;
         })
         .child(w::icon(ui, w::Icon::Plus, 16.0))
@@ -409,7 +410,8 @@ fn add_project_form(ui: &Ui, studio: Studio, unit: f32) -> El {
                             move || s.add_project(f.value(), false)
                         },
                     )
-                    .variant("primary"),
+                    .variant("quiet")
+                    .style(tokens::primary_button(&ui.theme().colors)),
                 )
                 .child(
                     w::button(
@@ -877,7 +879,7 @@ fn session_title(ui: &Ui, studio: &Studio, id: &str, title: &str) -> El {
                 l.width = Length::Percent(1.0);
                 l.min_width = Length::Px(0.0);
             })
-            .style(tokens::typo(tokens::BODY).weight(550.0).text_size(13.5))
+            .style(tokens::typo(tokens::BODY).weight(600.0))
     })
     .el()
 }
@@ -921,7 +923,7 @@ fn session_sub(ui: &Ui, studio: &Studio, id: &str, count: u32, age: Option<Strin
     let u = ui.clone();
     w::row(ui)
         .align(Align::Center)
-        .gap(6.0)
+        .gap(tokens::SPACE * 2.0)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);

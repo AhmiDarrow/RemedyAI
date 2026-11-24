@@ -228,6 +228,69 @@ pub fn app(app: &App) {
     });
 }
 
+
+/// Window chrome around a design-review surface, with the Grove/Studio
+/// switcher in the title bar. Does not replace golden `home()` previews.
+fn design_chrome(ui: &Ui, studio: Studio, grove: grove::Grove, body: impl Fn(&Ui) -> El + 'static) -> El {
+    fonts::prepare_theme(ui, &Fonts::load());
+    let chrome = Chrome::preview(chrome::Overlay::None);
+    chrome.grove.set(Some(grove));
+    chrome::hosted(ui, studio, chrome, body)
+}
+
+/// Studio design shots: attach a preview Grove so the title-bar switcher
+/// appears, and select Studio so the switcher reads correctly.
+fn design_hosted(ui: &Ui, studio: Studio, body: impl Fn(&Ui) -> El + 'static) -> El {
+    let grove = grove::Grove::preview(studio.clone());
+    grove.show_studio();
+    design_chrome(ui, studio, grove, body)
+}
+
+fn design_grove_body(ui: &Ui, grove: grove::Grove) -> El {
+    grove::root(ui, grove, None, None).layout(|l| {
+        l.grow = 1.0;
+        l.basis = Length::Px(0.0);
+        l.height = Length::Percent(1.0);
+        l.min_height = Length::Px(0.0);
+        l.width = Length::Percent(1.0);
+    })
+}
+
+/// Grove is the default home. Title-bar switcher with Grove selected.
+pub fn design_home(ui: &Ui) -> El {
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    studio.set_mode(studio::WorkMode::Chat);
+    let grove = grove::Grove::preview(studio.clone());
+    design_chrome(ui, studio, grove.clone(), move |ui| design_grove_body(ui, grove.clone()))
+}
+
+/// Grove after Remedy opened a Build session from a coding request.
+pub fn design_grove_handoff(ui: &Ui) -> El {
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    studio.set_mode(studio::WorkMode::Build);
+    let grove = grove::Grove::preview(studio.clone());
+    grove.handoff.set(Some(grove::StudioHandoff {
+        kind: grove::StudioKind::Build,
+        prompt: "Get the portal addon loading again after the entry rename.".into(),
+    }));
+    design_chrome(ui, studio, grove.clone(), move |ui| design_grove_body(ui, grove.clone()))
+}
+
+/// Build-mode chat inside the window chrome (status-rail review).
+pub fn design_status_rail(ui: &Ui) -> El {
+    let studio = Studio::preview_chat();
+    let st = studio.clone();
+    design_hosted(ui, studio, move |ui| {
+        shell_with(
+            ui,
+            st.clone(),
+            rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+        )
+    })
+}
+
 /// Empty-well preview (goldens and visual review). Left rail open, right thin.
 pub fn home(ui: &Ui) -> El {
     let studio = Studio::preview();
@@ -262,11 +325,14 @@ pub fn design_build_chat(ui: &Ui) -> El {
     let studio = Studio::preview_chat();
     studio.mode.set(studio::WorkMode::Build);
     studio.messages.set(design_preview_messages());
-    shell_with(
-        ui,
-        studio,
-        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
-    )
+    let st = studio.clone();
+    design_hosted(ui, studio, move |ui| {
+        shell_with(
+            ui,
+            st.clone(),
+            rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+        )
+    })
 }
 
 /// Design-review Plan mode with the dock open and a sample outline.
@@ -290,56 +356,69 @@ pub fn design_plan(ui: &Ui) -> El {
         done: 1,
         total: 3,
     }));
-    shell_with(
-        ui,
-        studio,
-        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
-    )
+    let st = studio.clone();
+    design_hosted(ui, studio, move |ui| {
+        shell_with(
+            ui,
+            st.clone(),
+            rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+        )
+    })
 }
 
 /// Design-review Settings rail open on the Studio shell.
 pub fn design_settings(ui: &Ui) -> El {
-    settings::install_preview(ui);
+    let studio = Studio::preview_chat();
     let layout = layout::layout_open_settings(&layout::WorkspaceLayout::default());
-    shell_with(
-        ui,
-        Studio::preview_chat(),
-        rails::WorkspaceChrome::fixed(layout),
-    )
+    let st = studio.clone();
+    design_hosted(ui, studio, move |ui| {
+        settings::install_preview(ui);
+        shell_with(
+            ui,
+            st.clone(),
+            rails::WorkspaceChrome::fixed(layout),
+        )
+    })
 }
 
 /// Design-review card for one presence state (static under reduced_motion).
 pub fn design_presence(ui: &Ui, state: presence::State) -> El {
-    fonts::prepare_theme(ui, &Fonts::load());
-    let colors = ui.theme().colors.clone();
-    let size = theme_pack::layout().presence_review;
-    let title = w::text(ui, state.label())
-        .variant("heading")
-        .style(tokens::typo(tokens::TITLE).foreground(colors.text));
-    let body = w::text(ui, state.caption())
-        .style(tokens::typo(tokens::BODY).foreground(colors.text))
-        .layout(|l| {
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    design_hosted(ui, studio, move |ui| {
+        fonts::prepare_theme(ui, &Fonts::load());
+        let colors = ui.theme().colors.clone();
+        let size = theme_pack::layout().presence_review;
+        let title = w::text(ui, state.label())
+            .variant("heading")
+            .style(tokens::typo(tokens::TITLE).foreground(colors.text));
+        let body = w::text(ui, state.caption())
+            .style(tokens::typo(tokens::BODY).foreground(colors.text))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        let panel = tokens::info_panel(ui, "Status", body).layout(|l| {
+            l.max_width = Length::Px(320.0);
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
         });
-    let panel = tokens::info_panel(ui, "Status", body).layout(|l| {
-        l.max_width = Length::Px(320.0);
-        l.width = Length::Percent(1.0);
-        l.min_width = Length::Px(0.0);
-    });
-    w::column(ui)
-        .align(Align::Center)
-        .justify(Justify::Center)
-        .gap(tokens::GUTTER)
-        .padding(Insets::all(tokens::GUTTER * 2.0))
-        .layout(|l| {
-            l.width = Length::Percent(1.0);
-            l.height = Length::Percent(1.0);
-        })
-        .style(StylePatch::new().background(colors.bg).foreground(colors.text))
-        .child(presence::preview(ui, state, size))
-        .child(title)
-        .child(panel)
+        w::column(ui)
+            .align(Align::Center)
+            .justify(Justify::Center)
+            .gap(tokens::GUTTER)
+            .padding(Insets::all(tokens::GUTTER * 2.0))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.height = Length::Percent(1.0);
+                l.grow = 1.0;
+                l.min_height = Length::Px(0.0);
+            })
+            .style(StylePatch::new().background(colors.bg).foreground(colors.text))
+            .child(presence::preview(ui, state, size))
+            .child(title)
+            .child(panel)
+    })
 }
 
 pub fn design_presence_idle(ui: &Ui) -> El {

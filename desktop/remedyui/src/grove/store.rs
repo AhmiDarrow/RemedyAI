@@ -172,4 +172,10 @@ mod tests {
         assert!(list.is_empty());
         assert!(!set_star(&mut list, "https://example.com/docs", false));
     }
+
+    #[test]
+    fn fresh_prefs_open_grove() {
+        assert_eq!(Prefs::default().surface, "grove");
+        assert_eq!(grove_surface(), "grove");
+    }
 }

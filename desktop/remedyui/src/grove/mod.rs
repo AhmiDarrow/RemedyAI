@@ -14,7 +14,8 @@ mod state;
 mod store;
 mod view;
 
-pub(crate) use state::Grove;
+pub(crate) use logic::StudioKind;
+pub(crate) use state::{Grove, StudioHandoff};
 
 use std::cell::RefCell;
 

@@ -55,7 +55,11 @@ pub(super) fn root(
             let cap = el.clone();
             let cap_ui = ui_frame.clone();
             el.bind(move || {
-                let h = (cap_ui.window_size().height - TITLE_BAR).max(160.0);
+                // Hosted chrome already reserves the 36px title bar and the
+                // ~44px status dock. Cap to that remaining column so the
+                // composer and Routines are not painted under the dock.
+                let dock = if crate::chrome::dock_in_host() { 44.0 } else { 0.0 };
+                let h = (cap_ui.window_size().height - TITLE_BAR - dock).max(160.0);
                 let _ = cap.clone().layout(|l| {
                     l.height = Length::Px(h);
                     l.max_height = Length::Px(h);
@@ -575,11 +579,82 @@ fn chip_style(colors: &remedy_ui::style::ColorRoles, on: bool) -> StylePatch {
     }
 }
 
+
+fn studio_handoff_card(ui: &Ui, grove: Grove) -> El {
+    let watch = grove.clone();
+    show(ui, move || watch.handoff.get().is_some(), {
+        let ui = ui.clone();
+        let grove = grove.clone();
+        move || {
+            let colors = ui.theme().colors.clone();
+            let unit = ui.theme().spacing.unit;
+            let Some(item) = grove.handoff.get() else {
+                return ui.el("grove-handoff-empty");
+            };
+            let title_key = match item.kind {
+                logic::StudioKind::Build => "grove-handoff-build",
+                logic::StudioKind::Plan => "grove-handoff-plan",
+                logic::StudioKind::Chat => "grove-handoff-chat",
+            };
+            let title = crate::messages().text(&ui, title_key);
+            let mut prompt = item.prompt.clone();
+            if prompt.chars().count() > 140 {
+                prompt = prompt.chars().take(137).collect::<String>() + "…";
+            }
+            let quote = w::text(&ui, prompt)
+                .style(crate::tokens::typo(crate::tokens::BODY).foreground(colors.text))
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                });
+            let note = w::text(&ui, crate::messages().text(&ui, "grove-handoff-body"))
+                .style(crate::tokens::typo(crate::tokens::META).foreground(colors.muted))
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                });
+            let g = grove.clone();
+            let open = w::button(&ui, crate::messages().text(&ui, "grove-handoff-open"), move || {
+                g.show_studio();
+            })
+            .style(crate::tokens::primary_button(&colors))
+            .semantics(
+                Semantics::new(Role::Button)
+                    .label(crate::messages().text(&ui, "grove-handoff-open"))
+                    .action(Action::Click),
+            );
+            let body = w::column(&ui)
+                .gap(unit * 2.0)
+                .align(Align::Start)
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                })
+                .child(quote)
+                .child(note)
+                .child(open);
+            crate::tokens::info_panel(&ui, title, body).layout(|l| {
+                l.margin = Insets {
+                    top: unit,
+                    end: unit * 3.0,
+                    bottom: unit * 2.0,
+                    start: unit * 3.0,
+                };
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            })
+        }
+    })
+    .el()
+    .layout(|l| l.width = Length::Percent(1.0))
+}
+
 fn home_plots(ui: &Ui, grove: Grove, app: Option<App>) -> El {
     let unit = ui.theme().spacing.unit;
     let scroll = w::scroll(ui)
         .child(hello(ui, grove.clone()))
-        .child(away(ui, grove.clone()));
+        .child(away(ui, grove.clone()))
+        .child(studio_handoff_card(ui, grove.clone()));
     let scroll = scroll
         .child(life_banner(ui, grove.clone()))
         .child(head::head_block(ui, grove.clone()))

@@ -20,7 +20,7 @@ pub fn gap(ui: &Ui) -> f32 {
 }
 
 pub fn stack(ui: &Ui) -> El {
-    w::column(ui).gap(gap(ui) * 1.5).fill_width()
+    w::column(ui).gap(gap(ui) * 2.0).fill_width()
 }
 
 pub fn hint(ui: &Ui, text: impl IntoProp<String>) -> El {
@@ -122,32 +122,34 @@ pub fn pick(ui: &Ui, name: &str, pairs: &[(String, String)], value: Signal<Strin
 }
 
 pub fn segments(ui: &Ui, name: &str, pairs: &[(&str, &str)], value: Signal<String>) -> El {
+    let _ = name;
     if pairs.is_empty() {
         return hint(ui, "No choices.");
     }
-    let labels: Vec<&str> = pairs.iter().map(|(_, label)| *label).collect();
-    let ids: Vec<String> = pairs.iter().map(|(id, _)| (*id).to_string()).collect();
-    let current = value.get();
-    let start = ids.iter().position(|id| id == &current).unwrap_or(0);
-    let selected = Signal::new(start);
-    let el = w::segmented(ui, name, &labels, selected);
-    let ids_from_index = ids.clone();
-    Effect::new(move || {
-        let i = selected.get();
-        if let Some(id) = ids_from_index.get(i) {
-            value.set_if_changed(id.clone());
-        }
-    });
-    let ids_from_value = ids;
-    Effect::new(move || {
-        let current = value.get();
-        let i = ids_from_value
-            .iter()
-            .position(|id| id == &current)
-            .unwrap_or(0);
-        selected.set_if_changed(i);
-    });
-    el
+    let colors = ui.theme().colors.clone();
+    let mut row = w::row(ui)
+        .align(Align::Center)
+        .gap(crate::tokens::SPACE * 2.0)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+            l.wrap = true;
+        });
+    for (id, label) in pairs {
+        let id = (*id).to_string();
+        let value = value.clone();
+        let colors = colors.clone();
+        row = row.child(
+            w::button(ui, (*label).to_string(), {
+                let value = value.clone();
+                let id = id.clone();
+                move || value.set_if_changed(id.clone())
+            })
+            .variant("quiet")
+            .style(move || crate::tokens::chip(&colors, value.get() == id).weight(550.0)),
+        );
+    }
+    row
 }
 
 pub fn toggle(ui: &Ui, title: &str, description: &str, value: Signal<bool>) -> El {
@@ -166,7 +168,13 @@ pub fn action(
     variant: &'static str,
     on_press: impl Fn() + 'static,
 ) -> El {
-    w::button(ui, title.into(), on_press).variant(variant)
+    if variant == "primary" {
+        w::button(ui, title.into(), on_press)
+            .variant("quiet")
+            .style(crate::tokens::primary_button(&ui.theme().colors))
+    } else {
+        w::button(ui, title.into(), on_press).variant(variant)
+    }
 }
 
 pub fn flow(
