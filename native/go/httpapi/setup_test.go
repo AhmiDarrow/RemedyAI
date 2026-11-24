@@ -204,7 +204,7 @@ func TestUpdateOfferOnceForExistingInstall(t *testing.T) {
 	}
 }
 
-func TestUpdateOfferLetsGoStartsConversation(t *testing.T) {
+func TestUpdateOfferLetsGoDoesNotRerunSetupWhenComplete(t *testing.T) {
 	s := newSetupTestServer(t)
 	if err := os.WriteFile(filepath.Join(s.homeDir, "config.toml"), []byte("setup_completed = true\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -218,7 +218,7 @@ func TestUpdateOfferLetsGoStartsConversation(t *testing.T) {
 	if offer["available"] == true {
 		t.Fatal("Let's go must consume the offer")
 	}
-	if body["mode"] != "conversation" || body["onboarding_pending"] != true {
-		t.Fatalf("expected conversation revisit, got %v", body)
+	if body["onboarding_pending"] == true {
+		t.Fatalf("Let's go must not re-trigger setup when setup_completed: %v", body)
 	}
 }
