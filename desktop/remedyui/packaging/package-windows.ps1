@@ -140,7 +140,7 @@ function Assert-WebUIComplete([string]$Root) {
                 } else {
                     $joined = ($base.TrimEnd('/') + '/' + $imp.Substring(2))
                 }
-                $joined = $joined -replace '\', '/'
+                $joined = $joined.Replace('\', '/')
                 if (-not $refs.Contains($joined)) { $refs.Add($joined) }
             }
         }
