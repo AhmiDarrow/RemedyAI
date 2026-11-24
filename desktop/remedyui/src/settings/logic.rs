@@ -992,6 +992,7 @@ pub const RMB_KNOBS: &[Knob] = &[
     Knob { key: "chat_template", label: "Chat template", kind: "text", min: 0.0, max: 0.0, step: 0.0 },
 ];
 
+
 pub fn clamp_knob(knob: &Knob, n: f64) -> f64 {
     if knob.kind == "text" || knob.kind == "bool" {
         return n;
@@ -999,6 +1000,93 @@ pub fn clamp_knob(knob: &Knob, n: f64) -> f64 {
     let n = n.clamp(knob.min, knob.max);
     if knob.kind == "int" { n.round() } else { n }
 }
+
+fn field_str(v: &Value, key: &str) -> String {
+    v.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string()
+}
+
+fn models_array(v: &Value) -> Option<&Vec<Value>> {
+    v.get("models").and_then(|m| m.as_array()).filter(|rows| !rows.is_empty())
+}
+
+/// Catalog models from `GET /rmb/catalog`, falling back to the status payload.
+pub fn rmb_catalog_models(catalog: &Value, status: &Value) -> Vec<Value> {
+    if let Some(rows) = models_array(catalog) {
+        return rows.clone();
+    }
+    status
+        .get("catalog")
+        .and_then(models_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+pub fn rmb_catalog_label(model: &Value) -> String {
+    let name = field_str(model, "name");
+    let id = field_str(model, "id");
+    let label = if name.is_empty() { id } else { name };
+    match model.get("approx_gb") {
+        Some(gb) if !gb.is_null() => format!("{label} (~{gb} GB)"),
+        _ => label,
+    }
+}
+
+pub fn rmb_catalog_patch(model_id: &str) -> Value {
+    json!({
+        "model_id": model_id,
+        "model_path": "",
+        "enabled": true,
+        "use_as_chat_provider": true,
+    })
+}
+
+pub fn hf_repo_label(row: &Value) -> String {
+    let id = field_str(row, "id");
+    let n = row.get("downloads").and_then(|x| x.as_f64()).unwrap_or(0.0);
+    if n <= 0.0 {
+        return id;
+    }
+    let suffix = if n >= 1_000_000.0 {
+        format!("{:.1}M dl", n / 1_000_000.0)
+    } else if n >= 1_000.0 {
+        format!("{:.1}k dl", n / 1_000.0)
+    } else {
+        format!("{n:.0} dl")
+    };
+    format!("{id} · {suffix}")
+}
+
+pub fn hf_file_path(row: &Value) -> String {
+    let path = field_str(row, "path");
+    if path.is_empty() { field_str(row, "name") } else { path }
+}
+
+pub fn hf_file_label(row: &Value) -> String {
+    let name = {
+        let n = field_str(row, "name");
+        if n.is_empty() { hf_file_path(row) } else { n }
+    };
+    let star = if row.get("recommended").and_then(|x| x.as_bool()).unwrap_or(false) {
+        "★ "
+    } else {
+        ""
+    };
+    let size = match row.get("size_gb") {
+        Some(gb) if !gb.is_null() => format!(" ({gb} GB)"),
+        _ => String::new(),
+    };
+    let role = if field_str(row, "role") == "mmproj" { " · mmproj" } else { "" };
+    format!("{star}{name}{size}{role}")
+}
+
+pub fn recommended_hf_file(files: &Value) -> Option<Value> {
+    let rows = files.as_array()?;
+    rows.iter()
+        .find(|f| f.get("recommended").and_then(|x| x.as_bool()) == Some(true))
+        .cloned()
+        .or_else(|| rows.first().cloned())
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -1215,5 +1303,50 @@ mod tests {
         for key in ["enable_mtp", "n_cpu_moe", "flash_attn", "use_jinja", "samplers", "rope_scaling", "tensor_split", "mmproj", "chat_template", "yarn_factor", "no_kv_offload"] {
             assert!(RMB_KNOBS.iter().any(|k| k.key == key), "{key}");
         }
+    }
+
+    #[test]
+    fn rmb_catalog_and_hf_files_match_the_old_shell() {
+        let catalog = json!({
+            "default_model_id": "qwen35-9b",
+            "models": [
+                {"id": "qwen35-9b", "name": "Qwen3.5 9B (Q6_K)", "approx_gb": 8.5},
+                {"id": "qwen25-coder-7b", "name": "Qwen2.5 Coder 7B (Q4_K_M)", "approx_gb": 5}
+            ]
+        });
+        let status = json!({"catalog": {"models": [{"id": "fallback", "name": "From status"}]}});
+        let models = rmb_catalog_models(&catalog, &status);
+        assert_eq!(models.len(), 2);
+        assert_eq!(rmb_catalog_label(&models[0]), "Qwen3.5 9B (Q6_K) (~8.5 GB)");
+        assert_eq!(rmb_catalog_label(&models[1]), "Qwen2.5 Coder 7B (Q4_K_M) (~5 GB)");
+        assert_eq!(
+            rmb_catalog_models(&json!({}), &status)[0]["id"],
+            "fallback"
+        );
+        let patch = rmb_catalog_patch("qwen35-9b");
+        assert_eq!(patch["model_id"], "qwen35-9b");
+        assert_eq!(patch["model_path"], "");
+        assert_eq!(patch["enabled"], true);
+        assert_eq!(patch["use_as_chat_provider"], true);
+
+        assert_eq!(hf_repo_label(&json!({"id": "Qwen/Qwen"})), "Qwen/Qwen");
+        assert_eq!(hf_repo_label(&json!({"id": "Qwen/Qwen", "downloads": 2500})), "Qwen/Qwen · 2.5k dl");
+        assert_eq!(hf_repo_label(&json!({"id": "big", "downloads": 2_000_000})), "big · 2.0M dl");
+
+        let files = json!([
+            {"path": "a.gguf", "name": "a.gguf", "size_gb": 4.2},
+            {"path": "b.gguf", "name": "b.gguf", "recommended": true, "size_gb": 5, "role": "weights"},
+            {"path": "mm.gguf", "name": "mm.gguf", "role": "mmproj"}
+        ]);
+        let rec = recommended_hf_file(&files).unwrap();
+        assert_eq!(hf_file_path(&rec), "b.gguf");
+        assert_eq!(hf_file_label(&rec), "★ b.gguf (5 GB)");
+        assert_eq!(hf_file_label(&files[2]), "mm.gguf · mmproj");
+        assert_eq!(hf_file_path(&json!({"name": "only-name.gguf"})), "only-name.gguf");
+        assert!(recommended_hf_file(&json!([])).is_none());
+        assert_eq!(
+            hf_file_path(&recommended_hf_file(&json!([{"path": "first.gguf"}])).unwrap()),
+            "first.gguf"
+        );
     }
 }
