@@ -515,7 +515,7 @@ const MessageBubble = memo(function MessageBubble({
   const placeholderOnly = /^\*\(Used tools — see process\.\)\*$/.test(text.trim())
   const showBubble = !(showStrip && (!text.trim() || placeholderOnly))
 
-  const selectTurn = (e: ReactPointerEvent) => {
+  const selectTurn = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!onSelectTurn || !turnId || isUser || isSystem) return
     if ((e.target as HTMLElement).closest('button, a, input, textarea')) return
     onSelectTurn(turnId)
