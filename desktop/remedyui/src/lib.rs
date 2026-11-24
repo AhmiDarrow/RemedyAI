@@ -40,6 +40,7 @@ mod time;
 mod timetravel;
 mod titlebar;
 mod theme_pack;
+mod theme_import;
 mod tokens;
 mod tray_copy;
 mod update;
