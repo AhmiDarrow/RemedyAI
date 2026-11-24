@@ -51,6 +51,7 @@ composer-placeholder = Ask Remedy
 composer-send = Send
 chat-edit = Edit & resend
 chat-regenerate = Regenerate reply
+chat-copy = Copy message
 composer-stop = Stop
 composer-attach = Attach
 composer-hint = Enter to send · Shift+Tab to switch mode
