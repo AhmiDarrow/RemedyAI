@@ -282,13 +282,14 @@ fn draw_happy_eyes(ui: &Ui, host: &El, part: &Part, pal: &Palette, scale: f32, m
         px(ui, host, 13.0, y, 6.0, 1.0, scale, c);
         return;
     }
-    // ∪ mid higher, outer corners lower. Left 5–10, right 13–18.
-    px(ui, host, 6.0, y, 4.0, 1.0, scale, c);
-    px(ui, host, 5.0, y + 1.0, 1.0, 1.0, scale, c);
-    px(ui, host, 10.0, y + 1.0, 1.0, 1.0, scale, c);
-    px(ui, host, 14.0, y, 4.0, 1.0, scale, c);
-    px(ui, host, 13.0, y + 1.0, 1.0, 1.0, scale, c);
-    px(ui, host, 18.0, y + 1.0, 1.0, 1.0, scale, c);
+    // Smiling lids: outer corners raised (smaller y), mid lower on the screen.
+    // Left 5–10, right 13–18.
+    px(ui, host, 5.0, y, 1.0, 1.0, scale, c);
+    px(ui, host, 10.0, y, 1.0, 1.0, scale, c);
+    px(ui, host, 6.0, y + 1.0, 4.0, 1.0, scale, c);
+    px(ui, host, 13.0, y, 1.0, 1.0, scale, c);
+    px(ui, host, 18.0, y, 1.0, 1.0, scale, c);
+    px(ui, host, 14.0, y + 1.0, 4.0, 1.0, scale, c);
 }
 
 fn draw_brow(ui: &Ui, host: &El, part: &Part, pal: &Palette, scale: f32) {
@@ -355,20 +356,29 @@ fn draw_mouth(ui: &Ui, host: &El, part: &Part, pal: &Palette, scale: f32) {
             px(ui, host, 11.0, y + 2.0, 2.0, 1.0, scale, c);
         }
         "smile" => {
-            // ∪ mid higher (lower y), corners lower on the screen.
-            px(ui, host, 8.0, 17.0, 2.0, 1.0, scale, c);
-            px(ui, host, 10.0, 16.0, 4.0, 1.0, scale, c);
-            px(ui, host, 14.0, 17.0, 2.0, 1.0, scale, c);
+            // U-shape: corners raised (smaller y), center lower on the screen.
+            // Three steps so it stays unmistakable at 24, 72, and 144.
+            px(ui, host, 7.0, 16.0, 2.0, 1.0, scale, c);
+            px(ui, host, 15.0, 16.0, 2.0, 1.0, scale, c);
+            px(ui, host, 9.0, 17.0, 2.0, 1.0, scale, c);
+            px(ui, host, 13.0, 17.0, 2.0, 1.0, scale, c);
+            px(ui, host, 10.0, 18.0, 4.0, 1.0, scale, c);
         }
         "small-smile" => {
-            px(ui, host, 9.0, 16.0, 1.0, 1.0, scale, c);
-            px(ui, host, 10.0, 15.0, 4.0, 1.0, scale, c);
-            px(ui, host, 14.0, 16.0, 1.0, 1.0, scale, c);
+            // Same U, one step shallower — still corners above the center.
+            px(ui, host, 8.0, 15.0, 2.0, 1.0, scale, c);
+            px(ui, host, 14.0, 15.0, 2.0, 1.0, scale, c);
+            px(ui, host, 9.0, 16.0, 2.0, 1.0, scale, c);
+            px(ui, host, 13.0, 16.0, 2.0, 1.0, scale, c);
+            px(ui, host, 10.0, 17.0, 4.0, 1.0, scale, c);
         }
         "frown" => {
-            px(ui, host, 8.0, 16.0, 2.0, 1.0, scale, c);
-            px(ui, host, 10.0, 17.0, 4.0, 1.0, scale, c);
-            px(ui, host, 14.0, 16.0, 2.0, 1.0, scale, c);
+            // Inverted U: center raised, corners lower on the screen.
+            px(ui, host, 10.0, 16.0, 4.0, 1.0, scale, c);
+            px(ui, host, 9.0, 17.0, 2.0, 1.0, scale, c);
+            px(ui, host, 13.0, 17.0, 2.0, 1.0, scale, c);
+            px(ui, host, 7.0, 18.0, 2.0, 1.0, scale, c);
+            px(ui, host, 15.0, 18.0, 2.0, 1.0, scale, c);
         }
         "hmm" => {
             let y = if part.y > 0.0 { part.y } else { 17.0 };
