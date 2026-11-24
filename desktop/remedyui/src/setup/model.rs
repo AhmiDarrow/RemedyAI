@@ -185,6 +185,21 @@ pub fn shows_base_url(provider: &str) -> bool {
     matches!(provider, "ollama" | "llamacpp" | "rmb" | "custom") || is_custom_like(provider)
 }
 
+/// URL Settings should persist for this provider. Hidden-URL providers
+/// always get their catalog default so a leftover `llm_base_url` (OpenRouter
+/// after a switch to Anthropic, for example) cannot hijack later turns.
+pub fn persist_base_url(provider: &str, form_or_saved: &str) -> String {
+    if shows_base_url(provider) {
+        return form_or_saved.trim().to_string();
+    }
+    let cat = provider_base(provider);
+    if cat.is_empty() {
+        form_or_saved.trim().to_string()
+    } else {
+        cat.to_string()
+    }
+}
+
 /// Balanced is stored as `default`, matching the wizard draft.
 pub fn persona_wire(persona: &str) -> &str {
     if persona == "balanced" {
@@ -1568,6 +1583,29 @@ mod tests {
     }
 
     #[test]
+    fn persist_base_url_snaps_hidden_providers_and_keeps_typable() {
+        assert_eq!(
+            persist_base_url("anthropic", "https://openrouter.ai/api/v1"),
+            "https://api.anthropic.com/v1"
+        );
+        assert_eq!(
+            persist_base_url("xai", "https://openrouter.ai/api/v1"),
+            "https://api.x.ai/v1"
+        );
+        assert_eq!(
+            persist_base_url("openai", ""),
+            "https://api.openai.com/v1"
+        );
+        assert_eq!(
+            persist_base_url("ollama", "http://192.168.1.9:11434/v1"),
+            "http://192.168.1.9:11434/v1"
+        );
+        assert_eq!(
+            persist_base_url("custom", "http://127.0.0.1:1234/v1"),
+            "http://127.0.0.1:1234/v1"
+        );
+    }
+
     fn offline_catalog_is_the_full_old_provider_set() {
         let ids: Vec<&str> = OFFLINE_PROVIDERS.iter().map(|p| p.id).collect();
         assert_eq!(

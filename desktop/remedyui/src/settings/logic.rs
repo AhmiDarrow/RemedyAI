@@ -746,11 +746,21 @@ pub fn save_body(d: &SaveDraft) -> Result<Value, String> {
         return Err("Sleev gateway is not on this computer. Turn on “Allow a remote gateway” or use a loopback address.".into());
     }
     let mut body = Map::new();
-    let llm_edited = d.provider != d.loaded_provider || d.model != d.loaded_model || d.base_url != d.loaded_base_url;
+    let persisted_url = crate::setup::model::persist_base_url(&d.provider, &d.base_url);
+    // Snap a leftover hidden-provider URL (e.g. OpenRouter still stored under
+    // Anthropic) without injecting llm_* into an otherwise unrelated save
+    // when no URL was loaded.
+    let hidden_url_dirty = !crate::setup::model::shows_base_url(&d.provider)
+        && !d.loaded_base_url.is_empty()
+        && persisted_url != d.loaded_base_url;
+    let llm_edited = d.provider != d.loaded_provider
+        || d.model != d.loaded_model
+        || d.base_url != d.loaded_base_url
+        || hidden_url_dirty;
     if llm_edited {
         body.insert("llm_provider".into(), json!(d.provider));
         body.insert("llm_model".into(), json!(d.model));
-        body.insert("llm_base_url".into(), json!(d.base_url));
+        body.insert("llm_base_url".into(), json!(persisted_url));
     }
     if d.provider == CUSTOM_PROVIDER {
         body.insert("custom_llm_name".into(), json!(d.custom_name.trim()));
@@ -1189,6 +1199,20 @@ mod tests {
     }
 
     #[test]
+    fn save_snaps_hidden_provider_url_even_when_form_still_has_a_leftover() {
+        let mut d = SaveDraft::default();
+        d.provider = "anthropic".into();
+        d.loaded_provider = "anthropic".into();
+        d.model = "claude-haiku-4-5-20251001".into();
+        d.loaded_model = "claude-haiku-4-5-20251001".into();
+        d.base_url = "https://openrouter.ai/api/v1".into();
+        d.loaded_base_url = "https://openrouter.ai/api/v1".into();
+        let body = save_body(&d).unwrap();
+        assert_eq!(body["llm_provider"], json!("anthropic"));
+        assert_eq!(body["llm_model"], json!("claude-haiku-4-5-20251001"));
+        assert_eq!(body["llm_base_url"], json!("https://api.anthropic.com/v1"));
+    }
+
     fn empty_project_forces_full_scope_and_blocks_remote_sleev() {
         let mut d = SaveDraft::default();
         d.project_path = " . ".into();
