@@ -8,6 +8,13 @@ use remedy_ui::a11y::Role;
 use remedy_ui::testing::TestApp;
 use std::sync::Once;
 
+fn names(app: &TestApp) -> Vec<String> {
+    app.reader_view()
+        .into_iter()
+        .filter_map(|n| n.name)
+        .collect()
+}
+
 fn no_spawn() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| unsafe { std::env::set_var("REMEDY_DESKTOP_NO_SPAWN", "1") });
@@ -36,6 +43,11 @@ fn wizard_more_options_opens_the_provider_step() {
     assert!(
         app.find(Role::Button, "Demo · no signup").is_some(),
         "provider step still shows Demo"
+    );
+    let names = names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("Or a free key")),
+        "provider step offers a free-key list: {names:?}"
     );
 }
 

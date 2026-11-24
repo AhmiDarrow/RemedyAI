@@ -276,9 +276,112 @@ pub const OFFLINE_PROVIDERS: &[ProviderOpt] = &[
 ];
 
 pub fn paid_providers() -> Vec<&'static ProviderOpt> {
+    paid_providers_except(&[])
+}
+
+pub fn paid_providers_except(free_ids: &[String]) -> Vec<&'static ProviderOpt> {
     OFFLINE_PROVIDERS
         .iter()
-        .filter(|p| p.id != "demo" && p.id != "ollama")
+        .filter(|p| p.id != "demo" && p.id != "ollama" && !free_ids.iter().any(|id| id == p.id))
+        .collect()
+}
+
+/// A row from `GET /api/providers/free`, or the bundled fallback.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FreeProviderOpt {
+    pub id: String,
+    pub tier: String,
+    pub title: String,
+    pub name: String,
+    pub blurb: String,
+}
+
+/// Bundled free-key rows used when the sidecar is offline.
+pub fn offline_free_options() -> Vec<FreeProviderOpt> {
+    [
+        ("google", "free_key", "Google Gemini", "Google AI (Gemini)", "Free AI Studio key — strong free multimodal models."),
+        ("groq", "free_key", "Groq", "Groq", "Free key — very fast open models."),
+        ("openrouter", "free_key", "OpenRouter free models", "OpenRouter", "Free key — pick models with :free suffix."),
+        ("mistral", "free_key", "Mistral", "Mistral", "Free Experiment plan key."),
+    ]
+    .into_iter()
+    .map(|(id, tier, title, name, blurb)| FreeProviderOpt {
+        id: id.into(),
+        tier: tier.into(),
+        title: title.into(),
+        name: name.into(),
+        blurb: blurb.into(),
+    })
+    .collect()
+}
+
+pub fn parse_free_providers(v: &Value) -> Vec<FreeProviderOpt> {
+    let Some(arr) = v.get("options").and_then(|o| o.as_array()) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|row| {
+            let id = row.get("id")?.as_str()?.trim();
+            if id.is_empty() {
+                return None;
+            }
+            let name = row
+                .get("name")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .trim();
+            let title = row
+                .get("title")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .trim();
+            let label = if !title.is_empty() {
+                title
+            } else if !name.is_empty() {
+                name
+            } else {
+                id
+            };
+            let tier = row
+                .get("tier")
+                .and_then(|s| s.as_str())
+                .or_else(|| row.get("free_tier").and_then(|s| s.as_str()))
+                .unwrap_or("")
+                .to_string();
+            Some(FreeProviderOpt {
+                id: id.to_string(),
+                tier,
+                title: label.to_string(),
+                name: if name.is_empty() { label.to_string() } else { name.to_string() },
+                blurb: row
+                    .get("blurb")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            })
+        })
+        .collect()
+}
+
+/// Live list when the sidecar returned options, otherwise the bundled catalog.
+pub fn free_providers_or_fallback(v: &Value) -> Vec<FreeProviderOpt> {
+    let parsed = parse_free_providers(v);
+    if parsed.is_empty() {
+        offline_free_options()
+    } else {
+        parsed
+    }
+}
+
+pub fn free_key_options(options: &[FreeProviderOpt]) -> Vec<FreeProviderOpt> {
+    options
+        .iter()
+        .filter(|o| {
+            o.id != "demo"
+                && o.id != "ollama"
+                && (o.tier == "free_key")
+        })
+        .cloned()
         .collect()
 }
 
@@ -1199,6 +1302,26 @@ mod tests {
         assert_eq!(prev_step(STEP_FOLDER, true), Some(STEP_WELCOME));
         assert_eq!(next_step(STEP_WELCOME, false), Some(STEP_PROVIDER));
         assert_eq!(next_step(STEP_PROVIDER, false), Some(STEP_FOLDER));
+    }
+
+    #[test]
+    fn free_providers_use_the_live_list_and_fall_back_offline() {
+        let live = serde_json::json!({
+            "options": [
+                {"id": "demo", "tier": "instant", "title": "Start instantly (Demo)", "name": "Demo"},
+                {"id": "groq", "tier": "free_key", "title": "Groq", "name": "Groq", "blurb": "fast"},
+                {"id": "newfree", "tier": "free_key", "title": "New Cloud", "name": "New Cloud"}
+            ]
+        });
+        let keys = free_key_options(&parse_free_providers(&live));
+        assert_eq!(keys.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), vec!["groq", "newfree"]);
+        assert_eq!(free_providers_or_fallback(&serde_json::json!({})), offline_free_options());
+        let offline = free_key_options(&offline_free_options());
+        assert!(offline.iter().any(|o| o.id == "google" && o.title.contains("Gemini")));
+        assert!(offline.iter().any(|o| o.id == "groq"));
+        let paid = paid_providers_except(&offline.iter().map(|o| o.id.clone()).collect::<Vec<_>>());
+        assert!(paid.iter().all(|p| p.id != "google" && p.id != "groq"));
+        assert!(paid.iter().any(|p| p.id == "openai"));
     }
 
 }
