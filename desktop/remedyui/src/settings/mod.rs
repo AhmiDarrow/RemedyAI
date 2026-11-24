@@ -370,6 +370,7 @@ pub fn preview_connect(ui: &Ui) -> El {
     s.category.set("connections".into());
     s.open_ids.set(vec!["connect".into()]);
     s.force.set(Some("connect".into()));
+    s.pair_qr.set("remedy://pair/preview-connect".into());
     view(ui, s, false)
 }
 

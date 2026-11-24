@@ -3,9 +3,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use remedy_ui::extra::{qr_code, QrOptions};
 use remedy_ui::reactive::{Effect, Signal};
 use remedy_ui::widgets as w;
-use remedy_ui::{El, Ui};
+use remedy_ui::{show, El, Ui};
 use serde_json::{Value, json};
 
 use super::bits;
@@ -115,11 +116,30 @@ fn connect(ui: &Ui, s: Settings) -> El {
         let loop_warn = form::notice(&ui, "warn", logic::CONNECT_LOOPBACK_WARNING);
         let loop_warn = bits::visible_when(loop_warn, move || logic::is_connect_loopback(&bind.get()));
         let panes = pane_list(&ui, s);
-        let qr = w::text(&ui, move || {
-            let q = s.pair_qr.get();
-            if q.is_empty() { "Pairing code appears here.".into() } else { q }
+        let qr = show(
+            &ui,
+            {
+                let s = s.clone();
+                move || s.pair_qr.get().trim().is_empty()
+            },
+            {
+                let ui = ui.clone();
+                move || w::text(&ui, "Pairing code appears here.").variant("muted")
+            },
+        )
+        .fallback({
+            let ui = ui.clone();
+            let s = s.clone();
+            move || {
+                qr_code(
+                    &ui,
+                    "Pairing code",
+                    s.pair_qr,
+                    QrOptions::default().description("Connect pairing QR code".into()),
+                )
+            }
         })
-        .variant("code");
+        .el();
         form::stack(&ui)
             .child(form::toggle(&ui, "Connect is on", "Phones on this network can reach this PC.", enabled))
             .child(form::action(&ui, "Apply on/off", "primary", move || put_connect_flag(s, "enabled", enabled.get())))
