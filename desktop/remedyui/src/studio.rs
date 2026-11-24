@@ -169,6 +169,12 @@ pub struct Studio {
     pub filter: Signal<Filter>,
     /// Session options disclosure.
     pub options_open: Signal<bool>,
+    /// Sessions checked for a bulk move or delete.
+    pub selected_ids: Signal<Vec<String>>,
+    /// Last session clicked while selecting (Shift+click range).
+    pub select_anchor: Signal<Option<String>>,
+    /// When true, session rows show checkboxes.
+    pub select_mode: Signal<bool>,
     /// Adding a project folder (path field visible).
     pub adding_project: Signal<bool>,
     /// Draft path for a new project folder.
@@ -309,6 +315,9 @@ impl Studio {
             query: Signal::new(String::new()),
             filter: Signal::new(Filter::All),
             options_open: Signal::new(false),
+            selected_ids: Signal::new(Vec::new()),
+            select_anchor: Signal::new(None),
+            select_mode: Signal::new(false),
             adding_project: Signal::new(false),
             project_draft: Signal::new(String::new()),
             projects: Signal::new(vec![Project {
@@ -423,6 +432,10 @@ impl Studio {
                 list.remove(i);
             }
         });
+        self.selected_ids.update(|ids| ids.retain(|s| s != &id));
+        if self.select_anchor.get().as_deref() == Some(id.as_str()) {
+            self.select_anchor.set(None);
+        }
         if self.active.get().as_deref() == Some(id.as_str()) {
             let list = self.sessions.get();
             self.active.set(list.first().map(|s| s.id.clone()));
