@@ -124,4 +124,15 @@ mod tests {
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].kind, "done");
     }
+
+    #[test]
+    fn session_events_hello_and_created() {
+        let mut p = Parser::new();
+        let chunk = "event: hello\ndata: {\"type\":\"hello\"}\n\nevent: session_created\ndata: {\"type\":\"session_created\",\"session_id\":\"s1\"}\n\n";
+        let frames = p.push(chunk);
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0].kind, "hello");
+        assert_eq!(frames[1].kind, "session_created");
+        assert_eq!(frames[1].event, "session_created");
+    }
 }
