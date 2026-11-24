@@ -3,6 +3,7 @@
 use remedy_ui::a11y::{Action, Role};
 use remedy_ui::core::{Point, Vec2};
 use remedy_ui::devtools::{check_golden, GoldenError, Preview};
+use remedy_ui::host::{HostEvent, TrayEvent};
 use remedy_ui::input::{Key, KeyEvent, Modifiers};
 use remedy_ui::testing::TestApp;
 use remedy_ui::themes::PALETTES;
@@ -2093,4 +2094,57 @@ fn hiding_presence_reflows_home_without_a_frame() {
         );
         assert_fits_window(&studio, w, &format!("Studio {w}x{h}"));
     }
+}
+
+/// chrome::TRAY_QUIT. Tray menu ids are not re-exported from the lib.
+const TRAY_QUIT: u32 = 2;
+
+#[test]
+fn tray_quit_shows_the_confirm_sheet_after_hide_to_tray() {
+    // Title-bar close hides the window and leaves the process running
+    // (close-to-tray). Tray "Quit Remedy" used to set the confirm overlay
+    // on that hidden window, so nothing appeared and the app never exited.
+    fresh_profile();
+    reset_saved_layout();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.frames(3);
+    let id = *app
+        .host()
+        .window_ids()
+        .first()
+        .expect("a window opened");
+    app.host().send(HostEvent::CloseRequested(id));
+    app.frames(2);
+    assert!(
+        app.host().window(id).is_some_and(|w| !w.options().visible),
+        "title-bar close hides to the tray"
+    );
+    assert!(
+        !app.host().has_exited(),
+        "close-to-tray must keep the process running"
+    );
+
+    app.host().send(HostEvent::Tray(TrayEvent::Menu(TRAY_QUIT)));
+    app.frames(3);
+    assert!(
+        app.host().window(id).is_some_and(|w| w.options().visible),
+        "tray Quit must show the window so the confirm sheet is visible"
+    );
+    assert!(!app.host().has_exited(), "confirm sheet is shown before quit");
+    let names = accessible_names(&app);
+    assert!(
+        has(&names, "Quit and stop server")
+            || has(&names, "Quit Remedy and stop the local server"),
+        "tray Quit must show the confirm sheet: {names:?}"
+    );
+
+    assert!(
+        app.press(Role::Button, "Quit and stop server"),
+        "confirm Quit and stop server"
+    );
+    app.frames(2);
+    assert!(
+        app.host().has_exited(),
+        "confirming tray Quit must exit the app"
+    );
 }
