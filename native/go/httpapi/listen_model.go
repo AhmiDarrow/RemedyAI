@@ -127,18 +127,23 @@ func tryLiveModel(home string, cfg ConfigMap, provider, model, baseURL string) c
 	rawURL := strings.TrimSpace(baseURL)
 	prov, modelID, urlOut := normalizeLLMSettings(rawProvider, rawModel, rawURL)
 
-	// Catalog base URL wins over normalize's custom localhost fallback when the
-	// caller did not pass an explicit URL (Poe used to resolve to :5001).
 	meta, ok := mergedProviderCatalog(cfg)[prov]
 	if !ok {
 		meta = providerCatalog[prov]
 	}
-	if rawURL != "" {
-		urlOut = rawURL
-	} else if catalogURL := strings.TrimSpace(meta.BaseURL); catalogURL != "" {
-		if urlOut == "" || (isLocalURL(urlOut) && !isLocalURL(catalogURL)) {
+	// Hidden-URL providers always use the catalog endpoint, even if config
+	// still holds a leftover llm_base_url (e.g. OpenRouter after a switch
+	// to Anthropic). Typable providers keep a caller- or catalog-supplied URL.
+	if providerShowsBaseURL(prov) {
+		if rawURL != "" {
+			urlOut = rawURL
+		} else if catalogURL := strings.TrimSpace(meta.BaseURL); catalogURL != "" {
 			urlOut = catalogURL
 		}
+	} else if catalogURL := strings.TrimSpace(meta.BaseURL); catalogURL != "" {
+		urlOut = catalogURL
+	} else {
+		urlOut = effectiveBaseURL(prov, rawURL)
 	}
 	if rawModel != "" {
 		modelID = rawModel

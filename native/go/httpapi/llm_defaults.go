@@ -32,6 +32,53 @@ var providerDefaults = map[string]struct {
 	"llamacpp":   {baseURL: "http://127.0.0.1:8080/v1", model: "", noAuth: true},
 }
 
+// providerShowsBaseURL reports whether the owner may type a custom endpoint
+// for this provider (Ollama, llama.cpp, RMB, custom, or a user-defined id).
+// Hidden-URL providers (Anthropic, OpenAI, xAI, …) always use the catalog URL.
+func providerShowsBaseURL(provider string) bool {
+	p := strings.ToLower(strings.TrimSpace(provider))
+	switch p {
+	case "ollama", "llamacpp", "rmb", "custom":
+		return true
+	}
+	if meta, ok := providerCatalog[p]; ok {
+		return meta.ShowBaseURL || meta.UserDefined
+	}
+	// Unknown / user-defined endpoint ids stay typable.
+	return p != ""
+}
+
+// catalogBaseURL is the built-in default endpoint for a known provider.
+func catalogBaseURL(provider string) string {
+	p := strings.ToLower(strings.TrimSpace(provider))
+	if meta, ok := providerCatalog[p]; ok {
+		if u := strings.TrimSpace(meta.BaseURL); u != "" {
+			return u
+		}
+	}
+	if def, ok := providerDefaults[p]; ok {
+		return def.baseURL
+	}
+	return ""
+}
+
+// effectiveBaseURL is the endpoint a client should call. Hidden-URL
+// providers always return their catalog URL, even when config still
+// holds a leftover llm_base_url from a previous provider.
+func effectiveBaseURL(provider, rawURL string) string {
+	raw := strings.TrimSpace(rawURL)
+	if providerShowsBaseURL(provider) {
+		if raw != "" {
+			return raw
+		}
+		return catalogBaseURL(provider)
+	}
+	if cat := catalogBaseURL(provider); cat != "" {
+		return cat
+	}
+	return raw
+}
+
 func normalizeLLMSettings(provider, model, baseURL string) (string, string, string) {
 	prov := strings.ToLower(strings.TrimSpace(provider))
 	if prov == "" {
@@ -47,10 +94,7 @@ func normalizeLLMSettings(provider, model, baseURL string) (string, string, stri
 	if !ok {
 		def = providerDefaults["custom"]
 	}
-	urlOut := strings.TrimSpace(baseURL)
-	if urlOut == "" {
-		urlOut = def.baseURL
-	}
+	urlOut := effectiveBaseURL(prov, baseURL)
 	modelOut := strings.TrimSpace(model)
 	if modelOut == "" {
 		modelOut = def.model

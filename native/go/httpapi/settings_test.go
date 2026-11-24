@@ -281,9 +281,9 @@ func TestConfigStoreRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, "config.toml")
 	cfg := ConfigMap{
-		"llm_provider":    "demo",
-		"setup_completed": true,
-		"name":            "Remedy",
+		"llm_provider":     "demo",
+		"setup_completed":  true,
+		"name":             "Remedy",
 		"enabled_channels": []string{"cli", "telegram"},
 		"vision": map[string]any{
 			"enabled":  true,
@@ -441,5 +441,63 @@ func TestPublicMessengersWebhookNeedsTunnel(t *testing.T) {
 		if byID2[id]["status"] != "ready" {
 			t.Fatalf("%s with tunnel status=%v reason=%v", id, byID2[id]["status"], byID2[id]["status_reason"])
 		}
+	}
+}
+
+func TestSettingsPutSnapsHiddenProviderBaseURL(t *testing.T) {
+	home := t.TempDir()
+	const token = "settings-token-not-sec!"
+	t.Setenv("REMEDY_HOME", home)
+	path := filepath.Join(home, "config.toml")
+	if err := WriteConfig(path, ConfigMap{
+		"llm_provider":    "anthropic",
+		"llm_model":       "claude-haiku-4-5-20251001",
+		"llm_base_url":    "https://openrouter.ai/api/v1",
+		"setup_completed": true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	InvalidateConfigCache()
+	base, shutdown := startTestServer(t, Config{Token: token, HomeDir: home})
+	defer shutdown()
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	// Saving a key (or any LLM field) must persist the Anthropic catalog URL,
+	// not the leftover OpenRouter endpoint.
+	body := `{
+		"llm_provider":"anthropic",
+		"llm_model":"claude-haiku-4-5-20251001",
+		"llm_base_url":"https://openrouter.ai/api/v1",
+		"llm_api_key":"sk-ant-unit-test-not-real"
+	}`
+	req, err := http.NewRequest(http.MethodPut, base+"/api/settings", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", resp.StatusCode, raw)
+	}
+	var saved map[string]any
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(saved["llm_base_url"]); !strings.Contains(got, "api.anthropic.com") {
+		t.Fatalf("saved llm_base_url=%v body=%s", saved["llm_base_url"], raw)
+	}
+	InvalidateConfigCache()
+	cfg := LoadConfig(home)
+	if got := cfgString(cfg, "llm_base_url", ""); got != "https://api.anthropic.com/v1" {
+		t.Fatalf("config llm_base_url=%q", got)
+	}
+	if cfgString(cfg, "llm_model", "") != "claude-haiku-4-5-20251001" {
+		t.Fatalf("model was rewritten: %q", cfgString(cfg, "llm_model", ""))
 	}
 }

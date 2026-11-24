@@ -323,19 +323,60 @@ func TestResolveChatModelBuildsNativeAnthropicAdapter(t *testing.T) {
 	}
 }
 
-func TestResolveChatModelAnthropicBaseURLOverrideIsHonoured(t *testing.T) {
+func TestResolveChatModelAnthropicIgnoresStaleBaseURL(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REMEDY_HOME", home)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-unit-test-not-real")
 	InvalidateConfigCache()
 
-	model := ResolveChatModel(home, "anthropic", "claude-fable-5-1", "https://gateway.example.com/v1")
+	// A leftover OpenRouter (or any) llm_base_url must not send the Anthropic
+	// key to the wrong host. Hidden-URL providers always use the catalog URL.
+	model := ResolveChatModel(home, "anthropic", "claude-haiku-4-5-20251001", "https://openrouter.ai/api/v1")
 	claude, ok := model.(*providers.Anthropic)
 	if !ok {
 		t.Fatalf("got %T", model)
 	}
-	if claude.BaseURL != "https://gateway.example.com/v1" || claude.Model != "claude-fable-5-1" {
-		t.Fatalf("override lost: %q / %q", claude.BaseURL, claude.Model)
+	if !strings.Contains(claude.BaseURL, "api.anthropic.com") {
+		t.Fatalf("stale URL leaked: %q", claude.BaseURL)
+	}
+	if claude.Model != "claude-haiku-4-5-20251001" {
+		t.Fatalf("model = %q", claude.Model)
+	}
+}
+
+func TestNormalizeLLMSettingsHiddenProviderDropsStaleURL(t *testing.T) {
+	_, _, base := normalizeLLMSettings("anthropic", "claude-opus-5", "https://openrouter.ai/api/v1")
+	if base != "https://api.anthropic.com/v1" {
+		t.Fatalf("anthropic base = %q", base)
+	}
+	_, _, base = normalizeLLMSettings("xai", "grok-4.5", "https://openrouter.ai/api/v1")
+	if base != "https://api.x.ai/v1" {
+		t.Fatalf("xai base = %q", base)
+	}
+	_, _, base = normalizeLLMSettings("openai", "gpt-4o-mini", "https://openrouter.ai/api/v1")
+	if base != "https://api.openai.com/v1" {
+		t.Fatalf("openai base = %q", base)
+	}
+	// Typable providers keep a custom URL.
+	_, _, base = normalizeLLMSettings("ollama", "llama", "http://192.168.1.9:11434/v1")
+	if base != "http://192.168.1.9:11434/v1" {
+		t.Fatalf("ollama custom URL lost: %q", base)
+	}
+	_, _, base = normalizeLLMSettings("custom", "local", "http://127.0.0.1:1234/v1")
+	if base != "http://127.0.0.1:1234/v1" {
+		t.Fatalf("custom URL lost: %q", base)
+	}
+	if !providerShowsBaseURL("custom-lm-studio") || providerShowsBaseURL("anthropic") {
+		t.Fatal("typable vs hidden classification")
+	}
+}
+
+func TestResolveChatModelHonoursStaleConfigForTypableProvider(t *testing.T) {
+	// Sanity: typable providers still use the configured URL, not a snap.
+	// (Covered via normalize; no live local listener required.)
+	_, _, base := normalizeLLMSettings("llamacpp", "qwen", "http://127.0.0.1:9090/v1")
+	if base != "http://127.0.0.1:9090/v1" {
+		t.Fatalf("llamacpp URL = %q", base)
 	}
 }
 

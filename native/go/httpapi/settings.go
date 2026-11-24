@@ -187,15 +187,22 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 		mergedModel := cfgString(patch, "llm_model", cfgString(cfg, "llm_model", ""))
 		mergedURL := cfgString(patch, "llm_base_url", cfgString(cfg, "llm_base_url", ""))
 		provider, model, baseURL = normalizeLLMSettings(mergedProv, mergedModel, mergedURL)
-		// Preserve flexible-provider models as stored when client sent them.
+		// Preserve typable-provider models and URLs as stored. Hidden-URL
+		// providers keep a custom model id but always persist the catalog URL
+		// (normalizeLLMSettings already snapped baseURL).
 		rawProv := strings.ToLower(strings.TrimSpace(mergedProv))
-		if rawProv == "ollama" || rawProv == "custom" || rawProv == "openrouter" {
+		if providerShowsBaseURL(rawProv) {
 			provider = rawProv
 			if strings.TrimSpace(mergedModel) != "" {
 				model = strings.TrimSpace(mergedModel)
 			}
 			if strings.TrimSpace(mergedURL) != "" {
 				baseURL = strings.TrimSpace(mergedURL)
+			}
+		} else if rawProv == "openrouter" {
+			provider = rawProv
+			if strings.TrimSpace(mergedModel) != "" {
+				model = strings.TrimSpace(mergedModel)
 			}
 		}
 		patch["llm_provider"] = provider
