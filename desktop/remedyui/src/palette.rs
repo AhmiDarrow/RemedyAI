@@ -8,6 +8,7 @@ use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui};
 
 use crate::chrome::{Chrome, Overlay};
+use crate::depth;
 use crate::help_view;
 use crate::messages;
 use crate::studio::Studio;
@@ -118,12 +119,12 @@ pub fn run(id: &str, studio: &Studio, chrome: Chrome, ui: &Ui) {
         }
         "time-travel" => chrome.open_time_travel(studio),
         "export" => {
-            chrome.toast(ui, messages().text(ui, "toast-export"));
             chrome.close_overlay();
+            depth::export_active(studio);
         }
         "import" => {
-            chrome.toast(ui, messages().text(ui, "toast-import"));
             chrome.close_overlay();
+            depth::import_session(studio);
         }
         "palette" => {
             chrome.palette_query.set(String::new());
