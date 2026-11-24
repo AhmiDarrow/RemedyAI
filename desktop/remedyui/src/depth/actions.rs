@@ -1375,6 +1375,11 @@ fn on_session_sync_event(studio: &Studio, kind: &str, data: &str) {
         return;
     }
     let sid = logic::event_session_id(data);
+    if kind == "session_deleted" {
+        studio.forget_deleted(&sid);
+        // Still refresh the list so other rows stay in sync, but the
+        // tombstone stops a stale snapshot from putting this row back.
+    }
     let request_id = logic::event_request_id(data);
     let reload = logic::should_reload_open_thread(
         kind,
