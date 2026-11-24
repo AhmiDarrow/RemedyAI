@@ -145,6 +145,97 @@ fn sidebar_rows_are_disclosures_and_the_helper_line_is_gone() {
 }
 
 #[test]
+fn sidebar_select_lets_you_move_or_delete_several_chats() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home);
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        !names.iter().any(|n| n == "Select" || n.starts_with("Select ")),
+        "Select stays inside collapsed session options: {names:?}"
+    );
+    assert!(
+        !names.iter().any(|n| n.ends_with(" selected")),
+        "no selection bar on the default home: {names:?}"
+    );
+    assert!(
+        app.press(Role::Button, "Session options"),
+        "open session options"
+    );
+    app.frames(2);
+    assert!(
+        app.find(Role::Button, "Select").is_some(),
+        "Select is in session options: {:?}",
+        accessible_names(&app)
+    );
+    assert!(app.press(Role::Button, "Select"), "enter select mode");
+    app.frames(2);
+    let names = accessible_names(&app);
+    for title in ["New chat", "Port to RemedyUI", "House rules"] {
+        assert!(
+            app.find(Role::Check, &format!("Select {title}")).is_some(),
+            "checkbox for {title}: {names:?}"
+        );
+    }
+    assert!(
+        names.iter().any(|n| n == "0 selected"),
+        "selection bar opens with select mode: {names:?}"
+    );
+    assert!(
+        app.press(Role::Check, "Select Port to RemedyUI"),
+        "check the first chat"
+    );
+    app.frames(2);
+    assert!(
+        accessible_names(&app).iter().any(|n| n == "1 selected"),
+        "one chat checked: {:?}",
+        accessible_names(&app)
+    );
+    assert!(
+        app.press(Role::Check, "Select House rules"),
+        "check a second chat"
+    );
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n == "2 selected"),
+        "two chats checked: {names:?}"
+    );
+    assert!(
+        app.find(Role::Button, "Delete").is_some(),
+        "bulk delete: {names:?}"
+    );
+    assert!(
+        app.find(Role::Button, "Clear").is_some(),
+        "clear selection: {names:?}"
+    );
+    assert!(app.press(Role::Button, "Delete"), "confirm bulk delete");
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n == "Delete 2 chats?"),
+        "confirm title: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Partner Memory")),
+        "same delete warning as a single chat: {names:?}"
+    );
+    assert!(app.press(Role::Button, "Cancel"), "keep the chats");
+    app.frames(2);
+    assert!(
+        app.find(Role::Button, "Port to RemedyUI").is_some(),
+        "cancel leaves the chats"
+    );
+    assert!(app.press(Role::Button, "Done selecting"), "leave select mode");
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        app.find(Role::Check, "Select Port to RemedyUI").is_none(),
+        "checkboxes hide when selection is cleared: {names:?}"
+    );
+}
+
+#[test]
 fn chat_preview_shows_worked_steps_and_errors() {
     no_spawn();
     let mut app = preview_window(remedy_desktop::home_chat);

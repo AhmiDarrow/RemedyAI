@@ -1691,6 +1691,37 @@ pub fn assign_project(studio: &Studio, id: &str, project: Option<String>) {
     }
 }
 
+/// Move many sessions to one project (or no project) with a single request.
+pub fn bulk_assign_project(studio: &Studio, ids: &[String], project: Option<String>) {
+    let ids: Vec<String> = ids.iter().take(200).cloned().collect();
+    if ids.is_empty() {
+        return;
+    }
+    let mut map = studio.depth.session_order.get();
+    for id in &ids {
+        let old = studio
+            .sessions
+            .get()
+            .iter()
+            .find(|s| s.id == *id)
+            .and_then(|s| s.project_path.clone());
+        studio.set_project(id, project.clone());
+        rehome_order(&mut map, id, old.as_deref(), project.as_deref());
+    }
+    studio.depth.session_order.set(map);
+    studio.depth.save_order();
+    if let Some(client) = studio.runtime() {
+        let body = logic::bulk_project_body(&ids, project.as_deref());
+        api::spawn_json(
+            &client,
+            Request::post("sessions/bulk-project").json(&body),
+            |_| {},
+        );
+    }
+    studio.selected_ids.set(Vec::new());
+    studio.select_anchor.set(None);
+}
+
 pub fn move_project_order(studio: &Studio, path: &str, dir: i32) {
     let keys = project_keys(studio);
     if let Some(next) = logic::move_in_list(&keys, path, dir) {
