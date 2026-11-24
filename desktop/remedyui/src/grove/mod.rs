@@ -9,12 +9,14 @@ mod child;
 mod decision;
 mod head;
 mod logic;
+mod marks;
 mod stage;
 mod state;
 mod store;
 mod view;
 
 pub(crate) use logic::StudioKind;
+pub(crate) use marks::PlotMark;
 pub(crate) use state::{Grove, StudioHandoff};
 
 use std::cell::RefCell;

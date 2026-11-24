@@ -13,9 +13,61 @@ use remedy_ui::reactive::Signal;
 use remedy_ui::style::StylePatch;
 use remedy_ui::{El, Ui};
 
+use std::cell::Cell;
+
 use crate::studio::{Conn, Studio};
 use crate::tokens;
 use crate::work::StepStatus;
+
+thread_local! {
+    static KIND_OVERRIDE: Cell<Option<Kind>> = const { Cell::new(None) };
+}
+
+/// Which forest-spirit form to draw. Joe can pick; the theme pack holds the default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// Abstract spirit with a morning-star motif from Lakota star quilts.
+    MorningStar,
+    /// Beadwork-style wolf guide.
+    Wolf,
+    /// Beadwork-style bear guide, with Black Hills pines.
+    Bear,
+}
+
+impl Kind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::MorningStar => "Morning Star",
+            Self::Wolf => "Wolf Guide",
+            Self::Bear => "Bear Guide",
+        }
+    }
+
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Self::MorningStar => {
+                "An abstract forest spirit. The morning star from Lakota star quilts sits at the brow, over a short beadwork band."
+            }
+            Self::Wolf => {
+                "A geometric wolf, drawn like beadwork: stepped ears, a banded muzzle, and a square nose. Ears and gaze carry the states."
+            }
+            Self::Bear => {
+                "A broader bear, with stepped ears, a quiet earth band, and a small pine between the ears for Black Hills forest growth."
+            }
+        }
+    }
+}
+
+/// Set for a design preview. Left in place until the next shot sets it.
+pub fn set_kind_override(kind: Option<Kind>) {
+    KIND_OVERRIDE.with(|c| c.set(kind));
+}
+
+pub fn kind() -> Kind {
+    KIND_OVERRIDE
+        .with(|c| c.get())
+        .unwrap_or_else(crate::theme_pack::presence_kind)
+}
 
 /// How Remedy's mark is holding itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -178,6 +230,16 @@ fn schedule_breath(ui: Ui, phase: Signal<u8>, blink: Signal<bool>) {
 }
 
 fn paint(ui: &Ui, host: &El, state: State, scale: f32, colors: &remedy_ui::style::ColorRoles, blink: bool) {
+    let p = crate::presence_draw::palette(state, colors);
+    match kind() {
+        Kind::MorningStar => crate::presence_draw::morning_star(ui, host, state, scale, &p, blink),
+        Kind::Wolf => crate::presence_draw::wolf(ui, host, state, scale, &p, blink),
+        Kind::Bear => crate::presence_draw::bear(ui, host, state, scale, &p, blink),
+    }
+}
+
+#[allow(dead_code)]
+fn paint_legacy(ui: &Ui, host: &El, state: State, scale: f32, colors: &remedy_ui::style::ColorRoles, blink: bool) {
     let hair = match state {
         State::Error => colors.danger,
         State::Working | State::Listening | State::Done => colors.accent,
