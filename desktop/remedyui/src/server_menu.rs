@@ -338,9 +338,18 @@ fn restart(studio: &Studio, chrome: Chrome, ui: &Ui) {
         chrome.push_output("restart skipped (REMEDY_DESKTOP_NO_SPAWN)");
         return;
     }
-    let _ = runtime::ensure_running();
-    chrome.toast(ui, messages().text(ui, "toast-restartAsk"));
-    chrome.push_output("restart requested");
+    let outcome = runtime::restart();
+    let (key, line) = match outcome {
+        runtime::RestartOutcome::Disabled => ("toast-restartOff", "restart skipped"),
+        runtime::RestartOutcome::Restarted | runtime::RestartOutcome::Spawned => {
+            ("toast-restartOk", "sidecar restarted")
+        }
+        runtime::RestartOutcome::Foreign => ("toast-restartForeign", "foreign server left running"),
+        runtime::RestartOutcome::Unhealthy => ("toast-restartWait", "sidecar spawned but not ready"),
+        runtime::RestartOutcome::Failed => ("toast-restartFail", "sidecar restart failed"),
+    };
+    chrome.toast(ui, messages().text(ui, key));
+    chrome.push_output(line);
     if let Some(client) = studio.client() {
         let c = chrome;
         let waker = remedy_ui::reactive::waker().ok();

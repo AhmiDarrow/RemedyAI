@@ -485,6 +485,7 @@ impl Chrome {
             || crate::settings::current()
                 .is_some_and(|s| s.skip_quit_warn.try_get().unwrap_or(false));
         if skipped {
+            runtime::note_exiting();
             if let Some(app) = self.app() {
                 app.quit();
             }
@@ -507,6 +508,7 @@ impl Chrome {
             self.skip_quit.set(true);
             self.save_prefs();
         }
+        runtime::note_exiting();
         if let Some(app) = self.app() {
             app.quit();
         }
