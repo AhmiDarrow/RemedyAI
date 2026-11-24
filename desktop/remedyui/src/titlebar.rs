@@ -593,14 +593,5 @@ fn surface_chip(ui: &Ui, chrome: Chrome, studio: bool) -> El {
 }
 
 fn switch_style(colors: &remedy_ui::style::ColorRoles, on: bool) -> StylePatch {
-    let line = colors.line.unwrap_or(colors.muted);
-    let p = StylePatch::new()
-        .radius(0.0)
-        .border_width(1.0)
-        .background(colors.bg.with_alpha(0.0));
-    if on {
-        p.foreground(colors.accent).border(colors.accent)
-    } else {
-        p.foreground(colors.text).border(line)
-    }
+    crate::tokens::chip(colors, on).weight(550.0)
 }

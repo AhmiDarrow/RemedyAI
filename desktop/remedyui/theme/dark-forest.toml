@@ -1,0 +1,100 @@
+# Dark Forest — shipped default Remedy theme package.
+#
+# A theme is tokens (color, type, space, radii) plus layout (pane placement,
+# docks, rails, sizes, Simple vs Advanced disclosure, and the face style).
+# RemedyUI loads this declaratively. User packs may override it later; unknown
+# keys are ignored and missing keys fall back to this default (safe).
+# RemedyLua is the extension layer for custom panels and behavior — this file
+# does not run script.
+
+[meta]
+id = "dark-forest"
+name = "Dark Forest"
+version = 1
+
+# From https://ahmidarrow.pages.dev console.css (void, ink, line, green).
+# Site glass, mist, and hero gradients are not part of this package.
+[tokens.colors]
+bg = "#040a09"
+panel = "#071412"
+card = "#0b1a17"
+line = "#24504a"
+text = "#e2f3ee"
+muted = "#86a39c"
+accent = "#6fdc86"
+on_accent = "#040a09"
+ok = "#6fdc86"
+
+# Defaults for the three font roles. $REMEDY_HOME/config.toml [fonts] overrides them.
+[tokens.fonts]
+ui = "Remedy Sans UI"
+display = "Ahmi Pixel"
+code = "AhmiPrint"
+
+[tokens.type]
+small = 12
+body = 15
+title = 16
+# Section kickers use the UI face in small caps — display is for headings only.
+section = 12
+section_tracking = 0.08
+
+[tokens.space]
+unit = 4
+gutter = 16
+control_height = 32
+
+# Site corners are stepped, not rounded. Hairline 0–2, never pills.
+[tokens.radii]
+none = 0
+hair = 2
+chip = 0
+pane = 2
+
+[tokens.chrome]
+hairline_px = 1
+select_mark = 4
+elevation_blur = 0
+elevation_offset = 1
+
+[layout]
+sidebar_side = "left"
+actions_side = "start"
+actions_width = 380
+actions_width_min = 240
+actions_width_max = 720
+chat_pane_min = 280
+rail_width = 44
+status_height = 44
+# Crisp square, not a glowing orb.
+connected_mark = 6
+presence_home = 72
+presence_avatar = 24
+presence_review = 72
+bubble_max = 560
+composer_hint = "under"
+
+[layout.presence]
+style = "geometric-pixel"
+# square is the shipped default. morning-star, wolf, and bear remain optional
+# bundled skins. A pack may also name any id loaded from theme/faces/{id}.toml.
+skin = "square"
+kind = "square"
+grid = 24
+enabled_default = true
+# 1px breath, blink, idle glance, and a short settle; skipped when reduced_motion is on.
+motion = ["breath", "blink", "glance", "settle"]
+
+# Hidden in Simple. Advanced and Settings still expose every knob; nothing is removed.
+[layout.simple]
+hide = [
+    "bar-memory",
+    "bar-skills",
+    "bar-usage",
+    "bar-thinking",
+    "bar-approval",
+    "bar-time-travel",
+]
+
+[layout.home]
+surface = "full-width-when-empty"

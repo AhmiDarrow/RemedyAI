@@ -30,7 +30,7 @@ use crate::work::{StepStatus, WorkStep};
 use crate::{messages, say};
 
 /// Matches `--chat-bubble-radius: 0.85rem` in the current app (at 16px).
-pub const PANE_RADIUS: f32 = 13.6;
+pub const PANE_RADIUS: f32 = crate::theme_pack::DARK_FOREST.layout.pane_radius;
 pub const ACTIONS_WIDTH_DEFAULT: f32 = 380.0;
 pub const ACTIONS_WIDTH_MIN: f32 = 240.0;
 pub const ACTIONS_WIDTH_MAX: f32 = 720.0;
@@ -481,7 +481,6 @@ fn pane_head(
 ) -> El {
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
-    let line = colors.line.unwrap_or(colors.muted);
     let titles = w::column(ui)
         .gap(1.0)
         .layout(|l| {
@@ -511,9 +510,9 @@ fn pane_head(
         .align(Align::Center)
         .gap(unit)
         .padding(Insets {
-            top: 10.0,
+            top: 8.0,
             end: tokens::GUTTER,
-            bottom: 10.0,
+            bottom: 8.0,
             start: tokens::GUTTER,
         })
         .layout(|l| {
@@ -522,7 +521,7 @@ fn pane_head(
         })
         .style(StylePatch::new().border_side(
             BorderEdge::Bottom,
-            BorderSide::new(1.0, line.with_alpha(0.4)),
+            BorderSide::new(1.0, crate::tokens::hairline(&colors)),
         ))
         .child(titles);
     if is_chat {
@@ -743,7 +742,7 @@ fn actions_feed(ui: &Ui, studio: Studio) -> El {
     });
     let collapsed: Signal<Vec<String>> = Signal::new(Vec::new());
     let u = ui.clone();
-    let st_rows = studio;
+    let st_rows = studio.clone();
     let col_state = collapsed;
     let col = w::for_each(
         &col,
@@ -751,6 +750,52 @@ fn actions_feed(ui: &Ui, studio: Studio) -> El {
         |t| t.id.clone(),
         move |t| action_turn(&u, st_rows.clone(), t.clone(), col_state.clone()),
     );
+    let empty_st = studio.clone();
+    let u_empty = ui.clone();
+    let u_feed = ui.clone();
+    show(
+        ui,
+        move || collect_turns(&empty_st).is_empty(),
+        move || actions_standby(&u_empty),
+    )
+    .fallback(move || {
+        w::scroll(&u_feed)
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.grow = 1.0;
+                l.basis = Length::Px(0.0);
+                l.min_height = Length::Px(0.0);
+            })
+            .child(col.clone())
+    })
+    .el()
+}
+
+/// Secondary info panel when there is no tool work yet. Not a toolbox.
+fn actions_standby(ui: &Ui) -> El {
+    let colors = ui.theme().colors.clone();
+    let body = w::column(ui)
+        .gap(tokens::SPACE * 2.0)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .child(
+            say(ui, "actions-empty-body", "muted")
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                })
+                .style(tokens::typo(tokens::BODY).foreground(colors.text)),
+        )
+        .child(
+            say(ui, "actions-empty-hint", "muted")
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                })
+                .style(tokens::meta_caps(&colors)),
+        );
     w::scroll(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
@@ -758,7 +803,22 @@ fn actions_feed(ui: &Ui, studio: Studio) -> El {
             l.basis = Length::Px(0.0);
             l.min_height = Length::Px(0.0);
         })
-        .child(col)
+        .child(
+            w::column(ui)
+                .padding(Insets::all(tokens::GUTTER))
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                })
+                .child(
+                    tokens::info_panel(ui, messages().text(ui, "actions-empty-title"), body).layout(
+                        |l| {
+                            l.width = Length::Percent(1.0);
+                            l.min_width = Length::Px(0.0);
+                        },
+                    ),
+                ),
+        )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1047,9 +1107,9 @@ fn build_block(ui: &Ui, todos: &[TodoItem]) -> El {
     let mut col = w::column(ui)
         .gap(unit)
         .padding(Insets {
-            top: 10.0,
+            top: 8.0,
             end: 12.0,
-            bottom: 10.0,
+            bottom: 8.0,
             start: 12.0,
         })
         .layout(|l| l.width = Length::Percent(1.0))

@@ -19,8 +19,13 @@ pub(super) fn head_block(ui: &Ui, grove: Grove) -> El {
     let unit = ui.theme().spacing.unit;
     let g = grove.clone();
     w::column(ui)
-        .gap(unit * 1.5)
-        .padding(Insets::all(unit * 2.0))
+        .gap(unit)
+        .padding(Insets {
+            top: unit,
+            end: unit * 3.0,
+            bottom: unit,
+            start: unit * 3.0,
+        })
         .semantics({
             let g = grove.clone();
             move || Semantics::new(Role::Group).label(format!("{} and her side jobs", g.partner()))
@@ -44,8 +49,13 @@ pub(super) fn house_block(ui: &Ui, grove: Grove) -> El {
         }
     });
     w::column(ui)
-        .gap(unit * 2.0)
-        .padding(Insets::all(unit * 2.0))
+        .gap(unit)
+        .padding(Insets {
+            top: unit * 2.0,
+            end: unit * 3.0,
+            bottom: unit * 2.0,
+            start: unit * 3.0,
+        })
         .semantics({
             let g = grove.clone();
             move || {
@@ -109,6 +119,7 @@ fn head_row(ui: &Ui, grove: Grove) -> El {
             let on = g.head.get().is_some_and(|h| h.heartbeat.enabled);
             g.toggle_watch(!on);
         })
+        .variant("quiet")
         .semantics({
             let g = grove.clone();
             move || {
@@ -121,9 +132,10 @@ fn head_row(ui: &Ui, grove: Grove) -> El {
         })
     };
     let g = grove.clone();
-    let gear = w::button(ui, "Always-on settings", move || {
+    let gear = w::button(ui, "Settings", move || {
         g.settings_open.update(|v| *v = !*v);
-    });
+    })
+    .variant("quiet");
     w::row(ui)
         .align(Align::Center)
         .gap(unit * 2.0)
@@ -131,9 +143,8 @@ fn head_row(ui: &Ui, grove: Grove) -> El {
         .child(open.layout(|l| l.shrink = 0.0))
         .child(
             w::column(ui)
-                .gap(unit * 0.4)
+                .gap(unit)
                 .layout(|l| {
-                    l.grow = 1.0;
                     l.shrink = 1.0;
                     l.min_width = Length::Px(0.0);
                 })
@@ -311,7 +322,7 @@ fn add_job(ui: &Ui, grove: Grove) -> El {
                 }, {
                     let g = g.clone();
                     move || g.job_open.set(true)
-                }))
+                }).variant("quiet"))
                 .child(cap)
         }
     })

@@ -55,7 +55,11 @@ pub(super) fn root(
             let cap = el.clone();
             let cap_ui = ui_frame.clone();
             el.bind(move || {
-                let h = (cap_ui.window_size().height - TITLE_BAR).max(160.0);
+                // Hosted chrome already reserves the 36px title bar and the
+                // ~44px status dock. Cap to that remaining column so the
+                // composer and Routines are not painted under the dock.
+                let dock = if crate::chrome::dock_in_host() { 44.0 } else { 0.0 };
+                let h = (cap_ui.window_size().height - TITLE_BAR - dock).max(160.0);
                 let _ = cap.clone().layout(|l| {
                     l.height = Length::Px(h);
                     l.max_height = Length::Px(h);
@@ -284,10 +288,9 @@ fn home_bar(ui: &Ui, grove: Grove) -> El {
                 .child(
                     w::row(&ui)
                         .align(Align::Center)
-                        .gap(unit * 2.0)
+                        .gap(unit * 3.0)
                         .padding(bar_insets(unit))
                         .layout(|l| l.width = Length::Percent(1.0))
-                        .child(brand(&ui, grove.clone()))
                         .child(home_tabs(&ui, grove.clone()))
                         .child(spacer(&ui)),
                 )
@@ -352,7 +355,7 @@ fn goal_bar(ui: &Ui, grove: Grove) -> El {
                     &ui,
                     grove.clone(),
                     RoomTab::Storyline,
-                    format!("📖 {}", tr(&ui, "grove-storyline")),
+                    tr(&ui, "grove-storyline"),
                     true,
                 ));
             w::column(&ui)
@@ -388,8 +391,8 @@ fn child_bar(ui: &Ui, grove: Grove) -> El {
                         .get()
                         .into_iter()
                         .find(|c| c.child_id == id)
-                        .map(|c| format!("🌱 {}", c.label))
-                        .unwrap_or_else(|| "🌱 Side job".into()),
+                        .map(|c| c.label)
+                        .unwrap_or_else(|| "Side job".into()),
                     _ => String::new(),
                 }
             });
@@ -483,15 +486,9 @@ fn home_tabs(ui: &Ui, grove: Grove) -> El {
 
 fn home_tab(ui: &Ui, grove: Grove, tab: HomeTab, label: String, tip: &str) -> El {
     let press = grove.clone();
-    let b = w::button(ui, label.clone(), move || press.set_home_tab(tab));
-    let paint = b.clone();
-    let colors = ui.theme().colors.clone();
     let watch = grove.clone();
-    let b = b.bind(move || {
-        let on = watch.home_tab.get() == tab;
-        paint.state(States::SELECTED, on);
-        let _ = paint.clone().style(chip_style(&colors, on));
-    });
+    let on = Rc::new(move || watch.home_tab.get() == tab);
+    let b = place_tab(ui, label.clone(), on, move || press.set_home_tab(tab));
     w::tooltip(&b, tip);
     let seen = grove;
     b.semantics(move || {
@@ -504,25 +501,65 @@ fn home_tab(ui: &Ui, grove: Grove, tab: HomeTab, label: String, tip: &str) -> El
 
 fn room_tab(ui: &Ui, grove: Grove, tab: RoomTab, label: String, _story: bool) -> El {
     let g = grove.clone();
-    let b = w::button(ui, label.clone(), move || g.set_room_tab(tab));
-    let paint = b.clone();
-    let colors = ui.theme().colors.clone();
-    let g = grove.clone();
-    let b = b.bind(move || {
-        let on = g.room_tab.get() == tab;
-        paint.state(States::SELECTED, on);
-        let _ = paint.clone().style(chip_style(&colors, on));
-    });
-    let g = grove;
+    let watch = grove.clone();
+    let on = Rc::new(move || watch.room_tab.get() == tab);
+    let b = place_tab(ui, label.clone(), on, move || g.set_room_tab(tab));
+    let seen = grove;
     b.semantics(move || {
         Semantics::new(Role::Button)
             .label(label.clone())
-            .checked(g.room_tab.get() == tab)
+            .checked(seen.room_tab.get() == tab)
             .action(Action::Click)
     })
 }
 
-fn mode_chips(ui: &Ui, grove: &Grove) -> El {
+/// Second-level tabs: typographic, with a 1px underline when selected.
+/// Distinct from the boxed Grove/Studio switcher in the title bar.
+fn place_tab(
+    ui: &Ui,
+    label: String,
+    on: Rc<dyn Fn() -> bool>,
+    press: impl Fn() + 'static,
+) -> El {
+    let colors = ui.theme().colors.clone();
+    let b = w::button(ui, label, press).variant("quiet");
+    let paint = b.clone();
+    let on_btn = on.clone();
+    let colors_btn = colors.clone();
+    let b = b.bind(move || {
+        let selected = on_btn();
+        paint.state(States::SELECTED, selected);
+        let _ = paint.clone().style(
+            StylePatch::new()
+                .background(colors_btn.bg.with_alpha(0.0))
+                .border_width(0.0)
+                .foreground(if selected {
+                    colors_btn.accent
+                } else {
+                    colors_btn.muted
+                })
+                .weight(if selected { 600.0 } else { 500.0 }),
+        );
+    });
+    let rule = ui.el("tab-underline").layout(|l| {
+        l.width = Length::Percent(1.0);
+        l.height = Length::Px(1.0);
+        l.min_height = Length::Px(1.0);
+    });
+    let paint_rule = rule.clone();
+    let colors_rule = colors;
+    let rule = rule.bind(move || {
+        let selected = on();
+        let _ = paint_rule.clone().style(StylePatch::new().background(if selected {
+            colors_rule.accent
+        } else {
+            colors_rule.bg.with_alpha(0.0)
+        }));
+    });
+    w::column(ui).align(Align::Stretch).child(b).child(rule)
+}
+
+pub(super) fn mode_chips(ui: &Ui, grove: &Grove) -> El {
     let unit = ui.theme().spacing.unit;
     let mut row = w::row(ui)
         .align(Align::Center)
@@ -546,7 +583,7 @@ fn mode_chips(ui: &Ui, grove: &Grove) -> El {
         let b = b.bind(move || {
             let on = g.studio.mode.get() == mode;
             paint.state(States::SELECTED, on);
-            let _ = paint.clone().style(chip_style(&colors, on));
+            let _ = paint.clone().style(crate::tokens::chip(&colors, on).weight(550.0));
         });
         w::tooltip(&b, tip);
         let g = grove.clone();
@@ -575,22 +612,85 @@ fn chip_style(colors: &remedy_ui::style::ColorRoles, on: bool) -> StylePatch {
     }
 }
 
+
+fn studio_handoff_card(ui: &Ui, grove: Grove) -> El {
+    let watch = grove.clone();
+    show(ui, move || watch.handoff.get().is_some(), {
+        let ui = ui.clone();
+        let grove = grove.clone();
+        move || {
+            let colors = ui.theme().colors.clone();
+            let unit = ui.theme().spacing.unit;
+            let Some(item) = grove.handoff.get() else {
+                return ui.el("grove-handoff-empty");
+            };
+            let title_key = match item.kind {
+                logic::StudioKind::Build => "grove-handoff-build",
+                logic::StudioKind::Plan => "grove-handoff-plan",
+                logic::StudioKind::Chat => "grove-handoff-chat",
+            };
+            let title = crate::messages().text(&ui, title_key);
+            let mut prompt = item.prompt.clone();
+            if prompt.chars().count() > 140 {
+                prompt = prompt.chars().take(137).collect::<String>() + "…";
+            }
+            let quote = w::text(&ui, prompt)
+                .style(crate::tokens::typo(crate::tokens::BODY).foreground(colors.text))
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                });
+            let note = w::text(&ui, crate::messages().text(&ui, "grove-handoff-body"))
+                .style(crate::tokens::typo(crate::tokens::META).foreground(colors.muted))
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                });
+            let g = grove.clone();
+            let open = w::button(&ui, crate::messages().text(&ui, "grove-handoff-open"), move || {
+                g.show_studio();
+            })
+            .style(crate::tokens::primary_button(&colors))
+            .semantics(
+                Semantics::new(Role::Button)
+                    .label(crate::messages().text(&ui, "grove-handoff-open"))
+                    .action(Action::Click),
+            );
+            let body = w::column(&ui)
+                .gap(unit * 2.0)
+                .align(Align::Start)
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                })
+                .child(quote)
+                .child(note)
+                .child(open);
+            crate::tokens::info_panel(&ui, title, body).layout(|l| {
+                l.margin = Insets {
+                    top: unit,
+                    end: unit * 3.0,
+                    bottom: unit * 2.0,
+                    start: unit * 3.0,
+                };
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            })
+        }
+    })
+    .el()
+    .layout(|l| l.width = Length::Percent(1.0))
+}
+
 fn home_plots(ui: &Ui, grove: Grove, app: Option<App>) -> El {
     let unit = ui.theme().spacing.unit;
     let scroll = w::scroll(ui)
-        .child(hello(ui, grove.clone()))
-        .child(away(ui, grove.clone()));
+        .child(space_kicker(ui))
+        .child(away(ui, grove.clone()))
+        .child(studio_handoff_card(ui, grove.clone()));
     let scroll = scroll
         .child(life_banner(ui, grove.clone()))
         .child(head::head_block(ui, grove.clone()))
-        .child(mode_chips(ui, &grove).layout(|l| {
-            l.margin = Insets {
-                top: 0.0,
-                end: unit * 3.0,
-                bottom: unit,
-                start: unit * 3.0,
-            };
-        }))
         .child(section_label(ui, grove.clone()))
         .child(plots(ui, grove.clone()))
         .child(head::house_block(ui, grove.clone()));
@@ -600,7 +700,7 @@ fn home_plots(ui: &Ui, grove: Grove, app: Option<App>) -> El {
         .padding(Insets {
             top: 0.0,
             end: 0.0,
-            bottom: unit * 4.0,
+            bottom: unit * 6.0,
             start: 0.0,
         })
         .layout(|l| {
@@ -667,35 +767,19 @@ fn goal_alongside(ui: &Ui, grove: Grove, app: Option<App>, id: String) -> El {
         .child(split)
 }
 
-fn hello(ui: &Ui, grove: Grove) -> El {
+fn space_kicker(ui: &Ui) -> El {
     let unit = ui.theme().spacing.unit;
-    let u = ui.clone();
-    let g = grove.clone();
-    let greet = w::heading(ui, 1, move || {
-        let hello = crate::messages().text(&u, logic::hello_key(g.hour()));
-        let name = g.studio.user_name.get();
-        if name.trim().is_empty() {
-            hello
-        } else {
-            format!("{hello}, {name}")
-        }
-    });
-    let g = grove;
-    w::column(ui)
-        .gap(unit * 0.6)
-        .padding(Insets {
-            top: unit * 3.0,
-            end: unit * 3.0,
-            bottom: unit,
-            start: unit * 3.0,
+    let colors = ui.theme().colors.clone();
+    w::text(ui, "Your space")
+        .style(crate::tokens::typo(crate::tokens::SECTION).foreground(colors.muted))
+        .layout(|l| {
+            l.margin = Insets {
+                top: unit * 3.0,
+                end: unit * 3.0,
+                bottom: unit,
+                start: unit * 3.0,
+            };
         })
-        .child(w::text(ui, "Your space").variant("muted"))
-        .child(greet)
-        .child(
-            w::text(ui, "")
-                .variant("muted")
-                .text(move || intro_line(&g)),
-        )
 }
 
 fn intro_line(grove: &Grove) -> String {
@@ -933,21 +1017,24 @@ fn life_asks(task: &LifeTask) -> bool {
 
 fn section_label(ui: &Ui, grove: Grove) -> El {
     let unit = ui.theme().spacing.unit;
-    w::heading(ui, 2, move || {
-        if grove.goals.get().is_empty() {
-            "A few places to start".to_string()
-        } else {
-            "Your goals".to_string()
-        }
-    })
-    .layout(|l| {
-        l.margin = Insets {
-            top: unit,
-            end: unit * 3.0,
-            bottom: unit * 0.5,
-            start: unit * 3.0,
-        };
-    })
+    let colors = ui.theme().colors.clone();
+    w::text(ui, "")
+        .text(move || {
+            if grove.goals.get().is_empty() {
+                "A few places to start".to_string()
+            } else {
+                "Your goals".to_string()
+            }
+        })
+        .style(crate::tokens::typo(crate::tokens::SECTION).foreground(colors.text))
+        .layout(|l| {
+            l.margin = Insets {
+                top: unit * 2.0,
+                end: unit * 3.0,
+                bottom: unit * 2.0,
+                start: unit * 3.0,
+            };
+        })
 }
 
 fn plots(ui: &Ui, grove: Grove) -> El {
@@ -988,17 +1075,24 @@ fn example_row(ui: &Ui, grove: &Grove) -> El {
         let g = grove.clone();
         let title = (*title).to_string();
         let open = title.clone();
+        let colors = ui.theme().colors.clone();
         let b = plot_shell(
             ui,
             w::column(ui)
-                .gap(unit * 0.5)
+                .gap(unit * 2.0)
                 .align(Align::Start)
-                .child(w::text(ui, *icon))
-                .child(w::text(ui, title.clone()).variant("strong"))
-                .child(w::text(ui, *hint).variant("muted"))
+                .child(super::marks::mark(ui, *icon, 32.0))
+                .child(
+                    w::text(ui, title.clone())
+                        .style(crate::tokens::typo(crate::tokens::BODY).weight(600.0).foreground(colors.text)),
+                )
+                .child(
+                    w::text(ui, *hint)
+                        .style(crate::tokens::typo(crate::tokens::META).foreground(colors.muted)),
+                )
                 .child(
                     w::text(ui, "Start here →")
-                        .style(StylePatch::new().foreground(ui.theme().colors.accent)),
+                        .style(crate::tokens::typo(crate::tokens::META).foreground(colors.accent)),
                 ),
         )
         .on_click(move || {
@@ -1023,11 +1117,14 @@ fn seed(ui: &Ui, grove: Grove) -> El {
         .padding(Insets {
             top: unit * 2.0,
             end: unit * 3.0,
-            bottom: unit * 3.0,
+            bottom: unit * 2.0,
             start: unit * 3.0,
         })
-        .child(w::text(ui, "Something else in mind?"))
-        .child(w::button(ui, "Tell Remedy →", move || g.focus_composer()))
+        .child(w::text(ui, "Something else in mind?").variant("muted"))
+        .child(
+            w::button(ui, "Ask Remedy →", move || g.focus_composer())
+                .variant("quiet"),
+        )
 }
 
 fn plot_card(ui: &Ui, grove: &Grove, id: &str) -> El {
@@ -1053,7 +1150,7 @@ fn plot_card(ui: &Ui, grove: &Grove, id: &str) -> El {
                         } else {
                             goal.horizon
                         };
-                        format!("🌿 {kind}")
+                        kind
                     })
                     .unwrap_or_default()
             }
@@ -1273,9 +1370,9 @@ fn plot_shell(ui: &Ui, body: El) -> El {
             StylePatch::new()
                 .background(colors.panel)
                 .foreground(colors.text)
-                .border(colors.line.unwrap_or(colors.muted))
+                .border(crate::tokens::hairline(&colors))
                 .border_width(1.0)
-                .radius(ui.theme().radii.medium),
+                .radius(0.0),
         )
 }
 
@@ -1464,9 +1561,9 @@ fn tr(ui: &Ui, id: &'static str) -> String {
 
 fn bar_insets(unit: f32) -> Insets {
     Insets {
-        top: unit * 1.5,
+        top: unit * 2.0,
         end: unit * 3.0,
-        bottom: unit * 1.5,
+        bottom: unit * 2.0,
         start: unit * 3.0,
     }
 }

@@ -275,9 +275,9 @@ fn pane_kicker(ui: &Ui, kicker: &'static str, sub: &'static str) -> El {
     w::row(ui)
         .align(Align::Center)
         .padding(Insets {
-            top: 10.0,
+            top: 8.0,
             end: tokens::GUTTER,
-            bottom: 10.0,
+            bottom: 8.0,
             start: tokens::GUTTER,
         })
         .layout(|l| {

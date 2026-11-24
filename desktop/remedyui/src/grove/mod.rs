@@ -9,12 +9,15 @@ mod child;
 mod decision;
 mod head;
 mod logic;
+mod marks;
 mod stage;
 mod state;
 mod store;
 mod view;
 
-pub(crate) use state::Grove;
+pub(crate) use logic::StudioKind;
+pub(crate) use marks::PlotMark;
+pub(crate) use state::{Grove, StudioHandoff};
 
 use std::cell::RefCell;
 
@@ -96,4 +99,13 @@ mod tests {
         assert!(grove.bookmarks.get().is_empty());
         unbind_live();
     }
+}
+
+/// Number of planted goals already in Grove prefs. Used by presence growth.
+pub(crate) fn planted_goal_count() -> u32 {
+    store::load().goal_sessions.len() as u32
+}
+
+pub(crate) fn remedy_home() -> std::path::PathBuf {
+    store::remedy_home()
 }

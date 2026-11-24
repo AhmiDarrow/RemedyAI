@@ -1,0 +1,42 @@
+# Optional bundled skin. A user pack may replace this file with a fully
+# declarative face in the same format as square.toml.
+id = "wolf"
+name = "Wolf Guide"
+blurb = "A geometric wolf guide. Optional bundled skin."
+grid = 24
+engine = "legacy"
+
+[colors]
+hair = "line"
+fill = "panel"
+ink = "accent"
+mute = "muted"
+earth = "#C4A36A"
+danger = "danger"
+
+[moods.idle]
+[moods.listening]
+hair = "ink"
+[moods.thinking]
+[moods.working]
+hair = "ink"
+[moods.happy]
+hair = "ink"
+same_as = "done"
+[moods.done]
+hair = "ink"
+[moods.error]
+hair = "danger"
+ink = "danger"
+[moods.focused]
+same_as = "working"
+[moods.curious]
+same_as = "listening"
+[moods.proud]
+same_as = "happy"
+[moods.sleepy]
+same_as = "idle"
+[moods.concerned]
+same_as = "error"
+[moods.surprised]
+same_as = "listening"

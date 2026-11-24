@@ -300,7 +300,7 @@ fn composer_hint_line(ui: &Ui, studio: Studio) -> El {
 
 fn field_row(ui: &Ui, studio: &Studio, field: &remedy_ui::TextField, unit: f32) -> El {
     let colors = ui.theme().colors.clone();
-    let line = colors
+    let _line = colors
         .line
         .unwrap_or(colors.accent.mix_oklab(colors.bg, 0.65));
     let attach = {
@@ -320,23 +320,22 @@ fn field_row(ui: &Ui, studio: &Studio, field: &remedy_ui::TextField, unit: f32) 
             .align(Align::Center)
             .gap(unit)
             .padding(Insets {
-                top: unit * 1.5,
-                end: unit * 1.5,
-                bottom: unit * 1.5,
-                start: unit * 1.5,
+                top: unit * 2.0,
+                end: unit * 2.0,
+                bottom: unit * 2.0,
+                start: unit * 2.0,
             })
             .layout(|l| {
                 l.width = Length::Percent(1.0);
-                l.min_height = Length::Px(52.0);
+                l.min_height = Length::Px(48.0);
                 l.shrink = 0.0;
             })
             .style(
                 StylePatch::new()
                     .background(colors.panel)
-                    .radius(ui.theme().radii.large)
-                    .border(line)
-                    .border_width(1.0)
-                    .shadow(crate::tokens::elevation(&colors)),
+                    .radius(0.0)
+                    .border(crate::tokens::hairline(&colors))
+                    .border_width(1.0),
             )
             .child(attach)
             .child(mic)

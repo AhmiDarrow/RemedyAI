@@ -1,8 +1,9 @@
 //! Appearance and font choices. They apply immediately and are stored in
 //! `config.toml` next to the families `fonts.rs` already reads.
 //!
-//! `[fonts]` keeps `ui` and `code` as family names (`Remedy Sans UI`,
-//! `AhmiPrint`). Heading, reading, and accent are written beside them.
+//! `[fonts]` keeps `ui`, `display`, and `code` as family names (`Remedy Sans UI`,
+//! `Ahmi Pixel`, `AhmiPrint`). `heading` is still read and written as a
+//! display alias. Reading and accent are written beside them.
 //! `[appearance]` holds theme, density, scale, motion, contrast, accent, and
 //! the last settings section. Other tables in the file are left alone.
 
@@ -43,11 +44,7 @@ pub fn load_into(s: Settings) {
     let fonts = Fonts::from_toml(&text);
     s.font_ui.set(logic::face_for_family(&fonts.ui));
     s.font_code.set(logic::face_for_family(&fonts.code));
-    if let Some(h) = logic::table_string(&text, "fonts", "heading") {
-        if !h.is_empty() {
-            s.font_heading.set(logic::face_for_family(&h));
-        }
-    }
+    s.font_heading.set(logic::face_for_family(&fonts.display));
     if let Some(h) = logic::table_string(&text, "fonts", "reading") {
         if !h.is_empty() {
             s.font_reading.set(logic::face_for_family(&h));
@@ -75,6 +72,9 @@ pub fn load_into(s: Settings) {
     }
     if let Some(v) = logic::table_bool(&text, "appearance", "reduce_motion") {
         s.reduce_motion.set(v);
+    }
+    if let Some(v) = logic::table_bool(&text, "appearance", "show_presence") {
+        s.show_presence.set(v);
     }
     if let Some(v) = logic::table_bool(&text, "appearance", "high_contrast") {
         s.high_contrast.set(v);
@@ -125,10 +125,10 @@ pub fn apply(s: Settings) {
     let mut theme = choice.resolve(s.system_dark.get(), high);
     let fonts = Fonts {
         ui: logic::family_for_face(&s.font_ui.get()),
+        display: logic::family_for_face(&s.font_heading.get()),
         code: logic::family_for_face(&s.font_code.get()),
     };
     fonts::apply_to_theme(&mut theme, &fonts);
-    theme.heading_families = vec![logic::family_for_face(&s.font_heading.get())];
     let factor = logic::font_scale_factor(&s.font_scale.get());
     theme.type_scale.small *= factor;
     theme.type_scale.body *= factor;
@@ -160,6 +160,7 @@ pub fn persist(s: Settings) {
     let fonts = [
         ("ui", logic::toml_quote(&logic::family_for_face(&s.font_ui.get()))),
         ("code", logic::toml_quote(&logic::family_for_face(&s.font_code.get()))),
+        ("display", logic::toml_quote(&logic::family_for_face(&s.font_heading.get()))),
         ("heading", logic::toml_quote(&logic::family_for_face(&s.font_heading.get()))),
         ("reading", logic::toml_quote(&logic::family_for_face(&s.font_reading.get()))),
         ("accent", logic::toml_quote(&logic::family_for_face(&s.font_accent.get()))),
@@ -170,6 +171,7 @@ pub fn persist(s: Settings) {
         ("density", logic::toml_quote(&s.density.get())),
         ("font_scale", logic::toml_quote(&s.font_scale.get())),
         ("reduce_motion", bool_toml(s.reduce_motion.get())),
+        ("show_presence", bool_toml(s.show_presence.get())),
         ("high_contrast", bool_toml(s.high_contrast.get())),
         ("custom_accent", logic::toml_quote(&s.custom_accent.get())),
         ("settings_mode", logic::toml_quote(&s.mode.get())),
@@ -249,7 +251,7 @@ pub fn set_accent(s: Settings, hex: &str) {
 pub fn set_font(s: Settings, role: &str, face: &str) {
     match role {
         "ui" => s.font_ui.set(face.to_string()),
-        "heading" => s.font_heading.set(face.to_string()),
+        "heading" | "display" => s.font_heading.set(face.to_string()),
         "reading" => s.font_reading.set(face.to_string()),
         "accent" => s.font_accent.set(face.to_string()),
         "code" => s.font_code.set(face.to_string()),
@@ -261,7 +263,7 @@ pub fn set_font(s: Settings, role: &str, face: &str) {
 
 pub fn reset_fonts(s: Settings) {
     s.font_ui.set("remedy-sans-ui".into());
-    s.font_heading.set("remedy-sans".into());
+    s.font_heading.set("ahmi-pixel".into());
     s.font_reading.set("ahmi-print".into());
     s.font_accent.set("ahmi-pixel".into());
     s.font_code.set("ahmi-print".into());
@@ -271,7 +273,7 @@ pub fn reset_fonts(s: Settings) {
 
 pub fn fonts_are_default(s: Settings) -> bool {
     s.font_ui.get() == "remedy-sans-ui"
-        && s.font_heading.get() == "remedy-sans"
+        && s.font_heading.get() == "ahmi-pixel"
         && s.font_reading.get() == "ahmi-print"
         && s.font_accent.get() == "ahmi-pixel"
         && s.font_code.get() == "ahmi-print"

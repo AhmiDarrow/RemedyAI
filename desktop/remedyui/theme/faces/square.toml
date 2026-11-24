@@ -1,0 +1,571 @@
+# Square — the shipped default face skin.
+#
+# A living, neutral square personage. No cultural motif. Geometry, moods,
+# colors and growth stages are declared here so a user pack or RemedyLua
+# can add or replace a face without a code change. Drawn on a 24-unit grid.
+# Dark Forest tokens; no glow, blur, gradients, glass, or blobs.
+
+id = "square"
+name = "Square"
+blurb = "A living square face. Neutral, crafted, and skinnable with the theme."
+grid = 24
+
+[colors]
+hair = "line"
+fill = "panel"
+ink = "accent"
+mute = "muted"
+sock = "bg"
+danger = "danger"
+
+[motion]
+breath = true
+blink = true
+glance_moods = ["idle", "listening", "sleepy", "curious"]
+
+# --- growth: cumulative, starting at stage 0 (the face itself is always complete)
+
+[[growth]]
+id = "new"
+label = "New"
+stage = 0
+when = "The first days."
+
+[[growth]]
+id = "familiar"
+label = "Familiar"
+stage = 1
+when = "A few conversations. A quiet inner ring."
+
+[[growth.parts]]
+name = "ring"
+kind = "inner-ring"
+color = "hair"
+
+[[growth]]
+id = "companion"
+label = "Companion"
+stage = 2
+when = "Settled use. Tiny corner studs."
+
+[[growth.parts]]
+name = "studs"
+kind = "rects"
+color = "ink"
+rects = [
+  { x = 4, y = 4, w = 1, h = 1 },
+  { x = 19, y = 4, w = 1, h = 1 },
+  { x = 4, y = 19, w = 1, h = 1 },
+  { x = 19, y = 19, w = 1, h = 1 },
+]
+
+[[growth]]
+id = "seasoned"
+label = "Seasoned"
+stage = 3
+when = "A long companionship. Side ticks and a chin mark."
+
+[[growth.parts]]
+name = "ticks"
+kind = "rects"
+color = "ink"
+rects = [
+  { x = 2, y = 11, w = 1, h = 2 },
+  { x = 21, y = 11, w = 1, h = 2 },
+  { x = 11, y = 20, w = 2, h = 1 },
+]
+
+# --- always-on frame; moods replace named parts and may recolor hair/ink
+
+[[parts]]
+name = "frame"
+kind = "stepped-frame"
+hair = "hair"
+fill = "fill"
+
+# ----- idle
+[moods.idle]
+glance = true
+blink = true
+
+[[moods.idle.parts]]
+name = "brow_l"
+kind = "rects"
+color = "mute"
+rects = [{ x = 5, y = 7, w = 6, h = 1 }]
+
+[[moods.idle.parts]]
+name = "brow_r"
+kind = "rects"
+color = "mute"
+rects = [{ x = 13, y = 7, w = 6, h = 1 }]
+
+[[moods.idle.parts]]
+name = "eyes"
+kind = "eyes"
+x = 5
+right_x = 13
+y = 9
+w = 6
+h = 4
+pupil_x = 2
+pupil_y = 1
+pupil_w = 2
+pupil_h = 2
+lid_top = 1
+rim = "ink"
+sock = "sock"
+pupil = "ink"
+
+[[moods.idle.parts]]
+name = "mouth"
+kind = "mouth"
+shape = "line"
+y = 16
+w = 4
+color = "mute"
+
+# ----- listening
+[moods.listening]
+hair = "ink"
+blink = true
+glance = true
+
+[[moods.listening.parts]]
+name = "brow_l"
+kind = "brow"
+shape = "arc"
+x = 5
+y = 6
+w = 6
+color = "ink"
+
+[[moods.listening.parts]]
+name = "brow_r"
+kind = "brow"
+shape = "arc"
+x = 13
+y = 6
+w = 6
+color = "ink"
+
+[[moods.listening.parts]]
+name = "eyes"
+kind = "eyes"
+x = 5
+right_x = 13
+y = 8
+w = 6
+h = 5
+pupil_x = 2
+pupil_y = 1
+pupil_w = 2
+pupil_h = 2
+rim = "ink"
+sock = "sock"
+pupil = "ink"
+
+[[moods.listening.parts]]
+name = "mouth"
+kind = "mouth"
+shape = "slot"
+y = 16
+w = 4
+h = 2
+color = "mute"
+
+# ----- thinking
+[moods.thinking]
+blink = true
+
+[[moods.thinking.parts]]
+name = "brow_l"
+kind = "rects"
+color = "mute"
+rects = [{ x = 5, y = 8, w = 5, h = 1 }]
+
+[[moods.thinking.parts]]
+name = "brow_r"
+kind = "brow"
+shape = "arc"
+x = 13
+y = 6
+w = 6
+color = "ink"
+
+[[moods.thinking.parts]]
+name = "eyes"
+kind = "eyes"
+x = 5
+right_x = 13
+y = 9
+w = 6
+h = 4
+pupil_x = 3
+pupil_y = 1
+pupil_w = 2
+pupil_h = 2
+rim = "ink"
+sock = "sock"
+pupil = "ink"
+
+[[moods.thinking.parts]]
+name = "mouth"
+kind = "mouth"
+shape = "hmm"
+y = 17
+color = "mute"
+
+# ----- working
+[moods.working]
+hair = "ink"
+blink = true
+
+[[moods.working.parts]]
+name = "brows"
+kind = "brow"
+shape = "knit"
+y = 8
+color = "ink"
+
+[[moods.working.parts]]
+name = "eyes"
+kind = "eyes"
+x = 5
+right_x = 13
+y = 10
+w = 6
+h = 3
+pupil_x = 2
+pupil_y = 0
+pupil_w = 2
+pupil_h = 2
+rim = "ink"
+sock = "sock"
+pupil = "ink"
+
+[[moods.working.parts]]
+name = "mouth"
+kind = "mouth"
+shape = "grit"
+y = 16
+w = 6
+color = "ink"
+
+# ----- focused
+[moods.focused]
+hair = "ink"
+blink = true
+
+[[moods.focused.parts]]
+name = "brow_l"
+kind = "rects"
+color = "ink"
+rects = [{ x = 5, y = 7, w = 6, h = 1 }]
+
+[[moods.focused.parts]]
+name = "brow_r"
+kind = "rects"
+color = "ink"
+rects = [{ x = 13, y = 7, w = 6, h = 1 }]
+
+[[moods.focused.parts]]
+name = "eyes"
+kind = "eyes"
+x = 5
+right_x = 13
+y = 9
+w = 6
+h = 4
+pupil_x = 2
+pupil_y = 1
+pupil_w = 2
+pupil_h = 2
+rim = "ink"
+sock = "sock"
+pupil = "ink"
+
+[[moods.focused.parts]]
+name = "mouth"
+kind = "mouth"
+shape = "line"
+y = 16
+w = 4
+color = "ink"
+
+# ----- curious
+[moods.curious]
+blink = true
+glance = true
+
+[[moods.curious.parts]]
+name = "brow_l"
+kind = "brow"
+shape = "arc"
+x = 5
+y = 5
+w = 6
+color = "ink"
+
+[[moods.curious.parts]]
+name = "brow_r"
+kind = "brow"
+shape = "arc"
+x = 13
+y = 5
+w = 6
+color = "ink"
+
+[[moods.curious.parts]]
+name = "eyes"
+kind = "eyes"
+x = 5
+right_x = 13
+y = 7
+w = 6
+h = 6
+pupil_x = 2
+pupil_y = 1
+pupil_w = 2
+pupil_h = 2
+rim = "ink"
+sock = "sock"
+pupil = "ink"
+
+[[moods.curious.parts]]
+name = "mouth"
+kind = "mouth"
+shape = "o"
+y = 16
+color = "mute"
+
+# ----- happy (also used for a clean finished turn)
+[moods.happy]
+hair = "ink"
+blink = false
+same_as_also = "done"
+
+[[moods.happy.parts]]
+name = "brow_l"
+kind = "brow"
+shape = "arc"
+x = 5
+y = 7
+w = 6
+color = "mute"
+
+[[moods.happy.parts]]
+name = "brow_r"
+kind = "brow"
+shape = "arc"
+x = 13
+y = 7
+w = 6
+color = "mute"
+
+[[moods.happy.parts]]
+name = "eyes"
+kind = "happy-eyes"
+y = 10
+color = "ink"
+
+[[moods.happy.parts]]
+name = "mouth"
+kind = "mouth"
+shape = "smile"
+color = "ink"
+
+# ----- proud
+[moods.proud]
+hair = "ink"
+blink = true
+
+[[moods.proud.parts]]
+name = "brow_l"
+kind = "rects"
+color = "mute"
+rects = [{ x = 5, y = 6, w = 6, h = 1 }]
+
+[[moods.proud.parts]]
+name = "brow_r"
+kind = "rects"
+color = "mute"
+rects = [{ x = 13, y = 6, w = 6, h = 1 }]
+
+[[moods.proud.parts]]
+name = "eyes"
+kind = "eyes"
+x = 5
+right_x = 13
+y = 8
+w = 6
+h = 4
+pupil_x = 2
+pupil_y = 1
+pupil_w = 2
+pupil_h = 2
+lid_top = 1
+rim = "ink"
+sock = "sock"
+pupil = "ink"
+
+[[moods.proud.parts]]
+name = "mouth"
+kind = "mouth"
+shape = "small-smile"
+color = "ink"
+
+# ----- sleepy
+[moods.sleepy]
+blink = false
+glance = true
+
+[[moods.sleepy.parts]]
+name = "brow_l"
+kind = "rects"
+color = "mute"
+rects = [{ x = 5, y = 9, w = 6, h = 1 }]
+
+[[moods.sleepy.parts]]
+name = "brow_r"
+kind = "rects"
+color = "mute"
+rects = [{ x = 13, y = 9, w = 6, h = 1 }]
+
+[[moods.sleepy.parts]]
+name = "eyes"
+kind = "eyes"
+x = 5
+right_x = 13
+y = 11
+w = 6
+h = 3
+pupil_x = 2
+pupil_y = 1
+pupil_w = 2
+pupil_h = 1
+rim = "mute"
+sock = "sock"
+pupil = "ink"
+
+[[moods.sleepy.parts]]
+name = "mouth"
+kind = "mouth"
+shape = "line"
+y = 17
+w = 6
+color = "mute"
+
+# ----- concerned
+[moods.concerned]
+blink = true
+
+[[moods.concerned.parts]]
+name = "brows"
+kind = "brow"
+shape = "worry"
+y = 6
+color = "ink"
+
+[[moods.concerned.parts]]
+name = "eyes"
+kind = "eyes"
+x = 5
+right_x = 13
+y = 8
+w = 6
+h = 5
+pupil_x = 2
+pupil_y = 2
+pupil_w = 2
+pupil_h = 2
+rim = "ink"
+sock = "sock"
+pupil = "ink"
+
+[[moods.concerned.parts]]
+name = "mouth"
+kind = "mouth"
+shape = "frown"
+color = "mute"
+
+# ----- error
+[moods.error]
+hair = "danger"
+ink = "danger"
+blink = false
+
+[[moods.error.parts]]
+name = "brows"
+kind = "brow"
+shape = "knit"
+y = 6
+color = "danger"
+
+[[moods.error.parts]]
+name = "eyes"
+kind = "eyes"
+x = 5
+right_x = 13
+y = 9
+w = 6
+h = 3
+pupil_x = 2
+pupil_y = 0
+pupil_w = 2
+pupil_h = 2
+rim = "danger"
+sock = "sock"
+pupil = "danger"
+
+[[moods.error.parts]]
+name = "mouth"
+kind = "mouth"
+shape = "frown"
+color = "danger"
+
+# ----- surprised
+[moods.surprised]
+hair = "ink"
+blink = false
+
+[[moods.surprised.parts]]
+name = "brow_l"
+kind = "brow"
+shape = "arc"
+x = 5
+y = 5
+w = 6
+color = "ink"
+
+[[moods.surprised.parts]]
+name = "brow_r"
+kind = "brow"
+shape = "arc"
+x = 13
+y = 5
+w = 6
+color = "ink"
+
+[[moods.surprised.parts]]
+name = "eyes"
+kind = "eyes"
+x = 5
+right_x = 13
+y = 7
+w = 6
+h = 6
+pupil_x = 2
+pupil_y = 2
+pupil_w = 2
+pupil_h = 2
+rim = "ink"
+sock = "sock"
+pupil = "ink"
+
+[[moods.surprised.parts]]
+name = "mouth"
+kind = "mouth"
+shape = "o"
+y = 16
+color = "mute"
