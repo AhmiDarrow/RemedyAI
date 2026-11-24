@@ -127,8 +127,6 @@ impl Wizard {
                 let opts = model::free_providers_or_fallback(&v);
                 if let Some(wake) = wake {
                     let _ = wake.post(move || wiz.free_options.set(opts));
-                } else {
-                    wiz.free_options.set(opts);
                 }
             }
         });
