@@ -62,9 +62,10 @@ pub enum PresenceStyle {
     GeometricPixel,
 }
 
-/// Which forest-spirit form the geometric mark takes.
+/// Which bundled face skin the presence draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PresenceKind {
+    Square,
     MorningStar,
     Wolf,
     Bear,
@@ -157,7 +158,7 @@ pub const DARK_FOREST: ThemePack = ThemePack {
         presence_review: 72.0,
         bubble_max: 560.0,
         presence_style: PresenceStyle::GeometricPixel,
-        presence_kind: PresenceKind::MorningStar,
+        presence_kind: PresenceKind::Square,
         presence_grid: 24.0,
         presence_enabled_default: true,
         select_mark: 4.0,
@@ -176,7 +177,21 @@ pub fn layout() -> &'static LayoutSpec {
 }
 
 pub fn presence_kind() -> crate::presence::Kind {
+    presence_skin_kind()
+}
+
+pub fn presence_skin() -> &'static str {
     match DARK_FOREST.layout.presence_kind {
+        PresenceKind::Square => "square",
+        PresenceKind::MorningStar => "morning-star",
+        PresenceKind::Wolf => "wolf",
+        PresenceKind::Bear => "bear",
+    }
+}
+
+pub fn presence_skin_kind() -> crate::presence::Kind {
+    match DARK_FOREST.layout.presence_kind {
+        PresenceKind::Square => crate::presence::Kind::Square,
         PresenceKind::MorningStar => crate::presence::Kind::MorningStar,
         PresenceKind::Wolf => crate::presence::Kind::Wolf,
         PresenceKind::Bear => crate::presence::Kind::Bear,

@@ -70,3 +70,18 @@ fn write_design6_review_shots() {
     write_shot(dir, "home-wolf", remedy_desktop::design_home_wolf, 1180.0, 740.0);
     write_shot(dir, "home-bear", remedy_desktop::design_home_bear, 1180.0, 740.0);
 }
+
+#[test]
+fn write_design7_review_shots() {
+    let Ok(dir) = std::env::var("REMEDY_DESIGN_OUT") else {
+        return;
+    };
+    no_spawn_defaults();
+    let dir = Path::new(&dir);
+    let _ = std::fs::create_dir_all(dir);
+    write_shot(dir, "moods-72", remedy_desktop::design_moods_72, 1180.0, 560.0);
+    write_shot(dir, "moods-144", remedy_desktop::design_moods_144, 1180.0, 740.0);
+    write_shot(dir, "evolution", remedy_desktop::design_evolution, 1180.0, 560.0);
+    write_shot(dir, "home", remedy_desktop::design_home, 1180.0, 740.0);
+    write_shot(dir, "build-chat", remedy_desktop::design_build_chat, 1180.0, 740.0);
+}
