@@ -230,3 +230,107 @@ func TestWebUIResponsesCarrySecurityHeaders(t *testing.T) {
 		}
 	}
 }
+
+func TestFirstCompleteWebUIDirSkipsMissingChunks(t *testing.T) {
+	incomplete := t.TempDir()
+	complete := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(incomplete, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(incomplete, "index.html"),
+		[]byte(`<!doctype html><script type="module" src="./assets/index-AAAAAA1.js"></script>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// index references a chunk that was never copied.
+	if err := os.MkdirAll(filepath.Join(complete, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(complete, "index.html"),
+		[]byte(`<!doctype html><script type="module" src="./assets/index-BBBBBB1.js"></script>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(complete, "assets", "index-BBBBBB1.js"),
+		[]byte(`import "./SetupFlow-CCCCCC1.js";`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(complete, "assets", "SetupFlow-CCCCCC1.js"),
+		[]byte(`export const SetupFlow = 1;`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if missed := webUIMissingAssets(incomplete); len(missed) == 0 {
+		t.Fatal("incomplete dir should report the missing index chunk")
+	}
+	if missed := webUIMissingAssets(complete); len(missed) != 0 {
+		t.Fatalf("complete dir reported missing %v", missed)
+	}
+	got := firstCompleteWebUIDir([]string{incomplete, complete})
+	abs, _ := filepath.Abs(complete)
+	if filepath.Clean(got) != filepath.Clean(abs) {
+		t.Fatalf("firstCompleteWebUIDir = %q, want complete %q", got, abs)
+	}
+}
+
+func TestWebUIHashedAssetsAreImmutable(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"),
+		[]byte(`<!doctype html><title>Remedy</title><script type="module" src="./assets/index-BnNpdofq.js"></script>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "assets", "index-BnNpdofq.js"),
+		[]byte(`import "./SetupFlow-BaqMPPdZ.js";`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "assets", "SetupFlow-BaqMPPdZ.js"),
+		[]byte(`export const SetupFlow = 1;`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "assets", "plain.js"),
+		[]byte(`console.log("plain")`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base, shutdown := startTestServer(t, Config{
+		Token:    "test-token-not-a-secret-16",
+		Version:  "0.50.2",
+		WebUIDir: dir,
+	})
+	defer shutdown()
+	client := &http.Client{Timeout: 3 * time.Second}
+
+	resp, err := client.Get(base + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if cc := resp.Header.Get("Cache-Control"); !strings.Contains(cc, "no-store") {
+		t.Fatalf("index Cache-Control = %q", cc)
+	}
+
+	resp, err = client.Get(base + "/assets/SetupFlow-BaqMPPdZ.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "SetupFlow") {
+		t.Fatalf("SetupFlow status=%d body=%q", resp.StatusCode, body)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "javascript") {
+		t.Fatalf("SetupFlow Content-Type = %q", ct)
+	}
+	if cc := resp.Header.Get("Cache-Control"); !strings.Contains(cc, "immutable") || !strings.Contains(cc, "max-age=31536000") {
+		t.Fatalf("hashed asset Cache-Control = %q", cc)
+	}
+
+	resp, err = client.Get(base + "/assets/plain.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if cc := resp.Header.Get("Cache-Control"); !strings.Contains(cc, "no-store") {
+		t.Fatalf("unhashed asset Cache-Control = %q", cc)
+	}
+}
