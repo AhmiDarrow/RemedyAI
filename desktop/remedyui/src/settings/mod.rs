@@ -7,7 +7,7 @@
 mod bits;
 mod form;
 mod http;
-mod logic;
+pub(crate) mod logic;
 mod panel;
 mod prefs;
 mod sec_general;
