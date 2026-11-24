@@ -120,6 +120,12 @@ if ($needBuild) {
             & $npm.Source install
         }
         if ($LASTEXITCODE -ne 0) { throw "npm install/ci failed ($LASTEXITCODE)" }
+        # npm 12 may skip esbuild's postinstall (allowScripts). Vite needs the binary.
+        $esbuildInstall = Join-Path $desktop "node_modules\esbuild\install.js"
+        if (Test-Path -LiteralPath $esbuildInstall) {
+            & node $esbuildInstall
+            if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "esbuild postinstall failed ($LASTEXITCODE)" }
+        }
         & $npm.Source run build
         if ($LASTEXITCODE -ne 0) { throw "npm run build (Web UI) failed ($LASTEXITCODE)" }
     } finally {
