@@ -6,7 +6,7 @@ use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::layout::{Align, Length};
 use remedy_ui::reactive::Signal;
-use remedy_ui::style::{RADIUS_FULL, StylePatch};
+use remedy_ui::style::StylePatch;
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui, show};
 use serde_json::json;
@@ -46,7 +46,7 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
     let usage = studio.clone();
 
     let bar = w::overflow_row(ui)
-        .gap(unit)
+        .gap(unit * 2.0)
         .keep(connection_indicator(ui, studio.clone()))
         .keep(streaming_slot(ui, studio.clone()))
         .child_maybe_fn(
@@ -162,6 +162,7 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
             l.min_width = Length::Px(0.0);
             l.basis = Length::Px(0.0);
         }))
+        .keep(rail_rule(ui))
         .keep(mode_chip(ui))
         .keep(picker);
 
@@ -252,13 +253,14 @@ fn connection_indicator(ui: &Ui, studio: Studio) -> El {
                             Conn::Ready => ok,
                             Conn::Disconnected => muted,
                         };
-                        StylePatch::new().background(dot).radius(RADIUS_FULL)
+                        StylePatch::new().background(dot).radius(0.0)
                     }
                 })
                 .layout(|l| {
-                    l.width = Length::Px(8.0);
-                    l.height = Length::Px(8.0);
-                    l.min_width = Length::Px(8.0);
+                    let m = crate::theme_pack::layout().connected_mark;
+                    l.width = Length::Px(m);
+                    l.height = Length::Px(m);
+                    l.min_width = Length::Px(m);
                     l.shrink = 0.0;
                 }),
         )
@@ -303,20 +305,16 @@ fn streaming_pill(ui: &Ui) -> El {
             bottom: 4.0,
             start: 8.0,
         })
-        .style(
-            StylePatch::new()
-                .background(accent.with_alpha(0.16))
-                .foreground(accent)
-                .radius(999.0),
-        )
+        .style(crate::tokens::chip(&colors, true))
         .semantics(Semantics::new(Role::Status).label(messages().text(ui, "bar-streaming")))
         .child(
             ui.el("stream-dot")
-                .style(StylePatch::new().background(accent).radius(999.0))
+                .style(StylePatch::new().background(accent).radius(0.0))
                 .layout(|l| {
-                    l.width = Length::Px(6.0);
-                    l.height = Length::Px(6.0);
-                    l.min_width = Length::Px(6.0);
+                    let m = crate::theme_pack::layout().connected_mark;
+                    l.width = Length::Px(m);
+                    l.height = Length::Px(m);
+                    l.min_width = Length::Px(m);
                     l.shrink = 0.0;
                 }),
         )
@@ -520,6 +518,18 @@ fn mode_chip(ui: &Ui) -> El {
     .el()
 }
 
+fn rail_rule(ui: &Ui) -> El {
+    let line = crate::tokens::hairline(&ui.theme().colors);
+    ui.el("status-rule")
+        .style(StylePatch::new().background(line))
+        .layout(|l| {
+            l.width = Length::Px(1.0);
+            l.min_width = Length::Px(1.0);
+            l.height = Length::Px(16.0);
+            l.shrink = 0.0;
+        })
+}
+
 fn chip(ui: &Ui, id: &'static str, active: bool, on_click: impl Fn() + 'static) -> El {
     let colors = ui.theme().colors.clone();
     let u = ui.clone();
@@ -537,13 +547,7 @@ fn chip(ui: &Ui, id: &'static str, active: bool, on_click: impl Fn() + 'static) 
         let label = label.clone();
         move || Semantics::new(Role::Button).label(label.clone()).action(Action::Click)
     });
-    if active {
-        btn = btn.style(
-            StylePatch::new()
-                .background(colors.accent.with_alpha(0.14))
-                .foreground(colors.accent),
-        );
-    }
+    btn = btn.style(crate::tokens::chip(&colors, active).weight(550.0));
     let _ = u;
     btn
 }

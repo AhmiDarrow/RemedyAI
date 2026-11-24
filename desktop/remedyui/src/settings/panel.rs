@@ -156,12 +156,7 @@ fn header(ui: &Ui, s: Settings) -> El {
         .justify(Justify::SpaceBetween)
         .gap(form::gap(ui))
         .fill_width()
-        .child(form::segments(
-            ui,
-            "Settings detail",
-            &[("simple", "Simple"), ("advanced", "Advanced")],
-            s.mode,
-        ));
+        .child(settings_mode_chips(ui, s));
     // The workspace rail already has a header and a collapse button.
     if super::studio_rail_owns_close() {
         row
@@ -220,18 +215,29 @@ fn categories(ui: &Ui, s: Settings) -> El {
     form::stack(ui).child(first).child(second)
 }
 
+fn settings_mode_chips(ui: &Ui, s: Settings) -> El {
+    w::row(ui)
+        .align(Align::Center)
+        .gap(crate::tokens::SPACE * 2.0)
+        .child(mode_chip(ui, s, "simple", "Simple"))
+        .child(mode_chip(ui, s, "advanced", "Advanced"))
+}
+
+fn mode_chip(ui: &Ui, s: Settings, id: &'static str, label: &'static str) -> El {
+    let colors = ui.theme().colors.clone();
+    w::button(ui, label, move || s.mode.set(id.to_string()))
+        .variant("quiet")
+        .style(move || crate::tokens::chip(&colors, s.mode.get() == id).weight(550.0))
+}
+
 fn category_button(ui: &Ui, s: Settings, id: &'static str, label: &'static str) -> El {
+    let colors = ui.theme().colors.clone();
     w::button(ui, label, move || {
         s.category.set(id.to_string());
         state::clear_search(s);
     })
-    .variant(move || {
-        if s.category.get() == id {
-            "primary"
-        } else {
-            "quiet"
-        }
-    })
+    .variant("quiet")
+    .style(move || crate::tokens::chip(&colors, s.category.get() == id).weight(550.0))
 }
 
 fn hint_line(s: Settings) -> String {

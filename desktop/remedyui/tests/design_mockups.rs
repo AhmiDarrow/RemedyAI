@@ -6,17 +6,14 @@ use std::path::Path;
 
 fn no_spawn_defaults() {
     let home = std::env::temp_dir().join(format!(
-        "remedy-design3-home-{}",
+        "remedy-design4-home-{}",
         std::process::id()
     ));
     let _ = std::fs::create_dir_all(&home);
     unsafe {
         std::env::set_var("REMEDY_DESKTOP_NO_SPAWN", "1");
         std::env::set_var("REMEDY_HOME", &home);
-        std::env::set_var(
-            "REMEDY_LAYOUT_DIR",
-            home.join("layout"),
-        );
+        std::env::set_var("REMEDY_LAYOUT_DIR", home.join("layout"));
     }
 }
 
@@ -39,11 +36,15 @@ fn write_shot(
     let bytes = snap.to_png().expect("png");
     let path = dir.join(format!("{name}.png"));
     std::fs::write(&path, bytes).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
-    eprintln!("wrote {} ({} bytes)", path.display(), std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0));
+    eprintln!(
+        "wrote {} ({} bytes)",
+        path.display(),
+        std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
+    );
 }
 
 #[test]
-fn write_design3_review_shots() {
+fn write_design4_review_shots() {
     let Ok(dir) = std::env::var("REMEDY_DESIGN_OUT") else {
         return;
     };
@@ -56,4 +57,28 @@ fn write_design3_review_shots() {
     write_shot(dir, "settings", remedy_desktop::design_settings, 1180.0, 740.0);
     write_shot(dir, "status-rail", remedy_desktop::home_chat, 1180.0, 740.0);
     write_shot(dir, "settings-narrow", remedy_desktop::design_settings, 700.0, 740.0);
+    write_shot(dir, "presence-idle", remedy_desktop::design_presence_idle, 480.0, 400.0);
+    write_shot(
+        dir,
+        "presence-listening",
+        remedy_desktop::design_presence_listening,
+        480.0,
+        400.0,
+    );
+    write_shot(
+        dir,
+        "presence-thinking",
+        remedy_desktop::design_presence_thinking,
+        480.0,
+        400.0,
+    );
+    write_shot(
+        dir,
+        "presence-working",
+        remedy_desktop::design_presence_working,
+        480.0,
+        400.0,
+    );
+    write_shot(dir, "presence-done", remedy_desktop::design_presence_done, 480.0, 400.0);
+    write_shot(dir, "presence-error", remedy_desktop::design_presence_error, 480.0, 400.0);
 }

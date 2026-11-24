@@ -41,17 +41,21 @@ pub fn well(ui: &Ui, studio: Studio) -> El {
                     l.width = Length::Percent(1.0);
                 })
                 .child({
-                    let st = studio.clone();
-                    let u = ui.clone();
-                    show(ui, move || st.mode.get() == WorkMode::Plan, {
-                        let u = u.clone();
+                    let empty_st = studio.clone();
+                    let empty = move || {
+                        empty_st.messages.get().is_empty()
+                            && empty_st.partial.get().is_empty()
+                            && !empty_st.streaming.get()
+                    };
+                    show(ui, empty, {
+                        let u = ui.clone();
                         let studio = studio.clone();
-                        move || crate::plan_dock::workspace(&u, studio.clone())
+                        move || home_surface(&u, studio.clone())
                     })
                     .fallback({
-                        let u = u.clone();
+                        let u = ui.clone();
                         let studio = studio.clone();
-                        move || crate::chat_split::workspace(&u, studio.clone())
+                        move || studio_workspace(&u, studio.clone())
                     })
                     .el()
                     .layout(|l| {
@@ -274,7 +278,7 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
     let items_out = items.clone();
     let st = studio.clone();
     let col = w::column(ui)
-        .gap(tokens::GUTTER)
+        .gap(tokens::SPACE * 2.0)
         .padding(Insets {
             top: unit * 2.0,
             end: tokens::GUTTER,
@@ -359,25 +363,81 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
         .child(latest)
 }
 
-fn empty_well(ui: &Ui, studio: Studio) -> El {
+fn studio_workspace(ui: &Ui, studio: Studio) -> El {
+    let st = studio.clone();
+    let u = ui.clone();
+    show(ui, move || st.mode.get() == WorkMode::Plan, {
+        let u = u.clone();
+        let studio = studio.clone();
+        move || crate::plan_dock::workspace(&u, studio.clone())
+    })
+    .fallback({
+        let u = u.clone();
+        let studio = studio.clone();
+        move || crate::chat_split::workspace(&u, studio.clone())
+    })
+    .el()
+    .layout(|l| {
+        l.grow = 1.0;
+        l.basis = Length::Px(0.0);
+        l.min_width = Length::Px(0.0);
+        l.min_height = Length::Px(0.0);
+        l.width = Length::Percent(1.0);
+        l.height = Length::Percent(1.0);
+    })
+}
+
+/// Agent-first Home: presence, a greeting, status, and intent starters.
+/// The composer below is the single clear input. Tools stay in the rails.
+fn home_surface(ui: &Ui, studio: Studio) -> El {
     let unit = ui.theme().spacing.unit;
+    let colors = ui.theme().colors.clone();
     let name = studio.greeting_name();
     let u = ui.clone();
-    let colors = ui.theme().colors.clone();
     let title = w::text(ui, "")
         .variant("heading")
         .text(move || messages().text(&u, "ready-named").replace("{name}", &name))
         .text_align(remedy_ui::style::TextAlign::Center)
         .layout(|l| {
             l.width = Length::Percent(1.0);
-            l.max_width = Length::Px(440.0);
+            l.max_width = Length::Px(480.0);
             l.min_width = Length::Px(0.0);
         })
         .style(tokens::typo(tokens::TITLE).foreground(colors.text));
+
+    let st_status = studio.clone();
+    let u_status = ui.clone();
+    let status = w::text(ui, "")
+        .text(move || {
+            let conn = match st_status.conn.get() {
+                crate::studio::Conn::Ready => messages().text(&u_status, "status-connected"),
+                crate::studio::Conn::Connecting => messages().text(&u_status, "status-connecting"),
+                crate::studio::Conn::Disconnected => {
+                    messages().text(&u_status, "status-disconnected")
+                }
+                crate::studio::Conn::Error(e) => e,
+            };
+            let model = st_status.model.get();
+            let provider = st_status.provider.get();
+            if model.is_empty() {
+                conn
+            } else if provider.is_empty() {
+                format!("{conn}  ·  {model}")
+            } else {
+                format!("{conn}  ·  {provider} / {model}")
+            }
+        })
+        .text_align(remedy_ui::style::TextAlign::Center)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .style(tokens::typo(tokens::META).foreground(colors.muted));
+
     let mut starters = w::row(ui)
         .align(Align::Center)
         .justify(Justify::Center)
-        .gap(unit)
+        .gap(unit * 2.0)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.wrap = true;
@@ -402,22 +462,27 @@ fn empty_well(ui: &Ui, studio: Studio) -> El {
             )
             .variant("quiet")
             .style(
-                tokens::typo(tokens::META)
+                tokens::chip(&ui.theme().colors, false)
                     .weight(550.0)
-                    .radius(ui.theme().radii.medium)
-                    .border(tokens::hairline(&ui.theme().colors))
-                    .border_width(1.0)
                     .padding(Insets {
-                        top: 6.0,
+                        top: 8.0,
                         end: 12.0,
-                        bottom: 6.0,
+                        bottom: 8.0,
                         start: 12.0,
                     }),
             ),
         );
     }
-    // Scroll so the greeting and starter cards stay above the composer when
-    // the well is shorter than this column (1180×740 and smaller).
+
+    let face = crate::presence::mark(ui, crate::presence::from_studio(&studio), crate::theme_pack::layout().presence_home);
+
+    let status_panel = tokens::info_panel(ui, messages().text(ui, "home-status-title"), status)
+        .layout(|l| {
+            l.max_width = Length::Px(400.0);
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        });
+
     w::scroll(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
@@ -426,43 +491,28 @@ fn empty_well(ui: &Ui, studio: Studio) -> El {
             l.basis = Length::Px(0.0);
             l.min_height = Length::Px(0.0);
         })
-        .semantics(Semantics::new(Role::Region).label("Home starters"))
+        .semantics(Semantics::new(Role::Region).label("Home"))
         .child(
             w::column(ui)
                 .align(Align::Center)
                 .justify(Justify::Center)
-                .gap(unit * 3.0)
-                .padding(Insets::all(tokens::GUTTER * 2.0))
+                .gap(unit * 2.0)
+                .padding(Insets::all(tokens::GUTTER))
                 .layout(|l| {
                     l.width = Length::Percent(1.0);
                     l.grow = 1.0;
                     l.basis = Length::Px(0.0);
                     l.min_height = Length::Px(0.0);
                 })
-                .child(logo::empty_mark(ui))
+                .child(face)
                 .child(title)
-                .child(
-                    say(ui, "ready-hint", "muted")
-                        .layout(|l| {
-                            l.max_width = Length::Px(440.0);
-                            l.width = Length::Percent(1.0);
-                            l.min_width = Length::Px(0.0);
-                        })
-                        .text_align(remedy_ui::style::TextAlign::Center)
-                        .style(tokens::typo(tokens::BODY).foreground(colors.muted)),
-                )
-                .child(starters)
-                .child(
-                    say(ui, "ready-keys", "muted")
-                        .layout(|l| {
-                            l.max_width = Length::Px(440.0);
-                            l.width = Length::Percent(1.0);
-                            l.min_width = Length::Px(0.0);
-                        })
-                        .text_align(remedy_ui::style::TextAlign::Center)
-                        .style(tokens::typo(tokens::META).foreground(colors.muted)),
-                ),
+                .child(status_panel)
+                .child(starters),
         )
+}
+
+fn empty_well(ui: &Ui, studio: Studio) -> El {
+    home_surface(ui, studio)
 }
 
 fn mid_turn_beats(msg: &ChatMessage) -> Vec<String> {
@@ -522,42 +572,84 @@ fn day_chip(ui: &Ui, label: &str) -> El {
 
 fn bubble_card(ui: &Ui, body: El, user: bool, system: bool) -> El {
     let colors = ui.theme().colors.clone();
-    let (bg, fg, border) = if user {
-        (colors.accent, colors.on_accent, colors.accent)
-    } else if system {
-        (
-            colors.card,
-            colors.danger,
-            colors.danger.mix_oklab(tokens::hairline(&colors), 0.4),
-        )
-    } else {
-        (
-            tokens::surface_overlay(&colors),
-            colors.text,
-            tokens::hairline(&colors),
-        )
+    let pad = Insets {
+        top: tokens::SPACE * 2.0,
+        end: tokens::SPACE * 2.0,
+        bottom: tokens::SPACE * 2.0,
+        start: tokens::SPACE * 2.0,
     };
-    w::column(ui)
-        .gap(tokens::SPACE)
-        .padding(Insets {
-            top: 10.0,
-            end: 14.0,
-            bottom: 10.0,
-            start: 14.0,
+    if user {
+        return w::column(ui)
+            .gap(tokens::SPACE)
+            .padding(pad)
+            .layout(|l| {
+                l.max_width = Length::Px(tokens::BUBBLE_MAX);
+                l.shrink = 1.0;
+            })
+            .style(
+                StylePatch::new()
+                    .background(colors.panel)
+                    .foreground(colors.text)
+                    .radius(0.0)
+                    .border(tokens::hairline(&colors))
+                    .border_width(1.0),
+            )
+            .child(body);
+    }
+    if system {
+        return w::column(ui)
+            .gap(tokens::SPACE)
+            .padding(pad)
+            .layout(|l| {
+                l.max_width = Length::Px(tokens::BUBBLE_MAX);
+                l.shrink = 1.0;
+            })
+            .style(
+                StylePatch::new()
+                    .background(colors.panel)
+                    .foreground(colors.danger)
+                    .radius(0.0)
+                    .border(colors.danger)
+                    .border_width(1.0),
+            )
+            .child(body);
+    }
+    // Assistant: a left accent rule, no enclosing box.
+    let rule = ui
+        .el("reply-rule")
+        .layout(|l| {
+            l.width = Length::Px(2.0);
+            l.min_width = Length::Px(2.0);
+            l.height = Length::Percent(1.0);
+            l.shrink = 0.0;
         })
+        .style(StylePatch::new().background(colors.accent));
+    w::row(ui)
+        .align(Align::Stretch)
+        .gap(tokens::SPACE * 2.0)
         .layout(|l| {
             l.max_width = Length::Px(tokens::BUBBLE_MAX);
             l.shrink = 1.0;
+            l.min_width = Length::Px(0.0);
         })
-        .style(
-            StylePatch::new()
-                .background(bg)
-                .foreground(fg)
-                .radius(ui.theme().radii.large)
-                .border(border)
-                .border_width(1.0),
+        .child(rule)
+        .child(
+            w::column(ui)
+                .gap(tokens::SPACE)
+                .padding(Insets {
+                    top: tokens::SPACE,
+                    end: tokens::SPACE,
+                    bottom: tokens::SPACE,
+                    start: 0.0,
+                })
+                .layout(|l| {
+                    l.shrink = 1.0;
+                    l.min_width = Length::Px(0.0);
+                    l.grow = 1.0;
+                })
+                .style(StylePatch::new().foreground(colors.text))
+                .child(body),
         )
-        .child(body)
 }
 
 fn stamp_text(created_at: Option<&str>, now: i64) -> Option<String> {
@@ -607,7 +699,7 @@ fn speaker_cluster(
     extras: Option<(El, f32)>,
 ) -> El {
     let content = w::column(ui)
-        .gap(6.0)
+        .gap(tokens::SPACE)
         .layout(|l| {
             l.shrink = 1.0;
             l.min_width = Length::Px(0.0);
@@ -620,10 +712,16 @@ fn speaker_cluster(
     } else {
         content
     };
-    let avatar = logo::persona(ui, name, user, tokens::AVATAR);
+    let avatar = if user {
+        logo::persona(ui, name, true, tokens::AVATAR)
+    } else if crate::presence::enabled() {
+        crate::presence::mark(ui, crate::presence::State::Done, tokens::AVATAR)
+    } else {
+        logo::persona(ui, name, false, tokens::AVATAR)
+    };
     let mut row = w::row(ui)
         .align(Align::Start)
-        .gap(10.0)
+        .gap(tokens::SPACE * 2.0)
         .layout(|l| l.width = Length::Percent(1.0));
     row = if user {
         row.justify(Justify::End).child(content).child(avatar)
@@ -1024,19 +1122,7 @@ fn mode_switcher(ui: &Ui, studio: Studio) -> El {
 }
 
 fn mode_chip_style(colors: &remedy_ui::style::ColorRoles, on: bool) -> StylePatch {
-    let radius = StylePatch::new().radius(8.0).weight(550.0);
-    if on {
-        radius
-            .foreground(colors.accent)
-            .background(colors.accent.mix_oklab(colors.card, 0.88))
-            .border(colors.accent)
-            .border_width(1.0)
-    } else {
-        radius
-            .foreground(colors.text)
-            .border(colors.line.unwrap_or(colors.muted))
-            .border_width(1.0)
-    }
+    tokens::chip(colors, on).weight(550.0)
 }
 
 fn panel_button(

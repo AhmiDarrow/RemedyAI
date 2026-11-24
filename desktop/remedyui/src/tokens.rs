@@ -1,6 +1,6 @@
 //! Shared spacing, type, surfaces and elevation for the Studio shell.
 
-use remedy_ui::core::Color;
+use remedy_ui::core::{Color, Insets};
 use remedy_ui::style::{
     ColorRoles, LetterSpacing, LineHeight, Shadow, StylePatch, TextTransform,
 };
@@ -23,13 +23,13 @@ pub const RAIL_GLYPH: f32 = 18.0;
 pub const ROW_ACTIONS: f32 = ROW_TOOL * 3.0 + 8.0;
 
 /// 4 px grid unit the shell is built on (matches the theme default).
-pub const SPACE: f32 = 4.0;
+pub const SPACE: f32 = crate::theme_pack::DARK_FOREST.space.unit;
 /// Shared gutter for headers, feeds, the composer and the sidebar.
-pub const GUTTER: f32 = 16.0;
+pub const GUTTER: f32 = crate::theme_pack::DARK_FOREST.space.gutter;
 /// Circular persona badge.
-pub const AVATAR: f32 = 28.0;
+pub const AVATAR: f32 = crate::theme_pack::DARK_FOREST.layout.presence_avatar;
 /// Chat bubble cap, inside a split pane.
-pub const BUBBLE_MAX: f32 = 560.0;
+pub const BUBBLE_MAX: f32 = crate::theme_pack::DARK_FOREST.layout.bubble_max;
 
 /// A named step on the type scale: size, weight, leading and tracking.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -57,14 +57,14 @@ pub const TITLE: Type = Type {
     mono: false,
     display: true,
 };
-/// Section kickers (CODING / ACTIONS, BUILD, day stamps). Drawn uppercase.
+/// Section kickers (CODING / ACTIONS, day stamps). UI face, small caps — not the display font.
 pub const SECTION: Type = Type {
-    size: 16.0,
-    weight: 700.0,
-    leading: 1.0,
-    tracking: 0.0,
+    size: 12.0,
+    weight: 600.0,
+    leading: 1.2,
+    tracking: 0.08,
     mono: false,
-    display: true,
+    display: false,
 };
 /// Chat body and readable prose.
 pub const BODY: Type = Type {
@@ -177,6 +177,58 @@ pub fn elevation_overlay(colors: &ColorRoles) -> Shadow {
     Shadow::new(0.0, 2.0, 0.0, ink.with_alpha(0.40))
 }
 
+
+/// Selected chip: accent hairline and text, no fill. Unselected: quiet hairline.
+pub fn chip(colors: &ColorRoles, on: bool) -> StylePatch {
+    let line = hairline(colors);
+    let p = StylePatch::new()
+        .radius(0.0)
+        .border_width(1.0)
+        .background(colors.bg.with_alpha(0.0));
+    if on {
+        p.foreground(colors.accent).border(colors.accent)
+    } else {
+        p.foreground(colors.text).border(line)
+    }
+}
+
+/// Session metadata and similar quiet lines: muted small caps.
+pub fn meta_caps(colors: &ColorRoles) -> StylePatch {
+    typo(META)
+        .text_transform(TextTransform::Upper)
+        .letter_spacing(LetterSpacing::Em(0.06))
+        .foreground(colors.muted)
+}
+
+/// A flat, hairline info panel. Title uses the UI kicker, not the display face.
+pub fn info_panel(ui: &remedy_ui::Ui, title: impl Into<String>, body: remedy_ui::El) -> remedy_ui::El {
+    use remedy_ui::layout::Length;
+    use remedy_ui::widgets as w;
+    let colors = ui.theme().colors.clone();
+    let title = title.into();
+    w::column(ui)
+        .gap(SPACE * 2.0)
+        .padding(Insets::all(SPACE * 2.0))
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .style(
+            StylePatch::new()
+                .background(colors.panel)
+                .border(hairline(&colors))
+                .border_width(1.0)
+                .radius(0.0),
+        )
+        .child(
+            w::text(ui, title).style(section_kicker(&colors)).layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            }),
+        )
+        .child(body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,8 +240,9 @@ mod tests {
         assert!(THINKING.size > MONO.size);
         assert!(MONO.size > META.size);
         assert_eq!(TITLE.size, 16.0);
-        assert_eq!(SECTION.size, 16.0);
-        assert!(TITLE.display && SECTION.display);
+        assert!(TITLE.display);
+        assert!(!SECTION.display);
+        assert!(SECTION.size < BODY.size);
         assert!(TITLE.weight > BODY.weight);
     }
 }

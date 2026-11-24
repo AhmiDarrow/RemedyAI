@@ -17,7 +17,7 @@ use remedy_ui::host::{DragData, DropEffect};
 use remedy_ui::input::Key;
 use remedy_ui::layout::{Align, Justify, Length};
 use remedy_ui::reactive::Signal;
-use remedy_ui::style::{RADIUS_FULL, StylePatch};
+use remedy_ui::style::StylePatch;
 use remedy_ui::view::{Drag, IntoProp};
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui, show};
@@ -164,27 +164,9 @@ fn filter_chip(
     on_press: impl Fn() + 'static,
 ) -> El {
     let colors = ui.theme().colors.clone();
-    let line = colors
-        .line
-        .unwrap_or(colors.muted.mix_oklab(colors.panel, 0.5));
     w::button(ui, label, on_press)
         .variant("quiet")
-        .style(move || {
-            let style = StylePatch::new()
-                .radius(RADIUS_FULL)
-                .border(line)
-                .border_width(1.0);
-            if active() {
-                style
-                    .background(colors.accent.mix_oklab(colors.panel, 0.82))
-                    .foreground(colors.accent)
-                    .border(colors.accent.mix_oklab(line, 0.4))
-            } else {
-                style
-                    .foreground(colors.muted)
-                    .background(colors.panel.mix_oklab(colors.bg, 0.15))
-            }
-        })
+        .style(move || crate::tokens::chip(&colors, active()))
 }
 
 /// Left-aligned disclosure row: chevron, label, optional trailing count.
@@ -357,6 +339,7 @@ fn add_project(ui: &Ui, studio: Studio) -> El {
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
     let line = colors.line.unwrap_or(colors.muted);
+    let radius = ui.theme().radii.small;
     let st = studio.clone();
     let u = ui.clone();
     let studio_form = studio.clone();
@@ -368,8 +351,7 @@ fn add_project(ui: &Ui, studio: Studio) -> El {
     .fallback({
         let open = studio.clone();
         let u = ui.clone();
-        let radius = ui.theme().radii.small;
-        move || {
+            move || {
             w::button(
                 &u,
                 {
@@ -622,7 +604,6 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
     let colors = ui.theme().colors.clone();
     let id = session.id.clone();
     let title = session.title.clone();
-    let radius = ui.theme().radii.small;
     let now = studio.now();
     let age = session
         .updated_at
@@ -695,7 +676,7 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
             StylePatch::new().foreground(if pinned {
                 colors_pin.accent
             } else {
-                crate::tokens::icon_fg(&colors_pin)
+                colors_pin.muted
             })
         }
     });
@@ -774,7 +755,7 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
             let colors = colors.clone();
             move || {
                 let selected = st.active.get().as_deref() == Some(sid.as_str());
-                let mut p = StylePatch::new().radius(radius);
+                let mut p = StylePatch::new().radius(0.0);
                 if selected {
                     p = p.background(tokens::selected_fill(&colors));
                 } else {
@@ -953,7 +934,7 @@ fn session_sub(ui: &Ui, studio: &Studio, id: &str, count: u32, age: Option<Strin
                     l.shrink = 1.0;
                     l.min_width = Length::Px(0.0);
                 })
-                .style(tokens::typo(tokens::META).foreground(ui.theme().colors.muted)),
+                .style(tokens::meta_caps(&ui.theme().colors)),
         )
         .child(
             show(

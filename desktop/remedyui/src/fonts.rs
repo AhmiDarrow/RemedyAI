@@ -135,29 +135,30 @@ fn is_dark_forest(theme: &Theme) -> bool {
 /// stays crisp) and small at 12. Radii stay sharp. Widgets must use the theme
 /// family tokens, not hard-coded family names, so a user swap still holds up.
 pub fn apply_to_theme(theme: &mut Theme, fonts: &Fonts) {
+    let pack = crate::theme_pack::current();
     theme.font_families = vec![fonts.ui.clone()];
     theme.mono_families = vec![fonts.code.clone(), fonts.ui.clone()];
     theme.heading_families = vec![fonts.display.clone(), fonts.ui.clone()];
-    theme.type_scale.small = 12.0;
-    theme.type_scale.body = 15.0;
-    theme.type_scale.title = 16.0;
-    theme.radii.small = 0.0;
-    theme.radii.medium = 2.0;
-    theme.radii.large = 2.0;
-    theme.spacing.unit = 4.0;
-    theme.spacing.control_height = 32.0;
+    theme.type_scale.small = pack.typo.small;
+    theme.type_scale.body = pack.typo.body;
+    theme.type_scale.title = pack.typo.title;
+    theme.radii.small = pack.radii.none;
+    theme.radii.medium = pack.radii.hair;
+    theme.radii.large = pack.radii.hair;
+    theme.spacing.unit = pack.space.unit;
+    theme.spacing.control_height = pack.space.control_height;
     if is_dark_forest(theme) {
-        // From https://ahmidarrow.pages.dev `console.css` (void, ink, line, green).
+        // Colors come from the Dark Forest theme package (Joe's site tokens).
         // Site glass / mist / hero gradients are not brought over.
-        theme.colors.bg = hex("#040a09");
-        theme.colors.panel = hex("#071412");
-        theme.colors.card = hex("#0b1a17");
-        theme.colors.line = Some(hex("#24504a"));
-        theme.colors.text = hex("#e2f3ee");
-        theme.colors.muted = hex("#86a39c");
-        theme.colors.accent = hex("#6fdc86");
-        theme.colors.on_accent = hex("#040a09");
-        theme.colors.ok = hex("#6fdc86");
+        theme.colors.bg = hex(pack.colors.bg);
+        theme.colors.panel = hex(pack.colors.panel);
+        theme.colors.card = hex(pack.colors.card);
+        theme.colors.line = Some(hex(pack.colors.line));
+        theme.colors.text = hex(pack.colors.text);
+        theme.colors.muted = hex(pack.colors.muted);
+        theme.colors.accent = hex(pack.colors.accent);
+        theme.colors.on_accent = hex(pack.colors.on_accent);
+        theme.colors.ok = hex(pack.colors.ok);
     }
 }
 

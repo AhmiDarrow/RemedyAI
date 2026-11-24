@@ -73,6 +73,9 @@ pub fn load_into(s: Settings) {
     if let Some(v) = logic::table_bool(&text, "appearance", "reduce_motion") {
         s.reduce_motion.set(v);
     }
+    if let Some(v) = logic::table_bool(&text, "appearance", "show_presence") {
+        s.show_presence.set(v);
+    }
     if let Some(v) = logic::table_bool(&text, "appearance", "high_contrast") {
         s.high_contrast.set(v);
     }
@@ -168,6 +171,7 @@ pub fn persist(s: Settings) {
         ("density", logic::toml_quote(&s.density.get())),
         ("font_scale", logic::toml_quote(&s.font_scale.get())),
         ("reduce_motion", bool_toml(s.reduce_motion.get())),
+        ("show_presence", bool_toml(s.show_presence.get())),
         ("high_contrast", bool_toml(s.high_contrast.get())),
         ("custom_accent", logic::toml_quote(&s.custom_accent.get())),
         ("settings_mode", logic::toml_quote(&s.mode.get())),

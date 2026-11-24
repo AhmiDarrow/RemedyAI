@@ -22,6 +22,7 @@ mod palette;
 mod panels;
 mod plan_dock;
 mod prefs;
+mod presence;
 mod rails;
 mod runtime;
 mod server_menu;
@@ -35,6 +36,7 @@ mod studio;
 mod time;
 mod timetravel;
 mod titlebar;
+mod theme_pack;
 mod tokens;
 mod tray_copy;
 mod update;
@@ -61,6 +63,7 @@ pub use timetravel::{TimeTravel, preview as time_travel_preview};
 pub use usage::{UsageContext, UsageDashboard, UsagePanel, UsageWindow};
 
 use remedy_ui::a11y::{Action, Role, Semantics};
+use remedy_ui::core::Insets;
 use remedy_ui::host::{TrayEvent, TrayIcon, TrayImage, TrayItem};
 use remedy_ui::i18n::Messages;
 use remedy_ui::layout::{Align, Justify, LayoutStyle, Length, Position};
@@ -73,7 +76,7 @@ use chrome::{Chrome, TRAY_ABOUT, TRAY_QUIT, TRAY_SETTINGS, TRAY_SHOW, TRAY_UPDAT
 pub(crate) use icons::{Glyph, glyph};
 pub(crate) use tokens::{ROW_ACTIONS, ROW_GLYPH, ROW_TOOL, TOOL, TOOL_GLYPH};
 /// Inset accent bar on the selected row; reserved on every row so close × stays lined up.
-pub(crate) const SELECT_MARK: f32 = 4.0;
+pub(crate) const SELECT_MARK: f32 = theme_pack::DARK_FOREST.layout.select_mark;
 
 /// Opens the window and puts the app in the tray.
 pub fn app(app: &App) {
@@ -226,7 +229,13 @@ pub fn app(app: &App) {
 
 /// Empty-well preview (goldens and visual review). Left rail open, right thin.
 pub fn home(ui: &Ui) -> El {
-    home_rails_left(ui)
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    shell_with(
+        ui,
+        studio,
+        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+    )
 }
 
 /// Chat-feed preview with a finished turn, for side-by-side review.
@@ -296,6 +305,59 @@ pub fn design_settings(ui: &Ui) -> El {
         Studio::preview_chat(),
         rails::WorkspaceChrome::fixed(layout),
     )
+}
+
+/// Design-review card for one presence state (static under reduced_motion).
+pub fn design_presence(ui: &Ui, state: presence::State) -> El {
+    fonts::prepare_theme(ui, &Fonts::load());
+    let colors = ui.theme().colors.clone();
+    let size = theme_pack::layout().presence_review;
+    let title = w::text(ui, state.label())
+        .variant("heading")
+        .style(tokens::typo(tokens::TITLE).foreground(colors.text));
+    let body = w::text(ui, state.caption())
+        .style(tokens::typo(tokens::BODY).foreground(colors.text))
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        });
+    let panel = tokens::info_panel(ui, "Status", body).layout(|l| {
+        l.max_width = Length::Px(320.0);
+        l.width = Length::Percent(1.0);
+        l.min_width = Length::Px(0.0);
+    });
+    w::column(ui)
+        .align(Align::Center)
+        .justify(Justify::Center)
+        .gap(tokens::GUTTER)
+        .padding(Insets::all(tokens::GUTTER * 2.0))
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.height = Length::Percent(1.0);
+        })
+        .style(StylePatch::new().background(colors.bg).foreground(colors.text))
+        .child(presence::preview(ui, state, size))
+        .child(title)
+        .child(panel)
+}
+
+pub fn design_presence_idle(ui: &Ui) -> El {
+    design_presence(ui, presence::State::Idle)
+}
+pub fn design_presence_listening(ui: &Ui) -> El {
+    design_presence(ui, presence::State::Listening)
+}
+pub fn design_presence_thinking(ui: &Ui) -> El {
+    design_presence(ui, presence::State::Thinking)
+}
+pub fn design_presence_working(ui: &Ui) -> El {
+    design_presence(ui, presence::State::Working)
+}
+pub fn design_presence_done(ui: &Ui) -> El {
+    design_presence(ui, presence::State::Done)
+}
+pub fn design_presence_error(ui: &Ui) -> El {
+    design_presence(ui, presence::State::Error)
 }
 
 fn design_preview_messages() -> Vec<studio::ChatMessage> {
