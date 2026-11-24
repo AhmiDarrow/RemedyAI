@@ -151,6 +151,10 @@ pub struct Settings {
     pub rmb_path: Signal<String>,
     pub hf_query: Signal<String>,
     pub hf_hits: Signal<Value>,
+    pub rmb_catalog: Signal<Value>,
+    pub hf_files: Signal<Value>,
+    pub hf_repo: Signal<String>,
+    pub hf_file: Signal<String>,
 }
 
 thread_local! {
@@ -274,6 +278,10 @@ impl Settings {
             rmb_path: Signal::new(String::new()),
             hf_query: Signal::new(String::new()),
             hf_hits: Signal::new(json!([])),
+            rmb_catalog: Signal::new(Value::Null),
+            hf_files: Signal::new(json!([])),
+            hf_repo: Signal::new(String::new()),
+            hf_file: Signal::new(String::new()),
         }
     }
 
@@ -580,6 +588,16 @@ impl Settings {
                 self.rmb.set(v);
             }
         });
+        http::request(self, "GET", "rmb/catalog".into(), None, move |out| {
+            if let Ok(v) = out {
+                self.rmb_catalog.set(v);
+            }
+        });
+    }
+
+    pub fn refresh_rmb(self) {
+        self.rmb_loaded.set(false);
+        self.load_rmb();
     }
 
     pub fn load_vision(self) {
