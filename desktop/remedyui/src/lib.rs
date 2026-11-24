@@ -57,6 +57,7 @@ pub use help::HelpPanel;
 pub use runtime::{Client, install_panic_hook};
 pub use settings::{
     preview_appearance, preview_connect, preview_error, preview_general, preview_models,
+    preview_models_provider,
 };
 pub use setup::{
     preview_conversation, preview_mind, preview_offer, preview_update, preview_wizard,

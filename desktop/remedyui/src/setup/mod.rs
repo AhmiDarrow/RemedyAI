@@ -7,7 +7,7 @@ mod downloads;
 mod flow;
 mod messengers;
 mod mind;
-mod model;
+pub(crate) mod model;
 mod name;
 mod offer;
 mod splash;

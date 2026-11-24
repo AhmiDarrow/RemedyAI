@@ -20,6 +20,69 @@ pub struct Prov {
     pub name: String,
     pub base_url: String,
     pub default_model: String,
+    pub show_base_url: bool,
+    pub auth: Vec<String>,
+    pub oauth: bool,
+}
+
+impl Prov {
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        base_url: impl Into<String>,
+        default_model: impl Into<String>,
+    ) -> Self {
+        let id = id.into();
+        let auth: Vec<String> = crate::setup::model::provider_auth(&id)
+            .iter()
+            .map(|mode| (*mode).to_string())
+            .collect();
+        let oauth = auth.iter().any(|mode| mode == "oauth");
+        let show_base_url = crate::setup::model::shows_base_url(&id);
+        Self {
+            id,
+            name: name.into(),
+            base_url: base_url.into(),
+            default_model: default_model.into(),
+            show_base_url,
+            auth,
+            oauth,
+        }
+    }
+
+    pub fn from_row(row: &Value) -> Option<Self> {
+        let id = row.get("id").and_then(|v| v.as_str()).unwrap_or("").trim();
+        if id.is_empty() {
+            return None;
+        }
+        let mut prov = Self::new(
+            id,
+            jstr(row, "name", id),
+            jstr(row, "base_url", ""),
+            jstr(row, "default_model", ""),
+        );
+        if let Some(arr) = row.get("auth").and_then(|v| v.as_array()) {
+            let parsed: Vec<String> = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect();
+            if !parsed.is_empty() {
+                prov.auth = parsed;
+            }
+        }
+        prov.oauth = row
+            .get("oauth")
+            .and_then(|v| v.as_bool())
+            .unwrap_or_else(|| prov.auth.iter().any(|mode| mode == "oauth"));
+        if let Some(flag) = row.get("show_base_url").and_then(|v| v.as_bool()) {
+            prov.show_base_url = flag || crate::setup::model::shows_base_url(&prov.id);
+        }
+        Some(prov)
+    }
+
+    pub fn has_oauth(&self) -> bool {
+        self.oauth || self.auth.iter().any(|mode| mode == "oauth")
+    }
 }
 
 /// One Settings surface. Copy so widgets and callbacks share it.
@@ -315,10 +378,10 @@ impl Settings {
         s.browser_home.set(logic::DEFAULT_BROWSER_HOME.into());
         s.access_scope.set("project".into());
         s.catalog.set(vec![
-            Prov { id: "demo".into(), name: "Demo".into(), base_url: String::new(), default_model: "demo".into() },
-            Prov { id: "xai".into(), name: "xAI (Grok)".into(), base_url: "https://api.x.ai/v1".into(), default_model: "grok-4".into() },
-            Prov { id: "ollama".into(), name: "Ollama".into(), base_url: "http://127.0.0.1:11434".into(), default_model: "llama3.1".into() },
-            Prov { id: "custom".into(), name: "Custom endpoint".into(), base_url: String::new(), default_model: String::new() },
+            Prov::new("demo", "Demo", "", "demo"),
+            Prov::new("xai", "xAI (Grok)", "https://api.x.ai/v1", "grok-4"),
+            Prov::new("ollama", "Ollama", "http://127.0.0.1:11434", "llama3.1"),
+            Prov::new("custom", "Custom endpoint", "", ""),
         ]);
         s.models.set(vec!["grok-4".into(), "grok-4-fast".into()]);
         s.enabled_providers.set(vec!["demo".into(), "xai".into(), "ollama".into(), "custom".into()]);
@@ -491,16 +554,7 @@ impl Settings {
             if let Ok(v) = out {
                 let rows = v.get("providers").and_then(|x| x.as_array()).or_else(|| v.as_array());
                 if let Some(rows) = rows {
-                    let provs = rows.iter().filter_map(|row| {
-                        let id = row.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string();
-                        if id.is_empty() { return None; }
-                        Some(Prov {
-                            name: jstr(row, "name", &id),
-                            base_url: jstr(row, "base_url", ""),
-                            default_model: jstr(row, "default_model", ""),
-                            id,
-                        })
-                    }).collect::<Vec<_>>();
+                    let provs = rows.iter().filter_map(Prov::from_row).collect::<Vec<_>>();
                     if self.enabled_providers.get().is_empty() {
                         self.enabled_providers.set(provs.iter().map(|p| p.id.clone()).collect());
                     }
@@ -864,4 +918,64 @@ pub fn jbool(v: &Value, key: &str, default: bool) -> bool {
 
 pub fn jnum(v: &Value, key: &str, default: f64) -> f64 {
     v.get(key).and_then(|x| x.as_f64()).unwrap_or(default)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn catalog_rows_keep_their_own_url_and_auth() {
+        let body = json!([
+            {
+                "id": "anthropic",
+                "name": "Anthropic",
+                "base_url": "https://api.anthropic.com/v1",
+                "auth": ["api_key"],
+                "show_base_url": false
+            },
+            {
+                "id": "xai",
+                "name": "xAI (Grok)",
+                "base_url": "https://api.x.ai/v1",
+                "auth": ["oauth", "api_key"],
+                "oauth": true,
+                "show_base_url": false
+            },
+            {
+                "id": "openrouter",
+                "name": "OpenRouter",
+                "base_url": "https://openrouter.ai/api/v1",
+                "auth": ["api_key"],
+                "show_base_url": false
+            },
+            {
+                "id": "custom",
+                "name": "Custom / OpenAI-compatible",
+                "base_url": "http://127.0.0.1:5001/v1",
+                "auth": ["api_key"],
+                "show_base_url": true
+            }
+        ]);
+        let rows: Vec<Prov> = body.as_array().unwrap().iter().filter_map(Prov::from_row).collect();
+        assert_eq!(rows[0].name, "Anthropic");
+        assert_eq!(rows[0].base_url, "https://api.anthropic.com/v1");
+        assert!(!rows[0].has_oauth());
+        assert!(!rows[0].show_base_url);
+        assert_eq!(rows[1].name, "xAI (Grok)");
+        assert_eq!(rows[1].base_url, "https://api.x.ai/v1");
+        assert!(rows[1].has_oauth());
+        assert!(!rows[1].show_base_url);
+        assert_eq!(rows[2].name, "OpenRouter");
+        assert_eq!(rows[2].base_url, "https://openrouter.ai/api/v1");
+        assert!(!rows[2].has_oauth());
+        assert!(rows[3].show_base_url);
+        for row in &rows {
+            if row.id != "openrouter" {
+                assert!(!row.base_url.contains("openrouter.ai"), "{} reused OpenRouter URL", row.id);
+                assert!(!row.name.to_ascii_lowercase().contains("openrouter"), "{} reused OpenRouter label", row.id);
+            }
+        }
+    }
 }
