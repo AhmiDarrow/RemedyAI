@@ -458,6 +458,20 @@ impl Settings {
         self.ensure_loaded();
     }
 
+    /// Re-read settings from the sidecar without flashing the loading state.
+    /// Used when another surface (Web UI) changes provider, model, or permissions.
+    pub fn reload_from_server(self) {
+        if self.preview || self.client.get().is_none() {
+            return;
+        }
+        http::get_settings(self, move |out| {
+            if let Ok(v) = out {
+                self.apply_doc(&v);
+                self.phase.set("ready".into());
+            }
+        });
+    }
+
     pub fn apply_doc(self, v: &Value) {
         self.user_name.set(jstr(v, "user_name", ""));
         self.agent_name.set(jstr(v, "name", "Remedy"));

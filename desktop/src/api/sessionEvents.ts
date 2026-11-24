@@ -21,6 +21,7 @@ export type SessionSyncEvent = {
   session_id?: string
   origin_channel?: string | null
   message_id?: string | null
+  request_id?: string | null
   title?: string | null
   message_count?: number | null
   role?: string | null
