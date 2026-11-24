@@ -876,6 +876,7 @@ pub fn boot(studio: &Studio) {
         reattach(studio, &id);
     }
     start_poll(studio);
+    start_session_events(studio);
     start_tick(studio);
 }
 
@@ -1129,6 +1130,169 @@ pub fn show_plan(card: &PlanCard, mode: WorkMode) -> bool {
 fn start_poll(studio: &Studio) {
     start_poll_every(studio, Duration::from_secs(4));
 }
+
+fn start_session_events(studio: &Studio) {
+    if studio
+        .depth
+        .session_events_flag()
+        .swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        return;
+    }
+    let Some(client) = studio.runtime() else {
+        studio
+            .depth
+            .session_events_flag()
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        return;
+    };
+    let Ok(wake) = waker() else {
+        studio
+            .depth
+            .session_events_flag()
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        return;
+    };
+    let studio = studio.clone();
+    let _ = std::thread::Builder::new()
+        .name("remedy-session-events".into())
+        .spawn(move || session_events_loop(studio, client, wake));
+}
+
+fn session_events_loop(studio: Studio, client: Client, wake: remedy_ui::reactive::Waker) {
+    let mut backoff = logic::SESSION_SYNC_BACKOFF_START_MS;
+    loop {
+        if studio.local_only {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let connected = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = connected.clone();
+        let wake_ev = wake.clone();
+        let studio_ev = studio.clone();
+        let cancel = Cancel::new();
+        runtime::stream_session_events(
+            &client,
+            cancel,
+            move |kind, data| {
+                if kind == "hello" {
+                    flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return;
+                }
+                let studio = studio_ev.clone();
+                let _ = wake_ev.post(move || on_session_sync_event(&studio, &kind, &data));
+            },
+            move || {
+                let _ = tx.send(());
+            },
+        );
+        if rx.recv().is_err() {
+            return;
+        }
+        if connected.load(std::sync::atomic::Ordering::Relaxed) {
+            backoff = logic::SESSION_SYNC_BACKOFF_START_MS;
+        } else {
+            backoff = logic::next_session_sync_backoff_ms(backoff);
+        }
+        std::thread::sleep(Duration::from_millis(backoff));
+    }
+}
+
+fn on_session_sync_event(studio: &Studio, kind: &str, data: &str) {
+    if !logic::is_session_sync_event(kind) {
+        return;
+    }
+    let sid = logic::event_session_id(data);
+    let reload = logic::should_reload_open_thread(
+        kind,
+        &sid,
+        studio.active.get().as_deref(),
+        studio.streaming.get(),
+    );
+    let seq = pending_sync_push(if reload { Some(sid) } else { None });
+    let studio = studio.clone();
+    let Ok(wake) = waker() else {
+        apply_session_sync(&studio, pending_sync_take());
+        return;
+    };
+    let _ = std::thread::Builder::new()
+        .name("remedy-session-sync-wait".into())
+        .spawn(move || {
+            std::thread::sleep(Duration::from_millis(logic::SESSION_SYNC_DEBOUNCE_MS));
+            let _ = wake.post(move || {
+                if pending_sync_gen() != seq {
+                    return;
+                }
+                let sid = pending_sync_take();
+                apply_session_sync(&studio, sid);
+            });
+        });
+}
+
+fn apply_session_sync(studio: &Studio, reload_sid: Option<String>) {
+    let Some(client) = studio.runtime() else {
+        return;
+    };
+    let studio = studio.clone();
+    let Ok(wake) = waker() else {
+        return;
+    };
+    runtime::list_sessions(&client, move |out| {
+        let _ = wake.post(move || {
+            let Ok(list) = out else {
+                return;
+            };
+            let active = studio.active.get();
+            studio.sessions.set(list);
+            if let Some(id) = active {
+                if !studio.sessions.get().iter().any(|s| s.id == id) {
+                    if let Some(next) = studio.sessions.get().first().map(|s| s.id.clone()) {
+                        studio.active.set(Some(next.clone()));
+                        studio.load_messages(&next);
+                    } else {
+                        studio.active.set(None);
+                        studio.messages.set(Vec::new());
+                    }
+                    return;
+                }
+            }
+            if let Some(sid) = reload_sid {
+                if !studio.streaming.get() && studio.active.get().as_deref() == Some(sid.as_str()) {
+                    studio.load_messages(&sid);
+                }
+            }
+        });
+    });
+}
+
+fn pending_sync_push(reload: Option<String>) -> u64 {
+    if let Some(sid) = reload {
+        *pending_sync_reload() = Some(sid);
+    }
+    pending_sync_counter().fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
+
+fn pending_sync_take() -> Option<String> {
+    pending_sync_reload().take()
+}
+
+fn pending_sync_gen() -> u64 {
+    pending_sync_counter().load(std::sync::atomic::Ordering::SeqCst)
+}
+
+fn pending_sync_counter() -> &'static std::sync::atomic::AtomicU64 {
+    static GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    &GEN
+}
+
+fn pending_sync_reload() -> std::sync::MutexGuard<'static, Option<String>> {
+    static RELOAD: std::sync::OnceLock<std::sync::Mutex<Option<String>>> = std::sync::OnceLock::new();
+    RELOAD
+        .get_or_init(|| std::sync::Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 
 /// Approvals polling. `waker()` is bound to this thread's runtime, so it
 /// must be captured on the UI thread and moved into the worker. The 1.0.0
@@ -2548,5 +2712,14 @@ mod tests {
         assert!(studio.depth.draft_text.get().is_empty());
         assert!(studio.depth.notice.get().is_empty());
         assert!(!studio.streaming.get());
+    }
+
+    #[test]
+    fn session_sync_pending_batches_a_reload() {
+        let first = pending_sync_push(None);
+        let second = pending_sync_push(Some("s1".into()));
+        assert!(second > first);
+        assert_eq!(pending_sync_take().as_deref(), Some("s1"));
+        assert!(pending_sync_take().is_none());
     }
 }

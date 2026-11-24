@@ -893,6 +893,50 @@ pub fn preceding_user_for_regen(
         .map(|m| (m.id.clone(), m.content.clone()))
 }
 
+
+/// Event names from `GET /api/events/sessions` that should refresh the sidebar.
+pub fn is_session_sync_event(kind: &str) -> bool {
+    matches!(
+        kind,
+        "session_created" | "session_updated" | "message_added" | "session_deleted"
+    )
+}
+
+/// Reload the open thread after a sync event, but not mid-stream.
+pub fn should_reload_open_thread(
+    kind: &str,
+    event_sid: &str,
+    active: Option<&str>,
+    streaming: bool,
+) -> bool {
+    if streaming || event_sid.is_empty() {
+        return false;
+    }
+    matches!(kind, "message_added" | "session_updated") && active == Some(event_sid)
+}
+
+/// `session_id` from a session-sync JSON payload.
+pub fn event_session_id(data: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(data)
+        .ok()
+        .and_then(|v| {
+            v.get("session_id")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_default()
+}
+
+pub const SESSION_SYNC_BACKOFF_START_MS: u64 = 1500;
+pub const SESSION_SYNC_BACKOFF_MAX_MS: u64 = 30_000;
+pub const SESSION_SYNC_DEBOUNCE_MS: u64 = 400;
+
+/// Next reconnect delay after a dropped session-events stream, matching the Tauri shell.
+pub fn next_session_sync_backoff_ms(current: u64) -> u64 {
+    let next = current.saturating_mul(16) / 10;
+    next.clamp(SESSION_SYNC_BACKOFF_START_MS, SESSION_SYNC_BACKOFF_MAX_MS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1010,5 +1054,60 @@ mod tests {
         );
         assert_eq!(preceding_user_for_regen(&msgs, "missing"), None);
         assert_eq!(preceding_user_for_regen(&msgs, "u1"), None);
+    }
+
+    #[test]
+    fn session_sync_events_refresh_the_sidebar() {
+        assert!(is_session_sync_event("session_created"));
+        assert!(is_session_sync_event("session_updated"));
+        assert!(is_session_sync_event("message_added"));
+        assert!(is_session_sync_event("session_deleted"));
+        assert!(!is_session_sync_event("hello"));
+        assert!(!is_session_sync_event("token"));
+    }
+
+    #[test]
+    fn session_sync_reloads_the_open_thread_only_when_idle() {
+        assert!(should_reload_open_thread(
+            "message_added",
+            "s1",
+            Some("s1"),
+            false
+        ));
+        assert!(should_reload_open_thread(
+            "session_updated",
+            "s1",
+            Some("s1"),
+            false
+        ));
+        assert!(!should_reload_open_thread(
+            "message_added",
+            "s1",
+            Some("s1"),
+            true
+        ));
+        assert!(!should_reload_open_thread(
+            "message_added",
+            "s2",
+            Some("s1"),
+            false
+        ));
+        assert!(!should_reload_open_thread("session_created", "s1", Some("s1"), false));
+        assert!(!should_reload_open_thread("session_deleted", "s1", Some("s1"), false));
+    }
+
+    #[test]
+    fn session_sync_reads_the_session_id() {
+        let data = r#"{"type":"session_created","session_id":"s9","title":"From messenger"}"#;
+        assert_eq!(event_session_id(data), "s9");
+        assert_eq!(event_session_id("not-json"), "");
+    }
+
+    #[test]
+    fn session_sync_backoff_matches_the_tauri_shell() {
+        assert_eq!(next_session_sync_backoff_ms(1500), 2400);
+        assert_eq!(next_session_sync_backoff_ms(2400), 3840);
+        assert_eq!(next_session_sync_backoff_ms(30_000), 30_000);
+        assert_eq!(SESSION_SYNC_DEBOUNCE_MS, 400);
     }
 }
