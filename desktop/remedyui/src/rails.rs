@@ -927,7 +927,9 @@ pub(crate) fn dismiss_settings(chrome: &WorkspaceChrome) -> bool {
 fn slide_body(ui: &Ui, studio: &Studio, slide: SlideId) -> El {
     let inner = if slide == SlideId::Sessions {
         sidebar::sidebar(ui, studio.clone())
-    } else if slide == SlideId::Settings && !studio.local_only {
+    } else if slide == SlideId::Settings && crate::settings::current().is_some() {
+        // Live shells, and design-review previews that installed a sample.
+        // Ordinary goldens keep the blurb when no settings set is mounted.
         settings_slide(ui)
     } else if let Some(body) = crate::slides::rail_body(ui, slide) {
         body

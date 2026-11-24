@@ -534,7 +534,7 @@ pub const FACES: &[(&str, &str, bool)] = &[
 
 pub const FONT_ROLES: &[(&str, &str, &str, &str)] = &[
     ("ui", "Text", "Chat, menus and settings — the primary font.", "remedy-sans-ui"),
-    ("heading", "Headings", "Page and section titles.", "remedy-sans"),
+    ("heading", "Display", "Titles and section labels — the display font.", "ahmi-pixel"),
     ("reading", "Reading", "Long-form pages such as Help articles.", "ahmi-print"),
     ("accent", "Accent", "Small touches: the signature and shortcut keys.", "ahmi-pixel"),
     ("code", "Code", "Code blocks, diffs and logs.", "ahmi-print"),
@@ -564,6 +564,12 @@ pub fn faces_for_role(role: &str) -> Vec<&'static str> {
         let mut out = vec!["ahmi-print"];
         out.extend(mono);
         out.push("ahmi-pixel");
+        return out;
+    }
+    if role == "heading" || role == "display" {
+        let mut out = vec!["ahmi-pixel"];
+        out.extend(text.into_iter().filter(|id| *id != "ahmi-pixel"));
+        out.extend(mono);
         return out;
     }
     let mut out = text;
