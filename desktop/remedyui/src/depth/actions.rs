@@ -1132,6 +1132,9 @@ fn start_poll(studio: &Studio) {
     start_poll_every(studio, Duration::from_secs(4));
 }
 
+/// Coordination presence. `studio.active` is a UI-thread signal, so the
+/// worker must not read it (or any other signal) itself. Capture the UI
+/// Waker here and post each poll onto that thread, matching approvals.
 fn start_coordination(studio: &Studio) {
     if studio
         .depth
@@ -1140,13 +1143,6 @@ fn start_coordination(studio: &Studio) {
     {
         return;
     }
-    let Some(client) = studio.runtime() else {
-        studio
-            .depth
-            .coordination_flag()
-            .store(false, std::sync::atomic::Ordering::Relaxed);
-        return;
-    };
     let Ok(wake) = waker() else {
         studio
             .depth
@@ -1157,37 +1153,49 @@ fn start_coordination(studio: &Studio) {
     let studio = studio.clone();
     let _ = std::thread::Builder::new()
         .name("remedy-coordination".into())
-        .spawn(move || coordination_loop(studio, client, wake));
+        .spawn(move || coordination_loop(studio, wake));
 }
 
-fn coordination_loop(studio: Studio, client: Client, wake: remedy_ui::reactive::Waker) {
+fn coordination_loop(studio: Studio, wake: remedy_ui::reactive::Waker) {
     loop {
         if studio.local_only {
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
-        let sid = studio.active.get().unwrap_or_default();
-        let path = if sid.is_empty() {
-            "coordination/presence".to_string()
-        } else {
-            format!("coordination/presence?session_id={sid}")
-        };
-        let studio_cb = studio.clone();
-        let wake_cb = wake.clone();
-        api::spawn_json(&client, Request::get(&path), move |out| {
-            let (others, error) = match out {
-                Ok(v) => (logic::other_beacons(&logic::parse_presence_beacons(&v)), false),
-                Err(_) => (Vec::new(), true),
-            };
-            let wait = logic::next_presence_poll_ms(others.len(), error);
-            let _ = wake_cb.post(move || studio_cb.depth.siblings.set(others));
-            let _ = tx.send(wait);
-        });
+        let studio = studio.clone();
+        let _ = wake.post(move || poll_coordination(&studio, tx));
         let wait = rx
             .recv_timeout(std::time::Duration::from_secs(20))
             .unwrap_or(logic::PRESENCE_POLL_ERROR_MS);
         std::thread::sleep(std::time::Duration::from_millis(wait));
     }
+}
+
+fn poll_coordination(studio: &Studio, tx: std::sync::mpsc::Sender<u64>) {
+    let sid = studio.active.get().unwrap_or_default();
+    let Some(client) = studio.runtime() else {
+        let _ = tx.send(logic::PRESENCE_POLL_ERROR_MS);
+        return;
+    };
+    let path = if sid.is_empty() {
+        "coordination/presence".to_string()
+    } else {
+        format!("coordination/presence?session_id={sid}")
+    };
+    let studio = studio.clone();
+    let Ok(wake) = waker() else {
+        let _ = tx.send(logic::PRESENCE_POLL_ERROR_MS);
+        return;
+    };
+    api::spawn_json(&client, Request::get(&path), move |out| {
+        let (others, error) = match out {
+            Ok(v) => (logic::other_beacons(&logic::parse_presence_beacons(&v)), false),
+            Err(_) => (Vec::new(), true),
+        };
+        let wait = logic::next_presence_poll_ms(others.len(), error);
+        let _ = wake.post(move || studio.depth.siblings.set(others));
+        let _ = tx.send(wait);
+    });
 }
 
 fn start_session_events(studio: &Studio) {
@@ -2988,6 +2996,91 @@ mod tests {
         assert!(
             saw,
             "the approvals poller must post the list onto the UI thread without panicking"
+        );
+    }
+
+    #[test]
+    fn coordination_and_session_event_loops_read_signals_on_the_ui_thread() {
+        // The installed 8bf051a1 build panicked about 11s after launch:
+        // `coordination_loop` called `studio.active.get()` on
+        // `remedy-coordination`. This starts those loops under a real
+        // TestApp runtime so a cross-thread signal access fails in CI.
+        unsafe { std::env::set_var("REMEDY_DESKTOP_NO_SPAWN", "1") };
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock");
+        let addr = listener.local_addr().expect("addr");
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen_cb = seen.clone();
+        thread::Builder::new()
+            .name("mock-coordination".into())
+            .spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(mut s) = stream else { continue };
+                    let mut buf = vec![0u8; 4096];
+                    let n = match s.read(&mut buf) {
+                        Ok(n) => n,
+                        Err(_) => continue,
+                    };
+                    let req = String::from_utf8_lossy(&buf[..n]);
+                    let path = req
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap_or("/")
+                        .to_string();
+                    seen_cb.lock().unwrap_or_else(|e| e.into_inner()).push(path.clone());
+                    let body = if path.contains("coordination/presence") {
+                        r#"{"beacons":[{"session_id":"me","you":true,"muscle":"local/remedy","project":"","goal":"","phase":"idle","held_files":[],"held_count":0},{"session_id":"s2","you":false,"muscle":"xai/grok-4.5","project":"portal","goal":"load the addon","phase":"build","held_files":["main.rs"],"held_count":1}],"count":2}"#
+                    } else {
+                        r#"{"ok":true}"#
+                    };
+                    let _ = write!(
+                        s,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                }
+            })
+            .expect("spawn mock");
+
+        let studio = Studio::new();
+        studio.attach_client(Client::new(&format!("http://{addr}"), Some("test-token-1")));
+        let mut app = TestApp::window({
+            let studio = studio.clone();
+            move |ui, _| {
+                ui.root().child(shell(ui, studio.clone()));
+            }
+        });
+        app.frames(2);
+        studio.active.set(Some("s-live".into()));
+        start_coordination(&studio);
+        start_session_events(&studio);
+        let start = Instant::now();
+        let mut saw = false;
+        while start.elapsed() < Duration::from_secs(3) {
+            app.frames(2);
+            thread::sleep(Duration::from_millis(20));
+            if studio
+                .depth
+                .siblings
+                .get()
+                .iter()
+                .any(|b| b.session_id == "s2")
+            {
+                saw = true;
+                break;
+            }
+        }
+        let paths = seen.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        assert!(
+            saw,
+            "coordination must post sibling beacons onto the UI thread without panicking; paths={paths:?}"
+        );
+        assert!(
+            paths.iter().any(|p| p.contains("session_id=s-live")),
+            "the active session id must be read on the UI thread and sent with the poll; paths={paths:?}"
         );
     }
 
