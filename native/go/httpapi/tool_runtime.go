@@ -225,7 +225,6 @@ type RegistryPolicy struct {
 	LiveContext func(sessionID string) string
 }
 
-
 func houseRulesMutation(call cognition.ToolCall) bool {
 	name := strings.TrimSpace(call.Name)
 	if name == "settings.patch" {
@@ -366,7 +365,7 @@ func toolCommandPreview(call cognition.ToolCall) string {
 // serverOwnedInputFields are set by the runtime from the session, never by
 // the model or an API caller: they choose the jail root, the shell's write
 // roots and the owner home the Python worker reads.
-var serverOwnedInputFields = []string{"home_dir", "workspace_root", "project_path", "write_roots", "owner_confirmed", "page_context", "caller_origin"}
+var serverOwnedInputFields = []string{"home_dir", "workspace_root", "project_path", "access_scope", "write_roots", "owner_confirmed", "page_context", "caller_origin"}
 
 // toolBinding is what the runtime, not the model, decides about a tool call:
 // which folder it is jailed to, how far outside it the shell may reach, and
@@ -438,6 +437,9 @@ func bindToolInput(call cognition.ToolCall, b toolBinding) cognition.ToolCall {
 	switch {
 	case isFileTool:
 		call.Input = injectSingleField(call.Input, "workspace_root", root)
+		if scope := strings.TrimSpace(b.Scope); scope != "" {
+			call.Input = injectSingleField(call.Input, "access_scope", scope)
+		}
 	case name == "delegate":
 		// The sub-agent is started in the bound project folder (or a folder
 		// inside it) and spawns under the session's write jail, exactly like
@@ -498,7 +500,6 @@ func injectSingleField(raw []byte, field, value string) []byte {
 	return b
 }
 
-
 func isHouseRulesTool(name string) bool {
 	n := strings.TrimSpace(name)
 	return n == "house_rules" || n == "setup.session" || n == "settings.patch" || n == "settings.get"
@@ -518,7 +519,6 @@ func injectBoolField(raw []byte, field string, value bool) []byte {
 	}
 	return b
 }
-
 
 func stripServerOwnedFields(raw []byte) []byte {
 	if len(raw) == 0 {

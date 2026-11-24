@@ -548,3 +548,63 @@ func toMaps(t *testing.T, v any) []map[string]any {
 	}
 	return out
 }
+
+func TestFileToolsHonorFullAccessScopeOutsideTheRoot(t *testing.T) {
+	jail := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "from-projects.txt")
+	if err := os.WriteFile(target, []byte("hello from outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := fileRegistry(t)
+
+	// Project scope still fences.
+	_, _, err := callTool(t, registry, "read", map[string]any{
+		"path": target, "workspace_root": jail, "access_scope": "project",
+	})
+	if err == nil || !strings.Contains(err.Error(), "outside the workspace root") {
+		t.Fatalf("project scope must still refuse a path outside the jail: %v", err)
+	}
+	_, _, err = callTool(t, registry, "grep", map[string]any{
+		"pattern": "hello", "path": target, "workspace_root": jail, "access_scope": "project",
+	})
+	if err == nil || !strings.Contains(err.Error(), "outside the workspace root") {
+		t.Fatalf("project scope grep must still refuse: %v", err)
+	}
+
+	// Full scope (no project / free reign) allows the absolute path.
+	out := mustCall(t, registry, "read", map[string]any{
+		"path": target, "workspace_root": jail, "access_scope": "full",
+	})
+	content, _ := out["content"].(string)
+	note, _ := out["note"].(string)
+	if !strings.Contains(content, "hello from outside") {
+		t.Fatalf("full-scope read missed the file: %#v", out)
+	}
+	if !strings.Contains(note, "free reign") {
+		t.Fatalf("full-scope read should warn: %#v", out)
+	}
+	out = mustCall(t, registry, "grep", map[string]any{
+		"pattern": "hello", "path": target, "workspace_root": jail, "access_scope": "full",
+	})
+	raw, _ := json.Marshal(out)
+	if !strings.Contains(string(raw), "hello from outside") {
+		t.Fatalf("full-scope grep missed the file: %s", raw)
+	}
+
+	// Auth secrets stay closed even in full scope.
+	authDir := filepath.Join(t.TempDir(), ".remedy", "auth")
+	if err := os.MkdirAll(authDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	authFile := filepath.Join(authDir, "local_api_token")
+	if err := os.WriteFile(authFile, []byte("secret-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = callTool(t, registry, "read", map[string]any{
+		"path": authFile, "workspace_root": jail, "access_scope": "full",
+	})
+	if err == nil || !strings.Contains(err.Error(), "auth secret") {
+		t.Fatalf("full scope must still refuse auth secrets: %v", err)
+	}
+}

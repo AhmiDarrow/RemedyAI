@@ -958,6 +958,14 @@ pub fn drive_stream(
     drive_stream_inner(http, request, false, on_frame);
 }
 
+/// SSE chat turns and event subscriptions outlive the HTTP client's 30s
+/// default. A tool-heavy turn that is still streaming surfaces that cutoff
+/// as "the server did not answer in time". `None` keeps the stream open
+/// until the sidecar ends it or the owner cancels.
+fn stream_request(request: Request) -> Request {
+    request.timeout(None)
+}
+
 fn drive_stream_inner(
     http: Http,
     request: Request,
@@ -1002,7 +1010,7 @@ fn drive_stream_inner(
             Ok(_) => on_frame("done".into(), "{\"type\":\"done\"}".into()),
         }
     };
-    http.stream(request, &Cancel::new(), on_chunk, on_done);
+    http.stream(stream_request(request), &Cancel::new(), on_chunk, on_done);
 }
 
 fn busy_frame(on_frame: &Arc<impl Fn(String, String)>, files: bool) {
@@ -1024,7 +1032,7 @@ pub fn stream_session_events(
     on_done: impl FnOnce() + Send + 'static,
 ) {
     let http = client.http.clone();
-    let request = Request::get("events/sessions").header("Accept", "text/event-stream");
+    let request = stream_request(Request::get("events/sessions").header("Accept", "text/event-stream"));
     let parser = Arc::new(Mutex::new(Parser::new()));
     let on_frame = Arc::new(on_frame);
     let on_chunk = {

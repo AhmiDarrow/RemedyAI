@@ -70,7 +70,7 @@ fn push_inline(rich: &mut RichText, line: &str, code: &TextStylePatch) {
         if let Some(start) = rest.find('`') {
             let (head, tail) = rest.split_at(start);
             if !head.is_empty() {
-                rich.push_text(head);
+                push_markup(rich, head);
             }
             let after = &tail[1..];
             if let Some(end) = after.find('`') {
@@ -84,10 +84,48 @@ fn push_inline(rich: &mut RichText, line: &str, code: &TextStylePatch) {
                 rest = after;
             }
         } else {
-            rich.push_text(rest);
+            push_markup(rich, rest);
             break;
         }
     }
+}
+
+fn push_markup(rich: &mut RichText, mut rest: &str) {
+    while !rest.is_empty() {
+        if let Some((mark, len, patch)) = next_mark(rest) {
+            if let Some(end) = rest[len..].find(mark) {
+                let inner = &rest[len..len + end];
+                if !inner.is_empty() && !inner.contains('\n') {
+                    if !mark_is_plain_prefix(rest, len) {
+                        rich.push_styled(inner, patch);
+                        rest = &rest[len + end + len..];
+                        continue;
+                    }
+                }
+            }
+        }
+        let ch = rest.chars().next().unwrap();
+        rich.push_text(&rest[..ch.len_utf8()]);
+        rest = &rest[ch.len_utf8()..];
+    }
+}
+
+fn next_mark(s: &str) -> Option<(&'static str, usize, TextStylePatch)> {
+    if s.starts_with("**") {
+        Some(("**", 2, TextStylePatch::bold()))
+    } else if s.starts_with("~~") {
+        Some(("~~", 2, TextStylePatch::strikethrough()))
+    } else if s.starts_with('*') {
+        Some(("*", 1, TextStylePatch::italic()))
+    } else {
+        None
+    }
+}
+
+/// A list marker like "1. * item" or "* item" should stay literal when the
+/// asterisk is followed by a space and there is no closing mark later.
+fn mark_is_plain_prefix(s: &str, len: usize) -> bool {
+    len == 1 && s[len..].starts_with(' ')
 }
 
 enum Block {
@@ -478,3 +516,33 @@ fn decode_bytes(bytes: &[u8]) -> Option<Image> {
         decoded.image.pixels,
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::inline_rich;
+    use remedy_ui::core::Color;
+    use remedy_ui::text::TextStylePatch;
+
+    #[test]
+    fn bold_inside_a_numbered_list_item_is_rendered() {
+        let rich = inline_rich("1. **Speed:** the main suite", Color::BLACK);
+        assert_eq!(rich.as_str(), "1. Speed: the main suite");
+        assert!(
+            rich.spans().iter().any(|span| {
+                let text = &rich.as_str()[span.range.clone()];
+                text == "Speed:" && span.patch.weight == TextStylePatch::bold().weight
+            }),
+            "expected a bold span for Speed:, spans={:?}",
+            rich.spans()
+        );
+        assert!(!rich.as_str().contains("**"));
+    }
+
+    #[test]
+    fn italic_and_code_still_parse_on_the_same_line() {
+        let rich = inline_rich("see *note* and `code`", Color::BLACK);
+        assert_eq!(rich.as_str(), "see note and code");
+        assert!(rich.spans().iter().any(|s| s.patch.italic == TextStylePatch::italic().italic));
+    }
+}
+
