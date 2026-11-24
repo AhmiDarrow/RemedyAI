@@ -22,6 +22,7 @@ thread_local! {
     static SKIN_OVERRIDE: Cell<Option<&'static str>> = const { Cell::new(None) };
     static STAGE_OVERRIDE: Cell<Option<u8>> = const { Cell::new(None) };
     static HOUR_OVERRIDE: Cell<Option<u32>> = const { Cell::new(None) };
+    static ENABLED_OVERRIDE: Cell<Option<bool>> = const { Cell::new(None) };
 }
 
 /// Bundled face ids. The source of truth is the skin file; this enum is
@@ -95,6 +96,11 @@ pub fn set_stage_override(stage: Option<u8>) {
 
 pub fn set_hour_override(hour: Option<u32>) {
     HOUR_OVERRIDE.with(|c| c.set(hour));
+}
+
+/// Force presence on or off, or `None` to follow the Appearance pref.
+pub fn set_enabled_override(on: Option<bool>) {
+    ENABLED_OVERRIDE.with(|c| c.set(on));
 }
 
 pub fn kind() -> Kind {
@@ -247,10 +253,22 @@ impl From<State> for Mood {
 }
 
 /// Presence is on unless the person turned it off in Appearance.
+///
+/// `None` means no settings are loaded yet, so the theme pack default applies
+/// (Dark Forest ships this as on).
+pub fn enabled_with(pref: Option<bool>) -> bool {
+    pref.unwrap_or(crate::theme_pack::layout().presence_enabled_default)
+}
+
+/// Presence is on unless the person turned it off in Appearance.
 pub fn enabled() -> bool {
-    crate::settings::current()
-        .and_then(|s| s.show_presence.try_get().ok())
-        .unwrap_or(crate::theme_pack::layout().presence_enabled_default)
+    if let Some(on) = ENABLED_OVERRIDE.with(|c| c.get()) {
+        return on;
+    }
+    enabled_with(
+        crate::settings::current()
+            .and_then(|s| s.show_presence.try_get().ok()),
+    )
 }
 
 /// Pick a mood from the live Studio and the clock.
@@ -574,5 +592,13 @@ mod tests {
         assert_eq!(Mood::from(State::Done), Mood::Happy);
         assert_eq!(Mood::from(State::Idle), Mood::Idle);
         assert_eq!(Mood::Happy.as_state(), State::Done);
+    }
+
+    #[test]
+    fn presence_defaults_on_and_the_pref_can_hide_it() {
+        assert!(crate::theme_pack::layout().presence_enabled_default);
+        assert!(enabled_with(None));
+        assert!(enabled_with(Some(true)));
+        assert!(!enabled_with(Some(false)));
     }
 }

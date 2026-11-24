@@ -101,6 +101,7 @@ fn watch_appearance(s: Settings) {
             s.density.get(),
             s.font_scale.get(),
             s.reduce_motion.get(),
+            s.show_presence.get(),
             s.high_contrast.get(),
             s.custom_accent.get(),
             s.font_ui.get(),
