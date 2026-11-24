@@ -114,7 +114,7 @@ function Assert-WebUIComplete([string]$Root) {
     }
     $html = Get-Content -Raw -LiteralPath $index
     $refs = [System.Collections.Generic.List[string]]::new()
-    foreach ($m in [regex]::Matches($html, "(?:src|href)\s*=\s*["']([^"']+)["']")) {
+    foreach ($m in [regex]::Matches($html, '(?:src|href)\s*=\s*["'']([^"'']+)["'']')) {
         $rel = $m.Groups[1].Value
         if ($rel -match '^(https?:|data:|mailto:|#)') { continue }
         $rel = $rel -replace '[?#].*$', ''
@@ -132,7 +132,7 @@ function Assert-WebUIComplete([string]$Root) {
         if ($rel -notmatch '\.(js|mjs)$') { continue }
         $body = Get-Content -Raw -LiteralPath $path
         $base = Split-Path -Parent $rel
-        foreach ($im in [regex]::Matches($body, "["'](\./[A-Za-z0-9_./@-]+\.(?:js|mjs|css|wasm))["']")) {
+        foreach ($im in [regex]::Matches($body, '["''](\./[A-Za-z0-9_./@-]+\.(?:js|mjs|css|wasm))["'']')) {
             $imp = $im.Groups[1].Value
             if ($imp.StartsWith('./')) {
                 if ([string]::IsNullOrEmpty($base) -or $base -eq '.') {
