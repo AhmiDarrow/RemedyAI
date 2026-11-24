@@ -124,8 +124,15 @@ has the same commands. Switching does not tear anything down — Studio stays mo
 while you are in Grove, so terminals keep running, streamed jobs keep streaming,
 and the computer-host loop stays connected.
 
-The choice persists in `remedy.surface`. Clearing browser storage returns you
-to Grove, which is the default.
+The choice persists in `remedy.surface`. A fresh install, and a cleared
+preference file, open Grove. Grove is the default home.
+
+If you ask for coding or Studio work from Grove — a fix, a plan for a
+loader, a question about a crate — Remedy starts a Studio session in the
+right mode with your request already in it, and switches you there. A card
+stays on Grove so you can open Studio again; **Ctrl+1** or the title-bar
+**Grove** switch brings you back. Everyday talk, goals, and "I want to …"
+stay in Grove.
 
 ## Which one should you use
 

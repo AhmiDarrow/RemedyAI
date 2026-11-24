@@ -316,7 +316,8 @@ fn footer(ui: &Ui, s: Settings) -> El {
                 },
                 move || s.save(),
             )
-            .variant("primary")
+            .variant("quiet")
+            .style(crate::tokens::primary_button(&ui.theme().colors))
             .disabled(move || s.saving.get() || s.phase.get() != "ready"),
         )
 }

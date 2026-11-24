@@ -1116,6 +1116,84 @@ pub fn todo_mark(status: &str) -> &'static str {
     }
 }
 
+/// Kind of Studio session Remedy should open from a Grove request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StudioKind {
+    Chat,
+    Plan,
+    Build,
+}
+
+impl StudioKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Chat => "Talk",
+            Self::Plan => "Plan",
+            Self::Build => "Build",
+        }
+    }
+}
+
+/// If this Grove request is work for Studio, the session kind to open.
+/// Life, goals, and everyday talk stay in Grove. Conservative: when unsure, stay.
+pub fn studio_handoff(text: &str) -> Option<StudioKind> {
+    let t = text.trim();
+    if t.is_empty() || planted_title(t).is_some() {
+        return None;
+    }
+    if !looks_like_studio_work(t) {
+        return None;
+    }
+    let lower = t.to_ascii_lowercase();
+    if has_phrase(&lower, &["help me plan", "outline", "design the steps", "plan the", "plan a refactor", "plan this"])
+        && !has_phrase(&lower, &["plan my day", "plan the day"])
+    {
+        return Some(StudioKind::Plan);
+    }
+    if has_phrase(&lower, &["explain", "what does", "walk me through", "what is this"])
+        && !has_phrase(&lower, &["fix", "implement", "patch", "debug", "compile", "refactor", "write a"])
+    {
+        return Some(StudioKind::Chat);
+    }
+    Some(StudioKind::Build)
+}
+
+fn looks_like_studio_work(text: &str) -> bool {
+    let lower = format!(" {} ", text.to_ascii_lowercase());
+    const PHRASES: &[&str] = &[
+        "stack trace",
+        "pull request",
+        "unit test",
+        "type error",
+        "syntax error",
+        "write a function",
+        "open a pr",
+        "manifest.json",
+        "init_main",
+    ];
+    if PHRASES.iter().any(|p| lower.contains(p)) {
+        return true;
+    }
+    const WORDS: &[&str] = &[
+        "rust", "rustc", "lua", "python", "javascript", "typescript", "cargo",
+        "clippy", "npm", "crate", "addon", "repo", "github", "git", "refactor",
+        "implement", "compile", "compiler", "debug", "bugfix", "lint", "patch",
+        "loader", "typo", "endpoint", "segfault", "sql", "css",
+    ];
+    has_word(&lower, WORDS)
+}
+
+fn has_phrase(lower: &str, phrases: &[&str]) -> bool {
+    phrases.iter().any(|p| lower.contains(p))
+}
+
+fn has_word(lower: &str, words: &[&str]) -> bool {
+    // `lower` may already be padded; split on non-identifier characters.
+    lower
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .any(|w| words.iter().any(|cue| *cue == w))
+}
+
 /// Home, with no attachments, and an "I want to …" line plants a goal.
 pub fn should_plant(on_home: bool, text: &str, attachments: usize) -> bool {
     on_home && attachments == 0 && planted_title(text).is_some()
@@ -1561,6 +1639,27 @@ mod tests {
         assert!(steer_first(true, 0));
         assert!(!steer_first(true, 2));
         assert!(!steer_first(false, 0));
+    }
+
+    #[test]
+    fn coding_requests_open_studio_and_life_stays_in_grove() {
+        assert_eq!(
+            studio_handoff("Get the portal addon loading again after the entry rename."),
+            Some(StudioKind::Build)
+        );
+        assert_eq!(
+            studio_handoff("Help me plan the addon loader rewrite."),
+            Some(StudioKind::Plan)
+        );
+        assert_eq!(
+            studio_handoff("Explain what init_main.lua should do."),
+            Some(StudioKind::Chat)
+        );
+        assert!(studio_handoff("Help me plan my day — ask me what’s on my plate.").is_none());
+        assert!(studio_handoff("How are my goals doing? Anything that needs me today?").is_none());
+        assert!(studio_handoff("I want to get the garden going").is_none());
+        assert!(studio_handoff("What's for dinner?").is_none());
+        assert!(studio_handoff("What kinds of things can you help me with, day to day?").is_none());
     }
 
     #[test]

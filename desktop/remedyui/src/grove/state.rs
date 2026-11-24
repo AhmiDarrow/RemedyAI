@@ -140,6 +140,13 @@ struct PollQuery {
     fast: bool,
 }
 
+/// A Studio session Remedy started from a Grove request.
+#[derive(Clone, Debug)]
+pub(crate) struct StudioHandoff {
+    pub kind: logic::StudioKind,
+    pub prompt: String,
+}
+
 /// The partner surface. Clone is a handle; the signals are shared.
 #[derive(Clone)]
 pub(crate) struct Grove {
@@ -199,6 +206,8 @@ pub(crate) struct Grove {
     pub process: Signal<Vec<String>>,
     pub focus_nonce: Signal<u64>,
     pub prefill: Signal<Option<String>>,
+    /// Last Studio session Remedy opened from a Grove request.
+    pub handoff: Signal<Option<StudioHandoff>>,
     pub hide_window: Signal<u64>,
     pub busy_ui: Signal<bool>,
     pub draft_empty: Signal<bool>,
@@ -282,6 +291,7 @@ impl Grove {
             process: Signal::new(Vec::new()),
             focus_nonce: Signal::new(0),
             prefill: Signal::new(None),
+            handoff: Signal::new(None),
             hide_window: Signal::new(0),
             busy_ui: Signal::new(false),
             draft_empty: Signal::new(true),
@@ -417,6 +427,30 @@ impl Grove {
         self.save();
     }
 
+    /// Open a Studio session from a Grove request: set the mode, start the
+    /// prompt, switch to Studio, and keep a handoff card in Grove for the way back.
+    pub(crate) fn open_studio_session(&self, kind: logic::StudioKind, prompt: &str) {
+        let prompt = prompt.trim().to_string();
+        if prompt.is_empty() {
+            return;
+        }
+        let mode = match kind {
+            logic::StudioKind::Chat => WorkMode::Chat,
+            logic::StudioKind::Plan => WorkMode::Plan,
+            logic::StudioKind::Build => WorkMode::Build,
+        };
+        self.studio.set_mode(mode);
+        if !self.studio.messages.get().is_empty() || self.studio.streaming.get() {
+            self.studio.add();
+        }
+        self.handoff.set(Some(StudioHandoff {
+            kind,
+            prompt: prompt.clone(),
+        }));
+        self.show_studio();
+        self.studio.send(prompt);
+    }
+
     pub(crate) fn go_home(&self) {
         self.place.set(Place::Home);
         self.home_tab.set(HomeTab::Plots);
@@ -548,6 +582,18 @@ impl Grove {
             let title = logic::planted_title(&trimmed).unwrap_or_default();
             self.release_busy();
             return self.plant(&title);
+        }
+        if on_home && attachments.is_empty() {
+            if let Some(kind) = logic::studio_handoff(&trimmed) {
+                let kind = match self.studio.mode.get() {
+                    WorkMode::Plan => logic::StudioKind::Plan,
+                    WorkMode::Build => logic::StudioKind::Build,
+                    WorkMode::Chat => kind,
+                };
+                self.release_busy();
+                self.open_studio_session(kind, &trimmed);
+                return true;
+            }
         }
         if self.local_only {
             self.push_message("user", &trimmed, Vec::new());

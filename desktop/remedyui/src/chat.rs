@@ -403,36 +403,48 @@ fn home_surface(ui: &Ui, studio: Studio) -> El {
             l.max_width = Length::Px(480.0);
             l.min_width = Length::Px(0.0);
         })
-        .style(tokens::typo(tokens::TITLE).foreground(colors.text));
+        .style(tokens::typo(tokens::HERO).foreground(colors.text));
 
     let st_status = studio.clone();
     let u_status = ui.clone();
-    let status = w::text(ui, "")
+    let status_line = w::text(ui, "")
+        .text(move || match st_status.conn.get() {
+            crate::studio::Conn::Ready => messages().text(&u_status, "home-status-ready"),
+            crate::studio::Conn::Connecting => messages().text(&u_status, "status-connecting"),
+            crate::studio::Conn::Disconnected => messages().text(&u_status, "status-disconnected"),
+            crate::studio::Conn::Error(e) => e,
+        })
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .style(tokens::typo(tokens::BODY).foreground(colors.text));
+    let st_detail = studio.clone();
+    let detail = w::text(ui, "")
         .text(move || {
-            let conn = match st_status.conn.get() {
-                crate::studio::Conn::Ready => messages().text(&u_status, "status-connected"),
-                crate::studio::Conn::Connecting => messages().text(&u_status, "status-connecting"),
-                crate::studio::Conn::Disconnected => {
-                    messages().text(&u_status, "status-disconnected")
-                }
-                crate::studio::Conn::Error(e) => e,
-            };
-            let model = st_status.model.get();
-            let provider = st_status.provider.get();
+            let model = st_detail.model.get();
+            let provider = st_detail.provider.get();
             if model.is_empty() {
-                conn
+                String::new()
             } else if provider.is_empty() {
-                format!("{conn}  ·  {model}")
+                model
             } else {
-                format!("{conn}  ·  {provider} / {model}")
+                format!("{provider} / {model}")
             }
         })
-        .text_align(remedy_ui::style::TextAlign::Center)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
         })
         .style(tokens::typo(tokens::META).foreground(colors.muted));
+    let status = w::column(ui)
+        .gap(tokens::SPACE)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .child(status_line)
+        .child(detail);
 
     let mut starters = w::row(ui)
         .align(Align::Center)
@@ -496,7 +508,7 @@ fn home_surface(ui: &Ui, studio: Studio) -> El {
             w::column(ui)
                 .align(Align::Center)
                 .justify(Justify::Center)
-                .gap(unit * 2.0)
+                .gap(tokens::GUTTER)
                 .padding(Insets::all(tokens::GUTTER))
                 .layout(|l| {
                     l.width = Length::Percent(1.0);

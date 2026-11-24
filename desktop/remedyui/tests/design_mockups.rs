@@ -6,7 +6,7 @@ use std::path::Path;
 
 fn no_spawn_defaults() {
     let home = std::env::temp_dir().join(format!(
-        "remedy-design4-home-{}",
+        "remedy-design5-home-{}",
         std::process::id()
     ));
     let _ = std::fs::create_dir_all(&home);
@@ -44,41 +44,24 @@ fn write_shot(
 }
 
 #[test]
-fn write_design4_review_shots() {
+fn write_design5_review_shots() {
     let Ok(dir) = std::env::var("REMEDY_DESIGN_OUT") else {
         return;
     };
     no_spawn_defaults();
     let dir = Path::new(&dir);
     let _ = std::fs::create_dir_all(dir);
-    write_shot(dir, "home", remedy_desktop::home, 1180.0, 740.0);
+    write_shot(dir, "home", remedy_desktop::design_home, 1180.0, 740.0);
+    write_shot(dir, "grove-handoff", remedy_desktop::design_grove_handoff, 1180.0, 740.0);
     write_shot(dir, "build-chat", remedy_desktop::design_build_chat, 1180.0, 740.0);
     write_shot(dir, "plan-dock", remedy_desktop::design_plan, 1180.0, 740.0);
     write_shot(dir, "settings", remedy_desktop::design_settings, 1180.0, 740.0);
-    write_shot(dir, "status-rail", remedy_desktop::home_chat, 1180.0, 740.0);
+    write_shot(dir, "status-rail", remedy_desktop::design_status_rail, 1180.0, 740.0);
     write_shot(dir, "settings-narrow", remedy_desktop::design_settings, 700.0, 740.0);
-    write_shot(dir, "presence-idle", remedy_desktop::design_presence_idle, 480.0, 400.0);
-    write_shot(
-        dir,
-        "presence-listening",
-        remedy_desktop::design_presence_listening,
-        480.0,
-        400.0,
-    );
-    write_shot(
-        dir,
-        "presence-thinking",
-        remedy_desktop::design_presence_thinking,
-        480.0,
-        400.0,
-    );
-    write_shot(
-        dir,
-        "presence-working",
-        remedy_desktop::design_presence_working,
-        480.0,
-        400.0,
-    );
-    write_shot(dir, "presence-done", remedy_desktop::design_presence_done, 480.0, 400.0);
-    write_shot(dir, "presence-error", remedy_desktop::design_presence_error, 480.0, 400.0);
+    write_shot(dir, "presence-idle", remedy_desktop::design_presence_idle, 560.0, 480.0);
+    write_shot(dir, "presence-listening", remedy_desktop::design_presence_listening, 560.0, 480.0);
+    write_shot(dir, "presence-thinking", remedy_desktop::design_presence_thinking, 560.0, 480.0);
+    write_shot(dir, "presence-working", remedy_desktop::design_presence_working, 560.0, 480.0);
+    write_shot(dir, "presence-done", remedy_desktop::design_presence_done, 560.0, 480.0);
+    write_shot(dir, "presence-error", remedy_desktop::design_presence_error, 560.0, 480.0);
 }

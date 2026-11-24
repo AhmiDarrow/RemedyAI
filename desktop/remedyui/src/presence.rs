@@ -204,35 +204,54 @@ fn paint(ui: &Ui, host: &El, state: State, scale: f32, colors: &remedy_ui::style
 
     match state {
         State::Idle => {
-            eyes(ui, host, scale, ink, 6.0, 8.0, 3.0, 3.0, blink);
+            // Half-lidded, at rest.
+            eyes(ui, host, scale, ink, 6.0, 9.0, 3.0, 2.0, blink);
             let _ = host.clone().child(px(ui, 10.0, 16.0, 4.0, 1.0, scale, mute));
         }
         State::Listening => {
-            eyes(ui, host, scale, ink, 6.0, 7.0, 3.0, 4.0, blink);
+            // Open eyes, raised brows, a small open mouth.
+            // Right marks sit at 15+w, same as eyes().
+            let _ = host.clone().child(px(ui, 6.0, 6.0, 3.0, 1.0, scale, ink));
+            let _ = host.clone().child(px(ui, 18.0, 6.0, 3.0, 1.0, scale, ink));
+            eyes(ui, host, scale, ink, 6.0, 8.0, 3.0, 4.0, blink);
             let _ = host.clone().child(px(ui, 11.0, 16.0, 2.0, 2.0, scale, mute));
         }
         State::Thinking => {
-            eyes(ui, host, scale, ink, 7.0, 8.0, 2.0, 3.0, blink);
+            // Gaze shifts right; one brow lifts; a stepped ellipsis.
+            let _ = host.clone().child(px(ui, 8.0, 7.0, 3.0, 1.0, scale, mute));
+            let _ = host.clone().child(px(ui, 18.0, 6.0, 3.0, 1.0, scale, ink));
+            eyes(ui, host, scale, ink, 8.0, 8.0, 3.0, 3.0, blink);
             let _ = host.clone().child(px(ui, 9.0, 17.0, 2.0, 2.0, scale, mute));
             let _ = host.clone().child(px(ui, 12.0, 17.0, 2.0, 2.0, scale, ink));
             let _ = host.clone().child(px(ui, 15.0, 17.0, 2.0, 2.0, scale, mute));
         }
         State::Working => {
-            eyes(ui, host, scale, ink, 5.0, 9.0, 4.0, 2.0, blink);
+            // Lowered brows, a squint, working ticks.
+            let _ = host.clone().child(px(ui, 5.0, 8.0, 4.0, 1.0, scale, ink));
+            let _ = host.clone().child(px(ui, 19.0, 8.0, 4.0, 1.0, scale, ink));
+            eyes(ui, host, scale, ink, 5.0, 10.0, 4.0, 2.0, blink);
             let _ = host.clone().child(px(ui, 8.0, 17.0, 2.0, 1.0, scale, ink));
             let _ = host.clone().child(px(ui, 11.0, 17.0, 2.0, 1.0, scale, ink));
             let _ = host.clone().child(px(ui, 14.0, 17.0, 2.0, 1.0, scale, mute));
         }
         State::Done => {
-            eyes(ui, host, scale, ink, 6.0, 9.0, 3.0, 2.0, blink);
-            // Stepped uptick, not a curved smile.
-            let _ = host.clone().child(px(ui, 8.0, 17.0, 2.0, 1.0, scale, mute));
-            let _ = host.clone().child(px(ui, 10.0, 16.0, 4.0, 1.0, scale, mute));
-            let _ = host.clone().child(px(ui, 14.0, 17.0, 2.0, 1.0, scale, mute));
+            // Open, pleased eyes and a clear stepped uptick — not a curved smile.
+            let _ = host.clone().child(px(ui, 6.0, 7.0, 3.0, 1.0, scale, mute));
+            let _ = host.clone().child(px(ui, 18.0, 7.0, 3.0, 1.0, scale, mute));
+            eyes(ui, host, scale, ink, 6.0, 8.0, 3.0, 4.0, blink);
+            let _ = host.clone().child(px(ui, 7.0, 18.0, 2.0, 1.0, scale, ink));
+            let _ = host.clone().child(px(ui, 9.0, 17.0, 2.0, 1.0, scale, ink));
+            let _ = host.clone().child(px(ui, 11.0, 16.0, 2.0, 1.0, scale, ink));
+            let _ = host.clone().child(px(ui, 13.0, 17.0, 2.0, 1.0, scale, ink));
+            let _ = host.clone().child(px(ui, 15.0, 18.0, 2.0, 1.0, scale, ink));
         }
         State::Error => {
+            // Brows step inward, stern eyes, a downturn.
+            let _ = host.clone().child(px(ui, 6.0, 6.0, 2.0, 1.0, scale, ink));
+            let _ = host.clone().child(px(ui, 8.0, 7.0, 2.0, 1.0, scale, ink));
+            let _ = host.clone().child(px(ui, 18.0, 7.0, 2.0, 1.0, scale, ink));
+            let _ = host.clone().child(px(ui, 20.0, 6.0, 2.0, 1.0, scale, ink));
             eyes(ui, host, scale, ink, 6.0, 9.0, 3.0, 1.0, false);
-            // Stepped downturn.
             let _ = host.clone().child(px(ui, 8.0, 16.0, 2.0, 1.0, scale, ink));
             let _ = host.clone().child(px(ui, 10.0, 17.0, 4.0, 1.0, scale, ink));
             let _ = host.clone().child(px(ui, 14.0, 16.0, 2.0, 1.0, scale, ink));

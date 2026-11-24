@@ -510,9 +510,9 @@ fn pane_head(
         .align(Align::Center)
         .gap(unit)
         .padding(Insets {
-            top: 10.0,
+            top: 8.0,
             end: tokens::GUTTER,
-            bottom: 10.0,
+            bottom: 8.0,
             start: tokens::GUTTER,
         })
         .layout(|l| {
@@ -1107,9 +1107,9 @@ fn build_block(ui: &Ui, todos: &[TodoItem]) -> El {
     let mut col = w::column(ui)
         .gap(unit)
         .padding(Insets {
-            top: 10.0,
+            top: 8.0,
             end: 12.0,
-            bottom: 10.0,
+            bottom: 8.0,
             start: 12.0,
         })
         .layout(|l| l.width = Length::Percent(1.0))
