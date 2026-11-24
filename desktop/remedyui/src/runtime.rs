@@ -789,6 +789,102 @@ fn parse_models(v: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
+
+/// GET `/api/providers/connected` — picker rows plus the active provider/model.
+pub fn list_connected_providers(
+    client: &Client,
+    done: impl FnOnce(Result<crate::model_picker::ConnectedList, String>) + Send + 'static,
+) {
+    let http = client.http.clone();
+    std::thread::Builder::new()
+        .name("remedy-providers".into())
+        .spawn(move || {
+            let cancel = Cancel::new();
+            let out = http
+                .send_blocking(Request::get("providers/connected"), &cancel)
+                .map_err(|e| e.to_string())
+                .and_then(|r| r.json::<serde_json::Value>().map_err(|e| e.to_string()))
+                .map(|v| crate::model_picker::parse_connected(&v));
+            done(out);
+        })
+        .ok();
+}
+
+/// GET `/api/models` or `/api/models?provider=`.
+pub fn list_models_for(
+    client: &Client,
+    provider: Option<&str>,
+    done: impl FnOnce(Result<Vec<crate::model_picker::ModelChoice>, String>) + Send + 'static,
+) {
+    let http = client.http.clone();
+    let path = match provider {
+        Some(p) if !p.is_empty() => format!("models?provider={}", encode_query(p)),
+        _ => "models".into(),
+    };
+    std::thread::Builder::new()
+        .name("remedy-models".into())
+        .spawn(move || {
+            let cancel = Cancel::new();
+            let out = http
+                .send_blocking(Request::get(&path), &cancel)
+                .map_err(|e| e.to_string())
+                .and_then(|r| r.json::<serde_json::Value>().map_err(|e| e.to_string()))
+                .map(|v| crate::model_picker::parse_model_rows(Some(&v)));
+            done(out);
+        })
+        .ok();
+}
+
+fn encode_query(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Persist a provider/model switch. A live session uses `PUT /api/sessions/{id}/llm`
+/// with `make_default` so Settings stays in sync; otherwise `PUT /api/settings`.
+pub fn apply_llm(
+    client: &Client,
+    session_id: Option<String>,
+    provider: &str,
+    model: &str,
+    done: impl FnOnce(Result<serde_json::Value, String>) + Send + 'static,
+) {
+    let http = client.http.clone();
+    let (path, body) = if let Some(id) = session_id.filter(|s| !s.is_empty()) {
+        (
+            format!("sessions/{id}/llm"),
+            crate::model_picker::session_body(provider, model, true),
+        )
+    } else {
+        (
+            "settings".into(),
+            crate::model_picker::settings_body(provider, model),
+        )
+    };
+    std::thread::Builder::new()
+        .name("remedy-llm-switch".into())
+        .spawn(move || {
+            let cancel = Cancel::new();
+            let out = match http.send_blocking(Request::put(&path).json(&body), &cancel) {
+                Ok(r) => r.json::<serde_json::Value>().map_err(|e| e.to_string()),
+                Err(e) if e.status() == Some(409) => {
+                    Err("Stop generation before switching provider or model.".into())
+                }
+                Err(e) => Err(e.to_string()),
+            };
+            done(out);
+        })
+        .ok();
+}
+
 /// POST `/api/sessions/{id}/abort` with reason `stop`.
 pub fn abort_session(
     client: &Client,

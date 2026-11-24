@@ -18,6 +18,7 @@ mod help_view;
 mod icons;
 mod layout;
 mod logo;
+mod model_picker;
 mod palette;
 mod panels;
 mod plan_dock;
@@ -65,6 +66,8 @@ pub use slides::{
     terminal_context_items, terminal_preview,
 };
 pub use studio::Studio;
+pub use model_picker::{parse_connected, PickerStatus, ProviderChoice};
+pub use status::status_bar;
 pub use timetravel::{TimeTravel, preview as time_travel_preview};
 pub use usage::{UsageContext, UsageDashboard, UsagePanel, UsageWindow};
 
@@ -979,6 +982,9 @@ fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
     slides::install(workspace.clone());
     let follow_ws = workspace;
     let follow_studio = studio.clone();
+    if studio.local_only {
+        settings::forget_current();
+    }
     let panel = settings::install(ui, studio.clone());
     let toggle = chrome.clone();
     let dismiss = chrome.clone();
