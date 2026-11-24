@@ -253,7 +253,7 @@ impl Settings {
             high_contrast: Signal::new(false),
             custom_accent: Signal::new(String::new()),
             font_ui: Signal::new("remedy-sans-ui".into()),
-            font_heading: Signal::new("remedy-sans".into()),
+            font_heading: Signal::new("ahmi-pixel".into()),
             font_reading: Signal::new("ahmi-print".into()),
             font_accent: Signal::new("ahmi-pixel".into()),
             font_code: Signal::new("ahmi-print".into()),

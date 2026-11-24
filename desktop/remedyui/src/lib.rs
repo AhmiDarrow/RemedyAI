@@ -1,7 +1,7 @@
 //! Remedy Desktop: Grove is home, and Studio is one tap away.
 //!
-//! Visual language follows the current Tauri/React app, then goes a little
-//! further (Remedy Sans UI in the chrome, AhmiPrint in code). The window talks
+//! Visual language follows Joe's own craft: flat dark forest panels, hairline
+//! borders, and three config-driven font roles (UI, display, code). The window talks
 //! to remedy-runtime over HTTP+SSE on 127.0.0.1:7400.
 
 mod browser;
@@ -43,7 +43,7 @@ mod usage;
 mod work;
 
 pub use diagnostics::DiagnosticsPanel;
-pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
+pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_DISPLAY_FONT, DEFAULT_UI_FONT, Fonts};
 pub use help::HelpPanel;
 pub use runtime::{Client, install_panic_hook};
 pub use settings::{
@@ -73,7 +73,7 @@ use chrome::{Chrome, TRAY_ABOUT, TRAY_QUIT, TRAY_SETTINGS, TRAY_SHOW, TRAY_UPDAT
 pub(crate) use icons::{Glyph, glyph};
 pub(crate) use tokens::{ROW_ACTIONS, ROW_GLYPH, ROW_TOOL, TOOL, TOOL_GLYPH};
 /// Inset accent bar on the selected row; reserved on every row so close × stays lined up.
-pub(crate) const SELECT_MARK: f32 = 3.0;
+pub(crate) const SELECT_MARK: f32 = 4.0;
 
 /// Opens the window and puts the app in the tray.
 pub fn app(app: &App) {
@@ -245,6 +245,90 @@ pub fn home_chat_live(ui: &Ui) -> El {
         Studio::preview_chat_live(),
         rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
     )
+}
+
+/// Design-review Build chat: a finished turn with a fenced code block.
+pub fn design_build_chat(ui: &Ui) -> El {
+    let studio = Studio::preview_chat();
+    studio.mode.set(studio::WorkMode::Build);
+    studio.messages.set(design_preview_messages());
+    shell_with(
+        ui,
+        studio,
+        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+    )
+}
+
+/// Design-review Plan mode with the dock open and a sample outline.
+pub fn design_plan(ui: &Ui) -> El {
+    let studio = Studio::preview_chat();
+    studio.mode.set(studio::WorkMode::Plan);
+    studio.depth.plan.set(Some(depth::PlanCard {
+        status: "ready".into(),
+        goal: "Get the portal addon loading again after the entry rename.".into(),
+        steps: vec![
+            (
+                "Patch manifest.json to init_main.lua".into(),
+                "the last update renamed the entry".into(),
+            ),
+            (
+                "Register the loader before the version check".into(),
+                String::new(),
+            ),
+            ("Run portal.exe --addon-check --all".into(), String::new()),
+        ],
+        done: 1,
+        total: 3,
+    }));
+    shell_with(
+        ui,
+        studio,
+        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+    )
+}
+
+/// Design-review Settings rail open on the Studio shell.
+pub fn design_settings(ui: &Ui) -> El {
+    settings::install_preview(ui);
+    let layout = layout::layout_open_settings(&layout::WorkspaceLayout::default());
+    shell_with(
+        ui,
+        Studio::preview_chat(),
+        rails::WorkspaceChrome::fixed(layout),
+    )
+}
+
+fn design_preview_messages() -> Vec<studio::ChatMessage> {
+    use studio::ChatMessage;
+    use work::WorkStep;
+    let body = "The portal addon loads again.\n\nThe loader now points at the new entry:\n\n```lua\n-- loader.lua\naddon.entry = \"init_main.lua\"\nassert(addon:register(), \"register before version check\")\n```\n\n`portal.exe --addon-check --all` reports all 6 addons OK. Restart the portal to pick it up.";
+    vec![
+        ChatMessage {
+            created_at: Some("2026-11-22T15:00:00Z".into()),
+            ..ChatMessage::plain(
+                "m1",
+                "user",
+                "The portal addon stopped loading after the last update. Can you fix it?",
+            )
+        },
+        ChatMessage {
+            created_at: Some("2026-11-22T15:00:20Z".into()),
+            thinking: "The manifest still named init.lua, but the last update renamed the entry. I'll patch the three files and run the addon check.".into(),
+            steps: vec![
+                {
+                    let mut s = WorkStep::done("c1", "file_read");
+                    s.detail = Some("manifest.json".into());
+                    s
+                },
+                {
+                    let mut s = WorkStep::done("c3", "file_write");
+                    s.detail = Some("loader.lua".into());
+                    s
+                },
+            ],
+            ..ChatMessage::plain("m2", "assistant", body)
+        },
+    ]
 }
 
 /// Diagnostics golden: server, host, hardware, and the hive inspector. No network.

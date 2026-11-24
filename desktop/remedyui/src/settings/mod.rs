@@ -193,6 +193,14 @@ pub(crate) fn install(ui: &Ui, studio: Studio) -> Settings {
     s
 }
 
+/// Fixture settings for design-review shells. `install` will reuse this set.
+pub(crate) fn install_preview(ui: &Ui) -> Settings {
+    prefs::bind_ui(ui);
+    let s = Settings::sample();
+    CURRENT.with(|c| c.set(Some(s)));
+    s
+}
+
 pub(crate) fn toggle() {
     let Some(s) = alive() else { return };
     if s.open.get() {

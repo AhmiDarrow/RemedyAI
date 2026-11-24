@@ -42,8 +42,10 @@ pub struct Type {
     pub leading: f32,
     /// Tracking, in em. Negative tightens titles.
     pub tracking: f32,
-    /// Monospace (AhmiPrint) when true.
+    /// Monospace (the theme's code family) when true.
     pub mono: bool,
+    /// Display / heading family (the theme's heading token) when true.
+    pub display: bool,
 }
 
 /// Session titles and empty-state headlines.
@@ -51,16 +53,18 @@ pub const TITLE: Type = Type {
     size: 16.0,
     weight: 600.0,
     leading: 1.25,
-    tracking: -0.012,
+    tracking: 0.0,
     mono: false,
+    display: true,
 };
 /// Section kickers (CODING / ACTIONS, BUILD, day stamps). Drawn uppercase.
 pub const SECTION: Type = Type {
-    size: 11.0,
-    weight: 620.0,
-    leading: 1.2,
-    tracking: 0.08,
+    size: 16.0,
+    weight: 700.0,
+    leading: 1.0,
+    tracking: 0.0,
     mono: false,
+    display: true,
 };
 /// Chat body and readable prose.
 pub const BODY: Type = Type {
@@ -69,6 +73,7 @@ pub const BODY: Type = Type {
     leading: 1.55,
     tracking: 0.0,
     mono: false,
+    display: false,
 };
 /// Timestamps, helper lines, session ages.
 pub const META: Type = Type {
@@ -77,6 +82,7 @@ pub const META: Type = Type {
     leading: 1.35,
     tracking: 0.02,
     mono: false,
+    display: false,
 };
 /// Tool names, arguments, and other code-like rows.
 pub const MONO: Type = Type {
@@ -85,6 +91,7 @@ pub const MONO: Type = Type {
     leading: 1.45,
     tracking: 0.0,
     mono: true,
+    display: false,
 };
 /// Thinking paragraphs: a half-step quieter than body.
 pub const THINKING: Type = Type {
@@ -93,6 +100,7 @@ pub const THINKING: Type = Type {
     leading: 1.5,
     tracking: 0.0,
     mono: false,
+    display: false,
 };
 
 /// Style for one step on the type scale.
@@ -106,6 +114,9 @@ pub fn typo(t: Type) -> StylePatch {
     }
     if t.mono {
         p = p.mono(true);
+    }
+    if t.display {
+        p = p.heading(true);
     }
     p
 }
@@ -122,12 +133,11 @@ pub fn icon_fg(colors: &ColorRoles) -> Color {
     colors.text.mix_oklab(colors.muted, 0.28)
 }
 
-/// Subtle 1px hairline between surfaces.
+/// Crisp 1px hairline between surfaces.
 pub fn hairline(colors: &ColorRoles) -> Color {
     colors
         .line
         .unwrap_or_else(|| colors.muted.mix_oklab(colors.bg, 0.35))
-        .with_alpha(0.55)
 }
 
 /// Window / well background.
@@ -158,13 +168,13 @@ pub fn selected_fill(colors: &ColorRoles) -> Color {
 /// A soft lift under the composer and menus.
 pub fn elevation(colors: &ColorRoles) -> Shadow {
     let ink = colors.text.mix_oklab(colors.bg, 0.15);
-    Shadow::new(0.0, 1.0, 10.0, ink.with_alpha(0.22))
+    Shadow::new(0.0, 1.0, 0.0, ink.with_alpha(0.35))
 }
 
 /// A slightly stronger lift for menus and overlays.
 pub fn elevation_overlay(colors: &ColorRoles) -> Shadow {
     let ink = colors.text.mix_oklab(colors.bg, 0.12);
-    Shadow::new(0.0, 4.0, 18.0, ink.with_alpha(0.28))
+    Shadow::new(0.0, 2.0, 0.0, ink.with_alpha(0.40))
 }
 
 #[cfg(test)]
@@ -177,7 +187,9 @@ mod tests {
         assert!(BODY.size > THINKING.size);
         assert!(THINKING.size > MONO.size);
         assert!(MONO.size > META.size);
-        assert!(META.size >= SECTION.size);
+        assert_eq!(TITLE.size, 16.0);
+        assert_eq!(SECTION.size, 16.0);
+        assert!(TITLE.display && SECTION.display);
         assert!(TITLE.weight > BODY.weight);
     }
 }

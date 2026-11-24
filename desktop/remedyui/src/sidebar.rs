@@ -776,10 +776,7 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
                 let selected = st.active.get().as_deref() == Some(sid.as_str());
                 let mut p = StylePatch::new().radius(radius);
                 if selected {
-                    p = p
-                        .background(tokens::selected_fill(&colors))
-                        .border(colors.accent.with_alpha(0.35))
-                        .border_width(1.0);
+                    p = p.background(tokens::selected_fill(&colors));
                 } else {
                     p = p.background(colors.panel.with_alpha(0.0));
                 }
