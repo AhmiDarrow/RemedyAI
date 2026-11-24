@@ -811,11 +811,34 @@ export default function App() {
       if (cancelled) return
       unsub = subscribeSessionEvents({
         onEvent: (ev) => {
+          if (ev.type === 'settings_updated') {
+            void getSettings()
+              .then((s) => {
+                if (s.llm_provider && s.llm_model && !activeIdRef.current) {
+                  setLlmProvider(String(s.llm_provider))
+                  setModel(String(s.llm_model))
+                }
+                setUserName((s.user_name || '').trim())
+                setToolProcessMode(normalizeToolProcess(s.tool_process))
+                setPrivacyMode(Boolean(s.privacy_mode))
+                const am = String(s.approval_mode || 'ask').toLowerCase()
+                setApprovalMode(am === 'auto' || am === 'full' ? am : 'ask')
+                if (s.thinking_level) setThinkingLevel(String(s.thinking_level))
+                void refreshConnected()
+                return refreshModels({
+                  provider: s.llm_provider ? String(s.llm_provider) : undefined,
+                })
+              })
+              .catch(() => {})
+            return
+          }
           if (
             ev.type === 'session_created'
             || ev.type === 'session_updated'
             || ev.type === 'message_added'
             || ev.type === 'session_deleted'
+            || ev.type === 'turn_started'
+            || ev.type === 'message_reaction'
           ) {
             scheduleRefresh(ev.session_id)
           }
