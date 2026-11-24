@@ -91,21 +91,42 @@ pub const STEP_LABELS: [&str; 7] = [
     "Ready",
 ];
 
-pub fn next_step(step: usize) -> Option<usize> {
-    if step + 1 < STEP_LABELS.len() {
-        Some(step + 1)
-    } else {
-        None
+/// Steps the recommended path skips (full provider/style extras stay on More options).
+pub fn skip_on_short(step: usize) -> bool {
+    matches!(step, STEP_PROVIDER | STEP_CHAT | STEP_VISION)
+}
+
+pub fn next_step(step: usize, short: bool) -> Option<usize> {
+    let mut s = step + 1;
+    while s < STEP_LABELS.len() {
+        if short && skip_on_short(s) {
+            s += 1;
+            continue;
+        }
+        return Some(s);
     }
+    None
 }
 
-pub fn prev_step(step: usize) -> Option<usize> {
-    step.checked_sub(1)
+pub fn prev_step(step: usize, short: bool) -> Option<usize> {
+    let mut s = step;
+    while s > 0 {
+        s -= 1;
+        if short && skip_on_short(s) {
+            continue;
+        }
+        return Some(s);
+    }
+    None
 }
 
-pub fn progress_fraction(step: usize) -> f32 {
-    let denom = (STEP_LABELS.len() - 1) as f32;
-    (step.min(STEP_LABELS.len() - 1) as f32) / denom
+pub fn progress_fraction(step: usize, short: bool) -> f32 {
+    let steps: Vec<usize> = (0..STEP_LABELS.len())
+        .filter(|s| !(short && skip_on_short(*s)))
+        .collect();
+    let i = steps.iter().position(|s| *s == step).unwrap_or(0);
+    let denom = (steps.len().saturating_sub(1)).max(1) as f32;
+    i as f32 / denom
 }
 
 pub const KEY_ERROR: &str = "Enter an API key, or choose Demo (no signup) / Ollama for free use.";
@@ -1167,4 +1188,17 @@ mod tests {
         assert_eq!(stage, Stage::Traditional);
         assert!(msg.contains("could not be downloaded"));
     }
+
+    #[test]
+    fn short_path_skips_provider_chat_and_vision() {
+        assert_eq!(next_step(STEP_WELCOME, true), Some(STEP_FOLDER));
+        assert_eq!(next_step(STEP_FOLDER, true), Some(STEP_STYLE));
+        assert_eq!(next_step(STEP_STYLE, true), Some(STEP_READY));
+        assert_eq!(next_step(STEP_READY, true), None);
+        assert_eq!(prev_step(STEP_READY, true), Some(STEP_STYLE));
+        assert_eq!(prev_step(STEP_FOLDER, true), Some(STEP_WELCOME));
+        assert_eq!(next_step(STEP_WELCOME, false), Some(STEP_PROVIDER));
+        assert_eq!(next_step(STEP_PROVIDER, false), Some(STEP_FOLDER));
+    }
+
 }

@@ -1,7 +1,7 @@
 //! Setup, house-rules, and update screens on the in-memory host.
 //!
 //! `REMEDY_DESKTOP_NO_SPAWN` is set so nothing launches a sidecar. These tests do not
-//! press Update & Relaunch.
+//! start a download. The update preview looks for Restart.
 
 use remedy_ui::AppConfig;
 use remedy_ui::a11y::Role;
@@ -14,20 +14,49 @@ fn no_spawn() {
 }
 
 #[test]
-fn wizard_get_started_opens_the_provider_step() {
+fn wizard_more_options_opens_the_provider_step() {
     no_spawn();
     let mut app = TestApp::new(
         AppConfig::new("Remedy setup test"),
         remedy_desktop::preview_wizard,
     );
     assert!(
-        app.find(Role::Button, "Get Started").is_some(),
-        "welcome shows Get Started"
+        app.find(Role::Button, "Use the recommended setup").is_some(),
+        "welcome shows the recommended CTA"
     );
-    assert!(app.press(Role::Button, "Get Started"), "Get Started");
+    assert!(
+        app.find(Role::Button, "More options").is_some(),
+        "welcome shows More options"
+    );
+    assert!(app.press(Role::Button, "More options"), "More options");
+    assert!(
+        app.find(Role::Button, "On this PC").is_some(),
+        "provider step leads with On this PC"
+    );
     assert!(
         app.find(Role::Button, "Demo · no signup").is_some(),
-        "provider step shows Demo"
+        "provider step still shows Demo"
+    );
+}
+
+#[test]
+fn wizard_recommended_setup_skips_to_the_folder_step() {
+    no_spawn();
+    let mut app = TestApp::new(
+        AppConfig::new("Remedy setup recommended"),
+        remedy_desktop::preview_wizard,
+    );
+    assert!(
+        app.press(Role::Button, "Use the recommended setup"),
+        "Use the recommended setup"
+    );
+    assert!(
+        app.find(Role::Button, "Demo · no signup").is_none(),
+        "recommended path skips the provider step"
+    );
+    assert!(
+        app.find(Role::Button, "Continue").is_some(),
+        "folder step is next"
     );
 }
 
@@ -43,16 +72,15 @@ fn house_rules_offer_names_the_choice() {
 }
 
 #[test]
-fn update_screen_offers_later_and_relaunch() {
+fn update_notice_offers_restart() {
     no_spawn();
     let app = TestApp::new(
         AppConfig::new("Remedy update test"),
         remedy_desktop::preview_update,
     );
-    assert!(app.find(Role::Button, "Later").is_some(), "Later");
     assert!(
-        app.find(Role::Button, "Update & Relaunch").is_some(),
-        "Update & Relaunch"
+        app.find(Role::Button, "Restart").is_some(),
+        "Restart"
     );
 }
 

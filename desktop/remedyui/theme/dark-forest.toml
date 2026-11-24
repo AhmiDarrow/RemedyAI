@@ -25,6 +25,15 @@ accent = "#6fdc86"
 on_accent = "#040a09"
 ok = "#6fdc86"
 
+# Stepped planes and bevel edges. Shadows are solid 2px offsets with no blur.
+[tokens.depth]
+raised = "#0b1a17"
+overlay = "#122821"
+highlight = "#3a6d66"
+well = "#020807"
+earth = "#C4A36A"
+shadow = "#010403"
+
 # Defaults for the three font roles. $REMEDY_HOME/config.toml [fonts] overrides them.
 [tokens.fonts]
 ui = "Remedy Sans UI"
@@ -55,7 +64,7 @@ pane = 2
 hairline_px = 1
 select_mark = 4
 elevation_blur = 0
-elevation_offset = 1
+elevation_offset = 2
 
 [layout]
 sidebar_side = "left"

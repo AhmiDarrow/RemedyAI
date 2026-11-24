@@ -31,6 +31,7 @@ mod runtime;
 mod server_menu;
 mod settings;
 mod setup;
+mod design_setup;
 mod sidebar;
 mod slides;
 mod sse;
@@ -709,6 +710,47 @@ pub fn design_presence_board(ui: &Ui, kind: presence::Kind) -> El {
             .child(blurb)
             .child(row)
     })
+}
+
+
+/// Design-8 first-run greeting. No Grove/Studio switcher.
+pub fn design_setup_hello(ui: &Ui) -> El {
+    design_setup::hello(ui)
+}
+
+/// Design-8 folder step.
+pub fn design_setup_folder(ui: &Ui) -> El {
+    design_setup::folder(ui)
+}
+
+/// Design-8 name step.
+pub fn design_setup_name(ui: &Ui) -> El {
+    design_setup::name(ui)
+}
+
+/// Design-8 ready step.
+pub fn design_setup_ready(ui: &Ui) -> El {
+    design_setup::ready(ui)
+}
+
+/// Design-8 more options: recommended, free, and other models.
+pub fn design_setup_more(ui: &Ui) -> El {
+    design_setup::more(ui)
+}
+
+/// Design-8 quiet background download: Grove as usual, no banner.
+pub fn design_update_quiet(ui: &Ui) -> El {
+    design_setup::update_quiet(ui)
+}
+
+/// Design-8 one-line update-ready notice with a single Restart button.
+pub fn design_update_ready(ui: &Ui) -> El {
+    design_setup::update_ready(ui)
+}
+
+/// Design-8 Advanced settings: notes, channel, and rollback.
+pub fn design_update_advanced(ui: &Ui) -> El {
+    design_setup::update_advanced(ui)
 }
 
 fn design_preview_messages() -> Vec<studio::ChatMessage> {

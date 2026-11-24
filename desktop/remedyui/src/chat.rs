@@ -600,14 +600,7 @@ fn bubble_card(ui: &Ui, body: El, user: bool, system: bool) -> El {
                 l.max_width = Length::Px(tokens::BUBBLE_MAX);
                 l.shrink = 1.0;
             })
-            .style(
-                StylePatch::new()
-                    .background(colors.panel)
-                    .foreground(colors.text)
-                    .radius(0.0)
-                    .border(tokens::hairline(&colors))
-                    .border_width(1.0),
-            )
+            .style(tokens::well_surface(&colors).foreground(colors.text))
             .child(body);
     }
     if system {
@@ -641,11 +634,13 @@ fn bubble_card(ui: &Ui, body: El, user: bool, system: bool) -> El {
     w::row(ui)
         .align(Align::Stretch)
         .gap(tokens::SPACE * 2.0)
+        .padding(Insets::all(tokens::SPACE * 2.0))
         .layout(|l| {
             l.max_width = Length::Px(tokens::BUBBLE_MAX);
             l.shrink = 1.0;
             l.min_width = Length::Px(0.0);
         })
+        .style(tokens::raised_surface(&colors))
         .child(rule)
         .child(
             w::column(ui)
