@@ -1065,6 +1065,65 @@ fn settings_chord_opens_the_rail_and_composer_ignores_new_session() {
     );
 }
 
+fn settings_rail_open(names: &[String]) -> bool {
+    has(names, "Search all settings") || has(names, "Settings couldn’t load")
+}
+
+fn open_settings_rail(app: &mut TestApp) {
+    app.key(KeyEvent::press(Key::char(',')).with_modifiers(Modifiers::CTRL));
+    app.frames(2);
+    assert!(
+        settings_rail_open(&accessible_names(app)),
+        "settings rail: {:?}",
+        accessible_names(app)
+    );
+}
+
+fn assert_settings_rail_closed(app: &TestApp, why: &str) {
+    let names = accessible_names(app);
+    assert!(
+        !settings_rail_open(&names),
+        "{why}: {names:?}"
+    );
+}
+
+#[test]
+fn escape_closes_settings_regardless_of_focus() {
+    fresh_profile();
+    reset_saved_layout();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.frames(2);
+    assert!(app.press(Role::Button, "Studio"));
+
+    // Ctrl+, leaves focus on the chrome frame, which is not under the shell
+    // column's on_key handler. Escape must still close the rail.
+    open_settings_rail(&mut app);
+    app.key(KeyEvent::press(Key::Escape));
+    app.frames(2);
+    assert_settings_rail_closed(&app, "escape closes settings when the frame has focus");
+
+    open_settings_rail(&mut app);
+    let search = app
+        .find(Role::TextInput, "Search all settings")
+        .or_else(|| app.find(Role::SearchInput, "Search all settings"));
+    if let Some(search) = search {
+        search.focus();
+        app.frames(1);
+    }
+    app.key(KeyEvent::press(Key::Escape));
+    app.frames(2);
+    assert_settings_rail_closed(&app, "escape closes settings when Search is focused");
+
+    open_settings_rail(&mut app);
+    if let Some(field) = app.find(Role::MultilineTextInput, "Message Remedy") {
+        field.focus();
+        app.frames(1);
+    }
+    app.key(KeyEvent::press(Key::Escape));
+    app.frames(2);
+    assert_settings_rail_closed(&app, "escape closes settings when the composer is focused");
+}
+
 /// The diagnostics overlay is a new surface. Forest, light, and deutan lock it.
 /// A missing PNG is written and is not a failure the first time.
 #[test]
