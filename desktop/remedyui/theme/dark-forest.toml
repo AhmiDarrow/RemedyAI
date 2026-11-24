@@ -76,12 +76,14 @@ composer_hint = "under"
 
 [layout.presence]
 style = "geometric-pixel"
-# morning-star | wolf | bear — Joe picks the form; construction stays geometric.
-kind = "morning-star"
+# square is the shipped default. morning-star, wolf, and bear remain optional
+# bundled skins. A pack may also name any id loaded from theme/faces/{id}.toml.
+skin = "square"
+kind = "square"
 grid = 24
 enabled_default = true
-# 1px breath and blink; skipped when reduced_motion is on.
-motion = ["breath", "blink"]
+# 1px breath, blink, idle glance, and a short settle; skipped when reduced_motion is on.
+motion = ["breath", "blink", "glance", "settle"]
 
 # Hidden in Simple. Advanced and Settings still expose every knob; nothing is removed.
 [layout.simple]

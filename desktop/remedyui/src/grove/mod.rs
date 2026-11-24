@@ -100,3 +100,12 @@ mod tests {
         unbind_live();
     }
 }
+
+/// Number of planted goals already in Grove prefs. Used by presence growth.
+pub(crate) fn planted_goal_count() -> u32 {
+    store::load().goal_sessions.len() as u32
+}
+
+pub(crate) fn remedy_home() -> std::path::PathBuf {
+    store::remedy_home()
+}

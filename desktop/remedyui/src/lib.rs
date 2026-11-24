@@ -24,6 +24,8 @@ mod plan_dock;
 mod prefs;
 mod presence;
 mod presence_draw;
+mod face_skin;
+mod face_draw;
 mod rails;
 mod runtime;
 mod server_menu;
@@ -265,7 +267,7 @@ fn design_grove_body(ui: &Ui, grove: grove::Grove) -> El {
 
 /// Grove is the default home. Title-bar switcher with Grove selected.
 pub fn design_home(ui: &Ui) -> El {
-    design_home_kind(ui, presence::Kind::MorningStar)
+    design_home_kind(ui, presence::Kind::Square)
 }
 
 pub fn design_home_wolf(ui: &Ui) -> El {
@@ -278,6 +280,8 @@ pub fn design_home_bear(ui: &Ui) -> El {
 
 fn design_home_kind(ui: &Ui, kind: presence::Kind) -> El {
     presence::set_kind_override(Some(kind));
+    presence::set_stage_override(Some(2));
+    presence::set_hour_override(Some(10));
     close_design_settings();
     let studio = Studio::preview();
     studio.conn.set(studio::Conn::Ready);
@@ -345,6 +349,10 @@ pub fn home_chat_live(ui: &Ui) -> El {
 
 /// Design-review Build chat: a finished turn with a fenced code block.
 pub fn design_build_chat(ui: &Ui) -> El {
+    presence::set_kind_override(Some(presence::Kind::Square));
+    presence::set_stage_override(Some(2));
+    presence::set_hour_override(Some(10));
+    close_design_settings();
     let studio = Studio::preview_chat();
     studio.mode.set(studio::WorkMode::Build);
     studio.messages.set(design_preview_messages());
@@ -474,6 +482,164 @@ pub fn design_concept_wolf(ui: &Ui) -> El {
 
 pub fn design_concept_bear(ui: &Ui) -> El {
     design_presence_board(ui, presence::Kind::Bear)
+}
+
+/// All twelve moods of the default Square skin, at `size` px.
+pub fn design_moods(ui: &Ui, size: f32) -> El {
+    presence::set_kind_override(Some(presence::Kind::Square));
+    presence::set_stage_override(Some(2));
+    presence::set_hour_override(Some(10));
+    close_design_settings();
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    design_hosted(ui, studio, move |ui| {
+        fonts::prepare_theme(ui, &Fonts::load());
+        let colors = ui.theme().colors.clone();
+        let title = w::text(ui, format!("Square — moods at {}", size as i32))
+            .style(tokens::typo(tokens::HERO).foreground(colors.text))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        let blurb = w::text(
+            ui,
+            "The default face. Neutral, living, and skinnable. Companion stage.",
+        )
+        .style(tokens::typo(tokens::BODY).foreground(colors.muted))
+        .layout(|l| {
+            l.max_width = Length::Px(720.0);
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        });
+        let moods = presence::Mood::all();
+        let mut col = w::column(ui)
+            .align(Align::Start)
+            .gap(tokens::GUTTER * 2.0)
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        for chunk in moods.chunks(6) {
+            let mut row = w::row(ui)
+                .align(Align::Start)
+                .justify(Justify::SpaceBetween)
+                .gap(tokens::GUTTER)
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                });
+            for mood in chunk {
+                let label = w::text(ui, mood.label())
+                    .style(tokens::typo(tokens::META).foreground(colors.muted));
+                let cell = w::column(ui)
+                    .align(Align::Center)
+                    .gap(tokens::SPACE * 2.0)
+                    .child(presence::preview_stage(ui, *mood, size, 2))
+                    .child(label);
+                row = row.child(cell);
+            }
+            col = col.child(row);
+        }
+        w::column(ui)
+            .align(Align::Start)
+            .justify(Justify::Center)
+            .gap(tokens::GUTTER)
+            .padding(Insets::all(tokens::GUTTER * 2.0))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.height = Length::Percent(1.0);
+                l.grow = 1.0;
+                l.min_height = Length::Px(0.0);
+            })
+            .style(StylePatch::new().background(colors.bg).foreground(colors.text))
+            .child(title)
+            .child(blurb)
+            .child(col)
+    })
+}
+
+pub fn design_moods_72(ui: &Ui) -> El {
+    design_moods(ui, 72.0)
+}
+
+pub fn design_moods_144(ui: &Ui) -> El {
+    design_moods(ui, 144.0)
+}
+
+/// Growth stages of the default Square skin, shown idle at 144.
+pub fn design_evolution(ui: &Ui) -> El {
+    presence::set_kind_override(Some(presence::Kind::Square));
+    presence::set_hour_override(Some(10));
+    close_design_settings();
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    design_hosted(ui, studio, move |ui| {
+        fonts::prepare_theme(ui, &Fonts::load());
+        let colors = ui.theme().colors.clone();
+        let title = w::text(ui, "Square — growth stages")
+            .style(tokens::typo(tokens::HERO).foreground(colors.text))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        let blurb = w::text(
+            ui,
+            "Details refine over time from data Remedy already has — sessions, messages, days, and planted goals. The face is complete from the first day.",
+        )
+        .style(tokens::typo(tokens::BODY).foreground(colors.muted))
+        .layout(|l| {
+            l.max_width = Length::Px(860.0);
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        });
+        let stages: [(&str, &str, u8); 4] = [
+            ("New", "The first days. A complete face, hairline frame only.", 0),
+            ("Familiar", "A few conversations. A quiet inner ring.", 1),
+            ("Companion", "Settled use. Tiny corner studs.", 2),
+            ("Seasoned", "A long companionship. Side ticks and a chin mark.", 3),
+        ];
+        let mut row = w::row(ui)
+            .align(Align::Start)
+            .justify(Justify::SpaceBetween)
+            .gap(tokens::GUTTER)
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        for (name, when, stage) in stages {
+            let label = w::text(ui, name)
+                .style(tokens::typo(tokens::TITLE).foreground(colors.text));
+            let cap = w::text(ui, when)
+                .style(tokens::typo(tokens::META).foreground(colors.muted))
+                .layout(|l| {
+                    l.max_width = Length::Px(220.0);
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                });
+            let cell = w::column(ui)
+                .align(Align::Start)
+                .gap(tokens::SPACE * 2.0)
+                .child(presence::preview_stage(ui, presence::Mood::Idle, 144.0, stage))
+                .child(label)
+                .child(cap);
+            row = row.child(cell);
+        }
+        w::column(ui)
+            .align(Align::Start)
+            .justify(Justify::Center)
+            .gap(tokens::GUTTER)
+            .padding(Insets::all(tokens::GUTTER * 2.0))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.height = Length::Percent(1.0);
+                l.grow = 1.0;
+                l.min_height = Length::Px(0.0);
+            })
+            .style(StylePatch::new().background(colors.bg).foreground(colors.text))
+            .child(title)
+            .child(blurb)
+            .child(row)
+    })
 }
 
 /// All six states of one presence form, for Joe to compare.
