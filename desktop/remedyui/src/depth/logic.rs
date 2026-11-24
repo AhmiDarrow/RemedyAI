@@ -907,6 +907,77 @@ pub fn message_copy_text(content: &str, beats: &[String]) -> String {
 }
 
 
+/// Toggle `id` in a bulk-select set, preserving order.
+pub fn toggle_selected_id(selected: &[String], id: &str) -> Vec<String> {
+    if selected.iter().any(|s| s == id) {
+        selected.iter().filter(|s| s.as_str() != id).cloned().collect()
+    } else {
+        let mut next = selected.to_vec();
+        next.push(id.to_string());
+        next
+    }
+}
+
+/// Inclusive range of visible session ids between `anchor` and `id` (Shift+click).
+pub fn selected_id_range(visible: &[String], anchor: Option<&str>, id: &str) -> Vec<String> {
+    let Some(a) = anchor.and_then(|a| visible.iter().position(|x| x == a)) else {
+        return vec![id.to_string()];
+    };
+    let Some(b) = visible.iter().position(|x| x == id) else {
+        return vec![id.to_string()];
+    };
+    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+    visible[lo..=hi].to_vec()
+}
+
+/// Body for `POST /api/sessions/bulk-project`. Empty path means no project.
+/// The sidecar rejects more than 200 ids.
+pub fn bulk_project_body(ids: &[String], project_path: Option<&str>) -> serde_json::Value {
+    let ids = if ids.len() > 200 { &ids[..200] } else { ids };
+    serde_json::json!({
+        "session_ids": ids,
+        "project_path": project_path.unwrap_or(""),
+    })
+}
+
+/// Visible session ids in tree order, for Shift+click ranges and Select visible.
+pub fn visible_session_ids(
+    sessions: &[crate::studio::Session],
+    projects: &[crate::studio::Project],
+    filter: crate::studio::Filter,
+    query: &str,
+    project_order: &[String],
+    session_order: &[(String, Vec<String>)],
+) -> Vec<String> {
+    ordered_groups(
+        sessions,
+        projects,
+        filter,
+        query,
+        project_order,
+        session_order,
+    )
+    .into_iter()
+    .flat_map(|(_, members)| members.into_iter().map(|s| s.id))
+    .collect()
+}
+
+pub fn delete_selected_title(count: usize) -> String {
+    if count == 1 {
+        "Delete 1 chat?".into()
+    } else {
+        format!("Delete {count} chats?")
+    }
+}
+
+pub fn delete_selected_confirm_label(count: usize) -> String {
+    if count == 1 {
+        "Delete chat".into()
+    } else {
+        format!("Delete {count} chats")
+    }
+}
+
 /// Event names from `GET /api/events/sessions` that should refresh the sidebar.
 pub fn is_session_sync_event(kind: &str) -> bool {
     matches!(
@@ -1042,6 +1113,27 @@ mod tests {
     }
 
     #[test]
+    fn bulk_select_toggles_and_shift_range_matches_the_old_shell() {
+        assert_eq!(toggle_selected_id(&[], "a"), vec!["a"]);
+        assert_eq!(toggle_selected_id(&["a".into()], "a"), Vec::<String>::new());
+        assert_eq!(toggle_selected_id(&["a".into()], "b"), vec!["a", "b"]);
+        let vis = vec!["a".into(), "b".into(), "c".into(), "d".into()];
+        assert_eq!(selected_id_range(&vis, Some("b"), "d"), vec!["b", "c", "d"]);
+        assert_eq!(selected_id_range(&vis, Some("d"), "b"), vec!["b", "c", "d"]);
+        assert_eq!(selected_id_range(&vis, None, "c"), vec!["c"]);
+        assert_eq!(selected_id_range(&vis, Some("missing"), "c"), vec!["c"]);
+        let body = bulk_project_body(&["s1".into(), "s2".into()], Some("/tmp/p"));
+        assert_eq!(body["session_ids"], serde_json::json!(["s1", "s2"]));
+        assert_eq!(body["project_path"], "/tmp/p");
+        assert_eq!(bulk_project_body(&["s1".into()], None)["project_path"], "");
+        let many: Vec<String> = (0..250).map(|i| format!("s{i}")).collect();
+        assert_eq!(bulk_project_body(&many, None)["session_ids"].as_array().unwrap().len(), 200);
+        assert_eq!(delete_selected_title(1), "Delete 1 chat?");
+        assert_eq!(delete_selected_title(4), "Delete 4 chats?");
+        assert_eq!(delete_selected_confirm_label(1), "Delete chat");
+        assert_eq!(delete_selected_confirm_label(4), "Delete 4 chats");
+    }
+
     fn message_copy_prefers_the_body_then_falls_back_to_beats() {
         assert_eq!(message_copy_text("hello\n", &["beat".into()]), "hello\n");
         assert_eq!(message_copy_text("   ", &["one".into(), "".into(), "two".into()]), "one\n\ntwo");
