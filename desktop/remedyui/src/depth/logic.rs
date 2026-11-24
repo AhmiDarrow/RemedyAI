@@ -1059,6 +1059,153 @@ pub fn session_tags_file_body(sessions: &[crate::studio::Session]) -> String {
     serde_json::to_string_pretty(&serde_json::Value::Object(map)).unwrap_or_else(|_| "{}".into())
 }
 
+/// A live session reported by `GET /api/coordination/presence`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SiblingBeacon {
+    pub session_id: String,
+    pub you: bool,
+    pub muscle: String,
+    pub project: String,
+    pub goal: String,
+    pub phase: String,
+    pub held_files: Vec<String>,
+    pub held_count: u32,
+}
+
+pub const PRESENCE_POLL_IDLE_MS: u64 = 30_000;
+pub const PRESENCE_POLL_BUSY_MS: u64 = 8_000;
+pub const PRESENCE_POLL_ERROR_MS: u64 = 45_000;
+
+pub fn parse_presence_beacons(v: &serde_json::Value) -> Vec<SiblingBeacon> {
+    let Some(arr) = v.get("beacons").and_then(|b| b.as_array()) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|row| {
+            let session_id = row.get("session_id")?.as_str()?.to_string();
+            if session_id.is_empty() {
+                return None;
+            }
+            let files = row
+                .get("held_files")
+                .and_then(|f| f.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            Some(SiblingBeacon {
+                session_id,
+                you: row.get("you").and_then(|y| y.as_bool()).unwrap_or(false),
+                muscle: row
+                    .get("muscle")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                project: row
+                    .get("project")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                goal: row
+                    .get("goal")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                phase: row
+                    .get("phase")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                held_count: row
+                    .get("held_count")
+                    .and_then(|n| n.as_u64())
+                    .unwrap_or(files_len(&files)) as u32,
+                held_files: files,
+            })
+        })
+        .collect()
+}
+
+fn files_len(files: &[String]) -> u64 {
+    files.len() as u64
+}
+
+pub fn other_beacons(beacons: &[SiblingBeacon]) -> Vec<SiblingBeacon> {
+    beacons.iter().filter(|b| !b.you).cloned().collect()
+}
+
+pub fn sibling_chip_label(others: &[SiblingBeacon]) -> String {
+    match others {
+        [] => String::new(),
+        [one] => {
+            let detail = if !one.muscle.is_empty() {
+                one.muscle.as_str()
+            } else if !one.project.is_empty() {
+                one.project.as_str()
+            } else {
+                "working"
+            };
+            format!("1 other session · {detail}")
+        }
+        many => format!("{} other sessions working", many.len()),
+    }
+}
+
+pub fn sibling_chip_tip(others: &[SiblingBeacon]) -> String {
+    if others.is_empty() {
+        return String::new();
+    }
+    let lines: Vec<String> = others
+        .iter()
+        .map(|b| {
+            let who = if b.muscle.is_empty() {
+                "another session"
+            } else {
+                b.muscle.as_str()
+            };
+            let where_ = if b.project.is_empty() { "?" } else { b.project.as_str() };
+            let goal = if b.goal.is_empty() {
+                String::new()
+            } else {
+                format!(" — {}", b.goal)
+            };
+            let held = if b.held_files.is_empty() {
+                String::new()
+            } else {
+                let shown = b.held_files.iter().take(6).cloned().collect::<Vec<_>>().join(", ");
+                let extra = if b.held_count as usize > 6 {
+                    format!(" (+{})", b.held_count as usize - 6)
+                } else {
+                    String::new()
+                };
+                format!("\n   holding: {shown}{extra}")
+            };
+            let phase = if b.phase.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", b.phase)
+            };
+            format!("• {who} · {where_}{goal}{phase}{held}")
+        })
+        .collect();
+    format!(
+        "Other Remedy sessions at work — their held files are protected from overwrites:\n{}",
+        lines.join("\n")
+    )
+}
+
+pub fn next_presence_poll_ms(others: usize, error: bool) -> u64 {
+    if error {
+        PRESENCE_POLL_ERROR_MS
+    } else if others > 0 {
+        PRESENCE_POLL_BUSY_MS
+    } else {
+        PRESENCE_POLL_IDLE_MS
+    }
+}
+
 /// Event names from `GET /api/events/sessions` that should refresh the sidebar.
 pub fn is_session_sync_event(kind: &str) -> bool {
     matches!(
@@ -1233,6 +1380,28 @@ mod tests {
         assert!(!session_matches_query(&s, "zebra"));
         let raw = session_tags_file_body(&[s.clone()]);
         assert_eq!(parse_session_tags_file(&raw), vec![("s1".into(), vec!["portal".into()])]);
+    }
+
+    #[test]
+    fn coordination_presence_hides_you_and_names_siblings() {
+        let v = serde_json::json!({
+            "beacons": [
+                {"session_id": "me", "you": true, "muscle": "local/remedy", "project": "app", "goal": "", "phase": "build", "held_files": [], "held_count": 0},
+                {"session_id": "s2", "you": false, "muscle": "xai/grok-4.5", "project": "portal", "goal": "load the addon", "phase": "build", "held_files": ["main.rs", "lib.rs"], "held_count": 2}
+            ],
+            "count": 2
+        });
+        let others = other_beacons(&parse_presence_beacons(&v));
+        assert_eq!(others.len(), 1);
+        assert_eq!(sibling_chip_label(&others), "1 other session · xai/grok-4.5");
+        assert!(sibling_chip_tip(&others).contains("load the addon"));
+        assert!(sibling_chip_tip(&others).contains("main.rs"));
+        assert_eq!(sibling_chip_label(&[]), "");
+        assert_eq!(next_presence_poll_ms(0, false), PRESENCE_POLL_IDLE_MS);
+        assert_eq!(next_presence_poll_ms(1, false), PRESENCE_POLL_BUSY_MS);
+        assert_eq!(next_presence_poll_ms(0, true), PRESENCE_POLL_ERROR_MS);
+        let two = vec![others[0].clone(), others[0].clone()];
+        assert_eq!(sibling_chip_label(&two), "2 other sessions working");
     }
 
     fn message_copy_prefers_the_body_then_falls_back_to_beats() {
