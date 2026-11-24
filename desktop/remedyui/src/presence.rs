@@ -490,7 +490,8 @@ fn draw(ui: &Ui, mood: Mood, size: f32, stage: u8) -> El {
         let settle_c = settle.clone();
         let ui_s = ui.clone();
         ui_s.after(Duration::from_millis(120), move || {
-            settle_c.set(0);
+            // The face may already be gone if the surface switched.
+            let _ = settle_c.try_set(0);
         });
         schedule_motion(
             ui.clone(),
@@ -515,23 +516,33 @@ fn schedule_motion(
 ) {
     let again = ui.clone();
     ui.after(Duration::from_millis(600), move || {
-        phase.update(|n| *n = n.wrapping_add(1));
-        let n = phase.get();
+        // Stop quietly if the face was torn down (Grove/Studio switch, unmount).
+        if phase.try_update(|n| *n = n.wrapping_add(1)).is_err() {
+            return;
+        }
+        let n = match phase.with_untracked(|n| *n) {
+            Ok(n) => n,
+            Err(_) => return,
+        };
         if do_glance && n % 10 == 3 {
             let dir = if n % 20 == 3 { 1 } else { -1 };
-            glance.set(dir);
+            let _ = glance.try_set(dir);
         } else if do_glance && n % 10 == 6 {
-            glance.set(0);
+            let _ = glance.try_set(0);
         }
         if do_blink && n % 16 == 0 {
-            blink.set(true);
+            if blink.try_set(true).is_err() {
+                return;
+            }
             let blink = blink.clone();
             let phase = phase.clone();
             let glance = glance.clone();
             let again2 = again.clone();
             again.after(Duration::from_millis(90), move || {
-                blink.set(false);
-                schedule_motion(again2, phase, blink, glance, do_blink, do_glance);
+                let _ = blink.try_set(false);
+                if phase.with_untracked(|_| ()).is_ok() {
+                    schedule_motion(again2, phase, blink, glance, do_blink, do_glance);
+                }
             });
         } else {
             schedule_motion(again, phase, blink, glance, do_blink, do_glance);

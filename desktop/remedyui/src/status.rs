@@ -107,13 +107,10 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
             },
             privacy_slot(ui),
         )
-        .child(
-            messages().text(ui, "bar-help"),
-            chip(ui, "bar-help", false, || {
-                crate::chrome::toggle_overlay(crate::chrome::Overlay::Help);
-            }),
-        )
-        .child_maybe_fn(bar_label(ui, "bar-webui"), webui_slot(ui))
+        .keep(chip(ui, "bar-help", false, || {
+            crate::chrome::toggle_overlay(crate::chrome::Overlay::Help);
+        }))
+        .keep(webui_slot(ui))
         .child_fn(
             {
                 let u = ui.clone();
@@ -121,41 +118,13 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
             },
             speak_chip(ui),
         )
-        .child_maybe_fn(
-            bar_label(ui, "bar-usage"),
-            advanced_slot(ui, "bar-usage", move || {
-                crate::chrome::open_usage(&usage);
-            }),
-        )
-        .child_maybe_fn(
-            {
-                let u = ui.clone();
-                move || {
-                    let id = match thinking_level().as_str() {
-                        "off" => "bar-thinking-off",
-                        "low" => "bar-thinking-low",
-                        "high" => "bar-thinking-high",
-                        _ => "bar-thinking-med",
-                    };
-                    messages().text(&u, id)
-                }
-            },
-            thinking_slot(ui),
-        )
-        .child_maybe_fn(
-            {
-                let u = ui.clone();
-                move || {
-                    let id = match approval_mode().as_str() {
-                        "auto" => "bar-approval-auto",
-                        "full" => "bar-approval-full",
-                        _ => "bar-approval-ask",
-                    };
-                    messages().text(&u, id)
-                }
-            },
-            approval_slot(ui),
-        )
+        // Advanced-only controls stay on the rail (0.70.5). They must not be
+        // the first chips pushed into the overflow menu at a typical width.
+        .keep(advanced_slot(ui, "bar-usage", move || {
+            crate::chrome::open_usage(&usage);
+        }))
+        .keep(thinking_slot(ui))
+        .keep(approval_slot(ui))
         .flex(ui.el("status-flex").layout(|l| {
             l.grow = 1.0;
             l.shrink = 1.0;
