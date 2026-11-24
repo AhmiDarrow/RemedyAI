@@ -185,6 +185,7 @@ pub struct SkillRow {
     pub description: String,
     pub status: String,
     pub quarantine: bool,
+    pub auto_generated: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -259,6 +260,10 @@ pub struct Depth {
     pub remote_busy: Signal<bool>,
     pub memory_body: Signal<String>,
     pub skills: Signal<Vec<SkillRow>>,
+    /// Status filter on the installed skills list.
+    pub skill_filter: Signal<String>,
+    pub skill_budget: Signal<logic::SkillBudget>,
+    pub skill_learning: Signal<logic::SkillLearning>,
     pub skill_name: Signal<String>,
     pub skill_body: Signal<String>,
     pub library_rows: Signal<Vec<SkillRow>>,
@@ -326,6 +331,9 @@ impl Depth {
             remote_busy: Signal::new(false),
             memory_body: Signal::new(String::new()),
             skills: Signal::new(Vec::new()),
+            skill_filter: Signal::new(logic::SKILL_FILTER_ALL.into()),
+            skill_budget: Signal::new(logic::SkillBudget::default()),
+            skill_learning: Signal::new(logic::SkillLearning::default()),
             skill_name: Signal::new(String::new()),
             skill_body: Signal::new(String::new()),
             library_rows: Signal::new(Vec::new()),
