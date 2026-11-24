@@ -242,6 +242,12 @@ fn theme(ui: &Ui, s: Settings) -> El {
             .child(bits::field(ui, "Custom accent", s.custom_accent, "#3D8F6E"))
             .child(form::hint(ui, "Hex color. Blank uses the theme accent. Light accents get dark text."))
             .child(form::toggle(ui, "Reduce motion", "Keep movement short and still.", s.reduce_motion))
+            .child(form::toggle(
+                ui,
+                "Remedy's presence",
+                "A small geometric mark that shows whether she is idle, listening, thinking, working, done, or in error. Off leaves a quieter shell.",
+                s.show_presence,
+            ))
             .child(form::toggle(ui, "High contrast", "Stronger text and borders, including when the system asks for it.", s.high_contrast))
             .child(form::action(ui, "Reset fonts", "quiet", move || super::prefs::reset_fonts(s)))
     })
