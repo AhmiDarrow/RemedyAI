@@ -393,6 +393,27 @@ pub fn preview_models(ui: &Ui) -> El {
     view(ui, s, false)
 }
 
+/// Settings Models form for a single catalog provider. Used by tests that
+/// check each row keeps its own label, default URL, and auth controls.
+pub fn preview_models_provider(ui: &Ui, provider: &str) -> El {
+    let s = Settings::sample();
+    let catalog: Vec<state::Prov> = crate::setup::model::OFFLINE_PROVIDERS
+        .iter()
+        .map(|p| state::Prov::new(p.id, p.name, p.base_url, ""))
+        .collect();
+    if let Some(p) = catalog.iter().find(|p| p.id == provider) {
+        s.provider.set(p.id.clone());
+        s.loaded_provider.set(p.id.clone());
+        s.base_url.set(p.base_url.clone());
+        s.loaded_base_url.set(p.base_url.clone());
+    }
+    s.catalog.set(catalog);
+    s.category.set("models".into());
+    s.open_ids.set(vec!["provider".into()]);
+    s.force.set(Some("provider".into()));
+    view(ui, s, false)
+}
+
 pub fn preview_connect(ui: &Ui) -> El {
     let s = Settings::sample();
     s.category.set("connections".into());
