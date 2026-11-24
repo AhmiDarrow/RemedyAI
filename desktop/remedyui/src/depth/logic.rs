@@ -893,6 +893,19 @@ pub fn preceding_user_for_regen(
         .map(|m| (m.id.clone(), m.content.clone()))
 }
 
+/// Text the Copy message control puts on the clipboard.
+pub fn message_copy_text(content: &str, beats: &[String]) -> String {
+    if !content.trim().is_empty() {
+        return content.to_string();
+    }
+    beats
+        .iter()
+        .map(|b| b.trim())
+        .filter(|b| !b.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 
 /// Event names from `GET /api/events/sessions` that should refresh the sidebar.
 pub fn is_session_sync_event(kind: &str) -> bool {
@@ -1029,6 +1042,13 @@ mod tests {
     }
 
     #[test]
+    fn message_copy_prefers_the_body_then_falls_back_to_beats() {
+        assert_eq!(message_copy_text("hello\n", &["beat".into()]), "hello\n");
+        assert_eq!(message_copy_text("   ", &["one".into(), "".into(), "two".into()]), "one\n\ntwo");
+        assert_eq!(message_copy_text("", &[]), "");
+        assert!(message_copy_text("  ", &["\n".into()]).is_empty());
+    }
+
     fn clean_resend_strips_the_attachment_block() {
         let raw = "please review\n\n📎 Attachments:\n- notes.txt (12 B)";
         assert_eq!(clean_resend_text(raw), "please review");
