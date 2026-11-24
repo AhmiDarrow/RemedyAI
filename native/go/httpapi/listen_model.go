@@ -127,16 +127,16 @@ func tryLiveModel(home string, cfg ConfigMap, provider, model, baseURL string) c
 	rawURL := strings.TrimSpace(baseURL)
 	prov, modelID, urlOut := normalizeLLMSettings(rawProvider, rawModel, rawURL)
 
-	// Catalog base URL wins over normalize's custom localhost fallback when the
-	// caller did not pass an explicit URL (Poe used to resolve to :5001).
 	meta, ok := mergedProviderCatalog(cfg)[prov]
 	if !ok {
 		meta = providerCatalog[prov]
 	}
-	if rawURL != "" {
-		urlOut = rawURL
-	} else if catalogURL := strings.TrimSpace(meta.BaseURL); catalogURL != "" {
-		if urlOut == "" || (isLocalURL(urlOut) && !isLocalURL(catalogURL)) {
+	// Hidden-URL providers drop a leftover catalog URL from another provider
+	// and otherwise use the catalog endpoint. Typable providers keep a
+	// caller- or catalog-supplied URL (including a test/mock endpoint).
+	urlOut = effectiveBaseURL(prov, rawURL)
+	if providerShowsBaseURL(prov) && rawURL == "" {
+		if catalogURL := strings.TrimSpace(meta.BaseURL); catalogURL != "" {
 			urlOut = catalogURL
 		}
 	}

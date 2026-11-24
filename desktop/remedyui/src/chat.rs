@@ -1,5 +1,8 @@
 //! Chat column: session header, empty monogram, bubbles, composer.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::depth::logic::{self, reaction_label};
 use crate::depth::{self, react};
 use crate::logo;
@@ -490,13 +493,17 @@ fn home_surface(ui: &Ui, studio: Studio) -> El {
 
     let face_studio = studio.clone();
     let face_ui = ui.clone();
-    let face = show(ui, move || crate::presence::enabled(), move || {
-        crate::presence::mark(
-            &face_ui,
-            crate::presence::from_studio(&face_studio),
-            crate::theme_pack::layout().presence_home,
-        )
-    })
+    let face = show(
+        ui,
+        move || crate::presence::enabled(),
+        move || {
+            crate::presence::mark(
+                &face_ui,
+                crate::presence::from_studio(&face_studio),
+                crate::theme_pack::layout().presence_home,
+            )
+        },
+    )
     .el();
 
     let status_panel = tokens::info_panel(ui, messages().text(ui, "home-status-title"), status)
@@ -751,9 +758,11 @@ fn speaker_cluster(
         let mark_ui = ui.clone();
         let persona_ui = ui.clone();
         let persona_name = name.to_string();
-        show(ui, move || crate::presence::enabled(), move || {
-            crate::presence::mark(&mark_ui, crate::presence::State::Done, tokens::AVATAR)
-        })
+        show(
+            ui,
+            move || crate::presence::enabled(),
+            move || crate::presence::mark(&mark_ui, crate::presence::State::Done, tokens::AVATAR),
+        )
         .fallback(move || logo::persona(&persona_ui, &persona_name, false, tokens::AVATAR))
         .el()
     };
@@ -1220,7 +1229,6 @@ fn panel_button(
     })
 }
 
-
 fn copy_button(ui: &Ui, text: String) -> El {
     let u = ui.clone();
     compact_icon_action(ui, w::Icon::Copy, "chat-copy", move || {
@@ -1280,74 +1288,104 @@ fn compact_icon_action(
     btn
 }
 
-fn reaction_is_on(studio: &Studio, id: &str, emoji: &str) -> bool {
-
+fn current_user_reaction(studio: &Studio, id: &str) -> String {
     if let Some(m) = studio.messages.get().iter().find(|m| m.id == id) {
-        return m.user_reaction == emoji;
+        return m.user_reaction.clone();
     }
-    studio.live_message_id.get().as_deref() == Some(id) && studio.live_user_reaction.get() == emoji
+    if studio.live_message_id.get().as_deref() == Some(id) {
+        return studio.live_user_reaction.get();
+    }
+    String::new()
 }
 
+fn reaction_menu_items(studio: &Studio, id: &str) -> Vec<w::MenuItem> {
+    let current = current_user_reaction(studio, id);
+    logic::REACTIONS
+        .iter()
+        .map(|(emoji, label)| {
+            let st = studio.clone();
+            let id = id.to_string();
+            let em = (*emoji).to_string();
+            let title = if current == *emoji {
+                format!("{emoji} {label} (selected, press to remove)")
+            } else {
+                format!("{emoji} {label}")
+            };
+            w::MenuItem::new(title, move || react(&st, &id, &em))
+        })
+        .collect()
+}
+
+/// One "Add reaction" trigger plus a compact pill for the chosen reaction.
+/// The four options live in a keyboard-accessible menu so the footer does not
+/// clip at narrow widths the way four always-visible emoji buttons did.
 fn reaction_bar(ui: &Ui, studio: Studio, id: String) -> (Option<El>, Option<(El, f32)>) {
     let colors = ui.theme().colors.clone();
-    let mut extras = w::row(ui).gap(2.0).align(Align::Center);
-    let mut selected: Option<El> = None;
-    let mut extra_count = 0;
-    for (emoji, _) in logic::REACTIONS {
-        let emoji = (*emoji).to_string();
-        let st_press = studio.clone();
-        let id_press = id.clone();
-        let em_press = emoji.clone();
-        let accent = colors.accent;
-        let muted = colors.muted;
-        let st_style = studio.clone();
-        let id_style = id.clone();
-        let em_style = emoji.clone();
-        let em_name = emoji.clone();
-        let on = reaction_is_on(&studio, &id, &emoji);
-        let btn = w::button(ui, emoji, move || react(&st_press, &id_press, &em_press))
-            .variant("quiet")
-            .style(move || {
-                let on = reaction_is_on(&st_style, &id_style, &em_style);
-                let mut p = tokens::typo(tokens::BODY).foreground(if on { accent } else { muted });
-                if on {
-                    p = p
-                        .background(accent.with_alpha(0.14))
-                        .radius(8.0)
-                        .padding(Insets {
-                            top: 2.0,
-                            end: 6.0,
-                            bottom: 2.0,
-                            start: 6.0,
-                        });
-                }
-                p
-            })
-            .semantics(move || {
-                Semantics::new(Role::Button)
-                    .label(reaction_label(&em_name).to_string())
-                    .action(Action::Click)
-            });
-        if on && selected.is_none() {
-            selected = Some(btn);
-        } else {
-            extras = extras.child(btn);
-            extra_count += 1;
-        }
-    }
-    let extras_width = 32.0 * extra_count as f32;
-    let extras_el = extras;
+    let accent = colors.accent;
+    let muted = colors.muted;
+    let current = current_user_reaction(&studio, &id);
+
     let mut row = w::row(ui).gap(4.0).align(Align::Center).padding(Insets {
         top: 2.0,
         end: 0.0,
         bottom: 0.0,
         start: 0.0,
     });
-    if let Some(chip) = selected {
-        row = row.child(chip);
+
+    if !current.is_empty() {
+        let st_press = studio.clone();
+        let id_press = id.clone();
+        let em_name = current.clone();
+        let label = format!("You reacted {}. Press to remove.", reaction_label(&em_name));
+        let pill = w::button(ui, current.clone(), move || react(&st_press, &id_press, ""))
+            .variant("quiet")
+            .style(move || {
+                tokens::typo(tokens::BODY)
+                    .foreground(accent)
+                    .background(accent.with_alpha(0.14))
+                    .radius(8.0)
+                    .padding(Insets {
+                        top: 2.0,
+                        end: 6.0,
+                        bottom: 2.0,
+                        start: 6.0,
+                    })
+            })
+            .semantics(move || {
+                Semantics::new(Role::Button)
+                    .label(label.clone())
+                    .action(Action::Click)
+            });
+        row = row.child(pill);
     }
-    row = row.child(extras_el.clone());
-    (Some(row), Some((extras_el, extras_width)))
+
+    let anchor: Rc<RefCell<Option<El>>> = Rc::new(RefCell::new(None));
+    let open_anchor = anchor.clone();
+    let open_ui = ui.clone();
+    let st_open = studio.clone();
+    let id_open = id.clone();
+    let add = w::button(ui, "☺", move || {
+        let Some(anchor_el) = open_anchor.borrow().clone() else {
+            return;
+        };
+        w::menu(
+            &open_ui,
+            &anchor_el,
+            reaction_menu_items(&st_open, &id_open),
+        );
+    })
+    .variant("quiet")
+    .style(move || tokens::typo(tokens::BODY).foreground(muted))
+    .semantics(|| {
+        Semantics::new(Role::Button)
+            .label("Add reaction")
+            .action(Action::Click)
+    });
+    *anchor.borrow_mut() = Some(add.clone());
+    row = row.child(add);
+    // No hover-reveal extras: the single trigger stays visible at 400px,
+    // and the picker is a menu that is positioned to stay on screen.
+    (Some(row), None)
 }
 
 fn agent_reaction(ui: &Ui, studio: Studio, id: String) -> El {
