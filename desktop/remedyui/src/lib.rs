@@ -41,6 +41,7 @@ mod timetravel;
 mod titlebar;
 mod theme_pack;
 mod theme_import;
+mod theme_custom;
 mod tokens;
 mod tray_copy;
 mod update;
@@ -128,6 +129,7 @@ pub fn app(app: &App) {
         let boot_studio = studio.clone();
         browser::bind_app(a.clone());
         settings::install(ui, studio.clone());
+        theme_custom::attach(ui, &a);
         let tag = tray_copy::fluent_tag(&chrome.locale.get());
         ui.set_locale(&tag);
         a.set_locale(Some(tag));

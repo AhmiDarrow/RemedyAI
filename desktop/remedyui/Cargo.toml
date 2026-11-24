@@ -10,9 +10,9 @@ publish = false
 # `webview` is the in-app browser (eval, set_user_agent, devtools). `playback` is
 # the mic and spoken-reply path. `update` is the signed latest.json installer.
 # `net`, `image`, `desktop`, and `term` stay for the shell, rails, Grove, and
-# Settings. `extra` is the Connect pairing QR. `webstorage` imports the old webview theme. Same features on Windows and Linux.
+# Settings. `extra` is the Connect pairing QR. `webstorage` imports the old webview theme. `customize` is for theme packs. Same features on Windows and Linux.
 # No path override. No script-lua and no rhai: 1.0 core stays plain RemedyUI Rust.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "3142c66cde5e20b06028f955087326dab9a04b51", features = ["net", "image", "webview", "playback", "desktop", "term", "update", "extra", "webstorage"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "3142c66cde5e20b06028f955087326dab9a04b51", features = ["net", "image", "webview", "playback", "desktop", "term", "update", "extra", "webstorage", "customize"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -25,7 +25,7 @@ portable-pty = "0.9"
 
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "3142c66cde5e20b06028f955087326dab9a04b51", features = ["headless", "devtools", "net", "image", "webview", "playback", "desktop", "term", "update", "extra", "webstorage"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "3142c66cde5e20b06028f955087326dab9a04b51", features = ["headless", "devtools", "net", "image", "webview", "playback", "desktop", "term", "update", "extra", "webstorage", "customize"] }
 
 [profile.release]
 lto = "fat"
