@@ -240,15 +240,14 @@ fn tab_btn(ui: &Ui, mobile: Signal<MobilePane>, which: MobilePane, key: &'static
             let colors = colors.clone();
             let active = active.clone();
             move || {
-                let mut p = StylePatch::new().radius(8.0).text_size(12.0).weight(600.0);
+                let mut p = StylePatch::new().radius(2.0).text_size(12.0).weight(600.0);
                 if active() {
-                    p = p
-                        .background(colors.accent.with_alpha(0.16))
-                        .foreground(colors.text)
-                        .border(colors.accent.with_alpha(0.4))
-                        .border_width(1.0);
+                    p = tokens::selected_surface(&colors)
+                        .text_size(12.0)
+                        .weight(600.0)
+                        .foreground(colors.text);
                 } else {
-                    p = p.foreground(colors.muted);
+                    p = p.foreground(colors.muted).radius(2.0);
                 }
                 p
             }
@@ -352,13 +351,7 @@ fn pane_shell(
         } else {
             chat_column(&u, st.clone(), pr.clone(), n.get())
         };
-        pane.style(
-            StylePatch::new()
-                .background(tokens::pane_fill(&colors))
-                .border(tokens::hairline(&colors))
-                .border_width(1.0)
-                .radius(PANE_RADIUS),
-        )
+        pane.style(tokens::panel_surface(&colors).radius(PANE_RADIUS))
         .clip()
     })
     .el();
@@ -1113,13 +1106,7 @@ fn build_block(ui: &Ui, todos: &[TodoItem]) -> El {
             start: 12.0,
         })
         .layout(|l| l.width = Length::Percent(1.0))
-        .style(
-            StylePatch::new()
-                .background(tokens::surface_overlay(&colors).mix_oklab(colors.bg, 0.12))
-                .border(tokens::hairline(&colors))
-                .border_width(1.0)
-                .radius(ui.theme().radii.medium),
-        )
+        .style(tokens::raised_surface(&colors))
         .child(say(ui, "chat-split-build", "strong").style(tokens::section_kicker(&colors)));
     for t in todos {
         col = col.child(todo_row(ui, t));

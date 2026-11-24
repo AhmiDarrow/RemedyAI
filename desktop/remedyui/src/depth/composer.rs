@@ -330,13 +330,7 @@ fn field_row(ui: &Ui, studio: &Studio, field: &remedy_ui::TextField, unit: f32) 
                 l.min_height = Length::Px(48.0);
                 l.shrink = 0.0;
             })
-            .style(
-                StylePatch::new()
-                    .background(colors.panel)
-                    .radius(0.0)
-                    .border(crate::tokens::hairline(&colors))
-                    .border_width(1.0),
-            )
+            .style(crate::tokens::well_surface(&colors))
             .child(attach)
             .child(mic)
             .child(field.el().layout(|l| {

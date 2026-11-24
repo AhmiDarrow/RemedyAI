@@ -14,7 +14,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use remedy_ui::reactive::Signal;
 use remedy_ui::update::{Feed, Release, UpdateConfig};
-use remedy_ui::App;
+use remedy_ui::layout::Length;
+use remedy_ui::widgets as w;
+use remedy_ui::{App, El, Ui, show};
+
+use crate::tokens::{typo, META, SPACE};
 
 /// First RemedyUI ship. Must stay greater than the last Tauri build, 0.70.5.
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -47,7 +51,11 @@ static PROGRESS_TOTAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU
 thread_local! {
     static OFFER: std::cell::RefCell<Option<Signal<String>>> = const { std::cell::RefCell::new(None) };
     static NOTE: std::cell::RefCell<Option<Signal<String>>> = const { std::cell::RefCell::new(None) };
+    static READY: std::cell::RefCell<Option<Signal<String>>> = const { std::cell::RefCell::new(None) };
+    static READY_NOTES: std::cell::RefCell<Option<Signal<String>>> = const { std::cell::RefCell::new(None) };
+    static LAST_NOTES: std::cell::RefCell<Option<Signal<String>>> = const { std::cell::RefCell::new(None) };
     static PENDING: std::cell::RefCell<Option<Release>> = const { std::cell::RefCell::new(None) };
+    static STAGED: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
     static APP: std::cell::RefCell<Option<App>> = const { std::cell::RefCell::new(None) };
 }
 
@@ -73,6 +81,36 @@ pub(crate) fn offer_signal() -> Signal<String> {
 
 pub(crate) fn note_signal() -> Signal<String> {
     NOTE.with(signal)
+}
+
+pub(crate) fn ready_signal() -> Signal<String> {
+    READY.with(signal)
+}
+
+pub(crate) fn ready_notes() -> Signal<String> {
+    READY_NOTES.with(signal)
+}
+
+pub(crate) fn last_notes_signal() -> Signal<String> {
+    LAST_NOTES.with(signal)
+}
+
+/// First non-empty line of release notes, trimmed to a single status line.
+pub fn short_notes(notes: &str) -> String {
+    let line = notes
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("")
+        .trim_start_matches('#')
+        .trim()
+        .trim_start_matches(['#', '*', '-'])
+        .trim();
+    let mut out: String = line.chars().take(120).collect();
+    if line.chars().count() > 120 {
+        out.push('…');
+    }
+    out
 }
 
 /// Tests and preview hosts set `REMEDY_DESKTOP_NO_SPAWN`. Either flag skips the network.
@@ -439,9 +477,10 @@ pub(crate) fn install_from_menu(app: &App) {
         match result {
             Ok(Some(release)) => {
                 offer_signal().set(release.version.clone());
+                last_notes_signal().set(release.notes.clone());
                 note_signal().set(String::new());
                 PENDING.with(|p| *p.borrow_mut() = Some(release));
-                spawn_install(&app2);
+                spawn_download(&app2);
             }
             Ok(None) => {
                 offer_signal().set(String::new());
@@ -456,6 +495,10 @@ pub(crate) fn on_update_menu(app: &App) {
     if checks_disabled() {
         return;
     }
+    if !ready_signal().get().is_empty() {
+        spawn_apply(app);
+        return;
+    }
     if offer_signal().get().is_empty() {
         if BUSY.swap(true, Ordering::SeqCst) {
             return;
@@ -464,7 +507,7 @@ pub(crate) fn on_update_menu(app: &App) {
         let app2 = app.clone();
         app.background(check_feed, move |result| finish_check(&app2, result));
     } else {
-        spawn_install(app);
+        spawn_download(app);
     }
 }
 
@@ -473,8 +516,10 @@ fn finish_check(_app: &App, result: Result<Option<Release>, String>) {
     match result {
         Ok(Some(release)) => {
             offer_signal().set(release.version.clone());
+            last_notes_signal().set(release.notes.clone());
             note_signal().set(String::new());
             PENDING.with(|p| *p.borrow_mut() = Some(release));
+            spawn_download(_app);
         }
         Ok(None) => {
             offer_signal().set(String::new());
@@ -495,7 +540,20 @@ fn trim_note(e: &str) -> String {
 }
 
 pub(crate) fn spawn_install(app: &App) {
+    if !ready_signal().get().is_empty() {
+        spawn_apply(app);
+    } else {
+        spawn_download(app);
+    }
+}
+
+/// Download and verify only. Restart / [`spawn_apply`] runs the installer.
+pub(crate) fn spawn_download(app: &App) {
     if checks_disabled() || BUSY.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    if STAGED.with(|s| s.borrow().is_some()) && !ready_signal().get().is_empty() {
+        BUSY.store(false, Ordering::SeqCst);
         return;
     }
     let Some(release) = PENDING.with(|p| p.borrow().clone()) else {
@@ -503,11 +561,47 @@ pub(crate) fn spawn_install(app: &App) {
         return;
     };
     store_progress(0, None);
+    // Tray may show progress. The title bar and status row stay quiet.
     note_signal().set(download_note(0, None));
     watch_download(app);
     let app2 = app.clone();
+    let version = release.version.clone();
+    let notes = release.notes.clone();
     app.background(
         move || download_and_stage(&release),
+        move |result| match result {
+            Ok(file) => {
+                BUSY.store(false, Ordering::SeqCst);
+                STAGED.with(|s| *s.borrow_mut() = Some(file));
+                ready_signal().set(version);
+                ready_notes().set(short_notes(&notes));
+                last_notes_signal().set(notes);
+                note_signal().set(String::new());
+                let _ = app2;
+            }
+            Err(e) => {
+                BUSY.store(false, Ordering::SeqCst);
+                note_signal().set(trim_note(&e));
+            }
+        },
+    );
+}
+
+/// Apply a staged, verified installer and quit so the waiter can relaunch.
+pub(crate) fn spawn_apply(app: &App) {
+    if checks_disabled() || BUSY.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let Some(file) = STAGED.with(|s| s.borrow().clone()) else {
+        BUSY.store(false, Ordering::SeqCst);
+        return;
+    };
+    let version = ready_signal().get();
+    keep_current_as_previous();
+    keep_applied(&file, &version);
+    let app2 = app.clone();
+    app.background(
+        move || apply_verified(&file),
         move |result| match result {
             Ok(()) => app2.quit(),
             Err(e) => {
@@ -516,6 +610,15 @@ pub(crate) fn spawn_install(app: &App) {
             }
         },
     );
+}
+
+/// Status-bar / ready-notice Restart.
+pub(crate) fn press_apply() {
+    APP.with(|slot| {
+        if let Some(app) = slot.borrow().clone() {
+            spawn_apply(&app);
+        }
+    });
 }
 
 /// What the status line and the tray say while bytes are arriving.
@@ -561,14 +664,13 @@ fn watch_download(app: &App) {
     });
 }
 
-pub fn download_and_stage(release: &Release) -> Result<(), String> {
+pub fn download_and_stage(release: &Release) -> Result<PathBuf, String> {
     if !trusted_download(&release.url) {
         return Err("Download URL is not a trusted GitHub release host".into());
     }
     let dir = std::env::temp_dir().join(format!("RemedyDesktop-Update-{}", std::process::id()));
-    let file = remedy_ui::update::download(&updater_config(), release, &dir, store_progress)
-        .map_err(|e| e.to_string())?;
-    apply_verified(&file)
+    remedy_ui::update::download(&updater_config(), release, &dir, store_progress)
+        .map_err(|e| e.to_string())
 }
 
 fn apply_verified(file: &Path) -> Result<(), String> {
@@ -930,9 +1032,155 @@ fn macos_app_bundle() -> Option<PathBuf> {
     None
 }
 
+/// One-line ready notice: short what's-new and a single Restart.
+pub fn ready_notice(ui: &Ui) -> El {
+    let host = ui.clone();
+    show(
+        ui,
+        || !ready_signal().try_get().unwrap_or_default().is_empty(),
+        move || {
+            let ui = host.clone();
+            let ver = ready_signal().try_get().unwrap_or_default();
+            let notes = ready_notes().try_get().unwrap_or_default();
+            w::row(&ui)
+                .gap(SPACE)
+                .fill_width()
+                .align(remedy_ui::layout::Align::Center)
+                .style(crate::tokens::raised_surface(&ui.theme().colors.clone()))
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_height = Length::Px(36.0);
+                    l.padding = remedy_ui::core::Insets::symmetric(SPACE, SPACE * 2.0);
+                })
+                .child(
+                    w::text(&ui, format!("Remedy {ver} is ready to install."))
+                        .style(typo(META)),
+                )
+                .child(
+                    w::text(&ui, notes)
+                        .style(typo(META))
+                        .variant("muted")
+                        .layout(|l| {
+                            l.grow = 1.0;
+                            l.shrink = 1.0;
+                            l.min_width = Length::Px(0.0);
+                        }),
+                )
+                .child(w::button(&ui, "Restart", press_apply).variant("primary"))
+        },
+    )
+    .el()
+}
+
+/// Preview host used by first-run tests. Seeds a staged notice; nothing downloads.
+pub fn preview_ready_notice(ui: &Ui) -> El {
+    ready_signal().set("1.2.0".into());
+    ready_notes().set("Faster Grove load and a calmer status bar.".into());
+    last_notes_signal().set("Faster Grove load and a calmer status bar.".into());
+    ready_notice(ui)
+}
+
+fn update_store() -> PathBuf {
+    crate::runtime::remedy_home().join("update")
+}
+
+pub fn channel() -> String {
+    let raw = std::fs::read_to_string(update_store().join("channel")).unwrap_or_default();
+    match raw.trim() {
+        "preview" => "preview".into(),
+        _ => "stable".into(),
+    }
+}
+
+pub fn set_channel(value: &str) {
+    let dir = update_store();
+    let _ = std::fs::create_dir_all(&dir);
+    let v = if value.trim() == "preview" { "preview" } else { "stable" };
+    let _ = std::fs::write(dir.join("channel"), v);
+}
+
+pub fn channel_signal() -> Signal<String> {
+    thread_local! {
+        static SLOT: std::cell::RefCell<Option<Signal<String>>> = const { std::cell::RefCell::new(None) };
+    }
+    let sig = SLOT.with(signal);
+    if sig.get().is_empty() {
+        sig.set(channel());
+    }
+    sig
+}
+
+pub fn previous_version() -> Option<String> {
+    let v = std::fs::read_to_string(update_store().join("previous-version")).ok()?;
+    let v = v.trim();
+    if v.is_empty() { None } else { Some(v.to_string()) }
+}
+
+fn keep_current_as_previous() {
+    let dir = update_store();
+    let current = dir.join("current-setup.bin");
+    let previous = dir.join("previous-setup.bin");
+    let current_ver = dir.join("current-version");
+    let previous_ver = dir.join("previous-version");
+    if current.exists() {
+        let _ = std::fs::rename(&current, &previous);
+        if current_ver.exists() {
+            let _ = std::fs::rename(&current_ver, &previous_ver);
+        }
+    }
+}
+
+fn keep_applied(file: &Path, version: &str) {
+    let dir = update_store();
+    let _ = std::fs::create_dir_all(&dir);
+    let dest = dir.join("current-setup.bin");
+    let _ = std::fs::copy(file, &dest);
+    if !version.is_empty() {
+        let _ = std::fs::write(dir.join("current-version"), version);
+    }
+}
+
+/// Restore the last kept build, if one was saved when a newer update applied.
+pub fn rollback() -> Result<(), String> {
+    let dir = update_store();
+    let previous = dir.join("previous-setup.bin");
+    if !previous.exists() {
+        return Err("No previous build is kept on this PC.".into());
+    }
+    apply_verified(&previous)
+}
+
+pub(crate) fn press_rollback() {
+    APP.with(|slot| {
+        if let Some(app) = slot.borrow().clone() {
+            if checks_disabled() {
+                return;
+            }
+            let app2 = app.clone();
+            app.background(rollback, move |result| match result {
+                Ok(()) => app2.quit(),
+                Err(e) => note_signal().set(trim_note(&e)),
+            });
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_notes_takes_the_first_line() {
+        assert_eq!(
+            short_notes("# What's new\n\nFaster Grove load and a calmer status bar.\n- More later"),
+            "What's new"
+        );
+        assert_eq!(short_notes("   "), "");
+        let long = "x".repeat(200);
+        let out = short_notes(&long);
+        assert!(out.ends_with('…'));
+        assert_eq!(out.chars().count(), 121);
+    }
 
     #[test]
     fn one_oh_is_newer_than_last_tauri() {

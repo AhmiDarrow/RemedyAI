@@ -493,6 +493,64 @@ fn tool_hint(id: &str) -> &'static str {
     }
 }
 
+
+fn updates_panel(ui: &Ui, _s: Settings) -> El {
+    let notes = crate::update::last_notes_signal();
+    let channel = crate::update::channel_signal();
+    let picker = bits::picker(
+        ui,
+        "Update channel",
+        &[
+            ("stable".into(), "Stable".into()),
+            ("preview".into(), "Preview".into()),
+        ],
+        channel,
+    );
+    let last = Signal::new(crate::update::channel());
+    let picker2 = picker.clone();
+    let picker = picker.bind(move || {
+        let v = crate::update::channel_signal().get();
+        if last.get() != v {
+            last.set(v.clone());
+            crate::update::set_channel(&v);
+        }
+        let _ = &picker2;
+    });
+    let previous = crate::update::previous_version();
+    let rollback = if let Some(ver) = previous.clone() {
+        form::action(ui, &format!("Restore {ver}"), "quiet", || {
+            crate::update::press_rollback();
+        })
+    } else {
+        form::hint(ui, "No previous build is kept on this PC.")
+    };
+    let ready = crate::update::ready_signal().try_get().unwrap_or_default();
+    let restart = if ready.is_empty() {
+        form::hint(ui, "Updates download quietly. Restart appears here and in the top notice when a build is ready.")
+    } else {
+        form::action(ui, &format!("Restart to install {ready}"), "primary", || {
+            crate::update::press_apply();
+        })
+    };
+    form::stack(ui)
+        .child(form::label(ui, "Updates"))
+        .child(w::text(ui, move || {
+            let n = notes.get();
+            if n.trim().is_empty() {
+                "No update notes yet.".into()
+            } else {
+                n
+            }
+        }).variant("small"))
+        .child(picker)
+        .child(form::hint(
+            ui,
+            "Preview uses the same signed feed until a preview channel is published.",
+        ))
+        .child(rollback)
+        .child(restart)
+}
+
 fn advanced(ui: &Ui, s: Settings) -> El {
     form::block(ui, s, "advanced", move |ui, s| {
         let knobs = bits::rebuild_on(
@@ -503,6 +561,7 @@ fn advanced(ui: &Ui, s: Settings) -> El {
             move |ui| knob_groups(ui, s),
         );
         form::stack(ui)
+            .child(updates_panel(ui, s))
             .child(form::toggle(ui, "Allow skill creation (learning loop)", "", s.allow_skills))
             .child(w::text(ui, move || format!("Learning auto-approve threshold ({:.2})", s.auto_approve.get())).variant("strong"))
             .child(w::slider(ui, "Learning auto-approve threshold", s.auto_approve, 0.0, 1.0, 0.05))

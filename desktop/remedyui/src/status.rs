@@ -618,7 +618,8 @@ fn update_button(ui: &Ui) -> El {
     show(
         ui,
         || {
-            !crate::update::offer_signal()
+            // Ready builds use the chrome notice, not a status-bar chip.
+            false && !crate::update::offer_signal()
                 .try_get()
                 .unwrap_or_default()
                 .is_empty()
@@ -649,10 +650,12 @@ fn update_note(ui: &Ui) -> El {
     show(
         ui,
         || {
-            !crate::update::note_signal()
-                .try_get()
-                .unwrap_or_default()
-                .is_empty()
+            {
+                let note = crate::update::note_signal()
+                    .try_get()
+                    .unwrap_or_default();
+                !note.is_empty() && !note.starts_with("Downloading")
+            }
         },
         move || {
             let u = u.clone();

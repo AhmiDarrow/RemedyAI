@@ -70,13 +70,7 @@ fn setup_card(ui: &Ui, children: Vec<El>) -> El {
             l.width = Length::Px(480.0);
             l.max_width = Length::Px(480.0);
         })
-        .style(
-            StylePatch::new()
-                .background(c.card)
-                .border(line(&c))
-                .border_width(1.0)
-                .radius(ui.theme().radii.medium),
-        );
+        .style(crate::tokens::raised_surface(&c));
     for child in children {
         col = col.child(child);
     }
@@ -109,13 +103,7 @@ fn field(ui: &Ui, value: &str) -> El {
             bottom: SPACE * 1.5,
         })
         .layout(|l| l.width = Length::Percent(1.0))
-        .style(
-            StylePatch::new()
-                .background(c.panel)
-                .border(line(&c))
-                .border_width(1.0)
-                .radius(ui.theme().radii.small),
-        )
+        .style(crate::tokens::well_surface(&c))
         .child(label(ui, value, BODY, c.text))
 }
 
