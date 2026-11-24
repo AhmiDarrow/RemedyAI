@@ -4,22 +4,40 @@
 // only worked after clicking out). The NSIS installer stays per-user
 // (`RequestExecutionLevel user`) so silent upgrades of %LOCALAPPDATA%
 // still work. Other hosts ignore this; the tray image is set in src/lib.rs
-// from tray-icon.png.
+// from tray-icon.png. Paths are resolved from CARGO_MANIFEST_DIR so the
+// embed still works when cargo's cwd is not the crate directory.
 
 fn main() {
-    let ico = std::path::Path::new("../../src-tauri/icons/icon.ico");
-    let manifest = std::path::Path::new("packaging/windows/remedy-desktop.exe.manifest");
+    let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+    let ico = manifest_dir.join("../../src-tauri/icons/icon.ico");
+    let manifest = manifest_dir.join("packaging/windows/remedy-desktop.exe.manifest");
     println!("cargo:rerun-if-changed={}", ico.display());
     println!("cargo:rerun-if-changed={}", manifest.display());
-    println!("cargo:rerun-if-changed=../../src-tauri/icons/tray-icon.png");
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest_dir.join("../../src-tauri/icons/tray-icon.png").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest_dir.join("../../src-tauri/icons/32x32.png").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest_dir.join("../../src-tauri/icons/128x128.png").display()
+    );
     #[cfg(windows)]
     {
         let mut res = winresource::WindowsResource::new();
         if ico.is_file() {
-            res.set_icon("../../src-tauri/icons/icon.ico");
+            res.set_icon(ico.to_str().expect("icon.ico path is valid UTF-8"));
+        } else {
+            println!(
+                "cargo:warning=icon.ico not found at {}, the exe will have no app icon",
+                ico.display()
+            );
         }
         if manifest.is_file() {
-            res.set_manifest_file("packaging/windows/remedy-desktop.exe.manifest");
+            res.set_manifest_file(manifest.to_str().expect("manifest path is valid UTF-8"));
         } else {
             res.set_manifest(
                 r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
