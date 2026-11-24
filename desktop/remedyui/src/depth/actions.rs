@@ -15,7 +15,7 @@ use crate::sse;
 use crate::studio::{ChatMessage, Studio, WorkMode};
 use crate::work::{self, WorkStep};
 use remedy_ui::host::FileDialog;
-use remedy_ui::net::Request;
+use remedy_ui::net::{Multipart, Request};
 use remedy_ui::playback::{
     MediaSource, Microphone, MicrophoneOptions, MicrophoneState, Player, PlayerOptions,
 };
@@ -2588,6 +2588,176 @@ pub fn project_confirm_body(studio: &Studio, path: &str) -> String {
         .filter(|s| s.project_path.as_deref() == Some(path))
         .count();
     logic::project_remove_body(path, n)
+}
+
+pub fn ask_archive_unused(studio: &Studio) {
+    studio.depth.ask_confirm(Confirm::ArchiveUnusedSkills);
+}
+
+pub fn export_skills_pack(studio: &Studio) {
+    let Some(client) = studio.runtime() else {
+        studio
+            .depth
+            .notice
+            .set("Connect Remedy to export skills.".into());
+        return;
+    };
+    let studio = studio.clone();
+    let Ok(wake) = waker() else {
+        return;
+    };
+    std::thread::spawn(move || {
+        let cancel = Cancel::new();
+        let req = Request::post("skills/export")
+            .json(&json!({ "names": [] }))
+            .max_body(None);
+        let out = client.http().send_blocking(req, &cancel);
+        let _ = wake.post(move || match out {
+            Ok(res) => {
+                let name = logic::attachment_filename(
+                    res.header("content-disposition"),
+                    "remedy-skills-pack.zip",
+                );
+                save_bytes(&studio, &name, res.body);
+            }
+            Err(e) => studio.depth.notice.set(e.to_string()),
+        });
+    });
+}
+
+pub fn import_skills_pack(studio: &Studio) {
+    let studio = studio.clone();
+    let dialog_studio = studio.clone();
+    let ok = with_host(move |app, window| {
+        let mut dialog = FileDialog::default();
+        dialog.title = "Import skills pack".into();
+        dialog.filters = vec![("ZIP".into(), vec!["zip".into()])];
+        let studio = dialog_studio.clone();
+        app.file_dialog(Some(window), dialog, move |paths| {
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let Ok(bytes) = std::fs::read(&path) else {
+                studio
+                    .depth
+                    .notice
+                    .set("Could not read that file.".into());
+                return;
+            };
+            let Some(client) = studio.runtime() else {
+                studio
+                    .depth
+                    .notice
+                    .set("Connect Remedy to import skills.".into());
+                return;
+            };
+            let Ok(wake) = waker() else {
+                return;
+            };
+            let file_name = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("skills.zip")
+                .to_string();
+            std::thread::spawn(move || {
+                let cancel = Cancel::new();
+                let form = Multipart::new().file(
+                    "file",
+                    file_name,
+                    "application/zip",
+                    bytes,
+                );
+                let req = Request::post("skills/import").multipart(&form);
+                let out = match client.http().send_blocking(req, &cancel) {
+                    Ok(res) => res.json::<Value>().map_err(|e| e.to_string()),
+                    Err(e) => Err(e.to_string()),
+                };
+                let _ = wake.post(move || match out {
+                    Ok(v) => {
+                        let (n, names) = logic::parse_import_pack(&v);
+                        studio
+                            .depth
+                            .notice
+                            .set(logic::import_pack_notice(n, &names));
+                        load_skills(&studio);
+                    }
+                    Err(e) => studio.depth.notice.set(e),
+                });
+            });
+        });
+    });
+    if !ok {
+        studio_notice_window(&studio);
+    }
+}
+
+fn save_bytes(studio: &Studio, name: &str, bytes: Vec<u8>) {
+    let studio = studio.clone();
+    let dialog_studio = studio.clone();
+    let name = name.to_string();
+    let ok = with_host(move |app, window| {
+        let mut dialog = FileDialog::default();
+        dialog.title = "Export skills pack".into();
+        dialog.save = true;
+        dialog.file_name = Some(name);
+        let studio = dialog_studio.clone();
+        app.file_dialog(Some(window), dialog, move |paths| {
+            if let Some(path) = paths.into_iter().next() {
+                match std::fs::write(&path, &bytes) {
+                    Ok(()) => studio
+                        .depth
+                        .notice
+                        .set(format!("Exported {}", path.display())),
+                    Err(e) => studio.depth.notice.set(e.to_string()),
+                }
+            }
+        });
+    });
+    if !ok {
+        studio
+            .depth
+            .notice
+            .set("File picking needs a window.".into());
+    }
+}
+
+pub fn archive_unused_skills(studio: &Studio) {
+    studio.depth.confirm.set(None);
+    let Some(client) = studio.runtime() else {
+        studio
+            .depth
+            .notice
+            .set("Connect Remedy to archive unused skills.".into());
+        return;
+    };
+    let studio = studio.clone();
+    let Ok(wake) = waker() else {
+        return;
+    };
+    api::spawn_json(
+        &client,
+        Request::post("skills/archive-unused").json(&json!({
+            "days": 90,
+            "dry_run": false,
+            "include_quarantine": false,
+        })),
+        move |out| {
+            let _ = wake.post(move || match out {
+                Ok(v) => {
+                    let count = logic::parse_archive_count(&v);
+                    studio
+                        .depth
+                        .notice
+                        .set(logic::archive_unused_notice(count, None));
+                    load_skills(&studio);
+                }
+                Err(e) => studio
+                    .depth
+                    .notice
+                    .set(logic::archive_unused_notice(0, Some(&e))),
+            });
+        },
+    );
 }
 
 pub fn ask_remove_project(studio: &Studio, path: &str) {

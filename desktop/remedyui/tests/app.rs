@@ -304,6 +304,26 @@ fn status_dock_shows_other_sessions_at_work() {
 }
 
 #[test]
+fn skills_sheet_offers_export_import_and_archive() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home_skills);
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n == "Export"),
+        "export is on the existing skills sheet: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n == "Import"),
+        "import is on the existing skills sheet: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Archive unused")),
+        "archive unused is on the existing skills sheet: {names:?}"
+    );
+}
+
+#[test]
 fn chat_preview_shows_worked_steps_and_errors() {
     no_spawn();
     let mut app = preview_window(remedy_desktop::home_chat);
