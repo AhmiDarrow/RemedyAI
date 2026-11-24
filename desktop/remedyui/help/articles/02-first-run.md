@@ -40,22 +40,26 @@ The form below is the same settings, in the older step-by-step wizard. Use
 
 ### 1. Welcome
 
-- Short product intro  
+- Remedy greets you with the Square face.  
+- **Use the recommended setup** — on this PC, no account, no key. Then a folder, your name, and the Grove.  
+- **More options** opens the full provider list (On this PC, Demo, Ollama, paid models, xAI, custom).  
 - **Language** pick (default Auto — matches this computer). Change anytime in Settings → You & Agent.  
-- **Get Started** or **Skip setup (configure later)**  
+- **Skip for now** applies defaults and enters the Grove.  
 
-### 2. Provider
+### 2. Provider (More options)
 
 | Choice | Notes |
 |--------|--------|
+| **On this PC** | Recommended local default. No account, no key. |
+| **Demo** | Rate-limited free gateway. Switch later in Settings. |
+| **Ollama** | No key if Ollama is running locally |
 | OpenAI / Anthropic / Google / DeepSeek / Groq / Mistral / OpenRouter | Paste API key |
 | **xAI (Grok)** | **Sign in with xAI** (OAuth) *or* console API key |
-| **Ollama** | No key if Ollama is running locally |
 | **Custom** (Advanced) | OpenAI-compatible base URL |
 
 - Model list follows the selected provider.  
 - Local URLs (`127.0.0.1` / `localhost`) do not require a key.  
-- You cannot proceed without a key (or xAI sign-in / Ollama) unless you **Skip**.
+- You cannot proceed without a key (or xAI sign-in / On this PC / Ollama / Demo) unless you **Skip**.
 
 ### 3. Workspace
 

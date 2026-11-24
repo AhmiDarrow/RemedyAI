@@ -23,7 +23,7 @@ use super::chrome;
 use super::conversation::{Conversation, conversation_view};
 use super::downloads::{self, Downloads};
 use super::mind::{Mind, mind_view};
-use super::model::{self, Stage, UpdatePhase};
+use super::model::{self, Stage};
 use super::name::{self, NamePrompt, name_overlay};
 use super::offer::Offer;
 use super::splash;
@@ -347,9 +347,12 @@ impl Gate {
             );
         }
         if self.surface.get() == Surface::Studio {
+            crate::chrome::show_home_switcher(Some(self.grove.clone()));
             if let Ok(waker) = remedy_ui::reactive::waker() {
                 self.downloads.start(waker);
             }
+        } else {
+            crate::chrome::show_home_switcher(None);
         }
     }
 
@@ -367,14 +370,10 @@ impl Gate {
     }
 
     fn open_update(&self) {
-        let phase = self.updater.phase.get();
-        if !matches!(
-            phase,
-            UpdatePhase::Downloading | UpdatePhase::Finishing | UpdatePhase::StartingApp
-        ) {
-            self.updater.prepare_auto();
-        }
-        self.surface.set(Surface::Update);
+        // Do not block first-run or Grove with a modal. Download quietly;
+        // the chrome ready notice offers Restart when the build is staged.
+        crate::update::press_offer();
+        self.show_studio();
     }
 
     fn retry(&self) {

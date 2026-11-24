@@ -138,18 +138,10 @@ fn message_row(ui: &Ui, grove: &Grove, msg: &StoryMessage) -> El {
 fn bubble(ui: &Ui, who: &str, user: bool, text: impl Fn() -> RichText + 'static) -> El {
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
-    let (bg, fg, border) = if user {
-        (
-            colors.bg,
-            colors.text,
-            crate::tokens::hairline(&colors),
-        )
+    let (fg, surface) = if user {
+        (colors.text, crate::tokens::well_surface(&colors))
     } else {
-        (
-            colors.card,
-            colors.text,
-            crate::tokens::hairline(&colors),
-        )
+        (colors.text, crate::tokens::raised_surface(&colors))
     };
     let who_owned = who.to_string();
     let body = w::column(ui)
@@ -164,14 +156,7 @@ fn bubble(ui: &Ui, who: &str, user: bool, text: impl Fn() -> RichText + 'static)
             l.max_width = Length::Px(640.0);
             l.shrink = 1.0;
         })
-        .style(
-            StylePatch::new()
-                .background(bg)
-                .foreground(fg)
-                .radius(ui.theme().radii.large)
-                .border(border)
-                .border_width(1.0),
-        )
+        .style(surface.foreground(fg))
         .child(w::text(ui, who_owned.clone()).variant("muted"))
         .child(w::text(ui, "").text(text));
     let row = w::row(ui)
@@ -324,21 +309,30 @@ fn empty_state(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
                         .style(crate::tokens::chip(&colors, false));
                     row = row.child(b);
                 }
+                let panel = w::column(&ui)
+                    .align(Align::Center)
+                    .gap(unit * 3.0)
+                    .padding(Insets::all(unit * 5.0))
+                    .layout(|l| {
+                        l.width = Length::Percent(1.0);
+                        l.max_width = Length::Px(640.0);
+                        l.min_width = Length::Px(0.0);
+                    })
+                    .style(crate::tokens::presence_frame(&colors))
+                    .child(face)
+                    .child(title)
+                    .child(sub)
+                    .child(row)
+                    .child(hints);
                 w::column(&ui)
                     .align(Align::Center)
                     .justify(Justify::Center)
-                    .gap(unit * 3.0)
-                    .padding(Insets::all(unit * 4.0))
                     .layout(|l| {
                         l.width = Length::Percent(1.0);
                         l.grow = 1.0;
                         l.min_height = Length::Px(0.0);
                     })
-                    .child(face)
-                    .child(title)
-                    .child(sub)
-                    .child(row)
-                    .child(hints)
+                    .child(panel)
             }
         },
     )

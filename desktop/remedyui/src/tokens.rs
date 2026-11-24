@@ -2,8 +2,11 @@
 
 use remedy_ui::core::{Color, Insets};
 use remedy_ui::style::{
-    ColorRoles, LetterSpacing, LineHeight, Shadow, StylePatch, TextTransform,
+    BorderEdge, BorderSide, ColorRoles, LetterSpacing, LineHeight, Shadow, StylePatch,
+    TextTransform,
 };
+
+use crate::theme_pack::{self, DepthTokens};
 
 /// Default tool control (composer, status, title bar).
 pub const TOOL: f32 = 32.0;
@@ -149,19 +152,76 @@ pub fn hairline(colors: &ColorRoles) -> Color {
         .unwrap_or_else(|| colors.muted.mix_oklab(colors.bg, 0.35))
 }
 
-/// Window / well background.
+/// Parsed depth colors from the active theme pack (Dark Forest).
+pub fn depth() -> DepthColors {
+    DepthColors::from_pack(theme_pack::depth())
+}
+
+fn is_dark_forest(colors: &ColorRoles) -> bool {
+    matches!(
+        colors.bg.to_hex().to_ascii_uppercase().as_str(),
+        "#040A09"
+    )
+}
+
+/// Dark Forest uses the pack; other palettes derive planes and bevels from the theme.
+pub fn depth_for(colors: &ColorRoles) -> DepthColors {
+    if is_dark_forest(colors) {
+        return depth();
+    }
+    let line = hairline(colors);
+    DepthColors {
+        raised: colors.card,
+        overlay: colors.card.mix_oklab(colors.text, 0.08),
+        highlight: line.mix_oklab(colors.text, 0.28),
+        well: colors.bg.mix_oklab(Color::BLACK, 0.28),
+        earth: colors.accent,
+        shadow: colors.bg.mix_oklab(Color::BLACK, 0.45),
+    }
+}
+
+/// Solid hex colors for planes, bevels, and hard shadows.
+#[derive(Clone, Copy, Debug)]
+pub struct DepthColors {
+    pub raised: Color,
+    pub overlay: Color,
+    pub highlight: Color,
+    pub well: Color,
+    pub earth: Color,
+    pub shadow: Color,
+}
+
+impl DepthColors {
+    fn from_pack(pack: &DepthTokens) -> Self {
+        Self {
+            raised: Color::from_hex(pack.raised).unwrap_or(Color::BLACK),
+            overlay: Color::from_hex(pack.overlay).unwrap_or(Color::BLACK),
+            highlight: Color::from_hex(pack.highlight).unwrap_or(Color::BLACK),
+            well: Color::from_hex(pack.well).unwrap_or(Color::BLACK),
+            earth: Color::from_hex(pack.earth).unwrap_or(Color::BLACK),
+            shadow: Color::from_hex(pack.shadow).unwrap_or(Color::BLACK),
+        }
+    }
+}
+
+/// Window / void background.
 pub fn surface_base(colors: &ColorRoles) -> Color {
     colors.bg
 }
 
-/// Raised panels and sidebars.
-pub fn surface_raised(colors: &ColorRoles) -> Color {
+/// Recessed panels and sidebars, one step above the void.
+pub fn surface_panel(colors: &ColorRoles) -> Color {
     colors.panel
 }
 
-/// Overlay cards, menus, and assistant bubbles.
+/// Raised cards, presence frames, and settings blocks.
+pub fn surface_raised(colors: &ColorRoles) -> Color {
+    depth_for(colors).raised
+}
+
+/// Overlay cards, menus, and popovers.
 pub fn surface_overlay(colors: &ColorRoles) -> Color {
-    colors.card
+    depth_for(colors).overlay
 }
 
 /// Fill for the rounded Actions and Chat panes, sitting on the well.
@@ -174,16 +234,87 @@ pub fn selected_fill(colors: &ColorRoles) -> Color {
     colors.card.mix_oklab(colors.accent, 0.16)
 }
 
-/// A soft lift under the composer and menus.
+/// Hard 2px solid offset. Blur stays zero.
 pub fn elevation(colors: &ColorRoles) -> Shadow {
-    let ink = colors.text.mix_oklab(colors.bg, 0.15);
-    Shadow::new(0.0, 1.0, 0.0, ink.with_alpha(0.35))
+    let d = depth_for(colors);
+    let off = theme_pack::current().chrome.elevation_offset;
+    Shadow::new(off, off, theme_pack::current().chrome.elevation_blur, d.shadow)
 }
 
-/// A slightly stronger lift for menus and overlays.
+/// A slightly longer hard offset for menus and overlays.
 pub fn elevation_overlay(colors: &ColorRoles) -> Shadow {
-    let ink = colors.text.mix_oklab(colors.bg, 0.12);
-    Shadow::new(0.0, 2.0, 0.0, ink.with_alpha(0.40))
+    let d = depth_for(colors);
+    let off = theme_pack::current().chrome.elevation_offset + 1.0;
+    Shadow::new(off, off, 0.0, d.shadow)
+}
+
+fn bevel_edges(highlight: Color, shade: Color) -> StylePatch {
+    StylePatch::new()
+        .border_width(1.0)
+        .border_side(BorderEdge::Top, BorderSide::new(1.0, highlight))
+        .border_side(BorderEdge::Start, BorderSide::new(1.0, highlight))
+        .border_side(BorderEdge::Bottom, BorderSide::new(1.0, shade))
+        .border_side(BorderEdge::End, BorderSide::new(1.0, shade))
+}
+
+/// Raised plane: line box, lit top/start, shaded bottom/end, hard shadow.
+pub fn raised_surface(colors: &ColorRoles) -> StylePatch {
+    let d = depth_for(colors);
+    bevel_edges(d.highlight, d.well)
+        .background(surface_raised(colors))
+        .border(hairline(colors))
+        .shadow(elevation(colors))
+        .radius(2.0)
+}
+
+/// Overlay plane for menus and popovers.
+pub fn overlay_surface(colors: &ColorRoles) -> StylePatch {
+    let d = depth_for(colors);
+    bevel_edges(d.highlight, d.well)
+        .background(surface_overlay(colors))
+        .border(hairline(colors))
+        .shadow(elevation_overlay(colors))
+        .radius(2.0)
+}
+
+/// Panel sitting on the void: hairline only, no drop shadow.
+pub fn panel_surface(colors: &ColorRoles) -> StylePatch {
+    StylePatch::new()
+        .background(surface_panel(colors))
+        .border(hairline(colors))
+        .border_width(1.0)
+        .radius(2.0)
+}
+
+/// Sunken well for inputs, code, and the chat composer.
+pub fn well_surface(colors: &ColorRoles) -> StylePatch {
+    let d = depth_for(colors);
+    bevel_edges(d.well, d.highlight)
+        .background(colors.bg)
+        .border(hairline(colors))
+        .radius(2.0)
+}
+
+/// Hover: lift the plane and use the earth edge.
+pub fn hover_edge(colors: &ColorRoles) -> StylePatch {
+    let d = depth_for(colors);
+    raised_surface(colors).border(d.earth)
+}
+
+/// Pressed: inset, earth edge, no drop shadow.
+pub fn pressed_surface(colors: &ColorRoles) -> StylePatch {
+    let d = depth_for(colors);
+    well_surface(colors).border(d.earth).shadow(Shadow::NONE)
+}
+
+/// Selected: green accent edge on a raised plane (earth for hover).
+pub fn selected_surface(colors: &ColorRoles) -> StylePatch {
+    raised_surface(colors).border(colors.accent)
+}
+
+/// Presence / face frame in Grove.
+pub fn presence_frame(colors: &ColorRoles) -> StylePatch {
+    raised_surface(colors)
 }
 
 
@@ -232,13 +363,7 @@ pub fn info_panel(ui: &remedy_ui::Ui, title: impl Into<String>, body: remedy_ui:
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
         })
-        .style(
-            StylePatch::new()
-                .background(colors.panel)
-                .border(hairline(&colors))
-                .border_width(1.0)
-                .radius(0.0),
-        )
+        .style(raised_surface(&colors))
         .child(
             w::text(ui, title).style(section_kicker(&colors)).layout(|l| {
                 l.width = Length::Percent(1.0);

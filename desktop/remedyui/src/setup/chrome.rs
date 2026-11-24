@@ -25,12 +25,11 @@ pub fn when_ui(ui: &Ui, on: impl Fn() -> bool + 'static, body: impl Fn(&Ui) -> E
 pub fn center(ui: &Ui, inner: El, width: f32) -> El {
     crate::fonts::prepare_theme(ui, &crate::fonts::Fonts::load());
     let colors = ui.theme().colors.clone();
-    let wash = colors.accent.mix_oklab(colors.bg, 0.88);
     w::column(ui)
         .align(Align::Center)
         .justify(Justify::Center)
         .padding(Insets::all(ui.theme().spacing.unit * 3.0))
-        .style(StylePatch::new().background(wash))
+        .style(StylePatch::new().background(crate::tokens::surface_base(&colors)))
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.height = Length::Percent(1.0);
@@ -40,18 +39,11 @@ pub fn center(ui: &Ui, inner: El, width: f32) -> El {
 
 pub fn card(ui: &Ui, inner: El, width: f32) -> El {
     let colors = ui.theme().colors.clone();
-    let line = colors.line.unwrap_or(colors.muted);
     let unit = ui.theme().spacing.unit;
     w::column(ui)
         .gap(unit * 2.0)
         .padding(Insets::all(unit * 4.0))
-        .style(
-            StylePatch::new()
-                .background(colors.card.mix_oklab(colors.bg, 0.08))
-                .radius(ui.theme().radii.large)
-                .border(line)
-                .border_width(1.0),
-        )
+        .style(crate::tokens::raised_surface(&colors))
         .layout(|l| {
             l.width = Length::Px(width);
             l.max_width = Length::Percent(1.0);
@@ -222,7 +214,7 @@ pub fn error_text(ui: &Ui, text: Signal<String>) -> El {
 
 /// Fraction signal kept in step with the wizard index.
 pub fn track_progress(step: Signal<usize>) -> Signal<Option<f32>> {
-    let pct = Signal::new(Some(model::progress_fraction(step.get())));
+    let pct = Signal::new(Some(model::progress_fraction(step.get(), false)));
     let pct2 = pct.clone();
     // The caller binds the view; this just seeds the value. Live updates happen in the view.
     let _ = pct2;

@@ -270,13 +270,7 @@ pub fn block(
     });
     let card = stack(ui)
         .padding(Insets::all(gap(ui) * 2.0))
-        .style(
-            StylePatch::new()
-                .background(colors.card)
-                .radius(ui.theme().radii.medium)
-                .border(colors.line.unwrap_or(colors.muted))
-                .border_width(1.0),
-        )
+        .style(crate::tokens::raised_surface(&colors))
         .child(head)
         .child(sum)
         .child(inner);
