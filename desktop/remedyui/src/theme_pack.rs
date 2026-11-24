@@ -19,6 +19,23 @@ pub struct ColorTokens {
     pub ok: &'static str,
 }
 
+/// Stepped planes, bevel edges, and hard-shadow ink. No blur or glow.
+#[derive(Clone, Copy, Debug)]
+pub struct DepthTokens {
+    /// Raised cards and presence frames, a step above panel.
+    pub raised: &'static str,
+    /// Menus, popovers, and other overlay planes.
+    pub overlay: &'static str,
+    /// Top and start hairline on raised surfaces.
+    pub highlight: &'static str,
+    /// Inner top and start edge of sunken wells.
+    pub well: &'static str,
+    /// Earth accent for selected / hover edges.
+    pub earth: &'static str,
+    /// Solid hard-shadow ink (used at 2px offset, zero blur).
+    pub shadow: &'static str,
+}
+
 /// Type scale in px. Font *families* stay on the three config-driven roles.
 #[derive(Clone, Copy, Debug)]
 pub struct TypeTokens {
@@ -104,6 +121,7 @@ pub struct ThemePack {
     pub radii: RadiiTokens,
     pub chrome: ChromeTokens,
     pub layout: LayoutSpec,
+    pub depth: DepthTokens,
 }
 
 /// Shipped default, matching `theme/dark-forest.toml`.
@@ -120,6 +138,14 @@ pub const DARK_FOREST: ThemePack = ThemePack {
         accent: "#6fdc86",
         on_accent: "#040a09",
         ok: "#6fdc86",
+    },
+    depth: DepthTokens {
+        raised: "#0b1a17",
+        overlay: "#122821",
+        highlight: "#3a6d66",
+        well: "#020807",
+        earth: "#C4A36A",
+        shadow: "#010403",
     },
     typo: TypeTokens {
         small: 12.0,
@@ -143,7 +169,7 @@ pub const DARK_FOREST: ThemePack = ThemePack {
         hairline_px: 1.0,
         select_mark: 4.0,
         elevation_blur: 0.0,
-        elevation_offset: 1.0,
+        elevation_offset: 2.0,
     },
     layout: LayoutSpec {
         actions_width: 380.0,
@@ -211,6 +237,10 @@ mod tests {
         assert_eq!(pack.radii.chip, 0.0);
         assert_eq!(pack.presence_style_is_geometric(), true);
         assert!(pack.layout.presence_enabled_default);
+        assert_eq!(pack.depth.raised, "#0b1a17");
+        assert_eq!(pack.depth.earth, "#C4A36A");
+        assert_eq!(pack.chrome.elevation_blur, 0.0);
+        assert_eq!(pack.chrome.elevation_offset, 2.0);
     }
 }
 
@@ -218,4 +248,9 @@ impl ThemePack {
     fn presence_style_is_geometric(&self) -> bool {
         self.layout.presence_style == PresenceStyle::GeometricPixel
     }
+}
+
+/// Depth tokens from the active pack.
+pub fn depth() -> &'static DepthTokens {
+    &current().depth
 }

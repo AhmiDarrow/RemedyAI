@@ -114,6 +114,14 @@ fn bind_live(chrome: Chrome) {
     LIVE.with(|slot| slot.set(Some(chrome)));
 }
 
+/// Hide the Grove/Studio switcher on setup, splash, and other first-run surfaces.
+pub fn show_home_switcher(grove: Option<crate::grove::Grove>) {
+    LIVE.with(|slot| {
+        let Some(c) = slot.get() else { return };
+        c.grove.set(grove);
+    });
+}
+
 /// Opens or closes the status-bar server menu when a chrome frame is mounted.
 pub fn toggle_server_menu() {
     LIVE.with(|slot| {
@@ -614,17 +622,10 @@ impl Chrome {
             self.check_updates(ui);
             return;
         }
-        let version = self.update_version.get();
-        self.set_download(format!("Update {version}"), Some(0.0));
-        // The menu found a newer build. The signed download and silent install
-        // are the packaging updater, not a browser open of the asset URL.
+        // Quiet background download. Restart on the ready notice applies it.
         if let Some(app) = self.app() {
             crate::update::install_from_menu(&app);
         }
-        self.toast(
-            ui,
-            messages().format(ui, "toast-updateFound", &[("version", version.into())]),
-        );
     }
 
     pub fn load_diag(self, studio: &Studio) {
@@ -1255,7 +1256,16 @@ fn build_hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: El) -> El {
             let cap_ui = ui.clone();
             body.bind(move || {
                 // Title bar (36) + status dock (~44). Leave the rest for Grove/Studio.
-                let h = (cap_ui.window_size().height - 36.0 - 44.0).max(160.0);
+                let notice = if crate::update::ready_signal()
+                    .try_get()
+                    .unwrap_or_default()
+                    .is_empty()
+                {
+                    0.0
+                } else {
+                    36.0
+                };
+                let h = (cap_ui.window_size().height - 36.0 - 44.0 - notice).max(160.0);
                 let _ = cap.clone().layout(|l| {
                     l.height = Length::Px(h);
                     l.max_height = Length::Px(h);
@@ -1267,6 +1277,7 @@ fn build_hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: El) -> El {
                 });
             })
         })
+        .child(crate::update::ready_notice(ui))
         .child(crate::status::status_bar(ui, studio.clone(), || {
             crate::settings::toggle()
         }));

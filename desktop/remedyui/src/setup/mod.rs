@@ -35,7 +35,7 @@ fn open_preview(app: &App, title: &str, build: impl Fn(&remedy_ui::Ui) -> remedy
     );
 }
 
-/// Welcome card. Tests press Get Started and look for the provider choices.
+/// Welcome card. Tests press More options and look for the provider choices.
 pub fn preview_wizard(app: &App) {
     open_preview(app, "Remedy setup", |ui| {
         wizard::wizard_screen(ui, wizard::Wizard::preview())
@@ -61,9 +61,9 @@ pub fn preview_offer(app: &App) {
     });
 }
 
-/// Ready to install. auto-start is off, so nothing downloads.
+/// Ready-to-install notice. auto-start is off, so nothing downloads.
 pub fn preview_update(app: &App) {
     open_preview(app, "Remedy Update", |ui| {
-        update::update_screen(ui, update::Updater::preview())
+        crate::update::preview_ready_notice(ui)
     });
 }

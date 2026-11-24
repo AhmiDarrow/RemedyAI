@@ -103,3 +103,32 @@ fn write_design8_review_shots() {
     write_shot(dir, "update-ready", remedy_desktop::design_update_ready, 1180.0, 740.0);
     write_shot(dir, "update-advanced", remedy_desktop::design_update_advanced, 1180.0, 740.0);
 }
+
+
+#[test]
+fn write_design9_review_shots() {
+    let Ok(dir) = std::env::var("REMEDY_DESIGN_OUT") else {
+        return;
+    };
+    no_spawn_defaults();
+    let dir = Path::new(&dir);
+    let _ = std::fs::create_dir_all(dir);
+    let tag = std::env::var("REMEDY_DESIGN9_TAG").unwrap_or_else(|_| "before".into());
+    let shots: &[(&str, fn(&remedy_ui::Ui) -> remedy_ui::El)] = &[
+        ("grove", remedy_desktop::design_home),
+        ("studio", remedy_desktop::design_plan),
+        ("settings", remedy_desktop::design_settings),
+        ("chat", remedy_desktop::design_build_chat),
+        ("setup-hello", remedy_desktop::design_setup_hello),
+    ];
+    let sizes: &[(&str, f32, f32)] = &[
+        ("narrow", 700.0, 740.0),
+        ("normal", 1180.0, 740.0),
+        ("wide", 1600.0, 740.0),
+    ];
+    for (name, build) in shots {
+        for (label, w, h) in sizes {
+            write_shot(dir, &format!("{name}-{label}-{tag}"), *build, *w, *h);
+        }
+    }
+}

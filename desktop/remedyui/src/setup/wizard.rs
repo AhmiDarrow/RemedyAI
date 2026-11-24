@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use remedy_ui::layout::{Align, Length};
 use remedy_ui::reactive::Signal;
+use crate::presence::{self, Mood};
 use remedy_ui::widgets as w;
 use remedy_ui::{El, TextField, Ui};
 use serde_json::{Map, Value, json};
@@ -13,8 +14,8 @@ use serde_json::{Map, Value, json};
 use super::chrome;
 use super::messengers::{self, Messenger};
 use super::model::{self, STEP_FOLDER, STEP_PROVIDER, STEP_READY, STEP_STYLE, STEP_VISION, STEP_WELCOME};
-use crate::logo;
 use crate::runtime::Client;
+use crate::tokens::{typo, BODY, HERO, META, SECTION, SPACE, TITLE};
 
 #[derive(Clone)]
 pub struct Wizard {
@@ -48,6 +49,10 @@ pub struct Wizard {
     pub ollama_models: Signal<Vec<String>>,
     pub languages: Signal<Vec<String>>,
     pub paid_index: Signal<usize>,
+    /// Recommended path: hello → folder → name → ready (still writes full defaults).
+    pub short: Signal<bool>,
+    /// Provider step: "On this PC" (local default) vs explicit Ollama.
+    pub on_this_pc: Signal<bool>,
     pub done: Signal<bool>,
     pub talk: Signal<bool>,
     pub failure: Signal<String>,
@@ -92,6 +97,8 @@ impl Wizard {
             ollama_models: Signal::new(Vec::new()),
             languages: Signal::new(Vec::new()),
             paid_index: Signal::new(0),
+            short: Signal::new(false),
+            on_this_pc: Signal::new(false),
             done: Signal::new(false),
             talk: Signal::new(false),
             failure: Signal::new(String::new()),
@@ -140,6 +147,7 @@ impl Wizard {
     }
 
     pub fn select_provider(&self, id: &str) {
+        self.on_this_pc.set(false);
         self.provider.set(id.into());
         self.error.set(String::new());
         if self.base_url.get().is_empty() || id == "ollama" || id == "custom" {
@@ -168,17 +176,31 @@ impl Wizard {
             return;
         }
         self.error.set(String::new());
-        if let Some(next) = model::next_step(step) {
+        if let Some(next) = model::next_step(step, self.short.get()) {
             self.step.set(next);
             self.remember_draft();
         }
     }
 
     pub fn back(&self) {
-        if let Some(prev) = model::prev_step(self.step.get()) {
+        if let Some(prev) = model::prev_step(self.step.get(), self.short.get()) {
             self.step.set(prev);
             self.error.set(String::new());
         }
+    }
+
+    /// Hello CTA: local default, then folder and name only.
+    pub fn take_recommended(&self) {
+        self.short.set(true);
+        self.select_provider("ollama");
+        self.on_this_pc.set(true);
+        self.advance();
+    }
+
+    /// Hello quiet link: full provider list, then the rest of the form.
+    pub fn take_more(&self) {
+        self.short.set(false);
+        self.advance();
     }
 
     pub fn skip(&self) {
@@ -210,7 +232,7 @@ impl Wizard {
             let _ = waker.post(move || {
                 saving.set(false);
                 match setup {
-                    Ok(_) => done.set(true),
+                    Ok(_) => { presence::set_skin_override(None); done.set(true); },
                     Err(e) => error.set(e),
                 }
             });
@@ -221,7 +243,9 @@ impl Wizard {
         if self.provider.get() == "ollama" {
             let model = self.model_name.get();
             let pulled = self.ollama_models.get();
-            if !pulled.iter().any(|m| m == &model) {
+            // Recommended / first-run can finish without a pulled model so
+            // "On this PC" just works; Ollama can be set up after.
+            if !model.is_empty() && !pulled.is_empty() && !pulled.iter().any(|m| m == &model) {
                 self.error
                     .set("Pull that model in Ollama first, or pick one from the list.".into());
                 return;
@@ -271,7 +295,7 @@ impl Wizard {
                 saving.set(false);
                 installing.set(false);
                 match saved {
-                    Ok(_) => done.set(true),
+                    Ok(_) => { presence::set_skin_override(None); done.set(true); },
                     Err(e) => error.set(e),
                 }
             });
@@ -428,21 +452,12 @@ impl Wizard {
 
 pub fn wizard_screen(ui: &Ui, wiz: Wizard) -> El {
     wiz.ensure_booted();
+    presence::set_skin_override(Some("square"));
     let unit = ui.theme().spacing.unit;
-    let pct = Signal::new(Some(model::progress_fraction(wiz.step.get())));
+    let pct = Signal::new(Some(model::progress_fraction(wiz.step.get(), wiz.short.get())));
     let pct2 = pct.clone();
     let step = wiz.step.clone();
-    let header = w::column(ui)
-        .gap(unit * 0.6)
-        .align(Align::Center)
-        .layout(|l| l.width = Length::Percent(1.0))
-        .child(logo::wordmark(ui, 40.0))
-        .child(chrome::heading(ui, "Remedy"))
-        .child(chrome::sub(ui, "Your local AI partner"))
-        .child(chrome::quiet(ui, "Talk with Remedy instead", {
-            let wiz = wiz.clone();
-            move || wiz.talk.set(true)
-        }));
+    let short = wiz.short.clone();
     let ui_banner = ui.clone();
     let banner = chrome::when(
         ui,
@@ -462,13 +477,15 @@ pub fn wizard_screen(ui: &Ui, wiz: Wizard) -> El {
             }
         },
     );
+    let after_hello = {
+        let step = wiz.step.clone();
+        move || step.get() != STEP_WELCOME
+    };
     let inner = chrome::stack(
         ui,
         vec![
-            header,
             banner,
-            chrome::progress_bar(ui, pct),
-            chrome::step_chips(ui, wiz.step.clone()),
+            chrome::when_ui(ui, after_hello, move |ui| chrome::progress_bar(ui, pct.clone())),
             welcome(ui, wiz.clone()),
             provider_step(ui, wiz.clone()),
             folder_step(ui, wiz.clone()),
@@ -487,11 +504,12 @@ pub fn wizard_screen(ui: &Ui, wiz: Wizard) -> El {
         l.grow = 0.0;
         l.min_height = Length::Px(0.0);
     });
-    let screen = chrome::center(ui, inner, 520.0);
+    let screen = chrome::center(ui, inner, 480.0);
     let screen2 = screen.clone();
     let screen = screen.bind(move || {
-        pct2.set(Some(model::progress_fraction(step.get())));
+        pct2.set(Some(model::progress_fraction(step.get(), short.get())));
         let _ = &screen2;
+        let _ = unit;
     });
     screen
 }
@@ -507,16 +525,29 @@ fn welcome(ui: &Ui, wiz: Wizard) -> El {
         let langs = wiz_body.languages.clone();
         let wiz_lang = wiz_body.clone();
         let wiz_go = wiz_body.clone();
+        let wiz_more = wiz_body.clone();
         let wiz_talk = wiz_body.clone();
         let wiz_skip = wiz_body.clone();
+        let face = w::column(ui)
+            .gap(SPACE)
+            .align(Align::Center)
+            .layout(|l| l.width = Length::Percent(1.0))
+            .child(presence::mark(ui, Mood::Happy, 72.0))
+            .child(w::text(ui, "I'm Remedy.").style(typo(HERO)))
+            .child(
+                w::text(ui, "On this PC. No account, no key.")
+                    .style(typo(META))
+                    .variant("muted"),
+            );
         chrome::stack(
             ui,
             vec![
-                w::text(ui, "Set up a provider and start chatting. Takes about a minute."),
+                face,
+                chrome::primary(ui, "Use the recommended setup", move || wiz_go.take_recommended()),
+                chrome::quiet(ui, "More options", move || wiz_more.take_more()),
                 chrome::when_ui(ui, move || !langs.get().is_empty(), move |ui| {
                     language_select(ui, wiz_lang.clone())
                 }),
-                chrome::primary(ui, "Get Started", move || wiz_go.advance()),
                 chrome::quiet(ui, "Talk with Remedy instead", move || wiz_talk.talk.set(true)),
                 chrome::quiet(ui, "Skip for now", move || wiz_skip.skip()),
             ],
@@ -546,6 +577,22 @@ fn provider_step(ui: &Ui, wiz: Wizard) -> El {
     chrome::when_ui(ui, on_step(&wiz, STEP_PROVIDER), move |ui| {
         let wiz = wiz_body.clone();
         let unit = ui.theme().spacing.unit;
+        let on_pc = chrome::choice(
+            ui,
+            "On this PC",
+            "No account, no key. Local models when they’re here; you can add more later.",
+            {
+                let flag = wiz.on_this_pc.clone();
+                move || flag.get()
+            },
+            {
+                let wiz = wiz.clone();
+                move || {
+                    wiz.select_provider("ollama");
+                    wiz.on_this_pc.set(true);
+                }
+            },
+        );
         let demo = chrome::choice(
             ui,
             "Demo · no signup",
@@ -565,7 +612,8 @@ fn provider_step(ui: &Ui, wiz: Wizard) -> El {
             model::OLLAMA_HINT,
             {
                 let p = wiz.provider.clone();
-                move || p.get() == "ollama"
+                let flag = wiz.on_this_pc.clone();
+                move || p.get() == "ollama" && !flag.get()
             },
             {
                 let wiz = wiz.clone();
@@ -594,9 +642,12 @@ fn provider_step(ui: &Ui, wiz: Wizard) -> El {
         chrome::stack(
             ui,
             vec![
-                w::text(ui, "Start free").variant("strong"),
+                w::text(ui, "Recommended").style(typo(SECTION)),
+                on_pc,
+                w::text(ui, "Free").style(typo(SECTION)),
                 demo,
                 ollama,
+                w::text(ui, "Other models").style(typo(SECTION)),
                 w::text(ui, "Or pick a paid / full provider").variant("muted"),
                 paid,
                 chrome::when_ui(
@@ -753,7 +804,10 @@ fn folder_step(ui: &Ui, wiz: Wizard) -> El {
         chrome::stack(
             ui,
             vec![
-                w::text(ui, "Default project folder for tools and shell (optional).").variant("muted"),
+                w::text(ui, "Where should we work?").style(typo(TITLE)),
+                w::text(ui, "Default project folder for tools and shell (optional).")
+                    .style(typo(META))
+                    .variant("muted"),
                 field.el(),
             ],
         )
@@ -783,17 +837,28 @@ fn style_step(ui: &Ui, wiz: Wizard) -> El {
                 style_card(ui, wiz.clone(), "playful", "Playful", "Casual tone with light humor"),
             ],
         );
-        chrome::stack(
-            ui,
-            vec![
-                name,
-                agent,
-                w::text(ui, "Partner gender").variant("strong"),
-                genders,
-                w::text(ui, "Style").variant("strong"),
-                styles,
-            ],
-        )
+        if wiz.short.get() {
+            chrome::stack(
+                ui,
+                vec![
+                    w::text(ui, "What should I call you?").style(typo(TITLE)),
+                    name,
+                ],
+            )
+        } else {
+            chrome::stack(
+                ui,
+                vec![
+                    w::text(ui, "What should I call you?").style(typo(TITLE)),
+                    name,
+                    agent,
+                    w::text(ui, "Partner gender").variant("strong"),
+                    genders,
+                    w::text(ui, "Style").variant("strong"),
+                    styles,
+                ],
+            )
+        }
     })
 }
 
@@ -895,10 +960,12 @@ fn ready_step(ui: &Ui, wiz: Wizard) -> El {
                     chrome::stack(
                         ui,
                         vec![
-                            chrome::heading(ui, "You're ready"),
-                            chrome::sub(ui, "Enter to send · F1 for help"),
+                            w::text(ui, "We're ready.").style(typo(TITLE)),
+                            w::text(ui, "I'll meet you in the Grove.")
+                                .style(typo(BODY))
+                                .variant("muted"),
                             launch.clone(),
-                            chrome::primary(ui, "Start chatting", move || wiz.finish()),
+                            chrome::primary(ui, "Open Grove", move || wiz.finish()),
                         ],
                     )
                 }),
@@ -919,7 +986,7 @@ fn installing_block(ui: &Ui, wiz: Wizard) -> El {
             }),
             chrome::quiet(ui, "Use app while downloading", {
                 let wiz = wiz.clone();
-                move || wiz.done.set(true)
+                move || { presence::set_skin_override(None); wiz.done.set(true); }
             }),
         ],
     )
