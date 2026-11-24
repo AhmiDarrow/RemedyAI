@@ -343,6 +343,22 @@ pub fn home_presence_off(ui: &Ui) -> El {
     home(ui)
 }
 
+/// Studio empty well with a tagged session, for sidebar tag tests (not a golden).
+pub fn home_tagged(ui: &Ui) -> El {
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    studio.sessions.update(|list| {
+        if let Some(session) = list.iter_mut().find(|s| s.id == "s1") {
+            session.tags = vec!["portal".into(), "ui".into()];
+        }
+    });
+    shell_with(
+        ui,
+        studio,
+        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+    )
+}
+
 /// Chat-feed preview with a finished turn, for side-by-side review.
 pub fn home_chat(ui: &Ui) -> El {
     shell_with(

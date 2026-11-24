@@ -236,6 +236,54 @@ fn sidebar_select_lets_you_move_or_delete_several_chats() {
 }
 
 #[test]
+fn sidebar_tags_can_be_shown_and_used_to_filter() {
+    no_spawn();
+    let mut tagged = preview_window(remedy_desktop::home_tagged);
+    tagged.frames(2);
+    let names = accessible_names(&tagged);
+    assert!(
+        names.iter().any(|n| n == "portal"),
+        "saved tag chip: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n == "ui"),
+        "second tag chip: {names:?}"
+    );
+    assert!(tagged.press(Role::Button, "portal"), "filter by tag");
+    tagged.frames(2);
+    let names = accessible_names(&tagged);
+    assert!(
+        names.iter().any(|n| n.contains("Port to RemedyUI")),
+        "tagged chat stays: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("No project") && n.contains("1")),
+        "searching a tag leaves only tagged chats: {names:?}"
+    );
+
+    let mut app = preview_window(remedy_desktop::home);
+    app.frames(2);
+    assert!(app.press(Role::Button, "Session options"), "open session options");
+    app.frames(2);
+    assert!(app.press(Role::Button, "Add tag"), "add a tag to the active chat");
+    app.frames(2);
+    let field = app
+        .find(Role::TextInput, "Tag name")
+        .expect("tag field opens on the active session");
+    field.focus();
+    app.frames(1);
+    app.type_text("portal");
+    app.frames(1);
+    assert!(app.press(Role::Button, "Add this tag"), "commit the tag");
+    app.frames(4);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n == "portal"),
+        "new tag appears on the row: {names:?}"
+    );
+}
+
+#[test]
 fn chat_preview_shows_worked_steps_and_errors() {
     no_spawn();
     let mut app = preview_window(remedy_desktop::home_chat);

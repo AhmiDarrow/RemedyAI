@@ -978,6 +978,87 @@ pub fn delete_selected_confirm_label(count: usize) -> String {
     }
 }
 
+pub const MAX_SESSION_TAGS: usize = 12;
+
+/// Trim, drop blanks and duplicates, cap at 12 — same as the old sidebar meta.
+pub fn normalize_tags<I, S>(tags: I) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut out = Vec::new();
+    for tag in tags {
+        let tag = tag.as_ref().trim();
+        if tag.is_empty() {
+            continue;
+        }
+        if out.iter().any(|have: &String| have.eq_ignore_ascii_case(tag)) {
+            continue;
+        }
+        out.push(tag.to_string());
+        if out.len() == MAX_SESSION_TAGS {
+            break;
+        }
+    }
+    out
+}
+
+pub fn add_session_tag(tags: &[String], tag: &str) -> Vec<String> {
+    let mut next = tags.to_vec();
+    next.push(tag.to_string());
+    normalize_tags(next)
+}
+
+/// Title, project path, or any tag contains `q` (case-insensitive).
+pub fn session_matches_query(session: &crate::studio::Session, q: &str) -> bool {
+    let q = q.trim().to_ascii_lowercase();
+    if q.is_empty() {
+        return true;
+    }
+    session.title.to_ascii_lowercase().contains(&q)
+        || session
+            .project_path
+            .as_deref()
+            .is_some_and(|p| p.to_ascii_lowercase().contains(&q))
+        || session
+            .tags
+            .iter()
+            .any(|t| t.to_ascii_lowercase().contains(&q))
+}
+
+/// `{ "id": ["tag"] }` on disk under the desktop dir.
+pub fn parse_session_tags_file(raw: &str) -> Vec<(String, Vec<String>)> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return Vec::new();
+    };
+    let Some(obj) = value.as_object() else {
+        return Vec::new();
+    };
+    obj.iter()
+        .filter_map(|(id, tags)| {
+            let tags = tags.as_array()?;
+            let tags = normalize_tags(tags.iter().filter_map(|t| t.as_str()));
+            if id.is_empty() || tags.is_empty() {
+                None
+            } else {
+                Some((id.clone(), tags))
+            }
+        })
+        .collect()
+}
+
+pub fn session_tags_file_body(sessions: &[crate::studio::Session]) -> String {
+    let mut map = serde_json::Map::new();
+    for session in sessions {
+        let tags = normalize_tags(session.tags.iter());
+        if tags.is_empty() {
+            continue;
+        }
+        map.insert(session.id.clone(), serde_json::json!(tags));
+    }
+    serde_json::to_string_pretty(&serde_json::Value::Object(map)).unwrap_or_else(|_| "{}".into())
+}
+
 /// Event names from `GET /api/events/sessions` that should refresh the sidebar.
 pub fn is_session_sync_event(kind: &str) -> bool {
     matches!(
@@ -1132,6 +1213,26 @@ mod tests {
         assert_eq!(delete_selected_title(4), "Delete 4 chats?");
         assert_eq!(delete_selected_confirm_label(1), "Delete chat");
         assert_eq!(delete_selected_confirm_label(4), "Delete 4 chats");
+
+        assert_eq!(
+            normalize_tags([" portal ", "portal", "", "ui", "UI"]),
+            vec!["portal", "ui"]
+        );
+        let many: Vec<String> = (0..20).map(|i| format!("t{i}")).collect();
+        assert_eq!(normalize_tags(&many).len(), 12);
+        assert_eq!(add_session_tag(&["portal".into()], "  ui "), vec!["portal", "ui"]);
+        let s = crate::studio::Session {
+            tags: vec!["portal".into()],
+            project_path: Some("/tmp/app".into()),
+            ..crate::studio::Session::fresh("s1", "Port to RemedyUI")
+        };
+        assert!(session_matches_query(&s, "portal"));
+        assert!(session_matches_query(&s, "PORT"));
+        assert!(session_matches_query(&s, "Remedy"));
+        assert!(session_matches_query(&s, "app"));
+        assert!(!session_matches_query(&s, "zebra"));
+        let raw = session_tags_file_body(&[s.clone()]);
+        assert_eq!(parse_session_tags_file(&raw), vec![("s1".into(), vec!["portal".into()])]);
     }
 
     fn message_copy_prefers_the_body_then_falls_back_to_beats() {
