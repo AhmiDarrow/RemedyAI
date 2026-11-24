@@ -430,6 +430,62 @@ fn is_known_base_url(url: &str, catalog: &[(&str, &str)]) -> bool {
 /// adopt the new catalog default when the field is empty or still a known
 /// preset. Hidden-URL providers always adopt their own default so a leftover
 /// OpenRouter (or other) URL cannot appear as this provider's endpoint.
+/// Percent-encode a query parameter value.
+pub fn query_param(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Base URL used to list models for `provider`.
+///
+/// Hidden-URL providers always use the catalog default so a leftover saved
+/// URL (OpenRouter left on Anthropic) cannot replace that provider's list.
+/// Typable-URL providers (Ollama, custom, llama.cpp, RMB) use the form or
+/// saved URL when the owner has typed one.
+pub fn discovery_url(provider: &str, form_or_saved_url: &str, catalog_url: &str) -> String {
+    let form = form_or_saved_url.trim();
+    let catalog = catalog_url.trim();
+    let catalog = if catalog.is_empty() {
+        provider_base(provider).to_string()
+    } else {
+        catalog.to_string()
+    };
+    if shows_base_url(provider) {
+        if !form.is_empty() {
+            form.to_string()
+        } else {
+            catalog
+        }
+    } else if !catalog.is_empty() {
+        catalog
+    } else {
+        form.to_string()
+    }
+}
+
+/// Path for `GET /api/models`, including a base_url override when we have one.
+pub fn models_request_path(provider: &str, discovery_url: &str) -> String {
+    let pid = provider.trim();
+    if pid.is_empty() {
+        return "models".into();
+    }
+    let mut path = format!("models?provider={}", query_param(pid));
+    let url = discovery_url.trim();
+    if !url.is_empty() {
+        path.push_str("&base_url=");
+        path.push_str(&query_param(url));
+    }
+    path
+}
+
 pub fn adopt_base_url(new_id: &str, current_url: &str, catalog: &[(&str, &str)]) -> Option<String> {
     let next = catalog_base_url(new_id, catalog);
     if next.is_empty() {
@@ -1467,6 +1523,59 @@ mod tests {
         assert_eq!(
             adopt_base_url("anthropic", "http://127.0.0.1:1234/v1", &[]).as_deref(),
             Some("https://api.anthropic.com/v1")
+        );
+    }
+
+    #[test]
+    fn hidden_url_providers_list_models_against_their_catalog_url() {
+        let leftover = "https://openrouter.ai/api/v1";
+        let anthropic = "https://api.anthropic.com/v1";
+        assert_eq!(
+            discovery_url("anthropic", leftover, anthropic),
+            anthropic,
+            "Anthropic must not list models from a leftover OpenRouter URL"
+        );
+        assert_eq!(
+            discovery_url("xai", leftover, "https://api.x.ai/v1"),
+            "https://api.x.ai/v1"
+        );
+        assert_eq!(
+            discovery_url("openrouter", leftover, leftover),
+            leftover
+        );
+        // Typable providers keep the owner's URL.
+        assert_eq!(
+            discovery_url("custom", "http://127.0.0.1:1234/v1", "http://127.0.0.1:5001/v1"),
+            "http://127.0.0.1:1234/v1"
+        );
+        assert_eq!(
+            discovery_url("ollama", "", "http://127.0.0.1:11434/v1"),
+            "http://127.0.0.1:11434/v1"
+        );
+        let path = models_request_path("anthropic", anthropic);
+        assert!(
+            path.starts_with("models?provider=anthropic&base_url="),
+            "{path}"
+        );
+        assert!(
+            path.contains("api.anthropic.com"),
+            "path should pin Anthropic's catalog host, got {path}"
+        );
+        assert!(
+            !path.contains("openrouter"),
+            "path must not keep a leftover OpenRouter URL, got {path}"
+        );
+    }
+
+    #[test]
+    fn offline_catalog_is_the_full_old_provider_set() {
+        let ids: Vec<&str> = OFFLINE_PROVIDERS.iter().map(|p| p.id).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "demo", "openai", "anthropic", "google", "deepseek", "xai", "groq",
+                "mistral", "openrouter", "poe", "ollama", "llamacpp", "rmb", "custom",
+            ]
         );
     }
 
