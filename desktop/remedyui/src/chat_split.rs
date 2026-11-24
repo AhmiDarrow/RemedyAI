@@ -1399,15 +1399,35 @@ fn request_tool_evidence(
         encode_path_seg(request_id),
         encode_path_seg(call_id),
     );
-    runtime::get_json(&client, &path, move |res| {
-        if let Ok(v) = res {
-            if let Some(out) = v.get("output").and_then(|s| s.as_str()).filter(|s| !s.is_empty()) {
-                evidence.set(Some(out.to_string()));
-                return;
-            }
-        }
+    let Ok(wake) = remedy_ui::reactive::waker() else {
         fetching.set(false);
+        return;
+    };
+    runtime::get_json(&client, &path, move |res| {
+        // get_json completes on a worker thread; Signal::set must run on the UI waker.
+        // Setting a signal here used to PANIC ("belongs to another thread's runtime")
+        // when Settings opened and remounted the Actions trail.
+        let _ = wake.post(move || apply_tool_evidence_result(res, &evidence, &fetching));
     });
+}
+
+/// Apply a tool-evidence payload on the UI thread.
+fn apply_tool_evidence_result(
+    res: Result<serde_json::Value, String>,
+    evidence: &Signal<Option<String>>,
+    fetching: &Signal<bool>,
+) {
+    if let Ok(v) = res {
+        if let Some(out) = v
+            .get("output")
+            .and_then(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            evidence.set(Some(out.to_string()));
+            return;
+        }
+    }
+    fetching.set(false);
 }
 
 fn merge_evidence_body(body: &str, evidence: Option<&str>) -> String {
@@ -1593,5 +1613,42 @@ mod tests {
         assert!(merged.contains("one"), "{merged}");
         assert!(merged.contains("// --- args ---"), "{merged}");
         assert!(!merged.contains("short…"), "{merged}");
+    }
+
+    #[test]
+    fn tool_evidence_apply_stores_full_output() {
+        let evidence: Signal<Option<String>> = Signal::new(None);
+        let fetching: Signal<bool> = Signal::new(true);
+        apply_tool_evidence_result(
+            Ok(serde_json::json!({"preview": "short…", "output": "line one\nline two"})),
+            &evidence,
+            &fetching,
+        );
+        assert_eq!(evidence.get().as_deref(), Some("line one\nline two"));
+        assert!(fetching.get(), "a successful body should leave fetching set");
+        apply_tool_evidence_result(Ok(serde_json::json!({})), &evidence, &fetching);
+        // already has output; a later empty payload only flips fetching
+        assert_eq!(evidence.get().as_deref(), Some("line one\nline two"));
+        assert!(!fetching.get());
+    }
+
+    #[test]
+    fn tool_evidence_fetch_posts_signal_updates_to_the_ui_waker() {
+        // Regression for 8b715d5b: opening Settings remounted the Actions trail,
+        // get_json completed on the remedy-get worker, and evidence.set panicked
+        // with "the signal belongs to another thread's runtime".
+        let src = include_str!("chat_split.rs");
+        let start = src.find("fn request_tool_evidence").expect("request_tool_evidence");
+        let rest = &src[start..];
+        let end = rest[1..].find("\nfn ").map(|i| i + 1).unwrap_or(rest.len());
+        let body = &rest[..end];
+        assert!(body.contains("remedy_ui::reactive::waker()"), "must take the UI waker");
+        assert!(body.contains("wake.post"), "must post Signal updates onto the UI thread: {body}");
+        let worker = body.split("runtime::get_json").nth(1).expect("get_json");
+        let before_post = worker.split("wake.post").next().unwrap();
+        assert!(
+            !before_post.contains("evidence.set") && !before_post.contains("fetching.set"),
+            "the worker callback must not touch Signals before posting: {before_post}"
+        );
     }
 }
