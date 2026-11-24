@@ -821,7 +821,10 @@ export default function App() {
                 setPrivacyMode(Boolean(s.privacy_mode))
                 const am = String(s.approval_mode || 'ask').toLowerCase()
                 setApprovalMode(am === 'auto' || am === 'full' ? am : 'ask')
-                if (s.thinking_level) setThinkingLevel(String(s.thinking_level))
+                const tl = String(s.thinking_level || '').toLowerCase()
+                if (tl === 'off' || tl === 'low' || tl === 'medium' || tl === 'high') {
+                  setThinkingLevel(tl)
+                }
                 void refreshConnected()
                 return refreshModels({
                   provider: s.llm_provider ? String(s.llm_provider) : undefined,
