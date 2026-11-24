@@ -1,19 +1,16 @@
-//! Confirms, the concurrent-turn dialog, and the image lightbox.
+//! Confirms, the concurrent-turn dialog, and the image markup lightbox.
 //!
 //! Each opens once per generation so a binding does not stack a new modal every frame.
 
 use super::logic::concurrent_turn_message;
+use super::markup;
 use super::{archive_unused_skills, continue_pending, delete_skill, project_confirm_body, remove_project, Confirm};
 use crate::messages;
 use crate::studio::Studio;
-use remedy_ui::image::decode;
 use remedy_ui::layout::Length;
-use remedy_ui::paint::Image;
 use remedy_ui::reactive::Signal;
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// A zero-size hook the shell keeps alive.
 pub fn mount(ui: &Ui, studio: Studio) -> El {
@@ -112,63 +109,5 @@ fn open_turns(ui: &Ui, studio: &Studio) {
 }
 
 fn open_lightbox(ui: &Ui, studio: &Studio, src: String) {
-    let slot: Rc<RefCell<Option<w::Modal>>> = Rc::new(RefCell::new(None));
-    let close_slot = slot.clone();
-    let st = studio.clone();
-    let u = ui.clone();
-    let content = w::column(ui)
-        .gap(ui.theme().spacing.unit * 2.0)
-        .child(lightbox_body(ui, &src))
-        .child(w::button(
-            ui,
-            move || messages().text(&u, "lightbox-close"),
-            move || {
-                st.depth.lightbox.set(None);
-                if let Some(m) = close_slot.borrow().as_ref() {
-                    m.close();
-                }
-            },
-        ).variant("primary"));
-    let modal = w::modal(ui, messages().text(ui, "lightbox-close"), content, true);
-    *slot.borrow_mut() = Some(modal);
-}
-
-fn lightbox_body(ui: &Ui, src: &str) -> El {
-    if let Some(image) = decode_src(src) {
-        return w::image(ui, image, src).layout(|l| {
-            l.max_width = Length::Px(960.0);
-            l.max_height = Length::Px(640.0);
-        });
-    }
-    w::text(ui, src)
-}
-
-fn decode_src(src: &str) -> Option<Image> {
-    let bytes = if let Some(rest) = src.strip_prefix("data:") {
-        let comma = rest.find(',')?;
-        let meta = &rest[..comma];
-        let data = &rest[comma + 1..];
-        if meta.to_ascii_lowercase().contains(";base64") {
-            super::api::b64_decode(data)?
-        } else {
-            data.as_bytes().to_vec()
-        }
-    } else if let Some(path) = super::markdown::file_path(src) {
-        let meta = std::fs::metadata(&path).ok()?;
-        if meta.len() as usize > super::api::IMAGE_CAP {
-            return None;
-        }
-        std::fs::read(&path).ok()?
-    } else {
-        return None;
-    };
-    if bytes.len() > super::api::IMAGE_CAP {
-        return None;
-    }
-    let decoded = decode(&bytes, Some((960, 960))).ok()?;
-    Some(Image::new(
-        decoded.image.width,
-        decoded.image.height,
-        decoded.image.pixels,
-    ))
+    markup::open(ui, studio, src);
 }

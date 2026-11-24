@@ -377,6 +377,121 @@ fn skills_sheet_stays_in_the_box_at_400_700_and_1180() {
     }
 }
 
+
+#[test]
+fn image_markup_shows_tools_colors_and_actions() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home_markup);
+    app.frames(3);
+    let names = accessible_names(&app);
+    for need in [
+        "Pen",
+        "Highlight",
+        "Arrow",
+        "Box",
+        "Text",
+        "Red",
+        "Orange",
+        "Yellow",
+        "Green",
+        "Blue",
+        "White",
+        "Black",
+        "S",
+        "M",
+        "L",
+        "Undo",
+        "Clear",
+        "Download",
+        "Save & attach to prompt",
+        "Close · Esc",
+        "settings-general.png",
+        "Ready to attach",
+    ] {
+        assert!(
+            names.iter().any(|n| n == need || n.contains(need)),
+            "markup editor is missing {need}: {names:?}"
+        );
+    }
+    assert!(
+        names.iter().any(|n| n.contains("Ctrl+Z undo") && n.contains("Attach markup")),
+        "footer hint: {names:?}"
+    );
+    let pen = app.node(Role::Button, "Pen").expect("pen");
+    assert_eq!(pen.selected, Some(true), "pen starts selected: {pen:?}");
+}
+
+#[test]
+fn image_markup_keyboard_picks_tools_and_resets_zoom() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home_markup);
+    app.frames(3);
+    app.key(KeyEvent::press(Key::char('h')));
+    app.frames(2);
+    let highlight = app.node(Role::Button, "Highlight").expect("highlight");
+    assert_eq!(highlight.selected, Some(true), "H selects highlight: {highlight:?}");
+    app.key(KeyEvent::press(Key::char('=')));
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n == "115%"),
+        "zoom in labels the percent: {names:?}"
+    );
+    app.key(KeyEvent::press(Key::char('0')));
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n == "100%"),
+        "0 resets zoom: {names:?}"
+    );
+    app.key(KeyEvent::press(Key::char('z')).with_modifiers(Modifiers::CTRL));
+    app.frames(2);
+}
+
+#[test]
+fn image_markup_text_dialog_can_be_cancelled() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home_markup_text);
+    app.frames(3);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n == "Text label"),
+        "text label card: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n == "Add label"),
+        "add label: {names:?}"
+    );
+    assert!(app.press(Role::Button, "Cancel"), "cancel text card");
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().all(|n| n != "Add label"),
+        "cancel closes the card: {names:?}"
+    );
+}
+
+#[test]
+fn image_markup_stays_in_the_box_at_400_700_and_1180() {
+    no_spawn();
+    for &(w, h) in &[(400.0, 800.0), (700.0, 800.0), (1180.0, 800.0)] {
+        let mut app = preview_window_size(remedy_desktop::home_markup, w, h);
+        app.frames(3);
+        let bad = horizontal_overflow(&app, w);
+        assert!(
+            bad.is_empty(),
+            "markup editor at {w}x{h} painted off-box:\n  {}",
+            bad.join("\n  ")
+        );
+        let names = accessible_names(&app);
+        assert!(
+            names.iter().any(|n| n == "Pen")
+                && names.iter().any(|n| n == "Save & attach to prompt"),
+            "markup chrome stays available at {w}: {names:?}"
+        );
+    }
+}
+
 #[test]
 fn chat_preview_shows_worked_steps_and_errors() {
     no_spawn();
