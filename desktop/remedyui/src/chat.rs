@@ -704,9 +704,24 @@ fn speaker_cluster(
     created_at: Option<&str>,
     now: i64,
     cards: El,
-    trailing: Option<El>,
+    meta_action: Option<El>,
+    below: Option<El>,
     extras: Option<(El, f32)>,
 ) -> El {
+    let meta = speaker_meta(ui, name, created_at, now, user);
+    let head = if let Some(action) = meta_action {
+        w::row(ui)
+            .align(Align::Baseline)
+            .gap(tokens::SPACE)
+            .layout(|l| {
+                l.min_width = Length::Px(0.0);
+                l.shrink = 1.0;
+            })
+            .child(meta)
+            .child(action)
+    } else {
+        meta
+    };
     let content = w::column(ui)
         .gap(tokens::SPACE)
         .layout(|l| {
@@ -714,9 +729,9 @@ fn speaker_cluster(
             l.min_width = Length::Px(0.0);
             l.max_width = Length::Px(tokens::BUBBLE_MAX + 8.0);
         })
-        .child(speaker_meta(ui, name, created_at, now, user))
+        .child(head)
         .child(cards);
-    let content = if let Some(tr) = trailing {
+    let content = if let Some(tr) = below {
         content.child(tr)
     } else {
         content
@@ -793,15 +808,33 @@ fn saved_turn(ui: &Ui, studio: Studio, msg: &ChatMessage, name: &str) -> El {
         });
         cards = cards.child(bubble_card(ui, body, user, system));
     }
-    let (trailing, extras) = if assistant && (show_body || !beats.is_empty()) {
-        reaction_bar(ui, studio.clone(), msg.id.clone())
+    let streaming = studio.streaming.get();
+    let (meta_action, below, extras) = if assistant && (show_body || !beats.is_empty()) {
+        let (react, extras) = reaction_bar(ui, studio.clone(), msg.id.clone());
+        let action = if streaming {
+            None
+        } else {
+            Some(regen_button(ui, studio.clone(), msg.id.clone()))
+        };
+        (action, react, extras)
     } else if user {
+        let action = if streaming {
+            None
+        } else {
+            Some(edit_button(
+                ui,
+                studio.clone(),
+                msg.id.clone(),
+                msg.content.clone(),
+            ))
+        };
         (
+            action,
             Some(agent_reaction(ui, studio.clone(), msg.id.clone())),
             None,
         )
     } else {
-        (None, None)
+        (None, None, None)
     };
     speaker_cluster(
         ui,
@@ -810,7 +843,8 @@ fn saved_turn(ui: &Ui, studio: Studio, msg: &ChatMessage, name: &str) -> El {
         msg.created_at.as_deref(),
         studio.now(),
         cards,
-        trailing,
+        meta_action,
+        below,
         extras,
     )
 }
@@ -896,6 +930,7 @@ fn live_turn(ui: &Ui, studio: Studio) -> El {
         None,
         studio.now(),
         cards,
+        None,
         None,
         react_ex,
     )
@@ -1161,7 +1196,46 @@ fn panel_button(
     })
 }
 
+
+fn edit_button(ui: &Ui, studio: Studio, id: String, content: String) -> El {
+    compact_icon_action(ui, w::Icon::Note, "chat-edit", move || {
+        depth::edit_user_message(&studio, &id, &content)
+    })
+}
+
+fn regen_button(ui: &Ui, studio: Studio, id: String) -> El {
+    compact_icon_action(ui, w::Icon::Refresh, "chat-regenerate", move || {
+        depth::regenerate(&studio, &id)
+    })
+}
+
+/// Same cap height as the speaker timestamp, so the name row does not grow
+/// and clip the last line of a tight chat preview.
+fn compact_icon_action(
+    ui: &Ui,
+    glyph: w::Icon,
+    label_key: &'static str,
+    on_press: impl Fn() + 'static,
+) -> El {
+    let colors = ui.theme().colors.clone();
+    let u = ui.clone();
+    let tip_ui = ui.clone();
+    let btn = w::row(ui)
+        .align(Align::Center)
+        .child(w::icon(ui, glyph, tokens::META.size))
+        .on_click(on_press)
+        .style(StylePatch::new().foreground(colors.muted))
+        .semantics(move || {
+            Semantics::new(Role::Button)
+                .label(messages().text(&u, label_key))
+                .action(Action::Click)
+        });
+    w::tooltip(&btn, move || messages().text(&tip_ui, label_key));
+    btn
+}
+
 fn reaction_is_on(studio: &Studio, id: &str, emoji: &str) -> bool {
+
     if let Some(m) = studio.messages.get().iter().find(|m| m.id == id) {
         return m.user_reaction == emoji;
     }

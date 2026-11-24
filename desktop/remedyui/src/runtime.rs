@@ -662,6 +662,9 @@ fn parse_messages(v: &serde_json::Value) -> Vec<ChatMessage> {
             if role == "tool" {
                 return None;
             }
+            if row.get("reverted").and_then(|v| v.as_bool()) == Some(true) {
+                return None;
+            }
             let content = row
                 .get("content")
                 .and_then(|t| t.as_str())
@@ -913,7 +916,7 @@ fn busy_frame(on_frame: &Arc<impl Fn(String, String)>, files: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_sessions;
+    use super::{parse_messages, parse_sessions};
     use super::remedy_home_from;
     use serde_json::json;
     use std::path::PathBuf;
@@ -1024,5 +1027,19 @@ mod tests {
     fn unrecognized_json_envelope_is_rejected() {
         let err = super::decode_local_api_token_bytes(br#"{"v":1,"token":"nope"}"#).unwrap_err();
         assert!(err.contains("unrecognized"), "{err}");
+    }
+
+    #[test]
+    fn parse_messages_skips_tool_and_reverted_rows() {
+        let rows = parse_messages(&json!({
+            "messages": [
+                {"id": "u1", "role": "user", "content": "hello"},
+                {"id": "t1", "role": "tool", "content": "hidden"},
+                {"id": "u0", "role": "user", "content": "old", "reverted": true},
+                {"id": "a1", "role": "assistant", "content": "hi", "reverted": false}
+            ]
+        }));
+        let ids: Vec<&str> = rows.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["u1", "a1"]);
     }
 }

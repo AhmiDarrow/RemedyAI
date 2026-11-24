@@ -1373,6 +1373,119 @@ pub fn react(studio: &Studio, message_id: &str, emoji: &str) {
     );
 }
 
+fn set_composer_draft(studio: &Studio, text: &str) {
+    studio.depth.draft_text.set(text.to_string());
+    studio.depth.composer_value.set(text.to_string());
+    studio.depth.draft_nonce.update(|n| *n += 1);
+}
+
+/// Soft-delete this user message and later ones, and put the text in the composer.
+pub fn edit_user_message(studio: &Studio, msg_id: &str, content: &str) {
+    if msg_id.is_empty() || studio.streaming.get() {
+        return;
+    }
+    let Some(sid) = studio.active.get() else {
+        return;
+    };
+    set_composer_draft(studio, content);
+    let Some(client) = studio.runtime() else {
+        return;
+    };
+    let Ok(wake) = waker() else {
+        return;
+    };
+    let studio = studio.clone();
+    let path = logic::edit_message_path(&sid, msg_id);
+    api::spawn_json(&client, Request::post(&path), move |out| {
+        let _ = wake.post(move || {
+            if studio.active.get().as_deref() != Some(sid.as_str()) {
+                return;
+            }
+            match out {
+                Ok(v) => {
+                    let server = api::str_field(&v, "content");
+                    if !server.is_empty() && server != studio.depth.draft_text.get() {
+                        set_composer_draft(&studio, &server);
+                    }
+                    studio.load_messages(&sid);
+                }
+                Err(e) => studio
+                    .depth
+                    .notice
+                    .set(format!("Could not edit message. {e}")),
+            }
+        });
+    });
+}
+
+/// Roll the thread back to the user turn that produced this reply, then resend it.
+pub fn regenerate(studio: &Studio, assistant_msg_id: &str) {
+    if assistant_msg_id.is_empty() || studio.streaming.get() {
+        return;
+    }
+    let Some(sid) = studio.active.get() else {
+        return;
+    };
+    let Some((user_id, prompt)) =
+        logic::preceding_user_for_regen(&studio.messages.get(), assistant_msg_id)
+    else {
+        return;
+    };
+    let clean = logic::clean_resend_text(&prompt);
+    let to_send = if !clean.is_empty() {
+        clean
+    } else if !prompt.trim().is_empty() {
+        prompt.trim().to_string()
+    } else {
+        "(see attached files)".into()
+    };
+    let Some(client) = studio.runtime() else {
+        return;
+    };
+    let Ok(wake) = waker() else {
+        return;
+    };
+    let studio = studio.clone();
+    let path = logic::edit_message_path(&sid, &user_id);
+    api::spawn_json(&client, Request::post(&path), move |out| {
+        let _ = wake.post(move || {
+            if studio.active.get().as_deref() != Some(sid.as_str()) {
+                return;
+            }
+            match out {
+                Ok(_) => reload_then_send(&studio, &sid, to_send),
+                Err(e) => studio
+                    .depth
+                    .notice
+                    .set(format!("Could not regenerate reply. {e}")),
+            }
+        });
+    });
+}
+
+fn reload_then_send(studio: &Studio, sid: &str, text: String) {
+    let Some(client) = studio.runtime() else {
+        return;
+    };
+    let Ok(wake) = waker() else {
+        submit(studio, text, Vec::new(), SubmitKind::Send, false);
+        return;
+    };
+    let studio = studio.clone();
+    let sid = sid.to_string();
+    let sid_ref = sid.clone();
+    runtime::list_messages(&client, &sid_ref, move |out| {
+        let _ = wake.post(move || {
+            if studio.active.get().as_deref() == Some(sid.as_str()) {
+                if let Ok(msgs) = out {
+                    studio.messages.set(msgs);
+                }
+            }
+            submit(&studio, text, Vec::new(), SubmitKind::Send, false);
+        });
+    });
+}
+
 pub fn rename_session(studio: &Studio, id: &str, title: &str) {
     let title = title.trim().to_string();
     if title.is_empty() {
@@ -2280,7 +2393,7 @@ pub fn focused_steps(studio: &Studio) -> Vec<WorkStep> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::studio::Studio;
+    use crate::studio::{ChatMessage, Studio};
     use crate::work::{StepStatus, WorkStep};
     use crate::shell;
     use remedy_ui::testing::TestApp;
@@ -2404,5 +2517,36 @@ mod tests {
             saw,
             "the approvals poller must post the list onto the UI thread without panicking"
         );
+    }
+
+    #[test]
+    fn edit_prefills_the_composer_when_idle() {
+        let studio = Studio::new();
+        studio.active.set(Some("s1".into()));
+        edit_user_message(&studio, "u1", "please review this");
+        assert_eq!(studio.depth.draft_text.get(), "please review this");
+        assert_eq!(studio.depth.composer_value.get(), "please review this");
+        assert!(studio.depth.draft_nonce.get() >= 1);
+    }
+
+    #[test]
+    fn edit_is_a_no_op_while_a_turn_is_streaming() {
+        let studio = Studio::new();
+        studio.active.set(Some("s1".into()));
+        studio.streaming.set(true);
+        edit_user_message(&studio, "u1", "please review this");
+        assert!(studio.depth.draft_text.get().is_empty());
+        assert_eq!(studio.depth.draft_nonce.get(), 0);
+    }
+
+    #[test]
+    fn regenerate_is_a_no_op_without_a_preceding_user_turn() {
+        let studio = Studio::new();
+        studio.active.set(Some("s1".into()));
+        studio.messages.set(vec![ChatMessage::plain("a1", "assistant", "hello")]);
+        regenerate(&studio, "a1");
+        assert!(studio.depth.draft_text.get().is_empty());
+        assert!(studio.depth.notice.get().is_empty());
+        assert!(!studio.streaming.get());
     }
 }

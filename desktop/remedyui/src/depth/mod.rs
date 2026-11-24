@@ -14,10 +14,10 @@ pub(crate) mod logic;
 
 pub(crate) use actions::{
     add_paths, after_finish, apply_frame, approve_plan, ask_delete_skill, ask_remove_project,
-    assign_project, background_title, boot, continue_pending, delete_skill, dismiss_library,
+    assign_project, background_title, boot, continue_pending, delete_skill, dismiss_library, edit_user_message,
     export_active, focus_session, focused_steps, import_session, install_library, install_named,
     load_memory, load_skills, move_project_order, move_session_order, open_skill, pick_attachments,
-    pick_folder, place_session, project_confirm_body, react, refresh_banners, remove_project,
+    pick_folder, place_session, project_confirm_body, react, regenerate, refresh_banners, remove_project,
     rename_session, request_plan_changes, resolve_approval, save_skill, search_library,
     search_memory, send_life, show_plan, speak_reply, stall_seconds, submit, toggle_mic,
     trust_skill, visible_approval,
