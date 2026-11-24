@@ -247,6 +247,10 @@ pub struct Depth {
     pub voice: Signal<VoicePrefs>,
     pub mic_on: Signal<bool>,
     pub rename_id: Signal<Option<String>>,
+    /// Session whose add-tag field is open.
+    pub tag_id: Signal<Option<String>>,
+    /// Draft in the add-tag field.
+    pub tag_draft: Signal<String>,
     pub remote_busy: Signal<bool>,
     pub memory_body: Signal<String>,
     pub skills: Signal<Vec<SkillRow>>,
@@ -310,6 +314,8 @@ impl Depth {
             voice: Signal::new(VoicePrefs::default()),
             mic_on: Signal::new(false),
             rename_id: Signal::new(None),
+            tag_id: Signal::new(None),
+            tag_draft: Signal::new(String::new()),
             remote_busy: Signal::new(false),
             memory_body: Signal::new(String::new()),
             skills: Signal::new(Vec::new()),
@@ -455,6 +461,21 @@ pub(crate) fn now_ms() -> i64 {
 
 fn desktop_dir() -> PathBuf {
     runtime::remedy_home().join("desktop")
+}
+
+pub(crate) fn load_session_tags() -> Vec<(String, Vec<String>)> {
+    std::fs::read_to_string(desktop_dir().join("session-tags.json"))
+        .ok()
+        .map(|raw| logic::parse_session_tags_file(&raw))
+        .unwrap_or_default()
+}
+
+pub(crate) fn save_session_tags(sessions: &[crate::studio::Session]) {
+    let _ = std::fs::create_dir_all(desktop_dir());
+    let _ = std::fs::write(
+        desktop_dir().join("session-tags.json"),
+        logic::session_tags_file_body(sessions),
+    );
 }
 
 fn load_disk() -> (Vec<String>, Vec<String>, Vec<(String, Vec<String>)>) {

@@ -539,6 +539,45 @@ impl Studio {
         });
     }
 
+    /// Replace the session list, keeping locally saved tags (the sidecar has no tag field).
+    pub fn apply_sessions(&self, mut list: Vec<Session>) {
+        let stored = if self.depth.save_enabled {
+            crate::depth::load_session_tags()
+        } else {
+            Vec::new()
+        };
+        let current = self.sessions.get();
+        for session in &mut list {
+            let mem = current
+                .iter()
+                .find(|s| s.id == session.id)
+                .map(|s| s.tags.as_slice())
+                .unwrap_or(&[]);
+            let disk = stored
+                .iter()
+                .find(|(id, _)| id == &session.id)
+                .map(|(_, tags)| tags.as_slice())
+                .unwrap_or(&[]);
+            session.tags = crate::depth::logic::normalize_tags(
+                session.tags.iter().chain(mem).chain(disk),
+            );
+        }
+        self.sessions.set(list);
+    }
+
+    /// Adds a tag to `id`, persists it, and closes the add-tag field.
+    pub fn add_tag(&self, id: &str, tag: &str) {
+        self.sessions.update(|list| {
+            if let Some(session) = list.iter_mut().find(|s| s.id == id) {
+                session.tags = crate::depth::logic::add_session_tag(&session.tags, tag);
+            }
+        });
+        self.depth.tag_id.set(None);
+        if self.depth.save_enabled {
+            crate::depth::save_session_tags(&self.sessions.get());
+        }
+    }
+
     /// Collapses or expands a project group.
     pub fn toggle_collapsed(&self, path: Option<&str>) {
         let key = path.map(|s| s.to_string());
@@ -731,7 +770,7 @@ impl Studio {
                     } else {
                         list.first().map(|s| s.id.clone())
                     };
-                    studio.sessions.set(list);
+                    studio.apply_sessions(list);
                     if let Some(id) = keep {
                         if studio.sessions.get().iter().any(|s| s.id == id) {
                             studio.active.set(Some(id.clone()));
@@ -831,14 +870,7 @@ pub fn grouped(
             Filter::Pinned => s.pinned && !s.archived,
             Filter::Archived => s.archived,
         })
-        .filter(|s| {
-            q.is_empty()
-                || s.title.to_ascii_lowercase().contains(&q)
-                || s.project_path
-                    .as_deref()
-                    .map(|p| p.to_ascii_lowercase().contains(&q))
-                    .unwrap_or(false)
-        })
+        .filter(|s| crate::depth::logic::session_matches_query(s, &q))
         .cloned()
         .collect();
 
@@ -886,5 +918,35 @@ pub fn project_label(path: Option<&str>) -> String {
             name.to_string()
         }
         None => String::new(), // filled from i18n at the call site
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_tag_updates_the_session_and_closes_the_field() {
+        let studio = Studio::preview();
+        studio.depth.tag_id.set(Some("s3".into()));
+        studio.add_tag("s3", "  portal ");
+        let tags = studio
+            .sessions
+            .get()
+            .into_iter()
+            .find(|s| s.id == "s3")
+            .map(|s| s.tags)
+            .unwrap_or_default();
+        assert_eq!(tags, vec!["portal".to_string()]);
+        assert!(studio.depth.tag_id.get().is_none());
+        studio.add_tag("s3", "portal");
+        let tags = studio
+            .sessions
+            .get()
+            .into_iter()
+            .find(|s| s.id == "s3")
+            .map(|s| s.tags)
+            .unwrap_or_default();
+        assert_eq!(tags, vec!["portal".to_string()]);
     }
 }
