@@ -422,6 +422,39 @@ pub fn next_reaction(current: &str, picked: &str) -> String {
     if current == picked { String::new() } else { picked.to_string() }
 }
 
+/// How to keep the open chat in step with the sidecar's session list.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SessionAdopt {
+    /// The current id is on the list — keep it.
+    Keep(String),
+    /// The current id is missing; open this live session instead.
+    Select(String),
+    /// The list is empty — create a session on the sidecar.
+    Create,
+}
+
+/// Pick what the open chat should be after a live session list arrives.
+///
+/// A first-launch placeholder such as `"1"` must not stay selected when the
+/// sidecar does not have that id, or a send 404s with "Session not found".
+pub fn adopt_active_session(active: Option<&str>, ids: &[String]) -> SessionAdopt {
+    if let Some(id) = active {
+        if !id.is_empty() && ids.iter().any(|s| s == id) {
+            return SessionAdopt::Keep(id.to_string());
+        }
+    }
+    match ids.first() {
+        Some(id) => SessionAdopt::Select(id.clone()),
+        None => SessionAdopt::Create,
+    }
+}
+
+/// True when a send or stream failed because the session id is unknown to the sidecar.
+pub fn is_missing_session_error(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    m.contains("session not found")
+}
+
 // --- follow (followController.ts) ---
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1754,5 +1787,33 @@ mod tests {
         assert_eq!(next_session_sync_backoff_ms(2400), 3840);
         assert_eq!(next_session_sync_backoff_ms(30_000), 30_000);
         assert_eq!(SESSION_SYNC_DEBOUNCE_MS, 400);
+    }
+
+    #[test]
+    fn adopt_active_session_drops_a_placeholder_and_picks_a_live_id() {
+        let live = vec!["sess-abc".into(), "sess-def".into()];
+        assert_eq!(
+            adopt_active_session(Some("1"), &live),
+            SessionAdopt::Select("sess-abc".into())
+        );
+        assert_eq!(
+            adopt_active_session(Some("sess-def"), &live),
+            SessionAdopt::Keep("sess-def".into())
+        );
+        assert_eq!(
+            adopt_active_session(None, &live),
+            SessionAdopt::Select("sess-abc".into())
+        );
+        assert_eq!(adopt_active_session(Some("1"), &[]), SessionAdopt::Create);
+        assert_eq!(adopt_active_session(None, &[]), SessionAdopt::Create);
+        assert_eq!(adopt_active_session(Some(""), &live), SessionAdopt::Select("sess-abc".into()));
+    }
+
+    #[test]
+    fn missing_session_error_matches_the_sidecar_404() {
+        assert!(is_missing_session_error("the server answered 404: Session not found"));
+        assert!(is_missing_session_error("Session not found"));
+        assert!(!is_missing_session_error("the server answered 401: Invalid API key"));
+        assert!(!is_missing_session_error("rate limited"));
     }
 }
