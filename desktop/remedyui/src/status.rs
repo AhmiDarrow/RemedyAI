@@ -1,11 +1,10 @@
 //! Status dock: the 0.70.5 bottom rail — connection, actions, model, and modes.
 
 use crate::studio::{Conn, Studio};
-use crate::{messages, say};
+use crate::messages;
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::layout::{Align, Length};
-use remedy_ui::reactive::Signal;
 use remedy_ui::style::StylePatch;
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui, show};
@@ -27,19 +26,7 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
 
-    let picker_studio = studio.clone();
-    let st = studio.clone();
-    let u = ui.clone();
-    let picker = show(
-        ui,
-        move || !st.models.get().is_empty(),
-        move || model_picker(&u, picker_studio.clone()),
-    )
-    .fallback({
-        let u = ui.clone();
-        move || say(&u, "partner-name", "muted")
-    })
-    .el();
+    let picker = crate::model_picker::control(ui, studio.clone());
 
     let mem = studio.clone();
     let skills = studio.clone();
@@ -193,6 +180,7 @@ fn compact_bar(ui: &Ui, studio: Studio) -> El {
             l.grow = 1.0;
             l.min_width = Length::Px(0.0);
         }))
+        .child(crate::model_picker::control(ui, studio.clone()))
         .child(reconnect_slot(ui, studio))
 }
 
@@ -665,25 +653,4 @@ fn update_note(ui: &Ui) -> El {
         },
     )
     .el()
-}
-
-fn model_picker(ui: &Ui, studio: Studio) -> El {
-    let models = studio.models.get();
-    let current = studio.model.get();
-    let selected = models.iter().position(|m| *m == current).unwrap_or(0);
-    let sel = Signal::new(selected);
-    let label = messages().text(ui, "status-model");
-    let control = w::select(ui, label, models.clone(), sel);
-    let sel2 = sel;
-    let names = models;
-    let st = studio.clone();
-    control.clone().bind(move || {
-        let i = sel2.get();
-        if let Some(name) = names.get(i) {
-            if st.model.get() != *name {
-                st.model.set(name.clone());
-            }
-        }
-    });
-    control
 }

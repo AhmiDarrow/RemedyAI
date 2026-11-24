@@ -361,6 +361,13 @@ impl Settings {
             return;
         }
         if self.client.get().is_none() {
+            // Headless preview tests set REMEDY_DESKTOP_NO_SPAWN and have no
+            // runtime. Stay on the loading placeholder so an extra frame
+            // (leftover waker work from an earlier test in the same process)
+            // cannot flip rails-right goldens to "Settings couldn't load".
+            if crate::runtime::spawn_disabled() {
+                return;
+            }
             self.phase.set("error".into());
             self.error.set("Settings couldn’t load".into());
             return;

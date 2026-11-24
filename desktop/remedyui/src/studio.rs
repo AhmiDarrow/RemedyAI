@@ -203,6 +203,10 @@ pub struct Studio {
     pub provider: Signal<String>,
     /// Models the picker can offer.
     pub models: Signal<Vec<String>>,
+    /// Configured providers (and each one's models) for the status-bar picker.
+    pub providers: Signal<Vec<crate::model_picker::ProviderChoice>>,
+    /// Loading / ready / error for that picker.
+    pub picker_status: Signal<crate::model_picker::PickerStatus>,
     /// Display name for "Ready when you are, {name}".
     pub user_name: Signal<String>,
     /// When true, this Studio does not talk to a runtime (goldens, tests).
@@ -325,6 +329,8 @@ impl Studio {
             model: Signal::new("remedy".into()),
             provider: Signal::new("local".into()),
             models: Signal::new(vec!["remedy".into()]),
+            providers: Signal::new(Vec::new()),
+            picker_status: Signal::new(crate::model_picker::PickerStatus::Ready),
             user_name: Signal::new(user.to_string()),
             local_only,
             clock: Signal::new(None),
@@ -672,6 +678,7 @@ impl Studio {
     pub fn attach_client(&self, client: Client) {
         self.client.set(Some(client.clone()));
         self.conn.set(Conn::Connecting);
+        self.picker_status.set(crate::model_picker::PickerStatus::Loading);
         let studio = self.clone();
         let Ok(waker) = waker() else {
             return;
@@ -721,16 +728,7 @@ impl Studio {
                 }
             });
         });
-        let studio = self.clone();
-        runtime::list_models(client, move |out| {
-            let _ = wake.post(move || {
-                if let Ok(models) = out {
-                    if !models.is_empty() {
-                        studio.models.set(models);
-                    }
-                }
-            });
-        });
+        crate::model_picker::refresh(self, client);
     }
 }
 

@@ -48,12 +48,40 @@ thread_local! {
     /// id keeps a disposed shell from clearing the next shell's hooks.
     static STUDIO: RefCell<Option<StudioHooks>> = const { RefCell::new(None) };
     static STUDIO_IDS: Cell<u64> = const { Cell::new(1) };
+    /// Next Settings open should land on Models (from the status-bar picker).
+    static OPEN_MODELS: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The window's settings, when [`install`] has run and the signals are alive.
 pub(crate) fn current() -> Option<Settings> {
     alive()
 }
+
+/// Drop a leftover Settings set so the next preview window does not inherit
+/// a failed load (or another theme's rail) from a previous TestApp in-process.
+pub(crate) fn forget_current() {
+    CURRENT.with(|c| c.set(None));
+}
+
+pub(crate) fn take_open_models() -> bool {
+    OPEN_MODELS.with(|c| c.replace(false))
+}
+
+/// Opens Settings on the Models category so the owner can add a provider.
+pub(crate) fn open_models() {
+    OPEN_MODELS.with(|c| c.set(true));
+    if let Some(s) = current() {
+        s.last_section.set("provider".into());
+        s.category.set("models".into());
+        open_panel(s);
+        OPEN_MODELS.with(|c| c.set(false));
+        return;
+    }
+    if let Some(toggle) = studio_toggle() {
+        toggle();
+    }
+}
+
 
 /// Current "speak replies" setting, including a mid-session override.
 pub(crate) fn speak_replies_on() -> bool {
