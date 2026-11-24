@@ -172,7 +172,7 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
         <FormHint>
           Advanced knobs only — defaults keep full owner power. Skill creation stays on so Remedy can improve.
         </FormHint>
-        {setAdvanced && advancedSchema.length > 0 ? (
+        {advancedSchema.length > 0 ? (
           <OrganismKnobs
             schema={advancedSchema}
             values={advanced}

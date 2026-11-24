@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   DEFAULT_FONTS,
-  FONT_ROLES,
   applyFonts,
   facesForRole,
   fontStack,
