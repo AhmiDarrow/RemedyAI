@@ -26,7 +26,7 @@ use crate::depth::TodoItem;
 use crate::runtime::{self, spawn_disabled};
 use crate::studio::{ChatMessage, Studio};
 use crate::tokens;
-use crate::work::{StepStatus, WorkStep};
+use crate::work::{self, StepStatus, WorkStep};
 use crate::{messages, say};
 
 /// Matches `--chat-bubble-radius: 0.85rem` in the current app (at 16px).
@@ -734,14 +734,24 @@ fn actions_feed(ui: &Ui, studio: Studio) -> El {
         }
     });
     let expanded: Signal<Vec<String>> = Signal::new(Vec::new());
+    let process_open: Signal<Vec<String>> = Signal::new(Vec::new());
     let u = ui.clone();
     let st_rows = studio.clone();
     let col_state = expanded;
+    let proc_state = process_open;
     let col = w::for_each(
         &col,
         turns,
         |t| t.id.clone(),
-        move |t| action_turn(&u, st_rows.clone(), t.clone(), col_state.clone()),
+        move |t| {
+            action_turn(
+                &u,
+                st_rows.clone(),
+                t.clone(),
+                col_state.clone(),
+                proc_state.clone(),
+            )
+        },
     );
     let empty_st = studio.clone();
     let u_empty = ui.clone();
@@ -821,11 +831,20 @@ struct ActionTurn {
     steps: Vec<WorkStep>,
     todos: Vec<TodoItem>,
     live: bool,
+    session_id: String,
+    request_id: String,
 }
 
 fn collect_turns(studio: &Studio) -> Vec<ActionTurn> {
     let streaming = studio.streaming.get();
     let live_id = studio.live_message_id.get();
+    let session_id = studio.active.get().unwrap_or_default();
+    let live_request_id = studio
+        .depth
+        .job(&session_id)
+        .map(|j| j.request_id)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_default();
     let mut out = Vec::new();
     for m in studio.messages.get() {
         if m.role != "assistant" {
@@ -843,6 +862,8 @@ fn collect_turns(studio: &Studio) -> Vec<ActionTurn> {
             steps: m.steps.clone(),
             todos: Vec::new(),
             live: false,
+            session_id: session_id.clone(),
+            request_id: m.request_id.clone(),
         });
     }
     let thinking = studio.live_thinking.get();
@@ -855,6 +876,8 @@ fn collect_turns(studio: &Studio) -> Vec<ActionTurn> {
             steps,
             todos,
             live: true,
+            session_id: session_id.clone(),
+            request_id: live_request_id,
         });
     }
     out
@@ -864,7 +887,13 @@ fn skip_idle(m: &ChatMessage) -> bool {
     m.thinking.trim().is_empty() && m.steps.is_empty()
 }
 
-fn action_turn(ui: &Ui, studio: Studio, turn: ActionTurn, expanded: Signal<Vec<String>>) -> El {
+fn action_turn(
+    ui: &Ui,
+    studio: Studio,
+    turn: ActionTurn,
+    expanded: Signal<Vec<String>>,
+    process_open: Signal<Vec<String>>,
+) -> El {
     let unit = ui.theme().spacing.unit;
     let thinking = turn.thinking.clone();
     let steps = turn.steps.clone();
@@ -889,12 +918,11 @@ fn action_turn(ui: &Ui, studio: Studio, turn: ActionTurn, expanded: Signal<Vec<S
         col = col.child(thinking_block(ui, &turn.id, &thinking, expanded));
     }
     if !steps.is_empty() {
-        col = col.child(tools_block(ui, &steps));
+        col = col.child(tools_block(ui, studio.clone(), &turn, &steps, process_open));
     }
     if !todos.is_empty() {
         col = col.child(build_block(ui, &todos));
     }
-    let _ = studio;
     col
 }
 
@@ -1009,49 +1037,260 @@ fn thinking_para(ui: &Ui, text: &str) -> El {
         )
 }
 
-fn tools_block(ui: &Ui, steps: &[WorkStep]) -> El {
+fn process_mode() -> String {
+    crate::settings::current()
+        .map(|s| work::normalize_tool_process(&s.tool_process.get()).to_string())
+        .unwrap_or_else(|| "off".into())
+}
+
+fn tools_block(
+    ui: &Ui,
+    studio: Studio,
+    turn: &ActionTurn,
+    steps: &[WorkStep],
+    process_open: Signal<Vec<String>>,
+) -> El {
+    let u = ui.clone();
+    let steps = steps.to_vec();
+    let process_open = process_open.clone();
+    let session_id = turn.session_id.clone();
+    let request_id = turn.request_id.clone();
+    let min = show(ui, || process_mode() == "off", {
+        let u = u.clone();
+        let steps = steps.clone();
+        move || tools_min(&u, &steps)
+    })
+    .el();
+    let med = show(ui, || process_mode() == "medium", {
+        let u = u.clone();
+        let steps = steps.clone();
+        let process_open = process_open.clone();
+        let studio = studio.clone();
+        let session_id = session_id.clone();
+        let request_id = request_id.clone();
+        move || tools_medium(&u, studio.clone(), &session_id, &request_id, &steps, process_open.clone())
+    })
+    .el();
+    let full = show(ui, || process_mode() == "full", {
+        let u = u.clone();
+        let steps = steps.clone();
+        let process_open = process_open.clone();
+        let studio = studio.clone();
+        let session_id = session_id.clone();
+        let request_id = request_id.clone();
+        move || tools_full(&u, studio.clone(), &session_id, &request_id, &steps, process_open.clone())
+    })
+    .el();
+    w::column(ui)
+        .layout(|l| l.width = Length::Percent(1.0))
+        .child(min)
+        .child(med)
+        .child(full)
+}
+
+/// Min: compact name chips and counts, no command lines.
+fn tools_min(ui: &Ui, steps: &[WorkStep]) -> El {
+    let unit = ui.theme().spacing.unit;
+    let colors = ui.theme().colors.clone();
+    let mut row = w::wrap(ui)
+        .gap(unit)
+        .layout(|l| l.width = Length::Percent(1.0));
+    for group in work::group_process_steps(steps) {
+        let name = short_tool(&group[0].name);
+        let failed = group.iter().any(|s| s.status == StepStatus::Error);
+        let running = group.iter().any(|s| s.status == StepStatus::Running);
+        let label = if group.len() > 1 {
+            format!("{name} ×{}", group.len())
+        } else {
+            name
+        };
+        let fg = if failed {
+            colors.danger
+        } else if running {
+            colors.accent
+        } else {
+            colors.text
+        };
+        row = row.child(
+            w::text(ui, label)
+                .nowrap()
+                .style(
+                    tokens::typo(tokens::MONO)
+                        .foreground(fg)
+                        .weight(600.0),
+                )
+                .padding(Insets {
+                    top: 2.0,
+                    end: 6.0,
+                    bottom: 2.0,
+                    start: 6.0,
+                }),
+        );
+    }
+    row
+}
+
+fn tools_medium(
+    ui: &Ui,
+    studio: Studio,
+    session_id: &str,
+    request_id: &str,
+    steps: &[WorkStep],
+    process_open: Signal<Vec<String>>,
+) -> El {
     let unit = ui.theme().spacing.unit;
     let mut col = w::column(ui)
-        .gap(unit * 0.6)
+        .gap(unit * 0.8)
         .layout(|l| l.width = Length::Percent(1.0));
-    for step in steps {
-        col = col.child(tool_row(ui, step));
+    for group in work::group_process_steps(steps) {
+        col = col.child(process_group(
+            ui,
+            studio.clone(),
+            session_id,
+            request_id,
+            group,
+            "medium",
+            process_open.clone(),
+        ));
     }
     col
 }
 
-fn tool_row(ui: &Ui, step: &WorkStep) -> El {
-    let colors = ui.theme().colors.clone();
-    let (mark, mark_color) = match step.status {
-        StepStatus::Running => ("◌", colors.accent),
-        StepStatus::Done => ("✓", colors.ok),
-        StepStatus::Error => ("✕", colors.danger),
-    };
-    let name = short_tool(&step.name);
-    let detail = step.detail.clone();
-    let mut label = format!("{mark} {name}");
-    if let Some(d) = &detail {
-        label.push(' ');
-        label.push_str(d);
+fn tools_full(
+    ui: &Ui,
+    studio: Studio,
+    session_id: &str,
+    request_id: &str,
+    steps: &[WorkStep],
+    process_open: Signal<Vec<String>>,
+) -> El {
+    let unit = ui.theme().spacing.unit;
+    let mut col = w::column(ui)
+        .gap(unit)
+        .layout(|l| l.width = Length::Percent(1.0));
+    for step in steps {
+        col = col.child(process_group(
+            ui,
+            studio.clone(),
+            session_id,
+            request_id,
+            std::slice::from_ref(step),
+            "full",
+            process_open.clone(),
+        ));
     }
-    let mut row = w::row(ui)
+    col
+}
+
+fn process_group(
+    ui: &Ui,
+    studio: Studio,
+    session_id: &str,
+    request_id: &str,
+    group: &[WorkStep],
+    mode: &'static str,
+    process_open: Signal<Vec<String>>,
+) -> El {
+    let step = &group[0];
+    let id = group
+        .iter()
+        .map(|s| s.id.clone())
+        .collect::<Vec<_>>()
+        .join("+");
+    let colors = ui.theme().colors.clone();
+    let name = short_tool(&step.name);
+    let title = if group.len() > 1 {
+        format!("{name} ×{}", group.len())
+    } else {
+        name
+    };
+    let failed = group.iter().any(|s| s.status == StepStatus::Error);
+    let running = group.iter().any(|s| s.status == StepStatus::Running);
+    let mark = if failed {
+        "✕"
+    } else if running {
+        "◌"
+    } else {
+        "✓"
+    };
+    let mark_color = if failed {
+        colors.danger
+    } else if running {
+        colors.accent
+    } else {
+        colors.ok
+    };
+    let summary = group
+        .iter()
+        .find_map(|s| {
+            work::step_inline_summary(
+                &s.name,
+                s.args_text.as_deref(),
+                s.result_text.as_deref(),
+                s.error.as_deref(),
+            )
+        })
+        .or_else(|| group.iter().find_map(|s| s.detail.clone()));
+    let body = process_group_body(group, mode);
+    let can_open = !body.is_empty();
+    let open = {
+        let process_open = process_open.clone();
+        let id = id.clone();
+        move || can_open && process_body_open(mode, &process_open.get(), &id)
+    };
+    let toggle = {
+        let process_open = process_open.clone();
+        let id = id.clone();
+        move || {
+            if !can_open {
+                return;
+            }
+            let mut next = process_open.get();
+            if let Some(i) = next.iter().position(|x| x == &id) {
+                next.remove(i);
+            } else {
+                next.push(id.clone());
+            }
+            process_open.set(next);
+        }
+    };
+    let chevron = {
+        let open = open.clone();
+        move || {
+            if !can_open {
+                return " ".to_string();
+            }
+            if open() {
+                "▾".to_string()
+            } else {
+                "▸".to_string()
+            }
+        }
+    };
+    let mut head = w::row(ui)
         .align(Align::Center)
         .gap(8.0)
         .layout(|l| l.width = Length::Percent(1.0))
+        .on_click(toggle)
         .semantics({
-            let label = label.clone();
-            let err = step.error.clone();
+            let title = title.clone();
+            let summary = summary.clone().unwrap_or_default();
             move || {
-                let mut s = label.clone();
-                if let Some(e) = &err {
-                    if !e.is_empty() {
-                        s.push_str(": ");
-                        s.push_str(e);
-                    }
+                let mut s = title.clone();
+                if !summary.is_empty() {
+                    s.push(' ');
+                    s.push_str(&summary);
                 }
-                Semantics::new(Role::Label).label(s)
+                Semantics::new(Role::Button).label(s).action(remedy_ui::a11y::Action::Click)
             }
         })
+        .child(
+            w::text(ui, "")
+                .text(chevron)
+                .nowrap()
+                .layout(|l| l.shrink = 0.0)
+                .style(tokens::typo(tokens::META).foreground(colors.muted)),
+        )
         .child(
             w::text(ui, mark)
                 .nowrap()
@@ -1063,7 +1302,7 @@ fn tool_row(ui: &Ui, step: &WorkStep) -> El {
                 ),
         )
         .child(
-            w::text(ui, &name)
+            w::text(ui, &title)
                 .nowrap()
                 .layout(|l| l.shrink = 0.0)
                 .style(
@@ -1072,9 +1311,9 @@ fn tool_row(ui: &Ui, step: &WorkStep) -> El {
                         .weight(600.0),
                 ),
         );
-    if let Some(detail) = detail.as_deref().filter(|s| !s.is_empty()) {
-        row = row.child(
-            w::text(ui, detail)
+    if let Some(summary) = summary.clone() {
+        head = head.child(
+            w::text(ui, summary)
                 .layout(|l| {
                     l.grow = 1.0;
                     l.shrink = 1.0;
@@ -1083,18 +1322,158 @@ fn tool_row(ui: &Ui, step: &WorkStep) -> El {
                 .style(tokens::typo(tokens::MONO).foreground(colors.muted)),
         );
     }
-    if let Some(err) = step.error.as_deref().filter(|s| !s.is_empty()) {
-        row = row.child(
-            w::text(ui, err)
-                .layout(|l| {
-                    l.grow = 1.0;
-                    l.shrink = 1.0;
-                    l.min_width = Length::Px(0.0);
-                })
-                .style(tokens::typo(tokens::META).foreground(colors.danger)),
-        );
+    let evidence: Signal<Option<String>> = Signal::new(None);
+    let fetching: Signal<bool> = Signal::new(false);
+    let want_evidence = work::is_full_process_mode(mode) && group.len() == 1;
+    let call_id = step.id.clone();
+    let session_id = session_id.to_string();
+    let request_id = request_id.to_string();
+    let u_body = ui.clone();
+    let body_view = show(ui, open, {
+        let evidence = evidence.clone();
+        let fetching = fetching.clone();
+        let body = body.clone();
+        move || {
+            if want_evidence {
+                request_tool_evidence(
+                    studio.clone(),
+                    &session_id,
+                    &request_id,
+                    &call_id,
+                    evidence.clone(),
+                    fetching.clone(),
+                );
+            }
+            process_dump(
+                &u_body,
+                {
+                    let evidence = evidence.clone();
+                    let body = body.clone();
+                    move || merge_evidence_body(&body, evidence.get().as_deref())
+                },
+                failed,
+            )
+        }
+    })
+    .el();
+    w::column(ui)
+        .gap(tokens::SPACE)
+        .layout(|l| l.width = Length::Percent(1.0))
+        .child(head)
+        .child(body_view)
+}
+
+fn encode_path_seg(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
     }
-    row
+    out
+}
+
+fn request_tool_evidence(
+    studio: Studio,
+    session_id: &str,
+    request_id: &str,
+    call_id: &str,
+    evidence: Signal<Option<String>>,
+    fetching: Signal<bool>,
+) {
+    if fetching.get() || evidence.get().is_some() {
+        return;
+    }
+    if studio.local_only || session_id.is_empty() || request_id.is_empty() || call_id.is_empty() {
+        return;
+    }
+    let Some(client) = studio.client() else {
+        return;
+    };
+    fetching.set(true);
+    let path = format!(
+        "sessions/{}/turns/{}/tools/{}",
+        encode_path_seg(session_id),
+        encode_path_seg(request_id),
+        encode_path_seg(call_id),
+    );
+    runtime::get_json(&client, &path, move |res| {
+        if let Ok(v) = res {
+            if let Some(out) = v.get("output").and_then(|s| s.as_str()).filter(|s| !s.is_empty()) {
+                evidence.set(Some(out.to_string()));
+                return;
+            }
+        }
+        fetching.set(false);
+    });
+}
+
+fn merge_evidence_body(body: &str, evidence: Option<&str>) -> String {
+    let Some(output) = evidence.map(str::trim).filter(|s| !s.is_empty()) else {
+        return body.to_string();
+    };
+    if body.contains("// --- result ---") {
+        let prefix = body.split("// --- result ---").next().unwrap_or("").trim_end();
+        if prefix.is_empty() {
+            return format!("// --- result ---\n{output}");
+        }
+        return format!("{prefix}\n\n// --- result ---\n{output}");
+    }
+    if body.is_empty() {
+        return output.to_string();
+    }
+    format!("{body}\n\n{output}")
+}
+
+fn process_body_open(mode: &str, toggled: &[String], id: &str) -> bool {
+    let on = toggled.iter().any(|x| x == id);
+    if work::is_full_process_mode(mode) {
+        !on
+    } else {
+        on
+    }
+}
+
+fn process_group_body(group: &[WorkStep], mode: &str) -> String {
+    let full = work::is_full_process_mode(mode);
+    let mut parts = Vec::new();
+    for (i, step) in group.iter().enumerate() {
+        if full {
+            if let Some(args) = step.args_text.as_deref().filter(|s| !s.is_empty()) {
+                let tag = if group.len() > 1 {
+                    format!("// --- args [{}] ---\n", i + 1)
+                } else {
+                    "// --- args ---\n".into()
+                };
+                parts.push(format!("{tag}{args}"));
+            }
+            if let Some(err) = step.error.as_deref().filter(|s| !s.is_empty()) {
+                parts.push(format!("// --- error ---\n{err}"));
+            } else if let Some(res) = step.result_text.as_deref().filter(|s| !s.is_empty()) {
+                parts.push(format!("// --- result ---\n{res}"));
+            }
+        } else {
+            let preview = work::step_medium_preview(step.result_text.as_deref(), step.error.as_deref());
+            if !preview.is_empty() {
+                parts.push(preview);
+            }
+        }
+    }
+    parts.join("\n\n")
+}
+
+fn process_dump(ui: &Ui, text: impl Fn() -> String + 'static, failed: bool) -> El {
+    let colors = ui.theme().colors.clone();
+    let fg = if failed { colors.danger } else { colors.muted };
+    w::text(ui, "")
+        .text(text)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .style(tokens::typo(tokens::MONO).foreground(fg).text_size(12.0))
 }
 
 fn short_tool(name: &str) -> String {
@@ -1201,5 +1580,18 @@ mod tests {
         assert!(!thinking_is_open(&[], "t1"));
         assert!(thinking_is_open(&["t1".into()], "t1"));
         assert!(!thinking_is_open(&["t2".into()], "t1"));
+    }
+
+    #[test]
+    fn process_detail_defaults_match_old_remedy() {
+        assert!(process_body_open("full", &[], "s1"));
+        assert!(!process_body_open("full", &["s1".into()], "s1"));
+        assert!(!process_body_open("medium", &[], "s1"));
+        assert!(process_body_open("medium", &["s1".into()], "s1"));
+        let body = "// --- args ---\n{\"command\":\"ls\"}\n\n// --- result ---\nshort…";
+        let merged = merge_evidence_body(body, Some("one\ntwo\nthree"));
+        assert!(merged.contains("one"), "{merged}");
+        assert!(merged.contains("// --- args ---"), "{merged}");
+        assert!(!merged.contains("short…"), "{merged}");
     }
 }

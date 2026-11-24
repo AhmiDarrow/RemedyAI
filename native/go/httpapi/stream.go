@@ -119,9 +119,14 @@ type toolResultToken struct {
 	Via string
 }
 
-// record is the persisted tool_results row shape.
+// record is the persisted tool_results row shape. Output is the full body
+// (not the short SSE preview) so a reloaded turn stays fully transparent.
 func (t toolResultToken) record() map[string]any {
-	item := map[string]any{"name": t.Name, "output": t.Preview, "error": nil}
+	body := firstNonEmpty(t.Output, t.Preview)
+	item := map[string]any{"name": t.Name, "output": body, "error": nil}
+	if t.Preview != "" && t.Preview != body {
+		item["preview"] = t.Preview
+	}
 	if t.Via != "" {
 		item["via"] = t.Via
 	}

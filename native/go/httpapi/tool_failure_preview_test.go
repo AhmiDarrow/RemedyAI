@@ -74,3 +74,21 @@ func TestToolResultRecordNeverSaysBareToolFailed(t *testing.T) {
 		}
 	}
 }
+
+func TestToolResultRecordKeepsFullOutput(t *testing.T) {
+	full := strings.Repeat("line of command output\n", 40)
+	res := toolResultToken{
+		Name:    "bash",
+		OK:      true,
+		Preview: previewOf(full),
+		Output:  full,
+	}
+	rec := res.record()
+	out, _ := rec["output"].(string)
+	if out != full {
+		t.Fatalf("persisted output was truncated: len=%d want=%d preview=%q", len(out), len(full), rec["preview"])
+	}
+	if rec["preview"] != previewOf(full) {
+		t.Fatalf("preview=%v", rec["preview"])
+	}
+}

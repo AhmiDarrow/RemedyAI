@@ -697,12 +697,18 @@ fn parse_messages(v: &serde_json::Value) -> Vec<ChatMessage> {
                 .and_then(|t| t.as_str())
                 .unwrap_or("")
                 .to_string();
+            let request_id = row
+                .get("request_id")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string();
             Some(ChatMessage {
                 created_at,
                 steps,
                 thinking,
                 user_reaction,
                 agent_reaction,
+                request_id,
                 ..ChatMessage::plain(id, role, content)
             })
         })
