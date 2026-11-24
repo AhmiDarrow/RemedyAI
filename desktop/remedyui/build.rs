@@ -1,9 +1,10 @@
-// On Windows, stamp the 0.70.5 multi-size icon.ico into the exe resource
-// and request elevation (requireAdministrator), matching 0.70.5's start
-// as admin. The NSIS installer stays per-user (`RequestExecutionLevel user`)
-// so silent upgrades of %LOCALAPPDATA% still work; the app itself then
-// elevates when launched. Other hosts ignore this; the tray image is set
-// in src/lib.rs from tray-icon.png.
+// On Windows, stamp the 0.70.5 multi-size icon.ico into the exe resource.
+// The exe manifest is asInvoker: running elevated blocked Win+Shift+S and
+// other system shortcuts via UIPI while the app had focus (Snipping Tool
+// only worked after clicking out). The NSIS installer stays per-user
+// (`RequestExecutionLevel user`) so silent upgrades of %LOCALAPPDATA%
+// still work. Other hosts ignore this; the tray image is set in src/lib.rs
+// from tray-icon.png.
 
 fn main() {
     let ico = std::path::Path::new("../../src-tauri/icons/icon.ico");
@@ -26,7 +27,7 @@ fn main() {
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
-        <requestedExecutionLevel level="requireAdministrator" uiAccess="false"/>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
       </requestedPrivileges>
     </security>
   </trustInfo>
@@ -35,6 +36,6 @@ fn main() {
             );
         }
         res.compile()
-            .expect("embed Windows icon and elevation manifest");
+            .expect("embed Windows icon and manifest");
     }
 }
