@@ -815,7 +815,7 @@ pub fn list_models_for(
     client: &Client,
     provider: Option<&str>,
     base_url: Option<&str>,
-    done: impl FnOnce(Result<Vec<crate::model_picker::ModelChoice>, String>) + Send + 'static,
+    done: impl FnOnce(Result<crate::model_picker::ModelsPage, String>) + Send + 'static,
 ) {
     let http = client.http.clone();
     let path = match provider {
@@ -832,7 +832,7 @@ pub fn list_models_for(
                 .send_blocking(Request::get(&path), &cancel)
                 .map_err(|e| e.to_string())
                 .and_then(|r| r.json::<serde_json::Value>().map_err(|e| e.to_string()))
-                .map(|v| crate::model_picker::parse_model_rows(Some(&v)));
+                .map(|v| crate::model_picker::parse_models_page(&v));
             done(out);
         })
         .ok();

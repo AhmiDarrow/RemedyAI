@@ -131,19 +131,14 @@ func tryLiveModel(home string, cfg ConfigMap, provider, model, baseURL string) c
 	if !ok {
 		meta = providerCatalog[prov]
 	}
-	// Hidden-URL providers always use the catalog endpoint, even if config
-	// still holds a leftover llm_base_url (e.g. OpenRouter after a switch
-	// to Anthropic). Typable providers keep a caller- or catalog-supplied URL.
-	if providerShowsBaseURL(prov) {
-		if rawURL != "" {
-			urlOut = rawURL
-		} else if catalogURL := strings.TrimSpace(meta.BaseURL); catalogURL != "" {
+	// Hidden-URL providers drop a leftover catalog URL from another provider
+	// and otherwise use the catalog endpoint. Typable providers keep a
+	// caller- or catalog-supplied URL (including a test/mock endpoint).
+	urlOut = effectiveBaseURL(prov, rawURL)
+	if providerShowsBaseURL(prov) && rawURL == "" {
+		if catalogURL := strings.TrimSpace(meta.BaseURL); catalogURL != "" {
 			urlOut = catalogURL
 		}
-	} else if catalogURL := strings.TrimSpace(meta.BaseURL); catalogURL != "" {
-		urlOut = catalogURL
-	} else {
-		urlOut = effectiveBaseURL(prov, rawURL)
 	}
 	if rawModel != "" {
 		modelID = rawModel

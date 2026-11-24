@@ -38,6 +38,8 @@ pub struct ProviderChoice {
     pub base_url: String,
     pub connected: bool,
     pub enabled: bool,
+    /// Empty when the last `/api/models` fetch succeeded or has not run.
+    pub list_error: String,
 }
 
 /// Fetch state for the picker, so the bar can show loading and errors
@@ -72,6 +74,8 @@ pub struct MenuGroup {
     pub name: String,
     pub current: bool,
     pub models: Vec<(String, String, bool)>, // id, label, selected
+    /// Shown in an empty submenu when live listing failed.
+    pub list_error: String,
 }
 
 impl PickerStatus {
@@ -122,6 +126,7 @@ pub fn plan(studio: &Studio) -> MenuPlan {
                             (id.clone(), id, on)
                         })
                         .collect(),
+                    list_error: String::new(),
                 });
             }
         }
@@ -150,6 +155,7 @@ pub fn plan(studio: &Studio) -> MenuPlan {
                 name: p.name.clone(),
                 current,
                 models,
+                list_error: p.list_error.clone(),
             }
         })
         .collect();
@@ -353,19 +359,6 @@ pub fn parse_connected(v: &Value) -> ConnectedList {
         .unwrap_or("")
         .trim()
         .to_string();
-    if !active_model.is_empty() {
-        if let Some(p) = providers.iter_mut().find(|p| p.id == active_provider) {
-            if !p.models.iter().any(|m| m.id == active_model) {
-                p.models.insert(
-                    0,
-                    ModelChoice {
-                        id: active_model.clone(),
-                        name: active_model.clone(),
-                    },
-                );
-            }
-        }
-    }
     ConnectedList {
         providers,
         active_provider,
@@ -397,13 +390,6 @@ fn parse_provider(v: &Value) -> Option<ProviderChoice> {
         .unwrap_or("")
         .trim()
         .to_string();
-    let mut models = models;
-    if models.is_empty() && !last_model.is_empty() && last_model != "default" {
-        models.push(ModelChoice {
-            id: last_model.clone(),
-            name: last_model.clone(),
-        });
-    }
     Some(ProviderChoice {
         id,
         name,
@@ -412,6 +398,7 @@ fn parse_provider(v: &Value) -> Option<ProviderChoice> {
         base_url,
         connected: v.get("connected").and_then(|x| x.as_bool()).unwrap_or(false),
         enabled: v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true),
+        list_error: String::new(),
     })
 }
 
@@ -441,6 +428,12 @@ pub fn parse_model_rows(v: Option<&Value>) -> Vec<ModelChoice> {
         };
         if id.is_empty() || !seen.insert(id.clone()) {
             continue;
+        }
+        // Live endpoint rows only. Catalog/config rows are fallbacks the
+        // port must not present as if the provider offered them.
+        match m.get("source").and_then(|s| s.as_str()) {
+            Some("catalog") | Some("config") => continue,
+            _ => {}
         }
         let name = m
             .get("name")
@@ -485,21 +478,65 @@ fn pick_model_for(p: &ProviderChoice, preferred: &str) -> String {
         .unwrap_or_else(|| p.last_model.clone())
 }
 
-/// Merge a live `/api/models` list into one provider row, keeping last_model.
+/// Replace a provider row's model list with the live `/api/models` result.
+/// An empty live list stays empty — the current id lives in the free-text
+/// field, never as a fake picker row.
 pub fn merge_models(p: &mut ProviderChoice, live: Vec<ModelChoice>) {
-    if live.is_empty() {
-        return;
-    }
     p.models = live;
-    if !p.last_model.is_empty() && !p.models.iter().any(|m| m.id == p.last_model) {
-        p.models.insert(
-            0,
-            ModelChoice {
-                id: p.last_model.clone(),
-                name: p.last_model.clone(),
-            },
-        );
+}
+
+/// Human hint for a `/api/models` discovery payload, matching the old desktop.
+pub fn discovery_hint(discovery: Option<&Value>, endpoint_count: usize) -> String {
+    let Some(d) = discovery else {
+        return String::new();
+    };
+    if !d.get("attempted").and_then(|x| x.as_bool()).unwrap_or(false) {
+        return String::new();
     }
+    if d.get("ok").and_then(|x| x.as_bool()).unwrap_or(false) {
+        let n = endpoint_count;
+        let cached = if d.get("cached").and_then(|x| x.as_bool()).unwrap_or(false) {
+            " (cached)"
+        } else {
+            ""
+        };
+        let noun = if n == 1 { "model" } else { "models" };
+        return format!("{n} {noun} from endpoint{cached}");
+    }
+    let why = d
+        .get("error")
+        .and_then(|x| x.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            d.get("status")
+                .and_then(|s| s.as_i64())
+                .map(|s| format!("HTTP {s}"))
+        })
+        .unwrap_or_else(|| "no response".into());
+    let url = d
+        .get("url")
+        .and_then(|x| x.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("endpoint");
+    format!(
+        "Couldn't list models from {url}: {why}. Models come from the provider — check the key or connection."
+    )
+}
+
+/// Parsed `GET /api/models` body: live rows plus the discovery hint.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ModelsPage {
+    pub models: Vec<ModelChoice>,
+    pub hint: String,
+}
+
+pub fn parse_models_page(v: &Value) -> ModelsPage {
+    let models = parse_model_rows(Some(v));
+    let hint = discovery_hint(v.get("discovery"), models.len());
+    ModelsPage { models, hint }
 }
 
 /// Loads connected providers and the active model into `studio`.
@@ -576,17 +613,35 @@ fn refresh_models_for(
     runtime::list_models_for(client, Some(&pid), Some(&url), move |out| {
         let studio = studio.clone();
         let _ = wake.post(move || {
-            let Ok(live) = out else { return };
-            if live.is_empty() {
-                return;
-            }
+            let page = match out {
+                Ok(page) => page,
+                Err(e) => ModelsPage {
+                    models: Vec::new(),
+                    hint: if e.is_empty() {
+                        "Couldn't list models from the provider — check the key or connection."
+                            .into()
+                    } else {
+                        e
+                    },
+                },
+            };
             let mut rows = studio.providers.get();
             if let Some(p) = rows.iter_mut().find(|p| p.id == provider) {
-                merge_models(p, live);
+                merge_models(p, page.models);
+                p.list_error = page.hint.clone();
                 if p.id == studio.provider.get() {
                     studio
                         .models
                         .set(p.models.iter().map(|m| m.id.clone()).collect());
+                    if !page.hint.is_empty() && p.models.is_empty() {
+                        studio.picker_status.set(PickerStatus::Error(page.hint));
+                    } else if p.models.is_empty() && matches!(studio.picker_status.get(), PickerStatus::Error(_)) {
+                        // leave the error; a later success clears below
+                    } else if !p.models.is_empty() {
+                        if let PickerStatus::Error(_) = studio.picker_status.get() {
+                            studio.picker_status.set(PickerStatus::Ready);
+                        }
+                    }
                 }
             }
             studio.providers.set(rows);
@@ -827,10 +882,15 @@ fn menu_items(studio: &Studio) -> Vec<MenuItem> {
             g.name.clone()
         };
         if g.models.is_empty() {
+            let empty = if g.list_error.is_empty() {
+                "Couldn't list models from the provider — check the key or connection.".into()
+            } else {
+                g.list_error.clone()
+            };
             items.push(
                 MenuItem::submenu(
                     title,
-                    vec![MenuItem::new("No models yet", || {}).disabled(true)],
+                    vec![MenuItem::new(empty, || {}).disabled(true)],
                 ),
             );
             continue;
@@ -1000,6 +1060,7 @@ mod tests {
             base_url: "https://api.anthropic.com/v1".into(),
             connected: true,
             enabled: true,
+            list_error: String::new(),
         }]);
         s.provider.set("anthropic".into());
         s.model.set(long.into());
@@ -1078,6 +1139,7 @@ mod tests {
             base_url: "https://openrouter.ai/api/v1".into(),
             connected: true,
             enabled: true,
+            list_error: String::new(),
         };
         assert_eq!(pick_model_for(&p, "a"), "a");
         assert_eq!(pick_model_for(&p, "missing"), "b");
@@ -1110,7 +1172,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_connected_seeds_last_and_active_models_when_live_list_is_empty() {
+    fn parse_connected_does_not_invent_a_list_from_last_or_active_model() {
         let v = json!({
             "picker": [{
                 "id": "anthropic",
@@ -1127,14 +1189,61 @@ mod tests {
         let list = parse_connected(&v);
         assert_eq!(list.providers.len(), 1);
         assert_eq!(list.providers[0].base_url, "https://api.anthropic.com/v1");
-        let ids: Vec<&str> = list.providers[0].models.iter().map(|m| m.id.as_str()).collect();
-        assert_eq!(
-            ids,
-            vec![
-                "anthropic/thinkingmachines/inkling-2-mini[1m]",
-                "claude-haiku-4-5-20251001",
-            ]
+        assert!(
+            list.providers[0].models.is_empty(),
+            "an empty endpoint list must stay empty, got {:?}",
+            list.providers[0].models
         );
+        assert_eq!(list.active_model, "anthropic/thinkingmachines/inkling-2-mini[1m]");
+        assert_eq!(list.providers[0].last_model, "claude-haiku-4-5-20251001");
+    }
+
+    #[test]
+    fn parse_model_rows_keeps_endpoint_rows_and_drops_catalog_or_config() {
+        let v = json!({
+            "models": [
+                {"id": "claude-haiku-4-5-20251001", "name": "Haiku", "source": "endpoint"},
+                {"id": "baked-in", "source": "catalog"},
+                {"id": "anthropic/thinkingmachines/inkling-2-mini[1m]", "source": "config"},
+                "plain-id"
+            ]
+        });
+        let ids: Vec<String> = parse_model_rows(Some(&v)).into_iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec!["claude-haiku-4-5-20251001".to_string(), "plain-id".to_string()]);
+    }
+
+    #[test]
+    fn discovery_hint_matches_the_old_desktop() {
+        let ok = json!({"attempted": true, "ok": true, "cached": false});
+        assert_eq!(discovery_hint(Some(&ok), 3), "3 models from endpoint");
+        let err = json!({
+            "attempted": true,
+            "ok": false,
+            "error": "unauthorized",
+            "url": "https://api.anthropic.com/v1/models"
+        });
+        assert_eq!(
+            discovery_hint(Some(&err), 0),
+            "Couldn't list models from https://api.anthropic.com/v1/models: unauthorized. Models come from the provider — check the key or connection."
+        );
+    }
+
+    #[test]
+    fn merge_models_replaces_the_list_and_does_not_inject_last_model() {
+        let mut p = ProviderChoice {
+            id: "anthropic".into(),
+            name: "Anthropic".into(),
+            models: vec![ModelChoice { id: "stale".into(), name: "stale".into() }],
+            last_model: "anthropic/thinkingmachines/inkling-2-mini[1m]".into(),
+            base_url: "https://api.anthropic.com/v1".into(),
+            connected: true,
+            enabled: true,
+            list_error: String::new(),
+        };
+        merge_models(&mut p, vec![ModelChoice { id: "claude-haiku-4-5-20251001".into(), name: "Haiku".into() }]);
+        assert_eq!(p.models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), vec!["claude-haiku-4-5-20251001"]);
+        merge_models(&mut p, Vec::new());
+        assert!(p.models.is_empty());
     }
 
 }
