@@ -3,7 +3,7 @@
 //! Each opens once per generation so a binding does not stack a new modal every frame.
 
 use super::logic::concurrent_turn_message;
-use super::{continue_pending, delete_skill, project_confirm_body, remove_project, Confirm};
+use super::{archive_unused_skills, continue_pending, delete_skill, project_confirm_body, remove_project, Confirm};
 use crate::messages;
 use crate::studio::Studio;
 use remedy_ui::image::decode;
@@ -64,6 +64,11 @@ fn open_confirm(ui: &Ui, studio: &Studio, confirm: Confirm) {
             format!("{} {name}", messages().text(ui, "confirm-delete-skill")),
             messages().text(ui, "skill-delete"),
         ),
+        Confirm::ArchiveUnusedSkills => (
+            messages().text(ui, "skills-archive-unused"),
+            messages().text(ui, "skills-archive-unused-body"),
+            messages().text(ui, "skills-archive-unused"),
+        ),
     };
     let st_yes = studio.clone();
     let st_no = studio.clone();
@@ -79,6 +84,7 @@ fn open_confirm(ui: &Ui, studio: &Studio, confirm: Confirm) {
             w::DialogButton::new(danger, "danger_solid", move || match &confirm_yes {
                 Confirm::RemoveProject(path) => remove_project(&st_yes, path),
                 Confirm::DeleteSkill(name) => delete_skill(&st_yes, name),
+                Confirm::ArchiveUnusedSkills => archive_unused_skills(&st_yes),
             }),
         ],
     );

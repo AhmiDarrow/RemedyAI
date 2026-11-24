@@ -1206,6 +1206,64 @@ pub fn next_presence_poll_ms(others: usize, error: bool) -> u64 {
     }
 }
 
+pub fn archive_unused_notice(count: u64, error: Option<&str>) -> String {
+    if let Some(err) = error {
+        return err.to_string();
+    }
+    if count == 0 {
+        "No unused skills to archive".into()
+    } else {
+        format!("Archived {count} skill(s)")
+    }
+}
+
+pub fn import_pack_notice(imported: u64, names: &[String]) -> String {
+    if imported == 0 {
+        "Imported 0 skills".into()
+    } else if names.is_empty() {
+        format!("Imported {imported} skill(s) in quarantine")
+    } else {
+        format!(
+            "Imported {imported} skill(s) in quarantine: {}",
+            names.join(", ")
+        )
+    }
+}
+
+pub fn parse_import_pack(v: &serde_json::Value) -> (u64, Vec<String>) {
+    let imported = v
+        .get("imported")
+        .and_then(|n| n.as_u64())
+        .unwrap_or(0);
+    let names = v
+        .get("names")
+        .and_then(|n| n.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    (imported, names)
+}
+
+pub fn parse_archive_count(v: &serde_json::Value) -> u64 {
+    v.get("count").and_then(|n| n.as_u64()).unwrap_or(0)
+}
+
+pub fn attachment_filename(disposition: Option<&str>, fallback: &str) -> String {
+    if let Some(cd) = disposition {
+        if let Some(rest) = cd.split("filename=").nth(1) {
+            let name = rest.trim().trim_matches('"').split(';').next().unwrap_or("").trim();
+            if !name.is_empty() {
+                return name.to_string();
+            }
+        }
+    }
+    fallback.to_string()
+}
+
+
 /// Event names from `GET /api/events/sessions` that should refresh the sidebar.
 pub fn is_session_sync_event(kind: &str) -> bool {
     matches!(
@@ -1402,6 +1460,25 @@ mod tests {
         assert_eq!(next_presence_poll_ms(0, true), PRESENCE_POLL_ERROR_MS);
         let two = vec![others[0].clone(), others[0].clone()];
         assert_eq!(sibling_chip_label(&two), "2 other sessions working");
+    }
+
+    #[test]
+    fn skills_pack_notices_cover_export_import_and_archive() {
+        assert_eq!(archive_unused_notice(0, None), "No unused skills to archive");
+        assert_eq!(archive_unused_notice(2, None), "Archived 2 skill(s)");
+        assert_eq!(archive_unused_notice(0, Some("no runtime")), "no runtime");
+        let (n, names) = parse_import_pack(&serde_json::json!({
+            "imported": 2,
+            "names": ["alpha", "beta"],
+            "quarantine": true
+        }));
+        assert_eq!(n, 2);
+        assert_eq!(import_pack_notice(n, &names), "Imported 2 skill(s) in quarantine: alpha, beta");
+        assert_eq!(parse_archive_count(&serde_json::json!({"count": 3})), 3);
+        assert_eq!(
+            attachment_filename(Some("attachment; filename=\"remedy-skills-pack.zip\""), "fallback.zip"),
+            "remedy-skills-pack.zip"
+        );
     }
 
     fn message_copy_prefers_the_body_then_falls_back_to_beats() {
