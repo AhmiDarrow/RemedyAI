@@ -810,15 +810,18 @@ pub fn list_connected_providers(
         .ok();
 }
 
-/// GET `/api/models` or `/api/models?provider=`.
+/// GET `/api/models` or `/api/models?provider=` (optional catalog `base_url`).
 pub fn list_models_for(
     client: &Client,
     provider: Option<&str>,
+    base_url: Option<&str>,
     done: impl FnOnce(Result<Vec<crate::model_picker::ModelChoice>, String>) + Send + 'static,
 ) {
     let http = client.http.clone();
     let path = match provider {
-        Some(p) if !p.is_empty() => format!("models?provider={}", encode_query(p)),
+        Some(p) if !p.is_empty() => {
+            crate::setup::model::models_request_path(p, base_url.unwrap_or(""))
+        }
         _ => "models".into(),
     };
     std::thread::Builder::new()

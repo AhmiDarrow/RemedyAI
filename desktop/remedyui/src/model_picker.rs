@@ -35,6 +35,7 @@ pub struct ProviderChoice {
     pub name: String,
     pub models: Vec<ModelChoice>,
     pub last_model: String,
+    pub base_url: String,
     pub connected: bool,
     pub enabled: bool,
 }
@@ -340,20 +341,35 @@ pub fn parse_connected(v: &Value) -> ConnectedList {
             providers = eligible;
         }
     }
+    let active_provider = v
+        .get("active_provider")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let active_model = v
+        .get("active_model")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if !active_model.is_empty() {
+        if let Some(p) = providers.iter_mut().find(|p| p.id == active_provider) {
+            if !p.models.iter().any(|m| m.id == active_model) {
+                p.models.insert(
+                    0,
+                    ModelChoice {
+                        id: active_model.clone(),
+                        name: active_model.clone(),
+                    },
+                );
+            }
+        }
+    }
     ConnectedList {
         providers,
-        active_provider: v
-            .get("active_provider")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string(),
-        active_model: v
-            .get("active_model")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string(),
+        active_provider,
+        active_model,
     }
 }
 
@@ -375,11 +391,25 @@ fn parse_provider(v: &Value) -> Option<ProviderChoice> {
         .unwrap_or("")
         .trim()
         .to_string();
+    let base_url = v
+        .get("base_url")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let mut models = models;
+    if models.is_empty() && !last_model.is_empty() && last_model != "default" {
+        models.push(ModelChoice {
+            id: last_model.clone(),
+            name: last_model.clone(),
+        });
+    }
     Some(ProviderChoice {
         id,
         name,
         models,
         last_model,
+        base_url,
         connected: v.get("connected").and_then(|x| x.as_bool()).unwrap_or(false),
         enabled: v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true),
     })
@@ -505,11 +535,17 @@ pub fn refresh(studio: &Studio, client: &Client) {
                     }
                     studio.picker_status.set(PickerStatus::Ready);
                     // Fill live model lists for each picker row (active first).
-                    let mut ids: Vec<String> = list.providers.iter().map(|p| p.id.clone()).collect();
+                    // Pin each request to that provider's catalog URL so a leftover
+                    // active URL (OpenRouter saved under Anthropic) cannot leak.
+                    let mut rows: Vec<(String, String)> = list
+                        .providers
+                        .iter()
+                        .map(|p| (p.id.clone(), p.base_url.clone()))
+                        .collect();
                     let active = studio.provider.get();
-                    ids.sort_by_key(|id| if *id == active { 0 } else { 1 });
-                    for id in ids.into_iter().take(8) {
-                        refresh_models_for(&studio, &client, &wake2, id);
+                    rows.sort_by_key(|(id, _)| if *id == active { 0 } else { 1 });
+                    for (id, url) in rows {
+                        refresh_models_for(&studio, &client, &wake2, id, url);
                     }
                 }
                 Err(e) => {
@@ -531,11 +567,13 @@ fn refresh_models_for(
     client: &Client,
     wake: &Waker,
     provider: String,
+    catalog_url: String,
 ) {
     let studio = studio.clone();
     let wake = wake.clone();
     let pid = provider.clone();
-    runtime::list_models_for(client, Some(&pid), move |out| {
+    let url = crate::setup::model::discovery_url(&pid, "", &catalog_url);
+    runtime::list_models_for(client, Some(&pid), Some(&url), move |out| {
         let studio = studio.clone();
         let _ = wake.post(move || {
             let Ok(live) = out else { return };
@@ -959,6 +997,7 @@ mod tests {
             name: "Anthropic".into(),
             models: vec![ModelChoice { id: long.into(), name: long.into() }],
             last_model: long.into(),
+            base_url: "https://api.anthropic.com/v1".into(),
             connected: true,
             enabled: true,
         }]);
@@ -1036,6 +1075,7 @@ mod tests {
                 ModelChoice { id: "b".into(), name: "B".into() },
             ],
             last_model: "b".into(),
+            base_url: "https://openrouter.ai/api/v1".into(),
             connected: true,
             enabled: true,
         };
@@ -1058,4 +1098,43 @@ mod tests {
         assert_eq!(s.model.get(), "llama3.2");
         assert_eq!(s.models.get(), vec!["llama3.2".to_string()]);
     }
+
+    #[test]
+    fn anthropic_lists_against_its_catalog_url_not_a_leftover_openrouter_url() {
+        let leftover = "https://openrouter.ai/api/v1";
+        let anthropic = "https://api.anthropic.com/v1";
+        let url = crate::setup::model::discovery_url("anthropic", leftover, anthropic);
+        let path = crate::setup::model::models_request_path("anthropic", &url);
+        assert!(path.contains("api.anthropic.com"), "{path}");
+        assert!(!path.contains("openrouter"), "{path}");
+    }
+
+    #[test]
+    fn parse_connected_seeds_last_and_active_models_when_live_list_is_empty() {
+        let v = json!({
+            "picker": [{
+                "id": "anthropic",
+                "name": "Anthropic",
+                "base_url": "https://api.anthropic.com/v1",
+                "models": [],
+                "last_model": "claude-haiku-4-5-20251001",
+                "connected": true,
+                "enabled": true
+            }],
+            "active_provider": "anthropic",
+            "active_model": "anthropic/thinkingmachines/inkling-2-mini[1m]"
+        });
+        let list = parse_connected(&v);
+        assert_eq!(list.providers.len(), 1);
+        assert_eq!(list.providers[0].base_url, "https://api.anthropic.com/v1");
+        let ids: Vec<&str> = list.providers[0].models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "anthropic/thinkingmachines/inkling-2-mini[1m]",
+                "claude-haiku-4-5-20251001",
+            ]
+        );
+    }
+
 }

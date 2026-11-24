@@ -572,15 +572,28 @@ impl Settings {
         if pid.is_empty() {
             return;
         }
-        let q = format!("models?provider={pid}");
+        let form_url = self.base_url.get();
+        let catalog_url = self
+            .catalog
+            .get()
+            .iter()
+            .find(|p| p.id == pid)
+            .map(|p| p.base_url.clone())
+            .unwrap_or_default();
+        let url = crate::setup::model::discovery_url(&pid, &form_url, &catalog_url);
+        let q = crate::setup::model::models_request_path(&pid, &url);
         http::request(self, "GET", q, None, move |out| {
             match out {
                 Ok(v) => {
-                    let rows = v.get("models").and_then(|x| x.as_array()).cloned().unwrap_or_default();
-                    let names: Vec<String> = rows.iter().filter_map(|m| m.get("id").and_then(|x| x.as_str()).map(|s| s.to_string())).collect();
-                    if !names.is_empty() {
-                        self.models.set(names);
+                    let mut names: Vec<String> = crate::model_picker::parse_model_rows(Some(&v))
+                        .into_iter()
+                        .map(|m| m.id)
+                        .collect();
+                    let current = self.model.get();
+                    if !current.is_empty() && !names.iter().any(|m| m == &current) {
+                        names.insert(0, current);
                     }
+                    self.models.set(names);
                     let hint = v.get("discovery").and_then(|d| d.get("message").or_else(|| d.get("error"))).and_then(|x| x.as_str()).unwrap_or("").to_string();
                     self.discovery.set(hint);
                 }
