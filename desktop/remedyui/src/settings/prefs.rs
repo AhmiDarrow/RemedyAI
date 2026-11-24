@@ -41,6 +41,7 @@ pub fn host() -> Option<App> {
 /// Reads `[appearance]` and the font roles. Missing keys keep today's defaults.
 pub fn load_into(s: Settings) {
     let text = fs::read_to_string(fonts::config_path()).unwrap_or_default();
+    let mut imported = false;
     let fonts = Fonts::from_toml(&text);
     s.font_ui.set(logic::face_for_family(&fonts.ui));
     s.font_code.set(logic::face_for_family(&fonts.code));
@@ -58,6 +59,11 @@ pub fn load_into(s: Settings) {
     if let Some(v) = logic::table_string(&text, "appearance", "theme") {
         if !v.is_empty() {
             s.theme_id.set(v);
+        }
+    } else if !s.preview {
+        if let Some(v) = crate::theme_import::from_webview() {
+            s.theme_id.set(v);
+            imported = true;
         }
     }
     if let Some(v) = logic::table_string(&text, "appearance", "density") {
@@ -97,6 +103,9 @@ pub fn load_into(s: Settings) {
     }
     if let Some(v) = logic::table_bool(&text, "appearance", "skip_quit_warn") {
         s.skip_quit_warn.set(v);
+    }
+    if imported {
+        persist(s);
     }
 }
 
