@@ -1,11 +1,11 @@
 //! Session list: New session, search, chips, project tree, row actions.
 
 use crate::depth::logic::{
-    PINNED_GROUP_KEY, ordered_groups, session_delete_body, should_show_busy_badge,
+    self, PINNED_GROUP_KEY, ordered_groups, session_delete_body, should_show_busy_badge,
 };
 use crate::depth::{
-    ask_remove_project, assign_project, export_active, import_session, move_project_order,
-    move_session_order, place_session, rename_session,
+    ask_remove_project, assign_project, bulk_assign_project, export_active, import_session,
+    move_project_order, move_session_order, place_session, rename_session,
 };
 use crate::studio::{Filter, Project, Session, Studio};
 use crate::time;
@@ -14,7 +14,7 @@ use crate::{Glyph, ROW_ACTIONS, ROW_GLYPH, ROW_TOOL, SELECT_MARK, messages, tool
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::host::{DragData, DropEffect};
-use remedy_ui::input::Key;
+use remedy_ui::input::{Key, PointerPhase};
 use remedy_ui::layout::{Align, Justify, Length};
 use remedy_ui::reactive::Signal;
 use remedy_ui::style::StylePatch;
@@ -66,6 +66,7 @@ fn chrome(ui: &Ui, studio: Studio) -> El {
         })
         .child(filter_row(ui, studio.clone()))
         .child(session_options(ui, studio.clone()))
+        .child(selection_bar(ui, studio.clone()))
         .child(add_project(ui, studio))
 }
 
@@ -272,6 +273,162 @@ fn disclosure_button(
     })
 }
 
+fn selecting(studio: &Studio) -> bool {
+    studio.select_mode.get() || !studio.selected_ids.get().is_empty()
+}
+
+fn visible_ids(studio: &Studio) -> Vec<String> {
+    logic::visible_session_ids(
+        &studio.sessions.get(),
+        &studio.projects.get(),
+        studio.filter.get(),
+        &studio.query.get(),
+        &studio.depth.project_order.get(),
+        &studio.depth.session_order.get(),
+    )
+}
+
+fn toggle_select_mode(studio: &Studio) {
+    if studio.select_mode.get() {
+        studio.select_mode.set(false);
+        studio.selected_ids.set(Vec::new());
+        studio.select_anchor.set(None);
+    } else {
+        studio.select_mode.set(true);
+    }
+}
+
+fn select_visible(studio: &Studio) {
+    let ids = visible_ids(studio);
+    studio.select_mode.set(true);
+    studio.selected_ids.set(ids);
+}
+
+fn apply_toggle(studio: &Studio, id: &str, shift: bool) {
+    if shift {
+        let range = logic::selected_id_range(
+            &visible_ids(studio),
+            studio.select_anchor.get().as_deref(),
+            id,
+        );
+        studio.selected_ids.set(range);
+    } else {
+        studio
+            .selected_ids
+            .set(logic::toggle_selected_id(&studio.selected_ids.get(), id));
+        studio.select_anchor.set(Some(id.to_string()));
+    }
+}
+
+fn clear_selection(studio: &Studio) {
+    studio.selected_ids.set(Vec::new());
+    studio.select_anchor.set(None);
+}
+
+fn confirm_delete_selected(ui: &Ui, studio: &Studio) {
+    let ids = studio.selected_ids.get();
+    if ids.is_empty() {
+        return;
+    }
+    let n = ids.len();
+    let title = logic::delete_selected_title(n);
+    let confirm = logic::delete_selected_confirm_label(n);
+    let cancel = messages().text(ui, "cancel");
+    let st = studio.clone();
+    w::dialog(
+        ui,
+        title,
+        session_delete_body(),
+        vec![
+            w::DialogButton::new(cancel, "quiet", || {}),
+            w::DialogButton::new(confirm, "danger_solid", move || {
+                for id in &ids {
+                    st.close(id);
+                }
+                clear_selection(&st);
+            }),
+        ],
+    );
+}
+
+fn selection_bar(ui: &Ui, studio: Studio) -> El {
+    let unit = ui.theme().spacing.unit;
+    let colors = ui.theme().colors.clone();
+    let st_when = studio.clone();
+    let u = ui.clone();
+    show(ui, move || selecting(&st_when), move || {
+        let st = studio.clone();
+        let mut row = w::row(&u)
+            .align(Align::Center)
+            .gap(unit)
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.wrap = true;
+                l.min_width = Length::Px(0.0);
+            })
+            .style(StylePatch::new().foreground(colors.text))
+            .child(
+                w::text(&u, "")
+                    .text({
+                        let st = st.clone();
+                        move || format!("{} selected", st.selected_ids.get().len())
+                    })
+                    .nowrap()
+                    .style(tokens::typo(tokens::META).weight(600.0)),
+            );
+        let st_none = st.clone();
+        let u_none = u.clone();
+        row = row.child(
+            w::button(
+                &u,
+                move || format!("→ {}", messages().text(&u_none, "no-project")),
+                move || bulk_assign_project(&st_none, &st_none.selected_ids.get(), None),
+            )
+            .variant("quiet"),
+        );
+        for project in st
+            .projects
+            .get()
+            .into_iter()
+            .filter_map(|p| p.path)
+            .filter(|path| path != PINNED_GROUP_KEY)
+            .take(4)
+        {
+            let label = crate::studio::project_label(Some(&project));
+            let st_p = st.clone();
+            let path = project.clone();
+            row = row.child(
+                w::button(&u, format!("→ {label}"), move || {
+                    bulk_assign_project(&st_p, &st_p.selected_ids.get(), Some(path.clone()));
+                })
+                .variant("quiet"),
+            );
+        }
+        let st_del = st.clone();
+        let u_del = u.clone();
+        let u_dlg = u.clone();
+        row = row.child(
+            w::button(
+                &u,
+                move || messages().text(&u_del, "sidebar-delete-selected"),
+                move || confirm_delete_selected(&u_dlg, &st_del),
+            )
+            .variant("quiet"),
+        );
+        let st_clear = st.clone();
+        let u_clear = u.clone();
+        row.child(
+            w::button(
+                &u,
+                move || messages().text(&u_clear, "sidebar-clear-selection"),
+                move || clear_selection(&st_clear),
+            )
+            .variant("quiet"),
+        )
+    })
+    .el()
+}
+
 fn session_options(ui: &Ui, studio: Studio) -> El {
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
@@ -297,7 +454,11 @@ fn session_options(ui: &Ui, studio: Studio) -> El {
         move || {
             let u_in = u.clone();
             let u_ex = u.clone();
-            w::row(&u)
+            let u_sel = u.clone();
+            let u_vis = u.clone();
+            let st_sel = st.clone();
+            let st_vis = st.clone();
+            let import_export = w::row(&u)
                 .gap(unit)
                 .layout(|l| l.width = Length::Percent(1.0))
                 .child(
@@ -321,6 +482,40 @@ fn session_options(ui: &Ui, studio: Studio) -> El {
                         l.grow = 1.0;
                         l.basis = Length::Px(0.0);
                     }),
+                );
+            w::column(&u)
+                .gap(unit)
+                .layout(|l| l.width = Length::Percent(1.0))
+                .child(import_export)
+                .child(
+                    w::button(
+                        &u,
+                        move || {
+                            messages().text(
+                                &u_sel,
+                                if st_sel.select_mode.get() {
+                                    "sidebar-select-done"
+                                } else {
+                                    "sidebar-select"
+                                },
+                            )
+                        },
+                        {
+                            let st = st.clone();
+                            move || toggle_select_mode(&st)
+                        },
+                    )
+                    .variant("quiet")
+                    .layout(|l| l.width = Length::Percent(1.0)),
+                )
+                .child(
+                    w::button(
+                        &u,
+                        move || messages().text(&u_vis, "sidebar-select-visible"),
+                        move || select_visible(&st_vis),
+                    )
+                    .variant("quiet")
+                    .layout(|l| l.width = Length::Percent(1.0)),
                 )
         },
     )
@@ -732,9 +927,25 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
     };
     *folder_slot.borrow_mut() = Some(folder_btn.clone());
 
+    let check_id = id.clone();
+    let check_title = title.clone();
+    let check_studio = studio.clone();
+    let check_ui = ui.clone();
+    let st_when = studio.clone();
+    let checkbox = show(
+        ui,
+        move || selecting(&st_when),
+        move || select_checkbox(&check_ui, &check_studio, &check_id, &check_title),
+    )
+    .el();
+
     let studio_close = studio.clone();
     let close_id = id.clone();
 
+    let skip_click = std::rc::Rc::new(std::cell::Cell::new(false));
+    let row_toggle = studio.clone();
+    let row_id = id.clone();
+    let skip_ptr = skip_click.clone();
     let row = w::row(ui)
         .align(Align::Center)
         .gap(unit)
@@ -757,16 +968,35 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
             let colors = colors.clone();
             move || {
                 let selected = st.active.get().as_deref() == Some(sid.as_str());
+                let checked = st.selected_ids.get().iter().any(|s| s == &sid);
                 let mut p = StylePatch::new().radius(0.0);
                 if selected {
                     p = p.background(tokens::selected_fill(&colors));
+                } else if checked {
+                    p = p.background(colors.accent.with_alpha(0.12));
                 } else {
                     p = p.background(colors.panel.with_alpha(0.0));
                 }
                 p
             }
         })
-        .on_click(move || studio_sel.select(&sid))
+        .on_pointer(move |e| {
+            if e.phase == PointerPhase::Down && e.modifiers.shift {
+                skip_ptr.set(true);
+                apply_toggle(&row_toggle, &row_id, true);
+                return true;
+            }
+            false
+        })
+        .on_click({
+            let skip_click = skip_click.clone();
+            move || {
+                if skip_click.replace(false) {
+                    return;
+                }
+                studio_sel.select(&sid);
+            }
+        })
         .semantics(move || {
             Semantics::new(Role::Button)
                 .label(sem_title.clone())
@@ -796,6 +1026,7 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
                     l.shrink = 0.0;
                 }),
         )
+        .child(checkbox)
         .child(pin_btn)
         .child(text_col);
     let actions = w::row(ui)
@@ -856,6 +1087,76 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
         session_menu(&u_menu, &st_menu, &menu_id, menu_project.clone())
     })
     .keyboard_alternative(move || messages().text(&u_keys, "keyboard-reorder"))
+}
+
+fn select_checkbox(ui: &Ui, studio: &Studio, id: &str, title: &str) -> El {
+    let colors = ui.theme().colors.clone();
+    let label = format!("Select {title}");
+    let skip = std::rc::Rc::new(std::cell::Cell::new(false));
+    ui.el("button")
+        .layout(|l| {
+            l.width = Length::Px(16.0);
+            l.height = Length::Px(16.0);
+            l.min_width = Length::Px(16.0);
+            l.min_height = Length::Px(16.0);
+            l.shrink = 0.0;
+        })
+        .style({
+            let colors = colors.clone();
+            let st = studio.clone();
+            let sid = id.to_string();
+            move || {
+                let on = st.selected_ids.get().iter().any(|s| s == &sid);
+                let mut p = StylePatch::new().radius(3.0);
+                if on {
+                    p = p.background(colors.accent).foreground(colors.on_accent);
+                } else {
+                    p = p
+                        .background(colors.panel)
+                        .foreground(colors.muted)
+                        .border(colors.line.unwrap_or(colors.muted))
+                        .border_width(1.0);
+                }
+                p
+            }
+        })
+        .semantics({
+            let st = studio.clone();
+            let sid = id.to_string();
+            let label = label.clone();
+            move || {
+                Semantics::new(Role::Check)
+                    .label(label.clone())
+                    .selected(st.selected_ids.get().iter().any(|s| s == &sid))
+                    .action(Action::Click)
+            }
+        })
+        .on_pointer({
+            let st = studio.clone();
+            let sid = id.to_string();
+            let skip = skip.clone();
+            move |e| {
+                // Click is dispatched before pointer Up, so Shift+range
+                // has to run on Down and skip the later click.
+                if e.phase == PointerPhase::Down && e.modifiers.shift {
+                    skip.set(true);
+                    apply_toggle(&st, &sid, true);
+                    return true;
+                }
+                false
+            }
+        })
+        .on_click({
+            let st = studio.clone();
+            let sid = id.to_string();
+            let skip = skip.clone();
+            move || {
+                if skip.replace(false) {
+                    return;
+                }
+                apply_toggle(&st, &sid, false);
+            }
+        })
 }
 
 fn session_title(ui: &Ui, studio: &Studio, id: &str, title: &str) -> El {
