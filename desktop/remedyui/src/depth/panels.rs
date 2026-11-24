@@ -1,5 +1,6 @@
 //! Memory and Skills, opened from the chat header.
 
+use super::logic;
 use super::{
     ask_archive_unused, ask_delete_skill, export_skills_pack, import_skills_pack, install_named,
     load_skills, open_skill, save_skill, search_library, search_memory, trust_skill, SidePanel,
@@ -7,6 +8,7 @@ use super::{
 };
 use crate::messages;
 use crate::studio::Studio;
+use crate::tokens::{self, section_kicker};
 use remedy_ui::core::Insets;
 use remedy_ui::layout::{Align, Length};
 use remedy_ui::reactive::Signal;
@@ -118,15 +120,18 @@ pub(crate) fn skills_sheet(ui: &Ui, studio: Studio) -> El {
     let tab = studio.depth.panel_tab.clone();
     let st_in = studio.clone();
     let st_lib = studio.clone();
-    let u = ui.clone();
     let tabs = w::row(ui)
         .gap(unit)
-        .child(w::button(
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+            l.wrap = true;
+        })
+        .child(skill_mode_tab(
             ui,
-            {
-                let u = u.clone();
-                move || messages().text(&u, "skills-installed")
-            },
+            &studio,
+            "installed",
+            "skills-installed",
             {
                 let tab = tab.clone();
                 let st = st_in.clone();
@@ -135,18 +140,21 @@ pub(crate) fn skills_sheet(ui: &Ui, studio: Studio) -> El {
                     load_skills(&st);
                 }
             },
-        ).variant("quiet"))
-        .child(w::button(
+        ))
+        .child(skill_mode_tab(
             ui,
-            move || messages().text(&u, "skills-library"),
+            &studio,
+            "library",
+            "skills-library",
             {
                 let tab = tab.clone();
+                let st = st_lib;
                 move || {
                     tab.set("library".into());
-                    search_library(&st_lib, "");
+                    search_library(&st, "");
                 }
             },
-        ).variant("quiet"));
+        ));
     let u_in = ui.clone();
     let u_lib = ui.clone();
     let body = show(
@@ -189,13 +197,26 @@ fn skills(ui: &Ui, studio: Studio) -> El {
 
 fn installed(ui: &Ui, studio: Studio) -> El {
     let unit = ui.theme().spacing.unit;
-    let rows = studio.depth.skills.clone();
+    let visible: Signal<Vec<SkillRow>> = Signal::new(Vec::new());
+    let vis_out = visible.clone();
+    let st_filter = studio.clone();
+    let hook = ui.el("skills-visible").layout(|l| {
+        l.width = Length::Px(0.0);
+        l.height = Length::Px(0.0);
+    });
+    let _ = hook.clone().bind(move || {
+        let next = logic::filter_skills(
+            &st_filter.depth.skills.get(),
+            &st_filter.depth.skill_filter.get(),
+        );
+        let _ = vis_out.try_set(next);
+    });
     let list = w::column(ui).gap(2.0).layout(|l| l.width = Length::Percent(1.0));
     let u = ui.clone();
-    let list = w::for_each(&list, rows, |row: &SkillRow| row.name.clone(), {
+    let list = w::for_each(&list, visible, |row: &SkillRow| row.name.clone(), {
         let st = studio.clone();
         let u = u.clone();
-        move |row| skill_button(&u, st.clone(), row.name.clone(), row.description.clone(), false)
+        move |row| skill_button(&u, st.clone(), row.clone())
     });
     let notice_st = studio.clone();
     let editor = skill_editor(ui, studio.clone());
@@ -205,18 +226,219 @@ fn installed(ui: &Ui, studio: Studio) -> El {
             l.width = Length::Percent(1.0);
             l.grow = 1.0;
             l.basis = Length::Px(0.0);
+            l.min_width = Length::Px(0.0);
         })
+        .child(hook)
+        .child(skill_filters(ui, &studio))
         .child(pack_toolbar(ui, &studio))
         .child(w::text(ui, "").text(move || notice_st.depth.notice.get()).variant("muted"))
+        .child(skill_budget_block(ui, &studio))
         .child(
             w::scroll(ui)
                 .layout(|l| {
                     l.width = Length::Percent(1.0);
-                    l.max_height = Length::Px(180.0);
+                    l.min_width = Length::Px(0.0);
+                    l.max_height = Length::Px(220.0);
+                    l.grow = 1.0;
+                    l.basis = Length::Px(0.0);
                 })
                 .child(list),
         )
         .child(editor)
+}
+
+fn skill_mode_tab(
+    ui: &Ui,
+    studio: &Studio,
+    id: &'static str,
+    label: &'static str,
+    on_click: impl Fn() + 'static,
+) -> El {
+    let colors = ui.theme().colors.clone();
+    let st = studio.clone();
+    let u = ui.clone();
+    w::button(ui, move || messages().text(&u, label), on_click)
+        .variant("quiet")
+        .style(move || {
+            let on = if id == "library" {
+                st.depth.panel_tab.get() == "library"
+            } else {
+                st.depth.panel_tab.get() != "library"
+            };
+            if on {
+                StylePatch::new()
+                    .background(colors.accent)
+                    .foreground(colors.on_accent)
+            } else {
+                StylePatch::new()
+                    .background(colors.card)
+                    .foreground(colors.text)
+                    .border(colors.line.unwrap_or(colors.muted))
+                    .border_width(1.0)
+            }
+        })
+}
+
+fn skill_filters(ui: &Ui, studio: &Studio) -> El {
+    let unit = ui.theme().spacing.unit;
+    w::row(ui)
+        .gap(unit)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+            l.wrap = true;
+        })
+        .child(skill_filter_chip(ui, studio, logic::SKILL_FILTER_ALL, "skills-filter-all"))
+        .child(skill_filter_chip(ui, studio, logic::SKILL_FILTER_ACTIVE, "skills-filter-active"))
+        .child(skill_filter_chip(
+            ui,
+            studio,
+            logic::SKILL_FILTER_QUARANTINE,
+            "skills-filter-quarantine",
+        ))
+        .child(skill_filter_chip(ui, studio, logic::SKILL_FILTER_LEARNED, "skills-filter-learned"))
+        .child(skill_filter_chip(
+            ui,
+            studio,
+            logic::SKILL_FILTER_ARCHIVED,
+            "skills-filter-archived",
+        ))
+}
+
+fn skill_filter_chip(ui: &Ui, studio: &Studio, id: &'static str, label: &'static str) -> El {
+    let colors = ui.theme().colors.clone();
+    let st = studio.clone();
+    let st_click = studio.clone();
+    let u = ui.clone();
+    w::button(
+        ui,
+        move || messages().text(&u, label),
+        move || st_click.depth.skill_filter.set(id.to_string()),
+    )
+    .variant("quiet")
+    .style(move || {
+        if st.depth.skill_filter.get() == id {
+            StylePatch::new()
+                .background(colors.accent)
+                .foreground(colors.on_accent)
+        } else {
+            StylePatch::new()
+                .background(colors.card)
+                .foreground(colors.muted)
+                .border(colors.line.unwrap_or(colors.muted))
+                .border_width(1.0)
+        }
+    })
+}
+
+fn skill_budget_block(ui: &Ui, studio: &Studio) -> El {
+    let colors = ui.theme().colors.clone();
+    let depth = tokens::depth_for(&colors);
+    let unit = ui.theme().spacing.unit;
+    let line = colors.line.unwrap_or(colors.muted);
+    let st_show = studio.clone();
+    let st_banner = studio.clone();
+    let st_line = studio.clone();
+    let st_learn = studio.clone();
+    let st_ratio = studio.clone();
+    let u = ui.clone();
+    let earth = depth.earth;
+    let well = depth.well;
+    let banner_colors = colors.clone();
+    let body = w::column(ui)
+        .gap(unit)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .child(show(ui, {
+            let st = st_banner.clone();
+            move || !st.depth.skill_budget.get().banner.is_empty()
+        }, {
+            let st = st_banner;
+            let earth = earth;
+            let colors = banner_colors;
+            move || {
+                w::text(&u, "")
+                    .text(move || st.depth.skill_budget.get().banner)
+                    .style(
+                        StylePatch::new()
+                            .foreground(earth)
+                            .background(colors.card)
+                            .border(earth)
+                            .border_width(1.0),
+                    )
+                    .padding(Insets::all(unit * 2.0))
+                    .layout(|l| {
+                        l.width = Length::Percent(1.0);
+                        l.min_width = Length::Px(0.0);
+                    })
+            }
+        }))
+        .child(
+            w::column(ui)
+                .gap(unit)
+                .padding(Insets::all(unit * 2.5))
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                    l.wrap = true;
+                })
+                .style(
+                    StylePatch::new()
+                        .background(colors.card)
+                        .border(line)
+                        .border_width(1.0),
+                )
+                .child(
+                    w::text(ui, messages().text(ui, "skills-active-budget")).style(section_kicker(&colors)),
+                )
+                .child(w::text(ui, "").text(move || {
+                    logic::skill_budget_line(&st_line.depth.skill_budget.get())
+                }))
+                .child({
+                    let fill = ui
+                        .el("budget-fill")
+                        .style(StylePatch::new().background(earth))
+                        .layout({
+                            let st = st_ratio;
+                            move |l| {
+                                l.width = Length::Percent(logic::skill_budget_ratio(
+                                    &st.depth.skill_budget.get(),
+                                ));
+                                l.height = Length::Px(8.0);
+                                l.min_width = Length::Px(0.0);
+                            }
+                        });
+                    w::row(ui)
+                        .layout(|l| {
+                            l.width = Length::Percent(1.0);
+                            l.min_width = Length::Px(0.0);
+                            l.height = Length::Px(8.0);
+                        })
+                        .style(StylePatch::new().background(well).border(line).border_width(1.0))
+                        .child(fill)
+                })
+                .child(
+                    w::text(ui, "")
+                        .variant("muted")
+                        .text(move || logic::skill_learning_line(&st_learn.depth.skill_learning.get()))
+                        .layout(|l| {
+                            l.width = Length::Percent(1.0);
+                            l.min_width = Length::Px(0.0);
+                        }),
+                ),
+        );
+    show(
+        ui,
+        move || {
+            let budget = st_show.depth.skill_budget.get();
+            let learn = st_show.depth.skill_learning.get();
+            logic::show_skill_budget(&budget, &learn)
+        },
+        move || body.clone(),
+    )
+    .into()
 }
 
 fn pack_toolbar(ui: &Ui, studio: &Studio) -> El {
@@ -230,6 +452,7 @@ fn pack_toolbar(ui: &Ui, studio: &Studio) -> El {
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
+            l.wrap = true;
         })
         .child(w::button(ui, {
             let u = u.clone();
@@ -279,18 +502,64 @@ fn library(ui: &Ui, studio: Studio) -> El {
         .child(w::scroll(ui).layout(|l| l.grow = 1.0).child(list))
 }
 
-fn skill_button(ui: &Ui, studio: Studio, name: String, detail: String, _library: bool) -> El {
-    let label = if detail.is_empty() {
-        name.clone()
-    } else {
-        format!("{name}  {detail}")
+fn skill_button(ui: &Ui, studio: Studio, row: SkillRow) -> El {
+    let colors = ui.theme().colors.clone();
+    let depth = tokens::depth_for(&colors);
+    let tag = logic::skill_tag(&row);
+    let tag_color = match tag {
+        "archived" => colors.muted,
+        "quarantine" | "learned · probation" => depth.earth,
+        _ => colors.accent,
     };
-    let st = studio.clone();
-    let open = name.clone();
-    w::button(ui, label, move || open_skill(&st, &open))
-        .variant("quiet")
-        .layout(|l| l.width = Length::Percent(1.0))
+    let line = colors.line.unwrap_or(colors.muted);
+    let unit = ui.theme().spacing.unit;
+    let st = studio;
+    let open = row.name.clone();
+    let title = row.name.clone();
+    let detail = row.description;
+    w::row(ui)
+        .align(Align::Start)
+        .gap(unit * 2.0)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+            l.wrap = true;
+        })
+        .style(StylePatch::new().border(line).border_width(1.0))
+        .padding(Insets::all(unit * 2.0))
+        .child(
+            w::column(ui)
+                .gap(unit)
+                .layout(|l| {
+                    l.grow = 1.0;
+                    l.shrink = 1.0;
+                    l.min_width = Length::Px(0.0);
+                    l.basis = Length::Px(0.0);
+                })
+                .child(
+                    w::button(ui, title, move || open_skill(&st, &open))
+                        .variant("quiet")
+                        .layout(|l| {
+                            l.width = Length::Percent(1.0);
+                            l.min_width = Length::Px(0.0);
+                        }),
+                )
+                .child(
+                    w::text(ui, detail)
+                        .variant("muted")
+                        .layout(|l| {
+                            l.width = Length::Percent(1.0);
+                            l.min_width = Length::Px(0.0);
+                        }),
+                ),
+        )
+        .child(
+            w::text(ui, tag)
+                .style(StylePatch::new().foreground(tag_color).border(line).border_width(1.0))
+                .padding(Insets::symmetric(unit, unit * 1.5)),
+        )
 }
+
 
 fn skill_editor(ui: &Ui, studio: Studio) -> El {
     let unit = ui.theme().spacing.unit;
