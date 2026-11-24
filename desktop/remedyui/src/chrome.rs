@@ -306,6 +306,7 @@ pub struct Chrome {
     armed: Signal<bool>,
     /// Window Grove handle, so the title bar can switch surfaces.
     pub grove: Signal<Option<crate::grove::Grove>>,
+    pub studio: Signal<Option<crate::studio::Studio>>,
     preview: bool,
 }
 
@@ -349,6 +350,7 @@ impl Chrome {
             was_streaming: Signal::new(false),
             armed: Signal::new(false),
             grove: Signal::new(None),
+            studio: Signal::new(None),
             preview,
         }
     }
@@ -436,6 +438,11 @@ impl Chrome {
         }
         if overlay == Overlay::Help && self.help_id.get().is_empty() {
             self.help_id.set(help_view::default_id().into());
+        }
+        if overlay == Overlay::Skills {
+            if let Some(studio) = self.studio.get() {
+                crate::depth::load_skills(&studio);
+            }
         }
         self.overlay.set(overlay);
     }
@@ -1187,6 +1194,7 @@ pub fn preview_frame(ui: &Ui, overlay: Overlay, menu: bool) -> El {
         chrome.menu_open.set(true);
     }
     let studio = Studio::preview();
+    chrome.studio.set(Some(studio.clone()));
     let body_studio = studio.clone();
     hosted(ui, studio, chrome, move |ui| {
         crate::shell_fixed(ui, body_studio.clone()).layout(|l| {
@@ -1212,6 +1220,7 @@ pub fn dock_in_host() -> bool {
 
 /// Title bar, overlays, and shortcuts around `body` (Grove, or a fixed Studio shell).
 pub fn hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: impl Fn(&Ui) -> El + 'static) -> El {
+    chrome.studio.set(Some(studio.clone()));
     bind_live(chrome);
     let u_err = ui.clone();
     let u_build = ui.clone();
@@ -1496,9 +1505,9 @@ fn overlay_layer(ui: &Ui, studio: Studio, chrome: Chrome, overlay: Overlay) -> E
         Overlay::Skills => sheet(
             ui,
             &messages().text(ui, "skills-title"),
-            false,
-            false,
-            crate::panels::skills_body(ui),
+            true,
+            true,
+            crate::panels::skills_body(ui, chrome),
             move || chrome.close_overlay(),
         ),
     };
