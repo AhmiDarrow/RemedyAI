@@ -1633,3 +1633,85 @@ fn title_bar_switcher_stays_visible_when_narrow() {
         "Studio stays in the title bar at 700px: {names:?}"
     );
 }
+
+struct PresenceOverrideGuard;
+
+impl Drop for PresenceOverrideGuard {
+    fn drop(&mut self) {
+        remedy_desktop::set_presence_enabled_override(None);
+    }
+}
+
+fn presence_image_names(app: &TestApp) -> Vec<String> {
+    app.reader_view()
+        .into_iter()
+        .filter(|n| n.role == Role::Image)
+        .filter_map(|n| n.name)
+        .filter(|n| n.starts_with("Remedy,"))
+        .collect()
+}
+
+fn assert_fits_window(app: &TestApp, width: f32, why: &str) {
+    // Session lists may overflow vertically so they can scroll. Horizontal
+    // overflow would mean the hidden face left a clipped or empty frame.
+    for node in app.reader_view() {
+        let Some(bounds) = node.bounds else { continue };
+        let name = node.name.as_deref().unwrap_or("(unnamed)");
+        assert!(
+            bounds.min.x >= -1.5,
+            "{why}: {name} starts off-screen: {bounds:?}"
+        );
+        assert!(
+            bounds.max.x <= width + 1.5 || bounds.min.x >= width - 1.0,
+            "{why}: {name} overflows width {width}: {bounds:?}"
+        );
+    }
+}
+
+/// Turning off Remedy's face must collapse the slot (no empty frame) and
+/// leave Grove and Studio home readable at narrow, normal, and wide widths.
+#[test]
+fn hiding_presence_reflows_home_without_a_frame() {
+    no_spawn();
+    let _guard = PresenceOverrideGuard;
+    let sizes = [(700.0, 520.0), (1100.0, 700.0), (1400.0, 800.0)];
+
+    // Default is on: the face is an Image named "Remedy, …".
+    let mut on = preview_window_size(remedy_desktop::grove_home_chrome, 1100.0, 700.0);
+    on.frames(4);
+    let faces = presence_image_names(&on);
+    assert!(
+        !faces.is_empty(),
+        "presence defaults to on at Grove: {:?}",
+        accessible_names(&on)
+    );
+
+    remedy_desktop::set_presence_enabled_override(Some(false));
+    for (w, h) in sizes {
+        let mut grove = preview_window_size(remedy_desktop::grove_home_presence_off, w, h);
+        grove.frames(4);
+        let names = accessible_names(&grove);
+        assert!(
+            presence_image_names(&grove).is_empty(),
+            "no face on Grove at {w}x{h}: {names:?}"
+        );
+        assert!(
+            has(&names, "Good morning") || has(&names, "Good afternoon") || has(&names, "Good evening"),
+            "Grove greeting remains at {w}x{h}: {names:?}"
+        );
+        assert_fits_window(&grove, w, &format!("Grove {w}x{h}"));
+
+        let mut studio = preview_window_size(remedy_desktop::home_presence_off, w, h);
+        studio.frames(4);
+        let names = accessible_names(&studio);
+        assert!(
+            presence_image_names(&studio).is_empty(),
+            "no face on Studio home at {w}x{h}: {names:?}"
+        );
+        assert!(
+            has(&names, "Ready when you are"),
+            "Studio greeting remains at {w}x{h}: {names:?}"
+        );
+        assert_fits_window(&studio, w, &format!("Studio {w}x{h}"));
+    }
+}
