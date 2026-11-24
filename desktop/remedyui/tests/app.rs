@@ -437,6 +437,7 @@ fn assert_settings_goldens(name: &str, build: fn(&remedy_ui::Ui) -> remedy_ui::E
 
 #[test]
 fn previews_match_their_golden_images() {
+    no_spawn();
     assert_goldens("studio", THEMES, remedy_desktop::home);
     assert_goldens("studio-chat", THEMES, remedy_desktop::home_chat);
     let rails = &["forest", "deutan"][..];
