@@ -5,8 +5,10 @@ use crate::studio::{ChatMessage, Session, WorkMode};
 use remedy_ui::net::{Http, Request};
 use remedy_ui::reactive::Cancel;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
+
+#[path = "sidecar.rs"]
+mod sidecar;
 
 /// Default loopback origin (no `/api` suffix).
 pub const DEFAULT_ORIGIN: &str = "http://127.0.0.1:7400";
@@ -250,68 +252,21 @@ pub enum EnsureOutcome {
 }
 
 /// Starts `remedy-runtime --serve` (or `remedy serve`) if nothing is already on the port.
+/// The child is supervised: a job object / parent-death signal ties it to this
+/// process, and a watchdog respawns it after a crash. [`restart`] kills and
+/// starts a fresh one. A server this process did not start is left alone.
 pub fn ensure_running() -> EnsureOutcome {
-    if spawn_disabled() {
-        return EnsureOutcome::Disabled;
-    }
-    if ping_blocking(&origin(), load_token().as_deref()) {
-        return EnsureOutcome::AlreadyUp;
-    }
-    let Some(cmd) = find_runtime() else {
-        log_desktop("sidecar missing: no remedy-runtime next to the app or on PATH");
-        return EnsureOutcome::MissingBinary;
-    };
-    let mut command = Command::new(&cmd);
-    if file_name_starts(&cmd, "remedy-runtime") {
-        command.arg("--serve");
-    } else {
-        command.args(["serve", "--host", "127.0.0.1", "--port", "7400"]);
-    }
-    if let Ok(key) = std::env::var("REMEDY_API_KEY") {
-        command.env("REMEDY_API_KEY", key);
-    }
-    if let Some(dir) = cmd.parent() {
-        command.current_dir(dir);
-    }
-    command.stdin(Stdio::null()).stdout(Stdio::null());
-    let log_path = remedy_home().join("logs").join("desktop.log");
-    if let Some(parent) = log_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    match std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
-        Ok(f) => {
-            command.stderr(Stdio::from(f));
-        }
-        Err(_) => {
-            command.stderr(Stdio::null());
-        }
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    match command.spawn() {
-        Ok(child) => {
-            log_desktop(&format!(
-                "sidecar spawned pid={} cmd={}",
-                child.id(),
-                cmd.display()
-            ));
-            // The child is supervised only by staying alive; we must not wait
-            // on it here. Forgetting the handle is the point.
-            std::mem::forget(child);
-            EnsureOutcome::Spawned
-        }
-        Err(err) => {
-            log_desktop(&format!("sidecar spawn failed cmd={} err={err}", cmd.display()));
-            EnsureOutcome::SpawnFailed
-        }
-    }
+    sidecar::ensure_running()
 }
 
-fn log_desktop(msg: &str) {
+/// Kill the managed sidecar and start a new one. See [`sidecar::RestartOutcome`].
+pub fn restart() -> sidecar::RestartOutcome {
+    sidecar::restart()
+}
+
+pub use sidecar::{RestartOutcome, note_exiting};
+
+pub(crate) fn log_desktop(msg: &str) {
     let path = remedy_home().join("logs").join("desktop.log");
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -378,7 +333,7 @@ pub(crate) fn format_panic(
     )
 }
 
-fn file_name_starts(p: &Path, prefix: &str) -> bool {
+pub(crate) fn file_name_starts(p: &Path, prefix: &str) -> bool {
     p.file_name()
         .and_then(|n| n.to_str())
         .map(|n| n.to_ascii_lowercase().starts_with(prefix))
@@ -502,7 +457,7 @@ pub fn wait_until_up(origin: &str, token: Option<&str>, attempts: u32) -> bool {
     false
 }
 
-fn ping_blocking(origin: &str, token: Option<&str>) -> bool {
+pub(crate) fn ping_blocking(origin: &str, token: Option<&str>) -> bool {
     let client = Client::new(origin, token);
     let cancel = Cancel::new();
     let ok_ping = client
