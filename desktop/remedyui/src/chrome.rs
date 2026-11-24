@@ -489,9 +489,16 @@ impl Chrome {
             if let Some(app) = self.app() {
                 app.quit();
             }
-        } else {
-            self.overlay.set(Overlay::Quit);
+            return;
         }
+        // Title-bar close hides the window (close-to-tray) and keeps the
+        // process running. Tray Quit must bring the window back, or the
+        // confirm sheet is invisible and the app never exits.
+        if let Some(w) = self.win() {
+            w.set_visible(true);
+            w.focus();
+        }
+        self.overlay.set(Overlay::Quit);
     }
 
     /// Ctrl+, and the title-bar Settings item. The settings rail owns this when it is mounted.
