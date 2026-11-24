@@ -227,6 +227,8 @@ pub struct Studio {
     next_id: Signal<u64>,
     next_msg: Signal<u64>,
     client: Signal<Option<Client>>,
+    /// Session ids whose DELETE is in flight. List refreshes must not restore them.
+    pending_deletes: Signal<Vec<String>>,
     /// Attachments, jobs, banners, order, and voice for this Studio.
     pub depth: crate::depth::Depth,
 }
@@ -350,6 +352,7 @@ impl Studio {
             next_id: Signal::new(next_id),
             next_msg: Signal::new(1),
             client: Signal::new(None),
+            pending_deletes: Signal::new(Vec::new()),
             depth: crate::depth::Depth::new(local_only),
         }
     }
@@ -437,9 +440,28 @@ impl Studio {
     /// Drops the session; if it was selected, a neighbour is selected.
     pub fn close(&self, id: &str) {
         let id = id.to_string();
+        if !self.pending_deletes.get().iter().any(|s| s == &id) {
+            self.pending_deletes.update(|ids| ids.push(id.clone()));
+        }
         if !self.local_only {
             if let Some(client) = self.client.get() {
-                runtime::delete_session(&client, &id, |_| {});
+                let studio = self.clone();
+                let dropped = id.clone();
+                let wake = remedy_ui::reactive::waker().ok();
+                runtime::delete_session(&client, &id, move |out| {
+                    let Some(wake) = wake else { return };
+                    let _ = wake.post(move || {
+                        studio
+                            .pending_deletes
+                            .update(|ids| ids.retain(|s| s != &dropped));
+                        if out.is_err() {
+                            // DELETE failed: let the next list refresh restore the row.
+                            if let Some(c) = studio.client.get() {
+                                studio.refresh(&c);
+                            }
+                        }
+                    });
+                });
             }
         }
         self.sessions.update(|list| {
@@ -490,7 +512,8 @@ impl Studio {
             let _ = waker.post(move || {
                 if studio.active.get().as_deref() == Some(sid.as_str()) {
                     if let Ok(msgs) = out {
-                        studio.messages.set(msgs);
+                        let local = studio.messages.get();
+                        studio.messages.set(merge_reloaded_messages(local, msgs));
                     }
                 }
             });
@@ -582,6 +605,11 @@ impl Studio {
 
     /// Apply a sidecar session list and drop any active id the sidecar does not have.
     pub fn apply_live_sessions(&self, list: Vec<Session>) {
+        let pending = self.pending_deletes.get();
+        let list: Vec<Session> = list
+            .into_iter()
+            .filter(|s| !pending.iter().any(|id| id == &s.id))
+            .collect();
         let ids: Vec<String> = list.iter().map(|s| s.id.clone()).collect();
         let decision = crate::depth::logic::adopt_active_session(self.active.get().as_deref(), &ids);
         self.apply_sessions(list);
@@ -959,6 +987,29 @@ pub fn project_label(path: Option<&str>) -> String {
     }
 }
 
+
+/// Keep locally finished assistant text when a list refresh comes back empty
+/// (the turn worked, but the bubble would otherwise show only the Remedy header).
+fn merge_reloaded_messages(local: Vec<ChatMessage>, server: Vec<ChatMessage>) -> Vec<ChatMessage> {
+    server
+        .into_iter()
+        .map(|mut m| {
+            if let Some(old) = local.iter().find(|o| o.id == m.id) {
+                if m.content.trim().is_empty() && !old.content.trim().is_empty() {
+                    m.content = old.content.clone();
+                }
+                if m.thinking.trim().is_empty() && !old.thinking.trim().is_empty() {
+                    m.thinking = old.thinking.clone();
+                }
+                if m.steps.is_empty() && !old.steps.is_empty() {
+                    m.steps = old.steps.clone();
+                }
+            }
+            m
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -986,5 +1037,27 @@ mod tests {
             .map(|s| s.tags)
             .unwrap_or_default();
         assert_eq!(tags, vec!["portal".to_string()]);
+    }
+
+    #[test]
+    fn merge_reloaded_messages_keeps_local_assistant_text() {
+        let local = vec![ChatMessage::plain("a1", "assistant", "The portal loads.")];
+        let server = vec![ChatMessage::plain("a1", "assistant", "")];
+        let out = merge_reloaded_messages(local, server);
+        assert_eq!(out[0].content, "The portal loads.");
+    }
+
+    #[test]
+    fn apply_live_sessions_does_not_restore_a_pending_delete() {
+        let studio = Studio::preview();
+        let id = studio.sessions.get()[0].id.clone();
+        studio.pending_deletes.set(vec![id.clone()]);
+        studio.apply_live_sessions(vec![
+            Session::fresh(&id, "Gone?"),
+            Session::fresh("keep", "Keep me"),
+        ]);
+        let ids: Vec<String> = studio.sessions.get().into_iter().map(|s| s.id).collect();
+        assert!(!ids.contains(&id), "pending delete came back: {ids:?}");
+        assert!(ids.contains(&"keep".to_string()));
     }
 }

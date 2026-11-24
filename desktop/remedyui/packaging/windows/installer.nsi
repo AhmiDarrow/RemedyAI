@@ -58,6 +58,9 @@ CRCCheck on
 !ifndef CORESRCPATH
   !error "Pass /DCORESRCPATH=path\to\remedy_core.dll"
 !endif
+!ifndef WEBUISRCPATH
+  !error "Pass /DWEBUISRCPATH=path\to\webui (folder with index.html)"
+!endif
 
 !define PLACEHOLDER_INSTALL_DIR "C:\__REMEDY_PLACEHOLDER_DO_NOT_INSTALL__"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}"
@@ -233,6 +236,11 @@ Section Install
   File "/oname=remedy-runtime.exe" "${RUNTIMESRCPATH}"
   File "/oname=remedy_core.dll" "${CORESRCPATH}"
 
+  ; Chat Web UI. remedy-runtime serves this from a `webui` folder next to the exe.
+  SetOutPath "$INSTDIR\webui"
+  File /r "${WEBUISRCPATH}\*.*"
+  SetOutPath "$INSTDIR"
+
   SetOutPath "$INSTDIR\windows"
   File "/oname=uninstall_options.ps1" "${UNINSTALL_OPTIONS}"
   File "/oname=uninstall_wipe.ps1" "${UNINSTALL_WIPE}"
@@ -282,6 +290,7 @@ Section Uninstall
   Delete "$INSTDIR\remedy-desktop.exe"
   Delete "$INSTDIR\remedy-runtime.exe"
   Delete "$INSTDIR\remedy_core.dll"
+  RMDir /r "$INSTDIR\webui"
   Delete "$INSTDIR\remedy-runtime-x86_64-pc-windows-msvc.exe"
   Delete "$INSTDIR\remedy-iroh.exe"
   Delete "$INSTDIR\windows\uninstall_options.ps1"

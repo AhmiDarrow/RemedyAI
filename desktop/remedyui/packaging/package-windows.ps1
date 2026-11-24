@@ -103,7 +103,37 @@ $runtimeNsis = (Resolve-Path -LiteralPath $Runtime).Path
 $coreNsis = (Resolve-Path -LiteralPath $Core).Path
 $outNsis = $out
 
-& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DRUNTIMESRCPATH=$runtimeNsis" "/DCORESRCPATH=$coreNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
+# Build or reuse the chat Web UI (Vite app in desktop/). Packaged runtime serves
+# $INSTDIR\webui next to remedy-runtime.exe.
+$webuiStage = Join-Path $outDir "webui"
+if (Test-Path -LiteralPath $webuiStage) { Remove-Item -LiteralPath $webuiStage -Recurse -Force }
+$dist = Join-Path $desktop "dist"
+$needBuild = -not (Test-Path -LiteralPath (Join-Path $dist "index.html"))
+if ($needBuild) {
+    $npm = Get-Command npm -ErrorAction SilentlyContinue
+    if (-not $npm) { throw "npm is required to build the Web UI (desktop/). Install Node.js, or leave a built desktop/dist/index.html." }
+    Push-Location $desktop
+    try {
+        if (Test-Path -LiteralPath (Join-Path $desktop "package-lock.json")) {
+            & $npm.Source ci
+        } else {
+            & $npm.Source install
+        }
+        if ($LASTEXITCODE -ne 0) { throw "npm install/ci failed ($LASTEXITCODE)" }
+        & $npm.Source run build
+        if ($LASTEXITCODE -ne 0) { throw "npm run build (Web UI) failed ($LASTEXITCODE)" }
+    } finally {
+        Pop-Location
+    }
+}
+if (-not (Test-Path -LiteralPath (Join-Path $dist "index.html"))) {
+    throw "Web UI is missing: expected $dist\index.html after the build"
+}
+New-Item -ItemType Directory -Force -Path $webuiStage | Out-Null
+Copy-Item -Path (Join-Path $dist "*") -Destination $webuiStage -Recurse -Force
+$webuiNsis = (Resolve-Path -LiteralPath $webuiStage).Path
+
+& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DRUNTIMESRCPATH=$runtimeNsis" "/DCORESRCPATH=$coreNsis" "/DWEBUISRCPATH=$webuiNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
 if ($LASTEXITCODE -ne 0) { throw "makensis failed ($LASTEXITCODE)" }
 if (-not (Test-Path -LiteralPath $out)) { throw "makensis did not write $out" }
 

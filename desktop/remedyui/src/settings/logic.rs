@@ -810,11 +810,8 @@ pub fn save_body(d: &SaveDraft) -> Result<Value, String> {
     body.insert("claimidx_public_ledger".into(), json!(d.claimidx));
     body.insert("advanced".into(), if d.advanced.is_object() { d.advanced.clone() } else { json!({}) });
     if d.providers_touched {
-        let mut ep = d.enabled_providers.clone();
-        if !ep.iter().any(|id| id == "demo") {
-            ep.insert(0, "demo".into());
-        }
-        let covers = d.catalog_ids.iter().all(|id| ep.iter().any(|e| e == id));
+        let ep = d.enabled_providers.clone();
+        let covers = !ep.is_empty() && d.catalog_ids.iter().all(|id| ep.iter().any(|e| e == id));
         if covers {
             body.insert("enabled_providers".into(), Value::Null);
         } else {
@@ -1180,7 +1177,7 @@ mod tests {
         d.api_key = "sk-test".into();
         d.providers_touched = true;
         d.enabled_providers = vec!["xai".into()];
-        // Ollama stays off, so the save is a list (demo is forced on) rather than null.
+        // Ollama and Demo stay off, so the save is a list rather than null (null means all catalog ids).
         d.catalog_ids = vec!["demo".into(), "xai".into(), "ollama".into()];
         d.messengers_dirty = true;
         d.messengers = Some(json!({"telegram": {"enabled": true}}));
@@ -1189,13 +1186,24 @@ mod tests {
         assert_eq!(body["llm_provider"], json!("custom"));
         assert_eq!(body["custom_llm_name"], json!("Home"));
         assert_eq!(body["llm_api_key"], json!("sk-test"));
-        assert_eq!(body["enabled_providers"], json!(["demo", "xai"]));
+        assert_eq!(body["enabled_providers"], json!(["xai"]));
         assert!(body.get("messengers").is_some());
         assert_eq!(body["assistant"]["enabled"], json!(true));
         d.catalog_ids = vec!["demo".into(), "xai".into()];
         d.enabled_providers = vec!["demo".into(), "xai".into()];
         let body = save_body(&d).unwrap();
         assert!(body["enabled_providers"].is_null());
+    }
+
+    #[test]
+    fn save_allows_turning_demo_off() {
+        let mut d = SaveDraft::default();
+        d.providers_touched = true;
+        d.enabled_providers = vec!["anthropic".into()];
+        d.catalog_ids = vec!["demo".into(), "anthropic".into(), "xai".into()];
+        let body = save_body(&d).unwrap();
+        assert_eq!(body["enabled_providers"], json!(["anthropic"]));
+        assert!(!body["enabled_providers"].as_array().unwrap().iter().any(|v| v == "demo"));
     }
 
     #[test]

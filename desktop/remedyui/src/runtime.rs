@@ -602,6 +602,19 @@ pub fn create_session(
         .ok();
 }
 
+
+fn encode_path_seg(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
 /// DELETE `/api/sessions/{id}`.
 pub fn delete_session(
     client: &Client,
@@ -609,7 +622,7 @@ pub fn delete_session(
     done: impl FnOnce(Result<(), String>) + Send + 'static,
 ) {
     let http = client.http.clone();
-    let path = format!("sessions/{id}");
+    let path = format!("sessions/{}", encode_path_seg(id));
     std::thread::Builder::new()
         .name("remedy-delete-session".into())
         .spawn(move || {
