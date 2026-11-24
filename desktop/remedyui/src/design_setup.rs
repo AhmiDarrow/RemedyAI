@@ -177,7 +177,7 @@ pub fn hello(ui: &Ui) -> El {
         setup_card(
             ui,
             vec![
-                presence::mark(ui, Mood::Curious, 72.0),
+                presence::preview(ui, Mood::Curious, 72.0),
                 label(ui, "I'm Remedy.", HERO, c.text),
                 label(
                     ui,
@@ -210,7 +210,7 @@ pub fn folder(ui: &Ui) -> El {
         setup_card(
             ui,
             vec![
-                presence::mark(ui, Mood::Idle, 72.0),
+                presence::preview(ui, Mood::Idle, 72.0),
                 label(ui, "A folder for the work we do together.", TITLE, c.text),
                 label(
                     ui,
@@ -233,7 +233,7 @@ pub fn name(ui: &Ui) -> El {
         setup_card(
             ui,
             vec![
-                presence::mark(ui, Mood::Listening, 72.0),
+                presence::preview(ui, Mood::Listening, 72.0),
                 label(ui, "What should I call you?", TITLE, c.text),
                 field(ui, "Joe"),
                 actions_end(ui, vec![primary(ui, "Continue")]),
@@ -250,7 +250,7 @@ pub fn ready(ui: &Ui) -> El {
         setup_card(
             ui,
             vec![
-                presence::mark(ui, Mood::Happy, 72.0),
+                presence::preview(ui, Mood::Happy, 72.0),
                 label(ui, "We're ready.", HERO, c.text),
                 label(ui, "I'll meet you in the Grove.", BODY, c.muted),
                 primary(ui, "Open Grove"),
@@ -267,7 +267,7 @@ pub fn more(ui: &Ui) -> El {
         setup_card(
             ui,
             vec![
-                presence::mark(ui, Mood::Idle, 72.0),
+                presence::preview(ui, Mood::Idle, 72.0),
                 label(ui, "Other ways to start.", TITLE, c.text),
                 option_row(
                     ui,

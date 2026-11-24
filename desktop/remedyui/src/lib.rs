@@ -336,6 +336,13 @@ pub fn home(ui: &Ui) -> El {
     )
 }
 
+/// Studio empty well with Remedy's presence turned off. Appearance defaults to on;
+/// this is the hidden state for layout tests.
+pub fn home_presence_off(ui: &Ui) -> El {
+    presence::set_enabled_override(Some(false));
+    home(ui)
+}
+
 /// Chat-feed preview with a finished turn, for side-by-side review.
 pub fn home_chat(ui: &Ui) -> El {
     shell_with(
@@ -831,6 +838,18 @@ pub fn grove_home_chrome(ui: &Ui) -> El {
             l.min_height = Length::Px(0.0);
         })
     })
+}
+
+/// Grove home in chrome with Remedy's presence turned off. Appearance defaults
+/// to on; this is the hidden state for layout tests.
+pub fn grove_home_presence_off(ui: &Ui) -> El {
+    presence::set_enabled_override(Some(false));
+    grove_home_chrome(ui)
+}
+
+/// Test hook: force presence on or off, or `None` to follow the Appearance pref.
+pub fn set_presence_enabled_override(on: Option<bool>) {
+    presence::set_enabled_override(on);
 }
 
 /// Command palette over the Studio preview.
