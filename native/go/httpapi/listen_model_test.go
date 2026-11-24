@@ -366,6 +366,12 @@ func TestNormalizeLLMSettingsHiddenProviderDropsStaleURL(t *testing.T) {
 	if base != "http://127.0.0.1:1234/v1" {
 		t.Fatalf("custom URL lost: %q", base)
 	}
+	// A mock / private endpoint for a hidden provider is not another
+	// provider's catalog host, so live listing can still hit it.
+	_, _, base = normalizeLLMSettings("deepseek", "deepseek-v9", "http://127.0.0.1:9/v1")
+	if base != "http://127.0.0.1:9/v1" {
+		t.Fatalf("deepseek mock URL snapped: %q", base)
+	}
 	if !providerShowsBaseURL("custom-lm-studio") || providerShowsBaseURL("anthropic") {
 		t.Fatal("typable vs hidden classification")
 	}
