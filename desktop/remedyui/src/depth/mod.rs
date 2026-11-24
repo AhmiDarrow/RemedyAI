@@ -17,7 +17,7 @@ pub(crate) use actions::{
     add_paths, after_finish, apply_frame, approve_plan, ask_delete_skill, ask_remove_project,
     assign_project, background_title, boot, bulk_assign_project, continue_pending, delete_skill, dismiss_library, edit_user_message,
     export_active, focus_session, focused_steps, import_session, install_library, install_named,
-    load_memory, load_skills, move_project_order, move_session_order, open_skill, pick_attachments,
+    load_memory, load_skills, move_project_order, move_session_order, on_session_created, open_skill, pick_attachments,
     pick_folder, place_session, project_confirm_body, react, regenerate, refresh_banners, remove_project,
     ask_archive_unused, export_skills_pack, import_skills_pack, archive_unused_skills,
     rename_session, request_plan_changes, resolve_approval, save_skill, search_library,
@@ -271,6 +271,14 @@ pub struct Depth {
     pub library_rows: Signal<Vec<SkillRow>>,
     pub trace_open: Signal<bool>,
     pub suggest_gen: Signal<u64>,
+    /// A composer send waiting for a sidecar session to be created.
+    pub held_for_session: Signal<Option<PendingSend>>,
+    /// When false, flushing `held_for_session` does not echo the user bubble again.
+    pub held_echo: Signal<bool>,
+    /// True after one "Session not found" recover-and-retry, so a second 404 surfaces.
+    pub missing_retried: Signal<bool>,
+    /// True while a sidecar session create is in flight.
+    pub creating_session: Signal<bool>,
 }
 
 impl Depth {
@@ -342,6 +350,10 @@ impl Depth {
             library_rows: Signal::new(Vec::new()),
             trace_open: Signal::new(false),
             suggest_gen: Signal::new(0),
+            held_for_session: Signal::new(None),
+            held_echo: Signal::new(true),
+            missing_retried: Signal::new(false),
+            creating_session: Signal::new(false),
         }
     }
 
