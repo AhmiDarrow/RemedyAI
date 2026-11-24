@@ -124,6 +124,8 @@ pub struct ChatMessage {
     pub user_reaction: String,
     /// The agent's reaction on a user row. Empty when unset.
     pub agent_reaction: String,
+    /// Turn id used to fetch full tool evidence (`…/turns/{request_id}/tools/{call_id}`).
+    pub(crate) request_id: String,
 }
 
 impl ChatMessage {
@@ -143,6 +145,7 @@ impl ChatMessage {
             thinking: String::new(),
             user_reaction: String::new(),
             agent_reaction: String::new(),
+            request_id: String::new(),
         }
     }
 }
@@ -698,11 +701,17 @@ impl Studio {
         };
         let spoken = body.clone();
         let speak = role == "assistant";
+        let request_id = self
+            .active
+            .get()
+            .and_then(|sid| self.depth.job(&sid).map(|j| j.request_id))
+            .unwrap_or_default();
         let message = ChatMessage {
             role: role.into(),
             steps,
             thinking,
             user_reaction: reaction,
+            request_id,
             ..ChatMessage::plain(id.clone(), "assistant", body)
         };
         let existed = self.messages.get().iter().any(|row| row.id == id);
