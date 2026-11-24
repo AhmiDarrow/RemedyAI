@@ -1434,7 +1434,12 @@ pub fn show_skill_budget(budget: &SkillBudget, learn: &SkillLearning) -> bool {
 pub fn is_session_sync_event(kind: &str) -> bool {
     matches!(
         kind,
-        "session_created" | "session_updated" | "message_added" | "session_deleted"
+        "session_created"
+            | "session_updated"
+            | "message_added"
+            | "session_deleted"
+            | "turn_started"
+            | "message_reaction"
     )
 }
 
@@ -1448,7 +1453,35 @@ pub fn should_reload_open_thread(
     if streaming || event_sid.is_empty() {
         return false;
     }
-    matches!(kind, "message_added" | "session_updated") && active == Some(event_sid)
+    matches!(kind, "message_added" | "session_updated" | "message_reaction")
+        && active == Some(event_sid)
+}
+
+/// Attach to a live turn that another surface started on the open session.
+pub fn should_attach_open_thread(
+    kind: &str,
+    event_sid: &str,
+    request_id: &str,
+    active: Option<&str>,
+    streaming: bool,
+) -> bool {
+    kind == "turn_started"
+        && !streaming
+        && !event_sid.is_empty()
+        && !request_id.is_empty()
+        && active == Some(event_sid)
+}
+
+/// `request_id` from a session-sync JSON payload.
+pub fn event_request_id(data: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(data)
+        .ok()
+        .and_then(|v| {
+            v.get("request_id")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_default()
 }
 
 /// `session_id` from a session-sync JSON payload.
@@ -1740,8 +1773,55 @@ mod tests {
         assert!(is_session_sync_event("session_updated"));
         assert!(is_session_sync_event("message_added"));
         assert!(is_session_sync_event("session_deleted"));
+        assert!(is_session_sync_event("turn_started"));
+        assert!(is_session_sync_event("message_reaction"));
         assert!(!is_session_sync_event("hello"));
         assert!(!is_session_sync_event("token"));
+        assert!(!is_session_sync_event("settings_updated"));
+    }
+
+    #[test]
+    fn session_sync_attaches_to_a_turn_started_on_the_open_idle_thread() {
+        assert!(should_attach_open_thread(
+            "turn_started",
+            "s1",
+            "req-9",
+            Some("s1"),
+            false
+        ));
+        assert!(!should_attach_open_thread(
+            "turn_started",
+            "s1",
+            "req-9",
+            Some("s1"),
+            true
+        ));
+        assert!(!should_attach_open_thread(
+            "turn_started",
+            "s2",
+            "req-9",
+            Some("s1"),
+            false
+        ));
+        assert!(!should_attach_open_thread(
+            "turn_started",
+            "s1",
+            "",
+            Some("s1"),
+            false
+        ));
+        assert!(!should_attach_open_thread(
+            "message_added",
+            "s1",
+            "req-9",
+            Some("s1"),
+            false
+        ));
+        assert_eq!(
+            event_request_id(r#"{"type":"turn_started","session_id":"s1","request_id":"req-9"}"#),
+            "req-9"
+        );
+        assert_eq!(event_request_id(r#"{"type":"session_created","session_id":"s1"}"#), "");
     }
 
     #[test]

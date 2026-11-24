@@ -125,7 +125,7 @@ func TestSessionEventsSSEHelloAndCRUD(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, key := range []string{
-		"type", "session_id", "origin_channel", "message_id",
+		"type", "session_id", "origin_channel", "message_id", "request_id",
 		"title", "message_count", "role", "ts",
 	} {
 		if _, ok := raw[key]; !ok {
@@ -134,6 +134,51 @@ func TestSessionEventsSSEHelloAndCRUD(t *testing.T) {
 	}
 	cancel()
 }
+
+func TestPublishTurnStartedAndSettingsUpdated(t *testing.T) {
+	s := &Server{events: newSessionEventHub()}
+	ch := s.events.subscribe()
+	defer s.events.unsubscribe(ch)
+
+	s.publishTurnStarted("sid-1", "req-9", "msg-1")
+	got := recvSessionEvent(t, ch, "message_added")
+	if got.SessionID != "sid-1" || got.Role == nil || *got.Role != "user" || got.MessageID == nil || *got.MessageID != "msg-1" {
+		t.Fatalf("user message_added = %#v", got)
+	}
+	got = recvSessionEvent(t, ch, "turn_started")
+	if got.SessionID != "sid-1" || got.RequestID == nil || *got.RequestID != "req-9" {
+		t.Fatalf("turn_started = %#v", got)
+	}
+
+	s.publishSettingsUpdated(map[string]any{"changes": []string{"privacy_mode"}})
+	got = recvSessionEvent(t, ch, "settings_updated")
+	if got.Type != "settings_updated" || got.SessionID != "" {
+		t.Fatalf("settings_updated = %#v", got)
+	}
+
+	s.publishSettingsUpdated(map[string]any{"changes": []string{}})
+	s.publishSettingsUpdated(nil)
+	select {
+	case ev := <-ch:
+		t.Fatalf("empty settings patch should not publish, got %#v", ev)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func recvSessionEvent(t *testing.T, ch <-chan SessionEvent, want string) SessionEvent {
+	t.Helper()
+	select {
+	case ev := <-ch:
+		if ev.Type != want {
+			t.Fatalf("event type = %q, want %q (%#v)", ev.Type, want, ev)
+		}
+		return ev
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for %s", want)
+		return SessionEvent{}
+	}
+}
+
 
 type deadlineConn struct {
 	net.Conn
