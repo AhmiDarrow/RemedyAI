@@ -401,23 +401,71 @@ pub fn skills_body(ui: &Ui, chrome: Chrome) -> El {
         .studio
         .get()
         .unwrap_or_else(Studio::preview);
-    if studio.runtime().is_none() && studio.depth.skills.get().is_empty() {
-        studio.depth.skills.set(vec![
-            crate::depth::SkillRow {
-                name: "summarize".into(),
-                description: "Shorten a long page or thread.".into(),
-                status: "installed".into(),
-                quarantine: false,
-            },
-            crate::depth::SkillRow {
-                name: "receipts".into(),
-                description: "Read a receipt photo and total it.".into(),
-                status: "installed".into(),
-                quarantine: false,
-            },
-        ]);
+    if studio.runtime().is_none() {
+        seed_skills_preview(&studio);
     }
     crate::depth::panels::skills_sheet(ui, studio)
+}
+
+
+fn seed_skills_preview(studio: &crate::studio::Studio) {
+    use crate::depth::logic::{SkillBudget, SkillLearning};
+    use crate::depth::SkillRow;
+    studio.depth.skills.set(vec![
+        SkillRow {
+            name: "summarize".into(),
+            description: "Shorten a long page or thread.".into(),
+            status: "installed".into(),
+            quarantine: false,
+            auto_generated: false,
+        },
+        SkillRow {
+            name: "receipts".into(),
+            description: "Read a receipt photo and total it.".into(),
+            status: "installed".into(),
+            quarantine: false,
+            auto_generated: false,
+        },
+        SkillRow {
+            name: "portal-notes".into(),
+            description: "Learned from the Portal thread. Still on probation.".into(),
+            status: "discovered".into(),
+            quarantine: false,
+            auto_generated: true,
+        },
+        SkillRow {
+            name: "house-style".into(),
+            description: "Keep replies in Joe's voice and spelling.".into(),
+            status: "active".into(),
+            quarantine: false,
+            auto_generated: true,
+        },
+        SkillRow {
+            name: "imported-pack-alpha".into(),
+            description: "Imported from a ZIP. Trust before it can run.".into(),
+            status: "installed".into(),
+            quarantine: true,
+            auto_generated: false,
+        },
+        SkillRow {
+            name: "old-scraper".into(),
+            description: "Unused for 4 months.".into(),
+            status: "archived".into(),
+            quarantine: false,
+            auto_generated: false,
+        },
+    ]);
+    studio.depth.skill_budget.set(SkillBudget {
+        active_count: 72,
+        active_budget: 80,
+        banner: "72 / 80 in active set — archive or pack to stay sharp".into(),
+    });
+    studio.depth.skill_learning.set(SkillLearning {
+        learned_count: 6,
+        probation_count: 2,
+        total_activations: 41,
+        multi_session: 3,
+    });
 }
 
 fn lang_index(id: &str) -> usize {

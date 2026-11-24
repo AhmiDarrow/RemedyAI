@@ -1264,6 +1264,139 @@ pub fn attachment_filename(disposition: Option<&str>, fallback: &str) -> String 
 }
 
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SkillBudget {
+    pub active_count: u32,
+    pub active_budget: u32,
+    pub banner: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SkillLearning {
+    pub learned_count: u32,
+    pub probation_count: u32,
+    pub total_activations: u32,
+    pub multi_session: u32,
+}
+
+pub const SKILL_FILTER_ALL: &str = "all";
+pub const SKILL_FILTER_ACTIVE: &str = "active";
+pub const SKILL_FILTER_QUARANTINE: &str = "quarantine";
+pub const SKILL_FILTER_LEARNED: &str = "learned";
+pub const SKILL_FILTER_ARCHIVED: &str = "archived";
+
+pub fn parse_skill_budget(v: &serde_json::Value) -> SkillBudget {
+    let active_count = v.get("active_count").and_then(|n| n.as_u64()).unwrap_or(0) as u32;
+    let active_budget = v.get("active_budget").and_then(|n| n.as_u64()).unwrap_or(0) as u32;
+    let banner = v
+        .get("budget_banner")
+        .and_then(|b| b.as_str())
+        .unwrap_or("")
+        .to_string();
+    SkillBudget { active_count, active_budget, banner }
+}
+
+pub fn parse_skill_learning(v: &serde_json::Value) -> SkillLearning {
+    SkillLearning {
+        learned_count: v.get("learned_count").and_then(|n| n.as_u64()).unwrap_or(0) as u32,
+        probation_count: v.get("probation_count").and_then(|n| n.as_u64()).unwrap_or(0) as u32,
+        total_activations: 0,
+        multi_session: 0,
+    }
+}
+
+pub fn parse_skill_reuse(v: &serde_json::Value) -> (u32, u32) {
+    (
+        v.get("total_activations").and_then(|n| n.as_u64()).unwrap_or(0) as u32,
+        v.get("multi_session_reactivations")
+            .and_then(|n| n.as_u64())
+            .unwrap_or(0) as u32,
+    )
+}
+
+pub fn skill_is_archived(row: &crate::depth::SkillRow) -> bool {
+    matches!(row.status.to_ascii_lowercase().as_str(), "archived" | "deprecated")
+}
+
+pub fn skill_is_probation(row: &crate::depth::SkillRow) -> bool {
+    row.auto_generated
+        && matches!(
+            row.status.to_ascii_lowercase().as_str(),
+            "discovered" | "validated" | "probation"
+        )
+}
+
+pub fn skill_matches_filter(row: &crate::depth::SkillRow, filter: &str) -> bool {
+    match filter {
+        SKILL_FILTER_ACTIVE => !row.quarantine && !skill_is_archived(row),
+        SKILL_FILTER_QUARANTINE => row.quarantine,
+        SKILL_FILTER_LEARNED => row.auto_generated,
+        SKILL_FILTER_ARCHIVED => skill_is_archived(row),
+        _ => true,
+    }
+}
+
+pub fn filter_skills(rows: &[crate::depth::SkillRow], filter: &str) -> Vec<crate::depth::SkillRow> {
+    rows.iter()
+        .filter(|row| skill_matches_filter(row, filter))
+        .cloned()
+        .collect()
+}
+
+pub fn skill_tag(row: &crate::depth::SkillRow) -> &'static str {
+    if skill_is_archived(row) {
+        "archived"
+    } else if row.quarantine {
+        "quarantine"
+    } else if skill_is_probation(row) {
+        "learned · probation"
+    } else if row.auto_generated {
+        "learned"
+    } else {
+        "active"
+    }
+}
+
+pub fn skill_budget_line(budget: &SkillBudget) -> String {
+    if budget.active_budget == 0 {
+        return String::new();
+    }
+    format!(
+        "{} of {} skills in the active set",
+        budget.active_count, budget.active_budget
+    )
+}
+
+pub fn skill_budget_ratio(budget: &SkillBudget) -> f32 {
+    if budget.active_budget == 0 {
+        0.0
+    } else {
+        (budget.active_count as f32 / budget.active_budget as f32).clamp(0.0, 1.0)
+    }
+}
+
+pub fn skill_learning_line(learn: &SkillLearning) -> String {
+    if learn.learned_count == 0
+        && learn.probation_count == 0
+        && learn.total_activations == 0
+        && learn.multi_session == 0
+    {
+        return String::new();
+    }
+    format!(
+        "Learned {} · {} probation · {} uses · {} reused across chats",
+        learn.learned_count, learn.probation_count, learn.total_activations, learn.multi_session
+    )
+}
+
+pub fn show_skill_budget(budget: &SkillBudget, learn: &SkillLearning) -> bool {
+    budget.active_budget > 0
+        || !budget.banner.is_empty()
+        || learn.learned_count > 0
+        || learn.total_activations > 0
+}
+
+
 /// Event names from `GET /api/events/sessions` that should refresh the sidebar.
 pub fn is_session_sync_event(kind: &str) -> bool {
     matches!(
@@ -1479,6 +1612,59 @@ mod tests {
             attachment_filename(Some("attachment; filename=\"remedy-skills-pack.zip\""), "fallback.zip"),
             "remedy-skills-pack.zip"
         );
+    }
+
+    fn preview_row(name: &str, status: &str, quarantine: bool, learned: bool) -> crate::depth::SkillRow {
+        crate::depth::SkillRow {
+            name: name.into(),
+            description: String::new(),
+            status: status.into(),
+            quarantine,
+            auto_generated: learned,
+        }
+    }
+
+    #[test]
+    fn skill_budget_and_learning_parse_and_filter() {
+        let budget = parse_skill_budget(&serde_json::json!({
+            "active_count": 72,
+            "active_budget": 80,
+            "budget_banner": "72 / 80 in active set — archive or pack to stay sharp"
+        }));
+        assert_eq!(skill_budget_line(&budget), "72 of 80 skills in the active set");
+        assert!((skill_budget_ratio(&budget) - 0.9).abs() < 0.001);
+        assert!(budget.banner.contains("archive or pack"));
+        let mut learn = parse_skill_learning(&serde_json::json!({
+            "learned_count": 6,
+            "probation_count": 2
+        }));
+        let (uses, multi) = parse_skill_reuse(&serde_json::json!({
+            "total_activations": 41,
+            "multi_session_reactivations": 3
+        }));
+        learn.total_activations = uses;
+        learn.multi_session = multi;
+        assert_eq!(
+            skill_learning_line(&learn),
+            "Learned 6 · 2 probation · 41 uses · 3 reused across chats"
+        );
+        let rows = vec![
+            preview_row("summarize", "installed", false, false),
+            preview_row("portal-notes", "discovered", false, true),
+            preview_row("house-style", "active", false, true),
+            preview_row("imported-pack-alpha", "installed", true, false),
+            preview_row("old-scraper", "archived", false, false),
+        ];
+        assert_eq!(skill_tag(&rows[0]), "active");
+        assert_eq!(skill_tag(&rows[1]), "learned · probation");
+        assert_eq!(skill_tag(&rows[2]), "learned");
+        assert_eq!(skill_tag(&rows[3]), "quarantine");
+        assert_eq!(skill_tag(&rows[4]), "archived");
+        assert_eq!(filter_skills(&rows, SKILL_FILTER_LEARNED).len(), 2);
+        assert_eq!(filter_skills(&rows, SKILL_FILTER_QUARANTINE)[0].name, "imported-pack-alpha");
+        assert_eq!(filter_skills(&rows, SKILL_FILTER_ARCHIVED).len(), 1);
+        assert_eq!(filter_skills(&rows, SKILL_FILTER_ACTIVE).len(), 3);
+        assert_eq!(filter_skills(&rows, SKILL_FILTER_ALL).len(), 5);
     }
 
     fn message_copy_prefers_the_body_then_falls_back_to_beats() {

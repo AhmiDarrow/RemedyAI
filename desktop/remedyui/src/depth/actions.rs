@@ -2431,10 +2431,51 @@ pub fn load_skills(studio: &Studio) {
     let Ok(wake) = waker() else {
         return;
     };
+    let st_list = studio.clone();
+    let wake_list = wake.clone();
     api::spawn_json(&client, Request::get("skills"), move |out| {
-        let _ = wake.post(move || {
+        let _ = wake_list.post(move || {
             if let Ok(v) = out {
-                studio.depth.skills.set(parse_skills(&v));
+                st_list.depth.skills.set(parse_skills(&v));
+            }
+        });
+    });
+    load_skill_insights(&client, &studio, &wake);
+}
+
+fn load_skill_insights(client: &Client, studio: &Studio, wake: &remedy_ui::reactive::Waker) {
+    let st = studio.clone();
+    let wake_b = wake.clone();
+    api::spawn_json(client, Request::get("skills/packs"), move |out| {
+        let _ = wake_b.post(move || {
+            if let Ok(v) = out {
+                st.depth.skill_budget.set(logic::parse_skill_budget(&v));
+            }
+        });
+    });
+    let st = studio.clone();
+    let wake_l = wake.clone();
+    api::spawn_json(client, Request::get("skills/learning/summary"), move |out| {
+        let _ = wake_l.post(move || {
+            if let Ok(v) = out {
+                let parsed = logic::parse_skill_learning(&v);
+                st.depth.skill_learning.update(|learn| {
+                    learn.learned_count = parsed.learned_count;
+                    learn.probation_count = parsed.probation_count;
+                });
+            }
+        });
+    });
+    let st = studio.clone();
+    let wake_r = wake.clone();
+    api::spawn_json(client, Request::get("skills/metrics/reuse"), move |out| {
+        let _ = wake_r.post(move || {
+            if let Ok(v) = out {
+                let (uses, multi) = logic::parse_skill_reuse(&v);
+                st.depth.skill_learning.update(|learn| {
+                    learn.total_activations = uses;
+                    learn.multi_session = multi;
+                });
             }
         });
     });
@@ -2453,6 +2494,7 @@ fn parse_skills(v: &Value) -> Vec<SkillRow> {
                 description: api::str_field(row, "description"),
                 status: api::str_field(row, "status"),
                 quarantine: api::bool_field(row, "quarantine"),
+                auto_generated: api::bool_field(row, "auto_generated"),
             })
         })
         .collect()
@@ -2540,6 +2582,7 @@ pub fn search_library(studio: &Studio, q: &str) {
                                 description: api::str_field(row, "description"),
                                 status: api::str_field(row, "id"),
                                 quarantine: false,
+                                auto_generated: false,
                             })
                         })
                         .collect()
