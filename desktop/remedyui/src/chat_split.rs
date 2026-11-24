@@ -733,10 +733,10 @@ fn actions_feed(ui: &Ui, studio: Studio) -> El {
             out.set(next);
         }
     });
-    let collapsed: Signal<Vec<String>> = Signal::new(Vec::new());
+    let expanded: Signal<Vec<String>> = Signal::new(Vec::new());
     let u = ui.clone();
     let st_rows = studio.clone();
-    let col_state = collapsed;
+    let col_state = expanded;
     let col = w::for_each(
         &col,
         turns,
@@ -864,7 +864,7 @@ fn skip_idle(m: &ChatMessage) -> bool {
     m.thinking.trim().is_empty() && m.steps.is_empty()
 }
 
-fn action_turn(ui: &Ui, studio: Studio, turn: ActionTurn, collapsed: Signal<Vec<String>>) -> El {
+fn action_turn(ui: &Ui, studio: Studio, turn: ActionTurn, expanded: Signal<Vec<String>>) -> El {
     let unit = ui.theme().spacing.unit;
     let thinking = turn.thinking.clone();
     let steps = turn.steps.clone();
@@ -886,7 +886,7 @@ fn action_turn(ui: &Ui, studio: Studio, turn: ActionTurn, collapsed: Signal<Vec<
             live,
         ));
     if !thinking.trim().is_empty() {
-        col = col.child(thinking_block(ui, &turn.id, &thinking, collapsed));
+        col = col.child(thinking_block(ui, &turn.id, &thinking, expanded));
     }
     if !steps.is_empty() {
         col = col.child(tools_block(ui, &steps));
@@ -898,25 +898,25 @@ fn action_turn(ui: &Ui, studio: Studio, turn: ActionTurn, collapsed: Signal<Vec<
     col
 }
 
-fn thinking_block(ui: &Ui, id: &str, thinking: &str, collapsed: Signal<Vec<String>>) -> El {
+fn thinking_block(ui: &Ui, id: &str, thinking: &str, expanded: Signal<Vec<String>>) -> El {
     let colors = ui.theme().colors.clone();
     let chunks = thinking_chunks(thinking);
     let open = {
-        let collapsed = collapsed.clone();
+        let expanded = expanded.clone();
         let id = id.to_string();
-        move || !collapsed.get().iter().any(|x| x == &id)
+        move || thinking_is_open(&expanded.get(), &id)
     };
     let toggle = {
-        let collapsed = collapsed.clone();
+        let expanded = expanded.clone();
         let id = id.to_string();
         move || {
-            let mut next = collapsed.get();
+            let mut next = expanded.get();
             if let Some(i) = next.iter().position(|x| x == &id) {
                 next.remove(i);
             } else {
                 next.push(id.clone());
             }
-            collapsed.set(next);
+            expanded.set(next);
         }
     };
     let chevron = {
@@ -965,6 +965,12 @@ fn thinking_block(ui: &Ui, id: &str, thinking: &str, collapsed: Signal<Vec<Strin
         .layout(|l| l.width = Length::Percent(1.0))
         .child(header)
         .child(body)
+}
+
+/// Thinking in the Coding / Actions pane starts collapsed. The owner opens
+/// a turn by clicking its THINKING header; `expanded` then holds that id.
+fn thinking_is_open(expanded: &[String], id: &str) -> bool {
+    expanded.iter().any(|x| x == id)
 }
 
 /// Thinking arrives as one buffer; blank lines become readable paragraphs.
@@ -1047,18 +1053,24 @@ fn tool_row(ui: &Ui, step: &WorkStep) -> El {
             }
         })
         .child(
-            w::text(ui, mark).style(
-                tokens::typo(tokens::MONO)
-                    .foreground(mark_color)
-                    .weight(650.0),
-            ),
+            w::text(ui, mark)
+                .nowrap()
+                .layout(|l| l.shrink = 0.0)
+                .style(
+                    tokens::typo(tokens::MONO)
+                        .foreground(mark_color)
+                        .weight(650.0),
+                ),
         )
         .child(
-            w::text(ui, &name).style(
-                tokens::typo(tokens::MONO)
-                    .foreground(colors.text)
-                    .weight(600.0),
-            ),
+            w::text(ui, &name)
+                .nowrap()
+                .layout(|l| l.shrink = 0.0)
+                .style(
+                    tokens::typo(tokens::MONO)
+                        .foreground(colors.text)
+                        .weight(600.0),
+                ),
         );
     if let Some(detail) = detail.as_deref().filter(|s| !s.is_empty()) {
         row = row.child(
@@ -1182,5 +1194,12 @@ mod tests {
             chunks,
             vec!["First thought.", "Second, after a beat.", "Third."]
         );
+    }
+
+    #[test]
+    fn thinking_starts_collapsed() {
+        assert!(!thinking_is_open(&[], "t1"));
+        assert!(thinking_is_open(&["t1".into()], "t1"));
+        assert!(!thinking_is_open(&["t2".into()], "t1"));
     }
 }
