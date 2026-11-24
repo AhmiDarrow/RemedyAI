@@ -508,18 +508,8 @@ func normalizeSettingsPatch(patch, cfg ConfigMap) {
 			delete(patch, "enabled_providers")
 			delete(cfg, "enabled_providers")
 		} else {
+			// Users may turn Demo off in the provider catalog. Do not force it back on.
 			patch["enabled_providers"] = normalizeStringList(v)
-			list, _ := patch["enabled_providers"].([]string)
-			hasDemo := false
-			for _, p := range list {
-				if p == "demo" {
-					hasDemo = true
-					break
-				}
-			}
-			if !hasDemo {
-				patch["enabled_providers"] = append([]string{"demo"}, list...)
-			}
 		}
 	}
 	if v, ok := patch["harness_min_context_pct"]; ok && v != nil {

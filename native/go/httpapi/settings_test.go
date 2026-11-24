@@ -501,3 +501,19 @@ func TestSettingsPutSnapsHiddenProviderBaseURL(t *testing.T) {
 		t.Fatalf("model was rewritten: %q", cfgString(cfg, "llm_model", ""))
 	}
 }
+
+func TestNormalizeSettingsPatchAllowsTurningDemoOff(t *testing.T) {
+	patch := ConfigMap{
+		"enabled_providers": []any{"anthropic", "xai"},
+	}
+	normalizeSettingsPatch(patch, ConfigMap{})
+	list, _ := patch["enabled_providers"].([]string)
+	for _, p := range list {
+		if p == "demo" {
+			t.Fatalf("demo was forced back on: %v", list)
+		}
+	}
+	if len(list) != 2 || list[0] != "anthropic" || list[1] != "xai" {
+		t.Fatalf("enabled_providers=%v", list)
+	}
+}

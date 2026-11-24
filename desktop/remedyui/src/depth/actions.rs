@@ -2462,8 +2462,12 @@ pub fn load_memory(studio: &Studio) {
         return;
     };
     let facts = format!("memory/facts");
+    // Capture the client on the UI thread. spawn_json runs on `remedy-depth`;
+    // calling studio.runtime() there panics ("signal belongs to another thread's runtime")
+    // when Memory is opened from the top bar.
+    let client_for_facts = client.clone();
     api::spawn_json(&client, Request::get(&facts), move |facts_out| {
-        let client = studio.runtime();
+        let client = Some(client_for_facts);
         let _ = wake.post(move || {
             let mut body = String::new();
             if let Ok(v) = facts_out {
@@ -3039,6 +3043,31 @@ mod tests {
         assert_eq!(a.steps[0].narration.as_deref(), Some("I'll look."));
         assert!(studio.live_message_id.get().is_none());
         assert!(studio.live_user_reaction.get().is_empty());
+    }
+
+    #[test]
+    fn load_memory_does_not_read_runtime_on_the_worker() {
+        // Opening Memory used to call studio.runtime() inside the remedy-depth
+        // callback (studio.rs:774 Signal::get) and abort the process.
+        let src = include_str!("actions.rs");
+        let Some(fn_at) = src.find("pub fn load_memory") else {
+            panic!("load_memory missing");
+        };
+        let body = &src[fn_at..];
+        let Some(spawn_at) = body.find("api::spawn_json") else {
+            panic!("load_memory has no spawn_json");
+        };
+        let after = &body[spawn_at..];
+        let post_at = after.find("wake.post").expect("load_memory must post to the UI waker");
+        let pre = &after[..post_at];
+        assert!(
+            !pre.contains("studio.runtime()"),
+            "load_memory must not call studio.runtime() on the remedy-depth worker"
+        );
+        assert!(
+            pre.contains("client_for_facts") || pre.contains("client.clone()"),
+            "load_memory should capture the client on the UI thread"
+        );
     }
 
     #[test]
