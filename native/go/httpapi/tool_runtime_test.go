@@ -335,3 +335,29 @@ func TestShellExecCancelledThroughExecutor(t *testing.T) {
 		t.Fatalf("cancellation took %s", elapsed)
 	}
 }
+
+func TestBindFileToolsCarryAccessScope(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	decode := func(raw []byte) map[string]any {
+		t.Helper()
+		out := map[string]any{}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("bound input not JSON: %v %s", err, raw)
+		}
+		return out
+	}
+	read := bindToolInput(cognition.ToolCall{Name: "read", Input: []byte(`{"path":"` + jsonEscape(outside) + `"}`)}, toolBinding{Root: root, Scope: "full"})
+	args := decode(read.Input)
+	if args["workspace_root"] != root {
+		t.Fatalf("read workspace_root=%v want %q", args["workspace_root"], root)
+	}
+	if args["access_scope"] != "full" {
+		t.Fatalf("read access_scope=%v want full", args["access_scope"])
+	}
+	proj := bindToolInput(cognition.ToolCall{Name: "grep", Input: []byte(`{"pattern":"x"}`)}, toolBinding{Root: root, Scope: "project"})
+	args = decode(proj.Input)
+	if args["access_scope"] != "project" {
+		t.Fatalf("grep access_scope=%v want project", args["access_scope"])
+	}
+}

@@ -379,36 +379,37 @@ func executeRead(_ context.Context, request Request) (Result, error) {
 		Offset        int    `json:"offset"`
 		Limit         int    `json:"limit"`
 		WorkspaceRoot string `json:"workspace_root"`
+		AccessScope   string `json:"access_scope"`
 	}
 	if err := json.Unmarshal(request.Input, &body); err != nil {
 		return Result{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
-	root, rootAbs, err := boundRoot(body.WorkspaceRoot)
+	bound, err := openBoundFS(body.WorkspaceRoot, body.AccessScope)
 	if err != nil {
 		return Result{}, err
 	}
-	defer root.Close()
-	rel, err := resolveBoundPath(rootAbs, body.Path)
+	defer bound.Close()
+	loc, err := bound.locate(body.Path)
 	if err != nil {
 		return Result{}, err
 	}
-	info, err := root.Stat(rel)
+	info, err := bound.Stat(loc)
 	if err != nil {
-		return Result{}, statError("read", body.Path, rootAbs, err)
+		return Result{}, statError("read", body.Path, bound.rootAbs, err)
 	}
 	if info.IsDir() {
 		return Result{}, fmt.Errorf("%w: %q is a directory — use glob to list what is in it", ErrInvalidInput, body.Path)
 	}
-	shown := filepath.ToSlash(filepath.Join(rootAbs, rel))
+	shown := loc.shown
 
-	if media := imageMediaTypes[strings.ToLower(filepath.Ext(rel))]; media != "" {
+	if media := imageMediaTypes[strings.ToLower(filepath.Ext(shown))]; media != "" {
 		if info.Size() > readMaxImageBytes {
 			return Result{}, fmt.Errorf("%w: %q is %d bytes, over the %d-byte image limit",
 				ErrInvalidInput, body.Path, info.Size(), readMaxImageBytes)
 		}
-		data, err := root.ReadFile(rel)
+		data, err := bound.ReadFile(loc)
 		if err != nil {
-			return Result{}, statError("read", body.Path, rootAbs, err)
+			return Result{}, statError("read", body.Path, bound.rootAbs, err)
 		}
 		out, err := json.Marshal(map[string]any{
 			"path": shown, "content": "", "total_lines": 0, "offset": 0, "next_offset": 0,
@@ -424,9 +425,9 @@ func executeRead(_ context.Context, request Request) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %q is %d bytes, over the %d-byte read limit — use grep to find the part you need",
 			ErrInvalidInput, body.Path, info.Size(), fsMaxFileBytes)
 	}
-	data, err := root.ReadFile(rel)
+	data, err := bound.ReadFile(loc)
 	if err != nil {
-		return Result{}, statError("read", body.Path, rootAbs, err)
+		return Result{}, statError("read", body.Path, bound.rootAbs, err)
 	}
 	if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
 		return Result{}, fmt.Errorf(
@@ -485,6 +486,8 @@ func executeRead(_ context.Context, request Request) (Result, error) {
 		result["note"] = fmt.Sprintf(
 			"showing lines %d-%d of %d; pass offset=%d and limit up to %d to continue",
 			offset, last, total, next, readMaxLines)
+	} else if loc.outside {
+		result["note"] = fullScopeNote()
 	}
 	out, err := json.Marshal(result)
 	return Result{Output: out}, err
@@ -534,6 +537,7 @@ func executeEdit(_ context.Context, request Request) (Result, error) {
 		NewString     string `json:"new_string"`
 		ReplaceAll    bool   `json:"replace_all"`
 		WorkspaceRoot string `json:"workspace_root"`
+		AccessScope   string `json:"access_scope"`
 	}
 	if err := json.Unmarshal(request.Input, &body); err != nil {
 		return Result{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
@@ -544,18 +548,18 @@ func executeEdit(_ context.Context, request Request) (Result, error) {
 	if body.OldString == body.NewString {
 		return Result{}, fmt.Errorf("%w: old_string and new_string are identical, so this edit would change nothing", ErrInvalidInput)
 	}
-	root, rootAbs, err := boundRoot(body.WorkspaceRoot)
+	bound, err := openBoundFS(body.WorkspaceRoot, body.AccessScope)
 	if err != nil {
 		return Result{}, err
 	}
-	defer root.Close()
-	rel, err := resolveBoundPath(rootAbs, body.Path)
+	defer bound.Close()
+	loc, err := bound.locate(body.Path)
 	if err != nil {
 		return Result{}, err
 	}
-	data, err := root.ReadFile(rel)
+	data, err := bound.ReadFile(loc)
 	if err != nil {
-		return Result{}, statError("edit", body.Path, rootAbs, err)
+		return Result{}, statError("edit", body.Path, bound.rootAbs, err)
 	}
 	if !utf8.Valid(data) {
 		return Result{}, fmt.Errorf("%w: %q is not UTF-8 text, so an exact-string edit cannot be applied", ErrInvalidInput, body.Path)
@@ -599,11 +603,11 @@ func executeEdit(_ context.Context, request Request) (Result, error) {
 	if bom {
 		out = append(append([]byte(nil), utf8BOM...), out...)
 	}
-	if err := atomicWriteInRoot(root, rel, out); err != nil {
+	if err := bound.atomicWrite(loc, out); err != nil {
 		return Result{}, err
 	}
 	payloadOut, err := json.Marshal(map[string]any{
-		"path":         filepath.ToSlash(filepath.Join(rootAbs, rel)),
+		"path":         loc.shown,
 		"replacements": replacements,
 		"bytes":        len(out),
 		"line_ending":  lineEndingName(out),
@@ -622,40 +626,39 @@ func executeWrite(_ context.Context, request Request) (Result, error) {
 		Path          string `json:"path"`
 		Content       string `json:"content"`
 		WorkspaceRoot string `json:"workspace_root"`
+		AccessScope   string `json:"access_scope"`
 	}
 	if err := json.Unmarshal(request.Input, &body); err != nil {
 		return Result{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
-	root, rootAbs, err := boundRoot(body.WorkspaceRoot)
+	bound, err := openBoundFS(body.WorkspaceRoot, body.AccessScope)
 	if err != nil {
 		return Result{}, err
 	}
-	defer root.Close()
-	rel, err := resolveBoundPath(rootAbs, body.Path)
+	defer bound.Close()
+	loc, err := bound.locate(body.Path)
 	if err != nil {
 		return Result{}, err
 	}
-	if rel == "." {
+	if !loc.usesHost() && loc.rel == "." {
 		return Result{}, fmt.Errorf("%w: path names the workspace root, not a file", ErrInvalidInput)
 	}
 	created := true
-	if info, err := root.Stat(rel); err == nil {
+	if info, err := bound.Stat(loc); err == nil {
 		if info.IsDir() {
 			return Result{}, fmt.Errorf("%w: %q is a directory", ErrInvalidInput, body.Path)
 		}
 		created = false
 	}
-	if parent := path.Dir(rel); parent != "." && parent != "" {
-		if err := root.MkdirAll(parent, 0o755); err != nil {
-			return Result{}, fmt.Errorf("%w: could not create %q under %s: %v", ErrInvalidInput, parent, rootAbs, err)
-		}
+	if err := bound.MkdirAll(loc, "", 0o755); err != nil {
+		return Result{}, fmt.Errorf("%w: could not create parent of %q: %v", ErrInvalidInput, loc.shown, err)
 	}
 	data := []byte(body.Content)
-	if err := atomicWriteInRoot(root, rel, data); err != nil {
+	if err := bound.atomicWrite(loc, data); err != nil {
 		return Result{}, err
 	}
 	out, err := json.Marshal(map[string]any{
-		"path":    filepath.ToSlash(filepath.Join(rootAbs, rel)),
+		"path":    loc.shown,
 		"bytes":   len(data),
 		"created": created,
 	})
@@ -717,6 +720,7 @@ func executeGlob(ctx context.Context, request Request) (Result, error) {
 		Pattern       string `json:"pattern"`
 		Path          string `json:"path"`
 		WorkspaceRoot string `json:"workspace_root"`
+		AccessScope   string `json:"access_scope"`
 	}
 	if err := json.Unmarshal(request.Input, &body); err != nil {
 		return Result{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
@@ -725,24 +729,25 @@ func executeGlob(ctx context.Context, request Request) (Result, error) {
 	if pattern == "" {
 		return Result{}, fmt.Errorf("%w: pattern is required, for example **/*.go", ErrInvalidInput)
 	}
-	root, rootAbs, err := boundRoot(body.WorkspaceRoot)
+	bound, err := openBoundFS(body.WorkspaceRoot, body.AccessScope)
 	if err != nil {
 		return Result{}, err
 	}
-	defer root.Close()
-	base, err := searchBase(root, rootAbs, body.Path)
+	defer bound.Close()
+	baseLoc, err := bound.searchBase(body.Path)
 	if err != nil {
 		return Result{}, err
 	}
 
 	type hit struct {
+		shown string
 		rel   string
 		mtime int64
 	}
 	hits := make([]hit, 0, 64)
 	truncated := false
-	err = walkBound(ctx, root, base, pattern, func(rel string, d fs.DirEntry) error {
-		if !matchGlob(pattern, relativeTo(base, rel)) {
+	add := func(rel, shown string, d fs.DirEntry) error {
+		if !matchGlob(pattern, relativeTo(baseLoc.rel, rel)) {
 			return nil
 		}
 		if len(hits) >= globMaxResults {
@@ -753,9 +758,18 @@ func executeGlob(ctx context.Context, request Request) (Result, error) {
 		if info, err := d.Info(); err == nil {
 			mtime = info.ModTime().UnixNano()
 		}
-		hits = append(hits, hit{rel: rel, mtime: mtime})
+		hits = append(hits, hit{shown: shown, rel: rel, mtime: mtime})
 		return nil
-	})
+	}
+	if baseLoc.usesHost() {
+		err = walkHost(ctx, baseLoc.hostAbs, pattern, func(rel, abs string, d fs.DirEntry) error {
+			return add(rel, filepath.ToSlash(abs), d)
+		})
+	} else {
+		err = walkBound(ctx, bound.root, baseLoc.rel, pattern, func(rel string, d fs.DirEntry) error {
+			return add(rel, filepath.ToSlash(filepath.Join(bound.rootAbs, rel)), d)
+		})
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -767,18 +781,20 @@ func executeGlob(ctx context.Context, request Request) (Result, error) {
 	})
 	files := make([]string, 0, len(hits))
 	for _, h := range hits {
-		files = append(files, filepath.ToSlash(filepath.Join(rootAbs, h.rel)))
+		files = append(files, h.shown)
 	}
 	result := map[string]any{
 		"files":     files,
 		"count":     len(files),
 		"truncated": truncated,
-		"searched":  filepath.ToSlash(filepath.Join(rootAbs, base)),
+		"searched":  baseLoc.shown,
 	}
 	if truncated {
 		result["note"] = fmt.Sprintf(
 			"results truncated at %d files; narrow the pattern or search a subdirectory to see the rest",
 			globMaxResults)
+	} else if baseLoc.outside {
+		result["note"] = fullScopeNote()
 	}
 	out, err := json.Marshal(result)
 	return Result{Output: out}, err
@@ -906,6 +922,7 @@ func executeGrep(ctx context.Context, request Request) (Result, error) {
 		Literal       bool   `json:"literal"`
 		CaseInsens    bool   `json:"case_insensitive"`
 		WorkspaceRoot string `json:"workspace_root"`
+		AccessScope   string `json:"access_scope"`
 	}
 	if err := json.Unmarshal(request.Input, &body); err != nil {
 		return Result{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
@@ -941,15 +958,16 @@ func executeGrep(ctx context.Context, request Request) (Result, error) {
 		limit = grepMaxResults
 	}
 
-	root, rootAbs, err := boundRoot(body.WorkspaceRoot)
+	bound, err := openBoundFS(body.WorkspaceRoot, body.AccessScope)
 	if err != nil {
 		return Result{}, err
 	}
-	defer root.Close()
-	base, err := searchBase(root, rootAbs, body.Path)
+	defer bound.Close()
+	baseLoc, err := bound.searchBase(body.Path)
 	if err != nil {
 		return Result{}, err
 	}
+	base := baseLoc.rel
 	fileGlob := strings.TrimSpace(body.Glob)
 
 	matches := make([]map[string]any, 0, 32)
@@ -957,24 +975,24 @@ func executeGrep(ctx context.Context, request Request) (Result, error) {
 	filesSearched, filesMatched := 0, 0
 	truncated := false
 
-	search := func(rel string) error {
+	search := func(loc located, matchRel string) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if fileGlob != "" && !matchGlob(fileGlob, relativeTo(base, rel)) {
+		if fileGlob != "" && !matchGlob(fileGlob, relativeTo(base, matchRel)) {
 			return nil
 		}
-		info, err := root.Stat(rel)
+		info, err := bound.Stat(loc)
 		if err != nil || info.Size() > grepMaxFileBytes {
 			return nil
 		}
-		data, err := root.ReadFile(rel)
+		data, err := bound.ReadFile(loc)
 		if err != nil || !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
 			return nil
 		}
 		filesSearched++
 		lines := splitLines(string(data))
-		shown := filepath.ToSlash(filepath.Join(rootAbs, rel))
+		shown := loc.shown
 		inFile := 0
 		for i, line := range lines {
 			if !re.MatchString(line) {
@@ -1003,12 +1021,18 @@ func executeGrep(ctx context.Context, request Request) (Result, error) {
 		return nil
 	}
 
-	if info, err := root.Stat(base); err == nil && !info.IsDir() {
-		if err := search(base); err != nil && !errors.Is(err, fs.SkipAll) {
+	if info, err := bound.Stat(baseLoc); err == nil && !info.IsDir() {
+		if err := search(baseLoc, baseLoc.rel); err != nil && !errors.Is(err, fs.SkipAll) {
 			return Result{}, err
 		}
-	} else if err := walkBound(ctx, root, base, orPattern(fileGlob, "**"), func(rel string, _ fs.DirEntry) error {
-		return search(rel)
+	} else if baseLoc.usesHost() {
+		if err := walkHost(ctx, baseLoc.hostAbs, orPattern(fileGlob, "**"), func(rel, abs string, _ fs.DirEntry) error {
+			return search(located{hostAbs: abs, shown: filepath.ToSlash(abs)}, rel)
+		}); err != nil {
+			return Result{}, err
+		}
+	} else if err := walkBound(ctx, bound.root, base, orPattern(fileGlob, "**"), func(rel string, _ fs.DirEntry) error {
+		return search(located{rel: rel, shown: filepath.ToSlash(filepath.Join(bound.rootAbs, rel))}, rel)
 	}); err != nil {
 		return Result{}, err
 	}
@@ -1027,6 +1051,8 @@ func executeGrep(ctx context.Context, request Request) (Result, error) {
 			note += "; raise the pattern specificity or page with a tighter path to see matches past the cap"
 		}
 		result["note"] = note
+	} else if baseLoc.outside {
+		result["note"] = fullScopeNote()
 	}
 	out, err := json.Marshal(result)
 	return Result{Output: out}, err

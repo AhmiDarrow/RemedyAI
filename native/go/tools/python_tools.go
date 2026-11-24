@@ -62,6 +62,7 @@ var modelInternalInputKeys = []string{
 	"session_id",
 	"workspace_root",
 	"project_path",
+	"access_scope",
 	"page_context",
 	"caller_origin",
 	GoBoundField,
@@ -128,7 +129,7 @@ func ModelInputSchema(schema json.RawMessage) json.RawMessage {
 // them after overwriting the paths with the session root.
 const (
 	propGoBound       = `"_go_bound":{"type":"boolean","description":"Set by the Go runtime after it bound workspace_root/project_path/home_dir; never model-supplied"}`
-	propWorkspaceRoot = `"workspace_root":{"type":"string","description":"Absolute workspace root (bound by the runtime to the session project; model-supplied values are ignored)"}`
+	propWorkspaceRoot = `"workspace_root":{"type":"string","description":"Absolute workspace root (bound by the runtime to the session project; model-supplied values are ignored)"},"access_scope":{"type":"string","description":"Access scope bound by the runtime (project, home, or full). Model-supplied values are ignored."}`
 	propProjectPath   = `"project_path":{"type":"string","description":"Absolute project path (bound by the runtime; model-supplied values are ignored)"}`
 	propHomeDir       = `"home_dir":{"type":"string","description":"Remedy home directory (internal; injected by the Go runtime)"}`
 )

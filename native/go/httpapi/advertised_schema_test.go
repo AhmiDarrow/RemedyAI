@@ -16,7 +16,7 @@ func TestAdvertisedSchemasHideRuntimeBoundFields(t *testing.T) {
 		t.Fatal("no tools advertised")
 	}
 
-	hidden := []string{"workspace_root", "home_dir", "session_id", "project_path"}
+	hidden := []string{"workspace_root", "home_dir", "session_id", "project_path", "access_scope"}
 	sawSomeProperties := false
 	for _, tool := range surface {
 		if len(tool.InputSchema) == 0 {
