@@ -603,7 +603,7 @@ pub fn create_session(
 }
 
 
-fn encode_path_seg(s: &str) -> String {
+pub(crate) fn encode_path_seg(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
@@ -1200,5 +1200,21 @@ mod tests {
         }));
         let ids: Vec<&str> = rows.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["u1", "a1"]);
+    }
+}
+
+#[cfg(test)]
+mod delete_path_tests {
+    use super::encode_path_seg;
+
+    #[test]
+    fn encode_path_seg_keeps_uuids() {
+        let id = "6af526a0-d72f-4fff-b226-2791429533e9";
+        assert_eq!(encode_path_seg(id), id);
+    }
+
+    #[test]
+    fn encode_path_seg_percent_encodes_reserved() {
+        assert_eq!(encode_path_seg("a/b c"), "a%2Fb%20c");
     }
 }

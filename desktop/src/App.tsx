@@ -178,6 +178,7 @@ export default function App() {
     loadMore: loadMoreSessions,
     remove,
     rename,
+    forget: forgetSession,
     refresh: refreshSessions,
   } = useSessions()
   // Studio lists raw-work sessions only — Grove's personal home/goal chats
@@ -778,6 +779,8 @@ export default function App() {
   activeIdRef.current = activeId
   const refreshSessionsRef = useRef(refreshSessions)
   refreshSessionsRef.current = refreshSessions
+  const forgetSessionRef = useRef(forgetSession)
+  forgetSessionRef.current = forgetSession
   const reloadMessagesRef = useRef(reloadMessages)
   reloadMessagesRef.current = reloadMessages
   // Avoid force-reloading the active thread while a local stream is mid-flight —
@@ -833,11 +836,16 @@ export default function App() {
               .catch(() => {})
             return
           }
+          if (ev.type === 'session_deleted') {
+            if (ev.session_id) forgetSessionRef.current(ev.session_id)
+            // Refresh the list, but do not reload messages for the deleted thread.
+            scheduleRefresh()
+            return
+          }
           if (
             ev.type === 'session_created'
             || ev.type === 'session_updated'
             || ev.type === 'message_added'
-            || ev.type === 'session_deleted'
             || ev.type === 'turn_started'
             || ev.type === 'message_reaction'
           ) {
