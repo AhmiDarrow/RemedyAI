@@ -39,6 +39,7 @@ import { SplashScreen } from './components/SplashScreen'
 import { TitleBar, type AppMenuAction } from './components/TitleBar'
 import { UserNamePrompt } from './components/UserNamePrompt'
 import { HouseRulesUpdateOffer } from './components/setup/HouseRulesUpdateOffer'
+import { SetupFlow } from './components/SetupFlow'
 import { getSetupSession, updateSetupSession, type SetupUpdateOffer } from './api/setup'
 import { CommandPalette, type CommandItem } from './components/CommandPalette'
 import { ChatSessionHeader } from './components/ChatSessionHeader'
@@ -50,9 +51,6 @@ const SettingsPanel = lazy(() =>
 )
 const HelpPanel = lazy(() =>
   import('./components/HelpPanel').then((m) => ({ default: m.HelpPanel })),
-)
-const SetupFlow = lazy(() =>
-  import('./components/SetupFlow').then((m) => ({ default: m.SetupFlow })),
 )
 const UpdateScreen = lazy(() =>
   import('./components/UpdateScreen').then((m) => ({ default: m.UpdateScreen })),
@@ -1557,8 +1555,15 @@ export default function App() {
 
   const dismissHouseRulesOffer = useCallback((go: boolean) => {
     setHouseRulesOffer(null)
-    void updateSetupSession({ action: go ? 'update_offer_go' : 'update_offer_later' }).catch(() => {})
-    if (go) setShowHouseRulesRevisit(true)
+    void updateSetupSession({ action: go ? 'update_offer_go' : 'update_offer_later' })
+      .then((session) => {
+        // Finished installs just acknowledge the notice. Only reopen setup
+        // when the sidecar actually starts onboarding (setup still incomplete).
+        if (go && session.onboarding_pending) {
+          setShowHouseRulesRevisit(true)
+        }
+      })
+      .catch(() => {})
   }, [])
 
   if (serverState === 'connecting') {

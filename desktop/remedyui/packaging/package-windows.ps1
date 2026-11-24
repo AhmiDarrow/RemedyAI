@@ -103,23 +103,97 @@ $runtimeNsis = (Resolve-Path -LiteralPath $Runtime).Path
 $coreNsis = (Resolve-Path -LiteralPath $Core).Path
 $outNsis = $out
 
-# Build or reuse the chat Web UI (Vite app in desktop/). Packaged runtime serves
-# $INSTDIR\webui next to remedy-runtime.exe.
+# Build a matching chat Web UI (Vite app in desktop/). Packaged runtime serves
+# $INSTDIR\webui next to remedy-runtime.exe. Always rebuild when desktop/src is
+# newer than dist (or dist is incomplete) so index.html cannot reference a
+# chunk that was never copied.
+function Assert-WebUIComplete([string]$Root) {
+    $index = Join-Path $Root "index.html"
+    if (-not (Test-Path -LiteralPath $index)) {
+        throw "Web UI is missing: expected $index"
+    }
+    $html = Get-Content -Raw -LiteralPath $index
+    $refs = [System.Collections.Generic.List[string]]::new()
+    foreach ($m in [regex]::Matches($html, "(?:src|href)\s*=\s*["']([^"']+)["']")) {
+        $rel = $m.Groups[1].Value
+        if ($rel -match '^(https?:|data:|mailto:|#)') { continue }
+        $rel = $rel -replace '[?#].*$', ''
+        $rel = $rel.TrimStart('./').TrimStart('/')
+        if ($rel) { $refs.Add($rel) }
+    }
+    $i = 0
+    while ($i -lt $refs.Count) {
+        $rel = $refs[$i]
+        $i++
+        $path = Join-Path $Root ($rel -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $path)) {
+            throw "Web UI bundle is incomplete: $index references $rel but $path is missing"
+        }
+        if ($rel -notmatch '\.(js|mjs)$') { continue }
+        $body = Get-Content -Raw -LiteralPath $path
+        $base = Split-Path -Parent $rel
+        foreach ($im in [regex]::Matches($body, "["'](\./[A-Za-z0-9_./@-]+\.(?:js|mjs|css|wasm))["']")) {
+            $imp = $im.Groups[1].Value
+            if ($imp.StartsWith('./')) {
+                if ([string]::IsNullOrEmpty($base) -or $base -eq '.') {
+                    $joined = $imp.Substring(2)
+                } else {
+                    $joined = ($base.TrimEnd('/') + '/' + $imp.Substring(2))
+                }
+                $joined = $joined -replace '\', '/'
+                if (-not $refs.Contains($joined)) { $refs.Add($joined) }
+            }
+        }
+    }
+}
+
 $webuiStage = Join-Path $outDir "webui"
 if (Test-Path -LiteralPath $webuiStage) { Remove-Item -LiteralPath $webuiStage -Recurse -Force }
 $dist = Join-Path $desktop "dist"
-$needBuild = -not (Test-Path -LiteralPath (Join-Path $dist "index.html"))
+$indexPath = Join-Path $dist "index.html"
+$needBuild = $true
+if (Test-Path -LiteralPath $indexPath) {
+    try {
+        Assert-WebUIComplete $dist
+        $distTime = (Get-Item -LiteralPath $indexPath).LastWriteTimeUtc
+        $srcRoots = @(
+            (Join-Path $desktop "src"),
+            (Join-Path $desktop "index.html"),
+            (Join-Path $desktop "vite.config.ts"),
+            (Join-Path $desktop "package.json")
+        )
+        $newer = $false
+        foreach ($src in $srcRoots) {
+            if (-not (Test-Path -LiteralPath $src)) { continue }
+            $items = Get-Item -LiteralPath $src
+            if ($items.PSIsContainer) {
+                $items = Get-ChildItem -LiteralPath $src -Recurse -File -ErrorAction SilentlyContinue
+            }
+            foreach ($item in @($items)) {
+                if ($item.LastWriteTimeUtc -gt $distTime) { $newer = $true; break }
+            }
+            if ($newer) { break }
+        }
+        $needBuild = $newer
+        if (-not $needBuild) { Write-Output "Reusing complete desktop/dist (up to date with desktop/src)" }
+    } catch {
+        Write-Output "Rebuilding Web UI: $($_.Exception.Message)"
+        $needBuild = $true
+    }
+}
 if ($needBuild) {
     $npm = Get-Command npm -ErrorAction SilentlyContinue
     if (-not $npm) { throw "npm is required to build the Web UI (desktop/). Install Node.js, or leave a built desktop/dist/index.html." }
     Push-Location $desktop
     try {
-        if (Test-Path -LiteralPath (Join-Path $desktop "package-lock.json")) {
-            & $npm.Source ci
-        } else {
-            & $npm.Source install
+        if (-not (Test-Path -LiteralPath (Join-Path $desktop "node_modules"))) {
+            if (Test-Path -LiteralPath (Join-Path $desktop "package-lock.json")) {
+                & $npm.Source ci
+            } else {
+                & $npm.Source install
+            }
+            if ($LASTEXITCODE -ne 0) { throw "npm install/ci failed ($LASTEXITCODE)" }
         }
-        if ($LASTEXITCODE -ne 0) { throw "npm install/ci failed ($LASTEXITCODE)" }
         # npm 12 may skip esbuild's postinstall (allowScripts). Vite needs the binary.
         $esbuildInstall = Join-Path $desktop "node_modules\esbuild\install.js"
         if (Test-Path -LiteralPath $esbuildInstall) {
@@ -132,11 +206,10 @@ if ($needBuild) {
         Pop-Location
     }
 }
-if (-not (Test-Path -LiteralPath (Join-Path $dist "index.html"))) {
-    throw "Web UI is missing: expected $dist\index.html after the build"
-}
+Assert-WebUIComplete $dist
 New-Item -ItemType Directory -Force -Path $webuiStage | Out-Null
 Copy-Item -Path (Join-Path $dist "*") -Destination $webuiStage -Recurse -Force
+Assert-WebUIComplete $webuiStage
 $webuiNsis = (Resolve-Path -LiteralPath $webuiStage).Path
 
 & $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DRUNTIMESRCPATH=$runtimeNsis" "/DCORESRCPATH=$coreNsis" "/DWEBUISRCPATH=$webuiNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
