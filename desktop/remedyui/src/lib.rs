@@ -67,7 +67,7 @@ pub use slides::{
 };
 pub use studio::Studio;
 pub use model_picker::{parse_connected, PickerStatus, ProviderChoice};
-pub use status::status_bar;
+pub use status::{compact_bar, status_bar};
 pub use timetravel::{TimeTravel, preview as time_travel_preview};
 pub use usage::{UsageContext, UsageDashboard, UsagePanel, UsageWindow};
 

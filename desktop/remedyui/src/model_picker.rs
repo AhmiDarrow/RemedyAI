@@ -11,8 +11,9 @@ use crate::studio::Studio;
 use crate::{messages, tokens};
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
-use remedy_ui::layout::Length;
-use remedy_ui::reactive::{Waker, waker};
+use remedy_ui::layout::{Align, Length};
+use remedy_ui::reactive::{Signal, Waker, waker};
+use remedy_ui::show;
 use remedy_ui::widgets as w;
 use remedy_ui::widgets::MenuItem;
 use remedy_ui::{El, Ui};
@@ -140,12 +141,7 @@ pub fn plan(studio: &Studio) -> MenuPlan {
                 .iter()
                 .map(|m| {
                     let on = current && (m.id == current_m);
-                    let label = if m.name.is_empty() || m.name == m.id {
-                        m.id.clone()
-                    } else {
-                        m.name.clone()
-                    };
-                    (m.id.clone(), label, on)
+                    (m.id.clone(), model_menu_label(&m.id, &m.name), on)
                 })
                 .collect();
             MenuGroup {
@@ -188,34 +184,23 @@ fn trigger_label(
         }
     }
     if let Some(p) = providers.iter().find(|p| p.id == current_p) {
-        let model = providers
+        let raw = p
+            .models
             .iter()
-            .find(|x| x.id == current_p)
-            .and_then(|x| {
-                x.models
-                    .iter()
-                    .find(|m| m.id == current_m)
-                    .map(|m| {
-                        if m.name.is_empty() {
-                            m.id.clone()
-                        } else {
-                            m.name.clone()
-                        }
-                    })
-            })
+            .find(|m| m.id == current_m)
+            .map(|m| if m.name.is_empty() { m.id.clone() } else { m.name.clone() })
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| current_m.to_string());
-        if model.is_empty() {
+        if raw.is_empty() {
             return p.name.clone();
         }
-        // Prefer the model id/name; the menu shows the provider.
-        return model;
+        return short_model_name(current_m, &raw);
     }
     if !current_m.is_empty() && !is_stub_model(current_m, current_p) {
-        return current_m.to_string();
+        return short_model_name(current_m, current_m);
     }
     if studio.local_only && !current_m.is_empty() {
-        return current_m.to_string();
+        return short_model_name(current_m, current_m);
     }
     if providers.is_empty() && matches!(status, PickerStatus::Ready) && !studio.local_only {
         return "No providers".into();
@@ -223,8 +208,103 @@ fn trigger_label(
     "Model".into()
 }
 
+/// Last path segment, or a human display name that isn't the raw provider/path id.
+pub fn short_model_name(id: &str, display: &str) -> String {
+    let id = id.trim();
+    let display = display.trim();
+    let last = id.rsplit('/').next().unwrap_or(id).trim();
+    let last = if last.is_empty() { id } else { last };
+    if !display.is_empty() && display != id {
+        if display.contains('/') {
+            let dlast = display.rsplit('/').next().unwrap_or(display).trim();
+            if !dlast.is_empty() {
+                return dlast.to_string();
+            }
+        } else {
+            return display.to_string();
+        }
+    }
+    last.to_string()
+}
+
+fn model_menu_label(id: &str, name: &str) -> String {
+    let short = short_model_name(id, name);
+    if short == id {
+        short
+    } else {
+        format!("{short} ({id})")
+    }
+}
+
+fn trigger_prefix(studio: &Studio) -> Option<String> {
+    let providers = studio.providers.get();
+    let current_p = studio.provider.get();
+    let status = studio.picker_status.get();
+    if matches!(status, PickerStatus::Loading) && providers.is_empty() {
+        return None;
+    }
+    let p = providers.iter().find(|x| x.id == current_p)?;
+    let short = trigger_label(
+        &providers,
+        &current_p,
+        &studio.model.get(),
+        &status,
+        studio,
+    );
+    if short == p.name {
+        return None;
+    }
+    let name = p.name.trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
 fn is_stub_model(model: &str, provider: &str) -> bool {
     model == "remedy" && (provider == "local" || provider.is_empty())
+}
+
+const CHIP_MAX: f32 = 240.0;
+const CHIP_CHROME: f32 = 36.0; // start/end padding plus chevron
+
+fn estimate_text_width(text: &str, size: f32) -> f32 {
+    // Slightly wide guess for Remedy Sans UI at body size, so the prefix hides
+    // before it would crowd the short name.
+    text.chars().count() as f32 * size * 0.58
+}
+
+fn prefix_fits(prefix: &str, name: &str, inner: f32) -> bool {
+    if prefix.is_empty() || name.is_empty() {
+        return false;
+    }
+    let size = tokens::BODY.size;
+    estimate_text_width(prefix, size) + 8.0 + estimate_text_width(name, size) <= inner
+}
+
+fn tooltip_text(studio: &Studio) -> String {
+    let providers = studio.providers.get();
+    let current_p = studio.provider.get();
+    let current_m = studio.model.get();
+    let provider = providers
+        .iter()
+        .find(|p| p.id == current_p)
+        .map(|p| p.name.as_str())
+        .filter(|s| !s.is_empty());
+    if current_m.is_empty() || is_stub_model(&current_m, &current_p) {
+        return trigger_label(
+            &providers,
+            &current_p,
+            &current_m,
+            &studio.picker_status.get(),
+            studio,
+        );
+    }
+    match provider {
+        Some(name) => format!("{name}  {current_m}"),
+        None => current_m,
+    }
 }
 
 /// `GET /api/providers/connected` → picker rows (else connected), plus the
@@ -552,58 +632,145 @@ pub fn open_settings_models() {
 /// submenus, no clipping into the overflow row's ⋯).
 pub fn control(ui: &Ui, studio: Studio) -> El {
     let colors = ui.theme().colors.clone();
-    let plan_s = studio.clone();
-    let label = {
-        let st = plan_s.clone();
-        move || plan(&st).trigger
-    };
     let anchor: Rc<RefCell<Option<El>>> = Rc::new(RefCell::new(None));
     let open_ui = ui.clone();
     let open_studio = studio.clone();
     let open_anchor = anchor.clone();
-    let btn = w::button(ui, label, move || {
-        let Some(anchor_el) = open_anchor.borrow().clone() else {
+    // w::button's label is nowrap + shrink 0, so a long id painted over Simple.
+    // Build the chip ourselves: short name, optional muted provider prefix,
+    // ellipsis, max width, tooltip with the full id.
+    let show_prefix = Signal::new({
+        let st = studio.clone();
+        match trigger_prefix(&st) {
+            Some(prefix) => prefix_fits(&prefix, &plan(&st).trigger, CHIP_MAX - CHIP_CHROME),
+            None => false,
+        }
+    });
+
+    let prefix_el = {
+        let st = studio.clone();
+        let colors = colors.clone();
+        let prefix_on = show_prefix.clone();
+        let u = ui.clone();
+        show(ui, move || prefix_on.get() && trigger_prefix(&st).is_some(), {
+            let st = studio.clone();
+            let colors = colors.clone();
+            let u = u.clone();
+            move || {
+                let st = st.clone();
+                w::text(&u, move || trigger_prefix(&st).unwrap_or_default())
+                    .variant("muted")
+                    .nowrap()
+                    .style({
+                        let colors = colors.clone();
+                        move || tokens::typo(tokens::BODY).foreground(colors.muted)
+                    })
+            }
+        })
+        .el()
+    };
+
+    let name_el = {
+        let st = studio.clone();
+        let colors = colors.clone();
+        w::text(ui, move || plan(&st).trigger)
+            .nowrap()
+            .truncate()
+            .style({
+                let colors = colors.clone();
+                move || tokens::typo(tokens::BODY).weight(550.0).foreground(colors.text)
+            })
+            .layout(|l| {
+                l.min_width = Length::Px(0.0);
+                l.shrink = 1.0;
+            })
+    };
+
+    let gap = ui.theme().spacing.unit * 1.5;
+    let btn = ui
+        .el("button")
+        .row()
+        .align(Align::Center)
+        .gap(gap)
+        .variant("quiet")
+        .style({
+            let colors = colors.clone();
+            let st = studio.clone();
+            move || {
+                let on = !st.provider.get().is_empty()
+                    && !is_stub_model(&st.model.get(), &st.provider.get());
+                tokens::chip(&colors, on)
+                    .merge(&tokens::typo(tokens::BODY))
+                    .weight(550.0)
+            }
+        })
+        .child(prefix_el)
+        .child(name_el)
+        .child(w::icon(
+            ui,
+            w::Icon::ChevronDown,
+            ui.theme().type_scale.small + 2.0,
+        ))
+        .on_click({
+            let open_anchor = open_anchor.clone();
+            let open_ui = open_ui.clone();
+            let open_studio = open_studio.clone();
+            move || {
+                let Some(anchor_el) = open_anchor.borrow().clone() else {
+                    return;
+                };
+                let items = menu_items(&open_studio);
+                w::menu(&open_ui, &anchor_el, items);
+            }
+        })
+        .semantics({
+            let st = studio.clone();
+            let u = ui.clone();
+            move || {
+                let name = plan(&st).trigger;
+                let label = format!("{}: {name}", messages().text(&u, "status-model"));
+                Semantics::new(Role::Button)
+                    .label(label)
+                    .action(Action::Click)
+            }
+        })
+        .layout(|l| {
+            l.min_width = Length::Px(0.0);
+            l.max_width = Length::Px(CHIP_MAX);
+            l.shrink = 1.0;
+        })
+        .padding(Insets {
+            top: 2.0,
+            end: 6.0,
+            bottom: 2.0,
+            start: 8.0,
+        });
+
+    let measured = btn.clone();
+    let st_fit = studio.clone();
+    let show = show_prefix.clone();
+    let btn = btn.bind(move || {
+        let name = plan(&st_fit).trigger;
+        let Some(prefix) = trigger_prefix(&st_fit) else {
+            if show.get() {
+                show.set(false);
+            }
             return;
         };
-        let items = menu_items(&open_studio);
-        w::menu(&open_ui, &anchor_el, items);
-    })
-    .variant("quiet")
-    .style({
-        let colors = colors.clone();
-        let st = studio.clone();
-        move || {
-            let on = !st.provider.get().is_empty() && !is_stub_model(&st.model.get(), &st.provider.get());
-            tokens::chip(&colors, on)
-                .merge(&tokens::typo(tokens::BODY))
-                .weight(550.0)
+        let inner = measured
+            .bounds()
+            .map(|b| (b.width() - CHIP_CHROME).max(0.0))
+            .unwrap_or(CHIP_MAX - CHIP_CHROME);
+        let room = prefix_fits(&prefix, &name, inner);
+        if show.get() != room {
+            show.set(room);
         }
-    })
-    .semantics({
-        let st = studio.clone();
-        let u = ui.clone();
-        move || {
-            let name = plan(&st).trigger;
-            let label = format!("{}: {name}", messages().text(&u, "status-model"));
-            Semantics::new(Role::Button)
-                .label(label)
-                .action(Action::Click)
-        }
-    })
-    .child(w::icon(ui, w::Icon::ChevronDown, ui.theme().type_scale.small + 2.0))
-    .layout(|l| {
-        l.min_width = Length::Px(0.0);
-        l.max_width = Length::Px(240.0);
-        l.shrink = 1.0;
     });
+
     *anchor.borrow_mut() = Some(btn.clone());
-    // Tight chip padding so the dock stays 44px tall at every width.
-    btn.padding(Insets {
-        top: 2.0,
-        end: 6.0,
-        bottom: 2.0,
-        start: 8.0,
-    })
+    let st_tip = studio.clone();
+    w::tooltip(&btn, move || tooltip_text(&st_tip));
+    btn
 }
 
 fn menu_items(studio: &Studio) -> Vec<MenuItem> {
@@ -767,6 +934,50 @@ mod tests {
             session_body("xai", "", false)["model"],
             Value::Null
         );
+    }
+
+    #[test]
+    fn short_model_name_uses_display_or_last_path_segment() {
+        let long = "anthropic/thinkingmachines/inkling-2-mini[1m]";
+        assert_eq!(short_model_name(long, long), "inkling-2-mini[1m]");
+        assert_eq!(short_model_name(long, ""), "inkling-2-mini[1m]");
+        assert_eq!(short_model_name("openrouter/auto", "Auto"), "Auto");
+        assert_eq!(short_model_name("llama3.2", "llama3.2"), "llama3.2");
+        assert_eq!(
+            model_menu_label(long, long),
+            "inkling-2-mini[1m] (anthropic/thinkingmachines/inkling-2-mini[1m])"
+        );
+        assert_eq!(model_menu_label("llama3.2", "llama3.2"), "llama3.2");
+    }
+
+    #[test]
+    fn trigger_uses_short_name_and_tooltip_keeps_the_full_id() {
+        let s = Studio::preview();
+        let long = "anthropic/thinkingmachines/inkling-2-mini[1m]";
+        s.providers.set(vec![ProviderChoice {
+            id: "anthropic".into(),
+            name: "Anthropic".into(),
+            models: vec![ModelChoice { id: long.into(), name: long.into() }],
+            last_model: long.into(),
+            connected: true,
+            enabled: true,
+        }]);
+        s.provider.set("anthropic".into());
+        s.model.set(long.into());
+        s.picker_status.set(PickerStatus::Ready);
+        let p = plan(&s);
+        assert_eq!(p.trigger, "inkling-2-mini[1m]");
+        assert!(
+            !p.trigger.contains("anthropic/thinkingmachines"),
+            "chip must not show the full path id: {}",
+            p.trigger
+        );
+        let tip = tooltip_text(&s);
+        assert!(tip.contains(long), "tooltip should keep the full id: {tip}");
+        assert_eq!(trigger_prefix(&s).as_deref(), Some("Anthropic"));
+        let label = &p.groups[0].models[0].1;
+        assert!(label.contains(long), "dropdown should include the full id: {label}");
+        assert!(label.contains("inkling-2-mini[1m]"));
     }
 
     #[test]

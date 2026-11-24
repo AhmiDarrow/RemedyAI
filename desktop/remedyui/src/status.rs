@@ -151,7 +151,7 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
 }
 
 /// Phone portal: status, a live pill, and reconnect. Power controls stay on the desktop.
-fn compact_bar(ui: &Ui, studio: Studio) -> El {
+pub fn compact_bar(ui: &Ui, studio: Studio) -> El {
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
     w::row(ui)
