@@ -1054,6 +1054,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "encoding_rs"
+version = "0.8.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75030f3c4f45dafd7586dd6780965a8c7e8e285a5ecb86713e63a79c5b2766f3"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "endi"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3572,7 +3581,9 @@ dependencies = [
  "remedy-ui-themes",
  "remedy-ui-tree",
  "remedy-ui-view",
+ "remedy-ui-viz",
  "remedy-ui-widgets-core",
+ "remedy-ui-widgets-extra",
  "remedy-ui-widgets-forms",
  "remedy-ui-widgets-nav",
  "remedy-ui-widgets-term",
@@ -4114,6 +4125,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "remedy-ui-viz"
+version = "1.0.0-rc.1"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=3142c66cde5e20b06028f955087326dab9a04b51#3142c66cde5e20b06028f955087326dab9a04b51"
+dependencies = [
+ "remedy-ui-a11y",
+ "remedy-ui-core",
+ "remedy-ui-input",
+ "remedy-ui-layout",
+ "remedy-ui-paint",
+ "remedy-ui-reactive",
+ "remedy-ui-view",
+]
+
+[[package]]
 name = "remedy-ui-widgets-core"
 version = "1.0.0-rc.1"
 source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=3142c66cde5e20b06028f955087326dab9a04b51#3142c66cde5e20b06028f955087326dab9a04b51"
@@ -4126,6 +4151,24 @@ dependencies = [
  "remedy-ui-reactive",
  "remedy-ui-style",
  "remedy-ui-view",
+]
+
+[[package]]
+name = "remedy-ui-widgets-extra"
+version = "1.0.0-rc.1"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=3142c66cde5e20b06028f955087326dab9a04b51#3142c66cde5e20b06028f955087326dab9a04b51"
+dependencies = [
+ "encoding_rs",
+ "remedy-ui-a11y",
+ "remedy-ui-core",
+ "remedy-ui-input",
+ "remedy-ui-layout",
+ "remedy-ui-paint",
+ "remedy-ui-reactive",
+ "remedy-ui-style",
+ "remedy-ui-view",
+ "remedy-ui-viz",
+ "remedy-ui-widgets-core",
 ]
 
 [[package]]
