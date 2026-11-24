@@ -366,6 +366,28 @@ fn rmb(ui: &Ui, s: Settings) -> El {
             },
             move |ui| gguf_select(ui, s),
         );
+        let catalog = bits::rebuild_on(
+            ui,
+            move || {
+                let _ = s.rmb_catalog.get().to_string();
+                let _ = s.rmb.get().get("catalog").map(|v| v.to_string());
+            },
+            move |ui| catalog_select(ui, s),
+        );
+        let hf_repos = bits::rebuild_on(
+            ui,
+            move || {
+                let _ = s.hf_hits.get().to_string();
+            },
+            move |ui| hf_repo_select(ui, s),
+        );
+        let hf_files = bits::rebuild_on(
+            ui,
+            move || {
+                let _ = s.hf_files.get().to_string();
+            },
+            move |ui| hf_file_select(ui, s),
+        );
         let profile_now = bits::str_of(&s.rmb.get(), "profile");
         let profile = Signal::new(if profile_now.is_empty() { "autofit".into() } else { profile_now });
         let thinking = Signal::new(rmb_thinking(&s.rmb.get()));
@@ -373,7 +395,6 @@ fn rmb(ui: &Ui, s: Settings) -> El {
             thinking.set_if_changed(rmb_thinking(&s.rmb.get()));
         });
         let knobs = knob_list(ui, s);
-        let hits = w::text(ui, move || hf_line(&s.hf_hits.get())).variant("small");
         form::stack(ui)
             .child(status)
             .child(form::hint(
@@ -385,6 +406,7 @@ fn rmb(ui: &Ui, s: Settings) -> El {
                 patch_rmb(s, json!({ "thinking": thinking.get() }));
             }))
             .child(files)
+            .child(catalog)
             .child(bits::field(ui, "Or paste a GGUF path", s.rmb_path, "C:\\models\\remedy.gguf"))
             .child(form::action(ui, "Use pasted path", "primary", move || {
                 let path = s.rmb_path.get();
@@ -392,6 +414,16 @@ fn rmb(ui: &Ui, s: Settings) -> El {
             }))
             .child(form::action(ui, "Start host", "quiet", move || bits::ask(s, "POST", "rmb/start", Some(json!({})), "Local host starting.")))
             .child(form::action(ui, "Stop host", "danger", move || bits::ask(s, "POST", "rmb/stop", Some(json!({})), "Local host stopping.")))
+            .child(form::action(ui, "Use for chat", "primary", move || {
+                bits::ask(s, "POST", "rmb/use", Some(json!({})), "Switching chat to the local model.");
+            }))
+            .child(form::action(ui, "Refresh list", "quiet", move || {
+                if s.preview {
+                    s.banner.set("Not available in this preview.".into());
+                    return;
+                }
+                s.refresh_rmb();
+            }))
             .child(bits::choice(
                 ui,
                 "Profile",
@@ -409,22 +441,13 @@ fn rmb(ui: &Ui, s: Settings) -> El {
                     return;
                 }
                 super::http::request(s, "POST", "rmb/hf/search".into(), Some(json!({ "query": query })), move |out| match out {
-                    Ok(v) => {
-                        s.hf_hits.set(v.get("repos").cloned().unwrap_or(Value::Null));
-                        s.report(Ok(v), "Search finished.");
-                    }
+                    Ok(v) => apply_hf_search(s, v),
                     Err(e) => s.banner.set(e),
                 });
             }))
-            .child(hits)
-            .child(form::action(ui, "Pull first result", "primary", move || {
-                let repo = s.hf_hits.get().as_array().and_then(|a| a.first()).map(|row| bits::str_of(row, "id")).unwrap_or_default();
-                if repo.is_empty() {
-                    s.banner.set("Search first.".into());
-                    return;
-                }
-                bits::ask(s, "POST", "rmb/hf/pull", Some(json!({ "repo": repo, "load": true })), "Download started.");
-            }))
+            .child(hf_repos)
+            .child(hf_files)
+            .child(form::action(ui, "Pull and load", "primary", move || pull_selected_hf(s)))
             .child(form::action(ui, "Download progress", "quiet", move || {
                 bits::ask(s, "GET", "rmb/hf/progress", None, "Progress updated.");
             }))
@@ -432,6 +455,175 @@ fn rmb(ui: &Ui, s: Settings) -> El {
                 bits::ask(s, "POST", "rmb/hf/cancel", Some(json!({})), "Download cancelled.");
             }))
     })
+}
+
+
+fn catalog_select(ui: &Ui, s: Settings) -> El {
+    let models = logic::rmb_catalog_models(&s.rmb_catalog.get(), &s.rmb.get());
+    if models.is_empty() {
+        return form::stack(ui);
+    }
+    let current = bits::str_of(&s.rmb.get(), "model_id");
+    let default = bits::str_of(&s.rmb_catalog.get(), "default_model_id");
+    let start = if !current.is_empty() {
+        current
+    } else if !default.is_empty() {
+        default
+    } else {
+        bits::str_of(&models[0], "id")
+    };
+    let selected = Signal::new(start);
+    let pairs: Vec<(String, String)> = models
+        .iter()
+        .map(|m| {
+            let id = bits::str_of(m, "id");
+            (id.clone(), logic::rmb_catalog_label(m))
+        })
+        .filter(|(id, _)| !id.is_empty())
+        .collect();
+    if pairs.is_empty() {
+        return form::stack(ui);
+    }
+    form::stack(ui)
+        .child(bits::picker(ui, "Catalog shortcut", &pairs, selected))
+        .child(form::action(ui, "Use catalog model", "primary", move || {
+            let id = selected.get();
+            if id.trim().is_empty() {
+                s.banner.set("Pick a catalog model first.".into());
+                return;
+            }
+            patch_rmb(s, logic::rmb_catalog_patch(&id));
+        }))
+}
+
+fn hf_repo_select(ui: &Ui, s: Settings) -> El {
+    let rows = s.hf_hits.get().as_array().cloned().unwrap_or_default();
+    if rows.is_empty() {
+        return w::text(ui, move || hf_line(&s.hf_hits.get())).variant("small");
+    }
+    let pairs: Vec<(String, String)> = rows
+        .iter()
+        .map(|row| {
+            let id = bits::str_of(row, "id");
+            (id.clone(), logic::hf_repo_label(row))
+        })
+        .filter(|(id, _)| !id.is_empty())
+        .collect();
+    if pairs.is_empty() {
+        return w::text(ui, "No matching repos.").variant("small");
+    }
+    form::stack(ui)
+        .child(bits::picker(ui, "Hugging Face repo", &pairs, s.hf_repo))
+        .child(form::action(ui, "List files", "quiet", move || list_hf_files(s, s.hf_repo.get())))
+}
+
+fn hf_file_select(ui: &Ui, s: Settings) -> El {
+    let rows = s.hf_files.get().as_array().cloned().unwrap_or_default();
+    if rows.is_empty() {
+        return form::stack(ui);
+    }
+    let pairs: Vec<(String, String)> = rows
+        .iter()
+        .map(|row| {
+            let path = logic::hf_file_path(row);
+            (path.clone(), logic::hf_file_label(row))
+        })
+        .filter(|(path, _)| !path.is_empty())
+        .collect();
+    if pairs.is_empty() {
+        return form::stack(ui);
+    }
+    form::stack(ui).child(bits::picker(ui, "GGUF file", &pairs, s.hf_file))
+}
+
+fn apply_hf_search(s: Settings, v: Value) {
+    s.hf_hits.set(v.get("repos").cloned().unwrap_or(json!([])));
+    s.hf_files.set(json!([]));
+    s.hf_repo.set(String::new());
+    s.hf_file.set(String::new());
+    let files = v.get("files").cloned().unwrap_or(json!([]));
+    let repos = s.hf_hits.get();
+    let repo_rows = repos.as_array().cloned().unwrap_or_default();
+    if files.as_array().map(|rows| !rows.is_empty()).unwrap_or(false) {
+        s.hf_files.set(files.clone());
+        if let Some(repo) = v.get("hint").and_then(|h| h.get("repo")).and_then(|r| r.as_str()) {
+            s.hf_repo.set(repo.to_string());
+        } else if let Some(only) = repo_rows.first() {
+            s.hf_repo.set(bits::str_of(only, "id"));
+        }
+        if let Some(f) = logic::recommended_hf_file(&files) {
+            s.hf_file.set(logic::hf_file_path(&f));
+        }
+        s.report(Ok(v), "Search finished.");
+        return;
+    }
+    if repo_rows.len() == 1 {
+        let repo = bits::str_of(&repo_rows[0], "id");
+        s.hf_repo.set(repo.clone());
+        list_hf_files(s, repo);
+        return;
+    }
+    if repo_rows.is_empty() {
+        let msg = v.get("error").and_then(|e| e.as_str()).unwrap_or("No GGUF repos matched").to_string();
+        s.report(Ok(v), &msg);
+        return;
+    }
+    s.report(Ok(v), "Search finished.");
+}
+
+fn list_hf_files(s: Settings, repo: String) {
+    if s.preview {
+        s.banner.set("Not available in this preview.".into());
+        return;
+    }
+    if repo.trim().is_empty() {
+        s.banner.set("Pick a Hugging Face repo first.".into());
+        return;
+    }
+    s.hf_repo.set(repo.clone());
+    super::http::request(s, "POST", "rmb/hf/files".into(), Some(json!({ "repo": repo })), move |out| match out {
+        Ok(v) => {
+            let files = v.get("files").cloned().unwrap_or(json!([]));
+            s.hf_files.set(files.clone());
+            if let Some(f) = logic::recommended_hf_file(&files) {
+                s.hf_file.set(logic::hf_file_path(&f));
+            } else {
+                s.hf_file.set(String::new());
+            }
+            let n = files.as_array().map(|a| a.len()).unwrap_or(0);
+            let ok = if n == 0 {
+                v.get("error")
+                    .and_then(|e| e.as_str())
+                    .unwrap_or("No GGUF files in this repo.")
+                    .to_string()
+            } else {
+                format!("{n} GGUF file{} in {repo}", if n == 1 { "" } else { "s" })
+            };
+            s.report(Ok(v), &ok);
+        }
+        Err(e) => s.banner.set(e),
+    });
+}
+
+fn pull_selected_hf(s: Settings) {
+    let repo = s.hf_repo.get();
+    let filename = s.hf_file.get();
+    if repo.trim().is_empty() || filename.trim().is_empty() {
+        s.banner.set("Pick a Hugging Face repo and GGUF first.".into());
+        return;
+    }
+    let mut body = json!({ "repo": repo, "filename": filename, "load": true });
+    if let Some(file) = s.hf_files.get().as_array().and_then(|rows| {
+        rows.iter().find(|f| logic::hf_file_path(f) == filename).cloned()
+    }) {
+        if let Some(url) = file.get("url").and_then(|u| u.as_str()).filter(|u| !u.is_empty()) {
+            body["url"] = json!(url);
+        }
+        if let Some(size) = file.get("size") {
+            body["expected_size"] = size.clone();
+        }
+    }
+    bits::ask(s, "POST", "rmb/hf/pull", Some(body), "Download started.");
 }
 
 fn rmb_status(v: &Value) -> String {
