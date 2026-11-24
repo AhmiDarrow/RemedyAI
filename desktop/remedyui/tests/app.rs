@@ -324,6 +324,60 @@ fn skills_sheet_offers_export_import_and_archive() {
 }
 
 #[test]
+fn skills_sheet_shows_budget_learning_and_filters() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home_skills);
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("72 / 80") && n.contains("archive or pack")),
+        "budget banner: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Active budget") || n.contains("72 of 80")),
+        "budget meter line: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.contains("Learned 6") && n.contains("41 uses")),
+        "learning summary: {names:?}"
+    );
+    assert!(names.iter().any(|n| n == "All"), "All filter: {names:?}");
+    assert!(names.iter().any(|n| n.contains("portal-notes")), "learned skill: {names:?}");
+    assert!(names.iter().any(|n| n.contains("imported-pack-alpha")), "quarantine skill: {names:?}");
+    assert!(names.iter().any(|n| n.contains("old-scraper")), "archived skill: {names:?}");
+    assert!(app.press(Role::Button, "Learned"), "filter to learned");
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("portal-notes") || n.contains("house-style")),
+        "learned filter keeps learned skills: {names:?}"
+    );
+    assert!(app.press(Role::Button, "All"), "clear filter");
+    app.frames(2);
+}
+
+#[test]
+fn skills_sheet_stays_in_the_box_at_400_700_and_1180() {
+    no_spawn();
+    for &(w, h) in &[(400.0, 800.0), (700.0, 800.0), (1180.0, 800.0)] {
+        let mut app = preview_window_size(remedy_desktop::home_skills, w, h);
+        app.frames(3);
+        let bad = horizontal_overflow(&app, w);
+        assert!(
+            bad.is_empty(),
+            "skills sheet at {w}x{h} painted off-box:
+  {}",
+            bad.join("\n  ")
+        );
+        let names = accessible_names(&app);
+        assert!(
+            names.iter().any(|n| n == "Export") && names.iter().any(|n| n == "All"),
+            "skills chrome stays available at {w}: {names:?}"
+        );
+    }
+}
+
+#[test]
 fn chat_preview_shows_worked_steps_and_errors() {
     no_spawn();
     let mut app = preview_window(remedy_desktop::home_chat);
@@ -577,6 +631,37 @@ fn preview_window_size(
             },
         );
     })
+}
+
+
+fn horizontal_overflow(app: &TestApp, width: f32) -> Vec<String> {
+    let Some(ui) = app.ui() else {
+        return vec!["no ui".into()];
+    };
+    let mut out = Vec::new();
+    for n in app.reader_view() {
+        let Some(el) = ui.element_by_node_id(n.id) else { continue };
+        let Some(b) = el.bounds() else { continue };
+        let left = b.min.x < -1.5;
+        let interactive = matches!(
+            n.role,
+            Role::Button
+                | Role::TextInput
+                | Role::MultilineTextInput
+                | Role::ComboBox
+                | Role::Link
+                | Role::Search
+                | Role::Tab
+        );
+        let right = b.max.x > width + 1.5 && b.min.x < width - 1.0;
+        if (left || (right && interactive)) && b.width() > 1.0 && b.height() > 1.0 {
+            out.push(format!(
+                "{:?} {:?} x={:.1}..{:.1} y={:.1}..{:.1}",
+                n.role, n.name, b.min.x, b.max.x, b.min.y, b.max.y
+            ));
+        }
+    }
+    out
 }
 
 fn accessible_names(app: &TestApp) -> Vec<String> {
