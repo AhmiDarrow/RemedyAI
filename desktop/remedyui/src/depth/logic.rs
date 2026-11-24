@@ -3,7 +3,7 @@
 //! These stay free of widgets so the decisions (what a drop is, when a turn
 //! needs a confirm, when the feed follows the floor) can be read on their own.
 
-use crate::studio::{Filter, Project, Session};
+use crate::studio::{ChatMessage, Filter, Project, Session};
 use crate::work::WorkStep;
 
 pub const MAX_ATTACHMENTS: usize = 12;
@@ -867,6 +867,32 @@ pub fn trace_lines(steps: &[WorkStep]) -> Vec<(String, String)> {
         .collect()
 }
 
+
+/// Path for `POST /api/sessions/{sid}/messages/{msg_id}/edit`.
+pub fn edit_message_path(session_id: &str, msg_id: &str) -> String {
+    format!("sessions/{session_id}/messages/{msg_id}/edit")
+}
+
+/// Drop the display-only attachment block the feed appends under a prompt.
+pub fn clean_resend_text(content: &str) -> String {
+    const MARK: &str = "\n\n📎 Attachments:\n";
+    let cut = content.find(MARK).unwrap_or(content.len());
+    content[..cut].trim().to_string()
+}
+
+/// The last non-empty user turn before `assistant_id`, used to regenerate.
+pub fn preceding_user_for_regen(
+    messages: &[ChatMessage],
+    assistant_id: &str,
+) -> Option<(String, String)> {
+    let idx = messages.iter().position(|m| m.id == assistant_id)?;
+    messages[..idx]
+        .iter()
+        .rev()
+        .find(|m| m.role == "user")
+        .map(|m| (m.id.clone(), m.content.clone()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -948,5 +974,41 @@ mod tests {
         let t = sanitize_assistant_text("Hello\n@@status:vision\nThere");
         assert!(t.contains("Hello"));
         assert!(!t.to_ascii_lowercase().contains("@@status"));
+    }
+
+    #[test]
+    fn edit_path_matches_the_sidecar() {
+        assert_eq!(
+            edit_message_path("s1", "m9"),
+            "sessions/s1/messages/m9/edit"
+        );
+    }
+
+    #[test]
+    fn clean_resend_strips_the_attachment_block() {
+        let raw = "please review\n\n📎 Attachments:\n- notes.txt (12 B)";
+        assert_eq!(clean_resend_text(raw), "please review");
+        assert_eq!(clean_resend_text("  just text  "), "just text");
+        assert_eq!(clean_resend_text("\n\n📎 Attachments:\n- a.png"), "");
+    }
+
+    #[test]
+    fn regen_finds_the_preceding_user_turn() {
+        let msgs = vec![
+            ChatMessage::plain("u1", "user", "first"),
+            ChatMessage::plain("a1", "assistant", "reply one"),
+            ChatMessage::plain("u2", "user", "second"),
+            ChatMessage::plain("a2", "assistant", "reply two"),
+        ];
+        assert_eq!(
+            preceding_user_for_regen(&msgs, "a2"),
+            Some(("u2".into(), "second".into()))
+        );
+        assert_eq!(
+            preceding_user_for_regen(&msgs, "a1"),
+            Some(("u1".into(), "first".into()))
+        );
+        assert_eq!(preceding_user_for_regen(&msgs, "missing"), None);
+        assert_eq!(preceding_user_for_regen(&msgs, "u1"), None);
     }
 }
