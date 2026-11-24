@@ -511,8 +511,9 @@ fn composer(ui: &Ui, grove: Grove, app: Option<App>, kind: RoomKind) -> El {
     let f_change = field.clone();
     let g_change = grove.clone();
     let field = field.on_change(move || {
-        let empty = f_change.value().trim().is_empty();
-        g_change.draft_empty.set(empty);
+        let text = f_change.value();
+        g_change.draft_empty.set(text.trim().is_empty());
+        g_change.composer_value.set(text);
     });
     // Enter sends. Shift+Enter stays a newline (the field keeps it). A composing
     // Enter is an IME confirm, not a send.
@@ -591,8 +592,31 @@ fn composer(ui: &Ui, grove: Grove, app: Option<App>, kind: RoomKind) -> El {
     .semantics(Semantics::new(Role::Button).label("Attach a file, receipt, or image").action(Action::Click));
 
     let g_mic = grove.clone();
-    let mic = w::button(ui, "Speak", move || g_mic.mic())
-        .semantics(Semantics::new(Role::Button).label("Speak instead of typing").action(Action::Click));
+    let mic = w::button(
+        ui,
+        {
+            let g = grove.clone();
+            move || {
+                if g.mic_on.get() {
+                    "Stop".to_string()
+                } else {
+                    "Speak".to_string()
+                }
+            }
+        },
+        move || g_mic.mic(),
+    )
+        .semantics({
+            let g = grove.clone();
+            move || {
+                let label = if g.mic_on.get() {
+                    "Stop listening"
+                } else {
+                    "Speak instead of typing"
+                };
+                Semantics::new(Role::Button).label(label).action(Action::Click)
+            }
+        });
 
     let g_stop = grove.clone();
     let pause = show(ui, move || g_stop.streaming.get(), {
@@ -688,6 +712,7 @@ fn send_field(grove: &Grove, field: &remedy_ui::TextField) {
     if grove.begin_send(text) {
         field.set_value("");
         grove.draft_empty.set(true);
+        grove.composer_value.set(String::new());
     }
 }
 
