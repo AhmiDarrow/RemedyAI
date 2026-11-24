@@ -394,6 +394,7 @@ func (s *Server) handleStreamMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	go s.runDetachedStream(sid, claimEpoch, claimCtx, requestID, turnReq, sink)
 	handedOff = true
+	s.publishTurnStarted(sid, requestID, userMsgID)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -794,6 +795,53 @@ func (s *Server) runDetachedStream(
 		status = "aborted"
 	}
 	ts.done(requestID, status, "")
+}
+
+
+// publishTurnStarted tells every other surface (desktop, Web UI) that a live
+// turn has just begun on this session, with the request id they need to attach
+// to /stream/attach for tokens and tool activity. Also announces the user
+// message so the thread list and open chat catch up before the first token.
+func (s *Server) publishTurnStarted(sid, requestID, userMsgID string) {
+	if s == nil || sid == "" {
+		return
+	}
+	var title *string
+	var count *int
+	var origin *string
+	if s.sessions != nil {
+		if sess, ok, _ := s.sessions.Get(sid); ok {
+			t := sess.Title
+			title = &t
+			c := sess.MessageCount
+			count = &c
+			origin = sess.OriginChannel
+		}
+	}
+	if userMsgID != "" {
+		role := "user"
+		mid := userMsgID
+		s.publishSessionEvent(SessionEvent{
+			Type:          "message_added",
+			SessionID:     sid,
+			OriginChannel: origin,
+			MessageID:     &mid,
+			Title:         title,
+			MessageCount:  count,
+			Role:          &role,
+		})
+	}
+	if requestID != "" {
+		rid := requestID
+		s.publishSessionEvent(SessionEvent{
+			Type:          "turn_started",
+			SessionID:     sid,
+			OriginChannel: origin,
+			RequestID:     &rid,
+			Title:         title,
+			MessageCount:  count,
+		})
+	}
 }
 
 // publishMessageAdded announces a persisted assistant reply for every session,

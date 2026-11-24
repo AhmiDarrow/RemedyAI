@@ -17,6 +17,7 @@ type SessionEvent struct {
 	SessionID      string  `json:"session_id"`
 	OriginChannel  *string `json:"origin_channel"`
 	MessageID      *string `json:"message_id"`
+	RequestID      *string `json:"request_id"`
 	Title          *string `json:"title"`
 	MessageCount   *int    `json:"message_count"`
 	Role           *string `json:"role"`
@@ -51,7 +52,7 @@ func (h *sessionEventHub) unsubscribe(ch chan SessionEvent) {
 
 // publish fans out with drop-oldest then drop-subscriber (Python hub parity).
 func (h *sessionEventHub) publish(ev SessionEvent) {
-	if ev.SessionID == "" {
+	if ev.SessionID == "" && ev.Type != "settings_updated" {
 		return
 	}
 	if ev.TS == 0 {

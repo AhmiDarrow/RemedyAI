@@ -1365,20 +1365,38 @@ fn session_events_loop(studio: Studio, client: Client, wake: remedy_ui::reactive
 }
 
 fn on_session_sync_event(studio: &Studio, kind: &str, data: &str) {
+    if kind == "settings_updated" {
+        if let Some(s) = crate::settings::current() {
+            s.reload_from_server();
+        }
+        return;
+    }
     if !logic::is_session_sync_event(kind) {
         return;
     }
     let sid = logic::event_session_id(data);
+    let request_id = logic::event_request_id(data);
     let reload = logic::should_reload_open_thread(
         kind,
         &sid,
         studio.active.get().as_deref(),
         studio.streaming.get(),
     );
-    let seq = pending_sync_push(if reload { Some(sid) } else { None });
+    let attach = logic::should_attach_open_thread(
+        kind,
+        &sid,
+        &request_id,
+        studio.active.get().as_deref(),
+        studio.streaming.get(),
+    );
+    let seq = pending_sync_push(
+        if reload { Some(sid.clone()) } else { None },
+        if attach { Some((sid, request_id)) } else { None },
+    );
     let studio = studio.clone();
     let Ok(wake) = waker() else {
-        apply_session_sync(&studio, pending_sync_take());
+        let (sid, attach) = pending_sync_take();
+        apply_session_sync(&studio, sid, attach);
         return;
     };
     let _ = std::thread::Builder::new()
@@ -1389,13 +1407,17 @@ fn on_session_sync_event(studio: &Studio, kind: &str, data: &str) {
                 if pending_sync_gen() != seq {
                     return;
                 }
-                let sid = pending_sync_take();
-                apply_session_sync(&studio, sid);
+                let (sid, attach) = pending_sync_take();
+                apply_session_sync(&studio, sid, attach);
             });
         });
 }
 
-fn apply_session_sync(studio: &Studio, reload_sid: Option<String>) {
+fn apply_session_sync(
+    studio: &Studio,
+    reload_sid: Option<String>,
+    attach: Option<(String, String)>,
+) {
     let Some(client) = studio.runtime() else {
         return;
     };
@@ -1409,6 +1431,14 @@ fn apply_session_sync(studio: &Studio, reload_sid: Option<String>) {
                 return;
             };
             studio.apply_live_sessions(list);
+            if let Some((sid, request_id)) = attach {
+                if !studio.streaming.get() && studio.active.get().as_deref() == Some(sid.as_str()) {
+                    studio.streaming.set(true);
+                    studio.depth.remote_busy.set(true);
+                    attach_stream(&studio, &sid, &request_id);
+                    return;
+                }
+            }
             if let Some(sid) = reload_sid {
                 if !studio.streaming.get() && studio.active.get().as_deref() == Some(sid.as_str()) {
                     studio.load_messages(&sid);
@@ -1418,15 +1448,20 @@ fn apply_session_sync(studio: &Studio, reload_sid: Option<String>) {
     });
 }
 
-fn pending_sync_push(reload: Option<String>) -> u64 {
+fn pending_sync_push(reload: Option<String>, attach: Option<(String, String)>) -> u64 {
+    let mut slot = pending_sync_reload();
     if let Some(sid) = reload {
-        *pending_sync_reload() = Some(sid);
+        slot.reload = Some(sid);
+    }
+    if let Some(a) = attach {
+        slot.attach = Some(a);
     }
     pending_sync_counter().fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
 }
 
-fn pending_sync_take() -> Option<String> {
-    pending_sync_reload().take()
+fn pending_sync_take() -> (Option<String>, Option<(String, String)>) {
+    let mut slot = pending_sync_reload();
+    (slot.reload.take(), slot.attach.take())
 }
 
 fn pending_sync_gen() -> u64 {
@@ -1438,10 +1473,15 @@ fn pending_sync_counter() -> &'static std::sync::atomic::AtomicU64 {
     &GEN
 }
 
-fn pending_sync_reload() -> std::sync::MutexGuard<'static, Option<String>> {
-    static RELOAD: std::sync::OnceLock<std::sync::Mutex<Option<String>>> = std::sync::OnceLock::new();
+struct PendingSync {
+    reload: Option<String>,
+    attach: Option<(String, String)>,
+}
+
+fn pending_sync_reload() -> std::sync::MutexGuard<'static, PendingSync> {
+    static RELOAD: std::sync::OnceLock<std::sync::Mutex<PendingSync>> = std::sync::OnceLock::new();
     RELOAD
-        .get_or_init(|| std::sync::Mutex::new(None))
+        .get_or_init(|| std::sync::Mutex::new(PendingSync { reload: None, attach: None }))
         .lock()
         .unwrap_or_else(|e| e.into_inner())
 }
@@ -3255,10 +3295,14 @@ mod tests {
 
     #[test]
     fn session_sync_pending_batches_a_reload() {
-        let first = pending_sync_push(None);
-        let second = pending_sync_push(Some("s1".into()));
+        let first = pending_sync_push(None, None);
+        let second = pending_sync_push(Some("s1".into()), Some(("s1".into(), "req-9".into())));
         assert!(second > first);
-        assert_eq!(pending_sync_take().as_deref(), Some("s1"));
-        assert!(pending_sync_take().is_none());
+        let (reload, attach) = pending_sync_take();
+        assert_eq!(reload.as_deref(), Some("s1"));
+        assert_eq!(attach, Some(("s1".into(), "req-9".into())));
+        let (reload, attach) = pending_sync_take();
+        assert!(reload.is_none());
+        assert!(attach.is_none());
     }
 }

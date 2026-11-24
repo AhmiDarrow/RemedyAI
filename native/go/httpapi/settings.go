@@ -109,7 +109,19 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.followDefaultOffDemo(prevProvider)
+	s.publishSettingsUpdated(result)
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) publishSettingsUpdated(result map[string]any) {
+	if s == nil || result == nil {
+		return
+	}
+	changes, _ := result["changes"].([]string)
+	if len(changes) == 0 {
+		return
+	}
+	s.publishSessionEvent(SessionEvent{Type: "settings_updated"})
 }
 
 // followDefaultOffDemo moves conversations off the free demo provider at the
