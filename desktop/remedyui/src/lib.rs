@@ -74,7 +74,7 @@ pub use usage::{UsageContext, UsageDashboard, UsagePanel, UsageWindow};
 
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
-use remedy_ui::host::{TrayEvent, TrayIcon, TrayImage, TrayItem};
+use remedy_ui::host::{TrayEvent, TrayIcon, TrayImage, TrayItem, WindowIcon};
 use remedy_ui::i18n::Messages;
 use remedy_ui::layout::{Align, Justify, LayoutStyle, Length, Position};
 use remedy_ui::style::StylePatch;
@@ -118,7 +118,8 @@ pub fn app(app: &App) {
         .size(1180.0, 740.0)
         .frameless()
         .hide_on_close()
-        .persist_geometry("main");
+        .persist_geometry("main")
+        .icon(window_icon());
     if start_hidden {
         spec = spec.hidden();
     }
@@ -207,6 +208,7 @@ pub fn app(app: &App) {
                 }
             });
     });
+    win.set_icon(Some(window_icon()));
     let (w2, c2) = (win.clone(), chrome);
     let a_up = app.clone();
     app.on_tray(move |e| match e {
@@ -1190,9 +1192,25 @@ pub fn tray_icon() -> TrayImage {
     }
 }
 
+/// Taskbar / Alt+Tab / title-bar mark from the same 0.70.5 artwork as the exe icon.
+/// Drawings at 32 and 128 px so Windows can pick the size it needs.
+pub fn window_icon() -> WindowIcon {
+    fn from_png(bytes: &[u8], size: u32) -> WindowIcon {
+        let decoded = remedy_ui::image::decode(bytes, Some((size, size)))
+            .or_else(|_| remedy_ui::image::decode(bytes, None))
+            .expect("Remedy icon PNG must decode");
+        let img = decoded.image;
+        WindowIcon::new(img.width.max(1), img.pixels.to_vec())
+            .expect("Remedy icon PNG must be square RGBA")
+    }
+    const ICON_32: &[u8] = include_bytes!("../../src-tauri/icons/32x32.png");
+    const ICON_128: &[u8] = include_bytes!("../../src-tauri/icons/128x128.png");
+    from_png(ICON_32, 32).with_size(from_png(ICON_128, 128))
+}
+
 #[cfg(test)]
 mod tray_icon_tests {
-    use super::tray_icon;
+    use super::{tray_icon, window_icon};
 
     #[test]
     fn tray_uses_the_remedy_mark_not_a_green_square() {
@@ -1220,6 +1238,28 @@ mod tray_icon_tests {
         assert!(
             forest * 2 < opaque,
             "tray must not be the solid forest square 1.0.0 shipped"
+        );
+    }
+
+    #[test]
+    fn window_icon_is_the_remedy_mark_at_taskbar_sizes() {
+        let icon = window_icon();
+        let sizes = icon.drawn_sizes();
+        assert!(sizes.contains(&32), "taskbar needs 32 px, got {sizes:?}");
+        assert!(sizes.contains(&128), "Alt+Tab / jumbo needs 128 px, got {sizes:?}");
+        assert_eq!(icon.rgba().len(), (icon.size() * icon.size() * 4) as usize);
+        let mut opaque = 0u32;
+        let mut colors = std::collections::BTreeSet::new();
+        for px in icon.rgba().chunks_exact(4) {
+            colors.insert((px[0], px[1], px[2], px[3]));
+            if px[3] > 0 {
+                opaque += 1;
+            }
+        }
+        assert!(opaque > 0, "window icon must have visible pixels");
+        assert!(
+            colors.len() > 2,
+            "window icon must be the Remedy mark, not a blank document"
         );
     }
 }

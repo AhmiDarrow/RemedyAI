@@ -31,7 +31,7 @@ remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "0d83bcc24b4
 lto = "fat"
 opt-level = "s"
 codegen-units = 1
-strip = true
+strip = "debuginfo"  # "true" can strip the embedded .ico from the Windows exe
 panic = "abort"
 
 # Embed desktop/src-tauri/icons/icon.ico into the Windows exe (tray is the
