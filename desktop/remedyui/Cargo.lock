@@ -469,6 +469,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1138,6 +1147,17 @@ checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
  "event-listener",
  "pin-project-lite",
+]
+
+[[package]]
+name = "fancy-regex"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "998b056554fbe42e03ae0e152895cd1a7e1002aec800fdc6635d20270260c46f"
+dependencies = [
+ "bit-set 0.8.0",
+ "regex-automata",
+ "regex-syntax",
 ]
 
 [[package]]
@@ -2270,6 +2290,12 @@ name = "linebender_resource_handle"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4a5ff6bcca6c4867b1c4fd4ef63e4db7436ef363e0ad7531d1558856bae64f4"
+
+[[package]]
+name = "linked-hash-map"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 
 [[package]]
 name = "linux-raw-sys"
@@ -3557,6 +3583,7 @@ dependencies = [
  "remedy-ui-bridge-windows",
  "remedy-ui-compositor",
  "remedy-ui-core",
+ "remedy-ui-customize",
  "remedy-ui-devtools",
  "remedy-ui-embed-webview",
  "remedy-ui-fonts",
@@ -3728,6 +3755,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "remedy-ui-customize"
+version = "1.0.0-rc.1"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=3142c66cde5e20b06028f955087326dab9a04b51#3142c66cde5e20b06028f955087326dab9a04b51"
+dependencies = [
+ "remedy-ui-a11y",
+ "remedy-ui-core",
+ "remedy-ui-doc-code",
+ "remedy-ui-host",
+ "remedy-ui-input",
+ "remedy-ui-layout",
+ "remedy-ui-media-image",
+ "remedy-ui-reactive",
+ "remedy-ui-rui",
+ "remedy-ui-services-i18n",
+ "remedy-ui-style",
+ "remedy-ui-text",
+ "remedy-ui-themes",
+ "remedy-ui-view",
+ "remedy-ui-widgets-core",
+ "remedy-ui-widgets-forms",
+ "remedy-ui-widgets-nav",
+ "serde_json",
+]
+
+[[package]]
 name = "remedy-ui-devtools"
 version = "1.0.0-rc.1"
 source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=3142c66cde5e20b06028f955087326dab9a04b51#3142c66cde5e20b06028f955087326dab9a04b51"
@@ -3752,6 +3804,21 @@ dependencies = [
  "remedy-ui-widgets-forms",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "remedy-ui-doc-code"
+version = "1.0.0-rc.1"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=3142c66cde5e20b06028f955087326dab9a04b51#3142c66cde5e20b06028f955087326dab9a04b51"
+dependencies = [
+ "remedy-ui-a11y",
+ "remedy-ui-core",
+ "remedy-ui-reactive",
+ "remedy-ui-style",
+ "remedy-ui-text",
+ "remedy-ui-view",
+ "remedy-ui-widgets-core",
+ "syntect",
 ]
 
 [[package]]
@@ -3970,6 +4037,19 @@ dependencies = [
  "web-sys",
  "wgpu",
  "windows",
+]
+
+[[package]]
+name = "remedy-ui-rui"
+version = "1.0.0-rc.1"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=3142c66cde5e20b06028f955087326dab9a04b51#3142c66cde5e20b06028f955087326dab9a04b51"
+dependencies = [
+ "remedy-ui-core",
+ "remedy-ui-layout",
+ "remedy-ui-reactive",
+ "remedy-ui-style",
+ "remedy-ui-view",
+ "remedy-ui-widgets-core",
 ]
 
 [[package]]
@@ -4874,6 +4954,25 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.10",
+]
+
+[[package]]
+name = "syntect"
+version = "5.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "656b45c05d95a5704399aeef6bd0ddec7b2b3531b7c9e900abbf7c4d2190c925"
+dependencies = [
+ "bincode",
+ "fancy-regex",
+ "flate2",
+ "fnv",
+ "once_cell",
+ "regex-syntax",
+ "serde",
+ "serde_derive",
+ "thiserror 2.0.21",
+ "walkdir",
+ "yaml-rust",
 ]
 
 [[package]]
@@ -6346,6 +6445,15 @@ name = "xml-rs"
 version = "0.8.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
+
+[[package]]
+name = "yaml-rust"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56c1936c4cc7a1c9ab21a1ebb602eb942ba868cbd44a99cb7cdc5892335e1c85"
+dependencies = [
+ "linked-hash-map",
+]
 
 [[package]]
 name = "yeslogic-fontconfig-sys"

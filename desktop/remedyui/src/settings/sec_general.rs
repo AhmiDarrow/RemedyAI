@@ -250,5 +250,19 @@ fn theme(ui: &Ui, s: Settings) -> El {
             ))
             .child(form::toggle(ui, "High contrast", "Stronger text and borders, including when the system asks for it.", s.high_contrast))
             .child(form::action(ui, "Reset fonts", "quiet", move || super::prefs::reset_fonts(s)))
+            .child(theme_pack_editor(ui))
     })
+}
+
+fn theme_pack_editor(ui: &Ui) -> El {
+    let Some(custom) = crate::theme_custom::current() else {
+        return form::stack(ui);
+    };
+    form::stack(ui)
+        .child(form::label(ui, "Theme pack"))
+        .child(form::hint(
+            ui,
+            "Your own tokens, on top of the selected theme. Import a pack or edit the one saved on this PC.",
+        ))
+        .child(remedy_ui::customize::theme_editor(ui, &custom))
 }
