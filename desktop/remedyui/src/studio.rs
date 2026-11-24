@@ -398,8 +398,13 @@ impl Studio {
     }
 
     fn create_remote(&self, client: Client) {
+        if self.depth.creating_session.get() {
+            return;
+        }
+        self.depth.creating_session.set(true);
         let studio = self.clone();
         let Ok(waker) = waker() else {
+            self.depth.creating_session.set(false);
             return;
         };
         runtime::create_session(&client, move |out| {
@@ -413,8 +418,15 @@ impl Studio {
                     studio.active.set(Some(s.id.clone()));
                     studio.messages.set(Vec::new());
                     crate::depth::focus_session(&studio, &s.id);
+                    studio.depth.creating_session.set(false);
+                    crate::depth::on_session_created(&studio, &s.id);
                 }
-                Err(e) => studio.conn.set(Conn::Error(e)),
+                Err(e) => {
+                    studio.depth.creating_session.set(false);
+                    studio.depth.held_for_session.set(None);
+                    studio.depth.held_echo.set(true);
+                    studio.conn.set(Conn::Error(e));
+                }
             });
         });
     }
@@ -563,6 +575,34 @@ impl Studio {
             );
         }
         self.sessions.set(list);
+    }
+
+    /// Apply a sidecar session list and drop any active id the sidecar does not have.
+    pub fn apply_live_sessions(&self, list: Vec<Session>) {
+        let ids: Vec<String> = list.iter().map(|s| s.id.clone()).collect();
+        let decision = crate::depth::logic::adopt_active_session(self.active.get().as_deref(), &ids);
+        self.apply_sessions(list);
+        match decision {
+            crate::depth::logic::SessionAdopt::Keep(id) => {
+                self.active.set(Some(id.clone()));
+                self.load_messages(&id);
+            }
+            crate::depth::logic::SessionAdopt::Select(id) => {
+                self.active.set(Some(id.clone()));
+                self.messages.set(Vec::new());
+                self.clear_live();
+                crate::depth::focus_session(self, &id);
+                self.load_messages(&id);
+            }
+            crate::depth::logic::SessionAdopt::Create => {
+                self.active.set(None);
+                self.messages.set(Vec::new());
+                self.clear_live();
+                if self.runtime().is_some() && !self.depth.creating_session.get() {
+                    self.add();
+                }
+            }
+        }
     }
 
     /// Adds a tag to `id`, persists it, and closes the add-tag field.
@@ -765,18 +805,7 @@ impl Studio {
             let studio = studio.clone();
             let _ = wake_sessions.post(move || {
                 if let Ok(list) = out {
-                    let keep = if studio.active.get().is_some() {
-                        studio.active.get()
-                    } else {
-                        list.first().map(|s| s.id.clone())
-                    };
-                    studio.apply_sessions(list);
-                    if let Some(id) = keep {
-                        if studio.sessions.get().iter().any(|s| s.id == id) {
-                            studio.active.set(Some(id.clone()));
-                            studio.load_messages(&id);
-                        }
-                    }
+                    studio.apply_live_sessions(list);
                 }
             });
         });

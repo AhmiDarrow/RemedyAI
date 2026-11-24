@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use crate::depth::logic::{self, reaction_label};
 use crate::depth::{self, react};
+use crate::icons::{glyph, reaction_glyph, Glyph};
 use crate::logo;
 use crate::runtime;
 use crate::studio::{ChatMessage, Studio, WorkMode};
@@ -1298,27 +1299,74 @@ fn current_user_reaction(studio: &Studio, id: &str) -> String {
     String::new()
 }
 
-fn reaction_menu_items(studio: &Studio, id: &str) -> Vec<w::MenuItem> {
-    let current = current_user_reaction(studio, id);
-    logic::REACTIONS
-        .iter()
-        .map(|(emoji, label)| {
-            let st = studio.clone();
-            let id = id.to_string();
-            let em = (*emoji).to_string();
-            let title = if current == *emoji {
-                format!("{emoji} {label} (selected, press to remove)")
+fn open_reaction_picker(ui: &Ui, anchor: &El, studio: Studio, id: String) {
+    let current = current_user_reaction(&studio, &id);
+    let colors = ui.theme().colors.clone();
+    let accent = colors.accent;
+    let muted = colors.muted;
+    let layer_slot: Rc<RefCell<Option<El>>> = Rc::new(RefCell::new(None));
+    let mut list = w::column(ui).gap(2.0).padding(Insets {
+        top: 4.0,
+        end: 4.0,
+        bottom: 4.0,
+        start: 4.0,
+    });
+    for (emoji, label) in logic::REACTIONS {
+        let selected = current == *emoji;
+        let title = if selected {
+            format!("{label} (selected, press to remove)")
+        } else {
+            (*label).to_string()
+        };
+        let mark = reaction_glyph(emoji).unwrap_or(Glyph::Star);
+        let st = studio.clone();
+        let mid = id.clone();
+        let em = (*emoji).to_string();
+        let close = layer_slot.clone();
+        let fg = if selected { accent } else { muted };
+        let title_sem = title.clone();
+        let row = w::row(ui)
+            .gap(8.0)
+            .align(Align::Center)
+            .padding(Insets {
+                top: 6.0,
+                end: 12.0,
+                bottom: 6.0,
+                start: 8.0,
+            })
+            .child(glyph(ui, mark, 16.0).style(StylePatch::new().foreground(fg)))
+            .child(
+                w::text(ui, (*label).to_string()).style(StylePatch::new().foreground(fg)),
+            )
+            .style(if selected {
+                StylePatch::new()
+                    .background(accent.with_alpha(0.14))
+                    .radius(6.0)
+                    .foreground(fg)
             } else {
-                format!("{emoji} {label}")
-            };
-            w::MenuItem::new(title, move || react(&st, &id, &em))
-        })
-        .collect()
+                StylePatch::new().radius(6.0).foreground(fg)
+            })
+            .semantics(move || {
+                Semantics::new(Role::Button)
+                    .label(title_sem.clone())
+                    .action(Action::Click)
+            })
+            .on_click(move || {
+                react(&st, &mid, &em);
+                if let Some(layer) = close.borrow().clone() {
+                    layer.remove();
+                }
+            });
+        list = list.child(row);
+    }
+    let layer = w::popover(ui, anchor, list);
+    *layer_slot.borrow_mut() = Some(layer);
 }
 
 /// One "Add reaction" trigger plus a compact pill for the chosen reaction.
-/// The four options live in a keyboard-accessible menu so the footer does not
-/// clip at narrow widths the way four always-visible emoji buttons did.
+/// The four options live in a keyboard-accessible popover of stroke icons
+/// so emoji font fallback cannot split or blur the marks, and the footer
+/// does not clip at narrow widths the way four always-visible buttons did.
 fn reaction_bar(ui: &Ui, studio: Studio, id: String) -> (Option<El>, Option<(El, f32)>) {
     let colors = ui.theme().colors.clone();
     let accent = colors.accent;
@@ -1337,20 +1385,23 @@ fn reaction_bar(ui: &Ui, studio: Studio, id: String) -> (Option<El>, Option<(El,
         let id_press = id.clone();
         let em_name = current.clone();
         let label = format!("You reacted {}. Press to remove.", reaction_label(&em_name));
-        let pill = w::button(ui, current.clone(), move || react(&st_press, &id_press, ""))
-            .variant("quiet")
-            .style(move || {
-                tokens::typo(tokens::BODY)
+        let mark = reaction_glyph(&current).unwrap_or(Glyph::Star);
+        let pill = w::row(ui)
+            .align(Align::Center)
+            .padding(Insets {
+                top: 2.0,
+                end: 6.0,
+                bottom: 2.0,
+                start: 6.0,
+            })
+            .child(glyph(ui, mark, 14.0).style(StylePatch::new().foreground(accent)))
+            .style({
+                StylePatch::new()
                     .foreground(accent)
                     .background(accent.with_alpha(0.14))
                     .radius(8.0)
-                    .padding(Insets {
-                        top: 2.0,
-                        end: 6.0,
-                        bottom: 2.0,
-                        start: 6.0,
-                    })
             })
+            .on_click(move || react(&st_press, &id_press, ""))
             .semantics(move || {
                 Semantics::new(Role::Button)
                     .label(label.clone())
@@ -1364,27 +1415,29 @@ fn reaction_bar(ui: &Ui, studio: Studio, id: String) -> (Option<El>, Option<(El,
     let open_ui = ui.clone();
     let st_open = studio.clone();
     let id_open = id.clone();
-    let add = w::button(ui, "☺", move || {
-        let Some(anchor_el) = open_anchor.borrow().clone() else {
-            return;
-        };
-        w::menu(
-            &open_ui,
-            &anchor_el,
-            reaction_menu_items(&st_open, &id_open),
-        );
-    })
-    .variant("quiet")
-    .style(move || tokens::typo(tokens::BODY).foreground(muted))
-    .semantics(|| {
-        Semantics::new(Role::Button)
-            .label("Add reaction")
-            .action(Action::Click)
-    });
+    let add = w::row(ui)
+        .align(Align::Center)
+        .padding(Insets {
+            top: 2.0,
+            end: 4.0,
+            bottom: 2.0,
+            start: 4.0,
+        })
+        .child(glyph(ui, Glyph::AddReaction, 16.0).style(StylePatch::new().foreground(muted)))
+        .on_click(move || {
+            let Some(anchor_el) = open_anchor.borrow().clone() else {
+                return;
+            };
+            open_reaction_picker(&open_ui, &anchor_el, st_open.clone(), id_open.clone());
+        })
+        .style(StylePatch::new().foreground(muted).radius(8.0))
+        .semantics(|| {
+            Semantics::new(Role::Button)
+                .label("Add reaction")
+                .action(Action::Click)
+        });
     *anchor.borrow_mut() = Some(add.clone());
     row = row.child(add);
-    // No hover-reveal extras: the single trigger stays visible at 400px,
-    // and the picker is a menu that is positioned to stay on screen.
     (Some(row), None)
 }
 
@@ -1404,14 +1457,16 @@ fn agent_reaction(ui: &Ui, studio: Studio, id: String) -> El {
         move || {
             let st = studio.clone();
             let id = id.clone();
-            w::text(&u, "").text(move || {
-                st.messages
-                    .get()
-                    .iter()
-                    .find(|m| m.id == id)
-                    .map(|m| m.agent_reaction.clone())
-                    .unwrap_or_default()
-            })
+            let mark = st
+                .messages
+                .get()
+                .iter()
+                .find(|m| m.id == id)
+                .map(|m| m.agent_reaction.clone())
+                .unwrap_or_default();
+            let g = reaction_glyph(&mark).unwrap_or(Glyph::Star);
+            let colors = u.theme().colors.clone();
+            glyph(&u, g, 14.0).style(StylePatch::new().foreground(colors.muted))
         },
     )
     .el()
