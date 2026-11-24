@@ -284,6 +284,26 @@ fn sidebar_tags_can_be_shown_and_used_to_filter() {
 }
 
 #[test]
+fn status_dock_shows_other_sessions_at_work() {
+    no_spawn();
+    let mut app = preview_window(remedy_desktop::home);
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        !names.iter().any(|n| n.contains("other session")),
+        "idle dock hides the siblings chip: {names:?}"
+    );
+
+    let mut app = preview_window(remedy_desktop::home_siblings);
+    app.frames(2);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("1 other session") && n.contains("xai/grok-4.5")),
+        "siblings chip names the other session: {names:?}"
+    );
+}
+
+#[test]
 fn chat_preview_shows_worked_steps_and_errors() {
     no_spawn();
     let mut app = preview_window(remedy_desktop::home_chat);

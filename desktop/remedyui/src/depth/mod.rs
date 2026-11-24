@@ -205,6 +205,9 @@ pub struct Depth {
     pub save_enabled: bool,
     poll_started: Arc<AtomicBool>,
     session_events_started: Arc<AtomicBool>,
+    coordination_started: Arc<AtomicBool>,
+    /// Other live sessions from `GET /api/coordination/presence`.
+    pub siblings: Signal<Vec<logic::SiblingBeacon>>,
     tick_started: Arc<AtomicBool>,
     pub samples: Arc<Mutex<Vec<f32>>>,
     pub draft_nonce: Signal<u64>,
@@ -273,6 +276,8 @@ impl Depth {
             save_enabled,
             poll_started: Arc::new(AtomicBool::new(false)),
             session_events_started: Arc::new(AtomicBool::new(false)),
+            coordination_started: Arc::new(AtomicBool::new(false)),
+            siblings: Signal::new(Vec::new()),
             tick_started: Arc::new(AtomicBool::new(false)),
             samples: Arc::new(Mutex::new(Vec::new())),
             draft_nonce: Signal::new(0),
@@ -445,6 +450,10 @@ impl Depth {
 
     pub fn session_events_flag(&self) -> Arc<AtomicBool> {
         self.session_events_started.clone()
+    }
+
+    pub fn coordination_flag(&self) -> Arc<AtomicBool> {
+        self.coordination_started.clone()
     }
 
     pub fn tick_flag(&self) -> Arc<AtomicBool> {
