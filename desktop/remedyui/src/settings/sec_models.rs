@@ -52,6 +52,11 @@ fn provider(ui: &Ui, s: Settings) -> El {
                 if let Some(next) = crate::setup::model::adopt_base_url(&id, &current, &refs) {
                     s.base_url.set(next);
                 }
+                // Drop the previous provider's model list immediately so the
+                // dropdown cannot show OpenRouter (or other) ids as if they
+                // belonged to the newly selected provider.
+                s.models.set(Vec::new());
+                s.discovery.set(String::new());
             }
             last_provider.set(id.clone());
         }
@@ -59,8 +64,12 @@ fn provider(ui: &Ui, s: Settings) -> El {
             if s.base_url.get_untracked().unwrap_or_default().is_empty() && !p.base_url.is_empty() {
                 s.base_url.set(p.base_url.clone());
             }
-            if s.model.get_untracked().unwrap_or_default().is_empty() && !p.default_model.is_empty() {
-                s.model.set(p.default_model.clone());
+            let def = p.default_model.trim();
+            if s.model.get_untracked().unwrap_or_default().is_empty()
+                && !def.is_empty()
+                && def != "default"
+            {
+                s.model.set(def.to_string());
             }
         }
         s.discover_models();
