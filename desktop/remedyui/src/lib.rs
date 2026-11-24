@@ -359,6 +359,27 @@ pub fn home_tagged(ui: &Ui) -> El {
     )
 }
 
+/// Status bar showing another live session (not a golden).
+pub fn home_siblings(ui: &Ui) -> El {
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    studio.depth.siblings.set(vec![depth::logic::SiblingBeacon {
+        session_id: "s-other".into(),
+        you: false,
+        muscle: "xai/grok-4.5".into(),
+        project: "portal".into(),
+        goal: "load the addon".into(),
+        phase: "build".into(),
+        held_files: vec!["main.rs".into()],
+        held_count: 1,
+    }]);
+    shell_with(
+        ui,
+        studio,
+        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+    )
+}
+
 /// Chat-feed preview with a finished turn, for side-by-side review.
 pub fn home_chat(ui: &Ui) -> El {
     shell_with(

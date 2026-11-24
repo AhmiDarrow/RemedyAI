@@ -877,6 +877,7 @@ pub fn boot(studio: &Studio) {
     }
     start_poll(studio);
     start_session_events(studio);
+    start_coordination(studio);
     start_tick(studio);
 }
 
@@ -1129,6 +1130,64 @@ pub fn show_plan(card: &PlanCard, mode: WorkMode) -> bool {
 
 fn start_poll(studio: &Studio) {
     start_poll_every(studio, Duration::from_secs(4));
+}
+
+fn start_coordination(studio: &Studio) {
+    if studio
+        .depth
+        .coordination_flag()
+        .swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        return;
+    }
+    let Some(client) = studio.runtime() else {
+        studio
+            .depth
+            .coordination_flag()
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        return;
+    };
+    let Ok(wake) = waker() else {
+        studio
+            .depth
+            .coordination_flag()
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        return;
+    };
+    let studio = studio.clone();
+    let _ = std::thread::Builder::new()
+        .name("remedy-coordination".into())
+        .spawn(move || coordination_loop(studio, client, wake));
+}
+
+fn coordination_loop(studio: Studio, client: Client, wake: remedy_ui::reactive::Waker) {
+    loop {
+        if studio.local_only {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sid = studio.active.get().unwrap_or_default();
+        let path = if sid.is_empty() {
+            "coordination/presence".to_string()
+        } else {
+            format!("coordination/presence?session_id={sid}")
+        };
+        let studio_cb = studio.clone();
+        let wake_cb = wake.clone();
+        api::spawn_json(&client, Request::get(&path), move |out| {
+            let (others, error) = match out {
+                Ok(v) => (logic::other_beacons(&logic::parse_presence_beacons(&v)), false),
+                Err(_) => (Vec::new(), true),
+            };
+            let wait = logic::next_presence_poll_ms(others.len(), error);
+            let _ = wake_cb.post(move || studio_cb.depth.siblings.set(others));
+            let _ = tx.send(wait);
+        });
+        let wait = rx
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .unwrap_or(logic::PRESENCE_POLL_ERROR_MS);
+        std::thread::sleep(std::time::Duration::from_millis(wait));
+    }
 }
 
 fn start_session_events(studio: &Studio) {

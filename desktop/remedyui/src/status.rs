@@ -37,6 +37,13 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
         .keep(connection_indicator(ui, studio.clone()))
         .keep(streaming_slot(ui, studio.clone()))
         .child_maybe_fn(
+            {
+                let st = studio.clone();
+                move || crate::depth::logic::sibling_chip_label(&st.depth.siblings.get())
+            },
+            siblings_slot(ui, studio.clone()),
+        )
+        .child_maybe_fn(
             bar_label(ui, "bar-reconnect"),
             reconnect_slot(ui, studio.clone()),
         )
@@ -176,6 +183,7 @@ pub fn compact_bar(ui: &Ui, studio: Studio) -> El {
         .semantics(Semantics::new(Role::Toolbar).label(messages().text(ui, "status-bar")))
         .child(connection_indicator(ui, studio.clone()))
         .child(streaming_slot(ui, studio.clone()))
+        .child(siblings_slot(ui, studio.clone()))
         .child(ui.el("status-flex").layout(|l| {
             l.grow = 1.0;
             l.min_width = Length::Px(0.0);
@@ -485,6 +493,39 @@ fn rail_rule(ui: &Ui) -> El {
             l.height = Length::Px(16.0);
             l.shrink = 0.0;
         })
+}
+
+fn siblings_slot(ui: &Ui, studio: Studio) -> El {
+    let colors = ui.theme().colors.clone();
+    let unit = ui.theme().spacing.unit;
+    let show_st = studio.clone();
+    let body_ui = ui.clone();
+    let body_st = studio;
+    show(
+        ui,
+        move || !show_st.depth.siblings.get().is_empty(),
+        move || {
+            let label_st = body_st.clone();
+            let tip_st = body_st.clone();
+            w::text(&body_ui, move || {
+                crate::depth::logic::sibling_chip_label(&label_st.depth.siblings.get())
+            })
+            .style(
+                StylePatch::new()
+                    .foreground(colors.accent)
+                    .background(colors.accent.with_alpha(0.12))
+                    .radius(3.0),
+            )
+            .padding(Insets::symmetric(unit * 0.5, unit))
+            .semantics(move || {
+                let others = tip_st.depth.siblings.get();
+                Semantics::new(Role::Status)
+                    .label(crate::depth::logic::sibling_chip_label(&others))
+                    .description(crate::depth::logic::sibling_chip_tip(&others))
+            })
+        },
+    )
+    .into()
 }
 
 fn chip(ui: &Ui, id: &'static str, active: bool, on_click: impl Fn() + 'static) -> El {
