@@ -68,7 +68,7 @@ rail_width = 44
 status_height = 44
 # Crisp square, not a glowing orb.
 connected_mark = 6
-presence_home = 48
+presence_home = 72
 presence_avatar = 24
 presence_review = 72
 bubble_max = 560
@@ -76,6 +76,8 @@ composer_hint = "under"
 
 [layout.presence]
 style = "geometric-pixel"
+# morning-star | wolf | bear — Joe picks the form; construction stays geometric.
+kind = "morning-star"
 grid = 24
 enabled_default = true
 # 1px breath and blink; skipped when reduced_motion is on.

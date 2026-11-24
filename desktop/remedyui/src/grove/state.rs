@@ -1814,7 +1814,7 @@ fn ensure_session(client: &Client, book: &Book, job: &SendJob) -> Result<String,
             if !stored.is_empty() && api::session_project(client, &stored).is_ok() {
                 return Ok(stored);
             }
-            let titled = format!("🌿 {title}");
+            let titled = title.clone();
             let id = api::create_grove_session(client, Some(titled.as_str()))?;
             let _ = api::set_goal_link(client, &gid, &json!({ "session_id": id }));
             Ok(id)

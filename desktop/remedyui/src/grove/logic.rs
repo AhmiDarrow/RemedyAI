@@ -1275,25 +1275,26 @@ fn looks_like_host(host: &str) -> bool {
 }
 
 /// Example plots shown only while the board is empty.
-pub fn example_plots() -> &'static [(&'static str, &'static str, &'static str)] {
+pub fn example_plots() -> &'static [(super::marks::PlotMark, &'static str, &'static str)] {
+    use super::marks::PlotMark;
     &[
         (
-            "🧾",
+            PlotMark::Receipts,
             "Sort out this month’s receipts",
             "Drop a photo — I’ll total and organize them",
         ),
         (
-            "✈️",
+            PlotMark::Trip,
             "Plan a weekend trip",
             "Tell me where and when; I’ll research and draft it",
         ),
         (
-            "📄",
+            PlotMark::Resume,
             "Polish my resume",
             "Share it and the role — we’ll tailor it together",
         ),
         (
-            "🛒",
+            PlotMark::Usuals,
             "Reorder the usuals",
             "I can shop with you, you approve the checkout",
         ),

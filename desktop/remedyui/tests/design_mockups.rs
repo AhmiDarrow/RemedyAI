@@ -6,7 +6,7 @@ use std::path::Path;
 
 fn no_spawn_defaults() {
     let home = std::env::temp_dir().join(format!(
-        "remedy-design5-home-{}",
+        "remedy-design6-home-{}",
         std::process::id()
     ));
     let _ = std::fs::create_dir_all(&home);
@@ -44,7 +44,7 @@ fn write_shot(
 }
 
 #[test]
-fn write_design5_review_shots() {
+fn write_design6_review_shots() {
     let Ok(dir) = std::env::var("REMEDY_DESIGN_OUT") else {
         return;
     };
@@ -64,4 +64,9 @@ fn write_design5_review_shots() {
     write_shot(dir, "presence-working", remedy_desktop::design_presence_working, 560.0, 480.0);
     write_shot(dir, "presence-done", remedy_desktop::design_presence_done, 560.0, 480.0);
     write_shot(dir, "presence-error", remedy_desktop::design_presence_error, 560.0, 480.0);
+    write_shot(dir, "concept-star", remedy_desktop::design_concept_star, 1180.0, 520.0);
+    write_shot(dir, "concept-wolf", remedy_desktop::design_concept_wolf, 1180.0, 520.0);
+    write_shot(dir, "concept-bear", remedy_desktop::design_concept_bear, 1180.0, 520.0);
+    write_shot(dir, "home-wolf", remedy_desktop::design_home_wolf, 1180.0, 740.0);
+    write_shot(dir, "home-bear", remedy_desktop::design_home_bear, 1180.0, 740.0);
 }

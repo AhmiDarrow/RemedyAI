@@ -23,6 +23,7 @@ mod panels;
 mod plan_dock;
 mod prefs;
 mod presence;
+mod presence_draw;
 mod rails;
 mod runtime;
 mod server_menu;
@@ -231,6 +232,12 @@ pub fn app(app: &App) {
 
 /// Window chrome around a design-review surface, with the Grove/Studio
 /// switcher in the title bar. Does not replace golden `home()` previews.
+fn close_design_settings() {
+    if let Some(s) = settings::current() {
+        settings::close_for_rail(s);
+    }
+}
+
 fn design_chrome(ui: &Ui, studio: Studio, grove: grove::Grove, body: impl Fn(&Ui) -> El + 'static) -> El {
     fonts::prepare_theme(ui, &Fonts::load());
     let chrome = Chrome::preview(chrome::Overlay::None);
@@ -258,6 +265,20 @@ fn design_grove_body(ui: &Ui, grove: grove::Grove) -> El {
 
 /// Grove is the default home. Title-bar switcher with Grove selected.
 pub fn design_home(ui: &Ui) -> El {
+    design_home_kind(ui, presence::Kind::MorningStar)
+}
+
+pub fn design_home_wolf(ui: &Ui) -> El {
+    design_home_kind(ui, presence::Kind::Wolf)
+}
+
+pub fn design_home_bear(ui: &Ui) -> El {
+    design_home_kind(ui, presence::Kind::Bear)
+}
+
+fn design_home_kind(ui: &Ui, kind: presence::Kind) -> El {
+    presence::set_kind_override(Some(kind));
+    close_design_settings();
     let studio = Studio::preview();
     studio.conn.set(studio::Conn::Ready);
     studio.set_mode(studio::WorkMode::Chat);
@@ -267,6 +288,8 @@ pub fn design_home(ui: &Ui) -> El {
 
 /// Grove after Remedy opened a Build session from a coding request.
 pub fn design_grove_handoff(ui: &Ui) -> El {
+    presence::set_kind_override(Some(presence::Kind::MorningStar));
+    close_design_settings();
     let studio = Studio::preview();
     studio.conn.set(studio::Conn::Ready);
     studio.set_mode(studio::WorkMode::Build);
@@ -383,6 +406,7 @@ pub fn design_settings(ui: &Ui) -> El {
 
 /// Design-review card for one presence state (static under reduced_motion).
 pub fn design_presence(ui: &Ui, state: presence::State) -> El {
+    presence::set_kind_override(Some(presence::Kind::MorningStar));
     let studio = Studio::preview();
     studio.conn.set(studio::Conn::Ready);
     design_hosted(ui, studio, move |ui| {
@@ -438,6 +462,84 @@ pub fn design_presence_done(ui: &Ui) -> El {
 }
 pub fn design_presence_error(ui: &Ui) -> El {
     design_presence(ui, presence::State::Error)
+}
+
+pub fn design_concept_star(ui: &Ui) -> El {
+    design_presence_board(ui, presence::Kind::MorningStar)
+}
+
+pub fn design_concept_wolf(ui: &Ui) -> El {
+    design_presence_board(ui, presence::Kind::Wolf)
+}
+
+pub fn design_concept_bear(ui: &Ui) -> El {
+    design_presence_board(ui, presence::Kind::Bear)
+}
+
+/// All six states of one presence form, for Joe to compare.
+pub fn design_presence_board(ui: &Ui, kind: presence::Kind) -> El {
+    presence::set_kind_override(Some(kind));
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    design_hosted(ui, studio, move |ui| {
+        fonts::prepare_theme(ui, &Fonts::load());
+        let colors = ui.theme().colors.clone();
+        let size = theme_pack::layout().presence_review;
+        let title = w::text(ui, kind.label())
+            .style(tokens::typo(tokens::HERO).foreground(colors.text))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        let blurb = w::text(ui, kind.blurb())
+            .style(tokens::typo(tokens::BODY).foreground(colors.muted))
+            .layout(|l| {
+                l.max_width = Length::Px(720.0);
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        let states = [
+            presence::State::Idle,
+            presence::State::Listening,
+            presence::State::Thinking,
+            presence::State::Working,
+            presence::State::Done,
+            presence::State::Error,
+        ];
+        let mut row = w::row(ui)
+            .align(Align::Start)
+            .justify(Justify::SpaceBetween)
+            .gap(tokens::GUTTER)
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        for state in states {
+            let label = w::text(ui, state.label())
+                .style(tokens::typo(tokens::META).foreground(colors.muted));
+            let cell = w::column(ui)
+                .align(Align::Center)
+                .gap(tokens::SPACE * 2.0)
+                .child(presence::preview(ui, state, size))
+                .child(label);
+            row = row.child(cell);
+        }
+        w::column(ui)
+            .align(Align::Start)
+            .justify(Justify::Center)
+            .gap(tokens::GUTTER)
+            .padding(Insets::all(tokens::GUTTER * 2.0))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.height = Length::Percent(1.0);
+                l.grow = 1.0;
+                l.min_height = Length::Px(0.0);
+            })
+            .style(StylePatch::new().background(colors.bg).foreground(colors.text))
+            .child(title)
+            .child(blurb)
+            .child(row)
+    })
 }
 
 fn design_preview_messages() -> Vec<studio::ChatMessage> {

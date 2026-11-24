@@ -62,6 +62,14 @@ pub enum PresenceStyle {
     GeometricPixel,
 }
 
+/// Which forest-spirit form the geometric mark takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PresenceKind {
+    MorningStar,
+    Wolf,
+    Bear,
+}
+
 /// Layout: pane placement, docks, rails, sizes, and the face.
 #[derive(Clone, Copy, Debug)]
 pub struct LayoutSpec {
@@ -77,6 +85,7 @@ pub struct LayoutSpec {
     pub presence_review: f32,
     pub bubble_max: f32,
     pub presence_style: PresenceStyle,
+    pub presence_kind: PresenceKind,
     pub presence_grid: f32,
     pub presence_enabled_default: bool,
     pub select_mark: f32,
@@ -143,11 +152,12 @@ pub const DARK_FOREST: ThemePack = ThemePack {
         rail_width: 44.0,
         status_height: 44.0,
         connected_mark: 6.0,
-        presence_home: 48.0,
+        presence_home: 72.0,
         presence_avatar: 24.0,
         presence_review: 72.0,
         bubble_max: 560.0,
         presence_style: PresenceStyle::GeometricPixel,
+        presence_kind: PresenceKind::MorningStar,
         presence_grid: 24.0,
         presence_enabled_default: true,
         select_mark: 4.0,
@@ -163,6 +173,14 @@ pub fn current() -> &'static ThemePack {
 
 pub fn layout() -> &'static LayoutSpec {
     &DARK_FOREST.layout
+}
+
+pub fn presence_kind() -> crate::presence::Kind {
+    match DARK_FOREST.layout.presence_kind {
+        PresenceKind::MorningStar => crate::presence::Kind::MorningStar,
+        PresenceKind::Wolf => crate::presence::Kind::Wolf,
+        PresenceKind::Bear => crate::presence::Kind::Bear,
+    }
 }
 
 #[cfg(test)]
