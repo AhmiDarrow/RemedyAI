@@ -809,16 +809,26 @@ fn saved_turn(ui: &Ui, studio: Studio, msg: &ChatMessage, name: &str) -> El {
         cards = cards.child(bubble_card(ui, body, user, system));
     }
     let streaming = studio.streaming.get();
+    let copy = if streaming {
+        None
+    } else {
+        let text = logic::message_copy_text(&msg.content, &beats);
+        if text.trim().is_empty() {
+            None
+        } else {
+            Some(copy_button(ui, text))
+        }
+    };
     let (meta_action, below, extras) = if assistant && (show_body || !beats.is_empty()) {
         let (react, extras) = reaction_bar(ui, studio.clone(), msg.id.clone());
-        let action = if streaming {
+        let regen = if streaming {
             None
         } else {
             Some(regen_button(ui, studio.clone(), msg.id.clone()))
         };
-        (action, react, extras)
+        (pack_actions(ui, copy, regen), react, extras)
     } else if user {
-        let action = if streaming {
+        let edit = if streaming {
             None
         } else {
             Some(edit_button(
@@ -829,7 +839,7 @@ fn saved_turn(ui: &Ui, studio: Studio, msg: &ChatMessage, name: &str) -> El {
             ))
         };
         (
-            action,
+            pack_actions(ui, copy, edit),
             Some(agent_reaction(ui, studio.clone(), msg.id.clone())),
             None,
         )
@@ -1196,6 +1206,28 @@ fn panel_button(
     })
 }
 
+
+fn copy_button(ui: &Ui, text: String) -> El {
+    let u = ui.clone();
+    compact_icon_action(ui, w::Icon::Copy, "chat-copy", move || {
+        u.copy_text(text.clone());
+    })
+}
+
+fn pack_actions(ui: &Ui, first: Option<El>, second: Option<El>) -> Option<El> {
+    match (first, second) {
+        (Some(a), Some(b)) => Some(
+            w::row(ui)
+                .align(Align::Baseline)
+                .gap(tokens::SPACE)
+                .child(a)
+                .child(b),
+        ),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
 
 fn edit_button(ui: &Ui, studio: Studio, id: String, content: String) -> El {
     compact_icon_action(ui, w::Icon::Note, "chat-edit", move || {
