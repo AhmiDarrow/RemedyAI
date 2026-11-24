@@ -48,6 +48,7 @@ pub fn submit(
     }
     let sid = ensure_session(studio);
     let Some(sid) = sid else {
+        hold_and_create(studio, text, attachments, kind);
         return;
     };
     let busy = studio.depth.session_running(&sid)
@@ -160,13 +161,23 @@ fn steer(studio: &Studio, sid: &str, text: &str) {
 }
 
 fn begin_turn(studio: &Studio, sid: &str, text: String, attachments: Vec<Attachment>) {
+    begin_turn_with(studio, sid, text, attachments, true);
+}
+
+fn begin_turn_with(
+    studio: &Studio,
+    sid: &str,
+    text: String,
+    attachments: Vec<Attachment>,
+    echo: bool,
+) {
     if sid.is_empty() {
         return;
     }
     if !text.is_empty() {
         studio.depth.remember_prompt(&text);
     }
-    if !text.is_empty() || !attachments.is_empty() {
+    if echo && (!text.is_empty() || !attachments.is_empty()) {
         let line = if text.is_empty() {
             attachments
                 .iter()
@@ -178,6 +189,8 @@ fn begin_turn(studio: &Studio, sid: &str, text: String, attachments: Vec<Attachm
         };
         push_user(studio, sid, &line);
         retitle(studio, sid, &line);
+    } else if !text.is_empty() {
+        retitle(studio, sid, &text);
     }
     studio.depth.attachments.set(Vec::new());
     if studio.local_only || studio.runtime().is_none() {
@@ -189,6 +202,7 @@ fn begin_turn(studio: &Studio, sid: &str, text: String, attachments: Vec<Attachm
     }
     studio.clear_live();
     studio.streaming.set(true);
+    studio.depth.missing_retried.set(false);
     studio.depth.remote_busy.set(false);
     studio.depth.stall_hidden.set(false);
     studio.depth.usage_run.set(Usage::default());
@@ -382,12 +396,95 @@ fn run_slash(studio: &Studio, text: &str) {
     });
 }
 
+fn hold_and_create(
+    studio: &Studio,
+    text: String,
+    attachments: Vec<Attachment>,
+    kind: SubmitKind,
+) {
+    if studio.runtime().is_none() {
+        return;
+    }
+    studio.depth.held_for_session.set(Some(PendingSend {
+        text,
+        attachments,
+        kind,
+    }));
+    studio.add();
+}
+
+/// Called after the sidecar creates a session the UI asked for.
+pub fn on_session_created(studio: &Studio, sid: &str) {
+    let Some(held) = studio.depth.held_for_session.get() else {
+        return;
+    };
+    studio.depth.held_for_session.set(None);
+    let echo = studio.depth.held_echo.get();
+    studio.depth.held_echo.set(true);
+    if echo {
+        submit(studio, held.text, held.attachments, held.kind, false);
+    } else {
+        begin_turn_with(studio, sid, held.text, held.attachments, false);
+    }
+}
+
+fn session_is_listed(studio: &Studio, id: &str) -> bool {
+    !id.is_empty() && studio.sessions.get().iter().any(|s| s.id == id)
+}
+
 fn ensure_session(studio: &Studio) -> Option<String> {
     if let Some(id) = studio.active.get() {
+        if session_is_listed(studio, &id) {
+            return Some(id);
+        }
+    }
+    if let Some(id) = studio.sessions.get().first().map(|s| s.id.clone()) {
+        studio.active.set(Some(id.clone()));
+        studio.messages.set(Vec::new());
+        studio.clear_live();
+        focus_session(studio, &id);
+        studio.load_messages(&id);
         return Some(id);
     }
+    if studio.local_only {
+        studio.add();
+        return studio.active.get();
+    }
+    None
+}
+
+fn recover_missing_session(studio: &Studio, sid: &str, message: &str) {
+    if studio.depth.missing_retried.get() {
+        if studio.active.get().as_deref() == Some(sid) {
+            studio.finish_assistant(Some(message.to_string()));
+        } else {
+            studio.depth.finish_job(sid, "error");
+        }
+        return;
+    }
+    let job = studio.depth.job(sid);
+    let text = job.as_ref().map(|j| j.outgoing.clone()).unwrap_or_default();
+    let files = job.map(|j| j.held).unwrap_or_default();
+    studio.streaming.set(false);
+    studio.depth.finish_job(sid, "error");
+    studio.clear_live();
+    studio.sessions.update(|list| list.retain(|s| s.id != sid));
+    if studio.active.get().as_deref() == Some(sid) {
+        studio.active.set(None);
+    }
+    if (text.is_empty() && files.is_empty()) || studio.runtime().is_none() {
+        studio.finish_assistant(Some(message.to_string()));
+        return;
+    }
+    studio.depth.missing_retried.set(true);
+    studio.depth.held_echo.set(true);
+    studio.depth.held_for_session.set(Some(PendingSend {
+        text,
+        attachments: files,
+        kind: SubmitKind::Send,
+    }));
+    studio.depth.notice.set("That chat was gone. Starting a new one…".into());
     studio.add();
-    studio.active.get()
 }
 
 fn push_user(studio: &Studio, sid: &str, text: &str) {
@@ -664,6 +761,8 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
                         .live_steps
                         .update(|steps| work::on_step_error(steps, data));
                 }
+            } else if logic::is_missing_session_error(&sse::error_text(data)) {
+                recover_missing_session(&studio, sid, &sse::error_text(data));
             } else if active {
                 studio.finish_assistant(Some(sse::error_text(data)));
             } else {
@@ -1309,20 +1408,7 @@ fn apply_session_sync(studio: &Studio, reload_sid: Option<String>) {
             let Ok(list) = out else {
                 return;
             };
-            let active = studio.active.get();
-            studio.apply_sessions(list);
-            if let Some(id) = active {
-                if !studio.sessions.get().iter().any(|s| s.id == id) {
-                    if let Some(next) = studio.sessions.get().first().map(|s| s.id.clone()) {
-                        studio.active.set(Some(next.clone()));
-                        studio.load_messages(&next);
-                    } else {
-                        studio.active.set(None);
-                        studio.messages.set(Vec::new());
-                    }
-                    return;
-                }
-            }
+            studio.apply_live_sessions(list);
             if let Some(sid) = reload_sid {
                 if !studio.streaming.get() && studio.active.get().as_deref() == Some(sid.as_str()) {
                     studio.load_messages(&sid);
@@ -2881,6 +2967,29 @@ mod tests {
     use std::net::TcpListener;
     use std::thread;
     use std::time::Instant;
+
+    #[test]
+    fn apply_live_sessions_drops_the_placeholder_and_selects_a_live_id() {
+        let studio = Studio::new();
+        assert_eq!(studio.active.get().as_deref(), Some("1"));
+        studio.apply_live_sessions(vec![crate::studio::Session::fresh("sess-live", "Hello")]);
+        assert_eq!(studio.active.get().as_deref(), Some("sess-live"));
+    }
+
+    #[test]
+    fn ensure_session_drops_a_stale_id_and_uses_a_live_one() {
+        let studio = Studio::new();
+        studio.sessions.set(vec![crate::studio::Session::fresh("sess-live", "Hello")]);
+        studio.active.set(Some("1".into()));
+        assert_eq!(ensure_session(&studio).as_deref(), Some("sess-live"));
+        assert_eq!(studio.active.get().as_deref(), Some("sess-live"));
+    }
+
+    #[test]
+    fn ensure_session_keeps_a_session_that_is_on_the_list() {
+        let studio = Studio::new();
+        assert_eq!(ensure_session(&studio).as_deref(), Some("1"));
+    }
 
     #[test]
     fn draft_event_stores_the_real_message_id() {
