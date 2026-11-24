@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use remedy_ui::layout::{Align, Length};
-use remedy_ui::reactive::Signal;
+use remedy_ui::reactive::{waker, Signal};
 use crate::presence::{self, Mood};
 use remedy_ui::widgets as w;
 use remedy_ui::{show, El, TextField, Ui};
@@ -49,6 +49,8 @@ pub struct Wizard {
     pub ollama_models: Signal<Vec<String>>,
     pub languages: Signal<Vec<String>>,
     pub paid_index: Signal<usize>,
+    pub free_options: Signal<Vec<model::FreeProviderOpt>>,
+    pub free_index: Signal<usize>,
     /// Recommended path: hello → folder → name → ready (still writes full defaults).
     pub short: Signal<bool>,
     /// Provider step: "On this PC" (local default) vs explicit Ollama.
@@ -97,6 +99,8 @@ impl Wizard {
             ollama_models: Signal::new(Vec::new()),
             languages: Signal::new(Vec::new()),
             paid_index: Signal::new(0),
+            free_options: Signal::new(model::offline_free_options()),
+            free_index: Signal::new(0),
             short: Signal::new(false),
             on_this_pc: Signal::new(false),
             done: Signal::new(false),
@@ -115,8 +119,18 @@ impl Wizard {
         let Some(client) = self.client.get() else {
             return;
         };
+        let wiz = self.clone();
+        let wake = waker().ok();
         std::thread::spawn(move || {
             let _ = super::api::begin_setup(&client, "traditional");
+            if let Ok(v) = super::api::get_json(&client, "providers/free") {
+                let opts = model::free_providers_or_fallback(&v);
+                if let Some(wake) = wake {
+                    let _ = wake.post(move || wiz.free_options.set(opts));
+                } else {
+                    wiz.free_options.set(opts);
+                }
+            }
         });
     }
 
@@ -625,8 +639,30 @@ fn provider_step(ui: &Ui, wiz: Wizard) -> El {
                 move || wiz.select_provider("ollama")
             },
         );
+        let free_keys = model::free_key_options(&wiz.free_options.get());
+        let free_ids: Vec<String> = free_keys.iter().map(|o| o.id.clone()).collect();
+        let free_names: Vec<String> = std::iter::once("Choose provider…".to_string())
+            .chain(free_keys.iter().map(|o| o.title.clone()))
+            .collect();
+        let free = w::select(ui, "Or a free key", free_names, wiz.free_index.clone());
+        let free2 = free.clone();
+        let wiz_free = wiz.clone();
+        let free_keys_bind = free_keys.clone();
+        let free = free.bind(move || {
+            let i = wiz_free.free_index.get();
+            if i > 0 {
+                if let Some(p) = free_keys_bind.get(i - 1) {
+                    if wiz_free.provider.get() != p.id {
+                        wiz_free.select_provider(&p.id);
+                        wiz_free.paid_index.set(0);
+                    }
+                }
+            }
+            let _ = &free2;
+        });
+        let paid_list = model::paid_providers_except(&free_ids);
         let paid_names: Vec<String> = std::iter::once("Choose provider…".to_string())
-            .chain(model::paid_providers().into_iter().map(|p| p.name.to_string()))
+            .chain(paid_list.iter().map(|p| p.name.to_string()))
             .collect();
         let paid = w::select(ui, "Or pick a paid / full provider", paid_names, wiz.paid_index.clone());
         let paid2 = paid.clone();
@@ -634,9 +670,10 @@ fn provider_step(ui: &Ui, wiz: Wizard) -> El {
         let paid = paid.bind(move || {
             let i = wiz_paid.paid_index.get();
             if i > 0 {
-                if let Some(p) = model::paid_providers().get(i - 1) {
+                if let Some(p) = paid_list.get(i - 1) {
                     if wiz_paid.provider.get() != p.id {
                         wiz_paid.select_provider(p.id);
+                        wiz_paid.free_index.set(0);
                     }
                 }
             }
@@ -652,6 +689,8 @@ fn provider_step(ui: &Ui, wiz: Wizard) -> El {
                 w::text(ui, "Free").style(typo(SECTION)),
                 demo,
                 ollama,
+                w::text(ui, "Or a free key").variant("muted"),
+                free,
                 w::text(ui, "Other models").style(typo(SECTION)),
                 w::text(ui, "Or pick a paid / full provider").variant("muted"),
                 paid,
