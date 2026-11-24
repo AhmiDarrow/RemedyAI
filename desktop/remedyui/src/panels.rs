@@ -396,8 +396,28 @@ pub fn memory_body(ui: &Ui) -> El {
     w::text(ui, messages().text(ui, "memory-body")).variant("muted")
 }
 
-pub fn skills_body(ui: &Ui) -> El {
-    w::text(ui, messages().text(ui, "skills-body")).variant("muted")
+pub fn skills_body(ui: &Ui, chrome: Chrome) -> El {
+    let studio = chrome
+        .studio
+        .get()
+        .unwrap_or_else(Studio::preview);
+    if studio.runtime().is_none() && studio.depth.skills.get().is_empty() {
+        studio.depth.skills.set(vec![
+            crate::depth::SkillRow {
+                name: "summarize".into(),
+                description: "Shorten a long page or thread.".into(),
+                status: "installed".into(),
+                quarantine: false,
+            },
+            crate::depth::SkillRow {
+                name: "receipts".into(),
+                description: "Read a receipt photo and total it.".into(),
+                status: "installed".into(),
+                quarantine: false,
+            },
+        ]);
+    }
+    crate::depth::panels::skills_sheet(ui, studio)
 }
 
 fn lang_index(id: &str) -> usize {

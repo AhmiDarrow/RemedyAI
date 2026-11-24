@@ -112,7 +112,7 @@ fn memory(ui: &Ui, studio: Studio) -> El {
     frame(ui, &studio, "memory", body)
 }
 
-fn skills(ui: &Ui, studio: Studio) -> El {
+pub(crate) fn skills_sheet(ui: &Ui, studio: Studio) -> El {
     let unit = ui.theme().spacing.unit;
     let tab = studio.depth.panel_tab.clone();
     let st_in = studio.clone();
@@ -179,7 +179,11 @@ fn skills(ui: &Ui, studio: Studio) -> El {
         })
         .child(tabs)
         .child(body);
-    frame(ui, &studio, "skills", col)
+    col
+}
+
+fn skills(ui: &Ui, studio: Studio) -> El {
+    frame(ui, &studio, "skills", skills_sheet(ui, studio.clone()))
 }
 
 fn installed(ui: &Ui, studio: Studio) -> El {
