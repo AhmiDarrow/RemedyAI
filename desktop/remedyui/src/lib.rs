@@ -89,6 +89,7 @@ pub fn app(app: &App) {
     let grove = grove::Grove::new(studio.clone(), true);
     grove::bind_live(grove.clone());
     let chrome = Chrome::load();
+    chrome.grove.set(Some(grove.clone()));
     let live = if runtime::spawn_disabled() {
         None
     } else {
@@ -262,6 +263,7 @@ pub fn grove_home_offer(ui: &Ui) -> El {
     let chrome = Chrome::preview(chrome::Overlay::None);
     let studio = Studio::preview();
     let grove = grove::Grove::preview(studio.clone());
+    chrome.grove.set(Some(grove.clone()));
     let offer = setup::Offer::preview();
     chrome::hosted(ui, studio, chrome, move |ui| {
         grove::root(ui, grove.clone(), None, Some(offer.clone())).layout(|l| {
@@ -279,6 +281,7 @@ pub fn grove_home_chrome(ui: &Ui) -> El {
     let chrome = Chrome::preview(chrome::Overlay::None);
     let studio = Studio::preview();
     let grove = grove::Grove::preview(studio.clone());
+    chrome.grove.set(Some(grove.clone()));
     chrome::hosted(ui, studio, chrome, move |ui| {
         grove::root(ui, grove.clone(), None, None).layout(|l| {
             l.grow = 1.0;
