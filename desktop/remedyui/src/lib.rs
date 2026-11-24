@@ -936,6 +936,27 @@ pub fn home_skills(ui: &Ui) -> El {
     chrome::preview_frame(ui, chrome::Overlay::Skills, false)
 }
 
+/// Image markup editor over a seeded settings screenshot (not a golden).
+pub fn home_markup(ui: &Ui) -> El {
+    markup_preview(ui, false)
+}
+
+/// Image markup editor with the text-label card open (not a golden).
+pub fn home_markup_text(ui: &Ui) -> El {
+    markup_preview(ui, true)
+}
+
+fn markup_preview(ui: &Ui, text_dialog: bool) -> El {
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    depth::markup::seed_preview(&studio, text_dialog);
+    shell_with(
+        ui,
+        studio,
+        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+    )
+}
+
 /// Filled usage tab, for goldens. No runtime calls.
 pub fn preview_usage(ui: &Ui) -> El {
     usage::UsagePanel::preview(ui)

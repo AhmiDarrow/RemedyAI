@@ -8,6 +8,7 @@ pub(crate) mod banners;
 pub(crate) mod composer;
 pub(crate) mod dialogs;
 mod markdown;
+pub(crate) mod markup;
 pub(crate) mod panels;
 
 pub(crate) mod logic;
@@ -238,6 +239,7 @@ pub struct Depth {
     pub stuck: Signal<bool>,
     pub lightbox: Signal<Option<String>>,
     pub lightbox_gen: Signal<u64>,
+    pub markup: markup::Markup,
     pub panel: Signal<SidePanel>,
     pub panel_tab: Signal<String>,
     pub confirm: Signal<Option<Confirm>>,
@@ -311,6 +313,7 @@ impl Depth {
             stuck: Signal::new(true),
             lightbox: Signal::new(None),
             lightbox_gen: Signal::new(0),
+            markup: markup::Markup::new(),
             panel: Signal::new(SidePanel::None),
             panel_tab: Signal::new("memory".into()),
             confirm: Signal::new(None),
@@ -450,6 +453,8 @@ impl Depth {
     }
 
     pub fn show_image(&self, src: String) {
+        self.markup.reset();
+        self.markup.src_name.set(markup::src_name(&src));
         self.lightbox.set(Some(src));
         self.lightbox_gen.update(|n| *n += 1);
     }

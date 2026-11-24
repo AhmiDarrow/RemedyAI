@@ -2735,12 +2735,17 @@ pub fn import_skills_pack(studio: &Studio) {
 }
 
 fn save_bytes(studio: &Studio, name: &str, bytes: Vec<u8>) {
+    save_bytes_as(studio, "Export skills pack", name, bytes);
+}
+
+pub(crate) fn save_bytes_as(studio: &Studio, title: &str, name: &str, bytes: Vec<u8>) {
     let studio = studio.clone();
     let dialog_studio = studio.clone();
     let name = name.to_string();
+    let title = title.to_string();
     let ok = with_host(move |app, window| {
         let mut dialog = FileDialog::default();
-        dialog.title = "Export skills pack".into();
+        dialog.title = title;
         dialog.save = true;
         dialog.file_name = Some(name);
         let studio = dialog_studio.clone();
