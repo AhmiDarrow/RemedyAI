@@ -601,7 +601,36 @@ impl Chrome {
 
     pub fn open_web(self, ui: &Ui) {
         let origin = runtime::origin();
-        self.open_url(&format!("{origin}/"));
+        let fallback = format!("{origin}/");
+        // Desktop sidecar leaves browser bootstrap off by default. A minted
+        // one-time link is explicit owner consent and is what actually signs
+        // the Web UI in. Opening bare "/" shows a signed-out or missing-asset page.
+        let client = self.studio.get().and_then(|s| s.client());
+        let Some(client) = client else {
+            self.open_url(&fallback);
+            self.toast(ui, messages().text(ui, "toast-web"));
+            return;
+        };
+        let Ok(wake) = remedy_ui::reactive::waker() else {
+            self.open_url(&fallback);
+            self.toast(ui, messages().text(ui, "toast-web"));
+            return;
+        };
+        let c = self;
+        runtime::post_json(&client, "auth/bootstrap-link", serde_json::json!({}), move |res| {
+            let _ = wake.post(move || {
+                let url = res
+                    .ok()
+                    .and_then(|v| {
+                        v.get("url")
+                            .and_then(|u| u.as_str())
+                            .map(|s| s.to_string())
+                    })
+                    .filter(|s| s.starts_with("http://127.0.0.1") || s.starts_with("http://localhost") || s.starts_with("http://[::1]"))
+                    .unwrap_or(fallback);
+                c.open_url(&url);
+            });
+        });
         self.toast(ui, messages().text(ui, "toast-web"));
     }
 
