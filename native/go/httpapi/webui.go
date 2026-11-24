@@ -3,12 +3,25 @@ package httpapi
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 )
+
+func init() {
+	// Windows may register .js as a non-script type; FileServer + nosniff
+	// would then fail dynamic import() of lazy chunks such as SetupFlow.
+	_ = mime.AddExtensionType(".js", "text/javascript; charset=utf-8")
+	_ = mime.AddExtensionType(".mjs", "text/javascript; charset=utf-8")
+	_ = mime.AddExtensionType(".cjs", "text/javascript; charset=utf-8")
+	_ = mime.AddExtensionType(".css", "text/css; charset=utf-8")
+	_ = mime.AddExtensionType(".wasm", "application/wasm")
+	_ = mime.AddExtensionType(".woff2", "font/woff2")
+	_ = mime.AddExtensionType(".woff", "font/woff")
+}
 
 const webUIMissingHTML = `<!DOCTYPE html>
 <html lang="en">
@@ -43,6 +56,13 @@ var webUIHTMLHeaders = map[string]string{
 	"Cache-Control": "no-cache, no-store, must-revalidate",
 	"Pragma":        "no-cache",
 }
+
+// Hashed Vite assets (name-<hash>.js) can be cached forever; the filename changes on rebuild.
+const webUIHashedAssetCacheControl = "public, max-age=31536000, immutable"
+
+var webUIHTMLAssetRefRE = regexp.MustCompile(`(?i)(?:src|href)\s*=\s*["']([^"']+)["']`)
+var webUIJSImportRE = regexp.MustCompile(`["'](\./[A-Za-z0-9_./@-]+\.(?:js|mjs|css|wasm))["']`)
+var webUIHashedAssetRE = regexp.MustCompile(`(?i)^[A-Za-z0-9_.@-]+-[A-Za-z0-9_-]{6,}\.(js|mjs|cjs|css|woff2?|wasm|map)$`)
 
 // webUICSPBase mirrors the desktop CSP in tauri.conf.json for the browser
 // mode, minus the Tauri-only ipc:/asset: sources. Inline scripts are allowed
@@ -96,13 +116,28 @@ func withWebUISecurityHeaders(next http.Handler) http.Handler {
 }
 
 // FindWebUIDir locates built desktop SPA assets (Python find_webui_dir parity).
-// Prefer REMEDY_WEBUI_DIR, then live desktop/dist, then staged webui/ui next to
-// the binary, then the copy bundled in the pip wheel (REMEDY_BUNDLED_WEBUI_DIR,
-// set by `remedy serve`).
+// Prefer REMEDY_WEBUI_DIR, then a complete webui/ui folder next to the
+// executable (the installed layout), then live desktop/dist for dev, then the
+// copy bundled in the pip wheel (REMEDY_BUNDLED_WEBUI_DIR, set by `remedy serve`).
+// Incomplete dirs (index.html that references a chunk that is not on disk) are
+// skipped so a stale workspace checkout cannot shadow the packaged bundle.
 func FindWebUIDir() string {
-	candidates := make([]string, 0, 24)
+	candidates := make([]string, 0, 32)
 	if env := strings.TrimSpace(os.Getenv("REMEDY_WEBUI_DIR")); env != "" {
 		candidates = append(candidates, expandUser(env))
+	}
+	if exe, err := os.Executable(); err == nil {
+		exe, _ = filepath.EvalSymlinks(exe)
+		exeDir := filepath.Dir(exe)
+		// Installed runtime: $INSTDIR/webui next to remedy-runtime.exe.
+		// Prefer this over cwd-walked desktop/dist, which may be a stale checkout.
+		candidates = append(candidates,
+			filepath.Join(exeDir, "webui"),
+			filepath.Join(exeDir, "ui"),
+			filepath.Join(exeDir, "resources", "webui"),
+			filepath.Join(filepath.Dir(exeDir), "webui"),
+			filepath.Join(filepath.Dir(exeDir), "resources", "webui"),
+		)
 	}
 	if root := strings.TrimSpace(os.Getenv("REMEDY_DEV_ROOT")); root != "" {
 		candidates = append(candidates, filepath.Join(expandUser(root), "desktop", "dist"))
@@ -115,19 +150,12 @@ func FindWebUIDir() string {
 	if exe, err := os.Executable(); err == nil {
 		exe, _ = filepath.EvalSymlinks(exe)
 		exeDir := filepath.Dir(exe)
-		// desktop/src-tauri/target/debug/*.exe → desktop/dist via parents[3]
+		// desktop/src-tauri/target/debug/*.exe → desktop/dist via parents
 		for _, p := range parentsOf(exe) {
 			candidates = append(candidates, filepath.Join(p, "desktop", "dist"))
 			candidates = append(candidates, filepath.Join(p, "dist"))
 		}
-		candidates = append(candidates,
-			filepath.Join(exeDir, "ui"),
-			filepath.Join(exeDir, "webui"),
-			filepath.Join(exeDir, "desktop", "dist"),
-			filepath.Join(exeDir, "resources", "webui"),
-			filepath.Join(filepath.Dir(exeDir), "webui"),
-			filepath.Join(filepath.Dir(exeDir), "resources", "webui"),
-		)
+		candidates = append(candidates, filepath.Join(exeDir, "desktop", "dist"))
 	}
 	if bundled := strings.TrimSpace(os.Getenv("REMEDY_BUNDLED_WEBUI_DIR")); bundled != "" {
 		candidates = append(candidates, expandUser(bundled))
@@ -137,7 +165,10 @@ func FindWebUIDir() string {
 			candidates = append(candidates, filepath.Join(p, "ui"), filepath.Join(p, "webui"))
 		}
 	}
+	return firstCompleteWebUIDir(candidates)
+}
 
+func firstCompleteWebUIDir(candidates []string) string {
 	seen := map[string]struct{}{}
 	for _, c := range candidates {
 		if c == "" {
@@ -159,12 +190,120 @@ func FindWebUIDir() string {
 }
 
 func webUIDirOK(dir string) bool {
+	return len(webUIMissingAssets(dir)) == 0
+}
+
+// webUIMissingAssets returns relative paths that index.html (and its JS
+// chunks) reference but that are not present under dir. A missing index.html
+// is reported as "index.html". Used so packaging and FindWebUIDir refuse a
+// mismatched bundle (index points at SetupFlow-*.js that was never copied).
+func webUIMissingAssets(dir string) []string {
 	st, err := os.Stat(dir)
 	if err != nil || !st.IsDir() {
-		return false
+		return []string{"index.html"}
 	}
-	st, err = os.Stat(filepath.Join(dir, "index.html"))
-	return err == nil && !st.IsDir()
+	index := filepath.Join(dir, "index.html")
+	st, err = os.Stat(index)
+	if err != nil || st.IsDir() {
+		return []string{"index.html"}
+	}
+	html, err := os.ReadFile(index)
+	if err != nil {
+		return []string{"index.html"}
+	}
+	root, err := filepath.Abs(dir)
+	if err != nil {
+		root = dir
+	}
+	var missing []string
+	seen := map[string]struct{}{}
+	var queue []string
+	enqueue := func(rel string) {
+		rel = strings.TrimSpace(rel)
+		if rel == "" || rel == "index.html" {
+			return
+		}
+		if i := strings.IndexAny(rel, "?#"); i >= 0 {
+			rel = rel[:i]
+		}
+		rel = strings.TrimPrefix(rel, "./")
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" || strings.Contains(rel, "..") {
+			return
+		}
+		if strings.HasPrefix(rel, "http:") || strings.HasPrefix(rel, "https:") ||
+			strings.HasPrefix(rel, "data:") || strings.HasPrefix(rel, "mailto:") {
+			return
+		}
+		if _, ok := seen[rel]; ok {
+			return
+		}
+		seen[rel] = struct{}{}
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		abs, err := filepath.Abs(path)
+		if err != nil || !(abs == root || strings.HasPrefix(abs, root+string(os.PathSeparator))) {
+			return
+		}
+		st, err := os.Stat(path)
+		if err != nil || st.IsDir() {
+			missing = append(missing, rel)
+			return
+		}
+		low := strings.ToLower(rel)
+		if strings.HasSuffix(low, ".js") || strings.HasSuffix(low, ".mjs") {
+			queue = append(queue, rel)
+		}
+	}
+	for _, m := range webUIHTMLAssetRefRE.FindAllSubmatch(html, -1) {
+		ref := string(m[1])
+		if strings.HasPrefix(ref, "http:") || strings.HasPrefix(ref, "https:") ||
+			strings.HasPrefix(ref, "data:") || strings.HasPrefix(ref, "mailto:") ||
+			strings.HasPrefix(ref, "javascript:") || strings.HasPrefix(ref, "#") {
+			continue
+		}
+		enqueue(ref)
+	}
+	for len(queue) > 0 {
+		rel := queue[0]
+		queue = queue[1:]
+		body, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+		if err != nil {
+			continue
+		}
+		base := filepath.ToSlash(filepath.Dir(rel))
+		for _, m := range webUIJSImportRE.FindAllSubmatch(body, -1) {
+			imp := string(m[1])
+			joined := imp
+			if strings.HasPrefix(imp, "./") {
+				if base == "." || base == "" {
+					joined = strings.TrimPrefix(imp, "./")
+				} else {
+					joined = base + "/" + strings.TrimPrefix(imp, "./")
+				}
+			}
+			enqueue(joined)
+		}
+	}
+	return missing
+}
+
+func setWebUIAssetCacheHeaders(h http.Header, name string) {
+	if webUIHashedAssetRE.MatchString(name) {
+		h.Set("Cache-Control", webUIHashedAssetCacheControl)
+		h.Del("Pragma")
+		return
+	}
+	for k, v := range webUIHTMLHeaders {
+		h.Set(k, v)
+	}
+}
+
+func withWebUIAssetHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setWebUISecurityHeaders(w.Header(), webUICSP(nil))
+		setWebUIAssetCacheHeaders(w.Header(), filepath.Base(r.URL.Path))
+		next.ServeHTTP(w, r)
+	})
 }
 
 func parentsOf(path string) []string {
@@ -225,7 +364,7 @@ func (s *Server) mountWebUI() {
 	assets := filepath.Join(webDir, "assets")
 	if st, err := os.Stat(assets); err == nil && st.IsDir() {
 		fileServer := http.FileServer(http.Dir(assets))
-		s.mux.Handle("GET /assets/", withWebUISecurityHeaders(http.StripPrefix("/assets/", fileServer)))
+		s.mux.Handle("GET /assets/", withWebUIAssetHeaders(http.StripPrefix("/assets/", fileServer)))
 	}
 	// GET only — separate HEAD wildcards conflict with more-specific GET patterns on ServeMux.
 	s.mux.HandleFunc("GET /{$}", s.handleWebUIIndex)
@@ -269,6 +408,7 @@ func (s *Server) handleWebUISPA(w http.ResponseWriter, r *http.Request) {
 		if root != "" && strings.HasPrefix(abs, root+string(os.PathSeparator)) {
 			if st, err := os.Stat(abs); err == nil && !st.IsDir() {
 				setWebUISecurityHeaders(w.Header(), webUICSP(nil))
+				setWebUIAssetCacheHeaders(w.Header(), filepath.Base(abs))
 				http.ServeFile(w, r, abs)
 				return
 			}

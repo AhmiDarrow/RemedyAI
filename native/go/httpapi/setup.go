@@ -320,11 +320,14 @@ func (s *Server) handlePutSetup(w http.ResponseWriter, r *http.Request) {
 	case "update_offer_go", "update_offer_accept":
 		if sess.UpdateOffer != "accepted" && sess.UpdateOffer != "declined" {
 			s.recordUpdateOffer(&sess, "accepted")
-			// Start the same conversation as a revisit; the pop-up itself is done.
-			sess.OnboardingPending = true
-			sess.Mode = "conversation"
-			sess.Status = "pending"
-			sess.Source = "revisit"
+			// Already-finished installs must not be thrown back into first-run
+			// setup (or a SetupFlow lazy-load) just for accepting the notice.
+			if !coerceBool(LoadConfig(s.homeDir)["setup_completed"], false) {
+				sess.OnboardingPending = true
+				sess.Mode = "conversation"
+				sess.Status = "pending"
+				sess.Source = "revisit"
+			}
 		}
 	case "update_offer_later", "update_offer_dismiss":
 		if sess.UpdateOffer != "accepted" && sess.UpdateOffer != "declined" {
