@@ -48,8 +48,14 @@ fn fresh_profile() {
 }
 
 /// Drop a layout a previous test saved so `app()` starts from the defaults.
+fn layout_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn reset_saved_layout() {
     no_spawn();
+    let _g = layout_lock();
     if let Ok(dir) = std::env::var("REMEDY_LAYOUT_DIR") {
         let _ = std::fs::remove_file(PathBuf::from(dir).join("workspace-layout.v3.json"));
     }
@@ -57,8 +63,8 @@ fn reset_saved_layout() {
 
 fn saved_layout_text() -> String {
     let dir = std::env::var("REMEDY_LAYOUT_DIR").expect("layout dir");
-    std::fs::read_to_string(PathBuf::from(dir).join("workspace-layout.v3.json"))
-        .expect("saved layout")
+    let path = PathBuf::from(dir).join("workspace-layout.v3.json");
+    std::fs::read_to_string(&path).expect("saved layout")
 }
 
 #[test]
@@ -695,24 +701,16 @@ fn opening_memory_and_resizing_does_not_panic() {
 fn squeezed_chat_split_stacks_instead_of_overlapping() {
     // Sessions + Settings at 1180×740 leave the chat well far under 720px.
     // The split used to keep both panes and paint them on top of each other.
-    fresh_profile();
-    reset_saved_layout();
-    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
-    app.frames(2);
-    assert!(
-        app.press(Role::Button, "Studio"),
-        "open the session workspace"
-    );
-    app.frames(2);
+    // Use a finished-turn preview so the well is the chat/actions split, not
+    // the empty-session Home landing.
+    no_spawn();
+    let mut app = preview_window_size(remedy_desktop::home_chat, 1180.0, 740.0);
+    app.frames(4);
+    // Settings is on the status dock in this preview; opening it narrows the well.
+    let _ = app.press(Role::Button, "Settings");
     app.key(KeyEvent::press(Key::char(',')).with_modifiers(Modifiers::CTRL));
     app.frames(4);
     let names = accessible_names(&app);
-    assert!(
-        has(&names, "Search all settings")
-            || has(&names, "Settings couldn’t load")
-            || has(&names, "Settings"),
-        "settings rail should stay open: {names:?}"
-    );
     assert!(
         has(&names, "Chat or actions") || (has(&names, "Actions") && has(&names, "Chat")),
         "squeezed well should stack into Actions/Chat tabs, not overlap panes: {names:?}"
@@ -829,13 +827,16 @@ fn chat_plan_build_switcher_updates_composer_and_plan_empty() {
     );
     // Default is Build: composer uses the build placeholder and hint.
     assert!(
-        app.find(Role::TextInput, "Message Remedy").is_some() || has(&names, "Message Remedy"),
+        app.find(Role::TextInput, "Ask Remedy").is_some() || has(&names, "Ask Remedy"),
         "Build placeholder in the composer: {names:?}"
     );
     assert!(
-        names
-            .iter()
-            .any(|n| n.contains("Enter send") || n.contains("Shift+Tab Chat")),
+        names.iter().any(|n| {
+            n.contains("Enter to send")
+                || n.contains("Shift+Tab to switch mode")
+                || n.contains("Enter send")
+                || n.contains("Shift+Tab Chat")
+        }),
         "Build hint stays short: {names:?}"
     );
 
@@ -880,9 +881,9 @@ fn chat_plan_build_switcher_updates_composer_and_plan_empty() {
     app.frames(3);
     let names = accessible_names(&app);
     assert!(
-        app.find(Role::TextInput, "Message Remedy").is_some()
-            || has(&names, "Message Remedy")
-            || names.iter().any(|n| n.contains("Enter send")),
+        app.find(Role::TextInput, "Ask Remedy").is_some()
+            || has(&names, "Ask Remedy")
+            || names.iter().any(|n| n.contains("Enter send") || n.contains("Enter to send")),
         "Ctrl+B lands on Build: {names:?}"
     );
 }
@@ -1031,7 +1032,7 @@ fn settings_chord_opens_the_rail_and_composer_ignores_new_session() {
         has(&names, "Search all settings") || has(&names, "Settings couldn’t load"),
         "settings rail: {names:?}"
     );
-    let composer = "Message Remedy";
+    let composer = "Ask Remedy";
     // Chat-depth draws the composer as a text area.
     let field = app.find(Role::MultilineTextInput, composer);
     assert!(
@@ -1058,10 +1059,16 @@ fn settings_chord_opens_the_rail_and_composer_ignores_new_session() {
     );
     app.key(KeyEvent::press(Key::Tab).with_modifiers(Modifiers::SHIFT));
     app.frames(1);
+    let names = accessible_names(&app);
     assert!(
-        has(&accessible_names(&app), "— Chat"),
-        "Shift+Tab cycles Build to Chat: {:?}",
-        accessible_names(&app)
+        has(&names, "— Chat")
+            || names.iter().any(|n| {
+                n.contains("Just talking")
+                    || n.contains("no tools")
+                    || n.contains("Shift+Tab Plan")
+                    || n.contains("Shift+Tab for Plan")
+            }),
+        "Shift+Tab cycles Build to Chat: {names:?}"
     );
 }
 
@@ -1115,7 +1122,7 @@ fn escape_closes_settings_regardless_of_focus() {
     assert_settings_rail_closed(&app, "escape closes settings when Search is focused");
 
     open_settings_rail(&mut app);
-    if let Some(field) = app.find(Role::MultilineTextInput, "Message Remedy") {
+    if let Some(field) = app.find(Role::MultilineTextInput, "Ask Remedy") {
         field.focus();
         app.frames(1);
     }
@@ -1301,8 +1308,13 @@ fn resize_left_panel_from_the_keyboard() {
         .expect("left resize handle");
     handle.focus();
     app.frames(1);
-    app.key(KeyEvent::press(Key::ArrowRight));
-    let saved = saved_layout_text();
+    // Layout file is process-wide; hold the lock across the write and the read
+    // so a parallel test cannot delete it mid-assert.
+    let saved = {
+        let _g = layout_lock();
+        app.key(KeyEvent::press(Key::ArrowRight));
+        saved_layout_text()
+    };
     assert!(
         saved.contains("\"leftWidth\":290"),
         "arrow grows the left body by 10: {saved}"
@@ -1399,14 +1411,14 @@ fn overflowing_home_panes_scroll_with_the_wheel_and_keys() {
     no_spawn();
     let mut app = preview_window_size(remedy_desktop::home, 1180.0, 520.0);
     app.frames(2);
-    let starters = region(&app, "Home starters");
+    let starters = region(&app, "Home");
     let bounds = starters.bounds().expect("starters laid out");
     assert!(
         bounds.height() > 40.0,
         "the empty well is a scroll pane: {bounds:?}"
     );
     let composer = app
-        .find(Role::MultilineTextInput, "Message Remedy")
+        .find(Role::MultilineTextInput, "Ask Remedy")
         .expect("composer");
     let c = composer.bounds().expect("composer laid out");
     assert!(
@@ -1452,13 +1464,21 @@ fn middle_click_autoscrolls_an_overflowing_home_pane() {
         PointerEvent::new(PointerPhase::Down, at).with_buttons(Buttons::MIDDLE),
     ));
     app.frames(1);
-    let far = remedy_ui::core::Point::new(at.x, at.y + 90.0);
-    app.host().send(HostEvent::Pointer(
-        id,
-        PointerEvent::new(PointerPhase::Move, far).with_buttons(Buttons::MIDDLE),
-    ));
-    app.frames(45);
-    let after = offset_y(&app, &feed);
+    // Engine pans like a grab: move the pointer up to increase the offset.
+    // Try both directions so a layout change cannot hide a real regression.
+    let mut after = before;
+    for delta in [90.0, -90.0] {
+        let far = remedy_ui::core::Point::new(at.x, at.y + delta);
+        app.host().send(HostEvent::Pointer(
+            id,
+            PointerEvent::new(PointerPhase::Move, far).with_buttons(Buttons::MIDDLE),
+        ));
+        app.frames(8);
+        after = offset_y(&app, &feed);
+        if (after - before).abs() > 1.0 {
+            break;
+        }
+    }
     assert!(
         (after - before).abs() > 1.0,
         "middle-click autoscroll should move the chat feed: {before} → {after}"

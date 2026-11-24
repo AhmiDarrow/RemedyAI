@@ -43,7 +43,9 @@ pub fn well(ui: &Ui, studio: Studio) -> El {
                 .child({
                     let empty_st = studio.clone();
                     let empty = move || {
-                        empty_st.messages.get().is_empty()
+                        // Plan mode always shows the plan list, even on a new session.
+                        empty_st.mode.get() != WorkMode::Plan
+                            && empty_st.messages.get().is_empty()
                             && empty_st.partial.get().is_empty()
                             && !empty_st.streaming.get()
                     };
