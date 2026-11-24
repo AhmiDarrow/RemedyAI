@@ -1542,3 +1542,73 @@ fn status_dock_shows_streaming_on_a_live_turn() {
         "a live turn shows Streaming on the status dock: {names:?}"
     );
 }
+
+
+#[test]
+fn title_bar_switches_grove_and_studio() {
+    fresh_profile();
+    reset_saved_layout();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    assert!(
+        app.find(Role::Button, "Grove").is_some(),
+        "Grove is in the title bar: {:?}",
+        accessible_names(&app)
+    );
+    assert!(
+        app.find(Role::Button, "Studio").is_some(),
+        "Studio is in the title bar: {:?}",
+        accessible_names(&app)
+    );
+    assert!(
+        app.find(Role::Button, "Home").is_some(),
+        "Grove starts on the home view"
+    );
+    assert!(app.press(Role::Button, "Studio"), "open Studio from the title bar");
+    app.frames(4);
+    assert!(
+        app.find(Role::Button, "New session").is_some(),
+        "Studio workbench is open"
+    );
+    assert!(app.press(Role::Button, "Grove"), "return from the title bar");
+    app.frames(4);
+    assert!(
+        app.find(Role::Button, "Home").is_some(),
+        "Grove is back after the title-bar switch"
+    );
+}
+
+#[test]
+fn ctrl_1_and_ctrl_2_switch_grove_and_studio() {
+    fresh_profile();
+    reset_saved_layout();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.key(KeyEvent::press(Key::char('2')).with_modifiers(Modifiers::CTRL));
+    app.frames(4);
+    assert!(
+        app.find(Role::Button, "New session").is_some(),
+        "Ctrl+2 opens Studio: {:?}",
+        accessible_names(&app)
+    );
+    app.key(KeyEvent::press(Key::char('1')).with_modifiers(Modifiers::CTRL));
+    app.frames(4);
+    assert!(
+        app.find(Role::Button, "Home").is_some(),
+        "Ctrl+1 returns to Grove: {:?}",
+        accessible_names(&app)
+    );
+}
+
+#[test]
+fn title_bar_switcher_stays_visible_when_narrow() {
+    let mut app = preview_window_size(remedy_desktop::grove_home_chrome, 700.0, 520.0);
+    app.frames(4);
+    let names = accessible_names(&app);
+    assert!(
+        app.find(Role::Button, "Grove").is_some(),
+        "Grove stays in the title bar at 700px: {names:?}"
+    );
+    assert!(
+        app.find(Role::Button, "Studio").is_some(),
+        "Studio stays in the title bar at 700px: {names:?}"
+    );
+}

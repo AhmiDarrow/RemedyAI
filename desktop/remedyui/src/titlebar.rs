@@ -5,7 +5,7 @@ use remedy_ui::core::Insets;
 use remedy_ui::layout::{Align, Justify, Length};
 use remedy_ui::style::StylePatch;
 use remedy_ui::widgets as w;
-use remedy_ui::{El, Ui};
+use remedy_ui::{El, Ui, show};
 
 use crate::chrome::{Chrome, Overlay};
 use crate::messages;
@@ -152,6 +152,7 @@ pub fn bar(ui: &Ui, _studio: &Studio, chrome: Chrome) -> El {
             l.height = Length::Percent(1.0);
             l.shrink = 0.0;
         }))
+        .child(surface_switch(ui, chrome))
         .child(drag)
         .child(
             w::text(ui, format!("v{VERSION}"))
@@ -243,6 +244,34 @@ pub fn menu(ui: &Ui, studio: &Studio, chrome: Chrome) -> El {
                 move || {
                     c.menu_open.set(false);
                     s.add();
+                }
+            },
+        ))
+        .child(item(
+            ui,
+            chrome,
+            messages().text(ui, "surface-grove"),
+            "Ctrl+1",
+            Kind::Normal,
+            {
+                let c = chrome;
+                move || {
+                    c.menu_open.set(false);
+                    c.show_grove();
+                }
+            },
+        ))
+        .child(item(
+            ui,
+            chrome,
+            messages().text(ui, "surface-studio"),
+            "Ctrl+2",
+            Kind::Normal,
+            {
+                let c = chrome;
+                move || {
+                    c.menu_open.set(false);
+                    c.show_studio();
                 }
             },
         ))
@@ -477,5 +506,101 @@ impl MarginY for El {
             l.margin.top = y;
             l.margin.bottom = y;
         })
+    }
+}
+
+
+/// Always-visible Grove / Studio switcher in the window title bar.
+///
+/// The old Studio control lived in Grove's content bar, after the brand and
+/// tabs. At ordinary widths that row could push it off the right edge, and it
+/// was never in the window top bar — so it also never appeared in Studio.
+fn surface_switch(ui: &Ui, chrome: Chrome) -> El {
+    let c = chrome;
+    show(ui, move || c.grove.get().is_some(), {
+        let ui = ui.clone();
+        move || surface_switch_row(&ui, chrome)
+    })
+    .el()
+    .layout(|l| {
+        l.shrink = 0.0;
+        l.height = Length::Percent(1.0);
+    })
+}
+
+fn surface_switch_row(ui: &Ui, chrome: Chrome) -> El {
+    let unit = ui.theme().spacing.unit;
+    w::row(ui)
+        .align(Align::Center)
+        .gap(unit * 2.0)
+        .padding(Insets {
+            start: unit * 2.0,
+            end: unit * 2.0,
+            top: 0.0,
+            bottom: 0.0,
+        })
+        .layout(|l| {
+            l.shrink = 0.0;
+            l.height = Length::Percent(1.0);
+        })
+        .semantics(Semantics::new(Role::Group).label("Grove or Studio"))
+        .child(surface_chip(ui, chrome, false))
+        .child(surface_chip(ui, chrome, true))
+}
+
+fn surface_chip(ui: &Ui, chrome: Chrome, studio: bool) -> El {
+    let colors = ui.theme().colors.clone();
+    let id = if studio { "surface-studio" } else { "surface-grove" };
+    let tip_id = if studio {
+        "surface-studio-tip"
+    } else {
+        "surface-grove-tip"
+    };
+    let label = messages().text(ui, id);
+    let tip = messages().text(ui, tip_id);
+    let c = chrome;
+    let btn = w::button(ui, label.clone(), move || {
+        if studio {
+            c.show_studio();
+        } else {
+            c.show_grove();
+        }
+    })
+    .variant("quiet");
+    let paint = btn.clone();
+    let c = chrome;
+    let btn = btn.bind(move || {
+        let on = c
+            .grove
+            .get()
+            .is_some_and(|g| g.on_studio() == studio);
+        let _ = paint.clone().style(switch_style(&colors, on));
+    });
+    w::tooltip(&btn, tip);
+    btn.layout(|l| l.shrink = 0.0).semantics({
+        let c = chrome;
+        move || {
+            let on = c
+                .grove
+                .get()
+                .is_some_and(|g| g.on_studio() == studio);
+            Semantics::new(Role::Button)
+                .label(label.clone())
+                .selected(on)
+                .action(Action::Click)
+        }
+    })
+}
+
+fn switch_style(colors: &remedy_ui::style::ColorRoles, on: bool) -> StylePatch {
+    let line = colors.line.unwrap_or(colors.muted);
+    let p = StylePatch::new()
+        .radius(0.0)
+        .border_width(1.0)
+        .background(colors.bg.with_alpha(0.0));
+    if on {
+        p.foreground(colors.accent).border(colors.accent)
+    } else {
+        p.foreground(colors.text).border(line)
     }
 }
