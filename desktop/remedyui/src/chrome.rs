@@ -925,6 +925,11 @@ impl Chrome {
                 } else if self.server_open.get() {
                     self.server_open.set(false);
                     true
+                } else if crate::settings::shell_escape_current(e) {
+                    // The chrome frame is focusable and often holds focus, so
+                    // the shell column's bubble handler never sees Escape.
+                    // Handle it here in capture so Settings always closes.
+                    true
                 } else {
                     false
                 }
