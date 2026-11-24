@@ -85,3 +85,21 @@ fn write_design7_review_shots() {
     write_shot(dir, "home", remedy_desktop::design_home, 1180.0, 740.0);
     write_shot(dir, "build-chat", remedy_desktop::design_build_chat, 1180.0, 740.0);
 }
+
+#[test]
+fn write_design8_review_shots() {
+    let Ok(dir) = std::env::var("REMEDY_DESIGN_OUT") else {
+        return;
+    };
+    no_spawn_defaults();
+    let dir = Path::new(&dir);
+    let _ = std::fs::create_dir_all(dir);
+    write_shot(dir, "setup-hello", remedy_desktop::design_setup_hello, 1180.0, 740.0);
+    write_shot(dir, "setup-folder", remedy_desktop::design_setup_folder, 1180.0, 740.0);
+    write_shot(dir, "setup-name", remedy_desktop::design_setup_name, 1180.0, 740.0);
+    write_shot(dir, "setup-ready", remedy_desktop::design_setup_ready, 1180.0, 740.0);
+    write_shot(dir, "setup-more", remedy_desktop::design_setup_more, 1180.0, 900.0);
+    write_shot(dir, "update-quiet", remedy_desktop::design_update_quiet, 1180.0, 740.0);
+    write_shot(dir, "update-ready", remedy_desktop::design_update_ready, 1180.0, 740.0);
+    write_shot(dir, "update-advanced", remedy_desktop::design_update_advanced, 1180.0, 740.0);
+}
