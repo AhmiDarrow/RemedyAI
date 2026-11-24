@@ -73,10 +73,12 @@ fn exiting() -> &'static AtomicBool {
     &FLAG
 }
 
-/// Stop the watchdog from respawning during a full quit. The job object or
-/// parent-death signal still reaps the child when this process actually exits.
+/// Stop the watchdog from respawning during a full quit, and reap a managed
+/// sidecar now. The job object or parent-death signal is the backstop if
+/// this process exits before the kill finishes.
 pub fn note_exiting() {
     exiting().store(true, Ordering::SeqCst);
+    kill_managed();
 }
 
 /// Whether a crashed sidecar should be started again.
