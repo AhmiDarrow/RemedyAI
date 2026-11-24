@@ -12,6 +12,7 @@ use serde_json::json;
 
 const THINKING: [&str; 4] = ["off", "low", "medium", "high"];
 const APPROVAL: [&str; 3] = ["ask", "auto", "full"];
+const PROCESS: [&str; 3] = ["off", "medium", "full"];
 
 /// Full-width status bar under the shell.
 ///
@@ -119,6 +120,7 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
         }))
         .keep(thinking_slot(ui))
         .keep(approval_slot(ui))
+        .keep(process_slot(ui))
         .flex(ui.el("status-flex").layout(|l| {
             l.grow = 1.0;
             l.shrink = 1.0;
@@ -406,6 +408,25 @@ fn approval_slot(ui: &Ui) -> El {
     .el()
 }
 
+fn process_slot(ui: &Ui) -> El {
+    let u = ui.clone();
+    show(
+        ui,
+        || crate::chrome::advanced_now(),
+        move || live_chip(
+            &u,
+            || match process_mode().as_str() {
+                "medium" => "bar-process-med",
+                "full" => "bar-process-full",
+                _ => "bar-process-min",
+            },
+            || process_mode() != "off",
+            cycle_process,
+        ),
+    )
+    .el()
+}
+
 fn live_chip(
     ui: &Ui,
     id: impl Fn() -> &'static str + 'static,
@@ -580,6 +601,12 @@ fn approval_mode() -> String {
         .unwrap_or_else(|| "ask".into())
 }
 
+fn process_mode() -> String {
+    crate::settings::current()
+        .map(|s| crate::work::normalize_tool_process(&s.tool_process.get()).to_string())
+        .unwrap_or_else(|| "off".into())
+}
+
 fn speak_on() -> bool {
     crate::settings::speak_replies_on()
 }
@@ -613,6 +640,16 @@ fn cycle_approval() {
         let next = APPROVAL[(i + 1) % APPROVAL.len()];
         s.approval_mode.set(next.to_string());
         s.put_patch(json!({ "approval_mode": next }));
+    }
+}
+
+fn cycle_process() {
+    if let Some(s) = crate::settings::current() {
+        let cur = crate::work::normalize_tool_process(&s.tool_process.get());
+        let i = PROCESS.iter().position(|x| *x == cur).unwrap_or(0);
+        let next = PROCESS[(i + 1) % PROCESS.len()];
+        s.tool_process.set(next.to_string());
+        s.put_patch(json!({ "tool_process": next }));
     }
 }
 
