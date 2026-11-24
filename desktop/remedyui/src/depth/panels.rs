@@ -1,8 +1,9 @@
 //! Memory and Skills, opened from the chat header.
 
 use super::{
-    ask_delete_skill, install_named, load_skills, open_skill, save_skill, search_library,
-    search_memory, trust_skill, SidePanel, SkillRow,
+    ask_archive_unused, ask_delete_skill, export_skills_pack, import_skills_pack, install_named,
+    load_skills, open_skill, save_skill, search_library, search_memory, trust_skill, SidePanel,
+    SkillRow,
 };
 use crate::messages;
 use crate::studio::Studio;
@@ -196,7 +197,8 @@ fn installed(ui: &Ui, studio: Studio) -> El {
         let u = u.clone();
         move |row| skill_button(&u, st.clone(), row.name.clone(), row.description.clone(), false)
     });
-    let editor = skill_editor(ui, studio);
+    let notice_st = studio.clone();
+    let editor = skill_editor(ui, studio.clone());
     w::column(ui)
         .gap(unit)
         .layout(|l| {
@@ -204,6 +206,8 @@ fn installed(ui: &Ui, studio: Studio) -> El {
             l.grow = 1.0;
             l.basis = Length::Px(0.0);
         })
+        .child(pack_toolbar(ui, &studio))
+        .child(w::text(ui, "").text(move || notice_st.depth.notice.get()).variant("muted"))
         .child(
             w::scroll(ui)
                 .layout(|l| {
@@ -213,6 +217,32 @@ fn installed(ui: &Ui, studio: Studio) -> El {
                 .child(list),
         )
         .child(editor)
+}
+
+fn pack_toolbar(ui: &Ui, studio: &Studio) -> El {
+    let unit = ui.theme().spacing.unit;
+    let st_ex = studio.clone();
+    let st_im = studio.clone();
+    let st_ar = studio.clone();
+    let u = ui.clone();
+    w::row(ui)
+        .gap(unit)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .child(w::button(ui, {
+            let u = u.clone();
+            move || messages().text(&u, "skills-export")
+        }, move || export_skills_pack(&st_ex)).variant("quiet"))
+        .child(w::button(ui, {
+            let u = u.clone();
+            move || messages().text(&u, "skills-import")
+        }, move || import_skills_pack(&st_im)).variant("quiet"))
+        .child(w::button(ui, {
+            let u = u.clone();
+            move || messages().text(&u, "skills-archive-unused")
+        }, move || ask_archive_unused(&st_ar)).variant("quiet"))
 }
 
 fn library(ui: &Ui, studio: Studio) -> El {
