@@ -201,10 +201,66 @@ fn render_block(ui: &Ui, block: &Block, on_image: impl Fn(String) + Clone + 'sta
 }
 
 fn code_block(ui: &Ui, lang: &str, text: &str) -> El {
+    use crate::tokens;
+    use remedy_ui::layout::Align;
     let colors = ui.theme().colors.clone();
-    let mut col = w::column(ui)
-        .gap(2.0)
-        .padding(Insets::all(8.0))
+    let copy = text.to_string();
+    let lang_label = if lang.is_empty() { "code".to_string() } else { lang.to_string() };
+    let chip = w::text(ui, lang_label)
+        .nowrap()
+        .style(
+            tokens::chip(&colors, false)
+                .mono(true)
+                .text_size(11.0)
+                .padding(Insets {
+                    top: 2.0,
+                    end: 6.0,
+                    bottom: 2.0,
+                    start: 6.0,
+                }),
+        );
+    let u = ui.clone();
+    let copy_btn = w::icon_button(ui, w::Icon::Copy, "Copy", move || {
+        u.copy_text(copy.clone());
+    })
+    .style(StylePatch::new().foreground(colors.muted));
+    let head = w::row(ui)
+        .align(Align::Center)
+        .gap(tokens::SPACE * 2.0)
+        .layout(|l| l.width = Length::Percent(1.0))
+        .child(chip)
+        .child(ui.el("code-head-flex").layout(|l| {
+            l.grow = 1.0;
+            l.min_width = Length::Px(0.0);
+        }))
+        .child(copy_btn);
+
+    let mut body = w::column(ui).gap(0.0).layout(|l| {
+        l.width = Length::Percent(1.0);
+        l.min_width = Length::Px(0.0);
+    });
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let comment = trimmed.starts_with("//")
+            || trimmed.starts_with("--")
+            || trimmed.starts_with("#")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with("*")
+            || trimmed.starts_with("*/");
+        let fg = if comment { colors.muted } else { colors.text };
+        body = body.child(
+            w::text(ui, line)
+                .style(StylePatch::new().mono(true).text_size(12.5).foreground(fg))
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                }),
+        );
+    }
+
+    w::column(ui)
+        .gap(tokens::SPACE * 2.0)
+        .padding(Insets::all(tokens::SPACE * 2.0))
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
@@ -212,31 +268,12 @@ fn code_block(ui: &Ui, lang: &str, text: &str) -> El {
         .style(
             StylePatch::new()
                 .background(colors.bg)
-                .radius(ui.theme().radii.small)
-                .border(colors.line.unwrap_or(colors.muted))
+                .radius(0.0)
+                .border(tokens::hairline(&colors))
                 .border_width(1.0),
-        );
-    if !lang.is_empty() {
-        col = col.child(
-            w::text(ui, lang).variant("muted").style(
-                StylePatch::new()
-                    .text_size(11.0)
-                    .mono(true)
-                    .foreground(colors.muted),
-            ),
-        );
-    }
-    col.child(
-        w::text(ui, text).style(
-            StylePatch::new()
-                .mono(true)
-                .text_size(12.5)
-                .foreground(colors.text),
-        ).layout(|l| {
-            l.width = Length::Percent(1.0);
-            l.min_width = Length::Px(0.0);
-        }),
-    )
+        )
+        .child(head)
+        .child(body)
 }
 
 fn diff_block(ui: &Ui, text: &str) -> El {

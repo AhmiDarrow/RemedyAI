@@ -8,6 +8,7 @@ use super::{
 };
 use super::{submit, Approval};
 use crate::messages;
+use crate::tokens;
 use crate::studio::{Studio, WorkMode};
 use crate::work::WorkStep;
 use remedy_ui::a11y::{Action, Role, Semantics};
@@ -169,10 +170,11 @@ fn scope_button(
         move || messages().text(&u, label),
         move || resolve_approval(&studio, &id, approve, scope),
     )
-    .variant(if approve && scope == "once" {
-        "primary"
+    .variant("quiet")
+    .style(if approve && scope == "once" {
+        tokens::primary_button(&ui.theme().colors)
     } else {
-        "quiet"
+        StylePatch::new()
     })
 }
 
@@ -301,7 +303,8 @@ fn plan_card(ui: &Ui, studio: Studio) -> El {
                     move || messages().text(&u, "plan-approve"),
                     move || approve_plan(&st_ok),
                 )
-                .variant("primary"),
+                .variant("quiet")
+                .style(tokens::primary_button(&ui.theme().colors)),
             )
             .child(
                 w::button(
@@ -362,7 +365,12 @@ fn word_button(ui: &Ui, studio: Studio, label: &'static str, word: &'static str)
         move || messages().text(&u, label),
         move || send_life(&studio, word),
     )
-    .variant(if word == "yes" { "primary" } else { "quiet" })
+    .variant("quiet")
+    .style(if word == "yes" {
+        tokens::primary_button(&ui.theme().colors)
+    } else {
+        StylePatch::new()
+    })
 }
 
 fn library_card(ui: &Ui, studio: Studio) -> El {
@@ -386,7 +394,8 @@ fn library_card(ui: &Ui, studio: Studio) -> El {
                     move || messages().text(&u, "library-install"),
                     move || install_library(&st_in),
                 )
-                .variant("primary"),
+                .variant("quiet")
+                .style(tokens::primary_button(&ui.theme().colors)),
             )
             .child(
                 w::button(
@@ -486,7 +495,8 @@ fn stall_card(ui: &Ui, studio: Studio) -> El {
                     },
                     move || retry_outgoing(&st_retry),
                 )
-                .variant("primary"),
+                .variant("quiet")
+                .style(tokens::primary_button(&ui.theme().colors)),
             ),
     )
 }

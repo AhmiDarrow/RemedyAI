@@ -6,7 +6,7 @@ use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::layout::{Align, Length};
 use remedy_ui::reactive::Signal;
-use remedy_ui::style::{RADIUS_FULL, StylePatch};
+use remedy_ui::style::StylePatch;
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui, show};
 use serde_json::json;
@@ -46,7 +46,7 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
     let usage = studio.clone();
 
     let bar = w::overflow_row(ui)
-        .gap(unit)
+        .gap(unit * 2.0)
         .keep(connection_indicator(ui, studio.clone()))
         .keep(streaming_slot(ui, studio.clone()))
         .child_maybe_fn(
@@ -107,13 +107,10 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
             },
             privacy_slot(ui),
         )
-        .child(
-            messages().text(ui, "bar-help"),
-            chip(ui, "bar-help", false, || {
-                crate::chrome::toggle_overlay(crate::chrome::Overlay::Help);
-            }),
-        )
-        .child_maybe_fn(bar_label(ui, "bar-webui"), webui_slot(ui))
+        .keep(chip(ui, "bar-help", false, || {
+            crate::chrome::toggle_overlay(crate::chrome::Overlay::Help);
+        }))
+        .keep(webui_slot(ui))
         .child_fn(
             {
                 let u = ui.clone();
@@ -121,47 +118,20 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
             },
             speak_chip(ui),
         )
-        .child_maybe_fn(
-            bar_label(ui, "bar-usage"),
-            advanced_slot(ui, "bar-usage", move || {
-                crate::chrome::open_usage(&usage);
-            }),
-        )
-        .child_maybe_fn(
-            {
-                let u = ui.clone();
-                move || {
-                    let id = match thinking_level().as_str() {
-                        "off" => "bar-thinking-off",
-                        "low" => "bar-thinking-low",
-                        "high" => "bar-thinking-high",
-                        _ => "bar-thinking-med",
-                    };
-                    messages().text(&u, id)
-                }
-            },
-            thinking_slot(ui),
-        )
-        .child_maybe_fn(
-            {
-                let u = ui.clone();
-                move || {
-                    let id = match approval_mode().as_str() {
-                        "auto" => "bar-approval-auto",
-                        "full" => "bar-approval-full",
-                        _ => "bar-approval-ask",
-                    };
-                    messages().text(&u, id)
-                }
-            },
-            approval_slot(ui),
-        )
+        // Advanced-only controls stay on the rail (0.70.5). They must not be
+        // the first chips pushed into the overflow menu at a typical width.
+        .keep(advanced_slot(ui, "bar-usage", move || {
+            crate::chrome::open_usage(&usage);
+        }))
+        .keep(thinking_slot(ui))
+        .keep(approval_slot(ui))
         .flex(ui.el("status-flex").layout(|l| {
             l.grow = 1.0;
             l.shrink = 1.0;
             l.min_width = Length::Px(0.0);
             l.basis = Length::Px(0.0);
         }))
+        .keep(rail_rule(ui))
         .keep(mode_chip(ui))
         .keep(picker);
 
@@ -252,13 +222,14 @@ fn connection_indicator(ui: &Ui, studio: Studio) -> El {
                             Conn::Ready => ok,
                             Conn::Disconnected => muted,
                         };
-                        StylePatch::new().background(dot).radius(RADIUS_FULL)
+                        StylePatch::new().background(dot).radius(0.0)
                     }
                 })
                 .layout(|l| {
-                    l.width = Length::Px(8.0);
-                    l.height = Length::Px(8.0);
-                    l.min_width = Length::Px(8.0);
+                    let m = crate::theme_pack::layout().connected_mark;
+                    l.width = Length::Px(m);
+                    l.height = Length::Px(m);
+                    l.min_width = Length::Px(m);
                     l.shrink = 0.0;
                 }),
         )
@@ -303,20 +274,16 @@ fn streaming_pill(ui: &Ui) -> El {
             bottom: 4.0,
             start: 8.0,
         })
-        .style(
-            StylePatch::new()
-                .background(accent.with_alpha(0.16))
-                .foreground(accent)
-                .radius(999.0),
-        )
+        .style(crate::tokens::chip(&colors, true))
         .semantics(Semantics::new(Role::Status).label(messages().text(ui, "bar-streaming")))
         .child(
             ui.el("stream-dot")
-                .style(StylePatch::new().background(accent).radius(999.0))
+                .style(StylePatch::new().background(accent).radius(0.0))
                 .layout(|l| {
-                    l.width = Length::Px(6.0);
-                    l.height = Length::Px(6.0);
-                    l.min_width = Length::Px(6.0);
+                    let m = crate::theme_pack::layout().connected_mark;
+                    l.width = Length::Px(m);
+                    l.height = Length::Px(m);
+                    l.min_width = Length::Px(m);
                     l.shrink = 0.0;
                 }),
         )
@@ -520,6 +487,18 @@ fn mode_chip(ui: &Ui) -> El {
     .el()
 }
 
+fn rail_rule(ui: &Ui) -> El {
+    let line = crate::tokens::hairline(&ui.theme().colors);
+    ui.el("status-rule")
+        .style(StylePatch::new().background(line))
+        .layout(|l| {
+            l.width = Length::Px(1.0);
+            l.min_width = Length::Px(1.0);
+            l.height = Length::Px(16.0);
+            l.shrink = 0.0;
+        })
+}
+
 fn chip(ui: &Ui, id: &'static str, active: bool, on_click: impl Fn() + 'static) -> El {
     let colors = ui.theme().colors.clone();
     let u = ui.clone();
@@ -537,13 +516,7 @@ fn chip(ui: &Ui, id: &'static str, active: bool, on_click: impl Fn() + 'static) 
         let label = label.clone();
         move || Semantics::new(Role::Button).label(label.clone()).action(Action::Click)
     });
-    if active {
-        btn = btn.style(
-            StylePatch::new()
-                .background(colors.accent.with_alpha(0.14))
-                .foreground(colors.accent),
-        );
-    }
+    btn = btn.style(crate::tokens::chip(&colors, active).weight(550.0));
     let _ = u;
     btn
 }

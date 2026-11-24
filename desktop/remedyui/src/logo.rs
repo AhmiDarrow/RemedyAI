@@ -53,20 +53,9 @@ pub fn empty_mark(ui: &Ui) -> El {
     mark(ui, 88.0)
 }
 
-/// A circular persona: the Remedy mark, or initials for a person.
+/// A square, hairline persona: initials for a person, or the Remedy mark.
 pub fn persona(ui: &Ui, name: &str, user: bool, size: f32) -> El {
     let colors = ui.theme().colors.clone();
-    let (bg, border) = if user {
-        (
-            colors.accent,
-            colors.accent.mix_oklab(colors.bg, 0.18),
-        )
-    } else {
-        (
-            colors.card.mix_oklab(colors.accent, 0.2),
-            tokens::hairline(&colors),
-        )
-    };
     let face = if user {
         let initials: String = name
             .split_whitespace()
@@ -79,15 +68,14 @@ pub fn persona(ui: &Ui, name: &str, user: bool, size: f32) -> El {
         } else {
             initials
         };
-        w::text(ui, initials)
-            .nowrap()
-            .style(
-                StylePatch::new()
-                    .foreground(colors.on_accent)
-                    .weight(600.0)
-                    .text_size((size * 0.38).round())
-                    .letter_spacing(LetterSpacing::Em(0.04)),
-            )
+        let glyph = if size <= 24.0 { 12.0 } else { (size * 0.5).round() };
+        w::text(ui, initials).nowrap().style(
+            StylePatch::new()
+                .foreground(colors.accent)
+                .weight(600.0)
+                .text_size(glyph)
+                .letter_spacing(LetterSpacing::Em(0.04)),
+        )
     } else {
         mark(ui, (size * 0.58).round())
     };
@@ -99,12 +87,16 @@ pub fn persona(ui: &Ui, name: &str, user: bool, size: f32) -> El {
         .justify(Justify::Center)
         .style(
             StylePatch::new()
-                .background(bg)
-                .radius(size / 2.0)
-                .border(border)
-                .border_width(1.0),
+                .background(colors.bg.with_alpha(0.0))
+                .radius(0.0)
+                .border(if user {
+                    tokens::hairline(&colors)
+                } else {
+                    tokens::hairline(&colors)
+                })
+                .border_width(1.0)
+                .foreground(colors.accent),
         )
-        .clip()
         .child(face)
         .semantics(Semantics::new(Role::Image).label(name.to_owned()))
         .layout(move |l| {

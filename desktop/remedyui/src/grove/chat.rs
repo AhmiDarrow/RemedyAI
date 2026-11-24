@@ -48,7 +48,27 @@ pub(super) fn pane(ui: &Ui, grove: Grove, app: Option<App>, kind: RoomKind) -> E
         .child(errors(ui, grove.clone()))
         .child(attach_rail(ui, grove.clone()))
         .child(turn_line(ui, grove.clone()))
+        .child(mode_row(ui, &grove, &kind))
         .child(composer(ui, grove, app, kind))
+}
+
+fn mode_row(ui: &Ui, grove: &Grove, kind: &RoomKind) -> El {
+    // Talk / Plan / Build live with the composer — the request's mode, not a
+    // second title-bar switcher.
+    match kind {
+        RoomKind::Home | RoomKind::Alongside => {
+            let unit = ui.theme().spacing.unit;
+            super::view::mode_chips(ui, grove).layout(|l| {
+                l.margin = Insets {
+                    start: unit * 2.0,
+                    end: unit * 2.0,
+                    top: 0.0,
+                    bottom: 0.0,
+                };
+            })
+        }
+        RoomKind::Goal(_) => ui.el("grove-mode-off"),
+    }
 }
 
 fn feed(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
@@ -119,12 +139,16 @@ fn bubble(ui: &Ui, who: &str, user: bool, text: impl Fn() -> RichText + 'static)
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
     let (bg, fg, border) = if user {
-        (colors.accent, colors.on_accent, colors.accent)
+        (
+            colors.bg,
+            colors.text,
+            crate::tokens::hairline(&colors),
+        )
     } else {
         (
             colors.card,
             colors.text,
-            colors.line.unwrap_or(colors.muted.mix_oklab(colors.card, 0.4)),
+            crate::tokens::hairline(&colors),
         )
     };
     let who_owned = who.to_string();
@@ -250,24 +274,39 @@ fn empty_state(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
             let grove = grove.clone();
             move || {
                 let unit = ui.theme().spacing.unit;
+                let colors = ui.theme().colors.clone();
                 let g = grove.clone();
+                let size = crate::theme_pack::layout().presence_home;
+                let face = crate::presence::mark(
+                    &ui,
+                    crate::presence::from_studio(&g.studio),
+                    size,
+                );
                 let title = w::text(&ui, "")
-                    .variant("heading")
                     .text_align(remedy_ui::style::TextAlign::Center)
-                    .text(move || ready_title(&g));
+                    .text(move || greeting_title(&g))
+                    .style(
+                        crate::tokens::typo(crate::tokens::HERO)
+                            .foreground(colors.text),
+                    )
+                    .layout(|l| {
+                        l.width = Length::Percent(1.0);
+                        l.min_width = Length::Px(0.0);
+                    });
                 let sub = w::text(
                     &ui,
-                    "Tell me what you’re carrying — a goal, an errand, a receipt, a bug. You can drop a file right here.",
+                    "A goal, an errand, a receipt, a bug — tell me, and I’ll take it from here.",
                 )
-                .variant("muted")
                 .text_align(remedy_ui::style::TextAlign::Center)
+                .style(crate::tokens::typo(crate::tokens::BODY).foreground(colors.muted))
                 .layout(|l| {
-                    l.max_width = Length::Px(352.0);
+                    l.max_width = Length::Px(400.0);
                     l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
                 });
                 let hints = w::text(&ui, hint_line(&grove.agent_gender.get()))
-                    .variant("muted")
                     .text_align(remedy_ui::style::TextAlign::Center)
+                    .style(crate::tokens::typo(crate::tokens::META).foreground(colors.muted))
                     .layout(|l| {
                         l.max_width = Length::Px(416.0);
                         l.width = Length::Percent(1.0);
@@ -280,22 +319,22 @@ fn empty_state(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
                     let label = (*label).to_string();
                     let text = (*text).to_string();
                     let g = grove.clone();
-                    let b = w::button(&ui, label, move || starter(&g, &text)).variant("quiet");
+                    let b = w::button(&ui, label, move || starter(&g, &text))
+                        .variant("quiet")
+                        .style(crate::tokens::chip(&colors, false));
                     row = row.child(b);
                 }
-                // Same empty hero as the desktop feed: mark, greeting, the
-                // note, starter chips, then the key line. Centered in the pane.
                 w::column(&ui)
                     .align(Align::Center)
                     .justify(Justify::Center)
-                    .gap(unit * 2.0)
-                    .padding(Insets::all(unit * 3.0))
+                    .gap(unit * 3.0)
+                    .padding(Insets::all(unit * 4.0))
                     .layout(|l| {
                         l.width = Length::Percent(1.0);
                         l.grow = 1.0;
                         l.min_height = Length::Px(0.0);
                     })
-                    .child(crate::logo::empty_mark(&ui))
+                    .child(face)
                     .child(title)
                     .child(sub)
                     .child(row)
@@ -315,21 +354,24 @@ fn starter(grove: &Grove, text: &str) {
     }
 }
 
-fn ready_title(grove: &Grove) -> String {
+fn greeting_title(grove: &Grove) -> String {
+    // messages().text needs a Ui, but this is a plain string helper used
+    // from a text closure. The English defaults match en-US.ftl hello keys.
+    let hello = match logic::hello_key(grove.hour()) {
+        "grove-hello-late" => "Good evening",
+        "grove-hello-morning" => "Good morning",
+        "grove-hello-afternoon" => "Good afternoon",
+        _ => "Good evening",
+    };
     let name = grove.studio.user_name.get();
     match name.split_whitespace().next() {
-        Some(first) if !first.is_empty() => format!("Ready when you are, {first}"),
-        _ => "Your partner is ready".to_string(),
+        Some(first) if !first.is_empty() => format!("{hello}, {first}"),
+        _ => hello.to_string(),
     }
 }
 
-fn hint_line(gender: &str) -> String {
-    let work = match gender.to_ascii_lowercase().as_str() {
-        "male" => "while he works",
-        "neutral" => "while they work",
-        _ => "while she works",
-    };
-    format!("Enter send · Shift+Enter new line · Attach · Speak · {work}, Enter steers")
+fn hint_line(_gender: &str) -> String {
+    "Enter send · Shift+Enter new line · Attach · Speak · Enter steers mid-work".into()
 }
 
 fn steer_label(gender: &str) -> String {

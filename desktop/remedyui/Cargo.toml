@@ -16,6 +16,7 @@ remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "3142c66cde5
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 url = "2"
 # Same verifier the Tauri shell uses for latest.json (do not invent a second key).
 minisign-verify = "0.2"

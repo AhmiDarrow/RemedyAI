@@ -1,7 +1,7 @@
 //! Remedy Desktop: Grove is home, and Studio is one tap away.
 //!
-//! Visual language follows the current Tauri/React app, then goes a little
-//! further (Remedy Sans UI in the chrome, AhmiPrint in code). The window talks
+//! Visual language follows Joe's own craft: flat dark forest panels, hairline
+//! borders, and three config-driven font roles (UI, display, code). The window talks
 //! to remedy-runtime over HTTP+SSE on 127.0.0.1:7400.
 
 mod browser;
@@ -22,6 +22,10 @@ mod palette;
 mod panels;
 mod plan_dock;
 mod prefs;
+mod presence;
+mod presence_draw;
+mod face_skin;
+mod face_draw;
 mod rails;
 mod runtime;
 mod server_menu;
@@ -35,6 +39,7 @@ mod studio;
 mod time;
 mod timetravel;
 mod titlebar;
+mod theme_pack;
 mod tokens;
 mod tray_copy;
 mod update;
@@ -43,7 +48,7 @@ mod usage;
 mod work;
 
 pub use diagnostics::DiagnosticsPanel;
-pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_UI_FONT, Fonts};
+pub use fonts::{DEFAULT_CODE_FONT, DEFAULT_DISPLAY_FONT, DEFAULT_UI_FONT, Fonts};
 pub use help::HelpPanel;
 pub use runtime::{Client, install_panic_hook};
 pub use settings::{
@@ -61,6 +66,7 @@ pub use timetravel::{TimeTravel, preview as time_travel_preview};
 pub use usage::{UsageContext, UsageDashboard, UsagePanel, UsageWindow};
 
 use remedy_ui::a11y::{Action, Role, Semantics};
+use remedy_ui::core::Insets;
 use remedy_ui::host::{TrayEvent, TrayIcon, TrayImage, TrayItem};
 use remedy_ui::i18n::Messages;
 use remedy_ui::layout::{Align, Justify, LayoutStyle, Length, Position};
@@ -73,7 +79,7 @@ use chrome::{Chrome, TRAY_ABOUT, TRAY_QUIT, TRAY_SETTINGS, TRAY_SHOW, TRAY_UPDAT
 pub(crate) use icons::{Glyph, glyph};
 pub(crate) use tokens::{ROW_ACTIONS, ROW_GLYPH, ROW_TOOL, TOOL, TOOL_GLYPH};
 /// Inset accent bar on the selected row; reserved on every row so close × stays lined up.
-pub(crate) const SELECT_MARK: f32 = 3.0;
+pub(crate) const SELECT_MARK: f32 = theme_pack::DARK_FOREST.layout.select_mark;
 
 /// Opens the window and puts the app in the tray.
 pub fn app(app: &App) {
@@ -225,9 +231,102 @@ pub fn app(app: &App) {
     });
 }
 
+
+/// Window chrome around a design-review surface, with the Grove/Studio
+/// switcher in the title bar. Does not replace golden `home()` previews.
+fn close_design_settings() {
+    if let Some(s) = settings::current() {
+        settings::close_for_rail(s);
+    }
+}
+
+fn design_chrome(ui: &Ui, studio: Studio, grove: grove::Grove, body: impl Fn(&Ui) -> El + 'static) -> El {
+    fonts::prepare_theme(ui, &Fonts::load());
+    let chrome = Chrome::preview(chrome::Overlay::None);
+    chrome.grove.set(Some(grove));
+    chrome::hosted(ui, studio, chrome, body)
+}
+
+/// Studio design shots: attach a preview Grove so the title-bar switcher
+/// appears, and select Studio so the switcher reads correctly.
+fn design_hosted(ui: &Ui, studio: Studio, body: impl Fn(&Ui) -> El + 'static) -> El {
+    let grove = grove::Grove::preview(studio.clone());
+    grove.show_studio();
+    design_chrome(ui, studio, grove, body)
+}
+
+fn design_grove_body(ui: &Ui, grove: grove::Grove) -> El {
+    grove::root(ui, grove, None, None).layout(|l| {
+        l.grow = 1.0;
+        l.basis = Length::Px(0.0);
+        l.height = Length::Percent(1.0);
+        l.min_height = Length::Px(0.0);
+        l.width = Length::Percent(1.0);
+    })
+}
+
+/// Grove is the default home. Title-bar switcher with Grove selected.
+pub fn design_home(ui: &Ui) -> El {
+    design_home_kind(ui, presence::Kind::Square)
+}
+
+pub fn design_home_wolf(ui: &Ui) -> El {
+    design_home_kind(ui, presence::Kind::Wolf)
+}
+
+pub fn design_home_bear(ui: &Ui) -> El {
+    design_home_kind(ui, presence::Kind::Bear)
+}
+
+fn design_home_kind(ui: &Ui, kind: presence::Kind) -> El {
+    presence::set_kind_override(Some(kind));
+    presence::set_stage_override(Some(2));
+    presence::set_hour_override(Some(10));
+    close_design_settings();
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    studio.set_mode(studio::WorkMode::Chat);
+    let grove = grove::Grove::preview(studio.clone());
+    design_chrome(ui, studio, grove.clone(), move |ui| design_grove_body(ui, grove.clone()))
+}
+
+/// Grove after Remedy opened a Build session from a coding request.
+pub fn design_grove_handoff(ui: &Ui) -> El {
+    presence::set_kind_override(Some(presence::Kind::MorningStar));
+    close_design_settings();
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    studio.set_mode(studio::WorkMode::Build);
+    let grove = grove::Grove::preview(studio.clone());
+    grove.handoff.set(Some(grove::StudioHandoff {
+        kind: grove::StudioKind::Build,
+        prompt: "Get the portal addon loading again after the entry rename.".into(),
+    }));
+    design_chrome(ui, studio, grove.clone(), move |ui| design_grove_body(ui, grove.clone()))
+}
+
+/// Build-mode chat inside the window chrome (status-rail review).
+pub fn design_status_rail(ui: &Ui) -> El {
+    let studio = Studio::preview_chat();
+    let st = studio.clone();
+    design_hosted(ui, studio, move |ui| {
+        shell_with(
+            ui,
+            st.clone(),
+            rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+        )
+    })
+}
+
 /// Empty-well preview (goldens and visual review). Left rail open, right thin.
 pub fn home(ui: &Ui) -> El {
-    home_rails_left(ui)
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    shell_with(
+        ui,
+        studio,
+        rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+    )
 }
 
 /// Chat-feed preview with a finished turn, for side-by-side review.
@@ -246,6 +345,400 @@ pub fn home_chat_live(ui: &Ui) -> El {
         Studio::preview_chat_live(),
         rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
     )
+}
+
+/// Design-review Build chat: a finished turn with a fenced code block.
+pub fn design_build_chat(ui: &Ui) -> El {
+    presence::set_kind_override(Some(presence::Kind::Square));
+    presence::set_stage_override(Some(2));
+    presence::set_hour_override(Some(10));
+    close_design_settings();
+    let studio = Studio::preview_chat();
+    studio.mode.set(studio::WorkMode::Build);
+    studio.messages.set(design_preview_messages());
+    let st = studio.clone();
+    design_hosted(ui, studio, move |ui| {
+        shell_with(
+            ui,
+            st.clone(),
+            rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+        )
+    })
+}
+
+/// Design-review Plan mode with the dock open and a sample outline.
+pub fn design_plan(ui: &Ui) -> El {
+    let studio = Studio::preview_chat();
+    studio.mode.set(studio::WorkMode::Plan);
+    studio.depth.plan.set(Some(depth::PlanCard {
+        status: "ready".into(),
+        goal: "Get the portal addon loading again after the entry rename.".into(),
+        steps: vec![
+            (
+                "Patch manifest.json to init_main.lua".into(),
+                "the last update renamed the entry".into(),
+            ),
+            (
+                "Register the loader before the version check".into(),
+                String::new(),
+            ),
+            ("Run portal.exe --addon-check --all".into(), String::new()),
+        ],
+        done: 1,
+        total: 3,
+    }));
+    let st = studio.clone();
+    design_hosted(ui, studio, move |ui| {
+        shell_with(
+            ui,
+            st.clone(),
+            rails::WorkspaceChrome::fixed(layout::WorkspaceLayout::default()),
+        )
+    })
+}
+
+/// Design-review Settings rail open on the Studio shell.
+pub fn design_settings(ui: &Ui) -> El {
+    let studio = Studio::preview_chat();
+    let layout = layout::layout_open_settings(&layout::WorkspaceLayout::default());
+    let st = studio.clone();
+    design_hosted(ui, studio, move |ui| {
+        settings::install_preview(ui);
+        shell_with(
+            ui,
+            st.clone(),
+            rails::WorkspaceChrome::fixed(layout),
+        )
+    })
+}
+
+/// Design-review card for one presence state (static under reduced_motion).
+pub fn design_presence(ui: &Ui, state: presence::State) -> El {
+    presence::set_kind_override(Some(presence::Kind::MorningStar));
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    design_hosted(ui, studio, move |ui| {
+        fonts::prepare_theme(ui, &Fonts::load());
+        let colors = ui.theme().colors.clone();
+        let size = theme_pack::layout().presence_review;
+        let title = w::text(ui, state.label())
+            .variant("heading")
+            .style(tokens::typo(tokens::TITLE).foreground(colors.text));
+        let body = w::text(ui, state.caption())
+            .style(tokens::typo(tokens::BODY).foreground(colors.text))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        let panel = tokens::info_panel(ui, "Status", body).layout(|l| {
+            l.max_width = Length::Px(320.0);
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        });
+        w::column(ui)
+            .align(Align::Center)
+            .justify(Justify::Center)
+            .gap(tokens::GUTTER)
+            .padding(Insets::all(tokens::GUTTER * 2.0))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.height = Length::Percent(1.0);
+                l.grow = 1.0;
+                l.min_height = Length::Px(0.0);
+            })
+            .style(StylePatch::new().background(colors.bg).foreground(colors.text))
+            .child(presence::preview(ui, state, size))
+            .child(title)
+            .child(panel)
+    })
+}
+
+pub fn design_presence_idle(ui: &Ui) -> El {
+    design_presence(ui, presence::State::Idle)
+}
+pub fn design_presence_listening(ui: &Ui) -> El {
+    design_presence(ui, presence::State::Listening)
+}
+pub fn design_presence_thinking(ui: &Ui) -> El {
+    design_presence(ui, presence::State::Thinking)
+}
+pub fn design_presence_working(ui: &Ui) -> El {
+    design_presence(ui, presence::State::Working)
+}
+pub fn design_presence_done(ui: &Ui) -> El {
+    design_presence(ui, presence::State::Done)
+}
+pub fn design_presence_error(ui: &Ui) -> El {
+    design_presence(ui, presence::State::Error)
+}
+
+pub fn design_concept_star(ui: &Ui) -> El {
+    design_presence_board(ui, presence::Kind::MorningStar)
+}
+
+pub fn design_concept_wolf(ui: &Ui) -> El {
+    design_presence_board(ui, presence::Kind::Wolf)
+}
+
+pub fn design_concept_bear(ui: &Ui) -> El {
+    design_presence_board(ui, presence::Kind::Bear)
+}
+
+/// All twelve moods of the default Square skin, at `size` px.
+pub fn design_moods(ui: &Ui, size: f32) -> El {
+    presence::set_kind_override(Some(presence::Kind::Square));
+    presence::set_stage_override(Some(2));
+    presence::set_hour_override(Some(10));
+    close_design_settings();
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    design_hosted(ui, studio, move |ui| {
+        fonts::prepare_theme(ui, &Fonts::load());
+        let colors = ui.theme().colors.clone();
+        let title = w::text(ui, format!("Square — moods at {}", size as i32))
+            .style(tokens::typo(tokens::HERO).foreground(colors.text))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        let blurb = w::text(
+            ui,
+            "The default face. Neutral, living, and skinnable. Companion stage.",
+        )
+        .style(tokens::typo(tokens::BODY).foreground(colors.muted))
+        .layout(|l| {
+            l.max_width = Length::Px(720.0);
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        });
+        let moods = presence::Mood::all();
+        let mut col = w::column(ui)
+            .align(Align::Start)
+            .gap(tokens::GUTTER * 2.0)
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        for chunk in moods.chunks(6) {
+            let mut row = w::row(ui)
+                .align(Align::Start)
+                .justify(Justify::SpaceBetween)
+                .gap(tokens::GUTTER)
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                });
+            for mood in chunk {
+                let label = w::text(ui, mood.label())
+                    .style(tokens::typo(tokens::META).foreground(colors.muted));
+                let cell = w::column(ui)
+                    .align(Align::Center)
+                    .gap(tokens::SPACE * 2.0)
+                    .child(presence::preview_stage(ui, *mood, size, 2))
+                    .child(label);
+                row = row.child(cell);
+            }
+            col = col.child(row);
+        }
+        w::column(ui)
+            .align(Align::Start)
+            .justify(Justify::Center)
+            .gap(tokens::GUTTER)
+            .padding(Insets::all(tokens::GUTTER * 2.0))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.height = Length::Percent(1.0);
+                l.grow = 1.0;
+                l.min_height = Length::Px(0.0);
+            })
+            .style(StylePatch::new().background(colors.bg).foreground(colors.text))
+            .child(title)
+            .child(blurb)
+            .child(col)
+    })
+}
+
+pub fn design_moods_72(ui: &Ui) -> El {
+    design_moods(ui, 72.0)
+}
+
+pub fn design_moods_144(ui: &Ui) -> El {
+    design_moods(ui, 144.0)
+}
+
+/// Growth stages of the default Square skin, shown idle at 144.
+pub fn design_evolution(ui: &Ui) -> El {
+    presence::set_kind_override(Some(presence::Kind::Square));
+    presence::set_hour_override(Some(10));
+    close_design_settings();
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    design_hosted(ui, studio, move |ui| {
+        fonts::prepare_theme(ui, &Fonts::load());
+        let colors = ui.theme().colors.clone();
+        let title = w::text(ui, "Square — growth stages")
+            .style(tokens::typo(tokens::HERO).foreground(colors.text))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        let blurb = w::text(
+            ui,
+            "Details refine over time from data Remedy already has — sessions, messages, days, and planted goals. The face is complete from the first day.",
+        )
+        .style(tokens::typo(tokens::BODY).foreground(colors.muted))
+        .layout(|l| {
+            l.max_width = Length::Px(860.0);
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        });
+        let stages: [(&str, &str, u8); 4] = [
+            ("New", "The first days. A complete face, hairline frame only.", 0),
+            ("Familiar", "A few conversations. A quiet inner ring.", 1),
+            ("Companion", "Settled use. Tiny corner studs.", 2),
+            ("Seasoned", "A long companionship. Side ticks and a chin mark.", 3),
+        ];
+        let mut row = w::row(ui)
+            .align(Align::Start)
+            .justify(Justify::SpaceBetween)
+            .gap(tokens::GUTTER)
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        for (name, when, stage) in stages {
+            let label = w::text(ui, name)
+                .style(tokens::typo(tokens::TITLE).foreground(colors.text));
+            let cap = w::text(ui, when)
+                .style(tokens::typo(tokens::META).foreground(colors.muted))
+                .layout(|l| {
+                    l.max_width = Length::Px(220.0);
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                });
+            let cell = w::column(ui)
+                .align(Align::Start)
+                .gap(tokens::SPACE * 2.0)
+                .child(presence::preview_stage(ui, presence::Mood::Idle, 144.0, stage))
+                .child(label)
+                .child(cap);
+            row = row.child(cell);
+        }
+        w::column(ui)
+            .align(Align::Start)
+            .justify(Justify::Center)
+            .gap(tokens::GUTTER)
+            .padding(Insets::all(tokens::GUTTER * 2.0))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.height = Length::Percent(1.0);
+                l.grow = 1.0;
+                l.min_height = Length::Px(0.0);
+            })
+            .style(StylePatch::new().background(colors.bg).foreground(colors.text))
+            .child(title)
+            .child(blurb)
+            .child(row)
+    })
+}
+
+/// All six states of one presence form, for Joe to compare.
+pub fn design_presence_board(ui: &Ui, kind: presence::Kind) -> El {
+    presence::set_kind_override(Some(kind));
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    design_hosted(ui, studio, move |ui| {
+        fonts::prepare_theme(ui, &Fonts::load());
+        let colors = ui.theme().colors.clone();
+        let size = theme_pack::layout().presence_review;
+        let title = w::text(ui, kind.label())
+            .style(tokens::typo(tokens::HERO).foreground(colors.text))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        let blurb = w::text(ui, kind.blurb())
+            .style(tokens::typo(tokens::BODY).foreground(colors.muted))
+            .layout(|l| {
+                l.max_width = Length::Px(720.0);
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        let states = [
+            presence::State::Idle,
+            presence::State::Listening,
+            presence::State::Thinking,
+            presence::State::Working,
+            presence::State::Done,
+            presence::State::Error,
+        ];
+        let mut row = w::row(ui)
+            .align(Align::Start)
+            .justify(Justify::SpaceBetween)
+            .gap(tokens::GUTTER)
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            });
+        for state in states {
+            let label = w::text(ui, state.label())
+                .style(tokens::typo(tokens::META).foreground(colors.muted));
+            let cell = w::column(ui)
+                .align(Align::Center)
+                .gap(tokens::SPACE * 2.0)
+                .child(presence::preview(ui, state, size))
+                .child(label);
+            row = row.child(cell);
+        }
+        w::column(ui)
+            .align(Align::Start)
+            .justify(Justify::Center)
+            .gap(tokens::GUTTER)
+            .padding(Insets::all(tokens::GUTTER * 2.0))
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.height = Length::Percent(1.0);
+                l.grow = 1.0;
+                l.min_height = Length::Px(0.0);
+            })
+            .style(StylePatch::new().background(colors.bg).foreground(colors.text))
+            .child(title)
+            .child(blurb)
+            .child(row)
+    })
+}
+
+fn design_preview_messages() -> Vec<studio::ChatMessage> {
+    use studio::ChatMessage;
+    use work::WorkStep;
+    let body = "The portal addon loads again.\n\nThe loader now points at the new entry:\n\n```lua\n-- loader.lua\naddon.entry = \"init_main.lua\"\nassert(addon:register(), \"register before version check\")\n```\n\n`portal.exe --addon-check --all` reports all 6 addons OK. Restart the portal to pick it up.";
+    vec![
+        ChatMessage {
+            created_at: Some("2026-11-22T15:00:00Z".into()),
+            ..ChatMessage::plain(
+                "m1",
+                "user",
+                "The portal addon stopped loading after the last update. Can you fix it?",
+            )
+        },
+        ChatMessage {
+            created_at: Some("2026-11-22T15:00:20Z".into()),
+            thinking: "The manifest still named init.lua, but the last update renamed the entry. I'll patch the three files and run the addon check.".into(),
+            steps: vec![
+                {
+                    let mut s = WorkStep::done("c1", "file_read");
+                    s.detail = Some("manifest.json".into());
+                    s
+                },
+                {
+                    let mut s = WorkStep::done("c3", "file_write");
+                    s.detail = Some("loader.lua".into());
+                    s
+                },
+            ],
+            ..ChatMessage::plain("m2", "assistant", body)
+        },
+    ]
 }
 
 /// Diagnostics golden: server, host, hardware, and the hive inspector. No network.
