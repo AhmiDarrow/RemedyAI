@@ -304,6 +304,8 @@ pub struct Chrome {
     ui_slot: Signal<Option<Ui>>,
     was_streaming: Signal<bool>,
     armed: Signal<bool>,
+    /// Window Grove handle, so the title bar can switch surfaces.
+    pub grove: Signal<Option<crate::grove::Grove>>,
     preview: bool,
 }
 
@@ -346,6 +348,7 @@ impl Chrome {
             ui_slot: Signal::new(None),
             was_streaming: Signal::new(false),
             armed: Signal::new(false),
+            grove: Signal::new(None),
             preview,
         }
     }
@@ -393,6 +396,21 @@ impl Chrome {
 
     pub fn win(self) -> Option<Window> {
         self.window.get()
+    }
+
+
+    /// Switch the window to Grove, when this chrome has a Grove handle.
+    pub fn show_grove(self) {
+        if let Some(grove) = self.grove.get() {
+            grove.show_grove();
+        }
+    }
+
+    /// Switch the window to Studio, when this chrome has a Grove handle.
+    pub fn show_studio(self) {
+        if let Some(grove) = self.grove.get() {
+            grove.show_studio();
+        }
     }
 
     pub fn close_overlay(self) {
@@ -886,6 +904,14 @@ impl Chrome {
                 studio.add();
                 true
             }
+            Key::Character(c) if ctrl && !e.modifiers.shift && !e.modifiers.alt && !e.modifiers.meta && c == "1" => {
+                self.show_grove();
+                true
+            }
+            Key::Character(c) if ctrl && !e.modifiers.shift && !e.modifiers.alt && !e.modifiers.meta && c == "2" => {
+                self.show_studio();
+                true
+            }
             Key::Character(c) if ctrl && (c == "p" || c == "k") => {
                 self.toggle(Overlay::Palette);
                 true
@@ -977,7 +1003,7 @@ fn allow_in_input(e: &KeyEvent) -> bool {
         return true;
     }
     match &e.key {
-        Key::Character(c) if e.modifiers.ctrl && (c == "b" || c == "/") => true,
+        Key::Character(c) if e.modifiers.ctrl && (c == "b" || c == "/" || c == "1" || c == "2") => true,
         Key::Character(c) if e.modifiers.ctrl && e.modifiers.shift && (c == "[" || c == "{") => {
             true
         }

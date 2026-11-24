@@ -224,6 +224,10 @@ browser-rail-hint = The in-app browser follows the agent. Back, the address bar,
 # Chrome and overlays (title bar, palette, help, tray prefs).
 
 menu-newSession = New session
+surface-grove = Grove
+surface-studio = Studio
+surface-grove-tip = Your space  ·  Ctrl+1
+surface-studio-tip = Full workbench  ·  Ctrl+2
 menu-settings = Settings…
 menu-memory = Memory
 menu-skills = Skills

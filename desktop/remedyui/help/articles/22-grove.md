@@ -118,9 +118,9 @@ Advanced still shows the pip command for power users.
 
 ## Switching to Studio
 
-Grove keeps a **Studio** pill in its top bar; Studio keeps a **✦ Grove** chip at
-the top of the chat, beside the Chat / Plan / Build badge. The bottom bar holds
-only status and settings. Switching does not tear anything down — Studio stays mounted
+The window title bar has a **Grove** / **Studio** switch, always on screen on
+both surfaces. **Ctrl+1** goes to Grove, **Ctrl+2** to Studio. The logo menu
+has the same commands. Switching does not tear anything down — Studio stays mounted
 while you are in Grove, so terminals keep running, streamed jobs keep streaming,
 and the computer-host loop stays connected.
 
