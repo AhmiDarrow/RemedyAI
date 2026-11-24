@@ -517,6 +517,26 @@ fn session_options(ui: &Ui, studio: Studio) -> El {
                     .variant("quiet")
                     .layout(|l| l.width = Length::Percent(1.0)),
                 )
+                .child(
+                    w::button(
+                        &u,
+                        {
+                            let u_tag = u.clone();
+                            move || messages().text(&u_tag, "sidebar-add-tag")
+                        },
+                        {
+                            let st = st.clone();
+                            move || {
+                                if let Some(id) = st.active.get() {
+                                    st.depth.tag_draft.set(String::new());
+                                    st.depth.tag_id.set(Some(id));
+                                }
+                            }
+                        },
+                    )
+                    .variant("quiet")
+                    .layout(|l| l.width = Length::Percent(1.0)),
+                )
         },
     )
     .el();
@@ -654,7 +674,7 @@ fn tree(ui: &Ui, studio: Studio) -> El {
     let studio_rows = studio.clone();
     let col = w::for_each(&col, rows, TreeItem::key, move |item| match item {
         TreeItem::Header(path) => project_header(&ui_rows, &studio_rows, path.clone()),
-        TreeItem::Session { id, title } => {
+        TreeItem::Session { id, title, .. } => {
             let session = studio_rows
                 .sessions
                 .get()
@@ -683,14 +703,14 @@ fn tree(ui: &Ui, studio: Studio) -> El {
 #[derive(Clone)]
 enum TreeItem {
     Header(Option<String>),
-    Session { id: String, title: String },
+    Session { id: String, title: String, tags: String },
 }
 
 impl TreeItem {
     fn key(&self) -> String {
         match self {
             TreeItem::Header(path) => format!("h:{}", path.as_deref().unwrap_or("-")),
-            TreeItem::Session { id, title } => format!("s:{id}:{title}"),
+            TreeItem::Session { id, title, tags } => format!("s:{id}:{title}:{tags}"),
         }
     }
 }
@@ -718,6 +738,7 @@ fn tree_items(
                 out.push(TreeItem::Session {
                     id: session.id,
                     title: session.title,
+                    tags: session.tags.join("\u{1f}"),
                 });
             }
         }
@@ -1083,10 +1104,27 @@ fn session_row(ui: &Ui, studio: &Studio, session: &Session) -> El {
     let menu_id = id.clone();
     let menu_project = project_path;
     let u_keys = ui.clone();
-    w::context_menu(&row, move || {
+    let row = w::context_menu(&row, move || {
         session_menu(&u_menu, &st_menu, &menu_id, menu_project.clone())
     })
-    .keyboard_alternative(move || messages().text(&u_keys, "keyboard-reorder"))
+    .keyboard_alternative(move || messages().text(&u_keys, "keyboard-reorder"));
+    let st_when = studio.clone();
+    let id_when = id.clone();
+    let st_field = studio.clone();
+    let id_field = id.clone();
+    let u_tag = ui.clone();
+    w::column(ui)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .child(row)
+        .child(show(
+            ui,
+            move || st_when.depth.tag_id.get().as_deref() == Some(id_when.as_str()),
+            move || tag_field(&u_tag, &st_field, &id_field),
+        )
+        .el())
 }
 
 fn select_checkbox(ui: &Ui, studio: &Studio, id: &str, title: &str) -> El {
@@ -1254,6 +1292,108 @@ fn session_sub(ui: &Ui, studio: &Studio, id: &str, count: u32, age: Option<Strin
             )
             .el(),
         )
+        .child(session_tag_chips(ui, studio, id))
+}
+
+fn session_tag_chips(ui: &Ui, studio: &Studio, id: &str) -> El {
+    let colors = ui.theme().colors.clone();
+    let tags: Signal<Vec<String>> = Signal::new(Vec::new());
+    let tags_out = tags.clone();
+    let st = studio.clone();
+    let sid = id.to_string();
+    let row = w::row(ui)
+        .align(Align::Center)
+        .gap(tokens::SPACE)
+        .layout(|l| l.shrink = 1.0);
+    let _ = row.clone().bind(move || {
+        let next = st
+            .sessions
+            .get()
+            .iter()
+            .find(|s| s.id == sid)
+            .map(|s| s.tags.iter().take(2).cloned().collect())
+            .unwrap_or_default();
+        let _ = tags_out.try_set(next);
+    });
+    let st_btn = studio.clone();
+    let colors_btn = colors;
+    let ui_btn = ui.clone();
+    w::for_each(&row, tags, |tag: &String| tag.clone(), move |tag| {
+        let st = st_btn.clone();
+        let label = tag.clone();
+        w::button(&ui_btn, tag.clone(), move || st.query.set(label.clone()))
+            .variant("quiet")
+            .style(
+                StylePatch::new()
+                    .background(colors_btn.accent.with_alpha(0.15))
+                    .foreground(colors_btn.accent)
+                    .radius(3.0),
+            )
+    })
+}
+
+fn tag_field(ui: &Ui, studio: &Studio, id: &str) -> El {
+    let field = w::text_input(ui, messages().text(ui, "sidebar-tag-name"));
+    field.set_value(&studio.depth.tag_draft.get());
+    let draft = field.clone();
+    let st_draft = studio.clone();
+    let field = field.on_change(move || st_draft.depth.tag_draft.set(draft.value()));
+    let submitted = studio.clone();
+    let sid = id.to_string();
+    let field = field.on_submit({
+        let st = submitted.clone();
+        let sid = sid.clone();
+        move || {
+            let tag = st.depth.tag_draft.get();
+            if !tag.trim().is_empty() {
+                st.add_tag(&sid, &tag);
+            } else {
+                st.depth.tag_id.set(None);
+            }
+        }
+    });
+    let st_esc = studio.clone();
+    let input = field
+        .el()
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+        })
+        .on_key(move |e| {
+            if e.pressed && e.key == Key::Escape {
+                st_esc.depth.tag_id.set(None);
+                true
+            } else {
+                false
+            }
+        });
+    let _ = input.clone().focus();
+    let st_add = studio.clone();
+    let id_add = id.to_string();
+    let u_add = ui.clone();
+    w::row(ui)
+        .align(Align::Center)
+        .gap(tokens::SPACE)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .child(input)
+        .child(
+            w::button(
+                ui,
+                move || messages().text(&u_add, "sidebar-add-this-tag"),
+                move || {
+                    let tag = st_add.depth.tag_draft.get();
+                    if !tag.trim().is_empty() {
+                        st_add.add_tag(&id_add, &tag);
+                    }
+                },
+            )
+            .variant("quiet"),
+        )
 }
 
 fn project_menu(ui: &Ui, studio: &Studio, path: Option<String>) -> Vec<w::MenuItem> {
@@ -1334,6 +1474,15 @@ fn session_menu(ui: &Ui, studio: &Studio, id: &str, project: Option<String>) -> 
             move || assign_project(&st, &sid, None),
         ));
     }
+    let st_tag = studio.clone();
+    let id_tag = id.to_string();
+    items.push(w::MenuItem::new(
+        messages().text(ui, "sidebar-add-tag"),
+        move || {
+            st_tag.depth.tag_draft.set(String::new());
+            st_tag.depth.tag_id.set(Some(id_tag.clone()));
+        },
+    ));
     items.push(w::MenuItem::separator());
     let st_del = studio.clone();
     let id_del = id.to_string();

@@ -1243,7 +1243,7 @@ fn apply_session_sync(studio: &Studio, reload_sid: Option<String>) {
                 return;
             };
             let active = studio.active.get();
-            studio.sessions.set(list);
+            studio.apply_sessions(list);
             if let Some(id) = active {
                 if !studio.sessions.get().iter().any(|s| s.id == id) {
                     if let Some(next) = studio.sessions.get().first().map(|s| s.id.clone()) {
@@ -2029,7 +2029,7 @@ pub fn import_session(studio: &Studio) {
                                 runtime::list_sessions(&client, move |res| {
                                     let _ = wake.post(move || {
                                         if let Ok(list) = res {
-                                            studio.sessions.set(list);
+                                            studio.apply_sessions(list);
                                             studio.select(&id);
                                         }
                                     });
