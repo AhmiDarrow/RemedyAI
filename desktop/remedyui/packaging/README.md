@@ -45,7 +45,7 @@ From `desktop/remedyui`, with NSIS 3 (`makensis`) on `PATH` and `NSISDIR` set:
 ./packaging/package-windows.ps1
 ```
 
-That runs `cargo build --release --jobs 4 --locked` at below-normal priority, then `makensis` on `packaging/windows/installer.nsi`. The script passes absolute backslash paths. Windows NSIS does not open `!include` or `File` paths written with forward slashes. The cargo binary is `remedy-desktop.exe`. The installer writes it as `Remedy Desktop.exe`. The installed exe keeps the default Rust icon until a Windows resource is embedded on the Windows CI machine. The installer icon is `desktop/src-tauri/icons/icon.ico`.
+That runs `cargo build --release --jobs 4 --locked` at below-normal priority, then `makensis` on `packaging/windows/installer.nsi`. The script passes absolute backslash paths. Windows NSIS does not open `!include` or `File` paths written with forward slashes. The cargo binary is `remedy-desktop.exe`. The installer writes it as `Remedy Desktop.exe`. The Windows exe embeds `desktop/src-tauri/icons/icon.ico` at build time (`build.rs` + winresource). The running window also sets that mark as its taskbar / Alt+Tab icon. The installer icon is the same `.ico`.
 
 A stub compile (no need to run the installer) is `cargo test nsis_script_compiles`. Do not execute the produced setup on a machine that already has Remedy installed unless you mean to. `hooks.nsh` taskkills Remedy processes.
 
