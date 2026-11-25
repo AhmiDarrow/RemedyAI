@@ -1,0 +1,25 @@
+# How `cargo remedy package` builds and labels the app.
+
+[app]
+name = "Remedy"
+# The id the Kotlin RemedyConnect shipped under, so an update replaces it.
+id = "com.remedy.groveconnect"
+publisher = "RemedyAI"
+description = "Talk with Remedy and see what she is doing, from a phone paired with your PC"
+icon = "assets/icon.png"
+
+[android]
+# aarch64-linux-android for phones; x86_64-linux-android for the emulator.
+target = "aarch64-linux-android"
+min_api = 26
+target_api = 35
+# The tunnel to the PC, and "Remedy needs you" when she asks before acting.
+permissions = ["internet", "notifications"]
+# The tunnel stays up while she is working on something you asked for.
+foreground = ["data-sync"]
+icon_foreground = "assets/icon-foreground.png"
+icon_background = ["#07120e", "#0e2a20"]
+# Sign for release with your keystore (and REMEDY_ANDROID_KEYSTORE_PASSWORD); without one,
+# packages are signed with a debug key made for this build.
+# keystore = "release.keystore"
+# key_alias = "release"

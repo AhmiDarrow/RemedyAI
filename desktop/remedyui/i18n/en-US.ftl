@@ -469,3 +469,7 @@ chat-split-exit-fullscreen = Exit fullscreen
 # Clicking Remedy's face swaps it for the R mark and back.
 presence-hide = Hide Remedy's face
 presence-show = Show Remedy's face
+
+# The phone's two Grove tabs.
+grove-talk = Talk
+grove-work = Work

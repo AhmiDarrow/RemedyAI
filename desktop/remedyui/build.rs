@@ -25,8 +25,11 @@ fn main() {
         "cargo:rerun-if-changed={}",
         manifest_dir.join("../../src-tauri/icons/128x128.png").display()
     );
+    // `cfg(windows)` here is the machine doing the build. The resource belongs
+    // only in a Windows exe, so also ask what is being built: an Android
+    // library built on this PC has no resource section to stamp.
     #[cfg(windows)]
-    {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let mut res = winresource::WindowsResource::new();
         if ico.is_file() {
             res.set_icon(ico.to_str().expect("icon.ico path is valid UTF-8"));

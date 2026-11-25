@@ -553,6 +553,12 @@ func settingsInt(v any, fallback int) int {
 	switch t := v.(type) {
 	case int:
 		return t
+	case int64:
+		// What a number in config.toml decodes to. Without this case a port
+		// written there was ignored and the default used in its place.
+		return int(t)
+	case int32:
+		return int(t)
 	case float64:
 		return int(t)
 	case string:
