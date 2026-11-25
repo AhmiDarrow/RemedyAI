@@ -37,6 +37,10 @@ type ChatSession struct {
 	// "working" after a reload and to call GET .../stream/attach.
 	Claimed         bool    `json:"claimed"`
 	ActiveRequestID *string `json:"active_request_id"`
+	// How the owner filed it. One value for every window (session_meta.go).
+	Pinned   bool     `json:"pinned"`
+	Archived bool     `json:"archived"`
+	Tags     []string `json:"tags"`
 }
 
 type createSessionRequest struct {
@@ -73,6 +77,7 @@ type updateSessionRequest struct {
 	Model       optionalString `json:"model"`
 	Agent       optionalString `json:"agent"`
 	ProjectPath optionalString `json:"project_path"`
+	sessionMetaPatch
 }
 
 const chatSessionsSchema = `
@@ -149,6 +154,9 @@ func openSessionStore(path string) (*sessionStore, error) {
 	}
 	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
 		_ = db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(sessionMetaSchema); err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(chatSessionsSchema); err != nil {
@@ -591,6 +599,9 @@ func (s *sessionStore) Delete(id string) (bool, error) {
 	if _, err := s.db.Exec(`DELETE FROM chat_messages WHERE session_id = ?`, sid); err != nil {
 		return false, err
 	}
+	if _, err := s.db.Exec(`DELETE FROM session_meta WHERE session_id = ?`, sid); err != nil {
+		return false, err
+	}
 	res, err := s.db.Exec(`DELETE FROM chat_sessions WHERE id = ?`, sid)
 	if err != nil {
 		return false, err
@@ -696,7 +707,13 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
 		return
 	}
+	meta, err := s.sessions.AllMeta()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
+		return
+	}
 	for i := range sessions {
+		applyMeta(&sessions[i], meta[sessions[i].ID])
 		s.decorateLiveness(&sessions[i])
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -750,6 +767,12 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Session not found"})
 		return
 	}
+	meta, err := s.sessions.Meta(sess.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
+		return
+	}
+	applyMeta(&sess, meta)
 	s.decorateLiveness(&sess)
 	writeJSON(w, http.StatusOK, sess)
 }
@@ -786,6 +809,15 @@ func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "Session not found"})
 		return
 	}
+	meta, err := s.sessions.Meta(sess.ID)
+	if err == nil && !req.sessionMetaPatch.empty() {
+		meta, err = s.sessions.PatchMeta(sess.ID, req.sessionMetaPatch)
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
+		return
+	}
+	applyMeta(&sess, meta)
 	title := sess.Title
 	count := sess.MessageCount
 	s.publishSessionEvent(SessionEvent{
@@ -804,6 +836,9 @@ func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 		"project_path": sess.ProjectPath,
 		"llm_provider": sess.LLMProvider,
 		"updated_at":   sess.UpdatedAt,
+		"pinned":       sess.Pinned,
+		"archived":     sess.Archived,
+		"tags":         sess.Tags,
 	})
 }
 
