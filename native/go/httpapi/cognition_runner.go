@@ -450,6 +450,14 @@ func (r *CognitionTurnRunner) finishTurn(req TurnRequest, out cognition.Outcome)
 		return
 	}
 	defer func() { _ = recover() }()
+	// With the native prompt the only thing left in the Python turn-end is
+	// turning a stretch of real tool work into a learned skill. A turn that
+	// could not teach one (a chat reply, a lookup or two) does not start, or
+	// wake, an interpreter.
+	steps := toolStepsFromOutcome(out)
+	if r.nativeOn() && !turnCouldTeachASkill(steps) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), r.learnTimeout("turn_end_timeout_s", 30*time.Second))
 	defer cancel()
 	input := map[string]any{
@@ -460,7 +468,7 @@ func (r *CognitionTurnRunner) finishTurn(req TurnRequest, out cognition.Outcome)
 		"session_id":     req.SessionID,
 		"plan_mode":      req.PlanMode,
 		"chat_mode":      req.ChatMode,
-		"tool_steps":     toolStepsFromOutcome(out),
+		"tool_steps":     steps,
 		// The Go runtime owns soul/field.json now; Python must not write it.
 		"soul_native": true,
 	}
@@ -1876,4 +1884,25 @@ func withTurnContext(msgs []cognition.Message, context string) []cognition.Messa
 	out := make([]cognition.Message, 0, len(msgs)+1)
 	out = append(out, msgs[:len(msgs)-1]...)
 	return append(out, note, msgs[len(msgs)-1])
+}
+
+// turnCouldTeachASkill is the least a turn needs before the skill learner
+// will consider it (agent_learn.should_auto_learn_from_steps): three steps,
+// three successes, and two different tools. The learner applies its stricter
+// rules itself.
+func turnCouldTeachASkill(steps []map[string]any) bool {
+	if len(steps) < 3 {
+		return false
+	}
+	ok := 0
+	names := map[string]bool{}
+	for _, s := range steps {
+		if s["success"] == true {
+			ok++
+		}
+		if n, _ := s["tool"].(string); n != "" {
+			names[n] = true
+		}
+	}
+	return ok >= 3 && len(names) >= 2
 }

@@ -130,26 +130,9 @@ func main() {
 			HomeDir: home,
 			Cwd:     cwd,
 		}
-		var supervisor *workers.Supervisor
-		if workers.PythonWorkerNeedsDownload() {
-			// The only interpreter is the managed CPython download. Bind HTTP
-			// first so the Desktop connects; /api/status reports
-			// tools_python=downloading|ready|failed (workers.ToolsPythonStatus)
-			// and tool calls fail with a clear error until the worker attaches.
-			fmt.Fprintln(os.Stderr, "remedy-runtime: no local Python; downloading managed CPython in the background")
-			supervisor = workers.StartSupervisedRMDYToolWorkerAsync(ctx, opts, func(err error) {
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "remedy-runtime: RMDY tool worker attach failed after download: %v\n", err)
-				}
-			})
-		} else {
-			var err error
-			supervisor, err = workers.StartSupervisedRMDYToolWorker(ctx, opts)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "remedy-runtime: RMDY tool worker required: %v\n", err)
-				os.Exit(1)
-			}
-		}
+		// The worker starts the first time a Python tool is called, not here:
+		// a turn is built and run natively, so most sessions never need it.
+		supervisor := workers.NewLazyRMDYToolWorker(ctx, opts)
 		defer func() { _ = supervisor.Close() }()
 		caller := supervisor.Caller()
 		if err := cognition.AttachPythonWorker(caller); err != nil {
@@ -164,9 +147,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "remedy-runtime: voice/vision workers required: %v\n", err)
 			os.Exit(1)
 		}
-		if session := supervisor.Session(); session != nil {
-			fmt.Fprintf(os.Stderr, "remedy-runtime: RMDY tool worker attached (pid=%d endpoint=%s; voice+vision)\n", session.PID, session.Endpoint)
-		}
+		fmt.Fprintln(os.Stderr, "remedy-runtime: Python tools (mail, calendar, voice, vision) start on first use")
 		runner = cognition
 	}
 
