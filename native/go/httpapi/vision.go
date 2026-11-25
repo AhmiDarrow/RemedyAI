@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/AhmiDarrow/RemedyAI/native/go/workers"
 	"io"
 	"net"
 	"net/http"
@@ -149,7 +150,9 @@ func idleVisionProgress() map[string]any {
 
 func (s *Server) visionProgressSnapshot() map[string]any {
 	if s.vision != nil {
-		if p := s.vision.Progress(context.Background(), ResolveHomeDir(s.homeDir)); p != nil {
+		// Install progress lives inside a running worker. With none running
+		// nothing is installing, and a status poll must not start one.
+		if p := s.vision.Progress(workers.OnlyIfRunning(context.Background()), ResolveHomeDir(s.homeDir)); p != nil {
 			return p
 		}
 	}
@@ -246,31 +249,31 @@ func (s *Server) visionStatusPayload(full bool) map[string]any {
 
 	out := map[string]any{
 		"enabled": enabled, "installed": installed, "running": running, "ready": ready,
-		"force_decode": anyBoolDef(vcfg["force_decode"], false),
-		"model_id":     mid,
-		"model":        spec.toPublic(),
-		"backend":      firstNonEmpty(anyString(side["backend"]), "llama_server"),
-		"base_url":     base,
-		"port":         port,
-		"host":         host,
+		"force_decode":    anyBoolDef(vcfg["force_decode"], false),
+		"model_id":        mid,
+		"model":           spec.toPublic(),
+		"backend":         firstNonEmpty(anyString(side["backend"]), "llama_server"),
+		"base_url":        base,
+		"port":            port,
+		"host":            host,
 		"runtime_version": side["runtime_version"],
-		"runtime_id":   rid,
-		"progress":     progress,
-		"not_ready_hint": hint,
-		"bundled":      anyBoolDef(side["bundled"], false),
-		"local_roles":  append([]string(nil), visionLocalRoles...),
-		"bundle_policy": visionBundlePolicy,
-		"auto_start":   anyBoolDef(vcfg["auto_start"], true),
-		"delivery":     "first_run_download",
+		"runtime_id":      rid,
+		"progress":        progress,
+		"not_ready_hint":  hint,
+		"bundled":         anyBoolDef(side["bundled"], false),
+		"local_roles":     append([]string(nil), visionLocalRoles...),
+		"bundle_policy":   visionBundlePolicy,
+		"auto_start":      anyBoolDef(vcfg["auto_start"], true),
+		"delivery":        "first_run_download",
 	}
 	if full {
 		out["health"] = map[string]any{
 			"ram_gb": nil, "disk_free_gb": nil,
 			"install_need_gb": float64(spec.approxDownloadBytes()) / (1024 * 1024 * 1024),
-			"min_ram_gb":     spec.MinRAMGB,
+			"min_ram_gb":      spec.MinRAMGB,
 			"nvidia_detected": false,
-			"runtime_id":     rid,
-			"cpu_runtime":    !strings.Contains(strings.ToLower(rid), "cuda") &&
+			"runtime_id":      rid,
+			"cpu_runtime": !strings.Contains(strings.ToLower(rid), "cuda") &&
 				!strings.Contains(strings.ToLower(rid), "vulkan"),
 			"warnings": []any{},
 		}

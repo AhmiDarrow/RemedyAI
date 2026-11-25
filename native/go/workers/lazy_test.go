@@ -2,8 +2,11 @@ package workers
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/protocol"
 )
 
 func TestLazyWorkerRunsNothingUntilCalled(t *testing.T) {
@@ -27,5 +30,16 @@ func TestLazyWorkerRunsNothingUntilCalled(t *testing.T) {
 	// After Close a call must fail cleanly instead of starting a worker.
 	if err := s.startOnDemand(); err == nil {
 		t.Fatal("a closed supervisor must not start a worker")
+	}
+}
+func TestAStatusReadDoesNotStartTheWorker(t *testing.T) {
+	s := NewLazyRMDYToolWorker(context.Background(), RMDYToolOptions{HomeDir: t.TempDir()})
+	defer s.Close()
+	_, err := s.Caller().Call(OnlyIfRunning(context.Background()), protocol.Frame{})
+	if !errors.Is(err, ErrWorkerNotRunning) {
+		t.Fatalf("err = %v, want ErrWorkerNotRunning", err)
+	}
+	if s.Session() != nil || s.Caller().Client() != nil {
+		t.Fatal("the call must not have started a worker")
 	}
 }
