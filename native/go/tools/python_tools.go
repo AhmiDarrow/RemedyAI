@@ -30,8 +30,6 @@ var modelHiddenToolIDs = map[string]struct{}{
 	"workspace.edit":   {},
 	"workspace.search": {},
 	"shell.exec":       {},
-	"partner.pulse":    {},
-	"partner.improve":  {},
 	"setup.session":    {},
 }
 
@@ -690,30 +688,6 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 		}`,
 		},
 		{
-			id:   "partner.vigil",
-			desc: "Grant or stop Remedy's muscle-free nights, or report whether they are on. Enable and disable only after the owner says yes or no.",
-			risk: RiskReadOnly,
-			in: `{
-			"type":"object",
-			"properties":{
-				"action":{"type":"string","enum":["status","enable","disable"],"description":"status reports the night grant; enable or disable is the owner's yes or no"},
-				` + propHomeDir + `,
-				` + propGoBound + `
-			},
-			"additionalProperties":false
-		}`,
-			out: `{
-			"type":"object",
-			"required":["ok"],
-			"properties":{
-				"ok":{"type":"boolean"},
-				"vigil":{"type":"object"},
-				"error":{"type":"string"}
-			},
-			"additionalProperties":false
-		}`,
-		},
-		{
 			id:   "house_rules",
 			desc: "Read or change the owner's house rules. Record first-run answers, skip all (use defaults), show a summary, confirm, propose a later change, roll back, or revisit. Peers cannot change house rules. Secrets are never stored in the audit log.",
 			risk: RiskMutation,
@@ -779,55 +753,6 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 				"ok":{"type":"boolean"},
 				"error":{"type":"string"},
 				"session":{"type":"object"}
-			},
-			"additionalProperties":true
-		}`,
-		},
-		{
-			id:   "partner.pulse",
-			desc: "One muscle-free night tick for the always-on hearth (internal; not model-callable)",
-			risk: RiskReadOnly,
-			in: `{
-			"type":"object",
-			"properties":{
-				` + propHomeDir + `,
-				` + propGoBound + `
-			},
-			"additionalProperties":false
-		}`,
-			out: `{
-			"type":"object",
-			"required":["ok"],
-			"properties":{
-				"ok":{"type":"boolean"},
-				"vigil":{"type":"object"},
-				"error":{"type":"string"}
-			},
-			"additionalProperties":false
-		}`,
-		},
-		{
-			id:   "partner.improve",
-			desc: "One unattended organism learning tick (internal; not model-callable)",
-			risk: RiskReadOnly,
-			in: `{
-			"type":"object",
-			"properties":{
-				` + propHomeDir + `,
-				` + propGoBound + `,
-				"project_path":{"type":"string"}
-			},
-			"additionalProperties":false
-		}`,
-			out: `{
-			"type":"object",
-			"required":["ok"],
-			"properties":{
-				"ok":{"type":"boolean"},
-				"organism":{"type":"object"},
-				"code":{"type":"object"},
-				"skipped":{"type":"string"},
-				"error":{"type":"string"}
 			},
 			"additionalProperties":true
 		}`,
