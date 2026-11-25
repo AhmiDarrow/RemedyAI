@@ -28,6 +28,10 @@ Usage::
 
     python scripts/record_prompt_fixtures.py            # all cases
     python scripts/record_prompt_fixtures.py empty_hello # one case
+    python scripts/record_prompt_fixtures.py --gen-go   # pytext_gen.go
+
+``--gen-go`` copies the prompt wording and regular expressions the Go port
+needs from the live Python objects into ``native/go/mind/prompt/pytext_gen.go``.
 """
 
 from __future__ import annotations
@@ -708,11 +712,40 @@ def case_soul_vigil(ctx: Ctx) -> list[tuple[str, dict[str, Any]]]:
     ]
 
 
-def case_skills(ctx: Ctx) -> list[tuple[str, dict[str, Any]]]:
-    proj = ctx.make_project(NODE_REPO)
-    return [
-        ("prompt.assemble", _assemble("review this project for security issues before I publish it", provider="openai", model="gpt-5", project_path=proj)),
+SKILLS_MSG = "review this project for security issues before I publish it"
+
+
+def _record_skill_ranking(ctx: Ctx, proj: str) -> Any:
+    """What the skill library ranks for SKILLS_MSG (the native skill.search reader)."""
+    from remedy.skills.registry import SkillRegistry
+
+    reg = SkillRegistry()
+    reg.discover_defaults(home_dir=str(ctx.home))
+    ranked = reg.match_skills(SKILLS_MSG[:240], limit=24, workspace_hint=str(Path(proj).resolve()))
+    ctx.readers["skills_ranked"] = [
+        {
+            "name": s.manifest.name,
+            "status": s.manifest.status.value if hasattr(s.manifest.status, "value") else str(s.manifest.status),
+            "description": s.manifest.description or "",
+            "score": float(sc),
+        }
+        for s, sc in ranked
     ]
+    ctx.readers["skills_count"] = int(reg.count)
+    return reg
+
+
+def case_skills(ctx: Ctx) -> list[tuple[str, dict[str, Any]]]:
+    """The production worker: skills are installed but its runtime has no registry.
+
+    ``prompt.assemble`` then says "Skills loaded: (none yet …)" although the
+    native skill.search / skill.activate serve the library. The ranking the
+    library gives is recorded as the reader the Go port would get.
+    """
+    proj = ctx.make_project(NODE_REPO)
+    _record_skill_ranking(ctx, proj)
+    ctx.notes.append("skills installed; the worker runtime has no skill registry")
+    return [("prompt.assemble", _assemble(SKILLS_MSG, provider="openai", model="gpt-5", project_path=proj))]
 
 
 def case_skills_registry(ctx: Ctx) -> list[tuple[str, dict[str, Any]]]:
@@ -725,26 +758,11 @@ def case_skills_registry(ctx: Ctx) -> list[tuple[str, dict[str, Any]]]:
     """
     proj = ctx.make_project(NODE_REPO)
     from remedy.runtime import prompt_assemble as pa
-    from remedy.skills.registry import SkillRegistry
 
     rt = _run(pa.get_cached_runtime(project_path=proj, provider="openai", model="gpt-5"))
-    reg = SkillRegistry()
-    reg.discover_defaults(home_dir=str(ctx.home))
-    rt.skills = reg
-    msg = "review this project for security issues before I publish it"
-    ranked = reg.match_skills(msg[:240], limit=24, workspace_hint=str(Path(proj).resolve()))
-    ctx.readers["skills_ranked"] = [
-        {
-            "name": s.manifest.name,
-            "status": s.manifest.status.value if hasattr(s.manifest.status, "value") else str(s.manifest.status),
-            "description": s.manifest.description or "",
-            "score": float(sc),
-        }
-        for s, sc in ranked
-    ]
-    ctx.readers["skills_count"] = int(reg.count)
+    rt.skills = _record_skill_ranking(ctx, proj)
     ctx.notes.append("registry attached by the recorder; the production worker has none")
-    return [("prompt.assemble", _assemble(msg, provider="openai", model="gpt-5", project_path=proj))]
+    return [("prompt.assemble", _assemble(SKILLS_MSG, provider="openai", model="gpt-5", project_path=proj))]
 
 
 def case_local_binding(ctx: Ctx) -> list[tuple[str, dict[str, Any]]]:
@@ -896,7 +914,7 @@ def child(name: str, home: Path, user: Path, project_root: Path) -> None:
         if marker and len(marker) > 3 and marker in text:
             raise RuntimeError(f"machine-specific text left in fixture: {marker}")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    (OUT_DIR / f"{name}.json").write_text(text + "\n", encoding="utf-8")
+    (OUT_DIR / f"{name}.json").write_text(text + "\n", encoding="utf-8", newline="\n")
 
 
 # --------------------------------------------------------------------------
@@ -921,10 +939,157 @@ def _clean_env(home: Path, user: Path) -> dict[str, str]:
     return env
 
 
+GEN_GO = REPO / "native" / "go" / "mind" / "prompt" / "pytext_gen.go"
+
+
+def gen_go() -> None:
+    """Write pytext_gen.go: the prompt wording and patterns, copied from Python.
+
+    The Go port must say exactly what the Python says, so its text constants
+    and regular expressions are generated from the live Python objects rather
+    than retyped. Run in the same clean child environment as the recorder.
+    """
+    sys.path.insert(0, str(REPO / "src"))
+    import re as _re
+
+    from remedy.core import agent_identity as ai
+    from remedy.core import house_rules as hr
+    from remedy.core import muscle_profile as mp
+    from remedy.core import plan_store as ps
+    from remedy.core import react_policy as rp
+    from remedy.core import react_stream as rs
+    from remedy.i18n import languages as lg
+    from remedy.interfaces import config as cfgmod
+    from remedy.memory.soul import proprioception as pr
+
+    def lit(s: str) -> str:
+        # A JSON string with ensure_ascii=False is a valid Go string literal.
+        return json.dumps(s, ensure_ascii=False)
+
+    def pattern(p: _re.Pattern[str], *, anchored: bool) -> str:
+        flags = ""
+        if p.flags & _re.IGNORECASE:
+            flags += "i"
+        if p.flags & _re.DOTALL:
+            flags += "s"
+        if p.flags & _re.MULTILINE:
+            flags += "m"
+        if p.flags & _re.VERBOSE:
+            raise RuntimeError(f"verbose pattern cannot be copied: {p.pattern[:60]}")
+        src = p.pattern
+        if anchored:
+            # re.match anchors at the start only.
+            src = "^(?:" + src + ")"
+        return ("(?" + flags + ")" if flags else "") + src
+
+    strings = [
+        ("frontierSystemCore", rp._FRONTIER_SYSTEM_CORE),
+        ("defaultSystemBody", rp._DEFAULT_SYSTEM_BODY),
+        ("remedyCreed", ai.REMEDY_CREED),
+        ("personaTemperament", ai.PERSONA_TEMPERAMENT),
+        ("reactionGuideline", rs.REACTION_GUIDELINE),
+        ("turnContextMarker", rs.TURN_CONTEXT_MARKER),
+        ("planModeAddendum", ps.PLAN_MODE_SYSTEM_ADDENDUM),
+        ("buildModeAddendum", ps.BUILD_MODE_SYSTEM_ADDENDUM),
+        ("frontierBuildAddendum", ps.FRONTIER_BUILD_MODE_ADDENDUM),
+        ("onboardingOfferPrompt", hr.offer_prompt()),
+    ]
+    maps = [
+        ("personaPrompts", dict(cfgmod.PERSONA_PROMPTS)),
+        ("toolNameTable", dict(rp.TOOL_NAME_TABLE)),
+        ("languagePromptNames", {row.id.lower(): row.prompt_name for row in lg.LANGUAGE_ROWS}),
+        ("languageIDs", {row.id.lower(): row.id for row in lg.LANGUAGE_ROWS}),
+        ("languageAliases", dict(lg._ALIASES)),
+        ("proprioCorrections", {k: s.correction for k, s in pr._SIGNALS.items()}),
+    ]
+    floats = [("proprioSeverity", {k: s.severity for k, s in pr._SIGNALS.items()})]
+    sets = [("chatShortSet", sorted(rp._CHAT_SHORT_SET))]
+    regexes = [
+        ("actionKickRE", rp._ACTION_KICK_RE, False),
+        ("greetPrefixRE", rp._GREET_PREFIX_RE, True),
+        ("hardChatOnlyRE", rp._HARD_CHAT_ONLY_RE, True),
+        ("chatOnlyRE", rp._CHAT_ONLY_RE, True),
+        ("socialReassureRE", rp._SOCIAL_REASSURE_RE, True),
+        ("metaNoToolsRE", rp._META_NO_TOOLS_RE, False),
+        ("requestWorkRE", rp._REQUEST_WORK_RE, False),
+        ("hostWorkRE", rp._HOST_WORK_RE, False),
+        ("debugFollowupRE", rp._DEBUG_FOLLOWUP_RE, False),
+        ("feelingPresenceRE", rp._FEELING_PRESENCE_RE, False),
+        ("frontierModelRE", mp._FRONTIER_MODEL, False),
+        ("midModelRE", mp._MID_MODEL, False),
+        ("tinyModelRE", mp._TINY_MODEL, False),
+    ]
+    out = [
+        "// Code generated by scripts/record_prompt_fixtures.py --gen-go; DO NOT EDIT.",
+        "",
+        "// Prompt wording and patterns copied from the Python worker (the",
+        "// specification). Regenerate instead of editing by hand.",
+        "",
+        "package prompt",
+        "",
+        'import "regexp"',
+        "",
+        "const (",
+    ]
+    for name, val in strings:
+        out.append(f"\t{name} = {lit(val)}")
+    out.append(")")
+    out.append("")
+    for name, m in maps:
+        out.append(f"var {name} = map[string]string{{")
+        for k in sorted(m):
+            out.append(f"\t{lit(k)}: {lit(m[k])},")
+        out.append("}")
+        out.append("")
+    for name, m in floats:
+        out.append(f"var {name} = map[string]float64{{")
+        for k in sorted(m):
+            out.append(f"\t{lit(k)}: {m[k]!r},")
+        out.append("}")
+        out.append("")
+    for name, items in sets:
+        out.append(f"var {name} = map[string]struct{{}}{{")
+        for k in items:
+            out.append(f"\t{lit(k)}: {{}},")
+        out.append("}")
+        out.append("")
+    out.append("// Patterns: Python re.match ones are anchored with ^(?:...).")
+    out.append("var (")
+    for name, rx, anchored in regexes:
+        out.append(f"\t{name} = regexp.MustCompile({lit(pattern(rx, anchored=anchored))})")
+    out.append(")")
+    out.append("")
+    GEN_GO.parent.mkdir(parents=True, exist_ok=True)
+    GEN_GO.write_text("\n".join(out), encoding="utf-8", newline="\n")
+    gofmt = shutil.which("gofmt")
+    if gofmt is None:
+        raise RuntimeError("gofmt not on PATH; the generated file must be gofmt-clean")
+    subprocess.run([gofmt, "-w", str(GEN_GO)], check=True)
+
+
 def main(argv: list[str]) -> int:
     if len(argv) >= 2 and argv[1] == "--child":
         child(argv[2], Path(argv[3]), Path(argv[4]), Path(argv[5]))
         return 0
+    if len(argv) >= 2 and argv[1] == "--gen-go-child":
+        gen_go()
+        return 0
+    if len(argv) >= 2 and argv[1] == "--gen-go":
+        base = Path(os.path.realpath(tempfile.mkdtemp(prefix="remedy-prompt-fixture-")))
+        user = base / "user"
+        home = user / ".remedy"
+        home.mkdir(parents=True)
+        try:
+            r = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve()), "--gen-go-child"],
+                env=_clean_env(home, user),
+                cwd=str(base),
+                timeout=300,
+            )
+        finally:
+            shutil.rmtree(base, ignore_errors=True)
+        print(f"{GEN_GO.name}: {'ok' if r.returncode == 0 else 'FAILED'}")
+        return r.returncode
     names = argv[1:] or list(CASES)
     failed = []
     for name in names:
