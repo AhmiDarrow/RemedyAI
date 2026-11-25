@@ -157,6 +157,8 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
     soulFieldEnabled,
     setSoulFieldEnabled,
     setPrivacyMode,
+    claimidxEnabled,
+    setClaimidxEnabled,
     approvalMode,
     setApprovalMode,
     trustProfile,
@@ -361,6 +363,11 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
           checked={soulFieldEnabled} onChange={setSoulFieldEnabled}
           label="Remember our working relationship"
           description="Keep personal context and continuity when you switch models. Turning this off stops updates; it does not erase existing memories."
+        />
+        <FormToggle
+          checked={claimidxEnabled} onChange={setClaimidxEnabled}
+          label="ClaimIDX"
+          description="On by default. Turn off to stop the local ClaimIDX host completely, including public ledger submits."
         />
         <PersonaWipeControl />
       </SettingsSection>

@@ -248,3 +248,17 @@ def test_schedule_is_non_blocking_and_once(monkeypatch, tmp_path):
     host.schedule_ensure(tmp_path)
 
     assert starts == [tmp_path]
+
+
+def test_start_skips_when_disabled(tmp_path, monkeypatch):
+    (tmp_path / "config.toml").write_text("claimidx_enabled = false\n", encoding="utf-8")
+    called: list[str] = []
+    monkeypatch.setattr(
+        host,
+        "ensure_installed",
+        lambda home=None: called.append("install") or {"ok": True},
+    )
+    result = host.start(tmp_path)
+    assert result.get("skipped") is True
+    assert result.get("reason") == "disabled"
+    assert called == []

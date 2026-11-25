@@ -199,6 +199,7 @@ export function SettingsPanel({
   const [autoApproveThreshold, setAutoApproveThreshold] = useState(0.8)
   const [logLevel, setLogLevel] = useState('INFO')
   const [sarcasmMode, setSarcasmMode] = useState(false)
+  const [claimidxEnabled, setClaimidxEnabled] = useState(true)
   const [claimidxPublicLedger, setClaimidxPublicLedger] = useState(true)
   const [advanced, setAdvanced] = useState<Record<string, number | boolean>>({})
   const [advancedSchema, setAdvancedSchema] = useState<AdvancedKnobSchema[]>([])
@@ -476,6 +477,7 @@ export function SettingsPanel({
       setLogLevel(String(s.log_level || 'INFO').toUpperCase())
       setSarcasmMode(Boolean(s.sarcasm_mode))
       // Default on (Claimidx submit-by-default); only explicit false opts out.
+      setClaimidxEnabled(s.claimidx_enabled !== false)
       setClaimidxPublicLedger(s.claimidx_public_ledger !== false)
       setAdvanced((s.advanced && typeof s.advanced === 'object') ? { ...s.advanced } : {})
       setAdvancedSchema(Array.isArray(s.advanced_schema) ? s.advanced_schema : [])
@@ -757,6 +759,7 @@ export function SettingsPanel({
       auto_approve_threshold: autoApproveThreshold,
       log_level: logLevel,
       sarcasm_mode: sarcasmMode,
+      claimidx_enabled: claimidxEnabled,
       claimidx_public_ledger: claimidxPublicLedger,
       advanced,
     }
@@ -1344,6 +1347,8 @@ export function SettingsPanel({
               setLogLevel={setLogLevel}
               sarcasmMode={sarcasmMode}
               setSarcasmMode={setSarcasmMode}
+              claimidxEnabled={claimidxEnabled}
+              setClaimidxEnabled={setClaimidxEnabled}
               claimidxPublicLedger={claimidxPublicLedger}
               setClaimidxPublicLedger={setClaimidxPublicLedger}
               advanced={advanced}

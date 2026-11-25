@@ -60,7 +60,7 @@ pub const SECTIONS: &[Section] = &[
     Section { id: "mcp", title: "MCP host", summary: "Expose skills to other apps", keywords: "mcp host server external client", category: "connections", advanced_only: true, display_title: None, display_summary: None },
     Section { id: "access", title: "Access & permissions", summary: "Filesystem scope", keywords: "scope untrusted home full project jail", category: "privacy", advanced_only: true, display_title: None, display_summary: None },
     Section { id: "security-power", title: "Security & power", summary: "Approvals, trust, web, bootstrap", keywords: "approval auto ask shell web_fetch bootstrap token ssrf thinking privacy trust conservative balanced autonomous profile", category: "privacy", advanced_only: false, display_title: Some("Permissions"), display_summary: Some("When Remedy asks before acting") },
-    Section { id: "privacy", title: "Privacy", summary: "What leaves this PC to your model", keywords: "privacy mode pii email phone scrub redact tool results llm egress cloud mail calendar page wipe memory forget persona soul", category: "privacy", advanced_only: false, display_title: None, display_summary: None },
+    Section { id: "privacy", title: "Privacy", summary: "What leaves this PC to your model", keywords: "privacy mode pii email phone scrub redact tool results llm egress cloud mail calendar page wipe memory forget persona soul claimidx", category: "privacy", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "always-ready", title: "Always ready", summary: "Startup & tray", keywords: "login tray startup quit windows", category: "system", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "tool-process", title: "Tool process", summary: "Visibility of tool steps", keywords: "process trail full medium off diagnostics", category: "system", advanced_only: true, display_title: None, display_summary: None },
     Section { id: "advanced", title: "Advanced", summary: "Learning, logs, tone", keywords: "skill creation log level sarcasm threshold learning", category: "system", advanced_only: true, display_title: None, display_summary: None },
@@ -672,6 +672,7 @@ pub struct SaveDraft {
     pub auto_approve: f64,
     pub log_level: String,
     pub sarcasm: bool,
+    pub claimidx_enabled: bool,
     pub claimidx: bool,
     pub advanced: Value,
     pub providers_touched: bool,
@@ -723,6 +724,7 @@ impl Default for SaveDraft {
             auto_approve: 0.8,
             log_level: "INFO".into(),
             sarcasm: false,
+            claimidx_enabled: true,
             claimidx: true,
             advanced: json!({}),
             providers_touched: false,
@@ -807,6 +809,7 @@ pub fn save_body(d: &SaveDraft) -> Result<Value, String> {
     body.insert("auto_approve_threshold".into(), json!(d.auto_approve));
     body.insert("log_level".into(), json!(d.log_level));
     body.insert("sarcasm_mode".into(), json!(d.sarcasm));
+    body.insert("claimidx_enabled".into(), json!(d.claimidx_enabled));
     body.insert("claimidx_public_ledger".into(), json!(d.claimidx));
     body.insert("advanced".into(), if d.advanced.is_object() { d.advanced.clone() } else { json!({}) });
     if d.providers_touched {
