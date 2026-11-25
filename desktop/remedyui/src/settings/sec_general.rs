@@ -113,13 +113,6 @@ fn voice(ui: &Ui, s: Settings) -> El {
             .child(form::toggle(ui, "Voice input", "Turn speech into text on this computer.", stt_on))
             .child(form::action(ui, "Download hearing", "quiet", move || {
                 bits::ask(s, "POST", "voice/install", Some(json!({ "component": "stt" })), "Hearing download started.");
-            }))
-            .child(form::hint(
-                ui,
-                "Turn-taking keeps Remedy from talking over you. About 9 MB. Until it arrives, calls use energy detection.",
-            ))
-            .child(form::action(ui, "Download turn-taking", "quiet", move || {
-                bits::ask(s, "POST", "voice/install", Some(json!({ "component": "smart-turn" })), "Turn-taking download started.");
             }));
         let advanced = bits::visible_when(advanced, move || s.mode.get() == "advanced" || logic::searching(&s.search.get()));
         form::stack(ui)
