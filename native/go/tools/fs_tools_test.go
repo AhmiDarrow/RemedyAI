@@ -608,3 +608,37 @@ func TestFileToolsHonorFullAccessScopeOutsideTheRoot(t *testing.T) {
 		t.Fatalf("full scope must still refuse auth secrets: %v", err)
 	}
 }
+
+func TestEditForgivesLineEndSpacesAndShowsTheClosestText(t *testing.T) {
+	root := t.TempDir()
+	// The file has trailing spaces the model did not copy, and CRLF endings.
+	writeFileForTest(t, root, "a.txt", "one\r\nif x {  \r\n\treturn 1\t\r\n}\r\nlast\r\n")
+	registry := fileRegistry(t)
+
+	mustCall(t, registry, "edit", map[string]any{
+		"path": "a.txt", "old_string": "if x {\n\treturn 1\n}", "new_string": "if y {\n\treturn 2\n}",
+		"workspace_root": root,
+	})
+	body, err := os.ReadFile(filepath.Join(root, "a.txt"))
+	if err != nil || string(body) != "one\r\nif y {\r\n\treturn 2\r\n}\r\nlast\r\n" {
+		t.Fatalf("the block is replaced and every other byte kept: %q %v", body, err)
+	}
+
+	// Wrong indentation is not guessed at: the error shows the file's own lines.
+	_, _, err = callTool(t, registry, "edit", map[string]any{
+		"path": "a.txt", "old_string": "if y {\n    return 2\n}", "new_string": "x", "workspace_root": root,
+	})
+	if err == nil || !strings.Contains(err.Error(), "closest text starts at line 2") ||
+		!strings.Contains(err.Error(), "3\t\treturn 2") {
+		t.Fatalf("a miss must show where the text is: %v", err)
+	}
+
+	// Two places that match once line ends are ignored stay a miss.
+	writeFileForTest(t, root, "b.txt", "x \ny\nx  \ny\n")
+	_, _, err = callTool(t, registry, "edit", map[string]any{
+		"path": "b.txt", "old_string": "x\ny", "new_string": "z", "workspace_root": root,
+	})
+	if err == nil {
+		t.Fatal("an ambiguous loose match must not be applied")
+	}
+}

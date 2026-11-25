@@ -157,12 +157,13 @@ func TestJobsListAndTailReadWhileKillAsks(t *testing.T) {
 		t.Fatalf("malformed jobs decision=%v want Ask", got)
 	}
 	// The file mutations still ask, and the readers still do not.
-	for _, name := range []string{"edit", "write", "bash", "todo"} {
+	for _, name := range []string{"edit", "write", "bash"} {
 		if got := policy.Decide(ctx, cognition.ToolCall{Name: name, Input: []byte(`{}`)}); got != cognition.Ask {
 			t.Fatalf("%s decision=%v want Ask", name, got)
 		}
 	}
-	for _, name := range []string{"read", "glob", "grep", "screenshot"} {
+	// The checklist is the session's own state, so it does not ask either.
+	for _, name := range []string{"read", "glob", "grep", "screenshot", "todo"} {
 		if got := policy.Decide(ctx, cognition.ToolCall{Name: name, Input: []byte(`{}`)}); got != cognition.Allow {
 			t.Fatalf("%s decision=%v want Allow", name, got)
 		}
