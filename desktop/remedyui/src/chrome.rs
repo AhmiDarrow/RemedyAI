@@ -480,6 +480,11 @@ impl Chrome {
         self.overlay.set(overlay);
     }
 
+    /// The window's `Ui`, for work that finishes after the click that started it.
+    pub(crate) fn ui(self) -> Option<Ui> {
+        self.ui_slot.get()
+    }
+
     pub fn toast(self, _ui: &Ui, text: impl Into<String>) {
         self.toast_text.set(text.into());
     }
