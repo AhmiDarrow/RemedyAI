@@ -5,14 +5,14 @@ edition = "2024"
 publish = false
 
 [dependencies]
-# RemedyUI 0d83bcc is main after #147: scrollbar thumbs can be grabbed and dragged in every pane.
+# RemedyUI 5b5fdff is main after #148: maximize icon tracks drag-restore, snap, and Win+Up/Down.
 # Setup, Grove, chrome, two-pane chat, and chat-depth share this pin.
 # `webview` is the in-app browser (eval, set_user_agent, devtools). `playback` is
 # the mic and spoken-reply path. `update` is the signed latest.json installer.
 # `net`, `image`, `desktop`, and `term` stay for the shell, rails, Grove, and
 # Settings. `extra` is the Connect pairing QR. `webstorage` imports the old webview theme. `customize` is for theme packs. Same features on Windows and Linux.
 # No path override. No script-lua and no rhai: 1.0 core stays plain RemedyUI Rust.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "0d83bcc24b46e8e0feeacd460c0a429c5b175973", features = ["net", "image", "webview", "playback", "desktop", "term", "update", "extra", "webstorage", "customize"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "5b5fdffc30f97cb7094db1ee8f2fdb54a4a5101a", features = ["net", "image", "webview", "playback", "desktop", "term", "update", "extra", "webstorage", "customize"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -25,7 +25,7 @@ portable-pty = "0.9"
 
 [dev-dependencies]
 # Tests run the app on the in-memory host and check its previews.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "0d83bcc24b46e8e0feeacd460c0a429c5b175973", features = ["headless", "devtools", "net", "image", "webview", "playback", "desktop", "term", "update", "extra", "webstorage", "customize"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "5b5fdffc30f97cb7094db1ee8f2fdb54a4a5101a", features = ["headless", "devtools", "net", "image", "webview", "playback", "desktop", "term", "update", "extra", "webstorage", "customize"] }
 
 [profile.release]
 lto = "fat"

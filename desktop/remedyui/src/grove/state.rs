@@ -860,6 +860,10 @@ impl Grove {
             if let Some(mic) = take_mic() {
                 mic.stop();
             }
+            self.mic_on.set(false);
+            if self.note.get() == "Hearing…" {
+                self.note.set(String::new());
+            }
             let samples = self
                 .samples
                 .lock()
@@ -892,11 +896,18 @@ impl Grove {
     }
 
     fn transcribe(&self, samples: Vec<f32>) {
+        self.mic_on.set(false);
         if samples.is_empty() {
+            if self.note.get() == "Hearing…" {
+                self.note.set(String::new());
+            }
             self.mic_error.set("No speech captured.".into());
             return;
         }
         if self.local_only {
+            if self.note.get() == "Hearing…" {
+                self.note.set(String::new());
+            }
             self.mic_error.set("Voice needs the local mind.".into());
             return;
         }
@@ -906,6 +917,9 @@ impl Grove {
             move |c| api::transcribe(c, wav),
             |g, out| match out {
                 Ok(heard) if heard.trim().is_empty() => {
+                    if g.note.get() == "Hearing…" {
+                        g.note.set(String::new());
+                    }
                     g.mic_error.set("Nothing to transcribe.".into());
                 }
                 Ok(heard) => {
@@ -921,7 +935,12 @@ impl Grove {
                     g.draft_empty.set(next.trim().is_empty());
                     g.prefill.set(Some(next));
                 }
-                Err(e) => g.mic_error.set(e),
+                Err(e) => {
+                    if g.note.get() == "Hearing…" {
+                        g.note.set(String::new());
+                    }
+                    g.mic_error.set(e);
+                }
             },
         );
     }

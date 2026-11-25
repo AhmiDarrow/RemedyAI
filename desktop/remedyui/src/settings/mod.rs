@@ -49,6 +49,8 @@ thread_local! {
     static STUDIO_IDS: Cell<u64> = const { Cell::new(1) };
     /// Next Settings open should land on Models (from the status-bar picker).
     static OPEN_MODELS: Cell<bool> = const { Cell::new(false) };
+    /// Next Settings open should land on Privacy (from the status-bar chip).
+    static OPEN_PRIVACY: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The window's settings, when [`install`] has run and the signals are alive.
@@ -66,6 +68,10 @@ pub(crate) fn take_open_models() -> bool {
     OPEN_MODELS.with(|c| c.replace(false))
 }
 
+pub(crate) fn take_open_privacy() -> bool {
+    OPEN_PRIVACY.with(|c| c.replace(false))
+}
+
 /// Opens Settings on the Models category so the owner can add a provider.
 pub(crate) fn open_models() {
     OPEN_MODELS.with(|c| c.set(true));
@@ -74,6 +80,22 @@ pub(crate) fn open_models() {
         s.category.set("models".into());
         open_panel(s);
         OPEN_MODELS.with(|c| c.set(false));
+        return;
+    }
+    if let Some(toggle) = studio_toggle() {
+        toggle();
+    }
+}
+
+/// Opens Settings on the Privacy section (ClaimIDX and related switches).
+pub(crate) fn open_privacy() {
+    OPEN_PRIVACY.with(|c| c.set(true));
+    if let Some(s) = current() {
+        s.last_section.set("privacy".into());
+        s.category.set("privacy".into());
+        s.note_opened("privacy");
+        open_panel(s);
+        OPEN_PRIVACY.with(|c| c.set(false));
         return;
     }
     if let Some(toggle) = studio_toggle() {
@@ -179,6 +201,10 @@ fn studio_dismiss() -> Option<Rc<dyn Fn() -> bool>> {
 
 pub(crate) fn bind_host(app: &App) {
     prefs::bind_host(app);
+}
+
+pub(crate) fn host() -> Option<App> {
+    prefs::host()
 }
 
 fn alive() -> Option<Settings> {

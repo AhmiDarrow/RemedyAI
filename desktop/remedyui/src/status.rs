@@ -109,9 +109,18 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
         .child_fn(
             {
                 let u = ui.clone();
-                move || messages().text(&u, if speak_on() { "bar-quiet" } else { "bar-speak" })
+                let st = studio.clone();
+                move || {
+                    if st.depth.speaking.get() {
+                        messages().text(&u, "bar-speaking")
+                    } else if speak_on() {
+                        messages().text(&u, "bar-quiet")
+                    } else {
+                        messages().text(&u, "bar-speak")
+                    }
+                }
             },
-            speak_chip(ui),
+            speak_chip(ui, studio.clone()),
         )
         // Advanced-only controls stay on the rail (0.70.5). They must not be
         // the first chips pushed into the overflow menu at a typical width.
@@ -346,17 +355,9 @@ fn reconnect_slot(ui: &Ui, studio: Studio) -> El {
 }
 
 fn privacy_slot(ui: &Ui) -> El {
-    let u = ui.clone();
-    show(
-        ui,
-        || crate::chrome::advanced_now() || privacy_on(),
-        move || {
-            let on = privacy_on();
-            let id = if on { "bar-privacy-on" } else { "bar-privacy" };
-            chip(&u, id, on, toggle_privacy)
-        },
-    )
-    .el()
+    let on = privacy_on();
+    let id = if on { "bar-privacy-on" } else { "bar-privacy" };
+    chip(ui, id, on, toggle_privacy)
 }
 
 fn webui_slot(ui: &Ui) -> El {
@@ -476,17 +477,53 @@ fn advanced_slot(ui: &Ui, id: &'static str, on_click: impl Fn() + 'static) -> El
     .el()
 }
 
-fn speak_chip(ui: &Ui) -> El {
+fn speak_chip(ui: &Ui, studio: Studio) -> El {
     let u = ui.clone();
+    let st_speak = studio.clone();
     show(
         ui,
-        speak_on,
+        {
+            let st = studio.clone();
+            move || st.depth.speaking.get()
+        },
         {
             let u = u.clone();
-            move || chip(&u, "bar-quiet", true, toggle_speak)
+            let st = studio.clone();
+            move || chip(&u, "bar-speaking", true, {
+                let st = st.clone();
+                move || toggle_speak(&st)
+            })
         },
     )
-    .fallback(move || chip(&u, "bar-speak", false, toggle_speak))
+    .fallback({
+        let u = u.clone();
+        let st = st_speak;
+        move || {
+            let u = u.clone();
+            let st = st.clone();
+            show(
+                &u,
+                speak_on,
+                {
+                    let u = u.clone();
+                    let st = st.clone();
+                    move || chip(&u, "bar-quiet", true, {
+                        let st = st.clone();
+                        move || toggle_speak(&st)
+                    })
+                },
+            )
+            .fallback({
+                let u = u.clone();
+                let st = st.clone();
+                move || chip(&u, "bar-speak", false, {
+                    let st = st.clone();
+                    move || toggle_speak(&st)
+                })
+            })
+            .el()
+        }
+    })
     .el()
 }
 
@@ -611,16 +648,23 @@ fn speak_on() -> bool {
     crate::settings::speak_replies_on()
 }
 
-fn toggle_speak() {
-    crate::settings::set_speak_replies(!speak_on());
+fn toggle_speak(studio: &Studio) {
+    let on = !speak_on();
+    crate::settings::set_speak_replies(on);
+    let mut v = studio.depth.voice.get();
+    v.speak_replies = on;
+    studio.depth.voice.set(v);
+    if !on {
+        crate::depth::stop_player();
+        studio.depth.speaking.set(false);
+        studio.depth.notice.set("I'll stay quiet.".into());
+    } else {
+        studio.depth.notice.set("I'll speak replies.".into());
+    }
 }
 
 fn toggle_privacy() {
-    if let Some(s) = crate::settings::current() {
-        let on = !s.privacy_mode.get();
-        s.privacy_mode.set(on);
-        s.put_patch(json!({ "privacy_mode": on }));
-    }
+    crate::settings::open_privacy();
 }
 
 fn cycle_thinking() {
@@ -653,16 +697,9 @@ fn cycle_process() {
     }
 }
 
-fn toggle_memory(studio: &Studio) {
+fn toggle_memory(_studio: &Studio) {
+    // One Memory surface: the overlay, which opens instantly with a loading state.
     crate::chrome::toggle_overlay(crate::chrome::Overlay::Memory);
-    let open = studio.depth.panel.get() == crate::depth::SidePanel::Memory;
-    if open {
-        studio.depth.panel.set(crate::depth::SidePanel::None);
-    } else {
-        studio.depth.panel.set(crate::depth::SidePanel::Memory);
-        studio.depth.panel_tab.set("memory".into());
-        crate::depth::load_memory(studio);
-    }
 }
 
 fn toggle_skills(studio: &Studio) {
