@@ -84,6 +84,9 @@ func (r *CognitionTurnRunner) rmdyCall(ctx context.Context, toolID string, input
 	if r == nil || r.promptAssemble == nil {
 		return nil, errors.New("rmdy prompt worker unavailable")
 	}
+	if out, ok := r.nativePrompt(toolID, input); ok {
+		return out, nil
+	}
 	raw, err := json.Marshal(input)
 	if err != nil {
 		return nil, err
@@ -227,23 +230,33 @@ func (r *CognitionTurnRunner) assemblePrompt(ctx context.Context, req TurnReques
 	if proj := strings.TrimSpace(req.ProjectPath); proj != "" && !isUnsetProjectPath(proj) {
 		input["project_path"] = proj
 	}
-	raw, err := json.Marshal(input)
-	if err != nil {
-		return assembledPrompt{}, err
-	}
-	res, err := r.promptAssemble.Execute(ctx, tools.Request{
-		ToolID:  "prompt.assemble",
-		Version: 1,
-		Input:   raw,
-	})
-	if err != nil {
-		return assembledPrompt{}, err
+	var output json.RawMessage
+	if native, ok := r.nativePrompt("prompt.assemble", input); ok {
+		raw, err := json.Marshal(native)
+		if err != nil {
+			return assembledPrompt{}, err
+		}
+		output = raw
+	} else {
+		raw, err := json.Marshal(input)
+		if err != nil {
+			return assembledPrompt{}, err
+		}
+		res, err := r.promptAssemble.Execute(ctx, tools.Request{
+			ToolID:  "prompt.assemble",
+			Version: 1,
+			Input:   raw,
+		})
+		if err != nil {
+			return assembledPrompt{}, err
+		}
+		output = res.Output
 	}
 	var out struct {
 		System string `json:"system"`
 		Goal   string `json:"goal"`
 	}
-	if err := json.Unmarshal(res.Output, &out); err != nil {
+	if err := json.Unmarshal(output, &out); err != nil {
 		return assembledPrompt{}, fmt.Errorf("prompt.assemble decode: %w", err)
 	}
 	if strings.TrimSpace(out.System) == "" {
