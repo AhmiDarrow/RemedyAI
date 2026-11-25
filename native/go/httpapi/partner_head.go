@@ -84,6 +84,8 @@ type partnerChild struct {
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
 	Runs            int    `json:"runs,omitempty"`
+	// Mode is plan or chat when the session runs that way; empty is build.
+	Mode string `json:"mode,omitempty"`
 }
 
 type partnerActivity struct {
@@ -146,6 +148,7 @@ type partnerRunRequest struct {
 	GoalID    string
 	RoutineID string
 	Deliver   string // grove | messenger | both
+	Mode      string // plan | chat; empty is build
 	QueuedAt  time.Time
 }
 
