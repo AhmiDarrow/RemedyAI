@@ -789,6 +789,10 @@ func capResults(results []ToolResult, maxChars int) []ToolResult {
 		if len(r.Output) > maxChars {
 			var body map[string]json.RawMessage
 			if json.Unmarshal(r.Output, &body) == nil && body != nil {
+				if fitted, ok := clipLargestString(body, len(r.Output), maxChars); ok {
+					out[i].Output = fitted
+					continue
+				}
 				preview := map[string]any{
 					"truncated":      true,
 					"output_preview": string(out[i].Output),
@@ -803,6 +807,37 @@ func capResults(results []ToolResult, maxChars int) []ToolResult {
 		}
 	}
 	return out
+}
+
+// clipLargestString shortens the one long text field of a JSON result (a file's
+// content, a command's stdout) and keeps every other field as it was. The model
+// then reads real text and intact metadata, not a JSON document cut in half and
+// escaped a second time inside a preview string. It reports false when no single
+// string holds most of the result.
+func clipLargestString(body map[string]json.RawMessage, total, maxChars int) ([]byte, bool) {
+	key := ""
+	for k, raw := range body {
+		if len(raw) > 0 && raw[0] == '"' && len(raw) > len(body[key]) {
+			key = k
+		}
+	}
+	raw := body[key]
+	budget := maxChars - (total - len(raw))
+	if key == "" || len(raw) < total/2 || budget < 200 {
+		return nil, false
+	}
+	var text string
+	if json.Unmarshal(raw, &text) != nil {
+		return nil, false
+	}
+	clipped, err := json.Marshal(string(clipBytes([]byte(text), budget)))
+	if err != nil {
+		return nil, false
+	}
+	body[key] = clipped
+	body["truncated"] = json.RawMessage("true")
+	fitted, err := json.Marshal(body)
+	return fitted, err == nil
 }
 
 func clipBytes(b []byte, max int) []byte {
