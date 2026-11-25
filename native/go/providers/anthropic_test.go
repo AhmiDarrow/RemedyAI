@@ -867,7 +867,92 @@ func TestAnthropicContextWindow(t *testing.T) {
 	if got := (&Anthropic{Model: "claude-opus-5"}).ContextWindow(); got != anthropicFrontierWindow {
 		t.Fatalf("frontier window = %d", got)
 	}
+	for _, legacy := range []string{"claude-sonnet-4-5", "claude-opus-4-5"} {
+		if got := (&Anthropic{Model: legacy}).ContextWindow(); got != anthropicHaikuWindow {
+			t.Fatalf("%s window = %d, want 200K", legacy, got)
+		}
+	}
+	if got := (&Anthropic{Model: "claude-haiku-5-5"}).ContextWindow(); got != anthropicFrontierWindow {
+		t.Fatalf("haiku 5.5 window = %d, want 1M", got)
+	}
 	if got := (&Anthropic{Model: "claude-haiku-4-5"}).ContextWindow(); got != anthropicHaikuWindow {
 		t.Fatalf("haiku window = %d", got)
+	}
+}
+
+func TestAnthropicReplaysAToolTurnExactlyAsReceived(t *testing.T) {
+	toolRound := sseEvent("message_start", `{"type":"message_start","message":{"id":"m","type":"message","role":"assistant","model":"claude-opus-5","content":[],"stop_reason":null,"usage":{"input_tokens":9,"output_tokens":1}}}`) +
+		sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`) +
+		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"read the file first"}}`) +
+		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-abc"}}`) +
+		sseEvent("content_block_stop", `{"type":"content_block_stop","index":0}`) +
+		sseEvent("content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"workspace_read","input":{}}}`) +
+		sseEvent("content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"a.txt\"}"}}`) +
+		sseEvent("content_block_stop", `{"type":"content_block_stop","index":1}`) +
+		sseEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":4}}`) +
+		sseEvent("message_stop", `{"type":"message_stop"}`)
+
+	rec := newRecorder(toolRound, roundSSE("done", "end_turn"), roundSSE("done", "end_turn"))
+	srv := rec.serve(t)
+	a := newAdapter(srv, "claude-opus-5")
+	a.replayAnyHost = true
+	a.SetTools(registrySurface())
+
+	var native any
+	var call *cognition.ToolCall
+	for _, ev := range collect(t, a, simpleTurn()) {
+		if ev.Native != nil {
+			native = ev.Native
+		}
+		if ev.ToolCall != nil {
+			call = ev.ToolCall
+		}
+	}
+	if native == nil || call == nil {
+		t.Fatalf("a tool round must hand back its native turn and its call: native=%v call=%v", native, call)
+	}
+	if first, _ := rec.body(0)["thinking"].(map[string]any); first["block_binding"] != nil {
+		t.Fatalf("a request that replays nothing must not send binding controls: %v", first)
+	}
+
+	next := func(m cognition.Message) cognition.Turn {
+		turn := simpleTurn()
+		turn.Messages = append(turn.Messages, m, cognition.Message{Role: cognition.RoleUser, Blocks: []cognition.Block{{
+			Type: cognition.BlockToolResult, ToolUseID: "toolu_1",
+			Content: []cognition.Block{cognition.TextBlock("file body")},
+		}}})
+		return turn
+	}
+	withNative := cognition.Message{Role: cognition.RoleAssistant, Native: native,
+		Blocks: []cognition.Block{cognition.ThinkingBlock("read the file first"), cognition.ToolUseBlock(*call)}}
+	collect(t, a, next(withNative))
+
+	body := rec.body(1)
+	messages, _ := body["messages"].([]any)
+	content, _ := messages[1].(map[string]any)["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("want thinking + tool_use replayed, got %v", content)
+	}
+	think, _ := content[0].(map[string]any)
+	if think["type"] != "thinking" || think["signature"] != "sig-abc" || think["thinking"] != "read the file first" {
+		t.Fatalf("the thinking block must go back unchanged: %v", think)
+	}
+	if use, _ := content[1].(map[string]any); use["type"] != "tool_use" || use["name"] != "workspace_read" {
+		t.Fatalf("the tool_use block must follow it: %v", content[1])
+	}
+	binding, _ := body["thinking"].(map[string]any)["block_binding"].(map[string]any)
+	if binding["prefix_mismatch_behavior"] != "drop_block" {
+		t.Fatalf("a replay must ask for drop_block: %v", body["thinking"])
+	}
+
+	// Another model cannot read these blocks: it gets the plain rendering.
+	other := newAdapter(srv, "claude-opus-5-5")
+	other.replayAnyHost = true
+	other.SetTools(registrySurface())
+	collect(t, other, next(withNative))
+	messages, _ = rec.body(2)["messages"].([]any)
+	content, _ = messages[1].(map[string]any)["content"].([]any)
+	if first, _ := content[0].(map[string]any); len(content) != 1 || first["type"] != "tool_use" {
+		t.Fatalf("a different model must not be sent another model's thinking: %v", content)
 	}
 }

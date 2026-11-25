@@ -32,3 +32,14 @@ func TestToolLedgerLineNamesToolsTargetsAndFailures(t *testing.T) {
 		t.Fatalf("a long ledger is capped: %d bytes, ends %q", len(long), long[len(long)-12:])
 	}
 }
+func TestDraftToolResultCapsOutputAndLeavesTheRecordWhole(t *testing.T) {
+	full := strings.Repeat("x", toolCap*3)
+	rec := map[string]any{"id": "1", "name": "bash", "output": full, "error": nil}
+	draft := draftToolResult(rec)
+	if got, _ := draft["output"].(string); len(got) >= len(full) || len(got) < toolCap {
+		t.Fatalf("draft output is %d bytes, want about %d", len(got), toolCap)
+	}
+	if rec["output"].(string) != full || draft["id"] != "1" || draft["name"] != "bash" {
+		t.Fatal("the full record is untouched and the other fields are copied")
+	}
+}
