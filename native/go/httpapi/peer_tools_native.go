@@ -568,7 +568,16 @@ func peerDispatch(ctx context.Context, s *Server, input map[string]any, field st
 		if peer == nil {
 			return map[string]any{"ok": false, "error": "unknown peer", "results": []any{}, "summary": ""}, nil
 		}
-		one := peerDelegate(ctx, peer, text)
+		// The Python contacted a named peer even when the owner had turned
+		// it off, and wrote no audit line for it. A disabled peer is never
+		// contacted, and every outbound message is audited.
+		if v, has := peer["enabled"]; has && !peerTruthy(v) {
+			return map[string]any{"ok": false, "error": "peer is disabled", "results": []any{}, "summary": ""}, nil
+		}
+		english, _ := peerForPeer(text)
+		one := peerDelegate(ctx, peer, english)
+		peerAudit(s, input, "out", "a2a", peer["id"], "delegate", english,
+			map[string]any{"endpoint": peerAuditEndpoint(peer["endpoint"])})
 		summary, parts := peerMerge([]map[string]any{one})
 		ok, _ := one["ok"].(bool)
 		return map[string]any{"ok": ok, "summary": summary, "results": parts}, nil

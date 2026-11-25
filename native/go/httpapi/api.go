@@ -214,6 +214,7 @@ func New(cfg Config) (*Server, error) {
 		// Google mail and calendar run natively; other providers use the worker.
 		_ = attachNativeMailCalendar(cr.Registry, home)
 		_ = attachNativeHouseRules(cr.Registry, s)
+		_ = attachNativePeerTools(cr.Registry, s)
 		// Settings Tool ABI (settings.get / settings.patch) uses the apply path.
 		_ = cr.AttachSettingsTools(func() *Server { return s })
 		// Remedy's head tools: children, routines, goals, owner notes.
