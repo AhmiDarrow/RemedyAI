@@ -299,6 +299,7 @@ func checkAssemble(t *testing.T, ce caseEnv, step fixtureStep) stepReport {
 			if fix, ok := ce.defects[s.Name]; ok {
 				// Explicit exception: the recorded span is a Python defect
 				// (see knownPythonDefects); compare against the fix instead.
+				rep.totalChars += len([]rune(ce.ph.fill(fix.Sep+fix.Text))) - size
 				s = fix
 			}
 			want = append(want, s)
