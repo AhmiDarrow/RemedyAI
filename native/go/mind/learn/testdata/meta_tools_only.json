@@ -1,0 +1,55 @@
+{
+  "name": "meta_tools_only",
+  "turns": [
+    {
+      "message": "what skills do I have",
+      "steps": [
+        {
+          "tool": "skill_search",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "skill_activate",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "skill_reload",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "local_discover",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "skill_search",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        }
+      ]
+    }
+  ],
+  "expect": [
+    {
+      "learned": false,
+      "skill": "",
+      "merged": false,
+      "reason": null,
+      "graded": {},
+      "files": {}
+    }
+  ]
+}
