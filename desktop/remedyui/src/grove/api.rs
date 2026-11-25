@@ -1127,6 +1127,17 @@ pub fn settings_identity(client: &Client) -> Result<(String, String), String> {
     Ok((str_of(&v, "name"), str_of(&v, "agent_gender")))
 }
 
+/// GET `/api/settings`: whether the owner has given Remedy her nights.
+pub fn vigil_enabled(client: &Client) -> Result<bool, String> {
+    let v = send(client, Request::get("settings"))?;
+    Ok(bool_of(&v, "vigil_enabled"))
+}
+
+/// PUT `/api/settings` `{vigil_enabled}`.
+pub fn set_vigil(client: &Client, on: bool) -> Result<(), String> {
+    send(client, Request::put("settings").json(&serde_json::json!({ "vigil_enabled": on }))).map(|_| ())
+}
+
 /// GET `/api/voice/status` — whether speak-back is on.
 pub fn speak_replies(client: &Client) -> Result<bool, String> {
     let v = send(client, Request::get("voice/status"))?;
