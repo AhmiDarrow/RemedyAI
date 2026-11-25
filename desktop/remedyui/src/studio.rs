@@ -594,6 +594,7 @@ impl Studio {
                 s.pinned = !s.pinned;
             }
         });
+        self.push_filing(&id);
     }
 
     /// Archives or un-archives `id`.
@@ -603,6 +604,22 @@ impl Studio {
             if let Some(s) = list.iter_mut().find(|s| s.id == id) {
                 s.archived = !s.archived;
             }
+        });
+        self.push_filing(&id);
+    }
+
+    /// Sends how `id` is filed (pinned, archived, tags) to the runtime, which
+    /// keeps it for every window: the web page and a phone show the same.
+    fn push_filing(&self, id: &str) {
+        let Some(client) = self.runtime() else { return };
+        let Some(s) = self.sessions.get().into_iter().find(|s| s.id == id) else {
+            return;
+        };
+        let body = serde_json::json!({ "pinned": s.pinned, "archived": s.archived, "tags": s.tags });
+        let (http, path) = (client.http(), format!("sessions/{id}"));
+        let _ = std::thread::Builder::new().name("remedy-filing".into()).spawn(move || {
+            let cancel = remedy_ui::reactive::Cancel::new();
+            let _ = http.send_blocking(remedy_ui::net::Request::patch(&path).json(&body), &cancel);
         });
     }
 
@@ -643,30 +660,56 @@ impl Studio {
         });
     }
 
-    /// Replace the session list, keeping locally saved tags (the sidecar has no tag field).
+    /// Replace the session list. How a session is filed comes from the runtime.
+    /// Tags an older build kept only on this PC are sent up once, for sessions
+    /// the runtime has no tags for, and the local file is then emptied.
     pub fn apply_sessions(&self, mut list: Vec<Session>) {
         let stored = if self.depth.save_enabled {
             crate::depth::load_session_tags()
         } else {
             Vec::new()
         };
-        let current = self.sessions.get();
+        let mut adopted = Vec::new();
         for session in &mut list {
-            let mem = current
-                .iter()
-                .find(|s| s.id == session.id)
-                .map(|s| s.tags.as_slice())
-                .unwrap_or(&[]);
-            let disk = stored
-                .iter()
-                .find(|(id, _)| id == &session.id)
-                .map(|(_, tags)| tags.as_slice())
-                .unwrap_or(&[]);
-            session.tags = crate::depth::logic::normalize_tags(
-                session.tags.iter().chain(mem).chain(disk),
-            );
+            if !session.tags.is_empty() {
+                continue;
+            }
+            if let Some((_, tags)) = stored.iter().find(|(id, _)| id == &session.id) {
+                session.tags = crate::depth::logic::normalize_tags(tags.iter());
+                if !session.tags.is_empty() {
+                    adopted.push(session.id.clone());
+                }
+            }
+        }
+        // Once: what the 0.70.x web shell kept in its own storage (pins, tags,
+        // archive flags), for sessions the runtime has nothing filed for.
+        let offer_old = self.depth.save_enabled
+            && self.runtime().is_some()
+            && !crate::depth::webview_filing_imported();
+        if offer_old {
+            for old in crate::theme_import::filing_from_webview() {
+                let Some(session) = list.iter_mut().find(|s| s.id == old.id) else { continue };
+                if session.pinned || session.archived || !session.tags.is_empty() {
+                    continue;
+                }
+                session.pinned = old.pinned;
+                session.archived = old.archived;
+                session.tags = crate::depth::logic::normalize_tags(old.tags.iter());
+                adopted.push(session.id.clone());
+            }
         }
         self.sessions.set(list);
+        if self.runtime().is_some() {
+            for id in &adopted {
+                self.push_filing(id);
+            }
+            if !stored.is_empty() {
+                crate::depth::save_session_tags(&[]);
+            }
+            if offer_old {
+                crate::depth::mark_webview_filing_imported();
+            }
+        }
     }
 
     /// Apply a sidecar session list and drop any active id the sidecar does not have.
@@ -710,9 +753,7 @@ impl Studio {
             }
         });
         self.depth.tag_id.set(None);
-        if self.depth.save_enabled {
-            crate::depth::save_session_tags(&self.sessions.get());
-        }
+        self.push_filing(id);
     }
 
     /// Collapses or expands a project group.
