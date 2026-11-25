@@ -28,6 +28,7 @@ import {
   saveHighContrast,
   applyHighContrast,
 } from '../utils/chatPrefs'
+import { getSettings, updateSettings } from '../api/settings'
 
 const STORAGE_KEY = 'remedy-theme'
 
@@ -105,9 +106,31 @@ export function useTheme() {
     return () => mq?.removeEventListener('change', onChange)
   }, [themeId, applyResolved])
 
+  // The look is one choice for the desktop, this page and a paired phone. The
+  // runtime holds it; localStorage only makes the first paint right.
+  useEffect(() => {
+    let live = true
+    getSettings()
+      .then((s) => {
+        if (live && isThemeId(s.theme)) {
+          setThemeId(s.theme)
+          saveTheme(s.theme)
+        }
+      })
+      .catch(() => {
+        // Not reachable yet (setup, signed out): keep the local choice.
+      })
+    return () => {
+      live = false
+    }
+  }, [])
+
   const set = useCallback((id: ThemeId) => {
     setThemeId(id)
     saveTheme(id)
+    updateSettings({ theme: id }).catch(() => {
+      // The choice still holds here; it is sent again the next time it changes.
+    })
   }, [])
 
   const setDensity = useCallback((d: Density) => {

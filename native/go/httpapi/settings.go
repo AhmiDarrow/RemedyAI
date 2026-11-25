@@ -16,6 +16,25 @@ import (
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
+// themeIDs are the looks every Remedy surface has. The colours live with the
+// surfaces (RemedyUI's palettes, desktop/src/themes.ts); this is the one list
+// of names they share.
+var themeIDs = map[string]struct{}{
+	"system": {}, "dark": {}, "neutral": {}, "light": {}, "forest": {}, "green": {},
+	"purple": {}, "alien": {}, "mecha": {}, "orange": {}, "cyan": {},
+	"deutan": {}, "protan": {}, "tritan": {},
+}
+
+// themeFromConfig is the chosen look, Dark Forest when none is chosen.
+func themeFromConfig(cfg ConfigMap) string {
+	appearance, _ := asStringMap(cfg["appearance"])
+	id := strings.TrimSpace(cfgString(ConfigMap(appearance), "theme", ""))
+	if _, ok := themeIDs[id]; !ok {
+		return "forest"
+	}
+	return id
+}
+
 // SETTABLE_KEYS mirrors Python settings_apply.SETTABLE_KEYS.
 var settableKeys = map[string]struct{}{
 	"llm_provider": {}, "llm_model": {}, "llm_base_url": {}, "custom_llm_name": {},
@@ -28,6 +47,7 @@ var settableKeys = map[string]struct{}{
 	"context_window_tokens": {}, "model_settings": {},
 	"show_tool_calls": {}, "tool_process": {},
 	"vision_enabled": {}, "vision_model_id": {}, "vision_force_decode": {},
+	"theme":             {},
 	"web_tools_enabled": {}, "http_bootstrap": {}, "privacy_mode": {},
 	"sleev_enabled": {}, "sleev_gateway_url": {}, "sleev_allow_remote_gateway": {},
 	"soul_field_enabled": {}, "build_os_advanced": {}, "rmb_enabled": {}, "vigil_enabled": {},
@@ -253,6 +273,23 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 	delete(patch, "vision_model_id")
 	delete(patch, "vision_force_decode")
 
+	// The look is one choice for the desktop, the web page and a phone, kept
+	// where the desktop has always kept it: [appearance] theme.
+	themeChoice, hasTheme := patch["theme"]
+	delete(patch, "theme")
+	if hasTheme {
+		id := strings.TrimSpace(fmt.Sprint(themeChoice))
+		if _, ok := themeIDs[id]; !ok {
+			return nil, settingsValueError{msg: "unknown theme: " + id}
+		}
+		appearance, _ := asStringMap(cfg["appearance"])
+		if appearance == nil {
+			appearance = map[string]any{}
+		}
+		appearance["theme"] = id
+		cfg["appearance"] = appearance
+	}
+
 	// Her nights are a grant kept in soul/vigil.json, not config.toml.
 	vigilEnabled, hasVigil := patch["vigil_enabled"]
 	delete(patch, "vigil_enabled")
@@ -322,6 +359,9 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 	for k := range patch {
 		changes = append(changes, k)
 	}
+	if hasTheme {
+		changes = append(changes, "theme")
+	}
 	if hasVE {
 		changes = append(changes, "vision_enabled")
 	}
@@ -364,6 +404,7 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 		"approval_mode":       strings.ToLower(cfgString(cfg, "approval_mode", "auto")),
 		"trust_profile":       normalizeTrustProfile(cfg["trust_profile"]),
 		"user_name":           strings.TrimSpace(cfgString(cfg, "user_name", "")),
+		"theme":               themeFromConfig(cfg),
 		"tool_process":        normalizeToolProcess(cfg, nil),
 		"vision_enabled":      coerceBool(visionTbl["enabled"], false),
 		"vision_model_id":     cfgString(ConfigMap(visionTbl), "model_id", ""),
@@ -759,6 +800,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"config_path":                  firstNonEmpty(path, defaultPath),
 		"enabled_channels":             enabledChannels,
 		"messengers":                   messengers,
+		"theme":                        themeFromConfig(cfg),
 		"vision_enabled":               visionEnabled,
 		"vision_model_id":              visionModelID,
 		"vision_force_decode":          visionForce,

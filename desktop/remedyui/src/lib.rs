@@ -88,7 +88,7 @@ use chrome::{Chrome, TRAY_ABOUT, TRAY_QUIT, TRAY_SETTINGS, TRAY_SHOW, TRAY_UPDAT
 pub(crate) use icons::{Glyph, glyph};
 pub(crate) use tokens::{ROW_ACTIONS, ROW_GLYPH, ROW_TOOL, TOOL, TOOL_GLYPH};
 /// Inset accent bar on the selected row; reserved on every row so close × stays lined up.
-pub(crate) const SELECT_MARK: f32 = theme_pack::DARK_FOREST.layout.select_mark;
+pub(crate) const SELECT_MARK: f32 = theme_pack::MECHA.layout.select_mark;
 
 /// Opens the window and puts the app in the tray.
 pub fn app(app: &App) {

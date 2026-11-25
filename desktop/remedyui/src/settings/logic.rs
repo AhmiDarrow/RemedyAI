@@ -168,9 +168,21 @@ pub fn theme_menu() -> Vec<ThemeItem> {
         accent: dark_p.map(|p| p.accent.to_string()).unwrap_or_else(|| "#8b5cf6".into()),
         split_bg: light_p.map(|p| p.bg.to_string()),
     });
-    for p in light.into_iter().chain(not_dark) {
-        out.push(item_from(p));
-    }
+    // Mecha is the shell's own theme, not one of RemedyUI's palettes; it sits by
+    // name among the themes that are not called "Dark ...".
+    let mecha = &crate::theme_pack::MECHA;
+    let mut plain: Vec<ThemeItem> = light.into_iter().map(item_from).collect();
+    let mut named: Vec<ThemeItem> = not_dark.into_iter().map(item_from).collect();
+    named.push(ThemeItem {
+        id: crate::theme_pack::MECHA_ID.into(),
+        name: mecha.name.into(),
+        bg: mecha.colors.bg.into(),
+        accent: mecha.colors.accent.into(),
+        split_bg: None,
+    });
+    named.sort_by(|a, b| a.name.cmp(&b.name));
+    plain.append(&mut named);
+    out.append(&mut plain);
     for p in dark {
         out.push(item_from(p));
         if p.id == "dark" {
@@ -1209,6 +1221,7 @@ mod tests {
                 "Amethyst",
                 "Deutan",
                 "Emerald",
+                "Mecha",
                 "Ocean",
                 "Protan",
                 "Tritan",

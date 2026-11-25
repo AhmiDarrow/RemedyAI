@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use remedy_ui::core::Color;
 use remedy_ui::style::Density;
-use remedy_ui::themes::{ThemeChoice, sheet};
+use remedy_ui::themes::sheet;
 use remedy_ui::{App, Ui};
 
 use crate::fonts::{self, Fonts};
@@ -125,13 +125,8 @@ pub fn capture_system(s: Settings) {
 /// Paints the current choices onto the open UI. Does not write the file.
 pub fn apply(s: Settings) {
     let Some(ui) = UI.with(|c| c.borrow().clone()) else { return };
-    let choice = if s.theme_id.get() == "system" {
-        ThemeChoice::System
-    } else {
-        ThemeChoice::Palette(s.theme_id.get())
-    };
     let high = s.high_contrast.get() || s.system_hc.get();
-    let mut theme = choice.resolve(s.system_dark.get(), high);
+    let mut theme = crate::theme_pack::theme_for_id(&s.theme_id.get(), s.system_dark.get(), high);
     let fonts = Fonts {
         ui: logic::family_for_face(&s.font_ui.get()),
         display: logic::family_for_face(&s.font_heading.get()),

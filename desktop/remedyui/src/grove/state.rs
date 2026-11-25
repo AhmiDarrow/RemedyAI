@@ -230,6 +230,9 @@ pub(crate) struct Grove {
     samples: Arc<Mutex<Vec<f32>>>,
     client: Signal<Option<Client>>,
     home_session: Signal<String>,
+    /// The look chosen on the PC (`/api/settings` `theme`), "" until it is known.
+    /// A phone paints with it; the desktop has its own settings for that.
+    pub(crate) shared_theme: Signal<String>,
     goal_sessions: Signal<BTreeMap<String, String>>,
     live_tools: Signal<Vec<ToolCall>>,
     next_msg: Signal<u64>,
@@ -332,6 +335,7 @@ impl Grove {
             samples: Arc::new(Mutex::new(Vec::new())),
             client: Signal::new(None),
             home_session: Signal::new(prefs.home_session),
+            shared_theme: Signal::new(String::new()),
             goal_sessions: Signal::new(prefs.goal_sessions),
             live_tools: Signal::new(Vec::new()),
             next_msg: Signal::new(1),
@@ -422,7 +426,8 @@ impl Grove {
         });
         let g = self.clone();
         self.spawn(move |c| api::settings_identity(&c), move |g, out| {
-            if let Ok((name, gender, owner)) = out {
+            if let Ok((name, gender, owner, theme)) = out {
+                g.shared_theme.set(theme);
                 // The greeting uses the name the owner gave at setup (none: no name).
                 g.studio.user_name.set(owner.trim().to_string());
                 if !name.trim().is_empty() {
@@ -2022,11 +2027,14 @@ fn ensure_session(client: &Client, book: &Book, job: &SendJob) -> Result<String,
                     return Ok(head);
                 }
             }
-            if !stored.is_empty() {
-                if let Ok(None) = api::session_project(client, &stored) {
-                    let _ = api::ensure_head_session(client, Some(&stored));
-                    return Ok(stored);
-                }
+            // The runtime holds the one home conversation, so the desktop, the web
+            // page and a phone all open the same one. This window's remembered
+            // home is only offered for when the runtime has none yet.
+            let offer = (!stored.is_empty()
+                && matches!(api::session_project(client, &stored), Ok(None)))
+            .then_some(stored.as_str());
+            if let Ok(shared) = api::ensure_head_session(client, offer) {
+                return Ok(shared);
             }
             let id = api::create_grove_session(client, None)?;
             let _ = api::ensure_head_session(client, Some(&id));
