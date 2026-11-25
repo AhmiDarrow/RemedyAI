@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/AhmiDarrow/RemedyAI/native/go/mind/vigil"
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
 
@@ -44,6 +45,7 @@ type memorySkillInput struct {
 	Name              string `json:"name"`
 	Skill             string `json:"skill"`
 	IncludeReferences bool   `json:"include_references"`
+	Action            string `json:"action"`
 }
 
 type memorySkillToolDef struct {
@@ -56,7 +58,32 @@ type memorySkillToolDef struct {
 func memorySkillToolDefs() []memorySkillToolDef {
 	return []memorySkillToolDef{
 		{
-			id: "skill.search", desc: "Rank skill packs for a task query (Python worker)",
+			id:   "partner.vigil",
+			desc: "Grant or stop Remedy's muscle-free nights, or report whether they are on. Enable and disable only after the owner says yes or no.",
+			risk: tools.RiskReadOnly,
+			in: `{
+			"type":"object",
+			"properties":{
+				"action":{"type":"string","enum":["status","enable","disable"],"description":"status reports the night grant; enable or disable is the owner's yes or no"},
+				` + msHomeDir + `,
+				` + msGoBound + `
+			},
+			"additionalProperties":false
+		}`,
+			out: `{
+			"type":"object",
+			"required":["ok"],
+			"properties":{
+				"ok":{"type":"boolean"},
+				"vigil":{"type":"object"},
+				"error":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`,
+			run: toolPartnerVigil,
+		},
+		{
+			id: "skill.search", desc: "Rank the installed skill packs for a task description. Returns names, status and a one-line summary; load one with skill.activate.",
 			risk: tools.RiskReadOnly,
 			in: `{
 			"type":"object",
@@ -95,7 +122,7 @@ func memorySkillToolDefs() []memorySkillToolDef {
 			run: toolSkillSearch,
 		},
 		{
-			id: "skill.activate", desc: "Load one skill procedure body (Python worker; progressive disclosure)",
+			id: "skill.activate", desc: "Load the full procedure of one skill pack by name. Load only the one the current task needs.",
 			risk: tools.RiskReadOnly,
 			in: `{
 			"type":"object",
@@ -999,4 +1026,27 @@ func toolMemorySearch(s *Server, in memorySkillInput) (any, error) {
 		hits = append(hits, item)
 	}
 	return map[string]any{"query": query, "hits": hits, "total": len(hits), "notice": retrievalNotAuthority}, nil
+}
+
+// toolPartnerVigil is the owner's yes or no for her nights (soul/vigil.json).
+func toolPartnerVigil(s *Server, in memorySkillInput) (any, error) {
+	env := mindEnv(s.homeDir)
+	switch strings.ToLower(strings.TrimSpace(in.Action)) {
+	case "enable":
+		if _, err := vigil.SetEnabled(env, true); err != nil {
+			return nil, err
+		}
+	case "disable":
+		if _, err := vigil.SetEnabled(env, false); err != nil {
+			return nil, err
+		}
+	case "", "status":
+	default:
+		return map[string]any{"ok": false, "error": "action must be status, enable, or disable"}, nil
+	}
+	status, err := vigil.Status(env)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true, "vigil": status}, nil
 }
