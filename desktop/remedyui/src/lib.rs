@@ -895,6 +895,11 @@ pub fn grove_home(ui: &Ui) -> El {
     grove::preview_home(ui)
 }
 
+/// Grove home with a conversation under way, for goldens. It does not touch disk or the network.
+pub fn grove_home_talking(ui: &Ui) -> El {
+    grove::preview_talking(ui)
+}
+
 /// Grove home inside the real window chrome, with the post-update house-rules banner open.
 pub fn grove_home_offer(ui: &Ui) -> El {
     let chrome = Chrome::preview(chrome::Overlay::None);
