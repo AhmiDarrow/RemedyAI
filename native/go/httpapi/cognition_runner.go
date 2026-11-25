@@ -990,7 +990,11 @@ func (r *CognitionTurnRunner) runEngine(
 			// live is the instance this turn owns — the OpenAICompat copy made
 			// above, or the adapter modelForTurn resolved for this request — so
 			// narrowing it cannot leak into a concurrent turn.
-			if !coding {
+			// Only for a local runtime. A cloud provider caches the prompt by
+			// prefix, and tools come first: changing them mid-turn makes it
+			// re-read the whole transcript at full price, which costs far more
+			// than the smaller tool list saves.
+			if oc, isCompat := live.(*providers.OpenAICompat); !coding && isCompat && providers.IsLocalBaseURL(oc.BaseURL) {
 				coding = true
 				r.advertiseToolSurface(live, true)
 				safeEmit("@@status:Switched to coding tool pack for a leaner mid-build context…\n")
