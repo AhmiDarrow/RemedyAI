@@ -77,6 +77,18 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
             update_button(ui),
         )
         .keep(update_note(ui))
+        // Advanced-only controls come first so they are the last chips the
+        // overflow menu takes (it fills from the end), yet a 400 px window
+        // can still move them there instead of pushing them off the edge.
+        .child_maybe_fn(
+            bar_label(ui, "bar-usage"),
+            advanced_slot(ui, "bar-usage", move || {
+                crate::chrome::open_usage(&usage);
+            }),
+        )
+        .child_maybe_fn(bar_label(ui, "bar-thinking"), thinking_slot(ui))
+        .child_maybe_fn(bar_label(ui, "bar-approval"), approval_slot(ui))
+        .child_maybe_fn(bar_label(ui, "bar-process"), process_slot(ui))
         .child_maybe_fn(
             bar_label(ui, "bar-memory"),
             advanced_slot(ui, "bar-memory", move || {
@@ -122,14 +134,6 @@ pub fn status_bar(ui: &Ui, studio: Studio, on_settings: impl Fn() + 'static) -> 
             },
             speak_chip(ui, studio.clone()),
         )
-        // Advanced-only controls stay on the rail (0.70.5). They must not be
-        // the first chips pushed into the overflow menu at a typical width.
-        .keep(advanced_slot(ui, "bar-usage", move || {
-            crate::chrome::open_usage(&usage);
-        }))
-        .keep(thinking_slot(ui))
-        .keep(approval_slot(ui))
-        .keep(process_slot(ui))
         .flex(ui.el("status-flex").layout(|l| {
             l.grow = 1.0;
             l.shrink = 1.0;
