@@ -187,6 +187,10 @@ pub struct Capacity {
 /// Remedy at the head of the house.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HeadOverview {
+    /// What she is doing on her own right now: "", "vigil" or "learning".
+    pub inner_activity: String,
+    /// What she has done on her own: finished night acts, coined words, routine runs.
+    pub inner_done: (u32, u32, u32),
     /// Her own session.
     pub session_id: String,
     /// Her state.
@@ -538,7 +542,11 @@ fn parse_head(v: &Value) -> Result<HeadOverview, String> {
             if c.channel.is_empty() { None } else { Some(c) }
         }
     });
+    let inner = v.get("inner").cloned().unwrap_or(Value::Null);
+    let count = |k: &str| i64_of(&inner, k).max(0) as u32;
     Ok(HeadOverview {
+        inner_activity: str_of(&inner, "activity"),
+        inner_done: (count("nights"), count("words"), count("routine_runs")),
         session_id: str_of(&head, "session_id"),
         state: {
             let s = str_of(&head, "state");

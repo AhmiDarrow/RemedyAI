@@ -16,6 +16,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/connect"
@@ -119,6 +120,8 @@ type Server struct {
 
 	hearthMu     sync.Mutex
 	hearthCancel context.CancelFunc
+	// innerAct is what Remedy is doing on her own right now: "", "vigil" or "learning".
+	innerAct atomic.Value
 
 	// partner is Remedy's head: children, routines, heartbeat, autopilot.
 	partner *partnerHub

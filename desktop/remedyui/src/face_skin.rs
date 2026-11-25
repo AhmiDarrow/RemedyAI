@@ -318,6 +318,9 @@ fn resolve_mood_key(skin: &FaceSkin, mood: &str) -> String {
 fn alias_mood(mood: &str) -> &str {
     match mood {
         "done" => "happy",
+        // Declarative skins have no pose of their own for her inner moods.
+        "dreaming" => "sleepy",
+        "watchful" => "idle",
         "happy" => "happy",
         other => other,
     }
@@ -365,6 +368,13 @@ impl Facts {
             goals,
         }
     }
+}
+
+/// Growth earned by what she did on her own: nights she finished, words she
+/// coined in her inner language, and routines she kept. Logarithmic like the rest.
+pub fn inner_points(nights: u32, words: u32, runs: u32) -> u32 {
+    let log = |n: u32| 32 - (n + 1).leading_zeros() - 1;
+    log(nights) + log(words) + log(runs) / 2
 }
 
 /// How many growth marks `facts` have earned. Logarithmic, so early use shows

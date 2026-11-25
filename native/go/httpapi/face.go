@@ -123,3 +123,39 @@ func toolFaceRestore(s *Server, _ partnerToolInput) (any, error) {
 	}
 	return map[string]any{"note": "The earlier face is back."}, nil
 }
+
+// innerPublic is Remedy's own life as her face reads it: what she is doing by
+// herself right now, and what she has done on her own so far. Every number is
+// counted from what she recorded; nothing is estimated.
+//
+//	activity      "" | "vigil" (a night tick) | "learning" (skills, dream, life cycle)
+//	nights        finished night acts in the vigil journal
+//	dreams        those of them that were dreams
+//	words         terms she has coined in her inner language
+//	routine_runs  times her routines have run
+func (s *Server) innerPublic() map[string]any {
+	act, _ := s.innerAct.Load().(string)
+	nights, dreams := 0, 0
+	for _, e := range s.hearthJournal() {
+		if !e.Ok {
+			continue
+		}
+		nights++
+		if strings.Contains(strings.ToLower(e.Act), "dream") {
+			dreams++
+		}
+	}
+	words := 0
+	if lex, ok := readInnerLanguagePublic(ResolveHomeDir(s.homeDir))["lexicon"].(map[string]any); ok {
+		words, _ = lex["count"].(int)
+	}
+	runs := 0
+	if h := s.partner; h != nil {
+		h.mu.Lock()
+		for _, r := range h.st.Routines {
+			runs += r.Runs
+		}
+		h.mu.Unlock()
+	}
+	return map[string]any{"activity": act, "nights": nights, "dreams": dreams, "words": words, "routine_runs": runs}
+}
