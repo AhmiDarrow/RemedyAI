@@ -1,10 +1,12 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // modelHiddenToolIDs are tools that stay registered but must never be
@@ -868,6 +870,45 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 // RMDY KindToolRequest frames on the supervised Python worker. caller must be
 // live; there is no in-process Python fallback. Pass a *workers.LiveCaller so
 // a respawned worker is picked up without re-registration.
+// mailCalendarToolIDs are the tools whose descriptions live in this file but
+// which the runtime serves in Go (Google, IMAP/SMTP, CalDAV).
+var mailCalendarToolIDs = map[string]struct{}{
+	"mail.list": {}, "mail.send": {}, "calendar.list_events": {}, "calendar.create_event": {},
+}
+
+// ErrToolNotAttached is what a registered tool answers before the runtime has
+// given it its executor.
+var ErrToolNotAttached = errors.New("this tool is not attached to the runtime")
+
+// RegisterMailCalendarTools registers the mail and calendar tools. The
+// runtime wraps their executors with the native ones; until it does they
+// answer ErrToolNotAttached.
+func RegisterMailCalendarTools(registry *Registry) error {
+	if registry == nil {
+		return fmt.Errorf("%w: nil registry", ErrInvalidDescriptor)
+	}
+	unattached := ExecutorFunc(func(context.Context, Request) (Result, error) {
+		return Result{}, ErrToolNotAttached
+	})
+	for _, r := range pythonWorkerToolSpecs() {
+		if _, ok := mailCalendarToolIDs[r.id]; !ok {
+			continue
+		}
+		if err := registry.Register(Descriptor{
+			ID:           r.id,
+			Version:      1,
+			Description:  strings.TrimSuffix(r.desc, " (Python worker)"),
+			Runtime:      RuntimeGo,
+			Risk:         r.risk,
+			InputSchema:  json.RawMessage(r.in),
+			OutputSchema: json.RawMessage(r.out),
+		}, unattached); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 	if registry == nil {
 		return fmt.Errorf("%w: nil registry", ErrInvalidDescriptor)
@@ -877,6 +918,9 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 	}
 	exec := NewRMDYExecutor(caller)
 	for _, r := range pythonWorkerToolSpecs() {
+		if _, native := mailCalendarToolIDs[r.id]; native {
+			continue // registered by RegisterMailCalendarTools, served in Go
+		}
 		if err := registry.Register(Descriptor{
 			ID:           r.id,
 			Version:      1,

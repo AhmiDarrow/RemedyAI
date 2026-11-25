@@ -57,14 +57,10 @@ func helpReadRoots(home string) []string {
 	return out
 }
 
-// nativeOn reports whether this runner builds its prompt in Go. It is the
-// default wherever the server supplied its stores; native_prompt = false in
-// config.toml sends an attached worker the prompt calls instead.
+// nativeOn reports whether this runner builds its prompt in Go: wherever the
+// server supplied its stores, which is every real runtime.
 func (r *CognitionTurnRunner) nativeOn() bool {
-	if r == nil || r.PromptSources == nil {
-		return false
-	}
-	return cfgBool(LoadConfig(r.HomeDir), "native_prompt", true)
+	return r != nil && r.PromptSources != nil
 }
 
 func (r *CognitionTurnRunner) nativePromptEnv(cfg ConfigMap) prompt.Env {

@@ -48,9 +48,9 @@ func TestTheRunnerBuildsItsPromptInGo(t *testing.T) {
 		t.Fatalf("context=%.80q goal=%q", got.Context, got.Goal)
 	}
 
-	// The owner can still send the prompt hooks to an attached worker.
+	// There is no other prompt to fall back to: the old switch is ignored.
 	writeCfg("native_prompt = false\n")
-	if r.nativeOn() {
-		t.Fatal("native_prompt = false turns the native prompt off")
+	if !r.nativeOn() {
+		t.Fatal("the native prompt is the only prompt")
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/AhmiDarrow/RemedyAI/native/go/workers"
 	"io"
 	"net"
 	"net/http"
@@ -152,7 +151,7 @@ func (s *Server) visionProgressSnapshot() map[string]any {
 	if s.vision != nil {
 		// Install progress lives inside a running worker. With none running
 		// nothing is installing, and a status poll must not start one.
-		if p := s.vision.Progress(workers.OnlyIfRunning(context.Background()), ResolveHomeDir(s.homeDir)); p != nil {
+		if p := s.vision.Progress(context.Background(), ResolveHomeDir(s.homeDir)); p != nil {
 			return p
 		}
 	}

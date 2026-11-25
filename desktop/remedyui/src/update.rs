@@ -1357,11 +1357,9 @@ mod tests {
         let stub = dir.join("stub.exe");
         std::fs::write(&stub, b"MZ remedy packaging stub\n").unwrap();
         let outfile = dir.join("Remedy.Desktop_1.0.0_x64-setup.exe");
-        let (webui, deps) = (dir.join("webui"), dir.join("rmdy-deps"));
-        for (folder, file) in [(&webui, "index.html"), (&deps, "placeholder.txt")] {
-            std::fs::create_dir_all(folder).unwrap();
-            std::fs::write(folder.join(file), b"stub\n").unwrap();
-        }
+        let webui = dir.join("webui");
+        std::fs::create_dir_all(&webui).unwrap();
+        std::fs::write(webui.join("index.html"), b"stub\n").unwrap();
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let desktop = manifest.parent().expect("desktop dir");
         let nsi = manifest.join("packaging/windows/installer.nsi");
@@ -1379,8 +1377,6 @@ mod tests {
             .arg(format!("/DVOICESRCPATH={}", as_nsis(&stub)))
             .arg(format!("/DCORESRCPATH={}", as_nsis(&stub)))
             .arg(format!("/DWEBUISRCPATH={}", as_nsis(&webui)))
-            .arg(format!("/DWORKERPYZPATH={}", as_nsis(&stub)))
-            .arg(format!("/DWORKERDEPSPATH={}", as_nsis(&deps)))
             .arg(format!("/DHOOKS={}", as_nsis(&desktop.join("src-tauri/windows/hooks.nsh"))))
             .arg(format!(
                 "/DUNINSTALL_OPTIONS={}",

@@ -227,6 +227,12 @@ func (v *voiceInstalls) start(homeDir, pack string) bool {
 	return true
 }
 
+// RemoveLegacyPython deletes the private Python that older versions downloaded
+// into the home folder to run their worker. Nothing starts it any more.
+func RemoveLegacyPython(homeDir string) {
+	_ = os.RemoveAll(filepath.Join(voiceHome(ResolveHomeDir(homeDir)), "runtime"))
+}
+
 // dropLegacyVoiceFiles removes what the Python voice kept for a pack, once the
 // native pack that replaces it is in place: nothing reads those files any more
 // and they are hundreds of megabytes (the cloning voice, gigabytes).
