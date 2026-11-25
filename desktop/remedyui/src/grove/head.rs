@@ -773,7 +773,8 @@ fn open_routine(ui: &Ui, grove: Grove, existing: Option<HeadRoutine>) -> () {
     let at_f = at.clone();
     let once_f = once.clone();
     let g = grove.clone();
-    let slot_s = slot.clone();
+    // Turns true when the server has the routine; only then does the dialog close.
+    let saved = Signal::new(false);
     let save = w::button(ui, "Save routine", move || {
         let body_text = what_f.value().trim().to_string();
         if body_text.is_empty() {
@@ -820,10 +821,8 @@ fn open_routine(ui: &Ui, grove: Grove, existing: Option<HeadRoutine>) -> () {
                 map.remove("schedule");
             }
         }
-        g.save_routine(edit_id.clone(), body);
-        if let Some(m) = slot_s.borrow().clone() {
-            m.close();
-        }
+        err.set(String::new());
+        g.save_routine(edit_id.clone(), body, saved, err);
     });
     let slot_c = slot.clone();
     let cancel = w::button(ui, "Cancel", move || {
@@ -861,6 +860,14 @@ fn open_routine(ui: &Ui, grove: Grove, existing: Option<HeadRoutine>) -> () {
     form = form
         .child(w::text(ui, "").variant("error").text(move || err.get()))
         .child(w::row(ui).gap(unit).child(cancel).child(save));
+    let slot_w = slot.clone();
+    let form = form.child(ui.el("routine-saved").bind(move || {
+        if saved.get() {
+            if let Some(m) = slot_w.borrow().clone() {
+                m.close();
+            }
+        }
+    }));
     let modal = w::modal(ui, heading, form, true);
     *slot.borrow_mut() = Some(modal);
 }
