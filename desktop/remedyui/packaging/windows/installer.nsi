@@ -64,12 +64,6 @@ CRCCheck on
 !ifndef WEBUISRCPATH
   !error "Pass /DWEBUISRCPATH=path\to\webui (folder with index.html)"
 !endif
-!ifndef WORKERPYZPATH
-  !error "Pass /DWORKERPYZPATH=path\to\rmdy_tool_worker.pyz"
-!endif
-!ifndef WORKERDEPSPATH
-  !error "Pass /DWORKERDEPSPATH=path\to\rmdy-deps (folder)"
-!endif
 
 !define PLACEHOLDER_INSTALL_DIR "C:\__REMEDY_PLACEHOLDER_DO_NOT_INSTALL__"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}"
@@ -221,6 +215,9 @@ Function RemoveStaleFiles
   Delete "$INSTDIR\app.exe"
   Delete "$INSTDIR\remedy-desktop.exe"
   Delete "$INSTDIR\remedy-runtime-x86_64-pc-windows-msvc.exe"
+  ; The Python worker older versions shipped. Nothing runs it now.
+  Delete "$INSTDIR\rmdy_tool_worker.pyz"
+  RMDir /r "$INSTDIR\rmdy-deps"
   ; Older installs put the Start Menu shortcut beside the folder this one uses.
   Delete "$SMPROGRAMS\${PRODUCTNAME}.lnk"
 FunctionEnd
@@ -243,14 +240,6 @@ Section Install
   ; Chat Web UI. remedy-runtime serves this from a `webui` folder next to the exe.
   SetOutPath "$INSTDIR\webui"
   File /r "${WEBUISRCPATH}\*.*"
-  SetOutPath "$INSTDIR"
-
-  ; The mind's worker and its compiled dependencies. remedy-runtime looks for
-  ; both next to itself. The old folder goes first so a removed module cannot linger.
-  File "/oname=rmdy_tool_worker.pyz" "${WORKERPYZPATH}"
-  RMDir /r "$INSTDIR\rmdy-deps"
-  SetOutPath "$INSTDIR\rmdy-deps"
-  File /r "${WORKERDEPSPATH}\*.*"
   SetOutPath "$INSTDIR"
 
   SetOutPath "$INSTDIR\windows"

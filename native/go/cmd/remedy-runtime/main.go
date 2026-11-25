@@ -19,7 +19,6 @@ import (
 	"github.com/AhmiDarrow/RemedyAI/native/go/parentwatch"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 	"github.com/AhmiDarrow/RemedyAI/native/go/servelock"
-	"github.com/AhmiDarrow/RemedyAI/native/go/workers"
 )
 
 const (
@@ -117,32 +116,13 @@ func main() {
 		// Per-turn ResolveChatModel: xAI OAuth bearer, then vision helper, else Scripted.
 		cognition := httpapi.NewCognitionTurnRunner(httpapi.ResolveListenModel(home))
 		cognition.HomeDir = home
-		// Equal-or-better vs pre-cutover Python ReAct: supervise the RMDY tool
-		// worker, dial FrameCaller, AttachPythonWorker. Fail closed — never
-		// serve forever with only Go demo builtins pretending product tools.
-		// Same session hosts voice/vision handlers (forever-Python ML lanes).
-		//
-		// The supervisor respawns a crashed worker (backoff 1 s → 30 s, five
-		// restarts per ten minutes) and swaps the ipc.Client behind one
-		// LiveCaller, so registered tools follow the new process.
-		cwd, _ := os.Getwd()
-		opts := workers.RMDYToolOptions{
-			HomeDir: home,
-			Cwd:     cwd,
-		}
-		// The worker starts the first time a Python tool is called, not here:
-		// a turn is built and run natively, so most sessions never need it.
-		supervisor := workers.NewLazyRMDYToolWorker(ctx, opts)
-		defer func() { _ = supervisor.Close() }()
-		caller := supervisor.Caller()
-		if err := cognition.AttachPythonWorker(caller); err != nil {
-			_ = supervisor.Close()
-			fmt.Fprintf(os.Stderr, "remedy-runtime: AttachPythonWorker failed: %v\n", err)
-			os.Exit(1)
-		}
+		// Everything a turn needs runs in this process or in a native helper:
+		// the prompt, the tools, mail and calendar, voice and vision. No
+		// interpreter is started.
 		// Voice and vision are native. Speech models run in the remedy-voice
 		// helper, started the first time she speaks or listens; the image
 		// model server is downloaded, verified and supervised here.
+		go httpapi.RemoveLegacyPython(home)
 		nativeVoice := httpapi.NewNativeVoiceWorker()
 		defer nativeVoice.Close()
 		voiceWorker = nativeVoice
