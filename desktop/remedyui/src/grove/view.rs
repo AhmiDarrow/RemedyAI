@@ -585,7 +585,7 @@ fn studio_handoff_card(ui: &Ui, grove: Grove) -> El {
                 .text({
                     let (g, ui) = (grove.clone(), ui.clone());
                     move || {
-                        let key = if g.studio.streaming.get() {
+                        let key = if g.handoff_working() {
                             "grove-handoff-working"
                         } else {
                             "grove-handoff-ready"
@@ -600,7 +600,7 @@ fn studio_handoff_card(ui: &Ui, grove: Grove) -> El {
                 });
             let g = grove.clone();
             let open = w::button(&ui, crate::messages().text(&ui, "grove-handoff-open"), move || {
-                g.show_studio();
+                g.open_handoff();
             })
             .variant("quiet")
             .semantics(
@@ -617,7 +617,11 @@ fn studio_handoff_card(ui: &Ui, grove: Grove) -> El {
                 })
                 .child(quote)
                 .child(note)
-                .child(open);
+                .child(w::row(&ui).gap(unit).child(open).child({
+                    let g = grove.clone();
+                    w::button(&ui, crate::messages().text(&ui, "grove-handoff-dismiss"), move || g.dismiss_handoff())
+                        .variant("quiet")
+                }));
             crate::tokens::info_panel(&ui, title, body).layout(|l| {
                 l.margin = Insets {
                     top: unit,

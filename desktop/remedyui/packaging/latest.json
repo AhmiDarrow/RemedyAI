@@ -1,23 +1,23 @@
 {
-  "version": "v1.0.0",
-  "notes": "Remedy Desktop 1.0.0. Signatures stay empty until the existing minisign key signs the release artifacts. Do not publish this file unsigned.",
+  "version": "v1.1.0",
+  "notes": "Remedy Desktop 1.1.0. Signatures stay empty until the existing minisign key signs the release artifacts. Do not publish this file unsigned.",
   "pub_date": "2026-11-23T00:00:00Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v1.0.0/Remedy.Desktop_1.0.0_x64-setup.exe"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v1.1.0/Remedy.Desktop_1.1.0_x64-setup.exe"
     },
     "linux-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v1.0.0/Remedy.Desktop_1.0.0_amd64.AppImage"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v1.1.0/Remedy.Desktop_1.1.0_amd64.AppImage"
     },
     "darwin-aarch64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/runtime-v1.0.0/Remedy.Desktop_1.0.0_aarch64.app.tar.gz"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/runtime-v1.1.0/Remedy.Desktop_1.1.0_aarch64.app.tar.gz"
     },
     "darwin-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/runtime-v1.0.0/Remedy.Desktop_1.0.0_x64.app.tar.gz"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/runtime-v1.1.0/Remedy.Desktop_1.1.0_x64.app.tar.gz"
     }
   }
 }
