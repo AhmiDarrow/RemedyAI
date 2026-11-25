@@ -856,6 +856,9 @@ func NewDefaultToolRegistry(pythonCaller tools.FrameCaller) (*tools.Registry, er
 	if err := tools.RegisterSessionTools(registry); err != nil {
 		return nil, err
 	}
+	if err := tools.RegisterMailCalendarTools(registry); err != nil {
+		return nil, err
+	}
 	if pythonCaller != nil {
 		if err := tools.RegisterPythonWorkerTools(registry, pythonCaller); err != nil {
 			return nil, err

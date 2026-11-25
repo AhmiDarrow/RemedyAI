@@ -212,7 +212,7 @@ func New(cfg Config) (*Server, error) {
 		}
 		// Browser-rail tools (computer.navigate) need the live HostBridge.
 		_ = cr.AttachRailTools(s.bridge)
-		// Google mail and calendar run natively; other providers use the worker.
+		// Mail and calendar run natively: Google, else IMAP/SMTP and CalDAV.
 		_ = attachNativeMailCalendar(cr.Registry, home)
 		_ = attachNativeHouseRules(cr.Registry, s)
 		_ = attachNativePeerTools(cr.Registry, s)
