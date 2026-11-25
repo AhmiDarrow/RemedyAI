@@ -154,6 +154,7 @@ pub struct Settings {
     pub auto_approve: Signal<f64>,
     pub log_level: Signal<String>,
     pub sarcasm: Signal<bool>,
+    pub claimidx_enabled: Signal<bool>,
     pub claimidx: Signal<bool>,
     pub advanced: Signal<Value>,
     pub advanced_schema: Signal<Value>,
@@ -287,6 +288,7 @@ impl Settings {
             auto_approve: Signal::new(0.8),
             log_level: Signal::new("INFO".into()),
             sarcasm: Signal::new(false),
+            claimidx_enabled: Signal::new(true),
             claimidx: Signal::new(true),
             advanced: Signal::new(json!({})),
             advanced_schema: Signal::new(json!([])),
@@ -528,6 +530,7 @@ impl Settings {
         self.auto_approve.set(jnum(v, "auto_approve_threshold", 0.8));
         self.log_level.set(jstr(v, "log_level", "INFO"));
         self.sarcasm.set(jbool(v, "sarcasm_mode", false));
+        self.claimidx_enabled.set(jbool(v, "claimidx_enabled", true));
         self.claimidx.set(jbool(v, "claimidx_public_ledger", true));
         self.advanced.set(v.get("advanced").cloned().unwrap_or_else(|| json!({})));
         self.advanced_schema.set(v.get("advanced_schema").cloned().unwrap_or_else(|| json!([])));
@@ -876,6 +879,7 @@ impl Settings {
         d.auto_approve = self.auto_approve.get();
         d.log_level = self.log_level.get();
         d.sarcasm = self.sarcasm.get();
+        d.claimidx_enabled = self.claimidx_enabled.get();
         d.claimidx = self.claimidx.get();
         d.advanced = self.advanced.get();
         d.providers_touched = self.providers_touched.get();

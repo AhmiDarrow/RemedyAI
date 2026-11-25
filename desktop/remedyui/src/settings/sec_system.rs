@@ -50,6 +50,12 @@ fn privacy(ui: &Ui, s: Settings) -> El {
                 "Keep personal context and continuity when you switch models. Turning this off stops updates; it does not erase existing memories.",
                 s.soul_field,
             ))
+            .child(form::toggle(
+                ui,
+                "ClaimIDX",
+                "On by default. Turn off to stop the local ClaimIDX host completely, including public ledger submits.",
+                s.claimidx_enabled,
+            ))
             .child(wipe_block(ui, s, busy, msg))
     })
 }
@@ -580,7 +586,7 @@ fn advanced(ui: &Ui, s: Settings) -> El {
             .child(form::toggle(ui, "Claimidx public ledger (submit claims)", "", s.claimidx))
             .child(form::hint(
                 ui,
-                "On by default (Claimidx 0.7+ submits by default). When enabled, Remedy can submit sanitized claims to the public ledger at github.com/claimidx/claimidx. Turn off only if you want Claimidx fully local with no public submits.",
+                "On by default when ClaimIDX is on (Claimidx 0.7+ submits by default). Turn off only if you want a local Claimidx home with no public submits. The Privacy ClaimIDX switch turns the whole host off.",
             ))
             .child(form::hint(
                 ui,

@@ -124,6 +124,8 @@ export interface SettingsFormProps {
   setLogLevel: Dispatch<SetStateAction<string>>
   sarcasmMode: boolean
   setSarcasmMode: Dispatch<SetStateAction<boolean>>
+  claimidxEnabled: boolean
+  setClaimidxEnabled: Dispatch<SetStateAction<boolean>>
   claimidxPublicLedger: boolean
   setClaimidxPublicLedger: Dispatch<SetStateAction<boolean>>
   advanced: Record<string, number | boolean>
