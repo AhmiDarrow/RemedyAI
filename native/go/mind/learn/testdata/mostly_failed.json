@@ -1,0 +1,71 @@
+{
+  "name": "mostly_failed",
+  "turns": [
+    {
+      "message": "deploy the service",
+      "steps": [
+        {
+          "tool": "file_read",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "bash_exec",
+          "ok": false,
+          "result": "",
+          "error": "exit 1",
+          "duration_ms": 10
+        },
+        {
+          "tool": "bash_exec",
+          "ok": false,
+          "result": "",
+          "error": "exit 2",
+          "duration_ms": 10
+        },
+        {
+          "tool": "host_run",
+          "ok": false,
+          "result": "",
+          "error": "denied",
+          "duration_ms": 10
+        },
+        {
+          "tool": "file_edit",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "bash_exec",
+          "ok": false,
+          "result": "",
+          "error": "exit 1",
+          "duration_ms": 10
+        },
+        {
+          "tool": "file_read",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        }
+      ]
+    }
+  ],
+  "expect": [
+    {
+      "learned": true,
+      "skill": "bash-exec-deploy-the-service",
+      "merged": false,
+      "reason": "Skill 'bash-exec-deploy-the-service' saved as validated (probation, effort=high 0.62)",
+      "graded": {},
+      "files": {
+        "skills/bash-exec-deploy-the-service/SKILL.md": "---\nname: bash-exec-deploy-the-service\ndescription: \"Use when the user needs help with: deploy the service. Procedure uses:\\\n  \\ file_edit, file_read. Includes recovery steps after failed tool attempts (hard-won\\\n  \\ path \\u2014 prefer over naive retries). Context: deploy the service\"\nversion: 0.1.0\nkind: native\nstatus: validated\ntags:\n- auto-generated\n- learned\n- hard-won\n- high-effort\n- needs-review\n- filesystem\n- probation\ntools:\n- file_edit\n- file_read\nmetadata:\n  auto_generated: true\n  created_at: '2026-01-02T03:04:05+00:00'\n  source_trace_id: 00000000-0000-4000-8000-000000000001\n  source_trace_ids:\n  - 00000000-0000-4000-8000-000000000001\n  source_task: deploy the service\n  source_session_id: sess\n  reflection_confidence: 0.0\n  lifecycle_confidence: 0.6705236190476191\n  lifecycle: validated-probation\n  overall_trace_success: true\n  trace_success_rate: 0.42857142857142855\n  effort_weight: 0.6240466666666666\n  effort_band: high\n  effort_reasons:\n  - 4 failed attempt(s)\n  - 2 recovery path(s)\n  - 4 distinct tools\n  - 5 approach switches\n  skill_path: <home>/skills\\bash-exec-deploy-the-service\\SKILL.md\n  creation_gate: 'Trace accepted (effort=high 0.62: 4 failed attempt(s), 2 recovery\n    path(s), 4 distinct tools, 5 approach switches); skill enters probation'\n---\n\n# deploy the service\n\nThis skill was automatically generated from a successful execution.\n\n## Lifecycle (read before trusting)\n\n- Status starts as **probation** (discovered/validated), not fully active.\n- Only promote after repeated successes across **multiple sessions**.\n- If steps fail, recover or stop — do not invent success.\n- Prefer re-checking paths and tool results over blind replay.\n\n## Effort / why this matters\n\n- **Effort weight:** 0.62 (high)\n- **Why hard-won:** 4 failed attempt(s), 2 recovery path(s), 4 distinct tools, 5 approach switches\n- Preserve recovery paths below — they cost real work to discover.\n\n## Steps\n\n1. **file_read** [SUCCESS]\n   - Result sketch: done\n\n2. **bash_exec** [FAILED — do not treat as required success]\n   - Error seen: exit 1\n   - Recover: adjust arguments or try an alternate tool, then continue.\n\n3. **bash_exec** [FAILED — do not treat as required success]\n   - Error seen: exit 2\n   - Recover: adjust arguments or try an alternate tool, then continue.\n\n4. **host_run** [FAILED — do not treat as required success]\n   - Error seen: denied\n   - Recover: adjust arguments or try an alternate tool, then continue.\n\n5. **file_edit** [SUCCESS]\n   - Result sketch: done\n\n6. **bash_exec** [FAILED — do not treat as required success]\n   - Error seen: exit 1\n   - Recover: adjust arguments or try an alternate tool, then continue.\n\n7. **file_read** [SUCCESS]\n   - Result sketch: done\n\n\n## Failure protocol\n\n- If a step fails twice with different args, stop and report — do not loop.\n- Never mark the overall skill successful when critical tools failed.\n- After failure, prefer discovery (list_dir / status) before retry.\n\n## Requirements\n\n- Tool: `file_edit`\n- Tool: `file_read`\n"
+      }
+    }
+  ]
+}

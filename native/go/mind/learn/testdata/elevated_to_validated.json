@@ -1,0 +1,78 @@
+{
+  "name": "elevated_to_validated",
+  "turns": [
+    {
+      "message": "Tune the cache layer",
+      "steps": [
+        {
+          "tool": "list_dir",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "file_edit",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "web_fetch",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "bash_exec",
+          "ok": false,
+          "result": "",
+          "error": "boom",
+          "duration_ms": 10
+        },
+        {
+          "tool": "bash_exec",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "bash_exec",
+          "ok": false,
+          "result": "",
+          "error": "boom",
+          "duration_ms": 10
+        },
+        {
+          "tool": "file_read",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "web_fetch",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        }
+      ]
+    }
+  ],
+  "expect": [
+    {
+      "learned": true,
+      "skill": "bash-exec-tune-the-cache-layer",
+      "merged": false,
+      "reason": "Skill 'bash-exec-tune-the-cache-layer' saved as validated (probation, effort=medium 0.46)",
+      "graded": {},
+      "files": {
+        "skills/bash-exec-tune-the-cache-layer/SKILL.md": "---\nname: bash-exec-tune-the-cache-layer\ndescription: \"Use when the user needs help with: Tune the cache layer. Procedure uses:\\\n  \\ bash_exec, file_edit, file_read, list_dir, web_fetch. Includes recovery steps\\\n  \\ after failed tool attempts (hard-won path \\u2014 prefer over naive retries). Context:\\\n  \\ Tune the cache layer\"\nversion: 0.1.0\nkind: native\nstatus: validated\ntags:\n- auto-generated\n- learned\n- medium-confidence\n- filesystem\n- web\n- probation\ntools:\n- web_fetch\n- list_dir\n- file_edit\n- bash_exec\n- file_read\nmetadata:\n  auto_generated: true\n  created_at: '2026-01-02T03:04:05+00:00'\n  source_trace_id: 00000000-0000-4000-8000-000000000001\n  source_trace_ids:\n  - 00000000-0000-4000-8000-000000000001\n  source_task: Tune the cache layer\n  source_session_id: sess\n  reflection_confidence: 0.27499999999999997\n  lifecycle_confidence: 0.8424106666666666\n  lifecycle: validated-probation\n  overall_trace_success: true\n  trace_success_rate: 0.75\n  effort_weight: 0.4620533333333333\n  effort_band: medium\n  effort_reasons:\n  - 2 failed attempt(s)\n  - 1 recovery path(s)\n  - 5 distinct tools\n  - 5 approach switches\n  - 8-step trace\n  skill_path: <home>/skills\\bash-exec-tune-the-cache-layer\\SKILL.md\n  creation_gate: 'Trace accepted (effort=medium 0.46: 2 failed attempt(s), 1 recovery\n    path(s), 5 distinct tools, 5 approach switches); skill enters probation'\n---\n\n# Tune the cache layer\n\nThis skill was automatically generated from a successful execution.\n\n## Lifecycle (read before trusting)\n\n- Status starts as **probation** (discovered/validated), not fully active.\n- Only promote after repeated successes across **multiple sessions**.\n- If steps fail, recover or stop — do not invent success.\n- Prefer re-checking paths and tool results over blind replay.\n\n## Steps\n\n1. **list_dir** [SUCCESS]\n   - Result sketch: done\n\n2. **file_edit** [SUCCESS]\n   - Result sketch: done\n\n3. **web_fetch** [SUCCESS]\n   - Result sketch: done\n\n4. **bash_exec** [FAILED — do not treat as required success]\n   - Error seen: boom\n   - Recover: adjust arguments or try an alternate tool, then continue.\n\n5. **bash_exec** [SUCCESS]\n   - Result sketch: done\n\n6. **bash_exec** [FAILED — do not treat as required success]\n   - Error seen: boom\n   - Recover: adjust arguments or try an alternate tool, then continue.\n\n7. **file_read** [SUCCESS]\n   - Result sketch: done\n\n8. **web_fetch** [SUCCESS]\n   - Result sketch: done\n\n## Reusable Patterns\n\n\n## Failure protocol\n\n- If a step fails twice with different args, stop and report — do not loop.\n- Never mark the overall skill successful when critical tools failed.\n- After failure, prefer discovery (list_dir / status) before retry.\n\n## Requirements\n\n- Tool: `bash_exec`\n- Tool: `file_edit`\n- Tool: `file_read`\n- Tool: `list_dir`\n- Tool: `web_fetch`\n"
+      }
+    }
+  ]
+}
