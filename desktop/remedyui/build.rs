@@ -9,21 +9,21 @@
 
 fn main() {
     let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-    let ico = manifest_dir.join("../../src-tauri/icons/icon.ico");
+    let ico = manifest_dir.join("../src-tauri/icons/icon.ico");
     let manifest = manifest_dir.join("packaging/windows/remedy-desktop.exe.manifest");
     println!("cargo:rerun-if-changed={}", ico.display());
     println!("cargo:rerun-if-changed={}", manifest.display());
     println!(
         "cargo:rerun-if-changed={}",
-        manifest_dir.join("../../src-tauri/icons/tray-icon.png").display()
+        manifest_dir.join("../src-tauri/icons/tray-icon.png").display()
     );
     println!(
         "cargo:rerun-if-changed={}",
-        manifest_dir.join("../../src-tauri/icons/32x32.png").display()
+        manifest_dir.join("../src-tauri/icons/32x32.png").display()
     );
     println!(
         "cargo:rerun-if-changed={}",
-        manifest_dir.join("../../src-tauri/icons/128x128.png").display()
+        manifest_dir.join("../src-tauri/icons/128x128.png").display()
     );
     // `cfg(windows)` here is the machine doing the build. The resource belongs
     // only in a Windows exe, so also ask what is being built: an Android

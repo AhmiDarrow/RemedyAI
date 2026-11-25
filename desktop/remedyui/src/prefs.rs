@@ -117,6 +117,21 @@ pub fn set_launch_at_login(on: bool) {
     if spawn_disabled() {
         return;
     }
+    if cfg!(target_os = "windows") {
+        // One entry, under the name 0.70.5 used ("Remedy Desktop.lnk" in the
+        // Startup folder), so this switch also controls a shortcut that an
+        // older version made. The two names 1.x builds wrote are removed.
+        let dir = autostart_dir();
+        for old in ["Remedy Desktop.cmd", "Remedy.lnk"] {
+            let _ = std::fs::remove_file(dir.join(old));
+        }
+        if let Ok(entry) =
+            remedy_ui::desktop::autostart::Entry::current("Remedy Desktop", "com.remedy.desktop", &[])
+        {
+            let _ = remedy_ui::desktop::autostart::set(&entry, on);
+        }
+        return;
+    }
     apply_launch_at_login(on, &autostart_dir(), &std::env::current_exe().unwrap_or_default());
 }
 

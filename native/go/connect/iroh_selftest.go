@@ -31,6 +31,7 @@ import (
 const IrohDefaultPort = 7403
 
 // DefaultSTUNServers are lookup-only servers for the public-address check.
+// They are third parties: contacted only when hole punching is on.
 var DefaultSTUNServers = []string{"stun.l.google.com:19302", "stun.cloudflare.com:3478"}
 
 // Reachability verdicts.
@@ -201,12 +202,16 @@ func forwardSteps(port int, router, target string) []string {
 	}
 }
 
-// runIrohSelfTest gathers STUN and IPv6 evidence and publishes the verdict.
+// runIrohSelfTest gathers the evidence (the router's mapping, IPv6 and, when
+// hole punching is on, the address a STUN server sees) and publishes the verdict.
 func runIrohSelfTest(ctx context.Context, servers []string) {
-	if len(servers) == 0 {
+	cur := CurrentIrohStatus()
+	// No outside service is asked unless the owner turned on hole punching,
+	// which already uses these servers. Without them the verdict comes from
+	// what the router reports about its own mapping, and from IPv6.
+	if len(servers) == 0 && cur.Punch {
 		servers = DefaultSTUNServers
 	}
-	cur := CurrentIrohStatus()
 	publicIP := ""
 	for _, s := range servers {
 		sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
