@@ -1184,7 +1184,7 @@ mod tests {
 
     #[test]
     fn one_oh_is_newer_than_last_tauri() {
-        assert_eq!(APP_VERSION, "1.0.0");
+        assert_eq!(APP_VERSION, "1.1.0");
         assert!(release_is_newer("1.0.0", "0.70.5"));
         assert!(release_is_newer("v1.0.0", "v0.70.5"));
         assert!(!release_is_newer("0.70.5", "1.0.0"));

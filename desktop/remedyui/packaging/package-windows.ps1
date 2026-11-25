@@ -220,4 +220,4 @@ if (-not (Test-Path -LiteralPath $out)) { throw "makensis did not write $out" }
 if ($LASTEXITCODE -ne 0) { throw "signing failed ($LASTEXITCODE)" }
 
 Write-Output $out
-Write-Output "Not published. Copy the .sig text into packaging/latest.json when Joe cuts the 1.0.0 release."
+Write-Output "Not published. Copy the .sig text into packaging/latest.json when Joe cuts the release."
