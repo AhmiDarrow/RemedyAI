@@ -328,6 +328,14 @@ func (s *Server) handleConnectPairStart(w http.ResponseWriter, r *http.Request) 
 	if port < 1 || port > 65535 {
 		port = connect.DefaultBindPort
 	}
+	// The code must name the port the gateway is really on. The configured
+	// one can differ (port 0 asks for any free port, and a listener keeps its
+	// port until it restarts).
+	if s.connectGW != nil {
+		if _, live, ok := s.connectGW.ListeningAddr(); ok && live > 0 {
+			port = live
+		}
+	}
 	host = connect.ReachableLANHost(host)
 	if host == "" {
 		cands := connect.PreferLANIPv4(connect.ListCandidateIPv4())
