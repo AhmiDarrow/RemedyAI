@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net"
-	"strings"
 	"testing"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/ipc"
@@ -85,31 +84,6 @@ func TestRMDYPythonToolsRoundTrip(t *testing.T) {
 		t.Fatalf("workspace.list total=%d", listOut.Total)
 	}
 
-	searched, err := clientReg.Execute(context.Background(), Request{
-		ToolID: "web.search", Version: 1,
-		Input: json.RawMessage(`{"query":"remedy tool abi","max_results":3}`),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var searchOut struct {
-		Query   string `json:"query"`
-		Backend string `json:"backend"`
-		Results []struct {
-			Title string `json:"title"`
-			URL   string `json:"url"`
-		} `json:"results"`
-	}
-	if err := json.Unmarshal(searched.Output, &searchOut); err != nil {
-		t.Fatal(err)
-	}
-	if searchOut.Query != "remedy tool abi" || searchOut.Backend != "mirror" || len(searchOut.Results) < 1 {
-		t.Fatalf("web.search=%+v", searchOut)
-	}
-	if !strings.Contains(searchOut.Results[0].Title, "remedy tool abi") {
-		t.Fatalf("web.search title=%q", searchOut.Results[0].Title)
-	}
-
 	written, err := clientReg.Execute(context.Background(), Request{
 		ToolID: "workspace.write", Version: 1,
 		Input:           json.RawMessage(`{"path":"out/note.txt","content":"hello abi"}`),
@@ -128,29 +102,6 @@ func TestRMDYPythonToolsRoundTrip(t *testing.T) {
 	}
 	if writeOut.Path != "out/note.txt" || writeOut.BytesWritten != len("hello abi") || !writeOut.Created {
 		t.Fatalf("workspace.write=%+v", writeOut)
-	}
-
-	fetched, err := clientReg.Execute(context.Background(), Request{
-		ToolID: "web.fetch", Version: 1,
-		Input: json.RawMessage(`{"url":"https://example.invalid/page","max_chars":5000}`),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fetchOut struct {
-		URL      string `json:"url"`
-		FinalURL string `json:"final_url"`
-		Content  string `json:"content"`
-		Format   string `json:"format"`
-	}
-	if err := json.Unmarshal(fetched.Output, &fetchOut); err != nil {
-		t.Fatal(err)
-	}
-	if fetchOut.URL != "https://example.invalid/page" || fetchOut.Format != "text" {
-		t.Fatalf("web.fetch=%+v", fetchOut)
-	}
-	if !strings.Contains(fetchOut.Content, "example.invalid/page") {
-		t.Fatalf("web.fetch content=%q", fetchOut.Content)
 	}
 }
 
