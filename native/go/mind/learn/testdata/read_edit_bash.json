@@ -1,0 +1,64 @@
+{
+  "name": "read_edit_bash",
+  "turns": [
+    {
+      "message": "Fix the build in the parser module",
+      "steps": [
+        {
+          "tool": "file_read",
+          "ok": true,
+          "result": "read main.go",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "file_read",
+          "ok": true,
+          "result": "read util.go",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "file_edit",
+          "ok": true,
+          "result": "edited main.go",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "bash_exec",
+          "ok": true,
+          "result": "go build ok",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "file_edit",
+          "ok": true,
+          "result": "edited util.go",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "bash_exec",
+          "ok": true,
+          "result": "go test ok",
+          "error": "",
+          "duration_ms": 10
+        }
+      ]
+    }
+  ],
+  "expect": [
+    {
+      "learned": true,
+      "skill": "file-read-fix-the-build-in-the-parser-module",
+      "merged": false,
+      "reason": "Skill 'file-read-fix-the-build-in-the-parser-module' saved as discovered (probation, effort=trivial 0.17)",
+      "graded": {},
+      "files": {
+        "skills/file-read-fix-the-build-in-the-parser-module/SKILL.md": "---\nname: file-read-fix-the-build-in-the-parser-module\ndescription: 'Use when the user needs help with: Fix the build in the parser module.\n  Procedure uses: bash_exec, file_edit, file_read. Context: Fix the build in the parser\n  module'\nversion: 0.1.0\nkind: native\nstatus: discovered\ntags:\n- auto-generated\n- learned\n- high-confidence\n- filesystem\n- probation\ntools:\n- file_edit\n- file_read\n- bash_exec\nmetadata:\n  auto_generated: true\n  created_at: '2026-01-02T03:04:05+00:00'\n  source_trace_id: 00000000-0000-4000-8000-000000000001\n  source_trace_ids:\n  - 00000000-0000-4000-8000-000000000001\n  source_task: Fix the build in the parser module\n  source_session_id: sess\n  reflection_confidence: 0.6\n  lifecycle_confidence: 0.8332080000000001\n  lifecycle: probation\n  overall_trace_success: true\n  trace_success_rate: 1.0\n  effort_weight: 0.16604\n  effort_band: trivial\n  effort_reasons:\n  - 3 distinct tools\n  - 4 approach switches\n---\n\n# Fix the build in the parser module\n\nThis skill was automatically generated from a successful execution.\n\n## Lifecycle (read before trusting)\n\n- Status starts as **probation** (discovered/validated), not fully active.\n- Only promote after repeated successes across **multiple sessions**.\n- If steps fail, recover or stop — do not invent success.\n- Prefer re-checking paths and tool results over blind replay.\n\n## Steps\n\n1. **file_read** [SUCCESS]\n   - Result sketch: read main.go\n\n2. **file_read** [SUCCESS]\n   - Result sketch: read util.go\n\n3. **file_edit** [SUCCESS]\n   - Result sketch: edited main.go\n\n4. **bash_exec** [SUCCESS]\n   - Result sketch: go build ok\n\n5. **file_edit** [SUCCESS]\n   - Result sketch: edited util.go\n\n6. **bash_exec** [SUCCESS]\n   - Result sketch: go test ok\n\n## Reusable Patterns\n\n- `file_edit -> bash_exec pattern` (2x, 100% success)\n\n## Failure protocol\n\n- If a step fails twice with different args, stop and report — do not loop.\n- Never mark the overall skill successful when critical tools failed.\n- After failure, prefer discovery (list_dir / status) before retry.\n\n## Requirements\n\n- Tool: `bash_exec`\n- Tool: `file_edit`\n- Tool: `file_read`\n"
+      }
+    }
+  ]
+}
