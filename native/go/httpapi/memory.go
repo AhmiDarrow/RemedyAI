@@ -303,19 +303,27 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 	if limit > 50 {
 		limit = 50
 	}
+	offset := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("offset")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			offset = n
+		}
+	}
 
 	var (
-		rows []memoryEntryRow
-		err  error
+		rows    []memoryEntryRow
+		err     error
+		hasMore bool
 	)
 	if q == "" {
-		fetchN := limit * 3
+		fetchN := (offset + limit + 1) * 3
 		if fetchN < 30 {
 			fetchN = 30
 		}
 		raw, e := s.sessions.listRecentMemory(fetchN)
 		err = e
 		kept := make([]memoryEntryRow, 0, limit)
+		skipped := 0
 		for _, row := range raw {
 			if strings.EqualFold(row.EntryType, "system") {
 				continue
@@ -323,24 +331,35 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 			if !keepMemoryEntry(row) {
 				continue
 			}
-			kept = append(kept, row)
+			if skipped < offset {
+				skipped++
+				continue
+			}
 			if len(kept) >= limit {
+				hasMore = true
 				break
 			}
+			kept = append(kept, row)
 		}
 		rows = kept
 	} else {
-		raw, e := s.sessions.searchMemoryLIKE(q, limit*2)
+		raw, e := s.sessions.searchMemoryLIKE(q, offset+limit+1)
 		err = e
 		kept := make([]memoryEntryRow, 0, limit)
+		skipped := 0
 		for _, row := range raw {
 			if !keepMemoryEntry(row) {
 				continue
 			}
-			kept = append(kept, row)
+			if skipped < offset {
+				skipped++
+				continue
+			}
 			if len(kept) >= limit {
+				hasMore = true
 				break
 			}
+			kept = append(kept, row)
 		}
 		rows = kept
 	}
@@ -370,8 +389,11 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"query":   q,
-		"results": results,
+		"query":    q,
+		"results":  results,
+		"has_more": hasMore,
+		"offset":   offset,
+		"limit":    limit,
 	})
 }
 
@@ -394,6 +416,12 @@ func (s *Server) handleMemoryFacts(w http.ResponseWriter, r *http.Request) {
 	if limit > 50 {
 		limit = 50
 	}
+	offset := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("offset")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			offset = n
+		}
+	}
 	profile, err := s.sessions.loadUserProfileJSON("default")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -403,6 +431,8 @@ func (s *Server) handleMemoryFacts(w http.ResponseWriter, r *http.Request) {
 	}
 	factsOut := make([]map[string]any, 0, limit)
 	rawFacts, _ := profile["facts"].([]any)
+	skipped := 0
+	hasMore := false
 	for _, item := range rawFacts {
 		f, ok := item.(map[string]any)
 		if !ok {
@@ -424,6 +454,14 @@ func (s *Server) handleMemoryFacts(w http.ResponseWriter, r *http.Request) {
 		if factIsWorkResidue(text, auth, asString(f["source"]), inferred) {
 			continue
 		}
+		if skipped < offset {
+			skipped++
+			continue
+		}
+		if len(factsOut) >= limit {
+			hasMore = true
+			break
+		}
 		if len(text) > 300 {
 			text = text[:300]
 		}
@@ -434,16 +472,24 @@ func (s *Server) handleMemoryFacts(w http.ResponseWriter, r *http.Request) {
 		if auth == "" {
 			auth = "agent"
 		}
+		id := strings.TrimSpace(asString(f["id"]))
+		if id == "" {
+			id = strings.TrimSpace(asString(f["key"]))
+		}
 		factsOut = append(factsOut, map[string]any{
+			"id":        id,
+			"title":     cat,
 			"text":      text,
 			"category":  cat,
 			"authority": auth,
 		})
-		if len(factsOut) >= limit {
-			break
-		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"facts": factsOut})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"facts":    factsOut,
+		"has_more": hasMore,
+		"offset":   offset,
+		"limit":    limit,
+	})
 }
 
 func (s *Server) handleMemoryPersonaWipe(w http.ResponseWriter, r *http.Request) {

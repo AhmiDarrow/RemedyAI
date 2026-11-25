@@ -17,8 +17,8 @@ pub(crate) use actions::{
     add_paths, after_finish, apply_frame, approve_plan, ask_delete_skill, ask_remove_project,
     assign_project, background_title, boot, bulk_assign_project, continue_pending, delete_skill, dismiss_library, edit_user_message,
     export_active, focus_session, focused_steps, import_session, install_library, install_named,
-    load_memory, load_skills, move_project_order, move_session_order, on_session_created, open_skill, pick_attachments,
-    pick_folder, place_session, project_confirm_body, react, regenerate, refresh_banners, remove_project,
+    load_memory, load_more_memory, load_skills, move_project_order, move_session_order, on_session_created, open_skill, pick_attachments,
+    apply_picked_project_path, pick_folder, place_session, project_confirm_body, react, regenerate, refresh_banners, remove_project,
     ask_archive_unused, export_skills_pack, import_skills_pack, archive_unused_skills,
     rename_session, request_plan_changes, resolve_approval, save_skill, search_library,
     search_memory, send_life, show_plan, speak_reply, stall_seconds, submit, toggle_mic,
@@ -196,6 +196,17 @@ pub enum SidePanel {
     Skills,
 }
 
+/// One memory fact or note shown in the Memory panel.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MemoryRow {
+    pub id: String,
+    pub title: String,
+    pub body: String,
+    pub kind: String,
+}
+
+pub const MEMORY_PAGE: usize = 20;
+
 #[derive(Clone, Debug)]
 pub enum Confirm {
     RemoveProject(String),
@@ -261,6 +272,13 @@ pub struct Depth {
     pub tag_draft: Signal<String>,
     pub remote_busy: Signal<bool>,
     pub memory_body: Signal<String>,
+    pub memory_rows: Signal<Vec<MemoryRow>>,
+    pub memory_loading: Signal<bool>,
+    pub memory_error: Signal<String>,
+    pub memory_has_more: Signal<bool>,
+    pub memory_query: Signal<String>,
+    pub memory_ready: Signal<bool>,
+    pub speaking: Signal<bool>,
     pub skills: Signal<Vec<SkillRow>>,
     /// Status filter on the installed skills list.
     pub skill_filter: Signal<String>,
@@ -341,6 +359,13 @@ impl Depth {
             tag_draft: Signal::new(String::new()),
             remote_busy: Signal::new(false),
             memory_body: Signal::new(String::new()),
+            memory_rows: Signal::new(Vec::new()),
+            memory_loading: Signal::new(false),
+            memory_error: Signal::new(String::new()),
+            memory_has_more: Signal::new(false),
+            memory_query: Signal::new(String::new()),
+            memory_ready: Signal::new(false),
+            speaking: Signal::new(false),
             skills: Signal::new(Vec::new()),
             skill_filter: Signal::new(logic::SKILL_FILTER_ALL.into()),
             skill_budget: Signal::new(logic::SkillBudget::default()),
@@ -592,4 +617,10 @@ pub(crate) fn put_mic(mic: remedy_ui::playback::Microphone) {
 
 pub(crate) fn put_player(player: remedy_ui::playback::Player) {
     PLAYER.with(|slot| *slot.borrow_mut() = Some(player));
+}
+
+pub(crate) fn stop_player() {
+    PLAYER.with(|slot| {
+        slot.borrow_mut().take();
+    });
 }

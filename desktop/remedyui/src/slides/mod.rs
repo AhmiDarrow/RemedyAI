@@ -13,7 +13,7 @@ mod pty;
 mod scratch;
 mod terminal;
 
-pub use hostcmd::bind_host;
+pub use hostcmd::{bind_host, current_app, current_window, pick_folder};
 pub use terminal::terminal_context_items;
 
 use crate::runtime::Client;

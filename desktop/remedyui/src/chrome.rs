@@ -409,6 +409,14 @@ impl Chrome {
         self.app.set(Some(app.clone()));
         self.window.set(Some(window.clone()));
         self.ui_slot.set(Some(ui.clone()));
+        // The title-bar maximize/restore icon must follow the real window
+        // (Aero Snap, drag-unmaximize, Win+Up/Down), not only our button.
+        self.maximized.set_if_changed(window.is_maximized());
+        let chrome = self.clone();
+        let win = window.clone();
+        window.on_geometry(move |_, _| {
+            chrome.maximized.set_if_changed(win.is_maximized());
+        });
     }
 
     pub fn app(self) -> Option<App> {
@@ -461,6 +469,12 @@ impl Chrome {
         if overlay == Overlay::Skills {
             if let Some(studio) = self.studio.get() {
                 crate::depth::load_skills(&studio);
+            }
+        }
+        if overlay == Overlay::Memory {
+            if let Some(studio) = self.studio.get() {
+                studio.depth.memory_ready.set(false);
+                crate::depth::load_memory(&studio);
             }
         }
         self.overlay.set(overlay);
@@ -1557,9 +1571,9 @@ fn overlay_layer(ui: &Ui, studio: Studio, chrome: Chrome, overlay: Overlay) -> E
         Overlay::Memory => sheet(
             ui,
             &messages().text(ui, "memory-title"),
-            false,
-            false,
-            crate::panels::memory_body(ui),
+            true,
+            true,
+            crate::panels::memory_body(ui, chrome),
             move || chrome.close_overlay(),
         ),
         Overlay::Skills => sheet(

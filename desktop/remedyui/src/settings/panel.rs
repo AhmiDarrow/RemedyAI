@@ -63,6 +63,10 @@ pub fn open_panel(s: Settings) {
         s.last_section.set("provider".into());
         s.category.set("models".into());
     }
+    if crate::settings::take_open_privacy() {
+        s.last_section.set("privacy".into());
+        s.category.set("privacy".into());
+    }
     let id = s.last_section.get();
     if let Some(sec) = logic::section(&id) {
         s.category.set(sec.category.to_string());
