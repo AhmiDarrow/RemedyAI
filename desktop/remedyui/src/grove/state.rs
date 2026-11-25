@@ -205,6 +205,8 @@ pub(crate) struct Grove {
     pub shield: Signal<bool>,
     pub desktop_site: Signal<bool>,
     pub partner_name: Signal<String>,
+    /// The owner has given Remedy her nights (the vigil). Off until they do.
+    pub vigil_on: Signal<bool>,
     /// `female`, `male`, or `neutral`. Grove's talk-bar hints follow it.
     pub agent_gender: Signal<String>,
     pub speak_replies: Signal<bool>,
@@ -307,6 +309,7 @@ impl Grove {
             shield: Signal::new(prefs.shield),
             desktop_site: Signal::new(prefs.desktop_site),
             partner_name: Signal::new("Remedy".into()),
+            vigil_on: Signal::new(false),
             agent_gender: Signal::new("female".into()),
             speak_replies: Signal::new(false),
             todos: Signal::new(Vec::new()),
@@ -380,6 +383,11 @@ impl Grove {
     pub(crate) fn attach_client(&self, client: Client) {
         self.client.set(Some(client.clone()));
         self.ensure_poll();
+        self.spawn(move |c| api::vigil_enabled(&c), |g, out| {
+            if let Ok(on) = out {
+                g.vigil_on.set(on);
+            }
+        });
         let g = self.clone();
         self.spawn(move |c| api::settings_identity(&c), move |g, out| {
             if let Ok((name, gender)) = out {
@@ -1067,6 +1075,23 @@ impl Grove {
                 g.refresh_head();
             },
         );
+    }
+
+    /// Give Remedy her nights, or take them back. The switch shows the new
+    /// state only once the runtime has it.
+    pub(crate) fn set_vigil(&self, on: bool, shown: Signal<bool>) {
+        self.spawn(move |c| api::set_vigil(&c, on), move |g, out| match out {
+            Ok(()) => {
+                g.vigil_on.set(on);
+                g.note.set(if on { "Her nights are hers now.".into() } else { "Nights are off.".into() });
+            }
+            Err(_) => {
+                // Put the switch back where the runtime still has it. The
+                // settings panel may be closed by now.
+                let _ = shown.try_set(!on);
+                g.note.set("That did not go through — try again.".into());
+            }
+        });
     }
 
     pub(crate) fn save_heartbeat(&self, every: i64, quiet_start: String, quiet_end: String) {
