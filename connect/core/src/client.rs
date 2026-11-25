@@ -39,6 +39,8 @@ pub enum Via {
     Tailscale,
     Lan,
     V6,
+    /// Straight to the PC's own endpoint, or through the owner's relay.
+    Direct,
 }
 
 impl Via {
@@ -47,6 +49,7 @@ impl Via {
             Via::Tailscale => "tailscale",
             Via::Lan => "lan",
             Via::V6 => "v6",
+            Via::Direct => "direct",
         }
     }
 }
@@ -63,6 +66,12 @@ pub struct ClientConfig {
     pub tailscale_connect_timeout: Duration,
     /// TCP connect timeout for LAN and IPv6 endpoints.
     pub local_connect_timeout: Duration,
+    /// How long the direct path may take to reach the PC's endpoint.
+    pub direct_connect_timeout: Duration,
+    /// Called when the PC reports a new direct address, with the updated
+    /// pairing, so the app can save it. `None`: the update lives only until
+    /// the client stops.
+    pub on_record: Option<Arc<dyn Fn(&PairingRecord) + Send + Sync>>,
     /// Read timeout during the handshake and the first PING/PONG.
     pub handshake_timeout: Duration,
     /// Write timeout on the socket; a stuck write fails the tunnel.
@@ -86,6 +95,8 @@ impl Default for ClientConfig {
         ClientConfig {
             tailscale_connect_timeout: Duration::from_millis(8_000),
             local_connect_timeout: Duration::from_millis(1_500),
+            direct_connect_timeout: Duration::from_millis(10_000),
+            on_record: None,
             handshake_timeout: Duration::from_millis(8_000),
             write_timeout: Duration::from_secs(30),
             keepalive: Duration::from_secs(30),
@@ -674,6 +685,35 @@ fn dial_any(
     Err(Error::Unreachable(errors.join("; ")))
 }
 
+/// The TCP endpoints first (home network, Tailscale), then the direct path
+/// when the PC has one. Away from home the TCP attempts fail fast and the
+/// direct one carries the session.
+fn dial_all(
+    cfg: &ClientConfig,
+    endpoints: &[(Via, SocketAddr)],
+    direct: Option<crate::direct::Target>,
+    device: &DeviceKeys,
+    host_key: &[u8; 32],
+    payload: &[u8],
+) -> Result<Tunnel> {
+    let tcp = match dial_any(cfg, endpoints, device, host_key, payload) {
+        Ok(t) => return Ok(t),
+        Err(e) => e,
+    };
+    let Some(target) = direct else { return Err(tcp) };
+    // A wrong pairing is wrong on every path: do not hide it behind a second dial.
+    if matches!(tcp, Error::Rejected | Error::PinMismatch) {
+        return Err(tcp);
+    }
+    match crate::direct::bridge(&target, cfg.direct_connect_timeout)
+        .and_then(|local| dial(cfg, Via::Direct, local, device, host_key, payload))
+    {
+        Ok(t) => Ok(t),
+        Err(Error::Rejected) => Err(Error::Rejected),
+        Err(e) => Err(Error::Unreachable(format!("{tcp}; direct: {e}"))),
+    }
+}
+
 impl Tunnel {
     /// First contact after scanning a pairing text.
     pub fn connect_pair(
@@ -684,14 +724,20 @@ impl Tunnel {
     ) -> Result<Tunnel> {
         let payload = pair_payload(&info.pair_secret, device_name);
         let eps = endpoint_order(info.tailscale, info.lan, info.v6);
-        dial_any(cfg, &eps, device, &info.host_key, &payload)
+        let direct = crate::direct::Target::from_fields(
+            info.iroh_id.as_deref(),
+            &info.iroh_addrs.join(","),
+            info.iroh_relay.as_deref(),
+        );
+        dial_all(cfg, &eps, direct, device, &info.host_key, &payload)
     }
 
     /// Reconnect of an already paired phone (`hello`).
     pub fn connect_hello(record: &PairingRecord, device: &DeviceKeys, cfg: &ClientConfig) -> Result<Tunnel> {
         let payload = hello_payload(&device.device_id());
         let eps = endpoint_order(record.tailscale, record.lan, record.v6);
-        dial_any(cfg, &eps, device, &record.host_key, &payload)
+        let direct = crate::direct::Target::from_record(record);
+        dial_all(cfg, &eps, direct, device, &record.host_key, &payload)
     }
 }
 
@@ -879,7 +925,46 @@ impl ShimPipe for ClientInner {
     }
 }
 
-fn supervise(inner: Arc<ClientInner>, record: PairingRecord, device: DeviceKeys) {
+/// The pairing with the direct address the PC reports right now, when that
+/// differs from what is stored. The reply came through the authenticated
+/// tunnel, so it is the PC's own word. `None`: nothing to change (or the PC
+/// has no direct path, in which case what was stored is kept).
+fn refreshed_direct(record: &PairingRecord, me_body: &[u8]) -> Option<PairingRecord> {
+    let v: serde_json::Value = serde_json::from_slice(me_body).ok()?;
+    let d = v.get("direct")?;
+    let id = d.get("id")?.as_str()?.trim();
+    if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let addrs: Vec<String> = d
+        .get("addrs")
+        .and_then(|a| a.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str())
+                .filter(|x| x.parse::<SocketAddr>().is_ok_and(|sa| !sa.ip().is_unspecified() && sa.port() != 0))
+                .take(6)
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
+    let relay = d.get("relay").and_then(|r| r.as_str()).unwrap_or("").trim();
+    let relay = if relay.starts_with("https://") { relay } else { "" };
+    let mut next = record.clone();
+    let mut put = |k: &str, val: String| {
+        if val.is_empty() {
+            next.extras.remove(k);
+        } else {
+            next.extras.insert(k.to_string(), val);
+        }
+    };
+    put("ir", id.to_ascii_lowercase());
+    put("ira", addrs.join(","));
+    put("irr", relay.to_string());
+    (next.extras != record.extras).then_some(next)
+}
+
+fn supervise(inner: Arc<ClientInner>, mut record: PairingRecord, device: DeviceKeys) {
     let cfg = &inner.cfg;
     let mut backoff = Backoff::new(cfg.backoff_min, cfg.backoff_max);
     let mut attempt = 0u32;
@@ -896,6 +981,17 @@ fn supervise(inner: Arc<ClientInner>, record: PairingRecord, device: DeviceKeys)
                     break;
                 }
                 inner.publish(ConnState::Connected { via: t.via() });
+                // Learn where the PC can be reached away from home now, while
+                // it is reachable: a home address changes, and this is the
+                // only way the phone hears of it without a third party.
+                if let Ok(me) = t.http("GET", "/connect/me", "", &[], Some(cfg.handshake_timeout)) {
+                    if let Some(next) = refreshed_direct(&record, &me.body) {
+                        record = next;
+                        if let Some(save) = &cfg.on_record {
+                            save(&record);
+                        }
+                    }
+                }
                 while !inner.stop.load(Ordering::SeqCst) && !t.wait_closed(Duration::from_millis(100)) {}
                 *inner.tunnel.lock().unwrap() = None;
                 if inner.stop.load(Ordering::SeqCst) {
@@ -925,6 +1021,34 @@ fn supervise(inner: Arc<ClientInner>, record: PairingRecord, device: DeviceKeys)
 mod tests {
     use super::*;
     use crate::pairing::PairSecret;
+
+    #[test]
+    fn a_new_direct_address_from_the_pc_updates_the_pairing() {
+        let mut record = PairingRecord {
+            host_key: [7; 32],
+            lan: "192.168.1.10:7401".parse().unwrap(),
+            tailscale: None,
+            v6: None,
+            device_name: "phone".into(),
+            paired_at: 1,
+            extras: Default::default(),
+        };
+        let id = "32f964994affa248ee05d85780291e07535c4229dfcba0bbde4c44f94594c602";
+        let body = format!(
+            r#"{{"direct":{{"id":"{id}","addrs":["203.0.113.9:7403","0.0.0.0:7403","junk"],"relay":"ftp://x"}}}}"#
+        );
+        let next = refreshed_direct(&record, body.as_bytes()).expect("a direct path appeared");
+        assert_eq!(next.extras.get("ir").map(String::as_str), Some(id));
+        assert_eq!(next.extras.get("ira").map(String::as_str), Some("203.0.113.9:7403"));
+        assert!(!next.extras.contains_key("irr"), "only an https relay is kept");
+        // The same report again changes nothing.
+        record = next;
+        assert!(refreshed_direct(&record, body.as_bytes()).is_none());
+        // No direct path reported: what is stored stays.
+        assert!(refreshed_direct(&record, br#"{"direct":null}"#).is_none());
+        assert!(refreshed_direct(&record, b"not json").is_none());
+        assert!(refreshed_direct(&record, br#"{"direct":{"id":"short","addrs":[]}}"#).is_none());
+    }
 
     #[test]
     fn backoff_doubles_to_the_ceiling_and_resets() {

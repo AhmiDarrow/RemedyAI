@@ -65,6 +65,8 @@ def main() -> int:
         "Function RemoveStaleFiles",
         "Call RemoveStaleFiles",
         "!ifndef VOICESRCPATH",
+        "!ifndef IROHSRCPATH",
+        r'File "/oname=remedy-iroh.exe" "${IROHSRCPATH}"',
         r'File "/oname=remedy-voice.exe" "${VOICESRCPATH}"',
         r'Delete "$INSTDIR\remedy-voice.exe"',
         "hooks.nsh",
@@ -143,6 +145,7 @@ def main() -> int:
     need('"/DHOOKS=' in win, "windows script must pass an absolute hooks path")
     need('"/DRUNTIMESRCPATH=' in win, "windows script must pass the remedy-runtime path")
     need('"/DVOICESRCPATH=' in win, "windows script must pass the remedy-voice path")
+    need('"/DIROHSRCPATH=' in win, "windows script must pass the remedy-iroh path")
     # Two quoted arguments with no space between them reach makensis as one.
     need('""/D' not in win, "windows script has two makensis arguments run together")
     need('"/DCORESRCPATH=' in win, "windows script must pass the remedy_core.dll path")

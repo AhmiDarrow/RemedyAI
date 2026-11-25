@@ -33,9 +33,17 @@ fn phone_pairs_and_reaches_the_pc_through_the_tunnel() {
 
     // The gateway advertises this PC's LAN address, but the test runtime is
     // bound to loopback so it is not reachable from the network. Dial it there.
+    // With REMEDY_PHONE_E2E_DIRECT set, the home-network address is pointed at
+    // a closed port instead, so only the direct path (the PC's own endpoint)
+    // can carry the session: the away-from-home case.
+    let direct_only = std::env::var("REMEDY_PHONE_E2E_DIRECT").is_ok();
+    let lan = if direct_only { "lan=127.0.0.1:9" } else { "lan=127.0.0.1:17481" };
+    if direct_only {
+        assert!(code.lines().any(|l| l.starts_with("ir=")), "the PC gave no direct endpoint: {code}");
+    }
     let code: String = code
         .lines()
-        .map(|l| if l.starts_with("lan=") { "lan=127.0.0.1:17481".to_string() } else { l.to_string() })
+        .map(|l| if l.starts_with("lan=") { lan.to_string() } else { l.to_string() })
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -43,7 +51,11 @@ fn phone_pairs_and_reaches_the_pc_through_the_tunnel() {
     pair(&store, &code, "Test phone", &ClientConfig::default()).expect("pairing with the real gateway");
 
     let client = ConnectClient::start_from_store(&store, ClientConfig::default()).expect("start the tunnel");
-    client.wait_connected(Duration::from_secs(20)).expect("the tunnel connects with hello");
+    client.wait_connected(Duration::from_secs(30)).expect("the tunnel connects with hello");
+    if direct_only {
+        let via = client.tunnel().map(|t| t.via());
+        assert_eq!(via, Some(remedy_connect_core::Via::Direct), "the session must be on the direct path");
+    }
     let shim = LoopbackShim::start(client.shim_pipe(), ShimConfig::default()).expect("start the shim");
     let origin = remedy_connect::shim_origin(&shim);
 

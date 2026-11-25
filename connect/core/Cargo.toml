@@ -14,3 +14,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hex = "0.4"
 thiserror = "2"
+# The away-from-home path: a QUIC stream to the PC's own endpoint. The same
+# version the PC's sidecar (native/iroh) is built with.
+iroh = "1.5"
+tokio = { version = "1", features = ["io-util", "net", "rt-multi-thread", "time"] }
