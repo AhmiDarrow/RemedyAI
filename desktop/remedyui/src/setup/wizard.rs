@@ -8,7 +8,7 @@ use remedy_ui::layout::{Align, Length};
 use remedy_ui::reactive::{waker, Signal};
 use crate::presence::{self, Mood};
 use remedy_ui::widgets as w;
-use remedy_ui::{show, El, TextField, Ui};
+use remedy_ui::{El, TextField, Ui};
 use serde_json::{Map, Value, json};
 
 use super::chrome;
@@ -544,10 +544,7 @@ fn welcome(ui: &Ui, wiz: Wizard) -> El {
         let wiz_talk = wiz_body.clone();
         let wiz_skip = wiz_body.clone();
         let face_ui = ui.clone();
-        let face_mark = show(ui, move || presence::enabled(), move || {
-            presence::mark(&face_ui, Mood::Happy, 72.0)
-        })
-        .el();
+        let face_mark = presence::swap(&face_ui, || Mood::Happy, 72.0);
         let face = w::column(ui)
             .gap(SPACE)
             .align(Align::Center)

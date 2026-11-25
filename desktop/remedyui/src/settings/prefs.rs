@@ -245,6 +245,12 @@ pub fn set_motion(s: Settings, on: bool) {
     persist(s);
 }
 
+/// Show Remedy's face, or the R mark in its place.
+pub fn set_presence(s: Settings, on: bool) {
+    s.show_presence.set(on);
+    persist(s);
+}
+
 pub fn set_contrast(s: Settings, on: bool) {
     s.high_contrast.set(on);
     apply(s);

@@ -501,18 +501,11 @@ fn home_surface(ui: &Ui, studio: Studio) -> El {
 
     let face_studio = studio.clone();
     let face_ui = ui.clone();
-    let face = show(
-        ui,
-        move || crate::presence::enabled(),
-        move || {
-            crate::presence::mark(
-                &face_ui,
-                crate::presence::from_studio(&face_studio),
-                crate::theme_pack::layout().presence_home,
-            )
-        },
-    )
-    .el();
+    let face = crate::presence::swap(
+        &face_ui,
+        move || crate::presence::from_studio(&face_studio),
+        crate::theme_pack::layout().presence_home,
+    );
 
     let status_panel = tokens::info_panel(ui, messages().text(ui, "home-status-title"), status)
         .layout(|l| {
@@ -763,16 +756,7 @@ fn speaker_cluster(
     let avatar = if user {
         logo::persona(ui, name, true, tokens::AVATAR)
     } else {
-        let mark_ui = ui.clone();
-        let persona_ui = ui.clone();
-        let persona_name = name.to_string();
-        show(
-            ui,
-            move || crate::presence::enabled(),
-            move || crate::presence::mark(&mark_ui, crate::presence::State::Done, tokens::AVATAR),
-        )
-        .fallback(move || logo::persona(&persona_ui, &persona_name, false, tokens::AVATAR))
-        .el()
+        crate::presence::swap(ui, || crate::presence::State::Done.into(), tokens::AVATAR)
     };
     let mut row = w::row(ui)
         .align(Align::Start)
