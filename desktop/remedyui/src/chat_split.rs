@@ -14,9 +14,9 @@ use std::rc::Rc;
 use serde::{Deserialize, Serialize};
 
 use remedy_ui::a11y::{Role, Semantics};
-use remedy_ui::core::Insets;
+use remedy_ui::core::{Insets, Size};
 use remedy_ui::input::{Buttons, Key, PointerPhase};
-use remedy_ui::layout::{Align, Justify, Length};
+use remedy_ui::layout::{AUTO, Align, Justify, Length, Position};
 use remedy_ui::reactive::Signal;
 use remedy_ui::style::{BorderEdge, BorderSide, StylePatch};
 use remedy_ui::widgets as w;
@@ -53,6 +53,125 @@ pub enum ActionsSide {
 pub enum MobilePane {
     Actions,
     Chat,
+}
+
+/// In-app float for a Code or Chat pane (not persisted).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FloatKind {
+    PopOut,
+    Pip,
+    Fullscreen,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FloatStage {
+    pub pane: MobilePane,
+    pub kind: FloatKind,
+    pub resume: Option<FloatKind>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FloatFrame {
+    pub top: f32,
+    pub start: f32,
+    pub width: f32,
+    pub height: f32,
+    pub fills: bool,
+}
+
+pub fn open_float(_current: Option<FloatStage>, pane: MobilePane, kind: FloatKind) -> Option<FloatStage> {
+    Some(FloatStage {
+        pane,
+        kind,
+        resume: None,
+    })
+}
+
+pub fn float_to_fullscreen(current: Option<FloatStage>, pane: MobilePane) -> Option<FloatStage> {
+    let resume = current.and_then(|s| {
+        if s.pane == pane && s.kind != FloatKind::Fullscreen {
+            Some(s.kind)
+        } else if s.pane == pane {
+            s.resume
+        } else {
+            None
+        }
+    });
+    Some(FloatStage {
+        pane,
+        kind: FloatKind::Fullscreen,
+        resume,
+    })
+}
+
+pub fn escape_float(current: Option<FloatStage>) -> Option<FloatStage> {
+    match current {
+        Some(s) if s.kind == FloatKind::Fullscreen => {
+            s.resume.map(|kind| FloatStage {
+                pane: s.pane,
+                kind,
+                resume: None,
+            })
+        }
+        Some(_) | None => None,
+    }
+}
+
+pub fn dock_float(_current: Option<FloatStage>) -> Option<FloatStage> {
+    None
+}
+
+/// Geometry for Pop out / PiP / Fullscreen inside a well. Must fit 400 / 700 / 1180.
+pub fn float_frame(kind: FloatKind, well: Size) -> FloatFrame {
+    let w = well.width.max(0.0);
+    let h = well.height.max(0.0);
+    match kind {
+        FloatKind::Fullscreen => FloatFrame {
+            top: 0.0,
+            start: 0.0,
+            width: w,
+            height: h,
+            fills: true,
+        },
+        FloatKind::PopOut => {
+            let width = (w * 0.76).clamp(0.0, w);
+            let height = (h * 0.80).clamp(0.0, h);
+            FloatFrame {
+                top: h * 0.08,
+                start: w * 0.12,
+                width,
+                height,
+                fills: false,
+            }
+        },
+        FloatKind::Pip => {
+            let width = 320.0_f32.min((w - 48.0).max(160.0).min(w));
+            let height = 220.0_f32.min((h - 48.0).max(120.0).min(h));
+            let start = (w - 24.0 - width).max(0.0);
+            let top = (h - 24.0 - height).max(0.0);
+            FloatFrame {
+                top,
+                start,
+                width,
+                height,
+                fills: false,
+            }
+        }
+    }
+}
+
+pub fn float_frame_fits(kind: FloatKind, well: Size) -> bool {
+    let f = float_frame(kind, well);
+    f.width <= w_plus(well.width)
+        && f.height <= w_plus(well.height)
+        && f.start >= -0.01
+        && f.top >= -0.01
+        && f.start + f.width <= w_plus(well.width)
+        && f.top + f.height <= w_plus(well.height)
+}
+
+fn w_plus(v: f32) -> f32 {
+    v + 0.51
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -131,11 +250,18 @@ pub fn workspace(ui: &Ui, studio: Studio) -> El {
     let prefs = Signal::new(load());
     let mobile = Signal::new(MobilePane::Chat);
     let narrow = Signal::new(false);
+    let float: Signal<Option<FloatStage>> = Signal::new(None);
+    let well = Signal::new(Size {
+        width: 0.0,
+        height: 0.0,
+    });
     let unit = ui.theme().spacing.unit;
 
     let n_out = narrow.clone();
+    let well_out = well.clone();
     let root = w::column(ui)
         .layout(|l| {
+            l.position = Position::Relative;
             l.width = Length::Percent(1.0);
             l.grow = 1.0;
             l.basis = Length::Px(0.0);
@@ -148,6 +274,7 @@ pub fn workspace(ui: &Ui, studio: Studio) -> El {
         // the two panes must stack instead of painting over each other.
         .on_resize(move |size| {
             n_out.set_if_changed(should_stack(size.width));
+            well_out.set_if_changed(size);
         });
 
     let tabs = {
@@ -163,7 +290,15 @@ pub fn workspace(ui: &Ui, studio: Studio) -> El {
         .el()
     };
 
-    let panes = panes_row(ui, studio, prefs.clone(), mobile, narrow.clone());
+    let panes = panes_row(
+        ui,
+        studio.clone(),
+        prefs.clone(),
+        mobile,
+        narrow.clone(),
+        float.clone(),
+    );
+    let overlay = float_host(ui, studio, prefs.clone(), float, well, narrow.clone());
 
     root.padding(Insets::all(unit * 1.5))
         .gap(unit)
@@ -186,6 +321,7 @@ pub fn workspace(ui: &Ui, studio: Studio) -> El {
         })
         .child(tabs)
         .child(panes)
+        .child(overlay)
 }
 
 fn tabs_row(ui: &Ui, mobile: Signal<MobilePane>, prefs: Signal<ChatSplit>) -> El {
@@ -269,6 +405,7 @@ fn panes_row(
     prefs: Signal<ChatSplit>,
     mobile: Signal<MobilePane>,
     narrow: Signal<bool>,
+    float: Signal<Option<FloatStage>>,
 ) -> El {
     let ui = ui.clone();
     let actions = pane_shell(
@@ -277,10 +414,19 @@ fn panes_row(
         prefs.clone(),
         mobile.clone(),
         narrow.clone(),
+        float.clone(),
         true,
     );
-    let chat = pane_shell(&ui, studio, prefs.clone(), mobile, narrow.clone(), false);
-    let handle = resize_handle(&ui, prefs.clone(), narrow);
+    let chat = pane_shell(
+        &ui,
+        studio,
+        prefs.clone(),
+        mobile,
+        narrow.clone(),
+        float.clone(),
+        false,
+    );
+    let handle = resize_handle(&ui, prefs.clone(), narrow, float);
 
     // One mounted row. Remounting the same pane elements through `show()`
     // left both panes with empty bounds after a swap. Row-reverse keeps them
@@ -325,13 +471,18 @@ fn pane_shell(
     prefs: Signal<ChatSplit>,
     mobile: Signal<MobilePane>,
     narrow: Signal<bool>,
+    float: Signal<Option<FloatStage>>,
     is_actions: bool,
 ) -> El {
     let colors = ui.theme().colors.clone();
     let visible = {
         let n = narrow.clone();
         let m = mobile;
+        let f = float.clone();
         move || {
+            if f.get().is_some_and(|s| (s.pane == MobilePane::Actions) == is_actions) {
+                return false;
+            }
             if !n.get() {
                 return true;
             }
@@ -345,11 +496,12 @@ fn pane_shell(
     let st = studio;
     let pr = prefs;
     let n = narrow.clone();
+    let fl = float.clone();
     let shell = show(ui, visible, move || {
         let pane = if is_actions {
-            actions_column(&u, st.clone(), pr.clone(), n.get())
+            actions_column(&u, st.clone(), pr.clone(), fl.clone(), n.get(), false)
         } else {
-            chat_column(&u, st.clone(), pr.clone(), n.get())
+            chat_column(&u, st.clone(), pr.clone(), fl.clone(), n.get(), false)
         };
         pane.style(tokens::panel_surface(&colors).radius(PANE_RADIUS))
         .clip()
@@ -357,15 +509,19 @@ fn pane_shell(
     .el();
     let shell_b = shell.clone();
     let n_layout = narrow;
+    let f_layout = float;
     shell.bind(move || {
         let stacked = n_layout.get();
+        let other_floating = f_layout
+            .get()
+            .is_some_and(|s| (s.pane == MobilePane::Actions) != is_actions);
         let _ = shell_b.clone().layout(move |l| {
             l.min_width = Length::Px(0.0);
             l.min_height = Length::Px(0.0);
             l.height = Length::Percent(1.0);
-            if stacked || !is_actions {
-                // Chat (and both panes when stacked) fills leftover well width
-                // when the side rails collapse.
+            if stacked || !is_actions || other_floating {
+                // Chat (and both panes when stacked, or when the other pane
+                // is floating) fills leftover well width.
                 l.grow = 1.0;
                 l.shrink = 1.0;
                 l.basis = Length::Px(0.0);
@@ -378,7 +534,14 @@ fn pane_shell(
     })
 }
 
-fn actions_column(ui: &Ui, studio: Studio, prefs: Signal<ChatSplit>, stacked: bool) -> El {
+fn actions_column(
+    ui: &Ui,
+    studio: Studio,
+    prefs: Signal<ChatSplit>,
+    float: Signal<Option<FloatStage>>,
+    stacked: bool,
+    overlay: bool,
+) -> El {
     let width = {
         let p = prefs.clone();
         move || p.get().actions_width
@@ -415,6 +578,8 @@ fn actions_column(ui: &Ui, studio: Studio, prefs: Signal<ChatSplit>, stacked: bo
             false,
             studio.clone(),
             stacked,
+            float,
+            overlay,
         ))
         .child(actions_feed(ui, studio).layout(|l| {
             l.width = Length::Percent(1.0);
@@ -424,7 +589,14 @@ fn actions_column(ui: &Ui, studio: Studio, prefs: Signal<ChatSplit>, stacked: bo
         }))
 }
 
-fn chat_column(ui: &Ui, studio: Studio, prefs: Signal<ChatSplit>, stacked: bool) -> El {
+fn chat_column(
+    ui: &Ui,
+    studio: Studio,
+    prefs: Signal<ChatSplit>,
+    float: Signal<Option<FloatStage>>,
+    stacked: bool,
+    overlay: bool,
+) -> El {
     let thread = w::column(ui)
         .layout(|l| {
             l.grow = 1.0;
@@ -459,6 +631,8 @@ fn chat_column(ui: &Ui, studio: Studio, prefs: Signal<ChatSplit>, stacked: bool)
             true,
             studio,
             stacked,
+            float,
+            overlay,
         ))
         .child(thread)
 }
@@ -471,6 +645,8 @@ fn pane_head(
     is_chat: bool,
     studio: Studio,
     stacked: bool,
+    float: Signal<Option<FloatStage>>,
+    overlay: bool,
 ) -> El {
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
@@ -510,6 +686,8 @@ fn pane_head(
         })
         .layout(|l| {
             l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+            l.wrap = true;
             l.shrink = 0.0;
         })
         .style(StylePatch::new().border_side(
@@ -540,7 +718,9 @@ fn pane_head(
             .el(),
         );
     }
-    if !stacked {
+    let pane = if is_chat { MobilePane::Chat } else { MobilePane::Actions };
+    row = row.child(pane_float_tools(ui, float, pane, overlay));
+    if !stacked && !overlay {
         row = row.child(swap_btn(ui, prefs, false));
     }
     row
@@ -574,15 +754,213 @@ fn swap_btn(ui: &Ui, prefs: Signal<ChatSplit>, in_tabs: bool) -> El {
     })
 }
 
-fn resize_handle(ui: &Ui, prefs: Signal<ChatSplit>, narrow: Signal<bool>) -> El {
+
+fn pane_float_tools(
+    ui: &Ui,
+    float: Signal<Option<FloatStage>>,
+    pane: MobilePane,
+    overlay: bool,
+) -> El {
+    let colors = ui.theme().colors.clone();
+    let mut row = w::row(ui)
+        .align(Align::Center)
+        .gap(ui.theme().spacing.unit)
+        .layout(|l| {
+            l.min_width = Length::Px(0.0);
+            l.wrap = true;
+            l.shrink = 0.0;
+        });
+    let kind = float.get().filter(|s| s.pane == pane).map(|s| s.kind);
+    let in_this = overlay && kind.is_some();
+    if overlay && !in_this {
+        return row;
+    }
+    let btn = |ui: &Ui, key: &'static str, on: Box<dyn Fn() + 'static>| {
+        let u = ui.clone();
+        w::button(ui, move || messages().text(&u, key), on)
+            .variant("quiet")
+            .style(
+                StylePatch::new()
+                    .radius(2.0)
+                    .border(tokens::hairline(&colors))
+                    .border_width(1.0)
+                    .shadow(tokens::elevation(&colors))
+                    .text_size(12.0)
+                    .weight(550.0),
+            )
+    };
+    if in_this {
+        if kind != Some(FloatKind::Fullscreen) {
+            let f = float.clone();
+            row = row.child(btn(
+                ui,
+                "chat-split-fullscreen",
+                Box::new(move || f.set(float_to_fullscreen(f.get(), pane))),
+            ));
+        }
+        let f = float.clone();
+        row = row.child(btn(
+            ui,
+            "chat-split-dock-back",
+            Box::new(move || f.set(dock_float(f.get()))),
+        ));
+        return row;
+    }
+    for (key, kind) in [
+        ("chat-split-pop-out", FloatKind::PopOut),
+        ("chat-split-pip", FloatKind::Pip),
+        ("chat-split-fullscreen", FloatKind::Fullscreen),
+    ] {
+        let f = float.clone();
+        row = row.child(btn(
+            ui,
+            key,
+            Box::new(move || f.set(open_float(f.get(), pane, kind))),
+        ));
+    }
+    row
+}
+
+fn float_host(
+    ui: &Ui,
+    studio: Studio,
+    prefs: Signal<ChatSplit>,
+    float: Signal<Option<FloatStage>>,
+    well: Signal<Size>,
+    narrow: Signal<bool>,
+) -> El {
+    let u = ui.clone();
+    let st = studio;
+    let pr = prefs;
+    let fl = float.clone();
+    let n = narrow;
+    show(
+        ui,
+        move || fl.get().is_some(),
+        move || {
+            let stage = fl.get().expect("float host visible");
+            float_layer(&u, st.clone(), pr.clone(), fl.clone(), well.clone(), n.get(), stage)
+        },
+    )
+    .el()
+}
+
+fn float_layer(
+    ui: &Ui,
+    studio: Studio,
+    prefs: Signal<ChatSplit>,
+    float: Signal<Option<FloatStage>>,
+    well: Signal<Size>,
+    stacked: bool,
+    stage: FloatStage,
+) -> El {
+    let colors = ui.theme().colors.clone();
+    let frame = float_frame(stage.kind, well.get());
+    let is_actions = stage.pane == MobilePane::Actions;
+    let body = if is_actions {
+        actions_column(ui, studio, prefs, float.clone(), stacked, true)
+    } else {
+        chat_column(ui, studio, prefs, float.clone(), stacked, true)
+    };
+    let accent = stage.kind == FloatKind::Pip;
+    let mut skin = tokens::overlay_surface(&colors);
+    if accent {
+        skin = skin.border(colors.accent).border_width(2.0);
+    }
+    if stage.kind == FloatKind::Fullscreen {
+        skin = skin.radius(0.0);
+    }
+    let title_key = if is_actions {
+        "chat-split-actions-kicker"
+    } else {
+        "chat-split-chat-kicker"
+    };
+    let layer = ui
+        .el("pane-float")
+        .column()
+        .clip()
+        .focusable(true)
+        .layout(move |l| {
+            l.position = Position::Absolute;
+            let size = well.get();
+            let frame = float_frame(stage.kind, size);
+            if frame.fills || size.width <= 0.0 || size.height <= 0.0 {
+                l.inset = Insets::ZERO;
+                l.width = Length::Percent(1.0);
+                l.height = Length::Percent(1.0);
+            } else {
+                l.inset = Insets {
+                    top: frame.top,
+                    start: frame.start,
+                    end: AUTO,
+                    bottom: AUTO,
+                };
+                l.width = Length::Px(frame.width);
+                l.height = Length::Px(frame.height);
+            }
+            l.min_width = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
+        })
+        .style(skin)
+        .semantics({
+            let u = ui.clone();
+            move || Semantics::new(Role::Dialog).label(messages().text(&u, title_key)).modal(true)
+        })
+        .on_key({
+            let float = float.clone();
+            move |e| {
+                if e.composing || !e.pressed || e.key != Key::Escape {
+                    return false;
+                }
+                float.set(escape_float(float.get()));
+                true
+            }
+        })
+        .child(body);
+    let layer_b = layer.clone();
+    let well_b = well;
+    let layer = layer.bind(move || {
+        let size = well_b.get();
+        let frame = float_frame(stage.kind, size);
+        let _ = layer_b.clone().layout(move |l| {
+            l.position = Position::Absolute;
+            if frame.fills || size.width <= 0.0 || size.height <= 0.0 {
+                l.inset = Insets::ZERO;
+                l.width = Length::Percent(1.0);
+                l.height = Length::Percent(1.0);
+            } else {
+                l.inset = Insets {
+                    top: frame.top,
+                    start: frame.start,
+                    end: AUTO,
+                    bottom: AUTO,
+                };
+                l.width = Length::Px(frame.width);
+                l.height = Length::Px(frame.height);
+            }
+            l.min_width = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
+        });
+    });
+    let _ = frame;
+    layer
+}
+
+fn resize_handle(
+    ui: &Ui,
+    prefs: Signal<ChatSplit>,
+    narrow: Signal<bool>,
+    float: Signal<Option<FloatStage>>,
+) -> El {
     let colors = ui.theme().colors.clone();
     let line = colors.line.unwrap_or(colors.muted).with_alpha(0.7);
     let u_show = ui.clone();
     let p_show = prefs;
     let n = narrow;
+    let f = float;
     show(
         ui,
-        move || !n.get(),
+        move || !n.get() && f.get().is_none(),
         move || handle_el(&u_show, p_show.clone(), line),
     )
     .el()
@@ -1649,5 +2027,39 @@ mod tests {
             !before_post.contains("evidence.set") && !before_post.contains("fetching.set"),
             "the worker callback must not touch Signals before posting: {before_post}"
         );
+    }
+
+    #[test]
+    fn pane_float_stages_and_escape() {
+        let pip = open_float(None, MobilePane::Actions, FloatKind::Pip).unwrap();
+        assert_eq!(pip.kind, FloatKind::Pip);
+        let full = float_to_fullscreen(Some(pip), MobilePane::Actions).unwrap();
+        assert_eq!(full.kind, FloatKind::Fullscreen);
+        assert_eq!(full.resume, Some(FloatKind::Pip));
+        let back = escape_float(Some(full)).unwrap();
+        assert_eq!(back.kind, FloatKind::Pip);
+        assert!(escape_float(Some(back)).is_none());
+        assert!(dock_float(Some(pip)).is_none());
+        let pop = open_float(None, MobilePane::Chat, FloatKind::PopOut).unwrap();
+        assert!(escape_float(Some(pop)).is_none());
+        let full_direct = float_to_fullscreen(None, MobilePane::Chat).unwrap();
+        assert!(escape_float(Some(full_direct)).is_none());
+    }
+
+    #[test]
+    fn pane_float_frames_fit_narrow_and_wide_wells() {
+        for (w, h) in [(400.0, 1000.0), (700.0, 1000.0), (1180.0, 1000.0)] {
+            let well = Size { width: w, height: h };
+            for kind in [FloatKind::PopOut, FloatKind::Pip, FloatKind::Fullscreen] {
+                assert!(
+                    float_frame_fits(kind, well),
+                    "{kind:?} must fit a {w}x{h} well, got {:?}",
+                    float_frame(kind, well)
+                );
+            }
+            let pip = float_frame(FloatKind::Pip, well);
+            assert!(pip.width <= 320.01);
+            assert!(pip.start + pip.width <= w + 0.51);
+        }
     }
 }

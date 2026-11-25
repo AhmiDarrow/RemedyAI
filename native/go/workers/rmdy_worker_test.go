@@ -140,7 +140,7 @@ func TestResolveDefaultWorkspaceNeverInstallDir(t *testing.T) {
 	}
 }
 
-func TestResolveDefaultWorkspaceUsesDocumentsRemedy(t *testing.T) {
+func TestResolveDefaultWorkspaceUsesProfileRemedy(t *testing.T) {
 	install := t.TempDir()
 	if err := os.WriteFile(filepath.Join(install, "remedy-runtime.exe"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
@@ -155,9 +155,12 @@ func TestResolveDefaultWorkspaceUsesDocumentsRemedy(t *testing.T) {
 	if got == "" || looksLikeInstallDir(got) {
 		t.Fatalf("workspace = %q (must not be empty or install)", got)
 	}
-	if !strings.Contains(filepath.ToSlash(got), "/Documents/Remedy") &&
+	if !strings.Contains(filepath.ToSlash(got), "/Remedy") &&
 		!strings.Contains(filepath.ToSlash(got), "/.remedy/workspace") {
-		t.Fatalf("workspace = %q want Documents/Remedy or .remedy/workspace", got)
+		t.Fatalf("workspace = %q want ~/Remedy or .remedy/workspace", got)
+	}
+	if strings.Contains(filepath.ToSlash(got), "/Documents/Remedy") {
+		t.Fatalf("workspace = %q still uses Documents/Remedy; want profile/Remedy", got)
 	}
 }
 

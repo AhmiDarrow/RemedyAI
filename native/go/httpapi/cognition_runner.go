@@ -937,7 +937,7 @@ func (r *CognitionTurnRunner) approvalGate(req TurnRequest, safeEmit func(string
 }
 
 // boundTools binds workspace/shell tools to a concrete root: session project
-// when set, else Documents/Remedy (or ~/.remedy/workspace). access_scope=full
+// when set, else ~/Remedy (or ~/.remedy/workspace). access_scope=full only when chosen
 // still allows absolute Files/shell paths via their own gates — this only
 // stops unbound model workspace_root / System32 cwd.
 func (r *CognitionTurnRunner) boundTools(req TurnRequest) cognition.ToolExecutor {

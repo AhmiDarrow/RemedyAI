@@ -87,6 +87,18 @@ def _memory_encrypt_status_public(raw: dict[str, Any]) -> str:
 
 
 # Flat keys the agent may set (mirrors SettingsUpdateRequest; no nested bags here).
+
+def _public_default_workspace_path(raw: dict | None) -> str:
+    from remedy.core.workspace import default_owner_project_path
+
+    configured = ""
+    if isinstance(raw, dict):
+        configured = str(raw.get("default_workspace") or "").strip()
+    try:
+        return str(default_owner_project_path(configured or None, create=False))
+    except Exception:
+        return configured
+
 SETTABLE_KEYS = frozenset(
     {
         "llm_provider",
@@ -95,6 +107,7 @@ SETTABLE_KEYS = frozenset(
         "custom_llm_name",
         "llm_api_key",
         "project_path",
+        "default_workspace",
         "name",
         "user_name",
         "agent_gender",
@@ -244,6 +257,8 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "ui_language": normalize_ui_language(raw.get("ui_language")),
         "persona": raw.get("persona", "default"),
         "project_path": raw.get("project_path") or "",
+        "default_workspace": raw.get("default_workspace") or "",
+        "default_workspace_path": _public_default_workspace_path(raw),
         "access_scope": raw.get("access_scope", "project"),
         "launch_at_login": bool(raw.get("launch_at_login", False)),
         "update_check": (
@@ -506,6 +521,13 @@ async def _apply_settings_update_inner(
         from remedy.core.workspace import normalize_access_scope
 
         patch["access_scope"] = normalize_access_scope(str(patch["access_scope"]))
+    if "default_workspace" in patch and patch["default_workspace"] is not None:
+        from remedy.core.workspace import is_unset_project_path
+
+        raw_ws = str(patch["default_workspace"]).strip()
+        if is_unset_project_path(raw_ws):
+            raw_ws = ""
+        patch["default_workspace"] = raw_ws
 
     if "harness_mode" in patch and patch["harness_mode"] is not None:
         hm = str(patch["harness_mode"]).strip().lower()
@@ -1022,6 +1044,7 @@ async def _apply_settings_update_inner(
         "custom_llm_name",
         "persona",
         "project_path",
+        "default_workspace",
         "access_scope",
         "thinking_level",
         "approval_mode",

@@ -37,7 +37,7 @@ func (s *Server) toolRegistry() *tools.Registry {
 
 // toolBindingFor resolves the session binding for a tool call the way RunTurn
 // does: the session's project as the root when set, else the owner's
-// Documents/Remedy folder; scope from access_scope (full when no project);
+// ~/Remedy folder; scope from access_scope (workspace when no project, unless Full);
 // home and session id for the job list and the checklist.
 func (s *Server) toolBindingFor(sessionID string) toolBinding {
 	projectPath := ""
@@ -46,9 +46,10 @@ func (s *Server) toolBindingFor(sessionID string) toolBinding {
 			projectPath = effectiveTurnProjectPath(*sess.ProjectPath)
 		}
 	}
+	cfg := LoadConfig(s.remedyHomeDir())
 	root := projectPath
 	if root == "" {
-		root = defaultOwnerFilesBase()
+		root = defaultOwnerFilesBaseConfigured(cfgString(cfg, "default_workspace", ""))
 	}
 	live := ""
 	if b := s.bridge(); b != nil {
@@ -56,7 +57,7 @@ func (s *Server) toolBindingFor(sessionID string) toolBinding {
 	}
 	return toolBinding{
 		Root:        root,
-		Scope:       effectiveAccessScope(cfgString(LoadConfig(s.remedyHomeDir()), "access_scope", "project"), projectPath),
+		Scope:       effectiveAccessScope(cfgString(cfg, "access_scope", "project"), projectPath),
 		HomeDir:     s.remedyHomeDir(),
 		SessionID:   sessionID,
 		PageContext: live,

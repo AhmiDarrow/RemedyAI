@@ -25,7 +25,6 @@ export function saveSettingsMode(mode: SettingsMode): void {
 /** Sections shown only in Advanced mode (ids match SettingsSectionId). */
 export const ADVANCED_ONLY_SECTIONS = new Set([
   'provider-catalog',
-  'access',
   'tool-process',
   'vision', // image VLM — advanced; RMB chat host is Simple
   'memory-harness',

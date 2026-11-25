@@ -112,15 +112,23 @@ func (s *Server) resolveFilesBase(sessionID string) (base string, source string)
 	return clampFilesBase(cwd), "cwd"
 }
 
-// defaultOwnerFilesBase mirrors the RMDY worker default: Documents/Remedy
-// (or ~/.remedy/workspace), not the entire user profile.
+// defaultOwnerFilesBase mirrors the RMDY worker default: ~/Remedy
+// (or ~/.remedy/workspace), not the entire user profile. A non-empty
+// default_workspace config overrides the folder.
 func defaultOwnerFilesBase() string {
+	return defaultOwnerFilesBaseConfigured("")
+}
+
+func defaultOwnerFilesBaseConfigured(configured string) string {
 	uh, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(uh) == "" {
 		return ""
 	}
-	docs := filepath.Join(uh, "Documents", "Remedy")
-	if abs, err := ensureDir(docs); err == nil {
+	target := strings.TrimSpace(configured)
+	if target == "" || isUnsetProjectPath(target) {
+		target = filepath.Join(uh, "Remedy")
+	}
+	if abs, err := ensureDir(target); err == nil {
 		return abs
 	}
 	fallback := filepath.Join(uh, ".remedy", "workspace")

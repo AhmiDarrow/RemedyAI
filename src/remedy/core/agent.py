@@ -129,7 +129,7 @@ class BasicRuntime(AgentRuntime):
         self._react_auto_continue = _REACT_AUTO_CONTINUE
         self._react_max_stale_epochs = _REACT_MAX_STALE_EPOCHS
         # Default workspace from config; per-session override applied in stream_response.
-        # Empty / "." project → home as root + full access (see workspace.effective_access_scope).
+        # Empty / "." project → default workspace unless Full was chosen (see workspace.effective_access_scope).
         raw_proj = getattr(config, "project_path", None)
         self._project_path_raw: str | None = (
             None if raw_proj is None else str(raw_proj)
@@ -284,7 +284,7 @@ class BasicRuntime(AgentRuntime):
         self.__dict__["_work_roots_live"] = roots
 
     def project_path_is_unset(self) -> bool:
-        """True when no real project folder is configured (→ full access).
+        """True when no real project folder is configured (→ default workspace).
 
         Prefers per-turn ContextVar so concurrent streams do not steal each
         other's project binding when checking the write jail.
@@ -700,7 +700,7 @@ class BasicRuntime(AgentRuntime):
                 home = getattr(cfg, "home_dir", None)
                 sync_identity_to_soul(n, g, home=home)
         if project_path is not None:
-            # Empty string clears project → home root + full access.
+            # Empty string clears project → default workspace unless Full was chosen.
             self.set_project_path(project_path if project_path.strip() else None, as_default=True)
 
     async def handle_event(self, event: GatewayEvent) -> AsyncIterator[Any]:
