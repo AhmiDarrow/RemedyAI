@@ -32,6 +32,12 @@ func TestPhoneEndToEndHost(t *testing.T) {
 		bind = "127.0.0.1"
 	}
 	cfg := "connect_enabled = true\nconnect_bind_host = \"" + bind + "\"\nconnect_bind_port = 17481\nconnect_rdv_enabled = false\n"
+	// REMEDY_PHONE_E2E_IROH turns on this PC's own endpoint for the
+	// away-from-home path (needs REMEDY_IROH_BIN and REMEDY_NATIVE_CORE_LIB).
+	wantDirect := strings.TrimSpace(os.Getenv("REMEDY_PHONE_E2E_IROH")) != ""
+	if wantDirect {
+		cfg += "connect_iroh_enabled = true\nconnect_iroh_port = 17483\n"
+	}
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -81,6 +87,16 @@ func TestPhoneEndToEndHost(t *testing.T) {
 	t.Logf("gateway listening: %v", state["listening"])
 	code, body := call(http.MethodPost, "/api/connect/pair/start")
 	qr, _ := body["qr"].(string)
+	// The endpoint comes up a moment after the gateway: ask again until the
+	// code carries it.
+	for until := time.Now().Add(30 * time.Second); wantDirect && !strings.Contains(qr, "\nir=") && time.Now().Before(until); {
+		time.Sleep(500 * time.Millisecond)
+		code, body = call(http.MethodPost, "/api/connect/pair/start")
+		qr, _ = body["qr"].(string)
+	}
+	if wantDirect && !strings.Contains(qr, "\nir=") {
+		t.Fatalf("the pairing code never carried a direct endpoint: %v", body["qr"])
+	}
 	if code != http.StatusOK || !strings.Contains(qr, "remedy-connect/1") {
 		t.Fatalf("pair/start: %d %v", code, body)
 	}

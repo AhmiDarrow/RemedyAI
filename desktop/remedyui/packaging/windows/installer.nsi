@@ -55,6 +55,9 @@ CRCCheck on
 !ifndef RUNTIMESRCPATH
   !error "Pass /DRUNTIMESRCPATH=path\to\remedy-runtime.exe"
 !endif
+!ifndef IROHSRCPATH
+  !error "Pass /DIROHSRCPATH=path\to\remedy-iroh.exe"
+!endif
 !ifndef VOICESRCPATH
   !error "Pass /DVOICESRCPATH=path\to\remedy-voice.exe"
 !endif
@@ -235,6 +238,8 @@ Section Install
   File "/oname=remedy-runtime.exe" "${RUNTIMESRCPATH}"
   ; Her voice. remedy-runtime starts it, from beside itself, on first use.
   File "/oname=remedy-voice.exe" "${VOICESRCPATH}"
+  ; The away-from-home path for a paired phone. Off until the owner turns it on.
+  File "/oname=remedy-iroh.exe" "${IROHSRCPATH}"
   File "/oname=remedy_core.dll" "${CORESRCPATH}"
 
   ; Chat Web UI. remedy-runtime serves this from a `webui` folder next to the exe.

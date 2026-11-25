@@ -99,7 +99,15 @@ impl Link {
                 return;
             }
         }
-        let client = match ConnectClient::start_from_store(&*self.store, ClientConfig::default()) {
+        // Keep the PC's current away-from-home address as it reports it.
+        let saver = self.store.clone();
+        let config = ClientConfig {
+            on_record: Some(Arc::new(move |record| {
+                let _ = saver.save_pairing(record);
+            })),
+            ..ClientConfig::default()
+        };
+        let client = match ConnectClient::start_from_store(&*self.store, config) {
             Ok(c) => c,
             Err(e) => {
                 self.error.set(e.to_string());
@@ -302,6 +310,7 @@ fn link_bar(ui: &Ui, link: Link) -> El {
             LinkStatus::Retrying => "link-retrying",
             LinkStatus::Connected(Via::Tailscale) => "link-connected-tailscale",
             LinkStatus::Connected(Via::Lan) => "link-connected-lan",
+            LinkStatus::Connected(Via::Direct) => "link-connected-direct",
             LinkStatus::Connected(_) => "link-connected",
         };
         tr(&text_ui, id)
