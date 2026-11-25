@@ -1,0 +1,56 @@
+{
+  "case": "local_binding",
+  "doc": "",
+  "clock": 1795608000.0,
+  "session_id": "sess-fixture-1",
+  "notes": [],
+  "config": {},
+  "files": {},
+  "readers": {},
+  "steps": [
+    {
+      "op": "prompt.assemble",
+      "input": {
+        "message": "hello",
+        "session_id": "sess-fixture-1",
+        "plan_mode": false,
+        "chat_mode": false,
+        "provider": "ollama",
+        "model": "qwen2.5-coder:7b"
+      },
+      "output": {
+        "system": "You are a local assistant on this PC (model: qwen2.5-coder:7b).\nAnswer in plain chat. No tools. No empty shell calls. Do not continue a previous tab's job unless this message asks.",
+        "goal": "hello",
+        "context_chars": 2437,
+        "system_chars": 180,
+        "history_chars": 0
+      },
+      "sections": [
+        {
+          "name": "local_slim_system",
+          "sep": "",
+          "text": "You are a local assistant on this PC (model: qwen2.5-coder:7b).\nAnswer in plain chat. No tools. No empty shell calls. Do not continue a previous tab's job unless this message asks."
+        }
+      ],
+      "calls": {
+        "rank_injectable_facts": [
+          {
+            "query": "hello",
+            "project_path": "{USER}\\Remedy",
+            "limit": 14,
+            "facts": []
+          },
+          {
+            "query": "hello",
+            "project_path": "{USER}\\Remedy",
+            "limit": 6,
+            "facts": []
+          }
+        ]
+      },
+      "files_after": {
+        "{HOME}/inner_language.jsonl": "{\"ts\": 1795608000.0, \"kind\": \"state\", \"dense\": \"ril1 state drv=45,45,45,45 aff=steady bio=0: bel=0:\", \"decoded\": \"Drives: curiosity 0.45, social 0.45, competence 0.45, rest 0.45. Feeling: steady.\"}\n"
+      }
+    }
+  ]
+}
