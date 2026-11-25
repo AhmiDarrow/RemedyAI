@@ -14,6 +14,7 @@ use remedy_ui::reactive::Signal;
 use remedy_ui::{El, Ui};
 
 use crate::face_draw;
+use crate::face_proc;
 use crate::face_skin;
 use crate::studio::{Conn, Studio, WorkMode};
 use crate::work::StepStatus;
@@ -21,6 +22,7 @@ use crate::work::StepStatus;
 thread_local! {
     static SKIN_OVERRIDE: Cell<Option<&'static str>> = const { Cell::new(None) };
     static STAGE_OVERRIDE: Cell<Option<u8>> = const { Cell::new(None) };
+    static FACTS: Cell<face_skin::Facts> = const { Cell::new(face_skin::Facts { sessions: 0, messages: 0, days: 0, goals: 0 }) };
     static HOUR_OVERRIDE: Cell<Option<u32>> = const { Cell::new(None) };
     static ENABLED_OVERRIDE: Cell<Option<bool>> = const { Cell::new(None) };
 }
@@ -286,6 +288,10 @@ pub fn enabled() -> bool {
 /// 10. Listening — connected, waiting
 /// 11. Idle — default rest
 pub fn from_studio(studio: &Studio) -> Mood {
+    // Recount only when the session list changes size; the count is what growth reads.
+    if studio.sessions.get().len() as u32 != FACTS.with(|c| c.get()).sessions {
+        FACTS.with(|c| c.set(face_skin::Facts::from_studio(studio)));
+    }
     mood_from(studio)
 }
 
@@ -442,7 +448,23 @@ pub fn preview_stage(ui: &Ui, mood: impl Into<Mood>, size: f32, stage: u8) -> El
     draw(ui, mood.into(), size, stage)
 }
 
+/// Design-review of a grown face for an explicit seed and usage.
+pub fn preview_grown(ui: &Ui, mood: impl Into<Mood>, size: f32, seed: u64, facts: face_skin::Facts) -> El {
+    draw_with(ui, mood.into(), size, 0, Some((seed, facts)))
+}
+
+/// The face design shots and tests show when no install seed applies.
+const DESIGN_SEED: u64 = 0x5EED;
+
 fn draw(ui: &Ui, mood: Mood, size: f32, stage: u8) -> El {
+    // Live faces grow from this install's seed and real use. Design shots and
+    // tests pin a stage instead.
+    let facts = FACTS.with(|c| c.get());
+    let live = STAGE_OVERRIDE.with(|c| c.get()).is_none() && facts.sessions > 0;
+    draw_with(ui, mood, size, stage, live.then(|| (face_skin::seed().unwrap_or(DESIGN_SEED), facts)))
+}
+
+fn draw_with(ui: &Ui, mood: Mood, size: f32, stage: u8, grow: Option<(u64, face_skin::Facts)>) -> El {
     let size = size.max(16.0);
     let grid = crate::theme_pack::layout().presence_grid.max(1.0);
     let scale = size / grid;
@@ -472,20 +494,18 @@ fn draw(ui: &Ui, mood: Mood, size: f32, stage: u8) -> El {
     let do_blink = skin.allows_blink(&resolved.pose);
     let do_glance = skin.allows_glance(mood.key(), &resolved.pose);
     let do_breath = skin.allows_breath(&resolved.pose);
+    let motion = face_draw::Motion {
+        blink: blink.clone(),
+        glance_x: glance.clone(),
+    };
 
-    face_draw::paint(
-        ui,
-        &frame,
-        &skin,
-        mood,
-        scale,
-        &colors,
-        stage,
-        face_draw::Motion {
-            blink: blink.clone(),
-            glance_x: glance.clone(),
-        },
-    );
+    // Square, the default, is procedural. A user or legacy skin keeps its own painter.
+    if skin.id == "square" && skin.engine != "legacy" {
+        let (seed, facts) = grow.unwrap_or((DESIGN_SEED, face_proc::facts_for_stage(stage)));
+        face_proc::paint(ui, &frame, seed, facts, mood, size, &colors, motion);
+    } else {
+        face_draw::paint(ui, &frame, &skin, mood, scale, &colors, stage, motion);
+    }
 
     if motion_on && (do_breath || do_blink || do_glance) {
         let frame_b = frame.clone();

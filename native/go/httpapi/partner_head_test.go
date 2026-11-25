@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -541,6 +542,40 @@ func TestPartnerToolsThroughRegistry(t *testing.T) {
 	refused := exec("children.spawn", `{"task":"x","session_id":"s","caller_origin":"partner:child:head"}`)
 	if refused["ok"] != false || !strings.Contains(refused["error"].(string), "cannot start children") {
 		t.Fatalf("grandchild must be refused in words: %v", refused)
+	}
+	// The seed is the setup: same people and install, same face; any change, another.
+	a := faceSeedFor("Ahmi", "Remedy", "salt-1", 0)
+	if a != faceSeedFor("Ahmi", "Remedy", "salt-1", 0) {
+		t.Fatal("face seed must be stable")
+	}
+	for _, other := range []uint64{
+		faceSeedFor("Joe", "Remedy", "salt-1", 0), faceSeedFor("Ahmi", "Reme", "salt-1", 0),
+		faceSeedFor("Ahmi", "Remedy", "salt-2", 0), faceSeedFor("Ahmi", "Remedy", "salt-1", 1),
+		faceSeedFor("AhmiR", "emedy", "salt-1", 0),
+	} {
+		if other == a {
+			t.Fatal("a different owner, name, install or generation must change the face")
+		}
+	}
+	// Regenerate keeps the old face; restore brings it back.
+	cur, prev := s.facePath("face.seed"), s.facePath("face.seed.prev")
+	if err := os.WriteFile(cur, []byte("42"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := exec("face.regenerate", `{}`); got["ok"] != true {
+		t.Fatalf("face.regenerate: %v", got)
+	}
+	if b, _ := os.ReadFile(prev); string(b) != "42" {
+		t.Fatalf("old face not kept: %q", b)
+	}
+	if b, _ := os.ReadFile(cur); string(b) == "42" || len(b) == 0 {
+		t.Fatalf("face not regenerated: %q", b)
+	}
+	if got := exec("face.restore", `{}`); got["ok"] != true {
+		t.Fatalf("face.restore: %v", got)
+	}
+	if b, _ := os.ReadFile(cur); string(b) != "42" {
+		t.Fatalf("old face not restored: %q", b)
 	}
 	rt := exec("routines.create", `{"what":"Take the bins out","mode":"remind","schedule":{"kind":"weekly","at":"19:00","days":["sun"]}}`)
 	if rt["ok"] != true {
