@@ -1,0 +1,179 @@
+{
+  "case": "should_continue",
+  "doc": "",
+  "clock": 1795608000.0,
+  "session_id": "sess-fixture-1",
+  "notes": [],
+  "config": {},
+  "files": {},
+  "readers": {},
+  "steps": [
+    {
+      "op": "prompt.should_continue",
+      "input": {
+        "goal": "what is the capital of France?",
+        "text": "Paris.",
+        "session_id": "sess-fixture-1",
+        "tool_count": 0,
+        "last_results": [],
+        "verify_seen": false,
+        "chat_mode": false,
+        "plan_mode": false,
+        "home_dir": "{HOME}",
+        "project_path": ""
+      },
+      "output": {
+        "ok": true,
+        "continue": false,
+        "nudge": "",
+        "reason": "done",
+        "tool_count": 0,
+        "evidence": {
+          "mutates": 0,
+          "verify_seen": false,
+          "verify_failed": false
+        }
+      },
+      "files_after": {}
+    },
+    {
+      "op": "prompt.should_continue",
+      "input": {
+        "goal": "fix the failing test in parser.py",
+        "text": "Done! All tests pass now.",
+        "session_id": "sess-fixture-1",
+        "tool_count": 2,
+        "last_results": [
+          {
+            "name": "edit",
+            "ok": true,
+            "tail": "edited parser.py"
+          },
+          {
+            "name": "bash",
+            "ok": false,
+            "tail": "exit_code=1 FAILED tests/test_parser.py::test_split",
+            "exit_code": 1
+          }
+        ],
+        "verify_seen": false,
+        "chat_mode": false,
+        "plan_mode": false,
+        "home_dir": "{HOME}",
+        "project_path": ""
+      },
+      "output": {
+        "ok": true,
+        "continue": true,
+        "nudge": "[Verify] `bash` returned exit_code=1, so the work is not done yet. Read the failure, fix it with edit, then re-run the same command with bash.",
+        "reason": "verify_failed",
+        "tool_count": 2,
+        "evidence": {
+          "mutates": 1,
+          "verify_seen": true,
+          "verify_failed": true
+        }
+      },
+      "files_after": {
+        "{HOME}/organism.json": "{\n  \"ts\": 1795608000.0,\n  \"alive\": true,\n  \"last_did\": \"verify red\"\n}"
+      }
+    },
+    {
+      "op": "prompt.should_continue",
+      "input": {
+        "goal": "create a file hello.py that prints hi",
+        "text": "Sure, I'll create hello.py for you now.",
+        "session_id": "sess-fixture-1",
+        "tool_count": 0,
+        "last_results": [],
+        "verify_seen": false,
+        "chat_mode": false,
+        "plan_mode": false,
+        "home_dir": "{HOME}",
+        "project_path": ""
+      },
+      "output": {
+        "ok": true,
+        "continue": true,
+        "nudge": "[Verify] Files changed and no later check has passed. Run the project's check with bash (tests, compiler, or the program itself) before reporting the result.",
+        "reason": "unverified",
+        "tool_count": 0,
+        "evidence": {
+          "mutates": 0,
+          "verify_seen": false,
+          "verify_failed": false
+        }
+      },
+      "files_after": {}
+    },
+    {
+      "op": "prompt.should_continue",
+      "input": {
+        "goal": "fix the bug in the build script",
+        "text": "Fixed it.",
+        "session_id": "sess-fixture-1",
+        "tool_count": 1,
+        "last_results": [
+          {
+            "name": "edit",
+            "ok": true,
+            "tail": "edited build.py"
+          }
+        ],
+        "verify_seen": false,
+        "chat_mode": false,
+        "plan_mode": false,
+        "home_dir": "{HOME}",
+        "project_path": ""
+      },
+      "output": {
+        "ok": true,
+        "continue": true,
+        "nudge": "[Verify] Files changed and no later check has passed. Run the project's check with bash (tests, compiler, or the program itself) before reporting the result.",
+        "reason": "unverified",
+        "tool_count": 1,
+        "evidence": {
+          "mutates": 1,
+          "verify_seen": false,
+          "verify_failed": false
+        }
+      },
+      "files_after": {}
+    },
+    {
+      "op": "prompt.should_continue",
+      "input": {
+        "goal": "fix the bug in the build script",
+        "text": "Fixed it, tests are green.",
+        "session_id": "sess-fixture-1",
+        "tool_count": 2,
+        "last_results": [
+          {
+            "name": "bash",
+            "ok": true,
+            "tail": "exit_code=0 4 passed",
+            "exit_code": 0
+          }
+        ],
+        "verify_seen": true,
+        "chat_mode": false,
+        "plan_mode": false,
+        "home_dir": "{HOME}",
+        "project_path": ""
+      },
+      "output": {
+        "ok": true,
+        "continue": false,
+        "nudge": "",
+        "reason": "done",
+        "tool_count": 2,
+        "evidence": {
+          "mutates": 0,
+          "verify_seen": true,
+          "verify_failed": false
+        }
+      },
+      "files_after": {}
+    }
+  ]
+}

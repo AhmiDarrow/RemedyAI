@@ -1,0 +1,84 @@
+{
+  "case": "slim_epoch",
+  "doc": "",
+  "clock": 1795608000.0,
+  "session_id": "sess-fixture-1",
+  "notes": [],
+  "config": {},
+  "files": {
+    "{PROJECT}/package.json": "{\n  \"name\": \"parser-demo\",\n  \"version\": \"0.1.0\",\n  \"scripts\": {\n    \"test\": \"node --test\",\n    \"build\": \"tsc -p .\"\n  },\n  \"devDependencies\": {\n    \"typescript\": \"^5.4.0\"\n  }\n}\n",
+    "{PROJECT}/README.md": "# parser-demo\n\nA tiny CSV splitter.\n",
+    "{PROJECT}/src/parser.js": "export function parse(s) {\n  return s.split(',');\n}\n"
+  },
+  "readers": {},
+  "steps": [
+    {
+      "op": "prompt.slim_epoch",
+      "input": {
+        "system": "You are Remedy.\n\n[Turn context]\nsession_id=sess-fixture-1",
+        "goal": "fix the failing parser test",
+        "text": "Step 1: read src/module_1.py and noted that function f1 needs a guard for empty input.\nStep 2: read src/module_2.py and noted that function f2 needs a guard for empty input.\nStep 3: read src/module_3.py and noted that function f3 needs a guard for empty input.\nStep 4: read src/module_4.py and noted that function f4 needs a guard for empty input.\nStep 5: read src/module_5.py and noted that function f5 needs a guard for empty input.\nStep 6: read src/module_6.py and noted that function f6 needs a guard for empty input.\nStep 7: read src/module_7.py and noted that function f7 needs a guard for empty input.\nStep 8: read src/module_8.py and noted that function f8 needs a guard for empty input.\nStep 9: read src/module_9.py and noted that function f9 needs a guard for empty input.\nStep 10: read src/module_10.py and noted that function f10 needs a guard for empty input.\nStep 11: read src/module_11.py and noted that function f11 needs a guard for empty input.\nStep 12: read src/module_12.py and noted that function f12 needs a guard for empty input.\nStep 13: read src/module_13.py and noted that function f13 needs a guard for empty input.\nStep 14: read src/module_14.py and noted that function f14 needs a guard for empty input.\nStep 15: read src/module_15.py and noted that function f15 needs a guard for empty input.\nStep 16: read src/module_16.py and noted that function f16 needs a guard for empty input.\nStep 17: read src/module_17.py and noted that function f17 needs a guard for empty input.\nStep 18: read src/module_18.py and noted that function f18 needs a guard for empty input.\nStep 19: read src/module_19.py and noted that function f19 needs a guard for empty input.\nStep 20: read src/module_20.py and noted that function f20 needs a guard for empty input.\nStep 21: read src/module_21.py and noted that function f21 needs a guard for empty input.\nStep 22: read src/module_22.py and noted that function f22 needs a guard for empty input.\nStep 23: read src/module_23.py and noted that function f23 needs a guard for empty input.\nStep 24: read src/module_24.py and noted that function f24 needs a guard for empty input.\nStep 25: read src/module_25.py and noted that function f25 needs a guard for empty input.\nStep 26: read src/module_26.py and noted that function f26 needs a guard for empty input.\nStep 27: read src/module_27.py and noted that function f27 needs a guard for empty input.\nStep 28: read src/module_28.py and noted that function f28 needs a guard for empty input.\nStep 29: read src/module_29.py and noted that function f29 needs a guard for empty input.\nStep 30: read src/module_30.py and noted that function f30 needs a guard for empty input.\nStep 31: read src/module_31.py and noted that function f31 needs a guard for empty input.\nStep 32: read src/module_32.py and noted that function f32 needs a guard for empty input.\nStep 33: read src/module_33.py and noted that function f33 needs a guard for empty input.\nStep 34: read src/module_34.py and noted that function f34 needs a guard for empty input.\nStep 35: read src/module_35.py and noted that function f35 needs a guard for empty input.\nStep 36: read src/module_36.py and noted that function f36 needs a guard for empty input.\nStep 37: read src/module_37.py and noted that function f37 needs a guard for empty input.\nStep 38: read src/module_38.py and noted that function f38 needs a guard for empty input.\nStep 39: read src/module_39.py and noted that function f39 needs a guard for empty input.\nStep 40: read src/module_40.py and noted that function f40 needs a guard for empty input.\nStep 41: read src/module_41.py and noted that function f41 needs a guard for empty input.\nStep 42: read src/module_42.py and noted that function f42 needs a guard for empty input.\nStep 43: read src/module_43.py and noted that function f43 needs a guard for empty input.\nStep 44: read src/module_44.py and noted that function f44 needs a guard for empty input.\nStep 45: read src/module_45.py and noted that function f45 needs a guard for empty input.\nStep 46: read src/module_46.py and noted that function f46 needs a guard for empty input.\nStep 47: read src/module_47.py and noted that function f47 needs a guard for empty input.\nStep 48: read src/module_48.py and noted that function f48 needs a guard for empty input.\nStep 49: read src/module_49.py and noted that function f49 needs a guard for empty input.\nStep 50: read src/module_50.py and noted that function f50 needs a guard for empty input.\nStep 51: read src/module_51.py and noted that function f51 needs a guard for empty input.\nStep 52: read src/module_52.py and noted that function f52 needs a guard for empty input.\nStep 53: read src/module_53.py and noted that function f53 needs a guard for empty input.\nStep 54: read src/module_54.py and noted that function f54 needs a guard for empty input.\nStep 55: read src/module_55.py and noted that function f55 needs a guard for empty input.\nStep 56: read src/module_56.py and noted that function f56 needs a guard for empty input.\nStep 57: read src/module_57.py and noted that function f57 needs a guard for empty input.\nStep 58: read src/module_58.py and noted that function f58 needs a guard for empty input.\nStep 59: read src/module_59.py and noted that function f59 needs a guard for empty input.",
+        "ledger": [
+          "- read [ok] src/parser.js",
+          "- edit [ok] src/parser.js +3 -1",
+          "- bash [fail] exit_code=1 npm test: 1 failing",
+          "- bash [ok] exit_code=0 npm test: 4 passing"
+        ],
+        "session_id": "sess-fixture-1",
+        "epoch": 1,
+        "total_steps": 12,
+        "home_dir": "{HOME}",
+        "project_path": "{PROJECT}",
+        "provider": "openai",
+        "model": "gpt-5"
+      },
+      "output": {
+        "ok": true,
+        "system": "You are Remedy.\n\n[Turn context]\nsession_id=sess-fixture-1\n\n[Session Brief · epoch working memory]\nSession Brief (working memory — trust this over stale chat):\n- Intent: fix the failing parser test\n- Historical context (cumulative):\n  · [C1] Epoch 1 @ step 12: - read [ok] src/parser.js; - edit [ok] src/parser.js +3 -1; - bash [fail] exit_code=1 npm test: 1 failing; - bash [ok] exit_code=0 npm test: 4 passing",
+        "text": "Step 1: read src/module_1.py and noted that function f1 needs a guard for empty input.\nStep 2: read src/module_2.py and noted that function f2 needs a guard for empty input.\nStep 3: read src/module_3.py and noted that function f3 needs a guard for empty input.\nStep 4: read src/module_4.py and noted that function f4 needs a guard for empty input.\nStep 5: read src/module_5.py and noted that function f5 needs a guard for empty input.\nStep 6: read src/module_6.py and noted that function f6 needs a guard for empty input.\nStep 7: read src/module_7.py and noted that function f7 needs a guard for empty input.\nStep 8: read src/module_8.py and noted that function f8 needs a guard for empty input.\nStep 9: read src/module_9.py and noted that function f9 needs a guard for empty input.\nStep 10: read src/module_10.py and noted that function f10 needs a guard for empty input.\nStep 11: read src/module_11.py and noted that function f11 needs a guard for empty input.\nStep 12: read src/module_12.py and noted that function f12 needs a guard for empty input.\nStep 13: read src/module_13.py and noted that function f13 needs a guard for empty input.\nStep 14: read src/module_14.py and noted that function f14 needs a guard for empty input.\nStep 15: read src/module_15.py and noted that function f15 needs a guard for empty input.\nStep 16: read src/module_16.py and noted that function f16 needs a guard for empty input.\nStep 17: read src/module_17.py and noted that function f17 needs a guard for empty input.\nStep 18: read src/module_18.py and noted that function f18 needs a guard for empty input.\nStep 19: read src/module_19.py and noted that function f19 needs a guard for empty input.\nStep 20: read src/module_20.py and noted that function f20 needs a guard for empty input.\nStep 21: read src/module_21.py and noted that function f21 needs a guard for empty input.\nStep 22: read src/module_22.py and noted that function f22 needs a guard for empty input.\nStep 23: read src/module_23.py and noted that function f23 needs a guard for empty input.\nStep 24: read src/module_24.py and noted that function f24 needs a guard for empty input.\nStep 25: read src/module_25.py and noted that function f25 needs a guard for empty input.\nStep 26: read src/module_26.py and noted that function f26 needs a guard for empty input.\nStep 27: read src/module_27.py and noted that function f27 needs a guard for empty input.\nStep 28: read src/module_28.py and noted that function f28 needs a guard for empty input.\nStep 29: read src/module_29.py and noted that function f29 needs a guard for empty input.\nStep 30: read src/module_30.py and noted that function f30 needs a guard for empty input.\nStep 31: read src/module_31.py and noted that function f31 needs a guard for empty input.\nStep 32: read src/module_32.py and noted that function f32 needs a guard for empty input.\nStep 33: read src/module_33.py and noted that function f33 needs a guard for empty input.\nStep 34: read src/module_34.py and noted that function f34 needs a guard for empty input.\nStep 35: read src/module_35.py and noted that function f35 needs a guard for empty input.\nStep 36: read src/module_36.py and noted that function f36 needs a guard for empty input.\nStep 37: read src/module_37.py and noted that function f37 needs a guard for empty input.\nStep 38: read src/module_38.py and noted that function f38 needs a guard for empty input.\nStep 39: read src/module_39.py and noted that function f39 needs a guard for empty input.\nStep 40: read src/module_40.py and noted that function f40 needs a guard for empty input.\nStep 41: read src/module_41.py and noted that function f41 needs a guard for empty input.\nStep 42: read src/module_42.py and noted that function f42 needs a guard for empty input.\nStep 43: read src/module_43.py and noted that function f43 needs a guard for empty input.\nStep 44: read src/module_44.py and noted that function f44 needs a guard for empty input.\nStep 45: read src/module_45.py and noted that function f45 needs a guard for empty input.\nStep 46: read src/module_46.py and noted that function f46 needs a guard for empty input.\nStep 47: read src/module_47.py and noted that function f47 needs a guard for empty input.\nStep 48: read src/module_48.py and noted that function f48 needs a guard for empty input.\nStep 49: read src/module_49.py and noted that function f49 needs a guard for empty input.\nStep 50: read src/module_50.py and noted that function f50 needs a guard for empty input.\nStep 51: read src/module_51.py and noted that function f51 needs a guard for empty input.\nStep 52: read src/module_52.py and noted that function f52 needs a guard for empty input.\nStep 53: read src/module_53.py and noted that function f53 needs a guard for empty input.\nStep 54: read src/module_54.py and noted that function f54 needs a guard for empty input.\nStep 55: read src/module_55.py and noted that function f55 needs a guard for empty input.\nStep 56: read src/module_56.py and noted that function f56 needs a guard for empty input.\nStep 57: read src/module_57.py and noted that function f57 needs a guard for empty input.\nStep 58: read src/module_58.py and noted that function f58 needs a guard for empty input.\nStep 59: read src/module_59.py and noted that function f59 needs a guard for empty input.",
+        "brief": "Session Brief (working memory — trust this over stale chat):\n- Intent: fix the failing parser test\n- Historical context (cumulative):\n  · [C1] Epoch 1 @ step 12: - read [ok] src/parser.js; - edit [ok] src/parser.js +3 -1; - bash [fail] exit_code=1 npm test: 1 failing; - bash [ok] exit_code=0 npm test: 4 passing",
+        "meta": {
+          "epoch": 1,
+          "total_steps": 12,
+          "level": null,
+          "est": null,
+          "compress_count": 1,
+          "ledger_lines": 4
+        }
+      },
+      "files_after": {}
+    },
+    {
+      "op": "prompt.slim_epoch",
+      "input": {
+        "system": "You are Remedy.\n\n[Turn context]\nsession_id=sess-fixture-1\n\n[Session Brief · epoch working memory]\nold tail that must be replaced",
+        "goal": "fix the failing parser test",
+        "text": "All four tests pass now.",
+        "ledger": [],
+        "session_id": "sess-fixture-1",
+        "epoch": 2,
+        "total_steps": 20,
+        "home_dir": "{HOME}",
+        "project_path": "{PROJECT}",
+        "provider": "openai",
+        "model": "gpt-5",
+        "checkpoint": "- bash [ok] exit_code=0 npm test"
+      },
+      "output": {
+        "ok": true,
+        "system": "You are Remedy.\n\n[Turn context]\nsession_id=sess-fixture-1\n\n[Session Brief · epoch working memory]\nSession Brief (working memory — trust this over stale chat):\n- Intent: fix the failing parser test\n- Historical context (cumulative):\n  · [C1] Epoch 1 @ step 12: - read [ok] src/parser.js; - edit [ok] src/parser.js +3 -1; - bash [fail] exit_code=1 npm test: 1 failing; - bash [ok] exit_code=0 npm test: 4 passing\n  · [C2] Epoch 2 @ step 20: - bash [ok] exit_code=0 npm test",
+        "text": "All four tests pass now.",
+        "brief": "Session Brief (working memory — trust this over stale chat):\n- Intent: fix the failing parser test\n- Historical context (cumulative):\n  · [C1] Epoch 1 @ step 12: - read [ok] src/parser.js; - edit [ok] src/parser.js +3 -1; - bash [fail] exit_code=1 npm test: 1 failing; - bash [ok] exit_code=0 npm test: 4 passing\n  · [C2] Epoch 2 @ step 20: - bash [ok] exit_code=0 npm test",
+        "meta": {
+          "epoch": 2,
+          "total_steps": 20,
+          "level": null,
+          "est": null,
+          "compress_count": 2,
+          "ledger_lines": 1
+        }
+      },
+      "files_after": {}
+    }
+  ]
+}

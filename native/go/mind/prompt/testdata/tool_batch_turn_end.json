@@ -1,0 +1,108 @@
+{
+  "case": "tool_batch_turn_end",
+  "doc": "",
+  "clock": 1795608000.0,
+  "session_id": "sess-fixture-1",
+  "notes": [],
+  "config": {},
+  "files": {
+    "{PROJECT}/package.json": "{\n  \"name\": \"parser-demo\",\n  \"version\": \"0.1.0\",\n  \"scripts\": {\n    \"test\": \"node --test\",\n    \"build\": \"tsc -p .\"\n  },\n  \"devDependencies\": {\n    \"typescript\": \"^5.4.0\"\n  }\n}\n",
+    "{PROJECT}/README.md": "# parser-demo\n\nA tiny CSV splitter.\n",
+    "{PROJECT}/src/parser.js": "export function parse(s) {\n  return s.split(',');\n}\n"
+  },
+  "readers": {},
+  "steps": [
+    {
+      "op": "prompt.after_tool_batch",
+      "input": {
+        "session_id": "sess-fixture-1",
+        "results": [
+          {
+            "tool": "read",
+            "name": "read",
+            "ok": true,
+            "success": true,
+            "result": "export function parse(s) {...}",
+            "tool_call_id": "call_1",
+            "arguments": {
+              "path": "src/parser.js"
+            }
+          },
+          {
+            "tool": "bash",
+            "name": "bash",
+            "ok": false,
+            "success": false,
+            "result": "exit_code=1\nnpm ERR! test failed",
+            "tool_call_id": "call_2",
+            "arguments": {
+              "command": "npm test"
+            },
+            "error": "exit_code=1"
+          }
+        ],
+        "home_dir": "{HOME}",
+        "_go_bound": true,
+        "project_path": "{PROJECT}"
+      },
+      "output": {
+        "ok": true,
+        "eu_new": 3,
+        "evidence_units": 3,
+        "tools": 2,
+        "duration_ms": 0.0
+      },
+      "files_after": {
+        "{HOME}/learn_log.jsonl": "{\"ts\": \"2026-11-25T09:25:30.000000Z\", \"kind\": \"after_tool_batch\", \"duration_ms\": 0.0, \"ok\": true, \"source\": \"python\", \"changed\": {\"eu_new\": 3, \"evidence_units\": 3, \"tools\": 2}}\n"
+      }
+    },
+    {
+      "op": "prompt.turn_end",
+      "input": {
+        "message": "run the tests",
+        "goal": "run the tests",
+        "user_text": "run the tests",
+        "assistant_text": "One test fails: the parser drops empty fields.",
+        "session_id": "sess-fixture-1",
+        "plan_mode": false,
+        "chat_mode": false,
+        "tool_steps": [
+          {
+            "tool": "read",
+            "name": "read",
+            "ok": true,
+            "success": true,
+            "result": "export function parse(s) {...}"
+          },
+          {
+            "tool": "bash",
+            "name": "bash",
+            "ok": false,
+            "success": false,
+            "result": "exit_code=1\nnpm ERR! test failed",
+            "error": "exit_code=1"
+          }
+        ],
+        "soul_native": true,
+        "project_path": "{PROJECT}"
+      },
+      "output": {
+        "ok": true,
+        "residue": "",
+        "genome": 1,
+        "learned": false,
+        "duration_ms": 0.0
+      },
+      "files_after": {
+        "{HOME}/cua_macros/macros.json": "{\n  \"version\": 1,\n  \"macros\": {}\n}",
+        "{HOME}/evidence/sess-fixture-1.jsonl": "{\"id\": \"eu_7c6dec85dfa98df8\", \"kind\": \"tool\", \"summary\": \"file_read:ok:export function parse(s) {...}\", \"tool_name\": \"file_read\", \"tool_call_id\": \"call_1\", \"offload_path\": null, \"result_hash\": \"359498e44577da8a\", \"tokens_est\": 7, \"ts\": 1795608000.0}\n{\"id\": \"eu_d7b17aa9f551679f\", \"kind\": \"test\", \"summary\": \"failed\", \"tool_name\": \"bash_exec\", \"tool_call_id\": \"call_2\", \"offload_path\": null, \"result_hash\": \"d0b309bfd0d2553b\", \"tokens_est\": 1, \"ts\": 1795608000.0}\n{\"id\": \"eu_4b10f7984dadbff2\", \"kind\": \"tool\", \"summary\": \"bash_exec:fail:exit_code=1\", \"tool_name\": \"bash_exec\", \"tool_call_id\": \"call_2\", \"offload_path\": null, \"result_hash\": \"d0b309bfd0d2553b\", \"tokens_est\": 8, \"ts\": 1795608000.0}\n",
+        "{HOME}/learn_log.jsonl": "{\"ts\": \"2026-11-25T09:25:30.000000Z\", \"kind\": \"after_tool_batch\", \"duration_ms\": 0.0, \"ok\": true, \"source\": \"python\", \"changed\": {\"eu_new\": 3, \"evidence_units\": 3, \"tools\": 2}}\n{\"ts\": \"2026-11-25T09:25:33.000000Z\", \"kind\": \"turn_end\", \"duration_ms\": 0.0, \"ok\": true, \"source\": \"python\", \"changed\": {\"genome\": 1}}\n",
+        "{HOME}/life/README.md": "# Remedy Life\n\nDrafts and research briefs Remedy writes toward your goals.\n\nThese files stay on this computer. Remedy never sends, pays, publishes,\nor deletes for you.\n\n- Say **I did it** when you finish the current move.\n- Say **I'm back** to hear what Remedy already did.\n- Say **what should I do** to take the next local step.\n",
+        "{HOME}/organism.json": "{\n  \"ts\": 1795608000.0,\n  \"alive\": true,\n  \"mood\": \"dormant\",\n  \"emoji\": \"◐\",\n  \"label\": \"Resting\",\n  \"life_title\": \"\",\n  \"next_action\": \"\",\n  \"last_did\": \"\",\n  \"cas_count\": 0,\n  \"cas_durable\": 0,\n  \"recalled\": 0,\n  \"stalled\": false,\n  \"last_cycle_at\": 0.0,\n  \"last_wake_at\": 0.0,\n  \"cycles\": [],\n  \"open_count\": 0,\n  \"life_folder\": \"{HOME:esc}\\\\life\",\n  \"last_drive_at\": 0.0,\n  \"last_pulse_at\": 0.0,\n  \"last_heartbeat_at\": 0.0,\n  \"last_compact_at\": 0.0,\n  \"life_updated_at\": 0.0,\n  \"who\": \"Remedy\",\n  \"stance\": \"steady\",\n  \"rapport\": 0.55,\n  \"trust\": 0.55,\n  \"turns\": 0,\n  \"dream\": \"\",\n  \"help_mode\": \"\",\n  \"open_hint\": \"\",\n  \"tray_tooltip\": \"Remedy ◐ Resting · rapport 55% · trust 55% · frontier · openai\"\n}",
+        "{HOME}/skill_genome/phenotypes.json": "{\n  \"version\": 1,\n  \"skills\": {\n    \"read\": {\n      \"skill_id\": \"read\",\n      \"success\": 0,\n      \"fail\": 1,\n      \"uses\": 1,\n      \"protected\": false,\n      \"score\": 1.0,\n      \"avg_latency_ms\": 0.0\n    }\n  }\n}",
+        "{HOME}/soul/soma.json": "{\n  \"mood\": \"dormant\",\n  \"emoji\": \"◐\",\n  \"label\": \"Resting\",\n  \"rapport\": 0.55,\n  \"trust\": 0.55,\n  \"last_stance\": \"steady\",\n  \"open_threads\": 0,\n  \"episodes\": 0,\n  \"muscle_hint\": \"frontier · openai\",\n  \"tray_tooltip\": \"Remedy ◐ Resting · rapport 55% · trust 55% · frontier · openai\",\n  \"ts\": 1795608000.0\n}",
+        "{HOME}/time_crystal/sess-fixture-1.json": "{\n  \"session_id\": \"sess-fixture-1\",\n  \"project_id\": \"\",\n  \"promotions\": 0,\n  \"blocked_secret\": 0,\n  \"facts\": [],\n  \"durable\": []\n}"
+      }
+    }
+  ]
+}
