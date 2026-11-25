@@ -472,7 +472,36 @@ fn settings(ui: &Ui, grove: Grove) -> El {
             "To get updates on your phone, message Remedy once from Telegram, Discord or another connected chat, then pick it here.",
         ).variant("muted"));
     }
-    col.child(w::text(ui, note).variant("muted"))
+    // Her nights: off until the owner turns them on. The check follows the
+    // runtime's state, and a click asks the runtime to change it.
+    let nights = Signal::new(grove.vigil_on.get());
+    let night_check = w::check(ui, "Give her the quiet hours for her own thinking", nights).bind({
+        let g = grove.clone();
+        move || {
+            let (want, have) = (nights.get(), g.vigil_on.get());
+            if want != have {
+                g.set_vigil(want, nights);
+            }
+        }
+    });
+    let follow = ui.el("vigil-follow").bind({
+        let g = grove.clone();
+        move || nights.set_if_changed(g.vigil_on.get())
+    });
+    col.child(night_check)
+        .child(follow)
+        .child(
+            w::text(
+                ui,
+                "At night she tidies what she learned, dreams on recent work, and tells you in the morning. It runs on this PC, calls no model, and sends nothing.",
+            )
+            .variant("muted")
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+            }),
+        )
+        .child(w::text(ui, note).variant("muted"))
         .child(w::row(ui).gap(unit).child(close).child(save))
 }
 
