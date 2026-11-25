@@ -59,6 +59,15 @@ if (-not $SkipBuild -or -not (Test-Path -LiteralPath $Runtime)) {
         Pop-Location
     }
 }
+# Her voice: the speech helper remedy-runtime starts the first time she speaks
+# or listens. One file, with the speech runtime linked in.
+$voiceManifest = Join-Path $repoRoot "native\voice\Cargo.toml"
+$Voice = Join-Path $repoRoot "native\voice\target\release\remedy-voice.exe"
+if (-not $SkipBuild -or -not (Test-Path -LiteralPath $Voice)) {
+    & cargo build --release --jobs $Jobs --locked --manifest-path $voiceManifest
+    if ($LASTEXITCODE -ne 0) { throw "cargo build remedy-voice failed ($LASTEXITCODE)" }
+}
+if (-not (Test-Path -LiteralPath $Voice)) { throw "remedy-voice.exe missing: $Voice" }
 if (-not (Test-Path -LiteralPath $Runtime)) {
     throw "Runtime not found: $Runtime"
 }
@@ -100,6 +109,7 @@ $wipe = To-NsisPath (Join-Path $desktop "src-tauri\windows\uninstall_wipe.ps1")
 $icon = To-NsisPath (Join-Path $desktop "src-tauri\icons\icon.ico")
 $binaryNsis = (Resolve-Path -LiteralPath $Binary).Path
 $runtimeNsis = (Resolve-Path -LiteralPath $Runtime).Path
+$voiceNsis = (Resolve-Path -LiteralPath $Voice).Path
 $coreNsis = (Resolve-Path -LiteralPath $Core).Path
 $outNsis = $out
 
@@ -234,7 +244,7 @@ if (-not (Get-ChildItem -LiteralPath $workerDeps -ErrorAction SilentlyContinue))
 $workerPyzNsis = (Resolve-Path -LiteralPath $workerPyz).Path
 $workerDepsNsis = (Resolve-Path -LiteralPath $workerDeps).Path
 
-& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DRUNTIMESRCPATH=$runtimeNsis" "/DCORESRCPATH=$coreNsis" "/DWEBUISRCPATH=$webuiNsis" "/DWORKERPYZPATH=$workerPyzNsis" "/DWORKERDEPSPATH=$workerDepsNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
+& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DRUNTIMESRCPATH=$runtimeNsis" "/DVOICESRCPATH=$voiceNsis""/DCORESRCPATH=$coreNsis" "/DWEBUISRCPATH=$webuiNsis" "/DWORKERPYZPATH=$workerPyzNsis" "/DWORKERDEPSPATH=$workerDepsNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
 if ($LASTEXITCODE -ne 0) { throw "makensis failed ($LASTEXITCODE)" }
 if (-not (Test-Path -LiteralPath $out)) { throw "makensis did not write $out" }
 

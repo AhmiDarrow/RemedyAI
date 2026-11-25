@@ -45,7 +45,7 @@ pub struct Section {
 
 pub const SECTIONS: &[Section] = &[
     Section { id: "you-agent", title: "You & Agent", summary: "Names, language & persona", keywords: "user name agent persona identity whoami soul language locale i18n", category: "general", advanced_only: false, display_title: None, display_summary: None },
-    Section { id: "voice", title: "Voice", summary: "Speak, hear, turn-taking", keywords: "voice speak hear mic kokoro whisper tts stt smart-turn turn-taking aloud quiet grove speech hq high-quality chatterbox human robot", category: "general", advanced_only: false, display_title: None, display_summary: None },
+    Section { id: "voice", title: "Voice", summary: "Speak and hear", keywords: "voice speak hear mic kokoro whisper tts stt aloud quiet grove speech hq high-quality clone human robot", category: "general", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "workspace", title: "Project workspace", summary: "Folder for tools", keywords: "project path folder directory cwd browser home homepage github url", category: "general", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "theme", title: "Appearance", summary: "Theme, text size, motion", keywords: "theme density accent dark light color appearance font size text large accessibility contrast motion reduce a11y presence face grove", category: "general", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "provider", title: "Provider", summary: "Model & API key", keywords: "llm openai anthropic xai ollama key model sleev gateway compression tokens", category: "models", advanced_only: false, display_title: None, display_summary: None },

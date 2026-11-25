@@ -55,6 +55,9 @@ CRCCheck on
 !ifndef RUNTIMESRCPATH
   !error "Pass /DRUNTIMESRCPATH=path\to\remedy-runtime.exe"
 !endif
+!ifndef VOICESRCPATH
+  !error "Pass /DVOICESRCPATH=path\to\remedy-voice.exe"
+!endif
 !ifndef CORESRCPATH
   !error "Pass /DCORESRCPATH=path\to\remedy_core.dll"
 !endif
@@ -233,6 +236,8 @@ Section Install
   File "/oname=${MAINBINARYNAME}" "${MAINBINARYSRCPATH}"
   ; Local API sidecar. The shell looks for remedy-runtime.exe next to the app.
   File "/oname=remedy-runtime.exe" "${RUNTIMESRCPATH}"
+  ; Her voice. remedy-runtime starts it, from beside itself, on first use.
+  File "/oname=remedy-voice.exe" "${VOICESRCPATH}"
   File "/oname=remedy_core.dll" "${CORESRCPATH}"
 
   ; Chat Web UI. remedy-runtime serves this from a `webui` folder next to the exe.
@@ -300,6 +305,7 @@ Section Uninstall
   Delete "$INSTDIR\app.exe"
   Delete "$INSTDIR\remedy-desktop.exe"
   Delete "$INSTDIR\remedy-runtime.exe"
+  Delete "$INSTDIR\remedy-voice.exe"
   Delete "$INSTDIR\remedy_core.dll"
   RMDir /r "$INSTDIR\webui"
   Delete "$INSTDIR\rmdy_tool_worker.pyz"
