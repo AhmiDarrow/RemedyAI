@@ -355,6 +355,7 @@ def _finish_production_turn_inner(inp: Mapping[str, Any]) -> dict[str, Any]:
                 runtime,
                 message=user_text,
                 session_id=session_id or None,
+                soul_native=bool(inp.get("soul_native")),
             )
 
         # schedule_post_turn_prep no-ops without a runtime; still ingest residue.

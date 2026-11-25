@@ -74,6 +74,9 @@ class Vigil:
     last_wake_ts: float = 0.0
     last_act: str = ""
     total_wakes: int = 0
+    # Lifetime finished dreams; written by the Go vigil, kept here so a
+    # Python save does not drop it.
+    total_dreams: int = 0
     # She may ask ONCE, in conversation, whether the partner would like her
     # to keep working between visits. Never twice; declining is final until
     # the partner raises it themselves.
@@ -120,6 +123,7 @@ def load_vigil(home: str | Path | None = None) -> Vigil:
         last_wake_ts=float(raw.get("last_wake_ts") or 0.0),
         last_act=str(raw.get("last_act") or ""),
         total_wakes=int(raw.get("total_wakes") or 0),
+        total_dreams=int(raw.get("total_dreams") or 0),
         offered=bool(raw.get("offered", False)),
         tended={
             str(k): float(t)
@@ -212,6 +216,7 @@ def vigil_status(home: str | Path | None = None) -> dict[str, Any]:
         "min_gap_minutes": int(v.min_gap_s // 60),
         "wakes_today": v.wakes_today,
         "total_wakes": v.total_wakes,
+        "total_dreams": v.total_dreams,
         "last_act": v.last_act,
     }
 

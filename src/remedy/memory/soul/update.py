@@ -370,6 +370,29 @@ def update_soul_after_turn(
     if ep.arc.strip():
         sf.episodes.append(ep)
 
+    _soul_bridges(sf, ut, work_t, open_t, session_id, home)
+
+    # Proprioception: fold how this muscle rendered us into its profile
+    with suppress(Exception):
+        from remedy.memory.soul.proprioception import observe_render
+
+        observe_render(
+            assistant_text=at,
+            user_text=ut,
+            provider=provider,
+            model=model,
+            home=home,
+        )
+
+    sf.touch()
+    save_soul_field(sf, home)
+    return sf
+
+
+def _soul_bridges(
+    sf: SoulField, ut: str, work_t: str, open_t: str, session_id: str | None, home: Any
+) -> None:
+    """The stores a turn feeds besides the field: Time Crystal and myelin."""
     # Bridge durable pledges / strong arcs into Time Crystal when available
     with suppress(Exception):
         from remedy.core.metabolism.time_crystal import (
@@ -398,21 +421,29 @@ def update_soul_after_turn(
 
         observe_pathway(ut, home)
 
-    # Proprioception: fold how this muscle rendered us into its profile
+
+def soul_bridges_after_turn(
+    *,
+    user_text: str = "",
+    session_id: str | None = None,
+    brief: Any = None,
+    home: str | Any = None,
+) -> None:
+    """When the Go runtime owns field.json, run only the non-field half.
+
+    Reads the field Go just saved (the cache is stat-validated) and never
+    writes it. Living-fact pledges are not extracted on this path.
+    """
     with suppress(Exception):
-        from remedy.memory.soul.proprioception import observe_render
+        from remedy.memory.authority import is_hive_writer
 
-        observe_render(
-            assistant_text=at,
-            user_text=ut,
-            provider=provider,
-            model=model,
-            home=home,
-        )
-
-    sf.touch()
-    save_soul_field(sf, home)
-    return sf
+        if is_hive_writer(session_id):
+            return
+    ut = (user_text or "").strip()
+    if looks_like_secret_soul(ut):
+        return
+    sf = load_soul_field(home)
+    _soul_bridges(sf, ut, _work_thread(brief), _open_thread(ut, brief), session_id, home)
 
 
 def record_self_inject_lesson(
