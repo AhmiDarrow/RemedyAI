@@ -73,6 +73,30 @@ struct Config {
     /// UPnP-IGD / PCP / NAT-PMP mapping of `bind_port` on the home router.
     #[serde(default = "default_true")]
     portmap: bool,
+    /// The endpoint ids allowed to connect: the paired phones. Present (even
+    /// empty) means everyone else is refused right after the handshake.
+    /// Absent accepts any peer (tests and measurement runs only).
+    #[serde(default)]
+    allow: Option<Vec<String>>,
+}
+
+/// Who may connect. `None`: anyone. The runtime replaces it with an
+/// `{"cmd":"allow","ids":[…]}` line whenever a phone is paired or removed.
+static ALLOW: std::sync::RwLock<Option<std::collections::HashSet<String>>> = std::sync::RwLock::new(None);
+
+fn set_allow(ids: Option<Vec<String>>) {
+    let set = ids.map(|v| v.into_iter().map(|s| s.trim().to_ascii_lowercase()).filter(|s| !s.is_empty()).collect());
+    if let Ok(mut g) = ALLOW.write() {
+        *g = set;
+    }
+}
+
+/// Whether `id` (an endpoint id, as lowercase hex) may connect.
+pub(crate) fn allowed(id: &str) -> bool {
+    match ALLOW.read() {
+        Ok(g) => g.as_ref().is_none_or(|set| set.contains(&id.to_ascii_lowercase())),
+        Err(_) => false,
+    }
 }
 
 fn default_true() -> bool {
@@ -220,6 +244,7 @@ async fn main() -> Result<()> {
         }
     });
 
+    set_allow(cfg.allow.clone());
     let slots = Arc::new(Semaphore::new(MAX_CONNS));
     let accept = spawn_accept(endpoint.clone(), forward, token.clone(), events.clone(), slots.clone(), None);
 
@@ -247,6 +272,17 @@ async fn main() -> Result<()> {
                 }
                 Err(e) => events.emit(json!({"event": "error", "detail": format!("punch: {e}")})).await,
             },
+            Some("allow") => {
+                let ids = v.get("ids").and_then(|x| serde_json::from_value::<Vec<String>>(x.clone()).ok());
+                match ids {
+                    Some(ids) => {
+                        let n = ids.len();
+                        set_allow(Some(ids));
+                        events.emit(json!({"event": "allow", "count": n})).await;
+                    }
+                    None => events.emit(json!({"event": "error", "detail": "allow: ids must be a list"})).await,
+                }
+            }
             _ => events.emit(json!({"event": "error", "detail": "unknown command"})).await,
         }
     }
@@ -341,6 +377,15 @@ async fn serve_conn(
     let conn = incoming.await.context("iroh handshake")?;
     if conn.alpn() != ALPN {
         conn.close(1u32.into(), b"alpn");
+        return Ok(());
+    }
+    // Only a paired phone gets a stream. Anyone else has completed a QUIC
+    // handshake and nothing more: no stream reaches the gateway.
+    if !allowed(&conn.remote_id().to_string()) {
+        events
+            .emit(json!({"event": "refused", "remote": conn.remote_id().fmt_short().to_string()}))
+            .await;
+        conn.close(2u32.into(), b"not paired");
         return Ok(());
     }
     let remote = conn.remote_id().fmt_short().to_string();

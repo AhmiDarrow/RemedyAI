@@ -100,6 +100,8 @@ func SaveDevice(rec Device, home string) (Device, error) {
 	} else {
 		delete(revokedLive, id)
 	}
+	// The away-from-home endpoint lets in exactly the paired phones.
+	go refreshDirectAllow(home)
 	return clean, nil
 }
 
