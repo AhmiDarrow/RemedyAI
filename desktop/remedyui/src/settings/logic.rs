@@ -66,7 +66,7 @@ pub const SECTIONS: &[Section] = &[
     Section { id: "advanced", title: "Advanced", summary: "Learning, logs, tone", keywords: "skill creation log level sarcasm threshold learning", category: "system", advanced_only: true, display_title: None, display_summary: None },
     Section { id: "help", title: "Help & shortcuts", summary: "Manual & keys", keywords: "f1 wiki hotkeys keyboard", category: "system", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "about", title: "About", summary: "Version & WebUI", keywords: "version update webui about", category: "system", advanced_only: false, display_title: None, display_summary: None },
-    Section { id: "license", title: "License", summary: "Free tier & commercial", keywords: "license commercial free indie enterprise copyright", category: "system", advanced_only: true, display_title: None, display_summary: None },
+    Section { id: "license", title: "License", summary: "Free tier & commercial", keywords: "license commercial free indie enterprise copyright", category: "system", advanced_only: false, display_title: None, display_summary: None },
 ];
 
 pub fn section(id: &str) -> Option<&'static Section> {
@@ -140,9 +140,9 @@ pub struct ThemeItem {
 
 pub fn palette_menu_name(id: &str, engine_name: &str) -> String {
     match id {
-        "deutan" => "Colorblind Deutan".into(),
-        "protan" => "Colorblind Protan".into(),
-        "tritan" => "Colorblind Tritan".into(),
+        "deutan" => "Deutan".into(),
+        "protan" => "Protan".into(),
+        "tritan" => "Tritan".into(),
         _ => engine_name.to_string(),
     }
 }
@@ -1123,6 +1123,9 @@ mod tests {
         let you = section("you-agent").unwrap();
         assert!(section_visible(you, "general", "simple", ""));
         assert!(!section_visible(you, "models", "advanced", ""));
+        let license = section("license").unwrap();
+        assert!(section_visible(license, "system", "simple", ""));
+        assert!(section_visible(license, "system", "advanced", ""));
     }
 
     #[test]
@@ -1135,11 +1138,11 @@ mod tests {
                 "Light",
                 "Amber",
                 "Amethyst",
-                "Colorblind Deutan",
-                "Colorblind Protan",
-                "Colorblind Tritan",
+                "Deutan",
                 "Emerald",
                 "Ocean",
+                "Protan",
+                "Tritan",
                 "Dark",
                 "Neutral Dark",
                 "Dark Forest",

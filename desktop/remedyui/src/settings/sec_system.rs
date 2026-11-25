@@ -775,7 +775,7 @@ fn license(ui: &Ui, s: Settings) -> El {
             .child(form::label(ui, "License"))
             .child(legal(ui, s.license_all, logic::license_text()))
             .child(w::link(ui, "Open Security & data (includes bootstrap / power notes)", || {
-                bits::open_http("https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/04-security-and-data.md");
+                bits::open_help_topic("04-security-and-data");
             }))
             .child(form::label(ui, "Third-party notices"))
             .child(legal(ui, s.notices_all, logic::third_party_text()))
@@ -828,7 +828,7 @@ fn help(ui: &Ui, s: Settings) -> El {
         }
         form::stack(ui)
             .child(form::hint(ui, "Enter sends · Shift+Enter new line · F1 opens Help"))
-            .child(form::action(ui, "Open Help", "primary", || bits::open_http(HELP_HOME)))
+            .child(form::action(ui, "Open Help", "primary", || bits::open_help_topic(crate::help_view::default_id())))
             .child(help_links(ui))
             .child(keys)
             .child(form::hint(
@@ -838,8 +838,6 @@ fn help(ui: &Ui, s: Settings) -> El {
     })
 }
 
-pub(crate) const HELP_HOME: &str = "https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/00-overview.md";
-
 fn help_links(ui: &Ui) -> El {
     let pages = [
         ("02-first-run", "Setup"),
@@ -848,10 +846,13 @@ fn help_links(ui: &Ui) -> El {
         ("09-troubleshooting", "Troubleshoot"),
         ("13-whats-new", "What's new"),
     ];
-    let mut row = w::row(ui).gap(form::gap(ui)).fill_width();
+    // Wrap so topic labels stay on-screen in a narrow settings column.
+    let mut row = w::wrap(ui).gap(form::gap(ui)).layout(|l| {
+        l.width = remedy_ui::layout::Length::Percent(1.0);
+        l.min_width = remedy_ui::layout::Length::Px(0.0);
+    });
     for (id, label) in pages {
-        let url = format!("https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/{id}.md");
-        row = row.child(form::action(ui, label, "quiet", move || bits::open_http(&url)));
+        row = row.child(form::action(ui, label, "quiet", move || bits::open_help_topic(id)));
     }
     row
 }

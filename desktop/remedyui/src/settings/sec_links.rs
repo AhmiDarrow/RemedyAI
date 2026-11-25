@@ -708,7 +708,7 @@ fn mcp(ui: &Ui, s: Settings) -> El {
             .child(form::hint(ui, "Quarantined skills stay blocked until you trust them in Skills."))
             .child(form::hint(ui, "Script execution: set REMEDY_MCP_ALLOW_RUN=1 (owner choice). Logs go to stderr."))
             .child(w::link(ui, "Open CLI & API help", || {
-                bits::open_http("https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/10-cli-and-api.md");
+                bits::open_help_topic("10-cli-and-api");
             }))
     })
 }
