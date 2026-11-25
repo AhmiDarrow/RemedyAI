@@ -412,14 +412,15 @@ fn loaded_image(ui: &Ui, src: &str, alt: &str, on_image: impl Fn(String) + Clone
             api::fetch_bytes(&url, move |out| {
                 let _ = wake.post(move || match out {
                     Ok(bytes) if bytes.len() <= api::IMAGE_CAP => {
+                        // The message may be gone by the time the image arrives.
                         if let Some(image) = decode_bytes(&bytes) {
-                            slot_set.set(Some(image));
+                            let _ = slot_set.try_set(Some(image));
                         } else {
-                            err_set.set("Could not read that image.".into());
+                            let _ = err_set.try_set("Could not read that image.".into());
                         }
                     }
-                    Ok(_) => err_set.set("That image is too large to show.".into()),
-                    Err(e) => err_set.set(e),
+                    Ok(_) => drop(err_set.try_set("That image is too large to show.".into())),
+                    Err(e) => drop(err_set.try_set(e)),
                 });
             });
         } else if let Some(bytes) = data_bytes(&url) {

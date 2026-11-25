@@ -2049,11 +2049,12 @@ fn apply_tool_evidence_result(
             .and_then(|s| s.as_str())
             .filter(|s| !s.is_empty())
         {
-            evidence.set(Some(out.to_string()));
+            // The row may be gone (its session was deleted) by the time this lands.
+            let _ = evidence.try_set(Some(out.to_string()));
             return;
         }
     }
-    fetching.set(false);
+    let _ = fetching.try_set(false);
 }
 
 fn merge_evidence_body(body: &str, evidence: Option<&str>) -> String {
