@@ -21,6 +21,11 @@ fn open(name: &'static str, width: f32, height: f32, build: fn(&remedy_ui::Ui) -
 }
 
 fn overflow(app: &TestApp, width: f32, _height: f32) -> Vec<String> {
+    overflow_below(app, width, f32::MIN)
+}
+
+/// Like `overflow`, for elements whose top is at or below `min_y`.
+fn overflow_below(app: &TestApp, width: f32, min_y: f32) -> Vec<String> {
     let Some(ui) = app.ui() else {
         return vec!["no ui".into()];
     };
@@ -28,6 +33,9 @@ fn overflow(app: &TestApp, width: f32, _height: f32) -> Vec<String> {
     for n in app.reader_view() {
         let Some(el) = ui.element_by_node_id(n.id) else { continue };
         let Some(b) = el.bounds() else { continue };
+        if b.min.y < min_y {
+            continue;
+        }
         // Vertical overflow of a scrolling list is expected. Horizontal
         // overflow of interactive chrome (a toolbar button past the rail) is not.
         // Labels in a clipped scroll (help code, breadcrumbs) may extend in
@@ -236,7 +244,13 @@ fn status_dock_keeps_priority_items_and_does_not_overlap() {
                     overlaps.join("\n  ")
                 ));
             }
-            let off = overflow(&app, w, 700.0);
+            // The fixture keeps the session list open, which squeezes the well at
+            // 400 px; this test is about the bar, so look from the bar down.
+            let bar_top = app
+                .find(Role::Toolbar, "Status")
+                .and_then(|el| el.bounds())
+                .map_or(0.0, |b| b.min.y - 1.0);
+            let off = overflow_below(&app, w, bar_top);
             // Only report status-bar overflow; the helper already checks the window.
             if !off.is_empty() {
                 failures.push(format!(
