@@ -8,10 +8,10 @@ import (
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
 
-// attachNativeMailCalendar puts the Go Google implementations in front of the
-// mail and calendar tools. A home whose mail or calendar is a connected Google
-// account is served natively and never starts the Python worker. Any other
-// provider (IMAP/SMTP, CalDAV) falls through to the worker as before.
+// attachNativeMailCalendar serves the mail and calendar tools from Go: a
+// connected Google account first, otherwise the IMAP/SMTP mailbox or CalDAV
+// calendar the owner configured. With neither, the second provider reports
+// that nothing is connected. The Python worker is never called.
 func attachNativeMailCalendar(registry *tools.Registry, homeDir string) error {
 	if registry == nil {
 		return nil
@@ -19,22 +19,24 @@ func attachNativeMailCalendar(registry *tools.Registry, homeDir string) error {
 	type native func(context.Context, string, map[string]any) (map[string]any, error)
 	rows := []struct {
 		id, kind string
-		run      native
+		run      native // Google
+		other    native // IMAP/SMTP or CalDAV
 	}{
-		{"mail.list", "mail", toolMailListGoogle},
-		{"mail.send", "mail", toolMailSendGoogle},
-		{"calendar.list_events", "calendar", toolCalendarListGoogle},
-		{"calendar.create_event", "calendar", toolCalendarCreateGoogle},
+		{"mail.list", "mail", toolMailListGoogle, toolMailListIMAP},
+		{"mail.send", "mail", toolMailSendGoogle, toolMailSendSMTP},
+		{"calendar.list_events", "calendar", toolCalendarListGoogle, toolCalendarListCalDAV},
+		{"calendar.create_event", "calendar", toolCalendarCreateGoogle, toolCalendarCreateCalDAV},
 	}
 	for _, row := range rows {
 		row := row
 		if _, err := registry.Resolve(row.id, 1); err != nil {
 			continue // not registered on this runtime (no worker attached)
 		}
-		err := registry.WrapExecutor(row.id, 1, func(next tools.Executor) tools.Executor {
+		err := registry.WrapExecutor(row.id, 1, func(tools.Executor) tools.Executor {
 			return tools.ExecutorFunc(func(ctx context.Context, req tools.Request) (tools.Result, error) {
+				run := row.run
 				if !googleMailCalendarAvailable(homeDir, row.kind) {
-					return next.Execute(ctx, req)
+					run = row.other
 				}
 				input := map[string]any{}
 				if len(req.Input) > 0 {
@@ -42,7 +44,7 @@ func attachNativeMailCalendar(registry *tools.Registry, homeDir string) error {
 						return tools.Result{}, fmt.Errorf("%w: %v", tools.ErrInvalidInput, err)
 					}
 				}
-				out, err := row.run(ctx, homeDir, input)
+				out, err := run(ctx, homeDir, input)
 				if err != nil {
 					return tools.Result{}, err
 				}
