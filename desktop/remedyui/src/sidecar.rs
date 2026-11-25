@@ -194,6 +194,10 @@ fn build_command(cmd: &std::path::Path) -> Command {
     if let Ok(key) = std::env::var("REMEDY_API_KEY") {
         command.env("REMEDY_API_KEY", key);
     }
+    // Tells the runtime and its worker they run inside the shipped desktop.
+    // Unattended code self-modification is for a developer's checkout only and
+    // keys off this, so an installed app never drafts changes to itself.
+    command.env("REMEDY_DESKTOP_SIDECAR", "1");
     if let Some(dir) = cmd.parent() {
         command.current_dir(dir);
     }
