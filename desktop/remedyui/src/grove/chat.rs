@@ -305,7 +305,8 @@ fn empty_state(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
                     .child(title)
                     .child(sub)
                     .child(row)
-                    .child(hints);
+                    // The hint line is keyboard shortcuts.
+                    .child(if grove.phone { ui.el("grove-no-hints") } else { hints });
                 w::column(&ui)
                     .align(Align::Center)
                     .justify(Justify::Center)
@@ -657,13 +658,15 @@ fn composer(ui: &Ui, grove: Grove, app: Option<App>, kind: RoomKind) -> El {
                 .border(line)
                 .border_width(1.0),
         )
-        .child(attach)
+        // Files and the microphone belong to the PC Remedy runs on. The
+        // phone's own keyboard already takes dictation.
+        .child(if grove.phone { ui.el("grove-no-attach") } else { attach })
         .child(el.layout(|l| {
             l.grow = 1.0;
             l.shrink = 1.0;
             l.min_width = Length::Px(0.0);
         }))
-        .child(mic)
+        .child(if grove.phone { ui.el("grove-no-mic") } else { mic })
         .child(pause)
         .child(send);
 

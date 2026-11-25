@@ -184,7 +184,14 @@ pub(super) fn frame(
         .child(zero(watch))
         .child(offer_slot(ui, offer))
         .child(slot)
-        .child(if crate::chrome::dock_in_host() {
+        .child(if grove.phone {
+            // Is she reachable, is she working, and a way to reconnect: the
+            // rest of the desktop's status line is about the PC's own screen.
+            w::column(ui)
+                .layout(|l| l.width = Length::Percent(1.0))
+                .child(w::divider(ui, false))
+                .child(crate::status::compact_bar(ui, grove.studio.clone()))
+        } else if crate::chrome::dock_in_host() {
             ui.el("status-hosted").layout(|l| {
                 l.width = Length::Percent(1.0);
                 l.height = Length::Px(0.0);
@@ -220,6 +227,7 @@ fn page_key(grove: &Grove) -> String {
                 HomeTab::Plots => "plots",
                 HomeTab::Alongside => "alongside",
                 HomeTab::Storyline => "story",
+                HomeTab::Talk => "talk",
             };
             format!("home\u{1f}{tab}")
         }
@@ -239,7 +247,11 @@ fn render_page(ui: &Ui, grove: Grove, app: Option<App>, key: &String) -> El {
     match parts.next() {
         Some("goal") => {
             let id = parts.next().unwrap_or("").to_string();
-            if parts.next() == Some("story") {
+            if grove.phone {
+                // A goal on the phone is its conversation. The stage above it
+                // on the desktop is the PC's browser.
+                goal_talk(ui, grove, app, id)
+            } else if parts.next() == Some("story") {
                 storyline(ui, grove, false)
             } else {
                 goal_alongside(ui, grove, app, id)
@@ -250,7 +262,8 @@ fn render_page(ui: &Ui, grove: Grove, app: Option<App>, key: &String) -> El {
             child::room(ui, grove, id)
         }
         _ => match parts.next() {
-            Some("alongside") => home_alongside(ui, grove, app),
+            Some("talk") => chat::pane(ui, grove, app, chat::RoomKind::Home),
+            Some("alongside") if !grove.phone => home_alongside(ui, grove, app),
             Some("story") => storyline(ui, grove, true),
             _ => home_plots(ui, grove, app),
         },
@@ -320,7 +333,11 @@ fn goal_bar(ui: &Ui, grove: Grove) -> El {
                 .child(w::text(&ui, "▸").variant("muted"))
                 .child(title)
                 .child(dot);
-            let tabs = w::row(&ui)
+            let tabs = if grove.phone {
+                // No stage on the phone, so nothing to switch between.
+                zero(ui.el("grove-room-tabs"))
+            } else {
+                w::row(&ui)
                 .align(Align::Center)
                 .gap(unit * 0.5)
                 .semantics(Semantics::new(Role::Group).label("This goal"))
@@ -337,7 +354,8 @@ fn goal_bar(ui: &Ui, grove: Grove) -> El {
                     RoomTab::Storyline,
                     tr(&ui, "grove-storyline"),
                     true,
-                ));
+                ))
+            };
             w::column(&ui)
                 .child(
                     w::row(&ui)
@@ -435,6 +453,26 @@ fn brand(ui: &Ui, grove: Grove) -> El {
 
 fn home_tabs(ui: &Ui, grove: Grove) -> El {
     let unit = ui.theme().spacing.unit;
+    if grove.phone {
+        return w::row(ui)
+            .align(Align::Center)
+            .gap(unit * 0.5)
+            .semantics(Semantics::new(Role::Group).label("Grove views"))
+            .child(home_tab(
+                ui,
+                grove.clone(),
+                HomeTab::Talk,
+                tr(ui, "grove-talk"),
+                "Talk with Remedy",
+            ))
+            .child(home_tab(
+                ui,
+                grove,
+                HomeTab::Plots,
+                tr(ui, "grove-work"),
+                "Your goals and what Remedy is working on",
+            ));
+    }
     w::row(ui)
         .align(Align::Center)
         .gap(unit * 0.5)
@@ -669,6 +707,10 @@ fn home_plots(ui: &Ui, grove: Grove, app: Option<App>) -> El {
             l.align_self = Some(Align::Stretch);
         })
         .semantics(Semantics::new(Role::Region).label("Home plots"));
+    if grove.phone {
+        // One column: the conversation is its own tab.
+        return scroll;
+    }
     // The widget clamps a drag to 0.05–0.95. React's home divider stops at
     // 0.28–0.72. 0.44, the saved start, is inside both.
     let chat = chat::pane(ui, grove.clone(), app, chat::RoomKind::Home);
@@ -693,6 +735,20 @@ fn home_alongside(ui: &Ui, grove: Grove, app: Option<App>) -> El {
         l.min_height = Length::Px(0.0);
         l.width = Length::Percent(1.0);
     })
+}
+
+/// A goal's conversation with its hint line, without the stage.
+fn goal_talk(ui: &Ui, grove: Grove, app: Option<App>, id: String) -> El {
+    w::column(ui)
+        .layout(|l| {
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
+            l.min_width = Length::Px(0.0);
+            l.width = Length::Percent(1.0);
+        })
+        .child(life_banner(ui, grove.clone()))
+        .child(chat::pane(ui, grove, app, chat::RoomKind::Goal(id)))
 }
 
 fn goal_alongside(ui: &Ui, grove: Grove, app: Option<App>, id: String) -> El {
