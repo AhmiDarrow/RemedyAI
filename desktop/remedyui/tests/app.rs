@@ -1493,7 +1493,10 @@ fn help_about_diagnostics_and_quit_use_the_title_menu() {
     assert!(
         has(&names, "Loading diagnostics")
             || has(&names, "Could not reach the runtime")
-            || has(&names, "Cannot reach local API"),
+            || has(&names, "Cannot reach local API")
+            // An installed Remedy running on this PC answers the port, and
+            // refuses the test, which has no token for it.
+            || has(&names, "Missing or invalid Bearer token"),
         "offline diagnostics: {names:?}"
     );
     app.key(KeyEvent::press(Key::Escape));

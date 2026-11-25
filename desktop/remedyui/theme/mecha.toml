@@ -1,4 +1,6 @@
-# Dark Forest — shipped default Remedy theme package.
+# Mecha: the shell package. Its layout and type tokens hold for every theme;
+# its colours are the Mecha theme. Dark Forest, the default, is one of
+# RemedyUI's shared palettes.
 #
 # A theme is tokens (color, type, space, radii) plus layout (pane placement,
 # docks, rails, sizes, Simple vs Advanced disclosure, and the face style).
@@ -8,8 +10,8 @@
 # does not run script.
 
 [meta]
-id = "dark-forest"
-name = "Dark Forest"
+id = "mecha"
+name = "Mecha"
 version = 1
 
 # From https://ahmidarrow.pages.dev console.css (void, ink, line, green).

@@ -1,6 +1,6 @@
 //! Three font roles: UI, display, and code. Defaults and config, never hardcoded at widgets.
 //!
-//! Defaults are Joe's faces: Remedy Sans UI for the interface, Ahmi Pixel for
+//! Defaults are Remedy's own faces: Remedy Sans UI for the interface, Ahmi Pixel for
 //! display headings and section labels, AhmiPrint for code and monospace.
 //! All three ship inside RemedyUI (`remedy-ui-fonts`). The person can pick
 //! other bundled or system families by setting the `ui`, `display`, and `code`
@@ -120,16 +120,8 @@ fn hex(s: &str) -> Color {
     Color::from_hex(s).unwrap_or(Color::BLACK)
 }
 
-fn is_dark_forest(theme: &Theme) -> bool {
-    if !theme.derive().dark {
-        return false;
-    }
-    let bg = theme.colors.bg.to_hex();
-    matches!(bg.to_ascii_uppercase().as_str(), "#0A0E0B" | "#040A09")
-}
-
-/// Applies the desktop type scale, the three font roles, and (on Dark Forest)
-/// Joe's site-inspired flat palette to `theme`.
+/// Applies the desktop type scale and the three font roles to `theme`. Colours
+/// are the theme's own.
 ///
 /// Body is 15 px, with a display title at 16 (a multiple of 8, so Ahmi Pixel
 /// stays crisp) and small at 12. Radii stay sharp. Widgets must use the theme
@@ -147,19 +139,6 @@ pub fn apply_to_theme(theme: &mut Theme, fonts: &Fonts) {
     theme.radii.large = pack.radii.hair;
     theme.spacing.unit = pack.space.unit;
     theme.spacing.control_height = pack.space.control_height;
-    if is_dark_forest(theme) {
-        // Colors come from the Dark Forest theme package (Joe's site tokens).
-        // Site glass / mist / hero gradients are not brought over.
-        theme.colors.bg = hex(pack.colors.bg);
-        theme.colors.panel = hex(pack.colors.panel);
-        theme.colors.card = hex(pack.colors.card);
-        theme.colors.line = Some(hex(pack.colors.line));
-        theme.colors.text = hex(pack.colors.text);
-        theme.colors.muted = hex(pack.colors.muted);
-        theme.colors.accent = hex(pack.colors.accent);
-        theme.colors.on_accent = hex(pack.colors.on_accent);
-        theme.colors.ok = hex(pack.colors.ok);
-    }
 }
 
 /// Installs [`apply_to_theme`] on this UI if the tokens are not already set.
@@ -246,7 +225,8 @@ display = "Ahmi Pixel"
         assert_eq!(theme.font_families[0], "Inter");
         assert_eq!(theme.heading_families[0], "Playfair Display");
         assert_eq!(theme.mono_families[0], "Fira Code");
-        assert_eq!(theme.colors.bg.to_hex().to_ascii_uppercase(), "#040A09");
+        // Dark Forest keeps its own colours; only type and radii are the shell's.
+        assert_eq!(theme.colors.bg.to_hex().to_ascii_uppercase(), "#0A0E0B");
         assert_eq!(theme.radii.small, 0.0);
     }
 }

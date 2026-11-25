@@ -24,6 +24,8 @@ export interface AdvancedKnobSchema {
 }
 
 export interface Settings {
+  /** The look shared by the desktop, this page and a paired phone. */
+  theme?: string
   llm_provider: string
   llm_model: string
   llm_base_url: string
@@ -251,6 +253,7 @@ export interface MessengerInfo {
 }
 
 export interface SettingsUpdate {
+  theme?: string
   llm_provider?: string
   llm_model?: string
   llm_base_url?: string

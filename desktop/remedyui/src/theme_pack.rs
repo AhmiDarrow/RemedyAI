@@ -1,6 +1,8 @@
-//! The shipped theme package: tokens plus layout, with Dark Forest as default.
+//! The shell's theme package: the layout and type tokens every theme uses,
+//! and the colours of the Mecha theme. Dark Forest, the default theme, and the
+//! other palettes come from RemedyUI's shared theme set (`remedy_ui::themes`).
 //!
-//! The declarative source lives in `theme/dark-forest.toml`. This module is the
+//! The declarative source lives in `theme/mecha.toml`. This module is the
 //! typed form the shell reads. A later RemedyUI loader can parse a user pack
 //! over this default (unknown keys ignored, missing keys inherited). Custom
 //! panels and behavior belong in RemedyLua, not in the theme file.
@@ -72,7 +74,7 @@ pub struct ChromeTokens {
     pub elevation_offset: f32,
 }
 
-/// How the face is drawn. Dark Forest ships a geometric pixel mark.
+/// How the face is drawn: a geometric pixel mark.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PresenceStyle {
     /// Stepped frame, square marks, no glow or orb.
@@ -124,10 +126,10 @@ pub struct ThemePack {
     pub depth: DepthTokens,
 }
 
-/// Shipped default, matching `theme/dark-forest.toml`.
-pub const DARK_FOREST: ThemePack = ThemePack {
-    id: "dark-forest",
-    name: "Dark Forest",
+/// The shell package, matching `theme/mecha.toml`.
+pub const MECHA: ThemePack = ThemePack {
+    id: "mecha",
+    name: "Mecha",
     colors: ColorTokens {
         bg: "#040a09",
         panel: "#071412",
@@ -192,14 +194,14 @@ pub const DARK_FOREST: ThemePack = ThemePack {
     },
 };
 
-/// The active package. Today this is always Dark Forest; a user pack will
-/// overlay it once the RemedyUI loader lands.
+/// The shell package: its layout and type tokens hold for every theme, its
+/// colours are the Mecha theme's.
 pub fn current() -> &'static ThemePack {
-    &DARK_FOREST
+    &MECHA
 }
 
 pub fn layout() -> &'static LayoutSpec {
-    &DARK_FOREST.layout
+    &MECHA.layout
 }
 
 pub fn presence_kind() -> crate::presence::Kind {
@@ -207,7 +209,7 @@ pub fn presence_kind() -> crate::presence::Kind {
 }
 
 pub fn presence_skin() -> &'static str {
-    match DARK_FOREST.layout.presence_kind {
+    match MECHA.layout.presence_kind {
         PresenceKind::Square => "square",
         PresenceKind::MorningStar => "morning-star",
         PresenceKind::Wolf => "wolf",
@@ -216,7 +218,7 @@ pub fn presence_skin() -> &'static str {
 }
 
 pub fn presence_skin_kind() -> crate::presence::Kind {
-    match DARK_FOREST.layout.presence_kind {
+    match MECHA.layout.presence_kind {
         PresenceKind::Square => crate::presence::Kind::Square,
         PresenceKind::MorningStar => crate::presence::Kind::MorningStar,
         PresenceKind::Wolf => crate::presence::Kind::Wolf,
@@ -229,9 +231,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shipped_default_is_dark_forest() {
+    fn the_shell_pack_is_mecha() {
         let pack = current();
-        assert_eq!(pack.id, "dark-forest");
+        assert_eq!(pack.id, "mecha");
         assert_eq!(pack.colors.accent, "#6fdc86");
         assert_eq!(pack.layout.connected_mark, 6.0);
         assert_eq!(pack.radii.chip, 0.0);
@@ -248,6 +250,39 @@ impl ThemePack {
     fn presence_style_is_geometric(&self) -> bool {
         self.layout.presence_style == PresenceStyle::GeometricPixel
     }
+}
+
+/// The id of the Mecha theme in `[appearance] theme` and the theme menu.
+pub const MECHA_ID: &str = "mecha";
+
+/// The Mecha theme: RemedyUI's base theme with this pack's colours.
+pub fn mecha_theme() -> remedy_ui::core::style::Theme {
+    let hex = |s: &str| remedy_ui::core::Color::from_hex(s).unwrap_or(remedy_ui::core::Color::BLACK);
+    let mut t = remedy_ui::core::style::Theme::dark_forest();
+    t.name = MECHA.name.to_owned();
+    let c = &MECHA.colors;
+    t.colors.bg = hex(c.bg);
+    t.colors.panel = hex(c.panel);
+    t.colors.card = hex(c.card);
+    t.colors.line = Some(hex(c.line));
+    t.colors.text = hex(c.text);
+    t.colors.muted = hex(c.muted);
+    t.colors.accent = hex(c.accent);
+    t.colors.on_accent = hex(c.on_accent);
+    t.colors.ok = hex(c.ok);
+    t
+}
+
+/// The theme for a saved theme id: Mecha, `system` (Dark or Light with the
+/// platform) or one of RemedyUI's palettes. An unknown id is Dark Forest.
+pub fn theme_for_id(id: &str, system_dark: Option<bool>, high: bool) -> remedy_ui::core::style::Theme {
+    use remedy_ui::themes::{ThemeChoice, high_contrast};
+    if id == MECHA_ID {
+        let t = mecha_theme();
+        return if high { high_contrast(&t) } else { t };
+    }
+    let choice = if id == "system" { ThemeChoice::System } else { ThemeChoice::Palette(id.to_string()) };
+    choice.resolve(system_dark, high)
 }
 
 /// Depth tokens from the active pack.
