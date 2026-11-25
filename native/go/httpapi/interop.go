@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,12 +142,18 @@ func originOK(origin, bind string) bool {
 	if strings.TrimSpace(origin) == "" {
 		return true
 	}
-	// Very small allowlist: loopback hosts when bound to loopback.
-	o := strings.ToLower(origin)
-	if interopLoopbackBind(bind) {
-		return strings.Contains(o, "127.0.0.1") || strings.Contains(o, "localhost") || strings.Contains(o, "[::1]")
+	// Very small allowlist: loopback hosts, plus the bind host when not
+	// loopback. The host is compared whole: "localhost.evil.example" is not
+	// localhost.
+	u, err := url.Parse(strings.TrimSpace(origin))
+	if err != nil {
+		return false
 	}
-	return strings.Contains(o, "127.0.0.1") || strings.Contains(o, "localhost") || strings.Contains(o, strings.ToLower(bind))
+	host := strings.ToLower(u.Hostname())
+	if host == "127.0.0.1" || host == "localhost" || host == "::1" {
+		return true
+	}
+	return !interopLoopbackBind(bind) && host != "" && host == strings.ToLower(strings.TrimSpace(bind))
 }
 
 // interopGate returns an HTTP status and message when the request should be

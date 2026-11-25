@@ -24,6 +24,7 @@ type InnerMuxState struct {
 	fragments   map[uint32]*fragmentBuf
 	inflight    int
 	Panes       map[string]bool
+	PanesLive   func() map[string]bool // nil → Panes
 	SidecarPort int
 	APIKey      string
 
@@ -85,6 +86,7 @@ func newInnerMuxState(cfg SessionConfig) *InnerMuxState {
 	return &InnerMuxState{
 		fragments:   make(map[uint32]*fragmentBuf),
 		Panes:       panes,
+		PanesLive:   cfg.PanesLive,
 		SidecarPort: port,
 		APIKey:      cfg.APIKey,
 		idleTimeout: idle,
@@ -152,6 +154,9 @@ func IterRequestHTTP(req HTTPRequest, device Device, state *InnerMuxState, home 
 		return fmt.Errorf("%w: nil mux state", ErrSession)
 	}
 	panes := state.Panes
+	if state.PanesLive != nil {
+		panes = NormalizePanes(state.PanesLive())
+	}
 	if panes == nil {
 		panes = DefaultPanes()
 	}

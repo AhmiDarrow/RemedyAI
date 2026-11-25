@@ -36,13 +36,15 @@ type GatewayHealth struct {
 
 // GatewaySettings is the Connect slice of owner Settings.
 type GatewaySettings struct {
-	Enabled  bool
-	Paused   bool
-	Host     string
-	Port     int
-	Home     string
-	APIKey   string
-	Sidecar  int
+	Enabled bool
+	Paused  bool
+	Host    string
+	Port    int
+	Home    string
+	APIKey  string
+	Sidecar int
+	// Panes is connect_panes: what a paired phone may open.
+	Panes    map[string]bool
 	RelayURL string
 	RDV      bool // connect_rdv_enabled; opt-in (public MQTT brokers)
 	// Iroh is connect_iroh_enabled (or REMEDY_CONNECT_IROH=1): dial-by-key
@@ -123,6 +125,7 @@ func (g *Gateway) SessionConfig() SessionConfig {
 		APIKey:      live.APIKey,
 		SidecarPort: sidecar,
 		Listener:    g.listener,
+		PanesLive:   func() map[string]bool { return g.LiveConfig().Panes },
 		ShouldStop: func() bool {
 			if IsPaused(home) {
 				return true
@@ -144,8 +147,16 @@ func (g *Gateway) NoiseConnHandler() ConnHandler {
 // supervisorHandler is the shared Noise path for relay / rdv dialed pipes.
 func (g *Gateway) supervisorHandler() RelayConnHandler {
 	return func(ctx context.Context, conn net.Conn) {
-		_, _ = RunSession(ctx, conn, g.SessionConfig())
+		_, _ = RunSession(ctx, conn, g.remoteSessionConfig())
 	}
+}
+
+// remoteSessionConfig is SessionConfig for a pipe that came from outside the
+// home network: it can carry a paired phone, never pair a new one.
+func (g *Gateway) remoteSessionConfig() SessionConfig {
+	cfg := g.SessionConfig()
+	cfg.Remote = true
+	return cfg
 }
 
 // supervisorSession is supervisorHandler with the auth outcome kept, so the
@@ -153,7 +164,7 @@ func (g *Gateway) supervisorHandler() RelayConnHandler {
 // first one as a dead broker.
 func (g *Gateway) supervisorSession() func(context.Context, net.Conn) error {
 	return func(ctx context.Context, conn net.Conn) error {
-		_, err := RunSession(ctx, conn, g.SessionConfig())
+		_, err := RunSession(ctx, conn, g.remoteSessionConfig())
 		return err
 	}
 }
@@ -509,6 +520,7 @@ func SettingsFromMap(raw map[string]any) GatewaySettings {
 	}
 	cfg.Enabled = asBool(raw["connect_enabled"])
 	cfg.Paused = asBool(raw["connect_paused"])
+	cfg.Panes = PanesFromConfig(raw)
 	cfg.Host = strings.TrimSpace(settingsString(raw["connect_bind_host"]))
 	cfg.Port = settingsInt(raw["connect_bind_port"], DefaultBindPort)
 	cfg.RelayURL = strings.TrimSpace(settingsString(raw["connect_relay_url"]))

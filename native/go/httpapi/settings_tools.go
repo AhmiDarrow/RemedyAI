@@ -120,7 +120,7 @@ func RegisterSettingsTools(registry *tools.Registry, server SettingsServerProvid
 			"required":["patch"],
 			"properties":{
 				"patch":{"type":"object","description":"Partial settings object of safe keys only"},
-				"confirm":{"type":"boolean","description":"Required to apply sensitive house-rules keys"},
+				"confirm":{"type":"boolean","description":"Set true for sensitive keys; the owner then approves the change on a card"},
 				"caller_origin":{"type":"string","description":"Bound by the runtime"},
 				"session_id":{"type":"string","description":"Bound by the runtime"},
 				"home_dir":{"type":"string","description":"Bound by the runtime"}

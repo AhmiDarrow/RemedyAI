@@ -122,6 +122,18 @@ type ProxyRequest struct {
 	APIKey      string
 }
 
+// loopbackClient is shared: one per request left its idle connection (and a
+// goroutine) behind every time.
+var loopbackClient = &http.Client{
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+	Transport: &http.Transport{
+		ResponseHeaderTimeout: 10 * time.Second,
+		IdleConnTimeout:       60 * time.Second,
+	},
+}
+
 // IterProxyResponse yields HTTP/1.1 response bytes as they arrive (SSE chunked).
 func IterProxyResponse(req ProxyRequest, emit func([]byte) error) error {
 	port := req.SidecarPort
@@ -163,16 +175,7 @@ func IterProxyResponse(req ProxyRequest, emit func([]byte) error) error {
 	if tok := strings.TrimSpace(req.APIKey); tok != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+tok)
 	}
-	client := &http.Client{
-		Timeout: 0,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-		Transport: &http.Transport{
-			ResponseHeaderTimeout: 10 * time.Second,
-		},
-	}
-	resp, err := client.Do(httpReq)
+	resp, err := loopbackClient.Do(httpReq)
 	if err != nil {
 		body := []byte(`{"error":"pipe","reason":"pipe"}`)
 		return emit(EncodeHTTPError(502, "Bad Gateway", body))
