@@ -79,7 +79,7 @@ pub fn fetch(done: impl FnOnce(Result<Feed, String>) + Send + 'static) {
             let out = http
                 .send_blocking(
                     Request::get(FEED)
-                        .header("User-Agent", "RemedyDesktop-Updater/0.10")
+                        .header("User-Agent", concat!("RemedyDesktop-Updater/", env!("CARGO_PKG_VERSION")))
                         .header("Accept", "application/json")
                         .header("Cache-Control", "no-cache"),
                     &cancel,

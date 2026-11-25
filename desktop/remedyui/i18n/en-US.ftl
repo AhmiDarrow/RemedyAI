@@ -458,7 +458,6 @@ chat-split-build = BUILD
 chat-split-side-left = Actions on the left
 chat-split-side-right = Actions on the right
 chat-split-pop-out = Pop out
-chat-split-pip = PiP
 chat-split-fullscreen = Fullscreen
 chat-split-dock-back = Dock back
 chat-split-always-on-top = Always on top

@@ -660,6 +660,11 @@ fn spawn_form(ui: &Ui, model: &AutomationsModel, unit: f32, colors: &remedy_ui::
             w::row(ui)
                 .align(Align::Center)
                 .gap(unit)
+                // Five controls do not fit a 360 px slide on one line.
+                .layout(|l| {
+                    l.wrap = true;
+                    l.min_width = Length::Px(0.0);
+                })
                 .child(once)
                 .child(repeat)
                 .child(steps)
