@@ -54,6 +54,10 @@ A **reminder** routine just posts its text and uses no AI. A **task** routine
 has Remedy do the work each time, in the background. Remedy can also set up
 routines when you ask her to, after you approve them.
 
+Each routine has **Pause** / **Resume**, **Run now**, **Edit** (the same form,
+filled in) and **Retire**. Under a routine that has run you see how many times
+it ran, when it last ran, and what came of it. **+ New** starts one yourself.
+
 ### Goals on their own
 
 Each goal card has an **On its own** switch. With it on, Remedy takes a step
@@ -129,10 +133,11 @@ preference file, open Grove. Grove is the default home.
 
 If you ask for coding or Studio work from Grove — a fix, a plan for a
 loader, a question about a crate — Remedy starts a Studio session in the
-right mode with your request already in it, and switches you there. A card
-stays on Grove so you can open Studio again; **Ctrl+1** or the title-bar
-**Grove** switch brings you back. Everyday talk, goals, and "I want to …"
-stay in Grove.
+right mode with your request already in it. It runs in the background: you
+stay in Grove, and a card there shows whether she is still working or has
+finished. **Open in Studio** on the card opens that session; **Dismiss**
+clears the card. Grove itself has no Talk / Plan / Build switch. Everyday
+talk, goals, and "I want to …" stay in Grove.
 
 ## Which one should you use
 
