@@ -142,6 +142,9 @@ def main() -> int:
     need('--jobs "${JOBS}"' in mac and 'JOBS="${JOBS:-4}"' in mac, "macos jobs default")
     need('"/DHOOKS=' in win, "windows script must pass an absolute hooks path")
     need('"/DRUNTIMESRCPATH=' in win, "windows script must pass the remedy-runtime path")
+    need('"/DVOICESRCPATH=' in win, "windows script must pass the remedy-voice path")
+    # Two quoted arguments with no space between them reach makensis as one.
+    need('""/D' not in win, "windows script has two makensis arguments run together")
     need('"/DCORESRCPATH=' in win, "windows script must pass the remedy_core.dll path")
     need("go build" in win and "remedy-runtime" in win, "windows script must build remedy-runtime")
     need("zig build" in win and "remedy_core.dll" in win, "windows script must build remedy_core.dll")
