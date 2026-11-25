@@ -43,6 +43,27 @@ impl DeviceKeys {
         Ok(DeviceKeys { secret: *secret, public })
     }
 
+    /// The seed of this phone's endpoint key on the away-from-home path, for
+    /// the PC whose public key is `host_public`:
+    /// `SHA-256("remedy-direct/1" || X25519(own secret, host public))`.
+    ///
+    /// The PC derives the same value from its own secret and this phone's
+    /// public key, so it knows which endpoint ids are its paired phones and
+    /// refuses everyone else, without the phone ever announcing an identity.
+    pub fn direct_seed(&self, host_public: &[u8; KEY_LEN]) -> Result<[u8; KEY_LEN]> {
+        use sha2::{Digest, Sha256};
+        let mut dh = DefaultResolver::default()
+            .resolve_dh(&DHChoice::Curve25519)
+            .ok_or(Error::Noise("X25519 unavailable"))?;
+        dh.set(&self.secret);
+        let mut shared = Zeroizing::new([0u8; KEY_LEN]);
+        dh.dh(host_public, &mut shared[..]).map_err(|_| Error::Noise("key agreement failed"))?;
+        let mut h = Sha256::new();
+        h.update(b"remedy-direct/1");
+        h.update(&shared[..]);
+        Ok(h.finalize().into())
+    }
+
     pub fn public(&self) -> &[u8; KEY_LEN] {
         &self.public
     }
@@ -249,6 +270,21 @@ mod tests {
     use super::*;
     use crate::pairing::PairingRecord;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn direct_seed_matches_the_pc() {
+        // The PC's side of this vector: native/go/connect
+        // TestDirectIdentityIsTheSameFromBothSides (phone secret 01.., PC secret 02..).
+        let phone = DeviceKeys::from_secret(&[1u8; KEY_LEN]).unwrap();
+        let pc = DeviceKeys::from_secret(&[2u8; KEY_LEN]).unwrap();
+        let seed = phone.direct_seed(pc.public()).unwrap();
+        assert_eq!(hex::encode(seed), "fbb25fb6f96dedc95fc0f24be0620f51019fdd55a7ff395ea935b25fcefdc4b7");
+        // The PC, deriving from its side, gets the same seed.
+        assert_eq!(pc.direct_seed(phone.public()).unwrap(), seed);
+        // A different PC is a different identity.
+        let other = DeviceKeys::from_secret(&[3u8; KEY_LEN]).unwrap();
+        assert_ne!(phone.direct_seed(other.public()).unwrap(), seed);
+    }
 
     fn tmp(name: &str) -> PathBuf {
         let mut p = std::env::temp_dir();

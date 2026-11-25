@@ -33,22 +33,36 @@ fn phone_pairs_and_reaches_the_pc_through_the_tunnel() {
 
     // The gateway advertises this PC's LAN address, but the test runtime is
     // bound to loopback so it is not reachable from the network. Dial it there.
-    // With REMEDY_PHONE_E2E_DIRECT set, the home-network address is pointed at
-    // a closed port instead, so only the direct path (the PC's own endpoint)
-    // can carry the session: the away-from-home case.
+    // With REMEDY_PHONE_E2E_DIRECT set, this is the away-from-home case: the
+    // phone pairs at home, then its home-network address stops answering and
+    // only the direct path (the PC's own endpoint) can carry the session.
     let direct_only = std::env::var("REMEDY_PHONE_E2E_DIRECT").is_ok();
-    let lan = if direct_only { "lan=127.0.0.1:9" } else { "lan=127.0.0.1:17481" };
     if direct_only {
         assert!(code.lines().any(|l| l.starts_with("ir=")), "the PC gave no direct endpoint: {code}");
     }
-    let code: String = code
-        .lines()
-        .map(|l| if l.starts_with("lan=") { lan.to_string() } else { l.to_string() })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let home_code = |lan: &str| -> String {
+        code.lines()
+            .map(|l| if l.starts_with("lan=") { lan.to_string() } else { l.to_string() })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
 
     let store = FileKeyStore::new(dir.join("phone.json"));
-    pair(&store, &code, "Test phone", &ClientConfig::default()).expect("pairing with the real gateway");
+    if direct_only {
+        // A phone the PC has never seen is refused on the direct path: its
+        // identity is not one of the paired phones'. Pairing happens at home.
+        let stranger = FileKeyStore::new(dir.join("stranger.json"));
+        let away = pair(&stranger, &home_code("lan=127.0.0.1:9"), "Stranger", &ClientConfig::default());
+        assert!(away.is_err(), "pairing over the direct path must be refused");
+    }
+    pair(&store, &home_code("lan=127.0.0.1:17481"), "Test phone", &ClientConfig::default())
+        .expect("pairing with the real gateway");
+    if direct_only {
+        use remedy_connect_core::KeyStore;
+        let mut record = store.load_pairing().unwrap().expect("paired");
+        record.lan = "127.0.0.1:9".parse().unwrap();
+        store.save_pairing(&record).unwrap();
+    }
 
     let client = ConnectClient::start_from_store(&store, ClientConfig::default()).expect("start the tunnel");
     client.wait_connected(Duration::from_secs(30)).expect("the tunnel connects with hello");
