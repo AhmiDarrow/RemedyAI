@@ -3,7 +3,7 @@
 //! Generation limits save on their own. Everything else waits for Settings Save.
 //! Launch-at-login is omitted on Linux. Close-to-tray stays on and cannot be turned off.
 
-use remedy_ui::layout::Length;
+use remedy_ui::layout::{Align, Length};
 use remedy_ui::reactive::{Effect, Signal};
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui, show};
@@ -14,6 +14,7 @@ use super::form;
 use super::logic;
 use super::state::Settings;
 use crate::runtime;
+use crate::tokens;
 
 pub fn sections(ui: &Ui, s: Settings) -> El {
     form::stack(ui)
@@ -131,33 +132,47 @@ fn run_wipe(s: Settings, busy: Signal<bool>, msg: Signal<String>) {
 }
 
 fn access(ui: &Ui, s: Settings) -> El {
-    Effect::new(move || {
-        if logic::project_forces_full(&s.project_path.get()) {
-            s.access_scope.set_if_changed("full".into());
-        }
-    });
     form::block(ui, s, "access", move |ui, s| {
-        let options = vec![
-            ("untrusted".into(), "Untrusted project (strict)".into()),
-            ("project".into(), "Project + Desktop/Docs/Downloads".into()),
-            ("home".into(), "Project + full home folder".into()),
-            ("full".into(), "Full user machine (you grant)".into()),
-        ];
-        let picker = form::pick(ui, "Filesystem scope", &options, s.access_scope)
-            .disabled(move || logic::project_forces_full(&s.project_path.get()));
+        let placeholder = logic::default_workspace_display("");
+        let path = w::row(ui)
+            .align(Align::Center)
+            .gap(form::gap(ui))
+            .fill_width()
+            .layout(|l| {
+                l.min_width = Length::Px(0.0);
+                l.wrap = true;
+            })
+            .child(
+                form::bound_line(ui, "Default workspace folder", s.default_workspace, &placeholder)
+                    .grow(1.0),
+            )
+            .child(form::action(ui, "Browse…", "quiet", move || bits::browse_default_workspace(s)))
+            .child(form::action(ui, "Use this folder", "quiet", move || bits::use_default_workspace(s)));
+        let scopes = form::segments(ui, "Access scope", logic::access_scope_choices(), s.access_scope);
+        let warn = form::notice(
+            ui,
+            "warn",
+            "Full machine access is never implied by an unset workspace. Remedy can read and write anywhere this account can, except auth secrets and its own install.",
+        );
+        let warn = bits::visible_when(warn, move || logic::normalize_access_scope(&s.access_scope.get()) == "full");
+        let legacy = form::hint(ui, move || logic::legacy_access_note(&s.access_scope.get()));
+        let legacy = bits::visible_when(legacy, move || logic::is_legacy_access_scope(&s.access_scope.get()));
         form::stack(ui)
+            .child(form::label(ui, "Default workspace"))
+            .child(form::hint(
+                ui,
+                "Used when no project folder is set. Created when you use it. Path comes from this account’s profile, not a fixed name.",
+            ))
+            .child(path)
             .child(form::label(ui, "Filesystem scope"))
-            .child(picker)
-            .child(w::text(ui, move || access_hint(&s.project_path.get()).to_string()).variant("small"))
+            .child(scopes)
+            .child(legacy)
+            .child(warn)
+            .child(form::hint(
+                ui,
+                "Project only limits tools to the focus folder. Default workspace uses the folder above. Full is never chosen automatically.",
+            ))
     })
-}
-
-fn access_hint(path: &str) -> &'static str {
-    if logic::project_forces_full(path) {
-        "Scope is forced to full while no project folder is set. Choose a workspace in General to limit file access."
-    } else {
-        "Untrusted = project root only, and shell or write still asks. Full still runs with your user account permissions."
-    }
 }
 
 fn permissions(ui: &Ui, s: Settings) -> El {
@@ -566,32 +581,38 @@ fn advanced(ui: &Ui, s: Settings) -> El {
             },
             move |ui| knob_groups(ui, s),
         );
-        form::stack(ui)
-            .child(updates_panel(ui, s))
+        let learning = form::stack(ui)
             .child(form::toggle(ui, "Allow skill creation (learning loop)", "", s.allow_skills))
             .child(w::text(ui, move || format!("Learning auto-approve threshold ({:.2})", s.auto_approve.get())).variant("strong"))
-            .child(w::slider(ui, "Learning auto-approve threshold", s.auto_approve, 0.0, 1.0, 0.05))
-            .child(bits::picker(
-                ui,
-                "Log level",
-                &[
-                    ("DEBUG".into(), "DEBUG".into()),
-                    ("INFO".into(), "INFO".into()),
-                    ("WARNING".into(), "WARNING".into()),
-                    ("ERROR".into(), "ERROR".into()),
-                ],
-                s.log_level,
-            ))
-            .child(form::toggle(ui, "Sarcasm mode (tone flag)", "", s.sarcasm))
+            .child(w::slider(ui, "Learning auto-approve threshold", s.auto_approve, 0.0, 1.0, 0.05));
+        let logs = bits::picker(
+            ui,
+            "Log level",
+            &[
+                ("DEBUG".into(), "DEBUG".into()),
+                ("INFO".into(), "INFO".into()),
+                ("WARNING".into(), "WARNING".into()),
+                ("ERROR".into(), "ERROR".into()),
+            ],
+            s.log_level,
+        );
+        let tone = form::toggle(ui, "Sarcasm mode (tone flag)", "", s.sarcasm);
+        let ledger = form::stack(ui)
             .child(form::toggle(ui, "Claimidx public ledger (submit claims)", "", s.claimidx))
             .child(form::hint(
                 ui,
                 "On by default when ClaimIDX is on (Claimidx 0.7+ submits by default). Turn off only if you want a local Claimidx home with no public submits. The Privacy ClaimIDX switch turns the whole host off.",
-            ))
+            ));
+        form::stack(ui)
+            .child(updates_panel(ui, s))
             .child(form::hint(
                 ui,
-                "Advanced knobs only — defaults keep full owner power. Skill creation stays on so Remedy can improve.",
+                "Each group has a default. You can change any of them. Skill creation stays on so Remedy can improve.",
             ))
+            .child(tokens::info_panel(ui, "Learning", learning))
+            .child(tokens::info_panel(ui, "Logs", logs))
+            .child(tokens::info_panel(ui, "Tone", tone))
+            .child(tokens::info_panel(ui, "Ledger", ledger))
             .child(knobs)
     })
 }
@@ -604,14 +625,22 @@ fn knob_groups(ui: &Ui, s: Settings) -> El {
             "Organism and token-budget knobs also live in config.toml under [advanced], or via remedy settings set.",
         );
     }
-    let mut col = form::stack(ui);
-    let mut last = String::new();
+    let mut names: Vec<String> = Vec::new();
+    let mut buckets: Vec<Vec<Spec>> = Vec::new();
     for spec in specs {
-        if spec.group != last {
-            last = spec.group.clone();
-            col = col.child(form::label(ui, &spec.group));
+        if names.last().map(|n| n != &spec.group).unwrap_or(true) {
+            names.push(spec.group.clone());
+            buckets.push(Vec::new());
         }
-        col = col.child(knob_row(ui, s, spec));
+        buckets.last_mut().unwrap().push(spec);
+    }
+    let mut col = form::stack(ui);
+    for (name, rows) in names.into_iter().zip(buckets) {
+        let mut body = form::stack(ui);
+        for spec in rows {
+            body = body.child(knob_row(ui, s, spec));
+        }
+        col = col.child(tokens::info_panel(ui, name, body));
     }
     col
 }

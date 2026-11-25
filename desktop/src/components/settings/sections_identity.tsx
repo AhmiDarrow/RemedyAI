@@ -143,6 +143,11 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
     uiLanguages,
     accessScope,
     setAccessScope,
+    defaultWorkspace,
+    setDefaultWorkspace,
+    defaultWorkspacePath,
+    handleBrowseDefaultWorkspace,
+    handleUseDefaultWorkspace,
     launchAtLogin,
     setLaunchAtLogin,
     startInTray,
@@ -376,30 +381,56 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
       <SettingsSection
         {...sectionProps('access')}
       >
-        <FormLabel>Filesystem scope</FormLabel>
-        <FormSelect
+        <FormLabel>Default workspace</FormLabel>
+        <FormHint>
+          Used when no project folder is set. Created when you use it. The path comes from this account’s profile, not a fixed name.
+        </FormHint>
+        <div className="flex flex-wrap gap-1 mb-1 min-w-0">
+          <input
+            type="text"
+            value={defaultWorkspace}
+            onChange={(e) => setDefaultWorkspace(e.target.value)}
+            placeholder={defaultWorkspacePath || 'e.g. %USERPROFILE%\\Remedy'}
+            className="ui-input flex-1 min-w-0"
+            aria-label="Default workspace folder"
+          />
+          <FormActionButton
+            onClick={() => handleBrowseDefaultWorkspace()}
+            className="flex-shrink-0"
+          >
+            Browse…
+          </FormActionButton>
+          <FormActionButton
+            onClick={() => handleUseDefaultWorkspace()}
+            className="flex-shrink-0"
+          >
+            Use this folder
+          </FormActionButton>
+        </div>
+        <FormLabel className="mt-3">Filesystem scope</FormLabel>
+        <FormSegmented
           value={accessScope}
           onChange={setAccessScope}
-          disabled={!projectPath.trim() || projectPath.trim() === '.'}
-          className="mb-1"
-        >
-          <option value="untrusted">Untrusted project (strict)</option>
-          <option value="project">Project + Desktop/Docs/Downloads</option>
-          <option value="home">Project + full home folder</option>
-          <option value="full">Full user machine (you grant)</option>
-        </FormSelect>
+          options={[
+            { id: 'project', label: 'Project only' },
+            { id: 'workspace', label: 'Default workspace' },
+            { id: 'full', label: 'Full machine access' },
+          ]}
+        />
+        {(accessScope === 'home' || accessScope === 'untrusted') && (
+          <FormHint>
+            {accessScope === 'home'
+              ? 'Current scope is Home (legacy). Pick one of the options above to change it.'
+              : 'Current scope is Untrusted (legacy). Pick one of the options above to change it.'}
+          </FormHint>
+        )}
+        {accessScope === 'full' && (
+          <FormNotice tone="warn">
+            Full machine access is never implied by an unset workspace. Remedy can read and write anywhere this account can, except auth secrets and its own install.
+          </FormNotice>
+        )}
         <FormHint>
-          {!projectPath.trim() || projectPath.trim() === '.' ? (
-            <>
-              Scope is forced to <strong>full</strong> while no project folder is set.
-              Choose a workspace in General to limit file access.
-            </>
-          ) : (
-            <>
-              <strong>Untrusted</strong> = project root only + always Ask for shell/write
-              (use for downloaded folders). Full still runs with your user account permissions.
-            </>
-          )}
+          Project only limits tools to the focus folder. Default workspace uses the folder above. Full is never chosen automatically.
         </FormHint>
       </SettingsSection>
 

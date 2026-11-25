@@ -276,7 +276,7 @@ func normalizeProjectPath(raw *string) *string {
 	}
 	trimmed := strings.TrimSpace(*raw)
 	// Empty, ".", volume roots, and the entire user profile are not
-	// project folders — clear so turns fall back to Documents/Remedy.
+	// project folders — clear so turns fall back to ~/Remedy.
 	if isUnsetProjectPath(trimmed) {
 		return nil
 	}

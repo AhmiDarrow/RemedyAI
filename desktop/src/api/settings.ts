@@ -48,6 +48,8 @@ export interface Settings {
   }>
   persona: string
   project_path: string
+  default_workspace?: string
+  default_workspace_path?: string
   access_scope?: string
   launch_at_login?: boolean
   start_in_tray?: boolean
@@ -256,6 +258,7 @@ export interface SettingsUpdate {
   custom_llm_name?: string
   llm_api_key?: string
   project_path?: string
+  default_workspace?: string
   name?: string
   user_name?: string
   agent_gender?: string

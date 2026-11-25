@@ -156,14 +156,15 @@ def is_unset_project_path(raw: str | Path | None) -> bool:
             return False
 
 
-def resolve_project_path(raw: str | None, *, fallback: Path | None = None) -> Path:
+def resolve_project_path(raw: str | None, *, fallback: Path | None = None, configured: str | None = None) -> Path:
     """Resolve a project path to an absolute directory.
 
     Empty / '.' / missing / user-home → ``fallback`` or the narrow owner
-    folder (``~/Documents/Remedy``, then ``~/.remedy/workspace``) — never the
+    folder (``~/Remedy``, then ``~/.remedy/workspace``) — never the
     process cwd (Desktop sidecars often run from the install folder) and never
     the entire user profile as the default project root.
-    Pair with :func:`effective_access_scope`: unset project → full access.
+    Pair with :func:`effective_access_scope`: unset project uses the default
+    workspace unless the owner explicitly chose full machine access.
     """
     if fallback is not None:
         try:
@@ -171,7 +172,7 @@ def resolve_project_path(raw: str | None, *, fallback: Path | None = None) -> Pa
         except OSError:
             fb = fallback.expanduser().absolute()
     else:
-        fb = default_owner_project_path()
+        fb = default_owner_project_path(configured)
     if is_unset_project_path(raw):
         return fb
     text = str(raw).strip()
@@ -185,16 +186,35 @@ def resolve_project_path(raw: str | None, *, fallback: Path | None = None) -> Pa
     return path
 
 
-def default_owner_project_path() -> Path:
-    """Narrow default project folder — Documents/Remedy, not the whole profile."""
+def default_owner_project_path(
+    configured: str | None = None,
+    *,
+    home: Path | None = None,
+    create: bool = True,
+) -> Path:
+    """Narrow default project folder — ``<profile>/Remedy``, not the whole profile.
+
+    *configured* is the owner's ``default_workspace`` override, when set.
+    The folder is created when *create* is true (tool use / Use this folder).
+    If creation fails, fall back to ``~/.remedy/workspace``.
+    """
     try:
-        user_home = Path.home().expanduser().resolve()
+        user_home = (home or Path.home()).expanduser().resolve()
     except OSError:
-        user_home = Path.home().expanduser().absolute()
-    docs = user_home / "Documents" / "Remedy"
+        user_home = (home or Path.home()).expanduser().absolute()
+    text = str(configured or "").strip()
+    if text and not is_unset_project_path(text):
+        target = Path(text).expanduser()
+    else:
+        target = user_home / "Remedy"
+    if not create:
+        try:
+            return target.resolve()
+        except OSError:
+            return target.absolute()
     try:
-        docs.mkdir(parents=True, exist_ok=True)
-        return docs.resolve()
+        target.mkdir(parents=True, exist_ok=True)
+        return target.resolve()
     except OSError:
         pass
     fallback = user_home / ".remedy" / "workspace"
@@ -202,7 +222,10 @@ def default_owner_project_path() -> Path:
         fallback.mkdir(parents=True, exist_ok=True)
         return fallback.resolve()
     except OSError:
-        return docs
+        try:
+            return target.resolve()
+        except OSError:
+            return target.absolute()
 
 
 def effective_access_scope(
@@ -211,13 +234,15 @@ def effective_access_scope(
 ) -> str:
     """Access scope used for tools.
 
-    When no project folder is set, treat as **full** user-machine access so
-    the partner is not jailed to an install/cwd folder. Prefer picking a
-    project folder for focused coding work.
+    When no project folder is set, use the default workspace (``~/Remedy``)
+    unless the owner explicitly chose ``full`` machine access.
     """
+    scope = normalize_access_scope(configured)
     if is_unset_project_path(project_path_raw):
-        return "full"
-    return normalize_access_scope(configured)
+        if scope == "full":
+            return "full"
+        return "workspace"
+    return scope
 
 
 def ensure_project_dir(path: Path) -> Path:
@@ -274,10 +299,12 @@ def path_in_roots(dest: Path | str, roots: list[Path] | None) -> bool:
 
 
 def normalize_access_scope(raw: str | None) -> str:
-    """Return project | home | full | untrusted.
+    """Return project | home | full | untrusted | workspace.
 
     ``untrusted`` — project root only (no Desktop/Documents/Downloads auto-roots);
     pair with Ask approvals for downloaded/untrusted folders.
+    ``workspace`` — the owner's default workspace (``~/Remedy`` or
+    ``default_workspace``), used as the safe fallback when no project is set.
     """
     s = (raw or "project").strip().lower()
     if s in ("home", "user", "project+home", "project_home"):
@@ -286,6 +313,8 @@ def normalize_access_scope(raw: str | None) -> str:
         return "full"
     if s in ("untrusted", "sandbox", "strict", "download"):
         return "untrusted"
+    if s in ("workspace", "default", "default_workspace", "owner_workspace"):
+        return "workspace"
     return "project"
 
 
@@ -343,8 +372,8 @@ def allowed_roots_for_scope(
     """
     roots: list[Path] = [_primary_project_root(project_root)]
     scope = normalize_access_scope(scope)
-    # Untrusted: project root only (no Desktop/Documents/Downloads).
-    if scope != "untrusted":
+    # Untrusted / default workspace: folder only (no Desktop/Documents/Downloads).
+    if scope not in ("untrusted", "workspace"):
         for folder in user_profile_work_folders(home=home):
             if folder not in roots:
                 roots.append(folder)
@@ -699,8 +728,8 @@ def workspace_context_block(
     ]
     if project_unset:
         lines.append(
-            "No focus folder is set — default cwd is Documents/Remedy "
-            "(or ~/.remedy/workspace); access is **full** for this account. "
+            "No focus folder is set — default cwd is ~/Remedy "
+            "(or ~/.remedy/workspace); access uses the default workspace unless you chose Full. "
             "Use absolute paths for any tree you work on; relative paths resolve "
             "from the default cwd. A focus folder is optional convenience, not required."
         )
@@ -781,11 +810,11 @@ def ensure_new_project_seed() -> Path:
 
 
 def default_project_from_config(cfg: dict | None) -> Path:
-    """Pick project path from config dict / env, else Documents/Remedy.
+    """Pick project path from config dict / env, else ~/Remedy.
 
     Unset / home-wide project → narrow owner folder (never install cwd, never
     the whole profile). access_scope becomes **full** via
-    :func:`effective_access_scope` so partner tools can still reach absolute
+    :func:`effective_access_scope` so an explicit Full choice can still reach absolute
     paths when needed. New Project is only for first-run config seeding.
     """
     cfg = cfg or {}

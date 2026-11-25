@@ -64,3 +64,36 @@ func TestNormalizeProjectPathClearsHome(t *testing.T) {
 		t.Fatalf("proj normalize → %v", got)
 	}
 }
+
+func TestNormalizeAndEffectiveAccessScope(t *testing.T) {
+	if got := normalizeAccessScope("default_workspace"); got != "workspace" {
+		t.Fatalf("normalize default_workspace = %q", got)
+	}
+	if got := effectiveAccessScope("project", ""); got != "workspace" {
+		t.Fatalf("unset project + project scope = %q want workspace", got)
+	}
+	if got := effectiveAccessScope("untrusted", "."); got != "workspace" {
+		t.Fatalf("unset project + untrusted = %q want workspace", got)
+	}
+	if got := effectiveAccessScope("full", ""); got != "full" {
+		t.Fatalf("unset project + full = %q want full", got)
+	}
+	if got := effectiveAccessScope("project", filepath.Join("C:", "code")); got != "project" {
+		t.Fatalf("set project = %q want project", got)
+	}
+}
+
+func TestDefaultOwnerFilesBaseConfiguredOverride(t *testing.T) {
+	dir := t.TempDir()
+	got := defaultOwnerFilesBaseConfigured(dir)
+	if got == "" {
+		t.Fatal("expected resolved override")
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Clean(got) != filepath.Clean(abs) {
+		t.Fatalf("got %q want %q", got, abs)
+	}
+}

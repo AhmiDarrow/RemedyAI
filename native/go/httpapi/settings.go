@@ -18,7 +18,7 @@ import (
 // SETTABLE_KEYS mirrors Python settings_apply.SETTABLE_KEYS.
 var settableKeys = map[string]struct{}{
 	"llm_provider": {}, "llm_model": {}, "llm_base_url": {}, "custom_llm_name": {},
-	"llm_api_key": {}, "project_path": {}, "name": {}, "user_name": {},
+	"llm_api_key": {}, "project_path": {}, "default_workspace": {}, "name": {}, "user_name": {},
 	"agent_gender": {}, "ui_language": {}, "persona": {}, "setup_completed": {},
 	"access_scope": {}, "launch_at_login": {}, "start_in_tray": {}, "close_to_tray": {},
 	"harness_mode": {}, "harness_min_context_pct": {}, "harness_max_context_pct": {},
@@ -339,6 +339,7 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 		"llm_base_url":        cfgString(cfg, "llm_base_url", baseURL),
 		"persona":             cfgString(cfg, "persona", "default"),
 		"project_path":        cfgString(cfg, "project_path", ""),
+		"default_workspace":   cfgString(cfg, "default_workspace", ""),
 		"access_scope":        cfgString(cfg, "access_scope", "project"),
 		"launch_at_login":     cfgBool(cfg, "launch_at_login", false),
 		"start_in_tray":       cfgBool(cfg, "start_in_tray", false),
@@ -370,18 +371,21 @@ func normalizeSettingsPatch(patch, cfg ConfigMap) {
 	if v, ok := patch["project_path"]; ok && v != nil {
 		raw := strings.TrimSpace(fmt.Sprint(v))
 		// Home / volume roots / install dir / "." are not project folders —
-		// persist empty so agency tools use Documents/Remedy.
+		// persist empty so agency tools use ~/Remedy.
 		if isUnsetProjectPath(raw) || isPackagedInstallDir(raw) {
 			raw = ""
 		}
 		patch["project_path"] = raw
 	}
 	if v, ok := patch["access_scope"]; ok && v != nil {
-		scope := strings.ToLower(strings.TrimSpace(fmt.Sprint(v)))
-		if scope != "project" && scope != "home" && scope != "full" {
-			scope = "project"
+		patch["access_scope"] = normalizeAccessScope(fmt.Sprint(v))
+	}
+	if v, ok := patch["default_workspace"]; ok && v != nil {
+		raw := strings.TrimSpace(fmt.Sprint(v))
+		if isUnsetProjectPath(raw) || isPackagedInstallDir(raw) {
+			raw = ""
 		}
-		patch["access_scope"] = scope
+		patch["default_workspace"] = raw
 	}
 	if v, ok := patch["harness_mode"]; ok && v != nil {
 		hm := strings.ToLower(strings.TrimSpace(fmt.Sprint(v)))
@@ -692,6 +696,8 @@ func (s *Server) settingsPayload() map[string]any {
 		"ui_languages":                 publicLanguageList(),
 		"persona":                      cfgString(cfg, "persona", "default"),
 		"project_path":                 projectPath,
+		"default_workspace":            cfgString(cfg, "default_workspace", ""),
+		"default_workspace_path":       defaultOwnerFilesBaseConfigured(cfgString(cfg, "default_workspace", "")),
 		"access_scope":                 cfgString(cfg, "access_scope", "project"),
 		"launch_at_login":              cfgBool(cfg, "launch_at_login", false),
 		"start_in_tray":                cfgBool(cfg, "start_in_tray", false),

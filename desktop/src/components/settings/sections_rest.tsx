@@ -133,45 +133,53 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
       <SettingsSection
         {...sectionProps('advanced')}
       >
-        <FormToggle
-          checked={allowSkillCreation}
-          onChange={setAllowSkillCreation}
-          label="Allow skill creation (learning loop)"
-        />
-        <FormLabel>
-          Learning auto-approve threshold ({autoApproveThreshold.toFixed(2)})
-        </FormLabel>
-        <FormRange
-          min={0}
-          max={100}
-          step={5}
-          value={Math.round(autoApproveThreshold * 100)}
-          onChange={(pct) => setAutoApproveThreshold(pct / 100)}
-        />
-        <FormLabel>Log level</FormLabel>
-        <FormSelect value={logLevel} onChange={setLogLevel}>
-          {['DEBUG', 'INFO', 'WARNING', 'ERROR'].map((l) => (
-            <option key={l} value={l}>{l}</option>
-          ))}
-        </FormSelect>
-        <FormToggle
-          checked={sarcasmMode}
-          onChange={setSarcasmMode}
-          label="Sarcasm mode (tone flag)"
-        />
-        <FormToggle
-          checked={claimidxPublicLedger}
-          onChange={setClaimidxPublicLedger}
-          label="Claimidx public ledger (submit claims)"
-        />
         <FormHint>
-          On by default when ClaimIDX is on (Claimidx 0.7+ submits by default).
-          Turn off only if you want a local Claimidx home with no public submits.
-          The Privacy ClaimIDX switch turns the whole host off.
+          Each group has a default. You can change any of them. Skill creation stays on so Remedy can improve.
         </FormHint>
-        <FormHint>
-          Advanced knobs only — defaults keep full owner power. Skill creation stays on so Remedy can improve.
-        </FormHint>
+        <CategoryCard kicker="Learning">
+          <FormToggle
+            checked={allowSkillCreation}
+            onChange={setAllowSkillCreation}
+            label="Allow skill creation (learning loop)"
+          />
+          <FormLabel>
+            Learning auto-approve threshold ({autoApproveThreshold.toFixed(2)})
+          </FormLabel>
+          <FormRange
+            min={0}
+            max={100}
+            step={5}
+            value={Math.round(autoApproveThreshold * 100)}
+            onChange={(pct) => setAutoApproveThreshold(pct / 100)}
+          />
+        </CategoryCard>
+        <CategoryCard kicker="Logs">
+          <FormLabel>Log level</FormLabel>
+          <FormSelect value={logLevel} onChange={setLogLevel}>
+            {['DEBUG', 'INFO', 'WARNING', 'ERROR'].map((l) => (
+              <option key={l} value={l}>{l}</option>
+            ))}
+          </FormSelect>
+        </CategoryCard>
+        <CategoryCard kicker="Tone">
+          <FormToggle
+            checked={sarcasmMode}
+            onChange={setSarcasmMode}
+            label="Sarcasm mode (tone flag)"
+          />
+        </CategoryCard>
+        <CategoryCard kicker="Ledger">
+          <FormToggle
+            checked={claimidxPublicLedger}
+            onChange={setClaimidxPublicLedger}
+            label="Claimidx public ledger (submit claims)"
+          />
+          <FormHint>
+            On by default when ClaimIDX is on (Claimidx 0.7+ submits by default).
+            Turn off only if you want a local Claimidx home with no public submits.
+            The Privacy ClaimIDX switch turns the whole host off.
+          </FormHint>
+        </CategoryCard>
         {advancedSchema.length > 0 ? (
           <OrganismKnobs
             schema={advancedSchema}
@@ -699,6 +707,30 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
 }
 
 
+
+function CategoryCard({ kicker, children }: { kicker: string; children: ReactNode }) {
+  return (
+    <div
+      className="mb-3 min-w-0"
+      style={{
+        border: '1px solid var(--border, #24504a)',
+        borderRadius: 2,
+        boxShadow: '2px 2px 0 color-mix(in srgb, var(--text-primary) 22%, transparent)',
+        background: 'var(--bg-secondary, #0b1a17)',
+        padding: 12,
+      }}
+    >
+      <div
+        className="text-[12px] tracking-[0.08em] uppercase mb-2 min-w-0"
+        style={{ color: 'var(--text-muted)' }}
+      >
+        {kicker}
+      </div>
+      {children}
+    </div>
+  )
+}
+
 function OrganismKnobs({
   schema,
   values,
@@ -725,8 +757,7 @@ function OrganismKnobs({
   return (
     <div className="mt-3 space-y-3">
       {groups.map((g) => (
-        <div key={g.name}>
-          <FormLabel>{g.name}</FormLabel>
+        <CategoryCard key={g.name} kicker={g.name}>
           {g.items.map((knob) => {
             const val = effective(knob)
             if (knob.kind === 'bool') {
@@ -760,7 +791,7 @@ function OrganismKnobs({
               </div>
             )
           })}
-        </div>
+        </CategoryCard>
       ))}
     </div>
   )
