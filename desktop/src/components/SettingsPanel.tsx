@@ -202,7 +202,7 @@ export function SettingsPanel({
   const [logLevel, setLogLevel] = useState('INFO')
   const [sarcasmMode, setSarcasmMode] = useState(false)
   const [claimidxEnabled, setClaimidxEnabled] = useState(true)
-  const [claimidxPublicLedger, setClaimidxPublicLedger] = useState(true)
+  const [claimidxPublicLedger, setClaimidxPublicLedger] = useState(false)
   const [advanced, setAdvanced] = useState<Record<string, number | boolean>>({})
   const [advancedSchema, setAdvancedSchema] = useState<AdvancedKnobSchema[]>([])
   const [toolProcess, setToolProcess] = useState<ToolProcessMode>(
@@ -482,7 +482,7 @@ export function SettingsPanel({
       setSarcasmMode(Boolean(s.sarcasm_mode))
       // Default on (Claimidx submit-by-default); only explicit false opts out.
       setClaimidxEnabled(s.claimidx_enabled !== false)
-      setClaimidxPublicLedger(s.claimidx_public_ledger !== false)
+      setClaimidxPublicLedger(s.claimidx_public_ledger === true)
       setAdvanced((s.advanced && typeof s.advanced === 'object') ? { ...s.advanced } : {})
       setAdvancedSchema(Array.isArray(s.advanced_schema) ? s.advanced_schema : [])
       setWebToolsEnabled(Boolean(s.web_tools_enabled))

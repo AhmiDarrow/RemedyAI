@@ -1,5 +1,5 @@
 /** Settings form sections — rest. */
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { SettingsFormProps } from './formTypes'
 import type { AdvancedKnobSchema } from '../../api/settings'
 import { FONT_SCALE_OPTIONS, type Density } from '../../utils/chatPrefs'
@@ -172,12 +172,12 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
           <FormToggle
             checked={claimidxPublicLedger}
             onChange={setClaimidxPublicLedger}
-            label="Claimidx public ledger (submit claims)"
+            label="Share claims to the public ClaimIDX ledger"
           />
           <FormHint>
-            On by default when ClaimIDX is on (Claimidx 0.7+ submits by default).
-            Turn off only if you want a local Claimidx home with no public submits.
-            The Privacy ClaimIDX switch turns the whole host off.
+            Off by default: claims stay on this computer. Turn on to let Remedy
+            submit claims to the public ClaimIDX ledger. The ClaimIDX switch
+            under Privacy turns the whole host off.
           </FormHint>
         </CategoryCard>
         {advancedSchema.length > 0 ? (
@@ -708,7 +708,9 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
 
 
 
+/** One advanced topic: a heading that opens on a click, closed to begin with. */
 function CategoryCard({ kicker, children }: { kicker: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
   return (
     <div
       className="mb-3 min-w-0"
@@ -720,13 +722,19 @@ function CategoryCard({ kicker, children }: { kicker: string; children: ReactNod
         padding: 12,
       }}
     >
-      <div
-        className="text-[12px] tracking-[0.08em] uppercase mb-2 min-w-0"
-        style={{ color: 'var(--text-muted)' }}
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="w-full text-left text-[12px] tracking-[0.08em] uppercase min-w-0"
+        style={{ color: 'var(--text-muted)', background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
       >
+        <span aria-hidden="true" style={{ display: 'inline-block', width: 14 }}>
+          {open ? '-' : '+'}
+        </span>
         {kicker}
-      </div>
-      {children}
+      </button>
+      {open && <div className="mt-2">{children}</div>}
     </div>
   )
 }

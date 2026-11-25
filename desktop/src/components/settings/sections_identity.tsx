@@ -372,7 +372,7 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
         <FormToggle
           checked={claimidxEnabled} onChange={setClaimidxEnabled}
           label="ClaimIDX"
-          description="On by default. Turn off to stop the local ClaimIDX host completely, including public ledger submits."
+          description="Turn off to stop the local ClaimIDX host completely. Sharing claims to the public ledger is a separate switch and is off unless you turn it on."
         />
         <PersonaWipeControl />
       </SettingsSection>

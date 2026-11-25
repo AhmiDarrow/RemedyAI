@@ -19,6 +19,7 @@ use crate::studio::Studio;
 #[derive(Clone)]
 pub struct PhoneGrove {
     grove: Grove,
+    client: Client,
 }
 
 impl PhoneGrove {
@@ -31,8 +32,20 @@ impl PhoneGrove {
         let studio = Studio::new();
         studio.attach_client(client.clone());
         let grove = Grove::for_phone(studio, persist);
-        grove.attach_client(client);
-        PhoneGrove { grove }
+        grove.attach_client(client.clone());
+        PhoneGrove { grove, client }
+    }
+
+    /// The tunnel to the PC just came up. If the first check failed because
+    /// there was no path yet (the app was opened out of reach), ask again, so
+    /// the screen does not sit on an old error until the app is restarted.
+    pub fn revive(&self) {
+        use crate::studio::Conn;
+        let studio = &self.grove.studio;
+        if matches!(studio.conn.get_untracked(), Ok(Conn::Error(_)) | Ok(Conn::Disconnected)) {
+            studio.attach_client(self.client.clone());
+            self.grove.attach_client(self.client.clone());
+        }
     }
 
     /// The Grove screen. `app` lets Grove raise system notifications.
