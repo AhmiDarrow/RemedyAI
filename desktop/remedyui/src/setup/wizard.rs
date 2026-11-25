@@ -243,6 +243,7 @@ impl Wizard {
                 saving.set(false);
                 match setup {
                     Ok(_) => { presence::set_skin_override(None); done.set(true); },
+                    Err(e) if had_key => error.set(format!("{e} Enter the API key again, then retry.")),
                     Err(e) => error.set(e),
                 }
             });
@@ -298,6 +299,8 @@ impl Wizard {
                     let _ = super::api::vision_install(&client);
                 }
             }
+            // The secret field is emptied when the key is read, so a failed save must say so.
+            let had_key = body.get("llm_api_key").and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty());
             let saved = super::api::put_settings(&client, &body).and_then(|_| {
                 super::api::put_setup(&client, &json!({ "action": "confirm" }))
             });
@@ -306,6 +309,7 @@ impl Wizard {
                 installing.set(false);
                 match saved {
                     Ok(_) => { presence::set_skin_override(None); done.set(true); },
+                    Err(e) if had_key => error.set(format!("{e} Enter the API key again, then retry.")),
                     Err(e) => error.set(e),
                 }
             });

@@ -1018,14 +1018,18 @@ impl Grove {
         if task.is_empty() {
             return;
         }
-        self.job_open.set(false);
         self.spawn(
             move |c| api::spawn_child(&c, &task, &label),
             |g, out| {
-                if let Ok(note) = out {
-                    if !note.is_empty() {
-                        g.note.set(note);
+                // The form stays open with what was typed until the job is really started.
+                match out {
+                    Ok(note) => {
+                        g.job_open.set(false);
+                        if !note.is_empty() {
+                            g.note.set(note);
+                        }
                     }
+                    Err(_) => g.note.set("That did not go through — try again.".into()),
                 }
                 g.refresh_head();
             },
@@ -1078,12 +1082,13 @@ impl Grove {
                 )
             },
             |g, out| {
-                g.note.set(if out.is_ok() {
-                    "Saved.".into()
+                // A failed save leaves the settings open with what was entered.
+                if out.is_ok() {
+                    g.note.set("Saved.".into());
+                    g.settings_open.set(false);
                 } else {
-                    "That did not go through — try again.".into()
-                });
-                g.settings_open.set(false);
+                    g.note.set("That did not go through — try again.".into());
+                }
                 g.refresh_head();
             },
         );
@@ -1141,19 +1146,27 @@ impl Grove {
     }
 
     /// Save a routine: a new one, or an edit of `id`.
-    pub(crate) fn save_routine(&self, id: Option<String>, body: Value) {
-        self.routine_open.set(false);
+    /// `saved` turns true once the server has it, which is when the dialog
+    /// closes; on failure `err` says why and the dialog keeps what was typed.
+    pub(crate) fn save_routine(&self, id: Option<String>, body: Value, saved: Signal<bool>, err: Signal<String>) {
         self.spawn(
             move |c| match &id {
                 Some(id) => api::patch_routine(&c, id, &body),
                 None => api::create_routine(&c, &body),
             },
-            |g, out| {
-                g.note.set(if out.is_ok() {
-                    "Routine saved.".into()
-                } else {
-                    "Could not save that routine.".into()
-                });
+            move |g, out| {
+                match out {
+                    Ok(()) => {
+                        g.routine_open.set(false);
+                        g.note.set("Routine saved.".into());
+                        // The dialog may already be gone (Cancel, Escape).
+                        let _ = saved.try_set(true);
+                    }
+                    Err(why) => {
+                        let text = if why.trim().is_empty() { "Could not save that routine.".to_string() } else { why };
+                        let _ = err.try_set(text);
+                    }
+                }
                 g.refresh_head();
             },
         );
