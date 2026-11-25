@@ -452,73 +452,156 @@ fn open_session(
     Ok((id, session))
 }
 
-/// Resolve the interactive shell. Unix never launches a WSL-interop `powershell.exe`.
-pub fn pick_shell() -> (String, Vec<String>) {
+/// One shell the terminal can run.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shell {
+    /// Stable name saved in `desktop.json` (`terminal_shell`).
+    pub id: String,
+    pub label: String,
+    pub program: String,
+    pub args: Vec<String>,
+}
+
+fn shell(id: &str, label: &str, program: &str, args: &[&str]) -> Shell {
+    Shell {
+        id: id.into(),
+        label: label.into(),
+        program: program.into(),
+        args: args.iter().map(|a| a.to_string()).collect(),
+    }
+}
+
+/// The shells found on this machine, the default first. Never empty.
+/// Unix never offers a WSL-interop `powershell.exe`.
+pub fn shells() -> Vec<Shell> {
+    let mut out: Vec<Shell> = Vec::new();
+    let mut add = |id: &str, label: &str, paths: &[String], args: &[&str]| {
+        if let Some(p) = paths.iter().find(|p| Path::new(p.as_str()).is_file()) {
+            out.push(shell(id, label, p, args));
+        }
+    };
     #[cfg(target_os = "windows")]
     {
-        let mut candidates: Vec<String> = Vec::new();
-        if let Ok(pf) = std::env::var("ProgramFiles") {
-            candidates.push(format!(r"{pf}\PowerShell\7\pwsh.exe"));
-            candidates.push(format!(r"{pf}\PowerShell\7-preview\pwsh.exe"));
+        let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+        let pf = env("ProgramFiles");
+        let pf86 = env("ProgramFiles(x86)");
+        let sys = env("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+        let mut pwsh = Vec::new();
+        if let Some(pf) = &pf {
+            pwsh.push(format!(r"{pf}\PowerShell\7\pwsh.exe"));
+            pwsh.push(format!(r"{pf}\PowerShell\7-preview\pwsh.exe"));
         }
-        if let Ok(pf86) = std::env::var("ProgramFiles(x86)") {
-            candidates.push(format!(r"{pf86}\PowerShell\7\pwsh.exe"));
+        if let Some(pf86) = &pf86 {
+            pwsh.push(format!(r"{pf86}\PowerShell\7\pwsh.exe"));
         }
-        if let Ok(sys) = std::env::var("SystemRoot") {
-            candidates.push(format!(
-                r"{sys}\System32\WindowsPowerShell\v1.0\powershell.exe"
-            ));
-            candidates.push(format!(
-                r"{sys}\SysWOW64\WindowsPowerShell\v1.0\powershell.exe"
-            ));
-        }
-        candidates.push(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe".into());
-        for c in &candidates {
-            if Path::new(c).is_file() {
-                return (c.clone(), vec!["-NoLogo".into(), "-NoExit".into()]);
-            }
-        }
-        return (
-            "powershell.exe".into(),
-            vec!["-NoLogo".into(), "-NoExit".into()],
+        let ps = ["-NoLogo", "-NoExit"];
+        add("pwsh", "PowerShell", &pwsh, &ps);
+        add(
+            "powershell",
+            "Windows PowerShell",
+            &[
+                format!(r"{sys}\System32\WindowsPowerShell\v1.0\powershell.exe"),
+                format!(r"{sys}\SysWOW64\WindowsPowerShell\v1.0\powershell.exe"),
+            ],
+            &ps,
         );
+        add("cmd", "Command Prompt", &[format!(r"{sys}\System32\cmd.exe")], &[]);
+        let mut git = Vec::new();
+        for root in [&pf, &pf86].into_iter().flatten() {
+            git.push(format!(r"{root}\Git\bin\bash.exe"));
+        }
+        add("git-bash", "Git Bash", &git, &["--login", "-i"]);
+        add("wsl", "WSL", &[format!(r"{sys}\System32\wsl.exe")], &[]);
+        if out.is_empty() {
+            out.push(shell("powershell", "Windows PowerShell", "powershell.exe", &ps));
+        }
     }
-
     #[cfg(not(target_os = "windows"))]
     {
-        if let Ok(shell) = std::env::var("SHELL") {
-            let s = shell.trim();
+        if let Ok(env_shell) = std::env::var("SHELL") {
+            let s = env_shell.trim();
             let low = s.to_ascii_lowercase();
             let windows_interop = low.ends_with(".exe")
                 || low.contains("/mnt/")
                 || low.contains(":\\")
                 || low.contains("//wsl");
-            if !s.is_empty() && Path::new(s).is_file() && !windows_interop {
-                return (s.to_string(), vec!["-i".into()]);
+            if !s.is_empty() && !windows_interop {
+                let name = s.rsplit('/').next().unwrap_or(s);
+                add(name, name, &[s.to_string()], &["-i"]);
             }
         }
-        for c in [
-            "/bin/bash",
-            "/usr/bin/bash",
-            "/bin/zsh",
-            "/usr/bin/zsh",
-            "/bin/fish",
-            "/usr/bin/fish",
-            "/bin/sh",
-        ] {
-            if Path::new(c).is_file() {
-                return (c.to_string(), vec!["-i".into()]);
-            }
+        for name in ["bash", "zsh", "fish", "sh"] {
+            add(
+                name,
+                name,
+                &[format!("/bin/{name}"), format!("/usr/bin/{name}")],
+                &["-i"],
+            );
         }
-        ("/bin/sh".into(), Vec::new())
+        // `$SHELL` may repeat one of the standard names.
+        let mut seen = Vec::new();
+        out.retain(|s| {
+            let new = !seen.contains(&s.id);
+            seen.push(s.id.clone());
+            new
+        });
+        if out.is_empty() {
+            out.push(shell("sh", "sh", "/bin/sh", &[]));
+        }
     }
+    out
 }
 
+/// The shell for `want`: one of [`shells`] by id, a full path to any other
+/// program, or the machine's default when `want` is empty or gone.
+pub fn choose(want: &str) -> Shell {
+    let want = want.trim();
+    let all = shells();
+    if let Some(s) = all.iter().find(|s| s.id == want) {
+        return s.clone();
+    }
+    if !want.is_empty() && Path::new(want).is_file() {
+        let name = Path::new(want)
+            .file_stem()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| want.to_string());
+        return shell(want, &name, want, &[]);
+    }
+    all.into_iter().next().expect("shells() is never empty")
+}
+
+/// The shell the user picked for the terminal (`terminal_shell` in desktop.json).
+pub fn chosen_shell() -> Shell {
+    choose(&crate::prefs::DesktopPrefs::load().terminal_shell)
+}
+
+/// Resolve the interactive shell and its arguments.
+pub fn pick_shell() -> (String, Vec<String>) {
+    let s = chosen_shell();
+    (s.program, s.args)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_shell_is_chosen_by_id_or_path_and_falls_back() {
+        let all = shells();
+        assert!(!all.is_empty());
+        assert_eq!(choose(""), all[0], "empty means the default");
+        assert_eq!(choose("no-such-shell"), all[0], "a gone choice falls back");
+        let last = all.last().unwrap();
+        assert_eq!(choose(&last.id), *last);
+        // Any program by full path, with no arguments of ours.
+        let exe = std::env::current_exe().unwrap();
+        let custom = choose(&exe.to_string_lossy());
+        assert_eq!(custom.program, exe.to_string_lossy());
+        assert!(custom.args.is_empty());
+        #[cfg(windows)]
+        assert!(all.iter().any(|s| s.id == "cmd"), "cmd ships with Windows: {all:?}");
+    }
 
     #[test]
     fn pick_shell_is_a_real_file() {
