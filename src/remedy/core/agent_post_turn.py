@@ -17,10 +17,13 @@ def schedule_post_turn_prep(
     *,
     message: str = "",
     session_id: str | None = None,
+    soul_native: bool = False,
 ) -> None:
     """Warm brief/memory/skills and lightly record project profile.
 
     Safe to call from stream finally-paths; never raises to the caller.
+    *soul_native*: the Go runtime already updated soul/field.json and runs
+    the post-turn dream itself, so only the non-field soul bridges run here.
     """
     with suppress(Exception):
         from remedy.core.project_learning import record_session_end
@@ -139,22 +142,34 @@ def schedule_post_turn_prep(
                             daemon=True,
                             name="remedy-consolidate",
                         ).start()
-                with suppress(Exception):
-                    from remedy.core.llm_binding import get_llm_binding
-                    from remedy.core.turn_context import turn_session_id
-                    from remedy.memory.soul.update import update_soul_after_turn
+                if soul_native:
+                    with suppress(Exception):
+                        from remedy.core.turn_context import turn_session_id
+                        from remedy.memory.soul.update import soul_bridges_after_turn
 
-                    bind = get_llm_binding(runtime)
-                    update_soul_after_turn(
-                        user_text=coerce_text_arg(message),
-                        assistant_text=asst,
-                        session_id=str(turn_session_id(runtime) or sid or ""),
-                        provider=str(getattr(bind, "provider", "") or ""),
-                        model=str(getattr(bind, "model", "") or ""),
-                        brief=getattr(runtime, "_session_brief", None),
-                        project_path=project_path or "",
-                        home=home,
-                    )
+                        soul_bridges_after_turn(
+                            user_text=coerce_text_arg(message),
+                            session_id=str(turn_session_id(runtime) or sid or ""),
+                            brief=getattr(runtime, "_session_brief", None),
+                            home=home,
+                        )
+                else:
+                    with suppress(Exception):
+                        from remedy.core.llm_binding import get_llm_binding
+                        from remedy.core.turn_context import turn_session_id
+                        from remedy.memory.soul.update import update_soul_after_turn
+
+                        bind = get_llm_binding(runtime)
+                        update_soul_after_turn(
+                            user_text=coerce_text_arg(message),
+                            assistant_text=asst,
+                            session_id=str(turn_session_id(runtime) or sid or ""),
+                            provider=str(getattr(bind, "provider", "") or ""),
+                            model=str(getattr(bind, "model", "") or ""),
+                            brief=getattr(runtime, "_session_brief", None),
+                            project_path=project_path or "",
+                            home=home,
+                        )
                 # Occasional dream densification (cooldown inside dream_cycle)
                 sid_soul = str(sid or "")
                 hive_pulse = False
@@ -175,7 +190,8 @@ def schedule_post_turn_prep(
                             or bool(sf.pledges)
                             or bool(sf.future_dreams)
                         )
-                        if ready and should_dream(home):
+                        # With soul_native the Go runtime dreams after the turn.
+                        if ready and not soul_native and should_dream(home):
                             # Off the request task so SSE finally can release the
                             # stream claim — a follow-up send must not 409.
                             import threading
