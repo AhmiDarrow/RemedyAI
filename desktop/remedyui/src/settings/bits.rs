@@ -77,6 +77,11 @@ pub fn open_http(url: &str) {
     app.open_url(url.to_string(), |_| {});
 }
 
+/// Open a bundled Help chapter in the in-app manual, the same path as F1.
+pub fn open_help_topic(id: &str) {
+    crate::chrome::open_help_topic(id);
+}
+
 /// OAuth and provider verification. The in-app browser keeps Settings mounted.
 /// Anything the host cannot take still opens in the system browser.
 pub fn open_in_browser_rail(url: &str) {

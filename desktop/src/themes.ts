@@ -388,7 +388,7 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
    */
   deutan: {
     id: 'deutan',
-    name: 'Colorblind Deutan',
+    name: 'Deutan',
     kind: 'dark',
     colors: {
       '--bg-primary': '#0b0f14',
@@ -415,7 +415,7 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
    */
   protan: {
     id: 'protan',
-    name: 'Colorblind Protan',
+    name: 'Protan',
     kind: 'dark',
     colors: {
       '--bg-primary': '#0d1013',
@@ -442,7 +442,7 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
    */
   tritan: {
     id: 'tritan',
-    name: 'Colorblind Tritan',
+    name: 'Tritan',
     kind: 'dark',
     colors: {
       '--bg-primary': '#12100f',

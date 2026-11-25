@@ -28,7 +28,6 @@ use remedy_ui::{App, El, Ui, show};
 use crate::studio::Studio;
 
 use panel::{close_panel, open_panel, view};
-use sec_system::HELP_HOME;
 use state::Settings;
 
 struct StudioHooks {
@@ -313,7 +312,7 @@ pub(crate) fn shell_chord(s: Settings, ev: &KeyEvent) -> bool {
     }
     if ev.key == Key::F(1) {
         if !ev.repeat {
-            bits::open_http(HELP_HOME);
+            bits::open_help_topic(crate::help_view::default_id());
         }
         return true;
     }
@@ -346,7 +345,7 @@ pub(crate) fn shell_chord(s: Settings, ev: &KeyEvent) -> bool {
         }
         Key::Character(c) if c == "/" => {
             if !ev.repeat {
-                bits::open_http(HELP_HOME);
+                bits::open_help_topic(crate::help_view::default_id());
             }
             true
         }

@@ -107,7 +107,6 @@ fn new_session_button(ui: &Ui, studio: Studio) -> El {
                     .action(Action::Click)
             }
         })
-        .style(StylePatch::new().foreground(colors.on_accent))
 }
 
 fn filter_row(ui: &Ui, studio: Studio) -> El {
