@@ -448,8 +448,8 @@ impl Grove {
         self.save();
     }
 
-    /// Open a Studio session from a Grove request: set the mode, start the
-    /// prompt, switch to Studio, and keep a handoff card in Grove for the way back.
+    /// Start a Studio session from a Grove request in the background: set the
+    /// mode, start the prompt, and leave a status card in Grove that links to it.
     pub(crate) fn open_studio_session(&self, kind: logic::StudioKind, prompt: &str) {
         let prompt = prompt.trim().to_string();
         if prompt.is_empty() {
@@ -468,7 +468,6 @@ impl Grove {
             kind,
             prompt: prompt.clone(),
         }));
-        self.show_studio();
         self.studio.send(prompt);
     }
 
@@ -569,14 +568,6 @@ impl Grove {
         self.focus_nonce.set(n.wrapping_add(1));
     }
 
-    pub(crate) fn set_mode(&self, mode: WorkMode) {
-        self.studio.mode.set(mode);
-    }
-
-    pub(crate) fn cycle_mode(&self) {
-        self.studio.cycle_mode();
-    }
-
     /// Accept a talk-bar send. The caller clears the field when this returns true.
     pub(crate) fn begin_send(&self, text: String) -> bool {
         let trimmed = text.trim().to_string();
@@ -606,11 +597,6 @@ impl Grove {
         }
         if on_home && attachments.is_empty() {
             if let Some(kind) = logic::studio_handoff(&trimmed) {
-                let kind = match self.studio.mode.get() {
-                    WorkMode::Plan => logic::StudioKind::Plan,
-                    WorkMode::Build => logic::StudioKind::Build,
-                    WorkMode::Chat => kind,
-                };
                 self.release_busy();
                 self.open_studio_session(kind, &trimmed);
                 return true;
@@ -1112,10 +1098,14 @@ impl Grove {
         );
     }
 
-    pub(crate) fn create_routine(&self, body: Value) {
+    /// Save a routine: a new one, or an edit of `id`.
+    pub(crate) fn save_routine(&self, id: Option<String>, body: Value) {
         self.routine_open.set(false);
         self.spawn(
-            move |c| api::create_routine(&c, &body),
+            move |c| match &id {
+                Some(id) => api::patch_routine(&c, id, &body),
+                None => api::create_routine(&c, &body),
+            },
             |g, out| {
                 g.note.set(if out.is_ok() {
                     "Routine saved.".into()
@@ -1478,7 +1468,8 @@ impl Grove {
             return;
         };
         let book = self.book.clone();
-        let mode = self.studio.mode.get();
+        // Grove has no modes: Remedy decides what a request needs.
+        let mode = WorkMode::Build;
         let model = self.studio.model.get();
         let provider = self.studio.provider.get();
         let grove = self.clone();

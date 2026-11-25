@@ -481,7 +481,7 @@ fn routines(ui: &Ui, grove: Grove) -> El {
         .child(w::button(ui, "+ New", {
             let ui = ui.clone();
             let g = grove.clone();
-            move || open_routine(&ui, g.clone())
+            move || open_routine(&ui, g.clone(), None)
         }));
     let empty = {
         let g = grove.clone();
@@ -503,7 +503,11 @@ fn routines(ui: &Ui, grove: Grove) -> El {
     };
     let col = w::column(ui).gap(unit);
     w::for_each(&col, grove.routines, |r: &HeadRoutine| {
-        format!("{}:{}", r.routine_id, r.enabled)
+        // Rebuild a row when anything it shows changes.
+        format!(
+            "{}:{}:{}:{}:{}:{}:{}",
+            r.routine_id, r.enabled, r.title, r.when, r.next_run, r.last_run, r.runs
+        )
     }, {
         let ui = ui.clone();
         let g = grove.clone();
@@ -528,6 +532,25 @@ fn routine_row(ui: &Ui, grove: &Grove, routine: &HeadRoutine) -> El {
         sub.push_str(" · ");
         sub.push_str(logic::state_words(&routine.last_state));
     }
+    // Run history as the server keeps it: last run, count, and what it came to.
+    let mut history = String::new();
+    if routine.runs > 0 {
+        let last = logic::relative_when(Some(&routine.last_run), now_ms());
+        history = if routine.runs == 1 { "Ran once".into() } else { format!("Ran {} times", routine.runs) };
+        if !last.is_empty() {
+            history.push_str(" · last ");
+            history.push_str(&last);
+        }
+        if !routine.last_summary.is_empty() {
+            history.push_str(" · ");
+            history.push_str(&routine.last_summary);
+        }
+    }
+    let edit = w::button(ui, format!("Edit {}", routine.title), {
+        let (ui, g, r) = (ui.clone(), grove.clone(), routine.clone());
+        move || open_routine(&ui, g.clone(), Some(r.clone()))
+    })
+    .variant("quiet");
     let id = routine.routine_id.clone();
     let title = routine.title.clone();
     let g = grove.clone();
@@ -570,7 +593,7 @@ fn routine_row(ui: &Ui, grove: &Grove, routine: &HeadRoutine) -> El {
         );
     })
     .variant("quiet");
-    w::row(ui)
+    let row = w::row(ui)
         .align(Align::Center)
         .gap(unit)
         .child(w::text(ui, if routine.mode == "remind" { "Remind" } else { "Task" }).variant("muted"))
@@ -578,7 +601,17 @@ fn routine_row(ui: &Ui, grove: &Grove, routine: &HeadRoutine) -> El {
         .child(w::text(ui, sub).variant("muted"))
         .child(switch)
         .child(run)
-        .child(retire)
+        .child(edit)
+        .child(retire);
+    if history.is_empty() {
+        return row;
+    }
+    w::column(ui)
+        .child(row)
+        .child(w::text(ui, history).variant("muted").layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        }))
 }
 
 fn activity(ui: &Ui, grove: Grove) -> El {
@@ -680,21 +713,45 @@ fn activity_row(ui: &Ui, grove: &Grove, item: &Activity) -> El {
     }
 }
 
-fn open_routine(ui: &Ui, grove: Grove) -> () {
+/// New routine, or an edit of `existing` with its fields filled in.
+fn open_routine(ui: &Ui, grove: Grove, existing: Option<HeadRoutine>) -> () {
     let unit = ui.theme().spacing.unit;
     let name = grove.partner();
-    let task_mode = Signal::new(true);
-    let choice = Signal::new(0usize); // weekdays, daily, weekly, hourly, every, once
-    let every_hours = Signal::new(0usize); // 2, 3, 4, 6, 8, 12
-    let days: Signal<Vec<String>> = Signal::new(vec!["mon".into()]);
-    let phone = Signal::new(false);
+    let hours = [2_i64, 3, 4, 6, 8, 12];
+    let old = existing.clone().unwrap_or_default();
+    let edit_id = existing.as_ref().map(|r| r.routine_id.clone());
+    let heading = if existing.is_some() { "Edit routine" } else { "New routine" };
+    // weekdays, daily, weekly, hourly, every, once
+    let (choice0, hours0) = match (old.kind.as_str(), old.every_minutes) {
+        ("daily", _) => (1, 0),
+        ("weekly", _) => (2, 0),
+        ("every", 60) => (3, 0),
+        ("every", m) => (4, hours.iter().position(|h| h * 60 == m).unwrap_or(0)),
+        ("once", _) => (5, 0),
+        _ => (0, 0),
+    };
+    let was_once = choice0 == 5;
+    let task_mode = Signal::new(old.mode != "remind");
+    let choice = Signal::new(choice0);
+    let every_hours = Signal::new(hours0); // 2, 3, 4, 6, 8, 12
+    let days: Signal<Vec<String>> = Signal::new(if old.days.is_empty() {
+        vec!["mon".into()]
+    } else {
+        old.days.clone()
+    });
+    let phone = Signal::new(matches!(old.deliver.as_str(), "both" | "messenger"));
     let what = w::text_area(ui, "What should Remedy do")
         .placeholder("e.g. Check my inbox and calendar, then give me a short brief for the day");
+    what.set_value(&old.what);
     let title = w::text_input(ui, "Name").placeholder("Name (optional)").max_length(120);
+    title.set_value(&old.title);
     let at = w::text_input(ui, "At").placeholder("08:00");
-    at.set_value("08:00");
-    let once = w::text_input(ui, "Date and time").placeholder("YYYY-MM-DDTHH:MM");
-    let hours = [2_i64, 3, 4, 6, 8, 12];
+    at.set_value(if old.at.is_empty() { "08:00" } else { &old.at });
+    let once = w::text_input(ui, "Date and time").placeholder(if was_once {
+        "YYYY-MM-DDTHH:MM (blank keeps the current time)"
+    } else {
+        "YYYY-MM-DDTHH:MM"
+    });
     let hour_labels: Vec<String> = hours.iter().map(|h| format!("every {h} hours")).collect();
     let when_labels = vec![
         "Weekdays".into(),
@@ -753,7 +810,13 @@ fn open_routine(ui: &Ui, grove: Grove) -> () {
         if !named.is_empty() {
             body["title"] = serde_json::Value::String(named);
         }
-        g.create_routine(body);
+        // An edited one-off with no new time keeps the time it has.
+        if was_once && picked == ScheduleChoice::Once && once_f.value().trim().is_empty() {
+            if let Some(map) = body.as_object_mut() {
+                map.remove("schedule");
+            }
+        }
+        g.save_routine(edit_id.clone(), body);
         if let Some(m) = slot_s.borrow().clone() {
             m.close();
         }
@@ -767,7 +830,7 @@ fn open_routine(ui: &Ui, grove: Grove) -> () {
     .variant("quiet");
     let mut form = w::column(ui)
         .gap(unit)
-        .child(w::heading(ui, 2, "New routine"))
+        .child(w::heading(ui, 2, heading))
         .child(w::button(ui, format!("{name} does it"), move || task_mode.set(true)))
         .child(w::button(ui, "Just remind me", move || task_mode.set(false)))
         .child(what.el())
@@ -794,7 +857,7 @@ fn open_routine(ui: &Ui, grove: Grove) -> () {
     form = form
         .child(w::text(ui, "").variant("error").text(move || err.get()))
         .child(w::row(ui).gap(unit).child(cancel).child(save));
-    let modal = w::modal(ui, "New routine", form, true);
+    let modal = w::modal(ui, heading, form, true);
     *slot.borrow_mut() = Some(modal);
 }
 
