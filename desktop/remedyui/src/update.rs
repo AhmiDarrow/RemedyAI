@@ -1375,6 +1375,7 @@ mod tests {
             // Everything the installer requires gets a stand-in, or makensis stops at its !error.
             .arg(format!("/DRUNTIMESRCPATH={}", as_nsis(&stub)))
             .arg(format!("/DVOICESRCPATH={}", as_nsis(&stub)))
+            .arg(format!("/DIROHSRCPATH={}", as_nsis(&stub)))
             .arg(format!("/DCORESRCPATH={}", as_nsis(&stub)))
             .arg(format!("/DWEBUISRCPATH={}", as_nsis(&webui)))
             .arg(format!("/DHOOKS={}", as_nsis(&desktop.join("src-tauri/windows/hooks.nsh"))))

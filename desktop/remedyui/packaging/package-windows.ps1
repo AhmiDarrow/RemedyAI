@@ -68,6 +68,15 @@ if (-not $SkipBuild -or -not (Test-Path -LiteralPath $Voice)) {
     if ($LASTEXITCODE -ne 0) { throw "cargo build remedy-voice failed ($LASTEXITCODE)" }
 }
 if (-not (Test-Path -LiteralPath $Voice)) { throw "remedy-voice.exe missing: $Voice" }
+# The away-from-home path: the helper that lets a paired phone reach this PC
+# without a third party (remedy-runtime starts it when the owner turns it on).
+$irohManifest = Join-Path $repoRoot "native\iroh\Cargo.toml"
+$Iroh = Join-Path $repoRoot "native\iroh\target\release\remedy-iroh.exe"
+if (-not $SkipBuild -or -not (Test-Path -LiteralPath $Iroh)) {
+    & cargo build --release --jobs $Jobs --locked --bin remedy-iroh --manifest-path $irohManifest
+    if ($LASTEXITCODE -ne 0) { throw "cargo build remedy-iroh failed ($LASTEXITCODE)" }
+}
+if (-not (Test-Path -LiteralPath $Iroh)) { throw "remedy-iroh.exe missing: $Iroh" }
 if (-not (Test-Path -LiteralPath $Runtime)) {
     throw "Runtime not found: $Runtime"
 }
@@ -110,6 +119,7 @@ $icon = To-NsisPath (Join-Path $desktop "src-tauri\icons\icon.ico")
 $binaryNsis = (Resolve-Path -LiteralPath $Binary).Path
 $runtimeNsis = (Resolve-Path -LiteralPath $Runtime).Path
 $voiceNsis = (Resolve-Path -LiteralPath $Voice).Path
+$irohNsis = (Resolve-Path -LiteralPath $Iroh).Path
 $coreNsis = (Resolve-Path -LiteralPath $Core).Path
 $outNsis = $out
 
@@ -222,7 +232,7 @@ Copy-Item -Path (Join-Path $dist "*") -Destination $webuiStage -Recurse -Force
 Assert-WebUIComplete $webuiStage
 $webuiNsis = (Resolve-Path -LiteralPath $webuiStage).Path
 
-& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DRUNTIMESRCPATH=$runtimeNsis" "/DVOICESRCPATH=$voiceNsis" "/DCORESRCPATH=$coreNsis" "/DWEBUISRCPATH=$webuiNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
+& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DRUNTIMESRCPATH=$runtimeNsis" "/DVOICESRCPATH=$voiceNsis" "/DIROHSRCPATH=$irohNsis" "/DCORESRCPATH=$coreNsis" "/DWEBUISRCPATH=$webuiNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
 if ($LASTEXITCODE -ne 0) { throw "makensis failed ($LASTEXITCODE)" }
 if (-not (Test-Path -LiteralPath $out)) { throw "makensis did not write $out" }
 

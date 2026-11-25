@@ -13,6 +13,7 @@ pair-empty = Paste the pairing code first.
 link-connecting = Reaching your PC…
 link-connected-lan = Connected over your home network
 link-connected-tailscale = Connected over Tailscale
+link-connected-direct = Connected directly to your PC
 link-connected = Connected
 link-retrying = Your PC is not answering. Trying again…
 link-unpair = Unpair
