@@ -93,6 +93,8 @@ fn header(ui: &Ui, studio: Studio) -> El {
         .layout(|l| {
             l.grow = 1.0;
             l.shrink = 1.0;
+            // A fixed basis: the chips wrap below once the title has under 160 px.
+            l.basis = Length::Px(160.0);
             l.min_width = Length::Px(0.0);
         })
         .child(
@@ -236,6 +238,9 @@ fn header(ui: &Ui, studio: Studio) -> El {
 
     let chips = chips.layout(|l| {
         l.shrink = 0.0;
+        // Never wider than the pane: the last chips wrap rather than clip.
+        l.max_width = Length::Percent(1.0);
+        l.wrap = true;
     });
     w::row(ui)
         .align(Align::Center)
@@ -251,6 +256,8 @@ fn header(ui: &Ui, studio: Studio) -> El {
             l.width = Length::Percent(1.0);
             l.min_width = Length::Px(0.0);
             l.shrink = 1.0;
+            // Narrow panes: chips drop to their own line instead of clipping.
+            l.wrap = true;
         })
         .clip()
         .child(left)
