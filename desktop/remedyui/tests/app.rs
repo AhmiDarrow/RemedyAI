@@ -2289,3 +2289,37 @@ fn clicking_the_face_swaps_it_for_the_mark_and_back() {
         accessible_names(&app)
     );
 }
+
+#[test]
+fn the_phone_grove_is_the_conversation_and_her_work_and_nothing_else() {
+    no_spawn();
+    let mut app = preview_window_size(remedy_desktop::grove_phone, 412.0, 892.0);
+    app.frames(3);
+    let names = accessible_names(&app);
+    for want in ["Talk", "Work", "Send"] {
+        assert!(names.iter().any(|n| n == want), "{want} on the phone's first screen: {names:?}");
+    }
+    for desktop_only in ["Alongside", "Attach", "Speak", "Studio", "Storyline"] {
+        assert!(
+            names.iter().all(|n| n != desktop_only),
+            "{desktop_only} needs the PC's own screen and must not be on the phone: {names:?}"
+        );
+    }
+    // Nothing is laid out past the right edge at phone width.
+    let off = horizontal_overflow(&app, 412.0);
+    assert!(off.is_empty(), "painted off the phone's screen: {off:?}");
+
+    // The tab is a button around its label button; either opens it.
+    assert!(
+        press_nth(&mut app, Role::Button, "Work", 1) || press_nth(&mut app, Role::Button, "Work", 0),
+        "open her work"
+    );
+    app.frames(3);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n.contains("Give Remedy a side job")),
+        "the Work tab shows what she is doing and takes a new job: {names:?}"
+    );
+    let off = horizontal_overflow(&app, 412.0);
+    assert!(off.is_empty(), "the Work tab paints off the phone's screen: {off:?}");
+}

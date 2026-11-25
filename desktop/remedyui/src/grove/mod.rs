@@ -17,7 +17,7 @@ mod view;
 
 pub(crate) use logic::StudioKind;
 pub(crate) use marks::PlotMark;
-pub(crate) use state::{Grove, StudioHandoff};
+pub(crate) use state::{Grove, HomeTab, StudioHandoff};
 
 use std::cell::RefCell;
 
@@ -70,6 +70,16 @@ pub(crate) fn root(
 /// Morning Grove with example plots, for goldens. It does not touch disk or the network.
 pub(crate) fn preview_home(ui: &Ui) -> El {
     view::frame(ui, Grove::preview(crate::Studio::preview()), None, None)
+}
+
+/// Grove as a paired phone shows it, with example plots, for goldens.
+pub(crate) fn preview_phone(ui: &Ui) -> El {
+    view::frame(ui, Grove::preview_phone(crate::Studio::preview()), None, None)
+}
+
+/// The phone's Grove on a live connection. `app` is absent in previews.
+pub(crate) fn phone(ui: &Ui, grove: Grove, app: Option<App>) -> El {
+    view::frame(ui, grove, app, None)
 }
 
 /// Morning Grove with the post-update house-rules banner open, for goldens.

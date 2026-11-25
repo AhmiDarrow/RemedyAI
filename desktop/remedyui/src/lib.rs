@@ -20,6 +20,7 @@ mod layout;
 mod logo;
 mod model_picker;
 mod palette;
+pub mod phone;
 mod panels;
 mod plan_dock;
 mod prefs;
@@ -875,6 +876,18 @@ fn design_preview_messages() -> Vec<studio::ChatMessage> {
 /// Diagnostics golden: server, host, hardware, and the hive inspector. No network.
 pub fn diagnostics_preview(ui: &Ui) -> El {
     diagnostics::preview(ui)
+}
+
+/// Grove as the paired phone shows it: the conversation first, one column.
+pub fn grove_phone(ui: &Ui) -> El {
+    grove::preview_phone(ui)
+}
+
+/// The phone's second tab: her goals and what she is working on.
+pub fn grove_phone_work(ui: &Ui) -> El {
+    let grove = grove::Grove::preview_phone(Studio::preview());
+    grove.set_home_tab(grove::HomeTab::Plots);
+    grove::phone(ui, grove, None)
 }
 
 /// Morning Grove with example plots, for goldens. It does not touch disk or the network.

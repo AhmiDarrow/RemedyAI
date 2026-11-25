@@ -32,6 +32,9 @@ pub(crate) enum HomeTab {
     Plots,
     Alongside,
     Storyline,
+    /// The conversation on its own, full width. The phone's first screen; the
+    /// desktop shows the same pane beside Home instead.
+    Talk,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -154,6 +157,9 @@ pub(crate) struct StudioHandoff {
 /// The partner surface. Clone is a handle; the signals are shared.
 #[derive(Clone)]
 pub(crate) struct Grove {
+    /// The paired phone's Grove: one column, the conversation first, and none
+    /// of what needs the PC's own screen (Alongside, Studio, files, the mic).
+    pub phone: bool,
     pub studio: Studio,
     pub surface: Signal<Surface>,
     pub place: Signal<Place>,
@@ -258,6 +264,7 @@ impl Grove {
         };
         let bubble = prefs.bubble().unwrap_or(BubblePos { x: 760.0, y: 280.0 });
         Grove {
+            phone: false,
             studio,
             surface: Signal::new(surface),
             place: Signal::new(Place::Home),
@@ -341,6 +348,31 @@ impl Grove {
         }
     }
 
+    /// Grove for a paired phone: it opens on the conversation.
+    pub(crate) fn for_phone(studio: Studio, persist: bool) -> Self {
+        let mut g = Self::new(studio, persist);
+        g.phone = true;
+        // A phone has no Studio to have been left on.
+        g.surface.set(Surface::Grove);
+        g.home_tab.set(HomeTab::Talk);
+        g.room_tab.set(RoomTab::Storyline);
+        g
+    }
+
+    /// The same example Grove as `preview`, laid out for a phone.
+    pub(crate) fn preview_phone(studio: Studio) -> Self {
+        let mut g = Self::preview(studio);
+        g.phone = true;
+        g.home_tab.set(HomeTab::Talk);
+        g.room_tab.set(RoomTab::Storyline);
+        g
+    }
+
+    /// Where Home opens: the conversation on a phone, the plots on a desktop.
+    pub(crate) fn first_tab(&self) -> HomeTab {
+        if self.phone { HomeTab::Talk } else { HomeTab::Plots }
+    }
+
     /// Morning Grove with example plots, for the golden. It does not touch the network or disk.
     pub(crate) fn preview(studio: Studio) -> Self {
         let mut g = Self::new(studio, false);
@@ -400,6 +432,9 @@ impl Grove {
             }
         });
         let _ = g;
+        if self.phone {
+            return;
+        }
         self.spawn(move |c| api::speak_replies(&c), move |g, out| {
             if let Ok(on) = out {
                 g.speak_replies.set(on);
@@ -523,7 +558,7 @@ impl Grove {
 
     pub(crate) fn go_home(&self) {
         self.place.set(Place::Home);
-        self.home_tab.set(HomeTab::Plots);
+        self.home_tab.set(self.first_tab());
         self.bubble_from.set(None);
         self.kick_home();
     }
@@ -571,7 +606,7 @@ impl Grove {
         }
         self.show_grove();
         self.place.set(Place::Home);
-        self.home_tab.set(HomeTab::Plots);
+        self.home_tab.set(self.first_tab());
         self.session_id.set(session_id.to_string());
         self.load_messages(session_id);
     }
@@ -614,6 +649,10 @@ impl Grove {
     }
 
     pub(crate) fn focus_composer(&self) {
+        // On the phone the composer is on the Talk tab, not beside the plots.
+        if self.phone && matches!(self.place.get(), Place::Home) {
+            self.home_tab.set(HomeTab::Talk);
+        }
         let n = self.focus_nonce.get();
         self.focus_nonce.set(n.wrapping_add(1));
     }
@@ -2063,9 +2102,12 @@ fn poll_loop(client: Client, grove: Grove, waker: remedy_ui::reactive::Waker) {
             } else {
                 Some(api::messages(&client, &query.child_session, 80))
             },
-            speak: api::speak_replies(&client).ok(),
-            command: api::take_app_command(&client).ok().flatten(),
-            browser: api::peek_browser_command(&client).ok().flatten(),
+            // Spoken replies, window commands and the browser stage belong to
+            // the PC's own screen and speakers. A phone does not ask for them
+            // (the gateway would refuse).
+            speak: if grove.phone { None } else { api::speak_replies(&client).ok() },
+            command: if grove.phone { None } else { api::take_app_command(&client).ok().flatten() },
+            browser: if grove.phone { None } else { api::peek_browser_command(&client).ok().flatten() },
         };
         tick = tick.wrapping_add(1);
         let g = grove.clone();
