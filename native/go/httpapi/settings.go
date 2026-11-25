@@ -117,6 +117,8 @@ func (s *Server) publishSettingsUpdated(result map[string]any) {
 	if s == nil || result == nil {
 		return
 	}
+	// Setup has just named the owner: this is when Remedy gets her face.
+	s.ensureFace()
 	changes, _ := result["changes"].([]string)
 	if len(changes) == 0 {
 		return

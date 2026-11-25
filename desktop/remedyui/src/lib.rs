@@ -27,6 +27,7 @@ mod presence;
 mod presence_draw;
 mod face_skin;
 mod face_draw;
+mod face_proc;
 mod rails;
 mod runtime;
 mod server_menu;
@@ -618,6 +619,40 @@ pub fn design_moods_72(ui: &Ui) -> El {
 
 pub fn design_moods_144(ui: &Ui) -> El {
     design_moods(ui, 144.0)
+}
+
+/// Grown faces: four seeds across three amounts of use, shown idle.
+pub fn design_grown(ui: &Ui) -> El {
+    presence::set_kind_override(Some(presence::Kind::Square));
+    presence::set_hour_override(Some(10));
+    close_design_settings();
+    let studio = Studio::preview();
+    studio.conn.set(studio::Conn::Ready);
+    design_hosted(ui, studio, move |ui| {
+        fonts::prepare_theme(ui, &Fonts::load());
+        let colors = ui.theme().colors.clone();
+        let uses = [
+            ("First week", face_skin::Facts { sessions: 3, messages: 20, days: 5, goals: 0 }),
+            ("A few months", face_skin::Facts { sessions: 30, messages: 600, days: 90, goals: 2 }),
+            ("Years", face_skin::Facts { sessions: 400, messages: 20000, days: 900, goals: 6 }),
+        ];
+        let mut col = w::column(ui)
+            .gap(tokens::GUTTER)
+            .padding(Insets::all(tokens::GUTTER * 2.0))
+            .style(StylePatch::new().background(colors.bg).foreground(colors.text));
+        for (label, facts) in uses {
+            let mut row = w::row(ui).align(Align::Center).gap(tokens::GUTTER * 2.0).child(
+                w::text(ui, label)
+                    .style(tokens::typo(tokens::TITLE).foreground(colors.text))
+                    .layout(|l| l.width = Length::Px(160.0)),
+            );
+            for seed in [1u64, 2, 3, 4, 5] {
+                row = row.child(presence::preview_grown(ui, presence::Mood::Idle, 120.0, seed, facts));
+            }
+            col = col.child(row);
+        }
+        col
+    })
 }
 
 /// Growth stages of the default Square skin, shown idle at 144.

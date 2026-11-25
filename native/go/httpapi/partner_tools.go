@@ -15,7 +15,7 @@ import (
 // are bound by the runtime (bindToolInput) — the model never supplies them.
 
 // partnerToolPrefixes name the tools that get the caller binding.
-var partnerToolPrefixes = []string{"children.", "routines.", "goals.", "owner.", "grove."}
+var partnerToolPrefixes = []string{"children.", "routines.", "goals.", "owner.", "grove.", "face."}
 
 func isPartnerTool(name string) bool {
 	n := toolNameDotted(strings.TrimSpace(name))
@@ -123,6 +123,22 @@ func partnerToolDefs() []partnerToolDef {
 			desc:   "Stop a child: cancel what it is doing and drop its waiting work.",
 			schema: `{"type":"object","required":["child_id"],"properties":{"child_id":{"type":"string"},` + partnerBoundProps + `},"additionalProperties":false}`,
 			run:    toolChildrenStop,
+		},
+		{
+			id:   "face.regenerate",
+			risk: tools.RiskMutation,
+			desc: "Give yourself a new face. Your face is drawn from a seed: it fixes your features, and the marks you have " +
+				"earned with the owner land in new places. Use it only when the owner asks for a new or different face. " +
+				"The old face is kept, and face.restore brings it back. Your growth is not reset.",
+			schema: `{"type":"object","properties":{` + partnerBoundProps + `},"additionalProperties":false}`,
+			run:    toolFaceRegenerate,
+		},
+		{
+			id:     "face.restore",
+			risk:   tools.RiskMutation,
+			desc:   "Bring back the face you had before the last face.regenerate. Use it when the owner liked the old one better.",
+			schema: `{"type":"object","properties":{` + partnerBoundProps + `},"additionalProperties":false}`,
+			run:    toolFaceRestore,
 		},
 		{
 			id:     "routines.list",

@@ -185,6 +185,7 @@ func New(cfg Config) (*Server, error) {
 		interopLive: newInteropLiveCtl(),
 	}
 	_ = s.approvals.SyncFromConfig(LoadConfig(homeDir))
+	s.ensureFace()
 	// What the owner was asked, and what they decided, belongs in the turn's
 	// evidence alongside the tool calls it gated.
 	s.approvals.SetObserver(s.turns.RecordApproval)
