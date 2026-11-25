@@ -581,11 +581,19 @@ func executeEdit(_ context.Context, request Request) (Result, error) {
 
 	text := string(payload)
 	count := strings.Count(text, oldStr)
+	if count == 0 {
+		// Models often drop or add spaces at the ends of lines. When the text
+		// matches one place once those are ignored, that place is the edit.
+		if start, end, n := matchIgnoringLineEnds(text, oldStr); n == 1 {
+			oldStr, count = text[start:end], 1
+
+		}
+	}
 	switch {
 	case count == 0:
 		return Result{}, fmt.Errorf(
-			"%w: old_string was not found in %q (0 matches). Read the file and copy the exact text, "+
-				"including indentation and line breaks", ErrInvalidInput, body.Path)
+			"%w: old_string was not found in %q (0 matches). Copy the exact text from the file, "+
+				"including indentation and line breaks.%s", ErrInvalidInput, body.Path, closestTextHint(text, oldStr))
 	case count > 1 && !body.ReplaceAll:
 		return Result{}, fmt.Errorf(
 			"%w: old_string matches %d times in %q. Add surrounding lines until it is unique, "+
@@ -614,6 +622,89 @@ func executeEdit(_ context.Context, request Request) (Result, error) {
 		"bom":          bom,
 	})
 	return Result{Output: payloadOut}, err
+}
+
+// trimLineEnd drops spaces, tabs and the carriage return at the end of a line.
+func trimLineEnd(s string) string { return strings.TrimRight(s, " \t\r") }
+
+// matchIgnoringLineEnds finds old in text line by line, ignoring whitespace at
+// the ends of lines. It returns the byte span of the first match in text and
+// how many places match. A span ends with its last line's ending only when old
+// ended with one.
+func matchIgnoringLineEnds(text, old string) (start, end, n int) {
+	want := strings.Split(strings.ReplaceAll(old, "\r\n", "\n"), "\n")
+	takeEnding := false
+	if len(want) > 1 && want[len(want)-1] == "" {
+		want, takeEnding = want[:len(want)-1], true
+	}
+	if len(want) == 0 || strings.TrimSpace(strings.Join(want, "")) == "" {
+		return 0, 0, 0
+	}
+	for i := range want {
+		want[i] = trimLineEnd(want[i])
+	}
+	lines := strings.SplitAfter(text, "\n")
+	offset := 0
+	for i := 0; i+len(want) <= len(lines); i++ {
+		hit := true
+		for j, w := range want {
+			if trimLineEnd(strings.TrimSuffix(lines[i+j], "\n")) != w {
+				hit = false
+				break
+			}
+		}
+		if hit {
+			n++
+			if n == 1 {
+				start, end = offset, offset
+				for j := range want {
+					end += len(lines[i+j])
+				}
+				if !takeEnding {
+					last := lines[i+len(want)-1]
+					end -= len(last) - len(strings.TrimRight(last, "\r\n"))
+				}
+			}
+		}
+		offset += len(lines[i])
+	}
+	return start, end, n
+}
+
+// closestTextHint shows the file's own lines where old_string most likely
+// belongs, so the next try can copy them without another read. Empty when the
+// first line of old_string appears nowhere.
+func closestTextHint(text, old string) string {
+	first := ""
+	oldLines := strings.Split(strings.ReplaceAll(old, "\r\n", "\n"), "\n")
+	for _, l := range oldLines {
+		if first = strings.TrimSpace(l); first != "" {
+			break
+		}
+	}
+	if first == "" {
+		return ""
+	}
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	for i, l := range lines {
+		if strings.TrimSpace(l) != first {
+			continue
+		}
+		show := len(oldLines) + 1
+		if show > 12 {
+			show = 12
+		}
+		if i+show > len(lines) {
+			show = len(lines) - i
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, " The closest text starts at line %d; the file has:\n", i+1)
+		for k := 0; k < show; k++ {
+			fmt.Fprintf(&b, "%d\t%s\n", i+1+k, lines[i+k])
+		}
+		return strings.TrimRight(b.String(), "\n")
+	}
+	return ""
 }
 
 // toCRLF rewrites every line ending in s to CRLF, whatever it started as.

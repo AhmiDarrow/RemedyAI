@@ -197,6 +197,17 @@ func (r *CognitionTurnRunner) modelForTurn(req TurnRequest) cognition.Model {
 			model = strings.TrimSpace(*req.Model)
 		}
 		live := ResolveChatModel(home, prov, model, "")
+		// The owner's Chat / Plan / Build switch sets how much thinking the
+		// turn is worth. Left unset, any turn with tools ran as a build:
+		// top effort and one-hour cache writes for a plain chat message.
+		if a, ok := live.(*providers.Anthropic); ok {
+			switch {
+			case req.ChatMode:
+				a.Shape = providers.ShapeChat
+			case req.PlanMode:
+				a.Shape = providers.ShapePlan
+			}
+		}
 		live = applyMuscleRoute(home, req, live)
 		r.advertiseToolSurface(live, false)
 		return wrapGPUSchedule(home, live)

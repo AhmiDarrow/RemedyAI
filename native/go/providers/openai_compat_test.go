@@ -626,3 +626,42 @@ func TestAdvertisedNameFallsBackToTheSanitizer(t *testing.T) {
 		t.Fatal("no name map means the model already emitted wire names")
 	}
 }
+
+func TestOpenAICompatRetriesRateLimitsButNotBadKeys(t *testing.T) {
+	old := retryBase
+	retryBase = time.Millisecond
+	defer func() { retryBase = old }()
+
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if hits < 3 {
+			http.Error(w, "slow down", http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+	m := &OpenAICompat{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "m", HTTPClient: srv.Client()}
+	ch, err := m.Stream(context.Background(), userTurn("hi"))
+	if err != nil {
+		t.Fatalf("two 429s then success should stream: %v", err)
+	}
+	for range ch {
+	}
+	if hits != 3 {
+		t.Fatalf("hits = %d, want 3", hits)
+	}
+
+	denied := 0
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		denied++
+		http.Error(w, "bad key", http.StatusUnauthorized)
+	}))
+	defer bad.Close()
+	m = &OpenAICompat{BaseURL: bad.URL + "/v1", APIKey: "k", Model: "m", HTTPClient: bad.Client()}
+	if _, err := m.Stream(context.Background(), userTurn("hi")); err == nil || denied != 1 {
+		t.Fatalf("a 401 is final: err=%v tries=%d", err, denied)
+	}
+}
