@@ -158,6 +158,8 @@ struct Pose {
     /// Per-eye aperture factor, for a lopsided curious look.
     open_r: f32,
     arc_eyes: bool,
+    /// Eyes closed in rest: arcs that hang down, the opposite of a smile's.
+    rest_eyes: bool,
     iris: f32,
     iris_dx: f32,
     iris_dy: f32,
@@ -179,6 +181,7 @@ fn pose(mood: Mood) -> Pose {
         lid_tilt: 0.0,
         open_r: 1.0,
         arc_eyes: false,
+        rest_eyes: false,
         iris: 1.0,
         iris_dx: 0.0,
         iris_dy: 0.0,
@@ -248,6 +251,10 @@ fn pose(mood: Mood) -> Pose {
             alarm: true,
             ..p
         },
+        // Eyes closed and easy, a faint smile, her light turned low.
+        Mood::Dreaming => Pose { rest_eyes: true, curve: 0.022, mouth_w: 0.6, brow_dy: (0.012, 0.012), glow: 0.6, ..p },
+        // Level, unhurried, eyes open and scanning.
+        Mood::Watchful => Pose { open: 0.72, iris: 0.9, mouth_w: 0.5, glow: 0.75, scan: true, ..p },
         Mood::Surprised => Pose {
             open: 1.25,
             iris: 0.6,
@@ -698,9 +705,14 @@ pub fn render(spec: &Spec, n: usize) -> Vec<u8> {
         let below_lid = |x: f32, y: f32| y > lid(x);
         let glance = spec.glance as f32 * 0.32 + p.iris_dx;
 
-        if p.arc_eyes && !blink {
-            // Happy: glowing upturned arcs.
-            let (a, m, b) = ((ex - hw * 0.85, ey + hh * 0.25), (ex, ey - hh * 0.95), (ex + hw * 0.85, ey + hh * 0.25));
+        if (p.arc_eyes && !blink) || p.rest_eyes {
+            // Happy: glowing upturned arcs. At rest they hang the other way.
+            let lift = if p.rest_eyes { -0.55 } else { 1.0 };
+            let (a, m, b) = (
+                (ex - hw * 0.85, ey + hh * 0.25 * lift),
+                (ex, ey - hh * 0.95 * lift),
+                (ex + hw * 0.85, ey + hh * 0.25 * lift),
+            );
             let pts: Vec<(f32, f32)> = (0..=20)
                 .map(|k| {
                     let s = k as f32 / 20.0;
@@ -953,7 +965,7 @@ fn rgb8(c: Color) -> [u8; 3] {
 }
 
 /// The spec for a face in the current theme.
-pub fn spec(seed: u64, facts: Facts, mood: Mood, colors: &ColorRoles, glance: i8, closed: bool) -> Spec {
+pub fn spec(seed: u64, facts: Facts, inner: u32, mood: Mood, colors: &ColorRoles, glance: i8, closed: bool) -> Spec {
     // The body is the theme's panel pulled toward its accent, so every theme gets a face of its own.
     let body = colors.panel.mix_oklab(colors.accent, 0.22);
     Spec {
@@ -961,7 +973,7 @@ pub fn spec(seed: u64, facts: Facts, mood: Mood, colors: &ColorRoles, glance: i8
         mood: mood_id(mood),
         glance,
         closed,
-        growth: growth_points(facts).min(u16::MAX as u32) as u16,
+        growth: (growth_points(facts) + inner).min(u16::MAX as u32) as u16,
         neon: rgb8(colors.accent),
         body: rgb8(body),
         alarm: rgb8(colors.danger),
@@ -972,8 +984,8 @@ pub fn spec(seed: u64, facts: Facts, mood: Mood, colors: &ColorRoles, glance: i8
 /// here, at the device size, in the frame that shows them: no loader, no
 /// placeholder. Blink and glance are signals the painter reads, so a change
 /// repaints with the matching frame.
-pub fn paint(ui: &Ui, host: &El, seed: u64, facts: Facts, mood: Mood, size: f32, colors: &ColorRoles, motion: Motion) {
-    let base = spec(seed, facts, mood, colors, 0, false);
+pub fn paint(ui: &Ui, host: &El, seed: u64, facts: Facts, inner: u32, mood: Mood, size: f32, colors: &ColorRoles, motion: Motion) {
+    let base = spec(seed, facts, inner, mood, colors, 0, false);
     let el = ui
         .el("face")
         .layout(move |l| {
@@ -1144,6 +1156,20 @@ mod tests {
         assert_ne!(left, right);
     }
 
+    #[test]
+    fn her_own_life_shows_on_her_face() {
+        // Dreaming and keeping watch are their own faces, not sleepy or idle again.
+        let face = |mood| render(&spec_for(9, mood, 5), 128);
+        assert_ne!(face(Mood::Dreaming), face(Mood::Sleepy));
+        assert_ne!(face(Mood::Watchful), face(Mood::Idle));
+        assert!(lit(&face(Mood::Dreaming)) > 0, "a dreaming face is dim, not dark");
+        // What she did alone adds to what the two of them did together.
+        let (_, few) = (0, circuits(9, &Traits::from_seed(9), growth_points(facts_for_stage(1))));
+        let (_, more) = (0, circuits(9, &Traits::from_seed(9), growth_points(facts_for_stage(1)) + 6));
+        assert!(more.0.iter().filter(|t| t.lit).count() > few.0.iter().filter(|t| t.lit).count());
+        assert_eq!(crate::face_skin::inner_points(0, 0, 0), 0);
+        assert!(crate::face_skin::inner_points(30, 12, 40) > crate::face_skin::inner_points(3, 1, 4));
+    }
     #[test]
     fn growth_adds_detail_and_seeds_pick_different_looks() {
         let t = Traits::from_seed(11);
