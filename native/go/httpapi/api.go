@@ -57,6 +57,9 @@ type Config struct {
 	// VisionWorker powers activate/install/start/stop (Python vision lane).
 	// Nil → status/catalog still work; mutate routes return 503.
 	VisionWorker VisionWorker
+	// ManageClaimidx lets this server install and run the managed ClaimIDX
+	// host (network and process work). The real runtime sets it; tests do not.
+	ManageClaimidx bool
 }
 
 // Server is the production local HTTP API served by remedy-runtime.
@@ -78,7 +81,9 @@ type Server struct {
 	voice  VoiceWorker
 	rmb    RmbController
 	vision VisionWorker
-	hf     *hfProgress
+	// claimidx is the managed ClaimIDX host, nil unless Config.ManageClaimidx.
+	claimidx *claimidxHost
+	hf       *hfProgress
 
 	connectGW     *connect.Gateway
 	messengerGW   *gateway.Gateway
@@ -178,6 +183,7 @@ func New(cfg Config) (*Server, error) {
 		voice:       cfg.VoiceWorker,
 		rmb:         cfg.RmbController,
 		vision:      cfg.VisionWorker,
+		claimidx:    claimidxFor(cfg),
 		hf:          newHFProgress(),
 		approvals:   newApprovalQueue(),
 		lifeHub:     newLifeTaskHub(),
@@ -404,6 +410,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/terminal/{terminal_id}/input", s.handleTerminalInput)
 	s.mux.HandleFunc("POST /api/terminal/{terminal_id}/resize", s.handleTerminalResize)
 	s.mux.HandleFunc("DELETE /api/terminal/{terminal_id}", s.handleTerminalClose)
+	s.mux.HandleFunc("GET /api/claimidx/status", s.handleClaimidxStatus)
 	s.mux.HandleFunc("GET /api/voice/status", s.handleVoiceStatus)
 	s.mux.HandleFunc("POST /api/voice/settings", s.handleVoiceSettings)
 	s.mux.HandleFunc("POST /api/voice/install", s.handleVoiceInstall)
@@ -455,6 +462,7 @@ func (s *Server) Close() error {
 	s.stopSchedulerLoop()
 	s.stopMessengerGateway()
 	s.stopConnectGateway()
+	s.claimidx.Stop()
 	if s.hiveMgr != nil {
 		s.hiveMgr.Shutdown()
 		s.hiveMgr = nil
@@ -481,6 +489,9 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.apiListenPort = listenPort(ln)
 	s.startMessengerGateway()
 	s.startConnectGateway(s.apiListenPort)
+	// Installed after first launch and only while the owner's switch is on.
+	// It works in the background and never holds the runtime up.
+	s.claimidx.Apply()
 	s.startSchedulerLoop(ctx)
 	s.startHearthLoop(ctx)
 	s.startPartnerDispatcher(ctx)

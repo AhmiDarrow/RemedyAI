@@ -134,7 +134,9 @@ func main() {
 		TurnRunner:   runner,
 		VoiceWorker:  voiceWorker,
 		VisionWorker: visionWorker,
-		HomeDir:      home,
+		// The real runtime keeps the managed ClaimIDX host (off in --smoke runs).
+		ManageClaimidx: !*smokeFixture,
+		HomeDir:        home,
 	}, func(bound string) {
 		fmt.Fprintf(os.Stderr, "remedy-runtime listening on http://%s\n", bound)
 	})

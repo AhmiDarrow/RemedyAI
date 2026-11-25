@@ -907,7 +907,9 @@ impl Drop for ConnectClient {
 }
 
 /// How long a request through the shim waits for the tunnel to come up.
-const PIPE_WAIT: Duration = Duration::from_secs(8);
+// Long enough for the slowest way in: the home-network addresses time out
+// first, then the direct path dials and shakes hands.
+const PIPE_WAIT: Duration = Duration::from_secs(25);
 
 impl ShimPipe for ClientInner {
     fn pipe(&self, req: &ShimRequest, out: &mut dyn Write) -> Result<()> {
