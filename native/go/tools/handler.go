@@ -57,7 +57,7 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:          "text.slugify",
 		Version:     1,
-		Description: "Slugify text (local mirror of Python worker)",
+		Description: "Slugify text",
 		Runtime:     RuntimeGo,
 		Risk:        RiskReadOnly,
 		InputSchema: json.RawMessage(`{
@@ -88,7 +88,7 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:          "text.word_count",
 		Version:     1,
-		Description: "Count words (local mirror of Python worker)",
+		Description: "Count words",
 		Runtime:     RuntimeGo,
 		Risk:        RiskReadOnly,
 		InputSchema: json.RawMessage(`{
@@ -119,7 +119,7 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:          "workspace.read",
 		Version:     1,
-		Description: "Read a UTF-8 text file (local mirror of Python worker)",
+		Description: "Read a UTF-8 text file",
 		Runtime:     RuntimeGo,
 		Risk:        RiskReadOnly,
 		InputSchema: json.RawMessage(`{
@@ -163,7 +163,7 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:          "workspace.list",
 		Version:     1,
-		Description: "List workspace entries (local mirror of Python worker)",
+		Description: "List workspace entries",
 		Runtime:     RuntimeGo,
 		Risk:        RiskReadOnly,
 		InputSchema: json.RawMessage(`{
@@ -223,7 +223,7 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:          "workspace.write",
 		Version:     1,
-		Description: "Write a UTF-8 text file (local mirror of Python worker)",
+		Description: "Write a UTF-8 text file",
 		Runtime:     RuntimeGo,
 		Risk:        RiskMutation,
 		InputSchema: json.RawMessage(`{
@@ -268,7 +268,7 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:          "workspace.edit",
 		Version:     1,
-		Description: "Search/replace edit a UTF-8 text file (local mirror of Python worker)",
+		Description: "Search/replace edit a UTF-8 text file",
 		Runtime:     RuntimeGo,
 		Risk:        RiskMutation,
 		InputSchema: json.RawMessage(`{
@@ -333,7 +333,7 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:          "workspace.search",
 		Version:     1,
-		Description: "Search workspace text (local mirror of Python worker)",
+		Description: "Search workspace text",
 		Runtime:     RuntimeGo,
 		Risk:        RiskReadOnly,
 		InputSchema: json.RawMessage(`{
@@ -396,7 +396,7 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:          "skill.search",
 		Version:     1,
-		Description: "Rank skill packs (local mirror of Python worker)",
+		Description: "Rank skill packs",
 		Runtime:     RuntimeGo,
 		Risk:        RiskReadOnly,
 		InputSchema: json.RawMessage(`{
@@ -437,7 +437,7 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:          "skill.activate",
 		Version:     1,
-		Description: "Load one skill procedure body (local mirror of Python worker)",
+		Description: "Load one skill procedure body",
 		Runtime:     RuntimeGo,
 		Risk:        RiskReadOnly,
 		InputSchema: json.RawMessage(`{
@@ -484,7 +484,7 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:          "memory.save",
 		Version:     1,
-		Description: "Save Partner Memory note (local mirror of Python worker)",
+		Description: "Save Partner Memory note",
 		Runtime:     RuntimeGo,
 		Risk:        RiskMutation,
 		InputSchema: json.RawMessage(`{
@@ -537,7 +537,7 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:          "memory.search",
 		Version:     1,
-		Description: "Search Partner Memory (local mirror of Python worker)",
+		Description: "Search Partner Memory",
 		Runtime:     RuntimeGo,
 		Risk:        RiskReadOnly,
 		InputSchema: json.RawMessage(`{
@@ -583,7 +583,7 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:          "prompt.assemble",
 		Version:     1,
-		Description: "Assemble system/soul/skills/memory context (local mirror of Python worker)",
+		Description: "Assemble system/soul/skills/memory context",
 		Runtime:     RuntimeGo,
 		Risk:        RiskReadOnly,
 		InputSchema: json.RawMessage(`{
@@ -638,7 +638,7 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:          "prompt.turn_end",
 		Version:     1,
-		Description: "Post-turn learning (local mirror of Python worker)",
+		Description: "Post-turn learning",
 		Runtime:     RuntimeGo,
 		Risk:        RiskReadOnly,
 		InputSchema: json.RawMessage(`{
@@ -678,7 +678,7 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:          "prompt.after_tool_batch",
 		Version:     1,
-		Description: "Mid-turn metabolism after a tool batch (local mirror of Python worker)",
+		Description: "Mid-turn metabolism after a tool batch",
 		Runtime:     RuntimeGo,
 		Risk:        RiskReadOnly,
 		InputSchema: json.RawMessage(`{
@@ -712,7 +712,7 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	if err := registry.Register(Descriptor{
 		ID:          "partner.improve",
 		Version:     1,
-		Description: "Unattended organism learning tick (local mirror of Python worker)",
+		Description: "Unattended organism learning tick",
 		Runtime:     RuntimeGo,
 		Risk:        RiskReadOnly,
 		InputSchema: json.RawMessage(`{

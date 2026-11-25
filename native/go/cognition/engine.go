@@ -885,16 +885,46 @@ func callsWith(calls []ToolCall, decisions []Decision, want Decision) []ToolCall
 	return out
 }
 
-// executeDecided runs the allowed calls in parallel and returns one result per
-// call in call order; denied calls get an error result instead.
+// ConcurrencyPolicy is an optional Policy extension. Concurrent reports a call
+// that only reads, so it may run alongside its neighbours. Without it every
+// call in a batch runs in parallel, as before.
+type ConcurrencyPolicy interface {
+	Concurrent(call ToolCall) bool
+}
+
+// executeDecided runs the allowed calls and returns one result per call in
+// call order; denied calls get an error result instead. Runs of read-only
+// calls go in parallel. A call that changes something runs alone, in the order
+// the model wrote it, so an edit never races another edit to the same file and
+// a command never starts before the edit it follows.
 func (e *Engine) executeDecided(ctx context.Context, calls []ToolCall, decisions []Decision, maxParallel int) []ToolResult {
 	results := make([]ToolResult, len(calls))
 	if maxParallel < 1 {
 		maxParallel = 1
 	}
+	order, ordered := e.Policy.(ConcurrencyPolicy)
+	for start := 0; start < len(calls); {
+		end := len(calls)
+		if ordered {
+			end = start + 1
+			if order.Concurrent(calls[start]) {
+				for end < len(calls) && order.Concurrent(calls[end]) {
+					end++
+				}
+			}
+		}
+		e.executeGroup(ctx, calls, decisions, results, start, end, maxParallel)
+		start = end
+	}
+	return results
+}
+
+// executeGroup runs calls[start:end] in parallel, at most maxParallel at once.
+func (e *Engine) executeGroup(ctx context.Context, calls []ToolCall, decisions []Decision, results []ToolResult, start, end, maxParallel int) {
 	sem := make(chan struct{}, maxParallel)
 	var wg sync.WaitGroup
-	for i, call := range calls {
+	for i := start; i < end; i++ {
+		call := calls[i]
 		if decisions[i] != Allow {
 			results[i] = ToolResult{ID: call.ID, Name: call.Name, Err: "policy denied", IsError: true}
 			continue
@@ -921,7 +951,6 @@ func (e *Engine) executeDecided(ctx context.Context, calls []ToolCall, decisions
 		}(i, call)
 	}
 	wg.Wait()
-	return results
 }
 
 func (e *Engine) streamWithRetry(ctx context.Context, turn Turn, config Config) (<-chan ModelEvent, error) {

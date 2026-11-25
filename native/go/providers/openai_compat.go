@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -121,26 +122,43 @@ func (c *OpenAICompat) Stream(ctx context.Context, turn cognition.Turn) (<-chan 
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
 	key := strings.TrimSpace(c.APIKey)
 	if key == "" {
 		key = "unused"
 	}
-	req.Header.Set("Authorization", "Bearer "+key)
-
-	resp, err := c.client().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		defer resp.Body.Close()
-		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("openai-compat HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+	// A rate limit, an overloaded server or a dropped connection before the
+	// first byte is worth another try; nothing has reached the owner yet.
+	var resp *http.Response
+	for attempt := 0; ; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("Authorization", "Bearer "+key)
+		resp, err = c.client().Do(req)
+		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			break
+		}
+		retryAfter, failure := "", err
+		if err == nil {
+			snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			resp.Body.Close()
+			retryAfter = resp.Header.Get("Retry-After")
+			failure = fmt.Errorf("openai-compat HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+			if !retryableStatus(resp.StatusCode) {
+				return nil, failure
+			}
+		}
+		if attempt >= openAIRetries || ctx.Err() != nil {
+			return nil, failure
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(retryDelay(attempt, retryAfter)):
+		}
 	}
 
 	out := make(chan cognition.ModelEvent, 16)
@@ -716,4 +734,26 @@ func parseSSE(ctx context.Context, body io.Reader, out chan<- cognition.ModelEve
 	if sawDone {
 		_ = p.emit(cognition.ModelEvent{Done: true})
 	}
+}
+
+// openAIRetries is how many times a request is sent again before any output.
+const openAIRetries = 2
+
+// retryBase is the first wait between tries; tests shorten it.
+var retryBase = time.Second
+
+func retryableStatus(code int) bool {
+	return code == http.StatusRequestTimeout || code == http.StatusTooManyRequests || code >= 500
+}
+
+// retryDelay honours the server's Retry-After (seconds, at most 30) and
+// otherwise waits 1 s, then 3 s.
+func retryDelay(attempt int, retryAfter string) time.Duration {
+	if s, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && s > 0 {
+		if s > 30 {
+			s = 30
+		}
+		return time.Duration(s) * time.Second
+	}
+	return retryBase * time.Duration(1+2*attempt)
 }

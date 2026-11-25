@@ -297,7 +297,9 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 	case tools.RiskCheckpoint:
 		return p.decideOwnerMoment(call)
 	case tools.RiskMutation:
-		if callIsReadOnlyAction(call) {
+		// The checklist is the session's own scratch state: it touches nothing
+		// outside the conversation, so it never needs the owner's yes.
+		if callIsReadOnlyAction(call) || call.Name == "todo" {
 			return cognition.Allow
 		}
 		if classifySensitiveComputer(call, p.livePageContext()) {
@@ -317,6 +319,23 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 	default:
 		return cognition.Deny
 	}
+}
+
+// Concurrent reports a call that may run alongside its neighbours in a batch:
+// it only reads, or it is a delegate, which works in its own session. The
+// engine runs everything else one at a time, in the order the model wrote it.
+func (p *RegistryPolicy) Concurrent(call cognition.ToolCall) bool {
+	if p == nil || p.Registry == nil {
+		return false
+	}
+	if call.Name == "delegate" {
+		return true
+	}
+	desc, err := p.Registry.Latest(call.Name)
+	if err != nil {
+		return false
+	}
+	return desc.Risk == tools.RiskReadOnly || callIsReadOnlyAction(call)
 }
 
 // callIsReadOnlyAction reports a call that only reads, on a tool whose
