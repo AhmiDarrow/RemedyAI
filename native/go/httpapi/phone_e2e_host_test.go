@@ -25,7 +25,13 @@ func TestPhoneEndToEndHost(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REMEDY_HOME", home)
 	InvalidateConfigCache()
-	cfg := "connect_enabled = true\nconnect_bind_host = \"127.0.0.1\"\nconnect_bind_port = 17481\nconnect_rdv_enabled = false\n"
+	// REMEDY_PHONE_E2E_BIND lets a real phone or an emulator reach the host
+	// (a LAN address); by default only this PC can.
+	bind := strings.TrimSpace(os.Getenv("REMEDY_PHONE_E2E_BIND"))
+	if bind == "" {
+		bind = "127.0.0.1"
+	}
+	cfg := "connect_enabled = true\nconnect_bind_host = \"" + bind + "\"\nconnect_bind_port = 17481\nconnect_rdv_enabled = false\n"
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +85,14 @@ func TestPhoneEndToEndHost(t *testing.T) {
 		t.Fatalf("pair/start: %d %v", code, body)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "qr.txt"), []byte(qr), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The one-line form, for a phone or emulator the code is typed into.
+	link, _ := body["link"].(string)
+	if !strings.HasPrefix(link, "remedyconnect://pair#") {
+		t.Fatalf("pair/start gave no link: %v", body)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "link.txt"), []byte(link), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	done := filepath.Join(dir, "done")

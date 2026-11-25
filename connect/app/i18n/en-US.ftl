@@ -1,7 +1,7 @@
 # RemedyConnect's own text. Grove's text comes with Grove.
 
 pair-title = Pair with your PC
-pair-steps = On your PC open Remedy, then Settings, Connect, and choose Show pairing code. Copy the code and paste it here.
+pair-steps = On your PC open Remedy, then Settings, Connect. Choose Show pairing code, then Copy pairing code. Send it to this phone and paste it here.
 pair-code = Pairing code
 pair-code-hint = Paste the code from your PC
 pair-name = This phone's name

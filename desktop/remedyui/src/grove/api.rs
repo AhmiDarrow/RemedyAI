@@ -1117,10 +1117,11 @@ pub fn browser_hello(client: &Client, session_id: Option<&str>) -> Result<bool, 
     Ok(bool_of(&v, "host_connected"))
 }
 
-/// GET `/api/settings` for the partner's name and gender. Missing keys stay empty.
-pub fn settings_identity(client: &Client) -> Result<(String, String), String> {
+/// GET `/api/settings` for the partner's name and gender, and the owner's name.
+/// Missing keys stay empty.
+pub fn settings_identity(client: &Client) -> Result<(String, String, String), String> {
     let v = send(client, Request::get("settings"))?;
-    Ok((str_of(&v, "name"), str_of(&v, "agent_gender")))
+    Ok((str_of(&v, "name"), str_of(&v, "agent_gender"), str_of(&v, "user_name")))
 }
 
 /// GET `/api/settings`: whether the owner has given Remedy her nights.
