@@ -188,6 +188,21 @@ func SetEnabled(env soul.Env, enabled bool) (State, error) {
 	})
 }
 
+// TakeOffer is take_vigil_offer: true exactly once, after minTurns turns
+// together, when the vigil is neither on nor already offered. Taking it
+// marks the offer made, so it is at most once even if never voiced.
+func TakeOffer(env soul.Env, minTurns, turnsTogether int) (bool, error) {
+	taken := false
+	_, err := mutate(env, func(st *State) (bool, error) {
+		if st.Enabled || st.Offered || turnsTogether < minTurns {
+			return false, nil
+		}
+		st.Offered, taken = true, true
+		return true, nil
+	})
+	return taken, err
+}
+
 // Status is the public snapshot (vigil_status).
 func Status(env soul.Env) (map[string]any, error) {
 	st, err := Load(env)
