@@ -908,6 +908,9 @@ func interopTruncate(s string, n int) string {
 
 func redactInteropText(s string) string {
 	// Never echo bearer tokens or env assignments in the audit log.
-	s = strings.ReplaceAll(s, os.Getenv(interopTokenEnv), "***")
+	// Replacing an empty string would put *** between every character.
+	if tok := os.Getenv(interopTokenEnv); tok != "" {
+		s = strings.ReplaceAll(s, tok, "***")
+	}
 	return s
 }
