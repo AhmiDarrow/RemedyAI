@@ -240,7 +240,7 @@ impl Studio {
             vec![Session::fresh("1", "New chat")],
             Some("1".into()),
             2,
-            "Joe",
+            "",
             false,
         )
     }

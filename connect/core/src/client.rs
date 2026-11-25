@@ -858,8 +858,22 @@ impl Drop for ConnectClient {
     }
 }
 
+/// How long a request through the shim waits for the tunnel to come up.
+const PIPE_WAIT: Duration = Duration::from_secs(8);
+
 impl ShimPipe for ClientInner {
     fn pipe(&self, req: &ShimRequest, out: &mut dyn Write) -> Result<()> {
+        if self.tunnel.lock().unwrap().is_none() {
+            // The app asks as soon as it opens, and again right after a drop: hold the
+            // request while the tunnel comes up instead of failing it at once.
+            let g = self.state.lock().unwrap();
+            let _ = self
+                .state_cv
+                .wait_timeout_while(g, PIPE_WAIT, |s| {
+                    !matches!(s, ConnState::Connected { .. } | ConnState::Stopped)
+                })
+                .unwrap();
+        }
         let t = self.tunnel.lock().unwrap().clone().ok_or(Error::NotConnected)?;
         t.pipe(req, out)
     }

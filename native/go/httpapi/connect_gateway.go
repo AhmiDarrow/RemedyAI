@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -390,7 +391,10 @@ func (s *Server) handleConnectPairStart(w http.ResponseWriter, r *http.Request) 
 			break
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"qr": qr, "exp": exp})
+	// The same lines as one line: it survives a paste, and a phone camera that
+	// scans it can open the phone app.
+	link := "remedyconnect://pair#" + base64.RawURLEncoding.EncodeToString([]byte(qr))
+	writeJSON(w, http.StatusOK, map[string]any{"qr": qr, "link": link, "exp": exp})
 }
 
 func (s *Server) handleConnectPause(w http.ResponseWriter, r *http.Request) {
