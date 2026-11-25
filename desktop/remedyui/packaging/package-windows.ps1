@@ -244,7 +244,7 @@ if (-not (Get-ChildItem -LiteralPath $workerDeps -ErrorAction SilentlyContinue))
 $workerPyzNsis = (Resolve-Path -LiteralPath $workerPyz).Path
 $workerDepsNsis = (Resolve-Path -LiteralPath $workerDeps).Path
 
-& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DRUNTIMESRCPATH=$runtimeNsis" "/DVOICESRCPATH=$voiceNsis""/DCORESRCPATH=$coreNsis" "/DWEBUISRCPATH=$webuiNsis" "/DWORKERPYZPATH=$workerPyzNsis" "/DWORKERDEPSPATH=$workerDepsNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
+& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DRUNTIMESRCPATH=$runtimeNsis" "/DVOICESRCPATH=$voiceNsis" "/DCORESRCPATH=$coreNsis" "/DWEBUISRCPATH=$webuiNsis" "/DWORKERPYZPATH=$workerPyzNsis" "/DWORKERDEPSPATH=$workerDepsNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
 if ($LASTEXITCODE -ne 0) { throw "makensis failed ($LASTEXITCODE)" }
 if (-not (Test-Path -LiteralPath $out)) { throw "makensis did not write $out" }
 
