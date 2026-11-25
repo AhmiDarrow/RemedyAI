@@ -208,33 +208,26 @@ Function RunMainBinary
   Exec '"$INSTDIR\${MAINBINARYNAME}"'
 FunctionEnd
 
-; Previous install, if the registry still points at one. /S skips the wipe
-; dialog. /UPDATE is the same signal the hooks already honor. _?= is last so
-; ExecWait does not return while the uninstaller is still deleting files.
-Function UninstallPrevious
-  ReadRegStr $R0 HKCU "${UNINSTKEY}" "UninstallString"
-  ${If} $R0 == ""
-    Return
-  ${EndIf}
-  StrCpy $R1 $R0
-  StrCpy $R2 $R1 1
-  ${If} $R2 == '"'
-    StrCpy $R1 $R1 "" 1
-    StrCpy $R1 $R1 -1
-  ${EndIf}
-  IfFileExists "$R1" 0 done_prev
-  ${GetParent} "$R1" $R2
-  DetailPrint "Removing the previous install. Per-user data stays."
-  ExecWait '"$R1" /S /UPDATE _?=$R2'
-  done_prev:
+; What an older install left that this one no longer ships. The old
+; uninstaller is not run: its hook stops every process under the install
+; folder, itself included, so it never removed anything. Per-user data lives
+; elsewhere and is not touched.
+Function RemoveStaleFiles
+  RMDir /r "$INSTDIR\webui"
+  RMDir /r "$INSTDIR\windows"
+  Delete "$INSTDIR\app.exe"
+  Delete "$INSTDIR\remedy-desktop.exe"
+  Delete "$INSTDIR\remedy-runtime-x86_64-pc-windows-msvc.exe"
+  ; Older installs put the Start Menu shortcut beside the folder this one uses.
+  Delete "$SMPROGRAMS\${PRODUCTNAME}.lnk"
 FunctionEnd
 
 Section Install
-  Call UninstallPrevious
-
   SetOutPath "$INSTDIR"
 
+  ; Running copies are closed first, so nothing below is locked.
   !insertmacro NSIS_HOOK_PREINSTALL
+  Call RemoveStaleFiles
 
   ; Installed name stays "Remedy Desktop.exe" even when the cargo bin is remedy-desktop.exe.
   File "/oname=${MAINBINARYNAME}" "${MAINBINARYSRCPATH}"
@@ -282,9 +275,13 @@ Section Install
 
   CreateDirectory "$SMPROGRAMS\${PRODUCTNAME}"
   CreateShortcut "$SMPROGRAMS\${PRODUCTNAME}\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}"
-  ${If} $PassiveMode = 1
-  ${OrIf} ${Silent}
-    CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}"
+  ; A first install puts a shortcut on the desktop. An update leaves the
+  ; desktop as the person arranged it.
+  ${If} $UpdateMode <> 1
+    ${If} $PassiveMode = 1
+    ${OrIf} ${Silent}
+      CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}"
+    ${EndIf}
   ${EndIf}
 
   !insertmacro NSIS_HOOK_POSTINSTALL
