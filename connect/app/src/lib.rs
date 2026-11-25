@@ -193,8 +193,11 @@ impl Link {
 
 /// The app's own text, from `i18n/<locale>.ftl`, carried inside the app.
 fn messages() -> Messages {
-    thread_local!(static MESSAGES: Messages =
-        Messages::new("en-US").embedded("en-US", include_str!("../i18n/en-US.ftl")));
+    // Detached: made inside a screen, the catalog would die with that screen (the pairing
+    // screen goes away once paired) and the next lookup would panic.
+    thread_local!(static MESSAGES: Messages = remedy_ui::reactive::Scope::detached(|| {
+        Messages::new("en-US").embedded("en-US", include_str!("../i18n/en-US.ftl"))
+    }).0);
     MESSAGES.with(Clone::clone)
 }
 
@@ -228,18 +231,8 @@ fn shell(ui: &Ui, link: Link, app: Option<App>) -> El {
             l.min_height = Length::Px(0.0);
         })
         .style(StylePatch::new().background(colors.bg).foreground(colors.text));
-    // Keep everything clear of the status bar, the gesture bar, a display
-    // cutout and the on-screen keyboard. The background still runs under them.
-    let (inset, inset_ui) = (page.clone(), ui.clone());
-    let page = page.bind(move || {
-        let area = inset_ui.safe_area();
-        let _ = inset.clone().padding(Insets {
-            top: area.top,
-            end: area.right,
-            bottom: area.bottom,
-            start: area.left,
-        });
-    });
+    // The engine's window root already keeps this clear of the status bar, the gesture
+    // bar, a display cutout and the on-screen keyboard.
 
     let stage = link.stage;
     let (pair_ui, pair_link) = (ui.clone(), link.clone());
@@ -260,7 +253,19 @@ fn shell(ui: &Ui, link: Link, app: Option<App>) -> El {
         };
         origins.set_if_changed(next);
     });
-    let slot = w::column(ui).layout(grow);
+    // Only the region in use takes the screen: two growing regions would each get half,
+    // and the pairing form would be cut off above the keyboard.
+    let slot = w::column(ui);
+    let slot_layout = slot.clone();
+    let slot = slot.bind(move || {
+        let live = matches!(stage.get(), Stage::Live(_));
+        let _ = slot_layout.clone().layout(move |l| {
+            grow(l);
+            if !live {
+                l.grow = 0.0;
+            }
+        });
+    });
     let (live_ui, live_link) = (ui.clone(), link);
     w::for_each(&slot, origins, |origin: &String| origin.clone(), move |origin| {
         let grove = PhoneGrove::open(origin, true);
@@ -380,7 +385,7 @@ fn pair_screen(ui: &Ui, link: Link) -> El {
         .child(w::text(ui, tr(ui, "pair-steps")).variant("muted"))
         .child(code.el().layout(|l| {
             l.width = Length::Percent(1.0);
-            l.min_height = Length::Px(140.0);
+            l.min_height = Length::Px(96.0);
         }))
         .child(name.el().layout(|l| l.width = Length::Percent(1.0)))
         .child(problem)
@@ -406,13 +411,14 @@ pub fn preview_pair(ui: &Ui) -> El {
 }
 
 /// Android starts the app here, in the activity's thread.
+// Written by hand: at this engine pin `main!` is exported from the platform crate
+// root, which an app cannot reach through `remedy_ui`.
 #[cfg(target_os = "android")]
-fn android_main() {
+#[unsafe(no_mangle)]
+fn android_main(activity: remedy_ui::android::AndroidApp) {
+    remedy_ui::android::attach(activity);
     let config = remedy_ui::AppConfig::new("Remedy").edition(remedy_ui::Edition::E2026);
     if let Err(e) = remedy_ui::run(config, app) {
         remedy_ui::android::log(&format!("RemedyConnect: {e}"));
     }
 }
-
-#[cfg(target_os = "android")]
-remedy_ui::android::main!(android_main);

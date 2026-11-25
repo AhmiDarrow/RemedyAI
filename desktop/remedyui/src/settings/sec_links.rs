@@ -164,13 +164,27 @@ fn connect(ui: &Ui, s: Settings) -> El {
                 }
                 super::http::request(s, "POST", "connect/pair/start".into(), Some(json!({})), move |out| match out {
                     Ok(v) => {
-                        s.pair_qr.set(state::jstr(&v, "qr", ""));
+                        // The one-line link when the runtime gives one (an older runtime gives only the lines).
+                        let link = state::jstr(&v, "link", "");
+                        s.pair_qr.set(if link.is_empty() { state::jstr(&v, "qr", "") } else { link });
                         s.banner.set("Pairing code ready.".into());
                     }
                     Err(e) => s.banner.set(e),
                 });
             }))
             .child(qr)
+            .child(form::action(&ui, "Copy pairing code", "quiet", {
+                let ui = ui.clone();
+                move || {
+                    let code = s.pair_qr.get();
+                    if code.trim().is_empty() {
+                        s.banner.set("Show the pairing code first.".into());
+                    } else {
+                        ui.copy_text(code);
+                        s.banner.set("Pairing code copied. It works once, for a minute.".into());
+                    }
+                }
+            }))
             .child(device_list(&ui, s))
             .child(form::action(&ui, "Tailscale status", "quiet", move || bits::ask(s, "GET", "connect/tailscale/status", None, "Tailscale status updated.")))
             .child(form::action(&ui, "Install Tailscale", "quiet", move || bits::ask(s, "POST", "connect/tailscale/install", Some(json!({})), "Tailscale install started.")))
