@@ -372,6 +372,7 @@ func applyMuscleRoute(home string, req TurnRequest, live cognition.Model) cognit
 	switch target {
 	case "mind":
 		if m := mindChatModel(home, cfg); m != nil {
+			noteVisionUse()
 			return m
 		}
 	case "rmb":

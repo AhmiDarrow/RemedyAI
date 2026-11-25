@@ -194,6 +194,7 @@ func New(cfg Config) (*Server, error) {
 	s.approvals.SetObserver(s.turns.RecordApproval)
 	// Partner trust loop: Auto/Full must unlock coding mutations; Ask must
 	// enqueue into the same queue the Desktop banner polls.
+	bindVisionUse(s.vision)
 	if cr, ok := s.runner.(*CognitionTurnRunner); ok && cr != nil {
 		cr.Approvals = s.approvals
 		if cr.HomeDir == "" {
