@@ -243,7 +243,6 @@ impl Wizard {
                 saving.set(false);
                 match setup {
                     Ok(_) => { presence::set_skin_override(None); done.set(true); },
-                    Err(e) if had_key => error.set(format!("{e} Enter the API key again, then retry.")),
                     Err(e) => error.set(e),
                 }
             });
