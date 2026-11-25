@@ -1736,10 +1736,27 @@ pub fn react(studio: &Studio, message_id: &str, emoji: &str) {
         return;
     };
     let path = format!("sessions/{sid}/messages/{message_id}/reaction");
+    let (st, wake) = (studio.clone(), waker().ok());
     api::spawn_json(
         &client,
         Request::put(&path).json(&json!({ "emoji": next })),
-        |_| {},
+        move |out| {
+            // The server did not take the reaction, so the message shows the old one again.
+            let (Err(_), Some(wake)) = (out, wake) else {
+                return;
+            };
+            let _ = wake.post(move || {
+                if st.live_message_id.get().as_deref() == Some(message_id.as_str()) {
+                    st.live_user_reaction.set(current.clone());
+                }
+                st.messages.update(|list| {
+                    if let Some(m) = list.iter_mut().find(|m| m.id == message_id) {
+                        m.user_reaction = current;
+                    }
+                });
+                st.depth.notice.set("That reaction did not save.".into());
+            });
+        },
     );
 }
 
@@ -1908,7 +1925,21 @@ pub fn assign_project(studio: &Studio, id: &str, project: Option<String>) {
     if let Some(client) = studio.runtime() {
         let path = format!("sessions/{id}");
         let body = json!({ "project_path": project });
-        api::spawn_json(&client, Request::patch(&path).json(&body), |_| {});
+        let (st, sid, wake) = (studio.clone(), id.to_string(), waker().ok());
+        api::spawn_json(&client, Request::patch(&path).json(&body), move |out| {
+            // The server kept the session where it was, so the list moves it back.
+            let (Err(_), Some(wake)) = (out, wake) else {
+                return;
+            };
+            let _ = wake.post(move || {
+                st.set_project(&sid, old.clone());
+                let mut map = st.depth.session_order.get();
+                rehome_order(&mut map, &sid, project.as_deref(), old.as_deref());
+                st.depth.session_order.set(map);
+                st.depth.save_order();
+                st.depth.notice.set("That move did not save.".into());
+            });
+        });
     }
 }
 
@@ -2640,6 +2671,10 @@ fn fetch_memory(studio: &Studio, append: bool) {
     // when Memory is opened from the top bar.
     api::spawn_json(&client, Request::get(&path), move |out| {
         let _ = wake.post(move || {
+            // A slow answer to an earlier search must not replace a newer one's results.
+            if studio.depth.memory_query.get() != q {
+                return;
+            }
             apply_memory_page(&studio, out, append);
         });
     });
