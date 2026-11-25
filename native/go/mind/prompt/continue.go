@@ -661,3 +661,9 @@ var (
 	reBuildFileCue     = regexp.MustCompile(`(?i)(?i)(?:\.(?:py|tsx?|jsx?|rs|go|cpp|h|gd)\b|\.c\b|\bgcc\b|\bcompile\b|\bclang\b)`)
 	reCompanion        = regexp.MustCompile(`(?i)(?i)\b(clipboard|what'?s on (my |the )?(screen|clipboard|desk)|look at (this|that|my screen|the (screen|clipboard|desktop|ui))|i copied|i just copied|paste( this)?|on my (screen|desktop|monitor)|what am i looking at|what'?s (open|focused)|design (this|that|the|my)|critique (this|that|the)|does this look|make (it|this) (pretty|beautiful|sleek|nice)|mock(up)?|screenshot|visual(ly)?)\b`)
 )
+
+// DecideContinue is prompt.should_continue for the runtime: input is the
+// hook's input map and st is the turn's own gate memory (one per turn).
+func DecideContinue(input map[string]any, st *ContinueState) (cont bool, nudge, reason string) {
+	return decideContinue(parseContinueInput(input), st)
+}
