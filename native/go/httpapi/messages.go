@@ -145,9 +145,15 @@ func (s *Server) turnHistory(sid string) []map[string]any {
 	out := make([]map[string]any, 0, len(msgs))
 	for _, m := range msgs {
 		content, _ := m.Content.(string)
+		content = truncStr(content, turnHistoryContentChars)
+		// What she did, not only what she said: without it the next turn has
+		// no idea a file was already read or a command already run.
+		if ledger := toolLedgerLine(m.ToolCalls, m.ToolResults); ledger != "" {
+			content = strings.TrimSpace(content + "\n" + ledger)
+		}
 		row := map[string]any{
 			"role":    m.Role,
-			"content": truncStr(content, turnHistoryContentChars),
+			"content": content,
 		}
 		if m.Reactions != nil && m.Reactions.User != "" {
 			row["owner_reaction"] = m.Reactions.User
@@ -155,6 +161,68 @@ func (s *Server) turnHistory(sid string) []map[string]any {
 		out = append(out, row)
 	}
 	return out
+}
+
+const (
+	toolLedgerCalls = 20
+	toolLedgerChars = 700
+)
+
+// toolLedgerLine is one line naming the tools a saved message ran and the main
+// thing each acted on, with failures marked. Empty when it ran none.
+func toolLedgerLine(calls, results any) string {
+	list, _ := calls.([]any)
+	if len(list) == 0 {
+		return ""
+	}
+	failed := map[string]bool{}
+	if rs, ok := results.([]any); ok {
+		for _, r := range rs {
+			row, _ := r.(map[string]any)
+			if id, _ := row["id"].(string); id != "" && row["error"] != nil {
+				failed[id] = true
+			}
+		}
+	}
+	parts := make([]string, 0, len(list))
+	for i, c := range list {
+		if i == toolLedgerCalls {
+			parts = append(parts, fmt.Sprintf("and %d more", len(list)-i))
+			break
+		}
+		call, _ := c.(map[string]any)
+		name, _ := call["name"].(string)
+		if name == "" {
+			continue
+		}
+		part := name
+		if args, ok := call["args"].(map[string]any); ok {
+			for _, key := range []string{"path", "command", "query", "url", "pattern"} {
+				if v, _ := args[key].(string); strings.TrimSpace(v) != "" {
+					v = strings.Join(strings.Fields(v), " ")
+					if len(v) > 80 {
+						v = truncStr(v, 80)
+						v = v[:strings.Index(v, "\n")] + "…"
+					}
+					part += " " + v
+					break
+				}
+			}
+		}
+		if id, _ := call["id"].(string); failed[id] {
+			part += " (failed)"
+		}
+		parts = append(parts, part)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	line := "[Tools used in this message: " + strings.Join(parts, " · ") + "]"
+	if len(line) > toolLedgerChars {
+		line = truncStr(line, toolLedgerChars)
+		line = line[:strings.Index(line, "\n")] + "…]"
+	}
+	return line
 }
 
 func truncAny(v any, n int) any {

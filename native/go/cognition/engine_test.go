@@ -1387,3 +1387,36 @@ func TestChangingCallsRunInOrderAndReadsRunTogether(t *testing.T) {
 		t.Fatalf("changing calls finished out of order: %v", finished)
 	}
 }
+func TestClippedJSONKeepsItsShapeAndReadableText(t *testing.T) {
+	content := strings.Repeat("line of text\n", 2000)
+	raw, _ := json.Marshal(map[string]any{"path": "a.txt", "content": content, "total_lines": 2000})
+	got := capResults([]ToolResult{{ID: "1", Name: "read", Output: raw}}, 4000)[0].Output
+	var body struct {
+		Path       string `json:"path"`
+		Content    string `json:"content"`
+		TotalLines int    `json:"total_lines"`
+		Truncated  bool   `json:"truncated"`
+	}
+	if err := json.Unmarshal(got, &body); err != nil {
+		t.Fatalf("a clipped result is still JSON: %v", err)
+	}
+	if body.Path != "a.txt" || body.TotalLines != 2000 || !body.Truncated {
+		t.Fatalf("the other fields survive: %+v", body)
+	}
+	if !strings.HasPrefix(body.Content, "line of text\nline of text\n") || !strings.Contains(body.Content, "truncated") {
+		t.Fatalf("content is plain text with a truncation note: %.80q", body.Content)
+	}
+	if len(got) > 4000+400 {
+		t.Fatalf("clipped result is %d bytes, want about 4000", len(got))
+	}
+	// Many small fields and no dominant text: the old preview shape still applies.
+	small := map[string]any{}
+	for i := 0; i < 300; i++ {
+		small[fmt.Sprintf("k%03d", i)] = "0123456789abcdef"
+	}
+	raw, _ = json.Marshal(small)
+	got = capResults([]ToolResult{{ID: "2", Name: "x", Output: raw}}, 2000)[0].Output
+	if !bytes.Contains(got, []byte(`"output_preview"`)) {
+		t.Fatalf("no dominant string falls back to the preview: %.80s", got)
+	}
+}
