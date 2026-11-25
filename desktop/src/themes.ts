@@ -9,6 +9,7 @@ export type ThemeId =
   | 'green'
   | 'purple'
   | 'alien'
+  | 'mecha'
   | 'orange'
   | 'cyan'
   | 'deutan'
@@ -30,6 +31,7 @@ const THEME_ID_SET = new Set<string>([
   'green',
   'purple',
   'alien',
+  'mecha',
   'orange',
   'cyan',
   'deutan',
@@ -335,6 +337,31 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--error': '#ff6b9d',
       '--warning': '#f0abfc',
       ...chatFromPalette('dark', '#b026ff', '#0f081a', '#1a0f2e', '#3b1d66', '#f2e8ff', '#ff6b9d'),
+    },
+  },
+
+  /**
+   * Mecha: near-black teal planes, bright signal green, hard edges.
+   * The same palette as the desktop's Mecha theme.
+   */
+  mecha: {
+    id: 'mecha',
+    name: 'Mecha',
+    kind: 'dark',
+    colors: {
+      '--bg-primary': '#040a09',
+      '--bg-secondary': '#071412',
+      '--bg-tertiary': '#0b1a17',
+      '--border': '#24504a',
+      '--accent': '#6fdc86',
+      '--accent-hover': '#54c06d',
+      '--text-primary': '#e2f3ee',
+      '--text-secondary': '#86a39c',
+      '--text-muted': '#5f7b74',
+      '--success': '#6fdc86',
+      '--error': '#b87a7a',
+      '--warning': '#c4a36a',
+      ...chatFromPalette('dark', '#6fdc86', '#071412', '#0b1a17', '#24504a', '#e2f3ee', '#b87a7a'),
     },
   },
 

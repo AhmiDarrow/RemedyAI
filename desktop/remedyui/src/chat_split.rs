@@ -30,7 +30,7 @@ use crate::work::{self, StepStatus, WorkStep};
 use crate::{messages, say};
 
 /// Matches `--chat-bubble-radius: 0.85rem` in the current app (at 16px).
-pub const PANE_RADIUS: f32 = crate::theme_pack::DARK_FOREST.layout.pane_radius;
+pub const PANE_RADIUS: f32 = crate::theme_pack::MECHA.layout.pane_radius;
 pub const ACTIONS_WIDTH_DEFAULT: f32 = 380.0;
 pub const ACTIONS_WIDTH_MIN: f32 = 240.0;
 pub const ACTIONS_WIDTH_MAX: f32 = 720.0;

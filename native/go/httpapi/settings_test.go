@@ -517,3 +517,48 @@ func TestNormalizeSettingsPatchAllowsTurningDemoOff(t *testing.T) {
 		t.Fatalf("enabled_providers=%v", list)
 	}
 }
+
+func TestSettingsThemeIsOneSharedChoice(t *testing.T) {
+	home := t.TempDir()
+	const token = "settings-token-not-sec!"
+	base, shutdown := startTestServer(t, Config{Token: token, HomeDir: home})
+	defer shutdown()
+	client := &http.Client{Timeout: 3 * time.Second}
+	call := func(method, body string) (int, map[string]any) {
+		req, err := http.NewRequest(method, base+"/api/settings", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	// Nothing chosen yet: Dark Forest.
+	if code, got := call(http.MethodGet, ""); code != http.StatusOK || got["theme"] != "forest" {
+		t.Fatalf("default theme: %d %v", code, got["theme"])
+	}
+	if code, _ := call(http.MethodPut, `{"theme":"mecha"}`); code != http.StatusOK {
+		t.Fatalf("set mecha: %d", code)
+	}
+	if _, got := call(http.MethodGet, ""); got["theme"] != "mecha" {
+		t.Fatalf("theme after set: %v", got["theme"])
+	}
+	// It is the key the desktop reads from the file.
+	raw, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil || !strings.Contains(string(raw), "[appearance]") || !strings.Contains(string(raw), `theme = "mecha"`) {
+		t.Fatalf("config.toml: %v\n%s", err, raw)
+	}
+	if code, _ := call(http.MethodPut, `{"theme":"not-a-theme"}`); code == http.StatusOK {
+		t.Fatal("an unknown theme must be refused")
+	}
+	if _, got := call(http.MethodGet, ""); got["theme"] != "mecha" {
+		t.Fatalf("a refused theme must not change the choice: %v", got["theme"])
+	}
+}

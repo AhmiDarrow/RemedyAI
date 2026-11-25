@@ -79,7 +79,18 @@ pub(crate) fn preview_phone(ui: &Ui) -> El {
 
 /// The phone's Grove on a live connection. `app` is absent in previews.
 pub(crate) fn phone(ui: &Ui, grove: Grove, app: Option<App>) -> El {
-    view::frame(ui, grove, app, None)
+    // The phone wears the look chosen on the PC, once the PC has said which.
+    let (theme_ui, theme) = (ui.clone(), grove.shared_theme);
+    view::frame(ui, grove, app, None).bind(move || {
+        let id = theme.get();
+        if id.is_empty() {
+            return;
+        }
+        let mut t = crate::theme_pack::theme_for_id(&id, None, false);
+        crate::fonts::apply_to_theme(&mut t, &crate::fonts::Fonts::default());
+        let sheet = remedy_ui::themes::sheet(&t);
+        theme_ui.set_theme(t, sheet);
+    })
 }
 
 /// Morning Grove with the post-update house-rules banner open, for goldens.

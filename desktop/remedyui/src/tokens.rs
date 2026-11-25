@@ -26,13 +26,13 @@ pub const RAIL_GLYPH: f32 = 18.0;
 pub const ROW_ACTIONS: f32 = ROW_TOOL * 3.0 + 8.0;
 
 /// 4 px grid unit the shell is built on (matches the theme default).
-pub const SPACE: f32 = crate::theme_pack::DARK_FOREST.space.unit;
+pub const SPACE: f32 = crate::theme_pack::MECHA.space.unit;
 /// Shared gutter for headers, feeds, the composer and the sidebar.
-pub const GUTTER: f32 = crate::theme_pack::DARK_FOREST.space.gutter;
+pub const GUTTER: f32 = crate::theme_pack::MECHA.space.gutter;
 /// Persona badge (square, hairline).
-pub const AVATAR: f32 = crate::theme_pack::DARK_FOREST.layout.presence_avatar;
+pub const AVATAR: f32 = crate::theme_pack::MECHA.layout.presence_avatar;
 /// Chat bubble cap, inside a split pane.
-pub const BUBBLE_MAX: f32 = crate::theme_pack::DARK_FOREST.layout.bubble_max;
+pub const BUBBLE_MAX: f32 = crate::theme_pack::MECHA.layout.bubble_max;
 
 /// A named step on the type scale: size, weight, leading and tracking.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -152,21 +152,21 @@ pub fn hairline(colors: &ColorRoles) -> Color {
         .unwrap_or_else(|| colors.muted.mix_oklab(colors.bg, 0.35))
 }
 
-/// Parsed depth colors from the active theme pack (Dark Forest).
+/// Parsed depth colors of the Mecha theme.
 pub fn depth() -> DepthColors {
     DepthColors::from_pack(theme_pack::depth())
 }
 
-fn is_dark_forest(colors: &ColorRoles) -> bool {
+fn is_mecha(colors: &ColorRoles) -> bool {
     matches!(
         colors.bg.to_hex().to_ascii_uppercase().as_str(),
         "#040A09"
     )
 }
 
-/// Dark Forest uses the pack; other palettes derive planes and bevels from the theme.
+/// Mecha uses the pack; other palettes derive planes and bevels from the theme.
 pub fn depth_for(colors: &ColorRoles) -> DepthColors {
-    if is_dark_forest(colors) {
+    if is_mecha(colors) {
         return depth();
     }
     let line = hairline(colors);
