@@ -616,6 +616,8 @@ impl Chrome {
             },
             font_scale: prefs::font_name(self.font_idx.get()).into(),
             launch_at_login: self.launch_at_login.get(),
+            // Owned by the terminal's shell picker; keep what it saved.
+            terminal_shell: prefs::DesktopPrefs::load().terminal_shell,
         };
         prefs.save();
     }
