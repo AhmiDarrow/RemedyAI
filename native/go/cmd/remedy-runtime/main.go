@@ -141,7 +141,11 @@ func main() {
 			os.Exit(1)
 		}
 		var err error
-		voiceWorker, visionWorker, err = httpapi.AttachMLWorkers(caller)
+		// Voice still runs speech models through the Python worker (started
+		// on first use). Vision is native: downloading, verifying and
+		// supervising the local image model server needs no interpreter.
+		voiceWorker, _, err = httpapi.AttachMLWorkers(caller)
+		visionWorker = httpapi.NewNativeVisionWorker()
 		if err != nil {
 			_ = supervisor.Close()
 			fmt.Fprintf(os.Stderr, "remedy-runtime: voice/vision workers required: %v\n", err)
