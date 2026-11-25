@@ -159,24 +159,58 @@ pub fn workspace(ui: &Ui, studio: Studio) -> El {
         strip_width: PLAN_STRIP_WIDTH,
         label,
     };
-    let docked = plan_column(ui, studio.clone());
-    let main = chat_column(ui, studio);
-    let dock = w::dock(ui, dock_state, spec, docked, main);
+    // The dock leaves Chat as little as 80 px. Below this width the two stack.
+    let narrow = remedy_ui::reactive::Signal::new(false);
+    let side = remedy_ui::show(ui, move || !narrow.get(), {
+        let (ui, studio) = (ui.clone(), studio.clone());
+        move || {
+            let docked = plan_column(&ui, studio.clone());
+            let main = chat_column(&ui, studio.clone());
+            w::dock(&ui, dock_state, spec.clone(), docked, main)
+        }
+    })
+    .el()
+    .layout(fill);
+    let stacked = remedy_ui::show(ui, move || narrow.get(), {
+        let ui = ui.clone();
+        move || {
+            let unit = ui.theme().spacing.unit;
+            w::column(&ui)
+                .gap(unit)
+                .layout(fill)
+                .child(plan_column(&ui, studio.clone()).layout(|l| {
+                    l.height = Length::Percent(0.45);
+                    l.shrink = 1.0;
+                }))
+                .child(chat_column(&ui, studio.clone()).layout(|l| {
+                    l.height = Length::Percent(0.55);
+                }))
+        }
+    })
+    .el()
+    .layout(fill);
     w::column(ui)
-        .layout(|l| {
-            l.width = Length::Percent(1.0);
-            l.grow = 1.0;
-            l.basis = Length::Px(0.0);
-            l.min_width = Length::Px(0.0);
-            l.min_height = Length::Px(0.0);
-            l.height = Length::Percent(1.0);
-        })
+        .layout(fill)
+        .on_resize(move |size| narrow.set_if_changed(size.width < PLAN_WIDTH_MIN + STACK_CHAT_MIN))
         .child(persist_el.layout(|l| {
             l.width = Length::Px(0.0);
             l.height = Length::Px(0.0);
             l.shrink = 0.0;
         }))
-        .child(dock)
+        .child(side)
+        .child(stacked)
+}
+
+/// Chat needs this much beside the Plan dock, or the two stack.
+const STACK_CHAT_MIN: f32 = 260.0;
+
+fn fill(l: &mut remedy_ui::layout::LayoutStyle) {
+    l.width = Length::Percent(1.0);
+    l.grow = 1.0;
+    l.basis = Length::Px(0.0);
+    l.min_width = Length::Px(0.0);
+    l.min_height = Length::Px(0.0);
+    l.height = Length::Percent(1.0);
 }
 
 fn plan_column(ui: &Ui, studio: Studio) -> El {

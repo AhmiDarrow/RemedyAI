@@ -788,7 +788,8 @@ fn actions_column(
                 l.max_width = Length::Px(ACTIONS_WIDTH_MAX);
                 l.shrink = 0.0;
                 l.grow = 0.0;
-                l.basis = Length::Px(width());
+                // No basis: the shell stacks vertically, so a basis of the
+                // width made the pane a square instead of full height.
             }
             l.height = Length::Percent(1.0);
         })
@@ -883,6 +884,8 @@ fn pane_head(
         .layout(|l| {
             l.grow = 1.0;
             l.shrink = 1.0;
+            // Truncate down to 120 px before the pane tools wrap to a second line.
+            l.basis = Length::Px(120.0);
             l.min_width = Length::Px(0.0);
         })
         .child(
