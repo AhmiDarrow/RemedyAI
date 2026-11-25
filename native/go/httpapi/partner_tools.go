@@ -15,7 +15,7 @@ import (
 // are bound by the runtime (bindToolInput) — the model never supplies them.
 
 // partnerToolPrefixes name the tools that get the caller binding.
-var partnerToolPrefixes = []string{"children.", "routines.", "goals.", "owner.", "grove.", "face."}
+var partnerToolPrefixes = []string{"children.", "routines.", "goals.", "owner.", "grove.", "face.", "sessions."}
 
 func isPartnerTool(name string) bool {
 	n := toolNameDotted(strings.TrimSpace(name))
@@ -75,6 +75,7 @@ type partnerToolInput struct {
 	Autopilot    *bool            `json:"autopilot"`
 	Surface      string           `json:"surface"`
 	Phone        bool             `json:"phone"`
+	ProjectPath  string           `json:"project_path"`
 }
 
 func partnerToolDefs() []partnerToolDef {
@@ -233,7 +234,7 @@ func RegisterPartnerTools(registry *tools.Registry, server SettingsServerProvide
 	if server == nil {
 		return errors.New("partner server provider is required")
 	}
-	for _, def := range partnerToolDefs() {
+	for _, def := range append(partnerToolDefs(), partnerSessionToolDefs()...) {
 		def := def
 		if _, err := registry.Latest(def.id); err == nil {
 			continue

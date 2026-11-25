@@ -241,6 +241,8 @@ func (s *Server) executePartnerRun(ctx context.Context, epoch int, req partnerRu
 		Provider:      sess.LLMProvider,
 		ProjectPath:   projectPath,
 		Origin:        req.Origin,
+		PlanMode:      req.Mode == "plan",
+		ChatMode:      req.Mode == "chat",
 		History:       history,
 		UserMessageID: userMsg.ID,
 		DrainNudges:   func() []string { return s.claims.DrainNudges(req.SessionID) },

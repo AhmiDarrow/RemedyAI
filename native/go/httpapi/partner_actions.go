@@ -22,6 +22,11 @@ type childSpec struct {
 	Origin          string // origin of the turn that asked for the child
 	RoutineID       string
 	Deliver         string
+	// InStudio makes the job an ordinary session the owner sees in Studio's
+	// list and can take over, where a plain child lives in Grove only.
+	InStudio bool
+	// Mode is build (default), plan or chat, as the owner's own switch.
+	Mode string
 }
 
 // partnerEnsureHeadSession returns Remedy's own conversation, creating it
@@ -117,6 +122,11 @@ func (s *Server) partnerSpawnChild(spec childSpec) (partnerChild, error) {
 	}
 	oc := "grove"
 	req := createSessionRequest{Title: "🌱 " + spec.Label, OriginChannel: &oc}
+	if spec.InStudio {
+		// No origin channel: Studio lists it like any session of the owner's.
+		req = createSessionRequest{Title: spec.Label}
+	}
+	mode := partnerRunMode(spec.Mode)
 	if p := strings.TrimSpace(spec.ProjectPath); p != "" {
 		req.ProjectPath = &p
 	} else if ps, ok, _ := s.sessions.Get(parent); ok && ps.ProjectPath != nil {
@@ -139,6 +149,7 @@ func (s *Server) partnerSpawnChild(spec childSpec) (partnerChild, error) {
 		State:           partnerStateQueued,
 		CreatedAt:       now,
 		UpdatedAt:       now,
+		Mode:            mode,
 	}
 	h.mu.Lock()
 	cp := child
@@ -159,6 +170,7 @@ func (s *Server) partnerSpawnChild(spec childSpec) (partnerChild, error) {
 		GoalID:    child.GoalID,
 		RoutineID: spec.RoutineID,
 		Deliver:   spec.Deliver,
+		Mode:      mode,
 	})
 	if !ok {
 		h.mu.Lock()
@@ -183,9 +195,9 @@ func (s *Server) partnerMessageChild(childID, text, origin string) error {
 	}
 	h.mu.Lock()
 	c := h.st.Children[strings.TrimSpace(childID)]
-	var label, parent string
+	var label, parent, mode string
 	if c != nil {
-		label, parent = c.Label, c.ParentSessionID
+		label, parent, mode = c.Label, c.ParentSessionID, c.Mode
 		c.State = partnerStateQueued
 		c.UpdatedAt = h.nowISO()
 	}
@@ -206,11 +218,23 @@ func (s *Server) partnerMessageChild(childID, text, origin string) error {
 		Shown:  "✦ Remedy: " + text,
 		Origin: "partner:child:" + parent,
 		Label:  label,
+		Mode:   mode,
 	})
 	if !ok {
 		return errors.New(reason)
 	}
 	return nil
+}
+
+// partnerRunMode is the run mode a job asked for: plan, chat, or "" (build).
+func partnerRunMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "plan":
+		return "plan"
+	case "chat", "talk":
+		return "chat"
+	}
+	return ""
 }
 
 // partnerStopChild cancels a child's run and drops its queued work.
