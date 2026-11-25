@@ -1862,6 +1862,7 @@ pub fn rename_session(studio: &Studio, id: &str, title: &str) {
         return;
     }
     let id = id.to_string();
+    let before = studio.sessions.get().iter().find(|s| s.id == id).map(|s| s.title.clone());
     studio.sessions.update(|list| {
         if let Some(s) = list.iter_mut().find(|s| s.id == id) {
             s.title = title.clone();
@@ -1870,10 +1871,24 @@ pub fn rename_session(studio: &Studio, id: &str, title: &str) {
     studio.depth.rename_id.set(None);
     if let Some(client) = studio.runtime() {
         let path = format!("sessions/{id}");
+        let (st, sid, wake) = (studio.clone(), id.clone(), waker().ok());
         api::spawn_json(
             &client,
             Request::patch(&path).json(&json!({ "title": title })),
-            |_| {},
+            move |out| {
+                // The server kept the old name, so the list must too.
+                let (Err(_), Some(old), Some(wake)) = (out, before, wake) else {
+                    return;
+                };
+                let _ = wake.post(move || {
+                    st.sessions.update(|list| {
+                        if let Some(s) = list.iter_mut().find(|s| s.id == sid) {
+                            s.title = old;
+                        }
+                    });
+                    st.depth.notice.set("That name did not save. Try again.".into());
+                });
+            },
         );
     }
 }

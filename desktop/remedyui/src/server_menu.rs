@@ -338,7 +338,23 @@ fn restart(studio: &Studio, chrome: Chrome, ui: &Ui) {
         chrome.push_output("restart skipped (REMEDY_DESKTOP_NO_SPAWN)");
         return;
     }
-    let outcome = runtime::restart();
+    // Stopping and starting the server takes seconds: off the UI thread, so the
+    // window keeps answering while it happens.
+    let Ok(waker) = remedy_ui::reactive::waker() else {
+        return;
+    };
+    chrome.push_output("restarting the server…");
+    let (c, client) = (chrome, studio.client());
+    let spawned = std::thread::Builder::new().name("remedy-restart".into()).spawn(move || {
+        let outcome = runtime::restart();
+        let _ = waker.post(move || finish_restart(c, client, outcome));
+    });
+    if spawned.is_err() {
+        chrome.push_output("restart failed: no worker thread");
+    }
+}
+
+fn finish_restart(chrome: Chrome, client: Option<runtime::Client>, outcome: runtime::RestartOutcome) {
     let (key, line) = match outcome {
         runtime::RestartOutcome::Disabled => ("toast-restartOff", "restart skipped"),
         runtime::RestartOutcome::Restarted | runtime::RestartOutcome::Spawned => {
@@ -348,9 +364,11 @@ fn restart(studio: &Studio, chrome: Chrome, ui: &Ui) {
         runtime::RestartOutcome::Unhealthy => ("toast-restartWait", "sidecar spawned but not ready"),
         runtime::RestartOutcome::Failed => ("toast-restartFail", "sidecar restart failed"),
     };
-    chrome.toast(ui, messages().text(ui, key));
+    if let Some(ui) = chrome.ui() {
+        chrome.toast(&ui, messages().text(&ui, key));
+    }
     chrome.push_output(line);
-    if let Some(client) = studio.client() {
+    if let Some(client) = client {
         let c = chrome;
         let waker = remedy_ui::reactive::waker().ok();
         runtime::get_json(&client, "ping", move |res| {
