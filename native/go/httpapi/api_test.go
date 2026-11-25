@@ -178,11 +178,11 @@ func TestPublicAndAuthRoutes(t *testing.T) {
 			method: http.MethodGet,
 			path:   "/api/ping",
 			headers: map[string]string{
-				"Origin": "http://localhost:1420",
+				"Origin": "tauri://localhost",
 			},
 			wantStatus: http.StatusOK,
 			check: func(t *testing.T, _ map[string]any, hdr http.Header) {
-				if got := hdr.Get("Access-Control-Allow-Origin"); got != "http://localhost:1420" {
+				if got := hdr.Get("Access-Control-Allow-Origin"); got != "tauri://localhost" {
 					t.Fatalf("ACA-Origin = %q", got)
 				}
 			},
@@ -192,12 +192,12 @@ func TestPublicAndAuthRoutes(t *testing.T) {
 			method: http.MethodOptions,
 			path:   "/api/skills",
 			headers: map[string]string{
-				"Origin":                        "http://localhost:1420",
+				"Origin":                        "tauri://localhost",
 				"Access-Control-Request-Method": "GET",
 			},
 			wantStatus: http.StatusNoContent,
 			check: func(t *testing.T, _ map[string]any, hdr http.Header) {
-				if got := hdr.Get("Access-Control-Allow-Origin"); got != "http://localhost:1420" {
+				if got := hdr.Get("Access-Control-Allow-Origin"); got != "tauri://localhost" {
 					t.Fatalf("preflight ACA-Origin = %q", got)
 				}
 			},

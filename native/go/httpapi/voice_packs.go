@@ -50,14 +50,15 @@ var pocketArchive = voiceArchive{
 }
 
 // whisperArchives: the listening models, by the stt_model setting. The
-// release publishes no digests for these, so the size is the check.
+// release publishes no digests for these; the ones here were taken from the
+// published archives on 2026-11-25.
 var whisperArchives = map[string]voiceArchive{
-	"tiny":           {Name: "sherpa-onnx-whisper-tiny", Size: 116204861},
-	"base":           {Name: "sherpa-onnx-whisper-base", Size: 207557382},
-	"small":          {Name: "sherpa-onnx-whisper-small", Size: 639387718},
-	"medium":         {Name: "sherpa-onnx-whisper-medium", Size: 1931372882},
-	"large-v3":       {Name: "sherpa-onnx-whisper-large-v3", Size: 1068482488},
-	"large-v3-turbo": {Name: "sherpa-onnx-whisper-turbo", Size: 563790207},
+	"tiny":           {Name: "sherpa-onnx-whisper-tiny", Size: 116204861, SHA256: "c46116994e539aa165266d96b325252728429c12535eb9d8b6a2b10f129e66b1"},
+	"base":           {Name: "sherpa-onnx-whisper-base", Size: 207557382, SHA256: "911b2083efd7c0dca2ac3b358b75222660dc09fb716d64fbfc417ba6c99ff3de"},
+	"small":          {Name: "sherpa-onnx-whisper-small", Size: 639387718, SHA256: "486a46afbb7ba798507190ffe02fea2dd726049af212e774537efac6afb210a6"},
+	"medium":         {Name: "sherpa-onnx-whisper-medium", Size: 1931372882, SHA256: "614b1172557049069d846c29d9399640bce83a4dd6c580decebd9ce2a4f32c33"},
+	"large-v3":       {Name: "sherpa-onnx-whisper-large-v3", Size: 1068482488, SHA256: "2d0e134b3b5fc4a0533baf24a0c9d473b629aa47f030af0a165a05f461df7a03"},
+	"large-v3-turbo": {Name: "sherpa-onnx-whisper-turbo", Size: 563790207, SHA256: "b11acbbcd660b44a8e0df33724feb5aaa709cf65668f2823d59f656312544f22"},
 }
 
 func whisperArchive(model string) voiceArchive {
@@ -387,7 +388,9 @@ func unpackVoiceArchive(archive, name, dest string) error {
 		return err
 	}
 	defer f.Close()
-	tr := tar.NewReader(bzip2.NewReader(f))
+	// No pack unpacks to anything near this: an archive that tries is not one of ours.
+	const unpackCap = 16 << 30
+	tr := tar.NewReader(io.LimitReader(bzip2.NewReader(f), unpackCap))
 	prefix := name + "/"
 	for {
 		hdr, err := tr.Next()

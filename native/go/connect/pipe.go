@@ -208,6 +208,24 @@ func HandshakeInitiator(conn net.Conn, deviceKP KeyPair, hostPub, payload []byte
 
 // AuthenticatePayload resolves pair or hello against the device store (fail closed).
 func AuthenticatePayload(payload, devicePub []byte, home string) (*Device, error) {
+	return authenticatePayload(payload, devicePub, home, true)
+}
+
+// pairableAddr reports a peer that is on this PC or its home network. A new
+// phone can only be paired from there: a pairing code that leaks is useless
+// to anyone outside the house.
+func pairableAddr(addr net.Addr) bool {
+	tcp, ok := addr.(*net.TCPAddr)
+	if !ok {
+		return true // in-process pipes (tests); every remote path sets Remote
+	}
+	ip := tcp.IP
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+}
+
+var errPairAway = errors.New("pairing only works on the home network")
+
+func authenticatePayload(payload, devicePub []byte, home string, mayPair bool) (*Device, error) {
 	kind, fields, err := ParseHandshakePayload(payload)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrAuth, err)
@@ -216,7 +234,10 @@ func AuthenticatePayload(payload, devicePub []byte, home string) (*Device, error
 		if len(devicePub) != DHLen {
 			return nil, fmt.Errorf("%w: missing initiator static", ErrAuth)
 		}
-		deviceID, err := CompletePair(fields.Secret, devicePub, fields.Name, home)
+		deviceID, err := "", errPairAway
+		if mayPair {
+			deviceID, err = CompletePair(fields.Secret, devicePub, fields.Name, home)
+		}
 		if err == nil {
 			rec, gerr := GetDevice(deviceID, home)
 			if gerr != nil || rec == nil {
@@ -364,6 +385,12 @@ type SessionConfig struct {
 	Panes map[string]bool
 	// Config may carry connect_panes when Panes is nil.
 	Config map[string]any
+	// PanesLive, when set, is asked on every request, so a pane the owner
+	// turns off stops working for a phone that is already connected.
+	PanesLive func() map[string]bool
+	// Remote marks a session that did not arrive on the home-network
+	// listener (relay, rendezvous, direct path). Pairing is refused there.
+	Remote bool
 }
 
 // AcceptSession runs pause check → Noise handshake → allowlist auth.
@@ -404,7 +431,7 @@ func AcceptSession(ctx context.Context, conn net.Conn, cfg SessionConfig) (*Sess
 		return nil, ErrPaused
 	}
 
-	device, err := AuthenticatePayload(payload, devicePub, cfg.Home)
+	device, err := authenticatePayload(payload, devicePub, cfg.Home, !cfg.Remote && pairableAddr(conn.RemoteAddr()))
 	if err != nil {
 		return nil, err
 	}
@@ -432,6 +459,9 @@ func RunSession(ctx context.Context, conn net.Conn, cfg SessionConfig) (*Session
 	sess, err := AcceptSession(ctx, conn, cfg)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.Listener != nil {
+		defer cfg.Listener.Unregister(conn)
 	}
 	if cfg.OnAuthed != nil {
 		if err := cfg.OnAuthed(ctx, sess); err != nil {
@@ -472,6 +502,10 @@ func runIdleLoop(ctx context.Context, sess *Session, cfg SessionConfig) error {
 				return nil
 			}
 			return err
+		}
+		// A revoked phone gets nothing more, whichever way it came in.
+		if IsRevokedLive(sess.Device.ID) {
+			return nil
 		}
 		if err := HandleInner(sess, plain, mux); err != nil {
 			return err

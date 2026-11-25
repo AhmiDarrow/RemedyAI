@@ -461,6 +461,11 @@ func (r *CognitionTurnRunner) learnFromTurn(req TurnRequest, out cognition.Outco
 	if home == "" {
 		return
 	}
+	// A skill is a standing instruction to every later turn. Only the owner's
+	// own turns may write one, and only while the owner allows it.
+	if !OriginIsOwner(req.Origin) || !cfgBool(LoadConfig(home), "allow_skill_creation", true) {
+		return
+	}
 	raw := toolStepsFromOutcome(out)
 	if len(raw) == 0 {
 		return
@@ -958,6 +963,10 @@ func (r *CognitionTurnRunner) learnTimeout(key string, fallback time.Duration) t
 	return d
 }
 
+// untrustedTurnSteps is the model-round ceiling for a turn started by a
+// messenger contact, another bot or a hive daughter without its own budget.
+const untrustedTurnSteps = 200
+
 func (r *CognitionTurnRunner) turnConfig(req TurnRequest) cognition.Config {
 	cfg := r.Config
 	if cfg.MaxResultChars <= 0 && advancedExplicit(loadHomeConfig(r.HomeDir), "max_result_chars") {
@@ -972,6 +981,10 @@ func (r *CognitionTurnRunner) turnConfig(req TurnRequest) cognition.Config {
 		if cfg.SoftEpochSteps <= 0 || cfg.SoftEpochSteps > req.MaxIterations {
 			cfg.SoftEpochSteps = -1 // disable soft epochs inside a capped budget
 		}
+	} else if !OriginIsOwner(req.Origin) {
+		// A message from outside does not get the owner's open-ended runway.
+		cfg.MaxIterations = untrustedTurnSteps
+		cfg.SoftEpochSteps = -1
 	}
 	return cfg
 }
