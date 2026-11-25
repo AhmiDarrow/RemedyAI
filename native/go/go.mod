@@ -10,6 +10,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	golang.org/x/crypto v0.47.0
 	golang.org/x/sys v0.47.0
+	golang.org/x/text v0.33.0
 	modernc.org/sqlite v1.58.0
 )
 
@@ -30,7 +31,6 @@ require (
 	github.com/tidwall/sjson v1.2.5 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/text v0.33.0 // indirect
 	modernc.org/libc v1.75.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
