@@ -1,12 +1,10 @@
 package main
 
 import (
-	"context"
 	"runtime"
 	"testing"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/httpapi"
-	"github.com/AhmiDarrow/RemedyAI/native/go/protocol"
 )
 
 func TestCurrentProbeDeclaresVersionedReadiness(t *testing.T) {
@@ -34,24 +32,12 @@ func TestResolveServeAddrDefaultsToProduction7400(t *testing.T) {
 	}
 }
 
-type noopCaller struct{}
-
-func (noopCaller) Call(context.Context, protocol.Frame) (protocol.Frame, error) {
-	return protocol.Frame{Kind: protocol.KindToolResult, Payload: []byte(`{"ok":true,"output":{}}`)}, nil
-}
-
-func TestServeWiringAttachesNonNilVoiceAndVisionWorkers(t *testing.T) {
-	// Mirrors main.go after StartRMDYToolWorker + AttachPythonWorker succeed:
-	// AttachMLWorkers must yield non-nil cfg workers (fail closed on nil caller).
-	if _, _, err := httpapi.AttachMLWorkers(nil); err == nil {
-		t.Fatal("nil caller must fail closed")
-	}
-	voice, vision, err := httpapi.AttachMLWorkers(noopCaller{})
-	if err != nil || voice == nil || vision == nil {
-		t.Fatalf("attached workers voice=%v vision=%v err=%v", voice, vision, err)
-	}
-	cfg := httpapi.Config{VoiceWorker: voice, VisionWorker: vision}
+func TestServeWiringUsesNativeVoiceAndVision(t *testing.T) {
+	// Mirrors main.go: both are native and need no worker to exist.
+	voice := httpapi.NewNativeVoiceWorker()
+	defer voice.Close()
+	cfg := httpapi.Config{VoiceWorker: voice, VisionWorker: httpapi.NewNativeVisionWorker()}
 	if cfg.VoiceWorker == nil || cfg.VisionWorker == nil {
-		t.Fatal("serve Config must carry non-nil voice/vision workers")
+		t.Fatal("serve Config must carry voice and vision")
 	}
 }
