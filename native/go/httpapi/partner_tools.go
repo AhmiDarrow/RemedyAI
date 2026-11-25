@@ -289,6 +289,9 @@ func (r *CognitionTurnRunner) AttachPartnerTools(server SettingsServerProvider) 
 	if err := RegisterPartnerTools(r.Registry, server); err != nil {
 		return err
 	}
+	if err := RegisterMemorySkillTools(r.Registry, server); err != nil {
+		return err
+	}
 	r.Tools = &RegistryToolExecutor{Registry: r.Registry, TokenFor: RuntimeCapabilityToken}
 	r.Policy = &RegistryPolicy{Registry: r.Registry, Approvals: r.Approvals, LiveContext: r.LiveContext}
 	r.syncModelToolSchemas()
