@@ -211,6 +211,8 @@ func New(cfg Config) (*Server, error) {
 		}
 		// Browser-rail tools (computer.navigate) need the live HostBridge.
 		_ = cr.AttachRailTools(s.bridge)
+		// Google mail and calendar run natively; other providers use the worker.
+		_ = attachNativeMailCalendar(cr.Registry, home)
 		// Settings Tool ABI (settings.get / settings.patch) uses the apply path.
 		_ = cr.AttachSettingsTools(func() *Server { return s })
 		// Remedy's head tools: children, routines, goals, owner notes.
