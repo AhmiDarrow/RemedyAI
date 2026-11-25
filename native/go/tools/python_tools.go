@@ -360,67 +360,6 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 		}`,
 		},
 		{
-			id: "web.search", desc: "Search the public web via the Python agent web_search backend (OpenSERP/DDG)",
-			risk: RiskReadOnly,
-			in: `{
-			"type":"object",
-			"required":["query"],
-			"properties":{
-				"query":{"type":"string","minLength":1,"description":"Search query (max 400 chars)"},
-				"max_results":{"type":"integer","minimum":1,"maximum":10,"description":"Maximum results to return (default 5)"}
-			},
-			"additionalProperties":false
-		}`,
-			out: `{
-			"type":"object",
-			"required":["query","backend","results"],
-			"properties":{
-				"query":{"type":"string"},
-				"backend":{"type":"string"},
-				"results":{
-					"type":"array",
-					"items":{
-						"type":"object",
-						"required":["title","url"],
-						"properties":{
-							"title":{"type":"string"},
-							"url":{"type":"string"},
-							"snippet":{"type":"string"}
-						},
-						"additionalProperties":false
-					}
-				}
-			},
-			"additionalProperties":false
-		}`,
-		},
-		{
-			id: "web.fetch", desc: "Fetch a public HTTP(S) URL as readable text via the Python agent web_fetch backend (SSRF-guarded)",
-			risk: RiskReadOnly,
-			in: `{
-			"type":"object",
-			"required":["url"],
-			"properties":{
-				"url":{"type":"string","minLength":1,"description":"http:// or https:// URL to fetch"},
-				"max_chars":{"type":"integer","minimum":1000,"maximum":200000,"description":"Cap on returned content characters (default 50000)"}
-			},
-			"additionalProperties":false
-		}`,
-			out: `{
-			"type":"object",
-			"required":["url","final_url","content","format"],
-			"properties":{
-				"url":{"type":"string"},
-				"final_url":{"type":"string"},
-				"content":{"type":"string"},
-				"format":{"type":"string","enum":["markdown","text"]},
-				"title":{"type":"string"},
-				"truncated":{"type":"boolean"}
-			},
-			"additionalProperties":false
-		}`,
-		},
-		{
 			id: "skill.search", desc: "Rank skill packs for a task query (Python worker)",
 			risk: RiskReadOnly,
 			in: `{
