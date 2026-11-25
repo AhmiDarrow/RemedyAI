@@ -214,8 +214,9 @@ func TestHearthMindRunsNativelyWithoutPython(t *testing.T) {
 	r := NewCognitionTurnRunner(&cognition.ScriptedModel{})
 	r.HomeDir = home
 	for i := 0; i < 4; i++ {
-		r.finishTurn(TurnRequest{Prompt: "remind me tomorrow to water the tomato plants", SessionID: "s1"},
-			cognition.Outcome{Text: "Will do."})
+		// The entry point a real turn uses: the soul is written before it returns.
+		r.scheduleTurnEnd(TurnRequest{Prompt: "remind me tomorrow to water the tomato plants", SessionID: "s1"},
+			&cognition.Outcome{Text: "Will do."})
 	}
 	if _, err := os.Stat(filepath.Join(home, "soul", "field.json")); err != nil {
 		t.Fatal("the soul must update after a turn with no worker")
