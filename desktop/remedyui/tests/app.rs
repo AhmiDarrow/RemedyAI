@@ -942,6 +942,9 @@ fn live_chat_preview_matches_its_golden_images() {
 #[test]
 fn grove_preview_matches_its_golden_images() {
     assert_goldens("grove-home", THEMES, remedy_desktop::grove_home);
+    // The left column once a conversation is going. New surface: a missing PNG
+    // is written and is not a failure.
+    assert_settings_goldens("grove-talking", remedy_desktop::grove_home_talking);
 }
 
 #[test]

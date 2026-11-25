@@ -91,8 +91,7 @@ fn feed(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
         .semantics(Semantics::new(Role::Region).label("Chat feed"))
         .child(list)
         .child(partial)
-        .child(todo_block(ui, grove.clone()))
-        .child(process_block(ui, grove.clone()))
+        .child(feed_extras(ui, grove.clone(), kind))
         .child(empty_state(ui, grove, kind))
 }
 
@@ -175,7 +174,19 @@ fn plain_rich(text: &str) -> RichText {
     rich
 }
 
-fn todo_block(ui: &Ui, grove: Grove) -> El {
+/// Her list and the steps she is on, under the conversation. On the desktop's
+/// home they are in the left column ("Right now") instead, so the chat stays
+/// a conversation.
+fn feed_extras(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
+    if !grove.phone && matches!(kind, RoomKind::Home) {
+        return w::column(ui);
+    }
+    w::column(ui)
+        .child(todo_block(ui, grove.clone()))
+        .child(process_block(ui, grove))
+}
+
+pub(super) fn todo_block(ui: &Ui, grove: Grove) -> El {
     let g = grove.clone();
     show(
         ui,
