@@ -1,0 +1,29 @@
+[package]
+name = "remedy-connect"
+version = "1.1.0"
+edition = "2021"
+publish = false
+description = "RemedyConnect: Grove on a paired phone"
+
+[lib]
+# The APK loads the app as a shared library; the desktop links it into src/main.rs.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Grove itself: the same code the desktop shows, laid out for a phone.
+remedy-desktop = { path = "../../desktop/remedyui" }
+# Pairing, the device key, the encrypted tunnel and its loopback shim.
+remedy-connect-core = { path = "../core" }
+# The same RemedyUI the desktop is pinned to.
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "bd5faa7e89467203dda5e6445ddd20ae22d6ebc2", features = ["net", "image"] }
+
+[dev-dependencies]
+serde_json = "1"
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "bd5faa7e89467203dda5e6445ddd20ae22d6ebc2", features = ["headless", "devtools", "net", "image"] }
+
+[profile.release]
+lto = "fat"
+opt-level = "s"
+codegen-units = 1
+strip = true
+panic = "abort"
