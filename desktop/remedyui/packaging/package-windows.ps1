@@ -212,7 +212,29 @@ Copy-Item -Path (Join-Path $dist "*") -Destination $webuiStage -Recurse -Force
 Assert-WebUIComplete $webuiStage
 $webuiNsis = (Resolve-Path -LiteralPath $webuiStage).Path
 
-& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DRUNTIMESRCPATH=$runtimeNsis" "/DCORESRCPATH=$coreNsis" "/DWEBUISRCPATH=$webuiNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
+# The mind's worker: a zipapp of src/remedy plus its compiled dependencies,
+# installed beside remedy-runtime.exe, which looks for both there. Without
+# them an installed app runs whatever "remedy" the PC's own Python has.
+$workerStage = Join-Path $outDir "worker"
+if (Test-Path -LiteralPath $workerStage) { Remove-Item -LiteralPath $workerStage -Recurse -Force }
+New-Item -ItemType Directory -Force -Path $workerStage | Out-Null
+$workerPyz = Join-Path $workerStage "rmdy_tool_worker.pyz"
+$workerDeps = Join-Path $workerStage "rmdy-deps"
+$python = Get-Command python -ErrorAction SilentlyContinue
+if (-not $python) { throw "python is required to build the worker zipapp" }
+Push-Location $repoRoot
+try {
+    & $python.Source -I (Join-Path $repoRoot "scripts\build_rmdy_worker.py") --out $workerPyz --deps-out $workerDeps
+    if ($LASTEXITCODE -ne 0) { throw "build_rmdy_worker failed ($LASTEXITCODE)" }
+} finally {
+    Pop-Location
+}
+if (-not (Test-Path -LiteralPath $workerPyz)) { throw "worker zipapp missing: $workerPyz" }
+if (-not (Get-ChildItem -LiteralPath $workerDeps -ErrorAction SilentlyContinue)) { throw "worker dependencies missing: $workerDeps" }
+$workerPyzNsis = (Resolve-Path -LiteralPath $workerPyz).Path
+$workerDepsNsis = (Resolve-Path -LiteralPath $workerDeps).Path
+
+& $makensis.Source "/V2" "/DVERSION=$version" "/DOUTFILE=$outNsis" "/DMAINBINARYSRCPATH=$binaryNsis" "/DRUNTIMESRCPATH=$runtimeNsis" "/DCORESRCPATH=$coreNsis" "/DWEBUISRCPATH=$webuiNsis" "/DWORKERPYZPATH=$workerPyzNsis" "/DWORKERDEPSPATH=$workerDepsNsis" "/DHOOKS=$hooks" "/DUNINSTALL_OPTIONS=$options" "/DUNINSTALL_WIPE=$wipe" "/DINSTALLERICON=$icon" $nsi
 if ($LASTEXITCODE -ne 0) { throw "makensis failed ($LASTEXITCODE)" }
 if (-not (Test-Path -LiteralPath $out)) { throw "makensis did not write $out" }
 
