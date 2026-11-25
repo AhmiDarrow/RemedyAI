@@ -370,10 +370,11 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
-    fn pick_shell_is_a_real_file_on_unix() {
+    fn pick_shell_is_a_real_file() {
         let (shell, args) = pick_shell();
         assert!(Path::new(&shell).is_file(), "{shell}");
-        assert!(!shell.to_ascii_lowercase().ends_with(".exe"));
+        // Windows picks PowerShell; everywhere else a shell is never an .exe.
+        assert_eq!(shell.to_ascii_lowercase().ends_with(".exe"), cfg!(windows), "{shell}");
         if shell != "/bin/sh" || args.is_empty() {
             assert!(args.iter().any(|a| a == "-i" || a == "-NoLogo"));
         }

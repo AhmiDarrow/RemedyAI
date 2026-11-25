@@ -61,6 +61,12 @@ CRCCheck on
 !ifndef WEBUISRCPATH
   !error "Pass /DWEBUISRCPATH=path\to\webui (folder with index.html)"
 !endif
+!ifndef WORKERPYZPATH
+  !error "Pass /DWORKERPYZPATH=path\to\rmdy_tool_worker.pyz"
+!endif
+!ifndef WORKERDEPSPATH
+  !error "Pass /DWORKERDEPSPATH=path\to\rmdy-deps (folder)"
+!endif
 
 !define PLACEHOLDER_INSTALL_DIR "C:\__REMEDY_PLACEHOLDER_DO_NOT_INSTALL__"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}"
@@ -241,6 +247,14 @@ Section Install
   File /r "${WEBUISRCPATH}\*.*"
   SetOutPath "$INSTDIR"
 
+  ; The mind's worker and its compiled dependencies. remedy-runtime looks for
+  ; both next to itself. The old folder goes first so a removed module cannot linger.
+  File "/oname=rmdy_tool_worker.pyz" "${WORKERPYZPATH}"
+  RMDir /r "$INSTDIR\rmdy-deps"
+  SetOutPath "$INSTDIR\rmdy-deps"
+  File /r "${WORKERDEPSPATH}\*.*"
+  SetOutPath "$INSTDIR"
+
   SetOutPath "$INSTDIR\windows"
   File "/oname=uninstall_options.ps1" "${UNINSTALL_OPTIONS}"
   File "/oname=uninstall_wipe.ps1" "${UNINSTALL_WIPE}"
@@ -291,6 +305,8 @@ Section Uninstall
   Delete "$INSTDIR\remedy-runtime.exe"
   Delete "$INSTDIR\remedy_core.dll"
   RMDir /r "$INSTDIR\webui"
+  Delete "$INSTDIR\rmdy_tool_worker.pyz"
+  RMDir /r "$INSTDIR\rmdy-deps"
   Delete "$INSTDIR\remedy-runtime-x86_64-pc-windows-msvc.exe"
   Delete "$INSTDIR\remedy-iroh.exe"
   Delete "$INSTDIR\windows\uninstall_options.ps1"
