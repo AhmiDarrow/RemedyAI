@@ -40,7 +40,7 @@ const (
 	anthropicPauseResendLimit = 2
 	// anthropicFrontierWindow is the prompt window of the current Claude line.
 	anthropicFrontierWindow = 1_000_000
-	// anthropicHaikuWindow is the Haiku 4.5 prompt window.
+	// anthropicHaikuWindow is the prompt window of the pre-4.6 models.
 	anthropicHaikuWindow = 200_000
 )
 
@@ -82,6 +82,8 @@ type Anthropic struct {
 	Gen GenerationOptions
 	// Shape selects effort and cache TTL. ShapeAuto derives it from the turn.
 	Shape TurnShape
+	// replayAnyHost lets tests exercise native replay against a local server.
+	replayAnyHost bool
 	// SystemStable overrides the stable/volatile split of Turn.System. Empty
 	// splits on the markers prompt.assemble writes.
 	SystemStable string
@@ -157,7 +159,9 @@ func (a *Anthropic) ContextWindow() int {
 	if n := envContextWindow(); n > 0 {
 		return n
 	}
-	if strings.Contains(strings.ToLower(a.Model), "haiku") && !supportsAdaptiveThinking(a.Model) {
+	// Every model before the 4.6 generation (Haiku, Sonnet and Opus 4.5 and
+	// older) has the 200K window; 4.6 and later have 1M.
+	if !supportsAdaptiveThinking(a.Model) {
 		return anthropicHaikuWindow
 	}
 	return anthropicFrontierWindow
@@ -179,8 +183,9 @@ func (a *Anthropic) Stream(ctx context.Context, turn cognition.Turn) (<-chan cog
 	}
 	client := a.client()
 	params := a.buildParams(turn)
+	opts := a.replayOptions(turn)
 
-	stream := client.Messages.NewStreaming(ctx, params)
+	stream := client.Messages.NewStreaming(ctx, params, opts...)
 	first, ok := advance(stream)
 	if !ok {
 		defer stream.Close()
@@ -193,7 +198,7 @@ func (a *Anthropic) Stream(ctx context.Context, turn cognition.Turn) (<-chan cog
 	out := make(chan cognition.ModelEvent, 16)
 	go func() {
 		defer close(out)
-		a.pump(ctx, client, params, stream, first, out)
+		a.pump(ctx, client, params, opts, stream, first, out)
 	}()
 	return out, nil
 }
@@ -237,6 +242,7 @@ func (a *Anthropic) pump(
 	ctx context.Context,
 	client anthropic.Client,
 	params anthropic.MessageNewParams,
+	opts []option.RequestOption,
 	stream *ssestream.Stream[anthropic.MessageStreamEventUnion],
 	first anthropic.MessageStreamEventUnion,
 	out chan<- cognition.ModelEvent,
@@ -253,7 +259,7 @@ func (a *Anthropic) pump(
 	// once the round can no longer be served.
 	reconnect := func() bool {
 		stream.Close()
-		stream = client.Messages.NewStreaming(ctx, params)
+		stream = client.Messages.NewStreaming(ctx, params, opts...)
 		ev, ok := advance(stream)
 		if !ok {
 			stream.Close()
@@ -293,6 +299,11 @@ func (a *Anthropic) pump(
 
 		switch msg.StopReason {
 		case anthropic.StopReasonToolUse:
+			// The tool loop continues from this turn: hand it back whole so
+			// the next round can replay its thinking blocks unchanged.
+			if n := a.nativeTurn(msg); n != nil && !emit(cognition.ModelEvent{Native: n}) {
+				return
+			}
 			a.emitToolCalls(msg, emit)
 			return
 		case anthropic.StopReasonMaxTokens:
@@ -605,16 +616,81 @@ func (a *Anthropic) splitSystem(system string) (stable, volatile string) {
 	return strings.TrimSpace(full[:cut]), strings.TrimSpace(full[cut:])
 }
 
-// renderMessages maps the append-only transcript onto Anthropic blocks. The
-// mapping is 1:1 except that tool_result blocks ride inside a user message and
-// thinking blocks are dropped — replaying one needs the signature the engine
-// does not carry, and a modified thinking block is a 400.
+// anthropicNative is one assistant turn exactly as the API returned it, with
+// the model that wrote it. Thinking blocks are signed over the conversation
+// and readable only by their own model, so they go back unchanged or not at all.
+type anthropicNative struct {
+	model   string
+	content []anthropic.ContentBlockParamUnion
+}
+
+// thinkingBindingBeta lets a request say what happens to a thinking block
+// whose conversation changed underneath it.
+const thinkingBindingBeta = "thinking-binding-controls-2026-08-01"
+
+// replaysThinking reports whether this adapter sends assistant turns back in
+// native form: an adaptive-thinking model on Anthropic's own API. A proxy or
+// partner endpoint may not accept the binding controls, so it keeps the
+// thinking-free rendering.
+func (a *Anthropic) replaysThinking() bool {
+	if a == nil || !supportsAdaptiveThinking(strings.TrimSpace(a.Model)) {
+		return false
+	}
+	if a.replayAnyHost {
+		return true
+	}
+	base := strings.ToLower(strings.TrimSpace(a.BaseURL))
+	return base == "" || strings.Contains(base, "://api.anthropic.com")
+}
+
+// nativeTurn captures msg for replay, or nil when this adapter does not replay.
+func (a *Anthropic) nativeTurn(msg *anthropic.Message) *anthropicNative {
+	if msg == nil || !a.replaysThinking() {
+		return nil
+	}
+	return &anthropicNative{model: strings.TrimSpace(a.Model), content: msg.ToParam().Content}
+}
+
+// replayable is the native copy of m when this adapter and model wrote it.
+func (a *Anthropic) replayable(m cognition.Message) *anthropicNative {
+	n, ok := m.Native.(*anthropicNative)
+	if !ok || n == nil || len(n.content) == 0 || !a.replaysThinking() || n.model != strings.TrimSpace(a.Model) {
+		return nil
+	}
+	return n
+}
+
+// replayOptions are the request options a turn with replayed thinking needs.
+// The engine clears native turns when it rewrites history, but if anything
+// before a block still differs, the API drops that block instead of failing
+// the turn with a 400.
+func (a *Anthropic) replayOptions(turn cognition.Turn) []option.RequestOption {
+	for _, m := range turn.Messages {
+		if m.Role == cognition.RoleAssistant && a.replayable(m) != nil {
+			return []option.RequestOption{
+				option.WithHeaderAdd("anthropic-beta", thinkingBindingBeta),
+				option.WithJSONSet("thinking.block_binding", map[string]string{"prefix_mismatch_behavior": "drop_block"}),
+			}
+		}
+	}
+	return nil
+}
+
+// renderMessages maps the append-only transcript onto Anthropic blocks. An
+// assistant turn this adapter captured goes back exactly as received. Any
+// other is rendered from the plain blocks: tool_result blocks ride inside a
+// user message and thinking is left out, since a thinking block without its
+// signature is a 400.
 func (a *Anthropic) renderMessages(turn cognition.Turn) []anthropic.MessageParam {
 	out := make([]anthropic.MessageParam, 0, len(turn.Messages))
 	for _, m := range turn.Messages {
 		var blocks []anthropic.ContentBlockParamUnion
 		if m.Role == cognition.RoleAssistant {
-			blocks = a.assistantBlocks(m)
+			if n := a.replayable(m); n != nil {
+				blocks = n.content
+			} else {
+				blocks = a.assistantBlocks(m)
+			}
 		} else {
 			blocks = a.userBlocks(m)
 		}

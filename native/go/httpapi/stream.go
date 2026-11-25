@@ -505,6 +505,11 @@ func (s *Server) runDetachedStream(
 		// fullResponse length at the last narration cut (see @@tool_call).
 		narrationMark        int
 		collectedToolResults []map[string]any
+		// draftToolResults is the same list with each output cut to what a
+		// reader is ever shown (toolCap). A draft is rewritten on every tool
+		// event, so writing full outputs each time grew with the square of
+		// the turn's length; the final row and the turn log keep them whole.
+		draftToolResults []map[string]any
 		aborted              bool
 		persistDone          bool
 		answeredModel        *string
@@ -562,7 +567,11 @@ func (s *Server) runDetachedStream(
 		}
 		draftLen = n
 		draftAt = time.Now()
-		calls, results := toolLedger()
+		calls, _ := toolLedger()
+		var results any = []any{}
+		if len(draftToolResults) > 0 {
+			results = draftToolResults
+		}
 		body := fullResponse.String()
 		if strings.TrimSpace(body) == "" && len(collectedToolCalls) == 0 {
 			return
@@ -651,7 +660,9 @@ func (s *Server) runDetachedStream(
 			upsertDraft(true)
 		case strings.HasPrefix(token, "@@tool_result:"):
 			res := parseToolResultToken(token)
-			collectedToolResults = append(collectedToolResults, res.record())
+			rec := res.record()
+			collectedToolResults = append(collectedToolResults, rec)
+			draftToolResults = append(draftToolResults, draftToolResult(rec))
 			ts.toolResult(res)
 			upsertDraft(true)
 		case strings.HasPrefix(token, "@@progress:"):
@@ -872,3 +883,16 @@ func (s *Server) publishMessageAdded(sid, reply string) {
 }
 
 var errStreamAborted = errors.New("stream aborted")
+
+// draftToolResult is rec with its output cut to toolCap, the most a reader of
+// the session ever sees. rec itself is left whole.
+func draftToolResult(rec map[string]any) map[string]any {
+	out := make(map[string]any, len(rec))
+	for k, v := range rec {
+		out[k] = v
+	}
+	if _, has := out["output"]; has {
+		out["output"] = truncAny(out["output"], toolCap)
+	}
+	return out
+}
