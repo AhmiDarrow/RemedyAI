@@ -36,11 +36,6 @@ PATHS = {
     "go_api_version": ROOT / "native" / "go" / "httpapi" / "api.go",
 }
 
-_GO_API_VERSION_RE = re.compile(
-    r'(const Version = )"\d+\.\d+\.\d+"',
-)
-
-
 def _pyproject_version() -> str:
     text = PATHS["pyproject"].read_text(encoding="utf-8")
     m = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
@@ -128,20 +123,6 @@ def _bump_android(ver: str, *, version_changed: bool) -> None:
             count=1,
         )
     path.write_text(text, encoding="utf-8")
-
-
-def _bump_go_api_version(ver: str) -> None:
-    """Stamp native/go/httpapi/api.go ``const Version`` to match pyproject."""
-    path = PATHS["go_api_version"]
-    if not path.exists():
-        return
-    text = path.read_text(encoding="utf-8")
-    updated, n = _GO_API_VERSION_RE.subn(rf'\1"{ver}"', text, count=1)
-    if n != 1:
-        raise SystemExit(
-            f"Could not find const Version in {path.relative_to(ROOT)}"
-        )
-    path.write_text(updated, encoding="utf-8")
 
 
 def _bump_latest_json(ver: str) -> None:
@@ -292,11 +273,6 @@ def _check_aligned(expected: str) -> int:
         av = re.search(r'versionName\s*=\s*"([^"]*)"', android)
         rows.append(("Android versionName", av.group(1) if av else "?"))
 
-    if PATHS["go_api_version"].exists():
-        go_api = PATHS["go_api_version"].read_text(encoding="utf-8")
-        gv = re.search(r'const Version = "([^"]*)"', go_api)
-        rows.append(("httpapi.Version", gv.group(1) if gv else "?"))
-
     rows.append(("remedy.__version__", _runtime_version()))
 
     print(f"Canonical version: {expected}")
@@ -307,6 +283,17 @@ def _check_aligned(expected: str) -> int:
             bad += 1
         mark = "OK " if ok else "BAD"
         print(f"  [{mark}] {label:22} = {ver}")
+
+    # The runtime reports the shipped product version, which is the RemedyUI
+    # desktop's (desktop/remedyui/Cargo.toml), not the Python package's.
+    desktop_toml = ROOT / "desktop" / "remedyui" / "Cargo.toml"
+    if PATHS["go_api_version"].exists() and desktop_toml.exists():
+        dv = re.search(r'(?m)^version\s*=\s*"([^"]*)"', desktop_toml.read_text(encoding="utf-8"))
+        gv = re.search(r'const Version = "([^"]*)"', PATHS["go_api_version"].read_text(encoding="utf-8"))
+        want, got = (dv.group(1) if dv else "?"), (gv.group(1) if gv else "?")
+        ok = want == got
+        bad += 0 if ok else 1
+        print(f"  [{'OK ' if ok else 'BAD'}] {'httpapi.Version':22} = {got} (desktop {want})")
     if bad:
         print(f"\n{bad} mismatch(es). Run: python scripts/sync_version.py {expected}")
         print("Then reinstall editable:  uv pip install -e .")
@@ -345,8 +332,6 @@ def main():
     _bump_android(new_ver, version_changed=new_ver != current)
     print("  Updated Android versionName")
 
-    _bump_go_api_version(new_ver)
-    print("  Updated native/go/httpapi/api.go Version")
 
     _bump_latest_json(new_ver)
     print("  Updated scripts/latest.json")
