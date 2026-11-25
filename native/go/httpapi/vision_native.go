@@ -251,10 +251,19 @@ type nativeVisionWorker struct {
 	procMu  sync.Mutex // guards proc
 	proc    *visionProc
 	startMu sync.Mutex // serialises Start
+
+	// Idle auto-stop (vision.runtime.mark_used / maybe_idle_stop).
+	now       func() time.Time // injectable clock
+	idleEvery time.Duration    // watcher period (Python: 30 s)
+	idleMu    sync.Mutex
+	lastUsed  time.Time
+	idleHome  string
+	idleQuit  chan struct{}
 }
 
 func newNativeVisionWorker() *nativeVisionWorker {
 	return &nativeVisionWorker{
+		now: time.Now, idleEvery: 30 * time.Second,
 		models:   append([]visionModelSpec(nil), visionModels...),
 		runtimes: nvDefaultRuntimes(),
 		// urllib follows up to 10 redirects; so does net/http. The socket

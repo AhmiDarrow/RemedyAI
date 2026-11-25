@@ -512,6 +512,8 @@ func (w *nativeVisionWorker) startServer(ctx context.Context, home string, ngl i
 		return map[string]any{"ok": false, "error": "mmproj file missing: " + nvPathStr(state["mmproj_path"])}, nil
 	}
 	if visionPortOpen(host, port) && nvHealth(base, 350*time.Millisecond) {
+		w.NoteUse()
+		w.ensureIdleWatcher(home)
 		return map[string]any{"ok": true, "already_running": true, "base_url": base, "pid": w.ownPID()}, nil
 	}
 
@@ -543,6 +545,7 @@ func (w *nativeVisionWorker) startServer(ctx context.Context, home string, ngl i
 	}
 
 	cfg := LoadConfig(home)
+	ngl = nvMindGPULayers(home, cfg, ngl)
 	cmd := nvBuildCommand(binary, modelPath, mmprojPath, host, port, ngl, cfg, nativeVisionHelp(home, binary))
 	candidates := append([][]string{cmd}, nvCommandFallbacks(cmd)...)
 	var lastErr string
@@ -574,6 +577,8 @@ func (w *nativeVisionWorker) startServer(ctx context.Context, home string, ngl i
 				(nvHealth(base, 600*time.Millisecond) || time.Now().After(deadline.Add(-2*time.Second))) {
 				state["pid"] = int(cur.PID)
 				save(state)
+				w.NoteUse()
+				w.ensureIdleWatcher(home)
 				return map[string]any{"ok": true, "already_running": false, "base_url": base, "pid": int(cur.PID)}, nil
 			}
 			time.Sleep(nativeVisionPoll)
@@ -606,17 +611,19 @@ func nvPIDAlive(pid int) bool {
 	return true
 }
 
-// looksLikeLlama guards against killing a stranger on a recycled PID. Linux
-// reads /proc; elsewhere the recorded server port must still be listening
-// (no process-name API in the allowed imports).
-func nvLooksLikeLlama(pid int, host string, port int) bool {
-	if raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline"); err == nil {
-		t := strings.ToLower(strings.ReplaceAll(string(raw), "\x00", " "))
-		return strings.Contains(t, "llama-server") || strings.Contains(t, "llama_server")
-	} else if _, serr := os.Stat("/proc/self"); serr == nil {
-		return true // /proc exists but the entry vanished or is unreadable
+// nativeVisionVerifyPID says whether pid is a llama-server (guards against
+// killing a recycled PID). Linux reads /proc/<pid>/cmdline. Windows has no
+// by-PID image-name query in the Zig host or in Go code here (the Zig
+// processImagePath is private to the foreground-window call) and vision.json
+// records only the PID, so it answers false: the record is reported stale and
+// nothing is killed.
+var nativeVisionVerifyPID = func(pid int) bool {
+	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
+	if err != nil {
+		return false
 	}
-	return visionPortOpen(host, port)
+	t := strings.ToLower(strings.ReplaceAll(string(raw), "\x00", " "))
+	return strings.Contains(t, "llama-server") || strings.Contains(t, "llama_server")
 }
 
 // stopServer is runtime.stop_server: our child plus any PID recorded in
@@ -646,13 +653,9 @@ func (w *nativeVisionWorker) stopServer(home string) (map[string]any, error) {
 			pids = append(pids, recorded)
 		}
 	}
-	host := anyString(state["host"])
-	if host == "" {
-		host = visionDefaultHost
-	}
-	port := anyInt(state["port"], visionDefaultPort)
 	seen := map[int]bool{}
 	list := []int{}
+	stale := []int{}
 	for _, pid := range pids {
 		if seen[pid] {
 			continue
@@ -662,7 +665,8 @@ func (w *nativeVisionWorker) stopServer(home string) (map[string]any, error) {
 		if pid == own || !nvPIDAlive(pid) {
 			continue
 		}
-		if pid == recorded && !nvLooksLikeLlama(pid, host, port) {
+		if pid == recorded && !nativeVisionVerifyPID(pid) {
+			stale = append(stale, pid)
 			continue
 		}
 		if nativeVisionKill(uint32(pid)) == nil {
@@ -673,7 +677,13 @@ func (w *nativeVisionWorker) stopServer(home string) (map[string]any, error) {
 		delete(state, "pid")
 		_ = writeJSONAtomic(visionJSONPath(home), state)
 	}
-	return map[string]any{"ok": true, "stopped": killed, "pids": list}, nil
+	out := map[string]any{"ok": true, "stopped": killed, "pids": list}
+	if len(stale) > 0 {
+		out["stale_records"] = stale
+		out["message"] = "stale record: the PID in vision.json is alive but could not be verified as " +
+			"the vision server, so it was not killed"
+	}
+	return out, nil
 }
 
 // ---- command line (mind_engine.build_mind_server_command) ----------------------
