@@ -1,0 +1,62 @@
+{
+  "name": "single_tool_loop",
+  "turns": [
+    {
+      "message": "read every file in the repo",
+      "steps": [
+        {
+          "tool": "file_read",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "file_read",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "file_read",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "file_read",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "file_read",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "file_read",
+          "ok": true,
+          "result": "done",
+          "error": "",
+          "duration_ms": 10
+        }
+      ]
+    }
+  ],
+  "expect": [
+    {
+      "learned": false,
+      "skill": "",
+      "merged": false,
+      "reason": null,
+      "graded": {},
+      "files": {}
+    }
+  ]
+}

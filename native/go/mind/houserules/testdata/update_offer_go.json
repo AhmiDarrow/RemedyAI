@@ -1,0 +1,4500 @@
+{
+ "name": "update_offer_go",
+ "config": {
+  "setup_completed": true
+ },
+ "steps": [
+  {
+   "tool": "house_rules",
+   "input": {
+    "action": "status"
+   },
+   "result": {
+    "ok": true,
+    "version": 1,
+    "mode": "conversation",
+    "status": "pending",
+    "rules_status": "pending",
+    "onboarding_pending": false,
+    "onboarding_enabled": true,
+    "mind_ready": false,
+    "mind_failure": null,
+    "mind_progress": null,
+    "draft": {},
+    "skipped": [],
+    "secrets_set": [],
+    "answers": {},
+    "pending": null,
+    "setup_session_id": "",
+    "questions": [
+     {
+      "id": "names",
+      "title": "Names",
+      "prompt": "What should I call you, and what should you call me? You can keep Remedy, or pick another name.",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "user_name",
+        "default": "",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "name",
+        "default": "Remedy",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "agent_gender",
+        "default": "female",
+        "kind": "enum",
+        "choices": [
+         "female",
+         "male",
+         "neutral"
+        ],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "language",
+      "title": "Language",
+      "prompt": "Which language should I use? The default is this computer's language, and I can follow what you type.",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "ui_language",
+        "default": "auto",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "tone",
+      "title": "Tone",
+      "prompt": "How should I talk — balanced, concise, detailed, or playful?",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "persona",
+        "default": "default",
+        "kind": "enum",
+        "choices": [
+         "default",
+         "balanced",
+         "efficient",
+         "concise",
+         "detailed",
+         "verbose",
+         "playful",
+         "sarcastic",
+         "minimal"
+        ],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "sarcasm_mode",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "provider",
+      "title": "Provider",
+      "prompt": "If you want a cloud model as muscle, which provider should I use? You can skip this and add a key later in Settings. I will not write API keys into logs or the house-rules file.",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "llm_provider",
+        "default": "demo",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "llm_model",
+        "default": "",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "llm_base_url",
+        "default": "",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "custom_llm_name",
+        "default": "",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "llm_api_key",
+        "default": null,
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": true
+       }
+      ]
+     },
+     {
+      "id": "workspace",
+      "title": "Workspace",
+      "prompt": "Is there a default project folder I should use for tools and files? You can leave this empty.",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "project_path",
+        "default": "",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "proactive",
+      "title": "How proactive",
+      "prompt": "Should I reach out between visits, and keep my own drives going? Reaching out stays off unless you say yes.",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "proactive_reach_out",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "drives_enabled",
+        "default": true,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "privacy",
+      "title": "Privacy and audit",
+      "prompt": "Should I keep a visible audit of inner work, and turn on privacy mode that strips personal details from provider traffic?",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "privacy_mode",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": true,
+        "secret": false
+       },
+       {
+        "key": "inner_audit",
+        "default": true,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": true,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "tokens",
+      "title": "Token saving",
+      "prompt": "I can handle easy chats and pictures here on this PC, and send the muscle a short description instead of the raw image. That saves your tokens. Want that?",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "always_send_images",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "vision_force_decode",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "mind_handles_easy_chats",
+        "default": true,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "muscle_route",
+        "default": "auto",
+        "kind": "enum",
+        "choices": [
+         "auto",
+         "mind",
+         "rmb",
+         "local",
+         "frontier"
+        ],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "gpu",
+      "title": "Local muscle and the GPU",
+      "prompt": "If a local muscle (a bigger model on this PC) is running, how should we share the GPU? Auto is fine for most machines. On a 12 GB card, yielding the mind to the CPU lets a 9B muscle run at full speed.",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "muscle_gpu_policy",
+        "default": "auto",
+        "kind": "enum",
+        "choices": [
+         "auto",
+         "share",
+         "yield_mind",
+         "keep_mind"
+        ],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "mind_keep_gpu",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "consent",
+      "title": "Consent",
+      "prompt": "I will always ask before spending money, sending messages, or deleting things — that's recommended and already the rule. Should I also ask before other tools run, or use the usual in-project auto mode?",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "approval_mode",
+        "default": "auto",
+        "kind": "enum",
+        "choices": [
+         "ask",
+         "auto",
+         "full"
+        ],
+        "sensitive": true,
+        "secret": false
+       },
+       {
+        "key": "trust_profile",
+        "default": "balanced",
+        "kind": "enum",
+        "choices": [
+         "conservative",
+         "balanced",
+         "autonomous"
+        ],
+        "sensitive": true,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "interop",
+      "title": "Other bots",
+      "prompt": "Should other bots be able to talk to me (A2A or MCP), and should I answer them automatically? Both stay off until you turn them on. Inbound connections stay on this computer and need a token.",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "interop_inbound",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": true,
+        "secret": false
+       },
+       {
+        "key": "interop_auto_reply",
+        "default": true,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": true,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "updates",
+      "title": "Updates",
+      "prompt": "Updates happen in the app. Should I check for them automatically and let you know, or only when you ask? Installs always wait for you.",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "update_check",
+        "default": "auto",
+        "kind": "enum",
+        "choices": [
+         "auto",
+         "ask"
+        ],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "launch",
+      "title": "Start with the computer",
+      "prompt": "Should I start with this computer so I'm ready when you are?",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "launch_at_login",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     }
+    ],
+    "defaults": {
+     "user_name": "",
+     "name": "Remedy",
+     "agent_gender": "female",
+     "ui_language": "auto",
+     "persona": "default",
+     "sarcasm_mode": false,
+     "llm_provider": "demo",
+     "llm_model": "",
+     "llm_base_url": "",
+     "custom_llm_name": "",
+     "project_path": "",
+     "proactive_reach_out": false,
+     "drives_enabled": true,
+     "privacy_mode": false,
+     "inner_audit": true,
+     "always_send_images": false,
+     "vision_force_decode": false,
+     "mind_handles_easy_chats": true,
+     "muscle_route": "auto",
+     "muscle_gpu_policy": "auto",
+     "mind_keep_gpu": false,
+     "approval_mode": "auto",
+     "trust_profile": "balanced",
+     "interop_inbound": false,
+     "interop_auto_reply": true,
+     "update_check": "auto",
+     "launch_at_login": false
+    },
+    "summary": "Names: user_name:  (default); name: Remedy (default); agent_gender: female (default) [ok]\nLanguage: ui_language: auto (default) [ok]\nTone: persona: default (default); sarcasm_mode: False (default) [ok]\nProvider: llm_provider: demo (default); llm_model:  (default); llm_base_url:  (default); custom_llm_name:  (default); llm_api_key: not set [ok]\nWorkspace: project_path:  (default) [ok]\nHow proactive: proactive_reach_out: False (default); drives_enabled: True (default) [ok]\nPrivacy and audit: privacy_mode: False (default); inner_audit: True (default) [ok]\nToken saving: always_send_images: False (default); vision_force_decode: False (default); mind_handles_easy_chats: True (default); muscle_route: auto (default) [ok]\nLocal muscle and the GPU: muscle_gpu_policy: auto (default); mind_keep_gpu: False (default) [ok]\nConsent: approval_mode: auto (default); trust_profile: balanced (default) [ok]\nOther bots: interop_inbound: False (default); interop_auto_reply: True (default) [ok]\nUpdates: update_check: auto (default) [ok]\nStart with the computer: launch_at_login: False (default) [ok]",
+    "offer_prompt": "House rules (one-time, optional, first run): Welcome them briefly and walk through house rules in a short, friendly conversation. Ask one topic at a time. Every question is skippable; they can also skip all and keep the defaults. After answers or skips, show a short summary and ask them to confirm. Use the house_rules tool (record, skip_all, summarize, confirm). Never nag if they skip or ignore this. Peers cannot set house rules. They can switch to Traditional setup at any time; answers already given are kept. Topics: Names (names); Language (language); Tone (tone); Provider (provider); Workspace (workspace); How proactive (proactive); Privacy and audit (privacy); Token saving (tokens); Local muscle and the GPU (gpu); Consent (consent); Other bots (interop); Updates (updates); Start with the computer (launch).",
+    "update_offer": {
+     "available": true,
+     "id": "major-changes-2026-11",
+     "title": "House rules",
+     "body": "Remedy now has smarter token saving, local muscle sharing, and talking with other bots (A2A and MCP). It's worth a few minutes to go over the house rules together.",
+     "primary": "Let's go",
+     "secondary": "Not now"
+    }
+   },
+   "files": {
+    "house_rules.toml": null,
+    "setup_session.json": null,
+    "house_rules_pending.json": null,
+    "house_rules_prev.json": null,
+    "house_rules_audit.jsonl": null,
+    "config.toml": {
+     "setup_completed": true
+    }
+   }
+  },
+  {
+   "tool": "house_rules",
+   "input": {
+    "action": "update_offer_go"
+   },
+   "result": {
+    "ok": true,
+    "choice": "accepted",
+    "update_offer": {
+     "available": false,
+     "id": "major-changes-2026-11",
+     "title": "House rules",
+     "body": "Remedy now has smarter token saving, local muscle sharing, and talking with other bots (A2A and MCP). It's worth a few minutes to go over the house rules together.",
+     "primary": "Let's go",
+     "secondary": "Not now"
+    },
+    "prompt": "The owner asked to go over house rules again. Walk through the same skippable topics, one at a time, show a short summary, and confirm before applying. Use the house_rules tool. Skipped items keep their current value (or the default if they were never set).",
+    "session": {
+     "version": 1,
+     "mode": "conversation",
+     "status": "pending",
+     "rules_status": "pending",
+     "onboarding_pending": true,
+     "onboarding_enabled": true,
+     "mind_ready": false,
+     "mind_failure": null,
+     "mind_progress": null,
+     "draft": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "default",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "skipped": [],
+     "secrets_set": [],
+     "answers": {},
+     "pending": null,
+     "setup_session_id": "",
+     "questions": [
+      {
+       "id": "names",
+       "title": "Names",
+       "prompt": "What should I call you, and what should you call me? You can keep Remedy, or pick another name.",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "user_name",
+         "default": "",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "name",
+         "default": "Remedy",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "agent_gender",
+         "default": "female",
+         "kind": "enum",
+         "choices": [
+          "female",
+          "male",
+          "neutral"
+         ],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "language",
+       "title": "Language",
+       "prompt": "Which language should I use? The default is this computer's language, and I can follow what you type.",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "ui_language",
+         "default": "auto",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "tone",
+       "title": "Tone",
+       "prompt": "How should I talk — balanced, concise, detailed, or playful?",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "persona",
+         "default": "default",
+         "kind": "enum",
+         "choices": [
+          "default",
+          "balanced",
+          "efficient",
+          "concise",
+          "detailed",
+          "verbose",
+          "playful",
+          "sarcastic",
+          "minimal"
+         ],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "sarcasm_mode",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "provider",
+       "title": "Provider",
+       "prompt": "If you want a cloud model as muscle, which provider should I use? You can skip this and add a key later in Settings. I will not write API keys into logs or the house-rules file.",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "llm_provider",
+         "default": "demo",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "llm_model",
+         "default": "",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "llm_base_url",
+         "default": "",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "custom_llm_name",
+         "default": "",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "llm_api_key",
+         "default": null,
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": true
+        }
+       ]
+      },
+      {
+       "id": "workspace",
+       "title": "Workspace",
+       "prompt": "Is there a default project folder I should use for tools and files? You can leave this empty.",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "project_path",
+         "default": "",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "proactive",
+       "title": "How proactive",
+       "prompt": "Should I reach out between visits, and keep my own drives going? Reaching out stays off unless you say yes.",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "proactive_reach_out",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "drives_enabled",
+         "default": true,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "privacy",
+       "title": "Privacy and audit",
+       "prompt": "Should I keep a visible audit of inner work, and turn on privacy mode that strips personal details from provider traffic?",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "privacy_mode",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": true,
+         "secret": false
+        },
+        {
+         "key": "inner_audit",
+         "default": true,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": true,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "tokens",
+       "title": "Token saving",
+       "prompt": "I can handle easy chats and pictures here on this PC, and send the muscle a short description instead of the raw image. That saves your tokens. Want that?",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "always_send_images",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "vision_force_decode",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "mind_handles_easy_chats",
+         "default": true,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "muscle_route",
+         "default": "auto",
+         "kind": "enum",
+         "choices": [
+          "auto",
+          "mind",
+          "rmb",
+          "local",
+          "frontier"
+         ],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "gpu",
+       "title": "Local muscle and the GPU",
+       "prompt": "If a local muscle (a bigger model on this PC) is running, how should we share the GPU? Auto is fine for most machines. On a 12 GB card, yielding the mind to the CPU lets a 9B muscle run at full speed.",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "muscle_gpu_policy",
+         "default": "auto",
+         "kind": "enum",
+         "choices": [
+          "auto",
+          "share",
+          "yield_mind",
+          "keep_mind"
+         ],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "mind_keep_gpu",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "consent",
+       "title": "Consent",
+       "prompt": "I will always ask before spending money, sending messages, or deleting things — that's recommended and already the rule. Should I also ask before other tools run, or use the usual in-project auto mode?",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "approval_mode",
+         "default": "auto",
+         "kind": "enum",
+         "choices": [
+          "ask",
+          "auto",
+          "full"
+         ],
+         "sensitive": true,
+         "secret": false
+        },
+        {
+         "key": "trust_profile",
+         "default": "balanced",
+         "kind": "enum",
+         "choices": [
+          "conservative",
+          "balanced",
+          "autonomous"
+         ],
+         "sensitive": true,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "interop",
+       "title": "Other bots",
+       "prompt": "Should other bots be able to talk to me (A2A or MCP), and should I answer them automatically? Both stay off until you turn them on. Inbound connections stay on this computer and need a token.",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "interop_inbound",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": true,
+         "secret": false
+        },
+        {
+         "key": "interop_auto_reply",
+         "default": true,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": true,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "updates",
+       "title": "Updates",
+       "prompt": "Updates happen in the app. Should I check for them automatically and let you know, or only when you ask? Installs always wait for you.",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "update_check",
+         "default": "auto",
+         "kind": "enum",
+         "choices": [
+          "auto",
+          "ask"
+         ],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "launch",
+       "title": "Start with the computer",
+       "prompt": "Should I start with this computer so I'm ready when you are?",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "launch_at_login",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      }
+     ],
+     "defaults": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "default",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "summary": "Names: user_name:  (default); name: Remedy (default); agent_gender: female (default) [ok]\nLanguage: ui_language: auto (default) [ok]\nTone: persona: default (default); sarcasm_mode: False (default) [ok]\nProvider: llm_provider: demo (default); llm_model:  (default); llm_base_url:  (default); custom_llm_name:  (default); llm_api_key: not set [ok]\nWorkspace: project_path:  (default) [ok]\nHow proactive: proactive_reach_out: False (default); drives_enabled: True (default) [ok]\nPrivacy and audit: privacy_mode: False (default); inner_audit: True (default) [ok]\nToken saving: always_send_images: False (default); vision_force_decode: False (default); mind_handles_easy_chats: True (default); muscle_route: auto (default) [ok]\nLocal muscle and the GPU: muscle_gpu_policy: auto (default); mind_keep_gpu: False (default) [ok]\nConsent: approval_mode: auto (default); trust_profile: balanced (default) [ok]\nOther bots: interop_inbound: False (default); interop_auto_reply: True (default) [ok]\nUpdates: update_check: auto (default) [ok]\nStart with the computer: launch_at_login: False (default) [ok]",
+     "offer_prompt": "House rules (one-time, optional, first run): Welcome them briefly and walk through house rules in a short, friendly conversation. Ask one topic at a time. Every question is skippable; they can also skip all and keep the defaults. After answers or skips, show a short summary and ask them to confirm. Use the house_rules tool (record, skip_all, summarize, confirm). Never nag if they skip or ignore this. Peers cannot set house rules. They can switch to Traditional setup at any time; answers already given are kept. Topics: Names (names); Language (language); Tone (tone); Provider (provider); Workspace (workspace); How proactive (proactive); Privacy and audit (privacy); Token saving (tokens); Local muscle and the GPU (gpu); Consent (consent); Other bots (interop); Updates (updates); Start with the computer (launch).",
+     "update_offer": {
+      "available": false,
+      "id": "major-changes-2026-11",
+      "title": "House rules",
+      "body": "Remedy now has smarter token saving, local muscle sharing, and talking with other bots (A2A and MCP). It's worth a few minutes to go over the house rules together.",
+      "primary": "Let's go",
+      "secondary": "Not now"
+     }
+    },
+    "questions": [
+     {
+      "id": "names",
+      "title": "Names",
+      "prompt": "What should I call you, and what should you call me? You can keep Remedy, or pick another name.",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "user_name",
+        "default": "",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "name",
+        "default": "Remedy",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "agent_gender",
+        "default": "female",
+        "kind": "enum",
+        "choices": [
+         "female",
+         "male",
+         "neutral"
+        ],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "language",
+      "title": "Language",
+      "prompt": "Which language should I use? The default is this computer's language, and I can follow what you type.",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "ui_language",
+        "default": "auto",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "tone",
+      "title": "Tone",
+      "prompt": "How should I talk — balanced, concise, detailed, or playful?",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "persona",
+        "default": "default",
+        "kind": "enum",
+        "choices": [
+         "default",
+         "balanced",
+         "efficient",
+         "concise",
+         "detailed",
+         "verbose",
+         "playful",
+         "sarcastic",
+         "minimal"
+        ],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "sarcasm_mode",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "provider",
+      "title": "Provider",
+      "prompt": "If you want a cloud model as muscle, which provider should I use? You can skip this and add a key later in Settings. I will not write API keys into logs or the house-rules file.",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "llm_provider",
+        "default": "demo",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "llm_model",
+        "default": "",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "llm_base_url",
+        "default": "",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "custom_llm_name",
+        "default": "",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "llm_api_key",
+        "default": null,
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": true
+       }
+      ]
+     },
+     {
+      "id": "workspace",
+      "title": "Workspace",
+      "prompt": "Is there a default project folder I should use for tools and files? You can leave this empty.",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "project_path",
+        "default": "",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "proactive",
+      "title": "How proactive",
+      "prompt": "Should I reach out between visits, and keep my own drives going? Reaching out stays off unless you say yes.",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "proactive_reach_out",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "drives_enabled",
+        "default": true,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "privacy",
+      "title": "Privacy and audit",
+      "prompt": "Should I keep a visible audit of inner work, and turn on privacy mode that strips personal details from provider traffic?",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "privacy_mode",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": true,
+        "secret": false
+       },
+       {
+        "key": "inner_audit",
+        "default": true,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": true,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "tokens",
+      "title": "Token saving",
+      "prompt": "I can handle easy chats and pictures here on this PC, and send the muscle a short description instead of the raw image. That saves your tokens. Want that?",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "always_send_images",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "vision_force_decode",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "mind_handles_easy_chats",
+        "default": true,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "muscle_route",
+        "default": "auto",
+        "kind": "enum",
+        "choices": [
+         "auto",
+         "mind",
+         "rmb",
+         "local",
+         "frontier"
+        ],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "gpu",
+      "title": "Local muscle and the GPU",
+      "prompt": "If a local muscle (a bigger model on this PC) is running, how should we share the GPU? Auto is fine for most machines. On a 12 GB card, yielding the mind to the CPU lets a 9B muscle run at full speed.",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "muscle_gpu_policy",
+        "default": "auto",
+        "kind": "enum",
+        "choices": [
+         "auto",
+         "share",
+         "yield_mind",
+         "keep_mind"
+        ],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "mind_keep_gpu",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "consent",
+      "title": "Consent",
+      "prompt": "I will always ask before spending money, sending messages, or deleting things — that's recommended and already the rule. Should I also ask before other tools run, or use the usual in-project auto mode?",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "approval_mode",
+        "default": "auto",
+        "kind": "enum",
+        "choices": [
+         "ask",
+         "auto",
+         "full"
+        ],
+        "sensitive": true,
+        "secret": false
+       },
+       {
+        "key": "trust_profile",
+        "default": "balanced",
+        "kind": "enum",
+        "choices": [
+         "conservative",
+         "balanced",
+         "autonomous"
+        ],
+        "sensitive": true,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "interop",
+      "title": "Other bots",
+      "prompt": "Should other bots be able to talk to me (A2A or MCP), and should I answer them automatically? Both stay off until you turn them on. Inbound connections stay on this computer and need a token.",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "interop_inbound",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": true,
+        "secret": false
+       },
+       {
+        "key": "interop_auto_reply",
+        "default": true,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": true,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "updates",
+      "title": "Updates",
+      "prompt": "Updates happen in the app. Should I check for them automatically and let you know, or only when you ask? Installs always wait for you.",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "update_check",
+        "default": "auto",
+        "kind": "enum",
+        "choices": [
+         "auto",
+         "ask"
+        ],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "launch",
+      "title": "Start with the computer",
+      "prompt": "Should I start with this computer so I'm ready when you are?",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "launch_at_login",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     }
+    ]
+   },
+   "files": {
+    "house_rules.toml": {
+     "version": 1,
+     "status": "pending",
+     "offered_at": "",
+     "completed_at": "",
+     "source": "",
+     "skipped": [],
+     "update_offer": "accepted",
+     "update_offer_id": "major-changes-2026-11",
+     "answers": {},
+     "provenance": {}
+    },
+    "setup_session.json": {
+     "version": 1,
+     "mode": "conversation",
+     "status": "pending",
+     "onboarding_pending": true,
+     "mind_failure": null,
+     "draft": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "default",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "skipped": [],
+     "offered_at": "",
+     "completed_at": "",
+     "source": "revisit",
+     "setup_session_id": "",
+     "update_offer": "accepted",
+     "update_offer_id": "major-changes-2026-11",
+     "update_offer_at": "2026-11-25T15:39:51Z"
+    },
+    "house_rules_pending.json": null,
+    "house_rules_prev.json": null,
+    "house_rules_audit.jsonl": [
+     {
+      "action": "update_offer",
+      "actor": "owner",
+      "origin": "",
+      "choice": "accepted",
+      "id": "major-changes-2026-11",
+      "ts": "2026-11-25T15:39:51Z"
+     },
+     {
+      "action": "revisit",
+      "actor": "owner",
+      "origin": "",
+      "ts": "2026-11-25T15:39:51Z"
+     }
+    ],
+    "config.toml": {
+     "setup_completed": true
+    }
+   }
+  },
+  {
+   "tool": "house_rules",
+   "input": {
+    "action": "status"
+   },
+   "result": {
+    "ok": true,
+    "version": 1,
+    "mode": "conversation",
+    "status": "pending",
+    "rules_status": "pending",
+    "onboarding_pending": true,
+    "onboarding_enabled": true,
+    "mind_ready": false,
+    "mind_failure": null,
+    "mind_progress": null,
+    "draft": {
+     "user_name": "",
+     "name": "Remedy",
+     "agent_gender": "female",
+     "ui_language": "auto",
+     "persona": "default",
+     "sarcasm_mode": false,
+     "llm_provider": "demo",
+     "llm_model": "",
+     "llm_base_url": "",
+     "custom_llm_name": "",
+     "project_path": "",
+     "proactive_reach_out": false,
+     "drives_enabled": true,
+     "privacy_mode": false,
+     "inner_audit": true,
+     "always_send_images": false,
+     "vision_force_decode": false,
+     "mind_handles_easy_chats": true,
+     "muscle_route": "auto",
+     "muscle_gpu_policy": "auto",
+     "mind_keep_gpu": false,
+     "approval_mode": "auto",
+     "trust_profile": "balanced",
+     "interop_inbound": false,
+     "interop_auto_reply": true,
+     "update_check": "auto",
+     "launch_at_login": false
+    },
+    "skipped": [],
+    "secrets_set": [],
+    "answers": {},
+    "pending": null,
+    "setup_session_id": "",
+    "questions": [
+     {
+      "id": "names",
+      "title": "Names",
+      "prompt": "What should I call you, and what should you call me? You can keep Remedy, or pick another name.",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "user_name",
+        "default": "",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "name",
+        "default": "Remedy",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "agent_gender",
+        "default": "female",
+        "kind": "enum",
+        "choices": [
+         "female",
+         "male",
+         "neutral"
+        ],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "language",
+      "title": "Language",
+      "prompt": "Which language should I use? The default is this computer's language, and I can follow what you type.",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "ui_language",
+        "default": "auto",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "tone",
+      "title": "Tone",
+      "prompt": "How should I talk — balanced, concise, detailed, or playful?",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "persona",
+        "default": "default",
+        "kind": "enum",
+        "choices": [
+         "default",
+         "balanced",
+         "efficient",
+         "concise",
+         "detailed",
+         "verbose",
+         "playful",
+         "sarcastic",
+         "minimal"
+        ],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "sarcasm_mode",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "provider",
+      "title": "Provider",
+      "prompt": "If you want a cloud model as muscle, which provider should I use? You can skip this and add a key later in Settings. I will not write API keys into logs or the house-rules file.",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "llm_provider",
+        "default": "demo",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "llm_model",
+        "default": "",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "llm_base_url",
+        "default": "",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "custom_llm_name",
+        "default": "",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "llm_api_key",
+        "default": null,
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": true
+       }
+      ]
+     },
+     {
+      "id": "workspace",
+      "title": "Workspace",
+      "prompt": "Is there a default project folder I should use for tools and files? You can leave this empty.",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "project_path",
+        "default": "",
+        "kind": "str",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "proactive",
+      "title": "How proactive",
+      "prompt": "Should I reach out between visits, and keep my own drives going? Reaching out stays off unless you say yes.",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "proactive_reach_out",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "drives_enabled",
+        "default": true,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "privacy",
+      "title": "Privacy and audit",
+      "prompt": "Should I keep a visible audit of inner work, and turn on privacy mode that strips personal details from provider traffic?",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "privacy_mode",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": true,
+        "secret": false
+       },
+       {
+        "key": "inner_audit",
+        "default": true,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": true,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "tokens",
+      "title": "Token saving",
+      "prompt": "I can handle easy chats and pictures here on this PC, and send the muscle a short description instead of the raw image. That saves your tokens. Want that?",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "always_send_images",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "vision_force_decode",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "mind_handles_easy_chats",
+        "default": true,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "muscle_route",
+        "default": "auto",
+        "kind": "enum",
+        "choices": [
+         "auto",
+         "mind",
+         "rmb",
+         "local",
+         "frontier"
+        ],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "gpu",
+      "title": "Local muscle and the GPU",
+      "prompt": "If a local muscle (a bigger model on this PC) is running, how should we share the GPU? Auto is fine for most machines. On a 12 GB card, yielding the mind to the CPU lets a 9B muscle run at full speed.",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "muscle_gpu_policy",
+        "default": "auto",
+        "kind": "enum",
+        "choices": [
+         "auto",
+         "share",
+         "yield_mind",
+         "keep_mind"
+        ],
+        "sensitive": false,
+        "secret": false
+       },
+       {
+        "key": "mind_keep_gpu",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "consent",
+      "title": "Consent",
+      "prompt": "I will always ask before spending money, sending messages, or deleting things — that's recommended and already the rule. Should I also ask before other tools run, or use the usual in-project auto mode?",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "approval_mode",
+        "default": "auto",
+        "kind": "enum",
+        "choices": [
+         "ask",
+         "auto",
+         "full"
+        ],
+        "sensitive": true,
+        "secret": false
+       },
+       {
+        "key": "trust_profile",
+        "default": "balanced",
+        "kind": "enum",
+        "choices": [
+         "conservative",
+         "balanced",
+         "autonomous"
+        ],
+        "sensitive": true,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "interop",
+      "title": "Other bots",
+      "prompt": "Should other bots be able to talk to me (A2A or MCP), and should I answer them automatically? Both stay off until you turn them on. Inbound connections stay on this computer and need a token.",
+      "group": "house_rules",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "interop_inbound",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": true,
+        "secret": false
+       },
+       {
+        "key": "interop_auto_reply",
+        "default": true,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": true,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "updates",
+      "title": "Updates",
+      "prompt": "Updates happen in the app. Should I check for them automatically and let you know, or only when you ask? Installs always wait for you.",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "update_check",
+        "default": "auto",
+        "kind": "enum",
+        "choices": [
+         "auto",
+         "ask"
+        ],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     },
+     {
+      "id": "launch",
+      "title": "Start with the computer",
+      "prompt": "Should I start with this computer so I'm ready when you are?",
+      "group": "setup",
+      "skippable": true,
+      "fields": [
+       {
+        "key": "launch_at_login",
+        "default": false,
+        "kind": "bool",
+        "choices": [],
+        "sensitive": false,
+        "secret": false
+       }
+      ]
+     }
+    ],
+    "defaults": {
+     "user_name": "",
+     "name": "Remedy",
+     "agent_gender": "female",
+     "ui_language": "auto",
+     "persona": "default",
+     "sarcasm_mode": false,
+     "llm_provider": "demo",
+     "llm_model": "",
+     "llm_base_url": "",
+     "custom_llm_name": "",
+     "project_path": "",
+     "proactive_reach_out": false,
+     "drives_enabled": true,
+     "privacy_mode": false,
+     "inner_audit": true,
+     "always_send_images": false,
+     "vision_force_decode": false,
+     "mind_handles_easy_chats": true,
+     "muscle_route": "auto",
+     "muscle_gpu_policy": "auto",
+     "mind_keep_gpu": false,
+     "approval_mode": "auto",
+     "trust_profile": "balanced",
+     "interop_inbound": false,
+     "interop_auto_reply": true,
+     "update_check": "auto",
+     "launch_at_login": false
+    },
+    "summary": "Names: user_name:  (default); name: Remedy (default); agent_gender: female (default) [ok]\nLanguage: ui_language: auto (default) [ok]\nTone: persona: default (default); sarcasm_mode: False (default) [ok]\nProvider: llm_provider: demo (default); llm_model:  (default); llm_base_url:  (default); custom_llm_name:  (default); llm_api_key: not set [ok]\nWorkspace: project_path:  (default) [ok]\nHow proactive: proactive_reach_out: False (default); drives_enabled: True (default) [ok]\nPrivacy and audit: privacy_mode: False (default); inner_audit: True (default) [ok]\nToken saving: always_send_images: False (default); vision_force_decode: False (default); mind_handles_easy_chats: True (default); muscle_route: auto (default) [ok]\nLocal muscle and the GPU: muscle_gpu_policy: auto (default); mind_keep_gpu: False (default) [ok]\nConsent: approval_mode: auto (default); trust_profile: balanced (default) [ok]\nOther bots: interop_inbound: False (default); interop_auto_reply: True (default) [ok]\nUpdates: update_check: auto (default) [ok]\nStart with the computer: launch_at_login: False (default) [ok]",
+    "offer_prompt": "House rules (one-time, optional, first run): Welcome them briefly and walk through house rules in a short, friendly conversation. Ask one topic at a time. Every question is skippable; they can also skip all and keep the defaults. After answers or skips, show a short summary and ask them to confirm. Use the house_rules tool (record, skip_all, summarize, confirm). Never nag if they skip or ignore this. Peers cannot set house rules. They can switch to Traditional setup at any time; answers already given are kept. Topics: Names (names); Language (language); Tone (tone); Provider (provider); Workspace (workspace); How proactive (proactive); Privacy and audit (privacy); Token saving (tokens); Local muscle and the GPU (gpu); Consent (consent); Other bots (interop); Updates (updates); Start with the computer (launch).",
+    "update_offer": {
+     "available": false,
+     "id": "major-changes-2026-11",
+     "title": "House rules",
+     "body": "Remedy now has smarter token saving, local muscle sharing, and talking with other bots (A2A and MCP). It's worth a few minutes to go over the house rules together.",
+     "primary": "Let's go",
+     "secondary": "Not now"
+    }
+   },
+   "files": {
+    "house_rules.toml": {
+     "version": 1,
+     "status": "pending",
+     "offered_at": "",
+     "completed_at": "",
+     "source": "",
+     "skipped": [],
+     "update_offer": "accepted",
+     "update_offer_id": "major-changes-2026-11",
+     "answers": {},
+     "provenance": {}
+    },
+    "setup_session.json": {
+     "version": 1,
+     "mode": "conversation",
+     "status": "pending",
+     "onboarding_pending": true,
+     "mind_failure": null,
+     "draft": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "default",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "skipped": [],
+     "offered_at": "",
+     "completed_at": "",
+     "source": "revisit",
+     "setup_session_id": "",
+     "update_offer": "accepted",
+     "update_offer_id": "major-changes-2026-11",
+     "update_offer_at": "2026-11-25T15:39:51Z"
+    },
+    "house_rules_pending.json": null,
+    "house_rules_prev.json": null,
+    "house_rules_audit.jsonl": [
+     {
+      "action": "update_offer",
+      "actor": "owner",
+      "origin": "",
+      "choice": "accepted",
+      "id": "major-changes-2026-11",
+      "ts": "2026-11-25T15:39:51Z"
+     },
+     {
+      "action": "revisit",
+      "actor": "owner",
+      "origin": "",
+      "ts": "2026-11-25T15:39:51Z"
+     }
+    ],
+    "config.toml": {
+     "setup_completed": true
+    }
+   }
+  },
+  {
+   "tool": "house_rules",
+   "input": {
+    "action": "record",
+    "answers": {
+     "persona": "playful"
+    }
+   },
+   "result": {
+    "ok": true,
+    "session": {
+     "version": 1,
+     "mode": "conversation",
+     "status": "in_progress",
+     "rules_status": "pending",
+     "onboarding_pending": true,
+     "onboarding_enabled": true,
+     "mind_ready": false,
+     "mind_failure": null,
+     "mind_progress": null,
+     "draft": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "playful",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "skipped": [],
+     "secrets_set": [],
+     "answers": {},
+     "pending": null,
+     "setup_session_id": "",
+     "questions": [
+      {
+       "id": "names",
+       "title": "Names",
+       "prompt": "What should I call you, and what should you call me? You can keep Remedy, or pick another name.",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "user_name",
+         "default": "",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "name",
+         "default": "Remedy",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "agent_gender",
+         "default": "female",
+         "kind": "enum",
+         "choices": [
+          "female",
+          "male",
+          "neutral"
+         ],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "language",
+       "title": "Language",
+       "prompt": "Which language should I use? The default is this computer's language, and I can follow what you type.",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "ui_language",
+         "default": "auto",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "tone",
+       "title": "Tone",
+       "prompt": "How should I talk — balanced, concise, detailed, or playful?",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "persona",
+         "default": "default",
+         "kind": "enum",
+         "choices": [
+          "default",
+          "balanced",
+          "efficient",
+          "concise",
+          "detailed",
+          "verbose",
+          "playful",
+          "sarcastic",
+          "minimal"
+         ],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "sarcasm_mode",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "provider",
+       "title": "Provider",
+       "prompt": "If you want a cloud model as muscle, which provider should I use? You can skip this and add a key later in Settings. I will not write API keys into logs or the house-rules file.",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "llm_provider",
+         "default": "demo",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "llm_model",
+         "default": "",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "llm_base_url",
+         "default": "",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "custom_llm_name",
+         "default": "",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "llm_api_key",
+         "default": null,
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": true
+        }
+       ]
+      },
+      {
+       "id": "workspace",
+       "title": "Workspace",
+       "prompt": "Is there a default project folder I should use for tools and files? You can leave this empty.",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "project_path",
+         "default": "",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "proactive",
+       "title": "How proactive",
+       "prompt": "Should I reach out between visits, and keep my own drives going? Reaching out stays off unless you say yes.",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "proactive_reach_out",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "drives_enabled",
+         "default": true,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "privacy",
+       "title": "Privacy and audit",
+       "prompt": "Should I keep a visible audit of inner work, and turn on privacy mode that strips personal details from provider traffic?",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "privacy_mode",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": true,
+         "secret": false
+        },
+        {
+         "key": "inner_audit",
+         "default": true,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": true,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "tokens",
+       "title": "Token saving",
+       "prompt": "I can handle easy chats and pictures here on this PC, and send the muscle a short description instead of the raw image. That saves your tokens. Want that?",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "always_send_images",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "vision_force_decode",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "mind_handles_easy_chats",
+         "default": true,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "muscle_route",
+         "default": "auto",
+         "kind": "enum",
+         "choices": [
+          "auto",
+          "mind",
+          "rmb",
+          "local",
+          "frontier"
+         ],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "gpu",
+       "title": "Local muscle and the GPU",
+       "prompt": "If a local muscle (a bigger model on this PC) is running, how should we share the GPU? Auto is fine for most machines. On a 12 GB card, yielding the mind to the CPU lets a 9B muscle run at full speed.",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "muscle_gpu_policy",
+         "default": "auto",
+         "kind": "enum",
+         "choices": [
+          "auto",
+          "share",
+          "yield_mind",
+          "keep_mind"
+         ],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "mind_keep_gpu",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "consent",
+       "title": "Consent",
+       "prompt": "I will always ask before spending money, sending messages, or deleting things — that's recommended and already the rule. Should I also ask before other tools run, or use the usual in-project auto mode?",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "approval_mode",
+         "default": "auto",
+         "kind": "enum",
+         "choices": [
+          "ask",
+          "auto",
+          "full"
+         ],
+         "sensitive": true,
+         "secret": false
+        },
+        {
+         "key": "trust_profile",
+         "default": "balanced",
+         "kind": "enum",
+         "choices": [
+          "conservative",
+          "balanced",
+          "autonomous"
+         ],
+         "sensitive": true,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "interop",
+       "title": "Other bots",
+       "prompt": "Should other bots be able to talk to me (A2A or MCP), and should I answer them automatically? Both stay off until you turn them on. Inbound connections stay on this computer and need a token.",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "interop_inbound",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": true,
+         "secret": false
+        },
+        {
+         "key": "interop_auto_reply",
+         "default": true,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": true,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "updates",
+       "title": "Updates",
+       "prompt": "Updates happen in the app. Should I check for them automatically and let you know, or only when you ask? Installs always wait for you.",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "update_check",
+         "default": "auto",
+         "kind": "enum",
+         "choices": [
+          "auto",
+          "ask"
+         ],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "launch",
+       "title": "Start with the computer",
+       "prompt": "Should I start with this computer so I'm ready when you are?",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "launch_at_login",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      }
+     ],
+     "defaults": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "default",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "summary": "Names: user_name:  (default); name: Remedy (default); agent_gender: female (default) [ok]\nLanguage: ui_language: auto (default) [ok]\nTone: persona: playful (set); sarcasm_mode: False (default) [ok]\nProvider: llm_provider: demo (default); llm_model:  (default); llm_base_url:  (default); custom_llm_name:  (default); llm_api_key: not set [ok]\nWorkspace: project_path:  (default) [ok]\nHow proactive: proactive_reach_out: False (default); drives_enabled: True (default) [ok]\nPrivacy and audit: privacy_mode: False (default); inner_audit: True (default) [ok]\nToken saving: always_send_images: False (default); vision_force_decode: False (default); mind_handles_easy_chats: True (default); muscle_route: auto (default) [ok]\nLocal muscle and the GPU: muscle_gpu_policy: auto (default); mind_keep_gpu: False (default) [ok]\nConsent: approval_mode: auto (default); trust_profile: balanced (default) [ok]\nOther bots: interop_inbound: False (default); interop_auto_reply: True (default) [ok]\nUpdates: update_check: auto (default) [ok]\nStart with the computer: launch_at_login: False (default) [ok]",
+     "offer_prompt": "House rules (one-time, optional, first run): Welcome them briefly and walk through house rules in a short, friendly conversation. Ask one topic at a time. Every question is skippable; they can also skip all and keep the defaults. After answers or skips, show a short summary and ask them to confirm. Use the house_rules tool (record, skip_all, summarize, confirm). Never nag if they skip or ignore this. Peers cannot set house rules. They can switch to Traditional setup at any time; answers already given are kept. Topics: Names (names); Language (language); Tone (tone); Provider (provider); Workspace (workspace); How proactive (proactive); Privacy and audit (privacy); Token saving (tokens); Local muscle and the GPU (gpu); Consent (consent); Other bots (interop); Updates (updates); Start with the computer (launch).",
+     "update_offer": {
+      "available": false,
+      "id": "major-changes-2026-11",
+      "title": "House rules",
+      "body": "Remedy now has smarter token saving, local muscle sharing, and talking with other bots (A2A and MCP). It's worth a few minutes to go over the house rules together.",
+      "primary": "Let's go",
+      "secondary": "Not now"
+     }
+    }
+   },
+   "files": {
+    "house_rules.toml": {
+     "version": 1,
+     "status": "pending",
+     "offered_at": "",
+     "completed_at": "",
+     "source": "",
+     "skipped": [],
+     "update_offer": "accepted",
+     "update_offer_id": "major-changes-2026-11",
+     "answers": {},
+     "provenance": {}
+    },
+    "setup_session.json": {
+     "version": 1,
+     "mode": "conversation",
+     "status": "in_progress",
+     "onboarding_pending": true,
+     "mind_failure": null,
+     "draft": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "playful",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "skipped": [],
+     "offered_at": "",
+     "completed_at": "",
+     "source": "revisit",
+     "setup_session_id": "",
+     "update_offer": "accepted",
+     "update_offer_id": "major-changes-2026-11",
+     "update_offer_at": "2026-11-25T15:39:51Z",
+     "secrets_set": []
+    },
+    "house_rules_pending.json": null,
+    "house_rules_prev.json": null,
+    "house_rules_audit.jsonl": [
+     {
+      "action": "update_offer",
+      "actor": "owner",
+      "origin": "",
+      "choice": "accepted",
+      "id": "major-changes-2026-11",
+      "ts": "2026-11-25T15:39:51Z"
+     },
+     {
+      "action": "revisit",
+      "actor": "owner",
+      "origin": "",
+      "ts": "2026-11-25T15:39:51Z"
+     },
+     {
+      "action": "record",
+      "actor": "owner",
+      "origin": "",
+      "source": "onboarding",
+      "keys": [
+       "persona"
+      ],
+      "skipped": [],
+      "ts": "2026-11-25T15:39:51Z"
+     }
+    ],
+    "config.toml": {
+     "setup_completed": true
+    }
+   }
+  },
+  {
+   "tool": "house_rules",
+   "input": {
+    "action": "confirm"
+   },
+   "result": {
+    "ok": true,
+    "status": "complete",
+    "summary": "Names: user_name:  (default); name: Remedy (default); agent_gender: female (default) [ok]\nLanguage: ui_language: auto (default) [ok]\nTone: persona: playful (set); sarcasm_mode: False (default) [ok]\nProvider: llm_provider: demo (default); llm_model:  (default); llm_base_url:  (default); custom_llm_name:  (default); llm_api_key: not set [ok]\nWorkspace: project_path:  (default) [ok]\nHow proactive: proactive_reach_out: False (default); drives_enabled: True (default) [ok]\nPrivacy and audit: privacy_mode: False (default); inner_audit: True (default) [ok]\nToken saving: always_send_images: False (default); vision_force_decode: False (default); mind_handles_easy_chats: True (default); muscle_route: auto (default) [ok]\nLocal muscle and the GPU: muscle_gpu_policy: auto (default); mind_keep_gpu: False (default) [ok]\nConsent: approval_mode: auto (default); trust_profile: balanced (default) [ok]\nOther bots: interop_inbound: False (default); interop_auto_reply: True (default) [ok]\nUpdates: update_check: auto (default) [ok]\nStart with the computer: launch_at_login: False (default) [ok]",
+    "changes": {
+     "user_name": {
+      "from": null,
+      "to": ""
+     },
+     "name": {
+      "from": null,
+      "to": "Remedy"
+     },
+     "agent_gender": {
+      "from": null,
+      "to": "female"
+     },
+     "ui_language": {
+      "from": null,
+      "to": "auto"
+     },
+     "persona": {
+      "from": null,
+      "to": "playful"
+     },
+     "sarcasm_mode": {
+      "from": null,
+      "to": false
+     },
+     "llm_provider": {
+      "from": null,
+      "to": "demo"
+     },
+     "llm_model": {
+      "from": null,
+      "to": ""
+     },
+     "llm_base_url": {
+      "from": null,
+      "to": ""
+     },
+     "custom_llm_name": {
+      "from": null,
+      "to": ""
+     },
+     "project_path": {
+      "from": null,
+      "to": ""
+     },
+     "proactive_reach_out": {
+      "from": null,
+      "to": false
+     },
+     "drives_enabled": {
+      "from": null,
+      "to": true
+     },
+     "privacy_mode": {
+      "from": null,
+      "to": false
+     },
+     "inner_audit": {
+      "from": null,
+      "to": true
+     },
+     "always_send_images": {
+      "from": null,
+      "to": false
+     },
+     "vision_force_decode": {
+      "from": null,
+      "to": false
+     },
+     "mind_handles_easy_chats": {
+      "from": null,
+      "to": true
+     },
+     "muscle_route": {
+      "from": null,
+      "to": "auto"
+     },
+     "muscle_gpu_policy": {
+      "from": null,
+      "to": "auto"
+     },
+     "mind_keep_gpu": {
+      "from": null,
+      "to": false
+     },
+     "approval_mode": {
+      "from": null,
+      "to": "auto"
+     },
+     "trust_profile": {
+      "from": null,
+      "to": "balanced"
+     },
+     "interop_inbound": {
+      "from": null,
+      "to": false
+     },
+     "interop_auto_reply": {
+      "from": null,
+      "to": true
+     },
+     "update_check": {
+      "from": null,
+      "to": "auto"
+     },
+     "launch_at_login": {
+      "from": null,
+      "to": false
+     }
+    },
+    "session": {
+     "version": 1,
+     "mode": "conversation",
+     "status": "complete",
+     "rules_status": "complete",
+     "onboarding_pending": false,
+     "onboarding_enabled": true,
+     "mind_ready": false,
+     "mind_failure": null,
+     "mind_progress": null,
+     "draft": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "playful",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "skipped": [],
+     "secrets_set": [],
+     "answers": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "playful",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "pending": null,
+     "setup_session_id": "",
+     "questions": [
+      {
+       "id": "names",
+       "title": "Names",
+       "prompt": "What should I call you, and what should you call me? You can keep Remedy, or pick another name.",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "user_name",
+         "default": "",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "name",
+         "default": "Remedy",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "agent_gender",
+         "default": "female",
+         "kind": "enum",
+         "choices": [
+          "female",
+          "male",
+          "neutral"
+         ],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "language",
+       "title": "Language",
+       "prompt": "Which language should I use? The default is this computer's language, and I can follow what you type.",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "ui_language",
+         "default": "auto",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "tone",
+       "title": "Tone",
+       "prompt": "How should I talk — balanced, concise, detailed, or playful?",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "persona",
+         "default": "default",
+         "kind": "enum",
+         "choices": [
+          "default",
+          "balanced",
+          "efficient",
+          "concise",
+          "detailed",
+          "verbose",
+          "playful",
+          "sarcastic",
+          "minimal"
+         ],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "sarcasm_mode",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "provider",
+       "title": "Provider",
+       "prompt": "If you want a cloud model as muscle, which provider should I use? You can skip this and add a key later in Settings. I will not write API keys into logs or the house-rules file.",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "llm_provider",
+         "default": "demo",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "llm_model",
+         "default": "",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "llm_base_url",
+         "default": "",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "custom_llm_name",
+         "default": "",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "llm_api_key",
+         "default": null,
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": true
+        }
+       ]
+      },
+      {
+       "id": "workspace",
+       "title": "Workspace",
+       "prompt": "Is there a default project folder I should use for tools and files? You can leave this empty.",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "project_path",
+         "default": "",
+         "kind": "str",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "proactive",
+       "title": "How proactive",
+       "prompt": "Should I reach out between visits, and keep my own drives going? Reaching out stays off unless you say yes.",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "proactive_reach_out",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "drives_enabled",
+         "default": true,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "privacy",
+       "title": "Privacy and audit",
+       "prompt": "Should I keep a visible audit of inner work, and turn on privacy mode that strips personal details from provider traffic?",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "privacy_mode",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": true,
+         "secret": false
+        },
+        {
+         "key": "inner_audit",
+         "default": true,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": true,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "tokens",
+       "title": "Token saving",
+       "prompt": "I can handle easy chats and pictures here on this PC, and send the muscle a short description instead of the raw image. That saves your tokens. Want that?",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "always_send_images",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "vision_force_decode",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "mind_handles_easy_chats",
+         "default": true,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "muscle_route",
+         "default": "auto",
+         "kind": "enum",
+         "choices": [
+          "auto",
+          "mind",
+          "rmb",
+          "local",
+          "frontier"
+         ],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "gpu",
+       "title": "Local muscle and the GPU",
+       "prompt": "If a local muscle (a bigger model on this PC) is running, how should we share the GPU? Auto is fine for most machines. On a 12 GB card, yielding the mind to the CPU lets a 9B muscle run at full speed.",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "muscle_gpu_policy",
+         "default": "auto",
+         "kind": "enum",
+         "choices": [
+          "auto",
+          "share",
+          "yield_mind",
+          "keep_mind"
+         ],
+         "sensitive": false,
+         "secret": false
+        },
+        {
+         "key": "mind_keep_gpu",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "consent",
+       "title": "Consent",
+       "prompt": "I will always ask before spending money, sending messages, or deleting things — that's recommended and already the rule. Should I also ask before other tools run, or use the usual in-project auto mode?",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "approval_mode",
+         "default": "auto",
+         "kind": "enum",
+         "choices": [
+          "ask",
+          "auto",
+          "full"
+         ],
+         "sensitive": true,
+         "secret": false
+        },
+        {
+         "key": "trust_profile",
+         "default": "balanced",
+         "kind": "enum",
+         "choices": [
+          "conservative",
+          "balanced",
+          "autonomous"
+         ],
+         "sensitive": true,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "interop",
+       "title": "Other bots",
+       "prompt": "Should other bots be able to talk to me (A2A or MCP), and should I answer them automatically? Both stay off until you turn them on. Inbound connections stay on this computer and need a token.",
+       "group": "house_rules",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "interop_inbound",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": true,
+         "secret": false
+        },
+        {
+         "key": "interop_auto_reply",
+         "default": true,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": true,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "updates",
+       "title": "Updates",
+       "prompt": "Updates happen in the app. Should I check for them automatically and let you know, or only when you ask? Installs always wait for you.",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "update_check",
+         "default": "auto",
+         "kind": "enum",
+         "choices": [
+          "auto",
+          "ask"
+         ],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      },
+      {
+       "id": "launch",
+       "title": "Start with the computer",
+       "prompt": "Should I start with this computer so I'm ready when you are?",
+       "group": "setup",
+       "skippable": true,
+       "fields": [
+        {
+         "key": "launch_at_login",
+         "default": false,
+         "kind": "bool",
+         "choices": [],
+         "sensitive": false,
+         "secret": false
+        }
+       ]
+      }
+     ],
+     "defaults": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "default",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "summary": "Names: user_name:  (default); name: Remedy (default); agent_gender: female (default) [ok]\nLanguage: ui_language: auto (default) [ok]\nTone: persona: playful (set); sarcasm_mode: False (default) [ok]\nProvider: llm_provider: demo (default); llm_model:  (default); llm_base_url:  (default); custom_llm_name:  (default); llm_api_key: not set [ok]\nWorkspace: project_path:  (default) [ok]\nHow proactive: proactive_reach_out: False (default); drives_enabled: True (default) [ok]\nPrivacy and audit: privacy_mode: False (default); inner_audit: True (default) [ok]\nToken saving: always_send_images: False (default); vision_force_decode: False (default); mind_handles_easy_chats: True (default); muscle_route: auto (default) [ok]\nLocal muscle and the GPU: muscle_gpu_policy: auto (default); mind_keep_gpu: False (default) [ok]\nConsent: approval_mode: auto (default); trust_profile: balanced (default) [ok]\nOther bots: interop_inbound: False (default); interop_auto_reply: True (default) [ok]\nUpdates: update_check: auto (default) [ok]\nStart with the computer: launch_at_login: False (default) [ok]",
+     "offer_prompt": "House rules (one-time, optional, first run): Welcome them briefly and walk through house rules in a short, friendly conversation. Ask one topic at a time. Every question is skippable; they can also skip all and keep the defaults. After answers or skips, show a short summary and ask them to confirm. Use the house_rules tool (record, skip_all, summarize, confirm). Never nag if they skip or ignore this. Peers cannot set house rules. They can switch to Traditional setup at any time; answers already given are kept. Topics: Names (names); Language (language); Tone (tone); Provider (provider); Workspace (workspace); How proactive (proactive); Privacy and audit (privacy); Token saving (tokens); Local muscle and the GPU (gpu); Consent (consent); Other bots (interop); Updates (updates); Start with the computer (launch).",
+     "update_offer": {
+      "available": false,
+      "id": "major-changes-2026-11",
+      "title": "House rules",
+      "body": "Remedy now has smarter token saving, local muscle sharing, and talking with other bots (A2A and MCP). It's worth a few minutes to go over the house rules together.",
+      "primary": "Let's go",
+      "secondary": "Not now"
+     }
+    }
+   },
+   "files": {
+    "house_rules.toml": {
+     "version": 1,
+     "status": "complete",
+     "offered_at": "",
+     "completed_at": "2026-11-25T15:39:51Z",
+     "source": "onboarding",
+     "skipped": [],
+     "update_offer": "accepted",
+     "update_offer_id": "major-changes-2026-11",
+     "answers": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "playful",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "provenance": {
+      "user_name": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "name": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "agent_gender": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "ui_language": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "persona": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "sarcasm_mode": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "llm_provider": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "llm_model": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "llm_base_url": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "custom_llm_name": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "project_path": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "proactive_reach_out": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "drives_enabled": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "privacy_mode": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "inner_audit": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "always_send_images": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "vision_force_decode": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "mind_handles_easy_chats": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "muscle_route": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "muscle_gpu_policy": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "mind_keep_gpu": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "approval_mode": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "trust_profile": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "interop_inbound": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "interop_auto_reply": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "update_check": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "launch_at_login": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      }
+     }
+    },
+    "setup_session.json": {
+     "version": 1,
+     "mode": "conversation",
+     "status": "complete",
+     "onboarding_pending": false,
+     "mind_failure": null,
+     "draft": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "playful",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "skipped": [],
+     "offered_at": "",
+     "completed_at": "2026-11-25T15:39:51Z",
+     "source": "onboarding",
+     "setup_session_id": "",
+     "update_offer": "accepted",
+     "update_offer_id": "major-changes-2026-11",
+     "update_offer_at": "2026-11-25T15:39:51Z"
+    },
+    "house_rules_pending.json": null,
+    "house_rules_prev.json": {
+     "ts": "2026-11-25T15:39:51Z",
+     "rules": {
+      "version": 1,
+      "status": "pending",
+      "offered_at": "",
+      "completed_at": "",
+      "source": "",
+      "answers": {},
+      "provenance": {},
+      "skipped": [],
+      "update_offer": "accepted",
+      "update_offer_id": "major-changes-2026-11"
+     },
+     "config": {}
+    },
+    "house_rules_audit.jsonl": [
+     {
+      "action": "update_offer",
+      "actor": "owner",
+      "origin": "",
+      "choice": "accepted",
+      "id": "major-changes-2026-11",
+      "ts": "2026-11-25T15:39:51Z"
+     },
+     {
+      "action": "revisit",
+      "actor": "owner",
+      "origin": "",
+      "ts": "2026-11-25T15:39:51Z"
+     },
+     {
+      "action": "record",
+      "actor": "owner",
+      "origin": "",
+      "source": "onboarding",
+      "keys": [
+       "persona"
+      ],
+      "skipped": [],
+      "ts": "2026-11-25T15:39:51Z"
+     },
+     {
+      "action": "finalize",
+      "actor": "owner",
+      "origin": "",
+      "source": "onboarding",
+      "status": "complete",
+      "changes": {
+       "user_name": {
+        "from": null,
+        "to": ""
+       },
+       "name": {
+        "from": null,
+        "to": "Remedy"
+       },
+       "agent_gender": {
+        "from": null,
+        "to": "female"
+       },
+       "ui_language": {
+        "from": null,
+        "to": "auto"
+       },
+       "persona": {
+        "from": null,
+        "to": "playful"
+       },
+       "sarcasm_mode": {
+        "from": null,
+        "to": false
+       },
+       "llm_provider": {
+        "from": null,
+        "to": "demo"
+       },
+       "llm_model": {
+        "from": null,
+        "to": ""
+       },
+       "llm_base_url": {
+        "from": null,
+        "to": ""
+       },
+       "custom_llm_name": {
+        "from": null,
+        "to": ""
+       },
+       "project_path": {
+        "from": null,
+        "to": ""
+       },
+       "proactive_reach_out": {
+        "from": null,
+        "to": false
+       },
+       "drives_enabled": {
+        "from": null,
+        "to": true
+       },
+       "privacy_mode": {
+        "from": null,
+        "to": false
+       },
+       "inner_audit": {
+        "from": null,
+        "to": true
+       },
+       "always_send_images": {
+        "from": null,
+        "to": false
+       },
+       "vision_force_decode": {
+        "from": null,
+        "to": false
+       },
+       "mind_handles_easy_chats": {
+        "from": null,
+        "to": true
+       },
+       "muscle_route": {
+        "from": null,
+        "to": "auto"
+       },
+       "muscle_gpu_policy": {
+        "from": null,
+        "to": "auto"
+       },
+       "mind_keep_gpu": {
+        "from": null,
+        "to": false
+       },
+       "approval_mode": {
+        "from": null,
+        "to": "auto"
+       },
+       "trust_profile": {
+        "from": null,
+        "to": "balanced"
+       },
+       "interop_inbound": {
+        "from": null,
+        "to": false
+       },
+       "interop_auto_reply": {
+        "from": null,
+        "to": true
+       },
+       "update_check": {
+        "from": null,
+        "to": "auto"
+       },
+       "launch_at_login": {
+        "from": null,
+        "to": false
+       }
+      },
+      "skipped": [],
+      "ts": "2026-11-25T15:39:51Z"
+     }
+    ],
+    "config.toml": {
+     "setup_completed": true,
+     "user_name": "",
+     "name": "Remedy",
+     "agent_gender": "female",
+     "ui_language": "auto",
+     "persona": "playful",
+     "sarcasm_mode": false,
+     "llm_provider": "demo",
+     "llm_model": "",
+     "llm_base_url": "",
+     "custom_llm_name": "",
+     "project_path": "",
+     "privacy_mode": false,
+     "vision_force_decode": false,
+     "approval_mode": "auto",
+     "trust_profile": "balanced",
+     "update_check": "auto",
+     "launch_at_login": false,
+     "home_dir": "<home>",
+     "advanced": {
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "inner_audit": true,
+      "always_send_images": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "interop_inbound": false,
+      "interop_auto_reply": true
+     }
+    }
+   }
+  },
+  {
+   "tool": "house_rules",
+   "input": {
+    "action": "update_offer_go"
+   },
+   "result": {
+    "ok": true,
+    "choice": "accepted",
+    "already": true,
+    "update_offer": {
+     "available": false,
+     "id": "major-changes-2026-11",
+     "title": "House rules",
+     "body": "Remedy now has smarter token saving, local muscle sharing, and talking with other bots (A2A and MCP). It's worth a few minutes to go over the house rules together.",
+     "primary": "Let's go",
+     "secondary": "Not now"
+    }
+   },
+   "files": {
+    "house_rules.toml": {
+     "version": 1,
+     "status": "complete",
+     "offered_at": "",
+     "completed_at": "2026-11-25T15:39:51Z",
+     "source": "onboarding",
+     "skipped": [],
+     "update_offer": "accepted",
+     "update_offer_id": "major-changes-2026-11",
+     "answers": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "playful",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "provenance": {
+      "user_name": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "name": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "agent_gender": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "ui_language": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "persona": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "sarcasm_mode": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "llm_provider": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "llm_model": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "llm_base_url": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "custom_llm_name": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "project_path": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "proactive_reach_out": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "drives_enabled": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "privacy_mode": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "inner_audit": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "always_send_images": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "vision_force_decode": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "mind_handles_easy_chats": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "muscle_route": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "muscle_gpu_policy": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "mind_keep_gpu": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "approval_mode": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "trust_profile": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "interop_inbound": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "interop_auto_reply": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "update_check": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "launch_at_login": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      }
+     }
+    },
+    "setup_session.json": {
+     "version": 1,
+     "mode": "conversation",
+     "status": "complete",
+     "onboarding_pending": false,
+     "mind_failure": null,
+     "draft": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "playful",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "skipped": [],
+     "offered_at": "",
+     "completed_at": "2026-11-25T15:39:51Z",
+     "source": "onboarding",
+     "setup_session_id": "",
+     "update_offer": "accepted",
+     "update_offer_id": "major-changes-2026-11",
+     "update_offer_at": "2026-11-25T15:39:51Z"
+    },
+    "house_rules_pending.json": null,
+    "house_rules_prev.json": {
+     "ts": "2026-11-25T15:39:51Z",
+     "rules": {
+      "version": 1,
+      "status": "pending",
+      "offered_at": "",
+      "completed_at": "",
+      "source": "",
+      "answers": {},
+      "provenance": {},
+      "skipped": [],
+      "update_offer": "accepted",
+      "update_offer_id": "major-changes-2026-11"
+     },
+     "config": {}
+    },
+    "house_rules_audit.jsonl": [
+     {
+      "action": "update_offer",
+      "actor": "owner",
+      "origin": "",
+      "choice": "accepted",
+      "id": "major-changes-2026-11",
+      "ts": "2026-11-25T15:39:51Z"
+     },
+     {
+      "action": "revisit",
+      "actor": "owner",
+      "origin": "",
+      "ts": "2026-11-25T15:39:51Z"
+     },
+     {
+      "action": "record",
+      "actor": "owner",
+      "origin": "",
+      "source": "onboarding",
+      "keys": [
+       "persona"
+      ],
+      "skipped": [],
+      "ts": "2026-11-25T15:39:51Z"
+     },
+     {
+      "action": "finalize",
+      "actor": "owner",
+      "origin": "",
+      "source": "onboarding",
+      "status": "complete",
+      "changes": {
+       "user_name": {
+        "from": null,
+        "to": ""
+       },
+       "name": {
+        "from": null,
+        "to": "Remedy"
+       },
+       "agent_gender": {
+        "from": null,
+        "to": "female"
+       },
+       "ui_language": {
+        "from": null,
+        "to": "auto"
+       },
+       "persona": {
+        "from": null,
+        "to": "playful"
+       },
+       "sarcasm_mode": {
+        "from": null,
+        "to": false
+       },
+       "llm_provider": {
+        "from": null,
+        "to": "demo"
+       },
+       "llm_model": {
+        "from": null,
+        "to": ""
+       },
+       "llm_base_url": {
+        "from": null,
+        "to": ""
+       },
+       "custom_llm_name": {
+        "from": null,
+        "to": ""
+       },
+       "project_path": {
+        "from": null,
+        "to": ""
+       },
+       "proactive_reach_out": {
+        "from": null,
+        "to": false
+       },
+       "drives_enabled": {
+        "from": null,
+        "to": true
+       },
+       "privacy_mode": {
+        "from": null,
+        "to": false
+       },
+       "inner_audit": {
+        "from": null,
+        "to": true
+       },
+       "always_send_images": {
+        "from": null,
+        "to": false
+       },
+       "vision_force_decode": {
+        "from": null,
+        "to": false
+       },
+       "mind_handles_easy_chats": {
+        "from": null,
+        "to": true
+       },
+       "muscle_route": {
+        "from": null,
+        "to": "auto"
+       },
+       "muscle_gpu_policy": {
+        "from": null,
+        "to": "auto"
+       },
+       "mind_keep_gpu": {
+        "from": null,
+        "to": false
+       },
+       "approval_mode": {
+        "from": null,
+        "to": "auto"
+       },
+       "trust_profile": {
+        "from": null,
+        "to": "balanced"
+       },
+       "interop_inbound": {
+        "from": null,
+        "to": false
+       },
+       "interop_auto_reply": {
+        "from": null,
+        "to": true
+       },
+       "update_check": {
+        "from": null,
+        "to": "auto"
+       },
+       "launch_at_login": {
+        "from": null,
+        "to": false
+       }
+      },
+      "skipped": [],
+      "ts": "2026-11-25T15:39:51Z"
+     }
+    ],
+    "config.toml": {
+     "setup_completed": true,
+     "user_name": "",
+     "name": "Remedy",
+     "agent_gender": "female",
+     "ui_language": "auto",
+     "persona": "playful",
+     "sarcasm_mode": false,
+     "llm_provider": "demo",
+     "llm_model": "",
+     "llm_base_url": "",
+     "custom_llm_name": "",
+     "project_path": "",
+     "privacy_mode": false,
+     "vision_force_decode": false,
+     "approval_mode": "auto",
+     "trust_profile": "balanced",
+     "update_check": "auto",
+     "launch_at_login": false,
+     "home_dir": "<home>",
+     "advanced": {
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "inner_audit": true,
+      "always_send_images": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "interop_inbound": false,
+      "interop_auto_reply": true
+     }
+    }
+   }
+  },
+  {
+   "tool": "house_rules",
+   "input": {
+    "action": "update_offer_later"
+   },
+   "result": {
+    "ok": true,
+    "choice": "accepted",
+    "already": true,
+    "update_offer": {
+     "available": false,
+     "id": "major-changes-2026-11",
+     "title": "House rules",
+     "body": "Remedy now has smarter token saving, local muscle sharing, and talking with other bots (A2A and MCP). It's worth a few minutes to go over the house rules together.",
+     "primary": "Let's go",
+     "secondary": "Not now"
+    }
+   },
+   "files": {
+    "house_rules.toml": {
+     "version": 1,
+     "status": "complete",
+     "offered_at": "",
+     "completed_at": "2026-11-25T15:39:51Z",
+     "source": "onboarding",
+     "skipped": [],
+     "update_offer": "accepted",
+     "update_offer_id": "major-changes-2026-11",
+     "answers": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "playful",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "provenance": {
+      "user_name": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "name": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "agent_gender": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "ui_language": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "persona": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "sarcasm_mode": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "llm_provider": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "llm_model": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "llm_base_url": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "custom_llm_name": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "project_path": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "proactive_reach_out": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "drives_enabled": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "privacy_mode": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "inner_audit": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "always_send_images": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "vision_force_decode": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "mind_handles_easy_chats": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "muscle_route": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "muscle_gpu_policy": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "mind_keep_gpu": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "approval_mode": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "trust_profile": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "interop_inbound": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "interop_auto_reply": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "update_check": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      },
+      "launch_at_login": {
+       "set_by": "owner",
+       "set_at": "2026-11-25T15:39:51Z",
+       "source": "onboarding",
+       "skipped": false
+      }
+     }
+    },
+    "setup_session.json": {
+     "version": 1,
+     "mode": "conversation",
+     "status": "complete",
+     "onboarding_pending": false,
+     "mind_failure": null,
+     "draft": {
+      "user_name": "",
+      "name": "Remedy",
+      "agent_gender": "female",
+      "ui_language": "auto",
+      "persona": "playful",
+      "sarcasm_mode": false,
+      "llm_provider": "demo",
+      "llm_model": "",
+      "llm_base_url": "",
+      "custom_llm_name": "",
+      "project_path": "",
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "privacy_mode": false,
+      "inner_audit": true,
+      "always_send_images": false,
+      "vision_force_decode": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "approval_mode": "auto",
+      "trust_profile": "balanced",
+      "interop_inbound": false,
+      "interop_auto_reply": true,
+      "update_check": "auto",
+      "launch_at_login": false
+     },
+     "skipped": [],
+     "offered_at": "",
+     "completed_at": "2026-11-25T15:39:51Z",
+     "source": "onboarding",
+     "setup_session_id": "",
+     "update_offer": "accepted",
+     "update_offer_id": "major-changes-2026-11",
+     "update_offer_at": "2026-11-25T15:39:51Z"
+    },
+    "house_rules_pending.json": null,
+    "house_rules_prev.json": {
+     "ts": "2026-11-25T15:39:51Z",
+     "rules": {
+      "version": 1,
+      "status": "pending",
+      "offered_at": "",
+      "completed_at": "",
+      "source": "",
+      "answers": {},
+      "provenance": {},
+      "skipped": [],
+      "update_offer": "accepted",
+      "update_offer_id": "major-changes-2026-11"
+     },
+     "config": {}
+    },
+    "house_rules_audit.jsonl": [
+     {
+      "action": "update_offer",
+      "actor": "owner",
+      "origin": "",
+      "choice": "accepted",
+      "id": "major-changes-2026-11",
+      "ts": "2026-11-25T15:39:51Z"
+     },
+     {
+      "action": "revisit",
+      "actor": "owner",
+      "origin": "",
+      "ts": "2026-11-25T15:39:51Z"
+     },
+     {
+      "action": "record",
+      "actor": "owner",
+      "origin": "",
+      "source": "onboarding",
+      "keys": [
+       "persona"
+      ],
+      "skipped": [],
+      "ts": "2026-11-25T15:39:51Z"
+     },
+     {
+      "action": "finalize",
+      "actor": "owner",
+      "origin": "",
+      "source": "onboarding",
+      "status": "complete",
+      "changes": {
+       "user_name": {
+        "from": null,
+        "to": ""
+       },
+       "name": {
+        "from": null,
+        "to": "Remedy"
+       },
+       "agent_gender": {
+        "from": null,
+        "to": "female"
+       },
+       "ui_language": {
+        "from": null,
+        "to": "auto"
+       },
+       "persona": {
+        "from": null,
+        "to": "playful"
+       },
+       "sarcasm_mode": {
+        "from": null,
+        "to": false
+       },
+       "llm_provider": {
+        "from": null,
+        "to": "demo"
+       },
+       "llm_model": {
+        "from": null,
+        "to": ""
+       },
+       "llm_base_url": {
+        "from": null,
+        "to": ""
+       },
+       "custom_llm_name": {
+        "from": null,
+        "to": ""
+       },
+       "project_path": {
+        "from": null,
+        "to": ""
+       },
+       "proactive_reach_out": {
+        "from": null,
+        "to": false
+       },
+       "drives_enabled": {
+        "from": null,
+        "to": true
+       },
+       "privacy_mode": {
+        "from": null,
+        "to": false
+       },
+       "inner_audit": {
+        "from": null,
+        "to": true
+       },
+       "always_send_images": {
+        "from": null,
+        "to": false
+       },
+       "vision_force_decode": {
+        "from": null,
+        "to": false
+       },
+       "mind_handles_easy_chats": {
+        "from": null,
+        "to": true
+       },
+       "muscle_route": {
+        "from": null,
+        "to": "auto"
+       },
+       "muscle_gpu_policy": {
+        "from": null,
+        "to": "auto"
+       },
+       "mind_keep_gpu": {
+        "from": null,
+        "to": false
+       },
+       "approval_mode": {
+        "from": null,
+        "to": "auto"
+       },
+       "trust_profile": {
+        "from": null,
+        "to": "balanced"
+       },
+       "interop_inbound": {
+        "from": null,
+        "to": false
+       },
+       "interop_auto_reply": {
+        "from": null,
+        "to": true
+       },
+       "update_check": {
+        "from": null,
+        "to": "auto"
+       },
+       "launch_at_login": {
+        "from": null,
+        "to": false
+       }
+      },
+      "skipped": [],
+      "ts": "2026-11-25T15:39:51Z"
+     }
+    ],
+    "config.toml": {
+     "setup_completed": true,
+     "user_name": "",
+     "name": "Remedy",
+     "agent_gender": "female",
+     "ui_language": "auto",
+     "persona": "playful",
+     "sarcasm_mode": false,
+     "llm_provider": "demo",
+     "llm_model": "",
+     "llm_base_url": "",
+     "custom_llm_name": "",
+     "project_path": "",
+     "privacy_mode": false,
+     "vision_force_decode": false,
+     "approval_mode": "auto",
+     "trust_profile": "balanced",
+     "update_check": "auto",
+     "launch_at_login": false,
+     "home_dir": "<home>",
+     "advanced": {
+      "proactive_reach_out": false,
+      "drives_enabled": true,
+      "inner_audit": true,
+      "always_send_images": false,
+      "mind_handles_easy_chats": true,
+      "muscle_route": "auto",
+      "muscle_gpu_policy": "auto",
+      "mind_keep_gpu": false,
+      "interop_inbound": false,
+      "interop_auto_reply": true
+     }
+    }
+   }
+  }
+ ]
+}
