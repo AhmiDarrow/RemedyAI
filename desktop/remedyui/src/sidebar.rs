@@ -5,7 +5,7 @@ use crate::depth::logic::{
 };
 use crate::depth::{
     ask_remove_project, assign_project, bulk_assign_project, export_active, import_session,
-    move_project_order, move_session_order, place_session, rename_session,
+    move_project_order, move_session_order, pick_folder, place_session, rename_session,
 };
 use crate::studio::{Filter, Project, Session, Studio};
 use crate::time;
@@ -596,52 +596,96 @@ fn add_project(ui: &Ui, studio: Studio) -> El {
     .layout(|l| l.width = Length::Percent(1.0))
 }
 
+fn project_path_from_field(value: String, studio: &Studio) -> String {
+    if value.trim().is_empty() {
+        studio.project_draft.get()
+    } else {
+        value
+    }
+}
+
 fn add_project_form(ui: &Ui, studio: Studio, unit: f32) -> El {
     let field = w::text_input(ui, messages().text(ui, "project-path"));
+    field.set_value(&studio.project_draft.get());
+    let draft = studio.project_draft.clone();
+    let f_change = field.clone();
+    let field = field.on_change(move || draft.set(f_change.value()));
     let f2 = field.clone();
     let s = studio.clone();
     let field = field.on_submit(move || {
-        s.add_project(f2.value(), false);
+        s.add_project(project_path_from_field(f2.value(), &s), false);
+    });
+    let f_sync = field.clone();
+    let d_sync = studio.project_draft.clone();
+    let col = w::column(ui)
+        .gap(unit)
+        .layout(|l| l.width = Length::Percent(1.0));
+    let _ = col.clone().bind(move || {
+        if let Ok(v) = d_sync.try_get() {
+            if f_sync.value() != v {
+                f_sync.set_value(&v);
+            }
+        }
     });
     let s2 = studio.clone();
-    w::column(ui)
-        .gap(unit)
-        .layout(|l| l.width = Length::Percent(1.0))
-        .child(field.el().layout(|l| l.width = Length::Percent(1.0)))
-        .child(
-            w::row(ui)
-                .gap(unit)
-                .child(
-                    w::button(
-                        ui,
-                        {
-                            let u = ui.clone();
-                            move || messages().text(&u, "project-add")
-                        },
-                        {
-                            let s = studio.clone();
-                            let f = field.clone();
-                            move || s.add_project(f.value(), false)
-                        },
-                    )
-                    .variant("quiet")
-                    .style(tokens::primary_button(&ui.theme().colors)),
+    col.child(field.el().layout(|l| {
+        l.width = Length::Percent(1.0);
+        l.min_width = Length::Px(0.0);
+    }))
+    .child(
+        w::row(ui)
+            .align(Align::Center)
+            .gap(unit)
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+                l.wrap = true;
+            })
+            .child(
+                w::button(
+                    ui,
+                    {
+                        let u = ui.clone();
+                        move || messages().text(&u, "browse-folder")
+                    },
+                    {
+                        let s = studio.clone();
+                        move || pick_folder(&s)
+                    },
                 )
-                .child(
-                    w::button(
-                        ui,
-                        {
-                            let u = ui.clone();
-                            move || messages().text(&u, "cancel")
-                        },
-                        move || {
-                            s2.adding_project.set(false);
-                            s2.project_draft.set(String::new());
-                        },
-                    )
-                    .variant("quiet"),
-                ),
-        )
+                .variant("quiet"),
+            )
+            .child(
+                w::button(
+                    ui,
+                    {
+                        let u = ui.clone();
+                        move || messages().text(&u, "project-add")
+                    },
+                    {
+                        let s = studio.clone();
+                        let f = field.clone();
+                        move || s.add_project(project_path_from_field(f.value(), &s), false)
+                    },
+                )
+                .variant("quiet")
+                .style(tokens::primary_button(&ui.theme().colors)),
+            )
+            .child(
+                w::button(
+                    ui,
+                    {
+                        let u = ui.clone();
+                        move || messages().text(&u, "cancel")
+                    },
+                    move || {
+                        s2.adding_project.set(false);
+                        s2.project_draft.set(String::new());
+                    },
+                )
+                .variant("quiet"),
+            ),
+    )
 }
 
 fn tree(ui: &Ui, studio: Studio) -> El {

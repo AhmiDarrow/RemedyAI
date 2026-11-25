@@ -315,7 +315,7 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
                 )
             });
         }
-        items_out.set(msgs);
+        let _ = items_out.try_set(msgs);
     });
     let u = ui.clone();
     let studio_rows = studio.clone();
@@ -896,8 +896,11 @@ fn live_turn(ui: &Ui, studio: Studio) -> El {
                 .into_iter()
                 .enumerate()
                 .collect();
-        if beats_out.get() != next {
-            beats_out.set(next);
+        match beats_out.try_get() {
+            Ok(cur) if cur != next => {
+                let _ = beats_out.try_set(next);
+            }
+            _ => {}
         }
     });
     let u_beat = ui.clone();
@@ -971,12 +974,11 @@ fn live_turn(ui: &Ui, studio: Studio) -> El {
 }
 
 fn live_shows_bubble(studio: &Studio) -> bool {
-    let reply = work::reply_after(&studio.partial.get(), &studio.live_breaks.get());
-    if !reply.trim().is_empty() {
-        return true;
-    }
-    let sum = work::summarize(&studio.live_steps.get());
-    !work::visible(&sum, !studio.live_thinking.get().trim().is_empty())
+    // The live turn stays mounted for the whole stream, including tool steps
+    // before any tokens arrive. Hiding the bubble then left a "Remedy" header
+    // with an empty body while Coding showed "Working".
+    let _ = studio;
+    true
 }
 
 /// "Worked · N steps · N errors" for a turn. Hidden for a plain chat.
@@ -1545,4 +1547,24 @@ fn latest_row(ui: &Ui, studio: Studio) -> El {
         },
     )
     .el()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_bubble_stays_up_while_a_tool_step_is_running() {
+        let studio = Studio::preview_chat_live();
+        studio.partial.set(String::new());
+        studio.live_breaks.set(Vec::new());
+        assert!(
+            !studio.live_steps.get().is_empty(),
+            "preview live turn has a running step"
+        );
+        assert!(
+            live_shows_bubble(&studio),
+            "the chat bubble must stay visible during a tool turn"
+        );
+    }
 }

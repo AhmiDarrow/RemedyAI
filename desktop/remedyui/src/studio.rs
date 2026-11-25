@@ -437,43 +437,11 @@ impl Studio {
         });
     }
 
-    /// Drops the session; if it was selected, a neighbour is selected.
+    /// Drops the session. If it is the open chat, another session is selected
+    /// first (or a fresh one is created) and any in-flight turn is cancelled so
+    /// the well is not torn down on the row being removed.
     pub fn close(&self, id: &str) {
-        let id = id.to_string();
-        if !self.pending_deletes.get().iter().any(|s| s == &id) {
-            self.pending_deletes.update(|ids| ids.push(id.clone()));
-        }
-        if !self.local_only {
-            if let Some(client) = self.client.get() {
-                let studio = self.clone();
-                let dropped = id.clone();
-                let wake = remedy_ui::reactive::waker().ok();
-                runtime::delete_session(&client, &id, move |out| {
-                    let Some(wake) = wake else { return };
-                    let _ = wake.post(move || {
-                        studio.on_delete_result(&dropped, out.is_ok());
-                    });
-                });
-            }
-        }
-        self.sessions.update(|list| {
-            if let Some(i) = list.iter().position(|s| s.id == id) {
-                list.remove(i);
-            }
-        });
-        self.selected_ids.update(|ids| ids.retain(|s| s != &id));
-        if self.select_anchor.get().as_deref() == Some(id.as_str()) {
-            self.select_anchor.set(None);
-        }
-        if self.active.get().as_deref() == Some(id.as_str()) {
-            let list = self.sessions.get();
-            self.active.set(list.first().map(|s| s.id.clone()));
-            self.messages.set(Vec::new());
-            self.clear_live();
-            if let Some(next) = self.active.get() {
-                self.load_messages(&next);
-            }
-        }
+        self.leave_then_drop(id, true);
     }
 
     /// Sidecar DELETE finished. A successful delete keeps the id in
@@ -495,26 +463,90 @@ impl Studio {
         if id.is_empty() {
             return;
         }
-        if !self.pending_deletes.get().iter().any(|s| s == id) {
-            self.pending_deletes.update(|ids| ids.push(id.to_string()));
+        self.leave_then_drop(id, false);
+    }
+
+    pub(crate) fn is_dropping(&self, id: &str) -> bool {
+        self.pending_deletes.get().iter().any(|s| s == id)
+    }
+
+    fn neighbor_id(&self, except: &str) -> Option<String> {
+        self.sessions
+            .get()
+            .into_iter()
+            .find(|s| s.id != except)
+            .map(|s| s.id)
+    }
+
+    /// Stops a live turn and drops jobs for `id` so later frames do not write
+    /// into a session that is about to go away.
+    fn abandon_session(&self, id: &str) {
+        let running = self.depth.session_running(id)
+            || (self.active.get().as_deref() == Some(id) && self.streaming.get());
+        if running {
+            if let (false, Some(client)) = (self.local_only, self.client.get()) {
+                runtime::abort_session(&client, id, |_| {});
+            }
+            self.depth.finish_job(id, "aborted");
+        }
+        if self.active.get().as_deref() == Some(id) {
+            self.streaming.set(false);
+            self.clear_live();
+            self.depth.todos.set(Vec::new());
+            self.depth.progress.set(None);
+            self.depth.remote_busy.set(false);
+        }
+    }
+
+    fn switch_off(&self, except: &str) {
+        if let Some(next) = self.neighbor_id(except) {
+            self.select(&next);
+            return;
+        }
+        self.add();
+    }
+
+    fn leave_then_drop(&self, id: &str, issue_delete: bool) {
+        let id = id.to_string();
+        if id.is_empty() {
+            return;
+        }
+        let was_active = self.active.get().as_deref() == Some(id.as_str());
+        if was_active {
+            self.abandon_session(&id);
+            self.switch_off(&id);
+        }
+        if !self.pending_deletes.get().iter().any(|s| s == &id) {
+            self.pending_deletes.update(|ids| ids.push(id.clone()));
+        }
+        if issue_delete && !self.local_only {
+            if let Some(client) = self.client.get() {
+                let studio = self.clone();
+                let dropped = id.clone();
+                let wake = remedy_ui::reactive::waker().ok();
+                runtime::delete_session(&client, &id, move |out| {
+                    let Some(wake) = wake else { return };
+                    let _ = wake.post(move || {
+                        studio.on_delete_result(&dropped, out.is_ok());
+                    });
+                });
+            }
         }
         self.sessions.update(|list| {
             if let Some(i) = list.iter().position(|s| s.id == id) {
                 list.remove(i);
             }
         });
-        self.selected_ids.update(|ids| ids.retain(|s| s != id));
-        if self.select_anchor.get().as_deref() == Some(id) {
+        self.selected_ids.update(|ids| ids.retain(|s| s != &id));
+        if self.select_anchor.get().as_deref() == Some(id.as_str()) {
             self.select_anchor.set(None);
         }
-        if self.active.get().as_deref() == Some(id) {
-            let list = self.sessions.get();
-            self.active.set(list.first().map(|s| s.id.clone()));
+        // Remote add() may still have this id selected until create returns.
+        if self.active.get().as_deref() == Some(id.as_str()) {
+            self.active.set(None);
             self.messages.set(Vec::new());
             self.clear_live();
-            if let Some(next) = self.active.get() {
-                self.load_messages(&next);
-            }
+            self.streaming.set(false);
         }
     }
 
@@ -1141,5 +1173,54 @@ mod tests {
         studio.apply_live_sessions(vec![Session::fresh(&id, "Stale"), Session::fresh("keep", "Keep")]);
         let ids: Vec<String> = studio.sessions.get().into_iter().map(|s| s.id).collect();
         assert!(!ids.contains(&id));
+    }
+
+    #[test]
+    fn close_active_session_switches_to_a_neighbor_first() {
+        let studio = Studio::preview();
+        assert_eq!(studio.active.get().as_deref(), Some("s3"));
+        studio.messages.set(vec![ChatMessage::plain("m", "user", "about to go")]);
+        studio.close("s3");
+        assert_ne!(studio.active.get().as_deref(), Some("s3"));
+        assert!(studio.active.get().is_some(), "a neighbor must be selected");
+        let ids: Vec<String> = studio.sessions.get().into_iter().map(|s| s.id).collect();
+        assert!(!ids.contains(&"s3".to_string()));
+        assert!(ids.contains(&studio.active.get().unwrap()));
+        assert!(
+            !studio.messages.get().iter().any(|m| m.content == "about to go"),
+            "the deleted session's messages must not stay in the well"
+        );
+    }
+
+    #[test]
+    fn close_last_session_opens_a_fresh_chat() {
+        let studio = Studio::preview();
+        let ids: Vec<String> = studio.sessions.get().into_iter().map(|s| s.id).collect();
+        for id in ids {
+            studio.close(&id);
+        }
+        let left = studio.sessions.get();
+        assert!(
+            !left.is_empty(),
+            "deleting the last session must leave a fresh chat"
+        );
+        assert!(studio.active.get().is_some());
+        assert!(!studio.is_dropping(&studio.active.get().unwrap()));
+    }
+
+    #[test]
+    fn close_active_session_cancels_a_running_turn() {
+        let studio = Studio::preview();
+        studio.streaming.set(true);
+        studio.partial.set("halfway".into());
+        studio.depth.map_job("s3", |job| job.status = "running".into());
+        studio.close("s3");
+        assert!(!studio.streaming.get());
+        assert!(studio.partial.get().is_empty());
+        let job = studio.depth.job("s3");
+        assert!(
+            job.as_ref().is_none_or(|j| j.status != "running"),
+            "the deleted session's job must not stay running: {job:?}"
+        );
     }
 }

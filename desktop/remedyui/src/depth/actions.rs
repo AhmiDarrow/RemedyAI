@@ -528,6 +528,9 @@ fn retitle(studio: &Studio, sid: &str, text: &str) {
 }
 
 pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
+    if studio.is_dropping(sid) {
+        return;
+    }
     let active = studio.active.get().as_deref() == Some(sid);
     studio.depth.map_job(sid, |job| {
         job.last_event_ms = now_ms();
@@ -2262,6 +2265,17 @@ pub fn pick_attachments(studio: &Studio) {
     }
 }
 
+/// Fills the add-project field with a picked folder. Does not add the project
+/// until the person confirms with Add.
+pub fn apply_picked_project_path(studio: &Studio, path: String) {
+    let path = path.trim().to_string();
+    if path.is_empty() {
+        return;
+    }
+    studio.adding_project.set(true);
+    studio.project_draft.set(path);
+}
+
 pub fn pick_folder(studio: &Studio) {
     let studio = studio.clone();
     let dialog_studio = studio.clone();
@@ -2272,7 +2286,13 @@ pub fn pick_folder(studio: &Studio) {
         let studio = dialog_studio.clone();
         app.file_dialog(Some(window), dialog, move |paths| {
             if let Some(path) = paths.into_iter().next() {
-                studio.add_project(path.display().to_string(), false);
+                let path = path.display().to_string();
+                let st = studio.clone();
+                if let Ok(wake) = waker() {
+                    let _ = wake.post(move || apply_picked_project_path(&st, path));
+                } else {
+                    apply_picked_project_path(&studio, path);
+                }
             }
         });
     });
@@ -2367,6 +2387,8 @@ pub fn toggle_mic(studio: &Studio) {
         if let Some(mic) = take_mic() {
             mic.stop();
         }
+        studio.depth.mic_on.set(false);
+        clear_hearing(studio);
         let samples = studio
             .depth
             .samples
@@ -2400,7 +2422,9 @@ pub fn toggle_mic(studio: &Studio) {
 }
 
 fn transcribe(studio: &Studio, samples: Vec<f32>) {
+    studio.depth.mic_on.set(false);
     if samples.is_empty() {
+        clear_hearing(studio);
         studio.depth.notice.set("No speech captured.".into());
         return;
     }
@@ -2415,6 +2439,7 @@ fn transcribe(studio: &Studio, samples: Vec<f32>) {
     let wav = api::wav_bytes(&samples, 48_000);
     let studio = studio.clone();
     let Ok(wake) = waker() else {
+        clear_hearing(&studio);
         return;
     };
     api::spawn_json(
@@ -2437,11 +2462,20 @@ fn transcribe(studio: &Studio, samples: Vec<f32>) {
                     studio.depth.draft_text.set(next.clone());
                     studio.depth.composer_value.set(next);
                     studio.depth.draft_nonce.update(|n| *n += 1);
+                    clear_hearing(&studio);
                 }
                 Err(e) => studio.depth.notice.set(e),
             });
         },
     );
+}
+
+/// Drop the composer "Hearing…" notice after the mic stops, a cancel, or a
+/// finished/failed transcript. Other notices (errors, prompts) stay put.
+pub(crate) fn clear_hearing(studio: &Studio) {
+    if studio.depth.notice.get() == "Hearing…" {
+        studio.depth.notice.set(String::new());
+    }
 }
 
 pub fn speak_reply(studio: &Studio, text: &str) {
@@ -2454,31 +2488,56 @@ pub fn speak_reply(studio: &Studio, text: &str) {
     if spoken.trim().is_empty() {
         return;
     }
-    let chunk = logic::split_for_speech(&spoken)
-        .into_iter()
-        .next()
-        .unwrap_or(spoken);
+    // Speak the full reply (joined speech chunks), not just the first sentence.
+    let mut chunk = logic::split_for_speech(&spoken).join(" ");
+    if chunk.is_empty() {
+        chunk = spoken;
+    }
+    if chunk.chars().count() > 4_000 {
+        chunk = chunk.chars().take(4_000).collect();
+    }
     let Some(client) = studio.runtime() else {
+        studio
+            .depth
+            .notice
+            .set("Voice needs the local mind to speak.".into());
         return;
     };
     let Ok(wake) = waker() else {
         return;
     };
+    studio.depth.speaking.set(true);
+    let studio_cb = studio.clone();
     api::spawn_bytes(
         &client,
         Request::post("voice/speak").json(&json!({ "text": chunk })),
         move |out| {
             let _ = wake.post(move || {
+                let finish = |ok: bool, msg: Option<&str>| {
+                    studio_cb.depth.speaking.set(false);
+                    if let Some(m) = msg {
+                        studio_cb.depth.notice.set(m.into());
+                    } else if !ok {
+                        studio_cb
+                            .depth
+                            .notice
+                            .set("Could not speak that reply.".into());
+                    }
+                };
                 let Ok(bytes) = out else {
+                    finish(false, None);
                     return;
                 };
                 if bytes.len() < 16 || &bytes[..4] != b"RIFF" {
+                    finish(false, Some("The voice service returned silence."));
                     return;
                 }
                 let path = std::env::temp_dir().join(format!("remedy-speak-{}.wav", now_ms()));
                 if std::fs::write(&path, &bytes).is_err() {
+                    finish(false, Some("Could not write the spoken reply."));
                     return;
                 }
+                let mut played = false;
                 with_ui(|ui| {
                     let player = Player::open_platform(
                         ui,
@@ -2487,83 +2546,207 @@ pub fn speak_reply(studio: &Studio, text: &str) {
                     );
                     player.play();
                     super::put_player(player);
+                    played = true;
                 });
+                if played {
+                    finish(true, None);
+                } else {
+                    finish(false, Some("Could not play the spoken reply."));
+                }
             });
         },
     );
 }
 
 pub fn load_memory(studio: &Studio) {
+    fetch_memory(studio, false);
+}
+
+/// Fetch the next page of memory rows and append them.
+pub fn load_more_memory(studio: &Studio) {
+    fetch_memory(studio, true);
+}
+
+fn fetch_memory(studio: &Studio, append: bool) {
+    studio.depth.memory_loading.set(true);
+    if !append {
+        studio.depth.memory_error.set(String::new());
+        studio.depth.memory_body.set("Loading memory…".into());
+        studio.depth.memory_ready.set(false);
+    }
     let Some(client) = studio.runtime() else {
+        studio.depth.memory_loading.set(false);
+        studio.depth.memory_ready.set(true);
+        studio.depth.memory_has_more.set(false);
+        studio
+            .depth
+            .memory_error
+            .set("The mind is not connected.".into());
         studio
             .depth
             .memory_body
             .set("The mind is not connected.".into());
         return;
     };
-    let sid = studio.active.get().unwrap_or_default();
+    let q = studio.depth.memory_query.get();
+    let offset = if append {
+        studio.depth.memory_rows.get().len()
+    } else {
+        0
+    };
+    let path = memory_fetch_path(&q, offset, super::MEMORY_PAGE);
     let studio = studio.clone();
     let Ok(wake) = waker() else {
+        studio.depth.memory_loading.set(false);
         return;
     };
-    let facts = format!("memory/facts");
     // Capture the client on the UI thread. spawn_json runs on `remedy-depth`;
     // calling studio.runtime() there panics ("signal belongs to another thread's runtime")
     // when Memory is opened from the top bar.
-    let client_for_facts = client.clone();
-    api::spawn_json(&client, Request::get(&facts), move |facts_out| {
-        let client = Some(client_for_facts);
+    api::spawn_json(&client, Request::get(&path), move |out| {
         let _ = wake.post(move || {
-            let mut body = String::new();
-            if let Ok(v) = facts_out {
-                body.push_str(&brief_json("Facts", &v));
-            }
-            studio.depth.memory_body.set(body);
-            let Some(client) = client else {
-                return;
-            };
-            let studio = studio.clone();
-            let Ok(wake) = waker() else {
-                return;
-            };
-            let path = format!("checkpoints/latest?session_id={}", api::query(&sid));
-            api::spawn_json(&client, Request::get(&path), move |out| {
-                let _ = wake.post(move || {
-                    if let Ok(v) = out {
-                        let mut body = studio.depth.memory_body.get();
-                        body.push_str(&brief_json("Checkpoint", &v));
-                        studio.depth.memory_body.set(body);
-                    }
-                });
-            });
+            apply_memory_page(&studio, out, append);
         });
     });
 }
 
-fn brief_json(title: &str, v: &Value) -> String {
-    let text = serde_json::to_string_pretty(v).unwrap_or_default();
-    if text.trim().is_empty() || text == "null" {
-        return String::new();
+/// Path for a paginated facts or search request. Search must use `query=`,
+/// not `q=` — the sidecar ignores the latter.
+pub(crate) fn memory_fetch_path(query: &str, offset: usize, limit: usize) -> String {
+    let q = query.trim();
+    if q.is_empty() {
+        format!("memory/facts?limit={limit}&offset={offset}")
+    } else {
+        format!(
+            "memory/search?query={}&limit={limit}&offset={offset}",
+            api::query(q)
+        )
     }
-    format!("{title}\n{text}\n\n")
+}
+
+fn apply_memory_page(studio: &Studio, out: Result<Value, String>, append: bool) {
+    studio.depth.memory_loading.set(false);
+    studio.depth.memory_ready.set(true);
+    match out {
+        Ok(v) => {
+            let rows = parse_memory_payload(&v);
+            let has_more = v
+                .get("has_more")
+                .and_then(|x| x.as_bool())
+                .unwrap_or(rows.len() >= super::MEMORY_PAGE);
+            let mut all = if append {
+                studio.depth.memory_rows.get()
+            } else {
+                Vec::new()
+            };
+            if append {
+                for row in rows {
+                    if !all.iter().any(|r: &super::MemoryRow| r.id == row.id && !row.id.is_empty()) {
+                        all.push(row);
+                    }
+                }
+            } else {
+                all = rows;
+            }
+            studio.depth.memory_has_more.set(has_more);
+            studio.depth.memory_error.set(String::new());
+            studio.depth.memory_body.set(memory_status_line(&all, has_more));
+            studio.depth.memory_rows.set(all);
+        }
+        Err(e) => {
+            if !append {
+                studio.depth.memory_rows.set(Vec::new());
+            }
+            studio.depth.memory_has_more.set(false);
+            studio.depth.memory_error.set(e.clone());
+            studio.depth.memory_body.set(e);
+        }
+    }
+}
+
+fn memory_status_line(rows: &[super::MemoryRow], has_more: bool) -> String {
+    if rows.is_empty() {
+        return "No memories yet.".into();
+    }
+    if has_more {
+        format!("{} memories (more available)", rows.len())
+    } else {
+        format!("{} memories", rows.len())
+    }
+}
+
+/// Parse facts or search JSON into display rows. Never pretty-prints the payload.
+pub(crate) fn parse_memory_payload(v: &Value) -> Vec<super::MemoryRow> {
+    let mut rows = Vec::new();
+    if let Some(arr) = v.get("facts").and_then(|x| x.as_array()) {
+        for item in arr {
+            rows.push(memory_row_from_value(item, "fact"));
+        }
+    }
+    if let Some(arr) = v.get("results").and_then(|x| x.as_array()) {
+        for item in arr {
+            rows.push(memory_row_from_value(item, "note"));
+        }
+    }
+    if let Some(arr) = v.get("notes").and_then(|x| x.as_array()) {
+        for item in arr {
+            rows.push(memory_row_from_value(item, "note"));
+        }
+    }
+    if rows.is_empty() {
+        if let Some(arr) = v.as_array() {
+            for item in arr {
+                rows.push(memory_row_from_value(item, "fact"));
+            }
+        }
+    }
+    rows
+}
+
+fn memory_row_from_value(item: &Value, default_kind: &str) -> super::MemoryRow {
+    let id = first_str(item, &["id", "fact_id", "key", "path"]).unwrap_or_default();
+    let title = first_str(item, &["title", "name", "key", "path", "kind"])
+        .or_else(|| first_str(item, &["id"]))
+        .unwrap_or_else(|| default_kind.to_string());
+    let body = first_str(
+        item,
+        &["text", "body", "content", "value", "fact", "summary", "snippet"],
+    )
+    .unwrap_or_else(|| {
+        if item.is_string() {
+            item.as_str().unwrap_or_default().to_string()
+        } else if item.is_object() {
+            serde_json::to_string(item).unwrap_or_default()
+        } else {
+            String::new()
+        }
+    });
+    let kind = first_str(item, &["kind", "type", "source"]).unwrap_or_else(|| default_kind.into());
+    super::MemoryRow {
+        id,
+        title,
+        body,
+        kind,
+    }
+}
+
+fn first_str(v: &Value, keys: &[&str]) -> Option<String> {
+    for k in keys {
+        if let Some(s) = v.get(*k).and_then(|x| x.as_str()) {
+            let t = s.trim();
+            if !t.is_empty() {
+                return Some(t.to_string());
+            }
+        }
+    }
+    None
 }
 
 pub fn search_memory(studio: &Studio, q: &str) {
-    let Some(client) = studio.runtime() else {
-        return;
-    };
-    let path = format!("memory/search?q={}", api::query(q));
-    let studio = studio.clone();
-    let Ok(wake) = waker() else {
-        return;
-    };
-    api::spawn_json(&client, Request::get(&path), move |out| {
-        let _ = wake.post(move || {
-            if let Ok(v) = out {
-                studio.depth.memory_body.set(brief_json("Memory", &v));
-            }
-        });
-    });
+    studio.depth.memory_query.set(q.to_string());
+    studio.depth.memory_rows.set(Vec::new());
+    studio.depth.memory_ready.set(false);
+    fetch_memory(studio, false);
 }
 
 pub fn load_skills(studio: &Studio) {
@@ -3309,5 +3492,56 @@ mod tests {
         let (reload, attach) = pending_sync_take();
         assert!(reload.is_none());
         assert!(attach.is_none());
+    }
+
+    #[test]
+    fn picked_folder_fills_the_add_project_draft() {
+        let studio = Studio::preview();
+        apply_picked_project_path(&studio, "  /tmp/my-project  ".into());
+        assert!(studio.adding_project.get());
+        assert_eq!(studio.project_draft.get(), "/tmp/my-project");
+        apply_picked_project_path(&studio, "   ".into());
+        assert_eq!(studio.project_draft.get(), "/tmp/my-project");
+    }
+
+    #[test]
+    fn memory_fetch_path_uses_query_and_limit() {
+        assert_eq!(
+            memory_fetch_path("", 0, 20),
+            "memory/facts?limit=20&offset=0"
+        );
+        assert_eq!(
+            memory_fetch_path("  lava  ", 20, 20),
+            format!("memory/search?query={}&limit=20&offset=20", api::query("lava"))
+        );
+    }
+
+    #[test]
+    fn parse_memory_payload_reads_facts_not_pretty_json() {
+        let v = serde_json::json!({
+            "facts": [
+                {"id": "1", "title": "Favorite color", "text": "green"},
+                {"id": "2", "key": "city", "value": "Chicago"}
+            ],
+            "has_more": true
+        });
+        let rows = parse_memory_payload(&v);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].title, "Favorite color");
+        assert_eq!(rows[0].body, "green");
+        assert_eq!(rows[1].title, "city");
+        assert_eq!(rows[1].body, "Chicago");
+        assert!(serde_json::to_string_pretty(&v).unwrap().len() > rows[0].body.len());
+    }
+
+    #[test]
+    fn clear_hearing_drops_only_the_hearing_notice() {
+        let studio = Studio::preview();
+        studio.depth.notice.set("Hearing…".into());
+        clear_hearing(&studio);
+        assert!(studio.depth.notice.get().is_empty());
+        studio.depth.notice.set("No speech captured.".into());
+        clear_hearing(&studio);
+        assert_eq!(studio.depth.notice.get(), "No speech captured.");
     }
 }
