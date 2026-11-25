@@ -17,6 +17,9 @@ pub const DEFAULT_ORIGIN: &str = "http://127.0.0.1:7400";
 #[derive(Clone)]
 pub struct Client {
     http: Http,
+    /// Kept so the first contact can check who is listening before the bearer goes out.
+    origin: String,
+    token: Option<String>,
 }
 
 impl Client {
@@ -27,7 +30,7 @@ impl Client {
         if let Some(t) = token.filter(|t| !t.is_empty()) {
             http = http.header("Authorization", format!("Bearer {t}"));
         }
-        Client { http }
+        Client { http, origin: origin.to_string(), token: token.filter(|t| !t.is_empty()).map(str::to_string) }
     }
 
     /// A clone of the bearer-backed client.
@@ -457,7 +460,56 @@ pub fn wait_until_up(origin: &str, token: Option<&str>, attempts: u32) -> bool {
     false
 }
 
+/// HMAC-SHA256, as hex.
+fn hmac_hex(key: &[u8], msg: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut block = [0u8; 64];
+    if key.len() > 64 {
+        block[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        block[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = Sha256::new();
+    inner.update(block.map(|b| b ^ 0x36));
+    inner.update(msg);
+    let mut outer = Sha256::new();
+    outer.update(block.map(|b| b ^ 0x5c));
+    outer.update(inner.finalize());
+    outer.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+#[test]
+fn hmac_matches_rfc4231_case_2() {
+    assert_eq!(
+        hmac_hex(b"Jefe", b"what do ya want for nothing?"),
+        "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+    );
+}
+
+/// Whether the program answering at `origin` holds `token`, asked without
+/// sending it. Another program (or another user's) on the port cannot answer,
+/// so it never gets the token from us.
+pub(crate) fn listener_is_ours(origin: &str, token: &str) -> bool {
+    use std::hash::{BuildHasher, Hasher};
+    // Unpredictable per call: std's hasher keys come from the OS.
+    let word = || std::collections::hash_map::RandomState::new().build_hasher().finish();
+    let nonce = format!("{:016x}{:016x}", word(), word());
+    let got = Client::new(origin, None)
+        .http
+        .send_blocking(Request::get(&format!("ping?nonce={nonce}")), &Cancel::new())
+        .ok()
+        .and_then(|r| r.json::<serde_json::Value>().ok())
+        .and_then(|v| v.get("proof").and_then(|p| p.as_str()).map(str::to_string));
+    got.is_some_and(|p| p == hmac_hex(token.as_bytes(), format!("remedy-proof/1:{nonce}").as_bytes()))
+}
+
 pub(crate) fn ping_blocking(origin: &str, token: Option<&str>) -> bool {
+    if let Some(t) = token.filter(|t| !t.is_empty()) {
+        if !listener_is_ours(origin, t) {
+            return false;
+        }
+    }
     let client = Client::new(origin, token);
     let cancel = Cancel::new();
     let ok_ping = client
@@ -474,9 +526,13 @@ pub(crate) fn ping_blocking(origin: &str, token: Option<&str>) -> bool {
 /// Probes `/api/ping` (then `/api/status`) and reports readiness on the worker thread.
 pub fn probe(client: &Client, done: impl FnOnce(bool, Option<String>) + Send + 'static) {
     let http = client.http.clone();
+    let (origin, token) = (client.origin.clone(), client.token.clone());
     std::thread::Builder::new()
         .name("remedy-ping".into())
         .spawn(move || {
+            if token.is_some_and(|t| !listener_is_ours(&origin, &t)) {
+                return done(false, Some("the program on Remedy's port is not Remedy's runtime".into()));
+            }
             let cancel = Cancel::new();
             match http.send_blocking(Request::get("ping"), &cancel) {
                 Ok(_) => done(true, None),

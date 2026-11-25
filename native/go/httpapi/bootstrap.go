@@ -142,6 +142,14 @@ func (s *Server) handleLocalBootstrap(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// A page from another site must not fetch the token through the owner's
+	// browser, whatever CORS would let it read afterwards.
+	if o := strings.TrimSpace(r.Header.Get("Origin")); o != "" && o != "http://"+r.Host {
+		if _, ok := allowedOrigins()[o]; !ok {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "origin not allowed"})
+			return
+		}
+	}
 	// A live one-time link is explicit owner consent (only a caller that
 	// already holds the token can mint one), so it opens the default-off
 	// desktop sidecar too. An explicit REMEDY_HTTP_BOOTSTRAP=0 still wins.

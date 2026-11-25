@@ -374,7 +374,11 @@ async fn serve_conn(
     token: Arc<[u8]>,
     events: Events,
 ) -> Result<()> {
-    let conn = incoming.await.context("iroh handshake")?;
+    // A peer that starts a handshake and stalls must not hold a slot.
+    let conn = tokio::time::timeout(Duration::from_secs(10), incoming)
+        .await
+        .context("iroh handshake timed out")?
+        .context("iroh handshake")?;
     if conn.alpn() != ALPN {
         conn.close(1u32.into(), b"alpn");
         return Ok(());
@@ -413,10 +417,22 @@ async fn serve_conn(
     });
 
     let mut streams = 0u32;
+    let id = conn.remote_id().to_string();
+    let mut recheck = tokio::time::interval(Duration::from_secs(3));
     loop {
-        let (send, recv) = match conn.accept_bi().await {
-            Ok(s) => s,
-            Err(_) => break,
+        let (send, recv) = tokio::select! {
+            s = conn.accept_bi() => match s {
+                Ok(s) => s,
+                Err(_) => break,
+            },
+            // A phone removed while connected is cut off, not just kept out next time.
+            _ = recheck.tick() => {
+                if !allowed(&id) {
+                    conn.close(2u32.into(), b"not paired");
+                    break;
+                }
+                continue;
+            }
         };
         streams += 1;
         if streams > MAX_STREAMS_PER_CONN {

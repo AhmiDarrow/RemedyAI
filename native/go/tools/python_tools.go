@@ -700,7 +700,7 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 				"answers":{"type":"object","description":"Answers to record"},
 				"patch":{"type":"object","description":"Settings patch for propose or update_draft"},
 				"skipped":{"type":"array","items":{"type":"string"},"description":"Question ids to skip"},
-				"confirm":{"type":"boolean","description":"Apply a propose immediately when already confirmed"},
+				"confirm":{"type":"boolean","description":"Set true to apply a propose in one step; a sensitive change is then approved by the owner on a card"},
 				"pending_id":{"type":"string"},
 				"mode":{"type":"string","enum":["conversation","traditional"]},
 				"source":{"type":"string"},

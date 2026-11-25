@@ -90,7 +90,8 @@ func TestToolCommandPreviewIsRuneSafe(t *testing.T) {
 	// 3-byte runes: the byte limit falls inside a rune unless clipping backs off.
 	input := []byte(`{"text":"` + strings.Repeat("€", toolCommandPreviewLimit) + `"}`)
 	preview := toolCommandPreview(cognition.ToolCall{Name: "computer.type", Input: input})
-	if len(preview) > toolCommandPreviewLimit {
+	// The clipped text plus the short note that carries the full input's hash.
+	if len(preview) > toolCommandPreviewLimit+128 {
 		t.Fatalf("preview len=%d over limit", len(preview))
 	}
 	for _, r := range preview {
@@ -98,7 +99,7 @@ func TestToolCommandPreviewIsRuneSafe(t *testing.T) {
 			t.Fatal("preview split a rune")
 		}
 	}
-	if !strings.HasSuffix(preview, "€") {
+	if text, _, _ := strings.Cut(preview, " … ["); !strings.HasSuffix(text, "€") {
 		t.Fatalf("preview should end on a whole rune: %q", preview[len(preview)-6:])
 	}
 }

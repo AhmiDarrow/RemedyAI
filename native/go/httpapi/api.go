@@ -8,6 +8,9 @@ package httpapi
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -495,7 +498,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.startSchedulerLoop(ctx)
 	s.startHearthLoop(ctx)
 	s.startPartnerDispatcher(ctx)
-	httpServer := &http.Server{Handler: s.Handler()}
+	httpServer := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 15 * time.Second}
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- httpServer.Serve(ln)
@@ -568,10 +571,23 @@ func ValidateListenAddr(addr string) error {
 	return nil
 }
 
-func (s *Server) handlePing(w http.ResponseWriter, _ *http.Request) {
+// pingProof answers a caller's nonce with a keyed hash only the holder of the
+// API token can make, so the desktop can tell this runtime from another
+// program sitting on the port before it sends the token itself.
+func pingProof(token, nonce string) string {
+	if token == "" || len(nonce) < 16 || len(nonce) > 128 {
+		return ""
+	}
+	mac := hmac.New(sha256.New, []byte(token))
+	mac.Write([]byte("remedy-proof/1:" + nonce))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":  "ok",
 		"version": s.version,
+		"proof":   pingProof(s.token, r.URL.Query().Get("nonce")),
 		"ts":      float64(time.Now().UnixNano()) / 1e9,
 		"native_runtime": map[string]any{
 			"requested": "native",
