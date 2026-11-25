@@ -113,7 +113,7 @@ Icon rails open real tools on this PC — not separate apps to juggle.
 | Tool | Role |
 |------|------|
 | **Files** | Browse the project / session tree; open; drag into chat |
-| **Terminal** | In-app PowerShell (ConPTY) |
+| **Terminal** | In-app shell: pick PowerShell, Command Prompt, Git Bash or WSL from **Shell** in its toolbar |
 | **Browser** | Embedded Chromium (WebView2 / WebKitGTK); **↗** for full system browser |
 | **Scratch** | Session-linked notes |
 | **Computer** | Optional desktop/computer-use path (navigate, click, type) with host bridge + safety |

@@ -26,6 +26,10 @@ pub struct DesktopPrefs {
     pub font_scale: String,
     #[serde(default)]
     pub launch_at_login: bool,
+    /// The terminal's shell: an id from `slides::pty::shells`, a full path, or
+    /// empty for the machine's default.
+    #[serde(default)]
+    pub terminal_shell: String,
 }
 
 fn yes() -> bool {
@@ -51,6 +55,7 @@ impl Default for DesktopPrefs {
             ui_mode: "simple".into(),
             font_scale: "md".into(),
             launch_at_login: false,
+            terminal_shell: String::new(),
         }
     }
 }

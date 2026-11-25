@@ -91,7 +91,7 @@ Remedy is a **workbench**: chat in the center, real tools on the rails.
 | **Sessions** | Chats, projects, messenger threads |
 | **Settings** | Provider, the local mind, messengers, appearance |
 | **Files** | In-app file browser for the session/project |
-| **Terminal** | In-app PowerShell (ConPTY) on this PC |
+| **Terminal** | In-app shell: pick PowerShell, Command Prompt, Git Bash or WSL from **Shell** in its toolbar on this PC |
 | **Browser** | Embedded WebView2 research pane (**↗** = system browser) |
 | **Scratch** | Session-linked notepad with local save and server sync |
 | **Automations** | Background tasks that run once or repeat |
