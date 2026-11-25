@@ -21,7 +21,7 @@ describe('settings navigation', () => {
   it('keeps privacy and approval controls accessible in simple mode', () => {
     expect(settingsSectionVisible('privacy', 'privacy', 'simple', false, true)).toBe(true)
     expect(settingsSectionVisible('security-power', 'privacy', 'simple', false, true)).toBe(true)
-    expect(settingsSectionVisible('access', 'privacy', 'simple', false, true)).toBe(false)
+    expect(settingsSectionVisible('access', 'privacy', 'simple', false, true)).toBe(true)
   })
 
   it('searches all categories and advanced sections without changing the selected mode', () => {

@@ -150,7 +150,7 @@ def _workspace_root(inp: Mapping[str, Any] | None = None) -> Path:
     """Resolve the active project root.
 
     Prefer per-call workspace_root/project_path, then env, then config.toml,
-    then a narrow owner folder (Documents/Remedy). Never fall back to the
+    then a narrow owner folder (~/Remedy). Never fall back to the
     packaged Desktop install cwd or the entire user profile.
     """
     if inp:

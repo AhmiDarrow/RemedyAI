@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use super::http;
 use super::state::Settings;
-use super::{form, prefs};
+use super::{form, logic, prefs};
 
 pub fn field(ui: &Ui, name: &str, value: Signal<String>, placeholder: &str) -> El {
     form::stack(ui)
@@ -109,6 +109,32 @@ pub fn browse_folder(s: Settings) {
             s.banner.set("Folder selected — click Save to load project and reload Remedy".into());
         }
     });
+}
+
+pub fn browse_default_workspace(s: Settings) {
+    let Some(app) = prefs::host() else {
+        s.banner.set("Folder picker is not available in this preview.".into());
+        return;
+    };
+    let mut dialog = remedy_ui::host::FileDialog::default();
+    dialog.title = "Choose the default workspace folder".into();
+    dialog.folders = true;
+    app.file_dialog(None, dialog, move |paths| {
+        if let Some(path) = paths.into_iter().next() {
+            s.default_workspace.set(path.display().to_string());
+            s.banner.set("Default workspace selected — click Save to keep this folder.".into());
+        }
+    });
+}
+
+pub fn use_default_workspace(s: Settings) {
+    let path = logic::default_workspace_display(&s.default_workspace.get());
+    if let Err(err) = std::fs::create_dir_all(&path) {
+        s.banner.set(format!("Could not create workspace folder: {err}"));
+        return;
+    }
+    s.default_workspace.set(path);
+    s.banner.set("Workspace folder ready — click Save to keep this path.".into());
 }
 
 pub fn ask(s: Settings, method: &str, path: &str, body: Option<Value>, ok: &str) {

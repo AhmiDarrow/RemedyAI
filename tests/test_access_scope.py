@@ -41,12 +41,15 @@ def test_normalize_access_scope():
     assert normalize_access_scope("full") == "full"
     assert normalize_access_scope("PROJECT+HOME") == "home"
     assert normalize_access_scope(None) == "project"
+    assert normalize_access_scope("workspace") == "workspace"
+    assert normalize_access_scope("default_workspace") == "workspace"
 
 
-def test_empty_project_forces_full_access():
-    assert effective_access_scope("project", None) == "full"
-    assert effective_access_scope("untrusted", "") == "full"
-    assert effective_access_scope("project", ".") == "full"
+def test_empty_project_uses_default_workspace():
+    assert effective_access_scope("project", None) == "workspace"
+    assert effective_access_scope("untrusted", "") == "workspace"
+    assert effective_access_scope("project", ".") == "workspace"
+    assert effective_access_scope("full", "") == "full"
     assert effective_access_scope("project", "C:/MyApp") == "project"
 
 

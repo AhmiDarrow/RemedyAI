@@ -56,7 +56,7 @@ async def test_store_clear_project_path(store: MemoryStore, tmp_path: Path):
     assert cleared.project_path is None
 
 
-def test_agent_unset_project_forces_full_access(tmp_path: Path):
+def test_agent_unset_project_uses_default_workspace(tmp_path: Path):
     cfg = AgentConfig(
         name="t",
         project_path="",
@@ -67,7 +67,7 @@ def test_agent_unset_project_forces_full_access(tmp_path: Path):
     )
     rt = BasicRuntime(cfg)
     assert rt.project_path_is_unset() is True
-    assert rt.access_scope() == "full"
+    assert rt.access_scope() == "workspace"
 
     rt.set_project_path(str(tmp_path / "code"), as_default=True)
     (tmp_path / "code").mkdir(exist_ok=True)
@@ -105,7 +105,7 @@ async def test_apply_session_workspace_binds_project(store: MemoryStore, tmp_pat
 
     await rt._apply_session_workspace(snone.id)
     assert rt.project_path_is_unset() is True
-    assert rt.access_scope() == "full"
+    assert rt.access_scope() == "workspace"
 
 
 @pytest.mark.asyncio

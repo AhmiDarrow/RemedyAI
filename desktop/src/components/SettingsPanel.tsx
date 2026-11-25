@@ -172,7 +172,9 @@ export function SettingsPanel({
   const [uiLanguages, setUiLanguages] = useState<
     Array<{ id: string; name_en: string; name_native: string; rtl: boolean; chrome: boolean }>
   >([])
-  const [accessScope, setAccessScope] = useState('project')
+  const [accessScope, setAccessScope] = useState('workspace')
+  const [defaultWorkspace, setDefaultWorkspace] = useState('')
+  const [defaultWorkspacePath, setDefaultWorkspacePath] = useState('')
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
   const [startInTray, setStartInTray] = useState(false)
   const [skipQuitWarn, setSkipQuitWarn] = useState(false)
@@ -432,7 +434,9 @@ export function SettingsPanel({
       if (Array.isArray(s.ui_languages) && s.ui_languages.length) {
         setUiLanguages(s.ui_languages)
       }
-      setAccessScope(s.access_scope || 'project')
+      setAccessScope(s.access_scope || 'workspace')
+      setDefaultWorkspace(s.default_workspace || '')
+      setDefaultWorkspacePath(s.default_workspace_path || '')
       setLaunchAtLogin(Boolean(s.launch_at_login))
       // Prefer shell desktop.json for tray prefs (authoritative at launch).
       setStartInTray(Boolean(s.start_in_tray))
@@ -708,6 +712,25 @@ export function SettingsPanel({
     }
   }
 
+  const handleBrowseDefaultWorkspace = async () => {
+    setErrorMessage('')
+    const path = await pickProjectFolder()
+    if (path) {
+      setDefaultWorkspace(path)
+      setStatusMessage('Default workspace selected — click Save to keep this folder.')
+    }
+  }
+
+  const handleUseDefaultWorkspace = () => {
+    const path = (defaultWorkspace.trim() || defaultWorkspacePath).trim()
+    if (!path) {
+      setErrorMessage('Set a default workspace folder first.')
+      return
+    }
+    setDefaultWorkspace(path)
+    setStatusMessage('Workspace folder ready — click Save to keep this path.')
+  }
+
   const handleSave = async () => {
     if (loading || !settings || saving) return
     setSaving(true)
@@ -729,6 +752,7 @@ export function SettingsPanel({
         : {}),
       custom_llm_name: provider === CUSTOM_TEMPLATE_ID ? customName.trim() : undefined,
       project_path: projectPath,
+      default_workspace: defaultWorkspace.trim(),
       browser_home_url: browserHomeUrl.trim() || 'https://github.com/AhmiDarrow/RemedyAI',
       persona,
       user_name: userName.trim(),
@@ -1306,6 +1330,11 @@ export function SettingsPanel({
               uiLanguages={uiLanguages}
               accessScope={accessScope}
               setAccessScope={setAccessScope}
+              defaultWorkspace={defaultWorkspace}
+              setDefaultWorkspace={setDefaultWorkspace}
+              defaultWorkspacePath={defaultWorkspacePath}
+              handleBrowseDefaultWorkspace={() => { void handleBrowseDefaultWorkspace() }}
+              handleUseDefaultWorkspace={handleUseDefaultWorkspace}
               launchAtLogin={launchAtLogin}
               setLaunchAtLogin={setLaunchAtLogin}
               startInTray={startInTray}

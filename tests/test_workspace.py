@@ -15,6 +15,7 @@ from remedy.core.workspace import (
     is_unset_project_path,
     jail_path,
     list_workspace_entries,
+    default_owner_project_path,
     resolve_project_path,
     workspace_context_block,
 )
@@ -38,11 +39,13 @@ def test_unset_project_path_helpers(tmp_path, monkeypatch):
     assert is_unset_project_path(fake_home)
     assert is_unset_project_path(str(fake_home))
     assert not is_unset_project_path(fake_home / "code")
-    # Empty project → full access
-    assert effective_access_scope("project", None) == "full"
-    assert effective_access_scope("project", "") == "full"
-    assert effective_access_scope("project", ".") == "full"
-    assert effective_access_scope("project", fake_home) == "full"
+    # Empty project → default workspace, not the whole machine
+    assert effective_access_scope("project", None) == "workspace"
+    assert effective_access_scope("project", "") == "workspace"
+    assert effective_access_scope("project", ".") == "workspace"
+    assert effective_access_scope("project", fake_home) == "workspace"
+    assert effective_access_scope("full", None) == "full"
+    assert effective_access_scope("workspace", "/real/proj") == "workspace"
     assert effective_access_scope("home", "/real/proj") == "home"
     assert effective_access_scope("untrusted", "C:/code") == "untrusted"
 
@@ -54,12 +57,12 @@ def test_resolve_project_path_defaults(tmp_path, monkeypatch):
     assert resolve_project_path(".", fallback=tmp_path) == tmp_path.resolve()
 
 
-def test_resolve_project_path_defaults_to_documents_remedy(tmp_path, monkeypatch):
+def test_resolve_project_path_defaults_to_profile_remedy(tmp_path, monkeypatch):
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
     got = resolve_project_path(None)
-    assert got == (fake_home / "Documents" / "Remedy").resolve()
+    assert got == (fake_home / "Remedy").resolve()
     # Entire profile is treated as unset → same narrow default.
     assert resolve_project_path(str(fake_home)) == got
 
@@ -272,3 +275,15 @@ def test_dev_stderr_redirect_not_flagged_alone():
     warn = check_dangerous_command(["true", "2>/dev/null"])
     if warn:
         assert "Error output suppression" not in warn
+
+
+def test_default_workspace_uses_profile_remedy_and_override(tmp_path, monkeypatch):
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    shown = default_owner_project_path(create=False)
+    assert shown == (fake_home / "Remedy").resolve()
+    custom = tmp_path / "custom-ws"
+    got = default_owner_project_path(str(custom), create=True)
+    assert got == custom.resolve()
+    assert custom.is_dir()

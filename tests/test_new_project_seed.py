@@ -27,7 +27,7 @@ def test_ensure_new_project_seed_creates(tmp_path, monkeypatch):
 def test_default_project_from_config_unset_is_documents_remedy_not_new_project(
     tmp_path, monkeypatch
 ):
-    """Unset config must not force New Project — narrow Documents/Remedy instead."""
+    """Unset config must not force New Project — narrow ~/Remedy instead."""
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     p = default_project_from_config({})
     assert p == resolve_project_path(None)

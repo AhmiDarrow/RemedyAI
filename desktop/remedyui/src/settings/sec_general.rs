@@ -158,12 +158,6 @@ fn voice_status_line(v: &serde_json::Value) -> String {
 
 fn workspace(ui: &Ui, s: Settings) -> El {
     form::block(ui, s, "workspace", move |ui, s| {
-        let warn = form::notice(
-            ui,
-            "warn",
-            "Scope is forced to full while no project folder is set. Choose a workspace to limit file access.",
-        );
-        let warn = bits::visible_when(warn, move || logic::project_forces_full(&s.project_path.get()));
         let path = w::row(ui)
             .align(remedy_ui::layout::Align::Center)
             .gap(form::gap(ui))
@@ -173,8 +167,7 @@ fn workspace(ui: &Ui, s: Settings) -> El {
         form::stack(ui)
             .child(form::label(ui, "Default project"))
             .child(path)
-            .child(form::hint(ui, "Tools and files use this folder. Click Save to load the project."))
-            .child(warn)
+            .child(form::hint(ui, "Tools and files use this folder. Click Save to load the project. An empty folder uses the default workspace in Access & permissions."))
             .child(bits::field(ui, "Browser homepage", s.browser_home, logic::DEFAULT_BROWSER_HOME))
             .child(form::hint(ui, "In-app Browser home. Blank becomes the Remedy GitHub repo. Use http(s) only."))
             .child(form::toggle(

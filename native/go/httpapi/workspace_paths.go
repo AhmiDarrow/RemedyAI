@@ -65,7 +65,7 @@ func isUnsetProjectPath(raw string) bool {
 		return true
 	}
 	// Entire user profile is not a project folder — treat like unset so
-	// agency tools fall back to ~/Documents/Remedy instead of jail-writing
+	// agency tools fall back to ~/Remedy instead of jail-writing
 	// across Desktop/Downloads/.ssh under a "project" root.
 	return isUserHomeProjectPath(text)
 }
@@ -119,16 +119,22 @@ func normalizeAccessScope(raw string) string {
 		return "full"
 	case "untrusted", "sandbox", "strict", "download":
 		return "untrusted"
+	case "workspace", "default", "default_workspace", "owner_workspace":
+		return "workspace"
 	default:
 		return "project"
 	}
 }
 
 func effectiveAccessScope(configured, projectRaw string) string {
+	scope := normalizeAccessScope(configured)
 	if isUnsetProjectPath(projectRaw) {
-		return "full"
+		if scope == "full" {
+			return "full"
+		}
+		return "workspace"
 	}
-	return normalizeAccessScope(configured)
+	return scope
 }
 
 func resolveAbsPath(raw string) (string, error) {

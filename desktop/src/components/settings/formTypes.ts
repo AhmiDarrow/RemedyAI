@@ -72,6 +72,11 @@ export interface SettingsFormProps {
   setAgentName: Dispatch<SetStateAction<string>>
   accessScope: string
   setAccessScope: Dispatch<SetStateAction<string>>
+  defaultWorkspace: string
+  setDefaultWorkspace: Dispatch<SetStateAction<string>>
+  defaultWorkspacePath: string
+  handleBrowseDefaultWorkspace: () => void
+  handleUseDefaultWorkspace: () => void
   launchAtLogin: boolean
   setLaunchAtLogin: Dispatch<SetStateAction<boolean>>
   startInTray: boolean
