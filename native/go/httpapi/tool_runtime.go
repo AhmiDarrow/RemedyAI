@@ -416,6 +416,11 @@ func bindToolInput(call cognition.ToolCall, b toolBinding) cognition.ToolCall {
 		call.Input = injectSessionBinding(call.Input, "", b.SessionID)
 		call.Input = injectSingleField(call.Input, "caller_origin", strings.TrimSpace(b.Origin))
 	}
+	// memory.save decides parent-memory rights and authority from the session:
+	// the runtime names it, never the model.
+	if toolNameDotted(name) == "memory.save" {
+		call.Input = injectSessionBinding(call.Input, "", b.SessionID)
+	}
 	if isHouseRulesTool(name) {
 		home := strings.TrimSpace(b.HomeDir)
 		call.Input = injectSessionBinding(call.Input, home, b.SessionID)

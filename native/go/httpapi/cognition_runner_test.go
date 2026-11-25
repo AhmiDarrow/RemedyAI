@@ -254,8 +254,8 @@ func TestCognitionTurnRunnerExecutesWorkspaceListOverRMDY(t *testing.T) {
 	if _, err := r.Registry.Latest("workspace.read"); err != nil {
 		t.Fatalf("workspace.read missing after attach: %v", err)
 	}
-	if _, err := r.Registry.Latest("memory.search"); err != nil {
-		t.Fatalf("memory.search missing after attach: %v", err)
+	if _, err := r.Registry.Latest("mail.list"); err != nil {
+		t.Fatalf("mail.list missing after attach: %v", err)
 	}
 	out, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "list"})
 	if err != nil {

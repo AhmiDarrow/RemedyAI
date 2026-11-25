@@ -28,6 +28,8 @@ type skillFM struct {
 	Source        string
 	SuccessRate   *float64
 	RawMeta       map[string]string
+	Tools         []string
+	Triggers      []string
 }
 
 func parseSkillFrontmatter(raw string) (skillFM, string, bool) {
@@ -43,6 +45,7 @@ func parseSkillFrontmatter(raw string) (skillFM, string, bool) {
 func parseFrontmatterBlock(block string) skillFM {
 	lines := splitYAMLLines(block)
 	vals := map[string]string{}
+	lists := map[string][]string{} // block lists: "key:" then "- item" lines
 	var i int
 	for i < len(lines) {
 		line := lines[i]
@@ -79,7 +82,11 @@ func parseFrontmatterBlock(block string) skillFM {
 		if rest == "" {
 			// Possibly a nested map we do not need; skip indented block.
 			next := i + 1
-			for next < len(lines) && countIndent(lines[next]) > indent && strings.TrimSpace(lines[next]) != "" {
+			for next < len(lines) && strings.TrimSpace(lines[next]) != "" &&
+				(countIndent(lines[next]) > indent || strings.HasPrefix(strings.TrimSpace(lines[next]), "- ")) {
+				if item, ok := strings.CutPrefix(strings.TrimSpace(lines[next]), "- "); ok {
+					lists[key] = append(lists[key], unquoteYAMLItem(item))
+				}
 				next++
 			}
 			i = next
@@ -97,6 +104,19 @@ func parseFrontmatterBlock(block string) skillFM {
 		Status:      strings.ToLower(strings.TrimSpace(vals["status"])),
 		Tags:        parseYAMLStringList(vals["tags"]),
 		RawMeta:     map[string]string{},
+		// shortcut: flow lists split on commas, so a flow-form trigger regex with
+		// a comma or a double-quoted "\\" escape mis-parses; block lists are exact.
+		Tools:    parseYAMLStringList(vals["tools"]),
+		Triggers: parseYAMLStringList(vals["triggers"]),
+	}
+	if l, ok := lists["tags"]; ok {
+		out.Tags = l
+	}
+	if l, ok := lists["tools"]; ok {
+		out.Tools = l
+	}
+	if l, ok := lists["triggers"]; ok {
+		out.Triggers = l
 	}
 	if out.Version == "" {
 		out.Version = "1.0.0"
@@ -109,7 +129,7 @@ func parseFrontmatterBlock(block string) skillFM {
 	// Promote common top-level keys (Python loader parity).
 	for _, k := range []string{
 		"auto_generated", "quarantine", "lifecycle", "effort_weight",
-		"effort_band", "library_id", "source", "success_rate", "trust",
+		"effort_band", "library_id", "source", "success_rate", "trust", "parent_skill",
 	} {
 		if _, ok := out.RawMeta[k]; !ok {
 			if v, ok := vals[k]; ok {
@@ -235,6 +255,19 @@ func unquoteYAML(s string) string {
 		s = strings.TrimSpace(s[:i])
 	}
 	return s
+}
+
+// unquoteYAMLItem unquotes one block-list item with YAML's escapes: "\\" is a
+// backslash in double quotes, '' is a quote in single quotes.
+func unquoteYAMLItem(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return strings.NewReplacer(`\\`, `\`, `\"`, `"`).Replace(s[1 : len(s)-1])
+	}
+	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
+		return strings.ReplaceAll(s[1:len(s)-1], "''", "'")
+	}
+	return unquoteYAML(s)
 }
 
 func parseYAMLStringList(raw string) []string {
