@@ -139,14 +139,18 @@ fn head_row(ui: &Ui, grove: Grove) -> El {
     w::row(ui)
         .align(Align::Center)
         .gap(unit * 2.0)
-        .layout(|l| l.width = Length::Percent(1.0))
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            // Narrow column: the buttons drop below rather than crush the status.
+            l.wrap = true;
+        })
         .child(open.layout(|l| l.shrink = 0.0))
         .child(
             w::column(ui)
                 .gap(unit)
                 .layout(|l| {
                     l.shrink = 1.0;
-                    l.min_width = Length::Px(0.0);
+                    l.min_width = Length::Px(150.0);
                 })
                 .child(
                     w::row(ui)
