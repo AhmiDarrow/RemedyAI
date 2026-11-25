@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const memoryPersonaWipeConfirm = "WIPE"
@@ -181,6 +182,71 @@ func (s *sessionStore) searchMemoryLIKE(query string, limit int) ([]memoryEntryR
 	}
 	defer rows.Close()
 	return scanMemoryRows(rows)
+}
+
+// searchMemoryWords finds notes that contain any word of the query and puts
+// the ones matching the most words first. A question such as "what did we
+// decide about the garden fence" then finds a note that says "garden fence"
+// without containing the whole question as one phrase.
+func (s *sessionStore) searchMemoryWords(query string, limit int) ([]memoryEntryRow, error) {
+	words := memoryQueryWords(query)
+	if len(words) == 0 {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.ensurePartnerMemorySchema(); err != nil {
+		return nil, err
+	}
+	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	const match = `(title LIKE ? ESCAPE '\' OR content LIKE ? ESCAPE '\')`
+	var score, where []string
+	var likes []any
+	for _, w := range words {
+		like := "%" + esc.Replace(w) + "%"
+		score = append(score, `(CASE WHEN `+match+` THEN 1 ELSE 0 END)`)
+		where = append(where, match)
+		likes = append(likes, like, like)
+	}
+	// The word patterns are bound twice: once for the score, once for the filter.
+	args := append(append([]any{}, likes...), likes...)
+	args = append(args, limit)
+	rows, err := s.db.Query(
+		`SELECT id, title, content, entry_type, importance, created_at,
+		        COALESCE(session_id, ''), COALESCE(metadata, '{}')
+		 FROM (SELECT *, `+strings.Join(score, " + ")+` AS hits FROM memory_entries WHERE `+strings.Join(where, " OR ")+`)
+		 ORDER BY hits DESC, created_at DESC LIMIT ?`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMemoryRows(rows)
+}
+
+// memoryQueryWords are the distinct words of a query worth matching: two or
+// more characters, not a filler word, at most eight.
+func memoryQueryWords(query string) []string {
+	filler := map[string]bool{"the": true, "and": true, "for": true, "what": true, "did": true, "was": true,
+		"are": true, "you": true, "about": true, "with": true, "that": true, "this": true, "have": true,
+		"how": true, "our": true, "is": true, "of": true, "to": true, "in": true, "on": true, "we": true,
+		"it": true, "do": true, "my": true, "me": true, "an": true}
+	seen := map[string]bool{}
+	var out []string
+	for _, w := range strings.FieldsFunc(strings.ToLower(query), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if len([]rune(w)) < 2 || filler[w] || seen[w] {
+			continue
+		}
+		seen[w] = true
+		out = append(out, w)
+		if len(out) == 8 {
+			break
+		}
+	}
+	return out
 }
 
 func scanMemoryRows(rows *sql.Rows) ([]memoryEntryRow, error) {
