@@ -3312,25 +3312,22 @@ mod tests {
     fn load_memory_does_not_read_runtime_on_the_worker() {
         // Opening Memory used to call studio.runtime() inside the remedy-depth
         // callback (studio.rs:774 Signal::get) and abort the process.
+        // load_memory and search_memory both go through fetch_memory.
         let src = include_str!("actions.rs");
-        let Some(fn_at) = src.find("pub fn load_memory") else {
-            panic!("load_memory missing");
-        };
-        let body = &src[fn_at..];
-        let Some(spawn_at) = body.find("api::spawn_json") else {
-            panic!("load_memory has no spawn_json");
-        };
-        let after = &body[spawn_at..];
-        let post_at = after.find("wake.post").expect("load_memory must post to the UI waker");
-        let pre = &after[..post_at];
+        let fn_at = src.find("\nfn fetch_memory(").expect("fetch_memory missing");
+        let rest = &src[fn_at + 1..];
+        let body = &rest[..rest.find("\n}\n").expect("fetch_memory has an end")];
+        let spawn_at = body.find("api::spawn_json").expect("fetch_memory has no spawn_json");
+        let (before, after) = body.split_at(spawn_at);
         assert!(
-            !pre.contains("studio.runtime()"),
-            "load_memory must not call studio.runtime() on the remedy-depth worker"
+            before.contains("studio.runtime()"),
+            "fetch_memory must take the client on the UI thread, before the worker starts"
         );
         assert!(
-            pre.contains("client_for_facts") || pre.contains("client.clone()"),
-            "load_memory should capture the client on the UI thread"
+            !after.contains("studio.runtime()"),
+            "fetch_memory must not call studio.runtime() on the remedy-depth worker"
         );
+        assert!(after.contains("wake.post"), "fetch_memory must hop back to the UI thread");
     }
 
     #[test]

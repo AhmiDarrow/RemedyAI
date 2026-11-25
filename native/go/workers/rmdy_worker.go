@@ -545,6 +545,17 @@ func defaultPythonWorkerArgv() ([]string, error) {
 	if venv := repoVenvPython(); venv != "" {
 		return workerArgv(venv), nil
 	}
+	// A packaged worker ships its dependencies compiled for the managed
+	// CPython series. A python on PATH may be another series (those compiled
+	// modules would not load) or carry an unrelated remedy install, so the
+	// packaged worker always runs on the managed interpreter.
+	if pyzOK {
+		if _, depsOK, _ := resolveRMDYDeps(); depsOK {
+			if abs, err := ensureManagedPython(); err == nil && abs != "" {
+				return workerArgv(abs), nil
+			}
+		}
+	}
 	for _, name := range []string{"python", "python3"} {
 		if abs := lookPathAbs(name); abs != "" && !isWindowsStorePythonStub(abs) {
 			return workerArgv(abs), nil

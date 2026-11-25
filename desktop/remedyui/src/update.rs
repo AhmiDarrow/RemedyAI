@@ -1350,11 +1350,16 @@ mod tests {
         let stub = dir.join("stub.exe");
         std::fs::write(&stub, b"MZ remedy packaging stub\n").unwrap();
         let outfile = dir.join("Remedy.Desktop_1.0.0_x64-setup.exe");
+        let (webui, deps) = (dir.join("webui"), dir.join("rmdy-deps"));
+        for (folder, file) in [(&webui, "index.html"), (&deps, "placeholder.txt")] {
+            std::fs::create_dir_all(folder).unwrap();
+            std::fs::write(folder.join(file), b"stub\n").unwrap();
+        }
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let desktop = manifest.parent().expect("desktop dir");
         let nsi = manifest.join("packaging/windows/installer.nsi");
         // Windows makensis does not open forward-slash !include or File paths.
-        let as_nsis = |p: &Path| p.display().to_string();
+        let as_nsis = |p: &Path| p.display().to_string().replace('/', "\\");
         // Compile from an unrelated directory. Absolute backslash /D paths.
         let status = std::process::Command::new(&makensis)
             .current_dir(&dir)
@@ -1362,6 +1367,12 @@ mod tests {
             .arg("/DVERSION=1.0.0")
             .arg(format!("/DOUTFILE={}", as_nsis(&outfile)))
             .arg(format!("/DMAINBINARYSRCPATH={}", as_nsis(&stub)))
+            // Everything the installer requires gets a stand-in, or makensis stops at its !error.
+            .arg(format!("/DRUNTIMESRCPATH={}", as_nsis(&stub)))
+            .arg(format!("/DCORESRCPATH={}", as_nsis(&stub)))
+            .arg(format!("/DWEBUISRCPATH={}", as_nsis(&webui)))
+            .arg(format!("/DWORKERPYZPATH={}", as_nsis(&stub)))
+            .arg(format!("/DWORKERDEPSPATH={}", as_nsis(&deps)))
             .arg(format!("/DHOOKS={}", as_nsis(&desktop.join("src-tauri/windows/hooks.nsh"))))
             .arg(format!(
                 "/DUNINSTALL_OPTIONS={}",
