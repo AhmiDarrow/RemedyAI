@@ -1,49 +1,56 @@
 package httpapi
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestNativePromptRouting(t *testing.T) {
-	cases := []struct {
-		name    string
-		cfg     ConfigMap
-		missing []string
-		want    bool
-	}{
-		{"off by default", ConfigMap{}, nil, false},
-		{"off explicitly", ConfigMap{"native_prompt": false}, nil, false},
-		{"on but a section is not ported", ConfigMap{"native_prompt": true}, []string{"metabolism"}, false},
-		{"on and complete", ConfigMap{"native_prompt": true}, nil, true},
-	}
-	for _, c := range cases {
-		if got := useNativePrompt(c.cfg, c.missing); got != c.want {
-			t.Errorf("%s: useNativePrompt = %v, want %v", c.name, got, c.want)
-		}
-	}
-
-	// Through the runner: assemble still has unported sections, so it stays
-	// on the worker; a chat-mode should_continue is fully ported.
+func TestTheRunnerBuildsItsPromptInGo(t *testing.T) {
 	home := t.TempDir()
 	proj := filepath.Join(t.TempDir(), "proj")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	r := &CognitionTurnRunner{HomeDir: home}
-	if _, ok := r.nativePrompt("prompt.should_continue", map[string]any{"chat_mode": true}); ok {
-		t.Fatal("native_prompt unset: the Go port must not answer")
+	writeCfg := func(extra string) {
+		cfg := extra + "project_path = '" + proj + "'\n"
+		if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	cfg := "native_prompt = true\nproject_path = '" + proj + "'\n"
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o600); err != nil {
+	writeCfg("")
+	req := TurnRequest{SessionID: "s1", Prompt: "hello", ProjectPath: proj}
+
+	// A bare runner (no stores, no worker) has no prompt source at all.
+	bare := &CognitionTurnRunner{HomeDir: home}
+	if bare.nativeOn() {
+		t.Fatal("a runner without stores must not claim a native prompt")
+	}
+	if _, err := bare.assemblePrompt(context.Background(), req); err == nil {
+		t.Fatal("with neither stores nor a worker, assembling must fail, not send an empty prompt")
+	}
+
+	// With the server's stores it is native by default, and no worker is needed.
+	r := &CognitionTurnRunner{HomeDir: home, PromptSources: serverPromptSources{}}
+	if !r.nativeOn() {
+		t.Fatal("native prompt is the default")
+	}
+	got, err := r.assemblePrompt(context.Background(), req)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := r.nativePrompt("prompt.assemble", map[string]any{"message": "hello", "session_id": "s1"}); ok {
-		t.Fatal("assemble has unported sections; it must stay on the Python worker")
+	if strings.TrimSpace(got.System) == "" || strings.Contains(got.System, "[Turn context") {
+		t.Fatalf("system prompt must be present and hold no per-turn context: %.200q", got.System)
 	}
-	out, ok := r.nativePrompt("prompt.should_continue", map[string]any{"chat_mode": true})
-	if !ok || out["reason"] != "chat_mode" || out["continue"] != false {
-		t.Fatalf("chat-mode should_continue: ok=%v out=%v", ok, out)
+	if !strings.HasPrefix(got.Context, "[Turn context") || got.Goal != "hello" {
+		t.Fatalf("context=%.80q goal=%q", got.Context, got.Goal)
+	}
+
+	// The owner can still send the prompt hooks to an attached worker.
+	writeCfg("native_prompt = false\n")
+	if r.nativeOn() {
+		t.Fatal("native_prompt = false turns the native prompt off")
 	}
 }

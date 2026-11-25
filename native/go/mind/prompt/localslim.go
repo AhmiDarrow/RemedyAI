@@ -106,20 +106,7 @@ var (
 		`</?parameter\b|name\s*=\s*["'][a-z][a-z0-9_]{1,64}["'])`)
 )
 
-// isVerbalOnlyRequest is react_policy.is_verbal_only_request.
-func isVerbalOnlyRequest(message string) bool {
-	msg := coerceText(message)
-	if msg == "" || strings.Contains(msg, "\n") || cpLen(msg) > 120 {
-		return false
-	}
-	if toolHintRE.MatchString(msg) || workShapeRE.MatchString(msg) {
-		return false
-	}
-	if requestWorkRE.MatchString(msg) || actionKickRE.MatchString(msg) {
-		return false
-	}
-	return verbalOnlyRE.MatchString(msg)
-}
+// isVerbalOnlyRequest lives in continue.go.
 
 // isPureTrivia is react_policy.is_pure_trivia_message.
 func isPureTrivia(message string) bool {

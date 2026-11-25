@@ -24,7 +24,10 @@ func (e Env) soulEnv() soul.Env {
 
 // soulRequest is what build_turn_context passes to build_soul_context_block.
 type soulRequest struct {
-	contract    bool // include_contract (and the one-time offers)
+	contract bool // include_contract (and the one-time offers)
+	// offers makes the one-time offers without the contract, for the native
+	// layout where the contract sits in the system prompt.
+	offers      bool
 	workThreads bool
 	provider    string
 	model       string
@@ -344,7 +347,7 @@ func soulBlock(env Env, req soulRequest) (string, error) {
 	if u := pyStrip(req.userName); u != "" {
 		lines = append(lines, "With: "+u)
 	}
-	if req.contract {
+	if req.contract || req.offers {
 		minTurns := sf.Int(senv.Knobs, "vigil_offer_turns", 12)
 		taken, err := vigil.TakeOffer(senv, minTurns, f.Relational.TurnsTogether)
 		if err == nil && taken {
@@ -355,6 +358,10 @@ func soulBlock(env Env, req soulRequest) (string, error) {
 				"partner.vigil with action enable. If no, call "+
 				"partner.vigil with action disable. If ignored, never "+
 				"raise it again.")
+		}
+		// Only when the tool the offer points at exists on this runtime.
+		if req.offers && env.HouseRulesTool && takeOnboardingOffer(env) {
+			lines = append(lines, offerPrompt())
 		}
 	}
 	if req.provider != "" || req.model != "" {
