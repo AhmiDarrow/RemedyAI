@@ -434,9 +434,9 @@ fn retire_button(ui: &Ui, panel: &DiagnosticsPanel, id: &str) -> El {
                     &ui,
                     move || -> String {
                         if pending.get().as_deref() == Some(id_label.as_str()) {
-                            "Confirm retire".into()
+                            "Confirm stop".into()
                         } else {
-                            "Retire".into()
+                            "Stop".into()
                         }
                     },
                     move || panel_c.retire_task(&id_c),

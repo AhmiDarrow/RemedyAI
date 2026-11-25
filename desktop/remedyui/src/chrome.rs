@@ -1113,7 +1113,8 @@ fn apply_feed(c: Chrome, res: Result<updates::Feed, String>) {
         }
     };
     let text = match res {
-        Ok(feed) if updates::is_newer(&feed.version, VERSION) => {
+        // A newer version with no download for this platform is not installable here.
+        Ok(feed) if updates::is_newer(&feed.version, VERSION) && !feed.url.is_empty() => {
             c.update_available.set(true);
             c.update_version.set(feed.version.clone());
             c.update_url.set(feed.url);

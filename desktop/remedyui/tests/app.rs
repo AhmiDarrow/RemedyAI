@@ -1447,7 +1447,7 @@ fn help_about_diagnostics_and_quit_use_the_title_menu() {
     app.key(KeyEvent::press(Key::Escape));
     app.frames(1);
     assert!(app.press(Role::Button, "Open Remedy menu"));
-    assert!(app.press(Role::Button, "About Remedy (v1.0.0)"));
+    assert!(app.press(Role::Button, concat!("About Remedy (v", env!("CARGO_PKG_VERSION"), ")")));
     app.frames(1);
     assert!(
         has(&accessible_names(&app), "Hope this helps"),

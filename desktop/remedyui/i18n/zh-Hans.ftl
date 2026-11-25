@@ -106,7 +106,6 @@ chat-split-build = BUILD
 chat-split-side-left = 操作栏在左
 chat-split-side-right = 操作栏在右
 chat-split-pop-out = Pop out
-chat-split-pip = PiP
 chat-split-fullscreen = Fullscreen
 chat-split-dock-back = Dock back
 chat-split-exit-fullscreen = Exit fullscreen

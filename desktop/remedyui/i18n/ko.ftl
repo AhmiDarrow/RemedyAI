@@ -106,7 +106,6 @@ chat-split-build = BUILD
 chat-split-side-left = 작업이 왼쪽
 chat-split-side-right = 작업이 오른쪽
 chat-split-pop-out = Pop out
-chat-split-pip = PiP
 chat-split-fullscreen = Fullscreen
 chat-split-dock-back = Dock back
 chat-split-exit-fullscreen = Exit fullscreen
