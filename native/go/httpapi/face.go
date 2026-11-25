@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/mind/vigil"
 )
 
 // Remedy's face is drawn by the desktop from one 64-bit seed in
@@ -129,21 +131,23 @@ func toolFaceRestore(s *Server, _ partnerToolInput) (any, error) {
 // counted from what she recorded; nothing is estimated.
 //
 //	activity      "" | "vigil" (a night tick) | "learning" (skills, dream, life cycle)
-//	nights        finished night acts in the vigil journal
-//	dreams        those of them that were dreams
+//	nights        finished night acts, lifetime (vigil.json total_wakes)
+//	dreams        those of them that were dreams (vigil.json total_dreams)
 //	words         terms she has coined in her inner language
 //	routine_runs  times her routines have run
+//
+// The journal is a ring, so it is only the fallback when vigil.json is absent.
 func (s *Server) innerPublic() map[string]any {
 	act, _ := s.innerAct.Load().(string)
 	nights, dreams := 0, 0
-	for _, e := range s.hearthJournal() {
-		if !e.Ok {
-			continue
+	env := mindEnv(s.homeDir)
+	if _, err := os.Stat(env.Path(vigil.StateFile)); err == nil {
+		if st, err := vigil.Load(env); err == nil {
+			nights, dreams = st.TotalWakes, st.TotalDreams
 		}
-		nights++
-		if strings.Contains(strings.ToLower(e.Act), "dream") {
-			dreams++
-		}
+	} else {
+		entries, _ := vigil.ReadJournal(env)
+		nights, dreams = vigil.CountJournal(entries)
 	}
 	words := 0
 	if lex, ok := readInnerLanguagePublic(ResolveHomeDir(s.homeDir))["lexicon"].(map[string]any); ok {

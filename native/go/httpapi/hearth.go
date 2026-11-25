@@ -14,6 +14,9 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/mind/drives"
+	"github.com/AhmiDarrow/RemedyAI/native/go/mind/vigil"
 )
 
 // Hearth is Remedy's always-on presence. The runtime stays up in the tray;
@@ -58,10 +61,11 @@ type hearthState struct {
 }
 
 type hearthJournal struct {
-	Ts     float64 `json:"ts"`
-	Act    string  `json:"act"`
-	Detail string  `json:"detail"`
-	Ok     bool    `json:"ok"`
+	Ts     float64        `json:"ts"`
+	Act    string         `json:"act"`
+	Detail string         `json:"detail"`
+	Ok     bool           `json:"ok"`
+	Added  map[string]int `json:"added,omitempty"`
 }
 
 func (s *Server) hearthPath() string {
@@ -185,7 +189,12 @@ func hearthPhrase(e hearthJournal) string {
 	detail := strings.TrimSpace(e.Detail)
 	switch e.Act {
 	case "dream":
-		return "dreamed on our recent episodes"
+		// The vigil journals the top dream line; older entries carry only
+		// the hunger ("consolidate N episodes"), which is not news.
+		if detail == "" || strings.HasPrefix(detail, "consolidate ") || strings.HasPrefix(detail, "skipped") {
+			return "dreamed on our recent episodes"
+		}
+		return "dreamed on “" + trimRunes(detail, 100) + "”"
 	case "life_step":
 		if detail != "" && detail != genericLifeDetail {
 			return "moved “" + trimRunes(detail, 100) + "” forward"
@@ -404,46 +413,43 @@ func (s *Server) stopHearthLoop() {
 	}
 }
 
-// hearthPulseNight spends one muscle-free vigil tick when a worker is
-// attached. Disabled vigils no-op inside Python. This never calls a provider.
-func (s *Server) hearthPulseNight(ctx context.Context) {
+// hearthPulseNight spends one muscle-free vigil tick (native/go/mind/vigil).
+// A disabled vigil is a no-op. A wake or a failure goes in the learn log.
+// This never calls a provider.
+func (s *Server) hearthPulseNight(_ context.Context) {
 	if s == nil {
 		return
 	}
-	cr, ok := s.runner.(*CognitionTurnRunner)
-	if !ok || cr == nil {
+	env := mindEnv(s.homeDir)
+	if strings.TrimSpace(env.Home) == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
 	s.innerAct.Store("vigil")
 	defer s.innerAct.Store("")
 	started := time.Now()
-	// A failed night tick goes in the learn log, like every other inner call.
-	cr.noteLearnCall("pulse", started, ctx, cr.PulsePartner(ctx))
+	res, err := vigil.Tick(env)
+	if err != nil || res.Woke {
+		appendLearnLog(s.homeDir, "pulse", time.Since(started), false, err, vigilChanged(res))
+	}
 }
 
-// hearthPulseLearn runs one unattended organism learning tick (skill
-// promote/prune, dream, life cycle). Code self-inject stays opt-in inside
-// the Python worker. Never calls a provider.
-func (s *Server) hearthPulseLearn(ctx context.Context) bool {
+// hearthPulseLearn runs one unattended organism tick (dream when due,
+// compact, drive drift) in-process and reports whether anything changed.
+// Skill promote/prune and self-inject are not part of it. Never calls a provider.
+func (s *Server) hearthPulseLearn(_ context.Context) bool {
 	if s == nil {
 		return false
 	}
-	cr, ok := s.runner.(*CognitionTurnRunner)
-	if !ok || cr == nil {
+	env := mindEnv(s.homeDir)
+	if strings.TrimSpace(env.Home) == "" {
 		return false
 	}
-	timeout := resolveAdvancedSeconds(LoadConfig(s.homeDir), "pulse_learn_timeout_s")
-	if timeout <= 0 {
-		timeout = 45 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 	s.innerAct.Store("learning")
 	defer s.innerAct.Store("")
-	changed, _ := cr.PulseLearn(ctx)
-	return changed
+	started := time.Now()
+	rep, err := drives.OrganismTick(env)
+	appendLearnLog(s.homeDir, "improve", time.Since(started), false, err, rep.ChangedMap())
+	return rep.Changed
 }
 
 // nextLearnInterval chooses the delay until the next unattended learn tick.
@@ -552,7 +558,7 @@ func (s *Server) recentlyHeavyWindow(now time.Time, window time.Duration) bool {
 	cut := now.Add(-window)
 	for _, row := range rows {
 		kind, _ := row["kind"].(string)
-		if kind != "turn_end" && kind != "after_tool_batch" {
+		if kind != "turn_end" && kind != "after_tool_batch" && kind != "soul" {
 			continue
 		}
 		ts, _ := row["ts"].(string)

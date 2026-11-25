@@ -408,7 +408,7 @@ func autobiography(st *State, user string, pledges []string, k map[string]any) s
 func ConsolidateFromDream(env soul.Env, f *soul.Field) (int, error) {
 	user := strings.TrimSpace(env.UserName)
 	if user == "" {
-		user = "Joe" // Python's fallback name
+		user = "my partner" // no name set yet
 	}
 	added := 0
 	_, err := mutate(env, func(st *State) (bool, error) {
