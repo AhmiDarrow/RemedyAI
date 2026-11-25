@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use iroh::endpoint::presets::{self, Preset};
 use iroh::endpoint::PortmapperConfig;
-use iroh::{EndpointAddr, EndpointId, RelayMode, RelayUrl};
+use iroh::{EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
@@ -80,18 +80,22 @@ fn runtime() -> Result<&'static Runtime> {
 /// Opens a stream to the PC's endpoint and returns the loopback address that
 /// carries it. The first connection to that address gets the stream; when it
 /// closes, the stream and the endpoint go with it.
-pub fn bridge(target: &Target, timeout: Duration) -> Result<SocketAddr> {
+///
+/// `seed` is this phone's identity on this path (`DeviceKeys::direct_seed`):
+/// the PC lets in the paired phones' identities and nobody else's.
+pub fn bridge(target: &Target, seed: &[u8; 32], timeout: Duration) -> Result<SocketAddr> {
     let rt = runtime()?;
     let target = target.clone();
+    let seed = *seed;
     rt.block_on(async move {
-        match tokio::time::timeout(timeout, open(target)).await {
+        match tokio::time::timeout(timeout, open(target, seed)).await {
             Ok(r) => r,
             Err(_) => Err(Error::Timeout("the PC's direct address did not answer")),
         }
     })
 }
 
-async fn open(target: Target) -> Result<SocketAddr> {
+async fn open(target: Target, seed: [u8; 32]) -> Result<SocketAddr> {
     let unreachable = |what: &str, e: &dyn std::fmt::Display| Error::Unreachable(format!("direct: {what}: {e}"));
     let peer = EndpointId::from_str(&target.id).map_err(|e| unreachable("endpoint id", &e))?;
 
@@ -104,7 +108,9 @@ async fn open(target: Target) -> Result<SocketAddr> {
         }
         None => builder.relay_mode(RelayMode::Disabled).clear_relay_transports(),
     };
-    builder = builder.portmapper_config(PortmapperConfig::Disabled);
+    builder = builder
+        .secret_key(SecretKey::from_bytes(&seed))
+        .portmapper_config(PortmapperConfig::Disabled);
     let endpoint = builder.bind().await.map_err(|e| unreachable("could not open a socket", &e))?;
 
     let mut addr = EndpointAddr::new(peer);
@@ -164,12 +170,22 @@ mod tests {
     }
 
     #[test]
+    fn the_endpoint_id_for_a_seed_matches_the_pc() {
+        // The PC computes this id from its side (native/go/connect
+        // TestDirectIdentityIsTheSameFromBothSides): same seed, same id.
+        let seed = hex::decode("fbb25fb6f96dedc95fc0f24be0620f51019fdd55a7ff395ea935b25fcefdc4b7").unwrap();
+        let seed: [u8; 32] = seed.try_into().unwrap();
+        let id = SecretKey::from_bytes(&seed).public().to_string();
+        assert_eq!(id, "839dfa90bf6c77fc84a2a3af9dc54fb95847b1e9baf71d996a79c0d6ce69ecae");
+    }
+
+    #[test]
     fn an_unanswered_address_fails_within_the_timeout() {
         // TEST-NET-3: nothing answers. The dial must give up, not hang.
         let id = "32f964994affa248ee05d85780291e07535c4229dfcba0bbde4c44f94594c602";
         let t = Target::from_fields(Some(id), "203.0.113.5:7403", None).unwrap();
         let started = std::time::Instant::now();
-        assert!(bridge(&t, Duration::from_millis(600)).is_err());
+        assert!(bridge(&t, &[9u8; 32], Duration::from_millis(600)).is_err());
         assert!(started.elapsed() < Duration::from_secs(5));
     }
 }

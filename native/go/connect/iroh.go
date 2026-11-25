@@ -388,6 +388,13 @@ func runIrohSidecar(ctx context.Context, bin string, sk, token []byte, forward s
 	if mode == "custom" {
 		sidecarCfg["relay_urls"] = []string{strings.TrimSpace(opts.RelayURL)}
 	}
+	// Paired phones only, from the first connection the endpoint accepts. If
+	// the list cannot be built, it is empty and nobody is let in.
+	allow, allowErr := DirectAllowList(opts.Home)
+	if allowErr != nil || allow == nil {
+		allow = []string{}
+	}
+	sidecarCfg["allow"] = allow
 	cfg, _ := json.Marshal(sidecarCfg)
 	updateIrohStatus(func(s *IrohStatus) {
 		*s = IrohStatus{Enabled: true, Port: port, RelayMode: mode, Punch: opts.Punch, Verdict: ReachChecking,
@@ -445,6 +452,14 @@ func runIrohSidecar(ctx context.Context, bin string, sk, token []byte, forward s
 		cmdMu   sync.Mutex
 		waiters = map[string]chan irohEvent{}
 	)
+	// A phone paired or removed while the endpoint runs changes who may connect.
+	setDirectAllowSender(opts.Home, func(ids []string) {
+		line, _ := json.Marshal(map[string]any{"cmd": "allow", "ids": ids})
+		cmdMu.Lock()
+		_, _ = stdin.Write(append(line, '\n'))
+		cmdMu.Unlock()
+	})
+	defer setDirectAllowSender("", nil)
 	setIrohPunch(func(pctx context.Context, peerID string, peerAddrs []string) ([]string, error) {
 		idb := make([]byte, 8)
 		if _, err := rand.Read(idb); err != nil {
