@@ -85,6 +85,7 @@ SENSITIVE_KEYS = frozenset(
         "connect_enabled",
         "connect_bind_host",
         "connect_bind_port",
+        "claimidx_enabled",
         "claimidx_public_ledger",
     }
 )

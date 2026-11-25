@@ -116,6 +116,7 @@ export interface Settings {
   auto_approve_threshold?: number
   log_level?: string
   sarcasm_mode?: boolean
+  claimidx_enabled?: boolean
   claimidx_public_ledger?: boolean
   /** Organism / token-budget knobs (Settings → Advanced). Effective values. */
   advanced?: Record<string, number | boolean>
@@ -296,6 +297,7 @@ export interface SettingsUpdate {
   auto_approve_threshold?: number
   log_level?: string
   sarcasm_mode?: boolean
+  claimidx_enabled?: boolean
   claimidx_public_ledger?: boolean
   advanced?: Record<string, number | boolean>
   vision_enabled?: boolean
