@@ -56,16 +56,60 @@ pub fn from_webview() -> Option<String> {
 }
 
 fn from_leveldb(dir: &std::path::Path) -> Option<String> {
+    theme_from_storage(&saved_storage(dir)?)
+}
+
+fn saved_storage(dir: &std::path::Path) -> Option<LocalStorage> {
     let store = match ChromiumStorage::read_dir(dir) {
         Ok(store) => store,
         Err(WebStorageError::NotFound { .. }) => return None,
         Err(_) => return None,
     };
-    let saved = match store.first_of(&TAURI_WINDOWS_ORIGINS) {
-        Ok(Some(saved)) => saved,
-        _ => return None,
+    match store.first_of(&TAURI_WINDOWS_ORIGINS) {
+        Ok(Some(saved)) => Some(saved),
+        _ => None,
+    }
+}
+
+/// The localStorage key the old web shell kept pins, tags and archive flags under.
+pub const SESSION_META_KEY: &str = "remedy.sessionMeta.v1";
+
+/// How the old web shell had one session filed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OldFiling {
+    pub id: String,
+    pub pinned: bool,
+    pub archived: bool,
+    pub tags: Vec<String>,
+}
+
+/// The filing in the old shell's saved JSON (`{ "<session id>": { pinned, archived, tags } }`).
+/// Entries that file nothing are left out; anything unreadable gives an empty list.
+pub fn filing_from_json(raw: &str) -> Vec<OldFiling> {
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return Vec::new();
     };
-    theme_from_storage(&saved)
+    let mut out = Vec::new();
+    for (id, v) in map {
+        let flag = |k: &str| v.get(k).and_then(|x| x.as_bool()).unwrap_or(false);
+        let tags: Vec<String> = v
+            .get("tags")
+            .and_then(|t| t.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(str::trim).filter(|s| !s.is_empty()).map(String::from)).collect())
+            .unwrap_or_default();
+        let (pinned, archived) = (flag("pinned"), flag("archived"));
+        if !id.trim().is_empty() && (pinned || archived || !tags.is_empty()) {
+            out.push(OldFiling { id, pinned, archived, tags });
+        }
+    }
+    out
+}
+
+/// Pins, tags and archive flags from the old webview store, if it is present.
+pub fn filing_from_webview() -> Vec<OldFiling> {
+    let Some(dir) = tauri_windows_dir(BUNDLE_ID) else { return Vec::new() };
+    let Some(saved) = saved_storage(&dir) else { return Vec::new() };
+    saved.get(SESSION_META_KEY).map(filing_from_json).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -83,6 +127,22 @@ mod tests {
         assert!(!is_theme_id(""));
         assert!(!is_theme_id("Dark Forest"));
         assert!(!is_theme_id("system "));
+    }
+
+    #[test]
+    fn old_filing_is_read_and_empty_entries_are_dropped() {
+        let raw = r#"{"a":{"pinned":true,"tags":[" ui ",""]},"b":{},"c":{"archived":true},"d":{"tags":[]}}"#;
+        let mut got = filing_from_json(raw);
+        got.sort_by(|x, y| x.id.cmp(&y.id));
+        assert_eq!(
+            got,
+            vec![
+                OldFiling { id: "a".into(), pinned: true, archived: false, tags: vec!["ui".into()] },
+                OldFiling { id: "c".into(), pinned: false, archived: true, tags: vec![] },
+            ]
+        );
+        assert!(filing_from_json("not json").is_empty());
+        assert!(filing_from_json("[1,2]").is_empty());
     }
 
     #[test]

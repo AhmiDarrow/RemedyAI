@@ -531,6 +531,16 @@ pub(crate) fn load_session_tags() -> Vec<(String, Vec<String>)> {
         .unwrap_or_default()
 }
 
+/// Whether the old web shell's pins and tags were already offered to the runtime.
+pub(crate) fn webview_filing_imported() -> bool {
+    desktop_dir().join("webview-filing-imported").exists()
+}
+
+pub(crate) fn mark_webview_filing_imported() {
+    let _ = std::fs::create_dir_all(desktop_dir());
+    let _ = std::fs::write(desktop_dir().join("webview-filing-imported"), b"1");
+}
+
 pub(crate) fn save_session_tags(sessions: &[crate::studio::Session]) {
     let _ = std::fs::create_dir_all(desktop_dir());
     let _ = std::fs::write(

@@ -13,6 +13,10 @@ export interface ChatSession {
   external_user?: string | null
   created_at: string
   updated_at: string
+  /** How the owner filed it; kept by the runtime, one value for every window. */
+  pinned?: boolean
+  archived?: boolean
+  tags?: string[] | null
   /** True while a turn holds this session's stream claim (server-side work in flight). */
   claimed?: boolean
   /** Turn id of that claim — what `stream/attach` and the evidence route are keyed on. */

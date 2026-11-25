@@ -101,7 +101,93 @@ export function setSessionMeta(id: string, patch: Partial<SessionMeta>): Session
   }
   all[id] = next
   writeAll(all)
+  pushFiling(id, next)
   return next
+}
+
+/**
+ * How a session is filed (pinned, archived, tags) is kept by the runtime, so
+ * the desktop, this page and a phone show the same. localStorage is the copy
+ * this page paints from. `folder` is this page's own and stays local.
+ */
+const SYNCED_KEY = 'remedy.sessionMeta.synced'
+
+function readSynced(): Set<string> {
+  try {
+    const raw = localStorage.getItem(SYNCED_KEY)
+    const parsed = raw ? (JSON.parse(raw) as unknown) : []
+    return new Set(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function writeSynced(ids: Set<string>) {
+  try {
+    localStorage.setItem(SYNCED_KEY, JSON.stringify([...ids]))
+  } catch {
+    // ignore
+  }
+}
+
+function pushFiling(id: string, m: SessionMeta) {
+  const body = JSON.stringify({
+    pinned: Boolean(m.pinned),
+    archived: Boolean(m.archived),
+    tags: m.tags || [],
+  })
+  // Imported on use: this module is also loaded where there is no runtime to reach.
+  import('../api/client')
+    .then(({ apiFetch }) => apiFetch(`/sessions/${id}`, { method: 'PATCH', body }))
+    .then(() => {
+      const synced = readSynced()
+      synced.add(id)
+      writeSynced(synced)
+    })
+    .catch(() => {
+      // Kept locally; sent again the next time it changes.
+    })
+}
+
+export type ServerFiling = { id: string; pinned?: boolean; archived?: boolean; tags?: string[] | null }
+
+/**
+ * Bring this page in line with the runtime's filing for the sessions it just
+ * listed. Returns true when the local copy changed.
+ *
+ * A session filed here before the runtime kept filing is sent up once. After
+ * that the runtime is the truth, including when a pin was removed elsewhere.
+ */
+export function adoptServerFiling(rows: ServerFiling[]): boolean {
+  const all = readAll()
+  const synced = readSynced()
+  let changed = false
+  let marked = false
+  for (const row of rows) {
+    const tags = (row.tags || []).filter(Boolean)
+    const filed = Boolean(row.pinned) || Boolean(row.archived) || tags.length > 0
+    const cur = all[row.id] || {}
+    const localFiled = Boolean(cur.pinned) || Boolean(cur.archived) || (cur.tags || []).length > 0
+    if (!filed && localFiled && !synced.has(row.id)) {
+      pushFiling(row.id, cur)
+      continue
+    }
+    const same =
+      Boolean(cur.pinned) === Boolean(row.pinned) &&
+      Boolean(cur.archived) === Boolean(row.archived) &&
+      JSON.stringify([...(cur.tags || [])].sort()) === JSON.stringify([...tags].sort())
+    if (!same) {
+      all[row.id] = { ...cur, pinned: Boolean(row.pinned), archived: Boolean(row.archived), tags }
+      changed = true
+    }
+    if (!synced.has(row.id)) {
+      synced.add(row.id)
+      marked = true
+    }
+  }
+  if (changed) writeAll(all)
+  if (marked) writeSynced(synced)
+  return changed
 }
 
 export function toggleSessionPin(id: string): boolean {

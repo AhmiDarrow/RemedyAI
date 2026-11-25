@@ -5,6 +5,7 @@ import { relativeTime } from '../utils/relativeTime'
 import { intlLocale } from '../i18n/locale'
 import {
   getAllSessionMeta,
+  adoptServerFiling,
   isSessionArchived,
   setSessionMeta,
   toggleSessionArchive,
@@ -216,6 +217,12 @@ export function Sidebar({
   )
 
   const refreshMeta = () => setMeta(getAllSessionMeta())
+
+  // The runtime keeps how each session is filed. Take its word whenever the
+  // list arrives, so a pin made on the desktop or a phone shows here too.
+  useEffect(() => {
+    if (adoptServerFiling(sessions)) setMeta(getAllSessionMeta())
+  }, [sessions])
 
   const commitRename = (id: string) => {
     const next = renameDraft.trim()
