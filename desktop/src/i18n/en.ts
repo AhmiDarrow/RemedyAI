@@ -292,7 +292,7 @@ export const EN: Record<string, string> = {
   'settings.communicationStyle': 'Communication style',
   'settings.defaultProject': 'Default project folder',
   'settings.projectHint': 'Type a path or browse. Save reloads the workspace (file tools, shell cwd, @file search).',
-  'settings.noProject': 'No project folder — tools use full access on this PC (your Windows user). Fine for general help; for coding, pick a project folder so work stays focused and safer.',
+  'settings.noProject': 'No project folder — tools use the default workspace in Access & permissions unless you choose Full machine access.',
   'settings.browse': 'Browse',
   'settings.browseFolder': 'Browse for folder',
   'settings.nameExample': 'e.g. Alex',

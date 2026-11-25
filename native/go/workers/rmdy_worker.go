@@ -830,7 +830,7 @@ func enrichWorkerEnv(env map[string]string, cwd string) {
 // resolveDefaultWorkspace picks a workspace root that is never the packaged
 // Desktop install folder (cwd when remedy-runtime is launched as a sidecar).
 // Order: REMEDY_PROJECT_PATH → config.toml project_path → repo root (dev) →
-// ~/Documents/Remedy (or ~/.remedy/workspace) — not the entire user home.
+// ~/Remedy (or ~/.remedy/workspace) — not the entire user home.
 func resolveDefaultWorkspace(env map[string]string, start string) string {
 	if p := strings.TrimSpace(env["REMEDY_PROJECT_PATH"]); p != "" && !isUserHomePath(p) && !looksLikeInstallDir(p) {
 		return p
@@ -878,13 +878,49 @@ func defaultOwnerWorkspaceDir() string {
 	if err != nil || strings.TrimSpace(userHome) == "" {
 		return ""
 	}
-	docs := filepath.Join(userHome, "Documents", "Remedy")
-	if err := os.MkdirAll(docs, 0o755); err == nil {
-		return docs
+	if cfgHome := strings.TrimSpace(os.Getenv("REMEDY_HOME")); cfgHome != "" {
+		if p := defaultWorkspaceFromConfig(cfgHome); p != "" && !looksLikeInstallDir(p) && !isUserHomePath(p) {
+			if err := os.MkdirAll(p, 0o755); err == nil {
+				return p
+			}
+		}
+	}
+	target := filepath.Join(userHome, "Remedy")
+	if err := os.MkdirAll(target, 0o755); err == nil {
+		return target
 	}
 	fallback := filepath.Join(userHome, ".remedy", "workspace")
 	if err := os.MkdirAll(fallback, 0o755); err == nil {
 		return fallback
+	}
+	return ""
+}
+
+func defaultWorkspaceFromConfig(home string) string {
+	raw, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		s := strings.TrimSpace(line)
+		if s == "" || strings.HasPrefix(s, "#") {
+			continue
+		}
+		if !strings.HasPrefix(strings.ToLower(s), "default_workspace") {
+			continue
+		}
+		parts := strings.SplitN(s, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		val := strings.TrimSpace(parts[1])
+		val = strings.Trim(val, `"'`)
+		val = strings.TrimSpace(val)
+		val = strings.ReplaceAll(val, `\\`, `\`)
+		if val == "" || val == "." || val == "./" {
+			return ""
+		}
+		return filepath.Clean(val)
 	}
 	return ""
 }

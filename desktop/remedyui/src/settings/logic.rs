@@ -58,7 +58,7 @@ pub const SECTIONS: &[Section] = &[
     Section { id: "channels", title: "Messengers", summary: "Telegram, Discord, WhatsApp…", keywords: "telegram discord slack mattermost whatsapp teams matrix signal messenger channel bot gateway continuity", category: "connections", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "assistant", title: "Personal assistant", summary: "Calendar, mail, budget (local)", keywords: "assistant personal calendar gmail mail outlook hotmail yahoo budget debt bills brief oauth accounts money disclaimer", category: "connections", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "mcp", title: "MCP host", summary: "Expose skills to other apps", keywords: "mcp host server external client", category: "connections", advanced_only: true, display_title: None, display_summary: None },
-    Section { id: "access", title: "Access & permissions", summary: "Filesystem scope", keywords: "scope untrusted home full project jail", category: "privacy", advanced_only: true, display_title: None, display_summary: None },
+    Section { id: "access", title: "Access & permissions", summary: "Workspace and machine access", keywords: "scope untrusted home full project jail workspace default folder machine", category: "privacy", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "security-power", title: "Security & power", summary: "Approvals, trust, web, bootstrap", keywords: "approval auto ask shell web_fetch bootstrap token ssrf thinking privacy trust conservative balanced autonomous profile", category: "privacy", advanced_only: false, display_title: Some("Permissions"), display_summary: Some("When Remedy asks before acting") },
     Section { id: "privacy", title: "Privacy", summary: "What leaves this PC to your model", keywords: "privacy mode pii email phone scrub redact tool results llm egress cloud mail calendar page wipe memory forget persona soul claimidx", category: "privacy", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "always-ready", title: "Always ready", summary: "Startup & tray", keywords: "login tray startup quit windows", category: "system", advanced_only: false, display_title: None, display_summary: None },
@@ -644,6 +644,7 @@ pub struct SaveDraft {
     pub custom_name: String,
     pub api_key: String,
     pub project_path: String,
+    pub default_workspace: String,
     pub browser_home_url: String,
     pub persona: String,
     pub user_name: String,
@@ -696,13 +697,14 @@ impl Default for SaveDraft {
             custom_name: String::new(),
             api_key: String::new(),
             project_path: String::new(),
+            default_workspace: String::new(),
             browser_home_url: String::new(),
             persona: "balanced".into(),
             user_name: String::new(),
             name: "Remedy".into(),
             agent_gender: "female".into(),
             ui_language: "auto".into(),
-            access_scope: "full".into(),
+            access_scope: "workspace".into(),
             launch_at_login: false,
             start_in_tray: false,
             harness_mode: "auto".into(),
@@ -738,9 +740,71 @@ impl Default for SaveDraft {
     }
 }
 
-pub fn project_forces_full(path: &str) -> bool {
-    let t = path.trim();
-    t.is_empty() || t == "."
+pub fn project_forces_full(_path: &str) -> bool {
+    // Kept so older call sites compile; an unset project no longer implies Full.
+    false
+}
+
+/// Profile home (`USERPROFILE` on Windows, `HOME` elsewhere). Never a hardcoded name.
+pub fn user_profile_dir() -> std::path::PathBuf {
+    for key in ["USERPROFILE", "HOME"] {
+        if let Ok(p) = std::env::var(key) {
+            let t = p.trim();
+            if !t.is_empty() {
+                return std::path::PathBuf::from(t);
+            }
+        }
+    }
+    std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+/// Display path for the default workspace. Empty config means `{profile}/Remedy`.
+pub fn default_workspace_display(configured: &str) -> String {
+    let t = configured.trim();
+    if !t.is_empty() && t != "." {
+        return t.to_string();
+    }
+    user_profile_dir()
+        .join("Remedy")
+        .display()
+        .to_string()
+}
+
+pub fn normalize_access_scope(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "home" | "user" | "project+home" | "project_home" => "home".into(),
+        "full" | "machine" | "all" | "unrestricted" => "full".into(),
+        "untrusted" | "sandbox" | "strict" | "download" => "untrusted".into(),
+        "workspace" | "default" | "default_workspace" | "owner_workspace" => "workspace".into(),
+        _ => "project".into(),
+    }
+}
+
+pub fn is_legacy_access_scope(raw: &str) -> bool {
+    matches!(normalize_access_scope(raw).as_str(), "home" | "untrusted")
+}
+
+pub fn legacy_access_note(raw: &str) -> String {
+    match normalize_access_scope(raw).as_str() {
+        "home" => "Current scope is Home (legacy). Pick one of the options above to change it.".into(),
+        "untrusted" => "Current scope is Untrusted (legacy). Pick one of the options above to change it.".into(),
+        _ => String::new(),
+    }
+}
+
+pub fn access_scope_choices() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("project", "Project only"),
+        ("workspace", "Default workspace"),
+        ("full", "Full machine access"),
+    ]
+}
+
+pub fn advanced_category_titles() -> &'static [&'static str] {
+    &["Learning", "Logs", "Tone", "Ledger"]
 }
 
 pub fn save_body(d: &SaveDraft) -> Result<Value, String> {
@@ -768,6 +832,7 @@ pub fn save_body(d: &SaveDraft) -> Result<Value, String> {
         body.insert("custom_llm_name".into(), json!(d.custom_name.trim()));
     }
     body.insert("project_path".into(), json!(d.project_path));
+    body.insert("default_workspace".into(), json!(d.default_workspace.trim()));
     let home = {
         let t = d.browser_home_url.trim();
         if t.is_empty() { DEFAULT_BROWSER_HOME.to_string() } else { t.to_string() }
@@ -784,8 +849,7 @@ pub fn save_body(d: &SaveDraft) -> Result<Value, String> {
     body.insert("agent_gender".into(), json!(gender));
     let lang = if d.ui_language.trim().is_empty() { "auto" } else { d.ui_language.trim() };
     body.insert("ui_language".into(), json!(lang));
-    let scope = if project_forces_full(&d.project_path) { "full" } else { d.access_scope.as_str() };
-    body.insert("access_scope".into(), json!(scope));
+    body.insert("access_scope".into(), json!(normalize_access_scope(&d.access_scope)));
     body.insert("launch_at_login".into(), json!(d.launch_at_login));
     body.insert("start_in_tray".into(), json!(d.start_in_tray));
     body.insert("close_to_tray".into(), json!(true));
@@ -1227,10 +1291,20 @@ mod tests {
         assert_eq!(body["llm_base_url"], json!("https://api.anthropic.com/v1"));
     }
 
-    fn empty_project_forces_full_scope_and_blocks_remote_sleev() {
+    #[test]
+    fn empty_project_keeps_chosen_scope_and_blocks_remote_sleev() {
         let mut d = SaveDraft::default();
         d.project_path = " . ".into();
         d.access_scope = "project".into();
+        let body = save_body(&d).unwrap();
+        assert_eq!(body["access_scope"], json!("project"));
+        assert_eq!(body["default_workspace"], json!(""));
+        d.access_scope = "workspace".into();
+        d.default_workspace = "C:/Users/Example/Remedy".into();
+        let body = save_body(&d).unwrap();
+        assert_eq!(body["access_scope"], json!("workspace"));
+        assert_eq!(body["default_workspace"], json!("C:/Users/Example/Remedy"));
+        d.access_scope = "full".into();
         assert_eq!(save_body(&d).unwrap()["access_scope"], json!("full"));
         d.sleev_url = "http://192.168.1.9:17321".into();
         d.sleev_allow_remote = false;
@@ -1393,4 +1467,22 @@ mod tests {
             "first.gguf"
         );
     }
+    #[test]
+    fn default_workspace_display_uses_profile_not_a_hardcoded_name() {
+        let profile = user_profile_dir();
+        let shown = default_workspace_display("");
+        assert_eq!(shown, profile.join("Remedy").display().to_string());
+        assert!(!shown.to_lowercase().contains("\\joe\\") || profile.display().to_string().to_lowercase().contains("joe"));
+        assert_eq!(default_workspace_display(" /data/ws "), "/data/ws");
+        assert_eq!(normalize_access_scope("default_workspace"), "workspace");
+        assert_eq!(normalize_access_scope("FULL"), "full");
+        assert!(is_legacy_access_scope("home"));
+        assert!(!is_legacy_access_scope("workspace"));
+        assert_eq!(access_scope_choices().len(), 3);
+        assert_eq!(advanced_category_titles(), &["Learning", "Logs", "Tone", "Ledger"]);
+        // Never force Full just because the project path is empty.
+        assert!(!project_forces_full(""));
+        assert!(!project_forces_full("."));
+    }
+
 }

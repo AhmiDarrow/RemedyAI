@@ -130,6 +130,7 @@ pub struct Settings {
     pub xai: Signal<Value>,
 
     pub project_path: Signal<String>,
+    pub default_workspace: Signal<String>,
     pub browser_home: Signal<String>,
     pub privacy_shield: Signal<bool>,
 
@@ -268,9 +269,10 @@ impl Settings {
             skills_budget: Signal::new(80.0),
             xai: Signal::new(Value::Null),
             project_path: Signal::new(String::new()),
+            default_workspace: Signal::new(String::new()),
             browser_home: Signal::new(String::new()),
             privacy_shield: Signal::new(false),
-            access_scope: Signal::new("full".into()),
+            access_scope: Signal::new("workspace".into()),
             approval_mode: Signal::new("ask".into()),
             trust_profile: Signal::new("balanced".into()),
             thinking_level: Signal::new("medium".into()),
@@ -508,8 +510,8 @@ impl Settings {
         self.project_path.set(project.clone());
         self.loaded_project.set(project);
         self.browser_home.set(jstr(v, "browser_home_url", ""));
-        let scope = jstr(v, "access_scope", "project");
-        self.access_scope.set(if logic::project_forces_full(&self.project_path.get()) { "full".into() } else { scope });
+        self.default_workspace.set(jstr(v, "default_workspace", ""));
+        self.access_scope.set(logic::normalize_access_scope(&jstr(v, "access_scope", "project")));
         self.launch_at_login.set(jbool(v, "launch_at_login", false));
         self.start_in_tray.set(jbool(v, "start_in_tray", false));
         self.harness_mode.set(jstr(v, "harness_mode", "auto"));
@@ -851,6 +853,7 @@ impl Settings {
         d.loaded_base_url = self.loaded_base_url.get();
         d.custom_name = self.custom_name.get();
         d.project_path = self.project_path.get();
+        d.default_workspace = self.default_workspace.get();
         d.browser_home_url = self.browser_home.get();
         d.persona = self.persona.get();
         d.user_name = self.user_name.get();

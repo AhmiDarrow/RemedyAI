@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -226,6 +227,8 @@ func TestProjectsScan(t *testing.T) {
 	root := t.TempDir()
 	_ = os.WriteFile(filepath.Join(root, "main.py"), []byte("print(1)\n"), 0o600)
 	_ = os.WriteFile(filepath.Join(root, "app.ts"), []byte(" const x=1\n"), 0o600)
+	home := os.Getenv("REMEDY_HOME")
+	_ = os.WriteFile(filepath.Join(home, "config.toml"), []byte("project_path = "+strconv.Quote(root)+"\n"), 0o600)
 	code, raw := doGaps(t, s, http.MethodPost, "/api/projects/scan?path="+mustQuery(root), "")
 	if code != http.StatusOK {
 		t.Fatalf("scan status=%d body=%s", code, raw)
