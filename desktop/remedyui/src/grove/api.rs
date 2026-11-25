@@ -1117,11 +1117,12 @@ pub fn browser_hello(client: &Client, session_id: Option<&str>) -> Result<bool, 
     Ok(bool_of(&v, "host_connected"))
 }
 
-/// GET `/api/settings` for the partner's name and gender, and the owner's name.
+/// GET `/api/settings` for the partner's name and gender, the owner's name and
+/// the shared theme.
 /// Missing keys stay empty.
-pub fn settings_identity(client: &Client) -> Result<(String, String, String), String> {
+pub fn settings_identity(client: &Client) -> Result<(String, String, String, String), String> {
     let v = send(client, Request::get("settings"))?;
-    Ok((str_of(&v, "name"), str_of(&v, "agent_gender"), str_of(&v, "user_name")))
+    Ok((str_of(&v, "name"), str_of(&v, "agent_gender"), str_of(&v, "user_name"), str_of(&v, "theme")))
 }
 
 /// GET `/api/settings`: whether the owner has given Remedy her nights.

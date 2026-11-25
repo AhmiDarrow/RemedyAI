@@ -10,7 +10,7 @@ pub const BUNDLE_ID: &str = "com.remedy.desktop";
 /// The localStorage key `useTheme.ts` used.
 pub const STORAGE_KEY: &str = "remedy-theme";
 
-/// Theme ids the web shell stored, including System.
+/// Theme ids the web shell stores, including System.
 pub fn is_theme_id(id: &str) -> bool {
     matches!(
         id,
@@ -22,6 +22,7 @@ pub fn is_theme_id(id: &str) -> bool {
             | "green"
             | "purple"
             | "alien"
+            | "mecha"
             | "orange"
             | "cyan"
             | "deutan"
@@ -74,7 +75,7 @@ mod tests {
     #[test]
     fn known_ids_match_the_webview() {
         for id in [
-            "system", "dark", "neutral", "light", "forest", "green", "purple", "alien", "orange",
+            "system", "dark", "neutral", "light", "forest", "green", "purple", "alien", "mecha", "orange",
             "cyan", "deutan", "protan", "tritan",
         ] {
             assert!(is_theme_id(id), "{id}");
