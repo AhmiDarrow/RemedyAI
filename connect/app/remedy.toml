@@ -7,6 +7,8 @@ id = "com.remedy.groveconnect"
 publisher = "RemedyAI"
 description = "Talk with Remedy and see what she is doing, from a phone paired with your PC"
 icon = "assets/icon.png"
+# A scanned pairing code is a link in this scheme, so the phone camera can open the app.
+url_schemes = ["remedyconnect"]
 
 [android]
 # aarch64-linux-android for phones; x86_64-linux-android for the emulator.

@@ -422,7 +422,9 @@ impl Grove {
         });
         let g = self.clone();
         self.spawn(move |c| api::settings_identity(&c), move |g, out| {
-            if let Ok((name, gender)) = out {
+            if let Ok((name, gender, owner)) = out {
+                // The greeting uses the name the owner gave at setup (none: no name).
+                g.studio.user_name.set(owner.trim().to_string());
                 if !name.trim().is_empty() {
                     g.partner_name.set(name);
                 }

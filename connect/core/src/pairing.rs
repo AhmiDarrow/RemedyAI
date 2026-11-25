@@ -133,8 +133,28 @@ impl PairingInfo {
     /// Parse and validate as of `now_unix`. A code is valid up to and
     /// including its `exp` second.
     pub fn parse_at(text: &str, now_unix: u64) -> Result<PairingInfo> {
-        parse(text, now_unix).map_err(Error::from)
+        match unlink(text) {
+            Some(lines) => parse(&lines, now_unix),
+            None => parse(text, now_unix),
+        }
+        .map_err(Error::from)
     }
+}
+
+/// The one-line form of a pairing code: the same lines, base64url, behind this prefix.
+/// One line survives a paste and a message, and a scanned code in it can open the app.
+pub const LINK_PREFIX: &str = "remedyconnect://pair#";
+
+/// A pairing code as one line ([`LINK_PREFIX`]).
+pub fn to_link(text: &str) -> String {
+    format!("{LINK_PREFIX}{}", b64url_encode(text.as_bytes()))
+}
+
+/// The pairing lines inside a link, or `None` when `text` is not a link (a link whose
+/// payload does not decode gives lines that fail to parse, so the error names the code).
+fn unlink(text: &str) -> Option<String> {
+    let body = text.trim().strip_prefix(LINK_PREFIX)?;
+    Some(b64url_decode(body).ok().and_then(|b| String::from_utf8(b).ok()).unwrap_or_default())
 }
 
 /// What is kept after a successful pairing (the pair secret is not).
@@ -533,6 +553,18 @@ mod tests {
             self.extra = e.into();
             self
         }
+    }
+
+    #[test]
+    fn a_one_line_link_parses_like_its_lines() {
+        let lines = q().text();
+        let link = to_link(&lines);
+        assert!(link.starts_with(LINK_PREFIX) && !link.contains('\n'));
+        let from_link = PairingInfo::parse_at(&format!("  {link}\n"), NOW).unwrap();
+        assert_eq!(from_link, PairingInfo::parse_at(&lines, NOW).unwrap());
+        // A damaged link is refused as a bad code, not read as something else.
+        assert!(PairingInfo::parse_at(&format!("{LINK_PREFIX}!!!"), NOW).is_err());
+        assert!(PairingInfo::parse_at(LINK_PREFIX, NOW).is_err());
     }
 
     fn parse_ok(q: &Q) -> PairingInfo {
