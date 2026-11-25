@@ -213,7 +213,8 @@ fn connect_body(s: Settings) -> Value {
         "enabled": cur.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false),
         "paused": cur.get("paused").and_then(|v| v.as_bool()).unwrap_or(false),
         "bind_host": bits::str_of(&cur, "bind_host"),
-        "bind_port": cur.get("bind_port").and_then(|v| v.as_i64()).unwrap_or(7400),
+        // 7401 is the gateway's own default; 7400 is the local API.
+        "bind_port": cur.get("bind_port").and_then(|v| v.as_i64()).unwrap_or(7401),
         "panes": panes,
         "relay_url": bits::str_of(&cur, "relay_url"),
     })

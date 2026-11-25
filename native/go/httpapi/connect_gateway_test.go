@@ -150,6 +150,13 @@ func TestPairStartLoopbackAfterBind(t *testing.T) {
 	if strings.Contains(qr, "local_api_token") || strings.Contains(qr, "Bearer") || strings.Contains(qr, connectTestToken) {
 		t.Fatalf("token leak in qr=%q", qr)
 	}
+	// Rendezvous is off by default, so the code must name no public broker:
+	// the phone tries every host it is handed.
+	for _, thirdParty := range []string{"rdv=", "emqx", "hivemq", "mosquitto"} {
+		if strings.Contains(qr, thirdParty) {
+			t.Fatalf("pairing code names a third party (%s) with rendezvous off: %q", thirdParty, qr)
+		}
+	}
 }
 
 func TestWildcardEnableRejected(t *testing.T) {
