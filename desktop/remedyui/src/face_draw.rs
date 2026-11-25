@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 use remedy_ui::core::Color;
 use remedy_ui::layout::{Length, Position};
+use remedy_ui::reactive::Signal;
 use remedy_ui::style::{ColorRoles, StylePatch};
 use remedy_ui::{El, Ui};
 
@@ -16,8 +17,28 @@ use crate::presence::{Mood, State};
 use crate::tokens;
 
 pub struct Motion {
-    pub blink: bool,
-    pub glance_x: i8,
+    pub blink: Signal<bool>,
+    pub glance_x: Signal<i8>,
+}
+
+impl Default for Motion {
+    fn default() -> Self {
+        Self {
+            blink: Signal::new(false),
+            glance_x: Signal::new(0),
+        }
+    }
+}
+
+fn glance_pupil_x(base: f32, glance: i8, max_x: f32) -> f32 {
+    let mut pxp = base + glance as f32;
+    if pxp < 1.0 {
+        pxp = 1.0;
+    }
+    if pxp > max_x {
+        pxp = max_x;
+    }
+    pxp
 }
 
 pub fn paint(
@@ -31,7 +52,7 @@ pub fn paint(
     motion: Motion,
 ) {
     if skin.engine == "legacy" {
-        paint_legacy(ui, host, skin, mood, scale, colors, motion.blink);
+        paint_legacy(ui, host, skin, mood, scale, colors, &motion);
         return;
     }
     let resolved = skin.resolve(mood.key(), stage);
@@ -48,10 +69,13 @@ fn paint_legacy(
     mood: Mood,
     scale: f32,
     colors: &ColorRoles,
-    blink: bool,
+    motion: &Motion,
 ) {
     let state = mood.as_state();
     let p = crate::presence_draw::palette(state, colors);
+    // Legacy painters still take a bool; subscribe so a blink rebuilds the marks.
+    let blink = motion.blink.get();
+    let _ = motion.glance_x.get();
     match crate::presence::kind() {
         crate::presence::Kind::MorningStar => {
             crate::presence_draw::morning_star(ui, host, state, scale, &p, blink)
@@ -223,28 +247,38 @@ fn draw_eyes(ui: &Ui, host: &El, part: &Part, pal: &Palette, scale: f32, motion:
     let fill = pal.get("fill");
     let pw = if part.pupil_w > 0.0 { part.pupil_w } else { 2.0 };
     let ph = if part.pupil_h > 0.0 { part.pupil_h } else { 2.0 };
-    let mut pxp = part.pupil_x + motion.glance_x as f32;
-    // Keep the pupil inside the interior (1 .. w-1-pw).
     let max_x = (w - 1.0 - pw).max(1.0);
-    if pxp < 1.0 {
-        pxp = 1.0;
-    }
-    if pxp > max_x {
-        pxp = max_x;
-    }
     let pyp = part.pupil_y;
-    if motion.blink {
-        let mid = part.y + (h * 0.5).floor();
-        for x in [part.x, right] {
-            px(ui, host, x, mid, w, 1.0, scale, rim);
-        }
-        return;
+    let mid = part.y + (h * 0.5).floor();
+    let blink = motion.blink.clone();
+    let glance = motion.glance_x.clone();
+    for x in [part.x, right] {
+        let blink = blink.clone();
+        px_shown(ui, host, x, mid, w, 1.0, scale, rim, move || blink.get());
     }
     for x in [part.x, right] {
-        px(ui, host, x, part.y, w, h, scale, sock);
-        px(ui, host, x + pxp, part.y + pyp, pw, ph, scale, pupil_c);
+        let blink = blink.clone();
+        px_shown(ui, host, x, part.y, w, h, scale, sock, {
+            let blink = blink.clone();
+            move || !blink.get()
+        });
+        px_pupil(
+            ui,
+            host,
+            x,
+            part.y,
+            part.pupil_x,
+            pyp,
+            pw,
+            ph,
+            max_x,
+            scale,
+            pupil_c,
+            glance.clone(),
+            blink.clone(),
+        );
         if part.lid_top > 0.0 {
-            px(
+            px_shown(
                 ui,
                 host,
                 x + 1.0,
@@ -253,10 +287,14 @@ fn draw_eyes(ui: &Ui, host: &El, part: &Part, pal: &Palette, scale: f32, motion:
                 part.lid_top.min((h - 2.0).max(0.0)),
                 scale,
                 fill,
+                {
+                    let blink = blink.clone();
+                    move || !blink.get()
+                },
             );
         }
         if part.lid_bot > 0.0 {
-            px(
+            px_shown(
                 ui,
                 host,
                 x + 1.0,
@@ -265,31 +303,57 @@ fn draw_eyes(ui: &Ui, host: &El, part: &Part, pal: &Palette, scale: f32, motion:
                 part.lid_bot,
                 scale,
                 fill,
+                {
+                    let blink = blink.clone();
+                    move || !blink.get()
+                },
             );
         }
-        px(ui, host, x, part.y, w, 1.0, scale, rim);
-        px(ui, host, x, part.y + h - 1.0, w, 1.0, scale, rim);
-        px(ui, host, x, part.y, 1.0, h, scale, rim);
-        px(ui, host, x + w - 1.0, part.y, 1.0, h, scale, rim);
+        px_shown(ui, host, x, part.y, w, 1.0, scale, rim, {
+            let blink = blink.clone();
+            move || !blink.get()
+        });
+        px_shown(ui, host, x, part.y + h - 1.0, w, 1.0, scale, rim, {
+            let blink = blink.clone();
+            move || !blink.get()
+        });
+        px_shown(ui, host, x, part.y, 1.0, h, scale, rim, {
+            let blink = blink.clone();
+            move || !blink.get()
+        });
+        px_shown(ui, host, x + w - 1.0, part.y, 1.0, h, scale, rim, {
+            let blink = blink.clone();
+            move || !blink.get()
+        });
     }
 }
 
 fn draw_happy_eyes(ui: &Ui, host: &El, part: &Part, pal: &Palette, scale: f32, motion: &Motion) {
     let c = pal.of(part.color.as_ref(), "ink");
     let y = if part.y > 0.0 { part.y } else { 10.0 };
-    if motion.blink {
-        px(ui, host, 5.0, y, 6.0, 1.0, scale, c);
-        px(ui, host, 13.0, y, 6.0, 1.0, scale, c);
-        return;
-    }
+    let blink = motion.blink.clone();
+    px_shown(ui, host, 5.0, y, 6.0, 1.0, scale, c, {
+        let blink = blink.clone();
+        move || blink.get()
+    });
+    px_shown(ui, host, 13.0, y, 6.0, 1.0, scale, c, {
+        let blink = blink.clone();
+        move || blink.get()
+    });
     // Smiling lids: outer corners raised (smaller y), mid lower on the screen.
     // Left 5–10, right 13–18.
-    px(ui, host, 5.0, y, 1.0, 1.0, scale, c);
-    px(ui, host, 10.0, y, 1.0, 1.0, scale, c);
-    px(ui, host, 6.0, y + 1.0, 4.0, 1.0, scale, c);
-    px(ui, host, 13.0, y, 1.0, 1.0, scale, c);
-    px(ui, host, 18.0, y, 1.0, 1.0, scale, c);
-    px(ui, host, 14.0, y + 1.0, 4.0, 1.0, scale, c);
+    let open = [
+        (5.0, y, 1.0, 1.0),
+        (10.0, y, 1.0, 1.0),
+        (6.0, y + 1.0, 4.0, 1.0),
+        (13.0, y, 1.0, 1.0),
+        (18.0, y, 1.0, 1.0),
+        (14.0, y + 1.0, 4.0, 1.0),
+    ];
+    for (x, yy, ww, hh) in open {
+        let blink = blink.clone();
+        px_shown(ui, host, x, yy, ww, hh, scale, c, move || !blink.get());
+    }
 }
 
 fn draw_brow(ui: &Ui, host: &El, part: &Part, pal: &Palette, scale: f32) {
@@ -401,6 +465,64 @@ fn draw_mouth(ui: &Ui, host: &El, part: &Part, pal: &Palette, scale: f32) {
     }
 }
 
+fn px_shown(
+    ui: &Ui,
+    host: &El,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    scale: f32,
+    color: Color,
+    visible: impl Fn() -> bool + 'static,
+) {
+    if w <= 0.0 || h <= 0.0 {
+        return;
+    }
+    let el = px_el(ui, x, y, w, h, scale, color);
+    let flag = el.clone();
+    let _ = host.clone().child(el.bind(move || {
+        flag.clone().hidden(!visible());
+    }));
+}
+
+fn px_pupil(
+    ui: &Ui,
+    host: &El,
+    eye_x: f32,
+    eye_y: f32,
+    pupil_x: f32,
+    pupil_y: f32,
+    pw: f32,
+    ph: f32,
+    max_x: f32,
+    scale: f32,
+    color: Color,
+    glance: Signal<i8>,
+    blink: Signal<bool>,
+) {
+    if pw <= 0.0 || ph <= 0.0 {
+        return;
+    }
+    let start_x = eye_x + glance_pupil_x(pupil_x, 0, max_x);
+    let el = px_el(ui, start_x, eye_y + pupil_y, pw, ph, scale, color);
+    let flag = el.clone();
+    let _ = host.clone().child(el.bind(move || {
+        let x = eye_x + glance_pupil_x(pupil_x, glance.get(), max_x);
+        let y = eye_y + pupil_y;
+        flag.clone()
+            .hidden(blink.get())
+            .layout(move |l| {
+                l.position = Position::Absolute;
+                l.inset.start = (x * scale).round();
+                l.inset.top = (y * scale).round();
+                l.width = Length::Px((pw * scale).round().max(1.0));
+                l.height = Length::Px((ph * scale).round().max(1.0));
+                l.shrink = 0.0;
+            });
+    }));
+}
+
 fn px(ui: &Ui, host: &El, x: f32, y: f32, w: f32, h: f32, scale: f32, color: Color) {
     if w <= 0.0 || h <= 0.0 {
         return;
@@ -425,4 +547,17 @@ fn px_el(ui: &Ui, x: f32, y: f32, w: f32, h: f32, scale: f32, color: Color) -> E
 #[allow(dead_code)]
 fn _state_link(s: State) -> State {
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::glance_pupil_x;
+
+    #[test]
+    fn glance_keeps_the_pupil_inside_the_socket() {
+        assert_eq!(glance_pupil_x(2.0, 0, 3.0), 2.0);
+        assert_eq!(glance_pupil_x(2.0, 1, 3.0), 3.0);
+        assert_eq!(glance_pupil_x(2.0, 4, 3.0), 3.0);
+        assert_eq!(glance_pupil_x(2.0, -2, 3.0), 1.0);
+    }
 }

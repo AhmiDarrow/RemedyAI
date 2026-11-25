@@ -482,8 +482,8 @@ fn draw(ui: &Ui, mood: Mood, size: f32, stage: u8) -> El {
         &colors,
         stage,
         face_draw::Motion {
-            blink: blink.get(),
-            glance_x: glance.get(),
+            blink: blink.clone(),
+            glance_x: glance.clone(),
         },
     );
 
