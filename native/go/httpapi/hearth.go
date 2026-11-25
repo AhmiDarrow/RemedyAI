@@ -410,6 +410,8 @@ func (s *Server) hearthPulseNight(ctx context.Context) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
+	s.innerAct.Store("vigil")
+	defer s.innerAct.Store("")
 	_ = cr.PulsePartner(ctx)
 }
 
@@ -430,6 +432,8 @@ func (s *Server) hearthPulseLearn(ctx context.Context) bool {
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	s.innerAct.Store("learning")
+	defer s.innerAct.Store("")
 	changed, _ := cr.PulseLearn(ctx)
 	return changed
 }

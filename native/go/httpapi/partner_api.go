@@ -130,6 +130,7 @@ func (s *Server) handlePartnerHead(w http.ResponseWriter, _ *http.Request) {
 		"children":        children,
 		"goals":           goals,
 		"routines":        routines,
+		"inner":           s.innerPublic(),
 		"queue":           queued,
 		"activity":        activity,
 		"activity_unseen": unseen,

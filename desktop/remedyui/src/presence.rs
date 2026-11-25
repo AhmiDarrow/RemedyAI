@@ -22,6 +22,7 @@ use crate::work::StepStatus;
 thread_local! {
     static SKIN_OVERRIDE: Cell<Option<&'static str>> = const { Cell::new(None) };
     static STAGE_OVERRIDE: Cell<Option<u8>> = const { Cell::new(None) };
+    static INNER: Cell<(u8, u32)> = const { Cell::new((0, 0)) };
     static FACTS: Cell<face_skin::Facts> = const { Cell::new(face_skin::Facts { sessions: 0, messages: 0, days: 0, goals: 0 }) };
     static HOUR_OVERRIDE: Cell<Option<u32>> = const { Cell::new(None) };
     static ENABLED_OVERRIDE: Cell<Option<bool>> = const { Cell::new(None) };
@@ -136,10 +137,14 @@ pub enum Mood {
     Concerned,
     Error,
     Surprised,
+    /// She is learning or dreaming on her own.
+    Dreaming,
+    /// She is keeping a night vigil.
+    Watchful,
 }
 
 impl Mood {
-    pub fn all() -> [Mood; 12] {
+    pub fn all() -> [Mood; 14] {
         [
             Mood::Idle,
             Mood::Listening,
@@ -153,6 +158,8 @@ impl Mood {
             Mood::Concerned,
             Mood::Error,
             Mood::Surprised,
+            Mood::Dreaming,
+            Mood::Watchful,
         ]
     }
 
@@ -170,6 +177,8 @@ impl Mood {
             Mood::Concerned => "concerned",
             Mood::Error => "error",
             Mood::Surprised => "surprised",
+            Mood::Dreaming => "dreaming",
+            Mood::Watchful => "watchful",
         }
     }
 
@@ -187,6 +196,8 @@ impl Mood {
             Mood::Concerned => "Concerned",
             Mood::Error => "Error",
             Mood::Surprised => "Surprised",
+            Mood::Dreaming => "Dreaming",
+            Mood::Watchful => "Keeping watch",
         }
     }
 
@@ -204,13 +215,15 @@ impl Mood {
             Mood::Concerned => "Something in the last turn went off.",
             Mood::Error => "Something needs your attention.",
             Mood::Surprised => "A new ask just landed.",
+            Mood::Dreaming => "Learning on her own. She will tell you what came of it.",
+            Mood::Watchful => "Keeping watch through the night.",
         }
     }
 
     /// Collapse a mood onto the older six-state set (for legacy skins).
     pub fn as_state(self) -> State {
         match self {
-            Mood::Idle | Mood::Sleepy => State::Idle,
+            Mood::Idle | Mood::Sleepy | Mood::Dreaming | Mood::Watchful => State::Idle,
             Mood::Listening | Mood::Curious => State::Listening,
             Mood::Thinking => State::Thinking,
             Mood::Working | Mood::Focused => State::Working,
@@ -287,12 +300,36 @@ pub fn enabled() -> bool {
 /// 9. Sleepy — idle or listening, in the quiet hours (midnight–5)
 /// 10. Listening — connected, waiting
 /// 11. Idle — default rest
+/// Her own life, from the runtime: `activity` is what she is doing by herself
+/// right now ("", "vigil", "learning"), `points` the growth it has earned.
+pub fn set_inner(activity: &str, points: u32) {
+    let act = match activity {
+        "learning" => 1,
+        "vigil" => 2,
+        _ => 0,
+    };
+    INNER.with(|c| c.set((act, points)));
+}
+
+/// A resting face shows what she is doing on her own. Anything she is doing
+/// with the owner (a turn, an error, a draft) comes first.
+fn with_inner(mood: Mood) -> Mood {
+    if !matches!(mood, Mood::Idle | Mood::Listening | Mood::Sleepy | Mood::Happy) {
+        return mood;
+    }
+    match INNER.with(|c| c.get()).0 {
+        1 => Mood::Dreaming,
+        2 => Mood::Watchful,
+        _ => mood,
+    }
+}
+
 pub fn from_studio(studio: &Studio) -> Mood {
     // Recount only when the session list changes size; the count is what growth reads.
     if studio.sessions.get().len() as u32 != FACTS.with(|c| c.get()).sessions {
         FACTS.with(|c| c.set(face_skin::Facts::from_studio(studio)));
     }
-    mood_from(studio)
+    with_inner(mood_from(studio))
 }
 
 pub fn mood_from(studio: &Studio) -> Mood {
@@ -502,7 +539,9 @@ fn draw_with(ui: &Ui, mood: Mood, size: f32, stage: u8, grow: Option<(u64, face_
     // Square, the default, is procedural. A user or legacy skin keeps its own painter.
     if skin.id == "square" && skin.engine != "legacy" {
         let (seed, facts) = grow.unwrap_or((DESIGN_SEED, face_proc::facts_for_stage(stage)));
-        face_proc::paint(ui, &frame, seed, facts, mood, size, &colors, motion);
+        // Growth is what the two of them did together plus what she did alone.
+        let inner = if grow.is_some() { INNER.with(|c| c.get()).1 } else { 0 };
+        face_proc::paint(ui, &frame, seed, facts, inner, mood, size, &colors, motion);
     } else {
         face_draw::paint(ui, &frame, &skin, mood, scale, &colors, stage, motion);
     }
