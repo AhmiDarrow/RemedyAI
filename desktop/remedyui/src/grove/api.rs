@@ -4,15 +4,11 @@
 //! with `origin_channel: "grove"` so the Studio list (which already drops that
 //! channel) never shows them.
 
-use std::io::{Read, Write};
-use std::net::TcpStream;
-use std::time::Duration;
-
 use remedy_ui::net::{Http, Request};
 use remedy_ui::reactive::Cancel;
 use serde_json::{Map, Value};
 
-use crate::runtime::{self, Client};
+use crate::runtime::Client;
 use crate::sse::{self, Parser};
 use crate::studio::WorkMode;
 
@@ -1191,76 +1187,18 @@ pub fn transcribe(client: &Client, wav: Vec<u8>) -> Result<String, String> {
     Ok(str_of(&v, "text"))
 }
 
-/// PATCH through a short loopback request.
-///
-/// `remedy_ui::net::Request` has GET, POST, PUT, and DELETE. Goal rename and
-/// routine edits are PATCH on the runtime, so Grove speaks that verb itself
-/// on the same 127.0.0.1 origin and bearer.
+/// PATCH `/api/{path}` through the same client as every other call, so it
+/// follows the client's origin (the loopback runtime on the desktop, the
+/// tunnel's shim on a phone) and carries its credentials. A success with no
+/// body reads as null.
 pub fn patch(client: &Client, path: &str, body: &Value) -> Result<Value, String> {
-    let _ = client;
-    let origin = runtime::origin();
-    let (host, port) = loopback_host(&origin)?;
-    let payload = serde_json::to_vec(body).map_err(|e| e.to_string())?;
-    let token = runtime::load_token().unwrap_or_default();
-    let mut req = format!(
-        "PATCH /api/{path} HTTP/1.1\r\nHost: {host}:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
-        payload.len()
-    );
-    if token.len() >= 8 {
-        req.push_str(&format!("Authorization: Bearer {token}\r\n"));
-    }
-    req.push_str("\r\n");
-    let mut stream = TcpStream::connect((host.as_str(), port)).map_err(|e| e.to_string())?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(20)))
-        .ok();
-    stream
-        .set_write_timeout(Some(Duration::from_secs(20)))
-        .ok();
-    stream.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
-    stream.write_all(&payload).map_err(|e| e.to_string())?;
-    let mut buf = Vec::new();
-    stream.read_to_end(&mut buf).map_err(|e| e.to_string())?;
-    let text = String::from_utf8_lossy(&buf);
-    let status = text
-        .split_whitespace()
-        .nth(1)
-        .and_then(|s| s.parse::<u16>().ok())
-        .unwrap_or(0);
-    let body = text.split("\r\n\r\n").nth(1).unwrap_or("").trim();
-    if !(200..300).contains(&status) {
-        return Err(if body.is_empty() {
-            format!("PATCH {path} returned {status}")
-        } else {
-            body.chars().take(240).collect()
-        });
-    }
-    if body.is_empty() {
-        Ok(Value::Null)
-    } else {
-        serde_json::from_str(body).map_err(|e| e.to_string())
-    }
+    let cancel = Cancel::new();
+    let reply = client
+        .http()
+        .send_blocking(Request::patch(path).json(body), &cancel)
+        .map_err(|e| e.to_string())?;
+    Ok(reply.json::<Value>().unwrap_or(Value::Null))
 }
-
-fn loopback_host(origin: &str) -> Result<(String, u16), String> {
-    let rest = origin
-        .trim()
-        .trim_end_matches('/')
-        .trim_start_matches("http://");
-    if origin.trim().starts_with("https://") {
-        return Err("Grove PATCH expects the loopback HTTP runtime".into());
-    }
-    let (host, port) = if let Some((h, p)) = rest.rsplit_once(':') {
-        (h.to_string(), p.parse::<u16>().map_err(|e| e.to_string())?)
-    } else {
-        (rest.to_string(), 80)
-    };
-    if host != "127.0.0.1" && host != "localhost" && host != "[::1]" {
-        return Err("Grove PATCH stays on loopback".into());
-    }
-    Ok((host, port))
-}
-
 
 #[cfg(test)]
 mod tests {
