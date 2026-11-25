@@ -364,6 +364,39 @@ impl Grove {
     }
 
     /// The same example Grove as `preview`, laid out for a phone.
+    /// Home with a conversation under way: she is partway through her list, has
+    /// written a file and given a link. For goldens of the left column.
+    pub(crate) fn preview_talking(studio: Studio) -> Self {
+        let g = Self::preview(studio);
+        let say = |id: &str, role: &str, content: &str, tool_calls: Vec<ToolCall>| StoryMessage {
+            id: id.into(),
+            role: role.into(),
+            content: content.into(),
+            reverted: false,
+            created_at: "2026-08-16T09:00:00Z".into(),
+            tool_calls,
+        };
+        g.session_id.set("grove-home".into());
+        g.messages.set(vec![
+            say("u1", "user", "Plan a weekend in Lisbon for two and keep it under budget.", Vec::new()),
+            say(
+                "a1",
+                "assistant",
+                "I drafted the plan and saved it. Trains are at https://www.cp.pt/passageiros/en.",
+                vec![ToolCall {
+                    name: "write".into(),
+                    args: serde_json::json!({ "path": "C:/Trips/lisbon-weekend.md" }),
+                }],
+            ),
+        ]);
+        g.todos.set(vec![
+            TodoRow { id: "t1".into(), content: "Draft the two-day plan".into(), status: "completed".into() },
+            TodoRow { id: "t2".into(), content: "Price the trains".into(), status: "in_progress".into() },
+            TodoRow { id: "t3".into(), content: "Pick three places to stay".into(), status: "pending".into() },
+        ]);
+        g
+    }
+
     pub(crate) fn preview_phone(studio: Studio) -> Self {
         let mut g = Self::preview(studio);
         g.phone = true;

@@ -682,11 +682,16 @@ fn home_plots(ui: &Ui, grove: Grove, app: Option<App>) -> El {
         .child(space_kicker(ui))
         .child(away(ui, grove.clone()))
         .child(studio_handoff_card(ui, grove.clone()));
+    // Once a conversation is going the column is about it: what she is doing
+    // this minute, the work she has in hand, and what she made here. The
+    // starter cards fold into a row of chips.
     let scroll = scroll
-        .child(life_banner(ui, grove.clone()))
+        .child(right_now(ui, grove.clone()))
         .child(head::head_block(ui, grove.clone()))
         .child(section_label(ui, grove.clone()))
         .child(plots(ui, grove.clone()))
+        .child(sessions_block(ui, grove.clone()))
+        .child(made_block(ui, grove.clone()))
         .child(head::house_block(ui, grove.clone()));
     // The split sizes this pane. Without a height, the scroll grows with its
     // content and paints over the status bar. 16 px matches the desktop split.
@@ -1033,7 +1038,11 @@ fn section_label(ui: &Ui, grove: Grove) -> El {
     w::text(ui, "")
         .text(move || {
             if grove.goals.get().is_empty() {
-                "A few places to start".to_string()
+                if started(&grove) {
+                    "Start something new".to_string()
+                } else {
+                    "A few places to start".to_string()
+                }
             } else {
                 "Your goals".to_string()
             }
@@ -1064,14 +1073,21 @@ fn plots(ui: &Ui, grove: Grove) -> El {
     });
     let watch = grove.clone();
     let sample = grove.clone();
-    let examples = show(ui, move || watch.goals.get().is_empty(), {
+    let examples = show(ui, move || watch.goals.get().is_empty() && !started(&watch), {
         let ui = ui.clone();
         move || example_row(&ui, &sample)
+    })
+    .el();
+    let (chip_watch, chip_grove) = (grove.clone(), grove.clone());
+    let chips = show(ui, move || chip_watch.goals.get().is_empty() && started(&chip_watch), {
+        let ui = ui.clone();
+        move || example_chips(&ui, &chip_grove)
     })
     .el();
     w::column(ui)
         .child(grid)
         .child(examples)
+        .child(chips)
         .child(seed(ui, grove))
 }
 
@@ -1118,6 +1134,235 @@ fn example_row(ui: &Ui, grove: &Grove) -> El {
         row = row.child(b);
     }
     row
+}
+
+/// The home conversation has begun (or she is answering the first message).
+fn started(grove: &Grove) -> bool {
+    !grove.messages.get().is_empty() || grove.streaming.get()
+}
+
+/// The starter ideas as one row of chips, for when the conversation is going
+/// and the full cards would only be in the way.
+fn example_chips(ui: &Ui, grove: &Grove) -> El {
+    let unit = ui.theme().spacing.unit;
+    let mut row = w::wrap(ui).gap(unit).padding(side_pad(unit));
+    for (_, title, hint) in logic::example_plots() {
+        let g = grove.clone();
+        let open = (*title).to_string();
+        let chip = w::button(ui, *title, move || {
+            let _ = g.plant(&open);
+        })
+        .variant("quiet");
+        w::tooltip(&chip, *hint);
+        row = row.child(chip);
+    }
+    row
+}
+
+/// A section heading in the left column.
+fn kicker(ui: &Ui, text: &'static str) -> El {
+    let unit = ui.theme().spacing.unit;
+    let colors = ui.theme().colors.clone();
+    w::text(ui, text)
+        .style(crate::tokens::typo(crate::tokens::SECTION).foreground(colors.text))
+        .layout(move |l| {
+            l.margin = Insets {
+                top: unit * 2.0,
+                end: unit * 3.0,
+                bottom: unit,
+                start: unit * 3.0,
+            };
+        })
+}
+
+fn side_pad(unit: f32) -> Insets {
+    Insets {
+        top: 0.0,
+        end: unit * 3.0,
+        bottom: unit,
+        start: unit * 3.0,
+    }
+}
+
+/// What she is doing this minute: the task in hand, the step she is on, her
+/// list, and whether she is waiting on the owner. On a phone the list and the
+/// steps stay with the conversation, which is its own tab there.
+fn right_now(ui: &Ui, grove: Grove) -> El {
+    let g = grove.clone();
+    let phone = grove.phone;
+    let body = show(
+        ui,
+        move || {
+            !g.approvals.get().is_empty()
+                || (!phone && (g.streaming.get() || logic::todos_open(&g.todos.get())))
+        },
+        {
+            let ui = ui.clone();
+            let grove = grove.clone();
+            move || {
+                let unit = ui.theme().spacing.unit;
+                let line = {
+                    let g = grove.clone();
+                    w::text(&ui, "")
+                        .text(move || {
+                            let waiting = g.approvals.get().len();
+                            if waiting == 1 {
+                                return "Waiting for your answer on one thing.".to_string();
+                            }
+                            if waiting > 1 {
+                                return format!("Waiting for your answer on {waiting} things.");
+                            }
+                            if g.streaming.get() {
+                                g.process
+                                    .get()
+                                    .last()
+                                    .cloned()
+                                    .unwrap_or_else(|| "Working on your message…".to_string())
+                            } else {
+                                "Next on her list".to_string()
+                            }
+                        })
+                        .variant("muted")
+                };
+                let mut col = w::column(&ui).gap(unit).padding(side_pad(unit)).child(line);
+                if !phone {
+                    col = col.child(chat::todo_block(&ui, grove.clone()));
+                }
+                w::column(&ui).child(kicker(&ui, "Right now")).child(col)
+            }
+        },
+    )
+    .el();
+    w::column(ui).child(life_banner(ui, grove)).child(body)
+}
+
+/// The build sessions she has open, the ones she is working in first. A
+/// click opens the session in Studio (the desktop; a phone has no Studio).
+fn sessions_block(ui: &Ui, grove: Grove) -> El {
+    const SHOWN: usize = 4;
+    let rows: Signal<Vec<(String, String, bool)>> = Signal::new(Vec::new());
+    let src = grove.clone();
+    let watch = ui.el("grove-sessions").bind(move || {
+        let mut all: Vec<(String, String, bool)> = src
+            .studio
+            .sessions
+            .get()
+            .into_iter()
+            .filter(|s| !s.archived && (s.claimed || s.message_count > 0))
+            .map(|s| (s.id, s.title, s.claimed))
+            .collect();
+        // The list arrives newest first; the ones she is working in go on top.
+        all.sort_by_key(|(_, _, working)| !*working);
+        all.truncate(SHOWN);
+        rows.set_if_changed(all);
+    });
+    let unit = ui.theme().spacing.unit;
+    let list = w::column(ui).gap(unit * 0.5).padding(side_pad(unit));
+    let (row_ui, row_grove) = (ui.clone(), grove.clone());
+    w::for_each(
+        &list,
+        rows,
+        |r: &(String, String, bool)| r.0.clone(),
+        move |(id, title, working)| {
+            let colors = row_ui.theme().colors.clone();
+            let unit = row_ui.theme().spacing.unit;
+            let state = if *working { "working" } else { "open" };
+            let name = if title.trim().is_empty() {
+                "Untitled session".to_string()
+            } else {
+                title.clone()
+            };
+            let row = w::row(&row_ui)
+                .align(Align::Center)
+                .gap(unit * 2.0)
+                .child(w::text(&row_ui, name.clone()).layout(|l| {
+                    l.grow = 1.0;
+                    l.min_width = Length::Px(0.0);
+                }))
+                .child(w::text(&row_ui, state).style(
+                    crate::tokens::typo(crate::tokens::META).foreground(if *working {
+                        colors.accent
+                    } else {
+                        colors.muted
+                    }),
+                ));
+            if row_grove.phone {
+                return row;
+            }
+            let (g, sid) = (row_grove.clone(), id.clone());
+            row.on_click(move || {
+                g.studio.select(&sid);
+                g.show_studio();
+            })
+            .semantics(
+                Semantics::new(Role::Button)
+                    .label(format!("Open {name} in Studio"))
+                    .action(Action::Click),
+            )
+        },
+    );
+    let has = show(ui, move || !rows.get().is_empty(), {
+        let ui = ui.clone();
+        move || kicker(&ui, "Build sessions")
+    })
+    .el();
+    w::column(ui).child(zero(watch)).child(has).child(list)
+}
+
+/// Files she wrote and links she gave in this conversation, newest first.
+fn made_block(ui: &Ui, grove: Grove) -> El {
+    let rows: Signal<Vec<logic::Made>> = Signal::new(Vec::new());
+    let src = grove.clone();
+    let watch = ui.el("grove-made").bind(move || {
+        rows.set_if_changed(logic::made_here(&src.messages.get()));
+    });
+    let unit = ui.theme().spacing.unit;
+    let list = w::column(ui).gap(unit * 0.5).padding(side_pad(unit));
+    let (row_ui, phone) = (ui.clone(), grove.phone);
+    w::for_each(&list, rows, |m: &logic::Made| m.target.clone(), move |m| {
+        let colors = row_ui.theme().colors.clone();
+        let unit = row_ui.theme().spacing.unit;
+        let kind = if m.link { "link" } else { "file" };
+        let row = w::row(&row_ui)
+            .align(Align::Center)
+            .gap(unit * 2.0)
+            .child(
+                w::text(&row_ui, kind)
+                    .style(crate::tokens::typo(crate::tokens::META).foreground(colors.muted))
+                    .layout(|l| l.shrink = 0.0),
+            )
+            .child(w::text(&row_ui, m.label.clone()).layout(|l| {
+                l.grow = 1.0;
+                l.min_width = Length::Px(0.0);
+            }));
+        w::tooltip(&row, m.target.as_str());
+        // The files are on the PC and the browser rail is the desktop's.
+        if phone {
+            return row;
+        }
+        let (link, target, label) = (m.link, m.target.clone(), m.label.clone());
+        row.on_click(move || {
+            if link {
+                crate::settings::open_in_browser_rail(&target);
+            } else if let Some(folder) = std::path::Path::new(&target).parent() {
+                // The folder, not the file: opening a file would run whatever it is.
+                if folder.is_dir() {
+                    let _ = crate::prefs::reveal(folder);
+                }
+            }
+        })
+        .semantics(
+            Semantics::new(Role::Button)
+                .label(format!("Open {label}"))
+                .action(Action::Click),
+        )
+    });
+    let has = show(ui, move || !rows.get().is_empty(), {
+        let ui = ui.clone();
+        move || kicker(&ui, "Made here")
+    })
+    .el();
+    w::column(ui).child(zero(watch)).child(has).child(list)
 }
 
 fn seed(ui: &Ui, grove: Grove) -> El {

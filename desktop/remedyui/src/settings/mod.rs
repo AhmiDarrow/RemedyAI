@@ -5,6 +5,7 @@
 //! not paint a theme: the golden harness owns the palette.
 
 mod bits;
+pub(crate) use bits::open_in_browser_rail;
 mod form;
 mod http;
 pub(crate) mod logic;

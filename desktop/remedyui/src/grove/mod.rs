@@ -72,6 +72,11 @@ pub(crate) fn preview_home(ui: &Ui) -> El {
     view::frame(ui, Grove::preview(crate::Studio::preview()), None, None)
 }
 
+/// Grove home with a conversation under way, for goldens of the left column.
+pub(crate) fn preview_talking(ui: &Ui) -> El {
+    view::frame(ui, Grove::preview_talking(crate::Studio::preview()), None, None)
+}
+
 /// Grove as a paired phone shows it, with example plots, for goldens.
 pub(crate) fn preview_phone(ui: &Ui) -> El {
     view::frame(ui, Grove::preview_phone(crate::Studio::preview()), None, None)
