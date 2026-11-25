@@ -244,14 +244,11 @@ fn empty_state(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
                 let size = crate::theme_pack::layout().presence_home;
                 let face_ui = ui.clone();
                 let face_g = g.clone();
-                let face = show(&ui, move || crate::presence::enabled(), move || {
-                    crate::presence::mark(
-                        &face_ui,
-                        crate::presence::from_studio(&face_g.studio),
-                        size,
-                    )
-                })
-                .el();
+                let face = crate::presence::swap(
+                    &face_ui,
+                    move || crate::presence::from_studio(&face_g.studio),
+                    size,
+                );
                 let title = w::text(&ui, "")
                     .text_align(remedy_ui::style::TextAlign::Center)
                     .text(move || greeting_title(&g))

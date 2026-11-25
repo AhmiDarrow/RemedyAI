@@ -475,6 +475,26 @@ pub fn mark(ui: &Ui, mood: impl Into<Mood>, size: f32) -> El {
     draw(ui, mood.into(), size, current_stage())
 }
 
+/// The face where it is on, the R mark where it is off, and a click on either
+/// swaps them everywhere (the same switch as Appearance → Show Remedy's face).
+/// `mood` is read each time the face is built.
+pub fn swap(ui: &Ui, mood: impl Fn() -> Mood + 'static, size: f32) -> El {
+    let (face_ui, logo_ui, label_ui) = (ui.clone(), ui.clone(), ui.clone());
+    remedy_ui::widgets::row(ui)
+        .child(
+            remedy_ui::show(ui, enabled, move || mark(&face_ui, mood(), size))
+                .fallback(move || crate::logo::mark(&logo_ui, size))
+                .el(),
+        )
+        .on_click(|| crate::settings::set_show_presence(!enabled()))
+        .semantics(move || {
+            let id = if enabled() { "presence-hide" } else { "presence-show" };
+            remedy_ui::a11y::Semantics::new(remedy_ui::a11y::Role::Button)
+                .label(crate::messages().text(&label_ui, id))
+                .action(remedy_ui::a11y::Action::Click)
+        })
+}
+
 /// Always drawn, for design-review (ignores the setting).
 pub fn preview(ui: &Ui, mood: impl Into<Mood>, size: f32) -> El {
     draw(ui, mood.into(), size, current_stage())
