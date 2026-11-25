@@ -351,6 +351,12 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 		_ = s.approvals.SyncFromConfig(cfg)
 	}
 	s.refreshConnectAfterSettings()
+	// Turning ClaimIDX or its public sharing on or off takes effect now.
+	if _, ok := patch["claimidx_enabled"]; ok {
+		s.claimidx.Apply()
+	} else if _, ok := patch["claimidx_public_ledger"]; ok {
+		s.claimidx.Apply()
+	}
 	if messengersUpdate != nil {
 		s.refreshMessengerAfterSettings()
 	}
@@ -786,7 +792,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"log_level":                    strings.ToUpper(cfgString(cfg, "log_level", "INFO")),
 		"sarcasm_mode":                 cfgBool(cfg, "sarcasm_mode", false),
 		"claimidx_enabled":             cfgBool(cfg, "claimidx_enabled", true),
-		"claimidx_public_ledger":       cfgBool(cfg, "claimidx_public_ledger", true),
+		"claimidx_public_ledger":       cfgBool(cfg, "claimidx_public_ledger", false),
 		"enabled_providers":            cfg["enabled_providers"],
 		"enabled_models":               cfgMapOrEmpty(cfg, "enabled_models"),
 		"last_model_by_provider":       cfgMapOrEmpty(cfg, "last_model_by_provider"),

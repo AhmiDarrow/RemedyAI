@@ -17,6 +17,12 @@ func errLookPathNotFound(file string) error {
 	return fmt.Errorf("%s: executable file not found in $PATH", file)
 }
 
+// LookPath is lookPath for the rest of the runtime: find a program on PATH
+// without os/exec, never from the current directory.
+func LookPath(file string) (string, error) {
+	return lookPath(file)
+}
+
 // lookPath resolves a program the way exec.LookPath does, without importing
 // os/exec (forbidden in this package). Bare names search PATH and skip "." so
 // a planted binary in the project cannot shadow a system tool.

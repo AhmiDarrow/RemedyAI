@@ -10,7 +10,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -18,6 +17,9 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/core"
+	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
 // Remedy's voice without Python: speech models run in the remedy-voice helper
@@ -253,7 +255,7 @@ const voiceHelperIdle = 10 * time.Minute
 // voiceHelper is the running remedy-voice process.
 type voiceHelper struct {
 	mu    sync.Mutex
-	cmd   *exec.Cmd
+	kill  func() // nil while no helper is running
 	in    io.WriteCloser
 	out   *bufio.Reader
 	next  int
@@ -289,38 +291,66 @@ func (h *voiceHelper) stopLocked() {
 		h.timer.Stop()
 		h.timer = nil
 	}
-	if h.cmd == nil {
+	if h.kill == nil {
 		return
 	}
 	_ = h.in.Close()
-	_ = h.cmd.Process.Kill()
-	_, _ = h.cmd.Process.Wait()
-	h.cmd, h.in, h.out = nil, nil, nil
+	h.kill()
+	h.kill, h.in, h.out = nil, nil, nil
 }
 
 func (h *voiceHelper) startLocked() error {
-	if h.cmd != nil {
+	if h.kill != nil {
 		return nil
 	}
 	path, err := voiceHelperPath()
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(path)
-	in, err := cmd.StdinPipe()
+	in, out, kill, err := voiceHelperSpawn(path)
 	if err != nil {
 		return err
 	}
-	out, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	h.cmd, h.in, h.out = cmd, in, bufio.NewReaderSize(out, 64*1024)
+	h.kill, h.in, h.out = kill, in, bufio.NewReaderSize(out, 64*1024)
 	return nil
+}
+
+// voiceHelperSpawn starts the helper with piped stdin/stdout. Like every
+// other child of the runtime it goes through the native core: an authorized,
+// hidden spawn in the runtime's job, so the helper cannot outlive it. Tests
+// may replace it.
+var voiceHelperSpawn = func(path string) (io.WriteCloser, io.Reader, func(), error) {
+	key, err := secret.EnsureHostSigningKey("")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if err := core.EnsureSigningKey(key); err != nil {
+		return nil, nil, nil, err
+	}
+	argv := []string{filepath.Clean(path)}
+	token, nowMS, err := core.IssueProcessSpawnToken(argv, nil, false, false)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var proc core.PipedProcess
+	if err := core.WithWriteJail(nil, func() error {
+		var err error
+		proc, err = core.ProcessSpawnPipedAuthorized(argv, "", nil, false, token, "", "", false, nowMS)
+		return err
+	}); err != nil {
+		return nil, nil, nil, err
+	}
+	stdin, stdout, stderr := proc.Files()
+	go func() { _, _ = io.Copy(io.Discard, stderr); _ = stderr.Close() }()
+	var once sync.Once
+	kill := func() {
+		once.Do(func() {
+			_ = core.ProcessKillTree(proc.PID)
+			_ = stdout.Close()
+			_ = core.ProcessClose(proc.Handle)
+		})
+	}
+	return stdin, stdout, kill, nil
 }
 
 // call sends one request and waits for its reply. One request runs at a time:

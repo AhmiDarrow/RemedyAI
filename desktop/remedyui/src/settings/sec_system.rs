@@ -54,7 +54,7 @@ fn privacy(ui: &Ui, s: Settings) -> El {
             .child(form::toggle(
                 ui,
                 "ClaimIDX",
-                "On by default. Turn off to stop the local ClaimIDX host completely, including public ledger submits.",
+                "Turn off to stop the local ClaimIDX host completely. Sharing claims to the public ledger is a separate switch and is off unless you turn it on.",
                 s.claimidx_enabled,
             ))
             .child(wipe_block(ui, s, busy, msg))
@@ -598,10 +598,10 @@ fn advanced(ui: &Ui, s: Settings) -> El {
         );
         let tone = form::toggle(ui, "Sarcasm mode (tone flag)", "", s.sarcasm);
         let ledger = form::stack(ui)
-            .child(form::toggle(ui, "Claimidx public ledger (submit claims)", "", s.claimidx))
+            .child(form::toggle(ui, "Share claims to the public ClaimIDX ledger", "", s.claimidx))
             .child(form::hint(
                 ui,
-                "On by default when ClaimIDX is on (Claimidx 0.7+ submits by default). Turn off only if you want a local Claimidx home with no public submits. The Privacy ClaimIDX switch turns the whole host off.",
+                "Off by default: claims stay on this computer. Turn on to let Remedy submit claims to the public ClaimIDX ledger. The ClaimIDX switch under Privacy turns the whole host off.",
             ));
         form::stack(ui)
             .child(updates_panel(ui, s))
@@ -609,10 +609,10 @@ fn advanced(ui: &Ui, s: Settings) -> El {
                 ui,
                 "Each group has a default. You can change any of them. Skill creation stays on so Remedy can improve.",
             ))
-            .child(tokens::info_panel(ui, "Learning", learning))
-            .child(tokens::info_panel(ui, "Logs", logs))
-            .child(tokens::info_panel(ui, "Tone", tone))
-            .child(tokens::info_panel(ui, "Ledger", ledger))
+            .child(fold(ui, "Learning", learning))
+            .child(fold(ui, "Logs", logs))
+            .child(fold(ui, "Tone", tone))
+            .child(fold(ui, "Ledger", ledger))
             .child(knobs)
     })
 }
@@ -640,9 +640,54 @@ fn knob_groups(ui: &Ui, s: Settings) -> El {
         for spec in rows {
             body = body.child(knob_row(ui, s, spec));
         }
-        col = col.child(tokens::info_panel(ui, name, body));
+        col = col.child(fold(ui, name, body));
     }
     col
+}
+
+/// One advanced topic: a heading that opens on a click. The page is a short
+/// list of headings until a topic is wanted, instead of every control at once.
+fn fold(ui: &Ui, title: impl Into<String>, body: El) -> El {
+    use remedy_ui::a11y::{Action, Role, Semantics};
+    let open = Signal::new(false);
+    let title = title.into();
+    let colors = ui.theme().colors.clone();
+    let unit = ui.theme().spacing.unit;
+    let mark = w::text(ui, "")
+        .text(move || if open.get() { "-".to_string() } else { "+".to_string() })
+        .style(tokens::section_kicker(&colors))
+        .layout(move |l| {
+            l.width = Length::Px(unit * 3.0);
+            l.shrink = 0.0;
+        });
+    let label = title.clone();
+    let head = w::row(ui)
+        .align(Align::Center)
+        .gap(unit)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .child(mark)
+        .child(w::text(ui, title).style(tokens::section_kicker(&colors)).layout(|l| {
+            l.grow = 1.0;
+            l.min_width = Length::Px(0.0);
+        }))
+        .on_click(move || open.update(|v| *v = !*v))
+        .semantics(move || {
+            let state = if open.get() { "open" } else { "closed" };
+            Semantics::new(Role::Button).label(format!("{label}, {state}")).action(Action::Click)
+        });
+    w::column(ui)
+        .gap(tokens::SPACE * 2.0)
+        .padding(remedy_ui::core::Insets::all(tokens::SPACE * 3.0))
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .style(tokens::raised_surface(&colors))
+        .child(head)
+        .child(bits::visible_when(body, move || open.get()))
 }
 
 struct Spec {

@@ -277,10 +277,18 @@ fn shell(ui: &Ui, link: Link, app: Option<App>) -> El {
     let (live_ui, live_link) = (ui.clone(), link);
     w::for_each(&slot, origins, |origin: &String| origin.clone(), move |origin| {
         let grove = PhoneGrove::open(origin, true);
+        let (status, wake) = (live_link.status, grove.clone());
         w::column(&live_ui)
             .layout(grow)
             .child(link_bar(&live_ui, live_link.clone()))
             .child(grove.view(&live_ui, app.clone()).layout(grow))
+            // Each time the tunnel comes up, a Grove that gave up while there
+            // was no path asks again.
+            .bind(move || {
+                if matches!(status.get(), LinkStatus::Connected(_)) {
+                    wake.revive();
+                }
+            })
     });
 
     page.child(watch.layout(|l| {
