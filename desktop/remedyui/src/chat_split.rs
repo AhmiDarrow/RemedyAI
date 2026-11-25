@@ -986,7 +986,43 @@ fn swap_btn(ui: &Ui, prefs: Signal<ChatSplit>, in_tabs: bool) -> El {
 }
 
 
+/// The float buttons of one pane, rebuilt when the pane's float state changes
+/// so a fullscreen pane swaps Pop out / Fullscreen for Dock back.
 fn pane_float_tools(
+    ui: &Ui,
+    float: Signal<Option<FloatStage>>,
+    pane: MobilePane,
+    overlay: bool,
+) -> El {
+    let key = move || {
+        let kind = float.try_get().ok().flatten().filter(|s| s.pane == pane).map(|s| s.kind);
+        vec![match kind {
+            Some(FloatKind::Fullscreen) => "full",
+            Some(_) => "float",
+            None => "dock",
+        }]
+    };
+    let state: Signal<Vec<&'static str>> = Signal::new(key());
+    let host = w::row(ui).layout(|l| {
+        l.min_width = Length::Px(0.0);
+        l.shrink = 0.0;
+    });
+    let _ = host.clone().bind(move || {
+        let next = key();
+        if state.try_get().is_ok_and(|cur| cur != next) {
+            let _ = state.try_set(next);
+        }
+    });
+    let u = ui.clone();
+    w::for_each(
+        &host,
+        state,
+        |k| k.to_string(),
+        move |_| float_tools_row(&u, float, pane, overlay),
+    )
+}
+
+fn float_tools_row(
     ui: &Ui,
     float: Signal<Option<FloatStage>>,
     pane: MobilePane,
@@ -1002,7 +1038,8 @@ fn pane_float_tools(
             l.shrink = 0.0;
         });
     let kind = float.get().filter(|s| s.pane == pane).map(|s| s.kind);
-    let in_this = overlay && kind.is_some();
+    // A fullscreen pane stays in the dock, so it needs Dock back there too.
+    let in_this = kind == Some(FloatKind::Fullscreen) || (overlay && kind.is_some());
     if overlay && !in_this {
         return row;
     }

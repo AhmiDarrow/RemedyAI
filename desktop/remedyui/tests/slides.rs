@@ -319,6 +319,8 @@ fn terminal_copies_a_selection_and_pops_out() {
     assert!(app.find(Role::Button, "Fullscreen Terminal").is_some());
     let term = app
         .find(Role::MultilineTextInput, "Terminal")
+        // The screen is named after the shell, which is PowerShell on Windows.
+        .or_else(|| app.find(Role::MultilineTextInput, "PowerShell"))
         .expect("terminal");
     term.focus();
     app.frames(1);

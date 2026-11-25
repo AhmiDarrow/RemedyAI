@@ -54,12 +54,18 @@ fn layout_lock() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn reset_saved_layout() {
+/// The saved layout is one file per process: the returned guard keeps tests
+/// that depend on it from running at the same time.
+#[must_use]
+fn reset_saved_layout() -> std::sync::MutexGuard<'static, ()> {
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
     no_spawn();
+    let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let _g = layout_lock();
     if let Ok(dir) = std::env::var("REMEDY_LAYOUT_DIR") {
         let _ = std::fs::remove_file(PathBuf::from(dir).join("workspace-layout.v3.json"));
     }
+    serial
 }
 
 fn saved_layout_text() -> String {
@@ -77,8 +83,8 @@ fn the_app_opens_its_window() {
 
 #[test]
 fn new_session_and_close_are_visible_and_work() {
+    let _layout = reset_saved_layout();
     fresh_profile();
-    reset_saved_layout();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     assert!(
         app.press(Role::Button, "Studio"),
@@ -531,6 +537,10 @@ fn live_turn_seals_mid_turn_speech_with_reactions() {
         names.iter().any(|n| n.contains("Patching the entry path")),
         "in-progress reply stays live: {names:?}"
     );
+    // Reactions live in the picker behind "Add reaction".
+    assert!(app.press(Role::Button, "Add reaction"), "open the picker");
+    app.frames(2);
+    let names = accessible_names(&app);
     for label in ["Thumbs up", "Thumbs down", "Heart", "Broken heart"] {
         assert!(
             names.iter().any(|n| n == label || n.contains(label)),
@@ -559,6 +569,10 @@ fn chat_workspace_is_two_panes_with_a_swap() {
         names.iter().any(|n| n.contains("Actions on the left")),
         "default side: {names:?}"
     );
+    // Thinking starts collapsed; open it to read the text.
+    assert!(app.press(Role::Button, "Thinking"), "expand thinking");
+    app.frames(2);
+    let names = accessible_names(&app);
     assert!(
         names
             .iter()
@@ -883,6 +897,8 @@ fn every_palette_is_covered_by_the_shell_preview() {
 }
 
 fn assert_goldens(name: &str, themes: &[&str], build: fn(&remedy_ui::Ui) -> remedy_ui::El) {
+    // Test profile first: the face seed must not come from this machine.
+    no_spawn();
     let preview = Preview::new(name, build).sizes(&[SHELL]).themes(themes);
     match check_golden(&preview, std::path::Path::new("tests/golden")) {
         Ok(()) => {}
@@ -895,6 +911,8 @@ fn assert_goldens(name: &str, themes: &[&str], build: fn(&remedy_ui::Ui) -> reme
 const SETTINGS_THEMES: &[&str] = &["forest", "light", "deutan"];
 
 fn assert_settings_goldens(name: &str, build: fn(&remedy_ui::Ui) -> remedy_ui::El) {
+    // Test profile first: the face seed must not come from this machine.
+    no_spawn();
     let preview = Preview::new(name, build)
         .sizes(&[SHELL])
         .themes(SETTINGS_THEMES);
@@ -971,6 +989,8 @@ fn help_preview_matches_its_golden_image() {
 /// Forest, a light theme, and a colorblind palette. A missing PNG is written and is not a failure.
 #[test]
 fn time_travel_preview_matches_its_golden_images() {
+    // Test profile first: the face seed must not come from this machine.
+    no_spawn();
     let themes = &["forest", "light", "deutan"][..];
     let preview = Preview::new("timetravel", remedy_desktop::time_travel_preview)
         .sizes(&[SHELL])
@@ -1068,6 +1088,8 @@ fn usage_previews_match_their_golden_images() {
 const CHROME_THEMES: &[&str] = &["forest", "deutan"];
 
 fn assert_chrome_goldens(name: &str, build: fn(&remedy_ui::Ui) -> remedy_ui::El) {
+    // Test profile first: the face seed must not come from this machine.
+    no_spawn();
     let preview = Preview::new(name, build)
         .sizes(&[SHELL])
         .themes(CHROME_THEMES);
@@ -1090,6 +1112,8 @@ fn chrome_previews_match_their_golden_images() {
 
 #[test]
 fn house_rules_banner_fits_a_1024_window() {
+    // Test profile first: the face seed must not come from this machine.
+    no_spawn();
     let preview = Preview::new("grove-offer-compact", remedy_desktop::grove_home_offer)
         .sizes(&[(1024.0, 642.0)])
         .themes(&["forest"]);
@@ -1189,8 +1213,8 @@ fn squeezed_chat_split_stacks_instead_of_overlapping() {
 
 #[test]
 fn settings_fields_stay_inside_a_narrow_window() {
+    let _layout = reset_saved_layout();
     fresh_profile();
-    reset_saved_layout();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     app.frames(2);
     app.key(KeyEvent::press(Key::char(',')).with_modifiers(Modifiers::CTRL));
@@ -1244,8 +1268,8 @@ fn settings_search_stays_visible_in_studio_at_700() {
     // #117 residual: at 700px (below NARROW_MAX) with Studio chrome and both
     // icon rails, crossing into the narrow band used to clear `narrow_side`,
     // collapse Settings, and hide "Search all settings".
+    let _layout = reset_saved_layout();
     fresh_profile();
-    reset_saved_layout();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     app.frames(2);
     assert!(
@@ -1284,8 +1308,8 @@ fn settings_search_stays_visible_in_studio_at_700() {
 
 #[test]
 fn chat_plan_build_switcher_updates_composer_and_plan_empty() {
+    let _layout = reset_saved_layout();
     fresh_profile();
-    reset_saved_layout();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     app.frames(2);
     assert!(app.press(Role::Button, "Studio"), "open Studio");
@@ -1360,8 +1384,8 @@ fn chat_plan_build_switcher_updates_composer_and_plan_empty() {
 
 #[test]
 fn plan_list_pane_docks_collapses_and_toggles_from_the_keyboard() {
+    let _layout = reset_saved_layout();
     fresh_profile();
-    reset_saved_layout();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     app.frames(2);
     assert!(app.press(Role::Button, "Studio"), "open Studio");
@@ -1486,8 +1510,8 @@ fn help_about_diagnostics_and_quit_use_the_title_menu() {
 
 #[test]
 fn settings_chord_opens_the_rail_and_composer_ignores_new_session() {
+    let _layout = reset_saved_layout();
     fresh_profile();
-    reset_saved_layout();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     app.frames(2);
     assert!(app.press(Role::Button, "Studio"));
@@ -1566,8 +1590,8 @@ fn assert_settings_rail_closed(app: &TestApp, why: &str) {
 
 #[test]
 fn escape_closes_settings_regardless_of_focus() {
+    let _layout = reset_saved_layout();
     fresh_profile();
-    reset_saved_layout();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     app.frames(2);
     assert!(app.press(Role::Button, "Studio"));
@@ -1769,8 +1793,8 @@ fn terminal_pops_out_of_the_right_rail() {
 
 #[test]
 fn resize_left_panel_from_the_keyboard() {
+    let _layout = reset_saved_layout();
     fresh_profile();
-    reset_saved_layout();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     assert!(app.press(Role::Button, "Studio"), "open Studio");
     let handle = app
@@ -2036,8 +2060,8 @@ fn status_dock_shows_streaming_on_a_live_turn() {
 
 #[test]
 fn title_bar_switches_grove_and_studio() {
+    let _layout = reset_saved_layout();
     fresh_profile();
-    reset_saved_layout();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     assert!(
         app.find(Role::Button, "Grove").is_some(),
@@ -2069,8 +2093,8 @@ fn title_bar_switches_grove_and_studio() {
 
 #[test]
 fn ctrl_1_and_ctrl_2_switch_grove_and_studio() {
+    let _layout = reset_saved_layout();
     fresh_profile();
-    reset_saved_layout();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     app.key(KeyEvent::press(Key::char('2')).with_modifiers(Modifiers::CTRL));
     app.frames(4);
@@ -2193,8 +2217,8 @@ fn tray_quit_shows_the_confirm_sheet_after_hide_to_tray() {
     // Title-bar close hides the window and leaves the process running
     // (close-to-tray). Tray "Quit Remedy" used to set the confirm overlay
     // on that hidden window, so nothing appeared and the app never exited.
+    let _layout = reset_saved_layout();
     fresh_profile();
-    reset_saved_layout();
     let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
     app.frames(3);
     let id = *app
