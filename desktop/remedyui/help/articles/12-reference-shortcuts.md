@@ -18,7 +18,8 @@ Canonical list for Remedy Desktop. Also shown under **Settings → Help & shortc
 |------|--------|
 | **Ctrl+N** | New chat session |
 | **Ctrl+P** / **Ctrl+K** | Command palette |
-| **Ctrl+B** | Toggle Plan / Build mode |
+| **Ctrl+B** / **Shift+Tab** | Studio: cycle Chat / Plan / Build |
+| **Ctrl+1** / **Ctrl+2** | Grove / Studio |
 | **Ctrl+,** | Open Settings (Grove sheet or Studio rail — stays on the current surface) |
 | **Ctrl+=** / **Ctrl++** | Larger text |
 | **Ctrl+-** | Smaller text |

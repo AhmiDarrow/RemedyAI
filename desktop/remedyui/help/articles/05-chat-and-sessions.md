@@ -98,6 +98,8 @@ Remedy is a **workbench**: chat in the center, real tools on the rails.
 
 Each side: **thin strip** → **icon rail** → **open panel** (× collapses).
 **⇄ Swap sides** · Terminal / Browser / Scratch: popout (↗) or fullscreen (⛶).
+The Chat and Coding / Actions panes have **Pop out** (its own window, with
+**Dock back**) and **Fullscreen** too.
 Fullscreen: **Exit fullscreen** / **Close** on the top bar, or **Esc** when
 an inner control is not using it. Escape closes a nested dialog first.
 

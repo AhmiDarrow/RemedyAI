@@ -40,7 +40,7 @@ The form below is the same settings, in the older step-by-step wizard. Use
 
 ### 1. Welcome
 
-- Remedy greets you with the Square face.  
+- Remedy greets you with a plain face. Once setup knows your name and hers, she gets a face of her own: its shape, eyes and color are drawn from the two of you and this install, and it gains detail the longer you work together. Ask her for a new face, or for the old one back.  
 - **Use the recommended setup** — on this PC, no account, no key. Then a folder, your name, and the Grove.  
 - **More options** opens the full provider list (On this PC, Demo, Ollama, paid models, xAI, custom).  
 - **Language** pick (default Auto — matches this computer). Change anytime in Settings → You & Agent.  
