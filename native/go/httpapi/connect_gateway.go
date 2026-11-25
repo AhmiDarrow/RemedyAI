@@ -367,7 +367,12 @@ func (s *Server) handleConnectPairStart(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": msg})
 		return
 	}
-	qr = qr + "\nrdv=" + connect.RDVQRValue()
+	// The rendezvous line names public MQTT brokers. The phone tries every
+	// host it is given, so the line is added only when the owner has turned
+	// rendezvous on. With it off, pairing contacts no third party.
+	if cfgBool(LoadConfig(s.homeDir), "connect_rdv_enabled", false) {
+		qr = qr + "\nrdv=" + connect.RDVQRValue()
+	}
 	var exp any
 	for _, line := range strings.Split(qr, "\n") {
 		if strings.HasPrefix(line, "exp=") {
