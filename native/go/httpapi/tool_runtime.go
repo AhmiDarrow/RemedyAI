@@ -820,6 +820,12 @@ func NewDefaultToolRegistry(pythonCaller tools.FrameCaller) (*tools.Registry, er
 	if err := tools.RegisterFileTools(registry); err != nil {
 		return nil, err
 	}
+	if err := tools.RegisterWebTools(registry, tools.WebOptions{
+		Version: Version,
+		Config:  func() map[string]any { return LoadConfig("") },
+	}); err != nil {
+		return nil, err
+	}
 	if err := tools.RegisterShellTools(registry); err != nil {
 		return nil, err
 	}
