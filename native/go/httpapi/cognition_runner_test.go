@@ -895,36 +895,6 @@ func TestToolBatchInputIncludesArguments(t *testing.T) {
 	}
 }
 
-func TestPulseLearnCallsPartnerImprove(t *testing.T) {
-	serverReg := tools.NewRegistry()
-	if err := tools.RegisterPythonWorkerLocalMirrors(serverReg); err != nil {
-		t.Fatal(err)
-	}
-	clientConn, serverConn := net.Pipe()
-	defer clientConn.Close()
-	defer serverConn.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go ipc.ServeConn(ctx, serverConn, tools.WorkerHandler{Registry: serverReg})
-	client := ipc.NewClient(clientConn)
-	defer client.Close()
-	counter := &countingFrameCaller{inner: client}
-
-	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
-		{{Text: "x", Done: true}},
-	}}
-	r := NewCognitionTurnRunner(model)
-	if err := r.AttachPythonWorker(counter); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.PulseLearn(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if counter.improve.Load() != 1 {
-		t.Fatalf("partner.improve calls=%d", counter.improve.Load())
-	}
-}
-
 func TestToolStepsFromOutcomeUsesResults(t *testing.T) {
 	steps := toolStepsFromOutcome(cognition.Outcome{
 		Results: []cognition.ToolResult{{

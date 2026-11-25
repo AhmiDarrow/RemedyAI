@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/AhmiDarrow/RemedyAI/native/go/mind/vigil"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
@@ -29,7 +30,7 @@ var settableKeys = map[string]struct{}{
 	"vision_enabled": {}, "vision_model_id": {}, "vision_force_decode": {},
 	"web_tools_enabled": {}, "http_bootstrap": {}, "privacy_mode": {},
 	"sleev_enabled": {}, "sleev_gateway_url": {}, "sleev_allow_remote_gateway": {},
-	"soul_field_enabled": {}, "build_os_advanced": {}, "rmb_enabled": {},
+	"soul_field_enabled": {}, "build_os_advanced": {}, "rmb_enabled": {}, "vigil_enabled": {},
 	"retention_session_days": {}, "retention_attachment_days": {},
 	"retention_computer_shot_days": {}, "retention_undo_days": {}, "retention_log_days": {},
 	"memory_encrypt": {}, "allow_skill_creation": {}, "auto_approve_threshold": {},
@@ -252,6 +253,15 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 	delete(patch, "vision_model_id")
 	delete(patch, "vision_force_decode")
 
+	// Her nights are a grant kept in soul/vigil.json, not config.toml.
+	vigilEnabled, hasVigil := patch["vigil_enabled"]
+	delete(patch, "vigil_enabled")
+	if hasVigil {
+		if _, err := vigil.SetEnabled(mindEnv(s.homeDir), coerceBool(vigilEnabled, false)); err != nil {
+			return nil, fmt.Errorf("vigil: %w", err)
+		}
+	}
+
 	incomingKey, hasKey := patch["llm_api_key"]
 	delete(patch, "llm_api_key")
 
@@ -324,6 +334,9 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 	if hasKey {
 		changes = append(changes, "llm_api_key")
 	}
+	if hasVigil {
+		changes = append(changes, "vigil_enabled")
+	}
 	if messengersUpdate != nil {
 		changes = append(changes, "messengers")
 	}
@@ -358,6 +371,7 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 		"name":                cfgString(cfg, "name", "Remedy"),
 		"web_tools_enabled":   cfgBool(cfg, "web_tools_enabled", true),
 		"http_bootstrap":      HTTPBootstrapEnabled(s.homeDir),
+		"vigil_enabled":       vigilEnabledFor(s.homeDir),
 		"custom_llm_name":     strings.TrimSpace(cfgString(cfg, "custom_llm_name", "")),
 	}, nil
 }
@@ -717,6 +731,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"sleev_enabled":                cfgBool(cfg, "sleev_enabled", false),
 		"sleev_gateway_url":            strings.TrimSpace(cfgString(cfg, "sleev_gateway_url", "")),
 		"soul_field_enabled":           cfgBool(cfg, "soul_field_enabled", true),
+		"vigil_enabled":                vigilEnabledFor(s.homeDir),
 		"build_os_advanced":            cfgBool(cfg, "build_os_advanced", false),
 		"rmb_enabled":                  cfgBool(cfg, "rmb_enabled", true),
 		"retention_session_days":       cfgInt(cfg, "retention_session_days", 180),

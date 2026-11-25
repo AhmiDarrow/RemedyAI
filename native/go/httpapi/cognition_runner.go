@@ -80,62 +80,6 @@ func (r *CognitionTurnRunner) AttachPythonWorker(caller tools.FrameCaller) error
 	return nil
 }
 
-// PulsePartner runs one muscle-free night tick on the Python worker.
-// The hearth calls this on its own clock. It does not call a provider.
-func (r *CognitionTurnRunner) PulsePartner(ctx context.Context) error {
-	if r == nil || r.promptAssemble == nil {
-		return errors.New("rmdy prompt worker unavailable")
-	}
-	input := map[string]any{}
-	if home := strings.TrimSpace(r.HomeDir); home != "" {
-		input["home_dir"] = home
-		input["_go_bound"] = true
-	}
-	_, err := r.rmdyCall(ctx, "partner.pulse", input)
-	return err
-}
-
-// PulseLearn runs one unattended organism learning tick on the Python worker.
-// The hearth calls this about once a minute. It does not call a provider.
-// Code self-inject remains opt-in and idle-gated in Python.
-func (r *CognitionTurnRunner) PulseLearn(ctx context.Context) (changed bool, err error) {
-	if r == nil || r.promptAssemble == nil {
-		return false, errors.New("rmdy prompt worker unavailable")
-	}
-	input := map[string]any{}
-	if home := strings.TrimSpace(r.HomeDir); home != "" {
-		input["home_dir"] = home
-		input["_go_bound"] = true
-	}
-	started := time.Now()
-	out, err := r.rmdyCall(ctx, "partner.improve", input)
-	r.noteLearnCall("improve", started, ctx, err)
-	return learnOutputChanged(out), err
-}
-
-func learnOutputChanged(out map[string]any) bool {
-	if len(out) == 0 {
-		return false
-	}
-	if v, ok := out["changed"].(bool); ok {
-		return v
-	}
-	if s, ok := out["skipped"].(string); ok && s != "" {
-		return false
-	}
-	if org, ok := out["organism"].(map[string]any); ok && len(org) > 0 {
-		for _, val := range org {
-			if val != nil && val != "" && val != false && val != 0.0 && val != 0 {
-				return true
-			}
-		}
-	}
-	if compact, ok := out["compacted"].(bool); ok && compact {
-		return true
-	}
-	return false
-}
-
 func (r *CognitionTurnRunner) rmdyCall(ctx context.Context, toolID string, input map[string]any) (map[string]any, error) {
 	if r == nil || r.promptAssemble == nil {
 		return nil, errors.New("rmdy prompt worker unavailable")
@@ -340,9 +284,10 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 		}
 		seed.System = assembled.System
 		userText = assembled.Goal
-		// Only after a successful assemble. Fire-and-forget so the reply is not delayed.
-		defer r.scheduleTurnEnd(req, &out)
 	}
+	// Fire-and-forget so the reply is not delayed. The soul update runs
+	// natively; the Python turn_end runs only when a worker is attached.
+	defer r.scheduleTurnEnd(req, &out)
 	seed.Messages = seedTranscript(req, userText, r.HomeDir)
 
 	var (
@@ -438,20 +383,30 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 	return nil
 }
 
-// scheduleTurnEnd fires post-turn learning on the Python worker without
-// blocking the reply. Failures are ignored. No worker means a no-op.
+// scheduleTurnEnd fires post-turn learning without blocking the reply.
+// Failures go to the learn log.
 func (r *CognitionTurnRunner) scheduleTurnEnd(req TurnRequest, out *cognition.Outcome) {
-	if r == nil || r.promptAssemble == nil || out == nil {
+	if r == nil || out == nil || (r.promptAssemble == nil && strings.TrimSpace(r.HomeDir) == "") {
 		return
 	}
 	snapshot := *out
 	reqCopy := req
+	// The soul update is a few local file writes. It finishes before the turn
+	// returns, so the next turn reads it and nothing is still writing to the
+	// home folder once the caller moves on.
+	func() {
+		defer func() { _ = recover() }()
+		r.updateSoulAfterTurn(reqCopy, snapshot)
+	}()
+	if r.promptAssemble == nil {
+		return
+	}
 	go r.finishTurn(reqCopy, snapshot)
 }
 
-// finishTurn asks the Python worker to ingest residue, update the soul,
-// record the skill genome, and run the LearningLoop. It must never affect
-// the already-finished turn.
+// finishTurn asks the Python worker (when attached) to ingest residue, record
+// the skill genome and run the LearningLoop. The soul was already updated
+// natively. It must never affect the already-finished turn.
 func (r *CognitionTurnRunner) finishTurn(req TurnRequest, out cognition.Outcome) {
 	if r == nil || r.promptAssemble == nil {
 		return
@@ -468,6 +423,8 @@ func (r *CognitionTurnRunner) finishTurn(req TurnRequest, out cognition.Outcome)
 		"plan_mode":      req.PlanMode,
 		"chat_mode":      req.ChatMode,
 		"tool_steps":     toolStepsFromOutcome(out),
+		// The Go runtime owns soul/field.json now; Python must not write it.
+		"soul_native": true,
 	}
 	if proj := strings.TrimSpace(req.ProjectPath); proj != "" && !isUnsetProjectPath(proj) {
 		input["project_path"] = proj

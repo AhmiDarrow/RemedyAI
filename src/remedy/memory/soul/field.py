@@ -639,7 +639,17 @@ def retain_pledges(sf: SoulField, cap: int = MAX_PLEDGES) -> list[str]:
 
 
 _lock = threading.Lock()
-_cache: dict[str, SoulField] = {}
+# home -> (file stat key, field). The Go runtime also writes field.json, so a
+# cached copy is reused only while the file on disk is unchanged.
+_cache: dict[str, tuple[Any, SoulField]] = {}
+
+
+def _field_stat(home: str | Path | None) -> Any:
+    try:
+        st = field_path(home).stat()
+        return (st.st_mtime_ns, st.st_ctime_ns, st.st_ino, st.st_size)
+    except OSError:
+        return None
 
 
 def scrub_work_residue(sf: SoulField) -> int:
@@ -708,8 +718,9 @@ def load_soul_field(home: str | Path | None = None) -> SoulField:
     """Load (or create) the owner-global soul field. Process-cached."""
     key = str(_home(home).resolve())
     with _lock:
-        if key in _cache:
-            return _cache[key]
+        hit = _cache.get(key)
+        if hit is not None and hit[0] == _field_stat(home):
+            return hit[1]
         path = field_path(home)
         raw: dict[str, Any] = {}
         persist_blocked = False
@@ -733,7 +744,7 @@ def load_soul_field(home: str | Path | None = None) -> SoulField:
                 from remedy.core.atomic_json import write_json_atomic
 
                 write_json_atomic(path, sf.to_dict())
-        _cache[key] = sf
+        _cache[key] = (_field_stat(home), sf)
         return sf
 
 
@@ -751,13 +762,13 @@ def save_soul_field(field: SoulField, home: str | Path | None = None) -> Path:
         tmp.replace(path)
         key = str(_home(home).resolve())
         with _lock:
-            _cache[key] = field
+            _cache[key] = (_field_stat(home), field)
         return path
     # Fallback non-atomic
     path.write_text(data, encoding="utf-8")
     key = str(_home(home).resolve())
     with _lock:
-        _cache[key] = field
+        _cache[key] = (_field_stat(home), field)
     return path
 
 

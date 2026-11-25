@@ -37,6 +37,7 @@ var toolSafeSettingsKeys = map[string]struct{}{
 	"access_scope":         {},
 	"allow_skill_creation": {},
 	"soul_field_enabled":   {},
+	"vigil_enabled":        {},
 	"rmb_enabled":          {},
 	"enabled_channels":     {},
 }
