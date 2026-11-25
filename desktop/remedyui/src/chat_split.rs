@@ -1447,13 +1447,10 @@ fn merge_evidence_body(body: &str, evidence: Option<&str>) -> String {
     format!("{body}\n\n{output}")
 }
 
-fn process_body_open(mode: &str, toggled: &[String], id: &str) -> bool {
-    let on = toggled.iter().any(|x| x == id);
-    if work::is_full_process_mode(mode) {
-        !on
-    } else {
-        on
-    }
+fn process_body_open(_mode: &str, toggled: &[String], id: &str) -> bool {
+    // Min, medium, and full all start collapsed. The owner expands a
+    // step; switching the visibility mode must not uncollapse every action.
+    toggled.iter().any(|x| x == id)
 }
 
 fn process_group_body(group: &[WorkStep], mode: &str) -> String {
@@ -1603,11 +1600,13 @@ mod tests {
     }
 
     #[test]
-    fn process_detail_defaults_match_old_remedy() {
-        assert!(process_body_open("full", &[], "s1"));
-        assert!(!process_body_open("full", &["s1".into()], "s1"));
+    fn process_detail_stays_collapsed_until_toggled() {
+        assert!(!process_body_open("full", &[], "s1"));
+        assert!(process_body_open("full", &["s1".into()], "s1"));
         assert!(!process_body_open("medium", &[], "s1"));
         assert!(process_body_open("medium", &["s1".into()], "s1"));
+        assert!(!process_body_open("off", &[], "s1"));
+        assert!(process_body_open("off", &["s1".into()], "s1"));
         let body = "// --- args ---\n{\"command\":\"ls\"}\n\n// --- result ---\nshort…";
         let merged = merge_evidence_body(body, Some("one\ntwo\nthree"));
         assert!(merged.contains("one"), "{merged}");

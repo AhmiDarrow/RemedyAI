@@ -418,13 +418,17 @@ pub(crate) fn resolve_wiki_href(href: &str) -> Option<&'static str> {
     if let Some(rest) = h.strip_prefix("article:") {
         h = rest;
     }
-    let lower = h.to_ascii_lowercase();
-    if lower.starts_with("http://")
-        || lower.starts_with("https://")
-        || lower.starts_with("mailto:")
-        || h.starts_with('#')
-    {
-        return None;
+    if let Some(id) = repo_manual_id(h) {
+        h = id;
+    } else {
+        let lower = h.to_ascii_lowercase();
+        if lower.starts_with("http://")
+            || lower.starts_with("https://")
+            || lower.starts_with("mailto:")
+            || h.starts_with('#')
+        {
+            return None;
+        }
     }
     h = h.strip_prefix("./").unwrap_or(h);
     h = h.split(['?', '#']).next().unwrap_or(h);
@@ -432,6 +436,41 @@ pub(crate) fn resolve_wiki_href(href: &str) -> Option<&'static str> {
         h = stripped;
     }
     get_article(h).map(|article| article.id)
+}
+
+
+/// Map a GitHub manual or wiki URL back to a bundled chapter id.
+fn repo_manual_id(href: &str) -> Option<&str> {
+    let h = href.trim();
+    let lower = h.to_ascii_lowercase();
+    const BLOB: &str = "https://github.com/ahmidarrow/remedyai/blob/";
+    const WIKI: &str = "https://github.com/ahmidarrow/remedyai/wiki/";
+    if let Some(rest) = lower.strip_prefix(BLOB) {
+        let rest_orig = &h[BLOB.len()..];
+        let marker = "/docs/manual/";
+        let idx = rest.find(marker)?;
+        let tail = rest_orig[idx + marker.len()..].split(['?', '#']).next().unwrap_or("");
+        let tail = tail
+            .strip_suffix(".md")
+            .or_else(|| tail.strip_suffix(".MD"))
+            .unwrap_or(tail);
+        if tail.is_empty() {
+            return None;
+        }
+        return Some(tail);
+    }
+    if lower.starts_with(WIKI) {
+        let tail = h[WIKI.len()..].split(['?', '#']).next().unwrap_or("");
+        let tail = tail
+            .strip_suffix(".md")
+            .or_else(|| tail.strip_suffix(".MD"))
+            .unwrap_or(tail);
+        if tail.is_empty() {
+            return None;
+        }
+        return Some(tail);
+    }
+    None
 }
 
 const MANUAL_BASE: &str = "https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/";
@@ -548,6 +587,14 @@ mod tests {
         assert_eq!(resolve_wiki_href("article:04-security-and-data"), Some("04-security-and-data"));
         assert_eq!(resolve_wiki_href("https://example.com"), None);
         assert_eq!(resolve_wiki_href("#about"), None);
+        assert_eq!(
+            resolve_wiki_href("https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/02-first-run.md"),
+            Some("02-first-run")
+        );
+        assert_eq!(
+            resolve_wiki_href("https://github.com/AhmiDarrow/RemedyAI/wiki/09-troubleshooting"),
+            Some("09-troubleshooting")
+        );
         assert!(get_article("11-reference-commands").unwrap().title.to_lowercase().contains("command"));
     }
 

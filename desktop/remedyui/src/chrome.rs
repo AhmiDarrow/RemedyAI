@@ -102,6 +102,17 @@ fn help_now() -> Option<crate::help::HelpPanel> {
     HELP.with(|slot| slot.borrow().clone().filter(|panel| panel.is_alive()))
 }
 
+/// Open a bundled Help chapter in the in-app manual (same as F1).
+pub fn open_help_topic(id: &str) {
+    let id = id.trim();
+    if id.is_empty() {
+        return;
+    }
+    if let Some(panel) = help_now() {
+        panel.open(Some(id));
+    }
+}
+
 fn close_help() {
     if let Some(panel) = help_now() {
         if panel.is_open() {

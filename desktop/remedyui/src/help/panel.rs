@@ -733,9 +733,24 @@ fn toc_button(ui: &Ui, title: &str, subtitle: Option<&str>, active: bool, on_pre
     let fg = if active { colors.accent } else { colors.text };
     // Titles wrap inside the 240 px nav, the same way the current wiki does.
     // Truncating them hides "continuity" and "nano swarm".
-    let mut column = ui.el("help_toc_label").column().grow(1.0).gap(1.0).child(
-        w::text(ui, title.to_string()).style(StylePatch::new().foreground(fg)),
-    );
+    let mut column = ui
+        .el("help_toc_label")
+        .column()
+        .grow(1.0)
+        .gap(1.0)
+        .layout(|l| {
+            l.min_width = Length::Px(0.0);
+            l.shrink = 1.0;
+        })
+        .child(
+            w::text(ui, title.to_string())
+                .layout(|l| {
+                    l.min_width = Length::Px(0.0);
+                    l.shrink = 1.0;
+                    l.width = Length::Percent(1.0);
+                })
+                .style(StylePatch::new().foreground(fg)),
+        );
     if let Some(subtitle) = subtitle {
         column = column.child(
             w::text(ui, subtitle.to_string())
