@@ -147,6 +147,9 @@ func memorySkillToolDefs() []memorySkillToolDef {
 				"saved":{"type":"boolean"},
 				"title":{"type":"string"},
 				"parent_memory":{"type":"boolean"},
+				"authority":{"type":"string"},
+				"inferred":{"type":"boolean"},
+				"profile_fact":{"type":"string"},
 				"why":{"type":"string"}
 			},
 			"additionalProperties":false
@@ -902,10 +905,10 @@ func (s *sessionStore) searchPartnerAndEntries(query string, limit int, projectP
 			})
 		}
 	}
-	// shortcut: Python matches the FTS5 table memory_fts; the Go schema has no
-	// FTS table, so this is the same LIKE fallback as /api/memory/search. Upgrade
-	// when the Go schema owns memory_fts.
-	if rows, err := s.searchMemoryLIKE(query, limit); err == nil {
+	// Python matched an FTS5 table the Go schema does not have. Matching word by
+	// word keeps a natural-language question finding the notes it is about; the
+	// hits are re-ranked by token overlap below.
+	if rows, err := s.searchMemoryWords(query, limit*4); err == nil {
 		for _, row := range rows {
 			// Rows Python's MemoryEntry cannot load (Go reaction feedback) were never hits.
 			if _, err := uuid.Parse(row.ID); err != nil || !pythonMemoryTypes[row.EntryType] {
