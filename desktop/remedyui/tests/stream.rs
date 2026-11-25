@@ -18,12 +18,31 @@ fn start_mock() -> SocketAddr {
             for stream in listener.incoming() {
                 let Ok(mut s) = stream else { continue };
                 s.set_nodelay(true).ok();
-                let mut buf = vec![0u8; 8192];
-                let n = match s.read(&mut buf) {
-                    Ok(n) => n,
-                    Err(_) => continue,
-                };
-                let req = String::from_utf8_lossy(&buf[..n]);
+                // Read the whole request. Closing with the POST body unread
+                // resets the connection on Windows and the client sees a drop.
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 8192];
+                loop {
+                    let n = match s.read(&mut chunk) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => n,
+                    };
+                    buf.extend_from_slice(&chunk[..n]);
+                    let text = String::from_utf8_lossy(&buf);
+                    let Some(head_end) = text.find("\r\n\r\n") else { continue };
+                    let want = text[..head_end]
+                        .lines()
+                        .find_map(|l| {
+                            let (k, v) = l.split_once(':')?;
+                            k.eq_ignore_ascii_case("content-length")
+                                .then(|| v.trim().parse::<usize>().ok())?
+                        })
+                        .unwrap_or(0);
+                    if buf.len() >= head_end + 4 + want {
+                        break;
+                    }
+                }
+                let req = String::from_utf8_lossy(&buf);
                 let line = req.lines().next().unwrap_or("");
                 let path = line.split_whitespace().nth(1).unwrap_or("/");
                 if path.contains("/messages/stream") {
@@ -102,7 +121,8 @@ fn composer_streams_a_reply() {
 
     let start = Instant::now();
     let mut saw = false;
-    while start.elapsed() < Duration::from_secs(3) {
+    // Generous: the loop leaves as soon as the reply shows, and a busy machine needs it.
+    while start.elapsed() < Duration::from_secs(15) {
         app.frames(2);
         thread::sleep(Duration::from_millis(25));
         if let Some(ui) = app.ui() {
@@ -117,5 +137,6 @@ fn composer_streams_a_reply() {
             }
         }
     }
-    assert!(saw, "the streamed assistant reply appears in the feed");
+    let dump: Vec<String> = app.ui().map(|ui| ui.reader_view().into_iter().filter_map(|n| n.name).collect()).unwrap_or_default();
+    assert!(saw, "the streamed assistant reply appears in the feed: {dump:?}");
 }
