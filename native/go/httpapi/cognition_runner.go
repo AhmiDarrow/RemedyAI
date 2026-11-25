@@ -391,21 +391,27 @@ func (r *CognitionTurnRunner) scheduleTurnEnd(req TurnRequest, out *cognition.Ou
 	}
 	snapshot := *out
 	reqCopy := req
-	go r.finishTurn(reqCopy, snapshot)
-}
-
-// finishTurn updates the soul natively, then asks the Python worker (when
-// attached) to ingest residue, record the skill genome and run the
-// LearningLoop. It must never affect the already-finished turn.
-func (r *CognitionTurnRunner) finishTurn(req TurnRequest, out cognition.Outcome) {
-	if r == nil {
-		return
-	}
-	defer func() { _ = recover() }()
-	r.updateSoulAfterTurn(req, out)
+	// The soul update is a few local file writes. It finishes before the turn
+	// returns, so the next turn reads it and nothing is still writing to the
+	// home folder once the caller moves on.
+	func() {
+		defer func() { _ = recover() }()
+		r.updateSoulAfterTurn(reqCopy, snapshot)
+	}()
 	if r.promptAssemble == nil {
 		return
 	}
+	go r.finishTurn(reqCopy, snapshot)
+}
+
+// finishTurn asks the Python worker (when attached) to ingest residue, record
+// the skill genome and run the LearningLoop. The soul was already updated
+// natively. It must never affect the already-finished turn.
+func (r *CognitionTurnRunner) finishTurn(req TurnRequest, out cognition.Outcome) {
+	if r == nil || r.promptAssemble == nil {
+		return
+	}
+	defer func() { _ = recover() }()
 	ctx, cancel := context.WithTimeout(context.Background(), r.learnTimeout("turn_end_timeout_s", 30*time.Second))
 	defer cancel()
 	input := map[string]any{
