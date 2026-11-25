@@ -74,6 +74,9 @@ const sessionsPrefix = "/api/sessions"
 var liveUIPrefixes = []string{
 	"/api/events",
 	"/api/partner",
+	// The task card on Grove's home: what she is working on for the owner
+	// and the owner's nudge to it. Same pane as her goals and side jobs.
+	"/api/life-tasks",
 }
 
 var blockedMethods = map[string]struct{}{

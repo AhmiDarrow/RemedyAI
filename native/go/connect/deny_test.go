@@ -499,3 +499,14 @@ func TestForbiddenProvidersGlanceWithoutSettingsWrite(t *testing.T) {
 		t.Fatal("free")
 	}
 }
+
+func TestPhoneReachesTheTaskCardOnlyWithTheLivePane(t *testing.T) {
+	for _, path := range []string{"/api/life-tasks/current", "/api/life-tasks/act"} {
+		if why := ConnectForbidden("GET", path, "", map[string]bool{"live_ui": true}); why != "" {
+			t.Errorf("%s with the live pane on: refused (%s)", path, why)
+		}
+		if why := ConnectForbidden("GET", path, "", map[string]bool{"live_ui": false}); why == "" {
+			t.Errorf("%s with the live pane off must be refused", path)
+		}
+	}
+}
