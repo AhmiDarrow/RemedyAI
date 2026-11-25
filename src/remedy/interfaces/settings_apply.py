@@ -140,6 +140,7 @@ SETTABLE_KEYS = frozenset(
         "auto_approve_threshold",
         "log_level",
         "sarcasm_mode",
+        "claimidx_enabled",
         "claimidx_public_ledger",
         "enabled_providers",
         "enabled_models",
@@ -286,6 +287,10 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "auto_approve_threshold": float(raw.get("auto_approve_threshold", 0.8)),
         "log_level": str(raw.get("log_level") or "INFO").upper(),
         "sarcasm_mode": bool(raw.get("sarcasm_mode", False)),
+        # Claimidx is on unless the owner explicitly turns it off.
+        "claimidx_enabled": bool(
+            raw.get("claimidx_enabled") if "claimidx_enabled" in raw else True
+        ),
         # Claimidx 0.7+ submits by default — missing key must read as on.
         "claimidx_public_ledger": bool(
             raw.get("claimidx_public_ledger")
@@ -650,6 +655,9 @@ async def _apply_settings_update_inner(
     if "sarcasm_mode" in patch and patch["sarcasm_mode"] is not None:
         patch["sarcasm_mode"] = _as_bool(patch["sarcasm_mode"])
 
+    if "claimidx_enabled" in patch and patch["claimidx_enabled"] is not None:
+        patch["claimidx_enabled"] = _as_bool(patch["claimidx_enabled"])
+
     if "claimidx_public_ledger" in patch and patch["claimidx_public_ledger"] is not None:
         patch["claimidx_public_ledger"] = _as_bool(patch["claimidx_public_ledger"])
 
@@ -862,6 +870,15 @@ async def _apply_settings_update_inner(
     cfg["llm_api_key"] = ""
     cfg.pop("provider_keys", None)
     _api_support._write_config(config_path, cfg)
+    try:
+        from remedy.runtime import claimidx_host
+
+        if not bool(cfg.get("claimidx_enabled", True)):
+            claimidx_host.stop()
+        else:
+            claimidx_host.schedule_ensure(home_path or config_path.parent)
+    except Exception:
+        logger.debug("claimidx enable apply failed", exc_info=True)
     if bool(cfg.get("setup_completed")):
         try:
             import threading

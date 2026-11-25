@@ -125,22 +125,47 @@ def _service_token(home_dir: str | Path | None = None) -> str:
     return token
 
 
+def _home_config(home_dir: str | Path | None = None) -> dict[str, Any]:
+    """Read the owner's Remedy home config without importing the full settings stack."""
+    if home_dir is not None:
+        path = Path(home_dir).expanduser() / "config.toml"
+    else:
+        env = (os.environ.get("REMEDY_HOME") or "").strip()
+        path = Path(env).expanduser() / "config.toml" if env else default_home() / "config.toml"
+    if not path.is_file():
+        return {}
+    try:
+        import tomllib
+
+        with path.open("rb") as fh:
+            data = tomllib.load(fh)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _host_enabled(home_dir: str | Path | None = None) -> bool:
+    """The local Claimidx host runs unless the owner turns it off.
+
+    Missing ``claimidx_enabled`` → True. Only an explicit false disables the
+    host (and, with it, public ledger submits).
+    """
+    cfg = _home_config(home_dir)
+    if "claimidx_enabled" not in cfg:
+        return True
+    return bool(cfg.get("claimidx_enabled"))
+
+
 def _public_ledger_enabled(home_dir: str | Path | None = None) -> bool:
     """Submit/share follows Claimidx defaults unless the owner opts out.
 
     Missing ``claimidx_public_ledger`` → True. Only an explicit false in the
     Remedy home config disables public submit (``CLAIMIDX_SHARE=0``).
     """
-    try:
-        from remedy.interfaces.config import load_config
-
-        if home_dir is not None:
-            cfg = load_config(Path(home_dir).expanduser() / "config.toml")
-        else:
-            cfg = load_config()
-    except Exception:
-        return True
-    if not isinstance(cfg, dict) or "claimidx_public_ledger" not in cfg:
+    if not _host_enabled(home_dir):
+        return False
+    cfg = _home_config(home_dir)
+    if "claimidx_public_ledger" not in cfg:
         return True
     return bool(cfg.get("claimidx_public_ledger"))
 
@@ -408,6 +433,9 @@ def start(
 ) -> dict[str, Any]:
     """Install, seed, and start Claimidx on loopback without blocking Remedy."""
     global _proc
+    if not _host_enabled(home_dir):
+        stop()
+        return {"ok": True, "skipped": True, "reason": "disabled"}
     installed = ensure_installed(home_dir)
     if not installed.get("ok"):
         return installed
@@ -483,6 +511,9 @@ def stop() -> None:
 def schedule_ensure(home_dir: str | Path | None = None) -> None:
     """Start exactly one non-blocking first-run ensure per Remedy process."""
     global _ensure_started
+    if not _host_enabled(home_dir):
+        stop()
+        return
     if _skip_network():
         return
     with _lock:

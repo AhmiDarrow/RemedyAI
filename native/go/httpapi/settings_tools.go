@@ -358,7 +358,7 @@ func sensitiveSettingsKey(k string) bool {
 	switch strings.TrimSpace(k) {
 	case "approval_mode", "trust_profile", "privacy_mode", "memory_encrypt",
 		"inner_audit", "access_scope", "connect_enabled", "connect_bind_host",
-		"connect_bind_port", "claimidx_public_ledger", "interop_inbound",
+		"connect_bind_port", "claimidx_enabled", "claimidx_public_ledger", "interop_inbound",
 		"interop_bind", "interop_auto_reply", "interop_trust_policy":
 		return true
 	default:
