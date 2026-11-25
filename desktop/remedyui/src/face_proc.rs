@@ -1,24 +1,22 @@
 //! Remedy's procedural face.
 //!
-//! A face is a few bytes: a seed (her lasting look: eye style, brow and mouth
-//! style, frame, the run of her circuitry), a mood, the eye state for blink and
-//! glance, how much she has grown with the owner, and the theme's colors. Those
-//! bytes are an image format of our own: the image engine renders them on its
-//! workers at the size they are shown, sharp at any size, and caches them.
+//! A face is a small spec: a seed (her lasting look: body shape, eye style,
+//! brow and mouth style, color, the run of her circuitry), a mood, the eye
+//! state for blink and glance, how much she has grown with the owner, and the
+//! theme's colors. The renderer turns a spec into pixels at the size it is
+//! shown, sharp at any size, and the element paints them in the same frame.
 //!
-//! The renderer paints a bevelled body with a mottled surface and etched
-//! circuit traces, recessed sockets, neon eyes, brows and mouth, and a glow.
-//! Growth adds circuitry, lit vias and bezel detail; moods move lids, brows
-//! and mouth. Same bytes, same face.
+//! It paints a bevelled body with a mottled surface and etched circuit
+//! traces, recessed sockets, neon eyes, brows and mouth, and a glow. Growth
+//! adds circuitry, lit vias and bezel detail; moods move lids, brows and
+//! mouth. Same spec, same face.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::{Arc, Once};
 
 use remedy_ui::core::Color;
-use remedy_ui::image::{self as img, DecodeError, Decoded, Fit, Format, Source};
 use remedy_ui::layout::{Length, Position};
-use remedy_ui::paint::Image;
+use remedy_ui::paint::{Image, Item, Sampling};
 use remedy_ui::style::ColorRoles;
 use remedy_ui::{El, Ui};
 
@@ -26,13 +24,9 @@ use crate::face_draw::Motion;
 use crate::face_skin::{growth_points, Facts};
 use crate::presence::Mood;
 
-const MAGIC: &[u8; 8] = b"RMDYFACE";
-/// Natural size; the format is scalable, so it renders sharper when shown larger.
-const NATURAL: u32 = 512;
+// ---------- the face spec ----------
 
-// ---------- the face spec (the image bytes) ----------
-
-/// Everything a face image depends on.
+/// Everything a face's pixels depend on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Spec {
     pub seed: u64,
@@ -43,61 +37,6 @@ pub struct Spec {
     pub neon: [u8; 3],
     pub body: [u8; 3],
     pub alarm: [u8; 3],
-}
-
-impl Spec {
-    fn encode(&self) -> Vec<u8> {
-        let mut b = MAGIC.to_vec();
-        b.extend(self.seed.to_le_bytes());
-        b.extend([self.mood, self.glance as u8, self.closed as u8]);
-        b.extend(self.growth.to_le_bytes());
-        b.extend(self.neon);
-        b.extend(self.body);
-        b.extend(self.alarm);
-        b
-    }
-
-    fn decode(b: &[u8]) -> Option<Spec> {
-        if b.len() < 30 || &b[..8] != MAGIC {
-            return None;
-        }
-        let rgb = |i: usize| [b[i], b[i + 1], b[i + 2]];
-        Some(Spec {
-            seed: u64::from_le_bytes(b[8..16].try_into().ok()?),
-            mood: b[16],
-            glance: b[17] as i8,
-            closed: b[18] != 0,
-            growth: u16::from_le_bytes([b[19], b[20]]),
-            neon: rgb(21),
-            body: rgb(24),
-            alarm: rgb(27),
-        })
-    }
-}
-
-struct FaceFormat;
-
-impl Format for FaceFormat {
-    fn sniff(&self, head: &[u8]) -> bool {
-        head.starts_with(MAGIC)
-    }
-    fn dimensions(&self, _bytes: &[u8]) -> Result<(u32, u32), DecodeError> {
-        Ok((NATURAL, NATURAL))
-    }
-    fn decode(&self, bytes: &[u8], show_at: Option<(u32, u32)>) -> Result<Decoded, DecodeError> {
-        let spec = Spec::decode(bytes).ok_or(DecodeError::Unrecognized)?;
-        let n = show_at.map(|(w, h)| w.min(h)).unwrap_or(NATURAL).clamp(16, 2048);
-        let px = render(&spec, n as usize);
-        Ok(Decoded::new(Image::new(n, n, px.into()), (NATURAL, NATURAL)))
-    }
-    fn scalable(&self) -> bool {
-        true
-    }
-}
-
-fn install() {
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| img::add_format(Arc::new(FaceFormat)));
 }
 
 // ---------- seed traits and mood poses ----------
@@ -991,19 +930,21 @@ pub fn render(spec: &Spec, n: usize) -> Vec<u8> {
 // ---------- the element ----------
 
 thread_local! {
-    /// One shared byte buffer per face, so the image engine's cache recognizes it.
-    static SOURCES: RefCell<HashMap<Spec, Arc<[u8]>>> = RefCell::new(HashMap::new());
+    /// Rendered frames by spec and pixel size. A face is a handful of frames
+    /// (three glances and a blink per mood), so this stays small.
+    static FRAMES: RefCell<HashMap<(Spec, u32), Image>> = RefCell::new(HashMap::new());
 }
 
-fn source(spec: Spec) -> Source {
-    let bytes = SOURCES.with(|m| {
+fn frame(spec: Spec, n: u32) -> Image {
+    FRAMES.with(|m| {
         let mut m = m.borrow_mut();
-        if m.len() > 256 {
+        if m.len() > 96 {
             m.clear();
         }
-        m.entry(spec).or_insert_with(|| spec.encode().into()).clone()
-    });
-    Source::Bytes(bytes)
+        m.entry((spec, n))
+            .or_insert_with(|| Image::new(n, n, render(&spec, n as usize).into()))
+            .clone()
+    })
 }
 
 fn rgb8(c: Color) -> [u8; 3] {
@@ -1027,28 +968,29 @@ pub fn spec(seed: u64, facts: Facts, mood: Mood, colors: &ColorRoles, glance: i8
     }
 }
 
-/// Paint the face into `host`, a `size` px square.
+/// Paint the face into `host`, a `size` px square. The pixels are rendered
+/// here, at the device size, in the frame that shows them: no loader, no
+/// placeholder. Blink and glance are signals the painter reads, so a change
+/// repaints with the matching frame.
 pub fn paint(ui: &Ui, host: &El, seed: u64, facts: Facts, mood: Mood, size: f32, colors: &ColorRoles, motion: Motion) {
-    install();
-    // Four frames; exactly one is visible at a time.
-    for (glance, closed) in [(0i8, false), (-1, false), (1, false), (0, true)] {
-        let el = img::image(ui, source(spec(seed, facts, mood, colors, glance, closed)), "", Fit::Contain).layout(
-            move |l| {
-                l.position = Position::Absolute;
-                l.inset.start = 0.0;
-                l.inset.top = 0.0;
-                l.width = Length::Px(size);
-                l.height = Length::Px(size);
-            },
-        );
-        let flag = el.clone();
-        let (blink, look) = (motion.blink.clone(), motion.glance_x.clone());
-        let _ = host.clone().child(el.bind(move || {
-            let b = blink.get();
-            let shown = if closed { b } else { !b && look.get().signum() == glance };
-            flag.clone().hidden(!shown);
-        }));
-    }
+    let base = spec(seed, facts, mood, colors, 0, false);
+    let el = ui
+        .el("face")
+        .layout(move |l| {
+            l.position = Position::Absolute;
+            l.inset.start = 0.0;
+            l.inset.top = 0.0;
+            l.width = Length::Px(size);
+            l.height = Length::Px(size);
+        })
+        .paint(move |cx| {
+            let closed = motion.blink.get();
+            let glance = if closed { 0 } else { motion.glance_x.get().signum() };
+            let n = (cx.size.width.min(cx.size.height) * cx.scale.max(0.5)).round().clamp(16.0, 1024.0) as u32;
+            let image = frame(Spec { glance, closed, ..base }, n);
+            cx.list.push(Item::Image { image, rect: cx.pixel_box, radii: cx.corners(), sampling: Sampling::Linear });
+        });
+    let _ = host.clone().child(el);
 }
 
 /// Representative use for a pinned growth stage (design shots and tests).
@@ -1173,15 +1115,6 @@ mod tests {
         // One Remedy growing: first week, a few months, years.
         sheet(&[vec![(1, 0, Mood::Idle), (1, 7, Mood::Idle), (1, 17, Mood::Idle)]], "growth.png");
     }
-    #[test]
-    fn spec_round_trips_and_the_format_sniffs_it() {
-        let s = Spec { glance: -1, closed: true, ..spec_for(99, Mood::Error, 17) };
-        let bytes = s.encode();
-        assert_eq!(Spec::decode(&bytes), Some(s));
-        assert!(FaceFormat.sniff(&bytes));
-        assert!(!FaceFormat.sniff(b"\x89PNG\r\n"));
-    }
-
     #[test]
     fn same_spec_same_pixels_and_every_mood_renders() {
         let a = render(&spec_for(7, Mood::Idle, 5), 96);
