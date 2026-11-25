@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1335,5 +1336,54 @@ func TestEngineElidesWhenThatFits(t *testing.T) {
 	}
 	if !strings.Contains(seen, "chars elided") {
 		t.Fatalf("model did not see the stub: %s", seen[:400])
+	}
+}
+
+// orderedPolicy allows everything and marks "read" as the only concurrent tool.
+type orderedPolicy struct{}
+
+func (orderedPolicy) Decide(context.Context, ToolCall) Decision { return Allow }
+func (orderedPolicy) Concurrent(call ToolCall) bool             { return call.Name == "read" }
+
+func TestChangingCallsRunInOrderAndReadsRunTogether(t *testing.T) {
+	var mu sync.Mutex
+	running, maxReads := 0, 0
+	var finished []string
+	tools := toolFunc(func(_ context.Context, call ToolCall) ToolResult {
+		mu.Lock()
+		running++
+		if call.Name == "read" && running > maxReads {
+			maxReads = running
+		}
+		if call.Name != "read" && running != 1 {
+			t.Errorf("%s %s ran alongside %d other call(s)", call.Name, call.ID, running-1)
+		}
+		mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+		mu.Lock()
+		running--
+		finished = append(finished, call.ID)
+		mu.Unlock()
+		return ToolResult{ID: call.ID, Name: call.Name}
+	})
+	engine := Engine{Tools: tools, Policy: orderedPolicy{}}
+	calls := []ToolCall{
+		{ID: "r1", Name: "read"}, {ID: "r2", Name: "read"}, {ID: "r3", Name: "read"},
+		{ID: "e1", Name: "edit"}, {ID: "b1", Name: "bash"}, {ID: "r4", Name: "read"},
+	}
+	decisions := []Decision{Allow, Allow, Allow, Allow, Allow, Allow}
+	results := engine.executeDecided(context.Background(), calls, decisions, 8)
+	for i, r := range results {
+		if r.ID != calls[i].ID {
+			t.Fatalf("result %d is %q, want %q", i, r.ID, calls[i].ID)
+		}
+	}
+	if maxReads < 2 {
+		t.Fatalf("reads did not run together (max %d at once)", maxReads)
+	}
+	// The edit, then the command, then the last read: each after everything before it.
+	tail := strings.Join(finished[3:], ",")
+	if tail != "e1,b1,r4" {
+		t.Fatalf("changing calls finished out of order: %v", finished)
 	}
 }

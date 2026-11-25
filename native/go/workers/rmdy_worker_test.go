@@ -394,6 +394,9 @@ func TestEnsureManagedPythonUsesExisting(t *testing.T) {
 func TestEnsureManagedPythonSkipDownload(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REMEDY_HOME", home)
+	// The lookup also tries ~/.remedy; point the user home away from a real install.
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOME", home)
 	t.Setenv("REMEDY_VOICE_PYTHON", "")
 	t.Setenv("REMEDY_SKIP_MANAGED_PYTHON_DOWNLOAD", "1")
 	_, err := ensureManagedPython()
