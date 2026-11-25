@@ -6,7 +6,7 @@
 //! Side and width persist under `~/.remedy/ui/chat-split.json`. Tests that set
 //! `REMEDY_DESKTOP_NO_SPAWN` keep the defaults and never touch disk.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -20,7 +20,7 @@ use remedy_ui::layout::{AUTO, Align, Justify, Length, Position};
 use remedy_ui::reactive::Signal;
 use remedy_ui::style::{BorderEdge, BorderSide, StylePatch};
 use remedy_ui::widgets as w;
-use remedy_ui::{El, Ui, show};
+use remedy_ui::{App, El, Ui, Window, WindowSpec, show};
 
 use crate::depth::TodoItem;
 use crate::runtime::{self, spawn_disabled};
@@ -59,7 +59,6 @@ pub enum MobilePane {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FloatKind {
     PopOut,
-    Pip,
     Fullscreen,
 }
 
@@ -121,6 +120,233 @@ pub fn dock_float(_current: Option<FloatStage>) -> Option<FloatStage> {
     None
 }
 
+/// Whether this pane should stay in the split well.
+/// A popped-out pane leaves the well (it lives in its own window). A
+/// fullscreen pane stays and fills the well; its sibling is hidden.
+pub fn pane_stays_in_dock(stage: Option<FloatStage>, is_actions: bool) -> bool {
+    match stage {
+        None => true,
+        Some(s) => {
+            let this = (s.pane == MobilePane::Actions) == is_actions;
+            if this {
+                s.kind == FloatKind::Fullscreen
+            } else {
+                s.kind != FloatKind::Fullscreen
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+struct FloatCtl {
+    stage: Signal<Option<FloatStage>>,
+    pop: Rc<RefCell<Option<Window>>>,
+    on_top: Signal<bool>,
+    studio: Studio,
+    prefs: Signal<ChatSplit>,
+}
+
+thread_local! {
+    static FLOAT_CTL: RefCell<Option<FloatCtl>> = const { RefCell::new(None) };
+}
+
+fn bind_float_ctl(ctl: FloatCtl) {
+    FLOAT_CTL.with(|c| *c.borrow_mut() = Some(ctl));
+}
+
+fn float_ctl() -> Option<FloatCtl> {
+    FLOAT_CTL.with(|c| c.borrow().clone())
+}
+
+fn studio_app() -> Option<App> {
+    crate::slides::current_app().or_else(crate::settings::host)
+}
+
+fn main_window() -> Option<Window> {
+    crate::slides::current_window()
+}
+
+impl FloatCtl {
+    fn set_stage(&self, next: Option<FloatStage>) {
+        self.stage.set(next);
+    }
+
+    fn close_pop(&self) {
+        if let Some(win) = self.pop.borrow_mut().take() {
+            win.close();
+        }
+    }
+
+    fn exit_main_fullscreen(&self) {
+        if let Some(win) = main_window() {
+            win.set_fullscreen(false);
+        }
+    }
+
+    fn dock(&self) {
+        self.close_pop();
+        self.exit_main_fullscreen();
+        self.on_top.set(false);
+        self.set_stage(None);
+    }
+
+    fn escape(&self) -> bool {
+        let Some(cur) = self.stage.get() else {
+            return false;
+        };
+        match escape_float(Some(cur)) {
+            Some(next) => {
+                if cur.kind == FloatKind::Fullscreen {
+                    self.exit_main_fullscreen();
+                }
+                self.set_stage(Some(next));
+                if next.kind == FloatKind::PopOut {
+                    self.open_pop(next.pane);
+                }
+                true
+            }
+            None => {
+                self.dock();
+                true
+            }
+        }
+    }
+
+    fn enter_fullscreen(&self, pane: MobilePane) {
+        let current = self.stage.get();
+        // Pop-out window: fill *that* window, do not close it.
+        if current.is_some_and(|s| s.pane == pane && s.kind == FloatKind::PopOut) {
+            if let Some(win) = self.pop.borrow().clone() {
+                win.set_fullscreen(true);
+                win.focus();
+                return;
+            }
+        }
+        self.close_pop();
+        self.set_stage(float_to_fullscreen(current, pane));
+        if let Some(win) = main_window() {
+            win.set_fullscreen(true);
+        }
+    }
+
+    fn open_pop(&self, pane: MobilePane) {
+        if let Some(win) = self.pop.borrow().clone() {
+            if self.stage.get().is_some_and(|s| s.pane == pane && s.kind == FloatKind::PopOut) {
+                win.set_fullscreen(false);
+                win.focus();
+                return;
+            }
+        }
+        let Some(app) = studio_app() else {
+            // Headless previews have no host: keep the pane in the well.
+            return;
+        };
+        self.exit_main_fullscreen();
+        self.close_pop();
+        self.set_stage(open_float(self.stage.get(), pane, FloatKind::PopOut));
+        let title = if pane == MobilePane::Actions {
+            "Coding / Actions"
+        } else {
+            "Chat"
+        };
+        let ctl = self.clone();
+        let studio = self.studio.clone();
+        let prefs = self.prefs.clone();
+        let stage = self.stage.clone();
+        let on_top = self.on_top.get();
+        let win = app.open(
+            WindowSpec::new(title)
+                .size(720.0, 640.0)
+                .min_size(360.0, 280.0)
+                .always_on_top(on_top),
+            move |ui, window| {
+                let colors = ui.theme().colors.clone();
+                let dock = ctl.clone();
+                let top = ctl.on_top.clone();
+                let win_top = window.clone();
+                let chrome = w::row(ui)
+                    .align(Align::Center)
+                    .gap(8.0)
+                    .padding(Insets::all(8.0))
+                    .layout(|l| l.width = Length::Percent(1.0))
+                    .child(
+                        w::text(ui, title)
+                            .style(StylePatch::new().weight(600.0).text_size(13.0)),
+                    )
+                    .child(w::row(ui).layout(|l| {
+                        l.grow = 1.0;
+                        l.min_width = Length::Px(0.0);
+                    }))
+                    .child(
+                        w::button(ui, {
+                            let u = ui.clone();
+                            let top = top.clone();
+                            move || {
+                                let label = messages().text(&u, "chat-split-always-on-top");
+                                if top.get() {
+                                    format!("{label} · on")
+                                } else {
+                                    label
+                                }
+                            }
+                        }, {
+                            let top = top.clone();
+                            let win_top = win_top.clone();
+                            move || {
+                                let next = !top.get();
+                                top.set(next);
+                                win_top.set_always_on_top(next);
+                            }
+                        })
+                        .variant("quiet"),
+                    )
+                    .child(
+                        w::button(ui, {
+                            let u = ui.clone();
+                            move || messages().text(&u, "chat-split-dock-back")
+                        }, move || dock.dock())
+                        .variant("quiet"),
+                    );
+                let float = stage.clone();
+                let body = if pane == MobilePane::Actions {
+                    actions_column(ui, studio.clone(), prefs.clone(), float, true, true)
+                } else {
+                    chat_column(ui, studio.clone(), prefs.clone(), float, true, true)
+                };
+                let esc = ctl.clone();
+                let root = ui
+                    .root()
+                    .column()
+                    .style(StylePatch::new().background(colors.bg))
+                    .on_key(move |e| {
+                        if e.composing || !e.pressed || e.key != Key::Escape {
+                            return false;
+                        }
+                        esc.escape();
+                        true
+                    })
+                    .child(chrome)
+                    .child(body.layout(|l| {
+                        l.width = Length::Percent(1.0);
+                        l.height = Length::Percent(1.0);
+                        l.grow = 1.0;
+                        l.min_height = Length::Px(0.0);
+                        l.min_width = Length::Px(0.0);
+                    }));
+                let _ = root;
+            },
+        );
+        let dock = self.clone();
+        win.on_closed(move || {
+            dock.pop.borrow_mut().take();
+            if dock.stage.get().is_some_and(|s| s.kind == FloatKind::PopOut) {
+                dock.set_stage(None);
+            }
+        });
+        *self.pop.borrow_mut() = Some(win);
+    }
+}
+
 /// Geometry for Pop out / PiP / Fullscreen inside a well. Must fit 400 / 700 / 1180.
 pub fn float_frame(kind: FloatKind, well: Size) -> FloatFrame {
     let w = well.width.max(0.0);
@@ -139,19 +365,6 @@ pub fn float_frame(kind: FloatKind, well: Size) -> FloatFrame {
             FloatFrame {
                 top: h * 0.08,
                 start: w * 0.12,
-                width,
-                height,
-                fills: false,
-            }
-        },
-        FloatKind::Pip => {
-            let width = 320.0_f32.min((w - 48.0).max(160.0).min(w));
-            let height = 220.0_f32.min((h - 48.0).max(120.0).min(h));
-            let start = (w - 24.0 - width).max(0.0);
-            let top = (h - 24.0 - height).max(0.0);
-            FloatFrame {
-                top,
-                start,
                 width,
                 height,
                 fills: false,
@@ -298,7 +511,23 @@ pub fn workspace(ui: &Ui, studio: Studio) -> El {
         narrow.clone(),
         float.clone(),
     );
-    let overlay = float_host(ui, studio, prefs.clone(), float, well, narrow.clone());
+    bind_float_ctl(FloatCtl {
+        stage: float.clone(),
+        pop: Rc::new(RefCell::new(None)),
+        on_top: Signal::new(false),
+        studio,
+        prefs: prefs.clone(),
+    });
+    let esc = float.clone();
+    let root = root.on_key(move |e| {
+        if e.composing || !e.pressed || e.key != Key::Escape {
+            return false;
+        }
+        float_ctl().is_some_and(|c| c.escape()) || {
+            let _ = esc;
+            false
+        }
+    });
 
     root.padding(Insets::all(unit * 1.5))
         .gap(unit)
@@ -321,7 +550,6 @@ pub fn workspace(ui: &Ui, studio: Studio) -> El {
         })
         .child(tabs)
         .child(panes)
-        .child(overlay)
 }
 
 fn tabs_row(ui: &Ui, mobile: Signal<MobilePane>, prefs: Signal<ChatSplit>) -> El {
@@ -480,7 +708,7 @@ fn pane_shell(
         let m = mobile;
         let f = float.clone();
         move || {
-            if f.get().is_some_and(|s| (s.pane == MobilePane::Actions) == is_actions) {
+            if !pane_stays_in_dock(f.get(), is_actions) {
                 return false;
             }
             if !n.get() {
@@ -791,33 +1019,49 @@ fn pane_float_tools(
     };
     if in_this {
         if kind != Some(FloatKind::Fullscreen) {
-            let f = float.clone();
             row = row.child(btn(
                 ui,
                 "chat-split-fullscreen",
-                Box::new(move || f.set(float_to_fullscreen(f.get(), pane))),
+                Box::new(move || {
+                    if let Some(ctl) = float_ctl() {
+                        ctl.enter_fullscreen(pane);
+                    }
+                }),
             ));
         }
-        let f = float.clone();
         row = row.child(btn(
             ui,
             "chat-split-dock-back",
-            Box::new(move || f.set(dock_float(f.get()))),
+            Box::new(move || {
+                if let Some(ctl) = float_ctl() {
+                    ctl.dock();
+                } else {
+                    float.set(dock_float(float.get()));
+                }
+            }),
         ));
         return row;
     }
-    for (key, kind) in [
-        ("chat-split-pop-out", FloatKind::PopOut),
-        ("chat-split-pip", FloatKind::Pip),
-        ("chat-split-fullscreen", FloatKind::Fullscreen),
-    ] {
-        let f = float.clone();
-        row = row.child(btn(
-            ui,
-            key,
-            Box::new(move || f.set(open_float(f.get(), pane, kind))),
-        ));
-    }
+    row = row.child(btn(
+        ui,
+        "chat-split-pop-out",
+        Box::new(move || {
+            if let Some(ctl) = float_ctl() {
+                ctl.open_pop(pane);
+            }
+        }),
+    ));
+    row = row.child(btn(
+        ui,
+        "chat-split-fullscreen",
+        Box::new(move || {
+            if let Some(ctl) = float_ctl() {
+                ctl.enter_fullscreen(pane);
+            } else {
+                float.set(float_to_fullscreen(float.get(), pane));
+            }
+        }),
+    ));
     row
 }
 
@@ -862,11 +1106,7 @@ fn float_layer(
     } else {
         chat_column(ui, studio, prefs, float.clone(), stacked, true)
     };
-    let accent = stage.kind == FloatKind::Pip;
     let mut skin = tokens::overlay_surface(&colors);
-    if accent {
-        skin = skin.border(colors.accent).border_width(2.0);
-    }
     if stage.kind == FloatKind::Fullscreen {
         skin = skin.radius(0.0);
     }
@@ -1107,8 +1347,13 @@ fn actions_feed(ui: &Ui, studio: Studio) -> El {
         .layout(|l| l.width = Length::Percent(1.0));
     let _ = col.clone().bind(move || {
         let next = collect_turns(&st);
-        if out.get() != next {
-            out.set(next);
+        // `turns` is local to this feed. Deleting the active session remounts
+        // the well and can flush this bind once after the signal is disposed.
+        match out.try_get() {
+            Ok(cur) if cur != next => {
+                let _ = out.try_set(next);
+            }
+            _ => {}
         }
     });
     let expanded: Signal<Vec<String>> = Signal::new(Vec::new());
@@ -2031,15 +2276,15 @@ mod tests {
 
     #[test]
     fn pane_float_stages_and_escape() {
-        let pip = open_float(None, MobilePane::Actions, FloatKind::Pip).unwrap();
-        assert_eq!(pip.kind, FloatKind::Pip);
-        let full = float_to_fullscreen(Some(pip), MobilePane::Actions).unwrap();
+        let pop = open_float(None, MobilePane::Actions, FloatKind::PopOut).unwrap();
+        assert_eq!(pop.kind, FloatKind::PopOut);
+        let full = float_to_fullscreen(Some(pop), MobilePane::Actions).unwrap();
         assert_eq!(full.kind, FloatKind::Fullscreen);
-        assert_eq!(full.resume, Some(FloatKind::Pip));
+        assert_eq!(full.resume, Some(FloatKind::PopOut));
         let back = escape_float(Some(full)).unwrap();
-        assert_eq!(back.kind, FloatKind::Pip);
+        assert_eq!(back.kind, FloatKind::PopOut);
         assert!(escape_float(Some(back)).is_none());
-        assert!(dock_float(Some(pip)).is_none());
+        assert!(dock_float(Some(pop)).is_none());
         let pop = open_float(None, MobilePane::Chat, FloatKind::PopOut).unwrap();
         assert!(escape_float(Some(pop)).is_none());
         let full_direct = float_to_fullscreen(None, MobilePane::Chat).unwrap();
@@ -2050,16 +2295,55 @@ mod tests {
     fn pane_float_frames_fit_narrow_and_wide_wells() {
         for (w, h) in [(400.0, 1000.0), (700.0, 1000.0), (1180.0, 1000.0)] {
             let well = Size { width: w, height: h };
-            for kind in [FloatKind::PopOut, FloatKind::Pip, FloatKind::Fullscreen] {
-                assert!(
-                    float_frame_fits(kind, well),
-                    "{kind:?} must fit a {w}x{h} well, got {:?}",
-                    float_frame(kind, well)
-                );
-            }
-            let pip = float_frame(FloatKind::Pip, well);
-            assert!(pip.width <= 320.01);
-            assert!(pip.start + pip.width <= w + 0.51);
+            assert!(
+                float_frame_fits(FloatKind::Fullscreen, well),
+                "fullscreen must fit a {w}x{h} well, got {:?}",
+                float_frame(FloatKind::Fullscreen, well)
+            );
         }
+    }
+
+    #[test]
+    fn popped_out_pane_leaves_the_dock_and_fullscreen_stays() {
+        let pop = open_float(None, MobilePane::Actions, FloatKind::PopOut);
+        assert!(!pane_stays_in_dock(pop, true), "popped Actions leaves the well");
+        assert!(pane_stays_in_dock(pop, false), "Chat stays while Actions is popped out");
+        let full = float_to_fullscreen(None, MobilePane::Actions);
+        assert!(pane_stays_in_dock(full, true), "fullscreen Actions stays in the well");
+        assert!(
+            !pane_stays_in_dock(full, false),
+            "Chat hides while Actions is fullscreen"
+        );
+    }
+
+    #[test]
+    fn action_turns_bind_survives_a_disposed_signal() {
+        let out: Signal<Vec<ActionTurn>> = Signal::new(Vec::new());
+        let next = vec![ActionTurn {
+            id: "a1".into(),
+            thinking: String::new(),
+            steps: Vec::new(),
+            todos: Vec::new(),
+            live: false,
+            session_id: "s1".into(),
+            request_id: String::new(),
+        }];
+        match out.try_get() {
+            Ok(cur) if cur != next => {
+                let _ = out.try_set(next.clone());
+            }
+            _ => panic!("live signal should accept a write"),
+        }
+        assert_eq!(out.get(), next);
+        out.dispose();
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            match out.try_get() {
+                Ok(cur) if cur != next => {
+                    let _ = out.try_set(next.clone());
+                }
+                _ => {}
+            }
+        }));
+        assert!(panicked.is_ok(), "a disposed turns signal must not panic");
     }
 }

@@ -24,6 +24,14 @@ fn current_host() -> Option<(App, Window)> {
     HOST.with(|h| h.borrow().clone())
 }
 
+pub fn current_window() -> Option<Window> {
+    current_host().map(|(_, w)| w)
+}
+
+pub fn current_app() -> Option<App> {
+    current_host().map(|(a, _)| a).or_else(crate::settings::host)
+}
+
 /// Empty names become `remedy-export.txt`. The characters a filename cannot hold become `_`.
 pub fn sanitize_export_filename(default_name: &str) -> String {
     if default_name.trim().is_empty() {

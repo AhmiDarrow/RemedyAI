@@ -208,7 +208,13 @@ fn win_btn_max(ui: &Ui, chrome: Chrome) -> El {
     let u = ui.clone();
     let c = chrome;
     host.bind(move || {
-        let maxed = c.maximized.get();
+        // Prefer the window's tracked state so a drag-restore, Aero Snap, or
+        // Win+Down flips the icon even when our button was not the one that
+        // changed maximization.
+        let maxed = c
+            .win()
+            .map(|w| w.is_maximized())
+            .unwrap_or_else(|| c.maximized.get());
         let id = if maxed { "win-restore" } else { "win-maximize" };
         let glyph = if maxed {
             w::Icon::Restore

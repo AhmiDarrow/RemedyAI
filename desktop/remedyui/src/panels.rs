@@ -392,8 +392,12 @@ pub fn settings_body(ui: &Ui, chrome: Chrome) -> El {
         .child(w::check(ui, messages().text(ui, "settings-phone"), chrome.connect_compact))
 }
 
-pub fn memory_body(ui: &Ui) -> El {
-    w::text(ui, messages().text(ui, "memory-body")).variant("muted")
+pub fn memory_body(ui: &Ui, chrome: Chrome) -> El {
+    let studio = chrome
+        .studio
+        .get()
+        .unwrap_or_else(Studio::preview);
+    crate::depth::panels::memory_sheet(ui, studio)
 }
 
 pub fn skills_body(ui: &Ui, chrome: Chrome) -> El {

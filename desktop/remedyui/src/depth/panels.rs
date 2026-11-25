@@ -3,8 +3,8 @@
 use super::logic;
 use super::{
     ask_archive_unused, ask_delete_skill, export_skills_pack, import_skills_pack, install_named,
-    load_skills, open_skill, save_skill, search_library, search_memory, trust_skill, SidePanel,
-    SkillRow,
+    load_memory, load_more_memory, load_skills, open_skill, save_skill, search_library,
+    search_memory, trust_skill, MemoryRow, SidePanel, SkillRow,
 };
 use crate::messages;
 use crate::studio::Studio;
@@ -79,40 +79,148 @@ fn frame(ui: &Ui, studio: &Studio, title_id: &'static str, body: El) -> El {
 }
 
 fn memory(ui: &Ui, studio: Studio) -> El {
-    let field = w::text_input(ui, messages().text(ui, "memory"));
+    if !studio.depth.memory_ready.get() && !studio.depth.memory_loading.get() {
+        load_memory(&studio);
+    }
+    frame(ui, &studio, "memory", memory_sheet(ui, studio.clone()))
+}
+
+/// Instant Memory list: a loading state, paginated rows, and search (`query=`).
+pub(crate) fn memory_sheet(ui: &Ui, studio: Studio) -> El {
+    let unit = ui.theme().spacing.unit;
+    let field = w::text_input(ui, messages().text(ui, "memory-search"));
     let f = field.clone();
     let st = studio.clone();
     let field = field.on_submit(move || search_memory(&st, &f.value()));
-    let st_body = studio.clone();
-    let body = w::column(ui)
-        .gap(ui.theme().spacing.unit)
+    let list = w::column(ui)
+        .gap(unit)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        });
+    let u = ui.clone();
+    let list = w::for_each(
+        &list,
+        studio.depth.memory_rows.clone(),
+        |row: &MemoryRow| {
+            if row.id.is_empty() {
+                format!("{}\0{}", row.title, row.body)
+            } else {
+                row.id.clone()
+            }
+        },
+        {
+            let u = u.clone();
+            move |row| memory_row(&u, row.clone())
+        },
+    );
+    let st_status = studio.clone();
+    let u_status = ui.clone();
+    let status = w::text(ui, "")
+        .variant("muted")
+        .text(move || {
+            if st_status.depth.memory_loading.get() && st_status.depth.memory_rows.get().is_empty() {
+                return messages().text(&u_status, "memory-loading");
+            }
+            let err = st_status.depth.memory_error.get();
+            if !err.trim().is_empty() && st_status.depth.memory_rows.get().is_empty() {
+                return err;
+            }
+            if st_status.depth.memory_rows.get().is_empty() && st_status.depth.memory_ready.get() {
+                return messages().text(&u_status, "memory-empty");
+            }
+            st_status.depth.memory_body.get()
+        })
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        });
+    let st_more = studio.clone();
+    let u_more = ui.clone();
+    let u_btn = ui.clone();
+    let st_btn = studio.clone();
+    let more = show(
+        ui,
+        move || st_more.depth.memory_has_more.get() && !st_more.depth.memory_loading.get(),
+        move || {
+            let st = st_btn.clone();
+            let u = u_btn.clone();
+            let label_ui = u_more.clone();
+            w::button(
+                &u,
+                move || messages().text(&label_ui, "memory-load-more"),
+                move || load_more_memory(&st),
+            )
+            .variant("quiet")
+        },
+    )
+    .el();
+    w::column(ui)
+        .gap(unit)
         .layout(|l| {
             l.width = Length::Percent(1.0);
             l.grow = 1.0;
             l.basis = Length::Px(0.0);
+            l.min_width = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
         })
-        .child(field.el().layout(|l| l.width = Length::Percent(1.0)))
+        .child(field.el().layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        }))
+        .child(status)
         .child(
             w::scroll(ui)
                 .layout(|l| {
                     l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
                     l.grow = 1.0;
                     l.basis = Length::Px(0.0);
                 })
-                .child(
-                    w::text(ui, "")
-                        .text(move || {
-                            let body = st_body.depth.memory_body.get();
-                            if body.trim().is_empty() {
-                                "…".into()
-                            } else {
-                                body
-                            }
-                        })
-                        .layout(|l| l.width = Length::Percent(1.0)),
-                ),
-        );
-    frame(ui, &studio, "memory", body)
+                .child(list),
+        )
+        .child(more)
+}
+
+fn memory_row(ui: &Ui, row: MemoryRow) -> El {
+    let unit = ui.theme().spacing.unit;
+    let colors = ui.theme().colors.clone();
+    let title = if row.title.trim().is_empty() {
+        row.kind.clone()
+    } else {
+        row.title.clone()
+    };
+    let body = row.body.clone();
+    w::column(ui)
+        .gap(unit * 0.5)
+        .padding(Insets::all(unit * 1.5))
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        })
+        .style(
+            StylePatch::new()
+                .background(colors.card)
+                .border(colors.line.unwrap_or(colors.muted))
+                .border_width(1.0)
+                .radius(6.0),
+        )
+        .child(
+            w::text(ui, title)
+                .variant("strong")
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                }),
+        )
+        .child(
+            w::text(ui, body)
+                .variant("muted")
+                .layout(|l| {
+                    l.width = Length::Percent(1.0);
+                    l.min_width = Length::Px(0.0);
+                }),
+        )
 }
 
 pub(crate) fn skills_sheet(ui: &Ui, studio: Studio) -> El {

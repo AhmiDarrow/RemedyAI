@@ -838,9 +838,42 @@ fn folder_step(ui: &Ui, wiz: Wizard) -> El {
     let path_sig = wiz.project_path.clone();
     chrome::when_ui(ui, on_step(&wiz, STEP_FOLDER), move |ui| {
         let field = w::text_input(ui, "Default project folder").placeholder(model::WORKSPACE_PLACEHOLDER);
+        field.set_value(&path_sig.get());
         let f2 = field.clone();
         let path = path_sig.clone();
         let field = field.on_change(move || path.set(f2.value()));
+        let f_sync = field.clone();
+        let p_sync = path_sig.clone();
+        let path_row = w::row(ui)
+            .align(Align::Center)
+            .gap(SPACE)
+            .layout(|l| {
+                l.width = Length::Percent(1.0);
+                l.min_width = Length::Px(0.0);
+                l.wrap = true;
+            })
+            .child(field.el().layout(|l| {
+                l.grow = 1.0;
+                l.min_width = Length::Px(0.0);
+                l.width = Length::Percent(1.0);
+            }))
+            .child(w::button(ui, "Browse…", {
+                let path = path_sig.clone();
+                move || {
+                    crate::slides::pick_folder(move |out| {
+                        if let Ok(Some(chosen)) = out {
+                            path.set(chosen);
+                        }
+                    });
+                }
+            }).variant("quiet"));
+        let _ = path_row.clone().bind(move || {
+            if let Ok(v) = p_sync.try_get() {
+                if f_sync.value() != v {
+                    f_sync.set_value(&v);
+                }
+            }
+        });
         chrome::stack(
             ui,
             vec![
@@ -848,7 +881,7 @@ fn folder_step(ui: &Ui, wiz: Wizard) -> El {
                 w::text(ui, "Default project folder for tools and shell (optional).")
                     .style(typo(META))
                     .variant("muted"),
-                field.el(),
+                path_row,
             ],
         )
     })

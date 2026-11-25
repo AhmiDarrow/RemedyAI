@@ -573,6 +573,95 @@ fn chat_workspace_is_two_panes_with_a_swap() {
     );
 }
 
+#[test]
+fn chat_pop_out_opens_a_real_window_and_has_no_pip() {
+    no_spawn();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), move |app| {
+        let host = app.clone();
+        app.open(
+            remedy_ui::WindowSpec::new("preview").size(1180.0, 800.0),
+            move |ui, window| {
+                remedy_desktop::bind_host(&host, window);
+                ui.root().child(remedy_desktop::home_chat(ui));
+            },
+        );
+    });
+    app.frames(3);
+    let names = accessible_names(&app);
+    assert!(
+        names.iter().any(|n| n == "Pop out"),
+        "Pop out control: {names:?}"
+    );
+    assert!(
+        names.iter().all(|n| n != "PiP"),
+        "PiP is merged into Pop out: {names:?}"
+    );
+    let before = app.host().window_ids().len();
+    assert!(app.press(Role::Button, "Pop out"), "pop out");
+    app.frames(3);
+    let ids = app.host().window_ids();
+    assert!(
+        ids.len() > before,
+        "Pop out must open a real window, had {before} now {}",
+        ids.len()
+    );
+    let wins = app.runner().app().windows();
+    let pop = wins
+        .iter()
+        .rev()
+        .find_map(|w| w.ui())
+        .expect("popped-out window has a UI");
+    let pop_names: Vec<String> = pop
+        .reader_view()
+        .into_iter()
+        .filter_map(|n| n.name)
+        .collect();
+    assert!(
+        pop_names.iter().any(|n| n == "Dock back"),
+        "popped window has Dock back: {pop_names:?}"
+    );
+    assert!(
+        pop_names.iter().any(|n| n.contains("Coding")
+            || n.contains("Chat")
+            || n.contains("Actions")
+            || n.contains("The portal")
+            || n.contains("I'll reach")),
+        "popped window must render live content: {pop_names:?}"
+    );
+}
+
+#[test]
+fn chat_fullscreen_keeps_the_pane_visible() {
+    no_spawn();
+    let mut app = preview_window_size(remedy_desktop::home_chat, 1180.0, 800.0);
+    app.frames(3);
+    let before = accessible_names(&app);
+    assert!(
+        before
+            .iter()
+            .any(|n| n.contains("The manifest still named init.lua")
+                || n.contains("portal")
+                || n.contains("Coding / Actions")),
+        "preview content before fullscreen: {before:?}"
+    );
+    assert!(app.press(Role::Button, "Fullscreen"), "fullscreen");
+    app.frames(3);
+    let after = accessible_names(&app);
+    assert!(
+        after
+            .iter()
+            .any(|n| n.contains("The manifest still named init.lua")
+                || n.contains("portal")
+                || n.contains("Coding / Actions")
+                || n.contains("Dock back")),
+        "fullscreen must show the pane, not hide it: {after:?}"
+    );
+    assert!(
+        after.iter().any(|n| n == "Dock back"),
+        "Dock back in fullscreen: {after:?}"
+    );
+}
+
 fn region_box(app: &TestApp, name: &str) -> remedy_ui::core::Rect {
     app.find(Role::Region, name)
         .and_then(|el| el.bounds())
