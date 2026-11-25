@@ -140,18 +140,13 @@ func main() {
 			fmt.Fprintf(os.Stderr, "remedy-runtime: AttachPythonWorker failed: %v\n", err)
 			os.Exit(1)
 		}
-		var err error
-		// Voice still runs speech models through the Python worker (started
-		// on first use). Vision is native: downloading, verifying and
-		// supervising the local image model server needs no interpreter.
-		voiceWorker, _, err = httpapi.AttachMLWorkers(caller)
+		// Voice and vision are native. Speech models run in the remedy-voice
+		// helper, started the first time she speaks or listens; the image
+		// model server is downloaded, verified and supervised here.
+		nativeVoice := httpapi.NewNativeVoiceWorker()
+		defer nativeVoice.Close()
+		voiceWorker = nativeVoice
 		visionWorker = httpapi.NewNativeVisionWorker()
-		if err != nil {
-			_ = supervisor.Close()
-			fmt.Fprintf(os.Stderr, "remedy-runtime: voice/vision workers required: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Fprintln(os.Stderr, "remedy-runtime: Python tools (mail, calendar, voice, vision) start on first use")
 		runner = cognition
 	}
 

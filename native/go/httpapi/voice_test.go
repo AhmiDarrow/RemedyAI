@@ -80,10 +80,11 @@ func doVoiceJSON(t *testing.T, s *Server, method, path string, body any) (int, m
 
 func TestVoiceStatusShape(t *testing.T) {
 	s, home := newVoiceTestServer(t, nil)
-	ttsDir := filepath.Join(home, "voice", "tts")
+	ttsDir := filepath.Join(home, "voice", "tts", "kokoro-multi-lang-v1_0")
 	_ = os.MkdirAll(ttsDir, 0o700)
-	_ = os.WriteFile(filepath.Join(ttsDir, "kokoro-v1.0.onnx"), []byte("x"), 0o600)
-	_ = os.WriteFile(filepath.Join(ttsDir, "voices-v1.0.bin"), []byte("y"), 0o600)
+	for _, name := range []string{"model.onnx", "voices.bin", "tokens.txt"} {
+		_ = os.WriteFile(filepath.Join(ttsDir, name), []byte("x"), 0o600)
+	}
 
 	code, body, text, _ := doVoiceJSON(t, s, http.MethodGet, "/api/voice/status", nil)
 	if code != http.StatusOK {

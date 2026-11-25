@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -60,7 +61,7 @@ type VoiceTranscribeResult struct {
 	Language string `json:"language,omitempty"`
 }
 
-// VoiceWorker is the clear Python-backed (or fixture) interface for ML ops.
+// VoiceWorker runs the speech models (NativeVoiceWorker, or a fixture in tests).
 // Nil on Server → speak/transcribe/install degrade with browser/none fallbacks.
 type VoiceWorker interface {
 	Speak(ctx context.Context, homeDir string, req VoiceSpeakRequest, gender string) (*VoiceSpeakResult, error)
@@ -181,36 +182,9 @@ func saveVoiceSettings(homeDir string, patch map[string]any) (map[string]any, er
 	return cur, nil
 }
 
-func ttsInstalled(homeDir string) bool {
-	base := filepath.Join(voiceHome(homeDir), "tts")
-	model := filepath.Join(base, "kokoro-v1.0.onnx")
-	voices := filepath.Join(base, "voices-v1.0.bin")
-	return fileExists(model) && fileExists(voices)
-}
-
-func sttInstalled(homeDir string) bool {
-	// faster-whisper caches under voice/stt; any file there counts as present.
-	dir := filepath.Join(voiceHome(homeDir), "stt")
-	ents, err := os.ReadDir(dir)
-	return err == nil && len(ents) > 0
-}
-
 func smartTurnInstalled(homeDir string) bool {
 	p := filepath.Join(voiceHome(homeDir), "models", "smart-turn", smartTurnPin.Filename)
 	return fileExists(p)
-}
-
-func chatterboxInstalled(homeDir string) bool {
-	p := filepath.Join(voiceHome(homeDir), "chatterbox", "ready.json")
-	raw, err := os.ReadFile(p)
-	if err != nil {
-		return false
-	}
-	var parsed map[string]any
-	if json.Unmarshal(raw, &parsed) != nil {
-		return false
-	}
-	return anyBoolDef(parsed["ok"], false)
 }
 
 func voiceForGender(gender, override string) string {
@@ -242,9 +216,9 @@ func (s *Server) voiceStatusPayload() map[string]any {
 	ttsOK := ttsInstalled(home)
 	sttOK := sttInstalled(home)
 	turnOK := smartTurnInstalled(home)
-	hqInstalled := chatterboxInstalled(home)
+	hqReady := hqInstalled(home)
 	quality := anyString(settings["tts_quality"])
-	usingHQ := quality == "hq" && hqInstalled
+	usingHQ := quality == "hq" && hqReady
 
 	reasonTTS, hintTTS := voiceUnavailable(ttsOK || usingHQ, ttsOK || usingHQ,
 		"Remedy's speaking voice is not on this computer yet.")
@@ -253,7 +227,7 @@ func (s *Server) voiceStatusPayload() map[string]any {
 
 	var hqReason any
 	var hqHint any
-	if !hqInstalled {
+	if !hqReady {
 		hqReason = "Remedy's voice is still arriving."
 	}
 
@@ -264,21 +238,27 @@ func (s *Server) voiceStatusPayload() map[string]any {
 
 	var ttsEngine any
 	if usingHQ {
-		ttsEngine = "chatterbox"
+		ttsEngine = "pocket-tts"
 	} else if ttsOK {
 		ttsEngine = "kokoro-82m"
 	}
 	var sttEngine any
 	if sttOK {
-		sttEngine = "faster-whisper"
+		sttEngine = "whisper"
 	}
 	var turnEngine any
 	if turnOK {
 		turnEngine = "smart-turn-v3"
 	}
 	var hqEngine any
-	if hqInstalled {
-		hqEngine = "chatterbox"
+	if hqReady {
+		hqEngine = "pocket-tts"
+	}
+
+	// What is arriving right now, when the voice worker tracks downloads.
+	installOf := func(string) any { return nil }
+	if r, ok := s.voice.(interface{ InstallState(string) any }); ok {
+		installOf = r.InstallState
 	}
 
 	return map[string]any{
@@ -291,7 +271,7 @@ func (s *Server) voiceStatusPayload() map[string]any {
 			"hint":      hintTTS,
 			"deps":      ttsOK || usingHQ,
 			"installed": ttsOK,
-			"install":   nil,
+			"install":   installOf(voicePackTTS),
 			"voice":     voiceForGender(gender, anyString(settings["voice_override"])),
 			"voices":    append([]string(nil), knownKokoroVoices...),
 			"fallback":  "browser",
@@ -306,7 +286,7 @@ func (s *Server) voiceStatusPayload() map[string]any {
 			"model":     settings["stt_model"],
 			"models":    append([]string(nil), validSTTModels...),
 			"installed": sttOK,
-			"install":   nil,
+			"install":   installOf(voicePackSTT),
 		},
 		"smart_turn": map[string]any{
 			"available": turnOK,
@@ -327,20 +307,20 @@ func (s *Server) voiceStatusPayload() map[string]any {
 		},
 		"pack": map[string]any{
 			"deps":      ttsOK && sttOK,
-			"install":   nil,
+			"install":   installOf(voicePackTTS),
 			"supported": true,
 		},
 		"hq": map[string]any{
-			"available": hqInstalled,
+			"available": hqReady,
 			"engine":    hqEngine,
-			"deps":      hqInstalled,
-			"installed": hqInstalled,
-			"install":   nil,
+			"deps":      hqReady,
+			"installed": hqReady,
+			"install":   installOf(voicePackHQ),
 			"reason":    hqReason,
 			"hint":      hqHint,
-			"approx_mb": 1100,
-			"licence":   "MIT",
-			"source":    "Resemble AI",
+			"approx_mb": 95,
+			"licence":   "MIT (code), CC BY 4.0 (model)",
+			"source":    "Kyutai Pocket TTS",
 			"fallback":  "kokoro",
 		},
 		"settings": settings,
@@ -375,7 +355,7 @@ func (s *Server) handleVoiceSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if anyString(saved["tts_quality"]) == "hq" && s.voice != nil {
-		_, _ = s.voice.Install(r.Context(), ResolveHomeDir(s.homeDir), "chatterbox")
+		_, _ = s.voice.Install(r.Context(), ResolveHomeDir(s.homeDir), "hq")
 	}
 	writeJSON(w, http.StatusOK, saved)
 }
@@ -401,8 +381,7 @@ func (s *Server) handleVoiceInstall(w http.ResponseWriter, r *http.Request) {
 	if s.voice == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":    false,
-			"error": "Voice worker is not attached to remedy-runtime.",
-			"hint":  "Wire a VoiceWorker (Python speech lane) or use the Python sidecar.",
+			"error": "Voice is not available in this build of remedy-runtime.",
 		})
 		return
 	}
@@ -494,6 +473,13 @@ func (s *Server) handleVoiceTranscribe(w http.ResponseWriter, r *http.Request) {
 	}
 	lang := strings.TrimSpace(r.URL.Query().Get("language"))
 	out, err := s.voice.Transcribe(r.Context(), home, body, r.Header.Get("Content-Type"), lang)
+	if errors.Is(err, errVoiceFormat) {
+		writeJSON(w, http.StatusUnsupportedMediaType, map[string]string{
+			"error":    "This recording is not WAV audio, which is the format Remedy can listen to.",
+			"fallback": "none",
+		})
+		return
+	}
 	if err != nil || out == nil || strings.TrimSpace(out.Text) == "" && err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error":    "Hearing is not ready yet. Open Settings → Voice to download it.",
