@@ -453,8 +453,10 @@ impl Wizard {
                     return;
                 }
             }
+            // Eighty seconds with no sign-in: say so instead of going quiet.
             let _ = waker.post(move || {
                 busy.set(false);
+                error.set("The xAI sign-in did not finish. Try again.".into());
             });
         });
     }

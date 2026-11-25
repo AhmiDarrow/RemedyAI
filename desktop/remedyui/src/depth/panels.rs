@@ -48,7 +48,8 @@ fn frame(ui: &Ui, studio: &Studio, title_id: &'static str, body: El) -> El {
             l.width = Length::Px(320.0);
             l.min_width = Length::Px(280.0);
             l.height = Length::Percent(1.0);
-            l.shrink = 0.0;
+            // Shrinks to its minimum in a narrow window instead of pushing the chat out.
+            l.shrink = 1.0;
         })
         .style(
             StylePatch::new()

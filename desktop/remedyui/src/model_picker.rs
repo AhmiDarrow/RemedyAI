@@ -673,6 +673,7 @@ pub fn apply(studio: &Studio, provider: String, model: String) {
     if studio.provider.get() == provider && studio.model.get() == model {
         return;
     }
+    let before = (studio.provider.get(), studio.model.get(), studio.models.get());
     studio.provider.set(provider.clone());
     studio.model.set(model.clone());
     if let Some(p) = studio
@@ -705,6 +706,10 @@ pub fn apply(studio: &Studio, provider: String, model: String) {
                 }
             }
             Err(e) => {
+                // The server kept the old model, so the chip must too.
+                studio.provider.set(before.0);
+                studio.model.set(before.1);
+                studio.models.set(before.2);
                 studio.picker_status.set(PickerStatus::Error(if e.is_empty() {
                     "Could not switch provider or model.".into()
                 } else {

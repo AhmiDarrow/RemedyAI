@@ -258,6 +258,11 @@ impl TimeTravel {
             .spawn(move || {
                 let out = api::restore(&session, &message_id);
                 let _ = wake.post(move || {
+                    // The restore happened on the server either way: the chat must show it
+                    // even if the rail was closed meanwhile.
+                    if out.is_ok() {
+                        studio.reload_open();
+                    }
                     if tt.epoch.get() != epoch {
                         return;
                     }
@@ -265,7 +270,6 @@ impl TimeTravel {
                         Ok(()) => {
                             tt.confirm.set(None);
                             tt.restoring.set(false);
-                            studio.reload_open();
                             tt.request_load(live_session(&studio), false);
                         }
                         Err(message) => {

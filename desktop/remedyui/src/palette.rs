@@ -103,12 +103,21 @@ pub fn run(id: &str, studio: &Studio, chrome: Chrome, ui: &Ui) {
         return;
     }
     if let Some(rest) = id.strip_prefix("model-") {
-        studio.model.set(rest.to_string());
+        // Through the picker, so the session's model changes and not only the label.
+        crate::model_picker::apply(studio, studio.provider.get(), rest.to_string());
         chrome.close_overlay();
         chrome.toast(ui, rest.to_string());
         return;
     }
-    if id.starts_with("agent-") {
+    if let Some(name) = id.strip_prefix("agent-") {
+        // Address the agent in the message being written.
+        let mut text = studio.depth.composer_value.get();
+        if !text.is_empty() && !text.ends_with(' ') {
+            text.push(' ');
+        }
+        text.push_str(&format!("@{name} "));
+        studio.depth.draft_text.set(text.clone());
+        studio.depth.composer_value.set(text);
         chrome.close_overlay();
         return;
     }

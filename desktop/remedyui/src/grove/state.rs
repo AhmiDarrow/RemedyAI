@@ -772,7 +772,7 @@ impl Grove {
         let id = id.to_string();
         self.spawn(
             move |c| api::set_goal_link(&c, &id, &json!({ "autopilot": on })),
-            |g, _| g.refresh_head(),
+            |g, out| g.after_action(out),
         );
     }
 
@@ -786,7 +786,7 @@ impl Grove {
 
     pub(crate) fn step_now(&self, id: &str) {
         let id = id.to_string();
-        self.spawn(move |c| api::step_goal(&c, &id), |g, _| g.refresh_head());
+        self.spawn(move |c| api::step_goal(&c, &id), |g, out| g.after_action(out));
     }
 
     pub(crate) fn clear_activity(&self) {
@@ -1044,7 +1044,7 @@ impl Grove {
 
     pub(crate) fn forget_child(&self, id: &str) {
         let id = id.to_string();
-        self.spawn(move |c| api::forget_child(&c, &id), |g, _| g.refresh_head());
+        self.spawn(move |c| api::forget_child(&c, &id), |g, out| g.after_action(out));
     }
 
     pub(crate) fn toggle_watch(&self, on: bool) {
@@ -1107,14 +1107,14 @@ impl Grove {
     }
 
     pub(crate) fn check_now(&self) {
-        self.spawn(api::run_heartbeat, |g, _| g.refresh_head());
+        self.spawn(api::run_heartbeat, |g, out| g.after_action(out));
     }
 
     pub(crate) fn toggle_routine(&self, id: &str, on: bool) {
         let id = id.to_string();
         self.spawn(
             move |c| api::patch_routine(&c, &id, &json!({ "enabled": on })),
-            |g, _| g.refresh_head(),
+            |g, out| g.after_action(out),
         );
     }
 
@@ -1136,7 +1136,7 @@ impl Grove {
         let id = id.to_string();
         self.spawn(
             move |c| api::delete_routine(&c, &id),
-            |g, _| g.refresh_head(),
+            |g, out| g.after_action(out),
         );
     }
 
@@ -1716,6 +1716,14 @@ impl Grove {
             q.child_session = child_session;
             q.fast = fast;
         }
+    }
+
+    /// After an action the owner asked for: say so if it failed, then refresh.
+    fn after_action<T>(&self, out: Result<T, String>) {
+        if out.is_err() {
+            self.note.set("That did not go through — try again.".into());
+        }
+        self.refresh_head();
     }
 
     fn spawn<T: Send + 'static>(

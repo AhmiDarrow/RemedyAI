@@ -189,7 +189,7 @@ fn hive_block(ui: &Ui, hive: &serde_json::Value, pending: Signal<String>, pendin
         let cadence = row.get("cadence").and_then(|s| s.as_str()).unwrap_or("");
         let status = row.get("status").and_then(|s| s.as_str()).unwrap_or("");
         let goal = row.get("goal").and_then(|s| s.as_str()).unwrap_or("untitled job");
-        let label = if pending_id == id { "Confirm retire" } else { "Retire" };
+        let label = if pending_id == id { "Confirm stop" } else { "Stop" };
         let hid = id.clone();
         let s = studio.clone();
         let p = pending;

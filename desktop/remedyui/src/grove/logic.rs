@@ -1124,15 +1124,6 @@ pub enum StudioKind {
     Build,
 }
 
-impl StudioKind {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Chat => "Talk",
-            Self::Plan => "Plan",
-            Self::Build => "Build",
-        }
-    }
-}
 
 /// If this Grove request is work for Studio, the session kind to open.
 /// Life, goals, and everyday talk stay in Grove. Conservative: when unsure, stay.

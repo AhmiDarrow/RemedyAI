@@ -1582,8 +1582,13 @@ pub fn resolve_approval(studio: &Studio, id: &str, approve: bool, scope: &str) {
     let Ok(wake) = waker() else {
         return;
     };
-    api::spawn_json(&client, Request::post(&path).json(&body), move |_| {
+    api::spawn_json(&client, Request::post(&path).json(&body), move |out| {
         let _ = wake.post(move || {
+            // A failed answer leaves the question up: Remedy is still waiting on it.
+            if out.is_err() {
+                studio.depth.notice.set("That answer did not go through. Try again.".into());
+                return;
+            }
             studio
                 .depth
                 .approvals
@@ -2068,6 +2073,12 @@ pub fn trust_skill(studio: &Studio, name: &str) {
     };
     let name = name.to_string();
     let path = format!("skills/{}/status", api::query(&name));
+    let qpath = format!("skills/{}/quarantine", api::query(&name));
+    let Ok(wake) = waker() else {
+        return;
+    };
+    let (studio, again) = (studio.clone(), client.clone());
+    // Promote, then lift the quarantine, and only then say it is trusted.
     api::spawn_json(
         &client,
         Request::post(&path).json(&json!({
@@ -2075,16 +2086,25 @@ pub fn trust_skill(studio: &Studio, name: &str) {
             "force_promote": true,
             "quarantine": false,
         })),
-        |_| {},
+        move |first| {
+            let said = |studio: Studio, ok: bool| {
+                studio.depth.notice.set(if ok {
+                    "Trusted. It can run.".into()
+                } else {
+                    "Could not trust that skill. Try again.".into()
+                });
+                load_skills(&studio);
+            };
+            if first.is_err() {
+                let _ = wake.post(move || said(studio, false));
+                return;
+            }
+            api::spawn_json(&again, Request::post(&qpath).json(&json!({ "quarantine": false })), move |second| {
+                let ok = second.is_ok();
+                let _ = wake.post(move || said(studio, ok));
+            });
+        },
     );
-    let qpath = format!("skills/{}/quarantine", api::query(&name));
-    api::spawn_json(
-        &client,
-        Request::post(&qpath).json(&json!({ "quarantine": false })),
-        |_| {},
-    );
-    studio.depth.notice.set("Trusted. It can run.".into());
-    load_skills(studio);
 }
 
 pub fn delete_skill(studio: &Studio, name: &str) {
