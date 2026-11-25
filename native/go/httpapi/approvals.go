@@ -646,6 +646,9 @@ func plainApprovalSummary(item *pendingApproval) string {
 	if tool == "mail_send" || tool == "mail.send" {
 		return "Remedy wants to send an email."
 	}
+	if tool == "settings.patch" || tool == "house_rules" || tool == "setup.session" {
+		return "Remedy wants to change her settings: " + cmd
+	}
 	if tool == "computer.navigate" {
 		return "Remedy wants to open a page in the Browser rail: " + cmd
 	}

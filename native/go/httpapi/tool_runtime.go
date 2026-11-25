@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -247,6 +248,54 @@ func houseRulesMutation(call cognition.ToolCall) bool {
 	}
 }
 
+// settingsOwnerMoment reports a settings change only the owner may approve,
+// one card per call, in every approval mode: where the model's traffic and
+// key go, how much Remedy may do unasked, which folder she works in, and what
+// this PC shares. The call's own "confirm" flag is the model's word, not the
+// owner's, so it never stands in for that card.
+func settingsOwnerMoment(call cognition.ToolCall) bool {
+	name := strings.TrimSpace(call.Name)
+	if name != "settings.patch" && name != "house_rules" && name != "setup.session" {
+		return false
+	}
+	if len(call.Input) == 0 {
+		return false
+	}
+	var body struct {
+		Action  string         `json:"action"`
+		Patch   map[string]any `json:"patch"`
+		Answers map[string]any `json:"answers"`
+	}
+	if json.Unmarshal(call.Input, &body) != nil {
+		return true
+	}
+	if name != "settings.patch" {
+		switch strings.ToLower(strings.TrimSpace(body.Action)) {
+		case "confirm", "rollback":
+			return true // applies a stored change the card cannot show key by key
+		case "propose":
+		default:
+			return false // status, and steps that only record answers
+		}
+	}
+	for _, m := range []map[string]any{body.Patch, body.Answers} {
+		for k := range m {
+			if ownerOnlySettingsKey(k) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func ownerOnlySettingsKey(k string) bool {
+	switch strings.TrimSpace(k) {
+	case "llm_base_url", "llm_provider", "custom_llm_name", "project_path", "house_rules_permission":
+		return true
+	}
+	return sensitiveSettingsKey(k) || looksLikeSecretSettingsKey(k)
+}
+
 func partnerVigilMutates(input []byte) bool {
 	var body struct {
 		Action string `json:"action"`
@@ -302,7 +351,7 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 		if callIsReadOnlyAction(call) || call.Name == "todo" {
 			return cognition.Allow
 		}
-		if classifySensitiveComputer(call, p.livePageContext()) {
+		if classifySensitiveComputer(call, p.livePageContext()) || settingsOwnerMoment(call) {
 			return p.decideOwnerMoment(call)
 		}
 		mode := "ask"
@@ -378,7 +427,14 @@ func toolCommandPreview(call cognition.ToolCall) string {
 	if len(call.Input) == 0 {
 		return call.Name
 	}
-	return clipUTF8(strings.TrimSpace(string(call.Input)), toolCommandPreviewLimit)
+	text := strings.TrimSpace(string(call.Input))
+	if len(text) <= toolCommandPreviewLimit {
+		return text
+	}
+	// The part that was cut still counts: without its hash, approving one long
+	// call would approve every call that starts the same way.
+	sum := sha256.Sum256([]byte(text))
+	return clipUTF8(text, toolCommandPreviewLimit) + fmt.Sprintf(" … [%d bytes in all, sha256 %x]", len(text), sum)
 }
 
 // serverOwnedInputFields are set by the runtime from the session, never by
@@ -647,7 +703,7 @@ var submitKeys = map[string]struct{}{"enter": {}, "return": {}, "\n": {}, "space
 // (one-shot, mode-proof) approval. enqueueToolApproval consults it so the
 // banner item carries Sensitive and SetMode sweeps leave it pending.
 func approvalIsSensitive(call cognition.ToolCall) bool {
-	return classifySensitiveComputer(call, "")
+	return classifySensitiveComputer(call, "") || settingsOwnerMoment(call)
 }
 
 func isSensitiveComputerAction(call cognition.ToolCall) bool {

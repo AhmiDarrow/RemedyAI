@@ -6,10 +6,10 @@ import (
 	"strings"
 )
 
-// DefaultCORSOrigins cover the Tauri desktop webview and Vite dev server.
+// DefaultCORSOrigins cover the desktop webview. A dev server's origin is not
+// trusted by default (any program can listen on a local port): name it in
+// REMEDY_CORS_ORIGINS while developing.
 var DefaultCORSOrigins = []string{
-	"http://localhost:1420",
-	"http://127.0.0.1:1420",
 	"tauri://localhost",
 	"http://tauri.localhost",
 	"https://tauri.localhost",

@@ -144,11 +144,23 @@ var settingsLockKeys = map[string]struct{}{
 	"connect_iroh_port":       {},
 	"connect_iroh_punch":      {},
 	"llm_api_key":             {},
-	"api_key":                 {},
-	"http_bootstrap":          {},
-	"provider_keys":           {},
-	"messengers":              {},
-	"assistant":               {},
+	// Where the model's traffic (and the key) goes, how much runs unasked,
+	// and what this PC shares are decided at the PC.
+	"llm_base_url":           {},
+	"approval_mode":          {},
+	"trust_profile":          {},
+	"access_scope":           {},
+	"project_path":           {},
+	"advanced":               {},
+	"interop_inbound":        {},
+	"interop_bind":           {},
+	"claimidx_enabled":       {},
+	"claimidx_public_ledger": {},
+	"api_key":                {},
+	"http_bootstrap":         {},
+	"provider_keys":          {},
+	"messengers":             {},
+	"assistant":              {},
 }
 
 // SanitizeOriginPath returns a relative URL path only.

@@ -402,7 +402,7 @@ func (s *Server) handleVoiceClientLog(w http.ResponseWriter, r *http.Request) {
 	if len(msg) > 400 {
 		msg = msg[:400]
 	}
-	log.Printf("voice client: %s", msg)
+	log.Printf("voice client: %q", msg) // quoted: the text cannot forge log lines
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

@@ -174,16 +174,16 @@ func (l *Listener) Register(conn net.Conn, deviceID string) {
 	l.conns[conn] = deviceID
 }
 
-// BindDevice associates a registered connection with a paired device id.
+// BindDevice associates a connection with a paired device id. A session that
+// came in another way than this listener (relay, direct path) is tracked from
+// here on too, so pausing or revoking closes it like any other.
 func (l *Listener) BindDevice(conn net.Conn, deviceID string) {
 	if conn == nil {
 		return
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if _, ok := l.conns[conn]; ok {
-		l.conns[conn] = deviceID
-	}
+	l.conns[conn] = deviceID
 }
 
 // Unregister drops tracking for conn without closing it.

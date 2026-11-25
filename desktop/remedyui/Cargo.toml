@@ -21,6 +21,8 @@ url = "2"
 # Same verifier the Tauri shell uses for latest.json (do not invent a second key).
 minisign-verify = "0.2"
 base64 = "0.22"
+# Proves the runtime on the port is ours before the token is sent to it.
+sha2 = "0.11"
 portable-pty = "0.9"
 
 [dev-dependencies]
