@@ -1,0 +1,86 @@
+{
+  "name": "hard_won_recovery",
+  "turns": [
+    {
+      "message": "Get the flaky integration suite green again",
+      "steps": [
+        {
+          "tool": "file_read",
+          "ok": true,
+          "result": "read suite",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "bash_exec",
+          "ok": false,
+          "result": "",
+          "error": "timeout",
+          "duration_ms": 10
+        },
+        {
+          "tool": "repo_search",
+          "ok": true,
+          "result": "found helper",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "file_edit",
+          "ok": false,
+          "result": "",
+          "error": "patch rejected",
+          "duration_ms": 10
+        },
+        {
+          "tool": "file_edit",
+          "ok": true,
+          "result": "patched",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "bash_exec",
+          "ok": false,
+          "result": "",
+          "error": "exit 3",
+          "duration_ms": 10
+        },
+        {
+          "tool": "list_dir",
+          "ok": true,
+          "result": "listed",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "bash_exec",
+          "ok": true,
+          "result": "pass",
+          "error": "",
+          "duration_ms": 10
+        },
+        {
+          "tool": "job_run",
+          "ok": true,
+          "result": "verified",
+          "error": "",
+          "duration_ms": 10
+        }
+      ],
+      "now": "2026-01-02T03:04:05.123456+00:00"
+    }
+  ],
+  "expect": [
+    {
+      "learned": true,
+      "skill": "bash-exec-get-the-flaky-integration-suite-green-again",
+      "merged": false,
+      "reason": "Skill 'bash-exec-get-the-flaky-integration-suite-green-again' saved as validated (probation, effort=high 0.66)",
+      "graded": {},
+      "files": {
+        "skills/bash-exec-get-the-flaky-integration-suite-green-again/SKILL.md": "---\nname: bash-exec-get-the-flaky-integration-suite-green-again\ndescription: \"Use when the user needs help with: Get the flaky integration suite green\\\n  \\ again. Procedure uses: bash_exec, file_edit, file_read, job_run, list_dir, repo_search.\\\n  \\ Includes recovery steps after failed tool attempts (hard-won path \\u2014 prefer\\\n  \\ over naive retries). Context: Get the flaky integration suite green again\"\nversion: 0.1.0\nkind: native\nstatus: validated\ntags:\n- auto-generated\n- learned\n- hard-won\n- high-effort\n- needs-review\n- filesystem\n- probation\ntools:\n- repo_search\n- file_edit\n- list_dir\n- job_run\n- bash_exec\n- file_read\nmetadata:\n  auto_generated: true\n  created_at: '2026-01-02T03:04:05.123456+00:00'\n  source_trace_id: 00000000-0000-4000-8000-000000000001\n  source_trace_ids:\n  - 00000000-0000-4000-8000-000000000001\n  source_task: Get the flaky integration suite green again\n  source_session_id: sess\n  reflection_confidence: 0.03333333333333327\n  lifecycle_confidence: 0.7653453333333333\n  lifecycle: probation\n  overall_trace_success: true\n  trace_success_rate: 0.6666666666666666\n  effort_weight: 0.66006\n  effort_band: high\n  effort_reasons:\n  - 3 failed attempt(s)\n  - 2 recovery path(s)\n  - 6 distinct tools\n  - 7 approach switches\n  - 9-step trace\n---\n\n# Get the flaky integration suite green again\n\nThis skill was automatically generated from a successful execution.\n\n## Lifecycle (read before trusting)\n\n- Status starts as **probation** (discovered/validated), not fully active.\n- Only promote after repeated successes across **multiple sessions**.\n- If steps fail, recover or stop — do not invent success.\n- Prefer re-checking paths and tool results over blind replay.\n\n## Effort / why this matters\n\n- **Effort weight:** 0.66 (high)\n- **Why hard-won:** 3 failed attempt(s), 2 recovery path(s), 6 distinct tools, 7 approach switches, 9-step trace\n- Preserve recovery paths below — they cost real work to discover.\n\n## Steps\n\n1. **file_read** [SUCCESS]\n   - Result sketch: read suite\n\n2. **bash_exec** [FAILED — do not treat as required success]\n   - Error seen: timeout\n   - Recover: adjust arguments or try an alternate tool, then continue.\n\n3. **repo_search** [SUCCESS]\n   - Result sketch: found helper\n\n4. **file_edit** [FAILED — do not treat as required success]\n   - Error seen: patch rejected\n   - Recover: adjust arguments or try an alternate tool, then continue.\n\n5. **file_edit** [SUCCESS]\n   - Result sketch: patched\n\n6. **bash_exec** [FAILED — do not treat as required success]\n   - Error seen: exit 3\n   - Recover: adjust arguments or try an alternate tool, then continue.\n\n7. **list_dir** [SUCCESS]\n   - Result sketch: listed\n\n8. **bash_exec** [SUCCESS]\n   - Result sketch: pass\n\n9. **job_run** [SUCCESS]\n   - Result sketch: verified\n\n\n## Failure protocol\n\n- If a step fails twice with different args, stop and report — do not loop.\n- Never mark the overall skill successful when critical tools failed.\n- After failure, prefer discovery (list_dir / status) before retry.\n\n## Requirements\n\n- Tool: `bash_exec`\n- Tool: `file_edit`\n- Tool: `file_read`\n- Tool: `job_run`\n- Tool: `list_dir`\n- Tool: `repo_search`\n"
+      }
+    }
+  ]
+}
