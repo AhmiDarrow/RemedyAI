@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"mime"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
+	"github.com/AhmiDarrow/RemedyAI/native/go/mind/learn"
 	"github.com/AhmiDarrow/RemedyAI/native/go/mind/prompt"
 	"github.com/AhmiDarrow/RemedyAI/native/go/providers"
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
@@ -436,10 +438,80 @@ func (r *CognitionTurnRunner) scheduleTurnEnd(req TurnRequest, out *cognition.Ou
 		defer func() { _ = recover() }()
 		r.updateSoulAfterTurn(reqCopy, snapshot)
 	}()
+	if r.nativeOn() {
+		// Skill learning is local file work too, and for the same reason it
+		// finishes before the turn returns. No Python is involved.
+		func() {
+			defer func() { _ = recover() }()
+			r.learnFromTurn(reqCopy, snapshot)
+		}()
+		return
+	}
 	if r.promptAssemble == nil {
 		return
 	}
 	go r.finishTurn(reqCopy, snapshot)
+}
+
+// learnFromTurn turns a real stretch of successful tool work into a learned
+// skill (or merges it into one), and grades the learned skills this turn
+// loaded by how the turn went.
+func (r *CognitionTurnRunner) learnFromTurn(req TurnRequest, out cognition.Outcome) {
+	home := strings.TrimSpace(r.HomeDir)
+	if home == "" {
+		return
+	}
+	raw := toolStepsFromOutcome(out)
+	if len(raw) == 0 {
+		return
+	}
+	steps := make([]learn.Step, 0, len(raw))
+	for _, s := range raw {
+		step := learn.Step{}
+		step.Tool, _ = s["tool"].(string)
+		step.OK, _ = s["success"].(bool)
+		step.Result, _ = s["result"].(string)
+		step.Error, _ = s["error"].(string)
+		step.DurationMS, _ = s["duration_ms"].(float64)
+		steps = append(steps, step)
+	}
+	started := time.Now()
+	res, err := learn.FromTurn(learn.Turn{
+		Home: ResolveHomeDir(home), SessionID: req.SessionID,
+		Message: req.Prompt, AssistantText: strings.TrimSpace(out.Text),
+		Steps:   steps,
+		Aborted: errors.Is(out.Err, context.Canceled) || errors.Is(out.Err, context.DeadlineExceeded),
+		Now:     time.Now,
+		Skills:  activatedSkills(out),
+	})
+	r.noteLearnCall("turn_end", started, nil, err)
+	if err == nil && res.Learned {
+		log.Printf("learned skill %q (merged=%v)", res.Skill, res.Merged)
+	}
+}
+
+// activatedSkills are the skills this turn loaded with skill.activate.
+func activatedSkills(out cognition.Outcome) []string {
+	var names []string
+	seen := map[string]bool{}
+	for _, msg := range out.Messages {
+		for _, b := range msg.ToolUses() {
+			if b.Name != "skill.activate" {
+				continue
+			}
+			var in struct {
+				Name  string `json:"name"`
+				Skill string `json:"skill"`
+			}
+			_ = json.Unmarshal(b.Input, &in)
+			name := strings.TrimSpace(firstNonEmpty(in.Name, in.Skill))
+			if name != "" && !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
+		}
+	}
+	return names
 }
 
 // finishTurn asks the Python worker (when attached) to ingest residue, record
@@ -450,14 +522,7 @@ func (r *CognitionTurnRunner) finishTurn(req TurnRequest, out cognition.Outcome)
 		return
 	}
 	defer func() { _ = recover() }()
-	// With the native prompt the only thing left in the Python turn-end is
-	// turning a stretch of real tool work into a learned skill. A turn that
-	// could not teach one (a chat reply, a lookup or two) does not start, or
-	// wake, an interpreter.
 	steps := toolStepsFromOutcome(out)
-	if r.nativeOn() && !turnCouldTeachASkill(steps) {
-		return
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), r.learnTimeout("turn_end_timeout_s", 30*time.Second))
 	defer cancel()
 	input := map[string]any{
@@ -1884,25 +1949,4 @@ func withTurnContext(msgs []cognition.Message, context string) []cognition.Messa
 	out := make([]cognition.Message, 0, len(msgs)+1)
 	out = append(out, msgs[:len(msgs)-1]...)
 	return append(out, note, msgs[len(msgs)-1])
-}
-
-// turnCouldTeachASkill is the least a turn needs before the skill learner
-// will consider it (agent_learn.should_auto_learn_from_steps): three steps,
-// three successes, and two different tools. The learner applies its stricter
-// rules itself.
-func turnCouldTeachASkill(steps []map[string]any) bool {
-	if len(steps) < 3 {
-		return false
-	}
-	ok := 0
-	names := map[string]bool{}
-	for _, s := range steps {
-		if s["success"] == true {
-			ok++
-		}
-		if n, _ := s["tool"].(string); n != "" {
-			names[n] = true
-		}
-	}
-	return ok >= 3 && len(names) >= 2
 }
