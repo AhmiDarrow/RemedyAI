@@ -367,6 +367,22 @@ impl Facts {
     }
 }
 
+/// How many growth marks `facts` have earned. Logarithmic, so early use shows
+/// quickly and a long companionship keeps adding.
+pub fn growth_points(facts: Facts) -> u32 {
+    let log = |n: u32| 32 - (n + 1).leading_zeros() - 1;
+    // About 6 marks in the first weeks, 11 after a few months, the last of 19 after years.
+    (log(facts.messages) + log(facts.sessions)) / 2 + log(facts.days) + facts.goals.min(4) / 2
+}
+
+/// Remedy's face seed. The runtime derives it from the setup (the owner's
+/// name, Remedy's name, this install) and writes `$REMEDY_HOME/face.seed`;
+/// the desktop only reads it. Before setup there is none, and she wears the
+/// plain design face.
+pub fn seed() -> Option<u64> {
+    let path = crate::grove::remedy_home().join("face.seed");
+    std::fs::read_to_string(path).ok()?.trim().parse().ok()
+}
 /// Growth stage 0..=3 from existing Studio / Grove facts.
 ///
 /// - New: default
