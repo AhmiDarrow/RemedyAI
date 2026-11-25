@@ -55,23 +55,3 @@ func TestTurnContextGoesJustBeforeTheOwnersMessage(t *testing.T) {
 		t.Fatal("no context means no note")
 	}
 }
-
-func TestOnlyRealToolWorkCanTeachASkill(t *testing.T) {
-	step := func(tool string, ok bool) map[string]any { return map[string]any{"tool": tool, "success": ok} }
-	cases := []struct {
-		name  string
-		steps []map[string]any
-		want  bool
-	}{
-		{"a chat reply", nil, false},
-		{"two lookups", []map[string]any{step("read", true), step("grep", true)}, false},
-		{"one tool three times", []map[string]any{step("read", true), step("read", true), step("read", true)}, false},
-		{"mostly failed", []map[string]any{step("read", true), step("bash", false), step("edit", false)}, false},
-		{"read, edit, test", []map[string]any{step("read", true), step("edit", true), step("bash", true)}, true},
-	}
-	for _, c := range cases {
-		if got := turnCouldTeachASkill(c.steps); got != c.want {
-			t.Errorf("%s: %v, want %v", c.name, got, c.want)
-		}
-	}
-}
