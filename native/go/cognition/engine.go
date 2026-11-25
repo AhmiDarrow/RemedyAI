@@ -86,6 +86,11 @@ type ModelEvent struct {
 	Done     bool
 	// Truncated means finish_reason=length / max_tokens — continue, do not stop.
 	Truncated bool
+	// Native is the round's assistant content in the provider's own form, sent
+	// once per round by an adapter that must replay it exactly (signed
+	// thinking blocks). The engine stores it on the assistant message and
+	// never looks inside; only the adapter that produced it reads it back.
+	Native any
 }
 
 // Model is one provider binding. ContextWindow reports the prompt window in
@@ -436,6 +441,8 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 		if est := estimateTokens(transcript); est > budget {
 			before := len(transcript)
 			elided := elideMiddleObservations(transcript)
+			// Either rewrite changes earlier turns, and a signed thinking block
+			// is valid only after the exact turns that produced it.
 			if elidedEst := estimateTokens(elided); elidedEst <= budget && elidedEst < est {
 				transcript = elided
 				trace(StateUpdate, iteration, fmt.Sprintf(
@@ -446,6 +453,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 				trace(StateUpdate, iteration, fmt.Sprintf(
 					"compacted transcript %d→%d messages (~%d tokens over %d)", before, len(transcript), est, budget))
 			}
+			transcript = stripNative(transcript)
 		}
 		turn := Turn{System: system, Messages: cloneMessages(transcript), Iteration: iteration}
 		out.Messages = turn.Messages
@@ -459,6 +467,7 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 		}
 		var text, thinking strings.Builder
 		var calls []ToolCall
+		var native any
 		completed := false
 		truncated := false
 	streamEvents:
@@ -481,6 +490,9 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 			truncated = truncated || event.Truncated
 			if event.ToolCall != nil {
 				calls = append(calls, *event.ToolCall)
+			}
+			if event.Native != nil {
+				native = event.Native
 			}
 		}
 		if err := ctx.Err(); err != nil {
@@ -589,6 +601,9 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 		}
 
 		transcript = appendAssistant(transcript, thinking.String(), roundText, calls)
+		if native != nil && len(transcript) > 0 && transcript[len(transcript)-1].Role == RoleAssistant {
+			transcript[len(transcript)-1].Native = native
+		}
 
 		trace(StatePolicy, iteration, fmt.Sprintf("evaluate %d tools", len(calls)))
 		decisions := e.decide(ctx, calls)
@@ -708,8 +723,10 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 			if e.EpochHook != nil {
 				hookTurn := Turn{System: system, Messages: cloneMessages(transcript), Iteration: iteration}
 				e.EpochHook(epoch, iteration, toolCount, ledger, &hookTurn)
-				if strings.TrimSpace(hookTurn.System) != "" {
+				if strings.TrimSpace(hookTurn.System) != "" && hookTurn.System != system {
 					system = hookTurn.System
+					// The system prompt is part of what a thinking block is signed over.
+					transcript = stripNative(transcript)
 				}
 			}
 			continue
@@ -733,6 +750,15 @@ func (e *Engine) contextWindow() int {
 
 // appendAssistant adds one assistant message for a model round: thinking, then
 // prose, then the tool_use blocks that will be executed.
+// stripNative drops the provider-native copy of every assistant turn, so the
+// adapter renders them from the plain blocks (without thinking) from then on.
+func stripNative(msgs []Message) []Message {
+	for i := range msgs {
+		msgs[i].Native = nil
+	}
+	return msgs
+}
+
 func appendAssistant(transcript []Message, thinking, text string, calls []ToolCall) []Message {
 	blocks := make([]Block, 0, 2+len(calls))
 	if strings.TrimSpace(thinking) != "" {

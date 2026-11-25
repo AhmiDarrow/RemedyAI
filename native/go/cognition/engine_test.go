@@ -1420,3 +1420,36 @@ func TestClippedJSONKeepsItsShapeAndReadableText(t *testing.T) {
 		t.Fatalf("no dominant string falls back to the preview: %.80s", got)
 	}
 }
+func TestNativeAssistantTurnIsCarriedIntoTheNextRound(t *testing.T) {
+	type marker struct{ id string }
+	round := 0
+	var seen any
+	model := modelFunc(func(_ context.Context, turn Turn) (<-chan ModelEvent, error) {
+		round++
+		out := make(chan ModelEvent, 4)
+		if round == 1 {
+			out <- ModelEvent{Native: &marker{"r1"}}
+			out <- ModelEvent{ToolCall: &ToolCall{ID: "c1", Name: "read", Input: []byte(`{"path":"a"}`)}}
+		} else {
+			for _, m := range turn.Messages {
+				if m.Role == RoleAssistant {
+					seen = m.Native
+				}
+			}
+			out <- ModelEvent{Text: "done", Done: true}
+		}
+		close(out)
+		return out, nil
+	})
+	engine := Engine{Model: model, Tools: EchoTools{}, Policy: AllowAll{}}
+	if res := engine.Run(context.Background(), "go"); res.Err != nil {
+		t.Fatal(res.Err)
+	}
+	if m, ok := seen.(*marker); !ok || m.id != "r1" {
+		t.Fatalf("round 2 must see round 1's native turn, got %#v", seen)
+	}
+	msgs := stripNative([]Message{{Role: RoleAssistant, Native: &marker{"x"}}})
+	if msgs[0].Native != nil {
+		t.Fatal("stripNative clears the native copy")
+	}
+}

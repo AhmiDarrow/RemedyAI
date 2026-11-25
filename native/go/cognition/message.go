@@ -72,6 +72,9 @@ type Message struct {
 	// Internal identifies engine guidance, not an owner request. Providers
 	// still receive it as user-role context, but it must never replace the goal.
 	Internal bool
+	// Native is ModelEvent.Native for the round that produced this assistant
+	// turn: opaque to the engine, replayed by the adapter that made it.
+	Native any
 }
 
 func contextNote(text string) Message {
