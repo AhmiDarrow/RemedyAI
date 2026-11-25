@@ -277,6 +277,7 @@ grove-handoff-chat = Looking into this in Studio
 grove-handoff-working = Remedy is working on it in the background. You can keep talking here.
 grove-handoff-ready = Remedy has finished her turn. It is waiting for you in Studio.
 grove-handoff-open = Open in Studio
+grove-handoff-dismiss = Dismiss
 menu-settings = Settings…
 menu-memory = Memory
 menu-skills = Skills

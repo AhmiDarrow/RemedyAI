@@ -312,6 +312,7 @@ pub fn design_grove_handoff(ui: &Ui) -> El {
     grove.handoff.set(Some(grove::StudioHandoff {
         kind: grove::StudioKind::Build,
         prompt: "Get the portal addon loading again after the entry rename.".into(),
+        session: None,
     }));
     design_chrome(ui, studio, grove.clone(), move |ui| design_grove_body(ui, grove.clone()))
 }

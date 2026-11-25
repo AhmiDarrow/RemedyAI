@@ -147,6 +147,8 @@ struct PollQuery {
 pub(crate) struct StudioHandoff {
     pub kind: logic::StudioKind,
     pub prompt: String,
+    /// The Studio session doing the work. `None` until a new session exists.
+    pub session: Option<String>,
 }
 
 /// The partner surface. Clone is a handle; the signals are shared.
@@ -461,14 +463,52 @@ impl Grove {
             logic::StudioKind::Build => WorkMode::Build,
         };
         self.studio.set_mode(mode);
-        if !self.studio.messages.get().is_empty() || self.studio.streaming.get() {
+        // An empty open chat takes the work; anything else gets a session of its own.
+        let fresh = !self.studio.messages.get().is_empty() || self.studio.streaming.get();
+        if fresh {
             self.studio.add();
         }
         self.handoff.set(Some(StudioHandoff {
             kind,
             prompt: prompt.clone(),
+            session: if fresh { None } else { self.studio.active.get() },
         }));
         self.studio.send(prompt);
+    }
+
+    /// Once the new session exists, the card follows it by id, so opening
+    /// another Studio chat later does not change what the card reports.
+    fn pin_handoff(&self) {
+        let Some(item) = self.handoff.get() else { return };
+        if item.session.is_some() || self.studio.depth.creating_session.get() {
+            return;
+        }
+        if let Some(sid) = self.studio.active.get() {
+            self.handoff.set(Some(StudioHandoff { session: Some(sid), ..item }));
+        }
+    }
+
+    /// True while the handed-off session still has a turn running.
+    pub(crate) fn handoff_working(&self) -> bool {
+        let Some(sid) = self.handoff.get().and_then(|h| h.session) else {
+            return self.handoff.get().is_some();
+        };
+        let open = self.studio.active.get().as_deref() == Some(sid.as_str());
+        (open && self.studio.streaming.get())
+            || self.studio.sessions.get().iter().any(|s| s.id == sid && s.claimed)
+    }
+
+    /// Show the handed-off session in Studio.
+    pub(crate) fn open_handoff(&self) {
+        self.pin_handoff();
+        if let Some(sid) = self.handoff.get().and_then(|h| h.session) {
+            self.studio.select(&sid);
+        }
+        self.show_studio();
+    }
+
+    pub(crate) fn dismiss_handoff(&self) {
+        self.handoff.set(None);
     }
 
     pub(crate) fn go_home(&self) {
@@ -1366,6 +1406,7 @@ impl Grove {
     }
 
     fn refresh_head(&self) {
+        self.pin_handoff();
         self.spawn(api::head, |g, out| {
             if let Ok(head) = out {
                 g.note_links(&head);
