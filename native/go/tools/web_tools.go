@@ -45,7 +45,7 @@ func registerWebTools(registry *Registry, c *webClient) error {
 	if err := registry.Register(Descriptor{
 		ID:          "web.search",
 		Version:     1,
-		Description: "Search the public web via the Python agent web_search backend (OpenSERP/DDG)",
+		Description: "Search the public web (SearXNG if configured, then OpenSERP, then DuckDuckGo)",
 		Runtime:     RuntimeGo,
 		Risk:        RiskReadOnly,
 		InputSchema: json.RawMessage(`{
@@ -89,7 +89,7 @@ func registerWebTools(registry *Registry, c *webClient) error {
 	return registry.Register(Descriptor{
 		ID:          "web.fetch",
 		Version:     1,
-		Description: "Fetch a public HTTP(S) URL as readable text via the Python agent web_fetch backend (SSRF-guarded)",
+		Description: "Fetch a public HTTP(S) URL as readable text (public addresses only; robots.txt respected)",
 		Runtime:     RuntimeGo,
 		Risk:        RiskReadOnly,
 		InputSchema: json.RawMessage(`{
