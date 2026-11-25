@@ -449,8 +449,20 @@ mod tests {
 
     #[test]
     fn kill_reaps_a_managed_child() {
-        let mut child = Command::new("sleep")
-            .arg("30")
+        // Windows has no `sleep` program outside a POSIX shell's PATH.
+        #[cfg(windows)]
+        let mut cmd = {
+            let mut c = Command::new("ping");
+            c.args(["-n", "30", "127.0.0.1"]);
+            c
+        };
+        #[cfg(not(windows))]
+        let mut cmd = {
+            let mut c = Command::new("sleep");
+            c.arg("30");
+            c
+        };
+        let mut child = cmd
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

@@ -231,6 +231,145 @@ fn worker_loop(rx: Receiver<Op>, live: Arc<Mutex<HashSet<String>>>) {
             }
         }
     }
+    // Every handle to this host is gone: end the shells that are still open.
+    for (_, session) in sessions.drain() {
+        if let Ok(mut child) = session.child.lock() {
+            let _ = child.kill();
+        }
+    }
+}
+
+/// Windows keeps a pseudo-console host alive after the process that opened it
+/// dies, and an orphaned host spins a CPU core on its closed pipes. A crash, a
+/// force-close, or the updater stopping the app would each leave one behind.
+/// Every console host and shell we start goes into one job object that the OS
+/// tears down when this process ends, however it ends.
+#[cfg(windows)]
+mod job {
+    use std::collections::HashSet;
+    use std::sync::OnceLock;
+
+    type Handle = isize;
+
+    #[repr(C)]
+    struct BasicLimits {
+        per_process_user_time: i64,
+        per_job_user_time: i64,
+        limit_flags: u32,
+        min_working_set: usize,
+        max_working_set: usize,
+        active_process_limit: u32,
+        affinity: usize,
+        priority_class: u32,
+        scheduling_class: u32,
+    }
+
+    #[repr(C)]
+    struct ExtendedLimits {
+        basic: BasicLimits,
+        io: [u64; 6],
+        process_memory_limit: usize,
+        job_memory_limit: usize,
+        peak_process_memory: usize,
+        peak_job_memory: usize,
+    }
+
+    #[repr(C)]
+    struct ProcessEntry {
+        size: u32,
+        usage: u32,
+        pid: u32,
+        default_heap: usize,
+        module: u32,
+        threads: u32,
+        parent: u32,
+        priority: i32,
+        flags: u32,
+        exe: [u16; 260],
+    }
+
+    const KILL_ON_JOB_CLOSE: u32 = 0x2000;
+    const EXTENDED_LIMIT_INFORMATION: i32 = 9;
+    const SNAP_PROCESS: u32 = 0x2;
+    const SET_QUOTA_AND_TERMINATE: u32 = 0x0100 | 0x0001;
+    const INVALID: Handle = -1;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn CreateJobObjectW(attrs: *const u8, name: *const u16) -> Handle;
+        fn SetInformationJobObject(job: Handle, class: i32, info: *const ExtendedLimits, len: u32) -> i32;
+        fn AssignProcessToJobObject(job: Handle, process: Handle) -> i32;
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
+        fn CloseHandle(h: Handle) -> i32;
+        fn GetCurrentProcessId() -> u32;
+        fn CreateToolhelp32Snapshot(flags: u32, pid: u32) -> Handle;
+        fn Process32FirstW(snap: Handle, entry: *mut ProcessEntry) -> i32;
+        fn Process32NextW(snap: Handle, entry: *mut ProcessEntry) -> i32;
+    }
+
+    /// The job, made once and never closed: the OS closes it with the process,
+    /// and that is what ends everything in it.
+    fn handle() -> Option<Handle> {
+        static JOB: OnceLock<Option<Handle>> = OnceLock::new();
+        *JOB.get_or_init(|| {
+            // SAFETY: plain Win32 calls with a zeroed, correctly sized limits struct.
+            unsafe {
+                let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+                if job == 0 {
+                    return None;
+                }
+                let mut limits: ExtendedLimits = std::mem::zeroed();
+                limits.basic.limit_flags = KILL_ON_JOB_CLOSE;
+                let len = std::mem::size_of::<ExtendedLimits>() as u32;
+                if SetInformationJobObject(job, EXTENDED_LIMIT_INFORMATION, &limits, len) == 0 {
+                    CloseHandle(job);
+                    return None;
+                }
+                Some(job)
+            }
+        })
+    }
+
+    /// Console hosts that are direct children of this process right now.
+    pub fn console_hosts() -> HashSet<u32> {
+        let mut out = HashSet::new();
+        // SAFETY: the snapshot handle is checked and closed; the entry's size is set as the API requires.
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(SNAP_PROCESS, 0);
+            if snap == INVALID || snap == 0 {
+                return out;
+            }
+            let me = GetCurrentProcessId();
+            let mut entry: ProcessEntry = std::mem::zeroed();
+            entry.size = std::mem::size_of::<ProcessEntry>() as u32;
+            let mut more = Process32FirstW(snap, &mut entry);
+            while more != 0 {
+                if entry.parent == me {
+                    let end = entry.exe.iter().position(|c| *c == 0).unwrap_or(entry.exe.len());
+                    let name = String::from_utf16_lossy(&entry.exe[..end]).to_ascii_lowercase();
+                    if name == "openconsole.exe" || name == "conhost.exe" {
+                        out.insert(entry.pid);
+                    }
+                }
+                more = Process32NextW(snap, &mut entry);
+            }
+            CloseHandle(snap);
+        }
+        out
+    }
+
+    /// Put `pid` in the job. Best effort: a process that has already exited is fine.
+    pub fn adopt(pid: u32) {
+        let Some(job) = handle() else { return };
+        // SAFETY: the process handle is checked and closed.
+        unsafe {
+            let process = OpenProcess(SET_QUOTA_AND_TERMINATE, 0, pid);
+            if process != 0 {
+                AssignProcessToJobObject(job, process);
+                CloseHandle(process);
+            }
+        }
+    }
 }
 
 fn open_session(
@@ -242,6 +381,8 @@ fn open_session(
 ) -> Result<(String, Arc<PtySession>), String> {
     let cols = cols.max(20);
     let rows = rows.max(5);
+    #[cfg(windows)]
+    let hosts_before = job::console_hosts();
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -267,6 +408,16 @@ fn open_session(
         .slave
         .spawn_command(cmd)
         .map_err(|e| format!("spawn {shell}: {e}"))?;
+    #[cfg(windows)]
+    {
+        // The host this session started, and its shell, end with this process.
+        for pid in job::console_hosts().difference(&hosts_before) {
+            job::adopt(*pid);
+        }
+        if let Some(pid) = child.process_id() {
+            job::adopt(pid);
+        }
+    }
     let mut reader = pair
         .master
         .try_clone_reader()
@@ -398,14 +549,21 @@ mod tests {
                 || {},
             )
             .expect("pty open");
-        host.write(&id, "printf 'remedy-pty-ok\\n'\n")
-            .expect("write");
+        // `echo` exists in every shell this host picks; Enter is a carriage return.
+        host.write(&id, "echo remedy-pty-ok\r").expect("write");
         let mut got = String::new();
-        let deadline = std::time::Instant::now() + Duration::from_secs(4);
+        let mut answered = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
         while std::time::Instant::now() < deadline && !got.contains("remedy-pty-ok") {
             match rx.recv_timeout(Duration::from_millis(200)) {
                 Ok(chunk) => {
                     got.push_str(&String::from_utf8_lossy(&chunk));
+                    // A pseudo-console asks where the cursor is and sends nothing
+                    // more until a terminal answers. The widget does; so must this test.
+                    if !answered && got.contains("\u{1b}[6n") {
+                        answered = true;
+                        host.write(&id, "\u{1b}[1;1R").expect("answer cursor query");
+                    }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
