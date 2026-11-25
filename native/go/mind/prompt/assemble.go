@@ -396,57 +396,27 @@ func (t *turn) contextParts() ([]Section, []string) {
 	}
 	add("workspace", workspaceBlock(t.proj))
 	if t.proj.Unset || t.proj.Scope == "full" {
-		add("access_reminder", "Access scope: full (or no focus folder). "+
-			"Tools may use absolute paths anywhere allowed for this account. "+
-			"A focus folder is optional convenience for relative paths — "+
-			"not required. Prefer reversible writes; confirm destructive ops.")
+		add("access_reminder", accessReminderText)
 	}
 	switch approvalMode(t.env.Config) {
 	case "full":
-		add("approvals", "Approvals: Full (warn). The host is in Remedy's hands. "+
-			"Write and run anywhere this account can. Auth secrets "+
-			"(~/.remedy/auth) stay closed. Do not stop to ask. "+
-			"write / edit / bash now "+
-			"(use only Tool ABI ids in your schema).")
+		add("approvals", approvalsFullText)
 	case "auto":
-		add("approvals", "Approvals: Auto (in-project). write / edit "+
-			"/ bash for pytest / uv / ruff inside the focus folder "+
-			"run without prompts. OS, home, and sibling trees stay jailed "+
-			"unless the user clicks Full.")
+		add("approvals", approvalsAutoText)
 	}
 	if sid := t.in.SessionID; strings.HasPrefix(sid, "msg:") && strings.Contains(sid[4:], ":") {
 		origin := strings.SplitN(sid, ":", 3)[1]
 		if origin != "" {
-			add("messenger", "[Messenger surface: "+origin+"] "+
-				"You are the same Remedy as desktop chat for this person. "+
-				"Keep replies concise for chat apps; still use tools when work needs them. "+
-				"Do not introduce yourself as a new bot.")
+			add("messenger", messengerText(origin))
 		}
 	}
 	if isRMBProvider(t.bind.Provider, t.bind.BaseURL) {
-		add("rmb", "RMB local agent: You are the sole on-device model for this session. "+
-			"No separate vision stack — image attachments are file paths; use tools "+
-			"to inspect them. Context is managed automatically (Session Brief, prune, "+
-			"offload) — do not discuss memory pressure or ask the user to compress. "+
-			"Finish tool chains, keep working, prefer compact tool results and "+
-			"concrete paths.")
+		add("rmb", rmbText)
 	}
 	if !t.chatOnly {
-		add("self_config", "Self-configuration: when the user asks you to set up, enable, disable, "+
-			"change, or configure Remedy (web tools, approval mode, model/provider, "+
-			"vision, persona, their name, project folder, access scope, messengers, "+
-			"assistant prefs, RMB, house map, etc.), use Desktop Settings / product "+
-			"HTTP surfaces when those actions are not in your Tool ABI schemas. "+
-			"Do not invent snake_case settings tools. Prefer computer.* / clipboard.* "+
-			"from your schema for screen and clipboard work.")
-		add("durable_memory", "Durable memory: when the user says remember / note that / don't forget / "+
-			"store in memory, ALWAYS call memory.save(content=…) with the fact "+
-			"(in addition to any automatic silent save). Confirm briefly what was stored. "+
-			"Never store secrets or API keys. Use memory.search to look up prior facts.")
-		add("manual", "Owner's manual / F1 Help: you CAN and SHOULD read it. Prefer "+
-			"read on docs/manual paths under the product tree when those "+
-			"paths are in access scope. Never claim F1/help is outside access scope "+
-			"for read-only manuals shipped with the product.")
+		add("self_config", selfConfigText)
+		add("durable_memory", durableMemoryText)
+		add("manual", manualText)
 	}
 	skills, m := t.skillsPart()
 	miss = append(miss, m...)
@@ -468,4 +438,62 @@ func (t *turn) addenda() []Section {
 		return []Section{{"frontier_build_addendum", "\n\n", frontierBuildAddendum}}
 	}
 	return []Section{{"build_mode_addendum", "\n\n", buildModeAddendum}}
+}
+
+// Standing rule texts, shared by Assemble and AssembleNative.
+
+// accessReminderText
+const accessReminderText = "Access scope: full (or no focus folder). " +
+	"Tools may use absolute paths anywhere allowed for this account. " +
+	"A focus folder is optional convenience for relative paths — " +
+	"not required. Prefer reversible writes; confirm destructive ops."
+
+// approvalsFullText
+const approvalsFullText = "Approvals: Full (warn). The host is in Remedy's hands. " +
+	"Write and run anywhere this account can. Auth secrets " +
+	"(~/.remedy/auth) stay closed. Do not stop to ask. " +
+	"write / edit / bash now " +
+	"(use only Tool ABI ids in your schema)."
+
+// approvalsAutoText
+const approvalsAutoText = "Approvals: Auto (in-project). write / edit " +
+	"/ bash for pytest / uv / ruff inside the focus folder " +
+	"run without prompts. OS, home, and sibling trees stay jailed " +
+	"unless the user clicks Full."
+
+// rmbText
+const rmbText = "RMB local agent: You are the sole on-device model for this session. " +
+	"No separate vision stack — image attachments are file paths; use tools " +
+	"to inspect them. Context is managed automatically (Session Brief, prune, " +
+	"offload) — do not discuss memory pressure or ask the user to compress. " +
+	"Finish tool chains, keep working, prefer compact tool results and " +
+	"concrete paths."
+
+// selfConfigText
+const selfConfigText = "Self-configuration: when the user asks you to set up, enable, disable, " +
+	"change, or configure Remedy (web tools, approval mode, model/provider, " +
+	"vision, persona, their name, project folder, access scope, messengers, " +
+	"assistant prefs, RMB, house map, etc.), use Desktop Settings / product " +
+	"HTTP surfaces when those actions are not in your Tool ABI schemas. " +
+	"Do not invent snake_case settings tools. Prefer computer.* / clipboard.* " +
+	"from your schema for screen and clipboard work."
+
+// durableMemoryText
+const durableMemoryText = "Durable memory: when the user says remember / note that / don't forget / " +
+	"store in memory, ALWAYS call memory.save(content=…) with the fact " +
+	"(in addition to any automatic silent save). Confirm briefly what was stored. " +
+	"Never store secrets or API keys. Use memory.search to look up prior facts."
+
+// manualText
+const manualText = "Owner's manual / F1 Help: you CAN and SHOULD read it. Prefer " +
+	"read on docs/manual paths under the product tree when those " +
+	"paths are in access scope. Never claim F1/help is outside access scope " +
+	"for read-only manuals shipped with the product."
+
+// messengerText is the note for a turn that arrived through a chat app.
+func messengerText(origin string) string {
+	return "[Messenger surface: " + origin + "] " +
+		"You are the same Remedy as desktop chat for this person. " +
+		"Keep replies concise for chat apps; still use tools when work needs them. " +
+		"Do not introduce yourself as a new bot."
 }

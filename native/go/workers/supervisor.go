@@ -40,6 +40,9 @@ type LiveCaller struct {
 	client atomic.Pointer[ipc.Client]
 	// unavailable explains a nil client (downloading / gave up / restarting).
 	unavailable atomic.Pointer[error]
+	// onDemand starts the worker the first time something calls it. Nil for
+	// a supervisor that started its worker up front.
+	onDemand func() error
 }
 
 // Call forwards to the current client.
@@ -48,6 +51,12 @@ func (c *LiveCaller) Call(ctx context.Context, frame protocol.Frame) (protocol.F
 		return protocol.Frame{}, ipc.ErrDisconnected
 	}
 	client := c.client.Load()
+	if client == nil && c.onDemand != nil {
+		if err := c.onDemand(); err != nil {
+			return protocol.Frame{}, err
+		}
+		client = c.client.Load()
+	}
 	if client == nil {
 		if reason := c.unavailable.Load(); reason != nil && *reason != nil {
 			return protocol.Frame{}, *reason
@@ -90,6 +99,13 @@ type Supervisor struct {
 	done     chan struct{}
 	started  chan struct{}
 	startErr error
+
+	// Lazy start (NewLazyRMDYToolWorker): launched is set once a start has
+	// succeeded or is running in the background.
+	lazy      bool
+	launched  bool
+	lastFail  time.Time
+	lazyStart sync.Mutex
 }
 
 // Caller is the stable FrameCaller for this supervisor.
@@ -216,8 +232,83 @@ func (s *Supervisor) Close() error {
 	if session != nil {
 		err = session.Close()
 	}
+	// A lazy supervisor nobody called never ran its loop, so nothing will
+	// close done for it.
+	s.lazyStart.Lock()
+	neverRan := s.lazy && !s.launched
+	s.lazyStart.Unlock()
+	if neverRan {
+		return err
+	}
 	<-s.done
 	return err
+}
+
+// lazyRetryAfter is how long a failed on-demand start is remembered, so a
+// burst of tool calls does not launch an interpreter per call.
+const lazyRetryAfter = 30 * time.Second
+
+// NewLazyRMDYToolWorker returns a supervisor whose worker starts the first
+// time a tool calls it. A turn needs no Python: the prompt, her inner life,
+// memory, skills, files and the web are native. Only the tools still
+// implemented in Python (mail, calendar, voice, vision, house rules, peers)
+// reach the worker, so an owner who uses none of them never pays for an
+// interpreter: no process, no import time, no memory.
+func NewLazyRMDYToolWorker(ctx context.Context, opts RMDYToolOptions) *Supervisor {
+	s := newSupervisor(ctx, opts)
+	s.lazy = true
+	setToolsPythonState(ToolsPythonIdle, "")
+	s.caller.onDemand = s.startOnDemand
+	return s
+}
+
+func (s *Supervisor) startOnDemand() error {
+	s.lazyStart.Lock()
+	defer s.lazyStart.Unlock()
+	if s.launched {
+		return nil
+	}
+	if s.ctx.Err() != nil {
+		return ipc.ErrDisconnected
+	}
+	if !s.lastFail.IsZero() && time.Since(s.lastFail) < lazyRetryAfter {
+		return fmt.Errorf("%w: %v", ErrWorkerAttachRequired, s.startErr)
+	}
+	if PythonWorkerNeedsDownload() {
+		// Fetching an interpreter takes minutes: start it, and let this call
+		// (and any other until it lands) report that it is on its way.
+		s.launched = true
+		s.caller.set(nil, ErrToolsPythonDownloading)
+		setToolsPythonState(ToolsPythonDownloading, "")
+		go func() {
+			session, err := StartRMDYToolWorker(s.ctx, s.opts)
+			if err != nil {
+				s.logf("remedy-runtime: RMDY tool worker attach failed: %v", err)
+				setToolsPythonState(ToolsPythonFailed, err.Error())
+				s.caller.set(nil, fmt.Errorf("%w: %v", ErrWorkerAttachRequired, err))
+				s.startErr = err
+				close(s.started)
+				close(s.done)
+				return
+			}
+			s.adopt(session)
+			close(s.started)
+			s.run()
+		}()
+		return ErrToolsPythonDownloading
+	}
+	session, err := StartRMDYToolWorker(s.ctx, s.opts)
+	if err != nil {
+		s.lastFail, s.startErr = time.Now(), err
+		setToolsPythonState(ToolsPythonFailed, err.Error())
+		s.logf("remedy-runtime: RMDY tool worker start failed: %v", err)
+		return fmt.Errorf("%w: %v", ErrWorkerAttachRequired, err)
+	}
+	s.launched = true
+	s.adopt(session)
+	close(s.started)
+	go s.run()
+	return nil
 }
 
 // run is the supervision loop. It owns s.done.
@@ -358,6 +449,8 @@ const (
 	ToolsPythonDownloading ToolsPythonState = "downloading"
 	ToolsPythonReady       ToolsPythonState = "ready"
 	ToolsPythonFailed      ToolsPythonState = "failed"
+	// ToolsPythonIdle: no worker is running because nothing has needed one.
+	ToolsPythonIdle ToolsPythonState = "idle"
 )
 
 var toolsPython struct {

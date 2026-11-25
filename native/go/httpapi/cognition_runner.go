@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
+	"github.com/AhmiDarrow/RemedyAI/native/go/mind/prompt"
 	"github.com/AhmiDarrow/RemedyAI/native/go/providers"
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
@@ -39,6 +40,10 @@ type CognitionTurnRunner struct {
 	promptAssemble *tools.RMDYExecutor
 	// LiveContext is the host-observed page for money/credential checkpoints.
 	LiveContext func(sessionID string) string
+	// PromptSources feeds the native prompt (memory, plan, checklist). The
+	// server sets it; a bare runner in a test has none and sends no system
+	// prompt unless a worker is attached.
+	PromptSources prompt.Sources
 }
 
 // NewCognitionTurnRunner builds a runner on the real Tool ABI registry (Go
@@ -81,11 +86,11 @@ func (r *CognitionTurnRunner) AttachPythonWorker(caller tools.FrameCaller) error
 }
 
 func (r *CognitionTurnRunner) rmdyCall(ctx context.Context, toolID string, input map[string]any) (map[string]any, error) {
-	if r == nil || r.promptAssemble == nil {
+	if r == nil {
 		return nil, errors.New("rmdy prompt worker unavailable")
 	}
-	if out, ok := r.nativePrompt(toolID, input); ok {
-		return out, nil
+	if r.promptAssemble == nil {
+		return nil, errors.New("rmdy prompt worker unavailable")
 	}
 	raw, err := json.Marshal(input)
 	if err != nil {
@@ -220,11 +225,14 @@ type assembledPrompt struct {
 	// Goal is the user message text for this turn (prompt.assemble may rewrite
 	// it); the transcript carries the conversation itself.
 	Goal string
+	// Context is this turn's context note (native prompt only). It goes just
+	// before the owner's message so earlier turns stay a cacheable prefix.
+	Context string
 }
 
 func (r *CognitionTurnRunner) assemblePrompt(ctx context.Context, req TurnRequest) (assembledPrompt, error) {
-	if r == nil || r.promptAssemble == nil {
-		return assembledPrompt{}, errors.New("prompt.assemble requires an attached Python worker")
+	if r == nil || (r.promptAssemble == nil && !r.nativeOn()) {
+		return assembledPrompt{}, errors.New("prompt.assemble requires the native prompt or an attached Python worker")
 	}
 	input := map[string]any{
 		"message":    req.Prompt,
@@ -241,14 +249,18 @@ func (r *CognitionTurnRunner) assemblePrompt(ctx context.Context, req TurnReques
 	if proj := strings.TrimSpace(req.ProjectPath); proj != "" && !isUnsetProjectPath(proj) {
 		input["project_path"] = proj
 	}
-	var output json.RawMessage
-	if native, ok := r.nativePrompt("prompt.assemble", input); ok {
-		raw, err := json.Marshal(native)
+	if r.nativeOn() {
+		n, err := prompt.AssembleNative(r.nativePromptEnv(LoadConfig(r.HomeDir)), input)
 		if err != nil {
-			return assembledPrompt{}, err
+			return assembledPrompt{}, fmt.Errorf("native prompt: %w", err)
 		}
-		output = raw
-	} else {
+		if strings.TrimSpace(n.System) == "" {
+			return assembledPrompt{}, errors.New("native prompt returned empty system")
+		}
+		return assembledPrompt{System: n.System, Context: n.Context, Goal: firstNonEmpty(n.Goal, req.Prompt)}, nil
+	}
+	var output json.RawMessage
+	{
 		raw, err := json.Marshal(input)
 		if err != nil {
 			return assembledPrompt{}, err
@@ -301,18 +313,20 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 	userText := req.Prompt
 	// Production serve always AttachPythonWorker. When attached, assemble is
 	// mandatory — never fall back to raw prompt-only.
-	if r.promptAssemble != nil {
+	turnContext := ""
+	if r.promptAssemble != nil || r.nativeOn() {
 		assembled, err := r.assemblePrompt(ctx, req)
 		if err != nil {
 			return fmt.Errorf("prompt.assemble required: %w", err)
 		}
 		seed.System = assembled.System
 		userText = assembled.Goal
+		turnContext = assembled.Context
 	}
 	// Fire-and-forget so the reply is not delayed. The soul update runs
 	// natively; the Python turn_end runs only when a worker is attached.
 	defer r.scheduleTurnEnd(req, &out)
-	seed.Messages = seedTranscript(req, userText, r.HomeDir)
+	seed.Messages = withTurnContext(seedTranscript(req, userText, r.HomeDir), turnContext)
 
 	var (
 		emitMu  sync.Mutex
@@ -436,6 +450,14 @@ func (r *CognitionTurnRunner) finishTurn(req TurnRequest, out cognition.Outcome)
 		return
 	}
 	defer func() { _ = recover() }()
+	// With the native prompt the only thing left in the Python turn-end is
+	// turning a stretch of real tool work into a learned skill. A turn that
+	// could not teach one (a chat reply, a lookup or two) does not start, or
+	// wake, an interpreter.
+	steps := toolStepsFromOutcome(out)
+	if r.nativeOn() && !turnCouldTeachASkill(steps) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), r.learnTimeout("turn_end_timeout_s", 30*time.Second))
 	defer cancel()
 	input := map[string]any{
@@ -446,7 +468,7 @@ func (r *CognitionTurnRunner) finishTurn(req TurnRequest, out cognition.Outcome)
 		"session_id":     req.SessionID,
 		"plan_mode":      req.PlanMode,
 		"chat_mode":      req.ChatMode,
-		"tool_steps":     toolStepsFromOutcome(out),
+		"tool_steps":     steps,
 		// The Go runtime owns soul/field.json now; Python must not write it.
 		"soul_native": true,
 	}
@@ -470,7 +492,9 @@ func (r *CognitionTurnRunner) scheduleAfterToolBatch(req TurnRequest, calls []co
 }
 
 func (r *CognitionTurnRunner) finishToolBatch(req TurnRequest, calls []cognition.ToolCall, results []cognition.ToolResult) {
-	if r == nil || r.promptAssemble == nil {
+	// The Python hook fed an evidence ledger that only its own prompt read.
+	// The native prompt has no such block, so there is nothing to feed.
+	if r == nil || r.promptAssemble == nil || r.nativeOn() {
 		return
 	}
 	defer func() { _ = recover() }()
@@ -965,6 +989,9 @@ func (r *CognitionTurnRunner) runEngine(
 	model := cognition.Model(&resolvingModel{inner: live, resolve: oc.ResolveToolName})
 	model = &emittingModel{inner: model, emit: safeEmit}
 	coding := false
+	// One gate memory per turn: a reason that already sent her back to work
+	// once does not do it again.
+	gate := &prompt.ContinueState{}
 	engine := cognition.Engine{
 		Model:        model,
 		Tools:        &emittingTools{inner: r.boundTools(req), emit: safeEmit},
@@ -1002,7 +1029,7 @@ func (r *CognitionTurnRunner) runEngine(
 			r.slimEpoch(ctx, req, epoch, totalSteps, ledger, turn, safeEmit)
 		},
 		ContinueGate: func(gateCtx context.Context, turn cognition.Turn, toolCount int, last []cognition.ToolResult, verifySeen bool) (bool, string) {
-			return r.shouldContinue(gateCtx, req, turn, toolCount, last, verifySeen)
+			return r.shouldContinue(gateCtx, req, turn, toolCount, last, verifySeen, gate)
 		},
 		AfterToolBatch: func(_ context.Context, calls []cognition.ToolCall, results []cognition.ToolResult) {
 			r.scheduleAfterToolBatch(req, calls, results)
@@ -1020,7 +1047,10 @@ func (r *CognitionTurnRunner) slimEpoch(
 	turn *cognition.Turn,
 	safeEmit func(string),
 ) {
-	if r.promptAssemble == nil || turn == nil {
+	// The native system prompt stays fixed for the whole turn: rewriting it
+	// mid-turn would discard the provider's cache and every thinking block.
+	// The engine's own compaction carries the long turn.
+	if r.promptAssemble == nil || turn == nil || r.nativeOn() {
 		return
 	}
 	input := map[string]any{
@@ -1065,9 +1095,11 @@ func (r *CognitionTurnRunner) shouldContinue(
 	toolCount int,
 	last []cognition.ToolResult,
 	verifySeen bool,
+	gate *prompt.ContinueState,
 ) (bool, string) {
-	if req.ChatMode || r.promptAssemble == nil {
-		// Without RMDY never re-arm on tool_count alone (explore thrash).
+	if req.ChatMode || (r.promptAssemble == nil && !r.nativeOn()) {
+		// With nothing to judge the reply, never re-arm on tool_count alone
+		// (explore thrash).
 		return false, ""
 	}
 	if partnerRunConcluded(req.Origin, turn.LastAssistantText()) {
@@ -1087,6 +1119,13 @@ func (r *CognitionTurnRunner) shouldContinue(
 		"plan_mode":    req.PlanMode,
 		"home_dir":     r.HomeDir,
 		"project_path": req.ProjectPath,
+	}
+	if r.nativeOn() {
+		if gate == nil {
+			gate = &prompt.ContinueState{}
+		}
+		cont, nudge, _ := prompt.DecideContinue(input, gate)
+		return cont, nudge
 	}
 	out, err := r.rmdyCall(ctx, "prompt.should_continue", input)
 	if err != nil || out == nil {
@@ -1831,4 +1870,39 @@ func CollectTokens(ctx context.Context, r TurnRunner, req TurnRequest) (string, 
 	out := b.String()
 	mu.Unlock()
 	return out, err
+}
+
+// withTurnContext places this turn's context note just before the owner's
+// message (the last one). Everything earlier is then the same bytes as last
+// turn, which is what lets a provider reuse its cache for it.
+func withTurnContext(msgs []cognition.Message, context string) []cognition.Message {
+	if strings.TrimSpace(context) == "" || len(msgs) == 0 {
+		return msgs
+	}
+	note := cognition.UserText(context)
+	note.Internal = true
+	out := make([]cognition.Message, 0, len(msgs)+1)
+	out = append(out, msgs[:len(msgs)-1]...)
+	return append(out, note, msgs[len(msgs)-1])
+}
+
+// turnCouldTeachASkill is the least a turn needs before the skill learner
+// will consider it (agent_learn.should_auto_learn_from_steps): three steps,
+// three successes, and two different tools. The learner applies its stricter
+// rules itself.
+func turnCouldTeachASkill(steps []map[string]any) bool {
+	if len(steps) < 3 {
+		return false
+	}
+	ok := 0
+	names := map[string]bool{}
+	for _, s := range steps {
+		if s["success"] == true {
+			ok++
+		}
+		if n, _ := s["tool"].(string); n != "" {
+			names[n] = true
+		}
+	}
+	return ok >= 3 && len(names) >= 2
 }

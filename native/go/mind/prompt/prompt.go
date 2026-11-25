@@ -41,6 +41,15 @@ type Env struct {
 	// State is per-process memory the Python keeps on its cached runtime.
 	// Nil means a fresh process.
 	State *State
+	// Sources is the runtime-owned data (memory, plan, checklist). Nil reads
+	// as none.
+	Sources Sources
+	// LocalWindow is the context size of the local model in use, in tokens;
+	// 0 when unknown.
+	LocalWindow int
+	// HouseRulesTool reports whether the house_rules tool is registered, so
+	// the first-run offer is only made where it can be followed.
+	HouseRulesTool bool
 }
 
 func (e Env) now() time.Time {
