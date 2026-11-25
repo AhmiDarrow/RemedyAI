@@ -28,6 +28,9 @@ type skillRecord struct {
 	LibraryID     string
 	Source        string
 	Related       []string
+	Tools         []string
+	Triggers      []string
+	Meta          map[string]string
 }
 
 func (s *Server) skillsHome() string {
@@ -271,6 +274,9 @@ func loadSkillDir(dir string) (skillRecord, bool) {
 		LibraryID:     fm.LibraryID,
 		Source:        fm.Source,
 		Related:       []string{},
+		Tools:         fm.Tools,
+		Triggers:      fm.Triggers,
+		Meta:          fm.RawMeta,
 	}
 	return rec, true
 }
