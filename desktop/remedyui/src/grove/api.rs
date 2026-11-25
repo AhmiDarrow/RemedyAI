@@ -71,7 +71,7 @@ pub struct HeadChild {
 }
 
 /// A standing routine.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HeadRoutine {
     /// Routine id.
     pub routine_id: String,
@@ -91,6 +91,22 @@ pub struct HeadRoutine {
     pub last_state: String,
     /// `head` opens her conversation.
     pub target: String,
+    /// Schedule kind: every | daily | weekdays | weekly | once.
+    pub kind: String,
+    /// Minutes between runs for `every`.
+    pub every_minutes: i64,
+    /// HH:MM local.
+    pub at: String,
+    /// mon..sun for `weekly`.
+    pub days: Vec<String>,
+    /// grove | messenger | both.
+    pub deliver: String,
+    /// Last run, ISO.
+    pub last_run: String,
+    /// What the last run came to.
+    pub last_summary: String,
+    /// How many times it has run.
+    pub runs: i64,
 }
 
 /// A goal's link to a conversation and autopilot.
@@ -468,6 +484,7 @@ fn parse_head(v: &Value) -> Result<HeadOverview, String> {
             if routine_id.is_empty() {
                 return None;
             }
+            let sched = r.get("schedule").cloned().unwrap_or(Value::Null);
             Some(HeadRoutine {
                 routine_id,
                 title: str_of(&r, "title"),
@@ -478,6 +495,17 @@ fn parse_head(v: &Value) -> Result<HeadOverview, String> {
                 next_run: str_of(&r, "next_run"),
                 last_state: str_of(&r, "last_state"),
                 target: str_of(&r, "target"),
+                kind: str_of(&sched, "kind"),
+                every_minutes: i64_of(&sched, "every_minutes"),
+                at: str_of(&sched, "at"),
+                days: arr(&sched, "days")
+                    .iter()
+                    .filter_map(|d| d.as_str().map(str::to_string))
+                    .collect(),
+                deliver: str_of(&r, "deliver"),
+                last_run: str_of(&r, "last_run"),
+                last_summary: str_of(&r, "last_summary"),
+                runs: i64_of(&r, "runs"),
             })
         })
         .collect();

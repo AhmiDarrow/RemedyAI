@@ -48,27 +48,7 @@ pub(super) fn pane(ui: &Ui, grove: Grove, app: Option<App>, kind: RoomKind) -> E
         .child(errors(ui, grove.clone()))
         .child(attach_rail(ui, grove.clone()))
         .child(turn_line(ui, grove.clone()))
-        .child(mode_row(ui, &grove, &kind))
         .child(composer(ui, grove, app, kind))
-}
-
-fn mode_row(ui: &Ui, grove: &Grove, kind: &RoomKind) -> El {
-    // Talk / Plan / Build live with the composer — the request's mode, not a
-    // second title-bar switcher.
-    match kind {
-        RoomKind::Home | RoomKind::Alongside => {
-            let unit = ui.theme().spacing.unit;
-            super::view::mode_chips(ui, grove).layout(|l| {
-                l.margin = Insets {
-                    start: unit * 2.0,
-                    end: unit * 2.0,
-                    top: 0.0,
-                    bottom: 0.0,
-                };
-            })
-        }
-        RoomKind::Goal(_) => ui.el("grove-mode-off"),
-    }
 }
 
 fn feed(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {

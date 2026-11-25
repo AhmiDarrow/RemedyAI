@@ -10,14 +10,12 @@ use std::rc::Rc;
 
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
-use remedy_ui::input::{Key, KeyEvent};
 use remedy_ui::layout::{Align, Axis, Justify, Length, Position};
 use remedy_ui::reactive::Signal;
 use remedy_ui::style::{States, StylePatch};
 use remedy_ui::widgets as w;
 use remedy_ui::{App, El, Ui, show};
 
-use crate::studio::WorkMode;
 
 use super::api::{self, GoalLink, LifeGoal, LifeTask};
 use super::logic::{self, Moment, MomentKind};
@@ -180,10 +178,6 @@ pub(super) fn frame(
                 .background(colors.bg)
                 .foreground(colors.text),
         )
-        .on_key_capture({
-            let g = grove.clone();
-            move |e| on_mode_key(e, &g)
-        })
         .child(home_bar(ui, grove.clone()))
         .child(goal_bar(ui, grove.clone()))
         .child(child_bar(ui, grove.clone()))
@@ -217,20 +211,6 @@ fn studio_face(ui: &Ui, grove: Grove) -> El {
         l.min_height = Length::Px(0.0);
         l.width = Length::Percent(1.0);
     })
-}
-
-/// Ctrl+B cycles Talk, Plan, and Build. It is on the Grove frame, so typing
-/// in Studio is left to Studio.
-fn on_mode_key(e: &KeyEvent, grove: &Grove) -> bool {
-    if !e.pressed || e.composing {
-        return false;
-    }
-    let m = &e.modifiers;
-    if m.ctrl && !m.shift && !m.alt && !m.meta && e.key == Key::char('b') {
-        grove.cycle_mode();
-        return true;
-    }
-    false
 }
 
 fn page_key(grove: &Grove) -> String {
@@ -367,7 +347,6 @@ fn goal_bar(ui: &Ui, grove: Grove) -> El {
                         .layout(|l| l.width = Length::Percent(1.0))
                         .child(crumb)
                         .child(tabs)
-                        .child(mode_chips(&ui, &grove))
                         .child(spacer(&ui)),
                 )
                 .child(w::divider(&ui, false))
@@ -412,7 +391,6 @@ fn child_bar(ui: &Ui, grove: Grove) -> El {
                         .padding(bar_insets(unit))
                         .layout(|l| l.width = Length::Percent(1.0))
                         .child(crumb)
-                        .child(mode_chips(&ui, &grove))
                         .child(spacer(&ui)),
                 )
                 .child(w::divider(&ui, false))
@@ -559,44 +537,6 @@ fn place_tab(
     w::column(ui).align(Align::Stretch).child(b).child(rule)
 }
 
-pub(super) fn mode_chips(ui: &Ui, grove: &Grove) -> El {
-    let unit = ui.theme().spacing.unit;
-    let mut row = w::row(ui)
-        .align(Align::Center)
-        .gap(unit)
-        .semantics(Semantics::new(Role::Group).label("How we work"));
-    let modes = [
-        (
-            WorkMode::Chat,
-            "Talk",
-            "Just talk — no tools unless you ask",
-        ),
-        (WorkMode::Plan, "Plan", "Outline first, then build"),
-        (WorkMode::Build, "Build", "Do the work when you ask"),
-    ];
-    for (mode, label, tip) in modes {
-        let g = grove.clone();
-        let b = w::button(ui, label, move || g.set_mode(mode));
-        let paint = b.clone();
-        let colors = ui.theme().colors.clone();
-        let g = grove.clone();
-        let b = b.bind(move || {
-            let on = g.studio.mode.get() == mode;
-            paint.state(States::SELECTED, on);
-            let _ = paint.clone().style(crate::tokens::chip(&colors, on).weight(550.0));
-        });
-        w::tooltip(&b, tip);
-        let g = grove.clone();
-        row = row.child(b.semantics(move || {
-            Semantics::new(Role::Button)
-                .label(label.to_string())
-                .checked(g.studio.mode.get() == mode)
-                .action(Action::Click)
-        }));
-    }
-    row
-}
-
 fn chip_style(colors: &remedy_ui::style::ColorRoles, on: bool) -> StylePatch {
     if on {
         StylePatch::new()
@@ -640,7 +580,19 @@ fn studio_handoff_card(ui: &Ui, grove: Grove) -> El {
                     l.width = Length::Percent(1.0);
                     l.min_width = Length::Px(0.0);
                 });
-            let note = w::text(&ui, crate::messages().text(&ui, "grove-handoff-body"))
+            // Live status of the background session: working until its turn ends.
+            let note = w::text(&ui, "")
+                .text({
+                    let (g, ui) = (grove.clone(), ui.clone());
+                    move || {
+                        let key = if g.studio.streaming.get() {
+                            "grove-handoff-working"
+                        } else {
+                            "grove-handoff-ready"
+                        };
+                        crate::messages().text(&ui, key)
+                    }
+                })
                 .style(crate::tokens::typo(crate::tokens::META).foreground(colors.muted))
                 .layout(|l| {
                     l.width = Length::Percent(1.0);
@@ -650,7 +602,7 @@ fn studio_handoff_card(ui: &Ui, grove: Grove) -> El {
             let open = w::button(&ui, crate::messages().text(&ui, "grove-handoff-open"), move || {
                 g.show_studio();
             })
-            .style(crate::tokens::primary_button(&colors))
+            .variant("quiet")
             .semantics(
                 Semantics::new(Role::Button)
                     .label(crate::messages().text(&ui, "grove-handoff-open"))
@@ -673,7 +625,7 @@ fn studio_handoff_card(ui: &Ui, grove: Grove) -> El {
                     bottom: unit * 2.0,
                     start: unit * 3.0,
                 };
-                l.width = Length::Percent(1.0);
+                // No fixed width: 100% plus the margins ran past the column.
                 l.min_width = Length::Px(0.0);
             })
         }

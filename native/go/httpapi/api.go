@@ -26,8 +26,9 @@ import (
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
-// Version matches pyproject.toml; scripts/sync_version.py stamps this const.
-const Version = "0.70.5"
+// Version is the shipped product version the Web UI and update check report.
+// It follows the desktop (desktop/remedyui/Cargo.toml), not the Python package.
+const Version = "1.0.0"
 
 // Config controls the minimal local API server.
 type Config struct {
