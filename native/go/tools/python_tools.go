@@ -493,6 +493,7 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 				"session_id":{"type":"string"},
 				"plan_mode":{"type":"boolean"},
 				"chat_mode":{"type":"boolean"},
+				"soul_native":{"type":"boolean","description":"The Go runtime already updated the soul field; Python skips it"},
 				"tool_steps":{
 					"type":"array",
 					"items":{

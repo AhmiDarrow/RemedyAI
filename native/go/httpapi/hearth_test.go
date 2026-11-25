@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
-	"github.com/AhmiDarrow/RemedyAI/native/go/ipc"
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
 
@@ -53,7 +51,7 @@ func TestHearthReturnSpeaksOnceFromFinishedNight(t *testing.T) {
 	}
 	night := "" +
 		`{"ts":1700001300,"act":"dream","detail":"episodes","ok":false}` + "\n" +
-		`{"ts":1700001400,"act":"dream","detail":"episodes","ok":true}` + "\n" +
+		`{"ts":1700001400,"act":"dream","detail":"consolidate 4 episodes","ok":true}` + "\n" +
 		`{"ts":1700001500,"act":"tend","detail":"the grocery list","ok":true}` + "\n"
 	if err := os.WriteFile(journal, []byte(night), 0o600); err != nil {
 		t.Fatal(err)
@@ -211,32 +209,71 @@ func TestHearthReadyLineNamesTheNextStep(t *testing.T) {
 	}
 }
 
-func TestHearthPulseLearnCallsPartnerImprove(t *testing.T) {
-	serverReg := tools.NewRegistry()
-	if err := tools.RegisterPythonWorkerLocalMirrors(serverReg); err != nil {
+func TestHearthMindRunsNativelyWithoutPython(t *testing.T) {
+	s, home := newPartnerTestServer(t)
+	r := NewCognitionTurnRunner(&cognition.ScriptedModel{})
+	r.HomeDir = home
+	for i := 0; i < 4; i++ {
+		r.finishTurn(TurnRequest{Prompt: "remind me tomorrow to water the tomato plants", SessionID: "s1"},
+			cognition.Outcome{Text: "Will do."})
+	}
+	if _, err := os.Stat(filepath.Join(home, "soul", "field.json")); err != nil {
+		t.Fatal("the soul must update after a turn with no worker")
+	}
+	// The owner grants her nights through settings; the desktop reads it back.
+	if _, err := s.applySettingsUpdate(map[string]any{"vigil_enabled": true}); err != nil {
 		t.Fatal(err)
 	}
-	clientConn, serverConn := net.Pipe()
-	defer clientConn.Close()
-	defer serverConn.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go ipc.ServeConn(ctx, serverConn, tools.WorkerHandler{Registry: serverReg})
-	client := ipc.NewClient(clientConn)
-	defer client.Close()
-	counter := &countingFrameCaller{inner: client}
+	if s.settingsPayload()["vigil_enabled"] != true {
+		t.Fatal("settings must report the vigil grant")
+	}
+	if _, err := os.Stat(filepath.Join(home, "soul", "dream.json")); err == nil {
+		// A post-turn dream ran; let its cooldown pass for the night tick.
+		_ = os.Remove(filepath.Join(home, "soul", "dream.json"))
+	}
+	s.hearthPulseNight(context.Background())
+	entries, _ := os.ReadFile(filepath.Join(home, "soul", "vigil_journal.jsonl"))
+	if !strings.Contains(string(entries), `"act":"dream"`) {
+		t.Fatalf("night tick must journal a dream: %s", entries)
+	}
+	_ = s.hearthPulseLearn(context.Background())
+	if _, err := os.Stat(filepath.Join(home, "alive.json")); err != nil {
+		t.Fatal("the learn tick must write alive.json")
+	}
+	inner := s.innerPublic()
+	if inner["nights"] != 1 || inner["dreams"] != 1 {
+		t.Fatalf("inner life must read vigil.json totals: %v", inner)
+	}
+	// The totals outlive the journal ring.
+	_ = os.Remove(filepath.Join(home, "soul", "vigil_journal.jsonl"))
+	if inner := s.innerPublic(); inner["nights"] != 1 || inner["dreams"] != 1 {
+		t.Fatalf("totals must not come from the journal: %v", inner)
+	}
+	log := readLearnLog(home, 20)
+	kinds := map[string]bool{}
+	for _, row := range log {
+		kinds[row["kind"].(string)] = true
+	}
+	if !kinds["soul"] || !kinds["pulse"] || !kinds["improve"] {
+		t.Fatalf("learn log kinds=%v", kinds)
+	}
+	if n := wipePersonaFiles(home); n == 0 {
+		t.Fatal("wipe removed nothing")
+	}
+	for _, p := range []string{"alive.json", "soul/vigil.json", "soul/dream.json", "soul/proprioception.json"} {
+		if _, err := os.Stat(filepath.Join(home, p)); err == nil {
+			t.Fatalf("%s survived the wipe", p)
+		}
+	}
+}
 
-	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
-		{{Text: "x", Done: true}},
-	}}
-	r := NewCognitionTurnRunner(model)
-	if err := r.AttachPythonWorker(counter); err != nil {
-		t.Fatal(err)
+func TestHearthPhraseSaysWhatSheDreamed(t *testing.T) {
+	got := hearthPhrase(hearthJournal{Act: "dream", Detail: "Toward the garden: act first", Ok: true})
+	if got != "dreamed on “Toward the garden: act first”" {
+		t.Fatalf("phrase=%q", got)
 	}
-	s := &Server{runner: r}
-	s.hearthPulseLearn(context.Background())
-	if counter.improve.Load() != 1 {
-		t.Fatalf("hearthPulseLearn must call partner.improve, got %d", counter.improve.Load())
+	if hearthPhrase(hearthJournal{Act: "dream", Ok: true}) != "dreamed on our recent episodes" {
+		t.Fatal("empty detail keeps the old phrase")
 	}
 }
 

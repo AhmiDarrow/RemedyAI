@@ -326,11 +326,11 @@ def consolidate_from_dream(home: str | Path | None, field: Any = None) -> dict[s
     state = load_alive(home)
     beliefs = list(state.get("beliefs") or [])
     added = 0
-    user_name = "Joe"
+    user_name = "my partner"
     with suppress(Exception):
         from remedy.interfaces.config import load_config
 
-        user_name = str(load_config().get("user_name") or "").strip() or "Joe"
+        user_name = str(load_config().get("user_name") or "").strip() or "my partner"
     episodes = []
     pledges: list[str] = []
     rapport = 0.55

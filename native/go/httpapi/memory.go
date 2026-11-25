@@ -6,11 +6,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/mind/soul"
 )
 
 const memoryPersonaWipeConfirm = "WIPE"
@@ -51,33 +52,6 @@ CREATE TABLE IF NOT EXISTS user_facts (
 CREATE INDEX IF NOT EXISTS idx_user_facts_user ON user_facts(user_id);
 `
 
-var (
-	jobResumeFactRE = regexp.MustCompile(`(?i)^\s*(?:` +
-		`stay with:\s*continue|` +
-		`continue:\s|` +
-		`keep going|` +
-		`resume (?:the |this )?(?:task|job|build|work)|` +
-		`pick up where|` +
-		`don'?t stop|` +
-		`continue remaining work|` +
-		`from the last successful tool` +
-		`)`)
-	// RE2 has no lookbehind; approximate Python's path / build-arc residue gate.
-	workResidueRE = regexp.MustCompile(`(?i)(?:` +
-		`(?:^|[^A-Za-z0-9_])[a-z]:[\\/]|` +
-		`(?:^|[^A-Za-z0-9_])/(?:home|users|mnt|srv|opt|var|tmp|etc|c|d)/|` +
-		`\bintent=|` +
-		`\|\s*user:|` +
-		`\|\s*did:|` +
-		`\|\s*tasks:|` +
-		`retry or work around|` +
-		`last failing tool|` +
-		`last successful tool|` +
-		`(?:^|:\s*)continue:\s|` +
-		`(?:^|:\s*)(?:resume|continue) (?:the |this )?(?:build|job|task|work)\b` +
-		`)`)
-)
-
 func (s *sessionStore) ensurePartnerMemorySchema() error {
 	if s == nil || s.db == nil {
 		return sql.ErrConnDone
@@ -86,16 +60,8 @@ func (s *sessionStore) ensurePartnerMemorySchema() error {
 	return err
 }
 
-func looksLikeWorkResidue(text string) bool {
-	t := strings.TrimSpace(text)
-	if t == "" {
-		return false
-	}
-	if jobResumeFactRE.MatchString(t) {
-		return true
-	}
-	return workResidueRE.MatchString(t)
-}
+// looksLikeWorkResidue is the one residue rule, shared with the native soul.
+func looksLikeWorkResidue(text string) bool { return soul.LooksLikeWorkResidue(text) }
 
 func isHiveSessionID(sessionID string) bool {
 	return strings.HasPrefix(strings.TrimSpace(sessionID), "hive_")
@@ -608,35 +574,12 @@ func (s *Server) handleMemoryPersonaWipe(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, stats)
 }
 
+// resetSoulPersonaFiles keeps the partner's name, presentation and vow and
+// forgets the rest, under the field's lock (no cache can re-save the old one).
 func resetSoulPersonaFiles(home string) bool {
-	path := filepath.Join(home, "soul", "field.json")
-	raw := map[string]any{}
-	_ = readJSONFile(path, &raw)
-	name := "Remedy"
-	gender := "female"
-	if v := strings.TrimSpace(asString(raw["identity_name"])); v != "" {
-		name = v
-	}
-	if v := strings.ToLower(strings.TrimSpace(asString(raw["identity_gender"]))); v == "female" || v == "male" || v == "neutral" {
-		gender = v
-	}
-	fresh := map[string]any{
-		"identity_name":   name,
-		"identity_gender": gender,
-		"identity_vow":    raw["identity_vow"],
-		"relational": map[string]any{
-			"rapport":      0.5,
-			"open_threads": []any{},
-		},
-		"pledges":          []any{},
-		"self_habits":      []any{},
-		"future_dreams":    []any{},
-		"episodes":         []any{},
-		"organism_lessons": []any{},
-		"pledge_traces":    map[string]any{},
-	}
-	_ = os.MkdirAll(filepath.Dir(path), 0o700)
-	return writeJSONAtomic(path, fresh) == nil
+	env := mindEnv(home)
+	env.Home = home
+	return soul.Reset(env) == nil
 }
 
 func wipePartnerStateFiles(home string) int {
@@ -695,14 +638,14 @@ func wipePersonaFiles(home string) int {
 		filepath.Join(home, "soul", "vigil.json"),
 		filepath.Join(home, "soul", "vigil_journal.jsonl"),
 		filepath.Join(home, "soul", "hearth.json"),
+		filepath.Join(home, "soul", "dream.json"),
+		filepath.Join(home, "alive.json"),
 		filepath.Join(home, "facts.jsonl"),
 		filepath.Join(home, "myelin", "ledger.json"),
 	}
+	// Under each file's lock, so a running tick cannot re-save what was wiped.
 	for _, p := range paths {
-		if _, err := os.Stat(p); err != nil {
-			continue
-		}
-		if os.Remove(p) == nil {
+		if removed, _ := soul.RemoveState(p); removed {
 			n++
 		}
 	}
