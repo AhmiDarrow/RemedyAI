@@ -166,8 +166,9 @@ func TestPeerAskA2AExactRequest(t *testing.T) {
 	if string(raw) != want {
 		t.Fatalf("got %s\nwant %s", raw, want)
 	}
-	if len(peerAuditLines(t, s)) != 0 {
-		t.Fatal("named-peer path must not audit (Python parity)")
+	// Every outbound message is audited, including one to a peer named by id.
+	if lines := peerAuditLines(t, s); len(lines) != 1 || lines[0]["direction"] != "out" || lines[0]["peer_id"] != "x" {
+		t.Fatalf("a named-peer message must leave one audit line: %v", lines)
 	}
 }
 
@@ -224,13 +225,14 @@ func TestPeerAskRefusals(t *testing.T) {
 	}
 }
 
-// The Python never checks `enabled` for a peer named by id; this pins that.
-func TestPeerAskDisabledNamedPeerParity(t *testing.T) {
+// A peer the owner turned off is not contacted, even when named by id. (The
+// Python contacted it.)
+func TestPeerAskDisabledNamedPeerIsRefused(t *testing.T) {
 	s := newInteropServer(t, false)
 	f, srv := newPeerFake(t, 200, peerTaskReply)
 	peerWriteStore(t, s, map[string]any{"x": peerEntry(srv.URL, "a2a", false)})
 	out, _ := toolPeerAsk(context.Background(), s, map[string]any{"question": "hi", "peer_id": "x"})
-	if out["ok"] != true || f.count() != 1 {
+	if out["ok"] != false || out["error"] != "peer is disabled" || f.count() != 0 {
 		t.Fatalf("%v count=%d", out, f.count())
 	}
 }
@@ -307,10 +309,11 @@ func TestPeerDelegateThenStatus(t *testing.T) {
 		}
 	}
 	lines := peerAuditLines(t, s)
-	if len(lines) != 2 {
+	// One line for the delegated message, then one per status read.
+	if len(lines) != 3 || lines[0]["action"] != "delegate" || lines[0]["direction"] != "out" {
 		t.Fatalf("audit %v", lines)
 	}
-	l := lines[0]
+	l := lines[1]
 	if l["direction"] != "in" || l["protocol"] != "mcp" || l["peer_id"] != nil || l["action"] != "task_status" || l["summary"] != "t-9" {
 		t.Fatalf("%v", l)
 	}
@@ -405,7 +408,7 @@ func TestPeerReplyShapes(t *testing.T) {
 	cases := map[string]string{
 		`{"result":{"id":"t2","status":{"message":{"parts":[{"kind":"text","text":"flat task"}]}}}}`: "x: flat task",
 		`{"result":{"task":{"id":"t3","status":{}}}}`:                                                "x: (empty)",
-		`{"result":{"message":{"parts":[{"text":"ril1 abcdense"}]}}}`:                        "x: [inner note]",
+		`{"result":{"message":{"parts":[{"text":"ril1 abcdense"}]}}}`:                                "x: [inner note]",
 	}
 	for reply, want := range cases {
 		s := newInteropServer(t, false)
@@ -435,5 +438,16 @@ func TestPeerRedactAndAuditRotate(t *testing.T) {
 	st, _ := os.Stat(filepath.Join(s.interopDir(), "audit.jsonl"))
 	if st.Size() > peerAuditMaxBytes+2000 {
 		t.Fatalf("size %d", st.Size())
+	}
+}
+
+func TestInteropRedactionLeavesTextAloneWithoutAToken(t *testing.T) {
+	t.Setenv(interopTokenEnv, "")
+	if got := redactInteropText("hello"); got != "hello" {
+		t.Fatalf("with no token set the text must be unchanged, got %q", got)
+	}
+	t.Setenv(interopTokenEnv, "fake-token-value")
+	if got := redactInteropText("auth fake-token-value ok"); got != "auth *** ok" {
+		t.Fatalf("got %q", got)
 	}
 }
