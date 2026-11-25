@@ -543,6 +543,23 @@ func TestPartnerToolsThroughRegistry(t *testing.T) {
 	if refused["ok"] != false || !strings.Contains(refused["error"].(string), "cannot start children") {
 		t.Fatalf("grandchild must be refused in words: %v", refused)
 	}
+	// Her face reads her own life: counted from the journal, never estimated.
+	if err := os.MkdirAll(filepath.Dir(s.facePath("soul/x")), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	journal := `{"ts":1,"act":"dream","detail":"a","ok":true}` + "\n" + `{"ts":2,"act":"tidy","detail":"b","ok":true}` + "\n" + `{"ts":3,"act":"dream","detail":"c","ok":false}` + "\n"
+	if err := os.WriteFile(s.facePath("soul/vigil_journal.jsonl"), []byte(journal), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inner := s.innerPublic()
+	if inner["nights"] != 2 || inner["dreams"] != 1 || inner["activity"] != "" {
+		t.Fatalf("inner life must count finished acts only: %v", inner)
+	}
+	s.innerAct.Store("learning")
+	if s.innerPublic()["activity"] != "learning" {
+		t.Fatal("inner activity must report what she is doing now")
+	}
+	s.innerAct.Store("")
 	// The seed is the setup: same people and install, same face; any change, another.
 	a := faceSeedFor("Ahmi", "Remedy", "salt-1", 0)
 	if a != faceSeedFor("Ahmi", "Remedy", "salt-1", 0) {
