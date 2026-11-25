@@ -37,12 +37,50 @@ pub fn terminal_context_items(has_selection: bool) -> Vec<&'static str> {
 }
 
 /// "Terminal" on Linux and macOS, "PowerShell" on Windows.
-pub fn shell_label() -> &'static str {
-    if cfg!(windows) {
-        "PowerShell"
-    } else {
-        "Terminal"
+/// With a shell picked in the toolbar, that shell's name.
+pub fn shell_label() -> String {
+    if !crate::runtime::spawn_disabled() {
+        let prefs = crate::prefs::DesktopPrefs::load();
+        if !prefs.terminal_shell.trim().is_empty() {
+            return super::pty::choose(&prefs.terminal_shell).label;
+        }
     }
+    if cfg!(windows) { "PowerShell" } else { "Terminal" }.into()
+}
+
+/// Saves the shell for every terminal from now on. Empty id is the default.
+fn save_shell(id: &str) {
+    let mut prefs = crate::prefs::DesktopPrefs::load();
+    prefs.terminal_shell = id.to_string();
+    prefs.save();
+}
+
+/// "Shell" select for the toolbar: the machine's shells, default first, plus a
+/// custom path from desktop.json when one is set. Picking one restarts the shell.
+fn shell_picker(ui: &Ui, model: &TerminalModel) -> El {
+    let saved = crate::prefs::DesktopPrefs::load().terminal_shell;
+    let mut list = super::pty::shells();
+    let current = super::pty::choose(&saved);
+    if !list.contains(&current) {
+        list.push(current.clone());
+    }
+    let index = list.iter().position(|s| *s == current).unwrap_or(0);
+    let labels: Vec<String> = list.iter().map(|s| s.label.clone()).collect();
+    let picked: Signal<usize> = Signal::new(index);
+    let seen = Rc::new(Cell::new(index));
+    let m = model.clone();
+    w::select(ui, "Shell", labels, picked).bind(move || {
+        let i = picked.get();
+        if i == seen.get() {
+            return;
+        }
+        seen.set(i);
+        if let Some(s) = list.get(i) {
+            // The first entry is the default: store nothing, so it follows the machine.
+            save_shell(if i == 0 { "" } else { &s.id });
+            m.restart();
+        }
+    })
 }
 
 /// Monospace fallbacks, then the configured code face (AhmiPrint by default).
@@ -645,9 +683,12 @@ fn chrome(ui: &Ui, model: &TerminalModel, unit: f32, colors: &remedy_ui::style::
         format!("Restart {label} in session project folder"),
     );
 
-    w::overflow_row(ui)
-        .gap(unit)
-        .flex(status)
+    let mut bar = w::overflow_row(ui).gap(unit).flex(status);
+    // Previews show a fixed screen with no shell to choose.
+    if !model.preview {
+        bar = bar.child("Shell", shell_picker(ui, model));
+    }
+    bar
         .child("Clear terminal", clear)
         .child("Restart", restart)
         .el()
