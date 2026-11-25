@@ -8,13 +8,12 @@ import (
 	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/mind/prompt"
+	"github.com/AhmiDarrow/RemedyAI/native/go/providers"
 )
 
-// The native prompt.* port (native/go/mind/prompt) sits behind the
-// native_prompt config key, default off. With it off nothing here runs.
-// With it on, an operation uses the Go port only when the port covers every
-// section that call needs (prompt.Missing is empty); otherwise the Python
-// worker answers, exactly as before.
+// The prompt is built in Go (native/go/mind/prompt). The Python worker's
+// prompt.* hooks are used only when native_prompt = false in config.toml and
+// a worker is attached.
 
 // nativePromptState is the per-process memory the Python worker keeps on
 // its cached runtime (the warm skills catalog).
@@ -22,11 +21,6 @@ var nativePromptState = struct {
 	sync.Mutex
 	st prompt.State
 }{}
-
-// useNativePrompt is the routing decision for one call.
-func useNativePrompt(cfg ConfigMap, missing []string) bool {
-	return cfgBool(cfg, "native_prompt", false) && len(missing) == 0
-}
 
 // nativeSkillCatalog is the installed skill library, ranked by the native
 // skill.search.
@@ -63,54 +57,32 @@ func helpReadRoots(home string) []string {
 	return out
 }
 
+// nativeOn reports whether this runner builds its prompt in Go. It is the
+// default wherever the server supplied its stores; native_prompt = false in
+// config.toml sends an attached worker the prompt calls instead.
+func (r *CognitionTurnRunner) nativeOn() bool {
+	if r == nil || r.PromptSources == nil {
+		return false
+	}
+	return cfgBool(LoadConfig(r.HomeDir), "native_prompt", true)
+}
+
 func (r *CognitionTurnRunner) nativePromptEnv(cfg ConfigMap) prompt.Env {
 	home := ResolveHomeDir(r.HomeDir)
 	userHome, _ := os.UserHomeDir()
 	s := &Server{homeDir: r.HomeDir}
+	houseRules := false
+	if r.Registry != nil {
+		_, err := r.Registry.Latest("house_rules")
+		houseRules = err == nil
+	}
 	return prompt.Env{
 		Home: home, UserHome: userHome, HelpRoots: helpReadRoots(home),
 		Clock: time.Now, Config: map[string]any(cfg),
-		Skills: nativeSkillCatalog{recs: s.discoverSkills()},
-		State:  &nativePromptState.st,
+		Skills:         nativeSkillCatalog{recs: s.discoverSkills()},
+		State:          &nativePromptState.st,
+		Sources:        r.PromptSources,
+		LocalWindow:    providers.LocalContextWindow,
+		HouseRulesTool: houseRules,
 	}
-}
-
-// nativePrompt answers op in-process when native_prompt is on and the port
-// is complete for this call. ok=false means: call the Python worker.
-func (r *CognitionTurnRunner) nativePrompt(op string, input map[string]any) (map[string]any, bool) {
-	if r == nil {
-		return nil, false
-	}
-	cfg := LoadConfig(r.HomeDir)
-	if !cfgBool(cfg, "native_prompt", false) {
-		return nil, false
-	}
-	env := r.nativePromptEnv(cfg)
-	if !useNativePrompt(cfg, prompt.Missing(op, env, input)) {
-		return nil, false
-	}
-	nativePromptState.Lock()
-	defer nativePromptState.Unlock()
-	var res prompt.Result
-	switch op {
-	case prompt.OpAssemble:
-		var err error
-		if res, err = prompt.Assemble(env, input); err != nil {
-			return nil, false
-		}
-	case prompt.OpShouldContinue:
-		res = prompt.ShouldContinue(env, input)
-	case prompt.OpSlimEpoch:
-		res = prompt.SlimEpoch(env, input)
-	case prompt.OpAfterToolBatch:
-		res = prompt.AfterToolBatch(env, input)
-	case prompt.OpTurnEnd:
-		res = prompt.TurnEnd(env, input)
-	default:
-		return nil, false
-	}
-	if !res.Complete() || res.Output == nil {
-		return nil, false
-	}
-	return res.Output, true
 }

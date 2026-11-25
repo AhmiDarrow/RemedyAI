@@ -132,13 +132,38 @@ const (
 	turnHistoryContentChars = 4_000
 )
 
+// turnHistoryWindow is how many of a session's total messages a turn carries.
+// The window's first message moves only every turnHistoryMessages messages,
+// not on every turn: a provider caches a request by prefix, so a window that
+// slid by two each turn made it re-read the whole history every time. The
+// result is between turnHistoryMessages and twice that, less one.
+func turnHistoryWindow(total int) int {
+	if total <= turnHistoryMessages {
+		return turnHistoryMessages
+	}
+	start := (total - turnHistoryMessages) / turnHistoryMessages * turnHistoryMessages
+	return total - start
+}
+
+// countMessages is how many rows a session has; 0 when it cannot be read.
+func (s *sessionStore) countMessages(sessionID string) int {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM chat_messages WHERE session_id = ?`, sessionID).Scan(&n)
+	return n
+}
+
 // turnHistory returns the most recent session messages, oldest first, as
 // prompt.assemble history rows. Call it before persisting the current prompt.
 func (s *Server) turnHistory(sid string) []map[string]any {
 	if s == nil || s.sessions == nil {
 		return nil
 	}
-	msgs, err := s.sessions.ListMessages(sid, turnHistoryMessages, 0)
+	msgs, err := s.sessions.ListMessages(sid, turnHistoryWindow(s.sessions.countMessages(sid)), 0)
 	if err != nil {
 		return nil
 	}

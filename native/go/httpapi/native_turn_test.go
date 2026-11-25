@@ -1,0 +1,77 @@
+package httpapi
+
+import (
+	"testing"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
+)
+
+func TestTurnHistoryWindowMovesInSteps(t *testing.T) {
+	// The first carried message is total-window; it must stay put for a run
+	// of turns, then jump, and the window never drops below the minimum.
+	prevStart, moves := -1, 0
+	for total := 0; total <= 120; total++ {
+		w := turnHistoryWindow(total)
+		if total >= turnHistoryMessages && (w < turnHistoryMessages || w >= 2*turnHistoryMessages) {
+			t.Fatalf("total %d: window %d outside [%d, %d)", total, w, turnHistoryMessages, 2*turnHistoryMessages)
+		}
+		start := total - w
+		if start < 0 {
+			start = 0
+		}
+		if start < prevStart {
+			t.Fatalf("total %d: window start went backwards (%d after %d)", total, start, prevStart)
+		}
+		if start != prevStart {
+			moves++
+		}
+		prevStart = start
+	}
+	if moves > 120/turnHistoryMessages+1 {
+		t.Fatalf("the window start moved %d times over 120 messages; it should move about every %d", moves, turnHistoryMessages)
+	}
+}
+
+func TestTurnContextGoesJustBeforeTheOwnersMessage(t *testing.T) {
+	msgs := []cognition.Message{
+		cognition.UserText("earlier question"),
+		{Role: cognition.RoleAssistant, Blocks: []cognition.Block{cognition.TextBlock("earlier answer")}},
+		cognition.UserText("new question"),
+	}
+	out := withTurnContext(msgs, "[Turn context]\nmood")
+	if len(out) != 4 {
+		t.Fatalf("want 4 messages, got %d", len(out))
+	}
+	if out[0].Blocks[0].Text != "earlier question" || out[1].Blocks[0].Text != "earlier answer" {
+		t.Fatal("earlier turns must be untouched, so their bytes match last turn's request")
+	}
+	if !out[2].Internal || out[2].Role != cognition.RoleUser || out[2].Blocks[0].Text != "[Turn context]\nmood" {
+		t.Fatalf("the note is an internal user message before the goal: %+v", out[2])
+	}
+	if out[3].Blocks[0].Text != "new question" || out[3].Internal {
+		t.Fatalf("the owner's message stays last: %+v", out[3])
+	}
+	if got := withTurnContext(msgs, "  "); len(got) != 3 {
+		t.Fatal("no context means no note")
+	}
+}
+
+func TestOnlyRealToolWorkCanTeachASkill(t *testing.T) {
+	step := func(tool string, ok bool) map[string]any { return map[string]any{"tool": tool, "success": ok} }
+	cases := []struct {
+		name  string
+		steps []map[string]any
+		want  bool
+	}{
+		{"a chat reply", nil, false},
+		{"two lookups", []map[string]any{step("read", true), step("grep", true)}, false},
+		{"one tool three times", []map[string]any{step("read", true), step("read", true), step("read", true)}, false},
+		{"mostly failed", []map[string]any{step("read", true), step("bash", false), step("edit", false)}, false},
+		{"read, edit, test", []map[string]any{step("read", true), step("edit", true), step("bash", true)}, true},
+	}
+	for _, c := range cases {
+		if got := turnCouldTeachASkill(c.steps); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
+	}
+}

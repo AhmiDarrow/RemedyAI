@@ -199,6 +199,7 @@ func New(cfg Config) (*Server, error) {
 		if cr.HomeDir == "" {
 			cr.HomeDir = home
 		}
+		cr.PromptSources = serverPromptSources{s}
 		if cr.Registry != nil {
 			cr.LiveContext = func(sid string) string {
 				if b := s.bridge(); b != nil {
