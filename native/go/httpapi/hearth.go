@@ -373,12 +373,18 @@ func (s *Server) startHearthLoop(ctx context.Context) {
 			case now := <-orient.C:
 				s.hearthTick(now)
 			case <-night.C:
-				s.hearthPulseNight(loopCtx)
+				// Her own work waits while the owner has a turn running.
+				if !s.partnerOwnerBusy() {
+					s.hearthPulseNight(loopCtx)
+				}
 			case <-learn.C:
-				changed := s.hearthPulseLearn(loopCtx)
+				changed := false
+				if !s.partnerOwnerBusy() {
+					changed = s.hearthPulseLearn(loopCtx)
+				}
 				cfg = LoadConfig(s.homeDir)
 				def, min, max, heavy = learnClockFrom(cfg)
-				interval = nextLearnIntervalBounds(interval, changed, systemBusy(), s.recentlyHeavyWindow(time.Now(), heavy), def, min, max)
+				interval = nextLearnIntervalBounds(interval, changed, s.hearthBusy(), s.recentlyHeavyWindow(time.Now(), heavy), def, min, max)
 				learn.Reset(interval)
 			}
 		}
@@ -412,7 +418,9 @@ func (s *Server) hearthPulseNight(ctx context.Context) {
 	defer cancel()
 	s.innerAct.Store("vigil")
 	defer s.innerAct.Store("")
-	_ = cr.PulsePartner(ctx)
+	started := time.Now()
+	// A failed night tick goes in the learn log, like every other inner call.
+	cr.noteLearnCall("pulse", started, ctx, cr.PulsePartner(ctx))
 }
 
 // hearthPulseLearn runs one unattended organism learning tick (skill
@@ -494,6 +502,19 @@ func maxDuration(a, b time.Duration) time.Duration {
 		return a
 	}
 	return b
+}
+
+// hearthBusy is true when this PC should not be given more background work:
+// the owner is mid-turn, memory is short, or the load average is high. The
+// load average exists only on Linux, so on Windows and macOS this rests on
+// the same memory and owner checks the background governor uses.
+func (s *Server) hearthBusy() bool {
+	if s != nil && s.partner != nil {
+		if c := s.partnerCapacity(); c.OwnerBusy || c.Paused {
+			return true
+		}
+	}
+	return systemBusy()
 }
 
 func systemBusy() bool {
