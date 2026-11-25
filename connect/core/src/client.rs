@@ -705,7 +705,9 @@ fn dial_all(
     if matches!(tcp, Error::Rejected | Error::PinMismatch) {
         return Err(tcp);
     }
-    match crate::direct::bridge(&target, cfg.direct_connect_timeout)
+    match device
+        .direct_seed(host_key)
+        .and_then(|seed| crate::direct::bridge(&target, &seed, cfg.direct_connect_timeout))
         .and_then(|local| dial(cfg, Via::Direct, local, device, host_key, payload))
     {
         Ok(t) => Ok(t),
