@@ -51,6 +51,17 @@ func ensureManagedPython() (string, error) {
 	if abs := managedVoicePython(); abs != "" {
 		return abs, nil
 	}
+	home := remedyHomeForManagedPython()
+	if home == "" {
+		return "", fmt.Errorf("cannot resolve REMEDY_HOME for managed python")
+	}
+	return EnsureManagedPythonIn(filepath.Join(home, "voice", "runtime"))
+}
+
+// EnsureManagedPythonIn returns the pinned, checksum-verified CPython under
+// rdir, downloading it there when it is missing. For a component that needs
+// a Python of its own on a PC that has none.
+func EnsureManagedPythonIn(rdir string) (string, error) {
 	if skipManagedPythonDownload() {
 		return "", fmt.Errorf("no managed python and download disabled (REMEDY_SKIP_MANAGED_PYTHON_DOWNLOAD)")
 	}
@@ -58,11 +69,6 @@ func ensureManagedPython() (string, error) {
 	if !ok {
 		return "", fmt.Errorf("no managed python pin for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
-	home := remedyHomeForManagedPython()
-	if home == "" {
-		return "", fmt.Errorf("cannot resolve REMEDY_HOME for managed python")
-	}
-	rdir := filepath.Join(home, "voice", "runtime")
 	if err := os.MkdirAll(rdir, 0o700); err != nil {
 		return "", err
 	}

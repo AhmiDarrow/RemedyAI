@@ -291,7 +291,7 @@ impl Settings {
             log_level: Signal::new("INFO".into()),
             sarcasm: Signal::new(false),
             claimidx_enabled: Signal::new(true),
-            claimidx: Signal::new(true),
+            claimidx: Signal::new(false),
             advanced: Signal::new(json!({})),
             advanced_schema: Signal::new(json!([])),
             launch_at_login: Signal::new(false),
@@ -533,7 +533,7 @@ impl Settings {
         self.log_level.set(jstr(v, "log_level", "INFO"));
         self.sarcasm.set(jbool(v, "sarcasm_mode", false));
         self.claimidx_enabled.set(jbool(v, "claimidx_enabled", true));
-        self.claimidx.set(jbool(v, "claimidx_public_ledger", true));
+        self.claimidx.set(jbool(v, "claimidx_public_ledger", false));
         self.advanced.set(v.get("advanced").cloned().unwrap_or_else(|| json!({})));
         self.advanced_schema.set(v.get("advanced_schema").cloned().unwrap_or_else(|| json!([])));
         self.vision_enabled.set_if_changed(jbool(v, "vision_enabled", false));

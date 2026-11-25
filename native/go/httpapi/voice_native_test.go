@@ -190,7 +190,7 @@ func TestNativeVoiceWithoutModelsOrHelper(t *testing.T) {
 	if out, err := w.Transcribe(context.Background(), home, wavFile(16000, 1, []int16{1, 2}), "audio/wav", ""); out != nil || err != nil {
 		t.Fatalf("transcribe without a model: %v %v", out, err)
 	}
-	if w.helper.cmd != nil {
+	if w.helper.kill != nil {
 		t.Fatal("the helper must not start without a model")
 	}
 	if _, err := w.Install(context.Background(), home, "nope"); err == nil {

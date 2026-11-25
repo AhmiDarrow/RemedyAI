@@ -741,7 +741,7 @@ impl Default for SaveDraft {
             log_level: "INFO".into(),
             sarcasm: false,
             claimidx_enabled: true,
-            claimidx: true,
+            claimidx: false,
             advanced: json!({}),
             providers_touched: false,
             enabled_providers: Vec::new(),
