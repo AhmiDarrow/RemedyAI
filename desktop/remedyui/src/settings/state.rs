@@ -929,13 +929,9 @@ pub(crate) fn take_api_key() -> String {
 }
 
 fn sync_login(on: bool) {
-    if cfg!(target_os = "linux") {
-        return;
-    }
-    let Ok(entry) = remedy_ui::desktop::autostart::Entry::current("Remedy", "com.remedy.desktop", &[]) else {
-        return;
-    };
-    let _ = remedy_ui::desktop::autostart::set(&entry, on);
+    // The same entry the title menu's switch writes: two names for one setting
+    // left a login item neither switch could remove.
+    crate::prefs::set_launch_at_login(on);
 }
 
 pub fn jstr(v: &Value, key: &str, default: &str) -> String {

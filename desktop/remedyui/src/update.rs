@@ -1264,8 +1264,15 @@ mod tests {
         assert!(nsi.contains("NSIS_HOOK_PREUNINSTALL"));
         assert!(nsi.contains("NSIS_HOOK_POSTUNINSTALL"));
         assert!(nsi.contains("/UPDATE"));
-        assert!(nsi.contains("Function UninstallPrevious"));
-        assert!(nsi.contains("ExecWait '\"$R1\" /S /UPDATE _?=$R2'"));
+        // The old uninstaller is not run on an update (it stopped itself and
+        // removed nothing); stale files go after running copies are closed.
+        assert!(nsi.contains("Function RemoveStaleFiles"));
+        assert!(!nsi.contains("ExecWait '\"$R1\""));
+        let closed = nsi.find("!insertmacro NSIS_HOOK_PREINSTALL").unwrap_or(usize::MAX);
+        let cleared = nsi.find("Call RemoveStaleFiles").unwrap_or(0);
+        assert!(closed < cleared, "stale files are removed only after running copies are closed");
+        // An update must not put the desktop shortcut back.
+        assert!(nsi.contains("${If} $UpdateMode <> 1"));
         assert!(nsi.contains("Remedy.Desktop_${VERSION}_x64-setup.exe") || nsi.contains("Remedy.Desktop_"));
         assert!(nsi.contains("com.remedy.desktop"));
         assert!(nsi.contains(r"$LOCALAPPDATA\${PRODUCTNAME}"));
