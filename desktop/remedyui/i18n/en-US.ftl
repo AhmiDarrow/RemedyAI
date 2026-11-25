@@ -465,3 +465,7 @@ chat-split-fullscreen = Fullscreen
 chat-split-dock-back = Dock back
 chat-split-always-on-top = Always on top
 chat-split-exit-fullscreen = Exit fullscreen
+
+# Clicking Remedy's face swaps it for the R mark and back.
+presence-hide = Hide Remedy's face
+presence-show = Show Remedy's face

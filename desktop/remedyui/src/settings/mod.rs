@@ -54,6 +54,13 @@ thread_local! {
 }
 
 /// The window's settings, when [`install`] has run and the signals are alive.
+/// Turn Remedy's face on or off and remember it.
+pub(crate) fn set_show_presence(on: bool) {
+    if let Some(s) = alive() {
+        prefs::set_presence(s, on);
+    }
+}
+
 pub(crate) fn current() -> Option<Settings> {
     alive()
 }

@@ -2261,3 +2261,31 @@ fn tray_quit_shows_the_confirm_sheet_after_hide_to_tray() {
         "confirming tray Quit must exit the app"
     );
 }
+
+#[test]
+fn clicking_the_face_swaps_it_for_the_mark_and_back() {
+    let _layout = reset_saved_layout();
+    fresh_profile();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    app.frames(3);
+    assert!(
+        app.find(Role::Button, "Hide Remedy's face").is_some(),
+        "the face is a button that hides it: {:?}",
+        accessible_names(&app)
+    );
+    assert!(app.press(Role::Button, "Hide Remedy's face"), "click the face");
+    app.frames(3);
+    assert!(
+        app.find(Role::Button, "Show Remedy's face").is_some()
+            && app.find(Role::Button, "Hide Remedy's face").is_none(),
+        "the R mark stands in and brings the face back: {:?}",
+        accessible_names(&app)
+    );
+    assert!(app.press(Role::Button, "Show Remedy's face"), "click the mark");
+    app.frames(3);
+    assert!(
+        app.find(Role::Button, "Hide Remedy's face").is_some(),
+        "the face is back: {:?}",
+        accessible_names(&app)
+    );
+}
