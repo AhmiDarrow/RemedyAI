@@ -67,6 +67,7 @@ func resolveChatModel(home, provider, model, baseURL, excludeProvider string) co
 	}
 
 	if m := resolveVisionHelperModel(home, cfg); m != nil {
+		noteVisionUse()
 		return m
 	}
 
