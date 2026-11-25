@@ -260,7 +260,13 @@ fn sse_response_is_delivered_chunk_by_chunk() {
     let pc = FakePc::start();
     let (gate_tx, gate_rx) = channel::<()>();
     let gate = Arc::new(Mutex::new(gate_rx));
-    pc.set_handler(move |_req: HttpRequest, out| {
+    pc.set_handler(move |req: HttpRequest, out| {
+        // The client asks for the PC's current addresses when it connects.
+        if req.target.contains("/connect/me") {
+            out.send(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+            out.end();
+            return;
+        }
         out.send(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n");
         out.send(b"b\r\ndata: one\n\n\r\n");
         gate.lock().unwrap().recv_timeout(Duration::from_secs(10)).ok();

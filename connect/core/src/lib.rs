@@ -16,6 +16,7 @@
 pub mod client;
 pub mod clock;
 pub mod deny;
+pub mod direct;
 pub mod error;
 pub mod frame;
 pub mod keys;

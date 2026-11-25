@@ -122,7 +122,18 @@ func meBody(device Device, panes map[string]bool, paused bool) map[string]any {
 	if paused {
 		reachable = "paused"
 	}
+	// Where this PC can be reached away from home right now, so a phone that
+	// is connected learns a new address before the old one stops working.
+	var direct any
+	if adv := CurrentIrohAdvert(); adv.EndpointID != "" {
+		direct = map[string]any{
+			"id":    adv.EndpointID,
+			"addrs": append([]string{}, adv.Addrs...),
+			"relay": adv.RelayURL,
+		}
+	}
 	return map[string]any{
+		"direct":     direct,
 		"panes":      panes,
 		"paused":     paused,
 		"reachable":  reachable,
