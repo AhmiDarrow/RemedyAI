@@ -42,10 +42,14 @@ func TestMailGoesNativeOnlyForAConnectedGoogleAccount(t *testing.T) {
 		return string(res.Output)
 	}
 
-	// No Google account: the worker answers, as before.
+	// Nothing connected: answered here ("not connected"), never by the worker.
 	worker := 0
-	if out := run(register(t, t.TempDir(), &worker)); worker != 1 || out != `{"from":"worker"}` {
-		t.Fatalf("without Google the worker must answer: calls=%d out=%s", worker, out)
+	empty := t.TempDir()
+	t.Setenv("REMEDY_HOME", empty)
+	reg := register(t, empty, &worker)
+	_, err := reg.Execute(context.Background(), tools.Request{ToolID: "mail.list", Version: 1, Input: json.RawMessage(`{}`)})
+	if worker != 0 {
+		t.Fatalf("with nothing connected the worker must still not be called (calls=%d, err=%v)", worker, err)
 	}
 
 	// A connected Google account: answered here, and the worker is never called.

@@ -32,6 +32,19 @@ var (
 	ErrToolsPythonDownloading = errors.New("RMDY tool worker unavailable: managed Python is downloading")
 )
 
+// ErrWorkerNotRunning answers a call made with OnlyIfRunning while no worker
+// has been started.
+var ErrWorkerNotRunning = errors.New("RMDY tool worker is not running")
+
+type onlyIfRunningKey struct{}
+
+// OnlyIfRunning marks a call that must not start the worker. A status read
+// uses it: state that lives only inside a running worker is, by definition,
+// empty when there is none, and asking must not launch an interpreter.
+func OnlyIfRunning(ctx context.Context) context.Context {
+	return context.WithValue(ctx, onlyIfRunningKey{}, true)
+}
+
 // LiveCaller is the FrameCaller handed to tools.RMDYExecutor and the voice /
 // vision workers. It forwards to whichever ipc.Client is current, so a
 // respawned worker is picked up by every registered Python tool without
@@ -52,6 +65,9 @@ func (c *LiveCaller) Call(ctx context.Context, frame protocol.Frame) (protocol.F
 	}
 	client := c.client.Load()
 	if client == nil && c.onDemand != nil {
+		if ctx.Value(onlyIfRunningKey{}) != nil {
+			return protocol.Frame{}, ErrWorkerNotRunning
+		}
 		if err := c.onDemand(); err != nil {
 			return protocol.Frame{}, err
 		}
