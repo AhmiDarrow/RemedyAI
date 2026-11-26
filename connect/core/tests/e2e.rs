@@ -334,10 +334,28 @@ fn peer_disconnect_mid_request_fails_the_request_and_the_client_reconnects() {
 #[test]
 fn keepalive_pings_reach_the_pc() {
     let pc = FakePc::start();
-    let cfg = ClientConfig { keepalive: Duration::from_millis(40), ..fast() };
+    let cfg = ClientConfig { keepalive: Duration::from_millis(40), pong_grace: Duration::ZERO, ..fast() };
     let (_s, _c) = connected(&pc, cfg);
     let base = pc.inner.pings.load(Ordering::SeqCst);
     wait_until("keepalive pings", 5, || pc.inner.pings.load(Ordering::SeqCst) >= base + 3);
+}
+
+#[test]
+fn a_pc_that_stops_answering_pings_is_not_shown_as_connected() {
+    let pc = FakePc::start();
+    let cfg = ClientConfig {
+        keepalive: Duration::from_millis(60),
+        pong_grace: Duration::from_millis(120),
+        ..fast()
+    };
+    let (_s, c) = connected(&pc, cfg);
+    // An answering PC stays connected through several pings.
+    let base = pc.inner.pings.load(Ordering::SeqCst);
+    wait_until("pings answered", 5, || pc.inner.pings.load(Ordering::SeqCst) >= base + 3);
+    assert!(matches!(c.state(), ConnState::Connected { .. }), "{:?}", c.state());
+    // The path dies without the socket closing; the default read timeout is 100 s.
+    pc.inner.mute.store(true, Ordering::SeqCst);
+    wait_until("the dead link is noticed", 5, || !matches!(c.state(), ConnState::Connected { .. }));
 }
 
 // ---- reconnect and state -------------------------------------------------------------
