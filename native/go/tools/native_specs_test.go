@@ -1,12 +1,8 @@
 package tools
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"testing"
-
-	"github.com/AhmiDarrow/RemedyAI/native/go/protocol"
 )
 
 func TestIsModelHiddenTool(t *testing.T) {
@@ -67,10 +63,13 @@ func TestModelInputSchemaStripsInternalKeys(t *testing.T) {
 	}
 }
 
-func TestPythonWorkerSchemasParseAndDescribeProperties(t *testing.T) {
+func TestNativeSpecSchemasParseAndBindTheHome(t *testing.T) {
 	reg := NewRegistry()
-	if err := RegisterPythonWorkerTools(reg, noopFrameCaller{}); err != nil {
+	if err := RegisterMailCalendarTools(reg); err != nil {
 		t.Fatal(err)
+	}
+	if len(reg.List()) == 0 {
+		t.Fatal("no tools registered")
 	}
 	for _, d := range reg.List() {
 		var doc map[string]any
@@ -78,33 +77,10 @@ func TestPythonWorkerSchemasParseAndDescribeProperties(t *testing.T) {
 			t.Fatalf("%s input schema: %v", d.ID, err)
 		}
 		props, _ := doc["properties"].(map[string]any)
-		switch {
-		case hasPrefix(d.ID, "workspace."), hasPrefix(d.ID, "web."), hasPrefix(d.ID, "memory."), hasPrefix(d.ID, "skill."):
-			for name, raw := range props {
-				p, _ := raw.(map[string]any)
-				if desc, _ := p["description"].(string); desc == "" {
-					t.Fatalf("%s.%s lacks a description", d.ID, name)
-				}
-			}
-		}
 		if _, ok := props["home_dir"]; ok {
 			if _, bound := props[GoBoundField]; !bound {
 				t.Fatalf("%s accepts home_dir but not %s", d.ID, GoBoundField)
 			}
 		}
-		if hasPrefix(d.ID, "workspace.") {
-			if _, ok := props["home_dir"]; ok {
-				t.Fatalf("%s must not advertise home_dir", d.ID)
-			}
-		}
 	}
-}
-
-func hasPrefix(s, p string) bool { return len(s) >= len(p) && s[:len(p)] == p }
-
-// noopFrameCaller satisfies FrameCaller for schema-only registration tests.
-type noopFrameCaller struct{}
-
-func (noopFrameCaller) Call(context.Context, protocol.Frame) (protocol.Frame, error) {
-	return protocol.Frame{}, errors.New("noop frame caller")
 }

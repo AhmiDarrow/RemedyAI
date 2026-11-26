@@ -23,7 +23,7 @@ func decodeInput(t *testing.T, raw []byte) map[string]any {
 }
 
 func TestFrontierToolsAreRegisteredAndAdvertised(t *testing.T) {
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestBindToolInputBindsTheFrontierTools(t *testing.T) {
 }
 
 func TestJobsListAndTailReadWhileKillAsks(t *testing.T) {
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestBashKeepsTheSensitiveCommandPredicate(t *testing.T) {
 		t.Fatal("an ordinary build command is not an owner moment")
 	}
 	// Auto mode does not waive the owner moment.
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -149,7 +149,7 @@ func TestResolveApprovalRequiresExplicitBoolean(t *testing.T) {
 }
 
 func TestOneShotGrantCoversIdenticalBatchCalls(t *testing.T) {
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestWaitAllDeniedDoesNotHangOnDuplicateIDs(t *testing.T) {
 }
 
 func TestForceAskIgnoresStandingGrantsButHonorsOneShot(t *testing.T) {
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}

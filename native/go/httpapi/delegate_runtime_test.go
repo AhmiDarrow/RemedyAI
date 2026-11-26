@@ -156,7 +156,7 @@ func TestRunnerStreamsToolProgressAsItHappens(t *testing.T) {
 // web tools are outside Remedy's guards. Full still runs it; a session
 // approval still covers the same mission again.
 func TestDelegateAsksInAutoButRunsInFull(t *testing.T) {
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
