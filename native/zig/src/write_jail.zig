@@ -586,10 +586,7 @@ fn shellScript(allocator: std.mem.Allocator, argv: []const []const u8, owned: *b
     const is_ps = eqlIgnoreCase(head, "powershell") or eqlIgnoreCase(head, "pwsh");
     if (!is_cmd and !is_ps) return null;
     for (argv[1..], 1..) |arg, i| {
-        const starts = if (is_cmd)
-            eqlIgnoreCase(arg, "/c") or eqlIgnoreCase(arg, "/k")
-        else
-            eqlIgnoreCase(arg, "-c") or eqlIgnoreCase(arg, "-command");
+        const starts = if (is_cmd) isCmdScriptSwitch(arg) else isPsCommandSwitch(arg);
         if (!starts or i + 1 >= argv.len) continue;
         var buf: std.ArrayList(u8) = .empty;
         errdefer buf.deinit(allocator);
@@ -603,12 +600,38 @@ fn shellScript(allocator: std.mem.Allocator, argv: []const []const u8, owned: *b
     return null;
 }
 
+fn isCmdScriptSwitch(arg: []const u8) bool {
+    return eqlIgnoreCase(arg, "/c") or eqlIgnoreCase(arg, "/k");
+}
+
+/// PowerShell takes any prefix of a switch name, with `-` or `/`: `-c`,
+/// `-com`, `/Command`.
+fn isPsSwitch(arg: []const u8, name: []const u8) bool {
+    if (arg.len < 2 or (arg[0] != '-' and arg[0] != '/')) return false;
+    return startsWithIgnoreCase(name, arg[1..]);
+}
+
+fn isPsCommandSwitch(arg: []const u8) bool {
+    return isPsSwitch(arg, "command");
+}
+
+/// `-e`, `-ec`, `-enc…`: a script that cannot be read. (`-ex…` and `-ep`
+/// are ExecutionPolicy.)
+fn isPsEncodedSwitch(arg: []const u8) bool {
+    if (arg.len < 2 or (arg[0] != '-' and arg[0] != '/')) return false;
+    const name = arg[1..];
+    return eqlIgnoreCase(name, "e") or eqlIgnoreCase(name, "ec") or
+        (name.len >= 2 and startsWithIgnoreCase("encodedcommand", name));
+}
+
 fn scriptWritesOutside(allocator: std.mem.Allocator, argv: []const []const u8, roots: []const []const u8, cwd: []const u8) Error!bool {
     var owned = false;
     const script = (try shellScript(allocator, argv, &owned)) orelse return false;
     defer if (owned) allocator.free(script.text);
     return scriptTextWritesOutside(allocator, script, roots, cwd, 0);
 }
+
+const WinShell = enum { none, cmd, powershell };
 
 const ScriptState = struct {
     allocator: std.mem.Allocator,
@@ -620,6 +643,10 @@ const ScriptState = struct {
     mutating: bool = false,
     shell_head: bool = false,
     shell_c: bool = false,
+    /// The command is `cmd` or `powershell`/`pwsh`, and its `/c` or
+    /// `-Command` has just been read.
+    win_shell: WinShell = .none,
+    win_script_next: bool = false,
     cd_pending: bool = false,
     /// A `cd` left the roots (or went somewhere unknown): relative names no
     /// longer land inside them.
@@ -634,6 +661,8 @@ const ScriptState = struct {
         self.mutating = false;
         self.shell_head = false;
         self.shell_c = false;
+        self.win_shell = .none;
+        self.win_script_next = false;
         self.cd_pending = false;
         self.redirect_next = false;
     }
@@ -653,7 +682,43 @@ const ScriptState = struct {
             const head = executableBasename(raw);
             self.mutating = nameIn(head, &mutation_heads);
             self.shell_head = nameIn(head, &posix_shells);
+            self.win_shell = if (eqlIgnoreCase(head, "cmd"))
+                .cmd
+            else if (eqlIgnoreCase(head, "powershell") or eqlIgnoreCase(head, "pwsh"))
+                .powershell
+            else
+                .none;
             self.cd_pending = nameIn(head, &cd_heads);
+            return;
+        }
+        // `powershell -Command "Set-Content C:\x"` inside a script is a script
+        // too: without this a nested Windows shell wrote anywhere.
+        if (self.win_shell != .none) {
+            const kind = self.win_shell;
+            if (self.win_script_next) {
+                self.win_shell = .none;
+                self.win_script_next = false;
+                if (has_var) return;
+                if (std.mem.indexOfAny(u8, raw, " \t") == null) {
+                    // the script follows as plain words: read them as a command
+                    self.command_start = true;
+                    return self.word(raw, has_var);
+                }
+                if (self.depth + 1 >= max_script_depth) {
+                    self.outside = true;
+                    return;
+                }
+                const nested: Script = .{ .text = raw, .posix = false, .single_quotes = kind == .powershell };
+                if (try scriptTextWritesOutside(self.allocator, nested, self.roots, self.cwd, self.depth + 1)) self.outside = true;
+                return;
+            }
+            if (kind == .cmd) {
+                if (isCmdScriptSwitch(raw)) self.win_script_next = true;
+            } else if (isPsCommandSwitch(raw)) {
+                self.win_script_next = true;
+            } else if (isPsEncodedSwitch(raw)) {
+                self.outside = true;
+            }
             return;
         }
         if (self.cd_pending) {
@@ -950,6 +1015,45 @@ test "workdir jail reads scripts handed to a shell, POSIX paths and --opt=value"
         &.{ "/bin/cp", "a", "out.txt" },
         &.{ "/bin/cp", "--target-directory=/focus/proj/out", "a" },
         &.{ "/bin/ls", "/etc" },
+    };
+    for (allowed) |argv| {
+        checkSpawn(allocator, argv, cwd) catch |err| {
+            std.debug.print("denied: {s}\n", .{argv[argv.len - 1]});
+            return err;
+        };
+    }
+}
+
+test "workdir jail reads a Windows shell nested inside a script" {
+    const allocator = std.testing.allocator;
+    try setRoots(allocator, &.{"C:\\focus\\proj"});
+    defer clearRoots(allocator);
+    const cwd = "C:\\focus\\proj";
+
+    const denied = [_][]const []const u8{
+        &.{ "pwsh.exe", "-NoProfile", "-Command", "powershell -NoProfile -Command \"Set-Content C:\\Users\\Public\\x.txt hi\"" },
+        &.{ "pwsh.exe", "-Command", "powershell -com 'Set-Content C:\\Users\\Public\\x.txt hi'" },
+        &.{ "pwsh.exe", "-Command", "powershell -Command Set-Content C:\\Users\\Public\\x.txt hi" },
+        &.{ "pwsh.exe", "-Command", "cmd /c \"copy a.txt C:\\Users\\Public\\a.txt\"" },
+        &.{ "pwsh.exe", "-Command", "cmd /d /c copy a.txt C:\\Users\\Public\\a.txt" },
+        &.{ "cmd.exe", "/c", "powershell /Command \"ni C:\\Users\\Public\\x.txt\"" },
+        &.{ "pwsh.exe", "-com", "Set-Content C:\\Users\\Public\\x.txt hi" },
+        &.{ "pwsh.exe", "-Command", "powershell -enc ZQBjAGgAbwA=" },
+    };
+    for (denied) |argv| {
+        checkSpawn(allocator, argv, cwd) catch |err| {
+            try std.testing.expectEqual(error.AccessDenied, err);
+            continue;
+        };
+        std.debug.print("not denied: {s}\n", .{argv[argv.len - 1]});
+        return error.TestExpectedError;
+    }
+
+    const allowed = [_][]const []const u8{
+        &.{ "pwsh.exe", "-Command", "powershell -NoProfile -Command \"Set-Content out.txt hi\"" },
+        &.{ "pwsh.exe", "-Command", "cmd /c \"copy a.txt C:\\focus\\proj\\b.txt\"" },
+        &.{ "pwsh.exe", "-Command", "powershell -ExecutionPolicy Bypass -File build.ps1" },
+        &.{ "pwsh.exe", "-Command", "cmd /c dir" },
     };
     for (allowed) |argv| {
         checkSpawn(allocator, argv, cwd) catch |err| {
