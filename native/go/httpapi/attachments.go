@@ -27,7 +27,10 @@ func safeSessionID(sessionID string) string {
 	if len(s) > 80 {
 		s = s[:80]
 	}
-	if s == "" {
+	// "." and ".." pass the character filter but name the attachments root
+	// and the Remedy home itself, where an upload could replace
+	// local_api_token or settings and a read could fetch them.
+	if strings.Trim(s, ".") == "" {
 		s = "_"
 	}
 	return s
