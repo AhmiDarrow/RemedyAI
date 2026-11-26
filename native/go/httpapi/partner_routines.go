@@ -33,6 +33,9 @@ type partnerRoutine struct {
 	Deliver     string          `json:"deliver"` // grove | messenger | both
 	Enabled     bool            `json:"enabled"`
 	CreatedBy   string          `json:"created_by"`
+	// Outside is set when someone other than the owner had Remedy create the
+	// routine: every run of it asks before changing anything.
+	Outside bool `json:"outside,omitempty"`
 	CreatedAt   string          `json:"created_at"`
 	NextRun     string          `json:"next_run,omitempty"`
 	LastRun     string          `json:"last_run,omitempty"`

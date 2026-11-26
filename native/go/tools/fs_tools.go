@@ -935,6 +935,10 @@ func walkBound(ctx context.Context, root *os.Root, base, pattern string, visit f
 			return ctx.Err()
 		}
 		if d.IsDir() {
+			// A search never looks inside the secrets folder, wherever it started.
+			if isSecretAuthPath(filepath.Join(root.Name(), filepath.FromSlash(p))) {
+				return fs.SkipDir
+			}
 			if p != base && skipWalkDir(d.Name(), pattern) {
 				return fs.SkipDir
 			}

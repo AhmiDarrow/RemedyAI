@@ -682,6 +682,11 @@ pub struct SaveDraft {
     pub sleev_allow_remote: bool,
     pub soul_field: bool,
     pub approval_mode: String,
+    pub shell_in_auto: String,
+    pub web_fetch_guard: String,
+    pub messenger_tools: String,
+    pub peer_tools: String,
+    pub api_max_body_mb: f64,
     pub trust_profile: String,
     pub allow_skills: bool,
     pub auto_approve: f64,
@@ -735,6 +740,11 @@ impl Default for SaveDraft {
             sleev_allow_remote: false,
             soul_field: true,
             approval_mode: "ask".into(),
+            shell_in_auto: "guard".into(),
+            web_fetch_guard: "payload".into(),
+            messenger_tools: "all".into(),
+            peer_tools: "safe".into(),
+            api_max_body_mb: 128.0,
             trust_profile: "balanced".into(),
             allow_skills: true,
             auto_approve: 0.8,
@@ -882,6 +892,11 @@ pub fn save_body(d: &SaveDraft) -> Result<Value, String> {
     body.insert("sleev_allow_remote_gateway".into(), json!(d.sleev_allow_remote));
     body.insert("soul_field_enabled".into(), json!(d.soul_field));
     body.insert("approval_mode".into(), json!(d.approval_mode));
+    body.insert("shell_in_auto".into(), json!(d.shell_in_auto));
+    body.insert("web_fetch_guard".into(), json!(d.web_fetch_guard));
+    body.insert("messenger_tools".into(), json!(d.messenger_tools));
+    body.insert("peer_tools".into(), json!(d.peer_tools));
+    body.insert("api_max_body_mb".into(), json!(d.api_max_body_mb.round().max(0.0) as u64));
     body.insert("trust_profile".into(), json!(d.trust_profile));
     body.insert("allow_skill_creation".into(), json!(d.allow_skills));
     body.insert("auto_approve_threshold".into(), json!(d.auto_approve));

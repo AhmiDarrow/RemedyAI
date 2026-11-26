@@ -483,7 +483,7 @@ func (s *Server) Close() error {
 
 // Handler returns the CORS + auth wrapped mux.
 func (s *Server) Handler() http.Handler {
-	return withCORS(s.withAuth(s.mux))
+	return withCORS(s.withBodyCap(s.withAuth(s.mux)))
 }
 
 // Serve serves until the listener closes or ctx is canceled.

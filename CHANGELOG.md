@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Security
+- New safeguards, each with a setting and documented in `docs/SECURITY.md`: in Auto mode a shell command that names a key file, reaches outside the project, contacts the network or is built while it runs waits for approval (`shell_in_auto`); a web fetch whose address could carry data out waits (`web_fetch_guard`); other agents may use only tools that show nothing of the owner's unless allowed (`peer_tools`, and `messenger_tools` for messenger senders); the local API caps one request body (`api_max_body_mb`).
+- A routine or background job created because someone outside asked keeps that standing: it asks before every change, however much later it runs.
+- File tools refuse Remedy's secrets folder also when the project folder contains it, and searches never walk into it.
+- "Just this once" now lets the approved call run instead of asking a second time.
+
 ### Fixed
 - Desktop 1.0.0 stayed on "Connecting to local server" because the installer never shipped `remedy-runtime` or `remedy_core`, and the shell did not look for `remedy-runtime.exe` on Windows. Both are packed next to the app again, and a missing binary fails the splash immediately instead of waiting ~90s.
 - The Windows tray icon is the Remedy mark from 0.70.5 (`tray-icon.png` / `icon.ico`) again, not a solid forest-green square.

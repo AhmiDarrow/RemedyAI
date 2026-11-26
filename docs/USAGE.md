@@ -639,6 +639,11 @@ remedy migrate openclaw ~/openclaw/skills --no-copy
 | `mcp_servers` | list | `[]` | MCP server configs |
 | `allow_skill_creation` | bool | `true` | Permit learning-generated skills |
 | `auto_approve_threshold` | float | `0.8` | Confidence threshold for auto-approval |
+| `shell_in_auto` | string | `"guard"` | Shell commands in Auto mode: `guard` asks when a command cannot be checked, `ask` always asks, `allow` never asks. See [SECURITY.md](SECURITY.md) |
+| `web_fetch_guard` | string | `"payload"` | Web fetches that could carry data out: `payload`, `ask`, `off` |
+| `messenger_tools` | string | `"all"` | Read-only tools a messenger sender may use unasked: `all`, `safe`, `none` |
+| `peer_tools` | string | `"safe"` | The same for other agents and for routines created from outside: `safe`, `all`, `none` |
+| `api_max_body_mb` | int | `128` | Largest request body the local API reads, in MiB. `0` = no limit |
 | `log_level` | string | `"INFO"` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `llm_provider` | string | `"openai"` | `openai`, `anthropic`, `google`, `deepseek`, `xai`, `groq`, `mistral`, `openrouter`, `ollama`, `custom` |
 | `llm_model` | string | provider default | Model id for the provider |

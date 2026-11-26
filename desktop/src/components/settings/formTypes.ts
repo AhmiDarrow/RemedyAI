@@ -122,6 +122,9 @@ export interface SettingsFormProps {
   thinkingLevel: 'off' | 'low' | 'medium' | 'high'
   setThinkingLevel: Dispatch<SetStateAction<'off' | 'low' | 'medium' | 'high'>>
   allowSkillCreation: boolean
+  /** The runtime's safeguards, as saved. */
+  guards: SettingsGuards
+  setGuards: Dispatch<SetStateAction<SettingsGuards>>
   setAllowSkillCreation: Dispatch<SetStateAction<boolean>>
   autoApproveThreshold: number
   setAutoApproveThreshold: Dispatch<SetStateAction<number>>
@@ -235,3 +238,20 @@ export interface SettingsFormProps {
   settingsMode?: SettingsMode
 }
 
+
+/** Settings that add a question where the approval mode alone would allow (docs/SECURITY.md). */
+export interface SettingsGuards {
+  shell_in_auto: string
+  web_fetch_guard: string
+  messenger_tools: string
+  peer_tools: string
+  api_max_body_mb: number
+}
+
+export const DEFAULT_GUARDS: SettingsGuards = {
+  shell_in_auto: 'guard',
+  web_fetch_guard: 'payload',
+  messenger_tools: 'all',
+  peer_tools: 'safe',
+  api_max_body_mb: 128,
+}

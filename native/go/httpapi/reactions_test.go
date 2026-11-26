@@ -236,6 +236,10 @@ func TestThumbsAnswerAPendingConfirmation(t *testing.T) {
 				t.Fatal("waiter not released")
 			}
 			// "once": a thumbs-up is not standing consent for the next call.
+			// The approved call itself runs once; the one after it asks again.
+			if tc.approved {
+				_ = s.approvals.IsApproved("bash", "installer.exe /quiet", sid, true)
+			}
 			if tc.approved && s.approvals.IsApproved("bash", "installer.exe /quiet", sid, true) {
 				t.Fatal("thumbs-up must not grant the session")
 			}
