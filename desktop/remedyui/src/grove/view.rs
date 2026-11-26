@@ -1339,7 +1339,7 @@ fn sessions_block(ui: &Ui, grove: Grove) -> El {
                     l.grow = 1.0;
                     l.min_width = Length::Px(0.0);
                 }))
-                .child(w::text(&row_ui, state).style(
+                .child(w::text(&row_ui, state).nowrap().style(
                     crate::tokens::typo(crate::tokens::META).foreground(if *working {
                         colors.accent
                     } else {
