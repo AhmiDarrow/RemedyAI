@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/sysres"
 )
 
 // isFullAccessScope is the access_scope that lifts the workspace-root fence
@@ -69,7 +71,7 @@ func pathWithin(p, dir string) bool {
 func resolveExistingPrefix(abs string) string {
 	p, tail := filepath.Clean(abs), ""
 	for {
-		if r, err := filepath.EvalSymlinks(p); err == nil {
+		if r, err := sysres.RealPath(p); err == nil {
 			if tail == "" {
 				return r
 			}

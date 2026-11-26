@@ -152,3 +152,68 @@ rest, including `workspace.*` and `text.*` now).
   turns always send "desktop").
 - A relative `auth/<file>` inside a shell command run from the Remedy home
   folder isn't caught by the Zig spawn jail.
+
+## 8. Results of the PC run (2026-11-26, Windows 11)
+
+Run on the owner's PC against this branch. Fixes for what it found are on the branch.
+
+### Local CI
+
+- `scripts/prepush.py` stops before any lane on the `[Unreleased]` notes, and at the first red lane after that, so
+  the lanes were run one at a time through `verify_tree`.
+- Green: ruff, mypy, mypy-exclude, docs sync, desktop (vitest + build), rust (Tauri shell and iroh sidecar),
+  android (gradle: unit tests, lint, debug and release builds), native (go test, race, vet, boundaries, benchmarks,
+  zig test debug and ReleaseSafe, ISA check).
+- pytest: 8,189 passed on Windows and 8,051 under WSL. The same two fail on both, and neither is this branch's:
+  the `[Unreleased]` notes check, and `test_sanitize_script_exits_clean_on_current_tree` (the notes again on
+  Windows; under WSL `git ls-files` cannot read a Windows worktree's git folder).
+- Not run: the WSL cargo step and the wheel build (`uv build`), because their lanes stop at pytest.
+- The native lane runs `go test` before it builds the Zig core, so on a clean checkout the Go tests that spawn a
+  process skip. Run again with the core built, they all pass, after one test fix (below).
+
+### Found and fixed
+
+- A directory junction to the auth folder was not refused on Windows: `filepath.EvalSymlinks` does not follow
+  junctions. File tools and `/api/media` now ask the system where an open path really is (`sysres.RealPath`). The
+  8.3 short-name case was already refused; both have Windows tests now.
+- The local tool API (`/api/tools/invoke`) built its policy without the guard settings, so in Auto it ran every
+  shell command and fetch without asking. Seen live: a PowerShell command wrote a file outside the project.
+- The write jail read a nested `sh -c` but not a nested `powershell -Command "..."` or `cmd /c "..."`, so a Windows
+  shell inside a script wrote anywhere. It now reads both, takes PowerShell's shortened switches (`-com`,
+  `/Command`), and refuses `-EncodedCommand` inside a script.
+- A shell command could read a secret through a junction (`findstr . link/local_api_token`): the core reads the
+  spelling only. A spawn is now refused when a path it names leads into the auth folder.
+- `TestBashPropagatesExitCode` used cmd syntax; the bash tool runs PowerShell where it is installed.
+- The RemedyUI desktop (`desktop/remedyui`, the desktop that ships) was not part of the sweep and had what the
+  Tauri shell was fixed for: opening a file from the Files rail went through `cmd /c start` (a file named
+  `x&calc.txt` ran `calc`), Open terminal doubled only the straight quote, and the Web UI link was accepted on a
+  prefix (`http://127.0.0.1.example.com/` passed). All three fixed, with tests.
+
+### Checked and passing
+
+- Batch files: `a&calc` and `x|y` reach the script as one argument each and Calculator does not open; `"`, `%`,
+  `!` and a line break are refused.
+- Auto mode, project scope: `cmd /c echo hi > C:/Windows/x.txt`, a PowerShell `-Command` writing outside, and
+  `robocopy ... /LOG:C:/outside/log.txt` all ask. A path rooted with one backslash and no drive letter is not
+  caught by the Auto text filter but is refused by the write jail.
+- Secret folder: refused by path, by junction and under full access, for read, grep and glob.
+- Tool worker root: `C:/`, `C:`, the `C$` share on localhost, the `?` and `.` device forms of `C:`, a share on a
+  server that is not there, and a cwd of the drive root all fall back to Documents/Remedy.
+- WSL bash under a bound project is refused at the cwd check, as section 2 expected. Whether that is wanted is
+  still the owner's call.
+- `withGlobalTauri` off: nothing in `desktop/src` or the shell needs `window.__TAURI__`; every use falls back to
+  the official package or `__TAURI_INTERNALS__`.
+- Server info and Open logs folder: `build.rs` declares no app command list, so the shell's own commands are
+  allowed without an entry in the permission files.
+
+### Not run
+
+- The Tauri desktop in a real window (section 3's smoke pass, decision card, long-command card, rail typing). Its
+  rules are covered by the unit tests in the rust and desktop lanes; nobody has clicked through it.
+- Computer scroll and drag on the real screen; the caps are covered by the Zig tests, which ran on Windows.
+- Phone checks (section 4): no phone was attached. The Android gradle lane passed.
+- macOS and a Linux desktop.
+
+### Noticed, not changed
+
+- On a new home, Settings reports `approval_mode: auto` while the runtime acts as Ask until the mode is saved once.

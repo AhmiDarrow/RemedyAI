@@ -243,19 +243,46 @@ pub fn launch_path(path: String) -> Result<String, String> {
     }
 }
 
+/// Hand a path or link to the Windows shell to open with its default app.
+/// Never `cmd /c start`: cmd runs whatever follows a `&` or `^` in the name.
+#[cfg(target_os = "windows")]
+pub(crate) fn shell_open(target: &std::ffi::OsStr) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::{w, PCWSTR};
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let wide: Vec<u16> = target.encode_wide().chain(std::iter::once(0)).collect();
+    // SAFETY: NUL-terminated wide strings that outlive the call.
+    let r = unsafe {
+        ShellExecuteW(None, w!("open"), PCWSTR(wide.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL)
+    };
+    // Values above 32 mean success.
+    if r.0 as isize > 32 {
+        Ok(())
+    } else {
+        Err(format!("the shell refused it (code {})", r.0 as isize))
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn launch_path_windows(p: &Path) -> Result<String, String> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    // `start` is a cmd builtin. The empty quoted title is required so paths
-    // with spaces are not taken as the window title.
-    let status = Command::new("cmd")
-        .args(["/c", "start", "", &p.display().to_string()])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status()
-        .map_err(|e| format!("open: {e}"))?;
-    let _ = status;
+    shell_open(p.as_os_str()).map_err(|e| format!("open: {e}"))?;
     Ok(format!("Opened {}", p.display()))
+}
+
+/// Escape `s` for the inside of a PowerShell single-quoted string. PowerShell
+/// ends such a string at any single-quote character, curly ones included
+/// (U+2018..U+201B), so each is doubled; a doubled one reads back as itself.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn ps_single_quote_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out
 }
 
 #[cfg(target_os = "macos")]
@@ -385,7 +412,7 @@ pub fn open_terminal(cwd: Option<String>) -> Result<String, String> {
 fn open_terminal_windows(dir_s: &str) -> Result<String, String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-    let cd_cmd = format!("Set-Location -LiteralPath '{}'", dir_s.replace('\'', "''"));
+    let cd_cmd = format!("Set-Location -LiteralPath '{}'", ps_single_quote_escape(dir_s));
     for (exe, label) in [
         ("pwsh.exe", "PowerShell 7+"),
         ("powershell.exe", "Windows PowerShell"),
@@ -404,20 +431,16 @@ fn open_terminal_windows(dir_s: &str) -> Result<String, String> {
     {
         return Ok(format!("Opened Windows Terminal (PowerShell) in {dir_s}"));
     }
-    let status = Command::new("cmd.exe")
-        .args([
-            "/c",
-            "start",
-            "cmd.exe",
-            "/k",
-            &format!("cd /d \"{dir_s}\""),
-        ])
-        .status()
-        .map_err(|e| format!("open terminal failed: {e}"))?;
-    if status.success() {
-        Ok(format!("Opened cmd in {dir_s}"))
-    } else {
-        Err(format!("Could not open a terminal (exit {status})"))
+    // The folder goes in as the working directory, never as command text:
+    // cmd would run whatever follows a `&` in its name.
+    let spawned = Command::new("cmd.exe")
+        .arg("/k")
+        .current_dir(dir_s)
+        .creation_flags(CREATE_NEW_CONSOLE)
+        .spawn();
+    match spawned {
+        Ok(_) => Ok(format!("Opened cmd in {dir_s}")),
+        Err(e) => Err(format!("open terminal failed: {e}")),
     }
 }
 
@@ -460,7 +483,7 @@ fn open_terminal_unix(dir_s: &str) -> Result<String, String> {
     if linux_env_is_wslg() {
         if let Some(ps) = wslg_powershell_exe() {
             let win = wslg_windows_path(Path::new(dir_s));
-            let loc = win.to_string_lossy().replace('\'', "''");
+            let loc = ps_single_quote_escape(&win.to_string_lossy());
             let cmd = format!("Set-Location -LiteralPath '{loc}'");
             if Command::new(&ps)
                 .args(["-NoLogo", "-NoExit", "-Command", &cmd])
@@ -532,6 +555,41 @@ fn wslg_windows_path(p: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Read back a PowerShell single-quoted string the way its tokenizer
+    /// does: any single-quote character ends it unless doubled.
+    fn ps_unquote(script: &str) -> (String, String) {
+        let is_q = |c: char| matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}');
+        let mut chars = script.chars().peekable();
+        assert!(chars.next().is_some_and(is_q), "{script}");
+        let mut lit = String::new();
+        while let Some(c) = chars.next() {
+            if is_q(c) {
+                if chars.peek().copied().is_some_and(is_q) {
+                    lit.push(chars.next().unwrap());
+                    continue;
+                }
+                return (lit, chars.collect());
+            }
+            lit.push(c);
+        }
+        panic!("unterminated: {script}");
+    }
+
+    #[test]
+    fn powershell_quoting_keeps_curly_quotes_literal() {
+        for dir in [
+            r"C:\Users\me\proj",
+            r"C:\Users\O'Brien\x",
+            "C:\\x\u{2019}; calc; \u{2018}",
+            "C:\\x\u{2018}\u{2018}\u{201A}\u{201B}'",
+        ] {
+            let quoted = format!("'{}'", ps_single_quote_escape(dir));
+            let (lit, rest) = ps_unquote(&quoted);
+            assert_eq!(lit, dir, "{quoted}");
+            assert_eq!(rest, "", "text after the string would run: {quoted}");
+        }
+    }
 
     #[test]
     fn network_paths_are_refused_before_any_filesystem_access() {

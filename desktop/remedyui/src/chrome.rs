@@ -658,7 +658,7 @@ impl Chrome {
                             .and_then(|u| u.as_str())
                             .map(|s| s.to_string())
                     })
-                    .filter(|s| s.starts_with("http://127.0.0.1") || s.starts_with("http://localhost") || s.starts_with("http://[::1]"))
+                    .filter(|s| is_minted_web_link(s, &origin))
                     .unwrap_or(fallback);
                 c.open_url(&url);
             });
@@ -1746,9 +1746,35 @@ fn toast_layer(ui: &Ui, chrome: Chrome) -> El {
     host
 }
 
+/// Only the exact shape Remedy mints (`{origin}/?bootstrap=<base64url>`):
+/// a prefix test alone would also pass `http://127.0.0.1.example.com/`.
+fn is_minted_web_link(url: &str, origin: &str) -> bool {
+    url.strip_prefix(origin)
+        .and_then(|rest| rest.strip_prefix("/?bootstrap="))
+        .is_some_and(|nonce| {
+            !nonce.is_empty() && nonce.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn web_link_must_be_remedys_own_shape() {
+        let origin = "http://127.0.0.1:7400";
+        assert!(is_minted_web_link("http://127.0.0.1:7400/?bootstrap=Ab9_-x", origin));
+        for url in [
+            "http://127.0.0.1.example.com/?bootstrap=abc",
+            "http://127.0.0.1:7400@example.com/?bootstrap=abc",
+            "http://127.0.0.1:74000/?bootstrap=abc",
+            "http://127.0.0.1:7400/?bootstrap=",
+            "http://127.0.0.1:7400/?bootstrap=x&calc",
+            "http://localhost:7400/?bootstrap=abc",
+        ] {
+            assert!(!is_minted_web_link(url, origin), "{url} must be refused");
+        }
+    }
 
     #[test]
     fn quit_label_matches_the_menu() {
