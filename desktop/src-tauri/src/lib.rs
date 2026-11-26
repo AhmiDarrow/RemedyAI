@@ -2845,11 +2845,26 @@ fn mint_web_ui_link() -> Result<String, String> {
         return Err(format!("unexpected response: {}", buf.lines().next().unwrap_or("")));
     }
     let body = buf.split("\r\n\r\n").nth(1).unwrap_or("");
+    parse_web_ui_link(body, &api_base_url())
+}
+
+/// Accept only the exact shape Remedy mints (`{base}/?bootstrap=<base64url>`),
+/// so whatever answers on the API port can't smuggle shell metacharacters
+/// into the URL the OS opens.
+fn parse_web_ui_link(body: &str, base: &str) -> Result<String, String> {
     let v: serde_json::Value =
         serde_json::from_str(body.trim()).map_err(|e| format!("json: {e}"))?;
+    let prefix = format!("{base}/?bootstrap=");
     v.get("url")
         .and_then(|u| u.as_str())
-        .filter(|u| u.starts_with("http://127.0.0.1:"))
+        .filter(|u| {
+            u.strip_prefix(prefix.as_str()).is_some_and(|nonce| {
+                !nonce.is_empty()
+                    && nonce
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+            })
+        })
         .map(str::to_string)
         .ok_or_else(|| "no url in response".to_string())
 }
@@ -2888,18 +2903,14 @@ fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
         log::info!("switch_to_web_ui: desktop stay-ready (sidecar alive)");
     }
 
-    // Open default browser (Windows: start; shell plugin as secondary).
-    #[cfg(target_os = "windows")]
-    {
-        let status = Command::new("cmd")
-            .args(["/C", "start", "", &url])
-            .creation_flags(CREATE_NO_WINDOW)
-            .status()
-            .map_err(|e| format!("open browser failed: {e}"))?;
-        if !status.success() {
-            return Err(format!("open browser exited with {status}"));
-        }
+    if !url_safe_for_os_open(&url) {
+        return Err("only http(s) URLs allowed".into());
     }
+
+    // Open default browser. Windows: ShellExecuteW, never `cmd /C start`
+    // (cmd would run anything after a `&` or `^` in the URL).
+    #[cfg(target_os = "windows")]
+    open_url_shell_execute(&url)?;
     #[cfg(not(target_os = "windows"))]
     {
         // Spawn and return — .status() waits until some desktops close the browser.
@@ -6935,6 +6946,35 @@ mod updater_parse_tests {
         assert!(!is_trusted_download_url(
             "http://github.com/AhmiDarrow/RemedyAI/releases/download/runtime-v0.69.0/x.app.tar.gz"
         ));
+    }
+}
+
+#[cfg(test)]
+mod web_ui_link_tests {
+    use super::*;
+
+    #[test]
+    fn minted_link_must_be_remedys_own_shape() {
+        let base = "http://127.0.0.1:7400";
+        let ok = r#"{"url":"http://127.0.0.1:7400/?bootstrap=Ab9_-x","single_use":true}"#;
+        assert_eq!(
+            parse_web_ui_link(ok, base).unwrap(),
+            "http://127.0.0.1:7400/?bootstrap=Ab9_-x"
+        );
+        for url in [
+            "http://127.0.0.1:7400/?bootstrap=x&calc",
+            "http://127.0.0.1:7400/?bootstrap=x^&calc",
+            "http://127.0.0.1:7400/&calc.exe",
+            "http://127.0.0.1:7400/?bootstrap=x|calc",
+            "http://127.0.0.1:7400/?bootstrap=x%26calc",
+            "http://127.0.0.1:7400/?bootstrap=",
+            "http://127.0.0.1:7401/?bootstrap=abc",
+            "http://127.0.0.1:74000/?bootstrap=abc",
+            "http://127.0.0.1:7400@evil.example/?bootstrap=abc",
+        ] {
+            let body = serde_json::json!({ "url": url }).to_string();
+            assert!(parse_web_ui_link(&body, base).is_err(), "{url} must be refused");
+        }
     }
 }
 
