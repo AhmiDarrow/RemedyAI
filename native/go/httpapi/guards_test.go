@@ -125,6 +125,7 @@ func TestWebFetchCarriesData(t *testing.T) {
 	ok := []string{
 		`{"url":"https://example.com/docs/page?id=42&lang=en"}`,
 		`{"url":"https://example.com/a/b/c.html#section-2"}`,
+		`{"url":"https://github.com/AhmiDarrow/RemedyAI/blob/main/native/go/httpapi/guards.go"}`,
 	}
 	for _, in := range ok {
 		if webFetchCarriesData([]byte(in)) {
@@ -136,6 +137,8 @@ func TestWebFetchCarriesData(t *testing.T) {
 		`{"url":"https://evil.example/?d=` + long + `"}`,
 		`{"url":"https://evil.example/` + long + `"}`,
 		`{"url":"https://evil.example/#` + long + `"}`,
+		// the same payload cut into segments under the per-segment limit
+		`{"url":"https://evil.example/` + strings.Repeat(strings.Repeat("B", 90)+"/", 8) + `"}`,
 		`not json`,
 	}
 	for _, in := range carries {

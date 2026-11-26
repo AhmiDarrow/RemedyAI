@@ -122,10 +122,13 @@ const (
 	webFetchQueryLimit = 256
 	// One path segment longer than this is more likely a payload than a page.
 	webFetchSegmentLimit = 96
+	// The whole path, so a payload cannot be cut into many short segments.
+	webFetchPathLimit = 512
 )
 
 // webFetchCarriesData reports a web.fetch whose address has room to carry
-// something out: a long query or fragment, or a very long path segment.
+// something out: a long query or fragment, a very long path segment, or a
+// long path made of short ones.
 // A call it cannot read counts as carrying data.
 func webFetchCarriesData(input []byte) bool {
 	var body struct {
@@ -139,6 +142,9 @@ func webFetchCarriesData(input []byte) bool {
 		return true
 	}
 	if len(u.RawQuery)+len(u.Fragment) > webFetchQueryLimit {
+		return true
+	}
+	if len(u.EscapedPath())+len(u.Opaque) > webFetchPathLimit {
 		return true
 	}
 	for _, seg := range strings.Split(u.EscapedPath(), "/") {
