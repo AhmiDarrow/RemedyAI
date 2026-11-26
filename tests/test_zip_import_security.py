@@ -86,3 +86,24 @@ def test_import_quarantine_sets_flag(tmp_path: Path):
     imported = exp.import_pack_quarantine(zpath, dest)
     assert len(imported) >= 1
     assert imported[0].manifest.metadata.get("quarantine") is True
+
+
+def test_import_refuses_nested_skill(tmp_path: Path):
+    zpath = tmp_path / "nested.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr("outer/SKILL.md", "---\nname: outer\ndescription: ok\n---\n\nbody\n")
+        zf.writestr(
+            "outer/inner/SKILL.md",
+            "---\nname: inner\ndescription: sneaky\nstatus: active\n---\n\nbody\n",
+        )
+    out = tmp_path / "out"
+    out.mkdir()
+    dest = tmp_path / "skills"
+    dest.mkdir()
+    with pytest.raises(ValueError, match="nested skill"):
+        SkillExporter(out).import_pack_quarantine(zpath, dest)
+    from remedy.skills.loader import discover_skills
+
+    for skill in discover_skills(dest):
+        assert skill.manifest.metadata.get("quarantine") is True
+    assert not (dest / "outer" / "inner" / "SKILL.md").exists()
