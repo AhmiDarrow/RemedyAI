@@ -35,6 +35,8 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
     setHarnessMaxPct,
     allowSkillCreation,
     setAllowSkillCreation,
+    guards,
+    setGuards,
     autoApproveThreshold,
     setAutoApproveThreshold,
     logLevel,
@@ -151,6 +153,66 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
             step={5}
             value={Math.round(autoApproveThreshold * 100)}
             onChange={(pct) => setAutoApproveThreshold(pct / 100)}
+          />
+        </CategoryCard>
+        <CategoryCard kicker="Safeguards">
+          <FormHint>
+            These stop a hidden instruction in a web page, a file or a message from using Remedy's own tools
+            against you. They read what a command says, so they are a filter, not a sandbox.
+          </FormHint>
+          <FormLabel>Shell commands in Auto</FormLabel>
+          <FormSelect
+            value={guards.shell_in_auto}
+            onChange={(v) => setGuards((g) => ({ ...g, shell_in_auto: v }))}
+          >
+            <option value="guard">Ask when a command is unclear (default)</option>
+            <option value="ask">Always ask</option>
+            <option value="allow">Never ask</option>
+          </FormSelect>
+          <FormHint>
+            Unclear means it names a key file, reaches outside the project, contacts the network, or is built
+            while it runs.
+          </FormHint>
+          <FormLabel>Web pages that could carry data out</FormLabel>
+          <FormSelect
+            value={guards.web_fetch_guard}
+            onChange={(v) => setGuards((g) => ({ ...g, web_fetch_guard: v }))}
+          >
+            <option value="payload">Ask for long addresses (default)</option>
+            <option value="ask">Always ask</option>
+            <option value="off">Never ask</option>
+          </FormSelect>
+          <FormLabel>People on your messenger allow lists may read</FormLabel>
+          <FormSelect
+            value={guards.messenger_tools}
+            onChange={(v) => setGuards((g) => ({ ...g, messenger_tools: v }))}
+          >
+            <option value="all">Everything (default)</option>
+            <option value="safe">Web and skills only</option>
+            <option value="none">Nothing unasked</option>
+          </FormSelect>
+          <FormLabel>Other agents may read</FormLabel>
+          <FormSelect
+            value={guards.peer_tools}
+            onChange={(v) => setGuards((g) => ({ ...g, peer_tools: v }))}
+          >
+            <option value="safe">Web and skills only (default)</option>
+            <option value="all">Everything</option>
+            <option value="none">Nothing unasked</option>
+          </FormSelect>
+          <FormHint>
+            Everything includes your mail, calendar, files, memory, clipboard and screen. Anything not allowed
+            here waits for your yes. Routines and jobs created from outside follow the second setting.
+          </FormHint>
+          <FormLabel>
+            Largest request to the local API ({guards.api_max_body_mb > 0 ? `${guards.api_max_body_mb} MB` : 'no limit'})
+          </FormLabel>
+          <FormRange
+            min={0}
+            max={2048}
+            step={16}
+            value={guards.api_max_body_mb}
+            onChange={(mb) => setGuards((g) => ({ ...g, api_max_body_mb: mb }))}
           />
         </CategoryCard>
         <CategoryCard kicker="Logs">

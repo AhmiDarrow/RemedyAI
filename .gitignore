@@ -141,6 +141,7 @@ docs/*.md
 !docs/RMB.md
 !docs/HOUSE_RULES.md
 !docs/SETUP.md
+!docs/SECURITY.md
 docs/_*/
 docs/_*.json
 docs/*soak*

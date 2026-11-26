@@ -117,6 +117,12 @@ export interface Settings {
   build_os_advanced?: boolean
   rmb_enabled?: boolean
   allow_skill_creation?: boolean
+  /** Safeguards (docs/SECURITY.md). */
+  shell_in_auto?: string
+  web_fetch_guard?: string
+  messenger_tools?: string
+  peer_tools?: string
+  api_max_body_mb?: number
   auto_approve_threshold?: number
   log_level?: string
   sarcasm_mode?: boolean
@@ -300,6 +306,12 @@ export interface SettingsUpdate {
   build_os_advanced?: boolean
   rmb_enabled?: boolean
   allow_skill_creation?: boolean
+  /** Safeguards (docs/SECURITY.md). */
+  shell_in_auto?: string
+  web_fetch_guard?: string
+  messenger_tools?: string
+  peer_tools?: string
+  api_max_body_mb?: number
   auto_approve_threshold?: number
   log_level?: string
   sarcasm_mode?: boolean

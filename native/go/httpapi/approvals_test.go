@@ -106,6 +106,10 @@ func TestApproveOnceDoesNotStampSessionFingerprint(t *testing.T) {
 	if got == nil || got.Status != "approved" {
 		t.Fatalf("once resolve=%+v", got)
 	}
+	// The call the owner just approved runs; that uses the approval up.
+	if !q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, true) {
+		t.Fatal("the approved call itself must run")
+	}
 	if q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, true) {
 		t.Fatal("approve-once must not persist a session fingerprint")
 	}

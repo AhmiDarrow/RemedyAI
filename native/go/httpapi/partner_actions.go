@@ -150,6 +150,7 @@ func (s *Server) partnerSpawnChild(spec childSpec) (partnerChild, error) {
 		CreatedAt:       now,
 		UpdatedAt:       now,
 		Mode:            mode,
+		Outside:         !OriginIsOwner(spec.Origin),
 	}
 	h.mu.Lock()
 	cp := child
@@ -165,7 +166,7 @@ func (s *Server) partnerSpawnChild(spec childSpec) (partnerChild, error) {
 		SessionID: sess.ID,
 		Prompt:    childBrief(spec, parentLabel),
 		Shown:     "🌱 Job from Remedy: " + spec.Task,
-		Origin:    "partner:child:" + parent,
+		Origin:    partnerOrigin("child", parent, child.Outside),
 		Label:     spec.Label,
 		GoalID:    child.GoalID,
 		RoutineID: spec.RoutineID,
@@ -196,7 +197,11 @@ func (s *Server) partnerMessageChild(childID, text, origin string) error {
 	h.mu.Lock()
 	c := h.st.Children[strings.TrimSpace(childID)]
 	var label, parent, mode string
+	outside := false
 	if c != nil {
+		// Words from outside make the child's next run an outside one, and it stays so.
+		c.Outside = c.Outside || !OriginIsOwner(origin)
+		outside = c.Outside
 		label, parent, mode = c.Label, c.ParentSessionID, c.Mode
 		c.State = partnerStateQueued
 		c.UpdatedAt = h.nowISO()
@@ -216,7 +221,7 @@ func (s *Server) partnerMessageChild(childID, text, origin string) error {
 		Prompt: "Remedy says: " + text + "\n\n" + partnerFrugalRule +
 			"\nEnd with one line: STATUS: done|waiting|blocked — <one short sentence>.",
 		Shown:  "✦ Remedy: " + text,
-		Origin: "partner:child:" + parent,
+		Origin: partnerOrigin("child", parent, outside),
 		Label:  label,
 		Mode:   mode,
 	})

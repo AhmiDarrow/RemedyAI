@@ -212,12 +212,77 @@ fn permissions(ui: &Ui, s: Settings) -> El {
             ))
             .child(form::flow(
                 ui,
+                "Safeguards",
+                "What still asks in Auto, and what a message from outside may read",
+                false,
+                move |ui| safeguards(ui, s),
+            ))
+            .child(form::flow(
+                ui,
                 "Advanced permissions",
                 "Trust behavior and browser access",
                 false,
                 move |ui| advanced_permissions(ui, s),
             ))
     })
+}
+
+/// The runtime's guards: each one only adds a question, and each can be turned down here.
+fn safeguards(ui: &Ui, s: Settings) -> El {
+    form::stack(ui)
+        .child(form::hint(
+            ui,
+            "These stop a hidden instruction in a web page, a file or a message from using Remedy's own tools against you. They read what a command says, so they are a filter, not a sandbox.",
+        ))
+        .child(bits::choice(
+            ui,
+            "Shell commands in Auto",
+            &[("guard", "Ask when unclear"), ("ask", "Always ask"), ("allow", "Never ask")],
+            s.shell_in_auto,
+        ))
+        .child(w::text(ui, move || shell_hint(&s.shell_in_auto.get()).to_string()).variant("small"))
+        .child(bits::choice(
+            ui,
+            "Web pages that could carry data out",
+            &[("payload", "Ask for long addresses"), ("ask", "Always ask"), ("off", "Never ask")],
+            s.web_fetch_guard,
+        ))
+        .child(form::hint(
+            ui,
+            "A fetch whose address has a long tail can carry your data to someone else's server. Ordinary pages are fetched without asking. Full approval mode does not ask.",
+        ))
+        .child(bits::choice(
+            ui,
+            "People on your messenger allow lists may read",
+            &[("all", "Everything"), ("safe", "Web and skills only"), ("none", "Nothing unasked")],
+            s.messenger_tools,
+        ))
+        .child(bits::choice(
+            ui,
+            "Other agents may read",
+            &[("safe", "Web and skills only"), ("all", "Everything"), ("none", "Nothing unasked")],
+            s.peer_tools,
+        ))
+        .child(form::hint(
+            ui,
+            "Everything includes your mail, calendar, files, memory, clipboard and screen. Anything not allowed here waits for your yes. Routines and jobs created from outside follow the second setting.",
+        ))
+        .child(w::slider(ui, "Largest request to the local API", s.api_max_body_mb, 0.0, 2048.0, 16.0))
+        .child(
+            w::text(ui, move || {
+                let mb = s.api_max_body_mb.get().round();
+                if mb <= 0.0 { "No limit".to_string() } else { format!("{mb:.0} MB") }
+            })
+            .variant("small"),
+        )
+}
+
+fn shell_hint(mode: &str) -> &'static str {
+    match mode {
+        "ask" => "Every shell command waits for your yes, also in Auto.",
+        "allow" => "Auto runs every shell command without asking. A command can then write outside your project and read keys.",
+        _ => "Auto runs plain commands in your project. A command that names a key file, reaches outside the project, contacts the network or is built while it runs waits for your yes.",
+    }
 }
 
 fn approval_hint(mode: &str) -> &'static str {

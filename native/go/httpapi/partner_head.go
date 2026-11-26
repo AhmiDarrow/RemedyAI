@@ -86,6 +86,9 @@ type partnerChild struct {
 	Runs            int    `json:"runs,omitempty"`
 	// Mode is plan or chat when the session runs that way; empty is build.
 	Mode string `json:"mode,omitempty"`
+	// Outside is set when someone other than the owner had Remedy start this
+	// child, or sent it a message since: its runs are not the owner's.
+	Outside bool `json:"outside,omitempty"`
 }
 
 type partnerActivity struct {
@@ -340,7 +343,29 @@ func isPartnerOrigin(origin string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(origin)), "partner:")
 }
 
+// partnerOutsidePrefix marks background work Remedy does because someone other
+// than the owner asked for it: a routine or child a messenger sender or another
+// agent had her create. It is not an owner origin, so that work asks before every
+// change and reads only what a turn from outside may read (guards.go), however
+// much later it runs.
+const partnerOutsidePrefix = "partner-outside:"
+
+// partnerOrigin is the origin of a background run of `kind` (child, routine, goal).
+func partnerOrigin(kind, id string, outside bool) string {
+	if outside {
+		return partnerOutsidePrefix + kind + ":" + id
+	}
+	return "partner:" + kind + ":" + id
+}
+
+// isPartnerRun reports any background run Remedy started, trusted or not.
+func isPartnerRun(origin string) bool {
+	o := strings.ToLower(strings.TrimSpace(origin))
+	return strings.HasPrefix(o, "partner:") || strings.HasPrefix(o, partnerOutsidePrefix)
+}
+
 // isChildOrigin reports a turn running inside one of Remedy's children.
 func isChildOrigin(origin string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(origin)), "partner:child:")
+	o := strings.ToLower(strings.TrimSpace(origin))
+	return strings.HasPrefix(o, "partner:child:") || strings.HasPrefix(o, partnerOutsidePrefix+"child:")
 }

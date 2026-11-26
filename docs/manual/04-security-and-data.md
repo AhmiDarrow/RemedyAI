@@ -81,6 +81,10 @@ API keys and OAuth tokens never leave as model input either way. Env override: `
 **Maximum power for you on this PC** — shell, files, skills, full scope when you enable them.  
 **Not a doorway for others** — no open LAN API by default, no website token theft, no untrusted skill packs until you Trust them.
 
+## Safeguards against hidden instructions
+
+Text in a web page, a file or a message can try to tell Remedy what to do. The safeguards that stop it from acting on that, the setting for each one, and what each does not cover are in [SECURITY.md](../SECURITY.md): shell commands in Auto, web fetches that could carry data out, what messenger senders and other agents may read, and the request size limit. You change them in Settings → Security & power → Safeguards.
+
 ## Local API protection
 
 - Default: API requires Bearer token (see [Providers & auth](03-providers-and-auth)).  
