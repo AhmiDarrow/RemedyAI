@@ -260,6 +260,7 @@ impl FloatCtl {
                 .min_size(360.0, 280.0)
                 .always_on_top(on_top),
             move |ui, window| {
+                crate::settings::bind_window(ui);
                 let colors = ui.theme().colors.clone();
                 let dock = ctl.clone();
                 let top = ctl.on_top.clone();

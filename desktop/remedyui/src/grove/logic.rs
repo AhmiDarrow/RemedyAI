@@ -39,6 +39,16 @@ pub struct ToolCall {
     pub args: Value,
 }
 
+/// Whether rows fetched in the background should replace the rows shown: they differ,
+/// and they are not an older picture (a fetch that began before the last reply landed).
+pub fn newer_rows(shown: &[StoryMessage], fetched: &[StoryMessage]) -> bool {
+    match (shown.last(), fetched.last()) {
+        (_, None) => false,
+        (None, Some(_)) => true,
+        (Some(a), Some(b)) => fetched != shown && b.created_at >= a.created_at,
+    }
+}
+
 /// One chat row the storyline and the bubble read.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StoryMessage {
@@ -1398,6 +1408,18 @@ mod tests {
             created_at: "2026-08-16T09:00:00Z".into(),
             tool_calls: Vec::new(),
         }
+    }
+
+    #[test]
+    fn rows_from_another_screen_replace_what_is_shown_unless_they_are_older() {
+        let at = |id: &str, when: &str| StoryMessage { created_at: when.into(), ..msg(id, "user", "hi") };
+        let shown = vec![at("1", "2026-08-16T09:00:00Z"), at("2", "2026-08-16T09:01:00Z")];
+        let more = vec![shown[0].clone(), shown[1].clone(), at("3", "2026-08-16T09:02:00Z")];
+        assert!(newer_rows(&shown, &more), "the phone added a row");
+        assert!(newer_rows(&[], &shown), "nothing shown yet");
+        assert!(!newer_rows(&shown, &shown), "nothing changed");
+        assert!(!newer_rows(&more, &shown), "a fetch from before the last reply");
+        assert!(!newer_rows(&shown, &[]), "an empty answer does not clear the screen");
     }
 
     #[test]

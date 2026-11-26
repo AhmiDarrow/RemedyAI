@@ -24,6 +24,19 @@ use super::state::Settings;
 thread_local! {
     static UI: RefCell<Option<Ui>> = RefCell::new(None);
     static HOST: RefCell<Option<App>> = RefCell::new(None);
+    /// The app's other windows (a popped-out pane), each `None` once closed.
+    static EXTRA: RefCell<Vec<Box<dyn Fn() -> Option<Ui>>>> = RefCell::new(Vec::new());
+}
+
+/// Another window of the app wears the main window's look, now and after every change.
+pub fn bind_window(ui: &Ui) {
+    let weak = ui.downgrade();
+    EXTRA.with(|e| e.borrow_mut().push(Box::new(move || weak.upgrade())));
+    if let Some(main) = UI.with(|c| c.borrow().clone()) {
+        let theme = main.theme();
+        let sheet = sheet(&theme);
+        ui.set_theme(theme, sheet);
+    }
 }
 
 pub fn bind_ui(ui: &Ui) {
@@ -147,6 +160,13 @@ pub fn apply(s: Settings) {
         theme.colors.accent = accent;
     }
     theme.motion.reduced = s.reduce_motion.get();
+    EXTRA.with(|e| {
+        e.borrow_mut().retain(|window| {
+            let Some(other) = window() else { return false };
+            other.set_theme(theme.clone(), sheet(&theme));
+            true
+        })
+    });
     let sheet = sheet(&theme);
     ui.set_theme(theme, sheet);
     ui.set_reduced_motion(s.reduce_motion.get());
