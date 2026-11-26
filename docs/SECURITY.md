@@ -51,7 +51,7 @@ What it does not cover:
 
 | Value | What happens |
 |---|---|
-| `payload` (default) | Fetching an ordinary page needs no approval. A fetch waits for you when its address has room to carry data: more than 256 characters after the `?` or `#`, or one path step longer than 96 characters. |
+| `payload` (default) | Fetching an ordinary page needs no approval. A fetch waits for you when its address has room to carry data: more than 256 characters after the `?` or `#`, one path step longer than 96 characters, or a path longer than 512 characters in all. |
 | `ask` | Every fetch waits for you. |
 | `off` | No fetch waits. |
 
