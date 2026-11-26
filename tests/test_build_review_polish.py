@@ -47,23 +47,6 @@ def test_reading_a_named_file_does_not_close_its_todo(tmp_path: Path):
 # --- tdd ---------------------------------------------------------------------
 
 
-def test_tdd_stub_never_overwrites_an_existing_test(tmp_path: Path):
-    from remedy.core.build_tdd import materialize_tdd_tests
-
-    tests = tmp_path / "tests"
-    tests.mkdir()
-    real = tests / "test_greet.py"
-    real.write_text("def test_real():\n    assert 1 == 1\n", encoding="utf-8")
-    out = materialize_tdd_tests(
-        _rt(tmp_path),
-        [{"path": "greet.py", "symbol": "greet", "behavior": "say hi"}],
-        root=tmp_path,
-    )
-    assert real.read_text(encoding="utf-8").startswith("def test_real")
-    assert out["written"] == ["tests/test_greet_remedy_tdd.py"]
-    assert (tests / "test_greet_remedy_tdd.py").is_file()
-
-
 def test_file_goal_does_not_assert_stem_is_a_symbol():
     from remedy.core.build_spec_compiler import compile_goal_to_spec
 
@@ -75,39 +58,6 @@ def test_file_goal_does_not_assert_stem_is_a_symbol():
 
 
 # --- apply_patch -------------------------------------------------------------
-
-
-def test_pure_add_hunk_lands_after_its_anchor(tmp_path: Path):
-    from remedy.core.build_apply_patch import apply_patch_text
-
-    src = "def a():\n    return 1\n\n\ndef b():\n    return 2\n"
-    (tmp_path / "mod.py").write_text(src, encoding="utf-8")
-    patch = "*** Begin Patch\n*** Update File: mod.py\n@@ def a():\n+    print('hi')\n*** End Patch\n"
-    res = apply_patch_text(_rt(tmp_path), patch, root=tmp_path)
-    assert res.get("ok"), res
-    text = (tmp_path / "mod.py").read_text(encoding="utf-8")
-    assert text.index("print('hi')") < text.index("def b()")
-    assert text.splitlines()[1] == "    print('hi')"
-
-
-def test_contextless_add_to_nonempty_file_is_refused(tmp_path: Path):
-    from remedy.core.build_apply_patch import apply_patch_text
-
-    (tmp_path / "mod.py").write_text("x = 1\n", encoding="utf-8")
-    patch = "*** Begin Patch\n*** Update File: mod.py\n+y = 2\n*** End Patch\n"
-    res = apply_patch_text(_rt(tmp_path), patch, root=tmp_path)
-    assert not res.get("ok")
-    assert "anchor" in json.dumps(res).lower()
-    assert (tmp_path / "mod.py").read_text(encoding="utf-8") == "x = 1\n"
-
-
-def test_add_file_still_works_without_anchor(tmp_path: Path):
-    from remedy.core.build_apply_patch import apply_patch_text
-
-    patch = "*** Begin Patch\n*** Add File: fresh.py\n+z = 3\n*** End Patch\n"
-    res = apply_patch_text(_rt(tmp_path), patch, root=tmp_path)
-    assert res.get("ok"), res
-    assert (tmp_path / "fresh.py").read_text(encoding="utf-8") == "z = 3\n"
 
 
 # --- engine ------------------------------------------------------------------

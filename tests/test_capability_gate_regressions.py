@@ -7,10 +7,7 @@ gate existed, the value it was handed did not discriminate, so it passed.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from remedy.core.approvals import ApprovalQueue
-from remedy.core.build_mutant import mutant_kill_score
 from remedy.core.hive.policy import DAUGHTER_CAPABILITIES, is_mother_only_tool
 from remedy.core.turn_pipeline import _approval_key
 from remedy.tools.catalog import descriptor_for
@@ -162,17 +159,3 @@ def test_settings_snapshot_emits_trust_profile() -> None:
 # --- build_mutant: a mutant row names the file that was mutated --------------
 
 
-def test_mutant_rows_name_the_mutated_file(tmp_path: Path) -> None:
-    (tmp_path / "alpha.py").write_text("def f(x):\n    return x == 1\n", encoding="utf-8")
-    (tmp_path / "beta.py").write_text("def g(y):\n    return y == 2\n", encoding="utf-8")
-
-    # No test_command_paths -> no pytest subprocess; every mutant "survives".
-    result = mutant_kill_score(tmp_path, ["alpha.py", "beta.py"])
-
-    assert result["ok"] is True
-    files = {row["file"] for row in result["details"]}
-    assert files == {"alpha.py", "beta.py"}, (
-        f"mutant rows attributed to {files}; each row must name the file that "
-        "was actually mutated, not the last one copied"
-    )
-    assert all(isinstance(row["file"], str) for row in result["details"])

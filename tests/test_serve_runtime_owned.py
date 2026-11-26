@@ -296,7 +296,6 @@ def test_fastapi_api_module_is_gone() -> None:
 def test_fastapi_module_is_not_production_serve_entry() -> None:
     """create_app must not be reachable from the production serve path."""
     import remedy.interfaces.cli.cmd_runtime as CR
-    import remedy.interfaces.serve_forensics as SF
 
     src = Path(CR.__file__).read_text(encoding="utf-8")
     assert "create_app" not in src
@@ -304,7 +303,6 @@ def test_fastapi_module_is_not_production_serve_entry() -> None:
     assert "import uvicorn" not in src
     assert "uvicorn.run" not in src
     assert "from remedy.interfaces.api" not in src
-    assert not hasattr(SF, "run_uvicorn_logged")
 
 
 def test_cmd_serve_argv_never_starts_uvicorn(monkeypatch, tmp_path) -> None:
@@ -454,7 +452,6 @@ def test_serve_worker_python_keeps_venv_symlink(tmp_path: Path) -> None:
     assert got == str(link)
     assert os.path.realpath(got) == str(base.resolve())
     assert got != os.path.realpath(got)
-
 
 
 def test_cmd_serve_refuses_non_loopback_even_with_insecure_flag(

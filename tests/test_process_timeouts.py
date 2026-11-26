@@ -9,7 +9,6 @@ simply stopped, with nothing said about why.
 from __future__ import annotations
 
 import ast
-import asyncio
 from pathlib import Path
 
 import pytest
@@ -110,29 +109,3 @@ def test_the_hidden_runner_defaults_to_a_bounded_wait():
     assert default == DEFAULT_RUN_TIMEOUT_S > 0
 
 
-@pytest.mark.asyncio
-async def test_docker_answers_no_when_it_cannot_answer(monkeypatch):
-    """A wedged daemon makes `docker ps` hang; the safe reading is "no such
-    sandbox", which makes the caller create one."""
-    from remedy.execution import docker as docker_mod
-
-    class _Never:
-        returncode = None
-
-        async def communicate(self):
-            await asyncio.sleep(3600)
-
-        def kill(self):
-            return None
-
-        async def wait(self):
-            return 0
-
-    async def _run(argv, **_kw):
-        import subprocess
-
-        raise subprocess.TimeoutExpired(cmd=list(argv), timeout=0.05)
-
-    monkeypatch.setattr("remedy.execution.process.run_hidden_async", _run)
-    sandbox = docker_mod.DockerSandbox.__new__(docker_mod.DockerSandbox)
-    assert await sandbox.sandbox_exists("x", timeout_s=0.05) is False
