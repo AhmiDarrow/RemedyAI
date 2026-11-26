@@ -346,11 +346,6 @@ def test_python_fastapi_routes_package_is_gone() -> None:
     assert importlib.util.find_spec("remedy.core.computer.host_conpty") is None
 
 
-def test_rmdy_tool_worker_entry_still_present() -> None:
-    spec = importlib.util.find_spec("remedy.runtime.rmdy_tool_worker")
-    assert spec is not None
-
-
 def test_resolve_prefers_env_override(monkeypatch, tmp_path) -> None:
     path = tmp_path / "custom-runtime.exe"
     path.write_bytes(b"")
