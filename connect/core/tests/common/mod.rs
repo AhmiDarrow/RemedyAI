@@ -139,6 +139,8 @@ pub struct PcInner {
     pub accepted: AtomicUsize,
     pub handshakes: AtomicUsize,
     pub pings: AtomicUsize,
+    /// Stop answering pings while keeping the socket open: a path that died silently.
+    pub mute: AtomicBool,
     pub rekeys_in: AtomicUsize,
     pub rekeys_out: Arc<AtomicUsize>,
     pub req_frames: AtomicUsize,
@@ -201,6 +203,7 @@ impl FakePc {
             accepted: AtomicUsize::new(0),
             handshakes: AtomicUsize::new(0),
             pings: AtomicUsize::new(0),
+            mute: AtomicBool::new(false),
             rekeys_in: AtomicUsize::new(0),
             rekeys_out: Arc::new(AtomicUsize::new(0)),
             req_frames: AtomicUsize::new(0),
@@ -363,6 +366,9 @@ fn serve(pc: Arc<PcInner>, mut sock: TcpStream) {
             }
             TYPE_PING => {
                 pc.pings.fetch_add(1, Ordering::SeqCst);
+                if pc.mute.load(Ordering::SeqCst) {
+                    continue;
+                }
                 conn.write_plain(&encode_inner(TYPE_PONG, f.id, &[], true).unwrap());
             }
             TYPE_HTTP_REQ => {
