@@ -48,7 +48,7 @@ MODE_TRADITIONAL = "traditional"
 
 # Origins that may change house rules. Stricter than OriginIsOwner: children,
 # routines, hive daughters, messengers, and peer bots are all refused.
-_OWNER_ORIGINS = frozenset({"", "desktop", "webui", "cli", "fixture"})
+_OWNER_ORIGINS = frozenset({"desktop", "webui", "cli", "fixture"})
 
 # Keys that must never appear in the audit log, draft files, or summaries.
 SECRET_KEYS = frozenset(
@@ -87,6 +87,19 @@ SENSITIVE_KEYS = frozenset(
         "connect_bind_port",
         "claimidx_enabled",
         "claimidx_public_ledger",
+    }
+)
+
+# Settings that always need the owner's explicit yes: where the model's
+# traffic and key go, and which folder tools work in (the Go runtime's
+# ownerOnlySettingsKey cards the same keys).
+OWNER_ONLY_KEYS = frozenset(
+    {
+        "llm_provider",
+        "llm_base_url",
+        "llm_api_key",
+        "custom_llm_name",
+        "project_path",
     }
 )
 
@@ -381,7 +394,8 @@ def is_secret_key(key: str) -> bool:
 
 
 def is_sensitive_key(key: str) -> bool:
-    return (key or "").strip() in SENSITIVE_KEYS or bool(
+    k = (key or "").strip()
+    return k in SENSITIVE_KEYS or k in OWNER_ONLY_KEYS or bool(
         FIELD_BY_KEY.get(key) and FIELD_BY_KEY[key].sensitive
     )
 
@@ -1684,8 +1698,10 @@ _MUTATING = frozenset(
 def dispatch(inp: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run one ``house_rules`` / ``setup.session`` action.
 
-    ``caller_origin`` must be injected by the runtime. Missing origin is
-    treated as the owner (desktop/CLI tests and unbound unit calls).
+    ``caller_origin`` must be injected by the runtime. A missing origin is
+    not the owner, so mutating actions are refused without one. The call's
+    own ``confirm`` flag is the model's word, not the owner's, so a sensitive
+    ``propose`` always waits for a separate ``confirm`` action.
     """
     data = dict(inp or {})
     origin = str(data.get("caller_origin") or "").strip()
@@ -1718,7 +1734,7 @@ def dispatch(inp: dict[str, Any] | None = None) -> dict[str, Any]:
                 patch,
                 home=home,
                 origin=origin,
-                confirm=bool(data.get("confirm")),
+                confirm=False,
                 source=str(data.get("source") or "chat"),
             )
         if action == "decline":

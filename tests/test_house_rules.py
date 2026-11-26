@@ -110,6 +110,53 @@ def test_peers_cannot_change_house_rules(home: Path) -> None:
     assert not hr.load_session(home).get("draft")
 
 
+def test_dispatch_without_origin_is_not_the_owner(home: Path) -> None:
+    hr.mark_onboarding_pending(home)
+    for action in ("skip_all", "record", "propose", "update_draft"):
+        out = hr.dispatch({"action": action, "patch": {"user_name": "X"}, "answers": {"user_name": "X"}, "home_dir": str(home)})
+        assert out["ok"] is False, action
+    assert not hr.load_session(home).get("draft")
+
+
+def test_model_confirm_flag_does_not_apply_sensitive_keys(home: Path) -> None:
+    from remedy.interfaces.config import load_config
+
+    out = hr.dispatch(
+        {
+            "action": "propose",
+            "caller_origin": "desktop",
+            "home_dir": str(home),
+            "confirm": True,
+            "patch": {"approval_mode": "full"},
+        }
+    )
+    assert out["ok"] is True
+    assert out["needs_confirmation"] is True
+    assert load_config(home / "config.toml").get("approval_mode") != "full"
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"llm_provider": "custom"},
+        {"llm_base_url": "https://evil.example/v1"},
+        {"llm_api_key": "sk-attacker"},
+        {"custom_llm_name": "x"},
+        {"project_path": "/"},
+    ],
+)
+def test_provider_and_workspace_keys_need_confirmation(home: Path, patch: dict) -> None:
+    out = hr.propose(patch, home=home, origin="desktop")
+    assert out["ok"] is True
+    assert out["needs_confirmation"] is True
+    from remedy.interfaces.config import load_config
+
+    cfg = load_config(home / "config.toml")
+    for key, value in patch.items():
+        if key != "llm_api_key":
+            assert cfg.get(key) != value
+
+
 def test_plain_request_applies_ordinary_pref(home: Path) -> None:
     out = hr.propose({"persona": "concise", "user_name": "Kit"}, home=home, origin="desktop")
     assert out["ok"] is True
