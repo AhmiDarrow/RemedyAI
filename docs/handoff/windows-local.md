@@ -16,9 +16,9 @@ macOS, a real GUI, hardware or a phone. Each item says what to do and what
 5. Everything else was run here and passes: go test, go test -race, go vet,
    zig build test (debug and ReleaseSafe), the ISA check, pytest (8,046),
    vitest (663), npm run build, and cargo test for the Tauri shell, phone
-   core and iroh sidecar. ruff (77), mypy (50) and the Go language-boundary
-   check fail the same way on `master` itself; the polish step works on
-   those.
+   core and iroh sidecar. ruff, mypy, the docs sync, the Go
+   language-boundary check and the benchmark budgets pass too (the first
+   three and the boundary check were failing on `master`).
 
 ## 1. Zig core on Windows and macOS
 
@@ -103,6 +103,14 @@ Run `npm run tauri:dev` (and a release build if you can).
 - Android: `cd android && .\gradlew.bat --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease`.
 
 ## 5. Behaviour changes to know about
+
+- `/house-rules` works again (it always answered "House rules error"), and
+  `/house-rules revisit` reopens the questions.
+- Auto quant for the local mind now sees the GPU and RAM. On Windows and
+  macOS it used to read every machine as 16 GB with no GPU, so a small card
+  may now get a smaller quant than before. Worth a look on your PC.
+- An API key given through house rules is now actually stored (it used to
+  be dropped while the audit said "stored").
 
 - An API key proposed in chat (house rules) now waits for your yes, and the
   pending store strips secrets, so you'll have to enter the key in Settings.
