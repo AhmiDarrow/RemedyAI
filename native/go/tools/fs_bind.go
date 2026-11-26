@@ -25,7 +25,70 @@ func isFullAccessScope(scope string) bool {
 	}
 }
 
+// isSecretAuthPath reports whether abs reaches the auth secrets: by its
+// spelling, by sitting under the configured home's auth folder (REMEDY_HOME
+// need not be named .remedy), or by doing either once symlinks are resolved.
 func isSecretAuthPath(abs string) bool {
+	if isSecretAuthSpelling(abs) || underAuthHome(abs, false) {
+		return true
+	}
+	if !filepath.IsAbs(abs) {
+		return false
+	}
+	target := resolveExistingPrefix(abs)
+	return target != "" && (isSecretAuthSpelling(target) || underAuthHome(target, true))
+}
+
+// underAuthHome reports whether p is inside the tool home's auth folder, as
+// spelled or (resolved) with that folder's own symlinks resolved too.
+func underAuthHome(p string, resolved bool) bool {
+	home := resolveToolHome()
+	if home == "" {
+		return false
+	}
+	auth := filepath.Join(home, "auth")
+	if resolved {
+		if r := resolveExistingPrefix(auth); r != "" {
+			auth = r
+		}
+	}
+	return pathWithin(filepath.Clean(p), filepath.Clean(auth))
+}
+
+func pathWithin(p, dir string) bool {
+	if runtime.GOOS == "windows" {
+		p, dir = strings.ToLower(p), strings.ToLower(dir)
+	}
+	rel, err := filepath.Rel(dir, p)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// resolveExistingPrefix resolves symlinks in the longest existing prefix of
+// abs and appends the rest, so a file that does not exist yet (a write) is
+// judged by where its folder really is. "" when nothing resolves.
+func resolveExistingPrefix(abs string) string {
+	p, tail := filepath.Clean(abs), ""
+	for {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			if tail == "" {
+				return r
+			}
+			return filepath.Join(r, tail)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return ""
+		}
+		if tail == "" {
+			tail = filepath.Base(p)
+		} else {
+			tail = filepath.Join(filepath.Base(p), tail)
+		}
+		p = parent
+	}
+}
+
+func isSecretAuthSpelling(abs string) bool {
 	cleaned := filepath.Clean(abs)
 	parts := strings.FieldsFunc(cleaned, func(r rune) bool {
 		return r == '/' || r == '\\'
