@@ -407,17 +407,21 @@ func (s *Server) startMessengerTunnel(body tunnelStartBody) (MessengerTunnelStat
 	metricsAddr := fmt.Sprintf("127.0.0.1:%d", metricsPort)
 
 	argv := []string{bin, "tunnel", "--no-autoupdate", "--metrics", metricsAddr}
+	var env map[string]string
 	if mode == "quick" {
 		argv = append(argv, "--url", origin)
 	} else {
-		argv = append(argv, "run", "--token", token)
+		// The token goes in cloudflared's TUNNEL_TOKEN, not on the command
+		// line, where any local user can read it from the process list.
+		argv = append(argv, "run")
+		env = map[string]string{"TUNNEL_TOKEN": token}
 	}
 
 	starter := s.tunnelStarter
 	if starter == nil {
 		starter = defaultTunnelStarter(home)
 	}
-	proc, err := starter(context.Background(), argv, nil, filepath.Dir(bin))
+	proc, err := starter(context.Background(), argv, env, filepath.Dir(bin))
 	if err != nil {
 		webhookOrig.close()
 		return MessengerTunnelStatus{}, fmt.Errorf("start cloudflared: %w", err)
