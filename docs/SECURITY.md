@@ -87,7 +87,7 @@ Default `128`. A request that says it is larger is refused with HTTP 413; one th
 ## Protections with no off switch
 
 - **Remedy's own secrets** (`.remedy/auth`): file tools never open them and searches never walk into them, including when your project folder is your home folder, in full access scope, and through Windows short names and alternate spellings.
-- **The local API** listens on `127.0.0.1` only, needs a token, refuses token requests from other web sites, and the desktop checks it is talking to Remedy's own runtime before sending the token.
+- **The local API** listens on `127.0.0.1` only, needs a token, and refuses token requests from other web sites. The RemedyUI desktop checks it is talking to Remedy's own runtime before sending the token; the Tauri desktop does not make that check yet, so a program that takes the API port before Remedy starts could receive the token from it.
 - **Phone**: a new phone can be paired only from this PC or the home network. Removing a phone cuts it off on every path. A phone cannot change the model address, approval mode, access scope, project folder or the safeguards.
 - **Downloads Remedy makes herself** (voice and listening models) are checked against pinned checksums.
 
