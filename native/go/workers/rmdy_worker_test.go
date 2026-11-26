@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AhmiDarrow/RemedyAI/native/go/ipc"
 	"github.com/AhmiDarrow/RemedyAI/native/go/protocol"
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
@@ -709,4 +710,27 @@ func stringSlicesEqualFold(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestDefaultToolEndpointFitsAUnixSocketUnderALongHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("named pipes have no path limit")
+	}
+	long := filepath.Join(t.TempDir(), strings.Repeat("a-very-long-folder-name-", 5))
+	if err := os.MkdirAll(long, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("REMEDY_HOME", long)
+	endpoint, err := defaultToolEndpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(endpoint) >= 104 {
+		t.Fatalf("endpoint %q is %d bytes, too long for sun_path", endpoint, len(endpoint))
+	}
+	ln, err := ipc.Listen(endpoint)
+	if err != nil {
+		t.Fatalf("listen on %q: %v", endpoint, err)
+	}
+	_ = ln.Close()
 }

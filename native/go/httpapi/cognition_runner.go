@@ -331,21 +331,40 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 	seed.Messages = withTurnContext(seedTranscript(req, userText, r.HomeDir), turnContext)
 
 	var (
-		emitMu  sync.Mutex
-		emitErr error
-		emitted bool
+		emitMu   sync.Mutex
+		emitErr  error
+		emitted  bool
+		emitDone bool
 	)
-	// Tool batches run concurrently; serialize emit + emitErr.
+	// Tool batches run concurrently; serialize emit + emitErr. Once RunTurn
+	// returns, the caller closes its stream, so a token that arrives late (a
+	// model stream or a delegate still flushing after Stop) is dropped here
+	// instead of reaching a closed sink.
+	defer func() {
+		emitMu.Lock()
+		emitDone = true
+		emitMu.Unlock()
+	}()
 	safeEmit := func(tok string) {
 		emitMu.Lock()
 		defer emitMu.Unlock()
-		if emitErr != nil || emit == nil {
+		if emitDone || emitErr != nil || emit == nil {
 			return
 		}
 		emitted = true
 		if err := emit(tok); err != nil {
 			emitErr = err
 		}
+	}
+	// forceEmit sends a closing token even after an earlier write failed,
+	// as the raw emit used to, but under the same lock as safeEmit.
+	forceEmit := func(tok string) {
+		emitMu.Lock()
+		defer emitMu.Unlock()
+		if emitDone || emit == nil {
+			return
+		}
+		_ = emit(tok)
 	}
 	hasEmitted := func() bool {
 		emitMu.Lock()
@@ -376,12 +395,15 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 		}
 	}
 
-	if emitErr != nil {
-		return emitErr
+	emitMu.Lock()
+	streamErr := emitErr
+	emitMu.Unlock()
+	if streamErr != nil {
+		return streamErr
 	}
 	if out.Err != nil {
 		if errors.Is(out.Err, context.Canceled) || errors.Is(out.Err, context.DeadlineExceeded) {
-			_ = emit("@@aborted\n")
+			forceEmit("@@aborted\n")
 			return nil
 		}
 		if errors.Is(out.Err, cognition.ErrOwnerDenied) {
