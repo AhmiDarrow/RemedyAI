@@ -72,6 +72,12 @@ func (c slashCaller) call(method, path string, body any) (int, map[string]any) {
 	if why := c.allowed(method, path); why != "" {
 		return http.StatusForbidden, map[string]any{"detail": why}
 	}
+	// The phone's own list of settings it may never change applies here too.
+	if c.phone && method == http.MethodPut && strings.HasPrefix(path, "/api/settings") && body != nil {
+		if phoneSettingsLocked(body) != "" {
+			return http.StatusForbidden, map[string]any{"detail": "That setting is changed at the PC, not from a phone."}
+		}
+	}
 	return c.s.selfCall(method, path, body)
 }
 

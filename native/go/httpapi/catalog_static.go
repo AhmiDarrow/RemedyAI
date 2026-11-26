@@ -78,5 +78,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleListCommands(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"commands": builtinCommands})
+	// Only commands the runtime carries out: a palette must not offer one that
+	// answers "unknown command".
+	writeJSON(w, http.StatusOK, map[string]any{"commands": allSlashCommands()})
 }
