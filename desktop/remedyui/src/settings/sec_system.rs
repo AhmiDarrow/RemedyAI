@@ -254,7 +254,7 @@ fn safeguards(ui: &Ui, s: Settings) -> El {
         .child(bits::choice(
             ui,
             "People on your messenger allow lists may read",
-            &[("all", "Everything"), ("safe", "Web and skills only"), ("none", "Nothing unasked")],
+            &[("safe", "Web and skills only"), ("all", "Everything"), ("none", "Nothing unasked")],
             s.messenger_tools,
         ))
         .child(bits::choice(
@@ -265,7 +265,7 @@ fn safeguards(ui: &Ui, s: Settings) -> El {
         ))
         .child(form::hint(
             ui,
-            "Everything includes your mail, calendar, files, memory, clipboard and screen. Anything not allowed here waits for your yes. Routines and jobs created from outside follow the second setting.",
+            "Everything includes your mail, calendar, files, memory, clipboard and screen. Anything not allowed here waits for your yes. If you message your own assistant and only you are on the allow list, Everything is the convenient choice. Routines and jobs created from outside follow the second setting.",
         ))
         .child(w::slider(ui, "Largest request to the local API", s.api_max_body_mb, 0.0, 2048.0, 16.0))
         .child(

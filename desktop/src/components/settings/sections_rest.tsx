@@ -187,8 +187,8 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
             value={guards.messenger_tools}
             onChange={(v) => setGuards((g) => ({ ...g, messenger_tools: v }))}
           >
-            <option value="all">Everything (default)</option>
-            <option value="safe">Web and skills only</option>
+            <option value="safe">Web and skills only (default)</option>
+            <option value="all">Everything</option>
             <option value="none">Nothing unasked</option>
           </FormSelect>
           <FormLabel>Other agents may read</FormLabel>
@@ -202,7 +202,8 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
           </FormSelect>
           <FormHint>
             Everything includes your mail, calendar, files, memory, clipboard and screen. Anything not allowed
-            here waits for your yes. Routines and jobs created from outside follow the second setting.
+            here waits for your yes. If you message your own assistant and only you are on the allow list,
+            Everything is the convenient choice. Routines and jobs created from outside follow the second setting.
           </FormHint>
           <FormLabel>
             Largest request to the local API ({guards.api_max_body_mb > 0 ? `${guards.api_max_body_mb} MB` : 'no limit'})
