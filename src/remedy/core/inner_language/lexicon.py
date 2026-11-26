@@ -66,7 +66,9 @@ def load_lexicon(home: str | Path | None) -> dict[str, Any]:
     if not isinstance(raw, dict):
         return state
     state.update({k: raw[k] for k in state if k in raw})
-    terms = state.get("terms") if isinstance(state.get("terms"), dict) else {}
+    terms = state.get("terms")
+    if not isinstance(terms, dict):
+        terms = {}
     clean = {}
     for key, val in terms.items():
         if not isinstance(val, dict):

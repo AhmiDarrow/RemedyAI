@@ -108,7 +108,7 @@ def model_files_for_quant(quant: str) -> tuple[str, str]:
     from remedy.runtime.catalog import get_model_spec
 
     spec = get_model_spec()
-    if quant == "q4_k_m" and getattr(spec, "fallback_model_file", ""):
+    if quant == "q4_k_m" and spec.fallback_model_file:
         return spec.fallback_model_file, spec.mmproj_file
     return spec.model_file, spec.mmproj_file
 
@@ -194,8 +194,7 @@ def resolve_spec_type(
         else:
             return None
     if chosen == "draft-mtp" and not allow_mtp:
-        chosen = "ngram-mod" if _has(help_blob, "ngram-mod") else None
-        return chosen
+        return "ngram-mod" if _has(help_blob, "ngram-mod") else None
     return chosen
 
 

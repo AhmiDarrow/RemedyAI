@@ -733,7 +733,9 @@ def _config_snapshot(home: str | Path | None = None) -> dict[str, Any]:
     cfg = _load_config(home)
     keys = set(FIELD_BY_KEY) | set(SENSITIVE_KEYS) | set(FORWARD_ADVANCED_KEYS)
     out: dict[str, Any] = {}
-    advanced = cfg.get("advanced") if isinstance(cfg.get("advanced"), dict) else {}
+    advanced = cfg.get("advanced")
+    if not isinstance(advanced, dict):
+        advanced = {}
     for key in keys:
         if is_secret_key(key):
             continue
@@ -1419,8 +1421,12 @@ def rollback(
         "rules": load_rules(home),
         "config": _config_snapshot(home),
     }
-    rules = prev.get("rules") if isinstance(prev.get("rules"), dict) else empty_rules()
-    config_bits = prev.get("config") if isinstance(prev.get("config"), dict) else {}
+    rules = prev.get("rules")
+    if not isinstance(rules, dict):
+        rules = empty_rules()
+    config_bits = prev.get("config")
+    if not isinstance(config_bits, dict):
+        config_bits = {}
     _snapshot_prev(home)  # will be overwritten; write current explicitly below
     write_json_atomic(prev_path(home), _scrub(current), mode=0o600)
     save_rules(rules, home)
@@ -1543,9 +1549,13 @@ def classify_mind_failure(status: dict[str, Any] | None) -> dict[str, Any] | Non
     """
     if not isinstance(status, dict):
         return None
-    progress = status.get("progress") if isinstance(status.get("progress"), dict) else {}
+    progress = status.get("progress")
+    if not isinstance(progress, dict):
+        progress = {}
     err = str(progress.get("error") or status.get("error") or "").strip()
-    health = status.get("health") if isinstance(status.get("health"), dict) else {}
+    health = status.get("health")
+    if not isinstance(health, dict):
+        health = {}
     ram = health.get("ram_gb")
     min_ram = health.get("min_ram_gb")
     phase = str(progress.get("phase") or "").strip().lower()

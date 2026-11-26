@@ -154,6 +154,7 @@ def _rotate_learn_log(path: Path) -> None:
     if len(lines) <= max_lines // 2:
         return
     keep = lines[-max_lines:] if len(lines) > max_lines else lines[len(lines) // 2 :]
+    tmp: Path | None = None
     try:
         from remedy.core.atomic_json import replace_with_retry, scratch_path
 
@@ -162,9 +163,8 @@ def _rotate_learn_log(path: Path) -> None:
         replace_with_retry(tmp, path)
     except Exception:
         with suppress(Exception):
-            tmp = locals().get("tmp")
             if tmp is not None:
-                Path(tmp).unlink(missing_ok=True)
+                tmp.unlink(missing_ok=True)
 
 
 def _changed_from(out: Mapping[str, Any]) -> dict[str, Any]:
