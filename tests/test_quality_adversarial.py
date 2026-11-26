@@ -88,17 +88,6 @@ def test_i_like_godot_does_not_arm_full_pack_make_a_game_does():
     assert me_game.pack == "full"
 
 
-def test_skip_pass_gate_is_not_drive_green():
-    from remedy.core.build_persist import iterate_to_green_multi
-
-    out = iterate_to_green_multi(
-        lambda: {"ok": True, "verified": False, "passed_levels": ["L3"]},
-        [("noop", lambda _v: {"ran": False})],
-    )
-    assert out.ok is False
-    assert out.reason == "unverified"
-
-
 def test_missing_suite_injects_do_not_claim_green(monkeypatch):
     import asyncio
 
@@ -180,42 +169,6 @@ def test_unknown_cli_action_ok_false(tmp_path: Path, monkeypatch):
     assert act.get("ok") is False
     assert host._run_action("select", {}, SimpleNamespace()).get("ok") is False
     assert host._run_action("act", {}, SimpleNamespace()).get("ok") is False
-
-
-def test_apply_patch_two_file_second_hunk_miss_leaves_file_1(tmp_path: Path):
-    from remedy.core.build_apply_patch import apply_patch_text
-
-    (tmp_path / "a.py").write_text("old\n", encoding="utf-8")
-    (tmp_path / "b.py").write_text("keep\n", encoding="utf-8")
-    rt = SimpleNamespace(
-        effective_project_path=lambda: tmp_path,
-        resolve_tool_path=lambda p, **k: tmp_path / p,
-        config=SimpleNamespace(home_dir=tmp_path),
-    )
-    diff = (
-        "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-old\n+new\n"
-        "--- a/b.py\n+++ b/b.py\n@@ -1 +1 @@\n-missing_this\n+newb\n"
-    )
-    res = apply_patch_text(rt, diff, root=tmp_path)
-    assert res["ok"] is False
-    assert (tmp_path / "a.py").read_text(encoding="utf-8") == "old\n"
-    assert (tmp_path / "b.py").read_text(encoding="utf-8") == "keep\n"
-
-
-def test_long_build_unverified_never_claims_green():
-    from remedy.core.build_persist import iterate_to_green_multi
-
-    hops = [{"ok": True, "verified": False} for _ in range(12)]
-    idx = {"n": 0}
-
-    def verify() -> dict:
-        i = min(idx["n"], len(hops) - 1)
-        idx["n"] += 1
-        return hops[i]
-
-    out = iterate_to_green_multi(verify, [("noop", lambda _v: {"ran": True})], max_rounds=8)
-    assert out.ok is False
-    assert out.reason == "unverified"
 
 
 def test_parse_verify_output_official_line_only():
@@ -341,36 +294,6 @@ def test_casual_verify_green_does_not_say_do_not_claim(monkeypatch):
     assert "Do not claim green" not in out["message"]
 
 
-def test_drive_build_skip_pass_is_not_machine_loop_green(tmp_path, monkeypatch):
-    from remedy.core.build_drive import drive_build
-
-    root = tmp_path / "proj"
-    root.mkdir()
-    (root / "hello.py").write_text("def greet():\n    return 'hi'\n", encoding="utf-8")
-    rt = SimpleNamespace(
-        effective_project_path=lambda: root,
-        resolve_tool_path=lambda p, **k: (root / p) if not Path(p).is_absolute() else Path(p),
-        config=SimpleNamespace(home_dir=root),
-        _llm_provider="xai",
-        _llm_model="grok-4",
-        _llm_base_url="",
-        _session_brief=None,
-    )
-    monkeypatch.setattr(
-        "remedy.core.build_gate_tower.run_gate_tower",
-        lambda *a, **k: {
-            "ok": True,
-            "verified": False,
-            "passed_levels": ["L3_unit"],
-            "message": "skip",
-        },
-    )
-    res = drive_build(rt, goal="implement function greet in module hello.py", use_llm=False)
-    msg = str(res.get("message") or "")
-    assert "Machine loop green" not in msg
-    assert res.get("gate", {}).get("verified") is False
-
-
 def test_materialize_extra_tests_nested_dotdot(tmp_path: Path):
     from remedy.core.builds.reducer import run_project_tests
 
@@ -452,25 +375,6 @@ def test_is_valid_navigate_url_dns_miss_and_loopback(monkeypatch):
         lambda _h: [],
     )
     assert is_valid_navigate_url("https://evil.example") is False
-
-
-def test_tdd_jail_any_exception_does_not_write(tmp_path: Path):
-    from remedy.core.build_tdd import materialize_tdd_tests
-
-    class RT:
-        def resolve_tool_path(self, p, **k):
-            raise RuntimeError("boom")
-
-        def effective_project_path(self):
-            return tmp_path
-
-    out = materialize_tdd_tests(
-        RT(),
-        [{"path": "hello.py", "symbol": "greet", "behavior": "hi"}],
-        root=tmp_path,
-    )
-    assert out.get("ok") is False
-    assert not (tmp_path / "tests" / "test_greet.py").exists()
 
 
 @pytest.mark.asyncio

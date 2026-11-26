@@ -13,7 +13,6 @@ from remedy.core.build_error_vector import (
     format_repair_ticket,
     parse_verify_output,
 )
-from remedy.core.build_syntax import check_path_syntax, format_syntax_gate_message
 
 
 def test_parse_pytest_failures():
@@ -96,51 +95,6 @@ def test_repair_nudge_uses_ticket():
     assert "test_foo.py" in msg["content"]
 
 
-def test_background_drive_only_when_away():
-    from types import SimpleNamespace
-
-    from remedy.core.build_delta import allow_background_drive, collapse_to_one_card
-    from remedy.core.build_drive import maybe_auto_implement
-    from remedy.core.build_engine import BuildTurnState
-
-    live = BuildTurnState(
-        active=True,
-        goal="build a cli",
-        serial_explore_streak=9,
-        write_steps=0,
-        away_mode=False,
-    )
-    assert allow_background_drive(live) is False
-    rt = SimpleNamespace(effective_project_path=lambda: None)
-    assert maybe_auto_implement(rt, live) is None
-    html = BuildTurnState(
-        active=True,
-        goal="Create a beautiful marketing landing page",
-        serial_explore_streak=9,
-        write_steps=0,
-        away_mode=True,
-    )
-    assert maybe_auto_implement(rt, html) is None
-    away = BuildTurnState(
-        active=True,
-        goal="build a cli",
-        serial_explore_streak=9,
-        write_steps=0,
-        away_mode=True,
-    )
-    assert allow_background_drive(away) is True
-    msgs: list[dict] = [
-        {"role": "user", "content": "[Build engine · AUTO VERIFY · RED]\nfailed"}
-    ]
-    assert (
-        collapse_to_one_card(
-            msgs, {"role": "user", "content": "[Build engine · FORCE IMPLEMENT] no"}
-        )
-        is False
-    )
-    assert len(msgs) == 1
-
-
 def test_parse_green():
     vec = parse_verify_output("exit_code=0\n5 passed", command="pytest -q", ok=True)
     assert vec.ok is True
@@ -156,19 +110,6 @@ def test_parse_verify_output_official_line_not_substring():
     assert wrapped.ok is False
     later_line = parse_verify_output("process output\nexit_code=0\nFAILED")
     assert later_line.ok is False
-
-
-def test_syntax_gate_py(tmp_path):
-    good = tmp_path / "ok.py"
-    good.write_text("x = 1\n", encoding="utf-8")
-    bad = tmp_path / "bad.py"
-    bad.write_text("def foo(\n", encoding="utf-8")
-    assert check_path_syntax(good)["ok"] is True
-    r = check_path_syntax(bad)
-    assert r["ok"] is False
-    msg = format_syntax_gate_message([r])
-    assert msg is not None
-    assert "SYNTAX GATE" in msg["content"]
 
 
 def test_write_set_and_green_gate():

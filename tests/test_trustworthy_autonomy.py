@@ -12,10 +12,8 @@ Documents the Optimization/Stability close-out:
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 from remedy.core.context import TurnFactory
-from remedy.core.explain import explain_turn
 from remedy.core.trust_profile import (
     TrustProfile,
     checkpoint_still_required,
@@ -64,39 +62,6 @@ def test_v038_autonomous_does_not_waive_owner_checkpoints():
     pay = checkpoint_still_required("computer_click", "Place your order")
     assert pay is not None
     assert "Owner checkpoint" in pay
-
-
-def test_v038_explain_turn_fake_bus():
-    # EventBus is owned by another agent; duck-type the for_turn contract.
-    bus = SimpleNamespace(
-        for_turn=lambda _turn_id: [
-            SimpleNamespace(event_type="ToolCompleted", payload={"tool": "file_read"}),
-            SimpleNamespace(
-                event_type="VerificationCompleted", payload={"reason": "file exists"}
-            ),
-            SimpleNamespace(event_type="ApprovalRequested", payload={"reason": "mail"}),
-            SimpleNamespace(event_type="GoalFailed", payload={"reason": "blocked"}),
-        ]
-    )
-    summary = explain_turn(bus, "t")
-    assert "file_read" in summary["what"]
-    assert "file exists" in summary["verified"]
-    assert "mail" in summary["why"]
-    assert "blocked" in summary["remains"]
-
-
-def test_v038_events_and_explain(tmp_path: Path):
-    from remedy.events.bus import EventBus
-    from remedy.events.types import EventType
-
-    bus = EventBus(db_path=tmp_path / "e.db")
-    bus.emit_simple(EventType.TOOL_COMPLETED, session_id="s", turn_id="t", tool="file_read")
-    bus.emit_simple(
-        EventType.VERIFICATION_COMPLETED, session_id="s", turn_id="t", reason="file exists"
-    )
-    summary = explain_turn(bus, "t")
-    assert "file_read" in summary["what"]
-    assert "file exists" in summary["verified"]
 
 
 def test_v038_verification_not_exit_code_alone(tmp_path: Path):

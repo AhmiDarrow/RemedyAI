@@ -90,7 +90,7 @@ Grove unmounts off-surface. Studio must own its own voice instance (`useVoice` i
 - First-run setup session lives in `setup_session.json` and `GET`/`PUT /api/setup`; house rules are `src/remedy/core/house_rules.py` plus `/house_rules` and `settings.patch` confirmation. Docs: [SETUP.md](SETUP.md), [HOUSE_RULES.md](HOUSE_RULES.md).
 - UI: `desktop/src/components/settings/VoiceSection.tsx` (HQ toggle), Grove `GroveVoiceControls` (speak/quiet only), Studio composer/status bar
 - Smart-turn: pinned ONNX under `~/.remedy/voice/models/smart-turn/`; detector `voice.realtime.turn.make_detector` globs `*.onnx` (no restart)
-- Identity: `~/.remedy/voice/identity.json`. Owner clone: `voice/clone.py` (named task, expiry, revoke).
+- Identity: `~/.remedy/voice/identity.json`.
 - Telephony loopback: `SipDirectBackend` (`sip_direct`) — UDP/in-process echo on 127.0.0.1, `simulated=True`
 
 ## Voice

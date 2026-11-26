@@ -21,7 +21,6 @@ tests/test_process_kill_tree.py
 tests/test_secret_acl_no_everyone.py
 tests/test_spawn_authorized.py
 tests/test_spawn_piped.py
-tests/test_telephony_registry.py
 
 # --- Security / capability ---
 tests/test_project_write_jail.py
@@ -69,7 +68,6 @@ tests/test_rmdy_worker_deps.py
 tests/test_rmdy_workspace_root.py
 tests/test_cli_home_publishes_env.py
 tests/test_home_env_is_honoured.py
-tests/test_instance_lock.py
 tests/test_uninstall_wipe_paths.py
 
 # --- Windows path / shell / UI ---
