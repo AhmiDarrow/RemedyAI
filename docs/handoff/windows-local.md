@@ -109,8 +109,10 @@ Run `npm run tauri:dev` (and a release build if you can).
 - Auto quant for the local mind now sees the GPU and RAM. On Windows and
   macOS it used to read every machine as 16 GB with no GPU, so a small card
   may now get a smaller quant than before. Worth a look on your PC.
-- An API key given through house rules is now actually stored (it used to
-  be dropped while the audit said "stored").
+- An API key you give during onboarding or a house-rules change is now
+  actually stored (it used to be dropped while the audit said "stored").
+  One the model proposes in chat still waits for your yes and then has to
+  be entered in Settings (see below).
 
 - An API key proposed in chat (house rules) now waits for your yes, and the
   pending store strips secrets, so you'll have to enter the key in Settings.
