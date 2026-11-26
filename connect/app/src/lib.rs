@@ -353,11 +353,49 @@ fn link_bar(ui: &Ui, link: Link) -> El {
         .child(unpair)
 }
 
-/// The first screen: paste the code the PC shows.
+/// The pairing link Android opened the app with, when the phone's camera scanned the
+/// QR code the PC shows. Each link is handed out once.
+fn scanned_link() -> Option<String> {
+    #[cfg(target_os = "android")]
+    let url = remedy_ui::android::launch_url();
+    #[cfg(not(target_os = "android"))]
+    let url: Option<String> = None;
+    fresh_link(url, &LAST_SCAN)
+}
+
+static LAST_SCAN: Mutex<String> = Mutex::new(String::new());
+
+fn fresh_link(url: Option<String>, last: &Mutex<String>) -> Option<String> {
+    let url = url.filter(|u| u.starts_with(remedy_connect_core::pairing::LINK_PREFIX))?;
+    let mut last = last.lock().unwrap_or_else(|e| e.into_inner());
+    if *last == url {
+        return None;
+    }
+    last.clone_from(&url);
+    Some(url)
+}
+
+/// Puts a scanned code in the box, and looks again each second while the pairing
+/// screen is up (the link arrives when the camera hands the phone back to the app).
+/// The owner still presses Pair: a link from a web page must not pair by itself.
+fn take_scans(ui: &Ui, code: remedy_ui::view::TextField) {
+    if let Some(link) = scanned_link() {
+        code.set_value(&link);
+    }
+    let again = ui.clone();
+    let _ = ui.after(Duration::from_secs(1), move || {
+        if again.tree().contains(code.el().id()) {
+            take_scans(&again, code);
+        }
+    });
+}
+
+/// The first screen: scan the PC's QR code, or paste the code it shows.
 fn pair_screen(ui: &Ui, link: Link) -> El {
     let unit = ui.theme().spacing.unit;
     let colors = ui.theme().colors.clone();
     let code = w::text_area(ui, tr(ui, "pair-code")).placeholder(tr(ui, "pair-code-hint"));
+    take_scans(ui, code.clone());
     let name = w::text_input(ui, tr(ui, "pair-name"));
     name.set_value(&tr(ui, "pair-name-default"));
 
@@ -399,6 +437,7 @@ fn pair_screen(ui: &Ui, link: Link) -> El {
             l.min_width = Length::Px(0.0);
         })
         .child(w::heading(ui, 1, tr(ui, "pair-title")))
+        .child(w::text(ui, tr(ui, "pair-scan")).variant("muted"))
         .child(w::text(ui, tr(ui, "pair-steps")).variant("muted"))
         .child(code.el().layout(|l| {
             l.width = Length::Percent(1.0);
@@ -437,5 +476,20 @@ fn android_main(activity: remedy_ui::android::AndroidApp) {
     let config = remedy_ui::AppConfig::new("Remedy").edition(remedy_ui::Edition::E2026);
     if let Err(e) = remedy_ui::run(config, app) {
         remedy_ui::android::log(&format!("RemedyConnect: {e}"));
+    }
+}
+
+#[cfg(test)]
+mod scan_tests {
+    use super::*;
+
+    #[test]
+    fn a_scanned_pairing_link_is_taken_once_and_other_links_never() {
+        let last = Mutex::new(String::new());
+        let link = format!("{}abc", remedy_connect_core::pairing::LINK_PREFIX);
+        assert_eq!(fresh_link(Some(link.clone()), &last), Some(link.clone()));
+        assert_eq!(fresh_link(Some(link), &last), None, "the same link again");
+        assert_eq!(fresh_link(Some("https://example.com/pair#abc".into()), &last), None);
+        assert_eq!(fresh_link(None, &last), None);
     }
 }

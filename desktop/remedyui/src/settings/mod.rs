@@ -215,6 +215,15 @@ pub(crate) fn host() -> Option<App> {
     prefs::host()
 }
 
+/// A second window of the app (a popped-out pane) takes the look chosen in Settings
+/// and the person's theme pack, like the main window.
+pub(crate) fn bind_window(ui: &Ui) {
+    if let Some(custom) = crate::theme_custom::current() {
+        custom.attach(ui);
+    }
+    prefs::bind_window(ui);
+}
+
 fn alive() -> Option<Settings> {
     let s = CURRENT.with(|c| c.get())?;
     if s.open.is_alive() { Some(s) } else { None }

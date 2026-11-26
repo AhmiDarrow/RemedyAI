@@ -360,8 +360,18 @@ fn spawn_portmap(endpoint: iroh::Endpoint, port: u16, events: Events) {
                     .await;
                 current = next;
             }
-            if watch.changed().await.is_err() {
-                break;
+            // The mapper renews a mapping it holds, but once a renewal fails it holds
+            // none and does not ask again by itself. Ask every 30 s while there is none,
+            // or the phone loses its way in an hour after the PC starts.
+            tokio::select! {
+                changed = watch.changed() => {
+                    if changed.is_err() {
+                        break;
+                    }
+                }
+                _ = tokio::time::sleep(Duration::from_secs(30)), if current.is_none() => {
+                    client.procure_mapping();
+                }
             }
         }
         drop(client);

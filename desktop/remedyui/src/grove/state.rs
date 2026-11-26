@@ -1896,6 +1896,17 @@ impl Grove {
             self.child_messages.set(rows);
             self.child_loading.set(false);
         }
+        if let Some((sid, Ok(rows))) = snap.messages {
+            // Never over a reply being written here, a load in flight, or another place.
+            if !self.local_only
+                && !self.streaming.get()
+                && !self.loading.get()
+                && self.session_id.get() == sid
+                && logic::newer_rows(&self.messages.get(), &rows)
+            {
+                self.messages.set(rows);
+            }
+        }
         if let Some(true) = snap.speak {
             self.speak_replies.set(true);
         } else if let Some(false) = snap.speak {
@@ -2100,6 +2111,8 @@ struct PollSnap {
     board: Option<Result<LifeBoard, String>>,
     head: Option<Result<HeadOverview, String>>,
     child_messages: Option<Result<Vec<StoryMessage>, String>>,
+    /// The open conversation as the runtime has it now (its session id, its rows).
+    messages: Option<(String, Result<Vec<StoryMessage>, String>)>,
     speak: Option<bool>,
     command: Option<Value>,
     browser: Option<Value>,
@@ -2144,6 +2157,12 @@ fn poll_loop(client: Client, grove: Grove, waker: remedy_ui::reactive::Waker) {
                 None
             } else {
                 Some(api::messages(&client, &query.child_session, 80))
+            },
+            // The same conversation is open on the PC, the web page and a phone:
+            // what another of them added shows up here on the slower beat.
+            messages: match &session {
+                Some(id) if fetch_board => Some((id.clone(), api::messages(&client, id, 80))),
+                _ => None,
             },
             // Spoken replies, window commands and the browser stage belong to
             // the PC's own screen and speakers. A phone does not ask for them
