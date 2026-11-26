@@ -934,6 +934,9 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 		if _, native := goPromptHookIDs[r.id]; native {
 			continue // built in Go
 		}
+		if _, native := goWorkspaceToolIDs[r.id]; native {
+			continue // registered by RegisterWorkspaceTools, served in Go
+		}
 		if err := registry.Register(Descriptor{
 			ID:           r.id,
 			Version:      1,

@@ -165,26 +165,25 @@ def test_tools(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_system_exit_in_tool_yields_error_frame_and_worker_keeps_serving(test_tools: None) -> None:
     frames = _serve(
-        _tool_frame(_corr(1), "debug.exit", {"code": 7})
-        + _tool_frame(_corr(2), "text.slugify", {"text": "Still Alive"})
+        _tool_frame(_corr(1), "debug.exit", {"code": 7}) + _tool_frame(_corr(2), "worker.probe", {})
     )
     by_corr = {c: body for _k, c, body in frames}
     assert by_corr[_corr(1)]["ok"] is False
     assert "SystemExit" in by_corr[_corr(1)]["error"]
-    assert by_corr[_corr(2)] == {"ok": True, "output": {"slug": "still-alive"}}
+    assert by_corr[_corr(2)] == {"ok": True, "output": {"ok": True}}
 
 
 def test_result_over_frame_limit_becomes_error_not_crash(test_tools: None) -> None:
     frames = _serve(
         _tool_frame(_corr(1), "debug.big", {"chars": worker._MAX_PAYLOAD + 1024})
-        + _tool_frame(_corr(2), "text.word_count", {"text": "one two"})
+        + _tool_frame(_corr(2), "worker.probe", {})
     )
     by_corr = {c: body for _k, c, body in frames}
     big = by_corr[_corr(1)]
     assert big["ok"] is False
     assert "16 MiB" in big["error"]
     assert big["size"] > worker._MAX_PAYLOAD
-    assert by_corr[_corr(2)]["output"] == {"words": 2}
+    assert by_corr[_corr(2)]["output"] == {"ok": True}
 
 
 def test_unserializable_output_uses_default_str(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -195,7 +194,7 @@ def test_unserializable_output_uses_default_str(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_non_integer_version_is_an_error_frame() -> None:
-    body = {"tool_id": "text.slugify", "version": "one", "input": {"text": "x"}}
+    body = {"tool_id": "worker.probe", "version": "one", "input": {}}
     raw = _frame(worker._KIND_TOOL_REQUEST, json.dumps(body).encode(), _corr(1))
     frames = _serve(raw)
     assert frames[0][2]["ok"] is False
@@ -215,7 +214,7 @@ def test_cancel_suppresses_late_response(test_tools: None) -> None:
     frames = _serve(
         _tool_frame(_corr(1), "debug.sleep", {"seconds": 0.6})
         + _frame(worker._KIND_CANCEL, b"", _corr(1))
-        + _tool_frame(_corr(2), "text.slugify", {"text": "After Cancel"})
+        + _tool_frame(_corr(2), "worker.probe", {})
     )
     corrs = [c for _k, c, _b in frames]
     assert _corr(1) not in corrs
@@ -268,45 +267,16 @@ def test_logging_writes_rotating_file_under_remedy_home(
 # --- Go-bound gating ------------------------------------------------------------
 
 
-def test_workspace_root_ignored_unless_go_bound(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    default_ws = tmp_path / "default"
-    other = tmp_path / "other"
-    default_ws.mkdir()
-    other.mkdir()
-    (default_ws / "a.txt").write_text("default\n", encoding="utf-8")
-    (other / "a.txt").write_text("other\n", encoding="utf-8")
-    monkeypatch.setenv("REMEDY_WORKSPACE", str(default_ws))
-
-    model_supplied = _serve(
-        _tool_frame(_corr(1), "workspace.read", {"path": "a.txt", "workspace_root": str(other)})
-    )
-    assert model_supplied[0][2]["output"]["content"] == "default\n"
-
-    envelope_bound = _serve(
-        _tool_frame(
-            _corr(2),
-            "workspace.read",
-            {"path": "a.txt", "workspace_root": str(other)},
-            _go_bound=True,
-        )
-    )
-    assert envelope_bound[0][2]["output"]["content"] == "other\n"
-
-    input_bound = _serve(
-        _tool_frame(
-            _corr(3),
-            "workspace.read",
-            {"path": "a.txt", "workspace_root": str(other), worker.GO_BOUND_FIELD: True},
-        )
-    )
-    assert input_bound[0][2]["output"]["content"] == "other\n"
-
-
 def test_sanitize_input_strips_marker_and_home_dir() -> None:
     cleaned = worker._sanitize_input(
-        {}, {"query": "q", "home_dir": "/x", "project_path": "/p", worker.GO_BOUND_FIELD: False}
+        {},
+        {
+            "query": "q",
+            "home_dir": "/x",
+            "project_path": "/p",
+            "workspace_root": "/w",
+            worker.GO_BOUND_FIELD: False,
+        },
     )
     assert cleaned == {"query": "q"}
     bound = worker._sanitize_input({worker.GO_BOUND_FIELD: True}, {"query": "q", "home_dir": "/x"})
@@ -316,7 +286,9 @@ def test_sanitize_input_strips_marker_and_home_dir() -> None:
 # --- tool semantics ---------------------------------------------------------------
 
 
-def test_workspace_edit_preserves_crlf_and_bom(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_workspace_edit_preserves_crlf_and_bom(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
     target = tmp_path / "win.txt"
     original = b"\xef\xbb\xbfline one\r\nreturn 1\r\nline three\r\n"
@@ -373,7 +345,9 @@ def test_workspace_search_invalid_regex_is_an_error(
         worker._workspace_search({"pattern": "foo("})
 
 
-def test_workspace_search_context_and_capped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_workspace_search_context_and_capped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
     (tmp_path / "a.txt").write_text(
         "before\nneedle one\nafter\n\nneedle two\nneedle three\n", encoding="utf-8"
@@ -426,7 +400,9 @@ def test_repo_search_rg_max_count_is_not_clamped_per_file(
     assert cmd[cmd.index("--max-count") + 1] == "301"
 
 
-def test_repo_search_rg_groups_context_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_repo_search_rg_groups_context_lines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from remedy.core import repo_search as rs
 
     class _Proc:
@@ -600,13 +576,13 @@ def test_real_endpoint_overlapping_requests_fast_returns_first(tmp_path: Path) -
             server.accept()
             server.send(_tool_frame(_corr(1), "debug.sleep", {"seconds": 1.0}))
             time.sleep(0.15)
-            server.send(_tool_frame(_corr(2), "text.slugify", {"text": "Fast Lane"}))
+            server.send(_tool_frame(_corr(2), "worker.probe", {}))
             t0 = time.monotonic()
             first_corr, first_body = server.recv_frame("fast result")
             elapsed = time.monotonic() - t0
             second_corr, second_body = server.recv_frame("slow result")
             assert first_corr == _corr(2), "fast request must not wait behind the slow one"
-            assert first_body["output"] == {"slug": "fast-lane"}
+            assert first_body["output"] == {"ok": True}
             assert elapsed < 0.9
             assert second_corr == _corr(1)
             assert second_body["output"]["slept"] == 1.0
@@ -643,7 +619,7 @@ def test_stdio_subprocess_oversize_result_does_not_kill_worker(tmp_path: Path) -
     ) as proc:
         assert proc.stdin is not None and proc.stdout is not None
         proc.stdin.write(_tool_frame(_corr(1), "debug.big", {"chars": worker._MAX_PAYLOAD + 5}))
-        proc.stdin.write(_tool_frame(_corr(2), "text.word_count", {"text": "x y z"}))
+        proc.stdin.write(_tool_frame(_corr(2), "worker.probe", {}))
         proc.stdin.flush()
         # Read proc.stdout directly: wrapping an already-buffered pipe in a
         # second BufferedReader makes each read demand a full 8 KiB block,
@@ -660,7 +636,7 @@ def test_stdio_subprocess_oversize_result_does_not_kill_worker(tmp_path: Path) -
         _bounded("oversize result", _read_result)
         _bounded("second result", _read_result)
         assert got[_corr(1)]["ok"] is False and "16 MiB" in got[_corr(1)]["error"]
-        assert got[_corr(2)]["output"] == {"words": 3}
+        assert got[_corr(2)]["output"] == {"ok": True}
         proc.stdin.close()
         # Closing the stream ends the worker cleanly — no leftover process.
         code = _bounded(

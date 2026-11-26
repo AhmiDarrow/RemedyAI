@@ -126,13 +126,17 @@ Run `npm run tauri:dev` (and a release build if you can).
 ## 6. Python worker after the cleanup
 
 About 21,000 lines of Python that nothing ran are gone, and the worker now
-serves only `text.*`, `workspace.*`, `prompt.turn_end`, `voice.*` and
-`vision.*` (Go serves the rest).
+serves only `prompt.turn_end`, `voice.*` and `vision.*` (Go serves the
+rest, including `workspace.*` and `text.*` now).
 
 - Start the packaged desktop app on Windows. Passing: Server info shows
   the Python worker attached, and a chat turn works.
 - Ask Remedy to read your mail or calendar, and say "let's go over house
   rules again". Passing: both work (they're served in Go now).
+- With the app running, run `remedy tool list` and then
+  `remedy tool run workspace.list`. Passing: `workspace.*` and `text.*` show
+  runtime `go`, and the run lists your project folder (never your whole home
+  folder or the install folder).
 - Speak to Remedy and have her talk back, and run a vision install. Passing:
   both still work (still Python).
 

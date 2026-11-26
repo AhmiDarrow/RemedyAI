@@ -28,9 +28,20 @@ func TestRMDYPythonToolsRoundTrip(t *testing.T) {
 	client := ipc.NewClient(clientConn)
 	defer client.Close()
 
+	// workspace.* and text.* are Go tools now; route them over RMDY here only
+	// to exercise the wire with tools whose results are easy to check.
 	clientReg := NewRegistry(allow)
-	if err := RegisterPythonWorkerTools(clientReg, client); err != nil {
-		t.Fatal(err)
+	exec := NewRMDYExecutor(client)
+	for _, r := range pythonWorkerToolSpecs() {
+		if _, ok := goWorkspaceToolIDs[r.id]; !ok {
+			continue
+		}
+		if err := clientReg.Register(Descriptor{
+			ID: r.id, Version: 1, Description: r.desc, Runtime: RuntimePython, Risk: r.risk,
+			InputSchema: json.RawMessage(r.in), OutputSchema: json.RawMessage(r.out),
+		}, exec); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	slug, err := clientReg.Execute(context.Background(), Request{

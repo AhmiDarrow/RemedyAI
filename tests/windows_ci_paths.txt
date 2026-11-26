@@ -65,7 +65,6 @@ tests/test_python_interpreter_resolve.py
 tests/test_serve_runtime_owned.py
 tests/test_rmdy_worker_serve.py
 tests/test_rmdy_worker_deps.py
-tests/test_rmdy_workspace_root.py
 tests/test_cli_home_publishes_env.py
 tests/test_home_env_is_honoured.py
 tests/test_uninstall_wipe_paths.py
