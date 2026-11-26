@@ -157,6 +157,13 @@ fn connect(ui: &Ui, s: Settings) -> El {
             .child(loop_warn)
             .child(form::action(&ui, "Use this bind address", "quiet", move || put_connect_bind(s, &bind.get())))
             .child(panes)
+            .child(form::flow(
+                &ui,
+                "Get the phone app",
+                "A code to scan that downloads the Android app",
+                false,
+                phone_app_download,
+            ))
             .child(form::action(&ui, "Show pairing code", "primary", move || {
                 if s.preview {
                     s.banner.set("Not available in this preview.".into());
@@ -191,6 +198,32 @@ fn connect(ui: &Ui, s: Settings) -> El {
             .child(form::action(&ui, "Tailscale login", "quiet", move || bits::ask(s, "POST", "connect/tailscale/login", Some(json!({})), "Tailscale login started.")))
             .child(mobile_reach(&ui, s))
     })
+}
+
+/// Where the Android app of the latest release is downloaded from. The name has no
+/// version in it so this address stays the same from release to release.
+pub(crate) const PHONE_APP_URL: &str =
+    "https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/Remedy.Connect_arm64-v8a.apk";
+
+/// A code the phone's camera can scan to download the app, with the same link in words.
+fn phone_app_download(ui: &Ui) -> El {
+    let url = Signal::new(PHONE_APP_URL.to_string());
+    let copy_ui = ui.clone();
+    form::stack(ui)
+        .child(form::hint(
+            ui,
+            "Point the phone's camera at this code to download Remedy for Android from the latest release on GitHub. Android asks you to allow the install, because the app does not come from a store. Then come back here and choose Show pairing code.",
+        ))
+        .child(qr_code(
+            ui,
+            "Phone app download",
+            url,
+            QrOptions::default().description("Download link for the Remedy phone app".into()),
+        ))
+        .child(w::text(ui, PHONE_APP_URL).variant("small"))
+        .child(form::action(ui, "Copy download link", "quiet", move || {
+            copy_ui.copy_text(PHONE_APP_URL.to_string());
+        }))
 }
 
 fn address_list(v: &Value) -> Vec<String> {
