@@ -239,7 +239,9 @@ func (s *Server) handleSessionCommand(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "command required"})
 		return
 	}
-	result := s.executeSlashCommand(sid, cmd)
+	// A request that came through the phone tunnel carries the hop header.
+	phone := strings.TrimSpace(r.Header.Get("X-Remedy-Connect-Hop")) != ""
+	result := s.executeSlashCommandFrom(sid, cmd, phone)
 	out := map[string]any{
 		"session_id": sid,
 		"command":    cmd,

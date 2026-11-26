@@ -4,6 +4,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added
+- Slash commands work wherever you type: Grove on the desktop and on a paired phone now carries a command out instead of sending it to Remedy as a message. New or made real: `/model` (show, list, or switch with part of a name), `/stop`, `/status`, `/think`, `/search`, `/rename`, `/remember`, `/goal`, `/goals`, `/plan` (show, approve, cancel), `/plans`, `/approve`, `/deny`, `/whoami`. A phone can do by command only what its panes in Connect settings allow.
+- Settings → Connect → Get the phone app shows a QR code that downloads the Android app from the latest release.
+
 ### Security
 - New safeguards, each with a setting and documented in `docs/SECURITY.md`: in Auto mode a shell command that names a key file, reaches outside the project, contacts the network or is built while it runs waits for approval (`shell_in_auto`); a web fetch whose address could carry data out waits (`web_fetch_guard`); other agents and messenger senders may use only tools that show nothing of the owner's until the owner allows more (`peer_tools`, `messenger_tools`); the local API caps one request body (`api_max_body_mb`).
 - A routine or background job created because someone outside asked keeps that standing: it asks before every change, however much later it runs.
