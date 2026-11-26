@@ -71,9 +71,9 @@ type approvalQueue struct {
 	oneShot      map[string]map[string]*oneShotGrant // sid -> approval id -> grant
 	// waiters holds every turn blocked on an item. Identical calls from two
 	// turns share one item, so one id can have several waiters.
-	waiters      map[string][]chan approvalResolveResult
-	mode         string
-	now          func() time.Time
+	waiters map[string][]chan approvalResolveResult
+	mode    string
+	now     func() time.Time
 
 	// observer records approval activity into the session's live turn log, so
 	// the owner can see afterwards what they were asked and what they decided.
