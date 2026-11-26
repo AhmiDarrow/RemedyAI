@@ -69,7 +69,9 @@ type approvalQueue struct {
 	sessionFPs   map[string]map[string]struct{}
 	sessionOrder []string
 	oneShot      map[string]map[string]*oneShotGrant // sid -> approval id -> grant
-	waiters      map[string]chan approvalResolveResult
+	// waiters holds every turn blocked on an item. Identical calls from two
+	// turns share one item, so one id can have several waiters.
+	waiters      map[string][]chan approvalResolveResult
 	mode         string
 	now          func() time.Time
 
@@ -113,7 +115,7 @@ func newApprovalQueue() *approvalQueue {
 		approvedFPs: map[string]struct{}{},
 		sessionFPs:  map[string]map[string]struct{}{},
 		oneShot:     map[string]map[string]*oneShotGrant{},
-		waiters:     map[string]chan approvalResolveResult{},
+		waiters:     map[string][]chan approvalResolveResult{},
 		mode:        "ask",
 		now:         time.Now,
 	}
@@ -286,7 +288,7 @@ func (q *approvalQueue) pruneLocked(now time.Time) {
 		if item.Status == "pending" {
 			continue
 		}
-		if _, waiting := q.waiters[id]; waiting {
+		if len(q.waiters[id]) > 0 {
 			continue
 		}
 		if !item.resolvedAt.IsZero() && item.resolvedAt.Before(cutoff) {
@@ -351,7 +353,7 @@ func (q *approvalQueue) resolve(id string, approve bool, scope string) (*pending
 		return &cp, false
 	}
 	resumed := false
-	if _, ok := q.waiters[id]; ok {
+	if len(q.waiters[id]) > 0 {
 		resumed = approve
 	}
 	now := q.now()
@@ -401,14 +403,13 @@ func (q *approvalQueue) resolve(id string, approve bool, scope string) (*pending
 }
 
 func (q *approvalQueue) signalWaiterLocked(id string, approve bool) {
-	ch := q.waiters[id]
-	if ch == nil {
-		return
-	}
+	chans := q.waiters[id]
 	delete(q.waiters, id)
-	select {
-	case ch <- approvalResolveResult{approved: approve}:
-	default:
+	for _, ch := range chans {
+		select {
+		case ch <- approvalResolveResult{approved: approve}:
+		default:
+		}
 	}
 }
 
@@ -419,8 +420,7 @@ func (q *approvalQueue) HasWaiter(id string) bool {
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	_, ok := q.waiters[id]
-	return ok
+	return len(q.waiters[id]) > 0
 }
 
 // WaitAll blocks until every id is approved, or returns false if any is denied.
@@ -437,15 +437,24 @@ func (q *approvalQueue) WaitAll(ctx context.Context, ids []string) (bool, error)
 	}
 	type waitSlot struct {
 		id string
-		ch <-chan approvalResolveResult
+		ch chan approvalResolveResult
 	}
 	var waiting []waitSlot
+	// release removes only this call's own registrations: another turn
+	// waiting on a shared item must keep its place.
+	release := func() {
+		q.mu.Lock()
+		defer q.mu.Unlock()
+		for _, slot := range waiting {
+			q.removeWaiterLocked(slot.id, slot.ch)
+		}
+	}
 	q.mu.Lock()
 	for _, id := range ids {
 		item := q.items[id]
 		if item == nil {
 			q.mu.Unlock()
-			q.clearWaiters(ids)
+			release()
 			return false, fmt.Errorf("approval %s not found", id)
 		}
 		switch item.Status {
@@ -453,11 +462,11 @@ func (q *approvalQueue) WaitAll(ctx context.Context, ids []string) (bool, error)
 			continue
 		case "denied":
 			q.mu.Unlock()
-			q.clearWaiters(ids)
+			release()
 			return false, nil
 		default:
 			ch := make(chan approvalResolveResult, 1)
-			q.waiters[id] = ch
+			q.waiters[id] = append(q.waiters[id], ch)
 			waiting = append(waiting, waitSlot{id: id, ch: ch})
 		}
 	}
@@ -466,12 +475,12 @@ func (q *approvalQueue) WaitAll(ctx context.Context, ids []string) (bool, error)
 	for _, slot := range waiting {
 		select {
 		case <-ctx.Done():
-			q.clearWaiters(ids)
+			release()
 			return false, ctx.Err()
 		case res := <-slot.ch:
 			if !res.approved {
 				q.denyRemaining(ids, slot.id)
-				q.clearWaiters(ids)
+				release()
 				return false, nil
 			}
 		}
@@ -496,11 +505,18 @@ func uniqueApprovalIDs(ids []string) []string {
 	return out
 }
 
-func (q *approvalQueue) clearWaiters(ids []string) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	for _, id := range ids {
+func (q *approvalQueue) removeWaiterLocked(id string, ch chan approvalResolveResult) {
+	chans := q.waiters[id]
+	for i, c := range chans {
+		if c == ch {
+			chans = append(chans[:i], chans[i+1:]...)
+			break
+		}
+	}
+	if len(chans) == 0 {
 		delete(q.waiters, id)
+	} else {
+		q.waiters[id] = chans
 	}
 }
 

@@ -287,3 +287,88 @@ func TestApprovalPublicCommandClipIsRuneSafe(t *testing.T) {
 		}
 	}
 }
+
+// Two turns making the identical call in one session share one approval item.
+// One tap on Yes must wake both: the second waiter used to overwrite the
+// first, which then sat on "Waiting for your approval…" forever.
+func TestSharedApprovalWakesEveryWaitingTurn(t *testing.T) {
+	q := newApprovalQueue()
+	sid := "s-shared"
+	a := q.Enqueue("shell.exec", `{"argv":["go","test"]}`, "test", &sid, "")
+	b := q.Enqueue("shell.exec", `{"argv":["go","test"]}`, "test", &sid, "")
+	if a.ID != b.ID {
+		t.Fatalf("identical calls should share one item: %s vs %s", a.ID, b.ID)
+	}
+	results := make(chan bool, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			ok, err := q.WaitAll(context.Background(), []string{a.ID})
+			results <- ok && err == nil
+		}()
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		q.mu.Lock()
+		n := len(q.waiters[a.ID])
+		q.mu.Unlock()
+		if n == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d waiters registered", n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	q.Resolve(a.ID, true, "once")
+	for i := 0; i < 2; i++ {
+		select {
+		case ok := <-results:
+			if !ok {
+				t.Fatal("a waiting turn was not approved")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("a turn waiting on the shared approval never woke")
+		}
+	}
+}
+
+// One turn giving up (Stop) must not unregister another turn still waiting.
+func TestCancelledWaiterLeavesTheOtherInPlace(t *testing.T) {
+	q := newApprovalQueue()
+	sid := "s-cancel"
+	a := q.Enqueue("shell.exec", `{"argv":["make"]}`, "test", &sid, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		_, _ = q.WaitAll(ctx, []string{a.ID})
+		close(stopped)
+	}()
+	kept := make(chan bool, 1)
+	go func() {
+		ok, _ := q.WaitAll(context.Background(), []string{a.ID})
+		kept <- ok
+	}()
+	for i := 0; i < 400; i++ {
+		q.mu.Lock()
+		n := len(q.waiters[a.ID])
+		q.mu.Unlock()
+		if n == 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-stopped
+	if !q.HasWaiter(a.ID) {
+		t.Fatal("cancelling one turn removed the other turn's wait")
+	}
+	q.Resolve(a.ID, true, "once")
+	select {
+	case ok := <-kept:
+		if !ok {
+			t.Fatal("remaining turn was not approved")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("remaining turn never woke")
+	}
+}
