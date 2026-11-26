@@ -136,7 +136,9 @@ rest, including `workspace.*` and `text.*` now).
 - With the app running, run `remedy tool list` and then
   `remedy tool run workspace.list`. Passing: `workspace.*` and `text.*` show
   runtime `go`, and the run lists your project folder (never your whole home
-  folder or the install folder).
+  folder or the install folder). With no project set, the last-resort
+  folder is ~/Remedy, the one the app already started the worker in; the
+  old Python tool used Documents/Remedy only when started from a drive root.
 - Speak to Remedy and have her talk back, and run a vision install. Passing:
   both still work (still Python).
 
