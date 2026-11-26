@@ -481,6 +481,11 @@ func runIdleLoop(ctx context.Context, sess *Session, cfg SessionConfig) error {
 	muxCtx, cancelMux := context.WithCancel(ctx)
 	defer cancelMux()
 	mux.ctx = muxCtx
+	// Stopping the dialer that carried this session (a settings save restarts
+	// them, and waits for each to exit) ends it now, not when the phone next
+	// speaks or the idle timer runs out.
+	stop := context.AfterFunc(ctx, func() { _ = sess.Conn.Close() })
+	defer stop()
 	for {
 		if cfg.ShouldStop != nil && cfg.ShouldStop() {
 			return nil
@@ -497,6 +502,9 @@ func runIdleLoop(ctx context.Context, sess *Session, cfg SessionConfig) error {
 		plain, err := sess.RecvPlain()
 		_ = sess.Conn.SetReadDeadline(time.Time{})
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
 				return nil
