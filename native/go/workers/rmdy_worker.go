@@ -513,8 +513,43 @@ func defaultToolEndpoint() (string, error) {
 			dir = filepath.Join(home, "run")
 			_ = os.MkdirAll(dir, 0o700)
 		}
-		return filepath.Join(dir, "remedy-tools-"+suffix+".sock"), nil
+		path := filepath.Join(dir, "remedy-tools-"+suffix+".sock")
+		if len(path) < maxUnixSocketPath {
+			return path, nil
+		}
+		// A long home folder makes the path too long for a Unix socket
+		// (bind fails with EINVAL and the worker never attaches). Use a
+		// private directory under the system temp folder instead.
+		short, err := shortSocketDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(short, "remedy-tools-"+suffix+".sock"), nil
 	}
+}
+
+// maxUnixSocketPath is the usable length of sockaddr_un.sun_path on macOS
+// (104 bytes, Linux allows 108), less the terminating NUL.
+const maxUnixSocketPath = 103
+
+var (
+	shortSocketOnce sync.Once
+	shortSocketPath string
+	shortSocketErr  error
+)
+
+// shortSocketDir makes one fresh 0700 directory per process under the system
+// temp folder (or /tmp when that is long too). MkdirTemp picks an unused,
+// unpredictable name, so another local user cannot pre-create it.
+func shortSocketDir() (string, error) {
+	shortSocketOnce.Do(func() {
+		base := os.TempDir()
+		if len(base) > 40 {
+			base = "/tmp"
+		}
+		shortSocketPath, shortSocketErr = os.MkdirTemp(base, "remedy-")
+	})
+	return shortSocketPath, shortSocketErr
 }
 
 func defaultPythonWorkerArgv() ([]string, error) {
