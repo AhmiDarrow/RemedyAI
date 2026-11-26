@@ -36,7 +36,9 @@ export function isNetworkPath(url: string): boolean {
     if ((lead === 2 || lead >= 4) && !/^[A-Za-z]:/.test(body)) return true
     v = body
   }
-  return /^[\\/]{2}/.test(v)
+  // \\host\share, //host/share, and the NT form \??\UNC\host\share, which a
+  // single leading slash used to let through to an SMB lookup.
+  return /^[\\/]{2}/.test(v) || /^[\\/]\?\?[\\/]/.test(v)
 }
 
 /** Active content — never pass through. */
