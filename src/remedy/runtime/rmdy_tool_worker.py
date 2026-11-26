@@ -161,7 +161,7 @@ def _workspace_root(inp: Mapping[str, Any] | None = None) -> Path:
                     cand = Path(raw).expanduser().resolve()
                 except OSError:
                     cand = Path(raw).expanduser().absolute()
-                if not _is_user_home_path(cand) and not _looks_like_install_dir(cand):
+                if not _is_user_home_path(cand) and not _looks_like_install_dir(cand) and not _is_filesystem_root(cand):
                     return cand
 
     for key in ("REMEDY_WORKSPACE", "REMEDY_PROJECT_PATH", "REMEDY_PROJECT", "REMEDY_FILES_ROOT"):
@@ -171,7 +171,7 @@ def _workspace_root(inp: Mapping[str, Any] | None = None) -> Path:
                 cand = Path(raw).expanduser().resolve()
             except OSError:
                 cand = Path(raw).expanduser().absolute()
-            if not _is_user_home_path(cand) and not _looks_like_install_dir(cand):
+            if not _is_user_home_path(cand) and not _looks_like_install_dir(cand) and not _is_filesystem_root(cand):
                 return cand
 
     home = (os.environ.get("REMEDY_HOME") or "").strip()
@@ -195,17 +195,26 @@ def _workspace_root(inp: Mapping[str, Any] | None = None) -> Path:
                     cand = Path(val).expanduser().resolve()
                 except OSError:
                     cand = Path(val).expanduser().absolute()
-                if not _is_user_home_path(cand) and not _looks_like_install_dir(cand):
+                if not _is_user_home_path(cand) and not _looks_like_install_dir(cand) and not _is_filesystem_root(cand):
                     return cand
 
     try:
         cwd = Path.cwd().resolve()
     except OSError:
         cwd = Path.cwd().absolute()
-    if not _looks_like_install_dir(cwd) and not _is_user_home_path(cwd):
+    if not _looks_like_install_dir(cwd) and not _is_user_home_path(cwd) and not _is_filesystem_root(cwd):
         return cwd
 
     return _default_owner_workspace()
+
+
+def _is_filesystem_root(path: Path) -> bool:
+    """A drive or filesystem root (/, C:\\, a UNC share) — never a workspace."""
+    try:
+        p = path.expanduser().resolve()
+    except OSError:
+        p = path.expanduser().absolute()
+    return p.parent == p
 
 
 def _is_user_home_path(path: Path) -> bool:
