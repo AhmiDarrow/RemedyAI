@@ -147,6 +147,9 @@ var settingsLockKeys = map[string]struct{}{
 	// Where the model's traffic (and the key) goes, how much runs unasked,
 	// and what this PC shares are decided at the PC.
 	"llm_base_url":           {},
+	// A Sleev gateway off this PC gets the provider keys with every request.
+	"sleev_gateway_url":          {},
+	"sleev_allow_remote_gateway": {},
 	"approval_mode":          {},
 	"trust_profile":          {},
 	"access_scope":           {},
