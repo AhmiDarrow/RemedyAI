@@ -25,7 +25,7 @@ type toolGuards struct {
 	Shell string
 	// WebFetch is web_fetch_guard: payload | ask | off.
 	WebFetch string
-	// Messenger is messenger_tools: all | safe | none.
+	// Messenger is messenger_tools: safe | all | none.
 	Messenger string
 	// Peer is peer_tools: safe | all | none.
 	Peer string
@@ -34,7 +34,7 @@ type toolGuards struct {
 const (
 	defaultShellInAuto    = "guard"
 	defaultWebFetchGuard  = "payload"
-	defaultMessengerTools = "all"
+	defaultMessengerTools = "safe"
 	defaultPeerTools      = "safe"
 	// defaultAPIMaxBodyMB caps one request body to the local API.
 	defaultAPIMaxBodyMB = 128
@@ -54,7 +54,7 @@ func loadToolGuards(cfg ConfigMap) toolGuards {
 	return toolGuards{
 		Shell:     oneOf(cfgString(cfg, "shell_in_auto", defaultShellInAuto), defaultShellInAuto, "guard", "ask", "allow"),
 		WebFetch:  oneOf(cfgString(cfg, "web_fetch_guard", defaultWebFetchGuard), defaultWebFetchGuard, "payload", "ask", "off"),
-		Messenger: oneOf(cfgString(cfg, "messenger_tools", defaultMessengerTools), defaultMessengerTools, "all", "safe", "none"),
+		Messenger: oneOf(cfgString(cfg, "messenger_tools", defaultMessengerTools), defaultMessengerTools, "safe", "all", "none"),
 		Peer:      oneOf(cfgString(cfg, "peer_tools", defaultPeerTools), defaultPeerTools, "safe", "all", "none"),
 	}
 }

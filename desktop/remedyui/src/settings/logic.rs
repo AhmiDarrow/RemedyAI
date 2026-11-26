@@ -742,7 +742,7 @@ impl Default for SaveDraft {
             approval_mode: "ask".into(),
             shell_in_auto: "guard".into(),
             web_fetch_guard: "payload".into(),
-            messenger_tools: "all".into(),
+            messenger_tools: "safe".into(),
             peer_tools: "safe".into(),
             api_max_body_mb: 128.0,
             trust_profile: "balanced".into(),
