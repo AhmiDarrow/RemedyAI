@@ -4,7 +4,7 @@
 use super::api;
 use super::hostcmd;
 use super::nav;
-use super::paths::{absolute_file_path, can_go_up, encode_query, parent_file_path};
+use super::paths::{absolute_file_path, encode_query, up_target};
 use crate::runtime::Client;
 use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Color;
@@ -65,6 +65,9 @@ pub struct FilesModel {
     pub status: Signal<String>,
     pub filter: Signal<String>,
     pub focus: Signal<i32>,
+    /// Starting points the access scope allows (name, path): the project, the user's
+    /// folders, drives.
+    places: Signal<Vec<(String, String)>>,
     sort: Signal<SortMode>,
     expanded: Signal<Vec<String>>,
     children: Signal<Vec<(String, Vec<FileEntry>)>>,
@@ -108,6 +111,7 @@ impl FilesModel {
             status: Signal::new(String::new()),
             filter: Signal::new(String::new()),
             focus: Signal::new(-1),
+            places: Signal::new(Vec::new()),
             sort: Signal::new(SortMode::FoldersName),
             expanded: Signal::new(Vec::new()),
             children: Signal::new(Vec::new()),
@@ -202,6 +206,10 @@ impl FilesModel {
         self.bump_nav();
         self.reset_tree();
         self.load(&path);
+    }
+
+    fn up(&self) -> Option<String> {
+        up_target(&self.root.get(), &self.path.get())
     }
 
     fn cycle_sort(&self) {
@@ -375,6 +383,24 @@ fn apply_listing(model: &FilesModel, requested: &str, v: serde_json::Value) {
         model.root.set(root.to_string());
     } else if requested == "." {
         model.root.set(String::new());
+    }
+    if let Some(places) = v.get("places").and_then(|p| p.as_array()) {
+        let places = places
+            .iter()
+            .filter_map(|p| {
+                Some((
+                    p.get("name")?.as_str()?.to_string(),
+                    p.get("path")?.as_str()?.to_string(),
+                ))
+            })
+            .collect();
+        model.places.set(places);
+    }
+    if v.get("truncated").and_then(|t| t.as_bool()) == Some(true) {
+        let shown = model.files.get().len();
+        model
+            .status
+            .set(format!("Showing the first {shown} items. Filter or open a subfolder for the rest."));
     }
     if let Some(err) = v
         .get("error")
@@ -577,11 +603,14 @@ fn breadcrumb_parts(root: &str, path: &str) -> Vec<(String, String)> {
         acc = if acc.is_empty() {
             if path_norm.starts_with('/') && !under_root {
                 format!("/{seg}")
+            } else if !under_root && seg.len() == 2 && seg.ends_with(':') {
+                // "C:" alone means the drive's current folder, not its root.
+                format!("{seg}/")
             } else {
                 seg.to_string()
             }
         } else {
-            format!("{acc}{sep}{seg}")
+            format!("{}{sep}{seg}", acc.trim_end_matches(['/', '\\']))
         };
         parts.push((seg.to_string(), acc.clone()));
     }
@@ -785,15 +814,14 @@ fn path_row(
     let up = glyph_button(ui, "↑", "Parent folder", {
         let m = model.clone();
         move || {
-            let path = m.path.get();
-            if can_go_up(&path) {
-                m.go_to(&parent_file_path(&path));
+            if let Some(parent) = m.up() {
+                m.go_to(&parent);
             }
         }
     })
     .disabled({
         let m = model.clone();
-        move || !can_go_up(&m.path.get()) || m.loading.get()
+        move || m.up().is_none() || m.loading.get()
     });
     w::tooltip(&up, "Parent folder (Backspace)");
 
@@ -952,6 +980,41 @@ fn path_row(
                     l.min_width = Length::Px(0.0);
                 })),
         )
+        .child(places_row(ui, model, unit))
+}
+
+/// One button per starting point (Project, Desktop, Documents, drives …), scrolled
+/// sideways when they do not fit.
+fn places_row(ui: &Ui, model: &FilesModel, unit: f32) -> El {
+    let row = w::row(ui)
+        .align(Align::Center)
+        .gap(2.0)
+        .scroll_x()
+        .padding(pad(0.0, unit * 2.0))
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.min_width = Length::Px(0.0);
+        });
+    let host = row.clone();
+    let ui = ui.clone();
+    let m = model.clone();
+    let _ = row.clone().bind(move || {
+        host.clear();
+        for (name, path) in m.places.get() {
+            let go = m.clone();
+            let label = format!("Go to {name}");
+            let btn = w::button(&ui, name, move || {
+                go.filter.set(String::new());
+                go.go_to(&path);
+            })
+            .variant("quiet");
+            let _ = btn
+                .clone()
+                .semantics(Semantics::new(Role::Button).label(label).action(Action::Click));
+            let _ = host.clone().child(btn);
+        }
+    });
+    row
 }
 
 fn filter_row(
@@ -1242,9 +1305,8 @@ fn on_list_key(
         }
     }
     if e.key == Key::Backspace && model.filter.get().is_empty() {
-        let path = model.path.get();
-        if can_go_up(&path) {
-            model.go_to(&parent_file_path(&path));
+        if let Some(parent) = model.up() {
+            model.go_to(&parent);
             return true;
         }
     }
@@ -1258,9 +1320,8 @@ fn on_list_key(
                 }
             }
         }
-        let path = model.path.get();
-        if can_go_up(&path) {
-            model.go_to(&parent_file_path(&path));
+        if let Some(parent) = model.up() {
+            model.go_to(&parent);
             return true;
         }
     }

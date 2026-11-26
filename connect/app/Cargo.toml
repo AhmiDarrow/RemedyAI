@@ -15,11 +15,11 @@ remedy-desktop = { path = "../../desktop/remedyui" }
 # Pairing, the device key, the encrypted tunnel and its loopback shim.
 remedy-connect-core = { path = "../core" }
 # The same RemedyUI the desktop is pinned to.
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "0898177e7db214f623b1def9163399773c73b14f", features = ["net", "image"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "f0ad0934e3ae32b25d006849ae8177cbd798e71f", features = ["net", "image"] }
 
 [dev-dependencies]
 serde_json = "1"
-remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "0898177e7db214f623b1def9163399773c73b14f", features = ["headless", "devtools", "net", "image"] }
+remedy-ui = { git = "https://github.com/AhmiDarrow/RemedyUI", rev = "f0ad0934e3ae32b25d006849ae8177cbd798e71f", features = ["headless", "devtools", "net", "image"] }
 
 [profile.release]
 lto = "fat"
