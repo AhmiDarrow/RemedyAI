@@ -46,6 +46,10 @@ type CognitionTurnRunner struct {
 	// server sets it; a bare runner in a test has none and sends no system
 	// prompt unless a worker is attached.
 	PromptSources prompt.Sources
+	// reachHiddenTools lets a test drive the demo/internal tools through a
+	// turn to check their plumbing. Production leaves it false, so a model
+	// can only run the tools it was shown.
+	reachHiddenTools bool
 }
 
 // NewCognitionTurnRunner builds a runner on the real Tool ABI registry (Go
@@ -979,6 +983,7 @@ func (r *CognitionTurnRunner) turnPolicy(req TurnRequest) cognition.Policy {
 			Origin:         req.Origin,
 			Root:           root,
 			Scope:          effectiveAccessScope(cfgString(cfg, "access_scope", "project"), req.ProjectPath),
+			ModelSurface:   !r.reachHiddenTools,
 		}
 	case r.Policy != nil:
 		return r.Policy

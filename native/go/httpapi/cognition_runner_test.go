@@ -168,6 +168,7 @@ func TestCognitionTurnRunnerExecutesRealGoBuiltinTools(t *testing.T) {
 		{{Text: "done", Done: true}},
 	}}
 	r := NewCognitionTurnRunner(model)
+	r.reachHiddenTools = true // demo/internal tools: this checks their plumbing
 	out, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "probe"})
 	if err != nil {
 		t.Fatal(err)
@@ -211,6 +212,7 @@ func TestCognitionTurnRunnerExecutesPythonToolsOverRMDY(t *testing.T) {
 		{{Text: "slug-ok", Done: true}},
 	}}
 	r := NewCognitionTurnRunner(model)
+	r.reachHiddenTools = true // demo/internal tools: this checks their plumbing
 	if err := r.AttachPythonWorker(client); err != nil {
 		t.Fatal(err)
 	}
@@ -248,6 +250,7 @@ func TestCognitionTurnRunnerExecutesWorkspaceListOverRMDY(t *testing.T) {
 		{{Text: "listed", Done: true}},
 	}}
 	r := NewCognitionTurnRunner(model)
+	r.reachHiddenTools = true // demo/internal tools: this checks their plumbing
 	if err := r.AttachPythonWorker(client); err != nil {
 		t.Fatal(err)
 	}
@@ -406,10 +409,10 @@ func TestApproveResumesPendingToolBatch(t *testing.T) {
 	}
 	q := newApprovalQueue()
 	_ = q.SetMode("ask")
-	input := `{"argv":["C:\\Windows\\System32\\cmd.exe","/c","echo"]}`
+	input := `{"command":"echo"}`
 	var executed atomic.Int32
 	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
-		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "shell.exec", Input: []byte(input)}}},
+		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "bash", Input: []byte(input)}}},
 		{{Text: "finished", Done: true}},
 	}}
 	r := &CognitionTurnRunner{
@@ -451,7 +454,7 @@ func TestApproveResumesPendingToolBatch(t *testing.T) {
 	if item == nil {
 		t.Fatal("timed out waiting for pending approval")
 	}
-	if item.ToolName != "shell.exec" {
+	if item.ToolName != "bash" {
 		t.Fatalf("tool=%q", item.ToolName)
 	}
 	waiterDeadline := time.Now().Add(2 * time.Second)
@@ -503,10 +506,10 @@ func TestDenyDoesNotRunPendingToolBatch(t *testing.T) {
 	}
 	q := newApprovalQueue()
 	_ = q.SetMode("ask")
-	input := `{"argv":["C:\\Windows\\System32\\cmd.exe","/c","echo"]}`
+	input := `{"command":"echo"}`
 	var executed atomic.Int32
 	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
-		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "shell.exec", Input: []byte(input)}}},
+		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "bash", Input: []byte(input)}}},
 		{{Text: "should-not-run", Done: true}},
 	}}
 	r := &CognitionTurnRunner{

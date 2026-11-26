@@ -240,6 +240,11 @@ type RegistryPolicy struct {
 	// jailed to, as boundTools has them.
 	Root  string
 	Scope string
+	// ModelSurface is set for a model's turn: only a tool the model was shown
+	// (modelVisibleTool) may run. A provider passes an unadvertised name
+	// through unchanged, so without this a model could call shell.exec, the
+	// internal prompt.* steps or setup.session by their Tool ABI ids.
+	ModelSurface bool
 }
 
 // askUnlessApproved is an Ask the owner's earlier yes for this exact call
@@ -353,6 +358,9 @@ func (p *RegistryPolicy) livePageContext() string {
 
 func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cognition.Decision {
 	if p == nil || p.Registry == nil {
+		return cognition.Deny
+	}
+	if p.ModelSurface && !modelVisibleTool(call.Name) {
 		return cognition.Deny
 	}
 	if p.HiveRestricted && hiveDeniedTool(call.Name) {
