@@ -1,6 +1,6 @@
 //go:build windows
 
-package httpapi
+package sysres
 
 import (
 	"os"
@@ -8,7 +8,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func lockFile(f *os.File) error {
+// LockFile takes an exclusive advisory lock on f, blocking until it is free.
+func LockFile(f *os.File) error {
 	var ol windows.Overlapped
 	return windows.LockFileEx(
 		windows.Handle(f.Fd()),
@@ -20,7 +21,8 @@ func lockFile(f *os.File) error {
 	)
 }
 
-func unlockFile(f *os.File) error {
+// UnlockFile releases LockFile.
+func UnlockFile(f *os.File) error {
 	var ol windows.Overlapped
 	return windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, &ol)
 }
