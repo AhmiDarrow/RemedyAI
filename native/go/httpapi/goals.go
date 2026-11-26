@@ -2,11 +2,14 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 var lifeGoalMu sync.Mutex
@@ -59,6 +62,11 @@ func (s *Server) loadLifeGoalsFile() lifeGoalsFile {
 	path := s.lifeGoalsPath()
 	var raw map[string]any
 	if err := readJSONFile(path, &raw); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			// The next save would replace the owner's goals with an empty
+			// list. Keep the unreadable file beside it instead.
+			_ = os.Rename(path, fmt.Sprintf("%s.corrupt-%d", path, time.Now().UnixNano()))
+		}
 		return emptyLifeGoals()
 	}
 	out := emptyLifeGoals()
