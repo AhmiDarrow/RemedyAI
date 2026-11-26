@@ -756,8 +756,12 @@ fn pane_shell(
                 l.basis = Length::Px(0.0);
                 l.width = Length::Percent(1.0);
             } else {
+                // Also undo the fill it had while the other pane was out, or it
+                // keeps the whole well and the returning pane has no room.
                 l.grow = 0.0;
                 l.shrink = 0.0;
+                l.basis = Length::Auto;
+                l.width = Length::Auto;
             }
         });
     })
