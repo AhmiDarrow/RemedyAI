@@ -75,7 +75,7 @@ def create(
     task_id = new_id()
     ctx = context_id or new_id()
     status_message = message
-    task = {
+    task: dict[str, Any] = {
         "id": task_id,
         "contextId": ctx,
         "status": {"state": state, "timestamp": now_iso()},

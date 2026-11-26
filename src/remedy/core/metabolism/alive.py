@@ -118,9 +118,13 @@ def load_alive(home: str | Path | None) -> dict[str, Any]:
     if not isinstance(raw, dict):
         return state
     state.update({k: raw[k] for k in state if k in raw})
-    drives = state.get("drives") if isinstance(state.get("drives"), dict) else {}
+    drives = state.get("drives")
+    if not isinstance(drives, dict):
+        drives = {}
     state["drives"] = {k: _clamp01(drives.get(k), 0.45) for k in DRIVE_KEYS}
-    aff = state.get("affect") if isinstance(state.get("affect"), dict) else {}
+    aff = state.get("affect")
+    if not isinstance(aff, dict):
+        aff = {}
     state["affect"] = {
         "valence": _clamp01(aff.get("valence"), 0.55),
         "arousal": _clamp01(aff.get("arousal"), 0.4),

@@ -6,6 +6,7 @@ import json
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Callable
 
 from remedy import __version__
@@ -36,7 +37,7 @@ LOCAL_MCP_PEER = {
 class InteropRuntime:
     def __init__(
         self,
-        home: str | None,
+        home: str | Path | None,
         *,
         cfg: dict[str, Any] | None = None,
         responder: Responder | None = None,
@@ -179,9 +180,10 @@ class InteropRuntime:
         if loop_err:
             return consent.Decision(action, "deny", loop_err, "untrusted")
         if source == "stdio" and not peer_id:
-            peer = dict(LOCAL_MCP_PEER)
             trust = TrustResult("verified", None, "owner-launched local MCP", "local")
-            return consent.decide(action, peer=peer, trust=trust, policy=consent.trust_policy(self.cfg))
+            return consent.decide(
+                action, peer=dict(LOCAL_MCP_PEER), trust=trust, policy=consent.trust_policy(self.cfg)
+            )
         peer = self.load_peer(peer_id)
         trust = self.trust_for(peer, metadata)
         return consent.decide(action, peer=peer, trust=trust, policy=consent.trust_policy(self.cfg))

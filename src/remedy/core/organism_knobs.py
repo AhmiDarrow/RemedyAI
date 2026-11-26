@@ -227,7 +227,7 @@ def _load_cfg(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         return {}
 
 
-def _coerce(knob: Knob, raw: Any) -> int | float | bool:
+def _coerce(knob: Knob, raw: Any) -> int | float | bool | str:
     if knob.kind == "bool":
         if isinstance(raw, str):
             return raw.strip().lower() in ("1", "true", "yes", "on")
@@ -263,7 +263,7 @@ def _coerce(knob: Knob, raw: Any) -> int | float | bool:
     return val
 
 
-def _from_env(knob: Knob) -> int | float | bool | None:
+def _from_env(knob: Knob) -> int | float | bool | str | None:
     if not knob.env:
         return None
     raw = os.environ.get(knob.env)

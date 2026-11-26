@@ -21,6 +21,7 @@ import json
 import os
 import logging
 import socket
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -636,7 +637,7 @@ def _schedule_lock_path(home_dir: str | Path | None = None) -> Path:
 
 
 def _lock_exclusive(fp: Any) -> None:
-    if os.name == "nt":
+    if sys.platform == "win32":
         import msvcrt
 
         fp.seek(0, os.SEEK_END)
@@ -652,7 +653,7 @@ def _lock_exclusive(fp: Any) -> None:
 
 
 def _unlock_exclusive(fp: Any) -> None:
-    if os.name == "nt":
+    if sys.platform == "win32":
         import msvcrt
 
         fp.seek(0)

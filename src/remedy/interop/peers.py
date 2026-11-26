@@ -48,7 +48,7 @@ def load(home: str | None = None) -> dict[str, Any]:
 
 def save(store: dict[str, Any], home: str | None = None) -> None:
     path = peers_path(home)
-    clean = {"version": 1, "peers": {}}
+    clean: dict[str, Any] = {"version": 1, "peers": {}}
     for key, peer in (store.get("peers") or {}).items():
         if isinstance(peer, dict):
             clean["peers"][str(key)] = redact_peer(peer)
@@ -78,7 +78,9 @@ def upsert(store: dict[str, Any], peer: dict[str, Any], *, home: str | None = No
     if peer_id not in peers and len(peers) >= cap:
         raise ValueError(f"peer registry full (max {cap})")
     now = time.time()
-    existing = peers.get(peer_id) if isinstance(peers.get(peer_id), dict) else {}
+    existing = peers.get(peer_id)
+    if not isinstance(existing, dict):
+        existing = {}
     protocol = str(peer.get("protocol") or existing.get("protocol") or "a2a").strip().lower()
     if protocol not in PROTOCOLS:
         raise ValueError(f"unknown protocol: {protocol}")
@@ -86,13 +88,16 @@ def upsert(store: dict[str, Any], peer: dict[str, Any], *, home: str | None = No
     if perms is None:
         perms = existing.get("permissions") or list(DEFAULT_PERMISSIONS)
     cleaned_perms = [str(p) for p in perms if str(p) in ALL_PERMISSIONS]
+    skills = peer.get("skills")
+    if skills is None:
+        skills = existing.get("skills") or []
     record = {
         **existing,
         "id": peer_id,
         "name": str(peer.get("name") or existing.get("name") or peer_id),
         "protocol": protocol,
         "endpoint": str(peer.get("endpoint") or existing.get("endpoint") or "").strip(),
-        "skills": [str(s) for s in (peer.get("skills") if peer.get("skills") is not None else existing.get("skills") or [])],
+        "skills": [str(s) for s in skills],
         "permissions": cleaned_perms,
         "did": peer.get("did") if peer.get("did") is not None else existing.get("did"),
         "enabled": bool(peer.get("enabled", existing.get("enabled", True))),

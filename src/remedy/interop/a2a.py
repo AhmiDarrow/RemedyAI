@@ -275,7 +275,8 @@ class A2AClient:
         if body.get("error"):
             err = body["error"]
             raise RuntimeError(str((err or {}).get("message") or err))
-        return body.get("result") if isinstance(body.get("result"), dict) else body
+        result = body.get("result")
+        return result if isinstance(result, dict) else body
 
     def _get_json(self, url: str, *, token: str | None = None) -> dict[str, Any]:
         headers = {"Accept": "application/json", "A2A-Version": A2A_PROTOCOL_VERSION}
