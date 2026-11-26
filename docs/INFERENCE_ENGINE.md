@@ -90,7 +90,7 @@ catalog migrates `smolvlm2-2.2b` and retired Qwen-VL pins to
 CPU-only numbers from this engine work box are in
 `docs/INFERENCE_ENGINE_BENCHMARKS.md` (Q4 ~55 tok/s prefill, 0.80 tok/s
 generation; Q6 ~40–42 tok/s prefill, 0.72 tok/s generation, 8-core
-Xeon, no GPU). GPU numbers (Joe's 3080, 12 GB) are pending — this
+Xeon, no GPU). GPU numbers (a 12 GB card) are pending — this
 change was not run on his PC.
 
 ## Training impact (fold into the one fine-tune)

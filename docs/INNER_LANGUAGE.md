@@ -12,7 +12,7 @@ affect, dream outputs, reflection notes) and the parent↔child-worker
 protocol use this channel.
 
 Every message is decodable. The audit log always stores the dense form
-beside a plain-language expansion. Joe can browse the lexicon, its
+beside a plain-language expansion. The owner can browse the lexicon, its
 lineage, and the log on `GET /api/partner/status` (`inner_language`).
 There is no privacy layer on this channel.
 
@@ -41,13 +41,13 @@ ril1 <kind> [L=1] [v=dense|natural] [lex=N] <payload>
 Example, dense:
 
 ```
-ril1 state L=1 v=dense drv 62 41 50 71 aff warm bio I am Remedy, Joe's partner on this machine.
+ril1 state L=1 v=dense drv 62 41 50 71 aff warm bio I am Remedy, Ahmi's partner on this machine.
 ```
 
 The same message, natural fallback:
 
 ```
-ril1 state L=1 v=natural Drives: curiosity 0.62, social 0.41, competence 0.50, rest 0.71. Feeling: warm. I am Remedy, Joe's partner on this machine.
+ril1 state L=1 v=natural Drives: curiosity 0.62, social 0.41, competence 0.50, rest 0.71. Feeling: warm. I am Remedy, Ahmi's partner on this machine.
 ```
 
 Core field tags (`drv`, `aff`, `bio`, `bel`, `tsk`, `out`, `gloss`,

@@ -73,12 +73,12 @@ func TestSetupGetAndSwitchModeKeepsDraft(t *testing.T) {
 	}
 
 	code, body = doSetupJSON(t, s, http.MethodPut, "/api/setup",
-		`{"draft":{"user_name":"Joe","persona":"playful","llm_api_key":"sk-should-never-persist"}}`)
+		`{"draft":{"user_name":"Ahmi","persona":"playful","llm_api_key":"sk-should-never-persist"}}`)
 	if code != 200 {
 		t.Fatalf("PUT draft=%d %v", code, body)
 	}
 	draft, _ := body["draft"].(map[string]any)
-	if draft["user_name"] != "Joe" || draft["persona"] != "playful" {
+	if draft["user_name"] != "Ahmi" || draft["persona"] != "playful" {
 		t.Fatalf("draft=%v", draft)
 	}
 	raw, _ := json.Marshal(body)
@@ -94,7 +94,7 @@ func TestSetupGetAndSwitchModeKeepsDraft(t *testing.T) {
 		t.Fatalf("mode=%v", body["mode"])
 	}
 	draft, _ = body["draft"].(map[string]any)
-	if draft["user_name"] != "Joe" {
+	if draft["user_name"] != "Ahmi" {
 		t.Fatalf("switching modes lost the draft: %v", draft)
 	}
 
@@ -103,7 +103,7 @@ func TestSetupGetAndSwitchModeKeepsDraft(t *testing.T) {
 		t.Fatalf("switch back=%d %v", code, body)
 	}
 	draft, _ = body["draft"].(map[string]any)
-	if draft["user_name"] != "Joe" {
+	if draft["user_name"] != "Ahmi" {
 		t.Fatalf("conversation switch lost draft: %v", draft)
 	}
 }

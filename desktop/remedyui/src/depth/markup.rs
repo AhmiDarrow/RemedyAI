@@ -1579,7 +1579,7 @@ fn preview_settings_png() -> Vec<u8> {
     fill_rect(&mut px, w, h, 0, 0, w, 44, Color::rgb8(7, 20, 18));
     blit_text(&mut px, w, h, 16.0, 14.0, "Settings · General", "#e2f3ee", 2);
     blit_text(&mut px, w, h, 16.0, 64.0, "Your name", "#86a39c", 2);
-    blit_text(&mut px, w, h, 200.0, 64.0, "Joe", "#e2f3ee", 2);
+    blit_text(&mut px, w, h, 200.0, 64.0, "Ahmi", "#e2f3ee", 2);
     blit_text(&mut px, w, h, 16.0, 100.0, "Launch at login", "#86a39c", 2);
     blit_text(&mut px, w, h, 200.0, 100.0, "Off", "#e2f3ee", 2);
     blit_text(&mut px, w, h, 16.0, 136.0, "Provider", "#86a39c", 2);

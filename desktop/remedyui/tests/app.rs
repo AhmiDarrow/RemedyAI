@@ -178,7 +178,7 @@ fn sidebar_select_lets_you_move_or_delete_several_chats() {
     assert!(app.press(Role::Button, "Select"), "enter select mode");
     app.frames(2);
     let names = accessible_names(&app);
-    for title in ["New chat", "Port to RemedyUI", "House rules"] {
+    for title in ["New chat", "Garden planner", "House rules"] {
         assert!(
             app.find(Role::Check, &format!("Select {title}")).is_some(),
             "checkbox for {title}: {names:?}"
@@ -189,7 +189,7 @@ fn sidebar_select_lets_you_move_or_delete_several_chats() {
         "selection bar opens with select mode: {names:?}"
     );
     assert!(
-        app.press(Role::Check, "Select Port to RemedyUI"),
+        app.press(Role::Check, "Select Garden planner"),
         "check the first chat"
     );
     app.frames(2);
@@ -230,14 +230,14 @@ fn sidebar_select_lets_you_move_or_delete_several_chats() {
     assert!(app.press(Role::Button, "Cancel"), "keep the chats");
     app.frames(2);
     assert!(
-        app.find(Role::Button, "Port to RemedyUI").is_some(),
+        app.find(Role::Button, "Garden planner").is_some(),
         "cancel leaves the chats"
     );
     assert!(app.press(Role::Button, "Done selecting"), "leave select mode");
     app.frames(2);
     let names = accessible_names(&app);
     assert!(
-        app.find(Role::Check, "Select Port to RemedyUI").is_none(),
+        app.find(Role::Check, "Select Garden planner").is_none(),
         "checkboxes hide when selection is cleared: {names:?}"
     );
 }
@@ -249,18 +249,18 @@ fn sidebar_tags_can_be_shown_and_used_to_filter() {
     tagged.frames(2);
     let names = accessible_names(&tagged);
     assert!(
-        names.iter().any(|n| n == "portal"),
+        names.iter().any(|n| n == "recipes"),
         "saved tag chip: {names:?}"
     );
     assert!(
         names.iter().any(|n| n == "ui"),
         "second tag chip: {names:?}"
     );
-    assert!(tagged.press(Role::Button, "portal"), "filter by tag");
+    assert!(tagged.press(Role::Button, "recipes"), "filter by tag");
     tagged.frames(2);
     let names = accessible_names(&tagged);
     assert!(
-        names.iter().any(|n| n.contains("Port to RemedyUI")),
+        names.iter().any(|n| n.contains("Garden planner")),
         "tagged chat stays: {names:?}"
     );
     assert!(
@@ -279,13 +279,13 @@ fn sidebar_tags_can_be_shown_and_used_to_filter() {
         .expect("tag field opens on the active session");
     field.focus();
     app.frames(1);
-    app.type_text("portal");
+    app.type_text("recipes");
     app.frames(1);
     assert!(app.press(Role::Button, "Add this tag"), "commit the tag");
     app.frames(4);
     let names = accessible_names(&app);
     assert!(
-        names.iter().any(|n| n == "portal"),
+        names.iter().any(|n| n == "recipes"),
         "new tag appears on the row: {names:?}"
     );
 }
@@ -349,14 +349,14 @@ fn skills_sheet_shows_budget_learning_and_filters() {
         "learning summary: {names:?}"
     );
     assert!(names.iter().any(|n| n == "All"), "All filter: {names:?}");
-    assert!(names.iter().any(|n| n.contains("portal-notes")), "learned skill: {names:?}");
+    assert!(names.iter().any(|n| n.contains("recipe-notes")), "learned skill: {names:?}");
     assert!(names.iter().any(|n| n.contains("imported-pack-alpha")), "quarantine skill: {names:?}");
     assert!(names.iter().any(|n| n.contains("old-scraper")), "archived skill: {names:?}");
     assert!(app.press(Role::Button, "Learned"), "filter to learned");
     app.frames(2);
     let names = accessible_names(&app);
     assert!(
-        names.iter().any(|n| n.contains("portal-notes") || n.contains("house-style")),
+        names.iter().any(|n| n.contains("recipe-notes") || n.contains("house-style")),
         "learned filter keeps learned skills: {names:?}"
     );
     assert!(app.press(Role::Button, "All"), "clear filter");
@@ -638,7 +638,7 @@ fn chat_pop_out_opens_a_real_window_and_has_no_pip() {
         pop_names.iter().any(|n| n.contains("Coding")
             || n.contains("Chat")
             || n.contains("Actions")
-            || n.contains("The portal")
+            || n.contains("The importer")
             || n.contains("I'll reach")),
         "popped window must render live content: {pop_names:?}"
     );
@@ -654,7 +654,7 @@ fn chat_fullscreen_keeps_the_pane_visible() {
         before
             .iter()
             .any(|n| n.contains("The manifest still named init.lua")
-                || n.contains("portal")
+                || n.contains("recipes")
                 || n.contains("Coding / Actions")),
         "preview content before fullscreen: {before:?}"
     );
@@ -665,7 +665,7 @@ fn chat_fullscreen_keeps_the_pane_visible() {
         after
             .iter()
             .any(|n| n.contains("The manifest still named init.lua")
-                || n.contains("portal")
+                || n.contains("recipes")
                 || n.contains("Coding / Actions")
                 || n.contains("Dock back")),
         "fullscreen must show the pane, not hide it: {after:?}"

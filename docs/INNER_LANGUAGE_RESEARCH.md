@@ -29,7 +29,7 @@ be dropped at low verbosity), and common-token English fragments.
 multi-agent channels show that an accuracy bump is not proof the
 receiver used the intended message. Mismatched or zeroed payloads can
 keep most of the gain. If a compressed channel cannot be expanded to
-readable text, Joe cannot audit it. So every inner and worker message
+readable text, the owner cannot audit it. So every inner and worker message
 is written to an audit log in both dense and decoded form, and the
 status view shows the lexicon (with glosses) and that log. There is no
 privacy layer on this channel.
@@ -67,7 +67,7 @@ StateBridge, and the Agent Vector Protocol, show real token and latency
 wins when agents share hidden states or KV caches instead of text. They
 also require engine access, usually the same (or aligned) local model,
 and they are easy to mis-credit: audits find “gains” that survive a
-mismatched cache. Joe requires every inner and worker message to be
+mismatched cache. The owner requires every inner and worker message to be
 decodable and visible. We reserve a latent slot and a `local` capability
 flag, and stub the interfaces. We do not pass hidden state.
 

@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hash/crc32"
 	"io"
 	"os"
@@ -86,6 +87,17 @@ func Open(path string) (*Bus, error) {
 	}
 	bus := &Bus{file: file, next: 1, subscribers: make(map[uint64]*subscription)}
 	valid, err := bus.replayDisk()
+	if errors.Is(err, ErrCorruptLog) {
+		// A record that does not check out ends the log: the process was stopped
+		// in the middle of a write. Everything before it is good, so keep that,
+		// put the rest aside for anyone who wants to look, and start. Refusing to
+		// start here left the whole app down until someone repaired the file by hand.
+		if qErr := quarantineTail(file, path, valid); qErr != nil {
+			file.Close()
+			return nil, fmt.Errorf("%w (and the damaged part could not be set aside: %v)", err, qErr)
+		}
+		err = nil
+	}
 	if err != nil {
 		file.Close()
 		return nil, err
@@ -108,6 +120,23 @@ func Open(path string) (*Bus, error) {
 	}
 	return bus, nil
 }
+// quarantineTail copies what follows the last good record to
+// "<path>.damaged-<unix time>". Open then truncates the log to the good part.
+func quarantineTail(file *os.File, path string, valid int64) error {
+	if _, err := file.Seek(valid, io.SeekStart); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(fmt.Sprintf("%s.damaged-%d", path, time.Now().Unix()), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, file)
+	if cErr := out.Close(); err == nil {
+		err = cErr
+	}
+	return err
+}
+
 func (b *Bus) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

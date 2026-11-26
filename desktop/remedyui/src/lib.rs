@@ -1,6 +1,6 @@
 //! Remedy Desktop: Grove is home, and Studio is one tap away.
 //!
-//! Visual language follows Joe's own craft: flat dark forest panels, hairline
+//! Visual language follows the owner's own craft: flat dark forest panels, hairline
 //! borders, and three config-driven font roles (UI, display, code). The window talks
 //! to remedy-runtime over HTTP+SSE on 127.0.0.1:7400.
 
@@ -312,7 +312,7 @@ pub fn design_grove_handoff(ui: &Ui) -> El {
     let grove = grove::Grove::preview(studio.clone());
     grove.handoff.set(Some(grove::StudioHandoff {
         kind: grove::StudioKind::Build,
-        prompt: "Get the portal addon loading again after the entry rename.".into(),
+        prompt: "Get the recipe addon loading again after the entry rename.".into(),
         session: None,
     }));
     design_chrome(ui, studio, grove.clone(), move |ui| design_grove_body(ui, grove.clone()))
@@ -355,7 +355,7 @@ pub fn home_tagged(ui: &Ui) -> El {
     studio.conn.set(studio::Conn::Ready);
     studio.sessions.update(|list| {
         if let Some(session) = list.iter_mut().find(|s| s.id == "s1") {
-            session.tags = vec!["portal".into(), "ui".into()];
+            session.tags = vec!["recipes".into(), "ui".into()];
         }
     });
     shell_with(
@@ -373,7 +373,7 @@ pub fn home_siblings(ui: &Ui) -> El {
         session_id: "s-other".into(),
         you: false,
         muscle: "xai/grok-4.5".into(),
-        project: "portal".into(),
+        project: "recipes".into(),
         goal: "load the addon".into(),
         phase: "build".into(),
         held_files: vec!["main.rs".into()],
@@ -429,7 +429,7 @@ pub fn design_plan(ui: &Ui) -> El {
     studio.mode.set(studio::WorkMode::Plan);
     studio.depth.plan.set(Some(depth::PlanCard {
         status: "ready".into(),
-        goal: "Get the portal addon loading again after the entry rename.".into(),
+        goal: "Get the recipe addon loading again after the entry rename.".into(),
         steps: vec![
             (
                 "Patch manifest.json to init_main.lua".into(),
@@ -439,7 +439,7 @@ pub fn design_plan(ui: &Ui) -> El {
                 "Register the loader before the version check".into(),
                 String::new(),
             ),
-            ("Run portal.exe --addon-check --all".into(), String::new()),
+            ("Run recipes.exe --check --all".into(), String::new()),
         ],
         done: 1,
         total: 3,
@@ -733,7 +733,7 @@ pub fn design_evolution(ui: &Ui) -> El {
     })
 }
 
-/// All six states of one presence form, for Joe to compare.
+/// All six states of one presence form, for the owner to compare.
 pub fn design_presence_board(ui: &Ui, kind: presence::Kind) -> El {
     presence::set_kind_override(Some(kind));
     let studio = Studio::preview();
@@ -843,14 +843,14 @@ pub fn design_update_advanced(ui: &Ui) -> El {
 fn design_preview_messages() -> Vec<studio::ChatMessage> {
     use studio::ChatMessage;
     use work::WorkStep;
-    let body = "The portal addon loads again.\n\nThe loader now points at the new entry:\n\n```lua\n-- loader.lua\naddon.entry = \"init_main.lua\"\nassert(addon:register(), \"register before version check\")\n```\n\n`portal.exe --addon-check --all` reports all 6 addons OK. Restart the portal to pick it up.";
+    let body = "The recipe importer loads again.\n\nThe loader now points at the new entry:\n\n```lua\n-- loader.lua\naddon.entry = \"init_main.lua\"\nassert(addon:register(), \"register before version check\")\n```\n\n`recipes.exe --check --all` reports all 6 addons OK. Restart the app to pick it up.";
     vec![
         ChatMessage {
             created_at: Some("2026-11-22T15:00:00Z".into()),
             ..ChatMessage::plain(
                 "m1",
                 "user",
-                "The portal addon stopped loading after the last update. Can you fix it?",
+                "The recipe importer stopped loading after the last update. Can you fix it?",
             )
         },
         ChatMessage {

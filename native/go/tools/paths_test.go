@@ -105,10 +105,10 @@ func TestWindowsPathToWSLAndRewrite(t *testing.T) {
 }
 
 func TestExpandHomeUnix(t *testing.T) {
-	if got := expandHome("~/src/app", "/home/joe", PathOSUnix); got != "/home/joe/src/app" {
+	if got := expandHome("~/src/app", "/home/ahmi", PathOSUnix); got != "/home/ahmi/src/app" {
 		t.Fatalf("unix home: %q", got)
 	}
-	if got := expandHome("~other/x", "/home/joe", PathOSUnix); got != "~other/x" {
+	if got := expandHome("~other/x", "/home/ahmi", PathOSUnix); got != "~other/x" {
 		t.Fatalf("~other must stay literal: %q", got)
 	}
 }

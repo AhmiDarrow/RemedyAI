@@ -431,15 +431,15 @@ fn seed_skills_preview(studio: &crate::studio::Studio) {
             auto_generated: false,
         },
         SkillRow {
-            name: "portal-notes".into(),
-            description: "Learned from the Portal thread. Still on probation.".into(),
+            name: "recipe-notes".into(),
+            description: "Learned from the Recipes thread. Still on probation.".into(),
             status: "discovered".into(),
             quarantine: false,
             auto_generated: true,
         },
         SkillRow {
             name: "house-style".into(),
-            description: "Keep replies in Joe's voice and spelling.".into(),
+            description: "Keep replies in Ahmi's voice and spelling.".into(),
             status: "active".into(),
             quarantine: false,
             auto_generated: true,

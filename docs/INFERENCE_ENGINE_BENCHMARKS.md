@@ -1,7 +1,7 @@
 # Local inference engine benchmarks
 
 Measured on 2026-11-22 (America/Chicago) on the engine work box.
-**CPU only.** GPU numbers (Joe's RTX 3080, 12 GB) are pending — this
+**CPU only.** GPU numbers (a 12 GB card) are pending — this
 change was not run on his PC.
 
 ## Machine

@@ -1,4 +1,4 @@
-"""Always write dense + decoded forms so Joe can audit the channel."""
+"""Always write dense + decoded forms so the owner can audit the channel."""
 
 from __future__ import annotations
 

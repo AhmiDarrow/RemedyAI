@@ -3321,7 +3321,7 @@ mod tests {
         let studio = Studio::new();
         studio.active.set(Some("1".into()));
         let first = "I'll look.\n\n";
-        studio.partial.set(format!("{first}The portal loads."));
+        studio.partial.set(format!("{first}The importer loads."));
         studio.live_breaks.set(vec![first.len()]);
         let mut step = WorkStep::done("c1", "bash");
         step.status = StepStatus::Done;
@@ -3337,7 +3337,7 @@ mod tests {
             .expect("assistant row");
         assert_eq!(a.id, "draft-9");
         assert_eq!(a.user_reaction, "👍");
-        assert_eq!(a.content, "The portal loads.");
+        assert_eq!(a.content, "The importer loads.");
         assert_eq!(a.steps[0].narration.as_deref(), Some("I'll look."));
         assert!(studio.live_message_id.get().is_none());
         assert!(studio.live_user_reaction.get().is_empty());
@@ -3464,7 +3464,7 @@ mod tests {
                         .to_string();
                     seen_cb.lock().unwrap_or_else(|e| e.into_inner()).push(path.clone());
                     let body = if path.contains("coordination/presence") {
-                        r#"{"beacons":[{"session_id":"me","you":true,"muscle":"local/remedy","project":"","goal":"","phase":"idle","held_files":[],"held_count":0},{"session_id":"s2","you":false,"muscle":"xai/grok-4.5","project":"portal","goal":"load the addon","phase":"build","held_files":["main.rs"],"held_count":1}],"count":2}"#
+                        r#"{"beacons":[{"session_id":"me","you":true,"muscle":"local/remedy","project":"","goal":"","phase":"idle","held_files":[],"held_count":0},{"session_id":"s2","you":false,"muscle":"xai/grok-4.5","project":"recipes","goal":"load the addon","phase":"build","held_files":["main.rs"],"held_count":1}],"count":2}"#
                     } else {
                         r#"{"ok":true}"#
                     };

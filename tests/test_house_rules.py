@@ -44,18 +44,18 @@ def test_defaults_and_questions_cover_setup_topics() -> None:
 
 def test_skip_all_uses_defaults_and_keeps_prior_answers(home: Path) -> None:
     hr.mark_onboarding_pending(home)
-    hr.update_draft({"user_name": "Joe", "persona": "playful"}, home=home, origin="desktop")
+    hr.update_draft({"user_name": "Ahmi", "persona": "playful"}, home=home, origin="desktop")
     out = hr.skip_all(home=home, origin="desktop")
     assert out["ok"] is True
     assert out["status"] == hr.STATUS_SKIPPED
     rules = hr.load_rules(home)
-    assert rules["answers"]["user_name"] == "Joe"
+    assert rules["answers"]["user_name"] == "Ahmi"
     assert rules["answers"]["persona"] == "playful"
     assert rules["answers"]["ui_language"] == "auto"
     assert rules["answers"]["interop_inbound"] is False
     cfg = (home / "config.toml").read_text(encoding="utf-8")
     assert "setup_completed = true" in cfg
-    assert "Joe" in cfg
+    assert "Ahmi" in cfg
 
 
 def test_take_onboarding_offer_is_once(home: Path) -> None:
