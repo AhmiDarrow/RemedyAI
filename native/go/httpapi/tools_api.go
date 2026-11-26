@@ -185,10 +185,11 @@ func (s *Server) handleInvokeTool(w http.ResponseWriter, r *http.Request) {
 
 	// Same session binding as the engine path: the caller never chooses the
 	// jail root, the shell cwd / write roots, or home_dir.
+	binding := s.toolBindingFor(sessionID)
 	call := bindToolInput(cognition.ToolCall{
 		Name:  desc.ID,
 		Input: append([]byte(nil), input...),
-	}, s.toolBindingFor(sessionID))
+	}, binding)
 	input = json.RawMessage(call.Input)
 
 	// Same Ask/Auto/Full + fingerprint gate as CognitionTurnRunner.
@@ -197,6 +198,10 @@ func (s *Server) handleInvokeTool(w http.ResponseWriter, r *http.Request) {
 		Approvals:   s.approvals,
 		SessionID:   sessionID,
 		LiveContext: func(sid string) string { return s.toolBindingFor(sid).PageContext },
+		// Without these Auto waved every shell command and fetch through here.
+		Guards: loadToolGuards(LoadConfig(s.remedyHomeDir())),
+		Root:   binding.Root,
+		Scope:  binding.Scope,
 	}
 	switch policy.Decide(r.Context(), call) {
 	case cognition.Allow:
