@@ -12,7 +12,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listApprovals, resolveApproval, type PendingApproval } from '../api/partner'
 import { approvalHeadline } from '../utils/approvalText'
-import { explainCommand, isGenericReason, orderDecisions } from './headHelpers'
+import { explainCommand, isGenericReason, keepShownFirst, orderDecisions } from './headHelpers'
+
+/** A card that just took the front can't be answered for this long, so a
+ * click or key meant for the card before it lands on nothing. */
+export const DECISION_ARM_MS = 500
 
 export interface DecisionCardProps {
   serverReady: boolean
@@ -42,11 +46,15 @@ export function DecisionCard({
   const [busy, setBusy] = useState(false)
   const [flash, setFlash] = useState<{ text: string; error?: boolean } | null>(null)
   const cardRef = useRef<HTMLDivElement | null>(null)
+  // The decision on screen, and the one that has been there long enough to
+  // be answered. A press only ever acts on that one.
+  const shownRef = useRef<string | null>(null)
+  const [armedId, setArmedId] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     if (!serverReady) return
     try {
-      const all = orderDecisions(await listApprovals())
+      const all = keepShownFirst(orderDecisions(await listApprovals()), shownRef.current)
       setItems(all)
       onCount?.(all.length)
       // A decision the owner has not seen yet brings the card back.
@@ -74,12 +82,21 @@ export function DecisionCard({
   }, [flash])
 
   const item = items[0]
+  const itemId = item?.id ?? null
+  useEffect(() => {
+    shownRef.current = itemId
+    setArmedId(null)
+    if (!itemId) return
+    const t = setTimeout(() => setArmedId(itemId), DECISION_ARM_MS)
+    return () => clearTimeout(t)
+  }, [itemId])
+  const armed = !!item && armedId === item.id
   const explain = !!item && explainId === item.id
   const toggleExplain = () => setExplainId((cur) => (item && cur !== item.id ? item.id : null))
 
   const decide = useCallback(
     async (approve: boolean, scope: 'once' | 'session' = 'once') => {
-      if (!item || busy) return
+      if (!item || busy || armedId !== item.id) return
       setBusy(true)
       try {
         const res = await resolveApproval(item.id, approve, approve ? scope : 'once')
@@ -93,7 +110,7 @@ export function DecisionCard({
         setBusy(false)
       }
     },
-    [item, busy, onResolved, refresh],
+    [item, busy, armedId, onResolved, refresh],
   )
 
   const onKey = (e: React.KeyboardEvent) => {
@@ -189,11 +206,11 @@ export function DecisionCard({
         </div>
       )}
       <div className="dc-actions">
-        <button type="button" className="dc-yes" disabled={busy} onClick={() => void decide(true)}>
+        <button type="button" className="dc-yes" disabled={busy || !armed} onClick={() => void decide(true)}>
           {busy ? 'Working…' : sensitive ? 'Yes, go ahead' : 'Yes'}
           <kbd aria-hidden>Y</kbd>
         </button>
-        <button type="button" className="dc-no" disabled={busy} onClick={() => void decide(false)}>
+        <button type="button" className="dc-no" disabled={busy || !armed} onClick={() => void decide(false)}>
           {sensitive ? 'Not now' : 'No'}
           <kbd aria-hidden>N</kbd>
         </button>
@@ -205,7 +222,7 @@ export function DecisionCard({
           <button
             type="button"
             className="dc-allow"
-            disabled={busy}
+            disabled={busy || !armed}
             onClick={() => void decide(true, 'session')}
             title="Don't ask again for this in this conversation"
           >
