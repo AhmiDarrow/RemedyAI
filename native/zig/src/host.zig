@@ -646,6 +646,19 @@ pub fn envBlock(gpa: std.mem.Allocator, pairs: []const EnvPair) Error![]u16 {
     };
 }
 
+/// argv[0] names a batch script (Windows drops trailing dots and spaces).
+pub fn isBatchScript(arg0: []const u8) bool {
+    const name = std.mem.trimEnd(u8, arg0, ". ");
+    return std.ascii.endsWithIgnoreCase(name, ".bat") or std.ascii.endsWithIgnoreCase(name, ".cmd");
+}
+
+fn isCmdMetachar(c: u8) bool {
+    return switch (c) {
+        '&', '|', '<', '>', '^', '(', ')', ',', ';', '=' => true,
+        else => false,
+    };
+}
+
 /// Quote argv the way CommandLineToArgvW / the CRT parse it. The first
 /// argument may not contain a double quote (it cannot be escaped there).
 pub fn commandLine(gpa: std.mem.Allocator, argv: []const []const u8) Error![:0]u16 {
@@ -663,10 +676,25 @@ pub fn commandLine(gpa: std.mem.Allocator, argv: []const []const u8) Error![:0]u
     buf.appendSlice(gpa, arg0) catch return error.OutOfMemory;
     if (needs_quotes) buf.append(gpa, '"') catch return error.OutOfMemory;
 
+    // CreateProcess runs a .bat/.cmd through cmd.exe, which parses the line
+    // again by its own rules (BatBadBut): there `"` cannot be escaped and `%`
+    // and `!` expand even inside quotes, so those are refused; the other
+    // metacharacters are literal once quoted.
+    const batch = isBatchScript(arg0);
+    if (batch) {
+        for (argv[1..]) |arg| {
+            for (arg) |c| switch (c) {
+                '"', '%', '!', '\r', '\n', 0 => return error.InvalidArgument,
+                else => {},
+            };
+        }
+    }
+
     for (argv[1..]) |arg| {
         buf.append(gpa, ' ') catch return error.OutOfMemory;
         const quote = for (arg) |c| {
             if (c <= ' ' or c == '"') break true;
+            if (batch and isCmdMetachar(c)) break true;
         } else arg.len == 0;
         if (!quote) {
             buf.appendSlice(gpa, arg) catch return error.OutOfMemory;
@@ -1392,6 +1420,30 @@ test "command line quoting follows CommandLineToArgvW rules" {
     }
     try std.testing.expectError(error.InvalidArgument, commandLine(gpa, &.{}));
     try std.testing.expectError(error.InvalidArgument, commandLine(gpa, &.{"bad\"exe"}));
+}
+
+test "a batch script's arguments cannot break out through cmd.exe" {
+    const gpa = std.testing.allocator;
+    for ([_][]const u8{ "C:\\x\\run.bat", "C:\\x\\RUN.CMD", "C:\\x\\run.bat. " }) |script| {
+        try std.testing.expect(isBatchScript(script));
+        for ([_][]const u8{ "a\" & calc", "%PATH%", "!x!", "a\r\ncalc" }) |arg| {
+            try std.testing.expectError(error.InvalidArgument, commandLine(gpa, &.{ script, arg }));
+        }
+    }
+    try std.testing.expect(!isBatchScript("C:\\x\\run.exe"));
+    const cases = [_]struct { argv: []const []const u8, expected: []const u8 }{
+        .{ .argv = &.{ "C:\\x\\run.bat", "a&calc" }, .expected = "C:\\x\\run.bat \"a&calc\"" },
+        .{ .argv = &.{ "C:\\x\\run.cmd", "x|y", "plain" }, .expected = "C:\\x\\run.cmd \"x|y\" plain" },
+        .{ .argv = &.{ "C:\\x\\run.exe", "a&b" }, .expected = "C:\\x\\run.exe a&b" },
+        .{ .argv = &.{ "C:\\x\\run.exe", "%PATH%" }, .expected = "C:\\x\\run.exe %PATH%" },
+    };
+    for (cases) |case| {
+        const wide = try commandLine(gpa, case.argv);
+        defer gpa.free(wide);
+        const narrow = try std.unicode.utf16LeToUtf8Alloc(gpa, wide);
+        defer gpa.free(narrow);
+        try std.testing.expectEqualStrings(case.expected, narrow);
+    }
 }
 
 test "a supplied environment merges onto the real parent block" {
