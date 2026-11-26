@@ -136,6 +136,12 @@ pub struct Settings {
 
     pub access_scope: Signal<String>,
     pub approval_mode: Signal<String>,
+    /// Safeguards (the runtime's guards.go, docs/SECURITY.md).
+    pub shell_in_auto: Signal<String>,
+    pub web_fetch_guard: Signal<String>,
+    pub messenger_tools: Signal<String>,
+    pub peer_tools: Signal<String>,
+    pub api_max_body_mb: Signal<f64>,
     pub trust_profile: Signal<String>,
     pub thinking_level: Signal<String>,
     pub web_tools: Signal<bool>,
@@ -274,6 +280,11 @@ impl Settings {
             privacy_shield: Signal::new(false),
             access_scope: Signal::new("workspace".into()),
             approval_mode: Signal::new("ask".into()),
+            shell_in_auto: Signal::new("guard".into()),
+            web_fetch_guard: Signal::new("payload".into()),
+            messenger_tools: Signal::new("all".into()),
+            peer_tools: Signal::new("safe".into()),
+            api_max_body_mb: Signal::new(128.0),
             trust_profile: Signal::new("balanced".into()),
             thinking_level: Signal::new("medium".into()),
             web_tools: Signal::new(false),
@@ -527,6 +538,11 @@ impl Settings {
         self.sleev_url.set(jstr(v, "sleev_gateway_url", ""));
         self.sleev_allow_remote.set(jbool(v, "sleev_allow_remote_gateway", false));
         self.approval_mode.set(jstr(v, "approval_mode", "ask"));
+        self.shell_in_auto.set(jstr(v, "shell_in_auto", "guard"));
+        self.web_fetch_guard.set(jstr(v, "web_fetch_guard", "payload"));
+        self.messenger_tools.set(jstr(v, "messenger_tools", "all"));
+        self.peer_tools.set(jstr(v, "peer_tools", "safe"));
+        self.api_max_body_mb.set(jnum(v, "api_max_body_mb", 128.0));
         self.trust_profile.set(jstr(v, "trust_profile", "balanced"));
         self.allow_skills.set(jbool(v, "allow_skill_creation", true));
         self.auto_approve.set(jnum(v, "auto_approve_threshold", 0.8));
@@ -877,6 +893,11 @@ impl Settings {
         d.sleev_allow_remote = self.sleev_allow_remote.get();
         d.soul_field = self.soul_field.get();
         d.approval_mode = self.approval_mode.get();
+        d.shell_in_auto = self.shell_in_auto.get();
+        d.web_fetch_guard = self.web_fetch_guard.get();
+        d.messenger_tools = self.messenger_tools.get();
+        d.peer_tools = self.peer_tools.get();
+        d.api_max_body_mb = self.api_max_body_mb.get();
         d.trust_profile = self.trust_profile.get();
         d.allow_skills = self.allow_skills.get();
         d.auto_approve = self.auto_approve.get();

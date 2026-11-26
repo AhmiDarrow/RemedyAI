@@ -30,11 +30,27 @@ func isSecretAuthPath(abs string) bool {
 		return r == '/' || r == '\\'
 	})
 	for i := 0; i+1 < len(parts); i++ {
-		if strings.EqualFold(parts[i], ".remedy") && strings.EqualFold(parts[i+1], "auth") {
+		if isRemedyDirName(parts[i]) && strings.EqualFold(winName(parts[i+1]), "auth") {
 			return true
 		}
 	}
 	return false
+}
+
+// winName is a path step as Windows opens it: without a stream suffix
+// ("auth::$INDEX_ALLOCATION") and without the trailing dots and spaces it drops.
+func winName(part string) string {
+	if i := strings.IndexByte(part, ':'); i > 0 {
+		part = part[:i]
+	}
+	return strings.TrimRight(part, ". ")
+}
+
+// isRemedyDirName reports ".remedy" in any spelling that opens it, its short
+// 8.3 name included (REMEDY~1: the leading dot is dropped there).
+func isRemedyDirName(part string) bool {
+	n := strings.ToLower(winName(part))
+	return n == ".remedy" || strings.HasPrefix(n, "remedy~")
 }
 
 // located is a path resolved for a file tool: either a path relative to the
@@ -80,6 +96,11 @@ func (b *boundFS) locateOS(p, home string, osName PathOS) (located, error) {
 	}
 	rel, err := resolveBoundPathOS(b.rootAbs, p, home, osName)
 	if err == nil {
+		// Inside the bound folder is not enough when that folder is the home
+		// folder (or .remedy itself): the secrets are inside it too.
+		if isSecretAuthPath(filepath.Join(b.rootAbs, rel)) {
+			return located{}, fmt.Errorf("%w: %q is an auth secret path and cannot be opened", ErrInvalidInput, p)
+		}
 		shown := filepath.ToSlash(filepath.Join(b.rootAbs, rel))
 		return located{rel: rel, shown: shown}, nil
 	}
@@ -230,6 +251,10 @@ func walkHost(ctx interface{ Err() error }, base, pattern string, visit func(rel
 		}
 		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
+			// A search never looks inside the secrets folder, wherever it started.
+			if isSecretAuthPath(p) {
+				return fs.SkipDir
+			}
 			if p != base && skipWalkDir(d.Name(), pattern) {
 				return fs.SkipDir
 			}

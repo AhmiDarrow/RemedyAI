@@ -63,6 +63,7 @@ import {
 } from '../utils/toolLabels'
 import { PERSONAS, pickProjectFolder } from './settings/shared'
 import { SettingsFormSections } from './settings/FormSections'
+import { DEFAULT_GUARDS, type SettingsGuards } from './settings/formTypes'
 import {
   draftsFromMessengers,
   messengersUpdateFromDrafts,
@@ -198,6 +199,7 @@ export function SettingsPanel({
   const [harnessMaxPct, setHarnessMaxPct] = useState(0.92)
   const [thinkingLevel, setThinkingLevel] = useState<'off' | 'low' | 'medium' | 'high'>('high')
   const [allowSkillCreation, setAllowSkillCreation] = useState(true)
+  const [guards, setGuards] = useState<SettingsGuards>(DEFAULT_GUARDS)
   const [autoApproveThreshold, setAutoApproveThreshold] = useState(0.8)
   const [logLevel, setLogLevel] = useState('INFO')
   const [sarcasmMode, setSarcasmMode] = useState(false)
@@ -474,6 +476,15 @@ export function SettingsPanel({
         )
       }
       setAllowSkillCreation(s.allow_skill_creation !== false)
+      setGuards({
+        shell_in_auto: String(s.shell_in_auto || DEFAULT_GUARDS.shell_in_auto),
+        web_fetch_guard: String(s.web_fetch_guard || DEFAULT_GUARDS.web_fetch_guard),
+        messenger_tools: String(s.messenger_tools || DEFAULT_GUARDS.messenger_tools),
+        peer_tools: String(s.peer_tools || DEFAULT_GUARDS.peer_tools),
+        api_max_body_mb: Number.isFinite(Number(s.api_max_body_mb))
+          ? Number(s.api_max_body_mb)
+          : DEFAULT_GUARDS.api_max_body_mb,
+      })
       {
         const th = Number(s.auto_approve_threshold)
         setAutoApproveThreshold(Number.isFinite(th) ? Math.min(1, Math.max(0, th)) : 0.8)
@@ -780,6 +791,7 @@ export function SettingsPanel({
       approval_mode: approvalMode,
       trust_profile: trustProfile,
       allow_skill_creation: allowSkillCreation,
+      ...guards,
       auto_approve_threshold: autoApproveThreshold,
       log_level: logLevel,
       sarcasm_mode: sarcasmMode,
@@ -1369,6 +1381,8 @@ export function SettingsPanel({
               thinkingLevel={thinkingLevel}
               setThinkingLevel={setThinkingLevel}
               allowSkillCreation={allowSkillCreation}
+              guards={guards}
+              setGuards={setGuards}
               setAllowSkillCreation={setAllowSkillCreation}
               autoApproveThreshold={autoApproveThreshold}
               setAutoApproveThreshold={setAutoApproveThreshold}

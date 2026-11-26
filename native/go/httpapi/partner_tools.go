@@ -427,6 +427,7 @@ func toolRoutinesCreate(s *Server, in partnerToolInput) (any, error) {
 		Target:    in.Target,
 		Deliver:   in.Deliver,
 		CreatedBy: originLabel(in.CallerOrigin),
+		Outside:   !OriginIsOwner(in.CallerOrigin),
 	})
 	if err != nil {
 		return nil, err

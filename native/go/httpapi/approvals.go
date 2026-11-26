@@ -361,10 +361,12 @@ func (q *approvalQueue) resolve(id string, approve bool, scope string) (*pending
 		sid := sessionKey(item.SessionID)
 		untrusted := strings.TrimSpace(item.Origin) != "" && !OriginIsOwner(item.Origin)
 		switch {
-		case item.Sensitive || untrusted:
+		case item.Sensitive || untrusted || scope == "once":
 			// One go-ahead is not standing consent. Hive / messenger Asks
 			// never inherit Always / This session fingerprints from the
 			// parent chat — a just-approved retry consumes this one-shot.
+			// "Just this once" is the same thing asked for by the owner: without
+			// a grant the retry found nothing and asked again.
 			if q.oneShot[sid] == nil {
 				q.oneShot[sid] = map[string]*oneShotGrant{}
 			}
@@ -387,9 +389,6 @@ func (q *approvalQueue) resolve(id string, approve bool, scope string) (*pending
 					break
 				}
 			}
-		case scope == "once":
-			// Approve this waiter only. Do not stamp a session fingerprint —
-			// the next identical call asks again.
 		default:
 			q.addSessionFPLocked(sid, item.Fingerprint)
 		}
