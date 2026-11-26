@@ -10,6 +10,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Emoji drew as scattered pieces on Windows. The engine took the system's emoji font ahead of Remedy Emoji and painted its layers in the wrong places. Remedy Emoji now draws them, and the system's font, still used for flags, is painted correctly.
 - Chat text in Studio and Grove can be selected with the mouse and copied.
 - The Files rail could not leave the project: the parent-folder button was off at the project root, and a folder opened outside the project led back into it. It now goes up to the drive, opens folders anywhere the access setting allows, and has a row of places (the project, Desktop, Documents, Downloads, and with full access the home folder and every drive). A folder with more than 1,000 items says it is showing the first 1,000 (it was 200, silently).
+- After the chat or actions pane was popped out and docked back, the other pane was gone: it kept the whole width it took while alone.
 - The main window could start as a sliver that could not be resized after it was closed while minimized. It now has a smallest size and opens at a normal one.
 
 ### Added
