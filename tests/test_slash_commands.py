@@ -74,3 +74,20 @@ async def test_odd_input_never_raises(junk):
 async def test_a_missing_session_id_is_tolerated():
     for name in ("/help", "/security-status", "/new"):
         assert isinstance(await handle_slash_command(name, None, None, None), dict)
+
+
+@pytest.mark.asyncio
+async def test_house_rules_shows_the_rules():
+    """The branch read an undefined ``args``, so every call came back as
+    "House rules error: name 'args' is not defined"."""
+    result = await handle_slash_command("/house-rules", "sess-1", None, None)
+    assert result["text"].startswith("**House rules**")
+
+
+@pytest.mark.asyncio
+async def test_house_rules_revisit_reopens_them():
+    """``/house-rules revisit`` is the advertised argument; it must reach the branch."""
+    result = await handle_slash_command("/house-rules revisit", "sess-1", None, None)
+    assert "House rules error" not in result["text"]
+    assert not result["text"].startswith("**House rules**")
+    assert "Unknown command" not in result["text"]

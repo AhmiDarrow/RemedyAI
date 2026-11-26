@@ -530,14 +530,15 @@ async def handle_slash_command(
         except Exception as e:
             return {"text": f"Profile error: {e}"}
 
-    if stripped in ("/house-rules", "/houserules", "/house_rules"):
+    house_cmd, _, house_arg = stripped.partition(" ")
+    if house_cmd in ("/house-rules", "/houserules", "/house_rules"):
         home = None
         if runtime is not None:
             home = getattr(getattr(runtime, "config", None), "home_dir", None)
         try:
             from remedy.core.house_rules import dispatch, summarize
 
-            arg = (args or "").strip().lower()
+            arg = house_arg.strip()
             if arg in ("again", "revisit", "redo", "review"):
                 out = dispatch({"action": "revisit", "home_dir": home, "caller_origin": "cli"})
                 if not out.get("ok"):
