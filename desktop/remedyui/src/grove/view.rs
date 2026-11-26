@@ -80,6 +80,9 @@ pub(super) fn root(
         l.height = Length::Percent(1.0);
         l.width = Length::Percent(1.0);
     });
+    // In the live window Studio's rails stay beside Grove too: one shell, and only
+    // its middle changes with the surface. Previews keep Grove on its own.
+    let railed = crate::chrome::dock_in_host() && !grove.studio.local_only;
     let studio_flag = grove.clone();
     let studio_grove = grove.clone();
     let on_grove = grove.clone();
@@ -87,7 +90,13 @@ pub(super) fn root(
     let studio_on = show(
         ui,
         move || matches!(studio_flag.surface.get(), Surface::Studio),
-        move || studio_face(&ui_studio, studio_grove.clone()),
+        move || {
+            if railed {
+                crate::chat::well(&ui_studio, studio_grove.studio.clone())
+            } else {
+                studio_face(&ui_studio, studio_grove.clone())
+            }
+        },
     )
     .el()
     .layout(|l| {
@@ -108,6 +117,9 @@ pub(super) fn root(
         })
         .child(grove_on)
         .child(studio_on);
+    if railed {
+        return crate::shell_around_live(ui, grove.studio.clone(), body);
+    }
     w::row(ui)
         .layout(|l| {
             l.width = Length::Percent(1.0);
