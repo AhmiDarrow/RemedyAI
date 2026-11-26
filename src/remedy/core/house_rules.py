@@ -780,7 +780,7 @@ def _store_secret(key: str, value: str, home: str | Path | None = None, provider
         from remedy.interfaces.config import set_provider_key
 
         prov = (provider or "").strip() or str(_load_config(home).get("llm_provider") or "openai")
-        set_provider_key(prov, value, cfg={"home_dir": str(_home(home))})
+        set_provider_key({}, prov, value, home=_home(home))
     except Exception:
         logger.exception("failed to store provider key (value not logged)")
 

@@ -222,6 +222,21 @@ def test_secrets_never_enter_audit_or_files(home: Path) -> None:
             assert "sk-live-secret-value-not-for-logs" not in path.read_text(encoding="utf-8")
 
 
+def test_api_key_from_house_rules_reaches_the_secure_store(home: Path) -> None:
+    """_store_secret called set_provider_key with its arguments shifted, so the
+    TypeError was logged and swallowed and the owner's key was never stored."""
+    from remedy.interfaces.secret_store import load_provider_keys
+
+    changed = hr.apply_config_patch(
+        {"llm_provider": "openai", "llm_api_key": "sk-house-rules-key-0123456789"},
+        home=home,
+        origin="desktop",
+    )
+    assert changed["llm_api_key"] == {"from": None, "to": "stored"}
+    assert "sk-house-rules-key-0123456789" in load_provider_keys(home).values()
+    assert "sk-house-rules-key-0123456789" not in (home / "config.toml").read_text(encoding="utf-8")
+
+
 def test_revisit_reopens_conversation(home: Path) -> None:
     hr.skip_all(home=home, origin="desktop")
     out = hr.revisit(home=home, origin="cli")
