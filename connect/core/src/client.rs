@@ -79,6 +79,10 @@ pub struct ClientConfig {
     /// Send a PING this often (the PC drops a socket silent for 180 s).
     /// `Duration::ZERO` turns the keepalive off.
     pub keepalive: Duration,
+    /// How long the PC has to answer a keepalive PING (anything it sends counts).
+    /// After that the link is called dead: a path that died silently (the phone left
+    /// Wi-Fi, the PC lost its port) no longer shows as connected until the read times out.
+    pub pong_grace: Duration,
     /// Close the tunnel if nothing at all arrives for this long.
     pub idle_timeout: Duration,
     /// Default deadline for `Tunnel::http`.
@@ -99,7 +103,8 @@ impl Default for ClientConfig {
             on_record: None,
             handshake_timeout: Duration::from_millis(8_000),
             write_timeout: Duration::from_secs(30),
-            keepalive: Duration::from_secs(30),
+            keepalive: Duration::from_secs(20),
+            pong_grace: Duration::from_secs(10),
             idle_timeout: Duration::from_secs(100),
             request_timeout: Duration::from_secs(30),
             rekey: RekeyPolicy::default(),
@@ -252,6 +257,8 @@ struct Shared {
     next_id: AtomicU32,
     streams: Mutex<HashMap<u32, Arc<StreamState>>>,
     pings: Mutex<HashMap<u32, Arc<PingState>>>,
+    /// When the PC was last heard from.
+    heard: Mutex<Instant>,
 }
 
 impl Shared {
@@ -358,6 +365,7 @@ fn reader_loop(shared: Arc<Shared>, mut sock: TcpStream) {
             Ok(p) => p,
             Err(e) => return shared.fail(&format!("{e}")),
         };
+        *shared.heard.lock().unwrap() = Instant::now();
         let frame = match decode_inner(&plain) {
             Ok(f) => f,
             Err(e) => return shared.fail(&format!("{e}")),
@@ -368,22 +376,41 @@ fn reader_loop(shared: Arc<Shared>, mut sock: TcpStream) {
     }
 }
 
-fn keepalive_loop(shared: Arc<Shared>, every: Duration) {
+fn keepalive_loop(shared: Arc<Shared>, every: Duration, grace: Duration) {
     let mut g = shared.reason.lock().unwrap();
+    // When the PING now waiting for an answer was sent. The wait for the answer is part
+    // of the period, so PINGs still go out `every`.
+    let grace = grace.min(every);
+    let mut pinged: Option<Instant> = None;
     loop {
         if shared.closed.load(Ordering::SeqCst) {
             return;
         }
-        let (ng, timeout) = shared.closed_cv.wait_timeout(g, every).unwrap();
+        let wait = if pinged.is_some() { grace } else { every - grace };
+        let (ng, timeout) = shared.closed_cv.wait_timeout(g, wait).unwrap();
         g = ng;
         if shared.closed.load(Ordering::SeqCst) {
             return;
         }
         if timeout.timed_out() {
             drop(g);
-            let id = shared.alloc_id();
-            if let Ok(f) = encode_inner(TYPE_PING, id, &[], true) {
-                let _ = shared.send_plain(&f);
+            match pinged.take() {
+                // Nothing came back since the PING: the path is dead, say so now.
+                Some(sent) => {
+                    if *shared.heard.lock().unwrap() < sent {
+                        return shared.fail("the PC went silent");
+                    }
+                }
+                None => {
+                    let sent = Instant::now();
+                    let id = shared.alloc_id();
+                    if let Ok(f) = encode_inner(TYPE_PING, id, &[], true) {
+                        let _ = shared.send_plain(&f);
+                    }
+                    if !grace.is_zero() {
+                        pinged = Some(sent);
+                    }
+                }
             }
             g = shared.reason.lock().unwrap();
         }
@@ -417,13 +444,16 @@ impl Tunnel {
             next_id: AtomicU32::new(1),
             streams: Mutex::new(HashMap::new()),
             pings: Mutex::new(HashMap::new()),
+            heard: Mutex::new(Instant::now()),
         });
         let s = shared.clone();
         thread::Builder::new().name("remedy-connect-recv".into()).spawn(move || reader_loop(s, sock))?;
         if !cfg.keepalive.is_zero() {
             let s = shared.clone();
-            let every = cfg.keepalive;
-            thread::Builder::new().name("remedy-connect-keepalive".into()).spawn(move || keepalive_loop(s, every))?;
+            let (every, grace) = (cfg.keepalive, cfg.pong_grace);
+            thread::Builder::new()
+                .name("remedy-connect-keepalive".into())
+                .spawn(move || keepalive_loop(s, every, grace))?;
         }
         Ok(Tunnel { shared, via, peer, request_timeout: cfg.request_timeout })
     }
@@ -472,7 +502,11 @@ impl Tunnel {
                 .cv
                 .wait_timeout_while(g, timeout, |got| !*got && !self.shared.closed.load(Ordering::SeqCst))
                 .unwrap();
-            if *g {
+            // Let go of the ping before asking why the tunnel closed: closing takes the
+            // reason first and this ping second, and the two would wait on each other for good.
+            let got = *g;
+            drop(g);
+            if got {
                 Ok(())
             } else if self.is_closed() {
                 Err(Error::Closed(self.shared.closed_reason()))
@@ -664,6 +698,8 @@ fn dial(
     match tunnel.ping(cfg.handshake_timeout) {
         Ok(()) => Ok(tunnel),
         Err(Error::Closed(_)) => Err(Error::Rejected),
+        // The PC hung up before the PING was written: the same answer.
+        Err(Error::Io(_)) if tunnel.is_closed() => Err(Error::Rejected),
         Err(e) => Err(e),
     }
 }
