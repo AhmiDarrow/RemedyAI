@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -156,6 +157,9 @@ func (o *webhookOrigin) close() {
 // startWebhookOrigin binds a fresh loopback port that only answers
 // /api/webhooks/* and /api/webhook/{source}. Every other path is 404 — the
 // tunnel never learns the API exists.
+// webhookBodyTimeout is how long the webhook origin waits for a request body.
+var webhookBodyTimeout = 30 * time.Second
+
 func (s *Server) startWebhookOrigin() (*webhookOrigin, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -167,17 +171,32 @@ func (s *Server) startWebhookOrigin() (*webhookOrigin, error) {
 	}
 	mux := s.mux
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// This origin faces the internet through the tunnel: a sender that
+		// dribbles its body must not hold the connection open for ever. The
+		// deadline is cleared once a webhook body is in, so a slow handler is
+		// not cut off.
+		rc := http.NewResponseController(w)
+		_ = rc.SetReadDeadline(time.Now().Add(webhookBodyTimeout))
 		if !isWebhookPath(r.URL.Path) {
 			writeJSON(w, http.StatusNotFound, map[string]string{
 				"detail": "not found (this origin serves messenger webhooks only)",
 			})
 			return
 		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, webhookMaxBytes+1))
+		if err != nil {
+			w.Header().Set("Connection", "close")
+			writeJSON(w, http.StatusRequestTimeout, map[string]string{"detail": "request body not received in time"})
+			return
+		}
+		_ = rc.SetReadDeadline(time.Time{})
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		mux.ServeHTTP(w, r)
 	})
 	srv := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: 15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	go func() { _ = srv.Serve(ln) }()
 	log.Printf("messenger tunnel: webhook-only origin on 127.0.0.1:%d (the API and Web UI stay off the tunnel)", port)
