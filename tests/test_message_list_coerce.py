@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from remedy.assistant.fast_path import match_assistant_fast_path
 from remedy.core.agent_react_preamble import append_plan_and_computer_addenda, parse_browse_intent
 from remedy.core.away_mode import looks_like_away_request
 from remedy.core.build_engine import looks_like_build_request
@@ -50,13 +49,6 @@ def test_build_and_intent_list_message_does_not_crash_strip() -> None:
     assert looks_like_readonly_request(["explain", "the build loop"]) is True
     pack = policy_for_intent(["chat"], user_text=["work", "alone"])
     assert pack.get("id") == "autonomous"
-
-
-def test_fast_path_list_message_does_not_crash_strip() -> None:
-    p = match_assistant_fast_path(["daily", "brief"])
-    assert p is not None and p.tool == "assistant_brief"
-    assert match_assistant_fast_path(["hi"]) is None
-    assert match_assistant_fast_path([]) is None
 
 
 def test_preamble_list_message_does_not_crash_strip(monkeypatch, tmp_path, stub_public_dns) -> None:

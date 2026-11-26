@@ -9,13 +9,13 @@ import pytest
 from remedy.core.errors import SecurityError
 from remedy.core.security import check_dangerous_command, safe_path
 from remedy.core.workspace import (
+    default_owner_project_path,
     effective_access_scope,
     ensure_project_dir,
     is_forbidden_project_path,
     is_unset_project_path,
     jail_path,
     list_workspace_entries,
-    default_owner_project_path,
     resolve_project_path,
     workspace_context_block,
 )

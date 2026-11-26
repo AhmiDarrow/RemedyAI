@@ -1,6 +1,7 @@
 package connect
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -20,6 +21,8 @@ const (
 
 // InnerMuxState holds per-session fragment buffers and inflight count.
 type InnerMuxState struct {
+	// ctx ends with the session, so a proxied stream does not outlive it.
+	ctx         context.Context
 	mu          sync.Mutex
 	fragments   map[uint32]*fragmentBuf
 	inflight    int
@@ -251,6 +254,7 @@ func IterRequestHTTP(req HTTPRequest, device Device, state *InnerMuxState, home 
 		Body:        req.Body,
 		SidecarPort: state.SidecarPort,
 		APIKey:      state.APIKey,
+		Ctx:         state.ctx,
 	}, emit)
 }
 
@@ -351,23 +355,37 @@ func handleHTTPReqFrame(sess *Session, frame InnerFrame, state *InnerMuxState) e
 		return sess.SendInnerHTTPRes(frame.ID, jsonError(400, "http", "http"), true)
 	}
 
+	// Proxy off the read loop. A streamed reply (a chat turn, /api/events)
+	// can run for minutes; served inline it stopped the session reading, so
+	// pings, a second request and the phone's tap on an approval the turn
+	// was waiting for all sat unread. Writes are serialized by the session
+	// and every frame carries its request id, so replies may interleave.
+	// inflight (MaxInnerTasks) bounds how many run at once.
+	go serveHTTPReq(sess, frame.ID, req, state)
+	return nil
+}
+
+func serveHTTPReq(sess *Session, id uint32, req HTTPRequest, state *InnerMuxState) {
+	defer func() {
+		state.mu.Lock()
+		state.inflight--
+		state.mu.Unlock()
+	}()
 	sentAny := false
 	emitErr := IterRequestHTTP(req, sess.Device, state, sess.Home, func(piece []byte) error {
 		if len(piece) == 0 {
 			return nil
 		}
 		sentAny = true
-		return sess.SendInnerHTTPRes(frame.ID, piece, false)
+		return sess.SendInnerHTTPRes(id, piece, false)
 	})
-	state.mu.Lock()
-	state.inflight--
-	state.mu.Unlock()
 	if emitErr != nil {
-		_ = sess.SendInnerHTTPRes(frame.ID, jsonError(502, "pipe", "pipe"), true)
-		return nil
+		_ = sess.SendInnerHTTPRes(id, jsonError(502, "pipe", "pipe"), true)
+		return
 	}
 	if !sentAny {
-		return sess.SendInnerHTTPRes(frame.ID, jsonError(502, "empty", "empty"), true)
+		_ = sess.SendInnerHTTPRes(id, jsonError(502, "empty", "empty"), true)
+		return
 	}
-	return sess.SendInnerHTTPRes(frame.ID, nil, true)
+	_ = sess.SendInnerHTTPRes(id, nil, true)
 }

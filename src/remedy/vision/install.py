@@ -151,9 +151,10 @@ def _asset_complete(path: Path, asset: DownloadAsset) -> bool:
         return False
     if asset.size_bytes and path.stat().st_size != asset.size_bytes:
         return False
-    if _usable_sha256(asset.sha256):
+    want = _usable_sha256(asset.sha256)
+    if want:
         try:
-            return _sha256_file(path).lower() == asset.sha256.lower()
+            return _sha256_file(path).lower() == want.lower()
         except OSError:
             return False
     return True
@@ -228,9 +229,10 @@ def _download_asset(
         raise RuntimeError(
             f"Size mismatch for {asset.name}: expected {asset.size_bytes}, got {got}"
         )
-    if _usable_sha256(asset.sha256):
+    want = _usable_sha256(asset.sha256)
+    if want:
         digest = _sha256_file(partial)
-        if digest.lower() != asset.sha256.lower():
+        if digest.lower() != want.lower():
             partial.unlink(missing_ok=True)
             raise RuntimeError(
                 f"SHA256 mismatch for {asset.name}: expected {asset.sha256}, got {digest}"

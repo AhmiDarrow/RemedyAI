@@ -79,13 +79,17 @@ export function subscribeSessionEvents(handlers: SessionEventsHandlers): () => v
         while (!stopped && !ac.signal.aborted) {
           const { done, value } = await reader.read()
           if (done) break
-          buf += decoder.decode(value, { stream: true })
+          // SSE allows CRLF line endings; split on blank lines either way.
+          buf += decoder.decode(value, { stream: true }).replace(/\r\n?/g, '\n')
           const parts = buf.split('\n\n')
           buf = parts.pop() || ''
           for (const block of parts) {
             parseSseBlock(block, handlers)
           }
         }
+        // The stream ended cleanly. Wait before reconnecting: a server or proxy
+        // that answers 200 and closes at once used to get a tight request loop.
+        if (!stopped && !ac.signal.aborted) await sleep(backoffMs)
       } catch (e) {
         if (ac.signal.aborted || stopped) break
         handlers.onError?.(e)

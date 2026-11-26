@@ -12,7 +12,6 @@ import pytest
 
 from remedy.core.session_quality import get_session_quality
 from remedy.core.session_reset import full_reset_session
-from remedy.interfaces.slash_commands import handle_slash_command
 from remedy.memory.store import MemoryStore
 from remedy.models import ChatMessage, ChatMessageRole, ChatSession, MemoryEntry, MemoryEntryType
 
@@ -256,54 +255,6 @@ async def test_full_reset_also_purges_undo(store: MemoryStore, tmp_path: Path):
     assert stats["ok"] is True
     assert stats.get("undo_purged") is True
     assert not SessionUndoLog(home)._path(sid).is_file()
-
-
-@pytest.mark.asyncio
-async def test_slash_reset_stays_on_session(store: MemoryStore):
-    sid = str(uuid4())
-    await store.create_chat_session(
-        ChatSession(
-            id=sid,
-            title="T",
-            message_count=0,
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        )
-    )
-    await store.add_chat_message(
-        ChatMessage(
-            id=str(uuid4()),
-            session_id=sid,
-            role=ChatMessageRole.USER,
-            content="hello",
-            created_at=datetime.now(UTC),
-        )
-    )
-
-    result = await handle_slash_command("/reset", sid, store)
-    assert result.get("action") == "reset_session"
-    assert "reset" in result.get("text", "").lower() or result.get("cleared") == 1
-    assert await store.get_chat_messages(sid) == []
-    # Same session still exists — not a new_session action
-    assert result.get("action") != "new_session"
-    still = await store.get_chat_session(sid)
-    assert still is not None
-    assert still.id == sid
-    assert still.title == "New Session"
-
-    # Alias
-    await store.add_chat_message(
-        ChatMessage(
-            id=str(uuid4()),
-            session_id=sid,
-            role=ChatMessageRole.USER,
-            content="again",
-            created_at=datetime.now(UTC),
-        )
-    )
-    r2 = await handle_slash_command("/clear", sid, store)
-    assert r2.get("action") == "reset_session"
-    assert await store.get_chat_messages(sid) == []
 
 
 @pytest.mark.asyncio

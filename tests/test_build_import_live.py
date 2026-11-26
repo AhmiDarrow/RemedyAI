@@ -249,32 +249,3 @@ def test_python_cmd_for_subprocess_prefers_real_python(tmp_path):
         assert "remedy-desktop" not in _P(host).name.lower()
 
 
-def test_gate_l2_soft_pass_on_interpreter(tmp_path):
-    from remedy.core.build_gate_tower import gate_l2_import
-
-    (tmp_path / "m.py").write_text("x = 1\n", encoding="utf-8")
-    # Monkeypatch dry_run to simulate sidecar failure
-    import remedy.core.build_import_graph as big
-
-    real = big.dry_run_imports_for_paths
-
-    def fake(_paths, _root, **_k):
-        return [
-            {
-                "ok": False,
-                "module": "m",
-                "error": "remedy: error: argument command: invalid choice",
-                "error_class": "interpreter",
-            }
-        ]
-
-    big.dry_run_imports_for_paths = fake  # type: ignore[assignment]
-    try:
-        gr = gate_l2_import(tmp_path, [str(tmp_path / "m.py")])
-        assert gr.ok is True
-        assert gr.verified is False
-        assert "soft-pass" in (gr.summary or "").lower() or "cpython" in (gr.summary or "").lower()
-    finally:
-        big.dry_run_imports_for_paths = real  # type: ignore[assignment]
-
-

@@ -14,9 +14,7 @@ from typing import Any
 
 from remedy.core.build_oracle import coerce_text_arg
 from remedy.core.provider_sanitize import sanitize_chat_body  # noqa: F401 — re-export habit
-from remedy.core.react_policy import TOOL_RESULT_CHAR_CAP as _TOOL_RESULT_CHAR_CAP
 from remedy.core.react_stream import (
-    build_runtime_system_block,
     should_enable_tools,
 )
 from remedy.home import default_home

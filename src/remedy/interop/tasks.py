@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
@@ -25,7 +25,7 @@ TERMINAL = frozenset({COMPLETED, FAILED, CANCELED, REJECTED})
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def empty_store() -> dict[str, Any]:
@@ -75,7 +75,7 @@ def create(
     task_id = new_id()
     ctx = context_id or new_id()
     status_message = message
-    task = {
+    task: dict[str, Any] = {
         "id": task_id,
         "contextId": ctx,
         "status": {"state": state, "timestamp": now_iso()},

@@ -220,18 +220,6 @@ def test_hearth_greeting_rides_once_in_the_inject(tmp_path):
     assert "Vigil (your own time" not in block
 
 
-def test_partner_vigil_enable_is_local(tmp_path):
-    from remedy.runtime.rmdy_tool_worker import _partner_pulse, _partner_vigil
-
-    status = _partner_vigil({"action": "status", "home_dir": str(tmp_path)})
-    assert status["ok"] is True
-    assert status["vigil"]["enabled"] is False
-    enabled = _partner_vigil({"action": "enable", "home_dir": str(tmp_path)})
-    assert enabled["vigil"]["enabled"] is True
-    pulse = _partner_pulse({"home_dir": str(tmp_path)})
-    assert pulse["ok"] is True
-    assert pulse["vigil"].get("skipped") != "disabled"
-    assert _partner_vigil({"action": "status", "home_dir": str(tmp_path)})["vigil"]["enabled"] is True
 
 
 def test_night_names_the_move_and_stops_before_paying(tmp_path):

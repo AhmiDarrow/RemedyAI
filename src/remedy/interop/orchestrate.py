@@ -7,7 +7,8 @@ from typing import Any
 
 from remedy.interop.a2a import A2AClient, extract_text
 from remedy.interop.language import for_peer
-from remedy.interop.peers import list_peers, load as load_peers
+from remedy.interop.peers import list_peers
+from remedy.interop.peers import load as load_peers
 
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+.#-]{1,32}", re.IGNORECASE)
 

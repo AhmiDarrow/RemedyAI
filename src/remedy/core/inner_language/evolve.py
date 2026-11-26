@@ -6,7 +6,12 @@ from typing import Any
 
 from remedy.core.inner_language.audit import record_audit
 from remedy.core.inner_language.codec import decode, encode, format_natural
-from remedy.core.inner_language.lexicon import consider_coinage, lexicon_slice, load_lexicon, note_comprehension
+from remedy.core.inner_language.lexicon import (
+    consider_coinage,
+    lexicon_slice,
+    load_lexicon,
+    note_comprehension,
+)
 
 
 def evolve_from_phrases(home: str | Any, phrases: list[str], *, source: str = "dream") -> list[dict[str, Any]]:

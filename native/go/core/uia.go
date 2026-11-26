@@ -1,5 +1,7 @@
 package core
 
+import "runtime"
+
 // UIAAvailable reports whether Windows UI Automation can be created on this thread.
 // Non-Windows returns (false, nil) when the export is unsupported.
 func UIAAvailable() (bool, error) {
@@ -131,6 +133,10 @@ func UIAElementActionJSON(hwnd uint64, name, role, action, text string) ([]byte,
 		unsafePtrPtr(&ptr),
 		sizePtr(&length),
 	)
+	runtime.KeepAlive(nameRaw)
+	runtime.KeepAlive(roleRaw)
+	runtime.KeepAlive(actionRaw)
+	runtime.KeepAlive(textRaw)
 	if err != nil {
 		return nil, err
 	}

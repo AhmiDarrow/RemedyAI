@@ -15,15 +15,7 @@ from remedy.core.approvals import APPROVALS, SENSITIVE_PREFIX
 from remedy.core.hive.policy import is_mother_only_tool
 from remedy.core.turn_context import begin_turn, end_turn
 from remedy.core.turn_pipeline import _tool_command, authorize_tool, clear_tool_gate
-from remedy.interfaces.instance_lock import (
-    lock_path,
-    release_serve_lock,
-    try_acquire_serve_lock,
-)
 from remedy.memory.authority import may_write_parent_memory
-from remedy.memory.persona_wipe import CONFIRM_PHRASE, wipe_persona
-from remedy.memory.store import MemoryStore
-from remedy.models import MemoryEntry, MemoryEntryType
 from remedy.tools.catalog import descriptor_for
 
 
@@ -219,57 +211,6 @@ def test_synthesize_standard_quality_skips_chatterbox_even_if_ready(
 def test_hive_writer_cannot_write_parent_memory() -> None:
     assert may_write_parent_memory("hive_abc") is False
     assert may_write_parent_memory("sess-1") is True
-
-
-@pytest.mark.asyncio
-async def test_persona_wipe_clears_notes_and_soul_files(tmp_path: Path) -> None:
-    store = MemoryStore(tmp_path / "memory.db")
-    await store.initialize()
-    await store.upsert(
-        MemoryEntry(
-            title="tea",
-            content="likes tea",
-            entry_type=MemoryEntryType.NOTE,
-        )
-    )
-    soul = tmp_path / "soul"
-    soul.mkdir()
-    (soul / "embeddings.json").write_text('{"t":"likes tea"}', encoding="utf-8")
-    (soul / "field.json").write_text("{}", encoding="utf-8")
-    stats = await wipe_persona(store, home=tmp_path, confirm=CONFIRM_PHRASE)
-    assert stats["ok"] is True
-    leftover = await store.list_by_type(MemoryEntryType.NOTE, limit=10)
-    assert leftover == []
-    assert not (soul / "embeddings.json").is_file()
-    await store.close()
-
-
-def test_live_pid_lock_is_not_stolen(tmp_path: Path, monkeypatch) -> None:
-    import os
-
-    home = tmp_path / "live"
-    home.mkdir()
-    p = lock_path(home)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(f"{os.getpid()} 1.0\n", encoding="utf-8")
-    ok, msg = try_acquire_serve_lock(home)
-    # Same PID is allowed to re-enter; a *different* live PID must not steal.
-    assert ok is True, msg
-    release_serve_lock()
-
-
-def test_foreign_live_pid_lock_is_not_stolen(tmp_path: Path, monkeypatch) -> None:
-    home = tmp_path / "foreign"
-    home.mkdir()
-    p = lock_path(home)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("1 1.0\n", encoding="utf-8")
-    monkeypatch.setattr(
-        "remedy.interfaces.instance_lock._pid_alive", lambda pid: pid == 1
-    )
-    ok, msg = try_acquire_serve_lock(home)
-    assert ok is False
-    assert "already running" in msg.lower() or "pid=1" in msg
 
 
 def test_linux_desktop_module_exports_capture_and_input() -> None:

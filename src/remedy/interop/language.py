@@ -23,7 +23,7 @@ def for_peer(text: str, *, home: str | None = None) -> tuple[str, dict[str, Any]
 
         lexicon = None
         if home:
-            with suppress_exc():
+            with _SuppressExc():
                 lexicon = load_lexicon(home)
         rec = decode(raw, lexicon=lexicon)
         decoded = rec.get("decoded") or format_natural(str(rec.get("kind") or "note"), rec)
@@ -43,7 +43,7 @@ def inbound_plain(text: str) -> str:
     return english
 
 
-class suppress_exc:
+class _SuppressExc:
     def __enter__(self):
         return self
 

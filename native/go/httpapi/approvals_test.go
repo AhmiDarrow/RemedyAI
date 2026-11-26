@@ -107,15 +107,15 @@ func TestApproveOnceDoesNotStampSessionFingerprint(t *testing.T) {
 		t.Fatalf("once resolve=%+v", got)
 	}
 	// The call the owner just approved runs; that uses the approval up.
-	if !q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, true) {
+	if !q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, "", true) {
 		t.Fatal("the approved call itself must run")
 	}
-	if q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, true) {
+	if q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, "", true) {
 		t.Fatal("approve-once must not persist a session fingerprint")
 	}
 	session := q.Enqueue("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, "Tool requires your approval", &sid, "")
 	_ = q.Resolve(session.ID, true, "session")
-	if !q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, true) {
+	if !q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, "", true) {
 		t.Fatal("approve-session must persist a session fingerprint")
 	}
 }
@@ -197,7 +197,7 @@ func TestOneShotGrantCoversIdenticalBatchCalls(t *testing.T) {
 	if d := p.Decide(context.Background(), callC); d != cognition.Ask {
 		t.Fatalf("third identical call must ask again: Decide=%v", d)
 	}
-	if q.IsApproved("computer.click", toolCommandPreview(callC), sid, true) {
+	if q.IsApproved("computer.click", toolCommandPreview(callC), sid, "", true) {
 		t.Fatal("sensitive approval leaked into standing session/always consent")
 	}
 
@@ -245,10 +245,10 @@ func TestForceAskIgnoresStandingGrantsButHonorsOneShot(t *testing.T) {
 	cmd := `{"argv":["echo","hi"]}`
 	item := q.Enqueue("shell.exec", cmd, "Tool requires your approval", &sid, "")
 	_ = q.Resolve(item.ID, true, "always")
-	if !q.IsApproved("shell.exec", cmd, sid, true) {
+	if !q.IsApproved("shell.exec", cmd, sid, "", true) {
 		t.Fatal("owner standing Always must allow on the parent")
 	}
-	if q.IsApproved("shell.exec", cmd, sid, false) {
+	if q.IsApproved("shell.exec", cmd, sid, "", false) {
 		t.Fatal("ForceAsk must not inherit Always / session fingerprints")
 	}
 
@@ -261,13 +261,13 @@ func TestForceAskIgnoresStandingGrantsButHonorsOneShot(t *testing.T) {
 	cmd2 := `{"argv":["echo","hive"]}`
 	hive := q.EnqueueOrigin("shell.exec", cmd2, "Tool requires your approval", &sid, "", "hive:"+sid)
 	_ = q.Resolve(hive.ID, true, "session")
-	if !q.IsApproved("shell.exec", cmd2, sid, false) {
+	if !q.IsApproved("shell.exec", cmd2, sid, "hive:"+sid, false) {
 		t.Fatal("just-approved hive Ask must Allow via one-shot on the engine retry")
 	}
-	if q.IsApproved("shell.exec", cmd2, sid, false) {
+	if q.IsApproved("shell.exec", cmd2, sid, "hive:"+sid, false) {
 		t.Fatal("hive one-shot must be consumed after the retry")
 	}
-	if q.IsApproved("shell.exec", cmd2, sid, true) {
+	if q.IsApproved("shell.exec", cmd2, sid, "", true) {
 		t.Fatal("hive session-scope must not stamp a standing fingerprint")
 	}
 }
@@ -278,12 +278,119 @@ func TestApprovalPublicCommandClipIsRuneSafe(t *testing.T) {
 	item := q.Enqueue("shell.exec", cmd, "test", nil, "")
 	pub := q.ToPublic(item)
 	got, _ := pub["command"].(string)
-	if len(got) != 498 || !strings.HasSuffix(got, "€") {
-		t.Fatalf("clip len=%d want 498 ending on a whole rune", len(got))
+	shown, _, _ := strings.Cut(got, " … [cut:")
+	if len(shown) != 498 || !strings.HasSuffix(shown, "€") {
+		t.Fatalf("clip len=%d want 498 ending on a whole rune", len(shown))
 	}
 	for _, r := range got {
 		if r == '\uFFFD' {
 			t.Fatal("clip split a rune")
 		}
+	}
+}
+
+// A long command must not show on the card as a harmless prefix that reads
+// like the whole thing.
+func TestApprovalCardMarksAClippedCommand(t *testing.T) {
+	q := newApprovalQueue()
+	cmd := "echo hello" + strings.Repeat(" ", 600) + "; rm -rf ~"
+	item := q.Enqueue("shell.exec", cmd, "test", nil, "")
+	pub := q.ToPublic(item)
+	got, _ := pub["command"].(string)
+	if !strings.HasPrefix(got, "echo hello") || !strings.Contains(got, "[cut: 120 more bytes not shown]") {
+		t.Fatalf("command=%q", got)
+	}
+	summary, _ := pub["summary"].(string)
+	if !strings.Contains(summary, "more bytes not shown]") {
+		t.Fatalf("summary=%q", summary)
+	}
+	short := q.Enqueue("shell.exec", "ls -la", "test", nil, "")
+	if c := q.ToPublic(short)["command"]; c != "ls -la" {
+		t.Fatalf("short command changed: %q", c)
+	}
+}
+
+// Two turns making the identical call in one session share one approval item.
+// One tap on Yes must wake both: the second waiter used to overwrite the
+// first, which then sat on "Waiting for your approval…" forever.
+func TestSharedApprovalWakesEveryWaitingTurn(t *testing.T) {
+	q := newApprovalQueue()
+	sid := "s-shared"
+	a := q.Enqueue("shell.exec", `{"argv":["go","test"]}`, "test", &sid, "")
+	b := q.Enqueue("shell.exec", `{"argv":["go","test"]}`, "test", &sid, "")
+	if a.ID != b.ID {
+		t.Fatalf("identical calls should share one item: %s vs %s", a.ID, b.ID)
+	}
+	results := make(chan bool, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			ok, err := q.WaitAll(context.Background(), []string{a.ID})
+			results <- ok && err == nil
+		}()
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		q.mu.Lock()
+		n := len(q.waiters[a.ID])
+		q.mu.Unlock()
+		if n == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d waiters registered", n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	q.Resolve(a.ID, true, "once")
+	for i := 0; i < 2; i++ {
+		select {
+		case ok := <-results:
+			if !ok {
+				t.Fatal("a waiting turn was not approved")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("a turn waiting on the shared approval never woke")
+		}
+	}
+}
+
+// One turn giving up (Stop) must not unregister another turn still waiting.
+func TestCancelledWaiterLeavesTheOtherInPlace(t *testing.T) {
+	q := newApprovalQueue()
+	sid := "s-cancel"
+	a := q.Enqueue("shell.exec", `{"argv":["make"]}`, "test", &sid, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		_, _ = q.WaitAll(ctx, []string{a.ID})
+		close(stopped)
+	}()
+	kept := make(chan bool, 1)
+	go func() {
+		ok, _ := q.WaitAll(context.Background(), []string{a.ID})
+		kept <- ok
+	}()
+	for i := 0; i < 400; i++ {
+		q.mu.Lock()
+		n := len(q.waiters[a.ID])
+		q.mu.Unlock()
+		if n == 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-stopped
+	if !q.HasWaiter(a.ID) {
+		t.Fatal("cancelling one turn removed the other turn's wait")
+	}
+	q.Resolve(a.ID, true, "once")
+	select {
+	case ok := <-kept:
+		if !ok {
+			t.Fatal("remaining turn was not approved")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("remaining turn never woke")
 	}
 }

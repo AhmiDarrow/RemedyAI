@@ -656,15 +656,17 @@ func (s *Server) runDetachedStream(
 			id, _ := parsed["id"].(string)
 			args, _ := parsed["args"].(map[string]any)
 			via, _ := parsed["via"].(string)
-			ts.toolUse(id, name, via, args)
 			upsertDraft(true)
+			ts.toolUse(id, name, via, args)
 		case strings.HasPrefix(token, "@@tool_result:"):
 			res := parseToolResultToken(token)
 			rec := res.record()
 			collectedToolResults = append(collectedToolResults, rec)
 			draftToolResults = append(draftToolResults, draftToolResult(rec))
-			ts.toolResult(res)
+			// Write the ledger before telling anyone: a client that saw the
+			// result must find it on disk if the process dies next.
 			upsertDraft(true)
+			ts.toolResult(res)
 		case strings.HasPrefix(token, "@@progress:"):
 			raw := token[len("@@progress:"):]
 			payload := map[string]any{"label": raw}

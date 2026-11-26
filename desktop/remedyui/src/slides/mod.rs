@@ -6,7 +6,7 @@ mod api;
 mod automations;
 mod chrome;
 mod files;
-mod hostcmd;
+pub(crate) mod hostcmd;
 mod nav;
 mod paths;
 mod pty;

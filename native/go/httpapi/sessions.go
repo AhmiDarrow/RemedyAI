@@ -613,6 +613,15 @@ func (s *sessionStore) Delete(id string) (bool, error) {
 	return n > 0, nil
 }
 
+// HasProjectPath reports whether some session is already bound to path.
+func (s *sessionStore) HasProjectPath(path string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM chat_sessions WHERE project_path = ?`, path).Scan(&n)
+	return n > 0, err
+}
+
 func (s *sessionStore) Count() (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -735,6 +744,10 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "invalid JSON body"})
 		return
 	}
+	if s.phoneNewProjectFolder(r, req.ProjectPath) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"detail": phoneProjectFolderDetail})
+		return
+	}
 	sess, err := s.sessions.Create(req)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"detail": err.Error()})
@@ -798,6 +811,10 @@ func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
 	var req updateSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "invalid JSON body"})
+		return
+	}
+	if req.ProjectPath.Set && s.phoneNewProjectFolder(r, req.ProjectPath.Value) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"detail": phoneProjectFolderDetail})
 		return
 	}
 	sess, ok, err := s.sessions.Update(id, req)

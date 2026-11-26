@@ -20,7 +20,7 @@ A turn from outside asks before every change, whatever the approval mode, never 
 ## Approval modes
 
 - **Ask**: changes wait for your yes.
-- **Auto**: routine work inside your project runs without asking. The safeguards below still ask.
+- **Auto**: routine work inside your project runs without asking. The safeguards below still ask, and so does handing a mission to another coding agent (delegate), because that agent's own commands and web fetches are outside Remedy's checks.
 - **Full**: everything runs without asking. Use it knowingly.
 
 In every mode these always need your approval on a card, for that exact action: sending mail or a message, payments, entering credentials, a sensitive settings change (model provider and address, keys, approval mode, access scope, project folder, privacy, phone access, the safeguards on this page).
@@ -35,7 +35,7 @@ Each of these only ever adds a question. None of them lets through what the appr
 
 | Value | What happens in Auto mode |
 |---|---|
-| `guard` (default) | A plain command inside your project runs. A command waits for you when it names a place keys are kept, reaches outside the folders the conversation may write, contacts a network address, or is built while it runs (variables, `$(...)`, encoded PowerShell, `python -c`, piping into a shell). |
+| `guard` (default) | A plain command inside your project runs. A command waits for you when it names a place keys are kept (also through a wildcard or `{a,b}` list, or by starting in such a folder), reaches outside the folders the conversation may write, contacts a network address or runs a network program (`curl`, `wget`, `ssh`, `nc`, ...), or is built while it runs (variables, `$(...)`, encoded PowerShell, `python -c`, piping into a shell). |
 | `ask` | Every shell command waits for you. |
 | `allow` | No shell command waits. This is how Remedy behaved before 1.1.0. |
 
@@ -51,7 +51,7 @@ What it does not cover:
 
 | Value | What happens |
 |---|---|
-| `payload` (default) | Fetching an ordinary page needs no approval. A fetch waits for you when its address has room to carry data: more than 256 characters after the `?` or `#`, or one path step longer than 96 characters. |
+| `payload` (default) | Fetching an ordinary page needs no approval. A fetch waits for you when its address has room to carry data: more than 256 characters after the `?` or `#`, one path step longer than 96 characters, or a path longer than 512 characters in all. |
 | `ask` | Every fetch waits for you. |
 | `off` | No fetch waits. |
 
@@ -87,7 +87,7 @@ Default `128`. A request that says it is larger is refused with HTTP 413; one th
 ## Protections with no off switch
 
 - **Remedy's own secrets** (`.remedy/auth`): file tools never open them and searches never walk into them, including when your project folder is your home folder, in full access scope, and through Windows short names and alternate spellings.
-- **The local API** listens on `127.0.0.1` only, needs a token, refuses token requests from other web sites, and the desktop checks it is talking to Remedy's own runtime before sending the token.
+- **The local API** listens on `127.0.0.1` only, needs a token, and refuses token requests from other web sites. The RemedyUI desktop checks it is talking to Remedy's own runtime before sending the token; the Tauri desktop does not make that check yet, so a program that takes the API port before Remedy starts could receive the token from it.
 - **Phone**: a new phone can be paired only from this PC or the home network. Removing a phone cuts it off on every path. A phone cannot change the model address, approval mode, access scope, project folder or the safeguards.
 - **Downloads Remedy makes herself** (voice and listening models) are checked against pinned checksums.
 

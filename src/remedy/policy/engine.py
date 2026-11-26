@@ -31,10 +31,21 @@ def _resolve_trust_profile():
         return TrustProfile.BALANCED
 
 
-def _command_from_args(args: Mapping[str, Any] | None) -> str:
+def _command_from_args(args: Mapping[str, Any] | None, tool_name: str = "") -> str:
     """Join host_run argv lists; never str(list) for the dangerous-command check."""
     if not args:
         return ""
+    if (tool_name or "").startswith("computer_"):
+        # The click / type locators carry the words ("Place order", "Pay")
+        # the owner checkpoint classifies, so they must reach needs_ask.
+        parts = [tool_name]
+        for key in ("text", "click", "label", "key", "url", "ref", "query"):
+            raw = args.get(key)
+            if raw is None or raw is False or not str(raw).strip():
+                continue
+            parts.append(f"{key}={str(raw).strip()}")
+        if len(parts) > 1:
+            return " ".join(parts)
     for key in ("command", "cmd"):
         raw = args.get(key)
         if raw:
@@ -67,7 +78,7 @@ class PolicyEngine:
 
             desc = descriptor_for(str(tool))
         req = request or ToolRequest(name=desc.name)
-        command = req.command or _command_from_args(req.arguments)
+        command = req.command or _command_from_args(req.arguments, desc.name)
 
         from remedy.core.approvals import APPROVALS
         from remedy.core.security import check_dangerous_command

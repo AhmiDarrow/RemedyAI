@@ -1,6 +1,6 @@
 // Package servelock enforces a single remedy-runtime (serve) per REMEDY_HOME.
 //
-// Contract matches Python remedy.interfaces.instance_lock: O_EXCL create,
+// The lock: O_EXCL create,
 // PID + heartbeat timestamp in ~/.remedy/locks/remedy_serve.lock, reclaim only
 // when the holder PID is dead (live PID is never stolen), fail-closed unless
 // REMEDY_SERVE_LOCK_FAIL_OPEN is set.

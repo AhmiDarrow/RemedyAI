@@ -13,10 +13,10 @@ sessions sharing one worker process never read each other's working memory.
 from __future__ import annotations
 
 import asyncio
-import os
 import contextlib
 import hashlib
 import logging
+import os
 import re
 from collections.abc import Iterator, Mapping
 from contextlib import suppress

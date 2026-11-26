@@ -9,6 +9,7 @@ import (
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
 	"github.com/AhmiDarrow/RemedyAI/native/go/providers"
+	"github.com/AhmiDarrow/RemedyAI/native/go/sysres"
 )
 
 func lastCoresidenceMap(home string) map[string]any {
@@ -62,12 +63,12 @@ func acquireGPUSchedule(home string, model cognition.Model) func() {
 	if err != nil {
 		return func() {}
 	}
-	if err := lockFile(f); err != nil {
+	if err := sysres.LockFile(f); err != nil {
 		_ = f.Close()
 		return func() {}
 	}
 	return func() {
-		_ = unlockFile(f)
+		_ = sysres.UnlockFile(f)
 		_ = f.Close()
 	}
 }

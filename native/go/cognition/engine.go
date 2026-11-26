@@ -1008,6 +1008,11 @@ func (e *Engine) executeGroup(ctx context.Context, calls []ToolCall, decisions [
 				results[i] = ToolResult{ID: call.ID, Name: call.Name, Err: "no tool executor", IsError: true}
 				return
 			}
+			defer func() {
+				if r := recover(); r != nil {
+					results[i] = ToolResult{ID: call.ID, Name: call.Name, Err: fmt.Sprintf("tool crashed: %v", r), IsError: true}
+				}
+			}()
 			results[i] = e.Tools.Execute(ctx, call)
 		}(i, call)
 	}

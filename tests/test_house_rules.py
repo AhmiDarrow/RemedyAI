@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -110,6 +109,53 @@ def test_peers_cannot_change_house_rules(home: Path) -> None:
     assert not hr.load_session(home).get("draft")
 
 
+def test_dispatch_without_origin_is_not_the_owner(home: Path) -> None:
+    hr.mark_onboarding_pending(home)
+    for action in ("skip_all", "record", "propose", "update_draft"):
+        out = hr.dispatch({"action": action, "patch": {"user_name": "X"}, "answers": {"user_name": "X"}, "home_dir": str(home)})
+        assert out["ok"] is False, action
+    assert not hr.load_session(home).get("draft")
+
+
+def test_model_confirm_flag_does_not_apply_sensitive_keys(home: Path) -> None:
+    from remedy.interfaces.config import load_config
+
+    out = hr.dispatch(
+        {
+            "action": "propose",
+            "caller_origin": "desktop",
+            "home_dir": str(home),
+            "confirm": True,
+            "patch": {"approval_mode": "full"},
+        }
+    )
+    assert out["ok"] is True
+    assert out["needs_confirmation"] is True
+    assert load_config(home / "config.toml").get("approval_mode") != "full"
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"llm_provider": "custom"},
+        {"llm_base_url": "https://evil.example/v1"},
+        {"llm_api_key": "sk-attacker"},
+        {"custom_llm_name": "x"},
+        {"project_path": "/"},
+    ],
+)
+def test_provider_and_workspace_keys_need_confirmation(home: Path, patch: dict) -> None:
+    out = hr.propose(patch, home=home, origin="desktop")
+    assert out["ok"] is True
+    assert out["needs_confirmation"] is True
+    from remedy.interfaces.config import load_config
+
+    cfg = load_config(home / "config.toml")
+    for key, value in patch.items():
+        if key != "llm_api_key":
+            assert cfg.get(key) != value
+
+
 def test_plain_request_applies_ordinary_pref(home: Path) -> None:
     out = hr.propose({"persona": "concise", "user_name": "Kit"}, home=home, origin="desktop")
     assert out["ok"] is True
@@ -173,6 +219,21 @@ def test_secrets_never_enter_audit_or_files(home: Path) -> None:
         path = home / name
         if path.exists():
             assert "sk-live-secret-value-not-for-logs" not in path.read_text(encoding="utf-8")
+
+
+def test_api_key_from_house_rules_reaches_the_secure_store(home: Path) -> None:
+    """_store_secret called set_provider_key with its arguments shifted, so the
+    TypeError was logged and swallowed and the owner's key was never stored."""
+    from remedy.interfaces.secret_store import load_provider_keys
+
+    changed = hr.apply_config_patch(
+        {"llm_provider": "openai", "llm_api_key": "sk-house-rules-key-0123456789"},
+        home=home,
+        origin="desktop",
+    )
+    assert changed["llm_api_key"] == {"from": None, "to": "stored"}
+    assert "sk-house-rules-key-0123456789" in load_provider_keys(home).values()
+    assert "sk-house-rules-key-0123456789" not in (home / "config.toml").read_text(encoding="utf-8")
 
 
 def test_revisit_reopens_conversation(home: Path) -> None:

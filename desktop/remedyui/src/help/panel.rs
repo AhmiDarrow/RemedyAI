@@ -1,6 +1,7 @@
 //! Help overlay. RA-chrome opens it; this module does not bind F1 or Ctrl+/.
 
 use std::cell::{Cell, RefCell};
+#[cfg(not(windows))]
 use std::process::Command;
 use std::rc::Rc;
 use std::time::Duration;
@@ -789,12 +790,7 @@ fn toc_button(ui: &Ui, title: &str, subtitle: Option<&str>, active: bool, on_pre
 fn open_with_os(url: &str) {
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let _ = Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn();
+        let _ = crate::slides::hostcmd::shell_open(std::ffi::OsStr::new(url));
     }
     #[cfg(target_os = "macos")]
     {

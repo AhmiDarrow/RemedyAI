@@ -21,8 +21,9 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from contextlib import suppress
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +49,7 @@ MODE_TRADITIONAL = "traditional"
 
 # Origins that may change house rules. Stricter than OriginIsOwner: children,
 # routines, hive daughters, messengers, and peer bots are all refused.
-_OWNER_ORIGINS = frozenset({"", "desktop", "webui", "cli", "fixture"})
+_OWNER_ORIGINS = frozenset({"desktop", "webui", "cli", "fixture"})
 
 # Keys that must never appear in the audit log, draft files, or summaries.
 SECRET_KEYS = frozenset(
@@ -87,6 +88,19 @@ SENSITIVE_KEYS = frozenset(
         "connect_bind_port",
         "claimidx_enabled",
         "claimidx_public_ledger",
+    }
+)
+
+# Settings that always need the owner's explicit yes: where the model's
+# traffic and key go, and which folder tools work in (the Go runtime's
+# ownerOnlySettingsKey cards the same keys).
+OWNER_ONLY_KEYS = frozenset(
+    {
+        "llm_provider",
+        "llm_base_url",
+        "llm_api_key",
+        "custom_llm_name",
+        "project_path",
     }
 )
 
@@ -332,7 +346,7 @@ _PERSONA_ALIASES = {
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _home(home: str | Path | None = None) -> Path:
@@ -381,7 +395,8 @@ def is_secret_key(key: str) -> bool:
 
 
 def is_sensitive_key(key: str) -> bool:
-    return (key or "").strip() in SENSITIVE_KEYS or bool(
+    k = (key or "").strip()
+    return k in SENSITIVE_KEYS or k in OWNER_ONLY_KEYS or bool(
         FIELD_BY_KEY.get(key) and FIELD_BY_KEY[key].sensitive
     )
 
@@ -696,10 +711,8 @@ def save_pending(data: dict[str, Any] | None, home: str | Path | None = None) ->
     if data is None:
         with _LOCK:
             if path.is_file():
-                try:
+                with suppress(OSError):
                     path.unlink()
-                except OSError:
-                    pass
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     write_json_atomic(path, _scrub(data), mode=0o600)
@@ -719,7 +732,9 @@ def _config_snapshot(home: str | Path | None = None) -> dict[str, Any]:
     cfg = _load_config(home)
     keys = set(FIELD_BY_KEY) | set(SENSITIVE_KEYS) | set(FORWARD_ADVANCED_KEYS)
     out: dict[str, Any] = {}
-    advanced = cfg.get("advanced") if isinstance(cfg.get("advanced"), dict) else {}
+    advanced = cfg.get("advanced")
+    if not isinstance(advanced, dict):
+        advanced = {}
     for key in keys:
         if is_secret_key(key):
             continue
@@ -766,7 +781,7 @@ def _store_secret(key: str, value: str, home: str | Path | None = None, provider
         from remedy.interfaces.config import set_provider_key
 
         prov = (provider or "").strip() or str(_load_config(home).get("llm_provider") or "openai")
-        set_provider_key(prov, value, cfg={"home_dir": str(_home(home))})
+        set_provider_key({}, prov, value, home=_home(home))
     except Exception:
         logger.exception("failed to store provider key (value not logged)")
 
@@ -965,9 +980,7 @@ def update_offer_available(home: str | Path | None = None) -> bool:
     if status in (STATUS_COMPLETE, STATUS_SKIPPED):
         return False
     source = str(session.get("source") or rules.get("source") or "")
-    if session.get("onboarding_pending") and source != "revisit":
-        return False
-    return True
+    return not (session.get("onboarding_pending") and source != "revisit")
 
 
 def update_offer_public(home: str | Path | None = None) -> dict[str, Any]:
@@ -1321,7 +1334,7 @@ def propose(
     diff = _diff_against_current(visible, home)
     if wait:
         pending = {
-            "id": f"hr-{int(datetime.now(timezone.utc).timestamp())}",
+            "id": f"hr-{int(datetime.now(UTC).timestamp())}",
             "created_at": _now(),
             "kind": "change",
             "keys": keys,
@@ -1405,8 +1418,12 @@ def rollback(
         "rules": load_rules(home),
         "config": _config_snapshot(home),
     }
-    rules = prev.get("rules") if isinstance(prev.get("rules"), dict) else empty_rules()
-    config_bits = prev.get("config") if isinstance(prev.get("config"), dict) else {}
+    rules = prev.get("rules")
+    if not isinstance(rules, dict):
+        rules = empty_rules()
+    config_bits = prev.get("config")
+    if not isinstance(config_bits, dict):
+        config_bits = {}
     _snapshot_prev(home)  # will be overwritten; write current explicitly below
     write_json_atomic(prev_path(home), _scrub(current), mode=0o600)
     save_rules(rules, home)
@@ -1529,9 +1546,13 @@ def classify_mind_failure(status: dict[str, Any] | None) -> dict[str, Any] | Non
     """
     if not isinstance(status, dict):
         return None
-    progress = status.get("progress") if isinstance(status.get("progress"), dict) else {}
+    progress = status.get("progress")
+    if not isinstance(progress, dict):
+        progress = {}
     err = str(progress.get("error") or status.get("error") or "").strip()
-    health = status.get("health") if isinstance(status.get("health"), dict) else {}
+    health = status.get("health")
+    if not isinstance(health, dict):
+        health = {}
     ram = health.get("ram_gb")
     min_ram = health.get("min_ram_gb")
     phase = str(progress.get("phase") or "").strip().lower()
@@ -1684,8 +1705,10 @@ _MUTATING = frozenset(
 def dispatch(inp: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run one ``house_rules`` / ``setup.session`` action.
 
-    ``caller_origin`` must be injected by the runtime. Missing origin is
-    treated as the owner (desktop/CLI tests and unbound unit calls).
+    ``caller_origin`` must be injected by the runtime. A missing origin is
+    not the owner, so mutating actions are refused without one. The call's
+    own ``confirm`` flag is the model's word, not the owner's, so a sensitive
+    ``propose`` always waits for a separate ``confirm`` action.
     """
     data = dict(inp or {})
     origin = str(data.get("caller_origin") or "").strip()
@@ -1718,7 +1741,7 @@ def dispatch(inp: dict[str, Any] | None = None) -> dict[str, Any]:
                 patch,
                 home=home,
                 origin=origin,
-                confirm=bool(data.get("confirm")),
+                confirm=False,
                 source=str(data.get("source") or "chat"),
             )
         if action == "decline":
@@ -1741,6 +1764,6 @@ def dispatch(inp: dict[str, Any] | None = None) -> dict[str, Any]:
         if action in ("update_offer_go", "update_offer_later", "update_offer_accept", "update_offer_dismiss"):
             return resolve_update_offer(action, home=home, origin=origin)
         return {"ok": False, "error": f"unknown action {action}"}
-    except Exception as exc:
+    except Exception:
         logger.exception("house_rules.dispatch failed")
         return {"ok": False, "error": "house rules action failed"}

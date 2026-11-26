@@ -77,3 +77,61 @@ func TestSecretsStayClosedWhenTheBoundFolderContainsThem(t *testing.T) {
 		}
 	}
 }
+
+func TestSecretsStayClosedThroughSymlinksAndACustomHome(t *testing.T) {
+	base := t.TempDir()
+	home := filepath.Join(base, "custom-home") // REMEDY_HOME need not be .remedy
+	auth := filepath.Join(home, "auth")
+	if err := os.MkdirAll(auth, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(auth, "local_api_token"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("REMEDY_HOME", home)
+	proj := filepath.Join(base, "proj")
+	if err := os.MkdirAll(proj, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(auth, filepath.Join(proj, "link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "notes.txt"), []byte("hi"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := openBoundFS(base, "project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	for _, p := range []string{
+		"custom-home/auth/local_api_token",
+		"proj/link/local_api_token",
+		"proj/link/new_file",
+	} {
+		if _, err := b.locate(p); err == nil {
+			t.Errorf("%s opened a secret", p)
+		}
+	}
+	if _, err := b.locate("proj/notes.txt"); err != nil {
+		t.Fatalf("ordinary files still open: %v", err)
+	}
+
+	full, err := openBoundFS(t.TempDir(), "full")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer full.Close()
+	for _, p := range []string{
+		filepath.Join(auth, "local_api_token"),
+		filepath.Join(proj, "link", "local_api_token"),
+	} {
+		if _, err := full.locate(p); err == nil {
+			t.Errorf("full scope opened %s", p)
+		}
+	}
+	if _, err := full.locate(filepath.Join(proj, "notes.txt")); err != nil {
+		t.Fatalf("full scope ordinary file: %v", err)
+	}
+}

@@ -166,7 +166,7 @@ def run_http_server(runtime: Any, host: str = DEFAULT_HOST, port: int = DEFAULT_
         def _dispatch(self) -> None:
             length = int(self.headers.get("Content-Length") or 0)
             raw = self.rfile.read(length) if length > 0 else b""
-            headers = {k: v for k, v in self.headers.items()}
+            headers = dict(self.headers.items())
             resp = handle_request(
                 runtime,
                 method=self.command,

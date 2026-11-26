@@ -8,7 +8,8 @@ import threading
 import pytest
 
 from remedy.core import organism_knobs as knobs
-from remedy.interop import consent, peers, tasks as taskstore
+from remedy.interop import consent, peers
+from remedy.interop import tasks as taskstore
 from remedy.interop.a2a import A2AClient, A2AHandler, extract_text
 from remedy.interop.card import WELL_KNOWN_PATH, public_card
 from remedy.interop.http import handle_request
@@ -322,6 +323,14 @@ def test_identity_is_pluggable_and_claimidx_is_optional() -> None:
     # Well-formed, host down → unverified, never required.
     ok = ClaimidxVerifier().verify({"did": "did:claimidx:friend"})
     assert ok.level in {"unverified", "verified"}
+
+
+def test_self_asserted_did_is_never_verified_even_with_claimidx_up(monkeypatch) -> None:
+    import remedy.runtime.claimidx_host as host
+
+    monkeypatch.setattr(host, "is_healthy", lambda **_: True)
+    for did in ("did:claimidx:owner", "did:key:z6Mkfriend"):
+        assert ClaimidxVerifier().verify({"did": did}).level == "unverified"
 
 
 def test_audit_log_written(tmp_path) -> None:

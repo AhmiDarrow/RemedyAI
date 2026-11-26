@@ -1069,3 +1069,45 @@ func TestAttachOnCrashedTurnEndsInterrupted(t *testing.T) {
 		t.Fatalf("last frame = %s %v", last.Event, last.Data)
 	}
 }
+
+// A model stream or a delegate can still be flushing when the turn ends and
+// its goroutine closes the sink. That late push used to panic with "send on
+// closed channel" outside any recover and take down the whole runtime.
+func TestFrameSinkDropsPushesAfterClose(t *testing.T) {
+	s := newFrameSink("r", 4)
+	s.push(streamFrame{Seq: 1, Data: "a"})
+	s.close()
+	s.close()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("push after close panicked: %v", r)
+		}
+	}()
+	s.push(streamFrame{Seq: 2, Data: "b"})
+	n := 0
+	for range s.ch {
+		n++
+	}
+	if n != 1 {
+		t.Fatalf("frames = %d, want only the one pushed before close", n)
+	}
+}
+
+func TestFrameSinkConcurrentPushAndCloseDoNotPanic(t *testing.T) {
+	for i := 0; i < 200; i++ {
+		s := newFrameSink("r", 2)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for j := 0; j < 50; j++ {
+				s.push(streamFrame{Seq: uint64(j + 1), Data: "x"})
+			}
+		}()
+		go func() {
+			for range s.ch {
+			}
+		}()
+		s.close()
+		<-done
+	}
+}

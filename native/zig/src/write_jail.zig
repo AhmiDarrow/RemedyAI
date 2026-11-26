@@ -251,15 +251,37 @@ fn slashFoldCopy(dst: []u8, src: []const u8) []const u8 {
     return dst[0..n];
 }
 
-/// True when *path* names Remedy auth secrets (read or write).
+/// Files under an auth folder that are secrets wherever that folder lives.
+const auth_secret_names = [_][]const u8{
+    "auth\\local_api_token",
+    "auth\\provider_keys",
+    "auth\\oauth",
+    "auth\\host_signing_key",
+};
+
+/// True when *path* names Remedy auth secrets (read or write), as spelled or
+/// lexically normalized (`//`, `.` and `..` collapsed), at any length. A
+/// relative `.remedy/auth` counts too. Fails closed when out of memory.
 pub fn isAuthSecretPath(path: []const u8) bool {
     if (path.len == 0) return false;
-    var lower_buf: [1024]u8 = undefined;
-    const low = slashFoldCopy(&lower_buf, path);
-    if (std.mem.indexOf(u8, low, "\\.remedy\\auth") != null) return true;
-    if (std.mem.indexOf(u8, low, "\\auth\\local_api_token") != null) return true;
-    if (std.mem.indexOf(u8, low, "\\auth\\provider_keys") != null) return true;
-    if (std.mem.indexOf(u8, low, "\\auth\\oauth") != null) return true;
+    const gpa = std.heap.smp_allocator;
+    if (authSecretSpelling(gpa, path)) return true;
+    const norm = normalizePathAlloc(gpa, path, "") catch |err| switch (err) {
+        error.OutOfMemory => return true,
+        else => return false,
+    };
+    defer gpa.free(norm);
+    return authSecretSpelling(gpa, norm);
+}
+
+fn authSecretSpelling(gpa: std.mem.Allocator, path: []const u8) bool {
+    const low = gpa.alloc(u8, path.len) catch return true;
+    defer gpa.free(low);
+    _ = slashFoldCopy(low, path);
+    if (containsAtNameStart(low, ".remedy\\auth")) return true;
+    for (auth_secret_names) |name| {
+        if (containsAtNameStart(low, name)) return true;
+    }
 
     // Custom portable home: only worth a REMEDY_HOME lookup when the path
     // already looks auth-related. Mapping the full Windows environ block just
@@ -268,15 +290,38 @@ pub fn isAuthSecretPath(path: []const u8) bool {
 
     if (builtin.os.tag == .windows) {
         const environ: std.process.Environ = .{ .block = .global };
-        if (std.process.Environ.getAlloc(environ, std.heap.smp_allocator, "REMEDY_HOME") catch null) |home| {
-            defer std.heap.smp_allocator.free(home);
-            if (authUnderHome(path, home)) return true;
+        if (std.process.Environ.getAlloc(environ, gpa, "REMEDY_HOME") catch null) |home| {
+            defer gpa.free(home);
+            if (authUnderNormalizedHome(gpa, path, home)) return true;
         }
     } else {
         const home_z = std.c.getenv("REMEDY_HOME") orelse return false;
-        if (authUnderHome(path, std.mem.span(home_z))) return true;
+        if (authUnderNormalizedHome(gpa, path, std.mem.span(home_z))) return true;
     }
     return false;
+}
+
+/// *needle* occurs in *hay* where a path step starts: at the beginning or
+/// after a byte that cannot be part of a file name (a separator, a space or a
+/// quote in a command line), so `x.remedy\auth` is not `.remedy\auth`.
+fn containsAtNameStart(hay: []const u8, needle: []const u8) bool {
+    var from: usize = 0;
+    while (std.mem.indexOfPos(u8, hay, from, needle)) |i| {
+        if (i == 0 or !isNameByte(hay[i - 1])) return true;
+        from = i + 1;
+    }
+    return false;
+}
+
+fn isNameByte(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c == '.' or c == '_' or c == '-' or c == '~' or c >= 0x80;
+}
+
+fn authUnderNormalizedHome(gpa: std.mem.Allocator, path: []const u8, home: []const u8) bool {
+    if (authUnderHome(path, home)) return true;
+    const norm = normalizePathAlloc(gpa, home, "") catch return false;
+    defer gpa.free(norm);
+    return authUnderHome(path, norm);
 }
 
 fn authUnderHome(path: []const u8, home: []const u8) bool {
@@ -400,9 +445,12 @@ fn hasRedirectWrite(text: []const u8) bool {
     return false;
 }
 
-fn isFlagArg(arg: []const u8) bool {
+/// `posix`: only `-` starts a switch. A `/x` switch is Windows syntax; on a
+/// POSIX command line `/etc` or `/tmp` is a path.
+fn isFlagArg(arg: []const u8, posix: bool) bool {
     if (arg.len == 0) return false;
     if (arg[0] == '-') return true;
+    if (posix) return false;
     if (arg[0] == '/' or arg[0] == '\\') {
         if (arg.len >= 2 and looksLikeWindowsAbs(arg)) return false;
         // `/c`, `/K`, `/S` — short alnum switch bodies, not `/Users/...`
@@ -419,11 +467,25 @@ fn isFlagArg(arg: []const u8) bool {
     return false;
 }
 
+/// *path* names an auth secret as given, or once a relative path is joined to
+/// *cwd* (`auth/local_api_token` run from the Remedy home).
+fn authSecretFrom(allocator: std.mem.Allocator, path: []const u8, cwd: []const u8) Error!bool {
+    if (isAuthSecretPath(path)) return true;
+    const raw = trimSpace(path);
+    if (raw.len == 0 or isAbsolutePath(raw) or trimSpace(cwd).len == 0) return false;
+    const joined = normalizePathAlloc(allocator, raw, cwd) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return false,
+    };
+    defer allocator.free(joined);
+    return isAuthSecretPath(joined);
+}
+
 /// Enforce workdir + auth + mutation dest constraints for an authorized spawn.
 pub fn checkSpawn(allocator: std.mem.Allocator, argv: []const []const u8, cwd: []const u8) Error!void {
     if (isAuthSecretPath(cwd)) return error.AccessDenied;
     for (argv) |arg| {
-        if (isAuthSecretPath(arg)) return error.AccessDenied;
+        if (try authSecretFrom(allocator, arg, cwd)) return error.AccessDenied;
     }
 
     const roots = try copyRoots(allocator);
@@ -437,21 +499,382 @@ pub fn checkSpawn(allocator: std.mem.Allocator, argv: []const []const u8, cwd: [
     if (cwd_trim.len == 0) return error.AccessDenied;
     if (try pathOutsideWriteRoots(cwd_trim, roots, "", allocator)) return error.AccessDenied;
 
+    if (try scriptWritesOutside(allocator, argv, roots, cwd_trim)) return error.AccessDenied;
+
     if (!looksLikeMutationArgv(argv)) return;
     if (argv.len < 2) return;
     for (argv[1..]) |arg| {
-        if (isFlagArg(arg)) continue;
-        const escapeish = isAbsolutePath(arg) or
-            std.mem.indexOf(u8, arg, "..") != null or
-            (arg.len > 0 and arg[0] == '~');
-        if (!escapeish) continue;
-        if (try pathOutsideWriteRoots(arg, roots, cwd_trim, allocator)) return error.AccessDenied;
+        const target = if (isFlagArg(arg, !is_windows)) flagValue(arg, !is_windows) else arg;
+        if (try destinationOutside(target, roots, cwd_trim, allocator)) return error.AccessDenied;
     }
+}
+
+/// The path a switch carries in itself: `--target-directory=/x`, `-o=/x`,
+/// and on Windows `-Path:C:\x` or `/LOG:C:\x`.
+fn flagValue(arg: []const u8, posix: bool) []const u8 {
+    if (arg.len == 0) return "";
+    if (std.mem.indexOfScalar(u8, arg, '=')) |i| return arg[i + 1 ..];
+    if (!posix) {
+        if (std.mem.indexOfScalar(u8, arg, ':')) |i| return arg[i + 1 ..];
+    }
+    return "";
+}
+
+fn destinationOutside(arg: []const u8, roots: []const []const u8, cwd: []const u8, allocator: std.mem.Allocator) Error!bool {
+    const escapeish = isAbsolutePath(arg) or
+        std.mem.indexOf(u8, arg, "..") != null or
+        (arg.len > 0 and arg[0] == '~');
+    if (!escapeish) return false;
+    return pathOutsideWriteRoots(arg, roots, cwd, allocator);
+}
+
+// ---- a script handed to a shell ----------------------------------------------
+//
+// `bash -lc "cp a /etc/x"` is one argv element to the checks above, so they
+// never saw its words. The script is split the way the shell would (quotes,
+// `;` `&&` `|` and friends, redirects) and each command in it is held to the
+// same rule: a mutation command, or a `>` redirect, may not name a
+// destination outside the roots, and after a `cd` out of them it may not name
+// any. Words that use a variable are left to the Auto-mode shell guard, which
+// asks for any of them; `~` is the home folder.
+
+const posix_shells = [_][]const u8{ "sh", "bash", "zsh", "dash", "ksh", "ash", "mksh" };
+
+/// Words that run the command after them.
+const command_prefixes = [_][]const u8{
+    "sudo",  "doas",    "env",  "command", "exec", "nohup", "nice", "time",
+    "xargs", "builtin", "then", "do",      "else", "elif",  "!",    "{",
+};
+
+const cd_heads = [_][]const u8{ "cd", "chdir", "pushd", "set-location", "sl", "push-location" };
+
+fn nameIn(name: []const u8, list: []const []const u8) bool {
+    for (list) |entry| {
+        if (eqlIgnoreCase(name, entry)) return true;
+    }
+    return false;
+}
+
+const max_script_depth: u8 = 3;
+
+const Script = struct {
+    text: []const u8,
+    /// POSIX shell rules: `-` switches, backslash escapes.
+    posix: bool,
+    /// `'` quotes (sh, PowerShell) — not in cmd.exe.
+    single_quotes: bool,
+};
+
+/// The script a shell wrapper argv runs, or null. `owned` tells the caller
+/// whether `text` was joined (and must be freed).
+fn shellScript(allocator: std.mem.Allocator, argv: []const []const u8, owned: *bool) Error!?Script {
+    owned.* = false;
+    if (argv.len < 2) return null;
+    const head = executableBasename(argv[0]);
+    if (nameIn(head, &posix_shells)) {
+        var saw_c = false;
+        for (argv[1..]) |arg| {
+            if (arg.len > 1 and arg[0] == '-' and arg[1] != '-') {
+                if (std.mem.indexOfScalar(u8, arg, 'c') != null) saw_c = true;
+                continue;
+            }
+            if (saw_c) return .{ .text = arg, .posix = true, .single_quotes = true };
+        }
+        return null;
+    }
+    const is_cmd = eqlIgnoreCase(head, "cmd");
+    const is_ps = eqlIgnoreCase(head, "powershell") or eqlIgnoreCase(head, "pwsh");
+    if (!is_cmd and !is_ps) return null;
+    for (argv[1..], 1..) |arg, i| {
+        const starts = if (is_cmd) isCmdScriptSwitch(arg) else isPsCommandSwitch(arg);
+        if (!starts or i + 1 >= argv.len) continue;
+        var buf: std.ArrayList(u8) = .empty;
+        errdefer buf.deinit(allocator);
+        for (argv[i + 1 ..], 0..) |part, n| {
+            if (n > 0) try buf.append(allocator, ' ');
+            try buf.appendSlice(allocator, part);
+        }
+        owned.* = true;
+        return .{ .text = try buf.toOwnedSlice(allocator), .posix = false, .single_quotes = is_ps };
+    }
+    return null;
+}
+
+fn isCmdScriptSwitch(arg: []const u8) bool {
+    return eqlIgnoreCase(arg, "/c") or eqlIgnoreCase(arg, "/k");
+}
+
+/// PowerShell takes any prefix of a switch name, with `-` or `/`: `-c`,
+/// `-com`, `/Command`.
+fn isPsSwitch(arg: []const u8, name: []const u8) bool {
+    if (arg.len < 2 or (arg[0] != '-' and arg[0] != '/')) return false;
+    return startsWithIgnoreCase(name, arg[1..]);
+}
+
+fn isPsCommandSwitch(arg: []const u8) bool {
+    return isPsSwitch(arg, "command");
+}
+
+/// `-e`, `-ec`, `-enc…`: a script that cannot be read. (`-ex…` and `-ep`
+/// are ExecutionPolicy.)
+fn isPsEncodedSwitch(arg: []const u8) bool {
+    if (arg.len < 2 or (arg[0] != '-' and arg[0] != '/')) return false;
+    const name = arg[1..];
+    return eqlIgnoreCase(name, "e") or eqlIgnoreCase(name, "ec") or
+        (name.len >= 2 and startsWithIgnoreCase("encodedcommand", name));
+}
+
+fn scriptWritesOutside(allocator: std.mem.Allocator, argv: []const []const u8, roots: []const []const u8, cwd: []const u8) Error!bool {
+    var owned = false;
+    const script = (try shellScript(allocator, argv, &owned)) orelse return false;
+    defer if (owned) allocator.free(script.text);
+    return scriptTextWritesOutside(allocator, script, roots, cwd, 0);
+}
+
+const WinShell = enum { none, cmd, powershell };
+
+const ScriptState = struct {
+    allocator: std.mem.Allocator,
+    roots: []const []const u8,
+    cwd: []const u8,
+    posix: bool,
+    depth: u8,
+    command_start: bool = true,
+    mutating: bool = false,
+    shell_head: bool = false,
+    shell_c: bool = false,
+    /// The command is `cmd` or `powershell`/`pwsh`, and its `/c` or
+    /// `-Command` has just been read.
+    win_shell: WinShell = .none,
+    win_script_next: bool = false,
+    cd_pending: bool = false,
+    /// A `cd` left the roots (or went somewhere unknown): relative names no
+    /// longer land inside them.
+    cwd_escaped: bool = false,
+    redirect_next: bool = false,
+    outside: bool = false,
+
+    fn endCommand(self: *ScriptState) void {
+        // A bare `cd` goes home.
+        if (self.cd_pending) self.cwd_escaped = true;
+        self.command_start = true;
+        self.mutating = false;
+        self.shell_head = false;
+        self.shell_c = false;
+        self.win_shell = .none;
+        self.win_script_next = false;
+        self.cd_pending = false;
+        self.redirect_next = false;
+    }
+
+    fn word(self: *ScriptState, raw: []const u8, has_var: bool) Error!void {
+        if (self.outside) return;
+        if (self.redirect_next) {
+            self.redirect_next = false;
+            try self.destination(raw, has_var);
+            return;
+        }
+        if (self.command_start) {
+            if (nameIn(executableBasename(raw), &command_prefixes) or isAssignment(raw)) return;
+            // a switch of a prefix word (`nice -n 5`, `env -i`)
+            if (raw.len > 0 and raw[0] == '-') return;
+            self.command_start = false;
+            const head = executableBasename(raw);
+            self.mutating = nameIn(head, &mutation_heads);
+            self.shell_head = nameIn(head, &posix_shells);
+            self.win_shell = if (eqlIgnoreCase(head, "cmd"))
+                .cmd
+            else if (eqlIgnoreCase(head, "powershell") or eqlIgnoreCase(head, "pwsh"))
+                .powershell
+            else
+                .none;
+            self.cd_pending = nameIn(head, &cd_heads);
+            return;
+        }
+        // `powershell -Command "Set-Content C:\x"` inside a script is a script
+        // too: without this a nested Windows shell wrote anywhere.
+        if (self.win_shell != .none) {
+            const kind = self.win_shell;
+            if (self.win_script_next) {
+                self.win_shell = .none;
+                self.win_script_next = false;
+                if (has_var) return;
+                if (std.mem.indexOfAny(u8, raw, " \t") == null) {
+                    // the script follows as plain words: read them as a command
+                    self.command_start = true;
+                    return self.word(raw, has_var);
+                }
+                if (self.depth + 1 >= max_script_depth) {
+                    self.outside = true;
+                    return;
+                }
+                const nested: Script = .{ .text = raw, .posix = false, .single_quotes = kind == .powershell };
+                if (try scriptTextWritesOutside(self.allocator, nested, self.roots, self.cwd, self.depth + 1)) self.outside = true;
+                return;
+            }
+            if (kind == .cmd) {
+                if (isCmdScriptSwitch(raw)) self.win_script_next = true;
+            } else if (isPsCommandSwitch(raw)) {
+                self.win_script_next = true;
+            } else if (isPsEncodedSwitch(raw)) {
+                self.outside = true;
+            }
+            return;
+        }
+        if (self.cd_pending) {
+            if (raw.len > 1 and raw[0] == '-') return; // `cd -P dir`
+            self.cd_pending = false;
+            if (has_var or std.mem.eql(u8, raw, "-") or (raw.len > 0 and raw[0] == '~') or
+                self.cwd_escaped or try destinationOutside(raw, self.roots, self.cwd, self.allocator))
+            {
+                self.cwd_escaped = true;
+            }
+            return;
+        }
+        if (self.shell_head) {
+            if (raw.len > 1 and raw[0] == '-' and raw[1] != '-') {
+                if (std.mem.indexOfScalar(u8, raw, 'c') != null) self.shell_c = true;
+                return;
+            }
+            if (self.shell_c and !has_var) {
+                self.shell_c = false;
+                if (self.depth + 1 >= max_script_depth) {
+                    self.outside = true;
+                    return;
+                }
+                const nested: Script = .{ .text = raw, .posix = true, .single_quotes = true };
+                if (try scriptTextWritesOutside(self.allocator, nested, self.roots, self.cwd, self.depth + 1)) self.outside = true;
+                return;
+            }
+        }
+        if (!self.mutating) return;
+        const target = if (isFlagArg(raw, self.posix)) flagValue(raw, self.posix) else raw;
+        try self.destination(target, has_var);
+    }
+
+    fn destination(self: *ScriptState, raw: []const u8, has_var: bool) Error!void {
+        if (has_var or raw.len == 0) return;
+        if (isStdStream(raw)) return;
+        if (self.cwd_escaped and !isAbsolutePath(raw)) {
+            if (!isDevNull(raw)) self.outside = true;
+            return;
+        }
+        if (raw[0] == '~') {
+            if (raw.len > 1 and raw[1] != '/' and raw[1] != '\\') {
+                self.outside = true; // ~user: someone else's home
+                return;
+            }
+            const home = host.parentEnvGet(self.allocator, if (is_windows) "USERPROFILE" else "HOME") orelse {
+                self.outside = true;
+                return;
+            };
+            defer self.allocator.free(home);
+            const full = try std.mem.concat(self.allocator, u8, &.{ home, raw[1..] });
+            defer self.allocator.free(full);
+            if (try pathOutsideWriteRoots(full, self.roots, self.cwd, self.allocator)) self.outside = true;
+            return;
+        }
+        if (try destinationOutside(raw, self.roots, self.cwd, self.allocator)) self.outside = true;
+    }
+};
+
+fn isAssignment(text: []const u8) bool {
+    const eq = std.mem.indexOfScalar(u8, text, '=') orelse return false;
+    if (eq == 0) return false;
+    for (text[0..eq]) |c| {
+        if (!(std.ascii.isAlphanumeric(c) or c == '_')) return false;
+    }
+    return true;
+}
+
+fn isStdStream(raw: []const u8) bool {
+    return std.mem.eql(u8, raw, "/dev/stdout") or std.mem.eql(u8, raw, "/dev/stderr");
+}
+
+fn scriptTextWritesOutside(
+    allocator: std.mem.Allocator,
+    script: Script,
+    roots: []const []const u8,
+    cwd: []const u8,
+    depth: u8,
+) Error!bool {
+    const text = script.text;
+    const posix = script.posix;
+    var state: ScriptState = .{ .allocator = allocator, .roots = roots, .cwd = cwd, .posix = posix, .depth = depth };
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
+    var in_word = false;
+    var has_var = false;
+    var quote: u8 = 0;
+    var i: usize = 0;
+    while (i < text.len) : (i += 1) {
+        const c = text[i];
+        if (quote != 0) {
+            if (c == quote) {
+                quote = 0;
+            } else if (posix and quote == '"' and c == '\\' and i + 1 < text.len) {
+                i += 1;
+                try buf.append(allocator, text[i]);
+            } else {
+                if ((c == '$' and quote == '"') or (!posix and c == '%')) has_var = true;
+                try buf.append(allocator, c);
+            }
+            continue;
+        }
+        if (c == '"' or (c == '\'' and script.single_quotes)) {
+            quote = c;
+            in_word = true;
+            continue;
+        }
+        switch (c) {
+            ' ', '\t', '\r', '\n', ';', '&', '|', '(', ')', '`', '<', '>' => {
+                if (in_word) {
+                    try state.word(buf.items, has_var);
+                    buf.clearRetainingCapacity();
+                    in_word = false;
+                    has_var = false;
+                }
+                if (c == '>') {
+                    // `>&2` / `2>&1` duplicate a stream; anything else writes a file.
+                    while (i + 1 < text.len and text[i + 1] == '>') i += 1;
+                    if (i + 1 < text.len and text[i + 1] == '&') {
+                        i += 1;
+                    } else {
+                        state.redirect_next = true;
+                    }
+                } else if (c != ' ' and c != '\t' and c != '\r' and c != '<') {
+                    state.endCommand();
+                }
+            },
+            else => {
+                if (posix and c == '\\' and i + 1 < text.len) {
+                    i += 1;
+                    try buf.append(allocator, text[i]);
+                } else if (!posix and !script.single_quotes and c == '^') {
+                    // cmd.exe's escape: `c^opy` is `copy`
+                    if (i + 1 < text.len) {
+                        i += 1;
+                        try buf.append(allocator, text[i]);
+                    }
+                } else {
+                    if (c == '$' or (!posix and c == '%')) has_var = true;
+                    try buf.append(allocator, c);
+                }
+                in_word = true;
+            },
+        }
+        if (state.outside) return true;
+    }
+    if (in_word) try state.word(buf.items, has_var);
+    // An unfinished quote or a dangling `>` cannot be read: fail closed.
+    if (quote != 0 or state.redirect_next) return true;
+    state.endCommand();
+    return state.outside;
 }
 
 /// Check a single path against the installed roots (and auth). For ABI tests.
 pub fn checkPath(allocator: std.mem.Allocator, path: []const u8, cwd: []const u8) Error!void {
-    if (isAuthSecretPath(path)) return error.AccessDenied;
+    if (try authSecretFrom(allocator, path, cwd)) return error.AccessDenied;
     const roots = try copyRoots(allocator);
     defer {
         for (roots) |r| allocator.free(r);
@@ -482,6 +905,33 @@ test "auth secret paths are detected" {
     try std.testing.expect(isAuthSecretPath("/home/ada/.remedy/auth/provider_keys"));
     try std.testing.expect(!isAuthSecretPath("C:\\Users\\Ada\\.remedy\\config.json"));
     try std.testing.expect(!isAuthSecretPath("C:\\proj\\auth\\notes.txt"));
+}
+
+test "auth secret paths are detected in every spelling" {
+    try std.testing.expect(isAuthSecretPath("/home/ada/.remedy//auth/local_api_token"));
+    try std.testing.expect(isAuthSecretPath("/home/ada/.remedy/./auth/local_api_token"));
+    try std.testing.expect(isAuthSecretPath("/home/ada/.remedy/x/../auth/local_api_token"));
+    try std.testing.expect(isAuthSecretPath("C:\\Users\\Ada\\.remedy\\.\\auth\\x"));
+    try std.testing.expect(isAuthSecretPath(".remedy/auth/local_api_token"));
+    try std.testing.expect(isAuthSecretPath("cat .remedy/auth/provider_keys"));
+    try std.testing.expect(isAuthSecretPath("/srv/portable-home/auth/host_signing_key"));
+    try std.testing.expect(!isAuthSecretPath("/home/ada/x.remedy/auth/notes"));
+
+    // No length cap: padding past any fixed buffer still names the secret.
+    var long: [3000]u8 = undefined;
+    @memset(long[0..2000], '/');
+    const tail = "home/ada/.remedy/auth/local_api_token";
+    @memcpy(long[2000..][0..tail.len], tail);
+    try std.testing.expect(isAuthSecretPath(long[0 .. 2000 + tail.len]));
+
+    // Relative to the cwd the command runs in.
+    const allocator = std.testing.allocator;
+    clearRoots(allocator);
+    const cmd = if (is_windows) "C:\\Windows\\System32\\cmd.exe" else "/bin/cat";
+    const home = if (is_windows) "C:\\Users\\Ada\\.remedy" else "/home/ada/.remedy";
+    try std.testing.expectError(error.AccessDenied, checkSpawn(allocator, &.{ cmd, "auth/local_api_token" }, home));
+    try std.testing.expectError(error.AccessDenied, checkPath(allocator, "auth", home));
+    try checkSpawn(allocator, &.{ cmd, "config.json" }, home);
 }
 
 test "workdir jail denies outside cwd and allows project writes" {
@@ -518,6 +968,99 @@ test "workdir jail denies outside cwd and allows project writes" {
         error.AccessDenied,
         checkSpawn(allocator, &.{ cmd, "/c", "type", auth }, if (is_windows) "C:\\Windows" else "/tmp"),
     );
+}
+
+test "workdir jail reads scripts handed to a shell, POSIX paths and --opt=value" {
+    if (is_windows) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    try setRoots(allocator, &.{"/focus/proj"});
+    defer clearRoots(allocator);
+    const cwd = "/focus/proj/src";
+
+    const denied = [_][]const []const u8{
+        &.{ "/bin/bash", "-lc", "cp a /etc/x" },
+        &.{ "/bin/sh", "-c", "cp a /etc/x" },
+        &.{ "/bin/sh", "-c", "echo hi > /etc/x" },
+        &.{ "/bin/sh", "-c", "echo hi>>/tmp/outside/x" },
+        &.{ "/bin/sh", "-c", "ls | tee /etc/x" },
+        &.{ "/bin/sh", "-c", "cd src && mv a /tmp/outside/b" },
+        &.{ "/bin/sh", "-c", "FOO=1 sudo cp a /etc/x" },
+        &.{ "/bin/sh", "-c", "c\\p a '/etc/x'" },
+        &.{ "/bin/bash", "-c", "bash -c 'cp a /etc/x'" },
+        &.{ "/bin/sh", "-c", "cd /tmp && touch x" },
+        &.{ "/bin/sh", "-c", "cp a ~/x" },
+        &.{ "/bin/sh", "-c", "cp --target-directory=/etc a" },
+        // a POSIX path is not a Windows `/x` switch
+        &.{ "/bin/cp", "a", "/etc" },
+        &.{ "/bin/mv", "a", "/tmp" },
+        &.{ "/bin/cp", "--target-directory=/tmp/outside", "a" },
+    };
+    for (denied) |argv| {
+        checkSpawn(allocator, argv, cwd) catch |err| {
+            try std.testing.expectEqual(error.AccessDenied, err);
+            continue;
+        };
+        std.debug.print("not denied: {s}\n", .{argv[argv.len - 1]});
+        return error.TestExpectedError;
+    }
+
+    const allowed = [_][]const []const u8{
+        &.{ "/bin/bash", "-lc", "cat /etc/hosts > out.txt" },
+        &.{ "/bin/sh", "-c", "go test ./... 2>/dev/null" },
+        &.{ "/bin/sh", "-c", "make 2>&1 | tee build.log" },
+        &.{ "/bin/sh", "-c", "cp a b && echo '>' /etc/x" },
+        &.{ "/bin/sh", "-c", "cp a \"$REMEDY_SCRATCH/x\"" },
+        &.{ "/bin/sh", "-c", "cd ../src && cp a b" },
+        &.{ "/bin/sh", "-c", "ls /etc; mkdir -p out/dir" },
+        &.{ "/bin/cp", "a", "out.txt" },
+        &.{ "/bin/cp", "--target-directory=/focus/proj/out", "a" },
+        &.{ "/bin/ls", "/etc" },
+    };
+    for (allowed) |argv| {
+        checkSpawn(allocator, argv, cwd) catch |err| {
+            std.debug.print("denied: {s}\n", .{argv[argv.len - 1]});
+            return err;
+        };
+    }
+}
+
+test "workdir jail reads a Windows shell nested inside a script" {
+    const allocator = std.testing.allocator;
+    try setRoots(allocator, &.{"C:\\focus\\proj"});
+    defer clearRoots(allocator);
+    const cwd = "C:\\focus\\proj";
+
+    const denied = [_][]const []const u8{
+        &.{ "pwsh.exe", "-NoProfile", "-Command", "powershell -NoProfile -Command \"Set-Content C:\\Users\\Public\\x.txt hi\"" },
+        &.{ "pwsh.exe", "-Command", "powershell -com 'Set-Content C:\\Users\\Public\\x.txt hi'" },
+        &.{ "pwsh.exe", "-Command", "powershell -Command Set-Content C:\\Users\\Public\\x.txt hi" },
+        &.{ "pwsh.exe", "-Command", "cmd /c \"copy a.txt C:\\Users\\Public\\a.txt\"" },
+        &.{ "pwsh.exe", "-Command", "cmd /d /c copy a.txt C:\\Users\\Public\\a.txt" },
+        &.{ "cmd.exe", "/c", "powershell /Command \"ni C:\\Users\\Public\\x.txt\"" },
+        &.{ "pwsh.exe", "-com", "Set-Content C:\\Users\\Public\\x.txt hi" },
+        &.{ "pwsh.exe", "-Command", "powershell -enc ZQBjAGgAbwA=" },
+    };
+    for (denied) |argv| {
+        checkSpawn(allocator, argv, cwd) catch |err| {
+            try std.testing.expectEqual(error.AccessDenied, err);
+            continue;
+        };
+        std.debug.print("not denied: {s}\n", .{argv[argv.len - 1]});
+        return error.TestExpectedError;
+    }
+
+    const allowed = [_][]const []const u8{
+        &.{ "pwsh.exe", "-Command", "powershell -NoProfile -Command \"Set-Content out.txt hi\"" },
+        &.{ "pwsh.exe", "-Command", "cmd /c \"copy a.txt C:\\focus\\proj\\b.txt\"" },
+        &.{ "pwsh.exe", "-Command", "powershell -ExecutionPolicy Bypass -File build.ps1" },
+        &.{ "pwsh.exe", "-Command", "cmd /c dir" },
+    };
+    for (allowed) |argv| {
+        checkSpawn(allocator, argv, cwd) catch |err| {
+            std.debug.print("denied: {s}\n", .{argv[argv.len - 1]});
+            return err;
+        };
+    }
 }
 
 test "empty roots skip workdir jail" {

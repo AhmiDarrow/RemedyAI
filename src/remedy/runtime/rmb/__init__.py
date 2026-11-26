@@ -10,17 +10,17 @@ from remedy.runtime.rmb.autofit import (
     plan_autofit,
     should_autofit,
 )
-from remedy.runtime.rmb.coresidence import (
-    discover_local_servers,
-    plan_coresidence,
-    route_request,
-)
 from remedy.runtime.rmb.config import (
     DEFAULT_CHAT_PORT,
     DEFAULT_HOST,
     load_rmb_json,
     rmb_home,
     save_rmb_json,
+)
+from remedy.runtime.rmb.coresidence import (
+    discover_local_servers,
+    plan_coresidence,
+    route_request,
 )
 from remedy.runtime.rmb.host_profile import detect_gguf_host_profile
 from remedy.runtime.rmb.mode import (

@@ -350,6 +350,7 @@ func (s *Server) runHiveForagerPulse(ctx context.Context, d hiveDaughter) error 
 	}
 	projectPath := effectiveTurnProjectPath(d.ProjectPath)
 	var text strings.Builder
+	sawAbort := false
 	err := s.runner.RunTurn(ctx, TurnRequest{
 		Prompt:        hiveForagerCharter(d),
 		SessionID:     d.SessionID,
@@ -360,12 +361,17 @@ func (s *Server) runHiveForagerPulse(ctx context.Context, d hiveDaughter) error 
 		if body, ok := modelTextToken(tok); ok {
 			tok = body
 		} else if strings.HasPrefix(tok, "@@") {
+			// RunTurn reports a stopped turn as "@@aborted" and a nil error.
+			if strings.HasPrefix(tok, "@@aborted") {
+				sawAbort = true
+			}
 			return nil
 		}
 		text.WriteString(tok)
 		return nil
 	})
-	aborted := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	aborted := sawAbort || ctx.Err() != nil ||
+		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 	if err != nil && !aborted {
 		s.finishHiveForager(d, hivePacket{
 			Goal:     d.Goal,
