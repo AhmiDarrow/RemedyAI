@@ -222,6 +222,7 @@ fn render_block(ui: &Ui, block: &Block, on_image: impl Fn(String) + Clone + 'sta
         Block::Paragraph(text) => ui
             .el("bubble-body")
             .text(inline_rich(text, chip))
+            .selectable(true)
             .layout(|l| {
                 l.width = Length::Percent(1.0);
                 l.min_width = Length::Px(0.0);
@@ -288,6 +289,7 @@ fn code_block(ui: &Ui, lang: &str, text: &str) -> El {
         let fg = if comment { colors.muted } else { colors.text };
         body = body.child(
             w::text(ui, line)
+                .selectable(true)
                 .style(StylePatch::new().mono(true).text_size(12.5).foreground(fg))
                 .layout(|l| {
                     l.width = Length::Percent(1.0);
@@ -340,6 +342,7 @@ fn diff_block(ui: &Ui, text: &str) -> El {
         };
         col = col.child(
             w::text(ui, line)
+                .selectable(true)
                 .style(StylePatch::new().foreground(color).mono(true).text_size(12.0))
                 .layout(|l| {
                     l.width = Length::Percent(1.0);

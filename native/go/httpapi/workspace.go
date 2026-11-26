@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -193,11 +194,17 @@ func isPackagedInstallDir(path string) bool {
 	return false
 }
 
-func listFileEntries(listed, base string) []fileEntry {
+// maxListed bounds one folder listing; a longer folder is cut and reported as truncated.
+const maxListed = 1000
+
+// listFileEntries lists `listed`. Entry paths are relative to `base`, or absolute
+// (forward slashes) when base is empty: the form a folder outside the project needs,
+// so opening an entry never resolves against the project root.
+func listFileEntries(listed, base string) ([]fileEntry, bool) {
 	entries := make([]fileEntry, 0, 32)
 	dirents, err := os.ReadDir(listed)
 	if err != nil {
-		return entries
+		return entries, false
 	}
 	names := make([]string, 0, len(dirents))
 	for _, d := range dirents {
@@ -209,25 +216,26 @@ func listFileEntries(listed, base string) []fileEntry {
 			continue
 		}
 		full := filepath.Join(listed, name)
-		rel, err := filepath.Rel(base, full)
-		if err != nil {
-			continue
+		rel := full
+		if base != "" {
+			if rel, err = filepath.Rel(base, full); err != nil {
+				continue
+			}
 		}
-		rel = filepath.ToSlash(rel)
 		info, err := os.Stat(full)
 		if err != nil {
 			continue
 		}
+		if len(entries) >= maxListed {
+			return entries, true
+		}
 		entries = append(entries, fileEntry{
 			Name:  name,
-			Path:  rel,
+			Path:  filepath.ToSlash(rel),
 			IsDir: info.IsDir(),
 		})
-		if len(entries) >= 200 {
-			break
-		}
 	}
-	return entries
+	return entries, false
 }
 
 func filesPayload(listed, base, requestPath string) map[string]any {
@@ -244,11 +252,52 @@ func filesPayload(listed, base, requestPath string) map[string]any {
 	if raw != "" && (filepath.IsAbs(raw) || (len(raw) > 1 && raw[1] == ':' && isDriveLetter(raw[0]))) {
 		shown = listed
 	}
+	files, truncated := listFileEntries(listed, base)
 	return map[string]any{
-		"files": listFileEntries(listed, base),
-		"path":  shown,
-		"root":  base,
+		"files":     files,
+		"path":      shown,
+		"root":      base,
+		"truncated": truncated,
 	}
+}
+
+// filesOutsidePayload lists a folder outside the project: the path and every entry are
+// absolute, and root stays the project so "." still leads home.
+func filesOutsidePayload(listed, project string) map[string]any {
+	files, truncated := listFileEntries(listed, "")
+	return map[string]any{
+		"files":     files,
+		"path":      filepath.ToSlash(listed),
+		"root":      project,
+		"truncated": truncated,
+	}
+}
+
+type filePlace struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// filePlaces are the starting points the access scope allows: the project, the user's
+// folders, and with full access every drive.
+func filePlaces(scope string, roots []string) []filePlace {
+	places := []filePlace{{Name: "Project", Path: "."}}
+	for _, r := range roots[1:] {
+		places = append(places, filePlace{Name: filepath.Base(r), Path: filepath.ToSlash(r)})
+	}
+	if normalizeAccessScope(scope) == "full" {
+		if runtime.GOOS == "windows" {
+			for c := 'A'; c <= 'Z'; c++ {
+				d := string(c) + ":/"
+				if _, err := os.Stat(d); err == nil {
+					places = append(places, filePlace{Name: string(c) + ":", Path: d})
+				}
+			}
+		} else {
+			places = append(places, filePlace{Name: "/", Path: "/"})
+		}
+	}
+	return places
 }
 
 func filesDenied(path, base string) map[string]any {
@@ -344,11 +393,12 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	base := jailBase
+	payload := filesPayload(listed, jailBase, path)
 	if !pathUnder(listed, jailBase) {
-		base = listed
+		payload = filesOutsidePayload(listed, jailBase)
 	}
-	writeJSON(w, http.StatusOK, filesPayload(listed, base, path))
+	payload["places"] = filePlaces(scope, roots)
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (s *Server) handleSearchFiles(w http.ResponseWriter, r *http.Request) {

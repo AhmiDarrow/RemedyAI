@@ -192,7 +192,7 @@ fn bubble(ui: &Ui, who: &str, user: bool, text: impl Fn() -> RichText + 'static)
         })
         .style(surface.foreground(fg))
         .child(w::text(ui, who_owned.clone()).variant("muted"))
-        .child(w::text(ui, "").text(text));
+        .child(w::text(ui, "").text(text).selectable(true));
     let row = w::row(ui)
         .align(Align::End)
         .gap(unit)
