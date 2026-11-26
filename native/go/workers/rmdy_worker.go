@@ -348,8 +348,6 @@ func probeWorker(ctx context.Context, client *ipc.Client, opts RMDYToolOptions, 
 		if home := strings.TrimSpace(opts.HomeDir); home != "" {
 			input["home_dir"] = home
 		}
-	case "text.slugify":
-		input["text"] = "attach probe"
 	}
 	raw, err := json.Marshal(map[string]any{"tool_id": tool, "version": 1, "input": input, "_go_bound": true})
 	if err != nil {

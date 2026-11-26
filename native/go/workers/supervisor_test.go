@@ -85,7 +85,7 @@ func testSupervisorOptions(t *testing.T, starter ProcessStarter) RMDYToolOptions
 		PythonArgv:      testPythonArgv(t),
 		AttachTimeout:   60 * time.Second,
 		StartProcess:    starter,
-		AttachProbeTool: "text.slugify",
+		AttachProbeTool: "worker.probe",
 	}
 }
 
@@ -134,7 +134,7 @@ func TestSupervisorRespawnsAfterWorkerKilledMidCall(t *testing.T) {
 	caller := sup.Caller()
 
 	// Sanity: the live caller works through the registered executor.
-	if out, err := callTool(ctx, caller, "text.slugify", map[string]any{"text": "Before Kill"}); err != nil || out["slug"] != "before-kill" {
+	if out, err := callTool(ctx, caller, "worker.probe", map[string]any{}); err != nil || out["ok"] != true {
 		t.Fatalf("pre-kill call out=%v err=%v", out, err)
 	}
 	firstPID := sup.Session().PID
@@ -173,11 +173,11 @@ func TestSupervisorRespawnsAfterWorkerKilledMidCall(t *testing.T) {
 	var last error
 	for time.Now().Before(deadline) {
 		callCtx, callCancel := context.WithTimeout(ctx, 10*time.Second)
-		out, err := callTool(callCtx, caller, "text.slugify", map[string]any{"text": "After Respawn"})
+		out, err := callTool(callCtx, caller, "worker.probe", map[string]any{})
 		callCancel()
 		if err == nil {
-			if out["slug"] != "after-respawn" {
-				t.Fatalf("post-respawn slug = %v", out["slug"])
+			if out["ok"] != true {
+				t.Fatalf("post-respawn probe = %v", out)
 			}
 			last = nil
 			break
@@ -220,7 +220,7 @@ func TestSupervisorOverlappingCallsFastReturnsFirst(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	go func() {
 		defer wg.Done()
-		if _, err := callTool(ctx, caller, "text.word_count", map[string]any{"text": "a b c"}); err != nil {
+		if _, err := callTool(ctx, caller, "worker.probe", map[string]any{}); err != nil {
 			t.Errorf("fast call: %v", err)
 		}
 		order <- "fast"
