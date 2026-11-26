@@ -44,7 +44,8 @@ func writeJSONAtomic(path string, v any) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	_ = os.Remove(path)
+	// os.Rename replaces the target on every platform Go supports. Removing
+	// it first left a window where a crash lost the file entirely.
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("atomic replace: %w", err)
 	}
