@@ -369,7 +369,7 @@ pub fn mood_from(studio: &Studio) -> Mood {
             Conn::Ready => Mood::Listening,
             _ => Mood::Idle,
         };
-        return maybe_sleepy(rest);
+        return maybe_sleepy(studio, rest);
     }
 
     let (ok, err) = face_skin::last_turn_steps(studio);
@@ -397,7 +397,7 @@ pub fn mood_from(studio: &Studio) -> Mood {
         return Mood::Curious;
     }
 
-    maybe_sleepy(Mood::Happy)
+    maybe_sleepy(studio, Mood::Happy)
 }
 
 fn composer_len(studio: &Studio) -> usize {
@@ -406,12 +406,16 @@ fn composer_len(studio: &Studio) -> usize {
     a.trim().len().max(b.trim().len())
 }
 
-fn maybe_sleepy(rest: Mood) -> Mood {
+fn maybe_sleepy(studio: &Studio, rest: Mood) -> Mood {
     if !matches!(rest, Mood::Idle | Mood::Listening) {
         return rest;
     }
+    // A preview carries its own fixed clock: its face must not change with the
+    // hour the picture happens to be taken at (reference images failed after midnight).
+    let fixed = studio.clock.get().map(|ts| (ts.rem_euclid(86_400) / 3_600) as u32);
     let hour = HOUR_OVERRIDE
         .with(|c| c.get())
+        .or(fixed)
         .unwrap_or_else(local_hour);
     if hour < 6 {
         Mood::Sleepy
