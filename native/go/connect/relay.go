@@ -28,6 +28,12 @@ const (
 // ErrRelay is a Connect relay failure (bind policy, session id, or dial).
 var ErrRelay = errors.New("connect relay")
 
+// relayMaxClients caps the sockets one relay serves at once. Each client may
+// sit up to relayHelloTimeout before sending its session id, so without a cap
+// anyone who can reach the port could hold unlimited goroutines and file
+// descriptors. A var so tests can lower it.
+var relayMaxClients = 512
+
 // AssertRelayBind refuses wildcards and non-IPv4 hosts. Relays listen on a chosen IPv4 only.
 func AssertRelayBind(host string) (string, error) {
 	text, err := AssertChosenBind(host)
@@ -59,6 +65,7 @@ type Relay struct {
 	sessions map[string]*relaySlot
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
+	clients  int
 }
 
 // StartRelay binds host:port (port 0 = ephemeral) and serves in the background.
@@ -151,8 +158,23 @@ func (r *Relay) acceptLoop() {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
 				continue
 			}
+			// A non-timeout error (too many open files) repeats at once;
+			// looping straight back spun a core at 100%.
+			select {
+			case <-r.stopCh:
+				return
+			case <-time.After(50 * time.Millisecond):
+			}
 			continue
 		}
+		r.mu.Lock()
+		if r.clients >= relayMaxClients {
+			r.mu.Unlock()
+			_ = conn.Close()
+			continue
+		}
+		r.clients++
+		r.mu.Unlock()
 		r.wg.Add(1)
 		go r.handleClient(conn)
 	}
@@ -160,6 +182,11 @@ func (r *Relay) acceptLoop() {
 
 func (r *Relay) handleClient(conn net.Conn) {
 	defer r.wg.Done()
+	defer func() {
+		r.mu.Lock()
+		r.clients--
+		r.mu.Unlock()
+	}()
 	defer func() { _ = conn.Close() }()
 
 	_ = conn.SetDeadline(time.Now().Add(relayHelloTimeout))
