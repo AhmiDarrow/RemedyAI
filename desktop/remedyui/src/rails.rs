@@ -14,7 +14,7 @@ use remedy_ui::a11y::{Action, Current, Role, Semantics};
 use remedy_ui::core::{Color, Insets, Size};
 use remedy_ui::input::{Buttons, Key, KeyEvent, PointerPhase};
 use remedy_ui::layout::{AUTO, Align, Justify, Length, Position};
-use remedy_ui::reactive::{Signal, untrack};
+use remedy_ui::reactive::{Scope, Signal, untrack};
 use remedy_ui::style::{BorderEdge, BorderSide, Shadow, StylePatch};
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui};
@@ -44,6 +44,10 @@ struct Built {
     key: (RailMode, SlideId, bool, bool),
     /// The panel body, so a width drag can resize it without remounting.
     body: Option<El>,
+    /// Owns what the rail built, so the binding running again (a window resize)
+    /// does not dispose the signals inside it: the session list kept its rows but
+    /// stopped taking new ones.
+    scope: Option<Scope>,
 }
 
 /// Live rails: layout signal, the temporary narrow side, and popout.
@@ -393,12 +397,18 @@ pub(crate) fn side(ui: &Ui, chrome: WorkspaceChrome, which: Side, studio: Studio
             let chrome = chrome_b.clone();
             let studio = studio_b.clone();
             untrack(move || {
-                if compact {
-                    root.clear();
-                    *built.borrow_mut() = Some(Built { key, body: None });
-                } else {
-                    let body = mount(&ui, &root, &chrome, which, mode, slide, hide_body, &studio);
-                    *built.borrow_mut() = Some(Built { key, body });
+                let old = built.borrow_mut().take().and_then(|b| b.scope);
+                let (body, scope) = Scope::detached(|| {
+                    if compact {
+                        root.clear();
+                        None
+                    } else {
+                        mount(&ui, &root, &chrome, which, mode, slide, hide_body, &studio)
+                    }
+                });
+                *built.borrow_mut() = Some(Built { key, body, scope: Some(scope) });
+                if let Some(old) = old {
+                    old.dispose();
                 }
             });
         }

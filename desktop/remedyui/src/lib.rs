@@ -1102,6 +1102,23 @@ pub(crate) fn shell_fixed(ui: &Ui, studio: Studio) -> El {
 }
 
 fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
+    let chat = studio.clone();
+    shell_around(ui, studio, chrome, move |ui| chat::well(ui, chat))
+}
+
+/// Studio's rails and status around `center`, for the live window: Grove sits between
+/// the same rails as the chat, so they stay put when the surface changes.
+pub(crate) fn shell_around_live(ui: &Ui, studio: Studio, center: El) -> El {
+    shell_around(ui, studio, rails::WorkspaceChrome::load(), move |_| center)
+}
+
+/// `center` is built after the shell has set up its theme and settings, as the chat always was.
+fn shell_around(
+    ui: &Ui,
+    studio: Studio,
+    chrome: rails::WorkspaceChrome,
+    center: impl FnOnce(&Ui) -> El,
+) -> El {
     // Chat-depth workers hop back onto this Ui (audio, dialogs). Every shell
     // path, including rail previews, goes through here.
     depth::set_ui(ui.clone());
@@ -1150,7 +1167,7 @@ fn shell_with(ui: &Ui, studio: Studio, chrome: rails::WorkspaceChrome) -> El {
                     layout::Side::Left,
                     studio.clone(),
                 ))
-                .child(chat::well(ui, studio.clone()))
+                .child(center(ui))
                 .child(rails::side(
                     ui,
                     chrome.clone(),

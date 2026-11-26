@@ -2329,3 +2329,19 @@ fn the_phone_grove_is_the_conversation_and_her_work_and_nothing_else() {
     let off = horizontal_overflow(&app, 412.0);
     assert!(off.is_empty(), "the Work tab paints off the phone's screen: {off:?}");
 }
+#[test]
+fn studio_rails_stay_beside_grove() {
+    let _layout = reset_saved_layout();
+    fresh_profile();
+    let mut app = TestApp::new(AppConfig::new("Remedy Desktop test"), remedy_desktop::app);
+    assert!(
+        app.find(Role::Button, "New session").is_some(),
+        "the Sessions rail is there on Grove, the home surface"
+    );
+    assert!(app.press(Role::Button, "Studio"), "to Studio");
+    assert!(app.press(Role::Button, "New session"), "the same rail still works");
+    assert!(
+        app.find(Role::Button, "Close New chat 2").is_some(),
+        "and its list takes the new row"
+    );
+}
