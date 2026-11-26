@@ -171,10 +171,10 @@ func executeBash(ctx context.Context, request Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if bad := modelDeniedEnvKey(body.Env); bad != "" {
+	if bad := modelSpawnEnvKey(body.Env); bad != "" {
 		return Result{}, fmt.Errorf(
-			"%w: %s cannot be set from a tool call — it makes an interpreter load code "+
-				"before the command runs. Put the path on the command line instead",
+			"%w: %s cannot be set from a tool call — it changes what runs or where it connects "+
+				"without the command showing it. Put it on the command line instead",
 			ErrInvalidInput, bad)
 	}
 

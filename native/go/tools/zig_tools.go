@@ -1714,6 +1714,66 @@ func modelDeniedEnvKey(env map[string]string) string {
 	return ""
 }
 
+// modelSpawnSteeringEnv are variables a command's own text never shows but
+// that decide which program runs (PATH, a pager, an editor, an askpass), run
+// a command from git config (GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n /
+// GIT_CONFIG_VALUE_n can set core.pager, core.sshCommand, ...), run code in
+// the shell itself (PS4 with SHELLOPTS=xtrace, ZDOTDIR), or send traffic
+// through someone else's proxy. The shell guard and the write jail read the
+// command, not its environment, so a tool call may not set them. They are not
+// in modelInterpreterPathEnv because a delegated agent inherits the owner's
+// own PATH and proxy, which is right for it.
+var modelSpawnSteeringEnv = []string{
+	"PATH",
+	"GIT_CONFIG",
+	"GIT_CONFIG_COUNT",
+	"GIT_CONFIG_PARAMETERS",
+	"GIT_ASKPASS",
+	"SSH_ASKPASS",
+	"GIT_PROXY_COMMAND",
+	"GIT_EXTERNAL_DIFF",
+	"GIT_PAGER",
+	"PAGER",
+	"GIT_EDITOR",
+	"GIT_SEQUENCE_EDITOR",
+	"EDITOR",
+	"VISUAL",
+	"LESSOPEN",
+	"LESSCLOSE",
+	"PS4",
+	"SHELLOPTS",
+	"BASHOPTS",
+	"ZDOTDIR",
+	"PERL5LIB",
+	"PERLLIB",
+	"RUBYLIB",
+	"HTTP_PROXY",
+	"HTTPS_PROXY",
+	"ALL_PROXY",
+	"FTP_PROXY",
+}
+
+// modelSpawnEnvKey returns the first variable a bash or shell.exec call may
+// not set, or "": everything modelDeniedEnvKey refuses, plus the variables
+// above and any GIT_CONFIG_* key.
+func modelSpawnEnvKey(env map[string]string) string {
+	if bad := modelDeniedEnvKey(env); bad != "" {
+		return bad
+	}
+	for key := range env {
+		trimmed := strings.TrimSpace(key)
+		if strings.HasPrefix(strings.ToUpper(trimmed), "GIT_CONFIG_") {
+			return trimmed
+		}
+		for _, denied := range modelSpawnSteeringEnv {
+			if strings.EqualFold(trimmed, denied) {
+				return denied
+			}
+		}
+	}
+	return ""
+}
+
 func vaultHandleIn(text string) bool {
 	low := strings.ToLower(text)
 	return strings.Contains(text, "{{") && strings.Contains(low, "vault:")
@@ -1789,10 +1849,10 @@ func executeShellExec(ctx context.Context, request Request) (Result, error) {
 	if body.Cwd != "" && !filepath.IsAbs(body.Cwd) {
 		return Result{}, fmt.Errorf("%w: cwd must be absolute when set", ErrInvalidInput)
 	}
-	if bad := modelDeniedEnvKey(body.Env); bad != "" {
+	if bad := modelSpawnEnvKey(body.Env); bad != "" {
 		return Result{}, fmt.Errorf(
-			"%w: %s cannot be set from a tool call — it makes an interpreter load code "+
-				"before the command runs. Put the path on the command line instead",
+			"%w: %s cannot be set from a tool call — it changes what runs or where it connects "+
+				"without the command showing it. Put it on the command line instead",
 			ErrInvalidInput, bad)
 	}
 	argv0, err := resolveShellArgv0(body.Argv[0], body.Cwd)
