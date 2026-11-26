@@ -871,9 +871,19 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 // live; there is no in-process Python fallback. Pass a *workers.LiveCaller so
 // a respawned worker is picked up without re-registration.
 // mailCalendarToolIDs are the tools whose descriptions live in this file but
-// which the runtime serves in Go (Google, IMAP/SMTP, CalDAV).
+// which the runtime serves in Go: mail and calendar (Google, IMAP/SMTP,
+// CalDAV), house rules and first-run setup (mind/houserules) and the other
+// bots (peer.*). The Python worker no longer has handlers for them.
 var mailCalendarToolIDs = map[string]struct{}{
 	"mail.list": {}, "mail.send": {}, "calendar.list_events": {}, "calendar.create_event": {},
+	"house_rules": {}, "setup.session": {},
+	"peer.list": {}, "peer.ask": {}, "peer.delegate": {}, "peer.status": {},
+}
+
+// goPromptHookIDs are the prompt hooks the Go runtime builds itself
+// (mind/prompt). They are not registered as worker tools.
+var goPromptHookIDs = map[string]struct{}{
+	"prompt.assemble": {}, "prompt.slim_epoch": {}, "prompt.should_continue": {}, "prompt.after_tool_batch": {},
 }
 
 // ErrToolNotAttached is what a registered tool answers before the runtime has
@@ -920,6 +930,9 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 	for _, r := range pythonWorkerToolSpecs() {
 		if _, native := mailCalendarToolIDs[r.id]; native {
 			continue // registered by RegisterMailCalendarTools, served in Go
+		}
+		if _, native := goPromptHookIDs[r.id]; native {
+			continue // built in Go
 		}
 		if err := registry.Register(Descriptor{
 			ID:           r.id,

@@ -306,360 +306,32 @@ def test_stdio_tool_round_trip_workspace_search(
     assert any("find-me-abi" in m["text"] for m in body["output"]["matches"])
 
 
-def test_web_search_bridges_agent_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    import remedy.core.web_helpers as web
-
-    monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
-
-    def _fake_run_search(q, *, max_results, timeout, runtime=None):
-        assert q == "asyncio gather"
-        assert max_results == 2
-        return (
-            [
-                {
-                    "title": "asyncio docs",
-                    "url": "https://docs.python.org/3/library/asyncio.html",
-                    "snippet": "gather coroutines",
-                }
-            ],
-            "test-backend",
-        )
-
-    monkeypatch.setattr(web, "run_search", _fake_run_search)
-    out = worker._web_search({"query": "asyncio gather", "max_results": 2})
-    assert out["query"] == "asyncio gather"
-    assert out["backend"] == "test-backend"
-    assert out["results"][0]["url"].startswith("https://docs.python.org/")
 
 
-def test_web_search_requires_query(monkeypatch: pytest.MonkeyPatch) -> None:
-    import remedy.core.web_helpers as web
-
-    monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
-    with pytest.raises(ValueError, match="query"):
-        worker._web_search({"query": "  "})
 
 
-def test_stdio_tool_round_trip_web_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    import remedy.core.web_helpers as web
-
-    monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
-    monkeypatch.setattr(
-        web,
-        "run_search",
-        lambda q, *, max_results, timeout, runtime=None: (
-            [{"title": "t", "url": "https://example.com/", "snippet": "s"}],
-            "stub",
-        ),
-    )
-
-    req = json.dumps(
-        {"tool_id": "web.search", "version": 1, "input": {"query": "example", "max_results": 1}}
-    ).encode("utf-8")
-    corr = b"\x03" + b"\x00" * 15
-    inbound = _frame(worker._KIND_TOOL_REQUEST, req, corr)
-
-    class _Buf:
-        def __init__(self, data: bytes) -> None:
-            self._data = data
-            self._pos = 0
-            self.out = bytearray()
-
-        def read(self, n: int) -> bytes:
-            if self._pos >= len(self._data):
-                return b""
-            chunk = self._data[self._pos : self._pos + n]
-            self._pos += len(chunk)
-            return chunk
-
-        def write(self, data: bytes) -> int:
-            self.out.extend(data)
-            return len(data)
-
-        def flush(self) -> None:
-            return None
-
-    buf = _Buf(inbound)
-    worker.serve(buf, buf)  # type: ignore[arg-type]
-
-    raw = bytes(buf.out)
-    payload_len = struct.unpack_from("<I", raw, 12)[0]
-    body = json.loads(raw[32 : 32 + payload_len].decode("utf-8"))
-    assert body["ok"] is True
-    assert body["output"]["backend"] == "stub"
-    assert body["output"]["results"][0]["title"] == "t"
 
 
-def test_web_fetch_bridges_polite_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
-    import remedy.core.web_helpers as web
-
-    monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
-    html = (
-        b"<!doctype html><html><head><title>Guide</title></head>"
-        b"<body><article><h1>Guide</h1><p>Hello partner.</p></article></body></html>"
-    )
-
-    def _fake_polite_fetch(url, *, max_chars, timeout, runtime=None, respect_robots=None):
-        assert url == "https://example.com/guide"
-        return url, html, "utf-8"
-
-    monkeypatch.setattr(web, "polite_fetch", _fake_polite_fetch)
-    out = worker._web_fetch({"url": "https://example.com/guide", "max_chars": 5000})
-    assert out["url"] == "https://example.com/guide"
-    assert out["final_url"] == "https://example.com/guide"
-    assert out["format"] == "markdown"
-    assert "Hello partner" in out["content"]
-    assert out.get("title") == "Guide"
 
 
-def test_web_fetch_requires_http_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    import remedy.core.web_helpers as web
-
-    monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
-    with pytest.raises(ValueError, match="http"):
-        worker._web_fetch({"url": "file:///etc/passwd"})
 
 
-def test_web_fetch_refuses_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    import remedy.core.web_helpers as web
-
-    monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: False)
-    with pytest.raises(PermissionError, match="disabled"):
-        worker._web_fetch({"url": "https://example.com/"})
 
 
-def test_stdio_tool_round_trip_web_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
-    import remedy.core.web_helpers as web
-
-    monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
-    monkeypatch.setattr(
-        web,
-        "polite_fetch",
-        lambda url, *, max_chars, timeout, runtime=None, respect_robots=None: (
-            url,
-            b"plain text body",
-            "utf-8",
-        ),
-    )
-
-    req = json.dumps(
-        {
-            "tool_id": "web.fetch",
-            "version": 1,
-            "input": {"url": "https://example.com/plain", "max_chars": 2000},
-        }
-    ).encode("utf-8")
-    corr = b"\x05" + b"\x00" * 15
-    inbound = _frame(worker._KIND_TOOL_REQUEST, req, corr)
-
-    class _Buf:
-        def __init__(self, data: bytes) -> None:
-            self._data = data
-            self._pos = 0
-            self.out = bytearray()
-
-        def read(self, n: int) -> bytes:
-            if self._pos >= len(self._data):
-                return b""
-            chunk = self._data[self._pos : self._pos + n]
-            self._pos += len(chunk)
-            return chunk
-
-        def write(self, data: bytes) -> int:
-            self.out.extend(data)
-            return len(data)
-
-        def flush(self) -> None:
-            return None
-
-    buf = _Buf(inbound)
-    worker.serve(buf, buf)  # type: ignore[arg-type]
-
-    raw = bytes(buf.out)
-    payload_len = struct.unpack_from("<I", raw, 12)[0]
-    body = json.loads(raw[32 : 32 + payload_len].decode("utf-8"))
-    assert body["ok"] is True
-    assert body["output"]["format"] == "text"
-    assert body["output"]["content"] == "plain text body"
-    assert body["output"]["url"] == "https://example.com/plain"
 
 
-def test_prompt_assemble_handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
-    (tmp_path / "config.toml").write_text(
-        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
-        encoding="utf-8",
-    )
-    out = worker._prompt_assemble(
-        {"message": "hello partner", "session_id": "sess-1", "chat_mode": True}
-    )
-    assert isinstance(out["system"], str) and out["system"].strip()
-    assert out["goal"] == "hello partner"
-    assert int(out["system_chars"]) == len(out["system"])
-    # Identity / operational body must beat raw prompt-only.
-    assert "Remedy" in out["system"] or "partner" in out["system"].lower()
 
 
-def test_prompt_assemble_does_not_register_agent_tools(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Phase 6 absolute: prompt path must not boot the agent_* tool forest."""
-    from remedy.runtime import prompt_assemble as pa
-
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
-    (tmp_path / "config.toml").write_text(
-        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
-        encoding="utf-8",
-    )
-    pa._runtime_cache.clear()
-    out = worker._prompt_assemble(
-        {"message": "tool-free harness", "session_id": "sess-tools", "chat_mode": True}
-    )
-    assert isinstance(out["system"], str) and out["system"].strip()
-    cached = next(iter(pa._runtime_cache.values()), None)
-    assert cached is not None
-    assert getattr(cached, "_register_tools", True) is False
-    names = {t.name for t in cached.tool_registry.tools}
-    handlers = set(getattr(cached.tool_registry, "_handlers", {}) or {})
-    assert not names
-    assert "file_read" not in handlers
-    assert "bash_exec" not in handlers
-    assert "memory_search" not in handlers
 
 
-def test_stdio_tool_round_trip_prompt_assemble(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    (tmp_path / "config.toml").write_text(
-        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
-        encoding="utf-8",
-    )
-    req = json.dumps(
-        {
-            "tool_id": "prompt.assemble",
-            "version": 1,
-            "input": {"message": "wire assemble", "session_id": "s"},
-        }
-    ).encode("utf-8")
-    corr = b"\x07" + b"\x00" * 15
-    inbound = _frame(worker._KIND_TOOL_REQUEST, req, corr)
-
-    class _Buf:
-        def __init__(self, data: bytes) -> None:
-            self._data = data
-            self._pos = 0
-            self.out = bytearray()
-
-        def read(self, n: int) -> bytes:
-            if self._pos >= len(self._data):
-                return b""
-            chunk = self._data[self._pos : self._pos + n]
-            self._pos += len(chunk)
-            return chunk
-
-        def write(self, data: bytes) -> int:
-            self.out.extend(data)
-            return len(data)
-
-        def flush(self) -> None:
-            return None
-
-    buf = _Buf(inbound)
-    worker.serve(buf, buf)  # type: ignore[arg-type]
-
-    raw = bytes(buf.out)
-    payload_len = struct.unpack_from("<I", raw, 12)[0]
-    body = json.loads(raw[32 : 32 + payload_len].decode("utf-8"))
-    assert body["ok"] is True
-    assert body["output"]["goal"] == "wire assemble"
-    assert isinstance(body["output"]["system"], str) and body["output"]["system"].strip()
 
 
-def test_prompt_assemble_registered() -> None:
-    assert ("prompt.assemble", 1) in worker._HANDLERS
-    assert ("prompt.slim_epoch", 1) in worker._HANDLERS
-    assert ("prompt.should_continue", 1) in worker._HANDLERS
 
 
-def test_prompt_slim_epoch_updates_brief(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
-    (tmp_path / "config.toml").write_text(
-        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
-        encoding="utf-8",
-    )
-    out = worker._prompt_slim_epoch(
-        {
-            "system": "You are Remedy.\n" + ("skills catalog\n" * 20),
-            "goal": "implement the feature",
-            "text": "Edited src/app.py and ran tests.",
-            "checkpoint": "- workspace.edit [ok] src/app.py\n- shell.exec [ok] pytest",
-            "session_id": "sess-epoch-1",
-            "epoch": 2,
-            "total_steps": 128,
-        }
-    )
-    assert out.get("ok") is True
-    assert isinstance(out.get("system"), str) and out["system"].strip()
-    # The epoch checkpoint is appended to the system block (the Session Brief
-    # lives there now); the assistant tail is left alone.
-    combined = " ".join(
-        str(out.get(key) or "") for key in ("text", "brief", "system")
-    )
-    assert "Epoch 2" in combined
-    # A soft epoch counts as a compaction pass for the owner-facing counter.
-    assert int((out.get("meta") or {}).get("compress_count") or 0) >= 1
 
 
-def test_prompt_should_continue_rearms_after_tools(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    (tmp_path / "config.toml").write_text(
-        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
-        encoding="utf-8",
-    )
-    # Narrated tool promise without tool_calls → re-arm (anti-hallucination).
-    out = worker._prompt_should_continue(
-        {
-            "goal": "build the app",
-            "text": "Activating the build skill now and calling tools.",
-            "session_id": "sess-rearm",
-            "tool_count": 0,
-            "chat_mode": False,
-        }
-    )
-    assert out.get("continue") is True
-    # Mere tool_count with a finished answer must NOT force endless re-arm
-    # (that made incoherent review thrash never stop).
-    done = worker._prompt_should_continue(
-        {
-            "goal": "what is connect?",
-            "text": "Connect pairs a phone over LAN or Tailscale.",
-            "session_id": "sess-done",
-            "tool_count": 3,
-            "chat_mode": False,
-        }
-    )
-    assert done.get("continue") is False
-    chat = worker._prompt_should_continue(
-        {"goal": "hi", "text": "hello", "tool_count": 0, "chat_mode": True}
-    )
-    assert chat.get("continue") is False
 
 
-def test_worker_web_handlers_import_web_helpers() -> None:
-    """Phase 6 absolute: worker must not pull agent_web_tools registration."""
-    import inspect
-
-    src = inspect.getsource(worker._web_search) + inspect.getsource(worker._web_fetch)
-    assert "web_helpers" in src
-    assert "agent_web_tools" not in src
 
 
 def test_voice_vision_handlers_registered() -> None:
@@ -712,188 +384,23 @@ def test_voice_speak_unavailable_without_engines(
     assert out["wav_b64"] == ""
 
 
-def test_memory_search_handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    (tmp_path / "config.toml").write_text(
-        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
-        encoding="utf-8",
-    )
-
-    async def _fake_search(memory, query, *, limit=12, project_path=None):
-        assert query == "favorite color"
-        assert limit == 5
-        return [
-            {
-                "kind": "fact",
-                "title": "prefs",
-                "content": "favorite color is teal",
-                "score": 1.5,
-                "authority": "owner",
-                "inferred": False,
-            }
-        ]
-
-    monkeypatch.setattr(
-        "remedy.memory.partner_memory.search_partner_and_entries",
-        _fake_search,
-    )
-    out = worker._memory_search({"query": "favorite color", "limit": 5})
-    assert out["query"] == "favorite color"
-    assert out["total"] == 1
-    assert out["hits"][0]["content"] == "favorite color is teal"
-    assert "context" in out["notice"].lower()
 
 
-def test_memory_search_requires_query(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    with pytest.raises(ValueError, match="query"):
-        worker._memory_search({"query": "  "})
 
 
-def test_stdio_tool_round_trip_memory_search(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    (tmp_path / "config.toml").write_text(
-        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
-        encoding="utf-8",
-    )
-
-    async def _fake_search(memory, query, *, limit=12, project_path=None):
-        return [
-            {
-                "kind": "entry",
-                "title": "note",
-                "content": "wire memory hit",
-                "score": 0.9,
-            }
-        ]
-
-    monkeypatch.setattr(
-        "remedy.memory.partner_memory.search_partner_and_entries",
-        _fake_search,
-    )
-
-    req = json.dumps(
-        {
-            "tool_id": "memory.search",
-            "version": 1,
-            "input": {"query": "wire", "limit": 3},
-        }
-    ).encode("utf-8")
-    corr = b"\x08" + b"\x00" * 15
-    inbound = _frame(worker._KIND_TOOL_REQUEST, req, corr)
-
-    class _Buf:
-        def __init__(self, data: bytes) -> None:
-            self._data = data
-            self._pos = 0
-            self.out = bytearray()
-
-        def read(self, n: int) -> bytes:
-            if self._pos >= len(self._data):
-                return b""
-            chunk = self._data[self._pos : self._pos + n]
-            self._pos += len(chunk)
-            return chunk
-
-        def write(self, data: bytes) -> int:
-            self.out.extend(data)
-            return len(data)
-
-        def flush(self) -> None:
-            return None
-
-    buf = _Buf(inbound)
-    worker.serve(buf, buf)  # type: ignore[arg-type]
-
-    raw = bytes(buf.out)
-    payload_len = struct.unpack_from("<I", raw, 12)[0]
-    body = json.loads(raw[32 : 32 + payload_len].decode("utf-8"))
-    assert body["ok"] is True
-    assert body["output"]["total"] == 1
-    assert "wire memory hit" in body["output"]["hits"][0]["content"]
 
 
-def test_memory_search_registered() -> None:
-    assert ("memory.search", 1) in worker._HANDLERS
 
 
-def test_memory_save_handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
-    (tmp_path / "config.toml").write_text(
-        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
-        encoding="utf-8",
-    )
-    from remedy.runtime import prompt_assemble as pa
-
-    pa._runtime_cache.clear()
-    out = worker._memory_save(
-        {
-            "content": "Owner likes oat milk in coffee",
-            "title": "Preference",
-            "session_id": "sess-save",
-        }
-    )
-    assert out["saved"] is True
-    assert out["title"] == "Preference"
-    assert out["parent_memory"] is True
 
 
-def test_memory_save_refuses_secret(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    from remedy.runtime import prompt_assemble as pa
-
-    pa._runtime_cache.clear()
-    with pytest.raises(PermissionError, match="secret"):
-        worker._memory_save(
-            {"content": "sk-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF"}
-        )
 
 
-def test_memory_save_registered() -> None:
-    assert ("memory.save", 1) in worker._HANDLERS
 
 
-def test_skill_search_and_activate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
-    (tmp_path / "config.toml").write_text(
-        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
-        encoding="utf-8",
-    )
-    from remedy.runtime import prompt_assemble as pa
-
-    pa._runtime_cache.clear()
-    ranked = worker._skill_search({"query": "change safety", "limit": 5})
-    assert ranked["total"] >= 1
-    names = {s["name"] for s in ranked["skills"]}
-    assert "change-safety" in names or any("change" in n for n in names)
-    pick = "change-safety" if "change-safety" in names else next(iter(names))
-    activated = worker._skill_activate({"name": pick})
-    assert activated["name"] == pick
-    assert isinstance(activated["body"], str) and activated["body"].strip()
-    assert int(activated["chars"]) == len(activated["body"])
 
 
-def test_skill_activate_refuses_bulk(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    from remedy.runtime import prompt_assemble as pa
-
-    pa._runtime_cache.clear()
-    with pytest.raises(PermissionError, match="bulk"):
-        worker._skill_activate({"name": "all"})
 
 
-def test_skill_handlers_registered() -> None:
-    assert ("skill.search", 1) in worker._HANDLERS
-    assert ("skill.activate", 1) in worker._HANDLERS
 
 

@@ -106,9 +106,6 @@ func TestCognitionTurnRunnerAssemblesPromptOverRMDY(t *testing.T) {
 	if got := model.LastTurn.FirstUserText(); got != "hello partner" {
 		t.Fatalf("user message=%q", got)
 	}
-	if _, err := r.Registry.Latest("prompt.assemble"); err != nil {
-		t.Fatalf("prompt.assemble missing after attach: %v", err)
-	}
 }
 
 func TestCognitionTurnRunnerFailsClosedWhenAssembleUnavailable(t *testing.T) {

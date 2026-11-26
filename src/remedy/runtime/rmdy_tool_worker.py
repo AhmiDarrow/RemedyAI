@@ -611,120 +611,14 @@ def _workspace_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     }
 
 
-def _web_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bridge Tool ABI web.search to the existing agent web_search backend."""
-    from remedy.core.web_helpers import SearchBlockedError, run_search, web_tools_enabled
-
-    if not web_tools_enabled(None):
-        raise PermissionError("web tools are disabled")
-    query = str(inp.get("query") or "").strip()
-    if not query:
-        raise ValueError("query is required")
-    if len(query) > 400:
-        query = query[:400]
-    raw_max = inp.get("max_results", 5)
-    try:
-        max_results = int(raw_max) if raw_max is not None else 5
-    except (TypeError, ValueError):
-        max_results = 5
-    max_results = max(1, min(10, max_results))
-    try:
-        rows, backend = run_search(query, max_results=max_results, timeout=20.0, runtime=None)
-    except SearchBlockedError as blocked:
-        # Say why there are no results, so the model stops searching instead
-        # of retrying and then scraping search engines that refuse it.
-        return {
-            "query": query,
-            "backend": "DuckDuckGo HTML",
-            "results": [],
-            "blocked": True,
-            "note": str(blocked),
-        }
-    results: list[dict[str, str]] = []
-    for row in rows:
-        item: dict[str, str] = {
-            "title": str(row.get("title") or ""),
-            "url": str(row.get("url") or ""),
-        }
-        snippet = str(row.get("snippet") or "").strip()
-        if snippet:
-            item["snippet"] = snippet
-        results.append(item)
-    return {"query": query, "backend": str(backend), "results": results}
 
 
-def _web_fetch(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bridge Tool ABI web.fetch to polite_fetch + HTML extract (SSRF-guarded)."""
-    from remedy.core.web_helpers import polite_fetch, web_tools_enabled
-
-    if not web_tools_enabled(None):
-        raise PermissionError("web tools are disabled")
-    url = str(inp.get("url") or "").strip()
-    if not url:
-        raise ValueError("url is required")
-    if not url.startswith(("http://", "https://")):
-        raise ValueError("url must start with http:// or https://")
-    raw_cap = inp.get("max_chars", 50_000)
-    try:
-        cap = int(raw_cap) if raw_cap is not None else 50_000
-    except (TypeError, ValueError):
-        cap = 50_000
-    cap = max(1000, min(200_000, cap))
-
-    final_url, raw, charset = polite_fetch(
-        url, max_chars=max(cap * 4, 200_000), timeout=25.0, runtime=None
-    )
-    text = raw.decode(charset or "utf-8", errors="replace")
-    from remedy.core.html_extract import html_to_markdown, looks_like_html
-
-    out: dict[str, Any] = {
-        "url": url,
-        "final_url": str(final_url or url),
-        "content": text,
-        "format": "text",
-    }
-    truncated = False
-    if looks_like_html(raw):
-        extracted = html_to_markdown(text, max_chars=cap)
-        md = str(extracted.get("markdown") or "")
-        body = md.strip()
-        title = str(extracted.get("title") or "").strip()
-        if body:
-            out["content"] = body
-            out["format"] = "markdown"
-            if title:
-                out["title"] = title
-            truncated = f"…[truncated at {cap} chars]" in md
-        else:
-            if len(text) > cap:
-                out["content"] = text[:cap]
-                truncated = True
-            if title:
-                out["title"] = title
-    elif len(text) > cap:
-        out["content"] = text[:cap]
-        truncated = True
-    if truncated:
-        out["truncated"] = True
-    return out
 
 
-def _prompt_assemble(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.runtime.prompt_assemble import assemble_prompt
-
-    return assemble_prompt(inp)
 
 
-def _prompt_slim_epoch(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.runtime.prompt_assemble import slim_epoch
-
-    return slim_epoch(inp)
 
 
-def _prompt_should_continue(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.runtime.prompt_assemble import should_continue
-
-    return should_continue(inp)
 
 
 def _prompt_turn_end(inp: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -733,16 +627,8 @@ def _prompt_turn_end(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return finish_production_turn(inp)
 
 
-def _prompt_after_tool_batch(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.core.production_learn import admit_production_tool_batch
-
-    return admit_production_tool_batch(inp)
 
 
-def _partner_improve(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.core.production_learn import run_unattended_learn
-
-    return run_unattended_learn(inp)
 
 
 def _voice_speak(inp: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -811,192 +697,61 @@ def _vision_progress(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return vision_progress(inp)
 
 
-def _memory_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bridge Tool ABI memory.search to Partner Memory + FTS (forever-Python)."""
-    from remedy.runtime.prompt_assemble import search_memory
-
-    return search_memory(inp)
-
-
-def _memory_save(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bridge Tool ABI memory.save to Partner Memory write (forever-Python)."""
-    from remedy.runtime.prompt_assemble import save_memory
-
-    return save_memory(inp)
-
-
-def _skill_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bridge Tool ABI skill.search to SkillRegistry ranking."""
-    from remedy.runtime.prompt_assemble import search_skills
-
-    return search_skills(inp)
-
-
-def _skill_activate(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bridge Tool ABI skill.activate to one skill body load."""
-    from remedy.runtime.prompt_assemble import activate_skill
-
-    return activate_skill(inp)
-
-
-def _mail_list(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.runtime.mail_calendar_tools import mail_list
-
-    return mail_list(inp)
-
-
-def _mail_send(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.runtime.mail_calendar_tools import mail_send
-
-    return mail_send(inp)
-
-
-def _calendar_list_events(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.runtime.mail_calendar_tools import calendar_list_events
-
-    return calendar_list_events(inp)
-
-
-def _calendar_create_event(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.runtime.mail_calendar_tools import calendar_create_event
-
-    return calendar_create_event(inp)
-
-
-def _partner_home(inp: Mapping[str, Any]) -> str | None:
-    """home_dir is present only when the runtime bound it."""
-    home = str(inp.get("home_dir") or "").strip()
-    return home or None
-
-
-def _partner_vigil(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Owner yes/no for muscle-free nights. Does not call a provider."""
-    from remedy.memory.soul.vigil import set_vigil_enabled, vigil_status
-
-    action = str(inp.get("action") or "status").strip().lower()
-    home = _partner_home(inp)
-    if action == "enable":
-        set_vigil_enabled(True, home)
-    elif action == "disable":
-        set_vigil_enabled(False, home)
-    elif action != "status":
-        return {"ok": False, "error": "action must be status, enable, or disable"}
-    return {"ok": True, "vigil": vigil_status(home)}
 
 
 
-def _house_rules(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """First-run house rules and talk-to-change settings."""
-    from remedy.core.house_rules import dispatch
-
-    data = dict(inp)
-    home = _partner_home(inp)
-    if home:
-        data["home_dir"] = home
-    try:
-        out = dispatch(data)
-    except Exception:
-        logger.exception("house_rules failed")
-        return {"ok": False, "error": "house rules action failed"}
-    return out if isinstance(out, dict) else {"ok": False, "error": "invalid house rules result"}
-
-
-def _setup_session(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Internal first-run setup session (same store as house_rules)."""
-    from remedy.core.house_rules import dispatch
-
-    data = dict(inp)
-    home = _partner_home(inp)
-    if home:
-        data["home_dir"] = home
-    action = str(data.get("action") or "status").strip().lower()
-    if action in ("", "get"):
-        data["action"] = "status"
-    try:
-        out = dispatch(data)
-    except Exception:
-        logger.exception("setup.session failed")
-        return {"ok": False, "error": "setup session action failed"}
-    return out if isinstance(out, dict) else {"ok": False, "error": "invalid setup session result"}
-
-
-def _partner_pulse(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """One hearth night tick. Local field only — never a model call."""
-    from remedy.memory.soul.vigil import vigil_tick
-
-    home = _partner_home(inp)
-    try:
-        out = vigil_tick(home)
-    except Exception:
-        logger.exception("partner.pulse failed")
-        return {"ok": False, "error": "night pulse failed"}
-    keep = ("ok", "skipped", "woke", "rested", "act")
-    vigil = {k: out.get(k) for k in keep if k in out}
-    return {"ok": True, "vigil": vigil}
 
 
 
-def _peer_home(inp: Mapping[str, Any]) -> str | None:
-    home = str(inp.get("home_dir") or "").strip()
-    return home or None
 
 
-def _peer_list(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.interop.runtime import InteropRuntime
-
-    rt = InteropRuntime(_peer_home(inp))
-    contacts = rt.list_contacts(enabled_only=False)
-    public = [
-        {
-            "id": p.get("id"),
-            "name": p.get("name"),
-            "protocol": p.get("protocol"),
-            "skills": p.get("skills") or [],
-            "enabled": p.get("enabled", True),
-        }
-        for p in contacts
-    ]
-    return {"ok": True, "peers": public, "total": len(public)}
 
 
-def _peer_dispatch(inp: Mapping[str, Any], field: str) -> Mapping[str, Any]:
-    from remedy.interop.orchestrate import delegate_to_peer, merge_results
-    from remedy.interop.runtime import InteropRuntime
-
-    text = str(inp.get(field) or inp.get("question") or inp.get("task") or "").strip()
-    if not text:
-        return {"ok": False, "error": f"{field} is required", "results": [], "summary": ""}
-    rt = InteropRuntime(_peer_home(inp))
-    peer_id = str(inp.get("peer_id") or "").strip()
-    if peer_id:
-        peer = rt.load_peer(peer_id)
-        if peer is None:
-            return {"ok": False, "error": "unknown peer", "results": [], "summary": ""}
-        one = delegate_to_peer(peer, text)
-        merged = merge_results([one])
-        return {"ok": bool(one.get("ok")), **merged}
-    return rt.orchestrate(text)
 
 
-def _peer_ask(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    return _peer_dispatch(inp, "question")
 
 
-def _peer_delegate(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    return _peer_dispatch(inp, "task")
 
 
-def _peer_status(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.interop.runtime import InteropRuntime
 
-    tid = str(inp.get("task_id") or "").strip()
-    if not tid:
-        return {"ok": False, "error": "task_id is required"}
-    rt = InteropRuntime(_peer_home(inp))
-    return rt.task_status(tid)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def _worker_probe(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Go's attach probe: import what the live tools need, run nothing.
+
+    A packaged worker missing a dependency fails here at startup, with the
+    traceback in the worker log, instead of on the first chat turn.
+    """
+    _ = inp
+    import remedy.core.production_learn  # noqa: F401
+    import remedy.runtime.voice_vision_rmdy  # noqa: F401
+
+    return {"ok": True}
 
 
 _HANDLERS: dict[tuple[str, int], ToolHandler] = {
+    ("worker.probe", 1): _worker_probe,
     ("text.slugify", 1): lambda inp: {"slug": _slugify(str(inp.get("text", "")))},
     ("text.word_count", 1): lambda inp: {"words": _word_count(str(inp.get("text", "")))},
     ("workspace.read", 1): _workspace_read,
@@ -1004,13 +759,7 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("workspace.write", 1): _workspace_write,
     ("workspace.edit", 1): _workspace_edit,
     ("workspace.search", 1): _workspace_search,
-    ("web.search", 1): _web_search,
-    ("web.fetch", 1): _web_fetch,
-    ("prompt.assemble", 1): _prompt_assemble,
-    ("prompt.slim_epoch", 1): _prompt_slim_epoch,
-    ("prompt.should_continue", 1): _prompt_should_continue,
     ("prompt.turn_end", 1): _prompt_turn_end,
-    ("prompt.after_tool_batch", 1): _prompt_after_tool_batch,
     ("voice.speak", 1): _voice_speak,
     ("voice.transcribe", 1): _voice_transcribe,
     ("voice.install", 1): _voice_install,
@@ -1022,23 +771,6 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("vision.start", 1): _vision_start,
     ("vision.stop", 1): _vision_stop,
     ("vision.progress", 1): _vision_progress,
-    ("memory.search", 1): _memory_search,
-    ("memory.save", 1): _memory_save,
-    ("skill.search", 1): _skill_search,
-    ("skill.activate", 1): _skill_activate,
-    ("mail.list", 1): _mail_list,
-    ("mail.send", 1): _mail_send,
-    ("calendar.list_events", 1): _calendar_list_events,
-    ("calendar.create_event", 1): _calendar_create_event,
-    ("partner.vigil", 1): _partner_vigil,
-    ("house_rules", 1): _house_rules,
-    ("setup.session", 1): _setup_session,
-    ("partner.pulse", 1): _partner_pulse,
-    ("partner.improve", 1): _partner_improve,
-    ("peer.list", 1): _peer_list,
-    ("peer.ask", 1): _peer_ask,
-    ("peer.delegate", 1): _peer_delegate,
-    ("peer.status", 1): _peer_status,
 }
 
 

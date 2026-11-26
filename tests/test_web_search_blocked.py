@@ -83,18 +83,6 @@ def test_results_still_parse_when_not_blocked(monkeypatch: pytest.MonkeyPatch) -
     assert rows and rows[0]["url"] == "https://example.com/a"
 
 
-def test_worker_web_search_reports_blocked_in_words(monkeypatch: pytest.MonkeyPatch) -> None:
-    from remedy.runtime import rmdy_tool_worker as worker
-
-    monkeypatch.setattr(wh, "web_tools_enabled", lambda _rt=None: True)
-
-    def blocked(*_a, **_kw):
-        raise wh.SearchBlockedError(wh.SEARCH_BLOCKED_NOTE)
-
-    monkeypatch.setattr(wh, "run_search", blocked)
-    out = worker._web_search({"query": "breakfast"})
-    assert out["blocked"] is True and out["results"] == []
-    assert "never solves" in out["note"] and "Browser" in out["note"]
 
 
 def test_search_public_web_stays_quiet_when_blocked(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -60,11 +60,11 @@ type StartedProcess struct {
 // ErrProcessClosed is returned by StartedProcess.Wait once Cleanup ran.
 var ErrProcessClosed = errors.New("process handle closed")
 
-// attachProbeDefault is the tool the attach probe executes. prompt.assemble
-// exercises the full import chain (config, models, memory) so a packaged
-// worker missing a dependency fails at startup with the traceback in the
-// worker log rather than on the first chat turn.
-const attachProbeDefault = "prompt.assemble"
+// attachProbeDefault is the tool the attach probe executes. worker.probe
+// imports what the worker's live tools need (the learning loop, voice and
+// vision) so a packaged worker missing a dependency fails at startup with the
+// traceback in the worker log rather than on the first chat turn.
+const attachProbeDefault = "worker.probe"
 
 // ProcessStarter starts argv with the given environment. Production uses Zig
 // remedy_core authorized spawn (no os/exec). Tests may inject os/exec.
@@ -344,10 +344,7 @@ func probeWorker(ctx context.Context, client *ipc.Client, opts RMDYToolOptions, 
 	}
 	input := map[string]any{"_go_bound": true}
 	switch tool {
-	case "prompt.assemble":
-		input["message"] = "attach probe"
-		input["session_id"] = "rmdy-attach-probe"
-		input["chat_mode"] = true
+	case "worker.probe":
 		if home := strings.TrimSpace(opts.HomeDir); home != "" {
 			input["home_dir"] = home
 		}

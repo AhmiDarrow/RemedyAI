@@ -393,7 +393,7 @@ func TestModelTurnCannotCallToolsItWasNotShown(t *testing.T) {
 	}
 	// The Python worker registers these in production; stub them so the
 	// registry lookup is not what turns them away.
-	for _, id := range []string{"workspace.write", "prompt.turn_end", "setup.session"} {
+	for _, id := range []string{"workspace.write", "prompt.turn_end"} {
 		if err := reg.Register(tools.Descriptor{
 			ID: id, Version: 1, Description: "stub", Risk: tools.RiskReadOnly, Runtime: tools.RuntimeGo,
 			InputSchema: json.RawMessage(`{"type":"object"}`), OutputSchema: json.RawMessage(`{"type":"object"}`),
