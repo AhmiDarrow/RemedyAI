@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -654,5 +655,32 @@ func TestEditLooseMatchChangesTheMatchedPlace(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join(root, "c.txt"))
 	if err != nil || string(body) != "keep xfoo \nbar\ndone\n" {
 		t.Fatalf("edited the wrong place: %q %v", body, err)
+	}
+}
+
+// Rewriting a file keeps its permissions: a private file stays private and a
+// script stays executable.
+func TestEditKeepsFilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX modes")
+	}
+	root := t.TempDir()
+	writeFileForTest(t, root, "secret.env", "TOKEN=a\n")
+	writeFileForTest(t, root, "run.sh", "#!/bin/sh\necho a\n")
+	if err := os.Chmod(filepath.Join(root, "secret.env"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(root, "run.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	registry := fileRegistry(t)
+	for name, want := range map[string]os.FileMode{"secret.env": 0o600, "run.sh": 0o755} {
+		mustCall(t, registry, "edit", map[string]any{
+			"path": name, "old_string": "a\n", "new_string": "b\n", "workspace_root": root,
+		})
+		info, err := os.Stat(filepath.Join(root, name))
+		if err != nil || info.Mode().Perm() != want {
+			t.Fatalf("%s mode = %v, want %v (%v)", name, info.Mode().Perm(), want, err)
+		}
 	}
 }

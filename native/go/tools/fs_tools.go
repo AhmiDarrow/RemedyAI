@@ -788,8 +788,19 @@ func atomicWriteInRoot(root *os.Root, rel string, data []byte) error {
 	if file == nil {
 		return fmt.Errorf("%w: could not create a temporary file beside %q", ErrInvalidInput, rel)
 	}
+	// Keep the replaced file's permissions: a rewrite used to turn a 0600
+	// file 0644 (readable by other users) and drop a script's execute bit.
+	var keepMode os.FileMode
+	if info, err := root.Stat(rel); err == nil && info.Mode().IsRegular() {
+		keepMode = info.Mode().Perm()
+	}
 	writeErr := func() error {
 		defer file.Close()
+		if keepMode != 0 {
+			if err := file.Chmod(keepMode); err != nil && runtime.GOOS != "windows" {
+				return err
+			}
+		}
 		if _, err := file.Write(data); err != nil {
 			return err
 		}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -208,8 +209,17 @@ func atomicWriteHost(abs string, data []byte) error {
 	if file == nil {
 		return fmt.Errorf("%w: could not create a temporary file beside %q", ErrInvalidInput, abs)
 	}
+	var keepMode os.FileMode
+	if info, err := os.Stat(abs); err == nil && info.Mode().IsRegular() {
+		keepMode = info.Mode().Perm()
+	}
 	writeErr := func() error {
 		defer file.Close()
+		if keepMode != 0 {
+			if err := file.Chmod(keepMode); err != nil && runtime.GOOS != "windows" {
+				return err
+			}
+		}
 		if _, err := file.Write(data); err != nil {
 			return err
 		}
