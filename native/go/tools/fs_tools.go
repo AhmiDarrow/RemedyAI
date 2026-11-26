@@ -581,12 +581,14 @@ func executeEdit(_ context.Context, request Request) (Result, error) {
 
 	text := string(payload)
 	count := strings.Count(text, oldStr)
+	looseStart, looseEnd := -1, -1
 	if count == 0 {
 		// Models often drop or add spaces at the ends of lines. When the text
 		// matches one place once those are ignored, that place is the edit.
+		// Splice at that span: the same bytes may also sit earlier mid-line
+		// ("xfoo \nbar"), where a text replace would change the wrong place.
 		if start, end, n := matchIgnoringLineEnds(text, oldStr); n == 1 {
-			oldStr, count = text[start:end], 1
-
+			looseStart, looseEnd, count = start, end, 1
 		}
 	}
 	switch {
@@ -601,7 +603,9 @@ func executeEdit(_ context.Context, request Request) (Result, error) {
 	}
 
 	replacements := 1
-	if body.ReplaceAll {
+	if looseStart >= 0 {
+		text = text[:looseStart] + newStr + text[looseEnd:]
+	} else if body.ReplaceAll {
 		replacements = count
 		text = strings.ReplaceAll(text, oldStr, newStr)
 	} else {
