@@ -1942,6 +1942,9 @@ func spawnAuthorized(ctx context.Context, spec shellSpawnSpec) (core.PipedProces
 	if err := ctx.Err(); err != nil {
 		return core.PipedProcess{}, fmt.Errorf("shell spawn: %w", err)
 	}
+	if spawnNamesSecret(spec.argv, spec.cwd) {
+		return core.PipedProcess{}, fmt.Errorf("%w: the command names a path that leads into the auth secrets folder", ErrInvalidInput)
+	}
 	home := resolveToolHome()
 	key, err := secret.EnsureHostSigningKey(home)
 	if err != nil {
@@ -1965,6 +1968,34 @@ func spawnAuthorized(ctx context.Context, spec shellSpawnSpec) (core.PipedProces
 		return core.PipedProcess{}, err
 	}
 	return spawnShellUnderJail(roots, spec.argv, spec.cwd, spec.env, token, false, nowMS)
+}
+
+// spawnNamesSecret reports a word of the command that is an existing path
+// into the auth secrets once links and junctions are resolved. The core reads
+// the spelling only, so `findstr . link/token` through a junction printed the
+// file. A filter, like the rest of the shell checks: it sees the paths the
+// command names, not the ones a program computes.
+func spawnNamesSecret(argv []string, cwd string) bool {
+	if cwd != "" && isSecretAuthPath(cwd) {
+		return true
+	}
+	for _, arg := range argv {
+		words := strings.FieldsFunc(arg, func(r rune) bool {
+			return r == ' ' || r == '\t' || r == '\r' || r == '\n' || strings.ContainsRune(`"'|;&<>()=,`, r)
+		})
+		for _, w := range append(words, arg) {
+			if !filepath.IsAbs(w) {
+				if cwd == "" {
+					continue
+				}
+				w = filepath.Join(cwd, w)
+			}
+			if _, err := os.Lstat(w); err == nil && isSecretAuthPath(w) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // spawnShellUnderJail installs the write roots and spawns under the core

@@ -114,10 +114,9 @@ func TestBashRefusesInterpreterPathEnvAndRelativeCwd(t *testing.T) {
 func TestBashPropagatesExitCode(t *testing.T) {
 	requireHostSpawn(t)
 	registry := shellRegistry(t)
+	// "exit 3" means the same to sh, cmd and PowerShell; the host shell on
+	// Windows is PowerShell where it is installed, and cmd syntax fails there.
 	command := "exit 3"
-	if runtime.GOOS == "windows" {
-		command = "echo failing 1>&2 & exit /b 3"
-	}
 	out := mustCall(t, registry, "bash", map[string]any{"command": command, "timeout_ms": 30000})
 	if got := asInt(t, out["exit_code"]); got != 3 {
 		t.Fatalf("exit_code=%d want 3 (%#v)", got, out)
