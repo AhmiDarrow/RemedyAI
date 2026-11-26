@@ -60,7 +60,6 @@ _PROTOCOL_VERSION = 1
 _HEADER_SIZE = 32
 _MAX_PAYLOAD = 16 << 20
 _MAGIC = b"RMDY"
-_READ_CHAR_CAP = 512_000
 _MAX_WORKERS = 8
 _LOG_MAX_BYTES = 2 * 1024 * 1024
 _LOG_BACKUPS = 3
@@ -89,19 +88,6 @@ EXIT_MISSING_DEPENDENCIES = 78
 
 # Hidden test-only tools (never advertised) — enabled by REMEDY_RMDY_TEST_TOOLS=1.
 _ENV_TEST_TOOLS = "REMEDY_RMDY_TEST_TOOLS"
-_SKIP_DIR_NAMES = {
-    ".git",
-    "__pycache__",
-    "node_modules",
-    ".venv",
-    "venv",
-    ".tox",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    "zig-cache",
-    "zig-out",
-}
 
 _KIND_TOOL_REQUEST = 1
 _KIND_TOOL_RESULT = 2
@@ -111,611 +97,44 @@ _KIND_HEALTH = 7
 ToolHandler = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 
 
-def _slugify(text: str) -> str:
-    lowered = text.lower()
-    parts: list[str] = []
-    last_hyphen = True
-    for ch in lowered:
-        if ch.isalnum():
-            parts.append(ch)
-            last_hyphen = False
-        elif not last_hyphen:
-            parts.append("-")
-            last_hyphen = True
-    return "".join(parts).strip("-")
-
-
-def _word_count(text: str) -> int:
-    return len(text.split())
-
-
-def _looks_like_install_dir(path: Path) -> bool:
-    """Packaged Desktop install folder — never a project workspace."""
-    try:
-        p = path.expanduser().resolve()
-    except OSError:
-        return False
-    markers = (
-        "Remedy Desktop.exe",
-        "remedy-runtime.exe",
-        "remedy-runtime",
-        "uninstall.exe",
-    )
-    if any((p / name).exists() for name in markers):
-        return True
-    return (p / "webui").is_dir() and (p / "windows").is_dir()
-
-
-def _workspace_root(inp: Mapping[str, Any] | None = None) -> Path:
-    """Resolve the active project root.
-
-    Prefer per-call workspace_root/project_path, then env, then config.toml,
-    then a narrow owner folder (~/Remedy). Never fall back to the
-    packaged Desktop install cwd or the entire user profile.
-    """
-    if inp:
-        for key in ("workspace_root", "project_path"):
-            raw = str(inp.get(key) or "").strip()
-            if raw and raw not in {".", "./"}:
-                try:
-                    cand = Path(raw).expanduser().resolve()
-                except OSError:
-                    cand = Path(raw).expanduser().absolute()
-                if not _is_user_home_path(cand) and not _looks_like_install_dir(cand):
-                    return cand
-
-    for key in ("REMEDY_WORKSPACE", "REMEDY_PROJECT_PATH", "REMEDY_PROJECT", "REMEDY_FILES_ROOT"):
-        raw = (os.environ.get(key) or "").strip()
-        if raw and raw not in {".", "./"}:
-            try:
-                cand = Path(raw).expanduser().resolve()
-            except OSError:
-                cand = Path(raw).expanduser().absolute()
-            if not _is_user_home_path(cand) and not _looks_like_install_dir(cand):
-                return cand
-
-    home = (os.environ.get("REMEDY_HOME") or "").strip()
-    if home:
-        cfg = Path(home).expanduser() / "config.toml"
-        try:
-            text = cfg.read_text(encoding="utf-8")
-        except OSError:
-            text = ""
-        for line in text.splitlines():
-            s = line.strip()
-            if not s or s.startswith("#") or not s.lower().startswith("project_path"):
-                continue
-            if "=" not in s:
-                continue
-            val = s.split("=", 1)[1].strip().strip("\"'")
-            # Writers escape Windows paths as C:\\Users\\… in TOML strings.
-            val = val.replace("\\\\", "\\")
-            if val and val not in {".", "./"}:
-                try:
-                    cand = Path(val).expanduser().resolve()
-                except OSError:
-                    cand = Path(val).expanduser().absolute()
-                if not _is_user_home_path(cand) and not _looks_like_install_dir(cand):
-                    return cand
-
-    try:
-        cwd = Path.cwd().resolve()
-    except OSError:
-        cwd = Path.cwd().absolute()
-    if not _looks_like_install_dir(cwd) and not _is_user_home_path(cwd):
-        return cwd
-
-    return _default_owner_workspace()
-
-
-def _is_user_home_path(path: Path) -> bool:
-    try:
-        home = Path.home().expanduser().resolve()
-        return path.expanduser().resolve() == home
-    except OSError:
-        try:
-            return path.expanduser().absolute() == Path.home().expanduser().absolute()
-        except OSError:
-            return False
-
-
-def _default_owner_workspace() -> Path:
-    """Narrow default — never the entire user profile."""
-    try:
-        user_home = Path.home().expanduser().resolve()
-    except OSError:
-        user_home = Path.home().expanduser().absolute()
-    docs = user_home / "Documents" / "Remedy"
-    try:
-        docs.mkdir(parents=True, exist_ok=True)
-        return docs.resolve()
-    except OSError:
-        pass
-    fallback = user_home / ".remedy" / "workspace"
-    try:
-        fallback.mkdir(parents=True, exist_ok=True)
-        return fallback.resolve()
-    except OSError:
-        # Never jail to the entire profile when both owner folders fail.
-        rem_home = (os.environ.get("REMEDY_HOME") or "").strip()
-        if rem_home:
-            try:
-                p = Path(rem_home).expanduser() / "workspace"
-                p.mkdir(parents=True, exist_ok=True)
-                return p.resolve()
-            except OSError:
-                pass
-        return docs
-
-
-def _resolve_workspace_path(path: str, inp: Mapping[str, Any] | None = None) -> Path:
-    root = _workspace_root(inp)
-    try:
-        from remedy.core.security import refuse_protected_secret_path
-
-        refuse_protected_secret_path(root)
-    except ImportError:
-        pass
-    raw = (path or ".").strip() or "."
-    candidate = Path(raw).expanduser()
-    if not candidate.is_absolute():
-        candidate = root / candidate
-    resolved = candidate.resolve()
-    try:
-        from remedy.core.security import refuse_protected_secret_path
-
-        refuse_protected_secret_path(resolved)
-    except ImportError:
-        pass
-    try:
-        resolved.relative_to(root)
-    except ValueError as exc:
-        raise PermissionError(f"path escapes workspace root: {path}") from exc
-    return resolved
-
-
-def _is_credential_name(name: str) -> bool:
-    try:
-        from remedy.core.security import is_credential_filename
-
-        return bool(is_credential_filename(name))
-    except Exception:  # noqa: BLE001 — worker must stay up without full package
-        lowered = name.lower()
-        return lowered in {".env", ".npmrc", ".pypirc"} or lowered.endswith(
-            (".pem", ".key", ".p12", ".pfx")
-        )
-
-
-def _is_junk_listing_name(name: str) -> bool:
-    """Hide corrupt / private-use names (e.g. 'C' + U+F03A) from listings."""
-    if not name or name in {".", ".."}:
-        return True
-    for ch in name:
-        o = ord(ch)
-        if o < 32 or o == 127 or 0xE000 <= o <= 0xF8FF:
-            return True
-    return False
-
-
-def _workspace_read(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    path = str(inp.get("path") or "").strip()
-    if not path:
-        raise ValueError("path is required")
-    target = _resolve_workspace_path(path, inp)
-    if _is_credential_name(target.name) or any(_is_credential_name(p) for p in target.parts):
-        raise PermissionError("credential-looking files are not readable")
-    if not target.exists():
-        raise FileNotFoundError(f"file not found: {path}")
-    if target.is_dir():
-        raise IsADirectoryError(f"path is a directory: {path}")
-    try:
-        from remedy.core.text_files import is_probably_text
-
-        if not is_probably_text(target):
-            raise ValueError(f"binary or non-text file: {path}")
-    except ImportError:
-        pass
-    text = target.read_text(encoding="utf-8", errors="replace")
-    # ``offset`` is a 1-based line number (0 and 1 both mean "from the top").
-    try:
-        offset = max(1, int(inp.get("offset") or 1))
-    except (TypeError, ValueError):
-        offset = 1
-    limit_raw = inp.get("limit")
-    limit: int | None
-    try:
-        limit = None if limit_raw is None else max(1, int(limit_raw))
-    except (TypeError, ValueError):
-        limit = None
-    number_lines = bool(inp.get("line_numbers") or False)
-
-    lines = text.splitlines(keepends=True)
-    total_lines = len(lines)
-    start = min(offset - 1, total_lines)
-    end = total_lines if limit is None else min(total_lines, start + limit)
-    window = lines[start:end]
-    more_lines = end < total_lines
-
-    if number_lines:
-        width = max(1, len(str(end)))
-        body = "".join(f"{start + i + 1:>{width}}\t{line}" for i, line in enumerate(window))
-    else:
-        body = "".join(window)
-    truncated = more_lines
-    if len(body) > _READ_CHAR_CAP:
-        body = body[:_READ_CHAR_CAP]
-        truncated = True
-        # Chars, not lines, bounded the window: the caller should resume at
-        # the last fully-included line rather than trust ``end``.
-        included = body.count("\n")
-        end = start + included
-        more_lines = end < total_lines
-
-    try:
-        rel = str(target.relative_to(_workspace_root(inp)).as_posix())
-    except ValueError:
-        rel = str(target)
-    out: dict[str, Any] = {
-        "path": rel,
-        "content": body,
-        "total_lines": total_lines,
-        "line_start": min(start + 1, max(total_lines, 1)),
-        "line_end": end,
-    }
-    if truncated:
-        out["truncated"] = True
-    if more_lines:
-        out["next_offset"] = end + 1
-    return out
-
-
-def _workspace_list(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    path = str(inp.get("path") or ".").strip() or "."
-    target = _resolve_workspace_path(path, inp)
-    if not target.exists():
-        raise FileNotFoundError(f"path not found: {path}")
-    if not target.is_dir():
-        raise NotADirectoryError(f"not a directory: {path}")
-    try:
-        limit = max(1, min(2000, int(inp.get("limit") or 200)))
-    except (TypeError, ValueError):
-        limit = 200
-    try:
-        offset = max(0, int(inp.get("offset") or 0))
-    except (TypeError, ValueError):
-        offset = 0
-    root = _workspace_root(inp)
-    entries = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
-    visible = [
-        p
-        for p in entries
-        if p.name not in _SKIP_DIR_NAMES
-        and not _is_credential_name(p.name)
-        and not _is_junk_listing_name(p.name)
-    ]
-    page = visible[offset : offset + limit]
-    items: list[dict[str, str]] = []
-    for p in page:
-        try:
-            name = p.relative_to(root).as_posix()
-        except ValueError:
-            name = p.name
-        items.append({"name": name, "kind": "dir" if p.is_dir() else "file"})
-    out: dict[str, Any] = {
-        "path": path,
-        "entries": items,
-        "total": len(visible),
-    }
-    if offset + len(items) < len(visible):
-        out["truncated"] = True
-    return out
-
-
-def _workspace_write(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bridge Tool ABI workspace.write to atomic workspace file write + agent guards."""
-    path = str(inp.get("path") or "").strip()
-    if not path:
-        raise ValueError("path is required")
-    if "content" not in inp:
-        raise ValueError("content is required")
-    raw_content = inp.get("content")
-    if raw_content is None:
-        raise ValueError("content is required")
-    if isinstance(raw_content, (dict, list)):
-        body = json.dumps(raw_content, ensure_ascii=False)
-    elif isinstance(raw_content, str):
-        body = raw_content
-    else:
-        body = str(raw_content)
-
-    from remedy.core.workspace_tools.guards import (
-        junk_write_guard,
-        looks_like_history_stub_text,
-        reserved_guard,
-    )
-
-    bad = reserved_guard(path)
-    if bad:
-        raise PermissionError(bad)
-    junk = junk_write_guard(path)
-    if junk:
-        raise PermissionError(junk)
-    if looks_like_history_stub_text(body):
-        raise ValueError("refusing to write provider-history summary stub as file content")
-
-    target = _resolve_workspace_path(path, inp)
-    if _is_credential_name(target.name) or any(_is_credential_name(p) for p in target.parts):
-        raise PermissionError("credential-looking files are not writable")
-    if target.exists() and target.is_dir():
-        raise IsADirectoryError(f"path is a directory: {path}")
-
-    created = not target.is_file()
-    from remedy.core.atomic_json import write_text_atomic
-
-    write_text_atomic(target, body)
-    try:
-        rel = str(target.relative_to(_workspace_root(inp)).as_posix())
-    except ValueError:
-        rel = str(target)
-    return {
-        "path": rel,
-        "bytes_written": len(body.encode("utf-8")),
-        "created": created,
-    }
-
-
-def _workspace_edit(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bridge Tool ABI workspace.edit to jailed search/replace (file_edit parity)."""
-    path = str(inp.get("path") or "").strip()
-    if not path:
-        raise ValueError("path is required")
-
-    from remedy.core.workspace_tools.guards import reserved_guard
-
-    bad = reserved_guard(path)
-    if bad:
-        raise PermissionError(bad)
-
-    target = _resolve_workspace_path(path, inp)
-    if _is_credential_name(target.name) or any(_is_credential_name(p) for p in target.parts):
-        raise PermissionError("credential-looking files are not editable")
-    if not target.is_file():
-        raise FileNotFoundError(f"file not found: {path}")
-
-    # Byte-exact round trip: keep the BOM and every CR/LF as found on disk.
-    # ``Path.read_text`` would fold CRLF to LF and the rewrite would silently
-    # re-line-end the whole file.
-    raw_bytes = target.read_bytes()
-    bom = b"\xef\xbb\xbf" if raw_bytes.startswith(b"\xef\xbb\xbf") else b""
-    try:
-        content = raw_bytes[len(bom) :].decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise ValueError(f"file is not UTF-8 text: {path}") from exc
-
-    from remedy.core.file_edit import apply_multi_hunk, apply_search_replace
-
-    hunks_raw = inp.get("edits")
-    if hunks_raw is not None:
-        if not isinstance(hunks_raw, list) or not hunks_raw:
-            raise ValueError("edits must be a non-empty list of {old_string,new_string}")
-        result = apply_multi_hunk(content, hunks_raw)
-    else:
-        old_string = inp.get("old_string")
-        if old_string is None:
-            raise ValueError("old_string is required (or pass edits=[...])")
-        new_string = inp.get("new_string")
-        if new_string is None:
-            raise ValueError("new_string is required")
-        replace_all = bool(inp.get("replace_all") or False)
-        result = apply_search_replace(
-            content,
-            str(old_string),
-            str(new_string),
-            replace_all=replace_all,
-        )
-
-    if not result.ok or result.new_content is None:
-        raise ValueError(result.message or "edit failed")
-
-    if result.new_content != content:
-        from remedy.core.atomic_json import write_bytes_atomic
-
-        write_bytes_atomic(target, bom + result.new_content.encode("utf-8"))
-
-    try:
-        rel = str(target.relative_to(_workspace_root(inp)).as_posix())
-    except ValueError:
-        rel = str(target)
-    return {
-        "path": rel,
-        "occurrences": int(result.occurrences or 0),
-        "hunks_applied": int(result.hunks_applied or 0),
-        "message": str(result.message or ""),
-        "changed": result.new_content != content,
-    }
-
-
-def _workspace_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bridge Tool ABI workspace.search to repo_search (rg or Python sniff)."""
-    pattern = str(inp.get("pattern") or "").strip()
-    if not pattern:
-        raise ValueError("pattern is required")
-    path = str(inp.get("path") or ".").strip() or "."
-    glob = str(inp.get("glob") or "").strip() or None
-    raw_max = inp.get("max_matches", 50)
-    try:
-        max_matches = int(raw_max) if raw_max is not None else 50
-    except (TypeError, ValueError):
-        max_matches = 50
-    max_matches = max(1, min(500, max_matches))
-    case_insensitive = bool(inp.get("case_insensitive") or False)
-    try:
-        context = int(inp.get("context") or 0)
-    except (TypeError, ValueError):
-        context = 0
-    context = max(0, min(5, context))
-
-    root = _workspace_root(inp)
-    # Keep absolute paths inside the workspace jail (fail closed).
-    if path not in (".", "./", ""):
-        _resolve_workspace_path(path, inp)
-
-    from remedy.core.repo_search import is_capped_label, search_repo
-
-    home = (os.environ.get("REMEDY_HOME") or "").strip() or None
-    hits, engine = search_repo(
-        root,
-        pattern,
-        path=path,
-        glob=glob,
-        max_matches=max_matches,
-        case_insensitive=case_insensitive,
-        context_before=context,
-        context_after=context,
-        home_dir=home,
-        allowed_roots=[root],
-        access_scope="project",
-    )
-    label = str(engine)
-    if label.startswith("error:"):
-        detail = label[len("error:") :].strip() or label
-        if detail.startswith("invalid regex"):
-            raise ValueError(detail)
-        raise PermissionError(detail)
-    matches: list[dict[str, Any]] = []
-    for hit in hits:
-        matches.append(
-            {
-                "path": str(hit.path),
-                "line": int(hit.line),
-                "text": str(hit.text),
-            }
-        )
-    capped = is_capped_label(label)
-    return {
-        "pattern": pattern,
-        "engine": label,
-        "matches": matches,
-        "total": len(matches),
-        "capped": capped,
-        "truncated": capped or ("truncated:" in label),
-    }
-
-
-def _web_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bridge Tool ABI web.search to the existing agent web_search backend."""
-    from remedy.core.web_helpers import SearchBlockedError, run_search, web_tools_enabled
-
-    if not web_tools_enabled(None):
-        raise PermissionError("web tools are disabled")
-    query = str(inp.get("query") or "").strip()
-    if not query:
-        raise ValueError("query is required")
-    if len(query) > 400:
-        query = query[:400]
-    raw_max = inp.get("max_results", 5)
-    try:
-        max_results = int(raw_max) if raw_max is not None else 5
-    except (TypeError, ValueError):
-        max_results = 5
-    max_results = max(1, min(10, max_results))
-    try:
-        rows, backend = run_search(query, max_results=max_results, timeout=20.0, runtime=None)
-    except SearchBlockedError as blocked:
-        # Say why there are no results, so the model stops searching instead
-        # of retrying and then scraping search engines that refuse it.
-        return {
-            "query": query,
-            "backend": "DuckDuckGo HTML",
-            "results": [],
-            "blocked": True,
-            "note": str(blocked),
-        }
-    results: list[dict[str, str]] = []
-    for row in rows:
-        item: dict[str, str] = {
-            "title": str(row.get("title") or ""),
-            "url": str(row.get("url") or ""),
-        }
-        snippet = str(row.get("snippet") or "").strip()
-        if snippet:
-            item["snippet"] = snippet
-        results.append(item)
-    return {"query": query, "backend": str(backend), "results": results}
-
-
-def _web_fetch(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bridge Tool ABI web.fetch to polite_fetch + HTML extract (SSRF-guarded)."""
-    from remedy.core.web_helpers import polite_fetch, web_tools_enabled
-
-    if not web_tools_enabled(None):
-        raise PermissionError("web tools are disabled")
-    url = str(inp.get("url") or "").strip()
-    if not url:
-        raise ValueError("url is required")
-    if not url.startswith(("http://", "https://")):
-        raise ValueError("url must start with http:// or https://")
-    raw_cap = inp.get("max_chars", 50_000)
-    try:
-        cap = int(raw_cap) if raw_cap is not None else 50_000
-    except (TypeError, ValueError):
-        cap = 50_000
-    cap = max(1000, min(200_000, cap))
-
-    final_url, raw, charset = polite_fetch(
-        url, max_chars=max(cap * 4, 200_000), timeout=25.0, runtime=None
-    )
-    text = raw.decode(charset or "utf-8", errors="replace")
-    from remedy.core.html_extract import html_to_markdown, looks_like_html
-
-    out: dict[str, Any] = {
-        "url": url,
-        "final_url": str(final_url or url),
-        "content": text,
-        "format": "text",
-    }
-    truncated = False
-    if looks_like_html(raw):
-        extracted = html_to_markdown(text, max_chars=cap)
-        md = str(extracted.get("markdown") or "")
-        body = md.strip()
-        title = str(extracted.get("title") or "").strip()
-        if body:
-            out["content"] = body
-            out["format"] = "markdown"
-            if title:
-                out["title"] = title
-            truncated = f"…[truncated at {cap} chars]" in md
-        else:
-            if len(text) > cap:
-                out["content"] = text[:cap]
-                truncated = True
-            if title:
-                out["title"] = title
-    elif len(text) > cap:
-        out["content"] = text[:cap]
-        truncated = True
-    if truncated:
-        out["truncated"] = True
-    return out
-
-
-def _prompt_assemble(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.runtime.prompt_assemble import assemble_prompt
-
-    return assemble_prompt(inp)
-
-
-def _prompt_slim_epoch(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.runtime.prompt_assemble import slim_epoch
-
-    return slim_epoch(inp)
-
-
-def _prompt_should_continue(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.runtime.prompt_assemble import should_continue
-
-    return should_continue(inp)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def _prompt_turn_end(inp: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -724,16 +143,8 @@ def _prompt_turn_end(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return finish_production_turn(inp)
 
 
-def _prompt_after_tool_batch(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.core.production_learn import admit_production_tool_batch
-
-    return admit_production_tool_batch(inp)
 
 
-def _partner_improve(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.core.production_learn import run_unattended_learn
-
-    return run_unattended_learn(inp)
 
 
 def _voice_speak(inp: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -802,206 +213,62 @@ def _vision_progress(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return vision_progress(inp)
 
 
-def _memory_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bridge Tool ABI memory.search to Partner Memory + FTS (forever-Python)."""
-    from remedy.runtime.prompt_assemble import search_memory
-
-    return search_memory(inp)
-
-
-def _memory_save(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bridge Tool ABI memory.save to Partner Memory write (forever-Python)."""
-    from remedy.runtime.prompt_assemble import save_memory
-
-    return save_memory(inp)
-
-
-def _skill_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bridge Tool ABI skill.search to SkillRegistry ranking."""
-    from remedy.runtime.prompt_assemble import search_skills
-
-    return search_skills(inp)
-
-
-def _skill_activate(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Bridge Tool ABI skill.activate to one skill body load."""
-    from remedy.runtime.prompt_assemble import activate_skill
-
-    return activate_skill(inp)
-
-
-def _mail_list(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.runtime.mail_calendar_tools import mail_list
-
-    return mail_list(inp)
-
-
-def _mail_send(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.runtime.mail_calendar_tools import mail_send
-
-    return mail_send(inp)
-
-
-def _calendar_list_events(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.runtime.mail_calendar_tools import calendar_list_events
-
-    return calendar_list_events(inp)
-
-
-def _calendar_create_event(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.runtime.mail_calendar_tools import calendar_create_event
-
-    return calendar_create_event(inp)
-
-
-def _partner_home(inp: Mapping[str, Any]) -> str | None:
-    """home_dir is present only when the runtime bound it."""
-    home = str(inp.get("home_dir") or "").strip()
-    return home or None
-
-
-def _partner_vigil(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Owner yes/no for muscle-free nights. Does not call a provider."""
-    from remedy.memory.soul.vigil import set_vigil_enabled, vigil_status
-
-    action = str(inp.get("action") or "status").strip().lower()
-    home = _partner_home(inp)
-    if action == "enable":
-        set_vigil_enabled(True, home)
-    elif action == "disable":
-        set_vigil_enabled(False, home)
-    elif action != "status":
-        return {"ok": False, "error": "action must be status, enable, or disable"}
-    return {"ok": True, "vigil": vigil_status(home)}
 
 
 
-def _house_rules(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """First-run house rules and talk-to-change settings."""
-    from remedy.core.house_rules import dispatch
-
-    data = dict(inp)
-    home = _partner_home(inp)
-    if home:
-        data["home_dir"] = home
-    try:
-        out = dispatch(data)
-    except Exception:
-        logger.exception("house_rules failed")
-        return {"ok": False, "error": "house rules action failed"}
-    return out if isinstance(out, dict) else {"ok": False, "error": "invalid house rules result"}
-
-
-def _setup_session(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Internal first-run setup session (same store as house_rules)."""
-    from remedy.core.house_rules import dispatch
-
-    data = dict(inp)
-    home = _partner_home(inp)
-    if home:
-        data["home_dir"] = home
-    action = str(data.get("action") or "status").strip().lower()
-    if action in ("", "get"):
-        data["action"] = "status"
-    try:
-        out = dispatch(data)
-    except Exception:
-        logger.exception("setup.session failed")
-        return {"ok": False, "error": "setup session action failed"}
-    return out if isinstance(out, dict) else {"ok": False, "error": "invalid setup session result"}
-
-
-def _partner_pulse(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    """One hearth night tick. Local field only — never a model call."""
-    from remedy.memory.soul.vigil import vigil_tick
-
-    home = _partner_home(inp)
-    try:
-        out = vigil_tick(home)
-    except Exception:
-        logger.exception("partner.pulse failed")
-        return {"ok": False, "error": "night pulse failed"}
-    keep = ("ok", "skipped", "woke", "rested", "act")
-    vigil = {k: out.get(k) for k in keep if k in out}
-    return {"ok": True, "vigil": vigil}
 
 
 
-def _peer_home(inp: Mapping[str, Any]) -> str | None:
-    home = str(inp.get("home_dir") or "").strip()
-    return home or None
 
 
-def _peer_list(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.interop.runtime import InteropRuntime
-
-    rt = InteropRuntime(_peer_home(inp))
-    contacts = rt.list_contacts(enabled_only=False)
-    public = [
-        {
-            "id": p.get("id"),
-            "name": p.get("name"),
-            "protocol": p.get("protocol"),
-            "skills": p.get("skills") or [],
-            "enabled": p.get("enabled", True),
-        }
-        for p in contacts
-    ]
-    return {"ok": True, "peers": public, "total": len(public)}
 
 
-def _peer_dispatch(inp: Mapping[str, Any], field: str) -> Mapping[str, Any]:
-    from remedy.interop.orchestrate import delegate_to_peer, merge_results
-    from remedy.interop.runtime import InteropRuntime
-
-    text = str(inp.get(field) or inp.get("question") or inp.get("task") or "").strip()
-    if not text:
-        return {"ok": False, "error": f"{field} is required", "results": [], "summary": ""}
-    rt = InteropRuntime(_peer_home(inp))
-    peer_id = str(inp.get("peer_id") or "").strip()
-    if peer_id:
-        peer = rt.load_peer(peer_id)
-        if peer is None:
-            return {"ok": False, "error": "unknown peer", "results": [], "summary": ""}
-        one = delegate_to_peer(peer, text)
-        merged = merge_results([one])
-        return {"ok": bool(one.get("ok")), **merged}
-    return rt.orchestrate(text)
 
 
-def _peer_ask(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    return _peer_dispatch(inp, "question")
 
 
-def _peer_delegate(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    return _peer_dispatch(inp, "task")
 
 
-def _peer_status(inp: Mapping[str, Any]) -> Mapping[str, Any]:
-    from remedy.interop.runtime import InteropRuntime
 
-    tid = str(inp.get("task_id") or "").strip()
-    if not tid:
-        return {"ok": False, "error": "task_id is required"}
-    rt = InteropRuntime(_peer_home(inp))
-    return rt.task_status(tid)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def _worker_probe(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Go's attach probe: import what the live tools need, run nothing.
+
+    A packaged worker missing a dependency fails here at startup, with the
+    traceback in the worker log, instead of on the first chat turn.
+    """
+    _ = inp
+    import remedy.core.production_learn  # noqa: F401
+    import remedy.runtime.voice_vision_rmdy  # noqa: F401
+
+    return {"ok": True}
 
 
 _HANDLERS: dict[tuple[str, int], ToolHandler] = {
-    ("text.slugify", 1): lambda inp: {"slug": _slugify(str(inp.get("text", "")))},
-    ("text.word_count", 1): lambda inp: {"words": _word_count(str(inp.get("text", "")))},
-    ("workspace.read", 1): _workspace_read,
-    ("workspace.list", 1): _workspace_list,
-    ("workspace.write", 1): _workspace_write,
-    ("workspace.edit", 1): _workspace_edit,
-    ("workspace.search", 1): _workspace_search,
-    ("web.search", 1): _web_search,
-    ("web.fetch", 1): _web_fetch,
-    ("prompt.assemble", 1): _prompt_assemble,
-    ("prompt.slim_epoch", 1): _prompt_slim_epoch,
-    ("prompt.should_continue", 1): _prompt_should_continue,
+    ("worker.probe", 1): _worker_probe,
     ("prompt.turn_end", 1): _prompt_turn_end,
-    ("prompt.after_tool_batch", 1): _prompt_after_tool_batch,
     ("voice.speak", 1): _voice_speak,
     ("voice.transcribe", 1): _voice_transcribe,
     ("voice.install", 1): _voice_install,
@@ -1013,23 +280,6 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("vision.start", 1): _vision_start,
     ("vision.stop", 1): _vision_stop,
     ("vision.progress", 1): _vision_progress,
-    ("memory.search", 1): _memory_search,
-    ("memory.save", 1): _memory_save,
-    ("skill.search", 1): _skill_search,
-    ("skill.activate", 1): _skill_activate,
-    ("mail.list", 1): _mail_list,
-    ("mail.send", 1): _mail_send,
-    ("calendar.list_events", 1): _calendar_list_events,
-    ("calendar.create_event", 1): _calendar_create_event,
-    ("partner.vigil", 1): _partner_vigil,
-    ("house_rules", 1): _house_rules,
-    ("setup.session", 1): _setup_session,
-    ("partner.pulse", 1): _partner_pulse,
-    ("partner.improve", 1): _partner_improve,
-    ("peer.list", 1): _peer_list,
-    ("peer.ask", 1): _peer_ask,
-    ("peer.delegate", 1): _peer_delegate,
-    ("peer.status", 1): _peer_status,
 }
 
 

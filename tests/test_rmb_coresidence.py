@@ -153,7 +153,7 @@ def test_no_gpu_both_stay_on_cpu() -> None:
 
 
 def test_already_served_compacts_catalog_and_ollama_names() -> None:
-    from remedy.runtime.rmb.coresidence import already_served, LocalMuscleServer
+    from remedy.runtime.rmb.coresidence import LocalMuscleServer, already_served
 
     srv = LocalMuscleServer(
         kind="ollama",

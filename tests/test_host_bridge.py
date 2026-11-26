@@ -24,8 +24,6 @@ from remedy.core.computer.host_binding import (
     script_op,
     translate_posix_to_host,
 )
-from remedy.execution.process import win_shell_prefix
-from remedy.execution.runtime import ToolRuntime
 
 
 def test_translate_mkdir_p() -> None:
@@ -739,20 +737,6 @@ def test_resolve_which_finds_venv_pytest(tmp_path: Path) -> None:
     assert Path(found).resolve() == stub.resolve()
 
 
-def test_win_shell_prefix_and_runtime_agree() -> None:
-    prefix = win_shell_prefix()
-    rt = ToolRuntime()
-    argv = rt._shell_command("echo host-bridge-ok")
-    if sys.platform == "win32":
-        assert prefix[0].lower().endswith("cmd") or "cmd.exe" in prefix[0].lower()
-        # Must NOT be pwsh -Command
-        joined = " ".join(argv).lower()
-        assert "-command" not in joined
-    else:
-        assert prefix[-1] == "-c"
-        assert argv[0] == prefix[0]
-
-
 def test_script_body_size_cap(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="exceeds"):
         launch_script("python", "x" * 1_000_001, scratch_dir=tmp_path)
@@ -836,18 +820,6 @@ def test_join_and_normalize_wrappers() -> None:
     # On Windows this rewrites; on POSIX it returns the original
     out = _normalize_shell_command_for_host("mkdir -p a")
     assert "mkdir" in out or "if not exist" in out
-
-
-def test_runtime_host_run_mapping() -> None:
-    from remedy.models import ToolCall
-
-    rt = ToolRuntime()
-    tc = ToolCall(
-        tool_name="host_run",
-        arguments={"argv": ["git", "status"]},
-    )
-    argv = rt._build_command(tc)
-    assert argv == ["git", "status"]
 
 
 @pytest.mark.asyncio

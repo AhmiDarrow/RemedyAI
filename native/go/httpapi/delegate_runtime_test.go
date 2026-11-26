@@ -151,3 +151,25 @@ func TestRunnerStreamsToolProgressAsItHappens(t *testing.T) {
 		t.Fatalf("last token must be the tool's own result: %q", tokens[2])
 	}
 }
+
+// Auto must not start a delegate without the owner: the sub-agent's shell and
+// web tools are outside Remedy's guards. Full still runs it; a session
+// approval still covers the same mission again.
+func TestDelegateAsksInAutoButRunsInFull(t *testing.T) {
+	reg, err := NewDefaultToolRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := newApprovalQueue()
+	sid := "s-delegate"
+	p := &RegistryPolicy{Registry: reg, Approvals: q, SessionID: sid}
+	call := cognition.ToolCall{ID: "d1", Name: "delegate", Input: []byte(`{"mission":"port the parser","allow_shell":true}`)}
+	_ = q.SetMode("auto")
+	if d := p.Decide(context.Background(), call); d != cognition.Ask {
+		t.Fatalf("auto Decide=%v, want Ask for a delegate", d)
+	}
+	_ = q.SetMode("full")
+	if d := p.Decide(context.Background(), call); d != cognition.Allow {
+		t.Fatalf("full Decide=%v, want Allow", d)
+	}
+}

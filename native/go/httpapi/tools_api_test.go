@@ -231,3 +231,18 @@ func TestInvokeMutationAutoAllowsPastPolicy(t *testing.T) {
 		}
 	}
 }
+
+// The tool API holds a shell command to the same Auto-mode guard as a model's
+// turn: without the guard settings on its policy, Auto ran every one.
+func TestInvokeAutoAsksForShellItCannotCheck(t *testing.T) {
+	s := newToolsAPIServer(t)
+	_ = s.approvals.SetMode("auto")
+	body := `{"id":"bash","session_id":"sess-auto","input":{"command":"powershell -NoProfile -Command \"Set-Content C:/Users/Public/x.txt hi\""}}`
+	code, raw := doTools(t, s, http.MethodPost, "/api/tools/invoke", body)
+	if code != http.StatusForbidden {
+		t.Fatalf("a write outside the project in Auto: status=%d body=%s want 403 (Ask)", code, raw)
+	}
+	if pending := s.approvals.ListPending("sess-auto"); len(pending) != 1 || pending[0].ToolName != "bash" {
+		t.Fatalf("pending=%v", pending)
+	}
+}

@@ -21,12 +21,11 @@ or taskkill something on the machine running the suite.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import socket
 import subprocess
 import threading
 import time
+from types import SimpleNamespace
 from urllib.request import Request
 
 import pytest

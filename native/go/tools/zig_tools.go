@@ -1216,7 +1216,11 @@ func executeComputerClick(_ context.Context, request Request) (Result, error) {
 	if clicks > 3 {
 		return Result{}, ErrInvalidInput
 	}
-	if err := core.MouseClick(int32(*body.X), int32(*body.Y), button, uint32(clicks)); err != nil {
+	xy, ok := screenCoords(*body.X, *body.Y)
+	if !ok {
+		return Result{}, ErrInvalidInput
+	}
+	if err := core.MouseClick(xy[0], xy[1], button, uint32(clicks)); err != nil {
 		return Result{}, err
 	}
 	out, err := json.Marshal(map[string]any{
@@ -1343,7 +1347,11 @@ func executeComputerMove(_ context.Context, request Request) (Result, error) {
 	if body.X == nil || body.Y == nil {
 		return Result{}, ErrInvalidInput
 	}
-	if err := core.MouseMove(int32(*body.X), int32(*body.Y)); err != nil {
+	xy, ok := screenCoords(*body.X, *body.Y)
+	if !ok {
+		return Result{}, ErrInvalidInput
+	}
+	if err := core.MouseMove(xy[0], xy[1]); err != nil {
 		return Result{}, err
 	}
 	out, err := json.Marshal(map[string]any{"ok": true, "x": *body.X, "y": *body.Y})
@@ -1363,13 +1371,40 @@ func executeComputerScroll(_ context.Context, request Request) (Result, error) {
 	if body.X == nil || body.Y == nil {
 		return Result{}, ErrInvalidInput
 	}
-	if err := core.MouseScroll(int32(*body.X), int32(*body.Y), int32(body.Dx), int32(body.Dy)); err != nil {
+	xy, ok := screenCoords(*body.X, *body.Y)
+	if !ok || body.Dx < -maxScrollClicks || body.Dx > maxScrollClicks ||
+		body.Dy < -maxScrollClicks || body.Dy > maxScrollClicks {
+		return Result{}, ErrInvalidInput
+	}
+	if err := core.MouseScroll(xy[0], xy[1], int32(body.Dx), int32(body.Dy)); err != nil {
 		return Result{}, err
 	}
 	out, err := json.Marshal(map[string]any{
 		"ok": true, "x": *body.X, "y": *body.Y, "dx": body.Dx, "dy": body.Dy,
 	})
 	return Result{Output: out}, err
+}
+
+// maxScreenCoord bounds the pixel coordinates the computer tools accept. A
+// virtual desktop spans at most a few tens of thousands of pixels (negative on
+// monitors left of or above the primary), so anything wider is a bad call.
+// Without the bound int32() wrapped huge values onto real screen positions and
+// the native drag maths overflowed.
+const maxScreenCoord = 1 << 16
+
+// maxScrollClicks bounds one computer.scroll call. The X11 backend sends one
+// button event per click, so an unbounded dy froze input for minutes.
+const maxScrollClicks = 100
+
+func screenCoords(values ...int) ([]int32, bool) {
+	out := make([]int32, len(values))
+	for i, v := range values {
+		if v < -maxScreenCoord || v > maxScreenCoord {
+			return nil, false
+		}
+		out[i] = int32(v)
+	}
+	return out, true
 }
 
 func executeComputerDrag(_ context.Context, request Request) (Result, error) {
@@ -1393,9 +1428,11 @@ func executeComputerDrag(_ context.Context, request Request) (Result, error) {
 	if steps > 200 {
 		return Result{}, ErrInvalidInput
 	}
-	if err := core.MouseDrag(
-		int32(*body.X1), int32(*body.Y1), int32(*body.X2), int32(*body.Y2), uint32(steps),
-	); err != nil {
+	pts, ok := screenCoords(*body.X1, *body.Y1, *body.X2, *body.Y2)
+	if !ok {
+		return Result{}, ErrInvalidInput
+	}
+	if err := core.MouseDrag(pts[0], pts[1], pts[2], pts[3], uint32(steps)); err != nil {
 		return Result{}, err
 	}
 	out, err := json.Marshal(map[string]any{
@@ -1677,6 +1714,66 @@ func modelDeniedEnvKey(env map[string]string) string {
 	return ""
 }
 
+// modelSpawnSteeringEnv are variables a command's own text never shows but
+// that decide which program runs (PATH, a pager, an editor, an askpass), run
+// a command from git config (GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n /
+// GIT_CONFIG_VALUE_n can set core.pager, core.sshCommand, ...), run code in
+// the shell itself (PS4 with SHELLOPTS=xtrace, ZDOTDIR), or send traffic
+// through someone else's proxy. The shell guard and the write jail read the
+// command, not its environment, so a tool call may not set them. They are not
+// in modelInterpreterPathEnv because a delegated agent inherits the owner's
+// own PATH and proxy, which is right for it.
+var modelSpawnSteeringEnv = []string{
+	"PATH",
+	"GIT_CONFIG",
+	"GIT_CONFIG_COUNT",
+	"GIT_CONFIG_PARAMETERS",
+	"GIT_ASKPASS",
+	"SSH_ASKPASS",
+	"GIT_PROXY_COMMAND",
+	"GIT_EXTERNAL_DIFF",
+	"GIT_PAGER",
+	"PAGER",
+	"GIT_EDITOR",
+	"GIT_SEQUENCE_EDITOR",
+	"EDITOR",
+	"VISUAL",
+	"LESSOPEN",
+	"LESSCLOSE",
+	"PS4",
+	"SHELLOPTS",
+	"BASHOPTS",
+	"ZDOTDIR",
+	"PERL5LIB",
+	"PERLLIB",
+	"RUBYLIB",
+	"HTTP_PROXY",
+	"HTTPS_PROXY",
+	"ALL_PROXY",
+	"FTP_PROXY",
+}
+
+// modelSpawnEnvKey returns the first variable a bash or shell.exec call may
+// not set, or "": everything modelDeniedEnvKey refuses, plus the variables
+// above and any GIT_CONFIG_* key.
+func modelSpawnEnvKey(env map[string]string) string {
+	if bad := modelDeniedEnvKey(env); bad != "" {
+		return bad
+	}
+	for key := range env {
+		trimmed := strings.TrimSpace(key)
+		if strings.HasPrefix(strings.ToUpper(trimmed), "GIT_CONFIG_") {
+			return trimmed
+		}
+		for _, denied := range modelSpawnSteeringEnv {
+			if strings.EqualFold(trimmed, denied) {
+				return denied
+			}
+		}
+	}
+	return ""
+}
+
 func vaultHandleIn(text string) bool {
 	low := strings.ToLower(text)
 	return strings.Contains(text, "{{") && strings.Contains(low, "vault:")
@@ -1752,10 +1849,10 @@ func executeShellExec(ctx context.Context, request Request) (Result, error) {
 	if body.Cwd != "" && !filepath.IsAbs(body.Cwd) {
 		return Result{}, fmt.Errorf("%w: cwd must be absolute when set", ErrInvalidInput)
 	}
-	if bad := modelDeniedEnvKey(body.Env); bad != "" {
+	if bad := modelSpawnEnvKey(body.Env); bad != "" {
 		return Result{}, fmt.Errorf(
-			"%w: %s cannot be set from a tool call — it makes an interpreter load code "+
-				"before the command runs. Put the path on the command line instead",
+			"%w: %s cannot be set from a tool call — it changes what runs or where it connects "+
+				"without the command showing it. Put it on the command line instead",
 			ErrInvalidInput, bad)
 	}
 	argv0, err := resolveShellArgv0(body.Argv[0], body.Cwd)
@@ -1845,6 +1942,9 @@ func spawnAuthorized(ctx context.Context, spec shellSpawnSpec) (core.PipedProces
 	if err := ctx.Err(); err != nil {
 		return core.PipedProcess{}, fmt.Errorf("shell spawn: %w", err)
 	}
+	if spawnNamesSecret(spec.argv, spec.cwd) {
+		return core.PipedProcess{}, fmt.Errorf("%w: the command names a path that leads into the auth secrets folder", ErrInvalidInput)
+	}
 	home := resolveToolHome()
 	key, err := secret.EnsureHostSigningKey(home)
 	if err != nil {
@@ -1868,6 +1968,34 @@ func spawnAuthorized(ctx context.Context, spec shellSpawnSpec) (core.PipedProces
 		return core.PipedProcess{}, err
 	}
 	return spawnShellUnderJail(roots, spec.argv, spec.cwd, spec.env, token, false, nowMS)
+}
+
+// spawnNamesSecret reports a word of the command that is an existing path
+// into the auth secrets once links and junctions are resolved. The core reads
+// the spelling only, so `findstr . link/token` through a junction printed the
+// file. A filter, like the rest of the shell checks: it sees the paths the
+// command names, not the ones a program computes.
+func spawnNamesSecret(argv []string, cwd string) bool {
+	if cwd != "" && isSecretAuthPath(cwd) {
+		return true
+	}
+	for _, arg := range argv {
+		words := strings.FieldsFunc(arg, func(r rune) bool {
+			return r == ' ' || r == '\t' || r == '\r' || r == '\n' || strings.ContainsRune(`"'|;&<>()=,`, r)
+		})
+		for _, w := range append(words, arg) {
+			if !filepath.IsAbs(w) {
+				if cwd == "" {
+					continue
+				}
+				w = filepath.Join(cwd, w)
+			}
+			if _, err := os.Lstat(w); err == nil && isSecretAuthPath(w) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // spawnShellUnderJail installs the write roots and spawns under the core

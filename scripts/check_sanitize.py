@@ -43,6 +43,7 @@ PUBLIC_TOP_LEVEL_DOCS = frozenset(
         "RMB.md",
         "HOUSE_RULES.md",
         "SETUP.md",
+        "SECURITY.md",
     }
 )
 

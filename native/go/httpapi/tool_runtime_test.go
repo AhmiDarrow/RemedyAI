@@ -362,3 +362,77 @@ func TestBindFileToolsCarryAccessScope(t *testing.T) {
 		t.Fatalf("grep access_scope=%v want project", args["access_scope"])
 	}
 }
+
+func TestRegistryToolExecutorSurvivesToolPanic(t *testing.T) {
+	reg := tools.NewRegistry(tools.AuthorizerFunc(runtimeLocalAuthorizer))
+	err := reg.Register(tools.Descriptor{
+		ID:           "test.panic",
+		Version:      1,
+		Description:  "panics",
+		Runtime:      tools.RuntimeGo,
+		Risk:         tools.RiskReadOnly,
+		InputSchema:  json.RawMessage(`{"type":"object"}`),
+		OutputSchema: json.RawMessage(`{"type":"object"}`),
+	}, tools.ExecutorFunc(func(context.Context, tools.Request) (tools.Result, error) {
+		panic("executor boom")
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := &RegistryToolExecutor{Registry: reg}
+	res := exec.Execute(context.Background(), cognition.ToolCall{ID: "c1", Name: "test.panic", Input: []byte(`{}`)})
+	if !strings.Contains(res.Err, "crashed") || !strings.Contains(res.Err, "executor boom") {
+		t.Fatalf("Err=%q", res.Err)
+	}
+}
+
+func TestModelTurnCannotCallToolsItWasNotShown(t *testing.T) {
+	reg, err := NewDefaultToolRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The Python worker registers this in production; stub it so the
+	// registry lookup is not what turns it away.
+	for _, id := range []string{"prompt.turn_end"} {
+		if err := reg.Register(tools.Descriptor{
+			ID: id, Version: 1, Description: "stub", Risk: tools.RiskReadOnly, Runtime: tools.RuntimeGo,
+			InputSchema: json.RawMessage(`{"type":"object"}`), OutputSchema: json.RawMessage(`{"type":"object"}`),
+		}, tools.ExecutorFunc(func(context.Context, tools.Request) (tools.Result, error) {
+			return tools.Result{Output: []byte(`{}`)}, nil
+		})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	q := newApprovalQueue()
+	_ = q.SetMode("full")
+	r := &CognitionTurnRunner{Registry: reg, Approvals: q}
+	for _, origin := range []string{"desktop", "telegram:42"} {
+		p, ok := r.turnPolicy(TurnRequest{SessionID: "s1", Origin: origin}).(*RegistryPolicy)
+		if !ok {
+			t.Fatal("turn policy is not a RegistryPolicy")
+		}
+		for _, call := range []cognition.ToolCall{
+			{ID: "1", Name: "shell.exec", Input: []byte(`{"argv":["curl","https://example.com"]}`)},
+			{ID: "2", Name: "workspace.write", Input: []byte(`{"path":"a.txt","content":"x"}`)},
+			{ID: "3", Name: "prompt.turn_end", Input: []byte(`{"message":"x"}`)},
+			{ID: "4", Name: "setup.session", Input: []byte(`{"action":"status"}`)},
+		} {
+			if _, err := reg.Latest(call.Name); err != nil {
+				t.Fatalf("%s is not registered: %v", call.Name, err)
+			}
+			if d := p.Decide(context.Background(), call); d != cognition.Deny {
+				t.Fatalf("origin %s: hidden tool %s Decide=%v want Deny", origin, call.Name, d)
+			}
+		}
+		// The tool the model is shown for the same job is still decided normally.
+		bash := cognition.ToolCall{ID: "5", Name: "bash", Input: []byte(`{"command":"echo hi"}`)}
+		if d := p.Decide(context.Background(), bash); d == cognition.Deny {
+			t.Fatalf("origin %s: visible bash Decide=Deny", origin)
+		}
+	}
+	// The local tool API (the CLI) still reaches the internal ABI.
+	api := &RegistryPolicy{Registry: reg, Approvals: q}
+	if d := api.Decide(context.Background(), cognition.ToolCall{Name: "prompt.turn_end", Input: []byte(`{}`)}); d == cognition.Deny {
+		t.Fatal("tool API policy must still reach internal tools")
+	}
+}

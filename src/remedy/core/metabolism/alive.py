@@ -92,7 +92,7 @@ def default_state() -> dict[str, Any]:
     mid = 0.45
     return {
         "schema": SCHEMA,
-        "drives": {k: mid for k in DRIVE_KEYS},
+        "drives": dict.fromkeys(DRIVE_KEYS, mid),
         "affect": {"valence": 0.55, "arousal": 0.4, "label": "steady"},
         "autobiography": "",
         "beliefs": [],
@@ -118,9 +118,13 @@ def load_alive(home: str | Path | None) -> dict[str, Any]:
     if not isinstance(raw, dict):
         return state
     state.update({k: raw[k] for k in state if k in raw})
-    drives = state.get("drives") if isinstance(state.get("drives"), dict) else {}
+    drives = state.get("drives")
+    if not isinstance(drives, dict):
+        drives = {}
     state["drives"] = {k: _clamp01(drives.get(k), 0.45) for k in DRIVE_KEYS}
-    aff = state.get("affect") if isinstance(state.get("affect"), dict) else {}
+    aff = state.get("affect")
+    if not isinstance(aff, dict):
+        aff = {}
     state["affect"] = {
         "valence": _clamp01(aff.get("valence"), 0.55),
         "arousal": _clamp01(aff.get("arousal"), 0.4),
@@ -345,7 +349,6 @@ def consolidate_from_dream(home: str | Path | None, field: Any = None) -> dict[s
                     user_name = str(rel.partner_name).strip() or user_name
     # Salience: prefer episodes with strength / recall; drop work-looking arcs.
     scored: list[tuple[float, str]] = []
-    now = time.time()
     for ep in episodes[-24:]:
         text = str(getattr(ep, "arc", None) or getattr(ep, "summary", None) or "").strip()
         if len(text) < 12:
@@ -389,7 +392,7 @@ def _belief_line(arc: str, user_name: str) -> str:
     line = re.sub(r"\s+", " ", arc).strip(" -—:")
     if len(line) < 12:
         return ""
-    if not re.search(r"(?i)\b(i|we|he|she|they|%s)\b" % re.escape(user_name), line):
+    if not re.search(rf"(?i)\b(i|we|he|she|they|{re.escape(user_name)})\b", line):
         line = f"About us: {line}"
     return line[:160]
 

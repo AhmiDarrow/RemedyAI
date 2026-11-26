@@ -204,6 +204,13 @@ func TestSessionScratchDirLivesUnderTheSession(t *testing.T) {
 	if scratch != dir || spec.env[RemedyScratchEnv] != dir || spec.env["FOO"] != "1" {
 		t.Fatalf("env=%v scratch=%s", spec.env, scratch)
 	}
+	if len(spec.writeRoots) != 0 {
+		t.Fatalf("an unbound jail stays unbound: %v", spec.writeRoots)
+	}
+	bound, _ := withScratchEnv(shellSpawnSpec{writeRoots: []string{"/proj"}}, home, "sess-1")
+	if len(bound.writeRoots) != 2 || bound.writeRoots[0] != "/proj" || bound.writeRoots[1] != dir {
+		t.Fatalf("a bound jail lets the scratch folder be written: %v", bound.writeRoots)
+	}
 }
 
 func containsAll(argv []string, want ...string) bool {

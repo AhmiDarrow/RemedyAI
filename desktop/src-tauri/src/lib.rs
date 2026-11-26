@@ -2083,6 +2083,21 @@ fn macos_terminal_cd_script(dir: &str) -> String {
     format!("tell application \"Terminal\" to do script \"{applescript}\"")
 }
 
+/// Escape `s` for the inside of a PowerShell single-quoted string. PowerShell
+/// ends such a string at any single-quote character, curly ones included
+/// (U+2018..U+201B), so each is doubled; a doubled one reads back as itself.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn ps_single_quote_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// Open a folder in Explorer, or reveal a file (select in parent).
 /// Never ShellExecute .md — that pops “Pick an app”. Agent reads via file_read.
 #[tauri::command]
@@ -2177,7 +2192,7 @@ fn open_terminal(cwd: Option<String>) -> Result<String, String> {
         const CREATE_NEW_CONSOLE: u32 = 0x00000010;
         let cd_cmd = format!(
             "Set-Location -LiteralPath '{}'",
-            dir_s.replace('\'', "''")
+            ps_single_quote_escape(&dir_s)
         );
         // 1) PowerShell 7+ if installed, 2) Windows PowerShell 5.1 (always on Win10+)
         for (exe, label) in [("pwsh.exe", "PowerShell 7+"), ("powershell.exe", "Windows PowerShell")]
@@ -2270,7 +2285,7 @@ fn open_terminal(cwd: Option<String>) -> Result<String, String> {
         if linux_env_is_wslg() {
             if let Some(ps) = wslg_powershell_exe() {
                 let win = wslg_windows_path(Path::new(&dir_s));
-                let loc = win.to_string_lossy().replace('\'', "''");
+                let loc = ps_single_quote_escape(&win.to_string_lossy());
                 let cmd = format!("Set-Location -LiteralPath '{loc}'");
                 if Command::new(&ps)
                     .args(["-NoLogo", "-NoExit", "-Command", &cmd])
@@ -2845,11 +2860,26 @@ fn mint_web_ui_link() -> Result<String, String> {
         return Err(format!("unexpected response: {}", buf.lines().next().unwrap_or("")));
     }
     let body = buf.split("\r\n\r\n").nth(1).unwrap_or("");
+    parse_web_ui_link(body, &api_base_url())
+}
+
+/// Accept only the exact shape Remedy mints (`{base}/?bootstrap=<base64url>`),
+/// so whatever answers on the API port can't smuggle shell metacharacters
+/// into the URL the OS opens.
+fn parse_web_ui_link(body: &str, base: &str) -> Result<String, String> {
     let v: serde_json::Value =
         serde_json::from_str(body.trim()).map_err(|e| format!("json: {e}"))?;
+    let prefix = format!("{base}/?bootstrap=");
     v.get("url")
         .and_then(|u| u.as_str())
-        .filter(|u| u.starts_with("http://127.0.0.1:"))
+        .filter(|u| {
+            u.strip_prefix(prefix.as_str()).is_some_and(|nonce| {
+                !nonce.is_empty()
+                    && nonce
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+            })
+        })
         .map(str::to_string)
         .ok_or_else(|| "no url in response".to_string())
 }
@@ -2888,18 +2918,14 @@ fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
         log::info!("switch_to_web_ui: desktop stay-ready (sidecar alive)");
     }
 
-    // Open default browser (Windows: start; shell plugin as secondary).
-    #[cfg(target_os = "windows")]
-    {
-        let status = Command::new("cmd")
-            .args(["/C", "start", "", &url])
-            .creation_flags(CREATE_NO_WINDOW)
-            .status()
-            .map_err(|e| format!("open browser failed: {e}"))?;
-        if !status.success() {
-            return Err(format!("open browser exited with {status}"));
-        }
+    if !url_safe_for_os_open(&url) {
+        return Err("only http(s) URLs allowed".into());
     }
+
+    // Open default browser. Windows: ShellExecuteW, never `cmd /C start`
+    // (cmd would run anything after a `&` or `^` in the URL).
+    #[cfg(target_os = "windows")]
+    open_url_shell_execute(&url)?;
     #[cfg(not(target_os = "windows"))]
     {
         // Spawn and return — .status() waits until some desktops close the browser.
@@ -6939,6 +6965,35 @@ mod updater_parse_tests {
 }
 
 #[cfg(test)]
+mod web_ui_link_tests {
+    use super::*;
+
+    #[test]
+    fn minted_link_must_be_remedys_own_shape() {
+        let base = "http://127.0.0.1:7400";
+        let ok = r#"{"url":"http://127.0.0.1:7400/?bootstrap=Ab9_-x","single_use":true}"#;
+        assert_eq!(
+            parse_web_ui_link(ok, base).unwrap(),
+            "http://127.0.0.1:7400/?bootstrap=Ab9_-x"
+        );
+        for url in [
+            "http://127.0.0.1:7400/?bootstrap=x&calc",
+            "http://127.0.0.1:7400/?bootstrap=x^&calc",
+            "http://127.0.0.1:7400/&calc.exe",
+            "http://127.0.0.1:7400/?bootstrap=x|calc",
+            "http://127.0.0.1:7400/?bootstrap=x%26calc",
+            "http://127.0.0.1:7400/?bootstrap=",
+            "http://127.0.0.1:7401/?bootstrap=abc",
+            "http://127.0.0.1:74000/?bootstrap=abc",
+            "http://127.0.0.1:7400@evil.example/?bootstrap=abc",
+        ] {
+            let body = serde_json::json!({ "url": url }).to_string();
+            assert!(parse_web_ui_link(&body, base).is_err(), "{url} must be refused");
+        }
+    }
+}
+
+#[cfg(test)]
 mod open_path_safety_tests {
     use super::*;
 
@@ -6979,6 +7034,42 @@ mod open_path_safety_tests {
             }
         }
         out
+    }
+
+    /// Read back a PowerShell single-quoted string the way its tokenizer
+    /// does: any single-quote character ends it unless doubled.
+    fn ps_unquote(script: &str) -> (String, String) {
+        let is_q = |c: char| matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}');
+        let mut chars = script.chars().peekable();
+        assert!(chars.next().is_some_and(is_q), "{script}");
+        let mut lit = String::new();
+        while let Some(c) = chars.next() {
+            if is_q(c) {
+                if chars.peek().copied().is_some_and(is_q) {
+                    lit.push(chars.next().unwrap());
+                    continue;
+                }
+                return (lit, chars.collect());
+            }
+            lit.push(c);
+        }
+        panic!("unterminated: {script}");
+    }
+
+    #[test]
+    fn powershell_quoting_keeps_curly_quotes_literal() {
+        for dir in [
+            r"C:\Users\me\proj",
+            r"C:\Users\O'Brien\x",
+            "C:\\x\u{2019}; calc; \u{2018}",
+            "C:\\x\u{2018}\u{2018}\u{201A}\u{201B}'",
+            "C:\\x\u{201C}$(calc)\u{201D}",
+        ] {
+            let quoted = format!("'{}'", ps_single_quote_escape(dir));
+            let (lit, rest) = ps_unquote(&quoted);
+            assert_eq!(lit, dir, "{quoted}");
+            assert_eq!(rest, "", "text after the string would run: {quoted}");
+        }
     }
 
     #[test]

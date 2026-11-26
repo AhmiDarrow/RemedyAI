@@ -835,8 +835,6 @@ def _organism_tick(runtime: Any, *, home: str | Path | None) -> dict[str, Any]:
     with suppress(Exception):
         from remedy.core.metabolism.alive import tick_alive
 
-        hours = None
-        # production_learn last user activity is not required; skip if unknown.
         alive = tick_alive(
             home,
             heavy=bool(out.get("skills_refined") or out.get("dreamed")),

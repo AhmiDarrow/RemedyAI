@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -58,6 +59,45 @@ func containsUnavailable(err error) bool {
 		err = u.Unwrap()
 	}
 	return false
+}
+
+func TestFindLibraryPathIgnoresALibraryAboveTheWorkingDirectory(t *testing.T) {
+	t.Setenv("REMEDY_NATIVE_CORE_LIB", "")
+	base := t.TempDir()
+	for _, sub := range []string{"bin", "lib"} {
+		dir := filepath.Join(base, "native", "zig", "zig-out", sub)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range libraryNames() {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("planted"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	wd := filepath.Join(base, "downloads", "project")
+	if err := os.MkdirAll(wd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(wd)
+	if got := FindLibraryPath(); got != "" && strings.HasPrefix(got, base) {
+		t.Fatalf("loaded a library planted above the working directory: %s", got)
+	}
+}
+
+func TestCheckoutOfExecutableKnowsOnlyDevLayouts(t *testing.T) {
+	repo := filepath.Join(string(filepath.Separator), "src", "remedy")
+	for dir, want := range map[string]string{
+		filepath.Join(repo, "desktop", "bin"):                                                      repo,
+		filepath.Join(repo, "desktop", "src-tauri", "target", "debug"):                             repo,
+		filepath.Join(repo, "desktop", "src-tauri", "target", "x86_64-pc-windows-msvc", "release"): repo,
+		filepath.Join(string(filepath.Separator), "opt", "Remedy"):                                 "",
+		filepath.Join(string(filepath.Separator), "usr", "bin"):                                    "",
+	} {
+		if got := checkoutOfExecutable(dir); got != want {
+			t.Errorf("checkoutOfExecutable(%s)=%q want %q", dir, got, want)
+		}
+	}
 }
 
 func TestFindLibraryPathIncludesCheckoutName(t *testing.T) {

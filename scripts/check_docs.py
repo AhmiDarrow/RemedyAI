@@ -6,7 +6,7 @@ Mirrors scripts/sync_version.py: one command to **check** (CI gate) or **sync**
 Canonical sources (do not invent second homes for these):
   - Version numbers     → pyproject.toml          (sync_version.py)
   - Help chapter bodies → docs/manual/*.md        (sync_help_manual.py)
-  - Slash commands      → src/remedy/interfaces/slash_commands.py  _BUILTIN_COMMANDS
+  - Slash commands      → native/go/httpapi/catalog_static.go  builtinCommands
                            (canonical: docs/manual/11-reference-commands.md;
                             README slash table is optional)
   - Keyboard shortcuts  → desktop/src/hotkeys.ts  HOTKEYS
@@ -23,7 +23,6 @@ Usage:
 
 from __future__ import annotations
 
-import ast
 import re
 import subprocess
 import sys
@@ -51,7 +50,7 @@ ARTICLES = ROOT / "desktop" / "src" / "help" / "articles"
 CATALOG_TS = ROOT / "desktop" / "src" / "help" / "catalog.ts"
 HOTKEYS_TS = ROOT / "desktop" / "src" / "hotkeys.ts"
 # Canonical slash command list.
-API_SUPPORT = ROOT / "src" / "remedy" / "interfaces" / "slash_commands.py"
+SLASH_CATALOG = ROOT / "native" / "go" / "httpapi" / "catalog_static.go"
 README = ROOT / "README.md"
 COMMANDS_MD = MANUAL / "11-reference-commands.md"
 SHORTCUTS_MD = MANUAL / "12-reference-shortcuts.md"
@@ -135,20 +134,27 @@ def check_version() -> CheckResult:
 
 
 def _parse_builtin_commands() -> list[dict]:
-    """Parse _BUILTIN_COMMANDS from slash_commands.py without importing remedy."""
-    text = API_SUPPORT.read_text(encoding="utf-8")
-    tree = ast.parse(text)
-    for node in tree.body:
-        # plain: _BUILTIN_COMMANDS = [...]
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "_BUILTIN_COMMANDS":
-                    return ast.literal_eval(node.value)
-        # annotated: _BUILTIN_COMMANDS: list[dict] = [...]
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            if node.target.id == "_BUILTIN_COMMANDS" and node.value is not None:
-                return ast.literal_eval(node.value)
-    raise RuntimeError("_BUILTIN_COMMANDS not found in slash_commands.py")
+    """Parse builtinCommands from the Go runtime's catalog_static.go.
+
+    The Go runtime answers slash commands, so its list is the one the manual
+    has to match. Each entry gives a "name" and an "aliases" []string{...}.
+    """
+    text = SLASH_CATALOG.read_text(encoding="utf-8")
+    m = re.search(r"var builtinCommands = \[\]map\[string\]any\{(.*?)\n\}", text, re.DOTALL)
+    if not m:
+        raise RuntimeError("builtinCommands not found in catalog_static.go")
+    body = m.group(1)
+    cmds: list[dict] = []
+    for name_m in re.finditer(r'"name":\s*"(/[^"]+)"', body):
+        rest = body[name_m.end():]
+        nxt = re.search(r'"name":', rest)
+        chunk = rest[: nxt.start()] if nxt else rest
+        al = re.search(r'"aliases":\s*\[\]string\{([^}]*)\}', chunk)
+        aliases = re.findall(r'"(/[^"]+)"', al.group(1)) if al else []
+        cmds.append({"name": name_m.group(1), "aliases": aliases})
+    if not cmds:
+        raise RuntimeError("builtinCommands in catalog_static.go is empty")
+    return cmds
 
 
 def check_slash_commands() -> CheckResult:
@@ -214,7 +220,7 @@ def check_slash_commands() -> CheckResult:
     for d in sorted(flat_doc):
         if d not in code_set:
             # /session-import is an alias — already in code_set if parsed
-            msgs.append(f"warn: documented but not in _BUILTIN_COMMANDS: {d}")
+            msgs.append(f"warn: documented but not in builtinCommands: {d}")
             # treat unknown documented commands as failures so docs can't invent APIs
             bad += 1
 
@@ -223,7 +229,7 @@ def check_slash_commands() -> CheckResult:
         bad == 0,
         msgs,
         "Update docs/manual/11-reference-commands.md to match "
-        "_BUILTIN_COMMANDS in slash_commands.py",
+        "builtinCommands in native/go/httpapi/catalog_static.go",
     )
 
 
@@ -650,7 +656,7 @@ def main() -> None:
         print("  help      docs/manual ↔ desktop/src/help/articles")
         print("  version   pyproject / package.json / tauri / cargo / latest.json")
         print("  catalog   docs/manual chapters ↔ catalog.ts META ids")
-        print("  commands  _BUILTIN_COMMANDS ↔ manual/11 + README slash table")
+        print("  commands  Go builtinCommands ↔ manual/11 + README slash table")
         print("  hotkeys   hotkeys.ts ↔ manual/12-reference-shortcuts")
         print("  tests     README '~N tests' vs live pytest collection")
         print("  readme    README mentions sync/check scripts")

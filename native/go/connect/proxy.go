@@ -2,6 +2,7 @@ package connect
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -120,6 +121,9 @@ type ProxyRequest struct {
 	Body        []byte
 	SidecarPort int
 	APIKey      string
+	// Ctx, when set, ends the loopback request (and a stream still open on
+	// it) once the phone session is gone.
+	Ctx context.Context
 }
 
 // loopbackClient is shared: one per request left its idle connection (and a
@@ -161,7 +165,11 @@ func IterProxyResponse(req ProxyRequest, emit func([]byte) error) error {
 	if len(req.Body) > 0 {
 		bodyReader = bytes.NewReader(req.Body)
 	}
-	httpReq, err := http.NewRequest(method, url, bodyReader)
+	reqCtx := req.Ctx
+	if reqCtx == nil {
+		reqCtx = context.Background()
+	}
+	httpReq, err := http.NewRequestWithContext(reqCtx, method, url, bodyReader)
 	if err != nil {
 		return err
 	}

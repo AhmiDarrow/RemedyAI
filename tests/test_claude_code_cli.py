@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from remedy.core.llm_api_errors import is_fatal_llm_api_error
 from remedy.interfaces.anthropic_auth import (
     classify_anthropic_secret,
     is_subscription_oauth_token,
@@ -55,6 +54,3 @@ def test_retired_claude_code_provider_snaps_to_anthropic() -> None:
     assert "anthropic.com" in url
 
 
-def test_claude_code_only_error_is_fatal() -> None:
-    body = '{"error":{"message":"This credential is only authorized for use with Claude Code"}}'
-    assert is_fatal_llm_api_error(403, body) is True

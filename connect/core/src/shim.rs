@@ -92,16 +92,18 @@ pub mod auth {
     }
 
     fn header_has_token(headers: &str, token: &str) -> bool {
+        // `get` rather than indexing: a header line from the network may put a
+        // multi-byte character across the cut, and slicing there panics
+        // before the request is even authenticated.
         headers.lines().any(|l| {
-            l.len() > HEADER_NAME.len()
-                && l[..HEADER_NAME.len()].eq_ignore_ascii_case(HEADER_NAME)
-                && l[HEADER_NAME.len()..].starts_with(':')
+            l.get(..HEADER_NAME.len()).is_some_and(|n| n.eq_ignore_ascii_case(HEADER_NAME))
+                && l.get(HEADER_NAME.len()..).is_some_and(|rest| rest.starts_with(':'))
                 && token_eq(l[HEADER_NAME.len() + 1..].trim(), token)
         })
     }
 
     fn cookie_has_token(headers: &str, token: &str) -> bool {
-        headers.lines().filter(|l| l.len() > 7 && l[..7].eq_ignore_ascii_case("cookie:")).any(|l| {
+        headers.lines().filter(|l| l.len() > 7 && l.get(..7).is_some_and(|n| n.eq_ignore_ascii_case("cookie:"))).any(|l| {
             l[7..].split(';').any(|kv| {
                 kv.trim().split_once('=').is_some_and(|(n, v)| {
                     n.trim().eq_ignore_ascii_case(COOKIE_NAME) && token_eq(v.trim(), token)
@@ -610,6 +612,16 @@ mod tests {
         // percent-encoded prefix still matches
         let enc = format!("/%61{}/x", &t[1..]);
         assert!(auth::allowed(&enc, "", &t));
+    }
+
+    #[test]
+    fn multibyte_header_lines_are_refused_not_a_panic() {
+        let t = token();
+        // "X-Grove-Shi" + a 2-byte char puts a char boundary across byte 12,
+        // and "cookie" + "é" does the same at byte 7.
+        for headers in ["X-Grove-Shi\u{e9}: x\r\n", "cookie\u{e9}: a=b\r\n", "\u{1f600}\u{1f600}\u{1f600}\u{1f600}\r\n"] {
+            assert!(!auth::allowed("/assets/a.js", headers, &t));
+        }
     }
 
     #[test]

@@ -60,11 +60,11 @@ type StartedProcess struct {
 // ErrProcessClosed is returned by StartedProcess.Wait once Cleanup ran.
 var ErrProcessClosed = errors.New("process handle closed")
 
-// attachProbeDefault is the tool the attach probe executes. prompt.assemble
-// exercises the full import chain (config, models, memory) so a packaged
-// worker missing a dependency fails at startup with the traceback in the
-// worker log rather than on the first chat turn.
-const attachProbeDefault = "prompt.assemble"
+// attachProbeDefault is the tool the attach probe executes. worker.probe
+// imports what the worker's live tools need (the learning loop, voice and
+// vision) so a packaged worker missing a dependency fails at startup with the
+// traceback in the worker log rather than on the first chat turn.
+const attachProbeDefault = "worker.probe"
 
 // ProcessStarter starts argv with the given environment. Production uses Zig
 // remedy_core authorized spawn (no os/exec). Tests may inject os/exec.
@@ -344,15 +344,10 @@ func probeWorker(ctx context.Context, client *ipc.Client, opts RMDYToolOptions, 
 	}
 	input := map[string]any{"_go_bound": true}
 	switch tool {
-	case "prompt.assemble":
-		input["message"] = "attach probe"
-		input["session_id"] = "rmdy-attach-probe"
-		input["chat_mode"] = true
+	case "worker.probe":
 		if home := strings.TrimSpace(opts.HomeDir); home != "" {
 			input["home_dir"] = home
 		}
-	case "text.slugify":
-		input["text"] = "attach probe"
 	}
 	raw, err := json.Marshal(map[string]any{"tool_id": tool, "version": 1, "input": input, "_go_bound": true})
 	if err != nil {
@@ -513,8 +508,43 @@ func defaultToolEndpoint() (string, error) {
 			dir = filepath.Join(home, "run")
 			_ = os.MkdirAll(dir, 0o700)
 		}
-		return filepath.Join(dir, "remedy-tools-"+suffix+".sock"), nil
+		path := filepath.Join(dir, "remedy-tools-"+suffix+".sock")
+		if len(path) < maxUnixSocketPath {
+			return path, nil
+		}
+		// A long home folder makes the path too long for a Unix socket
+		// (bind fails with EINVAL and the worker never attaches). Use a
+		// private directory under the system temp folder instead.
+		short, err := shortSocketDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(short, "remedy-tools-"+suffix+".sock"), nil
 	}
+}
+
+// maxUnixSocketPath is the usable length of sockaddr_un.sun_path on macOS
+// (104 bytes, Linux allows 108), less the terminating NUL.
+const maxUnixSocketPath = 103
+
+var (
+	shortSocketOnce sync.Once
+	shortSocketPath string
+	shortSocketErr  error
+)
+
+// shortSocketDir makes one fresh 0700 directory per process under the system
+// temp folder (or /tmp when that is long too). MkdirTemp picks an unused,
+// unpredictable name, so another local user cannot pre-create it.
+func shortSocketDir() (string, error) {
+	shortSocketOnce.Do(func() {
+		base := os.TempDir()
+		if len(base) > 40 {
+			base = "/tmp"
+		}
+		shortSocketPath, shortSocketErr = os.MkdirTemp(base, "remedy-")
+	})
+	return shortSocketPath, shortSocketErr
 }
 
 func defaultPythonWorkerArgv() ([]string, error) {

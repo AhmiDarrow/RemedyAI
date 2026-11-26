@@ -140,7 +140,9 @@ func (h *hiveStore) pathFor(d hiveDaughter) string {
 
 func (h *hiveStore) pathID(id string) string {
 	id = strings.TrimSpace(id)
-	if id == "" || !h.ready() {
+	// Ids are newHiveID's 32 hex characters. Anything else, such as
+	// "../../settings", would read and rewrite other JSON under the home.
+	if !validHiveID(id) || !h.ready() {
 		return ""
 	}
 	for _, sub := range []string{"episodes", "posts"} {
@@ -335,6 +337,19 @@ func (h *hiveStore) livePulses() ([]hiveDaughter, error) {
 		}
 	}
 	return out, nil
+}
+
+func validHiveID(id string) bool {
+	if len(id) != 32 {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func newHiveID() string {

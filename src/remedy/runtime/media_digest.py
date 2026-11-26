@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import suppress
 from typing import Any
 
 DIGEST_SCHEMA: dict[str, Any] = {
@@ -113,10 +114,8 @@ def format_digest_for_muscle(digest: dict[str, Any], *, path: str = "") -> str:
     if d.get("ui_elements"):
         lines.append("ui_elements: " + ", ".join(str(x) for x in d["ui_elements"]))
     if d.get("metadata"):
-        try:
+        with suppress(TypeError, ValueError):
             lines.append("metadata: " + json.dumps(d["metadata"], ensure_ascii=False))
-        except (TypeError, ValueError):
-            pass
     lines.append(f"needs_pixels: {bool(d.get('needs_pixels'))}")
     if d.get("reason"):
         lines.append(f"reason: {d['reason']}")

@@ -20,36 +20,6 @@ func TestPromptSchemasAcceptRunnerPayloads(t *testing.T) {
 		input map[string]any
 	}{
 		{
-			tool: "prompt.slim_epoch",
-			input: map[string]any{
-				"system":      "sys",
-				"goal":        "build the thing",
-				"text":        "working",
-				"session_id":  "s1",
-				"epoch":       1,
-				"total_steps": 64,
-				"ledger":      []any{"- shell.exec [err] exit_code=1"},
-				"home_dir":    "h",
-				"provider":    "anthropic",
-				"model":       "claude-opus-5",
-			},
-		},
-		{
-			tool: "prompt.should_continue",
-			input: map[string]any{
-				"goal":        "build the thing",
-				"text":        "Done, tests pass",
-				"session_id":  "s1",
-				"tool_count":  3,
-				"chat_mode":   false,
-				"plan_mode":   false,
-				"verify_seen": false,
-				"last_results": []any{
-					map[string]any{"name": "shell.exec", "ok": false, "tail": "exit_code=1"},
-				},
-			},
-		},
-		{
 			tool: "prompt.turn_end",
 			input: map[string]any{
 				"message":        "I want to always use TypeScript",
@@ -60,20 +30,6 @@ func TestPromptSchemasAcceptRunnerPayloads(t *testing.T) {
 					map[string]any{"tool": "read", "ok": true, "result": "ok"},
 					map[string]any{"tool": "edit", "ok": true, "result": "ok"},
 					map[string]any{"tool": "bash", "ok": true, "result": "exit 0"},
-				},
-			},
-		},
-		{
-			tool: "prompt.after_tool_batch",
-			input: map[string]any{
-				"session_id": "s1",
-				"home_dir":   "h",
-				"results": []any{
-					map[string]any{
-						"tool": "read", "ok": true, "result": "ok",
-						"tool_call_id": "1",
-						"arguments":    map[string]any{"path": "a.py"},
-					},
 				},
 			},
 		},

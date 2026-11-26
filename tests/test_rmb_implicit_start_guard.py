@@ -22,7 +22,6 @@ from typing import Any
 
 import pytest
 
-from remedy.core.llm_api_errors import is_local_host_loading_error
 from remedy.runtime.rmb import service as svc
 from remedy.runtime.rmb.config import merge_state, save_rmb_json
 
@@ -187,47 +186,3 @@ def test_wait_rmb_ready_still_waits_on_host_already_loading(
 # --- is_local_host_loading_error ---------------------------------------------
 
 
-def test_cloud_503_unavailable_is_not_local_loading() -> None:
-    assert (
-        is_local_host_loading_error(
-            503, _XAI_503, provider="xai", model="grok-4.5", base_url="https://api.x.ai/v1"
-        )
-        is False
-    )
-
-
-@pytest.mark.parametrize("provider", ["openai", "anthropic", "google", "deepseek", "openrouter"])
-def test_other_cloud_5xx_with_loading_words_is_not_local(provider: str) -> None:
-    assert is_local_host_loading_error(502, "model not ready", provider=provider) is False
-    assert is_local_host_loading_error(503, "Loading model", provider=provider) is False
-
-
-def test_rmb_503_loading_model_is_local_loading() -> None:
-    assert (
-        is_local_host_loading_error(
-            503,
-            '{"error":{"code":503,"message":"Loading model","type":"unavailable_error"}}',
-            provider="rmb",
-            model="Qwen2.5-Coder-7B-Instruct-Q4_K_M",
-            base_url="http://127.0.0.1:8787/v1",
-        )
-        is True
-    )
-
-
-def test_loopback_custom_host_503_is_local_loading() -> None:
-    assert (
-        is_local_host_loading_error(
-            503, "Loading model", provider="custom", base_url="http://127.0.0.1:8080/v1"
-        )
-        is True
-    )
-
-
-def test_local_503_without_loading_words_is_not_loading() -> None:
-    assert is_local_host_loading_error(503, "out of memory", provider="rmb") is False
-
-
-def test_non_5xx_is_never_loading() -> None:
-    assert is_local_host_loading_error(429, "unavailable", provider="rmb") is False
-    assert is_local_host_loading_error(500, "unavailable", provider="rmb") is False

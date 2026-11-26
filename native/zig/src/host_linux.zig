@@ -575,14 +575,18 @@ pub fn mouseDrag(x1: i32, y1: i32, x2: i32, y2: i32, steps: u32) Error!void {
     var i: u32 = 1;
     while (i <= n) : (i += 1) {
         const t: f64 = @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(n));
-        const fx = @as(f64, @floatFromInt(x1)) + @as(f64, @floatFromInt(x2 - x1)) * t;
-        const fy = @as(f64, @floatFromInt(y1)) + @as(f64, @floatFromInt(y2 - y1)) * t;
+        const fx = @as(f64, @floatFromInt(x1)) + (@as(f64, @floatFromInt(x2)) - @as(f64, @floatFromInt(x1))) * t;
+        const fy = @as(f64, @floatFromInt(y1)) + (@as(f64, @floatFromInt(y2)) - @as(f64, @floatFromInt(y1))) * t;
         try mouseMove(@intFromFloat(fx), @intFromFloat(fy));
         sleepMs(12);
     }
     sleepMs(120);
     try mouseButton(.left, false);
 }
+
+/// One scroll call sends at most this many wheel clicks per axis; each is a
+/// separate X event, so an unbounded count stalls input.
+const max_scroll_clicks: u32 = 100;
 
 pub fn mouseScroll(x: i32, y: i32, dx: i32, dy: i32) Error!void {
     try mouseMove(x, y);
@@ -591,7 +595,7 @@ pub fn mouseScroll(x: i32, y: i32, dx: i32, dy: i32) Error!void {
     defer guard.close();
     if (dy != 0) {
         const btn: c_uint = if (dy > 0) Button4 else Button5;
-        var n: i32 = @intCast(@abs(dy));
+        var n: u32 = @min(@abs(dy), max_scroll_clicks);
         while (n > 0) : (n -= 1) {
             _ = XTestFakeButtonEvent(guard.display, btn, True, CurrentTime);
             _ = XTestFakeButtonEvent(guard.display, btn, False, CurrentTime);
@@ -599,7 +603,7 @@ pub fn mouseScroll(x: i32, y: i32, dx: i32, dy: i32) Error!void {
     }
     if (dx != 0) {
         const btn: c_uint = if (dx > 0) Button7 else Button6;
-        var n: i32 = @intCast(@abs(dx));
+        var n: u32 = @min(@abs(dx), max_scroll_clicks);
         while (n > 0) : (n -= 1) {
             _ = XTestFakeButtonEvent(guard.display, btn, True, CurrentTime);
             _ = XTestFakeButtonEvent(guard.display, btn, False, CurrentTime);

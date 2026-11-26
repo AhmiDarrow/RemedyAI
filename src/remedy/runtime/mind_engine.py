@@ -64,31 +64,25 @@ def total_ram_gb() -> float:
     except Exception:
         logger.debug("meminfo read failed", exc_info=True)
     try:
-        from remedy.runtime.gpu_probe import host_ram_gb
+        from remedy.runtime.rmb.autofit import probe_ram
 
-        return float(host_ram_gb())
+        total_mb, _avail_mb = probe_ram()
+        if total_mb > 0:
+            return total_mb / 1024.0
     except Exception:
-        return 16.0
+        logger.debug("ram probe failed", exc_info=True)
+    return 16.0
 
 
 def gpu_vram_gb() -> float | None:
     try:
         from remedy.runtime.gpu_probe import probe_gpus
 
-        gpus = probe_gpus() or []
-        if not gpus:
+        # Best single device (dedicated first), in GB.
+        prim = probe_gpus().primary
+        if prim is None or prim.vram_total_mb <= 0:
             return None
-        # Best single device, in GB.
-        best = 0.0
-        for g in gpus:
-            raw = g.get("vram_gb") or g.get("memory_gb") or g.get("vram_mib")
-            if raw is None:
-                continue
-            val = float(raw)
-            if val > 128:  # probably MiB
-                val = val / 1024.0
-            best = max(best, val)
-        return best or None
+        return prim.vram_total_mb / 1024.0
     except Exception:
         return None
 
@@ -114,7 +108,7 @@ def model_files_for_quant(quant: str) -> tuple[str, str]:
     from remedy.runtime.catalog import get_model_spec
 
     spec = get_model_spec()
-    if quant == "q4_k_m" and getattr(spec, "fallback_model_file", ""):
+    if quant == "q4_k_m" and spec.fallback_model_file:
         return spec.fallback_model_file, spec.mmproj_file
     return spec.model_file, spec.mmproj_file
 
@@ -200,8 +194,7 @@ def resolve_spec_type(
         else:
             return None
     if chosen == "draft-mtp" and not allow_mtp:
-        chosen = "ngram-mod" if _has(help_blob, "ngram-mod") else None
-        return chosen
+        return "ngram-mod" if _has(help_blob, "ngram-mod") else None
     return chosen
 
 

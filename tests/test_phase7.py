@@ -1,7 +1,6 @@
 """Phase 7 tests: Polish & Production Readiness."""
 
 import asyncio
-import logging
 
 import pytest
 
@@ -14,16 +13,6 @@ from remedy.core.errors import (
     RemedyError,
     SecurityError,
     SkillError,
-)
-from remedy.core.logging import (
-    StructuredFormatter,
-    TextFormatter,
-    _channel,
-    _request_id,
-    _session_id,
-    clear_log_context,
-    set_log_context,
-    setup_logging,
 )
 from remedy.core.metrics import (
     Counter,
@@ -100,92 +89,6 @@ class TestErrorTypes:
 # ============================================================================
 # Test Logging
 # ============================================================================
-
-class TestStructuredFormatter:
-    def test_json_output(self, caplog):
-        formatter = StructuredFormatter(color=False)
-        logger = logging.getLogger("test.structured")
-        logger.setLevel(logging.DEBUG)
-        handler = logging.StreamHandler(open("NUL", "w")) if hasattr(open, '__name__') else None  # noqa
-        record = logging.LogRecord(
-            "test.structured", logging.INFO, "", 0, "hello world", (), None
-        )
-        output = formatter.format(record)
-        assert "test.structured" in output
-        assert "hello world" in output
-        assert "INFO" in output
-        assert '"ts"' in output
-
-    def test_json_with_context(self):
-        set_log_context(session_id="sess-001", channel="web", request_id="req-42")
-        formatter = StructuredFormatter(color=False)
-        record = logging.LogRecord("test.ctx", logging.INFO, "", 0, "contextual", (), None)
-        output = formatter.format(record)
-        assert "sess-001" in output
-        assert "web" in output
-        assert "req-42" in output
-        clear_log_context()
-
-    def test_json_with_error(self):
-        formatter = StructuredFormatter(color=False)
-        try:
-            raise ValueError("boom")
-        except ValueError:
-            record = logging.LogRecord(
-                "test.err", logging.ERROR, "", 0, "error msg", (), None
-            )
-            import sys
-            record.exc_info = sys.exc_info()
-            output = formatter.format(record)
-            assert "boom" in output
-            assert "ValueError" in output
-
-    def test_text_formatter(self):
-        formatter = TextFormatter()
-        record = logging.LogRecord("test.text", logging.INFO, "", 0, "simple", (), None)
-        output = formatter.format(record)
-        assert "INFO" in output
-        assert "simple" in output
-
-
-class TestLoggingSetup:
-    def test_hot_debug_tracks_operator_level(self):
-        from remedy.core.logging import hot_debug_enabled, setup_logging
-
-        setup_logging(level="INFO", json_output=False, console_output=False)
-        assert hot_debug_enabled() is False
-        setup_logging(level="DEBUG", json_output=False, console_output=False)
-        assert hot_debug_enabled() is True
-        setup_logging(level="INFO", json_output=False, console_output=False)
-        assert hot_debug_enabled() is False
-
-    def test_setup_logging_json(self):
-        setup_logging(level="DEBUG", json_output=True, console_output=True)
-        root = logging.getLogger()
-        handlers = root.handlers
-        assert len(handlers) >= 1
-        assert isinstance(handlers[0].formatter, StructuredFormatter)
-
-    def test_setup_logging_text(self):
-        setup_logging(level="DEBUG", json_output=False, console_output=True)
-        root = logging.getLogger()
-        handlers = root.handlers
-        assert len(handlers) >= 1
-        assert isinstance(handlers[0].formatter, TextFormatter)
-
-    def test_setup_logging_with_file(self, tmp_path):
-        log_dir = tmp_path / "logs"
-        setup_logging(level="INFO", log_dir=str(log_dir), json_output=False, console_output=False)
-        assert (log_dir / "remedy.log").exists()
-        assert (log_dir / "errors.log").exists()
-        assert (log_dir / "debug.log").exists()
-
-    def test_clear_log_context(self):
-        set_log_context(session_id="x", channel="y", request_id="z")
-        clear_log_context()
-        assert _session_id.get() is None
-        assert _channel.get() is None
-        assert _request_id.get() is None
 
 
 # ============================================================================

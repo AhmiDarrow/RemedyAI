@@ -69,9 +69,11 @@ type approvalQueue struct {
 	sessionFPs   map[string]map[string]struct{}
 	sessionOrder []string
 	oneShot      map[string]map[string]*oneShotGrant // sid -> approval id -> grant
-	waiters      map[string]chan approvalResolveResult
-	mode         string
-	now          func() time.Time
+	// waiters holds every turn blocked on an item. Identical calls from two
+	// turns share one item, so one id can have several waiters.
+	waiters map[string][]chan approvalResolveResult
+	mode    string
+	now     func() time.Time
 
 	// observer records approval activity into the session's live turn log, so
 	// the owner can see afterwards what they were asked and what they decided.
@@ -113,7 +115,7 @@ func newApprovalQueue() *approvalQueue {
 		approvedFPs: map[string]struct{}{},
 		sessionFPs:  map[string]map[string]struct{}{},
 		oneShot:     map[string]map[string]*oneShotGrant{},
-		waiters:     map[string]chan approvalResolveResult{},
+		waiters:     map[string][]chan approvalResolveResult{},
 		mode:        "ask",
 		now:         time.Now,
 	}
@@ -165,6 +167,16 @@ func clipUTF8(s string, max int) string {
 		cut--
 	}
 	return s[:cut]
+}
+
+// clipUTF8Shown clips text the owner reads before approving. A cut is always
+// marked, so a harmless-looking prefix can't pass for the whole command.
+func clipUTF8Shown(s string, max int) string {
+	cut := clipUTF8(s, max)
+	if len(cut) == len(s) {
+		return s
+	}
+	return cut + fmt.Sprintf(" … [cut: %d more bytes not shown]", len(s)-len(cut))
 }
 
 func (q *approvalQueue) Mode() string {
@@ -286,7 +298,7 @@ func (q *approvalQueue) pruneLocked(now time.Time) {
 		if item.Status == "pending" {
 			continue
 		}
-		if _, waiting := q.waiters[id]; waiting {
+		if len(q.waiters[id]) > 0 {
 			continue
 		}
 		if !item.resolvedAt.IsZero() && item.resolvedAt.Before(cutoff) {
@@ -351,7 +363,7 @@ func (q *approvalQueue) resolve(id string, approve bool, scope string) (*pending
 		return &cp, false
 	}
 	resumed := false
-	if _, ok := q.waiters[id]; ok {
+	if len(q.waiters[id]) > 0 {
 		resumed = approve
 	}
 	now := q.now()
@@ -401,14 +413,13 @@ func (q *approvalQueue) resolve(id string, approve bool, scope string) (*pending
 }
 
 func (q *approvalQueue) signalWaiterLocked(id string, approve bool) {
-	ch := q.waiters[id]
-	if ch == nil {
-		return
-	}
+	chans := q.waiters[id]
 	delete(q.waiters, id)
-	select {
-	case ch <- approvalResolveResult{approved: approve}:
-	default:
+	for _, ch := range chans {
+		select {
+		case ch <- approvalResolveResult{approved: approve}:
+		default:
+		}
 	}
 }
 
@@ -419,8 +430,7 @@ func (q *approvalQueue) HasWaiter(id string) bool {
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	_, ok := q.waiters[id]
-	return ok
+	return len(q.waiters[id]) > 0
 }
 
 // WaitAll blocks until every id is approved, or returns false if any is denied.
@@ -437,15 +447,24 @@ func (q *approvalQueue) WaitAll(ctx context.Context, ids []string) (bool, error)
 	}
 	type waitSlot struct {
 		id string
-		ch <-chan approvalResolveResult
+		ch chan approvalResolveResult
 	}
 	var waiting []waitSlot
+	// release removes only this call's own registrations: another turn
+	// waiting on a shared item must keep its place.
+	release := func() {
+		q.mu.Lock()
+		defer q.mu.Unlock()
+		for _, slot := range waiting {
+			q.removeWaiterLocked(slot.id, slot.ch)
+		}
+	}
 	q.mu.Lock()
 	for _, id := range ids {
 		item := q.items[id]
 		if item == nil {
 			q.mu.Unlock()
-			q.clearWaiters(ids)
+			release()
 			return false, fmt.Errorf("approval %s not found", id)
 		}
 		switch item.Status {
@@ -453,11 +472,11 @@ func (q *approvalQueue) WaitAll(ctx context.Context, ids []string) (bool, error)
 			continue
 		case "denied":
 			q.mu.Unlock()
-			q.clearWaiters(ids)
+			release()
 			return false, nil
 		default:
 			ch := make(chan approvalResolveResult, 1)
-			q.waiters[id] = ch
+			q.waiters[id] = append(q.waiters[id], ch)
 			waiting = append(waiting, waitSlot{id: id, ch: ch})
 		}
 	}
@@ -466,12 +485,12 @@ func (q *approvalQueue) WaitAll(ctx context.Context, ids []string) (bool, error)
 	for _, slot := range waiting {
 		select {
 		case <-ctx.Done():
-			q.clearWaiters(ids)
+			release()
 			return false, ctx.Err()
 		case res := <-slot.ch:
 			if !res.approved {
 				q.denyRemaining(ids, slot.id)
-				q.clearWaiters(ids)
+				release()
 				return false, nil
 			}
 		}
@@ -496,11 +515,18 @@ func uniqueApprovalIDs(ids []string) []string {
 	return out
 }
 
-func (q *approvalQueue) clearWaiters(ids []string) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	for _, id := range ids {
+func (q *approvalQueue) removeWaiterLocked(id string, ch chan approvalResolveResult) {
+	chans := q.waiters[id]
+	for i, c := range chans {
+		if c == ch {
+			chans = append(chans[:i], chans[i+1:]...)
+			break
+		}
+	}
+	if len(chans) == 0 {
 		delete(q.waiters, id)
+	} else {
+		q.waiters[id] = chans
 	}
 }
 
@@ -539,7 +565,10 @@ func (q *approvalQueue) Get(id string) *pendingApproval {
 // A one-shot grant also satisfies it (consumed, unbound to a call id).
 // honorStanding is false for ForceAsk origins: parent Always / This session
 // grants must not authorize an untrusted forager.
-func (q *approvalQueue) IsApproved(toolName, command, sessionID string, honorStanding bool) bool {
+// origin is the asking turn's origin: a one-shot grant is spent only by a
+// turn from the same origin, so a hive forager or messenger turn sharing the
+// owner's session can't take the owner's "just this once".
+func (q *approvalQueue) IsApproved(toolName, command, sessionID, origin string, honorStanding bool) bool {
 	if q == nil {
 		return false
 	}
@@ -560,14 +589,14 @@ func (q *approvalQueue) IsApproved(toolName, command, sessionID string, honorSta
 			}
 		}
 	}
-	return q.consumeOneShotLocked(sid, fp, "")
+	return q.consumeOneShotLocked(sid, fp, "", origin)
 }
 
 // IsOneShotApproved consumes one slot of a sensitive go-ahead for this call.
 // Standing session / always approvals never satisfy it — payment and
 // credential steps ask every time. callID keeps two identical calls in one
 // batch from sharing a slot and stops a single call from consuming twice.
-func (q *approvalQueue) IsOneShotApproved(toolName, command, sessionID, callID string) bool {
+func (q *approvalQueue) IsOneShotApproved(toolName, command, sessionID, origin, callID string) bool {
 	if q == nil {
 		return false
 	}
@@ -578,10 +607,19 @@ func (q *approvalQueue) IsOneShotApproved(toolName, command, sessionID, callID s
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return q.consumeOneShotLocked(sid, fp, callID)
+	return q.consumeOneShotLocked(sid, fp, callID, origin)
 }
 
-func (q *approvalQueue) consumeOneShotLocked(sid, fp, callID string) bool {
+// sameGrantOrigin: owner turns share their grants with each other; any
+// other origin only with itself.
+func sameGrantOrigin(grant, caller string) bool {
+	if OriginIsOwner(grant) && OriginIsOwner(caller) {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(grant), strings.TrimSpace(caller))
+}
+
+func (q *approvalQueue) consumeOneShotLocked(sid, fp, callID, origin string) bool {
 	grants := q.oneShot[sid]
 	if len(grants) == 0 {
 		return false
@@ -599,7 +637,7 @@ func (q *approvalQueue) consumeOneShotLocked(sid, fp, callID string) bool {
 			delete(grants, id)
 			continue
 		}
-		if grant.fingerprint != fp {
+		if grant.fingerprint != fp || !sameGrantOrigin(grant.origin, origin) {
 			continue
 		}
 		if callID != "" {
@@ -625,7 +663,7 @@ func plainApprovalSummary(item *pendingApproval) string {
 		return s
 	}
 	tool := strings.TrimSpace(item.ToolName)
-	cmd := clipUTF8(strings.TrimSpace(item.Command), 120)
+	cmd := clipUTF8Shown(strings.TrimSpace(item.Command), 120)
 	if tool == "life_drive" {
 		first := strings.TrimSpace(strings.Split(item.Command, "\n")[0])
 		if strings.HasPrefix(strings.ToLower(first), "remedy will") {
@@ -655,7 +693,7 @@ func plainApprovalSummary(item *pendingApproval) string {
 }
 
 func (q *approvalQueue) ToPublic(item *pendingApproval) map[string]any {
-	cmd := clipUTF8(item.Command, 500)
+	cmd := clipUTF8Shown(item.Command, 500)
 	var soft any
 	low := strings.ToLower(item.Reason)
 	if strings.Contains(low, "soft-risk:") || strings.Contains(item.Reason, "Soft-risk") {

@@ -733,6 +733,11 @@ type frameSink struct {
 	gapFrames int
 	dropped   uint64
 	synthetic uint64
+	// closed is set once the turn's goroutine closes ch. A late event (a
+	// model stream or delegate still flushing after Stop) must be dropped,
+	// not sent: a send on a closed channel panics outside any recover and
+	// takes the whole runtime down.
+	closed bool
 }
 
 func newFrameSink(requestID string, size int) *frameSink {
@@ -752,11 +757,17 @@ func (f *frameSink) push(frame streamFrame) {
 		return
 	}
 	f.mu.Lock()
+	if f.closed {
+		f.mu.Unlock()
+		return
+	}
 	from, to := f.pendFrom, f.pendTo
 	if from != 0 && len(f.ch) < cap(f.ch) {
 		f.pendFrom, f.pendTo = 0, 0
 		f.gapFrames++
-		f.mu.Unlock()
+		// Pushers are serialised by f.mu, so the free slot checked above is
+		// still free: this send cannot block, and holding the lock keeps
+		// close() from running between the check and the send.
 		f.ch <- streamFrame{Data: sseFrame("gap", map[string]any{
 			"type":         "gap",
 			"request_id":   f.requestID,
@@ -764,7 +775,6 @@ func (f *frameSink) push(frame streamFrame) {
 			"to":           to,
 			"resume_after": from - 1,
 		})}
-		f.mu.Lock()
 	}
 	for i := 0; i <= cap(f.ch); i++ {
 		select {
@@ -798,7 +808,20 @@ func (f *frameSink) gapStats() (dropped uint64, notices int) {
 	return f.dropped, f.gapFrames
 }
 
-func (f *frameSink) close() { close(f.ch) }
+// close ends the stream. It is safe to call more than once, and any push
+// after it is dropped.
+func (f *frameSink) close() {
+	if f == nil {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return
+	}
+	f.closed = true
+	close(f.ch)
+}
 
 // ---------------------------------------------------------------------------
 // reading a turn log back

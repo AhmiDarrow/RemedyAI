@@ -230,6 +230,11 @@ func interopUserText(task map[string]any) string {
 	return ""
 }
 
+// interopProtocol reports a channel name peer turns may use.
+func interopProtocol(ch string) bool {
+	return ch == "a2a" || ch == "mcp"
+}
+
 func (s *Server) interopSession(protocol, peerID, contextID string) (ChatSession, error) {
 	if s.sessions == nil {
 		return ChatSession{}, fmt.Errorf("no session store")
@@ -237,6 +242,12 @@ func (s *Server) interopSession(protocol, peerID, contextID string) (ChatSession
 	ch := strings.ToLower(strings.TrimSpace(protocol))
 	if ch == "" {
 		ch = "a2a"
+	}
+	// Peer turns live only in interop sessions. The protocol can come from a
+	// request body, and any other channel name ("telegram", "desktop") would
+	// have joined that channel's conversation and its history.
+	if !interopProtocol(ch) {
+		return ChatSession{}, fmt.Errorf("unknown interop protocol %q", protocol)
 	}
 	ext := strings.TrimSpace(peerID)
 	if contextID = strings.TrimSpace(contextID); contextID != "" {
@@ -672,9 +683,13 @@ func (s *Server) handleInteropTurn(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "parse error"})
 		return
 	}
-	protocol := stringVal(body, "protocol")
+	protocol := strings.ToLower(strings.TrimSpace(stringVal(body, "protocol")))
 	if protocol == "" {
 		protocol = "mcp"
+	}
+	if !interopProtocol(protocol) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "protocol must be a2a or mcp"})
+		return
 	}
 	text := stringVal(body, "text", "question", "prompt")
 	peerID := stringVal(body, "peer_id")

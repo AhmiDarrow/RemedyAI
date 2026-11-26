@@ -26,6 +26,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from remedy.runtime.catalog import DEFAULT_PORT as _MIND_PORT
+
 logger = logging.getLogger(__name__)
 
 # Tier configuration
@@ -42,7 +44,6 @@ class MdlTier:
 
 
 # Unified mind host (8740). Tier names remain for routing API compatibility.
-from remedy.runtime.catalog import DEFAULT_PORT as _MIND_PORT
 
 MDL_TIERS: dict[str, MdlTier] = {
     "light": MdlTier(

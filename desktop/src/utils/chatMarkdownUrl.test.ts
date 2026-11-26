@@ -102,6 +102,8 @@ describe('network paths (red-team: NTLM leak via UNC images)', () => {
     '\\\\attacker.example\\share\\x.png',
     '//attacker.example/share/x.png',
     '\\\\?\\UNC\\attacker.example\\share\\x.png',
+    '\\??\\UNC\\attacker.example\\share\\x.png',
+    '/??/UNC/attacker.example/share/x.png',
     '\\\\.\\pipe\\x.png',
     'file://attacker.example/share/x.png',
     'file:////attacker.example/share/x.png',

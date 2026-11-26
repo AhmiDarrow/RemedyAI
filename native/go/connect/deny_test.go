@@ -226,6 +226,27 @@ func TestSettingsWriteLockedBlocksConnectRetarget(t *testing.T) {
 	}
 }
 
+// The folder Remedy works in when a session has no project is chosen at the
+// PC, like project_path.
+func TestSettingsWriteLockedBlocksDefaultWorkspace(t *testing.T) {
+	if SettingsWriteLocked([]byte(`{"default_workspace":"/"}`)) != "settings:locked" {
+		t.Fatal("default_workspace")
+	}
+}
+
+// Pointing the Sleev gateway off this PC sends it the provider keys, so the
+// phone can't do it, any more than it can change llm_base_url.
+func TestSettingsWriteLockedBlocksSleevGateway(t *testing.T) {
+	for _, body := range []string{
+		`{"sleev_gateway_url":"http://203.0.113.9:17321"}`,
+		`{"sleev_allow_remote_gateway":true}`,
+	} {
+		if SettingsWriteLocked([]byte(body)) != "settings:locked" {
+			t.Fatalf("not locked: %s", body)
+		}
+	}
+}
+
 func TestDenyConnectManagementIsHard403(t *testing.T) {
 	def := DefaultPanes()
 	cases := []struct {

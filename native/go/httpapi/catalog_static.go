@@ -2,7 +2,8 @@ package httpapi
 
 import "net/http"
 
-// Builtin slash commands — lockstep with Python slash_commands._BUILTIN_COMMANDS.
+// Builtin slash commands. scripts/check_docs.py reads this list to keep the
+// owner's manual (docs/manual/11-reference-commands.md) in step.
 var builtinCommands = []map[string]any{
 	{"name": "/help", "description": "Show available commands", "aliases": []string{}, "arguments": nil},
 	{"name": "/new", "description": "Create a new chat session", "aliases": []string{}, "arguments": nil},
@@ -23,6 +24,7 @@ var builtinCommands = []map[string]any{
 	{"name": "/forget", "description": "Remove a remembered fact: /forget <text>", "aliases": []string{}, "arguments": "text"},
 	{"name": "/pin", "description": "Pin a fact so it always injects: /pin <text>", "aliases": []string{}, "arguments": "text"},
 	{"name": "/whoami", "description": "Show what Remedy knows about you", "aliases": []string{}, "arguments": nil},
+	{"name": "/house-rules", "description": "Show house rules, or go over them again", "aliases": []string{"/houserules"}, "arguments": "revisit"},
 	{
 		"name":        "/stretch",
 		"description": "Map this PC (hardware, tools, rooms) — first-home census",
@@ -65,7 +67,7 @@ var builtinCommands = []map[string]any{
 	{"name": "/init", "description": "Scan the project and generate AGENTS.md", "aliases": []string{}, "arguments": "path"},
 }
 
-// Builtin agents — lockstep with Python slash_commands._BUILTIN_AGENTS.
+// Builtin agents.
 var builtinAgents = []map[string]any{
 	{"name": "default", "description": "Remedy — general-purpose agent", "build_mode": true},
 	{"name": "remedy", "description": "Remedy — meta-orchestrator with skill routing", "build_mode": true},

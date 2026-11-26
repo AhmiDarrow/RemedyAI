@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/connect"
+	"github.com/AhmiDarrow/RemedyAI/native/go/mind/houserules"
 )
 
 // The slash commands that do something from the talk field, wherever it is: the
@@ -310,6 +311,9 @@ func (s *Server) executeMoreSlash(sessionID, raw string, phone bool) map[string]
 			return say("/plan takes approve or cancel. Send /plan alone to see it.")
 		}
 
+	case "/house-rules", "/houserules", "/house_rules":
+		return s.slashHouseRules(arg, phone)
+
 	case "/approve", "/yes":
 		return who.resolve(arg, true)
 	case "/deny", "/no":
@@ -411,4 +415,45 @@ func (who slashCaller) resolve(arg string, approve bool) map[string]any {
 		word = "Denied"
 	}
 	return map[string]any{"text": word + ":\n" + describe(pick), "action": "approval_resolved"}
+}
+
+// slashHouseRules shows the house rules, or reopens them with "revisit".
+// Reopening starts the house-rules conversation again, so only the PC may do
+// it; a paired phone can read the rules.
+func (s *Server) slashHouseRules(arg string, phone bool) map[string]any {
+	switch strings.ToLower(strings.TrimSpace(arg)) {
+	case "again", "revisit", "redo", "review":
+		if phone {
+			return map[string]any{"text": "House rules can only be reopened on the PC. Send /house-rules to read them."}
+		}
+		out, _ := houserules.Dispatch(s.houseRulesEnv(), map[string]any{"action": "revisit", "caller_origin": "desktop"})
+		if ok, _ := out["ok"].(bool); !ok {
+			msg, _ := out["error"].(string)
+			if strings.TrimSpace(msg) == "" {
+				msg = "Could not reopen house rules."
+			}
+			return map[string]any{"text": msg}
+		}
+		text, _ := out["prompt"].(string)
+		if strings.TrimSpace(text) == "" {
+			text = "Let's go over house rules again."
+		}
+		if sess, _ := out["session"].(map[string]any); sess != nil {
+			if sum, _ := sess["summary"].(string); strings.TrimSpace(sum) != "" {
+				text += "\n\nCurrent rules:\n" + sum
+			}
+		}
+		return map[string]any{"text": text}
+	case "":
+	default:
+		return map[string]any{"text": "/house-rules takes revisit. Send /house-rules alone to see them."}
+	}
+	out, _ := houserules.Dispatch(s.houseRulesEnv(), map[string]any{"action": "summarize", "caller_origin": "desktop"})
+	sum, _ := out["summary"].(string)
+	if strings.TrimSpace(sum) == "" {
+		sum = "Defaults are in effect."
+	}
+	return map[string]any{"text": "**House rules**\n\n" + sum +
+		"\n\nSay \u201clet's go over house rules again\u201d anytime, or `/house-rules revisit`. " +
+		"Change a setting in chat or in Settings. Skipped items keep their defaults."}
 }

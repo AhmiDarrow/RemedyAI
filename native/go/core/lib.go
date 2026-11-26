@@ -36,6 +36,10 @@ func libraryNames() []string {
 // FindLibraryPath mirrors Python native_runtime._core_library_path.
 // When both a staged (exe-adjacent) copy and a fresher zig-out build exist,
 // prefer zig-out so tauri:dev cannot bind a stale same-ABI DLL after zig build.
+// The dev zig-out is only ever the checkout this code was built from or the
+// one the executable sits in (devCheckoutRoots), never a folder found by
+// walking up from the working directory: a library planted in a parent of
+// wherever Remedy was started would otherwise be loaded.
 func FindLibraryPath() string {
 	if explicit := os.Getenv("REMEDY_NATIVE_CORE_LIB"); explicit != "" {
 		if st, err := os.Stat(explicit); err == nil && !st.IsDir() {
@@ -75,31 +79,13 @@ func FindLibraryPath() string {
 			}
 		}
 	}
-	wd, err := os.Getwd()
-	if err != nil {
-		wd = ""
-	}
-	start := wd
-	if start == "" {
-		if exe, err := os.Executable(); err == nil {
-			start = filepath.Dir(exe)
-		}
-	}
 	var dev string
-	for d := start; d != "" && d != filepath.Dir(d); d = filepath.Dir(d) {
-		if p := add(filepath.Join(d, "native", "zig", "zig-out", "bin")); p != "" {
+	for _, repo := range devCheckoutRoots() {
+		if p := add(filepath.Join(repo, "native", "zig", "zig-out", "bin")); p != "" {
 			dev = p
 			break
 		}
-		if p := add(filepath.Join(d, "native", "zig", "zig-out", "lib")); p != "" {
-			dev = p
-			break
-		}
-		if p := add(filepath.Join(d, "zig", "zig-out", "bin")); p != "" {
-			dev = p
-			break
-		}
-		if p := add(filepath.Join(d, "zig", "zig-out", "lib")); p != "" {
+		if p := add(filepath.Join(repo, "native", "zig", "zig-out", "lib")); p != "" {
 			dev = p
 			break
 		}
@@ -124,6 +110,42 @@ func FindLibraryPath() string {
 		return packaged
 	}
 	return dev
+}
+
+// devCheckoutRoots are the source checkouts whose native/zig/zig-out may hold
+// a dev build: the one this file was compiled from (go test / go run; a
+// -trimpath release build records no absolute path, so it has none) and the
+// one a dev executable sits in (desktop/bin, desktop/src-tauri/target/...).
+func devCheckoutRoots() []string {
+	var roots []string
+	if _, file, _, ok := runtime.Caller(0); ok && filepath.IsAbs(file) {
+		// <repo>/native/go/core/lib.go
+		roots = append(roots, filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(file)))))
+	}
+	if exe, err := os.Executable(); err == nil {
+		if repo := checkoutOfExecutable(filepath.Dir(exe)); repo != "" {
+			roots = append(roots, repo)
+		}
+	}
+	return roots
+}
+
+// checkoutOfExecutable is the repo root when dir is a dev output folder of a
+// checkout: <repo>/desktop/bin or <repo>/desktop/src-tauri/target/[<triple>/]<profile>.
+func checkoutOfExecutable(dir string) string {
+	dir = filepath.Clean(dir)
+	parent := filepath.Dir(dir)
+	if filepath.Base(dir) == "bin" && filepath.Base(parent) == "desktop" {
+		return filepath.Dir(parent)
+	}
+	for d, i := dir, 0; i < 3 && d != filepath.Dir(d); d, i = filepath.Dir(d), i+1 {
+		srcTauri := filepath.Dir(d)
+		desktop := filepath.Dir(srcTauri)
+		if filepath.Base(d) == "target" && filepath.Base(srcTauri) == "src-tauri" && filepath.Base(desktop) == "desktop" {
+			return filepath.Dir(desktop)
+		}
+	}
+	return ""
 }
 
 // Open loads remedy_core (cached). Fail-closed on missing / ABI mismatch.

@@ -18,17 +18,20 @@ All tunables are Advanced knobs with safe ``auto`` defaults. See docs/RMB.md.
 from __future__ import annotations
 
 import json
-import os
 import logging
+import os
 import socket
+import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 import urllib.request
+from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from urllib.parse import urlparse
 
 from remedy.core.organism_knobs import resolve, resolve_bool, resolve_int
@@ -636,7 +639,7 @@ def _schedule_lock_path(home_dir: str | Path | None = None) -> Path:
 
 
 def _lock_exclusive(fp: Any) -> None:
-    if os.name == "nt":
+    if sys.platform == "win32":
         import msvcrt
 
         fp.seek(0, os.SEEK_END)
@@ -652,7 +655,7 @@ def _lock_exclusive(fp: Any) -> None:
 
 
 def _unlock_exclusive(fp: Any) -> None:
-    if os.name == "nt":
+    if sys.platform == "win32":
         import msvcrt
 
         fp.seek(0)
@@ -680,7 +683,7 @@ class GpuSchedule:
             sched = last_saved_schedule() or "overlap"
         self._serialize = sched == "serialize"
 
-    def __enter__(self) -> "GpuSchedule":
+    def __enter__(self) -> GpuSchedule:
         if self._serialize:
             _gate.acquire()
             self._held = True
@@ -699,14 +702,10 @@ class GpuSchedule:
     def __exit__(self, *exc: object) -> None:
         if self._held:
             if self._fp is not None:
-                try:
+                with suppress(Exception):
                     _unlock_exclusive(self._fp)
-                except Exception:
-                    pass
-                try:
+                with suppress(Exception):
                     self._fp.close()
-                except Exception:
-                    pass
                 self._fp = None
             with _holders_mu:
                 global _holders

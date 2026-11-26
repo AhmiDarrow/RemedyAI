@@ -581,12 +581,14 @@ func executeEdit(_ context.Context, request Request) (Result, error) {
 
 	text := string(payload)
 	count := strings.Count(text, oldStr)
+	looseStart, looseEnd := -1, -1
 	if count == 0 {
 		// Models often drop or add spaces at the ends of lines. When the text
 		// matches one place once those are ignored, that place is the edit.
+		// Splice at that span: the same bytes may also sit earlier mid-line
+		// ("xfoo \nbar"), where a text replace would change the wrong place.
 		if start, end, n := matchIgnoringLineEnds(text, oldStr); n == 1 {
-			oldStr, count = text[start:end], 1
-
+			looseStart, looseEnd, count = start, end, 1
 		}
 	}
 	switch {
@@ -601,7 +603,9 @@ func executeEdit(_ context.Context, request Request) (Result, error) {
 	}
 
 	replacements := 1
-	if body.ReplaceAll {
+	if looseStart >= 0 {
+		text = text[:looseStart] + newStr + text[looseEnd:]
+	} else if body.ReplaceAll {
 		replacements = count
 		text = strings.ReplaceAll(text, oldStr, newStr)
 	} else {
@@ -784,8 +788,19 @@ func atomicWriteInRoot(root *os.Root, rel string, data []byte) error {
 	if file == nil {
 		return fmt.Errorf("%w: could not create a temporary file beside %q", ErrInvalidInput, rel)
 	}
+	// Keep the replaced file's permissions: a rewrite used to turn a 0600
+	// file 0644 (readable by other users) and drop a script's execute bit.
+	var keepMode os.FileMode
+	if info, err := root.Stat(rel); err == nil && info.Mode().IsRegular() {
+		keepMode = info.Mode().Perm()
+	}
 	writeErr := func() error {
 		defer file.Close()
+		if keepMode != 0 {
+			if err := file.Chmod(keepMode); err != nil && runtime.GOOS != "windows" {
+				return err
+			}
+		}
 		if _, err := file.Write(data); err != nil {
 			return err
 		}

@@ -383,7 +383,7 @@ func TestMessengerOriginForcesAskUnderAuto(t *testing.T) {
 	}
 	var executed atomic.Int32
 	err = reg.Register(tools.Descriptor{
-		ID: "workspace.write", Version: 1, Description: "test write", Risk: tools.RiskMutation,
+		ID: "test.write", Version: 1, Description: "test write", Risk: tools.RiskMutation,
 		Runtime: tools.RuntimeGo, InputSchema: json.RawMessage(`{"type":"object"}`), OutputSchema: json.RawMessage(`{"type":"object"}`),
 	}, tools.ExecutorFunc(func(context.Context, tools.Request) (tools.Result, error) {
 		executed.Add(1)
@@ -395,7 +395,7 @@ func TestMessengerOriginForcesAskUnderAuto(t *testing.T) {
 	q := newApprovalQueue()
 	_ = q.SetMode("auto")
 	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
-		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "workspace.write", Input: []byte(`{"path":"a.txt","content":"x"}`)}}},
+		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "test.write", Input: []byte(`{"path":"a.txt","content":"x"}`)}}},
 		{{Text: "wrote", Done: true}},
 	}}
 	r := &CognitionTurnRunner{
@@ -416,7 +416,7 @@ func TestMessengerOriginForcesAskUnderAuto(t *testing.T) {
 		out, turnErr = CollectTokens(ctx, r, TurnRequest{SessionID: sid, Prompt: "write a.txt", Origin: "telegram:42"})
 	}()
 	item := waitPending(t, q, sid, done)
-	if item.ToolName != "workspace.write" {
+	if item.ToolName != "test.write" {
 		t.Fatalf("pending=%q", item.ToolName)
 	}
 	if executed.Load() != 0 {
@@ -466,7 +466,7 @@ func TestHiveAskLandsOnParentSession(t *testing.T) {
 	if p.SessionID != "sess-parent" || !p.ForceAsk || !p.HiveRestricted {
 		t.Fatalf("policy session=%q forceAsk=%v hive=%v", p.SessionID, p.ForceAsk, p.HiveRestricted)
 	}
-	call := cognition.ToolCall{ID: "1", Name: "shell.exec", Input: []byte(`{"argv":["echo"]}`)}
+	call := cognition.ToolCall{ID: "1", Name: "bash", Input: []byte(`{"command":"echo"}`)}
 	if d := p.Decide(context.Background(), call); d != cognition.Ask {
 		t.Fatalf("hive mutation Decide=%v want Ask", d)
 	}

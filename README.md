@@ -52,11 +52,11 @@ Sample data throughout.
 
 | Grove, the home screen | Studio, for building |
 |---|---|
-| ![Grove on the desktop](docs/screenshots/desktop-grove-talking.png) | ![Studio on the desktop](docs/screenshots/desktop-studio-chat.png) |
+| ![Grove on the desktop](https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master/docs/screenshots/desktop-grove-talking.png) | ![Studio on the desktop](https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master/docs/screenshots/desktop-studio-chat.png) |
 
 | Phone: talk | Phone: work |
 |---|---|
-| <img src="docs/screenshots/phone-talk.png" alt="Remedy on a phone, talking" width="260"> | <img src="docs/screenshots/phone-work.png" alt="Remedy on a phone, work list" width="260"> |
+| <img src="https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master/docs/screenshots/phone-talk.png" alt="Remedy on a phone, talking" width="260"> | <img src="https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master/docs/screenshots/phone-work.png" alt="Remedy on a phone, work list" width="260"> |
 
 ## How it fits together
 

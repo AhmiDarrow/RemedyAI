@@ -106,9 +106,6 @@ func TestCognitionTurnRunnerAssemblesPromptOverRMDY(t *testing.T) {
 	if got := model.LastTurn.FirstUserText(); got != "hello partner" {
 		t.Fatalf("user message=%q", got)
 	}
-	if _, err := r.Registry.Latest("prompt.assemble"); err != nil {
-		t.Fatalf("prompt.assemble missing after attach: %v", err)
-	}
 }
 
 func TestCognitionTurnRunnerFailsClosedWhenAssembleUnavailable(t *testing.T) {
@@ -168,6 +165,7 @@ func TestCognitionTurnRunnerExecutesRealGoBuiltinTools(t *testing.T) {
 		{{Text: "done", Done: true}},
 	}}
 	r := NewCognitionTurnRunner(model)
+	r.reachHiddenTools = true // demo/internal tools: this checks their plumbing
 	out, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "probe"})
 	if err != nil {
 		t.Fatal(err)
@@ -211,6 +209,7 @@ func TestCognitionTurnRunnerExecutesPythonToolsOverRMDY(t *testing.T) {
 		{{Text: "slug-ok", Done: true}},
 	}}
 	r := NewCognitionTurnRunner(model)
+	r.reachHiddenTools = true // demo/internal tools: this checks their plumbing
 	if err := r.AttachPythonWorker(client); err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +228,13 @@ func TestCognitionTurnRunnerExecutesPythonToolsOverRMDY(t *testing.T) {
 	}
 }
 
-func TestCognitionTurnRunnerExecutesWorkspaceListOverRMDY(t *testing.T) {
+func TestCognitionTurnRunnerExecutesWorkspaceListInGo(t *testing.T) {
+	// workspace.* runs in Go now: a turn lists the bound folder whether or not
+	// a Python worker is attached, and attaching one does not take the tool back.
+	ws := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ws, "mirror.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	serverReg := tools.NewRegistry()
 	if err := tools.RegisterPythonWorkerLocalMirrors(serverReg); err != nil {
 		t.Fatal(err)
@@ -248,16 +253,18 @@ func TestCognitionTurnRunnerExecutesWorkspaceListOverRMDY(t *testing.T) {
 		{{Text: "listed", Done: true}},
 	}}
 	r := NewCognitionTurnRunner(model)
+	r.reachHiddenTools = true // demo/internal tools: this checks their plumbing
 	if err := r.AttachPythonWorker(client); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Registry.Latest("workspace.read"); err != nil {
-		t.Fatalf("workspace.read missing after attach: %v", err)
+	d, err := r.Registry.Latest("workspace.read")
+	if err != nil || d.Runtime != tools.RuntimeGo {
+		t.Fatalf("workspace.read after attach: %+v err=%v", d, err)
 	}
 	if _, err := r.Registry.Latest("mail.list"); err != nil {
 		t.Fatalf("mail.list missing after attach: %v", err)
 	}
-	out, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "list"})
+	out, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "list", ProjectPath: ws})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,10 +413,10 @@ func TestApproveResumesPendingToolBatch(t *testing.T) {
 	}
 	q := newApprovalQueue()
 	_ = q.SetMode("ask")
-	input := `{"argv":["C:\\Windows\\System32\\cmd.exe","/c","echo"]}`
+	input := `{"command":"echo"}`
 	var executed atomic.Int32
 	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
-		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "shell.exec", Input: []byte(input)}}},
+		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "bash", Input: []byte(input)}}},
 		{{Text: "finished", Done: true}},
 	}}
 	r := &CognitionTurnRunner{
@@ -451,7 +458,7 @@ func TestApproveResumesPendingToolBatch(t *testing.T) {
 	if item == nil {
 		t.Fatal("timed out waiting for pending approval")
 	}
-	if item.ToolName != "shell.exec" {
+	if item.ToolName != "bash" {
 		t.Fatalf("tool=%q", item.ToolName)
 	}
 	waiterDeadline := time.Now().Add(2 * time.Second)
@@ -503,10 +510,10 @@ func TestDenyDoesNotRunPendingToolBatch(t *testing.T) {
 	}
 	q := newApprovalQueue()
 	_ = q.SetMode("ask")
-	input := `{"argv":["C:\\Windows\\System32\\cmd.exe","/c","echo"]}`
+	input := `{"command":"echo"}`
 	var executed atomic.Int32
 	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
-		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "shell.exec", Input: []byte(input)}}},
+		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "bash", Input: []byte(input)}}},
 		{{Text: "should-not-run", Done: true}},
 	}}
 	r := &CognitionTurnRunner{

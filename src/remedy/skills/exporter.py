@@ -213,7 +213,16 @@ class SkillExporter:
 
         imported: list[Skill] = []
         # Find SKILL.md files under extract root
-        for skill_md in extract_root.rglob("SKILL.md"):
+        skill_mds = list(extract_root.rglob("SKILL.md"))
+        # A SKILL.md inside another skill's folder would be copied along with
+        # it, skip the quarantine rewrite, and load (recursively) as ready.
+        skill_dirs = {p.parent for p in skill_mds}
+        for d in skill_dirs:
+            if any(parent in skill_dirs for parent in d.parents):
+                raise ValueError(
+                    f"Refusing nested skill inside another skill: {d.relative_to(extract_root)}"
+                )
+        for skill_md in skill_mds:
             try:
                 skill = load_skill_from_dir(skill_md.parent)
             except Exception:

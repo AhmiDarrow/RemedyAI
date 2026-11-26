@@ -67,6 +67,15 @@ export function orderDecisions<T extends { id: string; tool_name?: string; creat
     .sort((a, b) => (a.created_at || 0) - (b.created_at || 0))
 }
 
+/** Keep the decision on screen in front while it is still waiting, so a
+ * poll that brings in an older one can't swap the card under the owner's
+ * click. */
+export function keepShownFirst<T extends { id: string }>(items: T[], shownId: string | null): T[] {
+  const i = shownId ? items.findIndex((x) => x.id === shownId) : -1
+  if (i <= 0) return items
+  return [items[i], ...items.slice(0, i), ...items.slice(i + 1)]
+}
+
 /** Fields the runtime fills in itself — never shown to the owner as part of
  * what Remedy asked to do. */
 const RUNTIME_FIELDS = new Set([

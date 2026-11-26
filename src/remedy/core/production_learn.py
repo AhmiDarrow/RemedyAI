@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
+from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +154,7 @@ def _rotate_learn_log(path: Path) -> None:
     if len(lines) <= max_lines // 2:
         return
     keep = lines[-max_lines:] if len(lines) > max_lines else lines[len(lines) // 2 :]
+    tmp: Path | None = None
     try:
         from remedy.core.atomic_json import replace_with_retry, scratch_path
 
@@ -162,9 +163,8 @@ def _rotate_learn_log(path: Path) -> None:
         replace_with_retry(tmp, path)
     except Exception:
         with suppress(Exception):
-            tmp = locals().get("tmp")
             if tmp is not None:
-                Path(tmp).unlink(missing_ok=True)
+                tmp.unlink(missing_ok=True)
 
 
 def _changed_from(out: Mapping[str, Any]) -> dict[str, Any]:
@@ -342,11 +342,11 @@ def _finish_production_turn_inner(inp: Mapping[str, Any]) -> dict[str, Any]:
                 runtime._last_assistant_text = assistant_text
             with suppress(Exception):
                 runtime._turn_tool_steps = list(steps)
-            with suppress(Exception):
-                from remedy.core.turn_context import set_turn_session_id
-
-                if session_id:
-                    set_turn_session_id(session_id, runtime)
+            if session_id:
+                # Post-turn work reads the session through turn_session_id,
+                # which falls back to the runtime outside a Python turn.
+                with suppress(Exception):
+                    runtime._session_id = session_id
 
         with suppress(Exception):
             from remedy.core.agent_post_turn import schedule_post_turn_prep

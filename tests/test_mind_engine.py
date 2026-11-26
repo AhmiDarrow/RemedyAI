@@ -11,6 +11,7 @@ from remedy.runtime.catalog import (
     catalog_public,
     get_model_spec,
 )
+from remedy.runtime.mdl import MDL_TIERS
 from remedy.runtime.media_digest import (
     DIGEST_SCHEMA,
     format_digest_for_muscle,
@@ -23,7 +24,6 @@ from remedy.runtime.mind_engine import (
     resolve_spec_type,
     select_quant,
 )
-from remedy.runtime.mdl import MDL_TIERS
 from remedy.runtime.rmb.mode import should_skip_vision_stack
 
 
@@ -139,6 +139,31 @@ def test_spec_off_knob() -> None:
 def test_select_quant_honors_knob() -> None:
     assert select_quant({"advanced": {"mind_quant": "q4_k_m"}}) == "q4_k_m"
     assert select_quant({"advanced": {"mind_quant": "q6_k"}}) == "q6_k"
+
+
+def test_auto_quant_sees_a_small_gpu(monkeypatch) -> None:
+    """gpu_vram_gb iterated the GpuSnapshot itself, which is not iterable, so
+    every probe fell into its except and auto never saw a small card."""
+    from remedy.runtime import gpu_probe, mind_engine
+
+    snap = gpu_probe.GpuSnapshot(
+        devices=[gpu_probe.GpuDevice(name="GTX 1650", vendor="nvidia", vram_total_mb=4096)]
+    )
+    monkeypatch.setattr(gpu_probe, "probe_gpus", lambda **_: snap)
+    monkeypatch.setattr(mind_engine, "total_ram_gb", lambda: 32.0)
+    assert mind_engine.gpu_vram_gb() == 4.0
+    assert select_quant({"advanced": {"mind_quant": "auto"}}) == "q4_k_m"
+
+
+def test_ram_without_proc_meminfo_comes_from_the_host(monkeypatch) -> None:
+    """Without /proc/meminfo (Windows, macOS) total_ram_gb imported a
+    gpu_probe.host_ram_gb that does not exist and always answered 16 GB."""
+    from remedy.runtime import mind_engine
+    from remedy.runtime.rmb import autofit
+
+    monkeypatch.setattr(mind_engine.os.path, "exists", lambda _p: False)
+    monkeypatch.setattr(autofit, "probe_ram", lambda: (8192, 4096))
+    assert mind_engine.total_ram_gb() == 8.0
 
 
 def test_digest_parse_and_format() -> None:

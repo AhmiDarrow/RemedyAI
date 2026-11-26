@@ -64,7 +64,7 @@ def _freeze() -> None:
     import uuid
 
     real_dt = _dt.datetime
-    utc = _dt.timezone.utc
+    utc = _dt.UTC
 
     class FrozenDateTime(real_dt):
         @classmethod
@@ -293,8 +293,8 @@ def _install_capture() -> None:
     import remedy.memory.partner_memory as pm
     import remedy.memory.partner_state as ps
     import remedy.memory.soul.inject as si
-    from remedy.core.metabolism import alive as al
     from remedy.core import session_continuity as sc
+    from remedy.core.metabolism import alive as al
 
     wrap(sc, "session_isolation_system_line", "isolation")
     wrap(si, "build_soul_context_block", "soul")
@@ -454,7 +454,7 @@ def _assemble_sections(system: str) -> list[dict[str, str]]:
         raise RuntimeError(f"unsectioned tail: {rest[:200]!r}")
     rebuilt = "".join(s["sep"] + s["text"] for s in secs)
     if rebuilt != system:
-        at = next((i for i, (a, b) in enumerate(zip(rebuilt, system)) if a != b), min(len(rebuilt), len(system)))
+        at = next((i for i, (a, b) in enumerate(zip(rebuilt, system, strict=False)) if a != b), min(len(rebuilt), len(system)))
         raise RuntimeError(
             f"sections do not rebuild the system block at {at}: "
             f"{rebuilt[max(0, at - 60):at + 60]!r} vs {system[max(0, at - 60):at + 60]!r}"

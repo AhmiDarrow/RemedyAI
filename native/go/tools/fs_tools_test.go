@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -640,5 +641,46 @@ func TestEditForgivesLineEndSpacesAndShowsTheClosestText(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("an ambiguous loose match must not be applied")
+	}
+}
+// A loose (line-end spaces) match is applied where it matched, not at an
+// earlier place where the same bytes sit mid-line.
+func TestEditLooseMatchChangesTheMatchedPlace(t *testing.T) {
+	root := t.TempDir()
+	writeFileForTest(t, root, "c.txt", "keep xfoo \nbar\nfoo \nbar\n")
+	registry := fileRegistry(t)
+	mustCall(t, registry, "edit", map[string]any{
+		"path": "c.txt", "old_string": "foo\nbar", "new_string": "done", "workspace_root": root,
+	})
+	body, err := os.ReadFile(filepath.Join(root, "c.txt"))
+	if err != nil || string(body) != "keep xfoo \nbar\ndone\n" {
+		t.Fatalf("edited the wrong place: %q %v", body, err)
+	}
+}
+
+// Rewriting a file keeps its permissions: a private file stays private and a
+// script stays executable.
+func TestEditKeepsFilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX modes")
+	}
+	root := t.TempDir()
+	writeFileForTest(t, root, "secret.env", "TOKEN=a\n")
+	writeFileForTest(t, root, "run.sh", "#!/bin/sh\necho a\n")
+	if err := os.Chmod(filepath.Join(root, "secret.env"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(root, "run.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	registry := fileRegistry(t)
+	for name, want := range map[string]os.FileMode{"secret.env": 0o600, "run.sh": 0o755} {
+		mustCall(t, registry, "edit", map[string]any{
+			"path": name, "old_string": "a\n", "new_string": "b\n", "workspace_root": root,
+		})
+		info, err := os.Stat(filepath.Join(root, name))
+		if err != nil || info.Mode().Perm() != want {
+			t.Fatalf("%s mode = %v, want %v (%v)", name, info.Mode().Perm(), want, err)
+		}
 	}
 }

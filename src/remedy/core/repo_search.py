@@ -78,6 +78,18 @@ _HUGE_ROOT_SKIP_NAMES = {
 }
 
 
+def _is_secret_search_path(path: Path, rel: str | None = None) -> bool:
+    """True for credential files (.env, *.pem, id_rsa, .ssh/…) and Remedy's
+    auth tree: search must not print their lines, the same files
+    workspace.read refuses."""
+    from remedy.core.security import is_credential_filename, is_protected_secret_path
+
+    parts = Path(rel).parts if rel is not None else path.parts
+    if any(is_credential_filename(part) for part in parts):
+        return True
+    return is_protected_secret_path(path)
+
+
 def is_huge_root(start: Path) -> bool:
     """True when *start* is the user's home or a filesystem/drive root."""
     try:
@@ -206,6 +218,8 @@ def search_repo(
     )
     if err:
         return [], err
+    if _is_secret_search_path(start):
+        return [], "error: credential-looking files are not searchable"
 
     max_matches = max(1, min(500, int(max_matches or 50)))
 
@@ -416,6 +430,7 @@ def _search_rg(
     current: SearchHit | None = None
     current_path = ""
     after_left = 0
+    secret_paths: dict[str, bool] = {}
     for line in (proc.stdout or "").splitlines():
         if with_context and line == "--":
             before = []
@@ -427,6 +442,16 @@ def _search_rg(
             continue
         raw_path, lineno, is_match, text = parsed
         text = text.rstrip("\n")
+        secret = secret_paths.get(raw_path)
+        if secret is None:
+            rel_check = _rg_relative_path(root, raw_path)
+            secret = _is_secret_search_path(root / rel_check, rel_check)
+            secret_paths[raw_path] = secret
+        if secret:
+            before = []
+            current = None
+            after_left = 0
+            continue
         if is_match:
             if len(hits) >= max_matches:
                 capped = True
@@ -552,6 +577,12 @@ def _search_python(
                     continue
                 p = Path(dirpath) / fn
                 if glob and not _glob_match(fn, glob) and not _glob_match(p.as_posix(), glob):
+                    continue
+                try:
+                    rel_check = p.relative_to(start).as_posix()
+                except ValueError:
+                    rel_check = None
+                if _is_secret_search_path(p, rel_check):
                     continue
                 if not should_search_file(p, max_file_bytes=DEFAULT_MAX_SEARCH_FILE_BYTES):
                     continue
