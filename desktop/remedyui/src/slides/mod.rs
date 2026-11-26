@@ -91,7 +91,7 @@ impl Workspace {
     pub fn for_studio(studio: &Studio) -> Self {
         if studio.local_only {
             let ws = Self::build(Signal::new(None), true, None);
-            ws.project_path.set("/home/joe/RemedyAI".into());
+            ws.project_path.set("/home/ahmi/RemedyAI".into());
             ws.session_id.set(Some("s3".into()));
             ws
         } else {
@@ -102,7 +102,7 @@ impl Workspace {
     /// One slide, filled with the fixture the goldens draw.
     pub fn preview_slide(id: SlideId) -> Self {
         let ws = Self::build(Signal::new(None), true, Some(id));
-        ws.project_path.set("/home/joe/RemedyAI".into());
+        ws.project_path.set("/home/ahmi/RemedyAI".into());
         ws.session_id.set(Some("s3".into()));
         ws
     }

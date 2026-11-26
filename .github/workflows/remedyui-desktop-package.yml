@@ -1,9 +1,9 @@
 # RemedyUI desktop packages for the 1.0.0 shell.
 #
 # workflow_dispatch only. Uploads artifacts. Does not create a tag and does
-# not publish a GitHub Release. Joe cuts the 1.0.0 tag and latest.json.
+# not publish a GitHub Release. The owner cuts the 1.0.0 tag and latest.json.
 # desktop-release.yml remains the Tauri 0.70.x pipeline. Do not add a
-# release-publishing action to this file. Joe publishes the 1.0.0 assets.
+# release-publishing action to this file. The owner publishes the 1.0.0 assets.
 
 name: RemedyUI desktop package
 

@@ -5,7 +5,7 @@ export const CHAT_SPLIT_KEY = 'remedy.chatSplit.v1'
 export type ChatActionsSide = 'left' | 'right'
 
 export type ChatSplitPrefs = {
-  /** Which side holds the coding/actions pane. Default left (Joe's sketch). */
+  /** Which side holds the coding/actions pane. Default left (the owner's sketch). */
   actionsSide: ChatActionsSide
   /** Actions pane width in px when the panes sit side by side. */
   actionsWidth: number

@@ -1,6 +1,6 @@
 # Remedy Desktop → RemedyUI port checklist
 
-Items stay red until proven (headless tests on the box, then a hidden Windows run on Joe's PC). First ship is 1.0 on Windows, Linux and macOS. Grove is in. Full browser parity is in. `com.remedy.desktop`, the installer asset name, the minisign key, NSIS `/S /NCRC /UPDATE /NOAUTOLAUNCH` and `~/.remedy` stay intact.
+Items stay red until proven (headless tests on the box, then a hidden Windows run on the owner's PC). First ship is 1.0 on Windows, Linux and macOS. Grove is in. Full browser parity is in. `com.remedy.desktop`, the installer asset name, the minisign key, NSIS `/S /NCRC /UPDATE /NOAUTOLAUNCH` and `~/.remedy` stay intact.
 
 Identity and engine pins: RemedyUI `main` at `3142c66cde5e20b06028f955087326dab9a04b51` (`net`, `image`, `webview`, `playback`, `desktop`, `term`, `update`, `extra`, `webstorage`, `customize`, and the preview features `headless` / `devtools`). Packaging scripts live in `desktop/remedyui/packaging/`. They do not tag or publish. The shell lives on `origin/master` (Grove, settings, rails, usage, diagnostics, help, time travel, setup, computer-use, the 1.0 updater, and the audit fixes below).
 
@@ -17,7 +17,7 @@ Identity and engine pins: RemedyUI `main` at `3142c66cde5e20b06028f955087326dab9
 - [ ] Spawn `remedy-runtime` on `:7400` and show live status (wired; last hidden Windows verify on `fa0a9900` saw the backend up)
 - [ ] Title bar extras (server menu, command palette, About, language picker)
 - [ ] Autostart
-- [x] Hidden Windows install / tray / single-instance proof on Joe's PC (silent `/S /NCRC /UPDATE /NOAUTOLAUNCH` of `fa0a9900`, 23 Nov 2026)
+- [x] Hidden Windows install / tray / single-instance proof on the owner's PC (silent `/S /NCRC /UPDATE /NOAUTOLAUNCH` of `fa0a9900`, 23 Nov 2026)
 
 ## Still red (later phases)
 
@@ -31,6 +31,6 @@ Identity and engine pins: RemedyUI `main` at `3142c66cde5e20b06028f955087326dab9
 - [ ] Voice (spoken replies, turn-taking), messengers, Hive, downloads
 - [ ] Privacy Shield engine (waits on a RemedyUI webview request filter)
 - [ ] Diagnostics, usage, help (wired in the shell; still red until a later proof pass)
-- [ ] Grove (on `master`; Linux `cargo test --lib` / `--test app` are green; Joe's PC has seen default Grove on a hidden install of `fa0a9900`. A later pass still has to prove the rest.)
-- [ ] Update jump from the last Tauri build through the same signed `latest.json` (feed, NSIS `/S /NCRC /UPDATE /NOAUTOLAUNCH`, tray and status offer, and download percent are wired; the install itself is Joe's PC)
-- [ ] Joe reviews screenshots before ship; no tag or release without him
+- [ ] Grove (on `master`; Linux `cargo test --lib` / `--test app` are green; the owner's PC has seen default Grove on a hidden install of `fa0a9900`. A later pass still has to prove the rest.)
+- [ ] Update jump from the last Tauri build through the same signed `latest.json` (feed, NSIS `/S /NCRC /UPDATE /NOAUTOLAUNCH`, tray and status offer, and download percent are wired; the install itself is the owner's PC)
+- [ ] The owner reviews screenshots before ship; no tag or release without the owner's yes

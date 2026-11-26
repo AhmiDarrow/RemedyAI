@@ -131,6 +131,8 @@ struct SendJob {
     attachments: Vec<Attachment>,
     steer: bool,
     home: bool,
+    /// A session the person opened to carry on: the message goes there, not home.
+    direct: String,
     head_session: String,
     stored_home: String,
     goal_id: String,
@@ -190,6 +192,8 @@ pub(crate) struct Grove {
     pub mic_on: Signal<bool>,
     pub composer_value: Signal<String>,
     pub session_id: Signal<String>,
+    /// A session opened to carry on (its id and title), while it is on screen.
+    pub visiting: Signal<Option<(String, String)>>,
     pub child_messages: Signal<Vec<StoryMessage>>,
     pub child_loading: Signal<bool>,
     pub home_split: Signal<f32>,
@@ -298,6 +302,7 @@ impl Grove {
             mic_on: Signal::new(false),
             composer_value: Signal::new(String::new()),
             session_id: Signal::new(String::new()),
+            visiting: Signal::new(None),
             child_messages: Signal::new(Vec::new()),
             child_loading: Signal::new(false),
             home_split: Signal::new(prefs.home_split),
@@ -626,6 +631,37 @@ impl Grove {
         self.bubble_from.set(None);
         self.child_messages.set(Vec::new());
         self.child_loading.set(true);
+        self.refresh_query();
+    }
+
+    /// Open any session to read it and carry it on from here. On the phone this
+    /// is how a Studio session is reached; the talk field then writes to it.
+    pub(crate) fn open_session(&self, session_id: &str, title: &str) {
+        if session_id.is_empty() {
+            return;
+        }
+        self.show_grove();
+        self.visiting.set(Some((session_id.to_string(), title.to_string())));
+        self.place.set(Place::Home);
+        self.home_tab.set(if self.phone { HomeTab::Talk } else { self.first_tab() });
+        self.bubble_from.set(None);
+        self.messages.set(Vec::new());
+        self.session_id.set(session_id.to_string());
+        self.load_messages(session_id);
+        self.refresh_query();
+    }
+
+    /// Back from a session opened with [`Grove::open_session`] to Remedy's own conversation.
+    pub(crate) fn leave_session(&self) {
+        if self.visiting.get().is_none() {
+            return;
+        }
+        self.visiting.set(None);
+        self.messages.set(Vec::new());
+        let home = self.home_session.get();
+        self.session_id.set(home.clone());
+        self.load_messages(&home);
+        self.kick_home();
         self.refresh_query();
     }
 
@@ -1464,7 +1500,10 @@ impl Grove {
 
     fn remember_home(&self, sid: String) {
         let changed = self.session_id.get() != sid;
-        self.home_session.set(sid.clone());
+        // A session opened to carry on is shown, but it is not the home conversation.
+        if self.visiting.get().is_none() {
+            self.home_session.set(sid.clone());
+        }
         self.session_id.set(sid.clone());
         self.save();
         if changed && !self.streaming.get() {
@@ -1608,6 +1647,7 @@ impl Grove {
             attachments,
             steer,
             home,
+            direct: self.visiting.get().map(|(id, _)| id).unwrap_or_default(),
             head_session,
             stored_home: self.home_session.get(),
             goal_id,
@@ -1949,6 +1989,18 @@ impl Grove {
                 "home" | "grove" => self.go_home(),
                 _ => self.show_grove(),
             },
+            "open_session" => {
+                if let Some(id) = params.get("session_id").and_then(|v| v.as_str()) {
+                    // Studio shows its own sessions best; Grove's hidden ones open here.
+                    if self.studio.sessions.get().iter().any(|s| s.id == id) {
+                        self.studio.select(id);
+                        self.show_studio();
+                    } else {
+                        let title = params.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                        self.open_session(id, title);
+                    }
+                }
+            }
             "open_goal" => {
                 if let Some(id) = params.get("goal_id").and_then(|v| v.as_str()) {
                     self.show_grove();
@@ -2061,6 +2113,9 @@ fn upload_all(
 }
 
 fn ensure_session(client: &Client, book: &Book, job: &SendJob) -> Result<String, String> {
+    if !job.direct.is_empty() {
+        return Ok(job.direct.clone());
+    }
     if job.home {
         let slot = book.slot("home");
         let head = job.head_session.clone();

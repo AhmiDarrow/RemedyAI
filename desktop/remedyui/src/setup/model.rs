@@ -1291,7 +1291,7 @@ mod tests {
         assert!(!ask_user_name(true, false, false, "", false));
         assert!(!ask_user_name(false, true, false, "", false));
         assert!(!ask_user_name(false, false, true, "", false));
-        assert!(!ask_user_name(false, false, false, "Joe", false));
+        assert!(!ask_user_name(false, false, false, "Ahmi", false));
         assert!(!ask_user_name(false, false, false, "", true));
         assert!(reject_empty_name("  "));
         assert!(!reject_empty_name("Ada"));

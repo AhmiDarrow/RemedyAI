@@ -80,7 +80,7 @@ fn feed(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
         })
         .el()
     };
-    w::scroll(ui)
+    let scroll = w::scroll(ui)
         .style(StylePatch::new().background(colors.bg))
         .layout(|l| {
             l.width = Length::Percent(1.0);
@@ -92,7 +92,50 @@ fn feed(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
         .child(list)
         .child(partial)
         .child(feed_extras(ui, grove.clone(), kind))
-        .child(empty_state(ui, grove, kind))
+        .child(empty_state(ui, grove.clone(), kind));
+    follow_newest(scroll, grove)
+}
+
+/// Keeps the feed on its newest message: when it opens, when a message or a
+/// piece of the reply arrives, and when another conversation is opened. Scrolling
+/// up to read lets go; the next message the person sends takes hold again.
+fn follow_newest(scroll: El, grove: Grove) -> El {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    let stuck = Rc::new(Cell::new(true));
+    // The feed getting shorter (another conversation) also moves the offset up;
+    // that one is not the person reading back.
+    let own_move = Rc::new(Cell::new(false));
+    let last_y = Rc::new(Cell::new(0.0f32));
+    let shown = Rc::new(RefCell::new(String::new()));
+    let was_streaming = Rc::new(Cell::new(false));
+    let (stuck_s, own_s, last_s) = (stuck.clone(), own_move.clone(), last_y.clone());
+    let scroller = scroll.clone();
+    scroll
+        .on_scroll(move |off| {
+            if off.y + 2.0 < last_s.get() && !own_s.replace(false) {
+                stuck_s.set(false);
+            }
+            last_s.set(off.y);
+        })
+        .bind(move || {
+            let _ = grove.messages.get();
+            let _ = grove.partial.get();
+            let session = grove.session_id.get();
+            let streaming = grove.streaming.get();
+            let moved = *shown.borrow() != session;
+            if moved {
+                *shown.borrow_mut() = session;
+            }
+            if moved || (streaming && !was_streaming.get()) {
+                stuck.set(true);
+            }
+            was_streaming.set(streaming);
+            if stuck.get() {
+                own_move.set(true);
+                scroller.scroll_to(remedy_ui::core::Vec2::new(0.0, 1.0e9));
+            }
+        })
 }
 
 fn message_row(ui: &Ui, grove: &Grove, msg: &StoryMessage) -> El {

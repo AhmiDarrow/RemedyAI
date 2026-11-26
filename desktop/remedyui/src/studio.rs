@@ -247,7 +247,7 @@ impl Studio {
 
     /// Three sessions and an empty well, matching the current-app capture.
     pub fn preview() -> Self {
-        let s = Self::with(preview_sessions(), Some("s3".into()), 10, "Joe", true);
+        let s = Self::with(preview_sessions(), Some("s3".into()), 10, "Ahmi", true);
         s.clock.set(Some(preview_now()));
         s.conn.set(Conn::Connecting);
         s.model.set("remedy".into());
@@ -256,9 +256,9 @@ impl Studio {
         s
     }
 
-    /// The same sessions with the portal-addon turn open, for chat goldens.
+    /// The same sessions with the recipe-importer turn open, for chat goldens.
     pub fn preview_chat() -> Self {
-        let s = Self::with(preview_sessions(), Some("s1".into()), 10, "Joe", true);
+        let s = Self::with(preview_sessions(), Some("s1".into()), 10, "Ahmi", true);
         s.clock.set(Some(preview_now()));
         s.conn.set(Conn::Ready);
         s.model.set("remedy".into());
@@ -971,7 +971,7 @@ fn preview_sessions() -> Vec<Session> {
         Session {
             message_count: 2,
             updated_at: Some("2026-11-22T20:00:00Z".into()),
-            ..Session::fresh("s1", "Port to RemedyUI")
+            ..Session::fresh("s1", "Garden planner")
         },
         Session {
             message_count: 2,
@@ -988,7 +988,7 @@ fn preview_messages() -> Vec<ChatMessage> {
             ..ChatMessage::plain(
                 "m1",
                 "user",
-                "The portal addon stopped loading after the last update. Can you fix it?",
+                "The recipe importer stopped loading after the last update. Can you fix it?",
             )
         },
         ChatMessage {
@@ -1002,7 +1002,7 @@ fn preview_messages() -> Vec<ChatMessage> {
                 },
                 {
                     let mut s = WorkStep::failed("c2", "bash", "exit 1");
-                    s.detail = Some("portal.exe --addon-check --all".into());
+                    s.detail = Some("recipes.exe --check --all".into());
                     s
                 },
                 {
@@ -1014,7 +1014,7 @@ fn preview_messages() -> Vec<ChatMessage> {
             ..ChatMessage::plain(
                 "m2",
                 "assistant",
-                "The portal addon loads again.\n\n\
+                "The recipe importer loads again.\n\n\
 What was wrong: the last update renamed `init.lua` to `init_main.lua`, but \
 `manifest.json` and `loader.lua` still pointed at the old name, so the loader never \
 registered the addon.\n\n\
@@ -1022,7 +1022,7 @@ What I changed:\n\
 `manifest.json`: entry now `init_main.lua`; minimum version guard relaxed to 2.4.\n\
 `loader.lua`: registers the entry before the version check.\n\
 `config.json`: removed the stale `init.lua` override.\n\n\
-`portal.exe --addon-check --all` reports all 6 addons OK. Restart the portal to pick it up.",
+`recipes.exe --check --all` reports all 6 addons OK. Restart the app to pick it up.",
             )
         },
     ]
@@ -1125,7 +1125,7 @@ mod tests {
     fn add_tag_updates_the_session_and_closes_the_field() {
         let studio = Studio::preview();
         studio.depth.tag_id.set(Some("s3".into()));
-        studio.add_tag("s3", "  portal ");
+        studio.add_tag("s3", "  recipes ");
         let tags = studio
             .sessions
             .get()
@@ -1133,9 +1133,9 @@ mod tests {
             .find(|s| s.id == "s3")
             .map(|s| s.tags)
             .unwrap_or_default();
-        assert_eq!(tags, vec!["portal".to_string()]);
+        assert_eq!(tags, vec!["recipes".to_string()]);
         assert!(studio.depth.tag_id.get().is_none());
-        studio.add_tag("s3", "portal");
+        studio.add_tag("s3", "recipes");
         let tags = studio
             .sessions
             .get()
@@ -1143,15 +1143,15 @@ mod tests {
             .find(|s| s.id == "s3")
             .map(|s| s.tags)
             .unwrap_or_default();
-        assert_eq!(tags, vec!["portal".to_string()]);
+        assert_eq!(tags, vec!["recipes".to_string()]);
     }
 
     #[test]
     fn merge_reloaded_messages_keeps_local_assistant_text() {
-        let local = vec![ChatMessage::plain("a1", "assistant", "The portal loads.")];
+        let local = vec![ChatMessage::plain("a1", "assistant", "The importer loads.")];
         let server = vec![ChatMessage::plain("a1", "assistant", "")];
         let out = merge_reloaded_messages(local, server);
-        assert_eq!(out[0].content, "The portal loads.");
+        assert_eq!(out[0].content, "The importer loads.");
     }
 
     #[test]

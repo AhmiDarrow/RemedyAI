@@ -1619,24 +1619,24 @@ mod tests {
         assert_eq!(delete_selected_confirm_label(4), "Delete 4 chats");
 
         assert_eq!(
-            normalize_tags([" portal ", "portal", "", "ui", "UI"]),
-            vec!["portal", "ui"]
+            normalize_tags([" recipes ", "recipes", "", "ui", "UI"]),
+            vec!["recipes", "ui"]
         );
         let many: Vec<String> = (0..20).map(|i| format!("t{i}")).collect();
         assert_eq!(normalize_tags(&many).len(), 12);
-        assert_eq!(add_session_tag(&["portal".into()], "  ui "), vec!["portal", "ui"]);
+        assert_eq!(add_session_tag(&["recipes".into()], "  ui "), vec!["recipes", "ui"]);
         let s = crate::studio::Session {
-            tags: vec!["portal".into()],
+            tags: vec!["recipes".into()],
             project_path: Some("/tmp/app".into()),
-            ..crate::studio::Session::fresh("s1", "Port to RemedyUI")
+            ..crate::studio::Session::fresh("s1", "Garden planner")
         };
-        assert!(session_matches_query(&s, "portal"));
-        assert!(session_matches_query(&s, "PORT"));
-        assert!(session_matches_query(&s, "Remedy"));
+        assert!(session_matches_query(&s, "recipes"));
+        assert!(session_matches_query(&s, "GARDEN"));
+        assert!(session_matches_query(&s, "planner"));
         assert!(session_matches_query(&s, "app"));
         assert!(!session_matches_query(&s, "zebra"));
         let raw = session_tags_file_body(&[s.clone()]);
-        assert_eq!(parse_session_tags_file(&raw), vec![("s1".into(), vec!["portal".into()])]);
+        assert_eq!(parse_session_tags_file(&raw), vec![("s1".into(), vec!["recipes".into()])]);
     }
 
     #[test]
@@ -1644,7 +1644,7 @@ mod tests {
         let v = serde_json::json!({
             "beacons": [
                 {"session_id": "me", "you": true, "muscle": "local/remedy", "project": "app", "goal": "", "phase": "build", "held_files": [], "held_count": 0},
-                {"session_id": "s2", "you": false, "muscle": "xai/grok-4.5", "project": "portal", "goal": "load the addon", "phase": "build", "held_files": ["main.rs", "lib.rs"], "held_count": 2}
+                {"session_id": "s2", "you": false, "muscle": "xai/grok-4.5", "project": "recipes", "goal": "load the addon", "phase": "build", "held_files": ["main.rs", "lib.rs"], "held_count": 2}
             ],
             "count": 2
         });
@@ -1716,7 +1716,7 @@ mod tests {
         );
         let rows = vec![
             preview_row("summarize", "installed", false, false),
-            preview_row("portal-notes", "discovered", false, true),
+            preview_row("recipe-notes", "discovered", false, true),
             preview_row("house-style", "active", false, true),
             preview_row("imported-pack-alpha", "installed", true, false),
             preview_row("old-scraper", "archived", false, false),

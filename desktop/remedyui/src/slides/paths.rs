@@ -99,17 +99,17 @@ mod tests {
     #[test]
     fn joins_relative_and_keeps_absolute() {
         assert_eq!(
-            absolute_file_path("/home/joe/RemedyAI", "desktop/src/App.tsx"),
-            "/home/joe/RemedyAI/desktop/src/App.tsx"
+            absolute_file_path("/home/ahmi/RemedyAI", "desktop/src/App.tsx"),
+            "/home/ahmi/RemedyAI/desktop/src/App.tsx"
         );
         assert_eq!(
             absolute_file_path(r"C:\work", r"desktop\src"),
             r"C:\work\desktop\src"
         );
-        assert_eq!(absolute_file_path("/home/joe", "/etc/hosts"), "/etc/hosts");
-        assert_eq!(absolute_file_path("/home/joe", r"C:\Windows"), r"C:\Windows");
+        assert_eq!(absolute_file_path("/home/ahmi", "/etc/hosts"), "/etc/hosts");
+        assert_eq!(absolute_file_path("/home/ahmi", r"C:\Windows"), r"C:\Windows");
         assert_eq!(absolute_file_path("", "notes.md"), "notes.md");
-        assert_eq!(absolute_file_path("/home/joe/", "."), "/home/joe/");
+        assert_eq!(absolute_file_path("/home/ahmi/", "."), "/home/ahmi/");
     }
 
     #[test]
