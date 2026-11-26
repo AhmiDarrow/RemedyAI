@@ -211,50 +211,27 @@ func TestStartRMDYToolWorkerAttachAndRoundTrip(t *testing.T) {
 	}
 	defer session.Close()
 
+	// The worker serves prompt.turn_end, voice.* and vision.* now; its own
+	// probe is the cheap round trip that proves the attach.
 	reg := tools.NewRegistry()
-	if err := tools.RegisterPythonWorkerTools(reg, session.Client); err != nil {
+	if err := reg.Register(tools.Descriptor{
+		ID: "worker.probe", Version: 1, Description: "attach probe", Runtime: tools.RuntimePython,
+		Risk:        tools.RiskReadOnly,
+		InputSchema: json.RawMessage(`{"type":"object"}`), OutputSchema: json.RawMessage(`{"type":"object"}`),
+	}, tools.NewRMDYExecutor(session.Client)); err != nil {
 		t.Fatal(err)
 	}
-
 	result, err := reg.Execute(context.Background(), tools.Request{
-		ToolID:  "text.slugify",
-		Version: 1,
-		Input:   json.RawMessage(`{"text":"Hello Worker Attach"}`),
+		ToolID: "worker.probe", Version: 1, Input: json.RawMessage(`{}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out struct {
-		Slug string `json:"slug"`
+		OK bool `json:"ok"`
 	}
-	if err := json.Unmarshal(result.Output, &out); err != nil {
-		t.Fatal(err)
-	}
-	if out.Slug != "hello-worker-attach" {
-		t.Fatalf("slug=%q", out.Slug)
-	}
-
-	// Product tool: workspace.list against the repo root.
-	list, err := reg.Execute(context.Background(), tools.Request{
-		ToolID:  "workspace.list",
-		Version: 1,
-		Input:   json.RawMessage(`{"path":".","limit":5}`),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var listOut struct {
-		Total   int `json:"total"`
-		Entries []struct {
-			Name string `json:"name"`
-			Kind string `json:"kind"`
-		} `json:"entries"`
-	}
-	if err := json.Unmarshal(list.Output, &listOut); err != nil {
-		t.Fatal(err)
-	}
-	if listOut.Total < 1 || len(listOut.Entries) < 1 {
-		t.Fatalf("workspace.list empty: %+v", listOut)
+	if err := json.Unmarshal(result.Output, &out); err != nil || !out.OK {
+		t.Fatalf("worker.probe = %s err=%v", result.Output, err)
 	}
 
 	// Health frame still works on the same caller.

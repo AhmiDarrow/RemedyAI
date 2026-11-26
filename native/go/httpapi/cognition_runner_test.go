@@ -228,7 +228,13 @@ func TestCognitionTurnRunnerExecutesPythonToolsOverRMDY(t *testing.T) {
 	}
 }
 
-func TestCognitionTurnRunnerExecutesWorkspaceListOverRMDY(t *testing.T) {
+func TestCognitionTurnRunnerExecutesWorkspaceListInGo(t *testing.T) {
+	// workspace.* runs in Go now: a turn lists the bound folder whether or not
+	// a Python worker is attached, and attaching one does not take the tool back.
+	ws := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ws, "mirror.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	serverReg := tools.NewRegistry()
 	if err := tools.RegisterPythonWorkerLocalMirrors(serverReg); err != nil {
 		t.Fatal(err)
@@ -251,13 +257,14 @@ func TestCognitionTurnRunnerExecutesWorkspaceListOverRMDY(t *testing.T) {
 	if err := r.AttachPythonWorker(client); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Registry.Latest("workspace.read"); err != nil {
-		t.Fatalf("workspace.read missing after attach: %v", err)
+	d, err := r.Registry.Latest("workspace.read")
+	if err != nil || d.Runtime != tools.RuntimeGo {
+		t.Fatalf("workspace.read after attach: %+v err=%v", d, err)
 	}
 	if _, err := r.Registry.Latest("mail.list"); err != nil {
 		t.Fatalf("mail.list missing after attach: %v", err)
 	}
-	out, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "list"})
+	out, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "list", ProjectPath: ws})
 	if err != nil {
 		t.Fatal(err)
 	}
