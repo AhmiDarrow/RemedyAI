@@ -208,7 +208,7 @@ function RailsShell({
               activeTools={[]}
               taskProgress={null}
               toolProcessMode="off"
-              userName="Joe"
+              userName="Ahmi"
               partnerName="Remedy"
               sessionId={activeId}
               stickNonce={0}
@@ -295,7 +295,7 @@ function ChromeLayer({ which }: { which: string }) {
         open
         onClose={noop}
         version="1.0.0"
-        userName="Joe"
+        userName="Ahmi"
         onOpenHelp={noop}
         onOpenSettings={noop}
         onOpenDiagnostics={noop}
@@ -650,7 +650,7 @@ function Harness() {
               activeTools={empty ? [] : feed.activeTools}
               taskProgress={empty ? [] : feed.taskProgress}
               toolProcessMode="off"
-              userName="Joe"
+              userName="Ahmi"
               partnerName="Remedy"
               sessionId={activeId}
               stickNonce={0}

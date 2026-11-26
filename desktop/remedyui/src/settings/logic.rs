@@ -1502,7 +1502,7 @@ mod tests {
         let profile = user_profile_dir();
         let shown = default_workspace_display("");
         assert_eq!(shown, profile.join("Remedy").display().to_string());
-        assert!(!shown.to_lowercase().contains("\\joe\\") || profile.display().to_string().to_lowercase().contains("joe"));
+        assert!(!shown.to_lowercase().contains("\\ahmi\\") || profile.display().to_string().to_lowercase().contains("ahmi"));
         assert_eq!(default_workspace_display(" /data/ws "), "/data/ws");
         assert_eq!(normalize_access_scope("default_workspace"), "workspace");
         assert_eq!(normalize_access_scope("FULL"), "full");

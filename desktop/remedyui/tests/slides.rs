@@ -332,7 +332,7 @@ fn terminal_copies_a_selection_and_pops_out() {
         .map(|(text, _)| text.to_string())
         .unwrap_or_default();
     assert!(
-        copied.contains("joe@remedy"),
+        copied.contains("ahmi@remedy"),
         "Ctrl+A then Ctrl+C copied the screen: {copied:?}"
     );
 

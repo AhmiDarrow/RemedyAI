@@ -31,12 +31,12 @@ def test_inner_language_knob_defaults() -> None:
 
 
 def test_structured_roundtrip_is_lossless() -> None:
-    bio = "I am Remedy, Joe's partner on this machine. (aff= should not split)"
+    bio = "I am Remedy, Ahmi's partner on this machine. (aff= should not split)"
     fields = {
         "drv": {"curiosity": 0.62, "social": 0.41, "competence": 0.5, "rest": 0.71},
         "aff": "warm",
         "bio": bio,
-        "bel": ["Joe likes concise answers.", "I stay on this machine."],
+        "bel": ["Ahmi likes concise answers.", "I stay on this machine."],
     }
     dense = encode("state", fields, verbosity="dense")
     rec = decode(dense)
@@ -64,13 +64,13 @@ def test_natural_fallback_and_off() -> None:
 def test_dense_wins_on_measured_tokens() -> None:
     natural = (
         "Drives: curiosity 0.62, social 0.41, competence 0.50, rest 0.71. "
-        "Feeling: warm. I am Remedy, Joe's partner on this machine. "
+        "Feeling: warm. I am Remedy, Ahmi's partner on this machine. "
         "I'm working on: stay with the current project."
     )
     fields = {
         "drv": {"curiosity": 0.62, "social": 0.41, "competence": 0.50, "rest": 0.71},
         "aff": "warm",
-        "bio": "I am Remedy, Joe's partner on this machine. I'm working on: stay with the current project.",
+        "bio": "I am Remedy, Ahmi's partner on this machine. I'm working on: stay with the current project.",
     }
     dense = encode("state", fields, verbosity="dense")
     nat_toks = measure_tokens(natural)
@@ -84,8 +84,8 @@ def test_dense_wins_on_measured_tokens() -> None:
         {
             "ver": 1,
             "lex": [
-                "joework:the current software project Joe and I are building together",
-                "sundayritual:the weekly planning ritual Joe and I keep every Sunday evening together",
+                "ahmiwork:the current software project Ahmi and I are building together",
+                "sundayritual:the weekly planning ritual Ahmi and I keep every Sunday evening together",
             ],
         },
         verbosity="dense",
@@ -94,14 +94,14 @@ def test_dense_wins_on_measured_tokens() -> None:
         "brief",
         {
             "id": "w1",
-            "tsk": "continue joework, then keep sundayritual, and report whether the unit tests still pass in the clone",
+            "tsk": "continue ahmiwork, then keep sundayritual, and report whether the unit tests still pass in the clone",
             "cst": ["do not publish", "do not tag a release", "do not touch the owner's PC"],
         },
         verbosity="dense",
     )
     prose = (
-        "Goal: continue the current software project Joe and I are building together, "
-        "then keep the weekly planning ritual Joe and I keep every Sunday evening together, "
+        "Goal: continue the current software project Ahmi and I are building together, "
+        "then keep the weekly planning ritual Ahmi and I keep every Sunday evening together, "
         "and report whether the unit tests still pass in the clone. "
         "Constraints: do not publish, do not tag a release, do not touch the owner's PC."
     )
@@ -125,7 +125,7 @@ def test_coinage_requires_gloss_and_can_be_pruned(tmp_path: Path, monkeypatch) -
         lambda key, cfg=None: True,
         raising=False,
     )
-    phrase = "the weekly planning ritual Joe and I keep every Sunday evening together"
+    phrase = "the weekly planning ritual Ahmi and I keep every Sunday evening together"
     coined = evolve_from_phrases(tmp_path, [phrase, phrase, phrase], source="dream")
     # If the tokenizer doesn't think it saves enough, we may coin zero — force one path:
     if not coined:
@@ -184,9 +184,9 @@ def test_child_worker_completes_dense_brief(tmp_path: Path) -> None:
 
 def test_decoder_expands_coined_terms(tmp_path: Path) -> None:
     state = load_lexicon(tmp_path)
-    state["terms"]["joework"] = {
-        "term": "joework",
-        "gloss": "the current software project Joe and I are building together",
+    state["terms"]["ahmiwork"] = {
+        "term": "ahmiwork",
+        "gloss": "the current software project Ahmi and I are building together",
         "coined_ts": 1.0,
         "source": "dream",
         "from": "the current software project",
@@ -197,9 +197,9 @@ def test_decoder_expands_coined_terms(tmp_path: Path) -> None:
         "core": False,
     }
     save_lexicon(state, tmp_path)
-    rec = decode("We should stay on joework this week.", lexicon=load_lexicon(tmp_path))
+    rec = decode("We should stay on ahmiwork this week.", lexicon=load_lexicon(tmp_path))
     assert "current software project" in rec["decoded"]
-    assert "joework" not in rec["decoded"] or "project" in rec["decoded"]
+    assert "ahmiwork" not in rec["decoded"] or "project" in rec["decoded"]
 
 
 def test_level_stubs_do_not_emit_latent() -> None:

@@ -274,12 +274,54 @@ fn render_page(ui: &Ui, grove: Grove, app: Option<App>, key: &String) -> El {
             child::room(ui, grove, id)
         }
         _ => match parts.next() {
-            Some("talk") => chat::pane(ui, grove, app, chat::RoomKind::Home),
+            Some("talk") => visiting_talk(ui, grove, app),
             Some("alongside") if !grove.phone => home_alongside(ui, grove, app),
             Some("story") => storyline(ui, grove, true),
             _ => home_plots(ui, grove, app),
         },
     }
+}
+
+/// The talk page, under a line naming the session when one was opened to carry on.
+fn visiting_talk(ui: &Ui, grove: Grove, app: Option<App>) -> El {
+    let unit = ui.theme().spacing.unit;
+    let colors = ui.theme().colors.clone();
+    let (watch, bar_grove, bar_ui) = (grove.clone(), grove.clone(), ui.clone());
+    let bar = show(ui, move || watch.visiting.get().is_some(), move || {
+        let title = bar_grove.visiting.get().map(|(_, t)| t).unwrap_or_default();
+        let back = bar_grove.clone();
+        w::row(&bar_ui)
+            .align(Align::Center)
+            .gap(unit * 2.0)
+            .padding(bar_insets(unit))
+            .layout(|l| l.width = Length::Percent(1.0))
+            .child(
+                w::button(&bar_ui, "‹ Back to Remedy", move || back.leave_session())
+                    .variant("quiet")
+                    .semantics(Semantics::new(Role::Button).label("Back to Remedy").action(Action::Click)),
+            )
+            .child(
+                w::text(&bar_ui, title)
+                    .nowrap()
+                    .style(crate::tokens::typo(crate::tokens::META).foreground(colors.muted))
+                    .layout(|l| {
+                        l.grow = 1.0;
+                        l.min_width = Length::Px(0.0);
+                    }),
+            )
+    })
+    .el()
+    .layout(|l| l.width = Length::Percent(1.0));
+    w::column(ui)
+        .layout(|l| {
+            l.width = Length::Percent(1.0);
+            l.height = Length::Percent(1.0);
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
+        })
+        .child(bar)
+        .child(chat::pane(ui, grove, app, chat::RoomKind::Home))
 }
 
 fn home_bar(ui: &Ui, grove: Grove) -> El {
@@ -1251,7 +1293,7 @@ fn right_now(ui: &Ui, grove: Grove) -> El {
 /// The build sessions she has open, the ones she is working in first. A
 /// click opens the session in Studio (the desktop; a phone has no Studio).
 fn sessions_block(ui: &Ui, grove: Grove) -> El {
-    const SHOWN: usize = 4;
+    const SHOWN: usize = 8;
     let rows: Signal<Vec<(String, String, bool)>> = Signal::new(Vec::new());
     let src = grove.clone();
     let watch = ui.el("grove-sessions").bind(move || {
@@ -1278,7 +1320,13 @@ fn sessions_block(ui: &Ui, grove: Grove) -> El {
         move |(id, title, working)| {
             let colors = row_ui.theme().colors.clone();
             let unit = row_ui.theme().spacing.unit;
-            let state = if *working { "working" } else { "open" };
+            // On the phone the row opens the conversation; say so, not a state word
+            // that reads like a button.
+            let state = match (*working, row_grove.phone) {
+                (true, _) => "working",
+                (false, true) => "Continue ›",
+                (false, false) => "open",
+            };
             let name = if title.trim().is_empty() {
                 "Untitled session".to_string()
             } else {
@@ -1298,19 +1346,25 @@ fn sessions_block(ui: &Ui, grove: Grove) -> El {
                         colors.muted
                     }),
                 ));
-            if row_grove.phone {
-                return row;
-            }
-            let (g, sid) = (row_grove.clone(), id.clone());
-            row.on_click(move || {
-                g.studio.select(&sid);
-                g.show_studio();
-            })
-            .semantics(
-                Semantics::new(Role::Button)
-                    .label(format!("Open {name} in Studio"))
-                    .action(Action::Click),
-            )
+            let (g, sid, title) = (row_grove.clone(), id.clone(), name.clone());
+            let label = if row_grove.phone {
+                format!("Continue {name}")
+            } else {
+                format!("Open {name} in Studio")
+            };
+            // A finger needs a taller row than a pointer does.
+            let tall = if row_grove.phone { crate::tokens::TOOL } else { 0.0 };
+            row.layout(move |l| l.min_height = Length::Px(tall))
+                .on_click(move || {
+                    if g.phone {
+                        // No Studio on the phone: the conversation opens here.
+                        g.open_session(&sid, &title);
+                    } else {
+                        g.studio.select(&sid);
+                        g.show_studio();
+                    }
+                })
+                .semantics(Semantics::new(Role::Button).label(label).action(Action::Click))
         },
     );
     let has = show(ui, move || !rows.get().is_empty(), {

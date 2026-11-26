@@ -914,9 +914,9 @@ mod tests {
 
     #[test]
     fn reply_keeps_only_text_after_the_last_break() {
-        let text = "I'll reach the folder.\n\nThe portal loads again.";
+        let text = "I'll reach the folder.\n\nThe importer loads again.";
         let at = "I'll reach the folder.\n\n".len();
-        assert_eq!(reply_after(text, &[at]), "The portal loads again.");
+        assert_eq!(reply_after(text, &[at]), "The importer loads again.");
         assert_eq!(reply_after("Hello", &[]), "Hello");
     }
 

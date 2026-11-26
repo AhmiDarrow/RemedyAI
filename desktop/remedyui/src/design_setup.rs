@@ -1,7 +1,7 @@
 //! Design-8 first-run and auto-update surfaces.
 //!
 //! Preview only. These screens stay on the local `design/setup-update` branch
-//! until Joe approves them. They follow the Dark Forest tokens and the three
+//! until the owner approves them. They follow the Dark Forest tokens and the three
 //! config-driven font roles: no glow, blur, gradients, or glass.
 
 use remedy_ui::core::Insets;
@@ -218,7 +218,7 @@ pub fn folder(ui: &Ui) -> El {
                     BODY,
                     c.muted,
                 ),
-                field(ui, r"C:\Users\Joe\Remedy"),
+                field(ui, r"C:\Users\Ahmi\Remedy"),
                 actions_end(ui, vec![quiet(ui, "Skip"), primary(ui, "Continue")]),
             ],
         ),
@@ -235,7 +235,7 @@ pub fn name(ui: &Ui) -> El {
             vec![
                 presence::preview(ui, Mood::Listening, 72.0),
                 label(ui, "What should I call you?", TITLE, c.text),
-                field(ui, "Joe"),
+                field(ui, "Ahmi"),
                 actions_end(ui, vec![primary(ui, "Continue")]),
             ],
         ),

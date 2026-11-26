@@ -26,6 +26,16 @@ func partnerSessionToolDefs() []partnerToolDef {
 			run:    toolSessionsList,
 		},
 		{
+			id:   "sessions.search",
+			risk: tools.RiskReadOnly,
+			desc: "Find sessions by what was said in them or by their title. Give the words the owner used (the router port, " +
+				"tax receipts); every word must appear. Each result has the session, how many messages matched and up to two " +
+				"short pieces of the matching talk. Use it when the owner refers to an earlier conversation, then sessions.read to " +
+				"check it is the right one before you carry it on.",
+			schema: `{"type":"object","required":["query"],"properties":{"query":{"type":"string","minLength":2,"maxLength":200},"last":{"type":"integer","minimum":1,"maximum":20,"description":"How many sessions to return (default 8)."},` + partnerBoundProps + `},"additionalProperties":false}`,
+			run:    toolSessionsSearch,
+		},
+		{
 			id:     "sessions.read",
 			risk:   tools.RiskReadOnly,
 			desc:   "Read the last messages of any session of the owner's, with the tools each reply ran. target is the session id from sessions.list.",
