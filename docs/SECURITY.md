@@ -74,6 +74,10 @@ What it does not cover:
 
 It starts at `safe` so that nothing of yours is readable from a chat until you decide it should be. With `safe`, asking her from a messenger about your calendar, files or memory raises an approval on the PC. If you use a messenger to reach your own assistant and only you are on that channel's allow list, `all` is the convenient choice. Leave it at `safe` if anyone else is on an allow list.
 
+### Whether a messenger chat joins the conversation on your PC: `messenger_join_desktop`
+
+On (the default), a message from someone on an allow list joins the conversation you have open on the desktop: they continue it, Remedy answers with its history in mind, and from then on that conversation's replies are also sent to their chat. That is what you want when the only person on the allow list is you. It is not a limit on what Remedy will repeat from that history, so turn it off (Settings, Advanced, Messengers) if anyone else is on an allow list: each sender then gets a conversation of their own and the one on your PC stays where it is.
+
 ### What other agents may read: `peer_tools`
 
 Same three values. The default is `safe`. It also applies to routines and background jobs that were created because someone outside asked.

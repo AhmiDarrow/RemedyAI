@@ -64,12 +64,12 @@ Sample data throughout.
 flowchart LR
   desk[Desktop app<br/>Grove · Alongside · Studio] --> rt
   cli["CLI: remedy serve"] --> rt
-  rt[remedy-runtime, Go<br/>127.0.0.1:7400] --> workers[Python workers<br/>model · voice · vision]
+  rt[remedy-runtime, Go<br/>127.0.0.1:7400] --> helpers[Native helpers<br/>voice · vision · local search]
   rt --> zig[Zig capability core<br/>checks before it acts]
   rt --> home[(~/.remedy<br/>memory · state · events)]
   rt --> gw[Gateway<br/>Telegram · Discord · Slack · more]
   rt --> claim[ClaimIDX host<br/>known fixes for agents]
-  workers --> model{{Your model<br/>cloud key or local RMB}}
+  rt --> model{{Your model<br/>cloud key or local RMB}}
 ```
 
 Details: [docs/ARCHITECTURE.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/ARCHITECTURE.md).
