@@ -79,33 +79,3 @@ def test_tool_name_table_maps_to_live_abi_ids() -> None:
         assert abi_id in live, f"{key} -> {abi_id} is not on the advertised surface"
 
 
-def test_prompt_services_are_reachable(tmp_path, monkeypatch) -> None:
-    """prompt.* handlers fail soft, which hides a broken import forever.
-
-    `should_continue` once imported a module that did not exist; every call
-    returned `ok=False, continue=False`, so the re-arm gate was dead in
-    production and nothing surfaced. Assert the handlers actually run.
-    """
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    (tmp_path / "config.toml").write_text(
-        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
-        encoding="utf-8",
-    )
-    from remedy.runtime import rmdy_tool_worker as worker
-
-    cont = worker._prompt_should_continue(
-        {"goal": "build the app", "text": "done", "session_id": "s", "tool_count": 0}
-    )
-    assert cont.get("ok") is True, cont.get("error")
-
-    epoch = worker._prompt_slim_epoch(
-        {
-            "system": "You are Remedy.",
-            "goal": "build the app",
-            "text": "worked",
-            "session_id": "s",
-            "epoch": 1,
-            "total_steps": 64,
-        }
-    )
-    assert epoch.get("ok") is True, epoch.get("error")

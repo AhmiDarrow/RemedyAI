@@ -151,7 +151,7 @@ func memorySkillToolDefs() []memorySkillToolDef {
 			run: toolSkillActivate,
 		},
 		{
-			id: "memory.save", desc: "Save an explicit Partner Memory note (Python worker; refuses secrets)",
+			id: "memory.save", desc: "Save an explicit Partner Memory note (refuses secrets)",
 			risk: tools.RiskMutation,
 			in: `{
 			"type":"object",
