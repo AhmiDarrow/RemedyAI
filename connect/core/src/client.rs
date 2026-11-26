@@ -940,7 +940,7 @@ fn refreshed_direct(record: &PairingRecord, me_body: &[u8]) -> Option<PairingRec
     if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
-    let addrs: Vec<String> = d
+    let mut addrs: Vec<String> = d
         .get("addrs")
         .and_then(|a| a.as_array())
         .map(|a| {
@@ -952,6 +952,13 @@ fn refreshed_direct(record: &PairingRecord, me_body: &[u8]) -> Option<PairingRec
                 .collect()
         })
         .unwrap_or_default();
+    // A report with no public address (the router's port mapping lapsed for a while)
+    // must not erase the one the phone knows: away from home it is the only way back.
+    if !addrs.iter().any(|a| is_public(a)) {
+        if let Some(old) = record.extras.get("ira") {
+            addrs.extend(old.split(',').filter(|a| is_public(a)).map(String::from));
+        }
+    }
     let relay = d.get("relay").and_then(|r| r.as_str()).unwrap_or("").trim();
     let relay = if relay.starts_with("https://") { relay } else { "" };
     let mut next = record.clone();
@@ -966,6 +973,21 @@ fn refreshed_direct(record: &PairingRecord, me_body: &[u8]) -> Option<PairingRec
     put("ira", addrs.join(","));
     put("irr", relay.to_string());
     (next.extras != record.extras).then_some(next)
+}
+
+/// An address a phone on mobile data could dial: not this home's own network.
+fn is_public(addr: &str) -> bool {
+    match addr.parse::<SocketAddr>().map(|a| a.ip()) {
+        Ok(std::net::IpAddr::V4(ip)) => {
+            let shared = ip.octets()[0] == 100 && ip.octets()[1] & 0xc0 == 64; // 100.64.0.0/10
+            !(ip.is_private() || ip.is_loopback() || ip.is_link_local() || shared)
+        }
+        Ok(std::net::IpAddr::V6(ip)) => {
+            let first = ip.segments()[0];
+            !(ip.is_loopback() || first & 0xfe00 == 0xfc00 || first & 0xffc0 == 0xfe80)
+        }
+        Err(_) => false,
+    }
 }
 
 fn supervise(inner: Arc<ClientInner>, mut record: PairingRecord, device: DeviceKeys) {
@@ -1048,6 +1070,14 @@ mod tests {
         // The same report again changes nothing.
         record = next;
         assert!(refreshed_direct(&record, body.as_bytes()).is_none());
+        // A report with home-network addresses only keeps the public one already known.
+        let home = format!(r#"{{"direct":{{"id":"{id}","addrs":["192.168.1.10:7403"]}}}}"#);
+        let kept = refreshed_direct(&record, home.as_bytes()).expect("the home address is new");
+        assert_eq!(kept.extras.get("ira").map(String::as_str), Some("192.168.1.10:7403,203.0.113.9:7403"));
+        // A new public address replaces the old one.
+        let moved = format!(r#"{{"direct":{{"id":"{id}","addrs":["198.51.100.4:7403"]}}}}"#);
+        let now = refreshed_direct(&kept, moved.as_bytes()).expect("the PC moved");
+        assert_eq!(now.extras.get("ira").map(String::as_str), Some("198.51.100.4:7403"));
         // No direct path reported: what is stored stays.
         assert!(refreshed_direct(&record, br#"{"direct":null}"#).is_none());
         assert!(refreshed_direct(&record, b"not json").is_none());

@@ -228,8 +228,13 @@ func runIrohSelfTest(ctx context.Context, servers []string) {
 			v6 = append(v6, ap.Addr().String())
 		}
 	}
-	lan := ""
+	// The address the router knows this PC by is the one on the route out, not
+	// the first private one (that can be a virtual adapter no router can reach).
+	lan := routeOutIPv4()
 	for _, a := range cur.Addrs {
+		if lan != "" {
+			break
+		}
 		if ap, err := netip.ParseAddrPort(a); err == nil && ap.Addr().Is4() && ap.Addr().IsPrivate() {
 			lan = ap.Addr().String()
 			break
@@ -252,6 +257,20 @@ func runIrohSelfTest(ctx context.Context, servers []string) {
 		extra = " Steps: " + strings.Join(steps, " ")
 	}
 	logIroh(fmt.Sprintf("connect: mobile-data reach self-test: %s — %s%s", verdict, msg, extra))
+}
+
+// routeOutIPv4 is this PC's private address on its default route, "" when
+// there is none. Connecting a UDP socket picks the route; nothing is sent.
+func routeOutIPv4() string {
+	c, err := net.Dial("udp4", "192.0.2.1:9")
+	if err != nil {
+		return ""
+	}
+	defer c.Close()
+	if a, ok := c.LocalAddr().(*net.UDPAddr); ok && a.IP.IsPrivate() {
+		return a.IP.String()
+	}
+	return ""
 }
 
 // RecheckIrohReach re-runs the self-test now and returns the result. When
