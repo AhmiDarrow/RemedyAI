@@ -65,7 +65,7 @@ func (s *Server) partnerFireRoutine(r partnerRoutine) (string, error) {
 	switch {
 	case target == "child":
 		child, err := s.partnerSpawnChild(childSpec{
-			Label: r.Title, Task: r.Prompt, Origin: "partner:routine:" + r.ID, RoutineID: r.ID, Deliver: r.Deliver,
+			Label: r.Title, Task: r.Prompt, Origin: partnerOrigin("routine", r.ID, r.Outside), RoutineID: r.ID, Deliver: r.Deliver,
 		})
 		if err != nil {
 			h.record(partnerActivity{Kind: "routine", Title: r.Title, Detail: "Couldn't start: " + err.Error(), State: partnerStateError, RoutineID: r.ID})
@@ -95,7 +95,7 @@ func (s *Server) partnerFireRoutine(r partnerRoutine) (string, error) {
 		SessionID: sessionID,
 		Prompt:    prompt,
 		Shown:     "⏰ " + r.Title + " — " + truncateRunes(r.Prompt, 300),
-		Origin:    "partner:routine:" + r.ID,
+		Origin:    partnerOrigin("routine", r.ID, r.Outside),
 		Label:     r.Title,
 		RoutineID: r.ID,
 		Deliver:   r.Deliver,

@@ -937,6 +937,15 @@ func (r *CognitionTurnRunner) turnPolicy(req TurnRequest) cognition.Policy {
 	switch {
 	case r.Registry != nil:
 		origin := strings.ToLower(strings.TrimSpace(req.Origin))
+		// The same folder and scope boundTools jails this turn's shell to.
+		root := effectiveTurnProjectPath(req.ProjectPath)
+		if root == "" {
+			root = defaultOwnerFilesBase()
+		}
+		var cfg ConfigMap
+		if r.HomeDir != "" {
+			cfg = LoadConfig(r.HomeDir)
+		}
 		return &RegistryPolicy{
 			Registry:       r.Registry,
 			Approvals:      r.Approvals,
@@ -944,6 +953,10 @@ func (r *CognitionTurnRunner) turnPolicy(req TurnRequest) cognition.Policy {
 			ForceAsk:       !OriginIsOwner(req.Origin),
 			HiveRestricted: strings.HasPrefix(origin, "hive:"),
 			LiveContext:    r.LiveContext,
+			Guards:         loadToolGuards(cfg),
+			Origin:         req.Origin,
+			Root:           root,
+			Scope:          effectiveAccessScope(cfgString(cfg, "access_scope", "project"), req.ProjectPath),
 		}
 	case r.Policy != nil:
 		return r.Policy

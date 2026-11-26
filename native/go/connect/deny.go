@@ -156,6 +156,12 @@ var settingsLockKeys = map[string]struct{}{
 	"interop_bind":           {},
 	"claimidx_enabled":       {},
 	"claimidx_public_ledger": {},
+	// The guards are turned down at the PC only.
+	"shell_in_auto":          {},
+	"web_fetch_guard":        {},
+	"messenger_tools":        {},
+	"peer_tools":             {},
+	"api_max_body_mb":        {},
 	"api_key":                {},
 	"http_bootstrap":         {},
 	"provider_keys":          {},

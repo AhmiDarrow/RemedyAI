@@ -493,7 +493,7 @@ func goalActivityTitle(title, state string) string {
 // report. Only runtime-minted partner origins qualify: an owner's own turn
 // that happens to contain "STATUS:" is never cut short.
 func partnerRunConcluded(origin, lastText string) bool {
-	if !isPartnerOrigin(origin) {
+	if !isPartnerRun(origin) {
 		return false
 	}
 	return partnerStatusLine.MatchString(lastText)

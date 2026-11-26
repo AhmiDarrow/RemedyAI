@@ -224,6 +224,32 @@ type RegistryPolicy struct {
 	// model-supplied page_context field is ignored — a checkout click without
 	// this probe is an owner moment.
 	LiveContext func(sessionID string) string
+	// Guards are the owner's settings that add an Ask where the mode alone
+	// would allow (guards.go). The zero value adds none.
+	Guards toolGuards
+	// Origin is the turn's origin, for what a turn from outside may read.
+	Origin string
+	// Root and Scope are the folder and access scope the turn's shell is
+	// jailed to, as boundTools has them.
+	Root  string
+	Scope string
+}
+
+// askUnlessApproved is an Ask the owner's earlier yes for this exact call
+// satisfies. A turn from outside never rides on a standing approval.
+func (p *RegistryPolicy) askUnlessApproved(call cognition.ToolCall) cognition.Decision {
+	if p.Approvals != nil && p.Approvals.IsApproved(call.Name, toolCommandPreview(call), p.SessionID, !p.ForceAsk) {
+		return cognition.Allow
+	}
+	return cognition.Ask
+}
+
+// approvalMode is the owner's approval mode, "ask" when unknown.
+func (p *RegistryPolicy) approvalMode() string {
+	if p.Approvals != nil {
+		return p.Approvals.Mode()
+	}
+	return "ask"
 }
 
 func houseRulesMutation(call cognition.ToolCall) bool {
@@ -293,7 +319,7 @@ func ownerOnlySettingsKey(k string) bool {
 	case "llm_base_url", "llm_provider", "custom_llm_name", "project_path", "house_rules_permission":
 		return true
 	}
-	return sensitiveSettingsKey(k) || looksLikeSecretSettingsKey(k)
+	return sensitiveSettingsKey(k) || looksLikeSecretSettingsKey(k) || guardSettingsKey(k)
 }
 
 func partnerVigilMutates(input []byte) bool {
@@ -342,6 +368,15 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 		if call.Name == "partner.vigil" && p.ForceAsk && partnerVigilMutates(call.Input) {
 			return cognition.Ask
 		}
+		// Someone outside asking for the owner's own data waits for the owner.
+		if p.ForceAsk && p.Guards.outsideReadAsks(p.Origin, call.Name) {
+			return p.askUnlessApproved(call)
+		}
+		// A fetch with room to carry data out waits too, unless the owner chose
+		// Full for this session's work.
+		if p.Guards.webFetchAsks(call) && (p.ForceAsk || p.approvalMode() != "full") {
+			return p.askUnlessApproved(call)
+		}
 		return cognition.Allow
 	case tools.RiskCheckpoint:
 		return p.decideOwnerMoment(call)
@@ -354,11 +389,10 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 		if classifySensitiveComputer(call, p.livePageContext()) || settingsOwnerMoment(call) {
 			return p.decideOwnerMoment(call)
 		}
-		mode := "ask"
-		if p.Approvals != nil {
-			mode = p.Approvals.Mode()
-		}
-		if !p.ForceAsk && (mode == "auto" || mode == "full") {
+		mode := p.approvalMode()
+		// Auto waves coding work through, but not a shell command the write
+		// jail cannot read (guards.go). Full is the owner's word for everything.
+		if !p.ForceAsk && (mode == "full" || (mode == "auto" && !p.shellAsks(call))) {
 			return cognition.Allow
 		}
 		if p.Approvals != nil && p.Approvals.IsApproved(call.Name, toolCommandPreview(call), p.SessionID, !p.ForceAsk) {

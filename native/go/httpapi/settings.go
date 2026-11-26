@@ -58,6 +58,8 @@ var settableKeys = map[string]struct{}{
 	"enabled_providers": {}, "enabled_models": {}, "last_model_by_provider": {},
 	"skills_active_budget": {}, "browser_home_url": {}, "update_check": {}, "enabled_channels": {},
 	"messengers": {}, "assistant": {},
+	// Guards (guards.go, docs/SECURITY.md).
+	"shell_in_auto": {}, "web_fetch_guard": {}, "messenger_tools": {}, "peer_tools": {}, "api_max_body_mb": {},
 	"connect_enabled": {}, "connect_bind_host": {}, "connect_bind_port": {},
 	"connect_paused": {}, "connect_panes": {}, "connect_relay_url": {},
 	"connect_rdv_enabled":  {},
@@ -440,6 +442,20 @@ func normalizeSettingsPatch(patch, cfg ConfigMap) {
 		}
 		patch["project_path"] = raw
 	}
+	// A guard takes one of its own words; anything else is its default.
+	for key, allowed := range map[string][]string{
+		"shell_in_auto":   {defaultShellInAuto, "guard", "ask", "allow"},
+		"web_fetch_guard": {defaultWebFetchGuard, "payload", "ask", "off"},
+		"messenger_tools": {defaultMessengerTools, "all", "safe", "none"},
+		"peer_tools":      {defaultPeerTools, "safe", "all", "none"},
+	} {
+		if v, ok := patch[key]; ok && v != nil {
+			patch[key] = oneOf(fmt.Sprint(v), allowed[0], allowed[1:]...)
+		}
+	}
+	if v, ok := patch["api_max_body_mb"]; ok && v != nil {
+		patch["api_max_body_mb"] = clampAPIMaxBodyMB(v)
+	}
 	if v, ok := patch["access_scope"]; ok && v != nil {
 		patch["access_scope"] = normalizeAccessScope(fmt.Sprint(v))
 	}
@@ -788,6 +804,11 @@ func (s *Server) settingsPayload() map[string]any {
 		"retention_log_days":           cfgInt(cfg, "retention_log_days", 30),
 		"memory_encrypt":               cfgBool(cfg, "memory_encrypt", false),
 		"allow_skill_creation":         cfgBool(cfg, "allow_skill_creation", true),
+		"shell_in_auto":                loadToolGuards(cfg).Shell,
+		"web_fetch_guard":              loadToolGuards(cfg).WebFetch,
+		"messenger_tools":              loadToolGuards(cfg).Messenger,
+		"peer_tools":                   loadToolGuards(cfg).Peer,
+		"api_max_body_mb":              apiMaxBodyMB(cfg),
 		"auto_approve_threshold":       cfgFloat(cfg, "auto_approve_threshold", 0.8),
 		"log_level":                    strings.ToUpper(cfgString(cfg, "log_level", "INFO")),
 		"sarcasm_mode":                 cfgBool(cfg, "sarcasm_mode", false),
