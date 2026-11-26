@@ -437,7 +437,11 @@ def test_github_runs_no_ci_and_publishes_nothing() -> None:
     """There is no CI on GitHub, and no workflow there creates or edits a release."""
     workflows = ROOT / ".github" / "workflows"
     names = sorted(p.name for p in workflows.glob("*.yml"))
-    assert names == ["desktop-release.yml", "verify-release-assets.yml"], names
+    assert names == [
+        "desktop-release.yml",
+        "remedyui-desktop-package.yml",
+        "verify-release-assets.yml",
+    ], names
     for path in workflows.glob("*.yml"):
         text = path.read_text("utf-8")
         for job in yaml.safe_load(text)["jobs"].values():
@@ -451,6 +455,10 @@ def test_github_runs_no_ci_and_publishes_nothing() -> None:
     triggers = release.get(True) or release.get("on")
     assert set(triggers) == {"push", "workflow_dispatch"}
     assert triggers["push"] == {"tags": ["v*"]}, "builds only on release tags"
+    package = yaml.safe_load((workflows / "remedyui-desktop-package.yml").read_text("utf-8"))
+    package_triggers = package.get(True) or package.get("on")
+    assert set(package_triggers) == {"workflow_dispatch"}, "the RemedyUI package runs only by hand"
+    assert package.get("permissions") == {"contents": "read"}, "the RemedyUI package is read-only"
 
 
 
