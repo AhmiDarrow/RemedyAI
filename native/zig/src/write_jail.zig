@@ -251,15 +251,37 @@ fn slashFoldCopy(dst: []u8, src: []const u8) []const u8 {
     return dst[0..n];
 }
 
-/// True when *path* names Remedy auth secrets (read or write).
+/// Files under an auth folder that are secrets wherever that folder lives.
+const auth_secret_names = [_][]const u8{
+    "auth\\local_api_token",
+    "auth\\provider_keys",
+    "auth\\oauth",
+    "auth\\host_signing_key",
+};
+
+/// True when *path* names Remedy auth secrets (read or write), as spelled or
+/// lexically normalized (`//`, `.` and `..` collapsed), at any length. A
+/// relative `.remedy/auth` counts too. Fails closed when out of memory.
 pub fn isAuthSecretPath(path: []const u8) bool {
     if (path.len == 0) return false;
-    var lower_buf: [1024]u8 = undefined;
-    const low = slashFoldCopy(&lower_buf, path);
-    if (std.mem.indexOf(u8, low, "\\.remedy\\auth") != null) return true;
-    if (std.mem.indexOf(u8, low, "\\auth\\local_api_token") != null) return true;
-    if (std.mem.indexOf(u8, low, "\\auth\\provider_keys") != null) return true;
-    if (std.mem.indexOf(u8, low, "\\auth\\oauth") != null) return true;
+    const gpa = std.heap.smp_allocator;
+    if (authSecretSpelling(gpa, path)) return true;
+    const norm = normalizePathAlloc(gpa, path, "") catch |err| switch (err) {
+        error.OutOfMemory => return true,
+        else => return false,
+    };
+    defer gpa.free(norm);
+    return authSecretSpelling(gpa, norm);
+}
+
+fn authSecretSpelling(gpa: std.mem.Allocator, path: []const u8) bool {
+    const low = gpa.alloc(u8, path.len) catch return true;
+    defer gpa.free(low);
+    _ = slashFoldCopy(low, path);
+    if (containsAtNameStart(low, ".remedy\\auth")) return true;
+    for (auth_secret_names) |name| {
+        if (containsAtNameStart(low, name)) return true;
+    }
 
     // Custom portable home: only worth a REMEDY_HOME lookup when the path
     // already looks auth-related. Mapping the full Windows environ block just
@@ -268,15 +290,38 @@ pub fn isAuthSecretPath(path: []const u8) bool {
 
     if (builtin.os.tag == .windows) {
         const environ: std.process.Environ = .{ .block = .global };
-        if (std.process.Environ.getAlloc(environ, std.heap.smp_allocator, "REMEDY_HOME") catch null) |home| {
-            defer std.heap.smp_allocator.free(home);
-            if (authUnderHome(path, home)) return true;
+        if (std.process.Environ.getAlloc(environ, gpa, "REMEDY_HOME") catch null) |home| {
+            defer gpa.free(home);
+            if (authUnderNormalizedHome(gpa, path, home)) return true;
         }
     } else {
         const home_z = std.c.getenv("REMEDY_HOME") orelse return false;
-        if (authUnderHome(path, std.mem.span(home_z))) return true;
+        if (authUnderNormalizedHome(gpa, path, std.mem.span(home_z))) return true;
     }
     return false;
+}
+
+/// *needle* occurs in *hay* where a path step starts: at the beginning or
+/// after a byte that cannot be part of a file name (a separator, a space or a
+/// quote in a command line), so `x.remedy\auth` is not `.remedy\auth`.
+fn containsAtNameStart(hay: []const u8, needle: []const u8) bool {
+    var from: usize = 0;
+    while (std.mem.indexOfPos(u8, hay, from, needle)) |i| {
+        if (i == 0 or !isNameByte(hay[i - 1])) return true;
+        from = i + 1;
+    }
+    return false;
+}
+
+fn isNameByte(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c == '.' or c == '_' or c == '-' or c == '~' or c >= 0x80;
+}
+
+fn authUnderNormalizedHome(gpa: std.mem.Allocator, path: []const u8, home: []const u8) bool {
+    if (authUnderHome(path, home)) return true;
+    const norm = normalizePathAlloc(gpa, home, "") catch return false;
+    defer gpa.free(norm);
+    return authUnderHome(path, norm);
 }
 
 fn authUnderHome(path: []const u8, home: []const u8) bool {
@@ -419,11 +464,25 @@ fn isFlagArg(arg: []const u8) bool {
     return false;
 }
 
+/// *path* names an auth secret as given, or once a relative path is joined to
+/// *cwd* (`auth/local_api_token` run from the Remedy home).
+fn authSecretFrom(allocator: std.mem.Allocator, path: []const u8, cwd: []const u8) Error!bool {
+    if (isAuthSecretPath(path)) return true;
+    const raw = trimSpace(path);
+    if (raw.len == 0 or isAbsolutePath(raw) or trimSpace(cwd).len == 0) return false;
+    const joined = normalizePathAlloc(allocator, raw, cwd) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return false,
+    };
+    defer allocator.free(joined);
+    return isAuthSecretPath(joined);
+}
+
 /// Enforce workdir + auth + mutation dest constraints for an authorized spawn.
 pub fn checkSpawn(allocator: std.mem.Allocator, argv: []const []const u8, cwd: []const u8) Error!void {
     if (isAuthSecretPath(cwd)) return error.AccessDenied;
     for (argv) |arg| {
-        if (isAuthSecretPath(arg)) return error.AccessDenied;
+        if (try authSecretFrom(allocator, arg, cwd)) return error.AccessDenied;
     }
 
     const roots = try copyRoots(allocator);
@@ -451,7 +510,7 @@ pub fn checkSpawn(allocator: std.mem.Allocator, argv: []const []const u8, cwd: [
 
 /// Check a single path against the installed roots (and auth). For ABI tests.
 pub fn checkPath(allocator: std.mem.Allocator, path: []const u8, cwd: []const u8) Error!void {
-    if (isAuthSecretPath(path)) return error.AccessDenied;
+    if (try authSecretFrom(allocator, path, cwd)) return error.AccessDenied;
     const roots = try copyRoots(allocator);
     defer {
         for (roots) |r| allocator.free(r);
@@ -482,6 +541,33 @@ test "auth secret paths are detected" {
     try std.testing.expect(isAuthSecretPath("/home/ada/.remedy/auth/provider_keys"));
     try std.testing.expect(!isAuthSecretPath("C:\\Users\\Ada\\.remedy\\config.json"));
     try std.testing.expect(!isAuthSecretPath("C:\\proj\\auth\\notes.txt"));
+}
+
+test "auth secret paths are detected in every spelling" {
+    try std.testing.expect(isAuthSecretPath("/home/ada/.remedy//auth/local_api_token"));
+    try std.testing.expect(isAuthSecretPath("/home/ada/.remedy/./auth/local_api_token"));
+    try std.testing.expect(isAuthSecretPath("/home/ada/.remedy/x/../auth/local_api_token"));
+    try std.testing.expect(isAuthSecretPath("C:\\Users\\Ada\\.remedy\\.\\auth\\x"));
+    try std.testing.expect(isAuthSecretPath(".remedy/auth/local_api_token"));
+    try std.testing.expect(isAuthSecretPath("cat .remedy/auth/provider_keys"));
+    try std.testing.expect(isAuthSecretPath("/srv/portable-home/auth/host_signing_key"));
+    try std.testing.expect(!isAuthSecretPath("/home/ada/x.remedy/auth/notes"));
+
+    // No length cap: padding past any fixed buffer still names the secret.
+    var long: [3000]u8 = undefined;
+    @memset(long[0..2000], '/');
+    const tail = "home/ada/.remedy/auth/local_api_token";
+    @memcpy(long[2000..][0..tail.len], tail);
+    try std.testing.expect(isAuthSecretPath(long[0 .. 2000 + tail.len]));
+
+    // Relative to the cwd the command runs in.
+    const allocator = std.testing.allocator;
+    clearRoots(allocator);
+    const cmd = if (is_windows) "C:\\Windows\\System32\\cmd.exe" else "/bin/cat";
+    const home = if (is_windows) "C:\\Users\\Ada\\.remedy" else "/home/ada/.remedy";
+    try std.testing.expectError(error.AccessDenied, checkSpawn(allocator, &.{ cmd, "auth/local_api_token" }, home));
+    try std.testing.expectError(error.AccessDenied, checkPath(allocator, "auth", home));
+    try checkSpawn(allocator, &.{ cmd, "config.json" }, home);
 }
 
 test "workdir jail denies outside cwd and allows project writes" {
