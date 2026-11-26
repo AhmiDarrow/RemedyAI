@@ -221,6 +221,32 @@ def test_workspace_search_handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert all(isinstance(m["line"], int) and m["line"] >= 1 for m in out["matches"])
 
 
+def test_workspace_search_skips_credential_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "app.py").write_text("SECRET_MARKER = 'code'\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("SECRET_MARKER=sk-live-1\n", encoding="utf-8")
+    (tmp_path / "server.pem").write_text("SECRET_MARKER pem\n", encoding="utf-8")
+    (tmp_path / "id_rsa").write_text("SECRET_MARKER key\n", encoding="utf-8")
+    auth = tmp_path / ".remedy" / "auth"
+    auth.mkdir(parents=True)
+    (auth / "tokens.txt").write_text("SECRET_MARKER token\n", encoding="utf-8")
+    from remedy.core import rg_binary
+
+    for no_rg in (False, True):
+        if no_rg:
+            monkeypatch.setattr(rg_binary, "find_rg", lambda *a, **k: (None, "none"))
+            monkeypatch.setattr(rg_binary, "schedule_ensure_rg", lambda *a, **k: None)
+        out = worker._workspace_search({"pattern": "SECRET_MARKER", "path": ".", "max_matches": 50})
+        paths = {m["path"] for m in out["matches"]}
+        assert paths == {"app.py"}, (out["engine"], paths)
+        from remedy.core.errors import SecurityError
+
+        for secret in (".env", "server.pem", ".remedy/auth/tokens.txt"):
+            with pytest.raises((PermissionError, SecurityError)):
+                worker._workspace_search({"pattern": "SECRET_MARKER", "path": secret})
+
+
 def test_workspace_search_refuses_escape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
     with pytest.raises(PermissionError):
