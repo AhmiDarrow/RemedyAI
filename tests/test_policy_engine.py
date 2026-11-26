@@ -112,3 +112,23 @@ def test_conservative_trust_does_not_fight_full_mode():
     d = _eval("bash_exec", "echo hi", mode="full")
     assert d.allowed is True
     assert d.requires_approval is False
+
+
+@pytest.mark.parametrize(
+    "args",
+    [{"text": "Place order"}, {"label": "Pay now"}, {"click": "Buy now"}],
+)
+def test_purchase_click_from_arguments_asks_in_full_mode(args):
+    prev = APPROVALS.mode
+    APPROVALS.set_mode("full")
+    tokens = begin_turn("policy-sess", project_raw=None, active_path=".")
+    try:
+        ctx = TurnFactory.create()
+        d = PolicyEngine().evaluate(
+            ctx, "computer_click", ToolRequest(name="computer_click", arguments=args)
+        )
+    finally:
+        end_turn("policy-sess", *tokens)
+        APPROVALS.set_mode(prev)
+    assert d.allowed is True
+    assert d.requires_approval is True
