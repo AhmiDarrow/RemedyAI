@@ -176,6 +176,10 @@ func cmdExec(c *Ctx) int {
 		c.Errorf("No command specified\n")
 		return 2
 	}
+	if danger := DangerousCommand(command); danger != "" {
+		c.Errorf("WARNING: %s\nExecution blocked by security policy\n", danger)
+		return 2
+	}
 	workdir := c.P.Str("workdir")
 	if workdir != "" {
 		abs, err := filepath.Abs(workdir)
