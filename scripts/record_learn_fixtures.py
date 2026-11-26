@@ -143,13 +143,13 @@ CASES = {
     ],
     "secret_inline": [
         {
-            "message": "deploy the app with api_key=sk-ant-api03-abcdefghijklmnopqrstuv now",
+            "message": "deploy the app with api_key=sk-ant-api03-fake-abcdefghijklmnopq now",
             "steps": EDIT_WORK,
         }
     ],
     "secret_only": [
         {
-            "message": "sk-ant-api03-abcdefghijklmnopqrstuv",
+            "message": "sk-ant-api03-fake-abcdefghijklmnopq",
             "steps": EDIT_WORK,
         }
     ],
