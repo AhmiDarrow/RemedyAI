@@ -31,6 +31,62 @@ func TestNormalizeNavigateURL(t *testing.T) {
 	}
 }
 
+func TestNavigateRefusesLocalAPIInEverySpelling(t *testing.T) {
+	for _, u := range []string{
+		"http://127.0.0.1:7400/",
+		"http://127.1:7400/",
+		"http://0x7f.1:7400/",
+		"http://0x7f000001:7400/",
+		"http://2130706433:7400/",
+		"http://0177.0.0.1:7400/",
+		"http://127.0.0.2:7400/",
+		"http://127.1:07400/",
+		"http://127.0.0.1.:7400/",
+		"http://0.0.0.0:7400/",
+		"http://0:7400/",
+		"http://[::1]:7400/",
+		"http://[::ffff:127.0.0.1]:7400/",
+		"http://[::ffff:7f00:1]:7400/",
+		"http://LOCALHOST:7400/",
+		"http://localhost.:7400/",
+		"http://127.1:8080/api/settings",
+	} {
+		if isValidNavigateURL(u) {
+			t.Errorf("%s must be refused", u)
+		}
+	}
+	for _, u := range []string{
+		"http://127.0.0.1:8080/",
+		"http://localhost:3000/app",
+		"https://example.com:7400/",
+		"https://1.2.3.4:7400/",
+		"https://0x7f.example.com:7400/",
+	} {
+		if !isValidNavigateURL(u) {
+			t.Errorf("%s must stay allowed", u)
+		}
+	}
+}
+
+func TestWhatwgIPv4(t *testing.T) {
+	cases := map[string]string{
+		"127.1": "127.0.0.1", "0x7f.1": "127.0.0.1", "2130706433": "127.0.0.1",
+		"0177.0.0.1": "127.0.0.1", "1.2.3.4": "1.2.3.4", "10.0x10.1": "10.16.0.1",
+		"0x": "0.0.0.0",
+	}
+	for in, want := range cases {
+		got, ok := whatwgIPv4(in)
+		if !ok || got.String() != want {
+			t.Errorf("whatwgIPv4(%q)=%v,%v want %s", in, got, ok, want)
+		}
+	}
+	for _, in := range []string{"example.com", "1.2.3.4.5", "256.1.1.1", "1.2.65536", "08.1.1.1", "1..2", ""} {
+		if _, ok := whatwgIPv4(in); ok {
+			t.Errorf("whatwgIPv4(%q) should not parse", in)
+		}
+	}
+}
+
 func TestComputerNavigateFailClosedHostOffline(t *testing.T) {
 	home := t.TempDir()
 	b := newHostBridge(home)
