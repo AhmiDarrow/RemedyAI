@@ -20,7 +20,7 @@ A turn from outside asks before every change, whatever the approval mode, never 
 ## Approval modes
 
 - **Ask**: changes wait for your yes.
-- **Auto**: routine work inside your project runs without asking. The safeguards below still ask.
+- **Auto**: routine work inside your project runs without asking. The safeguards below still ask, and so does handing a mission to another coding agent (delegate), because that agent's own commands and web fetches are outside Remedy's checks.
 - **Full**: everything runs without asking. Use it knowingly.
 
 In every mode these always need your approval on a card, for that exact action: sending mail or a message, payments, entering credentials, a sensitive settings change (model provider and address, keys, approval mode, access scope, project folder, privacy, phone access, the safeguards on this page).
