@@ -281,3 +281,24 @@ def test_learn_log_rotates_when_large(tmp_path: Path) -> None:
     rows = pl.recent_learn_runs(str(home), limit=50)
     assert rows and rows[-1]["kind"] == "turn_end"
     assert rows[-1]["changed"]["learned"] is True
+
+
+def test_turn_end_binds_the_go_turn_session_to_the_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Post-turn work (consolidation, soul notes) reads the session through
+    ``turn_session_id(runtime)``. The bind imported a ``set_turn_session_id``
+    that never existed, so the ImportError was swallowed and that work saw the
+    runtime's previous session instead of the Go turn's."""
+    from types import SimpleNamespace
+
+    from remedy.core import production_learn as pl
+    from remedy.core.turn_context import turn_session_id
+
+    runtime = SimpleNamespace(_session_id="sess-old", memory=None)
+    monkeypatch.setattr(pl, "_runtime_for", lambda inp: runtime)
+    out = pl.finish_production_turn(
+        {"session_id": "sess-go", "message": "", "home_dir": str(tmp_path)}
+    )
+    assert out["ok"] is True
+    assert turn_session_id(runtime) == "sess-go"

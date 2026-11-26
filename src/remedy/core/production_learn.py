@@ -342,11 +342,11 @@ def _finish_production_turn_inner(inp: Mapping[str, Any]) -> dict[str, Any]:
                 runtime._last_assistant_text = assistant_text
             with suppress(Exception):
                 runtime._turn_tool_steps = list(steps)
-            with suppress(Exception):
-                from remedy.core.turn_context import set_turn_session_id
-
-                if session_id:
-                    set_turn_session_id(session_id, runtime)
+            if session_id:
+                # Post-turn work reads the session through turn_session_id,
+                # which falls back to the runtime outside a Python turn.
+                with suppress(Exception):
+                    runtime._session_id = session_id
 
         with suppress(Exception):
             from remedy.core.agent_post_turn import schedule_post_turn_prep
