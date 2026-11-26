@@ -1060,6 +1060,23 @@ func (r *CognitionTurnRunner) boundTools(req TurnRequest) cognition.ToolExecutor
 	}}
 }
 
+// usageRecorder writes each round's token counts to the usage ledger, named
+// after the model that actually answers this turn. Nil when there is no home
+// folder to keep a ledger in.
+func (r *CognitionTurnRunner) usageRecorder(req TurnRequest, live cognition.Model) func(cognition.Usage) {
+	home := strings.TrimSpace(r.HomeDir)
+	if home == "" {
+		return nil
+	}
+	id, _, provider := answeringModelMeta(live)
+	sid := req.SessionID
+	return func(u cognition.Usage) {
+		if err := recordUsage(home, sid, provider, id, u); err != nil {
+			log.Printf("usage: could not record a round: %v", err)
+		}
+	}
+}
+
 func (r *CognitionTurnRunner) runEngine(
 	ctx context.Context,
 	req TurnRequest,
@@ -1078,7 +1095,7 @@ func (r *CognitionTurnRunner) runEngine(
 	// Tool names are resolved to ABI ids once, here, so tokens, approvals,
 	// policy and the executor all see the same id.
 	model := cognition.Model(&resolvingModel{inner: live, resolve: oc.ResolveToolName})
-	model = &emittingModel{inner: model, emit: safeEmit}
+	model = &emittingModel{inner: model, emit: safeEmit, onUsage: r.usageRecorder(req, live)}
 	coding := false
 	// One gate memory per turn: a reason that already sent her back to work
 	// once does not do it again.
@@ -1342,6 +1359,8 @@ func drainEvents(src <-chan cognition.ModelEvent) {
 type emittingModel struct {
 	inner cognition.Model
 	emit  func(string)
+	// onUsage, when set, is told each round's token counts (the usage ledger).
+	onUsage func(cognition.Usage)
 
 	// Round tracking so model text from separate rounds (narration before a
 	// tool call, then the next round's text) never runs together as
@@ -1404,6 +1423,9 @@ func (m *emittingModel) emitEvent(ev cognition.ModelEvent) {
 	if ev.Usage != nil {
 		if b, err := json.Marshal(ev.Usage); err == nil {
 			m.emit("@@usage:" + string(b) + "\n")
+		}
+		if m.onUsage != nil {
+			m.onUsage(*ev.Usage)
 		}
 	}
 }

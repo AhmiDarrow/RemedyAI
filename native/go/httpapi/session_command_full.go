@@ -406,7 +406,10 @@ func (s *Server) executeFullSlash(sessionID, raw string, phone bool) map[string]
 		num := func(k string) float64 { f, _ := totals[k].(float64); return f }
 		lines := []string{fmt.Sprintf("The last %d days:", days),
 			fmt.Sprintf("  %s tokens in, %s out, %s in all", groupDigits(num("prompt_tokens")), groupDigits(num("completion_tokens")), groupDigits(num("total_tokens"))),
-			fmt.Sprintf("  about $%.2f, over %s replies", num("estimated_cost_usd"), groupDigits(num("events")))}
+			fmt.Sprintf("  over %s model rounds", groupDigits(num("events")))}
+		if cost := num("estimated_cost_usd"); cost > 0 {
+			lines = append(lines, fmt.Sprintf("  about $%.2f at list prices", cost))
+		}
 		if rows, _ := out["by_model"].([]any); len(rows) > 0 {
 			lines = append(lines, "", "By model:")
 			for i, r := range rows {
@@ -415,11 +418,10 @@ func (s *Server) executeFullSlash(sessionID, raw string, phone bool) map[string]
 				}
 				row, _ := r.(map[string]any)
 				tok, _ := row["total_tokens"].(float64)
-				cost, _ := row["estimated_cost_usd"].(float64)
-				lines = append(lines, fmt.Sprintf("  %v: %s tokens, about $%.2f", firstOf(row, "model", "name", "id"), groupDigits(tok), cost))
+				lines = append(lines, fmt.Sprintf("  %v: %s tokens", firstOf(row, "model", "name", "id"), groupDigits(tok)))
 			}
 		}
-		lines = append(lines, "", "The cost is an estimate from list prices; your provider's bill is the real figure.")
+		lines = append(lines, "", "These are the counts the provider reported. Remedy does not work out a price; your provider's bill has that.")
 		return say("%s", strings.Join(lines, "\n"))
 
 	case "/context":
