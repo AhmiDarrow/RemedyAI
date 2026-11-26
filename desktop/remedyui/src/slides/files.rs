@@ -93,7 +93,7 @@ impl FilesModel {
             client,
             preview,
             root: Signal::new(if preview {
-                "/home/joe/RemedyAI".into()
+                "/home/ahmi/RemedyAI".into()
             } else {
                 String::new()
             }),
@@ -282,7 +282,7 @@ impl FilesModel {
         };
         if self.preview {
             let shown = normalize_preview(requested);
-            self.root.set("/home/joe/RemedyAI".into());
+            self.root.set("/home/ahmi/RemedyAI".into());
             self.path.set(shown.clone());
             self.files.set(preview_entries(&shown));
             self.error.set(String::new());

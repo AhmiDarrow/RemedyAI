@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Static screen for goldens. No cursor blink, no live shell.
-const PREVIEW_SCREEN: &[u8] = b"\r\nRemedy Desktop\r\njoe@remedy:~/RemedyAI/desktop/src$ ";
+const PREVIEW_SCREEN: &[u8] = b"\r\nRemedy Desktop\r\nahmi@remedy:~/RemedyAI/desktop/src$ ";
 
 /// What the right-click menu offers: Copy when text is selected, otherwise Paste.
 /// No extra commands — Clear and Restart stay on the chrome, as in TerminalSlide.
@@ -138,7 +138,7 @@ impl TerminalModel {
         let cwd = if preview {
             let p = project_path.get();
             if p.is_empty() {
-                "/home/joe/RemedyAI".into()
+                "/home/ahmi/RemedyAI".into()
             } else {
                 p
             }
@@ -213,7 +213,7 @@ impl TerminalModel {
         if self.preview {
             let path = self.project_path.get();
             let path = if path.is_empty() {
-                "/home/joe/RemedyAI".into()
+                "/home/ahmi/RemedyAI".into()
             } else {
                 path
             };

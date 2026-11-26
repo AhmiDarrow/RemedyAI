@@ -389,7 +389,7 @@ def _belief_line(arc: str, user_name: str) -> str:
     line = re.sub(r"\s+", " ", arc).strip(" -—:")
     if len(line) < 12:
         return ""
-    if not re.search(r"(?i)\b(i|we|he|she|they|joe|%s)\b" % re.escape(user_name), line):
+    if not re.search(r"(?i)\b(i|we|he|she|they|%s)\b" % re.escape(user_name), line):
         line = f"About us: {line}"
     return line[:160]
 

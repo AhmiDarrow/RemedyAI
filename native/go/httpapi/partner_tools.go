@@ -60,6 +60,7 @@ type partnerToolInput struct {
 	GoalID       string           `json:"goal_id"`
 	ChildID      string           `json:"child_id"`
 	Text         string           `json:"text"`
+	Query        string           `json:"query"`
 	Last         int              `json:"last"`
 	RoutineID    string           `json:"routine_id"`
 	Title        string           `json:"title"`
@@ -219,8 +220,8 @@ func partnerToolDefs() []partnerToolDef {
 		{
 			id:     "grove.open",
 			risk:   tools.RiskReadOnly,
-			desc:   "Show the owner something in the app: a goal's room (goal_id) or a surface (grove or studio).",
-			schema: `{"type":"object","properties":{"goal_id":{"type":"string"},"surface":{"type":"string","enum":["grove","studio"]},` + partnerBoundProps + `},"additionalProperties":false}`,
+			desc:   "Show the owner something in the app on the PC: a session (target is its id from sessions.list or sessions.search), a goal's room (goal_id) or a surface (grove or studio).",
+			schema: `{"type":"object","properties":{"target":{"type":"string","description":"A session id: opens that conversation."},"goal_id":{"type":"string"},"surface":{"type":"string","enum":["grove","studio"]},` + partnerBoundProps + `},"additionalProperties":false}`,
 			run:    toolGroveOpen,
 		},
 	}
@@ -559,6 +560,13 @@ func toolOwnerNotify(s *Server, in partnerToolInput) (any, error) {
 func toolGroveOpen(s *Server, in partnerToolInput) (any, error) {
 	if s.appCmd == nil {
 		return nil, errors.New("the app is not listening")
+	}
+	if strings.TrimSpace(in.Target) != "" {
+		sess, err := findOwnerSession(s, in.Target)
+		if err != nil {
+			return nil, err
+		}
+		return s.appCmd.Enqueue("open_session", map[string]any{"session_id": sess.ID, "title": sess.Title}), nil
 	}
 	if gid := strings.TrimSpace(in.GoalID); gid != "" {
 		g, ok := s.findLifeGoal(gid)

@@ -60,7 +60,7 @@ This document does not define those feature knobs.
 
 ## Talk to change them later
 
-In an ordinary chat you can say things like “call me Joe,” “be more concise,”
+In an ordinary chat you can say things like “call me Ahmi,” “be more concise,”
 or “don’t reach out unless I ask.” Remedy shows the change and applies it.
 
 - Ordinary preferences (name, tone, language, launch at login, `update_check`)
@@ -123,7 +123,7 @@ In `config.toml` under `[advanced]`:
 | `house_rules_permission` | `confirm_sensitive` | `confirm_sensitive`, `confirm_all`, or `plain` (sensitive keys still confirm). |
 | `house_rules_audit` | `true` | When false, new audit lines are not written. Existing files are left alone. |
 
-These follow Joe’s app rule: no forced nags. The first-run auto-offer is
+These follow the app's rule: no forced nags. The first-run auto-offer is
 a single non-repeating prompt. Existing installs get one update pop-up
 (Let's go / Not now) and then are left alone.
 

@@ -1,6 +1,6 @@
 //! Where browser files live. The Tauri host already uses `~/.remedy`.
 //!
-//! Tests set `REMEDY_DESKTOP_NO_SPAWN` and must not write Joe's real profile.
+//! Tests set `REMEDY_DESKTOP_NO_SPAWN` and must not write the owner's real profile.
 //! `REMEDY_HOME` wins when a caller points the app at another folder.
 
 use std::path::PathBuf;

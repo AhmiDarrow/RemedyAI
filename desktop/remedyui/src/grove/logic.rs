@@ -1768,7 +1768,7 @@ mod tests {
     #[test]
     fn coding_requests_open_studio_and_life_stays_in_grove() {
         assert_eq!(
-            studio_handoff("Get the portal addon loading again after the entry rename."),
+            studio_handoff("Get the recipe addon loading again after the entry rename."),
             Some(StudioKind::Build)
         );
         assert_eq!(

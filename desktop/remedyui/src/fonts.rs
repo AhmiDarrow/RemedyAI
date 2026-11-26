@@ -157,7 +157,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_are_joes_faces() {
+    fn defaults_are_the_house_faces() {
         let f = Fonts::default();
         assert_eq!(f.ui, "Remedy Sans UI");
         assert_eq!(f.display, "Ahmi Pixel");

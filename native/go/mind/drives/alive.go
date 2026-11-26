@@ -357,7 +357,7 @@ func beliefLine(arc, user string) string {
 	if utf8.RuneCountInString(line) < 12 {
 		return ""
 	}
-	if !regexp.MustCompile(`(?i)\b(i|we|he|she|they|joe|` + regexp.QuoteMeta(user) + `)\b`).MatchString(line) {
+	if !regexp.MustCompile(`(?i)\b(i|we|he|she|they|` + regexp.QuoteMeta(user) + `)\b`).MatchString(line) {
 		line = "About us: " + line
 	}
 	return sf.Cut(line, 160)

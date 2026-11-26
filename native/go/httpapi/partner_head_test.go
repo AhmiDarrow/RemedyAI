@@ -566,7 +566,7 @@ func TestPartnerToolsThroughRegistry(t *testing.T) {
 		t.Fatal("face seed must be stable")
 	}
 	for _, other := range []uint64{
-		faceSeedFor("Joe", "Remedy", "salt-1", 0), faceSeedFor("Ahmi", "Reme", "salt-1", 0),
+		faceSeedFor("Test User", "Remedy", "salt-1", 0), faceSeedFor("Ahmi", "Reme", "salt-1", 0),
 		faceSeedFor("Ahmi", "Remedy", "salt-2", 0), faceSeedFor("Ahmi", "Remedy", "salt-1", 1),
 		faceSeedFor("AhmiR", "emedy", "salt-1", 0),
 	} {
