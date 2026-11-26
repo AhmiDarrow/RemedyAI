@@ -399,7 +399,10 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 		mode := p.approvalMode()
 		// Auto waves coding work through, but not a shell command the write
 		// jail cannot read (guards.go). Full is the owner's word for everything.
-		if !p.ForceAsk && (mode == "full" || (mode == "auto" && !p.shellAsks(call))) {
+		// A delegate is never "routine" in Auto: it hands a whole mission to
+		// another agent whose shell and web fetches Remedy's guards never see,
+		// so the owner approves the mission (once, or for the session).
+		if !p.ForceAsk && (mode == "full" || (mode == "auto" && !p.shellAsks(call) && call.Name != "delegate")) {
 			return cognition.Allow
 		}
 		if p.Approvals != nil && p.Approvals.IsApproved(call.Name, toolCommandPreview(call), p.SessionID, !p.ForceAsk) {
