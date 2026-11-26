@@ -62,16 +62,24 @@ export function isAuthenticatedApiUrl(src: string): boolean {
   if (s.startsWith('/api/')) return true
   try {
     const u = new URL(s, 'http://127.0.0.1')
-    const host = (u.hostname || '').toLowerCase()
-    const loopback =
-      host === '127.0.0.1' || host === 'localhost' || host === '::1'
+    // Only Remedy's own API gets the bearer token. Any loopback port used to
+    // count, so an image link to another local listener (a dev server, a
+    // process the agent started, another user's port) was sent the token as
+    // soon as the message rendered.
+    let apiOrigin = ''
+    try {
+      apiOrigin = new URL(getServerUrl()).origin
+    } catch {
+      apiOrigin = ''
+    }
+    const isApi = !!apiOrigin && u.origin === apiOrigin
     // WebUI opened on a LAN address: its own origin's /api/* needs Bearer too.
     const sameOrigin =
       typeof window !== 'undefined'
       && !!window.location?.origin
       && window.location.origin !== 'null'
       && u.origin === window.location.origin
-    if (!loopback && !sameOrigin) return false
+    if (!isApi && !sameOrigin) return false
     return u.pathname.startsWith('/api/')
   } catch {
     return false

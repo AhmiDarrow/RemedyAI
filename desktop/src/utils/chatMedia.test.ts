@@ -54,6 +54,10 @@ describe('chatMedia path helpers', () => {
       ),
     ).toBe(true)
     expect(isAuthenticatedApiUrl('https://cdn.example/x.png')).toBe(false)
+    // Another local listener never gets the token.
+    expect(isAuthenticatedApiUrl('http://127.0.0.1:8081/api/a.png')).toBe(false)
+    expect(isAuthenticatedApiUrl('http://localhost:5173/api/a.png')).toBe(false)
+    expect(isAuthenticatedApiUrl('http://[::1]:7400/api/a.png')).toBe(false)
     expect(isAuthenticatedApiUrl('C:/Users/a/b.png')).toBe(false)
   })
 
