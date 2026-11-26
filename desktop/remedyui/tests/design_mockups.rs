@@ -133,3 +133,24 @@ fn write_design9_review_shots() {
         }
     }
 }
+
+/// The screenshots the repository shows (docs/screenshots). Everything in them is
+/// the previews' own sample data: no real names, projects or files.
+/// Run with REMEDY_SHOTS_OUT=<folder>.
+#[test]
+fn write_repo_screenshots() {
+    let Ok(dir) = std::env::var("REMEDY_SHOTS_OUT") else {
+        return;
+    };
+    no_spawn_defaults();
+    let dir = Path::new(&dir);
+    let _ = std::fs::create_dir_all(dir);
+    write_shot(dir, "desktop-grove", remedy_desktop::design_home, 1280.0, 800.0);
+    write_shot(dir, "desktop-studio-chat", remedy_desktop::design_build_chat, 1280.0, 800.0);
+    write_shot(dir, "desktop-studio-plan", remedy_desktop::design_plan, 1280.0, 800.0);
+    write_shot(dir, "desktop-grove-talking", remedy_desktop::grove_home_talking, 1280.0, 800.0);
+    write_shot(dir, "desktop-settings", remedy_desktop::preview_general, 1280.0, 800.0);
+    write_shot(dir, "desktop-themes", remedy_desktop::preview_appearance, 1280.0, 800.0);
+    write_shot(dir, "phone-talk", remedy_desktop::grove_phone, 412.0, 892.0);
+    write_shot(dir, "phone-work", remedy_desktop::grove_phone_work, 412.0, 892.0);
+}
