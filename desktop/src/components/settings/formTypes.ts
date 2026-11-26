@@ -251,7 +251,7 @@ export interface SettingsGuards {
 export const DEFAULT_GUARDS: SettingsGuards = {
   shell_in_auto: 'guard',
   web_fetch_guard: 'payload',
-  messenger_tools: 'all',
+  messenger_tools: 'safe',
   peer_tools: 'safe',
   api_max_body_mb: 128,
 }

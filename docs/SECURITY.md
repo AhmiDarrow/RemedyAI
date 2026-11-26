@@ -68,11 +68,11 @@ What it does not cover:
 
 | Value | Without asking you, they can have Remedy use |
 |---|---|
-| `all` (default) | Every read-only tool: your files, memory, mail list, calendar, other conversations, clipboard, screen. |
-| `safe` | Only tools that show nothing of yours: web search and fetch, text helpers, her skills. |
+| `safe` (default) | Only tools that show nothing of yours: web search and fetch, text helpers, her skills. |
+| `all` | Every read-only tool: your files, memory, mail list, calendar, other conversations, clipboard, screen. |
 | `none` | Nothing. Every tool call waits for you. |
 
-The default is `all` because a channel's allow list is your own choice of who may talk to her, and most owners use a messenger to reach their own assistant. If anyone other than you is on an allow list, choose `safe`.
+It starts at `safe` so that nothing of yours is readable from a chat until you decide it should be. With `safe`, asking her from a messenger about your calendar, files or memory raises an approval on the PC. If you use a messenger to reach your own assistant and only you are on that channel's allow list, `all` is the convenient choice. Leave it at `safe` if anyone else is on an allow list.
 
 ### What other agents may read: `peer_tools`
 
@@ -99,7 +99,7 @@ We would rather you read these here than find them out.
 - **Full mode trusts the model completely.** A hidden instruction that gets past the model's own judgement can do anything your account can, except the always-approve actions listed above.
 - **Reading is not asked about for you.** In your own turns, read-only tools run without approval in every mode. If Remedy reads a page with a hidden instruction and then reads a private file, the remaining barrier to that file leaving the PC is the fetch safeguard and the approval on sending mail and messages.
 - **Other programs running as you** can read Remedy's files, including her memory database. Memory encryption at rest is a separate setting (`memory_encrypt`).
-- **A messenger sender on `all`** can read whatever Remedy can.
+- **A messenger sender, once you set `messenger_tools` to `all`,** can read whatever Remedy can.
 
 ## Reporting a problem
 
