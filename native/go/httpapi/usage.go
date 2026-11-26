@@ -3,6 +3,7 @@ package httpapi
 import (
 	"database/sql"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
+	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
@@ -357,6 +360,42 @@ func maxFloat(a, b float64) float64 {
 
 func round6(v float64) float64 {
 	return float64(int64(v*1e6+0.5)) / 1e6
+}
+
+// recordUsage writes one model round's token counts, as the provider reported
+// them, to the usage ledger. The Usage screen and /usage read that ledger; until
+// this existed nothing wrote to it, so both showed zero.
+//
+// No cost is written: this runtime has no price list, and a guessed price would
+// read as a real one. estimated_cost_usd stays 0 and readers say so.
+func recordUsage(homeDir, sessionID, provider, model string, u cognition.Usage) error {
+	total := u.TotalTokens
+	if total <= 0 {
+		total = u.PromptTokens + u.CompletionTokens
+	}
+	if total <= 0 {
+		return nil
+	}
+	db, err := openUsageDB(homeDir)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	meta, _ := json.Marshal(map[string]int{
+		"cache_read_tokens":  u.CacheReadTokens,
+		"cache_write_tokens": u.CacheWriteTokens,
+	})
+	_, err = db.Exec(`
+		INSERT INTO usage_events (
+			id, ts, session_id, provider, model,
+			prompt_tokens, completion_tokens, total_tokens,
+			estimated_cost_usd, source, meta
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'provider', ?)`,
+		uuid.NewString(), float64(time.Now().UnixNano())/1e9, nullIfEmpty(sessionID),
+		nullIfEmpty(provider), nullIfEmpty(model),
+		u.PromptTokens, u.CompletionTokens, total, string(meta),
+	)
+	return err
 }
 
 // seedUsageEvent inserts one ledger row (tests).

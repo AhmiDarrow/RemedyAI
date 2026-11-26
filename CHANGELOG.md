@@ -5,6 +5,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 ## [Unreleased]
 
 ### Fixed
+- Usage was never recorded: the Usage screen and `/usage` showed zero however much was used. Each model round's token counts, as the provider reports them, are now written to the ledger. No cost is shown, because Remedy has no price list and a guessed price would read as a real one.
 - A number typed into Settings (retention days, for one) was dropped on save and the default came back.
 
 ### Added
