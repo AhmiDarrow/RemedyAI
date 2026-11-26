@@ -282,7 +282,7 @@ impl Settings {
             approval_mode: Signal::new("ask".into()),
             shell_in_auto: Signal::new("guard".into()),
             web_fetch_guard: Signal::new("payload".into()),
-            messenger_tools: Signal::new("all".into()),
+            messenger_tools: Signal::new("safe".into()),
             peer_tools: Signal::new("safe".into()),
             api_max_body_mb: Signal::new(128.0),
             trust_profile: Signal::new("balanced".into()),
@@ -540,7 +540,7 @@ impl Settings {
         self.approval_mode.set(jstr(v, "approval_mode", "ask"));
         self.shell_in_auto.set(jstr(v, "shell_in_auto", "guard"));
         self.web_fetch_guard.set(jstr(v, "web_fetch_guard", "payload"));
-        self.messenger_tools.set(jstr(v, "messenger_tools", "all"));
+        self.messenger_tools.set(jstr(v, "messenger_tools", "safe"));
         self.peer_tools.set(jstr(v, "peer_tools", "safe"));
         self.api_max_body_mb.set(jnum(v, "api_max_body_mb", 128.0));
         self.trust_profile.set(jstr(v, "trust_profile", "balanced"));

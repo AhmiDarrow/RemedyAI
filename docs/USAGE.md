@@ -641,7 +641,7 @@ remedy migrate openclaw ~/openclaw/skills --no-copy
 | `auto_approve_threshold` | float | `0.8` | Confidence threshold for auto-approval |
 | `shell_in_auto` | string | `"guard"` | Shell commands in Auto mode: `guard` asks when a command cannot be checked, `ask` always asks, `allow` never asks. See [SECURITY.md](SECURITY.md) |
 | `web_fetch_guard` | string | `"payload"` | Web fetches that could carry data out: `payload`, `ask`, `off` |
-| `messenger_tools` | string | `"all"` | Read-only tools a messenger sender may use unasked: `all`, `safe`, `none` |
+| `messenger_tools` | string | `"safe"` | Read-only tools a messenger sender may use unasked: `safe`, `all`, `none` |
 | `peer_tools` | string | `"safe"` | The same for other agents and for routines created from outside: `safe`, `all`, `none` |
 | `api_max_body_mb` | int | `128` | Largest request body the local API reads, in MiB. `0` = no limit |
 | `log_level` | string | `"INFO"` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |

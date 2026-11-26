@@ -446,7 +446,7 @@ func normalizeSettingsPatch(patch, cfg ConfigMap) {
 	for key, allowed := range map[string][]string{
 		"shell_in_auto":   {defaultShellInAuto, "guard", "ask", "allow"},
 		"web_fetch_guard": {defaultWebFetchGuard, "payload", "ask", "off"},
-		"messenger_tools": {defaultMessengerTools, "all", "safe", "none"},
+		"messenger_tools": {defaultMessengerTools, "safe", "all", "none"},
 		"peer_tools":      {defaultPeerTools, "safe", "all", "none"},
 	} {
 		if v, ok := patch[key]; ok && v != nil {

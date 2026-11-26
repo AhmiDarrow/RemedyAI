@@ -103,7 +103,7 @@ func TestWebFetchCarriesData(t *testing.T) {
 
 func TestOutsideReadLevels(t *testing.T) {
 	g := loadToolGuards(nil)
-	if g.Shell != "guard" || g.WebFetch != "payload" || g.Messenger != "all" || g.Peer != "safe" {
+	if g.Shell != "guard" || g.WebFetch != "payload" || g.Messenger != "safe" || g.Peer != "safe" {
 		t.Fatalf("defaults = %+v", g)
 	}
 	// Another agent may search the web, not read the owner's mail or files.
@@ -118,12 +118,16 @@ func TestOutsideReadLevels(t *testing.T) {
 			t.Errorf("a routine someone outside created asking for %s waits for the owner", tool)
 		}
 	}
-	// People on a channel's allow list keep their assistant by default.
-	if g.outsideReadAsks("telegram:42", "memory.search") {
-		t.Error("messenger_tools defaults to all")
+	// A messenger sender starts the same way, until the owner decides otherwise.
+	if !g.outsideReadAsks("telegram:42", "memory.search") || g.outsideReadAsks("telegram:42", "web.search") {
+		t.Error("messenger_tools defaults to safe")
 	}
-	strict := loadToolGuards(ConfigMap{"messenger_tools": "safe", "peer_tools": "none"})
-	if !strict.outsideReadAsks("telegram:42", "memory.search") || !strict.outsideReadAsks("interop:a2a", "web.search") {
+	open := loadToolGuards(ConfigMap{"messenger_tools": "all"})
+	if open.outsideReadAsks("telegram:42", "memory.search") {
+		t.Error("messenger_tools=all is the owner's choice to open it")
+	}
+	strict := loadToolGuards(ConfigMap{"peer_tools": "none"})
+	if !strict.outsideReadAsks("interop:a2a", "web.search") {
 		t.Error("the owner's stricter choice applies")
 	}
 	if strict.outsideReadAsks("interop:a2a", "prompt.assemble") {
@@ -269,8 +273,11 @@ func TestFetchWithAPayloadAndReadsFromOutsideWait(t *testing.T) {
 	if d := decideWith(t, "ask", "interop:a2a", ConfigMap{"peer_tools": "all"}, "read", `{"path":"notes.txt"}`); d != cognition.Allow {
 		t.Fatalf("peer_tools=all: %v", d)
 	}
-	if d := decideWith(t, "ask", "telegram:42", nil, "read", `{"path":"notes.txt"}`); d != cognition.Allow {
-		t.Fatalf("someone on a messenger allow list reads by default: %v", d)
+	if d := decideWith(t, "ask", "telegram:42", nil, "read", `{"path":"notes.txt"}`); d != cognition.Ask {
+		t.Fatalf("a messenger sender reading the owner's files waits by default: %v", d)
+	}
+	if d := decideWith(t, "ask", "telegram:42", ConfigMap{"messenger_tools": "all"}, "read", `{"path":"notes.txt"}`); d != cognition.Allow {
+		t.Fatalf("messenger_tools=all: %v", d)
 	}
 	if d := decideWith(t, "ask", "", nil, "read", `{"path":"notes.txt"}`); d != cognition.Allow {
 		t.Fatalf("the owner reads unasked: %v", d)
