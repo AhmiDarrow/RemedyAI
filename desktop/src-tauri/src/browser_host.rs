@@ -1162,12 +1162,75 @@ fn normalize_url(raw: &str) -> Result<String, String> {
             return Err(format!("blocked non-private IP: {host}"));
         }
     }
+    if is_remedy_own_origin(&parsed) {
+        return Err(format!("blocked Remedy's own address: {host}"));
+    }
     Ok(candidate)
+}
+
+/// True for an address that is Remedy itself rather than a page: the app's own
+/// webview origins (tauri / ipc / asset, served as *.localhost on Windows), the
+/// local API port, and the dev server on debug builds. The rail webview shares
+/// the main window, so loading one of these there gave a page the app's IPC
+/// and showed the agent Remedy's own UI and token. Other localhost dev
+/// servers stay allowed.
+pub(crate) fn is_remedy_own_origin(url: &Url) -> bool {
+    let scheme = url.scheme().to_ascii_lowercase();
+    if matches!(scheme.as_str(), "tauri" | "ipc" | "asset") {
+        return true;
+    }
+    if scheme != "http" && scheme != "https" {
+        return false;
+    }
+    let host = url.host_str().unwrap_or("").trim_matches(['[', ']']).to_ascii_lowercase();
+    if matches!(host.as_str(), "tauri.localhost" | "ipc.localhost" | "asset.localhost") {
+        return true;
+    }
+    let loopback = host == "localhost"
+        || host.ends_with(".localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .map(|ip| match ip {
+                std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_unspecified(),
+                std::net::IpAddr::V6(v6) => {
+                    v6.is_loopback()
+                        || v6.is_unspecified()
+                        || v6.to_ipv4_mapped().is_some_and(|m| m.is_loopback())
+                }
+            })
+            .unwrap_or(false);
+    if !loopback {
+        return false;
+    }
+    let port = url.port_or_known_default().unwrap_or(0);
+    if port == crate::api_port() || port == 7400 {
+        return true;
+    }
+    cfg!(debug_assertions) && port == 5173
 }
 
 #[cfg(test)]
 mod normalize_url_tests {
     use super::normalize_url;
+
+    #[test]
+    fn refuses_remedy_own_addresses_but_keeps_dev_servers() {
+        for url in [
+            "http://tauri.localhost/",
+            "https://tauri.localhost/index.html",
+            "http://ipc.localhost/plugin",
+            "http://127.0.0.1:7400/api/auth/local-bootstrap",
+            "http://127.1:7400/",
+            "http://localhost:7400/",
+            "http://[::1]:7400/",
+            "http://[::ffff:127.0.0.1]:7400/",
+        ] {
+            assert!(normalize_url(url).is_err(), "{url} must be refused");
+        }
+        for url in ["http://localhost:3000/", "http://127.0.0.1:8080/app"] {
+            assert!(normalize_url(url).is_ok(), "{url} must stay allowed");
+        }
+    }
 
     #[test]
     fn rejects_userinfo() {
@@ -2598,6 +2661,11 @@ pub fn navigate_embed(
                 return false;
             }
             if crate::privacy_shield::should_block_navigation(s) {
+                return false;
+            }
+            // A page (or a redirect) must not send the rail to Remedy itself.
+            if is_remedy_own_origin(url) {
+                log::warn!("browser rail refused navigation to Remedy's own address");
                 return false;
             }
             true
