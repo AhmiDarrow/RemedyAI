@@ -245,7 +245,7 @@ type RegistryPolicy struct {
 // askUnlessApproved is an Ask the owner's earlier yes for this exact call
 // satisfies. A turn from outside never rides on a standing approval.
 func (p *RegistryPolicy) askUnlessApproved(call cognition.ToolCall) cognition.Decision {
-	if p.Approvals != nil && p.Approvals.IsApproved(call.Name, toolCommandPreview(call), p.SessionID, !p.ForceAsk) {
+	if p.Approvals != nil && p.Approvals.IsApproved(call.Name, toolCommandPreview(call), p.SessionID, p.Origin, !p.ForceAsk) {
 		return cognition.Allow
 	}
 	return cognition.Ask
@@ -405,7 +405,7 @@ func (p *RegistryPolicy) Decide(_ context.Context, call cognition.ToolCall) cogn
 		if !p.ForceAsk && (mode == "full" || (mode == "auto" && !p.shellAsks(call) && call.Name != "delegate")) {
 			return cognition.Allow
 		}
-		if p.Approvals != nil && p.Approvals.IsApproved(call.Name, toolCommandPreview(call), p.SessionID, !p.ForceAsk) {
+		if p.Approvals != nil && p.Approvals.IsApproved(call.Name, toolCommandPreview(call), p.SessionID, p.Origin, !p.ForceAsk) {
 			return cognition.Allow
 		}
 		return cognition.Ask
@@ -454,7 +454,7 @@ func callIsReadOnlyAction(call cognition.ToolCall) bool {
 // decideOwnerMoment is the non-waivable path (pay / credentials / irreversible
 // send): only a one-shot grant for this exact call lets it through.
 func (p *RegistryPolicy) decideOwnerMoment(call cognition.ToolCall) cognition.Decision {
-	if p.Approvals != nil && p.Approvals.IsOneShotApproved(call.Name, toolCommandPreview(call), p.SessionID, call.ID) {
+	if p.Approvals != nil && p.Approvals.IsOneShotApproved(call.Name, toolCommandPreview(call), p.SessionID, p.Origin, call.ID) {
 		return cognition.Allow
 	}
 	return cognition.Ask

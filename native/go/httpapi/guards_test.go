@@ -161,14 +161,14 @@ func TestJustThisOnceLetsTheRetryThrough(t *testing.T) {
 	q := newApprovalQueue()
 	sid := "s1"
 	item := q.Enqueue("bash", `{"command":"echo $HOME"}`, "test", &sid, "")
-	if q.IsApproved("bash", `{"command":"echo $HOME"}`, "s1", true) {
+	if q.IsApproved("bash", `{"command":"echo $HOME"}`, "s1", "", true) {
 		t.Fatal("not approved yet")
 	}
 	q.Resolve(item.ID, true, "once")
-	if !q.IsApproved("bash", `{"command":"echo $HOME"}`, "s1", true) {
+	if !q.IsApproved("bash", `{"command":"echo $HOME"}`, "s1", "", true) {
 		t.Fatal("the retry right after Just this once must run")
 	}
-	if q.IsApproved("bash", `{"command":"echo $HOME"}`, "s1", true) {
+	if q.IsApproved("bash", `{"command":"echo $HOME"}`, "s1", "", true) {
 		t.Fatal("once is once: the same call later asks again")
 	}
 }

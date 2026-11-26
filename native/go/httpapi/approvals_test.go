@@ -107,15 +107,15 @@ func TestApproveOnceDoesNotStampSessionFingerprint(t *testing.T) {
 		t.Fatalf("once resolve=%+v", got)
 	}
 	// The call the owner just approved runs; that uses the approval up.
-	if !q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, true) {
+	if !q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, "", true) {
 		t.Fatal("the approved call itself must run")
 	}
-	if q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, true) {
+	if q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, "", true) {
 		t.Fatal("approve-once must not persist a session fingerprint")
 	}
 	session := q.Enqueue("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, "Tool requires your approval", &sid, "")
 	_ = q.Resolve(session.ID, true, "session")
-	if !q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, true) {
+	if !q.IsApproved("shell.exec", `{"argv":["C:\\x\\build.exe"]}`, sid, "", true) {
 		t.Fatal("approve-session must persist a session fingerprint")
 	}
 }
@@ -197,7 +197,7 @@ func TestOneShotGrantCoversIdenticalBatchCalls(t *testing.T) {
 	if d := p.Decide(context.Background(), callC); d != cognition.Ask {
 		t.Fatalf("third identical call must ask again: Decide=%v", d)
 	}
-	if q.IsApproved("computer.click", toolCommandPreview(callC), sid, true) {
+	if q.IsApproved("computer.click", toolCommandPreview(callC), sid, "", true) {
 		t.Fatal("sensitive approval leaked into standing session/always consent")
 	}
 
@@ -245,10 +245,10 @@ func TestForceAskIgnoresStandingGrantsButHonorsOneShot(t *testing.T) {
 	cmd := `{"argv":["echo","hi"]}`
 	item := q.Enqueue("shell.exec", cmd, "Tool requires your approval", &sid, "")
 	_ = q.Resolve(item.ID, true, "always")
-	if !q.IsApproved("shell.exec", cmd, sid, true) {
+	if !q.IsApproved("shell.exec", cmd, sid, "", true) {
 		t.Fatal("owner standing Always must allow on the parent")
 	}
-	if q.IsApproved("shell.exec", cmd, sid, false) {
+	if q.IsApproved("shell.exec", cmd, sid, "", false) {
 		t.Fatal("ForceAsk must not inherit Always / session fingerprints")
 	}
 
@@ -261,13 +261,13 @@ func TestForceAskIgnoresStandingGrantsButHonorsOneShot(t *testing.T) {
 	cmd2 := `{"argv":["echo","hive"]}`
 	hive := q.EnqueueOrigin("shell.exec", cmd2, "Tool requires your approval", &sid, "", "hive:"+sid)
 	_ = q.Resolve(hive.ID, true, "session")
-	if !q.IsApproved("shell.exec", cmd2, sid, false) {
+	if !q.IsApproved("shell.exec", cmd2, sid, "hive:"+sid, false) {
 		t.Fatal("just-approved hive Ask must Allow via one-shot on the engine retry")
 	}
-	if q.IsApproved("shell.exec", cmd2, sid, false) {
+	if q.IsApproved("shell.exec", cmd2, sid, "hive:"+sid, false) {
 		t.Fatal("hive one-shot must be consumed after the retry")
 	}
-	if q.IsApproved("shell.exec", cmd2, sid, true) {
+	if q.IsApproved("shell.exec", cmd2, sid, "", true) {
 		t.Fatal("hive session-scope must not stamp a standing fingerprint")
 	}
 }
