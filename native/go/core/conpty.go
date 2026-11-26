@@ -113,6 +113,7 @@ func ConptyWrite(handle uint64, data []byte) (int, error) {
 		bytesPtr(data), uintptr(len(data)),
 		sizePtr(&written),
 	)
+	runtime.KeepAlive(data)
 	if err != nil {
 		return 0, err
 	}
