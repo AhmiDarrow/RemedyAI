@@ -1216,7 +1216,11 @@ func executeComputerClick(_ context.Context, request Request) (Result, error) {
 	if clicks > 3 {
 		return Result{}, ErrInvalidInput
 	}
-	if err := core.MouseClick(int32(*body.X), int32(*body.Y), button, uint32(clicks)); err != nil {
+	xy, ok := screenCoords(*body.X, *body.Y)
+	if !ok {
+		return Result{}, ErrInvalidInput
+	}
+	if err := core.MouseClick(xy[0], xy[1], button, uint32(clicks)); err != nil {
 		return Result{}, err
 	}
 	out, err := json.Marshal(map[string]any{
@@ -1343,7 +1347,11 @@ func executeComputerMove(_ context.Context, request Request) (Result, error) {
 	if body.X == nil || body.Y == nil {
 		return Result{}, ErrInvalidInput
 	}
-	if err := core.MouseMove(int32(*body.X), int32(*body.Y)); err != nil {
+	xy, ok := screenCoords(*body.X, *body.Y)
+	if !ok {
+		return Result{}, ErrInvalidInput
+	}
+	if err := core.MouseMove(xy[0], xy[1]); err != nil {
 		return Result{}, err
 	}
 	out, err := json.Marshal(map[string]any{"ok": true, "x": *body.X, "y": *body.Y})
@@ -1363,13 +1371,40 @@ func executeComputerScroll(_ context.Context, request Request) (Result, error) {
 	if body.X == nil || body.Y == nil {
 		return Result{}, ErrInvalidInput
 	}
-	if err := core.MouseScroll(int32(*body.X), int32(*body.Y), int32(body.Dx), int32(body.Dy)); err != nil {
+	xy, ok := screenCoords(*body.X, *body.Y)
+	if !ok || body.Dx < -maxScrollClicks || body.Dx > maxScrollClicks ||
+		body.Dy < -maxScrollClicks || body.Dy > maxScrollClicks {
+		return Result{}, ErrInvalidInput
+	}
+	if err := core.MouseScroll(xy[0], xy[1], int32(body.Dx), int32(body.Dy)); err != nil {
 		return Result{}, err
 	}
 	out, err := json.Marshal(map[string]any{
 		"ok": true, "x": *body.X, "y": *body.Y, "dx": body.Dx, "dy": body.Dy,
 	})
 	return Result{Output: out}, err
+}
+
+// maxScreenCoord bounds the pixel coordinates the computer tools accept. A
+// virtual desktop spans at most a few tens of thousands of pixels (negative on
+// monitors left of or above the primary), so anything wider is a bad call.
+// Without the bound int32() wrapped huge values onto real screen positions and
+// the native drag maths overflowed.
+const maxScreenCoord = 1 << 16
+
+// maxScrollClicks bounds one computer.scroll call. The X11 backend sends one
+// button event per click, so an unbounded dy froze input for minutes.
+const maxScrollClicks = 100
+
+func screenCoords(values ...int) ([]int32, bool) {
+	out := make([]int32, len(values))
+	for i, v := range values {
+		if v < -maxScreenCoord || v > maxScreenCoord {
+			return nil, false
+		}
+		out[i] = int32(v)
+	}
+	return out, true
 }
 
 func executeComputerDrag(_ context.Context, request Request) (Result, error) {
@@ -1393,9 +1428,11 @@ func executeComputerDrag(_ context.Context, request Request) (Result, error) {
 	if steps > 200 {
 		return Result{}, ErrInvalidInput
 	}
-	if err := core.MouseDrag(
-		int32(*body.X1), int32(*body.Y1), int32(*body.X2), int32(*body.Y2), uint32(steps),
-	); err != nil {
+	pts, ok := screenCoords(*body.X1, *body.Y1, *body.X2, *body.Y2)
+	if !ok {
+		return Result{}, ErrInvalidInput
+	}
+	if err := core.MouseDrag(pts[0], pts[1], pts[2], pts[3], uint32(steps)); err != nil {
 		return Result{}, err
 	}
 	out, err := json.Marshal(map[string]any{

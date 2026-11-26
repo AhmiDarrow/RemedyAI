@@ -677,8 +677,8 @@ pub fn mouseDrag(x1: i32, y1: i32, x2: i32, y2: i32, steps: u32) Error!void {
     var i: u32 = 1;
     while (i <= n) : (i += 1) {
         const t: f64 = @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(n));
-        const fx = @as(f64, @floatFromInt(x1)) + @as(f64, @floatFromInt(x2 - x1)) * t;
-        const fy = @as(f64, @floatFromInt(y1)) + @as(f64, @floatFromInt(y2 - y1)) * t;
+        const fx = @as(f64, @floatFromInt(x1)) + (@as(f64, @floatFromInt(x2)) - @as(f64, @floatFromInt(x1))) * t;
+        const fy = @as(f64, @floatFromInt(y1)) + (@as(f64, @floatFromInt(y2)) - @as(f64, @floatFromInt(y1))) * t;
         try mouseMove(@intFromFloat(fx), @intFromFloat(fy));
         Sleep(12);
     }
@@ -690,11 +690,11 @@ pub fn mouseScroll(x: i32, y: i32, dx: i32, dy: i32) Error!void {
     try mouseMove(x, y);
     Sleep(20);
     if (dy != 0) {
-        const data: u32 = @bitCast(dy *% WHEEL_DELTA);
+        const data: u32 = @bitCast(std.math.clamp(dy, -100, 100) * WHEEL_DELTA);
         try sendInputs(&.{mouseInput(0, 0, data, MOUSEEVENTF_WHEEL)});
     }
     if (dx != 0) {
-        const data: u32 = @bitCast(dx *% WHEEL_DELTA);
+        const data: u32 = @bitCast(std.math.clamp(dx, -100, 100) * WHEEL_DELTA);
         try sendInputs(&.{mouseInput(0, 0, data, MOUSEEVENTF_HWHEEL)});
     }
 }
