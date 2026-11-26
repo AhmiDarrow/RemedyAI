@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
@@ -440,12 +442,82 @@ func isValidNavigateURL(raw string) bool {
 	if isBlockedMetadataHost(host) {
 		return false
 	}
-	// Never load the local API into the rail.
-	if (host == "127.0.0.1" || host == "localhost" || host == "::1") &&
-		(p.Port() == "7400" || strings.HasPrefix(p.Path, "/api/")) {
+	// Never load the local API into the rail. Judge the host the way the
+	// browser will connect to it: 127.1, 0x7f.1, 2130706433 and
+	// [::ffff:127.0.0.1] all reach 127.0.0.1.
+	port, _ := strconv.Atoi(p.Port())
+	if railHostIsLocal(host) && (port == 7400 || strings.HasPrefix(p.Path, "/api/")) {
 		return false
 	}
 	return true
+}
+
+// railHostIsLocal reports whether a URL host reaches this machine: a
+// localhost name, or an IP literal in any spelling a browser accepts that
+// lands on a loopback or unspecified address.
+func railHostIsLocal(host string) bool {
+	h := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") {
+		return true
+	}
+	ip, err := netip.ParseAddr(strings.Trim(h, "[]"))
+	if err != nil {
+		var ok bool
+		if ip, ok = whatwgIPv4(h); !ok {
+			return false
+		}
+	}
+	ip = ip.WithZone("").Unmap()
+	return ip.IsLoopback() || ip.IsUnspecified()
+}
+
+// whatwgIPv4 parses a host the way the WHATWG URL standard (and so every
+// browser) reads an IPv4 address: one to four dot-separated parts, each
+// decimal, 0x-hex or 0-led octal, the last part filling the remaining bytes.
+func whatwgIPv4(h string) (netip.Addr, bool) {
+	parts := strings.Split(h, ".")
+	if len(parts) > 1 && parts[len(parts)-1] == "" {
+		parts = parts[:len(parts)-1]
+	}
+	if len(parts) == 0 || len(parts) > 4 {
+		return netip.Addr{}, false
+	}
+	nums := make([]uint64, len(parts))
+	for i, part := range parts {
+		base, digits := 10, part
+		switch {
+		case strings.HasPrefix(part, "0x"):
+			base, digits = 16, part[2:]
+		case len(part) > 1 && part[0] == '0':
+			base, digits = 8, part[1:]
+		}
+		if digits == "" {
+			if base != 16 && part == "" {
+				return netip.Addr{}, false
+			}
+			nums[i] = 0
+			continue
+		}
+		n, err := strconv.ParseUint(digits, base, 64)
+		if err != nil {
+			return netip.Addr{}, false
+		}
+		nums[i] = n
+	}
+	last := len(nums) - 1
+	for _, n := range nums[:last] {
+		if n > 255 {
+			return netip.Addr{}, false
+		}
+	}
+	if nums[last] >= 1<<(8*(5-len(nums))) {
+		return netip.Addr{}, false
+	}
+	v := nums[last]
+	for i, n := range nums[:last] {
+		v += n << (8 * (3 - i))
+	}
+	return netip.AddrFrom4([4]byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)}), true
 }
 
 func isBlockedMetadataHost(host string) bool {
