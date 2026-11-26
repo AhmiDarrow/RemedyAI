@@ -265,7 +265,7 @@ func TestBodyCapRefusesAnOversizedRequest(t *testing.T) {
 // decideWith runs one call through a policy with the guards a live turn loads.
 func decideWith(t *testing.T, mode, origin string, cfg ConfigMap, name, input string) cognition.Decision {
 	t.Helper()
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}

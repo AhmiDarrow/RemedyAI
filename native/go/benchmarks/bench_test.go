@@ -4,52 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
 	"github.com/AhmiDarrow/RemedyAI/native/go/events"
-	"github.com/AhmiDarrow/RemedyAI/native/go/ipc"
 	"github.com/AhmiDarrow/RemedyAI/native/go/memory"
-	"github.com/AhmiDarrow/RemedyAI/native/go/protocol"
 	remedyruntime "github.com/AhmiDarrow/RemedyAI/native/go/runtime"
 	"github.com/AhmiDarrow/RemedyAI/native/go/scheduler"
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
 
-func BenchmarkFrame1KiBRoundTrip(b *testing.B) {
-	frame := protocol.Frame{Kind: protocol.KindToolResult, Payload: make([]byte, 1024)}
-	b.ReportAllocs()
-	for b.Loop() {
-		raw, _ := frame.MarshalBinary()
-		_, _ = protocol.Parse(raw)
-	}
-}
 func BenchmarkRuntimeStartStop(b *testing.B) {
 	for b.Loop() {
 		runtime := remedyruntime.New()
 		_ = runtime.Start(context.Background())
 		_ = runtime.Stop()
-	}
-}
-func BenchmarkIPCRoundTrip(b *testing.B) {
-	server, clientConn := net.Pipe()
-	go ipc.ServeConn(context.Background(), server, ipc.HandlerFunc(func(_ context.Context, request protocol.Frame) ([]protocol.Frame, error) {
-		return []protocol.Frame{{Kind: protocol.KindToolResult, Payload: request.Payload}}, nil
-	}))
-	client := ipc.NewClient(clientConn)
-	defer client.Close()
-	b.ReportAllocs()
-	var n uint64
-	for b.Loop() {
-		n++
-		var id [16]byte
-		for i := 0; i < 8; i++ {
-			id[i] = byte(n >> (8 * i))
-		}
-		_, _ = client.Call(context.Background(), protocol.Frame{Kind: protocol.KindToolRequest, CorrelationID: id, Payload: []byte("ping")})
 	}
 }
 func BenchmarkToolDispatchValidated(b *testing.B) {

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 )
 
 // modelHiddenToolIDs are tools that stay registered but must never be
@@ -134,16 +133,16 @@ const (
 	propHomeDir       = `"home_dir":{"type":"string","description":"Remedy home directory (internal; injected by the Go runtime)"}`
 )
 
-type pyToolSpec struct {
+type toolSpec struct {
 	id, desc string
 	risk     Risk
 	in, out  string
 }
 
-func pythonWorkerToolSpecs() []pyToolSpec {
-	return []pyToolSpec{
+func nativeToolSpecs() []toolSpec {
+	return []toolSpec{
 		{
-			id: "text.slugify", desc: "Slugify text in the Python worker (diagnostic; hidden from the model)",
+			id: "text.slugify", desc: "Slugify text (diagnostic; hidden from the model)",
 			risk: RiskReadOnly,
 			in: `{
 			"type":"object",
@@ -159,7 +158,7 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 		}`,
 		},
 		{
-			id: "text.word_count", desc: "Count whitespace-separated words in the Python worker (diagnostic; hidden from the model)",
+			id: "text.word_count", desc: "Count whitespace-separated words (diagnostic; hidden from the model)",
 			risk: RiskReadOnly,
 			in: `{
 			"type":"object",
@@ -315,7 +314,7 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 		}`,
 		},
 		{
-			id: "workspace.search", desc: "Regex search over workspace text files (ripgrep or Python fallback). pattern is a regular expression, not a literal; invalid regex is an error. capped=true means more matches exist beyond max_matches.",
+			id: "workspace.search", desc: "Regex search over workspace text files. pattern is a regular expression, not a literal; invalid regex is an error. capped=true means more matches exist beyond max_matches.",
 			risk: RiskReadOnly,
 			in: `{
 			"type":"object",
@@ -360,223 +359,7 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 		}`,
 		},
 		{
-			id: "prompt.assemble", desc: "Assemble system/soul/skills/memory context for a cognition turn (internal; not model-callable)",
-			risk: RiskReadOnly,
-			in: `{
-			"type":"object",
-			"properties":{
-				"message":{"type":"string"},
-				"prompt":{"type":"string"},
-				"session_id":{"type":"string"},
-				"plan_mode":{"type":"boolean"},
-				"chat_mode":{"type":"boolean"},
-				` + propHomeDir + `,
-				` + propProjectPath + `,
-				` + propGoBound + `,
-				"provider":{"type":"string"},
-				"model":{"type":"string"},
-				"base_url":{"type":"string"}
-			},
-			"additionalProperties":false
-		}`,
-			out: `{
-			"type":"object",
-			"required":["system","goal"],
-			"properties":{
-				"system":{"type":"string","minLength":1},
-				"goal":{"type":"string"},
-				"context_chars":{"type":"integer","minimum":0},
-				"system_chars":{"type":"integer","minimum":0}
-			},
-			"additionalProperties":false
-		}`,
-		},
-		{
-			id: "prompt.slim_epoch", desc: "Memory Harness prune/offload/brief at soft epochs (internal; not model-callable)",
-			risk: RiskReadOnly,
-			in: `{
-			"type":"object",
-			"properties":{
-				"system":{"type":"string"},
-				"goal":{"type":"string"},
-				"text":{"type":"string"},
-				"checkpoint":{"type":"string"},
-				"session_id":{"type":"string"},
-				"epoch":{"type":"integer"},
-				"total_steps":{"type":"integer"},
-				"ledger":{
-					"type":"array",
-					"description":"Outcome lines from the epoch, oldest first.",
-					"items":{"type":"string"}
-				},
-				` + propHomeDir + `,
-				` + propProjectPath + `,
-				` + propGoBound + `,
-				"provider":{"type":"string"},
-				"model":{"type":"string"},
-				"base_url":{"type":"string"}
-			},
-			"additionalProperties":false
-		}`,
-			out: `{
-			"type":"object",
-			"properties":{
-				"ok":{"type":"boolean"},
-				"system":{"type":"string"},
-				"text":{"type":"string"},
-				"brief":{"type":"string"},
-				"meta":{"type":"object"},
-				"error":{"type":"string"}
-			},
-			"additionalProperties":true
-		}`,
-		},
-		{
-			id: "prompt.should_continue", desc: "Unfinished-work / agency re-arm gate (internal; not model-callable)",
-			risk: RiskReadOnly,
-			in: `{
-			"type":"object",
-			"properties":{
-				"goal":{"type":"string"},
-				"message":{"type":"string"},
-				"text":{"type":"string"},
-				"session_id":{"type":"string"},
-				"tool_count":{"type":"integer"},
-				"chat_mode":{"type":"boolean"},
-				"plan_mode":{"type":"boolean"},
-				"verify_seen":{
-					"type":"boolean",
-					"description":"True when a verify command has succeeded since the last mutation."
-				},
-				"last_results":{
-					"type":"array",
-					"description":"The last tool batch, so the gate decides on evidence rather than prose.",
-					"items":{
-						"type":"object",
-						"properties":{
-							"name":{"type":"string"},
-							"ok":{"type":"boolean"},
-							"tail":{"type":"string"}
-						},
-						"additionalProperties":true
-					}
-				},
-				` + propHomeDir + `,
-				` + propProjectPath + `,
-				` + propGoBound + `
-			},
-			"additionalProperties":false
-		}`,
-			out: `{
-			"type":"object",
-			"properties":{
-				"ok":{"type":"boolean"},
-				"continue":{"type":"boolean"},
-				"nudge":{"type":"string"},
-				"reason":{"type":"string"},
-				"error":{"type":"string"}
-			},
-			"additionalProperties":true
-		}`,
-		},
-		{
-			id: "prompt.turn_end", desc: "Post-turn learning: residue, soul, skill genome, LearningLoop (internal; not model-callable)",
-			risk: RiskReadOnly,
-			in: `{
-			"type":"object",
-			"properties":{
-				"message":{"type":"string"},
-				"goal":{"type":"string"},
-				"user_text":{"type":"string"},
-				"assistant_text":{"type":"string"},
-				"text":{"type":"string"},
-				"session_id":{"type":"string"},
-				"plan_mode":{"type":"boolean"},
-				"chat_mode":{"type":"boolean"},
-				"soul_native":{"type":"boolean","description":"The Go runtime already updated the soul field; Python skips it"},
-				"tool_steps":{
-					"type":"array",
-					"items":{
-						"type":"object",
-						"properties":{
-							"tool":{"type":"string"},
-							"name":{"type":"string"},
-							"ok":{"type":"boolean"},
-							"success":{"type":"boolean"},
-							"result":{"type":"string"},
-							"error":{"type":"string"},
-							"duration_ms":{"type":"number"}
-						},
-						"additionalProperties":true
-					}
-				},
-				` + propHomeDir + `,
-				` + propProjectPath + `,
-				` + propGoBound + `
-			},
-			"additionalProperties":false
-		}`,
-			out: `{
-			"type":"object",
-			"properties":{
-				"ok":{"type":"boolean"},
-				"residue":{"type":"string"},
-				"genome":{"type":"integer"},
-				"learned":{"type":"boolean"},
-				"skill":{"type":"string"},
-				"skipped":{"type":"string"}
-			},
-			"additionalProperties":true
-		}`,
-		},
-		{
-			id: "prompt.after_tool_batch", desc: "Mid-turn metabolism after a tool batch: admit evidence, update the machine map (internal; not model-callable)",
-			risk: RiskReadOnly,
-			in: `{
-			"type":"object",
-			"properties":{
-				"session_id":{"type":"string"},
-				"tier":{"type":"integer"},
-				"results":{
-					"type":"array",
-					"items":{
-						"type":"object",
-						"properties":{
-							"tool":{"type":"string"},
-							"name":{"type":"string"},
-							"ok":{"type":"boolean"},
-							"success":{"type":"boolean"},
-							"result":{"type":"string"},
-							"error":{"type":"string"},
-							"tool_call_id":{"type":"string"},
-							"arguments":{"type":"object","additionalProperties":true},
-							"input":{"type":"object","additionalProperties":true},
-							"duration_ms":{"type":"number"}
-						},
-						"additionalProperties":true
-					}
-				},
-				` + propHomeDir + `,
-				` + propProjectPath + `,
-				` + propGoBound + `
-			},
-			"additionalProperties":false
-		}`,
-			out: `{
-			"type":"object",
-			"properties":{
-				"ok":{"type":"boolean"},
-				"eu_new":{"type":"integer"},
-				"evidence_units":{"type":"integer"},
-				"tools":{"type":"integer"},
-				"skipped":{"type":"string"}
-			},
-			"additionalProperties":true
-		}`,
-		},
-
-		{
-			id: "mail.list", desc: "List recent email messages from the connected account (Python worker)",
+			id: "mail.list", desc: "List recent email messages from the connected account",
 			risk: RiskReadOnly,
 			in: `{
 			"type":"object",
@@ -632,7 +415,7 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 		}`,
 		},
 		{
-			id: "calendar.list_events", desc: "List upcoming calendar events from the connected account (Python worker)",
+			id: "calendar.list_events", desc: "List upcoming calendar events from the connected account",
 			risk: RiskReadOnly,
 			in: `{
 			"type":"object",
@@ -866,24 +649,14 @@ func pythonWorkerToolSpecs() []pyToolSpec {
 	}
 }
 
-// RegisterPythonWorkerTools installs Tool ABI descriptors that execute over
-// RMDY KindToolRequest frames on the supervised Python worker. caller must be
-// live; there is no in-process Python fallback. Pass a *workers.LiveCaller so
-// a respawned worker is picked up without re-registration.
 // mailCalendarToolIDs are the tools whose descriptions live in this file but
 // which the runtime serves in Go: mail and calendar (Google, IMAP/SMTP,
 // CalDAV), house rules and first-run setup (mind/houserules) and the other
-// bots (peer.*). The Python worker no longer has handlers for them.
+// bots (peer.*).
 var mailCalendarToolIDs = map[string]struct{}{
 	"mail.list": {}, "mail.send": {}, "calendar.list_events": {}, "calendar.create_event": {},
 	"house_rules": {}, "setup.session": {},
 	"peer.list": {}, "peer.ask": {}, "peer.delegate": {}, "peer.status": {},
-}
-
-// goPromptHookIDs are the prompt hooks the Go runtime builds itself
-// (mind/prompt). They are not registered as worker tools.
-var goPromptHookIDs = map[string]struct{}{
-	"prompt.assemble": {}, "prompt.slim_epoch": {}, "prompt.should_continue": {}, "prompt.after_tool_batch": {},
 }
 
 // ErrToolNotAttached is what a registered tool answers before the runtime has
@@ -900,245 +673,19 @@ func RegisterMailCalendarTools(registry *Registry) error {
 	unattached := ExecutorFunc(func(context.Context, Request) (Result, error) {
 		return Result{}, ErrToolNotAttached
 	})
-	for _, r := range pythonWorkerToolSpecs() {
+	for _, r := range nativeToolSpecs() {
 		if _, ok := mailCalendarToolIDs[r.id]; !ok {
 			continue
 		}
 		if err := registry.Register(Descriptor{
 			ID:           r.id,
 			Version:      1,
-			Description:  strings.TrimSuffix(r.desc, " (Python worker)"),
+			Description:  r.desc,
 			Runtime:      RuntimeGo,
 			Risk:         r.risk,
 			InputSchema:  json.RawMessage(r.in),
 			OutputSchema: json.RawMessage(r.out),
 		}, unattached); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
-	if registry == nil {
-		return fmt.Errorf("%w: nil registry", ErrInvalidDescriptor)
-	}
-	if caller == nil {
-		return errors.New("python worker frame caller is required")
-	}
-	exec := NewRMDYExecutor(caller)
-	for _, r := range pythonWorkerToolSpecs() {
-		if _, native := mailCalendarToolIDs[r.id]; native {
-			continue // registered by RegisterMailCalendarTools, served in Go
-		}
-		if _, native := goPromptHookIDs[r.id]; native {
-			continue // built in Go
-		}
-		if _, native := goWorkspaceToolIDs[r.id]; native {
-			continue // registered by RegisterWorkspaceTools, served in Go
-		}
-		if err := registry.Register(Descriptor{
-			ID:           r.id,
-			Version:      1,
-			Description:  r.desc,
-			Runtime:      RuntimePython,
-			Risk:         r.risk,
-			InputSchema:  json.RawMessage(r.in),
-			OutputSchema: json.RawMessage(r.out),
-		}, exec); err != nil {
-			return err
-		}
-	}
-	return registerVoiceVisionWorkerTools(registry, exec)
-}
-
-func registerVoiceVisionWorkerTools(registry *Registry, exec Executor) error {
-	rows := []pyToolSpec{
-		{
-			id: "voice.speak", desc: "Synthesize speech via Python voice lane (internal)",
-			risk: RiskReadOnly,
-			in: `{
-			"type":"object",
-			"required":["text"],
-			"properties":{
-				` + propHomeDir + `,
-				` + propGoBound + `,
-				"text":{"type":"string"},
-				"gender":{"type":"string"},
-				"voice":{"type":"string"},
-				"speed":{"type":"number"}
-			},
-			"additionalProperties":false
-		}`,
-			out: `{
-			"type":"object",
-			"required":["wav_b64","sample_rate","unavailable"],
-			"properties":{
-				"wav_b64":{"type":"string"},
-				"sample_rate":{"type":"integer"},
-				"unavailable":{"type":"boolean"}
-			},
-			"additionalProperties":false
-		}`,
-		},
-		{
-			id: "voice.transcribe", desc: "Transcribe audio via Python STT lane (internal)",
-			risk: RiskReadOnly,
-			in: `{
-			"type":"object",
-			"required":["audio_b64"],
-			"properties":{
-				` + propHomeDir + `,
-				` + propGoBound + `,
-				"audio_b64":{"type":"string"},
-				"suffix":{"type":"string"},
-				"language":{"type":"string"}
-			},
-			"additionalProperties":false
-		}`,
-			out: `{
-			"type":"object",
-			"required":["text","unavailable"],
-			"properties":{
-				"text":{"type":"string"},
-				"language":{"type":"string"},
-				"unavailable":{"type":"boolean"}
-			},
-			"additionalProperties":false
-		}`,
-		},
-		{
-			id: "voice.install", desc: "Start voice pack/engine install (internal)",
-			risk: RiskMutation,
-			in: `{
-			"type":"object",
-			"properties":{
-				` + propHomeDir + `,
-				` + propGoBound + `,
-				"component":{"type":"string"}
-			},
-			"additionalProperties":false
-		}`,
-			out: `{
-			"type":"object",
-			"required":["ok","started"],
-			"properties":{
-				"ok":{"type":"boolean"},
-				"started":{"type":"boolean"},
-				"error":{"type":"string"}
-			},
-			"additionalProperties":false
-		}`,
-		},
-		{
-			id: "vision.activate", desc: "Activate local vision bundle (internal)",
-			risk: RiskMutation,
-			in: `{
-			"type":"object",
-			"properties":{
-				` + propHomeDir + `,
-				` + propGoBound + `,
-				"enabled":{"type":"boolean"}
-			},
-			"additionalProperties":false
-		}`,
-			out: `{"type":"object","additionalProperties":true}`,
-		},
-		{
-			id: "vision.install", desc: "Install or activate vision model (internal)",
-			risk: RiskMutation,
-			in: `{
-			"type":"object",
-			"properties":{
-				` + propHomeDir + `,
-				` + propGoBound + `,
-				"model_id":{"type":"string"},
-				"runtime_id":{"type":"string"},
-				"prefer_cuda":{"type":"boolean"}
-			},
-			"additionalProperties":false
-		}`,
-			out: `{"type":"object","additionalProperties":true}`,
-		},
-		{
-			id: "vision.cancel_install", desc: "Cancel in-flight vision install (internal)",
-			risk: RiskMutation,
-			in: `{
-			"type":"object",
-			"properties":{` + propHomeDir + `,` + propGoBound + `},
-			"additionalProperties":false
-		}`,
-			out: `{"type":"object","additionalProperties":true}`,
-		},
-		{
-			id: "vision.reinstall_runtime", desc: "Reinstall vision llama-server runtime (internal)",
-			risk: RiskMutation,
-			in: `{
-			"type":"object",
-			"properties":{
-				` + propHomeDir + `,
-				` + propGoBound + `,
-				"prefer_cuda":{"type":"boolean"}
-			},
-			"additionalProperties":false
-		}`,
-			out: `{"type":"object","additionalProperties":true}`,
-		},
-		{
-			id: "vision.uninstall", desc: "Uninstall vision runtime/models (internal)",
-			risk: RiskMutation,
-			in: `{
-			"type":"object",
-			"properties":{
-				` + propHomeDir + `,
-				` + propGoBound + `,
-				"keep_models":{"type":"boolean"}
-			},
-			"additionalProperties":false
-		}`,
-			out: `{"type":"object","additionalProperties":true}`,
-		},
-		{
-			id: "vision.start", desc: "Start local vision server (internal)",
-			risk: RiskMutation,
-			in: `{
-			"type":"object",
-			"properties":{` + propHomeDir + `,` + propGoBound + `},
-			"additionalProperties":false
-		}`,
-			out: `{"type":"object","additionalProperties":true}`,
-		},
-		{
-			id: "vision.stop", desc: "Stop local vision server (internal)",
-			risk: RiskMutation,
-			in: `{
-			"type":"object",
-			"properties":{` + propHomeDir + `,` + propGoBound + `},
-			"additionalProperties":false
-		}`,
-			out: `{"type":"object","additionalProperties":true}`,
-		},
-		{
-			id: "vision.progress", desc: "Vision install progress snapshot (internal)",
-			risk: RiskReadOnly,
-			in: `{
-			"type":"object",
-			"properties":{` + propHomeDir + `,` + propGoBound + `},
-			"additionalProperties":false
-		}`,
-			out: `{"type":"object","additionalProperties":true}`,
-		},
-	}
-	for _, r := range rows {
-		if err := registry.Register(Descriptor{
-			ID:           r.id,
-			Version:      1,
-			Description:  r.desc,
-			Runtime:      RuntimePython,
-			Risk:         r.risk,
-			InputSchema:  json.RawMessage(r.in),
-			OutputSchema: json.RawMessage(r.out),
-		}, exec); err != nil {
 			return err
 		}
 	}
