@@ -10,11 +10,11 @@ import (
 )
 
 func toolUnreachable(c *Ctx, err error) int {
-	c.Errorf("remedy tool needs Go remedy-runtime.\n" +
+	c.Printf("remedy tool needs Go remedy-runtime.\n" +
 		"  Start `remedy serve` (or Desktop), then retry.\n" +
 		"  First serve downloads a checksum-verified runtime from GitHub Releases when it is not already on PATH.\n")
-	c.Errorf("  (%s unreachable: %v)\n", runtimeBase(), err)
-	c.Errorf("  Tool ABI ids look like runtime.probe, workspace.read, shell.exec.\n")
+	c.Printf("  (%s unreachable: %v)\n", runtimeBase(), err)
+	c.Printf("  Tool ABI ids look like runtime.probe, workspace.read, shell.exec.\n")
 	return 2
 }
 
