@@ -290,6 +290,13 @@ func (h *claimidxHost) healthy() bool {
 	if resp.StatusCode != http.StatusOK {
 		return false
 	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	return claimidxIsOurs(raw)
+}
+
+// claimidxIsOurs reports a /api/whoami answer from the host Remedy started:
+// the right product, running as Remedy's own operator.
+func claimidxIsOurs(raw []byte) bool {
 	var v struct {
 		Product  string `json:"product"`
 		Operator struct {
@@ -297,8 +304,8 @@ func (h *claimidxHost) healthy() bool {
 			Agent string `json:"agent"`
 		} `json:"operator"`
 	}
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	return json.Unmarshal(raw, &v) == nil && v.Product == "Claimidx" &&
+	// The service has spelled its own name both "Claimidx" and "ClaimIDX".
+	return json.Unmarshal(raw, &v) == nil && strings.EqualFold(v.Product, "claimidx") &&
 		v.Operator.DID == "did:claimidx:remedy" && v.Operator.Agent == "remedy"
 }
 
