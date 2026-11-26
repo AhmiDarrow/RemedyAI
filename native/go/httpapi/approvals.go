@@ -169,6 +169,16 @@ func clipUTF8(s string, max int) string {
 	return s[:cut]
 }
 
+// clipUTF8Shown clips text the owner reads before approving. A cut is always
+// marked, so a harmless-looking prefix can't pass for the whole command.
+func clipUTF8Shown(s string, max int) string {
+	cut := clipUTF8(s, max)
+	if len(cut) == len(s) {
+		return s
+	}
+	return cut + fmt.Sprintf(" … [cut: %d more bytes not shown]", len(s)-len(cut))
+}
+
 func (q *approvalQueue) Mode() string {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -653,7 +663,7 @@ func plainApprovalSummary(item *pendingApproval) string {
 		return s
 	}
 	tool := strings.TrimSpace(item.ToolName)
-	cmd := clipUTF8(strings.TrimSpace(item.Command), 120)
+	cmd := clipUTF8Shown(strings.TrimSpace(item.Command), 120)
 	if tool == "life_drive" {
 		first := strings.TrimSpace(strings.Split(item.Command, "\n")[0])
 		if strings.HasPrefix(strings.ToLower(first), "remedy will") {
@@ -683,7 +693,7 @@ func plainApprovalSummary(item *pendingApproval) string {
 }
 
 func (q *approvalQueue) ToPublic(item *pendingApproval) map[string]any {
-	cmd := clipUTF8(item.Command, 500)
+	cmd := clipUTF8Shown(item.Command, 500)
 	var soft any
 	low := strings.ToLower(item.Reason)
 	if strings.Contains(low, "soft-risk:") || strings.Contains(item.Reason, "Soft-risk") {
