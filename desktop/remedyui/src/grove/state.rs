@@ -833,6 +833,14 @@ impl Grove {
                         match action {
                             // The conversation is empty now: so is the screen.
                             "reset_session" => g.messages.set(Vec::new()),
+                            "settings_changed" => {
+                                let changed = v.get("setting").and_then(|k| k.as_str()).unwrap_or("");
+                                if changed == "theme" && !g.phone {
+                                    if let Some(id) = v.get("value").and_then(|t| t.as_str()) {
+                                        crate::settings::apply_theme_id(id);
+                                    }
+                                }
+                            }
                             "model_changed" => {
                                 if let Some(model) = v.get("model").and_then(|m| m.as_str()) {
                                     g.studio.model.set(model.to_string());

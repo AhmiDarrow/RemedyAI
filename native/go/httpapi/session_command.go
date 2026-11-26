@@ -31,9 +31,15 @@ func (s *Server) executeSlashCommandFrom(sessionID, command string, phone bool) 
 	raw := strings.TrimSpace(command)
 	stripped := strings.ToLower(raw)
 
+	if rest, ok := strings.CutPrefix(stripped, "/help "); ok {
+		if text, found := slashCommandHelp(rest); found {
+			return map[string]any{"text": text}
+		}
+		return map[string]any{"text": "There is no command called " + strings.TrimSpace(rest) + ". Send /commands to see them all."}
+	}
 	if stripped == "/help" || stripped == "/h" {
 		var lines []string
-		for _, c := range append(append([]map[string]any{}, builtinSlashCommands...), moreSlashCommands...) {
+		for _, c := range allSlashCommands() {
 			name, _ := c["name"].(string)
 			desc, _ := c["description"].(string)
 			lines = append(lines, fmt.Sprintf("  %s — %s", name, desc))
@@ -59,6 +65,9 @@ func (s *Server) executeSlashCommandFrom(sessionID, command string, phone bool) 
 	}
 
 	if out := s.executeMoreSlash(sessionID, raw, phone); out != nil {
+		return out
+	}
+	if out := s.executeFullSlash(sessionID, raw, phone); out != nil {
 		return out
 	}
 
@@ -178,8 +187,7 @@ func (s *Server) executeSlashCommandFrom(sessionID, command string, phone bool) 
 
 	if stripped == "/export" || stripped == "/export-session" {
 		return map[string]any{
-			"text": "Export this chat from the session menu, or:\n" +
-				"• API: `GET /api/sessions/{id}/export?format=txt`",
+			"text":   "Exporting this conversation as a text file. On a phone, open it on the PC to save it.",
 			"action": "export_session",
 		}
 	}
