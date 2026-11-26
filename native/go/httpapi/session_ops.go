@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/connect"
 )
 
 const (
@@ -113,6 +115,10 @@ func (s *Server) handleBulkSetSessionProject(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "At most 200 sessions per bulk move"})
 		return
 	}
+	if s.phoneNewProjectFolder(r, req.ProjectPath) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"detail": phoneProjectFolderDetail})
+		return
+	}
 	projectPath, err := s.resolveSessionProject(req.ProjectPath)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": err.Error()})
@@ -149,6 +155,33 @@ func (s *Server) handleBulkSetSessionProject(w http.ResponseWriter, r *http.Requ
 		"missing":      missing,
 		"count":        len(updated),
 	})
+}
+
+const phoneProjectFolderDetail = "A new project folder is chosen at the PC. From the phone, pick a project the PC already has."
+
+// phoneNewProjectFolder reports a project folder that a request through the
+// phone tunnel may not bind a session to. Which folder Remedy works in is
+// decided at the PC (project_path is a locked setting for the phone), so
+// through the tunnel a session may only be cleared or moved among folders
+// already chosen there: the settings project or workspace, or the project of
+// another session.
+func (s *Server) phoneNewProjectFolder(r *http.Request, raw *string) bool {
+	if strings.TrimSpace(r.Header.Get(connect.ConnectHopHeader)) == "" {
+		return false
+	}
+	pp := normalizeProjectPath(raw)
+	if pp == nil {
+		return false
+	}
+	cfg := LoadConfig(s.remedyHomeDir())
+	for _, key := range []string{"project_path", "default_workspace"} {
+		v := cfgString(cfg, key, "")
+		if known := normalizeProjectPath(&v); known != nil && *known == *pp {
+			return false
+		}
+	}
+	known, err := s.sessions.HasProjectPath(*pp)
+	return err != nil || !known
 }
 
 func (s *Server) resolveSessionProject(raw *string) (*string, error) {
