@@ -4,7 +4,11 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- A number typed into Settings (retention days, for one) was dropped on save and the default came back.
+
 ### Added
+- A full set of commands, about sixty: every setting (`/settings`, `/set`, `/get` and shortcuts such as `/theme`, `/web`, `/approvals`), the model side (`/usage`, `/context`, `/providers`, `/tools`), memory (`/forget`), her own work (`/routines`, `/jobs`, `/notifications`) and this PC (`/connect`, `/voice`, `/doctor`, `/version`, `/update`). `/commands` lists them and `/help <command>` explains one. The apps' command list now holds only commands that do something.
 - Slash commands work wherever you type: Grove on the desktop and on a paired phone now carries a command out instead of sending it to Remedy as a message. New or made real: `/model` (show, list, or switch with part of a name), `/stop`, `/status`, `/think`, `/search`, `/rename`, `/remember`, `/goal`, `/goals`, `/plan` (show, approve, cancel), `/plans`, `/approve`, `/deny`, `/whoami`. A phone can do by command only what its panes in Connect settings allow.
 - Settings → Connect → Get the phone app shows a QR code that downloads the Android app from the latest release.
 

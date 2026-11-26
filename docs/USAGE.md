@@ -173,21 +173,45 @@ remedy memory add "start" "Remedy initial setup complete"
 remedy memory list --limit 5
 ```
 
-### Desktop partner commands
+### Commands you can type
 
-In chat (desktop or `POST /api/sessions/{id}/command`):
+Type a command in any conversation: Studio, Grove, the web UI, or Grove on a paired phone. Remedy carries it out and shows the answer; it is not sent to the model. `/commands` lists them all, `/help <command>` explains one. (`POST /api/sessions/{id}/command` runs one from a script, and `GET /api/commands` is the list the apps show.)
 
-| Command | Purpose |
-|---------|---------|
-| `/remember …` | Save a durable fact |
-| `/forget …` | Remove a matching Partner Memory fact |
-| `/pin …` | Pin a fact so it always injects |
-| `/whoami` | Show profile facts |
-| `/goal …` / `/goals` | Goals checklist |
-| `/compact` / `/harness` | Memory Harness |
-| `/approve` / `/deny` | High-impact shell approvals |
-| `/import <folder>` | Import markdown/text notes into memory |
-| `/security-status` / `/security` / `/secstatus` | Show partner control settings (approvals mode, web tools, execution timeout, scope) |
+| Command | What it does |
+|---------|--------------|
+| **Conversation** | |
+| `/new` | Start a new conversation |
+| `/clear`, `/reset` | Empty this conversation |
+| `/stop` | Stop the reply being written |
+| `/status` | Model, thinking, approval mode, whether she is working, anything waiting for you |
+| `/rename <title>` | Title this conversation |
+| `/sessions`, `/search <words>` | Recent conversations; find one by what was said |
+| `/export` | Save this conversation as a text file (desktop) |
+| `/approve [id]`, `/deny [id]` | Answer what she is waiting to do |
+| `/plan`, `/plan approve`, `/plan cancel`, `/plans` | Show and answer plans |
+| `/todos` | Her checklist here |
+| **Model** | |
+| `/model`, `/model <part of a name>` | Show, list, or switch this conversation's model |
+| `/think <level>`, `/effort <level>` | How much she thinks before answering: off, low, medium or high |
+| `/usage [days]`, `/context` | Tokens and estimated cost; how full this conversation is |
+| `/providers`, `/tools [word]`, `/agents`, `/mcp` | What is connected and available |
+| **Memory** | |
+| `/remember <text>`, `/forget <text>`, `/memory <words>`, `/whoami` | Save, remove, search, and see what she knows about you |
+| **Her work** | |
+| `/goal <title>`, `/goals` | Add and list goals |
+| `/routines`, `/jobs`, `/notifications`, `/skills` | Standing routines, background jobs, what she left for you, her skills |
+| **Settings** | |
+| `/settings [word]`, `/get <name>`, `/set <name> <value>` | List, show and change any setting. Advanced ones are found by a word: `/settings interop` |
+| `/theme`, `/name`, `/partner`, `/persona`, `/language` | Look, your name, her name, how she talks, menu language |
+| `/web`, `/privacy`, `/learning`, `/vigil` | Switches: add `on` or `off` |
+| `/approvals <mode>`, `/scope <scope>`, `/safeguards`, `/security-status` | When she asks first (ask, auto, full) and where her tools may reach (project, workspace, full) |
+| **This PC** | |
+| `/connect`, `/connect pause`, `/connect resume` | Phone access |
+| `/voice`, `/doctor`, `/version`, `/update` | Speaking and listening, a health check, the version, newer versions |
+
+Keys and passwords are never set by a command: they are entered in Settings, where they are not written into a conversation.
+
+From a paired phone a command can do only what the phone's panes in Connect settings allow, and it can never change the settings a phone is barred from (approval mode, access scope, the model address, the safeguards). The same command works from the PC.
 
 Composer: **↑** previous prompt, **↓** next (stored locally).
 

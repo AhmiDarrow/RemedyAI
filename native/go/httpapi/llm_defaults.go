@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -265,6 +266,14 @@ func cfgFloat(cfg ConfigMap, key string, def float64) float64 {
 		return float64(t)
 	case int64:
 		return float64(t)
+	case json.Number:
+		// A settings save decodes numbers this way; without this case a number
+		// typed in Settings was dropped and the default came back.
+		f, err := t.Float64()
+		if err != nil {
+			return def
+		}
+		return f
 	case string:
 		f, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
 		if err != nil {
@@ -291,6 +300,14 @@ func cfgInt(cfg ConfigMap, key string, def int) int {
 		return int(t)
 	case float64:
 		return int(t)
+	case json.Number:
+		if n, err := t.Int64(); err == nil {
+			return int(n)
+		}
+		if f, err := t.Float64(); err == nil {
+			return int(f)
+		}
+		return def
 	case string:
 		n, err := strconv.Atoi(strings.TrimSpace(t))
 		if err != nil {

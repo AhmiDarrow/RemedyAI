@@ -13,7 +13,7 @@ func TestEverySlashCommandDoesSomething(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	all := append(append([]map[string]any{}, builtinSlashCommands...), moreSlashCommands...)
+	all := allSlashCommands()
 	if len(all) < 20 {
 		t.Fatalf("only %d commands", len(all))
 	}
