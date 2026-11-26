@@ -217,6 +217,16 @@ pub(crate) fn host() -> Option<App> {
 
 /// A second window of the app (a popped-out pane) takes the look chosen in Settings
 /// and the person's theme pack, like the main window.
+/// The look was changed somewhere else (a command typed in a conversation):
+/// paint it now. Nothing happens in a window that has no settings.
+pub(crate) fn apply_theme_id(id: &str) {
+    if let Some(s) = alive() {
+        if s.theme_id.get() != id {
+            prefs::set_theme(s, id);
+        }
+    }
+}
+
 pub(crate) fn bind_window(ui: &Ui) {
     if let Some(custom) = crate::theme_custom::current() {
         custom.attach(ui);
