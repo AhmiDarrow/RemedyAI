@@ -324,6 +324,14 @@ def test_identity_is_pluggable_and_claimidx_is_optional() -> None:
     assert ok.level in {"unverified", "verified"}
 
 
+def test_self_asserted_did_is_never_verified_even_with_claimidx_up(monkeypatch) -> None:
+    import remedy.runtime.claimidx_host as host
+
+    monkeypatch.setattr(host, "is_healthy", lambda **_: True)
+    for did in ("did:claimidx:owner", "did:key:z6Mkfriend"):
+        assert ClaimidxVerifier().verify({"did": did}).level == "unverified"
+
+
 def test_audit_log_written(tmp_path) -> None:
     rt = _rt(tmp_path)
     rt.upsert_peer({"id": "p", "protocol": "mcp", "endpoint": "stdio", "permissions": ["ask"], "enabled": True})
