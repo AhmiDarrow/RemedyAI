@@ -365,3 +365,22 @@ func TestFilesRequiresAuth(t *testing.T) {
 		t.Fatalf("status=%d want 401", rr.Code)
 	}
 }
+
+// A folder outside the project lists with absolute entry paths, so opening one never
+// resolves against the project root.
+func TestFilesOutsideProjectListAbsolute(t *testing.T) {
+	proj, other := t.TempDir(), t.TempDir()
+	if err := os.Mkdir(filepath.Join(other, "inner"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	p := filesOutsidePayload(other, proj)
+	files, _ := p["files"].([]fileEntry)
+	want := filepath.ToSlash(filepath.Join(other, "inner"))
+	if len(files) != 1 || files[0].Path != want || p["path"] != filepath.ToSlash(other) || p["root"] != proj {
+		t.Fatalf("payload %+v, want one entry at %s", p, want)
+	}
+	places := filePlaces("full", []string{proj, other})
+	if places[0].Path != "." || places[1].Path != filepath.ToSlash(other) || len(places) < 3 {
+		t.Fatalf("places %+v", places)
+	}
+}

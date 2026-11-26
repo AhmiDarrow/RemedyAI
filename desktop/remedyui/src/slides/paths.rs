@@ -63,6 +63,16 @@ pub fn can_go_up(path: &str) -> bool {
     !path.is_empty() && path != "." && parent_file_path(path) != path.replace('\\', "/")
 }
 
+/// Where "parent folder" leads from `path`, shown under project `root`. At the project
+/// root (".") that is the root's own parent, so the browser is not shut inside the project.
+pub fn up_target(root: &str, path: &str) -> Option<String> {
+    if can_go_up(path) {
+        return Some(parent_file_path(path));
+    }
+    let at_root = path.is_empty() || path == ".";
+    (at_root && can_go_up(root)).then(|| parent_file_path(root))
+}
+
 fn is_drive_root(s: &str) -> bool {
     s.len() == 2 && s.as_bytes()[0].is_ascii_alphabetic() && s.as_bytes()[1] == b':'
 }
@@ -95,6 +105,15 @@ pub fn encode_query(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn up_leaves_the_project_root_and_stops_at_a_drive() {
+        assert_eq!(up_target("C:/work/app", "src/ui").as_deref(), Some("src"));
+        assert_eq!(up_target("C:/work/app", ".").as_deref(), Some("C:/work"));
+        assert_eq!(up_target("C:/work/app", "C:/work").as_deref(), Some("C:/"));
+        assert_eq!(up_target("C:/work/app", "C:/"), None);
+        assert_eq!(up_target("", "."), None);
+    }
 
     #[test]
     fn joins_relative_and_keeps_absolute() {

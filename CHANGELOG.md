@@ -7,6 +7,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 ### Fixed
 - Usage was never recorded: the Usage screen and `/usage` showed zero however much was used. Each model round's token counts, as the provider reports them, are now written to the ledger. No cost is shown, because Remedy has no price list and a guessed price would read as a real one.
 - A number typed into Settings (retention days, for one) was dropped on save and the default came back.
+- Emoji drew as scattered pieces on Windows. The engine took the system's emoji font ahead of Remedy Emoji and painted its layers in the wrong places. Remedy Emoji now draws them, and the system's font, still used for flags, is painted correctly.
+- Chat text in Studio and Grove can be selected with the mouse and copied.
+- The Files rail could not leave the project: the parent-folder button was off at the project root, and a folder opened outside the project led back into it. It now goes up to the drive, opens folders anywhere the access setting allows, and has a row of places (the project, Desktop, Documents, Downloads, and with full access the home folder and every drive). A folder with more than 1,000 items says it is showing the first 1,000 (it was 200, silently).
+- The main window could start as a sliver that could not be resized after it was closed while minimized. It now has a smallest size and opens at a normal one.
 
 ### Added
 - A full set of commands, about sixty: every setting (`/settings`, `/set`, `/get` and shortcuts such as `/theme`, `/web`, `/approvals`), the model side (`/usage`, `/context`, `/providers`, `/tools`), memory (`/forget`), her own work (`/routines`, `/jobs`, `/notifications`) and this PC (`/connect`, `/voice`, `/doctor`, `/version`, `/update`). `/commands` lists them and `/help <command>` explains one. The apps' command list now holds only commands that do something.

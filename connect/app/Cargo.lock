@@ -4968,7 +4968,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=0898177e7db214f623b1def9163399773c73b14f#0898177e7db214f623b1def9163399773c73b14f"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=f0ad0934e3ae32b25d006849ae8177cbd798e71f#f0ad0934e3ae32b25d006849ae8177cbd798e71f"
 dependencies = [
  "remedy-ui-core",
  "remedy-ui-engine",
@@ -4986,7 +4986,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-bridge-web"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=0898177e7db214f623b1def9163399773c73b14f#0898177e7db214f623b1def9163399773c73b14f"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=f0ad0934e3ae32b25d006849ae8177cbd798e71f#f0ad0934e3ae32b25d006849ae8177cbd798e71f"
 dependencies = [
  "js-sys",
  "remedy-ui-core",
@@ -4998,7 +4998,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-core"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=0898177e7db214f623b1def9163399773c73b14f#0898177e7db214f623b1def9163399773c73b14f"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=f0ad0934e3ae32b25d006849ae8177cbd798e71f#f0ad0934e3ae32b25d006849ae8177cbd798e71f"
 dependencies = [
  "accesskit",
  "cpu-time",
@@ -5016,7 +5016,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-engine"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=0898177e7db214f623b1def9163399773c73b14f#0898177e7db214f623b1def9163399773c73b14f"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=f0ad0934e3ae32b25d006849ae8177cbd798e71f#f0ad0934e3ae32b25d006849ae8177cbd798e71f"
 dependencies = [
  "ash",
  "fluent-bundle",
@@ -5042,12 +5042,12 @@ dependencies = [
 [[package]]
 name = "remedy-ui-fonts"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=0898177e7db214f623b1def9163399773c73b14f#0898177e7db214f623b1def9163399773c73b14f"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=f0ad0934e3ae32b25d006849ae8177cbd798e71f#f0ad0934e3ae32b25d006849ae8177cbd798e71f"
 
 [[package]]
 name = "remedy-ui-fonts-cjk"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=0898177e7db214f623b1def9163399773c73b14f#0898177e7db214f623b1def9163399773c73b14f"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=f0ad0934e3ae32b25d006849ae8177cbd798e71f#f0ad0934e3ae32b25d006849ae8177cbd798e71f"
 dependencies = [
  "remedy-ui-fonts",
 ]
@@ -5055,7 +5055,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-macros"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=0898177e7db214f623b1def9163399773c73b14f#0898177e7db214f623b1def9163399773c73b14f"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=f0ad0934e3ae32b25d006849ae8177cbd798e71f#f0ad0934e3ae32b25d006849ae8177cbd798e71f"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -5066,7 +5066,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-media"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=0898177e7db214f623b1def9163399773c73b14f#0898177e7db214f623b1def9163399773c73b14f"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=f0ad0934e3ae32b25d006849ae8177cbd798e71f#f0ad0934e3ae32b25d006849ae8177cbd798e71f"
 dependencies = [
  "image",
  "js-sys",
@@ -5082,7 +5082,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-media-playback"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=0898177e7db214f623b1def9163399773c73b14f#0898177e7db214f623b1def9163399773c73b14f"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=f0ad0934e3ae32b25d006849ae8177cbd798e71f#f0ad0934e3ae32b25d006849ae8177cbd798e71f"
 dependencies = [
  "js-sys",
  "libloading",
@@ -5106,7 +5106,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-platform"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=0898177e7db214f623b1def9163399773c73b14f#0898177e7db214f623b1def9163399773c73b14f"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=f0ad0934e3ae32b25d006849ae8177cbd798e71f#f0ad0934e3ae32b25d006849ae8177cbd798e71f"
 dependencies = [
  "accesskit_android",
  "accesskit_winit",
@@ -5161,7 +5161,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-text"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=0898177e7db214f623b1def9163399773c73b14f#0898177e7db214f623b1def9163399773c73b14f"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=f0ad0934e3ae32b25d006849ae8177cbd798e71f#f0ad0934e3ae32b25d006849ae8177cbd798e71f"
 dependencies = [
  "fontique",
  "icu_normalizer",
@@ -5182,7 +5182,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-widgets"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=0898177e7db214f623b1def9163399773c73b14f#0898177e7db214f623b1def9163399773c73b14f"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=f0ad0934e3ae32b25d006849ae8177cbd798e71f#f0ad0934e3ae32b25d006849ae8177cbd798e71f"
 dependencies = [
  "base64 0.23.1",
  "encoding_rs",
@@ -5209,7 +5209,7 @@ dependencies = [
 [[package]]
 name = "remedy-ui-widgets-term"
 version = "1.0.0-rc.1"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=0898177e7db214f623b1def9163399773c73b14f#0898177e7db214f623b1def9163399773c73b14f"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=f0ad0934e3ae32b25d006849ae8177cbd798e71f#f0ad0934e3ae32b25d006849ae8177cbd798e71f"
 dependencies = [
  "base64 0.23.1",
  "remedy-ui-core",
@@ -5222,7 +5222,7 @@ dependencies = [
 [[package]]
 name = "remedy-vello-cpu"
 version = "0.4.0"
-source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=0898177e7db214f623b1def9163399773c73b14f#0898177e7db214f623b1def9163399773c73b14f"
+source = "git+https://github.com/AhmiDarrow/RemedyUI?rev=f0ad0934e3ae32b25d006849ae8177cbd798e71f#f0ad0934e3ae32b25d006849ae8177cbd798e71f"
 dependencies = [
  "bytemuck",
  "fearless_simd",
