@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -25,6 +26,7 @@ func SecuritySetSigningKey(key []byte) error {
 	}
 	buf := append([]byte(nil), key[:32]...)
 	status, err := lib.call("remedy_core_security_set_signing_key", bytesPtr(buf), uintptr(len(buf)))
+	runtime.KeepAlive(buf)
 	if err != nil {
 		return err
 	}
@@ -103,6 +105,8 @@ func PolicyHashSpawn(argv []string, env map[string]string, replaceEnv bool) ([]b
 		replace,
 		bytesPtr(out), uintptr(len(out)),
 	)
+	runtime.KeepAlive(argvRaw)
+	runtime.KeepAlive(envRaw)
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +156,10 @@ func CapabilityIssue(
 		bytesPtr(nonceBuf), uintptr(len(nonceBuf)),
 		bytesPtr(out), uintptr(len(out)),
 	)
+	runtime.KeepAlive(subjectRaw)
+	runtime.KeepAlive(scopeRaw)
+	runtime.KeepAlive(op)
+	runtime.KeepAlive(nonceBuf)
 	if err != nil {
 		return nil, err
 	}
@@ -230,6 +238,7 @@ func writeJailSetRootsLocked(roots []string) error {
 		return err
 	}
 	status, err := lib.call("remedy_core_write_jail_set_roots", bytesPtr(payload), uintptr(len(payload)))
+	runtime.KeepAlive(payload)
 	if err != nil {
 		return err
 	}

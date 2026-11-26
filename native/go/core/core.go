@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"runtime"
 )
 
 // EnsureLoaded opens remedy_core (cached). Alias for Open used by Connect.
@@ -75,6 +76,7 @@ func TailscaleLaunchMSI(msiPath string) (uint32, error) {
 		uintptr(len(msi)),
 		uint32Ptr(&pid),
 	)
+	runtime.KeepAlive(msi)
 	if err != nil {
 		return 0, err
 	}

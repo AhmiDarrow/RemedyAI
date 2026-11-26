@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 	"unsafe"
 )
@@ -210,6 +211,7 @@ func EncodePNG(pixels []byte, width, height int, stride int, bytesPerPixel uint3
 		unsafePtrPtr(&ptr),
 		sizePtr(&length),
 	)
+	runtime.KeepAlive(pixels)
 	if err != nil {
 		return nil, err
 	}
@@ -433,6 +435,7 @@ func TypeText(text string, perCharDelayMS uint32) error {
 		"remedy_core_type_text",
 		bytesPtr(raw), uintptr(len(raw)), uintptr(perCharDelayMS),
 	)
+	runtime.KeepAlive(raw)
 	if err != nil {
 		return err
 	}
@@ -528,6 +531,7 @@ func ClipboardSetText(text string) error {
 		"remedy_core_clipboard_set_text",
 		bytesPtr(raw), uintptr(len(raw)),
 	)
+	runtime.KeepAlive(raw)
 	if err != nil {
 		return err
 	}
@@ -648,6 +652,7 @@ func KeyCombo(vks []uint16) error {
 		"remedy_core_key_combo",
 		uint16SlicePtr(vks), uintptr(len(vks)),
 	)
+	runtime.KeepAlive(vks)
 	if err != nil {
 		return err
 	}
