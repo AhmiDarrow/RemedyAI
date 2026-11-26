@@ -362,3 +362,26 @@ func TestBindFileToolsCarryAccessScope(t *testing.T) {
 		t.Fatalf("grep access_scope=%v want project", args["access_scope"])
 	}
 }
+
+func TestRegistryToolExecutorSurvivesToolPanic(t *testing.T) {
+	reg := tools.NewRegistry(tools.AuthorizerFunc(runtimeLocalAuthorizer))
+	err := reg.Register(tools.Descriptor{
+		ID:           "test.panic",
+		Version:      1,
+		Description:  "panics",
+		Runtime:      tools.RuntimeGo,
+		Risk:         tools.RiskReadOnly,
+		InputSchema:  json.RawMessage(`{"type":"object"}`),
+		OutputSchema: json.RawMessage(`{"type":"object"}`),
+	}, tools.ExecutorFunc(func(context.Context, tools.Request) (tools.Result, error) {
+		panic("executor boom")
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := &RegistryToolExecutor{Registry: reg}
+	res := exec.Execute(context.Background(), cognition.ToolCall{ID: "c1", Name: "test.panic", Input: []byte(`{}`)})
+	if !strings.Contains(res.Err, "crashed") || !strings.Contains(res.Err, "executor boom") {
+		t.Fatalf("Err=%q", res.Err)
+	}
+}

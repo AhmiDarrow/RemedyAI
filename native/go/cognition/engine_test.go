@@ -1453,3 +1453,33 @@ func TestNativeAssistantTurnIsCarriedIntoTheNextRound(t *testing.T) {
 		t.Fatal("stripNative clears the native copy")
 	}
 }
+// A panicking tool executor fails its own call; it must not crash the
+// process the runtime shares with every other turn.
+func TestEngineToolPanicBecomesToolError(t *testing.T) {
+	var n atomic.Int32
+	var seen ToolResult
+	engine := Engine{
+		Model: modelFunc(func(_ context.Context, turn Turn) (<-chan ModelEvent, error) {
+			if n.Add(1) == 1 {
+				return events(ModelEvent{ToolCall: &ToolCall{ID: "1", Name: "read"}}), nil
+			}
+			return events(ModelEvent{Text: "ok", Done: true}), nil
+		}),
+		Tools: toolFunc(func(context.Context, ToolCall) ToolResult {
+			panic("tool boom")
+		}),
+		Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+		AfterToolBatch: func(_ context.Context, _ []ToolCall, results []ToolResult) {
+			if len(results) > 0 {
+				seen = results[0]
+			}
+		},
+	}
+	out := engine.Run(context.Background(), "goal")
+	if out.Err != nil {
+		t.Fatalf("tool panic must not fail the turn: %v", out.Err)
+	}
+	if !seen.IsError || !strings.Contains(seen.Err, "tool boom") {
+		t.Fatalf("tool result = %#v", seen)
+	}
+}

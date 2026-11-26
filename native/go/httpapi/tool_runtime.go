@@ -122,6 +122,13 @@ func (e *RegistryToolExecutor) Execute(ctx context.Context, call cognition.ToolC
 	}
 	done := make(chan outcome, 1)
 	go func() {
+		// A panicking tool must fail its own call, not take the runtime
+		// (and every other turn) down with it.
+		defer func() {
+			if r := recover(); r != nil {
+				done <- outcome{err: fmt.Errorf("tool %s crashed: %v", desc.ID, r)}
+			}
+		}()
 		result, err := e.Registry.Execute(toolCtx, req)
 		done <- outcome{result: result, err: err}
 	}()
