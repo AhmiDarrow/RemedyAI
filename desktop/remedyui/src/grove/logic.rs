@@ -49,6 +49,34 @@ pub fn newer_rows(shown: &[StoryMessage], fetched: &[StoryMessage]) -> bool {
     }
 }
 
+/// Whether `text` is a slash command (`/model fable`, `/clear`) and not a path or a
+/// sentence that happens to start with a slash: one word of letters and dashes
+/// right after the slash.
+pub fn is_slash_command(text: &str) -> bool {
+    let Some(rest) = text.trim_start().strip_prefix('/') else {
+        return false;
+    };
+    let word = rest.split_whitespace().next().unwrap_or("");
+    !word.is_empty()
+        && word.len() <= 24
+        && word.starts_with(|c: char| c.is_ascii_alphabetic())
+        && word.chars().all(|c| c.is_ascii_alphabetic() || c == '-')
+}
+
+/// Commands that make sense while a reply is being written: stopping it, asking
+/// what is going on, and answering what she is waiting for.
+pub fn command_runs_mid_reply(command: &str) -> bool {
+    let word = command.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+    matches!(word.as_str(), "/stop" | "/abort" | "/status" | "/approve" | "/yes" | "/deny" | "/no" | "/help")
+}
+
+/// Whether the runtime has rows this screen does not: rows added here and not yet
+/// stored (a command and its answer) are not a reason to throw the screen away.
+pub fn server_has_news(shown: &[StoryMessage], fetched: &[StoryMessage]) -> bool {
+    let local = shown.iter().filter(|m| m.created_at.is_empty()).count();
+    local == 0 || fetched.len() != shown.len() - local
+}
+
 /// One chat row the storyline and the bubble read.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StoryMessage {
@@ -1408,6 +1436,38 @@ mod tests {
             created_at: "2026-08-16T09:00:00Z".into(),
             tool_calls: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_slash_command_is_one_word_after_the_slash() {
+        for yes in ["/model", "/model fable 5.2", "  /clear", "/security-status", "/M"] {
+            assert!(is_slash_command(yes), "{yes}");
+        }
+        for no in ["/", "/home/ahmi/notes.txt is missing", "/2 of the cake", "a/b", "not /model", "/etc/hosts", ""] {
+            assert!(!is_slash_command(no), "{no}");
+        }
+    }
+
+    #[test]
+    fn stopping_and_answering_work_while_she_is_replying() {
+        for yes in ["/stop", "/STOP", "/approve 3f2a", "/deny", "/status"] {
+            assert!(command_runs_mid_reply(yes), "{yes}");
+        }
+        for no in ["/clear", "/model fable", "/rename x", "/think low"] {
+            assert!(!command_runs_mid_reply(no), "{no}");
+        }
+    }
+
+    #[test]
+    fn a_command_and_its_answer_stay_until_the_runtime_has_something_new() {
+        let stored = |id: &str| StoryMessage { created_at: "2026-08-16T09:00:00Z".into(), ..msg(id, "user", "hi") };
+        let local = |id: &str| StoryMessage { created_at: String::new(), ..msg(id, "assistant", "Now using …") };
+        let server = vec![stored("1"), stored("2")];
+        let shown = vec![stored("1"), stored("2"), local("m1"), local("m2")];
+        assert!(!server_has_news(&shown, &server), "only the local rows differ");
+        let more = vec![stored("1"), stored("2"), stored("3")];
+        assert!(server_has_news(&shown, &more), "a new stored row replaces the screen");
+        assert!(server_has_news(&server, &more), "no local rows: the usual rule decides");
     }
 
     #[test]

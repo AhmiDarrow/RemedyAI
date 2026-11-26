@@ -754,6 +754,10 @@ impl Grove {
         }
         self.busy_ui.set(true);
         self.attach_error.set(String::new());
+        // A command is carried out, not sent to her as a message.
+        if attachments.is_empty() && logic::is_slash_command(&trimmed) {
+            return self.run_command(trimmed);
+        }
         let on_home = matches!(self.place.get(), Place::Home);
         if logic::should_plant(on_home, &trimmed, attachments.len()) {
             let title = logic::planted_title(&trimmed).unwrap_or_default();
@@ -785,6 +789,64 @@ impl Grove {
         }
         let job = self.job(trimmed, attachments, steer);
         self.launch(job);
+        true
+    }
+
+    /// Run a slash command in the conversation on screen and show its answer.
+    /// Returns whether the talk field may be cleared.
+    fn run_command(&self, command: String) -> bool {
+        if self.streaming.get() && !logic::command_runs_mid_reply(&command) {
+            self.attach_error.set("That command waits until this reply finishes. /stop stops it.".into());
+            self.release_busy();
+            return false;
+        }
+        self.push_message("user", &command, Vec::new());
+        if self.local_only {
+            self.push_message("assistant", "Commands run once Remedy is connected.", Vec::new());
+            self.release_busy();
+            return true;
+        }
+        if self.client.get().is_none() {
+            self.push_message("assistant", "Commands run once Remedy is connected.", Vec::new());
+            self.release_busy();
+            return true;
+        }
+        let job = self.job(String::new(), Vec::new(), false);
+        let home = job.home;
+        let book = self.book.clone();
+        let sent = command.clone();
+        self.spawn(
+            move |c| {
+                let sid = ensure_session(&c, &book, &job)?;
+                let out = api::session_command(&c, &sid, &sent)?;
+                Ok::<_, String>((sid, out))
+            },
+            move |g, out| {
+                g.release_busy();
+                match out {
+                    Ok((sid, v)) => {
+                        let text = v.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                        let action = v.get("action").and_then(|t| t.as_str()).unwrap_or("");
+                        if g.session_id.get() != sid {
+                            g.remember_session(home, sid);
+                        }
+                        match action {
+                            // The conversation is empty now: so is the screen.
+                            "reset_session" => g.messages.set(Vec::new()),
+                            "model_changed" => {
+                                if let Some(model) = v.get("model").and_then(|m| m.as_str()) {
+                                    g.studio.model.set(model.to_string());
+                                }
+                            }
+                            _ => {}
+                        }
+                        let answer = if text.is_empty() { "Done.".to_string() } else { text };
+                        g.push_message("assistant", &answer, Vec::new());
+                    }
+                    Err(e) => g.push_message("assistant", &format!("That command did not run: {e}"), Vec::new()),
+                }
+            },
+        );
         true
     }
 
@@ -1942,6 +2004,7 @@ impl Grove {
                 && !self.streaming.get()
                 && !self.loading.get()
                 && self.session_id.get() == sid
+                && logic::server_has_news(&self.messages.get(), &rows)
                 && logic::newer_rows(&self.messages.get(), &rows)
             {
                 self.messages.set(rows);
