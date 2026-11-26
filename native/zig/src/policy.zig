@@ -43,7 +43,7 @@ pub const dangerous_basenames = [_][]const u8{
     "fdisk",    "passwd",  "useradd", "usermod",   "groupadd", "reg",
     "takeown",  "icacls",  "net",     "wmic",      "sc",       "schtasks",
     "vssadmin", "bcdedit", "wevtutil","diskpart",  "cipher",   "format",
-    "shutdown", "reboot",
+    "shutdown", "reboot",  "doas",    "pkexec",
 };
 
 /// Product default: any non-dangerous absolute executable, any arguments.
@@ -179,6 +179,7 @@ pub fn isDangerousProcess(argv: []const []const u8) bool {
     const text = joinNormalized(scratch_allocator, argv[1..]) catch return true;
     defer scratch_allocator.free(text);
     if (containsAnyNeedle(text)) return true;
+    if (is_wrapper and payloadRunsPrivileged(argv[1..])) return true;
     var is_powershell = false;
     for (powershell_names) |name| {
         if (eqlIgnoreCase(base, name)) {
@@ -188,6 +189,84 @@ pub fn isDangerousProcess(argv: []const []const u8) bool {
     }
     if (is_powershell or shell_ir.isEncodedPowershell(text)) {
         return encodedPayloadDangerous(scratch_allocator, text, 0);
+    }
+    return false;
+}
+
+/// Privilege programs a wrapper's payload may not run either: the basename
+/// check above only sees argv[0], so `env sudo ...`, `nice doas ...` or
+/// `bash -lc "make && sudo make install"` went through as plain commands.
+const privilege_heads = [_][]const u8{ "sudo", "su", "doas", "pkexec" };
+
+/// Words that run the command after them; that command is still a head.
+const payload_prefixes = [_][]const u8{
+    "env",  "nice", "nohup", "command", "exec",       "time", "xargs", "builtin",
+    "then", "do",   "else",  "elif",    "!",          "{",    "bash",  "sh",
+    "zsh",  "dash", "ksh",   "cmd",     "powershell", "pwsh",
+};
+
+fn isPayloadSeparator(c: u8) bool {
+    return c == ';' or c == '&' or c == '|' or c == '(' or c == ')' or c == '`' or c == '{' or c == '}' or
+        c == '\n' or c == '\r';
+}
+
+fn isAssignmentWord(word: []const u8) bool {
+    const eq = std.mem.indexOfScalar(u8, word, '=') orelse return false;
+    if (eq == 0) return false;
+    for (word[0..eq]) |c| {
+        if (!(std.ascii.isAlphanumeric(c) or c == '_')) return false;
+    }
+    return true;
+}
+
+/// True when a command head anywhere in the (normalized) payload is a
+/// privilege program: the first word, the word after `;` `&&` `|` `$(` and
+/// the like, and the word after a prefix such as `env`, `nohup` or a shell
+/// with its switches (`bash -lc`, `cmd /c`). Quotes around a word and a
+/// leading `\` (alias bypass) and cmd's `^` escapes are ignored. It reads
+/// the raw arguments, not the normalized join, because a newline separates
+/// commands and the join turns it into a space.
+fn payloadRunsPrivileged(args: []const []const u8) bool {
+    var at_command = true;
+    for (args) |text| {
+        var i: usize = 0;
+        while (i < text.len) {
+            const c = text[i];
+            if (isPayloadSeparator(c)) {
+                at_command = true;
+                i += 1;
+                continue;
+            }
+            if (isClassifierSpace(c)) {
+                i += 1;
+                continue;
+            }
+            const start = i;
+            while (i < text.len and !isClassifierSpace(text[i]) and !isPayloadSeparator(text[i])) : (i += 1) {}
+            if (!at_command) continue;
+            var word = stripQuotes(text[start..i]);
+            while (word.len > 0 and word[0] == '\\') word = word[1..];
+            if (word.len == 0) continue;
+            // switches and assignments before the command: `env -i X=1 sudo`, `cmd /c`
+            if (word[0] == '-' or (word[0] == '/' and word.len <= 3) or isAssignmentWord(word)) continue;
+            var name_buf: [32]u8 = undefined;
+            var name_len: usize = 0;
+            for (executableBasename(word)) |b| {
+                if (b == '^') continue;
+                if (name_len == name_buf.len) break;
+                name_buf[name_len] = b;
+                name_len += 1;
+            }
+            const base = name_buf[0..name_len];
+            for (privilege_heads) |name| {
+                if (eqlIgnoreCase(base, name)) return true;
+            }
+            var prefix = false;
+            for (payload_prefixes) |name| {
+                if (eqlIgnoreCase(base, name)) prefix = true;
+            }
+            if (!prefix) at_command = false;
+        }
     }
     return false;
 }
@@ -572,6 +651,42 @@ test "nested privilege inside cmd /c is dangerous" {
     const flag = if (builtin.os.tag == .windows) "/c" else "-c";
     try std.testing.expect(isDangerousProcess(&.{ cmd, flag, "reg add HKLM\\Software\\Pwn" }));
     try std.testing.expect(!isDangerousProcess(&.{ cmd, flag, "echo hello" }));
+}
+
+test "a privilege program at the head of a wrapper's payload is dangerous" {
+    const dangerous = [_][]const []const u8{
+        &.{ "/usr/bin/env", "sudo", "ls" },
+        &.{ "/usr/bin/env", "-i", "X=1", "sudo", "ls" },
+        &.{ "/bin/bash", "-lc", "sudo rm -rf /" },
+        &.{ "/bin/sh", "-c", "make && sudo make install" },
+        &.{ "/bin/sh", "-c", "make\nsudo make install" },
+        &.{ "/bin/sh", "-c", "echo x | \\sudo tee /etc/hosts" },
+        &.{ "/bin/sh", "-c", "out=$(doas cat /etc/shadow)" },
+        &.{ "/bin/bash", "-c", "nohup /usr/bin/pkexec id" },
+        &.{ "/bin/sh", "-c", "sh -c 'su -c id'" },
+        &.{ "/usr/bin/nice", "\"sudo\"", "id" },
+        &.{ "/usr/bin/doas", "ls" },
+        &.{ "/usr/bin/pkexec", "id" },
+    };
+    for (dangerous) |argv| {
+        if (!isDangerousProcess(argv)) {
+            std.debug.print("not dangerous: {s}\n", .{argv[argv.len - 1]});
+            return error.TestExpectedDangerous;
+        }
+    }
+    const plain = [_][]const []const u8{
+        &.{ "/bin/bash", "-lc", "git log --grep sudo" },
+        &.{ "/bin/sh", "-c", "echo sudo is not run here" },
+        &.{ "/bin/sh", "-c", "grep -r su src | head" },
+        &.{ "/usr/bin/env", "FOO=1", "make" },
+        &.{ "/bin/bash", "-lc", "cargo test --release" },
+    };
+    for (plain) |argv| {
+        if (isDangerousProcess(argv)) {
+            std.debug.print("dangerous: {s}\n", .{argv[argv.len - 1]});
+            return error.TestUnexpectedDangerous;
+        }
+    }
 }
 
 test "classifier normalizes whitespace and caret escapes and scans the full argv" {
