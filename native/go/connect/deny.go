@@ -151,6 +151,7 @@ var settingsLockKeys = map[string]struct{}{
 	"trust_profile":          {},
 	"access_scope":           {},
 	"project_path":           {},
+	"default_workspace":      {},
 	"advanced":               {},
 	"interop_inbound":        {},
 	"interop_bind":           {},

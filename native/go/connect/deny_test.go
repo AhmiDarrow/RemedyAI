@@ -226,6 +226,14 @@ func TestSettingsWriteLockedBlocksConnectRetarget(t *testing.T) {
 	}
 }
 
+// The folder Remedy works in when a session has no project is chosen at the
+// PC, like project_path.
+func TestSettingsWriteLockedBlocksDefaultWorkspace(t *testing.T) {
+	if SettingsWriteLocked([]byte(`{"default_workspace":"/"}`)) != "settings:locked" {
+		t.Fatal("default_workspace")
+	}
+}
+
 func TestDenyConnectManagementIsHard403(t *testing.T) {
 	def := DefaultPanes()
 	cases := []struct {
