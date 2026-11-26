@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
+from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 logger = logging.getLogger(__name__)
 

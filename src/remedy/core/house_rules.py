@@ -21,8 +21,9 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from contextlib import suppress
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -345,7 +346,7 @@ _PERSONA_ALIASES = {
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _home(home: str | Path | None = None) -> Path:
@@ -710,10 +711,8 @@ def save_pending(data: dict[str, Any] | None, home: str | Path | None = None) ->
     if data is None:
         with _LOCK:
             if path.is_file():
-                try:
+                with suppress(OSError):
                     path.unlink()
-                except OSError:
-                    pass
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     write_json_atomic(path, _scrub(data), mode=0o600)
@@ -981,9 +980,7 @@ def update_offer_available(home: str | Path | None = None) -> bool:
     if status in (STATUS_COMPLETE, STATUS_SKIPPED):
         return False
     source = str(session.get("source") or rules.get("source") or "")
-    if session.get("onboarding_pending") and source != "revisit":
-        return False
-    return True
+    return not (session.get("onboarding_pending") and source != "revisit")
 
 
 def update_offer_public(home: str | Path | None = None) -> dict[str, Any]:
@@ -1337,7 +1334,7 @@ def propose(
     diff = _diff_against_current(visible, home)
     if wait:
         pending = {
-            "id": f"hr-{int(datetime.now(timezone.utc).timestamp())}",
+            "id": f"hr-{int(datetime.now(UTC).timestamp())}",
             "created_at": _now(),
             "kind": "change",
             "keys": keys,
@@ -1767,6 +1764,6 @@ def dispatch(inp: dict[str, Any] | None = None) -> dict[str, Any]:
         if action in ("update_offer_go", "update_offer_later", "update_offer_accept", "update_offer_dismiss"):
             return resolve_update_offer(action, home=home, origin=origin)
         return {"ok": False, "error": f"unknown action {action}"}
-    except Exception as exc:
+    except Exception:
         logger.exception("house_rules.dispatch failed")
         return {"ok": False, "error": "house rules action failed"}

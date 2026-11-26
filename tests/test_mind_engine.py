@@ -11,6 +11,7 @@ from remedy.runtime.catalog import (
     catalog_public,
     get_model_spec,
 )
+from remedy.runtime.mdl import MDL_TIERS
 from remedy.runtime.media_digest import (
     DIGEST_SCHEMA,
     format_digest_for_muscle,
@@ -23,7 +24,6 @@ from remedy.runtime.mind_engine import (
     resolve_spec_type,
     select_quant,
 )
-from remedy.runtime.mdl import MDL_TIERS
 from remedy.runtime.rmb.mode import should_skip_vision_stack
 
 

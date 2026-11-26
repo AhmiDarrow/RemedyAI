@@ -147,7 +147,6 @@ def core_available() -> bool:
     """True when the zig remedy_core library is loadable in this environment."""
     try:
         from remedy.core.computer import host_binding
-        from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
         host_binding._lib()
         return True

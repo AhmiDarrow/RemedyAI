@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
-from remedy.core.organism_knobs import resolve_int, resolve as resolve_knob
+from remedy.core.organism_knobs import resolve as resolve_knob
+from remedy.core.organism_knobs import resolve_int
 from remedy.interop.identity import TrustResult
 from remedy.interop.paths import rate_path
 
@@ -183,10 +185,8 @@ def _prune_and_save(path, data: dict[str, Any], now: float) -> None:
         )]
         for key in stale:
             table.pop(key, None)
-    try:
+    with suppress(Exception):
         write_json_atomic(path, data)
-    except Exception:
-        pass
 
 
 def _is_float(value: Any) -> bool:

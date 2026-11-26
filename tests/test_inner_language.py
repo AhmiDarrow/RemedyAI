@@ -9,7 +9,6 @@ from remedy.core.inner_language import (
     current_capability,
     decode,
     encode,
-    encode_state,
     evolve_from_phrases,
     measure_tokens,
     pack_brief,

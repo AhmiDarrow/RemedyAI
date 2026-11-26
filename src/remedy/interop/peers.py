@@ -8,7 +8,6 @@ from typing import Any
 from remedy.core.atomic_json import write_json_atomic
 from remedy.core.organism_knobs import resolve_int
 from remedy.interop.paths import peers_path
-from remedy.interop.redact import redact
 
 PROTOCOLS = ("a2a", "mcp")
 DEFAULT_PERMISSIONS = ("ask", "task_status", "share_context")

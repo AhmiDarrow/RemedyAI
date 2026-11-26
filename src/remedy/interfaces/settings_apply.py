@@ -330,7 +330,8 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "connect_panes": _connect_panes_public(raw.get("connect_panes")),
         "connect_relay_url": str(raw.get("connect_relay_url") or "").strip(),
     }
-    from remedy.core.organism_knobs import effective_table, schema as knobs_schema
+    from remedy.core.organism_knobs import effective_table
+    from remedy.core.organism_knobs import schema as knobs_schema
 
     out["advanced"] = effective_table(raw)
     out["advanced_schema"] = knobs_schema()

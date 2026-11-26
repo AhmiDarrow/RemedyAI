@@ -6,18 +6,17 @@ import json
 
 import pytest
 
-from tests.conftest import core_available
-
-requires_core = pytest.mark.skipif(
-    not core_available(), reason="remedy_core not built in this environment"
-)
-
 from remedy.execution.docker import DockerSandbox
 from remedy.execution.result import ExecutionResult, SubprocessSandbox
 from remedy.execution.runtime import ToolContext, ToolRuntime
 from remedy.models import ToolCall, ToolSource
 from remedy.policy.decisions import ToolRequest
 from remedy.policy.engine import PolicyEngine
+from tests.conftest import core_available
+
+requires_core = pytest.mark.skipif(
+    not core_available(), reason="remedy_core not built in this environment"
+)
 
 
 class TestPolicyEngineGate:

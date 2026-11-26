@@ -1808,7 +1808,11 @@ def _coresidence_plan_for_start(
 def _reuse_external_muscle(state: dict[str, Any], model: Path | None) -> dict[str, Any] | None:
     """If a user-run local server already hosts this model, do not start a second copy."""
     try:
-        from remedy.runtime.rmb.coresidence import already_served, discover_local_servers, plan_coresidence
+        from remedy.runtime.rmb.coresidence import (
+            already_served,
+            discover_local_servers,
+            plan_coresidence,
+        )
 
         servers = discover_local_servers()
         hints = [str(state.get("model_id") or ""), (model.name if model else "")]

@@ -4,12 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import core_available
-
-requires_core = pytest.mark.skipif(
-    not core_available(), reason="remedy_core not built in this environment"
-)
-
 from remedy.models import Skill, SkillManifest, SkillStatus, ToolDefinition, ToolSource
 from remedy.skills.adapters.hermes_deep import (
     batch_migrate_hermes,
@@ -28,6 +22,11 @@ from remedy.skills.executor import SkillExecutor
 from remedy.skills.exporter import SkillExporter
 from remedy.skills.tool_registry import ToolRegistry
 from remedy.skills.validator import SkillValidator
+from tests.conftest import core_available
+
+requires_core = pytest.mark.skipif(
+    not core_available(), reason="remedy_core not built in this environment"
+)
 
 
 class TestSkillExecutor:
