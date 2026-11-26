@@ -478,6 +478,9 @@ func runIdleLoop(ctx context.Context, sess *Session, cfg SessionConfig) error {
 		idle = IdleTimeout
 	}
 	mux := newInnerMuxState(cfg)
+	muxCtx, cancelMux := context.WithCancel(ctx)
+	defer cancelMux()
+	mux.ctx = muxCtx
 	for {
 		if cfg.ShouldStop != nil && cfg.ShouldStop() {
 			return nil
