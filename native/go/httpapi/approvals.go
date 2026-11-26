@@ -555,7 +555,10 @@ func (q *approvalQueue) Get(id string) *pendingApproval {
 // A one-shot grant also satisfies it (consumed, unbound to a call id).
 // honorStanding is false for ForceAsk origins: parent Always / This session
 // grants must not authorize an untrusted forager.
-func (q *approvalQueue) IsApproved(toolName, command, sessionID string, honorStanding bool) bool {
+// origin is the asking turn's origin: a one-shot grant is spent only by a
+// turn from the same origin, so a hive forager or messenger turn sharing the
+// owner's session can't take the owner's "just this once".
+func (q *approvalQueue) IsApproved(toolName, command, sessionID, origin string, honorStanding bool) bool {
 	if q == nil {
 		return false
 	}
@@ -576,14 +579,14 @@ func (q *approvalQueue) IsApproved(toolName, command, sessionID string, honorSta
 			}
 		}
 	}
-	return q.consumeOneShotLocked(sid, fp, "")
+	return q.consumeOneShotLocked(sid, fp, "", origin)
 }
 
 // IsOneShotApproved consumes one slot of a sensitive go-ahead for this call.
 // Standing session / always approvals never satisfy it — payment and
 // credential steps ask every time. callID keeps two identical calls in one
 // batch from sharing a slot and stops a single call from consuming twice.
-func (q *approvalQueue) IsOneShotApproved(toolName, command, sessionID, callID string) bool {
+func (q *approvalQueue) IsOneShotApproved(toolName, command, sessionID, origin, callID string) bool {
 	if q == nil {
 		return false
 	}
@@ -594,10 +597,19 @@ func (q *approvalQueue) IsOneShotApproved(toolName, command, sessionID, callID s
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return q.consumeOneShotLocked(sid, fp, callID)
+	return q.consumeOneShotLocked(sid, fp, callID, origin)
 }
 
-func (q *approvalQueue) consumeOneShotLocked(sid, fp, callID string) bool {
+// sameGrantOrigin: owner turns share their grants with each other; any
+// other origin only with itself.
+func sameGrantOrigin(grant, caller string) bool {
+	if OriginIsOwner(grant) && OriginIsOwner(caller) {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(grant), strings.TrimSpace(caller))
+}
+
+func (q *approvalQueue) consumeOneShotLocked(sid, fp, callID, origin string) bool {
 	grants := q.oneShot[sid]
 	if len(grants) == 0 {
 		return false
@@ -615,7 +627,7 @@ func (q *approvalQueue) consumeOneShotLocked(sid, fp, callID string) bool {
 			delete(grants, id)
 			continue
 		}
-		if grant.fingerprint != fp {
+		if grant.fingerprint != fp || !sameGrantOrigin(grant.origin, origin) {
 			continue
 		}
 		if callID != "" {
