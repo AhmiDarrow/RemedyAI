@@ -862,6 +862,15 @@ pub fn create_grove_session(client: &Client, title: Option<&str>) -> Result<Stri
     }
 }
 
+/// POST `/api/sessions/{id}/command`: run a slash command (`/model`, `/clear`, …)
+/// in that conversation. The answer carries `text` and sometimes an `action`.
+pub fn session_command(client: &Client, id: &str, command: &str) -> Result<Value, String> {
+    send(
+        client,
+        Request::post(&format!("sessions/{id}/command")).json(&serde_json::json!({ "command": command })),
+    )
+}
+
 /// GET `/api/sessions/{id}/messages`.
 pub fn messages(client: &Client, id: &str, limit: u32) -> Result<Vec<StoryMessage>, String> {
     let v = send(

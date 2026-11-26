@@ -11,8 +11,7 @@ var builtinSlashCommands = []map[string]any{
 	{"name": "/new", "description": "Create a new chat session", "aliases": []string{}, "arguments": nil},
 	{"name": "/reset", "description": "Full reset of this session (history) — stay in the same tab", "aliases": []string{"/clear"}, "arguments": nil},
 	{"name": "/sessions", "description": "List recent sessions", "aliases": []string{}, "arguments": nil},
-	{"name": "/models", "description": "List available models", "aliases": []string{}, "arguments": nil},
-	{"name": "/thinking", "description": "Toggle thinking visibility", "aliases": []string{}, "arguments": nil},
+	{"name": "/model", "description": "Show this conversation's model, list the others, or switch: /model <part of a name>", "aliases": []string{"/models", "/m"}, "arguments": "name"},
 	{"name": "/memory", "description": "Search memory", "aliases": []string{}, "arguments": "query"},
 	{"name": "/skills", "description": "List available skills", "aliases": []string{}, "arguments": nil},
 	{"name": "/export", "description": "Export this session as a .txt file (desktop)", "aliases": []string{}, "arguments": nil},
@@ -23,12 +22,18 @@ var builtinSlashCommands = []map[string]any{
 }
 
 func (s *Server) executeSlashCommand(sessionID, command string) map[string]any {
+	return s.executeSlashCommandFrom(sessionID, command, false)
+}
+
+// executeSlashCommandFrom runs a slash command. phone is true when it came
+// through a paired phone, which may do no more by command than its panes allow.
+func (s *Server) executeSlashCommandFrom(sessionID, command string, phone bool) map[string]any {
 	raw := strings.TrimSpace(command)
 	stripped := strings.ToLower(raw)
 
 	if stripped == "/help" || stripped == "/h" {
 		var lines []string
-		for _, c := range builtinSlashCommands {
+		for _, c := range append(append([]map[string]any{}, builtinSlashCommands...), moreSlashCommands...) {
 			name, _ := c["name"].(string)
 			desc, _ := c["description"].(string)
 			lines = append(lines, fmt.Sprintf("  %s — %s", name, desc))
@@ -51,6 +56,10 @@ func (s *Server) executeSlashCommand(sessionID, command string) map[string]any {
 		return map[string]any{
 			"text": "**Slash commands**\n" + strings.Join(lines, "\n") + "\n\n" + keys + tips,
 		}
+	}
+
+	if out := s.executeMoreSlash(sessionID, raw, phone); out != nil {
+		return out
 	}
 
 	if stripped == "/new" || stripped == "/n" {
@@ -106,12 +115,8 @@ func (s *Server) executeSlashCommand(sessionID, command string) map[string]any {
 		return map[string]any{"text": "Recent sessions:\n" + strings.Join(lines, "\n")}
 	}
 
-	if stripped == "/models" || stripped == "/m" {
-		return map[string]any{
-			"text": "Model list is filtered by your configured provider. " +
-				"Use the model picker in the status bar, or GET /api/models.",
-			"action": "list_models",
-		}
+	if arg, ok := slashModelArg(raw); ok {
+		return s.slashModel(sessionID, arg, phone)
 	}
 
 	if stripped == "/thinking" {

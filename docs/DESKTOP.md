@@ -439,6 +439,7 @@ Metadata: `https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/lates
 | Tag | `v{X.Y.Z}` |
 | NSIS file on disk (Tauri default) | `Remedy Desktop_{X.Y.Z}_x64-setup.exe` (space) |
 | **GitHub Windows asset / `windows-x86_64` URL** | **`Remedy.Desktop_{X.Y.Z}_x64-setup.exe`** (dots for spaces) |
+| **Android phone app** | **`Remedy.Connect_arm64-v8a.apk`** (no version in the name: Settings → Connect → Get the phone app shows a QR for `releases/latest/download/Remedy.Connect_arm64-v8a.apk`, so every release must carry it under this exact name) |
 | **GitHub Linux AppImage / `linux-x86_64` URL** | **`Remedy.Desktop_{X.Y.Z}_amd64.AppImage`** |
 | Metadata asset | `latest.json` (same release) |
 | **macOS `darwin-*` URLs** | **`…/releases/download/runtime-v{X.Y.Z}/Remedy.Desktop_{X.Y.Z}_{aarch64,x64}.app.tar.gz`** (companion release, 0.69.0+) |
