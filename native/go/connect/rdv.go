@@ -587,6 +587,9 @@ func (s *MqttSession) nextID() int {
 	return s.pktID
 }
 
+// maxMQTTPacket bounds one incoming MQTT packet: a record plus topic and headers.
+const maxMQTTPacket = MaxRecord + 1024
+
 func (s *MqttSession) readPacket(ctx context.Context) ([]byte, error) {
 	s.readMu.Lock()
 	defer s.readMu.Unlock()
@@ -632,6 +635,12 @@ func (s *MqttSession) readPacket(ctx context.Context) ([]byte, error) {
 			return nil, fmt.Errorf("%w: MQTT varint too long", ErrMQTT)
 		}
 		multiplier *= 128
+	}
+	// Remedy only ever exchanges records up to MaxRecord over the broker.
+	// A larger declared length is junk or hostile; refusing it avoids a
+	// broker-controlled allocation of up to 256 MiB per packet.
+	if value > maxMQTTPacket {
+		return nil, fmt.Errorf("%w: MQTT packet of %d bytes exceeds %d", ErrMQTT, value, maxMQTTPacket)
 	}
 	body := []byte{}
 	if value > 0 {
