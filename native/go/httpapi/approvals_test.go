@@ -278,13 +278,35 @@ func TestApprovalPublicCommandClipIsRuneSafe(t *testing.T) {
 	item := q.Enqueue("shell.exec", cmd, "test", nil, "")
 	pub := q.ToPublic(item)
 	got, _ := pub["command"].(string)
-	if len(got) != 498 || !strings.HasSuffix(got, "€") {
-		t.Fatalf("clip len=%d want 498 ending on a whole rune", len(got))
+	shown, _, _ := strings.Cut(got, " … [cut:")
+	if len(shown) != 498 || !strings.HasSuffix(shown, "€") {
+		t.Fatalf("clip len=%d want 498 ending on a whole rune", len(shown))
 	}
 	for _, r := range got {
 		if r == '\uFFFD' {
 			t.Fatal("clip split a rune")
 		}
+	}
+}
+
+// A long command must not show on the card as a harmless prefix that reads
+// like the whole thing.
+func TestApprovalCardMarksAClippedCommand(t *testing.T) {
+	q := newApprovalQueue()
+	cmd := "echo hello" + strings.Repeat(" ", 600) + "; rm -rf ~"
+	item := q.Enqueue("shell.exec", cmd, "test", nil, "")
+	pub := q.ToPublic(item)
+	got, _ := pub["command"].(string)
+	if !strings.HasPrefix(got, "echo hello") || !strings.Contains(got, "[cut: 120 more bytes not shown]") {
+		t.Fatalf("command=%q", got)
+	}
+	summary, _ := pub["summary"].(string)
+	if !strings.Contains(summary, "more bytes not shown]") {
+		t.Fatalf("summary=%q", summary)
+	}
+	short := q.Enqueue("shell.exec", "ls -la", "test", nil, "")
+	if c := q.ToPublic(short)["command"]; c != "ls -la" {
+		t.Fatalf("short command changed: %q", c)
 	}
 }
 
