@@ -118,6 +118,10 @@ pub fn app(app: &App) {
     let start_hidden = chrome.start_in_tray.get() && !runtime::spawn_disabled();
     let mut spec = WindowSpec::new("Remedy Desktop")
         .size(1180.0, 740.0)
+        // The window draws its own frame, so below a certain size there is nothing
+        // left to grab. A saved size smaller than this (a minimized window's 160 x 28
+        // was once saved and restored) can then never come back.
+        .min_size(MAIN_MIN_W, MAIN_MIN_H)
         .frameless()
         .hide_on_close()
         .persist_geometry("main")
@@ -127,6 +131,15 @@ pub fn app(app: &App) {
     }
     let a = app.clone();
     let win = app.open(spec, move |ui, window| {
+        // Belt and braces for a saved size the platform restored anyway.
+        let (fix_ui, fix_win) = (ui.clone(), window.clone());
+        let _ = ui.after(std::time::Duration::from_millis(400), move || {
+            let size = fix_ui.window_size();
+            if size.width > 0.0 && window_too_small(size.width, size.height) {
+                fix_win.set_size(1180.0, 740.0);
+                fix_win.center();
+            }
+        });
         chrome.attach(&a, window, ui);
         depth::set_host(a.clone(), window.clone());
         // Window scope, not a Grove/Studio/setup `show` branch. Those
@@ -1087,6 +1100,15 @@ pub fn home_sessions_long(ui: &Ui) -> El {
     )
 }
 
+/// The smallest the main window may be: the narrow layout still works here.
+const MAIN_MIN_W: f32 = 360.0;
+const MAIN_MIN_H: f32 = 280.0;
+
+/// Whether a window of this size is too small to use or to resize by its own frame.
+fn window_too_small(width: f32, height: f32) -> bool {
+    width < MAIN_MIN_W || height < MAIN_MIN_H
+}
+
 /// The Studio shell: left rail, chat well, right rail, status.
 pub fn shell(ui: &Ui, studio: Studio) -> El {
     shell_with(ui, studio, rails::WorkspaceChrome::load())
@@ -1277,6 +1299,19 @@ pub fn window_icon() -> WindowIcon {
     const ICON_32: &[u8] = include_bytes!("../../src-tauri/icons/32x32.png");
     const ICON_128: &[u8] = include_bytes!("../../src-tauri/icons/128x128.png");
     from_png(ICON_32, 32).with_size(from_png(ICON_128, 128))
+}
+
+#[cfg(test)]
+mod window_size_tests {
+    use super::window_too_small;
+
+    #[test]
+    fn a_minimized_windows_saved_size_is_too_small() {
+        assert!(window_too_small(160.0, 28.0), "what Windows reports for a minimized window");
+        assert!(window_too_small(1180.0, 20.0));
+        assert!(!window_too_small(400.0, 700.0), "the narrow layout");
+        assert!(!window_too_small(1180.0, 740.0));
+    }
 }
 
 #[cfg(test)]
