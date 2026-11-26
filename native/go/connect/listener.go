@@ -120,6 +120,7 @@ func (l *Listener) Stop() error {
 
 func (l *Listener) acceptLoop(ctx context.Context) {
 	defer l.wg.Done()
+	var acceptBackoff time.Duration
 	for {
 		l.mu.Lock()
 		ln := l.ln
@@ -136,14 +137,24 @@ func (l *Listener) acceptLoop(ctx context.Context) {
 				if errors.Is(err, net.ErrClosed) {
 					return
 				}
-				var ne net.Error
-				if errors.As(err, &ne) && ne.Timeout() {
-					time.Sleep(5 * time.Millisecond)
-					continue
+				// Any other error (too many open files, a reset handshake)
+				// is usually temporary. Returning here stopped accepting
+				// phone connections until the next restart, so back off
+				// and keep going the way net/http does.
+				if acceptBackoff == 0 {
+					acceptBackoff = 5 * time.Millisecond
+				} else if acceptBackoff *= 2; acceptBackoff > time.Second {
+					acceptBackoff = time.Second
 				}
-				return
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(acceptBackoff):
+				}
+				continue
 			}
 		}
+		acceptBackoff = 0
 		if !l.rateAllow(peerIP(conn)) {
 			_ = conn.Close()
 			continue
