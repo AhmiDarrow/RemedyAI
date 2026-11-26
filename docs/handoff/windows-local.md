@@ -104,8 +104,10 @@ Run `npm run tauri:dev` (and a release build if you can).
 
 ## 5. Behaviour changes to know about
 
-- `/house-rules` works again (it always answered "House rules error"), and
-  `/house-rules revisit` reopens the questions.
+- `/house-rules` now works in the app: the Go runtime answers it (before,
+  only an unused Python handler knew it, so it went to the model as a
+  message). `/house-rules revisit` reopens the questions on the PC; a paired
+  phone can read the rules but not reopen them.
 - Auto quant for the local mind now sees the GPU and RAM. On Windows and
   macOS it used to read every machine as 16 GB with no GPU, so a small card
   may now get a smaller quant than before. Worth a look on your PC.
@@ -121,7 +123,20 @@ Run `npm run tauri:dev` (and a release build if you can).
   (shell.exec, workspace.*, setup.session, prompt.*) are still reachable from
   the local tool API and the CLI.
 
-## 6. Design questions (not changed)
+## 6. Python worker after the cleanup
+
+About 21,000 lines of Python that nothing ran are gone, and the worker now
+serves only `text.*`, `workspace.*`, `prompt.turn_end`, `voice.*` and
+`vision.*` (Go serves the rest).
+
+- Start the packaged desktop app on Windows. Passing: Server info shows
+  the Python worker attached, and a chat turn works.
+- Ask Remedy to read your mail or calendar, and say "let's go over house
+  rules again". Passing: both work (they're served in Go now).
+- Speak to Remedy and have her talk back, and run a vision install. Passing:
+  both still work (still Python).
+
+## 7. Design questions (not changed)
 
 - Messenger senders join your focused desktop session (history and a
   permanent mirror). Tests assert this on purpose. Keep it?
