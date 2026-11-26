@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/sysres"
 )
 
 const maxMediaBytes = 25 * 1024 * 1024
@@ -183,7 +185,7 @@ func (s *Server) handleServeMedia(w http.ResponseWriter, r *http.Request) {
 	}
 	// Then follow symlinks / junctions and check the real target again, so an
 	// image-named link inside a root cannot point at the auth store or out.
-	real, err := filepath.EvalSymlinks(candidate)
+	real, err := sysres.RealPath(candidate)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"detail": "media not found"})
 		return
@@ -266,7 +268,7 @@ func mediaUnderRealRoots(real string, roots []string) bool {
 		if pathUnder(real, root) {
 			return true
 		}
-		if rr, err := filepath.EvalSymlinks(root); err == nil && pathUnder(real, rr) {
+		if rr, err := sysres.RealPath(root); err == nil && pathUnder(real, rr) {
 			return true
 		}
 	}
