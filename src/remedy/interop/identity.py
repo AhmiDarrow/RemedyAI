@@ -53,13 +53,10 @@ class ClaimidxVerifier:
             return TrustResult("untrusted", did, "malformed did", self.name)
         if did.lower().startswith("did:claimidx:") and not CLAIMIDX_DID_RE.match(did):
             return TrustResult("untrusted", did, "malformed did:claimidx", self.name)
-        # Optional live probe: if the local ClaimIDX host is up, treat a
-        # well-formed did:claimidx (or any did:* the host acknowledges) as
-        # verified-format. Cryptographic proof is left to a tighter plugin.
-        if _claimidx_host_healthy():
-            if did.lower().startswith("did:claimidx:") or did.lower().startswith("did:key:"):
-                return TrustResult("verified", did, "claimidx host reachable; did well-formed", self.name)
-        return TrustResult("unverified", did, "claimidx not confirmed", self.name)
+        # The DID is the peer's own claim. A reachable ClaimIDX host and a
+        # well-formed DID prove nothing about who sent this request, so the
+        # peer stays unverified until a plugin checks a signature or proof.
+        return TrustResult("unverified", did, "no proof of the did was checked", self.name)
 
 
 def verifier_for(cfg: dict[str, Any] | None = None, override: IdentityVerifier | None = None) -> IdentityVerifier:
@@ -76,12 +73,3 @@ def _did_of(peer: dict[str, Any]) -> str | None:
         if isinstance(value, str) and value.lower().startswith("did:"):
             return value.strip()
     return None
-
-
-def _claimidx_host_healthy() -> bool:
-    try:
-        from remedy.runtime.claimidx_host import is_healthy
-
-        return bool(is_healthy())
-    except Exception:
-        return False
