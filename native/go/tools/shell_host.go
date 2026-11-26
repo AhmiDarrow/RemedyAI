@@ -504,6 +504,12 @@ func withScratchEnv(spec shellSpawnSpec, home, sessionID string) (shellSpawnSpec
 		env[RemedyScratchEnv] = scratch
 	}
 	spec.env = env
+	// The write jail reads the script's own redirects and copies, so the
+	// session's scratch folder has to be one of its roots for a temporary
+	// script to land there. Empty roots stay empty: that is the unbound jail.
+	if len(spec.writeRoots) > 0 {
+		spec.writeRoots = append(append([]string(nil), spec.writeRoots...), scratch)
+	}
 	return spec, scratch
 }
 
