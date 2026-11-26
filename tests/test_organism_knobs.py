@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from remedy.core import organism_knobs as knobs
 from remedy.memory.soul.inject import DEFAULT_SOUL_CHARS
 

@@ -6,12 +6,14 @@ import json
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from remedy import __version__
 from remedy.core.organism_knobs import resolve, resolve_bool, resolve_int
-from remedy.interop import audit, consent, peers, tasks as taskstore
+from remedy.interop import audit, consent, peers
+from remedy.interop import tasks as taskstore
 from remedy.interop.a2a import extract_text, text_message
 from remedy.interop.card import extended_card, public_card
 from remedy.interop.identity import TrustResult, verifier_for

@@ -241,7 +241,7 @@ def decode(text: str, *, lexicon: Any | None = None) -> dict[str, Any]:
     while rest.startswith("L=") or rest.startswith("v="):
         token, _, rest = rest.partition(" ")
         if token.startswith("L="):
-            with _suppress():
+            with _Suppress():
                 level = int(token[2:])
         elif token.startswith("v="):
             verb = token[2:] or "dense"
@@ -341,7 +341,7 @@ def expand_terms(text: str, lexicon: Any) -> str:
     return out
 
 
-class _suppress:
+class _Suppress:
     def __enter__(self):
         return self
 

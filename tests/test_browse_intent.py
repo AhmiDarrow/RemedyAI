@@ -12,7 +12,6 @@ from remedy.core.computer.browse_intent import (
 from remedy.core.computer.router import normalize_url
 
 
-
 @pytest.fixture(autouse=True)
 def _offline_public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
     """Alias and parse tests must not depend on live public DNS.

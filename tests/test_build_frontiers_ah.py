@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
-
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from remedy.core.build_ast_patch import apply_minimal_patch, replace_top_level_def
 from remedy.core.build_gate_tower import run_gate_tower

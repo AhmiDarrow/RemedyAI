@@ -8,7 +8,8 @@ import threading
 import pytest
 
 from remedy.core import organism_knobs as knobs
-from remedy.interop import consent, peers, tasks as taskstore
+from remedy.interop import consent, peers
+from remedy.interop import tasks as taskstore
 from remedy.interop.a2a import A2AClient, A2AHandler, extract_text
 from remedy.interop.card import WELL_KNOWN_PATH, public_card
 from remedy.interop.http import handle_request

@@ -121,8 +121,17 @@ class A2AHandler:
             return rpc_error(mid, ERR_VERSION, f"VersionNotSupportedError: {version}")
         if method is None:
             return rpc_error(mid, -32601, f"Method not found: {body.get('method')}")
+        handler = {
+            "SendMessage": self._do_send_message,
+            "SendStreamingMessage": self._do_send_streaming_message,
+            "GetTask": self._do_get_task,
+            "ListTasks": self._do_list_tasks,
+            "CancelTask": self._do_cancel_task,
+            "GetExtendedAgentCard": self._do_get_extended_agent_card,
+            "SubscribeToTask": self._do_subscribe_to_task,
+        }[method]
         try:
-            result = getattr(self, f"_do_{method}")(params, headers or {})
+            result = handler(params, headers or {})
         except KeyError as exc:
             if str(exc) == "'not_found'":
                 return rpc_error(mid, ERR_TASK_NOT_FOUND, "TaskNotFoundError")
@@ -135,13 +144,13 @@ class A2AHandler:
             return rpc_error(mid, -32602, str(exc))
         return rpc_result(mid, result)
 
-    def _do_SendMessage(self, params: dict[str, Any], headers: dict[str, str]) -> Any:
+    def _do_send_message(self, params: dict[str, Any], headers: dict[str, str]) -> Any:
         return self.runtime.a2a_send(params, stream=False, headers=headers)
 
-    def _do_SendStreamingMessage(self, params: dict[str, Any], headers: dict[str, str]) -> Any:
+    def _do_send_streaming_message(self, params: dict[str, Any], headers: dict[str, str]) -> Any:
         return self.runtime.a2a_send(params, stream=True, headers=headers)
 
-    def _do_GetTask(self, params: dict[str, Any], headers: dict[str, str]) -> Any:
+    def _do_get_task(self, params: dict[str, Any], headers: dict[str, str]) -> Any:
         task_id = str(params.get("id") or params.get("taskId") or "").strip()
         if not task_id:
             raise ValueError("id is required")
@@ -150,7 +159,7 @@ class A2AHandler:
             raise KeyError("not_found")
         return task
 
-    def _do_ListTasks(self, params: dict[str, Any], headers: dict[str, str]) -> Any:
+    def _do_list_tasks(self, params: dict[str, Any], headers: dict[str, str]) -> Any:
         page, token = self.runtime.list_tasks(
             page_size=int(params.get("pageSize") or 20),
             page_token=params.get("pageToken") or params.get("page_token"),
@@ -162,7 +171,7 @@ class A2AHandler:
             out["nextPageToken"] = token
         return out
 
-    def _do_CancelTask(self, params: dict[str, Any], headers: dict[str, str]) -> Any:
+    def _do_cancel_task(self, params: dict[str, Any], headers: dict[str, str]) -> Any:
         task_id = str(params.get("id") or params.get("taskId") or "").strip()
         if not task_id:
             raise ValueError("id is required")
@@ -173,12 +182,12 @@ class A2AHandler:
             raise KeyError("not_cancelable")
         return task
 
-    def _do_GetExtendedAgentCard(self, params: dict[str, Any], headers: dict[str, str]) -> Any:
+    def _do_get_extended_agent_card(self, params: dict[str, Any], headers: dict[str, str]) -> Any:
         return self.runtime.extended_card()
 
-    def _do_SubscribeToTask(self, params: dict[str, Any], headers: dict[str, str]) -> Any:
+    def _do_subscribe_to_task(self, params: dict[str, Any], headers: dict[str, str]) -> Any:
         # Same payload as GetTask; streaming is handled by the HTTP layer.
-        return self._do_GetTask(params, headers)
+        return self._do_get_task(params, headers)
 
 
 class A2AClient:

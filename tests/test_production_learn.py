@@ -68,7 +68,6 @@ def test_assemble_includes_metabolism_pulse(
     )
     # Pulse must sit after the cache-stable prefix, not rewrite it.
     if "TURN_CONTEXT" in system or "turn context" in system.lower():
-        lower = system.lower()
         # A life-goal pulse line should not be the only content.
         assert "Finish the novel" in system or "Life:" in system or "Outline" in system
 

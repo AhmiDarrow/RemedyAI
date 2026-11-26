@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import os
 import secrets
+from contextlib import suppress
 from pathlib import Path
 
-from remedy.interop.paths import resolve_home, token_path
+from remedy.interop.paths import token_path
 
 ENV_NAME = "REMEDY_INTEROP_TOKEN"
 
@@ -38,10 +39,8 @@ def resolve_token(home: str | Path | None = None, *, create: bool = False) -> st
 def write_token(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(value, encoding="utf-8")
-    try:
+    with suppress(OSError):
         os.chmod(path, 0o600)
-    except OSError:
-        pass
 
 
 def token_matches(provided: str | None, home: str | Path | None = None) -> bool:
