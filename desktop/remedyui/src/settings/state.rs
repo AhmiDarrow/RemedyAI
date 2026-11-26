@@ -378,7 +378,7 @@ impl Settings {
         let s = Self::blank(true);
         s.open.set(true);
         s.phase.set("ready".into());
-        s.user_name.set("Ada".into());
+        s.user_name.set("Ahmi".into());
         s.agent_name.set("Remedy".into());
         s.persona.set("balanced".into());
         s.provider.set("xai".into());
@@ -388,8 +388,8 @@ impl Settings {
         s.base_url.set("https://api.x.ai/v1".into());
         s.loaded_base_url.set("https://api.x.ai/v1".into());
         s.api_key_set.set(true);
-        s.project_path.set("C:/Users/Ada/Projects/Remedy".into());
-        s.loaded_project.set("C:/Users/Ada/Projects/Remedy".into());
+        s.project_path.set("C:/Users/Ahmi/Projects/Remedy".into());
+        s.loaded_project.set("C:/Users/Ahmi/Projects/Remedy".into());
         s.browser_home.set(logic::DEFAULT_BROWSER_HOME.into());
         s.access_scope.set("project".into());
         s.catalog.set(vec![
