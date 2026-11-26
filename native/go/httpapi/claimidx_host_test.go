@@ -74,3 +74,24 @@ func TestClaimidxOffInstallsAndStartsNothing(t *testing.T) {
 	none.Apply()
 	none.Stop()
 }
+
+// The answer 0.7.31 really gives. The check once wanted "Claimidx" exactly, so a
+// healthy host was stopped 20 s after every start.
+func TestClaimidxHealthCheckAcceptsTheRealAnswer(t *testing.T) {
+	real := `{"home":"x","product":"ClaimIDX","operator":{"did":"did:claimidx:remedy","agent":"remedy"},"actors":[]}`
+	if !claimidxIsOurs([]byte(real)) {
+		t.Fatal("the running host's own answer must pass")
+	}
+	if !claimidxIsOurs([]byte(`{"product":"Claimidx","operator":{"did":"did:claimidx:remedy","agent":"remedy"}}`)) {
+		t.Fatal("the older spelling still passes")
+	}
+	for _, other := range []string{
+		`{"product":"ClaimIDX","operator":{"did":"did:claimidx:someone","agent":"remedy"}}`,
+		`{"product":"Other","operator":{"did":"did:claimidx:remedy","agent":"remedy"}}`,
+		`not json`,
+	} {
+		if claimidxIsOurs([]byte(other)) {
+			t.Fatalf("not Remedy's host: %s", other)
+		}
+	}
+}

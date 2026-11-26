@@ -93,13 +93,13 @@ fn feed(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
         .child(partial)
         .child(feed_extras(ui, grove.clone(), kind))
         .child(empty_state(ui, grove.clone(), kind));
-    follow_newest(scroll, grove)
+    follow_newest(ui, scroll, grove)
 }
 
 /// Keeps the feed on its newest message: when it opens, when a message or a
 /// piece of the reply arrives, and when another conversation is opened. Scrolling
 /// up to read lets go; the next message the person sends takes hold again.
-fn follow_newest(scroll: El, grove: Grove) -> El {
+fn follow_newest(ui: &Ui, scroll: El, grove: Grove) -> El {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     let stuck = Rc::new(Cell::new(true));
@@ -111,6 +111,7 @@ fn follow_newest(scroll: El, grove: Grove) -> El {
     let was_streaming = Rc::new(Cell::new(false));
     let (stuck_s, own_s, last_s) = (stuck.clone(), own_move.clone(), last_y.clone());
     let scroller = scroll.clone();
+    let ui = ui.clone();
     scroll
         .on_scroll(move |off| {
             if off.y + 2.0 < last_s.get() && !own_s.replace(false) {
@@ -134,6 +135,17 @@ fn follow_newest(scroll: El, grove: Grove) -> El {
             if stuck.get() {
                 own_move.set(true);
                 scroller.scroll_to(remedy_ui::core::Vec2::new(0.0, 1.0e9));
+                // The new rows have no height until the next layout, so the end is
+                // not the end yet: go there again once they have been measured.
+                for ms in [60u64, 350] {
+                    let (again, tree, own, held) = (scroller.clone(), ui.clone(), own_move.clone(), stuck.clone());
+                    let _ = ui.after(std::time::Duration::from_millis(ms), move || {
+                        if held.get() && tree.tree().contains(again.id()) {
+                            own.set(true);
+                            again.scroll_to(remedy_ui::core::Vec2::new(0.0, 1.0e9));
+                        }
+                    });
+                }
             }
         })
 }
