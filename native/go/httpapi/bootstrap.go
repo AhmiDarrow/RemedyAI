@@ -142,6 +142,15 @@ func (s *Server) handleLocalBootstrap(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// Only a script's fetch gets the token. A top-level or frame navigation
+	// would print it as page text, where anything that can see the page reads
+	// it. Non-browser callers send no Sec-Fetch-Mode and are unaffected.
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Mode")), "navigate") {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "navigation_refused",
+		})
+		return
+	}
 	// A page from another site must not fetch the token through the owner's
 	// browser, whatever CORS would let it read afterwards.
 	if o := strings.TrimSpace(r.Header.Get("Origin")); o != "" && o != "http://"+r.Host {

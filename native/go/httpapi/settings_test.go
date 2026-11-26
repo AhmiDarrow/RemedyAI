@@ -52,6 +52,47 @@ func TestLocalBootstrapLoopback(t *testing.T) {
 	}
 }
 
+func TestLocalBootstrapRefusesNavigation(t *testing.T) {
+	home := t.TempDir()
+	const token = "bootstrap-token-not-sec"
+	t.Setenv("REMEDY_HTTP_BOOTSTRAP", "1")
+	t.Setenv("REMEDY_API_AUTH", "1")
+	if !peerLookupSupported() {
+		stubPeer(t, true, nil)
+	}
+	base, shutdown := startTestServer(t, Config{Token: token, HomeDir: home})
+	defer shutdown()
+	client := &http.Client{Timeout: 3 * time.Second}
+	get := func(mode string) (int, string) {
+		req, err := http.NewRequest(http.MethodGet, base+"/api/auth/local-bootstrap", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mode != "" {
+			req.Header.Set("Sec-Fetch-Mode", mode)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(raw)
+	}
+	for _, mode := range []string{"navigate", "Navigate"} {
+		code, body := get(mode)
+		if code != http.StatusForbidden || strings.Contains(body, token) {
+			t.Fatalf("mode=%s status=%d body=%s", mode, code, body)
+		}
+	}
+	// What the SPA's fetch sends, and what curl / Python send.
+	for _, mode := range []string{"cors", "same-origin", ""} {
+		if code, body := get(mode); code != http.StatusOK || !strings.Contains(body, token) {
+			t.Fatalf("mode=%q status=%d body=%s", mode, code, body)
+		}
+	}
+}
+
 func TestLocalBootstrapDisabled(t *testing.T) {
 	home := t.TempDir()
 	const token = "bootstrap-token-not-sec"
