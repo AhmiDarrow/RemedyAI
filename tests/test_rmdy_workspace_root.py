@@ -65,6 +65,22 @@ def test_workspace_root_defaults_to_documents_remedy(
     assert got == (fake_home / "Documents" / "Remedy").resolve()
 
 
+def test_filesystem_root_is_never_the_workspace(tmp_path: Path, monkeypatch) -> None:
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    docs = (fake_home / "Documents" / "Remedy").resolve()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    for key in ("REMEDY_WORKSPACE", "REMEDY_PROJECT_PATH", "REMEDY_PROJECT", "REMEDY_FILES_ROOT", "REMEDY_HOME"):
+        monkeypatch.delenv(key, raising=False)
+    fs_root = Path(Path.cwd().anchor)
+    monkeypatch.chdir(fs_root)
+
+    assert w._workspace_root() == docs
+    assert w._workspace_root({"workspace_root": str(fs_root)}) == docs
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(fs_root))
+    assert w._workspace_root() == docs
+
+
 def test_junk_listing_name_filters_private_use() -> None:
     assert w._is_junk_listing_name("C\uf03a")
     assert not w._is_junk_listing_name("src")
