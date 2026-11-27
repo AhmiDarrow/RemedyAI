@@ -51,6 +51,11 @@ jobs:
         shell: pwsh
         run: |
           choco install nsis -y --no-progress
+          # Chocolatey does not put makensis on the path of later steps.
+          $nsis = "${env:ProgramFiles(x86)}\NSIS"
+          if (-not (Test-Path (Join-Path $nsis "makensis.exe"))) { throw "makensis.exe is not in $nsis" }
+          Add-Content -Path $env:GITHUB_PATH -Value $nsis
+          Add-Content -Path $env:GITHUB_ENV -Value "NSISDIR=$nsis"
           $zip = Join-Path $env:RUNNER_TEMP "minisign.zip"
           Invoke-WebRequest -Uri "https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip" -OutFile $zip
           $dest = Join-Path $env:RUNNER_TEMP "minisign"
