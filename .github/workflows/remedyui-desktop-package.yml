@@ -107,7 +107,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libwayland-dev libxkbcommon-dev \
-            dpkg-dev file curl ca-certificates libfuse2 python3
+            dpkg-dev file curl ca-certificates libfuse2 python3 \
+            libx11-dev libxtst-dev libatspi2.0-dev libdbus-1-dev libglib2.0-dev
           curl -fsSL -o /tmp/minisign.tar.gz \
             https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
           sudo tar -C /usr/local/bin -xzf /tmp/minisign.tar.gz --strip-components=2 minisign-linux/x86_64/minisign
