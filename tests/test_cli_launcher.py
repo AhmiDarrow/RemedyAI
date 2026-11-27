@@ -73,5 +73,19 @@ def test_unported_command_stays_in_python(monkeypatch):
     seen: list[list[str]] = []
     monkeypatch.setattr(launcher, "_python_main", lambda a: seen.append(a))
     monkeypatch.setattr(launcher, "_runtime_command", lambda: pytest.fail("looked for the runtime"))
-    launcher.main(["setup", "--quick"])
-    assert seen == [["setup", "--quick"]]
+    launcher.main(["skill", "list"])
+    assert seen == [["skill", "list"]]
+
+
+def test_child_env_names_this_python_for_pip(monkeypatch):
+    monkeypatch.delenv("REMEDY_CLI_PYTHON", raising=False)
+    monkeypatch.delenv("REMEDY_CLI_PACKAGE_DIR", raising=False)
+    env = launcher.child_env(None)
+    assert env["REMEDY_CLI_PYTHON"] == os.path.abspath(sys.executable)
+    assert (Path(env["REMEDY_CLI_PACKAGE_DIR"]) / "__init__.py").is_file()
+
+
+def test_frozen_app_leaves_pip_unset(monkeypatch):
+    monkeypatch.delenv("REMEDY_CLI_PYTHON", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert "REMEDY_CLI_PYTHON" not in launcher.child_env(None)

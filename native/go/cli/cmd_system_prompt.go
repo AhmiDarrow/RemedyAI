@@ -108,7 +108,7 @@ func (p *sysPrompter) Float(prompt string, def float64) float64 {
 func (p *sysPrompter) Secret(prompt string) string {
 	fmt.Fprint(p.out, prompt)
 	if f, ok := p.in.(*os.File); ok && secret.IsTerminal(f.Fd()) && p.r.Buffered() == 0 {
-		if restore, err := secret.DisableEcho(f.Fd()); err == nil {
+		if restore, hidden := secret.DisableEcho(f); hidden {
 			defer func() {
 				restore()
 				fmt.Fprintln(p.out)

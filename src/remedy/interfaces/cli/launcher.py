@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 #: Top-level commands the Go CLI answers. Grows as groups move over.
 GO_COMMANDS = frozenset(
@@ -34,6 +35,11 @@ GO_COMMANDS = frozenset(
         "settings",
         "tool",
         "user",
+        "setup",
+        "update",
+        "uninstall",
+        "mcp",
+        "computer",
     }
 )
 
@@ -125,6 +131,18 @@ def child_env(core_lib: str | None) -> dict[str, str]:
             pass
     if core_lib and not env.get("REMEDY_NATIVE_CORE_LIB", "").strip():
         env["REMEDY_NATIVE_CORE_LIB"] = core_lib
+    # update/uninstall drive pip with this interpreter and report this package
+    # path. A frozen app leaves both unset, so Go only reports and clears data.
+    if not getattr(sys, "frozen", False) and sys.executable:
+        env.setdefault("REMEDY_CLI_PYTHON", os.path.abspath(sys.executable))
+        try:
+            import remedy
+
+            env.setdefault(
+                "REMEDY_CLI_PACKAGE_DIR", str(Path(remedy.__file__).resolve().parent)
+            )
+        except Exception:
+            pass
     # Until the runtime starts no Python, it hands this interpreter to its
     # worker. abspath, not realpath: a venv python is often a symlink.
     if not env.get("REMEDY_PYTHON", "").strip() and sys.executable:
