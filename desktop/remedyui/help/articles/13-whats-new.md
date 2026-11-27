@@ -52,6 +52,24 @@ Earlier notes follow on this page, newest first.
   app and Escape returns. Deleting the open session no longer closes the app.
 - **Narrow windows.** The session header, Plan beside Chat, and Grove's status
   row now reflow instead of clipping.
+- **Commands everywhere.** About sixty slash commands, and they work in Grove
+  and on a paired phone as well as in Studio. `/commands` lists them.
+- **Usage.** The Usage screen and `/usage` show the tokens each model round
+  used. No cost is shown, because Remedy has no price list to go by.
+- **Files rail.** It leaves the project: up to the drive, into any folder your
+  access setting allows, with a row of places to jump to.
+- **Text and emoji.** Chat text can be selected and copied, and emoji draw
+  whole on Windows.
+- **No Python.** The runtime, the voice, the image model and the `remedy`
+  command line are all native. Nothing Python is installed or started.
+- **Web search.** Remedy runs her own local search engine again, so searches
+  stop falling back to a page that asks whether you are human.
+- **WSL.** WSL bash works inside a project folder and is kept to it.
+- **Safer by default.** In Auto, a shell command that reaches outside the
+  project, names a key file or contacts the network waits for you. Each
+  safeguard has a setting; see Security in this manual.
+- **One version.** The desktop, the phone app, the runtime and the command
+  line all carry the same number.
 
 ## 1.0.0 - A new desktop
 
