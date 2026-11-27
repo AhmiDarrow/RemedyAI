@@ -4,7 +4,6 @@
  */
 
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
-import { listAgents } from '../api/messages'
 import {
   listConnectedProviders,
   pickerFromConnectedResponse,
@@ -169,22 +168,11 @@ export function useAppBootstrap(opts: {
         const bootProvider = settings.llm_provider
           ? String(settings.llm_provider)
           : undefined
-        const [modelsData, agents] = await Promise.all([
-          refreshModelsRef.current({
-            selectDefault: !settings?.llm_model,
-            provider: bootProvider,
-          }),
-          listAgents().catch(() => null),
-        ])
+        const modelsData = await refreshModelsRef.current({
+          selectDefault: !settings?.llm_model,
+          provider: bootProvider,
+        })
         if (cancelled) return
-        if (agents) {
-          setAgentDefs(
-            Array.isArray(agents)
-              ? agents
-              : (agents as { agents?: { name: string; description: string }[] })
-                  .agents || [],
-          )
-        }
         if (!settings?.llm_model && modelsData?.default) {
           setModel(modelsData.default)
         }

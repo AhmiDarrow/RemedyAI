@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import importlib.util
 from pathlib import Path
@@ -27,4 +28,6 @@ def test_python_fastapi_routes_package_is_gone() -> None:
     assert importlib.util.find_spec("remedy.interfaces.routes") is None
     assert not Path("src/remedy/interfaces/routes").exists()
     assert importlib.util.find_spec("remedy.connect") is None
-    assert importlib.util.find_spec("remedy.core.computer.host_conpty") is None
+    # The whole package is gone, so asking for a module inside it raises.
+    with contextlib.suppress(ModuleNotFoundError):
+        assert importlib.util.find_spec("remedy.core.computer.host_conpty") is None
