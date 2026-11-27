@@ -56,8 +56,8 @@ func (r *CognitionTurnRunner) tickSkillsAfterTurn(req TurnRequest) {
 	}
 }
 
-// consolidateMinNotes is how many of a session's memory notes (of the latest
-// 24) make the turn end fold them into one consolidation entry.
+// consolidateMinNotes is how many new memory notes in a session make the
+// turn end fold them into one consolidation entry.
 const consolidateMinNotes = 8
 
 // consolidateMemoryAfterTurn is the MemoryConsolidator pass the old turn end
@@ -81,8 +81,9 @@ func (r *CognitionTurnRunner) consolidateMemoryAfterTurn(req TurnRequest) {
 		return
 	}
 	defer store.Close()
-	notes, err := store.listBySession(sid, 24)
-	if err == nil && len(notes) >= consolidateMinNotes {
+	notes, err := store.listBySession(sid, 100)
+	// Only notes no consolidation has folded yet count towards the next one.
+	if err == nil && len(cliStoreUnconsolidated(notes)) >= consolidateMinNotes {
 		_, err = store.Consolidate(sid, 100)
 	}
 	r.noteLearnCall("turn_end", started, nil, err)

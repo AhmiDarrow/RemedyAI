@@ -231,10 +231,9 @@ func cmdSettings(c *Ctx) int {
 	return 0
 }
 
-// cfgSnapshot is the Settings payload. The version is the one the launcher
-// passes in, else the runtime's own.
+// cfgSnapshot is the Settings payload, with the runtime's own version.
 func cfgSnapshot(home string) map[string]any {
-	return httpapi.CLISettingsSnapshot(home, strings.TrimSpace(os.Getenv("REMEDY_CLI_VERSION")))
+	return httpapi.CLISettingsSnapshot(home, "")
 }
 
 func cfgSettingsSet(c *Ctx) int {

@@ -4,18 +4,15 @@ Desktop is recommended for daily use. CLI and API share the same home data when 
 
 ## Install CLI
 
-```bash
-pip install remedy-ai
-# not: pip install remedy  (unrelated package)
-```
+Desktop installers (from the releases page) include the `remedy` command. On a machine without a desktop, run `sh scripts/install.sh` (Linux, macOS) or `scripts/install.ps1` (Windows) from the repository.
 
 From source:
 
 ```bash
 git clone https://github.com/AhmiDarrow/RemedyAI.git
 cd RemedyAI
-uv sync   # or: pip install -e .
-remedy --version
+cd native/go && go build -o remedy ./cmd/remedy-runtime
+./remedy --version
 ```
 
 ## Core commands
@@ -37,8 +34,6 @@ Desktop sidecar already runs `serve` with `--skip-setup`. Do not start a second 
 
 ```bash
 remedy mcp serve
-# equivalent console script (packaged with remedy-ai):
-remedy-mcp
 # optional Streamable HTTP on loopback (never port 7400; that is remedy serve):
 remedy mcp serve --http --host 127.0.0.1 --port 7401
 ```
@@ -49,14 +44,14 @@ so Claude, ChatGPT, Cursor, or another MCP app can talk to her as a peer.
 Inbound A2A and MCP on `remedy serve` (`:7400`) stay off until you enable
 them in Settings → Advanced. Details: `docs/AGENT_INTEROP.md`.
 
-Configure any MCP-compatible client with a stdio MCP server (same Python env as `remedy`):
+Configure any MCP-compatible client with a stdio MCP server (the `remedy` command):
 
 ```json
 {
   "mcpServers": {
     "remedy": {
-      "command": "remedy-mcp",
-      "args": []
+      "command": "remedy",
+      "args": ["mcp", "serve"]
     }
   }
 }

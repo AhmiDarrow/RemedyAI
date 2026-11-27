@@ -29,19 +29,19 @@
 
 Silent/passive/update installs may relaunch automatically.
 
-## PyPI CLI (optional)
+## Without the desktop app (optional)
 
 ```powershell
-pip install remedy-ai
+.\scripts\install.ps1
 remedy serve
 ```
 
-The wheel does not contain `remedy-runtime.exe`. The first `remedy serve`
-downloads it plus `remedy_core.dll` from this version's `runtime-v<version>`
-GitHub release,
-verifies them against the checksums pinned inside the wheel, and caches them under
-`%USERPROFILE%\.remedy\runtime\`. Prefer the Desktop installer above if
-you want a Start Menu app; it already includes both binaries.
+Run the script from a clone of the repository. It downloads
+`remedy-runtime.exe` plus `remedy_core.dll` from this version's
+`runtime-v<version>` GitHub release, verifies them against
+`remedy-native-SHA256SUMS.txt`, and installs them for the current user. Prefer
+the Desktop installer above if you want a Start Menu app; it already includes
+both binaries.
 
 
 ## Where files live

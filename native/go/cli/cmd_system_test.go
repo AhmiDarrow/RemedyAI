@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/httpapi"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
@@ -231,24 +230,24 @@ func TestCLISystemUpdateVersionOrdering(t *testing.T) {
 	}
 }
 
-func TestCLISystemUpdateReadsPyPIForRemedyAIOnly(t *testing.T) {
-	if !strings.HasSuffix(sysPyPIURL, "/pypi/remedy-ai/json") {
-		t.Fatalf("wrong PyPI dist: %s", sysPyPIURL)
+func TestCLISystemUpdateReadsTheReleaseFeed(t *testing.T) {
+	if !strings.HasSuffix(sysLatestURL, "/AhmiDarrow/RemedyAI/releases/latest/download/latest.json") {
+		t.Fatalf("wrong feed: %s", sysLatestURL)
 	}
 	var ua string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ua = r.Header.Get("User-Agent")
 		switch r.URL.Path {
 		case "/ok":
-			_, _ = w.Write([]byte(`{"info":{"version":"2.3.4"}}`))
+			_, _ = w.Write([]byte(`{"version":"v2.3.4","platforms":{}}`))
 		case "/bad":
-			_, _ = w.Write([]byte(`{"info":{"version":7}}`))
+			_, _ = w.Write([]byte(`{"version":7}`))
 		default:
 			http.Error(w, "x", 500)
 		}
 	}))
 	defer srv.Close()
-	if v := sysFetchLatest(srv.URL + "/ok"); v != "2.3.4" || ua != "Remedy-Updater" {
+	if v := sysFetchLatest(srv.URL + "/ok"); v != "v2.3.4" || ua != "Remedy-Updater" {
 		t.Fatalf("latest %q ua %q", v, ua)
 	}
 	if v := sysFetchLatest(srv.URL + "/bad"); v != "" {
@@ -259,225 +258,61 @@ func TestCLISystemUpdateReadsPyPIForRemedyAIOnly(t *testing.T) {
 	}
 }
 
-func TestCLISystemUpdateInstallSourceFromDirectURL(t *testing.T) {
-	for text, want := range map[string]string{
-		"": "pip",
-		`{"url":"https://files.pythonhosted.org/x.whl"}`:                                    "pip",
-		`{"url":"https://github.com/AhmiDarrow/RemedyAI.git","dir_info":{"editable":true}}`: "git-editable",
-		`{"url":"https://github.com/AhmiDarrow/RemedyAI.git"}`:                              "git-folder",
-		`{"url":"file:///x","vcs_info":{"vcs":"git"}}`:                                      "git-folder",
-		`{"url":"https://x/y.whl","dir_info":"malformed","vcs_info":["git"]}`:               "pip",
-		`{ this is not json`: "unknown",
-		`[1,2]`:              "unknown",
-	} {
-		if got := sysClassifyDirectURL(text); got != want {
-			t.Fatalf("%q: %s want %s", text, got, want)
-		}
-	}
-	if sysProbeInstallSource("", nil) != "unknown" {
-		t.Fatal("no python must read as unknown")
+func newSysFakeUpdate(installed, latest string, desktop bool) *sysUpdater {
+	return &sysUpdater{
+		installed: func() string { return installed },
+		latest:    func() string { return latest },
+		desktop:   func() bool { return desktop },
 	}
 }
 
-func TestCLISystemUpdateFindsOnlyThisProductsRoot(t *testing.T) {
-	ours := t.TempDir()
-	_ = os.WriteFile(filepath.Join(ours, "pyproject.toml"), []byte("[project]\nname = \"remedy-ai\"\n"), 0o600)
-	deep := filepath.Join(ours, "src", "remedy")
-	_ = os.MkdirAll(deep, 0o755)
-	if got := sysFindProjectRoot(deep); got != ours {
-		t.Fatalf("root %q want %q", got, ours)
-	}
-	stranger := t.TempDir()
-	_ = os.WriteFile(filepath.Join(stranger, "pyproject.toml"), []byte("[project]\nname = \"remedy\"\n"), 0o600)
-	if got := sysFindProjectRoot(stranger); got == stranger {
-		t.Fatal("a stranger's remedy project was accepted")
-	}
-	gitTree := t.TempDir()
-	_ = os.MkdirAll(filepath.Join(gitTree, ".git"), 0o755)
-	_ = os.MkdirAll(filepath.Join(gitTree, "src", "remedy", "interfaces"), 0o755)
-	if got := sysFindProjectRoot(gitTree); got == gitTree {
-		t.Fatal("git tree without updater.py accepted")
-	}
-	_ = os.WriteFile(filepath.Join(gitTree, "src", "remedy", "interfaces", "updater.py"), []byte(""), 0o600)
-	if got := sysFindProjectRoot(gitTree); got != gitTree {
-		t.Fatalf("git tree with our layout refused: %q", got)
-	}
-	if !sysIsRemedyPyproject(`name = 'remedy'`+"\n# Ahmi") || sysIsRemedyPyproject(`name = "remedy"`) {
-		t.Fatal("legacy pyproject recognition")
-	}
-}
-
-type sysFakeUpdate struct {
-	u      *sysUpdater
-	argvs  [][]string
-	result map[string]sysRunResult // keyed by argv[1]
-}
-
-func newSysFakeUpdate(installed, latest, source, root string, tty bool) *sysFakeUpdate {
-	f := &sysFakeUpdate{result: map[string]sysRunResult{}}
-	f.u = &sysUpdater{
-		installed:     func() string { return installed },
-		latest:        func() string { return latest },
-		frozen:        func() bool { return false },
-		installSource: func() string { return source },
-		projectRoot:   func() string { return root },
-		git:           func() string { return "git" },
-		isTTY:         func() bool { return tty },
-		python:        func() string { return "python" },
-		configExists:  func() bool { return true },
-	}
-	f.u.run = func(argv []string, cwd string, _ time.Duration) sysRunResult {
-		f.argvs = append(f.argvs, argv)
-		key := strings.Join(argv[1:], " ")
-		if r, ok := f.result[key]; ok {
-			return r
-		}
-		return sysRunResult{}
-	}
-	return f
-}
-
-func (f *sysFakeUpdate) installs() []string {
-	var out []string
-	for _, a := range f.argvs {
-		j := strings.Join(a, " ")
-		if strings.Contains(j, "pip install") || strings.HasSuffix(j, " pull") {
-			out = append(out, j)
-		}
-	}
-	return out
-}
-
-func sysUpdateCtx(stdin string) (*Ctx, *bytes.Buffer, *bytes.Buffer) {
+func sysUpdateCtx() (*Ctx, *bytes.Buffer, *bytes.Buffer) {
 	var out, errb bytes.Buffer
-	return &Ctx{Out: &out, Err: &errb, In: strings.NewReader(stdin)}, &out, &errb
+	return &Ctx{Out: &out, Err: &errb, In: strings.NewReader("")}, &out, &errb
 }
 
-func TestCLISystemUpdateCheckOnlyNeverInstalls(t *testing.T) {
-	f := newSysFakeUpdate("1.0.0", "2.0.0", "pip", "", true)
-	c, out, _ := sysUpdateCtx("y\n")
-	if code := f.u.runUpdate(c, true); code != 0 || len(f.installs()) != 0 {
-		t.Fatalf("exit %d installs %v", code, f.installs())
+func TestCLISystemUpdateNewerReleasePointsAtTheInstallScript(t *testing.T) {
+	c, out, _ := sysUpdateCtx()
+	if code := newSysFakeUpdate("1.0.0", "v2.0.0", false).runUpdate(c); code != 0 {
+		t.Fatalf("exit %d", code)
 	}
-	if !strings.Contains(out.String(), "Update available: 1.0.0 -> 2.0.0") || !strings.Contains(out.String(), "without --check") {
+	if !strings.Contains(out.String(), "Update available: 1.0.0 -> v2.0.0") || !strings.Contains(out.String(), "Run the install script again") {
+		t.Fatal(out.String())
+	}
+	if strings.Contains(strings.ToLower(out.String()), "pip") {
+		t.Fatalf("pip is gone: %s", out)
+	}
+}
+
+func TestCLISystemUpdateDesktopSaysItUpdatesItself(t *testing.T) {
+	c, out, _ := sysUpdateCtx()
+	if code := newSysFakeUpdate("1.0.0", "v2.0.0", true).runUpdate(c); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(out.String(), "The desktop app updates itself") || strings.Contains(out.String(), "install script") {
 		t.Fatal(out.String())
 	}
 }
 
 func TestCLISystemUpdateOfflineExitsOne(t *testing.T) {
-	f := newSysFakeUpdate("1.0.0", "", "pip", "", true)
-	c, out, errs := sysUpdateCtx("")
-	if code := f.u.runUpdate(c, false); code != 1 {
+	c, out, errs := sysUpdateCtx()
+	if code := newSysFakeUpdate("1.0.0", "", false).runUpdate(c); code != 1 {
 		t.Fatalf("exit %d", code)
 	}
-	if strings.Contains(strings.ToLower(out.String()), "up to date") || !strings.Contains(errs.String(), "Could not reach PyPI") {
+	if strings.Contains(strings.ToLower(out.String()), "up to date") || !strings.Contains(errs.String(), "Could not reach the release feed") {
 		t.Fatalf("offline claimed current:\n%s\n%s", out, errs)
 	}
 }
 
 func TestCLISystemUpdateUpToDateAndNewerLocalBuild(t *testing.T) {
-	f := newSysFakeUpdate("1.0.0", "1.0.0", "pip", "", true)
-	c, out, _ := sysUpdateCtx("")
-	if code := f.u.runUpdate(c, false); code != 0 || !strings.Contains(out.String(), "Remedy is up to date.") {
+	c, out, _ := sysUpdateCtx()
+	if code := newSysFakeUpdate("1.0.0", "v1.0.0", false).runUpdate(c); code != 0 || !strings.Contains(out.String(), "Remedy is up to date.") {
 		t.Fatalf("%d %s", code, out)
 	}
-	f = newSysFakeUpdate("2.0.0", "1.0.0", "pip", "", true)
-	c, out, _ = sysUpdateCtx("y\n")
-	if code := f.u.runUpdate(c, false); code != 0 || len(f.installs()) != 0 || !strings.Contains(out.String(), "is newer or different") {
-		t.Fatalf("downgraded: %d %v %s", code, f.installs(), out)
-	}
-}
-
-func TestCLISystemUpdateWithoutATTYDeclines(t *testing.T) {
-	f := newSysFakeUpdate("1.0.0", "2.0.0", "pip", "", false)
-	c, out, _ := sysUpdateCtx("y\n")
-	if code := f.u.runUpdate(c, false); code != 0 || len(f.installs()) != 0 || !strings.Contains(out.String(), "Non-interactive") {
-		t.Fatalf("%d %v %s", code, f.installs(), out)
-	}
-	// Answering no, or giving no answer, cancels too.
-	for _, in := range []string{"n\n", "", "maybe\n"} {
-		f = newSysFakeUpdate("1.0.0", "2.0.0", "pip", "", true)
-		c, out, _ = sysUpdateCtx(in)
-		if code := f.u.runUpdate(c, false); code != 0 || len(f.installs()) != 0 || !strings.Contains(out.String(), "Update cancelled.") {
-			t.Fatalf("%q: %d %v %s", in, code, f.installs(), out)
-		}
-	}
-}
-
-func TestCLISystemUpdatePipUpgradeTargetsRemedyAIAndFailureExitsOne(t *testing.T) {
-	f := newSysFakeUpdate("1.0.0", "2.0.0", "pip", "", true)
-	c, out, _ := sysUpdateCtx("y\n")
-	if code := f.u.runUpdate(c, false); code != 0 {
-		t.Fatalf("exit %d %s", code, out)
-	}
-	if got := f.installs(); len(got) != 1 || got[0] != "python -m pip install --upgrade remedy-ai" {
-		t.Fatalf("installs %v", got)
-	}
-	if !strings.Contains(out.String(), "Update complete!") || !strings.Contains(out.String(), "OK  Config valid") {
-		t.Fatal(out.String())
-	}
-	f = newSysFakeUpdate("1.0.0", "2.0.0", "unknown", "", true)
-	f.result["-m pip install --upgrade remedy-ai"] = sysRunResult{code: 1, stderr: "boom"}
-	c, out, _ = sysUpdateCtx("y\n")
-	if code := f.u.runUpdate(c, false); code != 1 {
-		t.Fatalf("failed apply exit %d", code)
-	}
-	if !strings.Contains(out.String(), "Update failed") || !strings.Contains(out.String(), "AhmiDarrow/RemedyAI") {
-		t.Fatal(out.String())
-	}
-}
-
-func TestCLISystemUpdateGitInstallPullsAndFallsBackOnRefs(t *testing.T) {
-	root := t.TempDir()
-	f := newSysFakeUpdate("1.0.0", "", "git-editable", root, true)
-	f.result["rev-list --count HEAD..@{upstream} --"] = sysRunResult{code: 128}
-	f.result["rev-list --count HEAD..origin/master --"] = sysRunResult{code: 0, stdout: "fatal"}
-	f.result["rev-list --count HEAD..origin/main --"] = sysRunResult{code: 0, stdout: "3\n"}
-	c, out, _ := sysUpdateCtx("y\n")
-	if code := f.u.runUpdate(c, false); code != 0 {
-		t.Fatalf("exit %d %s", code, out)
-	}
-	if !strings.Contains(out.String(), "Git behind by: 3 commits") {
-		t.Fatal(out.String())
-	}
-	want := []string{"git pull", "python -m pip install -e ."}
-	if got := f.installs(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("installs %v", got)
-	}
-	// A git source without a located root upgrades via pip.
-	f = newSysFakeUpdate("1.0.0", "2.0.0", "git-folder", "", true)
-	c, _, _ = sysUpdateCtx("y\n")
-	f.u.runUpdate(c, false)
-	if got := f.installs(); len(got) != 1 || !strings.Contains(got[0], "--upgrade remedy-ai") {
-		t.Fatalf("installs %v", got)
-	}
-}
-
-func TestCLISystemUpdateDirtyCheckoutAborts(t *testing.T) {
-	root := t.TempDir()
-	_ = os.MkdirAll(filepath.Join(root, ".git"), 0o755)
-	_ = os.WriteFile(filepath.Join(root, "pyproject.toml"), []byte("name = \"remedy-ai\"\n"), 0o600)
-	f := newSysFakeUpdate("1.0.0", "2.0.0", "git-editable", root, true)
-	f.result["-C "+root+" status --porcelain"] = sysRunResult{stdout: " M src/x.py\n"}
-	c, out, _ := sysUpdateCtx("y\n")
-	if code := f.u.runUpdate(c, false); code != 1 || len(f.installs()) != 0 || !strings.Contains(out.String(), "dirty") {
-		t.Fatalf("%d %v %s", code, f.installs(), out)
-	}
-	// A failing status check does not block the pull.
-	f = newSysFakeUpdate("1.0.0", "2.0.0", "git-editable", root, true)
-	f.result["-C "+root+" status --porcelain"] = sysRunResult{code: 128}
-	c, _, _ = sysUpdateCtx("y\n")
-	if code := f.u.runUpdate(c, false); code != 0 || len(f.installs()) != 2 {
-		t.Fatalf("%d %v", code, f.installs())
-	}
-}
-
-func TestCLISystemUpdateFrozenBuildOnlyReports(t *testing.T) {
-	f := newSysFakeUpdate("1.0.0", "2.0.0", "pip", "", true)
-	f.u.frozen = func() bool { return true }
-	c, out, _ := sysUpdateCtx("y\n")
-	if code := f.u.runUpdate(c, false); code != 0 || len(f.argvs) != 0 || !strings.Contains(out.String(), "About Remedy -> Check for updates") {
-		t.Fatalf("%d %v %s", code, f.argvs, out)
+	c, out, _ = sysUpdateCtx()
+	if code := newSysFakeUpdate("2.0.0", "v1.0.0", false).runUpdate(c); code != 0 || !strings.Contains(out.String(), "is newer or different") ||
+		strings.Contains(out.String(), "Update available") {
+		t.Fatalf("downgrade advised: %d %s", code, out)
 	}
 }
 
@@ -486,30 +321,20 @@ func TestCLISystemUpdateFrozenBuildOnlyReports(t *testing.T) {
 // sysUninstallFakes replaces every outside effect and records removals.
 type sysUninstallFakes struct {
 	removed []string
-	pipArgs [][]string
 	killed  []int
 	visions []string
-	pipFail bool
 }
 
-func installSysUninstallFakes(t *testing.T, python string) *sysUninstallFakes {
+func installSysUninstallFakes(t *testing.T) *sysUninstallFakes {
 	t.Helper()
 	f := &sysUninstallFakes{}
-	oldRemove, oldPip, oldMatch, oldKill, oldVision, oldUH := sysRemoveAll, sysPipRun, sysMatchingProcesses, sysKillTree, sysWipeVisionData, sysUserHome
+	oldRemove, oldMatch, oldKill, oldVision, oldUH := sysRemoveAll, sysMatchingProcesses, sysKillTree, sysWipeVisionData, sysUserHome
 	t.Cleanup(func() {
-		sysRemoveAll, sysPipRun, sysMatchingProcesses, sysKillTree, sysWipeVisionData, sysUserHome = oldRemove, oldPip, oldMatch, oldKill, oldVision, oldUH
+		sysRemoveAll, sysMatchingProcesses, sysKillTree, sysWipeVisionData, sysUserHome = oldRemove, oldMatch, oldKill, oldVision, oldUH
 	})
-	t.Setenv("REMEDY_CLI_PYTHON", python)
 	sysRemoveAll = func(p string) error {
 		f.removed = append(f.removed, p)
 		return os.RemoveAll(p)
-	}
-	sysPipRun = func(args []string, _ time.Duration) (string, string, int, error) {
-		f.pipArgs = append(f.pipArgs, args)
-		if f.pipFail {
-			return "", "ERROR: permission denied", 1, nil
-		}
-		return "Successfully uninstalled remedy-ai", "", 0, nil
 	}
 	sysMatchingProcesses = func(string) [][2]string { return [][2]string{{"4242", "/opt/llama-server -m x.gguf"}} }
 	sysKillTree = func(pid int) error { f.killed = append(f.killed, pid); return nil }
@@ -546,7 +371,7 @@ func TestCLISystemUninstallNeverTargetsAPathOutsideTheAllowedSet(t *testing.T) {
 	}
 	for _, flags := range [][]string{{"--config"}, {"--skills"}, {"--config", "--skills"}, {"--purge"}, {}} {
 		t.Run(strings.Join(flags, "+"), func(t *testing.T) {
-			f := installSysUninstallFakes(t, "python")
+			f := installSysUninstallFakes(t)
 			home, outside := sysPopulatedHome(t)
 			code, out, errs := sysRun(t, home, "y\n", append([]string{"uninstall"}, flags...)...)
 			if code != 0 {
@@ -592,7 +417,7 @@ func TestCLISystemUninstallNeverTargetsAPathOutsideTheAllowedSet(t *testing.T) {
 }
 
 func TestCLISystemUninstallSkillsWipeIsSelective(t *testing.T) {
-	installSysUninstallFakes(t, "python")
+	installSysUninstallFakes(t)
 	home, _ := sysPopulatedHome(t)
 	if code, out, _ := sysRun(t, home, "y\n", "uninstall", "--skills"); code != 0 {
 		t.Fatal(out)
@@ -610,7 +435,7 @@ func TestCLISystemUninstallSkillsWipeIsSelective(t *testing.T) {
 }
 
 func TestCLISystemUninstallConfigWipeAlsoStopsAndRemovesVision(t *testing.T) {
-	f := installSysUninstallFakes(t, "python")
+	f := installSysUninstallFakes(t)
 	home, _ := sysPopulatedHome(t)
 	if code, out, _ := sysRun(t, home, "y\n", "uninstall", "--config"); code != 0 {
 		t.Fatal(out)
@@ -629,7 +454,7 @@ func TestCLISystemUninstallConfigWipeAlsoStopsAndRemovesVision(t *testing.T) {
 }
 
 func TestCLISystemUninstallSymlinkInsideHomeIsNotFollowed(t *testing.T) {
-	installSysUninstallFakes(t, "python")
+	installSysUninstallFakes(t)
 	base := t.TempDir()
 	home := filepath.Join(base, ".remedy")
 	_ = os.MkdirAll(home, 0o700)
@@ -651,7 +476,7 @@ func TestCLISystemUninstallSymlinkInsideHomeIsNotFollowed(t *testing.T) {
 }
 
 func TestCLISystemUninstallRefusesAHomeThatIsNotARemedyDir(t *testing.T) {
-	f := installSysUninstallFakes(t, "python")
+	f := installSysUninstallFakes(t)
 	base := t.TempDir()
 	victim := filepath.Join(base, "Documents")
 	_ = os.MkdirAll(filepath.Join(victim, "skills"), 0o700)
@@ -704,11 +529,11 @@ func TestCLISystemUninstallSafeRootRules(t *testing.T) {
 }
 
 func TestCLISystemUninstallDryRunTouchesNothing(t *testing.T) {
-	f := installSysUninstallFakes(t, "python")
+	f := installSysUninstallFakes(t)
 	home, _ := sysPopulatedHome(t)
 	code, out, _ := sysRun(t, home, "y\n", "uninstall", "--purge", "--dry-run")
-	if code != 0 || len(f.removed) != 0 || len(f.pipArgs) != 0 || len(f.killed) != 0 {
-		t.Fatalf("dry run acted: %d %v %v %v", code, f.removed, f.pipArgs, f.killed)
+	if code != 0 || len(f.removed) != 0 || len(f.killed) != 0 {
+		t.Fatalf("dry run acted: %d %v %v", code, f.removed, f.killed)
 	}
 	if !strings.Contains(out, "Dry run complete. No changes made.") || !strings.Contains(out, "data file - memory.db") || !strings.Contains(out, "(full wipe)") {
 		t.Fatal(out)
@@ -718,40 +543,24 @@ func TestCLISystemUninstallDryRunTouchesNothing(t *testing.T) {
 	}
 }
 
-func TestCLISystemUninstallPipTargetsOnlyRemedyAI(t *testing.T) {
-	f := installSysUninstallFakes(t, "python")
+func TestCLISystemUninstallRunsNoPackageManager(t *testing.T) {
+	installSysUninstallFakes(t)
 	home, _ := sysPopulatedHome(t)
-	if code, out, _ := sysRun(t, home, "y\n", "uninstall"); code != 0 || !strings.Contains(out, "Uninstall complete.") {
+	code, out, _ := sysRun(t, home, "y\n", "uninstall")
+	if code != 0 || !strings.Contains(out, "Uninstall complete.") || !strings.Contains(out, "This clears data only") ||
+		strings.Contains(strings.ToLower(out), "pip") {
 		t.Fatalf("%d %s", code, out)
 	}
-	if !reflect.DeepEqual(f.pipArgs, [][]string{{"uninstall", "-y", "remedy-ai"}}) {
-		t.Fatalf("pip args %v", f.pipArgs)
-	}
 }
 
-func TestCLISystemUninstallPipFailureExitsOne(t *testing.T) {
-	f := installSysUninstallFakes(t, "python")
-	f.pipFail = true
-	home, _ := sysPopulatedHome(t)
-	code, out, errs := sysRun(t, home, "y\n", "uninstall")
-	if code != 1 || strings.Contains(strings.ToLower(out), "complete") || !strings.Contains(errs, "finished with errors") {
-		t.Fatalf("%d\n%s\n%s", code, out, errs)
-	}
-}
-
-func TestCLISystemUninstallDefaultsToNoAndFrozenSkipsPip(t *testing.T) {
-	f := installSysUninstallFakes(t, "python")
+func TestCLISystemUninstallDefaultsToNo(t *testing.T) {
+	f := installSysUninstallFakes(t)
 	home, _ := sysPopulatedHome(t)
 	for _, in := range []string{"\n", ""} {
 		code, out, _ := sysRun(t, home, in, "uninstall", "--purge")
-		if code != 0 || !strings.Contains(out, "Uninstall cancelled.") || len(f.removed) != 0 || len(f.pipArgs) != 0 {
+		if code != 0 || !strings.Contains(out, "Uninstall cancelled.") || len(f.removed) != 0 {
 			t.Fatalf("%q: %d %v %s", in, code, f.removed, out)
 		}
-	}
-	t.Setenv("REMEDY_CLI_PYTHON", "")
-	code, out, _ := sysRun(t, home, "y\n", "uninstall", "--skills")
-	if code != 0 || len(f.pipArgs) != 0 || !strings.Contains(out, "this clears data only") {
-		t.Fatalf("frozen: %d %v %s", code, f.pipArgs, out)
 	}
 }
 

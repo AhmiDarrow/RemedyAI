@@ -1,6 +1,6 @@
 # Reference voices
 
-These public-domain LibriVox clips are **not** shipped in the `remedy-ai` wheel.
+These public-domain LibriVox clips are **not** shipped in the desktop installers.
 Chatterbox HQ downloads them on first use, verifies the sha256 pin, and caches
 them under `~/.remedy/voice/references/`. The same files are attached to each
 GitHub release as `remedy-voice-female.wav` / `remedy-voice-male.wav` and listed

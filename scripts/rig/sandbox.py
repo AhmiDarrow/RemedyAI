@@ -14,7 +14,6 @@ import secrets
 import shutil
 import socket
 import subprocess
-import sys
 import tempfile
 import time
 import urllib.error
@@ -24,7 +23,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SRC = REPO / "src"
 
 
 def free_port() -> int:
@@ -39,15 +37,6 @@ def port_open(port: int, host: str = "127.0.0.1") -> bool:
             return True
     except OSError:
         return False
-
-
-def venv_python() -> str:
-    """Interpreter that has Remedy's deps - prefer the repo venv."""
-    for rel in ("Scripts/python.exe", "bin/python"):
-        cand = REPO / ".venv" / rel
-        if cand.is_file():
-            return str(cand)
-    return sys.executable
 
 
 @dataclass
@@ -178,7 +167,6 @@ class Sandbox:
         env["REMEDY_HOME"] = str(self.home)
         self.token = secrets.token_urlsafe(32)
         env["REMEDY_API_KEY"] = self.token
-        env["PYTHONPATH"] = str(SRC) + os.pathsep + env.get("PYTHONPATH", "")
         env["PYTHONUTF8"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
         # Unattended: no first-run wizard, no desktop sidecar, no auto-update.
@@ -188,12 +176,10 @@ class Sandbox:
             env["REMEDY_LLM_API_KEY"] = self.api_key
         else:
             env.pop("REMEDY_LLM_API_KEY", None)
-        runtime = os.environ.get("REMEDY_RIG_RUNTIME", "")
-        argv = [runtime, "--listen", f"127.0.0.1:{self.port}"] if runtime else [
-            venv_python(), "-m", "remedy.interfaces.cli", "--home", str(self.home),
-            "serve", "--host", "127.0.0.1", "--port", str(self.port),
-            "--skip-setup", "--no-computer-host",
-        ]
+        runtime = os.environ.get("REMEDY_RIG_RUNTIME", "") or shutil.which("remedy-runtime")
+        if not runtime:
+            raise RuntimeError("Set REMEDY_RIG_RUNTIME to a remedy-runtime binary")
+        argv = [runtime, "--listen", f"127.0.0.1:{self.port}"]
         if trace:
             env["REMEDY_LLM_TRACE_DIR"] = str(self.trace_dir)
         else:
@@ -208,7 +194,7 @@ class Sandbox:
                 env=env,
                 stdout=log,
                 stderr=subprocess.STDOUT,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,  # type: ignore[attr-defined]
             )
 
         deadline = time.monotonic() + timeout

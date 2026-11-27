@@ -118,7 +118,6 @@ control in the Grove top bar — there is no extra Voice button.
 Voice, vision, and local helpers download when Remedy first starts. Progress
 shows in the empty strip of the title bar (next to the logo). If the voice
 pack did not arrive, Settings → Voice has **Download Remedy's voice**.
-Advanced still shows the pip command for power users.
 
 ## Switching to Studio
 

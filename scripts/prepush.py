@@ -66,7 +66,6 @@ IS_WINDOWS = platform.system() == "Windows"
 ZERO_SHA = "0" * 40
 RELEASE_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+([.-].*)?$")
 PROTECTED_BRANCHES = ("master", "main")
-IMPORT_SMOKE = 'python -c "import remedy; print(\'import OK\')"'
 
 
 # --------------------------------------------------------------------------- #
@@ -161,20 +160,19 @@ RUST_WSL_ENV = {
 
 CHECKS = Lane(
     "checks",
-    "Sanitize, lint, types, docs, import smoke",
+    "Sanitize, lint, types, docs",
     (
         Step("sanitize", "uv run python scripts/check_sanitize.py"),
         Step("ruff", "uv run ruff check . --no-fix"),
         Step("mypy", "uv run mypy"),
         Step("mypy exclude may only shrink", "uv run python scripts/check_mypy_exclude.py"),
-        Step("import smoke", "uv run " + IMPORT_SMOKE),
         Step("docs sync", "uv run python scripts/check_docs.py"),
     ),
 )
 
 PYTHON = Lane(
     "python",
-    "Full pytest suite (this OS) + wheel",
+    "Tooling pytest suite (this OS)",
     (
         Step("native core present", REQUIRE_NATIVE_CORE),
         Step(
@@ -182,7 +180,6 @@ PYTHON = Lane(
             "uv run pytest -q --tb=short -p no:cacheprovider",
             env=NATIVE_CORE_ENV,
         ),
-        Step("uv build", "uv build"),
     ),
     # Timing-sensitive tests (telephony frame pacing) must not share the box
     # with cargo; this lane runs after the parallel lanes finish.
@@ -736,13 +733,13 @@ def lanes_for_paths(paths: list[str]) -> set[str] | None:
             continue
         if p.endswith(".md"):
             # Markdown that ships: help articles are bundled into the SPA,
-            # bundled skills are read by the Python runtime and its tests.
+            # bundled skills are compiled into the Go runtime.
             if p.startswith("desktop/remedyui/"):
                 lanes.add("remedyui")
             elif p.startswith("desktop/"):
                 lanes.add("desktop")
-            elif p.startswith("src/"):
-                lanes |= {"linux", "python"}
+            elif p.startswith("native/go/"):
+                lanes |= {"native", "linux"}
             continue
         if p.startswith("tests/") and p.endswith(".py"):
             lanes |= {"linux", "python"}

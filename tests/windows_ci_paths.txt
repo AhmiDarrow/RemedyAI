@@ -15,17 +15,11 @@
 # --- Security / capability ---
 
 # --- FFI / ABI / native host ---
-tests/test_native_bootstrap.py
-tests/test_native_pins.py
-tests/test_wheel_webui.py
 tests/test_check_remedy_core_isa.py
 
 # --- First-run bootstrap, install, serve ---
-tests/test_serve_runtime_owned.py
-tests/test_home_env_is_honoured.py
 
 # --- Windows path / shell / UI ---
-tests/test_atomic_json.py
 
 # --- CI contract (protects this list) ---
 tests/test_ci_matrix.py

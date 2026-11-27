@@ -532,23 +532,38 @@ func (s *Server) executeFullSlash(sessionID, raw string, phone bool) map[string]
 		if err != nil {
 			return say("Could not search memory: %s", err.Error())
 		}
+		// Facts are what Remedy is shown about you on every turn; notes are
+		// what she looks up. Forgetting covers both.
+		facts, err := s.sessions.matchProfileFacts("default", arg)
+		if err != nil {
+			return say("Could not search memory: %s", err.Error())
+		}
+		var matches []string
+		for _, fact := range facts {
+			matches = append(matches, truncateRunes(fact, 120))
+		}
+		for _, e := range found {
+			matches = append(matches, truncateRunes(e.Title+" — "+e.Content, 120))
+		}
 		switch {
-		case len(found) == 0:
+		case len(matches) == 0:
 			return say("Nothing in memory contains “%s”.", arg)
-		case len(found) > 3:
+		case len(matches) > 3:
 			lines := []string{fmt.Sprintf("More than three things in memory contain “%s”. Give more of the text so only the ones you mean match:", arg)}
-			for _, e := range found {
-				lines = append(lines, "  "+truncateRunes(e.Title+" — "+e.Content, 120))
+			for _, m := range matches {
+				lines = append(lines, "  "+m)
 			}
 			return say("%s", strings.Join(lines, "\n"))
 		}
-		n, err := s.sessions.forgetMemoryLIKE(arg)
-		if err != nil {
+		if _, err := s.sessions.forgetProfileFacts("default", arg); err != nil {
 			return say("Could not remove it: %s", err.Error())
 		}
-		lines := []string{fmt.Sprintf("Removed %d from memory:", n)}
-		for _, e := range found {
-			lines = append(lines, "  "+truncateRunes(e.Title+" — "+e.Content, 120))
+		if _, err := s.sessions.forgetMemoryLIKE(arg); err != nil {
+			return say("Could not remove it: %s", err.Error())
+		}
+		lines := []string{fmt.Sprintf("Removed %d from memory:", len(matches))}
+		for _, m := range matches {
+			lines = append(lines, "  "+m)
 		}
 		return map[string]any{"text": strings.Join(lines, "\n"), "action": "memory_changed"}
 

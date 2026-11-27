@@ -22,12 +22,14 @@ func skillSearchRoots(homeDir string) []string {
 	home := ResolveHomeDir(homeDir)
 	if home != "" {
 		roots = append(roots, filepath.Join(home, "skills"))
+		if shipped := embeddedSkillsRoot(home); shipped != "" {
+			roots = append(roots, shipped)
+		}
 	}
 	if cwd, err := os.Getwd(); err == nil {
 		for _, p := range parentsOf(cwd) {
 			roots = append(roots,
 				filepath.Join(p, "skills"),
-				filepath.Join(p, "src", "remedy", "bundled_skills"),
 			)
 		}
 	}
@@ -35,7 +37,6 @@ func skillSearchRoots(homeDir string) []string {
 		for _, p := range parentsOf(exe) {
 			roots = append(roots,
 				filepath.Join(p, "skills"),
-				filepath.Join(p, "src", "remedy", "bundled_skills"),
 				filepath.Join(p, "bundled_skills"),
 			)
 		}

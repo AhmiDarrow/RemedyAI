@@ -34,7 +34,7 @@ def main(argv: list[str]) -> int:
         print(f"probe not ready: {probe}", file=sys.stderr)
         return 1
     print(f"probe ok {probe}")
-    lib = ctypes.WinDLL(str(dll))
+    lib = ctypes.WinDLL(str(dll))  # type: ignore[attr-defined]  # win32 only
     lib.remedy_core_abi_version.restype = ctypes.c_uint32
     abi = int(lib.remedy_core_abi_version())
     if abi <= 0:

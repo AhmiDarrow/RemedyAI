@@ -6,37 +6,36 @@ Detailed help for each command, configuration, and usage pattern.
 
 ## Installation
 
-### From PyPI
+### Desktop installers
+
+Download the installer for your system from the
+[releases page](https://github.com/AhmiDarrow/RemedyAI/releases/latest). It
+includes `remedy-runtime`, `remedy_core` and the `remedy` command.
+
+### Without a desktop (server, headless)
 
 ```bash
-pip install remedy-ai
-# NOTE: do NOT `pip install remedy` — that is an unrelated package on PyPI.
+sh scripts/install.sh        # Linux, macOS
 ```
 
-`remedy serve` needs Go `remedy-runtime` plus Zig `remedy_core`. On a PyPI
-install, the first serve downloads the pair for this OS from the matching
-`runtime-v<version>` GitHub release, verifies each file against the sha256
-pinned inside the wheel at build time, and caches them in `~/.remedy/runtime/`.
-It never falls back to another version: if this version's files are missing or
-do not match, serve stops with an error. A source checkout has no pins and
-builds its own runtime (`REMEDY_NATIVE_ALLOW_UNPINNED=1` lets it trust this
-exact version's `remedy-native-SHA256SUMS.txt` instead).
-Set `REMEDY_NATIVE_BOOTSTRAP_DISABLE=1` to skip the download and require a
-local binary. The packaged Desktop installer already includes both binaries.
+On Windows, run `scripts/install.ps1` in PowerShell. The script downloads the
+Go `remedy-runtime` and Zig `remedy_core` for this OS from the matching
+`runtime-v<version>` GitHub release, verifies each file against
+`remedy-native-SHA256SUMS.txt`, and installs them for the current user. Run it
+again to update.
 
 ### From source
 
 ```bash
 git clone https://github.com/AhmiDarrow/RemedyAI.git
 cd RemedyAI
-uv sync
-# or: pip install -e .
+cd native/go && go build -o remedy ./cmd/remedy-runtime
 ```
 
 ### Verify
 
 ```bash
-remedy --version   # prints the installed package version
+remedy --version   # prints the installed version
 remedy --help      # Lists all commands
 ```
 
@@ -65,14 +64,10 @@ First launch: the app gets Remedy’s mind ready, then she talks you through hou
 ### 1. Start the local API
 
 ```bash
-pip install remedy-ai
-# not: pip install remedy  (unrelated package)
 remedy serve
 ```
 
-First run downloads a checksum-verified `remedy-runtime` from GitHub Releases
-and caches it in `~/.remedy/runtime/`. Open http://127.0.0.1:7400/ in a
-browser, or use the Desktop app from GitHub Releases. The API is loopback only
+Open http://127.0.0.1:7400/ in a browser, or use the Desktop app from GitHub Releases. The API is loopback only
 (`127.0.0.1` / `::1`).
 
 A default `~/.remedy/config.toml` is created on first run. To inspect or
@@ -161,8 +156,8 @@ back to them. Saving one model's entry leaves the other models' entries alone.
 
 ### 3. Skills and memory
 
-Bundled skills are discovered automatically from the package (and from
-`~/.remedy/skills` for your own). After a pip install you do not need
+Bundled skills are compiled into the runtime and discovered automatically (and
+from `~/.remedy/skills` for your own). You do not need
 `remedy skill discover skills/` — that path only exists in a source checkout.
 
 ```bash
@@ -612,9 +607,9 @@ none is present, first serve downloads the prebuilt for this OS from GitHub
 Releases and checksum-verifies it. If no asset exists, it prints build
 instructions (`go build` / `zig build` into `desktop/bin`).
 
-The browser UI ships inside the PyPI wheel (0.69.2+, `remedy/webui/dist`), so a
-pip install serves the full app at `/`. `REMEDY_WEBUI_DIR` or a live
-`desktop/dist` checkout takes precedence over the bundled copy. The served UI
+The browser UI is served from a `webui` folder next to the runtime (the desktop
+install layout). `REMEDY_WEBUI_DIR` or a live `desktop/dist` checkout takes
+precedence. The served UI
 carries a Content-Security-Policy (inline scripts allowed by hash only, no
 framing) and the same token handout as Desktop's browser mode: the same OS user
 is let in directly, and `remedy serve` / `remedy open` print a one-time link
@@ -857,8 +852,8 @@ Remedy’s ReAct loop (v0.10.4+) always pairs results for every call id, even wh
 - identical calls are fingerprint-deduped,
 - a tool raises an exception mid-batch.
 
-If you still see this on an older install, upgrade (`pip install -U remedy-ai` or install
-the latest desktop release), restart the app/server, and prefer a new chat session for
+If you still see this on an older install, upgrade (install
+the latest desktop release or run the install script again), restart the app/server, and prefer a new chat session for
 large multi-tool turns such as “review project”.
 
 ### Long answers cut off mid-stream

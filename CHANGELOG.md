@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Remedy (`remedy-ai`) are documented here.
+All notable changes to Remedy are documented here.
 
 ## [Unreleased]
 
@@ -18,7 +18,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Frontier-sized tool and context limits: tool results keep 30,000 characters (8,000 on a small local window), old tool output is trimmed from 75% of the model's real context window and the conversation compacted at 92% (Settings, Models, Memory harness), job logs can be paged with `jobs read`, grep lines go to 2,000 characters, and truncation notes say how much was cut and how to read the rest.
 - The runtime no longer contains any code to start, attach to or talk to a Python worker, and no installer builds or bundles one. Three settings that only the worker read are gone: the two learn timeouts and daily voice drift.
 - One version number, 2.0.0, for the desktop, the phone app, the runtime and the command line.
-- The `remedy` command line runs in the Go runtime. The Python package is now only a small launcher for it with no dependencies; the rest of the Python code is gone. `remedy-mcp` is the same as `remedy mcp serve`.
+- The `remedy` command line runs in the Go runtime. The pip package (`remedy-ai`) is gone: install with the installers from the releases page, or on a machine without a desktop with the install script (`scripts/install.sh`, `scripts/install.ps1`). `remedy-mcp` is now `remedy mcp serve`, and `remedy update` checks the release feed and says how to update.
 - Usage, Harness shows what the runtime measured for the session: context fill, the compaction budget, turns, tokens saved, tool and provider results. It no longer lists figures nothing produced (nudges, stuck rate, goals).
 - The Memory harness setting works: Auto trims and compacts at the two percentages you set, Off leaves a conversation whole until it no longer fits. Before, the setting was saved and never read. The Manual mode is gone; it did nothing.
 
@@ -37,6 +37,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Desktop 1.0.0 stayed on "Connecting to local server" because the installer never shipped `remedy-runtime` or `remedy_core`, and the shell did not look for `remedy-runtime.exe` on Windows. Both are packed next to the app again, and a missing binary fails the splash immediately instead of waiting ~90s.
 - The Windows tray icon is the Remedy mark from 0.70.5 (`tray-icon.png` / `icon.ico`) again, not a solid forest-green square.
 - Web search uses the local search engine again. Since the runtime stopped starting Python nothing started the engine, so every search fell back to a page that often answers with a human check. The runtime now downloads, verifies and starts it itself, and stops it when web tools are off.
+- The skills that ship with Remedy are now inside the runtime. The desktop installers shipped none; they were only in the pip package.
 - A local model whose context filled up lost all of its file and shell tools: the short tool list it was given named tools that no longer exist.
 - WSL bash works inside a project folder (it was refused outright). Commands run through `wsl` are now held to the project folder like any other, which they were not when written inside another command.
 - On Windows a folder junction could lead file tools, the media route and shell commands into the secrets folder. All three now follow where the path really goes.

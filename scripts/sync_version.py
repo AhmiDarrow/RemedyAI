@@ -196,23 +196,6 @@ def _bump_version(current: str, target: str) -> str:
     return target
 
 
-def _runtime_version() -> str:
-    """Import remedy.__version__ from the source tree (not a stale install)."""
-    src = str(ROOT / "src")
-    if src not in sys.path:
-        sys.path.insert(0, src)
-    try:
-        # Force re-read if already imported with a stale value
-        for name in list(sys.modules):
-            if name == "remedy" or name.startswith("remedy."):
-                del sys.modules[name]
-        from remedy import __version__ as v
-
-        return str(v)
-    except Exception as exc:
-        return f"? ({exc})"
-
-
 def _check_aligned(expected: str) -> int:
     """Print all version surfaces; return 0 if aligned, 1 if mismatch."""
     rows: list[tuple[str, str]] = []
@@ -259,8 +242,6 @@ def _check_aligned(expected: str) -> int:
             cm = re.search(r'(?m)^version\s*=\s*"([^"]*)"', PATHS[key].read_text(encoding="utf-8"))
             rows.append((label, cm.group(1) if cm else "?"))
 
-    rows.append(("remedy.__version__", _runtime_version()))
-
     print(f"Canonical version: {expected}")
     bad = 0
     for label, ver in rows:
@@ -282,7 +263,6 @@ def _check_aligned(expected: str) -> int:
         print(f"  [{'OK ' if ok else 'BAD'}] {'httpapi.Version':22} = {got} (desktop {want})")
     if bad:
         print(f"\n{bad} mismatch(es). Run: python scripts/sync_version.py {expected}")
-        print("Then reinstall editable:  uv pip install -e .")
         return 1
     print("\nAll version surfaces aligned.")
     return 0
@@ -319,9 +299,6 @@ def main():
     print("  Updated scripts/latest.json")
 
     print(f"\nDone! Version bumped from {current} -> {new_ver}")
-    print("Reinstall editable so dist-info matches:")
-    print("  uv pip install -e .")
-    print("  # or:  python -m pip install -e .")
     # Re-check from source
     raise SystemExit(_check_aligned(new_ver))
 

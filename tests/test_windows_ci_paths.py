@@ -10,12 +10,9 @@ LIST_PATH = ROOT / "tests" / "windows_ci_paths.txt"
 RUNNER = ROOT / "scripts" / "run_windows_ci_pytest.py"
 
 # Files this surface is required to keep even if they also run on Linux.
-# The spawn, jail and secret-store tests that used to be here tested Python
-# code that is gone; those behaviours are tested in Go and Zig now (native lane).
-REQUIRED_FILES = (
-    "tests/test_native_bootstrap.py",
-    "tests/test_serve_runtime_owned.py",
-)
+# The spawn, jail, secret-store and launcher tests that used to be here tested
+# Python code that is gone; those behaviours are tested in Go and Zig now.
+REQUIRED_FILES = ("tests/test_check_remedy_core_isa.py",)
 
 # Tests gated to Windows (or Windows+Linux spawn) so Linux CI will skip them.
 _WINDOWS_ONLY_GATES = (

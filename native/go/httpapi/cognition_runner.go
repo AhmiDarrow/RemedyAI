@@ -197,6 +197,7 @@ func (r *CognitionTurnRunner) assemblePrompt(req TurnRequest) (assembledPrompt, 
 		"session_id": req.SessionID,
 		"plan_mode":  req.PlanMode,
 		"chat_mode":  req.ChatMode,
+		"outside":    !OriginIsOwner(req.Origin),
 	}
 	if req.Model != nil && strings.TrimSpace(*req.Model) != "" {
 		input["model"] = strings.TrimSpace(*req.Model)

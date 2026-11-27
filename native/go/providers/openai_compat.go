@@ -561,6 +561,28 @@ type sseUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	// How much of the prompt the provider served from its cache. Providers
+	// name it differently; whichever one is present is used.
+	PromptTokensDetails *struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+	PromptCacheHitTokens int `json:"prompt_cache_hit_tokens"`
+	CachedTokens         int `json:"cached_tokens"`
+}
+
+// cached is the part of prompt_tokens read from the provider's cache.
+func (u *sseUsage) cached() int {
+	n := u.PromptCacheHitTokens
+	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens > n {
+		n = u.PromptTokensDetails.CachedTokens
+	}
+	if u.CachedTokens > n {
+		n = u.CachedTokens
+	}
+	if n < 0 || n > u.PromptTokens {
+		return 0
+	}
+	return n
 }
 
 type sseChunk struct {
@@ -656,10 +678,15 @@ func (p *sseParser) finish(reason string) bool {
 func (p *sseParser) chunk(c sseChunk) bool {
 	if c.Usage != nil {
 		p.sawUsage = true
+		// These providers count cached input inside prompt_tokens. It is
+		// reported apart, as the Anthropic adapter does, so PromptTokens is
+		// the input paid at the full rate on every provider.
+		cached := c.Usage.cached()
 		if !p.emit(cognition.ModelEvent{Usage: &cognition.Usage{
-			PromptTokens:     c.Usage.PromptTokens,
+			PromptTokens:     c.Usage.PromptTokens - cached,
 			CompletionTokens: c.Usage.CompletionTokens,
 			TotalTokens:      c.Usage.TotalTokens,
+			CacheReadTokens:  cached,
 		}}) {
 			return false
 		}
