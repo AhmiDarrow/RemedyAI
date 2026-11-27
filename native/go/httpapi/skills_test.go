@@ -266,7 +266,7 @@ func TestLibrarySuggestDismissAndEmpty(t *testing.T) {
 
 func TestLibraryCatalogFromCache(t *testing.T) {
 	s, home := newSkillsTestServer(t)
-	cacheDir := filepath.Join(home, "cache", "skills")
+	cacheDir := catalogCacheDir(home)
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		t.Fatal(err)
 	}

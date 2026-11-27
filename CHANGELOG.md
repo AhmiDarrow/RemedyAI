@@ -40,6 +40,7 @@ All notable changes to Remedy are documented here.
 - The Windows tray icon is the Remedy mark from 0.70.5 (`tray-icon.png` / `icon.ico`) again, not a solid forest-green square.
 - Web search uses the local search engine again. Since the runtime stopped starting Python nothing started the engine, so every search fell back to a page that often answers with a human check. The runtime now downloads, verifies and starts it itself, and stops it when web tools are off.
 - The skills that ship with Remedy are now inside the runtime. The desktop installers shipped none; they were only in the pip package.
+- The skills that ship with Remedy, and the skills library, call tools by the names the runtime has (`read`, `bash`, `grep`, `web.fetch` and so on). The Library tab now reads library release v2.0.0 (830 skills), and a catalog saved by an earlier Remedy is no longer reused.
 - A local model whose context filled up lost all of its file and shell tools: the short tool list it was given named tools that no longer exist.
 - WSL bash works inside a project folder (it was refused outright). Commands run through `wsl` are now held to the project folder like any other, which they were not when written inside another command.
 - On Windows a folder junction could lead file tools, the media route and shell commands into the secrets folder. All three now follow where the path really goes.

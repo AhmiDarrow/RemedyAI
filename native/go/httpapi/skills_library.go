@@ -23,7 +23,7 @@ import (
 
 const (
 	catalogPublicKeyB64    = "Zecma7eUlNtKbQSnTeBJC+v9nQEmJ5OT6YTYq27GsLc="
-	libraryReleaseTag      = "v1.0.0"
+	libraryReleaseTag      = "v2.0.0"
 	libraryRepo            = "AhmiDarrow/remedy-skills"
 	catalogCacheMaxAge     = 24 * time.Hour
 	maxCatalogBytes        = 8 * 1024 * 1024
@@ -93,7 +93,9 @@ func skillsDevMode() bool {
 }
 
 func catalogCacheDir(home string) string {
-	return filepath.Join(home, "cache", "skills")
+	// One folder per library release: a catalog saved by an earlier Remedy
+	// must not be served as this one's for the day it stays fresh.
+	return filepath.Join(home, "cache", "skills", libraryReleaseTag)
 }
 
 func verifyCatalogSignature(data []byte, sigB64, pubB64 string) error {
