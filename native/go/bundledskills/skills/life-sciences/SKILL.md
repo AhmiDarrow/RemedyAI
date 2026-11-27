@@ -12,7 +12,7 @@ version: 1.0.0
 author: Remedy
 tags: [research, biology, wet-lab, experimental-design, replicates, biosafety]
 requires: []
-tools: [lit_search, lit_fetch, cite_add, power_analysis, stats_assumptions, stats_effect_size, data_profile, manuscript_check, skill_activate]
+tools: [lit_search, lit_fetch, cite_add, power_analysis, stats_assumptions, stats_effect_size, data_profile, manuscript_check, skill.activate]
 triggers:
   - '\b(wet[- ]?lab|in vitro|in vivo|western blot|RT-?qPCR|\bqPCR\b|\bELISA\b|flow cytometry|immunohistochem\w+)\b'
   - '\b(cell (?:line|culture|viability)|knock(?:out|down)|CRISPR|plasmid|transfect\w+|passage number)\b'
@@ -22,7 +22,7 @@ triggers:
 
 # Life sciences (bench work)
 
-Call `skill_activate(skill="research-method")` first — it owns question
+Call `skill.activate(skill="research-method")` first — it owns question
 framing, evidence standards, preregistration, citation honesty and how to say
 "we do not know". Do not restate any of that here. This pack is only what is
 different at the bench.
@@ -108,4 +108,4 @@ analysis reruns from raw files to figure through `analysis_run`, with
 `analysis_ledger(action="verify")` reporting INTACT. One n=1 pilot with a
 pretty p is not a result — say so rather than letting the figure imply it.
 
-Read `references/INDEX.md`, then `file_read` what the task needs.
+Read `references/INDEX.md`, then `read` what the task needs.

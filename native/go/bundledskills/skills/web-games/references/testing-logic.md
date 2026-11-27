@@ -76,5 +76,5 @@ it N times with `1/60` and assert positions — no ticker needed.
 ## What not to test
 
 Rendering, tweens, camera, audio. Cover those with the browser playtest
-(`computer_navigate` + screenshot + `vision_decode`) and say that is what
+(`computer.navigate` + screenshot + `vision_decode`) and say that is what
 you did.

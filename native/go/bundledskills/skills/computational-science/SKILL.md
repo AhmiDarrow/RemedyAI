@@ -11,7 +11,7 @@ version: 1.0.0
 author: Remedy
 tags: [simulation, numerics, hpc, performance, reproducibility, research]
 requires: []
-tools: [analysis_env, analysis_run, analysis_ledger, data_diff, power_analysis, manuscript_build, skill_activate, bash_exec, file_read, file_write]
+tools: [analysis_env, analysis_run, analysis_ledger, data_diff, power_analysis, manuscript_build, skill.activate, bash, read, write]
 triggers:
   - '\b(numerical (?:stability|scheme|solver|accuracy)|finite (?:difference|element|volume)|CFL condition)\b'
   - '\b(mesh (?:convergence|refinement)|grid independence|solver tolerance|floating[- ]point (?:error|precision)|catastrophic cancellation)\b'
@@ -21,7 +21,7 @@ triggers:
 
 # Computational science
 
-`skill_activate(skill="research-method")` first, and do not restate the
+`skill.activate(skill="research-method")` first, and do not restate the
 spine — that pack owns question framing, evidence standards,
 preregistration, citation honesty and "we do not know". This pack owns
 the numerics and the machine.
@@ -108,4 +108,4 @@ own uncertainty on the experiment. Do not merge the two.
 
 ## References
 
-Read `references/INDEX.md`, then `file_read` what the task needs.
+Read `references/INDEX.md`, then `read` what the task needs.

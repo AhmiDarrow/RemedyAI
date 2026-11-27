@@ -34,7 +34,7 @@ Execute **in order**. After any failure, stop advancement until that gate is gre
 
 ### 0. Blast radius (before large edits)
 
-- Activate **change-safety** (`skill_activate(name=change-safety)`) when available.
+- Activate **change-safety** (`skill.activate(name=change-safety)`) when available.
 - Name the surface, list coupled neighbors, plan paired checks + manual smoke for
   UI/chrome/messengers that unit tests miss.
 - Prefer durable architecture over patch loops for known failure classes.

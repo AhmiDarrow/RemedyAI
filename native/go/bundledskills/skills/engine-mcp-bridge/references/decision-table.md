@@ -5,17 +5,17 @@ or only the files on disk?** Files on disk → native. Live state → MCP.
 
 | Step | Native | MCP | Why |
 |------|--------|-----|-----|
-| Fingerprint the project | `game_project_info`, `file_read project.godot` | — | disk is the truth; no editor needed |
+| Fingerprint the project | `game_project_info`, `read project.godot` | — | disk is the truth; no editor needed |
 | Parse / headless check after an edit | `godot_check`, `cargo check`, batchmode `-quit` | — | reproducible, works in CI, exits non-zero |
 | Run a scene headless / capture logs | `godot_run`, `game_playtest` | (only to press Play in the editor) | native captures stdout and screenshots itself |
 | Export / build / package | `godot_export`, UAT, batchmode build | — | long, deterministic, CI-shaped |
-| Tests (GUT, gdUnit4, NUnit, busted…) | `bash_exec` | — | same |
+| Tests (GUT, gdUnit4, NUnit, busted…) | `bash` | — | same |
 | What scene is open right now, what node is selected | — | `get_scene_tree` / `inspect_node` | only the editor knows |
 | Inspector values the owner tweaked but did not save | — | `get_node_properties` | unsaved state is not on disk |
 | Add/move/rename nodes while the owner watches | — (or edit `.tscn` when the editor is closed) | `create_node`, `set_property` | editing `.tscn` under an open editor causes reload prompts and lost work |
 | Connect a signal to a script | either | either | MCP is friendlier live; native is fine closed. Verify with `godot_check` after both |
 | Read the editor's Output/Errors panel | `godot_run` log for headless errors | `get_errors` for editor-only errors (import, plugin, tool scripts) | different sources of errors |
-| Write a new script | `file_write` | `create_script` if the server wires it to a node in one go | keep file ops native unless the MCP adds attachment |
+| Write a new script | `write` | `create_script` if the server wires it to a node in one go | keep file ops native unless the MCP adds attachment |
 | Import new assets | `godot_import` / headless import | editor reimport via MCP if exposed | both fine; native is reproducible |
 | Owner absent / CI / nightly | native only | — | no editor to talk to |
 
@@ -24,7 +24,7 @@ or only the files on disk?** Files on disk → native. Live state → MCP.
 The usual loop when the editor is open:
 
 ```
-read live state (MCP) → change (MCP or file edit) → native verify → confirm on disk (file_read) → playtest
+read live state (MCP) → change (MCP or file edit) → native verify → confirm on disk (read) → playtest
 ```
 
 Skipping "native verify" because the editor did not complain is the most

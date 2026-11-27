@@ -9,7 +9,7 @@ version: 1.0.0
 author: Remedy
 tags: [game, bevy, rust, ecs, cargo]
 requires: []
-tools: [game_project_info, bash_exec, file_read, file_write, file_edit, repo_search, list_dir, game_playtest, computer_screenshot, vision_decode]
+tools: [game_project_info, bash, read, write, edit, grep, glob, game_playtest, computer.screenshot, vision_decode]
 triggers:
   - "\\bbevy\\b"
 ---
@@ -22,7 +22,7 @@ you honest: check the version in `Cargo.toml` before writing a line, and use
 
 ## Fingerprint
 
-1. `game_project_info(path)`; `file_read Cargo.toml` → `bevy = "0.x"` and
+1. `game_project_info(path)`; `read Cargo.toml` → `bevy = "0.x"` and
    its `features`. `Cargo.lock` has the exact patch.
 2. `src/main.rs` (App builder), `src/**` plugins, `assets/` (default asset
    root, relative to the crate).
@@ -33,7 +33,7 @@ you honest: check the version in `Cargo.toml` before writing a line, and use
 **Version discipline.** Names moved between releases (`SpriteBundle` →
 `Sprite` component in 0.15; `Camera2dBundle` → `Camera2d`; `add_system` →
 `add_systems(Schedule, …)` in 0.11; `Color::rgb` → `Color::srgb` in 0.14).
-When unsure, `repo_search` the crate source under
+When unsure, `grep` the crate source under
 `~/.cargo/registry/src/*/bevy_*-<ver>/` or read `docs.rs/bevy/<ver>`. Do not
 write from memory for a version you have not checked.
 
@@ -89,11 +89,11 @@ app: &mut App) {…} }`) and keep `main.rs` short.
 ## Verify → playtest
 
 1. `cargo check` (oracle). 2. `cargo clippy` if configured. 3. `cargo test`
-   for pure logic crates/modules. 4. Launch: `bash_exec("cargo run")` is
+   for pure logic crates/modules. 4. Launch: `bash("cargo run")` is
    auto-backgrounded because it opens a window — the first run compiles
    for minutes, so set a long timeout or compile first with `cargo build`.
    Then `game_playtest(command="cargo run", seconds=…, keys=…, question=…)`
-   or `computer_screenshot` + `vision_decode`. Read stderr for panics
+   or `computer.screenshot` + `vision_decode`. Read stderr for panics
    (`thread 'main' panicked`) and Bevy `WARN`/`ERROR` lines (missing assets
    log as warnings, not crashes).
 

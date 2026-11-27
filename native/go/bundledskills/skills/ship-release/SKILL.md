@@ -15,7 +15,7 @@ User asked to **push**, **ship**, **publish**, **tag**, or **gh release** after 
 1. **Do not re-run pytest** unless you changed **source** (`.py`/`.ts`/`.c`/…).
 2. **Do not rewrite green product code** just to feel busy — ship tools only.
 3. Temp helpers → **`.remedy-build/tmp/`** only (never `_retag.py` at repo root).
-4. Prefer **`run_python_file`** over `python -c` blobs.
+4. Put Python in a file and run it with `bash`, not `python -c` blobs.
 5. Prefer **`git_status` → `git_push` → `gh_release`** over raw bash thrash.
 
 ## Steps

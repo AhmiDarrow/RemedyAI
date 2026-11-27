@@ -43,7 +43,7 @@ Execute **in order**. Skip a stage only if the user explicitly narrows scope
 
 ### Activate helpers
 
-**Never** `skill_activate` every pack (“reload all skills”). That floods context
+**Never** `skill.activate` every pack (“reload all skills”). That floods context
 and causes endless tool loops. Rescan disk with:
 
 ```
@@ -53,13 +53,13 @@ skill_reload()
 Then load **one** procedure at a time (or let auto-suggest inject for the task):
 
 ```
-skill_activate(skill="self-dev-loop")   # this meta playbook
-skill_activate(skill="self-inject")
-skill_activate(skill="gauntlet-security")
-skill_activate(skill="soak-product")
-skill_activate(skill="stress-suite")
-skill_activate(skill="change-safety")
-skill_activate(skill="project-etiquette")
+skill.activate(skill="self-dev-loop")   # this meta playbook
+skill.activate(skill="self-inject")
+skill.activate(skill="gauntlet-security")
+skill.activate(skill="soak-product")
+skill.activate(skill="stress-suite")
+skill.activate(skill="change-safety")
+skill.activate(skill="project-etiquette")
 ```
 
 ## Stage details (short)

@@ -9,7 +9,7 @@ version: 1.0.0
 author: Remedy
 tags: [game, design, studio, playtest, gdd, vertical-slice]
 requires: []
-tools: [game_project_info, game_playtest, godot_run, godot_check, godot_export, skill_activate, bash_exec, file_read, file_write, file_edit, repo_search, list_dir, computer_screenshot, vision_decode, comfyui]
+tools: [game_project_info, game_playtest, godot_run, godot_check, godot_export, skill.activate, bash, read, write, edit, grep, glob, computer.screenshot, vision_decode, comfyui]
 triggers:
   - "\\b(make|build|create|prototype|design)\\b.{0,40}\\b(game|platformer|roguelike|shooter|rpg|puzzle game|metroidvania|tower defense|visual novel)\\b"
   - "\\b(vertical slice|gdd|game design doc(ument)?|playtest(ing)?|game feel|juice|core loop|level design)\\b"

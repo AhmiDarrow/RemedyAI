@@ -11,7 +11,7 @@ version: 1.0.0
 author: Remedy
 tags: [statistics, inference, effect-size, power, regression, research]
 requires: []
-tools: [power_analysis, stats_assumptions, stats_effect_size, stats_multiplicity, data_profile, analysis_run, skill_activate, file_read, file_write]
+tools: [power_analysis, stats_assumptions, stats_effect_size, stats_multiplicity, data_profile, analysis_run, skill.activate, read, write]
 triggers:
   - '\b(p[- ]?values?|confidence intervals?|effect sizes?|statistical(?:ly)?\s+(?:significan\w+|power))\b'
   - '\b(t-?test|ANOVA|chi[- ]?squared?|Mann[- ]?Whitney|Wilcoxon|Kruskal[- ]?Wallis|Fisher.?s exact)\b'
@@ -21,7 +21,7 @@ triggers:
 
 # Statistics
 
-`skill_activate(skill="research-method")` first, and do not restate the
+`skill.activate(skill="research-method")` first, and do not restate the
 spine here — that pack owns question framing, evidence standards,
 preregistration, citation honesty and how to say "we do not know". This
 pack owns only the analysis itself.
@@ -99,4 +99,4 @@ Any of these failing means the claim is not ready. Say so plainly.
 
 ## References
 
-Read `references/INDEX.md`, then `file_read` what the task needs.
+Read `references/INDEX.md`, then `read` what the task needs.

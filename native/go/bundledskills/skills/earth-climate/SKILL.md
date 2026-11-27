@@ -10,7 +10,7 @@ version: 1.0.0
 author: Remedy
 tags: [research, climate, geospatial, remote-sensing, ecology, netcdf]
 requires: []
-tools: [analysis_env, analysis_run, analysis_ledger, data_profile, data_diff, stats_assumptions, stats_effect_size, lit_search, cite_add, skill_activate, file_read, file_write]
+tools: [analysis_env, analysis_run, analysis_ledger, data_profile, data_diff, stats_assumptions, stats_effect_size, lit_search, cite_add, skill.activate, read, write]
 triggers:
   - '\b(NetCDF|\.nc4?\b|\bGRIB2?\b|CMIP[56]|ERA5|MODIS|Landsat|Sentinel-[12])\b'
   - '\b(reanalysis (?:data|product|dataset)|climate (?:model|projection|scenario)|RCP\d(?:\.\d)?|SSP\d-?\d)\b'
@@ -20,7 +20,7 @@ triggers:
 
 # Earth, climate and ecology data
 
-Run `skill_activate(skill="research-method")` first and work from that spine —
+Run `skill.activate(skill="research-method")` first and work from that spine —
 question framing, evidence standards, citation honesty, what verification means.
 Do not restate it. This pack covers what is different when the data is gridded,
 projected, dated on a strange calendar and produced by somebody else.
@@ -86,7 +86,7 @@ projected, dated on a strange calendar and produced by somebody else.
   occupancy models estimate detection probability rather than assuming it.
   `references/ecology-field-data.md`.
 
-Read `references/INDEX.md` and pull what you need with `file_read`.
+Read `references/INDEX.md` and pull what you need with `read`.
 
 ## What counts as verified here
 

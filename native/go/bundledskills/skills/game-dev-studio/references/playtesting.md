@@ -10,7 +10,7 @@ note the pid). Then `game_playtest(pid, seconds=20, interval=2,
 keys=["right:3", "space", "right:2", "space"], question="Did the player
 move right and jump? Any error text? Is the HUD visible?")`. The key
 script format follows the tool's doc; keep it short and deterministic.
-Use `computer_screenshot` + `vision_decode` for spot checks between runs.
+Use `computer.screenshot` + `vision_decode` for spot checks between runs.
 
 What to look for in screenshots and log:
 - `SCRIPT ERROR`, `ERROR:`, `Condition ... is true` lines → fix first.

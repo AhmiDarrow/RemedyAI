@@ -65,7 +65,7 @@ listed explicitly.
 ## Timeouts and locks
 
 - Cold `Library/`: first run imports everything. Minutes to tens of minutes
-  on big projects. Set the `bash_exec` timeout generously and say so.
+  on big projects. Set the `bash` timeout generously and say so.
 - Only one editor per project. If the owner has it open, batchmode fails
   fast with an "already open" message in the log — ask them to close it.
 - Shader compilation during builds is slow even with `-nographics`; normal.

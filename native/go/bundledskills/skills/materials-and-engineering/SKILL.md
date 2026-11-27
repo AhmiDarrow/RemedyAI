@@ -11,7 +11,7 @@ version: 1.0.0
 author: Remedy
 tags: [research, materials, engineering, characterisation, simulation, standards]
 requires: []
-tools: [analysis_env, analysis_run, analysis_ledger, data_profile, data_diff, stats_assumptions, stats_effect_size, power_analysis, manuscript_build, lit_search, lit_fetch, cite_add, cite_check, skill_activate, file_read, file_write]
+tools: [analysis_env, analysis_run, analysis_ledger, data_profile, data_diff, stats_assumptions, stats_effect_size, power_analysis, manuscript_build, lit_search, lit_fetch, cite_add, cite_check, skill.activate, read, write]
 triggers:
   - '\b(stress[- ]strain|Young.?s modulus|yield strength|fatigue (?:life|limit|test)|fracture toughness|hardness test)\b'
   - '\b(\bSEM\b imaging|\bTEM\b imaging|\bEDS\b|\bEBSD\b|nanoindentation|tensile test|creep test)\b'
@@ -21,7 +21,7 @@ triggers:
 
 # Materials and engineering
 
-Activate `research-method` first: `skill_activate(skill="research-method")`.
+Activate `research-method` first: `skill.activate(skill="research-method")`.
 It owns question framing, evidence standards, citation honesty and how to say
 "we do not know". Do not restate it. This pack is what materials and device
 work does differently.
@@ -102,4 +102,4 @@ an analytic case and show the comparison.
 - `cite_check(resolve=True)` returns PASS; `manuscript_build` reports no
   undefined citations or references.
 
-Read `references/INDEX.md` and pull what you need with `file_read`.
+Read `references/INDEX.md` and pull what you need with `read`.

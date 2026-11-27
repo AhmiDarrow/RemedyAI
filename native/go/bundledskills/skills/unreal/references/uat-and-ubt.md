@@ -23,7 +23,7 @@ Build.bat <Target> <Platform> <Config> -Project="<abs>.uproject" -WaitMutex
   `Intermediate/`. Delete `Intermediate/` and `Binaries/` for a clean slate
   (not `Saved/Config` unless asked).
 - Compile errors appear as `<file>(<line>): error C2039: ...`.
-- Timing: cold build 10–60 min; use the longest `bash_exec` timeout and
+- Timing: cold build 10–60 min; use the longest `bash` timeout and
   tell the owner. Do not declare a hang before the timeout.
 
 ## Generate project files

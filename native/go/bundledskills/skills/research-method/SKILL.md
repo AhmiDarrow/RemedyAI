@@ -11,7 +11,7 @@ version: 1.0.0
 author: Remedy
 tags: [research, method, literature, citations, reproducibility, evidence]
 requires: []
-tools: [lit_search, lit_fetch, cite_add, cite_import, cite_list, cite_export, cite_check, analysis_ledger, manuscript_check, skill_activate, file_read, file_write, file_edit, repo_search, web_fetch]
+tools: [lit_search, lit_fetch, cite_add, cite_import, cite_list, cite_export, cite_check, analysis_ledger, manuscript_check, skill.activate, read, write, edit, grep, web.fetch]
 triggers:
   - '\b(research question|literature review|systematic review|scoping review|pre-?registration|prereg\w*)\b'
   - '\b(?:null|alternative|working|research)\s+hypothes[ei]s\b|\bfalsifiab\w+\b|\bconfound(?:er|ing|s)\b'
@@ -26,7 +26,7 @@ This pack owns the loop, the evidence standards, citation honesty and what
 activate one alongside this, never instead of it. Do not restate the spine
 inside field work; apply it.
 
-Read `references/INDEX.md`, then `file_read` the one or two that match the
+Read `references/INDEX.md`, then `read` the one or two that match the
 stage you are at. The stage, not the whole shelf.
 
 ## The loop

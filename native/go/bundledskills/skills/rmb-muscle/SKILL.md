@@ -50,7 +50,7 @@ owner at Settings.
 
 ## Do not
 
-- Glob `C:\Users` / `list_dir` / `where` for GGUFs — status / models.
+- `glob` over `C:\Users` / `where` for GGUFs — status / models.
 - Edit Old-Remedy (or any git repo) to configure the live host. Live
   RMB is `~/.remedy/rmb/` + this tool.
 - Invent `owner/repo`. Search, then pick.
