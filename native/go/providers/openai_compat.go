@@ -280,8 +280,10 @@ func uniqueSanitizedToolName(id string, used map[string]struct{}) string {
 }
 
 const (
-	maxToolArgChars    = 48_000
-	maxToolResultChars = 30_000
+	maxToolArgChars = 48_000
+	// The engine already caps each result (max_result_chars); this only stops a
+	// result that never went through it. It equals the most that setting allows.
+	maxToolResultChars = 256_000
 	maxAssistantChars  = 64_000
 )
 

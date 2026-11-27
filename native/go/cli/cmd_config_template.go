@@ -120,11 +120,9 @@ claimidx_public_ledger = false
 # improve_tick_min_s = 20
 # improve_tick_max_s = 900
 # improve_heavy_window_s = 300
-# turn_end_timeout_s = 30
-# after_tool_batch_timeout_s = 10
 # pulse_learn_timeout_s = 45
 # soul_inject_chars = 1400
-# max_result_chars = 30000
+# max_result_chars = 100000
 # soul_max_bytes = 65536
 # residue_max_bytes = 262144
 # journal_max_bytes = 65536
@@ -172,6 +170,8 @@ claimidx_public_ledger = false
 # harness_mode = "auto"     # auto | off (keep a long conversation inside the model window)
 # harness_min_context_pct = 0.75
 # harness_max_context_pct = 0.92
+# finish_checks = "auto"    # auto | all | off (send her back to work after a reply that looks unfinished;
+#                           # auto does it for small local models, and for others only when a check failed)
 
 # Desktop always-ready (also in Settings / desktop.json)
 # update_check = "auto"   # auto (check in-app, tell you) | ask (only when you check)
@@ -185,11 +185,6 @@ claimidx_public_ledger = false
 [gateway]
 heartbeat_interval = 60
 rate_limit = 120
-
-[execution]
-default_timeout = 30
-max_retries = 3
-retry_backoff = 1.0
 
 # Messengers — non-secret fields only (bot tokens via Settings / secret store)
 [telegram]

@@ -31,7 +31,7 @@ var advancedKnobList = []advancedKnob{
 	{"improve_heavy_window_s", 300, "int", 30, 3600, "s", "Improve tick", "How long a turn_end / after_tool_batch counts as heavy use.", ""},
 	{"pulse_learn_timeout_s", 45, "int", 10, 180, "s", "Learn timeouts", "Cap for one hearth partner.improve pulse.", ""},
 	{"soul_inject_chars", 1400, "int", 200, 8000, "chars", "Token budgets", "Max characters of soul injected after the cache-stable marker.", ""},
-	{"max_result_chars", 30000, "int", 2000, 256000, "chars", "Token budgets", "Max characters of each tool result kept for the model. Auto-tightens to 8,000 on a small local context window unless this knob or REMEDY_REACT_MAX_RESULT_CHARS is set.", "REMEDY_REACT_MAX_RESULT_CHARS"},
+	{"max_result_chars", 100000, "int", 2000, 256000, "chars", "Token budgets", "Max characters of each tool result kept for the model. Auto-tightens to 8,000 on a small local context window unless this knob or REMEDY_REACT_MAX_RESULT_CHARS is set.", "REMEDY_REACT_MAX_RESULT_CHARS"},
 	{"soul_max_bytes", 64 * 1024, "int", 8 * 1024, 1024 * 1024, "bytes", "Caps", "Hard cap on the on-disk soul field.", ""},
 	{"residue_max_bytes", 256 * 1024, "int", 16 * 1024, 4 * 1024 * 1024, "bytes", "Caps", "Hard cap on residue dumps during compact.", ""},
 	{"journal_max_bytes", 64 * 1024, "int", 4 * 1024, 1024 * 1024, "bytes", "Caps", "Hard cap on the vigil journal tail.", ""},
