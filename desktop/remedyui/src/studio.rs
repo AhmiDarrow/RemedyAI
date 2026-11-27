@@ -794,6 +794,16 @@ impl Studio {
         crate::depth::submit(self, text, Vec::new(), crate::depth::SubmitKind::Send, true);
     }
 
+    /// The latest messages, as many as are being shown, and how many earlier
+    /// ones are left out.
+    pub(crate) fn recent_messages(&self) -> (Vec<ChatMessage>, usize) {
+        let keep = self.depth.shown.get().max(1);
+        self.messages.with(|all| {
+            let hidden = all.len().saturating_sub(keep);
+            (all[hidden..].to_vec(), hidden)
+        })
+    }
+
     /// Drops the in-flight tail so a new session does not keep the previous turn.
     pub(crate) fn clear_live(&self) {
         self.partial.set(String::new());

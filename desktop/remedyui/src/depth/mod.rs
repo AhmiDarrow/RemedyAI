@@ -101,6 +101,11 @@ pub struct StreamJob {
     pub progress: Option<f32>,
 }
 
+/// The messages built when a conversation opens, and how many more each
+/// "Show earlier" adds.
+pub const RECENT_MESSAGES: usize = 40;
+pub const EARLIER_STEP: usize = 80;
+
 impl StreamJob {
     fn running(session_id: String) -> Self {
         Self {
@@ -270,6 +275,10 @@ pub struct Depth {
     /// Draft in the add-tag field.
     pub tag_draft: Signal<String>,
     pub remote_busy: Signal<bool>,
+    /// How many of the conversation's latest messages are built as rows. A
+    /// long conversation costs by what is built, not by what is on screen:
+    /// every streamed word laid out all of it. "Show earlier" raises this.
+    pub shown: Signal<usize>,
     /// Messages sent into a running turn that she has not taken in yet, as
     /// (session, text). They show under her live reply until she does.
     pub steers: Signal<Vec<(String, String)>>,
@@ -361,6 +370,7 @@ impl Depth {
             tag_id: Signal::new(None),
             tag_draft: Signal::new(String::new()),
             remote_busy: Signal::new(false),
+            shown: Signal::new(RECENT_MESSAGES),
             steers: Signal::new(Vec::new()),
             memory_body: Signal::new(String::new()),
             memory_rows: Signal::new(Vec::new()),
