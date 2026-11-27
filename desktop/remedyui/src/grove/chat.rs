@@ -11,6 +11,7 @@ use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::input::Key;
 use remedy_ui::layout::{Align, Justify, Length};
+use remedy_ui::reactive::Signal;
 use remedy_ui::style::StylePatch;
 use remedy_ui::text::{RichText, TextStylePatch};
 use remedy_ui::widgets as w;
@@ -58,7 +59,52 @@ fn feed(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
         .gap(unit * 2.0)
         .padding(Insets::all(unit * 2.0))
         .layout(|l| l.width = Length::Percent(1.0));
-    w::for_each(&list, grove.messages, |m: &StoryMessage| m.id.clone(), {
+    // Only the latest messages are built (as in Studio): a long conversation
+    // cost by what was built, and every streamed word laid all of it out.
+    let shown = Signal::new(crate::depth::RECENT_MESSAGES);
+    let hidden = Signal::new(0usize);
+    let recent: Signal<Vec<StoryMessage>> = Signal::new(Vec::new());
+    let _ = list.clone().bind({
+        let (g, shown, hidden, recent) = (grove.clone(), shown.clone(), hidden.clone(), recent.clone());
+        let last_session = std::cell::RefCell::new(String::new());
+        move || {
+            // Another conversation opens at its latest messages again.
+            let session = g.session_id.get();
+            if *last_session.borrow() != session {
+                *last_session.borrow_mut() = session;
+                shown.set_if_changed(crate::depth::RECENT_MESSAGES);
+            }
+            let keep = shown.get().max(1);
+            let (rows, left_out) = g.messages.with(|all| {
+                let cut = all.len().saturating_sub(keep);
+                (all[cut..].to_vec(), cut)
+            });
+            hidden.set_if_changed(left_out);
+            let _ = recent.try_set(rows);
+        }
+    });
+    let earlier = show(ui, {
+        let hidden = hidden.clone();
+        move || hidden.get() > 0
+    }, {
+        let (ui, shown, hidden) = (ui.clone(), shown.clone(), hidden.clone());
+        move || {
+            let (shown, hidden) = (shown.clone(), hidden.clone());
+            w::row(&ui)
+                .justify(Justify::Center)
+                .layout(|l| l.width = Length::Percent(1.0))
+                .child(
+                    w::button(
+                        &ui,
+                        move || format!("Show earlier messages ({} more)", hidden.get()),
+                        move || shown.update(|n| *n += crate::depth::EARLIER_STEP),
+                    )
+                    .variant("quiet"),
+                )
+        }
+    })
+    .el();
+    w::for_each(&list, recent, |m: &StoryMessage| m.id.clone(), {
         let ui = ui.clone();
         let g = grove.clone();
         move |m| message_row(&ui, &g, m)
@@ -89,6 +135,7 @@ fn feed(ui: &Ui, grove: Grove, kind: &RoomKind) -> El {
             l.min_height = Length::Px(0.0);
         })
         .semantics(Semantics::new(Role::Region).label("Chat feed"))
+        .child(earlier)
         .child(list)
         .child(partial)
         .child(feed_extras(ui, grove.clone(), kind))
@@ -109,6 +156,7 @@ fn follow_newest(ui: &Ui, scroll: El, grove: Grove) -> El {
     let last_y = Rc::new(Cell::new(0.0f32));
     let shown = Rc::new(RefCell::new(String::new()));
     let was_streaming = Rc::new(Cell::new(false));
+    let waiting = Rc::new(Cell::new(0u8));
     let (stuck_s, own_s, last_s) = (stuck.clone(), own_move.clone(), last_y.clone());
     let scroller = scroll.clone();
     let ui = ui.clone();
@@ -137,14 +185,20 @@ fn follow_newest(ui: &Ui, scroll: El, grove: Grove) -> El {
                 scroller.scroll_to(remedy_ui::core::Vec2::new(0.0, 1.0e9));
                 // The new rows have no height until the next layout, so the end is
                 // not the end yet: go there again once they have been measured.
-                for ms in [60u64, 350] {
-                    let (again, tree, own, held) = (scroller.clone(), ui.clone(), own_move.clone(), stuck.clone());
-                    let _ = ui.after(std::time::Duration::from_millis(ms), move || {
-                        if held.get() && tree.tree().contains(again.id()) {
-                            own.set(true);
-                            again.scroll_to(remedy_ui::core::Vec2::new(0.0, 1.0e9));
-                        }
-                    });
+                // One pair of follow-ups at a time, not a pair per streamed word.
+                if waiting.get() == 0 {
+                    waiting.set(2);
+                    for ms in [60u64, 350] {
+                        let (again, tree, own, held, waiting) =
+                            (scroller.clone(), ui.clone(), own_move.clone(), stuck.clone(), waiting.clone());
+                        let _ = ui.after(std::time::Duration::from_millis(ms), move || {
+                            waiting.set(waiting.get().saturating_sub(1));
+                            if held.get() && tree.tree().contains(again.id()) {
+                                own.set(true);
+                                again.scroll_to(remedy_ui::core::Vec2::new(0.0, 1.0e9));
+                            }
+                        });
+                    }
                 }
             }
         })

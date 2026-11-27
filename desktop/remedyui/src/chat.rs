@@ -300,34 +300,45 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
             start: tokens::GUTTER,
         })
         .layout(|l| l.width = Length::Percent(1.0));
+    // Whether she has said anything yet in the live turn. The list below reads
+    // this, not the text itself: reading the text made every streamed word
+    // copy and re-diff the whole conversation.
+    let speaking = Signal::new(false);
+    let _ = col.clone().bind({
+        let (st, speaking) = (studio.clone(), speaking.clone());
+        move || speaking.set_if_changed(!st.partial.with(|p| p.is_empty()))
+    });
+    let earlier = Signal::new(0usize);
+    let earlier_out = earlier.clone();
     let _ = col.clone().bind(move || {
-        let mut msgs = st.messages.get();
-        let partial = st.partial.get();
+        let (mut msgs, hidden) = st.recent_messages();
+        earlier_out.set_if_changed(hidden);
+        if hidden > 0 {
+            // One row standing for everything above.
+            msgs.insert(0, ChatMessage::plain("earlier", "system", ""));
+        }
+        let has_partial = speaking.get();
         let streaming = st.streaming.get();
         if streaming {
             if let Some(id) = st.live_message_id.get() {
                 msgs.retain(|m| m.id != id);
             }
         }
-        if !partial.is_empty() || streaming {
-            let started = st
-                .active
-                .get()
-                .and_then(|sid| st.depth.job(&sid))
-                // A pinned clock (design shots) stands in for the real start.
-                .map(|j| time::rfc3339(if st.clock.get().is_some() { st.now() } else { j.started_secs }));
+        if has_partial || streaming {
+            // Read without subscribing: the job record changes with every
+            // word, and only its start time is wanted here.
+            let started = remedy_ui::reactive::untrack(|| {
+                st.active
+                    .get()
+                    .and_then(|sid| st.depth.job(&sid))
+                    // A pinned clock (design shots) stands in for the real start.
+                    .map(|j| time::rfc3339(if st.clock.get().is_some() { st.now() } else { j.started_secs }))
+            });
+            // The live row draws from the live text itself (`live_turn`).
             msgs.push(ChatMessage {
                 streaming: true,
                 created_at: started,
-                ..ChatMessage::plain(
-                    "live",
-                    "assistant",
-                    if partial.is_empty() {
-                        "…".to_string()
-                    } else {
-                        partial
-                    },
-                )
+                ..ChatMessage::plain("live", "assistant", "…")
             });
         }
         // Sent while she works and not taken in yet: under her live reply,
@@ -349,6 +360,9 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
         items,
         |m| m.id.clone(),
         move |m| {
+            if m.id == "earlier" {
+                return earlier_row(&u, studio_rows.clone(), earlier.clone());
+            }
             let day = day_heading_for(&studio_rows, m);
             let body = if m.id == "live" {
                 live_turn(&u, studio_rows.clone())
@@ -598,6 +612,24 @@ fn day_heading_for(studio: &Studio, msg: &ChatMessage) -> Option<String> {
     } else {
         Some(label)
     }
+}
+
+/// Stands for the messages above the ones built, and builds more of them.
+fn earlier_row(ui: &Ui, studio: Studio, hidden: Signal<usize>) -> El {
+    let label = move || match hidden.get() {
+        1 => "Show 1 earlier message".to_string(),
+        n => format!("Show earlier messages ({n} more)"),
+    };
+    w::row(ui)
+        .justify(Justify::Center)
+        .layout(|l| l.width = Length::Percent(1.0))
+        .child(
+            w::button(ui, label, move || {
+                studio.depth.stuck.set(false);
+                studio.depth.shown.update(|n| *n += crate::depth::EARLIER_STEP);
+            })
+            .variant("quiet"),
+        )
 }
 
 fn day_chip(ui: &Ui, label: &str) -> El {
@@ -1502,6 +1534,8 @@ fn follow_scroll(ui: &Ui, scroll: El, studio: Studio) -> El {
     let touched: Rc<Cell<Option<std::time::Instant>>> = Rc::new(Cell::new(None));
     let shown = Rc::new(RefCell::new(None::<String>));
     let was_streaming = Rc::new(Cell::new(false));
+    // Follow-up scrolls still to run (see the binding below).
+    let waiting = Rc::new(Cell::new(0u8));
     let stuck = studio.depth.stuck.clone();
     let scroller_key = scroll.clone();
     let scroller_bind = scroll.clone();
@@ -1570,16 +1604,22 @@ fn follow_scroll(ui: &Ui, scroll: El, studio: Studio) -> El {
                     own_move.set(true);
                     scroller.scroll_to(Vec2::new(0.0, 1.0e9));
                     // New rows have no height until the next layout, so the end is not
-                    // the end yet: go there again once they have been measured.
-                    for ms in [60u64, 350] {
-                        let (again, tree, own, held) =
-                            (scroller.clone(), ui.clone(), own_move.clone(), st.depth.stuck.clone());
-                        let _ = ui.after(std::time::Duration::from_millis(ms), move || {
-                            if held.get() && tree.tree().contains(again.id()) {
-                                own.set(true);
-                                again.scroll_to(Vec2::new(0.0, 1.0e9));
-                            }
-                        });
+                    // the end yet: go there again once they have been measured. One
+                    // pair of follow-ups at a time: a pair per streamed word was a
+                    // hundred timers a second, each forcing a layout.
+                    if waiting.get() == 0 {
+                        waiting.set(2);
+                        for ms in [60u64, 350] {
+                            let (again, tree, own, held, waiting) =
+                                (scroller.clone(), ui.clone(), own_move.clone(), st.depth.stuck.clone(), waiting.clone());
+                            let _ = ui.after(std::time::Duration::from_millis(ms), move || {
+                                waiting.set(waiting.get().saturating_sub(1));
+                                if held.get() && tree.tree().contains(again.id()) {
+                                    own.set(true);
+                                    again.scroll_to(Vec2::new(0.0, 1.0e9));
+                                }
+                            });
+                        }
                     }
                 }
             }
