@@ -943,6 +943,8 @@ fn parse_life(v: &Value) -> LifeCard {
 
 pub fn focus_session(studio: &Studio, id: &str) {
     studio.depth.notice.set(String::new());
+    // Another conversation opens at its latest messages again.
+    studio.depth.shown.set_if_changed(super::RECENT_MESSAGES);
     if let Some(job) = studio.depth.job(id) {
         if job.status == "running" {
             studio.partial.set(job.partial);
@@ -3391,6 +3393,87 @@ mod tests {
         assert_eq!(studio.live_user_reaction.get(), "", "toggle off");
         react(&studio, "msg-42", "❤️");
         assert_eq!(studio.live_user_reaction.get(), "❤️");
+    }
+
+    #[test]
+    fn only_the_recent_part_of_a_long_conversation_is_built() {
+        let studio = Studio::new();
+        studio.messages.set((0..100).map(|i| ChatMessage::plain(format!("m{i}"), "user", "x")).collect());
+        let (rows, hidden) = studio.recent_messages();
+        assert_eq!((rows.len(), hidden), (crate::depth::RECENT_MESSAGES, 100 - crate::depth::RECENT_MESSAGES));
+        assert_eq!(rows.last().map(|m| m.id.as_str()), Some("m99"));
+        // "Show earlier" builds more of them, and opening another conversation starts over.
+        studio.depth.shown.update(|n| *n += crate::depth::EARLIER_STEP);
+        assert_eq!(studio.recent_messages().1, 0);
+        focus_session(&studio, "other");
+        assert_eq!(studio.depth.shown.get(), crate::depth::RECENT_MESSAGES);
+    }
+
+    /// Not a pass/fail test: prints what one frame costs in the chat as the
+    /// conversation grows. Run with
+    /// `cargo test --release --lib perf_probe -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn perf_probe() {
+        for n in [10usize, 100, 400] {
+            let studio = Studio::new();
+            studio.active.set(Some("s1".into()));
+            let body = "A paragraph of ordinary reply text with `code`, **bold** and a list:\n- one\n- two\n\n".repeat(4);
+            let mut msgs = Vec::new();
+            for i in 0..n {
+                let role = if i % 2 == 0 { "user" } else { "assistant" };
+                let mut m = ChatMessage::plain(format!("m{i}"), role, if role == "user" { "do the next thing".to_string() } else { body.clone() });
+                if role == "assistant" {
+                    m.steps = (0..6).map(|k| WorkStep::done(&format!("s{i}-{k}"), "bash")).collect();
+                }
+                msgs.push(m);
+            }
+            studio.messages.set(msgs);
+            let t = Instant::now();
+            let mut app = TestApp::window({
+                let studio = studio.clone();
+                move |ui, _| {
+                    ui.root().child(shell(ui, studio.clone()));
+                }
+            });
+            app.frames(2);
+            let build = t.elapsed();
+            let time = |app: &mut TestApp, reps: u32, mut step: Box<dyn FnMut(u32)>| {
+                let t = Instant::now();
+                for i in 0..reps {
+                    step(i);
+                    app.frames(1);
+                }
+                t.elapsed().as_secs_f64() * 1000.0 / f64::from(reps)
+            };
+            let idle = time(&mut app, 30, Box::new(|_| {}));
+            let st = studio.clone();
+            let typing = time(&mut app, 30, Box::new(move |i| st.depth.composer_value.set("x".repeat(i as usize + 1))));
+            studio.depth.map_job("s1", |job| {
+                *job = StreamJob::running("s1".to_string());
+                job.outgoing = "go".into();
+            });
+            studio.streaming.set(true);
+            app.frames(2);
+            let st = studio.clone();
+            let token = time(&mut app, 60, Box::new(move |_| apply_frame(&st, "s1", "token", r#"{"text":"word "}"#)));
+            // The parts of a token, apart: her text alone, the job record alone.
+            let st = studio.clone();
+            let text_only = time(&mut app, 40, Box::new(move |_| st.partial.update(|p| p.push_str("word "))));
+            let st = studio.clone();
+            let job_only = time(&mut app, 40, Box::new(move |_| st.depth.map_job("s1", |job| job.partial.push_str("word "))));
+            let st = studio.clone();
+            let tick_only = time(&mut app, 40, Box::new(move |i| st.depth.tick.set(u64::from(i) + 1000)));
+            eprintln!("PERF   parts: text only={text_only:.2} ms  job record only={job_only:.2} ms  tick only={tick_only:.2} ms");
+            let st = studio.clone();
+            let step = time(&mut app, 20, Box::new(move |i| {
+                apply_frame(&st, "s1", "tool_call", &format!(r#"{{"name":"bash","id":"c{i}","args":{{"command":"ls"}}}}"#));
+            }));
+            eprintln!(
+                "PERF messages={n:<4} build={:>7.1} ms  idle frame={idle:>6.2} ms  keystroke={typing:>6.2} ms  token={token:>6.2} ms  tool step={step:>6.2} ms",
+                build.as_secs_f64() * 1000.0
+            );
+        }
     }
 
     #[test]

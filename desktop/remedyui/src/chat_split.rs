@@ -1516,14 +1516,14 @@ fn collect_turns(studio: &Studio) -> Vec<ActionTurn> {
     let streaming = studio.streaming.get();
     let live_id = studio.live_message_id.get();
     let session_id = studio.active.get().unwrap_or_default();
-    let live_request_id = studio
-        .depth
-        .job(&session_id)
-        .map(|j| j.request_id)
-        .filter(|s| !s.is_empty())
-        .unwrap_or_default();
+    // Read without subscribing: the job record changes with every streamed
+    // word, and the request id only when a turn starts (streaming changes too).
+    let live_request_id = remedy_ui::reactive::untrack(|| {
+        studio.depth.job(&session_id).map(|j| j.request_id).filter(|s| !s.is_empty()).unwrap_or_default()
+    });
     let mut out = Vec::new();
-    for m in studio.messages.get() {
+    // The same recent part of the conversation the chat builds.
+    for m in studio.recent_messages().0 {
         if m.role != "assistant" {
             continue;
         }
