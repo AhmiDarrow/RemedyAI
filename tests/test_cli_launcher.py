@@ -1,4 +1,4 @@
-"""The ``remedy`` launcher hands ported commands to Go remedy-runtime."""
+"""The ``remedy`` launcher hands every command to Go remedy-runtime."""
 
 from __future__ import annotations
 
@@ -11,19 +11,6 @@ from pathlib import Path
 import pytest
 
 from remedy.interfaces.cli import launcher
-
-
-def test_command_word_skips_home():
-    assert launcher.command_word(["--home", "/x", "tool", "list"]) == "tool"
-    assert launcher.command_word(["--home=/x", "exec", "--", "ls"]) == "exec"
-    assert launcher.command_word([]) == ""
-
-
-def test_only_ported_commands_go_to_go():
-    assert launcher.wants_go(["tool", "list"])
-    assert launcher.wants_go(["--home", "/h", "serve"])
-    assert not launcher.wants_go([])
-    assert not launcher.wants_go(["--version"])
 
 
 def _fake_runtime(tmp_path: Path, record: dict) -> Path:
@@ -60,23 +47,33 @@ def test_runtime_with_cli_gets_argv_and_version(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(os.name != "posix", reason="fake runtime is a shebang script")
-def test_old_runtime_without_cli_falls_back_to_python(tmp_path, monkeypatch):
+def test_old_runtime_without_cli_is_reported(tmp_path, monkeypatch, capsys):
     rt = _fake_runtime(tmp_path, {"status": "ready", "protocol": 1, "tool_abi": 1})
     monkeypatch.setenv("REMEDY_NATIVE_RUNTIME_BIN", str(rt))
-    seen: list[list[str]] = []
-    monkeypatch.setattr(launcher, "_python_main", lambda a: seen.append(a))
-    launcher.main(["tool", "list"])
-    assert seen == [["tool", "list"]]
+    with pytest.raises(SystemExit) as ei:
+        launcher.main(["tool", "list"])
+    assert ei.value.code == 1
+    assert "too old" in capsys.readouterr().err
 
 
-def test_unported_command_stays_in_python(monkeypatch):
+def test_missing_runtime_is_reported(monkeypatch, capsys):
+    monkeypatch.setattr(launcher, "_runtime_command", lambda: (None, None))
+    with pytest.raises(SystemExit) as ei:
+        launcher.main(["tool", "list"])
+    assert ei.value.code == 1
+    assert "remedy-runtime was not found" in capsys.readouterr().err
+
+
+def test_no_arguments_asks_the_runtime_for_help(monkeypatch):
     seen: list[list[str]] = []
-    monkeypatch.setattr(launcher, "_python_main", lambda a: seen.append(a))
-    monkeypatch.setattr(launcher, "_runtime_command", lambda: pytest.fail("looked for the runtime"))
-    # Every command group is in Go now; a word the Go CLI does not know still
-    # goes to the Python parser, which prints the usage error.
-    launcher.main(["no-such-command", "x"])
-    assert seen == [["no-such-command", "x"]]
+    monkeypatch.setattr(launcher, "_runtime_command", lambda: (["rt"], None))
+    monkeypatch.setattr(launcher, "runtime_has_cli", lambda *a: True)
+    monkeypatch.setattr(launcher.os, "name", "nt")
+    monkeypatch.setattr(launcher.subprocess, "call", lambda full, **kw: seen.append(full) or 0)
+    with pytest.raises(SystemExit) as ei:
+        launcher.main([])
+    assert ei.value.code == 0
+    assert seen == [["rt", "--help"]]
 
 
 def test_child_env_names_this_python_for_pip(monkeypatch):
