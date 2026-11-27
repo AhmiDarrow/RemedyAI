@@ -1207,8 +1207,9 @@ func TestWorkingSetRecordsCommandsFailuresAndTodo(t *testing.T) {
 }
 
 func TestEstimateTokensChargesForImages(t *testing.T) {
-	text := []Message{UserText(strings.Repeat("a", 400))}
-	if got := estimateTokens(text); got < 100 || got > 120 {
+	// Counted by the tokenizer: 80 short words are about a token each.
+	text := []Message{UserText(strings.Repeat("word ", 80))}
+	if got := estimateTokens(text); got < 70 || got > 100 {
 		t.Fatalf("text tokens=%d", got)
 	}
 	withImage := []Message{{Role: RoleUser, Blocks: []Block{ImageBlock("image/png", bytes.Repeat([]byte{0}, 64))}}}

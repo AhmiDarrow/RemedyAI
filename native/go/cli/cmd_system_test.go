@@ -790,9 +790,9 @@ func TestCLISystemComputerStatusAndHost(t *testing.T) {
 	}
 	sysComputerHost = nil
 	sysWaitInterrupt = func(*httpapi.CLIComputerHost) {}
-	code, out, _ = sysRun(t, home, "", "computer", "host", "run", "--api")
+	code, out, _ = sysRun(t, home, "", "computer", "host", "run")
 	if code != 0 || !strings.Contains(out, "CLI computer host started. host_connected=True") ||
-		!strings.Contains(out, "--api HTTP poller skipped") || !strings.Contains(out, "Foreground host running") {
+		!strings.Contains(out, "Foreground host running") {
 		t.Fatalf("%d %s", code, out)
 	}
 	if sysComputerHost.Running() {

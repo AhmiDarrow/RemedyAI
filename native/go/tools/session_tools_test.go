@@ -195,7 +195,7 @@ func TestDelegateDescriptorAdvertisesTheHandOff(t *testing.T) {
 	}
 	agent, _ := props["agent"].(map[string]any)
 	enum, _ := agent["enum"].([]any)
-	if len(enum) != 2 || enum[0] != "claude-code" || enum[1] != "codex" {
-		t.Fatalf("agent enum=%v; codex stays listed so the shape is settled", enum)
+	if len(enum) != 1 || enum[0] != "claude-code" {
+		t.Fatalf("agent enum=%v; only agents Remedy can drive are listed", enum)
 	}
 }

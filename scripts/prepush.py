@@ -215,9 +215,9 @@ DESKTOP = Lane(
 
 RUST = Lane(
     "rust",
-    "Tauri shell (cargo)",
+    "Rust helpers: phone transport core and the mobile-data endpoint (cargo)",
     (
-        Step("cargo test", "cargo test --locked", cwd="desktop/src-tauri", env=RUST_ENV),
+        Step("cargo test (connect core)", "cargo test --locked", cwd="connect/core", env=RUST_ENV),
         Step("cargo test (iroh sidecar)", "cargo test --locked", cwd="native/iroh", env=RUST_ENV),
     ),
 )
@@ -509,18 +509,18 @@ def _wsl_go_test_command() -> str | None:
 
 
 def _wsl_cargo_command() -> str | None:
-    """``rust-desktop`` Linux ``cargo test/check --locked``, under WSL.
+    """Linux ``cargo test --locked`` of a shipped Rust crate, under WSL.
 
     Windows cargo does not type-check ``cfg(not(target_os = "windows"))``
     unused bindings; ubuntu-22.04 CI does, with ``RUSTFLAGS=-D warnings``.
-    Target dir is ``/tmp`` so this does not share ``desktop/src-tauri/target``
-    with the Windows cargo steps. Returns None on a Linux host; "" without WSL.
+    It runs on the mobile-data endpoint, a crate that ships on Linux. Target
+    dir is ``/tmp`` so this does not share a target with the Windows cargo steps. Returns None on a Linux host; "" without WSL.
     """
     if not IS_WINDOWS:
         return None
     if shutil.which("wsl") is None:
         return ""
-    tauri = _wsl_path(ROOT / "desktop" / "src-tauri")
+    tauri = _wsl_path(ROOT / "native" / "iroh")
     inner = (
         f"cd {tauri} && "
         "export CARGO_TARGET_DIR=/tmp/remedy-prepush-cargo && "

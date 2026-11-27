@@ -334,12 +334,12 @@ func TestCLISettingsUnrelatedSetDoesNotRewriteTheLLM(t *testing.T) {
 	home := cfgTestHome(t)
 	cfgWrite(t, filepath.Join(home, "config.toml"),
 		"llm_provider = \"deepseek\"\nllm_model = \"deepseek-v4-flash\"\nllm_base_url = \"https://api.deepseek.com/v1\"\nharness_mode = \"auto\"\n")
-	r := cfgCLI(t, home, "", "settings", "set", "harness_mode=manual", "sarcasm_mode=true")
+	r := cfgCLI(t, home, "", "settings", "set", "harness_mode=off", "sarcasm_mode=true")
 	if r.code != 0 || strings.Contains(r.out, "llm_model") || strings.Contains(r.out, "llm_provider") {
 		t.Fatalf("%+v", r)
 	}
 	text := cfgReadFile(t, filepath.Join(home, "config.toml"))
-	for _, want := range []string{`llm_model = "deepseek-v4-flash"`, `llm_provider = "deepseek"`, `harness_mode = "manual"`} {
+	for _, want := range []string{`llm_model = "deepseek-v4-flash"`, `llm_provider = "deepseek"`, `harness_mode = "off"`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("config lacks %q:\n%s", want, text)
 		}

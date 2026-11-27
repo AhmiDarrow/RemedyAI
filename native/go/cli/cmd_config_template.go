@@ -169,7 +169,7 @@ claimidx_public_ledger = false
 # house_rules_audit = true
 
 # Memory harness (chat compression)
-# harness_mode = "auto"     # off | manual | auto
+# harness_mode = "auto"     # auto | off (keep a long conversation inside the model window)
 # harness_min_context_pct = 0.75
 # harness_max_context_pct = 0.92
 

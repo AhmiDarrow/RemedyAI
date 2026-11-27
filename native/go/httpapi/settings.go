@@ -480,8 +480,9 @@ func normalizeSettingsPatch(patch, cfg ConfigMap) {
 	}
 	if v, ok := patch["harness_mode"]; ok && v != nil {
 		hm := strings.ToLower(strings.TrimSpace(fmt.Sprint(v)))
-		// "manual" was a mode of the old harness; it compacted nothing on its own.
-		if hm == "manual" {
+		// "manual" was a mode of the old harness; it compacted nothing on its
+		// own. A bare off on the command line arrives as the boolean false.
+		if hm == "manual" || hm == "false" || hm == "none" || hm == "0" {
 			hm = "off"
 		}
 		if hm != "off" && hm != "auto" {
@@ -847,7 +848,6 @@ func (s *Server) settingsPayload() map[string]any {
 		"vision_enabled":               visionEnabled,
 		"vision_model_id":              visionModelID,
 		"vision_force_decode":          visionForce,
-		"vision": s.visionStatusPayload(false),
 		"assistant": publicAssistant(cfg),
 	}
 	out["advanced"] = advancedTable(cfg)
