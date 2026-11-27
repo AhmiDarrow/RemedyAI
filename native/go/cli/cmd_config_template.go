@@ -70,9 +70,10 @@ log_level = "INFO"
 # Optional tone flag (Settings → Advanced); default off
 sarcasm_mode = false
 
-# Claimidx (Settings → Privacy); default on. Set false to stop the local
-# Claimidx host and all ledger submits.
-claimidx_enabled = true
+# Claimidx (Settings → Privacy). Set true to install and run the local
+# Claimidx host (downloaded from PyPI), false to stop it. Left unset, a host
+# that is already installed keeps running and nothing new is downloaded.
+# claimidx_enabled = false
 
 # Claimidx public ledger submits (Settings → Advanced); default off: claims
 # stay on this computer. Set true to share them with the public ledger.

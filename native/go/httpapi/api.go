@@ -510,11 +510,11 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.apiListenPort = listenPort(ln)
 	s.startMessengerGateway()
 	s.startConnectGateway(s.apiListenPort)
-	// Installed after first launch and only while the owner's switch is on.
+	// Runs when already installed; installed only once the owner turns it on.
 	// It works in the background and never holds the runtime up.
 	s.claimidx.Apply()
 	bindSearchHost(s.searchHost)
-	s.searchHost.Apply()
+	s.searchHost.ApplyIfInstalled()
 	s.startSchedulerLoop(ctx)
 	s.startHearthLoop(ctx)
 	s.startPartnerDispatcher(ctx)
