@@ -73,8 +73,10 @@ def test_unported_command_stays_in_python(monkeypatch):
     seen: list[list[str]] = []
     monkeypatch.setattr(launcher, "_python_main", lambda a: seen.append(a))
     monkeypatch.setattr(launcher, "_runtime_command", lambda: pytest.fail("looked for the runtime"))
-    launcher.main(["skill", "list"])
-    assert seen == [["skill", "list"]]
+    # Every command group is in Go now; a word the Go CLI does not know still
+    # goes to the Python parser, which prints the usage error.
+    launcher.main(["no-such-command", "x"])
+    assert seen == [["no-such-command", "x"]]
 
 
 def test_child_env_names_this_python_for_pip(monkeypatch):
