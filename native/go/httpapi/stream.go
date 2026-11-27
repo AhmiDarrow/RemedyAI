@@ -459,7 +459,9 @@ func (s *Server) runDetachedStream(
 	defer s.claims.EndTurn(sid)
 	// Her mood follows the turn: it starts here and its outcome is kept when
 	// it ends (after the claim is released, so the turn no longer counts).
-	s.moodNote(sid, func(*moodPhase) {})
+	firstMessage := s.sessions != nil && s.sessions.countMessages(sid) <= 1
+	s.moodNote(sid, func(p *moodPhase) { p.first = firstMessage })
+	s.moodTyping(false) // what was being typed has been sent
 	defer s.moodEnd(sid)
 	defer sink.close()
 	defer s.claims.Release(sid, &claimEpoch)
@@ -673,7 +675,7 @@ func (s *Server) runDetachedStream(
 			return nil
 		}
 		if text, ok := modelTextToken(token); ok {
-			s.moodNote(sid, func(p *moodPhase) { p.thinking = false })
+			s.moodNote(sid, func(p *moodPhase) { p.thinking, p.spoke = false, true })
 			fullResponse.WriteString(text)
 			ts.assistantText(text)
 			upsertDraft(false)

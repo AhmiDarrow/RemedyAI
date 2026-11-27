@@ -573,8 +573,7 @@ fn usage_table(ui: &Ui, rows: &[model::UsageLine]) -> El {
                         .variant("small")
                         .layout(|l| l.grow = 1.0),
                 )
-                .child(end_label(ui, "Tokens"))
-                .child(end_label(ui, "Cost")),
+                .child(end_label(ui, "Tokens")),
         );
     for row in rows {
         table = table.child(
@@ -593,8 +592,7 @@ fn usage_table(ui: &Ui, rows: &[model::UsageLine]) -> El {
                             l.min_width = Length::Px(0.0);
                         }),
                 )
-                .child(end_figure(ui, row.tokens.clone()))
-                .child(end_figure(ui, row.cost.clone())),
+                .child(end_figure(ui, row.tokens.clone())),
         );
     }
     table

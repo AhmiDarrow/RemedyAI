@@ -514,8 +514,9 @@ fn recover_missing_session(studio: &Studio, sid: &str, message: &str) {
 
 fn push_user(studio: &Studio, sid: &str, text: &str) {
     let id = studio.alloc_msg_id();
+    let at = crate::time::rfc3339(studio.now());
     studio.messages.update(|m| {
-        m.push(ChatMessage::plain(format!("local-u-{id}"), "user", text));
+        m.push(ChatMessage { created_at: Some(at), ..ChatMessage::plain(format!("local-u-{id}"), "user", text) });
     });
     let sid = sid.to_string();
     studio.sessions.update(|list| {
@@ -671,17 +672,10 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
                             .max(api::u64_field(&v, "prompt_tokens")),
                         output: api::u64_field(&v, "output_tokens")
                             .max(api::u64_field(&v, "completion_tokens")),
-                        cost: v
-                            .get("cost")
-                            .and_then(|c| c.as_f64())
-                            .or_else(|| v.get("cost_usd").and_then(|c| c.as_f64())),
                     };
                     let mut session = studio.depth.usage_session.get();
                     session.input = session.input.saturating_add(usage.input);
                     session.output = session.output.saturating_add(usage.output);
-                    if let Some(c) = usage.cost {
-                        session.cost = Some(session.cost.unwrap_or(0.0) + c);
-                    }
                     studio.depth.usage_run.set(usage);
                     studio.depth.usage_session.set(session);
                 }
@@ -789,6 +783,7 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
                 job.steps.clear();
                 job.thinking.clear();
                 job.message_id.clear();
+                job.started_secs = crate::time::now_secs();
             });
             if active {
                 studio.seal_live();
@@ -1437,6 +1432,16 @@ fn session_events_loop(studio: Studio, client: Client, wake: remedy_ui::reactive
 }
 
 fn on_session_sync_event(studio: &Studio, kind: &str, data: &str) {
+    if kind == "mood" {
+        // The runtime says her mood changed: every face follows at once.
+        if let Ok(v) = serde_json::from_str::<Value>(data) {
+            let mood = api::str_field(&v, "title");
+            if !mood.is_empty() {
+                studio.server_mood.set_if_changed(mood);
+            }
+        }
+        return;
+    }
     if kind == "settings_updated" {
         if let Some(s) = crate::settings::current() {
             s.reload_from_server();

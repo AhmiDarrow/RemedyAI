@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"encoding/json"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -16,7 +18,9 @@ import (
 //	    a tool is running, and it is at least the third step   focused
 //	    a tool is running                                       working
 //	    she is thinking                                         thinking
+//	    it is the conversation's first message, nothing said yet surprised
 //	    otherwise                                               working
+//	the owner is typing to her (on any surface)                 curious
 //	she is busy on her own: learning / a night act              dreaming / watchful
 //	the last turn ended within moodAfterglow
 //	    every tool call in it failed                            error
@@ -28,11 +32,18 @@ import (
 // own error face, which is not a mood.
 const moodAfterglow = 10 * time.Minute
 
+// moodTypingHold is how long one "typing" note counts. A surface repeats the
+// note while the owner keeps typing and withdraws it when the box is empty.
+const moodTypingHold = 6 * time.Second
+
 type moodPhase struct {
 	tools    int // tool calls running now
 	steps    int // tool calls started this turn
 	ok, err  int // finished tool calls
 	thinking bool
+	// first is the conversation's first message; spoke, that she has said
+	// something in this turn.
+	first, spoke bool
 }
 
 type moodState struct {
@@ -42,6 +53,8 @@ type moodState struct {
 	lastOK, lastErr int
 	lastAt          time.Time
 	shown           string
+	// typingUntil is when the owner's last "typing" note stops counting.
+	typingUntil time.Time
 }
 
 func (m *moodState) phase(sid string) *moodPhase {
@@ -96,11 +109,12 @@ func (s *Server) currentMood() string {
 	s.mood.mu.Lock()
 	defer s.mood.mu.Unlock()
 	if running > 0 || len(s.mood.live) > 0 {
-		tools, steps, thinking := 0, 0, false
+		tools, steps, thinking, opening := 0, 0, false, false
 		for _, p := range s.mood.live {
 			tools += p.tools
 			steps = max(steps, p.steps)
 			thinking = thinking || p.thinking
+			opening = opening || (p.first && !p.spoke && p.steps == 0)
 		}
 		switch {
 		case tools > 0 && steps >= 3:
@@ -109,8 +123,13 @@ func (s *Server) currentMood() string {
 			return "working"
 		case thinking:
 			return "thinking"
+		case opening:
+			return "surprised"
 		}
 		return "working"
+	}
+	if time.Now().Before(s.mood.typingUntil) {
+		return "curious"
 	}
 	switch act, _ := s.innerAct.Load().(string); act {
 	case "learning":
@@ -144,4 +163,30 @@ func (s *Server) moodPublish(sid string) {
 		return
 	}
 	s.publishSessionEvent(SessionEvent{Type: "mood", SessionID: sid, Title: &now})
+}
+
+// moodTyping records that the owner is typing to her, or has stopped. It lapses
+// by itself, so a surface that closes mid-sentence does not leave her curious.
+func (s *Server) moodTyping(on bool) {
+	s.mood.mu.Lock()
+	if on {
+		s.mood.typingUntil = time.Now().Add(moodTypingHold)
+	} else {
+		s.mood.typingUntil = time.Time{}
+	}
+	s.mood.mu.Unlock()
+	s.moodPublish("-")
+	if on {
+		time.AfterFunc(moodTypingHold+50*time.Millisecond, func() { s.moodPublish("-") })
+	}
+}
+
+// handlePresenceTyping is POST /api/presence/typing {"typing": bool}.
+func (s *Server) handlePresenceTyping(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Typing bool `json:"typing"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	s.moodTyping(body.Typing)
+	writeJSON(w, http.StatusOK, map[string]any{"mood": s.currentMood()})
 }

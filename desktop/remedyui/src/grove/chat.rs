@@ -556,6 +556,7 @@ fn composer(ui: &Ui, grove: Grove, app: Option<App>, kind: RoomKind) -> El {
     let field = field.on_change(move || {
         let text = f_change.value();
         g_change.draft_empty.set(text.trim().is_empty());
+        crate::presence::note_typing(&g_change.studio, !text.trim().is_empty());
         g_change.composer_value.set(text);
     });
     // Enter sends. Shift+Enter stays a newline (the field keeps it). A composing

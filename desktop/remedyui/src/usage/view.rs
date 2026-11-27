@@ -471,7 +471,7 @@ fn toolbar(ui: &Ui, dash: UsageDashboard) -> El {
         .child(w::segmented(
             ui,
             "Usage and continuity",
-            &["Usage & Cost", "Harness"],
+            &["Usage", "Harness"],
             tabs.tab,
         ))
         .child(w::spacer(ui))
@@ -637,7 +637,6 @@ fn usage_body(ui: &Ui, summary: &UsageSummary, points: &[api::UsagePoint]) -> El
             ui,
             [
                 ("Tokens", api::format_tokens(totals.total_tokens)),
-                ("Est. cost", api::cost_for(totals.estimated_cost_usd, totals.total_tokens, "not priced")),
                 ("Events", api::format_number(totals.events)),
                 // Share of input the provider served from its prompt cache, and how much.
                 ("From cache", api::cache_label(totals)),
@@ -651,7 +650,7 @@ fn usage_body(ui: &Ui, summary: &UsageSummary, points: &[api::UsagePoint]) -> El
     column
 }
 
-fn stat_row(ui: &Ui, stats: [(&str, String); 4]) -> El {
+fn stat_row(ui: &Ui, stats: [(&str, String); 3]) -> El {
     let unit = ui.theme().spacing.unit;
     let mut row = w::row(ui)
         .gap(unit * 2.0)
@@ -797,7 +796,6 @@ fn provider_table(ui: &Ui, rows: &[UsageByGroup]) -> El {
             vec![
                 head_name(ui, "Provider"),
                 end_text(ui, "Tokens", COL_TOKENS, true),
-                end_text(ui, "Cost", COL_COST, true),
                 end_text(ui, "Events", COL_EVENTS, true),
             ],
             false,
@@ -827,7 +825,6 @@ fn provider_table(ui: &Ui, rows: &[UsageByGroup]) -> El {
             vec![
                 name_text(ui, api::provider_label(&row.provider)),
                 end_text(ui, api::format_tokens(row.totals.total_tokens), COL_TOKENS, false),
-                end_text(ui, api::cost_for(row.totals.estimated_cost_usd, row.totals.total_tokens, "—"), COL_COST, false),
                 end_text(ui, api::format_number(row.totals.events), COL_EVENTS, false),
             ],
             true,
@@ -843,7 +840,6 @@ fn model_table(ui: &Ui, rows: &[UsageByGroup]) -> El {
             vec![
                 head_name(ui, "Model"),
                 end_text(ui, "Tokens", COL_TOKENS, true),
-                end_text(ui, "Cost", COL_COST, true),
             ],
             false,
         ),
@@ -854,7 +850,6 @@ fn model_table(ui: &Ui, rows: &[UsageByGroup]) -> El {
             vec![
                 model_name(ui, row),
                 end_text(ui, api::format_tokens(row.totals.total_tokens), COL_TOKENS, false),
-                end_text(ui, api::cost_for(row.totals.estimated_cost_usd, row.totals.total_tokens, "—"), COL_COST, false),
             ],
             true,
         ));
@@ -863,7 +858,6 @@ fn model_table(ui: &Ui, rows: &[UsageByGroup]) -> El {
 }
 
 const COL_TOKENS: f32 = 72.0;
-const COL_COST: f32 = 72.0;
 const COL_EVENTS: f32 = 64.0;
 
 fn table_row(ui: &Ui, cells: Vec<El>, hairline: bool) -> El {
@@ -1252,7 +1246,7 @@ fn token_card(ui: &Ui, dash: UsageDashboard) -> El {
 }
 
 fn subtitle(provider: &str, model: &str) -> String {
-    let mut line = "Token use, estimated costs, and conversation health".to_string();
+    let mut line = "Token use and conversation health".to_string();
     if !provider.is_empty() {
         line.push_str(" · active ");
         line.push_str(provider);
@@ -1430,15 +1424,15 @@ mod tests {
     fn subtitle_names_the_active_model() {
         assert_eq!(
             subtitle("local", "remedy"),
-            "Token use, estimated costs, and conversation health · active local/remedy"
+            "Token use and conversation health · active local/remedy"
         );
         assert_eq!(
             subtitle("local", ""),
-            "Token use, estimated costs, and conversation health · active local/…"
+            "Token use and conversation health · active local/…"
         );
         assert_eq!(
             subtitle("", "remedy"),
-            "Token use, estimated costs, and conversation health"
+            "Token use and conversation health"
         );
     }
 

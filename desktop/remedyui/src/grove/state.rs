@@ -424,6 +424,7 @@ impl Grove {
         g.partner_name.set("Remedy".into());
         g.install_head(HeadOverview {
             inner_activity: String::new(),
+            inner_mood: String::new(),
             inner_done: (0, 0, 0),
             session_id: String::new(),
             state: "idle".into(),
@@ -1648,6 +1649,9 @@ impl Grove {
         // Her own life reaches her face: what she is doing now, and what she has done.
         let (nights, words, runs) = head.inner_done;
         crate::presence::set_inner(&head.inner_activity, crate::face_skin::inner_points(nights, words, runs));
+        if !head.inner_mood.is_empty() {
+            self.studio.server_mood.set_if_changed(head.inner_mood.clone());
+        }
         self.children.set(head.children.clone());
         self.routines.set(head.routines.clone());
         self.activity.set(head.activity.clone());

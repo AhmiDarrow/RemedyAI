@@ -310,8 +310,15 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
             }
         }
         if !partial.is_empty() || streaming {
+            let started = st
+                .active
+                .get()
+                .and_then(|sid| st.depth.job(&sid))
+                // A pinned clock (design shots) stands in for the real start.
+                .map(|j| time::rfc3339(if st.clock.get().is_some() { st.now() } else { j.started_secs }));
             msgs.push(ChatMessage {
                 streaming: true,
+                created_at: started,
                 ..ChatMessage::plain(
                     "live",
                     "assistant",
@@ -327,7 +334,10 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
         // where the conversation is, not above it.
         if let Some(sid) = st.active.get() {
             for (i, (_, text)) in st.depth.steers.get().iter().filter(|(s, _)| *s == sid).enumerate() {
-                msgs.push(ChatMessage::plain(format!("steer-{i}"), "user", text.clone()));
+                msgs.push(ChatMessage {
+                    created_at: Some(time::rfc3339(st.now())),
+                    ..ChatMessage::plain(format!("steer-{i}"), "user", text.clone())
+                });
             }
         }
         let _ = items_out.try_set(msgs);
@@ -686,10 +696,11 @@ fn bubble_card(ui: &Ui, body: El, user: bool, system: bool) -> El {
         )
 }
 
-fn stamp_text(created_at: Option<&str>, now: i64) -> Option<String> {
-    created_at
-        .map(|t| time::relative(t, now))
-        .filter(|s| !s.is_empty())
+/// When a message was said, on the local clock ("2:14 PM"). The day is the
+/// heading above it.
+fn stamp_text(ui: &Ui, created_at: Option<&str>) -> Option<String> {
+    let at = time::parse_rfc3339(created_at?)?;
+    Some(time::clock(ui.local_time_at(at).local_seconds()))
 }
 
 fn speaker_meta(ui: &Ui, name: &str, created_at: Option<&str>, now: i64, user: bool) -> El {
@@ -703,7 +714,8 @@ fn speaker_meta(ui: &Ui, name: &str, created_at: Option<&str>, now: i64, user: b
         .align(Align::Baseline)
         .gap(8.0)
         .layout(|l| l.shrink = 1.0);
-    let stamp = stamp_text(created_at, now).map(|s| {
+    let _ = now;
+    let stamp = stamp_text(ui, created_at).map(|s| {
         w::text(ui, s)
             .nowrap()
             .style(tokens::typo(tokens::META).foreground(colors.muted))

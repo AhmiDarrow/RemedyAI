@@ -185,6 +185,8 @@ pub struct Capacity {
 pub struct HeadOverview {
     /// What she is doing on her own right now: "", "vigil" or "learning".
     pub inner_activity: String,
+    /// Her mood as the runtime decided it ("" from an older runtime).
+    pub inner_mood: String,
     /// What she has done on her own: finished night acts, coined words, routine runs.
     pub inner_done: (u32, u32, u32),
     /// Her own session.
@@ -542,6 +544,7 @@ fn parse_head(v: &Value) -> Result<HeadOverview, String> {
     let count = |k: &str| i64_of(&inner, k).max(0) as u32;
     Ok(HeadOverview {
         inner_activity: str_of(&inner, "activity"),
+        inner_mood: str_of(&inner, "mood"),
         inner_done: (count("nights"), count("words"), count("routine_runs")),
         session_id: str_of(&head, "session_id"),
         state: {

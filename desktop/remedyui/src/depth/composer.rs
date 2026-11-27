@@ -101,6 +101,7 @@ pub fn composer(ui: &Ui, studio: Studio) -> El {
         let text = f_ch.value();
         caret_ch.set(f_ch.caret());
         st_ch.depth.composer_value.set(text.clone());
+        crate::presence::note_typing(&st_ch, !text.trim().is_empty());
         refresh_files(&st_ch, &text, f_ch.caret(), &files_ch, &q_ch);
         picked_ch.set(0);
         hist_ch.set(-1);
