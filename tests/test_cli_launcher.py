@@ -73,5 +73,5 @@ def test_unported_command_stays_in_python(monkeypatch):
     seen: list[list[str]] = []
     monkeypatch.setattr(launcher, "_python_main", lambda a: seen.append(a))
     monkeypatch.setattr(launcher, "_runtime_command", lambda: pytest.fail("looked for the runtime"))
-    launcher.main(["config", "zzz-not-ported"])
-    assert seen == [["config", "zzz-not-ported"]]
+    launcher.main(["setup", "--quick"])
+    assert seen == [["setup", "--quick"]]
