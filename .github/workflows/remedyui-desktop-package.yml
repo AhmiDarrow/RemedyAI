@@ -37,6 +37,16 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # The package holds the runtime and the capability core, built here.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: native/go/go.mod
+          cache-dependency-path: native/go/go.sum
+
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+
       - name: Install NSIS and minisign
         shell: pwsh
         run: |
@@ -80,6 +90,16 @@ jobs:
           git config --global url."https://x-access-token:${TOKEN}@github.com/AhmiDarrow/RemedyUI".insteadOf "https://github.com/AhmiDarrow/RemedyUI"
 
       - uses: dtolnay/rust-toolchain@stable
+
+      # The package holds the runtime and the capability core, built here.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: native/go/go.mod
+          cache-dependency-path: native/go/go.sum
+
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
 
       - name: Install packaging tools and minisign
         run: |
@@ -133,6 +153,16 @@ jobs:
           git config --global url."https://x-access-token:${TOKEN}@github.com/AhmiDarrow/RemedyUI".insteadOf "https://github.com/AhmiDarrow/RemedyUI"
 
       - uses: dtolnay/rust-toolchain@stable
+
+      # The package holds the runtime and the capability core, built here.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: native/go/go.mod
+          cache-dependency-path: native/go/go.sum
+
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
 
       - name: Install minisign
         run: |
