@@ -9,7 +9,7 @@
 - `uid://` mismatch after manual moves: `--import`, then `godot_check`. The
   editor logs "Unrecognized UID" or silently rewrites the header.
 - `res://` paths are case-sensitive on Linux/Android/Web exports. Windows
-  hides the bug; `repo_search` for mismatched case before export.
+  hides the bug; `grep` for mismatched case before export.
 - Non-resource data files (`.json`, `.csv`, `.txt`) are not exported unless
   listed in the preset's `include_filter`.
 

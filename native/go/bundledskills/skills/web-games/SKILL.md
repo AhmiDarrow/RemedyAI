@@ -10,7 +10,7 @@ version: 1.0.0
 author: Remedy
 tags: [game, web, phaser, pixi, vite, html5, browser]
 requires: []
-tools: [game_project_info, bash_exec, file_read, file_write, file_edit, repo_search, list_dir, computer_navigate, computer_screenshot, computer_key, computer_click, vision_decode, game_playtest]
+tools: [game_project_info, bash, read, write, edit, grep, glob, computer.navigate, computer.screenshot, computer.key, computer.click, vision_decode, game_playtest]
 triggers:
   - "\\b(phaser|pixi(js|\\.js)?|browser game|html5 game|web game|itch\\.io)\\b"
 ---
@@ -18,11 +18,11 @@ triggers:
 # Web games (Phaser 3 / PixiJS + Vite)
 
 Everything here is plain Node tooling, so you can verify nearly all of it
-headless. The only window is the browser — drive it with `computer_navigate`.
+headless. The only window is the browser — drive it with `computer.navigate`.
 
 ## Fingerprint
 
-1. `game_project_info(path)`; `file_read package.json` → `phaser` or
+1. `game_project_info(path)`; `read package.json` → `phaser` or
    `pixi.js` in deps, `vite` in devDeps, `scripts` (`dev`, `build`, `test`).
 2. `index.html` at the root (Vite entry), `src/main.(ts|js)`, `public/`
    for static assets served at `/`.
@@ -62,13 +62,13 @@ management and physics. Skeleton: `references/pixi-basics.md`.
    `references/testing-logic.md` for the split and a jsdom note.
 3. `npm run build` — the real gate: Vite bundles to `dist/`. A green build
    means the import graph and assets resolve.
-4. Playtest: `npm run dev` is a **server** — run it with `bash_exec(...,
+4. Playtest: `npm run dev` is a **server** — run it with `bash(...,
    background=true)`, read the printed URL (default `http://localhost:5173`),
-   then `computer_navigate(url)` and `computer_screenshot`; press keys with
-   `computer_key`; ask `vision_decode` what is on screen. Or hand the whole
+   then `computer.navigate(url)` and `computer.screenshot`; press keys with
+   `computer.key`; ask `vision_decode` what is on screen. Or hand the whole
    thing to `game_playtest(command="npm run dev", seconds=…, keys=…,
    question=…)` when it can reach the browser. Watch the browser console
-   for red errors (open DevTools with F12 via `computer_key`).
+   for red errors (open DevTools with F12 via `computer.key`).
 
 Never say "it runs" on the strength of `npm run dev` starting; the bundle
 can serve and still throw on load.

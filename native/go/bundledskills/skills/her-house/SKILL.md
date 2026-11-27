@@ -26,7 +26,7 @@ change it only with a countersignature.
 
 **`house_status`** — census, RMB/vision/vault, a sample of apps, and a
 **drive** table naming the tool for each organ. Believe that. Do not
-`list_dir` `C:\` or Program Files. Do not only point at Settings.
+`glob` `C:\` or Program Files. Do not only point at Settings.
 
 ## Map vs hands
 
@@ -41,7 +41,7 @@ change it only with a countersignature.
 | Eyes | `vision_decode` |
 | Voice | `voice_identity` / `voice_adjust` |
 | Secret handles | `vault_list` (never values) |
-| Her own chrome | `app_control` — never `computer_click` Grove |
+| Her own chrome | `app_control` — never `computer.click` Grove |
 
 ## Do not
 

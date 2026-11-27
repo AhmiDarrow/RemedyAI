@@ -12,7 +12,7 @@ version: 1.0.0
 author: Remedy
 tags: [research, clinical, trials, epidemiology, statistics, ethics, reporting]
 requires: []
-tools: [power_analysis, stats_assumptions, stats_effect_size, manuscript_check, manuscript_build, lit_search, lit_fetch, cite_add, cite_check, data_profile, skill_activate]
+tools: [power_analysis, stats_assumptions, stats_effect_size, manuscript_check, manuscript_build, lit_search, lit_fetch, cite_add, cite_check, data_profile, skill.activate]
 triggers:
   - '\b(randomi[sz]ed controlled trial|\bRCT\b|clinical trial|trial protocol|ClinicalTrials\.gov|NCT\d{8})\b'
   - '\b(CONSORT|intention[- ]to[- ]treat|per[- ]protocol analysis|primary endpoint|secondary endpoints?|adverse events?)\b'
@@ -22,7 +22,7 @@ triggers:
 
 # Clinical research (human subjects)
 
-Run `skill_activate(skill="research-method")` first and work off that spine —
+Run `skill.activate(skill="research-method")` first and work off that spine —
 question framing, evidence hierarchy, preregistration, citation honesty, how
 to say "we do not know". Do not restate it here. This pack covers only what
 studying people adds.
@@ -110,4 +110,4 @@ Deviations are normal; hiding them is the fraud. Record each one and say so.
 - `cite_check(resolve=True)` returns PASS. A citation you cannot resolve is
   reported to the owner, never quietly kept.
 
-Read `references/INDEX.md` and pull what you need with `file_read`.
+Read `references/INDEX.md` and pull what you need with `read`.

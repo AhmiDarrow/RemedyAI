@@ -24,7 +24,7 @@ build/             # export output (gitignored)
 ```
 Feature folders (`player/`, `enemies/slime/`) keep a scene, its script and
 its art together; `assets/` holds shared material. Either pure by-type or
-pure by-feature works; a mix makes `repo_search` guesswork. Follow whatever
+pure by-feature works; a mix makes `grep` guesswork. Follow whatever
 the existing project already does.
 
 ## .gitignore

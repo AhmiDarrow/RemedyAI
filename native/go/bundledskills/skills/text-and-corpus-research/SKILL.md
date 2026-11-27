@@ -11,7 +11,7 @@ version: 1.0.0
 author: Remedy
 tags: [research, corpus, nlp, annotation, digital-humanities, text-analysis]
 requires: []
-tools: [analysis_env, analysis_run, analysis_ledger, data_profile, stats_assumptions, stats_multiplicity, lit_search, cite_add, manuscript_build, skill_activate, file_read, file_write]
+tools: [analysis_env, analysis_run, analysis_ledger, data_profile, stats_assumptions, stats_multiplicity, lit_search, cite_add, manuscript_build, skill.activate, read, write]
 triggers:
   - '\b(corpus (?:linguistics|analysis|building|design)|concordanc\w+|\bKWIC\b|n-?gram frequenc\w+|type[- ]token ratio)\b'
   - '\b(topic model(?:l?ing|s)?|\bLDA\b|tf-?idf|word embeddings?|named entity recognition|\bNER\b)\b'
@@ -21,7 +21,7 @@ triggers:
 
 # Text and corpus research
 
-Run `skill_activate(skill="research-method")` first and work from that spine —
+Run `skill.activate(skill="research-method")` first and work from that spine —
 question framing, evidence standards, preregistration, citation honesty, what
 verification means. Do not restate it. This pack covers what is different when
 the data is text: it was written by someone, licensed by someone, digitised
@@ -66,7 +66,7 @@ imperfectly, and every "measurement" is a chain of preprocessing decisions.
    agreement, reported prompt and model version, and error analysis by class.
    `references/llm-assisted-coding.md`.
 
-Read `references/INDEX.md` and pull what you need with `file_read`.
+Read `references/INDEX.md` and pull what you need with `read`.
 
 ## Running it
 

@@ -13,7 +13,7 @@ User says "remember that…", "I prefer…", "always…", or shares stable perso
 
 ## Steps
 1. Restate the fact briefly for confirmation (unless they said "just remember it").
-2. Call `memory_save` with clear content and a short title.
+2. Call `memory.save` with clear content and a short title.
 3. Prefer category tags: `preference`, `work`, `personal`, `project`.
 4. Confirm what was stored in one short line.
 

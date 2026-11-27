@@ -11,7 +11,7 @@ version: 1.0.0
 author: Remedy
 tags: [machine-learning, research, evaluation, benchmarking, reproducibility]
 requires: []
-tools: [data_profile, data_diff, analysis_run, analysis_ledger, analysis_env, stats_effect_size, stats_multiplicity, lit_search, cite_add, skill_activate]
+tools: [data_profile, data_diff, analysis_run, analysis_ledger, analysis_env, stats_effect_size, stats_multiplicity, lit_search, cite_add, skill.activate]
 triggers:
   - '\b(train(?:ing)?[/ -]?(?:test|val|validation)[/ -]?split|cross[- ]?validat\w+|hold[- ]?out set|data leakage)\b'
   - '\b(hyper-?parameter (?:search|tuning|sweep)|ablation (?:study|table|experiment)|learning curves?)\b'
@@ -21,7 +21,7 @@ triggers:
 
 # ML research
 
-`skill_activate(skill="research-method")` first, and do not restate the
+`skill.activate(skill="research-method")` first, and do not restate the
 spine — that pack owns question framing, evidence standards,
 preregistration, citation honesty and "we do not know". This pack owns
 what is different about *research on models*: the claim is empirical, the

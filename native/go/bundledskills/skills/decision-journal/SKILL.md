@@ -17,4 +17,4 @@ tags: [planning, decisions, memory]
 3. **Options** — 2–4 options with pros/cons.
 4. **Recommendation** — clear pick + why.
 5. **Risks & reversibility**.
-6. Offer `memory_save` titled "Decision: …" so future sessions remember it.
+6. Offer `memory.save` titled "Decision: …" so future sessions remember it.

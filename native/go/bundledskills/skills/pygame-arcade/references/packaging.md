@@ -52,7 +52,7 @@ keeps them. Pymunk needs `--collect-all pymunk` when used.
 
 ## Verify the build
 
-Run `dist/Game.exe` once via `bash_exec` (auto-backgrounded) and take a
+Run `dist/Game.exe` once via `bash` (auto-backgrounded) and take a
 screenshot, or `game_playtest(command="dist/Game.exe", seconds=10)`.
 A build that "succeeds" but opens and closes instantly is a missing-asset
 error — rebuild without `--windowed` to read it.

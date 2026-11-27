@@ -10,7 +10,7 @@ version: 1.0.0
 author: Remedy
 tags: [game, assets, sprites, pixel-art, tileset, comfyui, pillow]
 requires: [pillow]
-tools: [comfyui, skill_run, bash_exec, file_read, file_write, list_dir, vision_decode, skill_activate]
+tools: [comfyui, skill_run, bash, read, write, glob, vision_decode, skill.activate]
 triggers:
   - "\\b(sprite ?sheets?|tile ?sets?|tile ?map art|game assets?|pixel ?art|background art|ui sprites?|9-?slice|seamless tiles?)\\b"
 ---
@@ -71,7 +71,7 @@ magenta backgrounds you asked for in the prompt.
    art → lossless, no mipmaps, `texture_filter` nearest (project-wide
    `default_texture_filter=0`); 9-slice → `NinePatchRect`/`StyleBoxTexture`
    margins; tiles → `TileSet` with the sheet grid.
-5. **Verify**: `list_dir` the output, `vision_decode` one result, run the
+5. **Verify**: `glob` the output, `vision_decode` one result, run the
    engine headless verify (godot-4) so `.import` regenerates cleanly, and
    show the owner the image in chat.
 

@@ -31,7 +31,7 @@ the caesium hyperfine frequency and K_cd. Consequences you rely on:
 
 Get numbers from the NIST Fundamental Physical Constants dataset (the CODATA
 adjustment) rather than memory, and record the adjustment year alongside the
-result. To verify a constant you already have: `lit_fetch` or `web_fetch` the
+result. To verify a constant you already have: `lit_fetch` or `web.fetch` the
 NIST page for that constant and compare digit for digit; if you cannot fetch
 it, say the value is unverified rather than asserting it.
 

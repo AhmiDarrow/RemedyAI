@@ -10,7 +10,7 @@ version: 1.0.0
 author: Remedy
 tags: [game, python, pygame, arcade, pytest, pyinstaller]
 requires: []
-tools: [game_project_info, bash_exec, file_read, file_write, file_edit, repo_search, list_dir, game_playtest, computer_screenshot, vision_decode]
+tools: [game_project_info, bash, read, write, edit, grep, glob, game_playtest, computer.screenshot, vision_decode]
 triggers:
   - "\\b(pygame|pygame-ce|arcade game|python game|python arcade)\\b"
 ---
@@ -22,7 +22,7 @@ headless under pytest, and the window opens in a second for a playtest.
 
 ## Fingerprint
 
-1. `game_project_info(path)`; `file_read pyproject.toml` / `requirements.txt`
+1. `game_project_info(path)`; `read pyproject.toml` / `requirements.txt`
    → `pygame`, `pygame-ce` (drop-in fork, same `import pygame`), or
    `arcade`. `main.py` or `<pkg>/__main__.py` is the entry.
 2. `python -c "import pygame; print(pygame.version.ver)"` or
@@ -78,10 +78,10 @@ walls and gravity; `arcade.check_for_collision_with_list`. Skeleton:
    runs on CI with no display. arcade needs a GL context and is harder to
    run headless; keep arcade out of tests.
 3. `ruff check .` / `mypy` if the project has them configured.
-4. Launch: `bash_exec("python main.py")` — auto-backgrounded because it
+4. Launch: `bash("python main.py")` — auto-backgrounded because it
    opens a window (pass `background=true` if unsure). Then
    `game_playtest(command="python main.py", seconds=…, keys=…, question=…)`
-   or `computer_screenshot` + `vision_decode`. Read stderr: a traceback
+   or `computer.screenshot` + `vision_decode`. Read stderr: a traceback
    means the window closed on its own; say so instead of "it ran".
 
 ## Packaging
