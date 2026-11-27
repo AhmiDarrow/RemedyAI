@@ -531,6 +531,16 @@ pub(crate) fn format_tokens(n: f64) -> String {
 }
 
 /// `formatCost` from `desktop/src/utils/tokenCost.ts`.
+/// Cost for tokens that were used. Remedy has no price list, so the runtime
+/// records no cost; "$0.00" beside millions of tokens read as "free". With
+/// tokens and no cost this says so (`unpriced`).
+pub(crate) fn cost_for(usd: f64, tokens: f64, unpriced: &str) -> String {
+    if tokens > 0.0 && !(usd.is_finite() && usd > 0.0) {
+        return unpriced.to_string();
+    }
+    format_cost(usd)
+}
+
 pub(crate) fn format_cost(usd: f64) -> String {
     if !usd.is_finite() || usd <= 0.0 {
         return "$0.00".into();

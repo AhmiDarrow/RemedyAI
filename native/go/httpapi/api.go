@@ -136,6 +136,8 @@ type Server struct {
 	hearthCancel context.CancelFunc
 	// innerAct is what Remedy is doing on her own right now: "", "vigil" or "learning".
 	innerAct atomic.Value
+	// mood is the one mood every surface shows (mood.go).
+	mood moodState
 	// skillTickAt is when the learn clock last ran the learned-skill
 	// lifecycle tick (unix nanoseconds; 0 = never).
 	skillTickAt atomic.Int64
@@ -170,6 +172,7 @@ func New(cfg Config) (*Server, error) {
 		version = Version
 	}
 	homeDir := strings.TrimSpace(cfg.HomeDir)
+	setHarnessHome(homeDir)
 	token := cfg.Token
 	if token == "" {
 		token = ResolveToken(homeDir)

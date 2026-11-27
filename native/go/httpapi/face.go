@@ -161,5 +161,5 @@ func (s *Server) innerPublic() map[string]any {
 		}
 		h.mu.Unlock()
 	}
-	return map[string]any{"activity": act, "nights": nights, "dreams": dreams, "words": words, "routine_runs": runs}
+	return map[string]any{"activity": act, "mood": s.currentMood(), "nights": nights, "dreams": dreams, "words": words, "routine_runs": runs}
 }

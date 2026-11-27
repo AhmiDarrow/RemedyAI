@@ -997,8 +997,11 @@ pub fn abort_with(
 
 /// POST `/api/sessions/{id}/messages/stream` and deliver SSE frames to `on_frame`.
 ///
-/// A 409 (this session is already streaming) becomes `steered` when there are no
-/// attachments, and `queued` when there are. `on_frame` runs on a worker thread.
+/// A 409 means the session still has a turn running. Right after an interrupt
+/// that is the old turn winding down, so the request is tried again for a few
+/// seconds. If it is still refused the frame is `busy` (`queued` when files
+/// were attached): the message was NOT delivered, and the caller must say so.
+/// `on_frame` runs on a worker thread.
 pub fn stream_message(
     client: &Client,
     session_id: &str,
@@ -1021,7 +1024,33 @@ pub fn stream_message(
     if files {
         body["attachments"] = serde_json::Value::Array(attachments.to_vec());
     }
-    drive_stream_inner(client.http(), Request::post(&path).json(&body), files, on_frame);
+    send_turn(client.http(), path, body, files, Arc::new(on_frame), BUSY_TRIES);
+}
+
+/// How often a refused turn is tried again, and how long apart.
+const BUSY_TRIES: u32 = 12;
+const BUSY_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
+
+fn send_turn(
+    http: Http,
+    path: String,
+    body: serde_json::Value,
+    files: bool,
+    on_frame: Arc<dyn Fn(String, String) + Send + Sync>,
+    tries_left: u32,
+) {
+    let again = (http.clone(), path.clone(), body.clone(), on_frame.clone());
+    drive_stream_inner(http, Request::post(&path).json(&body), files, move |kind, data| {
+        if kind == "busy" && tries_left > 0 {
+            let (http, path, body, on_frame) = again.clone();
+            let _ = std::thread::Builder::new().name("remedy-turn-retry".into()).spawn(move || {
+                std::thread::sleep(BUSY_WAIT);
+                send_turn(http, path, body, files, on_frame, tries_left - 1);
+            });
+            return;
+        }
+        on_frame(kind, data);
+    });
 }
 
 /// GET or POST an SSE request and deliver frames to `on_frame` (worker thread).
@@ -1092,7 +1121,7 @@ fn busy_frame(on_frame: &Arc<impl Fn(String, String)>, files: bool) {
     if files {
         on_frame("queued".into(), "{}".into());
     } else {
-        on_frame("steered".into(), "{}".into());
+        on_frame("busy".into(), "{}".into());
     }
 }
 

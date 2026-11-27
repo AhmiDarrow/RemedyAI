@@ -414,9 +414,6 @@ func (s *Server) executeFullSlash(sessionID, raw string, phone bool) map[string]
 		lines := []string{fmt.Sprintf("The last %d days:", days),
 			fmt.Sprintf("  %s tokens in, %s out, %s in all", groupDigits(num("prompt_tokens")), groupDigits(num("completion_tokens")), groupDigits(num("total_tokens"))),
 			fmt.Sprintf("  over %s model rounds", groupDigits(num("events")))}
-		if cost := num("estimated_cost_usd"); cost > 0 {
-			lines = append(lines, fmt.Sprintf("  about $%.2f at list prices", cost))
-		}
 		if rows, _ := out["by_model"].([]any); len(rows) > 0 {
 			lines = append(lines, "", "By model:")
 			for i, r := range rows {

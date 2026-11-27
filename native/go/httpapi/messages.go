@@ -1167,6 +1167,15 @@ func (s *Server) handleAbortSession(w http.ResponseWriter, r *http.Request) {
 	if q.Has("reason") {
 		raw := q.Get("reason")
 		reasonPtr = &raw
+	} else {
+		// The desktop sends the reason in the body. Read only from the query,
+		// an interrupt was recorded as a plain stop.
+		var body struct {
+			Reason string `json:"reason"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) == nil && strings.TrimSpace(body.Reason) != "" {
+			reasonPtr = &body.Reason
+		}
 	}
 	var epochPtr *int
 	if v := q.Get("epoch"); v != "" {

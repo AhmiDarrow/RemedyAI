@@ -133,20 +133,42 @@ fn pump(studio: &Studio) {
     if sid.is_none() {
         return;
     }
-    begin_turn(
+    // A message that was refused as busy is already on screen: send it again
+    // without adding it a second time.
+    begin_turn_with(
         studio,
         sid.as_deref().unwrap_or(""),
         next.text,
         next.attachments,
+        next.mode != "retry",
     );
 }
 
+/// Stops the running turn and sends `text` as the next one. The new turn starts
+/// when the old one has really ended (its stream says so, and that pumps the
+/// queue): sent any sooner the runtime refuses it as busy, and the message was
+/// lost while the old turn was simply stopped.
 fn interrupt(studio: &Studio, sid: &str, text: String, attachments: Vec<Attachment>) {
-    if let Some(client) = studio.runtime() {
-        runtime::abort_with(&client, sid, "supersede", |_| {});
-    }
     studio.depth.insert_front(text, "interrupt", attachments);
-    studio.finish_assistant(None);
+    let Some(client) = studio.runtime() else {
+        studio.finish_assistant(None);
+        return;
+    };
+    let Ok(wake) = waker() else {
+        studio.finish_assistant(None);
+        return;
+    };
+    let st = studio.clone();
+    runtime::abort_with(&client, sid, "supersede", move |_| {
+        // A turn this window only watches has no stream here to end it. Give
+        // the stream a moment, then close the live reply so the queue moves.
+        std::thread::sleep(Duration::from_millis(1500));
+        let _ = wake.post(move || {
+            if st.streaming.get() && st.depth.queue.get().first().is_some_and(|q| q.mode == "interrupt") {
+                st.finish_assistant(None);
+            }
+        });
+    });
 }
 
 fn steer(studio: &Studio, sid: &str, text: &str) {
@@ -775,6 +797,30 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
                 studio.depth.notice.set(String::new());
             }
             land_steers(studio, sid, active);
+        }
+        "busy" => {
+            // The runtime refused the message: another turn is still running in
+            // this conversation. It was not delivered. Keep it at the front of
+            // the queue and try again shortly, and say so.
+            let outgoing = studio.depth.job(sid).map(|j| j.outgoing).unwrap_or_default();
+            studio.depth.finish_job(sid, "done");
+            if active {
+                studio.clear_live();
+                studio.streaming.set(false);
+                if !outgoing.trim().is_empty() {
+                    studio.depth.insert_front(outgoing, "retry", Vec::new());
+                    studio.depth.notice.set(
+                        "Remedy is still finishing her last turn here. Your message is queued and goes as soon as she is done.".into(),
+                    );
+                    let st = studio.clone();
+                    if let Ok(wake) = waker() {
+                        let _ = std::thread::Builder::new().name("remedy-queue-retry".into()).spawn(move || {
+                            std::thread::sleep(Duration::from_secs(2));
+                            let _ = wake.post(move || pump(&st));
+                        });
+                    }
+                }
+            }
         }
         "queued" => {
             if active {
@@ -3340,6 +3386,25 @@ mod tests {
         assert_eq!(studio.live_user_reaction.get(), "", "toggle off");
         react(&studio, "msg-42", "❤️");
         assert_eq!(studio.live_user_reaction.get(), "❤️");
+    }
+
+    #[test]
+    fn a_refused_message_is_kept_and_not_called_delivered() {
+        let studio = Studio::new();
+        studio.active.set(Some("s1".into()));
+        studio.depth.map_job("s1", |job| {
+            *job = StreamJob::running("s1".to_string());
+            job.outgoing = "eta?".into();
+        });
+        studio.streaming.set(true);
+        // The runtime answered 409: the old turn had not finished.
+        apply_frame(&studio, "s1", "busy", "{}");
+        assert!(!studio.streaming.get());
+        let queue = studio.depth.queue.get();
+        assert_eq!(queue.len(), 1);
+        assert_eq!((queue[0].text.as_str(), queue[0].mode.as_str()), ("eta?", "retry"));
+        assert!(studio.depth.notice.get().contains("queued"));
+        assert!(!studio.depth.notice.get().contains("Sent to the live turn"));
     }
 
     #[test]

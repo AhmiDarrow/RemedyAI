@@ -109,7 +109,7 @@ func TestUsageSummarySeriesExport(t *testing.T) {
 		t.Fatalf("content-type=%q", ct)
 	}
 	csv := rr.Body.String()
-	if !strings.HasPrefix(csv, "day,provider,total_tokens,estimated_cost_usd,events\n") {
+	if !strings.HasPrefix(csv, "day,provider,total_tokens,events\n") {
 		t.Fatalf("csv header missing: %q", csv)
 	}
 	if !strings.Contains(csv, "openai") {
@@ -194,7 +194,7 @@ func TestUsageCSVQuotesProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != 2 || len(records[1]) != 5 || records[1][1] != provider {
+	if len(records) != 2 || len(records[1]) != 4 || records[1][1] != provider {
 		t.Fatalf("bad csv: %#v", records)
 	}
 }
