@@ -792,3 +792,17 @@ func TestCLISkillBareGroupsNeedASubcommand(t *testing.T) {
 		}
 	}
 }
+
+// A dangerous instruction block is refused before anything is spawned, the
+// same guard `remedy exec` uses. The block is harmless if it did run.
+func TestCLISkillRunBlocksDangerousShellBlock(t *testing.T) {
+	x, calls := skFakeExecutor(0, false, "ok")
+	defer x.cleanup()
+	got := x.runInstructions("```bash\necho hi | sh\n```\n")
+	if len(got) != 1 || got[0].success || !strings.Contains(got[0].err, "Blocked by security policy") {
+		t.Fatalf("%+v", got)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("spawned a blocked block: %+v", *calls)
+	}
+}
