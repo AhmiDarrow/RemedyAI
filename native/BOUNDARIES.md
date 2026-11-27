@@ -10,8 +10,8 @@ The native runtime has two non-overlapping responsibilities, and starts no inter
 Speech runs in the Rust `remedy-voice` helper and the image model in a `llama-server`
 the runtime downloads, verifies and supervises; the local search engine is managed the
 same way. Go reaches Zig only through the versioned C Tool ABI. Go `remedy-runtime` owns
-production `:7400`. The Python package under `src/remedy` is the `remedy` command line and
-older library code; the runtime does not start, attach to or ship any of it. The one
+production `:7400`. The Python package under `src/remedy` is only the `remedy` launcher (and the bundled
+skills, as data); the runtime does not start, attach to or ship any Python of ours. The one
 Python the runtime may install is ClaimIDX's own, into its private folder, when the owner
 has ClaimIDX on.
 

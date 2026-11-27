@@ -3,6 +3,3 @@
 # To type a module: remove it here and from pyproject in the same commit.
 # Size is not a reason to exclude — split the module instead.
 # Remaining entries are Win32-only (Linux CI has no windll/WINFUNCTYPE).
-src/remedy/core/computer/desktop_win.py
-src/remedy/core/computer/desktop_uia.py
-src/remedy/core/companion.py

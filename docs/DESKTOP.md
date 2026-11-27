@@ -38,7 +38,6 @@ installed release first (shared port `7400` and `~/.remedy`).
 | Installer | **Does not** include SmolVLM2 GGUF / multi‑GB weights |
 | First run | Setup downloads pinned `smolvlm2-2.2b` into `~/.remedy/vision/` |
 | After install | llama-server **auto-starts with Remedy** |
-| Offline (optional) | `python scripts/stage_local_bundle.py --from-vision-home` then `REMEDY_LOCAL_BUNDLE=…` |
 
 `desktop/resources/local/` is a **staging area only** (gitignored weights). It is
 **not** listed in `tauri.conf.json` `bundle.resources` — so normal NSIS builds stay small.
