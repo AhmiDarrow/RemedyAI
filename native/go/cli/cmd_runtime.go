@@ -51,6 +51,12 @@ func cmdServe(c *Ctx) int {
 		c.Errorf("remedy serve: this build has no local API to start.\n")
 		return 2
 	}
+	// Partner defaults the Python serve set for the runtime's turns.
+	for k, v := range map[string]string{"REMEDY_FULL_CONTEXT": "1", "REMEDY_REACT_AUTO_CONTINUE": "1"} {
+		if _, ok := os.LookupEnv(k); !ok {
+			_ = os.Setenv(k, v)
+		}
+	}
 	addr := serveAddr(host, c.P.Int("port"))
 	c.Printf("Starting remedy-runtime on http://%s  Open http://%s in a browser, or the Desktop app.\n", addr, addr)
 	return c.Hooks.Serve(addr, c.Home, func(bound string) {
