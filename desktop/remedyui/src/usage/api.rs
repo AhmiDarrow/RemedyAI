@@ -16,6 +16,10 @@ pub(crate) struct UsageTotals {
     pub total_tokens: f64,
     pub estimated_cost_usd: f64,
     pub events: f64,
+    /// Input the provider served from its prompt cache, and its share of all input.
+    /// `None` when nothing was cached or the runtime does not report it.
+    pub cache_read_tokens: f64,
+    pub cache_hit_rate: Option<f64>,
 }
 
 impl Default for UsageTotals {
@@ -26,6 +30,8 @@ impl Default for UsageTotals {
             total_tokens: 0.0,
             estimated_cost_usd: 0.0,
             events: 0.0,
+            cache_read_tokens: 0.0,
+            cache_hit_rate: None,
         }
     }
 }
@@ -597,7 +603,21 @@ fn totals(v: Option<&Value>) -> Option<UsageTotals> {
         total_tokens: num(obj.get("total_tokens")).unwrap_or(0.0),
         estimated_cost_usd: num(obj.get("estimated_cost_usd")).unwrap_or(0.0),
         events: num(obj.get("events")).unwrap_or(0.0),
+        cache_read_tokens: num(obj.get("cache_read_tokens")).unwrap_or(0.0),
+        cache_hit_rate: num(obj.get("cache_hit_rate")).filter(|n| n.is_finite() && *n > 0.0),
     })
+}
+
+/// "62% · 1.2M" for the cache tile, or a dash when no input came from a cache.
+pub(crate) fn cache_label(totals: &UsageTotals) -> String {
+    match totals.cache_hit_rate {
+        Some(rate) => format!(
+            "{}% · {}",
+            (rate * 100.0).round() as i64,
+            format_tokens(totals.cache_read_tokens)
+        ),
+        None => "—".into(),
+    }
 }
 
 fn groups(v: Option<&Value>) -> Vec<UsageByGroup> {

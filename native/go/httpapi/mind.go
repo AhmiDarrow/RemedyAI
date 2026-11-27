@@ -35,6 +35,12 @@ func (r *CognitionTurnRunner) updateSoulAfterTurn(req TurnRequest, out cognition
 	if !cfgBool(cfg, "soul_field_enabled", true) {
 		return
 	}
+	// The soul field is the owner's relationship with Remedy and is shown in
+	// every later prompt. Only the owner's own turns may write to it: a
+	// messenger contact or a peer saying "from now on" pledges nothing.
+	if !OriginIsOwner(req.Origin) {
+		return
+	}
 	env := mindEnv(home)
 	prov, model := cfgString(cfg, "llm_provider", ""), cfgString(cfg, "llm_model", "")
 	if req.Provider != nil && strings.TrimSpace(*req.Provider) != "" {

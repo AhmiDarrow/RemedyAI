@@ -22,10 +22,14 @@ type historyRow struct {
 }
 
 type assembleInput struct {
-	Message     string
-	SessionID   string
-	PlanMode    bool
-	ChatMode    bool
+	Message   string
+	SessionID string
+	PlanMode  bool
+	ChatMode  bool
+	// Outside is true for a turn that did not come from the owner (a
+	// messenger contact, a peer). It gets none of what Remedy knows about the
+	// owner: no memory, no soul field.
+	Outside     bool
 	ProjectPath string
 	Provider    string
 	Model       string
@@ -44,6 +48,7 @@ func parseAssembleInput(in map[string]any) assembleInput {
 		SessionID:   pyStrip(pyStr(in, "session_id")),
 		PlanMode:    boolIn(in, "plan_mode"),
 		ChatMode:    boolIn(in, "chat_mode"),
+		Outside:     boolIn(in, "outside"),
 		ProjectPath: pyStrip(pyStr(in, "project_path")),
 		Provider:    pyStrip(pyStr(in, "provider")),
 		Model:       pyStrip(pyStr(in, "model")),
@@ -481,7 +486,7 @@ const selfConfigText = "Self-configuration: when the user asks you to set up, en
 // durableMemoryText
 const durableMemoryText = "Durable memory: when the user says remember / note that / don't forget / " +
 	"store in memory, ALWAYS call memory.save(content=…) with the fact " +
-	"(in addition to any automatic silent save). Confirm briefly what was stored. " +
+	"(nothing is saved for you otherwise). Confirm briefly what was stored. " +
 	"Never store secrets or API keys. Use memory.search to look up prior facts."
 
 // manualText

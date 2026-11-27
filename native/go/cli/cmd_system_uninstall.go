@@ -19,7 +19,7 @@ import (
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
 
-// `remedy uninstall`: a port of src/remedy/interfaces/uninstaller.py. Every
+// `remedy uninstall`: clears Remedy data; it does not remove the program. Every
 // deletion goes through sysWipeRemove, which refuses any path that is not
 // the checked Remedy home itself (--purge) or one of the fixed names below
 // directly inside it.
@@ -34,10 +34,6 @@ var sysWipeNames = map[string]bool{
 	"vision": true, "llama-server": true, "llama.cpp": true,
 	"skills": true, "skill_stats.json": true,
 }
-
-// sysPipDists is _pip_dists: only remedy-ai. The PyPI name "remedy" is an
-// unrelated package and must never be removed.
-var sysPipDists = []string{"remedy-ai"}
 
 // sysUserHome is replaceable in tests.
 var sysUserHome = os.UserHomeDir
@@ -260,51 +256,6 @@ func sysWipeSkills(c *Ctx, home string) error {
 	return nil
 }
 
-// sysFrozen reports a binary not launched from a pip install (Desktop
-// sidecar or standalone): the launcher passes REMEDY_CLI_PYTHON otherwise.
-func sysFrozen() bool { return strings.TrimSpace(os.Getenv("REMEDY_CLI_PYTHON")) == "" }
-
-// sysPackagePath is _get_package_path (from the launcher).
-func sysPackagePath() string { return strings.TrimSpace(os.Getenv("REMEDY_CLI_PACKAGE_DIR")) }
-
-// sysPipRun runs `python -m pip ...` and captures its output; replaceable.
-var sysPipRun = func(args []string, timeout time.Duration) (stdout, stderr string, code int, err error) {
-	py := strings.TrimSpace(os.Getenv("REMEDY_CLI_PYTHON"))
-	if py == "" {
-		return "", "", 1, errors.New("no Python interpreter (REMEDY_CLI_PYTHON unset)")
-	}
-	var out, errb bytes.Buffer
-	ctx, cancel := context.WithTimeout(context.Background(), timeout+5*time.Second)
-	defer cancel()
-	code, timedOut, err := tools.RunAttached(ctx, append([]string{py, "-m", "pip"}, args...), "", nil, nil, &out, &errb, timeout)
-	if timedOut && err == nil {
-		err = fmt.Errorf("timed out after %s", timeout)
-	}
-	return out.String(), errb.String(), code, err
-}
-
-// sysPipUninstall is _pip_uninstall.
-func sysPipUninstall(c *Ctx) bool {
-	ok := true
-	for _, dist := range sysPipDists {
-		out, errs, code, err := sysPipRun([]string{"uninstall", "-y", dist}, 60*time.Second)
-		if err != nil {
-			c.Printf("pip uninstall failed (%s): %v\n", dist, err)
-			ok = false
-			continue
-		}
-		if o := strings.TrimSpace(out); o != "" {
-			c.Println(o)
-		}
-		e := strings.TrimSpace(errs)
-		if code != 0 && !strings.Contains(strings.ToLower(e), "not installed") && !strings.Contains(e, "Skipping") {
-			c.Printf("pip uninstall warning (%s):\n%s\n", dist, e)
-			ok = false
-		}
-	}
-	return ok
-}
-
 // sysDataFiles lists every file under home (_get_data_files).
 func sysDataFiles(home string) [][2]string {
 	var out [][2]string
@@ -339,11 +290,7 @@ func cmdUninstall(c *Ctx) int {
 	}
 
 	sysPanel(c, "Uninstaller", "Preparing to uninstall Remedy...")
-	if pkg := sysPackagePath(); pkg != "" {
-		c.Printf("\nPackage:  %s\n", pkg)
-	} else {
-		c.Println("\nPackage:  not found (may already be removed)")
-	}
+	c.Println()
 	if sysExists(home) {
 		for _, f := range sysDataFiles(home) {
 			c.Printf("  %s: %s\n", f[0], f[1])
@@ -367,7 +314,7 @@ func cmdUninstall(c *Ctx) int {
 	var action string
 	switch {
 	case purge:
-		action = "Uninstall package AND full-wipe all Remedy data?\nThis cannot be undone!"
+		action = "Full-wipe all Remedy data?\nThis cannot be undone!"
 	case config || skills:
 		var bits []string
 		if config {
@@ -376,9 +323,9 @@ func cmdUninstall(c *Ctx) int {
 		if skills {
 			bits = append(bits, "skills")
 		}
-		action = "Uninstall package and remove " + strings.Join(bits, ", ") + "?"
+		action = "Remove " + strings.Join(bits, ", ") + "?"
 	default:
-		action = "Uninstall the remedy package (keep user data)?"
+		action = "Nothing selected to remove (user data is kept). Continue?"
 	}
 	if !sysConfirmOrNo(c, action) {
 		c.Println("Uninstall cancelled.")
@@ -386,12 +333,8 @@ func cmdUninstall(c *Ctx) int {
 	}
 
 	ok := true
-	if sysFrozen() {
-		c.Println("\nRemedy Desktop is removed from Windows Apps / your package manager; this clears data only.")
-	} else {
-		c.Println("\nUninstalling package...")
-		ok = sysPipUninstall(c)
-	}
+	c.Println("\nThis clears data only. Remove Remedy Desktop from Windows Apps / your package manager;")
+	c.Println("a command-line install is removed by deleting its folder and the `remedy` launcher.")
 
 	if purge && sysExists(home) {
 		root, err := sysSafeWipeRoot(home)
@@ -433,7 +376,7 @@ func cmdUninstall(c *Ctx) int {
 	c.Println()
 	c.Println("Uninstall complete.")
 	c.Println("\nThanks for trying Remedy!")
-	c.Println("To reinstall: pip install remedy-ai or pip install -e . from the repo")
+	c.Println("To reinstall: use the installers from the releases page, or run the install script.")
 	return 0
 }
 

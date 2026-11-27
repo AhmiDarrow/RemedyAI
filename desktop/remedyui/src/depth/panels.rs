@@ -3,7 +3,7 @@
 use super::logic;
 use super::{
     ask_archive_unused, ask_delete_skill, export_skills_pack, import_skills_pack, install_named,
-    load_memory, load_more_memory, load_skills, open_skill, save_skill, search_library,
+    load_memory, load_more_memory, load_skills, more_library, open_skill, save_skill, search_library,
     search_memory, trust_skill, MemoryRow, SidePanel, SkillRow,
 };
 use crate::messages;
@@ -596,10 +596,35 @@ fn library(ui: &Ui, studio: Studio) -> El {
             };
             let st = st.clone();
             let label = row.name.clone();
-            w::button(&u, label, move || install_named(&st, &id))
+            let row_el = w::button(&u, label, move || install_named(&st, &id))
                 .variant("quiet")
-                .layout(|l| l.width = Length::Percent(1.0))
+                .layout(|l| l.width = Length::Percent(1.0));
+            if !row.description.is_empty() {
+                w::tooltip(&row_el, row.description.clone());
+            }
+            row_el
         }
+    });
+    // "40 of 1,204": what is shown of what matches, and a way to fetch the next page.
+    let count = w::text(ui, "").variant("muted").text({
+        let st = studio.clone();
+        move || {
+            let (shown, total) = (st.depth.library_rows.get().len(), st.depth.library_total.get());
+            if total == 0 {
+                String::new()
+            } else {
+                format!("{shown} of {total}")
+            }
+        }
+    });
+    let more = w::button(ui, "Show more", {
+        let st = studio.clone();
+        move || more_library(&st)
+    })
+    .variant("quiet");
+    let more = crate::settings::visible_when(more, {
+        let st = studio.clone();
+        move || st.depth.library_rows.get().len() < st.depth.library_total.get()
     });
     w::column(ui)
         .gap(ui.theme().spacing.unit)
@@ -608,7 +633,8 @@ fn library(ui: &Ui, studio: Studio) -> El {
             l.grow = 1.0;
         })
         .child(field.el().layout(|l| l.width = Length::Percent(1.0)))
-        .child(w::scroll(ui).layout(|l| l.grow = 1.0).child(list))
+        .child(count)
+        .child(w::scroll(ui).layout(|l| l.grow = 1.0).child(w::column(ui).gap(2.0).child(list).child(more)))
 }
 
 fn skill_button(ui: &Ui, studio: Studio, row: SkillRow) -> El {

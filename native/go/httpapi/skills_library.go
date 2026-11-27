@@ -15,19 +15,20 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	catalogPublicKeyB64 = "Zecma7eUlNtKbQSnTeBJC+v9nQEmJ5OT6YTYq27GsLc="
-	libraryReleaseTag   = "v1.0.0"
-	libraryRepo         = "AhmiDarrow/remedy-skills"
-	catalogCacheMaxAge  = 24 * time.Hour
-	maxCatalogBytes     = 8 * 1024 * 1024
-	maxSkillZipBytes    = 50 * 1024 * 1024
-	librarySuggestMinQ  = 8
+	catalogPublicKeyB64    = "Zecma7eUlNtKbQSnTeBJC+v9nQEmJ5OT6YTYq27GsLc="
+	libraryReleaseTag      = "v1.0.0"
+	libraryRepo            = "AhmiDarrow/remedy-skills"
+	catalogCacheMaxAge     = 24 * time.Hour
+	maxCatalogBytes        = 8 * 1024 * 1024
+	maxSkillZipBytes       = 50 * 1024 * 1024
+	librarySuggestMinQ     = 8
 	librarySuggestMinScore = 0.35
 )
 
@@ -51,26 +52,26 @@ func defaultCatalogSigURL() string {
 }
 
 type librarySkillEntry struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	Description    string   `json:"description"`
-	Version        string   `json:"version"`
-	Author         string   `json:"author"`
-	AuthorURL      *string  `json:"author_url,omitempty"`
-	Tags           []string `json:"tags"`
-	DownloadURL    string   `json:"download_url"`
-	SizeBytes      int      `json:"size_bytes"`
-	Checksum       string   `json:"checksum"`
-	Requires       []string `json:"requires"`
-	Tools          []string `json:"tools"`
-	Rating         float64  `json:"rating"`
-	Installs       int      `json:"installs"`
-	ReviewsCount   int      `json:"reviews_count"`
-	UpdatedAt      string   `json:"updated_at"`
-	PublishedAt    string   `json:"published_at"`
-	Compatible     []string `json:"compatible_remedy"`
-	SecurityFlags  []string `json:"security_flags"`
-	Status         string   `json:"status"`
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Description   string   `json:"description"`
+	Version       string   `json:"version"`
+	Author        string   `json:"author"`
+	AuthorURL     *string  `json:"author_url,omitempty"`
+	Tags          []string `json:"tags"`
+	DownloadURL   string   `json:"download_url"`
+	SizeBytes     int      `json:"size_bytes"`
+	Checksum      string   `json:"checksum"`
+	Requires      []string `json:"requires"`
+	Tools         []string `json:"tools"`
+	Rating        float64  `json:"rating"`
+	Installs      int      `json:"installs"`
+	ReviewsCount  int      `json:"reviews_count"`
+	UpdatedAt     string   `json:"updated_at"`
+	PublishedAt   string   `json:"published_at"`
+	Compatible    []string `json:"compatible_remedy"`
+	SecurityFlags []string `json:"security_flags"`
+	Status        string   `json:"status"`
 }
 
 type skillsCatalog struct {
@@ -232,14 +233,8 @@ func (s *Server) getSkillsCatalog(refresh bool) (skillsCatalog, error) {
 	if !refresh && fileExists(cacheFile) && fileExists(cacheSig) {
 		st, err := os.Stat(cacheFile)
 		if err == nil && time.Since(st.ModTime()) < catalogCacheMaxAge {
-			data, err := os.ReadFile(cacheFile)
-			if err == nil {
-				sig, err := os.ReadFile(cacheSig)
-				if err == nil && verifyCatalogSignature(data, string(sig), pub) == nil {
-					if cat, err := loadCatalogFromBytes(data, "cache"); err == nil {
-						return cat, nil
-					}
-				}
+			if idx, ok := libraryIndexFromCache(cacheFile, cacheSig, pub); ok {
+				return idx.cat, nil
 			}
 		}
 	}
@@ -332,70 +327,40 @@ func (s *Server) getSkillsCatalogCached() (skillsCatalog, bool) {
 	return skillsCatalog{Skills: []librarySkillEntry{}, Source: "none"}, true
 }
 
-func searchLibraryCatalog(cat skillsCatalog, q, tagsCSV, author, sortBy string) []librarySkillEntry {
-	results := append([]librarySkillEntry(nil), cat.Skills...)
-	if q = strings.TrimSpace(q); q != "" {
-		ql := strings.ToLower(q)
-		filtered := results[:0]
-		for _, s := range results {
-			if strings.Contains(strings.ToLower(s.Name), ql) ||
-				strings.Contains(strings.ToLower(s.Description), ql) {
-				filtered = append(filtered, s)
-				continue
-			}
-			for _, t := range s.Tags {
-				if strings.Contains(strings.ToLower(t), ql) {
-					filtered = append(filtered, s)
-					break
-				}
-			}
-		}
-		results = filtered
+// libraryPage reads limit and offset. With no limit the whole result is
+// returned, as older clients expect; the desktop always asks for a page.
+func libraryPage(r *http.Request) (limit, offset int) {
+	limit, _ = strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("limit")))
+	offset, _ = strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("offset")))
+	if limit < 0 {
+		limit = 0
 	}
-	if tagsCSV = strings.TrimSpace(tagsCSV); tagsCSV != "" {
-		want := map[string]struct{}{}
-		for _, t := range strings.Split(tagsCSV, ",") {
-			t = strings.ToLower(strings.TrimSpace(t))
-			if t != "" {
-				want[t] = struct{}{}
-			}
-		}
-		if len(want) > 0 {
-			filtered := results[:0]
-			for _, s := range results {
-				for _, t := range s.Tags {
-					if _, ok := want[strings.ToLower(t)]; ok {
-						filtered = append(filtered, s)
-						break
-					}
-				}
-			}
-			results = filtered
-		}
+	if limit > libraryMaxPage {
+		limit = libraryMaxPage
 	}
-	if author = strings.TrimSpace(author); author != "" {
-		al := strings.ToLower(author)
-		filtered := results[:0]
-		for _, s := range results {
-			if strings.ToLower(s.Author) == al {
-				filtered = append(filtered, s)
-			}
-		}
-		results = filtered
+	if offset < 0 {
+		offset = 0
 	}
-	switch sortBy {
-	case "rating":
-		sort.SliceStable(results, func(i, j int) bool { return results[i].Rating > results[j].Rating })
-	case "updated_at":
-		sort.SliceStable(results, func(i, j int) bool { return results[i].UpdatedAt > results[j].UpdatedAt })
-	case "installs":
-		sort.SliceStable(results, func(i, j int) bool { return results[i].Installs > results[j].Installs })
-	default:
-		sort.SliceStable(results, func(i, j int) bool {
-			return strings.ToLower(results[i].Name) < strings.ToLower(results[j].Name)
-		})
+	return limit, offset
+}
+
+// libraryMaxPage is the most entries one request can ask for.
+const libraryMaxPage = 200
+
+// libraryIndexFor is the search index of a catalog: the memoised one when the
+// catalog came from the cache file, else one built from what was fetched.
+func (s *Server) libraryIndexFor(cat skillsCatalog) *libraryIndex {
+	home := s.skillsHome()
+	dir := catalogCacheDir(home)
+	pub := catalogPublicKeyB64
+	if env := strings.TrimSpace(os.Getenv("REMEDY_SKILLS_CATALOG_PUBKEY")); env != "" && (env == catalogPublicKeyB64 || skillsDevMode()) {
+		pub = env
 	}
-	return results
+	if idx, ok := libraryIndexFromCache(filepath.Join(dir, "catalog.json"), filepath.Join(dir, "catalog.json.sig"), pub); ok &&
+		idx.cat.GeneratedAt == cat.GeneratedAt && len(idx.cat.Skills) == len(cat.Skills) {
+		return idx
+	}
+	return newLibraryIndex(cat)
 }
 
 func (s *Server) handleLibraryCatalog(w http.ResponseWriter, r *http.Request) {
@@ -405,7 +370,16 @@ func (s *Server) handleLibraryCatalog(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"detail": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, cat)
+	limit, offset := libraryPage(r)
+	if limit == 0 && offset == 0 {
+		writeJSON(w, http.StatusOK, cat)
+		return
+	}
+	page, total := s.libraryIndexFor(cat).search(libraryQuery{SortBy: "name", Limit: limit, Offset: offset})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version": cat.Version, "generated_at": cat.GeneratedAt, "repository": cat.Repository,
+		"source": cat.Source, "skills": page, "total": total, "offset": offset, "limit": limit,
+	})
 }
 
 func (s *Server) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
@@ -415,10 +389,22 @@ func (s *Server) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query().Get("q")
-	results := searchLibraryCatalog(cat, q, r.URL.Query().Get("tags"), r.URL.Query().Get("author"), r.URL.Query().Get("sort_by"))
+	limit, offset := libraryPage(r)
+	var tags []string
+	for _, t := range strings.Split(r.URL.Query().Get("tags"), ",") {
+		if t = strings.ToLower(strings.TrimSpace(t)); t != "" {
+			tags = append(tags, t)
+		}
+	}
+	results, total := s.libraryIndexFor(cat).search(libraryQuery{
+		Text: q, Tags: tags, Author: strings.TrimSpace(r.URL.Query().Get("author")),
+		SortBy: r.URL.Query().Get("sort_by"), Limit: limit, Offset: offset,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"query":   q,
-		"total":   len(results),
+		"total":   total,
+		"offset":  offset,
+		"limit":   limit,
 		"results": results,
 		"source":  cat.Source,
 	})

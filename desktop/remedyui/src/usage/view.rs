@@ -639,6 +639,8 @@ fn usage_body(ui: &Ui, summary: &UsageSummary, points: &[api::UsagePoint]) -> El
                 ("Tokens", api::format_tokens(totals.total_tokens)),
                 ("Est. cost", api::format_cost(totals.estimated_cost_usd)),
                 ("Events", api::format_number(totals.events)),
+                // Share of input the provider served from its prompt cache, and how much.
+                ("From cache", api::cache_label(totals)),
             ],
         ))
         .child(group(ui, "Tokens over time", chart_card(ui, points)))
@@ -649,7 +651,7 @@ fn usage_body(ui: &Ui, summary: &UsageSummary, points: &[api::UsagePoint]) -> El
     column
 }
 
-fn stat_row(ui: &Ui, stats: [(&str, String); 3]) -> El {
+fn stat_row(ui: &Ui, stats: [(&str, String); 4]) -> El {
     let unit = ui.theme().spacing.unit;
     let mut row = w::row(ui)
         .gap(unit * 2.0)
@@ -1403,6 +1405,8 @@ fn totals(total: f64, cost: f64, events: f64) -> UsageTotals {
         total_tokens: total,
         estimated_cost_usd: cost,
         events,
+        cache_read_tokens: total * 0.35,
+        cache_hit_rate: Some(0.5),
     }
 }
 

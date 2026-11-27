@@ -33,7 +33,6 @@ func TestCLIHelpAndVersion(t *testing.T) {
 	if code, out, _ := runCLI(t, "--help"); code != 0 || !strings.Contains(out, "remedy serve") {
 		t.Fatalf("--help: %d %q", code, out)
 	}
-	t.Setenv("REMEDY_CLI_VERSION", "")
 	if code, out, _ := runCLI(t, "--version"); code != 0 || strings.TrimSpace(out) != "remedy 9.9.9" {
 		t.Fatalf("--version: %d %q", code, out)
 	}

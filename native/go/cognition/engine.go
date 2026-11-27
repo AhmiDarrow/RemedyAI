@@ -61,9 +61,9 @@ type ToolResult struct {
 	IsError bool
 }
 
-// Usage is the provider-reported token count for one model round. The cache
-// counts are Anthropic's prompt-cache accounting and are omitted by providers
-// that do not report them.
+// Usage is the provider-reported token count for one model round.
+// PromptTokens is input paid at the full rate; input the provider served from
+// its prompt cache is counted apart, for every provider that reports it.
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`

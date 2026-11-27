@@ -248,7 +248,34 @@ func toolSkillSearch(s *Server, in memorySkillInput) (any, error) {
 			"description": truncateRunes(r.rec.Description, 200),
 		})
 	}
-	return map[string]any{"query": query, "skills": skills, "total": len(skills)}, nil
+	out := map[string]any{"query": query, "skills": skills, "total": len(skills)}
+	// What the Skills Library has for the same task and is not installed. From
+	// the catalog already on disk: a search never goes to the network.
+	if cat, _ := s.getSkillsCatalogCached(); len(cat.Skills) > 0 && query != "" {
+		found, _ := s.libraryIndexFor(cat).search(libraryQuery{Text: query, Limit: 5, Exclude: s.installedLibraryIDs()})
+		library := make([]map[string]any, 0, len(found))
+		for _, e := range found {
+			library = append(library, map[string]any{
+				"id": e.ID, "name": e.Name, "description": truncateRunes(e.Description, 200),
+			})
+		}
+		if len(library) > 0 {
+			out["library"] = library
+		}
+	}
+	return out, nil
+}
+
+// installedLibraryIDs are the library skills already installed, by id and name.
+func (s *Server) installedLibraryIDs() map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, rec := range s.discoverSkills() {
+		out[rec.Name] = struct{}{}
+		if rec.LibraryID != "" {
+			out[rec.LibraryID] = struct{}{}
+		}
+	}
+	return out
 }
 
 // skillContextCaps are SKILL_BODY_CHAR_CAP, SKILL_REF_INLINE_MAX and

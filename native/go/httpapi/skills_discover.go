@@ -45,6 +45,16 @@ func (s *Server) discoverSkills() []skillRecord {
 	// skills into ~/.remedy/skills (Python SkillRegistry.discover_defaults parity).
 	seedMissingUserSkills(seedRoots, userRoot)
 
+	// Every SKILL.md is read and parsed only when a skill folder changed.
+	key := skillRootsSignature(append(append([]string{}, seedRoots...), userRoot))
+	installedSkillsMemo.Lock()
+	if installedSkillsMemo.key == key && installedSkillsMemo.recs != nil {
+		out := append([]skillRecord(nil), installedSkillsMemo.recs...)
+		installedSkillsMemo.Unlock()
+		return out
+	}
+	installedSkillsMemo.Unlock()
+
 	byName := map[string]skillRecord{}
 	for _, root := range seedRoots {
 		for _, rec := range loadSkillsFromRoot(root) {
@@ -61,6 +71,9 @@ func (s *Server) discoverSkills() []skillRecord {
 	sort.Slice(out, func(i, j int) bool {
 		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
 	})
+	installedSkillsMemo.Lock()
+	installedSkillsMemo.key, installedSkillsMemo.recs = key, append([]skillRecord(nil), out...)
+	installedSkillsMemo.Unlock()
 	return out
 }
 
@@ -177,8 +190,10 @@ func skillSeedRoots(home string) []string {
 		roots = append(roots, abs)
 	}
 
+	// The skills compiled into this runtime: there on every install route.
+	add(embeddedSkillsRoot(home))
+
 	if dev := strings.TrimSpace(os.Getenv("REMEDY_DEV_ROOT")); dev != "" {
-		add(filepath.Join(dev, "src", "remedy", "bundled_skills"))
 		add(filepath.Join(dev, "skills"))
 	}
 
@@ -202,13 +217,11 @@ func skillSeedRoots(home string) []string {
 	if err == nil && cwd != "" {
 		here := cwd
 		for i := 0; i < 6; i++ {
-			bundled := filepath.Join(here, "src", "remedy", "bundled_skills")
-			add(bundled)
 			// Only treat ./skills as a seed root inside a Remedy checkout.
 			// Walking TempDir parents must not pick up %USERPROFILE%/skills.
-			isRepo := fileExists(filepath.Join(here, "pyproject.toml")) &&
-				dirExists(filepath.Join(here, "src", "remedy"))
-			if isRepo || dirExists(bundled) {
+			isRepo := dirExists(filepath.Join(here, "native", "go", "bundledskills")) &&
+				dirExists(filepath.Join(here, "desktop", "remedyui"))
+			if isRepo {
 				add(filepath.Join(here, "skills"))
 			}
 			if isRepo {
@@ -222,7 +235,6 @@ func skillSeedRoots(home string) []string {
 		}
 	}
 
-	_ = home // user skills scanned separately (wins on collision)
 	return roots
 }
 

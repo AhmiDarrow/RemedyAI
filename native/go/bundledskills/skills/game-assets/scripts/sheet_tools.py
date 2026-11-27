@@ -16,8 +16,6 @@ try:
 except ModuleNotFoundError:  # owner-facing: say the fix, not a traceback
     sys.exit(
         "This script needs Pillow. Install it with:\n"
-        "  pip install \"remedy-ai[game-assets]\"\n"
-        "or:\n"
         "  pip install pillow"
     )
 

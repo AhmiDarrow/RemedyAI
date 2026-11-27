@@ -25,8 +25,6 @@ from pathlib import Path
 
 import pytest
 
-from remedy.interfaces.cli.launcher import resolve_remedy_runtime_command
-
 ROOT = Path(__file__).resolve().parents[1]
 GO_MOD = ROOT / "native" / "go"
 _LISTEN_RE = re.compile(r"listening on http://(\S+)")
@@ -116,12 +114,12 @@ def _runtime_argv(build_dir: Path) -> list[str] | None:
     built = _build_worktree_runtime(build_dir)
     if built is not None:
         return built
-    cmd = resolve_remedy_runtime_command()
-    if cmd is None:
+    # No fresh build: fall back to an explicit override or a runtime on PATH.
+    override = os.environ.get("REMEDY_NATIVE_RUNTIME_BIN", "").strip()
+    found = override or shutil.which("remedy-runtime")
+    if not found:
         return None
-    # `go run` fallback when build helper missed (should be rare).
-    if len(cmd) >= 3 and cmd[1] == "run" and "remedy-runtime" in cmd[2]:
-        return None
+    cmd = [found]
     if not _binary_supports_smoke_fixture(cmd):
         return None
     return list(cmd)

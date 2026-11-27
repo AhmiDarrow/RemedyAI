@@ -283,15 +283,14 @@ Trojan. Known historical / ML labels and status:
 
 ## The browser shows "WebUI assets not bundled"
 
-The local API is up but found no built UI. PyPI wheels from 0.69.2 on include
-it; upgrade with `pip install --upgrade remedy-ai` (or `uv tool upgrade
-remedy-ai`). From a source checkout, run `cd desktop && npm run build`, or set
+The local API is up but found no built UI. The Desktop app and its installers include it. From a source checkout, run `cd desktop && npm run build`, or set
 `REMEDY_WEBUI_DIR` to a folder that contains `index.html`.
 
 ## `remedy serve` says the runtime binary was not found
 
-On a PyPI install, first serve downloads `remedy-runtime` and `remedy_core`
-from GitHub Releases and checksum-verifies them. If that fails:
+The install script (`scripts/install.sh` / `scripts/install.ps1`) downloads
+`remedy-runtime` and `remedy_core` from GitHub Releases and checksum-verifies
+them. If that fails:
 
 - Confirm `remedy-native-SHA256SUMS.txt` and a pair of binaries for your OS
   are on the `runtime-v<version>` companion release (0.69.0 and later) or on

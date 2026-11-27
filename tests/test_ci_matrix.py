@@ -63,10 +63,8 @@ def test_local_gate_covers_every_shipped_runtime_and_artifact() -> None:
         "ruff check . --no-fix",
         "uv run mypy",
         "check_mypy_exclude.py",
-        "import remedy",
         "check_docs.py",
         "pytest -q --tb=short",
-        "uv build",
         "npm test",
         "npm run build",
         "cargo check",
@@ -390,7 +388,7 @@ def _good_sets(rl, ver: str = "1.2.0"):
 
 
 def test_runtime_assets_publish_on_a_companion_prerelease() -> None:
-    """The main release lists only installers + latest.json; pip runtime files,
+    """The main release lists only installers + latest.json; install-script runtime files,
     macOS updater tarballs and signatures go to runtime-v<ver>, which never
     takes over Latest and is published first. A dry run publishes nothing."""
     rl = _release_local_module()
@@ -418,17 +416,16 @@ def test_runtime_assets_publish_on_a_companion_prerelease() -> None:
         )
 
     source = (ROOT / "scripts" / "release_local.py").read_text("utf-8")
-    publish = source[source.index("def publish_releases(") : source.index("def build_wheel(")]
+    publish = source[source.index("def publish_releases(") : source.index("def main(")]
     assert publish.index('f"runtime-v{version}"') < publish.index('f"v{version}", "-R", repo'), (
         "companion release exists before Latest moves"
     )
     assert '"--prerelease", "--latest=false"' in publish[: publish.index('f"v{version}", "-R", repo')]
     notes = rl.main_notes("1.2.0", False)
-    assert "Which file do I need?" in notes and "right-click" in notes and "pip install remedy-ai" in notes
+    assert "Which file do I need?" in notes and "right-click" in notes and "scripts/install.sh" in notes and "pip install" not in notes
     assert "Experimental pre-release" in rl.main_notes("1.2.0", True)
     run_main = source[source.index("def main(") :]
     assert "if not args.dry_run:\n            publish_releases(" in run_main
-    assert "upload=not args.dry_run" in run_main
 
     # Published companion releases are re-checked on native macOS / ARM runners.
     verify = yaml.safe_load((ROOT / ".github" / "workflows" / "verify-release-assets.yml").read_text("utf-8"))
@@ -459,7 +456,7 @@ def test_reduced_gate_runs_only_the_lanes_docs_and_tests_need() -> None:
     lanes = prepush.lanes_for_paths
     assert lanes(["README.md", "docs/manual/22-grove.md"]) == {"checks"}
     assert lanes(["desktop/src/help/articles/22-grove.md"]) == {"checks", "desktop"}
-    assert lanes(["src/remedy/bundled_skills/x/SKILL.md"]) == {"checks", "linux", "python"}
+    assert lanes(["native/go/bundledskills/skills/x/SKILL.md"]) == {"checks", "native", "linux"}
     assert lanes(["tests/test_ci_matrix.py"]) == {"checks", "linux", "python"}
     assert lanes(["desktop/src/grove/head.test.ts"]) == {"checks", "desktop"}
     assert lanes(["desktop/src/components/X.test.tsx"]) == {"checks", "desktop"}
@@ -470,7 +467,7 @@ def test_reduced_gate_runs_only_the_lanes_docs_and_tests_need() -> None:
     # Anything that ships, builds, or is read by another stack: full matrix.
     for path in (
         "scripts/prepush.py",
-        "src/remedy/core/web_helpers.py",
+        "native/zig/src/core.zig",
         "desktop/src/grove/GroveApp.tsx",
         "desktop/src/grove/head.test.ts.snap",
         "native/go/httpapi/partner_head.go",
@@ -481,7 +478,7 @@ def test_reduced_gate_runs_only_the_lanes_docs_and_tests_need() -> None:
         "desktop/package.json",
     ):
         assert lanes([path]) is None, path
-    assert lanes(["tests/test_x.py", "src/remedy/core/a.py"]) is None, "one shipping file widens to full"
+    assert lanes(["tests/test_x.py", "native/zig/src/core.zig"]) is None, "one shipping file widens to full"
     assert lanes([]) is None, "no diff means nothing to reduce from"
     assert set(prepush.ALL_LANE_KEYS) == {lane.key for lane in prepush.LANES}
 

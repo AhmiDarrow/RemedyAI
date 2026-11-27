@@ -51,6 +51,10 @@ func compactTranscriptKeep(msgs []Message, verifySeen bool, keep int) []Message 
 	for cut > 1 && msgs[cut].Role == RoleUser && msgs[cut].HasToolResults() {
 		cut--
 	}
+	// Nor on a request whose context note would be cut off from it.
+	if _, ok := contextNoteBefore(msgs, cut); ok && cut > 1 {
+		cut--
+	}
 	if cut <= head+1 && (goal < 0 || goal == head || goal >= cut) {
 		return msgs
 	}
@@ -65,14 +69,37 @@ func compactTranscriptKeep(msgs []Message, verifySeen bool, keep int) []Message 
 	if len(middle) == 0 {
 		return msgs
 	}
-	out := make([]Message, 0, 4+len(msgs)-cut)
+	out := make([]Message, 0, 6+len(msgs)-cut)
+	// The note that carries memory, the plan and the checklist sits just
+	// before the request it was built for. It stays with that request, or the
+	// rest of the turn would run without them.
+	if note, ok := contextNoteBefore(msgs, head); ok {
+		out = append(out, note)
+	}
 	out = append(out, msgs[head])
 	if keepGoal {
+		if note, ok := contextNoteBefore(msgs, goal); ok {
+			out = append(out, note)
+		}
 		out = append(out, msgs[goal])
 	}
 	out = append(out, contextNote(buildWorkingSet(middle).render(len(middle), verifySeen)))
 	out = append(out, msgs[cut:]...)
 	return out
+}
+
+// contextNoteBefore returns the engine's context note placed right before
+// msgs[i], if there is one. An earlier compaction's own note is not it.
+func contextNoteBefore(msgs []Message, i int) (Message, bool) {
+	if i <= 0 || i > len(msgs) {
+		return Message{}, false
+	}
+	m := msgs[i-1]
+	if m.Role != RoleUser || !m.Internal || m.HasToolResults() ||
+		strings.HasPrefix(strings.TrimSpace(m.Text()), compactedHeader) {
+		return Message{}, false
+	}
+	return m, true
 }
 
 func firstUserProseIndex(msgs []Message) int {

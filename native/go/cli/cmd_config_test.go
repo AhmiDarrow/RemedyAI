@@ -35,7 +35,7 @@ func cfgTestHome(t *testing.T) string {
 	t.Setenv("USERPROFILE", t.TempDir())
 	for _, k := range []string{
 		"XAI_API_KEY", "REMEDY_XAI_API_KEY", "OPENAI_API_KEY", "REMEDY_LLM_API_KEY",
-		"ANTHROPIC_API_KEY", "GROQ_API_KEY", "REMEDY_CLI_VERSION",
+		"ANTHROPIC_API_KEY", "GROQ_API_KEY",
 	} {
 		t.Setenv(k, "")
 		os.Unsetenv(k)
