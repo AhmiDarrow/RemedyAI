@@ -2,14 +2,14 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v2.0.0**. Installed apps update on their own.
+Current release: **v2.1.1**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
-- [2.0.0 — A face of her own](#200---a-face-of-her-own)
+- [2.1.1 — A face of her own](#211---a-face-of-her-own)
 - [1.0.0 — A new desktop](#100---a-new-desktop)
 - [0.70.5 — Claude works on every model](#0705---claude-works-on-every-model)
 - [0.70.3 — Claude works again](#0703---claude-works-again)
@@ -37,7 +37,7 @@ you gave her, and waits for you before money, send, or delete.
 
 Earlier notes follow on this page, newest first.
 
-## 2.0.0 - A face of her own
+## 2.1.1 - A face of her own
 
 - **Her face.** Remedy's face is now drawn for you alone, from your name, the
   name you gave her, and this install. Its shape, eyes and color are hers, and

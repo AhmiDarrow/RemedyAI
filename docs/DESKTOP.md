@@ -2,7 +2,7 @@
 
 Remedy Desktop is the main way to use Remedy. It is a Rust app built on
 RemedyUI. It lives in `desktop/remedyui`. Its app id is `com.remedy.desktop`.
-The current version is 2.0.0.
+The current version is 2.1.1.
 
 The old Tauri and React desktop was replaced. Some of its folders are still in
 the tree (`desktop/src`, `desktop/src-tauri`), but they are not the shipped app.

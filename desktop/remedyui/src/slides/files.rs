@@ -1285,7 +1285,16 @@ fn list_area(
             },
             move || list.clone(),
         )
-        .el(),
+        .el()
+        // The wrapper sizes the list: left to its content it grew as tall as
+        // the rows, and the list never had anything to scroll.
+        .column()
+        .layout(|l| {
+            l.grow = 1.0;
+            l.basis = Length::Px(0.0);
+            l.min_height = Length::Px(0.0);
+            l.width = Length::Percent(1.0);
+        }),
     )
 }
 
@@ -1810,5 +1819,62 @@ fn pad(y: f32, x: f32) -> remedy_ui::core::Insets {
         bottom: y,
         start: x,
         end: x,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use remedy_ui::testing::TestApp;
+
+    /// Mounted the way a rail mounts it (a header, then a slot that takes the
+    /// rest), a long folder stays inside the pane and scrolls.
+    #[test]
+    fn a_long_folder_scrolls_inside_the_rail() {
+        let model = FilesModel::new(Signal::new(None), Signal::new(None), true);
+        let mut app = TestApp::window({
+            let model = model.clone();
+            move |ui, _| {
+                let slot = ui
+                    .el("slide_fill")
+                    .layout(|l| {
+                        l.width = Length::Percent(1.0);
+                        l.grow = 1.0;
+                        l.basis = Length::Px(0.0);
+                        l.min_height = Length::Px(0.0);
+                    })
+                    .child(body(ui, &model));
+                ui.root().child(
+                    w::column(ui)
+                        .layout(|l| {
+                            l.width = Length::Px(300.0);
+                            l.height = Length::Px(400.0);
+                        })
+                        .child(w::text(ui, "Files").layout(|l| l.height = Length::Px(36.0)))
+                        .child(slot),
+                );
+            }
+        });
+        app.frames(2);
+        model.files.set(
+            (0..200)
+                .map(|i| FileEntry {
+                    name: format!("file-{i:03}.txt"),
+                    path: format!("desktop/src/file-{i:03}.txt"),
+                    is_dir: false,
+                    depth: 0,
+                    size: 10,
+                    modified: 0,
+                })
+                .collect(),
+        );
+        app.frames(3);
+        let list = model.list_el.borrow().clone().expect("the list");
+        let b = list.bounds().expect("laid out");
+        assert!(b.max.y <= 400.5, "the list runs past the pane: {b:?}");
+        list.scroll_to(remedy_ui::core::Vec2::new(0.0, 1.0e6));
+        app.frames(2);
+        let off = app.ui().expect("ui").scroll_offset(list.id());
+        assert!(off.y > 0.0, "the list did not scroll: {off:?} in {b:?}");
     }
 }
