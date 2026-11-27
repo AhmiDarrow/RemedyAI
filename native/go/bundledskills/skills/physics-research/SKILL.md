@@ -11,7 +11,7 @@ version: 1.0.0
 author: Remedy
 tags: [research, physics, metrology, uncertainty, fitting, simulation]
 requires: []
-tools: [analysis_env, analysis_run, analysis_ledger, stats_assumptions, stats_effect_size, manuscript_build, lit_search, lit_fetch, cite_add, cite_check, skill_activate, file_read, file_write, repo_search]
+tools: [analysis_env, analysis_run, analysis_ledger, stats_assumptions, stats_effect_size, manuscript_build, lit_search, lit_fetch, cite_add, cite_check, skill.activate, read, write, grep]
 triggers:
   - '\b(systematic uncertaint\w+|statistical uncertaint\w+|error budget|error propagation|dimensional analysis|units check)\b'
   - '\b(Monte[- ]Carlo (?:event|generator)|GEANT4?|ROOT (?:file|tree|macro)|detector (?:calibration|response|acceptance))\b'
@@ -21,7 +21,7 @@ triggers:
 
 # Physics research
 
-Activate `research-method` first: `skill_activate(skill="research-method")`.
+Activate `research-method` first: `skill.activate(skill="research-method")`.
 That pack owns question framing, evidence standards, preregistration,
 citation honesty and how to say "we do not know". Do not restate it. What
 follows is only what physics does differently.
@@ -116,4 +116,4 @@ the work rather than routing around review.
   to the owner, never quietly kept.
 - `manuscript_build` reports no undefined citations or references.
 
-Read `references/INDEX.md` and pull what you need with `file_read`.
+Read `references/INDEX.md` and pull what you need with `read`.

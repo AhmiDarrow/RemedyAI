@@ -6,12 +6,12 @@ description: >
   through the editor's batchmode CLI, wire CI. Use when the project has
   ProjectSettings/ProjectVersion.txt or the owner mentions Unity, prefabs,
   MonoBehaviour, ScriptableObject, or Unity tests. Knowledge-only — no
-  dedicated tools; everything goes through bash_exec and file tools.
+  dedicated tools; everything goes through bash and file tools.
 version: 1.0.0
 author: Remedy
 tags: [game, unity, csharp, engine, batchmode, tests]
 requires: []
-tools: [game_project_info, local_discover, bash_exec, file_read, file_write, file_edit, repo_search, list_dir, game_playtest, computer_screenshot]
+tools: [game_project_info, local_discover, bash, read, write, edit, grep, glob, game_playtest, computer.screenshot]
 triggers:
   - "\\b(unity|monobehaviour|prefab|scriptableobject|unity tests?)\\b"
   - "\\bc# (script|class) for (a|the|my) game\\b"
@@ -32,7 +32,7 @@ plainly, do the text half, and tell them exactly what to click.
 
 ## Fingerprint (start here)
 
-1. `game_project_info(path)`; then `file_read ProjectSettings/ProjectVersion.txt`
+1. `game_project_info(path)`; then `read ProjectSettings/ProjectVersion.txt`
    → `m_EditorVersion: 2022.3.20f1` (exact version the project expects).
 2. `Assets/` (all content), `Packages/manifest.json` (package deps, incl.
    `com.unity.test-framework`, `com.unity.inputsystem`), `ProjectSettings/`.
@@ -63,7 +63,7 @@ Unity.exe -batchmode -nographics -quit -projectPath <p> -executeMethod <Class.Me
   compile errors. Grep for `error CS`, `Exception`, `Scripts have compiler errors`.
 - Compile check without doing anything: run with `-quit` and no
   `-executeMethod`; a non-zero exit or `error CS` in the log means broken scripts.
-- Budget: imports + domain reload take minutes. Give `bash_exec` a long
+- Budget: imports + domain reload take minutes. Give `bash` a long
   timeout; never conclude "hung" under 10 minutes on a cold `Library/`.
 - One editor instance per project at a time; if the owner has it open the
   log says so — ask them to close it or skip the CLI step.
@@ -108,7 +108,7 @@ mistakes live in `references/scripting-patterns.md`. Rules of thumb:
 
 No headless playtest. If the owner has a built player (`.exe`), use
 `game_playtest(command=<exe>, seconds=…, question=…)`. Otherwise ask them to
-press Play and describe/screenshot; `computer_screenshot` works when the
+press Play and describe/screenshot; `computer.screenshot` works when the
 editor is on screen.
 
 ## Refuse / redirect

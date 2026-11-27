@@ -10,7 +10,7 @@ version: 1.1.0
 author: Remedy
 tags: [image, generation, comfyui, art, flux, install, bootstrap]
 requires: []
-tools: [comfyui, local_discover, bash_exec, file_write, file_read]
+tools: [comfyui, local_discover, bash, write, read]
 # Portable local discovery — any machine, no hard-coded user paths.
 local:
   services:
@@ -49,7 +49,7 @@ user’s GPU/CPU** for pixels.
 | Discovery | `comfyui` action=`locate` (API ports + process + bounded home search) |
 | Starter workflow | `scripts/workflows/txt2img_flux2_klein.json` (API format) |
 
-**Do not** `list_dir` the whole disk hunting for ComfyUI. Use `action=locate` /
+**Do not** `glob` the whole disk hunting for ComfyUI. Use `action=locate` /
 `status`. Discovery is built in for every OS/user.
 
 ---
@@ -228,7 +228,7 @@ Or let the tool build it: `comfyui` / `action=generate` with a `prompt`
    **Save (API Format)** → save `.json` under the project (e.g. `assets/workflows/`).
 2. API format is a dict keyed by **string node ids**, each with `class_type` + `inputs`.
    Links are `[node_id, output_index]` pairs — not the pretty UI format.
-3. Edit with `file_write` / editor; keep filenames in loaders aligned with disk.
+3. Edit with `write` / editor; keep filenames in loaders aligned with disk.
 4. Queue via CLI helper or POST `/prompt` (see below). For chat UX, stick to
    `action=generate` when the Klein graph is enough.
 

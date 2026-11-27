@@ -43,7 +43,7 @@ git log -5 --oneline
 
 ### 2. Draft
 
-- Use normal `file_edit` / `file_write` tools. Keep the change minimal and focused.
+- Use normal `edit` / `write` tools. Keep the change minimal and focused.
 - Do not touch generated/lock files unless the change requires it.
 
 ### 3. Snapshot (rollback point)

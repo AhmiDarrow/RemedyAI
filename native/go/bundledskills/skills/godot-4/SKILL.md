@@ -9,7 +9,7 @@ version: 1.0.0
 author: Remedy
 tags: [game, godot, gdscript, engine, headless, export]
 requires: []
-tools: [game_project_info, godot_run, godot_check, godot_export, godot_import, game_playtest, local_discover, bash_exec, file_read, file_write, file_edit, repo_search, list_dir, computer_screenshot, skill_activate]
+tools: [game_project_info, godot_run, godot_check, godot_export, godot_import, game_playtest, local_discover, bash, read, write, edit, grep, glob, computer.screenshot, skill.activate]
 triggers:
   - "\\b(godot|gdscript|\\.tscn|\\.gd\\b|autoload|gdunit|gut\\b)\\b"
   - "\\b(export templates?|scene tree|project\\.godot|\\.tres|\\.godot/)\\b"
@@ -33,7 +33,7 @@ project — do not mix idioms.
    `GODOT4_BIN` env, `godot*` on PATH, a `Godot*.exe` in the project root
    (prefer `*_console.exe` on Windows). Still nothing → ask: "tell me where
    Godot is" and move on. Never start a setup wizard.
-2. `file_read` `project.godot`: main scene (`run/main_scene`), autoloads,
+2. `read` `project.godot`: main scene (`run/main_scene`), autoloads,
    input map, window size/stretch, rendering method, physics layer names.
 3. Work in scenes (`.tscn`, text) + scripts (`.gd`). Prefer editing `.gd`
    over hand-editing `.tscn`; when you must touch `.tscn`, keep `load_steps`,
@@ -46,12 +46,12 @@ project — do not mix idioms.
      quit_after=1)` — weaker, prints only script/load errors.
 5. Playtest: `godot_run(path, headless=False)` (auto-backgrounded) then
    `game_playtest(pid, seconds, interval, keys, question)` or
-   `computer_screenshot`. Read the engine log for `SCRIPT ERROR`, `E 0:00`.
+   `computer.screenshot`. Read the engine log for `SCRIPT ERROR`, `E 0:00`.
 6. Export: `godot_export(list=True)` → pick preset → `godot_export(preset,
    output, debug=False)`. Templates missing → tell the owner to install them
    from Editor → Manage Export Templates; you cannot download them silently.
 
-Read `references/INDEX.md` and pull what you need with `file_read`.
+Read `references/INDEX.md` and pull what you need with `read`.
 
 ## Canonical smoke script — `tools/smoke_boot.gd`
 
@@ -121,7 +121,7 @@ hangs otherwise.
   `.tscn`/`.tres` after deleting `.godot/` fall back to path; a wrong path +
   wrong uid = broken ref. Fix with `godot_import` then `godot_check`.
 - `res://` paths are case-sensitive on export (Linux/Android) even if Windows
-  editor runs fine. `repo_search` for case mismatches before export.
+  editor runs fine. `grep` for case mismatches before export.
 - `@onready` vars are null inside `_init` and before `_ready`.
 - `get_node("Player")` is relative; use `%UniqueName` or `$"../Player"`.
 - Physics bodies moved in `_process` jitter; use `_physics_process`.

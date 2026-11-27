@@ -12,7 +12,7 @@ tags: [companion, planning, memory]
 "What's on my plate?", "brief me", start-of-day / end-of-week check-ins.
 
 ## Steps
-1. `memory_search` for recent priorities and open loops.
+1. `memory.search` for recent priorities and open loops.
 2. Check Session Brief / handoffs if available (`/harness` context).
 3. Produce a short briefing:
    - **Focus** (1–3 items)

@@ -50,7 +50,7 @@ sidecar or `.tres`/`.tscn` header and cached in `.godot/uid_cache.bin`.
 References in scenes carry both `uid` and `path`; load tries uid first, path
 second. Consequences:
 - Moving a file inside the editor keeps uid and updates path: safe.
-- Moving a file outside the editor (git mv, `file_write`) keeps the uid in
+- Moving a file outside the editor (git mv, `write`) keeps the uid in
   the file but the cache is stale until the next import: run `godot_import`
   (`--import`) then `godot_check`.
 - Deleting `.godot/` is safe; it rebuilds.
