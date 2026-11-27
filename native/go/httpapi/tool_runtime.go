@@ -971,6 +971,8 @@ func NewDefaultToolRegistry() (*tools.Registry, error) {
 	}); err != nil {
 		return nil, err
 	}
+	// Before the shell tools: their description names the shell that will run.
+	tools.ShellPreference = func() string { return cfgString(LoadConfig(""), "shell", "") }
 	if err := tools.RegisterShellTools(registry); err != nil {
 		return nil, err
 	}

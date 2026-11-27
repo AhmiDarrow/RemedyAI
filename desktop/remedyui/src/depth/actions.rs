@@ -151,7 +151,11 @@ fn interrupt(studio: &Studio, sid: &str, text: String, attachments: Vec<Attachme
 
 fn steer(studio: &Studio, sid: &str, text: &str) {
     studio.depth.remember_prompt(text);
-    push_user(studio, sid, text);
+    // Not into the list yet: it would sit above the reply she is still
+    // writing. It shows under that reply and joins the list where she takes
+    // it in (the "steered" frame) or when the turn ends.
+    studio.depth.steers.update(|v| v.push((sid.to_string(), text.to_string())));
+    studio.depth.notice.set("Sent to the live turn.".into());
     let Some(client) = studio.runtime() else {
         return;
     };
@@ -499,6 +503,28 @@ fn push_user(studio: &Studio, sid: &str, text: &str) {
     });
 }
 
+/// Moves the session's waiting mid-turn messages into the conversation, at its
+/// end. A session that is not on screen only drops them: its messages are
+/// read from the runtime when it is opened.
+fn land_steers(studio: &Studio, sid: &str, active: bool) {
+    let mut mine = Vec::new();
+    studio.depth.steers.update(|v| {
+        v.retain(|(s, text)| {
+            if s == sid {
+                mine.push(text.clone());
+                false
+            } else {
+                true
+            }
+        })
+    });
+    if active {
+        for text in mine {
+            push_user(studio, sid, &text);
+        }
+    }
+}
+
 fn push_system(studio: &Studio, text: &str) {
     let id = studio.alloc_msg_id();
     studio.messages.update(|m| {
@@ -732,12 +758,23 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
             }
         }
         "steered" => {
+            // She has taken the message in. Her reply so far is closed as its
+            // own message, the message goes under it, and what she says next
+            // starts a new bubble: the conversation in the order it happened.
+            studio.depth.map_job(sid, |job| {
+                job.partial.clear();
+                job.breaks.clear();
+                job.steps.clear();
+                job.thinking.clear();
+                job.message_id.clear();
+            });
             if active {
-                studio.streaming.set(true);
+                studio.seal_live();
                 // Steering the turn this window is showing is not another window's work.
                 studio.depth.remote_busy.set(!here);
-                studio.depth.notice.set("Sent to the live turn.".into());
+                studio.depth.notice.set(String::new());
             }
+            land_steers(studio, sid, active);
         }
         "queued" => {
             if active {
@@ -780,6 +817,8 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
                 studio.depth.remote_busy.set(false);
                 studio.finish_assistant(None);
             }
+            // One she never got to (the turn ended first) goes after the reply.
+            land_steers(studio, sid, active);
         }
         _ => {}
     }
@@ -3301,6 +3340,42 @@ mod tests {
         assert_eq!(studio.live_user_reaction.get(), "", "toggle off");
         react(&studio, "msg-42", "❤️");
         assert_eq!(studio.live_user_reaction.get(), "❤️");
+    }
+
+    #[test]
+    fn a_message_sent_mid_turn_stays_in_the_flow() {
+        let studio = Studio::new();
+        studio.active.set(Some("s1".into()));
+        studio.depth.map_job("s1", |job| {
+            *job = StreamJob::running("s1".to_string());
+            job.outgoing = "do the thing".into();
+        });
+        studio.streaming.set(true);
+        apply_frame(&studio, "s1", "token", r#"{"text":"First part."}"#);
+        // Sent while she works: it waits under the live reply, not in the list.
+        steer(&studio, "s1", "also check the tests");
+        assert_eq!(studio.depth.steers.get().len(), 1);
+        assert!(studio.messages.get().iter().all(|m| m.role != "user"));
+        // She takes it in: her reply so far closes, the message goes under it.
+        apply_frame(&studio, "s1", "steered", "{}");
+        assert!(studio.streaming.get(), "the turn is still running");
+        apply_frame(&studio, "s1", "token", r#"{"text":"Second part."}"#);
+        apply_frame(&studio, "s1", "done", "{}");
+        let shape: Vec<(String, String)> = studio
+            .messages
+            .get()
+            .iter()
+            .map(|m| (m.role.clone(), m.content.clone()))
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                ("assistant".to_string(), "First part.".to_string()),
+                ("user".to_string(), "also check the tests".to_string()),
+                ("assistant".to_string(), "Second part.".to_string()),
+            ]
+        );
+        assert!(studio.depth.steers.get().is_empty());
     }
 
     #[test]

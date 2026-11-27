@@ -806,6 +806,18 @@ impl Studio {
     }
 
     pub(crate) fn finish_assistant(&self, error: Option<String>) {
+        self.close_live(error, true);
+    }
+
+    /// Closes what she has said so far as a message of its own while the turn
+    /// goes on: the owner's mid-turn message goes under it and the rest of her
+    /// reply starts a new bubble below that.
+    pub(crate) fn seal_live(&self) {
+        self.close_live(None, false);
+        self.streaming.set(true);
+    }
+
+    fn close_live(&self, error: Option<String>, end: bool) {
         let partial = self.partial.get();
         let breaks = self.live_breaks.get();
         let mut steps = self.live_steps.get();
@@ -829,7 +841,9 @@ impl Studio {
             }
         }
         if body.is_empty() && steps.is_empty() && thinking.trim().is_empty() {
-            crate::depth::after_finish(self);
+            if end {
+                crate::depth::after_finish(self);
+            }
             return;
         }
         let role = if error.is_some() && body.starts_with("The mind") {
@@ -868,6 +882,11 @@ impl Studio {
                     }
                 });
             }
+        }
+        // A part closed mid-turn is not the end of the reply: nothing is read
+        // aloud and the queue waits.
+        if !end {
+            return;
         }
         if speak {
             crate::depth::speak_reply(self, &spoken);

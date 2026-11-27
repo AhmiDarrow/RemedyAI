@@ -42,7 +42,7 @@ var settableKeys = map[string]struct{}{
 	"agent_gender": {}, "ui_language": {}, "persona": {}, "setup_completed": {},
 	"access_scope": {}, "launch_at_login": {}, "start_in_tray": {}, "close_to_tray": {},
 	"harness_mode": {}, "harness_min_context_pct": {}, "harness_max_context_pct": {},
-	"finish_checks": {},
+	"finish_checks": {}, "shell": {},
 	"thinking_level": {}, "approval_mode": {}, "trust_profile": {},
 	"reasoning_effort": {}, "thinking_budget_tokens": {}, "max_output_tokens": {},
 	"context_window_tokens": {}, "model_settings": {},

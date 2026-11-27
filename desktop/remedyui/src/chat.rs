@@ -323,6 +323,13 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
                 )
             });
         }
+        // Sent while she works and not taken in yet: under her live reply,
+        // where the conversation is, not above it.
+        if let Some(sid) = st.active.get() {
+            for (i, (_, text)) in st.depth.steers.get().iter().filter(|(s, _)| *s == sid).enumerate() {
+                msgs.push(ChatMessage::plain(format!("steer-{i}"), "user", text.clone()));
+            }
+        }
         let _ = items_out.try_set(msgs);
     });
     let u = ui.clone();
