@@ -19,14 +19,21 @@ import sys
 #: Top-level commands the Go CLI answers. Grows as groups move over.
 GO_COMMANDS = frozenset(
     {
+        "auth",
         "chat",
+        "config",
         "connect-relay",
         "desktop",
         "exec",
         "gateway",
+        "handoff",
+        "memory",
         "open",
         "serve",
+        "session",
+        "settings",
         "tool",
+        "user",
     }
 )
 
