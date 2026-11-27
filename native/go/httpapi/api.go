@@ -32,7 +32,7 @@ import (
 
 // Version is the shipped product version the Web UI and update check report.
 // It follows the desktop (desktop/remedyui/Cargo.toml), not the Python package.
-const Version = "2.0.0"
+const Version = "2.1.1"
 
 // Config controls the minimal local API server.
 type Config struct {

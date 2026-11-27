@@ -338,7 +338,7 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
                 let name = if m.role == "user" {
                     studio_rows.user_name.get()
                 } else {
-                    "Remedy".into()
+                    studio_rows.partner_name.get()
                 };
                 saved_turn(&u, studio_rows.clone(), m, &name)
             };
@@ -953,7 +953,7 @@ fn live_turn(ui: &Ui, studio: Studio) -> El {
 
     speaker_cluster(
         ui,
-        "Remedy",
+        &studio.partner_name.get(),
         false,
         None,
         studio.now(),

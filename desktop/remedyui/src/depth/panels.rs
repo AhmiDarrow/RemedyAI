@@ -9,6 +9,7 @@ use super::{
 use crate::messages;
 use crate::studio::Studio;
 use crate::tokens::{self, section_kicker};
+use remedy_ui::a11y::{Action, Role, Semantics};
 use remedy_ui::core::Insets;
 use remedy_ui::layout::{Align, Length};
 use remedy_ui::reactive::Signal;
@@ -652,47 +653,32 @@ fn skill_button(ui: &Ui, studio: Studio, row: SkillRow) -> El {
     let open = row.name.clone();
     let title = row.name.clone();
     let detail = row.description;
-    w::row(ui)
+    let full = |l: &mut remedy_ui::layout::LayoutStyle| {
+        l.width = Length::Percent(1.0);
+        l.min_width = Length::Px(0.0);
+    };
+    // Stacked, not side by side: in a narrow pane a name beside its tag had no
+    // room and was drawn over it. The name wraps; a button label does not.
+    w::column(ui)
         .align(Align::Start)
-        .gap(unit * 2.0)
-        .layout(|l| {
-            l.width = Length::Percent(1.0);
-            l.min_width = Length::Px(0.0);
-            l.wrap = true;
-        })
+        .gap(unit)
+        .layout(full)
         .style(StylePatch::new().border(line).border_width(1.0))
         .padding(Insets::all(unit * 2.0))
-        .child(
-            w::column(ui)
-                .gap(unit)
-                .layout(|l| {
-                    l.grow = 1.0;
-                    l.shrink = 1.0;
-                    l.min_width = Length::Px(0.0);
-                    l.basis = Length::Px(0.0);
-                })
-                .child(
-                    w::button(ui, title, move || open_skill(&st, &open))
-                        .variant("quiet")
-                        .layout(|l| {
-                            l.width = Length::Percent(1.0);
-                            l.min_width = Length::Px(0.0);
-                        }),
-                )
-                .child(
-                    w::text(ui, detail)
-                        .variant("muted")
-                        .layout(|l| {
-                            l.width = Length::Percent(1.0);
-                            l.min_width = Length::Px(0.0);
-                        }),
-                ),
-        )
         .child(
             w::text(ui, tag)
                 .style(StylePatch::new().foreground(tag_color).border(line).border_width(1.0))
                 .padding(Insets::symmetric(unit, unit * 1.5)),
         )
+        .child(
+            ui.el("button")
+                .child(w::text(ui, title.clone()).layout(full))
+                .variant("quiet")
+                .layout(full)
+                .on_click(move || open_skill(&st, &open))
+                .semantics(Semantics::new(Role::Button).label(title).action(Action::Click)),
+        )
+        .child(w::text(ui, detail).variant("muted").layout(full))
 }
 
 

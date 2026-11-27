@@ -37,16 +37,16 @@ def text(path: Path) -> str:
 
 def main() -> int:
     cargo = text(ROOT / "Cargo.toml")
-    need('version = "2.0.0"' in cargo, "Cargo.toml version is not 2.0.0")
+    need('version = "2.1.1"' in cargo, "Cargo.toml version is not 2.1.1")
 
     feed = json.loads(text(HERE / "latest.json"))
-    need(feed.get("version") == "v2.0.0", "latest.json version")
+    need(feed.get("version") == "v2.1.1", "latest.json version")
     platforms = feed.get("platforms") or {}
     expected = {
-        "windows-x86_64": "/v2.0.0/Remedy.Desktop_2.0.0_x64-setup.exe",
-        "linux-x86_64": "/v2.0.0/Remedy.Desktop_2.0.0_amd64.AppImage",
-        "darwin-aarch64": "/runtime-v2.0.0/Remedy.Desktop_2.0.0_aarch64.app.tar.gz",
-        "darwin-x86_64": "/runtime-v2.0.0/Remedy.Desktop_2.0.0_x64.app.tar.gz",
+        "windows-x86_64": "/v2.1.1/Remedy.Desktop_2.1.1_x64-setup.exe",
+        "linux-x86_64": "/v2.1.1/Remedy.Desktop_2.1.1_amd64.AppImage",
+        "darwin-aarch64": "/runtime-v2.1.1/Remedy.Desktop_2.1.1_aarch64.app.tar.gz",
+        "darwin-x86_64": "/runtime-v2.1.1/Remedy.Desktop_2.1.1_x64.app.tar.gz",
     }
     for key, suffix in expected.items():
         entry = platforms.get(key) or {}
