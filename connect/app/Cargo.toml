@@ -1,6 +1,6 @@
 [package]
 name = "remedy-connect"
-version = "2.0.0"
+version = "2.1.1"
 edition = "2021"
 publish = false
 description = "RemedyConnect: Grove on a paired phone"

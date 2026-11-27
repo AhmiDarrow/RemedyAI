@@ -270,6 +270,7 @@ impl Grove {
             Surface::Grove
         };
         let bubble = prefs.bubble().unwrap_or(BubblePos { x: 760.0, y: 280.0 });
+        let partner_name = studio.partner_name.clone();
         Grove {
             phone: false,
             studio,
@@ -323,7 +324,7 @@ impl Grove {
             bookmarks_open: Signal::new(false),
             shield: Signal::new(prefs.shield),
             desktop_site: Signal::new(prefs.desktop_site),
-            partner_name: Signal::new("Remedy".into()),
+            partner_name,
             vigil_on: Signal::new(false),
             agent_gender: Signal::new("female".into()),
             speak_replies: Signal::new(false),

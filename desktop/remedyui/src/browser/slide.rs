@@ -165,10 +165,14 @@ fn toolbar(ui: &Ui, model: &Model, field: &remedy_ui::view::TextField) -> El {
         let forward = nav_button(&ui_bar, &model, w::Icon::ArrowRight, "browser-forward", |m| m.go_forward(), true);
         let home = nav_button(&ui_bar, &model, w::Icon::Home, "browser-home", |m| m.go_home(), false);
         let reload = nav_button(&ui_bar, &model, w::Icon::Refresh, "browser-reload", |m| m.reload(), true);
-        let address = field.el().grow(1.0).layout(|l| {
+        // The address takes two thirds of what the fixed buttons leave, at any
+        // width. Sharing one overflow row with the other controls left it the
+        // row's 48 px reserve, too small to read what is typed.
+        let address = field.el().layout(|l| {
             l.min_width = Length::Px(0.0);
+            l.basis = Length::Px(0.0);
             l.shrink = 1.0;
-            l.grow = 1.0;
+            l.grow = 2.0;
         });
         let go_ui = ui_bar.clone();
         let star_ui = ui_bar.clone();
@@ -180,14 +184,11 @@ fn toolbar(ui: &Ui, model: &Model, field: &remedy_ui::view::TextField) -> El {
         let site_model = model.clone();
         let external_ui = ui_bar.clone();
         let close_ui = ui_bar.clone();
-        w::overflow_row(&ui_bar)
+        let shield = shield_button(&ui_bar, &model);
+        let rest = w::overflow_row(&ui_bar)
             .gap(unit)
-            .keep(back)
-            .keep(forward)
-            .child(messages().text(&ui_bar, "browser-home"), home)
-            .keep(shield_button(&ui_bar, &model))
             .child(messages().text(&ui_bar, "browser-reload"), reload)
-            .flex(address)
+            .child(messages().text(&ui_bar, "browser-home"), home)
             .child_fn(move || messages().text(&go_ui, "browser-go"), go_button(&ui_bar, &model, &field))
             .child_fn(
                 move || {
@@ -216,6 +217,21 @@ fn toolbar(ui: &Ui, model: &Model, field: &remedy_ui::view::TextField) -> El {
             .child(messages().text(&external_ui, "browser-external"), external_button(&ui_bar, &model, &field))
             .child(messages().text(&close_ui, "browser-close"), close_button(&ui_bar, &model))
             .el()
+            .layout(|l| {
+                // Room for the More button when everything else has moved into it.
+                l.min_width = Length::Px(36.0);
+                l.basis = Length::Px(0.0);
+                l.shrink = 1.0;
+                l.grow = 1.0;
+            });
+        w::row(&ui_bar)
+            .align(remedy_ui::layout::Align::Center)
+            .gap(unit)
+            .child(back)
+            .child(forward)
+            .child(shield)
+            .child(address)
+            .child(rest)
             .padding(Pad::all(unit.max(4.0) * 0.5))
             .style(StylePatch::new().background(colors.card))
             .layout(|l| {

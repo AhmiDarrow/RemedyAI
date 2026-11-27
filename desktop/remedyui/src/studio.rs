@@ -218,6 +218,8 @@ pub struct Studio {
     pub picker_status: Signal<crate::model_picker::PickerStatus>,
     /// Display name for "Ready when you are, {name}".
     pub user_name: Signal<String>,
+    /// What the owner calls her (Settings, Partner name). One name for Grove and Studio.
+    pub partner_name: Signal<String>,
     /// When true, this Studio does not talk to a runtime (goldens, tests).
     pub local_only: bool,
     /// Fixed "now" for relative times in previews (Unix seconds).
@@ -346,6 +348,7 @@ impl Studio {
             providers: Signal::new(Vec::new()),
             picker_status: Signal::new(crate::model_picker::PickerStatus::Ready),
             user_name: Signal::new(user.to_string()),
+            partner_name: Signal::new("Remedy".into()),
             local_only,
             clock: Signal::new(None),
             time_travel: crate::timetravel::TimeTravel::new(),

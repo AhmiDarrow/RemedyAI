@@ -4,7 +4,7 @@ All notable changes to Remedy are documented here.
 
 ## [Unreleased]
 
-## [2.0.0] - 2026-11-26
+## [2.1.1] - 2026-11-27
 
 ### Added
 - A full set of commands, about sixty: every setting (`/settings`, `/set`, `/get` and shortcuts such as `/theme`, `/web`, `/approvals`), the model side (`/usage`, `/context`, `/providers`, `/tools`), memory (`/forget`), her own work (`/routines`, `/jobs`, `/notifications`) and this PC (`/connect`, `/voice`, `/doctor`, `/version`, `/update`). `/commands` lists them and `/help <command>` explains one. The apps' command list now holds only commands that do something.
@@ -17,7 +17,7 @@ All notable changes to Remedy are documented here.
 ### Changed
 - Frontier-sized tool and context limits: tool results keep 30,000 characters (8,000 on a small local window), old tool output is trimmed from 75% of the model's real context window and the conversation compacted at 92% (Settings, Models, Memory harness), job logs can be paged with `jobs read`, grep lines go to 2,000 characters, and truncation notes say how much was cut and how to read the rest.
 - The runtime no longer contains any code to start, attach to or talk to a Python worker, and no installer builds or bundles one. Three settings that only the worker read are gone: the two learn timeouts and daily voice drift.
-- One version number, 2.0.0, for the desktop, the phone app, the runtime and the command line.
+- One version number, 2.1.1, for the desktop, the phone app, the runtime and the command line.
 - The `remedy` command line runs in the Go runtime. The pip package (`remedy-ai`) is gone: install with the installers from the releases page, or on a machine without a desktop with the install script (`scripts/install.sh`, `scripts/install.ps1`). `remedy-mcp` is now `remedy mcp serve`, and `remedy update` checks the release feed and says how to update.
 - Usage, Harness shows what the runtime measured for the session: context fill, the compaction budget, turns, tokens saved, tool and provider results. It no longer lists figures nothing produced (nudges, stuck rate, goals).
 - The Memory harness setting works: Auto trims and compacts at the two percentages you set, Off leaves a conversation whole until it no longer fits. Before, the setting was saved and never read. The Manual mode is gone; it did nothing.

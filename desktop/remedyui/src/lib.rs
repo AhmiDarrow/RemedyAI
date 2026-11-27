@@ -142,6 +142,8 @@ pub fn app(app: &App) {
         });
         chrome.attach(&a, window, ui);
         depth::set_host(a.clone(), window.clone());
+        // The slides' save, open and folder dialogs need the window too.
+        slides::bind_host(&a, window);
         // Window scope, not a Grove/Studio/setup `show` branch. Those
         // branches are disposed on the way between surfaces. Settings
         // has to outlive all of them. The computer-use poller starts

@@ -37,7 +37,7 @@ Each of these only ever adds a question. None of them lets through what the appr
 |---|---|
 | `guard` (default) | A plain command inside your project runs. A command waits for you when it names a place keys are kept (also through a wildcard or `{a,b}` list, or by starting in such a folder), reaches outside the folders the conversation may write, contacts a network address or runs a network program (`curl`, `wget`, `ssh`, `nc`, ...), or is built while it runs (variables, `$(...)`, encoded PowerShell, `python -c`, piping into a shell). |
 | `ask` | Every shell command waits for you. |
-| `allow` | No shell command waits. This is how Remedy behaved before 2.0.0. |
+| `allow` | No shell command waits. This is how Remedy behaved before 2.1.1. |
 
 Why it exists: the write jail checks where a program is started and with which arguments, but a shell command is one piece of text, and text can be written so the jail cannot read it.
 

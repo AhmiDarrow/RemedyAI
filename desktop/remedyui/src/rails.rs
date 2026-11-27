@@ -1277,21 +1277,86 @@ fn text_btn(
     btn
 }
 
-fn slide_icon(id: SlideId) -> w::Icon {
-    match id {
+fn slide_icon(id: SlideId) -> Glyph {
+    Glyph::Icon(match id {
+        // A globe: the monitor read as "this computer", not the web.
+        SlideId::Browser => return Glyph::Globe,
         SlideId::Sessions => w::Icon::Menu,
         SlideId::Settings => w::Icon::Settings,
         SlideId::Files => w::Icon::Folder,
         SlideId::Terminal => w::Icon::Code,
-        SlideId::Browser => w::Icon::Monitor,
         SlideId::Scratch => w::Icon::Note,
         SlideId::Automations => w::Icon::ListTask,
+    })
+}
+
+/// What a rail button shows: one of the engine's icons, or the globe drawn here.
+enum Glyph {
+    Icon(w::Icon),
+    Globe,
+}
+
+impl From<w::Icon> for Glyph {
+    fn from(icon: w::Icon) -> Self {
+        Glyph::Icon(icon)
     }
+}
+
+impl Glyph {
+    fn el(self, ui: &Ui, size: f32) -> El {
+        match self {
+            Glyph::Icon(icon) => w::icon(ui, icon, size),
+            Glyph::Globe => globe(ui, size),
+        }
+    }
+}
+
+/// A globe in the engine icons' own terms: a 24-unit box, a 2-unit round
+/// stroke, the element's text color.
+fn globe(ui: &Ui, size: f32) -> El {
+    use remedy_ui::core::Point;
+    use remedy_ui::paint::{Brush, Item, Path, Stroke, StrokeCap, StrokeJoin};
+    ui.el("icon")
+        .width(size)
+        .height(size)
+        .layout(|l| l.shrink = 0.0)
+        .paint(|cx| {
+            let k = cx.size.width.min(cx.size.height) / 24.0;
+            let (ox, oy) = ((cx.size.width - 24.0 * k) / 2.0, (cx.size.height - 24.0 * k) / 2.0);
+            let at = |x: f32, y: f32| Point::new(ox + x * k, oy + y * k);
+            let mut path = Path::new();
+            // The outline, then a meridian: the same circle, narrowed.
+            for rx in [9.0f32, 3.6] {
+                for i in 0..=32 {
+                    let a = i as f32 / 32.0 * std::f32::consts::TAU;
+                    let pt = at(12.0 + rx * a.cos(), 12.0 + 9.0 * a.sin());
+                    if i == 0 {
+                        path.move_to(pt);
+                    } else {
+                        path.line_to(pt);
+                    }
+                }
+            }
+            // The equator.
+            path.move_to(at(3.0, 12.0));
+            path.line_to(at(21.0, 12.0));
+            cx.list.push(Item::StrokePath {
+                path,
+                stroke: Stroke {
+                    width: (2.0 * k).max(1.0),
+                    cap: StrokeCap::Round,
+                    join: StrokeJoin::Round,
+                    dashes: Vec::new(),
+                },
+                brush: Brush::Solid(cx.style.foreground),
+            });
+        })
+        .semantics(Semantics::new(Role::Image).hidden(true))
 }
 
 fn icon_btn(
     ui: &Ui,
-    glyph: w::Icon,
+    glyph: impl Into<Glyph>,
     glyph_size: f32,
     box_size: f32,
     label: String,
@@ -1319,7 +1384,7 @@ fn icon_btn(
             l.shrink = 0.0;
         })
         .style(style)
-        .child(w::icon(ui, glyph, glyph_size))
+        .child(glyph.into().el(ui, glyph_size))
         .on_click(on_press)
         .semantics(sem);
     w::tooltip(&btn, title);

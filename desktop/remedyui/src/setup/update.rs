@@ -73,13 +73,13 @@ impl Updater {
     /// Ready state: notes, Later, Update & Relaunch. Nothing downloads.
     pub fn preview() -> Self {
         let u = Self::new();
-        u.to.set("2.0.0".into());
+        u.to.set("2.1.1".into());
         u.notes.set(
             "Smarter token saving, local muscle sharing, talking with other bots (A2A and MCP), and house rules you can go over again after an update."
                 .into(),
         );
         u.url.set(
-            "https://github.com/AhmiDarrow/RemedyAI/releases/download/v2.0.0/Remedy.Desktop_2.0.0_x64-setup.exe"
+            "https://github.com/AhmiDarrow/RemedyAI/releases/download/v2.1.1/Remedy.Desktop_2.1.1_x64-setup.exe"
                 .into(),
         );
         u.signature.set("preview".into());
