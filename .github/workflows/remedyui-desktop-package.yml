@@ -1,9 +1,9 @@
-# RemedyUI desktop packages for the 1.0.0 shell.
+# RemedyUI desktop packages, built on request.
 #
-# workflow_dispatch only. Uploads artifacts. Does not create a tag and does
-# not publish a GitHub Release. The owner cuts the 1.0.0 tag and latest.json.
-# desktop-release.yml remains the Tauri 0.70.x pipeline. Do not add a
-# release-publishing action to this file. The owner publishes the 1.0.0 assets.
+# workflow_dispatch only. A quick way to check that the packages build and
+# sign on every platform without a tag: it uploads artifacts and nothing else.
+# The tag build is desktop-release.yml, which runs the same packaging scripts;
+# releases are published from the owner's PC (scripts/release_local.py).
 
 name: RemedyUI desktop package
 

@@ -13,11 +13,41 @@ import (
 // The usage window's Harness tab: what the engine measured about each
 // session's context and calls, and the token counter it measured with.
 
+// handleCoordinationPresence lists the conversations that have a turn
+// running now, so a window can show what else is being worked on. Nothing
+// records which files a turn holds, so none are listed.
 func (s *Server) handleCoordinationPresence(w http.ResponseWriter, r *http.Request) {
-	_ = r.URL.Query().Get("session_id")
+	me := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	beacons := []any{}
+	if s.claims != nil && s.sessions != nil {
+		text := func(p *string) string {
+			if p == nil {
+				return ""
+			}
+			return strings.TrimSpace(*p)
+		}
+		for _, sid := range s.claims.ActiveSessions() {
+			sess, ok, err := s.sessions.Get(sid)
+			if err != nil || !ok {
+				continue
+			}
+			muscle := text(sess.Model)
+			if prov := text(sess.LLMProvider); prov != "" && muscle != "" {
+				muscle = prov + "/" + muscle
+			}
+			beacons = append(beacons, map[string]any{
+				"session_id": sid,
+				"you":        sid == me,
+				"muscle":     muscle,
+				"project":    text(sess.ProjectPath),
+				"goal":       sess.Title,
+				"phase":      "working",
+			})
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"beacons": []any{},
-		"count":   0,
+		"beacons": beacons,
+		"count":   len(beacons),
 		"ts":      float64(time.Now().UnixNano()) / 1e9,
 	})
 }

@@ -47,6 +47,18 @@ func newStreamClaims() *streamClaims {
 	}
 }
 
+// ActiveSessions lists the sessions that have a turn running now, sorted.
+func (c *streamClaims) ActiveSessions() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, 0, len(c.bySID))
+	for sid := range c.bySID {
+		out = append(out, sid)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func normalizeAbortReason(reason string) string {
 	r := strings.ToLower(strings.TrimSpace(reason))
 	switch r {

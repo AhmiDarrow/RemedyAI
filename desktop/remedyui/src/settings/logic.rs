@@ -639,11 +639,11 @@ pub fn phone_terms() -> String {
 }
 
 pub fn license_text() -> &'static str {
-    include_str!("../../../public/LICENSE.txt")
+    include_str!("../../assets/LICENSE.txt")
 }
 
 pub fn third_party_text() -> &'static str {
-    include_str!("../../../public/THIRD_PARTY_NOTICES.txt")
+    include_str!("../../assets/THIRD_PARTY_NOTICES.txt")
 }
 
 /// What Save sends. Mirrors `handleSave` in SettingsPanel.tsx.

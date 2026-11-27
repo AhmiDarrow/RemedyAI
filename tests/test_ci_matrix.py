@@ -101,21 +101,21 @@ def test_local_gate_covers_every_shipped_runtime_and_artifact() -> None:
 
 def test_release_builds_both_desktop_operating_systems_and_native_cores() -> None:
     jobs = _workflow_jobs("desktop-release.yml")
-    assert {"build-runtime", "build-tauri", "build-runtime-linux", "build-tauri-linux"} <= jobs.keys()
+    assert {"build-runtime", "build-desktop", "build-runtime-linux", "build-desktop-linux"} <= jobs.keys()
 
-    windows = _run_commands(jobs["build-runtime"]) + _run_commands(jobs["build-tauri"])
+    windows = _run_commands(jobs["build-runtime"]) + _run_commands(jobs["build-desktop"])
     assert "remedy-runtime.exe" in windows
     assert "remedy-runtime-x86_64-pc-windows-msvc.exe" in windows
     assert "remedy_core.dll" in windows
     assert "check_remedy_core_isa.py" in windows
-    assert "tauri build --bundles nsis" in windows
+    assert "package-windows.ps1" in windows
 
-    linux = _run_commands(jobs["build-runtime-linux"]) + _run_commands(jobs["build-tauri-linux"])
+    linux = _run_commands(jobs["build-runtime-linux"]) + _run_commands(jobs["build-desktop-linux"])
     assert "remedy-runtime" in linux
     assert "remedy-runtime-x86_64-unknown-linux-gnu" in linux
     assert "libremedy_core.so" in linux
     assert "check_remedy_core_isa.py" in linux
-    assert "tauri build --bundles deb,appimage" in linux
+    assert "package-linux.sh" in linux
 
 
 def test_release_ships_no_python_worker() -> None:

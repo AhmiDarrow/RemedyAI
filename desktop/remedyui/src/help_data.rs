@@ -19,7 +19,7 @@ pub static ARTICLES: &[Article] = &[
         order: 0.0f32,
         tags: &["intro", "quick start", "map"],
         summary: "What Remedy is — a partner for any ability level — architecture sketch, and manual map.",
-        body: include_str!("../../src/help/articles/00-overview.md"),
+        body: include_str!("../help/articles/00-overview.md"),
     },
     Article {
         id: "16-continuity-philosophy",
@@ -28,7 +28,7 @@ pub static ARTICLES: &[Article] = &[
         order: 0.5f32,
         tags: &["continuity", "philosophy", "memory", "partner", "vision"],
         summary: "Why Remedy feels like one partner on any model — silent continuity, not a bot farm.",
-        body: include_str!("../../src/help/articles/16-continuity-philosophy.md"),
+        body: include_str!("../help/articles/16-continuity-philosophy.md"),
     },
     Article {
         id: "17-nanoswarm",
@@ -37,7 +37,7 @@ pub static ARTICLES: &[Article] = &[
         order: 16.5f32,
         tags: &["harness", "context", "token", "tokenizer", "compaction", "operator"],
         summary: "Operator guide: how a long conversation is kept inside the model window, and how tokens are counted.",
-        body: include_str!("../../src/help/articles/17-nanoswarm.md"),
+        body: include_str!("../help/articles/17-nanoswarm.md"),
     },
     Article {
         id: "18-agency",
@@ -46,7 +46,7 @@ pub static ARTICLES: &[Article] = &[
         order: 7.5f32,
         tags: &["agency", "file_edit", "repo_search", "mission", "work alone", "tools"],
         summary: "file_edit, repo_search, missions, silent jobs — multi-hour coding with one partner.",
-        body: include_str!("../../src/help/articles/18-agency.md"),
+        body: include_str!("../help/articles/18-agency.md"),
     },
     Article {
         id: "19-metabolism",
@@ -55,7 +55,7 @@ pub static ARTICLES: &[Article] = &[
         order: 7.6f32,
         tags: &["metabolism", "evidence", "tier", "governor", "time crystal", "shadow", "identity export"],
         summary: "0.20.0+ silent partner OS: L0–L3 tiers, evidence ledger, shadow, IR, governor, portable identity.",
-        body: include_str!("../../src/help/articles/19-metabolism.md"),
+        body: include_str!("../help/articles/19-metabolism.md"),
     },
     Article {
         id: "computer-use-soak",
@@ -64,7 +64,7 @@ pub static ARTICLES: &[Article] = &[
         order: 18.0f32,
         tags: &["computer-use", "browser", "rail", "soak", "navigate"],
         summary: "Maintainer checklist for computer use. Not an owner how-to. The agent can help_read it.",
-        body: include_str!("../../src/help/articles/computer-use-soak.md"),
+        body: include_str!("../help/articles/computer-use-soak.md"),
     },
     Article {
         id: "01-install-windows",
@@ -73,7 +73,7 @@ pub static ARTICLES: &[Article] = &[
         order: 1.0f32,
         tags: &["install", "smartscreen", "paths"],
         summary: "Download, install paths, first launch, always-ready.",
-        body: include_str!("../../src/help/articles/01-install-windows.md"),
+        body: include_str!("../help/articles/01-install-windows.md"),
     },
     Article {
         id: "01-install-linux",
@@ -82,7 +82,7 @@ pub static ARTICLES: &[Article] = &[
         order: 1.1f32,
         tags: &["install", "linux", "wslg", "paths"],
         summary: "Linux / WSLg desktop, sidecar rules, shared Windows home.",
-        body: include_str!("../../src/help/articles/01-install-linux.md"),
+        body: include_str!("../help/articles/01-install-linux.md"),
     },
     Article {
         id: "02-first-run",
@@ -91,7 +91,7 @@ pub static ARTICLES: &[Article] = &[
         order: 2.0f32,
         tags: &["wizard", "setup", "skip"],
         summary: "Setup wizard steps, skip, Open setup, corrupt config.",
-        body: include_str!("../../src/help/articles/02-first-run.md"),
+        body: include_str!("../help/articles/02-first-run.md"),
     },
     Article {
         id: "03-providers-and-auth",
@@ -100,7 +100,7 @@ pub static ARTICLES: &[Article] = &[
         order: 3.0f32,
         tags: &["xai", "oauth", "api key", "ollama", "provider"],
         summary: "Providers, keys, xAI OAuth, Ollama, local API token.",
-        body: include_str!("../../src/help/articles/03-providers-and-auth.md"),
+        body: include_str!("../help/articles/03-providers-and-auth.md"),
     },
     Article {
         id: "04-security-and-data",
@@ -109,7 +109,7 @@ pub static ARTICLES: &[Article] = &[
         order: 4.0f32,
         tags: &["security", "privacy", "scope", "approvals", "trust", "dpapi"],
         summary: "Data map, what leaves the machine, scope, approvals, trust.",
-        body: include_str!("../../src/help/articles/04-security-and-data.md"),
+        body: include_str!("../help/articles/04-security-and-data.md"),
     },
     Article {
         id: "05-chat-and-sessions",
@@ -118,7 +118,7 @@ pub static ARTICLES: &[Article] = &[
         order: 5.0f32,
         tags: &["chat", "plan", "build", "proc", "sessions"],
         summary: "UI map, Plan/Build, tool process, sessions export.",
-        body: include_str!("../../src/help/articles/05-chat-and-sessions.md"),
+        body: include_str!("../help/articles/05-chat-and-sessions.md"),
     },
     Article {
         id: "06-memory-and-harness",
@@ -127,7 +127,7 @@ pub static ARTICLES: &[Article] = &[
         order: 6.0f32,
         tags: &["memory", "compact", "goals", "profile"],
         summary: "Durable memory, Session Brief, harness modes.",
-        body: include_str!("../../src/help/articles/06-memory-and-harness.md"),
+        body: include_str!("../help/articles/06-memory-and-harness.md"),
     },
     Article {
         id: "07-skills",
@@ -136,7 +136,7 @@ pub static ARTICLES: &[Article] = &[
         order: 7.0f32,
         tags: &["skills", "quarantine", "trust", "lifecycle"],
         summary: "Skills panel, lifecycle, import safety.",
-        body: include_str!("../../src/help/articles/07-skills.md"),
+        body: include_str!("../help/articles/07-skills.md"),
     },
     Article {
         id: "08-updates-and-uninstall",
@@ -145,7 +145,7 @@ pub static ARTICLES: &[Article] = &[
         order: 8.0f32,
         tags: &["update", "uninstall", "wipe"],
         summary: "Check/install updates, uninstall data options.",
-        body: include_str!("../../src/help/articles/08-updates-and-uninstall.md"),
+        body: include_str!("../help/articles/08-updates-and-uninstall.md"),
     },
     Article {
         id: "09-troubleshooting",
@@ -154,7 +154,7 @@ pub static ARTICLES: &[Article] = &[
         order: 9.0f32,
         tags: &["error", "server", "oauth", "defender", "fix"],
         summary: "Server, setup save, OAuth, Defender, provider errors.",
-        body: include_str!("../../src/help/articles/09-troubleshooting.md"),
+        body: include_str!("../help/articles/09-troubleshooting.md"),
     },
     Article {
         id: "10-cli-and-api",
@@ -163,7 +163,7 @@ pub static ARTICLES: &[Article] = &[
         order: 10.0f32,
         tags: &["cli", "api", "sse", "openapi"],
         summary: "Power-user CLI and local HTTP API.",
-        body: include_str!("../../src/help/articles/10-cli-and-api.md"),
+        body: include_str!("../help/articles/10-cli-and-api.md"),
     },
     Article {
         id: "11-reference-commands",
@@ -172,7 +172,7 @@ pub static ARTICLES: &[Article] = &[
         order: 11.0f32,
         tags: &["slash", "commands", "help"],
         summary: "Full slash command reference table.",
-        body: include_str!("../../src/help/articles/11-reference-commands.md"),
+        body: include_str!("../help/articles/11-reference-commands.md"),
     },
     Article {
         id: "12-reference-shortcuts",
@@ -181,7 +181,7 @@ pub static ARTICLES: &[Article] = &[
         order: 12.0f32,
         tags: &["hotkeys", "keyboard", "f1"],
         summary: "Composer and app-wide shortcuts.",
-        body: include_str!("../../src/help/articles/12-reference-shortcuts.md"),
+        body: include_str!("../help/articles/12-reference-shortcuts.md"),
     },
     Article {
         id: "13-whats-new",
@@ -190,7 +190,7 @@ pub static ARTICLES: &[Article] = &[
         order: 13.0f32,
         tags: &["changelog", "release", "version"],
         summary: "Recent product changes for owners.",
-        body: include_str!("../../src/help/articles/13-whats-new.md"),
+        body: include_str!("../help/articles/13-whats-new.md"),
     },
     Article {
         id: "14-visual-decoder",
@@ -199,7 +199,7 @@ pub static ARTICLES: &[Article] = &[
         order: 14.0f32,
         tags: &["vision", "image", "ocr", "llama", "qwen", "screenshot"],
         summary: "Local Qwen3.5-4B mind: text, vision, and image digests for muscle.",
-        body: include_str!("../../src/help/articles/14-visual-decoder.md"),
+        body: include_str!("../help/articles/14-visual-decoder.md"),
     },
     Article {
         id: "20-rmb-local-agent",
@@ -208,7 +208,7 @@ pub static ARTICLES: &[Article] = &[
         order: 14.5f32,
         tags: &["rmb", "local", "llama", "coding", "tools", "gguf", "agent", "offline"],
         summary: "Built-in local agent host (llama.cpp) for coding and tool use.",
-        body: include_str!("../../src/help/articles/20-rmb-local-agent.md"),
+        body: include_str!("../help/articles/20-rmb-local-agent.md"),
     },
     Article {
         id: "15-free-providers",
@@ -217,7 +217,7 @@ pub static ARTICLES: &[Article] = &[
         order: 15.0f32,
         tags: &["free", "demo", "gemini", "groq", "ollama", "openrouter", "no signup", "rmb"],
         summary: "Demo mode, free API keys, and local Ollama — use Remedy without paying.",
-        body: include_str!("../../src/help/articles/15-free-providers.md"),
+        body: include_str!("../help/articles/15-free-providers.md"),
     },
     Article {
         id: "22-grove",
@@ -226,7 +226,7 @@ pub static ARTICLES: &[Article] = &[
         order: 4.5f32,
         tags: &["grove", "goals", "plots", "storyline", "alongside", "surface", "studio"],
         summary: "The default surface: goals as plots, a needs-you strip, and each goal’s room with a live stage and a plain-words record.",
-        body: include_str!("../../src/help/articles/22-grove.md"),
+        body: include_str!("../help/articles/22-grove.md"),
     },
     Article {
         id: "23-vault",
@@ -235,7 +235,7 @@ pub static ARTICLES: &[Article] = &[
         order: 4.6f32,
         tags: &["vault", "card", "payment", "password", "credentials", "secret", "site binding"],
         summary: "Card details and passwords Remedy can fill without ever seeing them — handles in context, plaintext only machine-side.",
-        body: include_str!("../../src/help/articles/23-vault.md"),
+        body: include_str!("../help/articles/23-vault.md"),
     },
     Article {
         id: "24-telephony",
@@ -244,7 +244,7 @@ pub static ARTICLES: &[Article] = &[
         order: 17.0f32,
         tags: &["phone", "call", "voice", "sip", "bluetooth", "telephony", "bench"],
         summary: "Phase 0: a voice measured against a human bar on a simulated line. No hardware, no number, nobody called.",
-        body: include_str!("../../src/help/articles/24-telephony.md"),
+        body: include_str!("../help/articles/24-telephony.md"),
     },
     Article {
         id: "25-coordination",
@@ -253,7 +253,7 @@ pub static ARTICLES: &[Article] = &[
         order: 17.5f32,
         tags: &["coordination", "sessions", "claims", "beacon", "multi-session", "lock"],
         summary: "Several Remedy sessions on one repo without overwriting each other: per-path claims that lapse when a session dies.",
-        body: include_str!("../../src/help/articles/25-coordination.md"),
+        body: include_str!("../help/articles/25-coordination.md"),
     },
     Article {
         id: "26-game-dev",
@@ -262,7 +262,7 @@ pub static ARTICLES: &[Article] = &[
         order: 6.8f32,
         tags: &["game", "godot", "unity", "unreal", "phaser", "bevy", "pygame", "love2d", "playtest", "mcp"],
         summary: "Godot, web, Bevy, Pygame and Love2D projects: engine detection, headless verification, playtesting, export, and the optional live-editor MCP bridge.",
-        body: include_str!("../../src/help/articles/26-game-dev.md"),
+        body: include_str!("../help/articles/26-game-dev.md"),
     },
     Article {
         id: "27-research",
@@ -271,7 +271,7 @@ pub static ARTICLES: &[Article] = &[
         order: 6.85f32,
         tags: &["research", "paper", "citation", "notebook", "statistics", "power", "manuscript", "literature", "reproducibility"],
         summary: "Notebooks, R, Julia, manuscripts: literature search, a citation library that has to resolve, analysis in your environment with a run ledger, power and effect sizes, reporting checklists.",
-        body: include_str!("../../src/help/articles/27-research.md"),
+        body: include_str!("../help/articles/27-research.md"),
     },
     Article {
         id: "28-hive",
@@ -280,7 +280,7 @@ pub static ARTICLES: &[Article] = &[
         order: 7.7f32,
         tags: &["hive", "subagent", "forager", "post", "mother", "diagnostics"],
         summary: "Silent daughters Remedy hires for independent work. They report packets back to Remedy, never as extra chats. Standing posts survive Stop and restart.",
-        body: include_str!("../../src/help/articles/28-hive.md"),
+        body: include_str!("../help/articles/28-hive.md"),
     },
     Article {
         id: "29-remedy-connect",
@@ -289,7 +289,7 @@ pub static ARTICLES: &[Article] = &[
         order: 4.55f32,
         tags: &["connect", "phone", "remote", "qr", "tailscale", "lan"],
         summary: "Phone remote for this PC. Default off. Pair with a 60-second QR; Tailscale makes mobile data work anywhere.",
-        body: include_str!("../../src/help/articles/29-remedy-connect.md"),
+        body: include_str!("../help/articles/29-remedy-connect.md"),
     },
     Article {
         id: "21-personal-assistant",
@@ -298,7 +298,7 @@ pub static ARTICLES: &[Article] = &[
         order: 6.5f32,
         tags: &["reminders", "mail", "imap", "app password", "calendar", "caldav", "budget", "bills", "debt", "documents"],
         summary: "Reminders that fire, mail and calendar with an app password (no cloud project), money organization, and paperwork intake.",
-        body: include_str!("../../src/help/articles/21-personal-assistant.md"),
+        body: include_str!("../help/articles/21-personal-assistant.md"),
     },
 ];
 
