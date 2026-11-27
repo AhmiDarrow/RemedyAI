@@ -230,11 +230,9 @@ impl Wizard {
         std::thread::spawn(move || {
             let settings = super::api::put_settings(
                 &client,
-                &json!({
-                    "llm_provider": "demo",
-                    "llm_base_url": model::DEMO_BASE,
-                    "setup_completed": true,
-                }),
+                // No provider is chosen for the owner: one receives what they type,
+                // so it is used only after they pick it.
+                &json!({ "setup_completed": true }),
             );
             let setup = settings.and_then(|_| {
                 super::api::put_setup(&client, &json!({ "action": "skip_all" }))

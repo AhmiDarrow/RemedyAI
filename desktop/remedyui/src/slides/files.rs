@@ -1423,6 +1423,7 @@ fn file_row(ui: &Ui, model: &FilesModel, f: &FileEntry) -> El {
         let btn = ui
             .el("button")
             .child(w::icon(ui, icon, 12.0))
+            .variant("quiet")
             .row()
             .align(Align::Center)
             .justify(Justify::Center)
@@ -1768,6 +1769,7 @@ fn icon_button(ui: &Ui, icon: w::Icon, label: impl Into<String>, on_press: impl 
         .row()
         .align(Align::Center)
         .justify(Justify::Center)
+        .variant("quiet")
         .padding(pad(3.0, 4.0))
         .style(StylePatch::new().radius(ui.theme().radii.small))
         .on_click(on_press)

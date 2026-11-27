@@ -74,10 +74,9 @@ sarcasm_mode = false
 # Claimidx host and all ledger submits.
 claimidx_enabled = true
 
-# Claimidx public ledger submits (Settings → Advanced); default on when Claimidx
-# itself is on — Claimidx 0.7+ submits by default. Set false only for a fully
-# local Claimidx home.
-claimidx_public_ledger = true
+# Claimidx public ledger submits (Settings → Advanced); default off: claims
+# stay on this computer. Set true to share them with the public ledger.
+claimidx_public_ledger = false
 
 # --- Partner controls (also on status bar / Settings → Security & power) ---
 # approval_mode = "auto"    # ask | auto (in-project) | full (warn, jail off except auth)
