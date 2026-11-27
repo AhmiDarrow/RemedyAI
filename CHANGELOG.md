@@ -19,6 +19,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - The `remedy` command line runs in the Go runtime. The Python package is now only a small launcher for it with no dependencies; the rest of the Python code is gone. `remedy-mcp` is the same as `remedy mcp serve`.
 
 ### Fixed
+- The pairing code in Settings was cut off at the edge of the panel and could not be scanned. A code now shrinks to fit the space it has.
 - Usage was never recorded: the Usage screen and `/usage` showed zero however much was used. Each model round's token counts, as the provider reports them, are now written to the ledger. No cost is shown, because Remedy has no price list and a guessed price would read as a real one.
 - A number typed into Settings (retention days, for one) was dropped on save and the default came back.
 - Emoji drew as scattered pieces on Windows. The engine took the system's emoji font ahead of Remedy Emoji and painted its layers in the wrong places. Remedy Emoji now draws them, and the system's font, still used for flags, is painted correctly.
