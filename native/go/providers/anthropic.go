@@ -68,6 +68,8 @@ type Anthropic struct {
 	// ("https://api.anthropic.com") or the Remedy-configured "/v1" form; the
 	// SDK appends "v1/messages" itself. Empty uses the production root.
 	BaseURL string
+	// Headers are sent with every request, after the adapter's own.
+	Headers map[string]string
 	// APIKey comes from the owner's secret store. Required — this adapter
 	// never falls back to ambient environment credentials.
 	APIKey string
@@ -212,6 +214,9 @@ func (a *Anthropic) client() anthropic.Client {
 	}
 	if base := anthropicAPIRoot(a.BaseURL); base != "" {
 		opts = append(opts, option.WithBaseURL(base))
+	}
+	for name, value := range a.Headers {
+		opts = append(opts, option.WithHeader(name, value))
 	}
 	if a.HTTPClient != nil {
 		opts = append(opts, option.WithHTTPClient(a.HTTPClient))

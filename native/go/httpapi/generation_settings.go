@@ -46,6 +46,15 @@ func generationOptionsFor(cfg ConfigMap, provider, model string) providers.Gener
 		log.Printf("settings: ignoring reasoning/context defaults: %v", err)
 		global = providers.GenerationOptions{}
 	}
+	// The thinking level (status bar, /think) is the everyday form of the
+	// same choice; an explicit reasoning_effort wins over it.
+	if global.Effort == "" {
+		if level, ok := cfg["thinking_level"]; ok {
+			if eff, err := providers.NormalizeEffort(anyString(level)); err == nil {
+				global.Effort = eff
+			}
+		}
+	}
 	table := asMap(cfg[cfgModelSettingsKey])
 	if table == nil {
 		return global

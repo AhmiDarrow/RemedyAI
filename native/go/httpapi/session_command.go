@@ -128,10 +128,6 @@ func (s *Server) executeSlashCommandFrom(sessionID, command string, phone bool) 
 		return s.slashModel(sessionID, arg, phone)
 	}
 
-	if stripped == "/thinking" {
-		return map[string]any{"text": "Thinking visibility toggled."}
-	}
-
 	if stripped == "/memory" || stripped == "/mem" {
 		return map[string]any{"text": "Usage: /memory <query>"}
 	}

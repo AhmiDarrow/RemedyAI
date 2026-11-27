@@ -59,6 +59,8 @@ type OpenAICompat struct {
 	Family string
 	// Gen carries the owner's reasoning / output / context settings.
 	Gen GenerationOptions
+	// Headers are sent with every request, after the adapter's own.
+	Headers map[string]string
 }
 
 // ContextWindow reports the prompt window in tokens: the configured n_ctx, the
@@ -137,6 +139,9 @@ func (c *OpenAICompat) Stream(ctx context.Context, turn cognition.Turn) (<-chan 
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "text/event-stream")
 		req.Header.Set("Authorization", "Bearer "+key)
+		for name, value := range c.Headers {
+			req.Header.Set(name, value)
+		}
 		resp, err = c.client().Do(req)
 		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			break

@@ -22,32 +22,6 @@ func (s *Server) handleCoordinationPresence(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-func (s *Server) handleNanoswarmStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"name":           "Remedy Nano Swarm",
-		"active":         false,
-		"event_count":    0,
-		"last_event":     nil,
-		"last_event_ts":  nil,
-		"uptime_s":       0,
-		"local_model_id": "",
-		"roles":          []string{},
-		"bots":           map[string]any{},
-		"bundle": map[string]any{
-			"model_present": false,
-			"model_path":    nil,
-			"bundle_root":   nil,
-		},
-		"catalog": map[string]any{
-			"default_model_id": nil,
-			"roles":            []string{},
-			"bundle_policy":    nil,
-		},
-		"worker": "not_attached",
-		"note":   "nanoswarm workers are not attached to remedy-runtime",
-	})
-}
-
 // sessionHarness is what the engine measured over a session's turns since
 // the runtime started. Nothing here is estimated or carried from elsewhere.
 type sessionHarness struct {

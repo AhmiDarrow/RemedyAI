@@ -43,3 +43,10 @@ func TestOwnHomeIsRecognised(t *testing.T) {
 		t.Fatal("own home check is wrong")
 	}
 }
+
+func TestDiskSpaceOfTheTempFolder(t *testing.T) {
+	free, total := DiskSpace(t.TempDir())
+	if total == 0 || free > total {
+		t.Fatalf("free %d of %d", free, total)
+	}
+}

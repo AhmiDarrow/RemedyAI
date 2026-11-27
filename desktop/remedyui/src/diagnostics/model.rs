@@ -545,8 +545,6 @@ fn server_fact(remedy: Option<&Value>) -> Fact {
             pair("Version", remedy.and_then(|r| string_field(r, "version"))),
             pair("Uptime", remedy.and_then(|r| string_field(r, "uptime"))),
             pair("PID", process.and_then(|p| num_field(p, "pid"))),
-            pair("RSS", process.and_then(|p| suffixed(p, "rss_mb", " MB"))),
-            pair("CPU", process.and_then(|p| suffixed(p, "cpu_pct", "%"))),
             pair(
                 "Memory entries",
                 remedy.and_then(|r| num_field(r, "memory_entries")),
@@ -610,10 +608,6 @@ fn rmb_fact(rmb: Option<&Value>) -> Fact {
             pair("Context", rmb.and_then(|r| num_field(r, "ctx_size"))),
             pair("Profile", rmb.and_then(|r| string_field(r, "profile"))),
             pair("GPU layers", rmb.and_then(|r| num_field(r, "n_gpu_layers"))),
-            pair(
-                "Latency",
-                rmb.and_then(|r| suffixed(r, "latency_ms", " ms")),
-            ),
             pair("NVIDIA", Some(yes_no(flag(rmb, "nvidia")))),
             pair(
                 "Runtime",
@@ -642,15 +636,11 @@ fn hardware_from(hw: Option<&Value>) -> Hardware {
     let memory = hw.and_then(|h| obj(h, "memory"));
     let gpu = hw.and_then(|h| obj(h, "gpu"));
     let nvidia = flag(gpu, "nvidia");
-    let cpu_label = cpu
-        .and_then(|c| string_field(c, "brand"))
-        .unwrap_or_else(|| {
-            format!(
-                "{} cores",
-                cpu.and_then(|c| num_field(c, "count_logical"))
-                    .unwrap_or_else(|| "—".into())
-            )
-        });
+    let cpu_label = format!(
+        "{} cores",
+        cpu.and_then(|c| num_field(c, "count_logical"))
+            .unwrap_or_else(|| "—".into())
+    );
     let ram = memory
         .and_then(|m| val(m, "total_gb"))
         .and_then(as_f64)
@@ -684,9 +674,7 @@ fn hardware_from(hw: Option<&Value>) -> Hardware {
             },
             rows: vec![
                 pair("CPU", Some(cpu_label)),
-                pair("CPU load", cpu.and_then(|c| suffixed(c, "percent", "%"))),
                 pair("RAM", ram),
-                pair("Python", hw.and_then(|h| string_field(h, "python"))),
                 pair("Machine", hw.and_then(|h| string_field(h, "machine"))),
             ],
             meter: meter_of(

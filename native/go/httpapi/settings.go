@@ -847,22 +847,8 @@ func (s *Server) settingsPayload() map[string]any {
 		"vision_enabled":               visionEnabled,
 		"vision_model_id":              visionModelID,
 		"vision_force_decode":          visionForce,
-		"vision": map[string]any{
-			"enabled":      visionEnabled,
-			"installed":    false,
-			"ready":        false,
-			"running":      false,
-			"model_id":     visionModelID,
-			"model_name":   nil,
-			"force_decode": visionForce,
-		},
+		"vision": s.visionStatusPayload(false),
 		"assistant": publicAssistant(cfg),
-		"sleev": map[string]any{
-			"enabled":     cfgBool(cfg, "sleev_enabled", false),
-			"installed":   false,
-			"gateway_url": firstNonEmpty(strings.TrimSpace(cfgString(cfg, "sleev_gateway_url", "")), "http://127.0.0.1:17321"),
-			"harness":     "remedy",
-		},
 	}
 	out["advanced"] = advancedTable(cfg)
 	out["advanced_schema"] = advancedSchema()
@@ -916,7 +902,7 @@ func normalizeToolProcess(cfg ConfigMap, raw any) string {
 func normalizeTrustProfile(raw any) string {
 	s := strings.ToLower(strings.TrimSpace(fmt.Sprint(raw)))
 	switch s {
-	case "conservative", "balanced", "autonomous":
+	case "conservative", "balanced":
 		return s
 	default:
 		return "balanced"
