@@ -440,6 +440,9 @@ fn reveal_offer_or_name(offer: &Offer, name: &NamePrompt, setup_doc: &Option<Val
 }
 
 fn publish_update(waker: &Waker, updater: &Updater, ready: &Signal<bool>) {
+    if !crate::update::launch_check_allowed() {
+        return;
+    }
     let Ok(body) = api::fetch_latest_json() else {
         return;
     };

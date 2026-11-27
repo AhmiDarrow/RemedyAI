@@ -550,7 +550,7 @@ func (r *run) recordAnswers(answers map[string]any, skipped []any) map[string]an
 
 func (r *run) skipAll() map[string]any {
 	session := r.loadSession()
-	applied := defaults()
+	applied := map[string]any{}
 	for k, v := range orMap(session["draft"]) {
 		applied[k] = v
 	}
@@ -563,7 +563,7 @@ func (r *run) skipAll() map[string]any {
 
 func (r *run) confirmOnboarding(source string) map[string]any {
 	session := r.loadSession()
-	applied := defaults()
+	applied := map[string]any{}
 	for k, v := range orMap(session["draft"]) {
 		applied[k] = v
 	}
@@ -574,7 +574,21 @@ func (r *run) confirmOnboarding(source string) map[string]any {
 func (r *run) finalize(answers map[string]any, skipped []any, source, status string) map[string]any {
 	r.snapshotPrev()
 	clean := scrubMap(normalizePatch(answers))
+	// What the owner did not answer keeps the value it has. A default is
+	// written only where nothing is set, and an empty default not at all.
 	filled := defaults()
+	adv, _ := r.cfg["advanced"].(map[string]any)
+	for k, def := range filled {
+		cur, ok := r.cfg[k]
+		if f := fieldByKey[k]; f.advanced || forwardAdvancedKeys[k] {
+			cur, ok = adv[k]
+		}
+		if ok {
+			filled[k] = cur
+		} else if def == "" {
+			delete(filled, k)
+		}
+	}
 	for k, v := range clean {
 		filled[k] = v
 	}

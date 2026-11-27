@@ -60,7 +60,8 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip" -OutFile $zip
           $dest = Join-Path $env:RUNNER_TEMP "minisign"
           Expand-Archive $zip -DestinationPath $dest
-          $exe = Get-ChildItem -Recurse $dest -Filter minisign.exe | Select-Object -First 1
+          # The archive holds one build per CPU; the runner is x64.
+          $exe = Get-ChildItem -Recurse $dest -Filter minisign.exe | Where-Object { $_.FullName -match 'x86_64' } | Select-Object -First 1
           if (-not $exe) { throw "minisign.exe was not in the 0.12 archive" }
           $dir = $exe.DirectoryName
           Add-Content -Path $env:GITHUB_PATH -Value $dir
@@ -170,14 +171,11 @@ jobs:
         with:
           version: 0.16.0
 
+      # Homebrew builds for the runner's own CPU; the release archive is Apple silicon only.
       - name: Install minisign
         run: |
           set -euo pipefail
-          curl -fsSL -o /tmp/minisign.zip \
-            https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-macos.zip
-          unzip -q /tmp/minisign.zip -d /tmp/minisign
-          BIN="$(find /tmp/minisign -type f -name minisign | head -n 1)"
-          sudo install -m 0755 "${BIN}" /usr/local/bin/minisign
+          brew install minisign
           command -v minisign
 
       - name: Package
