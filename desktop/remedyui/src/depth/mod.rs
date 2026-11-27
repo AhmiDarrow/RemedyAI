@@ -269,6 +269,9 @@ pub struct Depth {
     /// Draft in the add-tag field.
     pub tag_draft: Signal<String>,
     pub remote_busy: Signal<bool>,
+    /// Messages sent into a running turn that she has not taken in yet, as
+    /// (session, text). They show under her live reply until she does.
+    pub steers: Signal<Vec<(String, String)>>,
     pub memory_body: Signal<String>,
     pub memory_rows: Signal<Vec<MemoryRow>>,
     pub memory_loading: Signal<bool>,
@@ -358,6 +361,7 @@ impl Depth {
             tag_id: Signal::new(None),
             tag_draft: Signal::new(String::new()),
             remote_busy: Signal::new(false),
+            steers: Signal::new(Vec::new()),
             memory_body: Signal::new(String::new()),
             memory_rows: Signal::new(Vec::new()),
             memory_loading: Signal::new(false),

@@ -854,3 +854,58 @@ func TestStreamRecordsNarrationOnToolCalls(t *testing.T) {
 		t.Fatalf("content = %q", content)
 	}
 }
+
+// A message the owner sends mid-turn splits the reply where she takes it in:
+// what she had said is one saved message, the rest another.
+func TestStreamSplitsTheReplyWhereASteerIsTakenIn(t *testing.T) {
+	runner := &stubRunner{tokens: []string{
+		"Starting on the first part.",
+		`@@tool_call:{"name":"bash","args":{"command":"ls"},"id":"c1"}`,
+		`@@tool_result:{"name":"bash","id":"c1","preview":"a.txt","ok":true}`,
+		"@@steered\n",
+		"Taking your note into account.",
+	}}
+	base, shutdown, token := startMessagesServer(t, runner, t.TempDir())
+	defer shutdown()
+	client := &http.Client{Timeout: 5 * time.Second}
+	sid := createSessionID(t, client, base, token)
+	req := authReq(t, http.MethodPost, base+"/api/sessions/"+sid+"/messages/stream", token,
+		bytes.NewBufferString(`{"message":"do the thing"}`))
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readSSE(t, resp)
+	resp.Body.Close()
+	if !strings.Contains(body, "event: steered") {
+		t.Fatalf("clients must be told where the reply splits: %s", body)
+	}
+
+	req = authReq(t, http.MethodGet, base+"/api/sessions/"+sid+"/messages", token, nil)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var listed struct {
+		Messages []ChatMessage `json:"messages"`
+	}
+	_ = json.Unmarshal(raw, &listed)
+	var parts []string
+	for _, m := range listed.Messages {
+		if m.Role == "assistant" {
+			c, _ := m.Content.(string)
+			parts = append(parts, c)
+			if m.Draft {
+				t.Fatalf("a closed part must not stay a draft: %q", c)
+			}
+		}
+	}
+	if len(parts) != 2 || !strings.Contains(parts[0], "first part") || !strings.Contains(parts[1], "your note") {
+		t.Fatalf("want two assistant messages split at the steer, got %q", parts)
+	}
+	if strings.Contains(parts[1], "first part") {
+		t.Fatalf("the second part repeats the first: %q", parts[1])
+	}
+}
