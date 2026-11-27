@@ -1391,11 +1391,16 @@ fn build_hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: El) -> El {
                     let title = session_title(&s);
                     let head = messages().text(&u, "toast-turn");
                     c.toast_text.set(format!("{head} — {title}"));
-                    if let Some(app) = c.app() {
-                        app.notify(
-                            Notification::new(TURN_NOTE, head, title).silent(true),
-                            |_| {},
-                        );
+                    // The desktop notification is for someone who is elsewhere. With the
+                    // window in front the answer is already on screen.
+                    let looking = c.window.get().is_some_and(|w| w.is_focused());
+                    if !looking {
+                        if let Some(app) = c.app() {
+                            app.notify(
+                                Notification::new(TURN_NOTE, head, title).silent(true),
+                                |_| {},
+                            );
+                        }
                     }
                 });
             }

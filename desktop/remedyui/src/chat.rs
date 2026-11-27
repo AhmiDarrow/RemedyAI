@@ -363,7 +363,7 @@ fn message_list(ui: &Ui, studio: Studio) -> El {
         })
         .semantics(Semantics::new(Role::Region).label("Chat messages"))
         .child(col);
-    let scroller = follow_scroll(scroll, studio.clone());
+    let scroller = follow_scroll(ui, scroll, studio.clone());
     let latest = latest_row(ui, studio);
     w::column(ui)
         .layout(|l| {
@@ -1466,19 +1466,48 @@ fn agent_reaction(ui: &Ui, studio: Studio, id: String) -> El {
     .el()
 }
 
-fn follow_scroll(scroll: El, studio: Studio) -> El {
-    let last_y = Signal::new(0.0f32);
+/// How long after a wheel turn, a key or a press a move of the feed counts as the
+/// person's own.
+const READ_BACK_WINDOW: std::time::Duration = std::time::Duration::from_millis(600);
+
+/// Keeps the feed on its newest message. Only the person lets go of it: by turning the
+/// wheel up, dragging the bar, or pressing Up, Page Up or Home. The feed moving because
+/// it got shorter, or because new rows were not measured yet, is not them. It takes hold
+/// again when they send a message, open another conversation, press End or Latest.
+fn follow_scroll(ui: &Ui, scroll: El, studio: Studio) -> El {
+    use std::cell::Cell;
+    let last_y = Rc::new(Cell::new(0.0f32));
+    // Set before a move the feed makes itself, so that move is not read as the person's.
+    let own_move = Rc::new(Cell::new(false));
+    let touched: Rc<Cell<Option<std::time::Instant>>> = Rc::new(Cell::new(None));
+    let shown = Rc::new(RefCell::new(None::<String>));
+    let was_streaming = Rc::new(Cell::new(false));
     let stuck = studio.depth.stuck.clone();
     let scroller_key = scroll.clone();
     let scroller_bind = scroll.clone();
     let st_key = studio.clone();
+    let ui = ui.clone();
+    let (touch_wheel, touch_press, touch_key) = (touched.clone(), touched.clone(), touched.clone());
+    let (last_s, own_s, touched_s) = (last_y.clone(), own_move.clone(), touched.clone());
     scroll
+        .on_wheel(move |_| {
+            touch_wheel.set(Some(std::time::Instant::now()));
+            false
+        })
+        .on_pointer(move |e| {
+            if matches!(e.phase, remedy_ui::input::PointerPhase::Down) {
+                touch_press.set(Some(std::time::Instant::now()));
+            }
+            false
+        })
         .on_scroll(move |off| {
             let y = off.y;
-            if y + 2.0 < last_y.get() {
+            let own = own_s.replace(false);
+            let by_person = touched_s.get().is_some_and(|at| at.elapsed() < READ_BACK_WINDOW);
+            if y + 2.0 < last_s.get() && !own && by_person {
                 stuck.set(false);
             }
-            last_y.set(y);
+            last_s.set(y);
         })
         .on_key(move |e| {
             if !e.pressed {
@@ -1486,6 +1515,7 @@ fn follow_scroll(scroll: El, studio: Studio) -> El {
             }
             match e.key {
                 Key::Home | Key::PageUp | Key::ArrowUp => {
+                    touch_key.set(Some(std::time::Instant::now()));
                     st_key.depth.stuck.set(false);
                     false
                 }
@@ -1504,8 +1534,33 @@ fn follow_scroll(scroll: El, studio: Studio) -> El {
                 let _ = st.messages.get();
                 let _ = st.partial.get();
                 let _ = st.depth.tick.get();
+                let session = st.active.get();
+                let streaming = st.streaming.get();
+                let moved = *shown.borrow() != session;
+                if moved {
+                    *shown.borrow_mut() = session;
+                }
+                // Another conversation, or a turn just started (they sent something):
+                // the newest message is what they want to see.
+                if moved || (streaming && !was_streaming.get()) {
+                    st.depth.stuck.set(true);
+                }
+                was_streaming.set(streaming);
                 if st.depth.stuck.get() {
+                    own_move.set(true);
                     scroller.scroll_to(Vec2::new(0.0, 1.0e9));
+                    // New rows have no height until the next layout, so the end is not
+                    // the end yet: go there again once they have been measured.
+                    for ms in [60u64, 350] {
+                        let (again, tree, own, held) =
+                            (scroller.clone(), ui.clone(), own_move.clone(), st.depth.stuck.clone());
+                        let _ = ui.after(std::time::Duration::from_millis(ms), move || {
+                            if held.get() && tree.tree().contains(again.id()) {
+                                own.set(true);
+                                again.scroll_to(Vec2::new(0.0, 1.0e9));
+                            }
+                        });
+                    }
                 }
             }
         })
