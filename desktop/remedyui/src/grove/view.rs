@@ -1375,7 +1375,7 @@ fn sessions_block(ui: &Ui, grove: Grove) -> El {
     w::column(ui).child(zero(watch)).child(has).child(list)
 }
 
-/// Files she wrote and links she gave in this conversation, newest first.
+/// Files she wrote in this conversation, newest first.
 fn made_block(ui: &Ui, grove: Grove) -> El {
     let rows: Signal<Vec<logic::Made>> = Signal::new(Vec::new());
     let src = grove.clone();
@@ -1388,12 +1388,11 @@ fn made_block(ui: &Ui, grove: Grove) -> El {
     w::for_each(&list, rows, |m: &logic::Made| m.target.clone(), move |m| {
         let colors = row_ui.theme().colors.clone();
         let unit = row_ui.theme().spacing.unit;
-        let kind = if m.link { "link" } else { "file" };
         let row = w::row(&row_ui)
             .align(Align::Center)
             .gap(unit * 2.0)
             .child(
-                w::text(&row_ui, kind)
+                w::text(&row_ui, "file")
                     .style(crate::tokens::typo(crate::tokens::META).foreground(colors.muted))
                     .layout(|l| l.shrink = 0.0),
             )
@@ -1402,15 +1401,13 @@ fn made_block(ui: &Ui, grove: Grove) -> El {
                 l.min_width = Length::Px(0.0);
             }));
         w::tooltip(&row, m.target.as_str());
-        // The files are on the PC and the browser rail is the desktop's.
+        // The files are on the PC.
         if phone {
             return row;
         }
-        let (link, target, label) = (m.link, m.target.clone(), m.label.clone());
+        let (target, label) = (m.target.clone(), m.label.clone());
         row.on_click(move || {
-            if link {
-                crate::settings::open_in_browser_rail(&target);
-            } else if let Some(folder) = std::path::Path::new(&target).parent() {
+            if let Some(folder) = std::path::Path::new(&target).parent() {
                 // The folder, not the file: opening a file would run whatever it is.
                 if folder.is_dir() {
                     let _ = crate::prefs::reveal(folder);

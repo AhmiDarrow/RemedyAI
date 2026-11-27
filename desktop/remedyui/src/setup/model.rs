@@ -1299,7 +1299,7 @@ mod tests {
 
     #[test]
     fn this_desktop_is_newer_than_the_last_tauri_build() {
-        assert_eq!(shell_version(), "2.0.0");
+        assert_eq!(shell_version(), "2.1.1");
         assert!(is_newer("1.0.0", "0.70.5"));
         assert!(!is_newer("0.70.5", "1.0.0"));
         assert!(!is_newer("1.0.0", "1.0.0"));

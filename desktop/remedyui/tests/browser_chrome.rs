@@ -98,3 +98,19 @@ fn browser_toolbar_fits_a_narrow_rail() {
         }
     }
 }
+
+/// What is typed has to be readable: the address keeps most of the bar.
+#[test]
+fn the_address_field_keeps_room_to_read() {
+    for (width, least) in [(640.0, 300.0), (420.0, 170.0)] {
+        let mut app = preview_at(width);
+        app.frames(4);
+        let field = app
+            .find(Role::TextInput, "Browser address — URL or search")
+            .expect("address field");
+        let b = field.bounds().expect("laid out");
+        let w = b.max.x - b.min.x;
+        assert!(w >= least, "{width} px: the address is {w} px wide");
+        assert!(max_button_x(&app) <= width + 1.0, "{width} px: toolbar overflowed");
+    }
+}

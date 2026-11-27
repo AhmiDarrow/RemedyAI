@@ -94,22 +94,20 @@ pub struct StoryMessage {
     pub tool_calls: Vec<ToolCall>,
 }
 
-/// Something Remedy made or pointed to in a conversation: a file she wrote or
-/// a link she gave.
+/// Something Remedy made in a conversation: a file she wrote. A link she
+/// mentioned is not hers and is not listed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Made {
-    /// A web link (`true`) or a file on the PC (`false`).
-    pub link: bool,
-    /// Short name for the row: the file's name, or the link without its scheme.
+    /// The file's name.
     pub label: String,
-    /// The full path or URL.
+    /// The full path.
     pub target: String,
 }
 
 /// The most a conversation's "Made here" list shows.
 pub const MADE_MAX: usize = 12;
 
-/// Files Remedy wrote and links she gave in `messages`, newest first, each once.
+/// Files Remedy wrote in `messages`, newest first, each once.
 pub fn made_here(messages: &[StoryMessage]) -> Vec<Made> {
     let mut out: Vec<Made> = Vec::new();
     let add = |m: Made, out: &mut Vec<Made>| {
@@ -137,45 +135,13 @@ pub fn made_here(messages: &[StoryMessage]) -> Vec<Made> {
                 .unwrap_or("")
                 .trim();
             let label = path.rsplit(['/', '\\']).next().unwrap_or(path);
-            add(Made { link: false, label: label.to_string(), target: path.to_string() }, &mut out);
-        }
-        for url in links_in(&msg.content) {
-            let bare = url.split_once("://").map(|(_, r)| r).unwrap_or(&url);
-            let bare = bare.strip_prefix("www.").unwrap_or(bare).trim_end_matches('/');
-            let label: String = if bare.chars().count() > 48 {
-                bare.chars().take(47).chain(std::iter::once('…')).collect()
-            } else {
-                bare.to_string()
-            };
-            add(Made { link: true, label, target: url }, &mut out);
+            add(Made { label: label.to_string(), target: path.to_string() }, &mut out);
         }
         if out.len() >= MADE_MAX {
             break;
         }
     }
     out.truncate(MADE_MAX);
-    out
-}
-
-/// The http(s) links in `text`, in the order written, without trailing punctuation.
-fn links_in(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut rest = text;
-    while let Some(at) = rest.find("http") {
-        let tail = &rest[at..];
-        if !(tail.starts_with("http://") || tail.starts_with("https://")) {
-            rest = &tail[4..];
-            continue;
-        }
-        let end = tail
-            .find(|c: char| c.is_whitespace() || matches!(c, ')' | ']' | '>' | '"' | '\'' | '`' | '|'))
-            .unwrap_or(tail.len());
-        let url = tail[..end].trim_end_matches(['.', ',', ';', ':', '!', '?', '*']);
-        if url.len() > "https://".len() {
-            out.push(url.to_string());
-        }
-        rest = &tail[end..];
-    }
     out
 }
 
@@ -1483,7 +1449,7 @@ mod tests {
     }
 
     #[test]
-    fn made_here_lists_her_files_and_links_newest_first_once() {
+    fn made_here_lists_her_files_newest_first_once_and_no_links() {
         let mut first = msg("a1", "assistant", "Plan is at https://example.com/plan, see (https://www.example.org/a/).");
         first.tool_calls = vec![call("write", json!({"path": "C:/work/notes.md"}))];
         let owner = msg("u1", "user", "look at https://owner.example/ignored");
@@ -1497,13 +1463,11 @@ mod tests {
         undone.reverted = true;
         let made = made_here(&[first, owner, second, undone]);
         let labels: Vec<&str> = made.iter().map(|m| m.label.as_str()).collect();
-        // Newest reply first: its files (last written first), then its links;
-        // the link repeated from the earlier reply is listed once.
-        assert_eq!(labels, vec!["report.csv", "notes.md", "example.com/plan", "example.org/a"]);
+        // Newest reply first, last written first; a file edited twice is listed
+        // once. The links in her replies are not things she made.
+        assert_eq!(labels, vec!["report.csv", "notes.md"]);
         assert_eq!(made[0].target, "C:/work/out/report.csv");
-        assert!(!made[0].link && made[2].link);
-        assert_eq!(made[2].target, "https://example.com/plan");
-        assert!(made.iter().all(|m| !m.target.contains("owner.example") && !m.target.contains("undone")));
+        assert!(made.iter().all(|m| !m.target.contains("example")));
         assert!(made_here(&[]).is_empty());
     }
 
