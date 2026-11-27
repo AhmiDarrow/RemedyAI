@@ -74,7 +74,7 @@ Full notes: **[What’s new](13-whats-new.md)** · engineering: repo `CHANGELOG.
 | **Game studio** | Godot-first engine verify, playtest, export |
 | **Workspace** | **Files** · **Terminal** · **Browser** · **Scratch** · **Computer use** |
 | **Local brain** | **Qwen3.5-4B** local mind + optional **RMB** (Qwen3.5-9B) muscle |
-| **Continuity** | Session Brief, partner memory, skills, silent nano swarm |
+| **Continuity** | Session Brief, partner memory, skills, context harness |
 | **Metabolism** | Turn tiers L0–L3, evidence ledger, governor, portable identity |
 | **Messengers** | Telegram (live) + Discord / Slack / Mattermost / Matrix / WhatsApp / Teams / Google Chat / Signal |
 | **Skills** | Bundled + learned + **Library** (signed catalog) |
@@ -131,7 +131,7 @@ When installed (Setup or **Settings → Advanced → Local model** — download 
 - **RMB** — on-device llama.cpp chat; default **Qwen3.5-9B Q6_K**
 - Binds to **127.0.0.1** only; auto-starts with Remedy when installed
 
-Details: [Local mind (Qwen3.5-4B)](14-visual-decoder) · [RMB](20-rmb-local-agent) · Workers: [Continuity workers](17-nanoswarm)
+Details: [Local mind (Qwen3.5-4B)](14-visual-decoder) · [RMB](20-rmb-local-agent) · Context: [Context harness](17-nanoswarm)
 
 ---
 
@@ -204,7 +204,7 @@ You → Grove / Studio (chat + Files / Terminal / Browser / Scratch)
 | [Game dev](26-game-dev) | Godot, web, Bevy, Pygame, Love2D studio |
 | [Local mind (Qwen3.5-4B)](14-visual-decoder) | On-device efficiency |
 | [RMB](20-rmb-local-agent) | Local llama.cpp chat |
-| [Continuity workers](17-nanoswarm) | Nano swarm (operators) |
+| [Context harness](17-nanoswarm) | Context window and token counting (operators) |
 | [Install (Windows)](01-install-windows) | Installer & SmartScreen |
 | [Install (Linux)](01-install-linux) | `.deb` / AppImage / WSLg |
 | [First run](02-first-run) | Setup wizard |

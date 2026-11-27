@@ -480,7 +480,11 @@ func normalizeSettingsPatch(patch, cfg ConfigMap) {
 	}
 	if v, ok := patch["harness_mode"]; ok && v != nil {
 		hm := strings.ToLower(strings.TrimSpace(fmt.Sprint(v)))
-		if hm != "off" && hm != "manual" && hm != "auto" {
+		// "manual" was a mode of the old harness; it compacted nothing on its own.
+		if hm == "manual" {
+			hm = "off"
+		}
+		if hm != "off" && hm != "auto" {
 			hm = "auto"
 		}
 		patch["harness_mode"] = hm

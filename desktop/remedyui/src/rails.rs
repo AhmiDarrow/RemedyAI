@@ -1001,6 +1001,8 @@ fn resize_handle(ui: &Ui, chrome: &WorkspaceChrome, side: Side) -> El {
     } else {
         "rail-resize-right"
     };
+    let hot = Signal::new(false);
+    let grip = ui.theme().colors.accent;
     let handle = ui
         .el("resize_handle")
         .row()
@@ -1015,11 +1017,18 @@ fn resize_handle(ui: &Ui, chrome: &WorkspaceChrome, side: Side) -> El {
         .child(
             ui.el("resize_hairline")
                 .layout(|l| {
-                    l.width = Length::Px(1.0);
+                    l.width = Length::Px(2.0);
                     l.height = Length::Percent(1.0);
                 })
-                .style(StylePatch::new().background(line)),
+                // Lights up under the pointer: the pane edge can be dragged.
+                .style(move || {
+                    StylePatch::new()
+                        .background(if hot.get() { grip } else { line })
+                        .radius(1.0)
+                }),
         )
+        .cursor(remedy_ui::input::Cursor::ColResize)
+        .on_hover(move |on| hot.set(on))
         .focusable(true)
         .on_pointer(move |e| match e.phase {
             PointerPhase::Down if e.buttons.contains(Buttons::PRIMARY) => {

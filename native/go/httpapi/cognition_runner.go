@@ -250,6 +250,7 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 	}
 	// Runs after the reply; a failure never changes the finished turn.
 	defer r.scheduleTurnEnd(req, &out)
+	defer recordHarness(req.SessionID, &out)
 	seed.Messages = withTurnContext(seedTranscript(req, userText, r.HomeDir), turnContext)
 
 	var (
@@ -806,6 +807,7 @@ func (r *CognitionTurnRunner) turnConfig(req TurnRequest) cognition.Config {
 			cfg.MaxResultChars = n
 		}
 	}
+	cfg.ContextTrimAt, cfg.ContextCompactAt = harnessShares(loadHomeConfig(r.HomeDir))
 	if req.MaxIterations > 0 {
 		// Explicit budgets (e.g. hive foragers) are absolute ceilings only.
 		cfg.MaxIterations = req.MaxIterations

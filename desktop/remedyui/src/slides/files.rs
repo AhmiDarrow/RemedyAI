@@ -24,6 +24,8 @@ enum SortMode {
     FoldersName,
     Name,
     NameDesc,
+    Newest,
+    Largest,
 }
 
 impl SortMode {
@@ -31,7 +33,9 @@ impl SortMode {
         match self {
             Self::FoldersName => Self::Name,
             Self::Name => Self::NameDesc,
-            Self::NameDesc => Self::FoldersName,
+            Self::NameDesc => Self::Newest,
+            Self::Newest => Self::Largest,
+            Self::Largest => Self::FoldersName,
         }
     }
 
@@ -40,6 +44,8 @@ impl SortMode {
             Self::FoldersName => "Folders",
             Self::Name => "A–Z",
             Self::NameDesc => "Z–A",
+            Self::Newest => "Newest",
+            Self::Largest => "Largest",
         }
     }
 }
@@ -50,6 +56,9 @@ pub struct FileEntry {
     pub path: String,
     pub is_dir: bool,
     pub depth: u32,
+    /// Bytes (files only) and last change in Unix seconds; 0 when the runtime gave none.
+    pub size: u64,
+    pub modified: i64,
 }
 
 #[derive(Clone)]
@@ -356,6 +365,8 @@ fn listing_from(v: serde_json::Value) -> Vec<FileEntry> {
                         path,
                         is_dir,
                         depth: 0,
+                        size: row.get("size").and_then(|n| n.as_u64()).unwrap_or(0),
+                        modified: row.get("modified").and_then(|n| n.as_i64()).unwrap_or(0),
                     })
                 })
                 .collect::<Vec<_>>()
@@ -418,6 +429,8 @@ fn sort_entries(list: &mut [FileEntry], mode: SortMode) {
             SortMode::FoldersName => b.is_dir.cmp(&a.is_dir).then(names),
             SortMode::Name => names,
             SortMode::NameDesc => names.reverse(),
+            SortMode::Newest => b.modified.cmp(&a.modified).then(names),
+            SortMode::Largest => b.size.cmp(&a.size).then(names),
         }
     });
 }
@@ -463,6 +476,8 @@ fn dir(name: &str, path: &str) -> FileEntry {
         path: path.into(),
         is_dir: true,
         depth: 0,
+        size: 0,
+        modified: 0,
     }
 }
 
@@ -472,6 +487,9 @@ fn file(name: &str, path: &str) -> FileEntry {
         path: path.into(),
         is_dir: false,
         depth: 0,
+        // Sample sizes for the preview only: steady, so its picture is.
+        size: name.len() as u64 * 1900,
+        modified: 0,
     }
 }
 
@@ -1508,7 +1526,7 @@ fn file_row(ui: &Ui, model: &FilesModel, f: &FileEntry) -> El {
         }
     });
 
-    let copy = glyph_button(ui, "path", format!("Copy path for {name}"), {
+    let copy = icon_button(ui, w::Icon::Copy, format!("Copy path for {name}"), {
         let m = model.clone();
         let ui = ui.clone();
         let full_path = path.clone();
@@ -1517,26 +1535,148 @@ fn file_row(ui: &Ui, model: &FilesModel, f: &FileEntry) -> El {
             copy_path(&ui, &m, &full, "Copied path");
         }
     });
-    let reveal = glyph_button(ui, "show", format!("Reveal {name}"), {
+    w::tooltip(&copy, "Copy path");
+    let reveal = icon_button(ui, w::Icon::External, format!("Reveal {name}"), {
         let m = model.clone();
         let ui = ui.clone();
         let entry = f.clone();
         move || reveal_entry(&ui, &m, &entry)
     });
     w::tooltip(&reveal, "Reveal in file manager");
-    w::row(ui)
+    // The row's actions take the place of its size and age while the pointer is over it
+    // or it is the selected row, so the list reads as names and facts, not buttons.
+    let hot = Signal::new(false);
+    let active = {
+        let m = model.clone();
+        let path = path.clone();
+        move || {
+            hot.get()
+                || usize::try_from(m.focus.get())
+                    .ok()
+                    .and_then(|i| visible_rows(&m).get(i).cloned())
+                    .is_some_and(|r| r.path == path)
+        }
+    };
+    let meta = w::text(ui, entry_meta(f, now_secs()))
+        .variant("muted")
+        .style(StylePatch::new().foreground(colors.muted));
+    let meta = meta.clone().bind({
+        let active = active.clone();
+        move || {
+            meta.clone().hidden(active());
+        }
+    });
+    let actions = w::row(ui).align(Align::Center).gap(2.0).child(reveal).child(copy);
+    let actions = actions.clone().bind({
+        let active = active.clone();
+        move || {
+            actions.clone().hidden(!active());
+        }
+    });
+    let row = w::row(ui)
         .align(Align::Center)
-        .gap(2.0)
+        .gap(6.0)
         .padding(remedy_ui::core::Insets {
             top: 2.0,
             bottom: 2.0,
             start: 4.0 + depth as f32 * 12.0,
-            end: 4.0,
+            end: 6.0,
         })
+        .layout(|l| l.min_height = Length::Px(26.0))
+        .style({
+            let hover = colors.accent.with_alpha(0.07);
+            let radius = ui.theme().radii.small;
+            move || {
+                StylePatch::new()
+                    .radius(radius)
+                    .background(if hot.get() { hover } else { Color::TRANSPARENT })
+            }
+        })
+        .on_hover(move |on| hot.set(on))
         .child(chevron)
         .child(open)
-        .child(reveal)
-        .child(copy)
+        .child(meta)
+        .child(actions);
+    let m = model.clone();
+    let ui_menu = ui.clone();
+    let entry = f.clone();
+    w::context_menu(&row, move || entry_menu(&ui_menu, &m, &entry))
+}
+
+/// What a right click on a row offers.
+fn entry_menu(ui: &Ui, model: &FilesModel, f: &FileEntry) -> Vec<w::MenuItem> {
+    let full = absolute_file_path(&model.root.get(), &f.path);
+    let item = |label: &str, icon: w::Icon, run: Box<dyn Fn(&Ui, &FilesModel, &FileEntry)>| {
+        let (ui, m, entry) = (ui.clone(), model.clone(), f.clone());
+        w::MenuItem::new(label, move || run(&ui, &m, &entry)).icon(icon)
+    };
+    let name = f.name.clone();
+    vec![
+        item(
+            if f.is_dir { "Open folder" } else { "Open" },
+            if f.is_dir { w::Icon::Folder } else { w::Icon::File },
+            Box::new(open_entry),
+        ),
+        item("Reveal in file manager", w::Icon::External, Box::new(reveal_entry)),
+        w::MenuItem::separator(),
+        item(
+            "Copy path",
+            w::Icon::Copy,
+            Box::new(move |ui, m, _| copy_path(ui, m, &full, "Copied path")),
+        ),
+        item(
+            "Copy name",
+            w::Icon::Copy,
+            Box::new(move |ui, m, _| copy_path(ui, m, &name, "Copied name")),
+        ),
+    ]
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
+}
+
+/// "12 KB · 3d": a file's size and how long ago the entry changed. Folders have no size.
+fn entry_meta(f: &FileEntry, now: i64) -> String {
+    let age = age(f.modified, now);
+    if f.is_dir {
+        return age;
+    }
+    let size = human_size(f.size);
+    if age.is_empty() { size } else { format!("{size} · {age}") }
+}
+
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 || value >= 10.0 {
+        format!("{value:.0} {}", UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+/// How long ago, in the largest whole unit. Empty when the time is unknown.
+fn age(modified: i64, now: i64) -> String {
+    if modified <= 0 {
+        return String::new();
+    }
+    let secs = (now - modified).max(0);
+    match secs {
+        0..=59 => "now".into(),
+        60..=3_599 => format!("{}m", secs / 60),
+        3_600..=86_399 => format!("{}h", secs / 3_600),
+        86_400..=2_591_999 => format!("{}d", secs / 86_400),
+        2_592_000..=31_535_999 => format!("{}mo", secs / 2_592_000),
+        _ => format!("{}y", secs / 31_536_000),
+    }
 }
 
 fn open_entry(ui: &Ui, model: &FilesModel, f: &FileEntry) {
@@ -1600,19 +1740,38 @@ fn footer(ui: &Ui, model: &FilesModel, unit: f32, colors: &remedy_ui::style::Col
             let files = vis.len() - dirs;
             let mut s = String::new();
             if dirs > 0 {
-                s.push_str(&format!("{dirs}d"));
+                s.push_str(&plural(dirs, "folder"));
             }
             if dirs > 0 && files > 0 {
                 s.push_str(" · ");
             }
             if files > 0 {
-                s.push_str(&format!("{files}f"));
+                s.push_str(&plural(files, "file"));
             }
             if !m.filter.get().trim().is_empty() && all.len() != vis.len() {
                 s.push_str(&format!(" / {}", all.len()));
             }
             s
         }))
+}
+
+fn plural(n: usize, word: &str) -> String {
+    if n == 1 { format!("1 {word}") } else { format!("{n} {word}s") }
+}
+
+/// A small icon-only button for a row.
+fn icon_button(ui: &Ui, icon: w::Icon, label: impl Into<String>, on_press: impl Fn() + 'static) -> El {
+    let label = label.into();
+    let colors = ui.theme().colors.clone();
+    ui.el("button")
+        .child(w::icon(ui, icon, 13.0).style(StylePatch::new().foreground(colors.muted)))
+        .row()
+        .align(Align::Center)
+        .justify(Justify::Center)
+        .padding(pad(3.0, 4.0))
+        .style(StylePatch::new().radius(ui.theme().radii.small))
+        .on_click(on_press)
+        .semantics(Semantics::new(Role::Button).label(label).action(Action::Click))
 }
 
 fn glyph_button(

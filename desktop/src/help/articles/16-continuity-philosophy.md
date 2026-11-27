@@ -24,7 +24,7 @@ You (goals, taste, judgment)
         └──────── learn / compress / remember ─────┘
 ```
 
-You should feel **Remedy**, not a network of agents. Internal workers (continuity layer / nanoswarm in code) measure, prune, rank, and distill — they do not compete for the microphone.
+You should feel **Remedy**, not a network of agents. The runtime measures, trims and compacts the conversation in the background ([Context harness](17-nanoswarm)); nothing else competes for the microphone.
 
 **The local 4B mind** (when installed) is part of that efficiency story: image→text for any chat model, and background assist that would otherwise cost another paid call. See [Local mind (Qwen3.5-4B)](14-visual-decoder).
 
@@ -88,5 +88,5 @@ You should return to progress, not a queue of clarifying questions.
 - [Partner Metabolism](19-metabolism) — turn tiers, evidence, governor, identity  
 - [Skills](07-skills)  
 - [Local mind](14-visual-decoder)  
-- [Continuity workers (nano swarm)](17-nanoswarm) — operator detail  
+- [Context harness and token counting](17-nanoswarm) — operator detail  
 - [Security & data](04-security-and-data)  
