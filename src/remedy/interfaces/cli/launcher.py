@@ -40,6 +40,9 @@ GO_COMMANDS = frozenset(
         "uninstall",
         "mcp",
         "computer",
+        "skill",
+        "learn",
+        "migrate",
     }
 )
 
