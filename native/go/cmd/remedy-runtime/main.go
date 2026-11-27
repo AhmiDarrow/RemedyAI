@@ -25,6 +25,8 @@ import (
 const (
 	protocolVersion = 1
 	toolABIVersion  = 1
+	// cliVersion tells the Python `remedy` launcher this build carries the CLI.
+	cliVersion = 1
 	// defaultServeAddr is the production loopback listen for --serve.
 	defaultServeAddr = "127.0.0.1:7400"
 )
@@ -35,6 +37,7 @@ type probeResult struct {
 	ToolABI  int    `json:"tool_abi"`
 	OS       string `json:"os"`
 	Arch     string `json:"arch"`
+	CLI      int    `json:"cli"`
 }
 
 func currentProbe() probeResult {
@@ -44,6 +47,7 @@ func currentProbe() probeResult {
 		ToolABI:  toolABIVersion,
 		OS:       runtime.GOOS,
 		Arch:     runtime.GOARCH,
+		CLI:      cliVersion,
 	}
 }
 
