@@ -268,3 +268,15 @@ moves over. None of these change the display resolution or scale.
 - Zig's spawn policy lets these through: `python -m pip`, `python -c`, `git
   fetch/pull/rev-list/status`, `powershell` (the llama-server lookup) and
   skill scripts run with `python`.
+
+## 10. End-of-turn learning in Go
+
+- Have a few turns with the desktop app, one ending "thanks, that works" and
+  one ending "that's wrong". Passing: alive.json gets an "accepted" and an
+  "unhappy" outcome, and nothing errors while the app has the file open.
+- With the memory panel open, have a session with eight or more notes and
+  finish a turn. Passing: a Consolidation entry appears, and the panel keeps
+  working (no "database is locked").
+- With a learned skill on probation that has passed in several sessions,
+  finish a turn. Passing: its SKILL.md status moves on while the app is
+  running, and created_at or the file time is read right in your time zone.
