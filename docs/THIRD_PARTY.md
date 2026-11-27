@@ -91,6 +91,14 @@ request** rather than bundled, so they are documented rather than attributed.
 - **Redistribution:** Official release binaries may be bundled or downloaded at first use into `~/.remedy/bin`
 - **Pin:** see `third_party/ripgrep/VERSION` and `remedy.core.rg_binary.RG_VERSION`
 
+## Tokenizer (compiled into the runtime)
+
+Token counts use the `o200k_base` byte-pair encoding from
+[tiktoken-go/tokenizer](https://github.com/tiktoken-go/tokenizer) (MIT), which
+builds on [dlclark/regexp2](https://github.com/dlclark/regexp2) (MIT). Both are
+Go modules compiled into `remedy-runtime`; the vocabulary is part of the
+binary, so nothing is downloaded and no request is made to count tokens.
+
 ## Telephony components (fetched on request, never bundled)
 
 Nothing below ships in the installer. Remedy names each one — purpose, size,

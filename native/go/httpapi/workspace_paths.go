@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/sysres"
 )
 
 var errPathOutside = errors.New("path outside allowed directory")
@@ -296,28 +298,17 @@ func filesEnvRoot() string {
 	return ""
 }
 
+// userProfileWorkFolders are the user's Desktop, Documents and Downloads,
+// wherever the system keeps them.
 func userProfileWorkFolders(home string) []string {
-	if home == "" {
-		var err error
-		home, err = os.UserHomeDir()
-		if err != nil || home == "" {
+	if home != "" {
+		abs, err := resolveAbsPath(home)
+		if err != nil {
 			return nil
 		}
+		home = abs
 	}
-	homeAbs, err := resolveAbsPath(home)
-	if err != nil {
-		return nil
-	}
-	out := make([]string, 0, 3)
-	for _, name := range []string{"Desktop", "Documents", "Downloads"} {
-		p := filepath.Join(homeAbs, name)
-		if st, err := os.Stat(p); err == nil && st.IsDir() {
-			if abs, err := resolveAbsPath(p); err == nil {
-				out = append(out, abs)
-			}
-		}
-	}
-	return out
+	return sysres.UserFolders(home)
 }
 
 func allowedReadRoots(scope, project string, userHome string) []string {

@@ -1264,6 +1264,8 @@ fn handle_el(ui: &Ui, prefs: Signal<ChatSplit>, line: remedy_ui::core::Color) ->
     let prefs_down = prefs.clone();
     let prefs_move = prefs.clone();
     let prefs_key = prefs.clone();
+    let hot = Signal::new(false);
+    let grip = ui.theme().colors.accent;
     let handle = ui
         .el("chat_split_handle")
         .row()
@@ -1278,11 +1280,18 @@ fn handle_el(ui: &Ui, prefs: Signal<ChatSplit>, line: remedy_ui::core::Color) ->
         .child(
             ui.el("chat_split_hairline")
                 .layout(|l| {
-                    l.width = Length::Px(1.0);
+                    l.width = Length::Px(2.0);
                     l.height = Length::Percent(1.0);
                 })
-                .style(StylePatch::new().background(line).radius(1.0)),
+                // Lights up under the pointer: the pane edge can be dragged.
+                .style(move || {
+                    StylePatch::new()
+                        .background(if hot.get() { grip } else { line })
+                        .radius(1.0)
+                }),
         )
+        .cursor(remedy_ui::input::Cursor::ColResize)
+        .on_hover(move |on| hot.set(on))
         .focusable(true)
         .on_pointer(move |e| match e.phase {
             PointerPhase::Down if e.buttons.contains(Buttons::PRIMARY) => {

@@ -1315,7 +1315,10 @@ fn build_hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: El) -> El {
             l.width = Length::Percent(1.0);
             l.height = Length::Percent(1.0);
         })
-        .child(titlebar::bar(ui, &studio, chrome))
+        .child({
+            let studio = studio.clone();
+            crate::settings::with_look(ui, false, move |ui| titlebar::bar(ui, &studio, chrome))
+        })
         .child({
             let body = body.layout(|l| {
                 l.grow = 1.0;
@@ -1349,9 +1352,12 @@ fn build_hosted(ui: &Ui, studio: Studio, chrome: Chrome, body: El) -> El {
             })
         })
         .child(crate::update::ready_notice(ui))
-        .child(crate::status::status_bar(ui, studio.clone(), || {
-            crate::settings::toggle()
-        }));
+        .child({
+            let studio = studio.clone();
+            crate::settings::with_look(ui, false, move |ui| {
+                crate::status::status_bar(ui, studio.clone(), crate::settings::toggle)
+            })
+        });
     let overlays = overlay_slot(ui, studio.clone(), chrome);
     let toast = toast_layer(ui, chrome);
     // Closed, the host is a zero-size absolute child. The open panel draws

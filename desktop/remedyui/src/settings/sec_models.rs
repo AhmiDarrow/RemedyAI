@@ -908,8 +908,9 @@ fn harness(ui: &Ui, s: Settings) -> El {
     });
     form::block(ui, s, "memory-harness", move |ui, s| {
         form::stack(ui)
-            .child(bits::choice(ui, "Mode", &[("auto", "Auto"), ("manual", "Manual"), ("off", "Off")], s.harness_mode))
-            .child(form::label(ui, "Keep at least"))
+            .child(bits::choice(ui, "Mode", &[("auto", "Auto"), ("off", "Off")], s.harness_mode))
+            .child(form::hint(ui, "Auto keeps a long conversation inside the model's window. Off leaves it whole until it no longer fits."))
+            .child(form::label(ui, "Trim old tool output from"))
             .child(w::slider(ui, "Harness minimum", s.harness_min, 0.05, 0.90, 0.01))
             .child(w::text(ui, move || format!("{:.0}% of the window", s.harness_min.get() * 100.0)).variant("small"))
             .child(form::label(ui, "Compact before"))

@@ -1,6 +1,6 @@
 module github.com/AhmiDarrow/RemedyAI/native/go
 
-go 1.25.0
+go 1.26
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.71.0
@@ -8,6 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+	github.com/tiktoken-go/tokenizer v0.10.0
 	go.yaml.in/yaml/v4 v4.0.0-rc.2
 	golang.org/x/crypto v0.47.0
 	golang.org/x/sys v0.47.0
@@ -18,6 +19,7 @@ require (
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
+	github.com/dlclark/regexp2/v2 v2.5.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect

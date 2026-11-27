@@ -1,108 +1,88 @@
-# Continuity workers (nano swarm)
+# Context harness and token counting
 
-This chapter is for **owners and operators** who want to understand what runs
-under the hood. In normal chat you still talk to **one Remedy** — not a cast of
-agents. Everyday use does not surface internal diagnostics.
+This chapter is for **owners and operators** who want to know how Remedy keeps a
+long conversation inside a model's context window, and where the numbers in
+**Usage → Harness** come from. In normal chat you do not need any of it.
 
-## Why it exists
+## What it does
 
-Provider models are stateless between sessions. Remedy keeps **local continuity**
-so work compounds:
+Every model has a window: the most text it can read in one request. A long task
+with many tool results would outgrow it. Before each model round the runtime
+counts the conversation and, when it is getting full, makes it smaller in two
+steps:
 
-| Worker (code name) | Job | Network? |
-|--------------------|-----|----------|
-| **Token** | Context fill %, compress nudge, usage calibration | No |
-| **Router** | Intent label → policy pack (memory / skill / plan / tool / chat) | No (optional local refine if llama-server already up) |
-| **Memory** | Session Brief touch (paths, decisions, next steps) | No |
-| **Pattern** | Tool sequence window; stuck signals; learn pre-gate | No |
-| **Skill** | Feedback + ranking cache for procedures | No |
-| **Helper** | Reserved on the same local 4B mind (not shipped as UI yet) | Local only when enabled |
+1. **Trim.** The bodies of old tool results in the middle of the conversation
+   are replaced by one-line stubs (which tool, which file or command, whether it
+   succeeded). The first message, your latest request and the most recent
+   messages stay as they are.
+2. **Compact.** If that is not enough, the middle of the conversation is
+   replaced by one working-set note: files read and changed, commands run and
+   their results, open to-dos.
 
-They share one **local 4B mind** runtime for vision/nano assist — never a
-second product personality.
+Each tool result is also capped when it arrives (30,000 characters on a large
+window, 8,000 on a small local one), so a single dump cannot fill the window.
 
-## How it attaches to a turn
+All of this runs inside the Remedy runtime on your computer. Nothing is sent
+anywhere to do it.
 
-1. User message arrives  
-2. **ContextSnapshot** (one pass): token measure, router intent, policy pack,
-   brief touch, quality remedies, pattern window  
-3. Policy + remedies inject as **silent system notes** (not chat bubbles)  
-4. Frontier model runs with tools  
-5. Each tool step updates **Pattern** + session quality; speculative prep warms
-   brief / memory / skill ranks for the *next* turn  
-6. End of multi-tool turns: **pattern pre-gate** can skip noisy auto-learn  
+## The setting
 
-Status API: `GET /api/nanoswarm/status` · slash: `/harness` / `/nanoswarm`  
-Partner status may include swarm counters for advanced UIs.
+**Settings → Models → Memory harness**
 
-## Intelligent utilization principles
+| Setting | Meaning | Default |
+|---------|---------|---------|
+| Mode | **Auto** trims and compacts at the two points below. **Off** leaves the conversation whole until it would no longer fit the window. | Auto |
+| Trim old tool output from | Share of the window at which step 1 starts. | 75% |
+| Compact before | Share of the window at which step 2 happens. | 92% |
 
-- **Heuristics first** — never block a turn waiting on a local model to classify  
-- **Shared bots** — one coordinator instance so pattern/skill history carries  
-- **Remedies from quality + pattern** — fail streaks and low tool success rates
-  change the next system guidance  
-- **Skill ranks off the hot path** — speculative prep warms the catalog; skill
-  intent reuses the cache  
-- **Learn only good traces** — pattern pre-gate rejects weak multi-tool noise  
-- **Spread when partitionable** — ContextSnapshot may add a **[Spread]** hint;
-  the frontier then calls `spread_run` for parallel silent jobs (not multi-agent
-  chat). The local 4B mind may refine the spread plan only if llama-server is already up.
-  Independent work that needs its own memory uses the [hive](28-hive.md), not
-  another nano worker.  
-- **Library skill check** — Skill nanobot ranks the **cached** Skills Library index
-  (never remote on the hot path). At most one soft Install tip; speculative prep
-  refreshes the catalog in the background. 
+A lower number saves tokens (and cost) sooner; a higher one keeps more of the
+original text in front of the model for longer. 16,000 tokens of the window are
+always held back for the reply.
 
-## Local model (optional)
+The window itself comes from the model. You can set it by hand under
+**Settings → System → Generation → Context window (tokens)** when a provider
+reports none.
 
-First-run download of the pinned Qwen3.5-4B mind (see [Local mind](14-visual-decoder)). When
-installed and running:
+## Token counting
 
-- Vision decode for text-only chat models  
-- Optional nano classify refine (only if server is already up)  
-- Same weights for all local roles  
+Tokens are counted with a real tokenizer, not a characters-divided-by-four
+guess: the `o200k_base` byte-pair encoding, through the open-source
+[tiktoken-go/tokenizer](https://github.com/tiktoken-go/tokenizer) library (MIT
+licence). The vocabulary is compiled into the runtime; it needs no download and
+makes no network request.
 
-## What is *not* disabled for “perf”
+What that means for accuracy:
 
-Recent releases temporarily limited live **provider** `GET /models` discovery
-to ollama/openrouter/custom (0.10.44). That was restored: cloud providers again
-query the endpoint so catalog renames (DeepSeek V4, Grok 4.x) stay correct.
-Continuity workers themselves were not removed — only some paths stopped
-*using* shared instances until Continuity 0.11+ rewired them.
+- For models that use `o200k_base` the count is exact for the text.
+- Other providers do not publish their tokenizers. For them the count is an
+  estimate, usually within a few percent for ordinary prose and code.
+- An image is charged a flat 1,500 tokens.
+- The count decides when to trim and compact. **What you are billed is what the
+  provider's API reports**, and that is what **Usage → Usage & Cost** shows.
 
-## NanoToken BPE (owned packs)
+## The Harness tab
 
-Token fill estimates use Remedy’s **clean-room byte-level BPE** — not tiktoken or
-any vendor merge tables.
+**Usage → Harness** shows what the runtime measured for the current session
+since Remedy started. Before the first turn the figures are empty; nothing is
+filled in for show.
 
-| Pack | Role |
-|------|------|
-| **`remedy-bbpe-v2`** (default) | Trained on first-party repo + multi-provider tool/skill battery transcripts |
-| **`remedy-bbpe-v1`** | Earlier synthetic pack; kept as fallback / comparison |
+| Figure | Meaning |
+|--------|---------|
+| Context fill | The conversation's size at the last model round, as a share of the window. |
+| Context budget | The size at which the conversation is compacted. |
+| Turns · saved | Turns run, and tokens removed by trimming and compacting. |
+| Compresses | How many times the conversation was trimmed or compacted. |
+| Tool fail max | The longest run of failed tool calls in a row. |
+| Pattern window | Tool calls run, the share that succeeded, and the most recent ones. |
+| Provider health | Model rounds asked for, the share that failed after retries, and rate-limit refusals. |
+| Tokenizer | The encoding in use and the last count. |
 
-- Swarm **assigns** a pack per provider/model family; `provider_changed` remeasures.
-- **Provider API usage** remains billing ground truth. Auto **calibration** scales
-  raw pack counts toward real usage (target raw band roughly **0.75–1.25**).
-- Retrain: `scripts/nanotoken_battery_and_train.py` (live battery + train) or
-  `--from-corpus` on a prior dump; measure with `scripts/nanotoken_ratio_eval.py`.
-- `REMEDY_BPE=0` forces heuristic weights only.
-- APIs: `/api/nanoswarm/token/assignment`, `/api/nanoswarm/token/packs`.
+These figures live in memory and reset when Remedy restarts.
 
-## Operator knobs
+## Limits
 
-| Knob | Effect |
-|------|--------|
-| Harness mode **auto** | ContextSnapshot + compress nudges on |
-| Harness **off** | Skips snapshot continuity pass |
-| `/harness` in chat | Continuity / session quality (operators) |
-| `REMEDY_LIVE_MODELS=0` | Disable live provider model listing |
-| `REMEDY_BPE=0` | Disable owned BPE; heuristic token estimates |
-| Vision enable + auto_start | Local 4B mind with Remedy |
+- There is no per-provider calibration: one encoding is used for every model.
+- The figures are per session and are not kept across restarts.
 
-## Related
-
-- [How Remedy works (continuity)](16-continuity-philosophy)  
-- [Memory & harness](06-memory-and-harness)  
-- [Local mind](14-visual-decoder)  
-- [CLI & API](10-cli-and-api)  
-
+See also: [Continuity philosophy](16-continuity-philosophy) ·
+[Security & data](04-security-and-data)

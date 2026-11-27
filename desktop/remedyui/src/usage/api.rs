@@ -1,4 +1,4 @@
-//! Usage, continuity, and NanoToken calls.
+//! Usage, context harness, and tokenizer calls.
 //!
 //! Paths match `desktop/src/api/usage.ts`: the runtime client base is
 //! `{origin}/api`, and these paths are joined onto it the same way
@@ -85,42 +85,24 @@ impl Loose {
     }
 }
 
-/// `context_snapshot` fields the dashboard prints.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Snapshot {
-    pub intent: String,
-    pub policy_id: String,
-    pub nudge: Option<String>,
-}
-
 /// `GET /continuity/dashboard`, reduced to what the panel shows.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Continuity {
-    pub harness_mode: String,
     pub token_method: String,
     pub token_estimate: f64,
     /// `token.last_remeasure.fill_pct`, when it is a number.
     pub token_fill: Option<f64>,
-    /// `context_snapshot.fill_pct`, the fallback the Tauri panel uses.
-    pub snapshot_fill: Option<f64>,
+    /// `token.last_remeasure.budget`: the tokens a transcript may reach before it is compacted.
+    pub budget: Option<f64>,
     pub turns: Loose,
     pub tokens_saved: Loose,
-    pub soft_nudge: Loose,
-    pub strong_nudge: Loose,
     pub compress: Loose,
-    pub stuck_rate: Option<f64>,
-    pub re_explain_rate: Option<f64>,
     pub tool_fail_max: Loose,
     pub step_count: f64,
     pub success_rate: Option<f64>,
     pub recent: Vec<String>,
-    pub snapshot: Option<Snapshot>,
-    pub goals: Vec<String>,
-    pub goals_stale: bool,
     pub samples: f64,
     pub error_rate: Option<f64>,
-    pub avg_latency_ms: Option<f64>,
-    pub flaky: bool,
     pub rate_limit_hits: f64,
 }
 
@@ -132,7 +114,6 @@ pub(crate) struct TokenStatus {
     pub last_estimate: f64,
     pub active_provider: Option<String>,
     pub active_model: Option<String>,
-    pub worker: Option<String>,
     pub note: Option<String>,
 }
 
@@ -257,17 +238,55 @@ pub(crate) fn save_csv(filename: &str, bytes: &[u8]) -> Result<std::path::PathBu
     Ok(path)
 }
 
+/// The Downloads folder as the system records it: it can be moved, so it is asked for.
+#[cfg(windows)]
+fn system_downloads() -> Option<std::path::PathBuf> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{FOLDERID_Downloads, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+    // SAFETY: the call returns a string the caller frees with CoTaskMemFree.
+    unsafe {
+        let wide = SHGetKnownFolderPath(&FOLDERID_Downloads, KF_FLAG_DEFAULT, None).ok()?;
+        let text = wide.to_string().ok();
+        CoTaskMemFree(Some(wide.0 as _));
+        text.map(std::path::PathBuf::from)
+    }
+}
+
+#[cfg(not(windows))]
+fn system_downloads() -> Option<std::path::PathBuf> {
+    let home = std::path::PathBuf::from(std::env::var_os("HOME")?);
+    let conf = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(".config"));
+    let text = std::fs::read_to_string(conf.join("user-dirs.dirs")).ok()?;
+    xdg_download_dir(&text, &home)
+}
+
+/// Reads `XDG_DOWNLOAD_DIR="$HOME/Name"`. A folder set to the home itself means none.
+#[cfg(any(not(windows), test))]
+fn xdg_download_dir(text: &str, home: &std::path::Path) -> Option<std::path::PathBuf> {
+    let value = text.lines().find_map(|l| l.trim().strip_prefix("XDG_DOWNLOAD_DIR="))?;
+    let value = value.trim().trim_matches('"');
+    let dir = match value.strip_prefix("$HOME") {
+        Some(rest) => home.join(rest.trim_start_matches('/')),
+        None => std::path::PathBuf::from(value),
+    };
+    (dir.is_absolute() && dir != home).then_some(dir)
+}
+
 fn downloads_dir() -> Result<std::path::PathBuf, String> {
-    if let Some(dir) = std::env::var_os("USERPROFILE") {
-        let dir = std::path::PathBuf::from(dir).join("Downloads");
+    if let Some(dir) = system_downloads() {
         if std::fs::create_dir_all(&dir).is_ok() {
             return Ok(dir);
         }
     }
-    if let Some(dir) = std::env::var_os("HOME") {
-        let dir = std::path::PathBuf::from(dir).join("Downloads");
-        if std::fs::create_dir_all(&dir).is_ok() {
-            return Ok(dir);
+    // No record in the system: the name the folder has by default under the home.
+    for home in ["USERPROFILE", "HOME"] {
+        if let Some(dir) = std::env::var_os(home) {
+            let dir = std::path::PathBuf::from(dir).join("Downloads");
+            if std::fs::create_dir_all(&dir).is_ok() {
+                return Ok(dir);
+            }
         }
     }
     let dir = std::env::temp_dir().join("remedy-usage");
@@ -421,23 +440,16 @@ pub(crate) fn parse_continuity(v: &Value) -> Option<Continuity> {
     let token = obj.get("token").and_then(|t| t.as_object());
     let quality = obj.get("session_quality").and_then(|q| q.as_object());
     let pattern = obj.get("pattern").and_then(|p| p.as_object());
-    let goal = obj.get("goal").and_then(|g| g.as_object());
     let health = obj.get("health").and_then(|h| h.as_object());
-    let snapshot_obj = obj.get("context_snapshot").filter(|s| s.is_object());
     let remeasure = token.and_then(|t| t.get("last_remeasure")).filter(|r| r.is_object());
     Some(Continuity {
-        harness_mode: token_str(obj.get("harness_mode"), "auto"),
         token_method: token.and_then(|t| nonempty(t.get("last_method"))).unwrap_or_else(|| "—".into()),
         token_estimate: token.and_then(|t| num(t.get("last_estimate"))).unwrap_or(0.0),
         token_fill: remeasure.and_then(|r| num(r.get("fill_pct"))),
-        snapshot_fill: snapshot_obj.and_then(|s| num(s.get("fill_pct"))),
+        budget: remeasure.and_then(|r| num(r.get("budget"))),
         turns: loose(quality.and_then(|q| q.get("turns"))),
         tokens_saved: loose(quality.and_then(|q| q.get("tokens_saved_by_compress"))),
-        soft_nudge: loose(quality.and_then(|q| q.get("soft_nudge_count"))),
-        strong_nudge: loose(quality.and_then(|q| q.get("strong_nudge_count"))),
         compress: loose(quality.and_then(|q| q.get("compress_count"))),
-        stuck_rate: quality.and_then(|q| num(q.get("stuck_rate"))),
-        re_explain_rate: quality.and_then(|q| num(q.get("re_explain_rate"))),
         tool_fail_max: loose(quality.and_then(|q| q.get("max_tool_fail_streak"))),
         step_count: pattern.and_then(|p| num(p.get("step_count"))).unwrap_or(0.0),
         success_rate: pattern.and_then(|p| num(p.get("success_rate"))),
@@ -446,27 +458,8 @@ pub(crate) fn parse_continuity(v: &Value) -> Option<Continuity> {
             .and_then(|r| r.as_array())
             .map(|items| items.iter().filter_map(|s| s.as_str().map(str::to_string)).collect())
             .unwrap_or_default(),
-        snapshot: snapshot_obj.map(|s| Snapshot {
-            intent: text(s.get("intent")),
-            policy_id: text(s.get("policy_id")),
-            nudge: nonempty(s.get("nudge")),
-        }),
-        goals: goal
-            .and_then(|g| g.get("open"))
-            .and_then(|o| o.as_array())
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|s| s.as_str().map(str::to_string))
-                    .take(4)
-                    .collect()
-            })
-            .unwrap_or_default(),
-        goals_stale: goal.and_then(|g| g.get("stale")).and_then(|s| s.as_bool()).unwrap_or(false),
         samples: health.and_then(|h| num(h.get("samples"))).unwrap_or(0.0),
         error_rate: health.and_then(|h| num(h.get("error_rate"))),
-        avg_latency_ms: health.and_then(|h| num(h.get("avg_latency_ms"))),
-        flaky: health.and_then(|h| h.get("flaky")).and_then(|f| f.as_bool()).unwrap_or(false),
         rate_limit_hits: health.and_then(|h| num(h.get("rate_limit_hits"))).unwrap_or(0.0),
     })
 }
@@ -474,12 +467,11 @@ pub(crate) fn parse_continuity(v: &Value) -> Option<Continuity> {
 pub(crate) fn parse_token_status(v: &Value) -> Option<TokenStatus> {
     let obj = v.as_object()?;
     Some(TokenStatus {
-        label: nonempty(obj.get("label")).unwrap_or_else(|| "NanoToken".into()),
+        label: nonempty(obj.get("label")).unwrap_or_else(|| "Tokenizer".into()),
         last_method: nonempty(obj.get("last_method")).unwrap_or_else(|| "—".into()),
         last_estimate: num(obj.get("last_estimate")).unwrap_or(0.0),
         active_provider: nonempty(obj.get("active_provider")),
         active_model: nonempty(obj.get("active_model")),
-        worker: nonempty(obj.get("worker")),
         note: nonempty(obj.get("ip_note")),
     })
 }
@@ -590,7 +582,7 @@ pub(crate) fn provider_label(provider: &str) -> String {
 }
 
 pub(crate) fn continuity_fill(c: &Continuity) -> Option<f64> {
-    c.token_fill.or(c.snapshot_fill)
+    c.token_fill
 }
 
 pub(crate) fn saved_tokens(c: &Continuity) -> String {
@@ -864,22 +856,22 @@ mod tests {
         assert_eq!(bars[0].tip, "2026-11-22: 15");
 
         let continuity = parse_continuity(&json!({
-            "harness_mode": "auto",
-            "session_quality": {"turns": 4, "tokens_saved_by_compress": 1500, "stuck_rate": 0.1, "soft_nudge_count": 2},
+            "session_quality": {"turns": 4, "tokens_saved_by_compress": 1500, "compress_count": 1, "max_tool_fail_streak": 2},
             "pattern": {"step_count": 3, "success_rate": 0.5, "recent": ["read", "edit"]},
-            "goal": {"open": ["ship the port"], "stale": false},
-            "health": {"samples": 8, "error_rate": 0.0, "avg_latency_ms": 120.4, "flaky": false, "rate_limit_hits": 0},
-            "token": {"last_method": "bpe", "last_estimate": 1000, "last_remeasure": {"fill_pct": 0.42}},
-            "context_snapshot": {"intent": "port", "policy_id": "house", "fill_pct": 0.1},
-            "swarm": {"event_count": 0}
+            "health": {"samples": 8, "error_rate": 0.0, "rate_limit_hits": 0},
+            "token": {"last_method": "o200k_base", "last_estimate": 1000, "last_remeasure": {"fill_pct": 0.42, "window": 200000, "budget": 160000}}
         }))
         .unwrap();
-        assert_eq!(continuity.harness_mode, "auto");
+        assert_eq!(continuity.budget, Some(160000.0));
+        assert_eq!(continuity.token_method, "o200k_base");
         assert_eq!(continuity_fill(&continuity), Some(0.42));
         assert_eq!(fill_label(continuity_fill(&continuity)), "42%");
         assert_eq!(continuity.recent, vec!["read".to_string(), "edit".to_string()]);
         assert_eq!(saved_tokens(&continuity), "1.5k");
-        assert!(continuity.snapshot.is_some());
+        // Before any turn the runtime sends no measurement: nothing is made up for it.
+        let idle = parse_continuity(&json!({"session_quality": {"turns": 0}, "token": {"last_method": "o200k_base", "last_estimate": 0}})).unwrap();
+        assert_eq!(continuity_fill(&idle), None);
+        assert_eq!(idle.budget, None);
     }
 
     #[test]
@@ -919,20 +911,18 @@ mod tests {
     }
 
     #[test]
-    fn token_status_reads_the_nanoswarm_payload() {
+    fn token_status_reads_the_tokenizer_payload() {
         let status = parse_token_status(&json!({
-            "bot": "token",
-            "label": "NanoToken",
-            "last_method": "unavailable",
-            "last_estimate": 0,
+            "label": "Tokenizer",
+            "last_method": "o200k_base",
+            "last_estimate": 1200,
             "active_provider": "local",
             "active_model": null,
-            "worker": "not_attached",
-            "ip_note": "Remedy-owned BBPE packs only"
+            "ip_note": "Counted with the o200k_base encoding"
         }))
         .unwrap();
-        assert_eq!(status.label, "NanoToken");
-        assert_eq!(status.worker.as_deref(), Some("not_attached"));
+        assert_eq!(status.label, "Tokenizer");
+        assert_eq!(status.last_method, "o200k_base");
         assert_eq!(status.active_provider.as_deref(), Some("local"));
         assert_eq!(status.active_model, None);
         assert_eq!(status.note.as_deref(), Some("Remedy-owned BBPE packs only"));

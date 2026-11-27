@@ -32,11 +32,11 @@ pub static ARTICLES: &[Article] = &[
     },
     Article {
         id: "17-nanoswarm",
-        title: "Continuity workers (nano swarm)",
+        title: "Context harness and token counting",
         category: "Reference",
         order: 16.5f32,
-        tags: &["nanoswarm", "continuity", "token", "router", "pattern", "operator"],
-        summary: "Operator guide: continuity workers, NanoToken BPE packs (v2 default), calibration — not chat agents.",
+        tags: &["harness", "context", "token", "tokenizer", "compaction", "operator"],
+        summary: "Operator guide: how a long conversation is kept inside the model window, and how tokens are counted.",
         body: include_str!("../../src/help/articles/17-nanoswarm.md"),
     },
     Article {

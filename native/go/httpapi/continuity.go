@@ -3,12 +3,15 @@ package httpapi
 import (
 	"net/http"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
+	"github.com/AhmiDarrow/RemedyAI/native/go/tokens"
 )
 
-// Coordination / nanoswarm / continuity dashboards are Python-worker heavy.
-// Go serves Python-shaped idle payloads so Desktop chrome does not 404; live
-// swarm mutation stays fail-closed until a worker is wired.
+// The usage window's Harness tab: what the engine measured about each
+// session's context and calls, and the token counter it measured with.
 
 func (s *Server) handleCoordinationPresence(w http.ResponseWriter, r *http.Request) {
 	_ = r.URL.Query().Get("session_id")
@@ -45,83 +48,169 @@ func (s *Server) handleNanoswarmStatus(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// sessionHarness is what the engine measured over a session's turns since
+// the runtime started. Nothing here is estimated or carried from elsewhere.
+type sessionHarness struct {
+	Turns, Compactions, TokensSaved      int
+	Window, Budget, Estimate             int
+	ModelCalls, ModelErrors, RateLimited int
+	Steps, StepsOK                       int
+	failStreak, MaxFailStreak            int
+	Recent                               []string
+}
+
+const harnessRecentSteps = 12
+
+// harness holds the per-session figures for the running runtime. One runtime
+// serves one home, so it is process-wide like the token counter it reports.
+var harness = struct {
+	sync.Mutex
+	bySession map[string]*sessionHarness
+	latest    string
+}{bySession: map[string]*sessionHarness{}}
+
+// recordHarness adds one finished turn to its session's figures.
+func recordHarness(sessionID string, out *cognition.Outcome) {
+	if out == nil {
+		return
+	}
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		sid = "_default"
+	}
+	c := out.Context
+	harness.Lock()
+	defer harness.Unlock()
+	h := harness.bySession[sid]
+	if h == nil {
+		h = &sessionHarness{}
+		harness.bySession[sid] = h
+	}
+	harness.latest = sid
+	h.Turns++
+	h.Compactions += c.Compactions
+	h.TokensSaved += c.TokensSaved
+	h.Window, h.Budget, h.Estimate = c.Window, c.Budget, c.Estimate
+	h.ModelCalls += c.ModelCalls
+	h.ModelErrors += c.ModelErrors
+	h.RateLimited += c.RateLimited
+	for _, step := range c.Steps {
+		h.Steps++
+		label := step.Name
+		if step.OK {
+			h.StepsOK++
+			h.failStreak = 0
+		} else {
+			label += " (failed)"
+			h.failStreak++
+			if h.failStreak > h.MaxFailStreak {
+				h.MaxFailStreak = h.failStreak
+			}
+		}
+		h.Recent = append(h.Recent, label)
+	}
+	if n := len(h.Recent); n > harnessRecentSteps {
+		h.Recent = append([]string(nil), h.Recent[n-harnessRecentSteps:]...)
+	}
+}
+
+// harnessFor returns a copy of a session's figures; an unnamed session reads
+// the one that ran last. The zero value means no turn has run.
+func harnessFor(sessionID string) sessionHarness {
+	harness.Lock()
+	defer harness.Unlock()
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" || sid == "_default" {
+		if _, ok := harness.bySession[sid]; !ok {
+			sid = harness.latest
+		}
+	}
+	h := harness.bySession[sid]
+	if h == nil {
+		return sessionHarness{}
+	}
+	out := *h
+	out.Recent = append([]string{}, h.Recent...)
+	return out
+}
+
+// harnessShares reads the Memory harness setting: the shares of the model's
+// window at which old tool output is trimmed and the transcript compacted.
+// Off keeps the transcript whole until it would no longer fit the window.
+func harnessShares(cfg ConfigMap) (trimAt, compactAt float64) {
+	if strings.ToLower(strings.TrimSpace(cfgString(cfg, "harness_mode", "auto"))) != "auto" {
+		return 1, 1
+	}
+	share := func(key string, def float64) float64 {
+		v := anyFloat(cfg[key], def)
+		if v <= 0 || v > 1 {
+			return def
+		}
+		return v
+	}
+	trimAt = share("harness_min_context_pct", 0.75)
+	compactAt = share("harness_max_context_pct", 0.92)
+	if trimAt > compactAt {
+		trimAt = compactAt
+	}
+	return trimAt, compactAt
+}
+
+const tokenNote = "Counted with the " + tokens.Method + " encoding " +
+	"(github.com/tiktoken-go/tokenizer, MIT). Exact for models that use it, " +
+	"an estimate for the others; what a provider bills is what its API reports."
+
 func (s *Server) handleNanoswarmTokenStatus(w http.ResponseWriter, _ *http.Request) {
 	cfg := LoadConfig(s.homeDir)
-	prov := strings.TrimSpace(cfgString(cfg, "llm_provider", ""))
-	mod := strings.TrimSpace(cfgString(cfg, "llm_model", ""))
+	h := harnessFor("")
 	writeJSON(w, http.StatusOK, map[string]any{
-		"bot":              "token",
-		"label":            "NanoToken",
-		"last_method":      "unavailable",
-		"last_estimate":    0,
-		"active_provider":  nullIfEmpty(prov),
-		"active_model":     nullIfEmpty(mod),
-		"bpe_assignment":   map[string]any{},
-		"bpe_packs":        []any{},
-		"calibrator":       map[string]any{},
-		"buckets":          map[string]any{},
-		"families":         []any{},
-		"worker":           "not_attached",
-		"ip_note": "Remedy-owned BBPE packs only; no third-party tokenizer " +
-			"libraries or foreign merge tables.",
+		"label":           "Tokenizer",
+		"last_method":     tokens.Method,
+		"last_estimate":   h.Estimate,
+		"active_provider": nullIfEmpty(strings.TrimSpace(cfgString(cfg, "llm_provider", ""))),
+		"active_model":    nullIfEmpty(strings.TrimSpace(cfgString(cfg, "llm_model", ""))),
+		"ip_note":         tokenNote,
 	})
 }
 
 func (s *Server) handleContinuityDashboard(w http.ResponseWriter, r *http.Request) {
 	sid := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	h := harnessFor(sid)
 	if sid == "" {
 		sid = "_default"
 	}
 	cfg := LoadConfig(s.homeDir)
-	prov := strings.TrimSpace(cfgString(cfg, "llm_provider", ""))
-	mod := strings.TrimSpace(cfgString(cfg, "llm_model", ""))
-	harness := strings.TrimSpace(cfgString(cfg, "harness_mode", "auto"))
-	if harness == "" {
-		harness = "auto"
+	token := map[string]any{
+		"last_method":     tokens.Method,
+		"last_estimate":   h.Estimate,
+		"active_provider": nullIfEmpty(strings.TrimSpace(cfgString(cfg, "llm_provider", ""))),
+		"active_model":    nullIfEmpty(strings.TrimSpace(cfgString(cfg, "llm_model", ""))),
+	}
+	if h.Window > 0 {
+		token["last_remeasure"] = map[string]any{
+			"fill_pct": float64(h.Estimate) / float64(h.Window),
+			"window":   h.Window,
+			"budget":   h.Budget,
+		}
+	}
+	pattern := map[string]any{"step_count": h.Steps, "recent": h.Recent}
+	if h.Steps > 0 {
+		pattern["success_rate"] = float64(h.StepsOK) / float64(h.Steps)
+	}
+	health := map[string]any{"samples": h.ModelCalls, "rate_limit_hits": h.RateLimited}
+	if h.ModelCalls > 0 {
+		health["error_rate"] = float64(h.ModelErrors) / float64(h.ModelCalls)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sid,
 		"session_quality": map[string]any{
-			"samples": 0,
+			"turns":                    h.Turns,
+			"compress_count":           h.Compactions,
+			"tokens_saved_by_compress": h.TokensSaved,
+			"max_tool_fail_streak":     h.MaxFailStreak,
 		},
-		"pattern": map[string]any{
-			"step_count":   0,
-			"success_rate": nil,
-			"recent":       []string{},
-		},
-		"goal": map[string]any{
-			"open":                  []string{},
-			"stale":                 false,
-			"tool_steps_since_sync": 0,
-		},
-		"scout": map[string]any{
-			"last_tools":  []string{},
-			"last_active": false,
-		},
-		"health": map[string]any{
-			"error_rate":       0,
-			"rate_limit_hits":  0,
-			"avg_latency_ms":   nil,
-			"flaky":            false,
-			"samples":          0,
-		},
-		"token": map[string]any{
-			"last_method":     "unavailable",
-			"last_estimate":   0,
-			"active_provider": nullIfEmpty(prov),
-			"active_model":    nullIfEmpty(mod),
-			"last_remeasure":  nil,
-			"status": map[string]any{
-				"bot":   "token",
-				"label": "NanoToken",
-				"worker": "not_attached",
-			},
-		},
-		"context_snapshot": nil,
-		"harness_mode":     harness,
-		"swarm": map[string]any{
-			"event_count": 0,
-			"last_event":  nil,
-		},
+		"pattern": pattern,
+		"health":  health,
+		"token":   token,
 	})
 }

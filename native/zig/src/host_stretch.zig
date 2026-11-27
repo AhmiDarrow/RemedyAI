@@ -27,14 +27,38 @@ const tool_names = [_][]const u8{
     "vulkaninfo",
 };
 
-const room_keys = [_]struct { []const u8, []const u8 }{
-    .{ "profile", "" },
-    .{ "desktop", "Desktop" },
-    .{ "documents", "Documents" },
-    .{ "downloads", "Downloads" },
-    .{ "pictures", "Pictures" },
+// Key, the name under the home when the system has no record, and the
+// Windows known-folder id: a folder can be moved (under a sync folder, say),
+// so Windows is asked where it is.
+const room_keys = [_]struct { []const u8, []const u8, []const u8 }{
+    .{ "profile", "", "" },
+    .{ "desktop", "Desktop", "{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}" },
+    .{ "documents", "Documents", "{FDD39AD0-238F-46AF-ADB4-6C85480369C7}" },
+    .{ "downloads", "Downloads", "{374DE290-123F-4565-9164-39C4925E467B}" },
+    .{ "pictures", "Pictures", "{33E28130-4E1E-4676-835A-98395C3BC3BB}" },
 };
 
+extern "shell32" fn SHGetKnownFolderPath(
+    rfid: *const std.os.windows.GUID,
+    flags: u32,
+    token: ?*anyopaque,
+    out: *?[*:0]u16,
+) callconv(.winapi) i32;
+extern "ole32" fn CoTaskMemFree(ptr: ?*anyopaque) callconv(.winapi) void;
+
+/// Where Windows keeps a known folder, or null (other systems, or no record).
+fn knownFolder(arena: std.mem.Allocator, comptime id: []const u8) ?[]const u8 {
+    if (!is_windows or id.len == 0) return null;
+    const guid = comptime std.os.windows.GUID.parse(id);
+    var wide: ?[*:0]u16 = null;
+    const hr = SHGetKnownFolderPath(&guid, 0, null, &wide);
+    defer CoTaskMemFree(wide);
+    if (hr != 0) return null;
+    const text = wide orelse return null;
+    return std.unicode.utf16LeToUtf8Alloc(arena, std.mem.span(text)) catch null;
+}
+
+// The first one sits in the documents room, the rest under the home.
 const work_hints = [_][]const []const u8{
     &[_][]const u8{ "Documents", "Remedy Projects" },
     &[_][]const u8{"Projects"},
@@ -477,13 +501,25 @@ fn probeCensus(arena: std.mem.Allocator, io: std.Io, home: []const u8) Error!Cen
 
     const profile = try userProfile(arena);
     var rooms_list: std.ArrayList(KV) = .empty;
-    for (room_keys) |rk| {
-        const p = if (rk[1].len == 0) profile else try std.fs.path.join(arena, &.{ profile, rk[1] });
-        if (isDir(io, p)) try rooms_list.append(arena, .{ .key = rk[0], .value = p });
+    var documents: ?[]const u8 = null;
+    inline for (room_keys) |rk| {
+        const p = if (rk[1].len == 0)
+            profile
+        else
+            knownFolder(arena, rk[2]) orelse try std.fs.path.join(arena, &.{ profile, rk[1] });
+        if (isDir(io, p)) {
+            try rooms_list.append(arena, .{ .key = rk[0], .value = p });
+            if (comptime std.mem.eql(u8, rk[0], "documents")) documents = p;
+        }
     }
     var work_list: std.ArrayList(KV) = .empty;
     for (work_hints) |parts| {
-        const full = try std.fs.path.join(arena, &.{ profile, try std.fs.path.join(arena, parts) });
+        const in_documents = std.mem.eql(u8, parts[0], "Documents");
+        if (in_documents and documents == null) continue;
+        const full = if (in_documents)
+            try std.fs.path.join(arena, &.{ documents.?, try std.fs.path.join(arena, parts[1..]) })
+        else
+            try std.fs.path.join(arena, &.{ profile, try std.fs.path.join(arena, parts) });
         if (isDir(io, full)) {
             var key_buf: std.ArrayList(u8) = .empty;
             for (parts, 0..) |part, i| {

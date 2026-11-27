@@ -11,14 +11,21 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Slash commands work wherever you type: Grove on the desktop and on a paired phone now carries a command out instead of sending it to Remedy as a message. New or made real: `/model` (show, list, or switch with part of a name), `/stop`, `/status`, `/think`, `/search`, `/rename`, `/remember`, `/goal`, `/goals`, `/plan` (show, approve, cancel), `/plans`, `/approve`, `/deny`, `/whoami`. A phone can do by command only what its panes in Connect settings allow.
 - Settings → Connect → Get the phone app shows a QR code that downloads the Android app from the latest release.
 - A setting for whether a messenger chat joins the conversation open on your PC (Advanced, Messengers; on by default). Turn it off if anyone but you is on a messenger allow list.
+- Tokens are counted with a real tokenizer (the `o200k_base` encoding, from the MIT-licensed tiktoken-go/tokenizer, compiled in) instead of four characters to a token. The count decides when a long conversation is trimmed and compacted; billing still comes from what the provider reports.
+- The Files rail shows each entry's size and age, sorts by newest or largest as well as by name, and has a right-click menu (open, reveal, copy path, copy name). The reveal and copy buttons are icons that appear on the row under the pointer.
 
 ### Changed
-- Frontier-sized tool and context limits: tool results keep 30,000 characters (8,000 on a small local window), compaction starts near 88% of the model's real context window, job logs can be paged with `jobs read`, grep lines go to 2,000 characters, and truncation notes say how much was cut and how to read the rest.
+- Frontier-sized tool and context limits: tool results keep 30,000 characters (8,000 on a small local window), old tool output is trimmed from 75% of the model's real context window and the conversation compacted at 92% (Settings, Models, Memory harness), job logs can be paged with `jobs read`, grep lines go to 2,000 characters, and truncation notes say how much was cut and how to read the rest.
 - The runtime no longer contains any code to start, attach to or talk to a Python worker, and no installer builds or bundles one. Three settings that only the worker read are gone: the two learn timeouts and daily voice drift.
 - One version number, 2.0.0, for the desktop, the phone app, the runtime and the command line.
 - The `remedy` command line runs in the Go runtime. The Python package is now only a small launcher for it with no dependencies; the rest of the Python code is gone. `remedy-mcp` is the same as `remedy mcp serve`.
+- Usage, Harness shows what the runtime measured for the session: context fill, the compaction budget, turns, tokens saved, tool and provider results. It no longer lists figures nothing produced (nudges, stuck rate, goals).
+- The Memory harness setting works: Auto trims and compacts at the two percentages you set, Off leaves a conversation whole until it no longer fits. Before, the setting was saved and never read. The Manual mode is gone; it did nothing.
 
 ### Fixed
+- Desktop, Documents and Downloads were looked for under the home folder by name, so a Desktop that Windows keeps elsewhere (under OneDrive, say) was missing from the Files rail and from what Remedy may read. Their places now come from the system, on Linux from `user-dirs.dirs`.
+- A theme picked in Settings changed only some of the window until a restart. The whole window now takes it at once.
+- The edges of the side panes and of the chat split did not show that they can be dragged. They are a clearer line now, light up under the pointer, and the pointer becomes a resize arrow.
 - The pairing code in Settings was cut off at the edge of the panel and could not be scanned. A code now shrinks to fit the space it has.
 - Usage was never recorded: the Usage screen and `/usage` showed zero however much was used. Each model round's token counts, as the provider reports them, are now written to the ledger. No cost is shown, because Remedy has no price list and a guessed price would read as a real one.
 - A number typed into Settings (retention days, for one) was dropped on save and the default came back.
