@@ -38,8 +38,8 @@ def test_parse_builtin_commands() -> None:
     cmds = mod._parse_builtin_commands()
     names = {c["name"] for c in cmds}
     assert "/help" in names
-    assert "/compact" in names
-    assert "/import-session" in names
+    assert "/usage" in names  # defined in session_command_more.go or _full.go
+    assert "/clear" in {a for c in cmds for a in c["aliases"]}
 
 
 def test_parse_hotkeys() -> None:

@@ -184,7 +184,7 @@ func memorySkillToolDefs() []memorySkillToolDef {
 			run: toolMemorySave,
 		},
 		{
-			id: "memory.search", desc: "Search Partner Memory + FTS entries (Python worker; context, not a grant)",
+			id: "memory.search", desc: "Search Partner Memory and saved entries (context, not a grant)",
 			risk: tools.RiskReadOnly,
 			in: `{
 			"type":"object",

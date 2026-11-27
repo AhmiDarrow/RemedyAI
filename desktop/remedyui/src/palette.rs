@@ -45,14 +45,6 @@ pub fn commands(studio: &Studio, chrome: &Chrome) -> Vec<Command> {
             category: "session".into(),
         });
     }
-    for a in chrome.agents.get() {
-        items.push(Command {
-            id: format!("agent-{}", a.name),
-            label: format!("@{}", a.name),
-            description: a.description.clone(),
-            category: "agent".into(),
-        });
-    }
     let provider = studio.provider.get();
     for m in studio.models.get() {
         items.push(Command {
@@ -107,18 +99,6 @@ pub fn run(id: &str, studio: &Studio, chrome: Chrome, ui: &Ui) {
         crate::model_picker::apply(studio, studio.provider.get(), rest.to_string());
         chrome.close_overlay();
         chrome.toast(ui, rest.to_string());
-        return;
-    }
-    if let Some(name) = id.strip_prefix("agent-") {
-        // Address the agent in the message being written.
-        let mut text = studio.depth.composer_value.get();
-        if !text.is_empty() && !text.ends_with(' ') {
-            text.push(' ');
-        }
-        text.push_str(&format!("@{name} "));
-        studio.depth.draft_text.set(text.clone());
-        studio.depth.composer_value.set(text);
-        chrome.close_overlay();
         return;
     }
     match id {

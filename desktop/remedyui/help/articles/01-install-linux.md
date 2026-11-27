@@ -7,9 +7,8 @@ Remedy Desktop now runs on Linux (including WSLg) as well as Windows. Same partn
 - 64-bit Linux with a desktop session (GNOME, KDE, XFCE, or **WSL2 + WSLg**)
 - Network for cloud providers, or a local model (Ollama / RMB / first-run vision)
 - Packaged desktop **includes** the Go `remedy-runtime` local API (same as Windows).
-  You do **not** need a system `python` / `uv` for the `.deb` or AppImage — on
-  first launch Remedy downloads a small managed CPython into `~/.remedy/voice/runtime`
-  (shared with voice) when none is already on `PATH`.
+  You do **not** need Python for the `.deb` or AppImage. Voice runs in the
+  native `remedy-voice` helper; its speech models download on first use.
 
 ## Ways to run
 
@@ -17,7 +16,7 @@ Remedy Desktop now runs on Linux (including WSLg) as well as Windows. Same partn
 |------|----------------|
 | **`.deb` / AppImage** | [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) — **v0.26.0+** |
 | **PyPI CLI** | `uv tool install remedy-ai` then `remedy serve` (browser WebUI). First `remedy serve` downloads the Go `remedy-runtime` and Zig `remedy_core` for this version from its `runtime-v<version>` GitHub release, verifies sha256 against the checksums pinned inside the wheel (never another version), and caches them under `~/.remedy/runtime/`. No Go or Zig toolchain is required. If this OS has no prebuilt, the command prints build instructions. |
-| **Dev / source** | This repo: `npm run tauri:dev` / `tauri:build` |
+| **Dev / source** | This repo: build the desktop with cargo in `desktop/remedyui` (see `desktop/remedyui/packaging/README.md`) |
 
 ### Packaged desktop (v0.26.0+)
 

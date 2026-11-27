@@ -404,17 +404,6 @@ def python_components() -> list[Component]:
 
 def vendored_components() -> list[Component]:
     out: list[Component] = []
-    rg = ROOT / "third_party" / "ripgrep"
-    if rg.is_dir():
-        version = _read(rg / "VERSION").strip() or "pinned"
-        texts = [t for t in (_read(rg / "LICENSE-MIT").strip(), _read(rg / "UNLICENSE").strip()) if t]
-        out.append(
-            Component(
-                "Bundled binary", "ripgrep", version, "MIT OR Unlicense",
-                _copyright_from(texts), texts,
-                "official release binary; bundled or downloaded to ~/.remedy/bin",
-            )
-        )
     return out
 
 

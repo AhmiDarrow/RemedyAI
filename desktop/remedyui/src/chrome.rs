@@ -272,12 +272,6 @@ pub enum Overlay {
     Skills,
 }
 
-#[derive(Clone, Debug)]
-pub struct Agent {
-    pub name: String,
-    pub description: String,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Confirm {
     None,
@@ -312,7 +306,6 @@ pub struct Chrome {
     pub palette_query: Signal<String>,
     pub palette_idx: Signal<usize>,
     pub confirm: Signal<Confirm>,
-    pub agents: Signal<Vec<Agent>>,
     pub diag: Signal<serde_json::Value>,
     pub hive: Signal<serde_json::Value>,
     pub timeline: Signal<serde_json::Value>,
@@ -357,7 +350,6 @@ impl Chrome {
             palette_query: Signal::new(String::new()),
             palette_idx: Signal::new(0),
             confirm: Signal::new(Confirm::None),
-            agents: Signal::new(Vec::new()),
             diag: Signal::new(serde_json::Value::Null),
             hive: Signal::new(serde_json::Value::Null),
             timeline: Signal::new(serde_json::Value::Null),
@@ -378,10 +370,6 @@ impl Chrome {
     pub fn preview(overlay: Overlay) -> Self {
         let c = Self::fresh(true);
         c.overlay.set(overlay);
-        c.agents.set(vec![Agent {
-            name: "remedy".into(),
-            description: "House partner".into(),
-        }]);
         c.diag.set(sample_diag());
         c.hive.set(sample_hive());
         c.timeline.set(sample_timeline());
@@ -840,18 +828,7 @@ impl Chrome {
         let Some(client) = studio.client() else {
             return;
         };
-        let agents = self.agents;
         let waker = remedy_ui::reactive::waker().ok();
-        runtime::get_json(&client, "agents", {
-            let waker = waker.clone();
-            move |res| {
-                let Ok(v) = res else { return };
-                let list = parse_agents(&v);
-                if let Some(w) = waker {
-                    let _ = w.post(move || agents.set(list));
-                }
-            }
-        });
         let tip = self.tooltip;
         runtime::get_json(&client, "partner/status", move |res| {
             let Ok(v) = res else { return };
@@ -1161,28 +1138,6 @@ fn post_then(
     runtime::post_json(client, path, body, move |res| {
         let _ = waker.post(move || done(res));
     });
-}
-
-fn parse_agents(v: &serde_json::Value) -> Vec<Agent> {
-    let Some(arr) = v.get("agents").and_then(|a| a.as_array()) else {
-        return Vec::new();
-    };
-    arr.iter()
-        .filter_map(|a| {
-            let name = a.get("name").and_then(|n| n.as_str())?;
-            if name.is_empty() {
-                return None;
-            }
-            Some(Agent {
-                name: name.to_string(),
-                description: a
-                    .get("description")
-                    .and_then(|d| d.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-            })
-        })
-        .collect()
 }
 
 fn tooltip_from(v: &serde_json::Value) -> Option<String> {

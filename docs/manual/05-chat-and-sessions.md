@@ -76,7 +76,7 @@ puts the file on the composer rail so you can point things out to Remedy.
 - **Auto-title** — from the first prompt
 - **Rename / pin / search / tags** — session sidebar features
 - **Export** — sidebar **Session options**, `/export`, or command palette → `.txt`
-- **Import** — sidebar **Session options**, `/import-session`, or palette → `.txt` / `.md`
+- **Import** — sidebar **Session options** or palette → `.txt` / `.md`
 
 ## Three-frame workspace
 
@@ -91,13 +91,15 @@ Remedy is a **workbench**: chat in the center, real tools on the rails.
 | **Sessions** | Chats, projects, messenger threads |
 | **Settings** | Provider, the local mind, messengers, appearance |
 | **Files** | In-app file browser for the session/project |
-| **Terminal** | In-app PowerShell (ConPTY) on this PC |
+| **Terminal** | In-app shell: pick PowerShell, Command Prompt, Git Bash or WSL from **Shell** in its toolbar on this PC |
 | **Browser** | Embedded WebView2 research pane (**↗** = system browser) |
 | **Scratch** | Session-linked notepad with local save and server sync |
 | **Automations** | Background tasks that run once or repeat |
 
 Each side: **thin strip** → **icon rail** → **open panel** (× collapses).
 **⇄ Swap sides** · Terminal / Browser / Scratch: popout (↗) or fullscreen (⛶).
+The Chat and Coding / Actions panes have **Pop out** (its own window, with
+**Dock back**) and **Fullscreen** too.
 Fullscreen: **Exit fullscreen** / **Close** on the top bar, or **Esc** when
 an inner control is not using it. Escape closes a nested dialog first.
 

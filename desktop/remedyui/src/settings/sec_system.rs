@@ -298,7 +298,7 @@ fn advanced_permissions(ui: &Ui, s: Settings) -> El {
         .child(bits::choice(
             ui,
             "Trust",
-            &[("conservative", "Conservative"), ("balanced", "Balanced"), ("autonomous", "Autonomous")],
+            &[("conservative", "Conservative"), ("balanced", "Balanced")],
             s.trust_profile,
         ))
         .child(w::text(ui, move || trust_hint(&s.trust_profile.get()).to_string()).variant("small"))
@@ -312,8 +312,7 @@ fn advanced_permissions(ui: &Ui, s: Settings) -> El {
 
 fn trust_hint(profile: &str) -> &'static str {
     match profile {
-        "conservative" => "Even Auto still asks before shell, files, and skills. Mail and payment always stop.",
-        "autonomous" => "In-project high-impact work runs without extra prompts, like Auto. Mail and payment always stop.",
+        "conservative" => "Auto and Full still ask before each change, unless you already said yes to that kind. Mail and payment always stop.",
         _ => "Follows Approvals (Ask / Auto / Full). Mail and payment always stop.",
     }
 }
@@ -646,22 +645,8 @@ fn advanced(ui: &Ui, s: Settings) -> El {
             },
             move |ui| knob_groups(ui, s),
         );
-        let learning = form::stack(ui)
-            .child(form::toggle(ui, "Allow skill creation (learning loop)", "", s.allow_skills))
-            .child(w::text(ui, move || format!("Learning auto-approve threshold ({:.2})", s.auto_approve.get())).variant("strong"))
-            .child(w::slider(ui, "Learning auto-approve threshold", s.auto_approve, 0.0, 1.0, 0.05));
-        let logs = bits::picker(
-            ui,
-            "Log level",
-            &[
-                ("DEBUG".into(), "DEBUG".into()),
-                ("INFO".into(), "INFO".into()),
-                ("WARNING".into(), "WARNING".into()),
-                ("ERROR".into(), "ERROR".into()),
-            ],
-            s.log_level,
-        );
-        let tone = form::toggle(ui, "Sarcasm mode (tone flag)", "", s.sarcasm);
+        let learning = form::toggle(ui, "Allow skill creation (learning loop)", "", s.allow_skills);
+        let tone = form::toggle(ui, "Sarcasm", "Dry humour when it fits. Never on serious matters.", s.sarcasm);
         let ledger = form::stack(ui)
             .child(form::toggle(ui, "Share claims to the public ClaimIDX ledger", "", s.claimidx))
             .child(form::hint(
@@ -675,7 +660,6 @@ fn advanced(ui: &Ui, s: Settings) -> El {
                 "Each group has a default. You can change any of them. Skill creation stays on so Remedy can improve.",
             ))
             .child(fold(ui, "Learning", learning))
-            .child(fold(ui, "Logs", logs))
             .child(fold(ui, "Tone", tone))
             .child(fold(ui, "Ledger", ledger))
             .child(knobs)

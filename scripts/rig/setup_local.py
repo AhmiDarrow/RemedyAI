@@ -1,12 +1,8 @@
-"""Fetch what the harness needs to score local models: a GPU runtime + weights.
+"""Fetch a GGUF (plus its ``mmproj`` when the model is multimodal) to score.
 
-Two jobs, both resumable and both hash-checked where the catalog pins a hash:
+The download is resumable. The llama.cpp server itself is not fetched here:
+point the harness at one with ``--llama-server``.
 
-* the CUDA llama.cpp build (Remedy pins ``b12628``), because the runtime that
-  ships with the vision stack is CPU-only and silently ignores GPU offload;
-* a GGUF (plus its ``mmproj`` when the model is multimodal).
-
-    python -m rig.setup_local runtime
     python -m rig.setup_local model --repo google/gemma-4-12B-it-qat-q4_0-gguf \\
         --file gemma-4-12b-it-qat-q4_0.gguf --mmproj mmproj-gemma-4-12b-it-qat-q4_0.gguf
 """
@@ -16,23 +12,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
-import shutil
-import sys
 import time
 import urllib.request
-import zipfile
 from pathlib import Path
-
-REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO / "src"))
 
 
 def remedy_home() -> Path:
     return Path(os.environ.get("REMEDY_HOME", "~/.remedy")).expanduser()
-
-
-def rmb_runtime_dir() -> Path:
-    return remedy_home() / "rmb" / "runtime"
 
 
 def rmb_models_dir() -> Path:
@@ -115,54 +101,6 @@ def sha256(path: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# runtime
-# ---------------------------------------------------------------------------
-
-
-def install_runtime(dest: Path | None = None, *, cache: Path | None = None) -> Path:
-    """Install the pinned CUDA llama.cpp build (engine + CUDA redistributables)."""
-    from remedy.runtime.catalog import LLAMA_CPP_TAG, LLAMA_RUNTIMES
-
-    spec = LLAMA_RUNTIMES.get("win-cuda-12.4-x64")
-    if spec is None:
-        raise SystemExit("catalog has no win-cuda-12.4-x64 runtime")
-
-    out = dest or rmb_runtime_dir()
-    out.mkdir(parents=True, exist_ok=True)
-    cache = cache or (remedy_home() / "cache" / "runtime")
-    cache.mkdir(parents=True, exist_ok=True)
-
-    print(f"  installing llama.cpp {LLAMA_CPP_TAG} (CUDA 12.4) -> {out}")
-    zips: list[Path] = []
-    zips.append(
-        download(spec.url, cache / spec.zip_name, expect_sha=spec.sha256)
-    )
-    for extra in spec.extra_zips or ():
-        zips.append(download(extra.url, cache / extra.name, expect_sha=extra.sha256))
-
-    for z in zips:
-        print(f"    extracting {z.name}")
-        with zipfile.ZipFile(z) as zf:
-            for member in zf.namelist():
-                if member.endswith("/"):
-                    continue
-                # Release zips nest under build/bin/ - flatten to one dir.
-                target = out / Path(member).name
-                with zf.open(member) as src, target.open("wb") as dst:
-                    shutil.copyfileobj(src, dst)
-
-    server = out / "llama-server.exe"
-    if not server.is_file():
-        raise SystemExit(f"llama-server.exe missing after extract in {out}")
-    cuda = list(out.glob("*cuda*"))
-    print(f"    installed: {server}")
-    print(f"    cuda backends: {len(cuda)} file(s)")
-    if not cuda:
-        raise SystemExit("no CUDA backend files extracted - wrong archive?")
-    return server
-
-
-# ---------------------------------------------------------------------------
 # weights
 # ---------------------------------------------------------------------------
 
@@ -188,9 +126,6 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="rig.setup_local", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    rt = sub.add_parser("runtime", help="Install the pinned CUDA llama.cpp build")
-    rt.add_argument("--dest", default="", help="Target dir (default ~/.remedy/rmb/runtime)")
-
     md = sub.add_parser("model", help="Download a GGUF (and mmproj) from Hugging Face")
     md.add_argument("--repo", required=True)
     md.add_argument("--file", required=True)
@@ -198,15 +133,12 @@ def main(argv: list[str] | None = None) -> int:
     md.add_argument("--dest", default="", help="Target dir (default ~/.remedy/rmb/models)")
 
     args = ap.parse_args(argv)
-    if args.cmd == "runtime":
-        install_runtime(Path(args.dest) if args.dest else None)
-    else:
-        install_model(
-            args.repo,
-            args.file,
-            mmproj=args.mmproj,
-            dest=Path(args.dest) if args.dest else None,
-        )
+    install_model(
+        args.repo,
+        args.file,
+        mmproj=args.mmproj,
+        dest=Path(args.dest) if args.dest else None,
+    )
     return 0
 
 

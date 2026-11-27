@@ -75,10 +75,8 @@ Optional default **project folder** — working directory for tools, shell, and 
 Vision, voice, Claimidx, and local helpers **download automatically** the first time
 Remedy starts. You can finish setup while they continue in the background.
 If the voice pack did not arrive, Settings → Voice has **Download Remedy's
-voice**. In Remedy Desktop the voice engines live in a small Python of their
-own under `~/.remedy/voice/runtime/` (downloaded and verified on first use,
-~70 MB) together with her voice model. From a
-`pip` install, Advanced still shows the pip command.
+voice**. In Remedy Desktop the voice runs in the native `remedy-voice`
+helper. The speech models download once and are checked before use.
 
 Claimidx is installed in its own environment under `~/.remedy/claimidx/`,
 seeded with prior art, and started with Remedy on `127.0.0.1:17340`. It uses a
@@ -141,8 +139,7 @@ Settings detail and main-bar detail are independent preferences.
 - Remedy **stretches out** in the background: hardware (RAM / GPU), tools on
   PATH (`python`, `git`, `uv`, …), user folders (Desktop / Documents / …),
   and a few local doors (Ollama, ComfyUI, RMB). No disk crawl. The map lives
-  in `~/.remedy/host/home.json` and injects as a **This home** line. Refresh
-  with `/stretch` (alias `/home`) after you install tools. `/whoami` shows it.
+  in `~/.remedy/host/home.json` and injects as a **This home** line. `/whoami` shows it.
 
 ## Corrupt config recovery
 

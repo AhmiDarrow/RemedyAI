@@ -34,7 +34,6 @@ Tool ABI ids (what the model calls on `:7400`):
 | **`apply_patch`** | Unified diff / Begin-Patch block through the write jail |
 | **`build_review_fix`** | Second pass: TODO / bare except / syntax / missing tests → isolated hops |
 | **`job_run`** | Silent **explore** or **verify** job — returns a summary, not a second chat persona |
-| **`spread_run`** | Silent **fan-out** of several jobs in parallel (cover more ground) — one merged digest |
 | **`mission_*`** | Durable checklist + verify for work-alone builds |
 | **`web_fetch` / `web_search`** | Public HTTP fetch and search — on by default; `web_tools_enabled: false` to disable |
 | **`skill.activate` / `skill.search`** | Load / discover procedure packs; scripts stay blocked until Trust |
@@ -54,8 +53,7 @@ Shell mutations stay inside **write roots** (project / home scope); opaque paylo
 ### Search (language-agnostic)
 
 - **No extension allowlist.** GDScript, Zig, Rust, Makefiles, etc. are searchable without special config.
-- Prefer **bundled or system `rg`** (ripgrep, MIT/Unlicense). Remedy can install a pinned build under `~/.remedy/bin`.
-- Pure-Python fallback sniffs **text vs binary** (skips PNGs and other binaries).
+- The `grep` tool searches file contents with a regular expression (Go RE2) or as plain text. Nothing else needs to be installed.
 - Zero matches include a **recovery hint** — re-scope path / simplify pattern; do not invent symbols.
 
 ### Shell and edits
@@ -70,31 +68,6 @@ Shell mutations stay inside **write roots** (project / home scope); opaque paylo
 - **`job_run kind=explore`:** tree sample + stack fingerprint + orientation pointers + optional search under `path=` (absolute OK).
 - **`job_run kind=verify`:** runs a command (or fingerprint default) with local PATH and longer timeout. Same Ask-mode approval gate as `bash`.
 - **`job_run kind=diff`:** `git status` / `diff --stat` summary.
-
-### Spread (parallel silent workers)
-
-When a request spans **independent** modules/paths (or you say “in parallel” / “cover more ground”), Remedy can **fan out**:
-
-- **`spread_run`** — runs several silent workers at once (explore / search / verify / diff / review), then returns **one merged digest** to the main agent.
-  Pass `tasks` as a **JSON array** (native tool-call list) or a JSON string, or use `goal=` for auto-plan.
-- You still talk to **one Remedy** — workers are not separate chat personas.
-- Workers are **depth-1** (they cannot spawn more workers).
-- Work that needs its own memory window is a [hive daughter](28-hive.md), not `spread_run`.
-- Most workers are **non-LLM** jobs (fast). Optional the local 4B mind only refines the plan or compresses long digests when the server is already up.
-- Continuity may inject a **[Spread]** system hint when fan-out looks useful; pure chat and single-file edits do not spread.
-
-Config (optional, under `~/.remedy/config.toml`):
-
-```toml
-[spread]
-enabled = true
-max_workers = 4
-max_tasks = 6
-use_local_plan = true
-```
-
-**When spread is faster:** independent branches and noisy surveys.  
-**When it is not:** serial edit→test chains; always-on fan-out on every message (disabled by design).
 
 ## Run until finished (long coding)
 
@@ -119,7 +92,6 @@ REMEDY_REACT_EPOCH_STEPS=64
 REMEDY_REACT_MAX_TOTAL_STEPS=1000000
 REMEDY_REACT_MAX_TOOL_CALLS=10000000
 REMEDY_REACT_MAX_RESULT_CHARS=24000
-REMEDY_REACT_MAX_ASSISTANT_CHARS=2000
 REMEDY_MAX_PARALLEL_TOOLS=32
 REMEDY_REACT_MAX_STALE_EPOCHS=8
 ```

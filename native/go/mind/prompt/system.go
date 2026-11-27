@@ -142,6 +142,8 @@ func languageSystemLine(code string) string {
 // agentIdentity is the identity part of config_to_agent_config.
 type agentIdentity struct {
 	Name, Gender, UILanguage, Persona string
+	// Sarcasm is the owner's tone switch (Settings, Advanced, Tone).
+	Sarcasm bool
 }
 
 func identityFromConfig(cfg map[string]any) agentIdentity {
@@ -164,6 +166,7 @@ func identityFromConfig(cfg map[string]any) agentIdentity {
 	return agentIdentity{
 		Name: name, Gender: g, Persona: persona,
 		UILanguage: normalizeUILanguage(cfgStr(cfg, "ui_language")),
+		Sarcasm:    cfg["sarcasm_mode"] == true,
 	}
 }
 
@@ -174,10 +177,17 @@ func buildSystemPrompt(id agentIdentity, compact bool) string {
 	}
 	base := identityPreamble(id.Name, id.Gender) + "\n" + languageSystemLine(id.UILanguage) + "\n\n" + body
 	if add := personaAddendum(id.Persona); add != "" {
-		return base + "\n\n" + add
+		base += "\n\n" + add
+	}
+	if id.Sarcasm {
+		base += "\n\n" + sarcasmAddendum
 	}
 	return base
 }
+
+// sarcasmAddendum is the tone the owner turned on with the Sarcasm switch.
+const sarcasmAddendum = "Tone: the owner turned sarcasm on. Dry, teasing humour is welcome when it fits. " +
+	"Never at the expense of accuracy, never about a serious or painful matter, and the work still gets done."
 
 // personaAddendum is config.persona_system_addendum.
 func personaAddendum(persona string) string {

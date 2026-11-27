@@ -16,7 +16,7 @@ Normal chat still talks to **one Remedy**. These organs never appear as named bo
 | **Machine map** | Live browser URL, work roots, windows, file touches |
 | **Shadow rehearsal** | Dry-run high-blast tools before commit (on top of write jail) |
 | **Action IR** | Redacted replay traces under `~/.remedy/action_ir/` |
-| **Spread muscle** | Partitionable work prefers `spread_run` (one merged answer) |
+| **Spread muscle** | Partitionable work is surveyed in one parallel batch of tool calls |
 | **Time Crystal** | turn → session → project week → life; secrets never promote |
 | **Skill genome** | Local success ranks for skills (protected after multi-win) |
 | **CUA macros** | Successful computer-use chains become reusable hints |
@@ -27,8 +27,7 @@ Normal chat still talks to **one Remedy**. These organs never appear as named bo
 ## Operator surfaces
 
 - Chat: `/harness` (includes **Metabolism** line when counters exist)
-- API: `GET /api/partner/metabolism`
-- Partner status: `metabolism` field, plus `learn_log` (recent background learning runs)
+- Partner status: `GET /api/partner/status` — `metabolism` field, plus `learn_log` (recent background learning runs)
 - Export: `POST /api/partner/identity/export` `{ "passphrase": "…" }`
 - Import: `POST /api/partner/identity/import` `{ "passphrase": "…", "source": "…" }`
 
@@ -64,7 +63,7 @@ On `remedy serve` (and Desktop turns) the Go runtime owns the loop:
 - **Soul and residue caps.** The unattended tick runs a compaction pass that enforces size caps on the soul field, residue dumps, and the vigil journal, so learning every turn cannot bloat later prompts. Injects stay after the cache-stable turn-context marker.
 - **Learning log.** Each background run (`after_tool_batch`, `turn_end`, `improve`) writes a local line under `learn_log.jsonl` in the home directory: what ran, what changed, how long it took, and whether it timed out or errored. The file is size-capped. Recent rows appear on `GET /api/partner/status` as `learn_log`.
 - **Vigil.** Still off until the owner accepts the one-time offer (after about 12 turns together). The hearth already ticks `partner.pulse`; a disabled vigil is a no-op.
-- **Voice.** Daily voice drift starts when the Python worker comes up (local JSON only). Set `REMEDY_NO_VOICE_EVOLUTION=1` to skip.
+- **Voice.** Her voice drifts a little each day, following her mood and your rapport (local only). The knob `voice_drift_from_affect` controls this.
 
 ## Related
 

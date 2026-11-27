@@ -173,9 +173,6 @@ func cmdComputer(c *Ctx) int {
 			return 0
 		}
 		c.Printf("CLI computer host started. host_connected=%s\n", sysPyBool(host.HostConnected()))
-		if c.P.Bool("api") {
-			c.Println("--api HTTP poller skipped: this CLI host already claims jobs/next. Use Desktop or this host, not both.")
-		}
 		if action == "run" {
 			c.Println("Foreground host running — Ctrl+C to stop")
 			sysWaitInterrupt(host)

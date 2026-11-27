@@ -55,7 +55,7 @@ def test_local_gate_covers_every_shipped_runtime_and_artifact() -> None:
     """Every runtime, platform and check Remedy ships runs on every push."""
     prepush = _prepush_module()
     assert {lane.key for lane in prepush.LANES} == {
-        "checks", "linux", "desktop", "rust", "native", "android", "python",
+        "checks", "linux", "desktop", "rust", "remedyui", "connect", "native", "python",
     }
     local = "\n".join(step.command for lane in prepush.LANES for step in lane.steps)
     for command in (
@@ -69,7 +69,7 @@ def test_local_gate_covers_every_shipped_runtime_and_artifact() -> None:
         "uv build",
         "npm test",
         "npm run build",
-        "testDebugUnitTest lintDebug assembleDebug assembleRelease",
+        "cargo check",
         "cargo test --locked",
         "go test ./...",
         "go test -race ./...",
@@ -82,6 +82,14 @@ def test_local_gate_covers_every_shipped_runtime_and_artifact() -> None:
         "check_remedy_core_isa.py",
     ):
         assert command in local, f"scripts/prepush.py lost {command!r}"
+
+    for lane in (prepush.REMEDYUI, prepush.CONNECT):
+        for step in lane.steps:
+            assert step.env["CARGO_BUILD_JOBS"], "cargo lanes cap their build jobs"
+    assert [s.command for s in prepush.REMEDYUI.steps] == ["cargo test"]
+    assert [s.command for s in prepush.CONNECT.steps] == ["cargo check"]
+    assert prepush.REMEDYUI.steps[0].cwd == "desktop/remedyui"
+    assert prepush.CONNECT.steps[0].cwd == "connect/app"
 
     for step in prepush.RUST.steps:
         assert step.env["RUSTFLAGS"] == "-D warnings", "Rust warnings are errors"
@@ -221,7 +229,7 @@ def _prepush_module():
 
 def test_prepush_reproduces_linux_from_a_windows_checkout() -> None:
     """The Linux suite, Linux cargo and Linux go test run from this checkout
-    under WSL, and pytest never shares the box with cargo or Gradle."""
+    under WSL, and pytest never shares the box with cargo."""
     prepush = _prepush_module()
     assert any(step.command == "__wsl_cargo__" for step in prepush.LINUX.steps), (
         "Windows cargo alone misses Linux cfg(not windows) unused vars; WSL cargo is required"
@@ -230,7 +238,7 @@ def test_prepush_reproduces_linux_from_a_windows_checkout() -> None:
     assert any(step.command == "__wsl_go_test__" for step in prepush.LINUX.steps), (
         "Windows go test alone misses Linux filepath traps; WSL go test is required"
     )
-    assert prepush.PYTHON.serial_after_others, "pytest must not share the box with cargo/gradle"
+    assert prepush.PYTHON.serial_after_others, "pytest must not share the box with cargo"
 
 
 def test_prepush_hook_is_wired_and_executable() -> None:
@@ -472,7 +480,7 @@ def test_reduced_gate_runs_only_the_lanes_docs_and_tests_need() -> None:
     assert lanes(["desktop/src/grove/head.test.ts"]) == {"checks", "desktop"}
     assert lanes(["desktop/src/components/X.test.tsx"]) == {"checks", "desktop"}
     assert lanes(["native/go/httpapi/partner_head_test.go"]) == {"checks", "native", "linux"}
-    assert lanes(["android/app/src/test/kotlin/A.kt"]) == {"checks", "android"}
+    assert lanes(["desktop/remedyui/help/articles/22-grove.md"]) == {"checks", "remedyui"}
     assert lanes(["tests\\test_x.py"]) == {"checks", "linux", "python"}  # Windows separators
 
     # Anything that ships, builds, or is read by another stack: full matrix.
@@ -482,7 +490,7 @@ def test_reduced_gate_runs_only_the_lanes_docs_and_tests_need() -> None:
         "desktop/src/grove/GroveApp.tsx",
         "desktop/src/grove/head.test.ts.snap",
         "native/go/httpapi/partner_head.go",
-        "android/app/src/main/kotlin/A.kt",
+        "connect/app/src/lib.rs",
         ".github/workflows/desktop-release.yml",
         "pyproject.toml",
         "tests/fixtures/connect/noise_ik_snow.json",
