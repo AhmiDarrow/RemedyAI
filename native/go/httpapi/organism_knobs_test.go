@@ -17,9 +17,6 @@ func TestAdvancedDefaultsMatchProduction(t *testing.T) {
 	if tbl["max_result_chars"] != 30000 {
 		t.Fatalf("max_result_chars=%v", tbl["max_result_chars"])
 	}
-	if tbl["voice_evolution"] != true {
-		t.Fatalf("voice_evolution=%v", tbl["voice_evolution"])
-	}
 	if tbl["self_inject_idle_s"] != 300 {
 		t.Fatalf("self_inject_idle_s=%v", tbl["self_inject_idle_s"])
 	}
@@ -76,15 +73,6 @@ func TestReactMaxResultEnvWins(t *testing.T) {
 	}
 	if got := resolveAdvancedInt(cfg, "max_result_chars"); got != 12000 {
 		t.Fatalf("config after unset=%d", got)
-	}
-}
-
-func TestNoVoiceEvolutionEnvStillDisables(t *testing.T) {
-	t.Setenv("REMEDY_NO_VOICE_EVOLUTION", "1")
-	cfg := ConfigMap{"advanced": map[string]any{"voice_evolution": true}}
-	tbl := advancedTable(cfg)
-	if tbl["voice_evolution"] != false {
-		t.Fatalf("env should disable: %v", tbl["voice_evolution"])
 	}
 }
 

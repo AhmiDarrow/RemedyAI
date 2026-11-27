@@ -57,12 +57,12 @@ func TestInjectWorkspaceRootOverwritesModelRoot(t *testing.T) {
 }
 
 func TestInjectWorkspaceRootPassesSchema(t *testing.T) {
-	reg := tools.NewRegistry()
-	if err := tools.RegisterPythonWorkerLocalMirrors(reg); err != nil {
+	reg, err := NewDefaultToolRegistry()
+	if err != nil {
 		t.Fatal(err)
 	}
 	raw := []byte(`{"path":"."}`)
-	injected := injectWorkspaceRoot(raw, `C:\Users\Administrator\Old-Remedy`)
+	injected := injectWorkspaceRoot(raw, t.TempDir())
 	var args map[string]any
 	if err := json.Unmarshal(injected, &args); err != nil {
 		t.Fatal(err)
@@ -81,7 +81,7 @@ func TestInjectWorkspaceRootPassesSchema(t *testing.T) {
 }
 
 func TestRegistryPolicyAutoAllowsMutation(t *testing.T) {
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestRegistryPolicyAutoAllowsMutation(t *testing.T) {
 }
 
 func TestRegistryPolicyAskThenFingerprintAllows(t *testing.T) {
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}

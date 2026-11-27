@@ -677,7 +677,7 @@ func plainApprovalSummary(item *pendingApproval) string {
 	if tool == "bash_exec" || tool == "shell.exec" {
 		return "Remedy wants to run a command: " + cmd
 	}
-	if tool == "file_write" || tool == "file_edit" || tool == "workspace.write" || tool == "workspace.edit" || tool == "write" || tool == "edit" {
+	if tool == "workspace.write" || tool == "workspace.edit" || tool == "write" || tool == "edit" {
 		return "Remedy wants to change a file: " + cmd
 	}
 	if tool == "mail_send" || tool == "mail.send" {

@@ -63,6 +63,10 @@ type Config struct {
 	// ManageClaimidx lets this server install and run the managed ClaimIDX
 	// host (network and process work). The real runtime sets it; tests do not.
 	ManageClaimidx bool
+	// ManageSearchHost lets this server download and run the local search
+	// engine web.search prefers (search_host.go). The real runtime sets it;
+	// tests do not.
+	ManageSearchHost bool
 }
 
 // Server is the production local HTTP API served by remedy-runtime.
@@ -86,7 +90,9 @@ type Server struct {
 	vision VisionWorker
 	// claimidx is the managed ClaimIDX host, nil unless Config.ManageClaimidx.
 	claimidx *claimidxHost
-	hf       *hfProgress
+	// searchHost is the managed local search engine, nil unless Config.ManageSearchHost.
+	searchHost *searchHost
+	hf         *hfProgress
 
 	connectGW     *connect.Gateway
 	messengerGW   *gateway.Gateway
@@ -187,6 +193,7 @@ func New(cfg Config) (*Server, error) {
 		rmb:         cfg.RmbController,
 		vision:      cfg.VisionWorker,
 		claimidx:    claimidxFor(cfg),
+		searchHost:  searchHostFor(cfg),
 		hf:          newHFProgress(),
 		approvals:   newApprovalQueue(),
 		lifeHub:     newLifeTaskHub(),
@@ -466,6 +473,7 @@ func (s *Server) Close() error {
 	s.stopMessengerGateway()
 	s.stopConnectGateway()
 	s.claimidx.Stop()
+	s.searchHost.Stop()
 	if s.hiveMgr != nil {
 		s.hiveMgr.Shutdown()
 		s.hiveMgr = nil
@@ -495,6 +503,8 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	// Installed after first launch and only while the owner's switch is on.
 	// It works in the background and never holds the runtime up.
 	s.claimidx.Apply()
+	bindSearchHost(s.searchHost)
+	s.searchHost.Apply()
 	s.startSchedulerLoop(ctx)
 	s.startHearthLoop(ctx)
 	s.startPartnerDispatcher(ctx)

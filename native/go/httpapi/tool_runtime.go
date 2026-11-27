@@ -938,10 +938,9 @@ func luhnOK(candidate string) bool {
 
 // NewDefaultToolRegistry builds the turn-time Tool ABI registry.
 // Always registers Go builtins and RuntimeZig host tools (execute fails closed
-// when remedy_core is unavailable). pythonCaller, when non-nil, registers
-// RuntimePython tools over RMDY frames. Every descriptor without its own
+// when remedy_core is unavailable). Every descriptor without its own
 // Deadline receives the deadlineForTool default.
-func NewDefaultToolRegistry(pythonCaller tools.FrameCaller) (*tools.Registry, error) {
+func NewDefaultToolRegistry() (*tools.Registry, error) {
 	registry := tools.NewRegistry(tools.AuthorizerFunc(runtimeLocalAuthorizer))
 	if err := tools.RegisterGoBuiltins(registry); err != nil {
 		return nil, err
@@ -969,11 +968,6 @@ func NewDefaultToolRegistry(pythonCaller tools.FrameCaller) (*tools.Registry, er
 	}
 	if err := tools.RegisterWorkspaceTools(registry); err != nil {
 		return nil, err
-	}
-	if pythonCaller != nil {
-		if err := tools.RegisterPythonWorkerTools(registry, pythonCaller); err != nil {
-			return nil, err
-		}
 	}
 	registry.SetDefaultDeadlines(func(d tools.Descriptor) time.Duration { return deadlineForTool(d.ID) })
 	return registry, nil
