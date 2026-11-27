@@ -123,23 +123,18 @@ Then open `http://127.0.0.1:7400`. First run downloads the checksum-verified `re
 
 ```bash
 git clone https://github.com/AhmiDarrow/RemedyAI.git && cd RemedyAI
-uv sync --group dev
-uv run ruff check .
-uv run mypy
-uv run pytest -q
-cd desktop && npm test && npm run build
-cd ../desktop/src-tauri && cargo test --locked
-cd ../../native/go && go test -race ./... && go vet ./...
-cd ../zig && zig build test -Doptimize=ReleaseSafe
-cd ../../android && ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
-cd .. && uv run python scripts/check_docs.py && uv build
+cd native/go && go test -race ./... && go vet ./...     # Go runtime
+cd ../zig && zig build test -Doptimize=ReleaseSafe      # Zig core
+cd ../../desktop/remedyui && cargo test                 # desktop app (RemedyUI)
+cd ../../connect/app && cargo test                      # phone app
+cargo remedy package --target android                   # build the phone app APK
 ```
 
-Before a push, the same matrix runs locally as the pre-push gate: `uv run python scripts/prepush.py`
-(enable once per clone with `git config core.hooksPath .githooks`). Windows uses `gradlew.bat`;
-Go race detection also runs on Linux CI. CI exercises Python
-3.12/3.13, a Windows-sensitive pytest surface, the React SPA, both Tauri targets,
-RemedyConnect Android, the Go/Zig native runtime, and Python packaging.
+Before a push, run the local gate: `uv run python scripts/prepush.py`
+(enable the hook once per clone with `git config core.hooksPath .githooks`).
+The gate runs the checks above for the parts of the tree you changed.
+CI has three workflows in `.github/workflows`: the desktop release, the
+RemedyUI desktop package, and the release-asset check.
 
 Version / help / docs / sanitize gates: `scripts/sync_version.py` · `scripts/sync_help_manual.py` · `scripts/check_docs.py` · `scripts/check_sanitize.py`.  
 Contributing: [CONTRIBUTING.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/CONTRIBUTING.md) · signing: [WINDOWS_SIGNING.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/WINDOWS_SIGNING.md)

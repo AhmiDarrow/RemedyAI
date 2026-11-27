@@ -265,7 +265,6 @@ Trojan. Known historical / ML labels and status:
 
 ## Chat cut off / context full
 
-- Run `/compact`.  
 - Lower harness thresholds or start a **new session**.  
 - Use a larger-context model if your provider offers one.
 

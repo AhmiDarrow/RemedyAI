@@ -999,24 +999,6 @@ fn refresh_lists(client: &Client, studio: &Studio) {
             }
         });
     });
-    let studio_a = studio.clone();
-    api::spawn_json(client, Request::get("agents"), move |out| {
-        let _ = wake2.post(move || {
-            if let Ok(v) = out {
-                let names = api::rows(&v, "agents")
-                    .into_iter()
-                    .filter_map(|row| {
-                        if let Some(s) = row.as_str() {
-                            return Some(s.to_string());
-                        }
-                        let name = api::str_field(row, "name");
-                        if name.is_empty() { None } else { Some(name) }
-                    })
-                    .collect::<Vec<_>>();
-                studio_a.depth.agents.set(names);
-            }
-        });
-    });
     let studio_v = studio.clone();
     let Ok(wake) = waker() else {
         return;

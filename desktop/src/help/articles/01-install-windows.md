@@ -5,9 +5,8 @@
 - Windows 10/11 **x64**
 - Network for LLM providers (or local Ollama only)
 - ~200 MB disk for the app; more for models if using Ollama
-- No system Python required — first launch downloads a managed CPython into
-  `%USERPROFILE%\.remedy\voice\runtime` when none is already on `PATH`
-  (shared with the optional voice runtime)
+- No Python required. Voice runs in the native `remedy-voice` helper; its
+  speech models download on first use.
 
 ## Download
 

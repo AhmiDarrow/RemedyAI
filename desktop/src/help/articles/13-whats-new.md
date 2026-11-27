@@ -2,13 +2,15 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current release: **v0.70.5**. Installed apps update on their own.
+Current release: **v2.0.0**. Installed apps update on their own.
 
 Remedy lives on this computer. She finishes the goal you set, keeps the rules
 you gave her, and waits for you before money, send, or delete.
 
 ## Contents
 
+- [2.0.0 — A face of her own](#200---a-face-of-her-own)
+- [1.0.0 — A new desktop](#100---a-new-desktop)
 - [0.70.5 — Claude works on every model](#0705---claude-works-on-every-model)
 - [0.70.3 — Claude works again](#0703---claude-works-again)
 - [0.70.2 — Switch to Web UI stays signed in](#0702---switch-to-web-ui-stays-signed-in)
@@ -34,6 +36,45 @@ you gave her, and waits for you before money, send, or delete.
 - [0.63.3 — Clearer UI and reliable tasks](#0633---clearer-ui-and-reliable-tasks)
 
 Earlier notes follow on this page, newest first.
+
+## 2.0.0 - A face of her own
+
+- **Her face.** Remedy's face is now drawn for you alone, from your name, the
+  name you gave her, and this install. Its shape, eyes and color are hers, and
+  it gains detail the longer you work together. Ask her for a new face and she
+  will draw one; ask for the old one back and she restores it.
+- **Grove.** Grove is one conversation: Talk, Plan and Build are gone from it.
+  When a request needs Studio, Remedy starts it there in the background and
+  leaves a card in Grove that shows how it is going and opens it.
+- **Routines.** Edit a routine in place, and see how many times it has run,
+  when it last ran, and what came of it.
+- **Chat panes.** Pop out opens a pane in its own window; Fullscreen fills the
+  app and Escape returns. Deleting the open session no longer closes the app.
+- **Narrow windows.** The session header, Plan beside Chat, and Grove's status
+  row now reflow instead of clipping.
+- **Commands everywhere.** About sixty slash commands, and they work in Grove
+  and on a paired phone as well as in Studio. `/commands` lists them.
+- **Usage.** The Usage screen and `/usage` show the tokens each model round
+  used. No cost is shown, because Remedy has no price list to go by.
+- **Files rail.** It leaves the project: up to the drive, into any folder your
+  access setting allows, with a row of places to jump to.
+- **Text and emoji.** Chat text can be selected and copied, and emoji draw
+  whole on Windows.
+- **No Python.** The runtime, the voice, the image model and the `remedy`
+  command line are all native. Nothing Python is installed or started.
+- **Web search.** Remedy runs her own local search engine again, so searches
+  stop falling back to a page that asks whether you are human.
+- **WSL.** WSL bash works inside a project folder and is kept to it.
+- **Safer by default.** In Auto, a shell command that reaches outside the
+  project, names a key file or contacts the network waits for you. Each
+  safeguard has a setting; see Security in this manual.
+- **One version.** The desktop, the phone app, the runtime and the command
+  line all carry the same number.
+
+## 1.0.0 - A new desktop
+
+- **New desktop.** Remedy Desktop is rebuilt on RemedyUI. Your settings,
+  sessions and `~/.remedy` folder carry over.
 
 ## 0.70.5 - Claude works on every model
 

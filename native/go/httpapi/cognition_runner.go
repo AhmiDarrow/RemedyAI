@@ -1529,7 +1529,6 @@ func plainToolApprovalSummary(toolName, preview, boundRoot string) string {
 // delegate tool can hand a mission to.
 var delegateAgentLabels = map[string]string{
 	"claude-code": "Claude Code",
-	"codex":       "Codex CLI",
 }
 
 // delegateApprovalSummary spells out what approving a hand-off actually

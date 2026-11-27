@@ -4,7 +4,7 @@ Updates version numbers consistently across all package manifests:
 - pyproject.toml          (Python package)
 - desktop/package.json    (Node frontend)
 - desktop/src-tauri/tauri.conf.json  (Tauri app)
-- android/app/build.gradle.kts       (RemedyConnect app)
+- desktop/src-tauri/Cargo.toml, desktop/remedyui/Cargo.toml, connect/app/Cargo.toml
 
 Usage:
     python scripts/sync_version.py          # check current version
@@ -32,7 +32,8 @@ PATHS = {
     "cargo": ROOT / "desktop" / "src-tauri" / "Cargo.toml",
     "cargo_lock": ROOT / "desktop" / "src-tauri" / "Cargo.lock",
     "latest_json": ROOT / "scripts" / "latest.json",
-    "android": ROOT / "android" / "app" / "build.gradle.kts",
+    "cargo_remedyui": ROOT / "desktop" / "remedyui" / "Cargo.toml",
+    "cargo_connect": ROOT / "connect" / "app" / "Cargo.toml",
     "go_api_version": ROOT / "native" / "go" / "httpapi" / "api.go",
 }
 
@@ -96,33 +97,18 @@ def _bump_tauri_conf(ver: str) -> None:
 
 
 def _bump_cargo_toml(ver: str) -> None:
-    if not PATHS["cargo"].exists():
-        return
-    text = PATHS["cargo"].read_text(encoding="utf-8")
-    # Only the package version line under [package]
-    text = re.sub(
-        r'(?m)^(version\s*=\s*)"[^"]*"',
-        rf'\1"{ver}"',
-        text,
-        count=1,
-    )
-    PATHS["cargo"].write_text(text, encoding="utf-8")
-
-
-def _bump_android(ver: str, *, version_changed: bool) -> None:
-    path = PATHS["android"]
-    if not path.exists():
-        return
-    text = path.read_text(encoding="utf-8")
-    text = re.sub(r'(versionName\s*=\s*)"[^"]*"', rf'\1"{ver}"', text, count=1)
-    if version_changed:
+    for key in ("cargo", "cargo_remedyui", "cargo_connect"):
+        if not PATHS[key].exists():
+            continue
+        text = PATHS[key].read_text(encoding="utf-8")
+        # Only the package version line under [package]
         text = re.sub(
-            r"(versionCode\s*=\s*)(\d+)",
-            lambda match: f"{match.group(1)}{int(match.group(2)) + 1}",
+            r'(?m)^(version\s*=\s*)"[^"]*"',
+            rf'\1"{ver}"',
             text,
             count=1,
         )
-    path.write_text(text, encoding="utf-8")
+        PATHS[key].write_text(text, encoding="utf-8")
 
 
 def _bump_latest_json(ver: str) -> None:
@@ -268,10 +254,10 @@ def _check_aligned(expected: str) -> int:
                 rows.append(("latest.json URL shape", "BAD_UNDERSCORE_NAME"))
                 break
 
-    if PATHS["android"].exists():
-        android = PATHS["android"].read_text(encoding="utf-8")
-        av = re.search(r'versionName\s*=\s*"([^"]*)"', android)
-        rows.append(("Android versionName", av.group(1) if av else "?"))
+    for label, key in (("remedyui Cargo.toml", "cargo_remedyui"), ("connect Cargo.toml", "cargo_connect")):
+        if PATHS[key].exists():
+            cm = re.search(r'(?m)^version\s*=\s*"([^"]*)"', PATHS[key].read_text(encoding="utf-8"))
+            rows.append((label, cm.group(1) if cm else "?"))
 
     rows.append(("remedy.__version__", _runtime_version()))
 
@@ -324,14 +310,10 @@ def main():
     print("  Updated tauri.conf.json")
 
     _bump_cargo_toml(new_ver)
-    print("  Updated Cargo.toml")
+    print("  Updated Cargo.toml (tauri, remedyui, connect)")
 
     _bump_cargo_lock(new_ver)
     print("  Updated Cargo.lock")
-
-    _bump_android(new_ver, version_changed=new_ver != current)
-    print("  Updated Android versionName")
-
 
     _bump_latest_json(new_ver)
     print("  Updated scripts/latest.json")

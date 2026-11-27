@@ -381,11 +381,7 @@ func (s *Server) rmbStatusPayload() map[string]any {
 		"ready":        ready,
 		"starting":     starting && !ready,
 		"loading":      loading,
-		"loading_for_s": 0,
-		"loading_stalled": false,
 		"pid":          state["pid"],
-		"managed_child": false,
-		"watchdog":     false,
 		"user_stopped": userStopped,
 		"base_url":     base,
 		"host":         host,
@@ -400,27 +396,19 @@ func (s *Server) rmbStatusPayload() map[string]any {
 			}
 			return modelPath
 		}(),
-		"model_present":   modelPath != "",
-		"runtime_binary":  nullIfEmpty(binary),
-		"runtime_present": binary != "",
-		"ctx_size":        anyInt(state["ctx_size"], rmbDefaultCtx),
-		"n_gpu_layers":    state["n_gpu_layers"],
-		"profile":         anyString(state["profile"]),
-		"engine":          rmbEnginePublic(state),
-		"catalog":         rmbCatalogPublic(),
-		"discovered_ggufs": discoverGGUFs(home),
-		"not_ready_hint":  hint,
-		"local_agent_mode": running,
+		"model_present":      modelPath != "",
+		"runtime_binary":     nullIfEmpty(binary),
+		"runtime_present":    binary != "",
+		"ctx_size":           anyInt(state["ctx_size"], rmbDefaultCtx),
+		"n_gpu_layers":       state["n_gpu_layers"],
+		"profile":            anyString(state["profile"]),
+		"engine":             rmbEnginePublic(state),
+		"catalog":            rmbCatalogPublic(),
+		"discovered_ggufs":   discoverGGUFs(home),
+		"not_ready_hint":     hint,
+		"local_agent_mode":   running,
 		"skips_vision_stack": running || anyBoolDef(state["vision_suspended"], false),
-		"vision_suspended":  running || anyBoolDef(state["vision_suspended"], false),
-		"endless_session": map[string]any{
-			"harness_min_pct": 0.55, "harness_max_pct": 0.78,
-			"ctx_size": anyInt(state["ctx_size"], rmbDefaultCtx),
-			"silent_context": true,
-			"note": "Context is automatic — Session Brief + harness keep long sessions " +
-				"alive without user-facing compress talk. " +
-				"SmolVLM is unloaded while RMB is running.",
-		},
+		"vision_suspended":   running || anyBoolDef(state["vision_suspended"], false),
 	}
 }
 
@@ -434,37 +422,37 @@ func nullIfEmpty(s string) any {
 func rmbEnginePublic(state map[string]any) map[string]any {
 	return map[string]any{
 		"threads": anyInt(state["threads"], 0), "parallel": anyInt(state["parallel"], 1),
-		"flash_attn": anyBoolDef(state["flash_attn"], true),
+		"flash_attn":  anyBoolDef(state["flash_attn"], true),
 		"temperature": state["temperature"], "top_p": state["top_p"], "top_k": state["top_k"],
 		"min_p": state["min_p"], "repeat_penalty": state["repeat_penalty"],
 		"repeat_last_n": state["repeat_last_n"], "seed": state["seed"],
 		"batch_size": state["batch_size"], "ubatch_size": state["ubatch_size"],
 		"mmproj": anyString(state["mmproj"]), "chat_template": anyString(state["chat_template"]),
-		"use_jinja": anyBoolDef(state["use_jinja"], true),
+		"use_jinja":       anyBoolDef(state["use_jinja"], true),
 		"use_jinja_owner": anyBoolDef(state["use_jinja_owner"], false),
 		"rope_freq_scale": state["rope_freq_scale"], "rope_freq_base": state["rope_freq_base"],
 		"mlock": anyBoolDef(state["mlock"], false), "no_mmap": anyBoolDef(state["no_mmap"], false),
 		"cache_type": anyString(state["cache_type"]),
-		"typical_p": state["typical_p"], "tfs_z": state["tfs_z"], "mirostat": state["mirostat"],
+		"typical_p":  state["typical_p"], "tfs_z": state["tfs_z"], "mirostat": state["mirostat"],
 		"mirostat_tau": state["mirostat_tau"], "mirostat_eta": state["mirostat_eta"],
 		"presence_penalty": state["presence_penalty"], "frequency_penalty": state["frequency_penalty"],
 		"main_gpu": state["main_gpu"], "threads_batch": state["threads_batch"],
 		"tensor_split": anyString(state["tensor_split"]), "samplers": anyString(state["samplers"]),
-		"rope_scaling": anyString(state["rope_scaling"]),
+		"rope_scaling":  anyString(state["rope_scaling"]),
 		"yarn_orig_ctx": state["yarn_orig_ctx"], "yarn_factor": state["yarn_factor"],
 		"yarn_beta_fast": state["yarn_beta_fast"], "yarn_beta_slow": state["yarn_beta_slow"],
-		"no_kv_offload": anyBoolDef(state["no_kv_offload"], false),
+		"no_kv_offload":  anyBoolDef(state["no_kv_offload"], false),
 		"dry_multiplier": state["dry_multiplier"], "dry_base": state["dry_base"],
 		"dry_allowed_length": state["dry_allowed_length"], "dry_penalty_last_n": state["dry_penalty_last_n"],
 		"xtc_probability": state["xtc_probability"], "xtc_threshold": state["xtc_threshold"],
-		"cache_reuse": state["cache_reuse"],
-		"thinking": normalizeThinking(state["thinking"]),
-		"reasoning_budget": state["reasoning_budget"],
-		"enable_mtp": anyBoolDef(state["enable_mtp"], true),
-		"spec_draft_n_max": state["spec_draft_n_max"],
-		"n_cpu_moe": state["n_cpu_moe"],
+		"cache_reuse":        state["cache_reuse"],
+		"thinking":           normalizeThinking(state["thinking"]),
+		"reasoning_budget":   state["reasoning_budget"],
+		"enable_mtp":         anyBoolDef(state["enable_mtp"], true),
+		"spec_draft_n_max":   state["spec_draft_n_max"],
+		"n_cpu_moe":          state["n_cpu_moe"],
 		"n_gpu_layers_draft": state["n_gpu_layers_draft"],
-		"model_draft": anyString(state["model_draft"]),
+		"model_draft":        anyString(state["model_draft"]),
 	}
 }
 
@@ -497,8 +485,7 @@ func (s *Server) handleRmbStart(w http.ResponseWriter, r *http.Request) {
 	if s.rmb == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"ok":    false,
-			"error": "RMB process controller is not attached to remedy-runtime.",
-			"hint":  "Wire an RmbController (Python worker) or use the Python sidecar.",
+			"error": "This build of the runtime cannot start a local model host.",
 		})
 		return
 	}
@@ -521,8 +508,8 @@ func (s *Server) handleRmbStop(w http.ResponseWriter, r *http.Request) {
 	_ = saveRmbJSON(home, state)
 	if s.rmb == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":    true,
-			"note":  "Marked stopped on disk; no process controller attached.",
+			"ok":      true,
+			"note":    "Marked stopped; this build of the runtime runs no local model host.",
 			"stopped": false,
 		})
 		return
@@ -682,10 +669,9 @@ func (s *Server) handleRmbSettings(w http.ResponseWriter, r *http.Request) {
 	} else {
 		status["live_apply"] = map[string]any{
 			"live": false, "restarted": false,
-			"live_error": "RMB process controller is not attached",
+			"live_error": "this build of the runtime runs no local model host",
 		}
 	}
-	status["runtime_applied"] = false
 	writeJSON(w, http.StatusOK, status)
 }
 
@@ -708,12 +694,11 @@ func (s *Server) handleRmbUse(w http.ResponseWriter, r *http.Request) {
 	} else {
 		start = map[string]any{
 			"ok":    false,
-			"error": "RMB process controller is not attached to remedy-runtime.",
+			"error": "This build of the runtime cannot start a local model host.",
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":          s.rmbStatusPayload(),
-		"start":           start,
-		"runtime_applied": false,
+		"status": s.rmbStatusPayload(),
+		"start":  start,
 	})
 }

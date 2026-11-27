@@ -32,10 +32,10 @@ Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
 
 ## What’s new (start here)
 
-**v0.65.0** keeps a long task open until a check after the last change is
-green. A rule you set — a must, a never, a do-not — still stands after the
-chat is compacted. Settings are five categories. She stays ready on this PC
-and does not watch the screen. A night step happens only after you say yes.
+**v2.0.0** gives Remedy a face of her own, drawn for you and this install.
+Grove is one conversation. When a request needs Studio, she starts it in the
+background and leaves a card in Grove. The runtime, the voice and the `remedy`
+command line are all native; nothing Python is installed.
 
 Full notes: **[What’s new](13-whats-new.md)** · engineering: repo `CHANGELOG.md`.
 
@@ -100,7 +100,7 @@ See [Personal assistant](21-personal-assistant) · [Vault](23-vault).
 
 ## Grove and voice
 
-**Grove** is the partner home (default). **Studio** is the workbench. The same status bar lives on both. She speaks locally (Chatterbox Nano / Kokoro); hearing uses whisper. Desktop downloads a pinned Python into `~/.remedy/voice/` so the installed app can actually speak.
+**Grove** is the partner home (default). **Studio** is the workbench. The same status bar lives on both. She speaks and hears on this PC. A small native helper, `remedy-voice`, runs the speech models (sherpa-onnx). The models download once, when you first use voice. No Python is needed.
 
 See [Grove](22-grove).
 
@@ -211,7 +211,7 @@ You → Grove / Studio (chat + Files / Terminal / Browser / Scratch)
 | [Providers & auth](03-providers-and-auth) | Keys, OAuth, Ollama |
 | [Security & data](04-security-and-data) | Tokens, scope, approvals |
 | [Chat & sessions](05-chat-and-sessions) | UI, rails, Plan/Build |
-| [Memory & harness](06-memory-and-harness) | `/compact`, Progress |
+| [Memory & harness](06-memory-and-harness) | `/harness`, Progress |
 | [Coding agency](18-agency) | Build-class tools |
 | [Skills](07-skills) | Trust, Library |
 | [Updates & uninstall](08-updates-and-uninstall) | Updates, wipe |

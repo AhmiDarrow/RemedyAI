@@ -40,16 +40,12 @@ refused. `/forget` still removes what you do not want stored.
 | `/forget <text>` | Remove a matching Partner Memory fact |
 | `/memory <query>` | Search memory |
 | `/whoami` | Show what Remedy knows about you (and this home) |
-| `/stretch` | Map this PC — hardware, tools, rooms (`/home`) |
 | `/goal <title>` | Hold a life goal; Remedy takes one local step (notes in **Documents/Remedy Life**) |
 | `/goals` | List life goals and the next action |
 | `what should I do?` / `work on my goals` | Take the next local step and open the note |
 | `I did it` | Notice you finished the current move and invent the next one |
 | `I'm back` / `what did you do?` | Digest of Life steps Remedy already took |
-| `/compact [focus]` | Compress session into a Session Brief |
 | `/harness` | Show Session Brief / harness stats |
-| `/import <folder>` | Import `.md`/`.txt` notes into memory |
-| `/handoff` | List handoff notes |
 
 ## Memory Harness
 
@@ -61,14 +57,13 @@ Long chats fill the model context window. The harness:
 4. Uses Remedy’s **on-device local model in the background** (when available) to refresh the brief **without** another paid API call and without blocking chat.  
 5. **Quality gate:** middle history is replaced with a brief pointer only when the brief retains real paths/decisions (fail-closed otherwise).  
 6. **Mid-turn:** long tool chains re-slim before the next model call when fill is high.  
-7. **`/compact`** forces a Session Brief pass + queues local enrichment.  
 
 **Harness modes** (Settings):
 
 | Mode | Behavior |
 |------|----------|
 | **Auto** | Enforce lean send-view + brief maintenance when thresholds say so |
-| **Manual** | Only when you `/compact` |
+| **Manual** | Only when you ask for it |
 | **Off** | No harness compression |
 
 ## Continuity quality
@@ -125,7 +120,7 @@ not a transcript compress.
 - Prefer / always / never phrasing in chat is distilled automatically when safe
   (one-off “always run the tests now” chatter is ignored).  
 - High-confidence facts are injected every turn (size-capped so the model stays sharp).  
-- `/whoami` lists what it knows; `/forget <text>` removes a mistake; `/pin` keeps a fact always ready.  
+- `/whoami` lists what it knows; `/forget <text>` removes a mistake; `/remember` keeps a fact always ready.  
 - Secrets (API keys, passwords) are **never** auto-stored.  
 - Click the **$** on the usage ticker to hide estimated cost (tokens stay visible).
 
@@ -136,8 +131,6 @@ you want certainty.
 
 - Natural language is enough (“I prefer TypeScript”); `/remember` for hard pins.  
 - Use `/forget …` if something was mis-learned.  
-- Use `/compact` before a big context switch.  
-- Import project notes with `/import` rather than pasting megabytes into chat.  
 - Treat memory as **local** — back up `memory.db` if it matters (CLI: `remedy memory backup`).  
 
 ## CLI counterparts

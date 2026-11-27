@@ -5,8 +5,11 @@ Mirrors scripts/sync_version.py: one command to **check** (CI gate) or **sync**
 
 Canonical sources (do not invent second homes for these):
   - Version numbers     → pyproject.toml          (sync_version.py)
-  - Help chapter bodies → docs/manual/*.md        (sync_help_manual.py)
-  - Slash commands      → native/go/httpapi/catalog_static.go  builtinCommands
+  - Help chapter bodies → docs/manual/*.md        (sync_help_manual.py;
+                           copied to desktop/src/help/articles and
+                           desktop/remedyui/help/articles)
+  - Slash commands      → native/go/httpapi/session_command*.go  builtinSlashCommands,
+                           moreSlashCommands, fullSlashCommands
                            (canonical: docs/manual/11-reference-commands.md;
                             README slash table is optional)
   - Keyboard shortcuts  → desktop/src/hotkeys.ts  HOTKEYS
@@ -47,10 +50,15 @@ _configure_stdio()
 ROOT = Path(__file__).resolve().parent.parent
 MANUAL = ROOT / "docs" / "manual"
 ARTICLES = ROOT / "desktop" / "src" / "help" / "articles"
+ARTICLES_REMEDYUI = ROOT / "desktop" / "remedyui" / "help" / "articles"
 CATALOG_TS = ROOT / "desktop" / "src" / "help" / "catalog.ts"
 HOTKEYS_TS = ROOT / "desktop" / "src" / "hotkeys.ts"
-# Canonical slash command list.
-SLASH_CATALOG = ROOT / "native" / "go" / "httpapi" / "catalog_static.go"
+# Canonical slash command list: three Go slices, each `var X = []map[string]any{`.
+SLASH_SOURCES = (
+    (ROOT / "native" / "go" / "httpapi" / "session_command.go", "builtinSlashCommands"),
+    (ROOT / "native" / "go" / "httpapi" / "session_command_more.go", "moreSlashCommands"),
+    (ROOT / "native" / "go" / "httpapi" / "session_command_full.go", "fullSlashCommands"),
+)
 README = ROOT / "README.md"
 COMMANDS_MD = MANUAL / "11-reference-commands.md"
 SHORTCUTS_MD = MANUAL / "12-reference-shortcuts.md"
@@ -80,32 +88,35 @@ def _chapter_ids(directory: Path) -> set[str]:
 
 
 def check_help_manual() -> CheckResult:
-    """docs/manual ↔ desktop/src/help/articles byte-for-byte."""
+    """docs/manual ↔ both help article dirs, byte-for-byte."""
     msgs: list[str] = []
-    if not MANUAL.is_dir() or not ARTICLES.is_dir():
+    dests = (ARTICLES, ARTICLES_REMEDYUI)
+    if not MANUAL.is_dir() or not all(d.is_dir() for d in dests):
         return CheckResult(
             "help-manual",
             False,
-            ["docs/manual or desktop help articles directory missing"],
+            ["docs/manual or a desktop help articles directory missing"],
             "python scripts/sync_help_manual.py",
         )
     src = {p.name: p for p in MANUAL.glob("*.md") if p.name != "README.md"}
-    dst = {p.name: p for p in ARTICLES.glob("*.md") if p.name != "README.md"}
     bad = 0
-    for name in sorted(set(src) | set(dst)):
-        if name not in src:
-            msgs.append(f"only in desktop: {name}")
-            bad += 1
-            continue
-        if name not in dst:
-            msgs.append(f"only in docs: {name}")
-            bad += 1
-            continue
-        if src[name].read_text(encoding="utf-8") != dst[name].read_text(encoding="utf-8"):
-            msgs.append(f"drift: {name}")
-            bad += 1
-        else:
-            msgs.append(f"ok: {name}")
+    for dest in dests:
+        where = dest.relative_to(ROOT).as_posix()
+        dst = {p.name: p for p in dest.glob("*.md") if p.name != "README.md"}
+        for name in sorted(set(src) | set(dst)):
+            if name not in src:
+                msgs.append(f"only in {where}: {name}")
+                bad += 1
+                continue
+            if name not in dst:
+                msgs.append(f"only in docs, missing from {where}: {name}")
+                bad += 1
+                continue
+            if src[name].read_text(encoding="utf-8") != dst[name].read_text(encoding="utf-8"):
+                msgs.append(f"drift in {where}: {name}")
+                bad += 1
+            else:
+                msgs.append(f"ok: {where}/{name}")
     return CheckResult(
         "help-manual",
         bad == 0,
@@ -134,26 +145,29 @@ def check_version() -> CheckResult:
 
 
 def _parse_builtin_commands() -> list[dict]:
-    """Parse builtinCommands from the Go runtime's catalog_static.go.
+    """Parse the three slash-command slices of the Go runtime.
 
     The Go runtime answers slash commands, so its list is the one the manual
     has to match. Each entry gives a "name" and an "aliases" []string{...}.
     """
-    text = SLASH_CATALOG.read_text(encoding="utf-8")
-    m = re.search(r"var builtinCommands = \[\]map\[string\]any\{(.*?)\n\}", text, re.DOTALL)
-    if not m:
-        raise RuntimeError("builtinCommands not found in catalog_static.go")
-    body = m.group(1)
     cmds: list[dict] = []
-    for name_m in re.finditer(r'"name":\s*"(/[^"]+)"', body):
-        rest = body[name_m.end():]
-        nxt = re.search(r'"name":', rest)
-        chunk = rest[: nxt.start()] if nxt else rest
-        al = re.search(r'"aliases":\s*\[\]string\{([^}]*)\}', chunk)
-        aliases = re.findall(r'"(/[^"]+)"', al.group(1)) if al else []
-        cmds.append({"name": name_m.group(1), "aliases": aliases})
-    if not cmds:
-        raise RuntimeError("builtinCommands in catalog_static.go is empty")
+    for path, var in SLASH_SOURCES:
+        text = path.read_text(encoding="utf-8")
+        m = re.search(rf"var {var} = \[\]map\[string\]any\{{(.*?)\n\}}", text, re.DOTALL)
+        if not m:
+            raise RuntimeError(f"{var} not found in {path.name}")
+        body = m.group(1)
+        found = 0
+        for name_m in re.finditer(r'"name":\s*"(/[^"]+)"', body):
+            rest = body[name_m.end():]
+            nxt = re.search(r'"name":', rest)
+            chunk = rest[: nxt.start()] if nxt else rest
+            al = re.search(r'"aliases":\s*\[\]string\{([^}]*)\}', chunk)
+            aliases = re.findall(r'"(/[^"]+)"', al.group(1)) if al else []
+            cmds.append({"name": name_m.group(1), "aliases": aliases})
+            found += 1
+        if not found:
+            raise RuntimeError(f"{var} in {path.name} is empty")
     return cmds
 
 
@@ -220,7 +234,7 @@ def check_slash_commands() -> CheckResult:
     for d in sorted(flat_doc):
         if d not in code_set:
             # /session-import is an alias — already in code_set if parsed
-            msgs.append(f"warn: documented but not in builtinCommands: {d}")
+            msgs.append(f"warn: documented but not in the Go slash command slices: {d}")
             # treat unknown documented commands as failures so docs can't invent APIs
             bad += 1
 
@@ -229,7 +243,8 @@ def check_slash_commands() -> CheckResult:
         bad == 0,
         msgs,
         "Update docs/manual/11-reference-commands.md to match "
-        "builtinCommands in native/go/httpapi/catalog_static.go",
+        "builtinSlashCommands, moreSlashCommands and fullSlashCommands in "
+        "native/go/httpapi/session_command*.go",
     )
 
 
@@ -626,7 +641,7 @@ def run_checks(names: list[str] | None = None, *, quiet: bool = False) -> int:
 
 def do_sync() -> int:
     """Safe auto-fixes only: help manual copy. Everything else is manual."""
-    print("Syncing help manual copies (docs/manual → desktop articles)…")
+    print("Syncing help manual copies (docs/manual → desktop and remedyui articles)…")
     script = ROOT / "scripts" / "sync_help_manual.py"
     proc = subprocess.run([sys.executable, str(script)], cwd=ROOT)
     if proc.returncode != 0:
@@ -653,10 +668,10 @@ def main() -> None:
 
     if args[0] in ("--list", "list"):
         print("Documentation sync surfaces:\n")
-        print("  help      docs/manual ↔ desktop/src/help/articles")
+        print("  help      docs/manual ↔ desktop/src/help/articles + desktop/remedyui/help/articles")
         print("  version   pyproject / package.json / tauri / cargo / latest.json")
         print("  catalog   docs/manual chapters ↔ catalog.ts META ids")
-        print("  commands  Go builtinCommands ↔ manual/11 + README slash table")
+        print("  commands  Go slash command slices ↔ manual/11 + README slash table")
         print("  hotkeys   hotkeys.ts ↔ manual/12-reference-shortcuts")
         print("  tests     README '~N tests' vs live pytest collection")
         print("  readme    README mentions sync/check scripts")

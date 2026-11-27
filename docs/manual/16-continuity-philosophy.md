@@ -75,9 +75,8 @@ You should return to progress, not a queue of clarifying questions.
 
 ## What to do as a human partner
 
-- Natural preferences (“I prefer TypeScript”) are learned; `/remember` / `/pin` for hard pins  
+- Natural preferences (“I prefer TypeScript”) are learned; `/remember` for hard pins  
 - `/whoami` / `/forget` to inspect and correct  
-- Use `/compact` when switching big tasks  
 - Prefer project folders so workspace continuity compounds  
 - Leave Tool process on **Off** unless debugging  
 - Say “work alone” / “handle this on your own” when you need unattended progress 
