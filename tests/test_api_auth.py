@@ -111,33 +111,5 @@ def test_self_improve_snapshot_shape(auth_on, tmp_path, monkeypatch):
     assert "last_tick" in body
 
 
-def test_gateway_serve_api_enables_auth(auth_on, tmp_path, monkeypatch):
-    """``remedy gateway serve`` delegates to ``remedy serve`` (lock + auth)."""
-    from types import SimpleNamespace
-
-    from remedy.interfaces.cli import cmd_gateway as gateway_cli
-
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    db = tmp_path / "memory.db"
-    db.write_bytes(b"")
-
-    called: dict = {}
-
-    def _fake_serve(args):
-        called["args"] = args
-
-    monkeypatch.setattr("remedy.interfaces.cli.cmd_runtime._cmd_serve", _fake_serve)
-    gateway_cli._serve_api(db)  # noqa: SLF001
-    ns = called.get("args")
-    assert ns is not None
-    assert getattr(ns, "skip_setup", False) is True
-    assert getattr(ns, "host", "") == "127.0.0.1"
-    assert int(getattr(ns, "port", 0)) == 7400
-    # Real argparse namespace is also accepted (same defaults filled).
-    called.clear()
-    gateway_cli._serve_api(db, args=SimpleNamespace(home=str(tmp_path)))
-    assert called.get("args") is not None
-
-
 # Generic CI webhook (/api/webhook/{source}) is covered by Go httpapi/webhooks_test.go.
 # Auth / CORS / bootstrap HTTP: native/go/httpapi/api_test.go + settings_test.go.

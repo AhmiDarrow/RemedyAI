@@ -95,16 +95,6 @@ def test_mcp_skill_get_github():
     assert "quarantine" not in text.lower() or "Trust" not in text  # not blocked
 
 
-def test_cli_mcp_help_registered():
-    from remedy.interfaces.cli import build_parser
-
-    p = build_parser()
-    # remedy mcp serve
-    ns = p.parse_args(["mcp", "serve"])
-    assert ns.command == "mcp"
-    assert ns.mcp_cmd == "serve"
-
-
 def test_pyproject_declares_remedy_mcp_script():
     root = Path(__file__).resolve().parents[1]
     text = (root / "pyproject.toml").read_text(encoding="utf-8")

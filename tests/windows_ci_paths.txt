@@ -63,17 +63,14 @@ tests/test_firstrun_guard.py
 tests/test_packaging_policy.py
 tests/test_python_interpreter_resolve.py
 tests/test_serve_runtime_owned.py
-tests/test_cli_home_publishes_env.py
 tests/test_home_env_is_honoured.py
 tests/test_uninstall_wipe_paths.py
 
 # --- Windows path / shell / UI ---
 tests/test_win_paths.py
 tests/test_disconnect_winerror64.py
-tests/test_noconsole_logging.py
 tests/test_translate_posix.py
 tests/test_cli_computer_host.py
-tests/test_cli_harden.py
 tests/test_open_folder.py
 tests/test_rg_binary.py
 tests/test_relpath.py

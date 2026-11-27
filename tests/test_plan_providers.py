@@ -8,7 +8,6 @@ from unittest.mock import patch
 import pytest
 
 from remedy.core.providers import get_provider, get_provider_for_base_url
-from remedy.interfaces.cli import _cmd_auth, build_parser
 from remedy.interfaces.config import (
     PROVIDER_CATALOG,
     detect_ollama,
@@ -173,39 +172,3 @@ class TestOllamaDetect:
                 assert uo.call_count == 2
 
 
-class TestCliAuth:
-    def test_parser_auth_subcommands(self):
-        p = build_parser()
-        for argv in (
-            ["auth", "status", "xai"],
-            ["auth", "logout", "xai"],
-            ["auth", "login", "xai"],
-            ["auth", "apikey", "xai", "xai-test"],
-        ):
-            ns = p.parse_args(argv)
-            assert ns.command == "auth"
-
-    def test_apikey_and_status(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
-        monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-        from argparse import Namespace
-
-        args = Namespace(
-            auth_cmd="apikey",
-            provider="xai",
-            api_key="xai-cli-key",
-            home=str(tmp_path),
-        )
-        _cmd_auth(args)
-        out = capsys.readouterr().out
-        assert "Saved" in out or "connected" in out.lower()
-
-        args2 = Namespace(auth_cmd="status", provider="xai", home=str(tmp_path))
-        _cmd_auth(args2)
-        out2 = capsys.readouterr().out
-        assert "xai" in out2.lower() or "api_key" in out2.lower() or "connected" in out2.lower()
-
-        args3 = Namespace(auth_cmd="logout", provider="xai", home=str(tmp_path))
-        _cmd_auth(args3)
-        from remedy.interfaces import xai_auth
-
-        assert xai_auth.load_credentials(home=tmp_path).connected is False

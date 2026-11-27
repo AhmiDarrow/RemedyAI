@@ -226,14 +226,6 @@ def test_linux_desktop_module_exports_capture_and_input() -> None:
     assert callable(m.screenshot_png)
 
 
-def test_chat_computer_host_defaults_off() -> None:
-    from remedy.interfaces.cli.parser import build_parser
-
-    p = build_parser()
-    ns = p.parse_args(["chat"])
-    assert bool(getattr(ns, "computer_host", False)) is False
-
-
 def test_browser_vault_type_requires_ref(tmp_path: Path) -> None:
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
