@@ -90,6 +90,9 @@ type allow struct{}
 func (allow) Decide(context.Context, cognition.ToolCall) cognition.Decision { return cognition.Allow }
 func BenchmarkReActCompleteTurn(b *testing.B) {
 	engine := cognition.Engine{Model: completeModel{}, Tools: noTools{}, Policy: allow{}, Now: func() time.Time { return time.Unix(1, 0) }}
+	// One turn first: the tokenizer loads its vocabulary once per process
+	// (about 28 ms), which is not what a turn costs.
+	_ = engine.Run(context.Background(), "goal")
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = engine.Run(context.Background(), "goal")
