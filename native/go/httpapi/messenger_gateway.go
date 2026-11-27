@@ -328,6 +328,11 @@ func trimUser(username string) *string {
 
 // attachMessengerToFocused mirrors Python session_bridge._attach_to_focused_session.
 func (s *Server) attachMessengerToFocused(channel, chatID, username string) (ChatSession, bool, error) {
+	// The owner's choice (messenger_join_desktop): joining shows the sender the
+	// open conversation's history and mirrors its replies to their chat.
+	if !coerceBool(resolveAdvanced(advancedByKey()["messenger_join_desktop"], LoadConfig(s.homeDir)), true) {
+		return ChatSession{}, false, nil
+	}
 	focused := strings.TrimSpace(s.FocusedSessionID())
 	if focused == "" || strings.HasPrefix(focused, "msg:") {
 		return ChatSession{}, false, nil

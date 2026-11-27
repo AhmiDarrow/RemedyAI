@@ -63,7 +63,7 @@ func TestRegistryToolExecutorReportsParentCancel(t *testing.T) {
 }
 
 func TestDefaultRegistryDeadlines(t *testing.T) {
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,9 +117,9 @@ func TestBindToolInputStripsServerOwnedFields(t *testing.T) {
 		return out
 	}
 
-	ws := bindToolInput(cognition.ToolCall{Name: "workspace.read", Input: []byte(`{"path":"a.txt","workspace_root":"` + jsonEscape(evil) + `","home_dir":"` + jsonEscape(evil) + `"}`)}, toolBinding{Root: root, Scope: "project"})
+	ws := bindToolInput(cognition.ToolCall{Name: "read", Input: []byte(`{"path":"a.txt","workspace_root":"` + jsonEscape(evil) + `","home_dir":"` + jsonEscape(evil) + `"}`)}, toolBinding{Root: root, Scope: "project"})
 	args := decode(ws.Input)
-	if args["workspace_root"] != root || args["project_path"] != root {
+	if args["workspace_root"] != root {
 		t.Fatalf("workspace root not rebound: %#v", args)
 	}
 	if _, ok := args["home_dir"]; ok {
@@ -263,7 +263,7 @@ func TestHiveDeniedTools(t *testing.T) {
 	if hiveDeniedTool("computer.snapshot") || hiveDeniedTool("computer.uia.focused") || hiveDeniedTool("computer.print_window") {
 		t.Fatal("hive may still observe the screen")
 	}
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestHiveDeniedTools(t *testing.T) {
 }
 
 func TestSensitiveMutationAsksInAutoAndIsExcludedFromModeSweep(t *testing.T) {
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestShellExecCancelledThroughExecutor(t *testing.T) {
 		t.Skip("remedy_core not built")
 	}
 	t.Setenv("REMEDY_HOME", t.TempDir())
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,12 +387,12 @@ func TestRegistryToolExecutorSurvivesToolPanic(t *testing.T) {
 }
 
 func TestModelTurnCannotCallToolsItWasNotShown(t *testing.T) {
-	reg, err := NewDefaultToolRegistry(nil)
+	reg, err := NewDefaultToolRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The Python worker registers this in production; stub it so the
-	// registry lookup is not what turns it away.
+	// Nothing registers this internal id any more; stub it so the registry
+	// lookup is not what turns it away.
 	for _, id := range []string{"prompt.turn_end"} {
 		if err := reg.Register(tools.Descriptor{
 			ID: id, Version: 1, Description: "stub", Risk: tools.RiskReadOnly, Runtime: tools.RuntimeGo,
@@ -413,7 +413,7 @@ func TestModelTurnCannotCallToolsItWasNotShown(t *testing.T) {
 		}
 		for _, call := range []cognition.ToolCall{
 			{ID: "1", Name: "shell.exec", Input: []byte(`{"argv":["curl","https://example.com"]}`)},
-			{ID: "2", Name: "workspace.write", Input: []byte(`{"path":"a.txt","content":"x"}`)},
+			{ID: "2", Name: "json.canonical", Input: []byte(`{"value":{"a":1}}`)},
 			{ID: "3", Name: "prompt.turn_end", Input: []byte(`{"message":"x"}`)},
 			{ID: "4", Name: "setup.session", Input: []byte(`{"action":"status"}`)},
 		} {

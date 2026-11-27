@@ -90,14 +90,13 @@ is not built or shipped** — there is no Python fallback launch path in
 installers. `tauri:dev` prefers staged `remedy-runtime` the same way; the live
 Python venv is only a last-resort launcher for `remedy serve` →
 `remedy-runtime`. FastAPI `create_app` / `interfaces.api` are deleted; Go owns `:7400`.
-Python worker entry: `python -m remedy.runtime.rmdy_tool_worker`.
+The runtime starts no Python worker, and no installer bundles one.
 
 **Worker notes:**
 
 | Gap | Why it still matters |
 |-----|----------------------|
 | Full `/api/*` route parity | Go covers the production Desktop surface; Desktop-called paths still missing on Go are listed in `tests/test_desktop_api_contract.py` `KNOWN_GO_GAPS` (shrink only). FastAPI API harness is deleted |
-| Python worker over RMDY | Prompt assembly, soul/skills text, voice/vision/telephony still need a supervised worker |
 | Zig in-process from Go | Some host primitives still load via Python `host_binding` |
 
 

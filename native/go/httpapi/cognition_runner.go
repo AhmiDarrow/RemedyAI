@@ -34,17 +34,16 @@ type CognitionTurnRunner struct {
 	Approvals *approvalQueue
 	// forcePrimary, when set, is the first model attempt (tests). Production
 	// leaves it nil so modelForTurn resolves from HomeDir / Model.
-	forcePrimary   cognition.Model
-	Tools          cognition.ToolExecutor
-	Policy         cognition.Policy
-	Config         cognition.Config
-	Registry       *tools.Registry
-	promptAssemble *tools.RMDYExecutor
+	forcePrimary cognition.Model
+	Tools        cognition.ToolExecutor
+	Policy       cognition.Policy
+	Config       cognition.Config
+	Registry     *tools.Registry
 	// LiveContext is the host-observed page for money/credential checkpoints.
 	LiveContext func(sessionID string) string
 	// PromptSources feeds the native prompt (memory, plan, checklist). The
 	// server sets it; a bare runner in a test has none and sends no system
-	// prompt unless a worker is attached.
+	// prompt.
 	PromptSources prompt.Sources
 	// reachHiddenTools lets a test drive the demo/internal tools through a
 	// turn to check their plumbing. Production leaves it false, so a model
@@ -53,12 +52,11 @@ type CognitionTurnRunner struct {
 }
 
 // NewCognitionTurnRunner builds a runner on the real Tool ABI registry (Go
-// builtins + RuntimeZig host tools in-process). Pass AttachPythonWorker to add
-// RuntimePython tools over RMDY frames. Missing Tools/Policy is an error —
-// no Echo/DenyAll fallback. Zig-owned tools fail closed when remedy_core is
-// unavailable (no Python soft fallback).
+// builtins + RuntimeZig host tools in-process). Missing Tools/Policy is an
+// error — no Echo/DenyAll fallback. Zig-owned tools fail closed when
+// remedy_core is unavailable.
 func NewCognitionTurnRunner(model cognition.Model) *CognitionTurnRunner {
-	registry, err := NewDefaultToolRegistry(nil)
+	registry, err := NewDefaultToolRegistry()
 	if err != nil {
 		panic("tool ABI builtins failed to register: " + err.Error())
 	}
@@ -70,51 +68,6 @@ func NewCognitionTurnRunner(model cognition.Model) *CognitionTurnRunner {
 	}
 	r.syncModelToolSchemas()
 	return r
-}
-
-// AttachPythonWorker registers RuntimePython tools that execute over RMDY frames.
-// Also enables prompt.assemble before each model turn (fail closed on error).
-func (r *CognitionTurnRunner) AttachPythonWorker(caller tools.FrameCaller) error {
-	if r == nil || r.Registry == nil {
-		return errors.New("cognition turn runner has no tool registry")
-	}
-	if caller == nil {
-		return errors.New("python worker frame caller is required")
-	}
-	if err := tools.RegisterPythonWorkerTools(r.Registry, caller); err != nil {
-		return err
-	}
-	r.promptAssemble = tools.NewRMDYExecutor(caller)
-	r.Tools = &RegistryToolExecutor{Registry: r.Registry, TokenFor: RuntimeCapabilityToken}
-	r.Policy = &RegistryPolicy{Registry: r.Registry, Approvals: r.Approvals}
-	r.syncModelToolSchemas()
-	return nil
-}
-
-func (r *CognitionTurnRunner) rmdyCall(ctx context.Context, toolID string, input map[string]any) (map[string]any, error) {
-	if r == nil {
-		return nil, errors.New("rmdy prompt worker unavailable")
-	}
-	if r.promptAssemble == nil {
-		return nil, errors.New("rmdy prompt worker unavailable")
-	}
-	raw, err := json.Marshal(input)
-	if err != nil {
-		return nil, err
-	}
-	res, err := r.promptAssemble.Execute(ctx, tools.Request{
-		ToolID:  toolID,
-		Version: 1,
-		Input:   raw,
-	})
-	if err != nil {
-		return nil, err
-	}
-	var out map[string]any
-	if err := json.Unmarshal(res.Output, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 // modelVisibleTool reports whether a Tool ABI id should be advertised to the
@@ -156,8 +109,7 @@ func (r *CognitionTurnRunner) syncModelToolSchemas() {
 
 // frontierCodingPack is the coding surface a frontier model works from: the
 // file tools, the shell and its background jobs, the checklist and the
-// hand-off. It joins providers.CodingPackABI rather than replacing it, so a
-// local model that only knows workspace.* still gets its own tools.
+// hand-off, on top of providers.CodingPackABI.
 var frontierCodingPack = map[string]struct{}{
 	"read": {}, "edit": {}, "write": {}, "glob": {}, "grep": {},
 	"bash": {}, "jobs": {}, "todo": {}, "delegate": {}, "react": {},
@@ -173,13 +125,10 @@ func isCodingPackTool(id string) bool {
 			return true
 		}
 	}
-	if strings.HasPrefix(id, "workspace.") || strings.HasPrefix(id, "mission.") {
-		return true
-	}
 	if strings.HasPrefix(id, "memory.") || strings.HasPrefix(id, "skill.") {
 		return true
 	}
-	return id == "shell.exec" || id == "web.fetch" || id == "web.search"
+	return id == "web.fetch" || id == "web.search"
 }
 
 func isVisionHelperCompat(oc *providers.OpenAICompat) bool {
@@ -236,9 +185,9 @@ type assembledPrompt struct {
 	Context string
 }
 
-func (r *CognitionTurnRunner) assemblePrompt(ctx context.Context, req TurnRequest) (assembledPrompt, error) {
-	if r == nil || (r.promptAssemble == nil && !r.nativeOn()) {
-		return assembledPrompt{}, errors.New("prompt.assemble requires the native prompt or an attached Python worker")
+func (r *CognitionTurnRunner) assemblePrompt(req TurnRequest) (assembledPrompt, error) {
+	if r == nil || !r.nativeOn() {
+		return assembledPrompt{}, errors.New("the prompt needs its sources (memory, plan, checklist)")
 	}
 	input := map[string]any{
 		"message":    req.Prompt,
@@ -255,47 +204,14 @@ func (r *CognitionTurnRunner) assemblePrompt(ctx context.Context, req TurnReques
 	if proj := strings.TrimSpace(req.ProjectPath); proj != "" && !isUnsetProjectPath(proj) {
 		input["project_path"] = proj
 	}
-	if r.nativeOn() {
-		n, err := prompt.AssembleNative(r.nativePromptEnv(LoadConfig(r.HomeDir)), input)
-		if err != nil {
-			return assembledPrompt{}, fmt.Errorf("native prompt: %w", err)
-		}
-		if strings.TrimSpace(n.System) == "" {
-			return assembledPrompt{}, errors.New("native prompt returned empty system")
-		}
-		return assembledPrompt{System: n.System, Context: n.Context, Goal: firstNonEmpty(n.Goal, req.Prompt)}, nil
+	n, err := prompt.AssembleNative(r.nativePromptEnv(LoadConfig(r.HomeDir)), input)
+	if err != nil {
+		return assembledPrompt{}, fmt.Errorf("native prompt: %w", err)
 	}
-	var output json.RawMessage
-	{
-		raw, err := json.Marshal(input)
-		if err != nil {
-			return assembledPrompt{}, err
-		}
-		res, err := r.promptAssemble.Execute(ctx, tools.Request{
-			ToolID:  "prompt.assemble",
-			Version: 1,
-			Input:   raw,
-		})
-		if err != nil {
-			return assembledPrompt{}, err
-		}
-		output = res.Output
+	if strings.TrimSpace(n.System) == "" {
+		return assembledPrompt{}, errors.New("native prompt returned empty system")
 	}
-	var out struct {
-		System string `json:"system"`
-		Goal   string `json:"goal"`
-	}
-	if err := json.Unmarshal(output, &out); err != nil {
-		return assembledPrompt{}, fmt.Errorf("prompt.assemble decode: %w", err)
-	}
-	if strings.TrimSpace(out.System) == "" {
-		return assembledPrompt{}, errors.New("prompt.assemble returned empty system")
-	}
-	goal := out.Goal
-	if strings.TrimSpace(goal) == "" {
-		goal = req.Prompt
-	}
-	return assembledPrompt{System: out.System, Goal: goal}, nil
+	return assembledPrompt{System: n.System, Context: n.Context, Goal: firstNonEmpty(n.Goal, req.Prompt)}, nil
 }
 
 func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit func(string) error) error {
@@ -317,11 +233,11 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 
 	seed := cognition.Turn{}
 	userText := req.Prompt
-	// Production serve always AttachPythonWorker. When attached, assemble is
-	// mandatory — never fall back to raw prompt-only.
+	// With its sources the prompt is mandatory — never fall back to the raw
+	// message alone.
 	turnContext := ""
-	if r.promptAssemble != nil || r.nativeOn() {
-		assembled, err := r.assemblePrompt(ctx, req)
+	if r.nativeOn() {
+		assembled, err := r.assemblePrompt(req)
 		if err != nil {
 			return fmt.Errorf("prompt.assemble required: %w", err)
 		}
@@ -329,8 +245,7 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 		userText = assembled.Goal
 		turnContext = assembled.Context
 	}
-	// Fire-and-forget so the reply is not delayed. The soul update runs
-	// natively; the Python turn_end runs only when a worker is attached.
+	// Runs after the reply; a failure never changes the finished turn.
 	defer r.scheduleTurnEnd(req, &out)
 	seed.Messages = withTurnContext(seedTranscript(req, userText, r.HomeDir), turnContext)
 
@@ -452,7 +367,7 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 // scheduleTurnEnd fires post-turn learning without blocking the reply.
 // Failures go to the learn log.
 func (r *CognitionTurnRunner) scheduleTurnEnd(req TurnRequest, out *cognition.Outcome) {
-	if r == nil || out == nil || (r.promptAssemble == nil && strings.TrimSpace(r.HomeDir) == "") {
+	if r == nil || out == nil || strings.TrimSpace(r.HomeDir) == "" {
 		return
 	}
 	snapshot := *out
@@ -466,17 +381,12 @@ func (r *CognitionTurnRunner) scheduleTurnEnd(req TurnRequest, out *cognition.Ou
 	}()
 	if r.nativeOn() {
 		// Skill learning is local file work too, and for the same reason it
-		// finishes before the turn returns. No Python is involved.
+		// finishes before the turn returns.
 		func() {
 			defer func() { _ = recover() }()
 			r.learnFromTurn(reqCopy, snapshot)
 		}()
-		return
 	}
-	if r.promptAssemble == nil {
-		return
-	}
-	go r.finishTurn(reqCopy, snapshot)
 }
 
 // learnFromTurn turns a real stretch of successful tool work into a learned
@@ -545,75 +455,8 @@ func activatedSkills(out cognition.Outcome) []string {
 	return names
 }
 
-// finishTurn asks the Python worker (when attached) to ingest residue, record
-// the skill genome and run the LearningLoop. The soul was already updated
-// natively. It must never affect the already-finished turn.
-func (r *CognitionTurnRunner) finishTurn(req TurnRequest, out cognition.Outcome) {
-	if r == nil || r.promptAssemble == nil {
-		return
-	}
-	defer func() { _ = recover() }()
-	steps := toolStepsFromOutcome(out)
-	ctx, cancel := context.WithTimeout(context.Background(), r.learnTimeout("turn_end_timeout_s", 30*time.Second))
-	defer cancel()
-	input := map[string]any{
-		"message":        req.Prompt,
-		"goal":           req.Prompt,
-		"user_text":      req.Prompt,
-		"assistant_text": strings.TrimSpace(out.Text),
-		"session_id":     req.SessionID,
-		"plan_mode":      req.PlanMode,
-		"chat_mode":      req.ChatMode,
-		"tool_steps":     steps,
-		// The Go runtime owns soul/field.json now; Python must not write it.
-		"soul_native": true,
-	}
-	if proj := strings.TrimSpace(req.ProjectPath); proj != "" && !isUnsetProjectPath(proj) {
-		input["project_path"] = proj
-	}
-	started := time.Now()
-	_, err := r.rmdyCall(ctx, "prompt.turn_end", input)
-	r.noteLearnCall("turn_end", started, ctx, err)
-}
-
-// scheduleAfterToolBatch fires mid-turn metabolism after a tool batch
-// without blocking the next model round. Failures are ignored.
-func (r *CognitionTurnRunner) scheduleAfterToolBatch(req TurnRequest, calls []cognition.ToolCall, results []cognition.ToolResult) {
-	if r == nil || r.promptAssemble == nil || len(results) == 0 {
-		return
-	}
-	calls = append([]cognition.ToolCall(nil), calls...)
-	results = append([]cognition.ToolResult(nil), results...)
-	go r.finishToolBatch(req, calls, results)
-}
-
-func (r *CognitionTurnRunner) finishToolBatch(req TurnRequest, calls []cognition.ToolCall, results []cognition.ToolResult) {
-	// The Python hook fed an evidence ledger that only its own prompt read.
-	// The native prompt has no such block, so there is nothing to feed.
-	if r == nil || r.promptAssemble == nil || r.nativeOn() {
-		return
-	}
-	defer func() { _ = recover() }()
-	ctx, cancel := context.WithTimeout(context.Background(), r.learnTimeout("after_tool_batch_timeout_s", 10*time.Second))
-	defer cancel()
-	input := map[string]any{
-		"session_id": req.SessionID,
-		"results":    toolBatchInput(calls, results),
-	}
-	if home := strings.TrimSpace(r.HomeDir); home != "" {
-		input["home_dir"] = home
-		input["_go_bound"] = true
-	}
-	if proj := strings.TrimSpace(req.ProjectPath); proj != "" && !isUnsetProjectPath(proj) {
-		input["project_path"] = proj
-	}
-	started := time.Now()
-	_, err := r.rmdyCall(ctx, "prompt.after_tool_batch", input)
-	r.noteLearnCall("after_tool_batch", started, ctx, err)
-}
-
-// noteLearnCall writes a local learn-log line only when the RMDY call
-// timed out or failed. Successful runs are recorded by the Python worker.
+// noteLearnCall writes a learn-log line when a learning step timed out or
+// failed.
 func (r *CognitionTurnRunner) noteLearnCall(kind string, started time.Time, ctx context.Context, err error) {
 	if r == nil {
 		return
@@ -628,54 +471,6 @@ func (r *CognitionTurnRunner) noteLearnCall(kind string, started time.Time, ctx 
 		return
 	}
 	appendLearnLog(home, kind, time.Since(started), timeout, err, nil)
-}
-
-func toolBatchInput(calls []cognition.ToolCall, results []cognition.ToolResult) []map[string]any {
-	out := make([]map[string]any, 0, len(results))
-	for i, res := range results {
-		name := strings.TrimSpace(res.Name)
-		var input any
-		id := strings.TrimSpace(res.ID)
-		if i < len(calls) {
-			if name == "" {
-				name = strings.TrimSpace(calls[i].Name)
-			}
-			if id == "" {
-				id = strings.TrimSpace(calls[i].ID)
-			}
-			if len(calls[i].Input) > 0 {
-				var parsed any
-				if json.Unmarshal(calls[i].Input, &parsed) == nil {
-					input = parsed
-				}
-			}
-		}
-		if name == "" {
-			continue
-		}
-		tail := strings.TrimSpace(string(res.Output))
-		if len(tail) > 500 {
-			tail = tail[:500]
-		}
-		ok := !res.IsError && strings.TrimSpace(res.Err) == ""
-		row := map[string]any{
-			"tool": name, "name": name, "ok": ok, "success": ok,
-			"result": tail, "tool_call_id": id,
-		}
-		if input != nil {
-			row["arguments"] = input
-			row["input"] = input
-		}
-		if !ok {
-			errText := strings.TrimSpace(res.Err)
-			if errText == "" {
-				errText = tail
-			}
-			row["error"] = errText
-		}
-		out = append(out, row)
-	}
-	return out
 }
 
 func toolStepsFromOutcome(out cognition.Outcome) []map[string]any {
@@ -992,17 +787,6 @@ func (r *CognitionTurnRunner) turnPolicy(req TurnRequest) cognition.Policy {
 	}
 }
 
-func (r *CognitionTurnRunner) learnTimeout(key string, fallback time.Duration) time.Duration {
-	if r == nil {
-		return fallback
-	}
-	d := resolveAdvancedSeconds(loadHomeConfig(r.HomeDir), key)
-	if d <= 0 {
-		return fallback
-	}
-	return d
-}
-
 // untrustedTurnSteps is the model-round ceiling for a turn started by a
 // messenger contact, another bot or a hive daughter without its own budget.
 const untrustedTurnSteps = 200
@@ -1161,68 +945,15 @@ func (r *CognitionTurnRunner) runEngine(
 				r.advertiseToolSurface(live, true)
 				safeEmit("@@status:Switched to coding tool pack for a leaner mid-build context…\n")
 			}
-			r.slimEpoch(ctx, req, epoch, totalSteps, ledger, turn, safeEmit)
 		},
 		ContinueGate: func(gateCtx context.Context, turn cognition.Turn, toolCount int, last []cognition.ToolResult, verifySeen bool) (bool, string) {
 			return r.shouldContinue(gateCtx, req, turn, toolCount, last, verifySeen, gate)
-		},
-		AfterToolBatch: func(_ context.Context, calls []cognition.ToolCall, results []cognition.ToolResult) {
-			r.scheduleAfterToolBatch(req, calls, results)
 		},
 	}
 	return engine.RunTurn(ctx, seed)
 }
 
-// slimEpoch runs the Memory Harness prune/offload/brief over RMDY (fail-open).
-func (r *CognitionTurnRunner) slimEpoch(
-	ctx context.Context,
-	req TurnRequest,
-	epoch, totalSteps int,
-	ledger []string,
-	turn *cognition.Turn,
-	safeEmit func(string),
-) {
-	// The native system prompt stays fixed for the whole turn: rewriting it
-	// mid-turn would discard the provider's cache and every thinking block.
-	// The engine's own compaction carries the long turn.
-	if r.promptAssemble == nil || turn == nil || r.nativeOn() {
-		return
-	}
-	input := map[string]any{
-		"system":      turn.System,
-		"goal":        turn.FirstUserText(),
-		"text":        turn.LastAssistantText(),
-		"ledger":      ledger,
-		"session_id":  req.SessionID,
-		"epoch":       epoch,
-		"total_steps": totalSteps,
-		"home_dir":    r.HomeDir,
-	}
-	if req.ProjectPath != "" {
-		input["project_path"] = req.ProjectPath
-	}
-	if req.Provider != nil {
-		input["provider"] = *req.Provider
-	}
-	if req.Model != nil {
-		input["model"] = *req.Model
-	}
-	out, err := r.rmdyCall(ctx, "prompt.slim_epoch", input)
-	if err != nil || out == nil {
-		return
-	}
-	if ok, _ := out["ok"].(bool); !ok {
-		return
-	}
-	// Only the system block is applied: the transcript is append-only and the
-	// harness brief lands in the system tail.
-	if sys, _ := out["system"].(string); strings.TrimSpace(sys) != "" {
-		turn.System = sys
-	}
-	safeEmit("@@status:Memory harness slimmed context (brief + prune)…\n")
-}
-
-// shouldContinue asks RMDY whether a text-only completion left work unfinished.
+// shouldContinue decides whether a text-only completion left work unfinished.
 func (r *CognitionTurnRunner) shouldContinue(
 	ctx context.Context,
 	req TurnRequest,
@@ -1232,7 +963,7 @@ func (r *CognitionTurnRunner) shouldContinue(
 	verifySeen bool,
 	gate *prompt.ContinueState,
 ) (bool, string) {
-	if req.ChatMode || (r.promptAssemble == nil && !r.nativeOn()) {
+	if req.ChatMode || !r.nativeOn() {
 		// With nothing to judge the reply, never re-arm on tool_count alone
 		// (explore thrash).
 		return false, ""
@@ -1255,19 +986,10 @@ func (r *CognitionTurnRunner) shouldContinue(
 		"home_dir":     r.HomeDir,
 		"project_path": req.ProjectPath,
 	}
-	if r.nativeOn() {
-		if gate == nil {
-			gate = &prompt.ContinueState{}
-		}
-		cont, nudge, _ := prompt.DecideContinue(input, gate)
-		return cont, nudge
+	if gate == nil {
+		gate = &prompt.ContinueState{}
 	}
-	out, err := r.rmdyCall(ctx, "prompt.should_continue", input)
-	if err != nil || out == nil {
-		return false, ""
-	}
-	cont, _ := out["continue"].(bool)
-	nudge, _ := out["nudge"].(string)
+	cont, nudge, _ := prompt.DecideContinue(input, gate)
 	return cont, nudge
 }
 
