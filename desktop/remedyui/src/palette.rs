@@ -293,7 +293,7 @@ mod tests {
             assert!(ids.contains(&id), "missing {id}");
         }
         assert!(ids.iter().any(|id| id.starts_with("session-")));
-        assert!(ids.iter().any(|id| *id == "agent-remedy"));
+        assert!(ids.iter().all(|id| !id.starts_with("agent-")));
         assert!(ids.iter().any(|id| *id == "model-remedy"));
         let found = filter(&items, "slash");
         assert!(found.iter().any(|c| c.id == "help-commands"));

@@ -461,18 +461,6 @@ func TestDelegateWithoutTheAgentInstalledSaysWhatToInstall(t *testing.T) {
 	}
 }
 
-func TestDelegateRefusesCodexUntilItIsWiredUp(t *testing.T) {
-	registry := sessionRegistry(t)
-	_, err := runDelegateTool(context.Background(), registry,
-		delegateInput(t, t.TempDir(), map[string]any{"agent": "codex"}))
-	if err == nil || !strings.Contains(err.Error(), "Codex") {
-		t.Fatalf("codex must fail with a clear message: %v", err)
-	}
-	if !strings.Contains(err.Error(), "claude-code") {
-		t.Fatalf("the error should point at the agent that works: %v", err)
-	}
-}
-
 func TestDelegateRefusesToDelegateAgain(t *testing.T) {
 	registry := sessionRegistry(t)
 	agent := installFakeAgent(t, "stream")

@@ -925,6 +925,6 @@ mod tests {
         assert_eq!(status.last_method, "o200k_base");
         assert_eq!(status.active_provider.as_deref(), Some("local"));
         assert_eq!(status.active_model, None);
-        assert_eq!(status.note.as_deref(), Some("Remedy-owned BBPE packs only"));
+        assert_eq!(status.note.as_deref(), Some("Counted with the o200k_base encoding"));
     }
 }

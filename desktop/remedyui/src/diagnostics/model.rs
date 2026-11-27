@@ -1197,14 +1197,8 @@ mod tests {
                 .map(|r| r.value.as_str()),
             Some("grok/grok-4")
         );
-        assert_eq!(
-            view.server
-                .rows
-                .iter()
-                .find(|r| r.label == "RSS")
-                .map(|r| r.value.as_str()),
-            Some("180.5 MB")
-        );
+        // Only what the runtime measures has a row.
+        assert!(view.server.rows.iter().all(|r| r.label != "RSS" && r.label != "CPU"));
         assert_eq!(view.rmb.badge.label, "Starting");
         assert_eq!(
             badge_tone(view.rmb.badge.ok, view.rmb.badge.warn),

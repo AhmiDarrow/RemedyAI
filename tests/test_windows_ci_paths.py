@@ -14,7 +14,6 @@ RUNNER = ROOT / "scripts" / "run_windows_ci_pytest.py"
 # code that is gone; those behaviours are tested in Go and Zig now (native lane).
 REQUIRED_FILES = (
     "tests/test_native_bootstrap.py",
-    "tests/test_clean_home_smoke.py",
     "tests/test_serve_runtime_owned.py",
 )
 

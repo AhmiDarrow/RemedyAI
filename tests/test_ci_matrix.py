@@ -91,6 +91,8 @@ def test_local_gate_covers_every_shipped_runtime_and_artifact() -> None:
     assert prepush.REMEDYUI.steps[0].cwd == "desktop/remedyui"
     assert prepush.CONNECT.steps[0].cwd == "connect/app"
 
+    # Only crates that ship: the old Tauri shell is not one of them.
+    assert [s.cwd for s in prepush.RUST.steps] == ["connect/core", "native/iroh"]
     for step in prepush.RUST.steps:
         assert step.env["RUSTFLAGS"] == "-D warnings", "Rust warnings are errors"
         config = step.env["TAURI_CONFIG"]
@@ -120,16 +122,11 @@ def test_release_builds_both_desktop_operating_systems_and_native_cores() -> Non
 
 def test_release_ships_no_python_worker() -> None:
     """The runtime starts no Python: no release job builds or bundles a worker."""
-    import json
-
     text = (ROOT / ".github" / "workflows" / "desktop-release.yml").read_text(encoding="utf-8")
     assert "rmdy" not in text, "the release workflow still builds or uploads the Python worker"
-    for conf in ("tauri.windows.conf.json", "tauri.linux.conf.json", "tauri.macos.conf.json"):
-        payload = json.loads(
-            (ROOT / "desktop" / "src-tauri" / conf).read_text(encoding="utf-8")
-        )
-        resources = json.dumps(payload["bundle"]["resources"])
-        assert "rmdy" not in resources, f"{conf} still bundles the Python worker"
+    for script in ("package-windows.ps1", "package-linux.sh", "package-macos.sh"):
+        packaging = (ROOT / "desktop" / "remedyui" / "packaging" / script).read_text(encoding="utf-8")
+        assert "rmdy" not in packaging, f"{script} still bundles the Python worker"
 
 
 def test_zig_build_defaults_to_baseline_cpu() -> None:
@@ -199,19 +196,6 @@ def test_release_builds_runtime_and_core_without_python_sidecar() -> None:
         assert core in runs, f"{name}: ships {core}"
         assert "build_desktop.py" not in runs, f"{name}: must not build remedy-desktop"
         assert "remedy-desktop" not in runs, f"{name}: must not reference remedy-desktop"
-
-
-def _build_desktop_module():
-    import importlib.util
-    import sys
-
-    path = ROOT / "scripts" / "build_desktop.py"
-    spec = importlib.util.spec_from_file_location("remedy_build_desktop", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def _prepush_module():

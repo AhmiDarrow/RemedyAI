@@ -1,17 +1,21 @@
 """Generate the third-party notices file that ships with Remedy Desktop.
 
-Remedy redistributes other people's code: npm packages in the web bundle,
-Rust crates linked into the Tauri binary, and Python packages used by the
-local worker/CLI surface. MIT / BSD / ISC / Apache-2.0 / OFL-1.1 all require
-their notice to travel with the binary, and nothing in the installer carried one.
+Remedy redistributes other people's code: Go modules linked into the runtime
+(native/go), Rust crates linked into the desktop app, the phone app and the
+voice and transport helpers, and the npm packages of the web UI that the
+Windows installer ships. MIT / BSD / ISC / Apache-2.0 / OFL-1.1 all require
+their notice to travel with the binary. Remedy's own crates (path or git
+sources such as remedy-ui) are first-party and are listed, not attributed.
+The Zig core has no third-party packages (no build.zig.zon).
 
-Output: ``desktop/public/THIRD_PARTY_NOTICES.txt``. Vite copies ``public/``
-verbatim into ``desktop/dist``, which is both the app's frontend and the
-``webui`` resource in the NSIS bundle — so one generated file reaches every
-place the code ships, and the in-app viewer can fetch it by relative path.
+Output, identical text in both places:
+    desktop/public/THIRD_PARTY_NOTICES.txt           web UI (Vite copies public/)
+    desktop/remedyui/assets/THIRD_PARTY_NOTICES.txt  compiled into the desktop app
+LICENSE.txt is copied from the repository LICENSE to the same two folders.
+The product version comes from desktop/remedyui/Cargo.toml.
 
 Usage:
-    python scripts/gen_third_party_notices.py            # write the file
+    python scripts/gen_third_party_notices.py            # write the files
     python scripts/gen_third_party_notices.py --check    # fail if stale
 """
 
@@ -20,14 +24,23 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "desktop" / "public" / "THIRD_PARTY_NOTICES.txt"
-LICENSE_OUT = ROOT / "desktop" / "public" / "LICENSE.txt"
+OUTS = (
+    ROOT / "desktop" / "public" / "THIRD_PARTY_NOTICES.txt",
+    ROOT / "desktop" / "remedyui" / "assets" / "THIRD_PARTY_NOTICES.txt",
+)
+LICENSE_OUTS = (
+    ROOT / "desktop" / "public" / "LICENSE.txt",
+    ROOT / "desktop" / "remedyui" / "assets" / "LICENSE.txt",
+)
+VERSION_FILE = ROOT / "desktop" / "remedyui" / "Cargo.toml"
 SPDX_DIR = Path(__file__).resolve().parent / "spdx_licenses"
 SELF = "python scripts/gen_third_party_notices.py"
 
@@ -47,30 +60,6 @@ _SPDX_ALIAS = {
     "OFL-1.1": "OFL-1.1",
 }
 _COPYRIGHT_TEMPLATES = frozenset({"MIT", "BSD-3-Clause", "BSD-2-Clause", "ISC"})
-
-# Heavy optional packages never attributed as installer payload (voice/vision
-# downloads). Attributing them here would claim they ship in the NSIS/deb bundle.
-SIDECAR_EXCLUDES = frozenset(
-    {
-        "torch", "torchvision", "torchaudio", "functorch",
-        "chatterbox", "chatterbox-tts", "transformers", "tokenizers", "safetensors",
-        "faster-whisper", "ctranslate2", "kokoro-onnx", "onnxruntime",
-        "espeakng-loader", "phonemizer",
-        "cupy", "opencv-python", "scipy", "scikit-learn", "pandas", "matplotlib", "av",
-        "triton", "tensorboard", "numba", "llvmlite", "huggingface-hub", "hf-xet",
-    }
-)
-
-# Developer tooling that lives in the same venv but never ships in Desktop.
-DEV_ONLY = frozenset(
-    {
-        "pytest", "pytest-asyncio", "pytest-cov", "ruff", "mypy", "mypy-extensions",
-        "coverage", "iniconfig", "pluggy",
-        "uv", "uv-build", "build", "twine", "wheel", "setuptools", "pip",
-        "nodeenv", "identify", "pre-commit", "virtualenv", "distlib", "filelock",
-        "types-pyyaml", "types-requests",
-    }
-)
 
 # Licences that would conflict with an Apache-2.0 product if they shipped.
 COPYLEFT_RE = re.compile(r"\b(?:A?GPL|LGPL|SSPL|EUPL|CC-BY-NC|CC-BY-SA)\b", re.I)
@@ -223,15 +212,21 @@ def _digest(text: str) -> str:
 
 
 # --------------------------------------------------------------------------
-# Rust — crates actually linked into the Tauri binary (normal deps only, so
+# Rust — crates linked into the shipped binaries (normal deps only, so
 # build-time and dev-only crates are not attributed as if they shipped).
 # --------------------------------------------------------------------------
 
 
-# Rust workspaces that ship in the installer: the Tauri shell and the
-# remedy-iroh sidecar ("Reach this PC from mobile data").
-RUST_SHIPPED = (ROOT / "desktop" / "src-tauri", ROOT / "native" / "iroh")
-OWN_CRATES = {"app", "remedy-iroh"}
+# Rust manifests that ship: desktop app, phone app (with connect/core), voice
+# helper and transport helper.
+RUST_SHIPPED = (
+    ROOT / "desktop" / "remedyui",
+    ROOT / "connect" / "app",
+    ROOT / "native" / "voice",
+    ROOT / "native" / "iroh",
+)
+# "name version" of crates from path or git sources; filled by rust_components().
+FIRST_PARTY: set[str] = set()
 
 
 def rust_components() -> list[Component]:
@@ -253,7 +248,10 @@ def rust_components() -> list[Component]:
             parts = line.replace(" (*)", "").split()
             if len(parts) >= 2 and parts[1].startswith("v"):
                 name, version = parts[0], parts[1][1:]
-                if name in OWN_CRATES:  # Remedy's own crates
+                # A source in parentheses (path or git) means first-party code;
+                # "(proc-macro)" is only a kind marker on a registry crate.
+                if len(parts) > 2 and parts[2] != "(proc-macro)":
+                    FIRST_PARTY.add(f"{name} {version}")
                     continue
                 wanted[(name, version)] = None
     if not wanted:
@@ -335,64 +333,77 @@ def npm_components() -> list[Component]:
 
 
 # --------------------------------------------------------------------------
-# Python — declared dependency closure used by the worker/CLI surface.
+# Go — modules actually linked into remedy-runtime (go list -deps, so modules
+# that are only named in go.mod are not attributed). Run offline.
 # --------------------------------------------------------------------------
 
-
-def _canon(name: str) -> str:
-    return re.sub(r"[-_.]+", "-", name).strip().lower()
-
-
-def _runtime_closure() -> set[str]:
-    """Declared dependency closure of remedy-ai, minus the heavy opt-ins."""
-    import importlib.metadata as md
-
-    try:
-        seen = {"remedy-ai"}
-        queue = ["remedy-ai"]
-        while queue:
-            dist_name = queue.pop()
-            try:
-                reqs = md.distribution(dist_name).requires or []
-            except md.PackageNotFoundError:
-                continue
-            for raw in reqs:
-                # Skip extras-gated requirements: those install only on request.
-                if "extra ==" in raw:
-                    continue
-                dep = _canon(re.split(r"[\s\[<>=!;~(]", raw.strip(), maxsplit=1)[0])
-                if dep and dep not in seen:
-                    seen.add(dep)
-                    queue.append(dep)
-        return seen
-    except Exception as exc:  # environment dependent — never fatal
-        print(f"WARNING: could not walk Python deps ({exc})", file=sys.stderr)
-        return set()
+GO_DIR = ROOT / "native" / "go"
+GO_TARGETS = ("windows", "linux", "darwin")  # platforms the runtime ships on
+GO_MISSING: list[str] = []  # modules whose licence text was not found
 
 
-def python_components() -> list[Component]:
-    import importlib.metadata as md
+def detect_license_ids(texts: list[str]) -> str:
+    """Classify licence texts into an SPDX expression ("" when unknown)."""
+    ids: list[str] = []
+    for t in texts:
+        head = t[:6000]
+        low = " ".join(head.split()).lower()
+        if "gnu lesser general public" in low:
+            found = "LGPL"
+        elif "gnu general public" in low or "gnu affero" in low:
+            found = "GPL"
+        elif "apache license" in low and "version 2.0" in low:
+            found = "Apache-2.0"
+        elif "mozilla public license" in low and "2.0" in low:
+            found = "MPL-2.0"
+        elif "permission is hereby granted, free of charge" in low:
+            found = "MIT"
+        elif "permission to use, copy, modify, and/or distribute" in low:
+            found = "ISC"
+        elif "redistribution and use in source and binary forms" in low:
+            found = "BSD-3-Clause" if "neither the name" in low else "BSD-2-Clause"
+        else:
+            continue
+        if found not in ids:
+            ids.append(found)
+    return " AND ".join(ids)
 
-    wanted = _runtime_closure()
-    wanted = {n for n in wanted if n not in SIDECAR_EXCLUDES and n not in DEV_ONLY}
-    wanted.discard("remedy-ai")
+
+def go_components() -> list[Component]:
+    env = {**os.environ, "GOFLAGS": "-mod=mod", "GOPROXY": "off"}
+    mods: dict[tuple[str, str], Path] = {}
+    for goos in GO_TARGETS:
+        try:
+            proc = subprocess.run(
+                ["go", "list", "-deps", "-f",
+                 "{{with .Module}}{{.Path}} {{.Version}} {{.Dir}}{{end}}", "./cmd/..."],
+                cwd=GO_DIR, capture_output=True, text=True, timeout=600, check=False,
+                env={**env, "GOOS": goos},
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"WARNING: go list failed for {goos} ({exc}) — its modules not attributed", file=sys.stderr)
+            continue
+        if proc.returncode != 0:
+            print(f"WARNING: go list exited {proc.returncode} for {goos} — its modules not attributed", file=sys.stderr)
+            print(proc.stderr[:400], file=sys.stderr)
+            continue
+        for line in proc.stdout.splitlines():
+            parts = line.strip().split(maxsplit=2)
+            # No version means the main module (or the standard library).
+            if len(parts) == 3 and parts[1].startswith("v"):
+                mods[(parts[0], parts[1])] = Path(parts[2])
 
     out: list[Component] = []
-    for dist in md.distributions():
-        meta = dist.metadata
-        raw_name = meta["Name"] if meta else None
-        if not raw_name or _canon(raw_name) not in wanted:
-            continue
-        license_ = (meta.get("License-Expression") or meta.get("License") or "").strip()
-        if not license_ or len(license_) > 60:
-            classifiers = [c for c in meta.get_all("Classifier") or [] if c.startswith("License ::")]
-            license_ = classifiers[0].split(" :: ")[-1] if classifiers else ""
-        info_dir = getattr(dist, "_path", None)
-        texts = _license_texts(Path(info_dir)) if info_dir else []
+    for (name, version), directory in sorted(mods.items()):
+        texts = _license_texts(directory)
+        note = ""
+        if not texts:
+            note = "licence text not found"
+            GO_MISSING.append(f"{name} {version}")
+            print(f"WARNING: no licence file for Go module {name} {version}", file=sys.stderr)
         component = Component(
-            "Python package", raw_name, dist.version or "", license_, _copyright_from(texts), texts
+            "Go module", name, version, detect_license_ids(texts), _copyright_from(texts), texts, note
         )
-        apply_spdx_fallback(component, Path(info_dir) if info_dir else None)
         out.append(component)
     return out
 
@@ -411,43 +422,58 @@ def vendored_components() -> list[Component]:
 
 
 def stamp_public_license() -> bool:
-    """Copy the binding LICENSE into the UI bundle so Settings can show it."""
+    """Copy the binding LICENSE next to each notices file (web UI and desktop app)."""
     src = ROOT / "LICENSE"
     if not src.is_file():
         return False
     text = _read_full(src)
     if not text.strip():
         return False
-    LICENSE_OUT.parent.mkdir(parents=True, exist_ok=True)
-    current = _read_full(LICENSE_OUT)
-    if current == text:
-        return False
-    LICENSE_OUT.write_text(text, encoding="utf-8", newline="\n")
-    return True
+    changed = False
+    for dest in LICENSE_OUTS:
+        if _read_full(dest) == text:
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(text, encoding="utf-8", newline="\n")
+        changed = True
+    return changed
 
 
 def restamp_version(version: str) -> bool:
-    """Rewrite only the version line in an existing notices file.
+    """Rewrite only the version line in the existing notices files.
 
     A version bump does not change who is attributed, so it must not fail the
     freshness gate — but the shipped file should still name the right build.
     """
-    current = _read_full(OUT)
-    if not current.strip():
-        return False
-    updated = re.sub(r"^Remedy Desktop .+$", f"Remedy Desktop {version}", current, count=1, flags=re.M)
-    if updated == current:
-        return False
-    OUT.write_text(updated, encoding="utf-8", newline="\n")
-    return True
+    changed = False
+    for out in OUTS:
+        current = _read_full(out)
+        if not current.strip():
+            continue
+        updated = re.sub(
+            r"^Remedy Desktop .+$", f"Remedy Desktop {version}", current, count=1, flags=re.M
+        )
+        if updated != current:
+            out.write_text(updated, encoding="utf-8", newline="\n")
+            changed = True
+    return changed
 
 
 def _version() -> str:
-    m = re.search(r'^version\s*=\s*"([^"]+)"', _read_full(ROOT / "pyproject.toml"), re.M)
+    """One source of truth: the desktop app's Cargo.toml."""
+    m = re.search(r'(?m)^version\s*=\s*"([^"]+)"', _read_full(VERSION_FILE))
     return m.group(1) if m else "0.0.0"
 
 
-def render(components: list[Component]) -> str:
+# Section headings that need to say where the code ships.
+SECTION_TITLE = {
+    "npm package": "NPM PACKAGES (WEB UI, WINDOWS INSTALLER)",
+    "Go module": "GO MODULES (RUNTIME)",
+    "Rust crate": "RUST CRATES (DESKTOP APP, PHONE APP, VOICE AND TRANSPORT HELPERS)",
+}
+
+
+def render(components: list[Component], first_party: set[str] | None = None) -> str:
     texts: dict[str, tuple[str, list[str]]] = {}  # digest -> (text, [component labels])
     order: list[str] = []
     for c in components:
@@ -476,6 +502,10 @@ def render(components: list[Component]) -> str:
     add("component list. Remedy's own licence (Apache-2.0) is separate — see")
     add("LICENSE and NOTICE in the repository.")
     add("")
+    add("Go modules are those linked into the runtime, Rust crates are those linked")
+    add("into the desktop app, the phone app and the voice and transport helpers,")
+    add("and npm packages are those of the web UI that the Windows installer ships.")
+    add("")
     add("Models, voices, and optional components that are downloaded at first use")
     add("rather than bundled are documented in docs/THIRD_PARTY.md.")
     add("")
@@ -483,6 +513,12 @@ def render(components: list[Component]) -> str:
         add("Source availability: the MPL-2.0 components below are used unmodified.")
         add("Their source is published by their own projects at the versions named")
         add("here; a copy can also be requested by email (see the repository README).")
+        add("")
+    if first_party:
+        add("First-party components: these Rust crates are Remedy's own work (the")
+        add("Remedy UI engine and the apps built on it) and are covered by Remedy's")
+        add("own licence, so they are not attributed below:")
+        add(textwrap.fill(", ".join(sorted(first_party)), 76, initial_indent="  ", subsequent_indent="  ", break_on_hyphens=False))
         add("")
     add("This file is generated by scripts/gen_third_party_notices.py. Do not edit")
     add("it by hand — regenerate it instead.")
@@ -509,7 +545,7 @@ def render(components: list[Component]) -> str:
 
     for eco in sorted(by_eco):
         add("=" * 78)
-        add(eco.upper() + "S")
+        add(SECTION_TITLE.get(eco, eco.upper() + "S"))
         add("=" * 78)
         add("")
         for c in sorted(by_eco[eco], key=lambda c: c.name.lower()):
@@ -546,7 +582,7 @@ def collect() -> list[Component]:
     components: list[Component] = []
     components += npm_components()
     components += rust_components()
-    components += python_components()
+    components += go_components()
     components += vendored_components()
     # Stable order and no duplicates, so --check only fails on real drift.
     unique: dict[tuple, Component] = {}
@@ -560,10 +596,14 @@ def main() -> int:
     ap.add_argument(
         "--check",
         action="store_true",
-        help="fail if the committed file is stale; run it on the release machine, "
-        "since the content depends on the local cargo registry cache and venv",
+        help="fail if a committed file is stale; run it on the release machine, "
+        "since the content depends on the local cargo registry and Go module caches",
     )
-    ap.add_argument("--strict", action="store_true", help="fail if a copyleft licence is attributed")
+    ap.add_argument(
+        "--strict",
+        action="store_true",
+        help="fail if a copyleft licence is attributed or a Go module has no licence text",
+    )
     args = ap.parse_args()
 
     components = collect()
@@ -575,39 +615,43 @@ def main() -> int:
     for c in copyleft:
         print(f"COPYLEFT: {c.ecosystem} {c.name} {c.version} — {c.license}", file=sys.stderr)
 
-    rendered = render(components)
+    rendered = render(components, FIRST_PARTY)
 
     if args.check:
-        # Coverage, not byte-equality: a CI job that has the venv but no warm
-        # cargo cache (or the reverse) sees only part of the tree, and a byte
-        # compare there would fail on everything it simply cannot look at.
-        # Every component this run *can* see must already be attributed.
-        current = _read_full(OUT)
-        if not current.strip():
-            print(f"MISSING: {OUT.relative_to(ROOT)} — run {SELF}", file=sys.stderr)
-            return 1
-        missing = [c for c in components if f"{c.name} {c.version}".strip() not in current]
-        if missing:
-            print(f"STALE: {OUT.relative_to(ROOT)} is missing {len(missing)} component(s):", file=sys.stderr)
-            for c in missing[:10]:
-                print(f"  - {c.ecosystem}: {c.name} {c.version}", file=sys.stderr)
-            if len(missing) > 10:
-                print(f"  … and {len(missing) - 10} more", file=sys.stderr)
-            print(f"Run {SELF}", file=sys.stderr)
-            return 1
+        # Coverage, not byte-equality: a CI job with a cold cargo or Go cache
+        # sees only part of the tree, and a byte compare there would fail on
+        # everything it simply cannot look at. Every component this run *can*
+        # see must already be attributed, in both files.
+        for out in OUTS:
+            rel = out.relative_to(ROOT)
+            current = _read_full(out)
+            if not current.strip():
+                print(f"MISSING: {rel} — run {SELF}", file=sys.stderr)
+                return 1
+            missing = [c for c in components if f"{c.name} {c.version}".strip() not in current]
+            if missing:
+                print(f"STALE: {rel} is missing {len(missing)} component(s):", file=sys.stderr)
+                for c in missing[:10]:
+                    print(f"  - {c.ecosystem}: {c.name} {c.version}", file=sys.stderr)
+                if len(missing) > 10:
+                    print(f"  … and {len(missing) - 10} more", file=sys.stderr)
+                print(f"Run {SELF}", file=sys.stderr)
+                return 1
         license_src = _read_full(ROOT / "LICENSE")
-        if license_src.strip() and _read_full(LICENSE_OUT) != license_src:
-            print(
-                f"STALE: {LICENSE_OUT.relative_to(ROOT)} does not match LICENSE — run {SELF}",
-                file=sys.stderr,
-            )
-            return 1
-        print(f"OK: {OUT.relative_to(ROOT)} covers all {len(components)} visible components")
+        for dest in LICENSE_OUTS:
+            if license_src.strip() and _read_full(dest) != license_src:
+                print(
+                    f"STALE: {dest.relative_to(ROOT)} does not match LICENSE — run {SELF}",
+                    file=sys.stderr,
+                )
+                return 1
+        print(f"OK: {len(OUTS)} notices files cover all {len(components)} visible components")
     else:
         stamp_public_license()
-        OUT.parent.mkdir(parents=True, exist_ok=True)
-        OUT.write_text(rendered, encoding="utf-8", newline="\n")
-        print(f"Wrote {OUT.relative_to(ROOT)} — {len(components)} components, {len(rendered):,} bytes")
+        for out in OUTS:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(rendered, encoding="utf-8", newline="\n")
+            print(f"Wrote {out.relative_to(ROOT)} — {len(components)} components, {len(rendered):,} bytes")
         missing_text = [c for c in components if not c.texts]
         if missing_text:
             print(
@@ -617,8 +661,11 @@ def main() -> int:
             for c in missing_text[:12]:
                 print(f"  - {c.ecosystem}: {c.name} {c.version} ({c.license})", file=sys.stderr)
 
-    if copyleft and args.strict:
-        print(f"ERROR: {len(copyleft)} copyleft component(s) attributed as shipping", file=sys.stderr)
+    if args.strict and (copyleft or GO_MISSING):
+        if copyleft:
+            print(f"ERROR: {len(copyleft)} copyleft component(s) attributed as shipping", file=sys.stderr)
+        if GO_MISSING:
+            print(f"ERROR: {len(GO_MISSING)} Go module(s) without licence text", file=sys.stderr)
         return 1
     return 0
 
