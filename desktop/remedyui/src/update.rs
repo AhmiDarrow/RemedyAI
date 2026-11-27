@@ -1184,7 +1184,7 @@ mod tests {
 
     #[test]
     fn one_oh_is_newer_than_last_tauri() {
-        assert_eq!(APP_VERSION, "1.1.0");
+        assert_eq!(APP_VERSION, "2.0.0");
         assert!(release_is_newer("1.0.0", "0.70.5"));
         assert!(release_is_newer("v1.0.0", "v0.70.5"));
         assert!(!release_is_newer("0.70.5", "1.0.0"));
@@ -1228,7 +1228,7 @@ mod tests {
         assert!(signing.contains(MINISIGN_PUBKEY_B64));
         assert_eq!(pubkey_line_from_blob(MINISIGN_PUBKEY_B64).as_deref(), Some(MINISIGN_PUBKEY));
         let cfg = updater_config();
-        assert_eq!(cfg.current, "1.1.0");
+        assert_eq!(cfg.current, "2.0.0");
         match cfg.trust {
             remedy_ui::update::Trust::Minisign(key) => assert_eq!(key, MINISIGN_PUBKEY),
             other => panic!("expected minisign trust, got {other:?}"),
@@ -1239,12 +1239,12 @@ mod tests {
     fn feed_template_uses_the_same_shape() {
         let raw = include_str!("../packaging/latest.json");
         let v: serde_json::Value = serde_json::from_str(raw).unwrap();
-        assert_eq!(v["version"], "v1.1.0");
+        assert_eq!(v["version"], "v2.0.0");
         for (key, url_end) in [
-            ("windows-x86_64", "/v1.1.0/Remedy.Desktop_1.1.0_x64-setup.exe"),
-            ("linux-x86_64", "/v1.1.0/Remedy.Desktop_1.1.0_amd64.AppImage"),
-            ("darwin-aarch64", "/runtime-v1.1.0/Remedy.Desktop_1.1.0_aarch64.app.tar.gz"),
-            ("darwin-x86_64", "/runtime-v1.1.0/Remedy.Desktop_1.1.0_x64.app.tar.gz"),
+            ("windows-x86_64", "/v2.0.0/Remedy.Desktop_2.0.0_x64-setup.exe"),
+            ("linux-x86_64", "/v2.0.0/Remedy.Desktop_2.0.0_amd64.AppImage"),
+            ("darwin-aarch64", "/runtime-v2.0.0/Remedy.Desktop_2.0.0_aarch64.app.tar.gz"),
+            ("darwin-x86_64", "/runtime-v2.0.0/Remedy.Desktop_2.0.0_x64.app.tar.gz"),
         ] {
             let url = v["platforms"][key]["url"].as_str().unwrap();
             assert!(url.ends_with(url_end), "{key} url {url}");
