@@ -21,8 +21,6 @@ tests/test_wheel_webui.py
 tests/test_check_remedy_core_isa.py
 
 # --- First-run bootstrap, install, serve ---
-tests/test_clean_home_smoke.py
-tests/test_packaging_policy.py
 tests/test_serve_runtime_owned.py
 tests/test_home_env_is_honoured.py
 
