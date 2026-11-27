@@ -9,7 +9,6 @@ use crate::work::WorkStep;
 pub const MAX_ATTACHMENTS: usize = 12;
 pub const PROMPT_HISTORY_MAX: usize = 80;
 pub const NEAR_PX: f32 = 48.0;
-pub const STALL_WARN_MS: u64 = 180_000;
 pub const SOFT_BADGE_AT: usize = 2;
 pub const CONFIRM_AT: usize = 3;
 pub const PINNED_GROUP_KEY: &str = "__pinned__";

@@ -1,12 +1,12 @@
-//! Approval, plan, life, library, stall, cost, todos, and the live trace.
+//! Approval, plan, life, library, cost, todos, and the live trace.
 
 use super::logic::{self, show_life_banner};
 use super::{
     approve_plan, background_title, dismiss_library, focused_steps, install_library,
-    refresh_banners, request_plan_changes, resolve_approval, send_life, show_plan, stall_seconds,
-    visible_approval, SubmitKind,
+    refresh_banners, request_plan_changes, resolve_approval, send_life, show_plan,
+    visible_approval,
 };
-use super::{submit, Approval};
+use super::Approval;
 use crate::messages;
 use crate::tokens;
 use crate::studio::{Studio, WorkMode};
@@ -38,7 +38,7 @@ pub fn lead(ui: &Ui, studio: Studio) -> El {
         .child(plan(ui, studio, false))
 }
 
-/// Remote-busy, background job, stall, todos, progress, and the live trace.
+/// Remote-busy, background job, todos, progress, and the live trace.
 pub fn status(ui: &Ui, studio: Studio) -> El {
     let unit = ui.theme().spacing.unit;
     w::column(ui)
@@ -55,7 +55,6 @@ pub fn status(ui: &Ui, studio: Studio) -> El {
         })
         .child(remote(ui, studio.clone()))
         .child(background(ui, studio.clone()))
-        .child(stall(ui, studio.clone()))
         // BUILD todos render in the Actions pane, not under the chat bubbles.
         .child(progress(ui, studio.clone()))
         .child(trace(ui, studio))
@@ -444,79 +443,6 @@ fn background(ui: &Ui, studio: Studio) -> El {
         },
     )
     .el()
-}
-
-fn stall(ui: &Ui, studio: Studio) -> El {
-    let st = studio.clone();
-    let u = ui.clone();
-    show(
-        ui,
-        move || stall_seconds(&st).is_some(),
-        move || stall_card(&u, studio.clone()),
-    )
-    .el()
-}
-
-fn stall_card(ui: &Ui, studio: Studio) -> El {
-    let secs = stall_seconds(&studio).unwrap_or(0);
-    let title = format!("{} · {secs}s", messages().text(ui, "stall-title"));
-    let st_hide = studio.clone();
-    let st_stop = studio.clone();
-    let st_retry = studio.clone();
-    let u = ui.clone();
-    card_shell(ui, &title, "").child(
-        w::row(ui)
-            .gap(8.0)
-            .child(
-                w::button(
-                    ui,
-                    move || messages().text(&u, "stall-hide"),
-                    move || st_hide.depth.stall_hidden.set(true),
-                )
-                .variant("quiet"),
-            )
-            .child(
-                w::button(
-                    ui,
-                    {
-                        let u = ui.clone();
-                        move || messages().text(&u, "stall-stop")
-                    },
-                    move || st_stop.stop(),
-                )
-                .variant("quiet"),
-            )
-            .child(
-                w::button(
-                    ui,
-                    {
-                        let u = ui.clone();
-                        move || messages().text(&u, "stall-retry")
-                    },
-                    move || retry_outgoing(&st_retry),
-                )
-                .variant("quiet")
-                .style(tokens::primary_button(&ui.theme().colors)),
-            ),
-    )
-}
-
-fn retry_outgoing(studio: &Studio) {
-    let sid = studio.active.get().unwrap_or_default();
-    let text = studio
-        .depth
-        .job(&sid)
-        .map(|j| j.outgoing)
-        .unwrap_or_default();
-    if text.trim().is_empty() {
-        return;
-    }
-    let kind = if studio.streaming.get() {
-        SubmitKind::Interrupt
-    } else {
-        SubmitKind::Send
-    };
-    submit(studio, text, Vec::new(), kind, false);
 }
 
 fn todos(ui: &Ui, studio: Studio) -> El {

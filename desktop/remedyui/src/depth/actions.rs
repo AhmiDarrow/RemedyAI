@@ -204,7 +204,6 @@ fn begin_turn_with(
     studio.streaming.set(true);
     studio.depth.missing_retried.set(false);
     studio.depth.remote_busy.set(false);
-    studio.depth.stall_hidden.set(false);
     studio.depth.usage_run.set(Usage::default());
     let files = attachments.clone();
     studio.depth.map_job(sid, |job| {
@@ -532,15 +531,14 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
         return;
     }
     let active = studio.active.get().as_deref() == Some(sid);
+    // This window started the turn and is following it (not one reattached to).
+    let here = studio.depth.job(sid).is_some_and(|j| j.status == "running" && (!j.outgoing.is_empty() || j.outgoing_files));
     studio.depth.map_job(sid, |job| {
         job.last_event_ms = now_ms();
         if job.status != "running" && !matches!(kind, "done" | "end" | "aborted" | "error") {
             job.status = "running".into();
         }
     });
-    if active {
-        studio.depth.stall_hidden.set(false);
-    }
     match kind {
         "token" | "text" => {
             let bit = sse::token_text(data);
@@ -736,7 +734,8 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
         "steered" => {
             if active {
                 studio.streaming.set(true);
-                studio.depth.remote_busy.set(true);
+                // Steering the turn this window is showing is not another window's work.
+                studio.depth.remote_busy.set(!here);
                 studio.depth.notice.set("Sent to the live turn.".into());
             }
         }
@@ -751,7 +750,7 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
                     .notice
                     .set("This session is still working. The files stayed on the composer.".into());
                 studio.streaming.set(true);
-                studio.depth.remote_busy.set(true);
+                studio.depth.remote_busy.set(!here);
             }
         }
         "error" => {
@@ -778,6 +777,7 @@ pub fn apply_frame(studio: &Studio, sid: &str, kind: &str, data: &str) {
             studio.depth.map_job(sid, |job| job.progress = None);
             if active {
                 studio.depth.progress.set(None);
+                studio.depth.remote_busy.set(false);
                 studio.finish_assistant(None);
             }
         }
@@ -863,7 +863,6 @@ fn parse_life(v: &Value) -> LifeCard {
 
 pub fn focus_session(studio: &Studio, id: &str) {
     studio.depth.notice.set(String::new());
-    studio.depth.stall_hidden.set(false);
     if let Some(job) = studio.depth.job(id) {
         if job.status == "running" {
             studio.partial.set(job.partial);
@@ -930,6 +929,9 @@ fn reattach(studio: &Studio, id: &str) {
                     studio.depth.map_job(&sid, |job| {
                         job.status = "running".into();
                         job.request_id = request_id.clone();
+                        // Someone else's turn: nothing this window sent.
+                        job.outgoing.clear();
+                        job.outgoing_files = false;
                     });
                     attach_stream(&studio, &sid, &request_id);
                 }
@@ -3219,24 +3221,6 @@ pub fn ask_delete_skill(studio: &Studio, name: &str) {
         .ask_confirm(Confirm::DeleteSkill(name.to_string()));
 }
 
-/// Quiet time for the stall banner, in whole seconds. None when it should stay hidden.
-pub fn stall_seconds(studio: &Studio) -> Option<u64> {
-    let _ = studio.depth.tick.get();
-    if studio.depth.stall_hidden.get() || !studio.streaming.get() {
-        return None;
-    }
-    let sid = studio.active.get()?;
-    let job = studio.depth.job(&sid)?;
-    if job.status != "running" {
-        return None;
-    }
-    let quiet = now_ms().saturating_sub(job.last_event_ms).max(0) as u64;
-    if quiet < logic::STALL_WARN_MS {
-        return None;
-    }
-    Some(quiet / 1000)
-}
-
 pub fn background_title(studio: &Studio) -> Option<String> {
     let active = studio.active.get();
     let jobs = studio.depth.jobs.get();
@@ -3317,6 +3301,25 @@ mod tests {
         assert_eq!(studio.live_user_reaction.get(), "", "toggle off");
         react(&studio, "msg-42", "❤️");
         assert_eq!(studio.live_user_reaction.get(), "❤️");
+    }
+
+    #[test]
+    fn a_steer_in_this_window_is_not_another_windows_work() {
+        let studio = Studio::new();
+        studio.active.set(Some("s1".into()));
+        // A turn this window started: steering it is local.
+        studio.depth.map_job("s1", |job| {
+            *job = StreamJob::running("s1".to_string());
+            job.outgoing = "do it".into();
+        });
+        apply_frame(&studio, "s1", "steered", "{}");
+        assert!(!studio.depth.remote_busy.get());
+        // A turn attached to from elsewhere: the notice stays, and ends with the turn.
+        studio.depth.map_job("s1", |job| job.outgoing.clear());
+        apply_frame(&studio, "s1", "steered", "{}");
+        assert!(studio.depth.remote_busy.get());
+        apply_frame(&studio, "s1", "done", "{}");
+        assert!(!studio.depth.remote_busy.get());
     }
 
     #[test]
