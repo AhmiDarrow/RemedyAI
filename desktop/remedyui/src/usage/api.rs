@@ -531,19 +531,6 @@ pub(crate) fn format_tokens(n: f64) -> String {
 }
 
 /// `formatCost` from `desktop/src/utils/tokenCost.ts`.
-pub(crate) fn format_cost(usd: f64) -> String {
-    if !usd.is_finite() || usd <= 0.0 {
-        return "$0.00".into();
-    }
-    if usd < 0.01 {
-        return format!("${}", format_fixed(usd, 4));
-    }
-    if usd < 1.0 {
-        return format!("${}", format_fixed(usd, 3));
-    }
-    format!("${}", format_fixed(usd, 2))
-}
-
 pub(crate) fn format_number(n: f64) -> String {
     if !n.is_finite() {
         return "0".into();
@@ -819,13 +806,6 @@ mod tests {
         assert_eq!(format_tokens(10_000.0), "10k");
         assert_eq!(format_tokens(18_420.0), "18k");
         assert_eq!(format_tokens(f64::NAN), "0");
-        assert_eq!(format_cost(0.0), "$0.00");
-        assert_eq!(format_cost(-1.0), "$0.00");
-        assert_eq!(format_cost(f64::NAN), "$0.00");
-        assert_eq!(format_cost(0.004), "$0.0040");
-        assert_eq!(format_cost(0.5), "$0.500");
-        assert_eq!(format_cost(1.2), "$1.20");
-        assert_eq!(format_cost(1.28), "$1.28");
     }
 
     #[test]

@@ -9,7 +9,7 @@ import {
   type UsageSeriesPoint,
   type UsageSummary,
 } from '../api/usage'
-import { formatCost, formatTokens } from '../utils/tokenCost'
+import { formatTokens } from '../utils/tokenCost'
 import { EmptyState } from './EmptyState'
 
 interface UsageDashboardProps {
@@ -25,7 +25,7 @@ function BarChart({
   valueKey = 'total_tokens',
 }: {
   points: UsageSeriesPoint[]
-  valueKey?: 'total_tokens' | 'estimated_cost_usd'
+  valueKey?: 'total_tokens'
 }) {
   const byDay = useMemo(() => {
     const map = new Map<string, number>()
@@ -41,7 +41,7 @@ function BarChart({
       <EmptyState
         compact
         title="No usage data yet"
-        description="Send a few messages and costs will appear here."
+        description="Send a few messages and token use will appear here."
       />
     )
   }
@@ -52,7 +52,7 @@ function BarChart({
         <div key={day} className="flex-1 h-full flex flex-col justify-end items-center gap-1 min-w-0">
           <div
             className="w-full rounded-t"
-            title={`${day}: ${valueKey === 'estimated_cost_usd' ? formatCost(val) : formatTokens(val)}`}
+            title={`${day}: ${formatTokens(val)}`}
             style={{
               height: `${Math.max(val > 0 ? 3 : 0, Math.round((val / max) * 88))}px`,
               background: 'var(--accent)',
@@ -143,7 +143,7 @@ export function UsageDashboard({
           <div>
             <div className="text-sm font-semibold tracking-tight">Usage & Continuity</div>
             <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-              Token use, estimated costs, and conversation health
+              Token use and conversation health
               {provider ? ` · active ${provider}/${model || '…'}` : ''}
             </div>
           </div>
@@ -161,7 +161,7 @@ export function UsageDashboard({
               aria-pressed={tab === t}
               onClick={() => setTab(t)}
             >
-              {t === 'usage' ? 'Usage & cost' : 'Harness'}
+              {t === 'usage' ? 'Usage' : 'Harness'}
             </button>
           ))}
           {tab === 'usage' && (
@@ -217,10 +217,9 @@ export function UsageDashboard({
 
           {tab === 'usage' && summary && !loading && !err && (
             <>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {[
                   ['Tokens', formatTokens(summary.totals.total_tokens)],
-                  ['Est. cost', formatCost(summary.totals.estimated_cost_usd)],
                   ['Events', String(summary.totals.events)],
                 ].map(([label, val]) => (
                   <div
@@ -251,7 +250,6 @@ export function UsageDashboard({
                     <tr style={{ color: 'var(--text-muted)' }}>
                       <th className="text-left py-1">Provider</th>
                       <th className="text-right">Tokens</th>
-                      <th className="text-right">Cost</th>
                       <th className="text-right">Events</th>
                     </tr>
                   </thead>
@@ -260,7 +258,6 @@ export function UsageDashboard({
                       <tr key={row.provider} style={{ borderTop: '1px solid var(--border)' }}>
                         <td className="py-1.5">{row.provider || 'unknown'}</td>
                         <td className="text-right">{formatTokens(row.total_tokens)}</td>
-                        <td className="text-right">{formatCost(row.estimated_cost_usd)}</td>
                         <td className="text-right">{row.events}</td>
                       </tr>
                     ))}
@@ -283,7 +280,6 @@ export function UsageDashboard({
                       <tr style={{ color: 'var(--text-muted)' }}>
                         <th className="text-left py-1">Model</th>
                         <th className="text-right">Tokens</th>
-                        <th className="text-right">Cost</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -297,7 +293,6 @@ export function UsageDashboard({
                             {row.model}
                           </td>
                           <td className="text-right">{formatTokens(row.total_tokens)}</td>
-                          <td className="text-right">{formatCost(row.estimated_cost_usd)}</td>
                         </tr>
                       ))}
                     </tbody>

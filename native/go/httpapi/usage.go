@@ -164,10 +164,11 @@ func (s *Server) handleUsageExport(w http.ResponseWriter, r *http.Request) {
 	}
 	var b strings.Builder
 	csvOut := csv.NewWriter(&b)
-	_ = csvOut.Write([]string{"day", "provider", "total_tokens", "estimated_cost_usd", "events"})
+	// No cost column: the runtime has no price list, so there is no cost to export.
+	_ = csvOut.Write([]string{"day", "provider", "total_tokens", "events"})
 	writePoint := func(p map[string]any) {
 		_ = csvOut.Write([]string{fmt.Sprint(p["day"]), fmt.Sprint(p["group"]),
-			fmt.Sprint(p["total_tokens"]), fmt.Sprint(p["estimated_cost_usd"]), fmt.Sprint(p["events"])})
+			fmt.Sprint(p["total_tokens"]), fmt.Sprint(p["events"])})
 	}
 	switch points := ser["points"].(type) {
 	case []map[string]any:

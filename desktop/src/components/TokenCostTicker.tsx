@@ -1,9 +1,8 @@
 import { useEffect, useId, useState } from 'react'
 import type { UsageSnapshot } from '../utils/tokenCost'
-import { formatCacheUsage, formatCost, formatTokens } from '../utils/tokenCost'
+import { formatCacheUsage, formatTokens } from '../utils/tokenCost'
 
 const HIDE_KEY = 'remedy.tokenTicker.hidden'
-const HIDE_COST_KEY = 'remedy.tokenTicker.hideCost'
 
 interface TokenCostTickerProps {
   /** Live run usage (current stream). */
@@ -21,9 +20,8 @@ interface TokenCostTickerProps {
 }
 
 /**
- * Subtle, hideable live ticker for tokens + estimated API cost.
+ * Subtle, hideable live ticker for tokens. No cost: Remedy has no price list.
  * Preference persists in localStorage.
- * Click the $ amount to hide cost only (tokens stay visible).
  */
 export function TokenCostTicker({
   run,
@@ -40,13 +38,6 @@ export function TokenCostTicker({
       return false
     }
   })
-  const [hideCost, setHideCost] = useState(() => {
-    try {
-      return localStorage.getItem(HIDE_COST_KEY) === '1'
-    } catch {
-      return false
-    }
-  })
   const [expanded, setExpanded] = useState(false)
   const detailsId = useId()
 
@@ -58,18 +49,8 @@ export function TokenCostTicker({
     }
   }, [hidden])
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(HIDE_COST_KEY, hideCost ? '1' : '0')
-    } catch {
-      /* */
-    }
-  }, [hideCost])
-
   const runTok = Math.max(0, Math.round(run?.total_tokens ?? 0))
-  const runCost = Number(run?.estimated_cost_usd ?? 0) || 0
   const sessTok = Math.max(0, Math.round(session?.total_tokens ?? 0))
-  const sessCost = Number(session?.estimated_cost_usd ?? 0) || 0
   const src = run?.source === 'provider' ? 'API' : 'est.'
   // Prompt-cache accounting, when the provider reports it. Quiet on the
   // collapsed row (a count, no label) but always present — a warm cache is the
@@ -80,7 +61,6 @@ export function TokenCostTicker({
   const hasData = runTok > 0 || sessTok > 0 || streaming || (run?.completion_tokens ?? 0) > 0
   const isSidebar = placement === 'sidebar'
   const displayTok = streaming ? Math.max(runTok, run?.completion_tokens ?? 0) : sessTok || runTok
-  const displayCost = streaming ? runCost : sessCost || runCost
 
   if (hidden) {
     return (
@@ -106,7 +86,7 @@ export function TokenCostTicker({
                 boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               }
         }
-        title="Show usage & cost stats"
+        title="Show usage stats"
       >
         Usage · stats
       </button>
@@ -164,38 +144,6 @@ export function TokenCostTicker({
           </button>
           {hasData && (
             <>
-                {hideCost ? (
-                  <button
-                    type="button"
-                    className="px-1 rounded"
-                    style={{ color: 'var(--text-muted)', fontSize: 10 }}
-                    title="Show estimated cost"
-                    aria-label="Show estimated cost"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setHideCost(false)
-                    }}
-                  >
-                    $·
-                  </button>
-                ) : (
-                  <>
-                    <span style={{ color: 'var(--text-muted)' }}>·</span>
-                    <button
-                      type="button"
-                      className="rounded px-0.5"
-                      style={{ color: 'var(--accent)', fontWeight: 500 }}
-                      title="Hide cost (tokens stay visible)"
-                      aria-label="Hide estimated cost"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setHideCost(true)
-                      }}
-                    >
-                      {formatCost(displayCost)}
-                    </button>
-                  </>
-                )}
                 {cacheRead > 0 && (
                   <span
                     className="rounded px-1"
@@ -237,12 +185,6 @@ export function TokenCostTicker({
             <span className="text-right">
               in {formatTokens(run?.prompt_tokens ?? 0)} · out{' '}
               {formatTokens(run?.completion_tokens ?? 0)}
-              {!hideCost && (
-                <>
-                  <br />
-                  {formatCost(runCost)}
-                </>
-              )}
             </span>
           </div>
           {cacheLine && (
@@ -257,7 +199,6 @@ export function TokenCostTicker({
             <span style={{ color: 'var(--text-muted)' }}>Session</span>
             <span>
               {formatTokens(sessTok)}
-              {!hideCost && <> · {formatCost(sessCost)}</>}
             </span>
           </div>
           {(model || provider) && (
@@ -270,11 +211,6 @@ export function TokenCostTicker({
               {run?.source === 'provider' ? ' · API' : ' · est.'}
             </div>
           )}
-          <div style={{ color: 'var(--text-muted)', lineHeight: 1.35 }}>
-            {hideCost
-              ? 'Cost hidden — click $· to show estimates. Not a billing invoice.'
-              : 'Estimates use list prices — not a billing invoice. Click $ to hide.'}
-          </div>
         </div>
       )}
     </div>

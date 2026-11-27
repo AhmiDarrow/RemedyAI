@@ -13,9 +13,10 @@ import (
 )
 
 const (
-	stopNote      = "*(Generation stopped. History is intact — send **continue** to resume.)*"
-	supersedeNote = "*(Interrupted by your next message — partial work above is saved. " +
-		"Say **continue** to pick it up.)*"
+	// Plain text with one bold word: bold inside italics drew stray asterisks.
+	stopNote      = "(Generation stopped. History is intact. Send **continue** to resume.)"
+	supersedeNote = "(Interrupted by your next message. The partial work above is saved. " +
+		"Say **continue** to pick it up.)"
 	sseKeepaliveInterval = 12 * time.Second
 	sseKeepaliveComment  = ": keepalive\n\n"
 	streamQueueSize      = 512
@@ -456,6 +457,12 @@ func (s *Server) runDetachedStream(
 ) {
 	s.claims.BeginTurn(sid)
 	defer s.claims.EndTurn(sid)
+	// Her mood follows the turn: it starts here and its outcome is kept when
+	// it ends (after the claim is released, so the turn no longer counts).
+	firstMessage := s.sessions != nil && s.sessions.countMessages(sid) <= 1
+	s.moodNote(sid, func(p *moodPhase) { p.first = firstMessage })
+	s.moodTyping(false) // what was being typed has been sent
+	defer s.moodEnd(sid)
 	defer sink.close()
 	defer s.claims.Release(sid, &claimEpoch)
 
@@ -668,6 +675,7 @@ func (s *Server) runDetachedStream(
 			return nil
 		}
 		if text, ok := modelTextToken(token); ok {
+			s.moodNote(sid, func(p *moodPhase) { p.thinking, p.spoke = false, true })
 			fullResponse.WriteString(text)
 			ts.assistantText(text)
 			upsertDraft(false)
@@ -691,6 +699,7 @@ func (s *Server) runDetachedStream(
 				}
 			}
 			collectedToolCalls = append(collectedToolCalls, parsed)
+			s.moodNote(sid, func(p *moodPhase) { p.tools++; p.steps++; p.thinking = false })
 			name, _ := parsed["name"].(string)
 			id, _ := parsed["id"].(string)
 			args, _ := parsed["args"].(map[string]any)
@@ -699,6 +708,14 @@ func (s *Server) runDetachedStream(
 			ts.toolUse(id, name, via, args)
 		case strings.HasPrefix(token, "@@tool_result:"):
 			res := parseToolResultToken(token)
+			s.moodNote(sid, func(p *moodPhase) {
+				p.tools = max(p.tools-1, 0)
+				if res.OK {
+					p.ok++
+				} else {
+					p.err++
+				}
+			})
 			rec := res.record()
 			collectedToolResults = append(collectedToolResults, rec)
 			draftToolResults = append(draftToolResults, draftToolResult(rec))
@@ -729,6 +746,7 @@ func (s *Server) runDetachedStream(
 		case strings.HasPrefix(token, "@@thinking_round"):
 			thinkingReplaceNext = true
 		case strings.HasPrefix(token, "@@thinking:"):
+			s.moodNote(sid, func(p *moodPhase) { p.thinking = true })
 			thought := token[len("@@thinking:"):]
 			if thought == "" {
 				return nil

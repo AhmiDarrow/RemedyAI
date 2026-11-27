@@ -1,7 +1,10 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -52,14 +55,15 @@ func (s *Server) handleCoordinationPresence(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// sessionHarness is what the engine measured over a session's turns since
-// the runtime started. Nothing here is estimated or carried from elsewhere.
+// sessionHarness is what the engine measured over a session's turns. It is
+// saved with the session, so the figures are still there after the runtime
+// restarts. Nothing here is estimated or carried from elsewhere.
 type sessionHarness struct {
 	Turns, Compactions, TokensSaved      int
 	Window, Budget, Estimate             int
 	ModelCalls, ModelErrors, RateLimited int
 	Steps, StepsOK                       int
-	failStreak, MaxFailStreak            int
+	FailStreak, MaxFailStreak            int
 	Recent                               []string
 }
 
@@ -71,10 +75,73 @@ var harness = struct {
 	sync.Mutex
 	bySession map[string]*sessionHarness
 	latest    string
+	// home is where the figures are saved (the runtime's home). Empty until
+	// the first turn or the first read names it; then nothing is saved.
+	home string
 }{bySession: map[string]*sessionHarness{}}
 
+// setHarnessHome names where the figures are saved, so a runtime that has just
+// started can show what earlier turns measured.
+func setHarnessHome(homeDir string) {
+	harness.Lock()
+	harness.home = ResolveHomeDir(strings.TrimSpace(homeDir))
+	harness.Unlock()
+}
+
+// harnessPath is a session's saved figures; "" when there is nowhere to save.
+// The caller holds the lock.
+func harnessPath(sid string) string {
+	if harness.home == "" || sid == "" || strings.ContainsAny(sid, `/\.`) {
+		return ""
+	}
+	return filepath.Join(harness.home, "sessions", sid, "harness.json")
+}
+
+// loadHarnessLocked reads a session's saved figures into memory, and for an
+// unnamed session the one that ran last. The caller holds the lock.
+func loadHarnessLocked(sid string) *sessionHarness {
+	if sid == "" && harness.home != "" {
+		if b, err := os.ReadFile(filepath.Join(harness.home, "sessions", "harness.latest")); err == nil {
+			sid = strings.TrimSpace(string(b))
+			harness.latest = sid
+		}
+	}
+	if h := harness.bySession[sid]; h != nil {
+		return h
+	}
+	path := harnessPath(sid)
+	if path == "" {
+		return nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	h := &sessionHarness{}
+	if json.Unmarshal(b, h) != nil {
+		return nil
+	}
+	harness.bySession[sid] = h
+	return h
+}
+
+// saveHarnessLocked writes a session's figures next to its other files. A
+// failed write loses nothing but the figures' survival across a restart.
+func saveHarnessLocked(sid string, h *sessionHarness) {
+	path := harnessPath(sid)
+	if path == "" {
+		return
+	}
+	b, err := json.Marshal(h)
+	if err != nil || os.MkdirAll(filepath.Dir(path), 0o700) != nil {
+		return
+	}
+	_ = os.WriteFile(path, b, 0o600)
+	_ = os.WriteFile(filepath.Join(harness.home, "sessions", "harness.latest"), []byte(sid), 0o600)
+}
+
 // recordHarness adds one finished turn to its session's figures.
-func recordHarness(sessionID string, out *cognition.Outcome) {
+func recordHarness(homeDir, sessionID string, out *cognition.Outcome) {
 	if out == nil {
 		return
 	}
@@ -85,12 +152,16 @@ func recordHarness(sessionID string, out *cognition.Outcome) {
 	c := out.Context
 	harness.Lock()
 	defer harness.Unlock()
-	h := harness.bySession[sid]
+	if home := strings.TrimSpace(homeDir); home != "" {
+		harness.home = ResolveHomeDir(home)
+	}
+	h := loadHarnessLocked(sid)
 	if h == nil {
 		h = &sessionHarness{}
 		harness.bySession[sid] = h
 	}
 	harness.latest = sid
+	defer saveHarnessLocked(sid, h)
 	h.Turns++
 	h.Compactions += c.Compactions
 	h.TokensSaved += c.TokensSaved
@@ -103,12 +174,12 @@ func recordHarness(sessionID string, out *cognition.Outcome) {
 		label := step.Name
 		if step.OK {
 			h.StepsOK++
-			h.failStreak = 0
+			h.FailStreak = 0
 		} else {
 			label += " (failed)"
-			h.failStreak++
-			if h.failStreak > h.MaxFailStreak {
-				h.MaxFailStreak = h.failStreak
+			h.FailStreak++
+			if h.FailStreak > h.MaxFailStreak {
+				h.MaxFailStreak = h.FailStreak
 			}
 		}
 		h.Recent = append(h.Recent, label)
@@ -130,6 +201,10 @@ func harnessFor(sessionID string) sessionHarness {
 		}
 	}
 	h := harness.bySession[sid]
+	if h == nil {
+		// Not counted since this runtime started: read what was saved.
+		h = loadHarnessLocked(sid)
+	}
 	if h == nil {
 		return sessionHarness{}
 	}
