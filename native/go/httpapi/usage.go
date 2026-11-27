@@ -266,14 +266,21 @@ func usageSummary(homeDir string, rangeDays float64, sessionID string) (map[stri
 		return nil, err
 	}
 
-	var tpt, tct, ttt, tn sql.NullInt64
+	var tpt, tct, ttt, tn, tcr, tcw sql.NullInt64
 	var tcost sql.NullFloat64
 	err = db.QueryRow(`
 		SELECT SUM(prompt_tokens), SUM(completion_tokens),
-		       SUM(total_tokens), SUM(estimated_cost_usd), COUNT(*)
-		FROM usage_events WHERE `+where, args...).Scan(&tpt, &tct, &ttt, &tcost, &tn)
+		       SUM(total_tokens), SUM(estimated_cost_usd), COUNT(*),
+		       SUM(CASE WHEN json_valid(meta) THEN json_extract(meta, '$.cache_read_tokens') END),
+		       SUM(CASE WHEN json_valid(meta) THEN json_extract(meta, '$.cache_write_tokens') END)
+		FROM usage_events WHERE `+where, args...).Scan(&tpt, &tct, &ttt, &tcost, &tn, &tcr, &tcw)
 	if err != nil {
 		return nil, err
+	}
+	// The share of all input that the provider served from its cache.
+	var cacheRate any
+	if input := tpt.Int64 + tcr.Int64 + tcw.Int64; input > 0 && tcr.Int64 > 0 {
+		cacheRate = float64(tcr.Int64) / float64(input)
 	}
 
 	provList := make([]map[string]any, 0, len(byProvider))
@@ -293,6 +300,9 @@ func usageSummary(homeDir string, rangeDays float64, sessionID string) (map[stri
 			"total_tokens":       int(ttt.Int64),
 			"estimated_cost_usd": round6(tcost.Float64),
 			"events":             int(tn.Int64),
+			"cache_read_tokens":  int(tcr.Int64),
+			"cache_write_tokens": int(tcw.Int64),
+			"cache_hit_rate":     cacheRate,
 		},
 		"by_provider": provList,
 		"by_model":    byModel,

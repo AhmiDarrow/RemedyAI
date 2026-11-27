@@ -999,24 +999,6 @@ fn refresh_lists(client: &Client, studio: &Studio) {
             }
         });
     });
-    let studio_a = studio.clone();
-    api::spawn_json(client, Request::get("agents"), move |out| {
-        let _ = wake2.post(move || {
-            if let Ok(v) = out {
-                let names = api::rows(&v, "agents")
-                    .into_iter()
-                    .filter_map(|row| {
-                        if let Some(s) = row.as_str() {
-                            return Some(s.to_string());
-                        }
-                        let name = api::str_field(row, "name");
-                        if name.is_empty() { None } else { Some(name) }
-                    })
-                    .collect::<Vec<_>>();
-                studio_a.depth.agents.set(names);
-            }
-        });
-    });
     let studio_v = studio.clone();
     let Ok(wake) = waker() else {
         return;
@@ -2948,45 +2930,66 @@ pub fn save_skill(studio: &Studio, body: &str) {
     );
 }
 
+/// How many library skills one request brings. The library holds thousands; the tab
+/// shows a page and fetches the next when asked.
+pub const LIBRARY_PAGE: usize = 40;
+
+/// A new search: the first page of matches, best first.
 pub fn search_library(studio: &Studio, q: &str) {
+    studio.depth.library_query.set(q.trim().to_string());
+    fetch_library(studio, 0);
+}
+
+/// The next page of the search already shown.
+pub fn more_library(studio: &Studio) {
+    let have = studio.depth.library_rows.get().len();
+    if have < studio.depth.library_total.get() {
+        fetch_library(studio, have);
+    }
+}
+
+fn fetch_library(studio: &Studio, offset: usize) {
     let Some(client) = studio.runtime() else {
         return;
     };
-    let path = if q.trim().is_empty() {
-        "skills/library/catalog".to_string()
-    } else {
-        format!("skills/library/search?q={}", api::query(q))
-    };
+    let q = studio.depth.library_query.get();
+    let path = format!(
+        "skills/library/search?q={}&limit={LIBRARY_PAGE}&offset={offset}",
+        api::query(&q)
+    );
     let studio = studio.clone();
     let Ok(wake) = waker() else {
         return;
     };
     api::spawn_json(&client, Request::get(&path), move |out| {
         let _ = wake.post(move || {
-            if let Ok(v) = out {
-                let rows = parse_skills(&v);
-                let rows = if rows.is_empty() {
-                    api::rows(&v, "results")
-                        .into_iter()
-                        .filter_map(|row| {
-                            let name = api::str_field(row, "name");
-                            if name.is_empty() {
-                                return None;
-                            }
-                            Some(SkillRow {
-                                name,
-                                description: api::str_field(row, "description"),
-                                status: api::str_field(row, "id"),
-                                quarantine: false,
-                                auto_generated: false,
-                            })
-                        })
-                        .collect()
-                } else {
-                    rows
-                };
-                studio.depth.library_rows.set(rows);
+            let Ok(v) = out else { return };
+            // A page that answers an older search is dropped.
+            if v.get("query").and_then(|x| x.as_str()).unwrap_or("") != studio.depth.library_query.get() {
+                return;
             }
+            let page: Vec<SkillRow> = api::rows(&v, "results")
+                .into_iter()
+                .filter_map(|row| {
+                    let name = api::str_field(row, "name");
+                    if name.is_empty() {
+                        return None;
+                    }
+                    Some(SkillRow {
+                        name,
+                        description: api::str_field(row, "description"),
+                        status: api::str_field(row, "id"),
+                        quarantine: false,
+                        auto_generated: false,
+                    })
+                })
+                .collect();
+            let total = v.get("total").and_then(|n| n.as_u64()).unwrap_or(page.len() as u64) as usize;
+            let mut rows = if offset == 0 { Vec::new() } else { studio.depth.library_rows.get() };
+            rows.truncate(offset);
+            rows.extend(page);
+            studio.depth.library_total.set(total.max(rows.len()));
+            studio.depth.library_rows.set(rows);
         });
     });
 }

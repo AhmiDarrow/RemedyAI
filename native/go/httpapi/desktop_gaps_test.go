@@ -49,22 +49,9 @@ func doGaps(t *testing.T, s *Server, method, path, body string) (int, []byte) {
 	return rr.Code, rr.Body.Bytes()
 }
 
-func TestListAgentsAndCommands(t *testing.T) {
+func TestListCommands(t *testing.T) {
 	s := newDesktopGapsServer(t)
-	code, raw := doGaps(t, s, http.MethodGet, "/api/agents", "")
-	if code != http.StatusOK {
-		t.Fatalf("agents status=%d body=%s", code, raw)
-	}
-	var agents map[string]any
-	if err := json.Unmarshal(raw, &agents); err != nil {
-		t.Fatal(err)
-	}
-	list, _ := agents["agents"].([]any)
-	if len(list) < 4 {
-		t.Fatalf("agents=%v", agents)
-	}
-
-	code, raw = doGaps(t, s, http.MethodGet, "/api/commands", "")
+	code, raw := doGaps(t, s, http.MethodGet, "/api/commands", "")
 	if code != http.StatusOK {
 		t.Fatalf("commands status=%d body=%s", code, raw)
 	}
@@ -262,11 +249,10 @@ func TestSelfInjectRoundsEmpty(t *testing.T) {
 	}
 }
 
-func TestContinuityNanoswarmPresence(t *testing.T) {
+func TestHarnessAndPresenceRoutes(t *testing.T) {
 	s := newDesktopGapsServer(t)
 	for _, path := range []string{
 		"/api/continuity/dashboard",
-		"/api/nanoswarm/status",
 		"/api/nanoswarm/token/status",
 		"/api/coordination/presence",
 	} {

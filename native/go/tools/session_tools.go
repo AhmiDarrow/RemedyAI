@@ -149,7 +149,7 @@ func RegisterSessionTools(registry *Registry) error {
 			"properties":{
 				"mission":{"type":"string","minLength":1,"description":"The whole assignment in one message: what to change, where, and how it will be verified. The agent cannot ask you questions."},
 				"cwd":{"type":"string","description":"Absolute folder the agent works in. Defaults to the bound project folder; a folder outside it is refused."},
-				"agent":{"type":"string","enum":["claude-code","codex"],"description":"Which coding agent to hand the mission to. Default claude-code."},
+				"agent":{"type":"string","enum":["claude-code"],"description":"Which coding agent to hand the mission to. Default claude-code."},
 				"allow_shell":{"type":"boolean","description":"Let the agent run shell commands as well as edit files. Default false, which allows file edits only."},
 				"timeout_ms":{"type":"integer","minimum":1,"maximum":7200000,"description":"Kill the agent's process tree after this long (default 1800000, thirty minutes; maximum two hours)."},
 				` + propWorkspaceRoot + `,

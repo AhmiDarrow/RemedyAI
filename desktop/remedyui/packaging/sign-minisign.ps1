@@ -67,28 +67,33 @@ if (-not $minisign) {
 }
 
 try {
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $minisign.Source
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardInput = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
-    $argList = @("-S", "-s", $keyPath, "-m", $File, "-x", $sig, "-c", "Remedy Desktop update", "-t", ([IO.Path]::GetFileName($File)))
-    if ([string]::IsNullOrEmpty($password)) {
-        $argList = @("-W") + $argList
+    $baseArgs = @("-S", "-s", $keyPath, "-m", $File, "-x", $sig, "-c", "Remedy Desktop update", "-t", ([IO.Path]::GetFileName($File)))
+    # The password goes in on stdin, also when it is empty: a key made with an empty
+    # password is still an encrypted key, and minisign asks for it. Only a key written
+    # with no encryption at all takes -W, which is tried when the first way fails.
+    $attempts = @(, $baseArgs)
+    if ([string]::IsNullOrEmpty($password)) { $attempts += , (@("-W") + $baseArgs) }
+    foreach ($argList in $attempts) {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $minisign.Source
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+        $psi.Arguments = ($argList | ForEach-Object {
+            if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+        }) -join " "
+        $proc = [Diagnostics.Process]::Start($psi)
+        if ($argList[0] -ne "-W") {
+            $proc.StandardInput.WriteLine([string]$password)
+        }
+        $proc.StandardInput.Close()
+        $stdout = $proc.StandardOutput.ReadToEnd()
+        $stderr = $proc.StandardError.ReadToEnd()
+        $proc.WaitForExit()
+        if ($proc.ExitCode -eq 0 -and (Test-Path -LiteralPath $sig)) { break }
     }
-    $psi.Arguments = ($argList | ForEach-Object {
-        if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
-    }) -join " "
-    $proc = [Diagnostics.Process]::Start($psi)
-    if (-not [string]::IsNullOrEmpty($password)) {
-        $proc.StandardInput.WriteLine($password)
-    }
-    $proc.StandardInput.Close()
-    $stdout = $proc.StandardOutput.ReadToEnd()
-    $stderr = $proc.StandardError.ReadToEnd()
-    $proc.WaitForExit()
     if ($proc.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $sig)) {
         Write-Output "minisign failed (exit $($proc.ExitCode)). The key was not printed."
         if ($stderr) { Write-Output $stderr }

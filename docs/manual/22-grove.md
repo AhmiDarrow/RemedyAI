@@ -54,6 +54,10 @@ A **reminder** routine just posts its text and uses no AI. A **task** routine
 has Remedy do the work each time, in the background. Remedy can also set up
 routines when you ask her to, after you approve them.
 
+Each routine has **Pause** / **Resume**, **Run now**, **Edit** (the same form,
+filled in) and **Retire**. Under a routine that has run you see how many times
+it ran, when it last ran, and what came of it. **+ New** starts one yourself.
+
 ### Goals on their own
 
 Each goal card has an **On its own** switch. With it on, Remedy takes a step
@@ -114,18 +118,25 @@ control in the Grove top bar — there is no extra Voice button.
 Voice, vision, and local helpers download when Remedy first starts. Progress
 shows in the empty strip of the title bar (next to the logo). If the voice
 pack did not arrive, Settings → Voice has **Download Remedy's voice**.
-Advanced still shows the pip command for power users.
 
 ## Switching to Studio
 
-Grove keeps a **Studio** pill in its top bar; Studio keeps a **✦ Grove** chip at
-the top of the chat, beside the Chat / Plan / Build badge. The bottom bar holds
-only status and settings. Switching does not tear anything down — Studio stays mounted
+The window title bar has a **Grove** / **Studio** switch, always on screen on
+both surfaces. **Ctrl+1** goes to Grove, **Ctrl+2** to Studio. The logo menu
+has the same commands. Switching does not tear anything down — Studio stays mounted
 while you are in Grove, so terminals keep running, streamed jobs keep streaming,
 and the computer-host loop stays connected.
 
-The choice persists in `remedy.surface`. Clearing browser storage returns you
-to Grove, which is the default.
+The choice persists in `remedy.surface`. A fresh install, and a cleared
+preference file, open Grove. Grove is the default home.
+
+If you ask for coding or Studio work from Grove — a fix, a plan for a
+loader, a question about a crate — Remedy starts a Studio session in the
+right mode with your request already in it. It runs in the background: you
+stay in Grove, and a card there shows whether she is still working or has
+finished. **Open in Studio** on the card opens that session; **Dismiss**
+clears the card. Grove itself has no Talk / Plan / Build switch. Everyday
+talk, goals, and "I want to …" stay in Grove.
 
 ## Which one should you use
 

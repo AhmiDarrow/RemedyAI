@@ -156,6 +156,8 @@ func serveRuntime(addr, home string, smoke bool, onBound func(string)) int {
 		TurnRunner:   runner,
 		VoiceWorker:  voiceWorker,
 		VisionWorker: visionWorker,
+		// Starts and stops the local model host (llama-server).
+		RmbController: httpapi.NewNativeRmbController(),
 		// The real runtime keeps the managed ClaimIDX host (off in --smoke runs).
 		ManageClaimidx: !smoke,
 		// So does the local search engine web.search prefers.

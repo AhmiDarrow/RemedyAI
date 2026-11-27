@@ -18,8 +18,8 @@ and she stalls waiting on herself.
 A daughter gets **her own session and memory**. Remedy is the mother of that
 hive: she hires, she collects the packet, she decides what to tell you.
 
-This is not `spread_run` (cheap parallel jobs that return a digest in the
-same turn) and not the nano swarm (silent continuity workers). Those stay.
+This is not a batch of parallel tool calls in one turn. A daughter lives
+across turns and keeps her own memory.
 
 ## Two cadences
 
@@ -77,6 +77,6 @@ on her evidence ledger.
 
 ## See also
 
-- [Continuity workers (nano swarm)](17-nanoswarm.md) — not chat agents
+- [Context harness and token counting](17-nanoswarm.md)
 - [Coordination](25-coordination.md) — several sessions, one repo
-- [Coding agency](18-agency.md) — `spread_run` for cheap parallel jobs
+- [Coding agency](18-agency.md) — parallel tool calls inside one turn

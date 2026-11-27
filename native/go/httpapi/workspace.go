@@ -13,6 +13,9 @@ type fileEntry struct {
 	Name  string `json:"name"`
 	Path  string `json:"path"`
 	IsDir bool   `json:"is_dir"`
+	// Size in bytes (files only) and last change in Unix seconds.
+	Size     int64 `json:"size"`
+	Modified int64 `json:"modified"`
 }
 
 type workspaceEntry struct {
@@ -233,9 +236,17 @@ func listFileEntries(listed, base string) ([]fileEntry, bool) {
 			Name:  name,
 			Path:  filepath.ToSlash(rel),
 			IsDir: info.IsDir(),
+			Size:  fileSize(info), Modified: info.ModTime().Unix(),
 		})
 	}
 	return entries, false
+}
+
+func fileSize(info os.FileInfo) int64 {
+	if info.IsDir() {
+		return 0
+	}
+	return info.Size()
 }
 
 func filesPayload(listed, base, requestPath string) map[string]any {
@@ -507,11 +518,11 @@ func (s *Server) handleSearchFiles(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(strings.ToLower(name), needle) {
 			return nil
 		}
-		results = append(results, fileEntry{
-			Name:  name,
-			Path:  filepath.ToSlash(rel),
-			IsDir: d.IsDir(),
-		})
+		hit := fileEntry{Name: name, Path: filepath.ToSlash(rel), IsDir: d.IsDir()}
+		if info, err := d.Info(); err == nil {
+			hit.Size, hit.Modified = fileSize(info), info.ModTime().Unix()
+		}
+		results = append(results, hit)
 		if len(results) >= maxResults {
 			return filepath.SkipAll
 		}

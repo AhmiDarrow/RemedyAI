@@ -60,11 +60,10 @@ func cmdMCP(c *Ctx) int {
 	return 0
 }
 
-// sysSkillPython is core.build_python.python_cmd_for_subprocess: REMEDY_PYTHON,
-// the launcher's interpreter, then python3 / python on PATH (never the
-// Windows Store alias stub).
+// sysSkillPython is the Python a skill's own script runs with: REMEDY_PYTHON
+// when set, then python3 / python on PATH (never the Windows Store alias stub).
 var sysSkillPython = func() string {
-	for _, k := range []string{"REMEDY_PYTHON", "REMEDY_CLI_PYTHON"} {
+	for _, k := range []string{"REMEDY_PYTHON"} {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
 			return v
 		}

@@ -22,8 +22,8 @@ project access scope).
 | **Home surface** | **Grove** (partner). **Studio** is one tap away (workbench). |
 | **Data home** | `~/.remedy` (config, memory, voice, Vault, skills; DPAPI on Windows) |
 | **Models** | *Your* provider keys or Ollama / RMB — continuity stays on disk |
-| **Current release** | **v0.65.0** · GitHub **[v0.65.0](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.65.0)** · PyPI **`remedy-ai`** |
-| **Install** | [Windows](01-install-windows.md) · [Linux](01-install-linux.md) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · PyPI `remedy-ai` |
+| **This build** | **v2.0.0** · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
+| **Install** | [Windows](01-install-windows.md) · [Linux](01-install-linux.md) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · no desktop: `scripts/install.sh` / `scripts/install.ps1` |
 
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.  
 Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
@@ -32,10 +32,10 @@ Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
 
 ## What’s new (start here)
 
-**v0.65.0** keeps a long task open until a check after the last change is
-green. A rule you set — a must, a never, a do-not — still stands after the
-chat is compacted. Settings are five categories. She stays ready on this PC
-and does not watch the screen. A night step happens only after you say yes.
+**v2.0.0** gives Remedy a face of her own, drawn for you and this install.
+Grove is one conversation. When a request needs Studio, she starts it in the
+background and leaves a card in Grove. The runtime, the voice and the `remedy`
+command line are all native; nothing Python is installed.
 
 Full notes: **[What’s new](13-whats-new.md)** · engineering: repo `CHANGELOG.md`.
 
@@ -74,7 +74,7 @@ Full notes: **[What’s new](13-whats-new.md)** · engineering: repo `CHANGELOG.
 | **Game studio** | Godot-first engine verify, playtest, export |
 | **Workspace** | **Files** · **Terminal** · **Browser** · **Scratch** · **Computer use** |
 | **Local brain** | **Qwen3.5-4B** local mind + optional **RMB** (Qwen3.5-9B) muscle |
-| **Continuity** | Session Brief, partner memory, skills, silent nano swarm |
+| **Continuity** | Session Brief, partner memory, skills, context harness |
 | **Metabolism** | Turn tiers L0–L3, evidence ledger, governor, portable identity |
 | **Messengers** | Telegram (live) + Discord / Slack / Mattermost / Matrix / WhatsApp / Teams / Google Chat / Signal |
 | **Skills** | Bundled + learned + **Library** (signed catalog) |
@@ -100,7 +100,7 @@ See [Personal assistant](21-personal-assistant) · [Vault](23-vault).
 
 ## Grove and voice
 
-**Grove** is the partner home (default). **Studio** is the workbench. The same status bar lives on both. She speaks locally (Chatterbox Nano / Kokoro); hearing uses whisper. Desktop downloads a pinned Python into `~/.remedy/voice/` so the installed app can actually speak.
+**Grove** is the partner home (default). **Studio** is the workbench. The same status bar lives on both. She speaks and hears on this PC. A small native helper, `remedy-voice`, runs the speech models (sherpa-onnx). The models download once, when you first use voice. No Python is needed.
 
 See [Grove](22-grove).
 
@@ -113,7 +113,7 @@ Icon rails open real tools on this PC — not separate apps to juggle.
 | Tool | Role |
 |------|------|
 | **Files** | Browse the project / session tree; open; drag into chat |
-| **Terminal** | In-app PowerShell (ConPTY) |
+| **Terminal** | In-app shell: pick PowerShell, Command Prompt, Git Bash or WSL from **Shell** in its toolbar |
 | **Browser** | Embedded Chromium (WebView2 / WebKitGTK); **↗** for full system browser |
 | **Scratch** | Session-linked notes |
 | **Computer** | Optional desktop/computer-use path (navigate, click, type) with host bridge + safety |
@@ -131,7 +131,7 @@ When installed (Setup or **Settings → Advanced → Local model** — download 
 - **RMB** — on-device llama.cpp chat; default **Qwen3.5-9B Q6_K**
 - Binds to **127.0.0.1** only; auto-starts with Remedy when installed
 
-Details: [Local mind (Qwen3.5-4B)](14-visual-decoder) · [RMB](20-rmb-local-agent) · Workers: [Continuity workers](17-nanoswarm)
+Details: [Local mind (Qwen3.5-4B)](14-visual-decoder) · [RMB](20-rmb-local-agent) · Context: [Context harness](17-nanoswarm)
 
 ---
 
@@ -204,14 +204,14 @@ You → Grove / Studio (chat + Files / Terminal / Browser / Scratch)
 | [Game dev](26-game-dev) | Godot, web, Bevy, Pygame, Love2D studio |
 | [Local mind (Qwen3.5-4B)](14-visual-decoder) | On-device efficiency |
 | [RMB](20-rmb-local-agent) | Local llama.cpp chat |
-| [Continuity workers](17-nanoswarm) | Nano swarm (operators) |
+| [Context harness](17-nanoswarm) | Context window and token counting (operators) |
 | [Install (Windows)](01-install-windows) | Installer & SmartScreen |
 | [Install (Linux)](01-install-linux) | `.deb` / AppImage / WSLg |
 | [First run](02-first-run) | Setup wizard |
 | [Providers & auth](03-providers-and-auth) | Keys, OAuth, Ollama |
 | [Security & data](04-security-and-data) | Tokens, scope, approvals |
 | [Chat & sessions](05-chat-and-sessions) | UI, rails, Plan/Build |
-| [Memory & harness](06-memory-and-harness) | `/compact`, Progress |
+| [Memory & harness](06-memory-and-harness) | `/harness`, Progress |
 | [Coding agency](18-agency) | Build-class tools |
 | [Skills](07-skills) | Trust, Library |
 | [Updates & uninstall](08-updates-and-uninstall) | Updates, wipe |

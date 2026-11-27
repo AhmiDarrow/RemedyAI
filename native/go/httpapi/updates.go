@@ -63,16 +63,8 @@ func (s *Server) checkUpdates(currentRaw string) map[string]any {
 	}
 	s.updatesMu.Unlock()
 
-	var latestPython, latestDesktop, releaseURL, installerURL any
+	var latestDesktop, releaseURL, installerURL any
 	var errors []string
-
-	if data, err := updatesHTTPGet("https://pypi.org/pypi/remedy-ai/json", 10*time.Second); err != nil {
-		errors = append(errors, "PyPI: "+err.Error())
-	} else if info, ok := asStringMap(data["info"]); ok {
-		if v := strings.TrimSpace(fmtString(info["version"])); v != "" {
-			latestPython = v
-		}
-	}
 
 	for _, url := range []string{
 		"https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json",
@@ -108,9 +100,6 @@ func (s *Server) checkUpdates(currentRaw string) map[string]any {
 	updateAvailable := false
 	if latestDesktop != nil && compareVersions(fmtString(latestDesktop), currentNorm) > 0 {
 		updateAvailable = true
-	} else if latestPython != nil && latestDesktop == nil &&
-		compareVersions(fmtString(latestPython), currentNorm) > 0 {
-		updateAvailable = true
 	}
 	if updateAvailable && latestDesktop != nil && strings.TrimSpace(fmtString(installerURL)) == "" {
 		errors = append(errors,
@@ -122,14 +111,12 @@ func (s *Server) checkUpdates(currentRaw string) map[string]any {
 		errOut = strings.Join(errors, " · ")
 	}
 	result := map[string]any{
-		"current_version":   currentNorm,
-		"python_version":    pythonVersion,
-		"latest_python":     latestPython,
-		"latest_desktop":    latestDesktop,
-		"release_url":       releaseURL,
-		"installer_url":     installerURL,
-		"update_available":  updateAvailable,
-		"error":             errOut,
+		"current_version":  currentNorm,
+		"latest_desktop":   latestDesktop,
+		"release_url":      releaseURL,
+		"installer_url":    installerURL,
+		"update_available": updateAvailable,
+		"error":            errOut,
 	}
 
 	s.updatesMu.Lock()

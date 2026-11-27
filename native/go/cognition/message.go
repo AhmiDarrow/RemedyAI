@@ -3,6 +3,8 @@ package cognition
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/tokens"
 )
 
 // Role is the author of a transcript message. Tool results are user-authored
@@ -164,8 +166,8 @@ func (t Turn) LastAssistantText() string {
 // roughly this many tokens on every frontier vision model).
 const imageTokenCost = 1_500
 
-// estimateTokens approximates the prompt cost of a transcript: four characters
-// per token plus a flat charge per image.
+// estimateTokens is the prompt cost of a transcript: the tokenizer's count of
+// its text plus a flat charge per image.
 func estimateTokens(msgs []Message) int {
 	total := 0
 	for _, m := range msgs {
@@ -182,11 +184,11 @@ func blocksTokens(blocks []Block) int {
 		case BlockImage:
 			total += imageTokenCost
 		case BlockToolUse:
-			total += (len(b.Name) + len(b.Input) + 3) / 4
+			total += tokens.Count(b.Name) + tokens.Count(string(b.Input))
 		case BlockToolResult:
 			total += blocksTokens(b.Content)
 		default:
-			total += (len(b.Text) + 3) / 4
+			total += tokens.Count(b.Text)
 		}
 	}
 	return total

@@ -55,7 +55,7 @@ def test_local_gate_covers_every_shipped_runtime_and_artifact() -> None:
     """Every runtime, platform and check Remedy ships runs on every push."""
     prepush = _prepush_module()
     assert {lane.key for lane in prepush.LANES} == {
-        "checks", "linux", "desktop", "rust", "native", "android", "python",
+        "checks", "linux", "desktop", "rust", "remedyui", "connect", "native", "python",
     }
     local = "\n".join(step.command for lane in prepush.LANES for step in lane.steps)
     for command in (
@@ -63,13 +63,11 @@ def test_local_gate_covers_every_shipped_runtime_and_artifact() -> None:
         "ruff check . --no-fix",
         "uv run mypy",
         "check_mypy_exclude.py",
-        "import remedy",
         "check_docs.py",
         "pytest -q --tb=short",
-        "uv build",
         "npm test",
         "npm run build",
-        "testDebugUnitTest lintDebug assembleDebug assembleRelease",
+        "cargo check",
         "cargo test --locked",
         "go test ./...",
         "go test -race ./...",
@@ -83,6 +81,16 @@ def test_local_gate_covers_every_shipped_runtime_and_artifact() -> None:
     ):
         assert command in local, f"scripts/prepush.py lost {command!r}"
 
+    for lane in (prepush.REMEDYUI, prepush.CONNECT):
+        for step in lane.steps:
+            assert step.env["CARGO_BUILD_JOBS"], "cargo lanes cap their build jobs"
+    assert [s.command for s in prepush.REMEDYUI.steps] == ["cargo test"]
+    assert [s.command for s in prepush.CONNECT.steps] == ["cargo check"]
+    assert prepush.REMEDYUI.steps[0].cwd == "desktop/remedyui"
+    assert prepush.CONNECT.steps[0].cwd == "connect/app"
+
+    # Only crates that ship: the old Tauri shell is not one of them.
+    assert [s.cwd for s in prepush.RUST.steps] == ["connect/core", "native/iroh"]
     for step in prepush.RUST.steps:
         assert step.env["RUSTFLAGS"] == "-D warnings", "Rust warnings are errors"
         config = step.env["TAURI_CONFIG"]
@@ -93,35 +101,30 @@ def test_local_gate_covers_every_shipped_runtime_and_artifact() -> None:
 
 def test_release_builds_both_desktop_operating_systems_and_native_cores() -> None:
     jobs = _workflow_jobs("desktop-release.yml")
-    assert {"build-runtime", "build-tauri", "build-runtime-linux", "build-tauri-linux"} <= jobs.keys()
+    assert {"build-runtime", "build-desktop", "build-runtime-linux", "build-desktop-linux"} <= jobs.keys()
 
-    windows = _run_commands(jobs["build-runtime"]) + _run_commands(jobs["build-tauri"])
+    windows = _run_commands(jobs["build-runtime"]) + _run_commands(jobs["build-desktop"])
     assert "remedy-runtime.exe" in windows
     assert "remedy-runtime-x86_64-pc-windows-msvc.exe" in windows
     assert "remedy_core.dll" in windows
     assert "check_remedy_core_isa.py" in windows
-    assert "tauri build --bundles nsis" in windows
+    assert "package-windows.ps1" in windows
 
-    linux = _run_commands(jobs["build-runtime-linux"]) + _run_commands(jobs["build-tauri-linux"])
+    linux = _run_commands(jobs["build-runtime-linux"]) + _run_commands(jobs["build-desktop-linux"])
     assert "remedy-runtime" in linux
     assert "remedy-runtime-x86_64-unknown-linux-gnu" in linux
     assert "libremedy_core.so" in linux
     assert "check_remedy_core_isa.py" in linux
-    assert "tauri build --bundles deb,appimage" in linux
+    assert "package-linux.sh" in linux
 
 
 def test_release_ships_no_python_worker() -> None:
     """The runtime starts no Python: no release job builds or bundles a worker."""
-    import json
-
     text = (ROOT / ".github" / "workflows" / "desktop-release.yml").read_text(encoding="utf-8")
     assert "rmdy" not in text, "the release workflow still builds or uploads the Python worker"
-    for conf in ("tauri.windows.conf.json", "tauri.linux.conf.json", "tauri.macos.conf.json"):
-        payload = json.loads(
-            (ROOT / "desktop" / "src-tauri" / conf).read_text(encoding="utf-8")
-        )
-        resources = json.dumps(payload["bundle"]["resources"])
-        assert "rmdy" not in resources, f"{conf} still bundles the Python worker"
+    for script in ("package-windows.ps1", "package-linux.sh", "package-macos.sh"):
+        packaging = (ROOT / "desktop" / "remedyui" / "packaging" / script).read_text(encoding="utf-8")
+        assert "rmdy" not in packaging, f"{script} still bundles the Python worker"
 
 
 def test_zig_build_defaults_to_baseline_cpu() -> None:
@@ -193,19 +196,6 @@ def test_release_builds_runtime_and_core_without_python_sidecar() -> None:
         assert "remedy-desktop" not in runs, f"{name}: must not reference remedy-desktop"
 
 
-def _build_desktop_module():
-    import importlib.util
-    import sys
-
-    path = ROOT / "scripts" / "build_desktop.py"
-    spec = importlib.util.spec_from_file_location("remedy_build_desktop", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 def _prepush_module():
     import importlib.util
     import sys
@@ -221,7 +211,7 @@ def _prepush_module():
 
 def test_prepush_reproduces_linux_from_a_windows_checkout() -> None:
     """The Linux suite, Linux cargo and Linux go test run from this checkout
-    under WSL, and pytest never shares the box with cargo or Gradle."""
+    under WSL, and pytest never shares the box with cargo."""
     prepush = _prepush_module()
     assert any(step.command == "__wsl_cargo__" for step in prepush.LINUX.steps), (
         "Windows cargo alone misses Linux cfg(not windows) unused vars; WSL cargo is required"
@@ -230,7 +220,7 @@ def test_prepush_reproduces_linux_from_a_windows_checkout() -> None:
     assert any(step.command == "__wsl_go_test__" for step in prepush.LINUX.steps), (
         "Windows go test alone misses Linux filepath traps; WSL go test is required"
     )
-    assert prepush.PYTHON.serial_after_others, "pytest must not share the box with cargo/gradle"
+    assert prepush.PYTHON.serial_after_others, "pytest must not share the box with cargo"
 
 
 def test_prepush_hook_is_wired_and_executable() -> None:
@@ -398,7 +388,7 @@ def _good_sets(rl, ver: str = "1.2.0"):
 
 
 def test_runtime_assets_publish_on_a_companion_prerelease() -> None:
-    """The main release lists only installers + latest.json; pip runtime files,
+    """The main release lists only installers + latest.json; install-script runtime files,
     macOS updater tarballs and signatures go to runtime-v<ver>, which never
     takes over Latest and is published first. A dry run publishes nothing."""
     rl = _release_local_module()
@@ -426,17 +416,16 @@ def test_runtime_assets_publish_on_a_companion_prerelease() -> None:
         )
 
     source = (ROOT / "scripts" / "release_local.py").read_text("utf-8")
-    publish = source[source.index("def publish_releases(") : source.index("def build_wheel(")]
+    publish = source[source.index("def publish_releases(") : source.index("def main(")]
     assert publish.index('f"runtime-v{version}"') < publish.index('f"v{version}", "-R", repo'), (
         "companion release exists before Latest moves"
     )
     assert '"--prerelease", "--latest=false"' in publish[: publish.index('f"v{version}", "-R", repo')]
     notes = rl.main_notes("1.2.0", False)
-    assert "Which file do I need?" in notes and "right-click" in notes and "pip install remedy-ai" in notes
+    assert "Which file do I need?" in notes and "right-click" in notes and "scripts/install.sh" in notes and "pip install" not in notes
     assert "Experimental pre-release" in rl.main_notes("1.2.0", True)
     run_main = source[source.index("def main(") :]
     assert "if not args.dry_run:\n            publish_releases(" in run_main
-    assert "upload=not args.dry_run" in run_main
 
     # Published companion releases are re-checked on native macOS / ARM runners.
     verify = yaml.safe_load((ROOT / ".github" / "workflows" / "verify-release-assets.yml").read_text("utf-8"))
@@ -467,29 +456,29 @@ def test_reduced_gate_runs_only_the_lanes_docs_and_tests_need() -> None:
     lanes = prepush.lanes_for_paths
     assert lanes(["README.md", "docs/manual/22-grove.md"]) == {"checks"}
     assert lanes(["desktop/src/help/articles/22-grove.md"]) == {"checks", "desktop"}
-    assert lanes(["src/remedy/bundled_skills/x/SKILL.md"]) == {"checks", "linux", "python"}
+    assert lanes(["native/go/bundledskills/skills/x/SKILL.md"]) == {"checks", "native", "linux"}
     assert lanes(["tests/test_ci_matrix.py"]) == {"checks", "linux", "python"}
     assert lanes(["desktop/src/grove/head.test.ts"]) == {"checks", "desktop"}
     assert lanes(["desktop/src/components/X.test.tsx"]) == {"checks", "desktop"}
     assert lanes(["native/go/httpapi/partner_head_test.go"]) == {"checks", "native", "linux"}
-    assert lanes(["android/app/src/test/kotlin/A.kt"]) == {"checks", "android"}
+    assert lanes(["desktop/remedyui/help/articles/22-grove.md"]) == {"checks", "remedyui"}
     assert lanes(["tests\\test_x.py"]) == {"checks", "linux", "python"}  # Windows separators
 
     # Anything that ships, builds, or is read by another stack: full matrix.
     for path in (
         "scripts/prepush.py",
-        "src/remedy/core/web_helpers.py",
+        "native/zig/src/core.zig",
         "desktop/src/grove/GroveApp.tsx",
         "desktop/src/grove/head.test.ts.snap",
         "native/go/httpapi/partner_head.go",
-        "android/app/src/main/kotlin/A.kt",
+        "connect/app/src/lib.rs",
         ".github/workflows/desktop-release.yml",
         "pyproject.toml",
         "tests/fixtures/connect/noise_ik_snow.json",
         "desktop/package.json",
     ):
         assert lanes([path]) is None, path
-    assert lanes(["tests/test_x.py", "src/remedy/core/a.py"]) is None, "one shipping file widens to full"
+    assert lanes(["tests/test_x.py", "native/zig/src/core.zig"]) is None, "one shipping file widens to full"
     assert lanes([]) is None, "no diff means nothing to reduce from"
     assert set(prepush.ALL_LANE_KEYS) == {lane.key for lane in prepush.LANES}
 

@@ -127,6 +127,19 @@ func (h *searchHost) Apply() {
 	}()
 }
 
+// ApplyIfInstalled is Apply for runtime start: an engine already downloaded
+// is started, but nothing is fetched until a search asks for it (web.search
+// calls Apply when it finds the engine down).
+func (h *searchHost) ApplyIfInstalled() {
+	if h == nil {
+		return
+	}
+	if st, err := os.Stat(h.binary()); err != nil || st.IsDir() {
+		return
+	}
+	h.Apply()
+}
+
 // Stop ends the engine this runtime started. One it did not start is left alone.
 func (h *searchHost) Stop() {
 	if h == nil {

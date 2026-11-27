@@ -63,7 +63,7 @@ pub const SECTIONS: &[Section] = &[
     Section { id: "privacy", title: "Privacy", summary: "What leaves this PC to your model", keywords: "privacy mode pii email phone scrub redact tool results llm egress cloud mail calendar page wipe memory forget persona soul claimidx", category: "privacy", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "always-ready", title: "Always ready", summary: "Startup & tray", keywords: "login tray startup quit windows", category: "system", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "tool-process", title: "Tool process", summary: "Visibility of tool steps", keywords: "process trail full medium off diagnostics", category: "system", advanced_only: true, display_title: None, display_summary: None },
-    Section { id: "advanced", title: "Advanced", summary: "Learning, logs, tone", keywords: "skill creation log level sarcasm threshold learning", category: "system", advanced_only: true, display_title: None, display_summary: None },
+    Section { id: "advanced", title: "Advanced", summary: "Learning, tone", keywords: "skill creation log level sarcasm threshold learning", category: "system", advanced_only: true, display_title: None, display_summary: None },
     Section { id: "help", title: "Help & shortcuts", summary: "Manual & keys", keywords: "f1 wiki hotkeys keyboard", category: "system", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "about", title: "About", summary: "Version & WebUI", keywords: "version update webui about", category: "system", advanced_only: false, display_title: None, display_summary: None },
     Section { id: "license", title: "License", summary: "Free tier & commercial", keywords: "license commercial free indie enterprise copyright", category: "system", advanced_only: false, display_title: None, display_summary: None },
@@ -639,11 +639,11 @@ pub fn phone_terms() -> String {
 }
 
 pub fn license_text() -> &'static str {
-    include_str!("../../../public/LICENSE.txt")
+    include_str!("../../assets/LICENSE.txt")
 }
 
 pub fn third_party_text() -> &'static str {
-    include_str!("../../../public/THIRD_PARTY_NOTICES.txt")
+    include_str!("../../assets/THIRD_PARTY_NOTICES.txt")
 }
 
 /// What Save sends. Mirrors `handleSave` in SettingsPanel.tsx.
@@ -899,8 +899,6 @@ pub fn save_body(d: &SaveDraft) -> Result<Value, String> {
     body.insert("api_max_body_mb".into(), json!(d.api_max_body_mb.round().max(0.0) as u64));
     body.insert("trust_profile".into(), json!(d.trust_profile));
     body.insert("allow_skill_creation".into(), json!(d.allow_skills));
-    body.insert("auto_approve_threshold".into(), json!(d.auto_approve));
-    body.insert("log_level".into(), json!(d.log_level));
     body.insert("sarcasm_mode".into(), json!(d.sarcasm));
     body.insert("claimidx_enabled".into(), json!(d.claimidx_enabled));
     body.insert("claimidx_public_ledger".into(), json!(d.claimidx));

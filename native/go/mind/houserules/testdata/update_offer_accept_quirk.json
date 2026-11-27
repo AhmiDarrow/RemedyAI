@@ -10,60 +10,60 @@
     "action": "update_offer_accept"
    },
    "result": {
-    "ok": true,
     "choice": "declined",
+    "ok": true,
     "update_offer": {
      "available": false,
-     "id": "major-changes-2026-11",
-     "title": "House rules",
      "body": "Remedy now has smarter token saving, local muscle sharing, and talking with other bots (A2A and MCP). It's worth a few minutes to go over the house rules together.",
+     "id": "major-changes-2026-11",
      "primary": "Let's go",
-     "secondary": "Not now"
+     "secondary": "Not now",
+     "title": "House rules"
     }
    },
    "files": {
+    "config.toml": {
+     "setup_completed": true
+    },
     "house_rules.toml": {
-     "version": 1,
-     "status": "pending",
-     "offered_at": "",
-     "completed_at": "",
-     "source": "",
-     "skipped": [],
-     "update_offer": "declined",
-     "update_offer_id": "major-changes-2026-11",
      "answers": {},
-     "provenance": {}
-    },
-    "setup_session.json": {
-     "version": 1,
-     "mode": "conversation",
-     "status": "pending",
-     "onboarding_pending": false,
-     "mind_failure": null,
-     "draft": {},
-     "skipped": [],
-     "offered_at": "",
      "completed_at": "",
+     "offered_at": "",
+     "provenance": {},
+     "skipped": [],
      "source": "",
-     "setup_session_id": "",
+     "status": "pending",
      "update_offer": "declined",
      "update_offer_id": "major-changes-2026-11",
-     "update_offer_at": "2026-11-25T15:39:51Z"
+     "version": 1
     },
-    "house_rules_pending.json": null,
-    "house_rules_prev.json": null,
     "house_rules_audit.jsonl": [
      {
       "action": "update_offer",
       "actor": "owner",
-      "origin": "",
       "choice": "declined",
       "id": "major-changes-2026-11",
-      "ts": "2026-11-25T15:39:51Z"
+      "origin": "",
+      "ts": "\u003cts\u003e"
      }
     ],
-    "config.toml": {
-     "setup_completed": true
+    "house_rules_pending.json": null,
+    "house_rules_prev.json": null,
+    "setup_session.json": {
+     "completed_at": "",
+     "draft": {},
+     "mind_failure": null,
+     "mode": "conversation",
+     "offered_at": "",
+     "onboarding_pending": false,
+     "setup_session_id": "",
+     "skipped": [],
+     "source": "",
+     "status": "pending",
+     "update_offer": "declined",
+     "update_offer_at": "\u003cts\u003e",
+     "update_offer_id": "major-changes-2026-11",
+     "version": 1
     }
    }
   }

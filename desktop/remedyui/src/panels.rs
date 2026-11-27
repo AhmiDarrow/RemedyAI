@@ -153,7 +153,13 @@ pub fn diagnostics_body(ui: &Ui, studio: Studio, chrome: Chrome) -> El {
         let _ = slot.clone().child(kv(&u, &messages().text(&u, "diag-remedy"), &json_line(&v, &[("/remedy/version", "version"), ("/remedy/active_model", "model"), ("/remedy/home_dir", "home")])));
         let listening = v.pointer("/remedy/api/listening").and_then(|n| n.as_bool());
         let api = match listening {
-            Some(true) => "127.0.0.1:7400 listening".to_string(),
+            Some(true) => {
+                let host = v.pointer("/remedy/api/host").and_then(|h| h.as_str()).unwrap_or("127.0.0.1");
+                match v.pointer("/remedy/api/port").and_then(|p| p.as_u64()) {
+                    Some(port) => format!("{host}:{port} listening"),
+                    None => format!("{host} listening"),
+                }
+            }
             Some(false) => "not listening".to_string(),
             None => String::new(),
         };

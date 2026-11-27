@@ -37,11 +37,9 @@ pub fn fallback_commands() -> Vec<SlashCommand> {
         SlashCommand::new("/help", "List commands"),
         SlashCommand::new("/new", "New session"),
         SlashCommand::new("/reset", "Full reset this session (stay here — like new chat)"),
-        SlashCommand::new("/compact", "Compact conversation"),
         SlashCommand::new("/remember", "Save a memory"),
-        SlashCommand::new("/thinking", "Toggle thinking visibility"),
+        SlashCommand::new("/think", "Thinking level: off, low, medium or high"),
         SlashCommand::new("/export", "Export session as .txt"),
-        SlashCommand::new("/import-session", "Import session from .txt / .md"),
     ]
 }
 

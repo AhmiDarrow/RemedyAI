@@ -61,9 +61,9 @@ type ToolResult struct {
 	IsError bool
 }
 
-// Usage is the provider-reported token count for one model round. The cache
-// counts are Anthropic's prompt-cache accounting and are omitted by providers
-// that do not report them.
+// Usage is the provider-reported token count for one model round.
+// PromptTokens is input paid at the full rate; input the provider served from
+// its prompt cache is counted apart, for every provider that reports it.
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
@@ -176,6 +176,11 @@ type Config struct {
 	RepeatNudgeBudget int
 	ModelRetries      int
 	RetryBackoff      time.Duration
+	// ContextTrimAt and ContextCompactAt are the shares of the model's window
+	// (0–1) at which the transcript's old tool output is trimmed and at which
+	// its middle is replaced by a working-set summary. Zero means the default
+	// (promptBudgetFraction for both).
+	ContextTrimAt, ContextCompactAt float64
 }
 
 func envInt(name string, def, lo, hi int) int {
@@ -323,6 +328,30 @@ type Outcome struct {
 	Trace    []TraceEvent
 	Pending  []ToolCall
 	Err      error
+	// Context is what the turn did to stay inside the model's window.
+	Context ContextStats
+}
+
+// ContextStats are a turn's measured facts about its prompt and its calls.
+type ContextStats struct {
+	// Window and Budget are the model's prompt window and the share of it the
+	// transcript may fill, in tokens. Estimate is the transcript's size at the
+	// last model round.
+	Window, Budget, Estimate int
+	// Compactions counts the rewrites that brought the transcript back under
+	// the budget, TokensSaved what they removed.
+	Compactions, TokensSaved int
+	// ModelCalls counts the model rounds asked for, ModelErrors the ones that
+	// failed after their retries, RateLimited those refused for rate.
+	ModelCalls, ModelErrors, RateLimited int
+	// Steps are the tool calls that ran, in order.
+	Steps []ToolStep
+}
+
+// ToolStep is one executed tool call and whether it succeeded.
+type ToolStep struct {
+	Name string
+	OK   bool
 }
 
 type Engine struct {
@@ -367,10 +396,18 @@ const (
 // transcriptBudget is the token ceiling the transcript may reach before the
 // engine compacts it.
 func transcriptBudget(window int) int {
+	return transcriptBudgetAt(window, promptBudgetFraction)
+}
+
+// transcriptBudgetAt is the ceiling at a given share of the window.
+func transcriptBudgetAt(window int, share float64) int {
 	if window <= 0 {
 		window = DefaultContextWindow
 	}
-	budget := int(float64(window)*promptBudgetFraction) - reservedOutputTokens
+	if share <= 0 || share > 1 {
+		share = promptBudgetFraction
+	}
+	budget := int(float64(window)*share) - reservedOutputTokens
 	if floor := window / 4; budget < floor {
 		budget = floor
 	}
@@ -413,7 +450,15 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 	if config.MaxResultChars <= 0 {
 		config.MaxResultChars = defaultMaxResultChars(window)
 	}
-	budget := transcriptBudget(window)
+	budget := transcriptBudgetAt(window, config.ContextCompactAt)
+	trimAt := budget
+	if config.ContextTrimAt > 0 {
+		trimAt = min(budget, transcriptBudgetAt(window, config.ContextTrimAt))
+	}
+	out.Context.Window, out.Context.Budget = window, budget
+	if window <= 0 {
+		out.Context.Window = DefaultContextWindow
+	}
 
 	var lastBatch string
 	var failNotes failNoteState
@@ -438,29 +483,45 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 			}
 		}
 		trace(StateObserve, iteration, "assemble transcript")
-		if est := estimateTokens(transcript); est > budget {
+		est := estimateTokens(transcript)
+		if est > trimAt {
 			before := len(transcript)
+			rewritten := false
 			elided := elideMiddleObservations(transcript)
 			// Either rewrite changes earlier turns, and a signed thinking block
 			// is valid only after the exact turns that produced it.
 			if elidedEst := estimateTokens(elided); elidedEst <= budget && elidedEst < est {
-				transcript = elided
+				transcript, rewritten = elided, true
 				trace(StateUpdate, iteration, fmt.Sprintf(
 					"elided middle observations %d messages (~%d→~%d tokens, budget %d)",
 					before, est, elidedEst, budget))
-			} else {
-				transcript = compactTranscriptKeep(transcript, verifySeen, compactKeepCount(window))
+			} else if est > budget {
+				transcript, rewritten = compactTranscriptKeep(transcript, verifySeen, compactKeepCount(window)), true
 				trace(StateUpdate, iteration, fmt.Sprintf(
 					"compacted transcript %d→%d messages (~%d tokens over %d)", before, len(transcript), est, budget))
 			}
-			transcript = stripNative(transcript)
+			if rewritten {
+				transcript = stripNative(transcript)
+				after := estimateTokens(transcript)
+				out.Context.Compactions++
+				if after < est {
+					out.Context.TokensSaved += est - after
+				}
+				est = after
+			}
 		}
+		out.Context.Estimate = est
 		turn := Turn{System: system, Messages: cloneMessages(transcript), Iteration: iteration}
 		out.Messages = turn.Messages
 
 		trace(StateModel, iteration, "stream model")
 		events, err := e.streamWithRetry(ctx, turn, config)
+		out.Context.ModelCalls++
 		if err != nil {
+			out.Context.ModelErrors++
+			if low := strings.ToLower(err.Error()); strings.Contains(low, "429") || strings.Contains(low, "rate limit") {
+				out.Context.RateLimited++
+			}
 			out.Err = err
 			trace(StateFailed, iteration, err.Error())
 			return out
@@ -638,6 +699,14 @@ func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 		trace(StateAct, iteration, fmt.Sprintf("execute %d tools", len(allowed)))
 		results := e.executeDecided(ctx, calls, decisions, config.MaxParallelTools)
 		out.Results = results
+		for i, res := range results {
+			name := res.Name
+			if name == "" && i < len(calls) {
+				name = calls[i].Name
+			}
+			out.Context.Steps = append(out.Context.Steps,
+				ToolStep{Name: name, OK: !res.IsError && strings.TrimSpace(res.Err) == ""})
+		}
 		if e.AfterToolBatch != nil {
 			func() {
 				defer func() { _ = recover() }()

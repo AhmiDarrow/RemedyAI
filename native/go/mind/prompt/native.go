@@ -103,7 +103,8 @@ func AssembleNative(env Env, input map[string]any) (Native, error) {
 	}
 
 	add(&ctx, ContextMarker, contextHeader)
-	if soulOn {
+	// What Remedy knows about the owner goes only into the owner's own turns.
+	if soulOn && !in.Outside {
 		req := t.soulRequest()
 		req.contract = false
 		req.offers = true
@@ -121,7 +122,9 @@ func AssembleNative(env Env, input map[string]any) (Native, error) {
 		add(&ctx, "work_roots", workRootsBlock(t.proj.Active))
 	}
 	if src := env.Sources; src != nil {
-		add(&ctx, "memory", src.MemoryBlock(cut(pyStrip(msg), 400), t.proj.Active))
+		if !in.Outside {
+			add(&ctx, "memory", src.MemoryBlock(cut(pyStrip(msg), 400), t.proj.Active))
+		}
 		if !chat {
 			add(&ctx, "active_plan", src.ActivePlan(in.SessionID))
 			add(&ctx, "todos", src.Todos(in.SessionID))

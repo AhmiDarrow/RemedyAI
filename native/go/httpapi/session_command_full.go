@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/AhmiDarrow/RemedyAI/native/go/tokens"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -40,11 +41,10 @@ var fullSlashCommands = []map[string]any{
 	{"name": "/safeguards", "description": "The four safeguards and their values", "aliases": []string{"/guards"}, "arguments": nil, "group": "Settings"},
 	// the model side
 	{"name": "/usage", "description": "Tokens and estimated cost: /usage [days]", "aliases": []string{"/cost"}, "arguments": "days", "group": "Model"},
+	{"name": "/harness", "description": "This conversation's context figures: fill, compactions, tool and model results", "aliases": []string{}, "arguments": nil, "group": "Model"},
 	{"name": "/context", "description": "How full this conversation's context is", "aliases": []string{}, "arguments": nil, "group": "Model"},
 	{"name": "/providers", "description": "Model providers and which are connected", "aliases": []string{}, "arguments": nil, "group": "Model"},
 	{"name": "/tools", "description": "The tools she can use: /tools [word to filter by]", "aliases": []string{}, "arguments": "filter", "group": "Model"},
-	{"name": "/agents", "description": "The agent kinds a conversation can run as", "aliases": []string{}, "arguments": nil, "group": "Model"},
-	{"name": "/mcp", "description": "Connected MCP servers", "aliases": []string{}, "arguments": nil, "group": "Model"},
 	{"name": "/todos", "description": "Her checklist in this conversation", "aliases": []string{}, "arguments": nil, "group": "Model"},
 	// memory
 	{"name": "/forget", "description": "Remove something from memory: /forget <text>", "aliases": []string{}, "arguments": "text", "group": "Memory"},
@@ -58,7 +58,14 @@ var fullSlashCommands = []map[string]any{
 	{"name": "/doctor", "description": "A health check of Remedy and this PC", "aliases": []string{"/diagnostics"}, "arguments": nil, "group": "This PC"},
 	{"name": "/version", "description": "The version that is running", "aliases": []string{}, "arguments": nil, "group": "This PC"},
 	{"name": "/update", "description": "Check whether a newer version is out", "aliases": []string{"/updates"}, "arguments": nil, "group": "This PC"},
+	{"name": "/house-rules", "description": "Read the house rules you set", "aliases": []string{"/houserules"}, "arguments": nil, "group": "Help"},
 	{"name": "/commands", "description": "Every command, grouped", "aliases": []string{}, "arguments": nil, "group": "Help"},
+}
+
+func (s *Server) handleListCommands(w http.ResponseWriter, _ *http.Request) {
+	// Only commands the runtime carries out: a palette must not offer one that
+	// answers "unknown command".
+	writeJSON(w, http.StatusOK, map[string]any{"commands": allSlashCommands()})
 }
 
 // allSlashCommands is every command the runtime carries out, in help order.
@@ -476,22 +483,18 @@ func (s *Server) executeFullSlash(sessionID, raw string, phone bool) map[string]
 		}
 		return say("%d tools:\n  %s", len(names), strings.Join(names, ", "))
 
-	case "/agents":
-		_, out := who.call(http.MethodGet, "/api/agents", nil)
-		return facts("Agent kinds:", out["agents"], 1)
-
-	case "/mcp":
-		servers, _ := LoadConfig(s.homeDir)["mcp_servers"].([]any)
-		if len(servers) == 0 {
-			return say("No MCP servers are connected. Add one in Settings, Connections.")
+	case "/harness":
+		h := harnessFor(sessionID)
+		if h.Turns == 0 {
+			return say("Nothing measured yet for this conversation. The figures start with its next turn.")
 		}
-		lines := []string{"MCP servers:"}
-		for _, sv := range servers {
-			if row, ok := sv.(map[string]any); ok {
-				lines = append(lines, "  "+fmt.Sprint(firstOf(row, "name", "id", "command", "url")))
-			} else {
-				lines = append(lines, "  "+fmt.Sprint(sv))
-			}
+		lines := []string{
+			fmt.Sprintf("Context: %d of %d tokens (%.0f%%), compacted at %d.",
+				h.Estimate, h.Window, 100*float64(h.Estimate)/float64(max(h.Window, 1)), h.Budget),
+			fmt.Sprintf("Turns %d · trimmed or compacted %d times · %d tokens saved.", h.Turns, h.Compactions, h.TokensSaved),
+			fmt.Sprintf("Tool calls %d (%d succeeded) · longest run of failures %d.", h.Steps, h.StepsOK, h.MaxFailStreak),
+			fmt.Sprintf("Model rounds %d · failed %d · rate limited %d.", h.ModelCalls, h.ModelErrors, h.RateLimited),
+			"Counted with " + tokens.Method + ".",
 		}
 		return say("%s", strings.Join(lines, "\n"))
 
@@ -529,23 +532,38 @@ func (s *Server) executeFullSlash(sessionID, raw string, phone bool) map[string]
 		if err != nil {
 			return say("Could not search memory: %s", err.Error())
 		}
+		// Facts are what Remedy is shown about you on every turn; notes are
+		// what she looks up. Forgetting covers both.
+		facts, err := s.sessions.matchProfileFacts("default", arg)
+		if err != nil {
+			return say("Could not search memory: %s", err.Error())
+		}
+		var matches []string
+		for _, fact := range facts {
+			matches = append(matches, truncateRunes(fact, 120))
+		}
+		for _, e := range found {
+			matches = append(matches, truncateRunes(e.Title+" — "+e.Content, 120))
+		}
 		switch {
-		case len(found) == 0:
+		case len(matches) == 0:
 			return say("Nothing in memory contains “%s”.", arg)
-		case len(found) > 3:
+		case len(matches) > 3:
 			lines := []string{fmt.Sprintf("More than three things in memory contain “%s”. Give more of the text so only the ones you mean match:", arg)}
-			for _, e := range found {
-				lines = append(lines, "  "+truncateRunes(e.Title+" — "+e.Content, 120))
+			for _, m := range matches {
+				lines = append(lines, "  "+m)
 			}
 			return say("%s", strings.Join(lines, "\n"))
 		}
-		n, err := s.sessions.forgetMemoryLIKE(arg)
-		if err != nil {
+		if _, err := s.sessions.forgetProfileFacts("default", arg); err != nil {
 			return say("Could not remove it: %s", err.Error())
 		}
-		lines := []string{fmt.Sprintf("Removed %d from memory:", n)}
-		for _, e := range found {
-			lines = append(lines, "  "+truncateRunes(e.Title+" — "+e.Content, 120))
+		if _, err := s.sessions.forgetMemoryLIKE(arg); err != nil {
+			return say("Could not remove it: %s", err.Error())
+		}
+		lines := []string{fmt.Sprintf("Removed %d from memory:", len(matches))}
+		for _, m := range matches {
+			lines = append(lines, "  "+m)
 		}
 		return map[string]any{"text": strings.Join(lines, "\n"), "action": "memory_changed"}
 

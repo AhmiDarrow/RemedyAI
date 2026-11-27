@@ -104,7 +104,7 @@ func Root() *Command {
 	computer := &Command{Name: "computer", Help: "Computer-use host status and CLI host control", Run: cmdComputer, Sub: []*Command{
 		leaf("status", "Show host_connected, pending jobs, CLI host state", cmdComputer, nil),
 		leaf("host", "Start/stop the in-process CLI computer host (system browser + desktop)", cmdComputer,
-			[]Flag{boolf("api", "Also start the HTTP stub poller against remedy serve (REMEDY_API)")},
+			nil,
 			Arg{Name: "action", Optional: true, Default: "start", Help: "start (background), stop, or run (foreground until Ctrl+C)"}),
 	}}
 	provider := opt("provider", "xai", "Provider id (default: xai)")

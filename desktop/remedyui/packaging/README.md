@@ -1,6 +1,6 @@
-# Remedy Desktop 1.0 packaging
+# Remedy Desktop 2.0 packaging
 
-The first RemedyUI ship is **1.0.0** (`com.remedy.desktop`), which is newer than the last Tauri build **0.70.5**. These scripts produce the artifacts that feed already understands. They do not tag a release and they do not publish one.
+The current RemedyUI build is **2.0.0** (`com.remedy.desktop`), which is newer than the last Tauri build **0.70.5**. These scripts produce the artifacts that feed already understands. They do not tag a release and they do not publish one.
 
 `cargo remedy package` writes an Inno Setup installer on Windows, a prefix tarball on Linux, and a zipped `.app` on macOS. None of those is the 0.70.5 update payload. Use the scripts in this directory.
 
@@ -20,11 +20,11 @@ If a previous install directory is known, `/D=<that directory>` is the last argu
 
 Before it copies files, the installer runs that previous uninstaller when the registry still has one: `ExecWait '"<old uninstall.exe>" /S /UPDATE _?=<old dir>'`. `/S` and `/UPDATE` skip the choices dialog. `_?=` is last so NSIS waits until the old files are gone instead of returning as soon as the uninstaller copies itself to `%TEMP%`. The hooks then write keep-choices (`config=0`, `skills=0`, `full=0`). The per-user data directory (`%USERPROFILE%\.remedy` or `~/.remedy`) is removed only when an interactive uninstall sets `full=1`. The NSIS script itself never deletes that directory.
 
-The 1.0 client uses the same flags, the same flag file, and the same three hidden hosts the 0.70.5 client used (PowerShell with job breakaway, a hidden `wscript` launch, and a one-shot scheduled task). It does not show the old update popup.
+The 2.0 client uses the same flags, the same flag file, and the same three hidden hosts the 0.70.5 client used (PowerShell with job breakaway, a hidden `wscript` launch, and a one-shot scheduled task). It does not show the old update popup.
 
 ## Feed
 
-`latest.json` in this directory is the 2.0.0 template. The shape matches `scripts/latest.json` (Tauri `Feed::Json`). Leave `scripts/latest.json` on the 0.70.5 template. Signatures in the 1.0 template are empty on purpose. RemedyUI refuses an empty signature, so an unsigned file cannot install.
+`latest.json` in this directory is the 2.0.0 template. The shape matches `scripts/latest.json` (Tauri `Feed::Json`). Leave `scripts/latest.json` on the 0.70.5 template. Signatures in the 2.0 template are empty on purpose. RemedyUI refuses an empty signature, so an unsigned file cannot install.
 
 | Platform | Asset | URL |
 | --- | --- | --- |

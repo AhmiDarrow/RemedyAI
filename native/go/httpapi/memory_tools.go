@@ -83,7 +83,7 @@ func memorySkillToolDefs() []memorySkillToolDef {
 			run: toolPartnerVigil,
 		},
 		{
-			id: "skill.search", desc: "Rank the installed skill packs for a task description. Returns names, status and a one-line summary; load one with skill.activate.",
+			id: "skill.search", desc: "Rank the installed skill packs for a task description. Returns names, status and a one-line summary; load one with skill.activate. Also lists matching skills in the Skills Library that are not installed; the owner installs those from the Library tab.",
 			risk: tools.RiskReadOnly,
 			in: `{
 			"type":"object",
@@ -115,7 +115,20 @@ func memorySkillToolDefs() []memorySkillToolDef {
 						"additionalProperties":false
 					}
 				},
-				"total":{"type":"integer","minimum":0}
+				"total":{"type":"integer","minimum":0},
+				"library":{
+					"type":"array",
+					"items":{
+						"type":"object",
+						"required":["id","name"],
+						"properties":{
+							"id":{"type":"string"},
+							"name":{"type":"string"},
+							"description":{"type":"string"}
+						},
+						"additionalProperties":false
+					}
+				}
 			},
 			"additionalProperties":false
 		}`,
@@ -184,7 +197,7 @@ func memorySkillToolDefs() []memorySkillToolDef {
 			run: toolMemorySave,
 		},
 		{
-			id: "memory.search", desc: "Search Partner Memory + FTS entries (Python worker; context, not a grant)",
+			id: "memory.search", desc: "Search Partner Memory and saved entries (context, not a grant)",
 			risk: tools.RiskReadOnly,
 			in: `{
 			"type":"object",
@@ -721,22 +734,48 @@ func (s *sessionStore) upsertProfileFact(userID string, w profileFactWrite) (str
 	if action == "skipped" {
 		return action, nil
 	}
+	if err := s.writeProfileLocked(userID, profile, now); err != nil {
+		return "skipped", err
+	}
+	return action, nil
+}
+
+// loadProfileLocked reads a user's profile, or an empty one. s.mu is held.
+func (s *sessionStore) loadProfileLocked(userID string) (map[string]any, error) {
+	profile := map[string]any{}
+	var raw string
+	err := s.db.QueryRow(`SELECT profile_json FROM user_profile WHERE user_id = ?`, userID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return profile, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if jerr := json.Unmarshal([]byte(raw), &profile); jerr != nil || profile == nil {
+		return nil, fmt.Errorf("profile_json unreadable: %v", jerr)
+	}
+	return profile, nil
+}
+
+// writeProfileLocked stores a profile and its facts mirror in one
+// transaction. s.mu is held.
+func (s *sessionStore) writeProfileLocked(userID string, profile map[string]any, now time.Time) error {
 	profile["user_id"] = userID
 	body, err := json.MarshalIndent(profile, "", "  ")
 	if err != nil {
-		return "skipped", err
+		return err
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
-		return "skipped", err
+		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.Exec(`INSERT OR REPLACE INTO user_profile (user_id, profile_json, updated_at) VALUES (?, ?, ?)`,
 		userID, string(body), pyISO(now)); err != nil {
-		return "skipped", err
+		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM user_facts WHERE user_id = ?`, userID); err != nil {
-		return "skipped", err
+		return err
 	}
 	facts, _ := profile["facts"].([]any)
 	for _, item := range facts {
@@ -766,13 +805,76 @@ func (s *sessionStore) upsertProfileFact(userID string, w profileFactWrite) (str
 			(id, user_id, fact, category, confidence, source, created_at, last_referenced, reference_count)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, userID, asString(f["fact"]), cat, factConfidence(f), src, created, last, factRefCount(f)); err != nil {
-			return "skipped", err
+			return err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return "skipped", err
+	return tx.Commit()
+}
+
+// forgetProfileFacts removes the facts whose text contains text (any case)
+// and returns what was removed. These are the facts shown to the model on
+// every turn, so forgetting has to reach them, not only the notes.
+func (s *sessionStore) forgetProfileFacts(userID, text string) ([]string, error) {
+	needle := strings.ToLower(strings.TrimSpace(text))
+	if needle == "" {
+		return nil, nil
 	}
-	return action, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.ensurePartnerMemorySchema(); err != nil {
+		return nil, err
+	}
+	profile, err := s.loadProfileLocked(userID)
+	if err != nil {
+		return nil, err
+	}
+	facts, _ := profile["facts"].([]any)
+	var kept []any
+	var removed []string
+	for _, item := range facts {
+		f, _ := item.(map[string]any)
+		if fact := asString(f["fact"]); f != nil && strings.Contains(strings.ToLower(fact), needle) {
+			removed = append(removed, fact)
+			continue
+		}
+		kept = append(kept, item)
+	}
+	if len(removed) == 0 {
+		return nil, nil
+	}
+	if kept == nil {
+		kept = []any{}
+	}
+	profile["facts"] = kept
+	return removed, s.writeProfileLocked(userID, profile, time.Now())
+}
+
+// matchProfileFacts lists the facts whose text contains text, without
+// changing anything.
+func (s *sessionStore) matchProfileFacts(userID, text string) ([]string, error) {
+	needle := strings.ToLower(strings.TrimSpace(text))
+	if needle == "" {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.ensurePartnerMemorySchema(); err != nil {
+		return nil, err
+	}
+	profile, err := s.loadProfileLocked(userID)
+	if err != nil {
+		return nil, err
+	}
+	facts, _ := profile["facts"].([]any)
+	var out []string
+	for _, item := range facts {
+		if f, ok := item.(map[string]any); ok {
+			if fact := asString(f["fact"]); strings.Contains(strings.ToLower(fact), needle) {
+				out = append(out, fact)
+			}
+		}
+	}
+	return out, nil
 }
 
 func (s *sessionStore) insertMemoryNote(title, content, sessionID string, importance float64, meta map[string]any) error {

@@ -126,7 +126,7 @@ func TestInformationCommandsAnswerWithFacts(t *testing.T) {
 	if text := run("/remember the cat is called Miso"); !strings.Contains(text, "Miso") {
 		t.Fatal(text)
 	}
-	if text := run("/forget Miso"); !strings.Contains(text, "Removed 1") {
+	if text := run("/forget Miso"); !strings.Contains(text, "Removed 2") { // the note and the fact
 		t.Fatalf("/forget: %s", text)
 	}
 	if text := run("/memory Miso"); strings.Contains(text, "cat is called") {

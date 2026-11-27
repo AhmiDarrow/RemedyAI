@@ -34,8 +34,8 @@ import (
 // private, checksum-verified CPython in the same folder.
 //
 // Two settings decide what it does:
-//   - claimidx_enabled (default on): off stops the host and nothing is
-//     installed or started.
+//   - claimidx_enabled: off stops the host and nothing is installed or
+//     started. Never set, an installed host runs and nothing new is installed.
 //   - claimidx_public_ledger (default OFF): claims stay on this computer
 //     unless the owner turns sharing on. Off sets CLAIMIDX_SHARE=0 and
 //     CLAIMIDX_COMMONS=0 and writes "share": false to the host's config.
@@ -119,7 +119,18 @@ func (h *claimidxHost) venvPython() string {
 	return filepath.Join(h.runtime(), "bin", "python")
 }
 
+// claimidxEnabled is the owner's switch when they set it.
 func claimidxEnabled(cfg ConfigMap) bool { return cfgBool(cfg, "claimidx_enabled", true) }
+
+// wanted says whether the host should run. With the switch never touched, a
+// host that is already installed keeps running, but nothing is downloaded and
+// installed until the owner turns ClaimIDX on.
+func (h *claimidxHost) wanted(cfg ConfigMap) bool {
+	if _, set := cfg["claimidx_enabled"]; set {
+		return claimidxEnabled(cfg)
+	}
+	return h != nil && h.installed()
+}
 
 // claimidxPublic: sharing to the public ledger is off unless the owner turned it on.
 func claimidxPublic(cfg ConfigMap) bool {
@@ -340,7 +351,7 @@ func (h *claimidxHost) Apply() {
 
 func (h *claimidxHost) apply() error {
 	cfg := LoadConfig(h.home)
-	if !claimidxEnabled(cfg) {
+	if !h.wanted(cfg) {
 		h.Stop()
 		return nil
 	}
@@ -408,7 +419,7 @@ func (s *Server) handleClaimidxStatus(w http.ResponseWriter, _ *http.Request) {
 	if s.claimidx == nil {
 		cfg := LoadConfig(s.homeDir)
 		writeJSON(w, http.StatusOK, map[string]any{
-			"enabled": claimidxEnabled(cfg), "public": claimidxPublic(cfg),
+			"enabled": s.claimidx.wanted(cfg), "public": claimidxPublic(cfg),
 			"installed": false, "running": false, "working": false, "version": claimidxVersion,
 			"error": "ClaimIDX is not managed by this runtime.",
 		})
@@ -424,7 +435,7 @@ func (h *claimidxHost) Status() map[string]any {
 	running, busy, lastErr := h.stop != nil, h.busy, h.lastErr
 	h.mu.Unlock()
 	return map[string]any{
-		"enabled":   claimidxEnabled(cfg),
+		"enabled":   h.wanted(cfg),
 		"public":    claimidxPublic(cfg),
 		"installed": h.installed(),
 		"running":   running,

@@ -120,9 +120,8 @@ type delegateAgent struct {
 	argv func(mission string, allowShell bool) []string
 }
 
-// delegateAgents is the enum in the descriptor. Codex stays listed with no
-// argv builder: the shape is settled, the headless contract is not verified,
-// and saying so is better than guessing at its flags.
+// delegateAgents is the enum in the descriptor: only agents Remedy can
+// actually drive are listed.
 var delegateAgents = map[string]delegateAgent{
 	"claude-code": {
 		id:     "claude-code",
@@ -132,16 +131,10 @@ var delegateAgents = map[string]delegateAgent{
 			"then run `claude` once to sign in",
 		argv: claudeCodeArgv,
 	},
-	"codex": {
-		id:      "codex",
-		label:   "Codex CLI",
-		binary:  "codex",
-		install: "install the Codex CLI and sign in",
-	},
 }
 
 // delegateAgentIDs is the sorted enum, for schema and error text.
-var delegateAgentIDs = []string{"claude-code", "codex"}
+var delegateAgentIDs = []string{"claude-code"}
 
 // delegateEditTools is the sub-agent surface a mission always gets: read the
 // folder, change files, look things up. delegateShellTools is what allow_shell
@@ -334,10 +327,6 @@ func resolveDelegateAgent(raw string) (delegateAgent, error) {
 	if !known {
 		return delegateAgent{}, fmt.Errorf("%w: %q is not an agent Remedy knows — use one of %s",
 			ErrInvalidInput, raw, strings.Join(delegateAgentIDs, ", "))
-	}
-	if agent.argv == nil {
-		return delegateAgent{}, fmt.Errorf("%w: Remedy cannot drive %s yet — its headless contract is not wired up. Use agent claude-code",
-			ErrInvalidInput, agent.label)
 	}
 	return agent, nil
 }

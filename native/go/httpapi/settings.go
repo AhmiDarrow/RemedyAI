@@ -480,7 +480,12 @@ func normalizeSettingsPatch(patch, cfg ConfigMap) {
 	}
 	if v, ok := patch["harness_mode"]; ok && v != nil {
 		hm := strings.ToLower(strings.TrimSpace(fmt.Sprint(v)))
-		if hm != "off" && hm != "manual" && hm != "auto" {
+		// "manual" was a mode of the old harness; it compacted nothing on its
+		// own. A bare off on the command line arrives as the boolean false.
+		if hm == "manual" || hm == "false" || hm == "none" || hm == "0" {
+			hm = "off"
+		}
+		if hm != "off" && hm != "auto" {
 			hm = "auto"
 		}
 		patch["harness_mode"] = hm
@@ -824,7 +829,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"auto_approve_threshold":       cfgFloat(cfg, "auto_approve_threshold", 0.8),
 		"log_level":                    strings.ToUpper(cfgString(cfg, "log_level", "INFO")),
 		"sarcasm_mode":                 cfgBool(cfg, "sarcasm_mode", false),
-		"claimidx_enabled":             cfgBool(cfg, "claimidx_enabled", true),
+		"claimidx_enabled":             s.claimidx.wanted(cfg),
 		"claimidx_public_ledger":       cfgBool(cfg, "claimidx_public_ledger", false),
 		"enabled_providers":            cfg["enabled_providers"],
 		"enabled_models":               cfgMapOrEmpty(cfg, "enabled_models"),
@@ -843,22 +848,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"vision_enabled":               visionEnabled,
 		"vision_model_id":              visionModelID,
 		"vision_force_decode":          visionForce,
-		"vision": map[string]any{
-			"enabled":      visionEnabled,
-			"installed":    false,
-			"ready":        false,
-			"running":      false,
-			"model_id":     visionModelID,
-			"model_name":   nil,
-			"force_decode": visionForce,
-		},
 		"assistant": publicAssistant(cfg),
-		"sleev": map[string]any{
-			"enabled":     cfgBool(cfg, "sleev_enabled", false),
-			"installed":   false,
-			"gateway_url": firstNonEmpty(strings.TrimSpace(cfgString(cfg, "sleev_gateway_url", "")), "http://127.0.0.1:17321"),
-			"harness":     "remedy",
-		},
 	}
 	out["advanced"] = advancedTable(cfg)
 	out["advanced_schema"] = advancedSchema()
@@ -912,7 +902,7 @@ func normalizeToolProcess(cfg ConfigMap, raw any) string {
 func normalizeTrustProfile(raw any) string {
 	s := strings.ToLower(strings.TrimSpace(fmt.Sprint(raw)))
 	switch s {
-	case "conservative", "balanced", "autonomous":
+	case "conservative", "balanced":
 		return s
 	default:
 		return "balanced"

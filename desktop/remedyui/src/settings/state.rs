@@ -554,9 +554,6 @@ impl Settings {
         self.advanced_schema.set(v.get("advanced_schema").cloned().unwrap_or_else(|| json!([])));
         self.vision_enabled.set_if_changed(jbool(v, "vision_enabled", false));
         self.vision_force.set_if_changed(jbool(v, "vision_force_decode", false));
-        if let Some(vis) = v.get("vision") {
-            self.vision.set(vis.clone());
-        }
         if let Some(list) = v.get("enabled_providers").and_then(|x| x.as_array()) {
             self.enabled_providers.set(list.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect());
         }

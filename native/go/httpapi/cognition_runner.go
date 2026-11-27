@@ -197,6 +197,7 @@ func (r *CognitionTurnRunner) assemblePrompt(req TurnRequest) (assembledPrompt, 
 		"session_id": req.SessionID,
 		"plan_mode":  req.PlanMode,
 		"chat_mode":  req.ChatMode,
+		"outside":    !OriginIsOwner(req.Origin),
 	}
 	if req.Model != nil && strings.TrimSpace(*req.Model) != "" {
 		input["model"] = strings.TrimSpace(*req.Model)
@@ -250,6 +251,7 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 	}
 	// Runs after the reply; a failure never changes the finished turn.
 	defer r.scheduleTurnEnd(req, &out)
+	defer recordHarness(req.SessionID, &out)
 	seed.Messages = withTurnContext(seedTranscript(req, userText, r.HomeDir), turnContext)
 
 	var (
@@ -779,6 +781,7 @@ func (r *CognitionTurnRunner) turnPolicy(req TurnRequest) cognition.Policy {
 			Approvals:      r.Approvals,
 			SessionID:      ownerApprovalSessionID(req),
 			ForceAsk:       !OriginIsOwner(req.Origin),
+			Conservative:   normalizeTrustProfile(cfg["trust_profile"]) == "conservative",
 			HiveRestricted: strings.HasPrefix(origin, "hive:"),
 			LiveContext:    r.LiveContext,
 			Guards:         loadToolGuards(cfg),
@@ -806,6 +809,7 @@ func (r *CognitionTurnRunner) turnConfig(req TurnRequest) cognition.Config {
 			cfg.MaxResultChars = n
 		}
 	}
+	cfg.ContextTrimAt, cfg.ContextCompactAt = harnessShares(loadHomeConfig(r.HomeDir))
 	if req.MaxIterations > 0 {
 		// Explicit budgets (e.g. hive foragers) are absolute ceilings only.
 		cfg.MaxIterations = req.MaxIterations
@@ -868,7 +872,11 @@ func (r *CognitionTurnRunner) boundTools(req TurnRequest) cognition.ToolExecutor
 	if r.LiveContext != nil {
 		live = r.LiveContext(req.SessionID)
 	}
-	return &workspaceBoundTools{inner: r.Tools, binding: toolBinding{
+	inner := r.Tools
+	if r.HomeDir != "" && cfgBool(LoadConfig(r.HomeDir), "privacy_mode", false) {
+		inner = &redactingTools{inner: inner}
+	}
+	return &workspaceBoundTools{inner: inner, binding: toolBinding{
 		Root:        root,
 		Scope:       scope,
 		HomeDir:     r.HomeDir,
@@ -1522,7 +1530,6 @@ func plainToolApprovalSummary(toolName, preview, boundRoot string) string {
 // delegate tool can hand a mission to.
 var delegateAgentLabels = map[string]string{
 	"claude-code": "Claude Code",
-	"codex":       "Codex CLI",
 }
 
 // delegateApprovalSummary spells out what approving a hand-off actually

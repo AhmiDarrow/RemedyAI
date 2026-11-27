@@ -1207,8 +1207,9 @@ func TestWorkingSetRecordsCommandsFailuresAndTodo(t *testing.T) {
 }
 
 func TestEstimateTokensChargesForImages(t *testing.T) {
-	text := []Message{UserText(strings.Repeat("a", 400))}
-	if got := estimateTokens(text); got < 100 || got > 120 {
+	// Counted by the tokenizer: 80 short words are about a token each.
+	text := []Message{UserText(strings.Repeat("word ", 80))}
+	if got := estimateTokens(text); got < 70 || got > 100 {
 		t.Fatalf("text tokens=%d", got)
 	}
 	withImage := []Message{{Role: RoleUser, Blocks: []Block{ImageBlock("image/png", bytes.Repeat([]byte{0}, 64))}}}
@@ -1481,5 +1482,47 @@ func TestEngineToolPanicBecomesToolError(t *testing.T) {
 	}
 	if !seen.IsError || !strings.Contains(seen.Err, "tool boom") {
 		t.Fatalf("tool result = %#v", seen)
+	}
+}
+
+// The context note in front of a request carries memory, the plan and the
+// checklist. Compaction keeps it with its request.
+func TestCompactTranscriptKeepsTheContextNoteWithItsRequest(t *testing.T) {
+	msgs := []Message{contextNote("[Turn context] memory: the owner's dog is Biscuit"), UserText("first request")}
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, Message{Role: RoleAssistant, Blocks: []Block{TextBlock(fmt.Sprintf("old %d", i))}})
+		msgs = append(msgs, UserText(fmt.Sprintf("history %d", i)))
+	}
+	msgs = append(msgs, contextNote("[Turn context] plan: step 3 of 5"), UserText("do X now"))
+	for i := 1; i <= 12; i++ {
+		msgs = append(msgs, Message{Role: RoleAssistant, Blocks: []Block{
+			TextBlock(fmt.Sprintf("Round %d.", i)),
+			{Type: BlockToolUse, ID: fmt.Sprintf("k%d", i), Name: "edit", Input: json.RawMessage(`{"path":"a.go"}`)},
+		}})
+		msgs = append(msgs, Message{Role: RoleUser, Blocks: []Block{
+			{Type: BlockToolResult, ToolUseID: fmt.Sprintf("k%d", i), Content: []Block{TextBlock("ok")}},
+		}})
+	}
+	out := compactTranscript(msgs, true)
+	if len(out) >= len(msgs) {
+		t.Fatalf("nothing was compacted: %d of %d", len(out), len(msgs))
+	}
+	at := func(text string) int {
+		for i, m := range out {
+			if strings.Contains(m.Text(), text) {
+				return i
+			}
+		}
+		return -1
+	}
+	note, goal := at("plan: step 3 of 5"), at("do X now")
+	if note < 0 || goal != note+1 {
+		t.Fatalf("the context note must sit right before its request: note %d, request %d\n%s", note, goal, transcriptText(out))
+	}
+	if !out[note].Internal {
+		t.Fatal("the kept note is still engine guidance, not an owner message")
+	}
+	if first := at("the owner's dog is Biscuit"); first < 0 || first+1 != at("first request") {
+		t.Fatalf("the opener's note was dropped or moved:\n%s", transcriptText(out))
 	}
 }

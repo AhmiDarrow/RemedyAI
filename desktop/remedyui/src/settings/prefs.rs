@@ -26,6 +26,47 @@ thread_local! {
     static HOST: RefCell<Option<App>> = RefCell::new(None);
     /// The app's other windows (a popped-out pane), each `None` once closed.
     static EXTRA: RefCell<Vec<Box<dyn Fn() -> Option<Ui>>>> = RefCell::new(Vec::new());
+    static LOOK: RefCell<Option<remedy_ui::reactive::Signal<u64>>> = const { RefCell::new(None) };
+}
+
+/// Counts the changes of the look (theme, accent, density, text size). A surface copies
+/// colours and sizes out of the theme while it is built, so it has to be built again
+/// when this moves: [`with_look`].
+fn look() -> remedy_ui::reactive::Signal<u64> {
+    LOOK.with(|slot| {
+        if let Some(existing) = slot.borrow().as_ref().copied() {
+            if existing.is_alive() {
+                return existing;
+            }
+        }
+        // Detached: it must outlive whatever binding first asks for it.
+        let (created, _scope) =
+            remedy_ui::reactive::Scope::detached(|| remedy_ui::reactive::Signal::new(0u64));
+        *slot.borrow_mut() = Some(created);
+        created
+    })
+}
+
+/// `build`'s surface, built again whenever the look changes, so a theme picked in
+/// Settings reaches every colour on it at once. What the surface shows must live in
+/// state outside it. `fill` gives it the whole height of its parent.
+pub(crate) fn with_look(ui: &Ui, fill: bool, build: impl Fn(&Ui) -> remedy_ui::El + 'static) -> remedy_ui::El {
+    let host = super::bits::rebuild_on(
+        ui,
+        || {
+            let _ = look().get();
+        },
+        build,
+    );
+    if !fill {
+        return host;
+    }
+    host.layout(|l| {
+        l.height = remedy_ui::layout::Length::Percent(1.0);
+        l.grow = 1.0;
+        l.basis = remedy_ui::layout::Length::Px(0.0);
+        l.min_height = remedy_ui::layout::Length::Px(0.0);
+    })
 }
 
 /// Another window of the app wears the main window's look, now and after every change.
@@ -167,8 +208,7 @@ pub fn apply(s: Settings) {
             true
         })
     });
-    let sheet = sheet(&theme);
-    ui.set_theme(theme, sheet);
+    paint(&ui, theme);
     ui.set_reduced_motion(s.reduce_motion.get());
     if let Some(app) = host() {
         app.set_reduce_motion(s.reduce_motion.get());
@@ -229,6 +269,16 @@ fn parse_accent(raw: &str) -> Option<Color> {
         return None;
     }
     Color::from_hex(t).ok()
+}
+
+/// Gives the window `theme`, and has the surfaces that copied the old one built again.
+fn paint(ui: &Ui, theme: remedy_ui::core::style::Theme) {
+    let changed = ui.theme() != theme;
+    let sheet = sheet(&theme);
+    ui.set_theme(theme, sheet);
+    if changed {
+        look().update(|n| *n = n.wrapping_add(1));
+    }
 }
 
 fn on_accent(c: Color) -> Color {
@@ -307,4 +357,43 @@ pub fn fonts_are_default(s: Settings) -> bool {
         && s.font_reading.get() == "ahmi-print"
         && s.font_accent.get() == "ahmi-pixel"
         && s.font_code.get() == "ahmi-print"
+}
+
+#[cfg(test)]
+mod look_tests {
+    use super::*;
+    use remedy_ui::testing::TestApp;
+    use remedy_ui::widgets as w;
+    use std::rc::Rc;
+
+    /// A surface copies colours while it is built. Under `with_look` a theme change
+    /// builds it again, so the copy is the new theme's; the same theme again does not.
+    #[test]
+    fn a_theme_change_builds_the_surface_again() {
+        let built: Rc<RefCell<Vec<Color>>> = Rc::default();
+        let mut app = TestApp::window({
+            let built = built.clone();
+            move |ui, _| {
+                let built = built.clone();
+                let surface = with_look(ui, false, move |ui| {
+                    built.borrow_mut().push(ui.theme().colors.bg);
+                    w::text(ui, "surface")
+                });
+                ui.root().child(surface);
+            }
+        });
+        app.frames(2);
+        let ui = app.ui().expect("window");
+        let before = built.borrow().len();
+        let light = crate::theme_pack::theme_for_id("light", None, false);
+        let bg = light.colors.bg;
+        assert_ne!(ui.theme().colors.bg, bg, "the test needs a theme that differs");
+        paint(&ui, light.clone());
+        app.frames(2);
+        assert_eq!(built.borrow().len(), before + 1, "built again once");
+        assert_eq!(built.borrow().last().copied(), Some(bg));
+        paint(&ui, light);
+        app.frames(2);
+        assert_eq!(built.borrow().len(), before + 1, "the same theme builds nothing");
+    }
 }

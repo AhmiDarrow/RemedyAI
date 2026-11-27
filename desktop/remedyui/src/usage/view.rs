@@ -19,7 +19,7 @@ use remedy_ui::style::{BorderEdge, BorderSide, StylePatch, TextAlign};
 use remedy_ui::widgets as w;
 use remedy_ui::{El, Ui, show};
 
-use super::api::{self, Continuity, Loose, Snapshot, TokenStatus, UsageByGroup, UsageSummary, UsageTotals};
+use super::api::{self, Continuity, Loose, TokenStatus, UsageByGroup, UsageSummary, UsageTotals};
 
 /// What the shell knows when it opens the dashboard.
 ///
@@ -256,7 +256,7 @@ impl UsagePanel {
         framed(ui, dialog_card(ui, content(ui, sample(false), || {})))
     }
 
-    /// Filled harness tab, including the NanoToken card. No runtime calls.
+    /// Filled harness tab, including the tokenizer card. No runtime calls.
     pub fn preview_harness(ui: &Ui) -> El {
         crate::fonts::prepare_theme(ui, &crate::fonts::Fonts::load());
         framed(ui, dialog_card(ui, content(ui, sample(true), || {})))
@@ -639,6 +639,8 @@ fn usage_body(ui: &Ui, summary: &UsageSummary, points: &[api::UsagePoint]) -> El
                 ("Tokens", api::format_tokens(totals.total_tokens)),
                 ("Est. cost", api::format_cost(totals.estimated_cost_usd)),
                 ("Events", api::format_number(totals.events)),
+                // Share of input the provider served from its prompt cache, and how much.
+                ("From cache", api::cache_label(totals)),
             ],
         ))
         .child(group(ui, "Tokens over time", chart_card(ui, points)))
@@ -649,7 +651,7 @@ fn usage_body(ui: &Ui, summary: &UsageSummary, points: &[api::UsagePoint]) -> El
     column
 }
 
-fn stat_row(ui: &Ui, stats: [(&str, String); 3]) -> El {
+fn stat_row(ui: &Ui, stats: [(&str, String); 4]) -> El {
     let unit = ui.theme().spacing.unit;
     let mut row = w::row(ui)
         .gap(unit * 2.0)
@@ -991,11 +993,11 @@ fn continuity_body(ui: &Ui, dash: UsageDashboard) -> El {
                     .map(|c| method_line(&c))
                     .unwrap_or_default()
             }),
-            hero_card(ui, "Harness", move || {
+            hero_card(ui, "Context budget", move || {
                 read.continuity
                     .get()
-                    .map(|c| api::capitalize_words(&c.harness_mode))
-                    .unwrap_or_default()
+                    .map(|c| budget_label(&c))
+                    .unwrap_or_else(|| "—".into())
             }, move || {
                 read.continuity
                     .get()
@@ -1005,19 +1007,7 @@ fn continuity_body(ui: &Ui, dash: UsageDashboard) -> El {
         ))
         .child(quality_grid(ui, dash))
         .child(note_card(ui, "Pattern window (this session)", dash, pattern_block, true))
-        .child(
-            show(ui, move || dash.continuity.get().is_some_and(|c| c.snapshot.is_some()), {
-                let u = ui.clone();
-                let dash = dash;
-                move || note_card(&u, "Last continuity snapshot", dash, snapshot_block, true)
-            })
-            .el(),
-        )
-        .child(pair(
-            ui,
-            note_card(ui, "Goals", dash, goals_block, false),
-            note_card(ui, "Provider health", dash, health_block, false),
-        ))
+        .child(note_card(ui, "Provider health", dash, health_block, true))
 }
 
 fn pair(ui: &Ui, left: El, right: El) -> El {
@@ -1087,14 +1077,7 @@ fn quality_grid(ui: &Ui, dash: UsageDashboard) -> El {
     wrap
 }
 
-const QUALITY: [&str; 6] = [
-    "Soft nudges",
-    "Strong nudges",
-    "Compresses",
-    "Stuck rate",
-    "Re-explain",
-    "Tool fail max",
-];
+const QUALITY: [&str; 3] = ["Compresses", "Tokens saved", "Tool fail max"];
 
 fn tile(ui: &Ui, label: &str, value: impl Fn() -> String + 'static) -> El {
     let unit = ui.theme().spacing.unit;
@@ -1188,28 +1171,6 @@ fn pattern_block(ui: &Ui, dash: UsageDashboard) -> El {
     )
 }
 
-fn snapshot_block(ui: &Ui, dash: UsageDashboard) -> El {
-    w::text(ui, move || {
-        dash.continuity
-            .get()
-            .and_then(|c| c.snapshot.map(|s| snapshot_line(&s)))
-            .unwrap_or_default()
-    })
-    .variant("muted")
-    .style(StylePatch::new().text_size(ui.theme().type_scale.small))
-}
-
-fn goals_block(ui: &Ui, dash: UsageDashboard) -> El {
-    w::text(ui, move || {
-        dash.continuity
-            .get()
-            .map(|c| goals_line(&c))
-            .unwrap_or_else(|| "No open goals tracked".into())
-    })
-    .variant("muted")
-    .style(StylePatch::new().text_size(ui.theme().type_scale.small))
-}
-
 fn health_block(ui: &Ui, dash: UsageDashboard) -> El {
     w::text(ui, move || {
         dash.continuity
@@ -1224,7 +1185,6 @@ fn health_block(ui: &Ui, dash: UsageDashboard) -> El {
 fn token_card(ui: &Ui, dash: UsageDashboard) -> El {
     let unit = ui.theme().spacing.unit;
     let active = dash;
-    let worker = dash;
     let note = dash;
     w::card(ui)
         .gap(unit)
@@ -1235,13 +1195,13 @@ fn token_card(ui: &Ui, dash: UsageDashboard) -> El {
             start: unit * 3.0,
         })
         .layout(|l| l.width = Length::Percent(1.0))
-        .semantics(Semantics::new(Role::Group).label("NanoToken"))
+        .semantics(Semantics::new(Role::Group).label("Tokenizer"))
         .child(
             w::text(ui, move || {
                 dash.token
                     .get()
                     .map(|t| t.label)
-                    .unwrap_or_else(|| "NanoToken".into())
+                    .unwrap_or_else(|| "Tokenizer".into())
             })
             .style(
                 StylePatch::new()
@@ -1268,23 +1228,6 @@ fn token_card(ui: &Ui, dash: UsageDashboard) -> El {
                             .token
                             .get()
                             .and_then(|t| token_active(&t))
-                            .unwrap_or_default()
-                    })
-                    .variant("muted")
-                    .style(StylePatch::new().text_size(10.0))
-                }
-            })
-            .el(),
-        )
-        .child(
-            show(ui, move || worker.token.get().is_some_and(|t| t.worker.is_some()), {
-                let u = ui.clone();
-                move || {
-                    w::text(&u, move || {
-                        worker
-                            .token
-                            .get()
-                            .and_then(|t| t.worker.map(|w| format!("worker {w}")))
                             .unwrap_or_default()
                     })
                     .variant("muted")
@@ -1333,19 +1276,18 @@ fn harness_sub(c: &Continuity) -> String {
 
 fn quality_value(c: &Continuity, index: usize) -> String {
     match index {
-        0 => c.soft_nudge.count(),
-        1 => c.strong_nudge.count(),
-        2 => c.compress.count(),
-        3 => c
-            .stuck_rate
-            .map(|n| api::percent_fixed(n, 1))
-            .unwrap_or_else(|| "—".into()),
-        4 => c
-            .re_explain_rate
-            .map(|n| api::percent_fixed(n, 1))
-            .unwrap_or_else(|| "—".into()),
+        0 => c.compress.count(),
+        1 => api::saved_tokens(c),
         _ => c.tool_fail_max.count(),
     }
+}
+
+/// The tokens a transcript may reach before the engine compacts it. Known after a turn.
+fn budget_label(c: &Continuity) -> String {
+    c.budget
+        .filter(|n| n.is_finite() && *n > 0.0)
+        .map(api::format_tokens)
+        .unwrap_or_else(|| "—".into())
 }
 
 fn pattern_line(c: &Continuity) -> String {
@@ -1358,40 +1300,11 @@ fn pattern_line(c: &Continuity) -> String {
     line
 }
 
-fn snapshot_line(snapshot: &Snapshot) -> String {
-    let intent = if snapshot.intent.is_empty() { "—" } else { snapshot.intent.as_str() };
-    let policy = if snapshot.policy_id.is_empty() { "—" } else { snapshot.policy_id.as_str() };
-    let mut line = format!("intent {intent} · policy {policy}");
-    if let Some(nudge) = snapshot.nudge.as_deref().filter(|n| !n.is_empty()) {
-        line.push_str(" · nudge ");
-        line.push_str(nudge);
-    }
-    line
-}
-
-fn goals_line(c: &Continuity) -> String {
-    let mut line = if c.goals.is_empty() {
-        "No open goals tracked".to_string()
-    } else {
-        c.goals.iter().take(4).cloned().collect::<Vec<_>>().join(" · ")
-    };
-    if c.goals_stale {
-        line.push_str(" · stale");
-    }
-    line
-}
-
 fn health_line(c: &Continuity) -> String {
     let mut line = format!("samples {}", api::format_number(c.samples));
     if let Some(rate) = c.error_rate.filter(|n| n.is_finite()) {
         line.push_str(" · err ");
         line.push_str(&api::percent_fixed(rate, 0));
-    }
-    if let Some(ms) = c.avg_latency_ms.filter(|n| n.is_finite()) {
-        line.push_str(&format!(" · ~{}ms", ms.round() as i64));
-    }
-    if c.flaky {
-        line.push_str(" · flaky");
     }
     if c.rate_limit_hits.is_finite() && c.rate_limit_hits != 0.0 {
         line.push_str(&format!(" · 429×{}", api::format_number(c.rate_limit_hits)));
@@ -1457,49 +1370,31 @@ fn sample_series() -> Vec<api::UsagePoint> {
 
 fn sample_continuity() -> Continuity {
     Continuity {
-        harness_mode: "auto".into(),
-        token_method: "bpe".into(),
+        token_method: "o200k_base".into(),
         token_estimate: 18420.0,
         token_fill: Some(0.62),
-        snapshot_fill: Some(0.40),
+        budget: Some(160_000.0),
         turns: Loose::Num(14.0),
         tokens_saved: Loose::Num(3200.0),
-        soft_nudge: Loose::Num(2.0),
-        strong_nudge: Loose::Num(1.0),
         compress: Loose::Num(3.0),
-        stuck_rate: Some(0.125),
-        re_explain_rate: Some(0.4),
         tool_fail_max: Loose::Num(2.0),
         step_count: 8.0,
         success_rate: Some(0.75),
         recent: vec!["read".into(), "edit".into(), "test".into()],
-        snapshot: Some(Snapshot {
-            intent: "port the usage dashboard".into(),
-            policy_id: "house".into(),
-            nudge: Some("stay on the usage panel".into()),
-        }),
-        goals: vec![
-            "ship the usage panel".into(),
-            "keep the ledger on the runtime".into(),
-        ],
-        goals_stale: false,
         samples: 20.0,
         error_rate: Some(0.05),
-        avg_latency_ms: Some(840.0),
-        flaky: false,
         rate_limit_hits: 0.0,
     }
 }
 
 fn sample_token() -> TokenStatus {
     TokenStatus {
-        label: "NanoToken".into(),
-        last_method: "bpe".into(),
+        label: "Tokenizer".into(),
+        last_method: "o200k_base".into(),
         last_estimate: 4096.0,
         active_provider: Some("local".into()),
         active_model: Some("remedy".into()),
-        worker: Some("attached".into()),
-        note: Some("Remedy-owned BBPE tokenizer.".into()),
+        note: Some("Counted with the o200k_base encoding (github.com/tiktoken-go/tokenizer, MIT).".into()),
     }
 }
 
@@ -1510,6 +1405,8 @@ fn totals(total: f64, cost: f64, events: f64) -> UsageTotals {
         total_tokens: total,
         estimated_cost_usd: cost,
         events,
+        cache_read_tokens: total * 0.35,
+        cache_hit_rate: Some(0.5),
     }
 }
 
@@ -1525,8 +1422,8 @@ fn group_row(provider: &str, model: &str, total: f64, cost: f64, events: f64) ->
 mod tests {
     use super::api;
     use super::{
-        Snapshot, goals_line, harness_sub, health_line, method_line, pattern_line, quality_value,
-        sample_continuity, sample_token, snapshot_line, subtitle, token_active,
+        budget_label, harness_sub, health_line, method_line, pattern_line, quality_value,
+        sample_continuity, sample_token, subtitle, token_active,
     };
 
     #[test]
@@ -1546,26 +1443,18 @@ mod tests {
     }
 
     #[test]
-    fn harness_lines_match_the_tauri_copy() {
+    fn harness_lines_show_what_the_runtime_measured() {
         let c = sample_continuity();
         assert_eq!(api::fill_label(api::continuity_fill(&c)), "62%");
-        assert_eq!(method_line(&c), "method bpe · estimate 18k");
-        assert_eq!(api::capitalize_words(&c.harness_mode), "Auto");
+        assert_eq!(method_line(&c), "method o200k_base · estimate 18k");
+        assert_eq!(budget_label(&c), "160k");
         assert_eq!(harness_sub(&c), "turns 14 · saved 3.2k");
-        assert_eq!(quality_value(&c, 3), "12.5%");
-        assert_eq!(quality_value(&c, 4), "40.0%");
+        assert_eq!(quality_value(&c, 0), "3");
+        assert_eq!(quality_value(&c, 1), "3.2k");
+        assert_eq!(quality_value(&c, 2), "2");
         assert_eq!(pattern_line(&c), "8 steps · 75% success");
         assert_eq!(c.recent.join(" → "), "read → edit → test");
-        let snapshot = c.snapshot.as_ref().unwrap();
-        assert_eq!(
-            snapshot_line(snapshot),
-            "intent port the usage dashboard · policy house · nudge stay on the usage panel"
-        );
-        assert_eq!(
-            goals_line(&c),
-            "ship the usage panel · keep the ledger on the runtime"
-        );
-        assert_eq!(health_line(&c), "samples 20 · err 5% · ~840ms");
+        assert_eq!(health_line(&c), "samples 20 · err 5%");
         assert_eq!(
             token_active(&sample_token()).as_deref(),
             Some("active local/remedy")
@@ -1573,26 +1462,16 @@ mod tests {
     }
 
     #[test]
-    fn empty_and_stale_continuity_lines() {
+    fn lines_before_any_turn_claim_nothing() {
         let mut c = sample_continuity();
-        c.goals.clear();
-        c.goals_stale = true;
         c.success_rate = None;
         c.error_rate = None;
-        c.avg_latency_ms = None;
-        c.flaky = true;
+        c.budget = None;
+        c.token_fill = None;
         c.rate_limit_hits = 2.0;
-        c.snapshot = Some(Snapshot {
-            intent: String::new(),
-            policy_id: String::new(),
-            nudge: None,
-        });
-        assert_eq!(goals_line(&c), "No open goals tracked · stale");
         assert_eq!(pattern_line(&c), "8 steps");
-        assert_eq!(health_line(&c), "samples 20 · flaky · 429×2");
-        assert_eq!(snapshot_line(c.snapshot.as_ref().unwrap()), "intent — · policy —");
-        assert_eq!(quality_value(&c, 0), "2");
-        c.stuck_rate = None;
-        assert_eq!(quality_value(&c, 3), "—");
+        assert_eq!(health_line(&c), "samples 20 · 429×2");
+        assert_eq!(budget_label(&c), "—");
+        assert_eq!(api::fill_label(api::continuity_fill(&c)), "—");
     }
 }

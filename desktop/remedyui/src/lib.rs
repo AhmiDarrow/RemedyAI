@@ -1274,7 +1274,7 @@ pub(crate) fn tool_button_sized(
 
 /// The same 32 px Remedy tray mark 0.70.5 shipped.
 pub fn tray_icon() -> TrayImage {
-    const TRAY_PNG: &[u8] = include_bytes!("../../src-tauri/icons/tray-icon.png");
+    const TRAY_PNG: &[u8] = include_bytes!("../assets/icons/tray-icon.png");
     let decoded = remedy_ui::image::decode(TRAY_PNG, Some((32, 32)))
         .or_else(|_| remedy_ui::image::decode(TRAY_PNG, None))
         .expect("0.70.5 tray-icon.png must decode");
@@ -1296,8 +1296,8 @@ pub fn window_icon() -> WindowIcon {
         WindowIcon::new(img.width.max(1), img.pixels.to_vec())
             .expect("Remedy icon PNG must be square RGBA")
     }
-    const ICON_32: &[u8] = include_bytes!("../../src-tauri/icons/32x32.png");
-    const ICON_128: &[u8] = include_bytes!("../../src-tauri/icons/128x128.png");
+    const ICON_32: &[u8] = include_bytes!("../assets/icons/32x32.png");
+    const ICON_128: &[u8] = include_bytes!("../assets/icons/128x128.png");
     from_png(ICON_32, 32).with_size(from_png(ICON_128, 128))
 }
 

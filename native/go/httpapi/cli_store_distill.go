@@ -20,12 +20,7 @@ func (s *CLIStore) Consolidate(sessionID string, maxEntries int) (*CLIMemoryEntr
 	if err != nil {
 		return nil, err
 	}
-	var src []*CLIMemoryEntry
-	for _, e := range entries {
-		if e.EntryType != "system" {
-			src = append(src, e)
-		}
-	}
+	src := cliStoreUnconsolidated(entries)
 	if len(src) < 3 {
 		return nil, nil
 	}
@@ -45,15 +40,12 @@ func (s *CLIStore) Consolidate(sessionID string, maxEntries int) (*CLIMemoryEntr
 		}
 		return strings.Join(parts, "\n")
 	}
-	// Python's conditional expression binds the whole concatenation, so a
-	// session with no action items consolidates to empty content. Kept as is
-	// so both stores write the same row.
-	summary := ""
+	// The summary is always written; the action items only when there are any.
+	summary := "Session " + sessionID + " consolidated summary.\n\n" +
+		"**Topics**: " + strings.Join(top5(topics), ", ") + "\n\n" +
+		"**Highlights**:\n" + bullets(top5(highlights))
 	if len(actions) > 0 {
-		summary = "Session " + sessionID + " consolidated summary.\n\n" +
-			"**Topics**: " + strings.Join(top5(topics), ", ") + "\n\n" +
-			"**Highlights**:\n" + bullets(top5(highlights)) + "\n\n" +
-			"**Action items**:\n" + bullets(top5(actions))
+		summary += "\n\n**Action items**:\n" + bullets(top5(actions))
 	}
 	ids := make([]any, len(src))
 	for i, e := range src {
@@ -84,12 +76,47 @@ func (s *CLIStore) Consolidate(sessionID string, maxEntries int) (*CLIMemoryEntr
 	if n > 40 {
 		n = 40
 	}
-	lines := make([]string, n)
+	// A note keeps the standing it was saved with. What the owner asked to be
+	// remembered is distilled as theirs; what Remedy noted on her own, from a
+	// tool result or a web page, never becomes "the owner said so", whatever
+	// words it holds.
+	var owned, noted []string
 	for i := 0; i < n; i++ {
-		lines[i] = src[i].Title + ": " + src[i].Content
+		line := src[i].Title + ": " + src[i].Content
+		authority := any(nil)
+		if src[i].meta != nil {
+			authority, _ = src[i].meta.get("authority")
+		}
+		if authority == "owner" {
+			owned = append(owned, line)
+		} else {
+			noted = append(noted, line)
+		}
 	}
-	_ = s.distill(strings.Join(lines, "\n"), sessionID) // quiet, never fails the consolidate
+	// Quiet: a failed distill never fails the consolidate.
+	_ = s.distillFrom(strings.Join(owned, "\n"), sessionID, true)
+	_ = s.distillFrom(strings.Join(noted, "\n"), sessionID, false)
 	return c, nil
+}
+
+// cliStoreUnconsolidated are the notes a consolidation has not folded yet:
+// not system rows, not earlier consolidation summaries, and not notes already
+// folded into one. Without this every turn folded the same notes again and
+// counted their facts once more.
+func cliStoreUnconsolidated(entries []*CLIMemoryEntry) []*CLIMemoryEntry {
+	var out []*CLIMemoryEntry
+	for _, e := range entries {
+		if e.EntryType == "system" || e.EntryType == "session" {
+			continue
+		}
+		if e.meta != nil {
+			if _, done := e.meta.get("consolidated_into"); done {
+				continue
+			}
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // cliStoreTopics is Counter(tags).most_common(5): count desc, first seen first.
@@ -370,10 +397,32 @@ func cliStoreGentleDecay(facts []map[string]any, now time.Time) int {
 // heuristic facts into the owner profile, explicit ones also as a note. Hive
 // sessions never write the parent's memory.
 func (s *CLIStore) distill(userText, sessionID string) error {
-	if isHiveSessionID(sessionID) {
+	return s.distillFrom(userText, sessionID, true)
+}
+
+// distillFrom turns preference-shaped sentences in text into profile facts.
+// owner says whether the owner wrote the text. Text from anywhere else can
+// only give low-confidence facts marked as Remedy's own inference: it never
+// renames the owner and is never recorded as something the owner asked for.
+func (s *CLIStore) distillFrom(userText, sessionID string, owner bool) error {
+	if isHiveSessionID(sessionID) || strings.TrimSpace(userText) == "" {
 		return nil
 	}
 	candidates := cliStoreExtractHeuristicFacts(userText)
+	if !owner {
+		kept := candidates[:0]
+		for _, cand := range candidates {
+			if cand.category == "identity" {
+				continue
+			}
+			cand.source = "agent"
+			if cand.confidence >= cliStoreAutoAccept {
+				cand.confidence = cliStoreAutoAccept - 0.01
+			}
+			kept = append(kept, cand)
+		}
+		candidates = kept
+	}
 	p, err := s.loadOrCreateProfile("default")
 	if err != nil {
 		return err

@@ -38,8 +38,8 @@ def test_parse_builtin_commands() -> None:
     cmds = mod._parse_builtin_commands()
     names = {c["name"] for c in cmds}
     assert "/help" in names
-    assert "/compact" in names
-    assert "/import-session" in names
+    assert "/usage" in names  # defined in session_command_more.go or _full.go
+    assert "/clear" in {a for c in cmds for a in c["aliases"]}
 
 
 def test_parse_hotkeys() -> None:
@@ -55,14 +55,6 @@ def test_parse_catalog_ids() -> None:
     ids = mod._parse_catalog_ids()
     assert "00-overview" in ids
     assert "11-reference-commands" in ids
-
-
-def test_check_pypi_readme_and_project_urls() -> None:
-    mod = _load_check_docs()
-    pypi = mod.check_pypi_readme_urls()
-    assert pypi.ok, pypi.messages
-    urls = mod.check_project_urls()
-    assert urls.ok, urls.messages
 
 
 def test_check_docs_full_passes() -> None:

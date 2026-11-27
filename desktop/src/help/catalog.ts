@@ -37,12 +37,12 @@ const META: HelpArticleMeta[] = [
   },
   {
     id: '17-nanoswarm',
-    title: 'Continuity workers (nano swarm)',
+    title: 'Context harness and token counting',
     category: 'Reference',
     order: 16.5,
-    tags: ['nanoswarm', 'continuity', 'token', 'router', 'pattern', 'operator'],
+    tags: ['harness', 'context', 'token', 'tokenizer', 'compaction', 'operator'],
     summary:
-      'Operator guide: continuity workers, NanoToken BPE packs (v2 default), calibration — not chat agents.',
+      'Operator guide: how a long conversation is kept inside the model window, and how tokens are counted.',
   },
   {
     id: '18-agency',
